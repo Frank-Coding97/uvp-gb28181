@@ -23,6 +23,10 @@ type playbackIntentOperation struct {
 	dua                   *sipgo.DialogUA
 	originalReleased      bool // Protected by work, not merely releaseOnce.
 	cleanup               *playbackIntentCleanup
+	cleanupPlan           []playbackCleanupBranchPlan // Frozen actual responses and per-dialog owners.
+	multiCleanup          bool                        // Original lease spans this bounded batch.
+	cleanupClose          context.Context             // Immutable signal; CloseLocal never starts network work.
+	cleanupCancel         context.CancelFunc
 	info                  *playbackIntentINFO
 	ackWritten            bool // Actual original ACK write; never reconstructed from storage.
 	owned                 *sipgo.OwnedClientInvite
@@ -51,6 +55,7 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 		return nil, ErrPlaybackUnavailable
 	}
 	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
+	o.cleanupClose, o.cleanupCancel = context.WithCancel(context.Background())
 	u.playbackIntentMu.Lock()
 	if len(u.playbackIntents) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil {
 		u.playbackIntentMu.Unlock()
@@ -423,6 +428,14 @@ func (o *playbackIntentOperation) Cancel(ctx context.Context) error {
 // never restores network permission. A durable handoff still means pending,
 // not closed: the registry retains this session and never advances a watermark.
 func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
+	if ctx == nil {
+		return ErrPlaybackUnavailable
+	}
+	// Signal before entering work: the active cleanup owns that domain while
+	// waiting for its response. Joining work alone cannot interrupt it.
+	if o.cleanupCancel != nil {
+		o.cleanupCancel()
+	}
 	if err := o.stopOriginal(ctx); err != nil {
 		return err
 	}
@@ -431,7 +444,20 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 	}
 	defer o.leave()
 	if o.cleanup != nil {
-		return o.finishCleanup(ctx)
+		if err := o.finishCleanup(ctx); err != nil {
+			return err
+		}
+		if o.multiCleanup {
+			stored, err := o.store.LoadSIPInviteSteps(ctx, o.id)
+			if err != nil {
+				return err
+			}
+			if err := o.validateCleanupBatch(stored, true); err != nil {
+				return err
+			}
+			o.releaseOriginal() // No untouched branch can start after this close.
+		}
+		return nil
 	}
 	if err := o.finishINFO(ctx); err != nil {
 		return err

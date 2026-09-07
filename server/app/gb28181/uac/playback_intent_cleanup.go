@@ -23,6 +23,9 @@ type playbackIntentCleanup struct {
 	stopOnce sync.Once
 	stopDone chan struct{}
 	finished bool
+	// Set only by the actual transport/response path, never by a failed CAS
+	// followed by successful readback. Batch advancement also requires finish.
+	networkOutcome bool
 }
 
 // CleanupKnownBranch performs one fresh, durably authorized compensation. It
@@ -35,6 +38,9 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		return err
 	}
 	defer o.leave()
+	if o.multiCleanup {
+		return o.cleanupObservedBranches(ctx)
+	}
 	if o.cleanup != nil {
 		if err := o.finishCleanup(ctx); err != nil {
 			return err
@@ -51,6 +57,10 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		return err
 	}
 	stored, err := o.persistOriginalFacts(ctx)
+	if playbackHasMultipleBranches(stored, o.invite) {
+		o.multiCleanup = true
+		return o.cleanupObservedBranchesFrom(ctx, stored)
+	}
 	if err != nil {
 		return err // Keep original owner until its observed facts are durable.
 	}
@@ -71,19 +81,37 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		o.releaseOriginal()
 		return ErrPlaybackCleanupUnknown
 	}
+	return o.runCleanupBranch(ctx, branch, first, nil)
+}
+
+// The caller owns work and has confirmed this branch's durable identity.
+func (o *playbackIntentOperation) runCleanupBranch(ctx context.Context, branch *playauth.DeviceSIPKnownBranch, response *sip.Response, plan *playbackCleanupBranchPlan) (result error) {
+	if o.cleanupClose != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		stop := context.AfterFunc(o.cleanupClose, cancel)
+		defer stop()
+		defer cancel()
+		if o.cleanupClose.Err() != nil {
+			return ErrPlaybackCleanupUnknown
+		}
+	}
 	lastCSeq := playbackLastINFOCSeq(o.invite.CSeq, branch)
 	if lastCSeq == math.MaxUint32 {
-		o.releaseOriginal()
+		o.releaseSingleCleanupOriginal()
 		return ErrPlaybackCleanupUnknown
 	}
-	owner, err := o.dua.NewBranchCleanup(o.request, first, lastCSeq+1)
+	owner, err := o.dua.NewBranchCleanup(o.request, response, lastCSeq+1)
 	if err != nil {
-		o.releaseOriginal()
+		o.releaseSingleCleanupOriginal()
 		return err
 	}
 	c := &playbackIntentCleanup{owned: owner, branch: branch.Identity, stopDone: make(chan struct{})}
 	c.branch.RouteSet = slices.Clone(branch.Identity.RouteSet)
 	o.cleanup = c // Strongly retained before persistence, connection or release.
+	if plan != nil {
+		plan.cleanup = c
+	}
 	defer func() {
 		finishCtx, cancel := context.WithTimeout(context.Background(), playbackTeardownTimeout)
 		defer cancel()
@@ -115,13 +143,14 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 	}
 	// No gap: both owners are installed until this release. Everything below,
 	// including TCP connection creation, is protected by the cleanup lease.
-	o.releaseOriginal()
+	o.releaseSingleCleanupOriginal()
 	stopOnCancel := context.AfterFunc(ctx, owner.Terminate)
 	stopOnTransfer := context.AfterFunc(c.lease.Context(), owner.Terminate)
 	defer stopOnCancel()
 	defer stopOnTransfer()
 	prepared, err := owner.PrepareBYE(ctx)
 	if err != nil {
+		c.networkOutcome = true
 		return err
 	}
 	actual, err := snapshotPlaybackCleanupRequest(prepared, sip.BYE, o.invite.StepID)
@@ -137,6 +166,7 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		return ErrPlaybackCleanupUnknown
 	}
 	if err := owner.WriteACK(); err != nil {
+		c.networkOutcome = true
 		return err
 	}
 	stored, err = o.store.DispatchSIPCleanupBYE(ctx, o.id, o.version, c.identity.AttemptID)
@@ -148,16 +178,19 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		return ErrPlaybackCleanupUnknown
 	}
 	if err := owner.StartBYE(); err != nil {
+		c.networkOutcome = true
 		return err
 	}
 	for {
 		response, err := owner.NextResponse(ctx)
 		if err != nil {
+			c.networkOutcome = true
 			return err
 		}
 		if response.StatusCode < 200 {
 			continue
 		}
+		c.networkOutcome = true
 		if response.StatusCode >= 300 {
 			return ErrPlaybackCleanupUnknown
 		}
@@ -196,14 +229,15 @@ func (o *playbackIntentOperation) finishCleanup(ctx context.Context) error {
 	var attempt *playauth.DeviceSIPCleanupAttempt
 	originalMatched := false
 	for _, step := range stored.Steps {
-		if step.Identity != o.invite || step.KnownBranch == nil {
+		if step.Identity != o.invite {
 			continue
 		}
-		b := step.KnownBranch.Identity
-		originalMatched = b.InviteStepID == c.branch.InviteStepID && b.CallID == c.branch.CallID &&
-			b.LocalTag == c.branch.LocalTag && b.RemoteTag == c.branch.RemoteTag && b.CSeq == c.branch.CSeq &&
-			b.StatusCode == c.branch.StatusCode && b.RemoteTarget == c.branch.RemoteTarget && slices.Equal(b.RouteSet, c.branch.RouteSet)
-		for _, a := range step.KnownBranch.CleanupAttempts {
+		b := playbackCleanupStoredBranch(step, c.branch)
+		if b == nil {
+			continue
+		}
+		originalMatched = true
+		for _, a := range b.CleanupAttempts {
 			if a.Identity.AttemptID == c.identity.AttemptID {
 				if !samePlaybackCleanupRequest(a.Identity.ACK, c.identity.ACK) || !samePlaybackCleanupRequest(a.Identity.BYE, c.identity.BYE) {
 					return ErrPlaybackCleanupUnknown
@@ -231,7 +265,13 @@ func (o *playbackIntentOperation) finishCleanup(ctx context.Context) error {
 	if c.lease != nil {
 		c.lease.Release()
 	}
-	o.releaseOriginal()
+	o.releaseSingleCleanupOriginal()
 	c.finished = true
 	return nil
+}
+
+func (o *playbackIntentOperation) releaseSingleCleanupOriginal() {
+	if !o.multiCleanup {
+		o.releaseOriginal()
+	}
 }
