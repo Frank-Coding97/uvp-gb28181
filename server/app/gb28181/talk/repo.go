@@ -87,7 +87,7 @@ func (r *GormRepo) Create(ctx context.Context, session *models.GbTalkSession, pu
 	row.TokenConsumedAt = nil
 	setActiveKeys(&row)
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
-		return classifyCreateError(&row, err)
+		return r.classifyCreateError(ctx, &row, err)
 	}
 	*session = row
 	return nil
@@ -452,7 +452,7 @@ func isNonterminal(state models.TalkSessionState) bool {
 	return false
 }
 
-func classifyCreateError(row *models.GbTalkSession, err error) error {
+func (r *GormRepo) classifyCreateError(ctx context.Context, row *models.GbTalkSession, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -463,12 +463,26 @@ func classifyCreateError(row *models.GbTalkSession, err error) error {
 	if strings.Contains(message, "lease_key") || strings.Contains(message, "uk_talk_session_lease") {
 		return fmt.Errorf("%w: channel %d", ErrLeaseConflict, row.ChannelID)
 	}
+	// NewSQLiteClient enables TranslateError, which intentionally retains only
+	// gorm.ErrDuplicatedKey and therefore omits the violated index name.  The
+	// lease is the only conflict that has a non-null channel key, so a bounded
+	// lookup restores the public lease error without changing other dialects.
+	if r != nil && r.db != nil && r.db.Dialector.Name() == "sqlite" && errors.Is(err, gorm.ErrDuplicatedKey) && row.LeaseKey != nil {
+		var existing models.GbTalkSession
+		result := r.db.WithContext(ctx).Where("lease_key = ?", *row.LeaseKey).Limit(1).Find(&existing)
+		if result.Error == nil && result.RowsAffected > 0 {
+			return fmt.Errorf("%w: channel %d", ErrLeaseConflict, row.ChannelID)
+		}
+	}
 	return fmt.Errorf("%w: %v", ErrResourceConflict, err)
 }
 
 func isUniqueConstraint(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "unique constraint") || strings.Contains(message, "duplicate entry")
