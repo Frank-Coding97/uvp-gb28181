@@ -11,6 +11,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
+	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 )
 
 type playbackTxRequestFunc func(context.Context, *sip.Request) (sip.ClientTransaction, error)
@@ -304,5 +305,70 @@ func TestPlaybackOutboundCloseRetryPreservesInboundEndNotification(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("outbound retry notification reentry deadlocked")
+	}
+}
+
+func TestPlaybackACKFailureRetainsCleanupOnlyDialog(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	dialog.ackErr = errors.New("ACK write unknown")
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if !errors.Is(err, dialog.ackErr) || !errors.Is(err, ErrPlaybackACKPending) || metadata.CallID == "" {
+		t.Fatalf("invite: %+v %v", metadata, err)
+	}
+	if u.playbackDialogs.get(metadata.CallID) == nil || dialog.closeCalls != 0 {
+		t.Fatal("ACK failure discarded cleanup material")
+	}
+	if _, err := u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoResume}); !errors.Is(err, ErrPlaybackClosed) {
+		t.Fatalf("unacknowledged dialog accepted control: %v", err)
+	}
+	if result, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID); result != PlaybackTeardownPending || !errors.Is(err, ErrPlaybackCleanupUnknown) {
+		t.Fatalf("cleanup=%s %v", result, err)
+	}
+	if dialog.ackCalls != 1 || dialog.byeCalls != 0 || dialog.closeCalls != 0 || len(dialog.requests) != 0 {
+		t.Fatal("unknown ACK silently retried or became BYE confirmation")
+	}
+	request := newTalkByeRequest(metadata.CallID)
+	if handled, err := u.HandlePlaybackBye(request, siptest.NewServerTxRecorder(request)); !handled || err != nil {
+		t.Fatalf("exact remote BYE: %v %v", handled, err)
+	}
+}
+
+func TestPlaybackAdapterKeepsRetainedFailureHandle(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	dialog.ackErr = errors.New("ACK failed")
+	u, _ := newPlaybackTestUAC(dialog)
+	in := validPlaybackInvite()
+	result, err := NewPlaybackAdapter(u).Invite(context.Background(), gbplayback.UACInvite{
+		DeviceID: in.DeviceID, ChannelID: in.ChannelID, Destination: in.Destination,
+		Transport: in.Transport, SSRC: in.SSRC, SDP: in.SDP,
+	})
+	if !errors.Is(err, dialog.ackErr) || !errors.Is(err, ErrPlaybackACKPending) || !result.CleanupRequired || result.CallID == "" || u.playbackDialogs.get(result.CallID) == nil {
+		t.Fatalf("adapter lost retained failure: %+v %v", result, err)
+	}
+}
+
+func TestPlaybackAdapterDoesNotInventCleanupHandleForOtherErrors(t *testing.T) {
+	for _, mode := range []string{"rejected", "wait-error", "send-error"} {
+		t.Run(mode, func(t *testing.T) {
+			dialog := establishedPlaybackDialog()
+			u, transport := newPlaybackTestUAC(dialog)
+			switch mode {
+			case "rejected":
+				dialog.statusCode, dialog.waitErr = sip.StatusBusyHere, errors.New("rejected")
+			case "wait-error":
+				dialog.waitErr = context.DeadlineExceeded
+			case "send-error":
+				transport.err = errors.New("send failed")
+			}
+			in := validPlaybackInvite()
+			result, err := NewPlaybackAdapter(u).Invite(context.Background(), gbplayback.UACInvite{
+				DeviceID: in.DeviceID, ChannelID: in.ChannelID, Destination: in.Destination,
+				Transport: in.Transport, SSRC: in.SSRC, SDP: in.SDP,
+			})
+			if err == nil || errors.Is(err, ErrPlaybackACKPending) || result.CleanupRequired || result.CallID != "" {
+				t.Fatalf("unretained failure became cleanup evidence: %+v %v", result, err)
+			}
+		})
 	}
 }

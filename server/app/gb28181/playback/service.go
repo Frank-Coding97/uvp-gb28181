@@ -65,6 +65,9 @@ type UACInvite struct {
 
 type DialogInfo struct {
 	CallID string
+	// On error, only this explicit marker identifies a retained cleanup-only
+	// dialog. A generated CallID alone does not prove such a resource exists.
+	CleanupRequired bool
 }
 
 type PlaybackInviter interface {
@@ -270,7 +273,20 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	}
 	dialog, err := s.inviter.Invite(ctx, UACInvite{DeviceID: request.DeviceID, ChannelID: sipChannelID, Destination: destination,
 		Transport: transport, SSRC: ssrc, SDP: body})
+	if dialog.CleanupRequired {
+		resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }
+		if dialog.CallID == "" && dialog.CleanupRequired {
+			resources.teardown = func(context.Context) error { return ErrPlaybackNotFound }
+		}
+	}
 	if err != nil {
+		if dialog.CleanupRequired && dialog.CallID != "" {
+			updateErr := s.registry.Update(session.ID, func(value *Session) error {
+				value.NodeID, value.StreamID, value.SSRC, value.CallID = node.ID, streamID, ssrc, dialog.CallID
+				return nil
+			})
+			err = errors.Join(err, updateErr)
+		}
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "failed", err, resources)
 	}
 	resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }

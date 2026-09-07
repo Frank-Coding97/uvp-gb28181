@@ -21,6 +21,7 @@ var (
 	ErrPlaybackClosed         = errors.New("playback dialog closed")
 	ErrPlaybackRejected       = errors.New("playback control rejected")
 	ErrPlaybackCleanupUnknown = errors.New("playback dialog cleanup unconfirmed")
+	ErrPlaybackACKPending     = errors.New("playback ACK unconfirmed; cleanup required")
 )
 
 const playbackTeardownTimeout = 2 * time.Second
@@ -163,6 +164,7 @@ type playbackDialogRecord struct {
 	closed         bool
 	closing        bool
 	byeConfirmed   bool
+	ackPending     bool
 	inboundByeCSeq *uint32
 }
 
@@ -273,13 +275,16 @@ func (u *UAC) InvitePlayback(ctx context.Context, in PlaybackInviteRequest) (Pla
 	dialogMetadata.ChannelID = metadata.ChannelID
 	dialogMetadata.SSRC = metadata.SSRC
 	record := &playbackDialogRecord{dialog: dialog, metadata: dialogMetadata}
+	// Publishing the record must not allow control/cleanup to race the ACK.
+	record.mu.Lock()
 	u.playbackDialogs.put(record)
 	if err := dialog.Ack(ctx); err != nil {
-		u.playbackDialogs.remove(metadata.CallID, record)
-		_ = dialog.Close()
+		record.closing, record.ackPending = true, true
+		record.mu.Unlock()
 		u.recordEnd(metadata.CallID, cseq, dialogMetadata.StatusCode, false)
-		return dialogMetadata, fmt.Errorf("发送 PLAYBACK ACK 失败: %w", err)
+		return dialogMetadata, errors.Join(ErrPlaybackACKPending, fmt.Errorf("发送 PLAYBACK ACK 失败: %w", err))
 	}
+	record.mu.Unlock()
 	u.recordEnd(metadata.CallID, cseq, dialogMetadata.StatusCode, true)
 	return dialogMetadata, nil
 }
@@ -414,6 +419,12 @@ func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result
 	}()
 	if record.closed {
 		return PlaybackTeardownClosed, nil
+	}
+	if record.ackPending && !record.byeConfirmed {
+		// Keep the known answer for cleanup, but do not gain permission for an
+		// automatic ACK retry from a legacy error path. A precise inbound BYE
+		// may still close this dialog; durable retry authorization comes later.
+		return PlaybackTeardownPending, ErrPlaybackCleanupUnknown
 	}
 	if record.inboundByeCSeq != nil && !record.byeConfirmed {
 		// sipgo already set Ended before attempting the inbound response.
