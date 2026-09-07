@@ -501,7 +501,7 @@ func startZLM(executable, dir, config string) (*zlmProcess, error) {
 		_ = stdout.Close()
 		return nil, err
 	}
-	cmd := exec.Command(executable, "-c", filepath.Base(config), "-a", "0")
+	cmd := exec.Command(executable, "-c", filepath.Base(config), "--affinity", "0")
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
