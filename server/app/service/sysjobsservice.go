@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // SysJobsService sys_jobs服务
@@ -184,7 +185,28 @@ func (s *SysJobsService) GetByID(c *gin.Context, id string) (*models.SysJobs, er
 func (s *SysJobsService) List(c *gin.Context, req models.SysJobsListRequest) (*models.SysJobsList, int64, error) {
 	// 获取总数
 	sysJobsList := models.NewSysJobsList()
-	scopes := []func(*gorm.DB) *gorm.DB{req.Handle()}
+	scopes := []func(*gorm.DB) *gorm.DB{func(db *gorm.DB) *gorm.DB {
+		if req.Id != nil {
+			db = db.Where("id = ?", *req.Id)
+		}
+		if req.Group != nil {
+			// group is a reserved keyword in SQLite; clause.Eq lets GORM quote it per dialect.
+			db = db.Where(clause.Eq{Column: clause.Column{Name: "group"}, Value: *req.Group})
+		}
+		if req.Name != nil {
+			db = db.Where("name LIKE ?", "%"+*req.Name+"%")
+		}
+		if req.ExecutorName != nil {
+			db = db.Where("executor_name LIKE ?", "%"+*req.ExecutorName+"%")
+		}
+		if req.ExecutionPolicy != nil {
+			db = db.Where("execution_policy = ?", *req.ExecutionPolicy)
+		}
+		if req.Status != nil {
+			db = db.Where("status = ?", *req.Status)
+		}
+		return db
+	}}
 	total, err := sysJobsList.GetTotal(c, scopes...)
 	if err != nil {
 		return nil, 0, err
