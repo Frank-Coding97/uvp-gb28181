@@ -327,6 +327,37 @@ func TestShutdownDeadlineLeavesAcceptedBeginAndRejectsNewStarts(t *testing.T) {
 	require.Equal(t, models.RecordingSessionStateRecording, storedSession.State)
 }
 
+func TestShutdownDeadlineWhileChannelLockHeld(t *testing.T) {
+	repo, channel, session := newShutdownFixture(t)
+	client := &shutdownRecorderClient{recording: true}
+	service := newShutdownService(repo, client)
+
+	unlock := service.locks.Lock(channel.ID)
+	released := make(chan struct{})
+	timer := time.AfterFunc(200*time.Millisecond, func() {
+		unlock()
+		close(released)
+	})
+	defer func() {
+		if timer.Stop() {
+			unlock()
+			return
+		}
+		<-released
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := service.Shutdown(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), 150*time.Millisecond)
+	require.Zero(t, client.stopCalls.Load())
+	storedSession, findErr := repo.FindSessionByID(context.Background(), session.ID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.RecordingSessionStateRecording, storedSession.State)
+}
+
 func TestShutdownWaitsForAcceptedBeginAndStopsIt(t *testing.T) {
 	repo, channel, session := newShutdownFixture(t)
 	client := &shutdownRecorderClient{

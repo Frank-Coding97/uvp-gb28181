@@ -183,7 +183,10 @@ func (s *Service) stopUnfinishedSession(ctx context.Context, session *models.GbR
 	if session == nil || session.State == models.RecordingSessionStateStopped {
 		return nil
 	}
-	unlock := s.locks.Lock(session.ChannelID)
+	unlock, err := s.locks.LockContext(ctx, session.ChannelID)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	channel, err := s.repo.GetChannel(ctx, session.ChannelID)
