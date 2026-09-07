@@ -245,22 +245,27 @@ type UDPConnection struct {
 	Listener      bool
 	writeObserver TransportWriteObserver
 
-	mu       sync.RWMutex
-	refcount int
+	mu        sync.RWMutex
+	refcount  int
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (c *UDPConnection) close() error {
-	c.mu.Lock()
-	c.refcount = 0
-	c.mu.Unlock()
-
 	if c.Listener {
-		// In case this UDP created as listener from Serve. Avoid double closing.
-		// Closing is done by read connection and it will return already error
+		// Serve borrows the caller's socket. Hard shutdown must neither close
+		// that socket nor erase references still held by its reader/transactions.
 		return nil
 	}
-	DefaultLogger().Debug("UDP reference doing hard close", "ip", c.LocalAddr().String(), "ref", 0)
-	return c.PacketConn.Close()
+	// Socket shutdown and owner release are different events. In particular,
+	// pool.Clear closes before the reader and in-flight transactions release
+	// their references. Pool aliases and concurrent owners can request shutdown
+	// again; keep the first result, including an error, without retrying close.
+	c.closeOnce.Do(func() {
+		DefaultLogger().Debug("UDP reference doing hard close", "ip", c.LocalAddr().String(), "ref", c.Ref(0))
+		c.closeErr = c.PacketConn.Close()
+	})
+	return c.closeErr
 }
 
 func (c *UDPConnection) LocalAddr() net.Addr {
@@ -297,7 +302,7 @@ func (c *UDPConnection) TryClose() (int, error) {
 
 	if ref < 0 {
 		DefaultLogger().Warn("UDP ref went negative on try close", "src", c.LocalAddr().String(), "ref", ref)
-		return 0, nil
+		return ref, nil
 	}
 
 	return ref, c.close()

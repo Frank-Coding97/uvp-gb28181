@@ -39,7 +39,9 @@ func TestTransportLayerClosing(t *testing.T) {
 
 			tp.Close()
 			c := conn.(*UDPConnection)
-			require.Error(t, c.Close(), "It is not closed already")
+			require.NoError(t, c.Close(), "repeated shutdown preserves the first close result")
+			_, err = c.PacketConn.WriteTo([]byte("closed"), c.LocalAddr())
+			require.ErrorIs(t, err, net.ErrClosed, "observe the socket, not a second close error")
 		})
 	}
 }
