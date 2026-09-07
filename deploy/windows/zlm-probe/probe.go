@@ -740,7 +740,7 @@ func checkRTPLifecycle(client *apiClient, secret string) checkResult {
 		return failedCheck("rtp_lifecycle", "listRtpServer failed after closing the test server")
 	}
 	entries = nil
-	if json.Unmarshal(remaining.Data, &entries) != nil {
+	if len(remaining.Data) > 0 && json.Unmarshal(remaining.Data, &entries) != nil {
 		return failedCheck("rtp_lifecycle", "listRtpServer data is not an array after close")
 	}
 	for _, entry := range entries {

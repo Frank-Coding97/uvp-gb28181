@@ -134,3 +134,30 @@ func TestProbeReportNeverSerializesSecretFields(t *testing.T) {
 		t.Fatal("API response serialization leaked an unmodeled secret field")
 	}
 }
+
+func TestRTPLifecycleAcceptsOmittedDataOnlyForEmptyList(t *testing.T) {
+	var stream string
+	closed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index/api/openRtpServer":
+			stream = r.URL.Query().Get("stream_id")
+			w.Write([]byte(`{"code":0,"port":12345}`))
+		case "/index/api/closeRtpServer":
+			closed = true
+			w.Write([]byte(`{"code":0,"hit":1}`))
+		case "/index/api/listRtpServer":
+			if closed {
+				w.Write([]byte(`{"code":0}`))
+			} else {
+				json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []map[string]any{{"vhost": "__defaultVhost__", "app": "rtp", "stream_id": stream, "port": 12345}}})
+			}
+		}
+	}))
+	defer server.Close()
+	client := &apiClient{baseURL: server.URL, http: server.Client()}
+	result := checkRTPLifecycle(client, "test-secret")
+	if result.Status != "passed" {
+		t.Fatalf("empty list contract: %+v", result)
+	}
+}
