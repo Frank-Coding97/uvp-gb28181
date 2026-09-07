@@ -58,6 +58,7 @@ func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = raw.Close() })
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}, &basemodels.SysDepartment{}, &basemodels.SysOperationLog{}, &gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
+	require.NoError(t, db.AutoMigrate(&models.PlayGrant{}, &models.Viewer{}))
 	active := int8(1)
 	require.NoError(t, db.Create(&[]basemodels.SysDepartment{{BaseModel: basemodels.BaseModel{ID: 10}, Status: &active}, {BaseModel: basemodels.BaseModel{ID: 20}, Status: &active}}).Error)
 	const device = "34020000002000000010"

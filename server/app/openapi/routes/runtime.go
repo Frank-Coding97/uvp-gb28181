@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
 	"uvplatform.cn/uvp-gb28181/app/openapi/client"
 	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
@@ -30,8 +31,9 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if settings == nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	// T10--T12 are not wired yet. A hot/raw flag never activates media, and no
-	// sticky commitment is written until the full startup preflight succeeds.
+	// The qualified media application/worker are not wired yet. A hot/raw flag
+	// never activates media, and no sticky commitment is written until the full
+	// startup preflight succeeds.
 	if settings.GetBool("openapi.play_enabled") {
 		return nil, nil, auth.ErrUnavailable
 	}
@@ -60,7 +62,10 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	service, err := client.NewService(db, keys, client.WithManagementBoundary(client.NewManagementScopeBoundary(db, permissions)))
+	revocation := playauth.NewOpenAPIRevocationStore(db, time.Now)
+	service, err := client.NewService(db, keys,
+		client.WithManagementBoundary(client.NewManagementScopeBoundary(db, permissions)),
+		client.WithRevocationIntentStore(revocation))
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
@@ -68,9 +73,17 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	// Until the durable T12 store/worker is wired, revoking mutations and progress
-	// return 503 rather than advertising a successful media cleanup.
-	return gate, controllers.NewClientAdminController(db, service, permissions, nil), nil
+	// Recording intent immediately revokes new admission, even when media control
+	// is unavailable. No worker is started here: progress is durable evidence only,
+	// and empty/unobserved targets remain unknown, never inferred closed.
+	progress := func(ctx context.Context, clientID int64) (controllers.RevocationView, error) {
+		state, err := revocation.Progress(ctx, clientID)
+		if err != nil {
+			return controllers.RevocationView{}, err
+		}
+		return controllers.RevocationView{Status: state.Status, Pending: state.Pending, Closed: state.Closed}, nil
+	}
+	return gate, controllers.NewClientAdminController(db, service, permissions, progress), nil
 }
 
 // RestoreMediaSecurity is mandatory before GB/HTTP startup even when OpenAPI
@@ -93,7 +106,7 @@ func RestoreMediaSecurity(ctx context.Context, db *gorm.DB, requireAuth func()) 
 // Read-only, zero-row probes check actual columns, not merely table existence.
 // They neither migrate schema nor load client secrets into diagnostics.
 func checkRuntimeSchema(ctx context.Context, db *gorm.DB) error {
-	for _, model := range []any{&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}} {
+	for _, model := range []any{&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}, &models.PlayGrant{}, &models.Viewer{}} {
 		if err := db.WithContext(ctx).Session(&gorm.Session{QueryFields: true}).Where("1 = 0").Find(model).Error; err != nil {
 			return auth.ErrUnavailable
 		}

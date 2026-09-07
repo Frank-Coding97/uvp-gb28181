@@ -188,7 +188,7 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 			if action != "enable" {
 				c.JSON(http.StatusAccepted, openAPIResponse{Code: "OK", Message: "accepted", RequestID: requestID(c), Data: gin.H{"client": updated, "revocationStatus": "pending"}})
 			} else {
-				writeOpenAPISuccess(c, updated)
+				writeOpenAPISuccess(c, gin.H{"client": updated})
 			}
 		default:
 			adminDenied(c)

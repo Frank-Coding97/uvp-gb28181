@@ -179,7 +179,7 @@ describe("OpenAPI client page", () => {
     api.create.mockReset().mockResolvedValue(ok({ client, secretKey: "one-time-secret" }));
     api.scopes.mockReset().mockResolvedValue(ok(client));
     api.rotate.mockReset().mockResolvedValue(ok({ client, secretKey: "rotated-secret" }));
-    api.enable.mockReset().mockResolvedValue(ok(client));
+    api.enable.mockReset().mockResolvedValue(ok({ client }));
     api.disable.mockReset().mockResolvedValue({ ...ok({ client, revocationStatus: "pending" }), status: 202 });
     api.revoke.mockReset().mockResolvedValue({ ...ok({ client, revocationStatus: "pending" }), status: 202 });
     api.audits.mockReset().mockResolvedValue(ok({ items: [] }));
@@ -382,6 +382,17 @@ describe("OpenAPI client page", () => {
     expect((wrapper.vm as any).drawerMode).toBe("detail");
     expect((wrapper.vm as any).drawerVisible).toBe(true);
     expect((wrapper.vm as any).currentClient).toEqual(disabledClient);
+  });
+
+  it("accepts the enabled client wrapper returned by the status HTTP API", async () => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    await vm.performStatus("enable", { ...client, status: "disabled" });
+    expect(vm.drawerError).toBe("");
+    expect(vm.currentClient).toEqual(client);
+    expect(vm.authStatus).toBe("active");
+    expect(vm.revocationStatus).toBeNull();
   });
 
   it("binds a list rotate conflict to that client's refreshed detail", async () => {
