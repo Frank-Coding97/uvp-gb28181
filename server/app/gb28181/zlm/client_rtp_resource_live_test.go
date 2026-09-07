@@ -102,5 +102,36 @@ func TestOpenAPIRtpResourceTLSIsolatedProcess(t *testing.T) {
 	result, err = control.CloseRtpServerIfMatch(ctx, other.RtpResourceSelector)
 	require.NoError(t, err)
 	require.Equal(t, RtpResourceShutdownScheduled, result)
-	t.Log("verified TLS RTP identity/fence interop passed; pending is not terminal and product dispatch stays disabled")
+	ingress, err := control.CloseRtpIngressIfMatchV2(ctx, wrong)
+	require.NoError(t, err)
+	require.Equal(t, RtpIngressRuntimeMismatch, ingress)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		ingress, err = control.CloseRtpIngressIfMatchV2(ctx, other.RtpResourceSelector)
+		require.NoError(t, err)
+		require.Contains(t, []RtpIngressResult{RtpIngressShutdownScheduled, RtpIngressClosePending, RtpIngressDrained}, ingress)
+		if ingress == RtpIngressDrained {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	require.Equal(t, RtpIngressDrained, ingress, "UDP-only ingress evidence must eventually close on this healthy fixture")
+	result, err = control.CloseRtpServerIfMatch(ctx, other.RtpResourceSelector)
+	require.NoError(t, err)
+	require.Equal(t, RtpResourceClosePending, result, "v1 must not change semantics")
+	tcp := request
+	tcp.ResourceID, err = NewRtpResourceID(time.Now())
+	require.NoError(t, err)
+	tcp.Stream += "-tcp"
+	tcp.TCPMode = 1
+	createdTCP, err := control.OpenRtpServerIfMatch(ctx, tcp)
+	require.NoError(t, err)
+	require.Equal(t, RtpResourceCreated, createdTCP.Result)
+	ingress, err = control.CloseRtpIngressIfMatchV2(ctx, tcp.RtpResourceSelector)
+	require.NoError(t, err)
+	require.Equal(t, RtpIngressShutdownScheduled, ingress)
+	ingress, err = control.CloseRtpIngressIfMatchV2(ctx, tcp.RtpResourceSelector)
+	require.NoError(t, err)
+	require.Equal(t, RtpIngressClosePending, ingress, "TCP cannot inherit UDP evidence")
+	t.Log("verified TLS v1 fence and v2 UDP ingress interop passed; source/viewer/SIP/device completion and product dispatch stay disabled")
 }

@@ -127,7 +127,7 @@ func TestOpenAPIRtpResourceExactWireAndNonterminalResults(t *testing.T) {
 
 func TestOpenAPIRtpResourceRejectsAmbiguousReplies(t *testing.T) {
 	for _, data := range []string{
-		`{"result":"closed"}`, `{"result":"not_found"}`, `{"result":null}`,
+		`{"result":"closed"}`, `{"result":"rtp_ingress_drained"}`, `{"result":"not_found"}`, `{"result":null}`,
 		`{"result":"close_pending","terminalRevision":1}`, `{"result":"created"}`,
 		`{"result":"created","port":0}`, `{"result":"created","port":-1}`,
 		`{"result":"created","port":65536}`, `{"result":"created","port":1.5}`,
