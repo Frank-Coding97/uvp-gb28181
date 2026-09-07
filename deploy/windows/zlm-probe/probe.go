@@ -69,14 +69,15 @@ type resourceStats struct {
 }
 
 type apiResponse struct {
-	Code   int             `json:"code"`
-	Msg    string          `json:"msg"`
-	Data   json.RawMessage `json:"data"`
-	Port   json.RawMessage `json:"port"`
-	Hit    json.RawMessage `json:"hit"`
-	Result json.RawMessage `json:"result"`
-	Status json.RawMessage `json:"status"`
-	Online json.RawMessage `json:"online"`
+	Code        int             `json:"code"`
+	Msg         string          `json:"msg"`
+	Data        json.RawMessage `json:"data"`
+	Port        json.RawMessage `json:"port"`
+	Hit         json.RawMessage `json:"hit"`
+	Result      json.RawMessage `json:"result"`
+	Status      json.RawMessage `json:"status"`
+	Online      json.RawMessage `json:"online"`
+	CountClosed json.RawMessage `json:"count_closed"`
 }
 
 type apiClient struct {
@@ -852,15 +853,49 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string) check
 	if files == 0 || bytes == 0 {
 		return failedCheck("media_and_recording", "Chinese/space recording path did not produce a non-empty MP4 file")
 	}
+	var recordedPath string
+	if err := filepath.WalkDir(recordRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(path), ".mp4") && recordedPath == "" {
+			recordedPath = path
+		}
+		return nil
+	}); err != nil || recordedPath == "" {
+		return failedCheck("media_and_recording", "recorded MP4 path could not be read")
+	}
+	recordedStream := randomToken("recorded-")
+	reloaded, err := client.call(context.Background(), "/index/api/loadMP4File", url.Values{
+		"vhost": {vhost}, "app": {app}, "stream": {recordedStream}, "file_path": {filepath.ToSlash(recordedPath)}, "secret": {secret},
+	})
+	var recordedData struct {
+		DurationMS uint64 `json:"duration_ms"`
+	}
+	if err != nil || reloaded.Code != 0 || json.Unmarshal(reloaded.Data, &recordedData) != nil || recordedData.DurationMS == 0 {
+		return failedCheck("media_and_recording", "recorded MP4 could not be parsed by ZLM")
+	}
+	if err := waitMediaOnline(client, secret, vhost, app, recordedStream); err != nil {
+		return failedCheck("media_and_recording", "recorded MP4 did not become readable media")
+	}
+	for _, mediaStream := range []string{stream, recordedStream} {
+		closed, err := client.call(context.Background(), "/index/api/close_streams", url.Values{"vhost": {vhost}, "app": {app}, "stream": {mediaStream}, "force": {"1"}, "secret": {secret}})
+		var count int
+		if err != nil || closed.Code != 0 || json.Unmarshal(closed.CountClosed, &count) != nil || count < 1 {
+			return failedCheck("media_and_recording", "test media did not close")
+		}
+	}
 	return passedCheck("media_and_recording", map[string]any{
-		"duration_ms":         loadedData.DurationMS,
-		"players":             len(playerEntries),
-		"probe_frames":        len(frames),
-		"recorded_files":      files,
-		"recorded_bytes":      bytes,
-		"path_has_chinese":    hasChineseAndSpace(recordRoot),
-		"traffic_unit":        unit,
-		"media_auth_rejected": true,
+		"duration_ms":               loadedData.DurationMS,
+		"players":                   len(playerEntries),
+		"probe_frames":              len(frames),
+		"recorded_files":            files,
+		"recorded_bytes":            bytes,
+		"path_has_chinese":          hasChineseAndSpace(recordRoot),
+		"traffic_unit":              unit,
+		"media_api_secret_rejected": true,
+		"recorded_duration_ms":      recordedData.DurationMS,
+		"media_closed":              true,
 	})
 }
 
