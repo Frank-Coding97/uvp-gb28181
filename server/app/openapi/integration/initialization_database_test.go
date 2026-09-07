@@ -367,6 +367,7 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 	}
 
 	for _, column := range []struct{ table, name string }{
+		{table: "gb_device_operation_intent", name: "rtp_steps_json"},
 		{table: "gb_device", name: "access_epoch"},
 		{table: "gb_device", name: "cleanup_completed_epoch"},
 		{table: "gb_device", name: "legacy_revoked_before"},

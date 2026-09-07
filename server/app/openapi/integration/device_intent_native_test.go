@@ -3,7 +3,9 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -72,6 +74,14 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.Equal(t, playauth.IntentReserved, row.State)
 	_, err = store.Reserve(ctx, id)
 	require.NoError(t, err)
+	rtpStem := "migrations/2026-09-07-device-operation-rtp-steps" + suffix
+	rtpUp, err := migrationsfs.FS.ReadFile(rtpStem + ".sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, connection.conn, rtpUp)
+	applyCleanupBarrierScript(t, ctx, connection.conn, rtpUp)
+	var unknownCount int64
+	require.NoError(t, db.Table("gb_device_operation_intent").Where("operation_id=? AND rtp_steps_json IS NULL", id.OperationID).Count(&unknownCount).Error)
+	require.EqualValues(t, 1, unknownCount, "upgrade must preserve historical unknown, not fabricate coverage")
 	for _, mutation := range []map[string]any{
 		{"device_epoch": 0}, {"contract_version": 2}, {"row_version": 0}, {"kind": "any"}, {"target_scope": "any"},
 		{"device_code": "bad"}, {"operation_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
@@ -147,8 +157,76 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.Equal(t, id.OperationID, rows[0].OperationID)
 	_, err = store.Dispatch(ctx, other, 1)
 	require.NoError(t, err)
+	verifyRTPResourceStepsNative(t, ctx, db, store, other)
+	rtpDown, err := migrationsfs.FS.ReadFile(rtpStem + "-down.sql")
+	require.NoError(t, err)
+	beforeDown, err := store.LoadRTPResourceSteps(ctx, other)
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, connection.conn, rtpDown)
+	applyCleanupBarrierScript(t, ctx, connection.conn, rtpUp)
+	afterUp, err := playauth.NewDeviceOperationIntentStore(db).LoadRTPResourceSteps(ctx, other)
+	require.NoError(t, err)
+	require.Equal(t, beforeDown, afterUp)
 	state, err := playauth.NewDeviceCleanupStore(db).Load(ctx, id.DeviceCode)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.CleanupCompletedEpoch)
 	t.Logf("%s native intent up/up, schema constraints, 20 concurrent dispatch CAS, restart/down/up preservation and transfer TX cancellation/rollback passed", dialect)
+}
+
+func verifyRTPResourceStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity) {
+	t.Helper()
+	identity := func(n int) playauth.DeviceRTPResourceIdentity {
+		resourceID, err := playauth.NewDeviceRTPResourceID(id.OperationID, fmt.Sprintf("%032x", n), time.UnixMilli(1788750000000))
+		require.NoError(t, err)
+		return playauth.DeviceRTPResourceIdentity{StepID: fmt.Sprintf("%032x", n), NodePK: 3, NodeUUID: "fixture-node", NodeRevision: 9,
+			BootNonce: strings.Repeat("a", 32), ResourceID: resourceID,
+			VHost: "__defaultVhost__", App: "rtp", Stream: fmt.Sprintf("fixture-step-%d", n), LocalIP: "127.0.0.1", SSRC: 12345}
+	}
+	for n := 1; n <= 16; n++ {
+		out, err := store.AddRTPResourceStep(ctx, id, int64(n+1), identity(n))
+		require.NoError(t, err)
+		require.Len(t, out.Steps, n)
+	}
+	_, err := store.AddRTPResourceStep(ctx, id, 18, identity(17))
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for n := 0; n < 20; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.DispatchRTPResourceStep(ctx, id, 18, identity(1).StepID)
+			if err == nil {
+				wins.Add(1)
+			} else {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	require.EqualValues(t, 1, wins.Load())
+	for err := range errs {
+		require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
+	}
+	loaded, err := store.LoadRTPResourceSteps(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, loaded.Steps, 16)
+	require.Equal(t, playauth.RTPStepMayHaveDispatched, loaded.Steps[0].State)
+	for n, step := range loaded.Steps {
+		require.Equal(t, identity(n+1), step.Identity)
+	}
+	for _, raw := range []string{"", strings.Repeat("x", 32769)} {
+		require.Error(t, db.Table("gb_device_operation_intent").Where("operation_id=?", id.OperationID).Update("rtp_steps_json", raw).Error)
+	}
+	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=?", id.DevicePK).Error)
+	_, err = store.DispatchRTPResourceStep(ctx, id, 19, identity(2).StepID)
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	_, err = store.AddRTPResourceStep(ctx, id, 19, identity(17))
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	loadedAfter, err := playauth.NewDeviceOperationIntentStore(db).LoadRTPResourceSteps(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, loaded, loadedAfter)
+	t.Log("RTP steps: 16 immutable resources, bounded growth, 20 concurrent single-step CAS, native byte constraints and old-epoch read-only recovery passed")
 }

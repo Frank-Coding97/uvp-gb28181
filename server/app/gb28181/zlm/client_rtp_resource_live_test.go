@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -76,7 +77,11 @@ func TestOpenAPIRtpResourceTLSIsolatedProcess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, RtpResourceRuntimeMismatch, result)
 	other := request
-	other.ResourceID, err = NewRtpResourceID(time.Now())
+	operationID, err := playauth.NewDeviceOperationIntentID()
+	require.NoError(t, err)
+	stepID, err := playauth.NewDeviceOperationIntentID()
+	require.NoError(t, err)
+	other.ResourceID, err = playauth.NewDeviceRTPResourceID(operationID, stepID, time.Now())
 	require.NoError(t, err)
 	other.Stream += "-other"
 	createdOther, err := control.OpenRtpServerIfMatch(ctx, other)
