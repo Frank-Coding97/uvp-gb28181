@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emiago/sipgo"
 	siplib "github.com/emiago/sipgo/sip"
 )
 
@@ -78,5 +79,64 @@ func TestShutdownClosesEstablishedTCPConnection(t *testing.T) {
 	}
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		t.Fatal("established TCP transport remained open after Shutdown")
+	}
+}
+
+func TestDrainRequestsPreservesOutgoingTransactionsAndDropsLateACK(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Shutdown(context.Background())
+	if err = s.DrainRequests(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	tx := &quiesceTransaction{}
+	s.drainHandler(func(*siplib.Request, siplib.ServerTransaction) { called = true })(siplib.NewRequest(siplib.ACK, siplib.Uri{Host: "127.0.0.1"}), tx)
+	if called || tx.response != nil {
+		t.Fatal("late ACK called a processor or received a response")
+	}
+
+	peerUA, err := sipgo.NewUA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peerUA.Close()
+	peer, err := sipgo.NewServer(peerUA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.OnBye(func(req *siplib.Request, tx siplib.ServerTransaction) {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, 200, "OK", nil))
+	})
+	socket, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- peer.ServeUDP(socket) }()
+	defer func() { socket.Close(); <-done }()
+	client, err := sipgo.NewClient(s.ua)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := socket.LocalAddr().(*net.UDPAddr)
+	req := siplib.NewRequest(siplib.BYE, siplib.Uri{Scheme: "sip", User: "fixture", Host: "127.0.0.1", Port: address.Port})
+	req.SetTransport("UDP")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	transaction, err := client.TransactionRequest(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.Terminate()
+	select {
+	case response := <-transaction.Responses():
+		if response == nil || response.StatusCode != 200 {
+			t.Fatal("BYE response missing")
+		}
+	case <-ctx.Done():
+		t.Fatal("request drain closed outgoing response transport")
 	}
 }

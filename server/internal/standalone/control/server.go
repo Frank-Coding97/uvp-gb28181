@@ -38,8 +38,16 @@ func Serve(ctx context.Context, listener net.Listener, handler func(context.Cont
 			return err
 		}
 		commandCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		_ = Handle(commandCtx, conn, handler)
+		finalized := false
+		handleErr := Handle(commandCtx, conn, func(ctx context.Context, command Command) (Reply, error) {
+			reply, err := handler(ctx, command)
+			finalized = reply == Finalized && err == nil
+			return reply, err
+		})
 		cancel()
 		_ = conn.Close()
+		if finalized {
+			return handleErr
+		}
 	}
 }

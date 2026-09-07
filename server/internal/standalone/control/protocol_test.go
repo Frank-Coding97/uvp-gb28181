@@ -111,3 +111,34 @@ func TestHandlerFailureIsConstantOnWire(t *testing.T) {
 		t.Fatalf("local failure lost: %v", err)
 	}
 }
+
+func TestServeFinalizedReplyArrivesBeforeServerReturns(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, listener, func(context.Context, Command) (Reply, error) { return Finalized, nil })
+	}()
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	reply, err := Exchange(ctx, conn, Finalize)
+	if err != nil || reply != Finalized {
+		t.Fatalf("reply=%q err=%v", reply, err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("finalized server still accepts commands")
+	}
+}

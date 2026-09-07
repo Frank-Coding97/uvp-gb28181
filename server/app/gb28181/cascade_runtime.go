@@ -279,17 +279,19 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 	return nil
 }
 
-func stopCascadeRuntime(ctx context.Context) {
+func stopCascadeRuntime(ctx context.Context) error {
 	manager := cascadeRuntimeManager
 	cascadeRuntimeManager = nil
 	if manager == nil {
-		return
+		return nil
 	}
-	if err := manager.Shutdown(ctx); err != nil {
+	err := manager.Shutdown(ctx)
+	if err != nil {
 		if app.ZapLog != nil {
 			app.ZapLog.Warn("国标级联运行时关闭失败,忽略继续关闭共享 SIP", zap.Error(err))
 		}
 	}
+	return err
 }
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)

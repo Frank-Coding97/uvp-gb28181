@@ -1,6 +1,7 @@
 package gb28181
 
 import (
+	"context"
 	"go.uber.org/zap"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
@@ -18,6 +19,7 @@ import (
 // reloads so no controller retains a stopped playback/talk/recording runtime.
 type zlmManagementCoreRuntime struct {
 	registry        *node.Registry
+	nodeService     *gbzlmsvc.NodeService
 	executor        *gbzlmmanagement.NodeExecutor
 	runtime         *gbzlmmanagement.RuntimeReader
 	ledger          *gbzlmrepo.ManagedResourceRepo
@@ -73,7 +75,7 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 		}
 	})
 	zlmManagementCore = &zlmManagementCoreRuntime{
-		registry: zlmRegistry, executor: executor,
+		registry: zlmRegistry, executor: executor, nodeService: nodeService,
 		runtime: runtime, ledger: ledger, restart: restart, overview: overview,
 		// No production allow-list source exists yet. An explicit empty set
 		// keeps FFmpeg listing available while create rejects every template
@@ -114,6 +116,30 @@ func installZLMManagementController() {
 func clearZLMManagementController() {
 	gbroutes.SetZLMManagementController(nil)
 	gbroutes.SetHomeDashboardOverview(nil)
+}
+
+// drainZLMManagementCore waits for service-owned writers before clearing the
+// process-wide registry and services. HTTP admission has already been drained.
+func drainZLMManagementCore(ctx context.Context) error {
+	if zlmManagementCore == nil {
+		return nil
+	}
+	if zlmManagementCore.overview != nil {
+		if err := zlmManagementCore.overview.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	if zlmManagementCore.nodeService != nil {
+		if err := zlmManagementCore.nodeService.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	if zlmManagementCore.restart != nil {
+		if err := zlmManagementCore.restart.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func teardownZLMManagementCore() {

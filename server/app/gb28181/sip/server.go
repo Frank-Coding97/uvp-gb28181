@@ -467,7 +467,7 @@ func (s *Server) Start() error {
 
 // Shutdown 优雅关闭
 func (s *Server) Shutdown(ctx context.Context) error {
-	drainErr := s.drainHandlers(ctx)
+	drainErr := s.DrainRequests(ctx)
 	if s.cancel != nil {
 		s.cancel()
 	}

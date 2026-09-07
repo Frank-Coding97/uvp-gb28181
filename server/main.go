@@ -68,10 +68,21 @@ func main() {
 	}
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
+	var admission *ginhelper.StandaloneAdmission
+	if app.DataPath != "" {
+		admission = ginhelper.NewStandaloneAdmission()
+		engine.Use(admission.Middleware())
+	}
 	// 初始化系统路由
 	routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
+	if admission != nil {
+		if err := runStandaloneServer(engine, admission); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
 	// 启动服务器(阻塞直到收到退出信号)

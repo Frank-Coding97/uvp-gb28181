@@ -34,7 +34,9 @@ func (s *Server) drainHandler(next sipgo.RequestHandler) sipgo.RequestHandler {
 	}
 }
 
-func (s *Server) drainHandlers(ctx context.Context) error {
+// DrainRequests closes business request admission but preserves the UA and
+// response transactions needed by outgoing session-cleanup BYEs.
+func (s *Server) DrainRequests(ctx context.Context) error {
 	s.handlerMu.Lock()
 	if !s.handlersClosing {
 		s.handlersClosing = true
