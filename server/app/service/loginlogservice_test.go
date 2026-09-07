@@ -5,19 +5,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestLoginLogServiceRecordLoginPersistsAllowlistedFields(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	uid := uint(7)
 	svc := NewLoginLogService(db)
-	err = svc.RecordLogin(context.Background(), app.LoginLogEvent{
+	err := svc.RecordLogin(context.Background(), app.LoginLogEvent{
 		UserID: &uid, Username: "alice", Result: LoginResultSuccess,
 		IP: "10.0.0.1", Location: "内网", UserAgent: "ua",
 		Browser: "Chrome", OS: "macOS",
@@ -33,12 +29,10 @@ func TestLoginLogServiceRecordLoginPersistsAllowlistedFields(t *testing.T) {
 }
 
 func TestLoginLogServiceRecordLoginHonorsCanceledContext(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = NewLoginLogService(db).RecordLogin(ctx, app.LoginLogEvent{Username: "alice", Result: LoginResultFailure})
+	err := NewLoginLogService(db).RecordLogin(ctx, app.LoginLogEvent{Username: "alice", Result: LoginResultFailure})
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 }

@@ -11,12 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 type fakeSessionValidator struct{ err error }
@@ -75,14 +73,9 @@ func TestJWTAuthMiddlewareRejectsMissingSessionValidator(t *testing.T) {
 }
 
 func TestJWTAuthMiddlewareRejectsRevokedSessionWhenNotFoundErrorMasked(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
-	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
-		g.Statement.RaiseErrorOnNotFound = false
-	}))
+	db := newSQLiteMiddlewareTestDB(t)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	sessions := service.NewAuthSessionService(db)
 	sessions.SetClock(func() time.Time { return now })
 	require.NoError(t, sessions.Create(context.Background(), &models.SysUserSession{
@@ -90,7 +83,7 @@ func TestJWTAuthMiddlewareRejectsRevokedSessionWhenNotFoundErrorMasked(t *testin
 		Browser: "test", OS: "test", LoginAt: now, LastActiveAt: now, SessionExpiresAt: now.Add(time.Hour),
 	}))
 	revokedBy := uint(1)
-	_, err = sessions.Revoke(context.Background(), "sid-revoked", "forced", &revokedBy)
+	_, err := sessions.Revoke(context.Background(), "sid-revoked", "forced", &revokedBy)
 	require.NoError(t, err)
 
 	oldToken, oldValidator, oldLog := app.TokenService, app.SessionValidator, app.ZapLog

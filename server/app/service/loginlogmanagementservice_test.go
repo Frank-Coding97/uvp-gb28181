@@ -5,16 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestLoginLogManagementDeletesSelectedAndClearsLogs(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	logs := []models.SysLoginLog{{Username: "alice", Result: LoginResultFailure}, {Username: "bob", Result: LoginResultSuccess}}
 	require.NoError(t, db.Create(&logs).Error)
 	svc := NewLoginLogManagementService(db, nil)
@@ -32,9 +28,7 @@ func TestLoginLogManagementDeletesSelectedAndClearsLogs(t *testing.T) {
 }
 
 func TestLoginLogManagementUnlockClearsLockAndFailureCount(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	user := models.User{Username: "locked-user", Password: "hash", Status: 1, Description: "test"}
 	require.NoError(t, db.Create(&user).Error)
 	log := models.SysLoginLog{UserID: &user.ID, Username: user.Username, Result: LoginResultFailure, FailureReason: LoginFailureAccountLocked}
@@ -55,9 +49,7 @@ func TestLoginLogManagementUnlockClearsLockAndFailureCount(t *testing.T) {
 }
 
 func TestLoginLogManagementUnlockRejectsMissingLogAndUser(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	cache := cachehelper.NewMemoryHelper()
 	t.Cleanup(func() { _ = cache.Close() })
 	svc := NewLoginLogManagementService(db, cache)

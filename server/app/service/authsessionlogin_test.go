@@ -6,17 +6,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestAuthSessionCreateLoginPersistsOneIndependentSessionPerLogin(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	db := newSQLiteSystemTestDB(t)
+	now := time.Now().UTC()
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
@@ -37,13 +33,13 @@ func TestAuthSessionCreateLoginPersistsOneIndependentSessionPerLogin(t *testing.
 	require.NoError(t, db.First(&stored, "sid = ?", first.SID).Error)
 	require.NotNil(t, stored.RefreshTokenHash)
 	require.NotEqual(t, first.RefreshToken, *stored.RefreshTokenHash)
-	require.Equal(t, now.Add(30*24*time.Hour), stored.SessionExpiresAt)
+	require.True(t, now.Add(30*24*time.Hour).Equal(stored.SessionExpiresAt))
 }
 
 func TestAuthSessionCreateLoginDoesNotReturnTokensWhenSessionWriteFails(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	db := newSQLiteSystemTestDB(t)
+	require.NoError(t, db.Exec("DROP TABLE sys_user_sessions").Error)
+	now := time.Now().UTC()
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}

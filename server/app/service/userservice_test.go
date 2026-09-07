@@ -9,7 +9,6 @@ import (
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 type userProfileTestConfig struct {
@@ -20,7 +19,7 @@ func (c userProfileTestConfig) ConfigFileChangeListen(...func()) {}
 func (c userProfileTestConfig) Get(string) interface{}           { return nil }
 func (c userProfileTestConfig) GetString(key string) string {
 	if key == "gormv2.usedbtype" {
-		return "mysql"
+		return "sqlite"
 	}
 	return ""
 }
@@ -37,22 +36,10 @@ func (c userProfileTestConfig) SaveConfig() error                { return nil }
 
 func newUserProfileTestDB(t *testing.T, config userProfileTestConfig) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(
-		&models.User{},
-		&models.SysDepartment{},
-		&models.SysRole{},
-		&models.SysMenu{},
-		&models.SysUserRole{},
-		&models.SysRoleMenu{},
-	))
-
-	oldDB, oldConfig := app.GormDbMysql, app.ConfigYml
-	app.GormDbMysql, app.ConfigYml = db, config
-	t.Cleanup(func() {
-		app.GormDbMysql, app.ConfigYml = oldDB, oldConfig
-	})
+	db := newSQLiteSystemTestDB(t)
+	oldConfig := app.ConfigYml
+	app.ConfigYml = config
+	t.Cleanup(func() { app.ConfigYml = oldConfig })
 	return db
 }
 
@@ -64,36 +51,36 @@ func userProfileTestContext() *gin.Context {
 func TestGetUserProfileReturnsGrantedType2AndType3Permissions(t *testing.T) {
 	db := newUserProfileTestDB(t, userProfileTestConfig{})
 	require.NoError(t, db.Create(&models.User{
-		BaseModel: models.BaseModel{ID: 10}, Username: "viewer", Password: "x", Status: 1,
+		BaseModel: models.BaseModel{ID: 10010}, Username: "viewer", Password: "x", Status: 1,
 	}).Error)
 	require.NoError(t, db.Create([]models.SysRole{
-		{BaseModel: models.BaseModel{ID: 1}, Name: "parent", ParentID: 0},
-		{BaseModel: models.BaseModel{ID: 2}, Name: "child", ParentID: 1},
-		{BaseModel: models.BaseModel{ID: 3}, Name: "second", ParentID: 0},
+		{BaseModel: models.BaseModel{ID: 10001}, Name: "parent", ParentID: 0},
+		{BaseModel: models.BaseModel{ID: 10002}, Name: "child", ParentID: 10001},
+		{BaseModel: models.BaseModel{ID: 10003}, Name: "second", ParentID: 0},
 	}).Error)
 	require.NoError(t, db.Create([]models.SysMenu{
-		{BaseModel: models.BaseModel{ID: 101}, Type: 2, Permission: "gb28181:recording:view", Path: "/recording", Name: "Recording"},
-		{BaseModel: models.BaseModel{ID: 102}, Type: 3, Permission: "gb28181:alarm:view", Name: "AlarmView"},
-		{BaseModel: models.BaseModel{ID: 103}, Type: 2, Permission: "gb28181:secret:view", Name: "Secret"},
-		{BaseModel: models.BaseModel{ID: 104}, Type: 1, Permission: "gb28181:catalog:view", Path: "/catalog", Name: "Catalog"},
-		{BaseModel: models.BaseModel{ID: 105}, Type: 3, Permission: "", Name: "NoPermission"},
-		{BaseModel: models.BaseModel{ID: 106}, Type: 2, Permission: "gb28181:home:view", Path: "/home", Name: "Home"},
-		{BaseModel: models.BaseModel{ID: 107}, Type: 2, Permission: "", Path: "/empty", Name: "EmptyPagePermission"},
+		{BaseModel: models.BaseModel{ID: 10101}, Type: 2, Permission: "gb28181:recording:view", Path: "/recording", Name: "Recording"},
+		{BaseModel: models.BaseModel{ID: 10102}, Type: 3, Permission: "gb28181:alarm:view", Name: "AlarmView"},
+		{BaseModel: models.BaseModel{ID: 10103}, Type: 2, Permission: "gb28181:secret:view", Name: "Secret"},
+		{BaseModel: models.BaseModel{ID: 10104}, Type: 1, Permission: "gb28181:catalog:view", Path: "/catalog", Name: "Catalog"},
+		{BaseModel: models.BaseModel{ID: 10105}, Type: 3, Permission: "", Name: "NoPermission"},
+		{BaseModel: models.BaseModel{ID: 10106}, Type: 2, Permission: "gb28181:home:view", Path: "/home", Name: "Home"},
+		{BaseModel: models.BaseModel{ID: 10107}, Type: 2, Permission: "", Path: "/empty", Name: "EmptyPagePermission"},
 	}).Error)
 	require.NoError(t, db.Create([]models.SysUserRole{
-		{UserID: 10, RoleID: 2},
-		{UserID: 10, RoleID: 3},
+		{UserID: 10010, RoleID: 10002},
+		{UserID: 10010, RoleID: 10003},
 	}).Error)
 	require.NoError(t, db.Create([]models.SysRoleMenu{
-		{RoleID: 1, MenuID: 101},
-		{RoleID: 2, MenuID: 102},
-		{RoleID: 2, MenuID: 104},
-		{RoleID: 2, MenuID: 105},
-		{RoleID: 2, MenuID: 107},
-		{RoleID: 3, MenuID: 106},
+		{RoleID: 10001, MenuID: 10101},
+		{RoleID: 10002, MenuID: 10102},
+		{RoleID: 10002, MenuID: 10104},
+		{RoleID: 10002, MenuID: 10105},
+		{RoleID: 10002, MenuID: 10107},
+		{RoleID: 10003, MenuID: 10106},
 	}).Error)
 
-	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 10)
+	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 10010)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{
 		"gb28181:recording:view",
@@ -107,32 +94,32 @@ func TestGetUserProfileReturnsGrantedType2AndType3Permissions(t *testing.T) {
 func TestGetUserProfileReflectsRoleMenuRevocation(t *testing.T) {
 	db := newUserProfileTestDB(t, userProfileTestConfig{})
 	require.NoError(t, db.Create(&models.User{
-		BaseModel: models.BaseModel{ID: 20}, Username: "viewer", Password: "x", Status: 1,
+		BaseModel: models.BaseModel{ID: 10020}, Username: "viewer", Password: "x", Status: 1,
 	}).Error)
-	require.NoError(t, db.Create(&models.SysRole{BaseModel: models.BaseModel{ID: 20}, Name: "guest"}).Error)
+	require.NoError(t, db.Create(&models.SysRole{BaseModel: models.BaseModel{ID: 10020}, Name: "guest"}).Error)
 	require.NoError(t, db.Create(&models.SysMenu{
-		BaseModel: models.BaseModel{ID: 201}, Type: 2, Permission: "gb28181:home:view", Path: "/home", Name: "Home",
+		BaseModel: models.BaseModel{ID: 10201}, Type: 2, Permission: "gb28181:home:view", Path: "/home", Name: "Home",
 	}).Error)
-	require.NoError(t, db.Create(&models.SysUserRole{UserID: 20, RoleID: 20}).Error)
-	require.NoError(t, db.Create(&models.SysRoleMenu{RoleID: 20, MenuID: 201}).Error)
+	require.NoError(t, db.Create(&models.SysUserRole{UserID: 10020, RoleID: 10020}).Error)
+	require.NoError(t, db.Create(&models.SysRoleMenu{RoleID: 10020, MenuID: 10201}).Error)
 
-	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 20)
+	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 10020)
 	require.NoError(t, err)
 	require.Equal(t, []string{"gb28181:home:view"}, profile.Permissions)
 
-	require.NoError(t, db.Where("role_id = ? AND menu_id = ?", 20, 201).Delete(&models.SysRoleMenu{}).Error)
-	profile, err = NewUserService().GetUserProfile(userProfileTestContext(), 20)
+	require.NoError(t, db.Where("role_id = ? AND menu_id = ?", 10020, 10201).Delete(&models.SysRoleMenu{}).Error)
+	profile, err = NewUserService().GetUserProfile(userProfileTestContext(), 10020)
 	require.NoError(t, err)
 	require.Empty(t, profile.Permissions)
 }
 
 func TestGetUserProfileKeepsAdministratorWildcard(t *testing.T) {
-	db := newUserProfileTestDB(t, userProfileTestConfig{skipUsers: []uint{99}})
+	db := newUserProfileTestDB(t, userProfileTestConfig{skipUsers: []uint{10099}})
 	require.NoError(t, db.Create(&models.User{
-		BaseModel: models.BaseModel{ID: 99}, Username: "administrator", Password: "x", Status: 1,
+		BaseModel: models.BaseModel{ID: 10099}, Username: "administrator", Password: "x", Status: 1,
 	}).Error)
 
-	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 99)
+	profile, err := NewUserService().GetUserProfile(userProfileTestContext(), 10099)
 	require.NoError(t, err)
 	require.Equal(t, []string{"*:*:*"}, profile.Permissions)
 }

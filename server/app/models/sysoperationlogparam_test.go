@@ -2,17 +2,25 @@ package models
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 )
 
 func TestSysOperationLogListRequestFiltersPath(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gormhelper.NewSQLiteClient(filepath.Join(t.TempDir(), "system.db"))
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&SysOperationLog{}))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	_, err = sqlitebootstrap.Initialize(ctx, db)
+	require.NoError(t, err)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = raw.Close() })
 	require.NoError(t, db.Create(&[]SysOperationLog{
 		{Path: "/api/gb28181/device-mgmt/permission-workbench/assignments"},
 		{Path: "/api/gb28181/device-mgmt/permission-workbench/grants/apply"},

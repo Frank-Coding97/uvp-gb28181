@@ -8,14 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestAuthSessionRevokeAllForUserAndCleanupTerminal(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	db := newSQLiteSystemTestDB(t)
+	now := time.Now().UTC()
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 	for _, session := range []*models.SysUserSession{

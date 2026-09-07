@@ -10,13 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestLoginLogCleanupDeletesInBatchesAndPreservesBoundary(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	now := time.Date(2026, 8, 18, 3, 0, 0, 0, time.UTC)
 	cutoff := now.Add(-180 * 24 * time.Hour)
 	rows := make([]models.SysLoginLog, 0, 2503)
@@ -37,9 +34,7 @@ func TestLoginLogCleanupDeletesInBatchesAndPreservesBoundary(t *testing.T) {
 }
 
 func TestLoginLogCleanupStopsAfterFailedSecondBatch(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	cutoff := time.Now().Add(-180 * 24 * time.Hour)
 	rows := make([]models.SysLoginLog, 2501)
 	for i := range rows {
