@@ -63,8 +63,9 @@ func TestMigrateMatchesBaselineAndAppliesEachWhitelistedSpecOnce(t *testing.T) {
 	require.EqualValues(t, 1, rows)
 
 	prodDB := testDB(t)
-	markMatchingBaseline(t, prodDB)
-	require.NoError(t, Migrate(context.Background(), prodDB), "the current compile-time SQLite increment whitelist is empty")
+	_, err := Initialize(context.Background(), prodDB)
+	require.NoError(t, err)
+	require.NoError(t, Migrate(context.Background(), prodDB))
 }
 
 func TestMigrateRejectsEmptyUnknownAndMismatchedMarkers(t *testing.T) {

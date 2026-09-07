@@ -6,19 +6,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 )
 
-// setupDB sqlite in-memory + 自动建表
+// setupDB uses the shipped SQLite schema and production connection settings.
 func setupDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&repo.MetaNode{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func TestNodeRepo_CreateGetUpdateDelete(t *testing.T) {

@@ -7,17 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 )
 
 func setupSchedulerLogRepoDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&repo.SchedulerLogDTO{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func TestSchedulerLogRepoT13_ListFilteredUsesPolicyAliasAndTypedPredicates(t *testing.T) {

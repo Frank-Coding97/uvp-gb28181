@@ -29,10 +29,13 @@ $before=Invoke-Mode '-migrate-up' $false
 if($before.stderr -notmatch 'baseline') {throw 'empty database must fail for missing baseline'}
 $results+=$before
 $results+=Invoke-Mode '-bootstrap-db' $true
+$firstUp=Invoke-Mode '-migrate-up' $true
+if($firstUp.stderr -notmatch 'before=1 after=2'){throw 'expected the pinned media identity increment after baseline'}
+$results+=$firstUp
 $hash=(Get-FileHash "$root\data\uvp.db" -Algorithm SHA256).Hash
 foreach($i in 1,2){
  $result=Invoke-Mode '-migrate-up' $true
- if($result.stderr -notmatch 'before=1 after=1') {throw 'empty release whitelist must preserve only the baseline marker'}
+ if($result.stderr -notmatch 'before=2 after=2') {throw 'repeated migration must preserve the baseline and pinned increment markers'}
  $results+=$result
  if((Get-FileHash "$root\data\uvp.db" -Algorithm SHA256).Hash -ne $hash){throw 'no-op migration changed database'}
 }

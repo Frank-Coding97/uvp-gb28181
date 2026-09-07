@@ -66,5 +66,5 @@ func TestSQLiteUpRequiresBaselineThenValidatesWithoutMySQLHistory(t *testing.T) 
 	require.NoError(t, Up(db, DialectSQLite))
 	var count int64
 	require.NoError(t, db.Table("gb_schema_migrations").Count(&count).Error)
-	require.EqualValues(t, 1, count)
+	require.EqualValues(t, 2, count)
 }

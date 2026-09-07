@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
@@ -17,13 +16,7 @@ import (
 
 func newManagedResourceDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbZLMManagedResource{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func managedResourceIdentity() repo.ManagedResourceIdentity {

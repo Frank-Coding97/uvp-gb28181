@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/resource/database/sqlitebaseline"
+	"uvplatform.cn/uvp-gb28181/resource/database/sqlitemigrations"
 )
 
 const migrationMarkerTable = "gb_schema_migrations"
@@ -32,9 +33,12 @@ type migrationSpec struct {
 	After   migrationCheck
 }
 
-// compiledMigrations is empty for the current release. The baseline is the
-// only SQLite schema input today; no synthetic incremental migration is run.
-var compiledMigrations = []migrationSpec{}
+// compiledMigrations pins the reviewed increments after the frozen baseline.
+var compiledMigrations = []migrationSpec{{
+	Version: sqlitemigrations.MediaIdentityVersion,
+	SQL:     sqlitemigrations.MediaIdentitySQL,
+	SHA256:  sqlitemigrations.MediaIdentitySHA256,
+}}
 
 // Migrate applies the ordered, checksum-pinned SQLite increments after the
 // release baseline has already been initialized. It never initializes a
