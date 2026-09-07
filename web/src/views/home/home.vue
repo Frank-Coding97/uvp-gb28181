@@ -35,7 +35,7 @@
             <CardTitle icon="activity" title="实时 SIP RPM" /><div class="kpi">{{ number(sipRpm) }}<small>/min</small></div><p>最近一分钟处理速率</p><MiniTrend :values="sipTrend" color="var(--uvp-warning)" />
           </template>
           <template v-else-if="widget.id === 'sip-today'">
-            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ sipTodayTotal == null ? "持久化统计暂不可用" : `失败 ${number(sipTodayFailures)} 条${sipCoveragePartial ? " · 部分数据" : ""}` }}</p><MiniTrend :values="sipTodayTrend" color="var(--uvp-brand-cyan)" />
+            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ dashboardSummary?.sip?.status === "empty" ? "今日暂无 SIP 事务样本" : sipTodayTotal == null ? "持久化统计暂不可用" : `失败 ${number(sipTodayFailures)} 条${sipCoveragePartial ? " · 部分数据" : ""}` }}</p><MiniTrend :values="sipTodayTrend" color="var(--uvp-brand-cyan)" />
           </template>
           <template v-else-if="widget.id === 'play-success-24h'">
             <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ playSuccessDescription }}</p><MiniTrend :values="playSuccessTrend" color="var(--uvp-brand)" />
