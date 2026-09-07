@@ -14,14 +14,16 @@ Set-Location G:\uvp-p0-zlm
   -BuildRoot G:\uvp-p0-zlm\cmake-build `
   -LockFile G:\uvp-p0-zlm\sources.lock.json `
   -VcpkgRoot G:\uvp-p0-zlm\vcpkg `
-  -SourceRevision 550d929b4fb9af8e2bbf0b2530634d4b40af6537 `
+  -SourceRevision 318726bd94f168d988fb2127042e74b4be207fd7 `
   -Parallel 8 *> G:\uvp-p0-zlm\zlm-build.log
 ```
 
-`-SourceRevision` 仅用于已从锁定基线派生的项目 fork 修复；省略时脚本要求源码恰好等于锁定基线。当前 Windows 运行库修复提交为 `550d929b4fb9af8e2bbf0b2530634d4b40af6537`，脚本同时验证它以锁定基线为祖先，并在 manifest 中保留两者。
+`-SourceRevision` 仅用于已从锁定基线派生的项目 fork 修复；省略时脚本要求源码恰好等于锁定基线。当前 Windows 运行库及 UTF-8 路径修复提交为 `318726bd94f168d988fb2127042e74b4be207fd7`，脚本同时验证它以锁定基线为祖先，并在 manifest 中保留两者。
 
 脚本使用 VS2022 的 `Visual Studio 17 2022` x64 生成器，并显式设置、校验 `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`，构建时固定开启 RTPProxy、MP4、HLS、OpenSSL、WebRTC 和 SCTP，关闭 FFmpeg、SRT、MySQL、Python 与测试目标。配置输出必须确认每个必需能力，随后使用 `dumpbin /DEPENDENTS` 检查 DLL 闭包；非系统依赖会从本地 vcpkg 复制到 `media/`，找不到则失败。
 
 输出目录中的 `zlm-manifest.json` 记录源码/子模块 SHA、CMake/生成器/triplet、特性、依赖和每个文件的 SHA-256。`licenses/zlm/` 保留 ZLMediaKit、五个已锁定子模块以及实际链接的 OpenSSL、libsrtp、usrsctp 许可文件。
 
 本脚本只证明构建和资源闭包。Windows 10 干净运行机启动、项目 Hook/RTP/媒体鉴权契约、中文/空格录像路径、真实设备播放/录制与重启仍需单独执行 T04-A/B/C；构建成功不等于 T04 完成。
+
+Windows 10 目标进程内嵌 UTF-8 activeCodePage 清单，使 API/配置的 UTF-8 路径与 Windows 文件名一致；不改变系统区域设置。运行网页资源排除所有 `.git` 文件/目录，manifest 对包括隐藏资源在内的实际分发文件计算哈希。

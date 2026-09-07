@@ -296,7 +296,22 @@ New-Item -ItemType Directory -Path $licenseRoot -Force | Out-Null
 Copy-Item -LiteralPath $executable -Destination (Join-Path $mediaRoot 'MediaServer.exe')
 Copy-Item -LiteralPath (Join-Path $builtRoot 'config.ini') -Destination (Join-Path $mediaRoot 'config.ini')
 Copy-Item -LiteralPath (Join-Path $builtRoot 'default.pem') -Destination (Join-Path $mediaRoot 'default.pem')
-Copy-Item -LiteralPath (Join-Path $builtRoot 'www') -Destination $mediaRoot -Recurse
+$webSource = Join-Path $builtRoot 'www'
+$webDestination = Join-Path $mediaRoot 'www'
+New-Item -ItemType Directory -Path $webDestination | Out-Null
+foreach ($entry in Get-ChildItem -LiteralPath $webSource -Recurse -Force) {
+    $relative = Get-RelativeFilePath $webSource $entry.FullName
+    if ($relative -match '(^|/)\.git(/|$)') { continue }
+    if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Runtime web assets must not contain links: $relative"
+    }
+    $destination = Join-Path $webDestination $relative
+    if ($entry.PSIsContainer) {
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    } else {
+        Copy-Item -LiteralPath $entry.FullName -Destination $destination
+    }
+}
 
 $licenseFiles = @(
     @{ Name = 'ZLMediaKit-LICENSE'; Path = (Join-Path $source 'LICENSE') },
@@ -349,7 +364,7 @@ foreach ($dll in $externalDependencies) {
     }
 }
 
-$files = @(Get-ChildItem -LiteralPath $output -Recurse -File | Sort-Object FullName | ForEach-Object {
+$files = @(Get-ChildItem -LiteralPath $output -Recurse -Force -File | Sort-Object FullName | ForEach-Object {
     [ordered]@{
         path = Get-RelativeFilePath $output $_.FullName
         sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
