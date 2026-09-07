@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -88,15 +89,22 @@ func main() {
 	}()
 	defer func() { cancelMaintenance(); <-maintenanceDone }()
 	// 启动服务器(阻塞直到收到退出信号)
-	_ = ginhelper.StartServer(engine)
+	serveErr := ginhelper.StartServer(engine)
+	if serveErr != nil {
+		app.ZapLog.Error("HTTP 服务异常结束,继续清理其余运行时", zap.Error(serveErr))
+	}
 	cancelMaintenance()
 	if stopRevocation != nil {
 		stopRevocation()
 	}
 	<-maintenanceDone
 	// 优雅关闭 GB28181 SIP 服务
-	gb28181.Stop()
-
+	waitForSIPShutdown(gb28181.Stop, func(err error) {
+		app.ZapLog.Error("GB28181 停机尚未排空,保留进程与依赖并重试", zap.Error(err))
+	}, time.Second)
+	if serveErr != nil {
+		os.Exit(1) // Preserve startup/serve failure status only after owned runtimes drain.
+	}
 }
 
 func migrateUpRequested(args []string) bool {

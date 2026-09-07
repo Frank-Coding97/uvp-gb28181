@@ -35,7 +35,14 @@ type Server struct {
 	wg                 sync.WaitGroup
 	started            bool
 	trace              gbtrace.Runtime
-	traceOnce          sync.Once
+	lifecycleMu        sync.Mutex // Only initializes lifecycleWork; never held across I/O.
+	lifecycleWork      chan struct{}
+	stopping           bool // Remaining lifecycle fields are protected by lifecycleWork.
+	playbackDrained    bool
+	listenerDone       chan struct{}
+	uaCloseDone        chan struct{}
+	uaCloseErr         error // Published by uaCloseDone; never discard an uncertain close.
+	traceClosed        bool
 	security           handler.RegisterSecurity
 	broadcastDialogs   *sipgo.DialogServerCache
 	broadcastProcessor handler.BroadcastInviteProcessor
@@ -427,6 +434,13 @@ func (s *Server) SetPlaybackEndSink(sink handler.PlaybackEndSink) {
 
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
 func (s *Server) Start() error {
+	if err := s.enterLifecycle(context.Background()); err != nil {
+		return err
+	}
+	defer s.leaveLifecycle()
+	if s.stopping || s.started || s.srv == nil {
+		return fmt.Errorf("SIP server cannot start in its current lifecycle state")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.started = true
@@ -446,41 +460,92 @@ func (s *Server) Start() error {
 			}
 		}()
 	}
+	s.listenerDone = make(chan struct{})
+	go func() { s.wg.Wait(); close(s.listenerDone) }()
 	return nil
 }
 
-// Shutdown 优雅关闭
-func (s *Server) Shutdown(ctx context.Context) error {
-	if !s.started {
-		return s.shutdownTrace(ctx)
+func (s *Server) enterLifecycle(ctx context.Context) error {
+	if s == nil || ctx == nil {
+		return fmt.Errorf("SIP lifecycle unavailable")
 	}
-	if s.cancel != nil {
-		s.cancel()
+	s.lifecycleMu.Lock()
+	if s.lifecycleWork == nil {
+		s.lifecycleWork = make(chan struct{}, 1)
 	}
-	if s.srv != nil {
-		_ = s.srv.Close()
-	}
-	done := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(done)
-	}()
+	work := s.lifecycleWork
+	s.lifecycleMu.Unlock()
 	select {
-	case <-done:
-		app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
-		return s.shutdownTrace(ctx)
+	case work <- struct{}{}:
+		return nil
 	case <-ctx.Done():
-		_ = s.shutdownTrace(ctx)
 		return ctx.Err()
 	}
 }
 
-func (s *Server) shutdownTrace(ctx context.Context) error {
-	var err error
-	s.traceOnce.Do(func() {
-		if s.trace != nil {
-			err = s.trace.Shutdown(ctx)
+func (s *Server) leaveLifecycle() { <-s.lifecycleWork }
+
+// Shutdown drains persistent playback before cancelling the shared listener.
+// On failure callers must retain this Server and its DB and retry. This does
+// not claim equivalent durable teardown for all legacy UAC business services.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if err := s.enterLifecycle(ctx); err != nil {
+		return err
+	}
+	defer s.leaveLifecycle()
+	s.stopping = true
+	if !s.playbackDrained {
+		if s.uac != nil {
+			if err := s.uac.ShutdownPlaybackIntents(ctx); err != nil {
+				return err
+			}
 		}
-	})
-	return err
+		s.playbackDrained = true
+	}
+	// Cancelling ListenAndServe closes UDP's shared receive socket. Do not
+	// move this before the persistent owners have finished their final flush.
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.listenerDone != nil {
+		select {
+		case <-s.listenerDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	// sipgo.Server.Close is a no-op; this Server owns the actual UA. Keep
+	// one close attempt and its result, including when the caller times out.
+	if s.uaCloseDone == nil {
+		s.uaCloseDone = make(chan struct{})
+		go func() {
+			if s.ua != nil {
+				s.uaCloseErr = s.ua.Close()
+			}
+			close(s.uaCloseDone)
+		}()
+	}
+	select {
+	case <-s.uaCloseDone:
+		if s.uaCloseErr != nil {
+			return s.uaCloseErr
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.shutdownTrace(ctx)
+}
+
+func (s *Server) shutdownTrace(ctx context.Context) error {
+	if s.traceClosed {
+		return nil
+	}
+	if s.trace != nil {
+		if err := s.trace.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	s.traceClosed = true
+	app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
+	return nil
 }

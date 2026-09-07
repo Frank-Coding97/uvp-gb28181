@@ -331,7 +331,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	server, err := factory(cfg)
 	if err != nil {
 		status.MarkFailed(err.Error())
-		return nil, err
+		return server, err // A partially constructed instance still owns resources.
 	}
 	server.SetRecorder(recorder)
 	server.SetErrorHandler(func(err error) {
@@ -339,7 +339,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	})
 	if err := server.Start(); err != nil {
 		status.MarkFailed(err.Error())
-		return nil, err
+		return server, err
 	}
 	status.MarkRunning()
 	return server, nil
@@ -489,6 +489,10 @@ func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report 
 func Start() {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
+	if sipServer != nil || securityRuntime != nil {
+		app.ZapLog.Warn("GB28181 旧运行时尚未释放,拒绝重复启动")
+		return
+	}
 
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
@@ -589,16 +593,31 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
 func startSIPDependencies(cfg gbconfig.Config) error {
-	runtime := setupSecurityRuntime()
-	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
-		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
+	return startSIPDependenciesWithFactory(cfg, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(securityRuntime))
 	})
+}
+
+// Caller holds sipLifecycleMu. Register every owned object before any later
+// fallible assembly; rollback must preserve the original instance on failure.
+func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFactory) (err error) {
+	if sipServer != nil || securityRuntime != nil {
+		return errors.New("GB28181 旧运行时尚未释放,拒绝替换")
+	}
+	securityRuntime = setupSecurityRuntime()
+	defer func() {
+		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = errors.Join(err, stopSIPDependencies(ctx))
+			cancel()
+			sipRuntimeStatus.MarkFailed(err.Error())
+		}
+	}()
+	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, factory)
+	sipServer = srv
 	if err != nil {
-		_ = runtime.Close(context.Background())
-		gbroutes.SetSecurityRuntime(nil)
 		return err
 	}
-	securityRuntime = runtime
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	var newFirmwareUpgradeService *upgrade.Service
@@ -611,9 +630,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			Location:           cfg.RecordQuery.Location,
 		})
 		if queryErr != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = srv.Shutdown(shutdownCtx)
-			cancel()
 			sipRuntimeStatus.MarkFailed(queryErr.Error())
 			return fmt.Errorf("装配设备录像查询 service 失败: %w", queryErr)
 		}
@@ -628,9 +644,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			recordQueryMetrics = nil
 			gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 			srv.SetRecordInfoSink(nil)
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = srv.Shutdown(shutdownCtx)
-			cancel()
 			sipRuntimeStatus.MarkFailed(err.Error())
 			return fmt.Errorf("装配 PTZ service 失败: %w", err)
 		}
@@ -644,9 +657,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				recordQueryMetrics = nil
 				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 				srv.SetRecordInfoSink(nil)
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = srv.Shutdown(shutdownCtx)
-				cancel()
 				sipRuntimeStatus.MarkFailed(err.Error())
 				return fmt.Errorf("装配设备固件升级 service 失败: %w", err)
 			}
@@ -659,16 +669,12 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				recordQueryMetrics = nil
 				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 				srv.SetRecordInfoSink(nil)
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = srv.Shutdown(shutdownCtx)
-				cancel()
 				sipRuntimeStatus.MarkFailed("SIP server 未提供设备升级消息路由")
 				return errors.New("SIP server 未提供设备升级消息路由")
 			}
 			setter.SetUpgradeProcessor(newFirmwareUpgradeService)
 		}
 	}
-	sipServer = srv
 	if err := startCascadeRuntime(cfg, srv); err != nil {
 		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.Error(err))
 	} else {
@@ -886,7 +892,7 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
-func stopSIPDependencies(ctx context.Context) {
+func stopSIPDependencies(ctx context.Context) error {
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	clearZLMManagementController()
@@ -927,17 +933,18 @@ func stopSIPDependencies(ctx context.Context) {
 	stopCascadeRuntime(ctx)
 	if sipServer != nil {
 		if err := sipServer.Shutdown(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 SIP 服务优雅关闭失败,忽略继续", zap.Error(err))
+			return fmt.Errorf("GB28181 SIP 排空失败,保留运行时等待重试: %w", err)
 		}
 		sipServer = nil
 	}
 	if securityRuntime != nil {
 		if err := securityRuntime.Close(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 安全事件持久化停止失败,忽略继续", zap.Error(err))
+			return fmt.Errorf("GB28181 安全事件持久化停止失败,保留运行时等待重试: %w", err)
 		}
 		securityRuntime = nil
 	}
 	gbroutes.SetSecurityRuntime(nil)
+	return nil
 }
 
 func stopPlaybackRuntime(ctx context.Context) {
@@ -1301,7 +1308,10 @@ func ReloadSIP() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	stopSIPDependencies(ctx)
+	if err := stopSIPDependencies(ctx); err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
 	return startSIPDependencies(sipCfg)
 }
 
@@ -1633,13 +1643,16 @@ func setupCivilCodeService() {
 }
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
-func Stop() {
+func Stop() error {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	stopSIPDependencies(ctx)
+	if err := stopSIPDependencies(ctx); err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil
@@ -1669,6 +1682,7 @@ func Stop() {
 		dashboardRetentionCancel()
 		dashboardRetentionCancel = nil
 	}
+	return nil
 }
 
 func startPositionHistoryPruner() {

@@ -19,6 +19,8 @@ import (
 
 type fakeSIPRuntimeServer struct {
 	startErr                error
+	shutdownErr             error
+	uac                     *uac.UAC
 	onError                 func(error)
 	started                 bool
 	events                  *[]string
@@ -45,12 +47,12 @@ func (f *fakeSIPRuntimeServer) Start() error {
 	f.started = true
 	return f.startErr
 }
-func (f *fakeSIPRuntimeServer) UAC() *uac.UAC { return nil }
+func (f *fakeSIPRuntimeServer) UAC() *uac.UAC { return f.uac }
 func (f *fakeSIPRuntimeServer) Shutdown(context.Context) error {
 	if f.events != nil {
 		*f.events = append(*f.events, "sip.shutdown")
 	}
-	return nil
+	return f.shutdownErr
 }
 
 type fakePTZSchedulerLifecycle struct {
@@ -69,10 +71,11 @@ func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 	t.Run("start failure", func(t *testing.T) {
 		status := gbsetup.NewRuntimeStatus()
 		server := &fakeSIPRuntimeServer{startErr: errors.New("bind failed")}
-		_, err := startSIPRuntime(gbconfig.Config{}, nil, status, func(gbconfig.Config) (sipRuntimeServer, error) {
+		got, err := startSIPRuntime(gbconfig.Config{}, nil, status, func(gbconfig.Config) (sipRuntimeServer, error) {
 			return server, nil
 		})
 		require.Error(t, err)
+		require.Same(t, server, got, "failed Start must return its owned instance for root rollback")
 		require.Equal(t, gbsetup.RuntimeFailed, status.Snapshot().State)
 	})
 
