@@ -18,7 +18,7 @@ import (
 // calling this, then strongly retain the owner through fresh CAS/lease and
 // actual Quiesced. Load cannot revive an old owner or dispatch permission.
 func (u *UAC) prepareRecoveredPlaybackCleanup(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, stepID, remoteTag string) (*sipgo.OwnedBranchCleanup, playauth.DeviceSIPInviteSteps, error) {
-	if u == nil || u.client == nil || store == nil || id.Kind != "playback" || id.TargetScope != "channel" || remoteTag == "" {
+	if u == nil || u.client == nil || store == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" || remoteTag == "" {
 		return nil, playauth.DeviceSIPInviteSteps{}, errPlaybackIntentSnapshot
 	}
 	loaded, err := store.LoadSIPInviteSteps(ctx, id)

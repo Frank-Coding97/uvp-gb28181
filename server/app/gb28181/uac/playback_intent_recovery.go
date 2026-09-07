@@ -34,7 +34,7 @@ func (u *UAC) reservePlaybackBarrierLocked(barrier *playauth.DeviceOperationBarr
 }
 
 func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID, remoteTag string) (_ *playbackIntentRecovery, err error) {
-	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" {
+	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" {
 		return nil, ErrPlaybackUnavailable
 	}
 	if err := ctx.Err(); err != nil {

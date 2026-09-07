@@ -66,6 +66,7 @@ type deviceOperationLaneRef struct {
 type deviceOperationLease struct {
 	lane        *deviceOperationLane
 	ref         *deviceOperationLaneRef
+	deviceCode  string
 	epoch       int64
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
@@ -330,6 +331,7 @@ func (b *DeviceOperationBarrier) beginOnLane(ctx, waitCtx context.Context, devic
 		return nil, err
 	}
 	lease := newDeviceOperationLease(ctx, lane, ref, epoch)
+	lease.deviceCode = deviceCode
 	lane.mu.Lock()
 	lane.active[lease] = struct{}{}
 	lane.guardHeld = false

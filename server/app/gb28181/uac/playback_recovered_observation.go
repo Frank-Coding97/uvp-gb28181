@@ -40,7 +40,7 @@ func (u *UAC) hasPlaybackObservationLocked(operationID string) bool {
 }
 
 func (u *UAC) beginRecoveredPlaybackObservation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID string) (_ *playbackRecoveredObservation, err error) {
-	if ctx == nil || u == nil || u.client == nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" {
+	if ctx == nil || u == nil || u.client == nil || store == nil || barrier == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" {
 		return nil, ErrPlaybackUnavailable
 	}
 	if err := ctx.Err(); err != nil {

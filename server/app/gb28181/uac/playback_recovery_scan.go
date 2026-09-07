@@ -83,7 +83,7 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 }
 
 func (u *UAC) recoverPlaybackIntent(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity) error {
-	if id.Kind != "playback" || id.TargetScope != "channel" {
+	if !playbackIntentKind(id.Kind) || id.TargetScope != "channel" {
 		return ErrPlaybackCleanupUnknown
 	}
 	u.playbackIntentMu.Lock()

@@ -26,6 +26,8 @@ var (
 
 type NodeInfo struct {
 	ID, DeviceID, ServerID string
+	NodeUUID               string
+	NodeRevision           uint64
 	Destination, Transport string
 	RecvIP                 string
 	TCPMode                bool
@@ -93,9 +95,10 @@ type MediaWaiter interface {
 }
 
 type ServiceConfig struct {
-	// Production uses the application's shared barrier. The preflight is read
-	// only; this field does not yet establish an operation lease or recovery.
+	// The application shares this barrier. Without Intents this is only the
+	// original-epoch preflight; Intents additionally requires both child factories.
 	DeviceOperations *playauth.DeviceOperationBarrier
+	Intents          *playauth.DeviceOperationIntentStore
 	ServerID         string
 	Metrics          *Metrics
 	MediaWait        time.Duration
@@ -216,11 +219,19 @@ func (r allocationResources) Unbind(context.Context) error {
 func (s *Service) fail(ctx context.Context, sessionID, stage, code string, cause error, resources CleanupResources) error {
 	_ = s.registry.Update(sessionID, func(session *Session) error {
 		session.ErrorStage, session.ErrorCode, session.Error = stage, code, cause
-		if resources != nil {
+		_, managed := session.Resources.(*playbackIntentOwner)
+		if resources != nil && !managed {
 			session.Resources = resources
 		}
 		return nil
 	})
+	if session, ok := s.registry.Get(sessionID); ok {
+		if owner, managed := session.Resources.(*playbackIntentOwner); managed && owner.initializing() {
+			// Create's deferred join publishes all children before finalization;
+			// waiting here would make initialization wait on its own ready signal.
+			return &ServiceError{Stage: stage, Code: code, Err: cause}
+		}
+	}
 	terminal := StateFailed
 	// Close cancels in-flight work before closing the registry. Both racing
 	// paths must classify that cancellation as a stop, not a business failure.
@@ -237,7 +248,7 @@ func (s *Service) fail(ctx context.Context, sessionID, stage, code string, cause
 	return &ServiceError{Stage: stage, Code: code, Err: errors.Join(cause, finalizeErr)}
 }
 
-func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResult, error) {
+func (s *Service) Create(ctx context.Context, request CreateRequest) (out CreateResult, createErr error) {
 	if s == nil || s.registry == nil || s.picker == nil || s.rtp == nil || s.inviter == nil || s.media == nil {
 		return CreateResult{}, ErrRTPUnavailable
 	}
@@ -264,17 +275,75 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 			return CreateResult{}, err
 		}
 	}
+	var owner *playbackIntentOwner
+	if s.config.Intents != nil {
+		if _, ok := s.rtp.(IntentRTPFactory); !ok {
+			return CreateResult{}, ErrRTPUnavailable
+		}
+		if _, ok := s.inviter.(IntentSIPFactory); !ok {
+			return CreateResult{}, ErrRTPUnavailable
+		}
+		owner, err = newPlaybackIntentOwner(s.lifecycle, s.config.Intents, s.config.DeviceOperations, request)
+		if err != nil {
+			return CreateResult{}, err
+		}
+		request.Resources = owner
+	}
 	created, err := s.registry.Create(ctx, request)
 	if err != nil {
+		if owner != nil {
+			owner.cancel()
+			owner.finishInitialization()
+		}
 		return CreateResult{}, err
 	}
 	if s.config.Metrics != nil && !created.Existing {
 		s.config.Metrics.Created.Add(1)
 	}
 	if created.Existing {
+		if owner != nil {
+			owner.cancel()
+			owner.finishInitialization()
+		}
 		return CreateResult{Session: created.Session, Existing: true}, nil
 	}
 	session := created.Session
+	if owner != nil {
+		defer func() {
+			owner.finishInitialization()
+			if createErr != nil {
+				owner.cancel()
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				terminal := StateFailed
+				if s.lifecycle.Err() != nil && errors.Is(createErr, context.Canceled) {
+					terminal = StateStopped
+				}
+				started, cleanupErr := s.registry.FinalizeContextOnce(cleanupCtx, session.ID, terminal, "initialization failed")
+				if started && s.config.Metrics != nil {
+					if terminal == StateFailed {
+						s.config.Metrics.Failed.Add(1)
+					}
+					s.config.Metrics.Cleaned.Add(1)
+				}
+				createErr = errors.Join(createErr, cleanupErr)
+			}
+		}()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		stopOwner := context.AfterFunc(owner.ctx, cancel)
+		stopRequest := context.AfterFunc(ctx, owner.cancel)
+		defer func() { stopRequest(); stopOwner(); cancel() }()
+		if err := owner.begin(ctx); err != nil {
+			return CreateResult{}, s.fail(ctx, session.ID, "intent", "unavailable", err, owner)
+		}
+		go func() {
+			<-owner.ctx.Done()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = s.registry.StopOnce(cleanupCtx, session.ID, "operation cancelled")
+		}()
+	}
 	streamID, ssrc := randomPlaybackValue("pb-"), randomPlaybackSSRC()
 	node, err := s.picker.Pick(ctx, PickRequest{OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID,
 		SIPChannelID: request.SIPChannelID, RecordKey: request.RecordKey, StreamID: streamID,
@@ -289,7 +358,19 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		return CreateResult{}, s.fail(ctx, session.ID, "node", "cancelled", err, nil)
 	}
 	tcpMode := request.TCPMode || node.TCPMode
-	allocation, err := s.rtp.Open(ctx, RTPRequest{NodeID: node.ID, StreamID: streamID, SSRC: ssrc, TCPMode: tcpMode})
+	rtpRequest := RTPRequest{NodeID: node.ID, StreamID: streamID, SSRC: ssrc, TCPMode: tcpMode}
+	var allocation RTPAllocation
+	if owner == nil {
+		allocation, err = s.rtp.Open(ctx, rtpRequest)
+	} else {
+		owner.rtp, err = s.rtp.(IntentRTPFactory).PrepareIntent(ctx, owner.store, owner.id, owner.version, node, rtpRequest)
+		if err == nil && owner.rtp == nil {
+			err = ErrRTPUnavailable
+		}
+		if err == nil {
+			allocation, err = owner.rtp.Open(ctx)
+		}
+	}
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "unavailable", fmt.Errorf("%w: %w", ErrRTPUnavailable, err), nil)
 	}
@@ -345,8 +426,27 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if transport == "" {
 		transport = node.Transport
 	}
-	dialog, err := s.inviter.Invite(ctx, UACInvite{DeviceID: request.DeviceID, ChannelID: sipChannelID, Destination: destination,
-		Transport: transport, SSRC: ssrc, SDP: body})
+	invite := UACInvite{DeviceID: request.DeviceID, ChannelID: sipChannelID, Destination: destination, Transport: transport, SSRC: ssrc, SDP: body}
+	var dialog DialogInfo
+	if owner == nil {
+		dialog, err = s.inviter.Invite(ctx, invite)
+	} else {
+		var stored playauth.DeviceRTPResourceSteps
+		stored, err = owner.store.LoadRTPResourceSteps(ctx, owner.id)
+		var stepID string
+		if err == nil {
+			stepID, err = playauth.NewDeviceOperationIntentID()
+		}
+		if err == nil {
+			owner.sip, err = s.inviter.(IntentSIPFactory).PrepareIntent(owner.ctx, owner.store, owner.barrier, owner.lease, owner.id, stored.Intent.RowVersion, stepID, invite)
+		}
+		if err == nil && owner.sip == nil {
+			err = ErrRTPUnavailable
+		}
+		if err == nil {
+			dialog, err = owner.sip.Invite(ctx)
+		}
+	}
 	if dialog.CleanupRequired {
 		resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }
 		if dialog.CallID == "" && dialog.CleanupRequired {
@@ -364,9 +464,13 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "failed", err, resources)
 	}
 	resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }
+	var publishedResources CleanupResources = resources
+	if owner != nil {
+		publishedResources = owner
+	}
 	if err := s.registry.Update(session.ID, func(value *Session) error {
 		value.NodeID, value.StreamID, value.SSRC, value.CallID = node.ID, streamID, ssrc, dialog.CallID
-		value.PlayFrom, value.State, value.Resources = playFrom, StateBuffering, resources
+		value.PlayFrom, value.State, value.Resources = playFrom, StateBuffering, publishedResources
 		return nil
 	}); err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "session_update", err, resources)
@@ -597,11 +701,23 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if request.Action != "pause" && request.Action != "resume" && request.Action != "seek" && request.Action != "scale" {
 		return nil, ErrInvalidSession
 	}
-	actioner, ok := s.inviter.(PlaybackActioner)
-	if !ok {
-		return nil, ErrRTPUnavailable
+	position, scale := request.PositionSeconds, request.Scale
+	if owner, managed := session.Resources.(*playbackIntentOwner); managed {
+		command := playauth.DeviceSIPINFOCommand{Action: request.Action}
+		if request.Action == "seek" {
+			command.PositionNanos, command.SegmentDurationNanos = int64(time.Duration(position*float64(time.Second))), int64(duration)
+		}
+		if request.Action == "scale" {
+			command.Scale = scale
+		}
+		err = owner.action(ctx, command)
+	} else {
+		actioner, ok := s.inviter.(PlaybackActioner)
+		if !ok {
+			return nil, ErrRTPUnavailable
+		}
+		position, scale, err = actioner.Action(ctx, session.CallID, request.Action, request.PositionSeconds, request.Scale, duration)
 	}
-	position, scale, err := actioner.Action(ctx, session.CallID, request.Action, request.PositionSeconds, request.Scale, duration)
 	if err != nil {
 		return nil, err
 	}

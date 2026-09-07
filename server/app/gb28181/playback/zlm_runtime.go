@@ -68,6 +68,7 @@ func (p *zlmNodePicker) Pick(ctx context.Context, request PickRequest) (NodeInfo
 		return NodeInfo{}, ErrNodeUnavailable
 	}
 	return NodeInfo{ID: strconv.FormatInt(selected.ID, 10), DeviceID: request.DeviceID, ServerID: p.serverID,
+		NodeUUID: selected.MediaServerUUID, NodeRevision: selected.Revision,
 		Destination: request.Destination, Transport: request.Transport, RecvIP: selected.EffectiveReceiveHost(), TCPMode: request.TCPMode}, nil
 }
 

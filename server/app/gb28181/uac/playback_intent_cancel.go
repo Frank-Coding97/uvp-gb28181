@@ -11,7 +11,7 @@ import (
 )
 
 func prepareStoredPlaybackCancel(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, invite playauth.DeviceSIPInviteIdentity, request *sip.Request) (playauth.DeviceSIPInviteSteps, error) {
-	if ctx == nil || store == nil || id.Kind != "playback" || id.TargetScope != "channel" {
+	if ctx == nil || store == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" {
 		return playauth.DeviceSIPInviteSteps{}, errPlaybackIntentSnapshot
 	}
 	snapshot, err := snapshotPlaybackRequest(request, sip.CANCEL)

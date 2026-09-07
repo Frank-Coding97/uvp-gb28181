@@ -58,7 +58,20 @@ type playbackIntentOperation struct {
 }
 
 func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, input PlaybackInviteRequest) (_ *playbackIntentOperation, err error) {
-	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" || input.DeviceID != id.DeviceCode || input.ChannelID != id.TargetCode {
+	return u.beginPlaybackIntent(ctx, store, barrier, nil, id, version, stepID, input)
+}
+
+func (u *UAC) beginPlaybackIntentChild(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, parent playauth.DeviceOperationLease, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, input PlaybackInviteRequest) (*playbackIntentOperation, error) {
+	if parent == nil {
+		return nil, ErrPlaybackUnavailable
+	}
+	return u.beginPlaybackIntent(ctx, store, barrier, parent, id, version, stepID, input)
+}
+
+func playbackIntentKind(kind string) bool { return kind == "playback" || kind == "download" }
+
+func (u *UAC) beginPlaybackIntent(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, parent playauth.DeviceOperationLease, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, input PlaybackInviteRequest) (_ *playbackIntentOperation, err error) {
+	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" || input.DeviceID != id.DeviceCode || input.ChannelID != id.TargetCode {
 		return nil, ErrPlaybackUnavailable
 	}
 	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, ready: make(chan struct{}), work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
@@ -90,7 +103,12 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 		}
 		u.playbackIntentMu.Unlock()
 	}
-	lease, err := barrier.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
+	var lease playauth.DeviceOperationLease
+	if parent != nil {
+		lease, err = barrier.BorrowChildLease(ctx, parent, id)
+	} else {
+		lease, err = barrier.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
+	}
 	if err != nil {
 		removeUnused()
 		return nil, err

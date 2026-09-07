@@ -60,11 +60,29 @@ type DeviceRTPResourceIdentity struct {
 }
 
 type DeviceRTPResourceStep struct {
-	Identity          DeviceRTPResourceIdentity `json:"-"`
-	State             string                    `json:"-"`
-	RowVersion        int64                     `json:"-"`
-	PreparedAt        time.Time                 `json:"-"`
-	DispatchStartedAt *time.Time                `json:"-"`
+	Identity                DeviceRTPResourceIdentity `json:"-"`
+	State                   string                    `json:"-"`
+	RowVersion              int64                     `json:"-"`
+	PreparedAt              time.Time                 `json:"-"`
+	DispatchStartedAt       *time.Time                `json:"-"`
+	OwnerRunID              string                    `json:"-"`
+	OpenResult              *DeviceRTPOpenResult      `json:"-"`
+	OpenObservedAt          *time.Time                `json:"-"`
+	ResourceCloseResult     string                    `json:"-"`
+	ResourceCloseObservedAt *time.Time                `json:"-"`
+	IngressCloseResult      string                    `json:"-"`
+	IngressCloseObservedAt  *time.Time                `json:"-"`
+	LocalQuiescedAt         *time.Time                `json:"-"`
+}
+
+type DeviceRTPOpenResult struct {
+	Result string `json:"-"`
+	Port   int    `json:"-"`
+}
+
+type rtpOpenResultWire struct {
+	Result string `json:"result"`
+	Port   int    `json:"port"`
 }
 
 // This snapshot has no completion/coverage field and grants no dispatch rights.
@@ -76,26 +94,34 @@ type DeviceRTPResourceSteps struct {
 // Persistence-only DTO: every field is fixed. In particular there is no raw
 // payload, endpoint, credentials, terminal state or generic action dispatcher.
 type rtpStepWire struct {
-	Version           int        `json:"version"`
-	Action            string     `json:"action"`
-	StepID            string     `json:"stepID"`
-	NodePK            int64      `json:"nodePK"`
-	NodeUUID          string     `json:"nodeUUID"`
-	NodeRevision      int64      `json:"nodeRevision"`
-	BootNonce         string     `json:"bootNonce"`
-	ResourceID        string     `json:"resourceID"`
-	VHost             string     `json:"vhost"`
-	App               string     `json:"app"`
-	Stream            string     `json:"stream"`
-	Port              int        `json:"port"`
-	LocalIP           string     `json:"localIP"`
-	TCPMode           int        `json:"tcpMode"`
-	SSRC              uint32     `json:"ssrc"`
-	OnlyTrack         int        `json:"onlyTrack"`
-	State             string     `json:"state"`
-	RowVersion        int64      `json:"rowVersion"`
-	PreparedAt        time.Time  `json:"preparedAt"`
-	DispatchStartedAt *time.Time `json:"dispatchStartedAt"`
+	Version                 int                `json:"version"`
+	Action                  string             `json:"action"`
+	StepID                  string             `json:"stepID"`
+	NodePK                  int64              `json:"nodePK"`
+	NodeUUID                string             `json:"nodeUUID"`
+	NodeRevision            int64              `json:"nodeRevision"`
+	BootNonce               string             `json:"bootNonce"`
+	ResourceID              string             `json:"resourceID"`
+	VHost                   string             `json:"vhost"`
+	App                     string             `json:"app"`
+	Stream                  string             `json:"stream"`
+	Port                    int                `json:"port"`
+	LocalIP                 string             `json:"localIP"`
+	TCPMode                 int                `json:"tcpMode"`
+	SSRC                    uint32             `json:"ssrc"`
+	OnlyTrack               int                `json:"onlyTrack"`
+	State                   string             `json:"state"`
+	RowVersion              int64              `json:"rowVersion"`
+	PreparedAt              time.Time          `json:"preparedAt"`
+	DispatchStartedAt       *time.Time         `json:"dispatchStartedAt"`
+	OwnerRunID              string             `json:"ownerRunID,omitempty"`
+	OpenResult              *rtpOpenResultWire `json:"openResult,omitempty"`
+	OpenObservedAt          *time.Time         `json:"openObservedAt,omitempty"`
+	ResourceCloseResult     string             `json:"resourceCloseResult,omitempty"`
+	ResourceCloseObservedAt *time.Time         `json:"resourceCloseObservedAt,omitempty"`
+	IngressCloseResult      string             `json:"ingressCloseResult,omitempty"`
+	IngressCloseObservedAt  *time.Time         `json:"ingressCloseObservedAt,omitempty"`
+	LocalQuiescedAt         *time.Time         `json:"localQuiescedAt,omitempty"`
 }
 
 type rtpStepsWire struct {
@@ -110,17 +136,29 @@ type rtpIntentRow struct {
 
 func stepToWire(step DeviceRTPResourceStep) rtpStepWire {
 	i := step.Identity
-	return rtpStepWire{1, "open_rtp", i.StepID, i.NodePK, i.NodeUUID, i.NodeRevision, i.BootNonce,
-		i.ResourceID, i.VHost, i.App, i.Stream, i.Port, i.LocalIP, i.TCPMode, i.SSRC, i.OnlyTrack,
-		step.State, step.RowVersion, step.PreparedAt, step.DispatchStartedAt}
+	w := rtpStepWire{Version: 1, Action: "open_rtp", StepID: i.StepID, NodePK: i.NodePK, NodeUUID: i.NodeUUID, NodeRevision: i.NodeRevision, BootNonce: i.BootNonce,
+		ResourceID: i.ResourceID, VHost: i.VHost, App: i.App, Stream: i.Stream, Port: i.Port, LocalIP: i.LocalIP, TCPMode: i.TCPMode, SSRC: i.SSRC, OnlyTrack: i.OnlyTrack,
+		State: step.State, RowVersion: step.RowVersion, PreparedAt: step.PreparedAt, DispatchStartedAt: step.DispatchStartedAt,
+		OwnerRunID: step.OwnerRunID, OpenObservedAt: step.OpenObservedAt, ResourceCloseResult: step.ResourceCloseResult, ResourceCloseObservedAt: step.ResourceCloseObservedAt,
+		IngressCloseResult: step.IngressCloseResult, IngressCloseObservedAt: step.IngressCloseObservedAt, LocalQuiescedAt: step.LocalQuiescedAt}
+	if step.OpenResult != nil {
+		w.OpenResult = &rtpOpenResultWire{Result: step.OpenResult.Result, Port: step.OpenResult.Port}
+	}
+	return w
 }
 
 func (w rtpStepWire) step() DeviceRTPResourceStep {
-	return DeviceRTPResourceStep{Identity: DeviceRTPResourceIdentity{
+	step := DeviceRTPResourceStep{Identity: DeviceRTPResourceIdentity{
 		StepID: w.StepID, NodePK: w.NodePK, NodeUUID: w.NodeUUID, NodeRevision: w.NodeRevision,
 		BootNonce: w.BootNonce, ResourceID: w.ResourceID, VHost: w.VHost, App: w.App, Stream: w.Stream,
 		Port: w.Port, LocalIP: w.LocalIP, TCPMode: w.TCPMode, SSRC: w.SSRC, OnlyTrack: w.OnlyTrack},
-		State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt}
+		State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt,
+		OwnerRunID: w.OwnerRunID, OpenObservedAt: w.OpenObservedAt, ResourceCloseResult: w.ResourceCloseResult, ResourceCloseObservedAt: w.ResourceCloseObservedAt,
+		IngressCloseResult: w.IngressCloseResult, IngressCloseObservedAt: w.IngressCloseObservedAt, LocalQuiescedAt: w.LocalQuiescedAt}
+	if w.OpenResult != nil {
+		step.OpenResult = &DeviceRTPOpenResult{Result: w.OpenResult.Result, Port: w.OpenResult.Port}
+	}
+	return step
 }
 
 func validRTPStepIdentity(i DeviceRTPResourceIdentity) bool {
@@ -186,10 +224,13 @@ func readRTPSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceRTPResou
 				return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 			}
 		case RTPStepMayHaveDispatched:
-			if w.RowVersion != 2 || w.DispatchStartedAt == nil || w.DispatchStartedAt.Before(w.PreparedAt) || w.DispatchStartedAt.After(row.UpdatedAt) {
+			if w.RowVersion < 2 || (w.OwnerRunID == "" && w.RowVersion != 2) || w.DispatchStartedAt == nil || w.DispatchStartedAt.Before(w.PreparedAt) || w.DispatchStartedAt.After(row.UpdatedAt) {
 				return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 			}
 		default:
+			return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
+		}
+		if !validRTPExecution(step, row.UpdatedAt) || step.RowVersion > row.RowVersion-2 {
 			return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 		}
 		ids[w.StepID], resources[w.ResourceID] = true, true
@@ -261,6 +302,10 @@ func (s *DeviceOperationIntentStore) DispatchRTPResourceStep(ctx context.Context
 }
 
 func (s *DeviceOperationIntentStore) mutateRTPStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, mutate func(*DeviceRTPResourceSteps, time.Time) (bool, error)) (DeviceRTPResourceSteps, error) {
+	return s.mutateRTPFacts(ctx, id, version, authorizeIntentDevice, mutate)
+}
+
+func (s *DeviceOperationIntentStore) mutateRTPFacts(ctx context.Context, id DeviceOperationIntentIdentity, version int64, authorize func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*DeviceRTPResourceSteps, time.Time) (bool, error)) (DeviceRTPResourceSteps, error) {
 	if !s.available(ctx) {
 		return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 	}
@@ -269,7 +314,7 @@ func (s *DeviceOperationIntentStore) mutateRTPStep(ctx context.Context, id Devic
 	}
 	var out DeviceRTPResourceSteps
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := authorizeIntentDevice(tx, ctx, id); err != nil {
+		if err := authorize(tx, ctx, id); err != nil {
 			return err
 		}
 		var err error

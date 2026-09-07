@@ -16,7 +16,7 @@ func observeStoredPlaybackBranch(ctx context.Context, store *playauth.DeviceOper
 }
 
 func observeStoredPlaybackBranchWith(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, invite playauth.DeviceSIPInviteIdentity, request *sip.Request, response *sip.Response, additional bool) (playauth.DeviceSIPInviteSteps, error) {
-	if store == nil || ctx == nil || id.Kind != "playback" || id.TargetScope != "channel" || response == nil || response.StatusCode < 200 || response.StatusCode > 299 {
+	if store == nil || ctx == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" || response == nil || response.StatusCode < 200 || response.StatusCode > 299 {
 		return playauth.DeviceSIPInviteSteps{}, errPlaybackIntentSnapshot
 	}
 	if err := ctx.Err(); err != nil {

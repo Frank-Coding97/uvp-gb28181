@@ -13,7 +13,7 @@ import (
 // device-bound owner must retain this request and obtain its one-shot CAS before
 // sending. In particular, failed or unknown persistence never returns a request.
 func (u *UAC) prepareStoredPlaybackInvite(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, in PlaybackInviteRequest) (*sip.Request, playauth.DeviceSIPInviteSteps, error) {
-	if ctx == nil || store == nil || u == nil || u.client == nil || id.Kind != "playback" || id.TargetScope != "channel" || in.DeviceID != id.DeviceCode || in.ChannelID != id.TargetCode {
+	if ctx == nil || store == nil || u == nil || u.client == nil || !playbackIntentKind(id.Kind) || id.TargetScope != "channel" || in.DeviceID != id.DeviceCode || in.ChannelID != id.TargetCode {
 		return nil, playauth.DeviceSIPInviteSteps{}, playauth.ErrDeviceIntentInvalid
 	}
 	if err := ctx.Err(); err != nil {
