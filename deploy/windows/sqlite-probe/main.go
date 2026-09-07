@@ -109,6 +109,16 @@ func runProbe() (*probeReport, error) {
 
 func runProbeAt(path string) (*probeReport, error) {
 	report := newReport(path)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return report, fmt.Errorf("probe database path already exists: %w", err)
+	}
+	if err != nil {
+		return report, fmt.Errorf("create probe database: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return report, err
+	}
 	db, err := openSQLite(path)
 	if err != nil {
 		return report, err

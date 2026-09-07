@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -52,5 +54,20 @@ func TestProbeCoversRequiredSQLiteContracts(t *testing.T) {
 	}
 	if !strings.Contains(report.DatabasePath, " ") || !strings.Contains(report.DatabasePath, "中文") {
 		t.Fatalf("database path does not exercise Chinese/space path: %q", report.DatabasePath)
+	}
+}
+
+func TestProbeRejectsExistingDatabasePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.db")
+	original := []byte("existing user data")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runProbeAt(path); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected existing-path rejection, got %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(original) {
+		t.Fatalf("existing file changed: %v", err)
 	}
 }
