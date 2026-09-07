@@ -65,15 +65,22 @@ type OverviewSampler struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
+
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	shutdownOnce    sync.Once
+	shutdownDone    chan struct{}
 }
 
 func NewOverviewSampler(source overviewSamplerSource, cache app.CacheInterf, options ...OverviewSamplerOption) *OverviewSampler {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	sampler := &OverviewSampler{
 		source: source, cache: cache, now: time.Now,
 		interval: DefaultMediaRateSampleInterval,
 		window:   DefaultMediaRateHistoryWindow,
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
+		stop:     make(chan struct{}), done: make(chan struct{}),
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
+		shutdownDone: make(chan struct{}),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -93,19 +100,31 @@ func (sampler *OverviewSampler) Start(onError func(error)) {
 	sampler.startOnce.Do(func() {
 		go func() {
 			defer close(sampler.done)
+			lifecycleCtx := sampler.lifecycleCtx
+			if lifecycleCtx == nil {
+				lifecycleCtx = context.Background()
+			}
 			recordError := func(err error) {
 				if err != nil && onError != nil {
 					onError(err)
 				}
 			}
-			recordError(sampler.SampleOnce(context.Background()))
+			if lifecycleCtx.Err() != nil {
+				return
+			}
+			recordError(sampler.SampleOnce(lifecycleCtx))
 			ticker := time.NewTicker(sampler.interval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					recordError(sampler.SampleOnce(context.Background()))
+					if lifecycleCtx.Err() != nil {
+						return
+					}
+					recordError(sampler.SampleOnce(lifecycleCtx))
 				case <-sampler.stop:
+					return
+				case <-lifecycleCtx.Done():
 					return
 				}
 			}
@@ -113,22 +132,45 @@ func (sampler *OverviewSampler) Start(onError func(error)) {
 	})
 }
 
+// Shutdown stops new background sampling, cancels the lifecycle context passed
+// to the active SampleOnce call, and waits for the sampling goroutine to exit.
+// A deadline reports that the source or cache is still running; a later call
+// can continue waiting for the same shutdown.
+func (sampler *OverviewSampler) Shutdown(ctx context.Context) error {
+	if sampler == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sampler.shutdownOnce.Do(func() {
+		// If Start has not won the startOnce yet, closing done here permanently
+		// prevents a later Start from launching a new sampler goroutine.
+		sampler.startOnce.Do(func() { close(sampler.done) })
+		sampler.stopOnce.Do(func() { close(sampler.stop) })
+		if sampler.lifecycleCancel != nil {
+			sampler.lifecycleCancel()
+		}
+		go func() {
+			<-sampler.done
+			close(sampler.shutdownDone)
+		}()
+	})
+	select {
+	case <-sampler.shutdownDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Close preserves the legacy no-return lifecycle API. New callers should use
+// Shutdown when they need a bounded wait result.
 func (sampler *OverviewSampler) Close() {
 	if sampler == nil {
 		return
 	}
-	started := false
-	sampler.startOnce.Do(func() { close(sampler.done) })
-	select {
-	case <-sampler.done:
-		return
-	default:
-		started = true
-	}
-	if started {
-		sampler.stopOnce.Do(func() { close(sampler.stop) })
-		<-sampler.done
-	}
+	_ = sampler.Shutdown(context.Background())
 }
 
 func (sampler *OverviewSampler) SampleOnce(ctx context.Context) error {
