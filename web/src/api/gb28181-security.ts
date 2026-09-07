@@ -4,10 +4,12 @@ import type { BaseResult } from "./types";
 
 export type SecurityMode = "observe" | "protect" | "strict";
 export type SecurityRiskScope = "source" | "device";
+export type SecurityAgentCapability = "supported" | "unsupported" | "unknown";
+export type FirewallAgentState = "applied" | "failed" | "unsupported" | "unknown";
 export interface SecurityEventAggregate { bucketAt: string; sourceIp: string; deviceId?: string; riskScope?: SecurityRiskScope; transport: string; method: string; userAgent?: string; reason: string; action: string; count: number; scoreDelta: number; firstSeenAt: string; lastSeenAt: string }
-export interface FirewallBan { decision: { decisionId: string; sourceIp: string; deviceId?: string; riskScope?: SecurityRiskScope; reason: string; score: number; ttl: number; permanent?: boolean; createdAt: string; triggerMethod?: string; triggerCount?: number; triggerThreshold?: number; windowSeconds?: number; policyMode?: SecurityMode }; status: string; ruleId: string; origin: string; agentState: string; firewallAppliedAt?: string; blockedCountAfterBan?: number; lastBlockedAt?: string; unbannedAt?: string; unbannedBy?: string; lastError?: string }
+export interface FirewallBan { decision: { decisionId: string; sourceIp: string; deviceId?: string; riskScope?: SecurityRiskScope; reason: string; score: number; ttl: number; permanent?: boolean; createdAt: string; triggerMethod?: string; triggerCount?: number; triggerThreshold?: number; windowSeconds?: number; policyMode?: SecurityMode }; status: string; ruleId: string; origin: string; agentState: FirewallAgentState; firewallAppliedAt?: string; blockedCountAfterBan?: number; lastBlockedAt?: string; unbannedAt?: string; unbannedBy?: string; lastError?: string }
 export interface SecurityPolicy { mode: SecurityMode; window: number; banScore: number; maxPacketBytes: number; maxUdpPerWindow: number; maxTcpConnections: number; samplePerSource: number; nonceTtl: number; permanentAutoBan?: boolean; banTTLs: { score: number; ttl: number }[]; allowlist: string[] }
-export interface AgentStatus { connected: boolean; appliedRules: number; lastError?: string; checkedAt?: string }
+export interface AgentStatus { connected: boolean; capability?: SecurityAgentCapability; appliedRules: number; lastError?: string; checkedAt?: string }
 export interface SecuritySnapshot { mode: SecurityMode; dropped: number; sampled: number; events: SecurityEventAggregate[]; bans: FirewallBan[]; agent: AgentStatus; asOf: string }
 export type AccessListType = "blacklist" | "allowlist";
 export type AccessMatchType = "ip" | "cidr" | "user_agent";

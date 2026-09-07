@@ -88,7 +88,7 @@ interface AutoBanRecord {
   reason: string;
   evidence: string;
   mode: "保护" | "严格";
-  firewallState: "已生效" | "待同步" | "同步失败";
+  firewallState: "已生效" | "待同步" | "同步失败" | "不支持";
   createdAt: string;
   expires: string;
   blocked: number;
@@ -246,7 +246,10 @@ const blockedCount = computed(() => securityEvents.value.reduce((total, item) =>
 const overviewEvents = computed(() => (securitySnapshot.value?.events || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)).map((item, index) => mapEvent(item, index)));
 const overviewBans = computed(() => (securitySnapshot.value?.bans || []).filter(item => item.status === "active" || item.status === "agent_failed").map((item, index) => mapBan(item, index)));
 const attentionCount = computed(() => banTotal.value + (allowRuleTotal.value > 0 ? 1 : 0));
-const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ? 1 : 0));
+const agentFirewallActive = computed(() => securityAgent.value.connected && securityAgent.value.capability !== "unsupported");
+const enabledDefenseLayers = computed(() => 1 + (agentFirewallActive.value ? 1 : 0));
+const agentConnectionState = computed(() => securityAgent.value.capability === "unsupported" ? "不支持" : securityAgent.value.connected ? "在线" : "降级");
+const agentRuleSummary = computed(() => securityAgent.value.capability === "unsupported" ? "系统防火墙不支持，应用层继续拦截" : `${securityAgent.value.appliedRules} 条动态规则`);
 const policyWindowLabel = computed(() => securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中");
 const shortWindowInviteRuleLabel = computed(() => formatShortWindowInviteRule(securityPolicy.value?.window, securityPolicy.value?.banScore));
 const lowFrequencyInviteRuleLabel = "10 分钟累计 10 次未授权 INVITE";
@@ -255,9 +258,18 @@ const automaticBanTTLLabel = computed(() => formatAutomaticBanTTL(securityPolicy
 const liveStatus = computed(() => {
   if (dataUnavailable.value) return { label: "数据不可用", color: "red" as const };
   if (selectedMode.value === "observe") return { label: "观察（不自动封 IP）", color: "orange" as const };
+  if (securityAgent.value.capability === "unsupported") return { label: "应用层防护运行中（系统防火墙不支持）", color: "orange" as const };
   return { label: securityAgent.value.connected ? "防护运行中" : "应用层防护运行中", color: securityAgent.value.connected ? "green" as const : "orange" as const };
 });
 const agentStatus = computed(() => {
+  if (securityAgent.value.capability === "unsupported") {
+    return {
+      title: "主机防火墙不支持",
+      detail: "当前平台不支持系统防火墙联动 · 应用层拦截仍生效",
+      label: "不支持",
+      color: "orange"
+    };
+  }
   if (securityAgent.value.connected) {
     return {
       title: "主机防火墙联动正常",
@@ -359,7 +371,19 @@ function mapBan(ban: FirewallBan, index: number, offset = 0): AutoBanRecord {
   const decision = ban.decision;
   const applied = ban.agentState === "applied";
   const location = decision.riskScope === "device" ? `设备 ${decision.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location, method: decision.triggerMethod || "未知", reason: formatSecurityReason(decision.reason), evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: formatRemaining(decision.createdAt, decision.ttl, Date.now(), decision.permanent === true), blocked: ban.blockedCountAfterBan || 0 };
+  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location, method: decision.triggerMethod || "未知", reason: formatSecurityReason(decision.reason), evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "unsupported" ? "不支持" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: formatRemaining(decision.createdAt, decision.ttl, Date.now(), decision.permanent === true), blocked: ban.blockedCountAfterBan || 0 };
+}
+
+function firewallStateLabel(state: AutoBanRecord["firewallState"]) {
+  if (state === "已生效") return "系统防火墙已生效";
+  if (state === "不支持") return "系统防火墙不支持";
+  if (state === "同步失败") return "系统防火墙同步失败";
+  return "系统防火墙待同步";
+}
+
+function firewallStateColor(state: AutoBanRecord["firewallState"]) {
+  if (state === "已生效") return "green";
+  return state === "同步失败" ? "red" : "orange";
 }
 
 async function refreshPreview(showMessage = false, forceLists = false) {
@@ -387,13 +411,14 @@ async function refreshPreview(showMessage = false, forceLists = false) {
       securityEvents.value = snapshot.data.events || [];
       securityAgent.value = {
         connected: !!snapshot.data.agent?.connected,
+        capability: snapshot.data.agent?.capability,
         appliedRules: snapshot.data.agent?.appliedRules ?? 0,
         lastError: snapshot.data.agent?.lastError || "",
         checkedAt: snapshot.data.agent?.checkedAt
       };
     }
     if (agentHealth.code === 0 && agentHealth.data) {
-      securityAgent.value = agentHealth.data;
+      securityAgent.value = { ...agentHealth.data, capability: agentHealth.data.capability ?? securityAgent.value.capability };
     }
     if (eventResult?.code === 0) {
       const items = (eventResult.data?.items || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt));
@@ -586,8 +611,8 @@ onBeforeUnmount(() => {
         <section class="metric-grid" aria-label="安全指标">
           <article><span>已识别安全事件</span><strong>{{ recognizedCount }}</strong><small class="warning"><Activity :size="13" />来自安全事件接口聚合</small></article>
           <article><span>应用层已拦截</span><strong>{{ blockedCount }}</strong><small class="success"><ShieldCheck :size="13" />拒绝与封禁动作累计</small></article>
-          <article><span>生效中自动封禁</span><strong>{{ banTotal }}</strong><small><Ban :size="13" />主机防火墙已生效 {{ overviewBans.filter(item => item.firewallState === '已生效').length }}</small></article>
-            <article><span>主机防火墙</span><strong class="status-value">{{ securityAgent.connected ? '在线' : '降级' }}</strong><small :class="securityAgent.connected ? 'success' : 'warning'"><BrickWall :size="13" />{{ securityAgent.appliedRules }} 条动态规则</small></article>
+          <article><span>生效中自动封禁</span><strong>{{ banTotal }}</strong><small><Ban :size="13" />系统防火墙已生效 {{ overviewBans.filter(item => item.firewallState === '已生效').length }}</small></article>
+          <article><span>主机防火墙</span><strong class="status-value">{{ agentConnectionState }}</strong><small :class="agentFirewallActive ? 'success' : 'warning'"><BrickWall :size="13" />{{ agentRuleSummary }}</small></article>
         </section>
 
         <section class="overview-grid">
@@ -608,7 +633,7 @@ onBeforeUnmount(() => {
             <div class="defense-chain">
               <div class="defense-item pending"><span><CloudCog :size="19" /></span><div><strong>云边界防护</strong><small>待接入云厂商 API</small></div><a-tag color="orange">规划中</a-tag></div>
               <i class="chain-line" />
-              <div class="defense-item" :class="{ active: securityAgent.connected }"><span><BrickWall :size="19" /></span><div><strong>主机防火墙</strong><small>uvp-firewall-agent · nftables</small></div><a-tag :color="securityAgent.connected ? 'green' : 'orange'"><Check :size="12" />{{ securityAgent.connected ? '在线' : '降级' }}</a-tag></div>
+              <div class="defense-item" :class="{ active: agentFirewallActive }"><span><BrickWall :size="19" /></span><div><strong>主机防火墙</strong><small>uvp-firewall-agent · nftables</small></div><a-tag :color="agentStatus.color"><Check v-if="agentFirewallActive" :size="12" /><TriangleAlert v-else :size="12" />{{ agentConnectionState }}</a-tag></div>
               <i class="chain-line active" />
               <div class="defense-item active"><span><Fingerprint :size="19" /></span><div><strong>应用协议防护</strong><small>限速 · 鉴权 · 风险评分</small></div><a-tag color="green"><Check :size="12" />保护</a-tag></div>
             </div>
@@ -664,7 +689,7 @@ onBeforeUnmount(() => {
         <s-layout-search class="security-list-search ban-search-panel">
           <template #fields>
             <div class="security-list-filter security-list-filter--keyword"><a-input v-model="banSearch" allow-clear placeholder="筛选本页来源、原因或策略" aria-label="筛选本页自动封禁"><template #prefix><Search :size="15" /></template></a-input></div>
-            <div class="security-list-filter security-list-filter--status"><a-select v-model="banFirewallState" aria-label="主机防火墙状态"><a-option>全部状态</a-option><a-option>已生效</a-option><a-option>待同步</a-option><a-option>同步失败</a-option></a-select></div>
+            <div class="security-list-filter security-list-filter--status"><a-select v-model="banFirewallState" aria-label="主机防火墙状态"><a-option>全部状态</a-option><a-option>已生效</a-option><a-option>待同步</a-option><a-option>同步失败</a-option><a-option>不支持</a-option></a-select></div>
           </template>
           <template #actions><a-button @click="resetBanSearch">重置</a-button></template>
         </s-layout-search>
@@ -673,7 +698,7 @@ onBeforeUnmount(() => {
             <a-table-column title="来源" :width="160"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
             <a-table-column title="进入原因" :width="280"><template #cell="{ record }"><strong class="ban-reason">{{ record.reason }}</strong><small class="cell-subline">{{ record.evidence }}</small></template></a-table-column>
             <a-table-column title="触发策略" :width="110"><template #cell="{ record }"><a-tag :color="record.mode === '严格' ? 'red' : 'blue'">{{ record.mode }}模式</a-tag><small class="cell-subline">{{ record.method }}</small></template></a-table-column>
-            <a-table-column title="防护位置" :width="170"><template #cell="{ record }"><span class="enforcement-tags"><a-tag color="green">应用层已拦截</a-tag><a-tag :color="record.firewallState === '已生效' ? 'green' : record.firewallState === '待同步' ? 'orange' : 'red'">主机防火墙{{ record.firewallState }}</a-tag></span></template></a-table-column>
+            <a-table-column title="防护位置" :width="190"><template #cell="{ record }"><span class="enforcement-tags"><a-tag color="green">应用层已拦截</a-tag><a-tag :color="firewallStateColor(record.firewallState)">{{ firewallStateLabel(record.firewallState) }}</a-tag></span></template></a-table-column>
             <a-table-column title="封禁时间" :width="110"><template #cell="{ record }"><span>{{ record.createdAt }}</span><small class="cell-subline">{{ record.expires }}</small></template></a-table-column>
             <a-table-column title="封禁后拦截" :width="100"><template #cell="{ record }"><strong>{{ record.blocked }} 次</strong></template></a-table-column>
             <a-table-column title="操作" :width="130"><template #cell="{ record }"><span class="ban-actions"><a-tooltip content="查看关联风险事件"><a-button size="small" aria-label="查看关联风险事件" @click="showBanEvents(record)"><template #icon><Search :size="14" /></template></a-button></a-tooltip><a-tooltip content="转为手动黑名单"><a-button size="small" aria-label="转为手动黑名单" @click="promoteToBlacklist(record)"><template #icon><Ban :size="14" /></template></a-button></a-tooltip><a-tooltip content="解除自动封禁"><a-button size="small" status="danger" aria-label="解除自动封禁" @click="unbanPreview(record)"><template #icon><ShieldOff :size="14" /></template></a-button></a-tooltip></span></template></a-table-column>
@@ -734,8 +759,8 @@ onBeforeUnmount(() => {
           </div>
           <div class="policy-section">
             <div class="policy-title"><span><BrickWall :size="18" /></span><div><h3>主机防火墙</h3><p>阻止已确认的攻击流量继续进入服务进程。</p></div></div>
-            <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，只有来源通过验证门禁且不是成功认证共享出口，才在操作系统网络入口永久封禁来源 IP</small></span><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{ securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
-            <div class="agent-status"><span :class="['agent-icon', { warning: !securityAgent.connected }]" ><CheckCircle2 v-if="securityAgent.connected" :size="22" /><TriangleAlert v-else :size="22" /></span><span><strong>{{ agentStatus.title }}</strong><small>{{ agentStatus.detail }}</small></span><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag></div>
+            <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，只有来源通过验证门禁且不是成功认证共享出口，才在操作系统网络入口永久封禁来源 IP</small></span><a-tag :color="agentStatus.color">{{ securityAgent.capability === 'unsupported' ? 'Agent 不支持' : securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
+            <div class="agent-status"><span :class="['agent-icon', { warning: !agentFirewallActive }]" ><CheckCircle2 v-if="agentFirewallActive" :size="22" /><TriangleAlert v-else :size="22" /></span><span><strong>{{ agentStatus.title }}</strong><small>{{ agentStatus.detail }}</small></span><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag></div>
             <div class="ttl-row"><span><strong>自动封禁有效期</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。</small></span><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag></div>
             <div class="cloud-roadmap"><CloudCog :size="18" /><span><strong>云厂商防火墙联动</strong><small>当前系统未接入云厂商 API，暂不宣称已生效。</small></span><a-tag color="orange">未接入</a-tag></div>
           </div>
