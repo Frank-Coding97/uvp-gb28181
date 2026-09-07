@@ -18,6 +18,8 @@ func TestPowerShellFirewallScriptUsesBoundedUTF8AndInterfaceFilter(t *testing.T)
 		"Get-NetFirewallInterfaceFilter -AssociatedNetFirewallRule",
 		"LocalPort = @([string]$item.local_port -split ',')",
 		"Group = [string]$item.group",
+		"Get-NetFirewallRule -Name $name -ErrorAction Stop",
+		"CmdletizationQuery_NotFound_*,Get-NetFirewallRule",
 	} {
 		if !strings.Contains(powerShellFirewallScript, fragment) {
 			t.Fatalf("PowerShell script missing required fragment")

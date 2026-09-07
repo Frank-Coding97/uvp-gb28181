@@ -64,8 +64,20 @@ function SameValue($actual, $expected, [bool]$ports) {
     return (StringValue $actual) -ieq (StringValue $expected)
 }
 
+function FindRule([string]$name) {
+    try {
+        Get-NetFirewallRule -Name $name -ErrorAction Stop
+    } catch {
+        if ($_.CategoryInfo.Category -eq 'ObjectNotFound' -and
+            [string]$_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound_*,Get-NetFirewallRule') {
+            return
+        }
+        throw
+    }
+}
+
 function RuleState($expected) {
-    $rule = Get-NetFirewallRule -Name ([string]$expected.name) -ErrorAction SilentlyContinue
+    $rule = FindRule ([string]$expected.name)
     if ($null -eq $rule) {
         return [pscustomobject]@{ name = [string]$expected.name; group = ''; present = $false; matches = $false; conflict = $false }
     }
@@ -131,7 +143,7 @@ try {
                     Emit ([pscustomobject]@{ ok = $false; reason = 'invalid_input' })
                     exit 2
                 }
-                $existing = @(Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)
+                $existing = @(FindRule $name)
                 foreach ($rule in $existing) {
                     if ([string]$rule.Group -ine $group) {
                         Emit ([pscustomobject]@{ ok = $false; reason = 'rule_conflict' })
@@ -156,7 +168,7 @@ try {
                     Enabled = ([bool]$item.enabled)
                     ErrorAction = 'Stop'
                 }
-                $existing = @(Get-NetFirewallRule -Name $params.Name -ErrorAction SilentlyContinue)
+                $existing = @(FindRule $params.Name)
                 if ($existing.Count -gt 0) {
                     Remove-NetFirewallRule -Name $params.Name -ErrorAction Stop
                 }
@@ -173,7 +185,7 @@ try {
                     Emit ([pscustomobject]@{ ok = $false; reason = 'invalid_input' })
                     exit 2
                 }
-                $existing = @(Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue)
+                $existing = @(FindRule $name)
                 foreach ($rule in $existing) {
                     if ([string]$rule.Group -ine $group) {
                         Emit ([pscustomobject]@{ ok = $false; reason = 'rule_conflict' })
@@ -182,7 +194,7 @@ try {
                 }
             }
             foreach ($item in $items) {
-                $existing = @(Get-NetFirewallRule -Name ([string]$item.name) -ErrorAction SilentlyContinue)
+                $existing = @(FindRule ([string]$item.name))
                 if ($existing.Count -gt 0) {
                     Remove-NetFirewallRule -Name ([string]$item.name) -ErrorAction Stop
                 }

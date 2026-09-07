@@ -158,3 +158,41 @@ Use a different fresh fixture for `UVP_T18_BROWSER_INSTALL_DIR` and
 Edge and uses a separate owned headless browser/profile. Credentials remain in
 memory and CDP navigation; they are never test arguments or output. This does
 not replace Explorer double-click or clean Windows Sandbox acceptance.
+
+## Instance firewall commands (T20 candidate)
+
+The Windows launcher has explicit firewall commands. Normal startup and stop do
+not request elevation or change firewall rules. From the package directory:
+
+```powershell
+.\UVP.exe firewall status
+Get-NetAdapter | Select-Object Name, InterfaceGuid
+.\UVP.exe firewall apply --interface-id <InterfaceGuid>
+.\UVP.exe firewall remove
+```
+
+`apply` prints the exact plan and asks for `yes` before Windows UAC. `remove`
+asks for confirmation and addresses only this installation's four rule names;
+it does not require the previous network adapter or SIP configuration to remain
+available. `--yes` explicitly accepts the printed plan, but does not bypass UAC.
+
+Rules permit only the configured SIP and media ports for the verified program
+paths, inbound on the selected Private interface from `LocalSubnet`. They do not
+expose the management backend or Redis. A Public interface is rejected; the
+command does not change network profiles. System-level automatic IP banning
+remains unsupported on Windows; application SIP protection remains active.
+
+The elevated child reloads the package and read-only SQLite configuration and
+compares a digest of the confirmed plan. Changes to the release, ports or
+interface cause failure. Existing rules with the same names but a different
+ownership group are preserved. A failed or partial operation is never reported
+as successful; inspect `status` before retrying. The JSON `success` field for
+`status` means the query succeeded; `converged` indicates whether the expected
+rules actually match.
+
+Use the package's trusted launcher for UAC. Manifest hashes check package
+consistency, not publisher identity. If the elevated account cannot read the
+installation, the command fails without widening its file permissions.
+
+Native rule application/removal, UAC cancellation and LAN traffic acceptance
+remain separate T20/T30 checks; passing unit tests or `status` is insufficient.

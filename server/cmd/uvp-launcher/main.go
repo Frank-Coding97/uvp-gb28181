@@ -14,6 +14,9 @@ import (
 )
 
 func main() {
+	if code, handled := runFirewallCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if runtime.GOOS != "windows" {
 		fmt.Fprintln(os.Stderr, "UVP 单机启动器仅支持 Windows 10 x64 及以上兼容系统")
 		os.Exit(1)
@@ -28,6 +31,10 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "仅启动组件，不打开浏览器（用于自动测试）")
 	stop := flag.Bool("stop", false, "停止当前安装目录的实例并等待完成")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "不支持的启动参数")
+		os.Exit(1)
+	}
 	if *stop {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
