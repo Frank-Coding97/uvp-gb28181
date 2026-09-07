@@ -1,7 +1,7 @@
 <template>
   <div class="snow-page plugins-page">
     <div class="snow-inner uvp-page-shell-flat">
-      <s-layout-search>
+      <s-layout-search v-if="developerCapabilityState === 'supported'">
         <template #fields>
           <a-input
             v-model="form.keyword"
@@ -29,7 +29,7 @@
         </template>
       </s-layout-search>
 
-      <a-row class="uvp-system-card-grid plugin-grid" :gutter="[16, 16]">
+      <a-row v-if="developerCapabilityState === 'supported'" class="uvp-system-card-grid plugin-grid" :gutter="[16, 16]">
         <a-col :xs="24" :sm="12" :md="8" :lg="6" v-for="plugin in filteredPlugins" :key="plugin.folderName">
           <a-card class="uvp-system-panel uvp-system-panel--dense plugin-card" hoverable @click="viewDetail(plugin)">
             <template #cover>
@@ -59,11 +59,26 @@
         </a-col>
       </a-row>
 
-      <a-empty v-if="filteredPlugins.length === 0 && !loading" :description="emptyDescription" />
+      <a-empty
+        v-if="developerCapabilityState === 'supported' && filteredPlugins.length === 0 && !loading"
+        :description="emptyDescription"
+      />
+
+      <div v-if="developerCapabilityState === 'unsupported'" class="developer-capability-state" role="status">
+        <a-alert type="warning">Windows 单机版不支持插件结构管理。</a-alert>
+      </div>
+      <div v-else-if="developerCapabilityState === 'unavailable'" class="developer-capability-state" role="alert">
+        <a-alert type="warning">暂时无法确认当前运行模式，请重试。</a-alert>
+        <a-button data-testid="developer-capability-retry" @click="retryDeveloperCapabilityAndReload">重试</a-button>
+      </div>
+      <div v-else-if="developerCapabilityState === 'checking'" class="developer-capability-state" role="status">
+        正在确认当前运行模式…
+      </div>
     </div>
 
     <!-- 详情弹窗 -->
     <a-modal
+      v-if="developerCapabilityState === 'supported'"
       modal-class="uvp-system-dialog"
       v-model:visible="detailVisible"
       :width="layoutMode.width"
@@ -155,7 +170,11 @@
     </a-modal>
 
     <!-- 导入插件弹窗组件 -->
-    <PluginImportModal v-model="importModalVisible" @success="handleImportSuccess" />
+    <PluginImportModal
+      v-if="developerCapabilityState === 'supported'"
+      v-model="importModalVisible"
+      @success="handleImportSuccess"
+    />
   </div>
 </template>
 
@@ -164,11 +183,18 @@ import { ref, onMounted, computed } from "vue";
 import { getPluginsExportAPI, exportPluginAPI, deletePluginAPI, type PluginExport } from "@/api/pluginsmanager";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStandaloneDeveloperCapability } from "@/hooks/useStandaloneDeveloperCapability";
 import { truncateString } from "@/utils/common-tools";
 import PluginImportModal from "./components/PluginImportModal.vue";
 import { IconApps, IconClose, IconDelete, IconDownload, IconRefresh, IconSearch, IconUpload } from "@arco-design/web-vue/es/icon";
 
 const { isMobile } = useDevicesSize();
+const {
+  state: developerCapabilityState,
+  canUse: developerToolsAvailable,
+  load: loadDeveloperCapability,
+  retry: retryDeveloperCapability
+} = useStandaloneDeveloperCapability();
 const layoutMode = computed(() => {
   let info = {
     mobile: {
@@ -218,6 +244,7 @@ const emptyDescription = computed(() => (form.value.keyword ? "暂无匹配插�
 
 // 获取插件列表
 const getPluginsList = async () => {
+  if (!developerToolsAvailable.value) return;
   try {
     loading.value = true;
     const res = await getPluginsExportAPI();
@@ -232,6 +259,7 @@ const getPluginsList = async () => {
 
 // 导出插件
 const exportPlugin = async (plugin: PluginExport) => {
+  if (!developerToolsAvailable.value) return;
   try {
     proxy.$message.loading("插件导出中...");
     const response = await exportPluginAPI(plugin.folderName, exportIncludeData.value);
@@ -273,17 +301,20 @@ const viewDetail = (plugin: PluginExport) => {
 
 // 显示导入弹窗
 const showImportModal = () => {
+  if (!developerToolsAvailable.value) return;
   importModalVisible.value = true;
 };
 
 // 导入成功回调
 const handleImportSuccess = async () => {
+  if (!developerToolsAvailable.value) return;
   // 刷新插件列表
   await getPluginsList();
 };
 
 // 删除插件
 const handleDeletePlugin = async () => {
+  if (!developerToolsAvailable.value) return;
   try {
     proxy.$message.loading("插件卸载中...");
     await deletePluginAPI(currentPlugin.value.folderName);
@@ -297,9 +328,19 @@ const handleDeletePlugin = async () => {
   }
 };
 
+const initializePage = async () => {
+  await loadDeveloperCapability();
+  if (developerToolsAvailable.value) await getPluginsList();
+};
+
+const retryDeveloperCapabilityAndReload = async () => {
+  await retryDeveloperCapability();
+  if (developerToolsAvailable.value) await getPluginsList();
+};
+
 // 初始化
 onMounted(() => {
-  getPluginsList();
+  void initializePage();
 });
 </script>
 

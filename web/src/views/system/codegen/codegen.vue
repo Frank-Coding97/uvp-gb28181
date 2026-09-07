@@ -1,7 +1,7 @@
 <template>
   <div class="snow-page codegen-page">
     <div class="snow-inner uvp-page-shell-flat">
-      <s-layout-search>
+      <s-layout-search v-if="developerCapabilityState === 'supported'">
         <template #fields>
           <a-input v-model="form.name" placeholder="请输入表名" style="width: 176px" allow-clear @press-enter="search" />
           <a-input
@@ -31,6 +31,7 @@
       </s-layout-search>
 
       <a-table
+        v-if="developerCapabilityState === 'supported'"
         class="uvp-data-table"
         row-key="id"
         :data="sysGenList"
@@ -90,10 +91,22 @@
           </a-table-column>
         </template>
       </a-table>
+
+      <div v-if="developerCapabilityState === 'unsupported'" class="developer-capability-state" role="status">
+        <a-alert type="warning">Windows 单机版不支持开发代码生成。</a-alert>
+      </div>
+      <div v-else-if="developerCapabilityState === 'unavailable'" class="developer-capability-state" role="alert">
+        <a-alert type="warning">暂时无法确认当前运行模式，请重试。</a-alert>
+        <a-button data-testid="developer-capability-retry" @click="retryDeveloperCapabilityAndReload">重试</a-button>
+      </div>
+      <div v-else-if="developerCapabilityState === 'checking'" class="developer-capability-state" role="status">
+        正在确认当前运行模式…
+      </div>
     </div>
 
     <!-- 导入表对话框 -->
     <a-modal
+      v-if="developerCapabilityState === 'supported'"
       modal-class="uvp-system-dialog"
       v-model:visible="importVisible"
       @ok="handleImport"
@@ -130,10 +143,16 @@
     </a-modal>
 
     <!-- 修改配置抽屉 -->
-    <CodegenConfigDrawer v-model:visible="editVisible" :record-id="currentEditId" @success="handleEditSuccess" />
+    <CodegenConfigDrawer
+      v-if="developerCapabilityState === 'supported'"
+      v-model:visible="editVisible"
+      :record-id="currentEditId"
+      @success="handleEditSuccess"
+    />
 
     <!-- 代码预览模态框 -->
     <CodegenPreviewModal
+      v-if="developerCapabilityState === 'supported'"
       v-model:visible="previewVisible"
       :record-id="currentPreviewId"
       :record="currentPreviewRecord"
@@ -143,6 +162,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
 import {
   getSysGenListAPI,
   batchInsertSysGenAPI,
@@ -153,12 +173,19 @@ import {
 } from "@/api/sysgen";
 
 import { generateCode, getTables, type TableInfo } from "@/api/syscodegen";
-import { formatTime } from "@/globals";
+import { arcoMessage, formatTime } from "@/globals";
 import CodegenConfigDrawer from "./components/codegen-config-drawer.vue";
 import CodegenPreviewModal from "./components/codegen-preview-modal.vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStandaloneDeveloperCapability } from "@/hooks/useStandaloneDeveloperCapability";
 import { IconDelete, IconEdit, IconEye, IconImport, IconPlayArrow, IconRefresh, IconSearch } from "@arco-design/web-vue/es/icon";
 const { isMobile } = useDevicesSize();
+const {
+  state: developerCapabilityState,
+  canUse: developerToolsAvailable,
+  load: loadDeveloperCapability,
+  retry: retryDeveloperCapability
+} = useStandaloneDeveloperCapability();
 const layoutMode = computed(() => {
   let info = {
     mobile: {
@@ -211,6 +238,7 @@ const tableScroll = computed(() => ({
 
 // 获取代码生成配置列表
 const getSysGenList = async () => {
+  if (!developerToolsAvailable.value) return;
   loading.value = true;
   try {
     const params: SysGenListParams = {
@@ -260,6 +288,7 @@ const importTableScroll = computed(() => ({
 
 // 获取表列表
 const getTableList = async () => {
+  if (!developerToolsAvailable.value) return;
   tableLoading.value = true;
   try {
     const res = await getTables("");
@@ -276,6 +305,7 @@ const getTableList = async () => {
 
 // 打开导入对话框
 const onImport = () => {
+  if (!developerToolsAvailable.value) return;
   importVisible.value = true;
   selectedTables.value = [];
   getTableList();
@@ -283,6 +313,7 @@ const onImport = () => {
 
 // 执行导入
 const handleImport = async () => {
+  if (!developerToolsAvailable.value) return false;
   if (selectedTables.value.length === 0) {
     arcoMessage("warning", "请选择要导入的表");
     return false;
@@ -324,6 +355,7 @@ const afterImportClose = () => {
 
 // 删除配置
 const onDelete = async (record: SysGenItem) => {
+  if (!developerToolsAvailable.value) return;
   try {
     // 调用删除API
     await deleteSysGenAPI(record.id);
@@ -340,6 +372,7 @@ const currentEditId = ref(0);
 
 // 打开修改对话框
 const onEdit = (record: SysGenItem) => {
+  if (!developerToolsAvailable.value) return;
   currentEditId.value = record.id;
   editVisible.value = true;
 };
@@ -351,6 +384,7 @@ const handleEditSuccess = () => {
 
 // 生成代码
 const onGenCode = async (record: SysGenItem) => {
+  if (!developerToolsAvailable.value) return;
   try {
     await generateCode(record.id);
     arcoMessage("success", "代码生成成功");
@@ -361,6 +395,7 @@ const onGenCode = async (record: SysGenItem) => {
 
 // 同步字段
 const onRefreshFields = async (record: SysGenItem) => {
+  if (!developerToolsAvailable.value) return;
   try {
     await refreshFields(record.id);
     arcoMessage("success", "字段同步成功");
@@ -378,6 +413,7 @@ const currentPreviewRecord = ref<SysGenItem | null>(null);
 
 // 打开预览模态框
 const onPreview = (record: SysGenItem) => {
+  if (!developerToolsAvailable.value) return;
   currentPreviewId.value = record.id;
   currentPreviewRecord.value = record;
   previewVisible.value = true;
@@ -388,9 +424,18 @@ const handlePreviewSuccess = () => {
   getSysGenList(); // 刷新列表
 };
 
+const initializePage = async () => {
+  await loadDeveloperCapability();
+  if (developerToolsAvailable.value) await getSysGenList();
+};
+
+const retryDeveloperCapabilityAndReload = async () => {
+  await retryDeveloperCapability();
+  if (developerToolsAvailable.value) await getSysGenList();
+};
+
 onMounted(() => {
-  // 初始化数据
-  getSysGenList();
+  void initializePage();
 });
 </script>
 
