@@ -35,6 +35,9 @@ func inspectDiskFullTarget(path string) (diskVolumeInfo, error) {
 	if volumeName == "" {
 		return diskVolumeInfo{}, fmt.Errorf("disk-full target %q has no Windows volume name", path)
 	}
+	if len(volumeName) != 2 || volumeName[1] != ':' {
+		return diskVolumeInfo{}, fmt.Errorf("disk-full target must be a local drive root, got %q", volumeName)
+	}
 	root := volumeName + `\`
 	if !strings.EqualFold(cleanPath, filepath.Clean(root)) {
 		return diskVolumeInfo{}, fmt.Errorf("disk-full target must be a volume root such as %s", root)

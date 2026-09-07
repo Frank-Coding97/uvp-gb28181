@@ -112,7 +112,12 @@ func runProbe(opts options) (result report) {
 		)
 		return result
 	}
-	defer instance.stop(true)
+	defer func() {
+		if stopErr := instance.stop(true); stopErr != nil {
+			result.Errors = append(result.Errors, "stop primary Redis instance: "+stopErr.Error())
+			result.Checks = append(result.Checks, failedCheck("cleanup", stopErr.Error()))
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	client, err := instance.start(ctx)
@@ -719,7 +724,15 @@ func checkRedisPersistence(instance *redisInstance, opts options, workspace stri
 
 	oom, oomResult, oomErr := runOOMCheck(opts.redisServer, workspace)
 	if oom != nil {
-		_ = oom.stop(true)
+		if stopErr := oom.stop(true); stopErr != nil {
+			oomResult["stop_error"] = stopErr.Error()
+			oomResult["status"] = "failed"
+			if oomErr == nil {
+				oomErr = fmt.Errorf("stop noeviction OOM Redis instance: %w", stopErr)
+			} else {
+				oomErr = fmt.Errorf("%v; stop noeviction OOM Redis instance: %w", oomErr, stopErr)
+			}
+		}
 	}
 	details["noeviction_oom"] = oomResult
 	if oomErr != nil {
