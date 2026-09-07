@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -169,6 +170,14 @@ func foreignKeysValue(t *testing.T, db *gorm.DB) int {
 	return value
 }
 
+func parentRebuildMigrationSpec() migrationSpec {
+	script := `CREATE TABLE parent_new(id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+INSERT INTO parent_new SELECT id, value FROM parent;
+DROP TABLE parent;
+ALTER TABLE parent_new RENAME TO parent;`
+	return testMigrationSpec("2026-09-07-parent-rebuild-kill", script)
+}
+
 func TestMigrateRebuildsParentWithForeignKeysOffAndRestoresEnforcement(t *testing.T) {
 	db := createParentChildFixture(t)
 	script := `CREATE TABLE parent_new(id INTEGER PRIMARY KEY, value TEXT NOT NULL);
@@ -251,7 +260,6 @@ func TestMigrateCommitsEarlierIncrementAndCanContinueAfterLaterFailure(t *testin
 	db := testDB(t)
 	markMatchingBaseline(t, db)
 	first := testMigrationSpec("2026-09-07-first", "CREATE TABLE first_increment(id INTEGER PRIMARY KEY);")
-	require.NoError(t, migrateWithSpecs(context.Background(), db, []migrationSpec{first}))
 	badSecond := testMigrationSpec("2026-09-07-second", "ALTER TABLE missing_table ADD COLUMN value TEXT;")
 	require.Error(t, migrateWithSpecs(context.Background(), db, []migrationSpec{first, badSecond}))
 	require.True(t, db.Migrator().HasTable("first_increment"))
@@ -262,9 +270,12 @@ func TestMigrateCommitsEarlierIncrementAndCanContinueAfterLaterFailure(t *testin
 }
 
 const (
-	childMigrationPathEnv   = "SQLITE_BOOTSTRAP_CHILD_PATH"
-	childMigrationSignalEnv = "SQLITE_BOOTSTRAP_CHILD_SIGNAL"
-	childMigrationHoldEnv   = "SQLITE_BOOTSTRAP_CHILD_HOLD_MS"
+	childMigrationPathEnv        = "SQLITE_BOOTSTRAP_CHILD_PATH"
+	childMigrationSignalEnv      = "SQLITE_BOOTSTRAP_CHILD_SIGNAL"
+	childMigrationHoldEnv        = "SQLITE_BOOTSTRAP_CHILD_HOLD_MS"
+	childMigrationModeEnv        = "SQLITE_BOOTSTRAP_CHILD_MODE"
+	childMigrationModeConcurrent = "concurrent"
+	childMigrationModeRebuild    = "rebuild"
 )
 
 func TestSQLiteMigrationSubprocess(t *testing.T) {
@@ -277,11 +288,29 @@ func TestSQLiteMigrationSubprocess(t *testing.T) {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	defer raw.Close()
-	script := "CREATE TABLE concurrent_once(id INTEGER PRIMARY KEY); INSERT INTO concurrent_once VALUES(1);"
-	spec := testMigrationSpec("2026-09-07-concurrent", script)
+	mode := os.Getenv(childMigrationModeEnv)
+	var spec migrationSpec
+	switch mode {
+	case childMigrationModeConcurrent:
+		script := "CREATE TABLE concurrent_once(id INTEGER PRIMARY KEY); INSERT INTO concurrent_once VALUES(1);"
+		spec = testMigrationSpec("2026-09-07-concurrent", script)
+	case childMigrationModeRebuild:
+		spec = parentRebuildMigrationSpec()
+	default:
+		t.Fatalf("unknown child migration mode %q", mode)
+	}
 	holdMS, _ := strconv.Atoi(os.Getenv(childMigrationHoldEnv))
 	if holdMS > 0 {
 		spec.After = func(ctx context.Context, tx *gorm.DB, conn *sql.Conn) error {
+			if mode == childMigrationModeRebuild {
+				var value string
+				if err := conn.QueryRowContext(ctx, "SELECT value FROM parent WHERE id=1").Scan(&value); err != nil {
+					return err
+				}
+				if value != "before-kill" {
+					return fmt.Errorf("rebuilt parent value=%q, want before-kill", value)
+				}
+			}
 			if signal := os.Getenv(childMigrationSignalEnv); signal != "" {
 				if err := os.WriteFile(signal, []byte("entered"), 0o600); err != nil {
 					return err
@@ -296,19 +325,46 @@ func TestSQLiteMigrationSubprocess(t *testing.T) {
 	require.NoError(t, migrateWithSpecs(ctx, db, []migrationSpec{spec}))
 }
 
-func startMigrationChild(t *testing.T, ctx context.Context, path, signal string, holdMS int) (*exec.Cmd, *bytes.Buffer) {
+type migrationChild struct {
+	cmd      *exec.Cmd
+	output   *bytes.Buffer
+	waitOnce sync.Once
+	waitErr  error
+}
+
+func (c *migrationChild) Wait() error {
+	c.waitOnce.Do(func() { c.waitErr = c.cmd.Wait() })
+	return c.waitErr
+}
+
+func (c *migrationChild) Kill() error {
+	if c.cmd.Process == nil {
+		return nil
+	}
+	return c.cmd.Process.Kill()
+}
+
+func (c *migrationChild) cleanup() {
+	_ = c.Kill()
+	_ = c.Wait()
+}
+
+func startMigrationChild(t *testing.T, ctx context.Context, path, signal string, holdMS int, mode string) (*migrationChild, *bytes.Buffer) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSQLiteMigrationSubprocess$", "-test.v")
 	cmd.Env = append(os.Environ(),
 		childMigrationPathEnv+"="+path,
 		childMigrationSignalEnv+"="+signal,
 		childMigrationHoldEnv+"="+strconv.Itoa(holdMS),
+		childMigrationModeEnv+"="+mode,
 	)
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	require.NoError(t, cmd.Start())
-	return cmd, &output
+	child := &migrationChild{cmd: cmd, output: &output}
+	t.Cleanup(child.cleanup)
+	return child, &output
 }
 
 func waitForMigrationSignal(path string, timeout time.Duration) error {
@@ -334,9 +390,9 @@ func TestMigrateConcurrentSubprocessesSerializeOnOneFile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	signal := filepath.Join(t.TempDir(), "entered")
-	first, firstOutput := startMigrationChild(t, ctx, path, signal, 800)
+	first, firstOutput := startMigrationChild(t, ctx, path, signal, 800, childMigrationModeConcurrent)
 	require.NoError(t, waitForMigrationSignal(signal, 5*time.Second))
-	second, secondOutput := startMigrationChild(t, ctx, path, "", 0)
+	second, secondOutput := startMigrationChild(t, ctx, path, "", 0, childMigrationModeConcurrent)
 	firstErr := make(chan error, 1)
 	secondErr := make(chan error, 1)
 	go func() { firstErr <- first.Wait() }()
@@ -353,12 +409,16 @@ func TestMigrateConcurrentSubprocessesSerializeOnOneFile(t *testing.T) {
 	require.EqualValues(t, 2, migrationMarkerCount(t, db))
 }
 
-func TestMigrateRecoversAfterKilledTransaction(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "killed.db")
+func TestMigrateRecoversAfterKilledParentRebuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "killed-rebuild.db")
 	db, err := gormhelper.NewSQLiteClient(path)
 	require.NoError(t, err)
 	markMatchingBaseline(t, db)
-	require.NoError(t, db.Exec("CREATE TABLE retained(id INTEGER PRIMARY KEY); INSERT INTO retained VALUES(1)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE parent(id INTEGER PRIMARY KEY, value TEXT NOT NULL)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id) ON DELETE CASCADE)").Error)
+	require.NoError(t, db.Exec("CREATE INDEX idx_parent_value ON parent(value)").Error)
+	require.NoError(t, db.Exec("INSERT INTO parent(id, value) VALUES(1, 'before-kill')").Error)
+	require.NoError(t, db.Exec("INSERT INTO child(id, parent_id) VALUES(1, 1)").Error)
 	raw, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, raw.Close())
@@ -366,19 +426,28 @@ func TestMigrateRecoversAfterKilledTransaction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	signal := filepath.Join(t.TempDir(), "entered")
-	child, output := startMigrationChild(t, ctx, path, signal, 30_000)
+	child, output := startMigrationChild(t, ctx, path, signal, 30_000, childMigrationModeRebuild)
 	require.NoError(t, waitForMigrationSignal(signal, 5*time.Second))
-	require.NoError(t, child.Process.Kill())
+	require.NoError(t, child.Kill())
 	require.Error(t, child.Wait(), output.String())
 
 	db, err = gormhelper.NewSQLiteClient(path)
 	require.NoError(t, err)
 	defer func() { raw, _ := db.DB(); _ = raw.Close() }()
-	require.False(t, db.Migrator().HasTable("concurrent_once"))
-	require.True(t, db.Migrator().HasTable("retained"))
+	var value string
+	require.NoError(t, db.Raw("SELECT value FROM parent WHERE id=1").Scan(&value).Error)
+	require.Equal(t, "before-kill", value)
+	var childCount int64
+	require.NoError(t, db.Raw("SELECT count(*) FROM child").Scan(&childCount).Error)
+	require.EqualValues(t, 1, childCount)
+	require.True(t, db.Migrator().HasIndex("parent", "idx_parent_value"))
+	require.Equal(t, 1, foreignKeysValue(t, db))
 	require.EqualValues(t, 1, migrationMarkerCount(t, db))
-	spec := testMigrationSpec("2026-09-07-concurrent", "CREATE TABLE concurrent_once(id INTEGER PRIMARY KEY); INSERT INTO concurrent_once VALUES(1);")
+	spec := parentRebuildMigrationSpec()
 	require.NoError(t, migrateWithSpecs(context.Background(), db, []migrationSpec{spec}))
+	require.NoError(t, db.Exec("DELETE FROM parent WHERE id=1").Error)
+	require.NoError(t, db.Raw("SELECT count(*) FROM child").Scan(&childCount).Error)
+	require.Zero(t, childCount)
 }
 
 func TestMigrateRejectsNilDatabaseDialector(t *testing.T) {
