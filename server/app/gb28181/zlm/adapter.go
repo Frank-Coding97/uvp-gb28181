@@ -32,6 +32,7 @@ func (a *ServiceAdapter) SetServerConfig(ctx context.Context, n *node.Node, para
 // ApplyConfigForNode 实现 service.ZLMProbe
 func (a *ServiceAdapter) ApplyConfigForNode(ctx context.Context, n *node.Node, t service.MediaTuning) error {
 	media := gbconfig.MediaConfig{
+		ManageRTCExternIP:       a.tuning.ManageRTCExternIP,
 		HookBaseURL:             a.tuning.HookBaseURL,
 		HookRequireTLS:          a.tuning.HookRequireTLS,
 		HookHost:                a.tuning.HookHost,

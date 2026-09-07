@@ -244,6 +244,11 @@ func managedConfigMatches(actual, expected map[string]string) bool {
 	if actual == nil {
 		return false
 	}
+	if expectedIP, managed := expected["rtc.externIP"]; managed {
+		if actual["rtc.externIP"] != expectedIP || !node.ParseServerConfig(actual).RTCTransportEnabled {
+			return false
+		}
+	}
 	if actual["hook.enable"] != expected["hook.enable"] ||
 		actual["general.mediaServerId"] != expected["general.mediaServerId"] {
 		return false

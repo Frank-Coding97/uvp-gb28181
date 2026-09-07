@@ -3,6 +3,7 @@ package zlm
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 
@@ -33,6 +34,9 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		return fmt.Errorf("回读 ZLM 配置失败: %w", err)
 	}
 	readbackKeys := []string{"hook.enable", "general.flowThreshold", "general.maxStreamWaitMS", "general.mediaServerId"}
+	if media.ManageRTCExternIP {
+		readbackKeys = append(readbackKeys, "rtc.externIP")
+	}
 	for _, event := range playauth.ManagedHookEvents() {
 		readbackKeys = append(readbackKeys, "hook."+string(event))
 	}
@@ -74,6 +78,13 @@ func ExpectedConfigForNode(n *node.Node, media gbconfig.MediaConfig) (map[string
 			return nil, buildErr
 		}
 		params["hook."+string(event)] = hookURL
+	}
+	if media.ManageRTCExternIP {
+		ip := net.ParseIP(n.ReceiveHost)
+		if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.Equal(net.IPv4bcast) {
+			return nil, fmt.Errorf("媒体收流地址必须为具体 IPv4 地址")
+		}
+		params["rtc.externIP"] = ip.String()
 	}
 	return params, nil
 }
