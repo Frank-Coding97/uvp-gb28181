@@ -81,7 +81,8 @@ func equalSIPINFOIdentity(a, b DeviceSIPINFOIdentity) bool {
 
 func sipINFOIdentityMatches(i DeviceSIPINFOIdentity, step DeviceSIPInviteStep, cseq uint32) bool {
 	body, err := i.Command.Body(cseq)
-	if !validIntentID(i.InfoID) || cseq <= step.Identity.CSeq || err != nil || len(body) == 0 || len(body) > 4096 {
+	if !validIntentID(i.InfoID) || step.KnownBranch == nil || i.Request.RemoteTag != step.KnownBranch.Identity.RemoteTag ||
+		cseq <= step.Identity.CSeq || err != nil || len(body) == 0 || len(body) > 4096 {
 		return false
 	}
 	digest := sha256.Sum256(body)
@@ -145,7 +146,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPINFO(ctx context.Context, id Devi
 			if step.Identity.StepID != identity.Request.Request.StepID || b == nil {
 				continue
 			}
-			if b.ACKState != SIPStepMayHaveDispatched || len(b.CleanupAttempts) != 0 || len(b.InfoSteps) >= maxSIPINFOSteps {
+			if b.ACKState != SIPStepMayHaveDispatched || sipBranchBusinessClosed(*step) || len(b.InfoSteps) >= maxSIPINFOSteps {
 				return false, ErrDeviceIntentConflict
 			}
 			if len(b.InfoSteps) != 0 {
@@ -193,7 +194,7 @@ func (s *DeviceOperationIntentStore) mutateSIPINFO(ctx context.Context, id Devic
 				if a.Identity.InfoID != infoID {
 					continue
 				}
-				if !observation && (len(b.CleanupAttempts) != 0 || a.OwnerRunID != runID || a.LocalQuiescedAt != nil || ai != len(b.InfoSteps)-1) {
+				if !observation && (sipBranchBusinessClosed(out.Steps[si]) || a.OwnerRunID != runID || a.LocalQuiescedAt != nil || ai != len(b.InfoSteps)-1) {
 					return false, ErrDeviceIntentConflict
 				}
 				return mutate(a, now, runID)

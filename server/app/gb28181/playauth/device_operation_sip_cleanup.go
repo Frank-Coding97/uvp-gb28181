@@ -77,7 +77,7 @@ func sipCleanupRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPI
 }
 
 func sipDialogRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPInviteStep, cseq uint32, contentType string, bodyLength int, bodySHA256 string) bool {
-	b := step.KnownBranch
+	b := sipFindBranch(&step, i.RemoteTag)
 	if b == nil || i.RemoteTag != b.Identity.RemoteTag || i.Routes == nil ||
 		!sipIdentityPart(i.Request.Branch, 128) || !strings.HasPrefix(i.Request.Branch, "z9hG4bK") || i.Request.Branch == step.Identity.Branch {
 		return false
@@ -115,7 +115,8 @@ func sipDialogRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPIn
 }
 
 func sipCleanupIdentityMatches(i DeviceSIPCleanupAttemptIdentity, step DeviceSIPInviteStep, cseq uint32) bool {
-	return validIntentID(i.AttemptID) && cseq > step.Identity.CSeq &&
+	return validIntentID(i.AttemptID) && step.KnownBranch != nil && i.ACK.RemoteTag == step.KnownBranch.Identity.RemoteTag &&
+		i.BYE.RemoteTag == i.ACK.RemoteTag && cseq > step.Identity.CSeq &&
 		sipCleanupRequestMatches(i.ACK, step, step.Identity.CSeq) && sipCleanupRequestMatches(i.BYE, step, cseq) &&
 		i.ACK.Request.Branch != i.BYE.Request.Branch
 }
@@ -138,29 +139,34 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context
 	return s.mutateSIPStepChecked(ctx, id, version, authorizeSIPCancelCleanupDevice, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
-			if step.KnownBranch == nil {
-				continue
-			}
-			for _, old := range step.KnownBranch.CleanupAttempts {
-				if old.Identity.AttemptID == identity.AttemptID {
-					if equalSIPCleanupIdentity(old.Identity, identity) {
-						return false, nil
+			for _, b := range sipObservedBranches(step) {
+				for _, old := range b.CleanupAttempts {
+					if old.Identity.AttemptID == identity.AttemptID {
+						if equalSIPCleanupIdentity(old.Identity, identity) {
+							return false, nil
+						}
+						return false, ErrDeviceIntentConflict
 					}
-					return false, ErrDeviceIntentConflict
 				}
 			}
 		}
+		if sipCleanupLocalWorkActive(out, runID) || sipCleanupBranchesUsed(out, identity) {
+			return false, ErrDeviceIntentConflict
+		}
 		for index := range out.Steps {
 			step := &out.Steps[index]
-			if step.Identity.StepID != identity.ACK.Request.StepID || step.KnownBranch == nil {
+			b := sipFindBranch(step, identity.ACK.RemoteTag)
+			if step.Identity.StepID != identity.ACK.Request.StepID || b == nil {
 				continue
 			}
-			attempts := step.KnownBranch.CleanupAttempts
+			attempts := b.CleanupAttempts
 			if len(attempts) >= maxSIPCleanupAttempts {
 				return false, ErrDeviceIntentConflict
 			}
-			lastCSeq := lastSIPINFOCSeq(*step)
-			for _, info := range step.KnownBranch.InfoSteps {
+			branchStep := *step
+			branchStep.KnownBranch = b
+			lastCSeq := lastSIPINFOCSeq(branchStep)
+			for _, info := range b.InfoSteps {
 				if (info.OwnerRunID == runID && info.LocalQuiescedAt == nil) ||
 					info.Identity.Request.Request.Branch == identity.ACK.Request.Branch || info.Identity.Request.Request.Branch == identity.BYE.Request.Branch {
 					return false, ErrDeviceIntentConflict
@@ -173,7 +179,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context
 				}
 				lastCSeq = last.Identity.BYE.Request.CSeq
 			}
-			if lastCSeq == math.MaxUint32 || !sipCleanupIdentityMatches(identity, *step, lastCSeq+1) {
+			if lastCSeq == math.MaxUint32 || identity.ACK.RemoteTag != identity.BYE.RemoteTag || !sipCleanupIdentityMatches(identity, branchStep, lastCSeq+1) {
 				return false, ErrDeviceIntentConflict
 			}
 			for _, old := range attempts {
@@ -185,7 +191,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context
 					return false, ErrDeviceIntentConflict
 				}
 			}
-			step.KnownBranch.CleanupAttempts = append(attempts, DeviceSIPCleanupAttempt{Identity: identity, OwnerRunID: runID, State: SIPCleanupPrepared, RowVersion: 1, PreparedAt: now})
+			b.CleanupAttempts = append(attempts, DeviceSIPCleanupAttempt{Identity: identity, OwnerRunID: runID, State: SIPCleanupPrepared, RowVersion: 1, PreparedAt: now})
 			return true, nil
 		}
 		return false, ErrDeviceIntentConflict
@@ -206,24 +212,22 @@ func (s *DeviceOperationIntentStore) mutateSIPCleanupAttempt(ctx context.Context
 	}
 	return s.mutateSIPStepChecked(ctx, id, version, check, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for si := range out.Steps {
-			b := out.Steps[si].KnownBranch
-			if b == nil {
-				continue
-			}
-			for ai := range b.CleanupAttempts {
-				a := &b.CleanupAttempts[ai]
-				if a.Identity.AttemptID == attemptID {
-					if !observation {
-						for _, old := range b.CleanupAttempts {
-							if old.Response != nil {
-								return false, ErrDeviceIntentConflict
+			for _, b := range sipObservedBranches(&out.Steps[si]) {
+				for ai := range b.CleanupAttempts {
+					a := &b.CleanupAttempts[ai]
+					if a.Identity.AttemptID == attemptID {
+						if !observation {
+							for _, old := range b.CleanupAttempts {
+								if old.Response != nil {
+									return false, ErrDeviceIntentConflict
+								}
 							}
 						}
+						if !observation && (a.OwnerRunID != runID || a.LocalQuiescedAt != nil || ai != len(b.CleanupAttempts)-1) {
+							return false, ErrDeviceIntentConflict
+						}
+						return mutate(a, now, runID)
 					}
-					if !observation && (a.OwnerRunID != runID || a.LocalQuiescedAt != nil) {
-						return false, ErrDeviceIntentConflict
-					}
-					return mutate(a, now, runID)
 				}
 			}
 		}

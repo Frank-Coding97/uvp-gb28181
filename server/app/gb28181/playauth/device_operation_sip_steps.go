@@ -18,32 +18,38 @@ const (
 )
 
 type DeviceSIPInviteStep struct {
-	Identity          DeviceSIPInviteIdentity `json:"-"`
-	State             string                  `json:"-"`
-	RowVersion        int64                   `json:"-"`
-	PreparedAt        time.Time               `json:"-"`
-	DispatchStartedAt *time.Time              `json:"-"`
-	KnownBranch       *DeviceSIPKnownBranch   `json:"-"`
-	Cancel            *DeviceSIPCancel        `json:"-"`
+	Identity                       DeviceSIPInviteIdentity `json:"-"`
+	State                          string                  `json:"-"`
+	RowVersion                     int64                   `json:"-"`
+	PreparedAt                     time.Time               `json:"-"`
+	DispatchStartedAt              *time.Time              `json:"-"`
+	KnownBranch                    *DeviceSIPKnownBranch   `json:"-"`
+	Cancel                         *DeviceSIPCancel        `json:"-"`
+	AdditionalBranches             []DeviceSIPKnownBranch  `json:"-"`
+	BranchInventoryFault           string                  `json:"-"`
+	BranchInventoryFaultObservedAt *time.Time              `json:"-"`
 }
 
-// At most the first observed branch is represented, never complete branch
-// coverage or terminal state. Empty/NULL steps prove no absence of side effects.
+// The selected and bounded additional observed branches are evidence, never
+// complete coverage or terminal state. Empty steps prove no absence of effects.
 type DeviceSIPInviteSteps struct {
 	Intent DeviceOperationIntent `json:"-"`
 	Steps  []DeviceSIPInviteStep `json:"-"`
 }
 
 type sipInviteStepWire struct {
-	Version           int                   `json:"version"`
-	Action            string                `json:"action"`
-	Identity          sipInviteIdentityWire `json:"identity"`
-	State             string                `json:"state"`
-	RowVersion        int64                 `json:"rowVersion"`
-	PreparedAt        time.Time             `json:"preparedAt"`
-	DispatchStartedAt *time.Time            `json:"dispatchStartedAt"`
-	KnownBranch       *sipKnownBranchWire   `json:"knownBranch,omitempty"`
-	Cancel            *sipCancelWire        `json:"cancel,omitempty"`
+	Version                        int                   `json:"version"`
+	Action                         string                `json:"action"`
+	Identity                       sipInviteIdentityWire `json:"identity"`
+	State                          string                `json:"state"`
+	RowVersion                     int64                 `json:"rowVersion"`
+	PreparedAt                     time.Time             `json:"preparedAt"`
+	DispatchStartedAt              *time.Time            `json:"dispatchStartedAt"`
+	KnownBranch                    *sipKnownBranchWire   `json:"knownBranch,omitempty"`
+	Cancel                         *sipCancelWire        `json:"cancel,omitempty"`
+	AdditionalBranches             []sipKnownBranchWire  `json:"additionalBranches,omitempty"`
+	BranchInventoryFault           string                `json:"branchInventoryFault,omitempty"`
+	BranchInventoryFaultObservedAt *time.Time            `json:"branchInventoryFaultObservedAt,omitempty"`
 }
 
 type sipInviteStepsWire struct {
@@ -57,7 +63,16 @@ type sipIntentRow struct {
 }
 
 func sipStepToWire(s DeviceSIPInviteStep) sipInviteStepWire {
-	return sipInviteStepWire{1, "invite", s.Identity.wire(), s.State, s.RowVersion, s.PreparedAt, s.DispatchStartedAt, sipKnownBranchToWire(s.KnownBranch), sipCancelToWire(s.Cancel)}
+	w := sipInviteStepWire{Version: 1, Action: "invite", Identity: s.Identity.wire(), State: s.State, RowVersion: s.RowVersion,
+		PreparedAt: s.PreparedAt, DispatchStartedAt: s.DispatchStartedAt, KnownBranch: sipKnownBranchToWire(s.KnownBranch), Cancel: sipCancelToWire(s.Cancel)}
+	if len(s.AdditionalBranches) != 0 || s.BranchInventoryFault != "" {
+		w.Version = 2
+		for index := range s.AdditionalBranches {
+			w.AdditionalBranches = append(w.AdditionalBranches, *sipKnownBranchToWire(&s.AdditionalBranches[index]))
+		}
+		w.BranchInventoryFault, w.BranchInventoryFaultObservedAt = s.BranchInventoryFault, s.BranchInventoryFaultObservedAt
+	}
+	return w
 }
 
 func validSIPStepTime(value time.Time) bool {
@@ -107,7 +122,7 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 	for _, w := range wire.Steps {
 		i := DeviceSIPInviteIdentity(w.Identity)
 		key := inviteKey{i.CallID, i.LocalTag}
-		if w.Version != 1 || w.Action != "invite" || !validSIPInviteIdentity(i) || ids[i.StepID] || invites[key] ||
+		if (w.Version != 1 && w.Version != 2) || w.Action != "invite" || !validSIPInviteIdentity(i) || ids[i.StepID] || invites[key] ||
 			!validSIPStepTime(w.PreparedAt) || w.PreparedAt.Before(*row.DispatchStartedAt) || w.PreparedAt.After(row.UpdatedAt) {
 			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 		}
@@ -131,6 +146,11 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 				return DeviceSIPInviteSteps{}, err
 			}
 			step.KnownBranch = branch
+		}
+		if err := readSIPBranchInventory(w, &step, row.UpdatedAt); err != nil {
+			return DeviceSIPInviteSteps{}, err
+		}
+		for _, branch := range sipObservedBranches(&step) {
 			if len(branch.InfoSteps) != 0 && (id.Kind != "playback" || id.TargetScope != "channel") {
 				return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 			}
@@ -155,6 +175,9 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 			step.Cancel = cancel
 		}
 		out.Steps = append(out.Steps, step)
+	}
+	if !validSIPInventoryHistory(out) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
 	return out, nil
 }
@@ -263,12 +286,8 @@ func (s *DeviceOperationIntentStore) mutateSIPStepChecked(ctx context.Context, i
 		if err != nil || !changed {
 			return err
 		}
-		wire := sipInviteStepsWire{Version: 1, Steps: make([]sipInviteStepWire, 0, len(out.Steps))}
-		for _, step := range out.Steps {
-			wire.Steps = append(wire.Steps, sipStepToWire(step))
-		}
-		body, err := json.Marshal(wire)
-		if err != nil || len(body) > maxIntentSIPBytes {
+		body, err := encodeSIPInviteSteps(out)
+		if err != nil || !sipInventoryFits(out, len(body)) || !validSIPInventoryHistory(out) {
 			return ErrDeviceIntentUnavailable
 		}
 		result := tx.Model(&DeviceOperationIntent{}).

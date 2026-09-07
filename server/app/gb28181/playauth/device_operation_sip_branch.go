@@ -205,7 +205,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPKnownBranchACK(ctx context.Conte
 				continue
 			}
 			b := step.KnownBranch
-			if b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared || len(b.CleanupAttempts) != 0 {
+			if b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared || sipBranchBusinessClosed(*step) {
 				return false, ErrDeviceIntentConflict
 			}
 			b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt = SIPStepMayHaveDispatched, 2, &now

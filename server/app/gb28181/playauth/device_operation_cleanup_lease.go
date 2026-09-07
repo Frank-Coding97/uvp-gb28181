@@ -52,10 +52,11 @@ func (work *sipCleanupWork) matches(out DeviceSIPInviteSteps) bool {
 		return false
 	}
 	for _, step := range out.Steps {
-		if step.Identity.StepID != work.identity.ACK.Request.StepID || step.KnownBranch == nil {
+		b := sipFindBranch(&step, work.identity.ACK.RemoteTag)
+		if step.Identity.StepID != work.identity.ACK.Request.StepID || b == nil {
 			continue
 		}
-		attempts := step.KnownBranch.CleanupAttempts
+		attempts := b.CleanupAttempts
 		if len(attempts) == 0 {
 			return false
 		}
