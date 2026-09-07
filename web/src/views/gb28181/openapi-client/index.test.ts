@@ -1,5 +1,5 @@
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
-import { Message, Modal } from "@arco-design/web-vue";
+import { Message, Modal, Table, TableColumn } from "@arco-design/web-vue";
 import { defineComponent, h, KeepAlive, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OpenAPIClientPage from "./index.vue";
@@ -193,6 +193,19 @@ describe("OpenAPI client page", () => {
     expect(api.capabilities).toHaveBeenCalledOnce();
     expect((wrapper.vm as any).ownerDepartments).toEqual([{ id: 10, name: "平台运维部" }]);
     expect((wrapper.vm as any).clients).toEqual([client]);
+  });
+
+  it("renders real Arco table columns, client rows and row actions", async () => {
+    const wrapper = mount(OpenAPIClientPage, {
+      global: {
+        components: { ATable: Table, ATableColumn: TableColumn },
+        stubs: { ...pageStubs, "a-table": false, "a-table-column": false }
+      }
+    });
+    await flushPromises();
+    expect(wrapper.findAll("th").map(cell => cell.text())).toContain("归属部门（精确）");
+    expect(wrapper.find("tbody").text()).toContain(client.name);
+    expect(wrapper.find("tbody").text()).toContain("详情");
   });
 
   it("does not call read APIs or render management content without read permission", async () => {

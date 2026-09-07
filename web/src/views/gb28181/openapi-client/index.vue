@@ -694,36 +694,38 @@ defineExpose({
           @page-size-change="handlePageSizeChange"
         >
           <template #empty><a-empty description="暂无 OpenAPI 客户端" /></template>
-          <a-table-column title="客户端" :width="220">
-            <template #cell="{ record }">
-              <div class="openapi-client-table__name">{{ record.name }}</div>
-              <code class="openapi-client-table__ak">{{ record.ak }}</code>
-            </template>
-          </a-table-column>
-          <a-table-column title="归属部门（精确）" :width="190">
-            <template #cell="{ record }">
-              <span>{{ departmentName(record.ownerDeptId) }}</span>
-              <small class="openapi-client-table__hint">不含下级 / 共享设备</small>
-            </template>
-          </a-table-column>
-          <a-table-column title="认证状态" :width="110">
-            <template #cell="{ record }"><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template>
-          </a-table-column>
-          <a-table-column title="密钥版本" data-index="secretVersion" :width="100" />
-          <a-table-column title="rowVersion" data-index="rowVersion" :width="100" />
-          <a-table-column title="操作" :width="520" fixed="right">
-            <template #cell="{ record }">
-              <div class="openapi-client-table__actions">
-                <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"><template #icon><Eye :size="15" /></template>详情</a-button>
-                <a-button v-if="canGrant" type="text" class="uvp-table-action uvp-table-action--permission" @click="openDetail(record)"><template #icon><ShieldCheck :size="15" /></template>能力</a-button>
-                <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="requestRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
-                <a-button v-if="canStatus && record.status === 'active'" type="text" status="warning" @click="requestStatus('disable', record)"><template #icon><ShieldOff :size="15" /></template>停用</a-button>
-                <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"><template #icon><ShieldCheck :size="15" /></template>启用</a-button>
-                <a-button v-if="canStatus && record.status !== 'revoked'" type="text" status="danger" @click="requestStatus('revoke', record)"><template #icon><Ban :size="15" /></template>撤销</a-button>
-                <a-button v-if="canAudit" type="text" class="uvp-table-action" @click="openDetail(record); loadAudits()"><template #icon><ScrollText :size="15" /></template>审计</a-button>
-              </div>
-            </template>
-          </a-table-column>
+          <template #columns>
+            <a-table-column title="客户端" :width="220">
+              <template #cell="{ record }">
+                <div class="openapi-client-table__name">{{ record.name }}</div>
+                <code class="openapi-client-table__ak">{{ record.ak }}</code>
+              </template>
+            </a-table-column>
+            <a-table-column title="归属部门（精确）" :width="190">
+              <template #cell="{ record }">
+                <span>{{ departmentName(record.ownerDeptId) }}</span>
+                <small class="openapi-client-table__hint">不含下级 / 共享设备</small>
+              </template>
+            </a-table-column>
+            <a-table-column title="认证状态" :width="110">
+              <template #cell="{ record }"><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template>
+            </a-table-column>
+            <a-table-column title="密钥版本" data-index="secretVersion" :width="100" />
+            <a-table-column title="rowVersion" data-index="rowVersion" :width="100" />
+            <a-table-column title="操作" :width="520" fixed="right">
+              <template #cell="{ record }">
+                <div class="openapi-client-table__actions">
+                  <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"><template #icon><Eye :size="15" /></template>详情</a-button>
+                  <a-button v-if="canGrant" type="text" class="uvp-table-action uvp-table-action--permission" @click="openDetail(record)"><template #icon><ShieldCheck :size="15" /></template>能力</a-button>
+                  <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="requestRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
+                  <a-button v-if="canStatus && record.status === 'active'" type="text" status="warning" @click="requestStatus('disable', record)"><template #icon><ShieldOff :size="15" /></template>停用</a-button>
+                  <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"><template #icon><ShieldCheck :size="15" /></template>启用</a-button>
+                  <a-button v-if="canStatus && record.status !== 'revoked'" type="text" status="danger" @click="requestStatus('revoke', record)"><template #icon><Ban :size="15" /></template>撤销</a-button>
+                  <a-button v-if="canAudit" type="text" class="uvp-table-action" @click="openDetail(record); loadAudits()"><template #icon><ScrollText :size="15" /></template>审计</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </template>
         </a-table>
       </template>
       <a-empty v-else description="没有 OpenAPI 客户端查看权限" />
