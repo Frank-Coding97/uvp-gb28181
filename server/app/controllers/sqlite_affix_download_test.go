@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
@@ -99,6 +100,7 @@ func TestSQLiteAffixDownloadReturnsStoredFileContract(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/sysAffix/download/21001", nil)
 	ctx.Params = gin.Params{{Key: "id", Value: strconv.FormatUint(uint64(affix.ID), 10)}}
+	ctx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: affix.CreatedBy}})
 	NewSysAffixController().Download(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
