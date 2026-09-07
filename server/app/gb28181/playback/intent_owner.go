@@ -116,9 +116,20 @@ func (o *playbackIntentOwner) Teardown(ctx context.Context) error {
 		o.sipLocal = true
 		return nil
 	}
-	var err error
-	o.sipLocal, err = o.sip.Close(ctx)
+	result, err := o.sip.Close(ctx)
+	err = localIntentCloseError(result, err)
+	o.sipLocal = err == nil
 	return err
+}
+
+func localIntentCloseError(result IntentCloseResult, err error) error {
+	if err != nil {
+		return err
+	}
+	if !result.LocalQuiesced {
+		return playauth.ErrDeviceOperationUnavailable
+	}
+	return nil
 }
 
 func (o *playbackIntentOwner) CloseRTP(ctx context.Context) error {
@@ -131,7 +142,10 @@ func (o *playbackIntentOwner) CloseRTP(ctx context.Context) error {
 	if o.rtp == nil {
 		o.rtpLocal = true
 	} else {
-		o.rtpLocal, err = o.rtp.Close(ctx)
+		var result IntentCloseResult
+		result, err = o.rtp.Close(ctx)
+		err = localIntentCloseError(result, err)
+		o.rtpLocal = err == nil
 	}
 	if o.rtpLocal && o.sipLocal && !o.released {
 		if o.stopLease != nil {

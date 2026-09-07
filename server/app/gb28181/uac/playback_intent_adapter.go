@@ -25,11 +25,12 @@ func (a *PlaybackAdapter) PrepareIntent(ctx context.Context, store *playauth.Dev
 }
 
 type playbackIntentChild struct {
-	u         *UAC
-	op        *playbackIntentOperation
-	gate      chan struct{}
-	closed    bool
-	remoteErr error
+	u             *UAC
+	op            *playbackIntentOperation
+	gate          chan struct{}
+	closed        bool
+	remotePending bool
+	remoteErr     error
 }
 
 func (c *playbackIntentChild) enter(ctx context.Context) error {
@@ -73,20 +74,20 @@ func (c *playbackIntentChild) SendINFO(ctx context.Context, command playauth.Dev
 	return c.op.SendINFO(ctx, command)
 }
 
-func (c *playbackIntentChild) Close(ctx context.Context) (bool, error) {
+func (c *playbackIntentChild) Close(ctx context.Context) (gbplayback.IntentCloseResult, error) {
 	if err := c.enter(ctx); err != nil {
-		return false, err
+		return gbplayback.IntentCloseResult{}, err
 	}
 	defer func() { <-c.gate }()
 	if c.closed {
-		return true, c.remoteErr
+		return gbplayback.IntentCloseResult{LocalQuiesced: true, RemotePending: c.remotePending}, nil
 	}
 	o := c.op
 	if err := waitPlaybackShutdown(ctx, o.ready); err != nil {
-		return false, err
+		return gbplayback.IntentCloseResult{}, err
 	}
 	if err := o.enter(ctx); err != nil {
-		return false, err
+		return gbplayback.IntentCloseResult{}, err
 	}
 	started := o.started
 	o.leave()
@@ -106,11 +107,11 @@ func (c *playbackIntentChild) Close(ctx context.Context) (bool, error) {
 	o.initCancel()
 	o.cleanupCancel()
 	if err := o.shutdownLocal(ctx); err != nil {
-		return false, errors.Join(c.remoteErr, err)
+		return gbplayback.IntentCloseResult{}, errors.Join(c.remoteErr, err)
 	}
 	loaded, err := o.store.LoadSIPInviteSteps(ctx, o.id)
 	if err != nil {
-		return false, errors.Join(c.remoteErr, err)
+		return gbplayback.IntentCloseResult{}, errors.Join(c.remoteErr, err)
 	}
 	valid := false
 	for _, step := range loaded.Steps {
@@ -122,19 +123,19 @@ func (c *playbackIntentChild) Close(ctx context.Context) (bool, error) {
 		} else if step.State == playauth.SIPStepMayHaveDispatched {
 			valid = step.BranchInventoryFault == playauth.SIPBranchObserverIncomplete
 			// Observation loss stays unknown even after a known branch's BYE.
-			c.remoteErr = errors.Join(c.remoteErr, ErrPlaybackCleanupUnknown)
+			c.remotePending = true
 		}
 	}
 	if !valid {
-		return false, errors.Join(c.remoteErr, ErrPlaybackCleanupUnknown)
+		return gbplayback.IntentCloseResult{}, errors.Join(c.remoteErr, ErrPlaybackCleanupUnknown)
 	}
 	c.u.playbackIntentMu.Lock()
 	if c.u.playbackIntents[o.id.OperationID] != o {
 		c.u.playbackIntentMu.Unlock()
-		return false, errors.Join(c.remoteErr, ErrPlaybackUnavailable)
+		return gbplayback.IntentCloseResult{}, errors.Join(c.remoteErr, ErrPlaybackUnavailable)
 	}
 	delete(c.u.playbackIntents, o.id.OperationID)
 	c.u.playbackIntentMu.Unlock()
 	c.closed = true
-	return true, c.remoteErr
+	return gbplayback.IntentCloseResult{LocalQuiesced: true, RemotePending: c.remotePending}, nil
 }

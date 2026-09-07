@@ -43,8 +43,18 @@ func (n parentIntegrationNodes) Wait(context.Context, string) (gbplayback.MediaR
 }
 
 func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
-	for _, mode := range []gbplayback.Mode{gbplayback.ModePlayback, gbplayback.ModeDownload} {
-		t.Run(string(mode), func(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mode         gbplayback.Mode
+		failFinalSQL bool
+	}{
+		{"playback", gbplayback.ModePlayback, false},
+		{"download", gbplayback.ModeDownload, false},
+		{"playback-final-SQL", gbplayback.ModePlayback, true},
+		{"download-final-SQL", gbplayback.ModeDownload, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode := tc.mode
 			u, db, store, oldID, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			require.NoError(t, db.Where("operation_id = ?", oldID.OperationID).Delete(&playauth.DeviceOperationIntent{}).Error)
@@ -115,8 +125,9 @@ func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
 			require.NoError(t, err)
 			defer control.Close()
 			nodes := parentIntegrationNodes{selected: selected, destination: peer.LocalAddr().String(), control: control}
+			locations := stream.NewLocationMap()
 			service := gbplayback.NewService(gbplayback.NewRegistry(gbplayback.RegistryConfig{}), nodes,
-				gbplayback.NewZLMIntentRTPOpener(nodes, stream.NewLocationMap(), nodes), NewPlaybackAdapter(u), nodes,
+				gbplayback.NewZLMIntentRTPOpener(nodes, locations, nodes), NewPlaybackAdapter(u), nodes,
 				gbplayback.ServiceConfig{DeviceOperations: barrier, Intents: store})
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -139,12 +150,40 @@ func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
 			wait, stop := context.WithTimeout(ctx, 10*time.Millisecond)
 			require.ErrorIs(t, barrier.WaitBefore(wait, 1, 2), context.DeadlineExceeded)
 			stop()
-			require.Error(t, service.Stop(ctx, created.Session.ID, "fixture finish"), "remote coverage remains explicitly unknown")
+			if tc.failFinalSQL {
+				require.NoError(t, db.Exec(`CREATE TRIGGER deny_parent_local_fact BEFORE UPDATE ON gb_device_operation_intent
+					WHEN NEW.rtp_steps_json LIKE '%"localQuiescedAt":%'
+					BEGIN SELECT RAISE(ABORT,'fixture final local fact unavailable'); END`).Error)
+				require.Error(t, service.Stop(ctx, created.Session.ID, "fixture finish"))
+				pending, ok := service.GetForOwner(created.Session.ID, "fixture-owner")
+				require.True(t, ok)
+				require.Equal(t, gbplayback.StateStopping, pending.State)
+				_, bound := locations.Lookup(created.Session.StreamID)
+				require.True(t, bound, "failed persistence cannot discard the binding")
+				wait, stop := context.WithTimeout(ctx, 10*time.Millisecond)
+				require.ErrorIs(t, barrier.WaitBefore(wait, 1, 2), context.DeadlineExceeded)
+				stop()
+				require.Error(t, service.Close(ctx), "root retains the same service on local persistence failure")
+				require.NoError(t, db.Exec("DROP TRIGGER deny_parent_local_fact").Error)
+			}
+			require.NoError(t, service.Stop(ctx, created.Session.ID, "fixture finish"), "durable remote pending must not prevent actual local completion")
 			require.NoError(t, barrier.WaitBefore(ctx, 1, 2), "all actual children joined before parent lease release")
+			stopped, ok := service.GetForOwner(created.Session.ID, "fixture-owner")
+			require.True(t, ok)
+			require.Equal(t, gbplayback.StateStopped, stopped.State)
+			_, bound := locations.Lookup(created.Session.StreamID)
+			require.False(t, bound, "only a locally quiesced and durable owner may unbind")
+			persisted, err := store.LoadSIPInviteSteps(ctx, intent.DeviceOperationIntentIdentity)
+			require.NoError(t, err)
+			require.Equal(t, playauth.IntentDispatched, persisted.Intent.State)
+			require.Equal(t, playauth.SIPBranchObserverIncomplete, persisted.Steps[0].BranchInventoryFault)
+			var completed int64
+			require.NoError(t, db.Table("gb_device").Select("cleanup_completed_epoch").Scan(&completed).Error)
+			require.EqualValues(t, 1, completed, "local completion cannot advance device coverage")
 			require.EqualValues(t, 1, invites.Load())
 			require.EqualValues(t, 1, byes.Load())
 			require.EqualValues(t, 3, rtpCalls.Load())
-			require.Error(t, service.Close(ctx))
+			require.NoError(t, service.Close(ctx))
 			require.NoError(t, u.ShutdownPlaybackIntents(ctx))
 		})
 	}

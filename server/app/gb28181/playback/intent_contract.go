@@ -16,9 +16,17 @@ type IntentSIPFactory interface {
 type IntentSIPChild interface {
 	Invite(context.Context) (DialogInfo, error)
 	SendINFO(context.Context, playauth.DeviceSIPINFOCommand) error
-	// The bool proves only actual local join plus persisted recovery materials.
-	// A true bool may accompany a remote-unknown error; it is not Complete.
-	Close(context.Context) (bool, error)
+	Close(context.Context) (IntentCloseResult, error)
+}
+
+// IntentCloseResult separates local lifecycle from remote recovery. A nil
+// error plus LocalQuiesced proves actual IO joined and its final facts and
+// recovery handoff are durable. RemotePending is not a local failure and must
+// never be interpreted as remote success or device Complete. Errors retain the
+// original owner for retry, even if a buggy implementation also returns true.
+type IntentCloseResult struct {
+	LocalQuiesced bool
+	RemotePending bool
 }
 
 type IntentRTPFactory interface {
@@ -27,7 +35,6 @@ type IntentRTPFactory interface {
 
 type IntentRTPChild interface {
 	Open(context.Context) (RTPAllocation, error)
-	// The bool is local quiescence, not media/source/viewer completion.
-	Close(context.Context) (bool, error)
+	Close(context.Context) (IntentCloseResult, error)
 	Unbind(context.Context) error
 }

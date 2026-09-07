@@ -21,17 +21,19 @@ func TestPlaybackIntentAdapterTransfersOnlyDurableQuiescedOwner(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			defer cancel()
 			local, err := child.Close(ctx)
-			require.Error(t, err, "zero 2xx cannot prove remote completion")
 			f.u.playbackIntentMu.Lock()
 			retained := f.u.playbackIntents[f.id.OperationID]
 			f.u.playbackIntentMu.Unlock()
 			if failSQL {
-				require.False(t, local)
+				require.Error(t, err)
+				require.False(t, local.LocalQuiesced)
 				require.Same(t, f.op, retained)
 				require.NoError(t, f.db.Exec("DROP TRIGGER deny_child_fault").Error)
-				local, _ = child.Close(ctx)
+				local, err = child.Close(ctx)
 			}
-			require.True(t, local)
+			require.NoError(t, err)
+			require.True(t, local.LocalQuiesced)
+			require.True(t, local.RemotePending, "zero 2xx cannot prove remote completion")
 			if !failSQL {
 				require.Nil(t, retained)
 			}
@@ -51,7 +53,7 @@ func TestPlaybackIntentAdapterNeverDeletesReplacementOwner(t *testing.T) {
 	f.u.playbackIntents[f.id.OperationID] = replacement
 	f.u.playbackIntentMu.Unlock()
 	local, err := child.Close(context.Background())
-	require.False(t, local)
+	require.False(t, local.LocalQuiesced)
 	require.ErrorIs(t, err, ErrPlaybackUnavailable)
 	f.u.playbackIntentMu.Lock()
 	require.Same(t, replacement, f.u.playbackIntents[f.id.OperationID])
@@ -59,7 +61,8 @@ func TestPlaybackIntentAdapterNeverDeletesReplacementOwner(t *testing.T) {
 	f.u.playbackIntents[f.id.OperationID] = f.op
 	f.u.playbackIntentMu.Unlock()
 	local, err = child.Close(context.Background())
-	require.True(t, local)
+	require.True(t, local.LocalQuiesced)
+	require.False(t, local.RemotePending, "prepared child never sent an INVITE")
 	require.NoError(t, err)
 	_, err = f.store.DispatchSIPInviteStep(context.Background(), f.id, 3, strings.Repeat("b", 32))
 	// A store write alone cannot revive the removed child or permit its Invite.

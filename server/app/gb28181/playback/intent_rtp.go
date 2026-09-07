@@ -2,7 +2,6 @@ package playback
 
 import (
 	"context"
-	"errors"
 	"math"
 	"strconv"
 	"time"
@@ -11,8 +10,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
-
-var ErrIntentRTPRemoteUnknown = errors.New("persistent RTP remote coverage is incomplete")
 
 // The composition root adapts its existing operator TLS binding resolver.
 // Never construct this control from node tags, a request DTO or private IP trust.
@@ -113,7 +110,6 @@ type intentRTPChild struct {
 	ssrc                                         string
 	gate                                         chan struct{}
 	attempted, dispatched, cleanupStarted, local bool
-	remoteErr                                    error
 }
 
 func (c *intentRTPChild) enter(ctx context.Context) error {
@@ -166,34 +162,36 @@ func (c *intentRTPChild) Open(ctx context.Context) (RTPAllocation, error) {
 		Bind: func() error { c.locations.Bind(c.identity.Stream, c.identity.NodePK); return nil }}, nil
 }
 
-func (c *intentRTPChild) Close(ctx context.Context) (bool, error) {
+func (c *intentRTPChild) Close(ctx context.Context) (IntentCloseResult, error) {
 	if err := c.enter(ctx); err != nil {
-		return false, err
+		return IntentCloseResult{}, err
 	}
 	defer func() { <-c.gate }()
 	if c.local {
-		return true, c.remoteErr
+		return IntentCloseResult{LocalQuiesced: true, RemotePending: c.dispatched}, nil
 	}
 	if !c.cleanupStarted {
 		c.cleanupStarted = true
 		if c.dispatched {
-			_, resourceErr := c.work.CloseResource(ctx, func(ctx context.Context, i playauth.DeviceRTPResourceIdentity) (string, error) {
+			_, _ = c.work.CloseResource(ctx, func(ctx context.Context, i playauth.DeviceRTPResourceIdentity) (string, error) {
 				result, err := c.runtime.Control.CloseRtpServerIfMatch(ctx, rtpSelector(i))
 				return string(result), err
 			})
-			_, ingressErr := c.work.CloseIngress(ctx, func(ctx context.Context, i playauth.DeviceRTPResourceIdentity) (string, error) {
+			_, _ = c.work.CloseIngress(ctx, func(ctx context.Context, i playauth.DeviceRTPResourceIdentity) (string, error) {
 				result, err := c.runtime.Control.CloseRtpIngressIfMatchV2(ctx, rtpSelector(i))
 				return string(result), err
 			})
-			c.remoteErr = errors.Join(resourceErr, ingressErr, ErrIntentRTPRemoteUnknown)
+			// Failed/unknown calls leave the corresponding result absent. The
+			// may-have-dispatched step plus final local quiescence preserves
+			// that remote uncertainty durably; neither call is replayed here.
 		}
 	}
 	if err := c.work.Quiesce(ctx); err != nil {
-		return false, errors.Join(c.remoteErr, err)
+		return IntentCloseResult{}, err
 	}
 	c.runtime.Release() // all actual synchronous HTTP calls have returned
 	c.local = true
-	return true, c.remoteErr
+	return IntentCloseResult{LocalQuiesced: true, RemotePending: c.dispatched}, nil
 }
 
 func (c *intentRTPChild) Unbind(ctx context.Context) error {
