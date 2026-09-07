@@ -96,12 +96,39 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
 	_, err = store.AddSIPInviteStep(ctx, id, 22, identity(17))
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
-	loaded, err = store.ObserveSIPKnownBranch(ctx, id, 22, knownBranch(2))
+	cancel := playauth.DeviceSIPCancelIdentity(identity(2))
+	cancel.ContentType, cancel.BodyLength, cancel.BodySHA256 = "", 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	_, err = store.PrepareSIPCancel(ctx, id, 22, cancel)
+	require.NoError(t, err, "old epoch can prepare exact cancellation while cleanup is pending")
+	wins.Store(0)
+	errs = make(chan error, 20)
+	for n := 0; n < 20; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := playauth.NewDeviceOperationIntentStore(db).DispatchSIPCancel(ctx, id, 23, cancel)
+			if err == nil {
+				wins.Add(1)
+			} else {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	require.EqualValues(t, 1, wins.Load())
+	for err := range errs {
+		require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
+	}
+	_, err = store.DispatchSIPCancel(ctx, id, 24, cancel)
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict, "restart cannot restore a consumed permission")
+	loaded, err = store.ObserveSIPKnownBranch(ctx, id, 24, knownBranch(2))
 	require.NoError(t, err, "retain a dispatched transaction's late response after transfer")
-	_, err = store.DispatchSIPKnownBranchACK(ctx, id, 23, knownBranch(2))
+	_, err = store.DispatchSIPKnownBranchACK(ctx, id, 25, knownBranch(2))
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
 	require.Equal(t, playauth.SIPStepMayHaveDispatched, loaded.Steps[0].KnownBranch.ACKState)
 	require.Equal(t, playauth.SIPStepPrepared, loaded.Steps[1].KnownBranch.ACKState)
+	require.Equal(t, playauth.SIPStepMayHaveDispatched, loaded.Steps[1].Cancel.State)
 	loadedAfter, err := playauth.NewDeviceOperationIntentStore(db).LoadSIPInviteSteps(ctx, id)
 	require.NoError(t, err)
 	// PostgreSQL returns a fixed-offset location, whereas the successful
@@ -110,5 +137,13 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 	loaded.Intent.UpdatedAt = loaded.Intent.UpdatedAt.UTC()
 	loadedAfter.Intent.UpdatedAt = loadedAfter.Intent.UpdatedAt.UTC()
 	require.Equal(t, loaded, loadedAfter)
-	t.Log("SIP steps: 16 immutable INVITEs, 20 concurrent INVITE/ACK single winners, native byte constraints, persistent first-known branches and old-epoch observation without reauthorization passed")
+	state, err := playauth.NewDeviceCleanupStore(db).Load(ctx, id.DeviceCode)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, state.CleanupCompletedEpoch)
+	// A newer cleanup watermark covers the original operation. Even another
+	// transfer must not make its old cancellation eligible again.
+	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=3, cleanup_completed_epoch=2 WHERE id=?", id.DevicePK).Error)
+	_, err = store.PrepareSIPCancel(ctx, id, 25, cancel)
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	t.Log("SIP steps: 16 immutable INVITEs; 20 concurrent INVITE, ACK and old-epoch CANCEL single winners; late branch retained; consumed/covered cleanup cannot reacquire; native byte constraints and reconstructed store passed")
 }

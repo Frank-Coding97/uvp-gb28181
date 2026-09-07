@@ -24,6 +24,7 @@ type DeviceSIPInviteStep struct {
 	PreparedAt        time.Time               `json:"-"`
 	DispatchStartedAt *time.Time              `json:"-"`
 	KnownBranch       *DeviceSIPKnownBranch   `json:"-"`
+	Cancel            *DeviceSIPCancel        `json:"-"`
 }
 
 // At most the first observed branch is represented, never complete branch
@@ -42,6 +43,7 @@ type sipInviteStepWire struct {
 	PreparedAt        time.Time             `json:"preparedAt"`
 	DispatchStartedAt *time.Time            `json:"dispatchStartedAt"`
 	KnownBranch       *sipKnownBranchWire   `json:"knownBranch,omitempty"`
+	Cancel            *sipCancelWire        `json:"cancel,omitempty"`
 }
 
 type sipInviteStepsWire struct {
@@ -55,7 +57,7 @@ type sipIntentRow struct {
 }
 
 func sipStepToWire(s DeviceSIPInviteStep) sipInviteStepWire {
-	return sipInviteStepWire{1, "invite", s.Identity.wire(), s.State, s.RowVersion, s.PreparedAt, s.DispatchStartedAt, sipKnownBranchToWire(s.KnownBranch)}
+	return sipInviteStepWire{1, "invite", s.Identity.wire(), s.State, s.RowVersion, s.PreparedAt, s.DispatchStartedAt, sipKnownBranchToWire(s.KnownBranch), sipCancelToWire(s.Cancel)}
 }
 
 func validSIPStepTime(value time.Time) bool {
@@ -128,6 +130,13 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 			}
 			step.KnownBranch = branch
 		}
+		if w.Cancel != nil {
+			cancel, err := readSIPCancel(w.Cancel, step, row.UpdatedAt)
+			if err != nil {
+				return DeviceSIPInviteSteps{}, err
+			}
+			step.Cancel = cancel
+		}
 		out.Steps = append(out.Steps, step)
 	}
 	return out, nil
@@ -199,8 +208,17 @@ func (s *DeviceOperationIntentStore) mutateSIPInviteStep(ctx context.Context, id
 
 // observationOnly permits recording a late branch for an already dispatched
 // INVITE after transfer. Only ObserveSIPKnownBranch uses this private path;
-// every network permission continues to require current-epoch authorization.
+// INVITE/ACK permission continues to require current-epoch authorization.
+// CANCEL compensation uses its own private gate, never observationOnly.
 func (s *DeviceOperationIntentStore) mutateSIPStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, observationOnly bool, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	check := authorizeIntentDevice
+	if observationOnly {
+		check = observeSIPBranchDevice
+	}
+	return s.mutateSIPStepChecked(ctx, id, version, check, mutate)
+}
+
+func (s *DeviceOperationIntentStore) mutateSIPStepChecked(ctx context.Context, id DeviceOperationIntentIdentity, version int64, check func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
 	if !s.available(ctx) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
@@ -209,10 +227,6 @@ func (s *DeviceOperationIntentStore) mutateSIPStep(ctx context.Context, id Devic
 	}
 	var out DeviceSIPInviteSteps
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		check := authorizeIntentDevice
-		if observationOnly {
-			check = observeSIPBranchDevice
-		}
 		if err := check(tx, ctx, id); err != nil {
 			return err
 		}
