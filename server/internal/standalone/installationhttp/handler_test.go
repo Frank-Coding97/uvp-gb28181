@@ -18,6 +18,9 @@ import (
 
 func TestStatusIsLoopbackOnlyAndReturnsRawPhase(t *testing.T) {
 	fixture := newCoordinator(t, PhasePendingAdmin, func(context.Context, string, string) error { return nil }, func(context.Context) error { return nil })
+	if !fixture.handler.CredentialAccepted() || !fixture.handler.Ready() {
+		t.Fatalf("initial coordinator state accepted=%v ready=%v", fixture.handler.CredentialAccepted(), fixture.handler.Ready())
+	}
 	response := fixture.request(http.MethodGet, "/api/standalone/setup/status", "", "127.0.0.1:32100", fixture.server.URL, nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d", response.Code, http.StatusOK)
@@ -169,7 +172,7 @@ func TestAdminSuccessConsumesTokenAndMovesToPendingSIP(t *testing.T) {
 	if reloadCalls.Load() != 1 || !fixture.handler.CredentialAccepted() {
 		t.Fatalf("reload calls = %d, accepted = %v", reloadCalls.Load(), fixture.handler.CredentialAccepted())
 	}
-	if fixture.handler.Phase() != PhasePendingSIP || fixture.handler.Ready() || fixture.handler.AllowedPhase() != PhasePendingSIP {
+	if fixture.handler.Phase() != PhasePendingSIP || !fixture.handler.Ready() || fixture.handler.AllowedPhase() != PhasePendingSIP {
 		t.Fatalf("phase=%q ready=%v allowed=%q", fixture.handler.Phase(), fixture.handler.Ready(), fixture.handler.AllowedPhase())
 	}
 	var responseBody statusResponse
@@ -208,7 +211,7 @@ func TestAdminCallbackFailureKeepsTokenForRetry(t *testing.T) {
 	if first.Code != http.StatusInternalServerError || strings.Contains(first.Body.String(), transactionErr.Error()) || strings.Contains(first.Body.String(), fixture.token) {
 		t.Fatalf("first response = %d %q", first.Code, first.Body.String())
 	}
-	if fixture.handler.CredentialAccepted() || fixture.handler.Phase() != PhasePendingAdmin {
+	if !fixture.handler.CredentialAccepted() || fixture.handler.Phase() != PhasePendingAdmin || !fixture.handler.Ready() {
 		t.Fatalf("failed transaction changed state: accepted=%v phase=%q", fixture.handler.CredentialAccepted(), fixture.handler.Phase())
 	}
 	second := fixture.request(http.MethodPost, "/api/standalone/setup/admin", `{"username":"admin","password":"strong-password"}`, "127.0.0.1:32100", fixture.server.URL, func(request *http.Request) {
@@ -333,8 +336,8 @@ func TestNewInvalidatesVerifierOutsidePendingAdmin(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixture := newCoordinatorWithVerifierAndToken(t, phase, verifier, token, nil, nil)
-			wantReady := phase == PhaseComplete
-			if fixture.handler.Phase() != phase || fixture.handler.CredentialAccepted() || fixture.handler.Ready() != wantReady {
+			wantReady := phase != PhaseFailed
+			if fixture.handler.Phase() != phase || !fixture.handler.CredentialAccepted() || fixture.handler.Ready() != wantReady {
 				t.Fatalf("initial state phase=%q accepted=%v ready=%v", fixture.handler.Phase(), fixture.handler.CredentialAccepted(), fixture.handler.Ready())
 			}
 			if err := verifier.Use(token, func() error { return nil }); !errors.Is(err, bootstrapcredential.ErrInvalidCredential) {

@@ -95,6 +95,7 @@ func New(
 	}
 	return &Handler{
 		phase:        initialPhase,
+		accepted:     true,
 		origin:       origin,
 		host:         host,
 		verifier:     verifier,
@@ -156,8 +157,9 @@ func (h *Handler) SetPhase(phase string) error {
 	return nil
 }
 
-// CredentialAccepted reports whether the current process consumed the setup
-// credential after a successful administrator transaction.
+// CredentialAccepted reports whether the current process safely received the
+// one-time bootstrap credential from its launcher. It is true after New
+// succeeds, even before the administrator transaction is submitted.
 func (h *Handler) CredentialAccepted() bool {
 	if h == nil {
 		return false
@@ -167,15 +169,24 @@ func (h *Handler) CredentialAccepted() bool {
 	return h.accepted
 }
 
-// Ready reports whether the coordinator has reached the complete phase without a
-// failed policy reload in this process.
+// Ready reports whether this HTTP coordinator can serve the current
+// installation phase. Setup phases are serviceable before business activation;
+// a failed policy reload keeps the process unavailable until restart.
 func (h *Handler) Ready() bool {
 	if h == nil {
 		return false
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.phase == PhaseComplete && !h.reloadFailed
+	if h.reloadFailed {
+		return false
+	}
+	switch h.phase {
+	case PhasePendingAdmin, PhasePendingSIP, PhaseComplete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) handleStatus(c *gin.Context) {
@@ -237,7 +248,6 @@ func (h *Handler) handleAdmin(c *gin.Context) {
 	}
 
 	h.mu.Lock()
-	h.accepted = true
 	h.phase = PhasePendingSIP
 	h.mu.Unlock()
 
