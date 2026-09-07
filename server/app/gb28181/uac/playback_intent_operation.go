@@ -34,6 +34,12 @@ type playbackIntentOperation struct {
 	invite                playauth.DeviceSIPInviteIdentity
 	input                 PlaybackInviteRequest
 	version               int64
+	ready                 chan struct{}
+	initCancel            context.CancelFunc
+	supervisorDone        chan struct{}
+	observationCloseOnce  sync.Once
+	observationCloseDone  chan struct{}
+	prepareErr            error         // Immutable after ready; reservation precedes initialization.
 	work                  chan struct{} // Serial workflow admission; never an application mutex.
 	started               bool
 	lost                  atomic.Bool
@@ -51,16 +57,19 @@ type playbackIntentOperation struct {
 	readerErr             error
 }
 
-func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, input PlaybackInviteRequest) (*playbackIntentOperation, error) {
+func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, version int64, stepID string, input PlaybackInviteRequest) (_ *playbackIntentOperation, err error) {
 	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" || input.DeviceID != id.DeviceCode || input.ChannelID != id.TargetCode {
 		return nil, ErrPlaybackUnavailable
 	}
-	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
+	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, ready: make(chan struct{}), work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
+	ctx, o.initCancel = context.WithCancel(ctx)
+	o.observationCloseDone = make(chan struct{})
 	o.cleanupClose, o.cleanupCancel = context.WithCancel(context.Background())
 	u.playbackIntentMu.Lock()
 	if !u.reservePlaybackBarrierLocked(barrier) || len(u.playbackIntents)+len(u.playbackRecoveries) >= maxPlaybackIntentOperations || len(u.playbackIntents)+len(u.playbackObservations) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil || u.playbackRecoveries[id.OperationID] != nil || u.hasPlaybackObservationLocked(id.OperationID) {
 		u.playbackIntentMu.Unlock()
 		o.cleanupCancel()
+		o.initCancel()
 		return nil, ErrPlaybackUnavailable
 	}
 	if u.playbackIntents == nil {
@@ -68,8 +77,10 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 	}
 	u.playbackIntents[id.OperationID] = o
 	u.playbackIntentMu.Unlock()
+	defer func() { o.prepareErr = err; close(o.ready) }()
 	removeUnused := func() {
 		o.cleanupCancel()
+		o.initCancel()
 		if o.lease != nil {
 			o.lease.Release()
 		}
@@ -105,12 +116,17 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 	}
 	snapshot, err := snapshotPlaybackIntentRequest(o.owned.Request())
 	if err != nil || playbackIntentStorageIdentity(stepID, snapshot) != o.invite {
-		_ = o.CloseLocal(context.Background())
+		// This constructor owns initialization: waiting on its own ready would
+		// deadlock. Drain directly with the cancellable initialization context;
+		// shutdown must be able to interrupt this final persistence too.
+		_ = o.closeLocalReady(ctx)
 		return o, errPlaybackIntentSnapshot
 	}
 	// Cancellation requests cleanup; it never drops the reader or the lease.
 	o.startQuarantineReader()
+	o.supervisorDone = make(chan struct{})
 	go func() {
+		defer close(o.supervisorDone)
 		select {
 		case <-lease.Context().Done():
 		case <-o.stopping:
@@ -437,6 +453,22 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 	if ctx == nil {
 		return ErrPlaybackUnavailable
 	}
+	o.lost.Store(true) // A timed-out close remains a permanent send veto.
+	o.cleanupCancel()  // Initialized before the reservation becomes visible.
+	select {
+	case <-o.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if o.owned == nil {
+		return o.prepareErr // Failed preparation already released its lease.
+	}
+	return o.closeLocalReady(ctx)
+}
+
+// Initialization's failure path may call this before publishing ready, but
+// registry consumers must use CloseLocal and wait for publication first.
+func (o *playbackIntentOperation) closeLocalReady(ctx context.Context) error {
 	// Signal before entering work: the active cleanup owns that domain while
 	// waiting for its response. Joining work alone cannot interrupt it.
 	if o.cleanupCancel != nil {

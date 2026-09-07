@@ -28,6 +28,8 @@ type playbackRecoveryWorker struct {
 	work                       chan struct{}
 	deviceAfter, deviceThrough int64 // Protected by work, including all Tick I/O.
 	operationAfter, minNext    string
+	cancel                     context.CancelFunc // Set before publishing the running worker.
+	done                       chan struct{}
 }
 
 func newPlaybackRecoveryWorker(u *UAC, devices *playauth.DeviceCleanupStore, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier) *playbackRecoveryWorker {
@@ -120,15 +122,17 @@ func (u *UAC) StartPlaybackRecovery(ctx context.Context, devices *playauth.Devic
 		return nil, ErrPlaybackUnavailable
 	}
 	w := newPlaybackRecoveryWorker(u, devices, store, barrier)
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	w.cancel, w.done = cancel, done
 	u.playbackIntentMu.Lock()
 	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackRecoveryWorker != nil {
 		u.playbackIntentMu.Unlock()
+		cancel()
 		return nil, ErrPlaybackUnavailable
 	}
 	u.playbackRecoveryWorker = w
 	u.playbackIntentMu.Unlock()
-	runCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
 	go func() {
 		defer func() {
 			cancel()

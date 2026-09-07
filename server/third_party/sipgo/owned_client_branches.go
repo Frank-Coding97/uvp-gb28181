@@ -109,6 +109,15 @@ func (o *OwnedClientInvite) ObservationDone() <-chan struct{} {
 	return o.responseObservation.Done()
 }
 
+// CloseObservation joins the private response observer without closing the
+// shared UA or sending SIP. Stop and join original work first. Retained branch
+// snapshots remain available and are marked incomplete by observation loss.
+func (o *OwnedClientInvite) CloseObservation() {
+	if o.responseObservation != nil {
+		o.responseObservation.Close()
+	}
+}
+
 type ownedInviteResponseSink struct{ owner *OwnedClientInvite }
 
 func (s ownedInviteResponseSink) CaptureResponse(response *sip.Response) {

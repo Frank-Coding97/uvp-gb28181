@@ -23,6 +23,11 @@ type playbackRecoveredObservation struct {
 	changes         chan struct{}
 	work            chan struct{}
 	done            chan struct{}
+	ready           chan struct{}
+	prepareErr      error // Immutable after ready.
+	closing         chan struct{}
+	closeOnce       sync.Once
+	initCancel      context.CancelFunc
 }
 
 func (u *UAC) hasPlaybackObservationLocked(operationID string) bool {
@@ -34,7 +39,7 @@ func (u *UAC) hasPlaybackObservationLocked(operationID string) bool {
 	return false
 }
 
-func (u *UAC) beginRecoveredPlaybackObservation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID string) (*playbackRecoveredObservation, error) {
+func (u *UAC) beginRecoveredPlaybackObservation(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID string) (_ *playbackRecoveredObservation, err error) {
 	if ctx == nil || u == nil || u.client == nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" {
 		return nil, ErrPlaybackUnavailable
 	}
@@ -42,7 +47,9 @@ func (u *UAC) beginRecoveredPlaybackObservation(ctx context.Context, store *play
 		return nil, err
 	}
 	key := id.OperationID + ":" + stepID
-	o := &playbackRecoveredObservation{store: store, id: id, changes: make(chan struct{}, 1), work: make(chan struct{}, 1), done: make(chan struct{})}
+	o := &playbackRecoveredObservation{store: store, id: id, changes: make(chan struct{}, 1), work: make(chan struct{}, 1), done: make(chan struct{}), ready: make(chan struct{}), closing: make(chan struct{})}
+	ctx, o.initCancel = context.WithCancel(ctx)
+	defer o.initCancel()
 	u.playbackIntentMu.Lock()
 	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackIntents[id.OperationID] != nil || u.playbackObservations[key] != nil || len(u.playbackIntents)+len(u.playbackObservations) >= maxPlaybackIntentOperations {
 		u.playbackIntentMu.Unlock()
@@ -53,6 +60,7 @@ func (u *UAC) beginRecoveredPlaybackObservation(ctx context.Context, store *play
 	}
 	u.playbackObservations[key] = o // Reserve before Load; ordinary begin now refuses.
 	u.playbackIntentMu.Unlock()
+	defer func() { o.prepareErr = err; close(o.ready) }()
 	removeUnused := func() {
 		u.playbackIntentMu.Lock()
 		if u.playbackObservations[key] == o {
@@ -204,6 +212,9 @@ func (o *playbackRecoveredObservation) run() {
 		select {
 		case <-o.changes:
 		case <-retry:
+		case <-o.closing:
+			o.observation.Close()
+			closing = true
 		case <-o.observation.Done():
 			closing = true
 		}
@@ -228,6 +239,18 @@ func (o *playbackRecoveredObservation) run() {
 // Shutdown only; do not call this when a single cleanup attempt completes.
 // The UAC registry retains identity and snapshots even after local close.
 func (o *playbackRecoveredObservation) CloseLocal(ctx context.Context) error {
+	if ctx == nil {
+		return ErrPlaybackUnavailable
+	}
+	o.closeOnce.Do(func() { close(o.closing) })
+	select {
+	case <-o.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if o.prepareErr != nil {
+		return o.prepareErr
+	}
 	o.observation.Close()
 	if err := o.flush(ctx); err != nil {
 		return err

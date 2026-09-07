@@ -26,7 +26,7 @@ type playbackIntentRecovery struct {
 // Caller holds playbackIntentMu. The composition root must share one UAC and
 // barrier for original and recovery work within its application instance.
 func (u *UAC) reservePlaybackBarrierLocked(barrier *playauth.DeviceOperationBarrier) bool {
-	if barrier == nil || (u.playbackIntentBarrier != nil && u.playbackIntentBarrier != barrier) {
+	if u.playbackShuttingDown || barrier == nil || (u.playbackIntentBarrier != nil && u.playbackIntentBarrier != barrier) {
 		return false
 	}
 	u.playbackIntentBarrier = barrier
@@ -41,6 +41,8 @@ func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth
 		return nil, err
 	}
 	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, work: make(chan struct{}, 1), originalReleased: true}
+	ctx, o.initCancel = context.WithCancel(ctx)
+	defer o.initCancel() // Preparation does not own the later Run context.
 	o.cleanupClose, o.cleanupCancel = context.WithCancel(context.Background())
 	r := &playbackIntentRecovery{u: u, op: o, ready: make(chan struct{})}
 	u.playbackIntentMu.Lock()

@@ -15,6 +15,11 @@ type PlaybackRecoveryPage struct {
 	NextAfter                   string
 }
 
+type playbackRecoveryScan struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 // RecoverPlaybackIntents executes one bounded page outside SQL transactions.
 // The composition root must share this UAC/barrier; this is not a multi-API
 // lease. Every dispatched intent stays pending until all adapters and the
@@ -27,19 +32,23 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 	if err := ctx.Err(); err != nil {
 		return page, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	scan := &playbackRecoveryScan{cancel: cancel, done: make(chan struct{})}
 	u.playbackIntentMu.Lock()
-	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackRecoveryScans[devicePK] || len(u.playbackRecoveryScans) >= maxPlaybackIntentOperations {
+	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackRecoveryScans[devicePK] != nil || len(u.playbackRecoveryScans) >= maxPlaybackIntentOperations {
 		u.playbackIntentMu.Unlock()
 		return page, ErrPlaybackUnavailable
 	}
 	if u.playbackRecoveryScans == nil {
-		u.playbackRecoveryScans = make(map[int64]bool)
+		u.playbackRecoveryScans = make(map[int64]*playbackRecoveryScan)
 	}
-	u.playbackRecoveryScans[devicePK] = true
+	u.playbackRecoveryScans[devicePK] = scan
 	u.playbackIntentMu.Unlock()
 	defer func() {
 		u.playbackIntentMu.Lock()
 		delete(u.playbackRecoveryScans, devicePK)
+		close(scan.done)
 		u.playbackIntentMu.Unlock()
 	}()
 	rows, err := store.ListRecoveryPage(ctx, devicePK, deviceCode, beforeEpoch, afterID, limit)

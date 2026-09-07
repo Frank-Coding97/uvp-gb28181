@@ -44,10 +44,12 @@ type UAC struct {
 	playbackIntents       map[string]*playbackIntentOperation
 	playbackRecoveries    map[string]*playbackIntentRecovery
 	playbackObservations  map[string]*playbackRecoveredObservation
-	playbackRecoveryScans map[int64]bool
+	playbackRecoveryScans map[int64]*playbackRecoveryScan
 	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
 	playbackRecoveryWorker *playbackRecoveryWorker
+	playbackShuttingDown   bool
+	playbackShutdownWork   chan struct{}
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
