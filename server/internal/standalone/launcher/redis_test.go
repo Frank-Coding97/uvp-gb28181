@@ -85,4 +85,16 @@ func TestRedisReadinessRequiresAuthenticationAndWrites(t *testing.T) {
 	if err = checkRedis(ctx, address, password); err != nil {
 		t.Fatal(err)
 	}
+	if err = shutdownRedis(ctx, address, "wrong-password"); err == nil {
+		t.Fatal("unauthenticated shutdown accepted")
+	}
+	if err = client.Ping(ctx).Err(); err != nil {
+		t.Fatal("unauthenticated stop affected Redis", err)
+	}
+	if err = shutdownRedis(ctx, address, password); err != nil {
+		t.Fatal("authenticated shutdown failed", err)
+	}
+	if err = cmd.Wait(); err != nil {
+		t.Fatal("Redis did not exit successfully", err)
+	}
 }

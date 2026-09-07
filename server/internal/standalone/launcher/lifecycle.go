@@ -23,10 +23,11 @@ const (
 )
 
 type Status struct {
-	ManagementURL string `json:"management_url,omitempty"`
-	State         State  `json:"state"`
-	SIPState      string `json:"sip_state,omitempty"`
-	BusinessReady bool   `json:"business_ready"`
+	ManagementURL   string `json:"management_url,omitempty"`
+	State           State  `json:"state"`
+	SIPState        string `json:"sip_state,omitempty"`
+	BusinessReady   bool   `json:"business_ready"`
+	PreviousUnclean bool   `json:"previous_unclean,omitempty"`
 }
 
 // Each step completes only after its concrete readiness checks. Cleanup owns

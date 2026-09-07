@@ -12,13 +12,24 @@ import (
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/control"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/controlpipe"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/readiness"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/winprocess"
 )
 
 // Launch holds installation ownership until all created components terminate.
-// Cancellation currently uses abnormal Job cleanup; graceful user stop is T16.
+// A normal stop drains the backend around media shutdown, then stops Redis.
 func Launch(ctx context.Context, installDir, recordingsDir string, notify func(Status)) error {
+	ctx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	owner := newControlOwner(cancelRun)
+	controlCtx, cancelControl := context.WithCancel(context.Background())
+	defer cancelControl()
+	var controlDone chan error
+	var marker *standalone.RunMarker
+	var mediaInput *os.File
+	var redisDone, backendDone, mediaDone <-chan error
 	lock, err := standalone.AcquireInstanceLock(installDir)
 	if err != nil {
 		return err
@@ -38,12 +49,12 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 	var paths standalone.Paths
 	var config standalone.InstanceConfig
 	var backendAddress string
-	start := func(name, path, dir string, args []string, monitor bool) (*winprocess.Process, <-chan error, error) {
+	start := func(name, path, dir string, args []string, stdin *os.File, monitor bool) (*winprocess.Process, <-chan error, error) {
 		log, err := os.OpenFile(filepath.Join(paths.LogsDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, nil, err
 		}
-		process, err := job.Start(winprocess.StartSpec{Path: path, Args: args, Dir: dir, Env: componentEnvironment(paths), Stdout: log, Stderr: log})
+		process, err := job.Start(winprocess.StartSpec{Path: path, Args: args, Dir: dir, Env: componentEnvironment(paths), Stdin: stdin, Stdout: log, Stderr: log})
 		_ = log.Close()
 		if err != nil {
 			return nil, nil, err
@@ -70,6 +81,9 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 	steps := Steps{Exits: exits}
 	steps.Cleanup = func() error {
 		result := job.Close()
+		if mediaInput != nil {
+			result = errors.Join(result, mediaInput.Close())
+		}
 		deadline := time.NewTimer(5 * time.Second)
 		defer deadline.Stop()
 		for _, child := range children {
@@ -104,17 +118,35 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		if err != nil {
 			return err
 		}
-		return checkPorts([]string{config.RedisAddress(), config.BackendAddress(), config.MediaAddress()})
+		if err = checkPorts([]string{config.RedisAddress(), config.BackendAddress(), config.MediaAddress()}); err != nil {
+			return err
+		}
+		marker, err = standalone.BeginRun(paths)
+		if err != nil {
+			return err
+		}
+		name, key, err := control.Endpoint(paths.InstallDir, "launcher", config.JWTSecret())
+		if err != nil {
+			return err
+		}
+		listener, err := controlpipe.Listen(name, key)
+		if err != nil {
+			return err
+		}
+		controlDone = make(chan error, 1)
+		go func() { defer listener.Close(); controlDone <- control.Serve(controlCtx, listener, owner.handle) }()
+		return nil
 	}
 	steps.Redis = func(ctx context.Context) error {
-		if _, _, err := start("redis", release.RedisExe, paths.ConfigDir, []string{filepath.Base(config.RedisConfigPath)}, true); err != nil {
+		var err error
+		if _, redisDone, err = start("redis", release.RedisExe, paths.ConfigDir, []string{filepath.Base(config.RedisConfigPath)}, nil, true); err != nil {
 			return err
 		}
 		return awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error { return checkRedis(ctx, config.RedisAddress(), config.RedisPassword()) })
 	}
 	steps.Database = func(ctx context.Context) error {
 		for _, mode := range []string{"-bootstrap-db", "-migrate-up"} {
-			_, done, err := start("database", release.BackendExe, release.ReleaseDir, []string{mode}, false)
+			_, done, err := start("database", release.BackendExe, release.ReleaseDir, []string{mode}, nil, false)
 			if err != nil {
 				return err
 			}
@@ -138,7 +170,8 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		return nil
 	}
 	steps.Backend = func(ctx context.Context) (string, error) {
-		process, _, err := start("backend", release.BackendExe, release.ReleaseDir, nil, true)
+		process, done, err := start("backend", release.BackendExe, release.ReleaseDir, nil, nil, true)
+		backendDone = done
 		if err != nil {
 			return "", err
 		}
@@ -151,14 +184,62 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		return status.SIPState, err
 	}
 	steps.Media = func(ctx context.Context) error {
-		if _, _, err := start("media", release.MediaExe, paths.ConfigDir, []string{"-c", filepath.Base(config.ZLMConfigPath), "--affinity", "0"}, true); err != nil {
+		input, output, err := os.Pipe()
+		if err != nil {
+			return err
+		}
+		mediaInput = output
+		defer input.Close()
+		if _, mediaDone, err = start("media", release.MediaExe, paths.ConfigDir, []string{"-c", filepath.Base(config.ZLMConfigPath), "--affinity", "0", "--uvp-stdin-control"}, input, true); err != nil {
 			return err
 		}
 		return awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error {
 			return checkMedia(ctx, "http://"+config.MediaAddress(), config.ZLMSecret())
 		})
 	}
-	return Run(ctx, steps, func(status Status) {
+	backendCommand := func(ctx context.Context, command control.Command, expected control.Reply) error {
+		name, key, err := control.Endpoint(paths.InstallDir, "backend", config.JWTSecret())
+		if err != nil {
+			return err
+		}
+		reply, err := control.Call(ctx, name, key, command)
+		if err != nil {
+			return err
+		}
+		if reply != expected {
+			return errors.New("backend shutdown was not confirmed")
+		}
+		return nil
+	}
+	steps.Stop = func(ctx context.Context) error {
+		return Shutdown(ctx, ShutdownSteps{
+			Quiesce: func(ctx context.Context) error { return backendCommand(ctx, control.Quiesce, control.MediaReady) },
+			Media: func(ctx context.Context) error {
+				// This exclusive pipe has never been written: the single short command fits
+				// in its empty kernel buffer even if the child has stopped reading.
+				if _, err := mediaInput.Write([]byte("shutdown\n")); err != nil {
+					return err
+				}
+				return waitOwnedExit(ctx, mediaDone)
+			},
+			Finalize: func(ctx context.Context) error { return backendCommand(ctx, control.Finalize, control.Finalized) },
+			Backend:  func(ctx context.Context) error { return waitOwnedExit(ctx, backendDone) },
+			Redis: func(ctx context.Context) error {
+				if err := shutdownRedis(ctx, config.RedisAddress(), config.RedisPassword()); err != nil {
+					return err
+				}
+				return waitOwnedExit(ctx, redisDone)
+			},
+		})
+	}
+	result := Run(ctx, steps, func(status Status) {
+		if status.State == Stopped {
+			return
+		} // publish only after marker removal
+		owner.publish(status.State)
+		if marker != nil {
+			status.PreviousUnclean = marker.PreviousUnclean
+		}
 		if backendAddress != "" {
 			status.ManagementURL = "http://" + backendAddress + "/"
 		}
@@ -166,6 +247,53 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 			notify(status)
 		}
 	})
+	if result == nil && marker != nil {
+		result = marker.Finish()
+	}
+	owner.finish(result)
+	if controlDone != nil {
+		joined := false
+		if owner.stopRequested() && result == nil {
+			select {
+			case err := <-controlDone:
+				joined = true
+				result = errors.Join(result, err)
+			case <-time.After(5 * time.Second):
+				result = errors.New("stop acknowledgement timed out")
+			}
+		}
+		cancelControl()
+		if !joined {
+			select {
+			case err := <-controlDone:
+				result = errors.Join(result, err)
+			case <-time.After(5 * time.Second):
+				result = errors.Join(result, errors.New("control listener cleanup timed out"))
+			}
+		}
+	}
+	if result == nil {
+		owner.publish(Stopped)
+		if notify != nil {
+			notify(Status{State: Stopped})
+		}
+	}
+	return result
+}
+
+func waitOwnedExit(ctx context.Context, done <-chan error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if done == nil {
+		return errors.New("owned process is missing")
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func componentEnvironment(paths standalone.Paths) []string {
