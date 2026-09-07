@@ -183,6 +183,9 @@ func (s *Service) transferLocked(ctx context.Context, tx *gorm.DB, device assign
 	if updated.RowsAffected != 1 {
 		return nil, ErrAssignmentSecurityUnavailable
 	}
+	if err := playauth.CancelReservedDeviceOperationIntents(ctx, tx, int64(device.ID), device.DeviceCode, newEpoch); err != nil {
+		return nil, ErrAssignmentSecurityUnavailable
+	}
 	if err := cascadeAssignment(tx, device, targetDeptID); err != nil {
 		return nil, err
 	}

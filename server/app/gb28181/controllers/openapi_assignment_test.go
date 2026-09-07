@@ -32,7 +32,7 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 				r, db := newDeviceMgmtRouter(t)
 				registerPermissionWorkbenchRoutes(r, db)
 				require.NoError(t, db.AutoMigrate(&gbmodels.GbRecordingFile{}, &gbmodels.GbAlarmResource{},
-					&openapimodels.PlayGrant{}, &openapimodels.Viewer{}))
+					&openapimodels.PlayGrant{}, &openapimodels.Viewer{}, &playauth.DeviceOperationIntent{}))
 				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)
 				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
@@ -47,6 +47,12 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 					{DeviceID: "34020000001320000002", OwnerDeptID: 30},
 				}
 				require.NoError(t, db.Create(&devices).Error)
+				intentID := "00000000000000000000000000000001"
+				_, intentErr := playauth.NewDeviceOperationIntentStore(db).Reserve(context.Background(), playauth.DeviceOperationIntentIdentity{
+					OperationID: intentID, DevicePK: int64(devices[0].ID), DeviceCode: devices[0].DeviceID, DeviceEpoch: 1,
+					TargetScope: "device", TargetPK: int64(devices[0].ID), TargetCode: devices[0].DeviceID, Kind: "ptz",
+				})
+				require.NoError(t, intentErr)
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				grantID := "00000000-0000-4000-8000-000000000001"
 				channel := "34020000001320000101"
@@ -94,6 +100,14 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 					summary = unmarshal(t, w)["data"].(map[string]any)["summary"].(map[string]any)
 				}
 				require.NotContains(t, w.Body.String(), "receipt")
+				require.NotContains(t, w.Body.String(), intentID)
+				var intent playauth.DeviceOperationIntent
+				require.NoError(t, db.Where("operation_id = ?", intentID).Take(&intent).Error)
+				if outcome == "commit" {
+					require.Equal(t, playauth.IntentCancelled, intent.State)
+				} else {
+					require.Equal(t, playauth.IntentReserved, intent.State)
+				}
 				var states []struct {
 					OwnerDeptID           uint
 					AccessEpoch           int64

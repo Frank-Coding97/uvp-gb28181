@@ -30,6 +30,7 @@ func newAssignTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{},
 		&gbmodels.GbCustomGroupDevice{}, &basemodels.SysDepartment{},
 		&openapimodels.PlayGrant{}, &openapimodels.Viewer{},
+		&playauth.DeviceOperationIntent{},
 	))
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)

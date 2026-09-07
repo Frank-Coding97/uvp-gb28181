@@ -269,3 +269,26 @@ func TestDeviceOperationIntentCommitUnknownNeverGrantsDispatch(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceOperationIntentTransferRequiresExactTransaction(t *testing.T) {
+	f, s := newIntentFixture(t)
+	ctx := context.Background()
+	id := intentIdentity(1)
+	_, err := s.Reserve(ctx, id)
+	require.NoError(t, err)
+	require.ErrorIs(t, CancelReservedDeviceOperationIntents(ctx, f.db, 1, cleanupDeviceA, 2), ErrDeviceIntentUnavailable)
+	err = f.db.Transaction(func(tx *gorm.DB) error { return CancelReservedDeviceOperationIntents(ctx, tx, 1, cleanupDeviceA, 2) })
+	require.ErrorIs(t, err, ErrDeviceIntentRevoked, "epoch must already be updated in this transaction")
+	// Malformed old reserved evidence is a transfer failure, not silently skipped.
+	require.NoError(t, f.db.Exec("UPDATE gb_device_operation_intent SET contract_version=9 WHERE operation_id=?", id.OperationID).Error)
+	err = f.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error; err != nil {
+			return err
+		}
+		return CancelReservedDeviceOperationIntents(ctx, tx, 1, cleanupDeviceA, 2)
+	})
+	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
+	state, err := NewDeviceCleanupStore(f.db).Load(ctx, cleanupDeviceA)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), state.AccessEpoch, "malformed evidence rolls back whole transfer")
+}

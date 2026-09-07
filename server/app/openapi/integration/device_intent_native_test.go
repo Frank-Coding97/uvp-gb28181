@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -118,14 +119,36 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	other.TargetPK = 12
 	_, err = store.Reserve(ctx, other)
 	require.NoError(t, err)
-	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
+	rollback := errors.New("fixture transfer rollback")
+	transfer := func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error; err != nil {
+			return err
+		}
+		return playauth.CancelReservedDeviceOperationIntents(ctx, tx, 1, id.DeviceCode, 2)
+	}
+	require.ErrorIs(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := transfer(tx); err != nil {
+			return err
+		}
+		return rollback
+	}), rollback)
+	var beforeCommit playauth.DeviceOperationIntent
+	require.NoError(t, db.Where("operation_id=?", newID.OperationID).Take(&beforeCommit).Error)
+	require.Equal(t, playauth.IntentReserved, beforeCommit.State)
+	require.NoError(t, db.Transaction(transfer))
 	_, err = store.Dispatch(ctx, newID, 1)
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
-	require.NoError(t, store.CancelReserved(ctx, newID.OperationID, 1))
+	var cancelled playauth.DeviceOperationIntent
+	require.NoError(t, db.Where("operation_id=?", newID.OperationID).Take(&cancelled).Error)
+	require.Equal(t, playauth.IntentCancelled, cancelled.State)
+	rows, err = store.ListUnsettled(ctx, 1, id.DeviceCode, 2, "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, id.OperationID, rows[0].OperationID)
 	_, err = store.Dispatch(ctx, other, 1)
 	require.NoError(t, err)
 	state, err := playauth.NewDeviceCleanupStore(db).Load(ctx, id.DeviceCode)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.CleanupCompletedEpoch)
-	t.Logf("%s native intent up/up, immutable constraints, 20 concurrent dispatch CAS, restart/down/up preservation and exact transfer rejection passed", dialect)
+	t.Logf("%s native intent up/up, schema constraints, 20 concurrent dispatch CAS, restart/down/up preservation and transfer TX cancellation/rollback passed", dialect)
 }
