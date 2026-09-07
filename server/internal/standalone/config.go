@@ -18,6 +18,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultMediaListenIP = "0.0.0.0"
+	defaultMediaHTTPPort = 18080
+	defaultMediaRTPPort  = 40000
+	defaultMediaRTPRange = "30000-35000"
+	defaultMediaRTCPort  = 18000
+)
+
+// MediaListener is one protocol/address pair that the launcher must reserve
+// before starting ZLMediaKit. Network is "tcp" or "udp".
+type MediaListener struct {
+	Network string
+	Address string
+}
+
 // InstanceConfig describes committed configuration without exposing secrets in
 // JSON or diagnostic formatting. Component credentials require explicit access.
 type InstanceConfig struct {
@@ -143,7 +158,12 @@ func initializeConfig(paths Paths, hook func(string) error) (InstanceConfig, err
 		}
 		// Full media listeners/hooks are configured and accepted by T19. These
 		// deterministic inputs carry the same instance secret, not a second source.
-		zlm := fmt.Sprintf("[api]\napiDebug=0\nsecret=%s\n[general]\nlisten_ip=127.0.0.1\n[http]\nport=%d\nsslport=0\n[rtsp]\nport=0\nsslport=0\n[rtmp]\nport=0\nsslport=0\n[shell]\nport=0\n[srt]\nport=0\n[rtp_proxy]\nport=0\n[rtc]\nport=0\ntcpPort=0\nsignalingPort=0\nsignalingSslPort=0\nicePort=0\niceTcpPort=0\n", result.ZLMSecret(), configInt(values, "gb28181", "zlm", "httpport"))
+		zlmListenIP := configStringDefault(values, defaultMediaListenIP, "gb28181", "zlm", "listenip")
+		zlmHTTPPort := configIntDefault(values, defaultMediaHTTPPort, "gb28181", "zlm", "httpport")
+		zlmRTPPort := configIntDefault(values, defaultMediaRTPPort, "gb28181", "zlm", "rtpport")
+		zlmRTCPort := configIntDefault(values, defaultMediaRTCPort, "gb28181", "zlm", "rtcport")
+		zlmRTCTCPPort := configIntDefault(values, defaultMediaRTCPort, "gb28181", "zlm", "rtctcpport")
+		zlm := fmt.Sprintf("[api]\napiDebug=0\nsecret=%s\n[general]\nlisten_ip=%s\n[http]\nport=%d\nsslport=0\n[rtsp]\nport=0\nsslport=0\n[rtmp]\nport=0\nsslport=0\n[shell]\nport=0\n[srt]\nport=0\n[rtp_proxy]\nport=%d\nport_range=%s\n[rtc]\nport=%d\ntcpPort=%d\nsignalingPort=0\nsignalingSslPort=0\nicePort=0\niceTcpPort=0\n", result.ZLMSecret(), zlmListenIP, zlmHTTPPort, zlmRTPPort, defaultMediaRTPRange, zlmRTCPort, zlmRTCTCPPort)
 		if err := writeSecureConfigFile(result.ZLMConfigPath, []byte(zlm), true, prefixConfigHook("zlm", hook)); err != nil {
 			return err
 		}
@@ -216,20 +236,135 @@ func decodeInstanceConfig(raw []byte) (map[string]any, error) {
 			return nil, fmt.Errorf("%s must be a valid TCP port", strings.Join(key, "."))
 		}
 	}
+	listenIP := defaultMediaListenIP
+	if raw, present := configLookup(values, "gb28181", "zlm", "listenip"); present {
+		var ok bool
+		listenIP, ok = raw.(string)
+		if !ok {
+			return nil, errors.New("gb28181.zlm.listenip must be a local IPv4 address or 0.0.0.0")
+		}
+	}
+	if !validMediaListenIP(listenIP) {
+		return nil, errors.New("gb28181.zlm.listenip must be a local IPv4 address or 0.0.0.0")
+	}
+	for _, setting := range []struct {
+		key       string
+		fallback  int
+		allowZero bool
+	}{
+		{key: "rtpport", fallback: defaultMediaRTPPort},
+		{key: "rtcport", fallback: defaultMediaRTCPort, allowZero: true},
+		{key: "rtctcpport", fallback: defaultMediaRTCPort, allowZero: true},
+	} {
+		port := setting.fallback
+		if raw, present := configLookup(values, "gb28181", "zlm", setting.key); present {
+			var ok bool
+			port, ok = raw.(int)
+			if !ok {
+				return nil, fmt.Errorf("gb28181.zlm.%s must be a valid port", setting.key)
+			}
+		}
+		if err := validateMediaPort("gb28181.zlm."+setting.key, port, setting.allowZero); err != nil {
+			return nil, err
+		}
+	}
 	return values, nil
 }
 
 func configValue(values map[string]any, keys ...string) any {
+	value, _ := configLookup(values, keys...)
+	return value
+}
+
+func configLookup(values map[string]any, keys ...string) (any, bool) {
 	var value any = values
 	for _, key := range keys {
 		m, ok := value.(map[string]any)
 		if !ok {
-			return nil
+			return nil, false
 		}
-		value = m[key]
+		value, ok = m[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return value, true
+}
+
+func configStringValue(values map[string]any, keys ...string) (string, bool) {
+	value, present := configLookup(values, keys...)
+	if !present {
+		return "", false
+	}
+	stringValue, ok := value.(string)
+	return stringValue, ok
+}
+
+func configIntValue(values map[string]any, keys ...string) (int, bool) {
+	value, present := configLookup(values, keys...)
+	if !present {
+		return 0, false
+	}
+	intValue, ok := value.(int)
+	return intValue, ok
+}
+
+func configStringDefault(values map[string]any, fallback string, keys ...string) string {
+	value, ok := configStringValue(values, keys...)
+	if !ok {
+		return fallback
 	}
 	return value
 }
+
+func configIntDefault(values map[string]any, fallback int, keys ...string) int {
+	value, ok := configIntValue(values, keys...)
+	if !ok {
+		return fallback
+	}
+	return value
+}
+
+func validMediaListenIP(value string) bool {
+	if value == "" || strings.Contains(value, ":") {
+		return false
+	}
+	ip := net.ParseIP(value)
+	if ip == nil || ip.To4() == nil {
+		return false
+	}
+	if ip.Equal(net.IPv4zero) {
+		return true
+	}
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, address := range addresses {
+		var local net.IP
+		switch typed := address.(type) {
+		case *net.IPNet:
+			local = typed.IP
+		case *net.IPAddr:
+			local = typed.IP
+		}
+		if local != nil && local.To4() != nil && local.To4().Equal(ip.To4()) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateMediaPort(name string, port int, allowZero bool) error {
+	if allowZero && port == 0 {
+		return nil
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("%s must be a valid port", name)
+	}
+	return nil
+}
+
 func configString(values map[string]any, keys ...string) string {
 	value, _ := configValue(values, keys...).(string)
 	return value
@@ -276,8 +411,8 @@ m = g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act
 			"device":           map[string]any{"default_owner_dept_id": 1, "keepalive_interval": 60, "keepalive_timeout_count": 3, "keepalive_grace_seconds": 15, "offline_scan_interval": 30, "sync_channels_on_online": true, "online_on_heartbeat": true},
 			"alarm":            map[string]any{"save_messages": true},
 			"position_history": map[string]any{"enabled": true, "retention_days": 7},
-			"zlm":              map[string]any{"host": "127.0.0.1", "receivehost": "", "playbackhost": "", "httpport": 18080, "rtpport": 40000, "secret": secrets[2]},
-			"media":            map[string]any{"hookhost": "127.0.0.1", "hookport": 8280, "streamnonereadertimeout": 20, "rtpservertimeout": 15},
+			"zlm":              map[string]any{"host": "127.0.0.1", "receivehost": "", "playbackhost": "", "listenip": defaultMediaListenIP, "httpport": defaultMediaHTTPPort, "rtpport": defaultMediaRTPPort, "rtcport": defaultMediaRTCPort, "rtctcpport": defaultMediaRTCPort, "secret": secrets[2]},
+			"media":            map[string]any{"hookhost": "127.0.0.1", "hookport": 8280, "managertcexternip": true, "streamnonereadertimeout": 20, "rtpservertimeout": 15},
 			"record_query":     map[string]any{"timezone": "Asia/Shanghai", "timeout_sec": 15},
 			"play":             map[string]any{"auth": map[string]any{"enabled": true, "bind_client_ip": false, "ttl_seconds": 120}},
 		},
@@ -289,5 +424,31 @@ func (c InstanceConfig) BackendAddress() string {
 	return configString(c.values, "httpserver", "port")
 }
 func (c InstanceConfig) MediaAddress() string {
-	return net.JoinHostPort("127.0.0.1", strconv.Itoa(configInt(c.values, "gb28181", "zlm", "httpport")))
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(configIntDefault(c.values, defaultMediaHTTPPort, "gb28181", "zlm", "httpport")))
+}
+
+// MediaListeners returns the finite set of media sockets required before ZLM
+// starts. The HTTP management address intentionally stays loopback in
+// MediaAddress; the actual media process binds its configured listen IP.
+func (c InstanceConfig) MediaListeners() []MediaListener {
+	listenIP := configStringDefault(c.values, defaultMediaListenIP, "gb28181", "zlm", "listenip")
+	ports := []struct {
+		network string
+		port    int
+	}{
+		{network: "tcp", port: configIntDefault(c.values, defaultMediaHTTPPort, "gb28181", "zlm", "httpport")},
+		{network: "tcp", port: configIntDefault(c.values, defaultMediaRTPPort, "gb28181", "zlm", "rtpport")},
+		{network: "udp", port: configIntDefault(c.values, defaultMediaRTPPort, "gb28181", "zlm", "rtpport")},
+		{network: "udp", port: configIntDefault(c.values, defaultMediaRTCPort, "gb28181", "zlm", "rtcport")},
+		{network: "tcp", port: configIntDefault(c.values, defaultMediaRTCPort, "gb28181", "zlm", "rtctcpport")},
+	}
+	listeners := make([]MediaListener, 0, len(ports))
+	for _, candidate := range ports {
+		if candidate.port <= 0 {
+			continue
+		}
+		address := net.JoinHostPort(listenIP, strconv.Itoa(candidate.port))
+		listeners = append(listeners, MediaListener{Network: candidate.network, Address: address})
+	}
+	return listeners
 }

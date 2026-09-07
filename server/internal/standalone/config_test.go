@@ -213,6 +213,136 @@ func TestInstanceConfigManagementAddresses(t *testing.T) {
 	}
 }
 
+func TestInstanceMediaListenersDefaultsAndOverrides(t *testing.T) {
+	values, err := newInstanceConfigValues()
+	require.NoError(t, err)
+	config := InstanceConfig{values: values}
+	require.Equal(t, []MediaListener{
+		{Network: "tcp", Address: "0.0.0.0:18080"},
+		{Network: "tcp", Address: "0.0.0.0:40000"},
+		{Network: "udp", Address: "0.0.0.0:40000"},
+		{Network: "udp", Address: "0.0.0.0:18000"},
+		{Network: "tcp", Address: "0.0.0.0:18000"},
+	}, config.MediaListeners())
+
+	zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+	zlm["listenip"] = "127.0.0.1"
+	zlm["rtpport"] = 41000
+	zlm["rtcport"] = 18001
+	zlm["rtctcpport"] = 18002
+	require.Equal(t, []MediaListener{
+		{Network: "tcp", Address: "127.0.0.1:18080"},
+		{Network: "tcp", Address: "127.0.0.1:41000"},
+		{Network: "udp", Address: "127.0.0.1:41000"},
+		{Network: "udp", Address: "127.0.0.1:18001"},
+		{Network: "tcp", Address: "127.0.0.1:18002"},
+	}, (InstanceConfig{values: values}).MediaListeners())
+}
+
+func TestInstanceMediaConfigOverrideRebuildsDerivedListeners(t *testing.T) {
+	paths := configTestPaths(t)
+	initial, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(initial.ConfigPath)
+	require.NoError(t, err)
+	var values map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &values))
+	zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+	zlm["listenip"] = "127.0.0.1"
+	zlm["httpport"] = 18180
+	zlm["rtpport"] = 41000
+	zlm["rtcport"] = 18001
+	zlm["rtctcpport"] = 18002
+	media := values["gb28181"].(map[string]any)["media"].(map[string]any)
+	media["managertcexternip"] = false
+	override, err := yaml.Marshal(values)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(initial.ConfigPath, override, 0600))
+
+	loaded, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1:18180", loaded.MediaAddress())
+	require.Equal(t, (InstanceConfig{values: values}).MediaListeners(), loaded.MediaListeners())
+	zlmRaw, err := os.ReadFile(loaded.ZLMConfigPath)
+	require.NoError(t, err)
+	for _, expected := range []string{"listen_ip=127.0.0.1", "port=18180", "port=41000", "port_range=30000-35000", "port=18001", "tcpPort=18002"} {
+		require.Contains(t, string(zlmRaw), expected)
+	}
+}
+
+func TestInstanceMediaConfigAllowsDisabledRTC(t *testing.T) {
+	values, err := newInstanceConfigValues()
+	require.NoError(t, err)
+	zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+	zlm["rtcport"] = 0
+	zlm["rtctcpport"] = 0
+	raw, err := yaml.Marshal(values)
+	require.NoError(t, err)
+	_, err = decodeInstanceConfig(raw)
+	require.NoError(t, err)
+	listeners := (InstanceConfig{values: values}).MediaListeners()
+	for _, listener := range listeners {
+		require.NotContains(t, listener.Address, ":0")
+	}
+	require.Len(t, listeners, 3)
+}
+
+func TestInstanceMediaConfigRejectsInvalidListenIPAndPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "hostname", mutate: func(zlm map[string]any) { zlm["listenip"] = "localhost" }},
+		{name: "remote IPv4", mutate: func(zlm map[string]any) { zlm["listenip"] = "192.0.2.1" }},
+		{name: "IPv6", mutate: func(zlm map[string]any) { zlm["listenip"] = "::1" }},
+		{name: "listen IP wrong type", mutate: func(zlm map[string]any) { zlm["listenip"] = 127001 }},
+		{name: "RTP zero", mutate: func(zlm map[string]any) { zlm["rtpport"] = 0 }},
+		{name: "RTP above range", mutate: func(zlm map[string]any) { zlm["rtpport"] = 65536 }},
+		{name: "RTP wrong type", mutate: func(zlm map[string]any) { zlm["rtpport"] = "40000" }},
+		{name: "RTC negative", mutate: func(zlm map[string]any) { zlm["rtcport"] = -1 }},
+		{name: "RTC TCP above range", mutate: func(zlm map[string]any) { zlm["rtctcpport"] = 65536 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := newInstanceConfigValues()
+			require.NoError(t, err)
+			zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+			tc.mutate(zlm)
+			raw, err := yaml.Marshal(values)
+			require.NoError(t, err)
+			_, err = decodeInstanceConfig(raw)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestInstanceMediaConfigUsesDefaultsForLegacyFields(t *testing.T) {
+	paths := configTestPaths(t)
+	initial, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(initial.ConfigPath)
+	require.NoError(t, err)
+	var values map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &values))
+	zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+	delete(zlm, "listenip")
+	delete(zlm, "rtcport")
+	delete(zlm, "rtctcpport")
+	delete(values["gb28181"].(map[string]any)["media"].(map[string]any), "managertcexternip")
+	legacy, err := yaml.Marshal(values)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(initial.ConfigPath, legacy, 0600))
+
+	loaded, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	require.Equal(t, initial.MediaAddress(), loaded.MediaAddress())
+	require.Equal(t, (InstanceConfig{values: values}).MediaListeners(), loaded.MediaListeners())
+	zlmRaw, err := os.ReadFile(loaded.ZLMConfigPath)
+	require.NoError(t, err)
+	require.Contains(t, string(zlmRaw), "listen_ip=0.0.0.0")
+	require.Contains(t, string(zlmRaw), "port=40000")
+	require.Contains(t, string(zlmRaw), "port=18000")
+}
+
 func TestInstanceMediaConfigDisablesAPIDebug(t *testing.T) {
 	cfg, err := InitializeConfig(configTestPaths(t))
 	require.NoError(t, err)
@@ -223,9 +353,20 @@ func TestInstanceMediaConfigDisablesAPIDebug(t *testing.T) {
 	}
 }
 
-func TestInitialMediaConfigDisablesUnconfiguredListeners(t *testing.T) {
+func TestInitialMediaConfigDeclaresApprovedListeners(t *testing.T) {
 	cfg, err := InitializeConfig(configTestPaths(t))
 	require.NoError(t, err)
+	authority, err := os.ReadFile(cfg.ConfigPath)
+	require.NoError(t, err)
+	var values map[string]any
+	require.NoError(t, yaml.Unmarshal(authority, &values))
+	zlmValues := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+	mediaValues := values["gb28181"].(map[string]any)["media"].(map[string]any)
+	require.Equal(t, "0.0.0.0", zlmValues["listenip"])
+	require.Equal(t, 40000, zlmValues["rtpport"])
+	require.Equal(t, 18000, zlmValues["rtcport"])
+	require.Equal(t, 18000, zlmValues["rtctcpport"])
+	require.Equal(t, true, mediaValues["managertcexternip"])
 	raw, err := os.ReadFile(cfg.ZLMConfigPath)
 	require.NoError(t, err)
 	sections := map[string]map[string]string{}
@@ -240,14 +381,14 @@ func TestInitialMediaConfigDisablesUnconfiguredListeners(t *testing.T) {
 			sections[section][key] = value
 		}
 	}
-	for section, keys := range map[string][]string{"http": {"sslport"}, "rtsp": {"port", "sslport"}, "rtmp": {"port", "sslport"}, "shell": {"port"}, "srt": {"port"}, "rtp_proxy": {"port"}, "rtc": {"port", "tcpPort", "signalingPort", "signalingSslPort", "icePort", "iceTcpPort"}} {
+	for section, keys := range map[string][]string{"http": {"sslport"}, "rtsp": {"port", "sslport"}, "rtmp": {"port", "sslport"}, "shell": {"port"}, "srt": {"port"}, "rtc": {"signalingPort", "signalingSslPort", "icePort", "iceTcpPort"}} {
 		for _, key := range keys {
 			if sections[section][key] != "0" {
 				t.Errorf("unconfigured listener %s.%s must be disabled", section, key)
 			}
 		}
 	}
-	if sections["general"]["listen_ip"] != "127.0.0.1" {
-		t.Error("initial media management must bind loopback")
+	if sections["general"]["listen_ip"] != "0.0.0.0" || sections["http"]["port"] != "18080" || sections["rtp_proxy"]["port"] != "40000" || sections["rtp_proxy"]["port_range"] != "30000-35000" || sections["rtc"]["port"] != "18000" || sections["rtc"]["tcpPort"] != "18000" {
+		t.Error("initial media configuration does not expose the approved LAN listeners")
 	}
 }

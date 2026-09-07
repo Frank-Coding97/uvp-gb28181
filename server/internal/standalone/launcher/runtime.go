@@ -218,7 +218,7 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		if err != nil {
 			return err
 		}
-		if err = checkPorts([]string{config.RedisAddress(), config.BackendAddress(), config.MediaAddress()}); err != nil {
+		if err = checkPorts([]string{config.RedisAddress(), config.BackendAddress()}, config.MediaListeners()); err != nil {
 			return err
 		}
 		marker, err = standalone.BeginRun(paths)
@@ -479,19 +479,39 @@ func localProbeAddress(address string) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
-func checkPorts(addresses []string) error {
-	listeners := []net.Listener{}
+type portResource interface {
+	Close() error
+}
+
+func checkPorts(addresses []string, media ...[]standalone.MediaListener) error {
+	bindings := make([]standalone.MediaListener, 0, len(addresses))
+	for _, address := range addresses {
+		bindings = append(bindings, standalone.MediaListener{Network: "tcp", Address: address})
+	}
+	for _, listeners := range media {
+		bindings = append(bindings, listeners...)
+	}
+	resources := make([]portResource, 0, len(bindings))
 	defer func() {
-		for _, listener := range listeners {
-			_ = listener.Close()
+		for _, resource := range resources {
+			_ = resource.Close()
 		}
 	}()
-	for _, address := range addresses {
-		listener, err := net.Listen("tcp", address)
-		if err != nil {
-			return fmt.Errorf("required port %s is unavailable: %w", address, err)
+	for _, binding := range bindings {
+		var resource portResource
+		var err error
+		switch binding.Network {
+		case "tcp":
+			resource, err = net.Listen("tcp", binding.Address)
+		case "udp":
+			resource, err = net.ListenPacket("udp", binding.Address)
+		default:
+			return fmt.Errorf("unsupported required port network %q", binding.Network)
 		}
-		listeners = append(listeners, listener)
+		if err != nil {
+			return fmt.Errorf("required %s port %s is unavailable: %w", binding.Network, binding.Address, err)
+		}
+		resources = append(resources, resource)
 	}
 	return nil
 }
