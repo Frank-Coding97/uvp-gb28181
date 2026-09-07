@@ -42,11 +42,20 @@ func init() {
 	}
 	// 配置文件
 	if standalonePaths.Explicit {
+		// Database-only maintenance commands do not start authenticated services.
+		// Every business startup must validate secrets and Windows permissions,
+		// including when the backend is invoked directly without the launcher.
+		if !migrationCommandRequested() {
+			if _, err := standalone.LoadConfig(standalonePaths); err != nil {
+				log.Fatal("standalone configuration invalid: " + err.Error())
+			}
+		}
 		app.ConfigYml = ymlconfig.CreateYamlFactoryFromFile(standalonePaths.ConfigFile)
 		normalizeStandaloneConfigPaths()
 		if app.ConfigYml.GetBool("server.appdebug") {
 			log.Fatal("standalone configuration invalid: server.appdebug must be false")
 		}
+
 	} else {
 		app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -148,7 +149,12 @@ func TestPathsValidateRejectsDirectorySymlinkEscape(t *testing.T) {
 
 	paths, err := ResolvePaths(options)
 	require.NoError(t, err)
-	require.ErrorIs(t, paths.Validate(), ErrPathOutsideInstall)
+	if runtime.GOOS == "windows" {
+		// Windows rejects the reparse point before resolving its outside target.
+		require.ErrorIs(t, paths.Validate(), ErrPathSymlink)
+	} else {
+		require.ErrorIs(t, paths.Validate(), ErrPathOutsideInstall)
+	}
 }
 
 func TestPathsValidateRejectsDatabaseSymlink(t *testing.T) {
