@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -12,40 +14,72 @@ import (
 	"go.uber.org/zap"
 )
 
-// resultHandlerCancel 用于取消结果处理协程
-var resultHandlerCancel context.CancelFunc
+// resultHandlerMu protects the current handler lifecycle state.
+var (
+	resultHandlerMu      sync.Mutex
+	currentResultHandler *resultHandlerState
+)
+
+// ErrResultHandlerStopped means the compatibility stop path returned before
+// the producer closed its result channel, so drain completion is unknown.
+var ErrResultHandlerStopped = errors.New("result handler stopped before result channel closed")
+
+type resultHandlerState struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
+}
 
 // StartResultHandler 启动任务结果处理器
 // 该函数会启动一个后台协程，从调度器的结果通道中读取任务执行结果，
 // 并将结果保存到数据库的 sys_job_results 表中
 func StartResultHandler() {
 	ctx, cancel := context.WithCancel(context.Background())
-	resultHandlerCancel = cancel
+	state := &resultHandlerState{cancel: cancel, done: make(chan struct{})}
+	resultHandlerMu.Lock()
+	previous := currentResultHandler
+	currentResultHandler = state
+	resultHandlerMu.Unlock()
+	if previous != nil {
+		previous.cancel()
+	}
 
 	go func() {
-		app.ZapLog.Info("任务结果处理器已启动")
-		defer app.ZapLog.Info("任务结果处理器已停止")
+		defer close(state.done)
+		resultLogger().Info("任务结果处理器已启动")
+		defer resultLogger().Info("任务结果处理器已停止")
 
+		if app.JobScheduler == nil {
+			state.err = errors.New("result handler scheduler is nil")
+			return
+		}
 		resultsChan := app.JobScheduler.GetResults()
 
 		for {
 			select {
 			case <-ctx.Done():
-				// 处理剩余的结果
-				app.ZapLog.Info("正在处理剩余的任务结果...")
-				drainResults(resultsChan)
+				resultLogger().Info("正在处理剩余的任务结果...")
+				err, closed := drainResults(resultsChan)
+				if err != nil {
+					state.err = err
+				}
+				if !closed {
+					if state.err == nil {
+						state.err = ErrResultHandlerStopped
+					}
+				}
 				return
 
 			case result, ok := <-resultsChan:
 				if !ok {
-					// 通道已关闭
-					app.ZapLog.Info("任务结果通道已关闭，处理器退出")
+					resultLogger().Info("任务结果通道已关闭，处理器退出")
 					return
 				}
 
 				// 保存结果到数据库
 				if err := saveJobResult(result); err != nil {
-					app.ZapLog.Error("保存任务结果失败",
+					state.err = firstResultHandlerError(state.err, err)
+					resultLogger().Error("保存任务结果失败",
 						zap.String("jobID", result.JobID),
 						zap.String("status", result.Status),
 						zap.Error(err))
@@ -82,7 +116,7 @@ func saveJobResult(result *schedulerhelper.JobResult) error {
 		return fmt.Errorf("保存任务结果到数据库失败: %w", err)
 	}
 
-	app.ZapLog.Debug("任务结果已保存到数据库",
+	resultLogger().Debug("任务结果已保存到数据库",
 		zap.String("jobID", result.JobID),
 		zap.String("status", result.Status),
 		zap.Duration("duration", result.Duration),
@@ -92,18 +126,20 @@ func saveJobResult(result *schedulerhelper.JobResult) error {
 	if result.ExecutionPolicy == schedulerhelper.PolicyOnce && result.Status == "SUCCESS" {
 		job := &models.SysJobs{}
 		if err := job.GetByID(ctx, result.JobID); err != nil {
-			app.ZapLog.Error("获取任务信息失败",
+			resultLogger().Error("获取任务信息失败",
 				zap.String("jobID", result.JobID),
 				zap.Error(err))
+			return fmt.Errorf("获取任务信息失败: %w", err)
 		} else {
 			if job.Status == 1 {
 				job.Status = 0
 				if err := job.Update(ctx); err != nil {
-					app.ZapLog.Error("更新单次执行任务状态失败",
+					resultLogger().Error("更新单次执行任务状态失败",
 						zap.String("jobID", result.JobID),
 						zap.Error(err))
+					return fmt.Errorf("更新单次执行任务状态失败: %w", err)
 				} else {
-					app.ZapLog.Info("单次执行任务已完成，已更新数据库状态为禁用",
+					resultLogger().Info("单次执行任务已完成，已更新数据库状态为禁用",
 						zap.String("jobID", result.JobID))
 				}
 			}
@@ -115,37 +151,81 @@ func saveJobResult(result *schedulerhelper.JobResult) error {
 }
 
 // StopResultHandler 停止任务结果处理器
-// 该函数会优雅地停止结果处理协程，确保所有待处理的结果都被保存
+// 这是兼容旧调用方的取消操作，不等待生产者关闭通道，也不宣称结果已排空。
 func StopResultHandler() {
-	if resultHandlerCancel != nil {
-		app.ZapLog.Info("正在停止任务结果处理器...")
-		resultHandlerCancel()
-		resultHandlerCancel = nil
+	resultHandlerMu.Lock()
+	state := currentResultHandler
+	resultHandlerMu.Unlock()
+	if state != nil {
+		resultLogger().Info("正在停止任务结果处理器...")
+		state.cancel()
+	}
+}
+
+// WaitResultHandler waits for the result handler to observe the producer's
+// closed channel and finish saving every result it received. It returns a
+// persistence error, or ErrResultHandlerStopped when the compatibility stop
+// path ended before channel closure made draining provable.
+func WaitResultHandler(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	resultHandlerMu.Lock()
+	state := currentResultHandler
+	resultHandlerMu.Unlock()
+	if state == nil {
+		return nil
+	}
+	select {
+	case <-state.done:
+		return state.err
+	default:
+	}
+	select {
+	case <-state.done:
+		return state.err
+	case <-ctx.Done():
+		return fmt.Errorf("wait result handler: %w", ctx.Err())
 	}
 }
 
 // drainResults 处理结果通道中剩余的所有结果
-func drainResults(resultsChan <-chan *schedulerhelper.JobResult) {
+func drainResults(resultsChan <-chan *schedulerhelper.JobResult) (error, bool) {
 	count := 0
+	var firstErr error
 	for {
 		select {
 		case result, ok := <-resultsChan:
 			if !ok {
-				app.ZapLog.Info("所有剩余任务结果已处理完成", zap.Int("count", count))
-				return
+				resultLogger().Info("所有剩余任务结果已处理完成", zap.Int("count", count))
+				return firstErr, true
 			}
 			count++
 			if err := saveJobResult(result); err != nil {
-				app.ZapLog.Error("保存剩余任务结果失败",
+				firstErr = firstResultHandlerError(firstErr, err)
+				resultLogger().Error("保存剩余任务结果失败",
 					zap.String("jobID", result.JobID),
 					zap.Error(err))
 			}
 		default:
-			// 通道为空，退出
 			if count > 0 {
-				app.ZapLog.Info("所有剩余任务结果已处理完成", zap.Int("count", count))
+				resultLogger().Info("所有剩余任务结果已处理完成", zap.Int("count", count))
 			}
-			return
+			return firstErr, false
 		}
 	}
+}
+
+func firstResultHandlerError(first, next error) error {
+	if first != nil {
+		return first
+	}
+	return next
+}
+
+func resultLogger() *zap.Logger {
+	if app.ZapLog != nil {
+		return app.ZapLog
+	}
+	return zap.NewNop()
 }
