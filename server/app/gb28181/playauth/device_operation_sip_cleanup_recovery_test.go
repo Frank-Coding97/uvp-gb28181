@@ -42,7 +42,7 @@ func TestDeviceSIPCleanupProcessHelper(t *testing.T) {
 			_, err = fn(ctx, id, version, identity.AttemptID)
 			require.ErrorIs(t, err, ErrDeviceIntentConflict)
 		}
-		next, err := s.PrepareSIPBranchCleanup(ctx, id, version, sipCleanupIdentity(2))
+		next, ticket, err := s.PrepareSIPBranchCleanupWork(ctx, id, version, sipCleanupIdentity(2))
 		require.NoError(t, err)
 		a := next.Steps[0].KnownBranch.CleanupAttempts
 		require.Len(t, a, 2)
@@ -51,6 +51,17 @@ func TestDeviceSIPCleanupProcessHelper(t *testing.T) {
 		require.Nil(t, a[0].LocalQuiescedAt)
 		require.Equal(t, a[0].Identity.BYE.Request.CSeq+1, a[1].Identity.BYE.Request.CSeq)
 		require.Equal(t, SIPCleanupPrepared, a[1].State)
+		barrier := NewDeviceOperationBarrier(NewDeviceSecurityStore(db))
+		lease, err := barrier.BeginSIPCleanup(ctx, ticket)
+		require.NoError(t, err, "real new process may own a new compensation attempt")
+		require.Equal(t, id.DeviceEpoch, lease.OperationEpoch())
+		_, err = barrier.BeginEpoch(ctx, id.DeviceCode, 2)
+		require.Error(t, err, "cleanup registration must not clear fresh business gate")
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+		require.ErrorIs(t, barrier.WaitBefore(waitCtx, uint(id.DevicePK), 2), context.DeadlineExceeded)
+		cancel()
+		lease.Release()
+		require.NoError(t, barrier.WaitBefore(ctx, uint(id.DevicePK), 2))
 		os.Exit(0)
 	}
 	_, err = s.PrepareSIPBranchCleanup(ctx, id, 5, identity)
@@ -71,6 +82,8 @@ func TestDeviceSIPCleanupActualProcessRestart(t *testing.T) {
 	for _, stage := range []string{"prepared", "ack", "bye"} {
 		t.Run(stage, func(t *testing.T) {
 			f, _, _ := sipCleanupFixture(t)
+			require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+			require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 			path := filepath.Join(t.TempDir(), "cleanup.db")
 			// Copy only this isolated fixture, before any cleanup owner exists.
 			require.NoError(t, f.db.Exec("VACUUM INTO ?", path).Error)
