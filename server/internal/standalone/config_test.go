@@ -239,6 +239,21 @@ func TestInstanceMediaListenersDefaultsAndOverrides(t *testing.T) {
 	}, (InstanceConfig{values: values}).MediaListeners())
 }
 
+func TestInstanceMediaListenIPPolicy(t *testing.T) {
+	for _, listenIP := range []string{"0.0.0.0", "127.0.0.1"} {
+		t.Run("allow "+listenIP, func(t *testing.T) {
+			values, err := newInstanceConfigValues()
+			require.NoError(t, err)
+			zlm := values["gb28181"].(map[string]any)["zlm"].(map[string]any)
+			zlm["listenip"] = listenIP
+			raw, err := yaml.Marshal(values)
+			require.NoError(t, err)
+			_, err = decodeInstanceConfig(raw)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestInstanceMediaConfigOverrideRebuildsDerivedListeners(t *testing.T) {
 	paths := configTestPaths(t)
 	initial, err := InitializeConfig(paths)
@@ -294,8 +309,10 @@ func TestInstanceMediaConfigRejectsInvalidListenIPAndPorts(t *testing.T) {
 	}{
 		{name: "hostname", mutate: func(zlm map[string]any) { zlm["listenip"] = "localhost" }},
 		{name: "remote IPv4", mutate: func(zlm map[string]any) { zlm["listenip"] = "192.0.2.1" }},
+		{name: "other loopback IPv4", mutate: func(zlm map[string]any) { zlm["listenip"] = "127.0.0.2" }},
 		{name: "IPv6", mutate: func(zlm map[string]any) { zlm["listenip"] = "::1" }},
 		{name: "listen IP wrong type", mutate: func(zlm map[string]any) { zlm["listenip"] = 127001 }},
+		{name: "remote ZLM host", mutate: func(zlm map[string]any) { zlm["host"] = "192.0.2.1" }},
 		{name: "RTP zero", mutate: func(zlm map[string]any) { zlm["rtpport"] = 0 }},
 		{name: "RTP above range", mutate: func(zlm map[string]any) { zlm["rtpport"] = 65536 }},
 		{name: "RTP wrong type", mutate: func(zlm map[string]any) { zlm["rtpport"] = "40000" }},

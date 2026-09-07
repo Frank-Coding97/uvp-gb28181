@@ -230,6 +230,9 @@ func decodeInstanceConfig(raw []byte) (map[string]any, error) {
 	if configString(values, "redis", "host") != "127.0.0.1" {
 		return nil, errors.New("standalone Redis must bind to 127.0.0.1")
 	}
+	if configString(values, "gb28181", "zlm", "host") != "127.0.0.1" {
+		return nil, errors.New("standalone ZLM must bind to 127.0.0.1")
+	}
 	for _, key := range [][]string{{"redis", "port"}, {"gb28181", "zlm", "httpport"}} {
 		port := configInt(values, key...)
 		if port < 1 || port > 65535 {
@@ -326,33 +329,7 @@ func configIntDefault(values map[string]any, fallback int, keys ...string) int {
 }
 
 func validMediaListenIP(value string) bool {
-	if value == "" || strings.Contains(value, ":") {
-		return false
-	}
-	ip := net.ParseIP(value)
-	if ip == nil || ip.To4() == nil {
-		return false
-	}
-	if ip.Equal(net.IPv4zero) {
-		return true
-	}
-	addresses, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, address := range addresses {
-		var local net.IP
-		switch typed := address.(type) {
-		case *net.IPNet:
-			local = typed.IP
-		case *net.IPAddr:
-			local = typed.IP
-		}
-		if local != nil && local.To4() != nil && local.To4().Equal(ip.To4()) {
-			return true
-		}
-	}
-	return false
+	return value == defaultMediaListenIP || value == "127.0.0.1"
 }
 
 func validateMediaPort(name string, port int, allowZero bool) error {
