@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/bootstrapcredential"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/control"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/controlpipe"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/readiness"
@@ -21,6 +22,12 @@ import (
 // Launch holds installation ownership until all created components terminate.
 // A normal stop drains the backend around media shutdown, then stops Redis.
 func Launch(ctx context.Context, installDir, recordingsDir string, notify func(Status)) error {
+	return LaunchWithBrowser(ctx, installDir, recordingsDir, notify, nil)
+}
+
+// LaunchWithBrowser delivers the ephemeral entry URL only to the browser
+// callback. It is deliberately excluded from progress status and logs.
+func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, notify func(Status), openBrowser func(string)) error {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	owner := newControlOwner(cancelRun)
@@ -49,6 +56,7 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 	var paths standalone.Paths
 	var config standalone.InstanceConfig
 	var backendAddress string
+	var bootstrapToken, installationPhase string
 	start := func(name, path, dir string, args []string, stdin *os.File, monitor bool) (*winprocess.Process, <-chan error, error) {
 		log, err := os.OpenFile(filepath.Join(paths.LogsDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
@@ -177,7 +185,24 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		return nil
 	}
 	steps.Backend = func(ctx context.Context) (string, error) {
-		process, done, err := start("backend", release.BackendExe, release.ReleaseDir, nil, nil, true)
+		var err error
+		bootstrapToken, err = bootstrapcredential.NewToken()
+		if err != nil {
+			return "", err
+		}
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			return "", errors.New("create backend bootstrap pipe failed")
+		}
+		defer reader.Close()
+		// The fixed frame fits in the empty pipe. Close the writer before process
+		// creation so the child always receives a complete frame followed by EOF.
+		err = bootstrapcredential.Write(writer, bootstrapToken)
+		err = errors.Join(err, writer.Close())
+		if err != nil {
+			return "", errors.New("prepare backend bootstrap credential failed")
+		}
+		process, done, err := start("backend", release.BackendExe, release.ReleaseDir, nil, reader, true)
 		backendDone = done
 		if err != nil {
 			return "", err
@@ -186,6 +211,20 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		err = awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error {
 			var err error
 			status, err = readiness.Check(ctx, nil, "http://"+backendAddress, config.JWTSecret(), process.PID())
+			if err == nil {
+				switch status.InstallationPhase {
+				case "pending_admin":
+					if !status.CredentialAccepted {
+						err = errors.New("backend bootstrap credential not accepted")
+					}
+				case "pending_sip", "complete":
+				default:
+					err = errors.New("backend installation state is unavailable")
+				}
+			}
+			if err == nil {
+				installationPhase = status.InstallationPhase
+			}
 			return err
 		})
 		return status.SIPState, err
@@ -252,6 +291,16 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 		}
 		if notify != nil {
 			notify(status)
+		}
+		if status.State == Ready {
+			entry := status.ManagementURL
+			if installationPhase == "pending_admin" {
+				entry += "#/standalone-setup?bootstrap_token=" + bootstrapToken
+			}
+			if openBrowser != nil {
+				openBrowser(entry)
+			}
+			bootstrapToken = ""
 		}
 	})
 	if result == nil && marker != nil {

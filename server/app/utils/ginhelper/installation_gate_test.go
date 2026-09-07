@@ -13,8 +13,8 @@ func TestInstallationGatePhasesAndExactRoutes(t *testing.T) {
 		want                int
 	}{
 		{"pending_admin", "GET", "/", 204},
-		{"pending_admin", "GET", "/assets/main.js", 204},
-		{"pending_admin", "GET", "/assets/../uploads/private", 503},
+		{"pending_admin", "GET", "/static/main.js", 204},
+		{"pending_admin", "GET", "/static/../uploads/private", 503},
 		{"pending_admin", "POST", "/api/standalone/setup/admin", 204},
 		{"pending_admin", "GET", "/api/standalone/setup/admin", 503},
 		{"pending_admin", "POST", "/api/login", 503},

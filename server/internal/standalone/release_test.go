@@ -49,10 +49,10 @@ func TestLoadReleaseAcceptsVerifiedManifest(t *testing.T) {
 	require.Equal(t, filepath.Join(fixture.releaseDir, "resource"), release.ResourceDir)
 }
 
-func TestLoadReleaseAcceptsSchemaV2Only(t *testing.T) {
+func TestLoadReleaseAcceptsSchemaV3Only(t *testing.T) {
 	fixture := newTestReleaseFixture(t, "1.2.3-win10")
-	fixture.manifest.SchemaMin = 2
-	fixture.manifest.SchemaMax = 2
+	fixture.manifest.SchemaMin = 3
+	fixture.manifest.SchemaMax = 3
 	writeTestReleaseManifest(t, fixture)
 
 	_, err := LoadRelease(fixture.installDir)
@@ -127,7 +127,7 @@ func TestLoadReleaseRejectsInvalidManifest(t *testing.T) {
 		{
 			name: "schema maximum above supported",
 			mutate: func(fixture *testReleaseFixture) {
-				fixture.manifest.SchemaMax = 3
+				fixture.manifest.SchemaMax = 4
 			},
 		},
 		{
@@ -139,7 +139,7 @@ func TestLoadReleaseRejectsInvalidManifest(t *testing.T) {
 		{
 			name: "schema range reversed",
 			mutate: func(fixture *testReleaseFixture) {
-				fixture.manifest.SchemaMin = 2
+				fixture.manifest.SchemaMin = 3
 				fixture.manifest.SchemaMax = 1
 			},
 		},
@@ -231,35 +231,35 @@ func TestLoadReleaseRejectsDuplicateManifestAndFileKeys(t *testing.T) {
 		{
 			name: "manifest metadata case alias",
 			manifest: func(fixture testReleaseFixture) string {
-				return fmt.Sprintf(`{"format_version":1,"FORMAT_VERSION":1,"version":%q,"source_commit":%q,"files":%s,"schema_min":1,"schema_max":2}`,
+				return fmt.Sprintf(`{"format_version":1,"FORMAT_VERSION":1,"version":%q,"source_commit":%q,"files":%s,"schema_min":1,"schema_max":3}`,
 					fixture.manifest.Version, fixture.manifest.SourceCommit, testReleaseFilesJSON(fixture))
 			},
 		},
 		{
 			name: "file path duplicate",
 			manifest: func(fixture testReleaseFixture) string {
-				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","path":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","path":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":3}`,
 					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
 			},
 		},
 		{
 			name: "file path case alias",
 			manifest: func(fixture testReleaseFixture) string {
-				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","PATH":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","PATH":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":3}`,
 					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
 			},
 		},
 		{
 			name: "file checksum duplicate",
 			manifest: func(fixture testReleaseFixture) string {
-				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"sha256":%q},%s],"schema_min":1,"schema_max":3}`,
 					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
 			},
 		},
 		{
 			name: "file checksum case alias",
 			manifest: func(fixture testReleaseFixture) string {
-				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"SHA256":%q},%s],"schema_min":1,"schema_max":2}`,
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"SHA256":%q},%s],"schema_min":1,"schema_max":3}`,
 					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
 			},
 		},
@@ -368,7 +368,7 @@ func newTestReleaseFixture(t *testing.T, version string) testReleaseFixture {
 			Version:       version,
 			SourceCommit:  "0123456789abcdef0123456789abcdef01234567",
 			SchemaMin:     1,
-			SchemaMax:     2,
+			SchemaMax:     3,
 			Files: []testReleaseFile{
 				{Path: "backend/uvp-server.exe", Data: []byte("backend")},
 				{Path: "redis/redis-server.exe", Data: []byte("redis")},

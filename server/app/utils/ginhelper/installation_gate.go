@@ -31,7 +31,7 @@ func installationRouteAllowed(phase, method, requestPath string) bool {
 		// Vite's shipped assets only. Uploads, public QR and media paths are not
 		// installation resources; the static handler still enforces file ownership.
 		if requestPath == "/" || requestPath == "/index.html" || requestPath == "/favicon.ico" ||
-			(strings.HasPrefix(requestPath, "/assets/") && path.Clean(requestPath) == requestPath && !strings.Contains(requestPath, "\\")) {
+			(strings.HasPrefix(requestPath, "/static/") && path.Clean(requestPath) == requestPath && !strings.Contains(requestPath, "\\")) {
 			return true
 		}
 	}

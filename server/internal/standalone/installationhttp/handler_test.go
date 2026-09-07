@@ -433,3 +433,18 @@ func (fixture coordinatorFixture) request(method, path, body, remoteAddr, origin
 	fixture.engine.ServeHTTP(response, request)
 	return response
 }
+
+func TestLoginAdmissionWaitsForPolicyReload(t *testing.T) {
+	var handler *Handler
+	fixture := newCoordinator(t, PhasePendingAdmin, func(context.Context, string, string) error { return nil }, func(context.Context) error {
+		if handler.AllowedPhase() != PhasePendingAdmin {
+			t.Error("login admission opened before policy reload finished")
+		}
+		return nil
+	})
+	handler = fixture.handler
+	response := fixture.request(http.MethodPost, "/api/standalone/setup/admin", `{"username":"admin","password":"strong-password"}`, "127.0.0.1:32100", fixture.server.URL, func(request *http.Request) { request.Header.Set(setupTokenHeader, fixture.token) })
+	if response.Code != http.StatusCreated || handler.AllowedPhase() != PhasePendingSIP {
+		t.Fatal("policy completion did not open SIP setup")
+	}
+}

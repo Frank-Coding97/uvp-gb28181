@@ -69,16 +69,22 @@ func main() {
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
 	var admission *ginhelper.StandaloneAdmission
+	var setup *standaloneSetup
 	if app.DataPath != "" {
 		admission = ginhelper.NewStandaloneAdmission()
 		engine.Use(admission.Middleware())
+		var err error
+		setup, err = prepareStandaloneSetup(engine)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	// 初始化系统路由
 	routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
 	if admission != nil {
-		if err := runStandaloneServer(engine, admission); err != nil {
+		if err := runStandaloneServer(engine, admission, setup); err != nil {
 			log.Fatal(err)
 		}
 		return

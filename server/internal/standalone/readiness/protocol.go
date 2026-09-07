@@ -14,6 +14,8 @@ const (
 )
 
 type Status struct {
+	InstallationPhase  string `json:"installation_phase,omitempty"`
+	CredentialAccepted bool   `json:"credential_accepted,omitempty"`
 	BackendReady       bool   `json:"backend_ready"`
 	DatabaseReady      bool   `json:"database_ready"`
 	RedisReady         bool   `json:"redis_ready"`

@@ -28,6 +28,14 @@ func registerStandaloneReadiness(engine *gin.Engine, secret string, probe func(c
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 		defer cancel()
 		state := probe(ctx)
+		if phase, exists := c.Get("standalone.installation_phase"); exists {
+			state.InstallationPhase, _ = phase.(string)
+			state.CredentialAccepted = c.GetBool("standalone.credential_accepted")
+			if !c.GetBool("standalone.installation_ready") {
+				state.AuthorizationReady = false
+				state.BackendReady = false
+			}
+		}
 		body, err := json.Marshal(state)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)

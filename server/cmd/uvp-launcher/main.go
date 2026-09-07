@@ -40,23 +40,24 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	err = launcher.Launch(ctx, *root, *recordings, func(status launcher.Status) {
+	err = launcher.LaunchWithBrowser(ctx, *root, *recordings, func(status launcher.Status) {
 		if status.State == launcher.Ready {
 			if status.PreviousUnclean {
 				fmt.Println("检测到上次异常退出；本次启动检查已通过，录像完整性仍需核对")
 			}
 			fmt.Println("管理地址：", status.ManagementURL)
-			if !*noBrowser {
-				if err := openManagementBrowser(status.ManagementURL); err != nil {
-					fmt.Fprintln(os.Stderr, "浏览器打开失败，请手动访问管理地址")
-				}
-			}
 		}
 		if status.State == launcher.Ready && !status.BusinessReady {
 			fmt.Println("基础组件已就绪，SIP 待配置或待就绪")
 			return
 		}
 		fmt.Printf("UVP: %s\n", status.State)
+	}, func(entry string) {
+		if !*noBrowser {
+			if err := openManagementBrowser(entry); err != nil {
+				fmt.Fprintln(os.Stderr, "浏览器打开失败，请从本机启动器重新打开初始化页面")
+			}
+		}
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "启动器退出：", err)

@@ -247,10 +247,6 @@ func (h *Handler) handleAdmin(c *gin.Context) {
 		return
 	}
 
-	h.mu.Lock()
-	h.phase = PhasePendingSIP
-	h.mu.Unlock()
-
 	if h.reloadPolicy == nil {
 		h.markReloadFailed()
 		writeError(c, http.StatusServiceUnavailable, "policy reload failed")
@@ -261,6 +257,11 @@ func (h *Handler) handleAdmin(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "policy reload failed")
 		return
 	}
+	// Keep login behind the pending-admin gate until policy publication finishes.
+	h.mu.Lock()
+	h.phase = PhasePendingSIP
+	h.mu.Unlock()
+
 	c.JSON(http.StatusCreated, statusResponse{Standalone: true, Phase: PhasePendingSIP})
 }
 

@@ -17,7 +17,7 @@ import (
 const (
 	releaseManifestFormatVersion = 1
 	releaseSchemaMinSupported    = 1
-	releaseSchemaMaxSupported    = 2
+	releaseSchemaMaxSupported    = 3
 
 	releaseBackendPath = "backend/uvp-server.exe"
 	releaseRedisPath   = "redis/redis-server.exe"

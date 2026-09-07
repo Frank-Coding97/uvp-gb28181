@@ -28,6 +28,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/installation"
 )
 
 var standalonePaths standalone.Paths
@@ -96,6 +97,18 @@ func init() {
 	}
 
 	// 初始化casbin
+	if standalonePaths.Explicit {
+		state, err := installation.NewStore(app.DB()).State(context.Background())
+		if err != nil {
+			log.Fatal("standalone installation state is invalid")
+		}
+		if state.Phase != installation.PhaseComplete {
+			// This first-install process reloads the committed administrator policy
+			// explicitly before allowing login. Keep the periodic loader out of that
+			// transition; normal configured reload resumes on the next full startup.
+			app.ConfigYml.Set("casbin.autoloadpolicyseconds", 0)
+		}
+	}
 	app.CasbinV2 = casbinhelper.NewCasbinHelper()
 	err := app.CasbinV2.InitCasbin(app.DB(), app.ConfigYml.GetString("casbin.modelconfig"))
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 // The launcher owns the process Job and coordinates ZLM between quiesce and
 // finalize. Child process groups isolate Ctrl+C so only the launcher initiates
 // this protocol. Closing the console or losing the launcher remains abnormal.
-func runStandaloneServer(engine *gin.Engine, admission *ginhelper.StandaloneAdmission) error {
+func runStandaloneServer(engine *gin.Engine, admission *ginhelper.StandaloneAdmission, setup *standaloneSetup) error {
 	name, key, err := control.Endpoint(app.BasePath, "backend", app.ConfigYml.GetString("token.jwttokensignkey"))
 	if err != nil {
 		return err
@@ -40,7 +40,11 @@ func runStandaloneServer(engine *gin.Engine, admission *ginhelper.StandaloneAdmi
 		IdleTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.idle_timeout")) * time.Second,
 	}
 	defer server.Close()
-	gb28181.Start()
+	if setup.handler.Phase() == "complete" {
+		if err := setup.activate(); err != nil && !setup.started {
+			return err
+		}
+	}
 	ginhelper.PrintStartupBanner()
 	httpDone := make(chan error, 1)
 	go func() { httpDone <- server.Serve(listener) }()
