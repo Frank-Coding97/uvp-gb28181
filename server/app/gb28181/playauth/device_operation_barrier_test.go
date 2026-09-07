@@ -2,11 +2,13 @@ package playauth
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 const operationBarrierDevice = transferDevice
@@ -133,6 +135,75 @@ func TestAuthorizationServiceBeginQueuedOperationUsesTrustedV2IATAndV4Epoch(t *t
 	lease.Release()
 }
 
+func TestAuthorizationServiceBeginQueuedOperationRechecksRegistryAfterAdmission(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, *AuthorizationRegistry, string)
+		err    error
+	}{
+		{
+			name: "terminal",
+			mutate: func(t *testing.T, registry *AuthorizationRegistry, generation string) {
+				require.NoError(t, registry.BindAuthorization(generation, 77))
+				require.Equal(t, 1, registry.TerminateMediaGeneration(77))
+			},
+			err: ErrAuthorizationTerminal,
+		},
+		{
+			name: "replacement",
+			mutate: func(_ *testing.T, registry *AuthorizationRegistry, generation string) {
+				registry.mu.Lock()
+				record := registry.records[generation]
+				record.nonce = "replacement"
+				registry.records[generation] = record
+				registry.mu.Unlock()
+			},
+			err: ErrAuthorizationClaimsMismatch,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture, barrier := newDeviceOperationBarrierFixture(t)
+			service, queued := newOperationBarrierAuthorizationService(t, fixture, barrier, 1, "post-admission-"+test.name)
+			guard, err := barrier.LockTransfer(context.Background(), 1)
+			require.NoError(t, err)
+
+			resolved := make(chan struct{})
+			var resolveOnce sync.Once
+			callbackName := "device_operation_barrier_test_signal_resolve_" + test.name
+			require.NoError(t, fixture.db.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+				if db.Statement.Table == "gb_device" && len(db.Statement.Selects) == 1 && db.Statement.Selects[0] == "id" {
+					resolveOnce.Do(func() { close(resolved) })
+				}
+			}))
+			t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callbackName) })
+
+			type outcome struct {
+				lease DeviceOperationLease
+				err   error
+			}
+			result := make(chan outcome, 1)
+			go func() {
+				lease, err := service.BeginQueuedOperation(context.Background(), queued)
+				result <- outcome{lease: lease, err: err}
+			}()
+			select {
+			case <-resolved:
+			case <-time.After(time.Second):
+				t.Fatal("queued operation did not reach PK resolution")
+			}
+			test.mutate(t, service.registry, queued.AuthorizationGeneration)
+			guard.Release()
+
+			got := <-result
+			require.ErrorIs(t, got.err, test.err)
+			require.Nil(t, got.lease)
+			barrier.mu.Lock()
+			require.Empty(t, barrier.lanes, "post-admission rejection must release the owner lease")
+			barrier.mu.Unlock()
+		})
+	}
+}
+
 func TestDeviceOperationBarrierCommitCancelsOldLeasesButReleaseDoesNot(t *testing.T) {
 	fixture, barrier := newDeviceOperationBarrierFixture(t)
 	first, err := barrier.BeginEpoch(context.Background(), operationBarrierDevice, 1)
@@ -172,7 +243,10 @@ func TestDeviceOperationBarrierCallerCancelDoesNotCancelAnotherLeaseAndReclaimsL
 	first, err := barrier.BeginEpoch(firstCtx, operationBarrierDevice, 1)
 	require.NoError(t, err)
 	firstCancel()
-	require.NoError(t, first.Context().Err())
+	require.ErrorIs(t, first.Context().Err(), context.Canceled)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	require.ErrorIs(t, barrier.WaitBefore(waitCtx, 1, 2), context.DeadlineExceeded)
+	waitCancel()
 
 	second, err := barrier.BeginEpoch(context.Background(), operationBarrierDevice, 1)
 	require.NoError(t, err)
@@ -183,6 +257,71 @@ func TestDeviceOperationBarrierCallerCancelDoesNotCancelAnotherLeaseAndReclaimsL
 	_, exists := barrier.lanes[1]
 	barrier.mu.Unlock()
 	require.False(t, exists, "released leases must allow the PK lane to be reclaimed")
+}
+
+func TestDeviceOperationBarrierAdmissionGateDoesNotHoldLaneMutexDuringSQL(t *testing.T) {
+	fixture, barrier := newDeviceOperationBarrierFixture(t)
+	queryStarted := make(chan struct{})
+	releaseQuery := make(chan struct{})
+	var signalOnce sync.Once
+	callbackName := "device_operation_barrier_test_block_resolve"
+	require.NoError(t, fixture.db.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement.Table != "gb_device" || len(db.Statement.Selects) != 1 || !strings.Contains(db.Statement.Selects[0], "cleanup_completed_epoch") {
+			return
+		}
+		signalOnce.Do(func() { close(queryStarted) })
+		select {
+		case <-releaseQuery:
+		case <-db.Statement.Context.Done():
+		}
+	}))
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callbackName) })
+
+	type outcome struct {
+		lease DeviceOperationLease
+		err   error
+	}
+	firstResult := make(chan outcome, 1)
+	go func() {
+		lease, err := barrier.BeginEpoch(context.Background(), operationBarrierDevice, 1)
+		firstResult <- outcome{lease: lease, err: err}
+	}()
+	select {
+	case <-queryStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first admission did not reach the controlled SQL block")
+	}
+
+	secondCtx, secondCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	secondResult := make(chan error, 1)
+	go func() {
+		guard, err := barrier.LockTransfer(secondCtx, 1)
+		if guard != nil {
+			guard.Release()
+		}
+		secondResult <- err
+	}()
+
+	var secondErr error
+	timely := true
+	select {
+	case secondErr = <-secondResult:
+	case <-time.After(250 * time.Millisecond):
+		timely = false
+	}
+	secondCancel()
+	close(releaseQuery)
+	first := <-firstResult
+	if first.lease != nil {
+		first.lease.Release()
+	}
+	if !timely {
+		if secondErr == nil {
+			secondErr = context.DeadlineExceeded
+		}
+		t.Fatalf("LockTransfer remained blocked by admission SQL, err=%v", secondErr)
+	}
+	require.ErrorIs(t, secondErr, context.DeadlineExceeded)
 }
 
 func TestDeviceOperationBarrierConcurrentLeaseReleaseIsIdempotent(t *testing.T) {

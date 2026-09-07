@@ -64,18 +64,15 @@ type deviceOperationLaneRef struct {
 }
 
 type deviceOperationLease struct {
-	barrier        *DeviceOperationBarrier
-	lane           *deviceOperationLane
-	ref            *deviceOperationLaneRef
-	epoch          int64
-	ctx            context.Context
-	cancel         context.CancelCauseFunc
-	deadlineCancel context.CancelFunc
-	releaseOnce    sync.Once
+	lane        *deviceOperationLane
+	ref         *deviceOperationLaneRef
+	epoch       int64
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	releaseOnce sync.Once
 }
 
 type deviceTransferGuard struct {
-	barrier   *DeviceOperationBarrier
 	lane      *deviceOperationLane
 	ref       *deviceOperationLaneRef
 	mu        sync.Mutex
@@ -117,33 +114,48 @@ func (s *AuthorizationService) BeginQueuedOperation(ctx context.Context, queued 
 	if s == nil || s.operationBarrier == nil {
 		return nil, ErrDeviceOperationUnavailable
 	}
-	snapshot, err := s.captureQueuedAuthorization(ctx, queued, 0, false)
+	if err := requireAuthorizationContext(ctx); err != nil {
+		return nil, err
+	}
+	admissionCtx, cancel := context.WithTimeout(ctx, deviceOperationAdmissionTimeout)
+	defer cancel()
+	snapshot, err := s.captureQueuedAuthorization(admissionCtx, queued, 0, false)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeQueuedRecord(ctx, snapshot.record); err != nil {
+	if err := s.authorizeQueuedRecord(admissionCtx, snapshot.record); err != nil {
 		return nil, err
 	}
-	if err := s.recheckQueuedAuthorization(ctx, queued, snapshot, 0, false); err != nil {
+	if err := s.recheckQueuedAuthorization(admissionCtx, queued, snapshot, 0, false); err != nil {
 		return nil, err
 	}
 
+	var lease DeviceOperationLease
+	var beginErr error
 	switch snapshot.record.binding.version {
 	case tokenVersionV2:
 		issuedAt := snapshot.record.issuedAt.Unix()
 		if issuedAt <= 0 {
 			return nil, ErrAuthorizationClaimsMismatch
 		}
-		return s.operationBarrier.beginLegacy(ctx, snapshot.record.binding.deviceID, issuedAt)
+		lease, beginErr = s.operationBarrier.beginLegacyWithWait(ctx, admissionCtx, snapshot.record.binding.deviceID, issuedAt)
 	case tokenVersionV4:
 		epoch := snapshot.record.binding.deviceEpoch
 		if epoch <= 0 {
 			return nil, ErrAuthorizationDeviceEpoch
 		}
-		return s.operationBarrier.BeginEpoch(ctx, snapshot.record.binding.deviceID, epoch)
+		lease, beginErr = s.operationBarrier.beginEpochWithWait(ctx, admissionCtx, snapshot.record.binding.deviceID, epoch)
 	default:
 		return nil, ErrAuthorizationClaimsMismatch
 	}
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	if err := s.recheckQueuedAuthorization(admissionCtx, queued, snapshot, 0, false); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	return lease, nil
 }
 
 // BeginEpoch admits a v4-style operation against the exact expected epoch.
@@ -155,6 +167,19 @@ func (b *DeviceOperationBarrier) BeginEpoch(ctx context.Context, deviceCode stri
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, deviceOperationAdmissionTimeout)
 	defer cancel()
+	return b.beginEpochWithWait(ctx, waitCtx, deviceCode, expectedEpoch)
+}
+
+func (b *DeviceOperationBarrier) beginEpochWithWait(ctx, waitCtx context.Context, deviceCode string, expectedEpoch int64) (DeviceOperationLease, error) {
+	if err := b.validateBegin(ctx, deviceCode, expectedEpoch); err != nil {
+		return nil, err
+	}
+	if isNilInterface(waitCtx) {
+		return nil, ErrDeviceOperationUnavailable
+	}
+	if err := waitCtx.Err(); err != nil {
+		return nil, err
+	}
 	devicePK, err := b.resolveDevicePK(waitCtx, deviceCode)
 	if err != nil {
 		return nil, normalizeDeviceOperationError(err, waitCtx)
@@ -205,6 +230,25 @@ func (b *DeviceOperationBarrier) beginLegacy(ctx context.Context, deviceCode str
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, deviceOperationAdmissionTimeout)
 	defer cancel()
+	return b.beginLegacyWithWait(ctx, waitCtx, deviceCode, issuedAt)
+}
+
+func (b *DeviceOperationBarrier) beginLegacyWithWait(ctx, waitCtx context.Context, deviceCode string, issuedAt int64) (DeviceOperationLease, error) {
+	if isNilInterface(ctx) || isNilInterface(waitCtx) {
+		return nil, ErrDeviceOperationUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := waitCtx.Err(); err != nil {
+		return nil, err
+	}
+	if b == nil || b.store == nil || b.store.db == nil {
+		return nil, ErrDeviceOperationUnavailable
+	}
+	if !validGBID(deviceCode) || issuedAt <= 0 {
+		return nil, ErrDeviceOperationInvalid
+	}
 	devicePK, err := b.resolveDevicePK(waitCtx, deviceCode)
 	if err != nil {
 		return nil, normalizeDeviceOperationError(err, waitCtx)
@@ -256,38 +300,40 @@ func (b *DeviceOperationBarrier) beginOnLane(ctx, waitCtx context.Context, devic
 		ref.release()
 		return nil, normalizeDeviceOperationError(err, waitCtx)
 	}
+	lane.guardHeld = true
+	lane.mu.Unlock()
 
-	var row deviceOperationRow
+	var (
+		row   deviceOperationRow
+		epoch int64
+	)
 	err := b.store.db.WithContext(waitCtx).Transaction(func(tx *gorm.DB) error {
 		loaded, err := loadDeviceOperationRow(tx.WithContext(waitCtx), devicePK, deviceCode)
 		if err != nil {
 			return err
 		}
 		row = loaded
-		epoch, err := validateDeviceOperationRow(row, deviceCode, devicePK)
+		epoch, err = validateDeviceOperationRow(row, deviceCode, devicePK)
 		if err != nil {
 			return err
 		}
 		return validate(row, epoch)
 	})
 	if err != nil {
-		lane.mu.Unlock()
+		b.releaseAdmissionGate(lane)
 		ref.release()
 		return nil, normalizeDeviceOperationError(err, waitCtx)
 	}
 	if err := waitCtx.Err(); err != nil {
-		lane.mu.Unlock()
-		ref.release()
-		return nil, err
-	}
-	epoch, err := validateDeviceOperationRow(row, deviceCode, devicePK)
-	if err != nil {
-		lane.mu.Unlock()
+		b.releaseAdmissionGate(lane)
 		ref.release()
 		return nil, err
 	}
 	lease := newDeviceOperationLease(ctx, lane, ref, epoch)
+	lane.mu.Lock()
 	lane.active[lease] = struct{}{}
+	lane.guardHeld = false
+	signalDeviceOperationLaneLocked(lane)
 	lane.mu.Unlock()
 	return lease, nil
 }
@@ -357,7 +403,7 @@ func (b *DeviceOperationBarrier) LockTransfer(ctx context.Context, devicePK uint
 	}
 	lane.guardHeld = true
 	lane.mu.Unlock()
-	return &deviceTransferGuard{barrier: b, lane: lane, ref: ref}, nil
+	return &deviceTransferGuard{lane: lane, ref: ref}, nil
 }
 
 // WaitBefore waits for every older active lease to call Release. A canceled
@@ -459,14 +505,21 @@ func signalDeviceOperationLaneLocked(lane *deviceOperationLane) {
 	lane.notify = make(chan struct{})
 }
 
-func newDeviceOperationLease(parent context.Context, lane *deviceOperationLane, ref *deviceOperationLaneRef, epoch int64) *deviceOperationLease {
-	base := context.WithoutCancel(parent)
-	deadlineCancel := func() {}
-	if deadline, ok := parent.Deadline(); ok {
-		base, deadlineCancel = context.WithDeadline(base, deadline)
+func (b *DeviceOperationBarrier) releaseAdmissionGate(lane *deviceOperationLane) {
+	if lane == nil {
+		return
 	}
-	operationCtx, cancel := context.WithCancelCause(base)
-	return &deviceOperationLease{lane: lane, ref: ref, epoch: epoch, ctx: operationCtx, cancel: cancel, deadlineCancel: deadlineCancel}
+	lane.mu.Lock()
+	if lane.guardHeld {
+		lane.guardHeld = false
+		signalDeviceOperationLaneLocked(lane)
+	}
+	lane.mu.Unlock()
+}
+
+func newDeviceOperationLease(parent context.Context, lane *deviceOperationLane, ref *deviceOperationLaneRef, epoch int64) *deviceOperationLease {
+	operationCtx, cancel := context.WithCancelCause(parent)
+	return &deviceOperationLease{lane: lane, ref: ref, epoch: epoch, ctx: operationCtx, cancel: cancel}
 }
 
 func (lease *deviceOperationLease) Context() context.Context {
@@ -492,7 +545,6 @@ func (lease *deviceOperationLease) Release() {
 		delete(lease.lane.active, lease)
 		signalDeviceOperationLaneLocked(lease.lane)
 		lease.lane.mu.Unlock()
-		lease.deadlineCancel()
 		lease.cancel(nil)
 		lease.ref.release()
 	})
