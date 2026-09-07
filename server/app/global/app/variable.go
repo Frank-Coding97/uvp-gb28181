@@ -20,6 +20,7 @@ var (
 	LogsPath         string                    // 显式日志目录
 	SchedulerLogPath string                    // 显式调度器日志目录
 	ConfigYml        YmlConfigInterf           // 全局配置文件指针
+	GormDbSQLite     *gorm.DB                  // SQLite单机数据库连接
 	GormDbMysql      *gorm.DB                  // mysql数据库连接
 	GormDbSqlserver  *gorm.DB                  // sqlserver数据库连接
 	GormDbPostgreSql *gorm.DB                  // postgresql数据库连接
@@ -48,6 +49,8 @@ func DB(sqlType ...string) *gorm.DB {
 	}
 	var db *gorm.DB
 	switch dbType {
+	case consts.DbTypeSQLite:
+		db = GormDbSQLite
 	case consts.DbTypeMySql:
 		db = GormDbMysql
 	case consts.DbTypeSqlServer:
@@ -55,7 +58,7 @@ func DB(sqlType ...string) *gorm.DB {
 	case consts.DbTypePostgreSql:
 		db = GormDbPostgreSql
 	default:
-		db = GormDbMysql
+		log.Fatalf("未知数据库类型: %s", dbType)
 	}
 	if db == nil {
 		log.Fatal("数据库连接失败")

@@ -395,3 +395,25 @@ func validateExistingTarget(base, target string) error {
 	}
 	return nil
 }
+
+// ValidateDatabaseFile rejects implicit locations and link escapes before the
+// SQLite driver can create or modify a file.
+func ValidateDatabaseFile(path string) error {
+	clean, err := cleanAbsolute(path)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(clean)
+	if err := validateLocalVolume(parent); err != nil {
+		return err
+	}
+	if err := validateExistingTarget(parent, clean); err != nil {
+		return err
+	}
+	if info, err := os.Stat(clean); err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("standalone: database is not a regular file")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return validateWritableDirectory(parent)
+}

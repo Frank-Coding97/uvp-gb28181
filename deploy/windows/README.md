@@ -89,3 +89,22 @@ $env:UVP_RECORDINGS_DIR = 'D:\UVP Recordings 中文'
 Set-Location $env:TEMP
 & "$env:UVP_INSTALL_DIR\standalone-path-probe.exe"
 ```
+
+### SQLite runtime check
+
+The standalone backend selects `gormv2.usedbtype: sqlite`; `data/uvp.db` is
+fixed by the explicit data directory. Enabling another database at the same
+time is rejected before a connection is opened. Outside standalone mode,
+SQLite requires an absolute `gormv2.sqlite.path`.
+
+`uvp-server.exe -db-check` opens the configured SQLite file, prints runtime
+settings as JSON, then closes it. It may create a new empty database, but does
+not initialize application tables, seed users, start HTTP/SIP, or register
+scheduled jobs. SQLite is pinned to 3.53.4 with WAL, FULL synchronous mode,
+foreign keys, a 5000 ms busy timeout, and one pooled connection. T07/T08 add
+the application baseline and migration paths; until then normal SQLite
+startup and migration commands report that schema support is unavailable.
+
+`test-db-check.ps1 -ServerExe <absolute-exe> -WorkRoot <new-directory>` checks
+this entry point on Windows with a Chinese/space path, repeated open, unknown
+dialect and conflicting MySQL configuration. Use an isolated temporary root.

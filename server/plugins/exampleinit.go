@@ -21,7 +21,7 @@ func init() {
 
 func migrationRequested() bool {
 	for _, arg := range os.Args {
-		if arg == "-migrate-up" {
+		if arg == "-migrate-up" || arg == "-db-check" {
 			return true
 		}
 		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {

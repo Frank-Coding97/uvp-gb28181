@@ -10,6 +10,7 @@ const (
 	ServerOccurredErrorCode int    = -500100
 	ServerOccurredErrorMsg  string = "服务器内部发生代码执行错误,请联系开发者排查错误日志"
 	// 数据库类型
+	DbTypeSQLite     = "sqlite"
 	DbTypeMySql      = "mysql"
 	DbTypeSqlServer  = "sqlserver"
 	DbTypePostgreSql = "postgresql"

@@ -46,6 +46,12 @@ func init() {
 	} else {
 		app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
 	}
+	// 运维命令只打开配置和数据库，不启动日志工作线程或业务组件。
+	if migrationCommandRequested() {
+		app.ZapLog = zap.NewNop()
+		initDB()
+		return
+	}
 	if standalonePaths.Explicit {
 		app.ConfigYml.ConfigFileChangeListen(normalizeStandaloneConfigPaths)
 	} else {
@@ -58,11 +64,8 @@ func init() {
 	// 初始化数据库
 	initDB()
 
-	// -migrate-up / -migrate-down=<文件名> 是纯运维入口:只完成配置+DB 初始化,
-	// 不执行 Up/业务初始化(main 解析参数后直接走 Down)。
-	// 否则迁移失败时回滚命令会先重试同一失败的 Up 并 log.Fatal,永远到不了 Down
-	if migrationCommandRequested() {
-		return
+	if app.GormDbSQLite != nil {
+		log.Fatal("SQLite schema initialization is not implemented yet; use -db-check for runtime diagnostics")
 	}
 
 	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
@@ -112,6 +115,31 @@ func init() {
 
 // 初始化数据库
 func initDB() {
+	primary := app.ConfigYml.GetString("gormv2.usedbtype")
+	enabled := map[string]bool{
+		"sqlite":     primary == "sqlite",
+		"mysql":      app.ConfigYml.GetInt("gormv2.mysql.isinitglobalgormmysql") == 1,
+		"sqlserver":  app.ConfigYml.GetInt("gormv2.sqlserver.isinitglobalgormsqlserver") == 1,
+		"postgresql": app.ConfigYml.GetInt("gormv2.postgresql.isinitglobalgormpostgresql") == 1,
+	}
+	if err := app.ValidateDatabaseSelection(primary, enabled, standalonePaths.Explicit); err != nil {
+		log.Fatal("数据库配置无效: " + err.Error())
+	}
+	if enabled["sqlite"] {
+		path := app.ConfigYml.GetString("gormv2.sqlite.path")
+		if standalonePaths.Explicit {
+			if path != "" && filepath.Clean(path) != standalonePaths.DatabasePath {
+				log.Fatal("gormv2.sqlite.path conflicts with standalone data directory")
+			}
+			path = standalonePaths.DatabasePath
+		}
+		db, err := gormhelper.NewSQLiteClient(path)
+		if err != nil {
+			log.Fatal("SQLite initialization failed: " + err.Error())
+		}
+		app.GormDbSQLite = db
+		return
+	}
 	// mysql
 	if app.ConfigYml.GetInt("gormv2.mysql.isinitglobalgormmysql") == 1 {
 		if dbMysql, err := gormhelper.GetOneMysqlClient(); err != nil {
@@ -414,7 +442,7 @@ func newScheduler() app.JobSchedulerInterf {
 // 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
 func migrationCommandRequested() bool {
 	for _, arg := range os.Args {
-		if arg == "-migrate-up" {
+		if arg == "-migrate-up" || arg == "-db-check" {
 			return true
 		}
 		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {
