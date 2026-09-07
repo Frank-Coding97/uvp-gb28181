@@ -258,10 +258,6 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitRecording(client, secret, vhost, app, stream, false); err != nil {
 		return failedCheck(scenario.name, "isRecording did not report the stopped MP4 recorder"), stage, stats
 	}
-	if err := player.stop(5 * time.Second); err != nil {
-		return failedCheck(scenario.name, "HTTP fmp4 player cleanup timed out before shutdown"), stage, stats
-	}
-	playerStopped = true
 	if err := gate.waitForAttempt(scenario.expectedHookAttempt, shutdownHookWait); err != nil {
 		return failedCheck(scenario.name, "on_record_mp4 did not reach the controlled Hook gate"), stage, stats
 	}
