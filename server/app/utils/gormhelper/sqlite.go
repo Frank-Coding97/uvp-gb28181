@@ -35,6 +35,7 @@ func NewSQLiteClient(path string) (*gorm.DB, error) {
 		uriPath = "/" + uriPath
 	}
 	query := url.Values{}
+	query.Set("_txlock", "immediate")
 	for _, pragma := range []string{"busy_timeout(5000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(FULL)"} {
 		query.Add("_pragma", pragma)
 	}

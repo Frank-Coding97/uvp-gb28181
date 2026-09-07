@@ -105,3 +105,29 @@ func TestBaselineRejectsNonInternalSQLiteLikeTableNames(t *testing.T) {
 	_, err := applyBaseline(context.Background(), db, "test-baseline", script, digest(script), nil)
 	require.ErrorContains(t, err, "non-empty")
 }
+
+func TestBaselineCommitCancellationRollsBack(t *testing.T) {
+	db := testDB(t)
+	script := "CREATE TABLE sample(id INTEGER PRIMARY KEY);"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := applyBaseline(ctx, db, "test-commit", script, digest(script), func(tx *gorm.DB) error { cancel(); return nil })
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, db.Migrator().HasTable("sample"))
+	_, err = applyBaseline(context.Background(), db, "test-commit", script, digest(script), nil)
+	require.NoError(t, err)
+}
+func TestBaselineRollbackFailureDiscardsConnection(t *testing.T) {
+	db := testDB(t)
+	script := "CREATE TABLE sample(id INTEGER PRIMARY KEY);"
+	_, err := applyBaseline(context.Background(), db, "test-rollback", script, digest(script), func(tx *gorm.DB) error {
+		if err := tx.Exec("ROLLBACK").Error; err != nil {
+			return err
+		}
+		return fmt.Errorf("injected seed failure after unexpected rollback")
+	})
+	require.ErrorContains(t, err, "SQLite rollback failed")
+	require.False(t, db.Migrator().HasTable("sample"))
+	_, err = applyBaseline(context.Background(), db, "test-rollback", script, digest(script), nil)
+	require.NoError(t, err)
+}
