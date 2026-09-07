@@ -28,7 +28,7 @@ func TestPublishedMediaIdentityMigrationPreservesUnknownRowsAndExactKey(t *testi
 	require.NoError(t, db.Exec(`INSERT INTO gb_zlm_managed_resource(node_id,resource_type,resource_key,schema,vhost,app,stream,identity_fingerprint,created_at,updated_at) VALUES(7,'pull_proxy','camera','rtsp','tenant','live','camera','fingerprint','2026-09-07','2026-09-07')`).Error)
 	require.Error(t, db.Exec(`INSERT INTO gb_zlm_managed_resource(node_id,resource_type,resource_key,schema,vhost,app,stream,identity_fingerprint,created_at,updated_at) VALUES(7,'pull_proxy','camera','rtsp','tenant','live','camera','fingerprint','2026-09-07','2026-09-07')`).Error)
 	require.NoError(t, Migrate(ctx, db))
-	require.EqualValues(t, 2, migrationMarkerCount(t, db))
+	require.EqualValues(t, len(compiledMigrations)+1, migrationMarkerCount(t, db))
 }
 
 func TestPublishedMediaIdentityMigrationFailureRollsBackAndRetries(t *testing.T) {

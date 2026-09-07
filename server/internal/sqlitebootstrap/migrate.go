@@ -38,6 +38,10 @@ var compiledMigrations = []migrationSpec{{
 	Version: sqlitemigrations.MediaIdentityVersion,
 	SQL:     sqlitemigrations.MediaIdentitySQL,
 	SHA256:  sqlitemigrations.MediaIdentitySHA256,
+	}, {
+	Version: sqlitemigrations.StandaloneInstallationVersion,
+	SQL:     sqlitemigrations.StandaloneInstallationSQL,
+	SHA256:  sqlitemigrations.StandaloneInstallationSHA256,
 }}
 
 // Migrate applies the ordered, checksum-pinned SQLite increments after the
