@@ -48,9 +48,17 @@ var (
 // AuthorizeFixedPlayback resolves a fixed URL without opening RTP, sending
 // INVITE, or creating live ownership. Playback auth decorates it when enabled.
 func (s *Service) AuthorizeFixedPlayback(ctx context.Context, req AuthorizedRequest) (*Result, error) {
+	if s.operationBarrierRequired && s.operationBarrier == nil {
+		return nil, ErrPlayAuthorizationUnavailable
+	}
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentFixedAddressPlaybackSettings()
 	authSettings := gbconfig.CurrentPlayAuthSettings()
+	if s.operationBarrier != nil {
+		if err := s.operationBarrier.AuthorizeEpoch(ctx, deviceID, req.DeviceEpoch); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+	}
 	if !settings.FixedAddressEnabled || !s.useMultiNode() {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
@@ -197,7 +205,7 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
 	if !settings.Enabled {
-		return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, Trigger: "explicit"})
+		return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit"})
 	}
 	issuer, ok := s.tokenIssuer.(preparedTokenIssuer)
 	if !ok || issuer == nil {

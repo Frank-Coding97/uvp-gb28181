@@ -726,6 +726,9 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		cfg.ZLM.Secret,
 	)
 	var playAuthorization *playauth.AuthorizationService
+	deviceSecurity := playauth.NewDeviceSecurityStore(app.DB())
+	deviceOperations := playauth.NewDeviceOperationBarrier(deviceSecurity)
+	gbroutes.SetDeviceTransferBarrier(deviceOperations)
 	playAuthMetrics = nil
 	if signerErr != nil {
 		gbroutes.SetPlayAuthorizer(nil)
@@ -739,7 +742,8 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			playSigner,
 			playauth.NewAuthorizationRegistry(),
 			playauth.WithAuthorizationMetrics(playAuthMetrics),
-			playauth.WithDeviceSecurityAuthority(playauth.NewDeviceSecurityStore(app.DB())),
+			playauth.WithDeviceSecurityAuthority(deviceSecurity),
+			playauth.WithDeviceOperationBarrier(deviceOperations),
 		)
 		gbroutes.SetPlayAuthorizer(playAuthorization)
 		app.ZapLog.Info("GB28181 播放鉴权服务已装配")
@@ -757,6 +761,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
 			snapshotSvc := buildSnapshotService()
 			opts := []play.Option{
+				play.WithDeviceOperationBarrier(deviceOperations),
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
 			}
@@ -800,7 +805,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zap.Int("recoverySkipped", recoveryStats.Skipped),
 				zap.Int("recoveryFailed", recoveryStats.Failed))
 		} else {
-			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv))}
+			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv)), play.WithDeviceOperationBarrier(deviceOperations)}
 			if playAuthorization != nil {
 				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}
@@ -1046,7 +1051,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
 	recordingPlanLeases = play.NewSourceLeaseRegistry()
-	recordingPlanOrchestrator := recordingplan.NewOrchestrator(playSvc, recordingSvc, recordingPlanLeases, nil)
+	recordingPlanLive := play.NewSystemLiveEnsurer(playSvc, playauth.NewDeviceSecurityStore(app.DB()))
+	recordingPlanOrchestrator := recordingplan.NewOrchestrator(recordingPlanLive, recordingSvc, recordingPlanLeases, nil)
 	planEnabled := cfg.Recording.PlanEnabled
 	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
 		InstanceID: uuid.NewString(), BatchSize: 200, Workers: 8, DeviceConcurrency: 2,

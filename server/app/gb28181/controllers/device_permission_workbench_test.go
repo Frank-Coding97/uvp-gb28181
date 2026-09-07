@@ -26,6 +26,7 @@ import (
 func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
+	controller.SetDeviceTransferBarrier(playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)))
 	r.GET("/api/gb28181/device-mgmt/permission-workbench/summary", controller.PermissionWorkbenchSummary)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/devices/resolve", controller.ResolvePermissionWorkbenchDevices)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/grants/query", controller.QueryPermissionWorkbenchGrants)

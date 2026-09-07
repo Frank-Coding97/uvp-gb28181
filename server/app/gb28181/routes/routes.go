@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	gbcascadecontroller "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/controller"
 	gbcascadeservice "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/service"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
@@ -35,6 +36,11 @@ var directoryController = gbcontrollers.NewDirectoryController()
 var customGroupController = gbcontrollers.NewCustomGroupController()
 var playbackSchemeController = gbcontrollers.NewPlaybackSchemeController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
+
+func SetDeviceTransferBarrier(barrier assign.DeviceTransferBarrier) {
+	deviceMgmtController.SetDeviceTransferBarrier(barrier)
+}
+
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
 var alarmController = gbcontrollers.NewAlarmController()

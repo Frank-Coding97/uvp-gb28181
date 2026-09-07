@@ -75,6 +75,7 @@ type Service struct {
 	validate         DeptValidator
 	clock            func() time.Time
 	transferRecorder DeviceTransferRecorder
+	transferBarrier  DeviceTransferBarrier
 }
 
 func NewService(db *gorm.DB, validate DeptValidator, options ...ServiceOption) *Service {
@@ -154,8 +155,18 @@ func (s *Service) AssignOne(ctx context.Context, deviceID uint, targetDeptID uin
 // post-commit receipt. The receipt is intentionally not part of any HTTP DTO;
 // callers may use it only to start later, device-scoped cleanup.
 func (s *Service) AssignOneWithReceipt(ctx context.Context, deviceID uint, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) (TransferReceipt, error) {
+	if ctx == nil {
+		return TransferReceipt{}, ErrAssignmentSecurityUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, assignmentTransferTimeout)
+	defer cancel()
+	guard, err := s.lockTransfer(ctx, deviceID)
+	if err != nil {
+		return TransferReceipt{}, err
+	}
+	defer guard.Release()
 	var receipt *TransferReceipt
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		device, err := lockAssignmentDevice(tx, deviceID, visibleDeptIDs, needFilter)
 		if err != nil {
 			return err
@@ -169,13 +180,26 @@ func (s *Service) AssignOneWithReceipt(ctx context.Context, deviceID uint, targe
 	if receipt == nil {
 		return TransferReceipt{}, nil
 	}
+	guard.Commit(receipt.NewEpoch)
 	return *receipt, nil
 }
 
 func (s *Service) assignOneV2WithReceipt(ctx context.Context, input AssignmentInput, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) (AssignmentResultItemV2, *TransferReceipt) {
 	item := AssignmentResultItemV2{DeviceID: input.DeviceID, Status: AssignmentFailed}
+	if ctx == nil {
+		item.Message = ErrAssignmentSecurityUnavailable.Error()
+		return item, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, assignmentTransferTimeout)
+	defer cancel()
+	guard, err := s.lockTransfer(ctx, input.DeviceID)
+	if err != nil {
+		item.Message = err.Error()
+		return item, nil
+	}
+	defer guard.Release()
 	var receipt *TransferReceipt
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		device, err := lockAssignmentDevice(tx, input.DeviceID, visibleDeptIDs, needFilter)
 		if err != nil {
 			return err
@@ -203,6 +227,9 @@ func (s *Service) assignOneV2WithReceipt(ctx context.Context, input AssignmentIn
 		item.Status = AssignmentFailed
 		item.Message = err.Error()
 		return item, nil
+	}
+	if receipt != nil {
+		guard.Commit(receipt.NewEpoch)
 	}
 	item.Receipt = receipt
 	return item, receipt

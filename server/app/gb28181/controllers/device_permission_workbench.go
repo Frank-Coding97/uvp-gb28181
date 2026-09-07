@@ -25,6 +25,22 @@ func deptValidatorFor(c *gin.Context) assign.DeptValidator {
 	}
 }
 
+// SetDeviceTransferBarrier installs the process-wide barrier shared with media
+// operations. A missing dependency denies assignment; never build one per HTTP
+// request because that would leave already-running media outside the guard.
+func (dc *DeviceMgmtController) SetDeviceTransferBarrier(barrier assign.DeviceTransferBarrier) {
+	dc.transferBarrierMu.Lock()
+	defer dc.transferBarrierMu.Unlock()
+	dc.transferBarrier = barrier
+}
+
+func (dc *DeviceMgmtController) assignmentService(c *gin.Context, db *gorm.DB) *assign.Service {
+	dc.transferBarrierMu.RLock()
+	barrier := dc.transferBarrier
+	dc.transferBarrierMu.RUnlock()
+	return assign.NewService(db, deptValidatorFor(c), assign.WithDeviceTransferBarrier(barrier))
+}
+
 func (dc *DeviceMgmtController) PermissionWorkbenchSummary(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -180,7 +196,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), body.Items, body.TargetDeptID)
+	result, err := dc.assignmentService(c, db).AssignBatchV2(c.Request.Context(), body.Items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "调整设备归属失败", err)
 		return
@@ -243,7 +259,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	for _, device := range devices {
 		items = append(items, assign.AssignmentInput{DeviceID: device.ID, ExpectedOwnerDeptID: device.OwnerDeptID})
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), items, body.TargetDeptID)
+	result, err := dc.assignmentService(c, db).AssignBatchV2(c.Request.Context(), items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "整部门调整归属失败", err)
 		return

@@ -154,15 +154,17 @@ type Service struct {
 	readyWait time.Duration // 仅测试覆盖;生产使用 playCtx 剩余总预算
 	pollEvery time.Duration // 轮询间隔,默认 200ms
 
-	snapshotSvc        SnapshotService // 通道快照(播放触发),可为 nil
-	urlResolver        *URLResolver
-	tokenIssuer        playauth.ContextDirectIssuer
-	nodeClient         func(*node.Node) ZLM
-	qualifiedValidator QualifiedNodeValidator
-	diagnosticSink     diagnosis.DiagnosticSink
-	liveReady          func(LiveSession)
-	recordingMu        sync.RWMutex
-	recording          PlaybackRecordingLifecycle
+	snapshotSvc              SnapshotService // 通道快照(播放触发),可为 nil
+	urlResolver              *URLResolver
+	tokenIssuer              playauth.ContextDirectIssuer
+	operationBarrier         *playauth.DeviceOperationBarrier
+	operationBarrierRequired bool
+	nodeClient               func(*node.Node) ZLM
+	qualifiedValidator       QualifiedNodeValidator
+	diagnosticSink           diagnosis.DiagnosticSink
+	liveReady                func(LiveSession)
+	recordingMu              sync.RWMutex
+	recording                PlaybackRecordingLifecycle
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator

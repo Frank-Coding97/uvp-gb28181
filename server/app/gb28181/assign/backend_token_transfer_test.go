@@ -61,7 +61,7 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 		}
 	}
 	globalCutoff := playauth.RevokedBefore()
-	transfer := NewService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
+	transfer := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
 	receipt, err := transfer.AssignOneWithReceipt(ctx, device.ID, 2, nil, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, receipt.NewEpoch)

@@ -10,9 +10,15 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
+
+func newTestAssignService(db *gorm.DB, validator DeptValidator, options ...ServiceOption) *Service {
+	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	return NewService(db, validator, append([]ServiceOption{WithDeviceTransferBarrier(barrier)}, options...)...)
+}
 
 func newAssignTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -63,7 +69,7 @@ func seedAssignedDeviceWithCode(t *testing.T, db *gorm.DB, code string) (device 
 func TestAssignOne_AllCascades(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000000001")
-	svc := NewService(db, validatorVisibleDept1)
+	svc := newTestAssignService(db, validatorVisibleDept1)
 
 	err := svc.AssignOne(context.Background(), device.ID, 2, []uint{1}, true)
 	require.NoError(t, err)
@@ -107,7 +113,7 @@ func TestAssignOne_DeviceNotVisible(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000000009")
 
-	err := NewService(db, validatorVisibleDept1).AssignOne(context.Background(), device.ID, 2, []uint{9}, true)
+	err := newTestAssignService(db, validatorVisibleDept1).AssignOne(context.Background(), device.ID, 2, []uint{9}, true)
 	assert.ErrorIs(t, err, ErrDeviceNotVisible)
 
 	var dev gbmodels.GbDevice
@@ -122,7 +128,7 @@ func TestAssignBatch_PartialFailure(t *testing.T) {
 	d2 := seedAssignedDeviceWithCode(t, db, "34020000002000000012")
 	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("id = ?", d2.ID).Update("owner_dept_id", 9).Error)
 
-	result, err := NewService(db, validatorVisibleDept1).AssignBatch(context.Background(), []uint{d1.ID, d2.ID}, 2)
+	result, err := newTestAssignService(db, validatorVisibleDept1).AssignBatch(context.Background(), []uint{d1.ID, d2.ID}, 2)
 	require.NoError(t, err)
 	require.Len(t, result.Results, 2)
 
@@ -139,7 +145,7 @@ func TestAssignBatch_TargetDeptNotVisible(t *testing.T) {
 	db := newAssignTestDB(t)
 	seedAssignedDeviceWithCode(t, db, "34020000002000000013")
 
-	_, err := NewService(db, validatorVisibleDept1).AssignBatch(context.Background(), []uint{1}, 99)
+	_, err := newTestAssignService(db, validatorVisibleDept1).AssignBatch(context.Background(), []uint{1}, 99)
 	assert.ErrorIs(t, err, ErrTargetDeptInvalid)
 }
 
@@ -147,7 +153,7 @@ func TestAssignBatchV2_SameTargetIsSkippedWithoutCleanup(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000000021")
 
-	result, err := NewService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
+	result, err := newTestAssignService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
 		{DeviceID: device.ID, ExpectedOwnerDeptID: 1},
 	}, 1)
 	require.NoError(t, err)
@@ -164,7 +170,7 @@ func TestAssignBatchV2_StaleOwnerFailsClosed(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000000022")
 
-	result, err := NewService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
+	result, err := newTestAssignService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
 		{DeviceID: device.ID, ExpectedOwnerDeptID: 9},
 	}, 2)
 	require.NoError(t, err)

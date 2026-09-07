@@ -21,7 +21,7 @@ func TestOpenAPIAssignmentRequiresValidCleanupWatermark(t *testing.T) {
 				values := map[string]int64{"zero": 0, "negative": -1, "ahead": 2}
 				require.NoError(t, db.Exec("UPDATE gb_device SET cleanup_completed_epoch=? WHERE id=?", values[scenario], device.ID).Error)
 			}
-			service := NewService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock))
+			service := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock))
 			receipt, err := service.AssignOneWithReceipt(context.Background(), device.ID, 2, nil, false)
 			require.ErrorIs(t, err, ErrAssignmentSecurityUnavailable)
 			require.Equal(t, TransferReceipt{}, receipt)
@@ -37,7 +37,7 @@ func TestOpenAPIAssignmentKeepsEarlierPendingCleanupAcrossAnotherTransfer(t *tes
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000100021")
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=?", device.ID).Error)
-	service := NewService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock))
+	service := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock))
 	receipt, err := service.AssignOneWithReceipt(context.Background(), device.ID, 2, nil, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, receipt.OldEpoch)

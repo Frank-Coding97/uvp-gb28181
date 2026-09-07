@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
 // Request identifies one channel-level live ensure operation.
@@ -163,6 +165,7 @@ type Coordinator struct {
 	recoveryPending bool
 	start           StartFunc
 	stop            StopFunc
+	beginOperation  func(context.Context, Request) (playauth.DeviceOperationLease, error)
 }
 
 func NewCoordinator(start StartFunc) *Coordinator {
@@ -287,7 +290,28 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 		startCtx, cancel = context.WithDeadline(startCtx, deadline)
 		defer cancel()
 	}
-	result, err := c.start(startCtx, req)
+	var result *Result
+	var err error
+	if c.beginOperation != nil {
+		var lease playauth.DeviceOperationLease
+		lease, err = c.beginOperation(startCtx, req)
+		if lease != nil {
+			// Release follows compensation AND publication of entry.done below.
+			// Waiters neither acquire nor release the shared owner's lease.
+			defer lease.Release()
+		}
+		if err == nil {
+			if lease == nil || lease.Context() == nil {
+				err = ErrPlayAuthorizationUnavailable
+			} else {
+				startCtx = lease.Context()
+				err = startCtx.Err()
+			}
+		}
+	}
+	if err == nil {
+		result, err = c.start(startCtx, req)
+	}
 
 	var retryCleanup bool
 	retryReq := Request{}
@@ -462,6 +486,9 @@ func (c *Coordinator) ownerConflict(req Request) error {
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	if s.operationBarrierRequired && s.operationBarrier == nil {
+		return nil, ErrPlayAuthorizationUnavailable
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -495,6 +522,11 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 			return nil, err
 		}
 	}
+	if s.operationBarrier != nil && req.AuthorizationID == "" {
+		if err := s.operationBarrier.AuthorizeEpoch(ctx, req.DeviceID, req.DeviceEpoch); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+	}
 	if req.AuthorizationID != "" {
 		// Revalidate after queue delay, before reuse probes or cleanup in the
 		// coordinator. A preflight denial must not touch a shared generation.
@@ -505,6 +537,13 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if s.operationBarrier != nil && req.AuthorizationID == "" {
+		if err := s.operationBarrier.AuthorizeEpoch(ctx, req.DeviceID, req.DeviceEpoch); err != nil {
+			// A late media result is not renewed device authority. Keep cleanup
+			// ownership with the device clearer, not with this rejected caller.
+			return nil, ErrPlayAuthorizationUnavailable
+		}
 	}
 	if req.IsQualified() {
 		if err := s.validateQualifiedResult(ctx, req, result); err != nil {
@@ -542,6 +581,9 @@ func (s *Service) coordinator() *Coordinator {
 				return s.stopCurrentResult(ctx, result)
 			},
 		)
+		if s.operationBarrierRequired || s.operationBarrier != nil {
+			s.liveCoordinator.beginOperation = s.beginDeviceOperation
+		}
 	}
 	c := s.liveCoordinator
 	s.liveCoordinatorMu.Unlock()

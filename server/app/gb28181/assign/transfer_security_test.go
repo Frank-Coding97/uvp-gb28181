@@ -79,7 +79,7 @@ func TestAssignOneWithReceiptCommitsSecurityAndRecordsIntent(t *testing.T) {
 	oldCutoff := time.Unix(fixedTransferClock().Unix()+5, 0).UTC()
 	require.NoError(t, db.Table("gb_device").Where("id = ?", device.ID).Update("legacy_revoked_before", oldCutoff).Error)
 	recorder := &recordingTransferRecorder{}
-	svc := NewService(db, validatorVisibleDept1,
+	svc := newTestAssignService(db, validatorVisibleDept1,
 		WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
 
 	receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
@@ -110,7 +110,7 @@ func TestAssignOneWithReceiptDefaultRecorderRevokesGrantAndViewer(t *testing.T) 
 	grantID := "00000000-0000-4000-8000-000000000101"
 	seedTransferGrantAndViewer(t, db, device.DeviceID, now, grantID, 101)
 
-	svc := NewService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
 	_, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 	require.NoError(t, err)
 
@@ -131,7 +131,7 @@ func TestAssignOneWithReceiptRevocationFailureRollsBackGrantViewerAndCascade(t *
 	seedTransferGrantAndViewer(t, db, device.DeviceID, now, grantID, 109)
 	require.NoError(t, db.Exec("CREATE TRIGGER transfer_viewer_failure BEFORE UPDATE ON gb_openapi_viewer BEGIN SELECT RAISE(ABORT, 'fixture failure'); END").Error)
 
-	svc := NewService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
 	receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 	require.Error(t, err)
 	require.Equal(t, TransferReceipt{}, receipt)
@@ -156,7 +156,7 @@ func TestAssignOneWithReceiptRecorderFailureRollsBackCascadeAndSecurity(t *testi
 	recorder := &recordingTransferRecorder{
 		err: errors.New("revocation recorder failed"),
 	}
-	svc := NewService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
 
 	receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 	require.ErrorIs(t, err, recorder.err)
@@ -174,7 +174,7 @@ func TestAssignOneWithReceiptSameOwnerIsNoop(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000100004")
 	recorder := &recordingTransferRecorder{}
-	svc := NewService(db, validatorVisibleDept1, WithTransferRecorder(recorder))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferRecorder(recorder))
 
 	receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 1, []uint{1}, true)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func TestAssignBatchV2SameSecondTransferAndReturnNeverRegressesCutoff(t *testing
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000100005")
 	recorder := &recordingTransferRecorder{}
 	clock := fixedTransferClock
-	svc := NewService(db, validatorVisibleDept1, WithTransferClock(clock), WithTransferRecorder(recorder))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(clock), WithTransferRecorder(recorder))
 
 	first, err := svc.AssignBatchV2(context.Background(), []AssignmentInput{{DeviceID: device.ID, ExpectedOwnerDeptID: 1}}, 2)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestAssignBatchV2StaleAndPartialFailurePreserveSecurityBoundary(t *testing.
 	d2 := seedAssignedDeviceWithCode(t, db, "34020000002000100007")
 	require.NoError(t, db.Model(&struct{}{}).Table("gb_device").Where("id = ?", d2.ID).Update("owner_dept_id", 9).Error)
 	recorder := &recordingTransferRecorder{}
-	svc := NewService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
 
 	result, err := svc.AssignBatchV2(context.Background(), []AssignmentInput{
 		{DeviceID: d1.ID, ExpectedOwnerDeptID: 1},
@@ -244,7 +244,7 @@ func TestAssignOneRejectsEpochOverflow(t *testing.T) {
 	db := newAssignTestDB(t)
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000100008")
 	require.NoError(t, db.Model(&struct{}{}).Table("gb_device").Where("id = ?", device.ID).Update("access_epoch", math.MaxInt64).Error)
-	svc := NewService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{}))
+	svc := newTestAssignService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{}))
 
 	_, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 	require.ErrorIs(t, err, ErrAssignmentSecurityUnavailable)
@@ -259,7 +259,7 @@ func TestAssignOneRejectsSoftDeletedDevice(t *testing.T) {
 	deletedAt := fixedTransferClock()
 	require.NoError(t, db.Model(&struct{}{}).Table("gb_device").Where("id = ?", device.ID).Update("deleted_at", deletedAt).Error)
 
-	_, err := NewService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
+	_, err := newTestAssignService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 	require.ErrorIs(t, err, ErrDeviceNotVisible)
 }
 
@@ -276,7 +276,7 @@ func TestAssignOneRejectsMalformedExistingCutoff(t *testing.T) {
 			device := seedAssignedDeviceWithCode(t, db, "34020000002000100012")
 			require.NoError(t, db.Model(&struct{}{}).Table("gb_device").Where("id = ?", device.ID).Update("legacy_revoked_before", test.cutoff).Error)
 
-			_, err := NewService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
+			_, err := newTestAssignService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 			require.ErrorIs(t, err, ErrAssignmentSecurityUnavailable)
 			state := readTransferSecurity(t, db, device.ID)
 			require.EqualValues(t, 1, state.OwnerDeptID)
@@ -291,7 +291,7 @@ func TestAssignOneTypedNilRecorderUsesProductionRecorder(t *testing.T) {
 	grantID := "00000000-0000-4000-8000-000000000113"
 	seedTransferGrantAndViewer(t, db, device.DeviceID, fixedTransferClock(), grantID, 113)
 	var recorder *recordingTransferRecorder
-	svc := NewService(db, validatorVisibleDept1,
+	svc := newTestAssignService(db, validatorVisibleDept1,
 		WithTransferClock(fixedTransferClock), WithTransferRecorder(recorder))
 
 	receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
@@ -312,7 +312,7 @@ func TestAssignOneRejectsNonPositiveClock(t *testing.T) {
 			db := newAssignTestDB(t)
 			device := seedAssignedDeviceWithCode(t, db, "34020000002000100014")
 			recorder := &recordingTransferRecorder{}
-			svc := NewService(db, validatorVisibleDept1,
+			svc := newTestAssignService(db, validatorVisibleDept1,
 				WithTransferClock(func() time.Time { return now }), WithTransferRecorder(recorder))
 			receipt, err := svc.AssignOneWithReceipt(context.Background(), device.ID, 2, []uint{1}, true)
 			require.ErrorIs(t, err, ErrAssignmentSecurityUnavailable)
@@ -335,7 +335,7 @@ func TestAssignOneFailsClosedWhenSecurityColumnsAreMissing(t *testing.T) {
 	)`).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, owner_dept_id) VALUES (1, ?, 1)", "34020000002000100010").Error)
 
-	receipt, err := NewService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), 1, 2, nil, false)
+	receipt, err := newTestAssignService(db, validatorVisibleDept1, WithTransferRecorder(&recordingTransferRecorder{})).AssignOneWithReceipt(context.Background(), 1, 2, nil, false)
 	require.ErrorIs(t, err, ErrAssignmentSecurityUnavailable)
 	require.Equal(t, TransferReceipt{}, receipt)
 	var owner int
