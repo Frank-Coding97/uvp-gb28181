@@ -23,6 +23,8 @@ type UpdateSIPConfigRequest struct {
 	Domain              string                 `json:"domain"`
 	ServerID            string                 `json:"serverId"`
 	Password            *string                `json:"password"`
+	MediaReceiveHost    string                 `json:"mediaReceiveHost"`
+	MediaPlaybackHost   string                 `json:"mediaPlaybackHost"`
 }
 
 // SetupStatusResponse 精简后的 SIP 引导状态响应.
@@ -104,6 +106,8 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		Domain:              request.Domain,
 		ServerID:            request.ServerID,
 		Password:            request.Password,
+		MediaReceiveHost:    request.MediaReceiveHost,
+		MediaPlaybackHost:   request.MediaPlaybackHost,
 	}
 	var view gbsetup.SIPConfigView
 	var err error

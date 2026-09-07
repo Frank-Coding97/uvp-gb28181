@@ -47,7 +47,7 @@ func TestSetupController_SaveConfigUsesInjectedSaverBeforeReload(t *testing.T) {
 	controller.SetConfigSaver(saver)
 	router := newSetupControllerRouter(controller)
 
-	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","advertiseIpInferred":true,"port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!"}`
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","advertiseIpInferred":true,"port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!","mediaReceiveHost":"192.168.1.20","mediaPlaybackHost":"192.168.1.21"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
 
@@ -61,6 +61,8 @@ func TestSetupController_SaveConfigUsesInjectedSaverBeforeReload(t *testing.T) {
 	require.Equal(t, 5061, received.Port)
 	require.Equal(t, "3402000000", received.Domain)
 	require.Equal(t, "34020000002000000001", received.ServerID)
+	require.Equal(t, "192.168.1.20", received.MediaReceiveHost)
+	require.Equal(t, "192.168.1.21", received.MediaPlaybackHost)
 	require.NotNil(t, received.Password)
 	require.Equal(t, password, *received.Password)
 	var row gbsetup.SIPConfig

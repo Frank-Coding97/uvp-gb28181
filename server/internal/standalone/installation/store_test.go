@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
@@ -234,12 +237,14 @@ func TestCompleteSIPResumesAndPreservesExistingPassword(t *testing.T) {
 	require.NoError(t, db.Where("id = ?", 1).Take(&before).Error)
 
 	view, err := store.CompleteSIP(ctx, gbmodels.SaveSIPConfigRequest{
-		DeploymentMode: gbmodels.DeploymentLAN,
-		ListenIP:       "0.0.0.0",
-		AdvertiseIP:    "192.168.1.11",
-		Port:           5061,
-		Domain:         "3402000000",
-		ServerID:       "34020000002000000001",
+		DeploymentMode:    gbmodels.DeploymentLAN,
+		ListenIP:          "0.0.0.0",
+		AdvertiseIP:       "192.168.1.11",
+		Port:              5061,
+		Domain:            "3402000000",
+		ServerID:          "34020000002000000001",
+		MediaReceiveHost:  "192.168.1.20",
+		MediaPlaybackHost: "192.168.1.21",
 	})
 	require.NoError(t, err)
 	require.Equal(t, 5061, view.Port)
@@ -254,6 +259,7 @@ func TestCompleteSIPResumesAndPreservesExistingPassword(t *testing.T) {
 	require.Equal(t, "Old!Passw0rd#2026", after.Password)
 	require.Equal(t, 5061, after.Port)
 	require.Equal(t, "192.168.1.11", after.AdvertiseIP)
+	require.Zero(t, countTable(t, db, "meta_node"), "legacy CompleteSIP must not seed a media node")
 
 	require.NoError(t, db.Unscoped().Where("id = ?", *state.AdministratorID).Delete(&models.User{}).Error)
 	read, err := store.State(ctx)
@@ -262,6 +268,290 @@ func TestCompleteSIPResumesAndPreservesExistingPassword(t *testing.T) {
 	require.Equal(t, state.AdministratorID, read.AdministratorID)
 	_, err = store.CreateAdmin(ctx, "second-admin", "Admin!Passw0rd#2026")
 	require.ErrorIs(t, err, ErrAlreadyInitialized)
+}
+
+func TestCompleteSIPWithMediaSeedsLocalNodeAtomically(t *testing.T) {
+	db, _ := newInstallationDB(t)
+	store := NewStore(db)
+	ctx := installationContext(t)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+	view, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+	require.NoError(t, err)
+	require.Equal(t, 5061, view.Port)
+	require.EqualValues(t, 1, countTable(t, db, "gb_sip_config"))
+	require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+
+	var row gbzlmrepo.MetaNode
+	require.NoError(t, db.Where("id = ?", 1).Take(&row).Error)
+	require.Equal(t, "zlm-default", row.Name)
+	require.Equal(t, "127.0.0.1", row.Host)
+	require.Equal(t, "192.168.1.20", row.ReceiveHost)
+	require.Equal(t, "192.168.1.21", row.PlaybackHost)
+	require.Equal(t, 18080, row.APIPort)
+	require.Equal(t, "zlm-secret", row.APISecret)
+	require.Equal(t, "active", row.State)
+	require.Equal(t, 30000, row.RTPPortStart)
+	require.Equal(t, 35000, row.RTPPortEnd)
+	_, err = uuid.Parse(row.MediaServerUUID)
+	require.NoError(t, err)
+}
+
+func TestCompleteSIPWithMediaAcceptsLoopbackHosts(t *testing.T) {
+	db, _ := newInstallationDB(t)
+	store := NewStore(db)
+	ctx := installationContext(t)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+	req := validMediaSIPRequest()
+	req.MediaReceiveHost = "127.0.0.1"
+	req.MediaPlaybackHost = "127.0.0.2"
+
+	_, err := store.CompleteSIPWithMedia(ctx, req, localZLMConfig())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, countTable(t, db, "gb_sip_config"))
+	require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+}
+
+func TestCompleteSIPWithMediaRejectsInvalidMediaHostsWithoutWrites(t *testing.T) {
+	tests := []struct {
+		name   string
+		field  string
+		mutate func(*gbmodels.SaveSIPConfigRequest)
+	}{
+		{name: "empty receive", field: "mediaReceiveHost", mutate: func(req *gbmodels.SaveSIPConfigRequest) { req.MediaReceiveHost = "" }},
+		{name: "wildcard receive", field: "mediaReceiveHost", mutate: func(req *gbmodels.SaveSIPConfigRequest) { req.MediaReceiveHost = "0.0.0.0" }},
+		{name: "multicast playback", field: "mediaPlaybackHost", mutate: func(req *gbmodels.SaveSIPConfigRequest) { req.MediaPlaybackHost = "224.0.0.1" }},
+		{name: "IPv6 playback", field: "mediaPlaybackHost", mutate: func(req *gbmodels.SaveSIPConfigRequest) { req.MediaPlaybackHost = "2001:db8::1" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db, _ := newInstallationDB(t)
+			store := NewStore(db)
+			ctx := installationContext(t)
+			require.NoError(t, createPendingSIPAdmin(store, ctx))
+			req := validMediaSIPRequest()
+			test.mutate(&req)
+
+			_, err := store.CompleteSIPWithMedia(ctx, req, localZLMConfig())
+			var validation *gbmodels.ValidationError
+			require.ErrorAs(t, err, &validation)
+			require.Contains(t, validation.Fields, test.field)
+			require.Zero(t, countTable(t, db, "gb_sip_config"))
+			require.Zero(t, countTable(t, db, "meta_node"))
+			state, stateErr := store.State(ctx)
+			require.NoError(t, stateErr)
+			require.Equal(t, PhasePendingSIP, state.Phase)
+		})
+	}
+}
+
+func TestCompleteSIPWithMediaPreservesMatchingNodeAndRejectsConflict(t *testing.T) {
+	t.Run("matching endpoint preserves node identity and addresses", func(t *testing.T) {
+		db, _ := newInstallationDB(t)
+		store := NewStore(db)
+		ctx := installationContext(t)
+		require.NoError(t, db.Create(&gbzlmrepo.MetaNode{
+			Name:            "configured-by-user",
+			Host:            "localhost",
+			ReceiveHost:     "192.168.1.20",
+			PlaybackHost:    "192.168.1.21",
+			APIPort:         18080,
+			APISecret:       "zlm-secret",
+			MediaServerUUID: "existing-uuid",
+			Weight:          80,
+			State:           "maintenance",
+		}).Error)
+		require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+		_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+		require.NoError(t, err)
+		require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+		var row gbzlmrepo.MetaNode
+		require.NoError(t, db.Where("id = ?", 1).Take(&row).Error)
+		require.Equal(t, "configured-by-user", row.Name)
+		require.Equal(t, "existing-uuid", row.MediaServerUUID)
+		require.Equal(t, 80, row.Weight)
+		require.Equal(t, "maintenance", row.State)
+	})
+
+	t.Run("matching endpoint rejects address conflict", func(t *testing.T) {
+		db, _ := newInstallationDB(t)
+		store := NewStore(db)
+		ctx := installationContext(t)
+		require.NoError(t, db.Create(&gbzlmrepo.MetaNode{
+			Name:            "configured-by-user",
+			Host:            "127.0.0.1",
+			ReceiveHost:     "192.168.1.99",
+			PlaybackHost:    "192.168.1.21",
+			APIPort:         18080,
+			APISecret:       "zlm-secret",
+			MediaServerUUID: "existing-uuid",
+			State:           "active",
+		}).Error)
+		require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+		_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+		var validation *gbmodels.ValidationError
+		require.ErrorAs(t, err, &validation)
+		require.Contains(t, validation.Fields, "mediaReceiveHost")
+		require.Zero(t, countTable(t, db, "gb_sip_config"))
+		require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+		var row gbzlmrepo.MetaNode
+		require.NoError(t, db.Where("id = ?", 1).Take(&row).Error)
+		require.Equal(t, "192.168.1.99", row.ReceiveHost)
+	})
+
+	t.Run("multiple matching identities fail closed", func(t *testing.T) {
+		db, _ := newInstallationDB(t)
+		store := NewStore(db)
+		ctx := installationContext(t)
+		for _, mediaUUID := range []string{"existing-uuid-a", "existing-uuid-b"} {
+			require.NoError(t, db.Create(&gbzlmrepo.MetaNode{
+				Name:            "configured-by-user",
+				Host:            "localhost",
+				ReceiveHost:     "192.168.1.20",
+				PlaybackHost:    "192.168.1.21",
+				APIPort:         18080,
+				APISecret:       "zlm-secret",
+				MediaServerUUID: mediaUUID,
+				State:           "active",
+			}).Error)
+		}
+		require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+		_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+		var validation *gbmodels.ValidationError
+		require.ErrorAs(t, err, &validation)
+		require.Contains(t, validation.Fields, "mediaNode")
+		require.Zero(t, countTable(t, db, "gb_sip_config"))
+		require.EqualValues(t, 2, countTable(t, db, "meta_node"))
+	})
+}
+
+func TestCompleteSIPWithMediaRejectsUnmatchedExistingNodeWithoutWrites(t *testing.T) {
+	db, _ := newInstallationDB(t)
+	store := NewStore(db)
+	ctx := installationContext(t)
+	require.NoError(t, db.Create(&gbzlmrepo.MetaNode{
+		Name:            "another-node",
+		Host:            "192.168.1.50",
+		APIPort:         18080,
+		APISecret:       "other-secret",
+		MediaServerUUID: "other-uuid",
+		State:           "active",
+	}).Error)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+	_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+	var validation *gbmodels.ValidationError
+	require.ErrorAs(t, err, &validation)
+	require.Contains(t, validation.Fields, "mediaNode")
+	require.Zero(t, countTable(t, db, "gb_sip_config"))
+	require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+}
+
+func TestCompleteSIPWithMediaRollsBackSIPAndNodeOnStateFailure(t *testing.T) {
+	db, _ := newInstallationDB(t)
+	store := NewStore(db)
+	ctx := installationContext(t)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+	require.NoError(t, db.Exec(`CREATE TRIGGER fail_installation_complete_media BEFORE UPDATE ON standalone_installation WHEN NEW.phase = 'complete' BEGIN SELECT RAISE(ABORT, 'complete state update failed'); END`).Error)
+
+	_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+	require.Error(t, err)
+	require.Zero(t, countTable(t, db, "gb_sip_config"))
+	require.Zero(t, countTable(t, db, "meta_node"))
+	state, stateErr := store.State(ctx)
+	require.NoError(t, stateErr)
+	require.Equal(t, PhasePendingSIP, state.Phase)
+}
+
+func TestCompleteSIPWithMediaSerializesConcurrentFirstUse(t *testing.T) {
+	db, path := newInstallationDB(t)
+	other, err := gormhelper.NewSQLiteClient(path)
+	require.NoError(t, err)
+	otherRaw, err := other.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = otherRaw.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	store := NewStore(db)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+
+	start := make(chan struct{})
+	type result struct{ err error }
+	results := make(chan result, 2)
+	var wg sync.WaitGroup
+	for _, client := range []*gorm.DB{db, other} {
+		wg.Add(1)
+		go func(client *gorm.DB) {
+			defer wg.Done()
+			<-start
+			_, err := NewStore(client).CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+			results <- result{err: err}
+		}(client)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	for result := range results {
+		if result.err == nil {
+			successes++
+			continue
+		}
+		require.ErrorIs(t, result.err, ErrAlreadyInitialized)
+	}
+	require.Equal(t, 1, successes)
+	require.EqualValues(t, 1, countTable(t, db, "gb_sip_config"))
+	require.EqualValues(t, 1, countTable(t, db, "meta_node"))
+}
+
+func TestCompleteSIPWithMediaSurvivesDatabaseReopen(t *testing.T) {
+	db, path := newInstallationDB(t)
+	store := NewStore(db)
+	ctx := installationContext(t)
+	require.NoError(t, createPendingSIPAdmin(store, ctx))
+	_, err := store.CompleteSIPWithMedia(ctx, validMediaSIPRequest(), localZLMConfig())
+	require.NoError(t, err)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	reopened, err := gormhelper.NewSQLiteClient(path)
+	require.NoError(t, err)
+	reopenedRaw, err := reopened.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopenedRaw.Close() })
+	reopenedStore := NewStore(reopened)
+	state, err := reopenedStore.State(ctx)
+	require.NoError(t, err)
+	require.Equal(t, PhaseComplete, state.Phase)
+	require.EqualValues(t, 1, countTable(t, reopened, "meta_node"))
+}
+
+func createPendingSIPAdmin(store *Store, ctx context.Context) error {
+	_, err := store.CreateAdmin(ctx, "first-admin", "Admin!Passw0rd#2026")
+	return err
+}
+
+func validMediaSIPRequest() gbmodels.SaveSIPConfigRequest {
+	return gbmodels.SaveSIPConfigRequest{
+		DeploymentMode:    gbmodels.DeploymentLAN,
+		ListenIP:          "0.0.0.0",
+		AdvertiseIP:       "192.168.1.10",
+		Port:              5061,
+		Domain:            "3402000000",
+		ServerID:          "34020000002000000001",
+		Password:          stringPtr("Sip!Passw0rd#2026"),
+		MediaReceiveHost:  "192.168.1.20",
+		MediaPlaybackHost: "192.168.1.21",
+	}
+}
+
+func localZLMConfig() gbconfig.ZLMConfig {
+	return gbconfig.ZLMConfig{Host: "127.0.0.1", HTTPPort: 18080, Secret: "zlm-secret"}
 }
 
 func TestCompleteSIPRollsBackConfigAndStateOnStateFailure(t *testing.T) {

@@ -4,11 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
+	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	gbnode "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
 )
@@ -188,6 +195,31 @@ func (s *Store) CreateAdmin(ctx context.Context, username, password string) (Sta
 }
 
 func (s *Store) CompleteSIP(ctx context.Context, req setup.SaveSIPConfigRequest) (setup.SIPConfigView, error) {
+	return s.completeSIP(ctx, req, completeSIPOptions{})
+}
+
+// CompleteSIPWithMedia completes standalone first installation and persists
+// the local media endpoint in the same transaction as the SIP configuration
+// and installation phase transition. Existing meta nodes are user-owned: only
+// an exact endpoint plus API secret match may be reused, and its identity and
+// media addresses are never silently changed.
+func (s *Store) CompleteSIPWithMedia(ctx context.Context, req setup.SaveSIPConfigRequest, localZLM gbconfig.ZLMConfig) (setup.SIPConfigView, error) {
+	return s.completeSIP(ctx, req, completeSIPOptions{
+		beforeSave: func(_ context.Context, _ *gorm.DB, req setup.SaveSIPConfigRequest) error {
+			return validateStandaloneMediaHosts(req)
+		},
+		afterSave: func(ctx context.Context, tx *gorm.DB, req setup.SaveSIPConfigRequest) error {
+			return ensureStandaloneMediaNode(ctx, tx, req, localZLM)
+		},
+	})
+}
+
+type completeSIPOptions struct {
+	beforeSave func(context.Context, *gorm.DB, setup.SaveSIPConfigRequest) error
+	afterSave  func(context.Context, *gorm.DB, setup.SaveSIPConfigRequest) error
+}
+
+func (s *Store) completeSIP(ctx context.Context, req setup.SaveSIPConfigRequest, options completeSIPOptions) (setup.SIPConfigView, error) {
 	db, err := s.database()
 	if err != nil {
 		return setup.SIPConfigView{}, err
@@ -198,17 +230,13 @@ func (s *Store) CompleteSIP(ctx context.Context, req setup.SaveSIPConfigRequest)
 		if err != nil {
 			return err
 		}
-		switch row.Phase {
-		case PhaseComplete:
-			return ErrAlreadyInitialized
-		case PhasePendingAdmin:
-			return invalidState("SIP cannot be completed before the administrator is created")
-		case PhasePendingSIP:
-			if row.AdministratorID == nil || *row.AdministratorID == 0 {
-				return invalidState("pending_sip row has no administrator")
+		if err := validateSIPCompletionState(row); err != nil {
+			return err
+		}
+		if options.beforeSave != nil {
+			if err := options.beforeSave(ctx, tx, req); err != nil {
+				return err
 			}
-		default:
-			return invalidState("cannot complete SIP from phase %q", row.Phase)
 		}
 
 		// SIPConfigService.Save uses a nested savepoint when handed this
@@ -217,6 +245,12 @@ func (s *Store) CompleteSIP(ctx context.Context, req setup.SaveSIPConfigRequest)
 		if err != nil {
 			return fmt.Errorf("save SIP configuration: %w", err)
 		}
+		if options.afterSave != nil {
+			if err := options.afterSave(ctx, tx, req); err != nil {
+				return err
+			}
+		}
+
 		completedAt := time.Now().UTC()
 		update := tx.WithContext(ctx).Model(&installationRow{}).
 			Where("id = ? AND phase = ?", installationID, PhasePendingSIP).
@@ -229,6 +263,9 @@ func (s *Store) CompleteSIP(ctx context.Context, req setup.SaveSIPConfigRequest)
 			return fmt.Errorf("complete standalone installation state: %w", update.Error)
 		}
 		if update.RowsAffected != 1 {
+			if options.afterSave != nil {
+				return invalidState("standalone installation state changed while saving SIP and media configuration")
+			}
 			return invalidState("standalone installation state changed while saving SIP configuration")
 		}
 		return nil
@@ -237,6 +274,137 @@ func (s *Store) CompleteSIP(ctx context.Context, req setup.SaveSIPConfigRequest)
 		return setup.SIPConfigView{}, err
 	}
 	return result, nil
+}
+
+func validateSIPCompletionState(row installationRow) error {
+	switch row.Phase {
+	case PhaseComplete:
+		return ErrAlreadyInitialized
+	case PhasePendingAdmin:
+		return invalidState("SIP cannot be completed before the administrator is created")
+	case PhasePendingSIP:
+		if row.AdministratorID == nil || *row.AdministratorID == 0 {
+			return invalidState("pending_sip row has no administrator")
+		}
+	default:
+		return invalidState("cannot complete SIP from phase %q", row.Phase)
+	}
+	return nil
+}
+
+func validateStandaloneMediaHosts(req setup.SaveSIPConfigRequest) error {
+	fields := make(map[string]string)
+	if !isConcreteIPv4(req.MediaReceiveHost) {
+		fields["mediaReceiveHost"] = "must be a concrete IPv4 address"
+	}
+	if !isConcreteIPv4(req.MediaPlaybackHost) {
+		fields["mediaPlaybackHost"] = "must be a concrete IPv4 address"
+	}
+	if len(fields) > 0 {
+		return &setup.ValidationError{Fields: fields}
+	}
+	return nil
+}
+
+func isConcreteIPv4(value string) bool {
+	ip := net.ParseIP(value)
+	if ip == nil || ip.To4() == nil || value != ip.To4().String() {
+		return false
+	}
+	return !ip.IsUnspecified() && !ip.IsMulticast() && !ip.Equal(net.IPv4bcast)
+}
+
+func ensureStandaloneMediaNode(ctx context.Context, tx *gorm.DB, req setup.SaveSIPConfigRequest, localZLM gbconfig.ZLMConfig) error {
+	var rows []gbzlmrepo.MetaNode
+	if err := tx.WithContext(ctx).Order("id").Find(&rows).Error; err != nil {
+		return fmt.Errorf("read standalone media nodes: %w", err)
+	}
+
+	wantHost, validHost := normalizeLiteralHost(localZLM.Host)
+	if !validHost || localZLM.HTTPPort < 1 || localZLM.HTTPPort > 65535 {
+		return &setup.ValidationError{Fields: map[string]string{
+			"mediaNode": "local ZLM endpoint must be a literal host and valid port",
+		}}
+	}
+	var endpointMatches int
+	var identityMatches []*gbzlmrepo.MetaNode
+	for i := range rows {
+		host, ok := normalizeLiteralHost(rows[i].Host)
+		if !ok || host != wantHost || rows[i].APIPort != localZLM.HTTPPort {
+			continue
+		}
+		endpointMatches++
+		if rows[i].APISecret == localZLM.Secret {
+			identityMatches = append(identityMatches, &rows[i])
+		}
+	}
+	if len(identityMatches) > 1 {
+		return &setup.ValidationError{Fields: map[string]string{
+			"mediaNode": "multiple nodes match the local ZLM endpoint and API secret",
+		}}
+	}
+	if len(identityMatches) == 1 {
+		match := identityMatches[0]
+		fields := make(map[string]string)
+		if match.ReceiveHost != req.MediaReceiveHost {
+			fields["mediaReceiveHost"] = "does not match the existing local media node"
+		}
+		if match.PlaybackHost != req.MediaPlaybackHost {
+			fields["mediaPlaybackHost"] = "does not match the existing local media node"
+		}
+		if len(fields) > 0 {
+			return &setup.ValidationError{Fields: fields}
+		}
+		return nil
+	}
+	if endpointMatches != 0 {
+		return &setup.ValidationError{Fields: map[string]string{
+			"mediaNode": "the local ZLM API secret does not match the registered endpoint",
+		}}
+	}
+	if len(rows) != 0 {
+		return &setup.ValidationError{Fields: map[string]string{
+			"mediaNode": "the local ZLM endpoint and API secret are not registered",
+		}}
+	}
+
+	now := time.Now().UTC()
+	row := gbzlmrepo.MetaNode{
+		Revision:        1,
+		Name:            "zlm-default",
+		Host:            localZLM.Host,
+		ReceiveHost:     req.MediaReceiveHost,
+		PlaybackHost:    req.MediaPlaybackHost,
+		APIPort:         localZLM.HTTPPort,
+		APISecret:       localZLM.Secret,
+		MediaServerUUID: uuid.NewString(),
+		Weight:          50,
+		State:           string(gbnode.StateActive),
+		RTPPortStart:    30000,
+		RTPPortEnd:      35000,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		return fmt.Errorf("seed standalone media node: %w", err)
+	}
+	return nil
+}
+
+func normalizeLiteralHost(raw string) (string, bool) {
+	host := strings.TrimSpace(raw)
+	if strings.EqualFold(host, "localhost") {
+		return "127.0.0.1", true
+	}
+	host = strings.Trim(host, "[]")
+	if strings.Contains(host, "%") {
+		return "", false
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return "", false
+	}
+	return addr.Unmap().String(), true
 }
 
 func (s *Store) database() (*gorm.DB, error) {
