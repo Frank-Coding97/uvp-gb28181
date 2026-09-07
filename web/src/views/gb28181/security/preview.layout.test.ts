@@ -85,7 +85,7 @@ describe("security preview system integration", () => {
 
   it("models platform capability separately from firewall connectivity", () => {
     expect(apiSource).toContain('export type SecurityAgentCapability = "supported" | "unsupported" | "unknown";');
-    expect(apiSource).toContain('export type FirewallAgentState = "applied" | "failed" | "unsupported" | "unknown";');
+    expect(apiSource).toContain('export type FirewallAgentState = "applied" | "failed" | "pending" | "unsupported" | "unknown";');
     expect(apiSource).toContain("capability?: SecurityAgentCapability");
     expect(apiSource).toContain("agentState: FirewallAgentState");
   });
@@ -103,6 +103,7 @@ describe("security preview system integration", () => {
     expect(source).toContain('ban.agentState === "unsupported"');
     expect(source).toContain("firewallStateLabel");
     expect(source).toContain("系统防火墙已生效");
+    expect(source).toContain("系统防火墙待同步");
     expect(source).toContain("系统防火墙不支持");
     expect(source).toContain("<a-option>不支持</a-option>");
     expect(source).toContain("unbanPreview(record)");
