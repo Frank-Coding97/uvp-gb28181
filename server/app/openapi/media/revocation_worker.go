@@ -58,6 +58,7 @@ type RevocationRuntime struct {
 	CurrentBootNonce string
 	HookBudget       time.Duration
 	Trusted          bool
+	Release          func() // caller releases the resolved control on every path
 }
 
 // RevocationRuntimeFactory resolves one already-qualified runtime endpoint.
@@ -277,6 +278,9 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
 	}
 	runtime, err := w.factory.Resolve(totalCtx, claim.binding.NodeUUID)
+	if runtime.Release != nil {
+		defer runtime.Release()
+	}
 	if deadlineErr := totalCtx.Err(); deadlineErr != nil {
 		err = deadlineErr
 	}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -76,6 +77,22 @@ func TestOpenAPINodePreflightActualReadback(t *testing.T) {
 	require.Equal(t, got.CurrentBootNonce, replayed.CurrentBootNonce)
 	require.Equal(t, got.RuntimeEpoch, replayed.RuntimeEpoch)
 
+	// Exercise the production resolver against this real isolated ZLM, not a
+	// pre-trusted runtime stub. It still does not qualify playback or Hook delivery.
+	factory := media.NewTrustedRevocationFactory(liveRevocationRegistry{n}, liveRevocationBinding{media.NodeControlBinding{
+		NodeID: n.ID, NodeUUID: n.MediaServerUUID, BindingRevision: 1, Enabled: true, TLS: settings, HookBase: base,
+	}}, openapiconfig.NewNodeRuntimeStore(db, nil))
+	runtime, err := factory.Resolve(context.Background(), n.MediaServerUUID)
+	require.NoError(t, err)
+	require.True(t, runtime.Trusted)
+	require.Equal(t, got.CurrentBootNonce, runtime.CurrentBootNonce)
+	require.Equal(t, 2500*time.Millisecond, runtime.HookBudget)
+	require.NotNil(t, runtime.Release)
+	defer runtime.Release()
+	sessions, err := runtime.Control.GetRuntimeSessions(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, runtime.CurrentBootNonce, sessions.BootNonce)
+
 	// A bad pin cannot keep the prior mapping marked usable, nor erase history.
 	settings.SPKISHA256[0] ^= 1
 	_, err = probe.Probe(context.Background(), n, settings, base)
@@ -84,4 +101,17 @@ func TestOpenAPINodePreflightActualReadback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, openapiconfig.NodeRuntimeStatusUnknown, stored.IdentityStatus)
 	require.Equal(t, got.CurrentBootNonce, stored.CurrentBootNonce)
+}
+
+type liveRevocationRegistry struct{ n node.Node }
+
+func (r liveRevocationRegistry) GetByUUID(uuid string) (*node.Node, bool) {
+	n := r.n
+	return &n, n.MediaServerUUID == uuid
+}
+
+type liveRevocationBinding struct{ binding media.NodeControlBinding }
+
+func (b liveRevocationBinding) Lookup(context.Context, string) (media.NodeControlBinding, error) {
+	return b.binding, nil
 }
