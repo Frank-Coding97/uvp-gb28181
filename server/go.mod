@@ -5,6 +5,7 @@ go 1.25.0
 replace github.com/emiago/sipgo => ./third_party/sipgo
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/casbin/casbin/v2 v2.120.0
 	github.com/casbin/gorm-adapter/v3 v3.36.0
 	github.com/emiago/sipgo v1.4.0
