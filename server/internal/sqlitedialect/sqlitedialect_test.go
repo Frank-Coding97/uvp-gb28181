@@ -82,3 +82,43 @@ func TestOpenUsesModernSQLiteDriver(t *testing.T) {
 	require.NoError(t, rawDB.QueryRow("SELECT sqlite_version()").Scan(&version))
 	require.Equal(t, "3.53.4", version)
 }
+
+type translationParent struct {
+	ID uint
+}
+
+type translationChild struct {
+	ID       uint
+	ParentID uint
+	Parent   translationParent
+}
+
+type translationUnique struct {
+	ID    uint
+	Value string `gorm:"uniqueIndex"`
+}
+
+type translationPrimary struct {
+	ID uint
+}
+
+func TestOpenTranslatesModernSQLiteConstraintErrors(t *testing.T) {
+	db, err := gorm.Open(Open(":memory:?_pragma=foreign_keys(1)"), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	rawDB, err := db.DB()
+	require.NoError(t, err)
+	rawDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = rawDB.Close() })
+	require.NoError(t, db.AutoMigrate(&translationParent{}, &translationChild{}, &translationUnique{}, &translationPrimary{}))
+
+	require.NoError(t, db.Create(&translationUnique{Value: "same"}).Error)
+	err = db.Create(&translationUnique{Value: "same"}).Error
+	require.ErrorIs(t, err, gorm.ErrDuplicatedKey)
+
+	require.NoError(t, db.Create(&translationPrimary{ID: 7}).Error)
+	err = db.Create(&translationPrimary{ID: 7}).Error
+	require.ErrorIs(t, err, gorm.ErrDuplicatedKey)
+
+	err = db.Create(&translationChild{ParentID: 999}).Error
+	require.ErrorIs(t, err, gorm.ErrForeignKeyViolated)
+}
