@@ -15,6 +15,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 )
 
@@ -25,22 +26,24 @@ type localIPResolver func(destination string) (string, error)
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
 type UAC struct {
-	client           *sipgo.Client
-	talkDialogs      *talkDialogStore
-	playbackDialogs  *PlaybackDialogStore
-	serverID         string
-	domain           string
-	sipPort          int
-	advertiseIP      string
-	dynamicAdvertise bool
-	resolveLocalIP   localIPResolver
-	recorder         metrics.Recorder // 可选:埋点出向事务
-	doMessage        messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
-	inviteTransport  inviteDialogTransport
-	playbackEndMu    sync.RWMutex
-	playbackEndHook  func(context.Context, PlaybackDialogMetadata, string) error
-	playbackIntentMu sync.Mutex
-	playbackIntents  map[string]*playbackIntentOperation
+	client                *sipgo.Client
+	talkDialogs           *talkDialogStore
+	playbackDialogs       *PlaybackDialogStore
+	serverID              string
+	domain                string
+	sipPort               int
+	advertiseIP           string
+	dynamicAdvertise      bool
+	resolveLocalIP        localIPResolver
+	recorder              metrics.Recorder // 可选:埋点出向事务
+	doMessage             messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
+	inviteTransport       inviteDialogTransport
+	playbackEndMu         sync.RWMutex
+	playbackEndHook       func(context.Context, PlaybackDialogMetadata, string) error
+	playbackIntentMu      sync.Mutex
+	playbackIntents       map[string]*playbackIntentOperation
+	playbackRecoveries    map[string]*playbackIntentRecovery
+	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对

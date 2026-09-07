@@ -58,8 +58,9 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
 	o.cleanupClose, o.cleanupCancel = context.WithCancel(context.Background())
 	u.playbackIntentMu.Lock()
-	if len(u.playbackIntents) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil {
+	if !u.reservePlaybackBarrierLocked(barrier) || len(u.playbackIntents)+len(u.playbackRecoveries) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil || u.playbackRecoveries[id.OperationID] != nil {
 		u.playbackIntentMu.Unlock()
+		o.cleanupCancel()
 		return nil, ErrPlaybackUnavailable
 	}
 	if u.playbackIntents == nil {
@@ -68,11 +69,14 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 	u.playbackIntents[id.OperationID] = o
 	u.playbackIntentMu.Unlock()
 	removeUnused := func() {
+		o.cleanupCancel()
 		if o.lease != nil {
 			o.lease.Release()
 		}
 		u.playbackIntentMu.Lock()
-		delete(u.playbackIntents, id.OperationID)
+		if u.playbackIntents[id.OperationID] == o {
+			delete(u.playbackIntents, id.OperationID)
+		}
 		u.playbackIntentMu.Unlock()
 	}
 	lease, err := barrier.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)

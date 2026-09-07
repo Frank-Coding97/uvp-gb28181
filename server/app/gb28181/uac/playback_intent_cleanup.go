@@ -116,6 +116,13 @@ func (o *playbackIntentOperation) runCleanupBranch(ctx context.Context, branch *
 		o.releaseSingleCleanupOriginal()
 		return err
 	}
+	return o.runFixedCleanupBranch(ctx, branch, owner, plan)
+}
+
+// Both live observation and recovery use the same fresh CAS/lease and actual
+// transaction path. The caller holds work and the shared registry reservation.
+func (o *playbackIntentOperation) runFixedCleanupBranch(ctx context.Context, branch *playauth.DeviceSIPKnownBranch, owner *sipgo.OwnedBranchCleanup, plan *playbackCleanupBranchPlan) (result error) {
+	var err error
 	c := &playbackIntentCleanup{owned: owner, branch: branch.Identity, stopDone: make(chan struct{})}
 	c.branch.RouteSet = slices.Clone(branch.Identity.RouteSet)
 	o.cleanup = c // Strongly retained before persistence, connection or release.
@@ -281,7 +288,7 @@ func (o *playbackIntentOperation) finishCleanup(ctx context.Context) error {
 }
 
 func (o *playbackIntentOperation) releaseSingleCleanupOriginal() {
-	if !o.multiCleanup {
+	if !o.multiCleanup && !o.originalReleased {
 		o.releaseOriginal()
 	}
 }
