@@ -348,6 +348,11 @@ func (browser *t18EdgeBrowser) completeSIP(ctx context.Context, mediaIP, serverI
 	}); err != nil {
 		return err
 	}
+	if err := t19RunStage(ctx, "deployment-next", func(stageCtx context.Context) error {
+		return t19WaitClickText(stageCtx, browser.cdp, ".sip-setup-dialog button", "下一步")
+	}); err != nil {
+		return err
+	}
 	if err := t19RunStage(ctx, "network-form", func(stageCtx context.Context) error {
 		return t19WaitPendingSelector(stageCtx, browser.cdp, ".network-form")
 	}); err != nil {
