@@ -121,6 +121,49 @@ func TestAPIClientDoesNotTreatHTTP200AuthErrorAsSuccess(t *testing.T) {
 	}
 }
 
+func TestCloseMediaStreamReturnsErrorForNonZeroAPICode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/index/api/close_streams" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{"code":-1,"msg":"close failed"}`))
+	}))
+	defer server.Close()
+
+	closed, err := closeMediaStream(&apiClient{baseURL: server.URL, http: server.Client()}, "secret", "vhost", "app", "stream")
+	if err == nil || closed {
+		t.Fatalf("non-zero API code was treated as a clean close: closed=%v err=%v", closed, err)
+	}
+}
+
+func TestWaitMediaOfflineRequiresExplicitFalseOnline(t *testing.T) {
+	responses := []string{`{"code":0,"online":true}`, `{"code":0,"online":false}`}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/index/api/isMediaOnline" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		if request.URL.Query().Get("schema") != "fmp4" {
+			t.Fatalf("offline query omitted fmp4 schema: %v", request.URL.Query())
+		}
+		response := responses[len(responses)-1]
+		if requests < len(responses) {
+			response = responses[requests]
+		}
+		requests++
+		_, _ = writer.Write([]byte(response))
+	}))
+	defer server.Close()
+
+	err := waitMediaOffline(&apiClient{baseURL: server.URL, http: server.Client()}, "secret", "vhost", "app", "stream")
+	if err != nil {
+		t.Fatalf("explicit offline response was not accepted: %v", err)
+	}
+	if requests < 2 {
+		t.Fatalf("online=true was incorrectly accepted as offline: requests=%d", requests)
+	}
+}
+
 func TestProbeReportNeverSerializesSecretFields(t *testing.T) {
 	var response apiResponse
 	if err := json.Unmarshal([]byte(`{"code":0,"secret":"must-not-appear","data":[]}`), &response); err != nil {

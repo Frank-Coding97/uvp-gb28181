@@ -980,11 +980,17 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 		return failedCheck("media_and_recording", "HTTP fmp4 player cleanup timed out")
 	}
 	playerStopped = true
-	noneObservation, noneErr := receiver.waitFor(hookOnStreamNoneReader, noneBefore, 4*time.Second)
-	noneObserved := noneErr == nil && noneObservation.close != nil && !*noneObservation.close
+	_, _ = receiver.waitFor(hookOnStreamNoneReader, noneBefore, 4*time.Second)
 	originalClosed, err := closeMediaStream(client, secret, vhost, app, stream)
-	if err != nil || (!originalClosed && !noneObserved) {
+	if err != nil {
 		return failedCheck("media_and_recording", "test media did not close")
+	}
+	mediaClosed := originalClosed
+	if !mediaClosed {
+		if err := waitMediaOffline(client, secret, vhost, app, stream); err != nil {
+			return failedCheck("media_and_recording", "test media did not close")
+		}
+		mediaClosed = true
 	}
 	return passedCheck("media_and_recording", map[string]any{
 		"duration_ms":               loadedData.DurationMS,
@@ -996,7 +1002,7 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 		"traffic_unit":              unit,
 		"media_api_secret_rejected": true,
 		"recorded_duration_ms":      recordedData.DurationMS,
-		"media_closed":              originalClosed || noneObserved,
+		"media_closed":              mediaClosed,
 	})
 }
 
@@ -1004,14 +1010,33 @@ func closeMediaStream(client *apiClient, secret, vhost, app, stream string) (boo
 	closed, err := client.call(context.Background(), "/index/api/close_streams", url.Values{
 		"vhost": {vhost}, "app": {app}, "stream": {stream}, "force": {"1"}, "secret": {secret},
 	})
-	if err != nil || closed.Code != 0 {
+	if err != nil {
 		return false, err
+	}
+	if closed.Code != 0 {
+		return false, fmt.Errorf("close_streams returned API code %d", closed.Code)
 	}
 	var count int
 	if json.Unmarshal(closed.CountClosed, &count) != nil {
 		return false, errors.New("close_streams did not return a count")
 	}
 	return count >= 1, nil
+}
+
+func waitMediaOffline(client *apiClient, secret, vhost, app, stream string) error {
+	deadline := time.Now().Add(mediaReadyTimeout)
+	for time.Now().Before(deadline) {
+		query := url.Values{"schema": {"fmp4"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "secret": {secret}}
+		response, err := client.call(context.Background(), "/index/api/isMediaOnline", query)
+		if err == nil && response.Code == 0 {
+			var online bool
+			if len(response.Online) > 0 && json.Unmarshal(response.Online, &online) == nil && !online {
+				return nil
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return errors.New("fmp4 source offline timeout")
 }
 
 func waitMediaOnline(client *apiClient, secret, vhost, app, stream string) error {
