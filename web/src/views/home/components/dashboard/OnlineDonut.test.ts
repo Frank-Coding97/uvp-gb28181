@@ -60,6 +60,7 @@ describe("OnlineDonut", () => {
 
     expect(wrapper.get(".donut-center strong").text()).toBe(ratio);
     expect(spec.data[0].values).toEqual(values);
+    expect(spec.progress.style.fillOpacity).toBe(online > 0 ? 1 : 0);
     expect(spec.track.style.fill).toBe("var(--uvp-panel-border)");
   });
 
@@ -71,5 +72,12 @@ describe("OnlineDonut", () => {
 
     expect(chartSpec(wrapper).data[0].values).toEqual([{ category: "在线率", value: 0.75 }]);
     expect(wrapper.get(".donut-center strong").text()).toBe("75.0%");
+
+    await wrapper.setProps({ online: 0 });
+    expect(chartSpec(wrapper).progress.style.fillOpacity).toBe(0);
+    expect(wrapper.get(".donut-center strong").text()).toBe("0.0%");
+
+    await wrapper.setProps({ online: 1 });
+    expect(chartSpec(wrapper).progress.style.fillOpacity).toBe(1);
   });
 });
