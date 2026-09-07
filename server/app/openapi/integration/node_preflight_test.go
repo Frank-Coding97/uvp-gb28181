@@ -4,6 +4,8 @@ package integration
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -24,6 +27,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	"uvplatform.cn/uvp-gb28181/app/openapi/media"
+	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
 // This checks actual ZLM configuration readback and durable identity, NOT
@@ -92,6 +96,7 @@ func TestOpenAPINodePreflightActualReadback(t *testing.T) {
 	sessions, err := runtime.Control.GetRuntimeSessions(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, runtime.CurrentBootNonce, sessions.BootNonce)
+	verifyConfiguredRevocationWithRealNode(t, f, db, n, settings, base, runtime.CurrentBootNonce)
 
 	// A bad pin cannot keep the prior mapping marked usable, nor erase history.
 	settings.SPKISHA256[0] ^= 1
@@ -101,6 +106,71 @@ func TestOpenAPINodePreflightActualReadback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, openapiconfig.NodeRuntimeStatusUnknown, stored.IdentityStatus)
 	require.Equal(t, got.CurrentBootNonce, stored.CurrentBootNonce)
+}
+
+func verifyConfiguredRevocationWithRealNode(t *testing.T, f *mediaProbeFixture, db *gorm.DB, n node.Node, settings zlm.OpenAPIControlTLS, hookBase, boot string) {
+	t.Helper()
+	stream := "revocation-startup-fixture"
+	f.publish(t, stream)
+	require.NoError(t, db.AutoMigrate(&models.PlayGrant{}, &models.Viewer{}))
+	device, channel, schema, vhost, appName := "34020000001320000001", "34020000001310000001", "rtmp", "__defaultVhost__", "live"
+	protocol, generation := "https-flv", uint64(1)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	grant := models.PlayGrant{GrantID: "00000000-0000-4000-8000-000000000099", ClientID: 1, Scope: "play:live:apply",
+		DeviceID: &device, ChannelID: &channel, ClientEpoch: 1, ScopeEpoch: 1, DeviceEpoch: 1, NodeUUID: &n.MediaServerUUID,
+		BootNonce: &boot, Schema: &schema, VHost: &vhost, App: &appName, Stream: &stream, MediaGeneration: &generation,
+		Protocol: &protocol, State: models.GrantStateRevoked, Reason: "client.disabled", IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute), CreatedAt: now.Add(-10 * time.Second), UpdatedAt: now.Add(-10 * time.Second)}
+	require.NoError(t, db.Create(&grant).Error)
+	// This deliberately absent identifier checks durable recovery, not an
+	// active viewer kick or A/B/U playback isolation.
+	viewer := models.Viewer{GrantID: grant.GrantID, NodeUUID: n.MediaServerUUID, BootNonce: boot, Identifier: "absent-startup-fixture",
+		Schema: schema, VHost: vhost, App: appName, Stream: stream, MediaGeneration: generation,
+		State: models.ViewerStateRevokePending, RetryAt: &now, LastErrorClass: media.RevocationErrorPending, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, db.Create(&viewer).Error)
+	pemBytes, err := os.ReadFile(filepath.Join(f.dir, "server.pem"))
+	require.NoError(t, err)
+	cert, _ := pem.Decode(pemBytes)
+	require.NotNil(t, cert)
+	require.Equal(t, "CERTIFICATE", cert.Type)
+	document := map[string]any{"version": 1, "nodes": []any{map[string]any{
+		"node_id": n.ID, "node_uuid": n.MediaServerUUID, "binding_revision": 1, "enabled": true, "endpoint": settings.Endpoint,
+		"ca_mode": "private", "ca_pem": string(pem.EncodeToMemory(cert)), "spki_sha256": hex.EncodeToString(settings.SPKISHA256[:]), "hook_base": hookBase,
+	}}}
+	data, err := yaml.Marshal(document)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "revocation.yml")
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	reports := make(chan media.RevocationTickResult, 8)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	stop, err := media.StartConfiguredRevocation(ctx, db, liveRevocationRegistry{n}, path, func(result media.RevocationTickResult, err error) {
+		require.NoError(t, err)
+		reports <- result
+	})
+	require.NoError(t, err)
+	defer stop()
+	var first media.RevocationTickResult
+	select {
+	case first = <-reports:
+	case <-ctx.Done():
+		t.Fatal("real-node startup runner did not report")
+	}
+	require.Equal(t, 1, first.Pending)
+	require.Zero(t, first.Closed)
+	for {
+		select {
+		case result := <-reports:
+			if result.Closed == 1 {
+				stop()
+				require.NoError(t, db.First(&viewer, viewer.ID).Error)
+				require.Equal(t, models.ViewerStateClosed, viewer.State)
+				require.Equal(t, media.RevocationErrorAlreadyGone, viewer.LastErrorClass)
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("two fresh real-node absence checks never closed the pending fixture")
+		}
+	}
 }
 
 type liveRevocationRegistry struct{ n node.Node }

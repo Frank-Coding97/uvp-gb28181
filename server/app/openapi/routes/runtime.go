@@ -31,9 +31,9 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if settings == nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	// The qualified media application/worker are not wired yet. A hot/raw flag
-	// never activates media, and no sticky commitment is written until the full
-	// startup preflight succeeds.
+	// The qualified media application is not wired yet. Root's independent
+	// revocation compensation never grants playback eligibility. A hot/raw flag
+	// cannot activate media or write a sticky commitment before full preflight.
 	if settings.GetBool("openapi.play_enabled") {
 		return nil, nil, auth.ErrUnavailable
 	}

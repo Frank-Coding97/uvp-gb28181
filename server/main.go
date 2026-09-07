@@ -14,6 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
@@ -59,6 +60,25 @@ func main() {
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
 	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
+	defer cancelMaintenance()
+	stopRevocation, revocationErr := openapimedia.StartConfiguredRevocation(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
+		app.ConfigYml.GetString("openapi.revocation_bindings_file"), func(result openapimedia.RevocationTickResult, err error) {
+			if err != nil {
+				app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.Error(err))
+			} else if result.Alarms > 0 {
+				app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
+			}
+		})
+	if revocationErr != nil {
+		// Keep metadata/admin available; missing trust never means legacy control.
+		if errors.Is(revocationErr, openapimedia.ErrRevocationNotConfigured) {
+			app.ZapLog.Warn("OpenAPI revocation control is not configured; pending cleanup is not running")
+		} else {
+			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.Error(revocationErr))
+		}
+	} else {
+		defer stopRevocation()
+	}
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)
@@ -70,6 +90,9 @@ func main() {
 	// 启动服务器(阻塞直到收到退出信号)
 	_ = ginhelper.StartServer(engine)
 	cancelMaintenance()
+	if stopRevocation != nil {
+		stopRevocation()
+	}
 	<-maintenanceDone
 	// 优雅关闭 GB28181 SIP 服务
 	gb28181.Stop()

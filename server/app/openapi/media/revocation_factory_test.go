@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,6 +41,7 @@ type trustedFactoryFixture struct {
 	mu       sync.Mutex
 	requests []string
 	boot     string
+	caPEM    string
 	onConfig func()
 }
 
@@ -88,6 +90,7 @@ func newTrustedFactoryFixture(t *testing.T) *trustedFactoryFixture {
 	t.Cleanup(server.Close)
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
+	f.caPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
 	f.binding.TLS = zlm.OpenAPIControlTLS{Endpoint: server.URL + "/index/api", Roots: roots, SPKISHA256: sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)}
 	f.store = config.NewNodeRuntimeStore(w.db, w.now)
 	f.factory = NewTrustedRevocationFactory(revocationRegistryFunc(func(uuid string) (*node.Node, bool) {
