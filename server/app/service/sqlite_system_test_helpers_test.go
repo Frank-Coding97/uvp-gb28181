@@ -69,6 +69,7 @@ func newSQLiteSystemTestDBAt(t *testing.T, path string) *gorm.DB {
 	t.Cleanup(cancel)
 	_, err = sqlitebootstrap.Initialize(ctx, db)
 	require.NoError(t, err)
+	require.NoError(t, sqlitebootstrap.Migrate(ctx, db))
 	app.GormDbSQLite = db
 	t.Cleanup(func() {
 		raw, dbErr := db.DB()
