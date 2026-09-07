@@ -17,7 +17,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/casbinhelper"
@@ -116,17 +115,11 @@ func init() {
 	// 初始化文件上传服务
 	app.UploadService = newUploadService()
 
-	// 初始化任务调度器
-	app.JobScheduler = newScheduler()
-
-	// 注册所有执行器
-	scheduler.RegisterExecutors()
-	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
-		log.Fatal("注册系统任务失败: " + err.Error())
+	// Legacy startup starts runtime jobs here. Explicit standalone startup
+	// waits for the installation phase to complete and is started by root.
+	if err := startLegacyRuntimeJobs(); err != nil {
+		log.Fatal("初始化运行时任务失败: " + err.Error())
 	}
-
-	// 从数据库加载启用的任务到调度器及任务结果处理器
-	scheduler.LoadJobsFromDB()
 
 	// 初始化Response
 	app.Response = response.NewResponseHandler()
