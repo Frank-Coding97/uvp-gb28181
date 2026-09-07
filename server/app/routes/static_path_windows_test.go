@@ -29,7 +29,7 @@ func TestResolveStaticFileRejectsWindowsJunction(t *testing.T) {
 	}
 	t.Logf("junction=%q EvalSymlinks=%q", junction, resolved)
 
-	_, err = resolveStaticFile(root, filepath.Join("junction", "secret.txt"))
+	_, err = resolveStaticFile(root, "junction/secret.txt")
 	if !errors.Is(err, errStaticReparsePoint) {
 		t.Fatalf("resolveStaticFile error=%v, want %v", err, errStaticReparsePoint)
 	}
