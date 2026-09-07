@@ -43,6 +43,7 @@ type UAC struct {
 	playbackIntentMu      sync.Mutex
 	playbackIntents       map[string]*playbackIntentOperation
 	playbackRecoveries    map[string]*playbackIntentRecovery
+	playbackObservations  map[string]*playbackRecoveredObservation
 	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,

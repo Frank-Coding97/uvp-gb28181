@@ -21,13 +21,14 @@ type ClientResponseSink interface {
 // ClientResponseObservation outlives its transaction. It is not network
 // permission and is never expired by timers or by transaction termination.
 type ClientResponseObservation struct {
-	layer  *TransactionLayer
-	key    string
-	conn   Connection
-	sink   ClientResponseSink
-	mu     sync.Mutex
-	closed bool
-	done   chan struct{}
+	layer    *TransactionLayer
+	key      string
+	conn     Connection
+	selector *DetachedInviteResponseSelector
+	sink     ClientResponseSink
+	mu       sync.Mutex
+	closed   bool
+	done     chan struct{}
 }
 
 // ObserveClientResponses must be installed before Init can write the request.
@@ -40,6 +41,10 @@ func (txl *TransactionLayer) ObserveClientResponses(request *Request, conn Conne
 	if err != nil {
 		return nil, ErrClientResponseObservation
 	}
+	return txl.registerResponseObservation(key, conn, nil, sink)
+}
+
+func (txl *TransactionLayer) registerResponseObservation(key string, conn Connection, selector *DetachedInviteResponseSelector, sink ClientResponseSink) (*ClientResponseObservation, error) {
 	txl.responseObserverMu.Lock()
 	defer txl.responseObserverMu.Unlock()
 	if txl.responseObserversClosed || len(txl.responseObservers) >= maxClientResponseObservers || txl.responseObservers[key] != nil {
@@ -48,7 +53,7 @@ func (txl *TransactionLayer) ObserveClientResponses(request *Request, conn Conne
 	if txl.responseObservers == nil {
 		txl.responseObservers = make(map[string]*ClientResponseObservation)
 	}
-	o := &ClientResponseObservation{layer: txl, key: key, conn: conn, sink: sink, done: make(chan struct{})}
+	o := &ClientResponseObservation{layer: txl, key: key, conn: conn, selector: selector, sink: sink, done: make(chan struct{})}
 	txl.responseObservers[key] = o
 	return o, nil
 }
@@ -57,6 +62,10 @@ func (o *ClientResponseObservation) capture(response *Response) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.closed {
+		if o.selector != nil && !o.selector.matches(response) {
+			o.sink.ObservationLost()
+			return
+		}
 		o.sink.CaptureResponse(response)
 	}
 }

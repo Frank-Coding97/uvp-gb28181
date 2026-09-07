@@ -3,6 +3,7 @@ package uac
 import (
 	"bytes"
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,6 +96,22 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.Equal(t, playauth.SIPCleanupBYEDispatched, first[0].State)
 	_, err = f.store.DispatchSIPCleanupBYE(ctx, f.id, old.Intent.RowVersion, first[0].Identity.AttemptID)
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict, "old process permission never resumes")
+	observation, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
+	require.NoError(t, err)
+	defer observation.CloseLocal(ctx)
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	require.NoError(t, err)
+	listenerDone := make(chan error, 1)
+	go func() { listenerDone <- f.u.client.TransportLayer().ServeUDP(listener) }()
+	defer func() { _ = listener.Close(); <-listenerDone }()
+	late := recoveredObservationResponse(t, old.Steps[0].Identity, "after-process-death")
+	_, err = f.peer.WriteTo([]byte(late.String()), listener.LocalAddr())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		out, err := f.store.LoadSIPInviteSteps(ctx, f.id)
+		return err == nil && len(out.Steps[0].AdditionalBranches) == 1
+	}, 2*time.Second, time.Millisecond)
+	f.noACK(t) // Restoring observation must not revive any original SIP work.
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
 	defer r.CloseLocal(ctx)
@@ -110,7 +127,7 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.NotEqual(t, oldBYE.Via().Params.GetOr("branch", ""), newBYE.Via().Params.GetOr("branch", ""))
 	_, err = f.peer.WriteTo([]byte(sip.NewResponseFromRequest(newBYE, 200, "OK", nil).String()), address)
 	require.NoError(t, err)
-	require.NoError(t, <-result)
+	require.ErrorIs(t, <-result, ErrPlaybackCleanupUnknown, "late branch and restart gap remain unknown despite this branch's 200")
 	loaded, err := f.store.LoadSIPInviteSteps(ctx, f.id)
 	require.NoError(t, err)
 	attempts := loaded.Steps[0].KnownBranch.CleanupAttempts
@@ -119,6 +136,9 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.NotEqual(t, attempts[0].OwnerRunID, attempts[1].OwnerRunID)
 	require.NotNil(t, attempts[1].Response)
 	require.NotNil(t, attempts[1].LocalQuiescedAt)
+	require.Len(t, loaded.Steps[0].AdditionalBranches, 1)
+	require.Empty(t, loaded.Steps[0].AdditionalBranches[0].CleanupAttempts)
+	require.Equal(t, playauth.SIPBranchObserverIncomplete, loaded.Steps[0].BranchInventoryFault)
 	require.Equal(t, playauth.IntentDispatched, loaded.Intent.State)
 	_, err = f.barrier.BeginEpoch(ctx, f.id.DeviceCode, 2)
 	require.Error(t, err, "one branch's response cannot open the device completion gate")

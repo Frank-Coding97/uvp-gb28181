@@ -111,6 +111,15 @@ func validSIPKnownBranchIdentity(i DeviceSIPKnownBranchIdentity) bool {
 	return true
 }
 
+// ValidateSIPBranchObservation is pure validation for bounded receive-path
+// capture. It neither authorizes persistence nor any SIP write.
+func ValidateSIPBranchObservation(i DeviceSIPKnownBranchIdentity) error {
+	if !validSIPKnownBranchIdentity(i) {
+		return ErrDeviceIntentInvalid
+	}
+	return nil
+}
+
 func sipBranchMatchesInvite(i DeviceSIPKnownBranchIdentity, step DeviceSIPInviteStep) bool {
 	return step.State == SIPStepMayHaveDispatched && i.InviteStepID == step.Identity.StepID &&
 		i.CallID == step.Identity.CallID && i.LocalTag == step.Identity.LocalTag && i.CSeq == step.Identity.CSeq
