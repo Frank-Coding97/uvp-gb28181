@@ -32,6 +32,20 @@ type playbackOperationUDPFixture struct {
 
 func newPlaybackOperationUDPFixture(t *testing.T) *playbackOperationUDPFixture {
 	t.Helper()
+	f := newPlaybackOperationPreparedUDPFixture(t)
+	require.NoError(t, f.op.Start(context.Background()))
+	buffer := make([]byte, 8192)
+	require.NoError(t, f.peer.SetReadDeadline(time.Now().Add(time.Second)))
+	n, address, err := f.peer.ReadFrom(buffer)
+	require.NoError(t, err)
+	message, err := sip.ParseMessage(buffer[:n])
+	require.NoError(t, err)
+	f.address, f.invite = address, message.(*sip.Request)
+	return f
+}
+
+func newPlaybackOperationPreparedUDPFixture(t *testing.T) *playbackOperationUDPFixture {
+	t.Helper()
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
@@ -51,14 +65,7 @@ func newPlaybackOperationUDPFixture(t *testing.T) *playbackOperationUDPFixture {
 	u.playbackIntentMu.Lock()
 	require.Same(t, op, u.playbackIntents[id.OperationID], "strong owner precedes first wire write")
 	u.playbackIntentMu.Unlock()
-	require.NoError(t, op.Start(context.Background()))
-	buffer := make([]byte, 8192)
-	require.NoError(t, peer.SetReadDeadline(time.Now().Add(time.Second)))
-	n, address, err := peer.ReadFrom(buffer)
-	require.NoError(t, err)
-	message, err := sip.ParseMessage(buffer[:n])
-	require.NoError(t, err)
-	return &playbackOperationUDPFixture{u, db, store, id, barrier, op, peer, address, message.(*sip.Request)}
+	return &playbackOperationUDPFixture{u: u, db: db, store: store, id: id, barrier: barrier, op: op, peer: peer}
 }
 
 func (f *playbackOperationUDPFixture) respond(t *testing.T, status int) {
