@@ -22,6 +22,10 @@ func NewUnixFirewallClient(socketPath string, timeout time.Duration) *UnixFirewa
 	return &UnixFirewallClient{socketPath: socketPath, timeout: timeout}
 }
 
+func (*UnixFirewallClient) Capability() AgentCapabilityState {
+	return AgentCapabilitySupported
+}
+
 func (c *UnixFirewallClient) Ban(decision BanDecision) error {
 	_, err := c.call(unixFirewallRequest{Action: "ban", Decision: decision})
 	return err
@@ -35,7 +39,10 @@ func (c *UnixFirewallClient) Unban(sourceIP string) error {
 func (c *UnixFirewallClient) Status() AgentStatus {
 	response, err := c.call(unixFirewallRequest{Action: "status"})
 	if err != nil {
-		return AgentStatus{Connected: false, LastError: err.Error(), CheckedAt: time.Now()}
+		return AgentStatus{Connected: false, Capability: AgentCapabilitySupported, LastError: err.Error(), CheckedAt: time.Now()}
+	}
+	if response.Status.Capability == "" || response.Status.Capability == AgentCapabilityUnknown {
+		response.Status.Capability = AgentCapabilitySupported
 	}
 	return response.Status
 }
@@ -88,3 +95,4 @@ func (c *UnixFirewallClient) call(req unixFirewallRequest) (unixFirewallResponse
 }
 
 var _ FirewallAgentClient = (*UnixFirewallClient)(nil)
+var _ FirewallAgentCapabilityProvider = (*UnixFirewallClient)(nil)

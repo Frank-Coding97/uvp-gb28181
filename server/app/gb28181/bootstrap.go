@@ -567,7 +567,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 	if socketPath == "" {
 		socketPath = "/run/uvp/firewall-agent.sock"
 	}
-	agent := gbsecurity.NewUnixFirewallClient(socketPath, 2*time.Second)
+	agent := gbsecurity.NewFirewallAgentClient(socketPath, 2*time.Second)
 	secret := []byte(os.Getenv("UVP_GB28181_NONCE_SECRET"))
 	if app.DB() != nil {
 		store := gbsecurity.NewGormStore(app.DB())

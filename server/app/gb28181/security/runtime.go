@@ -53,7 +53,7 @@ func NewRuntime(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecr
 	}
 	r := &Runtime{policy: policy, clock: clock, scorer: NewScorer(policy, clock, nil, nonceSecret), events: NewAggregateStore(policy.MaxEventKeys), bans: NewBanStore(), agent: agent, subs: make(map[chan RuntimeSnapshot]struct{})}
 	r.admit = NewAdmission(policy, clock, nil, func(event Event) { _ = r.Record(event) })
-	r.agentHealth = AgentStatus{LastError: "agent health not checked"}
+	r.agentHealth = initialAgentStatus(agent)
 	r.admit.SetTrustedSource(func(source, transport, deviceID string) bool {
 		endpoint, ok := r.scorer.TrustedEndpoint(deviceID)
 		return ok && endpoint.Address == source && strings.EqualFold(endpoint.Transport, transport)
@@ -102,6 +102,17 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	active, err := store.ActiveBans(ctx, r.clock.Now())
 	if err != nil {
 		return nil, err
+	}
+	if isFirewallUnsupported(r.agent) {
+		for i := range active {
+			normalized, changed := normalizeUnsupportedBan(active[i])
+			active[i] = normalized
+			if changed {
+				// Admission must remain effective even when a legacy row cannot
+				// be rewritten during startup. The next startup retries it.
+				_ = store.SaveBan(ctx, normalized)
+			}
+		}
 	}
 	r.bans.Seed(active)
 	for _, item := range enforcementDecisions(policy, active, r.clock.Now()) {
@@ -199,7 +210,10 @@ func (r *Runtime) applyBan(decision BanDecision) error {
 	} else {
 		err = errors.New("agent unavailable")
 	}
-	if err != nil {
+	if errors.Is(err, ErrFirewallUnsupported) {
+		r.bans.MarkUnsupported(decision.SourceIP)
+		err = nil
+	} else if err != nil {
 		r.bans.MarkAgentFailed(decision.SourceIP, err.Error())
 	} else {
 		r.bans.MarkApplied(decision.SourceIP, r.clock.Now())
@@ -319,9 +333,11 @@ func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
 	for _, item := range decisions {
 		_ = r.admit.Ban(item.SourceIP, item.ExpiresAt())
 	}
-	if reconciler, ok := r.agent.(interface{ Reconcile([]BanDecision) error }); ok {
+	if reconciler, ok := r.agent.(interface{ Reconcile([]BanDecision) error }); ok && !isFirewallUnsupported(r.agent) {
 		if err := reconciler.Reconcile(decisions); err != nil {
-			return err
+			if !errors.Is(err, ErrFirewallUnsupported) {
+				return err
+			}
 		}
 	}
 	return nil
@@ -350,7 +366,7 @@ func (r *Runtime) Unban(identifier, actor string) error {
 		return errors.New("ban not found")
 	}
 	if r.agent != nil {
-		if err := r.agent.Unban(item.Decision.SourceIP); err != nil {
+		if err := r.agent.Unban(item.Decision.SourceIP); err != nil && !errors.Is(err, ErrFirewallUnsupported) {
 			return err
 		}
 	}
@@ -400,6 +416,13 @@ func (r *Runtime) runAgentMaintenance() {
 func (r *Runtime) reconcileAgent() error {
 	r.enforcementMu.Lock()
 	defer r.enforcementMu.Unlock()
+	if isFirewallUnsupported(r.agent) {
+		status := agentStatus(r.agent)
+		r.mu.Lock()
+		r.agentHealth = status
+		r.mu.Unlock()
+		return nil
+	}
 	decisions := enforcementDecisions(r.Policy(), r.bans.List(r.clock.Now()), r.clock.Now())
 	var err error
 	for _, d := range decisions {
@@ -488,7 +511,68 @@ func (r *Runtime) publish(snapshot RuntimeSnapshot) {
 }
 func agentStatus(agent FirewallAgentClient) AgentStatus {
 	if agent == nil {
-		return AgentStatus{Connected: false, LastError: "agent unavailable"}
+		return AgentStatus{Connected: false, Capability: AgentCapabilityUnknown, LastError: "agent unavailable"}
 	}
-	return agent.Status()
+	capability := firewallAgentCapability(agent)
+	if capability == AgentCapabilityUnsupported {
+		return AgentStatus{Connected: false, Capability: AgentCapabilityUnsupported, LastError: ErrFirewallUnsupported.Error(), CheckedAt: time.Now()}
+	}
+	status := agent.Status()
+	if status.Capability == "" || status.Capability == AgentCapabilityUnknown {
+		status.Capability = capability
+	}
+	if status.Capability == "" {
+		status.Capability = AgentCapabilityUnknown
+	}
+	return status
+}
+
+func initialAgentStatus(agent FirewallAgentClient) AgentStatus {
+	status := AgentStatus{Capability: AgentCapabilityUnknown, LastError: "agent health not checked"}
+	if agent == nil {
+		status.LastError = "agent unavailable"
+		return status
+	}
+	status.Capability = firewallAgentCapability(agent)
+	if status.Capability == AgentCapabilityUnsupported {
+		status.LastError = ErrFirewallUnsupported.Error()
+	}
+	return status
+}
+
+func firewallAgentCapability(agent FirewallAgentClient) AgentCapabilityState {
+	if provider, ok := agent.(FirewallAgentCapabilityProvider); ok {
+		switch capability := provider.Capability(); capability {
+		case AgentCapabilitySupported, AgentCapabilityUnsupported:
+			return capability
+		}
+	}
+	return AgentCapabilityUnknown
+}
+
+func isFirewallUnsupported(agent FirewallAgentClient) bool {
+	return firewallAgentCapability(agent) == AgentCapabilityUnsupported
+}
+
+func normalizeUnsupportedBan(item FirewallBan) (FirewallBan, bool) {
+	if item.Status != BanActive && item.Status != BanAgentFailed {
+		return item, false
+	}
+	changed := item.Status != BanActive || item.AgentState != AgentStateUnsupported || !item.FirewallAppliedAt.IsZero() || item.LastError != ErrFirewallUnsupported.Error()
+	item.Status = BanActive
+	item.AgentState = AgentStateUnsupported
+	item.LastError = ErrFirewallUnsupported.Error()
+	item.FirewallAppliedAt = time.Time{}
+	return item, changed
+}
+
+func (s *BanStore) MarkUnsupported(sourceIP string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[sourceIP]
+	if !ok {
+		return
+	}
+	normalized, _ := normalizeUnsupportedBan(item)
+	s.items[sourceIP] = normalized
 }
