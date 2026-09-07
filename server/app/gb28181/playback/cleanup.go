@@ -14,6 +14,8 @@ func (CleanupRunner) Run(ctx context.Context, resources CleanupResources) error 
 	var result error
 	result = errors.Join(result, resources.Teardown(ctx))
 	result = errors.Join(result, resources.CloseRTP(ctx))
-	result = errors.Join(result, resources.Unbind(ctx))
-	return result
+	if result != nil {
+		return result
+	}
+	return resources.Unbind(ctx)
 }

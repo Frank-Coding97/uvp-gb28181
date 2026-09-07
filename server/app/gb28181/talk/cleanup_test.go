@@ -135,7 +135,11 @@ func TestCleanupCancelledWaiterCannotReportFalseSuccess(t *testing.T) {
 	go func() {
 		ownerDone <- service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "owner")
 	}()
-	<-media.started
+	select {
+	case <-media.started:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup owner did not reach media close")
+	}
 
 	waiterCtx, cancel := context.WithCancel(context.Background())
 	cancel()
