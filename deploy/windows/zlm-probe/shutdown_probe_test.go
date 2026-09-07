@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,39 @@ import (
 	"testing"
 	"time"
 )
+
+func TestShutdownGateCountsLogicalHooksIndependentlyOfRetry(t *testing.T) {
+	receiver, err := newHookReceiver("shutdown-node", "shutdown-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiver.close(time.Second)
+	gate, err := newShutdownHookGate(receiver, shutdownHookAlwaysFailure, filepath.Join(t.TempDir(), "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.close()
+	body := shutdownProbeRecordBody(t)
+	for i := 0; i < 2; i++ {
+		_, _, err = postShutdownHook(gate.url(), body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if gate.logicalHooks() != 1 || gate.attempts() != 2 {
+		t.Fatal("retry counted as another recording")
+	}
+	body = bytes.Replace(body, []byte(`"hook_index":1`), []byte(`"hook_index":2`), 1)
+	_, _, err = postShutdownHook(gate.url(), body)
+	if err != nil || gate.logicalHooks() != 1 {
+		t.Fatal("new HTTP hook index must not invent another recording")
+	}
+	body = bytes.ReplaceAll(body, []byte("record.mp4"), []byte("record-2.mp4"))
+	_, _, err = postShutdownHook(gate.url(), body)
+	if err != nil || gate.logicalHooks() != 2 {
+		t.Fatal("second recording not detected")
+	}
+}
 
 func TestShutdownHookGateBlocksBeforeIndexAndReleasesBeforeSuccess(t *testing.T) {
 	receiver, err := newHookReceiver("shutdown-node", "shutdown-secret")

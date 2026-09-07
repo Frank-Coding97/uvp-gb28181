@@ -115,14 +115,16 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	var receiver *hookReceiver
 	var gate *shutdownHookGate
 	var player *playerSession
-	playerStopped := false
 	var inputReader, inputWriter *os.File
 	var server *zlmProcess
 	defer func() {
+		if gate != nil && result.Status == "passed" && (gate.logicalHooks() != 1 || gate.attempts() != scenario.expectedHookAttempt) {
+			result = failedCheck(scenario.name, "recording produced unexpected logical Hooks or retry count")
+		}
 		if gate != nil {
 			gate.release()
 		}
-		if player != nil && !playerStopped {
+		if player != nil {
 			if stopErr := player.stop(5 * time.Second); stopErr != nil && result.Status == "passed" {
 				result = failedCheck(scenario.name, "HTTP fmp4 player cleanup timed out")
 			}
@@ -236,7 +238,7 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	}
 	recordPath := "./录像 输出 中文 space/"
 	started, err := client.call(context.Background(), "/index/api/startRecord", url.Values{
-		"type": {"1"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "customized_path": {recordPath}, "max_second": {"30"}, "secret": {secret},
+		"type": {"1"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "customized_path": {recordPath}, "max_second": {"3600"}, "secret": {secret},
 	})
 	if err != nil || started.Code != 0 || !rawBool(started.Result) {
 		return failedCheck(scenario.name, "startRecord did not start MP4 recording"), stage, stats
@@ -244,10 +246,8 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitRecording(client, secret, vhost, app, stream, true); err != nil {
 		return failedCheck(scenario.name, "isRecording did not report the active MP4 recorder"), stage, stats
 	}
-	files, bytes := waitForMP4Size(recordRoot, shutdownRecordingDataMinBytes, recordWaitTimeout)
-	if files == 0 || bytes < shutdownRecordingDataMinBytes {
-		return failedCheck(scenario.name, "recording produced no confirmed temporary MP4 data"), stage, stats
-	}
+	// MP4 muxing buffers data until close. Waiting for disk growth here can
+	// accidentally loop the fixture and produce a second recording/Hook.
 
 	stopped, err := client.call(context.Background(), "/index/api/stopRecord", url.Values{
 		"type": {"1"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "secret": {secret},
@@ -312,6 +312,7 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 			return failedCheck(scenario.name, "failed recording Hook scenario reported a successful index"), stage, stats
 		}
 		return passedCheck(scenario.name, map[string]any{
+			"logical_hooks":      gate.logicalHooks(),
 			"hook_attempts":      gate.attempts(),
 			"hook_successes":     gate.successes(),
 			"expected_exit_code": 2,
@@ -343,6 +344,7 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 		return failedCheck(scenario.name, "simulated recording index was not written exactly once"), stage, stats
 	}
 	return passedCheck(scenario.name, map[string]any{
+		"logical_hooks":            gate.logicalHooks(),
 		"hook_attempts":            gate.attempts(),
 		"hook_successes":           gate.successes(),
 		"barrier_observed":         scenario.requireBarrier,
@@ -367,6 +369,7 @@ type shutdownHookGate struct {
 	attemptCount   int
 	successCount   int
 	recordFilePath string
+	recordPaths    map[string]struct{}
 }
 
 func newShutdownHookGate(receiver *hookReceiver, mode shutdownHookMode, marker string) (*shutdownHookGate, error) {
@@ -374,11 +377,12 @@ func newShutdownHookGate(receiver *hookReceiver, mode shutdownHookMode, marker s
 		return nil, errors.New("shutdown Hook gate requires a receiver and marker")
 	}
 	gate := &shutdownHookGate{
-		receiver:  receiver,
-		mode:      mode,
-		marker:    marker,
-		releaseCh: make(chan struct{}),
-		entered:   make(chan int, 16),
+		receiver:    receiver,
+		mode:        mode,
+		marker:      marker,
+		releaseCh:   make(chan struct{}),
+		entered:     make(chan int, 16),
+		recordPaths: make(map[string]struct{}),
 	}
 	gate.server = httptest.NewServer(http.HandlerFunc(gate.handle))
 	return gate, nil
@@ -403,6 +407,7 @@ func (gate *shutdownHookGate) handle(writer http.ResponseWriter, request *http.R
 	attempt := gate.attemptCount
 	if rawPath, ok := rawString(body["file_path"]); ok {
 		gate.recordFilePath = rawPath
+		gate.recordPaths[rawPath] = struct{}{}
 	}
 	gate.mu.Unlock()
 	gate.entered <- attempt
@@ -493,6 +498,12 @@ func (gate *shutdownHookGate) attempts() int {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	return gate.attemptCount
+}
+
+func (gate *shutdownHookGate) logicalHooks() int {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	return len(gate.recordPaths)
 }
 
 func (gate *shutdownHookGate) successes() int {
