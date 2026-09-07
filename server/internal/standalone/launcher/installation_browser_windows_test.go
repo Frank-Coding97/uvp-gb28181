@@ -140,7 +140,8 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	defer cancelSIP()
 	sipPassword := t18BrowserPassword(t)
 	if err := browser.completeSIP(sipContext, sipIP, "34020000002000000001", sipPassword); err != nil {
-		t18LogBrowserState(t, browser.cdp)
+		t19LogFlowFailure(t, browser.cdp, err)
+		t19CaptureFailureScreenshot(t, browser, filepath.Join(installDir, "t19-sip-failure.png"))
 		t.Fatal("standalone SIP browser flow could not be completed")
 	}
 	sipPassword = ""
@@ -340,55 +341,114 @@ func (browser *t18EdgeBrowser) loginAndSubmit(ctx context.Context, username, pas
 
 func (browser *t18EdgeBrowser) completeSIP(ctx context.Context, mediaIP, serverID, password string) error {
 	if browser == nil || browser.cdp == nil {
-		return errors.New("browser protocol is unavailable")
+		return &t19BrowserFlowError{stage: "browser", kind: "unavailable"}
 	}
-	if err := t19WaitClickText(ctx, browser.cdp, ".deployment-options .deployment-option", "局域网部署"); err != nil {
-		return errors.New("select LAN deployment")
+	if err := t19RunStage(ctx, "deployment", func(stageCtx context.Context) error {
+		return t19WaitClickText(stageCtx, browser.cdp, ".deployment-options .deployment-option", "局域网部署")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitPendingSelector(ctx, browser.cdp, ".network-form"); err != nil {
-		return errors.New("network step did not become ready")
+	if err := t19RunStage(ctx, "network-form", func(stageCtx context.Context) error {
+		return t19WaitPendingSelector(stageCtx, browser.cdp, ".network-form")
+	}); err != nil {
+		return err
 	}
-	if err := t19SelectNetworkIP(ctx, browser.cdp, mediaIP); err != nil {
-		return errors.New("select configured LAN address")
+	if err := t19RunStage(ctx, "network-select", func(stageCtx context.Context) error {
+		return t19SelectNetworkIP(stageCtx, browser.cdp, mediaIP)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitSetInputAt(ctx, browser.cdp, ".media-addresses input", 0, mediaIP); err != nil {
-		return errors.New("confirm media receive address")
+	if err := t19RunStage(ctx, "media-receive", func(stageCtx context.Context) error {
+		return t19WaitSetInputAt(stageCtx, browser.cdp, ".media-addresses input", 0, mediaIP)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitSetInputAt(ctx, browser.cdp, ".media-addresses input", 1, mediaIP); err != nil {
-		return errors.New("confirm media playback address")
+	if err := t19RunStage(ctx, "media-playback", func(stageCtx context.Context) error {
+		return t19WaitSetInputAt(stageCtx, browser.cdp, ".media-addresses input", 1, mediaIP)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitMediaValues(ctx, browser.cdp, mediaIP); err != nil {
-		return errors.New("media addresses were not confirmed")
+	if err := t19RunStage(ctx, "media-confirm", func(stageCtx context.Context) error {
+		return t19WaitMediaValues(stageCtx, browser.cdp, mediaIP)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "下一步"); err != nil {
-		return errors.New("advance from network step")
+	if err := t19RunStage(ctx, "network-next", func(stageCtx context.Context) error {
+		return t19WaitClickText(stageCtx, browser.cdp, ".sip-setup-dialog button", "下一步")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitPendingSelector(ctx, browser.cdp, ".identity-form"); err != nil {
-		return errors.New("identity step did not become ready")
+	if err := t19RunStage(ctx, "identity-form", func(stageCtx context.Context) error {
+		return t19WaitPendingSelector(stageCtx, browser.cdp, ".identity-form")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[placeholder='1 - 65535']", 0, "15070"); err != nil {
-		return errors.New("set SIP port")
+	if err := t19RunStage(ctx, "identity-port", func(stageCtx context.Context) error {
+		return t19WaitSetInputAt(stageCtx, browser.cdp, ".identity-form input[placeholder='1 - 65535']", 0, "15070")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[placeholder='20 位数字编码']", 0, serverID); err != nil {
-		return errors.New("set SIP platform ID")
+	if err := t19RunStage(ctx, "identity-id", func(stageCtx context.Context) error {
+		return t19WaitSetInputAt(stageCtx, browser.cdp, ".identity-form input[placeholder='20 位数字编码']", 0, serverID)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[type='text'][placeholder^='至少 12 位']", 0, password); err != nil {
-		return errors.New("set SIP password")
+	if err := t19RunStage(ctx, "identity-password", func(stageCtx context.Context) error {
+		return t19WaitSetInputAt(stageCtx, browser.cdp, ".identity-form input[type='text'][placeholder^='至少 12 位']", 0, password)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitIdentityValues(ctx, browser.cdp, serverID, password); err != nil {
-		return errors.New("SIP identity fields were not accepted")
+	if err := t19RunStage(ctx, "identity-confirm", func(stageCtx context.Context) error {
+		return t19WaitIdentityValues(stageCtx, browser.cdp, serverID, password)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "下一步"); err != nil {
-		return errors.New("advance from identity step")
+	if err := t19RunStage(ctx, "identity-next", func(stageCtx context.Context) error {
+		return t19WaitClickText(stageCtx, browser.cdp, ".sip-setup-dialog button", "下一步")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitPendingSelector(ctx, browser.cdp, ".confirm-groups"); err != nil {
-		return errors.New("confirmation step did not become ready")
+	if err := t19RunStage(ctx, "confirmation-form", func(stageCtx context.Context) error {
+		return t19WaitPendingSelector(stageCtx, browser.cdp, ".confirm-groups")
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitConfirmValues(ctx, browser.cdp, mediaIP, serverID); err != nil {
-		return errors.New("confirmation page did not show the configured values")
+	if err := t19RunStage(ctx, "confirmation-values", func(stageCtx context.Context) error {
+		return t19WaitConfirmValues(stageCtx, browser.cdp, mediaIP, serverID)
+	}); err != nil {
+		return err
 	}
-	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "保存并启动"); err != nil {
-		return errors.New("submit SIP configuration")
+	if err := t19RunStage(ctx, "save", func(stageCtx context.Context) error {
+		return t19WaitClickText(stageCtx, browser.cdp, ".sip-setup-dialog button", "保存并启动")
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+const t19BrowserStageTimeout = 12 * time.Second
+
+type t19BrowserFlowError struct {
+	stage string
+	kind  string
+}
+
+func (err *t19BrowserFlowError) Error() string {
+	return "stage=" + err.stage + " error=" + err.kind
+}
+
+func t19RunStage(ctx context.Context, stage string, run func(context.Context) error) error {
+	stageCtx, cancel := context.WithTimeout(ctx, t19BrowserStageTimeout)
+	defer cancel()
+	if err := run(stageCtx); err != nil {
+		kind := "selector_or_protocol"
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			kind = "deadline"
+		case errors.Is(err, context.Canceled):
+			kind = "canceled"
+		}
+		return &t19BrowserFlowError{stage: stage, kind: kind}
 	}
 	return nil
 }
@@ -559,6 +619,25 @@ func (browser *t18EdgeBrowser) captureScreenshot(ctx context.Context, path strin
 		return errors.New("write browser screenshot")
 	}
 	return nil
+}
+
+func t19CaptureFailureScreenshot(t *testing.T, browser *t18EdgeBrowser, path string) {
+	t.Helper()
+	if browser == nil || browser.cdp == nil {
+		return
+	}
+	redactCtx, cancelRedact := context.WithTimeout(context.Background(), time.Second)
+	_ = browser.cdp.evalBool(redactCtx, "(() => {"+
+		"document.querySelectorAll('input').forEach(input => { const placeholder = String(input.placeholder || ''); if (input.type === 'password' || placeholder.includes('密码') || placeholder.includes('至少 12 位')) { input.value = '[redacted]'; input.setAttribute('value', '[redacted]'); } });"+
+		"document.querySelectorAll('.confirm-row').forEach(row => { const label = row.querySelector('.confirm-row__label'); if (label && String(label.textContent || '').includes('SIP 密码')) { const value = row.querySelector('.confirm-value'); if (value) value.textContent = '[redacted]'; } });"+
+		"return true;"+
+		"})()")
+	cancelRedact()
+	screenshotCtx, cancelScreenshot := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelScreenshot()
+	if err := browser.captureScreenshot(screenshotCtx, path); err != nil {
+		t.Log("T19 SIP failure screenshot was unavailable")
+	}
 }
 
 func t18FindEdgeExecutable() (string, error) {
@@ -803,6 +882,16 @@ type t18BrowserDOMState struct {
 	LoginRoute              bool `json:"loginRoute"`
 	HomeRoute               bool `json:"homeRoute"`
 	LoginForm               bool `json:"loginForm"`
+	DeploymentVisible       bool `json:"deploymentVisible"`
+	NetworkFormVisible      bool `json:"networkFormVisible"`
+	NetworkSelectVisible    bool `json:"networkSelectVisible"`
+	MediaAddressesVisible   bool `json:"mediaAddressesVisible"`
+	IdentityFormVisible     bool `json:"identityFormVisible"`
+	ConfirmGroupsVisible    bool `json:"confirmGroupsVisible"`
+	MediaInputCount         int  `json:"mediaInputCount"`
+	VisibleOptionCount      int  `json:"visibleOptionCount"`
+	NextEnabled             bool `json:"nextEnabled"`
+	SaveEnabled             bool `json:"saveEnabled"`
 	SIPModalVisible         bool `json:"sipModalVisible"`
 	SIPRequired             bool `json:"sipRequired"`
 	SIPSkipVisible          bool `json:"sipSkipVisible"`
@@ -834,6 +923,15 @@ const t18BrowserDOMStateExpression = `(() => {
    .some(node => String(node.textContent || "").includes("请完成配置后再使用系统"));
  const sipSkip = sipDialog && sipDialog.querySelector(".sip-modal-skip");
  const sipClose = sipDialog && sipDialog.querySelector(".arco-modal-close-btn, .arco-modal-close, [aria-label='Close']");
+ const deployment = document.querySelector(".deployment-options");
+ const networkForm = document.querySelector(".network-form");
+ const networkSelect = document.querySelector(".network-form .arco-select-view, .network-form .arco-select");
+ const mediaAddresses = document.querySelector(".media-addresses");
+ const identityForm = document.querySelector(".identity-form");
+ const confirmGroups = document.querySelector(".confirm-groups");
+ const visibleButton = label => Array.from(document.querySelectorAll(".sip-setup-dialog button")).some(node => visible(node) && !node.disabled && String(node.textContent || "").includes(label));
+ const visibleOptions = Array.from(document.querySelectorAll(".arco-select-option, [role=option]")).filter(visible).length;
+ const mediaInputCount = Array.from(document.querySelectorAll(".media-addresses input")).filter(visible).length;
  const dashboardVisible = Boolean(document.querySelector(".dashboard-shell, .dashboard-grid"));
  const dashboardAPIRequested = performance.getEntriesByType("resource").some(entry => {
    try {
@@ -855,9 +953,19 @@ const t18BrowserDOMStateExpression = `(() => {
 	return {
 	  urlScrubbed: !href.includes("bootstrap_token="),
 	  setupForm: setupForm,
-	  loginRoute: route.includes("/login"),
-	  homeRoute: route.includes("/home"),
-	  loginForm: loginForm,
+		loginRoute: route.includes("/login"),
+		homeRoute: route.includes("/home"),
+		loginForm: loginForm,
+		deploymentVisible: visible(deployment),
+		networkFormVisible: visible(networkForm),
+		networkSelectVisible: visible(networkSelect),
+		mediaAddressesVisible: visible(mediaAddresses),
+		identityFormVisible: visible(identityForm),
+		confirmGroupsVisible: visible(confirmGroups),
+		mediaInputCount: mediaInputCount,
+		visibleOptionCount: visibleOptions,
+		nextEnabled: visibleButton("下一步"),
+		saveEnabled: visibleButton("保存并启动"),
    sipModalVisible: sipModalVisible,
    sipRequired: requiredCopy,
    sipSkipVisible: visible(sipSkip),
@@ -929,6 +1037,17 @@ func t19WaitStandaloneComplete(t *testing.T, ctx context.Context, client t18HTTP
 	}
 }
 
+func t19LogFlowFailure(t *testing.T, cdp *t18CDP, err error) {
+	t.Helper()
+	stage, kind := "unknown", "internal"
+	var flowErr *t19BrowserFlowError
+	if errors.As(err, &flowErr) {
+		stage, kind = flowErr.stage, flowErr.kind
+	}
+	t.Logf("T19 SIP browser flow failed: stage=%s error=%s", stage, kind)
+	t18LogBrowserState(t, cdp)
+}
+
 func t19ConcreteIPv4(value string) bool {
 	parts := strings.Split(value, ".")
 	if len(parts) != 4 {
@@ -961,6 +1080,6 @@ func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
 		t.Log("browser DOM state unavailable")
 		return
 	}
-	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t home_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
-		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.HomeRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
+	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t home_route=%t login_form=%t deployment=%t network=%t select=%t media=%t media_inputs=%d options=%d identity=%t confirm=%t next=%t save=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
+		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.HomeRoute, state.LoginForm, state.DeploymentVisible, state.NetworkFormVisible, state.NetworkSelectVisible, state.MediaAddressesVisible, state.MediaInputCount, state.VisibleOptionCount, state.IdentityFormVisible, state.ConfirmGroupsVisible, state.NextEnabled, state.SaveEnabled, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
 }
