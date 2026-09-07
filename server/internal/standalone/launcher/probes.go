@@ -15,8 +15,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/standalone/readiness"
 )
 
-// Locked custom build with stdin control and MP4 finalization tracking.
-const mediaCommit = "86059fe79984cd50b00d98ec6813cdc1558213dd"
+// Locked custom build with stdin control, MP4 finalization, and reloadable keepalive.
+const mediaCommit = "ea709762572be65196beed7d03770700f0848715"
 
 var requiredMediaAPIs = []string{
 	"/index/api/getApiList", "/index/api/getServerConfig", "/index/api/openRtpServer",
