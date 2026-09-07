@@ -192,6 +192,25 @@ func TestWindowsStandaloneT18MovedInstallationAddressWarning(t *testing.T) {
 		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("moved address warning did not become visible in the real Edge browser")
 	}
+	settleContext, cancelSettle := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := t19WaitEval(settleContext, browser.cdp, `!document.getAnimations().some(animation => animation.playState === 'running' && animation.effect && animation.effect.getTiming().iterations !== Infinity)`); err != nil {
+		cancelSettle()
+		t.Fatal("moved address warning animations did not settle within the deadline")
+	}
+	cancelSettle()
+	maskContext, cancelMask := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := t18AssertAddressPasswordInputsMasked(maskContext, browser.cdp); err != nil {
+		cancelMask()
+		t.Fatal("moved address warning page did not keep password inputs masked")
+	}
+	cancelMask()
+	warningScreenshot := filepath.Join(installDir, "t18-address-warning.png")
+	screenshotContext, cancelScreenshot := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := browser.captureScreenshot(screenshotContext, warningScreenshot); err != nil {
+		cancelScreenshot()
+		t.Fatal("moved address warning screenshot was unavailable")
+	}
+	cancelScreenshot()
 
 	status, headers, body = client.request(t, http.MethodGet, "/api/gb28181/sip/setup/network-interfaces", "", nil)
 	t18AssertResponseSafe(t, headers, body, "", "")
@@ -491,6 +510,21 @@ func t18WaitAddressWarning(ctx context.Context, cdp *t18CDP) error {
 			return err
 		}
 	}
+}
+
+func t18AssertAddressPasswordInputsMasked(ctx context.Context, cdp *t18CDP) error {
+	if cdp == nil {
+		return errors.New("browser protocol is unavailable")
+	}
+	const expression = `(() => {
+	 const passwordField = input => {
+	   const semantic = ["name", "autocomplete", "placeholder", "aria-label"].map(attribute => String(input.getAttribute(attribute) || "")).join(" ").toLowerCase();
+	   return input.type === "password" || semantic.includes("password") || semantic.includes("密码");
+	 };
+	 return Array.from(document.querySelectorAll("input")).filter(passwordField).every(input =>
+	   input.type === "password" && String(input.getAttribute("type") || "").toLowerCase() === "password");
+})()`
+	return cdp.evalBool(ctx, expression)
 }
 
 func t18WaitAddressBusinessFailClosed(t *testing.T, run *t18Launch, timeout time.Duration) {
