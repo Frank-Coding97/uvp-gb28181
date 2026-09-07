@@ -36,6 +36,7 @@ type probeOptions struct {
 	fixture        string
 	expectedCommit string
 	keepTemp       bool
+	shutdownProbe  bool
 }
 
 type probeReport struct {
@@ -551,6 +552,10 @@ func rewriteINI(path string, values map[string]map[string]string) error {
 }
 
 func startZLM(executable, dir, config string) (*zlmProcess, error) {
+	return startZLMWithInput(executable, dir, config, nil)
+}
+
+func startZLMWithInput(executable, dir, config string, input *os.File) (*zlmProcess, error) {
 	stdout, err := os.OpenFile(filepath.Join(dir, "probe-stdout.log"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, err
@@ -561,6 +566,10 @@ func startZLM(executable, dir, config string) (*zlmProcess, error) {
 		return nil, err
 	}
 	cmd := exec.Command(executable, "-c", filepath.Base(config), "--affinity", "0")
+	if input != nil {
+		cmd.Args = append(cmd.Args, "--uvp-stdin-control")
+		cmd.Stdin = input
+	}
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

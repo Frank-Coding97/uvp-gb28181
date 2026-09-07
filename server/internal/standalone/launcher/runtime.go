@@ -39,7 +39,7 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 	if err != nil {
 		return err
 	}
-	exits := make(chan error, 3)
+	exits := make(chan error, 4) // three components and the control listener
 	type child struct {
 		process *winprocess.Process
 		done    chan struct{}
@@ -134,7 +134,14 @@ func Launch(ctx context.Context, installDir, recordingsDir string, notify func(S
 			return err
 		}
 		controlDone = make(chan error, 1)
-		go func() { defer listener.Close(); controlDone <- control.Serve(controlCtx, listener, owner.handle) }()
+		go func() {
+			defer listener.Close()
+			err := control.Serve(controlCtx, listener, owner.handle)
+			if err != nil {
+				exits <- errors.New("launcher control listener failed")
+			}
+			controlDone <- err
+		}()
 		return nil
 	}
 	steps.Redis = func(ctx context.Context) error {

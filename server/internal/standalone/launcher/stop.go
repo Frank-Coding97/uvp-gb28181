@@ -41,7 +41,7 @@ func Stop(ctx context.Context, installDir, recordingsDir string) error {
 }
 
 func shutdownRedis(ctx context.Context, address, password string) error {
-	client := redis.NewClient(&redis.Options{Addr: address, Password: password, MaxRetries: -1, DialTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second})
+	client := redis.NewClient(&redis.Options{Addr: address, Password: password, MaxRetries: -1, DialTimeout: time.Second, ReadTimeout: 60 * time.Second, WriteTimeout: time.Second})
 	defer client.Close()
 	// go-redis normalizes the expected SHUTDOWN EOF. Runtime additionally waits
 	// for the exact owned process to exit successfully before declaring completion.
