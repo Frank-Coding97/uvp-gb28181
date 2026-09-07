@@ -790,6 +790,7 @@ INSERT INTO sys_gen_field VALUES (211, 24, 'updated_at', 'datetime', '更新时�
 INSERT INTO sys_gen_field VALUES (212, 24, 'deleted_at', 'datetime', '删除时间', '', '', 0, 0, 'time.Time', 'string', 'deleted_at', NULL, NULL, NULL, NULL, '', '', '', 'column:deleted_at');
 INSERT INTO sys_gen_field VALUES (213, 24, 'created_by', 'int', '创建人', '', '', 1, 0, 'uint', 'number', 'created_by', NULL, NULL, NULL, NULL, '', '', '', 'column:created_by');
 -- Table structure for sys_jobs
+DROP TABLE IF EXISTS sys_job_results;
 DROP TABLE IF EXISTS sys_jobs;
 CREATE TABLE sys_jobs (
     id VARCHAR(255) NOT NULL,
@@ -834,7 +835,6 @@ COMMENT ON COLUMN sys_jobs.retry_interval IS '重试间隔(纳秒)';
 
 -- Records of sys_jobs
 -- Table structure for sys_job_results
-DROP TABLE IF EXISTS sys_job_results;
 CREATE TABLE sys_job_results (
     id BIGSERIAL,
     job_id VARCHAR(255) NOT NULL,
@@ -2758,8 +2758,8 @@ UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' 
 UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerStrategy',title='调度策略',icon='lucide:Workflow',sort=100,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler' AND deleted_at IS NULL;
 UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerLog',title='调度日志',icon='lucide:History',sort=110,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler/logs' AND deleted_at IS NULL;
 UPDATE sys_menu SET parent_id=0,component='gb28181/zlm/NodeDetail',title='节点详情',hide=1,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/nodes/:id' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/cloud-recordings/index',title='云端录像',icon='lucide:Cloud',sort=35,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/cloud-recordings' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/recording-schedules/index',title='录像计划',icon='lucide:CalendarClock',sort=36,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/recording-schedules' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=COALESCE((SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),parent_id),component='gb28181/cloud-recordings/index',title='云端录像',icon='lucide:Cloud',sort=35,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/cloud-recordings' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=COALESCE((SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),parent_id),component='gb28181/recording-schedules/index',title='录像计划',icon='lucide:CalendarClock',sort=36,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/recording-schedules' AND deleted_at IS NULL;
 UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP WHERE path IN ('/media/overview','/media/monitoring','/media/ingress','/media/recordings','/media/nodes','/media/scheduling','/media/nodes/:id') AND deleted_at IS NULL;
 -- zlm-admin-parity-v3:end
 

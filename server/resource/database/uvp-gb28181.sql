@@ -8832,7 +8832,7 @@ CREATE TEMPORARY TABLE IF NOT EXISTS `__openapi_client_menu_guard` (
   `id` TINYINT UNSIGNED NOT NULL PRIMARY KEY
 );
 INSERT INTO `__openapi_client_menu_guard` (`id`)
-SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM `__openapi_client_menu_guard` WHERE `id`=1);
+VALUES (1);
 INSERT INTO `__openapi_client_menu_guard` (`id`)
 SELECT 1
 WHERE

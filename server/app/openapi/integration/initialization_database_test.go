@@ -557,3 +557,20 @@ func TestFullInitializationSQLFilesPassStaticSafetyGate(t *testing.T) {
 		})
 	}
 }
+
+func TestPostgreSQLFullInitializationMenuReparentingPreservesParentWithoutAnchor(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("../../../resource/database", "postgresql_converted.sql"))
+	require.NoError(t, err)
+	anchorExpression := "parent_id=COALESCE((SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),parent_id)"
+	require.Equal(t, 2, strings.Count(string(body), anchorExpression), "cloud-recording reparenting must preserve an existing parent when the optional device-menu anchor is absent")
+}
+
+func TestPostgreSQLFullInitializationDropsJobResultsBeforeJobs(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("../../../resource/database", "postgresql_converted.sql"))
+	require.NoError(t, err)
+	childDrop := strings.Index(string(body), "DROP TABLE IF EXISTS sys_job_results;")
+	parentDrop := strings.Index(string(body), "DROP TABLE IF EXISTS sys_jobs;")
+	require.NotEqual(t, -1, childDrop)
+	require.NotEqual(t, -1, parentDrop)
+	require.Less(t, childDrop, parentDrop, "PostgreSQL full initialization must drop the foreign-key child before its parent")
+}

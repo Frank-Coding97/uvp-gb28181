@@ -176,6 +176,8 @@ func TestOpenAPIClientMenuMigrationDialectContracts(t *testing.T) {
 			require.Regexp(t, regexp.MustCompile(`(?s)insert[[:space:]]+into[[:space:]].*guard`), up)
 			switch suffix {
 			case "":
+				require.Regexp(t, regexp.MustCompile(`(?s)insert[[:space:]]+into[[:space:]]+`+"`__openapi_client_menu_guard`"+`[[:space:]]*\([[:space:]]*`+"`id`"+`[[:space:]]*\)[[:space:]]+values[[:space:]]*\(1\)`), up)
+				require.NotContains(t, up, "select 1 where not exists (select 1 from `__openapi_client_menu_guard` where `id`=1)")
 				require.Contains(t, up, "drop temporary table if exists `__openapi_client_menu_guard`")
 				require.NotContains(t, up, "drop table `__openapi_client_menu_guard`")
 			case "-postgresql":
