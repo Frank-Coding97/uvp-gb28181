@@ -101,7 +101,7 @@ func (s *standaloneSetup) saveSIP(ctx context.Context, request gbsetup.SaveSIPCo
 		// failed. Retrying must use the normal settings path, never recreate users.
 		return gbsetup.NewSIPConfigService(app.DB()).Save(ctx, request)
 	}
-	return s.store.CompleteSIP(ctx, request)
+	return s.store.CompleteSIPWithMedia(ctx, request, gbconfig.LoadFrom(app.ConfigYml).ZLM)
 }
 
 func (s *standaloneSetup) activate() error {
@@ -125,10 +125,15 @@ func (s *standaloneSetup) activate() error {
 	registry := gb28181.ZLMRegistry()
 	probe := businessreadiness.NewProbe(businessreadiness.ProbeConfig{Client: zlm.NewServiceAdapter(cfg.Media)})
 	approutes.SetStandaloneBusinessProbe(func(ctx context.Context) (bool, string) {
+		sipConfig, err := gbsetup.NewSIPConfigService(app.DB()).Get(ctx)
+		if err != nil || sipConfig == nil {
+			return false, "config_not_converged"
+		}
 		result := probe.Check(ctx, businessreadiness.Input{
-			InstallationPhase: s.handler.Phase(),
-			SIPState:          string(gb28181.SIPRuntimeStatus().Snapshot().State),
-			ZLM:               cfg.ZLM, Media: cfg.Media, Registry: registry,
+			InstallationPhase:          s.handler.Phase(),
+			SIPState:                   string(gb28181.SIPRuntimeStatus().Snapshot().State),
+			RequireLocalMediaAddresses: sipConfig.DeploymentMode == gbsetup.DeploymentLAN,
+			ZLM:                        cfg.ZLM, Media: cfg.Media, Registry: registry,
 		})
 		return result.BusinessReady, string(result.Reason)
 	})

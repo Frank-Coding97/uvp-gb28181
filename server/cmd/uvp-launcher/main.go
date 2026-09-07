@@ -83,6 +83,26 @@ func displayBusinessReason(reason string) string {
 		return "业务状态暂不可用"
 	case "installation_pending":
 		return "安装尚未完成"
+	case "node_missing":
+		return "未找到本机媒体节点"
+	case "node_ambiguous":
+		return "本机媒体节点配置重复，请检查节点管理"
+	case "node_inactive":
+		return "媒体节点离线或等待恢复"
+	case "media_unreachable":
+		return "暂时无法连接媒体服务"
+	case "media_address_unavailable":
+		return "已保存的媒体网卡地址不可用，请检查节点配置"
+	case "identity_mismatch":
+		return "媒体节点身份与本实例配置不一致"
+	case "config_not_converged":
+		return "正在确认媒体配置"
+	case "hook_unconfirmed":
+		return "等待媒体服务认证心跳"
+	case "sip_not_running":
+		return "SIP 服务尚未运行"
+	case "ready":
+		return "业务服务已就绪"
 	case "":
 		return "业务状态待就绪"
 	default:

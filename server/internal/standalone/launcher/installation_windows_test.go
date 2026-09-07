@@ -158,9 +158,10 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 	}
 	t18AssertSetupStatus(t, body, true, "pending_sip")
 
+	var mediaUUID string
 	if sipIP := os.Getenv("UVP_T18_SIP_IP"); sipIP != "" {
 		sipPassword := t18RandomPassword(t)
-		configBody, err := json.Marshal(map[string]any{"deploymentMode": "lan", "listenIp": sipIP, "advertiseIp": sipIP, "port": 15070, "domain": "3402000000", "serverId": "34020000002000000001", "password": sipPassword})
+		configBody, err := json.Marshal(map[string]any{"deploymentMode": "lan", "listenIp": sipIP, "advertiseIp": sipIP, "mediaReceiveHost": sipIP, "mediaPlaybackHost": sipIP, "port": 15070, "domain": "3402000000", "serverId": "34020000002000000001", "password": sipPassword})
 		if err != nil {
 			t.Fatal("could not encode SIP test settings")
 		}
@@ -183,6 +184,7 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 		t18AssertSetupStatus(t, body, true, "complete")
 		if os.Getenv("UVP_T19_REQUIRE_BUSINESS_READY") == "1" {
 			t19WaitBusinessReady(t, second)
+			mediaUUID = t19AssertLocalMediaNode(t, client, sipIP)
 		}
 	}
 
@@ -222,6 +224,9 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 		}
 		if os.Getenv("UVP_T19_REQUIRE_BUSINESS_READY") == "1" {
 			t19WaitBusinessReady(t, third)
+			if t19AssertLocalMediaNode(t, client, os.Getenv("UVP_T18_SIP_IP")) != mediaUUID {
+				t.Fatal("local media node identity changed after restart")
+			}
 		}
 		third.cancel()
 		if !t18WaitFinished(t, third, 90*time.Second) {
@@ -282,6 +287,29 @@ func t19WaitBusinessReady(t *testing.T, run *t18Launch) {
 			t.Fatalf("real ZLM Hook readiness timed out: reason=%s", lastReason)
 		}
 	}
+}
+
+func t19AssertLocalMediaNode(t *testing.T, client t18HTTPClient, mediaIP string) string {
+	t.Helper()
+	status, _, body := client.request(t, http.MethodGet, "/api/gb28181/zlm/nodes", "", nil)
+	var result struct {
+		Data struct {
+			List []struct {
+				Host         string `json:"host"`
+				ReceiveHost  string `json:"receiveHost"`
+				PlaybackHost string `json:"playbackHost"`
+				UUID         string `json:"mediaServerUUID"`
+			} `json:"list"`
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &result) != nil || len(result.Data.List) != 1 {
+		t.Fatal("expected exactly one persisted local media node")
+	}
+	n := result.Data.List[0]
+	if n.Host != "127.0.0.1" || n.ReceiveHost != mediaIP || n.PlaybackHost != mediaIP || n.UUID == "" {
+		t.Fatal("media addresses or identity did not match confirmed setup")
+	}
+	return n.UUID
 }
 
 func t18WaitBrowserEntry(run *t18Launch, browserURLs <-chan string, timeout time.Duration) (string, bool) {
