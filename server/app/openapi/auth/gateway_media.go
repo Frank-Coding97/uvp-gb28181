@@ -394,7 +394,9 @@ func (g *Gateway) processMedia(hardContext context.Context, q gatewayRequest) (o
 	}
 	ticket, err := prepareMedia(g.media, ctx, target)
 	if errors.Is(err, limit.ErrQuotaExceeded) {
-		return invalid(http.StatusTooManyRequests, "QUOTA_EXCEEDED")
+		response := invalid(http.StatusTooManyRequests, "QUOTA_EXCEEDED")
+		response.retryAfter = 1 // Minimum backoff, not a promise that a viewer has left.
+		return response
 	}
 	if err != nil || ticket == "" || len(ticket) > 1024 {
 		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
@@ -415,7 +417,9 @@ func (g *Gateway) processMedia(hardContext context.Context, q gatewayRequest) (o
 	if err != nil {
 		switch {
 		case errors.Is(reserveErr, limit.ErrQuotaExceeded):
-			return invalid(http.StatusTooManyRequests, "QUOTA_EXCEEDED")
+			response := invalid(http.StatusTooManyRequests, "QUOTA_EXCEEDED")
+			response.retryAfter = 1
+			return response
 		case errors.Is(reserveErr, resource.ErrResourceNotFound):
 			return invalid(http.StatusNotFound, "RESOURCE_NOT_FOUND")
 		case errors.Is(err, ErrReplay):

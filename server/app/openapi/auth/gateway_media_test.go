@@ -390,6 +390,21 @@ func TestOpenAPIMediaSlowBodyReadFailsClosedBeforeAdmission(t *testing.T) {
 }
 
 func TestOpenAPIMediaPrepareFailureAndQuotaFailureHaveNoAdmission(t *testing.T) {
+	t.Run("prepare-quota", func(t *testing.T) {
+		dispatcher := &mediaDispatcherStub{prepareErr: limit.ErrQuotaExceeded}
+		dispatcher.ready.Store(true)
+		gate, db, secret := mediaGatewayFixture(t, dispatcher)
+		response := sendMediaRequest(t, gate, secret, []byte(`{"protocol":"https-flv"}`), strings.Repeat("e", 32))
+		require.Equal(t, http.StatusTooManyRequests, response.Code)
+		require.Equal(t, "1", response.Header().Get("Retry-After"))
+		require.Contains(t, response.Body.String(), `"code":"QUOTA_EXCEEDED"`)
+		require.Zero(t, dispatcher.applyCall.Load())
+		var count int64
+		require.NoError(t, db.Model(&models.Nonce{}).Count(&count).Error)
+		require.Zero(t, count)
+		require.NoError(t, db.Model(&models.PlayGrant{}).Count(&count).Error)
+		require.Zero(t, count)
+	})
 	t.Run("prepare", func(t *testing.T) {
 		dispatcher := &mediaDispatcherStub{prepareErr: errors.New("internal qualification detail")}
 		dispatcher.ready.Store(true)
@@ -444,6 +459,8 @@ func TestOpenAPIMediaPrepareFailureAndQuotaFailureHaveNoAdmission(t *testing.T) 
 		require.NoError(t, db.Create(&grant).Error)
 		response := sendMediaRequest(t, gate, secret, []byte(`{"protocol":"https-flv"}`), strings.Repeat("0", 32))
 		require.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
+		require.Equal(t, "1", response.Header().Get("Retry-After"))
+		require.Contains(t, response.Body.String(), `"code":"QUOTA_EXCEEDED"`)
 		require.EqualValues(t, 0, dispatcher.applyCall.Load())
 		var nonceCount, auditCount int64
 		require.NoError(t, db.Model(&models.Nonce{}).Count(&nonceCount).Error)

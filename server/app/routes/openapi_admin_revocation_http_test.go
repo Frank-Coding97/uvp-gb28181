@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +59,14 @@ func TestOpenAPIAdminRootMetadataLifecycleTakesEffectImmediately(t *testing.T) {
 	}
 	mutate(http.MethodPut, "/scopes", `{"rowVersion":1,"scopes":["device:list"]}`, http.StatusOK)
 	require.Equal(t, http.StatusOK, query())
+	var audit models.Audit
+	require.NoError(t, f.db.Where("client_id = ? AND scope = ? AND result = ?", envelope.Data.Client.ID, "device:list", "success").First(&audit).Error)
+	fingerprint := sha256.Sum256([]byte(envelope.Data.Client.AK))
+	require.Equal(t, hex.EncodeToString(fingerprint[:]), audit.AKFingerprint)
+	serializedAudit, err := json.Marshal(audit)
+	require.NoError(t, err)
+	require.NotContains(t, string(serializedAudit), envelope.Data.Client.AK)
+	require.NotContains(t, string(serializedAudit), envelope.Data.SecretKey)
 	mutate(http.MethodPut, "/scopes", `{"rowVersion":2,"scopes":[]}`, http.StatusOK)
 	require.Equal(t, http.StatusForbidden, query())
 	mutate(http.MethodPut, "/scopes", `{"rowVersion":3,"scopes":["device:list"]}`, http.StatusOK)
