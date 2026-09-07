@@ -50,9 +50,7 @@ func withConfigLock(dir string, fn func() error) error {
 			var overlapped windows.Overlapped
 			err = windows.LockFileEx(handle, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
 			if err == nil {
-				callbackErr := fn()
-				unlockErr := windows.UnlockFileEx(handle, 0, 1, 0, &overlapped)
-				closeErr := windows.CloseHandle(handle)
+				callbackErr, unlockErr, closeErr := runWindowsLockedCallback(handle, &overlapped, fn)
 				if callbackErr != nil {
 					return callbackErr
 				}
@@ -74,6 +72,15 @@ func withConfigLock(dir string, fn func() error) error {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+}
+
+func runWindowsLockedCallback(handle windows.Handle, overlapped *windows.Overlapped, fn func() error) (callbackErr, unlockErr, closeErr error) {
+	defer func() {
+		unlockErr = windows.UnlockFileEx(handle, 0, 1, 0, overlapped)
+		closeErr = windows.CloseHandle(handle)
+	}()
+	callbackErr = fn()
+	return
 }
 
 func openWindowsLock(path string) (windows.Handle, error) {
@@ -494,7 +501,7 @@ func validateProtectedACLPath(path string, userSID *windows.SID, directory bool)
 	descriptor, err := windows.GetNamedSecurityInfo(
 		path,
 		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION,
 	)
 	if err != nil {
 		return errors.New("read Windows ACL")
@@ -506,7 +513,7 @@ func validateProtectedACLHandle(handle windows.Handle, userSID *windows.SID, dir
 	descriptor, err := windows.GetSecurityInfo(
 		handle,
 		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION,
 	)
 	if err != nil {
 		return errors.New("read Windows ACL")
@@ -528,6 +535,18 @@ func validateProtectedACL(descriptor *windows.SECURITY_DESCRIPTOR, userSID *wind
 	}
 	systemSID, err := windows.StringToSid("S-1-5-18")
 	if err != nil {
+		return errSecureACL
+	}
+	owner, _, err := descriptor.Owner()
+	if err != nil || owner == nil {
+		return errSecureACL
+	}
+	administratorsSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return errSecureACL
+	}
+	ownerKey := owner.String()
+	if ownerKey != userSID.String() && ownerKey != systemSID.String() && ownerKey != administratorsSID.String() {
 		return errSecureACL
 	}
 	expected := map[string]bool{userSID.String(): false, systemSID.String(): false}
