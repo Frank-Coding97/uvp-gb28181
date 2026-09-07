@@ -129,3 +129,48 @@ func TestLockGBDeviceForMaintenance_RealSQLiteSerializesTransactions(t *testing.
 	require.NoError(t, <-firstDone)
 	require.NoError(t, <-secondEntered)
 }
+
+func TestRealSQLiteRowsMustBeClosedBeforeSecondOperation(t *testing.T) {
+	db := newRealSQLiteDeviceDB(t)
+	device := GbDevice{DeviceID: "34020000002000100010", Status: DeviceStatusOnline}
+	require.NoError(t, db.Create(&device).Error)
+
+	rows, err := db.WithContext(context.Background()).Model(&GbDevice{}).Where("device_id = ?", device.DeviceID).Rows()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if rows != nil {
+			_ = rows.Close()
+		}
+	})
+
+	blockedCtx, cancelBlocked := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	blockedErr := db.WithContext(blockedCtx).Exec("SELECT 1").Error
+	cancelBlocked()
+	require.ErrorIs(t, blockedErr, context.DeadlineExceeded, "an open Rows must occupy the sole SQLite connection")
+
+	require.NoError(t, rows.Close())
+	rows = nil
+	readyCtx, cancelReady := context.WithTimeout(context.Background(), 2*time.Second)
+	require.NoError(t, db.WithContext(readyCtx).Exec("SELECT 1").Error)
+	cancelReady()
+}
+
+func TestRealSQLiteTransactionMustUseTxConnectionInsteadOfGlobalDB(t *testing.T) {
+	db := newRealSQLiteDeviceDB(t)
+	var globalErr, txErr error
+	err := db.Transaction(func(tx *gorm.DB) error {
+		blockedCtx, cancelBlocked := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		globalErr = app.DB().WithContext(blockedCtx).Exec("SELECT 1").Error
+		cancelBlocked()
+		txErr = tx.Exec("SELECT 1").Error
+		return txErr
+	})
+
+	require.NoError(t, err)
+	require.ErrorIs(t, globalErr, context.DeadlineExceeded, "the global DB must be blocked while the transaction owns the sole connection")
+	require.NoError(t, txErr, "the transaction connection must remain usable")
+
+	readyCtx, cancelReady := context.WithTimeout(context.Background(), 2*time.Second)
+	require.NoError(t, app.DB().WithContext(readyCtx).Exec("SELECT 1").Error)
+	cancelReady()
+}
