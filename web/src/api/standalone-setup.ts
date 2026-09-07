@@ -4,6 +4,7 @@ export const STANDALONE_SETUP_ADMIN_PATH = "/api/standalone/setup/admin";
 export const BOOTSTRAP_TOKEN_QUERY = "bootstrap_token";
 export const BOOTSTRAP_TOKEN_HEADER = "X-UVP-Setup-Token";
 export const BCRYPT_MAX_PASSWORD_BYTES = 72;
+export const STANDALONE_ADMIN_PASSWORD_MIN_LENGTH = 6;
 
 export type StandaloneSetupPhase = "pending_admin" | "pending_sip" | "complete";
 
@@ -163,6 +164,12 @@ export function forgetBootstrapToken() {
 
 export function isBcryptPasswordLengthValid(password: string): boolean {
   return new TextEncoder().encode(password).byteLength <= BCRYPT_MAX_PASSWORD_BYTES;
+}
+
+export function isStandaloneAdminPasswordValid(password: string): boolean {
+  return (
+    isBcryptPasswordLengthValid(password) && password.length >= STANDALONE_ADMIN_PASSWORD_MIN_LENGTH && /[!@#$%]/.test(password)
+  );
 }
 
 export function stripBootstrapTokenQuery(query: Record<string, unknown>): Record<string, unknown> {

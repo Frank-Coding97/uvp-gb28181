@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { fetchSipSetupStatus } from "@/api/gb28181";
+import { loadStandaloneSetupStatus } from "@/api/standalone-setup";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSipSetupStore } from "@/store/modules/sip-setup";
 import { hasSipStatusPermission, hasSipUpdatePermission } from "./sipSetupHostRules";
@@ -21,6 +22,7 @@ const currentUserId = computed(() => props.userId ?? account.id);
 const currentPermissions = computed(() => props.permissions ?? account.permissions);
 const canViewStatus = computed(() => hasSipStatusPermission(currentPermissions.value));
 const canUpdateConfig = computed(() => hasSipUpdatePermission(currentPermissions.value));
+const standaloneSipRequired = ref(false);
 let requestVersion = 0;
 
 const permissionKey = (permissions: string[]) => permissions.slice().sort().join("|");
@@ -44,6 +46,7 @@ watch(
         const version = ++requestVersion;
         const permissions = currentPermissions.value.slice();
         store.reset();
+        standaloneSipRequired.value = false;
         if (!userId || !hasSipStatusPermission(permissions)) {
             return;
         }
@@ -68,7 +71,11 @@ watch(
                 if (!hasSipStatusPermission(currentPermissions.value)) store.reset();
                 return;
             }
-            if (store.shouldAutoOpen(currentPermissions.value)) {
+            const standaloneProbe = await loadStandaloneSetupStatus();
+            if (!isCurrentSession()) return;
+            standaloneSipRequired.value =
+                standaloneProbe.kind === "standalone" && standaloneProbe.status.phase === "pending_sip";
+            if ((standaloneSipRequired.value && store.needsAttention) || store.shouldAutoOpen(currentPermissions.value)) {
                 store.openModal();
             }
         } catch (error: any) {
@@ -87,6 +94,7 @@ watch(
     <SipSetupModal
         v-if="canViewStatus"
         :visible="canUpdateConfig && store.modalOpen"
+        :required="standaloneSipRequired"
         @close="store.closeModal({ suppressThisSession: true })"
         @saved="refreshAfterSave"
     />

@@ -6,6 +6,7 @@ import {
   createStandaloneAdmin,
   forgetBootstrapToken,
   isBcryptPasswordLengthValid,
+  isStandaloneAdminPasswordValid,
   loadStandaloneSetupStatus,
   readBootstrapTokenOnce,
   type StandaloneSetupPhase
@@ -30,6 +31,9 @@ function validateForm(): boolean {
   if (!normalizedUsername) errors.username = "请输入管理员用户名";
   if (!password.value) errors.password = "请输入管理员密码";
   else if (!isBcryptPasswordLengthValid(password.value)) errors.password = "密码的 UTF-8 长度不能超过 72 字节";
+  else if (!isStandaloneAdminPasswordValid(password.value)) {
+    errors.password = "密码至少 6 个字符，且至少包含 !@#$% 中的一个特殊字符";
+  }
   if (!passwordConfirmation.value) errors.passwordConfirmation = "请再次输入管理员密码";
   else if (password.value !== passwordConfirmation.value) errors.passwordConfirmation = "两次输入的密码不一致";
   fieldErrors.value = errors;
@@ -57,7 +61,12 @@ async function submit() {
       await router.replace("/login");
       return;
     }
-    if (result.outcome === "unauthorized" || result.outcome === "missing-token") {
+    if (result.outcome === "unauthorized") {
+      submitError.value =
+        result.status === 403 ? "初始化链接已失效，请从本机启动器重新打开" : "管理员创建失败，请检查初始化凭据后重试";
+      return;
+    }
+    if (result.outcome === "missing-token") {
       submitError.value = "管理员创建失败，请检查初始化凭据后重试";
       return;
     }
@@ -144,6 +153,7 @@ onMounted(loadStatus);
               :aria-invalid="Boolean(fieldErrors.password)"
               @input="fieldErrors.password = ''"
             />
+            <small class="form-hint">至少 6 个字符，包含 !@#$% 中至少一个，UTF-8 不超过 72 字节</small>
             <small v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</small>
           </label>
 

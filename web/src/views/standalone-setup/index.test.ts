@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   createStandaloneAdmin: vi.fn(),
   forgetBootstrapToken: vi.fn(),
   isBcryptPasswordLengthValid: vi.fn((value: string) => new TextEncoder().encode(value).byteLength <= 72),
+  isStandaloneAdminPasswordValid: vi.fn(
+    (value: string) => new TextEncoder().encode(value).byteLength <= 72 && value.length >= 6 && /[!@#$%]/.test(value)
+  ),
   loadStandaloneSetupStatus: vi.fn(),
   readBootstrapTokenOnce: vi.fn(),
   routerReplace: vi.fn(),
@@ -19,6 +22,7 @@ vi.mock("@/api/standalone-setup", () => ({
   createStandaloneAdmin: mocks.createStandaloneAdmin,
   forgetBootstrapToken: mocks.forgetBootstrapToken,
   isBcryptPasswordLengthValid: mocks.isBcryptPasswordLengthValid,
+  isStandaloneAdminPasswordValid: mocks.isStandaloneAdminPasswordValid,
   loadStandaloneSetupStatus: mocks.loadStandaloneSetupStatus,
   readBootstrapTokenOnce: mocks.readBootstrapTokenOnce
 }));
@@ -54,8 +58,8 @@ describe("standalone setup page", () => {
 
   async function fillForm(wrapper: ReturnType<typeof mount>) {
     await wrapper.get('input[name="username"]').setValue("admin");
-    await wrapper.get('input[name="password"]').setValue("safe-password");
-    await wrapper.get('input[name="passwordConfirmation"]').setValue("safe-password");
+    await wrapper.get('input[name="password"]').setValue("safe-password!");
+    await wrapper.get('input[name="passwordConfirmation"]').setValue("safe-password!");
   }
 
   it("submits the form with the in-memory token and sends the user to login after creation", async () => {
@@ -65,19 +69,28 @@ describe("standalone setup page", () => {
     await wrapper.get("form").trigger("submit");
     await flushPromises();
 
-    expect(mocks.createStandaloneAdmin).toHaveBeenCalledWith({ username: "admin", password: "safe-password" }, "secret-token");
+    expect(mocks.createStandaloneAdmin).toHaveBeenCalledWith({ username: "admin", password: "safe-password!" }, "secret-token");
     expect(mocks.forgetBootstrapToken).toHaveBeenCalledTimes(1);
     expect(mocks.messages.success).toHaveBeenCalledWith("管理员已创建，请登录并配置 SIP");
     expect(mocks.routerReplace).toHaveBeenCalledWith("/login");
   });
 
   it("does not reveal credential details for unauthorized and repeat submissions", async () => {
-    mocks.createStandaloneAdmin.mockResolvedValue({ outcome: "unauthorized", status: 403 });
+    mocks.createStandaloneAdmin.mockResolvedValueOnce({ outcome: "unauthorized", status: 401 });
+    const unauthorizedCredentials = await mountReady();
+    await fillForm(unauthorizedCredentials);
+    await unauthorizedCredentials.get("form").trigger("submit");
+    await flushPromises();
+    expect(unauthorizedCredentials.text()).toContain("请检查初始化凭据后重试");
+    expect(unauthorizedCredentials.text()).not.toContain("credential detail");
+    expect(mocks.routerReplace).not.toHaveBeenCalled();
+
+    mocks.createStandaloneAdmin.mockResolvedValueOnce({ outcome: "unauthorized", status: 403 });
     const unauthorized = await mountReady();
     await fillForm(unauthorized);
     await unauthorized.get("form").trigger("submit");
     await flushPromises();
-    expect(unauthorized.text()).toContain("请检查初始化凭据后重试");
+    expect(unauthorized.text()).toContain("初始化链接已失效，请从本机启动器重新打开");
     expect(unauthorized.text()).not.toContain("credential detail");
     expect(mocks.routerReplace).not.toHaveBeenCalled();
 
@@ -97,8 +110,20 @@ describe("standalone setup page", () => {
     expect(wrapper.text()).toContain("请输入管理员用户名");
 
     await wrapper.get('input[name="username"]').setValue("admin");
+    await wrapper.get('input[name="password"]').setValue("safe!");
+    await wrapper.get('input[name="passwordConfirmation"]').setValue("safe!");
+    await wrapper.get("form").trigger("submit");
+    expect(mocks.createStandaloneAdmin).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("至少 6 个字符");
+
     await wrapper.get('input[name="password"]').setValue("safe-password");
-    await wrapper.get('input[name="passwordConfirmation"]').setValue("different-password");
+    await wrapper.get('input[name="passwordConfirmation"]').setValue("safe-password");
+    await wrapper.get("form").trigger("submit");
+    expect(mocks.createStandaloneAdmin).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("至少包含 !@#$%");
+
+    await wrapper.get('input[name="password"]').setValue("safe-password!");
+    await wrapper.get('input[name="passwordConfirmation"]').setValue("different-password!");
     await wrapper.get("form").trigger("submit");
     expect(mocks.createStandaloneAdmin).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("两次输入的密码不一致");

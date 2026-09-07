@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BOOTSTRAP_TOKEN_HEADER,
   BCRYPT_MAX_PASSWORD_BYTES,
+  STANDALONE_ADMIN_PASSWORD_MIN_LENGTH,
   STANDALONE_SETUP_ADMIN_PATH,
   STANDALONE_SETUP_STATUS_PATH,
   createStandaloneAdmin,
   isBcryptPasswordLengthValid,
+  isStandaloneAdminPasswordValid,
   loadStandaloneSetupStatus,
   readBootstrapTokenOnce,
   requestStandaloneSetupStatus,
@@ -150,5 +152,14 @@ describe("standalone setup API contract", () => {
     expect(isBcryptPasswordLengthValid("a".repeat(73))).toBe(false);
     expect(isBcryptPasswordLengthValid("中".repeat(24))).toBe(true);
     expect(isBcryptPasswordLengthValid("中".repeat(25))).toBe(false);
+  });
+
+  it("enforces the standalone administrator password minimum and special character", () => {
+    expect(STANDALONE_ADMIN_PASSWORD_MIN_LENGTH).toBe(6);
+    expect(isStandaloneAdminPasswordValid("safe-password!")).toBe(true);
+    expect(isStandaloneAdminPasswordValid("safe!")).toBe(false);
+    expect(isStandaloneAdminPasswordValid("safe-password")).toBe(false);
+    expect(isStandaloneAdminPasswordValid(`${"a".repeat(71)}!`)).toBe(true);
+    expect(isStandaloneAdminPasswordValid(`${"a".repeat(72)}!`)).toBe(false);
   });
 });

@@ -11,16 +11,19 @@ import { identityCanContinue, networkCanContinue } from "@/views/gb28181/sip/sip
 
 const props = withDefaults(defineProps<{
     visible: boolean;
-    // editing=true:从"编辑配置"入口进,标题/文案切换成编辑态,隐藏"稍后再配"按钮.
-    // editing=false(默认):首装引导,允许"稍后再配".
+    // editing=true:从"编辑配置"入口进,标题/文案切换成编辑态,允许取消.
+    // required=true:standalone pending_sip 首装引导,必须完成 SIP 配置.
+    // required=false(默认):legacy 首装引导,保留"稍后再配".
     editing?: boolean;
-}>(), { editing: false });
+    required?: boolean;
+}>(), { editing: false, required: false });
 const emit = defineEmits<{
     close: [];
     saved: [];
 }>();
 
 const modalTitle = computed(() => (props.editing ? "编辑 SIP 配置" : "配置 SIP 服务"));
+const canClose = computed(() => props.editing || !props.required);
 
 const setup = useSipSetup();
 const step = ref(1);
@@ -72,9 +75,8 @@ async function save() {
     }
 }
 
-function skipLater() {
-    // 允许用户先进系统.status 保留 unconfigured,header 铃铛红点常亮.
-    emit("close");
+function closeModal() {
+    if (canClose.value) emit("close");
 }
 </script>
 
@@ -85,10 +87,10 @@ function skipLater() {
         width="min(760px, calc(100vw - 24px))"
         :mask-closable="false"
         :esc-to-close="false"
-        :closable="editing"
+        :closable="canClose"
         modal-class="uvp-system-dialog sip-setup-dialog"
         unmount-on-close
-        @cancel="skipLater"
+        @cancel="closeModal"
     >
         <div v-if="!editing" class="sip-modal-intro">
             <span class="sip-modal-intro-badge">
@@ -96,7 +98,8 @@ function skipLater() {
             </span>
             <div class="sip-modal-intro-text">
                 <strong>首次接入国标设备前需要完成 SIP 参数配置</strong>
-                <span>点稍后再配也可以先进入系统,右上角铃铛会一直提醒你完成配置</span>
+                <span v-if="required">请完成配置后再使用系统，保存并启动 SIP 后即可继续。</span>
+                <span v-else>点稍后再配也可以先进入系统,右上角铃铛会一直提醒你完成配置</span>
             </div>
         </div>
 
@@ -141,8 +144,9 @@ function skipLater() {
         </div>
 
         <template #footer>
-            <a-button v-if="editing" type="text" class="sip-modal-skip" @click="skipLater">取消</a-button>
-            <a-button v-else type="text" class="sip-modal-skip" @click="skipLater">稍后再配</a-button>
+            <a-button v-if="editing || !required" type="text" class="sip-modal-skip" @click="closeModal">
+                {{ editing ? "取消" : "稍后再配" }}
+            </a-button>
             <span class="sip-modal-spacer" />
             <a-button v-if="step > 1" @click="step--">
                 <template #icon><ChevronLeft :size="16" /></template>
