@@ -37,6 +37,7 @@ $driveRoot = $drive + ':\'
 $fillDir = $null
 $instanceRoot = $null
 $vhdAttached = $false
+$vhdOwned = $false
 $report = $null
 $failureMessage = $null
 $cleanupErrors = New-Object 'System.Collections.Generic.List[string]'
@@ -206,6 +207,7 @@ function Invoke-ConfigProbe([string]$Name) {
     $stderr = Join-Path $work ("probe-$Name.stderr")
     $process = Start-Process -FilePath $probe -WorkingDirectory "$env:SystemRoot\System32" -PassThru `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
+    $processHandle = $process.Handle
     if (-not $process.WaitForExit(30000)) {
         try { $process.Kill() } catch { }
         throw "standalone-config-probe timed out"
@@ -279,7 +281,7 @@ try {
         throw 'WorkRoot must be a new isolated directory'
     }
     Assert-ExistingDirectory (Split-Path -Parent $work) 'WorkRoot'
-    $null = New-Item -ItemType Directory -LiteralPath $work
+    $null = New-Item -ItemType Directory -Path $work
 
     if ([string]::IsNullOrWhiteSpace($VhdPath)) {
         $vhd = Join-Path $work ("uvp-t14-config-disk-full-$([Guid]::NewGuid().ToString('N')).vhd")
@@ -301,6 +303,7 @@ try {
         throw 'ProbeExe must be outside the dedicated test volume'
     }
 
+    $vhdOwned = $true
     $null = Invoke-DiskPart @(
         "create vdisk file=`"$vhd`" maximum=64 type=expandable",
         "select vdisk file=`"$vhd`"",
@@ -321,7 +324,7 @@ try {
         throw 'isolated instance directory unexpectedly exists on the new VHD'
     }
     $fillDir = Join-Path $driveRoot ("uvp-t14-disk-full-fill-$([Guid]::NewGuid().ToString('N'))")
-    $null = New-Item -ItemType Directory -LiteralPath $fillDir
+    $null = New-Item -ItemType Directory -Path $fillDir
     $fillPath = $fillDir
     $fill = Fill-UntilDiskFull $fillDir
     if (-not $fill.reached_no_space -or ($fill.error_code -ne 39 -and $fill.error_code -ne 112)) {
@@ -403,7 +406,7 @@ try {
             $null = $cleanupErrors.Add('remove test fill failed')
         }
     }
-    if ($null -ne $vhd -and (Test-Path -LiteralPath $vhd)) {
+    if ($vhdOwned -and $null -ne $vhd -and (Test-Path -LiteralPath $vhd)) {
         try {
             $image = Get-DiskImage -ImagePath $vhd -ErrorAction Stop
             if ($image.Attached) {
