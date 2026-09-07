@@ -48,6 +48,15 @@ export const staticRoutes = [
     }
   },
   {
+    path: "/standalone-setup",
+    name: "standalone-setup",
+    component: () => import(/* webpackChunkName: "standalone-setup" */ "@/views/standalone-setup/index.vue"),
+    meta: {
+      title: "首次安装",
+      hide: true
+    }
+  },
+  {
     path: "/layout",
     name: "layout",
     redirect: HOME_PATH,

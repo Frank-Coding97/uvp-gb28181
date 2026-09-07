@@ -9,6 +9,11 @@ import { useRoutingMethod } from "@/hooks/useRoutingMethod";
 import { hasRefreshToken } from "@/utils/auth";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSystemStore } from "@/store/modules/system";
+import {
+    loadStandaloneSetupStatus,
+    standaloneSetupNavigation,
+    STANDALONE_SETUP_PATH
+} from "@/api/standalone-setup";
 
 
 /**
@@ -41,6 +46,12 @@ const router = createRouter({
  */
 router.beforeEach(async (to: any, _: any, next: any) => {
     NProgress.start(); // 开启进度条
+    const standaloneProbe = await loadStandaloneSetupStatus();
+    const standaloneNavigation = standaloneSetupNavigation(to.path, to.query, standaloneProbe);
+    if (standaloneNavigation) return next(standaloneNavigation);
+    if (standaloneProbe.kind === "standalone"
+        && standaloneProbe.status.phase === "pending_admin"
+        && to.path === STANDALONE_SETUP_PATH) return next();
     // 免登录路由白名单(用于原型/demo 页面)
     const publicRoutes = [
         "/play-console-demo",
