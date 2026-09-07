@@ -30,6 +30,7 @@ var (
 	errSecurePath        = errors.New("standalone: secure path rejected")
 	errSecureACL         = errors.New("standalone: secure permissions rejected")
 	errSecureLockTimeout = errors.New("standalone: configuration lock timed out")
+	procReplaceFileW     = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReplaceFileW")
 )
 
 func withConfigLock(dir string, fn func() error) error {
@@ -273,23 +274,25 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 	if err := callSecureHook(hook, "publish", path); err != nil {
 		return err
 	}
-	from, err := windows.UTF16PtrFromString(tempPath)
-	if err != nil {
-		return fmt.Errorf("publish secure file %q: %w", path, err)
-	}
-	to, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return fmt.Errorf("publish secure file %q: %w", path, err)
-	}
-	flags := uint32(windows.MOVEFILE_WRITE_THROUGH)
 	if replace {
-		flags |= windows.MOVEFILE_REPLACE_EXISTING
-	}
-	if err := windows.MoveFileEx(from, to, flags); err != nil {
-		if !replace && isWindowsAlreadyExists(err) {
-			return fs.ErrExist
+		if err := replaceWindowsFile(path, tempPath); err != nil {
+			return fmt.Errorf("publish secure file %q: %w", path, err)
 		}
-		return fmt.Errorf("publish secure file %q: %w", path, err)
+	} else {
+		from, err := windows.UTF16PtrFromString(tempPath)
+		if err != nil {
+			return fmt.Errorf("publish secure file %q: %w", path, err)
+		}
+		to, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			return fmt.Errorf("publish secure file %q: %w", path, err)
+		}
+		if err := windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH); err != nil {
+			if isWindowsAlreadyExists(err) {
+				return fs.ErrExist
+			}
+			return fmt.Errorf("publish secure file %q: %w", path, err)
+		}
 	}
 	removeTemp = false
 	if _, err := ensureWindowsTarget(path, false, false); err != nil {
@@ -297,6 +300,29 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 	}
 	if err := validateProtectedACLPath(path, userSID, false); err != nil {
 		return fmt.Errorf("validate published secure file %q: %w", path, err)
+	}
+	return nil
+}
+
+func replaceWindowsFile(target, replacement string) error {
+	targetName, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	replacementName, err := windows.UTF16PtrFromString(replacement)
+	if err != nil {
+		return err
+	}
+	result, _, lastErr := procReplaceFileW.Call(
+		uintptr(unsafe.Pointer(targetName)),
+		uintptr(unsafe.Pointer(replacementName)),
+		0,
+		0,
+		0,
+		0,
+	)
+	if result == 0 {
+		return lastErr
 	}
 	return nil
 }

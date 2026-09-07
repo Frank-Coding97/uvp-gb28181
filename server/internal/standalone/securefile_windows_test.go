@@ -3,6 +3,10 @@
 package standalone
 
 import (
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,6 +52,78 @@ func TestWindowsProtectedDirectoryUsesTwoInheritedFAEntries(t *testing.T) {
 		require.Equal(t, windowsFileAllAccessMask, ace.Mask)
 	}
 	require.NoError(t, validateProtectedACL(descriptor, userSID, true))
+}
+
+func TestWindowsReplaceFileKeepsSharedReaderSnapshotAndPublishesNewACL(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, protectConfigDir(dir, true))
+	target := filepath.Join(dir, "replace shared 中文.yml")
+	require.NoError(t, writeSecureConfigFile(target, []byte("old-value"), false, nil))
+	reader := openWindowsSecureReadHandle(t, target, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+	defer reader.Close()
+
+	require.NoError(t, writeSecureConfigFile(target, []byte("new-value"), true, nil))
+	oldValue, err := readWindowsFileFromStart(reader)
+	require.NoError(t, err)
+	require.Equal(t, []byte("old-value"), oldValue)
+	newValue, err := readSecureConfigFile(target)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new-value"), newValue)
+	userSID, err := currentWindowsUserSID()
+	require.NoError(t, err)
+	require.NoError(t, validateProtectedACLPath(target, userSID, false))
+}
+
+func TestWindowsReplaceFileRejectsReaderWithoutShareDeleteAndRetriesAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, protectConfigDir(dir, true))
+	target := filepath.Join(dir, "replace locked.conf")
+	require.NoError(t, writeSecureConfigFile(target, []byte("old-value"), false, nil))
+	reader := openWindowsSecureReadHandle(t, target, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
+
+	err := writeSecureConfigFile(target, []byte("blocked-value"), true, nil)
+	require.Error(t, err)
+	unchanged, readErr := readSecureConfigFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, []byte("old-value"), unchanged)
+	require.NoError(t, reader.Close())
+
+	require.NoError(t, writeSecureConfigFile(target, []byte("after-close"), true, nil))
+	updated, readErr := readSecureConfigFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, []byte("after-close"), updated)
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	for _, entry := range entries {
+		require.False(t, strings.HasPrefix(entry.Name(), secureTempPrefix), "temporary file remains: %s", entry.Name())
+	}
+}
+
+func openWindowsSecureReadHandle(t *testing.T, path string, share uint32) *os.File {
+	t.Helper()
+	name, err := windows.UTF16PtrFromString(path)
+	require.NoError(t, err)
+	handle, err := windows.CreateFile(
+		name,
+		windows.FILE_GENERIC_READ,
+		share,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	require.NoError(t, err)
+	file := os.NewFile(uintptr(handle), path)
+	require.NotNil(t, file)
+	t.Cleanup(func() { _ = file.Close() })
+	return file
+}
+
+func readWindowsFileFromStart(file *os.File) ([]byte, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(file)
 }
 
 func TestWindowsConfigLockReleasesAfterCallbackPanic(t *testing.T) {
