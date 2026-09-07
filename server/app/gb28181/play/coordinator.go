@@ -154,7 +154,12 @@ type coordinatorEntry struct {
 	result    *Result
 	err       error
 	ownerNode int64
-	done      chan struct{}
+	// operationEpoch is the epoch returned by the admission lease which owns
+	// this generation.  Zero deliberately means unknown: recovered entries and
+	// starts admitted through a legacy coordinator must never be guessed into a
+	// device-wide cleanup target.
+	operationEpoch int64
+	done           chan struct{}
 }
 
 // Coordinator serializes side effects per device/channel while allowing
@@ -166,6 +171,7 @@ type Coordinator struct {
 	start           StartFunc
 	stop            StopFunc
 	beginOperation  func(context.Context, Request) (playauth.DeviceOperationLease, error)
+	cleanupJobs     map[deviceCleanupKey]*deviceCleanupJob
 }
 
 func NewCoordinator(start StartFunc) *Coordinator {
@@ -176,7 +182,12 @@ func NewCoordinatorWithStop(start StartFunc, stop StopFunc) *Coordinator {
 	if start == nil {
 		panic("play: nil live start function")
 	}
-	return &Coordinator{entries: make(map[coordinatorKey]*coordinatorEntry), start: start, stop: stop}
+	return &Coordinator{
+		entries:     make(map[coordinatorKey]*coordinatorEntry),
+		cleanupJobs: make(map[deviceCleanupKey]*deviceCleanupJob),
+		start:       start,
+		stop:        stop,
+	}
 }
 
 // EnsureLive ensures that one live generation exists for the channel. An
@@ -296,17 +307,31 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 		var lease playauth.DeviceOperationLease
 		lease, err = c.beginOperation(startCtx, req)
 		if lease != nil {
+			operationEpoch := lease.OperationEpoch()
+			// Publish the lease epoch before invoking the real media start. A
+			// concurrent device clear may be waiting on this Starting entry;
+			// it must be able to turn the exact same entry into a stop after
+			// the start publishes Ready.
+			c.mu.Lock()
+			if current := c.entries[key]; current == entry {
+				entry.operationEpoch = operationEpoch
+			}
+			c.mu.Unlock()
 			// Release follows compensation AND publication of entry.done below.
 			// Waiters neither acquire nor release the shared owner's lease.
 			defer lease.Release()
-		}
-		if err == nil {
-			if lease == nil || lease.Context() == nil {
-				err = ErrPlayAuthorizationUnavailable
-			} else {
-				startCtx = lease.Context()
-				err = startCtx.Err()
+			if err == nil {
+				if lease.Context() == nil || operationEpoch <= 0 {
+					err = ErrPlayAuthorizationUnavailable
+				} else {
+					startCtx = lease.Context()
+					err = startCtx.Err()
+				}
 			}
+		} else if err == nil {
+			// A configured admission hook that returns no lease is not an
+			// admitted operation and must not reach real media side effects.
+			err = ErrPlayAuthorizationUnavailable
 		}
 	}
 	if err == nil {
