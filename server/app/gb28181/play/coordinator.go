@@ -60,6 +60,7 @@ var (
 	ErrOwnerNodeMismatch  = errors.New("owner-node-mismatch")
 	ErrLiveStartNilResult = errors.New("live start returned nil result")
 	ErrLiveCleanupPending = errors.New("live start cleanup pending")
+	ErrLiveShutdown       = errors.New("live shutdown")
 )
 
 const cleanupPendingRetryTimeout = 5 * time.Second
@@ -99,6 +100,7 @@ type Coordinator struct {
 	mu              sync.Mutex
 	entries         map[coordinatorKey]*coordinatorEntry
 	recoveryPending bool
+	shutdown        bool
 	start           StartFunc
 	stop            StopFunc
 }
@@ -112,6 +114,19 @@ func NewCoordinatorWithStop(start StartFunc, stop StopFunc) *Coordinator {
 		panic("play: nil live start function")
 	}
 	return &Coordinator{entries: make(map[coordinatorKey]*coordinatorEntry), start: start, stop: stop}
+}
+
+// BeginShutdown permanently closes the live start admission gate. Existing
+// entries remain available to Stop so callers can drain already accepted
+// generations. Repeated calls are safe and return false after the first call.
+func (c *Coordinator) BeginShutdown() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.shutdown {
+		return false
+	}
+	c.shutdown = true
+	return true
 }
 
 // EnsureLive ensures that one live generation exists for the channel. An
@@ -131,6 +146,10 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 
 	for {
 		c.mu.Lock()
+		if c.shutdown {
+			c.mu.Unlock()
+			return nil, false, ErrLiveShutdown
+		}
 		if c.recoveryPending {
 			c.mu.Unlock()
 			return nil, false, ErrLiveRecoveryPending
@@ -185,7 +204,9 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 
 			var cleanupErr error
 			if c.stop != nil {
-				cleanupErr = c.stop(context.WithoutCancel(ctx), result)
+				cleanupCtx, cleanupCancel := detachedContext(ctx)
+				cleanupErr = c.stop(cleanupCtx, result)
+				cleanupCancel()
 			}
 			c.finishStop(key, entry, cleanupErr, LiveStateCleanupPending)
 			if cleanupErr != nil {
@@ -270,6 +291,29 @@ func (c *Coordinator) retryCleanupPending(req Request) {
 	_ = c.Stop(ctx, req)
 }
 
+// waitForAcceptedStarts waits for the start transactions that were reserved
+// before shutdown admission closed. BeginShutdown and the reservation both
+// use c.mu, so no new Starting entry can appear after this snapshot.
+func (c *Coordinator) waitForAcceptedStarts(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	dones := make([]<-chan struct{}, 0)
+	for _, entry := range c.entries {
+		if entry != nil && entry.state == LiveStateStarting {
+			dones = append(dones, entry.done)
+		}
+	}
+	c.mu.Unlock()
+	for _, done := range dones {
+		if err := waitFor(ctx, done); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Stop transitions a ready generation through Stopping and blocks new starts
 // until cleanup has returned. Concurrent stop callers share the same barrier.
 func (c *Coordinator) Stop(ctx context.Context, req Request) error {
@@ -316,7 +360,9 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 
 			var err error
 			if c.stop != nil {
-				err = c.stop(context.WithoutCancel(ctx), result)
+				stopCtx, stopCancel := detachedContext(ctx)
+				err = c.stop(stopCtx, result)
+				stopCancel()
 			}
 			c.finishStop(key, entry, err, failureState)
 			return err
@@ -373,15 +419,40 @@ func waitFor(ctx context.Context, done <-chan struct{}) error {
 	select {
 	case <-done:
 		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// detachedContext keeps cleanup independent from caller cancellation while
+// retaining a caller deadline, so bounded shutdown cannot turn cleanup into an
+// unbounded wait.
+func detachedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	base := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(base, deadline)
+	}
+	return base, func() {}
 }
 
 // EnsureLive exposes the channel coordinator through the existing Service.
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	release, ok := s.startAdmission.begin()
+	if !ok {
+		return nil, ErrLiveShutdown
+	}
+	defer release()
+
 	c := s.coordinator()
 	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
