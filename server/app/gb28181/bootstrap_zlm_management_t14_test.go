@@ -50,10 +50,14 @@ func newT14ManagementCore(t *testing.T) (*zlmManagementCoreRuntime, *gorm.DB) {
 	require.NoError(t, err)
 	require.NotZero(t, current.ID)
 	executor := gbzlmmanagement.NewNodeExecutor(reg, func(*node.Node) *zlm.Client { return nil })
+	runtime := gbzlmmanagement.NewRuntimeReader(executor)
+	overview := gbzlmmanagement.NewOverviewSampler(gbzlmmanagement.NewOverviewService(gbzlmmanagement.OverviewDependencies{Registry: reg, Runtime: runtime, Media: runtime}), nil)
+	t.Cleanup(overview.Close)
 	return &zlmManagementCoreRuntime{
 		registry: reg,
 		executor: executor,
-		runtime:  gbzlmmanagement.NewRuntimeReader(executor),
+		runtime:  runtime,
+		overview: overview,
 		ledger:   gbzlmrepo.NewManagedResourceRepo(db),
 		restart:  gbzlmsvc.NewRestartCoordinator(reg),
 	}, db
