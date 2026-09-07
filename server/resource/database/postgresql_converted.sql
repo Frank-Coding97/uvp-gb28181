@@ -5199,3 +5199,10 @@ CREATE INDEX IF NOT EXISTS ix_device_intent_recovery ON gb_device_operation_inte
 ALTER TABLE gb_device_operation_intent ADD COLUMN IF NOT EXISTS rtp_steps_json TEXT NULL;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'gb_device_operation_intent'::regclass AND conname = 'ck_device_intent_rtp_size') THEN ALTER TABLE gb_device_operation_intent ADD CONSTRAINT ck_device_intent_rtp_size CHECK (rtp_steps_json IS NULL OR OCTET_LENGTH(rtp_steps_json) BETWEEN 1 AND 32768); END IF; END $$;
 -- device-operation-rtp-steps:end
+
+-- device-operation-sip-steps:begin
+-- SIP INVITE-only fixed evidence. NULL preserves unknown legacy history.
+-- TEXT preserves canonical bytes; the application validates the full contract.
+ALTER TABLE gb_device_operation_intent ADD COLUMN IF NOT EXISTS sip_steps_json TEXT NULL;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'gb_device_operation_intent'::regclass AND conname = 'ck_device_intent_sip_size') THEN ALTER TABLE gb_device_operation_intent ADD CONSTRAINT ck_device_intent_sip_size CHECK (sip_steps_json IS NULL OR OCTET_LENGTH(sip_steps_json) BETWEEN 1 AND 32768); END IF; END $$;
+-- device-operation-sip-steps:end

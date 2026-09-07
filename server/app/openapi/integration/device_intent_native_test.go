@@ -79,8 +79,13 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.NoError(t, err)
 	applyCleanupBarrierScript(t, ctx, connection.conn, rtpUp)
 	applyCleanupBarrierScript(t, ctx, connection.conn, rtpUp)
+	sipStem := "migrations/2026-09-07-device-operation-sip-steps" + suffix
+	sipUp, err := migrationsfs.FS.ReadFile(sipStem + ".sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, connection.conn, sipUp)
+	applyCleanupBarrierScript(t, ctx, connection.conn, sipUp)
 	var unknownCount int64
-	require.NoError(t, db.Table("gb_device_operation_intent").Where("operation_id=? AND rtp_steps_json IS NULL", id.OperationID).Count(&unknownCount).Error)
+	require.NoError(t, db.Table("gb_device_operation_intent").Where("operation_id=? AND rtp_steps_json IS NULL AND sip_steps_json IS NULL", id.OperationID).Count(&unknownCount).Error)
 	require.EqualValues(t, 1, unknownCount, "upgrade must preserve historical unknown, not fabricate coverage")
 	for _, mutation := range []map[string]any{
 		{"device_epoch": 0}, {"contract_version": 2}, {"row_version": 0}, {"kind": "any"}, {"target_scope": "any"},
@@ -167,6 +172,23 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	afterUp, err := playauth.NewDeviceOperationIntentStore(db).LoadRTPResourceSteps(ctx, other)
 	require.NoError(t, err)
 	require.Equal(t, beforeDown, afterUp)
+	// Separate device: the RTP fixture already transferred its original device.
+	require.NoError(t, db.Exec(`INSERT INTO gb_device VALUES (3,'34020000001320000004',1,1,NULL)`).Error)
+	sipID := playauth.DeviceOperationIntentIdentity{OperationID: "00000000000000000000000000000004", DevicePK: 3, DeviceCode: "34020000001320000004", DeviceEpoch: 1, TargetScope: "device", TargetPK: 3, TargetCode: "34020000001320000004", Kind: "playback"}
+	_, err = store.Reserve(ctx, sipID)
+	require.NoError(t, err)
+	_, err = store.Dispatch(ctx, sipID, 1)
+	require.NoError(t, err)
+	verifySIPInviteStepsNative(t, ctx, db, store, sipID)
+	sipBefore, err := store.LoadSIPInviteSteps(ctx, sipID)
+	require.NoError(t, err)
+	sipDown, err := migrationsfs.FS.ReadFile(sipStem + "-down.sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, connection.conn, sipDown)
+	applyCleanupBarrierScript(t, ctx, connection.conn, sipUp)
+	sipAfter, err := playauth.NewDeviceOperationIntentStore(db).LoadSIPInviteSteps(ctx, sipID)
+	require.NoError(t, err)
+	require.Equal(t, sipBefore, sipAfter)
 	state, err := playauth.NewDeviceCleanupStore(db).Load(ctx, id.DeviceCode)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.CleanupCompletedEpoch)
