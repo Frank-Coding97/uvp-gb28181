@@ -30,7 +30,6 @@ var (
 	errSecurePath        = errors.New("standalone: secure path rejected")
 	errSecureACL         = errors.New("standalone: secure permissions rejected")
 	errSecureLockTimeout = errors.New("standalone: configuration lock timed out")
-	procReplaceFileW     = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReplaceFileW")
 )
 
 func withConfigLock(dir string, fn func() error) error {
@@ -132,9 +131,6 @@ func readSecureConfigFile(path string) ([]byte, error) {
 	if err := protectConfigDir(dir, false); err != nil {
 		return nil, err
 	}
-	if _, err := ensureWindowsTarget(path, false, false); err != nil {
-		return nil, err
-	}
 	userSID, err := currentWindowsUserSID()
 	if err != nil {
 		return nil, err
@@ -180,12 +176,6 @@ func readSecureConfigFile(path string) ([]byte, error) {
 	}
 	if closeErr != nil {
 		return nil, fmt.Errorf("close secure file %q: %w", path, closeErr)
-	}
-	if _, err := ensureWindowsTarget(path, false, false); err != nil {
-		return nil, err
-	}
-	if err := validateProtectedACLPath(path, userSID, false); err != nil {
-		return nil, fmt.Errorf("validate secure file %q: %w", path, err)
 	}
 	return data, nil
 }
@@ -245,19 +235,17 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 	if err := windows.FlushFileBuffers(tempHandle); err != nil {
 		return fmt.Errorf("flush secure file %q: %w", path, err)
 	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("close secure file %q: %w", path, err)
-	}
 	if err := callSecureHook(hook, "acl", path); err != nil {
 		return err
 	}
-	if err := setProtectedACL(tempPath, userSID, false); err != nil {
-		return fmt.Errorf("protect secure file %q: %w", path, err)
+	var tempInfo windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(tempHandle, &tempInfo); err != nil {
+		return fmt.Errorf("inspect temporary secure file %q: %w", path, err)
 	}
-	if _, err := ensureWindowsTarget(tempPath, false, false); err != nil {
-		return err
+	if tempInfo.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
+		return errSecurePath
 	}
-	if err := validateProtectedACLPath(tempPath, userSID, false); err != nil {
+	if err := validateProtectedACLHandle(tempHandle, userSID, false); err != nil {
 		return fmt.Errorf("validate temporary secure file %q: %w", path, err)
 	}
 
@@ -275,10 +263,19 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 		return err
 	}
 	if replace && exists {
-		if err := replaceWindowsFile(path, tempPath); err != nil {
+		if err := renameWindowsFileAtomically(path, tempHandle); err != nil {
 			return fmt.Errorf("publish secure file %q: %w", path, err)
 		}
+		if err := validateProtectedACLHandle(tempHandle, userSID, false); err != nil {
+			return fmt.Errorf("validate renamed secure file %q: %w", path, err)
+		}
+		if err := tempFile.Close(); err != nil {
+			return err
+		}
 	} else {
+		if err := tempFile.Close(); err != nil {
+			return err
+		}
 		from, err := windows.UTF16PtrFromString(tempPath)
 		if err != nil {
 			return fmt.Errorf("publish secure file %q: %w", path, err)
@@ -304,27 +301,31 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 	return nil
 }
 
-func replaceWindowsFile(target, replacement string) error {
-	targetName, err := windows.UTF16PtrFromString(target)
+// Windows 10 FileRenameInfoEx preserves the old open file object while
+// atomically publishing the new name. Derived files are flushed first and can
+// be rebuilt at startup; the authoritative file uses no-replace write-through.
+func renameWindowsFileAtomically(target string, handle windows.Handle) error {
+	name, err := windows.UTF16FromString(target)
 	if err != nil {
 		return err
 	}
-	replacementName, err := windows.UTF16PtrFromString(replacement)
-	if err != nil {
-		return err
+	type renameInfo struct {
+		Flags          uint32
+		RootDirectory  windows.Handle
+		FileNameLength uint32
+		FileName       [1]uint16
 	}
-	result, _, lastErr := procReplaceFileW.Call(
-		uintptr(unsafe.Pointer(targetName)),
-		uintptr(unsafe.Pointer(replacementName)),
-		0,
-		0,
-		0,
-		0,
-	)
-	if result == 0 {
-		return lastErr
-	}
-	return nil
+	const fileRenameInfoEx = 22
+	const replaceIfExistsAndPOSIX = 0x1 | 0x2
+	offset := unsafe.Offsetof(renameInfo{}.FileName)
+	size := offset + uintptr(len(name))*2
+	// uint64 storage retains native HANDLE alignment on Windows x64.
+	storage := make([]uint64, (size+7)/8)
+	info := (*renameInfo)(unsafe.Pointer(&storage[0]))
+	info.Flags = replaceIfExistsAndPOSIX
+	info.FileNameLength = uint32((len(name) - 1) * 2)
+	copy(unsafe.Slice((*uint16)(unsafe.Add(unsafe.Pointer(info), offset)), len(name)), name)
+	return windows.SetFileInformationByHandle(handle, fileRenameInfoEx, (*byte)(unsafe.Pointer(info)), uint32(size))
 }
 
 func createWindowsTempFile(dir, target string, userSID *windows.SID, hook func(stage string) error) (string, windows.Handle, error) {
@@ -350,8 +351,8 @@ func createWindowsTempFile(dir, target string, userSID *windows.SID, hook func(s
 		}
 		handle, err := windows.CreateFile(
 			namePtr,
-			windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE,
-			0,
+			windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 			securityAttributes,
 			windows.CREATE_NEW,
 			windows.FILE_ATTRIBUTE_NORMAL,

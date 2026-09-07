@@ -54,7 +54,7 @@ func TestWindowsProtectedDirectoryUsesTwoInheritedFAEntries(t *testing.T) {
 	require.NoError(t, validateProtectedACL(descriptor, userSID, true))
 }
 
-func TestWindowsReplaceFileKeepsSharedReaderSnapshotAndPublishesNewACL(t *testing.T) {
+func TestWindowsAtomicReplaceKeepsSharedReaderSnapshotAndPublishesNewACL(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, protectConfigDir(dir, true))
 	target := filepath.Join(dir, "replace shared 中文.yml")
@@ -74,7 +74,7 @@ func TestWindowsReplaceFileKeepsSharedReaderSnapshotAndPublishesNewACL(t *testin
 	require.NoError(t, validateProtectedACLPath(target, userSID, false))
 }
 
-func TestWindowsReplaceFileRejectsReaderWithoutShareDeleteAndRetriesAfterClose(t *testing.T) {
+func TestWindowsAtomicReplaceRejectsReaderWithoutShareDeleteAndRetriesAfterClose(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, protectConfigDir(dir, true))
 	target := filepath.Join(dir, "replace locked.conf")
