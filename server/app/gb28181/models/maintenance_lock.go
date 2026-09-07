@@ -19,6 +19,12 @@ func LockGBDeviceForMaintenance(tx *gorm.DB, deviceID uint, deviceCode string) (
 	}
 	query := tx.Model(&GbDevice{}).Where("id = ?", deviceID)
 	switch strings.ToLower(tx.Dialector.Name()) {
+	case "sqlite":
+		// NewSQLiteClient starts transactions with BEGIN IMMEDIATE. Keep the
+		// same write reservation for callers using a deferred SQLite tx.
+		if result := tx.Exec("UPDATE gb_device SET id = id WHERE id = ?", deviceID); result.Error != nil {
+			return device, result.Error
+		}
 	case "mysql", "postgres", "postgresql":
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	case "sqlserver":
