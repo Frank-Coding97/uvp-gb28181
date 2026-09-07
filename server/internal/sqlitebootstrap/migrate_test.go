@@ -116,11 +116,13 @@ func TestMigrateRequiresForeignKeysInitiallyEnabled(t *testing.T) {
 func TestMigrateSQLValidationIgnoresCommentsAndLiterals(t *testing.T) {
 	valid := `-- BEGIN; PRAGMA foreign_keys=OFF; ATTACH 'x'; TRIGGER
 CREATE TABLE "PRAGMA"("BEGIN" TEXT, value TEXT);
-INSERT INTO "PRAGMA" VALUES('COMMIT; ROLLBACK; DETACH; TRIGGER', 'ok'); /* SAVEPOINT; */`
+INSERT INTO "PRAGMA" VALUES('COMMIT; ROLLBACK; DETACH; TRIGGER', CASE WHEN 1=1 THEN 'ok' ELSE 'no' END); /* SAVEPOINT; */`
 	require.NoError(t, validateMigrationSQL(valid))
 	for _, script := range []string{
 		"BEGIN; CREATE TABLE bad(id INTEGER);",
 		"CREATE TABLE bad(id INTEGER); COMMIT;",
+		"END;",
+		"CREATE TABLE bad(id INTEGER); END;",
 		"PRAGMA foreign_keys=OFF; CREATE TABLE bad(id INTEGER);",
 		"ATTACH DATABASE 'other.db' AS other;",
 		"DETACH DATABASE other;",

@@ -286,13 +286,17 @@ func validateMigrationSQL(script string) error {
 		return errors.New("SQL contains no statements")
 	}
 	for _, token := range tokens {
-		switch token {
-		case "BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE":
-			return fmt.Errorf("transaction control %q is not allowed", token)
+		switch token.value {
+		case "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE":
+			return fmt.Errorf("transaction control %q is not allowed", token.value)
+		case "END":
+			if token.statementStart {
+				return fmt.Errorf("transaction control %q is not allowed", token.value)
+			}
 		case "PRAGMA":
 			return errors.New("PRAGMA is not allowed")
 		case "ATTACH", "DETACH":
-			return fmt.Errorf("database attachment %q is not allowed", token)
+			return fmt.Errorf("database attachment %q is not allowed", token.value)
 		case "VACUUM":
 			return errors.New("VACUUM is not allowed")
 		case "TRIGGER":
@@ -302,12 +306,21 @@ func validateMigrationSQL(script string) error {
 	return nil
 }
 
-func scanSQLTokens(script string) ([]string, error) {
-	tokens := make([]string, 0)
+type sqlToken struct {
+	value          string
+	statementStart bool
+}
+
+func scanSQLTokens(script string) ([]sqlToken, error) {
+	tokens := make([]sqlToken, 0)
+	statementStart := true
 	for i := 0; i < len(script); {
 		c := script[i]
 		switch {
 		case c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ';':
+			if c == ';' {
+				statementStart = true
+			}
 			i++
 		case c == '-' && i+1 < len(script) && script[i+1] == '-':
 			i += 2
@@ -324,19 +337,23 @@ func scanSQLTokens(script string) ([]string, error) {
 			if err := skipSQLQuote(script, &i, c); err != nil {
 				return nil, err
 			}
+			statementStart = false
 		case c == '[':
 			if err := skipBracketIdentifier(script, &i); err != nil {
 				return nil, err
 			}
+			statementStart = false
 		case isSQLIdentifierStart(c):
 			start := i
 			i++
 			for i < len(script) && isSQLIdentifierPart(script[i]) {
 				i++
 			}
-			tokens = append(tokens, strings.ToUpper(script[start:i]))
+			tokens = append(tokens, sqlToken{value: strings.ToUpper(script[start:i]), statementStart: statementStart})
+			statementStart = false
 		default:
 			i++
+			statementStart = false
 		}
 	}
 	return tokens, nil
