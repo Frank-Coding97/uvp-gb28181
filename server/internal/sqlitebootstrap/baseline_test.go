@@ -97,3 +97,11 @@ func TestBaselineCancellationRollsBackAndReleasesConnection(t *testing.T) {
 	_, err = applyBaseline(context.Background(), db, "test-cancel", script, digest(script), nil)
 	require.NoError(t, err)
 }
+
+func TestBaselineRejectsNonInternalSQLiteLikeTableNames(t *testing.T) {
+	db := testDB(t)
+	require.NoError(t, db.Exec("CREATE TABLE sqliteXuser_data(id INTEGER)").Error)
+	script := "CREATE TABLE sample(id INTEGER PRIMARY KEY);"
+	_, err := applyBaseline(context.Background(), db, "test-baseline", script, digest(script), nil)
+	require.ErrorContains(t, err, "non-empty")
+}

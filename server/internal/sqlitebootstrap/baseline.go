@@ -41,7 +41,7 @@ func applyBaseline(ctx context.Context, db *gorm.DB, version, script, expectedCh
 			return nil
 		}
 		var tables int
-		if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").Scan(&tables); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'").Scan(&tables); err != nil {
 			return err
 		}
 		if tables != 0 {
