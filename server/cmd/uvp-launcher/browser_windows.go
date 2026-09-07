@@ -9,7 +9,7 @@ import (
 
 // ShellExecute uses the desktop's default browser outside the component Job.
 func openManagementBrowser(value string) error {
-	if !validManagementURL(value) {
+	if !validManagementURL(value) && !validBootstrapURL(value) {
 		return errors.New("invalid management URL")
 	}
 	target, err := windows.UTF16PtrFromString(value)
