@@ -10,6 +10,13 @@ import (
 // 运维入口,由 -migrate-down 标志触发;删除记录后下次启动 Up 会重新
 // 应用该迁移(手动回滚语义,文档已注明)。
 func Down(db *gorm.DB, d Dialect, upFileName string) error {
+	if db == nil || d == DialectUnknown || DialectOf(db.Dialector) != d {
+		return fmt.Errorf("invalid or mismatched migration dialect %q", d)
+	}
+	if d == DialectSQLite {
+		return fmt.Errorf("SQLite rollback requires restoring the complete pre-upgrade backup")
+	}
+
 	store := NewStore(db)
 	exec := &dbExecutor{db: db}
 	return downWith(store, exec, &embedSource{dialect: d}, d, upFileName)

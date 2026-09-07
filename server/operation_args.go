@@ -16,12 +16,16 @@ func migrateUpRequested(args []string) bool {
 
 func databaseIdentitySQL(dialect migration.Dialect) string {
 	switch dialect {
+	case migration.DialectSQLite:
+		return "SELECT 'main' AS database_name, sqlite_version() AS database_version"
 	case migration.DialectPostgres:
 		return "SELECT current_database() AS database_name, version() AS database_version"
 	case migration.DialectSQLServer:
 		return "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS database_version"
-	default:
+	case migration.DialectMySQL:
 		return "SELECT DATABASE() AS database_name, VERSION() AS database_version"
+	default:
+		return ""
 	}
 }
 

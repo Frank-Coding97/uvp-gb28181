@@ -171,7 +171,7 @@ func runMigrateDown(downFile string) error {
 // 多库同时启用时 down 仅作用于主库)。
 func primaryDB() (*gorm.DB, migration.Dialect, error) {
 	if app.GormDbSQLite != nil {
-		return nil, migration.DialectUnknown, errors.New("SQLite migrations are not implemented yet")
+		return app.GormDbSQLite, migration.DialectSQLite, nil
 	}
 	if app.GormDbMysql != nil {
 		return app.GormDbMysql, migration.DialectMySQL, nil

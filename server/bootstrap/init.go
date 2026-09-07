@@ -27,6 +27,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
 )
 
@@ -65,11 +66,17 @@ func init() {
 	initDB()
 
 	if app.GormDbSQLite != nil {
-		log.Fatal("SQLite business startup awaits migration support; use -bootstrap-db to initialize or -db-check for runtime diagnostics")
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		_, err := sqlitebootstrap.Initialize(ctx, app.GormDbSQLite)
+		cancel()
+		if err != nil {
+			log.Fatal("SQLite initialization failed: " + err.Error())
+		}
 	}
 
 	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
 	if err := migration.RunMigrations(map[string]*gorm.DB{
+		"sqlite":     app.GormDbSQLite,
 		"mysql":      app.GormDbMysql,
 		"sqlserver":  app.GormDbSqlserver,
 		"postgresql": app.GormDbPostgreSql,

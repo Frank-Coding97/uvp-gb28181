@@ -1,11 +1,14 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
 )
 
@@ -118,6 +121,15 @@ func splitStatements(sqlText string) []string {
 
 // Up 执行未应用的迁移:建版本表 → 取锁 → 基线化或增量执行 → 放锁。
 func Up(db *gorm.DB, d Dialect) error {
+	if db == nil || d == DialectUnknown || DialectOf(db.Dialector) != d {
+		return fmt.Errorf("invalid or mismatched migration dialect %q", d)
+	}
+	if d == DialectSQLite {
+		ctx, cancel := context.WithTimeout(db.Statement.Context, 2*time.Minute)
+		defer cancel()
+		return sqlitebootstrap.Migrate(ctx, db)
+	}
+
 	probe := func(tableName string) (bool, error) {
 		return db.Migrator().HasTable(tableName), nil
 	}
