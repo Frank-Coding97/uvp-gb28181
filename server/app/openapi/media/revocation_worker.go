@@ -18,7 +18,7 @@ const (
 	minimumRevocationRetry     = time.Second
 	maximumHookBudget          = 5 * time.Second
 	playLiveApplyScope         = "play:live:apply"
-	resolverTimeout            = maximumHookBudget
+	revocationNetworkTimeout   = 5 * time.Second
 
 	RevocationErrorPending             = "revocation_pending"
 	RevocationErrorAwaitingLateSession = "awaiting_late_session"
@@ -267,12 +267,18 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 	if w.factory == nil {
 		return w.pending(ctx, claim, RevocationErrorRuntimeUnavailable, nil, false)
 	}
-	resolveCtx, cancelResolve := context.WithTimeout(ctx, resolverTimeout)
-	runtime, err := w.factory.Resolve(resolveCtx, claim.binding.NodeUUID)
-	resolveDeadlineErr := resolveCtx.Err()
-	cancelResolve()
-	if err == nil && resolveDeadlineErr != nil {
-		err = resolveDeadlineErr
+	// Resolution and control share one monotonic budget, not two consecutive
+	// five-second windows. The lease is overlap suppression, not an SLA proof.
+	// Persistence uses the caller context so an expired network budget can
+	// still record pending; cancellation cannot undo an already sent kick.
+	totalCtx, cancelTotal := context.WithTimeout(ctx, revocationNetworkTimeout)
+	defer cancelTotal()
+	if err := totalCtx.Err(); err != nil {
+		return w.pending(ctx, claim, classifyContextError(err), nil, false)
+	}
+	runtime, err := w.factory.Resolve(totalCtx, claim.binding.NodeUUID)
+	if deadlineErr := totalCtx.Err(); deadlineErr != nil {
+		err = deadlineErr
 	}
 	if err != nil {
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
@@ -290,14 +296,23 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 		return w.pending(ctx, claim, RevocationErrorHookBudgetExceeded, nil, true)
 	}
 
-	networkCtx, cancel := context.WithTimeout(ctx, runtime.HookBudget)
+	networkCtx, cancel := context.WithTimeout(totalCtx, runtime.HookBudget)
 	defer cancel()
 	target := zlm.StreamTarget{Schema: claim.binding.Schema, VHost: claim.binding.VHost, App: claim.binding.App, Stream: claim.binding.Stream}
+	if err := networkCtx.Err(); err != nil {
+		return w.pending(ctx, claim, classifyContextError(err), nil, false)
+	}
 	players, err := runtime.Control.GetRuntimeMediaPlayers(networkCtx, target)
+	if deadlineErr := networkCtx.Err(); deadlineErr != nil {
+		err = deadlineErr
+	}
 	if err != nil {
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
 	}
 	sessions, err := runtime.Control.GetRuntimeSessions(networkCtx)
+	if deadlineErr := networkCtx.Err(); deadlineErr != nil {
+		err = deadlineErr
+	}
 	if err != nil {
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
 	}
@@ -312,11 +327,17 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 	if playerPresent != sessionPresent {
 		return w.pending(ctx, claim, RevocationErrorPartialSnapshot, nil, false)
 	}
+	if err := networkCtx.Err(); err != nil {
+		return w.pending(ctx, claim, classifyContextError(err), nil, false)
+	}
 	if !playerPresent {
 		return w.processAbsent(ctx, claim, runtime.HookBudget)
 	}
 
 	kick, err := runtime.Control.KickSessionIfMatch(networkCtx, claim.binding.BootNonce, claim.bindingIdentifier())
+	if deadlineErr := networkCtx.Err(); deadlineErr != nil {
+		err = deadlineErr
+	}
 	if err != nil {
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
 	}
