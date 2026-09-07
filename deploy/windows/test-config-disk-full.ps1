@@ -155,7 +155,7 @@ function Fill-UntilDiskFull([string]$Directory) {
     $path = Join-Path $Directory 'fill.bin'
     $stream = $null
     try {
-        $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream = [IO.FileStream]::new($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 1, [IO.FileOptions]::WriteThrough)
         while ($attempted -lt $maxFillBytes) {
             $remaining = $maxFillBytes - $attempted
             $target = [int][Math]::Min([uint64]$attemptSize, $remaining)
@@ -193,7 +193,10 @@ function Fill-UntilDiskFull([string]$Directory) {
         }
     } finally {
         if ($null -ne $stream) {
-            $stream.Dispose()
+            try { $stream.Dispose() } catch {
+                if (-not (Test-DiskFullException $_.Exception)) { throw }
+                $errorCode = Get-Win32Code $_.Exception
+            }
         }
     }
     $actual = Get-FillBytes $Directory
