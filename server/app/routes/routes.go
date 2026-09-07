@@ -44,8 +44,9 @@ func InitRoutes(engine *gin.Engine) {
 		engine.Use(middleware.CorsNext())
 	}
 
-	// 静态文件
-	engine.Static(app.ConfigYml.GetString("httpserver.serverrootpath"), app.ConfigYml.GetString("httpserver.serverroot"))
+	// 静态文件与生产 Web 产物。单机模式下 uploads 独立映射到 data/uploads，
+	// SPA 回退只由受限文件处理器提供，不能吞掉 API、Hook 或媒体错误。
+	registerConfiguredStaticRoutes(engine)
 
 	// GB28181 ZLMediaKit Hook 回调端点(engine 根,无 /api 前缀,无鉴权)
 	gbroutes.RegisterHookRoutes(engine)
