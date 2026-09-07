@@ -62,6 +62,7 @@ openapi:
   # 主密钥仅从 UVP_OPENAPI_MASTER_KEY 注入：32 随机字节的无填充 base64url
   tls_terminator_proxies: [] # 单独授权的 TLS 终止代理 IP/CIDR，不自动继承 trustedproxies
   request_timeout_seconds: 5 # 预留末尾 1 秒同步审计；HTTP write_timeout 必须大于此值+1
+  revocation_bindings_file: "" # 运维受控文件绝对路径；空值不启动清退。仅启动读取，独立于上面两个开关；见 openapi-revocation.example.yml
 token:
   jwttokensignkey:  "CHANGE_ME_TO_A_RANDOM_SECRET"   # ⚠️ 部署前必须改成项目专属随机字符串(token 加密签名,泄露=任何人可伪造 token)
   jwttokenexpire:  43200    #设置token过期时间，单位秒 示例:43200=12小时
