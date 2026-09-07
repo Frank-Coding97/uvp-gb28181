@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -42,12 +43,16 @@ type NetworkInterfacesResponse struct {
 // SIPReloader 抽象出保存后的热启动动作,由 bootstrap 层实现并注入,避免 controller → bootstrap 反向依赖.
 type SIPReloader func() error
 
+// SIPConfigSaver 抽象出 SIP 配置落库动作,由 bootstrap 层在首装事务中注入.
+type SIPConfigSaver func(context.Context, gbsetup.SaveSIPConfigRequest) (gbsetup.SIPConfigView, error)
+
 type SetupController struct {
 	controllers.Common
-	db         *gorm.DB
-	runtime    *gbsetup.RuntimeStatus
-	interfaces gbsetup.InterfaceProvider
-	reload     SIPReloader
+	db          *gorm.DB
+	runtime     *gbsetup.RuntimeStatus
+	interfaces  gbsetup.InterfaceProvider
+	reload      SIPReloader
+	configSaver SIPConfigSaver
 }
 
 func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces gbsetup.InterfaceProvider, reload SIPReloader) *SetupController {
@@ -55,6 +60,12 @@ func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces 
 		runtime = gbsetup.NewRuntimeStatus()
 	}
 	return &SetupController{db: db, runtime: runtime, interfaces: interfaces, reload: reload}
+}
+
+// SetConfigSaver configures the optional SIP configuration persistence hook.
+// It must be called before the controller is registered with the router.
+func (sc *SetupController) SetConfigSaver(saver SIPConfigSaver) {
+	sc.configSaver = saver
 }
 
 // Status GET /api/gb28181/sip/setup/status
@@ -84,7 +95,7 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		sc.Fail(c, "SIP 配置请求格式错误", err, http.StatusBadRequest)
 		return
 	}
-	view, err := gbsetup.NewSIPConfigService(sc.db).Save(c.Request.Context(), gbsetup.SaveSIPConfigRequest{
+	requestToSave := gbsetup.SaveSIPConfigRequest{
 		DeploymentMode:      request.DeploymentMode,
 		ListenIP:            request.ListenIP,
 		AdvertiseIP:         request.AdvertiseIP,
@@ -93,7 +104,14 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		Domain:              request.Domain,
 		ServerID:            request.ServerID,
 		Password:            request.Password,
-	})
+	}
+	var view gbsetup.SIPConfigView
+	var err error
+	if sc.configSaver != nil {
+		view, err = sc.configSaver(c.Request.Context(), requestToSave)
+	} else {
+		view, err = gbsetup.NewSIPConfigService(sc.db).Save(c.Request.Context(), requestToSave)
+	}
 	if err != nil {
 		var validation *gbsetup.ValidationError
 		if errors.As(err, &validation) {
