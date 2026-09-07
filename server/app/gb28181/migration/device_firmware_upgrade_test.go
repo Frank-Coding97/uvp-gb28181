@@ -72,10 +72,9 @@ func TestFirmwareUpgradePermissionMigrationIsScopedAndReversible(t *testing.T) {
 			run := func(body string) {
 				body = strings.ReplaceAll(body, "N'", "'")
 				body = strings.ReplaceAll(body, "CONCAT('role_',rm.role_id)", "'role_' || rm.role_id")
-				for _, statement := range strings.Split(body, ";") {
-					if strings.TrimSpace(statement) != "" {
-						require.NoError(t, db.Exec(statement).Error, statement)
-					}
+				// Use the migration splitter: trailing marker comments are not SQL.
+				for _, statement := range splitStatements(body) {
+					require.NoError(t, db.Exec(statement).Error, statement)
 				}
 			}
 			run(sections[1])
