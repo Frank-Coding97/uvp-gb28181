@@ -201,3 +201,53 @@ func TestLoadConfigDoesNotGenerateOrRepair(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "invalid: [", string(raw))
 }
+
+func TestInstanceConfigManagementAddresses(t *testing.T) {
+	values, err := newInstanceConfigValues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := InstanceConfig{values: values}
+	if config.BackendAddress() != "127.0.0.1:8280" || config.MediaAddress() != "127.0.0.1:18080" {
+		t.Fatal("unexpected management addresses")
+	}
+}
+
+func TestInstanceMediaConfigDisablesAPIDebug(t *testing.T) {
+	cfg, err := InitializeConfig(configTestPaths(t))
+	require.NoError(t, err)
+	raw, err := os.ReadFile(cfg.ZLMConfigPath)
+	require.NoError(t, err)
+	if !strings.Contains(string(raw), "\napiDebug=0\n") {
+		t.Fatal("media API debug must be explicitly disabled to keep management secrets out of logs")
+	}
+}
+
+func TestInitialMediaConfigDisablesUnconfiguredListeners(t *testing.T) {
+	cfg, err := InitializeConfig(configTestPaths(t))
+	require.NoError(t, err)
+	raw, err := os.ReadFile(cfg.ZLMConfigPath)
+	require.NoError(t, err)
+	sections := map[string]map[string]string{}
+	section := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "[") {
+			section = strings.Trim(line, "[]")
+			sections[section] = map[string]string{}
+			continue
+		}
+		if key, value, ok := strings.Cut(line, "="); ok {
+			sections[section][key] = value
+		}
+	}
+	for section, keys := range map[string][]string{"http": {"sslport"}, "rtsp": {"port", "sslport"}, "rtmp": {"port", "sslport"}, "shell": {"port"}, "srt": {"port"}, "rtp_proxy": {"port"}, "rtc": {"port", "tcpPort", "signalingPort", "signalingSslPort", "icePort", "iceTcpPort"}} {
+		for _, key := range keys {
+			if sections[section][key] != "0" {
+				t.Errorf("unconfigured listener %s.%s must be disabled", section, key)
+			}
+		}
+	}
+	if sections["general"]["listen_ip"] != "127.0.0.1" {
+		t.Error("initial media management must bind loopback")
+	}
+}

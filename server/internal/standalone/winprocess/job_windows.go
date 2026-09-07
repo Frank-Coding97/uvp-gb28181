@@ -243,13 +243,15 @@ func (j *Job) Contains(p *Process) (bool, error) {
 	if j == nil || p == nil {
 		return false, ErrProcessClosed
 	}
+	// Wait may hold p.mu until exit; never hold the Job lock while waiting
+	// for it, otherwise Job.Close could not terminate that process.
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.closed || j.handle == windows.InvalidHandle {
 		return false, ErrJobClosed
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.handle == windows.InvalidHandle {
 		return false, ErrProcessClosed
 	}

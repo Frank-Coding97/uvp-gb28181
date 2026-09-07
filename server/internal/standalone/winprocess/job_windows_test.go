@@ -165,6 +165,24 @@ func TestWindowsJobKillsChildrenWhenOwnerExits(t *testing.T) {
 	waitForPIDExit(t, uint32(pid))
 }
 
+func TestWindowsJobKillsChildIfOwnerCrashesBeforeRegistration(t *testing.T) {
+	resultPath := filepath.Join(t.TempDir(), "crash-result.txt")
+	cmd := helperCommand("owner-crash-before-registration", map[string]string{processHelperResultEnv: resultPath})
+	err := cmd.Run()
+	if err == nil || cmd.ProcessState.ExitCode() != 73 {
+		t.Fatalf("expected injected owner crash: %v", err)
+	}
+	raw, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForPIDExit(t, uint32(pid))
+}
+
 func TestWindowsJobUsesExplicitStandardIO(t *testing.T) {
 	job, err := NewJob()
 	if err != nil {
@@ -362,6 +380,18 @@ func TestWinProcessHelper(t *testing.T) {
 		} else {
 			fmt.Fprintln(os.Stdout, "sentinel-absent")
 		}
+	case "owner-crash-before-registration":
+		job, err := NewJob()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = job.start(helperStartSpec("sleep", nil, nil, nil), func(info windows.ProcessInformation) error {
+			if err := os.WriteFile(os.Getenv(processHelperResultEnv), []byte(strconv.FormatUint(uint64(info.ProcessId), 10)), 0600); err != nil {
+				return err
+			}
+			return windows.TerminateProcess(windows.CurrentProcess(), 73)
+		})
+		t.Fatalf("owner crash did not occur: %v", err)
 	case "owner-exit":
 		job, err := NewJob()
 		if err != nil {
@@ -557,4 +587,35 @@ func jobProcessIDs(t *testing.T, job *Job) []uint32 {
 		t.Fatalf("Job process list count %d exceeds test buffer", count)
 	}
 	return append([]uint32(nil), info.ProcessIdList[:count]...)
+}
+
+func TestWindowsMembershipQueryCannotBlockJobClose(t *testing.T) {
+	job, err := NewJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer job.Close()
+	process, err := job.Start(helperStartSpec("sleep", nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model the process lock held by Wait without relying on scheduler timing.
+	process.mu.Lock()
+	queryDone := make(chan struct{})
+	go func() { _, _ = job.Contains(process); close(queryDone) }()
+	time.Sleep(25 * time.Millisecond)
+	closed := make(chan error, 1)
+	go func() { closed <- job.Close() }()
+	select {
+	case err := <-closed:
+		process.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		process.mu.Unlock()
+		t.Fatal("membership query blocked Job.Close")
+	}
+	<-queryDone
+	waitForProcess(t, process)
 }

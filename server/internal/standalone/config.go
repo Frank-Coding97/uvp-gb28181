@@ -143,7 +143,7 @@ func initializeConfig(paths Paths, hook func(string) error) (InstanceConfig, err
 		}
 		// Full media listeners/hooks are configured and accepted by T19. These
 		// deterministic inputs carry the same instance secret, not a second source.
-		zlm := fmt.Sprintf("[api]\nsecret=%s\n[http]\nport=%d\n", result.ZLMSecret(), configInt(values, "gb28181", "zlm", "httpport"))
+		zlm := fmt.Sprintf("[api]\napiDebug=0\nsecret=%s\n[general]\nlisten_ip=127.0.0.1\n[http]\nport=%d\nsslport=0\n[rtsp]\nport=0\nsslport=0\n[rtmp]\nport=0\nsslport=0\n[shell]\nport=0\n[srt]\nport=0\n[rtp_proxy]\nport=0\n[rtc]\nport=0\ntcpPort=0\nsignalingPort=0\nsignalingSslPort=0\nicePort=0\niceTcpPort=0\n", result.ZLMSecret(), configInt(values, "gb28181", "zlm", "httpport"))
 		if err := writeSecureConfigFile(result.ZLMConfigPath, []byte(zlm), true, prefixConfigHook("zlm", hook)); err != nil {
 			return err
 		}
@@ -282,4 +282,12 @@ m = g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act
 			"play":             map[string]any{"auth": map[string]any{"enabled": true, "bind_client_ip": false, "ttl_seconds": 120}},
 		},
 	}, nil
+}
+
+// BackendAddress and MediaAddress are the configured management listeners.
+func (c InstanceConfig) BackendAddress() string {
+	return configString(c.values, "httpserver", "port")
+}
+func (c InstanceConfig) MediaAddress() string {
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(configInt(c.values, "gb28181", "zlm", "httpport")))
 }

@@ -25,3 +25,6 @@ func (*Process) Wait() (uint32, error) { return 0, ErrUnsupported }
 
 // Close reports that Windows Job Objects are unavailable on this platform.
 func (*Process) Close() error { return ErrUnsupported }
+
+func (*Job) Contains(*Process) (bool, error) { return false, ErrUnsupported }
+func (*Process) IsInJob() (bool, error)      { return false, ErrUnsupported }
