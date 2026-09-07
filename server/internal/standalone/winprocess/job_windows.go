@@ -71,6 +71,12 @@ func NewJob() (*Job, error) {
 // attribute makes membership part of CreateProcess itself; there is no
 // suspended-process assignment window or breakaway fallback.
 func (j *Job) Start(spec StartSpec) (*Process, error) {
+	return j.start(spec, nil)
+}
+
+// start is split from Start so Windows tests can inject a failure in the
+// narrow interval after CreateProcess returns and before Process is exposed.
+func (j *Job) start(spec StartSpec, afterCreate func(windows.ProcessInformation) error) (*Process, error) {
 	if j == nil {
 		return nil, ErrJobClosed
 	}
@@ -107,6 +113,10 @@ func (j *Job) Start(spec StartSpec) (*Process, error) {
 		return nil, err
 	}
 	defer closeChildHandles(childHandles)
+	inheritedHandles := uniqueChildHandles(childHandles)
+	if len(inheritedHandles) == 0 {
+		return nil, errors.New("prepare process handle list")
+	}
 
 	attributes, err := windows.NewProcThreadAttributeList(2)
 	if err != nil {
@@ -123,8 +133,8 @@ func (j *Job) Start(spec StartSpec) (*Process, error) {
 	}
 	if err := attributes.Update(
 		windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-		unsafe.Pointer(&childHandles[0]),
-		uintptr(len(childHandles))*unsafe.Sizeof(childHandles[0]),
+		unsafe.Pointer(&inheritedHandles[0]),
+		uintptr(len(inheritedHandles))*unsafe.Sizeof(inheritedHandles[0]),
 	); err != nil {
 		return nil, fmt.Errorf("set process handle attribute: %w", err)
 	}
@@ -158,6 +168,7 @@ func (j *Job) Start(spec StartSpec) (*Process, error) {
 	runtime.KeepAlive(environment)
 	runtime.KeepAlive(jobList)
 	runtime.KeepAlive(childHandles)
+	runtime.KeepAlive(inheritedHandles)
 	if createErr != nil {
 		return nil, fmt.Errorf("create process: %w", createErr)
 	}
@@ -165,6 +176,21 @@ func (j *Job) Start(spec StartSpec) (*Process, error) {
 	_ = windows.CloseHandle(processInfo.Thread)
 	if processInfo.Process == 0 || processInfo.Process == windows.InvalidHandle {
 		return nil, errors.New("create process returned an invalid process handle")
+	}
+	if afterCreate != nil {
+		if err := afterCreate(processInfo); err != nil {
+			cleanupCreatedProcess(processInfo.Process)
+			return nil, fmt.Errorf("after-create process hook: %w", err)
+		}
+	}
+	inJob, err := processHandleInJob(processInfo.Process, j.handle)
+	if err != nil {
+		cleanupCreatedProcess(processInfo.Process)
+		return nil, fmt.Errorf("verify process job membership: %w", err)
+	}
+	if !inJob {
+		cleanupCreatedProcess(processInfo.Process)
+		return nil, errors.New("created process is outside its Job")
 	}
 	return &Process{handle: processInfo.Process, pid: processInfo.ProcessId}, nil
 }
@@ -209,19 +235,25 @@ func (p *Process) IsInJob() (bool, error) {
 	if p.handle == windows.InvalidHandle {
 		return false, ErrProcessClosed
 	}
-	var inJob int32
-	result, _, callErr := procIsProcessInJob.Call(
-		uintptr(p.handle),
-		0,
-		uintptr(unsafe.Pointer(&inJob)),
-	)
-	if result == 0 {
-		if callErr == nil {
-			callErr = errors.New("IsProcessInJob failed")
-		}
-		return false, fmt.Errorf("query process job membership: %w", callErr)
+	return processHandleInJob(p.handle, 0)
+}
+
+// Contains reports whether p belongs to this exact Job Object.
+func (j *Job) Contains(p *Process) (bool, error) {
+	if j == nil || p == nil {
+		return false, ErrProcessClosed
 	}
-	return inJob != 0, nil
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed || j.handle == windows.InvalidHandle {
+		return false, ErrJobClosed
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handle == windows.InvalidHandle {
+		return false, ErrProcessClosed
+	}
+	return processHandleInJob(p.handle, j.handle)
 }
 
 // Wait waits for process termination, returns its exit code, and releases the
@@ -296,33 +328,54 @@ func prepareChildHandles(spec StartSpec) ([]windows.Handle, error) {
 	files := []*os.File{spec.Stdin, spec.Stdout, spec.Stderr}
 	access := []uint32{windows.GENERIC_READ, windows.GENERIC_WRITE, windows.GENERIC_WRITE}
 	handles := make([]windows.Handle, len(files))
+	duplicates := make(map[windows.Handle]windows.Handle, len(files))
+	nullSources := make(map[uint32]windows.Handle, 2)
+	defer func() {
+		for _, source := range nullSources {
+			_ = windows.CloseHandle(source)
+		}
+	}()
 	for index, file := range files {
-		handle, err := duplicateChildHandle(file, access[index])
+		source, err := standardHandleSource(file, access[index], nullSources)
 		if err != nil {
 			closeChildHandles(handles[:index])
 			return nil, fmt.Errorf("prepare standard handle %d: %w", index, err)
 		}
+		if handle, ok := duplicates[source]; ok {
+			handles[index] = handle
+			continue
+		}
+		handle, err := duplicateChildHandle(source)
+		if err != nil {
+			closeChildHandles(handles[:index])
+			return nil, fmt.Errorf("prepare standard handle %d: %w", index, err)
+		}
+		duplicates[source] = handle
 		handles[index] = handle
 	}
 	return handles, nil
 }
 
-func duplicateChildHandle(file *os.File, access uint32) (windows.Handle, error) {
-	var source windows.Handle
-	closeSource := false
-	if file == nil {
-		var err error
-		source, err = openNullHandle(access)
-		if err != nil {
-			return windows.InvalidHandle, fmt.Errorf("open NUL standard handle: %w", err)
+func standardHandleSource(file *os.File, access uint32, nullSources map[uint32]windows.Handle) (windows.Handle, error) {
+	if file != nil {
+		source := windows.Handle(file.Fd())
+		if source == 0 || source == windows.InvalidHandle {
+			return windows.InvalidHandle, errors.New("standard handle is invalid")
 		}
-		closeSource = true
+		return source, nil
 	}
-	if closeSource {
-		defer windows.CloseHandle(source)
-	} else {
-		source = windows.Handle(file.Fd())
+	if source, ok := nullSources[access]; ok {
+		return source, nil
 	}
+	source, err := openNullHandle(access)
+	if err != nil {
+		return windows.InvalidHandle, fmt.Errorf("open NUL standard handle: %w", err)
+	}
+	nullSources[access] = source
+	return source, nil
+}
+
+func duplicateChildHandle(source windows.Handle) (windows.Handle, error) {
 	if source == 0 || source == windows.InvalidHandle {
 		return windows.InvalidHandle, errors.New("standard handle is invalid")
 	}
@@ -361,11 +414,61 @@ func openNullHandle(access uint32) (windows.Handle, error) {
 }
 
 func closeChildHandles(handles []windows.Handle) {
+	closed := make(map[windows.Handle]struct{}, len(handles))
 	for _, handle := range handles {
-		if handle != 0 && handle != windows.InvalidHandle {
-			_ = windows.CloseHandle(handle)
+		if handle == 0 || handle == windows.InvalidHandle {
+			continue
 		}
+		if _, ok := closed[handle]; ok {
+			continue
+		}
+		closed[handle] = struct{}{}
+		_ = windows.CloseHandle(handle)
 	}
+}
+
+func uniqueChildHandles(handles []windows.Handle) []windows.Handle {
+	unique := make([]windows.Handle, 0, len(handles))
+	seen := make(map[windows.Handle]struct{}, len(handles))
+	for _, handle := range handles {
+		if handle == 0 || handle == windows.InvalidHandle {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		unique = append(unique, handle)
+	}
+	return unique
+}
+
+func processHandleInJob(process, job windows.Handle) (bool, error) {
+	if process == 0 || process == windows.InvalidHandle {
+		return false, ErrProcessClosed
+	}
+	var inJob int32
+	result, _, callErr := procIsProcessInJob.Call(
+		uintptr(process),
+		uintptr(job),
+		uintptr(unsafe.Pointer(&inJob)),
+	)
+	if result == 0 {
+		if callErr == nil {
+			callErr = errors.New("IsProcessInJob failed")
+		}
+		return false, callErr
+	}
+	return inJob != 0, nil
+}
+
+func cleanupCreatedProcess(handle windows.Handle) {
+	if handle == 0 || handle == windows.InvalidHandle {
+		return
+	}
+	_ = windows.TerminateProcess(handle, 1)
+	_, _ = windows.WaitForSingleObject(handle, 5000)
+	_ = windows.CloseHandle(handle)
 }
 
 type environmentEntry struct {

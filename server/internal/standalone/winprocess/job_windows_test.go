@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -104,6 +106,11 @@ func TestWindowsJobStartsDescendantsAndCloseKillsOnlyOwned(t *testing.T) {
 		t.Fatal(err)
 	} else if !inJob {
 		t.Fatal("created child is not in a Job Object")
+	}
+	if inJob, err := job.Contains(owned); err != nil {
+		t.Fatal(err)
+	} else if !inJob {
+		t.Fatal("created child is not in its creating Job Object")
 	}
 	grandchildHandle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(grandchildPID))
 	if err != nil {
@@ -216,6 +223,68 @@ func TestWindowsJobUsesExplicitStandardIO(t *testing.T) {
 	}
 }
 
+func TestWindowsFailedCreateAddsNoJobMember(t *testing.T) {
+	job, err := NewJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer job.Close()
+	owned, err := job.Start(helperStartSpec("sleep", nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := jobProcessIDs(t, job)
+	if len(before) != 1 {
+		t.Fatalf("initial Job members = %v, want one process", before)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(filepath.Dir(executable), "uvp-winprocess-missing.exe")
+	if _, err := job.Start(StartSpec{
+		Path: missing,
+		Env:  os.Environ(),
+		Dir:  filepath.Dir(executable),
+	}); err == nil {
+		t.Fatal("failed process creation unexpectedly succeeded")
+	}
+	after := jobProcessIDs(t, job)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("Job members after failed create = %v, before = %v", after, before)
+	}
+	if err := job.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForProcess(t, owned)
+}
+
+func TestWindowsAfterCreateFailureDoesNotExposeProcess(t *testing.T) {
+	job, err := NewJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer job.Close()
+	var createdPID uint32
+	_, err = job.start(helperStartSpec("sleep", nil, nil, nil), func(info windows.ProcessInformation) error {
+		createdPID = info.ProcessId
+		if err := windows.TerminateProcess(info.Process, 73); err != nil {
+			return err
+		}
+		return errors.New("injected post-create failure")
+	})
+	if err == nil {
+		t.Fatal("post-create failure was ignored")
+	}
+	if createdPID == 0 {
+		t.Fatal("post-create hook did not observe a process")
+	}
+	waitForPIDExit(t, createdPID)
+	if members := jobProcessIDs(t, job); len(members) != 0 {
+		t.Fatalf("Job members after post-create failure = %v", members)
+	}
+}
+
 func TestWindowsJobDoesNotLeakUnlistedInheritableHandle(t *testing.T) {
 	job, err := NewJob()
 	if err != nil {
@@ -282,6 +351,7 @@ func TestWinProcessHelper(t *testing.T) {
 		}
 		fmt.Fprintf(os.Stdout, "stdout:%s", input)
 		fmt.Fprintln(os.Stderr, "stderr:ok")
+		os.Exit(0)
 	case "check-sentinel":
 		handleValue, err := strconv.ParseUint(os.Getenv(processHelperHandleEnv), 10, 64)
 		if err != nil {
@@ -464,4 +534,27 @@ func waitForPIDExit(t *testing.T, pid uint32) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("process %d remained alive after owner exit", pid)
+}
+
+func jobProcessIDs(t *testing.T, job *Job) []uint32 {
+	t.Helper()
+	var info struct {
+		NumberOfAssignedProcesses uint32
+		NumberOfProcessIdsInList  uint32
+		ProcessIdList             [16]uint32
+	}
+	if err := windows.QueryInformationJobObject(
+		job.handle,
+		windows.JobObjectBasicProcessIdList,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	count := int(info.NumberOfProcessIdsInList)
+	if count > len(info.ProcessIdList) {
+		t.Fatalf("Job process list count %d exceeds test buffer", count)
+	}
+	return append([]uint32(nil), info.ProcessIdList[:count]...)
 }
