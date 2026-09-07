@@ -149,6 +149,9 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("standalone SIP browser flow did not reach the completed home page")
 	}
+	if err := browser.captureScreenshot(sipContext, filepath.Join(installDir, "t19-completed-home.png")); err != nil {
+		t.Fatal("completed home screenshot was unavailable")
+	}
 }
 
 func t18BrowserPassword(t *testing.T) string {
