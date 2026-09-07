@@ -38,6 +38,16 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 		return err
 	}
 	defer o.leave()
+	if pending, err := o.persistQuarantineFacts(ctx); err != nil {
+		return err
+	} else if pending {
+		if o.cleanup != nil {
+			if err := o.finishCleanup(ctx); err != nil {
+				return err
+			}
+		}
+		return ErrPlaybackCleanupUnknown
+	}
 	if o.multiCleanup {
 		return o.cleanupObservedBranches(ctx)
 	}

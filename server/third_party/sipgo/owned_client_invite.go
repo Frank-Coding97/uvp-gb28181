@@ -29,6 +29,11 @@ type OwnedClientInvite struct {
 	branches                            []*sip.Response
 	branchesIncomplete                  bool
 	branchChanges                       chan struct{}
+	branchesFrozen                      bool
+	quarantine                          []*sip.Response
+	quarantineIncomplete                bool
+	quarantineChanges                   chan struct{}
+	responseObservation                 *sip.ClientResponseObservation
 	writeErrors                         chan error
 	provisionalObserved, finalObserved  bool
 	cancelPrepared, cancelStarted       bool
@@ -72,13 +77,21 @@ func (ua *DialogUA) PrepareWriteInviteOwned(ctx context.Context, request *sip.Re
 	if err != nil {
 		return nil, err
 	}
-	return newOwnedClientInvite(ua, prepared, tx), nil
+	o := newOwnedClientInvite(ua, prepared, tx)
+	o.responseObservation, err = ua.Client.TransactionLayer().ObserveClientResponses(prepared, tx.Connection(), ownedInviteResponseSink{o})
+	if err != nil {
+		o.Terminate()
+		<-o.Quiesced()
+		return nil, err
+	}
+	return o, nil
 }
 
 func newOwnedClientInvite(ua *DialogUA, request *sip.Request, tx *sip.ClientTx) *OwnedClientInvite {
 	session := &DialogClientSession{Dialog: Dialog{InviteRequest: request}, UA: ua, inviteTx: tx}
 	session.Dialog.Init()
 	o := &OwnedClientInvite{session: session, tx: tx, quiesced: make(chan struct{}), unmatched: make(chan *sip.Response, 1), branchChanges: make(chan struct{}, 1), writeErrors: make(chan error, 1)}
+	o.quarantineChanges = make(chan struct{}, 1)
 	if !tx.OnRetransmission(func(response *sip.Response) { o.observeBranch(response, true) }) {
 		o.closing, o.branchesIncomplete = true, true
 	}
@@ -109,7 +122,7 @@ func (o *OwnedClientInvite) Request() *sip.Request {
 // Terminate and observe Quiesced; an error is not evidence of zero dispatch.
 func (o *OwnedClientInvite) Start() error {
 	o.mu.Lock()
-	if o.started || o.closing {
+	if o.started || o.closing || o.branchesIncomplete {
 		o.mu.Unlock()
 		return ErrOwnedInviteState
 	}
@@ -129,6 +142,7 @@ func (o *OwnedClientInvite) endWork() {
 
 func (o *OwnedClientInvite) closeQuiescedLocked() {
 	if o.transactionExited && o.active == 0 && (o.cancelTx == nil || o.cancelExited) && !o.quiescedClosed {
+		o.branchesFrozen = true
 		o.quiescedClosed = true
 		close(o.quiesced)
 	}

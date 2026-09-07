@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -20,9 +21,12 @@ func defaultUnhandledRespHandler(r *Response) {
 }
 
 type TransactionLayer struct {
-	tpl           *TransportLayer
-	reqHandler    TransactionRequestHandler
-	unRespHandler UnhandledResponseHandler
+	tpl                     *TransportLayer
+	reqHandler              TransactionRequestHandler
+	unRespHandler           UnhandledResponseHandler
+	responseObserverMu      sync.Mutex
+	responseObservers       map[string]*ClientResponseObservation
+	responseObserversClosed bool
 
 	clientTransactions *transactionStore[*ClientTx]
 	serverTransactions *transactionStore[*ServerTx]
@@ -101,6 +105,7 @@ func (txl *TransactionLayer) OnRequest(h TransactionRequestHandler) {
 // OnConnectionClose is called when a reliable transport connection (TCP, TLS,
 // WS, WSS) is closed by the remote side or due to a read error.
 func (txl *TransactionLayer) OnConnectionClose(conn Connection) {
+	txl.responseConnectionLost(conn)
 	if txl.terminateOnConnClose {
 		txl.terminateClientTransactions(conn)
 		txl.terminateServerTransactions(conn)
@@ -139,6 +144,7 @@ func (txl *TransactionLayer) handleMessage(msg Message) {
 	case *Request:
 		go txl.handleRequestBackground(msg)
 	case *Response:
+		txl.captureClientResponse(msg)
 		go txl.handleResponseBackground(msg)
 	default:
 		txl.log.Error("unsupported message, skip it")
@@ -393,6 +399,7 @@ func (txl *TransactionLayer) getServerTx(key string) (*ServerTx, bool) {
 }
 
 func (txl *TransactionLayer) Close() {
+	txl.closeResponseObservers()
 	txl.clientTransactions.terminateAll()
 	txl.serverTransactions.terminateAll()
 	txl.log.Debug("transaction layer closed")

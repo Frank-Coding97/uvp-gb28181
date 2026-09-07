@@ -17,9 +17,9 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
-func playbackIntentStoreFixture(t *testing.T) (*UAC, *gorm.DB, *playauth.DeviceOperationIntentStore, playauth.DeviceOperationIntentIdentity, *snapshotTransactionObserver) {
+func playbackIntentStoreFixture(t *testing.T, options ...sipgo.UserAgentOption) (*UAC, *gorm.DB, *playauth.DeviceOperationIntentStore, playauth.DeviceOperationIntentIdentity, *snapshotTransactionObserver) {
 	t.Helper()
-	ua, err := sipgo.NewUA()
+	ua, err := sipgo.NewUA(options...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ua.Close() })
 	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)

@@ -36,9 +36,9 @@ func (c *ownedInviteConnection) Ref(n int) int          { return n }
 func (c *ownedInviteConnection) Close() error           { return nil }
 func (c *ownedInviteConnection) TryClose() (int, error) { return 0, nil }
 
-func ownedInviteRequest(t *testing.T, destination string) (*DialogUA, *sip.Request) {
+func ownedInviteRequest(t *testing.T, destination string, options ...UserAgentOption) (*DialogUA, *sip.Request) {
 	t.Helper()
-	ua, err := NewUA()
+	ua, err := NewUA(options...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ua.Close() })
 	client, err := NewClient(ua)

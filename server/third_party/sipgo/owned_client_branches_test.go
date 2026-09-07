@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ownedBranchUDPFixture(t *testing.T) (*OwnedClientInvite, net.PacketConn, net.Addr, *sip.Response) {
+func ownedBranchUDPFixture(t *testing.T, options ...UserAgentOption) (*OwnedClientInvite, net.PacketConn, net.Addr, *sip.Response) {
 	t.Helper()
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = peer.Close() })
-	dua, req := ownedInviteRequest(t, peer.LocalAddr().String())
+	dua, req := ownedInviteRequest(t, peer.LocalAddr().String(), options...)
 	owned, err := dua.PrepareWriteInviteOwned(context.Background(), req)
 	require.NoError(t, err)
 	t.Cleanup(func() { owned.Terminate(); waitOwnedInvite(t, owned.Quiesced()) })

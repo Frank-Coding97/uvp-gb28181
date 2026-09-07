@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -30,9 +31,9 @@ type playbackOperationUDPFixture struct {
 	invite  *sip.Request
 }
 
-func newPlaybackOperationUDPFixture(t *testing.T) *playbackOperationUDPFixture {
+func newPlaybackOperationUDPFixture(t *testing.T, options ...sipgo.UserAgentOption) *playbackOperationUDPFixture {
 	t.Helper()
-	f := newPlaybackOperationPreparedUDPFixture(t)
+	f := newPlaybackOperationPreparedUDPFixture(t, options...)
 	require.NoError(t, f.op.Start(context.Background()))
 	buffer := make([]byte, 8192)
 	require.NoError(t, f.peer.SetReadDeadline(time.Now().Add(time.Second)))
@@ -44,9 +45,9 @@ func newPlaybackOperationUDPFixture(t *testing.T) *playbackOperationUDPFixture {
 	return f
 }
 
-func newPlaybackOperationPreparedUDPFixture(t *testing.T) *playbackOperationUDPFixture {
+func newPlaybackOperationPreparedUDPFixture(t *testing.T, options ...sipgo.UserAgentOption) *playbackOperationUDPFixture {
 	t.Helper()
-	u, db, store, id, _ := playbackIntentStoreFixture(t)
+	u, db, store, id, _ := playbackIntentStoreFixture(t, options...)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))

@@ -42,6 +42,7 @@ type playbackIntentOperation struct {
 	stopDone              chan struct{}
 	readerCancel          context.CancelFunc
 	readerDone            chan struct{}
+	quarantineReaderDone  chan struct{}
 	events                chan struct{} // Coalesced notification, never a response backlog.
 	factMu                sync.Mutex    // Only copies facts, never calls DB/SIP or waits.
 	first                 *sip.Response
@@ -104,6 +105,7 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 		return o, errPlaybackIntentSnapshot
 	}
 	// Cancellation requests cleanup; it never drops the reader or the lease.
+	o.startQuarantineReader()
 	go func() {
 		select {
 		case <-lease.Context().Done():
@@ -443,9 +445,16 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 		return err
 	}
 	defer o.leave()
+	quarantinePending, err := o.persistQuarantineFacts(ctx)
+	if err != nil {
+		return err
+	}
 	if o.cleanup != nil {
 		if err := o.finishCleanup(ctx); err != nil {
 			return err
+		}
+		if quarantinePending {
+			return ErrPlaybackCleanupUnknown
 		}
 		if o.multiCleanup {
 			stored, err := o.store.LoadSIPInviteSteps(ctx, o.id)
