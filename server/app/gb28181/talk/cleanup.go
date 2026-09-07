@@ -120,6 +120,9 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	if len(message) > 500 {
 		message = message[:500]
 	}
+	if firstErr != nil {
+		return firstErr
+	}
 	finishCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, finishErr := s.repo.FinishAndReleaseLease(finishCtx, sessionID, terminal, message, s.now().UTC()); finishErr != nil {
