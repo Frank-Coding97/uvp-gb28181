@@ -15,8 +15,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/standalone/readiness"
 )
 
-// Locked T04 custom build, not interchangeable with upstream ZLMediaKit.
-const mediaCommit = "318726bd94f168d988fb2127042e74b4be207fd7"
+// Locked custom build with stdin control and MP4 finalization tracking.
+const mediaCommit = "86059fe79984cd50b00d98ec6813cdc1558213dd"
 
 var requiredMediaAPIs = []string{
 	"/index/api/getApiList", "/index/api/getServerConfig", "/index/api/openRtpServer",

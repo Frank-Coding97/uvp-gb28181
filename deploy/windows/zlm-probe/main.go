@@ -18,9 +18,15 @@ func main() {
 	flag.StringVar(&opts.fixture, "fixture", "", "small H264 MP4 fixture used by the media and recording checks")
 	flag.StringVar(&opts.expectedCommit, "expected-commit", "", "locked ZLMediaKit commit; /index/api/version must report its prefix")
 	flag.BoolVar(&opts.keepTemp, "keep-temp", false, "keep the isolated workspace and process logs after the probe")
+	flag.BoolVar(&opts.shutdownProbe, "shutdown-probe", false, "exercise stdin shutdown with delayed and failing MP4 Hooks")
 	flag.Parse()
 
-	report := runProbe(opts)
+	var report probeReport
+	if opts.shutdownProbe {
+		report = runShutdownProbe(opts)
+	} else {
+		report = runProbe(opts)
+	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {

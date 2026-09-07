@@ -197,6 +197,9 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitForAPI(server, client, secret, serverStartupTimeout); err != nil {
 		return failedCheck(scenario.name, "MediaServer.exe did not expose a ready authenticated HTTP API"), stage, stats
 	}
+	if check := checkAPIs(client, secret, opts.expectedCommit); check.Status != "passed" {
+		return failedCheck(scenario.name, "authenticated API inventory or locked commit verification failed"), stage, stats
+	}
 
 	vhost, app, stream := "__defaultVhost__", "live", randomToken("shutdown-")
 	loaded, err := client.call(context.Background(), "/index/api/loadMP4File", url.Values{
