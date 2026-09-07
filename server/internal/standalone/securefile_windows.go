@@ -21,6 +21,9 @@ const (
 	secureTempPrefix = ".uvp-secure-"
 	secureLockName   = ".uvp-config.lock"
 	secureLockWait   = 5 * time.Second
+	// FILE_ALL_ACCESS for a file object: STANDARD_RIGHTS_REQUIRED,
+	// SYNCHRONIZE, and the file-specific 0x1ff rights.
+	windowsFileAllAccessMask windows.ACCESS_MASK = 0x001F01FF
 )
 
 var (
@@ -418,7 +421,11 @@ func protectedFileSecurityAttributes(userSID *windows.SID) (*windows.SECURITY_DE
 	if userSID == nil || !userSID.IsValid() {
 		return nil, nil, errors.New("invalid effective Windows user SID")
 	}
-	sddl := fmt.Sprintf("D:P(A;;GA;;;%s)(A;;GA;;;SY)", userSID.String())
+	// Use the file-specific full-access mask. Windows otherwise expands a
+	// generic inherited ACE into direct FILE_ALL_ACCESS plus an inherit-only
+	// ACE, which would make a directory's policy less precise than the two
+	// principals we explicitly requested.
+	sddl := fmt.Sprintf("D:P(A;;FA;;;%s)(A;;FA;;;SY)", userSID.String())
 	descriptor, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return nil, nil, errors.New("build protected file security descriptor")
@@ -438,13 +445,14 @@ func setProtectedACL(path string, userSID *windows.SID, directory bool) error {
 	if err != nil {
 		return errors.New("build SYSTEM SID")
 	}
+	// Every object is created with its own protected descriptor. Keeping the
+	// directory ACL direct avoids Windows splitting inherited generic ACEs into
+	// extra inherit-only entries; callers protect newly-created directories
+	// explicitly before using them.
 	inheritance := uint32(windows.NO_INHERITANCE)
-	if directory {
-		inheritance = windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
-	}
 	entries := []windows.EXPLICIT_ACCESS{
 		{
-			AccessPermissions: windows.ACCESS_MASK(windows.GENERIC_ALL),
+			AccessPermissions: windowsFileAllAccessMask,
 			AccessMode:        windows.SET_ACCESS,
 			Inheritance:       inheritance,
 			Trustee: windows.TRUSTEE{
@@ -454,7 +462,7 @@ func setProtectedACL(path string, userSID *windows.SID, directory bool) error {
 			},
 		},
 		{
-			AccessPermissions: windows.ACCESS_MASK(windows.GENERIC_ALL),
+			AccessPermissions: windowsFileAllAccessMask,
 			AccessMode:        windows.SET_ACCESS,
 			Inheritance:       inheritance,
 			Trustee: windows.TRUSTEE{
@@ -524,15 +532,12 @@ func validateProtectedACL(descriptor *windows.SECURITY_DESCRIPTOR, userSID *wind
 	}
 	expected := map[string]bool{userSID.String(): false, systemSID.String(): false}
 	var expectedFlags uint8
-	if directory {
-		expectedFlags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
-	}
 	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, index, &ace); err != nil || ace == nil {
 			return errSecureACL
 		}
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != expectedFlags || ace.Mask != windows.ACCESS_MASK(windows.GENERIC_ALL) {
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != expectedFlags || ace.Mask != windowsFileAllAccessMask {
 			return errSecureACL
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
