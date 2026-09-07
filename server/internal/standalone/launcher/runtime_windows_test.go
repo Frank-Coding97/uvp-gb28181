@@ -27,6 +27,9 @@ func TestWindowsUnresponsiveRedisUsesBoundedOwnedCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if release.Version != "t16-stop" {
+		t.Fatal("fault test requires the isolated t16-stop release")
+	}
 	paths, err := standalone.ResolvePaths(standalone.PathOptions{InstallDir: root, ConfigDir: filepath.Join(root, "config"), DataDir: filepath.Join(root, "data"), ResourceDir: release.ResourceDir, WebDir: release.WebDir})
 	if err != nil {
 		t.Fatal(err)
@@ -89,4 +92,41 @@ func TestWindowsUnresponsiveRedisUsesBoundedOwnedCleanup(t *testing.T) {
 		t.Fatal("startup cancellation replaced shutdown result")
 	}
 	t.Logf("unresponsive Redis cleanup returned in %s; marker retained and all ports released", elapsed)
+
+	recoveryCtx, cancelRecovery := context.WithCancel(context.Background())
+	defer cancelRecovery()
+	recovered := make(chan Status, 1)
+	go func() {
+		done <- Launch(recoveryCtx, root, "", func(status Status) {
+			if status.State == Ready {
+				recovered <- status
+			}
+		})
+	}()
+	select {
+	case status := <-recovered:
+		if !status.PreviousUnclean {
+			cancelRecovery()
+			<-done
+			t.Fatal("recovery did not report the failed previous stop")
+		}
+	case err := <-done:
+		t.Fatalf("restart after failed stop: %v", err)
+	case <-time.After(45 * time.Second):
+		cancelRecovery()
+		t.Fatal("restart after failed stop timed out")
+	}
+	cancelRecovery()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("normal stop after recovery: %v", err)
+		}
+	case <-time.After(70 * time.Second):
+		t.Fatal("normal stop after recovery exceeded budget")
+	}
+	if _, err := os.Stat(filepath.Join(paths.DataDir, ".uvp-running.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("normal stop after recovery did not clear marker")
+	}
+	t.Log("restart reported the previous failure and normal stop cleared the marker")
 }
