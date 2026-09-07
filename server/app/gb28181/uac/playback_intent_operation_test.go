@@ -161,6 +161,10 @@ func (p *playbackOperationCommitFault) BeginTx(ctx context.Context, opts *sql.Tx
 	return &playbackOperationFaultTx{tx, p}, nil
 }
 
+func (p *playbackOperationCommitFault) GetDBConn() (*sql.DB, error) {
+	return p.ConnPool.(*sql.DB), nil
+}
+
 func (tx *playbackOperationFaultTx) Commit() error {
 	if tx.pool.commits.Add(1) != tx.pool.failAt {
 		return tx.Tx.Commit()
@@ -232,11 +236,22 @@ func TestPlaybackIntentOperationTransferCANCELRetainsLateSuccess(t *testing.T) {
 	require.ErrorIs(t, f.barrier.WaitBefore(waitCtx, 1, 2), context.DeadlineExceeded, "CANCEL 200 alone cannot release the original operation")
 	stop()
 	f.respond(t, 200)
-	require.NoError(t, f.barrier.WaitBefore(ctx, 1, 2), "supervisor persists the late first branch before releasing the original lease")
+	cleanupACK, _ := readCleanupRequest(t, f.peer)
+	require.Equal(t, sip.ACK, cleanupACK.Method)
+	cleanupBYE, cleanupAddress := readCleanupRequest(t, f.peer)
+	require.Equal(t, sip.BYE, cleanupBYE.Method)
+	waitCleanupCtx, stopCleanupWait := context.WithTimeout(ctx, 20*time.Millisecond)
+	require.ErrorIs(t, f.barrier.WaitBefore(waitCleanupCtx, 1, 2), context.DeadlineExceeded, "cleanup owner overlaps the original lease")
+	stopCleanupWait()
+	_, err = f.peer.WriteTo([]byte(sip.NewResponseFromRequest(cleanupBYE, 200, "OK", nil).String()), cleanupAddress)
+	require.NoError(t, err)
+	require.NoError(t, f.barrier.WaitBefore(ctx, 1, 2), "supervisor joins actual cleanup and persists its exact facts")
 	loaded, err = f.store.LoadSIPInviteSteps(ctx, f.id)
 	require.NoError(t, err)
 	require.NotNil(t, loaded.Steps[0].KnownBranch)
-	require.Equal(t, playauth.SIPStepPrepared, loaded.Steps[0].KnownBranch.ACKState, "old epoch must not ACK late success")
+	require.Equal(t, playauth.SIPStepPrepared, loaded.Steps[0].KnownBranch.ACKState, "original business ACK remains forbidden")
+	require.Len(t, loaded.Steps[0].KnownBranch.CleanupAttempts, 1)
+	require.Equal(t, playauth.SIPCleanupBYEObserved, loaded.Steps[0].KnownBranch.CleanupAttempts[0].State)
 	require.Equal(t, playauth.IntentDispatched, loaded.Intent.State)
 	f.noACK(t)
 	f.u.playbackIntentMu.Lock()

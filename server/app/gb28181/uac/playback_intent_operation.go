@@ -19,6 +19,10 @@ type playbackIntentOperation struct {
 	store                 *playauth.DeviceOperationIntentStore
 	id                    playauth.DeviceOperationIntentIdentity
 	lease                 playauth.DeviceOperationLease
+	barrier               *playauth.DeviceOperationBarrier
+	dua                   *sipgo.DialogUA
+	originalReleased      bool // Protected by work, not merely releaseOnce.
+	cleanup               *playbackIntentCleanup
 	owned                 *sipgo.OwnedClientInvite
 	request               *sip.Request
 	invite                playauth.DeviceSIPInviteIdentity
@@ -44,7 +48,7 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" || input.DeviceID != id.DeviceCode || input.ChannelID != id.TargetCode {
 		return nil, ErrPlaybackUnavailable
 	}
-	o := &playbackIntentOperation{store: store, id: id, input: input, work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
+	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, input: input, work: make(chan struct{}, 1), stopping: make(chan struct{}), stopDone: make(chan struct{}), events: make(chan struct{}, 1)}
 	u.playbackIntentMu.Lock()
 	if len(u.playbackIntents) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil {
 		u.playbackIntentMu.Unlock()
@@ -81,6 +85,7 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 		}
 	}
 	dua := &sipgo.DialogUA{Client: u.client, ContactHDR: *request.Contact()}
+	o.dua = dua
 	o.owned, err = dua.PrepareWriteInviteOwned(lease.Context(), request)
 	if err != nil {
 		removeUnused()
@@ -102,7 +107,7 @@ func (u *UAC) beginPlaybackIntentOperation(ctx context.Context, store *playauth.
 		_ = o.Cancel(cleanupCtx)
 		cancel()
 		cleanupCtx, cancel = context.WithTimeout(context.Background(), playbackTeardownTimeout)
-		_ = o.CloseLocal(cleanupCtx)
+		_ = o.CleanupKnownBranch(cleanupCtx)
 		cancel()
 	}()
 	return o, nil
@@ -412,6 +417,29 @@ func (o *playbackIntentOperation) Cancel(ctx context.Context) error {
 // never restores network permission. A durable handoff still means pending,
 // not closed: the registry retains this session and never advances a watermark.
 func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
+	if err := o.stopOriginal(ctx); err != nil {
+		return err
+	}
+	if err := o.enter(ctx); err != nil {
+		return err
+	}
+	defer o.leave()
+	if o.cleanup != nil {
+		return o.finishCleanup(ctx)
+	}
+	if _, err := o.persistOriginalFacts(ctx); err != nil {
+		return err
+	}
+	o.releaseOriginal()
+	return nil
+}
+
+func (o *playbackIntentOperation) releaseOriginal() {
+	o.releaseOnce.Do(o.lease.Release)
+	o.originalReleased = true
+}
+
+func (o *playbackIntentOperation) stopOriginal(ctx context.Context) error {
 	if ctx == nil {
 		return ErrPlaybackUnavailable
 	}
@@ -425,16 +453,17 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if err := o.enter(ctx); err != nil {
-		return err
-	}
-	defer o.leave()
+	return nil
+}
+
+// Caller owns work and has already joined the original concrete transactions.
+func (o *playbackIntentOperation) persistOriginalFacts(ctx context.Context) (playauth.DeviceSIPInviteSteps, error) {
 	if o.readerCancel != nil {
 		o.readerCancel()
 		select {
 		case <-o.readerDone:
 		case <-ctx.Done():
-			return ctx.Err()
+			return playauth.DeviceSIPInviteSteps{}, ctx.Err()
 		}
 	}
 	// All callback producers and readers have exited. Do not let cancellation
@@ -453,13 +482,13 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 	first, unsupported := o.first, o.unsupported
 	o.factMu.Unlock()
 	if unsupported {
-		return ErrPlaybackCleanupUnknown
+		return playauth.DeviceSIPInviteSteps{}, ErrPlaybackCleanupUnknown
 	}
 	persistCtx, cancel := context.WithTimeout(ctx, playbackTeardownTimeout)
 	defer cancel()
 	loaded, err := o.store.LoadSIPInviteSteps(persistCtx, o.id)
 	if err != nil {
-		return err
+		return playauth.DeviceSIPInviteSteps{}, err
 	}
 	matched := false
 	for _, step := range loaded.Steps {
@@ -468,14 +497,14 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 		}
 	}
 	if !matched {
-		return ErrPlaybackCleanupUnknown
+		return playauth.DeviceSIPInviteSteps{}, ErrPlaybackCleanupUnknown
 	}
 	if first != nil {
-		_, err = observeStoredPlaybackBranch(persistCtx, o.store, o.id, loaded.Intent.RowVersion, o.invite, o.request, first)
+		loaded, err = observeStoredPlaybackBranch(persistCtx, o.store, o.id, loaded.Intent.RowVersion, o.invite, o.request, first)
 		if err != nil {
-			return errors.Join(ErrPlaybackCleanupUnknown, err)
+			return playauth.DeviceSIPInviteSteps{}, errors.Join(ErrPlaybackCleanupUnknown, err)
 		}
 	}
-	o.releaseOnce.Do(o.lease.Release)
-	return nil
+	o.version = loaded.Intent.RowVersion
+	return loaded, nil
 }
