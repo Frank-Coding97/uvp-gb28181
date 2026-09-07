@@ -174,7 +174,8 @@ func parentRebuildMigrationSpec() migrationSpec {
 	script := `CREATE TABLE parent_new(id INTEGER PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO parent_new SELECT id, value FROM parent;
 DROP TABLE parent;
-ALTER TABLE parent_new RENAME TO parent;`
+ALTER TABLE parent_new RENAME TO parent;
+CREATE INDEX idx_parent_value ON parent(value);`
 	return testMigrationSpec("2026-09-07-parent-rebuild-kill", script)
 }
 
@@ -445,6 +446,8 @@ func TestMigrateRecoversAfterKilledParentRebuild(t *testing.T) {
 	require.EqualValues(t, 1, migrationMarkerCount(t, db))
 	spec := parentRebuildMigrationSpec()
 	require.NoError(t, migrateWithSpecs(context.Background(), db, []migrationSpec{spec}))
+	require.True(t, db.Migrator().HasIndex("parent", "idx_parent_value"))
+	require.EqualValues(t, 2, migrationMarkerCount(t, db))
 	require.NoError(t, db.Exec("DELETE FROM parent WHERE id=1").Error)
 	require.NoError(t, db.Raw("SELECT count(*) FROM child").Scan(&childCount).Error)
 	require.Zero(t, childCount)
