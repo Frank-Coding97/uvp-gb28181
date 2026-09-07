@@ -376,8 +376,8 @@ func newCache() app.CacheInterf {
 
 		return redisHelper
 	}
-	if standalonePaths.Explicit {
-		panic("standalone requires Redis cache; memory cache is not supported")
+	if standalonePaths.Explicit || strings.EqualFold(strings.TrimSpace(app.ConfigYml.GetString("gormv2.usedbtype")), "sqlite") {
+		panic("SQLite or standalone mode requires Redis cache; memory cache is not supported")
 	}
 	return cachehelper.NewMemoryHelper()
 }

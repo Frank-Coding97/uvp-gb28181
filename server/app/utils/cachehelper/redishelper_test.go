@@ -2,6 +2,8 @@ package cachehelper
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -31,11 +33,21 @@ type isolatedRedis struct {
 func startIsolatedRedis(t *testing.T, maxMemory string) *isolatedRedis {
 	t.Helper()
 	dir := t.TempDir()
-	password := fmt.Sprintf("t13-%d", time.Now().UnixNano())
+	password := randomRedisPassword(t)
 	return startIsolatedRedisAt(t, dir, password, maxMemory)
 }
 
 func startIsolatedRedisAt(t *testing.T, dir, password, maxMemory string) *isolatedRedis {
+	return startIsolatedRedisAtWithOptions(t, dir, password, maxMemory, false)
+}
+
+func startIsolatedRedisPersistenceFailure(t *testing.T) *isolatedRedis {
+	t.Helper()
+	dir := t.TempDir()
+	return startIsolatedRedisAtWithOptions(t, dir, randomRedisPassword(t), "", true)
+}
+
+func startIsolatedRedisAtWithOptions(t *testing.T, dir, password, maxMemory string, persistenceFailure bool) *isolatedRedis {
 	t.Helper()
 	binary := os.Getenv("UVP_T13_REDIS_SERVER")
 	if binary == "" {
@@ -51,16 +63,23 @@ func startIsolatedRedisAt(t *testing.T, dir, password, maxMemory string) *isolat
 
 	port := reserveRedisPort(t)
 	configPath := filepath.Join(dir, "redis.conf")
-	logPath := filepath.Join(dir, "redis.log")
 	maxMemoryLine := ""
 	if maxMemory != "" {
 		maxMemoryLine = "maxmemory " + maxMemory + "\n"
 	}
-	config := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir %s\ndbfilename %s\nappendonly yes\nappendfilename %s\nappendfsync always\nsave \"\"\nrequirepass %s\n%smaxmemory-policy noeviction\nlogfile %s\n",
-		port, strconv.Quote(dir), strconv.Quote("dump.rdb"), strconv.Quote("appendonly.aof"), strconv.Quote(password), maxMemoryLine, strconv.Quote(logPath))
+	dbFilename := "dump.rdb"
+	saveConfig := "save \"\""
+	if persistenceFailure {
+		dbFilename = "rdb-failure"
+		saveConfig = "save 1 1"
+		require.NoError(t, os.Mkdir(filepath.Join(dir, dbFilename), 0o700))
+	}
+	config := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir .\ndbfilename %s\nappendonly yes\nappendfilename appendonly.aof\nappendfsync always\n%s\nstop-writes-on-bgsave-error yes\nrequirepass %s\n%smaxmemory-policy noeviction\nlogfile redis.log\n",
+		port, dbFilename, saveConfig, password, maxMemoryLine)
 	require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
 
-	cmd := exec.Command(binary, configPath)
+	cmd := exec.Command(binary, filepath.Base(configPath))
+	cmd.Dir = dir
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	require.NoError(t, cmd.Start())
@@ -80,7 +99,7 @@ func startIsolatedRedisAt(t *testing.T, dir, password, maxMemory string) *isolat
 		cancel()
 		if err == nil {
 			server := &isolatedRedis{cmd: cmd, raw: raw, addr: addr, password: password, dir: dir}
-			t.Cleanup(server.stop)
+			t.Cleanup(func() { _ = server.stopGracefully() })
 			return server
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -102,25 +121,51 @@ func reserveRedisPort(t *testing.T) int {
 }
 
 func (s *isolatedRedis) stop() {
+	_ = s.stopGracefully()
+}
+
+func (s *isolatedRedis) stopGracefully() error {
 	if s == nil || s.cmd == nil {
-		return
+		return nil
 	}
 	if s.raw != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.raw.ShutdownNoSave(ctx).Err()
+		cancel()
 		_ = s.raw.Close()
 	}
-	_ = s.cmd.Process.Signal(os.Interrupt)
+	command := s.cmd
 	done := make(chan struct{})
+	var waitErr error
 	go func() {
-		_ = s.cmd.Wait()
+		waitErr = command.Wait()
 		close(done)
 	}()
 	select {
 	case <-done:
+		s.cmd = nil
+		return waitErr
 	case <-time.After(3 * time.Second):
-		_ = s.cmd.Process.Kill()
-		<-done
+		killErr := command.Process.Kill()
+		select {
+		case <-done:
+			s.cmd = nil
+			if killErr != nil {
+				return fmt.Errorf("graceful Redis shutdown timed out and kill failed: %w", killErr)
+			}
+			return errors.New("graceful Redis shutdown timed out; process was killed")
+		case <-time.After(3 * time.Second):
+			return errors.New("timed out waiting for Redis process to exit")
+		}
 	}
-	s.cmd = nil
+}
+
+func randomRedisPassword(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	require.NoError(t, err)
+	return "t13-" + hex.EncodeToString(b)
 }
 
 func openRedisCache(t *testing.T, server *isolatedRedis) app.CacheInterf {
@@ -195,7 +240,7 @@ func TestNewRedisHelperRejectsWrongPasswordAndUnavailablePromptly(t *testing.T) 
 	require.Nil(t, cache)
 	require.Less(t, time.Since(started), 2*time.Second)
 
-	server.stop()
+	require.NoError(t, server.stopGracefully())
 	started = time.Now()
 	cache, err = NewRedisHelper(server.addr, server.password, 0)
 	require.Error(t, err)
@@ -212,9 +257,37 @@ func TestRedisHelperNoEvictionWriteErrorIsReturned(t *testing.T) {
 	require.Contains(t, strings.ToUpper(err.Error()), "OOM")
 }
 
+func TestRedisHelperPersistenceWriteErrorIsReturned(t *testing.T) {
+	server := startIsolatedRedisPersistenceFailure(t)
+	cache := openRedisCache(t, server)
+	ctx := context.Background()
+	require.NoError(t, cache.Set(ctx, "t13:persist-before-failure", "sip-secret-payload", time.Minute))
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		info, err := server.raw.Info(ctx, "persistence").Result()
+		require.NoError(t, err)
+		if strings.Contains(info, "rdb_last_bgsave_status:err") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Redis did not report a failed BGSAVE: %s", info)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	err := cache.Set(ctx, "t13:persist-write-failure", "sip-secret-payload", time.Minute)
+	require.Error(t, err)
+	require.Contains(t, strings.ToUpper(err.Error()), "MISCONF")
+	value, err := cache.GetDel(ctx, "t13:persist-before-failure")
+	require.Empty(t, value)
+	require.Error(t, err)
+	require.Contains(t, strings.ToUpper(err.Error()), "MISCONF")
+}
+
 func TestRedisHelperRestartDoesNotExtendLockTTL(t *testing.T) {
 	dir := t.TempDir()
-	password := fmt.Sprintf("t13-%d", time.Now().UnixNano())
+	password := randomRedisPassword(t)
 	first := startIsolatedRedisAt(t, dir, password, "")
 	cache := openRedisCache(t, first)
 	require.NoError(t, cache.Set(context.Background(), "account_locked:t13", "1", 5*time.Second))
@@ -222,7 +295,7 @@ func TestRedisHelperRestartDoesNotExtendLockTTL(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, initial, int64(0))
 	time.Sleep(1500 * time.Millisecond)
-	first.stop()
+	require.NoError(t, first.stopGracefully())
 
 	second := startIsolatedRedisAt(t, dir, password, "")
 	defer second.stop()
@@ -230,5 +303,5 @@ func TestRedisHelperRestartDoesNotExtendLockTTL(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, after, int64(0))
 	require.Less(t, after, initial-500*time.Millisecond)
-	require.Greater(t, after, int64(1000))
+	require.Greater(t, after, time.Second)
 }

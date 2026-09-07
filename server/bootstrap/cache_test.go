@@ -13,6 +13,7 @@ import (
 
 type cacheInitTestConfig struct {
 	cacheType string
+	dbType    string
 	redisHost string
 	redisPort string
 }
@@ -27,6 +28,8 @@ func (c cacheInitTestConfig) GetString(key string) string {
 		return c.redisHost
 	case "redis.port":
 		return c.redisPort
+	case "gormv2.usedbtype":
+		return c.dbType
 	default:
 		return ""
 	}
@@ -64,6 +67,18 @@ func TestNewCacheStandaloneRejectsMemoryFallback(t *testing.T) {
 	})
 	app.ConfigYml = cacheInitTestConfig{cacheType: "memory"}
 	standalonePaths = standalone.Paths{Explicit: true}
+
+	require.Panics(t, func() { _ = newCache() })
+}
+
+func TestNewCacheSQLiteRejectsMemoryFallback(t *testing.T) {
+	previousConfig, previousPaths := app.ConfigYml, standalonePaths
+	t.Cleanup(func() {
+		app.ConfigYml = previousConfig
+		standalonePaths = previousPaths
+	})
+	app.ConfigYml = cacheInitTestConfig{cacheType: "memory", dbType: "sqlite"}
+	standalonePaths = standalone.Paths{}
 
 	require.Panics(t, func() { _ = newCache() })
 }

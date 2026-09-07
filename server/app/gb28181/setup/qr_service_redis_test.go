@@ -60,11 +60,12 @@ func startQRRedis(t *testing.T) *qrRedisProcess {
 	require.NoError(t, err)
 	password := "t13-" + hex.EncodeToString(passwordBytes)
 	configPath := filepath.Join(dir, "redis.conf")
-	config := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir %s\ndbfilename %s\nappendonly yes\nappendfsync always\nsave \"\"\nrequirepass %s\nmaxmemory-policy noeviction\nlogfile %s\n",
-		port, strconv.Quote(dir), strconv.Quote("dump.rdb"), strconv.Quote(password), strconv.Quote(filepath.Join(dir, "redis.log")))
+	config := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir .\ndbfilename dump.rdb\nappendonly yes\nappendfilename appendonly.aof\nappendfsync always\nsave \"\"\nstop-writes-on-bgsave-error yes\nrequirepass %s\nmaxmemory-policy noeviction\nlogfile redis.log\n",
+		port, password)
 	require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
 
-	cmd := exec.Command(binary, configPath)
+	cmd := exec.Command(binary, filepath.Base(configPath))
+	cmd.Dir = dir
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	require.NoError(t, cmd.Start())
@@ -78,7 +79,7 @@ func startQRRedis(t *testing.T) *qrRedisProcess {
 		cancel()
 		if err == nil {
 			server := &qrRedisProcess{cmd: cmd, raw: raw, addr: addr, password: password, dir: dir}
-			t.Cleanup(server.stop)
+			t.Cleanup(func() { _ = server.stopGracefully() })
 			return server
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -91,25 +92,43 @@ func startQRRedis(t *testing.T) *qrRedisProcess {
 }
 
 func (s *qrRedisProcess) stop() {
+	_ = s.stopGracefully()
+}
+
+func (s *qrRedisProcess) stopGracefully() error {
 	if s == nil || s.cmd == nil {
-		return
+		return nil
 	}
 	if s.raw != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.raw.ShutdownNoSave(ctx).Err()
+		cancel()
 		_ = s.raw.Close()
 	}
-	_ = s.cmd.Process.Signal(os.Interrupt)
+	command := s.cmd
 	done := make(chan struct{})
+	var waitErr error
 	go func() {
-		_ = s.cmd.Wait()
+		waitErr = command.Wait()
 		close(done)
 	}()
 	select {
 	case <-done:
+		s.cmd = nil
+		return waitErr
 	case <-time.After(3 * time.Second):
-		_ = s.cmd.Process.Kill()
-		<-done
+		killErr := command.Process.Kill()
+		select {
+		case <-done:
+			s.cmd = nil
+			if killErr != nil {
+				return fmt.Errorf("graceful Redis shutdown timed out and kill failed: %w", killErr)
+			}
+			return errors.New("graceful Redis shutdown timed out; process was killed")
+		case <-time.After(3 * time.Second):
+			return errors.New("timed out waiting for Redis process to exit")
+		}
 	}
-	s.cmd = nil
 }
 
 func newQRRedisService(t *testing.T, server *qrRedisProcess) (*QRService, *gorm.DB, app.CacheInterf) {
@@ -218,7 +237,7 @@ func TestQRServiceRealRedisFailureDoesNotReturnSIPCredentials(t *testing.T) {
 	svc, _, _ := newQRRedisService(t, server)
 	token, _, err := svc.GenerateToken(context.Background())
 	require.NoError(t, err)
-	server.stop()
+	require.NoError(t, server.stopGracefully())
 
 	payload, err := svc.Exchange(context.Background(), token)
 	require.Nil(t, payload)
