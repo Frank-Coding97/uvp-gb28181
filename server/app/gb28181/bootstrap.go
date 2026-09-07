@@ -618,6 +618,10 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 	if err != nil {
 		return err
 	}
+	deviceDB := app.DB()
+	if deviceDB == nil || srv.UAC() == nil {
+		return fmt.Errorf("装配持久回放恢复缺少数据库或 UAC: %w", uac.ErrPlaybackUnavailable)
+	}
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	var newFirmwareUpgradeService *upgrade.Service
@@ -732,8 +736,19 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 		cfg.ZLM.Secret,
 	)
 	var playAuthorization *playauth.AuthorizationService
-	deviceSecurity := playauth.NewDeviceSecurityStore(app.DB())
+	deviceSecurity := playauth.NewDeviceSecurityStore(deviceDB)
 	deviceOperations := playauth.NewDeviceOperationBarrier(deviceSecurity)
+	// The same UAC owns this worker through ShutdownPlaybackIntents. Do not
+	// create a second runner/stop owner or cancel it when assembly returns.
+	if _, err := srv.UAC().StartPlaybackRecovery(context.Background(),
+		playauth.NewDeviceCleanupStore(deviceDB), playauth.NewDeviceOperationIntentStore(deviceDB), deviceOperations,
+		func(_ uac.PlaybackRecoveryTick, err error) {
+			if err != nil {
+				app.ZapLog.Error("持久回放恢复尚未完成", zap.Error(err))
+			}
+		}); err != nil {
+		return fmt.Errorf("装配持久回放恢复失败: %w", err)
+	}
 	gbroutes.SetDeviceTransferBarrier(deviceOperations)
 	playAuthMetrics = nil
 	if signerErr != nil {
@@ -893,6 +908,9 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) error {
+	// Revoke transfer admission before stopping the barrier's runtime. A new
+	// facade is published only after its recovery worker has been registered.
+	gbroutes.SetDeviceTransferBarrier(nil)
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	clearZLMManagementController()
