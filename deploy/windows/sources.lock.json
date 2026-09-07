@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "purpose": "P0 source candidate only; Windows runtime and toolchain not yet qualified",
+  "components": {
+    "uvp": {
+      "revision": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
+      "submodules": {}
+    },
+    "zlm": {
+      "revision": "b422fb016da1c3989b725dde3bd0292613b12060",
+      "submodules": {
+        "3rdpart/ZLToolKit": "d7d601200f65f3111dbf9d20ed7f14d2654bbd6e",
+        "3rdpart/jsoncpp": "ca98c98457b1163cca1f7d8db62827c115fec6d1",
+        "3rdpart/media-server": "21c4451ff2e4c4bb1c817e606c8b4e5deac1e719",
+        "3rdpart/pybind11": "ed5057ded698e305210269dafa57574ecf964483",
+        "www/webassist": "6689195ac89462d40accd88f13dfde58902da57b"
+      }
+    },
+    "redis": {
+      "revision": "335554f18caf7bbf6b0ac2b3548133d750f00a1b",
+      "tag": "7.2.16",
+      "source": "https://github.com/redis/redis",
+      "submodules": {}
+    }
+  }
+}
