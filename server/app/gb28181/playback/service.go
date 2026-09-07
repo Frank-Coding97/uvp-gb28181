@@ -337,11 +337,18 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (out Create
 		if err := owner.begin(ctx); err != nil {
 			return CreateResult{}, s.fail(ctx, session.ID, "intent", "unavailable", err, owner)
 		}
+		// This watcher is a child of the already-admitted Create. Register it
+		// before Create can finish, even if Close has since sealed admission;
+		// the shared producer signal cannot become idle between the two.
+		s.producerMu.Lock()
+		s.addProducerLocked()
+		s.producerMu.Unlock()
 		go func() {
+			defer s.finishProducer()
 			<-owner.ctx.Done()
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, _ = s.registry.StopOnce(cleanupCtx, session.ID, "operation cancelled")
+			_ = s.Stop(cleanupCtx, session.ID, "operation cancelled")
 		}()
 	}
 	streamID, ssrc := randomPlaybackValue("pb-"), randomPlaybackSSRC()
