@@ -303,6 +303,64 @@ func (instance *redisInstance) startupError() error {
 	return fmt.Errorf("Redis exited before readiness: %v; output: %s", instance.exitErr, message)
 }
 
+type processExitEvidence struct {
+	Exited   bool
+	ExitCode int
+	Log      string
+}
+
+func (instance *redisInstance) waitForExit(timeout time.Duration) bool {
+	instance.stateMu.Lock()
+	done := instance.done
+	instance.stateMu.Unlock()
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func (instance *redisInstance) processExitEvidence() processExitEvidence {
+	instance.stateMu.Lock()
+	defer instance.stateMu.Unlock()
+	evidence := processExitEvidence{ExitCode: -1}
+	if instance.done == nil {
+		return evidence
+	}
+	select {
+	case <-instance.done:
+		evidence.Exited = true
+	default:
+		return evidence
+	}
+	if exitError, ok := instance.exitErr.(*exec.ExitError); ok {
+		evidence.ExitCode = exitError.ExitCode()
+	} else if instance.exitErr == nil {
+		evidence.ExitCode = 0
+	}
+	log := instance.output.String()
+	log = strings.ReplaceAll(log, instance.password, "[REDACTED_SECRET]")
+	log = strings.ReplaceAll(log, instance.workspace, "<probe-workspace>")
+	log = strings.TrimSpace(log)
+	if len(log) > 8192 {
+		log = log[len(log)-8192:]
+	}
+	evidence.Log = log
+	return evidence
+}
+
+func (evidence processExitEvidence) json() map[string]any {
+	return map[string]any{
+		"exited":    evidence.Exited,
+		"exit_code": evidence.ExitCode,
+		"log":       evidence.Log,
+	}
+}
+
 func (instance *redisInstance) stop(force bool) error {
 	instance.stateMu.Lock()
 	command := instance.cmd

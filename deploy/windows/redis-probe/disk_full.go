@@ -74,6 +74,11 @@ type diskFillResult struct {
 	Files          int
 }
 
+type diskFullConfirmedWrite struct {
+	Key   string
+	Value string
+}
+
 func runDiskFullCheck(binary, root string) (result map[string]any) {
 	result = map[string]any{
 		"status": "not_executed",
@@ -152,10 +157,16 @@ func runDiskFullCheck(binary, root string) (result map[string]any) {
 	if err != nil {
 		return diskFullFailure(result, "create disk-full key suffix: "+err.Error())
 	}
-	confirmedKey := "__uvp_disk_full_confirmed_" + token
-	confirmedValue := "confirmed-before-disk-full"
-	if _, err := client.do(context.Background(), "SET", confirmedKey, confirmedValue); err != nil {
-		return diskFullFailure(result, "confirmed SET before fill: "+err.Error())
+	confirmedWrites := []diskFullConfirmedWrite{
+		{Key: fmt.Sprintf("__uvp_disk_full_confirmed_%s_0", token), Value: "confirmed-before-disk-full-0"},
+		{Key: fmt.Sprintf("__uvp_disk_full_confirmed_%s_1", token), Value: "confirmed-before-disk-full-1"},
+		{Key: fmt.Sprintf("__uvp_disk_full_confirmed_%s_2", token), Value: "confirmed-before-disk-full-2"},
+	}
+	result["confirmed_writes"] = len(confirmedWrites)
+	for _, expected := range confirmedWrites {
+		if _, err := client.do(context.Background(), "SET", expected.Key, expected.Value); err != nil {
+			return diskFullFailure(result, "confirmed SET before fill: "+err.Error())
+		}
 	}
 
 	fillerDir, err := os.MkdirTemp(caseDir, "filler with spaces 中文-")
@@ -188,58 +199,79 @@ func runDiskFullCheck(binary, root string) (result map[string]any) {
 		return diskFullFailure(result, "volume did not report ENOSPC before 128 MiB fill cap")
 	}
 
-	writeResult, writeErr := writeAOFUntilRejected(client, token)
+	writeResult, writeErr := writeAOFUntilRejected(client, instance, token)
 	result["aof_write_under_full"] = writeResult
 	removeFillErr := os.RemoveAll(fillerDir)
 	result["filler_released"] = removeFillErr == nil
 	if removeFillErr != nil {
 		result["filler_release_error"] = removeFillErr.Error()
 	}
+
+	// The full-volume write may intentionally terminate Redis. Release the
+	// filler first, then always attempt a fresh process and recovery checks so
+	// an expected AOF failure cannot skip durability validation.
+	recovery := map[string]any{
+		"status":           "failed",
+		"confirmed_writes": len(confirmedWrites),
+	}
+	recoveryFailures := make([]string, 0)
+	if closeErr := client.close(); closeErr != nil {
+		result["client_close_error"] = closeErr.Error()
+		recoveryFailures = append(recoveryFailures, "close full-volume Redis connection: "+closeErr.Error())
+	}
+	client = nil
+	restartCtx, restartCancel := context.WithTimeout(context.Background(), startupTimeout)
+	restartedClient, restartErr := instance.restart(restartCtx)
+	restartCancel()
+	if restartErr != nil {
+		recoveryFailures = append(recoveryFailures, "restart after releasing fill files: "+restartErr.Error())
+	} else {
+		client = restartedClient
+		for _, expected := range confirmedWrites {
+			readCtx, readCancel := context.WithTimeout(context.Background(), probeTimeout)
+			recovered, readErr := client.do(readCtx, "GET", expected.Key)
+			readCancel()
+			got, valueErr := recovered.stringValue()
+			if readErr != nil || valueErr != nil || got != expected.Value {
+				recoveryFailures = append(recoveryFailures, fmt.Sprintf("confirmed key %q value=%q want=%q command_err=%v value_err=%v", expected.Key, got, expected.Value, readErr, valueErr))
+			}
+		}
+		recoveryKey := "__uvp_disk_full_recovered_" + token
+		if _, err := client.do(context.Background(), "SET", recoveryKey, "recovered"); err != nil {
+			recoveryFailures = append(recoveryFailures, "recovery SET: "+err.Error())
+		} else {
+			info, infoErr := redisInfo(client, "persistence")
+			if infoErr != nil || info["aof_last_write_status"] != "ok" {
+				recoveryFailures = append(recoveryFailures, fmt.Sprintf("aof_last_write_status=%q info_err=%v", info["aof_last_write_status"], infoErr))
+			} else {
+				recovery["aof_last_write_status"] = info["aof_last_write_status"]
+			}
+		}
+		cleanupKeys := []string{recoveryKey}
+		for _, expected := range confirmedWrites {
+			cleanupKeys = append(cleanupKeys, expected.Key)
+		}
+		if _, err := client.do(context.Background(), append([]string{"DEL"}, cleanupKeys...)...); err != nil {
+			recoveryFailures = append(recoveryFailures, "recovery cleanup: "+err.Error())
+		}
+	}
+	result["recovery"] = recovery
+	if after, afterErr := inspectDiskFullTarget(volume.Root); afterErr != nil {
+		recoveryFailures = append(recoveryFailures, "inspect volume after fill release: "+afterErr.Error())
+	} else {
+		result["free_bytes_after_release"] = after.FreeBytes
+	}
+	if len(recoveryFailures) > 0 {
+		recovery["reason"] = strings.Join(recoveryFailures, "; ")
+		return diskFullFailure(result, recovery["reason"].(string))
+	}
+	recovery["status"] = "passed"
 	if writeErr != nil {
 		return diskFullFailure(result, writeErr.Error())
 	}
 	if removeFillErr != nil {
 		return diskFullFailure(result, "release fill files: "+removeFillErr.Error())
 	}
-
-	client.close()
-	client = nil
-	restartCtx, restartCancel := context.WithTimeout(context.Background(), startupTimeout)
-	client, err = instance.restart(restartCtx)
-	restartCancel()
-	if err != nil {
-		return diskFullFailure(result, "restart after releasing fill files: "+err.Error())
-	}
-	recovery := map[string]any{"status": "failed"}
-	readCtx, readCancel := context.WithTimeout(context.Background(), probeTimeout)
-	recovered, readErr := client.do(readCtx, "GET", confirmedKey)
-	readCancel()
-	got, valueErr := recovered.stringValue()
-	if readErr != nil || valueErr != nil || got != confirmedValue {
-		recovery["reason"] = fmt.Sprintf("confirmed value=%q command_err=%v value_err=%v", got, readErr, valueErr)
-		result["recovery"] = recovery
-		return diskFullFailure(result, "recovery integrity check failed: "+recovery["reason"].(string))
-	}
-	if _, err := client.do(context.Background(), "SET", "__uvp_disk_full_recovered_"+token, "recovered"); err != nil {
-		recovery["reason"] = "recovery SET: " + err.Error()
-		result["recovery"] = recovery
-		return diskFullFailure(result, recovery["reason"].(string))
-	}
-	info, infoErr := redisInfo(client, "persistence")
-	if infoErr != nil || info["aof_last_write_status"] != "ok" {
-		recovery["reason"] = fmt.Sprintf("aof_last_write_status=%q info_err=%v", info["aof_last_write_status"], infoErr)
-		result["recovery"] = recovery
-		return diskFullFailure(result, "recovery AOF integrity check failed: "+recovery["reason"].(string))
-	}
-	recovery["status"] = "passed"
-	recovery["aof_last_write_status"] = info["aof_last_write_status"]
-	result["recovery"] = recovery
-	if after, afterErr := inspectDiskFullTarget(volume.Root); afterErr != nil {
-		return diskFullFailure(result, "inspect volume after fill release: "+afterErr.Error())
-	} else {
-		result["free_bytes_after_release"] = after.FreeBytes
-	}
-	_, _ = client.do(context.Background(), "DEL", confirmedKey)
 	result["status"] = "passed"
 	return result
 }
@@ -309,7 +341,7 @@ func fillDiskUntilFull(ctx context.Context, directory string, capBytes uint64) (
 	}
 }
 
-func writeAOFUntilRejected(client *redisClient, token string) (map[string]any, error) {
+func writeAOFUntilRejected(client *redisClient, instance *redisInstance, token string) (map[string]any, error) {
 	result := map[string]any{"attempts": 0, "status": "failed"}
 	payload := strings.Repeat("a", 64*1024)
 	for attempt := 1; attempt <= 16; attempt++ {
@@ -321,23 +353,51 @@ func writeAOFUntilRejected(client *redisClient, token string) (map[string]any, e
 			info, infoErr := redisInfo(client, "persistence")
 			if infoErr != nil {
 				result["reason"] = "SET replied success but persistence status could not be read: " + infoErr.Error()
+				result["process_exit"] = captureAOFProcessExit(instance).json()
 				return result, errors.New(result["reason"].(string))
 			}
 			if info["aof_last_write_status"] == "err" {
 				result["reason"] = "SET replied success while aof_last_write_status=err"
+				result["process_exit"] = captureAOFProcessExit(instance).json()
 				return result, errors.New(result["reason"].(string))
 			}
 			continue
 		}
 		result["observed_error"] = err.Error()
-		upper := strings.ToUpper(err.Error())
-		if isNoSpaceError(err) || strings.Contains(upper, "AOF") || strings.Contains(upper, "MISCONF") {
+		evidence := captureAOFProcessExit(instance)
+		result["process_exit"] = evidence.json()
+		if validAOFExitEvidence(evidence) {
 			result["status"] = "passed"
 			return result, nil
 		}
-		result["reason"] = "Redis rejected write without an explicit AOF/disk-full error: " + err.Error()
+		result["reason"] = "Redis write did not produce exit-code-1 plus explicit AOF/ENOSPC log evidence: " + err.Error()
 		return result, errors.New(result["reason"].(string))
 	}
 	result["reason"] = "Redis accepted 16 writes after the marked volume reported ENOSPC"
+	result["process_exit"] = captureAOFProcessExit(instance).json()
 	return result, errors.New(result["reason"].(string))
+}
+
+func captureAOFProcessExit(instance *redisInstance) processExitEvidence {
+	if instance.waitForExit(5 * time.Second) {
+		return instance.processExitEvidence()
+	}
+	return instance.processExitEvidence()
+}
+
+func validAOFExitEvidence(evidence processExitEvidence) bool {
+	if !evidence.Exited || evidence.ExitCode != 1 {
+		return false
+	}
+	log := strings.ToUpper(evidence.Log)
+	hasAOF := strings.Contains(log, "AOF")
+	hasNoSpace := strings.Contains(log, "ENOSPC") ||
+		strings.Contains(log, "NO SPACE") ||
+		strings.Contains(log, "NOT ENOUGH SPACE") ||
+		strings.Contains(log, "DISK FULL") ||
+		strings.Contains(log, "磁盘空间不足") ||
+		strings.Contains(log, "空间不足") ||
+		strings.Contains(log, "没有剩余空间")
+	hasExit := strings.Contains(log, "EXIT")
+	return hasAOF && hasNoSpace && hasExit
 }
