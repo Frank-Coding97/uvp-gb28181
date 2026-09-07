@@ -145,40 +145,55 @@ function Get-FillBytes([string]$Directory) {
 
 function Fill-UntilDiskFull([string]$Directory) {
     $chunkBytes = 1024 * 1024
+    $fallbackChunkBytes = 4096
     $buffer = New-Object byte[] $chunkBytes
     $attempted = [uint64]0
-    $index = 0
+    $attemptSize = $chunkBytes
+    $smallestAttemptBytes = $chunkBytes
     $reachedNoSpace = $false
     $errorCode = 0
-    while ($attempted -lt $maxFillBytes) {
-        $remaining = $maxFillBytes - $attempted
-        $target = [int][Math]::Min([uint64]$chunkBytes, $remaining)
-        $path = Join-Path $Directory ("fill-{0:D4}.bin" -f $index)
-        $stream = $null
-        try {
-            $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $path = Join-Path $Directory 'fill.bin'
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        while ($attempted -lt $maxFillBytes) {
+            $remaining = $maxFillBytes - $attempted
+            $target = [int][Math]::Min([uint64]$attemptSize, $remaining)
             try {
                 $stream.Write($buffer, 0, $target)
                 $stream.Flush($true)
-            } finally {
-                if ($null -ne $stream) {
-                    $stream.Dispose()
-                    $stream = $null
+                $attempted = [uint64]$stream.Length
+            } catch {
+                $attempted = [uint64]$stream.Length
+                try { $stream.Position = $stream.Length } catch { }
+                if (-not (Test-DiskFullException $_.Exception)) {
+                    throw "fill write failed with a non-disk-full error"
                 }
-            }
-            $attempted += [uint64]$target
-            $index++
-        } catch {
-            if (Test-DiskFullException $_.Exception) {
-                $reachedNoSpace = $true
                 $errorCode = Get-Win32Code $_.Exception
+                if ($attemptSize -gt $fallbackChunkBytes) {
+                    $attemptSize = $fallbackChunkBytes
+                    $smallestAttemptBytes = $attemptSize
+                    continue
+                }
+                if ($attemptSize -gt 1) {
+                    $attemptSize = 1
+                    $smallestAttemptBytes = $attemptSize
+                    continue
+                }
+                $reachedNoSpace = $true
                 break
             }
+        }
+    } catch {
+        if (Test-DiskFullException $_.Exception) {
+            $reachedNoSpace = $true
+            $errorCode = Get-Win32Code $_.Exception
+        } else {
             throw "fill write failed with a non-disk-full error"
-        } finally {
-            if ($null -ne $stream) {
-                $stream.Dispose()
-            }
+        }
+    } finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
         }
     }
     $actual = Get-FillBytes $Directory
@@ -192,6 +207,8 @@ function Fill-UntilDiskFull([string]$Directory) {
         cap_bytes = $maxFillBytes
         reached_no_space = $reachedNoSpace
         error_code = $errorCode
+        single_fill_file = $true
+        smallest_attempt_bytes = $smallestAttemptBytes
     }
 }
 
