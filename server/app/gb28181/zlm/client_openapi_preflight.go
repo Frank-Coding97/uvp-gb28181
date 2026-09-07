@@ -13,60 +13,77 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
+// RuntimeConfiguration is a fresh, validated control readback, not a playback
+// qualification. It contains no raw configuration or Hook credentials.
+type RuntimeConfiguration struct {
+	RuntimeIdentity
+	HookBudget time.Duration `json:"-"`
+}
+
 // ProbeConfiguration checks control-plane readback without changing config or
 // starting media. The caller must serialize the whole probe per node and CAS
 // its result against the starting meta_node revision. A successful result is
 // NOT deployment/topology qualification and is NOT proof an older process exited.
 // Requires the matching ZLM build that suppresses config API debug dumps.
-func (c *OpenAPIRuntimeControl) ProbeConfiguration(ctx context.Context, hookBase string) (RuntimeIdentity, error) {
+func (c *OpenAPIRuntimeControl) ProbeConfiguration(ctx context.Context, hookBase string) (RuntimeConfiguration, error) {
 	if c == nil || c.client == nil || c.client.node == nil || ctx == nil || !c.client.node.IsActive() || c.client.node.RecoveryRequired {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
 	base, err := url.Parse(hookBase)
 	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.RawPath != "" || base.Opaque != "" || base.String() != hookBase {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	first, err := c.GetRuntimeIdentity(ctx)
 	if err != nil {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
 	config, err := c.readConfiguration(ctx)
-	if err != nil || config["general.mediaServerId"] != c.client.node.MediaServerUUID || config["hook.enable"] != "1" || config["general.flowThreshold"] != "0" || config["api.apiDebug"] != "0" || !validOpenAPIHookBudget(config) {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+	budget, validBudget := openAPIHookBudget(config)
+	if err != nil || config["general.mediaServerId"] != c.client.node.MediaServerUUID || config["hook.enable"] != "1" || config["general.flowThreshold"] != "0" || config["api.apiDebug"] != "0" || !validBudget {
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
 	for _, event := range playauth.ManagedHookEvents() {
 		expected, err := buildManagedHookURL(base, c.client.secret, c.client.node.MediaServerUUID, event)
 		if err != nil || config["hook."+string(event)] != expected {
-			return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+			return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 		}
 	}
 	sessions, err := c.GetRuntimeSessions(ctx)
 	if err != nil || sessions.BootNonce != first.BootNonce {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
 	last, err := c.GetRuntimeIdentity(ctx)
-	if err != nil || first != last {
-		return RuntimeIdentity{}, ErrRuntimeControlUnavailable
+	if err != nil || first != last || ctx.Err() != nil {
+		return RuntimeConfiguration{}, ErrRuntimeControlUnavailable
 	}
-	return last, nil
+	return RuntimeConfiguration{RuntimeIdentity: last, HookBudget: budget}, nil
 }
 
-func validOpenAPIHookBudget(config map[string]string) bool {
+func openAPIHookBudget(config map[string]string) (time.Duration, bool) {
 	timeout, err := strconv.ParseFloat(config["hook.timeoutSec"], 64)
 	if err != nil || math.IsNaN(timeout) || math.IsInf(timeout, 0) || timeout <= 0 || timeout >= 5 {
-		return false
+		return 0, false
 	}
 	retries, err := strconv.Atoi(config["hook.retry"])
 	if err != nil || retries < 0 || retries > 100 {
-		return false
+		return 0, false
 	}
 	delay, err := strconv.ParseFloat(config["hook.retry_delay"], 64)
 	if err != nil || math.IsNaN(delay) || math.IsInf(delay, 0) || delay < 0 {
-		return false
+		return 0, false
 	}
-	return timeout*float64(retries+1)+delay*float64(retries) < 5
+	seconds := timeout*float64(retries+1) + delay*float64(retries)
+	if seconds >= 5 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return 0, false
+	}
+	// Never shorten the late-Hook window by truncating fractional nanoseconds.
+	budget := time.Duration(math.Ceil(seconds * float64(time.Second)))
+	if budget <= 0 || budget >= 5*time.Second {
+		return 0, false
+	}
+	return budget, true
 }
 
 // Keep the raw configuration local: it contains node secrets and Hook
