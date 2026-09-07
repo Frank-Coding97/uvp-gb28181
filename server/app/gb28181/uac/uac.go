@@ -47,6 +47,8 @@ type UAC struct {
 	playbackRecoveryScans map[int64]bool
 	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
+	playbackRecoveryWorker *playbackRecoveryWorker
+
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
 	outCSeq uint64
