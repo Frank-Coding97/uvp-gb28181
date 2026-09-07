@@ -489,7 +489,7 @@ func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report 
 func Start() {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
-	if sipServer != nil || securityRuntime != nil {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil {
 		app.ZapLog.Warn("GB28181 旧运行时尚未释放,拒绝重复启动")
 		return
 	}
@@ -601,7 +601,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // Caller holds sipLifecycleMu. Register every owned object before any later
 // fallible assembly; rollback must preserve the original instance on failure.
 func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFactory) (err error) {
-	if sipServer != nil || securityRuntime != nil {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil {
 		return errors.New("GB28181 旧运行时尚未释放,拒绝替换")
 	}
 	securityRuntime = setupSecurityRuntime()
@@ -914,7 +914,9 @@ func stopSIPDependencies(ctx context.Context) error {
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	clearZLMManagementController()
-	stopPlaybackRuntime(ctx)
+	if err := stopPlaybackRuntime(ctx); err != nil {
+		return fmt.Errorf("GB28181 回放排空失败,保留运行时等待重试: %w", err)
+	}
 	stopRecordQueryRuntime()
 	stopFirmwareUpgradeRuntime()
 	stopPTZRuntime()
@@ -965,14 +967,18 @@ func stopSIPDependencies(ctx context.Context) error {
 	return nil
 }
 
-func stopPlaybackRuntime(ctx context.Context) {
+func stopPlaybackRuntime(ctx context.Context) error {
+	// Detach request admission first, but keep callbacks and strong references
+	// until the original producer/resource owners have actually stopped.
+	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	if playbackService != nil {
-		_ = playbackService.Close(ctx)
+		if err := playbackService.Close(ctx); err != nil {
+			return err
+		}
 		playbackService = nil
 	}
 	playbackMetrics = nil
 	playbackRegistry = nil
-	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	gbroutes.SetPlaybackMediaSink(nil)
 	if sipServer != nil {
 		sipServer.SetPlaybackEndSink(nil)
@@ -980,6 +986,7 @@ func stopPlaybackRuntime(ctx context.Context) {
 			u.SetPlaybackEndHook(nil)
 		}
 	}
+	return nil
 }
 
 func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {

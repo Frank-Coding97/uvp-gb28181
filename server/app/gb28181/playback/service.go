@@ -97,24 +97,63 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	registry      *Registry
-	picker        NodePicker
-	rtp           RTPOpener
-	inviter       PlaybackInviter
-	media         MediaWaiter
-	config        ServiceConfig
-	sweeperOnce   sync.Once
-	sweeperCancel context.CancelFunc
-	sweeperWG     sync.WaitGroup
-	lifecycle     context.Context
-	lifecycleStop context.CancelFunc
-	mediaReady    func(Session)
+	registry       *Registry
+	picker         NodePicker
+	rtp            RTPOpener
+	inviter        PlaybackInviter
+	media          MediaWaiter
+	config         ServiceConfig
+	producerMu     sync.Mutex
+	closing        bool
+	producers      int
+	producersDone  chan struct{}
+	sweeperStarted bool
+	lifecycle      context.Context
+	lifecycleStop  context.CancelFunc
+	mediaReady     func(Session)
 }
 
 func NewService(registry *Registry, picker NodePicker, rtp RTPOpener, inviter PlaybackInviter, media MediaWaiter, config ServiceConfig) *Service {
 	lifecycle, cancel := context.WithCancel(context.Background())
+	idle := make(chan struct{})
+	close(idle)
 	return &Service{registry: registry, picker: picker, rtp: rtp, inviter: inviter, media: media, config: config,
-		lifecycle: lifecycle, lifecycleStop: cancel}
+		lifecycle: lifecycle, lifecycleStop: cancel, producersDone: idle}
+}
+
+// Admission and the last-producer signal share a lock. A closing service cannot
+// miss a partially initialized Create/Action or a concurrently started sweeper.
+func (s *Service) addProducerLocked() {
+	if s.producers == 0 {
+		s.producersDone = make(chan struct{})
+	}
+	s.producers++
+}
+
+func (s *Service) finishProducer() {
+	s.producerMu.Lock()
+	defer s.producerMu.Unlock()
+	s.producers--
+	if s.producers == 0 {
+		close(s.producersDone)
+	}
+}
+
+func (s *Service) beginOperation(ctx context.Context) (context.Context, func(), error) {
+	s.producerMu.Lock()
+	if s.closing {
+		s.producerMu.Unlock()
+		return nil, nil, ErrRegistryClosed
+	}
+	s.addProducerLocked()
+	s.producerMu.Unlock()
+	operationCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.lifecycle, cancel)
+	return operationCtx, func() {
+		stop()
+		cancel()
+		s.finishProducer()
+	}, nil
 }
 
 // SetMediaReadyObserver reports a successfully established playback stream.
@@ -200,12 +239,11 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if !gbconfig.IsSupportedPlaybackProtocol(request.DefaultProtocol) {
 		request.DefaultProtocol = gbconfig.DefaultPlaybackProtocol
 	}
-	operationCtx, operationCancel := context.WithCancel(ctx)
-	stopLifecycleCancel := context.AfterFunc(s.lifecycle, operationCancel)
-	defer func() {
-		stopLifecycleCancel()
-		operationCancel()
-	}()
+	operationCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	defer finish()
 	ctx = operationCtx
 	created, err := s.registry.Create(ctx, request)
 	if err != nil {
@@ -228,6 +266,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if strings.TrimSpace(node.RecvIP) == "" {
 		return CreateResult{}, s.fail(ctx, session.ID, "node", "invalid", fmt.Errorf("%w: receive IP missing", ErrNodeUnavailable), nil)
 	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "node", "cancelled", err, nil)
+	}
 	tcpMode := request.TCPMode || node.TCPMode
 	allocation, err := s.rtp.Open(ctx, RTPRequest{NodeID: node.ID, StreamID: streamID, SSRC: ssrc, TCPMode: tcpMode})
 	if err != nil {
@@ -240,10 +281,16 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		ssrc = allocation.SSRC
 	}
 	resources := allocationResources{allocation: allocation}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "cancelled", err, resources)
+	}
 	if allocation.Bind != nil {
 		if err := allocation.Bind(); err != nil {
 			return CreateResult{}, s.fail(ctx, session.ID, "rtp", "bind_failed", err, resources)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "cancelled", err, resources)
 	}
 	start, end := session.SegmentStart, session.SegmentEnd
 	playFrom := session.PlayFrom
@@ -305,6 +352,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	}); err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "session_update", err, resources)
 	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "invite", "cancelled", err, resources)
+	}
 	mediaCtx := ctx
 	mediaCancel := func() {}
 	if s.config.MediaWait > 0 {
@@ -314,6 +364,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	mediaCancel()
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "timeout", fmt.Errorf("%w: %w", ErrMediaWait, err), resources)
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "cancelled", err, resources)
 	}
 	if err := s.registry.Update(session.ID, func(value *Session) error {
 		selected := playurl.Select(playurl.FromMap(ready.URLs), request.DefaultProtocol, request.Secure)
@@ -329,6 +382,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	}
 	if s.mediaReady != nil {
 		s.mediaReady(*result)
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "cancelled", err, resources)
 	}
 	return CreateResult{Session: result, Existing: created.Existing}, nil
 }
@@ -371,12 +427,17 @@ func (s *Service) Close(ctx context.Context) error {
 	if s == nil || s.registry == nil {
 		return nil
 	}
+	s.producerMu.Lock()
+	s.closing = true
+	done := s.producersDone
+	s.producerMu.Unlock()
 	if s.lifecycleStop != nil {
 		s.lifecycleStop()
 	}
-	if s.sweeperCancel != nil {
-		s.sweeperCancel()
-		s.sweeperWG.Wait()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	cleaned, err := s.registry.CloseOnce(ctx)
 	if cleaned > 0 && s.config.Metrics != nil {
@@ -389,16 +450,19 @@ func (s *Service) StartSweeper(parent context.Context, interval time.Duration) {
 	if s == nil || s.registry == nil || interval <= 0 {
 		return
 	}
-	s.sweeperOnce.Do(func() {
+	s.producerMu.Lock()
+	defer s.producerMu.Unlock()
+	if !s.closing && !s.sweeperStarted {
+		s.sweeperStarted = true
 		if parent == nil {
 			parent = context.Background()
 		}
 		ctx, cancel := context.WithCancel(s.lifecycle)
 		stopParent := context.AfterFunc(parent, cancel)
-		s.sweeperCancel = cancel
-		s.sweeperWG.Add(1)
+		s.addProducerLocked()
 		go func() {
-			defer s.sweeperWG.Done()
+			defer s.finishProducer()
+			defer cancel()
 			defer stopParent()
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
@@ -414,7 +478,7 @@ func (s *Service) StartSweeper(parent context.Context, interval time.Duration) {
 				}
 			}
 		}()
-	})
+	}
 }
 
 func (s *Service) MetricsSnapshot() MetricsSnapshot {
@@ -488,6 +552,15 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if s == nil || s.registry == nil {
 		return nil, ErrPlaybackNotFound
 	}
+	operationCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	ctx = operationCtx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	session, ok := s.registry.GetForOwner(sessionID, ownerID)
 	if !ok || session.State.IsTerminal() {
 		return nil, ErrPlaybackNotFound
@@ -511,6 +584,9 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	}
 	position, scale, err := actioner.Action(ctx, session.CallID, request.Action, request.PositionSeconds, request.Scale, duration)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s.config.Metrics != nil {
