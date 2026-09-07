@@ -3,12 +3,12 @@ package main
 import "testing"
 
 func TestRuntimeRequiresWindows10NativeX64(t *testing.T) {
-	good := inventory{Caption: "Microsoft Windows 10 Pro", Build: 19045, ProductType: 1, Architecture: 9}
+	good := inventory{Caption: "Microsoft Windows 10 Pro", Build: 19041, ProductType: 1, Architecture: 9}
 	if err := validate("runtime", good); err != nil {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*inventory){
-		func(i *inventory) { i.Build = 19044 },
+		func(i *inventory) { i.Build = 19040 },
 		func(i *inventory) { i.ProductType = 3 },
 		func(i *inventory) { i.Architecture = 12 },
 		func(i *inventory) { i.Caption = "" },

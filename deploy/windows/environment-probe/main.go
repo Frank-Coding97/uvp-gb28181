@@ -32,8 +32,8 @@ func validate(role string, i inventory) error {
 		return errors.New("requires a detected native x64 Windows host")
 	}
 	if role == "runtime" {
-		if i.ProductType != 1 || i.Build < 19045 || i.Build >= 22000 || !strings.Contains(i.Caption, "Windows 10") {
-			return errors.New("runtime must be Windows 10 22H2 x64 (build 19045)")
+		if i.ProductType != 1 || i.Build < 19041 || i.Build >= 22000 || !strings.Contains(i.Caption, "Windows 10") {
+			return errors.New("runtime must be Windows 10 x64 (build 19041 or newer, below Windows 11)")
 		}
 		if len(i.BuildTools) != 0 || len(i.RunningComponents) != 0 {
 			return errors.New("runtime is not isolated: build tools or existing components detected")

@@ -44,7 +44,7 @@ names. It does not install software, start/stop processes or change services.
 .\environment-probe.exe -role runtime > runtime-environment.json
 ```
 
-The runtime preflight rejects non-Windows-10-22H2/native-x64 hosts and detected
+The runtime preflight rejects Windows hosts below build 19041, Windows 11, non-native-x64 hosts and detected
 build tools or existing running components. Passing is **inventory only**:
 software absent from PATH or not running can remain installed. T01-C still
 requires a known clean OS image. P0 additionally requires actual native component
