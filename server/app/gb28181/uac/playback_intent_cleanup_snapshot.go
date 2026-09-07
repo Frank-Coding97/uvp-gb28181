@@ -13,6 +13,14 @@ func snapshotPlaybackCleanupRequest(r *sip.Request, method sip.RequestMethod, st
 	if method != sip.ACK && method != sip.BYE {
 		return playauth.DeviceSIPCleanupRequestIdentity{}, errPlaybackIntentSnapshot
 	}
+	return snapshotPlaybackDialogRequest(r, method, stepID)
+}
+
+func snapshotPlaybackINFORequest(r *sip.Request, stepID string) (playauth.DeviceSIPCleanupRequestIdentity, error) {
+	return snapshotPlaybackDialogRequest(r, sip.INFO, stepID)
+}
+
+func snapshotPlaybackDialogRequest(r *sip.Request, method sip.RequestMethod, stepID string) (playauth.DeviceSIPCleanupRequestIdentity, error) {
 	snapshot, err := snapshotPlaybackRequest(r, method)
 	if err != nil {
 		return playauth.DeviceSIPCleanupRequestIdentity{}, err
@@ -20,6 +28,10 @@ func snapshotPlaybackCleanupRequest(r *sip.Request, method sip.RequestMethod, st
 	for _, h := range r.Headers() {
 		switch strings.ToLower(h.Name()) {
 		case "via", "from", "to", "call-id", "cseq", "contact", "max-forwards", "content-length", "route":
+		case "content-type":
+			if method != sip.INFO {
+				return playauth.DeviceSIPCleanupRequestIdentity{}, errPlaybackIntentSnapshot
+			}
 		default:
 			return playauth.DeviceSIPCleanupRequestIdentity{}, errPlaybackIntentSnapshot
 		}

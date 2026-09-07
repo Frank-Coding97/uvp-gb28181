@@ -3,8 +3,6 @@ package sipgo
 import (
 	"context"
 	"errors"
-	"net"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -34,20 +32,8 @@ type OwnedBranchCleanup struct {
 // quiesce the original dialog owner and validate the original branch evidence.
 // This deliberately excludes RewriteContact and implicit authentication.
 func (ua *DialogUA) NewBranchCleanup(invite *sip.Request, response *sip.Response, byeCSeq uint32) (*OwnedBranchCleanup, error) {
-	if ua == nil || ua.Client == nil || ua.Client.UserAgent == nil || ua.Client.TransactionLayer() == nil || ua.Client.TxRequester != nil || ua.RewriteContact ||
-		!validCleanupInvite(invite) || !validOwnedInviteResponse(invite, response) || byeCSeq <= invite.CSeq().SeqNo || len(response.String()) > 65536 {
+	if !validFixedDialogMaterial(ua, invite, response, byeCSeq) {
 		return nil, ErrOwnedCleanupState
-	}
-	if !validCleanupTarget(response.Contact().Address) || len(response.GetHeaders("Record-Route")) > 8 {
-		return nil, ErrOwnedCleanupState
-	}
-	for _, h := range response.GetHeaders("Record-Route") {
-		var uri sip.Uri
-		params := sip.NewParams()
-		name, err := sip.ParseAddressValue(h.Value(), &uri, &params)
-		if err != nil || name != "" || len(params) != 0 || !validCleanupTarget(uri) {
-			return nil, ErrOwnedCleanupState
-		}
 	}
 	requestCopy, responseCopy := cloneOwnedCleanupRequest(invite), response.Clone()
 	requestCopy.SetBody(nil) // Only dialog headers are used, never replay SDP.
@@ -64,15 +50,7 @@ func (ua *DialogUA) NewBranchCleanup(invite *sip.Request, response *sip.Response
 	session.lastCSeqNo.Store(byeCSeq - 1)
 	session.buildReq(bye)
 	for _, r := range []*sip.Request{ack, bye} {
-		target := r.Recipient
-		if route := r.Route(); route != nil {
-			target = route.Address
-		}
-		port := target.Port
-		if port == 0 {
-			port = 5060
-		}
-		r.SetDestination(net.JoinHostPort(strings.Trim(target.Host, "[]"), strconv.Itoa(port)))
+		setFixedDialogDestination(r)
 	}
 	return &OwnedBranchCleanup{client: ua.Client, ack: ack, bye: bye, quiesced: make(chan struct{})}, nil
 }

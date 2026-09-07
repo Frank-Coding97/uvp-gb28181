@@ -95,7 +95,7 @@ func snapshotPlaybackIntentRequest(r *sip.Request) (playbackIntentSnapshot, erro
 }
 
 func snapshotPlaybackRequest(r *sip.Request, method sip.RequestMethod) (playbackIntentSnapshot, error) {
-	dialogRequest := method == sip.ACK || method == sip.BYE
+	dialogRequest := method == sip.ACK || method == sip.BYE || method == sip.INFO
 	if (method != sip.INVITE && method != sip.CANCEL && !dialogRequest) || !fixedPlaybackRequestIdentity(r, method) {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
@@ -111,11 +111,14 @@ func snapshotPlaybackRequest(r *sip.Request, method sip.RequestMethod) (playback
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
 	contentType := ""
-	if method == sip.INVITE {
+	if method == sip.INVITE || method == sip.INFO {
 		if len(r.GetHeaders("Content-Type")) != 1 || r.ContentType() == nil {
 			return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 		}
 		contentType = string(*r.ContentType())
+		if method == sip.INFO && (contentType != "Application/MANSRTSP" || len(r.Body()) == 0 || len(r.Body()) > 4096) {
+			return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
+		}
 	} else if len(r.GetHeaders("Content-Type")) != 0 || len(r.Body()) != 0 {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
