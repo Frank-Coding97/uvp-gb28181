@@ -46,3 +46,12 @@ func TestLayoutServiceSQLiteBaselineEmptyAndRevisionFlow(t *testing.T) {
 	_, err = service.Save(ctx, 9901, 1, DefaultLayout())
 	require.ErrorIs(t, err, ErrLayoutRevisionConflict)
 }
+
+func TestLayoutServiceSQLiteBaselineDoesNotHideDatabaseFailure(t *testing.T) {
+	db := newDashboardSQLiteBaselineDB(t)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+	_, err = NewLayoutService(db).Get(context.Background(), 10001)
+	require.Error(t, err)
+}

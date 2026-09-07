@@ -34,11 +34,11 @@ func (service *LayoutService) Get(ctx context.Context, userID uint) (StoredLayou
 	result := service.db.WithContext(ctx).
 		Where("user_id = ? AND dashboard_key = ?", userID, homeDashboardKey).
 		Take(&record)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return StoredLayout{}, result.Error
+	}
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) || result.RowsAffected == 0 {
 		return StoredLayout{Layout: DefaultLayout()}, nil
-	}
-	if result.Error != nil {
-		return StoredLayout{}, result.Error
 	}
 	var layout Layout
 	if err := json.Unmarshal([]byte(record.LayoutJSON), &layout); err != nil {
