@@ -40,6 +40,10 @@ type Server struct {
 	broadcastDialogs   *sipgo.DialogServerCache
 	broadcastProcessor handler.BroadcastInviteProcessor
 	broadcastSessions  sync.Map
+	inviteMu           sync.Mutex
+	quiescing          bool
+	activeInvites      int
+	invitesDrained     chan struct{}
 }
 
 type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
@@ -222,6 +226,11 @@ func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTran
 	if req == nil || tx == nil {
 		return
 	}
+	if !s.beginInvite() {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusServiceUnavailable, "Server Shutting Down", nil))
+		return
+	}
+	defer s.endInvite()
 	if s.broadcastDialogs == nil || s.broadcastProcessor == nil {
 		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusServiceUnavailable, "Broadcast Service Unavailable", nil))
 		return

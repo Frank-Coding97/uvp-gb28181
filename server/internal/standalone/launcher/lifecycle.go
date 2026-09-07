@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type State string
@@ -17,6 +18,7 @@ const (
 	BackendReady  State = "BackendReady"
 	MediaReady    State = "MediaReady"
 	Ready         State = "Ready"
+	Stopping      State = "Stopping"
 	Failed        State = "Failed"
 )
 
@@ -36,11 +38,13 @@ type Steps struct {
 	Backend   func(context.Context) (string, error)
 	Media     func(context.Context) error
 	Exits     <-chan error
+	Stop      func(context.Context) error
 	Cleanup   func() error
 }
 
 func Run(ctx context.Context, steps Steps, notify func(Status)) (result error) {
 	status := Status{State: Stopped}
+	graceful := false
 	publish := func(state State) {
 		status.State = state
 		// Business readiness additionally requires the T19 node/Hook contract.
@@ -56,6 +60,8 @@ func Run(ctx context.Context, steps Steps, notify func(Status)) (result error) {
 		}
 		if result != nil {
 			publish(Failed)
+		} else if graceful {
+			publish(Stopped)
 		}
 	}()
 	check := func() error {
@@ -114,7 +120,17 @@ func Run(ctx context.Context, steps Steps, notify func(Status)) (result error) {
 	publish(Ready)
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		if steps.Stop == nil {
+			return ctx.Err()
+		}
+		publish(Stopping)
+		stopCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := steps.Stop(stopCtx); err != nil {
+			return fmt.Errorf("graceful stop: %w", err)
+		}
+		graceful = true
+		return nil
 	case err, ok := <-steps.Exits:
 		if !ok || err == nil {
 			return errors.New("component exited unexpectedly")

@@ -61,3 +61,61 @@ func TestLifecycleCancellationBeforeStartDoesNotLaunch(t *testing.T) {
 		t.Fatalf("called=%v err=%v", called, err)
 	}
 }
+
+func TestLifecycleManualStopUsesFreshContextAndReportsFailure(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		step := func(context.Context) error { return nil }
+		sequence := []string{}
+		failure := errors.New("media finalization unconfirmed")
+		steps := Steps{Preflight: step, Redis: step, Database: step,
+			Backend: func(context.Context) (string, error) { return "unconfigured", nil }, Media: step,
+			Stop: func(stopCtx context.Context) error {
+				sequence = append(sequence, "stop")
+				if stopCtx.Err() != nil {
+					t.Error("stop inherited canceled run context")
+				}
+				if _, ok := stopCtx.Deadline(); !ok {
+					t.Error("stop must be bounded")
+				}
+				if fail {
+					return failure
+				}
+				return nil
+			}, Cleanup: func() error { sequence = append(sequence, "cleanup"); return nil },
+		}
+		states := []State{}
+		err := Run(ctx, steps, func(s Status) {
+			states = append(states, s.State)
+			if s.State == Ready {
+				cancel()
+			}
+		})
+		if !reflect.DeepEqual(sequence, []string{"stop", "cleanup"}) {
+			t.Fatalf("sequence=%v", sequence)
+		}
+		if fail {
+			if !errors.Is(err, failure) || states[len(states)-1] != Failed {
+				t.Fatalf("err=%v states=%v", err, states)
+			}
+		} else if err != nil || states[len(states)-1] != Stopped {
+			t.Fatalf("err=%v states=%v", err, states)
+		}
+	}
+}
+
+func TestLifecycleUnexpectedExitDoesNotClaimGracefulStop(t *testing.T) {
+	exits := make(chan error, 1)
+	step := func(context.Context) error { return nil }
+	called := false
+	failure := errors.New("backend crashed")
+	steps := Steps{Preflight: step, Redis: step, Database: step, Backend: func(context.Context) (string, error) { return "", nil }, Media: step, Exits: exits, Stop: func(context.Context) error { called = true; return nil }}
+	err := Run(context.Background(), steps, func(s Status) {
+		if s.State == Ready {
+			exits <- failure
+		}
+	})
+	if called || !errors.Is(err, failure) {
+		t.Fatalf("graceful=%v err=%v", called, err)
+	}
+}
