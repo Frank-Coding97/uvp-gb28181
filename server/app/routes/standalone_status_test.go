@@ -169,9 +169,21 @@ func TestStandaloneBackendProbeChecksLiveDependencies(t *testing.T) {
 	app.CasbinV2 = developerRouteCasbin{}
 	app.TokenService = readinessToken{}
 	app.SessionValidator = readinessSession{}
+	oldProbe := standaloneBusinessProbe.Load()
+	t.Cleanup(func() { standaloneBusinessProbe.Store(oldProbe) })
+	called := false
+	SetStandaloneBusinessProbe(func(context.Context) (bool, string) { called = true; return true, "ready" })
 	require.True(t, probeStandaloneBackend(context.Background()).BackendReady)
+	require.False(t, called, "business probe must not run before installation completes")
+	completeContext := context.WithValue(context.Background(), standaloneInstallationPhaseKey{}, "complete")
+	require.True(t, probeStandaloneBackend(completeContext).BusinessReady)
+	require.True(t, called)
+	called = false
+
 	app.Cache = readinessCache{failure: errors.New("internal Redis failure")}
-	state := probeStandaloneBackend(context.Background())
+	state := probeStandaloneBackend(completeContext)
+	require.False(t, called, "unhealthy dependencies must not publish business readiness")
+	require.False(t, state.BusinessReady)
 	require.False(t, state.BackendReady)
 	require.True(t, state.DatabaseReady)
 	require.False(t, state.RedisReady)
@@ -185,4 +197,42 @@ func TestStandaloneBackendProbeChecksLiveDependencies(t *testing.T) {
 	state = probeStandaloneBackend(context.Background())
 	require.False(t, state.BackendReady)
 	require.False(t, state.DatabaseReady)
+}
+
+func TestStandaloneReadinessNeverPublishesBusinessReadyBeforeInstallation(t *testing.T) {
+	const secret = "business-readiness-test-secret"
+	challenge, err := readiness.NewChallenge()
+	require.NoError(t, err)
+	for _, phase := range []string{"pending_admin", "pending_sip", "complete"} {
+		t.Run(phase, func(t *testing.T) {
+			engine := gin.New()
+			engine.Use(func(c *gin.Context) {
+				c.Set("standalone.installation_phase", phase)
+				c.Set("standalone.installation_ready", true)
+				c.Next()
+			})
+			registerStandaloneReadiness(engine, secret, func(context.Context) readiness.Status {
+				return readiness.Status{BackendReady: true, BusinessReady: true, BusinessReason: "ready"}
+			})
+			req := httptest.NewRequest("GET", "/api/standalone/ready", nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set(readiness.ChallengeHeader, challenge)
+			req.Header.Set(readiness.ProofHeader, readiness.RequestProof(secret, challenge))
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, req)
+			require.Equal(t, 200, response.Code)
+			var state readiness.Status
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &state))
+			require.Equal(t, phase == "complete", state.BusinessReady)
+			if phase != "complete" {
+				require.Equal(t, "installation_pending", state.BusinessReason)
+			}
+			signature := response.Header().Get(readiness.ProofHeader)
+			require.True(t, readiness.VerifyResponse(secret, challenge, response.Body.Bytes(), signature))
+			state.BusinessReady = !state.BusinessReady
+			altered, err := json.Marshal(state)
+			require.NoError(t, err)
+			require.False(t, readiness.VerifyResponse(secret, challenge, altered, signature))
+		})
+	}
 }

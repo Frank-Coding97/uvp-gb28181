@@ -14,6 +14,8 @@ const (
 )
 
 type Status struct {
+	BusinessReady      bool   `json:"business_ready"`
+	BusinessReason     string `json:"business_reason,omitempty"`
 	InstallationPhase  string `json:"installation_phase,omitempty"`
 	CredentialAccepted bool   `json:"credential_accepted,omitempty"`
 	BackendReady       bool   `json:"backend_ready"`
