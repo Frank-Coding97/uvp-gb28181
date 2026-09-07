@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -16,6 +18,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 
 	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
 	_ "uvplatform.cn/uvp-gb28181/plugins"
@@ -36,6 +39,12 @@ import (
 // @BasePath /api
 func main() {
 	for _, arg := range os.Args[1:] {
+		if arg == "-bootstrap-db" {
+			if err := runBootstrapDB(); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
 		if arg == "-db-check" {
 			if err := runDBCheck(); err != nil {
 				log.Fatal(err)
@@ -70,6 +79,25 @@ func main() {
 	// 优雅关闭 GB28181 SIP 服务
 	gb28181.Stop()
 
+}
+
+func runBootstrapDB() error {
+	if app.GormDbSQLite == nil {
+		return errors.New("-bootstrap-db requires sqlite")
+	}
+	db := app.DB()
+	raw, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer raw.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := sqlitebootstrap.Initialize(ctx, db)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
 // runDBCheck reports runtime settings only; it does not initialize application schema.

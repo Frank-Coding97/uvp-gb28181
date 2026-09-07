@@ -65,7 +65,7 @@ func init() {
 	initDB()
 
 	if app.GormDbSQLite != nil {
-		log.Fatal("SQLite schema initialization is not implemented yet; use -db-check for runtime diagnostics")
+		log.Fatal("SQLite business startup awaits migration support; use -bootstrap-db to initialize or -db-check for runtime diagnostics")
 	}
 
 	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
@@ -442,7 +442,7 @@ func newScheduler() app.JobSchedulerInterf {
 // 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
 func migrationCommandRequested() bool {
 	for _, arg := range os.Args {
-		if arg == "-migrate-up" || arg == "-db-check" {
+		if arg == "-migrate-up" || arg == "-db-check" || arg == "-bootstrap-db" {
 			return true
 		}
 		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {

@@ -131,3 +131,18 @@ func TestBaselineRollbackFailureDiscardsConnection(t *testing.T) {
 	_, err = applyBaseline(context.Background(), db, "test-rollback", script, digest(script), nil)
 	require.NoError(t, err)
 }
+
+func TestBaselineRejectsDeferredForeignKeyViolation(t *testing.T) {
+	db := testDB(t)
+	script := `CREATE TABLE parent(id INTEGER PRIMARY KEY);
+ CREATE TABLE child(parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);
+ INSERT INTO child VALUES(42);`
+	_, err := applyBaseline(context.Background(), db, "test-foreign-key", script, digest(script), nil)
+	require.ErrorContains(t, err, "foreign key check failed")
+	require.False(t, db.Migrator().HasTable("parent"))
+	require.False(t, db.Migrator().HasTable("child"))
+	require.False(t, db.Migrator().HasTable("gb_schema_migrations"))
+	good := `CREATE TABLE parent(id INTEGER PRIMARY KEY);`
+	_, err = applyBaseline(context.Background(), db, "test-foreign-key", good, digest(good), nil)
+	require.NoError(t, err)
+}

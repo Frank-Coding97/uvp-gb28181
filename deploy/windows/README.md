@@ -101,10 +101,35 @@ SQLite requires an absolute `gormv2.sqlite.path`.
 settings as JSON, then closes it. It may create a new empty database, but does
 not initialize application tables, seed users, start HTTP/SIP, or register
 scheduled jobs. SQLite is pinned to 3.53.4 with WAL, FULL synchronous mode,
-foreign keys, a 5000 ms busy timeout, and one pooled connection. T07/T08 add
-the application baseline and migration paths; until then normal SQLite
-startup and migration commands report that schema support is unavailable.
+foreign keys, a 5000 ms busy timeout, and one pooled connection. Ordinary write
+transactions reserve the writer at entry (`_txlock=immediate`); explicitly
+read-only transactions retain WAL read concurrency. Incremental migrations
+and normal business startup remain gated until T08 is complete.
 
 `test-db-check.ps1 -ServerExe <absolute-exe> -WorkRoot <new-directory>` checks
 this entry point on Windows with a Chinese/space path, repeated open, unknown
 dialect and conflicting MySQL configuration. Use an isolated temporary root.
+
+### SQLite first initialization
+
+`uvp-server.exe -bootstrap-db` applies the embedded, checksum-pinned SQLite
+release baseline and civil-code dataset in one immediate transaction. It emits
+`version`, `checksum`, and `created` as JSON and closes the database. Repeating
+it verifies the existing baseline marker without replaying seeds or changing
+user data. A non-empty database without the matching marker is rejected.
+Schema, seeds, and marker roll back together on failure; an uncertain rollback
+discards the connection. This command does not create an administrator or start
+HTTP, SIP, media, Redis, or scheduled jobs.
+
+`test-bootstrap-db.ps1 -ServerExe <absolute-exe> -WorkRoot <new-directory>`
+checks first and repeated initialization using the actual backend on Windows,
+including a Chinese/space/hash path and an unchanged database file checksum.
+The Go initialization tests separately cover user/device/role preservation and
+SQL, seed, cancellation, and marker failures.
+
+When using Windows Sandbox, put the test `WorkRoot` on its internal disk
+(for example `C:\uvp-local-tests\bootstrap-001`). Use WSB mapped folders only
+for copying binaries and result logs. A mapped folder reported NTFS and a local
+C: path by Win32 but faulted during SQLite WAL shared-memory access; the same
+backend and tests passed on the Sandbox internal disk. WSB shared storage is
+not a qualified SQLite data location.
