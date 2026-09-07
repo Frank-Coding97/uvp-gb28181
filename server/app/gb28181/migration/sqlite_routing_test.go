@@ -9,6 +9,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
+	"uvplatform.cn/uvp-gb28181/resource/database/sqlitebaseline"
+	"uvplatform.cn/uvp-gb28181/resource/database/sqlitemigrations"
 )
 
 func TestSQLiteMigrationFilesNeverFallThroughToMySQL(t *testing.T) {
@@ -64,7 +66,7 @@ func TestSQLiteUpRequiresBaselineThenValidatesWithoutMySQLHistory(t *testing.T) 
 	require.NoError(t, err)
 	require.NoError(t, Up(db, DialectSQLite))
 	require.NoError(t, Up(db, DialectSQLite))
-	var count int64
-	require.NoError(t, db.Table("gb_schema_migrations").Count(&count).Error)
-	require.EqualValues(t, 2, count)
+	var versions []string
+	require.NoError(t, db.Table("gb_schema_migrations").Pluck("version", &versions).Error)
+	require.ElementsMatch(t, []string{sqlitebaseline.Version, sqlitemigrations.MediaIdentityVersion, sqlitemigrations.StandaloneInstallationVersion}, versions)
 }
