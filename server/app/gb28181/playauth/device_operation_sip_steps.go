@@ -101,6 +101,7 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 	}
 	ids := map[string]bool{}
 	cleanupIDs := map[string]bool{}
+	infoIDs := map[string]bool{}
 	type inviteKey struct{ callID, localTag string }
 	invites := map[inviteKey]bool{}
 	for _, w := range wire.Steps {
@@ -130,6 +131,12 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 				return DeviceSIPInviteSteps{}, err
 			}
 			step.KnownBranch = branch
+			for _, info := range branch.InfoSteps {
+				if infoIDs[info.Identity.InfoID] {
+					return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+				}
+				infoIDs[info.Identity.InfoID] = true
+			}
 			for _, attempt := range branch.CleanupAttempts {
 				if cleanupIDs[attempt.Identity.AttemptID] {
 					return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable

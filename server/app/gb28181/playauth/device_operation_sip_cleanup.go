@@ -73,6 +73,10 @@ func equalSIPCleanupIdentity(a, b DeviceSIPCleanupAttemptIdentity) bool {
 // Validate the current non-RewriteContact UAC builder's exact route shape.
 // No arbitrary recovered destination or repaired/stripped header is accepted.
 func sipCleanupRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPInviteStep, cseq uint32) bool {
+	return sipDialogRequestMatches(i, step, cseq, "", 0, sipEmptyBodySHA256)
+}
+
+func sipDialogRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPInviteStep, cseq uint32, contentType string, bodyLength int, bodySHA256 string) bool {
 	b := step.KnownBranch
 	if b == nil || i.RemoteTag != b.Identity.RemoteTag || i.Routes == nil ||
 		!sipIdentityPart(i.Request.Branch, 128) || !strings.HasPrefix(i.Request.Branch, "z9hG4bK") || i.Request.Branch == step.Identity.Branch {
@@ -106,7 +110,7 @@ func sipCleanupRequestMatches(i DeviceSIPCleanupRequestIdentity, step DeviceSIPI
 	expected.RequestURI, expected.CSeq, expected.Branch = requestURI, cseq, i.Request.Branch
 	expected.Destination = net.JoinHostPort(strings.Trim(uri.Host, "[]"), strconv.Itoa(port))
 	expected.MaxForwards = 70
-	expected.ContentType, expected.BodyLength, expected.BodySHA256 = "", 0, sipEmptyBodySHA256
+	expected.ContentType, expected.BodyLength, expected.BodySHA256 = contentType, bodyLength, bodySHA256
 	return i.Request == expected
 }
 
@@ -123,8 +127,8 @@ func sipCleanupResponseMatches(r DeviceSIPCleanupBYEResponse, a DeviceSIPCleanup
 }
 
 // Prepare persists both immutable requests at once; it performs no network.
-// A new attempt consumes the next dialog CSeq. Future INFO support must use
-// this same durable sequence allocation before any business route is enabled.
+// A new attempt consumes the next dialog CSeq after every prepared INFO and
+// permanently closes business INFO admission, even if this BYE is never sent.
 func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context, id DeviceOperationIntentIdentity, version int64, identity DeviceSIPCleanupAttemptIdentity) (DeviceSIPInviteSteps, error) {
 	runID, err := sipCleanupProcessID()
 	if err != nil {
@@ -155,7 +159,13 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context
 			if len(attempts) >= maxSIPCleanupAttempts {
 				return false, ErrDeviceIntentConflict
 			}
-			lastCSeq := step.Identity.CSeq
+			lastCSeq := lastSIPINFOCSeq(*step)
+			for _, info := range step.KnownBranch.InfoSteps {
+				if (info.OwnerRunID == runID && info.LocalQuiescedAt == nil) ||
+					info.Identity.Request.Request.Branch == identity.ACK.Request.Branch || info.Identity.Request.Request.Branch == identity.BYE.Request.Branch {
+					return false, ErrDeviceIntentConflict
+				}
+			}
 			if len(attempts) != 0 {
 				last := attempts[len(attempts)-1]
 				if last.Response != nil || (last.OwnerRunID == runID && last.LocalQuiescedAt == nil) {

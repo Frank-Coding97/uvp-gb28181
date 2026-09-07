@@ -62,7 +62,7 @@ func readSIPCleanupAttempts(wires []sipCleanupAttemptWire, step DeviceSIPInviteS
 		return nil, ErrDeviceIntentUnavailable
 	}
 	var out []DeviceSIPCleanupAttempt
-	lastCSeq := step.Identity.CSeq
+	lastCSeq := lastSIPINFOCSeq(step)
 	ids, byeBranches := map[string]bool{}, map[string]bool{}
 	for _, w := range wires {
 		i := DeviceSIPCleanupAttemptIdentity{w.Identity.AttemptID,
@@ -76,6 +76,13 @@ func readSIPCleanupAttempts(wires []sipCleanupAttemptWire, step DeviceSIPInviteS
 		}
 		for _, old := range out {
 			if old.Identity.ACK.Request.Branch == i.BYE.Request.Branch || (old.ResponseObservedAt != nil && old.ResponseObservedAt.Before(w.PreparedAt)) {
+				return nil, ErrDeviceIntentUnavailable
+			}
+		}
+		for _, info := range step.KnownBranch.InfoSteps {
+			if w.PreparedAt.Before(info.PreparedAt) || (w.OwnerRunID == info.OwnerRunID &&
+				(info.LocalQuiescedAt == nil || w.PreparedAt.Before(*info.LocalQuiescedAt))) ||
+				info.Identity.Request.Request.Branch == i.ACK.Request.Branch || info.Identity.Request.Request.Branch == i.BYE.Request.Branch {
 				return nil, ErrDeviceIntentUnavailable
 			}
 		}

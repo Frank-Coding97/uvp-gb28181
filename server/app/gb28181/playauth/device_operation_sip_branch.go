@@ -30,6 +30,7 @@ type DeviceSIPKnownBranch struct {
 	ACKRowVersion        int64                        `json:"-"`
 	ACKDispatchStartedAt *time.Time                   `json:"-"`
 	CleanupAttempts      []DeviceSIPCleanupAttempt    `json:"-"`
+	InfoSteps            []DeviceSIPINFOStep          `json:"-"`
 }
 
 type sipKnownBranchIdentityWire struct {
@@ -51,13 +52,14 @@ type sipKnownBranchWire struct {
 	ACKRowVersion        int64                      `json:"ackRowVersion"`
 	ACKDispatchStartedAt *time.Time                 `json:"ackDispatchStartedAt"`
 	CleanupAttempts      []sipCleanupAttemptWire    `json:"cleanupAttempts,omitempty"`
+	InfoSteps            []sipINFOStepWire          `json:"infoSteps,omitempty"`
 }
 
 func sipKnownBranchToWire(b *DeviceSIPKnownBranch) *sipKnownBranchWire {
 	if b == nil {
 		return nil
 	}
-	return &sipKnownBranchWire{1, sipKnownBranchIdentityWire(b.Identity), b.ObservedAt, b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt, sipCleanupAttemptsToWire(b.CleanupAttempts)}
+	return &sipKnownBranchWire{1, sipKnownBranchIdentityWire(b.Identity), b.ObservedAt, b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt, sipCleanupAttemptsToWire(b.CleanupAttempts), sipINFOStepsToWire(b.InfoSteps)}
 }
 
 // Preserve parsed URI order and spelling. The accepted bounded profile is not
@@ -140,6 +142,10 @@ func readSIPKnownBranch(w *sipKnownBranchWire, step DeviceSIPInviteStep, updated
 	b := &DeviceSIPKnownBranch{Identity: i, ObservedAt: w.ObservedAt, ACKState: w.ACKState, ACKRowVersion: w.ACKRowVersion, ACKDispatchStartedAt: w.ACKDispatchStartedAt}
 	step.KnownBranch = b
 	var err error
+	b.InfoSteps, err = readSIPINFOSteps(w.InfoSteps, step, updatedAt)
+	if err != nil {
+		return nil, err
+	}
 	b.CleanupAttempts, err = readSIPCleanupAttempts(w.CleanupAttempts, step, updatedAt)
 	return b, err
 }
