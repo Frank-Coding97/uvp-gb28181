@@ -153,6 +153,9 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	if err := browser.captureScreenshot(sipContext, filepath.Join(installDir, "t19-completed-home.png")); err != nil {
 		t.Fatal("completed home screenshot was unavailable")
 	}
+	if os.Getenv("UVP_T20_BROWSER_CAPABILITIES") == "1" {
+		t20AssertBrowserCapabilities(t, browser, origin, installDir)
+	}
 }
 
 func t18BrowserPassword(t *testing.T) string {
@@ -1043,7 +1046,7 @@ func t19WaitStandaloneComplete(t *testing.T, ctx context.Context, client t18HTTP
 			return errors.New("completed administrator page reported an API error")
 		}
 		if phaseComplete && stateErr == nil && state.URLScrubbed && state.HomeRoute && state.DashboardVisible && !state.ServerErrorToastVisible &&
-			cdp.evalBool(ctx, "Boolean(document.querySelector('.dashboard-grid .grid-stack-item')) && !document.querySelector('.dashboard-shell > .loading')") == nil {
+			cdp.evalBool(ctx, "Boolean(document.querySelector('.dashboard-grid .grid-stack-item')) && !document.querySelector('.dashboard-shell > .loading') && Boolean(document.querySelector('.sip-card__sub--live'))") == nil {
 			return nil
 		}
 		if err := t18WaitPoll(ctx); err != nil {
