@@ -133,3 +133,28 @@ for copying binaries and result logs. A mapped folder reported NTFS and a local
 C: path by Win32 but faulted during SQLite WAL shared-memory access; the same
 backend and tests passed on the Sandbox internal disk. WSB shared storage is
 not a qualified SQLite data location.
+
+### First-install integration fixtures
+
+`prepare-installation-test.ps1` creates a new, isolated `t18-setup` release from
+explicit launcher/backend binaries, Redis/media directories and web/resource
+ZIP files. The web ZIP must contain `index.html` directly at its root and use
+UTF-8 entry names. Existing destinations are rejected. This helper is for test
+fixtures, not the final distribution builder.
+
+Build the native test executable from `server`:
+
+```sh
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c ./internal/standalone/launcher -o launcher-installation.test.exe
+```
+
+On Windows, set `UVP_T18_INSTALL_DIR` to a fresh fixture and run
+`-test.run=TestWindowsStandaloneT18InstallationHTTPFlow`. Setting
+`UVP_T18_SIP_IP` to a local non-loopback IPv4 address additionally exercises SIP
+activation on port 15070 and a third restart preserving completed setup.
+
+Use a different fresh fixture for `UVP_T18_BROWSER_INSTALL_DIR` and
+`-test.run=TestWindowsStandaloneT18InstallationBrowserFlow`. It requires installed
+Edge and uses a separate owned headless browser/profile. Credentials remain in
+memory and CDP navigation; they are never test arguments or output. This does
+not replace Explorer double-click or clean Windows Sandbox acceptance.
