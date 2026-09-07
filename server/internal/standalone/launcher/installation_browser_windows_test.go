@@ -28,14 +28,16 @@ import (
 const (
 	t18BrowserInstallDirEnv  = "UVP_T18_BROWSER_INSTALL_DIR"
 	t18BrowserReleaseVersion = "t18-setup"
+	t19BrowserSIPIPEnv       = "UVP_T19_BROWSER_SIP_IP"
 )
 
 // TestWindowsStandaloneT18InstallationBrowserFlow is an opt-in native Edge
 // headless smoke test for the first-install UI. It covers the browser-facing
-// pending_admin -> login -> required SIP setup transition; SIP configuration
-// completion is out of scope. Edge is an independently owned process Job,
-// with a temporary clean profile and no bootstrap credential in its command
-// line. This is native headless Edge automation, not Explorer automation.
+// pending_admin -> login -> required SIP setup transition. When
+// UVP_T19_BROWSER_SIP_IP is set, it also completes the required SIP setup
+// through the browser. Edge is an independently owned process Job, with a
+// temporary clean profile and no bootstrap credential in its command line.
+// This is native headless Edge automation, not Explorer automation.
 func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	installDir := strings.TrimSpace(os.Getenv(t18BrowserInstallDirEnv))
 	if installDir == "" {
@@ -124,6 +126,27 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	t18AssertSetupStatus(t, body, true, "pending_sip")
 	if err := browser.captureScreenshot(browserContext, filepath.Join(installDir, "t18-sip-onboarding.png")); err != nil {
 		t.Log("SIP onboarding screenshot was unavailable")
+	}
+
+	sipIP := strings.TrimSpace(os.Getenv(t19BrowserSIPIPEnv))
+	if sipIP == "" {
+		return
+	}
+	if !t19ConcreteIPv4(sipIP) {
+		t.Fatal("UVP_T19_BROWSER_SIP_IP must be a concrete IPv4 address")
+	}
+
+	sipContext, cancelSIP := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelSIP()
+	sipPassword := t18BrowserPassword(t)
+	if err := browser.completeSIP(sipContext, sipIP, "34020000002000000001", sipPassword); err != nil {
+		t18LogBrowserState(t, browser.cdp)
+		t.Fatal("standalone SIP browser flow could not be completed")
+	}
+	sipPassword = ""
+	if err := t19WaitStandaloneComplete(t, sipContext, client, browser.cdp); err != nil {
+		t18LogBrowserState(t, browser.cdp)
+		t.Fatal("standalone SIP browser flow did not reach the completed home page")
 	}
 }
 
@@ -313,6 +336,205 @@ func (browser *t18EdgeBrowser) loginAndSubmit(ctx context.Context, username, pas
 		"submit.click(); return true;" +
 		"})()"
 	return browser.cdp.evalBool(ctx, expression)
+}
+
+func (browser *t18EdgeBrowser) completeSIP(ctx context.Context, mediaIP, serverID, password string) error {
+	if browser == nil || browser.cdp == nil {
+		return errors.New("browser protocol is unavailable")
+	}
+	if err := t19WaitClickText(ctx, browser.cdp, ".deployment-options .deployment-option", "局域网部署"); err != nil {
+		return errors.New("select LAN deployment")
+	}
+	if err := t19WaitPendingSelector(ctx, browser.cdp, ".network-form"); err != nil {
+		return errors.New("network step did not become ready")
+	}
+	if err := t19SelectNetworkIP(ctx, browser.cdp, mediaIP); err != nil {
+		return errors.New("select configured LAN address")
+	}
+	if err := t19WaitSetInputAt(ctx, browser.cdp, ".media-addresses input", 0, mediaIP); err != nil {
+		return errors.New("confirm media receive address")
+	}
+	if err := t19WaitSetInputAt(ctx, browser.cdp, ".media-addresses input", 1, mediaIP); err != nil {
+		return errors.New("confirm media playback address")
+	}
+	if err := t19WaitMediaValues(ctx, browser.cdp, mediaIP); err != nil {
+		return errors.New("media addresses were not confirmed")
+	}
+	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "下一步"); err != nil {
+		return errors.New("advance from network step")
+	}
+	if err := t19WaitPendingSelector(ctx, browser.cdp, ".identity-form"); err != nil {
+		return errors.New("identity step did not become ready")
+	}
+	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[placeholder='1 - 65535']", 0, "15070"); err != nil {
+		return errors.New("set SIP port")
+	}
+	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[placeholder='20 位数字编码']", 0, serverID); err != nil {
+		return errors.New("set SIP platform ID")
+	}
+	if err := t19WaitSetInputAt(ctx, browser.cdp, ".identity-form input[type='text'][placeholder^='至少 12 位']", 0, password); err != nil {
+		return errors.New("set SIP password")
+	}
+	if err := t19WaitIdentityValues(ctx, browser.cdp, serverID, password); err != nil {
+		return errors.New("SIP identity fields were not accepted")
+	}
+	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "下一步"); err != nil {
+		return errors.New("advance from identity step")
+	}
+	if err := t19WaitPendingSelector(ctx, browser.cdp, ".confirm-groups"); err != nil {
+		return errors.New("confirmation step did not become ready")
+	}
+	if err := t19WaitConfirmValues(ctx, browser.cdp, mediaIP, serverID); err != nil {
+		return errors.New("confirmation page did not show the configured values")
+	}
+	if err := t19WaitClickText(ctx, browser.cdp, ".sip-setup-dialog button", "保存并启动"); err != nil {
+		return errors.New("submit SIP configuration")
+	}
+	return nil
+}
+
+func t19WaitClickText(ctx context.Context, cdp *t18CDP, selector, label string) error {
+	selectorJSON, err := json.Marshal(selector)
+	if err != nil {
+		return errors.New("encode browser selector")
+	}
+	labelJSON, err := json.Marshal(label)
+	if err != nil {
+		return errors.New("encode browser label")
+	}
+	expression := "(() => {" +
+		"const visible = node => { if (!node) return false; const style = getComputedStyle(node); return style.display !== 'none' && style.visibility !== 'hidden' && (node.offsetWidth > 0 || node.offsetHeight > 0 || node.getClientRects().length > 0); };" +
+		"const nodes = Array.from(document.querySelectorAll(" + string(selectorJSON) + "));" +
+		"const label = " + string(labelJSON) + ";" +
+		"const node = nodes.find(candidate => visible(candidate) && !candidate.disabled && String(candidate.textContent || '').includes(label));" +
+		"if (!node) return false; node.click(); return true;" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19SelectNetworkIP(ctx context.Context, cdp *t18CDP, mediaIP string) error {
+	triggerExpression := "(() => {" +
+		"const trigger = document.querySelector('.network-form .arco-select-view, .network-form .arco-select');" +
+		"if (!trigger) return false; trigger.click(); return true;" +
+		"})()"
+	if err := t19WaitEval(ctx, cdp, triggerExpression); err != nil {
+		return err
+	}
+	desiredJSON, err := json.Marshal(mediaIP)
+	if err != nil {
+		return errors.New("encode configured LAN address")
+	}
+	optionExpression := "(() => {" +
+		"const visible = node => { if (!node) return false; const style = getComputedStyle(node); return style.display !== 'none' && style.visibility !== 'hidden' && (node.offsetWidth > 0 || node.offsetHeight > 0 || node.getClientRects().length > 0); };" +
+		"const desired = " + string(desiredJSON) + ";" +
+		"const option = Array.from(document.querySelectorAll('.arco-select-option, [role=option]')).find(candidate => { const text = String(candidate.textContent || '').trim(); return visible(candidate) && (text === desired || text.startsWith(desired + ' ')); });" +
+		"if (!option) return false; option.click(); return true;" +
+		"})()"
+	if err := t19WaitEval(ctx, cdp, optionExpression); err != nil {
+		return err
+	}
+	selectedExpression := "(() => {" +
+		"const desired = " + string(desiredJSON) + ";" +
+		"const value = document.querySelector('.network-form .arco-select-view-value, .network-form .arco-select-view');" +
+		"if (!value) return false; const text = String(value.textContent || '').trim(); return text === desired || text.startsWith(desired + ' ');" +
+		"})()"
+	return t19WaitEval(ctx, cdp, selectedExpression)
+}
+
+func t19WaitSetInputAt(ctx context.Context, cdp *t18CDP, selector string, index int, value string) error {
+	selectorJSON, err := json.Marshal(selector)
+	if err != nil {
+		return errors.New("encode browser input selector")
+	}
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return errors.New("encode browser input value")
+	}
+	expression := "(() => {" +
+		"const visible = node => { if (!node) return false; const style = getComputedStyle(node); return style.display !== 'none' && style.visibility !== 'hidden' && (node.offsetWidth > 0 || node.offsetHeight > 0 || node.getClientRects().length > 0); };" +
+		"const inputs = Array.from(document.querySelectorAll(" + string(selectorJSON) + ")).filter(visible);" +
+		"const input = inputs[" + strconv.Itoa(index) + "]; const desired = " + string(valueJSON) + ";" +
+		"if (!input || input.disabled) return false;" +
+		"const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;" +
+		"if (!setter) return false; setter.call(input, desired); input.dispatchEvent(new Event('input', {bubbles: true})); input.dispatchEvent(new Event('change', {bubbles: true})); input.blur(); return input.value === desired;" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19WaitMediaValues(ctx context.Context, cdp *t18CDP, mediaIP string) error {
+	desiredJSON, err := json.Marshal(mediaIP)
+	if err != nil {
+		return errors.New("encode configured media address")
+	}
+	expression := "(() => {" +
+		"const desired = " + string(desiredJSON) + ";" +
+		"const inputs = Array.from(document.querySelectorAll('.media-addresses input'));" +
+		"return inputs.length >= 2 && inputs[0].value === desired && inputs[1].value === desired;" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19WaitIdentityValues(ctx context.Context, cdp *t18CDP, serverID, password string) error {
+	serverIDJSON, err := json.Marshal(serverID)
+	if err != nil {
+		return errors.New("encode SIP platform ID")
+	}
+	passwordJSON, err := json.Marshal(password)
+	if err != nil {
+		return errors.New("encode SIP password")
+	}
+	expression := "(() => {" +
+		"const serverID = " + string(serverIDJSON) + "; const password = " + string(passwordJSON) + ";" +
+		"const port = document.querySelector('.identity-form input[placeholder=\"1 - 65535\"]');" +
+		"const id = document.querySelector('.identity-form input[placeholder=\"20 位数字编码\"]');" +
+		"const domain = document.querySelector('.identity-form input[placeholder=\"填入平台 ID 后自动生成\"]');" +
+		"const passwordInput = document.querySelector('.identity-form input[type=\"text\"][placeholder^=\"至少 12 位\"]');" +
+		"return Boolean(port && id && domain && passwordInput) && port.value === '15070' && id.value === serverID && domain.value === serverID.slice(0, 10) && passwordInput.value === password;" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19WaitConfirmValues(ctx context.Context, cdp *t18CDP, mediaIP, serverID string) error {
+	mediaIPJSON, err := json.Marshal(mediaIP)
+	if err != nil {
+		return errors.New("encode confirmation media address")
+	}
+	serverIDJSON, err := json.Marshal(serverID)
+	if err != nil {
+		return errors.New("encode confirmation platform ID")
+	}
+	expression := "(() => {" +
+		"const root = document.querySelector('.confirm-groups'); const text = root ? String(root.textContent || '') : '';" +
+		"return Boolean(root) && text.includes(" + string(mediaIPJSON) + ") && text.includes(" + string(serverIDJSON) + ") && text.includes('15070') && text.includes('媒体接收地址') && text.includes('媒体播放地址');" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19WaitPendingSelector(ctx context.Context, cdp *t18CDP, selector string) error {
+	selectorJSON, err := json.Marshal(selector)
+	if err != nil {
+		return errors.New("encode pending UI selector")
+	}
+	expression := "(() => {" +
+		"const node = document.querySelector(" + string(selectorJSON) + ");" +
+		"const visible = node => { if (!node) return false; const style = getComputedStyle(node); return style.display !== 'none' && style.visibility !== 'hidden' && (node.offsetWidth > 0 || node.offsetHeight > 0 || node.getClientRects().length > 0); };" +
+		"const dashboard = Boolean(document.querySelector('.dashboard-shell, .dashboard-grid'));" +
+		"const errorToast = Array.from(document.querySelectorAll('.arco-message, .arco-notification, [role=alert]')).some(candidate => { if (!visible(candidate)) return false; const text = String(candidate.textContent || ''); return text.includes('服务器异常') || text.includes('请联系管理员'); });" +
+		"const businessRequest = performance.getEntriesByType('resource').some(entry => { try { const path = new URL(String(entry.name || ''), location.href).pathname; return path === '/api/gb28181/sip/platform' || path === '/api/gb28181/sip/dashboard/snapshot' || path.startsWith('/api/gb28181/sip/dashboard/') || path.startsWith('/api/gb28181/home/') || path === '/api/gb28181/zlm/overview'; } catch (_) { return false; } });" +
+		"return visible(node) && !dashboard && !errorToast && !businessRequest;" +
+		"})()"
+	return t19WaitEval(ctx, cdp, expression)
+}
+
+func t19WaitEval(ctx context.Context, cdp *t18CDP, expression string) error {
+	for {
+		if err := cdp.evalBool(ctx, expression); err == nil {
+			return nil
+		}
+		if err := t18WaitPoll(ctx); err != nil {
+			return err
+		}
+	}
 }
 
 func (browser *t18EdgeBrowser) captureScreenshot(ctx context.Context, path string) error {
@@ -579,6 +801,7 @@ type t18BrowserDOMState struct {
 	URLScrubbed             bool `json:"urlScrubbed"`
 	SetupForm               bool `json:"setupForm"`
 	LoginRoute              bool `json:"loginRoute"`
+	HomeRoute               bool `json:"homeRoute"`
 	LoginForm               bool `json:"loginForm"`
 	SIPModalVisible         bool `json:"sipModalVisible"`
 	SIPRequired             bool `json:"sipRequired"`
@@ -629,11 +852,12 @@ const t18BrowserDOMStateExpression = `(() => {
    const text = String(node.textContent || "");
    return text.includes("服务器异常") || text.includes("请联系管理员");
  });
- return {
-   urlScrubbed: !href.includes("bootstrap_token="),
-   setupForm: setupForm,
-   loginRoute: route.includes("/login"),
-   loginForm: loginForm,
+	return {
+	  urlScrubbed: !href.includes("bootstrap_token="),
+	  setupForm: setupForm,
+	  loginRoute: route.includes("/login"),
+	  homeRoute: route.includes("/home"),
+	  loginForm: loginForm,
    sipModalVisible: sipModalVisible,
    sipRequired: requiredCopy,
    sipSkipVisible: visible(sipSkip),
@@ -680,6 +904,54 @@ func t18WaitSIPRequired(ctx context.Context, cdp *t18CDP) error {
 	}
 }
 
+func t19WaitStandaloneComplete(t *testing.T, ctx context.Context, client t18HTTPClient, cdp *t18CDP) error {
+	t.Helper()
+	for {
+		status, headers, body := client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+		t18AssertResponseSafe(t, headers, body, "", "")
+		phaseComplete := false
+		if status == http.StatusOK {
+			var setupStatus struct {
+				Standalone bool   `json:"standalone"`
+				Phase      string `json:"phase"`
+			}
+			if json.Unmarshal(body, &setupStatus) == nil && setupStatus.Standalone && setupStatus.Phase == "complete" {
+				phaseComplete = true
+			}
+		}
+		state, stateErr := cdp.evalState(ctx)
+		if phaseComplete && stateErr == nil && state.URLScrubbed && state.HomeRoute && state.DashboardVisible && !state.ServerErrorToastVisible {
+			return nil
+		}
+		if err := t18WaitPoll(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func t19ConcreteIPv4(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || len(part) > 3 || (len(part) > 1 && part[0] == '0') {
+			return false
+		}
+		for _, ch := range part {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil || value > 255 {
+			return false
+		}
+	}
+	first, _ := strconv.Atoi(parts[0])
+	return first > 0 && first < 224
+}
+
 func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -689,6 +961,6 @@ func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
 		t.Log("browser DOM state unavailable")
 		return
 	}
-	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
-		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
+	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t home_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
+		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.HomeRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
 }
