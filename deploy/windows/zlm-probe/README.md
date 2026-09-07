@@ -23,6 +23,19 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o z
   -expected-commit '318726bd94f168d988fb2127042e74b4be207fd7'
 ```
 
+只验证服务端 keepalive Hook 的原生状态机时，使用独立的
+`-keepalive-probe` 选项（它不能与 `-shutdown-probe` 同时使用）：
+
+```powershell
+.\zlm-probe.exe -root 'D:\UVP\media' -keepalive-probe
+```
+
+该模式先以空的 `on_server_keepalive` 启动并等待静默窗口，再通过认证的
+`setServerConfig` 热启用并等待真实回调；随后清空配置确认不再回调，最后再次热启用
+确认恢复。它复用同一份隔离资源复制和受控 Hook receiver，标准输出只包含脱敏 JSON，
+并在进程退出后检查隔离日志中是否出现 capability URL。这个探针只验证 Windows 原生
+运行时行为，不代替 C++ 修复或完整业务验收。
+
 探针覆盖：
 
 - 完整资源树复制、可执行文件哈希、中文/空格路径和第二次启动；

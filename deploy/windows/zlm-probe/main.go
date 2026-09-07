@@ -13,18 +13,26 @@ import (
 
 func main() {
 	var opts probeOptions
+	var keepaliveProbe bool
 	flag.StringVar(&opts.root, "root", "", "directory containing MediaServer.exe and its complete runtime resources")
 	flag.StringVar(&opts.executable, "exe", "", "path to MediaServer.exe; it must be inside -root")
 	flag.StringVar(&opts.fixture, "fixture", "", "small H264 MP4 fixture used by the media and recording checks")
 	flag.StringVar(&opts.expectedCommit, "expected-commit", "", "locked ZLMediaKit commit; /index/api/version must report its prefix")
 	flag.BoolVar(&opts.keepTemp, "keep-temp", false, "keep the isolated workspace and process logs after the probe")
 	flag.BoolVar(&opts.shutdownProbe, "shutdown-probe", false, "exercise stdin shutdown with delayed and failing MP4 Hooks")
+	flag.BoolVar(&keepaliveProbe, "keepalive-probe", false, "verify empty, hot-enabled, disabled, and re-enabled server keepalive Hook configuration")
 	flag.Parse()
 
 	var report probeReport
-	if opts.shutdownProbe {
+	switch {
+	case opts.shutdownProbe && keepaliveProbe:
+		report = newReport(opts)
+		report.Checks = append(report.Checks, failedCheck("input", "shutdown-probe and keepalive-probe are mutually exclusive"))
+	case keepaliveProbe:
+		report = runKeepaliveProbe(opts)
+	case opts.shutdownProbe:
 		report = runShutdownProbe(opts)
-	} else {
+	default:
 		report = runProbe(opts)
 	}
 	encoder := json.NewEncoder(os.Stdout)
