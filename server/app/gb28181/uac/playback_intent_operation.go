@@ -236,8 +236,8 @@ func (o *playbackIntentOperation) startReader() {
 		defer readers.Done()
 		for {
 			select {
-			case response := <-o.owned.UnmatchedResponses():
-				o.capture(response)
+			case <-o.owned.BranchChanges():
+				o.refreshBranchInventory()
 			case <-o.owned.WriteErrors():
 				o.lost.Store(true)
 			case <-ctx.Done():
@@ -252,6 +252,7 @@ func (o *playbackIntentOperation) startReader() {
 // or a burst of provisional responses. Only the workflow consumes this signal.
 func (o *playbackIntentOperation) waitResponse(ctx context.Context, finalOnly bool, leaseDone <-chan struct{}) (*sip.Response, error) {
 	for {
+		o.refreshBranchInventory()
 		select {
 		case <-o.stopping:
 			return nil, ErrPlaybackCleanupUnknown
@@ -313,6 +314,7 @@ func (o *playbackIntentOperation) ReadAndAccept(ctx context.Context) (PlaybackDi
 		return PlaybackDialogMetadata{}, err
 	}
 	o.version = stored.Intent.RowVersion
+	o.refreshBranchInventory()
 	if o.lost.Load() || o.lease.Context().Err() != nil || ctx.Err() != nil {
 		return PlaybackDialogMetadata{}, ErrPlaybackCleanupUnknown
 	}
@@ -340,7 +342,8 @@ func (o *playbackIntentOperation) ReadAndAccept(ctx context.Context) (PlaybackDi
 		return PlaybackDialogMetadata{}, err
 	}
 	o.version = stored.Intent.RowVersion
-	if o.lease.Context().Err() != nil || ctx.Err() != nil {
+	o.refreshBranchInventory()
+	if o.lost.Load() || o.lease.Context().Err() != nil || ctx.Err() != nil {
 		o.lost.Store(true)
 		return PlaybackDialogMetadata{}, ErrPlaybackCleanupUnknown
 	}
@@ -476,8 +479,8 @@ func (o *playbackIntentOperation) persistOriginalFacts(ctx context.Context) (pla
 	// win a select over an already queued unsupported branch or write error.
 	for draining := true; draining; {
 		select {
-		case response := <-o.owned.UnmatchedResponses():
-			o.capture(response)
+		case <-o.owned.UnmatchedResponses():
+			// The retained inventory, not this coalesced hint, owns all facts.
 		case <-o.owned.WriteErrors():
 			o.lost.Store(true)
 		default:
@@ -487,9 +490,6 @@ func (o *playbackIntentOperation) persistOriginalFacts(ctx context.Context) (pla
 	o.factMu.Lock()
 	first, unsupported := o.first, o.unsupported
 	o.factMu.Unlock()
-	if unsupported {
-		return playauth.DeviceSIPInviteSteps{}, ErrPlaybackCleanupUnknown
-	}
 	persistCtx, cancel := context.WithTimeout(ctx, playbackTeardownTimeout)
 	defer cancel()
 	loaded, err := o.store.LoadSIPInviteSteps(persistCtx, o.id)
@@ -506,11 +506,29 @@ func (o *playbackIntentOperation) persistOriginalFacts(ctx context.Context) (pla
 		return playauth.DeviceSIPInviteSteps{}, ErrPlaybackCleanupUnknown
 	}
 	if first != nil {
-		loaded, err = observeStoredPlaybackBranch(persistCtx, o.store, o.id, loaded.Intent.RowVersion, o.invite, o.request, first)
+		observed, err := observeStoredPlaybackBranch(persistCtx, o.store, o.id, loaded.Intent.RowVersion, o.invite, o.request, first)
 		if err != nil {
-			return playauth.DeviceSIPInviteSteps{}, errors.Join(ErrPlaybackCleanupUnknown, err)
+			if !errors.Is(err, errPlaybackIntentSnapshot) && !errors.Is(err, playauth.ErrDeviceIntentInvalid) {
+				return playauth.DeviceSIPInviteSteps{}, errors.Join(ErrPlaybackCleanupUnknown, err)
+			}
+			// An invalid first 2xx still leaves durable negative evidence; a
+			// missing Contact must not prevent recording observer incompleteness.
+			observed, err = o.store.ObserveSIPBranchInventoryFault(persistCtx, o.id, loaded.Intent.RowVersion, o.invite.StepID, playauth.SIPBranchObserverIncomplete)
+			if err != nil {
+				return playauth.DeviceSIPInviteSteps{}, errors.Join(ErrPlaybackCleanupUnknown, err)
+			}
 		}
+		loaded = observed
+	}
+	loaded, err = o.persistBranchInventory(persistCtx, loaded)
+	if err != nil {
+		return playauth.DeviceSIPInviteSteps{}, err
 	}
 	o.version = loaded.Intent.RowVersion
+	for _, step := range loaded.Steps {
+		if step.Identity == o.invite && (unsupported || len(step.AdditionalBranches) != 0 || step.BranchInventoryFault != "") {
+			return loaded, ErrPlaybackCleanupUnknown
+		}
+	}
 	return loaded, nil
 }

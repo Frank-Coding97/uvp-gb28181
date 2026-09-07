@@ -12,6 +12,10 @@ import (
 // ownership on any error. This adapter never calls ACK/Close or publishes a
 // dialog; missing or unsupported material remains unresolved.
 func observeStoredPlaybackBranch(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, invite playauth.DeviceSIPInviteIdentity, request *sip.Request, response *sip.Response) (playauth.DeviceSIPInviteSteps, error) {
+	return observeStoredPlaybackBranchWith(ctx, store, id, version, invite, request, response, false)
+}
+
+func observeStoredPlaybackBranchWith(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, invite playauth.DeviceSIPInviteIdentity, request *sip.Request, response *sip.Response, additional bool) (playauth.DeviceSIPInviteSteps, error) {
 	if store == nil || ctx == nil || id.Kind != "playback" || id.TargetScope != "channel" || response == nil || response.StatusCode < 200 || response.StatusCode > 299 {
 		return playauth.DeviceSIPInviteSteps{}, errPlaybackIntentSnapshot
 	}
@@ -44,10 +48,14 @@ func observeStoredPlaybackBranch(ctx context.Context, store *playauth.DeviceOper
 		}
 		routes = append(routes, route.Address.String())
 	}
-	return store.ObserveSIPKnownBranch(ctx, id, version, playauth.DeviceSIPKnownBranchIdentity{
+	identity := playauth.DeviceSIPKnownBranchIdentity{
 		InviteStepID: invite.StepID, CallID: invite.CallID, LocalTag: localTag, RemoteTag: remoteTag,
 		CSeq: invite.CSeq, StatusCode: response.StatusCode, RemoteTarget: contact.Address.String(), RouteSet: routes,
-	})
+	}
+	if additional {
+		return store.ObserveSIPAdditionalBranch(ctx, id, version, identity)
+	}
+	return store.ObserveSIPKnownBranch(ctx, id, version, identity)
 }
 
 func singlePlaybackBranchTag(params sip.HeaderParams) string {

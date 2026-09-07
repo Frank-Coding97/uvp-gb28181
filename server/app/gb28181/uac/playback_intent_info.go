@@ -37,6 +37,7 @@ func (o *playbackIntentOperation) sendINFO(ctx context.Context, command playauth
 		return err
 	}
 	defer o.leave()
+	o.refreshBranchInventory()
 	if !o.ackWritten || o.originalReleased || o.cleanup != nil || o.lost.Load() || o.lease.Context().Err() != nil || (o.info != nil && !o.info.finished) {
 		return ErrPlaybackCleanupUnknown
 	}
@@ -133,6 +134,7 @@ func (o *playbackIntentOperation) runINFO(ctx context.Context, c *playbackIntent
 		return err
 	}
 	o.version = stored.Intent.RowVersion
+	o.refreshBranchInventory()
 	if ctx.Err() != nil || o.lease.Context().Err() != nil || o.lost.Load() {
 		return ErrPlaybackCleanupUnknown
 	}
@@ -148,6 +150,7 @@ func (o *playbackIntentOperation) runINFO(ctx context.Context, c *playbackIntent
 	if err != nil || !samePlaybackCleanupRequest(actual, c.identity.Request) {
 		return errPlaybackIntentSnapshot
 	}
+	o.refreshBranchInventory()
 	if ctx.Err() != nil || o.lease.Context().Err() != nil || o.lost.Load() {
 		return ErrPlaybackCleanupUnknown
 	}
