@@ -177,9 +177,17 @@ func (s *Service) fail(ctx context.Context, sessionID, stage, code string, cause
 		}
 		return nil
 	})
-	started, finalizeErr := s.registry.FinalizeContextOnce(ctx, sessionID, StateFailed, stage+": "+cause.Error())
+	terminal := StateFailed
+	// Close cancels in-flight work before closing the registry. Both racing
+	// paths must classify that cancellation as a stop, not a business failure.
+	if s.lifecycle != nil && s.lifecycle.Err() != nil && errors.Is(cause, context.Canceled) {
+		terminal = StateStopped
+	}
+	started, finalizeErr := s.registry.FinalizeContextOnce(ctx, sessionID, terminal, stage+": "+cause.Error())
 	if started && s.config.Metrics != nil {
-		s.config.Metrics.Failed.Add(1)
+		if terminal == StateFailed {
+			s.config.Metrics.Failed.Add(1)
+		}
 		s.config.Metrics.Cleaned.Add(1)
 	}
 	return &ServiceError{Stage: stage, Code: code, Err: errors.Join(cause, finalizeErr)}
