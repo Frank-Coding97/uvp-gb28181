@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -90,40 +89,4 @@ func applyBaseline(ctx context.Context, db *gorm.DB, version, script, expectedCh
 		return false, err
 	}
 	return created, nil
-}
-
-// BEGIN IMMEDIATE reserves the sole writer before inspecting the marker, so a
-// competing initializer cannot read an empty state and race schema creation.
-func withImmediateTransaction(ctx context.Context, db *gorm.DB, fn func(*gorm.DB, *sql.Conn) error) error {
-	return db.WithContext(ctx).Connection(func(tx *gorm.DB) (err error) {
-		conn, ok := tx.Statement.ConnPool.(*sql.Conn)
-		if !ok {
-			return errors.New("SQLite initialization requires a dedicated connection")
-		}
-		if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-			return err
-		}
-		committed := false
-		defer func() {
-			if !committed {
-				rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if _, rollbackErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); rollbackErr != nil {
-					// Never return an uncertain open transaction to the pool.
-					_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-					err = errors.Join(err, fmt.Errorf("SQLite rollback failed: %w", rollbackErr))
-				}
-			}
-		}()
-		tx = tx.Session(&gorm.Session{NewDB: true, SkipDefaultTransaction: true})
-		tx.Config.PrepareStmt = false
-		if err = fn(tx, conn); err != nil {
-			return err
-		}
-		if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
-			return err
-		}
-		committed = true
-		return nil
-	})
 }
