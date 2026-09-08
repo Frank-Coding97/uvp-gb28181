@@ -3,6 +3,8 @@ package standalone
 import (
 	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,11 +39,45 @@ func loadMaintenanceReleasesWithTrust(installDir, candidateVersion, allowlist st
 	if err != nil {
 		return Release{}, Release{}, err
 	}
-	for _, release := range []Release{current, candidate} {
+	releases, err := loadInstalledMaintenanceReleases(installDir)
+	if err != nil {
+		return Release{}, Release{}, err
+	}
+	for _, release := range releases {
 		digest, err := releaseFileSHA256(release.BackendExe)
 		if err != nil || !trusted[strings.ToLower(digest)] {
 			return Release{}, Release{}, denied
 		}
 	}
 	return current, candidate, nil
+}
+
+func loadInstalledMaintenanceReleases(installDir string) ([]Release, error) {
+	root, err := cleanAbsolute(installDir)
+	if err != nil {
+		return nil, err
+	}
+	directory := filepath.Join(root, "releases")
+	if _, err := ensureReleaseDirectory(directory); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	var releases []Release
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return nil, errors.New("unrecognized object in installed releases")
+		}
+		release, err := LoadReleaseVersion(root, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	if len(releases) == 0 {
+		return nil, errors.New("no installed releases")
+	}
+	return releases, nil
 }

@@ -3,13 +3,14 @@ package standalone
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestMaintenanceCompatibilityRequiresTrustedActualBackends(t *testing.T) {
-	for _, mode := range []string{"trusted", "empty", "old-untrusted", "candidate-untrusted", "malformed", "candidate-tampered"} {
+	for _, mode := range []string{"trusted", "empty", "old-untrusted", "candidate-untrusted", "malformed", "candidate-tampered", "retained-untrusted", "retained-trusted", "retained-invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			old := newTestReleaseFixture(t, "1.2.3-win10")
 			candidate := newTestReleaseFixtureAt(t, old.installDir, "2.0.0-win10", false)
@@ -23,6 +24,19 @@ func TestMaintenanceCompatibilityRequiresTrustedActualBackends(t *testing.T) {
 			oldSHA := old.manifest.Files[0].SHA256
 			candidateSHA := testSHA256(data)
 			trust := oldSHA + "," + candidateSHA
+			if strings.HasPrefix(mode, "retained-") {
+				retained := newTestReleaseFixtureAt(t, old.installDir, "0.9.0-win10", false)
+				retainedData := []byte("retained backend")
+				require.NoError(t, os.WriteFile(filepath.Join(retained.releaseDir, filepath.FromSlash(releaseBackendPath)), retainedData, 0700))
+				retained.manifest.Files[0].SHA256 = testSHA256(retainedData)
+				writeTestReleaseManifest(t, retained)
+				if mode == "retained-trusted" {
+					trust += "," + testSHA256(retainedData)
+				}
+				if mode == "retained-invalid" {
+					require.NoError(t, os.WriteFile(filepath.Join(retained.releaseDir, "manifest.json"), []byte("broken"), 0600))
+				}
+			}
 			switch mode {
 			case "empty":
 				trust = ""
@@ -37,7 +51,7 @@ func TestMaintenanceCompatibilityRequiresTrustedActualBackends(t *testing.T) {
 			}
 			before := maintenanceCompatibilitySnapshot(t, old.installDir)
 			current, next, err := loadMaintenanceReleasesWithTrust(old.installDir, candidate.manifest.Version, trust)
-			if mode == "trusted" {
+			if mode == "trusted" || mode == "retained-trusted" {
 				require.NoError(t, err)
 				require.Equal(t, old.manifest.Version, current.Version)
 				require.Equal(t, candidate.manifest.Version, next.Version)

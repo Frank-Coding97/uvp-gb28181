@@ -2,4 +2,4 @@
 
 package standalone
 
-func backupComponentsStopped(Release) error { return nil }
+func backupComponentsStopped(...Release) error { return nil }

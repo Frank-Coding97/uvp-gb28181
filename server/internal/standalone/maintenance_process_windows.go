@@ -13,8 +13,11 @@ import (
 )
 
 // Called with the installation lock held; never terminates a process.
-func backupComponentsStopped(release Release) error {
-	paths := []string{release.BackendExe, release.RedisExe, release.MediaExe}
+func backupComponentsStopped(releases ...Release) error {
+	var paths []string
+	for _, release := range releases {
+		paths = append(paths, release.BackendExe, release.RedisExe, release.MediaExe)
+	}
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return fmt.Errorf("inspect backup components: %w", err)
