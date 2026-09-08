@@ -882,6 +882,11 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else if playSvc != nil {
 		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
 	}
+	if playSvc != nil && zlmRegistry != nil && zlmScheduler != nil {
+		if err := openAPILivePlayer.Publish(playSvc); err != nil {
+			return fmt.Errorf("OpenAPI 播放运行时上一代尚未退出: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -930,6 +935,9 @@ func stopSIPDependencies(ctx context.Context) error {
 	// Revoke transfer admission before stopping the barrier's runtime. A new
 	// facade is published only after its recovery worker has been registered.
 	gbroutes.SetDeviceTransferBarrier(nil)
+	if err := openAPILivePlayer.Retire(ctx); err != nil {
+		return fmt.Errorf("OpenAPI 播放申请尚未排空，保留依赖等待重试: %w", err)
+	}
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	clearZLMManagementController()

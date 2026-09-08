@@ -82,7 +82,7 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	app.GormDbMysql = db
 	authority := authoritytest.Register(t, db, "")
-	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
+	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
 	for _, sql := range []string{
 		"ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT NULL",
 		"ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT NULL",
