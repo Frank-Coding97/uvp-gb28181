@@ -54,6 +54,11 @@ func TestWindowsUpgradeStoppedTransaction(t *testing.T) {
 		archives, err := filepath.Glob(filepath.Join(root, ".uvp-completed-*", "journal.json"))
 		require.NoError(t, err)
 		require.Len(t, archives, 1)
+		repeatedBackup := destination + "-repeat"
+		require.ErrorContains(t, UpgradeStopped(ctx, root, paths.RecordingsDir, candidate.Version, repeatedBackup), "already selected")
+		require.NoError(t, standalone.CheckMaintenanceGate(root))
+		_, err = os.Stat(repeatedBackup)
+		require.ErrorIs(t, err, os.ErrNotExist)
 	} else {
 		require.Error(t, err)
 		if mode == "media-failure" {

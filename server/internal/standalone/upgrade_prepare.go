@@ -41,6 +41,9 @@ func prepareUpgradeStoppedWithTrust(ctx context.Context, paths Paths, candidateV
 	if err != nil {
 		return nil, err
 	}
+	if current.Version == candidateVersion {
+		return nil, errors.New("candidate version is already selected")
+	}
 	_, releaseIdentity, err := installedMaintenanceReleaseSnapshot(paths.InstallDir)
 	if err != nil {
 		return nil, err

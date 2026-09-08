@@ -11,7 +11,7 @@ import (
 )
 
 func TestUpgradePreparationOwnsWholeBackupTransaction(t *testing.T) {
-	for _, mode := range []string{"complete", "untrusted", "busy", "invalid-destination", "run-marker"} {
+	for _, mode := range []string{"complete", "same-version", "untrusted", "busy", "invalid-destination", "run-marker"} {
 		t.Run(mode, func(t *testing.T) {
 			paths := newBackupTestPaths(t)
 			candidate := newTestReleaseFixtureAt(t, paths.InstallDir, "t25.1", false)
@@ -23,7 +23,10 @@ func TestUpgradePreparationOwnsWholeBackupTransaction(t *testing.T) {
 			require.NoError(t, err)
 			trust := oldSHA + "," + newSHA
 			destination := filepath.Join(filepath.Dir(paths.InstallDir), "transaction-backup")
+			candidateVersion := candidate.manifest.Version
 			switch mode {
+			case "same-version":
+				candidateVersion = current.Version
 			case "untrusted":
 				trust = strings.Repeat("a", 64)
 			case "busy":
@@ -39,7 +42,7 @@ func TestUpgradePreparationOwnsWholeBackupTransaction(t *testing.T) {
 			beforeConfig := maintenanceCompatibilitySnapshot(t, paths.ConfigDir)
 			beforeCurrent, err := releaseFileSHA256(filepath.Join(paths.InstallDir, "current.json"))
 			require.NoError(t, err)
-			prepared, err := prepareUpgradeStoppedWithTrust(context.Background(), paths, candidate.manifest.Version, destination, trust)
+			prepared, err := prepareUpgradeStoppedWithTrust(context.Background(), paths, candidateVersion, destination, trust)
 			if mode == "complete" {
 				require.NoError(t, err)
 				defer prepared.Close()
