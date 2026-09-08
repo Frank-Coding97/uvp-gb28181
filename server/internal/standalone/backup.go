@@ -69,7 +69,7 @@ func BackupStopped(ctx context.Context, paths Paths, destination string) (Backup
 // so an upgrade can establish its next state without admitting another launcher.
 // Paths and destination must already have passed their ordinary validation.
 func backupStoppedOwned(ctx context.Context, paths Paths, destination string) (BackupManifest, error) {
-	return backupStoppedAdmitted(ctx, paths, destination, "", "")
+	return backupStoppedAdmitted(ctx, paths, destination, "", "", "")
 }
 
 func backupPreparingOwned(ctx context.Context, paths Paths, destination, operationID string) (BackupManifest, error) {
@@ -80,10 +80,10 @@ func backupPreparingOwned(ctx context.Context, paths Paths, destination, operati
 	if err != nil {
 		return BackupManifest{}, err
 	}
-	return backupStoppedAdmitted(ctx, paths, validated, operationID, maintenanceBackendSHA256Allowlist)
+	return backupStoppedAdmitted(ctx, paths, validated, operationID, maintenanceBackendSHA256Allowlist, "")
 }
 
-func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operationID, trust string) (BackupManifest, error) {
+func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operationID, trust, expectedReleaseIdentity string) (BackupManifest, error) {
 	var result BackupManifest
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -102,6 +102,9 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 			preparedFingerprint, err = checkPreparingBackupAdmission(paths, destination, operationID, trust)
 			if err != nil {
 				return err
+			}
+			if expectedReleaseIdentity != "" && preparedFingerprint != expectedReleaseIdentity {
+				return errors.New("installed releases changed before preparing backup")
 			}
 		}
 		if _, err := os.Lstat(filepath.Join(paths.DataDir, runMarkerName)); !errors.Is(err, os.ErrNotExist) {

@@ -49,7 +49,7 @@ func TestPreparingBackupAdmissionAndPromotion(t *testing.T) {
 			case "untrusted":
 				trust = strings.Repeat("d", 64)
 			}
-			_, err = backupStoppedAdmitted(context.Background(), paths, destination, operation, trust)
+			_, err = backupStoppedAdmitted(context.Background(), paths, destination, operation, trust, "")
 			if mode == "complete" {
 				require.NoError(t, err)
 				require.NoError(t, promotePreparedMaintenance(context.Background(), paths.InstallDir, operation, destination))
