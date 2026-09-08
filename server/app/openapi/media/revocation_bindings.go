@@ -22,7 +22,8 @@ import (
 var ErrRevocationBindingsUnavailable = errors.New("openapi revocation bindings unavailable")
 
 type FileNodeControlBindings struct {
-	bindings map[string]NodeControlBinding
+	bindings       map[string]NodeControlBinding
+	qualifications map[string]deploymentQualification
 }
 
 type nodeControlFile struct {
@@ -31,15 +32,16 @@ type nodeControlFile struct {
 }
 
 type nodeControlEntry struct {
-	NodeID          int64  `yaml:"node_id"`
-	NodeUUID        string `yaml:"node_uuid"`
-	BindingRevision uint64 `yaml:"binding_revision"`
-	Enabled         bool   `yaml:"enabled"`
-	Endpoint        string `yaml:"endpoint"`
-	CAMode          string `yaml:"ca_mode"`
-	CAPEM           string `yaml:"ca_pem"`
-	SPKISHA256      string `yaml:"spki_sha256"`
-	HookBase        string `yaml:"hook_base"`
+	NodeID          int64                    `yaml:"node_id"`
+	NodeUUID        string                   `yaml:"node_uuid"`
+	BindingRevision uint64                   `yaml:"binding_revision"`
+	Enabled         bool                     `yaml:"enabled"`
+	Endpoint        string                   `yaml:"endpoint"`
+	CAMode          string                   `yaml:"ca_mode"`
+	CAPEM           string                   `yaml:"ca_pem"`
+	SPKISHA256      string                   `yaml:"spki_sha256"`
+	HookBase        string                   `yaml:"hook_base"`
+	Qualification   *deploymentQualification `yaml:"qualification,omitempty"`
 }
 
 // LoadNodeControlBindings takes one bounded startup snapshot. The deployment
@@ -77,7 +79,7 @@ func LoadNodeControlBindings(path string) (*FileNodeControlBindings, error) {
 	if decoder.Decode(&extra) != io.EOF {
 		return nil, ErrRevocationBindingsUnavailable
 	}
-	provider := &FileNodeControlBindings{bindings: make(map[string]NodeControlBinding, len(document.Nodes))}
+	provider := &FileNodeControlBindings{bindings: make(map[string]NodeControlBinding, len(document.Nodes)), qualifications: make(map[string]deploymentQualification)}
 	ids := make(map[int64]bool, len(document.Nodes))
 	for _, entry := range document.Nodes {
 		if entry.NodeID <= 0 || !validBindingNodeUUID(entry.NodeUUID) || entry.BindingRevision == 0 || ids[entry.NodeID] || !validBindingURL(entry.Endpoint, true) || !validBindingURL(entry.HookBase, false) {
@@ -111,6 +113,12 @@ func LoadNodeControlBindings(path string) (*FileNodeControlBindings, error) {
 			return nil, ErrRevocationBindingsUnavailable
 		}
 		provider.bindings[entry.NodeUUID] = binding
+		if entry.Qualification != nil {
+			if !validDeploymentQualification(*entry.Qualification) {
+				return nil, ErrRevocationBindingsUnavailable
+			}
+			provider.qualifications[entry.NodeUUID] = *entry.Qualification
+		}
 		ids[entry.NodeID] = true
 	}
 	return provider, nil
