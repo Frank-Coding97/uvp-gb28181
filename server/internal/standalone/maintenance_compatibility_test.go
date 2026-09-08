@@ -73,6 +73,12 @@ func maintenanceCompatibilitySnapshot(t *testing.T, root string) map[string]stri
 			return err
 		}
 		if !info.IsDir() {
+			// Windows exclusively holds this coordination file during a
+			// transaction. Its bytes are not installation data.
+			if path == filepath.Join(root, ".uvp-instance.lock") {
+				files[path] = "instance lock"
+				return nil
+			}
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
