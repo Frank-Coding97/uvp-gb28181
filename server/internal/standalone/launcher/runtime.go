@@ -135,6 +135,17 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 	if err := standalone.CheckMaintenanceGate(installDir); err != nil {
 		return err
 	}
+	release, err := standalone.LoadRelease(installDir)
+	if err != nil {
+		return err
+	}
+	paths, err := standalone.ResolvePaths(standalone.PathOptions{InstallDir: installDir, ConfigDir: filepath.Join(installDir, "config"), DataDir: filepath.Join(installDir, "data"), ResourceDir: release.ResourceDir, WebDir: release.WebDir, RecordingsDir: recordingsDir})
+	if err != nil {
+		return err
+	}
+	if _, err := standalone.InspectRunMarker(paths); err != nil {
+		return err
+	}
 	job, err := winprocess.NewJob()
 	if err != nil {
 		return err
@@ -145,8 +156,6 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		done    chan struct{}
 	}
 	children := []child{}
-	var release standalone.Release
-	var paths standalone.Paths
 	var config standalone.InstanceConfig
 	var backendAddress string
 	var backendPID int
@@ -200,14 +209,6 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 	}
 	steps.Preflight = func(context.Context) error {
 		var err error
-		release, err = standalone.LoadRelease(installDir)
-		if err != nil {
-			return err
-		}
-		paths, err = standalone.ResolvePaths(standalone.PathOptions{InstallDir: installDir, ConfigDir: filepath.Join(installDir, "config"), DataDir: filepath.Join(installDir, "data"), ResourceDir: release.ResourceDir, WebDir: release.WebDir, RecordingsDir: recordingsDir})
-		if err != nil {
-			return err
-		}
 		for _, dir := range []string{paths.ConfigDir, paths.DataDir, paths.RecordingsDir, paths.LogsDir} {
 			if err = os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
 				return err
