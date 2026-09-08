@@ -12,6 +12,7 @@ import (
 // silently accept a different failure scene after interruption.
 type recoveryJournal struct {
 	Schema               int    `json:"schema"`
+	ContextSHA256        string `json:"context_sha256,omitempty"`
 	OperationID          string `json:"operation_id"`
 	BackupManifestSHA256 string `json:"backup_manifest_sha256"`
 	OldVersion           string `json:"old_version"`
@@ -25,6 +26,9 @@ type recoveryJournal struct {
 }
 
 func recoveryPhaseIndex(phase string) int {
+	if phase == "pointer_unchanged_verified" {
+		return 6
+	}
 	for i, name := range []string{"staging", "staged", "config_isolated", "config_published", "data_isolated", "data_published", "pointer_restored"} {
 		if phase == name {
 			return i
@@ -34,8 +38,11 @@ func recoveryPhaseIndex(phase string) int {
 }
 
 func validateRecoveryJournal(j recoveryJournal) error {
-	if j.Schema != 1 || !validReleaseVersion(j.OldVersion) || recoveryPhaseIndex(j.Phase) < 0 {
+	if (j.Schema != 1 && j.Schema != 2) || !validReleaseVersion(j.OldVersion) || recoveryPhaseIndex(j.Phase) < 0 {
 		return errors.New("invalid recovery metadata")
+	}
+	if (j.Schema == 1 && (j.ContextSHA256 != "" || j.Phase == "pointer_unchanged_verified")) || (j.Schema == 2 && (!validMaintenancePermitHex(j.ContextSHA256) || j.Phase == "pointer_restored")) {
+		return errors.New("invalid recovery operation context")
 	}
 	for _, value := range []string{j.OperationID, j.BackupManifestSHA256, j.OldCurrentSHA256, j.ReleaseSetSHA256} {
 		if !validMaintenancePermitHex(value) {
@@ -68,7 +75,17 @@ func readRecoveryJournal(root string) (recoveryJournal, error) {
 	if err != nil {
 		return j, err
 	}
-	if err := decodeBackupObject(raw, &j, "schema", "operation_id", "backup_manifest_sha256", "old_version", "old_current_sha256", "release_set_sha256", "phase", "staged_config_sha256", "staged_data_sha256", "failed_config_sha256", "failed_data_sha256"); err != nil {
+	var header struct {
+		Schema int `json:"schema"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return j, err
+	}
+	keys := []string{"schema", "operation_id", "backup_manifest_sha256", "old_version", "old_current_sha256", "release_set_sha256", "phase", "staged_config_sha256", "staged_data_sha256", "failed_config_sha256", "failed_data_sha256"}
+	if header.Schema == 2 {
+		keys = append(keys, "context_sha256")
+	}
+	if err := decodeBackupObject(raw, &j, keys...); err != nil {
 		return j, err
 	}
 	return j, validateRecoveryJournal(j)
@@ -88,7 +105,7 @@ func persistRecoveryJournal(root string, expected *recoveryJournal, next recover
 		if err != nil {
 			return err
 		}
-		if outer.OperationID != next.OperationID || outer.BackupManifestSHA256 != next.BackupManifestSHA256 || outer.OldVersion != next.OldVersion || outer.OldCurrentSHA256 != next.OldCurrentSHA256 || outer.ReleaseSetSHA256 != next.ReleaseSetSHA256 {
+		if !recoveryContextMatches(next, outer) || outer.OperationID != next.OperationID || outer.BackupManifestSHA256 != next.BackupManifestSHA256 || outer.OldVersion != next.OldVersion || outer.OldCurrentSHA256 != next.OldCurrentSHA256 || outer.ReleaseSetSHA256 != next.ReleaseSetSHA256 {
 			return errors.New("recovery does not match maintenance operation")
 		}
 		if expected == nil {

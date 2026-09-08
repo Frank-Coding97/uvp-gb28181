@@ -29,6 +29,9 @@ func RestoreStopped(ctx context.Context, paths Paths, run MaintenanceRunner, red
 	if err != nil {
 		return MaintenanceJournal{}, err
 	}
+	if journal.Schema != 1 {
+		return MaintenanceJournal{}, errors.New("unclean recovery must use the recover command")
+	}
 	result, err := restoreStoppedWithRunners(ctx, paths, journal.OperationID, maintenanceBackendSHA256Allowlist, run, recoveryRedisRunner(redis))
 	if err != nil {
 		return MaintenanceJournal{}, err

@@ -38,6 +38,22 @@ func TestRecoveryConfirmCommandRejectsArgumentsAndDoesNotInvokeCore(t *testing.T
 	}
 }
 
+func TestRecoveryConfirmationReviewDistinguishesUncleanSnapshot(t *testing.T) {
+	var out bytes.Buffer
+	err := writeRecoveryConfirmationReview(&out, standalone.RecoveryConfirmationInfo{Kind: "unclean_recovery", OperationID: "fixture-operation", BackupTime: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"异常现场快照时间", "当前版本保持不变", "已重建会话和播放凭据", "设备长期凭据保留自异常现场"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in review", want)
+		}
+	}
+	if strings.Contains(out.String(), "回退到备份") {
+		t.Fatal("unclean recovery misrepresented as historical rollback")
+	}
+}
+
 func TestRecoveryConfirmCommandDisplaysReviewAndPassesSecretOnlyToInjectedCore(t *testing.T) {
 	operation := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	password := "secret-do-not-print"

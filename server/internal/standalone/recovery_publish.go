@@ -33,14 +33,14 @@ func publishRecoveryDirectories(ctx context.Context, root, operation, trust stri
 			if err != nil {
 				return err
 			}
-			if previous.OperationID != operation || previous.BackupManifestSHA256 != outer.BackupManifestSHA256 || previous.OldVersion != outer.OldVersion || previous.OldCurrentSHA256 != outer.OldCurrentSHA256 || previous.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
+			if !recoveryContextMatches(previous, outer) || previous.OperationID != operation || previous.BackupManifestSHA256 != outer.BackupManifestSHA256 || previous.OldVersion != outer.OldVersion || previous.OldCurrentSHA256 != outer.OldCurrentSHA256 || previous.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
 				return errors.New("recovery publication identity mismatch")
 			}
 			phase := recoveryPhaseIndex(previous.Phase)
 			if phase < 1 || phase > 5 {
 				return errors.New("recovery directories are not sealed for publication")
 			}
-			if _, _, err := loadMaintenanceReleasesWithTrust(root, outer.CandidateVersion, trust); err != nil {
+			if _, _, err := loadMaintenanceReleasesWithTrust(root, maintenanceSourceSelection(outer), trust); err != nil {
 				return err
 			}
 			releases, identity, err := installedMaintenanceReleaseSnapshot(root)
@@ -56,7 +56,7 @@ func publishRecoveryDirectories(ctx context.Context, root, operation, trust stri
 			if _, err := os.Lstat(maintenancePermitPath(root)); !errors.Is(err, os.ErrNotExist) {
 				return errors.New("recovery publication has outstanding permit")
 			}
-			if _, err := VerifyBackup(ctx, outer.BackupRoot); err != nil {
+			if _, err := verifyRecoveryBackup(ctx, outer); err != nil {
 				return err
 			}
 			backupSHA, err := releaseFileSHA256(filepath.Join(outer.BackupRoot, backupManifestFile))
@@ -74,7 +74,7 @@ func publishRecoveryDirectories(ctx context.Context, root, operation, trust stri
 			if err != nil {
 				return err
 			}
-			if currentSHA != outer.OldCurrentSHA256 && currentSHA != currentPointerSHA256(candidateRaw) {
+			if currentSHA != outer.OldCurrentSHA256 && (outer.Schema == 2 || currentSHA != currentPointerSHA256(candidateRaw)) {
 				return errors.New("recovery current pointer changed")
 			}
 			if err := checkRecoveryDirectoryState(ctx, root, previous, phase); err != nil {

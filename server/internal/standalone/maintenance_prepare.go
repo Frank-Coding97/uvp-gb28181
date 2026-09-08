@@ -15,6 +15,9 @@ func createPreparingMaintenanceJournal(installDir string, journal MaintenanceJou
 }
 
 func createPreparingMaintenanceJournalWithHook(installDir string, journal MaintenanceJournal, hook func(string) error) error {
+	if journal.Schema != 1 {
+		return errors.New("schema1 preparation requires schema1 maintenance journal")
+	}
 	if journal.Phase != MaintenancePreparing {
 		return errors.New("expected preparing maintenance phase")
 	}

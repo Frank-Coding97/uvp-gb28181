@@ -25,7 +25,7 @@ func promotePreparedMaintenance(ctx context.Context, installDir, operationID, ba
 		if err != nil {
 			return err
 		}
-		if journal.OperationID != operationID || journal.BackupRoot != root || (journal.Phase != MaintenancePreparing && journal.Phase != MaintenanceUpgrading) {
+		if journal.Schema != 1 || journal.OperationID != operationID || journal.BackupRoot != root || (journal.Phase != MaintenancePreparing && journal.Phase != MaintenanceUpgrading) {
 			return errors.New("maintenance preparation identity changed")
 		}
 		currentSHA, err := releaseFileSHA256(filepath.Join(installDir, "current.json"))

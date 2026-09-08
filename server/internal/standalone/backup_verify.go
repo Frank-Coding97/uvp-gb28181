@@ -57,11 +57,34 @@ func VerifyBackup(ctx context.Context, root string) (BackupManifest, error) {
 	if marker.ManifestSHA256 != hex.EncodeToString(sum[:]) {
 		return manifest, errors.New("backup manifest checksum mismatch")
 	}
-	if err := decodeBackupObject(raw, &manifest, "format_version", "version", "source_commit", "created_at", "recordings_dir", "files", "sqlite_source_files", "redis_manifests"); err != nil {
+	fields, err := decodeStrictJSONObject(raw)
+	if err != nil {
 		return manifest, err
 	}
-	if manifest.FormatVersion != 1 || !validReleaseVersion(manifest.Version) || manifest.CreatedAt.IsZero() || strings.TrimSpace(manifest.SourceCommit) == "" {
+	var formatVersion int
+	if formatRaw, ok := fields["format_version"]; !ok {
+		return manifest, errors.New("backup format version is missing")
+	} else if err := decodeReleaseJSON(formatRaw, &formatVersion); err != nil {
+		return manifest, err
+	}
+	baseKeys := []string{"format_version", "version", "source_commit", "created_at", "recordings_dir", "files", "sqlite_source_files", "redis_manifests"}
+	manifestKeys := baseKeys
+	if formatVersion == 2 {
+		manifestKeys = append(append([]string{}, baseKeys...), "kind", "operation_id", "run_marker_sha256", "source_current_sha256")
+	} else if formatVersion != 1 {
+		return manifest, errors.New("unsupported backup format version")
+	}
+	if err := decodeBackupObject(raw, &manifest, manifestKeys...); err != nil {
+		return manifest, err
+	}
+	if manifest.FormatVersion != formatVersion || !validReleaseVersion(manifest.Version) || manifest.CreatedAt.IsZero() || strings.TrimSpace(manifest.SourceCommit) == "" {
 		return manifest, errors.New("invalid backup metadata")
+	}
+	if manifest.FormatVersion == 2 {
+		if manifest.Kind != "unclean_snapshot" || !validMaintenancePermitHex(manifest.OperationID) ||
+			!validMaintenancePermitHex(manifest.RunMarkerSHA256) || !validMaintenancePermitHex(manifest.SourceCurrentSHA256) {
+			return manifest, errors.New("invalid unclean snapshot metadata")
+		}
 	}
 	if _, err := cleanAbsolute(manifest.RecordingsDir); err != nil {
 		return manifest, errors.New("invalid backup recordings reference")
@@ -80,10 +103,6 @@ func VerifyBackup(ctx context.Context, root string) (BackupManifest, error) {
 	}
 	if !sqliteFiles["data/uvp.db"] {
 		return manifest, errors.New("SQLite source reference missing")
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return manifest, err
 	}
 	var rawFiles []json.RawMessage
 	if err := json.Unmarshal(fields["files"], &rawFiles); err != nil {
@@ -175,6 +194,12 @@ func VerifyBackup(ctx context.Context, root string) (BackupManifest, error) {
 	version, err := parseReleaseCurrent(current)
 	if err != nil || version != manifest.Version {
 		return manifest, errors.New("backup version reference mismatch")
+	}
+	if manifest.FormatVersion == 2 {
+		currentSum := sha256.Sum256(current)
+		if manifest.SourceCurrentSHA256 != hex.EncodeToString(currentSum[:]) {
+			return manifest, errors.New("unclean snapshot current pointer mismatch")
+		}
 	}
 	reference, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(releaseReference)))
 	if err != nil {

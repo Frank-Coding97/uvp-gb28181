@@ -11,6 +11,7 @@ import (
 )
 
 type RecoveryConfirmationInfo struct {
+	Kind        string `json:",omitempty"`
 	OperationID string
 	BackupTime  time.Time
 	Impacts     []string
@@ -25,7 +26,15 @@ type RecoveryConfirmationInput struct {
 // ConfirmRecovery requires the launcher to collect credentials and explicit
 // acknowledgement from its local console. No normal component is started.
 func ConfirmRecovery(ctx context.Context, root, operation string, prompt func(RecoveryConfirmationInfo) (RecoveryConfirmationInput, error)) error {
-	return confirmRecoveryWithTrust(ctx, root, operation, maintenanceBackendSHA256Allowlist, prompt)
+	journal, err := ReadMaintenanceJournal(root)
+	if err != nil {
+		return err
+	}
+	trust := maintenanceBackendSHA256Allowlist
+	if journal.Schema == 2 {
+		trust = uncleanRecoveryBackendSHA256Allowlist
+	}
+	return confirmRecoveryWithTrust(ctx, root, operation, trust, prompt)
 }
 
 func confirmRecoveryWithTrust(ctx context.Context, root, operation, trust string, prompt func(RecoveryConfirmationInfo) (RecoveryConfirmationInput, error)) (failure error) {
@@ -51,6 +60,9 @@ func confirmRecoveryWithTrust(ctx context.Context, root, operation, trust string
 		return err
 	}
 	info := RecoveryConfirmationInfo{OperationID: operation, BackupTime: manifest.CreatedAt, Impacts: impacts}
+	if manifest.FormatVersion == 2 {
+		info.Kind = maintenanceKindUnclean
+	}
 	// Bind the receipt to the exact information displayed, including backup time.
 	raw, err := json.Marshal(info)
 	if err != nil {

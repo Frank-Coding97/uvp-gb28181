@@ -35,7 +35,7 @@ func admitInterruptedRecovery(ctx context.Context, root, operation, trust string
 		default:
 			return errors.New("maintenance phase cannot enter interrupted recovery")
 		}
-		if _, _, err := loadMaintenanceReleasesWithTrust(root, outer.CandidateVersion, trust); err != nil {
+		if _, _, err := loadMaintenanceReleasesWithTrust(root, maintenanceSourceSelection(outer), trust); err != nil {
 			return err
 		}
 		releases, identity, err := installedMaintenanceReleaseSnapshot(root)
@@ -48,7 +48,7 @@ func admitInterruptedRecovery(ctx context.Context, root, operation, trust string
 		if err := backupComponentsStopped(releases...); err != nil {
 			return err
 		}
-		manifest, err := VerifyBackup(ctx, outer.BackupRoot)
+		manifest, err := verifyRecoveryBackup(ctx, outer)
 		if err != nil {
 			return err
 		}
@@ -78,7 +78,7 @@ func admitInterruptedRecovery(ctx context.Context, root, operation, trust string
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(current, old) && (outer.Phase == MaintenanceUpgrading || !bytes.Equal(current, candidate)) {
+		if !bytes.Equal(current, old) && (outer.Schema == 2 || outer.Phase == MaintenanceUpgrading || !bytes.Equal(current, candidate)) {
 			return errors.New("interrupted recovery current pointer is inconsistent")
 		}
 		progress, progressErr := readRecoveryJournal(root)
@@ -89,7 +89,7 @@ func admitInterruptedRecovery(ctx context.Context, root, operation, trust string
 			if outer.Phase == MaintenanceUpgrading || outer.Phase == MaintenanceCommitting || (outer.Phase == MaintenanceRestoreRequired && progress.Phase != "staging") {
 				return errors.New("interrupted recovery progress is inconsistent")
 			}
-			if progress.OperationID != operation || progress.BackupManifestSHA256 != backupSHA || progress.OldVersion != outer.OldVersion || progress.OldCurrentSHA256 != outer.OldCurrentSHA256 || progress.ReleaseSetSHA256 != identity {
+			if !recoveryContextMatches(progress, outer) || progress.OperationID != operation || progress.BackupManifestSHA256 != backupSHA || progress.OldVersion != outer.OldVersion || progress.OldCurrentSHA256 != outer.OldCurrentSHA256 || progress.ReleaseSetSHA256 != identity {
 				return errors.New("interrupted recovery progress identity mismatch")
 			}
 		} else if outer.Phase == MaintenanceRestoring {
@@ -135,6 +135,9 @@ func retireInterruptedRecoveryPermit(ctx context.Context, root string, outer Mai
 	}
 	selection := outer
 	if outer.Phase == MaintenanceRestoreRequired {
+		if outer.Schema == 2 {
+			return errInvalidMaintenancePermit
+		}
 		if progress.Phase != "" {
 			return errInvalidMaintenancePermit
 		}

@@ -28,14 +28,18 @@ type BackupFile struct {
 }
 
 type BackupManifest struct {
-	FormatVersion  int          `json:"format_version"`
-	Version        string       `json:"version"`
-	SourceCommit   string       `json:"source_commit"`
-	CreatedAt      time.Time    `json:"created_at"`
-	RecordingsDir  string       `json:"recordings_dir"`
-	Files          []BackupFile `json:"files"`
-	SQLiteFiles    []string     `json:"sqlite_source_files"`
-	RedisManifests []string     `json:"redis_manifests"`
+	FormatVersion       int          `json:"format_version"`
+	Version             string       `json:"version"`
+	SourceCommit        string       `json:"source_commit"`
+	CreatedAt           time.Time    `json:"created_at"`
+	RecordingsDir       string       `json:"recordings_dir"`
+	Files               []BackupFile `json:"files"`
+	SQLiteFiles         []string     `json:"sqlite_source_files"`
+	RedisManifests      []string     `json:"redis_manifests"`
+	Kind                string       `json:"kind,omitempty"`
+	OperationID         string       `json:"operation_id,omitempty"`
+	RunMarkerSHA256     string       `json:"run_marker_sha256,omitempty"`
+	SourceCurrentSHA256 string       `json:"source_current_sha256,omitempty"`
 }
 
 type backupCompleteMarker struct {
@@ -93,24 +97,39 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 			return err
 		}
 		var preparedFingerprint string
+		var preparedJournal MaintenanceJournal
+		uncleanSnapshot := false
 		if operationID == "" {
 			if err := CheckMaintenanceGate(paths.InstallDir); err != nil {
 				return err
 			}
 		} else {
 			var err error
-			preparedFingerprint, err = checkPreparingBackupAdmission(paths, destination, operationID, trust)
+			preparedFingerprint, err = checkPreparingBackupAdmissionContext(ctx, paths, destination, operationID, trust)
 			if err != nil {
 				return err
 			}
+			preparedJournal, err = ReadMaintenanceJournal(paths.InstallDir)
+			if err != nil {
+				return err
+			}
+			uncleanSnapshot = preparedJournal.Schema == 2 && preparedJournal.Kind == maintenanceKindUnclean
 			if expectedReleaseIdentity != "" && preparedFingerprint != expectedReleaseIdentity {
 				return errors.New("installed releases changed before preparing backup")
 			}
 		}
-		if _, err := os.Lstat(filepath.Join(paths.DataDir, runMarkerName)); !errors.Is(err, os.ErrNotExist) {
-			return errors.New("backup requires a clean stopped instance without a run marker")
+		if !uncleanSnapshot {
+			if _, err := os.Lstat(filepath.Join(paths.DataDir, runMarkerName)); !errors.Is(err, os.ErrNotExist) {
+				return errors.New("backup requires a clean stopped instance without a run marker")
+			}
 		}
-		release, err := LoadRelease(paths.InstallDir)
+		var release Release
+		var err error
+		if uncleanSnapshot {
+			release, err = LoadReleaseVersion(paths.InstallDir, preparedJournal.OldVersion)
+		} else {
+			release, err = LoadRelease(paths.InstallDir)
+		}
 		if err != nil {
 			return err
 		}
@@ -127,6 +146,13 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 			}
 		}()
 		result = BackupManifest{FormatVersion: 1, Version: release.Version, SourceCommit: release.SourceCommit, CreatedAt: time.Now().UTC(), RecordingsDir: filepath.Clean(paths.RecordingsDir)}
+		if uncleanSnapshot {
+			result.FormatVersion = 2
+			result.Kind = "unclean_snapshot"
+			result.OperationID = preparedJournal.OperationID
+			result.RunMarkerSHA256 = preparedJournal.RunMarkerSHA256
+			result.SourceCurrentSHA256 = preparedJournal.OldCurrentSHA256
+		}
 		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
 			path := paths.DatabasePath + suffix
 			f, err := backupOpenSource(path, true)
@@ -139,13 +165,17 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 			held[filepath.Clean(path)] = f
 			result.SQLiteFiles = append(result.SQLiteFiles, "data/"+filepath.Base(path))
 		}
-		staging, err := os.MkdirTemp(filepath.Dir(destination), ".uvp-backup-")
+		stagingPrefix := ".uvp-backup-"
+		if uncleanSnapshot {
+			stagingPrefix = ".uvp-unclean-snapshot-"
+		}
+		staging, err := os.MkdirTemp(filepath.Dir(destination), stagingPrefix)
 		if err != nil {
 			return err
 		}
 		published := false
 		defer func() {
-			if !published {
+			if !published && !uncleanSnapshot {
 				os.RemoveAll(staging)
 			}
 		}()
@@ -170,12 +200,27 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 		if err != nil {
 			return err
 		}
-		if err := backupCheckSQLite(ctx, filepath.Join(staging, "data", "uvp.db")); err != nil {
+		var sqliteCheck func(context.Context, string) error = backupCheckSQLite
+		if uncleanSnapshot {
+			sqliteCheck = backupCheckSQLiteReadOnly
+		}
+		if err := sqliteCheck(ctx, filepath.Join(staging, "data", "uvp.db")); err != nil {
 			return err
 		}
 		result.Files, err = backupInventory(ctx, staging)
 		if err != nil {
 			return err
+		}
+		// The final schema-2 source-tree proof hashes the active SQLite family
+		// again. Windows cannot open those files while the copy handles still
+		// have exclusive sharing, so close them only after every copy/checksum
+		// operation has completed. InstanceLock and ConfigLock remain held for
+		// the entire close-and-recheck window. Ordinary Format1 backups retain
+		// their existing deferred-close behavior.
+		if uncleanSnapshot {
+			if err := closeBackupSources(held); err != nil {
+				return err
+			}
 		}
 		raw, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
@@ -193,7 +238,7 @@ func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operat
 			return err
 		}
 		if operationID != "" {
-			fingerprint, err := checkPreparingBackupAdmission(paths, destination, operationID, trust)
+			fingerprint, err := checkPreparingBackupAdmissionContext(ctx, paths, destination, operationID, trust)
 			if err != nil {
 				return err
 			}
@@ -359,6 +404,44 @@ func backupCheckSQLite(ctx context.Context, path string) error {
 		return errors.New("backup SQLite integrity check failed")
 	}
 	return closeErr
+}
+
+// backupCheckSQLiteReadOnly verifies an exceptional snapshot through a
+// protected disposable SQLite family. Opening the staged database directly
+// with the normal driver may create or checkpoint WAL sidecars, which would
+// change the forensic bytes that the snapshot is meant to preserve.
+func backupCheckSQLiteReadOnly(ctx context.Context, path string) error {
+	if ctx == nil {
+		return errors.New("backup SQLite integrity context is required")
+	}
+	db, cleanup, err := openRecoveryAuthorizationDatabase(ctx, path)
+	if err != nil {
+		return fmt.Errorf("backup SQLite integrity: %w", err)
+	}
+	defer cleanup()
+	var integrity string
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil {
+		return fmt.Errorf("backup SQLite integrity: %w", err)
+	}
+	if integrity != "ok" {
+		return errors.New("backup SQLite integrity check failed")
+	}
+	return nil
+}
+
+func closeBackupSources(held map[string]*os.File) error {
+	var failure error
+	for path, file := range held {
+		if file == nil {
+			delete(held, path)
+			continue
+		}
+		if err := file.Close(); err != nil && failure == nil {
+			failure = fmt.Errorf("close backup SQLite source %s: %w", filepath.Base(path), err)
+		}
+		delete(held, path)
+	}
+	return failure
 }
 
 func backupInventory(ctx context.Context, root string) ([]BackupFile, error) {

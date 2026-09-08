@@ -20,6 +20,11 @@ func restoreStoppedWithRunners(ctx context.Context, paths Paths, operation, trus
 		return result, err
 	}
 	defer func() { failure = errors.Join(failure, lock.Close()) }()
+	return restoreStoppedOwnedWithRunners(ctx, paths, operation, trust, run, redis)
+}
+
+func restoreStoppedOwnedWithRunners(ctx context.Context, paths Paths, operation, trust string, run MaintenanceRunner, redis recoveryRedisRunner) (MaintenanceJournal, error) {
+	var result MaintenanceJournal
 	outer, err := admitInterruptedRecovery(ctx, paths.InstallDir, operation, trust, backupPublish)
 	if err != nil {
 		return result, err
@@ -40,12 +45,12 @@ func restoreStoppedWithRunners(ctx context.Context, paths Paths, operation, trus
 			return result, err
 		}
 	}
-	if j.Phase != "pointer_restored" {
+	if j.Phase != recoveryFinalPhase(outer) {
 		if err := publishRecoveryDirectories(ctx, paths.InstallDir, operation, trust, nil); err != nil {
 			return result, err
 		}
 	}
-	if err := restoreRecoveryCurrent(ctx, paths.InstallDir, operation, trust, nil); err != nil {
+	if err := finishRecoveryPointer(ctx, paths.InstallDir, operation, trust, outer); err != nil {
 		return result, err
 	}
 	if err := ctx.Err(); err != nil {

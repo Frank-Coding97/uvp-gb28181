@@ -28,10 +28,10 @@ func verifyRecoveryConfirmation(ctx context.Context, root, operation, trust stri
 	if err != nil {
 		return empty, manifest, err
 	}
-	if j.Phase != "pointer_restored" || j.OperationID != operation || j.BackupManifestSHA256 != outer.BackupManifestSHA256 || j.OldVersion != outer.OldVersion || j.OldCurrentSHA256 != outer.OldCurrentSHA256 || j.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
+	if !recoveryContextMatches(j, outer) || j.Phase != recoveryFinalPhase(outer) || j.OperationID != operation || j.BackupManifestSHA256 != outer.BackupManifestSHA256 || j.OldVersion != outer.OldVersion || j.OldCurrentSHA256 != outer.OldCurrentSHA256 || j.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
 		return empty, manifest, errors.New("recovery confirmation identity mismatch")
 	}
-	if _, _, err := loadMaintenanceReleasesWithTrust(root, outer.CandidateVersion, trust); err != nil {
+	if _, _, err := loadMaintenanceReleasesWithTrust(root, maintenanceSourceSelection(outer), trust); err != nil {
 		return empty, manifest, err
 	}
 	releases, identity, err := installedMaintenanceReleaseSnapshot(root)
@@ -47,7 +47,7 @@ func verifyRecoveryConfirmation(ctx context.Context, root, operation, trust stri
 	if _, err := os.Lstat(maintenancePermitPath(root)); !errors.Is(err, os.ErrNotExist) {
 		return empty, manifest, errors.New("recovery confirmation has outstanding permit")
 	}
-	manifest, err = VerifyBackup(ctx, outer.BackupRoot)
+	manifest, err = verifyRecoveryBackup(ctx, outer)
 	if err != nil {
 		return empty, manifest, err
 	}
@@ -122,32 +122,34 @@ func archiveRecoveryConfirmation(ctx context.Context, root, operation, trust str
 		} else {
 			return err
 		}
-		// Cover the entire retained gate including failed data, work, journal,
-		// and receipt; successful rename alone is insufficient evidence.
-		identity, err := recoveryTreeIdentity(ctx, source)
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		renameErr := rename(source, target)
-		_, sourceErr := os.Lstat(source)
-		if !errors.Is(sourceErr, os.ErrNotExist) {
-			return errors.Join(renameErr, errors.New("recovery gate remains present or inaccessible"))
-		}
-		// Do not let cancellation after the rename skip the safety check.
-		actual, archiveErr := recoveryTreeIdentity(context.Background(), target)
-		if archiveErr == nil && actual == identity {
-			return nil
-		}
-		// Preserve the archive even if invalid, and restore a fail-closed gate.
-		if err := os.Mkdir(source, 0700); err != nil && !errors.Is(err, os.ErrExist) {
-			return errors.Join(renameErr, archiveErr, err)
-		}
-		if err := protectConfigDir(source, true); err != nil {
-			return err
-		}
-		return errors.Join(renameErr, archiveErr, errors.New("recovery archive invalid; startup gate restored"))
+		return publishRecoveryArchive(ctx, source, target, rename)
 	})
+}
+
+// Both callers hold InstanceLock and ConfigLock and have just proved either
+// administrator acknowledgement or a strictly pristine first installation.
+func publishRecoveryArchive(ctx context.Context, source, target string, rename func(string, string) error) error {
+	identity, err := recoveryTreeIdentity(ctx, source)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	renameErr := rename(source, target)
+	_, sourceErr := os.Lstat(source)
+	if !errors.Is(sourceErr, os.ErrNotExist) {
+		return errors.Join(renameErr, errors.New("recovery gate remains present or inaccessible"))
+	}
+	actual, archiveErr := recoveryTreeIdentity(context.Background(), target)
+	if archiveErr == nil && actual == identity {
+		return nil
+	}
+	if err := os.Mkdir(source, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return errors.Join(renameErr, archiveErr, err)
+	}
+	if err := protectConfigDir(source, true); err != nil {
+		return err
+	}
+	return errors.Join(renameErr, archiveErr, errors.New("recovery archive invalid; startup gate restored"))
 }

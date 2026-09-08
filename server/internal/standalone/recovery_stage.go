@@ -36,7 +36,7 @@ func prepareRecoveryStageWithSpace(ctx context.Context, paths Paths, operation, 
 	if outer.OperationID != operation || (outer.Phase != MaintenanceRestoreRequired && outer.Phase != MaintenanceRestoring) {
 		return empty, errors.New("invalid recovery staging operation")
 	}
-	if _, _, err := loadMaintenanceReleasesWithTrust(root, outer.CandidateVersion, trust); err != nil {
+	if _, _, err := loadMaintenanceReleasesWithTrust(root, maintenanceSourceSelection(outer), trust); err != nil {
 		return empty, err
 	}
 	releases, identity, err := installedMaintenanceReleaseSnapshot(root)
@@ -52,7 +52,7 @@ func prepareRecoveryStageWithSpace(ctx context.Context, paths Paths, operation, 
 	if _, err := os.Lstat(maintenancePermitPath(root)); !errors.Is(err, os.ErrNotExist) {
 		return empty, errors.New("recovery staging has outstanding permit")
 	}
-	manifest, err := VerifyBackup(ctx, outer.BackupRoot)
+	manifest, err := verifyRecoveryBackup(ctx, outer)
 	if err != nil {
 		return empty, err
 	}
@@ -84,14 +84,14 @@ func prepareRecoveryStageWithSpace(ctx context.Context, paths Paths, operation, 
 				return empty, errors.New("unowned recovery work already exists")
 			}
 		}
-		j = recoveryJournal{Schema: 1, OperationID: operation, BackupManifestSHA256: outer.BackupManifestSHA256, OldVersion: outer.OldVersion, OldCurrentSHA256: outer.OldCurrentSHA256, ReleaseSetSHA256: identity, Phase: "staging"}
+		j = recoveryJournal{Schema: outer.Schema, ContextSHA256: recoveryContextSHA256(outer), OperationID: operation, BackupManifestSHA256: outer.BackupManifestSHA256, OldVersion: outer.OldVersion, OldCurrentSHA256: outer.OldCurrentSHA256, ReleaseSetSHA256: identity, Phase: "staging"}
 		if err := persistRecoveryJournal(root, nil, j); err != nil {
 			return empty, err
 		}
 	} else if readErr != nil {
 		return empty, readErr
 	}
-	if j.OperationID != operation || j.BackupManifestSHA256 != backupSHA || j.OldVersion != outer.OldVersion || j.OldCurrentSHA256 != outer.OldCurrentSHA256 || j.ReleaseSetSHA256 != identity {
+	if !recoveryContextMatches(j, outer) || j.OperationID != operation || j.BackupManifestSHA256 != backupSHA || j.OldVersion != outer.OldVersion || j.OldCurrentSHA256 != outer.OldCurrentSHA256 || j.ReleaseSetSHA256 != identity {
 		return empty, errors.New("recovery staging identity mismatch")
 	}
 	if j.Phase == "staged" {
@@ -122,6 +122,9 @@ func prepareRecoveryStageWithSpace(ctx context.Context, paths Paths, operation, 
 	dataSHA, err := recoveryTreeIdentity(ctx, paths.DataDir)
 	if err != nil {
 		return empty, err
+	}
+	if outer.Schema == 2 && (configSHA != outer.SourceConfigSHA256 || dataSHA != outer.SourceDataSHA256) {
+		return empty, errors.New("unclean source changed before staging")
 	}
 	if _, err := os.Lstat(work); err == nil {
 		if _, err := recoveryTreeIdentity(ctx, work); err != nil {

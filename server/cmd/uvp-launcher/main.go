@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
+	"uvplatform.cn/uvp-gb28181/internal/standalone"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/launcher"
 )
 
@@ -33,6 +36,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(runRestoreCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "recover" {
+		os.Exit(runUncleanRecoveryCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "recovery-confirm" {
 		os.Exit(runRecoveryConfirmCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
@@ -60,16 +66,11 @@ func main() {
 	defer cancel()
 	componentReadyPrinted := false
 	managementURLPrinted := false
-	previousUncleanPrinted := false
 	err = launcher.LaunchWithBrowser(ctx, *root, *recordings, func(status launcher.Status) {
 		if status.State == launcher.Ready {
 			if !componentReadyPrinted {
 				componentReadyPrinted = true
 				fmt.Println("基础组件已就绪")
-			}
-			if status.PreviousUnclean && !previousUncleanPrinted {
-				fmt.Println("检测到上次异常退出；本次启动检查已通过，录像完整性仍需核对")
-				previousUncleanPrinted = true
 			}
 			if managementURL, ok := takeManagementURL(&managementURLPrinted, status); ok {
 				fmt.Println("管理地址：", managementURL)
@@ -90,9 +91,20 @@ func main() {
 		}
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "启动器退出：", err)
+		writeLaunchFailure(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func writeLaunchFailure(stderr io.Writer, err error) {
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	if errors.Is(err, standalone.ErrUncleanRecoveryRequired) {
+		fmt.Fprintln(stderr, "检测到上次异常退出，请先运行：UVP.exe recover --snapshot <安装目录外的新目录>")
+		return
+	}
+	fmt.Fprintln(stderr, "启动器退出：", err)
 }
 
 func displayBusinessReason(reason string) string {

@@ -218,6 +218,15 @@ func validateMaintenancePermitSelection(journal MaintenanceJournal, purpose, ver
 	if strings.TrimSpace(purpose) == "" || !validReleaseVersion(version) {
 		return errInvalidMaintenancePermit
 	}
+	if journal.Schema == 2 {
+		if journal.Kind != maintenanceKindUnclean || journal.Phase != MaintenanceRestoring || version != journal.OldVersion || (purpose != "revoke_sessions" && purpose != "db_check") {
+			return errInvalidMaintenancePermit
+		}
+		return nil
+	}
+	if journal.Schema != 1 {
+		return errInvalidMaintenancePermit
+	}
 	candidatePhase := journal.Phase == MaintenanceUpgrading || journal.Phase == MaintenanceCommitting
 	restorePhase := journal.Phase == MaintenanceRestoring
 	candidatePurpose := purpose == "bootstrap_db" || purpose == "migrate_up" || purpose == "db_check" || purpose == "candidate_health"

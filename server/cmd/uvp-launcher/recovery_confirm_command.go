@@ -70,7 +70,11 @@ func writeRecoveryConfirmationReview(out io.Writer, info standalone.RecoveryConf
 	if _, err := fmt.Fprintf(out, "操作编号：%s\n", info.OperationID); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "备份时间：%s\n", info.BackupTime.Format(time.RFC3339)); err != nil {
+	timeLabel := "备份时间"
+	if info.Kind == "unclean_recovery" {
+		timeLabel = "异常现场快照时间"
+	}
+	if _, err := fmt.Fprintf(out, "%s：%s\n", timeLabel, info.BackupTime.Format(time.RFC3339)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(out, "影响范围："); err != nil {
@@ -86,6 +90,10 @@ func writeRecoveryConfirmationReview(out io.Writer, info standalone.RecoveryConf
 				return err
 			}
 		}
+	}
+	if info.Kind == "unclean_recovery" {
+		_, err := fmt.Fprintln(out, "当前版本保持不变；已重建会话和播放凭据。设备长期凭据保留自异常现场，请核对设备注册状态。")
+		return err
 	}
 	_, err := fmt.Fprintln(out, "长期设备凭据可能回退到备份时状态，恢复后请重新核对设备注册信息。")
 	return err

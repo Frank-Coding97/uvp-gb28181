@@ -27,11 +27,14 @@ func restoreRecoveryCurrent(ctx context.Context, root, operation, trust string, 
 		if outer.OperationID != operation || outer.Phase != MaintenanceRestoring {
 			return errors.New("pointer restoration requires owning restore operation")
 		}
+		if outer.Schema != 1 {
+			return errors.New("unclean recovery must not restore a version pointer")
+		}
 		previous, err = readRecoveryJournal(root)
 		if err != nil {
 			return err
 		}
-		if previous.OperationID != operation || previous.BackupManifestSHA256 != outer.BackupManifestSHA256 || previous.OldVersion != outer.OldVersion || previous.OldCurrentSHA256 != outer.OldCurrentSHA256 || previous.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
+		if !recoveryContextMatches(previous, outer) || previous.OperationID != operation || previous.BackupManifestSHA256 != outer.BackupManifestSHA256 || previous.OldVersion != outer.OldVersion || previous.OldCurrentSHA256 != outer.OldCurrentSHA256 || previous.ReleaseSetSHA256 != outer.ReleaseSetSHA256 {
 			return errors.New("recovery pointer identity mismatch")
 		}
 		if previous.Phase != "data_published" && previous.Phase != "pointer_restored" {
@@ -53,7 +56,7 @@ func restoreRecoveryCurrent(ctx context.Context, root, operation, trust string, 
 		if _, err := os.Lstat(maintenancePermitPath(root)); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("recovery pointer has outstanding permit")
 		}
-		if _, err := VerifyBackup(ctx, outer.BackupRoot); err != nil {
+		if _, err := verifyRecoveryBackup(ctx, outer); err != nil {
 			return err
 		}
 		backupSHA, err := releaseFileSHA256(filepath.Join(outer.BackupRoot, backupManifestFile))
