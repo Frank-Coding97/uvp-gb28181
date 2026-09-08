@@ -49,6 +49,74 @@ func TestLoadReleaseAcceptsVerifiedManifest(t *testing.T) {
 	require.Equal(t, filepath.Join(fixture.releaseDir, "resource"), release.ResourceDir)
 }
 
+func TestLoadReleaseVersionAcceptsCandidateWithoutChangingCurrent(t *testing.T) {
+	current := newTestReleaseFixture(t, "1.2.3-win10")
+	candidate := newTestReleaseFixtureAt(t, current.installDir, "2.0.0-win10", false)
+	currentPath := filepath.Join(current.installDir, "current.json")
+	currentBefore, err := os.ReadFile(currentPath)
+	require.NoError(t, err)
+
+	release, err := LoadReleaseVersion(current.installDir, candidate.manifest.Version)
+
+	require.NoError(t, err)
+	require.Equal(t, candidate.manifest.Version, release.Version)
+	require.Equal(t, candidate.releaseDir, release.ReleaseDir)
+	currentAfter, err := os.ReadFile(currentPath)
+	require.NoError(t, err)
+	require.Equal(t, currentBefore, currentAfter)
+}
+
+func TestLoadReleaseVersionRejectsInvalidCandidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		mutate  func(*testReleaseFixture)
+	}{
+		{name: "relative escape", version: "../outside"},
+		{name: "absolute path", version: "/absolute/candidate"},
+		{name: "invalid version", version: "bad/version"},
+		{name: "missing candidate", version: "missing-candidate"},
+		{
+			name:    "bad hash",
+			version: "2.0.0-win10",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.Files[0].SHA256 = "not-a-sha256"
+			},
+		},
+		{
+			name:    "unsupported schema",
+			version: "2.0.0-win10",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.SchemaMax = 4
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := newTestReleaseFixture(t, "1.2.3-win10")
+			candidate := newTestReleaseFixtureAt(t, current.installDir, "2.0.0-win10", false)
+			if tt.mutate != nil {
+				tt.mutate(&candidate)
+				writeTestReleaseManifest(t, candidate)
+			}
+
+			_, err := LoadReleaseVersion(current.installDir, tt.version)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLoadReleaseVersionDoesNotRequireCurrentPointer(t *testing.T) {
+	fixture := newTestReleaseFixture(t, "candidate-only")
+	current := filepath.Join(fixture.installDir, "current.json")
+	require.NoError(t, os.Remove(current))
+	_, err := LoadReleaseVersion(fixture.installDir, fixture.manifest.Version)
+	require.NoError(t, err)
+	_, err = os.Stat(current)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestLoadReleaseAcceptsSchemaV3Only(t *testing.T) {
 	fixture := newTestReleaseFixture(t, "1.2.3-win10")
 	fixture.manifest.SchemaMin = 3
@@ -347,6 +415,11 @@ func TestLoadReleaseRejectsSymlinkedResourceDirectory(t *testing.T) {
 func newTestReleaseFixture(t *testing.T, version string) testReleaseFixture {
 	t.Helper()
 	installDir := filepath.Join(t.TempDir(), "UVP 发布包 中文 # spaces")
+	return newTestReleaseFixtureAt(t, installDir, version, true)
+}
+
+func newTestReleaseFixtureAt(t *testing.T, installDir, version string, writeCurrent bool) testReleaseFixture {
+	t.Helper()
 	releaseDir := filepath.Join(installDir, "releases", version)
 	for _, dir := range []string{
 		installDir,
@@ -385,7 +458,9 @@ func newTestReleaseFixture(t *testing.T, version string) testReleaseFixture {
 		require.NoError(t, os.WriteFile(path, file.Data, 0o600))
 	}
 	writeTestReleaseManifest(t, fixture)
-	require.NoError(t, os.WriteFile(filepath.Join(installDir, "current.json"), []byte(`{"version":"`+version+`"}`+"\n"), 0o600))
+	if writeCurrent {
+		require.NoError(t, os.WriteFile(filepath.Join(installDir, "current.json"), []byte(`{"version":"`+version+`"}`+"\n"), 0o600))
+	}
 	return fixture
 }
 

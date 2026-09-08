@@ -56,12 +56,9 @@ type releaseManifestFile struct {
 // LoadRelease reads and verifies the immutable release selected by current.json.
 // It does not create files, execute binaries, or fetch anything from a network.
 func LoadRelease(installDir string) (Release, error) {
-	root, err := cleanAbsolute(installDir)
+	root, err := releaseRoot(installDir)
 	if err != nil {
-		return Release{}, fmt.Errorf("release install directory: %w", err)
-	}
-	if _, err := ensureReleaseDirectory(root); err != nil {
-		return Release{}, fmt.Errorf("release install directory: %w", err)
+		return Release{}, err
 	}
 
 	currentPath := filepath.Join(root, "current.json")
@@ -76,7 +73,35 @@ func LoadRelease(installDir string) (Release, error) {
 	if err != nil {
 		return Release{}, fmt.Errorf("release current pointer: %w", err)
 	}
+	return loadReleaseVersion(root, version)
+}
 
+// LoadReleaseVersion reads and verifies a specific immutable release directory.
+// It does not read or modify current.json, execute binaries, or fetch anything
+// from a network.
+func LoadReleaseVersion(installDir, version string) (Release, error) {
+	root, err := releaseRoot(installDir)
+	if err != nil {
+		return Release{}, err
+	}
+	return loadReleaseVersion(root, version)
+}
+
+func releaseRoot(installDir string) (string, error) {
+	root, err := cleanAbsolute(installDir)
+	if err != nil {
+		return "", fmt.Errorf("release install directory: %w", err)
+	}
+	if _, err := ensureReleaseDirectory(root); err != nil {
+		return "", fmt.Errorf("release install directory: %w", err)
+	}
+	return root, nil
+}
+
+func loadReleaseVersion(root, version string) (Release, error) {
+	if !validReleaseVersion(version) {
+		return Release{}, fmt.Errorf("release version: %w", errInvalidRelease)
+	}
 	releasesRoot := filepath.Join(root, "releases")
 	if _, err := ensureReleaseChild(root, releasesRoot, true); err != nil {
 		return Release{}, fmt.Errorf("release root: %w", err)
