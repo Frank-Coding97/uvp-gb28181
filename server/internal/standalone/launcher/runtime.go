@@ -332,7 +332,7 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		}
 		mediaInput = output
 		defer input.Close()
-		if _, mediaDone, err = start("media", release.MediaExe, paths.ConfigDir, []string{"-c", filepath.Base(config.ZLMConfigPath), "--affinity", "0", "--uvp-stdin-control"}, input, true); err != nil {
+		if _, mediaDone, err = start("media", release.MediaExe, paths.ConfigDir, mediaArguments(paths, config), input, true); err != nil {
 			return err
 		}
 		return awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error {
@@ -528,6 +528,10 @@ func checkPorts(addresses []string, media ...[]standalone.MediaListener) error {
 		resources = append(resources, resource)
 	}
 	return nil
+}
+
+func mediaArguments(paths standalone.Paths, config standalone.InstanceConfig) []string {
+	return []string{"-c", filepath.Base(config.ZLMConfigPath), "--affinity", "0", "--uvp-stdin-control", "--log-dir", filepath.Join(paths.LogsDir, "media")}
 }
 
 func awaitReady(ctx context.Context, exits <-chan error, timeout time.Duration, probe func(context.Context) error) error {
