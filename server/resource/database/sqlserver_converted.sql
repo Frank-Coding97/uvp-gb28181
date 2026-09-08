@@ -544,66 +544,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
--- 登录审计事件与操作菜单 seed。
-IF OBJECT_ID(N'sys_login_logs', N'U') IS NULL CREATE TABLE [sys_login_logs] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,[user_id] BIGINT NULL,[username] NVARCHAR(100) NOT NULL,[result] NVARCHAR(16) NOT NULL,[failure_reason] NVARCHAR(48) NULL,[ip] NVARCHAR(50) NOT NULL DEFAULT N'',[location] NVARCHAR(100) NOT NULL DEFAULT N'未知',[user_agent] NVARCHAR(500) NOT NULL DEFAULT N'',[browser] NVARCHAR(100) NOT NULL DEFAULT N'未知',[os] NVARCHAR(100) NOT NULL DEFAULT N'未知',[created_at] DATETIME2 NOT NULL,[updated_at] DATETIME2 NULL,[deleted_at] DATETIME2 NULL);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_login_logs_created_at' AND object_id=OBJECT_ID(N'sys_login_logs')) CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (341,N'登录日志列表',N'/api/sysLoginLog/list',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,N'登录日志详情',N'/api/sysLoginLog/:id',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,N'删除登录日志',N'/api/sysLoginLog/delete',N'DELETE',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,N'清空登录日志',N'/api/sysLoginLog/clear',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,N'解锁登录账号',N'/api/sysLoginLog/unlock',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140384,10,N'/system/login-log',N'SystemLoginLog',N'system/login-log/index',N'登录日志',0,0,1,2,N'system:login-log:list',N'lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140385,140384,N'',N'SystemLoginLogDelete',N'',N'删除登录日志',1,0,1,3,N'system:login-log:delete',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140386,140384,N'',N'SystemLoginLogClear',N'',N'清空登录日志',1,0,2,3,N'system:login-log:clear',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140387,140384,N'',N'SystemLoginLogUnlock',N'',N'解锁登录账号',1,0,3,3,N'system:login-log:unlock',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140384),(1,140385),(1,140386),(1,140387); INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES (7808,N'p',N'role_1',N'/api/sysLoginLog/list',N'GET',N'*',N'',N''),(7809,N'p',N'role_1',N'/api/sysLoginLog/:id',N'GET',N'*',N'',N''),(7810,N'p',N'role_1',N'/api/sysLoginLog/delete',N'DELETE',N'*',N'',N''),(7811,N'p',N'role_1',N'/api/sysLoginLog/clear',N'POST',N'*',N'',N''),(7812,N'p',N'role_1',N'/api/sysLoginLog/unlock',N'POST',N'*',N'',N'');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
--- Playback schemes reuse the multi-screen page and expose one hidden permission.
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
-(228,N'查询播放方案','/api/gb28181/playback-schemes','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(229,N'查看播放方案','/api/gb28181/playback-schemes/:id','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(230,N'创建播放方案','/api/gb28181/playback-schemes','POST',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(231,N'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(232,N'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(233,N'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
-(140362,140355,'','','',N'管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140362);
-INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
-(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
-(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
-(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
-(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
-(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
-(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
-(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
--- GB28181 cascade API/menu/Casbin seed for fresh SQL Server installs.
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
-(234,N'查看级联平台列表',N'/api/gb28181/cascade/platforms',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(235,N'创建级联平台',N'/api/gb28181/cascade/platforms',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(236,N'查看级联平台',N'/api/gb28181/cascade/platforms/:id',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(237,N'修改级联平台',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(238,N'删除级联平台',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(239,N'启停级联平台',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(240,N'启用级联平台',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(241,N'停用级联平台',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(242,N'重连级联平台',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(243,N'查看级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(244,N'更新级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(245,N'共享级联通道',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(246,N'取消级联通道共享',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
-(140370,0,N'/gb28181/cascade',N'gb28181-cascade',N'gb28181/cascade/index',N'国标级联',0,0,13,2,N'',N'lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
-(140363,140370,N'',N'',N'',N'查看国标级联',1,3,N'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,N'',N'',N'',N'管理国标级联',1,3,N'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,N'',N'',N'',N'启停国标级联',1,3,N'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,N'',N'',N'',N'共享国标级联',1,3,N'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,N'',N'',N'',N'重连国标级联',1,3,N'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140370),(1,140363),(1,140364),(1,140365),(1,140366),(1,140367);
-INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140363,234),(140363,236),(140363,243),(140364,235),(140364,237),(140364,238),(140365,239),(140365,240),(140365,241),(140366,244),(140366,245),(140366,246),(140367,242);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
-(7578,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'GET',N'*',N'',N''),(7579,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'POST',N'*',N'',N''),(7580,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'GET',N'*',N'',N''),(7581,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'*',N'',N''),(7582,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'*',N'',N''),(7583,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'*',N'',N''),(7584,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'*',N'',N''),(7585,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'*',N'',N''),(7586,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'*',N'',N''),(7587,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'*',N'',N''),(7588,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'*',N'',N''),(7589,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'*',N'',N''),(7590,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'*',N'',N'');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
 -- ZLM media-node registry and durable endpoint-recovery gate.
 IF OBJECT_ID(N'meta_node', N'U') IS NOT NULL DROP TABLE [meta_node];
 CREATE TABLE [meta_node] (
@@ -1597,6 +1537,66 @@ WHERE [id] IN (
 );
 
 SET NOCOUNT OFF;
+
+-- 登录审计事件与操作菜单 seed。
+IF OBJECT_ID(N'sys_login_logs', N'U') IS NULL CREATE TABLE [sys_login_logs] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,[user_id] BIGINT NULL,[username] NVARCHAR(100) NOT NULL,[result] NVARCHAR(16) NOT NULL,[failure_reason] NVARCHAR(48) NULL,[ip] NVARCHAR(50) NOT NULL DEFAULT N'',[location] NVARCHAR(100) NOT NULL DEFAULT N'未知',[user_agent] NVARCHAR(500) NOT NULL DEFAULT N'',[browser] NVARCHAR(100) NOT NULL DEFAULT N'未知',[os] NVARCHAR(100) NOT NULL DEFAULT N'未知',[created_at] DATETIME2 NOT NULL,[updated_at] DATETIME2 NULL,[deleted_at] DATETIME2 NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_login_logs_created_at' AND object_id=OBJECT_ID(N'sys_login_logs')) CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (341,N'登录日志列表',N'/api/sysLoginLog/list',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,N'登录日志详情',N'/api/sysLoginLog/:id',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,N'删除登录日志',N'/api/sysLoginLog/delete',N'DELETE',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,N'清空登录日志',N'/api/sysLoginLog/clear',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,N'解锁登录账号',N'/api/sysLoginLog/unlock',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140384,10,N'/system/login-log',N'SystemLoginLog',N'system/login-log/index',N'登录日志',0,0,1,2,N'system:login-log:list',N'lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140385,140384,N'',N'SystemLoginLogDelete',N'',N'删除登录日志',1,0,1,3,N'system:login-log:delete',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140386,140384,N'',N'SystemLoginLogClear',N'',N'清空登录日志',1,0,2,3,N'system:login-log:clear',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140387,140384,N'',N'SystemLoginLogUnlock',N'',N'解锁登录账号',1,0,3,3,N'system:login-log:unlock',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140384),(1,140385),(1,140386),(1,140387); INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES (7808,N'p',N'role_1',N'/api/sysLoginLog/list',N'GET',N'*',N'',N''),(7809,N'p',N'role_1',N'/api/sysLoginLog/:id',N'GET',N'*',N'',N''),(7810,N'p',N'role_1',N'/api/sysLoginLog/delete',N'DELETE',N'*',N'',N''),(7811,N'p',N'role_1',N'/api/sysLoginLog/clear',N'POST',N'*',N'',N''),(7812,N'p',N'role_1',N'/api/sysLoginLog/unlock',N'POST',N'*',N'',N'');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
+-- Playback schemes reuse the multi-screen page and expose one hidden permission.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(228,N'查询播放方案','/api/gb28181/playback-schemes','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(229,N'查看播放方案','/api/gb28181/playback-schemes/:id','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(230,N'创建播放方案','/api/gb28181/playback-schemes','POST',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(231,N'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(232,N'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(233,N'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
+(140362,140355,'','','',N'管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140362);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
+(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
+(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
+(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
+(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
+(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
+(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
+-- GB28181 cascade API/menu/Casbin seed for fresh SQL Server installs.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(234,N'查看级联平台列表',N'/api/gb28181/cascade/platforms',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(235,N'创建级联平台',N'/api/gb28181/cascade/platforms',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(236,N'查看级联平台',N'/api/gb28181/cascade/platforms/:id',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(237,N'修改级联平台',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(238,N'删除级联平台',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(239,N'启停级联平台',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(240,N'启用级联平台',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(241,N'停用级联平台',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(242,N'重连级联平台',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(243,N'查看级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(244,N'更新级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(245,N'共享级联通道',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(246,N'取消级联通道共享',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
+(140370,0,N'/gb28181/cascade',N'gb28181-cascade',N'gb28181/cascade/index',N'国标级联',0,0,13,2,N'',N'lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
+(140363,140370,N'',N'',N'',N'查看国标级联',1,3,N'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,N'',N'',N'',N'管理国标级联',1,3,N'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,N'',N'',N'',N'启停国标级联',1,3,N'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,N'',N'',N'',N'共享国标级联',1,3,N'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,N'',N'',N'',N'重连国标级联',1,3,N'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140370),(1,140363),(1,140364),(1,140365),(1,140366),(1,140367);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140363,234),(140363,236),(140363,243),(140364,235),(140364,237),(140364,238),(140365,239),(140365,240),(140365,241),(140366,244),(140366,245),(140366,246),(140367,242);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7578,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'GET',N'*',N'',N''),(7579,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'POST',N'*',N'',N''),(7580,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'GET',N'*',N'',N''),(7581,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'*',N'',N''),(7582,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'*',N'',N''),(7583,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'*',N'',N''),(7584,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'*',N'',N''),(7585,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'*',N'',N''),(7586,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'*',N'',N''),(7587,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'*',N'',N''),(7588,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'*',N'',N''),(7589,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'*',N'',N''),(7590,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'*',N'',N'');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
 -- SIP setup API, UI permissions and administrator policies.
 SET IDENTITY_INSERT [sys_api] ON;
@@ -2630,8 +2630,8 @@ UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL),[component]='gb28181/zlm/SchedulerStrategy',[title]=N'调度策略',[icon]='lucide:Workflow',[sort]=100,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/scheduler' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL),[component]='gb28181/zlm/SchedulerLog',[title]=N'调度日志',[icon]='lucide:History',[sort]=110,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/scheduler/logs' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=0,[component]='gb28181/zlm/NodeDetail',[title]=N'节点详情',[hide]=1,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/nodes/:id' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=(SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[component]='gb28181/cloud-recordings/index',[title]=N'云端录像',[icon]='lucide:Cloud',[sort]=35,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/cloud-recordings' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=(SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[component]='gb28181/recording-schedules/index',[title]=N'录像计划',[icon]='lucide:CalendarClock',[sort]=36,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/recording-schedules' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=COALESCE((SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[parent_id]),[component]='gb28181/cloud-recordings/index',[title]=N'云端录像',[icon]='lucide:Cloud',[sort]=35,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/cloud-recordings' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=COALESCE((SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[parent_id]),[component]='gb28181/recording-schedules/index',[title]=N'录像计划',[icon]='lucide:CalendarClock',[sort]=36,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/recording-schedules' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [component]='gb28181/zlm/workbench/LegacyMediaRoute',[hide]=1,[updated_at]=CURRENT_TIMESTAMP WHERE [path] IN ('/media/overview','/media/monitoring','/media/ingress','/media/recordings','/media/nodes','/media/scheduling','/media/nodes/:id') AND [deleted_at] IS NULL;
 -- zlm-admin-parity-v3:end
 
@@ -2653,14 +2653,14 @@ AND a.[path] IN ('/api/gb28181/zlm/overview','/api/gb28181/zlm/nodes','/api/gb28
 AND NOT EXISTS (SELECT 1 FROM [sys_casbin_rule] c WHERE c.[ptype]='p' AND c.[v0]='role_'+CAST(rm.[role_id] AS varchar(20)) AND c.[v1]=a.[path] AND c.[v2]=a.[method] AND c.[v3]='*');
 -- zlm-overview-merge:end
 -- zlm-single-menu-workbench:start
-DECLARE @media_menu_id BIGINT;
-SELECT @media_menu_id=MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL;
+DECLARE @workbench_media_menu_id BIGINT;
+SELECT @workbench_media_menu_id=MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [redirect]='/media/overview',[component]='',[title]=N'流媒体管理',[icon]='lucide:Clapperboard',[sort]=9,[type]=1,[hide]=0,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaOverview',[title]=N'运行总览',[sort]=10,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/overview' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaMonitoring',[title]=N'流与会话',[sort]=20,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/monitoring' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/IngressManagement',[title]=N'接入管理',[sort]=30,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/ingress' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/NodeManagement',[title]=N'节点管理',[sort]=40,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/SchedulingManagement',[title]=N'调度管理',[sort]=50,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/scheduling' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/MediaOverview',[title]=N'运行总览',[sort]=10,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/overview' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/MediaMonitoring',[title]=N'流与会话',[sort]=20,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/monitoring' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/IngressManagement',[title]=N'接入管理',[sort]=30,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/ingress' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/NodeManagement',[title]=N'节点管理',[sort]=40,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/SchedulingManagement',[title]=N'调度管理',[sort]=50,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/scheduling' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media/nodes' AND [deleted_at] IS NULL),[component]='gb28181/zlm/workbench/nodes/NodeDetail',[title]=N'节点详情',[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes/:id' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [component]='gb28181/zlm/workbench/LegacyMediaRoute',[hide]=1,[updated_at]=GETDATE() WHERE [path] IN ('/gb28181/zlm/overview','/gb28181/zlm/runtime','/gb28181/zlm/streams','/gb28181/zlm/sessions','/gb28181/zlm/proxies','/gb28181/zlm/ffmpeg-sources','/gb28181/zlm/rtp-servers','/gb28181/zlm/nodes','/gb28181/zlm/nodes/:id','/gb28181/zlm/config','/gb28181/zlm/scheduler','/gb28181/zlm/scheduler/logs') AND [deleted_at] IS NULL;
 -- zlm-single-menu-workbench:end

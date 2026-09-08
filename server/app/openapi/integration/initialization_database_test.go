@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/microsoft/go-mssqldb"
+	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -233,6 +233,10 @@ func TestOpenAPIDatabaseFullInitialization(t *testing.T) {
 // PostgreSQL positions are one-based character offsets, not byte offsets.
 // Report only the source line, never the failing statement or seed values.
 func initializationErrorLocation(err error, body string) string {
+	var sqlServerError mssql.Error
+	if errors.As(err, &sqlServerError) && sqlServerError.LineNo > 0 {
+		return fmt.Sprintf(":%d", sqlServerError.LineNo)
+	}
 	var pgError *pgconn.PgError
 	if !errors.As(err, &pgError) || pgError.Position <= 0 {
 		return ""
@@ -253,6 +257,8 @@ func initializationErrorLocation(err error, body string) string {
 func TestFullInitializationErrorLocationDoesNotExposeSQL(t *testing.T) {
 	err := &pgconn.PgError{Position: 6}
 	require.Equal(t, ":2", initializationErrorLocation(err, "中文;\n( ) secret-seed"))
+	require.Equal(t, ":2634", initializationErrorLocation(fmt.Errorf("wrapped: %w", mssql.Error{LineNo: 2634, Message: "secret-seed"}), "secret-seed"))
+	require.Empty(t, initializationErrorLocation(mssql.Error{LineNo: 0, Message: "secret-seed"}, "secret-seed"))
 	require.Empty(t, initializationErrorLocation(errors.New("driver failed"), "secret-seed"))
 }
 
@@ -568,6 +574,12 @@ func TestPostgreSQLFullInitializationMenuReparentingPreservesParentWithoutAnchor
 	require.NoError(t, err)
 	anchorExpression := "parent_id=COALESCE((SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),parent_id)"
 	require.Equal(t, 2, strings.Count(string(body), anchorExpression), "cloud-recording reparenting must preserve an existing parent when the optional device-menu anchor is absent")
+}
+
+func TestSQLServerFullInitializationMenuReparentingPreservesParentWithoutAnchor(t *testing.T) {
+	body := readInitializationContractSQL(t, "sqlserver_converted.sql")
+	anchorExpression := "[parent_id]=COALESCE((SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[parent_id])"
+	require.Equal(t, 2, strings.Count(body, anchorExpression), "cloud-recording reparenting must preserve an existing parent when the optional device-menu anchor is absent")
 }
 
 func TestPostgreSQLFullInitializationDropsJobResultsBeforeJobs(t *testing.T) {

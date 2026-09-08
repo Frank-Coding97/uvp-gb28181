@@ -42,6 +42,9 @@ func checkNativeGrantViewer(t *testing.T, root *gorm.DB) {
 	var err error
 	fixture, err = prepareNativeGrantViewerFixture(t, db)
 	require.NoError(t, err)
+	var qualified int64
+	require.NoError(t, db.Table("meta_node AS n").Joins("JOIN "+nativeGrantViewerQualificationTable+" AS q ON q.node_uuid = n.media_server_uuid AND q.boot_nonce = n.current_boot_nonce").Count(&qualified).Error, "native fixture qualification must join its exact node identity")
+	require.Positive(t, qualified)
 
 	clock := time.Date(2026, 9, 6, 20, 30, 40, 123456789, time.UTC)
 	signer, err := playauth.NewSigner([]byte(strings.Repeat("n", 32)), playauth.WithNow(func() time.Time { return clock }))
@@ -404,7 +407,11 @@ func nativeGrantViewerChannelDDL(dialect string) string {
 }
 
 func nativeGrantViewerQualificationDDL(dialect string) string {
-	return "CREATE TABLE " + nativeGrantViewerQualificationTable + " (node_uuid VARCHAR(64) NOT NULL, boot_nonce CHAR(32) NOT NULL, protocol VARCHAR(16) NOT NULL, is_qualified SMALLINT NOT NULL, PRIMARY KEY (node_uuid, boot_nonce, protocol))"
+	bootType := "CHAR(32)"
+	if dialect == "sqlserver" {
+		bootType += " COLLATE Latin1_General_100_BIN2"
+	}
+	return "CREATE TABLE " + nativeGrantViewerQualificationTable + " (node_uuid VARCHAR(64) NOT NULL, boot_nonce " + bootType + " NOT NULL, protocol VARCHAR(16) NOT NULL, is_qualified SMALLINT NOT NULL, PRIMARY KEY (node_uuid, boot_nonce, protocol))"
 }
 
 func dropNativeGrantViewerTable(t *testing.T, db *gorm.DB, table string) {

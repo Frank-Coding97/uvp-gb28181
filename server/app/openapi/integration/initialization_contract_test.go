@@ -19,6 +19,28 @@ func readInitializationContractSQL(t *testing.T, name string) string {
 	return string(body)
 }
 
+func TestSQLServerInitializationBatchVariablesAreUnique(t *testing.T) {
+	body := stripInitializationSQLCommentsAndLiterals(readInitializationContractSQL(t, "sqlserver_converted.sql"))
+	declarations := regexp.MustCompile(`(?im)^\s*DECLARE\s+(@[a-z0-9_]+)\b`).FindAllStringSubmatch(body, -1)
+	seen := map[string]bool{}
+	for _, declaration := range declarations {
+		name := strings.ToLower(declaration[1])
+		require.False(t, seen[name], "SQL Server batch variables collide under default case-insensitive collation: %s", name)
+		seen[name] = true
+	}
+}
+
+func TestSQLServerInitializationCreatesPermissionTablesBeforeSeeds(t *testing.T) {
+	body := readInitializationContractSQL(t, "sqlserver_converted.sql")
+	for _, table := range []string{"sys_menu", "sys_menu_api", "sys_role_menu"} {
+		create := strings.Index(body, "CREATE TABLE ["+table+"]")
+		firstInsert := regexp.MustCompile(`(?i)\bINSERT\s+INTO\s+\[?` + table + `\]?\s`).FindStringIndex(body)
+		require.GreaterOrEqual(t, create, 0, table)
+		require.NotNil(t, firstInsert, table)
+		require.Greater(t, firstInsert[0], create, "fresh initialization must create %s before its first seed", table)
+	}
+}
+
 func TestMySQLInitializationPTZTableUsesSingleStatementTerminator(t *testing.T) {
 	body := readInitializationContractSQL(t, "uvp-gb28181.sql")
 	const marker = "COMMENT='GB28181 latest PTZ state'"
