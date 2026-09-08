@@ -2,6 +2,7 @@ package uac
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,12 @@ func TestPlaybackParentLeaseSurvivesPreparedChildShutdown(t *testing.T) {
 			t.Cleanup(guard.Release)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			op, err := u.beginPlaybackIntentChild(ctx, store, barrier, parent, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
+			peer, err := net.Listen("tcp4", "127.0.0.1:0")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = peer.Close() })
+			in := validPlaybackInvite()
+			in.Destination, in.Transport = peer.Addr().String(), "TCP"
+			op, err := u.beginPlaybackIntentChild(ctx, store, barrier, parent, id, 2, strings.Repeat("b", 32), in)
 			require.NoError(t, err)
 			require.NotNil(t, op)
 			guard.Release()
