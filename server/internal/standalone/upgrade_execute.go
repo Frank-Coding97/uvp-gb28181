@@ -54,7 +54,11 @@ func (p *upgradePreparation) execute(ctx context.Context, run func(context.Conte
 		return err
 	}
 	phase = MaintenanceCommitting
-	return commitMaintenanceCurrent(p.paths.InstallDir, p.journal.OperationID)
+	if err := commitMaintenanceCurrent(p.paths.InstallDir, p.journal.OperationID); err != nil {
+		return err
+	}
+	p.committed = true
+	return nil
 }
 
 func (p *upgradePreparation) checkExecutionIdentity() error {

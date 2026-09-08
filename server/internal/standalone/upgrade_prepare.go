@@ -17,6 +17,7 @@ type upgradePreparation struct {
 	paths           Paths
 	trust           string
 	releaseIdentity string
+	committed       bool
 }
 
 func (p *upgradePreparation) Close() error {
@@ -100,6 +101,7 @@ func prepareUpgradeStoppedWithTrust(ctx context.Context, paths Paths, candidateV
 		Schema: 1, OperationID: hex.EncodeToString(nonce[:]), OldVersion: current.Version,
 		CandidateVersion: candidateVersion, OldCurrentSHA256: currentSHA, BackupRoot: destination,
 		Phase: MaintenancePreparing, CreatedAt: time.Now().UTC(),
+		ReleaseSetSHA256: lockedIdentity,
 	}
 	if err := createPreparingMaintenanceJournal(paths.InstallDir, journal); err != nil {
 		return nil, err

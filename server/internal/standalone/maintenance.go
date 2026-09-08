@@ -18,6 +18,7 @@ const (
 	MaintenancePreparing            MaintenancePhase = "preparing"
 	MaintenanceUpgrading            MaintenancePhase = "upgrading"
 	MaintenanceCommitting           MaintenancePhase = "committing"
+	MaintenanceCompletionReady      MaintenancePhase = "completion_ready"
 	MaintenanceRestoreRequired      MaintenancePhase = "restore_required"
 	MaintenanceRestoring            MaintenancePhase = "restoring"
 	MaintenanceAwaitingConfirmation MaintenancePhase = "awaiting_local_confirmation"
@@ -28,15 +29,18 @@ var ErrMaintenanceRequired = errors.New("standalone: unfinished maintenance requ
 // Maintenance state lives outside config/data so restoring a historical
 // snapshot cannot replace the gate that protects the current operation.
 type MaintenanceJournal struct {
-	Schema               int              `json:"schema"`
-	OperationID          string           `json:"operation_id"`
-	OldVersion           string           `json:"old_version"`
-	CandidateVersion     string           `json:"candidate_version"`
-	OldCurrentSHA256     string           `json:"old_current_sha256"`
-	BackupRoot           string           `json:"backup_root"`
-	BackupManifestSHA256 string           `json:"backup_manifest_sha256"`
-	Phase                MaintenancePhase `json:"phase"`
-	CreatedAt            time.Time        `json:"created_at"`
+	Schema                 int              `json:"schema"`
+	OperationID            string           `json:"operation_id"`
+	OldVersion             string           `json:"old_version"`
+	CandidateVersion       string           `json:"candidate_version"`
+	OldCurrentSHA256       string           `json:"old_current_sha256"`
+	BackupRoot             string           `json:"backup_root"`
+	BackupManifestSHA256   string           `json:"backup_manifest_sha256"`
+	Phase                  MaintenancePhase `json:"phase"`
+	CreatedAt              time.Time        `json:"created_at"`
+	ReleaseSetSHA256       string           `json:"release_set_sha256,omitempty"`
+	CandidateCurrentSHA256 string           `json:"candidate_current_sha256,omitempty"`
+	CompletedAt            string           `json:"completed_at,omitempty"`
 }
 
 // CheckMaintenanceGate must run with instance ownership before creating any
@@ -57,12 +61,15 @@ func CheckMaintenanceGate(installDir string) error {
 }
 
 func ReadMaintenanceJournal(installDir string) (MaintenanceJournal, error) {
-	var journal MaintenanceJournal
 	root, err := cleanAbsolute(installDir)
 	if err != nil {
-		return journal, err
+		return MaintenanceJournal{}, err
 	}
-	path := filepath.Join(root, maintenanceDirName, "journal.json")
+	return readMaintenanceJournalFile(filepath.Join(root, maintenanceDirName, "journal.json"))
+}
+
+func readMaintenanceJournalFile(path string) (MaintenanceJournal, error) {
+	var journal MaintenanceJournal
 	info, err := os.Lstat(path)
 	if err != nil {
 		return journal, err
@@ -159,6 +166,20 @@ func validateMaintenanceJournal(journal MaintenanceJournal) error {
 		return errors.New("invalid maintenance metadata")
 	}
 	checksums := []string{journal.OperationID, journal.OldCurrentSHA256}
+	// Older in-progress journals remain readable for recovery, but cannot be
+	// granted completion without a persisted preparation release-set identity.
+	if journal.ReleaseSetSHA256 != "" {
+		checksums = append(checksums, journal.ReleaseSetSHA256)
+	}
+	if journal.Phase == MaintenanceCompletionReady {
+		completed, err := time.Parse(time.RFC3339Nano, journal.CompletedAt)
+		if err != nil || completed.Before(journal.CreatedAt) {
+			return errors.New("invalid maintenance completion time")
+		}
+		checksums = append(checksums, journal.ReleaseSetSHA256, journal.CandidateCurrentSHA256)
+	} else if journal.CompletedAt != "" || journal.CandidateCurrentSHA256 != "" {
+		return errors.New("unfinished maintenance cannot claim completion")
+	}
 	if journal.Phase == MaintenancePreparing {
 		if journal.BackupManifestSHA256 != "" {
 			return errors.New("preparing maintenance cannot claim a completed backup")
@@ -176,7 +197,7 @@ func validateMaintenanceJournal(journal MaintenanceJournal) error {
 		return errors.New("invalid maintenance backup root")
 	}
 	switch journal.Phase {
-	case MaintenancePreparing, MaintenanceUpgrading, MaintenanceCommitting, MaintenanceRestoreRequired, MaintenanceRestoring, MaintenanceAwaitingConfirmation:
+	case MaintenancePreparing, MaintenanceUpgrading, MaintenanceCommitting, MaintenanceCompletionReady, MaintenanceRestoreRequired, MaintenanceRestoring, MaintenanceAwaitingConfirmation:
 		return nil
 	default:
 		return errors.New("invalid maintenance phase")
