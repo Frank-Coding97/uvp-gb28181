@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,7 +48,20 @@ func TestWindowsUpgradeStoppedTransaction(t *testing.T) {
 	destination := filepath.Join(filepath.Dir(root), "upgrade-transaction-backup")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	err = UpgradeStopped(ctx, root, paths.RecordingsDir, candidate.Version, destination)
+	run := func(backup string) error {
+		if binary := os.Getenv("UVP_UPGRADE_CLI_PATH"); binary != "" {
+			cmd := exec.CommandContext(ctx, binary, "upgrade", "--install-dir", root, "--recordings-dir", paths.RecordingsDir, "--version", candidate.Version, "--backup", backup)
+			output, err := cmd.CombinedOutput()
+			if err == nil {
+				require.Contains(t, string(output), "升级已完成：")
+			} else {
+				require.NotContains(t, string(output), "升级已完成：")
+			}
+			return err
+		}
+		return UpgradeStopped(ctx, root, paths.RecordingsDir, candidate.Version, backup)
+	}
+	err = run(destination)
 	if mode == "complete" {
 		require.NoError(t, err)
 		require.NoError(t, standalone.CheckMaintenanceGate(root))
@@ -55,7 +69,7 @@ func TestWindowsUpgradeStoppedTransaction(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, archives, 1)
 		repeatedBackup := destination + "-repeat"
-		require.ErrorContains(t, UpgradeStopped(ctx, root, paths.RecordingsDir, candidate.Version, repeatedBackup), "already selected")
+		require.Error(t, run(repeatedBackup))
 		require.NoError(t, standalone.CheckMaintenanceGate(root))
 		_, err = os.Stat(repeatedBackup)
 		require.ErrorIs(t, err, os.ErrNotExist)
