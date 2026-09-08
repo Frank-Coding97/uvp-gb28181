@@ -237,13 +237,18 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 
 func t18Start(t *testing.T, installDir string, browserURLs chan<- string) *t18Launch {
 	t.Helper()
+	return t18StartWithRecordings(t, installDir, "", browserURLs)
+}
+
+func t18StartWithRecordings(t *testing.T, installDir, recordingsDir string, browserURLs chan<- string) *t18Launch {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	finished := make(chan struct{})
 	statuses := make(chan Status, 64)
 	go func() {
 		defer close(finished)
-		done <- LaunchWithBrowser(ctx, installDir, "", func(status Status) {
+		done <- LaunchWithBrowser(ctx, installDir, recordingsDir, func(status Status) {
 			select {
 			case statuses <- status:
 			default:

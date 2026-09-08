@@ -33,7 +33,7 @@ func TestWindowsStandaloneCloudRecordingBrowserDecode(t *testing.T) {
 	}
 
 	browserURLs := make(chan string, 1)
-	run := t18Start(t, root, browserURLs)
+	run := t18StartWithRecordings(t, root, strings.TrimSpace(os.Getenv("UVP_RECORD_BROWSER_DIR")), browserURLs)
 	defer func() {
 		run.cancel()
 		t18WaitFinished(t, run, 90*time.Second)
