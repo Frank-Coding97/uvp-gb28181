@@ -141,7 +141,12 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	require.Equal(t, 1, strings.Count(start, "playauth.NewDeviceOperationBarrier("))
 	require.Contains(t, start, "deviceDB := app.DB()")
 	require.Contains(t, start, "playauth.NewDeviceSecurityStore(deviceDB)")
-	require.Contains(t, start[register:publish], "playauth.NewDeviceCleanupStore(deviceDB), playauth.NewDeviceOperationIntentStore(deviceDB), deviceOperations")
+	require.Contains(t, start[register:publish], "playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations")
+	configure := strings.Index(start, "configurePlaybackRTPCleanup(")
+	require.GreaterOrEqual(t, configure, 0)
+	require.Less(t, configure, register)
+	require.Contains(t, start[configure:register], "srv.UAC(), deviceDB, deviceIntents, deviceOperations")
+	require.Equal(t, 1, strings.Count(start, "playauth.NewDeviceOperationIntentStore(deviceDB)"))
 	stopBegin, stopEnd := strings.Index(source, "func stopSIPDependencies("), strings.Index(source, "func stopPlaybackRuntime(")
 	require.Greater(t, stopEnd, stopBegin)
 	stop := source[stopBegin:stopEnd]

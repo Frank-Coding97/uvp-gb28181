@@ -76,3 +76,37 @@ func TestConfiguredRevocationRejectsMissingSchemaAndTypedNilRegistry(t *testing.
 		})
 	}
 }
+
+func TestBoundRevocationUsesAlreadyLoadedStartupSnapshot(t *testing.T) {
+	f := newTrustedFactoryFixture(t)
+	f.seed(t, 1, models.ViewerStateRevokePending)
+	path := writeBindingFile(t, nodeControlFile{Version: 1, Nodes: []nodeControlEntry{{NodeID: f.n.ID, NodeUUID: f.n.MediaServerUUID,
+		BindingRevision: 1, Enabled: true, Endpoint: f.binding.TLS.Endpoint, CAMode: "private", CAPEM: f.caPEM,
+		SPKISHA256: hex.EncodeToString(f.binding.TLS.SPKISHA256[:]), HookBase: f.binding.HookBase}}})
+	bindings, err := LoadNodeControlBindings(path)
+	require.NoError(t, err)
+	// The root loaded trust before starting GB; later consumers must not read
+	// a different file generation or turn a live edit into trust hot-reload.
+	require.NoError(t, os.WriteFile(path, []byte("invalid before consumer startup"), 0600))
+	ready := make(chan RevocationTickResult, 1)
+	stop, err := StartRevocationWithBindings(context.Background(), f.db, f.factory.registry, bindings, func(result RevocationTickResult, err error) {
+		require.NoError(t, err)
+		select {
+		case ready <- result:
+		default:
+		}
+	})
+	require.NoError(t, err)
+	defer stop()
+	select {
+	case result := <-ready:
+		require.Equal(t, 1, result.Pending)
+	case <-time.After(4 * time.Second):
+		t.Fatal("bound startup did not process pending viewer")
+	}
+	stop()
+	stop()
+	missing, err := StartRevocationWithBindings(context.Background(), f.db, f.factory.registry, nil, nil)
+	require.ErrorIs(t, err, ErrRevocationNotConfigured)
+	require.Nil(t, missing)
+}

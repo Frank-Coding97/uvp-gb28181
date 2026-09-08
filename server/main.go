@@ -58,18 +58,25 @@ func main() {
 	openAPI := routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
+	// Prime process-lifetime trust before SIP recovery starts; both consumers
+	// reuse this exact snapshot, including a sticky startup failure.
+	controlBindings, controlBindingsErr := gb28181.LoadStartupOpenAPIControlBindingsOnce()
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
 	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
-	stopRevocation, revocationErr := openapimedia.StartConfiguredRevocation(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
-		app.ConfigYml.GetString("openapi.revocation_bindings_file"), func(result openapimedia.RevocationTickResult, err error) {
-			if err != nil {
-				app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.Error(err))
-			} else if result.Alarms > 0 {
-				app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
-			}
-		})
+	var stopRevocation func()
+	revocationErr := controlBindingsErr
+	if revocationErr == nil {
+		stopRevocation, revocationErr = openapimedia.StartRevocationWithBindings(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
+			controlBindings, func(result openapimedia.RevocationTickResult, err error) {
+				if err != nil {
+					app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.Error(err))
+				} else if result.Alarms > 0 {
+					app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
+				}
+			})
+	}
 	if revocationErr != nil {
 		// Keep metadata/admin available; missing trust never means legacy control.
 		if errors.Is(revocationErr, openapimedia.ErrRevocationNotConfigured) {

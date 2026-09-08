@@ -30,6 +30,22 @@ func StartConfiguredRevocation(ctx context.Context, db *gorm.DB, registry Revoca
 	if err != nil {
 		return nil, err
 	}
+	return StartRevocationWithBindings(ctx, db, registry, bindings, report)
+}
+
+// StartRevocationWithBindings shares the root's already loaded immutable trust
+// snapshot with other media consumers. It never reads configuration files.
+// Stopping still cancels and joins the actual worker before GB/DB teardown.
+func StartRevocationWithBindings(ctx context.Context, db *gorm.DB, registry RevocationNodeRegistry, bindings *FileNodeControlBindings, report func(RevocationTickResult, error)) (func(), error) {
+	if bindings == nil {
+		return nil, ErrRevocationNotConfigured
+	}
+	if ctx == nil || ctx.Err() != nil || db == nil || registry == nil {
+		return nil, ErrRevocationWorkerUnavailable
+	}
+	if concrete, ok := registry.(*node.Registry); ok && concrete == nil {
+		return nil, ErrRevocationWorkerUnavailable
+	}
 	checkContext, cancelCheck := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelCheck()
 	for _, model := range []any{&models.PlayGrant{}, &models.Viewer{}, &models.MediaNodeSecurity{}} {

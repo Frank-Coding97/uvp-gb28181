@@ -738,10 +738,14 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 	var playAuthorization *playauth.AuthorizationService
 	deviceSecurity := playauth.NewDeviceSecurityStore(deviceDB)
 	deviceOperations := playauth.NewDeviceOperationBarrier(deviceSecurity)
+	deviceIntents := playauth.NewDeviceOperationIntentStore(deviceDB)
+	if err := configurePlaybackRTPCleanup(srv.UAC(), deviceDB, deviceIntents, deviceOperations); err != nil {
+		return fmt.Errorf("装配持久RTP清理失败: %w", err)
+	}
 	// The same UAC owns this worker through ShutdownPlaybackIntents. Do not
 	// create a second runner/stop owner or cancel it when assembly returns.
 	if _, err := srv.UAC().StartPlaybackRecovery(context.Background(),
-		playauth.NewDeviceCleanupStore(deviceDB), playauth.NewDeviceOperationIntentStore(deviceDB), deviceOperations,
+		playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations,
 		func(_ uac.PlaybackRecoveryTick, err error) {
 			if err != nil {
 				app.ZapLog.Error("持久回放恢复尚未完成", zap.Error(err))
