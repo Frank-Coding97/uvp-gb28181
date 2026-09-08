@@ -16,6 +16,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -163,8 +164,25 @@ type Scheduler struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 
-	activeMu sync.Mutex
-	active   map[uint]context.CancelFunc
+	activeMu            sync.Mutex
+	active              map[uint]schedulerActiveAttempt
+	pendingMu           sync.Mutex
+	pendingResults      map[uint]schedulerPendingResult
+	pendingClaims       []*playauth.PTZUnissuedAttempt
+	pendingReservations []*playauth.PTZReservationOutcome
+}
+
+type schedulerPendingResult struct {
+	attempt    gbmodels.GbPTZOperationAttempt
+	result     uac.TrackedMessageResult
+	sendErr    error
+	observedAt time.Time
+	lease      playauth.DeviceOperationLease
+}
+
+type schedulerActiveAttempt struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func NewScheduler(service *Service, options ...SchedulerOption) *Scheduler {
@@ -177,7 +195,7 @@ func NewScheduler(service *Service, options ...SchedulerOption) *Scheduler {
 	}
 	scheduler := &Scheduler{
 		service: service, dispatcher: config.dispatcher, interval: config.interval,
-		active: make(map[uint]context.CancelFunc),
+		active: make(map[uint]schedulerActiveAttempt),
 	}
 	if service != nil {
 		scheduler.db = service.db
@@ -235,23 +253,79 @@ func (s *Scheduler) Stop() {
 	}
 	s.cancelAllActive()
 	s.dispatcher.Stop()
+	ctx, finish := context.WithTimeout(context.Background(), 2*time.Second)
+	defer finish()
+	if err := s.flushPendingResults(ctx); err != nil && app.ZapLog != nil {
+		app.ZapLog.Error("PTZ 停止后仍有未持久化结果，保留设备租约", zap.Error(err))
+	}
 }
+
+// Retained facts are retried without calling the sender. A failed flush leaves
+// the original lease owned here, including after Stop, rather than falsely
+// declaring the device drained.
+func (s *Scheduler) flushPendingResults(ctx context.Context) error {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	for len(s.pendingReservations) > 0 {
+		if err := s.pendingReservations[0].Reconcile(ctx); err != nil {
+			return err
+		}
+		s.pendingReservations = s.pendingReservations[1:]
+	}
+	for len(s.pendingClaims) > 0 {
+		if err := s.pendingClaims[0].Reconcile(ctx); err != nil {
+			return err
+		}
+		s.pendingClaims = s.pendingClaims[1:]
+	}
+	for id, pending := range s.pendingResults {
+		if err := s.persistAttemptResult(ctx, pending.attempt, pending.result, pending.sendErr, pending.observedAt); err != nil {
+			return err
+		}
+		if pending.lease != nil {
+			pending.lease.Release()
+		}
+		delete(s.pendingResults, id)
+	}
+	return nil
+}
+
+func (s *Scheduler) retainUnissued(err error) {
+	var ticket *playauth.PTZUnissuedAttempt
+	if errors.As(err, &ticket) {
+		s.pendingMu.Lock()
+		s.pendingClaims = append(s.pendingClaims, ticket)
+		s.pendingMu.Unlock()
+	}
+}
+
+// FlushResults retries local facts only. Root teardown must retain this owner
+// when it fails, and must not construct a replacement runtime over it.
+func (s *Scheduler) FlushResults(ctx context.Context) error { return s.flushPendingResults(ctx) }
 
 func (s *Scheduler) cancelAllActive() {
 	s.activeMu.Lock()
-	for _, cancel := range s.active {
-		cancel()
+	for _, owner := range s.active {
+		owner.cancel()
 	}
 	s.activeMu.Unlock()
 }
 
-func (s *Scheduler) cancelAttempt(attemptID uint) {
+func (s *Scheduler) cancelAttempt(ctx context.Context, attemptID uint) error {
 	s.activeMu.Lock()
-	cancel := s.active[attemptID]
+	owner, exists := s.active[attemptID]
 	s.activeMu.Unlock()
-	if cancel != nil {
-		cancel()
+	if exists {
+		owner.cancel()
+		// Expiration requests cancellation; it does not prove that Send or
+		// its result writeback has returned. Never recover over a live owner.
+		select {
+		case <-owner.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+	return nil
 }
 
 // RunDue performs all deadline convergence before it claims any work.
@@ -262,6 +336,14 @@ func (s *Scheduler) RunDue(now time.Time) error {
 func (s *Scheduler) runDue(ctx context.Context, now time.Time) error {
 	if s == nil || s.db == nil || s.service == nil || s.service.sender == nil {
 		return errors.New("PTZ scheduler 未就绪")
+	}
+	if err := s.flushPendingResults(ctx); err != nil {
+		return err
+	}
+	if syncOwner := s.service.synchronous; syncOwner != nil && syncOwner != s {
+		if err := syncOwner.flushPendingResults(ctx); err != nil {
+			return err
+		}
 	}
 	steps := []func(context.Context, time.Time) error{
 		s.expireQueued, s.expireTransport, s.expireApplication, s.recoverExpiredLeases,
@@ -278,8 +360,27 @@ func (s *Scheduler) runDue(ctx context.Context, now time.Time) error {
 }
 
 func (s *Scheduler) expireQueued(ctx context.Context, now time.Time) error {
+	var bound []gbmodels.GbPTZOperation
+	if err := ptzWriter(s.db).WithContext(ctx).
+		Where("response_required = ? AND status = ? AND attempt = 0 AND queue_deadline_at <= ?", true, gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(s.db, now)).
+		Where("device_intent_id IS NOT NULL OR device_epoch IS NOT NULL").Find(&bound).Error; err != nil {
+		return err
+	}
+	for _, op := range bound {
+		id, err := ptzIntentIdentity(op)
+		if err != nil {
+			return err
+		}
+		if s.service.intents == nil {
+			return playauth.ErrDeviceIntentUnavailable
+		}
+		if err := s.service.intents.ExpirePTZReservation(ctx, id, op.ID, now); err != nil {
+			return err
+		}
+	}
 	return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("response_required = ? AND status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at <= ?", true, gbmodels.PTZOperationQueued, now).
+		Where("device_intent_id IS NULL AND device_epoch IS NULL").
+		Where("response_required = ? AND status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at <= ?", true, gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(s.db, now)).
 		Updates(map[string]interface{}{
 			"status": gbmodels.PTZOperationRejected, "error_code": schedulerErrorHomePositionUnavailable,
 			"error_message": "PTZ operation 排队超时", "completed_at": now, "next_attempt_at": nil,
@@ -288,7 +389,7 @@ func (s *Scheduler) expireQueued(ctx context.Context, now time.Time) error {
 
 func (s *Scheduler) expireTransport(ctx context.Context, now time.Time) error {
 	return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("response_required = ? AND status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at <= ?", true, gbmodels.PTZOperationQueued, now).
+		Where("response_required = ? AND status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at <= ?", true, gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(s.db, now)).
 		Updates(map[string]interface{}{
 			"status": gbmodels.PTZOperationUnknown, "error_code": schedulerErrorTransportUnknown,
 			"error_message": "PTZ MESSAGE 传输结果不确定", "completed_at": now, "next_attempt_at": nil,
@@ -297,7 +398,7 @@ func (s *Scheduler) expireTransport(ctx context.Context, now time.Time) error {
 
 func (s *Scheduler) expireApplication(ctx context.Context, now time.Time) error {
 	return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("response_required = ? AND status = ? AND deadline_at IS NOT NULL AND deadline_at <= ?", true, gbmodels.PTZOperationSent, now).
+		Where("response_required = ? AND status = ? AND deadline_at IS NOT NULL AND deadline_at <= ?", true, gbmodels.PTZOperationSent, gbmodels.PTZTimeComparison(s.db, now)).
 		Updates(map[string]interface{}{
 			"status": gbmodels.PTZOperationTimeout, "error_code": schedulerErrorApplicationTimeout,
 			"error_message": "等待设备应用层响应超时", "completed_at": now, "next_attempt_at": nil,
@@ -309,15 +410,17 @@ func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) err
 	if err := ptzWriter(s.db).WithContext(ctx).Table("gb_ptz_operation_attempt AS attempt").
 		Select("attempt.*").
 		Joins("JOIN gb_ptz_operation AS operation ON operation.id = attempt.operation_id").
-		Where("operation.response_required = ? AND attempt.status = ? AND attempt.lease_until <= ?", true, gbmodels.PTZOperationAttemptDispatching, now).
+		Where("operation.response_required = ? AND attempt.status = ? AND attempt.lease_until <= ?", true, gbmodels.PTZOperationAttemptDispatching, gbmodels.PTZTimeComparison(s.db, now)).
 		Order("attempt.id").Find(&attempts).Error; err != nil {
 		return err
 	}
 	for _, attempt := range attempts {
-		s.cancelAttempt(attempt.ID)
+		if err := s.cancelAttempt(ctx, attempt.ID); err != nil {
+			return err
+		}
 		if err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 			result := tx.Model(&gbmodels.GbPTZOperationAttempt{}).
-				Where("id = ? AND status = ? AND lease_until <= ?", attempt.ID, gbmodels.PTZOperationAttemptDispatching, now).
+				Where("id = ? AND status = ? AND lease_until <= ?", attempt.ID, gbmodels.PTZOperationAttemptDispatching, gbmodels.PTZTimeComparison(tx, now)).
 				Updates(map[string]interface{}{
 					"status": gbmodels.PTZOperationAttemptUnknown, "completed_at": now,
 					"error_code": schedulerErrorTransportUnknown, "error_message": "sender lease expired",
@@ -352,7 +455,7 @@ func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 	if err := ptzWriter(s.db).WithContext(ctx).
 		Where("response_required = ? AND status IN ? AND attempt < max_attempts", true, []gbmodels.PTZOperationStatus{gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent}).
 		Where(`(attempt = 0 AND dispatch_started_at IS NULL AND queue_deadline_at > ?)
-			OR (attempt > 0 AND next_attempt_at IS NOT NULL AND next_attempt_at <= ? AND transport_deadline_at > ?)`, now, now, now).
+			OR (attempt > 0 AND next_attempt_at IS NOT NULL AND next_attempt_at <= ? AND transport_deadline_at > ?)`, gbmodels.PTZTimeComparison(s.db, now), gbmodels.PTZTimeComparison(s.db, now), gbmodels.PTZTimeComparison(s.db, now)).
 		Order("id").Find(&candidates).Error; err != nil {
 		return err
 	}
@@ -363,7 +466,14 @@ func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 		}
 		attempt, claimed, err := s.claimAttempt(ctx, candidate.ID, now)
 		if err != nil {
+			s.retainUnissued(err)
 			reservation.Release()
+			if errors.Is(err, playauth.ErrDeviceIntentRevoked) {
+				if err := s.revokeOperation(ctx, candidate, now); err != nil {
+					return err
+				}
+				continue
+			}
 			return err
 		}
 		if !claimed {
@@ -377,7 +487,45 @@ func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 	return nil
 }
 
+// Revocation stops future work, not history. A possibly sent attempt remains
+// unknown; only a command without such evidence can be marked rejected.
+func (s *Scheduler) revokeOperation(ctx context.Context, expected gbmodels.GbPTZOperation, now time.Time) error {
+	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		var uncertain int64
+		if err := tx.Model(&gbmodels.GbPTZOperationAttempt{}).
+			Where("operation_id = ? AND status IN ?", expected.ID, []gbmodels.PTZOperationAttemptStatus{gbmodels.PTZOperationAttemptSent, gbmodels.PTZOperationAttemptUnknown, gbmodels.PTZOperationAttemptDispatching}).Count(&uncertain).Error; err != nil {
+			return err
+		}
+		status := gbmodels.PTZOperationRejected
+		if uncertain != 0 || expected.Status == gbmodels.PTZOperationSent || ((expected.DeviceEpoch == nil || expected.DeviceIntentID == nil) && expected.Attempt > 0) {
+			status = gbmodels.PTZOperationUnknown
+		}
+		return tx.Model(&gbmodels.GbPTZOperation{}).
+			Where("id = ? AND attempt = ? AND status = ?", expected.ID, expected.Attempt, expected.Status).
+			Updates(map[string]any{"status": status, "error_code": "DEVICE_EPOCH_REVOKED", "error_message": "原设备授权已失效", "next_attempt_at": nil, "completed_at": now}).Error
+	})
+}
+
 func (s *Scheduler) claimAttempt(ctx context.Context, operationID uint, now time.Time) (gbmodels.GbPTZOperationAttempt, bool, error) {
+	// This read selects a protocol; it never refreshes the operation's epoch.
+	// The authorized store rechecks the exact binding inside its transaction.
+	var original gbmodels.GbPTZOperation
+	if err := ptzWriter(s.db).WithContext(ctx).First(&original, operationID).Error; err != nil {
+		return gbmodels.GbPTZOperationAttempt{}, false, err
+	}
+	if requiresPTZIntent(original) {
+		id, err := ptzIntentIdentity(original)
+		if err != nil {
+			// Historical NULL authorization is never refreshed. Stop this
+			// command rather than failing every future scheduling batch.
+			return gbmodels.GbPTZOperationAttempt{}, false, playauth.ErrDeviceIntentRevoked
+		}
+		if s.service.intents == nil || s.service.barrier == nil {
+			return gbmodels.GbPTZOperationAttempt{}, false, playauth.ErrDeviceIntentUnavailable
+		}
+		attempt, err := s.service.intents.ClaimPTZAttempt(ctx, id, original.ID, original.Attempt, now)
+		return attempt, err == nil, err
+	}
 	var claimed gbmodels.GbPTZOperationAttempt
 	err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		claimed = gbmodels.GbPTZOperationAttempt{}
@@ -423,9 +571,9 @@ func (s *Scheduler) claimAttempt(ctx context.Context, operationID uint, now time
 			Where("id = ? AND response_required = ? AND status IN ? AND attempt = ? AND attempt < max_attempts",
 				operation.ID, true, []gbmodels.PTZOperationStatus{gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent}, operation.Attempt)
 		if operation.Attempt == 0 {
-			query = query.Where("dispatch_started_at IS NULL AND queue_deadline_at > ?", now)
+			query = query.Where("dispatch_started_at IS NULL AND queue_deadline_at > ?", gbmodels.PTZTimeComparison(tx, now))
 		} else {
-			query = query.Where("next_attempt_at IS NOT NULL AND next_attempt_at <= ? AND transport_deadline_at > ?", now, now)
+			query = query.Where("next_attempt_at IS NOT NULL AND next_attempt_at <= ? AND transport_deadline_at > ?", gbmodels.PTZTimeComparison(tx, now), gbmodels.PTZTimeComparison(tx, now))
 		}
 		result := query.Updates(updates)
 		if result.Error != nil || result.RowsAffected == 0 {
@@ -472,26 +620,50 @@ func schedulerBoundaries(startedAt, now time.Time, maxAttempts int) (time.Time, 
 }
 
 func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodels.GbPTZOperationAttempt) {
+	_ = s.dispatchPreparedAttempt(dispatchCtx, attempt, nil)
+}
+
+func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt gbmodels.GbPTZOperationAttempt, preparedBody []byte) error {
 	ctx, cancel := context.WithDeadline(dispatchCtx, attempt.LeaseUntil)
+	done := make(chan struct{})
 	s.activeMu.Lock()
-	s.active[attempt.ID] = cancel
+	s.active[attempt.ID] = schedulerActiveAttempt{cancel: cancel, done: done}
 	s.activeMu.Unlock()
 	defer func() {
 		cancel()
 		s.activeMu.Lock()
 		delete(s.active, attempt.ID)
+		close(done)
 		s.activeMu.Unlock()
 	}()
 
 	var operation gbmodels.GbPTZOperation
 	var result uac.TrackedMessageResult
 	err := ptzWriter(s.db).WithContext(ctx).First(&operation, attempt.OperationID).Error
+	var lease playauth.DeviceOperationLease
+	if err == nil && requiresPTZIntent(operation) {
+		var id playauth.DeviceOperationIntentIdentity
+		id, err = ptzIntentIdentity(operation)
+		if err == nil && s.service.barrier == nil {
+			err = playauth.ErrDeviceIntentUnavailable
+		}
+		if err == nil {
+			lease, err = s.service.barrier.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
+			if err == nil {
+				ctx = lease.Context()
+			}
+		}
+	}
 	if err == nil {
 		var destination, transport string
 		destination, transport, err = s.schedulerTarget(ctx, operation)
 		if err == nil {
 			var body []byte
-			body, err = buildScheduledPTZBody(operation)
+			if preparedBody != nil {
+				body = preparedBody
+			} else {
+				body, err = buildScheduledPTZBody(operation)
+			}
 			if err == nil {
 				result, err = s.service.sender.SendMessageTracked(ctx, operation.DeviceCode, destination, transport, body)
 			}
@@ -500,11 +672,23 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 	observedAt := s.service.now()
 	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(dispatchCtx), 2*time.Second)
 	defer persistCancel()
-	if persistErr := s.persistAttemptResult(persistCtx, attempt, result, err, observedAt); persistErr != nil && app.ZapLog != nil {
+	if persistErr := s.persistAttemptResult(persistCtx, attempt, result, err, observedAt); persistErr != nil {
+		s.pendingMu.Lock()
+		if s.pendingResults == nil {
+			s.pendingResults = make(map[uint]schedulerPendingResult)
+		}
+		s.pendingResults[attempt.ID] = schedulerPendingResult{attempt: attempt, result: result, sendErr: err, observedAt: observedAt, lease: lease}
+		s.pendingMu.Unlock()
 		// 写回失败不得无声:否则 attempt 停留 dispatching,直到租约恢复才可能被发现
-		app.ZapLog.Error("PTZ 调度结果持久化失败",
-			zap.Uint("attempt", attempt.ID), zap.Uint("operation", attempt.OperationID), zap.Error(persistErr))
+		if app.ZapLog != nil {
+			app.ZapLog.Error("PTZ 调度结果持久化失败",
+				zap.Uint("attempt", attempt.ID), zap.Uint("operation", attempt.OperationID), zap.Error(persistErr))
+		}
+		return persistErr
+	} else if lease != nil {
+		lease.Release()
 	}
+	return err
 }
 
 func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPTZOperation) (string, string, error) {
@@ -637,10 +821,33 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 }
 
 func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.GbPTZOperationAttempt, result uac.TrackedMessageResult, sendErr error, observedAt time.Time) error {
-	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) (persistErr error) {
 		var currentAttempt gbmodels.GbPTZOperationAttempt
 		if err := tx.First(&currentAttempt, attempt.ID).Error; err != nil {
 			return err
+		}
+		bound := currentAttempt.OwnerProcessID != nil || currentAttempt.OwnerRunID != nil || attempt.OwnerProcessID != nil || attempt.OwnerRunID != nil
+		if bound {
+			if currentAttempt.OwnerProcessID == nil || currentAttempt.OwnerRunID == nil || attempt.OwnerProcessID == nil || attempt.OwnerRunID == nil ||
+				*currentAttempt.OwnerProcessID != *attempt.OwnerProcessID || *currentAttempt.OwnerRunID != *attempt.OwnerRunID ||
+				currentAttempt.OperationID != attempt.OperationID || currentAttempt.AttemptNo != attempt.AttemptNo {
+				return playauth.ErrDeviceIntentConflict
+			}
+			// This function is called only after Send has returned. A failed
+			// result write must roll back its exit marker too; lease expiry is
+			// never allowed to manufacture this evidence.
+			defer func() {
+				if persistErr != nil || currentAttempt.LocalQuiescedAt != nil {
+					return
+				}
+				res := tx.Model(&gbmodels.GbPTZOperationAttempt{}).
+					Where("id = ? AND owner_process_id = ? AND owner_run_id = ? AND local_quiesced_at IS NULL", attempt.ID, *attempt.OwnerProcessID, *attempt.OwnerRunID).
+					UpdateColumn("local_quiesced_at", observedAt)
+				persistErr = res.Error
+				if persistErr == nil && res.RowsAffected != 1 {
+					persistErr = playauth.ErrDeviceIntentConflict
+				}
+			}()
 		}
 		success := sendErr == nil && result.StatusCode >= 200 && result.StatusCode < 300
 		recoveredBeforeWriteback := success &&
@@ -653,6 +860,9 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 		var operation gbmodels.GbPTZOperation
 		if err := tx.First(&operation, currentAttempt.OperationID).Error; err != nil {
 			return err
+		}
+		if !operation.ResponseRequired {
+			return persistOneWayAttemptResult(tx, operation, currentAttempt, result, sendErr, observedAt)
 		}
 		if !currentAttempt.LeaseUntil.After(observedAt) || operation.TransportDeadlineAt == nil || !operation.TransportDeadlineAt.After(observedAt) {
 			if currentAttempt.Status == gbmodels.PTZOperationAttemptDispatching {

@@ -229,7 +229,7 @@ func (dc *DeviceMgmtController) activeDeviceControlResource(
 		Where("action IN ?", resource.actions).
 		Where(`status IN ? OR (status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
 			[]gbmodels.PTZOperationStatus{gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent},
-			gbmodels.PTZOperationUnknown, now).
+			gbmodels.PTZOperationUnknown, gbmodels.PTZTimeComparison(dc.db(), now)).
 		Order("id DESC").Limit(1).Find(&operation)
 	return operation, result.RowsAffected > 0, result.Error
 }

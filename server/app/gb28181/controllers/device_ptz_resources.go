@@ -166,12 +166,20 @@ func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *
 	if result.RowsAffected == 0 {
 		return ptz.Target{}, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "所属设备不存在或无权限", nil)
 	}
-	return ptz.Target{
+	target := ptz.Target{
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile: profileForDevice(&device),
-	}, nil
+	}
+	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
+		captured, err := capturePTZAuthorization(c, dc.db(), target)
+		if err != nil {
+			return ptz.Target{}, homePositionFailure(http.StatusConflict, ptz.ErrorCodeHomePositionUnavailable, "设备权限已失效或正在转移", err)
+		}
+		target = captured
+	}
+	return target, nil
 }
 
 func (dc *DeviceMgmtController) loadHomePositionActor(c *gin.Context) (uint, uint, *homePositionHTTPFailure) {
@@ -214,12 +222,16 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return ptz.Target{}, false
 	}
-	return ptz.Target{
+	target := ptz.Target{
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile: profileForDevice(&device),
-	}, true
+	}
+	if !dc.authorizePTZTarget(c, &target) {
+		return ptz.Target{}, false
+	}
+	return target, true
 }
 
 func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, action manscdp.PTZExtendedAction, id int, name, idempotencyKey string) {

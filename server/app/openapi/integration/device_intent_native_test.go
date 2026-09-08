@@ -40,7 +40,7 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.Contains(t, []string{"mysql", "postgresql", "sqlserver"}, dialect, "an explicit supported native database is required; never substitute SQLite")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	connection, err := openFullInitializationConnection(ctx, fullInitializationConfig{dialect: dialect, dsn: dsn})
+	connection, err := openInitializationConnector(ctx, fullInitializationConfig{dialect: dialect, dsn: dsn}, authoritytest.CommitFaultConnector)
 	require.NoError(t, err)
 	defer connection.db.Close()
 	defer connection.conn.Close()
@@ -93,6 +93,9 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD legacy_revoked_before "+dateType+" NULL").Error)
+	if os.Getenv("UVP_OPENAPI_PTZ_NATIVE") == "1" {
+		exercisePTZNative(t, ctx, connection.conn, db, store, authority, dialect, suffix)
+	}
 	barrier, err := playauth.NewAuthorizedDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db), authority)
 	require.NoError(t, err)
 	var fenceBefore int64

@@ -14,6 +14,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -48,6 +49,14 @@ type homePositionControlValue struct {
 
 // OnPTZMessage adapts inbound MANSCDP responses to the operation state machine.
 func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq string, body []byte) error {
+	if s == nil || s.db == nil {
+		return operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
+	}
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	if s.retired {
+		return operationError(ErrorCodeHomePositionUnavailable, "PTZ service 已卸载", nil)
+	}
 	head, err := manscdp.ParseHead(body)
 	if err != nil {
 		return err
@@ -232,10 +241,10 @@ func ptzResponseOperationUpdate(tx *gorm.DB, operation gbmodels.GbPTZOperation, 
 			OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
 			OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
 			OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
-			gbmodels.PTZOperationUnknown, observedAt,
-			gbmodels.PTZOperationSent, observedAt,
-			gbmodels.PTZOperationQueued, observedAt,
-			gbmodels.PTZOperationQueued, observedAt,
+			gbmodels.PTZOperationUnknown, gbmodels.PTZTimeComparison(tx, observedAt),
+			gbmodels.PTZOperationSent, gbmodels.PTZTimeComparison(tx, observedAt),
+			gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(tx, observedAt),
+			gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(tx, observedAt),
 		)
 	}
 	return update
@@ -357,6 +366,20 @@ func (s *Service) applyAcceptedHomePositionControl(ctx context.Context, operatio
 	completedAt := s.now()
 	rawSummary := summarizePTZBody(body)
 	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		var observation *playauth.PTZResponseObservation
+		if (operation.DeviceEpoch == nil) != (operation.DeviceIntentID == nil) {
+			return playauth.ErrDeviceIntentConflict
+		}
+		if operation.DeviceEpoch != nil {
+			if s.intents == nil {
+				return playauth.ErrDeviceIntentUnavailable
+			}
+			var err error
+			observation, err = s.intents.BeginPTZResponseObservation(tx, operation)
+			if err != nil {
+				return err
+			}
+		}
 		applied, err := applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
 			Status: gbmodels.PTZOperationAccepted, DeviceResult: string(manscdp.DeviceControlResultOK),
 		}, completedAt)
@@ -373,11 +396,16 @@ func (s *Service) applyAcceptedHomePositionControl(ctx context.Context, operatio
 		}); err != nil {
 			return err
 		}
+		// A pre-lock command may still report its result. Preserve that fact,
+		// but never invent current authorization for its follow-up query.
+		if observation == nil && requiresPTZIntent(operation) {
+			return nil
+		}
 		allowed, err := automaticHomePositionReconcileAllowed(tx, operation.ChannelID)
 		if err != nil || !allowed {
 			return err
 		}
-		return s.createHomePositionReconcile(tx, operation, completedAt)
+		return s.createHomePositionReconcile(tx, operation, completedAt, observation)
 	})
 }
 func decodeHomePositionControlPayload(payloadJSON string) (homePositionControlValue, error) {
@@ -410,12 +438,20 @@ func automaticHomePositionReconcileAllowed(tx *gorm.DB, channelID uint) (bool, e
 	return !declared || capability.Status != HomePositionCapabilityUnsupported, nil
 }
 
-func (s *Service) createHomePositionReconcile(tx *gorm.DB, parent gbmodels.GbPTZOperation, createdAt time.Time) error {
+func (s *Service) createHomePositionReconcile(tx *gorm.DB, parent gbmodels.GbPTZOperation, createdAt time.Time, observation *playauth.PTZResponseObservation) error {
 	payloadJSON, err := canonicalPayload(map[string]interface{}{"triggerOperationId": parent.OperationID})
 	if err != nil {
 		return err
 	}
 	operationID := uuid.NewString()
+	if observation != nil {
+		deadline := createdAt.Add(5 * time.Second)
+		return observation.ReserveHomePositionQuery(gbmodels.GbPTZOperation{
+			OperationID: operationID, CmdType: manscdp.CmdHomePositionQuery, Action: "refresh_home_position",
+			PayloadJSON: payloadJSON, SN: s.nextSN(), Status: gbmodels.PTZOperationQueued,
+			ResponseRequired: true, MaxAttempts: homePositionReconcileAttempts, QueueDeadlineAt: &deadline, CreatedAt: createdAt,
+		})
+	}
 	values := map[string]interface{}{
 		"operation_id": operationID, "idempotency_key": "home-reconcile:" + parent.OperationID,
 		"device_id": parent.DeviceID, "device_code": parent.DeviceCode,

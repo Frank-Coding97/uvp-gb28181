@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -149,6 +151,33 @@ func (s *Service) createOperation(
 		ActorID: command.ActorID, ActorDeptID: command.ActorDeptID,
 		TriggerOperationID: triggerOperationPointer(command.TriggerOperationID), CreatedAt: createdAt,
 	}
+	if targetRequiresPTZIntent(target) {
+		if target.DeviceEpoch <= 0 || s.intents == nil || s.barrier == nil {
+			return gbmodels.GbPTZOperation{}, playauth.ErrDeviceIntentUnavailable
+		}
+		parentID, err := playauth.NewDeviceOperationIntentID()
+		if err != nil {
+			return gbmodels.GbPTZOperation{}, err
+		}
+		authScope, targetPK, authCode, err := playauth.PTZIntentTarget(operation)
+		if err != nil {
+			return gbmodels.GbPTZOperation{}, err
+		}
+		operation.Attempt = 0
+		operation.ResponseRequired = command.ResponseRequired
+		operation.MaxAttempts = command.MaxAttempts
+		if operation.MaxAttempts <= 0 {
+			operation.MaxAttempts = 1
+		}
+		if !command.ResponseRequired {
+			operation.MaxAttempts = 1
+		}
+		deadline := createdAt.Add(5 * time.Second)
+		operation.QueueDeadlineAt = &deadline
+		return s.intents.ReservePTZOperation(ctx, playauth.DeviceOperationIntentIdentity{
+			OperationID: parentID, DevicePK: int64(target.DeviceID), DeviceCode: target.DeviceCode, DeviceEpoch: target.DeviceEpoch,
+			TargetScope: authScope, TargetPK: targetPK, TargetCode: authCode, Kind: "ptz"}, operation)
+	}
 	if !command.ResponseRequired {
 		return operation, s.db.WithContext(ctx).Create(&operation).Error
 	}
@@ -208,6 +237,11 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	if s.retired {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 已卸载", nil)
 	}
+	if s.synchronous != nil {
+		if err := s.synchronous.flushPendingResults(ctx); err != nil {
+			return gbmodels.GbPTZOperation{}, err
+		}
+	}
 	if err := validateTargetIdentity(target); err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
@@ -236,7 +270,7 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 		return gbmodels.GbPTZOperation{}, err
 	}
 	if found {
-		if !operationMatches(existing, command, payloadJSON) {
+		if !operationMatchesTarget(existing, target) || !operationMatches(existing, command, payloadJSON) {
 			return existing, idempotencyConflict(existing)
 		}
 		return existing, nil
@@ -255,9 +289,18 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	}
 	operation, err := s.createOperation(ctx, target, command, payloadJSON, sn, s.now())
 	if err != nil {
+		var reservation *playauth.PTZReservationOutcome
+		if errors.As(err, &reservation) {
+			if s.synchronous != nil {
+				s.synchronous.pendingMu.Lock()
+				s.synchronous.pendingReservations = append(s.synchronous.pendingReservations, reservation)
+				s.synchronous.pendingMu.Unlock()
+			}
+			return gbmodels.GbPTZOperation{}, err
+		}
 		raced, racedFound, readErr := s.findIdempotentOperation(ctx, target.ChannelID, command.IdempotencyKey)
 		if readErr == nil && racedFound {
-			if !operationMatches(raced, command, payloadJSON) {
+			if !operationMatchesTarget(raced, target) || !operationMatches(raced, command, payloadJSON) {
 				return raced, idempotencyConflict(raced)
 			}
 			return raced, nil
@@ -266,6 +309,32 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	}
 	if command.ResponseRequired {
 		return operation, nil
+	}
+	if requiresPTZIntent(operation) {
+		if s.synchronous == nil {
+			return operation, playauth.ErrDeviceIntentUnavailable
+		}
+		id, err := ptzIntentIdentity(operation)
+		if err != nil {
+			return operation, err
+		}
+		attempt, err := s.intents.ClaimPTZAttempt(ctx, id, operation.ID, 0, s.now())
+		if err != nil {
+			s.synchronous.retainUnissued(err)
+			return operation, err
+		}
+		sendErr := s.synchronous.dispatchPreparedAttempt(ctx, attempt, body)
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if err := ptzWriter(s.db).WithContext(readCtx).First(&operation, operation.ID).Error; err != nil {
+			return operation, err
+		}
+		if sendErr == nil && operation.Status == gbmodels.PTZOperationSent {
+			if err := s.SyncPresetOperation(readCtx, operation); err != nil {
+				return operation, err
+			}
+		}
+		return operation, sendErr
 	}
 	return s.sendLegacyOperation(ctx, target, operation, body)
 }
@@ -427,10 +496,10 @@ func (s *Service) ApplyResponse(ctx context.Context, response Response) (gbmodel
 				OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
 				OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
 				OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
-				gbmodels.PTZOperationUnknown, completedAt,
-				gbmodels.PTZOperationSent, completedAt,
-				gbmodels.PTZOperationQueued, completedAt,
-				gbmodels.PTZOperationQueued, completedAt,
+				gbmodels.PTZOperationUnknown, gbmodels.PTZTimeComparison(tx, completedAt),
+				gbmodels.PTZOperationSent, gbmodels.PTZTimeComparison(tx, completedAt),
+				gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(tx, completedAt),
+				gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(tx, completedAt),
 			)
 		}
 		result := update.Updates(updates)

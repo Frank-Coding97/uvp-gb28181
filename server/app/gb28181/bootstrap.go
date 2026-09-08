@@ -493,7 +493,7 @@ func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report 
 func Start(authority *processauthority.Authority) {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
-	if sipServer != nil || securityRuntime != nil || playbackService != nil {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil || ptzService != nil || ptzScheduler != nil {
 		app.ZapLog.Warn("GB28181 旧运行时尚未释放,拒绝重复启动")
 		return
 	}
@@ -610,7 +610,7 @@ func startSIPDependencies(cfg gbconfig.Config, authority *processauthority.Autho
 // Caller holds sipLifecycleMu. Register every owned object before any later
 // fallible assembly; rollback must preserve the original instance on failure.
 func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauthority.Authority, factory sipRuntimeFactory) (err error) {
-	if sipServer != nil || securityRuntime != nil || playbackService != nil {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil || ptzService != nil || ptzScheduler != nil {
 		return errors.New("GB28181 旧运行时尚未释放,拒绝替换")
 	}
 	deviceDB := app.DB()
@@ -659,7 +659,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		recordQueryMetrics = recordquery.NewMetrics()
 		srv.SetRecordInfoSink(newRecordQueryService)
 		gbroutes.SetDeviceMgmtRecordQueryRuntime(newRecordQueryService, cfg.RecordQuery, recordQueryMetrics)
-		newPTZService, err = ptz.NewService(app.DB(), u, time.Now)
+		newPTZService, err = ptz.NewAuthorizedService(deviceDB, u, time.Now, deviceIntents, deviceOperations)
 		if err != nil {
 			newRecordQueryService.Close()
 			recordQueryService = nil
@@ -938,7 +938,9 @@ func stopSIPDependencies(ctx context.Context) error {
 	}
 	stopRecordQueryRuntime()
 	stopFirmwareUpgradeRuntime()
-	stopPTZRuntime()
+	if err := stopPTZRuntime(); err != nil {
+		return fmt.Errorf("PTZ 结果排空失败，保留运行时等待重试: %w", err)
+	}
 	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
@@ -1073,16 +1075,36 @@ func stopRecordQueryRuntime() {
 	recordQueryMetrics = nil
 }
 
-func stopPTZRuntime() {
-	if ptzScheduler != nil {
-		ptzScheduler.Stop()
-		ptzScheduler = nil
+func stopPTZRuntime() error {
+	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+	if sipServer != nil {
+		if setter, ok := sipServer.(interface {
+			SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
+		}); ok {
+			setter.SetPTZMessageProcessor(nil)
+		}
 	}
 	if ptzService != nil {
 		ptzService.Retire()
 	}
+	if ptzScheduler != nil {
+		ptzScheduler.Stop()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if owner, ok := ptzScheduler.(interface{ FlushResults(context.Context) error }); ok {
+		if err := owner.FlushResults(ctx); err != nil {
+			return err
+		}
+	}
+	if ptzService != nil {
+		if err := ptzService.FlushResults(ctx); err != nil {
+			return err
+		}
+	}
+	ptzScheduler = nil
 	ptzService = nil
-	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+	return nil
 }
 
 func stopFirmwareUpgradeRuntime() {

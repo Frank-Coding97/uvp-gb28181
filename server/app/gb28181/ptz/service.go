@@ -13,6 +13,7 @@ import (
 	"gorm.io/plugin/dbresolver"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
@@ -22,6 +23,7 @@ type TrackedSender interface {
 }
 
 type Target struct {
+	DeviceEpoch   int64
 	DeviceID      uint
 	DeviceCode    string
 	ChannelID     uint
@@ -84,10 +86,13 @@ type PreciseNotify struct {
 }
 
 type Service struct {
-	db     *gorm.DB
-	sender TrackedSender
-	now    func() time.Time
-	sn     atomic.Uint64
+	synchronous *Scheduler
+	intents     *playauth.DeviceOperationIntentStore
+	barrier     *playauth.DeviceOperationBarrier
+	db          *gorm.DB
+	sender      TrackedSender
+	now         func() time.Time
+	sn          atomic.Uint64
 	// locks + lockTableMu 组成可回收的通道锁表:acquire 与删除都在表锁内完成,
 	// 保证同一 channel 永远只有一个有效锁,且锁表不随历史通道无限累积
 	lockTableMu  sync.Mutex
@@ -96,6 +101,21 @@ type Service struct {
 	queryStages  map[string]queryResponseStage
 	lifecycleMu  sync.RWMutex
 	retired      bool
+}
+
+// NewAuthorizedService borrows the root's shared intent store and barrier.
+// It must not create a second process authority or an independent lease set.
+func NewAuthorizedService(db *gorm.DB, sender TrackedSender, now func() time.Time, intents *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier) (*Service, error) {
+	if intents == nil || barrier == nil {
+		return nil, playauth.ErrDeviceIntentUnavailable
+	}
+	s, err := NewService(db, sender, now)
+	if err != nil {
+		return nil, err
+	}
+	s.intents, s.barrier = intents, barrier
+	s.synchronous = NewScheduler(s)
+	return s, nil
 }
 
 func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Service, error) {
@@ -196,8 +216,8 @@ func (s *Service) EnsureSNFloor(floor int) error {
 	}
 }
 
-// Retire prevents future operation creation and waits for every Execute that
-// already entered the old runtime. Reload calls it before a new Service reads
+// Retire prevents future operation creation and waits for every Execute and
+// inbound response already entered into the old runtime. Reload calls it before a new Service reads
 // MAX(sn), so two generations cannot allocate the same sequence number.
 func (s *Service) Retire() {
 	if s == nil {
@@ -206,7 +226,18 @@ func (s *Service) Retire() {
 	s.lifecycleMu.Lock()
 	s.retired = true
 	s.lifecycleMu.Unlock()
+	if s.synchronous != nil {
+		s.synchronous.Stop()
+	}
 	s.clearQueryStages()
+}
+
+// FlushResults preserves synchronous sends across a failed root teardown.
+func (s *Service) FlushResults(ctx context.Context) error {
+	if s == nil || s.synchronous == nil {
+		return nil
+	}
+	return s.synchronous.FlushResults(ctx)
 }
 
 func validateTargetIdentity(target Target) error {

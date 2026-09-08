@@ -18,6 +18,7 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type schedulerFakeClock struct {
@@ -136,12 +137,18 @@ type schedulerFixture struct {
 	scheduler  *Scheduler
 }
 
-func newSchedulerFixture(t *testing.T, capacity int) *schedulerFixture {
+func newSchedulerFixture(t *testing.T, capacity int, managedDriver ...bool) *schedulerFixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "scheduler.db")
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", path)
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
+	var db *gorm.DB
+	if len(managedDriver) != 0 && managedDriver[0] {
+		db = authoritytest.OpenSQLite(t, dsn)
+	} else {
+		var err error
+		db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+		require.NoError(t, err)
+	}
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(8)

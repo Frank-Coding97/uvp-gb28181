@@ -26,6 +26,10 @@ type GbPTZOperation struct {
 	CmdType        string `gorm:"column:cmd_type;size:64;not null;index:idx_ptz_operation_channel_cmd_id,priority:2" json:"cmdType"`
 	Action         string `gorm:"column:action;size:64" json:"action"`
 	PayloadJSON    string `gorm:"column:payload_json;type:text" json:"-"`
+	// Original authorization and its durable parent are a pair. Historical
+	// NULLs remain unknown; neither a retry nor migration may refresh them.
+	DeviceEpoch    *int64  `gorm:"column:device_epoch" json:"-"`
+	DeviceIntentID *string `gorm:"column:device_intent_id;size:32" json:"-"`
 	// Profile and target are immutable snapshots. They make retries and
 	// scheduler recovery deterministic even if the device override changes.
 	ProfileVersion       string             `gorm:"column:profile_version;size:8" json:"profileVersion"`
@@ -202,21 +206,25 @@ const (
 )
 
 type GbPTZOperationAttempt struct {
-	ID           uint                      `gorm:"primaryKey" json:"id"`
-	OperationID  uint                      `gorm:"column:operation_id;not null;uniqueIndex:uk_ptz_operation_attempt,priority:1" json:"operationId"`
-	AttemptNo    int                       `gorm:"column:attempt_no;not null;uniqueIndex:uk_ptz_operation_attempt,priority:2" json:"attemptNo"`
-	SN           int                       `gorm:"column:sn;not null" json:"sn"`
-	Status       PTZOperationAttemptStatus `gorm:"column:status;size:16;not null;index:idx_ptz_attempt_status_lease,priority:1" json:"status"`
-	CallID       string                    `gorm:"column:call_id;size:255" json:"callId"`
-	CSeq         string                    `gorm:"column:cseq;size:64" json:"cseq"`
-	SIPStatus    int                       `gorm:"column:sip_status;not null;default:0" json:"sipStatus"`
-	StartedAt    time.Time                 `gorm:"column:started_at;not null" json:"startedAt"`
-	LeaseUntil   time.Time                 `gorm:"column:lease_until;not null;index:idx_ptz_attempt_status_lease,priority:2" json:"leaseUntil"`
-	SentAt       *time.Time                `gorm:"column:sent_at" json:"sentAt"`
-	CompletedAt  *time.Time                `gorm:"column:completed_at" json:"completedAt"`
-	ErrorCode    string                    `gorm:"column:error_code;size:64" json:"errorCode"`
-	ErrorMessage string                    `gorm:"column:error_message;type:text" json:"errorMessage"`
-	CreatedAt    time.Time                 `gorm:"column:created_at;not null" json:"createdAt"`
+	// A lease deadline is not proof that the original sender has exited.
+	OwnerProcessID  *string                   `gorm:"column:owner_process_id;size:32" json:"-"`
+	OwnerRunID      *string                   `gorm:"column:owner_run_id;size:32" json:"-"`
+	LocalQuiescedAt *time.Time                `gorm:"column:local_quiesced_at" json:"-"`
+	ID              uint                      `gorm:"primaryKey" json:"id"`
+	OperationID     uint                      `gorm:"column:operation_id;not null;uniqueIndex:uk_ptz_operation_attempt,priority:1" json:"operationId"`
+	AttemptNo       int                       `gorm:"column:attempt_no;not null;uniqueIndex:uk_ptz_operation_attempt,priority:2" json:"attemptNo"`
+	SN              int                       `gorm:"column:sn;not null" json:"sn"`
+	Status          PTZOperationAttemptStatus `gorm:"column:status;size:16;not null;index:idx_ptz_attempt_status_lease,priority:1" json:"status"`
+	CallID          string                    `gorm:"column:call_id;size:255" json:"callId"`
+	CSeq            string                    `gorm:"column:cseq;size:64" json:"cseq"`
+	SIPStatus       int                       `gorm:"column:sip_status;not null;default:0" json:"sipStatus"`
+	StartedAt       time.Time                 `gorm:"column:started_at;not null" json:"startedAt"`
+	LeaseUntil      time.Time                 `gorm:"column:lease_until;not null;index:idx_ptz_attempt_status_lease,priority:2" json:"leaseUntil"`
+	SentAt          *time.Time                `gorm:"column:sent_at" json:"sentAt"`
+	CompletedAt     *time.Time                `gorm:"column:completed_at" json:"completedAt"`
+	ErrorCode       string                    `gorm:"column:error_code;size:64" json:"errorCode"`
+	ErrorMessage    string                    `gorm:"column:error_message;type:text" json:"errorMessage"`
+	CreatedAt       time.Time                 `gorm:"column:created_at;not null" json:"createdAt"`
 }
 
 func (GbPTZOperationAttempt) TableName() string { return "gb_ptz_operation_attempt" }

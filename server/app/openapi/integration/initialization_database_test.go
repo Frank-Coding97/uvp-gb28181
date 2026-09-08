@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"os"
@@ -263,7 +264,11 @@ func TestFullInitializationErrorLocationDoesNotExposeSQL(t *testing.T) {
 }
 
 func openFullInitializationConnection(ctx context.Context, cfg fullInitializationConfig) (*fullInitializationConnection, error) {
-	var db *sql.DB
+	return openInitializationConnector(ctx, cfg, nil)
+}
+
+func openInitializationConnector(ctx context.Context, cfg fullInitializationConfig, wrap func(driver.Connector) driver.Connector) (*fullInitializationConnection, error) {
+	var connector driver.Connector
 	var err error
 	switch cfg.dialect {
 	case "mysql":
@@ -272,22 +277,26 @@ func openFullInitializationConnection(ctx context.Context, cfg fullInitializatio
 			return nil, parseErr
 		}
 		parsed.MultiStatements = true
-		db, err = sql.Open("mysql", parsed.FormatDSN())
+		connector, err = mysql.NewConnector(parsed)
 	case "postgresql":
 		parsed, parseErr := pgx.ParseConfig(cfg.dsn)
 		if parseErr != nil {
 			return nil, parseErr
 		}
 		parsed.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-		db = sql.OpenDB(stdlib.GetConnector(*parsed))
+		connector = stdlib.GetConnector(*parsed)
 	case "sqlserver":
-		db, err = sql.Open("sqlserver", cfg.dsn)
+		connector, err = mssql.NewConnector(cfg.dsn)
 	default:
 		return nil, fmt.Errorf("unsupported full-initialization dialect %q", cfg.dialect)
 	}
 	if err != nil {
 		return nil, err
 	}
+	if wrap != nil {
+		connector = wrap(connector)
+	}
+	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)

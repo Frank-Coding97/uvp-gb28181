@@ -126,6 +126,31 @@ func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
 	require.Nil(t, sipServer)
 }
 
+type pendingPTZRuntime struct{ err error }
+
+func (*pendingPTZRuntime) Start(context.Context)                {}
+func (*pendingPTZRuntime) Stop()                                {}
+func (p *pendingPTZRuntime) FlushResults(context.Context) error { return p.err }
+
+func TestPTZFailedWritebackRetainsRuntimeForRetry(t *testing.T) {
+	oldScheduler, oldService := ptzScheduler, ptzService
+	defer func() { ptzScheduler, ptzService = oldScheduler, oldService }()
+	owner := &pendingPTZRuntime{err: errors.New("result persistence unavailable")}
+	ptzScheduler, ptzService = owner, nil
+	require.Error(t, stopPTZRuntime())
+	require.Same(t, owner, ptzScheduler, "unflushed facts must not lose their owner")
+	called := false
+	err := startSIPDependenciesWithFactory(gbconfig.Config{}, nil, func(gbconfig.Config) (sipRuntimeServer, error) {
+		called = true
+		return nil, errors.New("unexpected replacement")
+	})
+	require.ErrorContains(t, err, "旧运行时尚未释放")
+	require.False(t, called)
+	owner.err = nil
+	require.NoError(t, stopPTZRuntime())
+	require.Nil(t, ptzScheduler)
+}
+
 type recordQueryRuntimeSender struct{}
 
 func (recordQueryRuntimeSender) SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
