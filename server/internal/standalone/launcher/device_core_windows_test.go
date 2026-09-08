@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ const (
 	coreDirectoryTimeoutEnv   = "UVP_CORE_DIRECTORY_TIMEOUT"
 	coreContinueTimeoutEnv    = "UVP_CORE_CONTINUE_TIMEOUT"
 	coreRestartTimeoutEnv     = "UVP_CORE_RESTART_TIMEOUT"
+	coreActiveStopEnv         = "UVP_CORE_ACTIVE_STOP"
 
 	coreSIPPort   = 15070
 	coreServerID  = "34020000002000000001"
@@ -71,6 +74,12 @@ type coreEvidence struct {
 	FLVHTTPStatus           int    `json:"flvHttpStatus,omitempty"`
 	FLVHeader               string `json:"flvHeader,omitempty"`
 	StopHTTPStatus          int    `json:"stopHttpStatus,omitempty"`
+	ActiveStop              bool   `json:"activeStop,omitempty"`
+	FLVBytesUntilEOF        int64  `json:"flvBytesUntilEOF,omitempty"`
+	FLVEOFObserved          bool   `json:"flvEOFObserved,omitempty"`
+	ActiveStopPortsReleased bool   `json:"activeStopPortsReleased,omitempty"`
+	ActiveStopMarkerCleared bool   `json:"activeStopMarkerCleared,omitempty"`
+	RestartSIPConfigPort    int    `json:"restartSIPConfigPort,omitempty"`
 	RestartDeviceOnline     bool   `json:"restartDeviceOnline,omitempty"`
 	RestartChannelCount     int    `json:"restartChannelCount,omitempty"`
 	RestartRegisterTime     string `json:"restartRegisterTime,omitempty"`
@@ -112,6 +121,15 @@ type coreFLVObservation struct {
 	Header     string
 }
 
+type coreFLVStream struct {
+	Body io.ReadCloser
+}
+
+type coreFLVReadResult struct {
+	Bytes int64
+	Err   error
+}
+
 // TestWindowsStandaloneDeviceCorePath is an opt-in Windows core-device chain.
 // It owns only the launcher process started by t18Start; the simulator reads
 // the explicitly supplied provisioning file and remains an external fixture.
@@ -119,6 +137,10 @@ type coreFLVObservation struct {
 // bytes, stop, and registration after a launcher restart. It does not claim
 // browser decoding or simulator lifecycle ownership.
 func TestWindowsStandaloneDeviceCorePath(t *testing.T) {
+	runWindowsStandaloneDeviceCorePath(t, false)
+}
+
+func runWindowsStandaloneDeviceCorePath(t *testing.T, activeStop bool) {
 	if os.Getenv(coreEnableEnv) != "1" {
 		t.Skip("set UVP_CORE_ENABLE=1 to run the isolated device core harness")
 	}
@@ -150,7 +172,7 @@ func TestWindowsStandaloneDeviceCorePath(t *testing.T) {
 	if privatePath != "" && privatePath == provisionPath {
 		t.Fatal("UVP_CORE_PRIVATE_FILE and UVP_CORE_PROVISION_FILE must be different files")
 	}
-	evidence := &coreEvidence{Version: "uvp-core-device-v1", Stage: "starting", DeviceID: deviceID}
+	evidence := &coreEvidence{Version: "uvp-core-device-v1", Stage: "starting", DeviceID: deviceID, ActiveStop: activeStop}
 	defer coreWriteEvidence(t, evidencePath, evidence)
 
 	release, err := standalone.LoadRelease(installDir)
@@ -291,12 +313,40 @@ func TestWindowsStandaloneDeviceCorePath(t *testing.T) {
 	if playResult.StreamID == "" || playResult.HTTPFlvURL == "" {
 		coreFail(t, evidence, "play", "play_response_missing_stream_or_httpflv")
 	}
-	flvContext, flvCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	flv, flvReason := coreFetchFLV(flvContext, client.client, playResult.HTTPFlvURL)
-	flvCancel()
+	flvTimeout := 15 * time.Second
+	if activeStop {
+		flvTimeout = 2 * time.Minute
+	}
+	flvContext, flvCancel := context.WithTimeout(context.Background(), flvTimeout)
+	var activeFLV *coreFLVStream
+	var activeFLVDone chan coreFLVReadResult
+	var flv coreFLVObservation
+	var flvReason string
+	if activeStop {
+		activeClient := *client.client
+		activeClient.Timeout = 0
+		activeFLV, flv, flvReason = coreOpenFLV(flvContext, &activeClient, playResult.HTTPFlvURL)
+		if activeFLV != nil && flvReason == "" {
+			activeFLVDone = make(chan coreFLVReadResult, 1)
+			go func() {
+				bytesRead, err := coreReadFLVUntilEOF(activeFLV.Body)
+				activeFLVDone <- coreFLVReadResult{Bytes: bytesRead, Err: err}
+			}()
+		}
+	} else {
+		flv, flvReason = coreFetchFLV(flvContext, client.client, playResult.HTTPFlvURL)
+	}
 	evidence.PlayHTTPStatus = flv.HTTPStatus
 	evidence.FLVBytes = flv.Bytes
 	evidence.FLVHeader = flv.Header
+	if activeFLV != nil {
+		defer func() {
+			_ = activeFLV.Body.Close()
+			flvCancel()
+		}()
+	} else {
+		flvCancel()
+	}
 	if flvReason != "" {
 		coreFail(t, evidence, "play_stream", flvReason)
 	}
@@ -309,19 +359,68 @@ func TestWindowsStandaloneDeviceCorePath(t *testing.T) {
 		}
 	}
 
-	stopPath := "/api/gb28181/play/" + url.PathEscape(playResult.StreamID)
-	status, headers, body = client.request(t, http.MethodDelete, stopPath, "", nil)
-	coreAssertResponseSafe(t, headers, body, bootstrapToken, adminPassword, sipPassword)
-	evidence.StopHTTPStatus = status
-	if status != http.StatusOK {
-		coreFail(t, evidence, "stop", "stop_request_rejected")
+	if activeStop {
+		select {
+		case result := <-activeFLVDone:
+			if result.Err == nil {
+				coreFail(t, evidence, "active_stop", "httpflv_ended_before_launcher_stop")
+			}
+			coreFail(t, evidence, "active_stop", "httpflv_read_failed_before_launcher_stop")
+		default:
+		}
+		evidence.Stage = "active_play_ready"
+		t.Log("ACTIVE_PLAY_READY")
+	} else {
+		stopPath := "/api/gb28181/play/" + url.PathEscape(playResult.StreamID)
+		status, headers, body = client.request(t, http.MethodDelete, stopPath, "", nil)
+		coreAssertResponseSafe(t, headers, body, bootstrapToken, adminPassword, sipPassword)
+		evidence.StopHTTPStatus = status
+		if status != http.StatusOK {
+			coreFail(t, evidence, "stop", "stop_request_rejected")
+		}
+		evidence.Stage = "play_stopped"
+		t.Log("PLAY_STOPPED")
 	}
-	evidence.Stage = "play_stopped"
-	t.Log("PLAY_STOPPED")
 
 	first.cancel()
 	if !t18WaitFinished(t, first, 90*time.Second) {
 		coreFail(t, evidence, "restart", "first_launcher_did_not_stop")
+	}
+	if activeStop {
+		select {
+		case result := <-activeFLVDone:
+			if result.Err != nil {
+				coreFail(t, evidence, "active_stop", "httpflv_did_not_reach_eof")
+			}
+			evidence.FLVBytesUntilEOF = int64(evidence.FLVBytes) + result.Bytes
+			evidence.FLVEOFObserved = true
+		case <-time.After(30 * time.Second):
+			coreFail(t, evidence, "active_stop", "httpflv_eof_timeout")
+		}
+		activePaths, err := standalone.ResolvePaths(standalone.PathOptions{
+			InstallDir:  installDir,
+			ConfigDir:   filepath.Join(installDir, "config"),
+			DataDir:     filepath.Join(installDir, "data"),
+			ResourceDir: release.ResourceDir,
+			WebDir:      release.WebDir,
+		})
+		if err != nil {
+			coreFail(t, evidence, "active_stop", "instance_paths_unavailable")
+		}
+		activeConfig, err := standalone.LoadConfig(activePaths)
+		if err != nil {
+			coreFail(t, evidence, "active_stop", "instance_config_unavailable")
+		}
+		if err := checkPorts([]string{activeConfig.RedisAddress(), activeConfig.BackendAddress()}, activeConfig.MediaListeners()); err != nil {
+			coreFail(t, evidence, "active_stop", "instance_ports_not_released")
+		}
+		evidence.ActiveStopPortsReleased = true
+		if _, err := os.Stat(filepath.Join(activePaths.DataDir, ".uvp-running.json")); !errors.Is(err, os.ErrNotExist) {
+			coreFail(t, evidence, "active_stop", "running_marker_not_cleared")
+		}
+		evidence.ActiveStopMarkerCleared = true
+		evidence.Stage = "active_play_stopped"
+		t.Log("ACTIVE_PLAY_STOPPED")
 	}
 
 	secondURLs := make(chan string, 1)
@@ -348,6 +447,23 @@ func TestWindowsStandaloneDeviceCorePath(t *testing.T) {
 	}
 	client.accessToken = accessToken
 	t.Log("RESTART_READY_FOR_SIM")
+	if activeStop {
+		status, headers, body = client.request(t, http.MethodGet, "/api/gb28181/sip/setup/status", "", nil)
+		// This permission-protected configuration endpoint intentionally returns
+		// the SIP password for device enrollment, never the administrator secret.
+		coreAssertResponseSafe(t, headers, body, bootstrapToken, adminPassword)
+		var persisted struct {
+			Data struct {
+				Config struct {
+					Port int `json:"port"`
+				} `json:"config"`
+			} `json:"data"`
+		}
+		if status != http.StatusOK || json.Unmarshal(body, &persisted) != nil || persisted.Data.Config.Port != coreSIPPort {
+			coreFail(t, evidence, "restart", "sip_config_not_preserved")
+		}
+		evidence.RestartSIPConfigPort = persisted.Data.Config.Port
+	}
 	if restartPath := strings.TrimSpace(os.Getenv(coreSimulatorRestartedEnv)); restartPath != "" {
 		if !coreWaitForFile(restartPath, restartTimeout) {
 			coreFail(t, evidence, "restart", "simulator_restart_marker_timeout")
@@ -585,34 +701,60 @@ func coreAssertResponseSafe(t *testing.T, headers http.Header, body []byte, secr
 }
 
 func coreFetchFLV(ctx context.Context, client *http.Client, rawURL string) (coreFLVObservation, string) {
+	stream, observation, reason := coreOpenFLV(ctx, client, rawURL)
+	if stream == nil {
+		return observation, reason
+	}
+	defer stream.Body.Close()
+	return observation, ""
+}
+
+func coreOpenFLV(ctx context.Context, client *http.Client, rawURL string) (*coreFLVStream, coreFLVObservation, string) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-		return coreFLVObservation{}, "invalid_httpflv_url"
+		return nil, coreFLVObservation{}, "invalid_httpflv_url"
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return coreFLVObservation{}, "invalid_httpflv_request"
+		return nil, coreFLVObservation{}, "invalid_httpflv_request"
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return coreFLVObservation{}, "httpflv_unavailable"
+		return nil, coreFLVObservation{}, "httpflv_unavailable"
 	}
-	defer response.Body.Close()
 	observation := coreFLVObservation{HTTPStatus: response.StatusCode}
 	if response.StatusCode != http.StatusOK {
-		return observation, "httpflv_bad_status"
+		response.Body.Close()
+		return nil, observation, "httpflv_bad_status"
 	}
 	data := make([]byte, coreFLVBytes)
 	read, err := io.ReadFull(response.Body, data)
 	observation.Bytes = read
 	if err != nil || read < coreFLVBytes {
-		return observation, "httpflv_short_body"
+		response.Body.Close()
+		return nil, observation, "httpflv_short_body"
 	}
 	if !bytes.Equal(data[:3], []byte("FLV")) {
-		return observation, "httpflv_header_invalid"
+		response.Body.Close()
+		return nil, observation, "httpflv_header_invalid"
 	}
 	observation.Header = "FLV"
-	return observation, ""
+	return &coreFLVStream{Body: response.Body}, observation, ""
+}
+
+func coreReadFLVUntilEOF(body io.Reader) (int64, error) {
+	buffer := make([]byte, 32*1024)
+	var total int64
+	for {
+		read, err := body.Read(buffer)
+		total += int64(read)
+		if err == io.EOF {
+			return total, nil
+		}
+		if err != nil {
+			return total, err
+		}
+	}
 }
 
 func coreWaitForFile(path string, timeout time.Duration) bool {
