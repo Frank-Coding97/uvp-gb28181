@@ -4,6 +4,7 @@ package launcher
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net"
 	"os"
@@ -81,6 +82,12 @@ func TestWindowsUnresponsiveRedisUsesBoundedOwnedCleanup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(paths.DataDir, ".uvp-running.json")); err != nil {
 		t.Fatal("failed stop did not retain abnormal marker")
 	}
+	markerPath := filepath.Join(paths.DataDir, ".uvp-running.json")
+	markerBefore, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal("read retained abnormal marker", err)
+	}
+	markerBeforeSHA := sha256.Sum256(markerBefore)
 	for _, address := range []string{config.RedisAddress(), config.BackendAddress(), config.MediaAddress()} {
 		listener, err := net.Listen("tcp", address)
 		if err != nil {
@@ -93,11 +100,12 @@ func TestWindowsUnresponsiveRedisUsesBoundedOwnedCleanup(t *testing.T) {
 	}
 	t.Logf("unresponsive Redis cleanup returned in %s; marker retained and all ports released", elapsed)
 
-	recoveryCtx, cancelRecovery := context.WithCancel(context.Background())
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancelRecovery()
+	recoveryDone := make(chan error, 1)
 	recovered := make(chan Status, 1)
 	go func() {
-		done <- Launch(recoveryCtx, root, "", func(status Status) {
+		recoveryDone <- Launch(recoveryCtx, root, "", func(status Status) {
 			if status.State == Ready {
 				recovered <- status
 			}
@@ -105,28 +113,22 @@ func TestWindowsUnresponsiveRedisUsesBoundedOwnedCleanup(t *testing.T) {
 	}()
 	select {
 	case status := <-recovered:
-		if !status.PreviousUnclean {
-			cancelRecovery()
-			<-done
-			t.Fatal("recovery did not report the failed previous stop")
+		cancelRecovery()
+		t.Fatalf("restart after failed stop reached Ready: %+v", status)
+	case err := <-recoveryDone:
+		if !errors.Is(err, standalone.ErrUncleanRecoveryRequired) {
+			t.Fatalf("restart after failed stop returned %v, want %v", err, standalone.ErrUncleanRecoveryRequired)
 		}
-	case err := <-done:
-		t.Fatalf("restart after failed stop: %v", err)
 	case <-time.After(45 * time.Second):
 		cancelRecovery()
 		t.Fatal("restart after failed stop timed out")
 	}
-	cancelRecovery()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("normal stop after recovery: %v", err)
-		}
-	case <-time.After(70 * time.Second):
-		t.Fatal("normal stop after recovery exceeded budget")
+	markerAfter, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal("read abnormal marker after rejected restart", err)
 	}
-	if _, err := os.Stat(filepath.Join(paths.DataDir, ".uvp-running.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("normal stop after recovery did not clear marker")
+	if sha256.Sum256(markerAfter) != markerBeforeSHA {
+		t.Fatal("rejected restart changed the abnormal marker")
 	}
-	t.Log("restart reported the previous failure and normal stop cleared the marker")
+	t.Log("restart retained the abnormal marker and required explicit recovery")
 }
