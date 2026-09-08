@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 
 // One random identity for this actual process, not a caller supplied restart
 // assertion. Reconstructing a store in the same process cannot change it.
-var sipCleanupProcessID = sync.OnceValues(NewDeviceOperationIntentID)
+var sipCleanupProcessID = processauthority.ProcessID
 
 type DeviceSIPCleanupRequestIdentity struct {
 	Request   DeviceSIPInviteIdentity `json:"-"`

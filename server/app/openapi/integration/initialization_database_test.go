@@ -360,6 +360,8 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 		"gb_openapi_play_grant",
 		"gb_openapi_viewer",
 		"gb_device_operation_intent",
+		"sys_openapi_process_generation",
+		"sys_openapi_process_authority",
 	} {
 		if _, ok := tableSet[table]; !ok {
 			t.Fatalf("full initialization missing OpenAPI table %s", table)
@@ -399,7 +401,7 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 	require.False(t, lockedAt.Valid)
 	require.Zero(t, lockVersion)
 
-	for _, table := range []string{"sys_openapi_client", "sys_openapi_client_scope", "sys_openapi_nonce", "sys_openapi_audit", "gb_openapi_play_grant", "gb_openapi_viewer", "gb_device_operation_intent"} {
+	for _, table := range []string{"sys_openapi_client", "sys_openapi_client_scope", "sys_openapi_nonce", "sys_openapi_audit", "gb_openapi_play_grant", "gb_openapi_viewer", "gb_device_operation_intent", "sys_openapi_process_generation", "sys_openapi_process_authority"} {
 		count, countErr := initializationRowCount(ctx, conn, table)
 		require.NoError(t, countErr, table)
 		require.Zero(t, count, "full initialization must not seed %s", table)
