@@ -60,6 +60,43 @@ func TestDeviceRTPWorkRecordsActualOutcomeAndQuiescence(t *testing.T) {
 	require.ErrorIs(t, err, ErrDeviceIntentConflict)
 }
 
+func TestDeviceRTPWorkPersistsActualProcessIdentity(t *testing.T) {
+	f, store, id := newRTPStepFixture(t)
+	ctx := context.Background()
+	_, err := store.AddRTPResourceStep(ctx, id, 2, rtpStepIdentity(1))
+	require.NoError(t, err)
+	out, work, err := store.DispatchRTPResourceWork(ctx, id, 3, rtpStepIdentity(1).StepID)
+	require.NoError(t, err)
+	processID, err := sipCleanupProcessID()
+	require.NoError(t, err)
+	require.Equal(t, processID, out.Steps[0].OwnerProcessID)
+	require.NotEqual(t, out.Steps[0].OwnerRunID, out.Steps[0].OwnerProcessID)
+	loaded, err := NewDeviceOperationIntentStore(f.db).LoadRTPResourceSteps(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, out.Steps[0].OwnerProcessID, loaded.Steps[0].OwnerProcessID)
+	var raw string
+	require.NoError(t, f.db.Table("gb_device_operation_intent").Select("rtp_steps_json").Scan(&raw).Error)
+	var wire rtpStepsWire
+	require.NoError(t, json.Unmarshal([]byte(raw), &wire))
+	wire.Steps[0].OwnerProcessID = strings.Repeat("f", 32)
+	encoded, err := json.Marshal(wire)
+	require.NoError(t, err)
+	require.NoError(t, f.db.Exec("UPDATE gb_device_operation_intent SET rtp_steps_json=?", string(encoded)).Error)
+	require.ErrorIs(t, work.Quiesce(ctx), ErrDeviceIntentConflict, "an owner cannot rewrite another process's record")
+	var after string
+	require.NoError(t, f.db.Table("gb_device_operation_intent").Select("rtp_steps_json").Scan(&after).Error)
+	require.Equal(t, string(encoded), after)
+	// Historical canonical rows remain readable, with no inferred process ID.
+	wire.Steps[0].OwnerProcessID = ""
+	encoded, err = json.Marshal(wire)
+	require.NoError(t, err)
+	require.NoError(t, f.db.Exec("UPDATE gb_device_operation_intent SET rtp_steps_json=?", string(encoded)).Error)
+	loaded, err = store.LoadRTPResourceSteps(ctx, id)
+	require.NoError(t, err)
+	require.Empty(t, loaded.Steps[0].OwnerProcessID)
+	require.ErrorIs(t, work.Flush(ctx), ErrDeviceIntentConflict)
+}
+
 func TestDeviceRTPExecutionCanonicalLegacyAndMalformedFacts(t *testing.T) {
 	f, store, id := newRTPStepFixture(t)
 	ctx := context.Background()
@@ -82,7 +119,7 @@ func TestDeviceRTPExecutionCanonicalLegacyAndMalformedFacts(t *testing.T) {
 	require.NoError(t, work.Quiesce(ctx))
 	var valid string
 	require.NoError(t, f.db.Table("gb_device_operation_intent").Select("rtp_steps_json").Where("operation_id = ?", id.OperationID).Scan(&valid).Error)
-	for _, kind := range []string{"null", "unknown-field", "unknown-result", "no-owner", "unpaired-time", "early-quiesced", "version-ahead"} {
+	for _, kind := range []string{"null", "unknown-field", "unknown-result", "no-owner", "invalid-process", "unpaired-time", "early-quiesced", "version-ahead"} {
 		t.Run(kind, func(t *testing.T) {
 			var wire rtpStepsWire
 			require.NoError(t, json.Unmarshal([]byte(valid), &wire))
@@ -91,6 +128,8 @@ func TestDeviceRTPExecutionCanonicalLegacyAndMalformedFacts(t *testing.T) {
 				wire.Steps[0].OpenResult.Result = "complete"
 			case "no-owner":
 				wire.Steps[0].OwnerRunID = ""
+			case "invalid-process":
+				wire.Steps[0].OwnerProcessID = "not-a-process-identity"
 			case "unpaired-time":
 				wire.Steps[0].OpenObservedAt = nil
 			case "early-quiesced":

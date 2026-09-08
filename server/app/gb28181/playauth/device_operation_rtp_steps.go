@@ -66,6 +66,7 @@ type DeviceRTPResourceStep struct {
 	PreparedAt              time.Time                 `json:"-"`
 	DispatchStartedAt       *time.Time                `json:"-"`
 	OwnerRunID              string                    `json:"-"`
+	OwnerProcessID          string                    `json:"-"`
 	OpenResult              *DeviceRTPOpenResult      `json:"-"`
 	OpenObservedAt          *time.Time                `json:"-"`
 	ResourceCloseResult     string                    `json:"-"`
@@ -124,6 +125,7 @@ type rtpStepWire struct {
 	IngressCloseObservedAt  *time.Time         `json:"ingressCloseObservedAt,omitempty"`
 	LocalQuiescedAt         *time.Time         `json:"localQuiescedAt,omitempty"`
 	Recovery                *rtpRecoveryWire   `json:"cleanup,omitempty"`
+	OwnerProcessID          string             `json:"ownerProcessID,omitempty"`
 }
 
 type rtpStepsWire struct {
@@ -141,7 +143,7 @@ func stepToWire(step DeviceRTPResourceStep) rtpStepWire {
 	w := rtpStepWire{Version: 1, Action: "open_rtp", StepID: i.StepID, NodePK: i.NodePK, NodeUUID: i.NodeUUID, NodeRevision: i.NodeRevision, BootNonce: i.BootNonce,
 		ResourceID: i.ResourceID, VHost: i.VHost, App: i.App, Stream: i.Stream, Port: i.Port, LocalIP: i.LocalIP, TCPMode: i.TCPMode, SSRC: i.SSRC, OnlyTrack: i.OnlyTrack,
 		State: step.State, RowVersion: step.RowVersion, PreparedAt: step.PreparedAt, DispatchStartedAt: step.DispatchStartedAt,
-		OwnerRunID: step.OwnerRunID, OpenObservedAt: step.OpenObservedAt, ResourceCloseResult: step.ResourceCloseResult, ResourceCloseObservedAt: step.ResourceCloseObservedAt,
+		OwnerRunID: step.OwnerRunID, OwnerProcessID: step.OwnerProcessID, OpenObservedAt: step.OpenObservedAt, ResourceCloseResult: step.ResourceCloseResult, ResourceCloseObservedAt: step.ResourceCloseObservedAt,
 		IngressCloseResult: step.IngressCloseResult, IngressCloseObservedAt: step.IngressCloseObservedAt, LocalQuiescedAt: step.LocalQuiescedAt, Recovery: recoveryToWire(step.Recovery)}
 	if step.OpenResult != nil {
 		w.OpenResult = &rtpOpenResultWire{Result: step.OpenResult.Result, Port: step.OpenResult.Port}
@@ -155,7 +157,7 @@ func (w rtpStepWire) step() DeviceRTPResourceStep {
 		BootNonce: w.BootNonce, ResourceID: w.ResourceID, VHost: w.VHost, App: w.App, Stream: w.Stream,
 		Port: w.Port, LocalIP: w.LocalIP, TCPMode: w.TCPMode, SSRC: w.SSRC, OnlyTrack: w.OnlyTrack},
 		State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt,
-		OwnerRunID: w.OwnerRunID, OpenObservedAt: w.OpenObservedAt, ResourceCloseResult: w.ResourceCloseResult, ResourceCloseObservedAt: w.ResourceCloseObservedAt,
+		OwnerRunID: w.OwnerRunID, OwnerProcessID: w.OwnerProcessID, OpenObservedAt: w.OpenObservedAt, ResourceCloseResult: w.ResourceCloseResult, ResourceCloseObservedAt: w.ResourceCloseObservedAt,
 		IngressCloseResult: w.IngressCloseResult, IngressCloseObservedAt: w.IngressCloseObservedAt, LocalQuiescedAt: w.LocalQuiescedAt, Recovery: w.Recovery.recovery()}
 	if w.OpenResult != nil {
 		step.OpenResult = &DeviceRTPOpenResult{Result: w.OpenResult.Result, Port: w.OpenResult.Port}

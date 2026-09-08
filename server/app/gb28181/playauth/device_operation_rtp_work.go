@@ -20,7 +20,7 @@ type rtpResourceWork struct {
 	step                                  DeviceRTPResourceStep
 	gate                                  chan struct{}
 	sealed                                atomic.Bool
-	runID                                 string
+	runID, processID                      string
 	attempted, confirmed                  bool
 	opened, resourceClosed, ingressClosed bool
 }
@@ -47,6 +47,10 @@ func (s *DeviceOperationIntentStore) PrepareRTPResourceWork(ctx context.Context,
 	if !validIntentID(stepID) {
 		return nil, ErrDeviceIntentInvalid
 	}
+	processID, err := sipCleanupProcessID()
+	if err != nil {
+		return nil, err
+	}
 	runID, err := NewDeviceOperationIntentID()
 	if err != nil {
 		return nil, err
@@ -57,7 +61,7 @@ func (s *DeviceOperationIntentStore) PrepareRTPResourceWork(ctx context.Context,
 	}
 	for _, step := range loaded.Steps {
 		if step.Identity.StepID == stepID && step.State == RTPStepPrepared {
-			return &RTPResourceWork{work: &rtpResourceWork{store: s, id: id, step: step, runID: runID, gate: make(chan struct{}, 1)}}, nil
+			return &RTPResourceWork{work: &rtpResourceWork{store: s, id: id, step: step, runID: runID, processID: processID, gate: make(chan struct{}, 1)}}, nil
 		}
 	}
 	return nil, ErrDeviceIntentConflict
@@ -83,6 +87,7 @@ func (h *RTPResourceWork) Dispatch(ctx context.Context, version int64) (DeviceRT
 				return false, ErrDeviceIntentConflict
 			}
 			step.State, step.RowVersion, step.DispatchStartedAt, step.OwnerRunID = RTPStepMayHaveDispatched, 2, &now, w.runID
+			step.OwnerProcessID = w.processID
 			w.step = *step
 			stamp := now
 			w.step.DispatchStartedAt = &stamp
@@ -224,7 +229,7 @@ func (w *rtpResourceWork) flush(ctx context.Context) error {
 			candidate := w.step
 			candidate.RowVersion = step.RowVersion
 			candidate.Recovery = step.Recovery // independent cleanup domain, never owned by this execution
-			if step.State != RTPStepMayHaveDispatched || step.OwnerRunID != w.step.OwnerRunID || !rtpFactsExtend(*step, candidate) {
+			if step.State != RTPStepMayHaveDispatched || step.OwnerRunID != w.step.OwnerRunID || step.OwnerProcessID != w.processID || !rtpFactsExtend(*step, candidate) {
 				return false, ErrDeviceIntentConflict
 			}
 			if reflect.DeepEqual(*step, candidate) {
@@ -249,7 +254,7 @@ func (w *rtpResourceWork) flush(ctx context.Context) error {
 		return err
 	}
 	for _, step := range loaded.Steps {
-		if step.Identity == w.step.Identity && step.OwnerRunID == w.step.OwnerRunID {
+		if step.Identity == w.step.Identity && step.OwnerRunID == w.step.OwnerRunID && step.OwnerProcessID == w.processID {
 			copy := w.step
 			copy.RowVersion = step.RowVersion
 			copy.Recovery = step.Recovery
