@@ -244,3 +244,53 @@ func TestDeviceRTPCleanupRuntimeNonconformingResolverStillRetainsPartialRuntime(
 	require.NoError(t, w.Quiesce(ctx))
 	require.EqualValues(t, 1, freed.Load())
 }
+
+func TestDeviceRTPCleanupRuntimeDispositionSeparatesSQLAndResolverFailure(t *testing.T) {
+	for _, kind := range []string{"resolver", "resource", "ingress", "sql"} {
+		t.Run(kind, func(t *testing.T) {
+			db, _, _, _, w := rtpCleanupRuntimeFixture(t)
+			ctx := context.Background()
+			require.NoError(t, w.Prepare(ctx))
+			runtime := &rtpCleanupRuntimeFixtureControl{
+				resource: func(context.Context) (string, error) {
+					if kind == "resource" {
+						return "", errors.New("resource response lost")
+					}
+					return "close_pending", nil
+				},
+				ingress: func(context.Context) (string, error) {
+					if kind == "ingress" {
+						return "", errors.New("ingress response lost")
+					}
+					return "rtp_ingress_drained", nil
+				},
+				release: func() {},
+			}
+			resolver := rtpCleanupResolverFunc(func(context.Context, DeviceRTPResourceIdentity) (RTPCleanupRuntime, error) {
+				if kind == "resolver" {
+					return nil, errors.New("untrusted resolver")
+				}
+				return runtime, nil
+			})
+			if kind == "sql" {
+				require.NoError(t, db.Exec(`CREATE TRIGGER disposition_sql BEFORE UPDATE ON gb_device_operation_intent WHEN json_extract(NEW.rtp_steps_json,'$.steps[0].cleanup.currentCall.outcome') IS NOT NULL BEGIN SELECT RAISE(FAIL,'fixture SQL failure'); END`).Error)
+			}
+			require.Error(t, w.Run(ctx, resolver))
+			d, err := w.BatchDisposition(ctx)
+			require.NoError(t, err)
+			if kind == "resolver" || kind == "ingress" {
+				require.Equal(t, RTPRecoveryReadyToQuiesce, d)
+			} else {
+				require.Equal(t, RTPRecoveryRetrySameOwner, d)
+				if kind == "sql" {
+					require.NoError(t, db.Exec("DROP TRIGGER disposition_sql").Error)
+				}
+				require.NoError(t, w.Run(ctx, resolver))
+				d, err = w.BatchDisposition(ctx)
+				require.NoError(t, err)
+				require.Equal(t, RTPRecoveryReadyToQuiesce, d)
+			}
+			require.NoError(t, w.Quiesce(ctx))
+		})
+	}
+}

@@ -48,6 +48,7 @@ type UAC struct {
 	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
 	playbackRecoveryWorker *playbackRecoveryWorker
+	playbackRTPCleanup     *playbackRTPCleanup
 	playbackShuttingDown   bool
 	playbackShutdownWork   chan struct{}
 

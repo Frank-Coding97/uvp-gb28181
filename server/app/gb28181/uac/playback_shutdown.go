@@ -21,6 +21,7 @@ func (u *UAC) ShutdownPlaybackIntents(ctx context.Context) error {
 		u.playbackShutdownWork = make(chan struct{}, 1)
 	}
 	work, worker := u.playbackShutdownWork, u.playbackRecoveryWorker
+	rtp := u.playbackRTPCleanup
 	var originals []*playbackIntentOperation
 	var recoveries []*playbackIntentRecovery
 	var observations []*playbackRecoveredObservation
@@ -38,6 +39,9 @@ func (u *UAC) ShutdownPlaybackIntents(ctx context.Context) error {
 		scans = append(scans, s)
 	}
 	u.playbackIntentMu.Unlock()
+	if rtp != nil {
+		rtp.cancel()
+	}
 	// Immutable cancellation handles exist before every registry publication.
 	// Signal all owners before waiting for any slow query or network operation.
 	if worker != nil {
@@ -75,7 +79,7 @@ func (u *UAC) ShutdownPlaybackIntents(ctx context.Context) error {
 			return err
 		}
 	}
-	var result error
+	result := u.shutdownPlaybackRTP(ctx)
 	for _, o := range originals {
 		result = errors.Join(result, o.shutdownLocal(ctx))
 	}

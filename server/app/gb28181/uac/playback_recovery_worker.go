@@ -126,7 +126,7 @@ func (u *UAC) StartPlaybackRecovery(ctx context.Context, devices *playauth.Devic
 	done := make(chan struct{})
 	w.cancel, w.done = cancel, done
 	u.playbackIntentMu.Lock()
-	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackRecoveryWorker != nil {
+	if !u.reservePlaybackBarrierLocked(barrier) || !u.playbackRTPDependenciesMatchLocked(store, barrier) || u.playbackRecoveryWorker != nil {
 		u.playbackIntentMu.Unlock()
 		cancel()
 		return nil, ErrPlaybackUnavailable

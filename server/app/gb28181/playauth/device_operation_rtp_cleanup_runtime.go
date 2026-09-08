@@ -17,6 +17,38 @@ type RTPCleanupRuntime interface {
 	Release()
 }
 
+// RTPRecoveryDisposition describes local scheduling only, never resource or
+// device completion. SQL uncertainty and resolver failure need different next
+// actions even when their public errors have the same unavailable sentinel.
+type RTPRecoveryDisposition uint8
+
+const (
+	RTPRecoveryRetrySameOwner RTPRecoveryDisposition = iota
+	RTPRecoveryReadyToQuiesce
+)
+
+func (h *RTPRecoveryWork) BatchDisposition(ctx context.Context) (RTPRecoveryDisposition, error) {
+	if h == nil || h.work == nil || ctx == nil {
+		return RTPRecoveryRetrySameOwner, ErrDeviceIntentUnavailable
+	}
+	w := h.work
+	select {
+	case w.runGate <- struct{}{}:
+		defer func() { <-w.runGate }()
+	case <-ctx.Done():
+		return RTPRecoveryRetrySameOwner, ctx.Err()
+	}
+	if _, err := h.enter(ctx); err != nil {
+		return RTPRecoveryRetrySameOwner, err
+	}
+	defer func() { <-w.gate }()
+	if w.sealed.Load() || w.ctx.Err() != nil || (w.resolveAttempted && w.resolveErr != nil) ||
+		(w.resourceAttempted && w.ingressAttempted && !w.dirty) {
+		return RTPRecoveryReadyToQuiesce, nil
+	}
+	return RTPRecoveryRetrySameOwner, nil
+}
+
 // Run processes this owner's fixed two-call batch, never a remote completion
 // decision. Each action is attempted at most once. After SQL failure, retry on
 // the SAME handle flushes its facts before attempting the remaining action.

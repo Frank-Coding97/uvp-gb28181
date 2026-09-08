@@ -36,7 +36,7 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 	defer cancel()
 	scan := &playbackRecoveryScan{cancel: cancel, done: make(chan struct{})}
 	u.playbackIntentMu.Lock()
-	if !u.reservePlaybackBarrierLocked(barrier) || u.playbackRecoveryScans[devicePK] != nil || len(u.playbackRecoveryScans) >= maxPlaybackIntentOperations {
+	if !u.reservePlaybackBarrierLocked(barrier) || !u.playbackRTPDependenciesMatchLocked(store, barrier) || u.playbackRecoveryScans[devicePK] != nil || len(u.playbackRecoveryScans) >= maxPlaybackIntentOperations {
 		u.playbackIntentMu.Unlock()
 		return page, ErrPlaybackUnavailable
 	}
@@ -44,6 +44,7 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 		u.playbackRecoveryScans = make(map[int64]*playbackRecoveryScan)
 	}
 	u.playbackRecoveryScans[devicePK] = scan
+	rtpEnabled := u.playbackRTPCleanup != nil
 	u.playbackIntentMu.Unlock()
 	defer func() {
 		u.playbackIntentMu.Lock()
@@ -55,7 +56,7 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 	if err != nil {
 		return page, err
 	}
-	var firstErr error
+	seenRTP, firstErr := u.resumePlaybackRTP(ctx, devicePK, beforeEpoch)
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return page, err
@@ -69,7 +70,15 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 				continue
 			}
 		} else {
-			err = u.recoverPlaybackIntent(ctx, store, barrier, row.DeviceOperationIntentIdentity)
+			if rtpEnabled {
+				sipCtx, cancelSIP := playbackRecoverySIPBudget(ctx)
+				sipErr := u.recoverPlaybackIntent(sipCtx, store, barrier, row.DeviceOperationIntentIdentity)
+				cancelSIP()
+				rtpErr := u.recoverPlaybackRTP(ctx, row.DeviceOperationIntentIdentity, seenRTP)
+				err = errors.Join(sipErr, rtpErr)
+			} else {
+				err = u.recoverPlaybackIntent(ctx, store, barrier, row.DeviceOperationIntentIdentity)
+			}
 		}
 		page.Pending++
 		if firstErr == nil {
@@ -79,7 +88,7 @@ func (u *UAC) RecoverPlaybackIntents(ctx context.Context, store *playauth.Device
 	if page.Pending != 0 {
 		return page, errors.Join(ErrPlaybackCleanupUnknown, firstErr)
 	}
-	return page, nil
+	return page, firstErr
 }
 
 func (u *UAC) recoverPlaybackIntent(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity) error {
