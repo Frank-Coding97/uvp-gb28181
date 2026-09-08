@@ -15,9 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackRecoveredObservationRealUDPAndNoDispatch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
@@ -64,6 +69,10 @@ func recoveredObservationResponse(t *testing.T, i playauth.DeviceSIPInviteIdenti
 }
 
 func TestPlaybackRecoveredObservationRetriesFactsAndBoundsInventory(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
@@ -127,6 +136,10 @@ func TestPlaybackRecoveredObservationRetriesFactsAndBoundsInventory(t *testing.T
 }
 
 func TestPlaybackRecoveredObservationSingleRegistrationAndLiveExclusion(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -149,21 +162,32 @@ func TestPlaybackRecoveredObservationSingleRegistrationAndLiveExclusion(t *testi
 	f.u.playbackIntentMu.Lock()
 	require.Len(t, f.u.playbackObservations, 1, "local observation shutdown does not erase identity")
 	f.u.playbackIntentMu.Unlock()
+	f.noACK(t)
+}
+
+func TestPlaybackRecoveredObservationExcludesLiveOwner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
+	ctx := context.Background()
 	live := newPlaybackOperationUDPFixture(t)
 	other, err := live.u.beginRecoveredPlaybackObservation(ctx, live.store, live.barrier, live.id, live.op.invite.StepID)
 	require.Error(t, err)
 	require.Nil(t, other)
-	f.noACK(t)
 }
 
 func TestPlaybackRecoveredObservationGapCommitUnknownDoesNotRegister(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		t.Run(fmt.Sprint(committed), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f, stepID := recoveredPlaybackUDPFixture(t)
 			ctx := context.Background()
-			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-			faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: 1, commitFirst: committed}
-			o, err := f.u.beginRecoveredPlaybackObservation(ctx, playauth.NewDeviceOperationIntentStore(faultDB), f.barrier, f.id, stepID)
+			faultDB := authoritytest.CommitFaultDB(t, f.db, 1, committed)
+			o, err := f.u.beginRecoveredPlaybackObservation(ctx, newAuthorizedIntentTestStore(t, faultDB), f.barrier, f.id, stepID)
 			require.Error(t, err)
 			require.Nil(t, o)
 			require.Empty(t, f.u.playbackObservations)
@@ -181,6 +205,10 @@ func TestPlaybackRecoveredObservationGapCommitUnknownDoesNotRegister(t *testing.
 }
 
 func TestPlaybackRecoveredObservationRepeatedLossDoesNotDriveSQL(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)

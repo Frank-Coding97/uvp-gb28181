@@ -4,70 +4,31 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackOriginalProcessCrashRecovery(t *testing.T) {
 	for _, phase := range []string{"prepared", "invite-dispatched", "branch-observed", "ack-committed", "ack-dispatched", "info-prepared", "info-committed", "info-dispatched"} {
 		t.Run(phase, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			testPlaybackOriginalProcessCrash(t, phase)
 		})
 	}
-}
-
-// Pause only after a real SQL commit, before its caller regains control.
-// The parent kills the OS process while stdin stays open: no owner defer,
-// transaction termination, or synthetic quiescence runs in the old process.
-type playbackCrashCommitPool struct {
-	gorm.ConnPool
-	commits atomic.Int32
-	pauseAt int32
-}
-
-type playbackCrashCommitTx struct {
-	*sql.Tx
-	pool *playbackCrashCommitPool
-}
-
-func (p *playbackCrashCommitPool) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
-	tx, err := p.ConnPool.(*sql.DB).BeginTx(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	return &playbackCrashCommitTx{tx, p}, nil
-}
-
-func (p *playbackCrashCommitPool) GetDBConn() (*sql.DB, error) {
-	return p.ConnPool.(*sql.DB), nil
-}
-
-func (tx *playbackCrashCommitTx) Commit() error {
-	if err := tx.Tx.Commit(); err != nil {
-		return err
-	}
-	if tx.pool.commits.Add(1) == tx.pool.pauseAt {
-		fmt.Fprintln(os.Stdout, "UVP_ORIGINAL_COMMIT_PAUSED")
-		_, err := bufio.NewReader(os.Stdin).ReadByte()
-		return err
-	}
-	return nil
 }
 
 func TestPlaybackOriginalProcessCrashChild(t *testing.T) {
@@ -78,35 +39,43 @@ func TestPlaybackOriginalProcessCrashChild(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	require.True(t, info.Mode().IsRegular())
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db := authoritytest.OpenSQLite(t, path)
+	authority := authoritytest.Register(t, db, os.Getenv("UVP_ORIGINAL_CRASH_STATE"))
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
 	require.NoError(t, err)
-	raw, err := db.DB()
-	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
 	var intent playauth.DeviceOperationIntent
 	require.NoError(t, db.Where("operation_id = ?", strings.Repeat("a", 32)).First(&intent).Error)
+	intent, err = store.Dispatch(context.Background(), intent.DeviceOperationIntentIdentity, intent.RowVersion)
+	require.NoError(t, err)
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
 	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
 	require.NoError(t, err)
 	phase := os.Getenv("UVP_ORIGINAL_CRASH_PHASE")
-	pool := &playbackCrashCommitPool{ConnPool: raw}
+	var pauseAt int32
 	switch phase {
 	case "prepared":
-		pool.pauseAt = 1
+		pauseAt = 1
 	case "branch-observed":
-		pool.pauseAt = 3 // Prepare, INVITE dispatch, first branch observation.
+		pauseAt = 3 // Prepare, INVITE dispatch, first branch observation.
 	case "ack-committed":
-		pool.pauseAt = 4
+		pauseAt = 4
 	case "info-prepared":
-		pool.pauseAt = 5
+		pauseAt = 5
 	case "info-committed":
-		pool.pauseAt = 6
+		pauseAt = 6
 	}
-	pausedDB := db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
-	pausedDB.Statement.ConnPool = pool
-	store := playauth.NewDeviceOperationIntentStore(pausedDB)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	if pauseAt > 0 {
+		pausedDB := authoritytest.AfterCommitDB(t, db, pauseAt, func() error {
+			fmt.Fprintln(os.Stdout, "UVP_ORIGINAL_COMMIT_PAUSED")
+			_, err := bufio.NewReader(os.Stdin).ReadByte()
+			return err
+		})
+		store, err = playauth.NewAuthorizedDeviceOperationIntentStore(pausedDB, authority)
+		require.NoError(t, err)
+	}
+	barrier, err := playauth.NewAuthorizedDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db), authority)
+	require.NoError(t, err)
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = os.Getenv("UVP_ORIGINAL_CRASH_PEER"), "UDP"
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -126,13 +95,20 @@ func TestPlaybackOriginalProcessCrashChild(t *testing.T) {
 
 func testPlaybackOriginalProcessCrash(t *testing.T, phase string) {
 	t.Helper()
-	// Parent seeds only the parent intent. No original SIP owner, branch,
-	// transaction, or snapshot is created in the surviving UAC.
-	u, seed, _, id, _ := playbackIntentStoreFixture(t)
-	u.client.TxRequester = nil
-	require.NoError(t, seed.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+	// The survivor prepares schema/reservation only. The original child owns
+	// the first registered authority and every original dispatch on this file.
 	path := filepath.Join(t.TempDir(), "original-crash.sqlite")
-	require.NoError(t, seed.Exec("VACUUM INTO ?", path).Error)
+	db := authoritytest.OpenSQLite(t, path)
+	id := playbackIntentSchemaFixture(t, db)
+	_, err := playauth.NewDeviceOperationIntentStore(db).Reserve(context.Background(), id)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+	stateDir := authoritytest.StateDirectory(t)
+	ua, err := sipgo.NewUA()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ua.Close() })
+	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
+	require.NoError(t, err)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
@@ -141,7 +117,7 @@ func testPlaybackOriginalProcessCrash(t *testing.T, phase string) {
 	binary, err := os.Executable()
 	require.NoError(t, err)
 	cmd := exec.CommandContext(ctx, binary, "-test.run=^TestPlaybackOriginalProcessCrashChild$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "UVP_ORIGINAL_CRASH_DB="+path, "UVP_ORIGINAL_CRASH_PHASE="+phase, "UVP_ORIGINAL_CRASH_PEER="+peer.LocalAddr().String())
+	cmd.Env = append(os.Environ(), "UVP_ORIGINAL_CRASH_DB="+path, "UVP_ORIGINAL_CRASH_STATE="+stateDir, "UVP_ORIGINAL_CRASH_PHASE="+phase, "UVP_ORIGINAL_CRASH_PEER="+peer.LocalAddr().String())
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	defer stdin.Close()
@@ -238,15 +214,10 @@ func testPlaybackOriginalProcessCrash(t *testing.T, phase string) {
 		require.Equal(t, string(*invite.CallID()), string(*r.CallID()))
 		require.True(t, r.Method == sip.INVITE || (phase == "info-dispatched" && r.Method == sip.INFO))
 	}
-	// Reopen the exact file only after OS exit; no reconstruction or copying
-	// of the child's committed SIP state occurs at the restart boundary.
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	// Register on the same file/domain only after confirmed OS exit.
+	authority := authoritytest.Register(t, db, stateDir)
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
 	require.NoError(t, err)
-	raw, err := db.DB()
-	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
-	defer raw.Close()
-	store := playauth.NewDeviceOperationIntentStore(db)
 	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
 	defer closeScanObservations(t, u)
 	old, err := store.LoadSIPInviteSteps(ctx, id)

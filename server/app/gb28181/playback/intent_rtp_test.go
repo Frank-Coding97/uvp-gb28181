@@ -16,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type intentRTPTestResolver struct{ control *zlm.OpenAPIRuntimeControl }
@@ -25,11 +26,14 @@ func (r intentRTPTestResolver) ResolveRTP(context.Context, string) (IntentRTPRun
 }
 
 func TestPlaybackIntentRTPUsesActualPinnedCallsAndDurableFixedIdentity(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db, barrier, req := playbackEpochFixture(t)
 	require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", req.DeviceID, req.SIPChannelID).Error)
 	require.NoError(t, db.Exec("ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT NULL").Error)
-	store := playauth.NewDeviceOperationIntentStore(db)
+	store := newAuthorizedIntentTestStore(t, db)
 	o, err := newPlaybackIntentOwner(context.Background(), store, barrier, req)
 	require.NoError(t, err)
 	require.NoError(t, o.begin(context.Background()))

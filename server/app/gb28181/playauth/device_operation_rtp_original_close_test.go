@@ -66,7 +66,7 @@ func TestDeviceRTPOriginalCloseCancellationAfterCommitNeverCalls(t *testing.T) {
 					cancel()
 				}
 			}}
-			work.work.store = NewDeviceOperationIntentStore(faultDB)
+			work.work.store = newIntentFixtureStore(faultDB)
 			_, err = work.CloseResource(ctx, func(context.Context, DeviceRTPResourceIdentity) (string, error) {
 				t.Fatal("cancelled or sealed after CAS cannot invoke network")
 				return "", nil
@@ -157,7 +157,7 @@ func TestDeviceRTPOriginalCloseRequiresConfirmedCAS(t *testing.T) {
 				ctx := context.Background()
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				work.work.store = NewDeviceOperationIntentStore(faultDB)
+				work.work.store = newIntentFixtureStore(faultDB)
 				closeCall := work.CloseResource
 				if ingress {
 					closeCall = work.CloseIngress
@@ -255,7 +255,7 @@ func TestDeviceRTPOriginalCloseUnknownResultsAndLostOutcomeCommit(t *testing.T) 
 				}
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: kind == "outcome-committed"}
-				work.work.store = NewDeviceOperationIntentStore(faultDB)
+				work.work.store = newIntentFixtureStore(faultDB)
 				return "close_pending", nil
 			})
 			require.Error(t, err)

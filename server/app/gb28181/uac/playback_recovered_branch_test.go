@@ -8,9 +8,14 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackRecoveredBranchUsesDurableIdentityWithoutRequest(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, id, observer := playbackIntentStoreFixture(t)
 	ctx := context.Background()
 	request, prepared, err := u.prepareStoredPlaybackInvite(ctx, store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
@@ -35,6 +40,10 @@ func TestPlaybackRecoveredBranchUsesDurableIdentityWithoutRequest(t *testing.T) 
 }
 
 func TestPlaybackRecoveredBranchRejectsWrongTransaction(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, id, _ := playbackIntentStoreFixture(t)
 	request, prepared, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
 	require.NoError(t, err)

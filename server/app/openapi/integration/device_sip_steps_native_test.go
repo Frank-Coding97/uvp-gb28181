@@ -106,7 +106,7 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := playauth.NewDeviceOperationIntentStore(db).DispatchSIPCancel(ctx, id, 23, cancel)
+			_, err := store.DispatchSIPCancel(ctx, id, 23, cancel)
 			if err == nil {
 				wins.Add(1)
 			} else {

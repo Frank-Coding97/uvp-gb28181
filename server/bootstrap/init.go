@@ -350,9 +350,8 @@ func newScheduler() app.JobSchedulerInterf {
 		schedulerhelper.WithJobResultsBufferSize(bufferSize),
 	)
 
-	// 启动调度器
-	scheduler.Start()
-
+	// main starts the scheduler only after process authority registration.
+	// Jobs can be loaded now, but must not execute during package init.
 	return scheduler
 }
 

@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
 )
 
@@ -29,6 +31,9 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 			t.Fatal("explicit empty intent fixture required")
 		}
 		t.Skip("no explicit empty intent database; not an acceptance pass")
+	}
+	if !authoritytest.InProcess(t) {
+		return
 	}
 	dialect, dsn := os.Getenv("UVP_OPENAPI_TEST_DIALECT"), os.Getenv("UVP_OPENAPI_TEST_DSN")
 	require.NotEmpty(t, dsn, "explicit fixture DSN required")
@@ -73,7 +78,51 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.NoError(t, err)
 	applyCleanupBarrierScript(t, ctx, connection.conn, up)
 	applyCleanupBarrierScript(t, ctx, connection.conn, up)
-	store := playauth.NewDeviceOperationIntentStore(db)
+	// Use product migrations, never AutoMigrate, so native qualification also
+	// exercises the real authority schema and its transaction lock order.
+	authorityUp, err := migrationsfs.FS.ReadFile("migrations/2026-09-08-openapi-process-authority" + suffix + ".sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, connection.conn, authorityUp)
+	applyCleanupBarrierScript(t, ctx, connection.conn, authorityUp)
+	lock, err := processauthority.AcquireLocalLock(authoritytest.StateDirectory(t))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, lock.Close()) }()
+	authority, err := processauthority.Register(ctx, db, lock)
+	require.NoError(t, err)
+	defer authority.Seal()
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD legacy_revoked_before "+dateType+" NULL").Error)
+	barrier, err := playauth.NewAuthorizedDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db), authority)
+	require.NoError(t, err)
+	var fenceBefore int64
+	require.NoError(t, db.Table("sys_openapi_process_authority").Pluck("row_version", &fenceBefore).Error)
+	// Each admitted lease must commit the current generation fence on the
+	// real engine. Concurrent leases may coexist; they are not one-shot CAS.
+	barrierErrors := make(chan error, 20)
+	var barrierWG sync.WaitGroup
+	for n := 0; n < 20; n++ {
+		barrierWG.Add(1)
+		go func() {
+			defer barrierWG.Done()
+			lease, err := barrier.BeginEpoch(ctx, "34020000001320000001", 1)
+			if lease != nil {
+				lease.Release()
+			}
+			barrierErrors <- err
+		}()
+	}
+	barrierWG.Wait()
+	close(barrierErrors)
+	for err := range barrierErrors {
+		require.NoError(t, err)
+	}
+	var fenceAfter int64
+	require.NoError(t, db.Table("sys_openapi_process_authority").Pluck("row_version", &fenceAfter).Error)
+	require.Equal(t, fenceBefore+20, fenceAfter)
+	_, err = playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)).BeginEpoch(ctx, "34020000001320000001", 1)
+	require.ErrorIs(t, err, playauth.ErrDeviceOperationUnavailable)
+	t.Log("native ordinary admission: 20 confirmed generation fences; observer constructor denied")
 	id := playauth.DeviceOperationIntentIdentity{OperationID: "00000000000000000000000000000001", DevicePK: 1, DeviceCode: "34020000001320000001", DeviceEpoch: 1, TargetScope: "channel", TargetPK: 11, TargetCode: "34020000001320000003", Kind: "live"}
 	row, err := store.Reserve(ctx, id)
 	require.NoError(t, err)
@@ -179,7 +228,7 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, beforeDown, afterUp)
 	// Separate device: the RTP fixture already transferred its original device.
-	require.NoError(t, db.Exec(`INSERT INTO gb_device VALUES (3,'34020000001320000004',1,1,NULL)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO gb_device (id,device_id,access_epoch,cleanup_completed_epoch,deleted_at) VALUES (3,'34020000001320000004',1,1,NULL)`).Error)
 	sipID := playauth.DeviceOperationIntentIdentity{OperationID: "00000000000000000000000000000004", DevicePK: 3, DeviceCode: "34020000001320000004", DeviceEpoch: 1, TargetScope: "device", TargetPK: 3, TargetCode: "34020000001320000004", Kind: "playback"}
 	_, err = store.Reserve(ctx, sipID)
 	require.NoError(t, err)

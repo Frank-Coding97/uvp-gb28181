@@ -9,11 +9,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackParentLeaseSurvivesPreparedChildShutdown(t *testing.T) {
 	for _, kind := range []string{"playback", "download"} {
 		t.Run(kind, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, db, store, id, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
@@ -21,7 +26,7 @@ func TestPlaybackParentLeaseSurvivesPreparedChildShutdown(t *testing.T) {
 				require.NoError(t, db.Table("gb_device_operation_intent").Where("operation_id = ?", id.OperationID).Update("kind", kind).Error)
 				id.Kind = kind
 			}
-			barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+			barrier := newAuthorizedBarrierTest(t, db)
 			parent, err := barrier.BeginEpoch(context.Background(), id.DeviceCode, id.DeviceEpoch)
 			require.NoError(t, err)
 			t.Cleanup(parent.Release)

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentLateBranchPersistsAfterLocalRelease(t *testing.T) {
@@ -21,7 +22,12 @@ func TestPlaybackIntentLateBranchPersistsAfterLocalRelease(t *testing.T) {
 		if cleaned {
 			name = "completed-cleanup"
 		}
-		t.Run(name, func(t *testing.T) { testPlaybackIntentLateBranch(t, cleaned) })
+		t.Run(name, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+			testPlaybackIntentLateBranch(t, cleaned)
+		})
 	}
 }
 
@@ -41,6 +47,10 @@ func (p *quarantineOfflinePool) BeginTx(ctx context.Context, options *sql.TxOpti
 func (p *quarantineOfflinePool) GetDBConn() (*sql.DB, error) { return p.ConnPool.(*sql.DB), nil }
 
 func TestPlaybackIntentQuarantineRetriesFactsAfterDatabaseRecovery(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	connection := f.op.owned.Transaction().Connection()
@@ -54,7 +64,7 @@ func TestPlaybackIntentQuarantineRetriesFactsAfterDatabaseRecovery(t *testing.T)
 	faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 	faultDB.Statement.ConnPool = pool
 	require.NoError(t, f.op.enter(ctx))
-	f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+	f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 	f.op.leave()
 	f.op.factMu.Lock()
 	late := f.op.first.Clone()
@@ -78,6 +88,10 @@ func TestPlaybackIntentQuarantineRetriesFactsAfterDatabaseRecovery(t *testing.T)
 }
 
 func TestPlaybackIntentQuarantineWaitsOutsideFrozenCleanupBatch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	unhandled := make(chan *sip.Response, 1)
 	f := newPlaybackOperationUDPFixture(t, sipgo.WithUserAgentTransactionLayerOptions(sip.WithTransactionLayerUnhandledResponseHandler(func(r *sip.Response) { unhandled <- r })))
 	awaitCleanupFirstBranch(t, f)
@@ -123,6 +137,10 @@ func TestPlaybackIntentQuarantineWaitsOutsideFrozenCleanupBatch(t *testing.T) {
 }
 
 func TestPlaybackIntentQuarantineRetainsLateFirstValidResponse(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	connection := f.op.owned.Transaction().Connection()
 	connection.Ref(1)

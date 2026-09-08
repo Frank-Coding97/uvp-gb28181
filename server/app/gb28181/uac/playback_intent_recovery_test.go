@@ -14,13 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackRecoveryRejectsLiveOwnerAndDifferentBarrier(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	ctx := context.Background()
-	for _, barrier := range []*playauth.DeviceOperationBarrier{f.barrier, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(f.db))} {
+	for _, barrier := range []*playauth.DeviceOperationBarrier{f.barrier, newAuthorizedBarrierTest(t, f.db)} {
 		r, err := f.u.beginRecoveredPlaybackCleanup(ctx, playauth.NewDeviceOperationIntentStore(f.db), barrier, f.id, f.op.invite.StepID, "owned-device")
 		require.Error(t, err)
 		require.Nil(t, r)
@@ -56,10 +61,14 @@ func recoveredPlaybackUDPFixture(t *testing.T) (*playbackOperationUDPFixture, st
 	_, err = observeStoredPlaybackBranch(ctx, store, id, 4, i, request, response)
 	require.NoError(t, err)
 	return &playbackOperationUDPFixture{u: u, db: db, store: store, id: id, peer: peer,
-		barrier: playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))}, i.StepID
+		barrier: newAuthorizedBarrierTest(t, db)}, i.StepID
 }
 
 func TestPlaybackRecoveryReservationSingleWinner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -85,12 +94,16 @@ func TestPlaybackRecoveryReservationSingleWinner(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, loaded.Steps[0].KnownBranch.CleanupAttempts, "reservation does not prepare or send")
 	require.NoError(t, r.CloseLocal(ctx))
-	_, err = f.u.beginRecoveredPlaybackCleanup(ctx, f.store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(f.db)), f.id, stepID, "recovery-remote")
+	_, err = f.u.beginRecoveredPlaybackCleanup(ctx, f.store, newAuthorizedBarrierTest(t, f.db), f.id, stepID, "recovery-remote")
 	require.Error(t, err, "binding cannot silently replace the shared barrier")
 	f.noACK(t)
 }
 
 func TestPlaybackRecoveryActualUDPAndRepeatCannotResend(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -122,6 +135,10 @@ func TestPlaybackRecoveryActualUDPAndRepeatCannotResend(t *testing.T) {
 }
 
 func TestPlaybackRecoveryCloseInterruptsWithoutResend(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -150,12 +167,15 @@ func TestPlaybackRecoveryUnknownCommitRetainsUntilFacts(t *testing.T) {
 	for _, stage := range []int32{1, 2, 3, 4, 5} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("stage=%d/commit=%v", stage, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f, stepID := recoveredPlaybackUDPFixture(t)
 				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 				defer cancel()
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: stage, commitFirst: committed}
-				r, err := f.u.beginRecoveredPlaybackCleanup(ctx, playauth.NewDeviceOperationIntentStore(faultDB), f.barrier, f.id, stepID, "recovery-remote")
+				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
+				r, err := f.u.beginRecoveredPlaybackCleanup(ctx, newAuthorizedIntentTestStore(t, faultDB), f.barrier, f.id, stepID, "recovery-remote")
 				require.NoError(t, err)
 				defer r.CloseLocal(ctx)
 				result := make(chan error, 1)
@@ -193,6 +213,10 @@ func TestPlaybackRecoveryUnknownCommitRetainsUntilFacts(t *testing.T) {
 }
 
 func TestPlaybackRecoveryReservesBeforeLoad(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -249,6 +273,10 @@ func TestPlaybackRecoveryReservesBeforeLoad(t *testing.T) {
 }
 
 func TestPlaybackRecoveryActualTCP(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
@@ -269,7 +297,7 @@ func TestPlaybackRecoveryActualTCP(t *testing.T) {
 	response.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "device", Host: "127.0.0.1", Port: peer.Addr().(*net.TCPAddr).Port}})
 	_, err = observeStoredPlaybackBranch(ctx, store, id, 4, i, request, response)
 	require.NoError(t, err)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	r, err := u.beginRecoveredPlaybackCleanup(ctx, store, barrier, id, i.StepID, "recovery-tcp")
 	require.NoError(t, err)
 	defer r.CloseLocal(ctx)
@@ -320,6 +348,10 @@ func TestPlaybackRecoveryActualTCP(t *testing.T) {
 }
 
 func TestPlaybackRecoveryCapacityAndLoadFailure(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	f.u.playbackRecoveries = make(map[string]*playbackIntentRecovery)
@@ -345,6 +377,10 @@ func TestPlaybackRecoveryCapacityAndLoadFailure(t *testing.T) {
 }
 
 func TestPlaybackRecoveryBranchSuccessPreservesInventoryUnknown(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()

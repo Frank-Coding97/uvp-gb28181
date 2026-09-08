@@ -45,7 +45,7 @@ type rtpRecoveryWork struct {
 // retain its handle for retries. Use the worker lifetime context, not a page's
 // timeout, and the application's one shared barrier.
 func (b *DeviceOperationBarrier) ReserveRTPCleanup(ctx context.Context, store *DeviceOperationIntentStore, id DeviceOperationIntentIdentity, stepID string) (*RTPRecoveryWork, error) {
-	if b == nil || b.store == nil || b.store.db == nil || !store.available(ctx) {
+	if b == nil || b.store == nil || b.store.db == nil || !store.available(ctx) || !store.hasAuthority() {
 		return nil, ErrDeviceIntentUnavailable
 	}
 	if !validIntentIdentity(id) || !validIntentID(stepID) || id.DeviceEpoch == math.MaxInt64 {
@@ -102,8 +102,8 @@ func (h *RTPRecoveryWork) enter(ctx context.Context) (*rtpRecoveryWork, error) {
 
 // Prepare joins the original epoch first. Only its confirmed owner CAS permits
 // registration in the same barrier. A lost reply is retained for Quiesce, never
-// retried as authorization. Cross-process takeover needs a separate root proof
-// and is deliberately not granted by this ordinary entry point.
+// retried as authorization. Foreign owners require the root authority's
+// same-transaction retired-generation proof; their missing facts stay unknown.
 func (h *RTPRecoveryWork) Prepare(ctx context.Context) error {
 	w, err := h.enter(ctx)
 	if err != nil {
@@ -121,18 +121,26 @@ func (h *RTPRecoveryWork) Prepare(ctx context.Context) error {
 		return err
 	}
 	w.attempted = true
-	_, err = w.store.mutateRTPFacts(ctx, w.id, loaded.Intent.RowVersion, authorizeRTPCleanupDevice, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+	_, err = w.store.mutateRTPFactsTx(ctx, w.id, loaded.Intent.RowVersion, w.store.effectDeviceCheck(authorizeRTPCleanupDevice), func(tx *gorm.DB, out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 		for i := range out.Steps {
 			s := &out.Steps[i]
 			if s.Identity.StepID != w.stepID {
 				continue
 			}
-			if s.State != RTPStepMayHaveDispatched || (s.OwnerRunID != "" && s.LocalQuiescedAt == nil) {
+			if err := w.store.requireCleanupGenerationTx(tx, s.OwnerProcessID); err != nil {
+				return false, err
+			}
+			if s.State != RTPStepMayHaveDispatched || (s.OwnerProcessID == w.processID && s.LocalQuiescedAt == nil) {
 				return false, ErrDeviceIntentConflict
 			}
 			old := s.Recovery
-			if old != nil && (old.OwnerProcessID != w.processID || old.LocalQuiescedAt == nil || old.Generation == math.MaxInt64) {
-				return false, ErrDeviceIntentConflict
+			if old != nil {
+				if err := w.store.requireCleanupGenerationTx(tx, old.OwnerProcessID); err != nil {
+					return false, err
+				}
+				if (old.OwnerProcessID == w.processID && old.LocalQuiescedAt == nil) || old.Generation == math.MaxInt64 {
+					return false, ErrDeviceIntentConflict
+				}
 			}
 			r := &DeviceRTPRecovery{Version: 1, Generation: 1, OwnerProcessID: w.processID, OwnerRunID: w.runID, ReservedAt: now, PriorObservationIncomplete: s.LocalQuiescedAt == nil}
 			if old != nil {
@@ -140,7 +148,7 @@ func (h *RTPRecoveryWork) Prepare(ctx context.Context) error {
 				r.CallSequence = old.CallSequence
 				r.ResourceEvidence = old.ResourceEvidence
 				r.IngressEvidence = old.IngressEvidence
-				r.PriorObservationIncomplete = r.PriorObservationIncomplete || old.PriorObservationIncomplete
+				r.PriorObservationIncomplete = r.PriorObservationIncomplete || old.PriorObservationIncomplete || old.LocalQuiescedAt == nil
 				if old.CurrentCall != nil && old.CurrentCall.Outcome == rtpCallUnknown {
 					r.PriorObservationIncomplete = true
 				}
@@ -208,6 +216,9 @@ func (b *DeviceOperationBarrier) beginRTPCleanup(ctx context.Context, ticket *rt
 	lane.guardHeld = true
 	lane.mu.Unlock()
 	err := b.store.db.WithContext(waitCtx).Transaction(func(tx *gorm.DB) error {
+		if err := w.store.checkAuthorityTx(tx); err != nil {
+			return err
+		}
 		if err := authorizeRTPCleanupDevice(tx, waitCtx, w.id); err != nil {
 			return err
 		}
@@ -263,7 +274,7 @@ func (h *RTPRecoveryWork) closeCall(ctx context.Context, action string, call fun
 		return "", err
 	}
 	w.beforeCall = cloneRTPRecovery(w.durable)
-	_, err = w.store.mutateRTPFacts(ctx, w.id, loaded.Intent.RowVersion, authorizeRTPCleanupDevice, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+	_, err = w.store.mutateRTPFacts(ctx, w.id, loaded.Intent.RowVersion, w.store.effectDeviceCheck(authorizeRTPCleanupDevice), func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 		for i := range out.Steps {
 			s := &out.Steps[i]
 			if s.Identity != w.identity {

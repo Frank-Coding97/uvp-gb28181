@@ -2,7 +2,6 @@ package uac
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -17,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type playbackOperationUDPFixture struct {
@@ -50,7 +50,7 @@ func newPlaybackOperationPreparedUDPFixture(t *testing.T, options ...sipgo.UserA
 	u, db, store, id, _ := playbackIntentStoreFixture(t, options...)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = peer.Close() })
@@ -99,6 +99,10 @@ func (f *playbackOperationUDPFixture) noACK(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationPumpRetainsFinalWithoutConsumer(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	for _, code := range []int{100, 180, 183, 200} {
 		f.respond(t, code)
@@ -117,6 +121,10 @@ func TestPlaybackIntentOperationPumpRetainsFinalWithoutConsumer(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationBranchPersistenceFailureRetainsLease(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	require.NoError(t, f.db.Exec(`CREATE TRIGGER deny_owner_observe BEFORE UPDATE ON gb_device_operation_intent BEGIN SELECT RAISE(ABORT,'fixture write failure'); END`).Error)
 	f.respond(t, 200)
@@ -142,50 +150,17 @@ func TestPlaybackIntentOperationBranchPersistenceFailureRetainsLease(t *testing.
 	require.Equal(t, playauth.IntentDispatched, loaded.Intent.State)
 }
 
-type playbackOperationCommitFault struct {
-	gorm.ConnPool
-	commits     atomic.Int32
-	failAt      int32
-	commitFirst bool
-}
-
-type playbackOperationFaultTx struct {
-	*sql.Tx
-	pool *playbackOperationCommitFault
-}
-
-func (p *playbackOperationCommitFault) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
-	tx, err := p.ConnPool.(*sql.DB).BeginTx(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	return &playbackOperationFaultTx{tx, p}, nil
-}
-
-func (p *playbackOperationCommitFault) GetDBConn() (*sql.DB, error) {
-	return p.ConnPool.(*sql.DB), nil
-}
-
-func (tx *playbackOperationFaultTx) Commit() error {
-	if tx.pool.commits.Add(1) != tx.pool.failAt {
-		return tx.Tx.Commit()
-	}
-	if tx.pool.commitFirst {
-		if err := tx.Tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return errors.New("fixture lost commit reply")
-}
-
 func TestPlaybackIntentOperationUnknownCommitNeverWritesACK(t *testing.T) {
 	for _, step := range []int32{1, 2} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("step=%d/committed=%v", step, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := newPlaybackOperationUDPFixture(t)
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: step, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, step, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				f.respond(t, 200)
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
@@ -210,6 +185,10 @@ func TestPlaybackIntentOperationUnknownCommitNeverWritesACK(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationTransferCANCELRetainsLateSuccess(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	f.respond(t, 180)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -261,6 +240,10 @@ func TestPlaybackIntentOperationTransferCANCELRetainsLateSuccess(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationRegistryCapacityDoesNotEvict(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	retained := &playbackIntentOperation{}
@@ -268,7 +251,7 @@ func TestPlaybackIntentOperationRegistryCapacityDoesNotEvict(t *testing.T) {
 	for i := 0; i < maxPlaybackIntentOperations; i++ {
 		u.playbackIntents[fmt.Sprintf("%032x", i)] = retained
 	}
-	op, err := u.beginPlaybackIntentOperation(context.Background(), store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)), id, 2, strings.Repeat("b", 32), validPlaybackInvite())
+	op, err := u.beginPlaybackIntentOperation(context.Background(), store, newAuthorizedBarrierTest(t, db), id, 2, strings.Repeat("b", 32), validPlaybackInvite())
 	require.Error(t, err)
 	require.Nil(t, op)
 	require.Len(t, u.playbackIntents, maxPlaybackIntentOperations)
@@ -281,6 +264,10 @@ func TestPlaybackIntentOperationRegistryCapacityDoesNotEvict(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationFinalBeforeCancelDoesNotDispatch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	f.respond(t, 200)
 	require.Eventually(t, func() bool {
@@ -300,6 +287,10 @@ func TestPlaybackIntentOperationFinalBeforeCancelDoesNotDispatch(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationRejectedInviteOwnsTransactionACK(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	f.respond(t, 486)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -325,6 +316,10 @@ func TestPlaybackIntentOperationRejectedInviteOwnsTransactionACK(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationBlockedPersistenceCannotReleaseLease(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var released sync.Once
@@ -361,10 +356,14 @@ func TestPlaybackIntentOperationBlockedPersistenceCannotReleaseLease(t *testing.
 }
 
 func TestPlaybackIntentOperationActualTCPCommitBeforeACK(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
@@ -424,10 +423,14 @@ func TestPlaybackIntentOperationActualTCPCommitBeforeACK(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationActualUDPCommitBeforeACK(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()

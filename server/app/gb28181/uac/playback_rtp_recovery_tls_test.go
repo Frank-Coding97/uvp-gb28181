@@ -23,6 +23,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type recoveryTLSNodes struct{ n *node.Node }
@@ -38,6 +39,9 @@ func (r recoveryTLSResolver) ResolveRTP(ctx context.Context, id string) (playbac
 // Public integration: real discovery/scan, persistent owner and pinned TLS
 // adapter. The peer is a protocol fixture, not a ZLM binary or physical device.
 func TestPlaybackRTPRecoveryActualTLSWorker(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "worker.sqlite")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -58,7 +62,8 @@ func TestPlaybackRTPRecoveryActualTLSWorker(t *testing.T) {
 		require.NoError(t, db.Exec(sql).Error)
 	}
 	id := playauth.DeviceOperationIntentIdentity{OperationID: strings.Repeat("a", 32), DevicePK: 1, DeviceCode: "34020000001320000001", DeviceEpoch: 1, TargetScope: "channel", TargetPK: 11, TargetCode: "34020000001320000002", Kind: "playback"}
-	store := playauth.NewDeviceOperationIntentStore(db)
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authoritytest.Register(t, db, ""))
+	require.NoError(t, err)
 	_, err = store.Reserve(ctx, id)
 	require.NoError(t, err)
 	_, err = store.Dispatch(ctx, id, 1)

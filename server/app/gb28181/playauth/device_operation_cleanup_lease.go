@@ -15,6 +15,7 @@ type SIPCleanupWorkTicket struct{ work *sipCleanupWork }
 
 type sipCleanupWork struct {
 	authority *sql.DB
+	process   deviceIntentAuthority
 	intent    DeviceOperationIntentIdentity
 	identity  DeviceSIPCleanupAttemptIdentity
 	runID     string
@@ -40,7 +41,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanupWork(ctx context.Con
 	if err != nil {
 		return DeviceSIPInviteSteps{}, nil, ErrDeviceIntentUnavailable
 	}
-	work := &sipCleanupWork{authority: authority, intent: id, identity: cloneSIPCleanupIdentity(identity), runID: runID}
+	work := &sipCleanupWork{authority: authority, process: s.authority, intent: id, identity: cloneSIPCleanupIdentity(identity), runID: runID}
 	if out.Intent.RowVersion != version+1 || !work.matches(out) {
 		return DeviceSIPInviteSteps{}, nil, ErrDeviceIntentConflict
 	}
@@ -109,6 +110,9 @@ func (b *DeviceOperationBarrier) BeginSIPCleanup(ctx context.Context, ticket *SI
 	// The admission gate stays reserved, but no lane mutex is held over SQL.
 	// This serializes registration with transfer Commit/Release notification.
 	err = b.store.db.WithContext(waitCtx).Transaction(func(tx *gorm.DB) error {
+		if isNilInterface(work.process) || work.process.GenerationID() != runID || work.process.CheckTx(tx) != nil {
+			return ErrDeviceIntentUnavailable
+		}
 		if err := authorizeSIPCancelCleanupDevice(tx, waitCtx, work.intent); err != nil {
 			return err
 		}

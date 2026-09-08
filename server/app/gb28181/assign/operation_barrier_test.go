@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestOpenAPIAssignmentRequiresProcessBarrier(t *testing.T) {
@@ -42,10 +43,14 @@ func TestOpenAPIAssignmentCancelsOnlyCommittedTargetOperations(t *testing.T) {
 				name = version + "/rollback"
 			}
 			t.Run(name, func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
 				db := newAssignTestDB(t)
 				device := seedAssignedDeviceWithCode(t, db, "34020000002000100021")
 				other := seedAssignedDeviceWithCode(t, db, "34020000002000100022")
-				barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+				barrier, err := playauth.NewAuthorizedDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db), authoritytest.Authority(t, db))
+				require.NoError(t, err)
 				lease, err := barrier.BeginEpoch(context.Background(), device.DeviceID, 1)
 				require.NoError(t, err)
 				defer lease.Release()

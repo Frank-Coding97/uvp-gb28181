@@ -121,7 +121,7 @@ func TestDeviceSIPStepsCommitUnknownNeverGrantsDispatch(t *testing.T) {
 			ctx := context.Background()
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-			fault := NewDeviceOperationIntentStore(faultDB)
+			fault := newIntentFixtureStore(faultDB)
 			out, err := fault.AddSIPInviteStep(ctx, id, 2, sipStepIdentity(1))
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 			require.Empty(t, out.Intent.OperationID)

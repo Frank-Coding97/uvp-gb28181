@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // Each invocation owns a real OS process. Exit deliberately bypasses database
@@ -30,7 +31,9 @@ func TestDeviceSIPCleanupProcessHelper(t *testing.T) {
 	require.True(t, info.Mode().IsRegular())
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
-	s := NewDeviceOperationIntentStore(db)
+	authority := authoritytest.Register(t, db, os.Getenv("UVP_SIP_CLEANUP_PROCESS_STATE"))
+	s, err := NewAuthorizedDeviceOperationIntentStore(db, authority)
+	require.NoError(t, err)
 	ctx, id, identity := context.Background(), intentIdentity(1), sipCleanupIdentity(1)
 	if mode == "recover" {
 		old, err := s.LoadSIPInviteSteps(ctx, id)
@@ -64,6 +67,19 @@ func TestDeviceSIPCleanupProcessHelper(t *testing.T) {
 		require.NoError(t, barrier.WaitBefore(ctx, uint(id.DevicePK), 2))
 		os.Exit(0)
 	}
+	_, err = s.Reserve(ctx, id)
+	require.NoError(t, err)
+	_, err = s.Dispatch(ctx, id, 1)
+	require.NoError(t, err)
+	_, err = s.AddSIPInviteStep(ctx, id, 2, sipStepIdentity(1))
+	require.NoError(t, err)
+	_, err = s.DispatchSIPInviteStep(ctx, id, 3, sipStepIdentity(1).StepID)
+	require.NoError(t, err)
+	branch := sipKnownBranch()
+	branch.RouteSet = []string{}
+	_, err = s.ObserveSIPKnownBranch(ctx, id, 4, branch)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 	_, err = s.PrepareSIPBranchCleanup(ctx, id, 5, identity)
 	require.NoError(t, err)
 	if mode == "ack" || mode == "bye" {
@@ -81,18 +97,20 @@ func TestDeviceSIPCleanupProcessHelper(t *testing.T) {
 func TestDeviceSIPCleanupActualProcessRestart(t *testing.T) {
 	for _, stage := range []string{"prepared", "ack", "bye"} {
 		t.Run(stage, func(t *testing.T) {
-			f, _, _ := sipCleanupFixture(t)
+			f, _ := newIntentFixture(t)
+			require.NoError(t, f.db.Exec("ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT NULL").Error)
 			require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-			require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 			path := filepath.Join(t.TempDir(), "cleanup.db")
-			// Copy only this isolated fixture, before any cleanup owner exists.
+			// Copy only empty schema and device seeds, before any generation or
+			// operation exists. Original and successor register in the same file.
 			require.NoError(t, f.db.Exec("VACUUM INTO ?", path).Error)
+			stateDir := authoritytest.StateDirectory(t)
 			binary, err := os.Executable()
 			require.NoError(t, err)
 			for _, mode := range []string{stage, "recover"} {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				cmd := exec.CommandContext(ctx, binary, "-test.run=^TestDeviceSIPCleanupProcessHelper$", "-test.count=1")
-				cmd.Env = append(os.Environ(), "UVP_SIP_CLEANUP_PROCESS_MODE="+mode, "UVP_SIP_CLEANUP_PROCESS_DB="+path)
+				cmd.Env = append(os.Environ(), "UVP_SIP_CLEANUP_PROCESS_MODE="+mode, "UVP_SIP_CLEANUP_PROCESS_DB="+path, "UVP_SIP_CLEANUP_PROCESS_STATE="+stateDir)
 				out, err := cmd.CombinedOutput()
 				cancel()
 				require.NoError(t, err, "isolated %s: %s", mode, out)

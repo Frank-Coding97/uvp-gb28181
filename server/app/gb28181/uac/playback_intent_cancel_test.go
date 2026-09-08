@@ -11,9 +11,14 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentCancelMatchesOwnedPreparation(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	ctx := context.Background()

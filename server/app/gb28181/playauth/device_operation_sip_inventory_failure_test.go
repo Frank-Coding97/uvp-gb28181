@@ -50,7 +50,7 @@ func TestDeviceSIPInventoryCommitUnknownReturnsNoMaterial(t *testing.T) {
 				require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				fault := NewDeviceOperationIntentStore(faultDB)
+				fault := newIntentFixtureStore(faultDB)
 				var out DeviceSIPInviteSteps
 				var err error
 				if operation == "fault" {

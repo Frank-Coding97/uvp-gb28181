@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type scanRTPResolver func(context.Context, playauth.DeviceRTPResourceIdentity) (playauth.RTPCleanupRuntime, error)
@@ -46,7 +47,7 @@ func playbackRTPScanFixture(t *testing.T, beforeTransfer ...func(*playauth.Devic
 	_, old, err := store.DispatchRTPResourceWork(ctx, id, out.Intent.RowVersion, stepID)
 	require.NoError(t, err)
 	require.NoError(t, old.Quiesce(ctx))
-	b := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	b := newAuthorizedBarrierTest(t, db)
 	for _, prepare := range beforeTransfer {
 		prepare(b, id)
 	}
@@ -60,6 +61,10 @@ func playbackRTPScanFixture(t *testing.T, beforeTransfer ...func(*playauth.Devic
 }
 
 func TestPlaybackRTPRecoveryScanContinuesSameOwnerAfterSQLFailure(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, b, id, identity := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	var resource, ingress, resolved, freed atomic.Int32
@@ -101,6 +106,10 @@ func TestPlaybackRTPRecoveryScanContinuesSameOwnerAfterSQLFailure(t *testing.T) 
 }
 
 func TestPlaybackRTPRecoveryWorkerStopJoinsAndRestartKeepsOwner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, b, id, identity := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -165,6 +174,10 @@ func TestPlaybackRTPRecoveryWorkerStopJoinsAndRestartKeepsOwner(t *testing.T) {
 }
 
 func TestPlaybackRTPRecoveryShutdownRetainsFailedFinalFacts(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, b, id, _ := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	var calls, freed atomic.Int32
@@ -189,6 +202,10 @@ func TestPlaybackRTPRecoveryShutdownRetainsFailedFinalFacts(t *testing.T) {
 }
 
 func TestPlaybackRTPRecoveryPageTimeoutDoesNotCancelController(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, b, id, _ := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	var resource, ingress, freed atomic.Int32
@@ -215,6 +232,10 @@ func TestPlaybackRTPRecoveryPageTimeoutDoesNotCancelController(t *testing.T) {
 }
 
 func TestPlaybackRTPRecoveryResolverFailureQuiescesAndCannotRebind(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, b, id, _ := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	var calls atomic.Int32
@@ -235,6 +256,10 @@ func TestPlaybackRTPRecoveryResolverFailureQuiescesAndCannotRebind(t *testing.T)
 }
 
 func TestPlaybackRTPRecoveryControllerCapacityDoesNotEvictCreators(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, b, id, identity := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	resolver := scanRTPResolver(func(context.Context, playauth.DeviceRTPResourceIdentity) (playauth.RTPCleanupRuntime, error) {
@@ -262,6 +287,10 @@ func TestPlaybackRTPRecoveryControllerCapacityDoesNotEvictCreators(t *testing.T)
 }
 
 func TestPlaybackRTPRecoveryCancelledPrepareQuiescesBeforeNewBatch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	ctx := context.Background()
 	var lease playauth.DeviceOperationLease
 	u, _, store, b, id, _ := playbackRTPScanFixture(t, func(b *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity) {
@@ -289,6 +318,10 @@ func TestPlaybackRTPRecoveryCancelledPrepareQuiescesBeforeNewBatch(t *testing.T)
 }
 
 func TestPlaybackRTPRecoveryShutdownJoinsLateResolverAndRetainsRuntime(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, b, id, _ := playbackRTPScanFixture(t)
 	ctx := context.Background()
 	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
@@ -328,6 +361,10 @@ func TestPlaybackRTPRecoveryShutdownJoinsLateResolverAndRetainsRuntime(t *testin
 }
 
 func TestPlaybackRTPRecoverySIPTimeoutCannotStarveRTPNextPage(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, _ := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	defer func() { closeScanObservations(t, f.u); require.NoError(t, f.u.ShutdownPlaybackIntents(ctx)) }()

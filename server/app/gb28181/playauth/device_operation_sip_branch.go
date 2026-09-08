@@ -211,7 +211,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPKnownBranchACK(ctx context.Conte
 	if err != nil {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
-	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+	return s.mutateSIPStepChecked(ctx, id, version, s.effectDeviceCheck(authorizeIntentDevice), func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != identity.InviteStepID {

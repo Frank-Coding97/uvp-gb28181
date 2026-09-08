@@ -84,7 +84,7 @@ func (h *RTPResourceWork) Dispatch(ctx context.Context, version int64) (DeviceRT
 		return DeviceRTPResourceSteps{}, ErrDeviceIntentConflict
 	}
 	w.attempted = true
-	out, err := w.store.mutateRTPStep(ctx, w.id, version, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+	out, err := w.store.mutateRTPFacts(ctx, w.id, version, w.store.effectDeviceCheck(authorizeIntentDevice), func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity != w.step.Identity {
@@ -175,7 +175,7 @@ func (h *RTPResourceWork) closeCall(ctx context.Context, ingress bool, call func
 	if err != nil {
 		return "", err
 	}
-	_, err = w.store.mutateRTPFacts(ctx, w.id, loaded.Intent.RowVersion, authorizeSIPCancelCleanupDevice, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+	_, err = w.store.mutateRTPFacts(ctx, w.id, loaded.Intent.RowVersion, w.store.effectDeviceCheck(authorizeSIPCancelCleanupDevice), func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 		for i := range out.Steps {
 			s := &out.Steps[i]
 			if s.Identity != w.step.Identity {

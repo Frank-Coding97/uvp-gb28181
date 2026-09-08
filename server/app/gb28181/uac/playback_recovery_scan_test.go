@@ -8,8 +8,8 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func closeScanObservations(t *testing.T, u *UAC) {
@@ -28,6 +28,10 @@ func closeScanObservations(t *testing.T, u *UAC) {
 }
 
 func TestPlaybackRecoveryScanPageAndTargetBoundary(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, _ := recoveredPlaybackUDPFixture(t)
 	ctx := context.Background()
 	for _, letter := range []string{"1", "2", "3"} {
@@ -64,6 +68,10 @@ func TestPlaybackRecoveryScanPageAndTargetBoundary(t *testing.T) {
 }
 
 func TestPlaybackRecoveryScanActualMultipleBranchesAndRepeat(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -130,6 +138,10 @@ func TestPlaybackRecoveryScanActualMultipleBranchesAndRepeat(t *testing.T) {
 
 func TestPlaybackRecoveryScanMissingMaterialAndOriginalOwner(t *testing.T) {
 	t.Run("missing-or-unsupported", func(t *testing.T) {
+		if !authoritytest.InProcess(t) {
+			return
+		}
+
 		u, db, store, id, observer := playbackIntentStoreFixture(t)
 		ctx := context.Background()
 		other := id
@@ -140,7 +152,7 @@ func TestPlaybackRecoveryScanMissingMaterialAndOriginalOwner(t *testing.T) {
 		_, err = store.Dispatch(ctx, other, 1)
 		require.NoError(t, err)
 		require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch = 2 WHERE id = 1").Error)
-		barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+		barrier := newAuthorizedBarrierTest(t, db)
 		p, err := u.RecoverPlaybackIntents(ctx, store, barrier, 1, id.DeviceCode, 2, "", 1000)
 		require.ErrorIs(t, err, ErrPlaybackCleanupUnknown)
 		require.Equal(t, 2, p.Scanned)
@@ -151,6 +163,10 @@ func TestPlaybackRecoveryScanMissingMaterialAndOriginalOwner(t *testing.T) {
 		require.Empty(t, u.playbackObservations)
 	})
 	t.Run("original-owner", func(t *testing.T) {
+		if !authoritytest.InProcess(t) {
+			return
+		}
+
 		f := newPlaybackOperationUDPFixture(t)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -165,14 +181,17 @@ func TestPlaybackRecoveryScanMissingMaterialAndOriginalOwner(t *testing.T) {
 }
 
 func TestPlaybackRecoveryScanResumesRetainedFactsWithoutResend(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	defer closeScanObservations(t, f.u)
 	// Fail the response-fact commit once; the concrete owner must survive.
-	faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-	faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: 4}
-	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, playauth.NewDeviceOperationIntentStore(faultDB), f.barrier, f.id, stepID, "recovery-remote")
+	faultDB := authoritytest.CommitFaultDB(t, f.db, 4, false)
+	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, newAuthorizedIntentTestStore(t, faultDB), f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
 	defer r.CloseLocal(ctx)
 	result := make(chan error, 1)
@@ -197,6 +216,10 @@ func TestPlaybackRecoveryScanResumesRetainedFactsWithoutResend(t *testing.T) {
 }
 
 func TestPlaybackRecoveryScanTimeoutRetainsRunningOwner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, stepID := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

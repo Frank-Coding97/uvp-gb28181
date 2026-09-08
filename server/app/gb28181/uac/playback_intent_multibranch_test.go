@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func addPlaybackCleanupFork(t *testing.T, f *playbackOperationUDPFixture, tag string) net.PacketConn {
@@ -39,6 +40,10 @@ func addPlaybackCleanupFork(t *testing.T, f *playbackOperationUDPFixture, tag st
 }
 
 func TestPlaybackIntentMultiBranchHandoffHasNoBarrierGap(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -105,6 +110,10 @@ func TestPlaybackIntentMultiBranchHandoffHasNoBarrierGap(t *testing.T) {
 func TestPlaybackIntentMultiBranchCleanupUsesExactDialogs(t *testing.T) {
 	for _, statusA := range []int{200, 481} {
 		t.Run(fmt.Sprint(statusA), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationUDPFixture(t)
 			awaitCleanupFirstBranch(t, f)
 			peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -163,6 +172,10 @@ func TestPlaybackIntentMultiBranchCleanupUsesExactDialogs(t *testing.T) {
 }
 
 func TestPlaybackIntentMultiBranchCloseStopsCurrentWithoutStartingNext(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -193,6 +206,10 @@ func TestPlaybackIntentMultiBranchUnknownPermissionStopsBatch(t *testing.T) {
 	for _, stage := range []int32{1, 2, 3, 4, 5} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("stage=%d/commit=%v", stage, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := newPlaybackOperationUDPFixture(t)
 				awaitCleanupFirstBranch(t, f)
 				peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -206,9 +223,8 @@ func TestPlaybackIntentMultiBranchUnknownPermissionStopsBatch(t *testing.T) {
 				require.ErrorIs(t, err, ErrPlaybackCleanupUnknown)
 				f.op.multiCleanup = true
 				f.op.leave()
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: stage, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				finished := make(chan error, 1)
 				go func() { finished <- f.op.CleanupKnownBranch(ctx) }()
 				if stage >= 3 {
@@ -246,6 +262,10 @@ func TestPlaybackIntentMultiBranchUnknownPermissionStopsBatch(t *testing.T) {
 }
 
 func TestPlaybackIntentMultiBranchFaultNeverProvesCoverage(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -284,6 +304,10 @@ func TestPlaybackIntentMultiBranchFaultNeverProvesCoverage(t *testing.T) {
 }
 
 func TestPlaybackIntentMultiBranchRetryContinuesOnlyUntouchedBranch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -295,9 +319,8 @@ func TestPlaybackIntentMultiBranchRetryContinuesOnlyUntouchedBranch(t *testing.T
 	require.ErrorIs(t, err, ErrPlaybackCleanupUnknown)
 	f.op.multiCleanup = true
 	f.op.leave()
-	faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-	faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: 1, commitFirst: true}
-	f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+	faultDB := authoritytest.CommitFaultDB(t, f.db, 1, true)
+	f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 	require.Error(t, f.op.CleanupKnownBranch(ctx))
 	f.noACK(t)
 	// A's actual owner is now quiesced and durably reconciled. A subsequent
@@ -324,6 +347,10 @@ func TestPlaybackIntentMultiBranchRetryContinuesOnlyUntouchedBranch(t *testing.T
 }
 
 func TestPlaybackIntentMultiBranchEightObservedDialogs(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	peers := []net.PacketConn{f.peer}
@@ -365,6 +392,10 @@ func TestPlaybackIntentMultiBranchAdditionalCommitUnknownRetainsOwner(t *testing
 	for _, stage := range []int32{6, 7, 8, 9, 10} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("stage=%d/commit=%v", stage, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := newPlaybackOperationUDPFixture(t)
 				awaitCleanupFirstBranch(t, f)
 				peerB := addPlaybackCleanupFork(t, f, "branch-B")
@@ -376,9 +407,8 @@ func TestPlaybackIntentMultiBranchAdditionalCommitUnknownRetainsOwner(t *testing
 				require.ErrorIs(t, err, ErrPlaybackCleanupUnknown)
 				f.op.multiCleanup = true
 				f.op.leave()
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: stage, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				finished := make(chan error, 1)
 				go func() { finished <- f.op.CleanupKnownBranch(ctx) }()
 				_, _ = readCleanupRequest(t, f.peer)

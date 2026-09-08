@@ -16,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
@@ -52,6 +53,20 @@ func main() {
 		}
 		return
 	}
+	// Own the local domain for the whole API process, not one SIP generation.
+	// Migrations are complete; no HTTP routes or device effect runtime exists.
+	authorityLock, err := processauthority.AcquireLocalLock(app.ConfigYml.GetString("processauthority.state_dir"))
+	if err != nil {
+		log.Fatal("进程授权目录或排他锁不可用: " + err.Error())
+	}
+	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 10*time.Second)
+	authority, err := processauthority.Register(registerCtx, app.DB(), authorityLock)
+	cancelRegister()
+	if err != nil {
+		_ = authorityLock.Close()
+		log.Fatal("进程授权注册失败: " + err.Error())
+	}
+	app.JobScheduler.Start()
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
 	// 初始化系统路由
@@ -62,7 +77,7 @@ func main() {
 	// reuse this exact snapshot, including a sticky startup failure.
 	controlBindings, controlBindingsErr := gb28181.LoadStartupOpenAPIControlBindingsOnce()
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
-	gb28181.Start()
+	gb28181.Start(authority)
 	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
 	var stopRevocation func()
@@ -109,6 +124,13 @@ func main() {
 	waitForSIPShutdown(gb28181.Stop, func(err error) {
 		app.ZapLog.Error("GB28181 停机尚未排空,保留进程与依赖并重试", zap.Error(err))
 	}, time.Second)
+	// All HTTP, maintenance and GB owners have joined. Do not release this
+	// process authority in GB Stop/Reload, or before the last retry succeeds.
+	authority.Seal()
+	if err := authorityLock.Close(); err != nil {
+		app.ZapLog.Error("进程授权锁释放失败", zap.Error(err))
+		serveErr = errors.Join(serveErr, err)
+	}
 	if serveErr != nil {
 		os.Exit(1) // Preserve startup/serve failure status only after owned runtimes drain.
 	}

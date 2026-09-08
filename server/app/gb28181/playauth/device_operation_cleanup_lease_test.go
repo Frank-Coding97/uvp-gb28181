@@ -16,7 +16,7 @@ func TestDeviceSIPCleanupLeaseOverlapsOriginalAndTransfer(t *testing.T) {
 	f, store, id := sipCleanupFixture(t)
 	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	ctx := context.Background()
-	b := NewDeviceOperationBarrier(NewDeviceSecurityStore(f.db))
+	b := newDeviceOperationBarrier(NewDeviceSecurityStore(f.db), intentFixtureAuthority{})
 	original, err := b.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
 	require.NoError(t, err)
 	defer original.Release()
@@ -132,7 +132,7 @@ func TestDeviceSIPCleanupLeaseUnknownPrepareHasNoTicket(t *testing.T) {
 			ctx := context.Background()
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-			out, ticket, err := NewDeviceOperationIntentStore(faultDB).PrepareSIPBranchCleanupWork(ctx, id, 5, sipCleanupIdentity(1))
+			out, ticket, err := newIntentFixtureStore(faultDB).PrepareSIPBranchCleanupWork(ctx, id, 5, sipCleanupIdentity(1))
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 			require.Empty(t, out)
 			require.Nil(t, ticket)

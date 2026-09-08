@@ -34,7 +34,7 @@ func TestDeviceRTPCleanupWorkCallsNeedNewConfirmedDispatch(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrDeviceIntentConflict)
 	require.NoError(t, work.Prepare(ctx))
-	duplicate, err := barrier.ReserveRTPCleanup(ctx, NewDeviceOperationIntentStore(f.db), id, identity.StepID)
+	duplicate, err := barrier.ReserveRTPCleanup(ctx, newIntentFixtureStore(f.db), id, identity.StepID)
 	require.ErrorIs(t, err, ErrDeviceIntentConflict)
 	require.Nil(t, duplicate, "a second factory cannot acquire this owner's execution or shutdown authority")
 	calls := 0
@@ -92,7 +92,7 @@ func TestDeviceRTPCleanupWorkUnknownCommitNeverSends(t *testing.T) {
 				require.NoError(t, err)
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				faultStore := NewDeviceOperationIntentStore(faultDB)
+				faultStore := newIntentFixtureStore(faultDB)
 				if phase == "prepare" {
 					work.work.store = faultStore
 					require.Error(t, work.Prepare(ctx))
@@ -178,7 +178,7 @@ func TestDeviceRTPCleanupWorkWaitsForOldLeaseAndRejectsOtherAuthority(t *testing
 	f, store, id := newRTPStepFixture(t)
 	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	ctx := context.Background()
-	b := NewDeviceOperationBarrier(NewDeviceSecurityStore(f.db))
+	b := newDeviceOperationBarrier(NewDeviceSecurityStore(f.db), intentFixtureAuthority{})
 	lease, err := b.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
 	require.NoError(t, err)
 	_, err = store.AddRTPResourceStep(ctx, id, 2, rtpStepIdentity(1))
@@ -246,7 +246,7 @@ func TestDeviceRTPCleanupWorkUnknownDispatchThenUnknownQuiesceCanRetry(t *testin
 			require.NoError(t, w.Prepare(ctx))
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: false}
-			w.work.store = NewDeviceOperationIntentStore(faultDB)
+			w.work.store = newIntentFixtureStore(faultDB)
 			_, err = w.CloseResource(ctx, func(context.Context, DeviceRTPResourceIdentity) (string, error) {
 				t.Fatal("unknown commit sent HTTP")
 				return "", nil
@@ -354,7 +354,7 @@ func TestDeviceRTPCleanupWorkConcurrentReservationAndPrepareAreSingleOwner(t *te
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w, e := b.ReserveRTPCleanup(ctx, NewDeviceOperationIntentStore(f.db), id, rtpStepIdentity(1).StepID)
+			w, e := b.ReserveRTPCleanup(ctx, newIntentFixtureStore(f.db), id, rtpStepIdentity(1).StepID)
 			results <- w
 			if e == nil {
 				e = w.Prepare(ctx)

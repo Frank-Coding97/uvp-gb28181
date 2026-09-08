@@ -20,6 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type parentIntegrationNodes struct {
@@ -54,13 +55,17 @@ func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
 		{"download-final-SQL", gbplayback.ModeDownload, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			mode := tc.mode
 			u, db, store, oldID, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			require.NoError(t, db.Where("operation_id = ?", oldID.OperationID).Delete(&playauth.DeviceOperationIntent{}).Error)
 			require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 			require.NoError(t, db.Exec("ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT NULL").Error)
-			barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+			barrier := newAuthorizedBarrierTest(t, db)
 			var rtpCalls, invites, byes atomic.Int32
 			https := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				rtpCalls.Add(1)

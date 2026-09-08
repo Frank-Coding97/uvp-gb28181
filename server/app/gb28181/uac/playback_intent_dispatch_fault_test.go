@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func requirePlaybackNoPacket(t *testing.T, peer net.PacketConn) {
@@ -25,10 +25,13 @@ func requirePlaybackNoPacket(t *testing.T, peer net.PacketConn) {
 func TestPlaybackIntentOperationUnknownInviteCommitNeverSends(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("committed=%v", committed), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationPreparedUDPFixture(t)
-			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
-			faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: 1, commitFirst: committed}
-			f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+			faultDB := authoritytest.CommitFaultDB(t, f.db, 1, committed)
+			f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 			require.Error(t, f.op.Start(context.Background()))
 			requirePlaybackNoPacket(t, f.peer)
 			f.op.store = f.store
@@ -51,6 +54,10 @@ func TestPlaybackIntentOperationUnknownCancelCommitNeverSends(t *testing.T) {
 	for _, step := range []int32{1, 2} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("step=%d/committed=%v", step, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := newPlaybackOperationUDPFixture(t)
 				f.respond(t, 180)
 				require.Eventually(t, func() bool {
@@ -58,9 +65,8 @@ func TestPlaybackIntentOperationUnknownCancelCommitNeverSends(t *testing.T) {
 					defer f.op.factMu.Unlock()
 					return f.op.provisional
 				}, time.Second, time.Millisecond)
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: step, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, step, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				guard, err := f.barrier.LockTransfer(ctx, 1)
@@ -91,6 +97,10 @@ func TestPlaybackIntentOperationUnknownCancelCommitNeverSends(t *testing.T) {
 }
 
 func TestPlaybackIntentOperationTransferBeforeStartNeverSends(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationPreparedUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

@@ -13,11 +13,9 @@ import (
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // The parent kills this actual process after receiving its real ACK/BYE.
@@ -30,43 +28,72 @@ func TestPlaybackRecoveryProcessChild(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	require.True(t, info.Mode().IsRegular())
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db := authoritytest.OpenSQLite(t, path)
+	authority := authoritytest.Register(t, db, os.Getenv("UVP_PLAYBACK_RECOVERY_TEST_STATE"))
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
 	require.NoError(t, err)
-	var intent playauth.DeviceOperationIntent
-	require.NoError(t, db.Where("operation_id = ?", strings.Repeat("a", 32)).First(&intent).Error)
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = ua.Close() })
 	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := u.beginRecoveredPlaybackCleanup(ctx, playauth.NewDeviceOperationIntentStore(db), playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)), intent.DeviceOperationIntentIdentity, strings.Repeat("b", 32), "recovery-remote")
+	if os.Getenv("UVP_PLAYBACK_RECOVERY_TEST_MODE") == "seed" {
+		id := playbackIntentSchemaFixture(t, db)
+		require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+		_, err := store.Reserve(ctx, id)
+		require.NoError(t, err)
+		_, err = store.Dispatch(ctx, id, 1)
+		require.NoError(t, err)
+		in := validPlaybackInvite()
+		in.Destination, in.Transport = os.Getenv("UVP_PLAYBACK_RECOVERY_TEST_PEER"), "UDP"
+		request, prepared, err := u.prepareStoredPlaybackInvite(ctx, store, id, 2, strings.Repeat("b", 32), in)
+		require.NoError(t, err)
+		identity := prepared.Steps[0].Identity
+		_, err = store.DispatchSIPInviteStep(ctx, id, 3, identity.StepID)
+		require.NoError(t, err)
+		peer, err := net.ResolveUDPAddr("udp4", in.Destination)
+		require.NoError(t, err)
+		response := sip.NewResponseFromRequest(request, 200, "OK", nil)
+		response.To().Params.Add("tag", "recovery-remote")
+		response.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "device", Host: peer.IP.String(), Port: peer.Port}})
+		_, err = observeStoredPlaybackBranch(ctx, store, id, 4, identity, request, response)
+		require.NoError(t, err)
+		require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
+		return
+	}
+	var intent playauth.DeviceOperationIntent
+	require.NoError(t, db.Where("operation_id = ?", strings.Repeat("a", 32)).First(&intent).Error)
+	r, err := u.beginRecoveredPlaybackCleanup(ctx, store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)), intent.DeviceOperationIntentIdentity, strings.Repeat("b", 32), "recovery-remote")
 	require.NoError(t, err)
 	require.NoError(t, r.Run(ctx))
 	t.Fatal("parent must kill the child before any successful completion")
 }
 
 func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
-	f, stepID := recoveredPlaybackUDPFixture(t)
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	stepID := strings.Repeat("b", 32)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	// Copy only our isolated test database. Both the killed child and the
-	// survivor open this exact file, never a rebuilt or in-memory replacement.
+	// The coordinator holds no authority while seed and recovery children run.
+	// Every generation uses this same file and lifetime-lock directory.
 	path := filepath.Join(t.TempDir(), "recovery.sqlite")
-	require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
-	require.NoError(t, f.db.Exec("VACUUM INTO ?", path).Error)
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db := authoritytest.OpenSQLite(t, path)
+	stateDir := authoritytest.StateDirectory(t)
+	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	raw, err := db.DB()
-	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = raw.Close() })
-	f.store = playauth.NewDeviceOperationIntentStore(db)
-	f.barrier = playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	t.Cleanup(func() { _ = peer.Close() })
 	binary, err := os.Executable()
 	require.NoError(t, err)
+	seed := exec.CommandContext(ctx, binary, "-test.run=^TestPlaybackRecoveryProcessChild$", "-test.count=1")
+	seed.Env = append(os.Environ(), "UVP_PLAYBACK_RECOVERY_TEST_DB="+path, "UVP_PLAYBACK_RECOVERY_TEST_STATE="+stateDir, "UVP_PLAYBACK_RECOVERY_TEST_MODE=seed", "UVP_PLAYBACK_RECOVERY_TEST_PEER="+peer.LocalAddr().String())
+	seedOutput, err := seed.CombinedOutput()
+	require.NoError(t, err, "%s", seedOutput)
 	cmd := exec.CommandContext(ctx, binary, "-test.run=^TestPlaybackRecoveryProcessChild$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "UVP_PLAYBACK_RECOVERY_TEST_DB="+path)
+	cmd.Env = append(os.Environ(), "UVP_PLAYBACK_RECOVERY_TEST_DB="+path, "UVP_PLAYBACK_RECOVERY_TEST_STATE="+stateDir)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	require.NoError(t, cmd.Start())
@@ -77,8 +104,8 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 			_ = cmd.Wait()
 		}
 	}()
-	ack, _ := readCleanupRequest(t, f.peer)
-	oldBYE, _ := readCleanupRequest(t, f.peer)
+	ack, _ := readCleanupRequest(t, peer)
+	oldBYE, _ := readCleanupRequest(t, peer)
 	require.Equal(t, sip.ACK, ack.Method)
 	require.Equal(t, sip.BYE, oldBYE.Method)
 	require.NoError(t, cmd.Process.Kill())
@@ -87,6 +114,18 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.Error(t, err, "the actual owner process was killed, not gracefully closed: %s", output.String())
 	require.NotNil(t, cmd.ProcessState)
 	require.False(t, cmd.ProcessState.Success())
+	authority := authoritytest.Register(t, db, stateDir)
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
+	require.NoError(t, err)
+	ua, err := sipgo.NewUA()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ua.Close() })
+	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
+	require.NoError(t, err)
+	var intent playauth.DeviceOperationIntent
+	require.NoError(t, db.Where("operation_id = ?", strings.Repeat("a", 32)).First(&intent).Error)
+	f := &playbackOperationUDPFixture{u: u, db: db, store: store, peer: peer, id: intent.DeviceOperationIntentIdentity,
+		barrier: playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))}
 	old, err := f.store.LoadSIPInviteSteps(ctx, f.id)
 	require.NoError(t, err)
 	first := old.Steps[0].KnownBranch.CleanupAttempts

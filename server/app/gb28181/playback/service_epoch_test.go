@@ -6,20 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func playbackEpochFixture(t *testing.T) (*gorm.DB, *playauth.DeviceOperationBarrier, CreateRequest) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "playback.sqlite")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	require.NoError(t, err)
-	raw, err := db.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = raw.Close() })
+	db := authoritytest.OpenSQLite(t, filepath.Join(t.TempDir(), "playback.sqlite"))
 	require.NoError(t, db.Exec(`CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id TEXT,
 		access_epoch INTEGER, cleanup_completed_epoch INTEGER, legacy_revoked_before DATETIME, deleted_at DATETIME)`).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch, cleanup_completed_epoch) VALUES (1, '34020000002000000001', 1, 1)").Error)
@@ -28,12 +23,15 @@ func playbackEpochFixture(t *testing.T) (*gorm.DB, *playauth.DeviceOperationBarr
 	req.DeviceID, req.ChannelID, req.SIPChannelID = "34020000002000000001", "2", "34020000001320000001"
 	req.Authorization = AuthorizationSnapshot{DevicePK: 1, DeviceEpoch: 1, CleanupCompletedEpoch: 1,
 		DeviceCode: req.DeviceID, ChannelPK: 2, ChannelCode: req.SIPChannelID}
-	return db, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)), req
+	return db, newAuthorizedBarrierTest(t, db), req
 }
 
 func TestPlaybackOriginalEpochPreflightBeforeAnySessionOrIO(t *testing.T) {
 	for _, state := range []string{"transferred", "pending", "schema-missing", "snapshot-missing", "target-mismatch", "barrier-missing"} {
 		t.Run(state, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			db, barrier, req := playbackEpochFixture(t)
 			switch state {
 			case "transferred":
@@ -64,6 +62,9 @@ func TestPlaybackOriginalEpochPreflightBeforeAnySessionOrIO(t *testing.T) {
 }
 
 func TestPlaybackPreflightIsNotLeaseOrDurableOperation(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db, barrier, req := playbackEpochFixture(t)
 	h := &heldPlaybackStage{}
 	s := NewService(NewRegistry(RegistryConfig{}), h, h, h, h, ServiceConfig{DeviceOperations: barrier})
@@ -94,6 +95,9 @@ func TestPlaybackRegistryIdempotencyBindsAuthorizationIdentity(t *testing.T) {
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			_, _, req := playbackEpochFixture(t)
 			r := NewRegistry(RegistryConfig{})
 			created, err := r.Create(context.Background(), req)

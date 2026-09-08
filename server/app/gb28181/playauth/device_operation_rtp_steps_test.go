@@ -196,7 +196,7 @@ func TestDeviceRTPStepsCommitUnknownNeverGrantsDispatch(t *testing.T) {
 			ctx := context.Background()
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: commitFirst}
-			fault := NewDeviceOperationIntentStore(faultDB)
+			fault := newIntentFixtureStore(faultDB)
 			out, err := fault.AddRTPResourceStep(ctx, id, 2, rtpStepIdentity(1))
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 			require.Empty(t, out.Intent.OperationID)

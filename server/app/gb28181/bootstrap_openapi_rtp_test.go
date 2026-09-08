@@ -32,6 +32,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // Only registry loading is a fixture; control trust, probe, SQL, SIP assembly,
@@ -77,8 +79,9 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
-	defer raw.Close()
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	app.GormDbMysql = db
+	authority := authoritytest.Register(t, db, "")
 	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
 	for _, sql := range []string{
 		"ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT NULL",
@@ -93,7 +96,8 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 		require.NoError(t, db.Exec(sql).Error)
 	}
 	id := playauth.DeviceOperationIntentIdentity{OperationID: strings.Repeat("a", 32), DevicePK: 1, DeviceCode: "34020000001320000001", DeviceEpoch: 1, TargetScope: "channel", TargetPK: 11, TargetCode: "34020000001320000002", Kind: "playback"}
-	store := playauth.NewDeviceOperationIntentStore(db)
+	store, err := playauth.NewAuthorizedDeviceOperationIntentStore(db, authority)
+	require.NoError(t, err)
 	_, err = store.Reserve(ctx, id)
 	require.NoError(t, err)
 	_, err = store.Dispatch(ctx, id, 1)
@@ -191,7 +195,7 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 	for generation := 0; generation < 2; generation++ {
 		t.Logf("SIP dependency generation %d", generation)
 		beforeDiscovery, beforeProbe := discoveries.Load(), probes.Load()
-		err = startSIPDependenciesWithFactory(cfg, func(c gbconfig.Config) (sipRuntimeServer, error) {
+		err = startSIPDependenciesWithFactory(cfg, authority, func(c gbconfig.Config) (sipRuntimeServer, error) {
 			server, err := gbsip.NewServer(c)
 			if err == nil && mode == "conflict" {
 				err = configurePlaybackRTPCleanup(server.UAC(), db, store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)))
@@ -221,6 +225,10 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 			}, time.Second, 10*time.Millisecond)
 		}
 		require.NoError(t, stopSIPDependencies(ctx))
+		require.NoError(t, db.WithContext(ctx).Transaction(authority.CheckTx), "SIP stop must not seal main's authority")
+		var generations int64
+		require.NoError(t, db.Table("sys_openapi_process_generation").Count(&generations).Error)
+		require.EqualValues(t, 1, generations, "reload must reuse the registered generation")
 		got, err := LoadStartupOpenAPIControlBindingsOnce()
 		require.True(t, got == snapshot && err == loadErr)
 	}
@@ -235,4 +243,7 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 	out, err = store.LoadRTPResourceSteps(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, playauth.IntentDispatched, out.Intent.State, "RTP drain alone is not device completion")
+	second, err := processauthority.Register(ctx, db, nil)
+	require.ErrorIs(t, err, processauthority.ErrProcessAuthorityUnavailable)
+	require.Nil(t, second)
 }

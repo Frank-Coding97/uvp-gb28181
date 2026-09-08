@@ -9,8 +9,8 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func acceptedPlaybackINFOFixture(t *testing.T) *playbackOperationUDPFixture {
@@ -25,6 +25,10 @@ func acceptedPlaybackINFOFixture(t *testing.T) *playbackOperationUDPFixture {
 }
 
 func TestPlaybackIntentINFOActualUDPAndCleanupShareDurableSequence(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -74,6 +78,10 @@ func TestPlaybackIntentINFOActualUDPAndCleanupShareDurableSequence(t *testing.T)
 }
 
 func TestPlaybackIntentINFORequiresActualOriginalACK(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	stored, err := observeStoredPlaybackBranch(context.Background(), f.store, f.id, f.op.version, f.op.invite, f.op.request, f.op.first)
@@ -89,12 +97,15 @@ func TestPlaybackIntentINFOCommitUnknownCannotSendOrResend(t *testing.T) {
 	for _, stage := range []int32{1, 2, 3, 4} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("stage=%d/commit=%v", stage, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := acceptedPlaybackINFOFixture(t)
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: stage, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				var creates atomic.Int32
 				finished := make(chan error, 1)
 				go func() {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/x509"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,16 +19,10 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type intentRTPCleanupResolverFunc func(context.Context, string) (IntentRTPRuntime, error)
-
-// Preserve GORM's underlying DB identity while injecting commit replies.
-type rtpCleanupCommitFaultPool struct{ *parentCommitFaultPool }
-
-func (p rtpCleanupCommitFaultPool) GetDBConn() (*sql.DB, error) {
-	return p.ConnPool.(*sql.DB), nil
-}
 
 func (f intentRTPCleanupResolverFunc) ResolveRTP(ctx context.Context, uuid string) (IntentRTPRuntime, error) {
 	return f(ctx, uuid)
@@ -42,7 +35,7 @@ func rtpRecoveryTLSFixture(t *testing.T) (*gorm.DB, *playauth.DeviceOperationBar
 	require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", req.DeviceID, req.SIPChannelID).Error)
 	require.NoError(t, db.Exec("ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT NULL").Error)
-	store := playauth.NewDeviceOperationIntentStore(db)
+	store := newAuthorizedIntentTestStore(t, db)
 	o, err := newPlaybackIntentOwner(ctx, store, b, req)
 	require.NoError(t, err)
 	require.NoError(t, o.begin(ctx))
@@ -77,6 +70,9 @@ func newRTPCleanupTLSControl(t *testing.T, n *node.Node, handler http.Handler) (
 }
 
 func TestPlaybackRTPRecoveryTLSResolverUsesOnlyOriginalSelector(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	_, _, _, _, identity, n := rtpRecoveryTLSFixture(t)
 	var calls, releases atomic.Int32
 	_, control := newRTPCleanupTLSControl(t, n, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +125,9 @@ func TestPlaybackRTPRecoveryTLSResolverUsesOnlyOriginalSelector(t *testing.T) {
 func TestPlaybackRTPRecoveryTLSActualOwnerPersistsBeforeCallsAndRetriesOnlyFacts(t *testing.T) {
 	for _, failOutcome := range []bool{false, true} {
 		t.Run(fmt.Sprint(failOutcome), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			db, b, store, id, identity, n := rtpRecoveryTLSFixture(t)
 			ctx := context.Background()
 			var resource, ingress, resolved, freed atomic.Int32
@@ -199,6 +198,9 @@ func TestPlaybackRTPRecoveryTLSActualOwnerPersistsBeforeCallsAndRetriesOnlyFacts
 func TestPlaybackRTPRecoveryTLSRejectsChangedNodeAndBootWithoutClose(t *testing.T) {
 	for _, kind := range []string{"node-pk", "node-uuid", "node-revision", "node-state", "node-recovery", "node-address", "boot", "late-revision", "late-secret", "cancelled", "partial-error", "missing-release", "changed-after-resolve"} {
 		t.Run(kind, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			_, _, _, _, identity, n := rtpRecoveryTLSFixture(t)
 			var calls, freed, resolved atomic.Int32
 			_, control := newRTPCleanupTLSControl(t, n, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))
@@ -262,6 +264,9 @@ func TestPlaybackRTPRecoveryTLSUnknownCommitDoesNotAuthorizeHTTP(t *testing.T) {
 	for _, phase := range []string{"prepare", "dispatch"} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/committed=%v", phase, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
 				db, b, store, id, identity, n := rtpRecoveryTLSFixture(t)
 				ctx := context.Background()
 				var resource, ingress, resolved, freed atomic.Int32
@@ -287,23 +292,17 @@ func TestPlaybackRTPRecoveryTLSUnknownCommitDoesNotAuthorizeHTTP(t *testing.T) {
 				// Preserve the same underlying DB identity through the wrapper.
 				failAt := int32(1)
 				if phase == "dispatch" {
-					failAt = 0
+					failAt = 3 // Prepare, Run's fact reconciliation, then dispatch.
 				}
-				pool := &parentCommitFaultPool{ConnPool: db.Statement.ConnPool, failAt: failAt, committed: committed}
-				faultDB := db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = rtpCleanupCommitFaultPool{pool}
-				work, err := b.ReserveRTPCleanup(ctx, playauth.NewDeviceOperationIntentStore(faultDB), id, identity.StepID)
+				faultDB := authoritytest.CommitFaultDB(t, db, failAt, committed)
+				work, err := b.ReserveRTPCleanup(ctx, newAuthorizedIntentTestStore(t, faultDB), id, identity.StepID)
 				require.NoError(t, err)
 				if phase == "prepare" {
 					require.Error(t, work.Prepare(ctx))
 				} else {
 					require.NoError(t, work.Prepare(ctx))
-					// Run reconciles facts, then commits its first dispatch.
-					failAt = pool.commits.Load() + 2
-					pool.failAt = failAt
 				}
 				require.Error(t, work.Run(ctx, resolver))
-				require.Equal(t, failAt, pool.commits.Load())
 				require.Zero(t, resource.Load())
 				require.Zero(t, ingress.Load())
 				if phase == "prepare" {

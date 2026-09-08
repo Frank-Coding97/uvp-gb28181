@@ -237,7 +237,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPInviteStep(ctx context.Context, 
 	if err != nil || !validIntentID(processID) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
-	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+	return s.mutateSIPStepChecked(ctx, id, version, s.effectDeviceCheck(authorizeIntentDevice), func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != stepID {
@@ -270,6 +270,12 @@ func (s *DeviceOperationIntentStore) mutateSIPStep(ctx context.Context, id Devic
 }
 
 func (s *DeviceOperationIntentStore) mutateSIPStepChecked(ctx context.Context, id DeviceOperationIntentIdentity, version int64, check func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	return s.mutateSIPStepTx(ctx, id, version, check, func(_ *gorm.DB, out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+		return mutate(out, now)
+	})
+}
+
+func (s *DeviceOperationIntentStore) mutateSIPStepTx(ctx context.Context, id DeviceOperationIntentIdentity, version int64, check func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*gorm.DB, *DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
 	if !s.available(ctx) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
@@ -293,7 +299,7 @@ func (s *DeviceOperationIntentStore) mutateSIPStepChecked(ctx context.Context, i
 		if now.Before(out.Intent.UpdatedAt) {
 			return ErrDeviceIntentUnavailable
 		}
-		changed, err := mutate(&out, now)
+		changed, err := mutate(tx, &out, now)
 		if err != nil || !changed {
 			return err
 		}

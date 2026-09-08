@@ -135,7 +135,7 @@ func TestDeviceSIPKnownBranchCommitUnknownReturnsEmpty(t *testing.T) {
 				}
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				fault := NewDeviceOperationIntentStore(faultDB)
+				fault := newIntentFixtureStore(faultDB)
 				mutate := fault.ObserveSIPKnownBranch
 				if operation == "ack" {
 					mutate = fault.DispatchSIPKnownBranchACK

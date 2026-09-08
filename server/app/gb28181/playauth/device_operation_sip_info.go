@@ -182,6 +182,8 @@ func (s *DeviceOperationIntentStore) mutateSIPINFO(ctx context.Context, id Devic
 	check := authorizeIntentDevice
 	if observation {
 		check = observeSIPBranchDevice
+	} else {
+		check = s.effectDeviceCheck(check)
 	}
 	return s.mutateSIPStepChecked(ctx, id, version, check, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for si := range out.Steps {

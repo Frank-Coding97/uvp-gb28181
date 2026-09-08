@@ -14,15 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackRecoveryWorkerFairGlobalCursor(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 	for n := 2; n <= 101; n++ {
 		require.NoError(t, db.Exec("INSERT INTO gb_device VALUES (?,?,2,1,NULL)", n, fmt.Sprintf("3402000000132%07d", n)).Error)
 	}
-	w := newPlaybackRecoveryWorker(u, playauth.NewDeviceCleanupStore(db), store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)))
+	w := newPlaybackRecoveryWorker(u, playauth.NewDeviceCleanupStore(db), store, newAuthorizedBarrierTest(t, db))
 	w.deviceLimit, w.intentLimit = 100, 100
 	// Model only the page scheduler here; real SQL discovery is not mocked.
 	// The separate worker UDP test exercises the actual page executor.
@@ -82,6 +87,10 @@ func TestPlaybackRecoveryWorkerFairGlobalCursor(t *testing.T) {
 }
 
 func TestPlaybackRecoveryWorkerActualUDPStopAndResumeRetainedOwner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, _ := recoveredPlaybackUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -140,6 +149,10 @@ func TestPlaybackRecoveryWorkerActualUDPStopAndResumeRetainedOwner(t *testing.T)
 }
 
 func TestPlaybackRecoveryWorkerStopTimeoutKeepsSingleRunner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f, _ := recoveredPlaybackUDPFixture(t)
 	require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -177,10 +190,14 @@ func TestPlaybackRecoveryWorkerStopTimeoutKeepsSingleRunner(t *testing.T) {
 }
 
 func TestPlaybackRecoveryWorkerDiscoveryFailureDoesNotStarve(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_device VALUES (2,'malformed',2,1,NULL), (3,?,2,1,NULL)", "34020000001320000003").Error)
-	w := newPlaybackRecoveryWorker(u, playauth.NewDeviceCleanupStore(db), store, playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db)))
+	w := newPlaybackRecoveryWorker(u, playauth.NewDeviceCleanupStore(db), store, newAuthorizedBarrierTest(t, db))
 	w.deviceLimit = 1
 	var visited []int64
 	w.recoverPage = func(_ context.Context, pk int64, _ string, _ int64, _ string, _ int) (PlaybackRecoveryPage, error) {

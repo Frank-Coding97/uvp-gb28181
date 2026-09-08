@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 )
 
 const deviceOperationAdmissionTimeout = 5 * time.Second
@@ -41,7 +42,8 @@ type DeviceTransferGuard interface {
 // legacy cutoff; lanes only serialize this process's admission and transfer
 // notifications for one device primary key.
 type DeviceOperationBarrier struct {
-	store *DeviceSecurityStore
+	store     *DeviceSecurityStore
+	authority deviceIntentAuthority
 
 	mu    sync.Mutex
 	lanes map[uint]*deviceOperationLane
@@ -92,11 +94,24 @@ type deviceOperationRow struct {
 	LegacyRevokedBefore   *time.Time `gorm:"column:legacy_revoked_before"`
 }
 
-// NewDeviceOperationBarrier creates one application-instance barrier. A nil
-// store is retained as an unavailable dependency so all admission paths fail
-// closed instead of silently becoming an in-memory-only authorization check.
+// NewDeviceOperationBarrier supports observation and transfer coordination,
+// but cannot admit ordinary operations. Cleanup tickets carry their own
+// concrete authority and still require a fenced transaction.
 func NewDeviceOperationBarrier(store *DeviceSecurityStore) *DeviceOperationBarrier {
-	return &DeviceOperationBarrier{store: store, lanes: make(map[uint]*deviceOperationLane)}
+	return newDeviceOperationBarrier(store, nil)
+}
+
+// NewAuthorizedDeviceOperationBarrier borrows the root's single authority.
+// Every admission transaction rechecks it before taking the device row lock.
+func NewAuthorizedDeviceOperationBarrier(store *DeviceSecurityStore, authority *processauthority.Authority) (*DeviceOperationBarrier, error) {
+	if store == nil || store.db == nil || !validDeviceProcessAuthority(authority) {
+		return nil, ErrDeviceOperationUnavailable
+	}
+	return newDeviceOperationBarrier(store, authority), nil
+}
+
+func newDeviceOperationBarrier(store *DeviceSecurityStore, authority deviceIntentAuthority) *DeviceOperationBarrier {
+	return &DeviceOperationBarrier{store: store, authority: authority, lanes: make(map[uint]*deviceOperationLane)}
 }
 
 // WithDeviceOperationBarrier wires the process-local operation barrier into a
@@ -247,7 +262,7 @@ func (b *DeviceOperationBarrier) beginLegacyWithWait(ctx, waitCtx context.Contex
 	if err := waitCtx.Err(); err != nil {
 		return nil, err
 	}
-	if b == nil || b.store == nil || b.store.db == nil {
+	if b == nil || b.store == nil || b.store.db == nil || !validDeviceProcessAuthority(b.authority) {
 		return nil, ErrDeviceOperationUnavailable
 	}
 	if !validGBID(deviceCode) || issuedAt <= 0 {
@@ -272,7 +287,7 @@ func (b *DeviceOperationBarrier) validateBegin(ctx context.Context, deviceCode s
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if b == nil || b.store == nil || b.store.db == nil {
+	if b == nil || b.store == nil || b.store.db == nil || !validDeviceProcessAuthority(b.authority) {
 		return ErrDeviceOperationUnavailable
 	}
 	if !validGBID(deviceCode) || expectedEpoch <= 0 {
@@ -312,6 +327,9 @@ func (b *DeviceOperationBarrier) beginOnLane(ctx, waitCtx context.Context, devic
 		epoch int64
 	)
 	err := b.store.db.WithContext(waitCtx).Transaction(func(tx *gorm.DB) error {
+		if !validDeviceProcessAuthority(b.authority) || b.authority.CheckTx(tx) != nil {
+			return ErrDeviceOperationUnavailable
+		}
 		loaded, err := loadDeviceOperationRow(tx.WithContext(waitCtx), devicePK, deviceCode)
 		if err != nil {
 			return err

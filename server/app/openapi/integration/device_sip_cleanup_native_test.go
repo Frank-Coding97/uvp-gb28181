@@ -55,7 +55,7 @@ func verifySIPCleanupNative(t *testing.T, ctx context.Context, db *gorm.DB, stor
 		}
 		version++
 	}
-	_, err = playauth.NewDeviceOperationIntentStore(db).DispatchSIPCleanupBYE(ctx, id, version, i.AttemptID)
+	_, err = store.DispatchSIPCleanupBYE(ctx, id, version, i.AttemptID)
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
 	response := playauth.DeviceSIPCleanupBYEResponse{AttemptID: i.AttemptID, CallID: bye.CallID, CSeq: bye.CSeq, LocalTag: bye.LocalTag, RemoteTag: i.BYE.RemoteTag, StatusCode: 200}
 	out, err = store.ObserveSIPCleanupBYE(ctx, id, version, response)

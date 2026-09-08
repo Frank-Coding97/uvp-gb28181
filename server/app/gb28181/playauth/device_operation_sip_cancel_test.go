@@ -119,7 +119,7 @@ func TestDeviceSIPCancelCommitUnknownReturnsNoPermit(t *testing.T) {
 				require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				fault := NewDeviceOperationIntentStore(faultDB)
+				fault := newIntentFixtureStore(faultDB)
 				mutate := fault.PrepareSIPCancel
 				if operation == "dispatch" {
 					mutate = fault.DispatchSIPCancel
@@ -197,9 +197,11 @@ func TestDeviceSIPCancelOldEpochCannotRestoreBusiness(t *testing.T) {
 	require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
 	_, err := store.PrepareSIPCancel(ctx, id, 4, sipCancelIdentity())
 	require.NoError(t, err)
-	// Reconstructing a store permits an explicit prepared-only cleanup CAS, not
-	// re-authorization or automatic dispatch from a loaded state.
-	restarted := NewDeviceOperationIntentStore(f.db)
+	// Reconstructing an observer never restores permission. Reusing the same
+	// process authority still requires a new confirmed prepared-only CAS.
+	_, err = NewDeviceOperationIntentStore(f.db).DispatchSIPCancel(ctx, id, 5, sipCancelIdentity())
+	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
+	restarted := newIntentFixtureStore(f.db)
 	_, err = restarted.DispatchSIPCancel(ctx, id, 5, sipCancelIdentity())
 	require.NoError(t, err)
 	_, err = restarted.DispatchSIPCancel(ctx, id, 6, sipCancelIdentity())

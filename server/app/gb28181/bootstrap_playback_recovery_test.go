@@ -22,6 +22,7 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // Actual SIP dependency assembly runs in a fresh process so legacy global
@@ -48,8 +49,9 @@ func TestSIPRootStartsAndRetainsPlaybackRecovery(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := db.DB()
 	require.NoError(t, err)
-	defer raw.Close()
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	app.GormDbMysql = db
+	authority := authoritytest.Register(t, db, "")
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
 	require.NoError(t, db.Exec("CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id TEXT, access_epoch BIGINT, cleanup_completed_epoch BIGINT, deleted_at DATETIME)").Error)
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -71,7 +73,7 @@ func TestSIPRootStartsAndRetainsPlaybackRecovery(t *testing.T) {
 	// covered by Server's dual-transport test, not inferred from this fixture.
 	var server *gbsip.Server
 	conflict := os.Getenv("UVP_ROOT_RECOVERY_MODE") == "conflicting-barrier"
-	err = startSIPDependenciesWithFactory(cfg, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+	err = startSIPDependenciesWithFactory(cfg, authority, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		var err error
 		server, err = gbsip.NewServer(cfg)
 		if err == nil && conflict {
@@ -117,8 +119,12 @@ func TestSIPRootStartsAndRetainsPlaybackRecovery(t *testing.T) {
 }
 
 func TestSIPRootRejectsMissingRecoveryUAC(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	isolateSIPShutdownRoot(t)
-	err := startSIPDependenciesWithFactory(gbconfig.Config{}, func(gbconfig.Config) (sipRuntimeServer, error) {
+	authority := authoritytest.Register(t, app.DB(), "")
+	err := startSIPDependenciesWithFactory(gbconfig.Config{}, authority, func(gbconfig.Config) (sipRuntimeServer, error) {
 		return &fakeSIPRuntimeServer{}, nil
 	})
 	require.ErrorIs(t, err, uac.ErrPlaybackUnavailable)
@@ -138,7 +144,8 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	register, publish := strings.Index(start, "srv.UAC().StartPlaybackRecovery("), strings.Index(start, "gbroutes.SetDeviceTransferBarrier(deviceOperations)")
 	require.GreaterOrEqual(t, register, 0)
 	require.Greater(t, publish, register)
-	require.Equal(t, 1, strings.Count(start, "playauth.NewDeviceOperationBarrier("))
+	require.Equal(t, 1, strings.Count(start, "playauth.NewAuthorizedDeviceOperationBarrier(deviceSecurity, authority)"))
+	require.Less(t, strings.Index(start, "playauth.NewAuthorizedDeviceOperationBarrier("), strings.Index(start, "startSIPRuntime("))
 	require.Contains(t, start, "deviceDB := app.DB()")
 	require.Contains(t, start, "playauth.NewDeviceSecurityStore(deviceDB)")
 	require.Contains(t, start[register:publish], "playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations")
@@ -146,7 +153,8 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	require.GreaterOrEqual(t, configure, 0)
 	require.Less(t, configure, register)
 	require.Contains(t, start[configure:register], "srv.UAC(), deviceDB, deviceIntents, deviceOperations")
-	require.Equal(t, 1, strings.Count(start, "playauth.NewDeviceOperationIntentStore(deviceDB)"))
+	require.Equal(t, 1, strings.Count(start, "authorizedRootIntentStore(deviceDB, authority)"))
+	require.Less(t, strings.Index(start, "authorizedRootIntentStore(deviceDB, authority)"), strings.Index(start, "startSIPRuntime("))
 	stopBegin, stopEnd := strings.Index(source, "func stopSIPDependencies("), strings.Index(source, "func stopPlaybackRuntime(")
 	require.Greater(t, stopEnd, stopBegin)
 	stop := source[stopBegin:stopEnd]

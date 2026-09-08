@@ -299,7 +299,7 @@ func (s *DeviceOperationIntentStore) DispatchRTPResourceStep(ctx context.Context
 	if !validIntentID(stepID) {
 		return DeviceRTPResourceSteps{}, ErrDeviceIntentInvalid
 	}
-	return s.mutateRTPStep(ctx, id, version, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+	return s.mutateRTPFacts(ctx, id, version, s.effectDeviceCheck(authorizeIntentDevice), func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != stepID {
@@ -320,6 +320,12 @@ func (s *DeviceOperationIntentStore) mutateRTPStep(ctx context.Context, id Devic
 }
 
 func (s *DeviceOperationIntentStore) mutateRTPFacts(ctx context.Context, id DeviceOperationIntentIdentity, version int64, authorize func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*DeviceRTPResourceSteps, time.Time) (bool, error)) (DeviceRTPResourceSteps, error) {
+	return s.mutateRTPFactsTx(ctx, id, version, authorize, func(_ *gorm.DB, out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
+		return mutate(out, now)
+	})
+}
+
+func (s *DeviceOperationIntentStore) mutateRTPFactsTx(ctx context.Context, id DeviceOperationIntentIdentity, version int64, authorize func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*gorm.DB, *DeviceRTPResourceSteps, time.Time) (bool, error)) (DeviceRTPResourceSteps, error) {
 	if !s.available(ctx) {
 		return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 	}
@@ -343,7 +349,7 @@ func (s *DeviceOperationIntentStore) mutateRTPFacts(ctx context.Context, id Devi
 		if now.Before(out.Intent.UpdatedAt) {
 			return ErrDeviceIntentUnavailable
 		}
-		changed, err := mutate(&out, now)
+		changed, err := mutate(tx, &out, now)
 		if err != nil || !changed {
 			return err
 		}

@@ -199,7 +199,7 @@ func TestDeviceRTPWorkCommitUnknownCannotMintHandle(t *testing.T) {
 			require.NoError(t, err)
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-			_, work, err := NewDeviceOperationIntentStore(faultDB).DispatchRTPResourceWork(ctx, id, 3, rtpStepIdentity(1).StepID)
+			_, work, err := newIntentFixtureStore(faultDB).DispatchRTPResourceWork(ctx, id, 3, rtpStepIdentity(1).StepID)
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 			require.Nil(t, work)
 			loaded, err := store.LoadRTPResourceSteps(ctx, id)
@@ -223,7 +223,7 @@ func TestDeviceRTPPreparedOwnerCanJoinUnknownDispatchButNeverOpen(t *testing.T) 
 			require.NoError(t, err)
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-			work, err := NewDeviceOperationIntentStore(faultDB).PrepareRTPResourceWork(ctx, id, rtpStepIdentity(1).StepID)
+			work, err := newIntentFixtureStore(faultDB).PrepareRTPResourceWork(ctx, id, rtpStepIdentity(1).StepID)
 			require.NoError(t, err)
 			_, err = work.Dispatch(ctx, 3)
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
@@ -265,7 +265,7 @@ func TestDeviceRTPWorkLostObservationCommitKeepsLaterActualCleanupFacts(t *testi
 	require.NoError(t, err)
 	faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 	faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: true}
-	work.work.store = NewDeviceOperationIntentStore(faultDB) // same dedicated DB, transient commit acknowledgement loss
+	work.work.store = newIntentFixtureStore(faultDB) // same dedicated DB, transient commit acknowledgement loss
 	require.ErrorIs(t, work.Flush(ctx), ErrDeviceIntentUnavailable)
 	work.work.store = store
 	_, err = work.CloseIngress(ctx, func(context.Context, DeviceRTPResourceIdentity) (string, error) { return "rtp_ingress_drained", nil })

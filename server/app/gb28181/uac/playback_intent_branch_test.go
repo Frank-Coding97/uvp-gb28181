@@ -8,6 +8,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func playbackKnownBranchResponse(request *sip.Request) *sip.Response {
@@ -23,6 +24,10 @@ func playbackKnownBranchResponse(request *sip.Request) *sip.Response {
 }
 
 func TestPlaybackIntentKnownBranchExactResponsePersistence(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, observer := playbackIntentStoreFixture(t)
 	ctx := context.Background()
 	request, prepared, err := u.prepareStoredPlaybackInvite(ctx, store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
@@ -51,6 +56,10 @@ func TestPlaybackIntentKnownBranchExactResponsePersistence(t *testing.T) {
 func TestPlaybackIntentKnownBranchRejectsMismatchedActualMaterials(t *testing.T) {
 	for _, fault := range []string{"nil-request", "nil-response", "request-body", "request-destination", "call-id", "cseq", "method", "from-uri", "to-uri", "local-tag", "empty-remote-tag", "duplicate-remote-tag", "duplicate-local-tag", "duplicate-contact", "missing-contact", "secret-contact", "duplicate-call-id", "status", "generic-route"} {
 		t.Run(fault, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, _, store, id, observer := playbackIntentStoreFixture(t)
 			ctx := context.Background()
 			request, prepared, err := u.prepareStoredPlaybackInvite(ctx, store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())

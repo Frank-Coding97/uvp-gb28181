@@ -54,6 +54,11 @@ httpserver:
   idle_timeout: 60    # TCP空闲连接超时(秒)
   handler_timeout: 30 #  请求处理超时(秒)，超过该时间，将返回超时错误
   trustedproxies: [] # 明确配置反向代理 IP/CIDR；为空时不信任 X-Forwarded-For
+processauthority:
+  # 必填：预置的本地持久私有目录，绝对路径、非符号链接、运行用户所有。
+  # Unix 0700；Windows 仅运行账户/SYSTEM/Administrators 可访问。
+  # 不放在 current/releases、公开 uploads、日志或临时目录；升级保留目录和锁文件。
+  state_dir: "" # 例如 /opt/uvp-gb28181/data/process-authority；无默认，空值正常启动失败
 openapi:
   enabled: false # 首版单 API 进程；启动时决定，默认关闭；媒体申请仍受独立门禁
   play_enabled: false # 仅启动期激活；需完整媒体门禁，启用后的持久鉴权锁不随关闭接入解除

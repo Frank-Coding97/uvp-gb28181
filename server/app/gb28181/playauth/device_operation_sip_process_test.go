@@ -60,7 +60,7 @@ func TestDeviceSIPInviteLegacyAndForeignProcessCannotDispatch(t *testing.T) {
 			duplicate, err := store.AddSIPInviteStep(ctx, id, 3, sipStepIdentity(1))
 			require.NoError(t, err)
 			require.Equal(t, loaded, duplicate, "idempotent prepare must not claim an existing step")
-			for _, candidate := range []*DeviceOperationIntentStore{store, NewDeviceOperationIntentStore(f.db)} {
+			for _, candidate := range []*DeviceOperationIntentStore{store, newIntentFixtureStore(f.db)} {
 				result, err := candidate.DispatchSIPInviteStep(ctx, id, 3, sipStepIdentity(1).StepID)
 				require.ErrorIs(t, err, ErrDeviceIntentConflict)
 				require.Empty(t, result.Intent.OperationID)
@@ -134,7 +134,7 @@ func TestDeviceSIPInviteProcessHelper(t *testing.T) {
 	pool, err := db.DB()
 	require.NoError(t, err)
 	defer pool.Close()
-	store, ctx, id := NewDeviceOperationIntentStore(db), context.Background(), intentIdentity(1)
+	store, ctx, id := newIntentFixtureStore(db), context.Background(), intentIdentity(1)
 	if os.Getenv("UVP_SIP_INVITE_PROCESS_ACTION") == "info" {
 		id.Kind = "playback"
 	}

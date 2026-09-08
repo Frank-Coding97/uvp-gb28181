@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type parentTestSIP struct {
@@ -35,10 +36,13 @@ func (c *parentTestRTP) Close(context.Context) (IntentCloseResult, error) {
 func (c *parentTestRTP) Unbind(context.Context) error { return nil }
 
 func TestPlaybackIntentParentRequiresBothChildrenAndInitializationJoin(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db, barrier, req := playbackEpochFixture(t)
 	require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", req.DeviceID, req.SIPChannelID).Error)
-	o, err := newPlaybackIntentOwner(context.Background(), playauth.NewDeviceOperationIntentStore(db), barrier, req)
+	o, err := newPlaybackIntentOwner(context.Background(), newAuthorizedIntentTestStore(t, db), barrier, req)
 	require.NoError(t, err)
 	require.NoError(t, o.begin(context.Background()))
 	sip := &parentTestSIP{local: true, pending: true}

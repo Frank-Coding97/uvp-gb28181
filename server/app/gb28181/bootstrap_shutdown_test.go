@@ -19,6 +19,7 @@ import (
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type shutdownRootConfig struct{ app.YmlConfigInterf }
@@ -71,7 +72,7 @@ func TestStopSIPDependenciesRetainsFailedServerAndSecurity(t *testing.T) {
 	require.Same(t, server, sipServer)
 	require.Same(t, runtime, securityRuntime)
 	called := 0
-	err := startSIPDependenciesWithFactory(gbconfig.Config{}, func(gbconfig.Config) (sipRuntimeServer, error) {
+	err := startSIPDependenciesWithFactory(gbconfig.Config{}, nil, func(gbconfig.Config) (sipRuntimeServer, error) {
 		called++
 		return &fakeSIPRuntimeServer{}, nil
 	})
@@ -86,7 +87,11 @@ func TestStopSIPDependenciesRetainsFailedServerAndSecurity(t *testing.T) {
 func TestStartSIPDependenciesRetainsFailedRollback(t *testing.T) {
 	for _, stage := range []string{"factory", "start", "assembly"} {
 		t.Run(stage, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
 			isolateSIPShutdownRoot(t)
+			authority := authoritytest.Register(t, app.DB(), "")
 			failure, shutdownFailure := errors.New("fixture start failed"), errors.New("fixture rollback failed")
 			server := &fakeSIPRuntimeServer{shutdownErr: shutdownFailure}
 			if stage == "start" {
@@ -99,7 +104,7 @@ func TestStartSIPDependenciesRetainsFailedRollback(t *testing.T) {
 				server.uac, err = uac.New(ua, "34020000002000000001", "3402000000", "127.0.0.1", 5061, false)
 				require.NoError(t, err)
 			}
-			err := startSIPDependenciesWithFactory(gbconfig.Config{}, func(gbconfig.Config) (sipRuntimeServer, error) {
+			err := startSIPDependenciesWithFactory(gbconfig.Config{}, authority, func(gbconfig.Config) (sipRuntimeServer, error) {
 				if stage == "factory" {
 					return server, failure
 				}
@@ -142,7 +147,7 @@ func TestReloadSIPDoesNotReplaceServerAfterStopFailure(t *testing.T) {
 	server := &fakeSIPRuntimeServer{shutdownErr: want}
 	runtime := gbsecurity.NewRuntime(gbsecurity.DefaultPolicy(), nil, nil, nil)
 	sipServer, securityRuntime = server, runtime
-	require.ErrorIs(t, ReloadSIP(), want)
+	require.ErrorIs(t, ReloadSIP(nil), want)
 	require.Same(t, server, sipServer)
 	require.Same(t, runtime, securityRuntime)
 	require.Equal(t, gbsetup.RuntimeFailed, sipRuntimeStatus.Snapshot().State)

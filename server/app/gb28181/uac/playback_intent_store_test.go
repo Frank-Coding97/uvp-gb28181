@@ -10,15 +10,16 @@ import (
 	"testing"
 
 	"github.com/emiago/sipgo"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func playbackIntentStoreFixture(t *testing.T, options ...sipgo.UserAgentOption) (*UAC, *gorm.DB, *playauth.DeviceOperationIntentStore, playauth.DeviceOperationIntentIdentity, *snapshotTransactionObserver) {
 	t.Helper()
+	db := authoritytest.OpenSQLite(t, filepath.Join(t.TempDir(), "intent.sqlite"))
+	store := newAuthorizedIntentTestStore(t, db)
 	ua, err := sipgo.NewUA(options...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ua.Close() })
@@ -26,12 +27,16 @@ func playbackIntentStoreFixture(t *testing.T, options ...sipgo.UserAgentOption) 
 	require.NoError(t, err)
 	observer := &snapshotTransactionObserver{}
 	u.client.TxRequester = observer
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "intent.sqlite")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	id := playbackIntentSchemaFixture(t, db)
+	_, err = store.Reserve(context.Background(), id)
 	require.NoError(t, err)
-	raw, err := db.DB()
+	_, err = store.Dispatch(context.Background(), id, 1)
 	require.NoError(t, err)
-	raw.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = raw.Close() })
+	return u, db, store, id, observer
+}
+
+func playbackIntentSchemaFixture(t *testing.T, db *gorm.DB) playauth.DeviceOperationIntentIdentity {
+	t.Helper()
 	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}))
 	require.NoError(t, db.Exec("ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT NULL").Error)
 	require.NoError(t, db.Exec("CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id TEXT, access_epoch BIGINT, cleanup_completed_epoch BIGINT, deleted_at DATETIME)").Error)
@@ -40,15 +45,14 @@ func playbackIntentStoreFixture(t *testing.T, options ...sipgo.UserAgentOption) 
 	require.NoError(t, db.Exec("INSERT INTO gb_device VALUES (1,?,1,1,NULL)", in.DeviceID).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES (11,?,?,NULL)", in.DeviceID, in.ChannelID).Error)
 	id := playauth.DeviceOperationIntentIdentity{OperationID: strings.Repeat("a", 32), DevicePK: 1, DeviceCode: in.DeviceID, DeviceEpoch: 1, TargetScope: "channel", TargetPK: 11, TargetCode: in.ChannelID, Kind: "playback"}
-	store := playauth.NewDeviceOperationIntentStore(db)
-	_, err = store.Reserve(context.Background(), id)
-	require.NoError(t, err)
-	_, err = store.Dispatch(context.Background(), id, 1)
-	require.NoError(t, err)
-	return u, db, store, id, observer
+	return id
 }
 
 func TestPlaybackIntentStoredPreparationMatchesActualBuilder(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, observer := playbackIntentStoreFixture(t)
 	in := validPlaybackInvite()
 	request, stored, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), in)
@@ -89,6 +93,10 @@ func TestPlaybackIntentStoredPreparationMatchesActualBuilder(t *testing.T) {
 func TestPlaybackIntentStoredPreparationRejectsWrongBinding(t *testing.T) {
 	for _, mismatch := range []string{"device", "channel", "kind", "scope", "step", "nil-store", "nil-context", "nil-uac", "cancelled"} {
 		t.Run(mismatch, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, _, store, id, observer := playbackIntentStoreFixture(t)
 			in, stepID := validPlaybackInvite(), strings.Repeat("b", 32)
 			ctx := context.Background()
@@ -126,6 +134,10 @@ func TestPlaybackIntentStoredPreparationRejectsWrongBinding(t *testing.T) {
 func TestPlaybackIntentStoredPreparationFailureReturnsNoRequest(t *testing.T) {
 	for _, failure := range []string{"db-write", "transfer", "version"} {
 		t.Run(failure, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, db, store, id, observer := playbackIntentStoreFixture(t)
 			version := int64(2)
 			switch failure {

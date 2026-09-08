@@ -47,7 +47,7 @@ func TestStopSIPDependenciesRetainsFailedPlayback(t *testing.T) {
 			require.Same(t, metrics, playbackMetrics)
 			require.Empty(t, events, "SIP and query dependencies must remain usable for retry")
 			called := 0
-			err = startSIPDependenciesWithFactory(gbconfig.Config{}, func(gbconfig.Config) (sipRuntimeServer, error) {
+			err = startSIPDependenciesWithFactory(gbconfig.Config{}, nil, func(gbconfig.Config) (sipRuntimeServer, error) {
 				called++
 				return &fakeSIPRuntimeServer{}, nil
 			})

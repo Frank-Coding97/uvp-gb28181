@@ -11,6 +11,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // Preserve message boundaries even when ACK and BYE arrive in one TCP read.
@@ -38,10 +39,14 @@ func playbackCleanupTCPReader(t *testing.T, conn net.Conn) func() *sip.Request {
 }
 
 func TestPlaybackIntentMultiBranchActualTCPUsesBranchRoute(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peerA, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peerA.Close()

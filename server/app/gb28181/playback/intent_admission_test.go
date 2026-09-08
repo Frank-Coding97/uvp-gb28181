@@ -2,66 +2,32 @@ package playback
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
-
-// Only the intent store uses this pool. The real admission barrier and
-// assertions use the same dedicated SQLite DB through its healthy pool.
-type parentCommitFaultPool struct {
-	gorm.ConnPool
-	commits   atomic.Int32
-	failAt    int32
-	committed bool
-}
-
-type parentCommitFaultTx struct {
-	*sql.Tx
-	pool *parentCommitFaultPool
-}
-
-func (p *parentCommitFaultPool) BeginTx(ctx context.Context, options *sql.TxOptions) (gorm.ConnPool, error) {
-	tx, err := p.ConnPool.(*sql.DB).BeginTx(ctx, options)
-	if err != nil {
-		return nil, err
-	}
-	return &parentCommitFaultTx{Tx: tx, pool: p}, nil
-}
-
-func (tx *parentCommitFaultTx) Commit() error {
-	if tx.pool.commits.Add(1) != tx.pool.failAt {
-		return tx.Tx.Commit()
-	}
-	if tx.pool.committed {
-		if err := tx.Tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return errors.New("fixture parent commit acknowledgement lost")
-}
 
 func TestPlaybackIntentServiceParentCommitUnknownNeverStartsResources(t *testing.T) {
 	for _, failAt := range []int32{1, 2} { // Reserve, then Dispatch.
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("commit%d/committed=%v", failAt, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
 				db, barrier, request := playbackEpochFixture(t)
 				require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 				require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", request.DeviceID, request.SIPChannelID).Error)
-				faultDB := db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
-				faultDB.Statement.ConnPool = &parentCommitFaultPool{ConnPool: db.Statement.ConnPool, failAt: failAt, committed: committed}
+				_ = newAuthorizedIntentTestStore(t, db)
+				faultDB := authoritytest.CommitFaultDB(t, db, failAt, committed)
 				h := &heldPlaybackStage{}
 				metrics := &Metrics{}
 				service := NewService(NewRegistry(RegistryConfig{}), h, &parentServiceRTPFactory{RTPOpener: h},
 					&parentServiceSIPFactory{PlaybackInviter: h}, h,
-					ServiceConfig{DeviceOperations: barrier, Intents: playauth.NewDeviceOperationIntentStore(faultDB), Metrics: metrics})
+					ServiceConfig{DeviceOperations: barrier, Intents: newAuthorizedIntentTestStore(t, faultDB), Metrics: metrics})
 				result, err := service.Create(context.Background(), request)
 				require.ErrorIs(t, err, playauth.ErrDeviceIntentUnavailable)
 				require.Nil(t, result.Session)

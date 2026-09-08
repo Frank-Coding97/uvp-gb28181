@@ -102,7 +102,7 @@ func TestDeviceSIPCleanupConcurrentStagesAndQuiescedRetry(t *testing.T) {
 			require.ErrorIs(t, err, ErrDeviceIntentConflict)
 		}
 	}
-	_, err = NewDeviceOperationIntentStore(f.db).PrepareSIPBranchCleanup(ctx, id, 8, sipCleanupIdentity(2))
+	_, err = newIntentFixtureStore(f.db).PrepareSIPBranchCleanup(ctx, id, 8, sipCleanupIdentity(2))
 	require.ErrorIs(t, err, ErrDeviceIntentConflict, "new store is not a new process or a quiesced transaction")
 	_, err = store.ObserveSIPCleanupQuiesced(ctx, id, 8, identity.AttemptID)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestDeviceSIPCleanupCommitUnknownReturnsNoPermission(t *testing.T) {
 				}
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				fault := NewDeviceOperationIntentStore(faultDB)
+				fault := newIntentFixtureStore(faultDB)
 				var out DeviceSIPInviteSteps
 				var err error
 				switch operation {

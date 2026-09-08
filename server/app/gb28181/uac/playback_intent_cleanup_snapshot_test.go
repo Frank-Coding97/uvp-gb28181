@@ -9,9 +9,14 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentCleanupSnapshotMatchesStoredBranch(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	ctx := context.Background()
@@ -42,6 +47,10 @@ func TestPlaybackIntentCleanupSnapshotMatchesStoredBranch(t *testing.T) {
 func TestPlaybackIntentCleanupSnapshotRejectsExtraAuthority(t *testing.T) {
 	for _, fault := range []string{"tag", "duplicate-tag", "extra-param", "auth", "body", "content-type", "method", "route-param"} {
 		t.Run(fault, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, _, store, id, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			request, prepared, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())

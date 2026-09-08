@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 )
 
@@ -136,7 +137,25 @@ func (s *DeviceOperationIntentStore) PrepareSIPBranchCleanup(ctx context.Context
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
 	identity = cloneSIPCleanupIdentity(identity)
-	return s.mutateSIPStepChecked(ctx, id, version, authorizeSIPCancelCleanupDevice, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+	return s.mutateSIPStepTx(ctx, id, version, s.effectDeviceCheck(authorizeSIPCancelCleanupDevice), func(tx *gorm.DB, out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+		for index := range out.Steps {
+			step := &out.Steps[index]
+			if err := s.requireCleanupGenerationTx(tx, step.OwnerProcessID); err != nil {
+				return false, err
+			}
+			for _, b := range sipObservedBranches(step) {
+				for _, info := range b.InfoSteps {
+					if err := s.requireCleanupGenerationTx(tx, info.OwnerRunID); err != nil {
+						return false, err
+					}
+				}
+				for _, old := range b.CleanupAttempts {
+					if err := s.requireCleanupGenerationTx(tx, old.OwnerRunID); err != nil {
+						return false, err
+					}
+				}
+			}
+		}
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			for _, b := range sipObservedBranches(step) {
@@ -209,6 +228,8 @@ func (s *DeviceOperationIntentStore) mutateSIPCleanupAttempt(ctx context.Context
 	check := authorizeSIPCancelCleanupDevice
 	if observation {
 		check = observeSIPBranchDevice
+	} else {
+		check = s.effectDeviceCheck(check)
 	}
 	return s.mutateSIPStepChecked(ctx, id, version, check, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for si := range out.Steps {

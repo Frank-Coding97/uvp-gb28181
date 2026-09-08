@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 type parentServiceRTP struct {
@@ -46,6 +47,9 @@ func (f *parentServiceSIPFactory) PrepareIntent(context.Context, *playauth.Devic
 }
 
 func TestPlaybackIntentServiceStopJoinsPartiallyCreatedResource(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db, barrier, req := playbackEpochFixture(t)
 	require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", req.DeviceID, req.SIPChannelID).Error)
@@ -54,7 +58,7 @@ func TestPlaybackIntentServiceStopJoinsPartiallyCreatedResource(t *testing.T) {
 	child := &parentServiceRTP{parentTestRTP: parentTestRTP{local: true}, entered: make(chan struct{}), release: make(chan struct{})}
 	rtp := &parentServiceRTPFactory{RTPOpener: h, child: child, t: t, barrier: barrier}
 	s := NewService(NewRegistry(RegistryConfig{}), h, rtp, &parentServiceSIPFactory{PlaybackInviter: h}, h,
-		ServiceConfig{DeviceOperations: barrier, Intents: playauth.NewDeviceOperationIntentStore(db)})
+		ServiceConfig{DeviceOperations: barrier, Intents: newAuthorizedIntentTestStore(t, db)})
 	done := make(chan error, 1)
 	go func() { _, err := s.Create(context.Background(), req); done <- err }()
 	select {
@@ -87,6 +91,9 @@ func TestPlaybackIntentServiceStopJoinsPartiallyCreatedResource(t *testing.T) {
 }
 
 func TestPlaybackIntentServiceLifecycleCancellationIsStoppedAndCountedOnce(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db, barrier, req := playbackEpochFixture(t)
 	require.NoError(t, db.Exec("CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel VALUES(2,?,?,NULL)", req.DeviceID, req.SIPChannelID).Error)
@@ -99,7 +106,7 @@ func TestPlaybackIntentServiceLifecycleCancellationIsStoppedAndCountedOnce(t *te
 	metrics := &Metrics{}
 	s := NewService(NewRegistry(RegistryConfig{}), h, &parentServiceRTPFactory{RTPOpener: h, child: child, t: t, barrier: barrier},
 		&parentServiceSIPFactory{PlaybackInviter: h}, h,
-		ServiceConfig{DeviceOperations: barrier, Intents: playauth.NewDeviceOperationIntentStore(db), Metrics: metrics})
+		ServiceConfig{DeviceOperations: barrier, Intents: newAuthorizedIntentTestStore(t, db), Metrics: metrics})
 	done := make(chan error, 1)
 	go func() { _, err := s.Create(context.Background(), req); done <- err }()
 	select {

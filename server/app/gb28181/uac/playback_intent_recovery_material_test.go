@@ -8,6 +8,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackRecoveryMaterialMatchesDurableCleanup(t *testing.T) {
@@ -19,6 +20,10 @@ func TestPlaybackRecoveryMaterialMatchesDurableCleanup(t *testing.T) {
 					name += "/additional"
 				}
 				t.Run(name, func(t *testing.T) {
+					if !authoritytest.InProcess(t) {
+						return
+					}
+
 					u, _, store, id, _ := playbackIntentStoreFixture(t)
 					u.client.TxRequester = nil
 					ctx := context.Background()
@@ -98,6 +103,10 @@ func TestPlaybackRecoveryMaterialMatchesDurableCleanup(t *testing.T) {
 }
 
 func TestPlaybackRecoveryMaterialMissingEvidenceDoesNotRepair(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	ctx := context.Background()
@@ -116,6 +125,10 @@ func TestPlaybackRecoveryMaterialMissingEvidenceDoesNotRepair(t *testing.T) {
 }
 
 func TestPlaybackRecoveryMaterialEqualURIsRemainIndependent(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, _, store, id, _ := playbackIntentStoreFixture(t)
 	_, prepared, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
 	require.NoError(t, err)

@@ -27,7 +27,7 @@ func newIntentFixture(t *testing.T) (*deviceCleanupFixture, *DeviceOperationInte
 	)`).Error)
 	require.NoError(t, f.db.Exec(`CREATE TABLE gb_channel (id BIGINT PRIMARY KEY, device_id TEXT, channel_id TEXT, deleted_at DATETIME)`).Error)
 	require.NoError(t, f.db.Exec(`INSERT INTO gb_channel(id,device_id,channel_id) VALUES (11,?,?), (12,?,?)`, cleanupDeviceA, cleanupDeviceC, cleanupDeviceB, cleanupDeviceC).Error)
-	return f, NewDeviceOperationIntentStore(f.db)
+	return f, newIntentFixtureStore(f.db)
 }
 
 func intentIdentity(n int) DeviceOperationIntentIdentity {
@@ -46,7 +46,7 @@ func TestDeviceOperationIntentReservationIsDurableAndImmutable(t *testing.T) {
 	require.False(t, first.CreatedAt.IsZero())
 
 	// Recreate the service, not the database: recovery sees the original intent.
-	s = NewDeviceOperationIntentStore(f.db)
+	s = newIntentFixtureStore(f.db)
 	second, err := s.Reserve(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
@@ -239,7 +239,7 @@ func TestDeviceOperationIntentCommitUnknownNeverGrantsDispatch(t *testing.T) {
 			ctx := context.Background()
 			faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 			faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: commitFirst}
-			fault := NewDeviceOperationIntentStore(faultDB)
+			fault := newIntentFixtureStore(faultDB)
 			id := intentIdentity(1)
 			row, err := fault.Reserve(ctx, id)
 			require.ErrorIs(t, err, ErrDeviceIntentUnavailable)

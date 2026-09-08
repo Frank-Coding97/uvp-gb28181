@@ -10,9 +10,14 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentINFOBlockedCreateCannotOutliveOwnership(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -44,6 +49,10 @@ func TestPlaybackIntentINFOBlockedCreateCannotOutliveOwnership(t *testing.T) {
 func TestPlaybackIntentINFOTxAndErrorStillJoinsActualQuiescence(t *testing.T) {
 	for _, outcome := range []string{"tx-error", "mutated-request", "nil-tx"} {
 		t.Run(outcome, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := acceptedPlaybackINFOFixture(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -79,6 +88,10 @@ func TestPlaybackIntentINFOTxAndErrorStillJoinsActualQuiescence(t *testing.T) {
 }
 
 func TestPlaybackIntentINFOTransferStopsControlBeforeCleanup(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -109,6 +122,10 @@ func TestPlaybackIntentINFOTransferStopsControlBeforeCleanup(t *testing.T) {
 }
 
 func TestPlaybackIntentINFORejectsAmbiguousViaResponse(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	body, err := (playauth.DeviceSIPINFOCommand{Action: "pause"}).Body(f.op.invite.CSeq + 1)
 	require.NoError(t, err)

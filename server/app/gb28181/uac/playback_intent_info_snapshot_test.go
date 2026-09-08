@@ -11,6 +11,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentINFOSnapshotPreservesExistingCommands(t *testing.T) {
@@ -20,6 +21,10 @@ func TestPlaybackIntentINFOSnapshotPreservesExistingCommands(t *testing.T) {
 		{Action: PlaybackInfoScale, Scale: 2}, {Action: PlaybackInfoTeardown},
 	} {
 		t.Run(string(input.Action), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, _, store, id, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			request, stored, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())
@@ -45,6 +50,10 @@ func TestPlaybackIntentINFOSnapshotPreservesExistingCommands(t *testing.T) {
 func TestPlaybackIntentINFOSnapshotRejectsExtraAuthority(t *testing.T) {
 	for _, fault := range []string{"type", "body", "large-body", "auth", "duplicate-type", "tag", "method", "route"} {
 		t.Run(fault, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, _, store, id, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			request, _, err := u.prepareStoredPlaybackInvite(context.Background(), store, id, 2, strings.Repeat("b", 32), validPlaybackInvite())

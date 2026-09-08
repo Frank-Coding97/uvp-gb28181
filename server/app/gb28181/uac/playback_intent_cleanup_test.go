@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func awaitCleanupFirstBranch(t *testing.T, f *playbackOperationUDPFixture) {
@@ -41,6 +42,10 @@ func readCleanupRequest(t *testing.T, peer net.PacketConn) (*sip.Request, net.Ad
 }
 
 func TestPlaybackIntentCleanupActualUDPOnlyAfterDurableHandoff(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -79,6 +84,10 @@ func TestPlaybackIntentCleanupActualUDPOnlyAfterDurableHandoff(t *testing.T) {
 }
 
 func TestPlaybackIntentCleanupAfterLocalReleaseCannotSend(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	require.NoError(t, f.op.CloseLocal(context.Background()))
@@ -90,6 +99,10 @@ func TestPlaybackIntentCleanupAfterLocalReleaseCannotSend(t *testing.T) {
 }
 
 func TestPlaybackIntentCleanupCannotReleaseIfOriginalEvidenceDisappears(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	awaitCleanupFirstBranch(t, f)
 	ctx := context.Background()
@@ -117,13 +130,16 @@ func TestPlaybackIntentCleanupUnknownCommitNeverResends(t *testing.T) {
 	for _, stage := range []int32{2, 3, 4, 5, 6} {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("stage=%d/commit=%v", stage, committed), func(t *testing.T) {
+				if !authoritytest.InProcess(t) {
+					return
+				}
+
 				f := newPlaybackOperationUDPFixture(t)
 				awaitCleanupFirstBranch(t, f)
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
-				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
-				faultDB.Statement.ConnPool = &playbackOperationCommitFault{ConnPool: f.db.Statement.ConnPool, failAt: stage, commitFirst: committed}
-				f.op.store = playauth.NewDeviceOperationIntentStore(faultDB)
+				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
+				f.op.store = newAuthorizedIntentTestStore(t, faultDB)
 				finished := make(chan error, 1)
 				go func() { finished <- f.op.CleanupKnownBranch(ctx) }()
 				if stage >= 4 {
@@ -161,6 +177,10 @@ func TestPlaybackIntentCleanupUnknownCommitNeverResends(t *testing.T) {
 func TestPlaybackIntentCleanupHandoffSQLGapsKeepBarrier(t *testing.T) {
 	for _, stage := range []string{"prepare-attempt", "register-lease", "dispatch-ack"} {
 		t.Run(stage, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationUDPFixture(t)
 			awaitCleanupFirstBranch(t, f)
 			entered, release := make(chan struct{}), make(chan struct{})
@@ -225,10 +245,14 @@ func TestPlaybackIntentCleanupHandoffSQLGapsKeepBarrier(t *testing.T) {
 }
 
 func TestPlaybackIntentCleanupActualTCP(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	u, db, store, id, _ := playbackIntentStoreFixture(t)
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
@@ -288,6 +312,10 @@ func TestPlaybackIntentCleanupActualTCP(t *testing.T) {
 func TestPlaybackIntentCleanupCancellationAnd481StayUnknown(t *testing.T) {
 	for _, outcome := range []string{"481", "cancel", "transfer"} {
 		t.Run(outcome, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationUDPFixture(t)
 			awaitCleanupFirstBranch(t, f)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

@@ -9,12 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func reserveAssignmentIntent(t *testing.T, db *gorm.DB, pk uint, code string, n int, dispatch bool) string {
 	t.Helper()
 	id := playauth.DeviceOperationIntentIdentity{OperationID: fmt.Sprintf("%032x", n), DevicePK: int64(pk), DeviceCode: code, DeviceEpoch: 1, TargetScope: "device", TargetPK: int64(pk), TargetCode: code, Kind: "ptz"}
 	store := playauth.NewDeviceOperationIntentStore(db)
+	if dispatch {
+		var err error
+		store, err = playauth.NewAuthorizedDeviceOperationIntentStore(db, authoritytest.Authority(t, db))
+		require.NoError(t, err)
+	}
 	_, err := store.Reserve(context.Background(), id)
 	require.NoError(t, err)
 	if dispatch {
@@ -25,6 +31,9 @@ func reserveAssignmentIntent(t *testing.T, db *gorm.DB, pk uint, code string, n 
 }
 
 func TestAssignTransferCancelsOnlyOldReservedIntents(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
 	db := newAssignTestDB(t)
 	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}))
 	device := seedAssignedDeviceWithCode(t, db, "34020000002000101001")

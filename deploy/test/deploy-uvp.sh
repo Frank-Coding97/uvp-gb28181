@@ -57,6 +57,10 @@ trap rollback ERR
 [[ "$ARCHIVE" == "$INCOMING/uvp-release-$SHA.tar.gz" ]] || fail "Unexpected archive path"
 [[ -f "$ARCHIVE" ]] || fail "Release archive not found"
 [[ -f "$ROOT/config/config.yml" ]] || fail "Runtime config is missing"
+# This test deployment's unit runs as root. Provision state independently of
+# releases; never mkdir/chmod/unlink an existing authority domain during deploy.
+[[ -d "$ROOT/data/process-authority" && ! -L "$ROOT/data/process-authority" ]] || fail "Pre-provision the private process-authority directory"
+[[ "$(stat -c '%a:%u:%g' "$ROOT/data/process-authority")" == "700:0:0" ]] || fail "Process-authority directory must be root-owned mode 0700 for this unit"
 
 install -d -m 0755 "$RELEASES"
 exec 9>"$LOCK_FILE"

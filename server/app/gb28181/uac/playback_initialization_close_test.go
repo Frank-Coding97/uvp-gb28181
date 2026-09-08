@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 // Inject at the real transport's synchronous connection-preparation boundary,
@@ -32,6 +33,10 @@ func (h playbackInitializationLogHook) WithAttrs([]slog.Attr) slog.Handler { ret
 func (h playbackInitializationLogHook) WithGroup(string) slog.Handler      { return h }
 
 func TestPlaybackShutdownCancelsSnapshotMismatchSelfCleanup(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	var u *UAC
 	var original playauth.DeviceSIPInviteIdentity
 	var injected, blocked atomic.Bool
@@ -54,7 +59,7 @@ func TestPlaybackShutdownCancelsSnapshotMismatchSelfCleanup(t *testing.T) {
 	u, db, store, id, _ = playbackIntentStoreFixture(t, sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(slog.New(hook))))
 	u.client.TxRequester = nil
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-	barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
@@ -148,6 +153,10 @@ func blockPlaybackInitialization(t *testing.T, db *gorm.DB, fail bool) (<-chan s
 func TestPlaybackObservationCloseDuringInitialization(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fail=%v", fail), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f, stepID := recoveredPlaybackUDPFixture(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -196,10 +205,14 @@ func TestPlaybackObservationCloseDuringInitialization(t *testing.T) {
 func TestPlaybackOriginalCloseDuringInitialization(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fail=%v", fail), func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			u, db, store, id, _ := playbackIntentStoreFixture(t)
 			u.client.TxRequester = nil
 			require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
-			barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))
+			barrier := newAuthorizedBarrierTest(t, db)
 			peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			require.NoError(t, err)
 			defer peer.Close()

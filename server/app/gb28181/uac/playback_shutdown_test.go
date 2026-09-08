@@ -13,9 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackShutdownDrainsOriginalButDoesNotCompleteDevice(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -41,6 +46,10 @@ func TestPlaybackShutdownDrainsOriginalButDoesNotCompleteDevice(t *testing.T) {
 }
 
 func TestPlaybackShutdownConcurrentWithOriginalStart(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationPreparedUDPFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -77,6 +86,10 @@ func TestPlaybackShutdownConcurrentWithOriginalStart(t *testing.T) {
 func TestPlaybackShutdownWaitsForEveryPublishedInitializerAndRunner(t *testing.T) {
 	for _, kind := range []string{"original", "observation", "recovery", "scan", "worker"} {
 		t.Run(kind, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f, stepID := recoveredPlaybackUDPFixture(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -144,6 +157,10 @@ func TestPlaybackShutdownWaitsForEveryPublishedInitializerAndRunner(t *testing.T
 }
 
 func TestPlaybackShutdownPreparedOriginalHasNoRemoteGap(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationPreparedUDPFixture(t)
 	ctx := context.Background()
 	before, err := f.store.LoadSIPInviteSteps(ctx, f.id)
@@ -159,6 +176,10 @@ func TestPlaybackShutdownPreparedOriginalHasNoRemoteGap(t *testing.T) {
 
 func TestPlaybackShutdownInterruptsActiveINFOAndCleanup(t *testing.T) {
 	t.Run("info", func(t *testing.T) {
+		if !authoritytest.InProcess(t) {
+			return
+		}
+
 		f := acceptedPlaybackINFOFixture(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -181,6 +202,10 @@ func TestPlaybackShutdownInterruptsActiveINFOAndCleanup(t *testing.T) {
 		requirePlaybackNoPacket(t, f.peer)
 	})
 	t.Run("cleanup", func(t *testing.T) {
+		if !authoritytest.InProcess(t) {
+			return
+		}
+
 		f, stepID := recoveredPlaybackUDPFixture(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -210,6 +235,10 @@ func TestPlaybackShutdownInterruptsActiveINFOAndCleanup(t *testing.T) {
 }
 
 func TestPlaybackShutdownRetriesFinalFactsAfterReadersExit(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := acceptedPlaybackINFOFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

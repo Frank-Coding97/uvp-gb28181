@@ -65,10 +65,15 @@ func NewDeviceOperationIntentID() (string, error) {
 // It performs no I/O, recovery dispatch, resource closure or coverage inference.
 // Production wiring additionally needs the shared operation lease and durable
 // resource-step identities; this store alone is NOT safe media recovery.
-type DeviceOperationIntentStore struct{ db *gorm.DB }
+type DeviceOperationIntentStore struct {
+	db        *gorm.DB
+	authority deviceIntentAuthority
+}
 
+// NewDeviceOperationIntentStore permits reads, observations and preparation
+// without dispatch permission. Only the root-authorized constructor can send.
 func NewDeviceOperationIntentStore(db *gorm.DB) *DeviceOperationIntentStore {
-	return &DeviceOperationIntentStore{db: db}
+	return newDeviceOperationIntentStore(db, nil)
 }
 
 func (s *DeviceOperationIntentStore) available(ctx context.Context) bool {
@@ -126,6 +131,9 @@ func (s *DeviceOperationIntentStore) Dispatch(ctx context.Context, id DeviceOper
 	}
 	var out DeviceOperationIntent
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.checkAuthorityTx(tx); err != nil {
+			return err
+		}
 		if err := authorizeIntentDevice(tx, ctx, id); err != nil {
 			return err
 		}

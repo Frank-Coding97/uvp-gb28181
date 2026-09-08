@@ -14,13 +14,16 @@ import (
 
 // 任务调度器
 type JobScheduler struct {
-	mu         sync.RWMutex
-	cron       *cron.Cron
-	jobs       map[string]*Job     // 任务存储
-	executors  map[string]Executor // 执行器存储
-	jobResults chan *JobResult     // 任务结果通道
-	logger     JobLogger           // 日志记录器
-	wg         sync.WaitGroup      // 等待正在执行的任务完成
+	mu          sync.RWMutex
+	cron        *cron.Cron
+	jobs        map[string]*Job     // 任务存储
+	executors   map[string]Executor // 执行器存储
+	jobResults  chan *JobResult     // 任务结果通道
+	logger      JobLogger           // 日志记录器
+	wg          sync.WaitGroup      // 等待正在执行的任务完成
+	lifecycleMu sync.Mutex
+	stopped     bool
+	stopOnce    sync.Once
 }
 
 // NewJobScheduler 创建新的调度器
@@ -65,23 +68,33 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 
 // 启动调度器
 func (s *JobScheduler) Start() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped {
+		return
+	}
 	s.cron.Start()
 	s.logger.Info("system", "调度器已启动")
 }
 
 // 停止调度器
 func (s *JobScheduler) Stop() {
-	s.cron.Stop()
-	s.logger.Info("system", "调度器已停止")
-
-	// 等待所有正在执行的任务完成
-	s.wg.Wait()
-
-	close(s.jobResults)
-	// 关闭日志记录器
-	if err := s.logger.Close(); err != nil {
-		log.Printf("Failed to close logger: %v", err)
-	}
+	s.stopOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.stopped = true
+		drained := s.cron.Stop()
+		s.lifecycleMu.Unlock()
+		// cron registers its callbacks before spawning them. Its context is
+		// the join boundary even for callbacks not yet inside executeJob.
+		<-drained.Done()
+		// Manual work is registered synchronously by ExecuteNow before go.
+		s.wg.Wait()
+		s.logger.Info("system", "调度器已停止")
+		close(s.jobResults)
+		if err := s.logger.Close(); err != nil {
+			log.Printf("Failed to close logger: %v", err)
+		}
+	})
 }
 
 // 注册执行器
@@ -196,6 +209,11 @@ func (s *JobScheduler) canExecute(job *Job) bool {
 
 // 立即执行一次任务
 func (s *JobScheduler) ExecuteNow(jobID string) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped {
+		return fmt.Errorf("job scheduler is stopping or stopped")
+	}
 	s.mu.RLock()
 	job, exists := s.jobs[jobID]
 	s.mu.RUnlock()
@@ -209,7 +227,9 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 	}
 
 	// 异步执行
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		s.incrementRunningCount(job.ID)
 		defer s.decrementRunningCount(job.ID)
 		s.executeJob(job)
@@ -220,9 +240,6 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 
 // 执行任务（非递归版本）
 func (s *JobScheduler) executeJob(job *Job) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	startTime := time.Now()
 	jobExecutionID := fmt.Sprintf("%s-%d", job.ID, startTime.UnixNano())
 

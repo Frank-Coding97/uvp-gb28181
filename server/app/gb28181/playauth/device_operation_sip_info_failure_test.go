@@ -30,7 +30,7 @@ func TestDeviceSIPINFOCommitUnknownNeverReturnsPermission(t *testing.T) {
 				}
 				faultDB := f.db.Session(&gorm.Session{NewDB: true, Context: ctx})
 				faultDB.Statement.ConnPool = intentCommitFaultPool{ConnPool: f.db.Statement.ConnPool, commitFirst: committed}
-				fault := NewDeviceOperationIntentStore(faultDB)
+				fault := newIntentFixtureStore(faultDB)
 				var out DeviceSIPInviteSteps
 				var err error
 				switch stage {

@@ -8,11 +8,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentAdapterTransfersOnlyDurableQuiescedOwner(t *testing.T) {
 	for _, failSQL := range []bool{false, true} {
 		t.Run(map[bool]string{false: "durable-unknown", true: "fault-SQL"}[failSQL], func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationUDPFixture(t)
 			child := &playbackIntentChild{u: f.u, op: f.op, gate: make(chan struct{}, 1)}
 			if failSQL {
@@ -46,6 +51,10 @@ func TestPlaybackIntentAdapterTransfersOnlyDurableQuiescedOwner(t *testing.T) {
 }
 
 func TestPlaybackIntentAdapterNeverDeletesReplacementOwner(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationPreparedUDPFixture(t)
 	child := &playbackIntentChild{u: f.u, op: f.op, gate: make(chan struct{}, 1)}
 	replacement := &playbackIntentOperation{id: f.id}

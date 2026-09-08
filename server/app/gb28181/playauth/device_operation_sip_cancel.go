@@ -114,7 +114,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPCancel(ctx context.Context, id D
 	if err != nil {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
-	return s.mutateSIPCancelStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+	return s.mutateSIPStepChecked(ctx, id, version, s.effectDeviceCheck(authorizeSIPCancelCleanupDevice), func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != identity.StepID {

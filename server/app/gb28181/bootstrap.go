@@ -52,6 +52,7 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 
@@ -345,7 +346,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	return server, nil
 }
 
-func startControlPlane(cfg gbconfig.Config) {
+func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authority) {
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
 	if err != nil {
@@ -353,8 +354,9 @@ func startControlPlane(cfg gbconfig.Config) {
 			zap.String("env", cascadeCredentialKeyEnv))
 	}
 	setupCascadeManagement(nil, cascadeCipher)
-	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
-	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
+	reload := func() error { return ReloadSIP(authority) }
+	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, reload))
+	gbroutes.SetServiceConfigSIPTraceReloader(reload)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
@@ -486,7 +488,7 @@ func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report 
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过。SIP 未配置时不启 SIP 依赖,由前端引导页录入并触发热启动。
-func Start() {
+func Start(authority *processauthority.Authority) {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
 	if sipServer != nil || securityRuntime != nil || playbackService != nil {
@@ -494,13 +496,18 @@ func Start() {
 		return
 	}
 
+	if _, err := authorizedRootIntentStore(app.DB(), authority); err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		app.ZapLog.Error("GB28181 缺少有效进程授权，拒绝启动", zap.Error(err))
+		return
+	}
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
 		sipRuntimeStatus.MarkDisabled()
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
-	startControlPlane(cfg)
+	startControlPlane(cfg, authority)
 
 	// 老 stack 升级迁移:如果 DB 空 + YAML 有 SIP 段 + gb_device 有历史数据 → 一次性 seed.
 	// 幂等,首启后 DB 有数据下次调用直接 skip.
@@ -530,7 +537,7 @@ func Start() {
 		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.Error(err))
 	}
 
-	if err := startSIPDependencies(sipCfg); err != nil {
+	if err := startSIPDependencies(sipCfg, authority); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
 		return
 	}
@@ -592,17 +599,27 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
-func startSIPDependencies(cfg gbconfig.Config) error {
-	return startSIPDependenciesWithFactory(cfg, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+func startSIPDependencies(cfg gbconfig.Config, authority *processauthority.Authority) error {
+	return startSIPDependenciesWithFactory(cfg, authority, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(securityRuntime))
 	})
 }
 
 // Caller holds sipLifecycleMu. Register every owned object before any later
 // fallible assembly; rollback must preserve the original instance on failure.
-func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFactory) (err error) {
+func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauthority.Authority, factory sipRuntimeFactory) (err error) {
 	if sipServer != nil || securityRuntime != nil || playbackService != nil {
 		return errors.New("GB28181 旧运行时尚未释放,拒绝替换")
+	}
+	deviceDB := app.DB()
+	deviceIntents, err := authorizedRootIntentStore(deviceDB, authority)
+	if err != nil {
+		return err
+	}
+	deviceSecurity := playauth.NewDeviceSecurityStore(deviceDB)
+	deviceOperations, err := playauth.NewAuthorizedDeviceOperationBarrier(deviceSecurity, authority)
+	if err != nil {
+		return err
 	}
 	securityRuntime = setupSecurityRuntime()
 	defer func() {
@@ -618,7 +635,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 	if err != nil {
 		return err
 	}
-	deviceDB := app.DB()
 	if deviceDB == nil || srv.UAC() == nil {
 		return fmt.Errorf("装配持久回放恢复缺少数据库或 UAC: %w", uac.ErrPlaybackUnavailable)
 	}
@@ -736,9 +752,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 		cfg.ZLM.Secret,
 	)
 	var playAuthorization *playauth.AuthorizationService
-	deviceSecurity := playauth.NewDeviceSecurityStore(deviceDB)
-	deviceOperations := playauth.NewDeviceOperationBarrier(deviceSecurity)
-	deviceIntents := playauth.NewDeviceOperationIntentStore(deviceDB)
 	if err := configurePlaybackRTPCleanup(srv.UAC(), deviceDB, deviceIntents, deviceOperations); err != nil {
 		return fmt.Errorf("装配持久RTP清理失败: %w", err)
 	}
@@ -1311,7 +1324,7 @@ func stopTalkRuntime(ctx context.Context) {
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
 // 由 SetupController.SaveConfig 保存后调用,让用户不需要重启进程.
 // 失败时 runtime state 会被 MarkFailed,不 panic.
-func ReloadSIP() error {
+func ReloadSIP(authority *processauthority.Authority) error {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
 
@@ -1341,7 +1354,7 @@ func ReloadSIP() error {
 		sipRuntimeStatus.MarkFailed(err.Error())
 		return err
 	}
-	return startSIPDependencies(sipCfg)
+	return startSIPDependencies(sipCfg, authority)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

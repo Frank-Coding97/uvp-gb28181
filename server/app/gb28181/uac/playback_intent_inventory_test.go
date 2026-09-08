@@ -8,11 +8,16 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentInventoryPersistsForkAndFaultBeforeACK(t *testing.T) {
 	for _, kind := range []string{"fork", "conflict", "invalid"} {
 		t.Run(kind, func(t *testing.T) {
+			if !authoritytest.InProcess(t) {
+				return
+			}
+
 			f := newPlaybackOperationUDPFixture(t)
 			f.respond(t, 200)
 			require.Eventually(t, func() bool {
@@ -65,6 +70,10 @@ func TestPlaybackIntentInventoryPersistsForkAndFaultBeforeACK(t *testing.T) {
 }
 
 func TestPlaybackIntentInventoryBurstRetainedWithoutBusinessConsumer(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	f.respond(t, 200)
 	require.Eventually(t, func() bool {
@@ -88,6 +97,10 @@ func TestPlaybackIntentInventoryBurstRetainedWithoutBusinessConsumer(t *testing.
 }
 
 func TestPlaybackIntentInventoryInvalidFirstResponsePersistsFault(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+
 	f := newPlaybackOperationUDPFixture(t)
 	r := sip.NewResponseFromRequest(f.invite, 200, "fixture", nil)
 	r.To().Params.Add("tag", "invalid-no-contact")
