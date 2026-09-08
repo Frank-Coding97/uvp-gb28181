@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -45,7 +44,7 @@ func main() {
 		fmt.Println("UVP 已停止")
 		return
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := shutdownContext(context.Background())
 	defer cancel()
 	componentReadyPrinted := false
 	managementURLPrinted := false
