@@ -74,7 +74,7 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 		testCase = "complete"
 	}
 	switch testCase {
-	case "complete", "unclean":
+	case "complete", "unclean", "write-load":
 	default:
 		t.Fatalf("unsupported recovery authorization case %q", testCase)
 	}
@@ -127,6 +127,10 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 
 	firstPair := t26LoginPair(t, client, adminUsername, adminPassword)
 	client.accessToken = firstPair.AccessToken
+	if testCase == "write-load" {
+		t27SQLiteWriteLoadKill(t, paths, first, client, adminBody)
+		return
+	}
 	first.cancel()
 	require.True(t, t18WaitFinished(t, first, 90*time.Second))
 

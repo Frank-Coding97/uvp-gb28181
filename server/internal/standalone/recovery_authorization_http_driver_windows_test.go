@@ -4,6 +4,7 @@ package standalone
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,23 @@ func TestWindowsRecoveryAuthorizationHTTPDriver(t *testing.T) {
 	if caseName != "complete" && caseName != "unclean" {
 		t.Fatalf("unsupported recovery authorization case %q", caseName)
 	}
+	runRecoveryAuthorizationHTTPDriver(t, launcherTest, caseName)
+}
+
+func TestWindowsSQLiteWriteLoadProcessKillDriver(t *testing.T) {
+	launcherTest := strings.TrimSpace(os.Getenv("UVP_MAINTENANCE_LAUNCHER_TEST_PATH"))
+	if launcherTest == "" {
+		t.Skip("requires built Windows launcher test executable")
+	}
+	for round := 1; round <= 20; round++ {
+		t.Run(fmt.Sprintf("round-%02d", round), func(t *testing.T) {
+			runRecoveryAuthorizationHTTPDriver(t, launcherTest, "write-load")
+		})
+	}
+}
+
+func runRecoveryAuthorizationHTTPDriver(t *testing.T, launcherTest, caseName string) {
+	t.Helper()
 	backend := maintenanceBackendTestPath(t)
 	componentRoot := maintenanceComponentReleaseRoot(t)
 
@@ -64,13 +82,19 @@ func TestWindowsRecoveryAuthorizationHTTPDriver(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, backupComponentsStopped(old, candidate))
 	require.NoError(t, CheckMaintenanceGate(fixture.paths.InstallDir))
+	if caseName == "write-load" {
+		lock, err := AcquireInstanceLock(fixture.paths.InstallDir)
+		require.NoError(t, err)
+		defer lock.Close()
+		_, err = InspectRunMarker(fixture.paths)
+		require.ErrorIs(t, err, ErrUncleanRecoveryRequired)
+	}
 	selected, err := LoadRelease(fixture.paths.InstallDir)
 	require.NoError(t, err)
 	require.Equal(t, fixture.journal.OldVersion, selected.Version)
 }
 
 func recoveryAuthorizationFailureSummary(output string) string {
-	const testFile = "recovery_authorization_http_windows_test.go"
 	seen := make(map[string]struct{})
 	markers := make([]string, 0, 4)
 	add := func(marker string) {
@@ -105,14 +129,16 @@ func recoveryAuthorizationFailureSummary(output string) string {
 		if strings.HasPrefix(line, "--- FAIL: TestWindowsRecoveryAuthorizationHTTP") {
 			add("FAIL: TestWindowsRecoveryAuthorizationHTTP")
 		}
-		if index := strings.Index(line, testFile+":"); index >= 0 {
-			suffix := line[index+len(testFile)+1:]
-			end := 0
-			for end < len(suffix) && suffix[end] >= '0' && suffix[end] <= '9' {
-				end++
-			}
-			if end > 0 {
-				add(testFile + ":" + suffix[:end])
+		for _, testFile := range []string{"recovery_authorization_http_windows_test.go", "sqlite_write_load_windows_test.go"} {
+			if index := strings.Index(line, testFile+":"); index >= 0 {
+				suffix := line[index+len(testFile)+1:]
+				end := 0
+				for end < len(suffix) && suffix[end] >= '0' && suffix[end] <= '9' {
+					end++
+				}
+				if end > 0 {
+					add(testFile + ":" + suffix[:end])
+				}
 			}
 		}
 		if line == "FAIL" || strings.HasPrefix(line, "FAIL ") || strings.HasPrefix(line, "FAIL\t") {
