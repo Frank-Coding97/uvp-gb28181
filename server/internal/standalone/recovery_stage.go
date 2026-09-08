@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-type recoveryRedisRunner func(context.Context, string, string, string, string) error
+type recoveryRedisRunner func(context.Context, string, string, string, string, int) error
 
 // Prepare a disposable, isolated old-schema copy. Runners must wait for every
 // owned process and verify their durable results before returning success.
@@ -181,7 +181,7 @@ func prepareRecoveryStage(ctx context.Context, paths Paths, operation, trust str
 	if err := rotateRecoveryCredentials(stage, operation, cfg.ConfigSHA256, nil); err != nil {
 		return empty, err
 	}
-	if err := redis(ctx, old.RedisExe, sourceRedis, filepath.Join(stage.DataDir, "redis"), control); err != nil {
+	if err := redis(ctx, old.RedisExe, sourceRedis, filepath.Join(stage.DataDir, "redis"), control, configInt(cfg.values, "redis", "indexdb")); err != nil {
 		return empty, errors.New("recovery Redis staging failed")
 	}
 	if err := run(ctx, stage, operation, "db_check", old.Version); err != nil {

@@ -33,7 +33,7 @@ func TestRecoveryStageIsolatedBuildAndRetry(t *testing.T) {
 				}
 				return nil
 			}
-			redis := func(ctx context.Context, exe, source, target, control string) error {
+			redis := func(ctx context.Context, exe, source, target, control string, indexDB int) error {
 				require.NotEqual(t, filepath.Join(outer.BackupRoot, "data", "redis"), source)
 				entries, err := os.ReadDir(target)
 				require.NoError(t, err)
@@ -72,6 +72,19 @@ func TestRecoveryStageIsolatedBuildAndRetry(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "staged", j.Phase)
 			require.NoError(t, checkRecoveryDirectoryState(context.Background(), root, j, 1))
+			repeated, err := prepareRecoveryStage(context.Background(), owner.paths, outer.OperationID, owner.trust,
+				func(context.Context, Paths, string, string, string) error {
+					t.Fatal("sealed stage reran backend")
+					return nil
+				},
+				func(context.Context, string, string, string, string, int) error {
+					t.Fatal("sealed stage reran Redis")
+					return nil
+				})
+			require.NoError(t, err)
+			again, err := LoadConfig(repeated)
+			require.NoError(t, err)
+			require.Equal(t, config.ConfigSHA256, again.ConfigSHA256)
 			require.ErrorIs(t, CheckMaintenanceGate(root), ErrMaintenanceRequired)
 		})
 	}
