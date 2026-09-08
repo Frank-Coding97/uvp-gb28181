@@ -45,7 +45,7 @@ func init() {
 		// Database-only maintenance commands do not start authenticated services.
 		// Every business startup must validate secrets and Windows permissions,
 		// including when the backend is invoked directly without the launcher.
-		if !migrationCommandRequested() {
+		if !migrationCommandRequested() || admittedMaintenance != nil {
 			if _, err := standalone.LoadConfig(standalonePaths); err != nil {
 				log.Fatal("standalone configuration invalid: " + err.Error())
 			}
@@ -200,7 +200,7 @@ func checkRequiredFolders() {
 	if paths.Explicit {
 		// Direct backend execution must obey the same maintenance gate as the
 		// launcher, before even path write probes or database-only commands.
-		if err := standalone.CheckMaintenanceGate(paths.InstallDir); err != nil {
+		if err := authorizeMaintenanceStartup(paths); err != nil {
 			log.Fatal(err)
 		}
 		if err := paths.Validate(); err != nil {
@@ -474,6 +474,9 @@ func newScheduler() app.JobSchedulerInterf {
 // migrationCommandRequested 判断启动参数是否请求纯迁移运维入口。
 // 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
 func migrationCommandRequested() bool {
+	if admittedMaintenance != nil {
+		return true
+	}
 	for _, arg := range os.Args {
 		if arg == "-migrate-up" || arg == "-db-check" || arg == "-bootstrap-db" {
 			return true

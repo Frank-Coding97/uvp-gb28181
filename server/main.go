@@ -17,7 +17,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
-	_ "uvplatform.cn/uvp-gb28181/bootstrap"
+	"uvplatform.cn/uvp-gb28181/bootstrap"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 
 	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
@@ -38,6 +38,12 @@ import (
 // @host localhost:8080
 // @BasePath /api
 func main() {
+	if operation, admitted := bootstrap.MaintenanceOperation(); admitted {
+		if err := runStandaloneMaintenance(operation); err != nil {
+			log.Fatal("standalone maintenance operation failed: " + operation.Purpose)
+		}
+		return
+	}
 	for _, arg := range os.Args[1:] {
 		if arg == "-bootstrap-db" {
 			if err := runBootstrapDB(); err != nil {
