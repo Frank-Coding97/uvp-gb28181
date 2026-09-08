@@ -52,7 +52,7 @@ func TestWindowsBackupRunningInstallation(t *testing.T) {
 	if !t18WaitFinished(t, run, 30*time.Second) {
 		t.Fatal("backup returned before owner exited")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".uvp-running.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "data", ".uvp-running.json")); !os.IsNotExist(err) {
 		t.Fatal("run marker remains")
 	}
 	if manifest.Version != release.Version || !strings.EqualFold(filepath.Clean(manifest.RecordingsDir), filepath.Clean(recordings)) {

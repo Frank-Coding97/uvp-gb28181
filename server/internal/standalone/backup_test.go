@@ -116,16 +116,22 @@ func TestBackupStoppedRejectsMissingRedisManifestMemberWithoutMarker(t *testing.
 
 func TestBackupStoppedRejectsRunMarkerBeforeCreatingOutput(t *testing.T) {
 	paths := newBackupTestPaths(t)
-	marker := filepath.Join(paths.InstallDir, ".uvp-running.json")
-	require.NoError(t, os.WriteFile(marker, []byte("unverified run"), 0600))
+	lock, err := AcquireInstanceLock(paths.InstallDir)
+	require.NoError(t, err)
+	_, err = BeginRun(paths)
+	require.NoError(t, err)
+	require.NoError(t, lock.Close())
+	marker := filepath.Join(paths.DataDir, runMarkerName)
+	before, err := os.ReadFile(marker)
+	require.NoError(t, err)
 	destination := filepath.Join(filepath.Dir(paths.InstallDir), "marker-backup")
-	_, err := BackupStopped(context.Background(), paths, destination)
+	_, err = BackupStopped(context.Background(), paths, destination)
 	require.ErrorContains(t, err, "run marker")
 	_, err = os.Stat(destination)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	raw, err := os.ReadFile(marker)
 	require.NoError(t, err)
-	require.Equal(t, "unverified run", string(raw))
+	require.Equal(t, before, raw)
 }
 
 func TestBackupInvalidDestinationDoesNotRequestRunningOwnerStop(t *testing.T) {
