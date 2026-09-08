@@ -28,6 +28,7 @@ type DeviceSIPInviteStep struct {
 	AdditionalBranches             []DeviceSIPKnownBranch  `json:"-"`
 	BranchInventoryFault           string                  `json:"-"`
 	BranchInventoryFaultObservedAt *time.Time              `json:"-"`
+	OwnerProcessID                 string                  `json:"-"`
 }
 
 // The selected and bounded additional observed branches are evidence, never
@@ -50,6 +51,7 @@ type sipInviteStepWire struct {
 	AdditionalBranches             []sipKnownBranchWire  `json:"additionalBranches,omitempty"`
 	BranchInventoryFault           string                `json:"branchInventoryFault,omitempty"`
 	BranchInventoryFaultObservedAt *time.Time            `json:"branchInventoryFaultObservedAt,omitempty"`
+	OwnerProcessID                 string                `json:"ownerProcessID,omitempty"`
 }
 
 type sipInviteStepsWire struct {
@@ -64,7 +66,7 @@ type sipIntentRow struct {
 
 func sipStepToWire(s DeviceSIPInviteStep) sipInviteStepWire {
 	w := sipInviteStepWire{Version: 1, Action: "invite", Identity: s.Identity.wire(), State: s.State, RowVersion: s.RowVersion,
-		PreparedAt: s.PreparedAt, DispatchStartedAt: s.DispatchStartedAt, KnownBranch: sipKnownBranchToWire(s.KnownBranch), Cancel: sipCancelToWire(s.Cancel)}
+		PreparedAt: s.PreparedAt, DispatchStartedAt: s.DispatchStartedAt, KnownBranch: sipKnownBranchToWire(s.KnownBranch), Cancel: sipCancelToWire(s.Cancel), OwnerProcessID: s.OwnerProcessID}
 	if len(s.AdditionalBranches) != 0 || s.BranchInventoryFault != "" {
 		w.Version = 2
 		for index := range s.AdditionalBranches {
@@ -123,6 +125,7 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 		i := DeviceSIPInviteIdentity(w.Identity)
 		key := inviteKey{i.CallID, i.LocalTag}
 		if (w.Version != 1 && w.Version != 2) || w.Action != "invite" || !validSIPInviteIdentity(i) || ids[i.StepID] || invites[key] ||
+			(w.OwnerProcessID != "" && (!validIntentID(w.OwnerProcessID) || w.OwnerProcessID == "00000000000000000000000000000000")) ||
 			!validSIPStepTime(w.PreparedAt) || w.PreparedAt.Before(*row.DispatchStartedAt) || w.PreparedAt.After(row.UpdatedAt) {
 			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 		}
@@ -139,7 +142,7 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 		}
 		ids[i.StepID], invites[key] = true, true
-		step := DeviceSIPInviteStep{Identity: i, State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt}
+		step := DeviceSIPInviteStep{Identity: i, State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt, OwnerProcessID: w.OwnerProcessID}
 		if w.KnownBranch != nil {
 			branch, err := readSIPKnownBranch(w.KnownBranch, step, row.UpdatedAt)
 			if err != nil {
@@ -198,6 +201,10 @@ func (s *DeviceOperationIntentStore) AddSIPInviteStep(ctx context.Context, id De
 	if !validSIPInviteIdentity(identity) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
 	}
+	processID, err := sipCleanupProcessID()
+	if err != nil || !validIntentID(processID) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
 	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for _, old := range out.Steps {
 			if old.Identity.StepID == identity.StepID {
@@ -213,7 +220,7 @@ func (s *DeviceOperationIntentStore) AddSIPInviteStep(ctx context.Context, id De
 		if len(out.Steps) >= maxIntentSIPSteps {
 			return false, ErrDeviceIntentConflict
 		}
-		out.Steps = append(out.Steps, DeviceSIPInviteStep{Identity: identity, State: SIPStepPrepared, RowVersion: 1, PreparedAt: now})
+		out.Steps = append(out.Steps, DeviceSIPInviteStep{Identity: identity, State: SIPStepPrepared, RowVersion: 1, PreparedAt: now, OwnerProcessID: processID})
 		return true, nil
 	})
 }
@@ -226,13 +233,17 @@ func (s *DeviceOperationIntentStore) DispatchSIPInviteStep(ctx context.Context, 
 	if !validIntentID(stepID) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
 	}
+	processID, err := sipCleanupProcessID()
+	if err != nil || !validIntentID(processID) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
 	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != stepID {
 				continue
 			}
-			if step.State != SIPStepPrepared {
+			if step.State != SIPStepPrepared || step.OwnerProcessID != processID {
 				return false, ErrDeviceIntentConflict
 			}
 			step.State, step.RowVersion, step.DispatchStartedAt = SIPStepMayHaveDispatched, 2, &now
