@@ -135,6 +135,8 @@ func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
 		"gb28181:home:view",
 		"gb28181:home:layout:save",
 		"gb28181:home:layout:reset",
+		"gb28181:channel:recording:update",
+		"gb28181:recording:view",
 	} {
 		var count int64
 		require.NoError(t, db.Table("sys_role_menu rm").Joins("JOIN sys_menu m ON m.id = rm.menu_id").Where("rm.role_id = ? AND m.permission = ?", adminRoleID, permission).Count(&count).Error)
@@ -162,6 +164,9 @@ func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
 		{path: "/api/gb28181/device/34020000001320000901/channels", method: http.MethodGet},
 		{path: "/api/gb28181/play/34020000001320000901/34020000001320000132", method: http.MethodPost},
 		{path: "/api/gb28181/play/test-stream", method: http.MethodDelete},
+		{path: "/api/gb28181/device-mgmt/channel/1/cloud-recording", method: http.MethodPatch},
+		{path: "/api/gb28181/cloud-recordings/files", method: http.MethodGet},
+		{path: "/api/gb28181/cloud-recordings/files/1/access", method: http.MethodPost},
 	} {
 		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
 		require.NoError(t, err)

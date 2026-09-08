@@ -35,6 +35,8 @@ var standaloneAdministratorHomepagePermissions = []string{
 	"gb28181:play:stop",
 	"gb28181:play:monitor",
 	"gb28181:device:view",
+	"gb28181:channel:recording:update",
+	"gb28181:recording:view",
 }
 
 type standaloneAdministratorHomepageAPI struct {
