@@ -12,15 +12,20 @@ import (
 // The returned owner must survive migration, health checks and commit/recovery.
 // Close only releases the lock; it never clears an unfinished maintenance gate.
 type upgradePreparation struct {
-	journal MaintenanceJournal
-	lock    *InstanceLock
+	journal         MaintenanceJournal
+	lock            *InstanceLock
+	paths           Paths
+	trust           string
+	releaseIdentity string
 }
 
 func (p *upgradePreparation) Close() error {
 	if p == nil || p.lock == nil {
 		return nil
 	}
-	return p.lock.Close()
+	err := p.lock.Close()
+	p.lock = nil
+	return err
 }
 
 func prepareUpgradeStopped(ctx context.Context, paths Paths, candidateVersion, destination string) (*upgradePreparation, error) {
@@ -110,5 +115,5 @@ func prepareUpgradeStoppedWithTrust(ctx context.Context, paths Paths, candidateV
 		return nil, err
 	}
 	retained = true
-	return &upgradePreparation{journal: journal, lock: lock}, nil
+	return &upgradePreparation{journal: journal, lock: lock, paths: paths, trust: trust, releaseIdentity: lockedIdentity}, nil
 }
