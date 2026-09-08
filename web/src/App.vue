@@ -9,6 +9,7 @@ import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import uvpFavicon from "@/assets/logo/uvp-favicon.svg";
 import { watch } from "vue";
+import { useRouter } from "vue-router";
 
 // 初始化主题
 const onTheme = () => {
@@ -110,7 +111,19 @@ const isDeviceRecordPreview = import.meta.env.DEV
     && window.location.hash.startsWith("#/device-record-query-demo");
 
 if (isDeviceRecordPreview) setTitle("设备录像回放预览");
-else initSysConfig();
+else {
+    const router = useRouter();
+    void router.isReady().then(() => {
+        watch(
+            () => router.currentRoute.value.path === "/standalone-setup",
+            (initializing) => {
+                if (initializing) setTitle("UVP 首次初始化");
+                else initSysConfig();
+            },
+            { immediate: true }
+        );
+    });
+}
 </script>
 
 <style lang="scss" scoped></style>

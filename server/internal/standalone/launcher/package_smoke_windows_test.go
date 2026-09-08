@@ -45,6 +45,9 @@ func TestWindowsFinalPackageFreshBrowser(t *testing.T) {
 	if err = t19WaitEval(ctx, browser.cdp, `!!document.querySelector('input[type=password]') && document.body.innerText.includes('管理员')`); err != nil {
 		t.Fatal("fresh setup page unavailable")
 	}
+	if err = browser.cdp.evalBool(ctx, `!document.querySelector('.arco-message-error')`); err != nil {
+		t.Fatal("fresh setup page displayed an error")
+	}
 	if path := os.Getenv("UVP_FINAL_SCREENSHOT"); path != "" {
 		if err = browser.captureScreenshot(ctx, path); err != nil {
 			t.Fatal(err)
