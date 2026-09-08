@@ -283,6 +283,11 @@ func (c *Client) DownloadFile(ctx context.Context, filePath, byteRange string) (
 	}
 	query := url.Values{}
 	query.Set("secret", c.secret)
+	// ZLM compares download paths against slash-normalized absolute roots.
+	// Only normalize Windows drive paths; backslashes can be Linux filenames.
+	if len(filePath) >= 3 && ((filePath[0] >= 'A' && filePath[0] <= 'Z') || (filePath[0] >= 'a' && filePath[0] <= 'z')) && filePath[1] == ':' && (filePath[2] == '\\' || filePath[2] == '/') {
+		filePath = strings.ReplaceAll(filePath, "\\", "/")
+	}
 	query.Set("file_path", filePath)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/downloadFile?"+query.Encode(), nil)
 	if err != nil {

@@ -86,6 +86,9 @@ func initializeConfig(paths Paths, hook func(string) error) (InstanceConfig, err
 	if !paths.Explicit {
 		return result, errors.New("standalone configuration requires explicit paths")
 	}
+	if strings.ContainsAny(paths.RecordingsDir, ";\r\n") {
+		return result, errors.New("recordings directory cannot contain INI separators")
+	}
 	err := withConfigLock(paths.InstallDir, func() error {
 		if err := paths.Validate(); err != nil {
 			return err
@@ -164,6 +167,9 @@ func initializeConfig(paths Paths, hook func(string) error) (InstanceConfig, err
 		zlmRTCPort := configIntDefault(values, defaultMediaRTCPort, "gb28181", "zlm", "rtcport")
 		zlmRTCTCPPort := configIntDefault(values, defaultMediaRTCPort, "gb28181", "zlm", "rtctcpport")
 		zlm := fmt.Sprintf("[api]\napiDebug=0\nsecret=%s\n[general]\nlisten_ip=%s\n[http]\nport=%d\nsslport=0\n[rtsp]\nport=0\nsslport=0\n[rtmp]\nport=0\nsslport=0\n[shell]\nport=0\n[srt]\nport=0\n[rtp_proxy]\nport=%d\nport_range=%s\n[rtc]\nport=%d\ntcpPort=%d\nsignalingPort=0\nsignalingSslPort=0\nicePort=0\niceTcpPort=0\n", result.ZLMSecret(), zlmListenIP, zlmHTTPPort, zlmRTPPort, defaultMediaRTPRange, zlmRTCPort, zlmRTCTCPPort)
+		recordRoot := filepath.ToSlash(paths.RecordingsDir)
+		zlm = strings.Replace(zlm, "[api]\n", "[api]\ndownloadRoot="+recordRoot+"\n", 1)
+		zlm += "[protocol]\nmp4_save_path=" + recordRoot + "\n"
 		if err := writeSecureConfigFile(result.ZLMConfigPath, []byte(zlm), true, prefixConfigHook("zlm", hook)); err != nil {
 			return err
 		}

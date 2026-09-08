@@ -55,8 +55,21 @@ func TestInstanceConfigIndependentSecretsAndRepeat(t *testing.T) {
 	zlm, err := os.ReadFile(a.ZLMConfigPath)
 	require.NoError(t, err)
 	require.Contains(t, string(zlm), "secret="+a.ZLMSecret())
+	require.Contains(t, string(zlm), "downloadRoot="+filepath.ToSlash(aPaths.RecordingsDir)+"\n")
+	require.Contains(t, string(zlm), "mp4_save_path="+filepath.ToSlash(aPaths.RecordingsDir)+"\n")
 	_, err = os.Stat(aPaths.DatabasePath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestInstanceConfigRejectsRecordingRootINISeparators(t *testing.T) {
+	for _, separator := range []string{";", "\r", "\n"} {
+		paths := configTestPaths(t)
+		paths.RecordingsDir += separator + "other"
+		_, err := InitializeConfig(paths)
+		require.ErrorContains(t, err, "INI separators")
+		_, err = os.Stat(paths.ConfigFile)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
 }
 
 func TestInstanceConfigConcurrentInitialization(t *testing.T) {
