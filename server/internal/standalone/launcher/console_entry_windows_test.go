@@ -52,7 +52,11 @@ func TestWindowsStandaloneConsoleEntry(t *testing.T) {
 	}
 	for _, mode := range []string{"ctrl-c", "window-close"} {
 		if !t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 160*time.Second)
+			budget := 160 * time.Second
+			if os.Getenv("UVP_T16_ACTIVE_READY_FILE") != "" {
+				budget = 240 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsStandaloneConsoleEntry$", "-test.v", "-test.count=1")
 			cmd.Env = append(os.Environ(), consoleEntryHelperEnv+"="+mode)
@@ -182,6 +186,25 @@ func runConsoleEntry(root, mode string) (result consoleEntryEvidence, resultErr 
 			_ = windows.CloseHandle(handle)
 		}
 	}()
+	if ready := os.Getenv("UVP_T16_ACTIVE_READY_FILE"); ready != "" {
+		proceed := os.Getenv("UVP_T16_ACTIVE_CONTINUE_FILE")
+		if proceed == "" {
+			return result, errors.New("active console test requires a continue file")
+		}
+		if _, err := os.Stat(proceed); !errors.Is(err, os.ErrNotExist) {
+			return result, errors.New("active console continue marker must not already exist")
+		}
+		file, err := os.OpenFile(ready, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return result, errors.New("cannot publish active console readiness marker")
+		}
+		if err := file.Close(); err != nil {
+			return result, err
+		}
+		if !coreWaitForFile(proceed, 150*time.Second) {
+			return result, errors.New("active console work was not confirmed")
+		}
+	}
 	started := time.Now()
 	if mode == "ctrl-c" {
 		if ok, _, err := consoleEntryKernel.NewProc("SetConsoleCtrlHandler").Call(0, 1); ok == 0 {
