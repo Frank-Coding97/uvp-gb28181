@@ -62,7 +62,18 @@ func BackupStopped(ctx context.Context, paths Paths, destination string) (Backup
 		return result, err
 	}
 	defer lock.Close()
-	err = withConfigLock(paths.InstallDir, func() error {
+	return backupStoppedOwned(ctx, paths, destination)
+}
+
+// backupStoppedOwned keeps the caller's instance lock alive after publication
+// so an upgrade can establish its next state without admitting another launcher.
+// Paths and destination must already have passed their ordinary validation.
+func backupStoppedOwned(ctx context.Context, paths Paths, destination string) (BackupManifest, error) {
+	var result BackupManifest
+	err := withConfigLock(paths.InstallDir, func() error {
+		if err := requireMaintenanceInstanceLock(paths.InstallDir); err != nil {
+			return err
+		}
 		if err := CheckMaintenanceGate(paths.InstallDir); err != nil {
 			return err
 		}
