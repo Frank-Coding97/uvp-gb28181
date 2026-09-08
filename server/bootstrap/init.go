@@ -198,6 +198,11 @@ func checkRequiredFolders() {
 		log.Fatal("单机路径参数无效: " + err.Error())
 	}
 	if paths.Explicit {
+		// Direct backend execution must obey the same maintenance gate as the
+		// launcher, before even path write probes or database-only commands.
+		if err := standalone.CheckMaintenanceGate(paths.InstallDir); err != nil {
+			log.Fatal(err)
+		}
 		if err := paths.Validate(); err != nil {
 			log.Fatal("单机路径不可用: " + err.Error())
 		}
