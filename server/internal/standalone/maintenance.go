@@ -15,6 +15,7 @@ const maintenanceDirName = ".uvp-maintenance"
 type MaintenancePhase string
 
 const (
+	MaintenancePreparing            MaintenancePhase = "preparing"
 	MaintenanceUpgrading            MaintenancePhase = "upgrading"
 	MaintenanceCommitting           MaintenancePhase = "committing"
 	MaintenanceRestoreRequired      MaintenancePhase = "restore_required"
@@ -157,7 +158,15 @@ func validateMaintenanceJournal(journal MaintenanceJournal) error {
 	if journal.Schema != 1 || journal.CreatedAt.IsZero() || !validReleaseVersion(journal.OldVersion) || !validReleaseVersion(journal.CandidateVersion) {
 		return errors.New("invalid maintenance metadata")
 	}
-	for _, value := range []string{journal.OperationID, journal.OldCurrentSHA256, journal.BackupManifestSHA256} {
+	checksums := []string{journal.OperationID, journal.OldCurrentSHA256}
+	if journal.Phase == MaintenancePreparing {
+		if journal.BackupManifestSHA256 != "" {
+			return errors.New("preparing maintenance cannot claim a completed backup")
+		}
+	} else {
+		checksums = append(checksums, journal.BackupManifestSHA256)
+	}
+	for _, value := range checksums {
 		raw, err := hex.DecodeString(value)
 		if err != nil || len(raw) != 32 {
 			return errors.New("invalid maintenance identity or checksum")
@@ -167,7 +176,7 @@ func validateMaintenanceJournal(journal MaintenanceJournal) error {
 		return errors.New("invalid maintenance backup root")
 	}
 	switch journal.Phase {
-	case MaintenanceUpgrading, MaintenanceCommitting, MaintenanceRestoreRequired, MaintenanceRestoring, MaintenanceAwaitingConfirmation:
+	case MaintenancePreparing, MaintenanceUpgrading, MaintenanceCommitting, MaintenanceRestoreRequired, MaintenanceRestoring, MaintenanceAwaitingConfirmation:
 		return nil
 	default:
 		return errors.New("invalid maintenance phase")
