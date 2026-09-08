@@ -60,21 +60,24 @@ type DeviceRTPResourceIdentity struct {
 }
 
 type DeviceRTPResourceStep struct {
-	Identity                DeviceRTPResourceIdentity `json:"-"`
-	State                   string                    `json:"-"`
-	RowVersion              int64                     `json:"-"`
-	PreparedAt              time.Time                 `json:"-"`
-	DispatchStartedAt       *time.Time                `json:"-"`
-	OwnerRunID              string                    `json:"-"`
-	OwnerProcessID          string                    `json:"-"`
-	OpenResult              *DeviceRTPOpenResult      `json:"-"`
-	OpenObservedAt          *time.Time                `json:"-"`
-	ResourceCloseResult     string                    `json:"-"`
-	ResourceCloseObservedAt *time.Time                `json:"-"`
-	IngressCloseResult      string                    `json:"-"`
-	IngressCloseObservedAt  *time.Time                `json:"-"`
-	LocalQuiescedAt         *time.Time                `json:"-"`
-	Recovery                *DeviceRTPRecovery        `json:"-"`
+	Identity                  DeviceRTPResourceIdentity   `json:"-"`
+	State                     string                      `json:"-"`
+	RowVersion                int64                       `json:"-"`
+	PreparedAt                time.Time                   `json:"-"`
+	DispatchStartedAt         *time.Time                  `json:"-"`
+	OwnerRunID                string                      `json:"-"`
+	OwnerProcessID            string                      `json:"-"`
+	OpenResult                *DeviceRTPOpenResult        `json:"-"`
+	OpenObservedAt            *time.Time                  `json:"-"`
+	ResourceCloseResult       string                      `json:"-"`
+	ResourceCloseObservedAt   *time.Time                  `json:"-"`
+	IngressCloseResult        string                      `json:"-"`
+	IngressCloseObservedAt    *time.Time                  `json:"-"`
+	LocalQuiescedAt           *time.Time                  `json:"-"`
+	Recovery                  *DeviceRTPRecovery          `json:"-"`
+	OriginalCloseCallSequence int64                       `json:"-"`
+	ResourceCloseCall         *DeviceRTPOriginalCloseCall `json:"-"`
+	IngressCloseCall          *DeviceRTPOriginalCloseCall `json:"-"`
 }
 
 type DeviceRTPOpenResult struct {
@@ -96,36 +99,39 @@ type DeviceRTPResourceSteps struct {
 // Persistence-only DTO: every field is fixed. In particular there is no raw
 // payload, endpoint, credentials, terminal state or generic action dispatcher.
 type rtpStepWire struct {
-	Version                 int                `json:"version"`
-	Action                  string             `json:"action"`
-	StepID                  string             `json:"stepID"`
-	NodePK                  int64              `json:"nodePK"`
-	NodeUUID                string             `json:"nodeUUID"`
-	NodeRevision            int64              `json:"nodeRevision"`
-	BootNonce               string             `json:"bootNonce"`
-	ResourceID              string             `json:"resourceID"`
-	VHost                   string             `json:"vhost"`
-	App                     string             `json:"app"`
-	Stream                  string             `json:"stream"`
-	Port                    int                `json:"port"`
-	LocalIP                 string             `json:"localIP"`
-	TCPMode                 int                `json:"tcpMode"`
-	SSRC                    uint32             `json:"ssrc"`
-	OnlyTrack               int                `json:"onlyTrack"`
-	State                   string             `json:"state"`
-	RowVersion              int64              `json:"rowVersion"`
-	PreparedAt              time.Time          `json:"preparedAt"`
-	DispatchStartedAt       *time.Time         `json:"dispatchStartedAt"`
-	OwnerRunID              string             `json:"ownerRunID,omitempty"`
-	OpenResult              *rtpOpenResultWire `json:"openResult,omitempty"`
-	OpenObservedAt          *time.Time         `json:"openObservedAt,omitempty"`
-	ResourceCloseResult     string             `json:"resourceCloseResult,omitempty"`
-	ResourceCloseObservedAt *time.Time         `json:"resourceCloseObservedAt,omitempty"`
-	IngressCloseResult      string             `json:"ingressCloseResult,omitempty"`
-	IngressCloseObservedAt  *time.Time         `json:"ingressCloseObservedAt,omitempty"`
-	LocalQuiescedAt         *time.Time         `json:"localQuiescedAt,omitempty"`
-	Recovery                *rtpRecoveryWire   `json:"cleanup,omitempty"`
-	OwnerProcessID          string             `json:"ownerProcessID,omitempty"`
+	Version                   int                       `json:"version"`
+	Action                    string                    `json:"action"`
+	StepID                    string                    `json:"stepID"`
+	NodePK                    int64                     `json:"nodePK"`
+	NodeUUID                  string                    `json:"nodeUUID"`
+	NodeRevision              int64                     `json:"nodeRevision"`
+	BootNonce                 string                    `json:"bootNonce"`
+	ResourceID                string                    `json:"resourceID"`
+	VHost                     string                    `json:"vhost"`
+	App                       string                    `json:"app"`
+	Stream                    string                    `json:"stream"`
+	Port                      int                       `json:"port"`
+	LocalIP                   string                    `json:"localIP"`
+	TCPMode                   int                       `json:"tcpMode"`
+	SSRC                      uint32                    `json:"ssrc"`
+	OnlyTrack                 int                       `json:"onlyTrack"`
+	State                     string                    `json:"state"`
+	RowVersion                int64                     `json:"rowVersion"`
+	PreparedAt                time.Time                 `json:"preparedAt"`
+	DispatchStartedAt         *time.Time                `json:"dispatchStartedAt"`
+	OwnerRunID                string                    `json:"ownerRunID,omitempty"`
+	OpenResult                *rtpOpenResultWire        `json:"openResult,omitempty"`
+	OpenObservedAt            *time.Time                `json:"openObservedAt,omitempty"`
+	ResourceCloseResult       string                    `json:"resourceCloseResult,omitempty"`
+	ResourceCloseObservedAt   *time.Time                `json:"resourceCloseObservedAt,omitempty"`
+	IngressCloseResult        string                    `json:"ingressCloseResult,omitempty"`
+	IngressCloseObservedAt    *time.Time                `json:"ingressCloseObservedAt,omitempty"`
+	LocalQuiescedAt           *time.Time                `json:"localQuiescedAt,omitempty"`
+	Recovery                  *rtpRecoveryWire          `json:"cleanup,omitempty"`
+	OwnerProcessID            string                    `json:"ownerProcessID,omitempty"`
+	OriginalCloseCallSequence int64                     `json:"originalCloseCallSequence,omitempty"`
+	ResourceCloseCall         *rtpOriginalCloseCallWire `json:"resourceCloseCall,omitempty"`
+	IngressCloseCall          *rtpOriginalCloseCallWire `json:"ingressCloseCall,omitempty"`
 }
 
 type rtpStepsWire struct {
@@ -145,6 +151,8 @@ func stepToWire(step DeviceRTPResourceStep) rtpStepWire {
 		State: step.State, RowVersion: step.RowVersion, PreparedAt: step.PreparedAt, DispatchStartedAt: step.DispatchStartedAt,
 		OwnerRunID: step.OwnerRunID, OwnerProcessID: step.OwnerProcessID, OpenObservedAt: step.OpenObservedAt, ResourceCloseResult: step.ResourceCloseResult, ResourceCloseObservedAt: step.ResourceCloseObservedAt,
 		IngressCloseResult: step.IngressCloseResult, IngressCloseObservedAt: step.IngressCloseObservedAt, LocalQuiescedAt: step.LocalQuiescedAt, Recovery: recoveryToWire(step.Recovery)}
+	w.OriginalCloseCallSequence = step.OriginalCloseCallSequence
+	w.ResourceCloseCall, w.IngressCloseCall = originalCloseToWire(step.ResourceCloseCall), originalCloseToWire(step.IngressCloseCall)
 	if step.OpenResult != nil {
 		w.OpenResult = &rtpOpenResultWire{Result: step.OpenResult.Result, Port: step.OpenResult.Port}
 	}
@@ -159,6 +167,8 @@ func (w rtpStepWire) step() DeviceRTPResourceStep {
 		State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt,
 		OwnerRunID: w.OwnerRunID, OwnerProcessID: w.OwnerProcessID, OpenObservedAt: w.OpenObservedAt, ResourceCloseResult: w.ResourceCloseResult, ResourceCloseObservedAt: w.ResourceCloseObservedAt,
 		IngressCloseResult: w.IngressCloseResult, IngressCloseObservedAt: w.IngressCloseObservedAt, LocalQuiescedAt: w.LocalQuiescedAt, Recovery: w.Recovery.recovery()}
+	step.OriginalCloseCallSequence = w.OriginalCloseCallSequence
+	step.ResourceCloseCall, step.IngressCloseCall = w.ResourceCloseCall.call(), w.IngressCloseCall.call()
 	if w.OpenResult != nil {
 		step.OpenResult = &DeviceRTPOpenResult{Result: w.OpenResult.Result, Port: w.OpenResult.Port}
 	}

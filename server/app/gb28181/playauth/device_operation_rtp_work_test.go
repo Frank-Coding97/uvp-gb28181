@@ -253,7 +253,9 @@ func TestDeviceRTPPreparedOwnerCanJoinUnknownDispatchButNeverOpen(t *testing.T) 
 func TestDeviceRTPWorkLostObservationCommitKeepsLaterActualCleanupFacts(t *testing.T) {
 	f, store, id := newRTPStepFixture(t)
 	ctx := context.Background()
-	_, err := store.AddRTPResourceStep(ctx, id, 2, rtpStepIdentity(1))
+	identity := rtpStepIdentity(1)
+	identity.TCPMode = 0 // The ingress-drained result is qualified only for UDP.
+	_, err := store.AddRTPResourceStep(ctx, id, 2, identity)
 	require.NoError(t, err)
 	_, work, err := store.DispatchRTPResourceWork(ctx, id, 3, rtpStepIdentity(1).StepID)
 	require.NoError(t, err)

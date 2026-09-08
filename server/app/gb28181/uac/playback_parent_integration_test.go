@@ -152,9 +152,14 @@ func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
 			stop()
 			if tc.failFinalSQL {
 				require.NoError(t, db.Exec(`CREATE TRIGGER deny_parent_local_fact BEFORE UPDATE ON gb_device_operation_intent
-					WHEN NEW.rtp_steps_json LIKE '%"localQuiescedAt":%'
+					WHEN json_type(NEW.rtp_steps_json, '$.steps[0].localQuiescedAt') IS NOT NULL
 					BEGIN SELECT RAISE(ABORT,'fixture final local fact unavailable'); END`).Error)
 				require.Error(t, service.Stop(ctx, created.Session.ID, "fixture finish"))
+				pendingRTP, err := store.LoadRTPResourceSteps(ctx, intent.DeviceOperationIntentIdentity)
+				require.NoError(t, err)
+				require.Equal(t, "response_observed", pendingRTP.Steps[0].ResourceCloseCall.Outcome)
+				require.Equal(t, "response_observed", pendingRTP.Steps[0].IngressCloseCall.Outcome)
+				require.Nil(t, pendingRTP.Steps[0].LocalQuiescedAt, "only the whole owner's final fact is blocked")
 				pending, ok := service.GetForOwner(created.Session.ID, "fixture-owner")
 				require.True(t, ok)
 				require.Equal(t, gbplayback.StateStopping, pending.State)

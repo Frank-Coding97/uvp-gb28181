@@ -25,6 +25,9 @@ func validRTPCloseResult(result string, ingress bool) bool {
 }
 
 func validRTPExecution(step DeviceRTPResourceStep, updated time.Time) bool {
+	if !validRTPOriginalCloseCalls(step, updated) {
+		return false
+	}
 	// Missing process identity is historical unknown, never proof of exit.
 	if step.OwnerProcessID != "" && (!validIntentID(step.OwnerProcessID) || step.OwnerRunID == "") {
 		return false
