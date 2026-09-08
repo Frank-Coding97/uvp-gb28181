@@ -14,6 +14,10 @@ type recoveryRedisRunner func(context.Context, string, string, string, string, i
 // owned process and verify their durable results before returning success.
 // Caller owns InstanceLock; no active config/data file is changed here.
 func prepareRecoveryStage(ctx context.Context, paths Paths, operation, trust string, run MaintenanceRunner, redis recoveryRedisRunner) (Paths, error) {
+	return prepareRecoveryStageWithSpace(ctx, paths, operation, trust, run, redis, recoveryAvailableSpace)
+}
+
+func prepareRecoveryStageWithSpace(ctx context.Context, paths Paths, operation, trust string, run MaintenanceRunner, redis recoveryRedisRunner, available func(string) (uint64, error)) (Paths, error) {
 	var empty Paths
 	if ctx == nil || run == nil || redis == nil {
 		return empty, errors.New("recovery staging requires offline runners")
@@ -129,6 +133,9 @@ func prepareRecoveryStage(ctx context.Context, paths Paths, operation, trust str
 			return empty, err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
+		return empty, err
+	}
+	if err := checkRecoverySpace(gate, manifest, available); err != nil {
 		return empty, err
 	}
 	sourceRedis, control := filepath.Join(work, "redis-source"), filepath.Join(work, "redis-control")
