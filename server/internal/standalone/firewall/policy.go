@@ -229,6 +229,264 @@ func joinPorts(values map[int]struct{}) string {
 	return strings.Join(result, ",")
 }
 
+type blockClassification string
+
+const (
+	blockIgnored   blockClassification = "ignored"
+	blockEffective blockClassification = "effective"
+	blockPotential blockClassification = "potential"
+)
+
+func classifyRuleStates(states []RuleState, expected []Rule, selected InterfaceInfo) []RuleState {
+	classified := make([]RuleState, 0, len(states))
+	for _, state := range states {
+		if !state.ExternalBlock {
+			classified = append(classified, state)
+			continue
+		}
+		if state.DiagnosticsTruncated || state.DetailTruncated || ruleStateDetailTruncated(state) {
+			state.DetailTruncated = true
+			state.PotentialBlock = true
+			classified = append(classified, state)
+			continue
+		}
+		classification := classifyBlockRule(state, expected, selected)
+		if classification == blockIgnored {
+			continue
+		}
+		state.PotentialBlock = classification == blockPotential
+		classified = append(classified, state)
+	}
+	return classified
+}
+
+// classifyBlockRule applies only the small set of firewall conditions that
+// can be proved from the package inputs and the selected adapter. A rule with
+// an otherwise matching scope but an explicit remote range or an additional
+// filter is potential: the launcher has no source connection to prove it is
+// the rule that blocked this package.
+func classifyBlockRule(candidate RuleState, expected []Rule, selected InterfaceInfo) blockClassification {
+	if !candidate.ExternalBlock || !candidate.Present || !candidate.Enabled || !strings.EqualFold(strings.TrimSpace(candidate.Action), "Block") || !strings.EqualFold(strings.TrimSpace(candidate.Direction), "Inbound") {
+		return blockIgnored
+	}
+	for _, want := range expected {
+		if !sameExecutable(candidate.Program, want.Program) {
+			continue
+		}
+		protocolMatch, protocolUncertain := protocolOverlap(candidate.Protocol, want.Protocol)
+		if !protocolMatch {
+			continue
+		}
+		portMatch, portUncertain := portOverlap(candidate.LocalPort, want.LocalPort)
+		if !portMatch {
+			continue
+		}
+		profileMatch, profileUncertain := scopedValue(candidate.Profile, "Private")
+		if !profileMatch {
+			continue
+		}
+		interfaceMatch, interfaceUncertain := interfaceOverlap(candidate.InterfaceAlias, want.InterfaceAlias)
+		if !interfaceMatch {
+			continue
+		}
+		localAddressMatch, localAddressUncertain := localAddressOverlap(candidate.LocalAddress, selected)
+		if !localAddressMatch {
+			continue
+		}
+		remoteMatch, remoteUncertain := remoteAddressScope(candidate.RemoteAddress)
+		if !remoteMatch {
+			continue
+		}
+
+		uncertain := protocolUncertain || portUncertain || profileUncertain || interfaceUncertain || localAddressUncertain || remoteUncertain
+		uncertain = uncertain || nonEmptyConstraint(candidate.RemotePort) || nonEmptyConstraint(candidate.Service) || nonEmptyConstraint(candidate.AppPackage) || nonEmptyConstraint(candidate.InterfaceType)
+		uncertain = uncertain || candidate.IdentityConstraint || candidate.UnknownConstraints
+		if uncertain {
+			return blockPotential
+		}
+		return blockEffective
+	}
+	return blockIgnored
+}
+
+func sameExecutable(actual, expected string) bool {
+	actual = strings.TrimSpace(actual)
+	expected = strings.TrimSpace(expected)
+	return actual != "" && expected != "" && strings.EqualFold(actual, expected)
+}
+
+func protocolOverlap(actual, expected string) (bool, bool) {
+	actual = strings.ToUpper(strings.TrimSpace(actual))
+	expected = strings.ToUpper(strings.TrimSpace(expected))
+	if actual == "ANY" {
+		return expected == "TCP" || expected == "UDP", false
+	}
+	if actual == "TCP" || actual == "UDP" {
+		return actual == expected, false
+	}
+	if actual == "" || actual == "-1" {
+		return expected == "TCP" || expected == "UDP", true
+	}
+	return false, false
+}
+
+func scopedValue(actual, expected string) (bool, bool) {
+	actual = strings.TrimSpace(actual)
+	if actual == "" {
+		return true, true
+	}
+	matched := false
+	uncertain := false
+	for _, token := range splitFirewallValues(actual) {
+		switch {
+		case strings.EqualFold(token, "Any"), strings.EqualFold(token, expected):
+			matched = true
+		case strings.EqualFold(token, "Domain"), strings.EqualFold(token, "Private"), strings.EqualFold(token, "Public"):
+			// A known profile that is not the selected one does not match,
+			// but it does not make a matching profile uncertain.
+		default:
+			uncertain = true
+		}
+	}
+	return matched, uncertain
+}
+
+func interfaceOverlap(actual, expected string) (bool, bool) {
+	actual = strings.TrimSpace(actual)
+	if strings.EqualFold(actual, "Any") {
+		return true, false
+	}
+	if actual == "" {
+		return true, true
+	}
+	for _, alias := range splitFirewallValues(actual) {
+		if strings.EqualFold(alias, strings.TrimSpace(expected)) || strings.EqualFold(alias, "Any") {
+			return true, false
+		}
+	}
+	return false, false
+}
+
+func localAddressOverlap(actual string, selected InterfaceInfo) (bool, bool) {
+	actual = strings.TrimSpace(actual)
+	if strings.EqualFold(actual, "Any") {
+		return true, false
+	}
+	if actual == "" {
+		return true, true
+	}
+	selectedAddresses := make(map[string]struct{}, len(selected.IPv4))
+	for _, raw := range selected.IPv4 {
+		if address, ok := parseIPv4(strings.TrimSpace(raw)); ok {
+			selectedAddresses[address.String()] = struct{}{}
+		}
+	}
+	uncertain := false
+	matched := false
+	for _, token := range splitFirewallValues(actual) {
+		if address, ok := parseIPv4(token); ok {
+			if _, exists := selectedAddresses[address.String()]; exists {
+				matched = true
+			}
+			continue
+		}
+		if strings.EqualFold(token, "Any") {
+			return true, false
+		}
+		uncertain = true
+	}
+	if matched {
+		return true, uncertain
+	}
+	return uncertain, uncertain
+}
+
+func remoteAddressScope(actual string) (bool, bool) {
+	actual = strings.TrimSpace(actual)
+	if strings.EqualFold(actual, "Any") || strings.EqualFold(actual, "LocalSubnet") {
+		return true, false
+	}
+	if actual == "" {
+		return true, true
+	}
+	// An explicit address could match the peer, but the launcher has no peer
+	// address in this readback. Keep it visible as a potential diagnostic.
+	return true, true
+}
+
+func nonEmptyConstraint(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !strings.EqualFold(value, "Any")
+}
+
+func portOverlap(actual, expected string) (bool, bool) {
+	actualRanges, actualAny, actualUnknown := parsePortRanges(actual)
+	expectedRanges, expectedAny, expectedUnknown := parsePortRanges(expected)
+	if actualAny {
+		return !expectedUnknown, expectedUnknown
+	}
+	if expectedAny {
+		return !actualUnknown, actualUnknown
+	}
+	for _, left := range actualRanges {
+		for _, right := range expectedRanges {
+			if left.start <= right.end && right.start <= left.end {
+				return true, actualUnknown || expectedUnknown
+			}
+		}
+	}
+	if actualUnknown {
+		return true, true
+	}
+	return false, false
+}
+
+type firewallPortRange struct {
+	start int
+	end   int
+}
+
+func parsePortRanges(value string) ([]firewallPortRange, bool, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, false, true
+	}
+	var ranges []firewallPortRange
+	unknown := false
+	for _, token := range splitFirewallValues(value) {
+		if strings.EqualFold(token, "Any") {
+			return nil, true, false
+		}
+		if port, err := strconv.Atoi(token); err == nil && port >= 1 && port <= 65535 {
+			ranges = append(ranges, firewallPortRange{start: port, end: port})
+			continue
+		}
+		parts := strings.Split(token, "-")
+		if len(parts) == 2 {
+			start, startErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+			end, endErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if startErr == nil && endErr == nil && start >= 1 && end <= 65535 && start <= end {
+				ranges = append(ranges, firewallPortRange{start: start, end: end})
+				continue
+			}
+		}
+		unknown = true
+	}
+	return ranges, false, unknown
+}
+
+func splitFirewallValues(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
+}
+
 // RuleNames returns deterministic owned names for an absolute instance root.
 // Invalid roots return nil; callers handling user input must validate first.
 func RuleNames(root string) []string {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"sort"
+	"strings"
 
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
 )
@@ -48,6 +50,9 @@ const (
 	ReasonElevationFailed          Reason = "elevation_failed"
 	ReasonRuleDrift                Reason = "rule_drift"
 	ReasonRuleConflict             Reason = "rule_conflict"
+	ReasonPotentialBlock           Reason = "potential_block"
+	ReasonEffectiveBlockRule       Reason = "effective_block_rule"
+	ReasonDiagnosticTruncated      Reason = "diagnostic_truncated"
 )
 
 // Error is an intentionally bounded firewall operation error.
@@ -146,6 +151,38 @@ type RuleState struct {
 	Present  bool   `json:"present"`
 	Matches  bool   `json:"matches"`
 	Conflict bool   `json:"conflict,omitempty"`
+
+	// ExternalBlock marks a rule returned by the bounded ActiveStore scan. It
+	// is diagnostic data only and is never an owned mutation target.
+	ExternalBlock bool `json:"external_block,omitempty"`
+	// PotentialBlock means the rule shares the package's executable/port scope
+	// but has a constraint the adapter cannot prove from local state.
+	PotentialBlock bool `json:"potential_block,omitempty"`
+	// DiagnosticsTruncated means the bounded ActiveStore scan found more
+	// package candidates than it can safely return.
+	DiagnosticsTruncated bool `json:"diagnostics_truncated,omitempty"`
+	// DetailTruncated means one normalized external field exceeded the response
+	// bound; the caller must not treat that readback as complete.
+	DetailTruncated bool `json:"detail_truncated,omitempty"`
+
+	// The following fields are bounded, normalized details for an external
+	// block. They intentionally omit command output and security identities.
+	Program            string `json:"program,omitempty"`
+	Protocol           string `json:"protocol,omitempty"`
+	LocalPort          string `json:"local_port,omitempty"`
+	RemotePort         string `json:"remote_port,omitempty"`
+	Enabled            bool   `json:"enabled,omitempty"`
+	Direction          string `json:"direction,omitempty"`
+	Action             string `json:"action,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	LocalAddress       string `json:"local_address,omitempty"`
+	RemoteAddress      string `json:"remote_address,omitempty"`
+	InterfaceAlias     string `json:"interface_alias,omitempty"`
+	InterfaceType      string `json:"interface_type,omitempty"`
+	Service            string `json:"service,omitempty"`
+	AppPackage         string `json:"app_package,omitempty"`
+	IdentityConstraint bool   `json:"identity_constraint,omitempty"`
+	UnknownConstraints bool   `json:"unknown_constraints,omitempty"`
 }
 
 // Result is the bounded result of one operation.
@@ -155,6 +192,7 @@ type Result struct {
 	Converged   bool        `json:"converged"`
 	InterfaceID string      `json:"interface_id,omitempty"`
 	Rules       []RuleState `json:"rules,omitempty"`
+	Warnings    []Reason    `json:"warnings,omitempty"`
 	Reason      Reason      `json:"reason,omitempty"`
 }
 
@@ -231,6 +269,14 @@ func (s *Service) Status(ctx context.Context) (Result, error) {
 		var matchingStates []RuleState
 		var mismatchStates []RuleState
 		var matchingInterface string
+		var effectiveMismatchStates []RuleState
+		var effectiveMismatchInterface string
+		var effectiveMatchingStates []RuleState
+		var effectiveMatchingInterface string
+		var diagnosticMismatchStates []RuleState
+		var diagnosticMismatchInterface string
+		var diagnosticMatchingStates []RuleState
+		var diagnosticMatchingInterface string
 		matches := 0
 		validCandidates := 0
 		for _, candidate := range interfaces {
@@ -246,43 +292,83 @@ func (s *Service) Status(ctx context.Context) (Result, error) {
 			states, inspectErr := s.adapter.Inspect(ctx, rules)
 			if inspectErr != nil {
 				inspectErr = adapterError(inspectErr)
-				return Result{Action: ActionStatus, Rules: states, Reason: reasonOf(inspectErr)}, inspectErr
+				return Result{Action: ActionStatus, Rules: boundRuleStates(states), Reason: reasonOf(inspectErr)}, inspectErr
 			}
+			states = classifyRuleStates(states, rules, chosen)
 			if allMatching(states) {
 				matches++
 				matchingStates = states
 				matchingInterface = chosen.ID
+				if hasEffectiveBlock(states) {
+					effectiveMatchingStates = states
+					effectiveMatchingInterface = chosen.ID
+				}
+				if hasDiagnosticTruncation(states) {
+					diagnosticMatchingStates = states
+					diagnosticMatchingInterface = chosen.ID
+				}
 			} else {
 				mismatchStates = states
+				if hasEffectiveBlock(states) {
+					effectiveMismatchStates = states
+					effectiveMismatchInterface = chosen.ID
+				}
+				if hasDiagnosticTruncation(states) {
+					diagnosticMismatchStates = states
+					diagnosticMismatchInterface = chosen.ID
+				}
 			}
 		}
 		if matches == 1 {
-			return Result{Action: ActionStatus, Success: true, Converged: true, InterfaceID: matchingInterface, Rules: matchingStates}, nil
+			if effectiveMatchingStates != nil {
+				result := Result{Action: ActionStatus, Success: false, Converged: true, InterfaceID: effectiveMatchingInterface, Rules: boundRuleStates(effectiveMatchingStates), Warnings: blockWarnings(effectiveMatchingStates), Reason: ReasonEffectiveBlockRule}
+				return result, errorFor(ReasonEffectiveBlockRule)
+			}
+			result := Result{Action: ActionStatus, Success: true, Converged: true, InterfaceID: matchingInterface, Rules: boundRuleStates(matchingStates), Warnings: blockWarnings(matchingStates)}
+			if hasDiagnosticTruncation(matchingStates) {
+				result.Success = false
+				result.Reason = ReasonDiagnosticTruncated
+				return result, errorFor(ReasonDiagnosticTruncated)
+			}
+			return result, nil
 		}
 		if matches > 1 {
+			if diagnosticMatchingStates != nil {
+				result := Result{Action: ActionStatus, Success: false, InterfaceID: diagnosticMatchingInterface, Rules: boundRuleStates(diagnosticMatchingStates), Warnings: blockWarnings(diagnosticMatchingStates), Reason: ReasonDiagnosticTruncated}
+				return result, errorFor(ReasonDiagnosticTruncated)
+			}
 			return Result{Action: ActionStatus, Success: true, Reason: ReasonInterfaceAmbiguous}, nil
 		}
+		expected := make([]Rule, 0, 4)
 		if validCandidates > 0 {
+			if effectiveMismatchStates != nil {
+				result := Result{Action: ActionStatus, Success: false, Converged: false, InterfaceID: effectiveMismatchInterface, Rules: boundRuleStates(effectiveMismatchStates), Warnings: blockWarnings(effectiveMismatchStates), Reason: ReasonEffectiveBlockRule}
+				return result, errorFor(ReasonEffectiveBlockRule)
+			}
+			if diagnosticMismatchStates != nil {
+				result := Result{Action: ActionStatus, Success: false, Converged: false, InterfaceID: diagnosticMismatchInterface, Rules: boundRuleStates(diagnosticMismatchStates), Warnings: blockWarnings(diagnosticMismatchStates), Reason: ReasonDiagnosticTruncated}
+				return result, errorFor(ReasonDiagnosticTruncated)
+			}
 			reason := ReasonRuleDrift
 			if hasConflict(mismatchStates) {
 				reason = ReasonRuleConflict
 			}
-			return Result{Action: ActionStatus, Success: true, Converged: false, Rules: mismatchStates, Reason: reason}, nil
+			return Result{Action: ActionStatus, Success: true, Converged: false, Rules: boundRuleStates(mismatchStates), Warnings: blockWarnings(mismatchStates), Reason: reason}, nil
 		}
-		expected := make([]Rule, 0, 4)
 		for _, name := range RuleNames(inputs.CanonicalRoot) {
 			expected = append(expected, Rule{Name: name, Group: RuleGroup(inputs.CanonicalRoot)})
 		}
 		states, err := s.adapter.Inspect(ctx, expected)
 		if err != nil {
 			err = adapterError(err)
-			return Result{Action: ActionStatus, Rules: states, Reason: reasonOf(err)}, err
+			return Result{Action: ActionStatus, Rules: boundRuleStates(states), Reason: reasonOf(err)}, err
 		}
+		states = classifyRuleStates(states, expected, InterfaceInfo{})
 		reason := ReasonRuleDrift
 		if hasConflict(states) {
 			reason = ReasonRuleConflict
 		}
-		return Result{Action: ActionStatus, Success: true, Converged: false, Rules: states, Reason: reason}, nil
+		return Result{Action: ActionStatus, Success: true, Converged: false, Rules: boundRuleStates(states), Warnings: blockWarnings(states), Reason: reason}, nil
 	})
 }
 
@@ -343,11 +429,13 @@ func (s *Service) Remove(ctx context.Context, _ ...string) (Result, error) {
 		states, err := s.adapter.Inspect(ctx, expected)
 		if err != nil {
 			err = adapterError(err)
-			result.Rules = states
+			result.Rules = boundRuleStates(states)
 			result.Reason = reasonOf(err)
 			return result, err
 		}
-		result.Rules = states
+		states = classifyRuleStates(states, expected, InterfaceInfo{})
+		result.Rules = boundRuleStates(states)
+		result.Warnings = blockWarnings(states)
 		result.Success = nonePresent(states)
 		result.Converged = result.Success
 		if !result.Success {
@@ -402,6 +490,7 @@ func (s *Service) mutate(ctx context.Context, action Action, interfaceID string,
 			result.Reason = reasonOf(err)
 			return result, err
 		}
+		existing = classifyRuleStates(existing, rules, chosen)
 		if hasConflict(existing) {
 			result.Reason = ReasonRuleConflict
 			return result, errorFor(ReasonRuleConflict)
@@ -414,14 +503,26 @@ func (s *Service) mutate(ctx context.Context, action Action, interfaceID string,
 		states, err := s.adapter.Inspect(ctx, rules)
 		if err != nil {
 			err = adapterError(err)
-			result.Rules = states
+			result.Rules = boundRuleStates(states)
 			result.Reason = reasonOf(err)
 			return result, err
 		}
-		result.Rules = states
+		states = classifyRuleStates(states, rules, chosen)
+		result.Rules = boundRuleStates(states)
+		result.Warnings = blockWarnings(states)
 		if action == ActionApply {
-			result.Success = allMatching(states)
-			result.Converged = result.Success
+			result.Converged = allMatching(states)
+			if hasEffectiveBlock(states) {
+				result.Success = false
+				result.Reason = ReasonEffectiveBlockRule
+				return result, errorFor(ReasonEffectiveBlockRule)
+			}
+			if hasDiagnosticTruncation(states) {
+				result.Success = false
+				result.Reason = ReasonDiagnosticTruncated
+				return result, errorFor(ReasonDiagnosticTruncated)
+			}
+			result.Success = result.Converged
 			if !result.Success {
 				if hasConflict(states) {
 					result.Reason = ReasonRuleConflict
@@ -444,7 +545,136 @@ func (s *Service) mutate(ctx context.Context, action Action, interfaceID string,
 
 func hasConflict(states []RuleState) bool {
 	for _, state := range states {
-		if state.Conflict {
+		if !state.ExternalBlock && state.Conflict {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEffectiveBlock(states []RuleState) bool {
+	for _, state := range states {
+		if state.ExternalBlock && !state.PotentialBlock && !state.DiagnosticsTruncated && !state.DetailTruncated {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDiagnosticTruncation(states []RuleState) bool {
+	for _, state := range states {
+		if state.ExternalBlock && (state.DiagnosticsTruncated || state.DetailTruncated) {
+			return true
+		}
+	}
+	return false
+}
+
+func blockWarnings(states []RuleState) []Reason {
+	var warnings []Reason
+	for _, state := range states {
+		if !state.ExternalBlock {
+			continue
+		}
+		if state.PotentialBlock && !containsReason(warnings, ReasonPotentialBlock) {
+			warnings = append(warnings, ReasonPotentialBlock)
+		}
+		if (state.DiagnosticsTruncated || state.DetailTruncated) && !containsReason(warnings, ReasonDiagnosticTruncated) {
+			warnings = append(warnings, ReasonDiagnosticTruncated)
+		}
+	}
+	return warnings
+}
+
+func containsReason(reasons []Reason, want Reason) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	maxFirewallRuleStates = 20
+	maxFirewallDetailLen  = 256
+)
+
+func boundFirewallDetail(value string) string {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) <= maxFirewallDetailLen {
+		return value
+	}
+	return string([]rune(value)[:maxFirewallDetailLen])
+}
+
+func boundRuleStates(states []RuleState) []RuleState {
+	owned := make([]RuleState, 0, len(states))
+	external := make([]RuleState, 0, len(states))
+	seenExternal := make(map[string]struct{})
+	for _, state := range states {
+		if state.ExternalBlock && ruleStateDetailTruncated(state) {
+			state.DetailTruncated = true
+		}
+		state.Name = boundFirewallDetail(state.Name)
+		state.Group = boundFirewallDetail(state.Group)
+		state.Program = boundFirewallDetail(state.Program)
+		state.Protocol = boundFirewallDetail(state.Protocol)
+		state.LocalPort = boundFirewallDetail(state.LocalPort)
+		state.RemotePort = boundFirewallDetail(state.RemotePort)
+		state.Direction = boundFirewallDetail(state.Direction)
+		state.Action = boundFirewallDetail(state.Action)
+		state.Profile = boundFirewallDetail(state.Profile)
+		state.LocalAddress = boundFirewallDetail(state.LocalAddress)
+		state.RemoteAddress = boundFirewallDetail(state.RemoteAddress)
+		state.InterfaceAlias = boundFirewallDetail(state.InterfaceAlias)
+		state.InterfaceType = boundFirewallDetail(state.InterfaceType)
+		state.Service = boundFirewallDetail(state.Service)
+		state.AppPackage = boundFirewallDetail(state.AppPackage)
+		if !state.ExternalBlock {
+			owned = append(owned, state)
+			continue
+		}
+		key := strings.ToLower(state.Name)
+		if key == "" {
+			key = strings.ToLower(strings.Join([]string{state.Program, state.Protocol, state.LocalPort, state.RemoteAddress, state.InterfaceAlias, state.InterfaceType}, "|"))
+		}
+		if _, exists := seenExternal[key]; exists {
+			continue
+		}
+		seenExternal[key] = struct{}{}
+		external = append(external, state)
+	}
+	sort.SliceStable(external, func(i, j int) bool {
+		if !strings.EqualFold(external[i].Name, external[j].Name) {
+			return strings.ToLower(external[i].Name) < strings.ToLower(external[j].Name)
+		}
+		if external[i].PotentialBlock != external[j].PotentialBlock {
+			return !external[i].PotentialBlock
+		}
+		return external[i].Program < external[j].Program
+	})
+	if len(owned) > maxFirewallRuleStates {
+		owned = owned[:maxFirewallRuleStates]
+	}
+	remaining := maxFirewallRuleStates - len(owned)
+	if remaining < 0 {
+		remaining = 0
+	}
+	if len(external) > remaining {
+		external = external[:remaining]
+	}
+	return append(owned, external...)
+}
+
+func ruleStateDetailTruncated(state RuleState) bool {
+	for _, value := range []string{
+		state.Name, state.Group, state.Program, state.Protocol, state.LocalPort,
+		state.RemotePort, state.Direction, state.Action, state.Profile,
+		state.LocalAddress, state.RemoteAddress, state.InterfaceAlias,
+		state.InterfaceType, state.Service, state.AppPackage,
+	} {
+		if len([]rune(strings.TrimSpace(value))) > maxFirewallDetailLen {
 			return true
 		}
 	}
@@ -466,6 +696,7 @@ func adapterError(err error) error {
 }
 
 func allPresent(states []RuleState) bool {
+	states = ownedRuleStates(states)
 	if len(states) != 4 {
 		return false
 	}
@@ -478,6 +709,7 @@ func allPresent(states []RuleState) bool {
 }
 
 func allMatching(states []RuleState) bool {
+	states = ownedRuleStates(states)
 	if len(states) != 4 {
 		return false
 	}
@@ -490,6 +722,7 @@ func allMatching(states []RuleState) bool {
 }
 
 func nonePresent(states []RuleState) bool {
+	states = ownedRuleStates(states)
 	if len(states) != 4 {
 		return false
 	}
@@ -499,6 +732,16 @@ func nonePresent(states []RuleState) bool {
 		}
 	}
 	return true
+}
+
+func ownedRuleStates(states []RuleState) []RuleState {
+	owned := make([]RuleState, 0, len(states))
+	for _, state := range states {
+		if !state.ExternalBlock && !state.PotentialBlock && !state.DiagnosticsTruncated {
+			owned = append(owned, state)
+		}
+	}
+	return owned
 }
 
 // parseIPv4 is shared by policy and adapter-facing tests.

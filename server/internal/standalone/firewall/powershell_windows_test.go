@@ -20,9 +20,22 @@ func TestPowerShellFirewallScriptUsesBoundedUTF8AndInterfaceFilter(t *testing.T)
 		"Group = [string]$item.group",
 		"Get-NetFirewallRule -Name $name -ErrorAction Stop",
 		"CmdletizationQuery_NotFound_*,Get-NetFirewallRule",
+		"Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True -Direction Inbound -Action Block",
+		"Get-NetFirewallServiceFilter -AssociatedNetFirewallRule",
+		"Get-NetFirewallSecurityFilter -AssociatedNetFirewallRule",
+		"Get-NetFirewallInterfaceTypeFilter -AssociatedNetFirewallRule",
+		"remote_port = BoundedString $remotePort",
+		"enabled = [bool]$rule.Enabled",
+		"external_block = $true",
+		"detail_truncated = [bool]$detailTruncated",
+		"function DetailTooLong",
+		"diagnostics_truncated = $true",
+		"BoundedString",
+		"$externalBlockCount -gt 8",
+		"$expectedPrograms = @($request.rules | Where-Object { [string]$_.program -ne '' }",
 	} {
 		if !strings.Contains(powerShellFirewallScript, fragment) {
-			t.Fatalf("PowerShell script missing required fragment")
+			t.Fatalf("PowerShell script missing required fragment: %q", fragment)
 		}
 	}
 }

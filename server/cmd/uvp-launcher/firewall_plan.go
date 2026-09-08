@@ -105,7 +105,7 @@ var firewallExitReasons = []firewall.Reason{
 	"configuration_unavailable", "database_unavailable", "sip_config_missing",
 	"adapter_unavailable", "permission_denied", "readback_failed", "operation_failed",
 	"unsupported_platform", "confirmation_required", "elevation_canceled", "elevation_failed",
-	"rule_drift", "rule_conflict",
+	"rule_drift", "rule_conflict", "effective_block_rule", "diagnostic_truncated",
 }
 
 func firewallExitCode(reason firewall.Reason) int {
@@ -138,8 +138,11 @@ func (a *confirmedFirewallAdapter) Inspect(ctx context.Context, rules []firewall
 }
 
 func reportFirewallChildFailure(ctx context.Context, options firewallCommandOptions, action firewall.Action, childErr error) int {
-	result, _ := firewall.NewService(options.adapter(), options.load).Status(ctx)
-	result.Action, result.Success, result.Converged = action, false, false
+	var result firewall.Result
+	if options.adapter != nil && options.load != nil {
+		result, _ = firewall.NewService(options.adapter(), options.load).Status(ctx)
+	}
+	result.Action, result.Success = action, false
 	result.Reason = firewall.ReasonOf(childErr)
 	return writeFirewallResult(options, result)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -154,17 +155,18 @@ func TestRuleNamesAreStableAndInstanceScoped(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	mu          sync.Mutex
-	ifaces      []InterfaceInfo
-	rules       map[string]Rule
-	foreign     map[string]Rule
-	maxInFlight int
-	inFlight    int
-	upsertCalls int
-	removeCalls int
-	block       <-chan struct{}
-	reached     chan struct{}
-	mismatch    bool
+	mu             sync.Mutex
+	ifaces         []InterfaceInfo
+	rules          map[string]Rule
+	foreign        map[string]Rule
+	externalBlocks []RuleState
+	maxInFlight    int
+	inFlight       int
+	upsertCalls    int
+	removeCalls    int
+	block          <-chan struct{}
+	reached        chan struct{}
+	mismatch       bool
 }
 
 func newFakeAdapter() *fakeAdapter {
@@ -220,6 +222,7 @@ func (a *fakeAdapter) Inspect(_ context.Context, expected []Rule) ([]RuleState, 
 		}
 		states = append(states, RuleState{Name: want.Name, Group: got.Group, Present: present, Matches: matches, Conflict: conflict})
 	}
+	states = append(states, a.externalBlocks...)
 	return states, nil
 }
 
@@ -354,6 +357,198 @@ func TestServiceStatusReportsForeignGroupConflict(t *testing.T) {
 	}
 	if len(result.Rules) != 4 || !result.Rules[0].Conflict {
 		t.Fatalf("foreign status rules = %+v", result.Rules)
+	}
+}
+
+func TestServiceStatusSelectsTheOnlyConvergedInterface(t *testing.T) {
+	inputs := testInputs(t)
+	adapter := newFakeAdapter()
+	second := testInterface()
+	second.ID = "87654321-4321-4321-4321-abcdefabcdef"
+	second.Alias = "Wi-Fi"
+	adapter.ifaces = []InterfaceInfo{testInterface(), second}
+	rules, err := BuildRules(inputs, testInterface())
+	if err != nil {
+		t.Fatalf("BuildRules() error = %v", err)
+	}
+	for _, rule := range rules {
+		adapter.rules[rule.Name] = rule
+	}
+
+	service := NewService(adapter, func(context.Context) (Inputs, error) { return inputs, nil })
+	result, err := service.Status(context.Background())
+	if err != nil || !result.Success || !result.Converged || result.InterfaceID != testGUID {
+		t.Fatalf("status = %+v, err=%v", result, err)
+	}
+}
+
+func TestClassifyExternalBlockUsesConservativeIntersection(t *testing.T) {
+	inputs := testInputs(t)
+	iface := testInterface()
+	rules, err := BuildRules(inputs, iface)
+	if err != nil {
+		t.Fatalf("BuildRules() error = %v", err)
+	}
+	base := RuleState{
+		ExternalBlock:  true,
+		Present:        true,
+		Program:        inputs.MediaExe,
+		Protocol:       "TCP",
+		LocalPort:      "Any",
+		Direction:      "Inbound",
+		Action:         "Block",
+		Profile:        "Private",
+		LocalAddress:   "Any",
+		RemoteAddress:  "Any",
+		InterfaceAlias: iface.Alias,
+		Enabled:        true,
+	}
+	cases := []struct {
+		name  string
+		block RuleState
+		want  blockClassification
+	}{
+		{name: "same media exe any protocol and port", block: base, want: blockEffective},
+		{name: "any protocol", block: func() RuleState { b := base; b.Protocol = "Any"; return b }(), want: blockEffective},
+		{name: "any profile", block: func() RuleState { b := base; b.Profile = "Any"; return b }(), want: blockEffective},
+		{name: "private among multiple profiles", block: func() RuleState { b := base; b.Profile = "Domain, Private, Public"; return b }(), want: blockEffective},
+		{name: "local subnet remote scope", block: func() RuleState { b := base; b.RemoteAddress = "LocalSubnet"; return b }(), want: blockEffective},
+		{name: "target among multiple interfaces", block: func() RuleState { b := base; b.InterfaceAlias = "Wi-Fi," + iface.Alias; return b }(), want: blockEffective},
+		{name: "disabled ignored", block: func() RuleState { b := base; b.Enabled = false; return b }(), want: blockIgnored},
+		{name: "outbound ignored", block: func() RuleState { b := base; b.Direction = "Outbound"; return b }(), want: blockIgnored},
+		{name: "allow ignored", block: func() RuleState { b := base; b.Action = "Allow"; return b }(), want: blockIgnored},
+		{name: "target local address", block: func() RuleState { b := base; b.LocalAddress = iface.IPv4[0]; return b }(), want: blockEffective},
+		{name: "intersecting local port", block: func() RuleState { b := base; b.LocalPort = "80,40000-40001"; return b }(), want: blockEffective},
+		{name: "explicit remote is only potential", block: func() RuleState { b := base; b.RemoteAddress = "192.168.10.0/24"; return b }(), want: blockPotential},
+		{name: "other program ignored", block: func() RuleState { b := base; b.Program = filepath.Join(inputs.CanonicalRoot, "other.exe"); return b }(), want: blockIgnored},
+		{name: "other port ignored", block: func() RuleState { b := base; b.LocalPort = "1"; return b }(), want: blockIgnored},
+		{name: "other protocol ignored", block: func() RuleState { b := base; b.Protocol = "ICMP"; return b }(), want: blockIgnored},
+		{name: "other profile ignored", block: func() RuleState { b := base; b.Profile = "Public"; return b }(), want: blockIgnored},
+		{name: "other interface ignored", block: func() RuleState { b := base; b.InterfaceAlias = "Wi-Fi"; return b }(), want: blockIgnored},
+		{name: "other local address ignored", block: func() RuleState { b := base; b.LocalAddress = "192.168.10.53"; return b }(), want: blockIgnored},
+		{name: "service constraint is only potential", block: func() RuleState { b := base; b.Service = "SomeService"; return b }(), want: blockPotential},
+		{name: "remote port constraint is only potential", block: func() RuleState { b := base; b.RemotePort = "9000"; return b }(), want: blockPotential},
+		{name: "app package constraint is only potential", block: func() RuleState { b := base; b.AppPackage = "Example.Package"; return b }(), want: blockPotential},
+		{name: "identity constraint is only potential", block: func() RuleState { b := base; b.IdentityConstraint = true; return b }(), want: blockPotential},
+		{name: "unknown constraint is only potential", block: func() RuleState { b := base; b.UnknownConstraints = true; return b }(), want: blockPotential},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyBlockRule(tc.block, rules, iface); got != tc.want {
+				t.Fatalf("classification = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServiceReportsExternalBlockWithoutLosingOwnedConvergence(t *testing.T) {
+	inputs := testInputs(t)
+	adapter := newFakeAdapter()
+	adapter.externalBlocks = []RuleState{{
+		Name:           "Query User MediaServer.exe",
+		ExternalBlock:  true,
+		Present:        true,
+		Program:        inputs.MediaExe,
+		Protocol:       "TCP",
+		LocalPort:      "Any",
+		Direction:      "Inbound",
+		Action:         "Block",
+		Profile:        "Private",
+		LocalAddress:   "Any",
+		RemoteAddress:  "Any",
+		InterfaceAlias: "Any",
+		Enabled:        true,
+	}}
+	service := NewService(adapter, func(context.Context) (Inputs, error) { return inputs, nil })
+	result, err := service.Apply(context.Background(), testGUID)
+	if reasonOf(err) != ReasonEffectiveBlockRule || result.Success || !result.Converged || result.Reason != ReasonEffectiveBlockRule {
+		t.Fatalf("effective block result = %+v, err=%v", result, err)
+	}
+	if adapter.upsertCalls != 1 || len(adapter.rules) != 4 {
+		t.Fatalf("owned mutation = calls %d rules %d", adapter.upsertCalls, len(adapter.rules))
+	}
+	if len(result.Rules) != 5 || !result.Rules[4].ExternalBlock {
+		t.Fatalf("block diagnostics = %+v", result.Rules)
+	}
+}
+
+func TestServicePotentialBlockIsWarningAndRemoveLeavesItUntouched(t *testing.T) {
+	inputs := testInputs(t)
+	adapter := newFakeAdapter()
+	block := RuleState{
+		Name:           "Query User MediaServer.exe",
+		ExternalBlock:  true,
+		Present:        true,
+		Program:        inputs.MediaExe,
+		Protocol:       "TCP",
+		LocalPort:      "Any",
+		Direction:      "Inbound",
+		Action:         "Block",
+		Profile:        "Private",
+		LocalAddress:   "Any",
+		RemoteAddress:  "192.168.10.0/24",
+		InterfaceAlias: "Any",
+		Enabled:        true,
+	}
+	adapter.externalBlocks = []RuleState{block}
+	service := NewService(adapter, func(context.Context) (Inputs, error) { return inputs, nil })
+	result, err := service.Apply(context.Background(), testGUID)
+	if err != nil || !result.Success || !result.Converged || len(result.Warnings) != 1 || result.Warnings[0] != ReasonPotentialBlock {
+		t.Fatalf("potential block result = %+v, err=%v", result, err)
+	}
+	removed, err := service.Remove(context.Background())
+	if err != nil || !removed.Success || !removed.Converged {
+		t.Fatalf("remove = %+v, err=%v", removed, err)
+	}
+	if adapter.removeCalls != 1 || len(adapter.externalBlocks) != 1 || adapter.externalBlocks[0].Name != block.Name {
+		t.Fatalf("external block changed on remove: %+v", adapter.externalBlocks)
+	}
+}
+
+func TestBoundRuleStatesDeduplicatesAndBoundsExternalDetails(t *testing.T) {
+	longName := strings.Repeat("n", maxFirewallDetailLen+50)
+	longProgram := strings.Repeat("p", maxFirewallDetailLen+50)
+	states := make([]RuleState, 0, maxFirewallRuleStates+4)
+	for i := 0; i < maxFirewallRuleStates+4; i++ {
+		states = append(states, RuleState{
+			Name:          longName,
+			ExternalBlock: true,
+			Present:       true,
+			Program:       longProgram,
+		})
+	}
+	got := boundRuleStates(states)
+	if len(got) != 1 {
+		t.Fatalf("bounded states = %d, want one deduplicated detail", len(got))
+	}
+	if len([]rune(got[0].Name)) > maxFirewallDetailLen || len([]rune(got[0].Program)) > maxFirewallDetailLen {
+		t.Fatalf("unbounded details = %+v", got[0])
+	}
+	if !got[0].DetailTruncated {
+		t.Fatalf("long external detail was not marked truncated: %+v", got[0])
+	}
+}
+
+func TestServiceDoesNotClaimSuccessOnTruncatedExternalDetail(t *testing.T) {
+	inputs := testInputs(t)
+	adapter := newFakeAdapter()
+	adapter.externalBlocks = []RuleState{{
+		Name:          "long-block",
+		ExternalBlock: true,
+		Present:       true,
+		Program:       strings.Repeat("p", maxFirewallDetailLen+1),
+		Protocol:      "TCP",
+		LocalPort:     "Any",
+		Direction:     "Inbound",
+		Action:        "Block",
+		Profile:       "Private",
+		RemoteAddress: "Any",
+		Enabled:       true,
+	}}
+	service := NewService(adapter, func(context.Context) (Inputs, error) { return inputs, nil })
+	result, err := service.Apply(context.Background(), testGUID)
+	if reasonOf(err) != ReasonDiagnosticTruncated || result.Success || !result.Converged || result.Reason != ReasonDiagnosticTruncated {
+		t.Fatalf("truncated block result = %+v, err=%v", result, err)
 	}
 }
 

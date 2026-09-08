@@ -56,11 +56,12 @@ func launcherInputs(t *testing.T) firewall.Inputs {
 }
 
 type launcherAdapter struct {
-	mu      sync.Mutex
-	iface   firewall.InterfaceInfo
-	rules   map[string]firewall.Rule
-	upserts int
-	removes int
+	mu             sync.Mutex
+	iface          firewall.InterfaceInfo
+	rules          map[string]firewall.Rule
+	externalBlocks []firewall.RuleState
+	upserts        int
+	removes        int
 }
 
 func newLauncherAdapter() *launcherAdapter {
@@ -92,6 +93,7 @@ func (a *launcherAdapter) Inspect(_ context.Context, expected []firewall.Rule) (
 		}
 		states = append(states, firewall.RuleState{Name: want.Name, Present: present, Matches: matches})
 	}
+	states = append(states, a.externalBlocks...)
 	return states, nil
 }
 
@@ -130,7 +132,14 @@ func TestFirewallPublicMutationPreviewsAndElevatesOnlyAfterYes(t *testing.T) {
 		adapter:  func() firewall.Adapter { return adapter },
 		elevate: func(_ context.Context, action firewall.Action, id string, planHash string) error {
 			elevatedAction, elevatedID = action, id
-			return nil
+			if adapter.upserts != 0 {
+				t.Fatal("public preview mutated rules before elevation")
+			}
+			rules, err := firewall.BuildRules(inputs, adapter.iface)
+			if err != nil {
+				return err
+			}
+			return adapter.Upsert(context.Background(), rules)
 		},
 	}
 	if code := runFirewallPublic([]string{"apply", "--interface-id", testGUIDForLauncher, "--yes"}, options); code != 0 {
@@ -142,8 +151,8 @@ func TestFirewallPublicMutationPreviewsAndElevatesOnlyAfterYes(t *testing.T) {
 	if !bytes.Contains(out.Bytes(), []byte("preview")) || !bytes.Contains(out.Bytes(), []byte("30000-35000")) {
 		t.Fatalf("preview omitted bounded rule details: %s", out.String())
 	}
-	if adapter.upserts != 0 {
-		t.Fatal("public preview mutated rules before elevation")
+	if adapter.upserts != 1 {
+		t.Fatalf("elevation mutation count = %d, want 1", adapter.upserts)
 	}
 
 	out.Reset()
@@ -156,7 +165,8 @@ func TestFirewallPublicMutationPreviewsAndElevatesOnlyAfterYes(t *testing.T) {
 		t.Fatal("confirmation rejection still elevated")
 	}
 	var result firewall.Result
-	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()[bytes.LastIndex(out.Bytes(), []byte("{")):]), &result); err != nil {
+	lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
+	if err := json.Unmarshal(lines[len(lines)-1], &result); err != nil {
 		t.Fatalf("decode rejection result: %v (%s)", err, out.String())
 	}
 	if result.Reason != firewall.ReasonConfirmationRequired {
@@ -184,6 +194,88 @@ func TestFirewallInternalMutationUsesServiceReadback(t *testing.T) {
 	}
 	if !result.Success || result.Reason != "" || adapter.upserts != 1 {
 		t.Fatalf("internal result = %+v, upserts=%d", result, adapter.upserts)
+	}
+}
+
+func TestFirewallPublicApplyReadsBackExternalBlockDiagnostics(t *testing.T) {
+	inputs := launcherInputs(t)
+	adapter := newLauncherAdapter()
+	adapter.externalBlocks = []firewall.RuleState{{
+		Name:           "Query User MediaServer.exe",
+		ExternalBlock:  true,
+		Present:        true,
+		Program:        inputs.MediaExe,
+		Protocol:       "TCP",
+		LocalPort:      "Any",
+		Direction:      "Inbound",
+		Action:         "Block",
+		Profile:        "Private",
+		LocalAddress:   "Any",
+		RemoteAddress:  "Any",
+		InterfaceAlias: "Any",
+		Enabled:        true,
+	}}
+	var out bytes.Buffer
+	options := firewallCommandOptions{
+		in:       bytes.NewBufferString(""),
+		out:      &out,
+		errOut:   &bytes.Buffer{},
+		load:     func(context.Context) (firewall.Inputs, error) { return inputs, nil },
+		identity: func(context.Context) (firewall.Inputs, error) { return inputs, nil },
+		adapter:  func() firewall.Adapter { return adapter },
+		elevate: func(_ context.Context, action firewall.Action, id string, planHash string) error {
+			if action != firewall.ActionApply || id != testGUIDForLauncher || planHash == "" {
+				t.Fatalf("unexpected elevation request: %q %q %q", action, id, planHash)
+			}
+			rules, err := firewall.BuildRules(inputs, adapter.iface)
+			if err != nil {
+				return err
+			}
+			return adapter.Upsert(context.Background(), rules)
+		},
+	}
+	if code := runFirewallPublic([]string{"apply", "--interface-id", testGUIDForLauncher, "--yes"}, options); code != firewallExitCode(firewall.ReasonEffectiveBlockRule) {
+		t.Fatalf("public apply exit code = %d, output=%s", code, out.String())
+	}
+	var result firewall.Result
+	lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
+	if err := json.Unmarshal(lines[len(lines)-1], &result); err != nil {
+		t.Fatalf("decode public readback result: %v (%s)", err, out.String())
+	}
+	if result.Action != firewall.ActionApply || result.Success || !result.Converged || result.Reason != firewall.ReasonEffectiveBlockRule || result.InterfaceID != testGUIDForLauncher {
+		t.Fatalf("public readback result = %+v", result)
+	}
+	if len(result.Rules) != 5 || !result.Rules[4].ExternalBlock {
+		t.Fatalf("public readback rules = %+v", result.Rules)
+	}
+}
+
+func TestReportFirewallChildFailureKeepsStatusDiagnostics(t *testing.T) {
+	inputs := launcherInputs(t)
+	adapter := newLauncherAdapter()
+	rules, err := firewall.BuildRules(inputs, adapter.iface)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range rules {
+		adapter.rules[rule.Name] = rule
+	}
+	var out bytes.Buffer
+	options := firewallCommandOptions{
+		out:     &out,
+		errOut:  &bytes.Buffer{},
+		load:    func(context.Context) (firewall.Inputs, error) { return inputs, nil },
+		adapter: func() firewall.Adapter { return adapter },
+	}
+	if code := reportFirewallChildFailure(context.Background(), options, firewall.ActionApply, firewall.NewError(firewall.ReasonElevationFailed)); code != firewallExitCode(firewall.ReasonElevationFailed) {
+		t.Fatalf("child failure exit code = %d, output=%s", code, out.String())
+	}
+	var result firewall.Result
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &result); err != nil {
+		t.Fatalf("decode child failure result: %v", err)
+	}
+	if result.Action != firewall.ActionApply || result.Success || !result.Converged || result.InterfaceID != testGUIDForLauncher || len(result.Rules) != 4 {
+		t.Fatalf("child failure diagnostics = %+v", result)
 	}
 }
 

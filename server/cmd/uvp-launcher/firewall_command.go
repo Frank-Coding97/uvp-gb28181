@@ -190,12 +190,19 @@ func runFirewallMutation(command firewallCommand, options firewallCommandOptions
 	if err := options.elevate(ctx, command.action, command.interfaceID, firewallPlanHash(inputs, command.action, rules)); err != nil {
 		return reportFirewallChildFailure(ctx, options, command.action, err)
 	}
-	return writeFirewallResult(options, firewall.Result{
-		Action:      command.action,
-		Success:     true,
-		Converged:   true,
-		InterfaceID: command.interfaceID,
-	})
+	readback, readbackErr := firewall.NewService(adapter, options.load).Status(ctx)
+	readback.Action = command.action
+	readback.InterfaceID = command.interfaceID
+	if readbackErr != nil && readback.Reason == "" {
+		readback.Reason = firewall.ReasonOf(readbackErr)
+	}
+	if readbackErr == nil && !readback.Converged {
+		readback.Success = false
+		if readback.Reason == "" {
+			readback.Reason = firewall.ReasonReadbackFailed
+		}
+	}
+	return writeFirewallResult(options, readback)
 }
 
 func runFirewallRemove(command firewallCommand, options firewallCommandOptions, ctx context.Context) int {

@@ -49,6 +49,16 @@ function StringValue($value) {
     return (@($value) | ForEach-Object { [string]$_ }) -join ','
 }
 
+function BoundedString($value) {
+    $text = StringValue $value
+    if ($text.Length -gt 256) { return $text.Substring(0, 256) }
+    return $text
+}
+
+function DetailTooLong($value) {
+    return (StringValue $value).Length -gt 256
+}
+
 function PortValue($value) {
     if ($null -eq $value) { return '' }
     $tokens = @(@($value) | ForEach-Object { [string]$_ -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' } })
@@ -108,6 +118,75 @@ function RuleState($expected) {
     return [pscustomobject]@{ name = [string]$expected.name; group = $actualGroup; present = $true; matches = [bool]$matches; conflict = [bool]$conflict }
 }
 
+function BlockState($rule, $application) {
+	$port = @(Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop | Select-Object -First 1)
+	$address = @(Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop | Select-Object -First 1)
+	$interface = @(Get-NetFirewallInterfaceFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop | Select-Object -First 1)
+	$interfaceType = @(Get-NetFirewallInterfaceTypeFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop | Select-Object -First 1)
+	$service = @(Get-NetFirewallServiceFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop | Select-Object -First 1)
+	$security = @(Get-NetFirewallSecurityFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop)
+	$identityConstraint = $false
+	foreach ($item in $security) {
+		foreach ($property in @('LocalUser', 'RemoteUser', 'LocalUserAuthorizedList', 'RemoteUserAuthorizedList')) {
+			if ($item.PSObject.Properties.Name -contains $property -and (StringValue $item.$property) -notin @('', 'Any')) {
+				$identityConstraint = $true
+			}
+		}
+	}
+	$unknownConstraints = $false
+	foreach ($property in @('LocalOnlyMapping', 'LooseSourceMapping')) {
+		if ($rule.PSObject.Properties.Name -contains $property -and (StringValue $rule.$property) -ieq 'True') {
+			$unknownConstraints = $true
+		}
+	}
+	foreach ($property in @('IcmpType', 'DynamicTransport')) {
+		if ($port.Count -gt 0 -and $port[0].PSObject.Properties.Name -contains $property -and (StringValue $port[0].$property) -notin @('', 'Any', 'False')) {
+			$unknownConstraints = $true
+		}
+	}
+	foreach ($item in $security) {
+		foreach ($property in @('Authentication', 'Encryption', 'OverrideBlockRules')) {
+			if ($item.PSObject.Properties.Name -contains $property -and (StringValue $item.$property) -notin @('', 'Any', 'NotRequired', 'None', 'False')) {
+				$unknownConstraints = $true
+			}
+		}
+	}
+	$localPort = PortValue $port.LocalPort
+	$remotePort = PortValue $port.RemotePort
+	$appPackage = StringValue $application.Package
+	if ($appPackage -eq '') { $appPackage = StringValue $application.PackageFamilyName }
+	$detailTruncated = $false
+	foreach ($value in @($rule.Name, $rule.Group, $application.Program, $port.Protocol, $localPort, $remotePort, $rule.Direction, $rule.Action, $rule.Profile, $address.LocalAddress, $address.RemoteAddress, $interface.InterfaceAlias, $interfaceType.InterfaceType, $service.Service, $appPackage)) {
+		if (DetailTooLong $value) { $detailTruncated = $true }
+	}
+	return [pscustomobject]@{
+		name = BoundedString $rule.Name
+		group = BoundedString $rule.Group
+		present = $true
+		matches = $false
+		conflict = $false
+		external_block = $true
+		potential_block = $false
+		detail_truncated = [bool]$detailTruncated
+		enabled = [bool]$rule.Enabled
+		program = BoundedString $application.Program
+		protocol = BoundedString $port.Protocol
+		local_port = BoundedString $localPort
+		remote_port = BoundedString $remotePort
+		direction = BoundedString $rule.Direction
+		action = BoundedString $rule.Action
+		profile = BoundedString $rule.Profile
+		local_address = BoundedString $address.LocalAddress
+		remote_address = BoundedString $address.RemoteAddress
+		interface_alias = BoundedString $interface.InterfaceAlias
+		interface_type = BoundedString $interfaceType.InterfaceType
+		service = BoundedString $service.Service
+		app_package = BoundedString $appPackage
+		identity_constraint = [bool]$identityConstraint
+		unknown_constraints = [bool]$unknownConstraints
+	}
+}
+
 try {
     $utf8Reader = New-Object -TypeName System.IO.StreamReader -ArgumentList ([Console]::OpenStandardInput()), $utf8, $true
     $request = ($utf8Reader.ReadToEnd() | ConvertFrom-Json)
@@ -132,6 +211,34 @@ try {
         }
         'inspect' {
             $states = @($request.rules | ForEach-Object { RuleState $_ })
+			$expectedPrograms = @($request.rules | Where-Object { [string]$_.program -ne '' } | ForEach-Object { [string]$_.program })
+			$scanBlocks = $expectedPrograms.Count -gt 0
+			if ($scanBlocks) {
+				$externalBlockCount = 0
+				$diagnosticTruncated = $false
+				foreach ($block in @(Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True -Direction Inbound -Action Block -ErrorAction Stop)) {
+					$application = @(Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $block -ErrorAction Stop | Select-Object -First 1)
+					$program = (StringValue $application.Program).Trim()
+					if (@($expectedPrograms | Where-Object { ([string]$_).Trim() -ieq $program }).Count -eq 0) { continue }
+					$externalBlockCount++
+					if ($externalBlockCount -gt 8) {
+						$diagnosticTruncated = $true
+						continue
+					}
+					$states += BlockState $block $application
+				}
+				if ($diagnosticTruncated) {
+					$states += [pscustomobject]@{
+						name = '[firewall diagnostics truncated]'
+						present = $true
+						matches = $false
+						external_block = $true
+						potential_block = $true
+						diagnostics_truncated = $true
+						unknown_constraints = $true
+					}
+				}
+			}
             Emit ([pscustomobject]@{ ok = $true; rules = $states })
         }
         'upsert' {
@@ -244,7 +351,7 @@ func (powerShellAdapter) Inspect(ctx context.Context, rules []Rule) ([]RuleState
 	if err := decodeJSONArray(response.RuleStates, &values); err != nil {
 		return nil, errorFor(ReasonAdapterUnavailable)
 	}
-	return values, nil
+	return boundRuleStates(values), nil
 }
 
 func (powerShellAdapter) Upsert(ctx context.Context, rules []Rule) error {
