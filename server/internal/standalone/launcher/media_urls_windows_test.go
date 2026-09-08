@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,12 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/standalone"
 )
 
-const mediaURLsRootEnv = "UVP_MEDIA_URLS_ROOT"
+const (
+	mediaURLsRootEnv         = "UVP_MEDIA_URLS_ROOT"
+	mediaURLsPrivateOutEnv   = "UVP_MEDIA_URLS_PRIVATE_OUT"
+	mediaURLsContinueFileEnv = "UVP_MEDIA_URLS_CONTINUE"
+	mediaURLsExternalTimeout = 2 * time.Minute
+)
 
 type mediaURLsNode struct {
 	ID           int64  `json:"id"`
@@ -158,6 +164,43 @@ func TestWindowsStandaloneMediaURLsAndWebRTC(t *testing.T) {
 		t.Fatalf("WebRTC did not provide decoded video: width=%d currentTime=%.3f", observation.VideoWidth, observation.CurrentTime)
 	}
 	t.Logf("MEDIA_URLS_HOSTS_CONFIRMED playbackHost=%s; WEBRTC_VIDEO_DECODED width=%d currentTime=%.3f", playbackHost, observation.VideoWidth, observation.CurrentTime)
+	mediaURLsMaybeWaitExternal(t, playResult, privatePath)
+}
+
+func mediaURLsMaybeWaitExternal(t *testing.T, result mediaURLsPlayResult, privatePath string) {
+	t.Helper()
+	outputPath := strings.TrimSpace(os.Getenv(mediaURLsPrivateOutEnv))
+	if outputPath == "" {
+		return
+	}
+	continuePath := strings.TrimSpace(os.Getenv(mediaURLsContinueFileEnv))
+	if continuePath == "" {
+		t.Fatal("UVP_MEDIA_URLS_CONTINUE is required when UVP_MEDIA_URLS_PRIVATE_OUT is set")
+	}
+	if _, err := os.Stat(continuePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("external media acceptance requires a fresh continue marker path")
+	}
+	if strings.EqualFold(filepath.Clean(outputPath), filepath.Clean(privatePath)) || strings.EqualFold(filepath.Clean(outputPath), filepath.Clean(continuePath)) {
+		t.Fatal("external URL output path must be distinct from credentials and continue marker")
+	}
+	snapshot := struct {
+		HTTPFlv string `json:"httpFlv"`
+		WSFlv   string `json:"wsFlv"`
+		WebRTC  string `json:"webrtc"`
+	}{
+		HTTPFlv: result.URLs.HTTPFlvURL,
+		WSFlv:   result.URLs.WSFlvURL,
+		WebRTC:  result.URLs.WebRTCURL,
+	}
+	if err := coreWriteJSONFile(outputPath, snapshot); err != nil {
+		t.Fatal("could not write the private external media URL file")
+	}
+	if err := os.Chmod(outputPath, 0o600); err != nil {
+		t.Fatal("could not secure the private external media URL file")
+	}
+	if !coreWaitForFile(continuePath, mediaURLsExternalTimeout) {
+		t.Fatal("external media URL acceptance marker was not observed within two minutes")
+	}
 }
 
 func mediaURLsFindChannel(t *testing.T, client *t18HTTPClient, timeout time.Duration) (string, string) {
