@@ -11,7 +11,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
@@ -26,7 +25,7 @@ type MapController struct {
 }
 
 func NewMapController() *MapController {
-	return &MapController{db: func() *gorm.DB { return app.GormDbMysql }}
+	return &MapController{db: configuredDeviceDB}
 }
 
 func (mc *MapController) SetDB(p func() *gorm.DB) { mc.db = p }

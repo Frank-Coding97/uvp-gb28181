@@ -65,7 +65,14 @@ type CatalogTrigger interface {
 }
 
 func NewDeviceMgmtController() *DeviceMgmtController {
-	return &DeviceMgmtController{db: func() *gorm.DB { return app.GormDbMysql }}
+	return &DeviceMgmtController{db: configuredDeviceDB}
+}
+
+func configuredDeviceDB() *gorm.DB {
+	if app.ConfigYml != nil {
+		return app.DB()
+	}
+	return app.GormDbMysql
 }
 
 func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }

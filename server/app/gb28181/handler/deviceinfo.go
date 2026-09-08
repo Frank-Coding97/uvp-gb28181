@@ -28,6 +28,9 @@ func HandleDeviceInfoResponse(ctx context.Context, body []byte) {
 	}
 
 	db := app.GormDbMysql
+	if app.ConfigYml != nil {
+		db = app.DB()
+	}
 	if db == nil {
 		app.ZapLog.Debug("DB 未初始化,跳过 DeviceInfo 回写", zap.String("deviceId", resp.DeviceID))
 		return

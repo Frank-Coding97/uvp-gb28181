@@ -165,7 +165,7 @@ try {
                     RemoteAddress = [string]$item.remote_address
                     InterfaceAlias = [string]$item.interface_alias
                     EdgeTraversalPolicy = [string]$item.edge_traversal_policy
-                    Enabled = ([bool]$item.enabled)
+                    Enabled = ([string][bool]$item.enabled)
                     ErrorAction = 'Stop'
                 }
                 $existing = @(FindRule $params.Name)

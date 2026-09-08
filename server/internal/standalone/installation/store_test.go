@@ -156,6 +156,12 @@ func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
 		{path: "/api/gb28181/sip/dashboard/stream", method: http.MethodGet},
 		{path: "/api/gb28181/sip/platform", method: http.MethodGet},
 		{path: "/api/gb28181/zlm/overview", method: http.MethodGet},
+		{path: "/api/gb28181/device/list", method: http.MethodGet},
+		{path: "/api/gb28181/device-mgmt/directory/tree", method: http.MethodGet},
+		{path: "/api/gb28181/device-mgmt/channels", method: http.MethodGet},
+		{path: "/api/gb28181/device/34020000001320000901/channels", method: http.MethodGet},
+		{path: "/api/gb28181/play/34020000001320000901/34020000001320000132", method: http.MethodPost},
+		{path: "/api/gb28181/play/test-stream", method: http.MethodDelete},
 	} {
 		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
 		require.NoError(t, err)

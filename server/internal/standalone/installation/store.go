@@ -31,6 +31,10 @@ var standaloneAdministratorHomepagePermissions = []string{
 	"gb28181:home:view",
 	"gb28181:home:layout:save",
 	"gb28181:home:layout:reset",
+	"gb28181:play:start",
+	"gb28181:play:stop",
+	"gb28181:play:monitor",
+	"gb28181:device:view",
 }
 
 type standaloneAdministratorHomepageAPI struct {
@@ -42,6 +46,10 @@ var standaloneAdministratorHomepageAPIFallbacks = []standaloneAdministratorHomep
 	// The live dashboard stream predates the API catalog entry, but is an
 	// exact homepage dependency alongside the cataloged snapshot endpoint.
 	{Path: "/api/gb28181/sip/dashboard/stream", Method: "GET"},
+	// Legacy device read routes have no API catalog rows in the frozen seed.
+	{Path: "/api/gb28181/device/list", Method: "GET"},
+	{Path: "/api/gb28181/device/:deviceId", Method: "GET"},
+	{Path: "/api/gb28181/device/:deviceId/channels", Method: "GET"},
 }
 
 type Phase string

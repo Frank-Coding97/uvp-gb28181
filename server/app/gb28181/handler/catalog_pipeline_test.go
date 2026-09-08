@@ -24,6 +24,26 @@ func catalogResponseBody(sn, sumNum int, deviceID string, itemIDs ...string) []b
 	return []byte(fmt.Sprintf(`<Response><CmdType>Catalog</CmdType><SN>%d</SN><DeviceID>%s</DeviceID><SumNum>%d</SumNum><DeviceList Num="%d">%s</DeviceList></Response>`, sn, deviceID, sumNum, len(itemIDs), items))
 }
 
+type catalogSQLiteConfig struct{ app.YmlConfigInterf }
+
+func (catalogSQLiteConfig) GetString(string) string { return "sqlite" }
+
+func TestCatalogPipelineUsesConfiguredSQLite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	oldConfig, oldSQLite, oldMySQL := app.ConfigYml, app.GormDbSQLite, app.GormDbMysql
+	SetCatalogPipeline(nil)
+	t.Cleanup(func() {
+		SetCatalogPipeline(nil)
+		app.ConfigYml, app.GormDbSQLite, app.GormDbMysql = oldConfig, oldSQLite, oldMySQL
+		raw, _ := db.DB()
+		_ = raw.Close()
+	})
+	app.ConfigYml = catalogSQLiteConfig{}
+	app.GormDbSQLite, app.GormDbMysql = db, nil
+	require.NotNil(t, getCatalogPipeline())
+}
+
 func init() {
 	// 单测兜底:给 app.ZapLog 一个 nop logger,防 Handle* 路径 nil 解引用
 	if app.ZapLog == nil {

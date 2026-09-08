@@ -69,6 +69,9 @@ func (t *sipgoInviteDialogTransport) WriteInvite(ctx context.Context, req *sip.R
 	if err != nil {
 		return nil, err
 	}
+	// Direct GB devices may return a numeric SIP realm as their Contact host.
+	// Keep in-dialog packets on the responding peer; Record-Route still wins.
+	dialog.UA.RewriteContact = true
 	return &sipgoInviteDialog{session: dialog}, nil
 }
 
