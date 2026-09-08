@@ -186,9 +186,10 @@ The elevated child reloads the package and read-only SQLite configuration and
 compares a digest of the confirmed plan. Changes to the release, ports or
 interface cause failure. Existing rules with the same names but a different
 ownership group are preserved. A failed or partial operation is never reported
-as successful; inspect `status` before retrying. The JSON `success` field for
-`status` means the query succeeded; `converged` indicates whether the expected
-rules actually match.
+as successful; inspect `status` before retrying. The JSON `converged` field
+indicates whether the owned rules match. An effective external Block rule makes
+`success` false even when owned rules converge; it is reported without changing
+the external rule. Incomplete diagnostics also fail explicitly.
 
 Use the package's trusted launcher for UAC. Manifest hashes check package
 consistency, not publisher identity. If the elevated account cannot read the
@@ -196,3 +197,30 @@ installation, the command fails without widening its file permissions.
 
 Native rule application/removal, UAC cancellation and LAN traffic acceptance
 remain separate T20/T30 checks; passing unit tests or `status` is insufficient.
+
+## Stopped backup command (T24 candidate)
+
+The candidate launcher provides a maintenance command:
+
+```powershell
+.\UVP.exe backup --output 'D:\UVP Backups\before-upgrade-01' --recordings-dir 'G:\UVP 录像'
+```
+
+Use a new absolute destination outside the installation and recordings trees.
+Supply the same external recordings directory used for startup; omit the option
+only when recordings use the installation's default directory. Existing output
+is never overwritten. The command authenticates a normal stop if necessary,
+then acquires the installation lock before copying. It leaves the instance
+stopped. A competing owner, incomplete shutdown or open database handle causes
+failure.
+
+The backup includes configuration, authoritative data, SQLite companion files,
+Redis persistence and release references. SQLite integrity is checked on the
+copy. Only a fully verified backup receives `complete.json`; partial output is
+not a usable backup. The directory contains secrets and retains private access
+permissions. Video files remain at their original root, which is recorded in
+the manifest. This does not protect against loss of the recordings disk.
+
+Backup creation does not implement restore or upgrade. Never replace an active
+Redis directory with backup files or launch an older binary against a migrated
+database; those actions require the separate recovery workflow.

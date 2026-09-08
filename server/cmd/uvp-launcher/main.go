@@ -25,6 +25,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		os.Exit(runBackupCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
+	}
 	root := flag.String("install-dir", filepath.Dir(executable), "安装目录")
 	recordings := flag.String("recordings-dir", "", "录像目录（默认安装目录下 recordings）")
 	noBrowser := flag.Bool("no-browser", false, "仅启动组件，不打开浏览器（用于自动测试）")
