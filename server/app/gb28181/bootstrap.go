@@ -2,6 +2,8 @@ package gb28181
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/url"
@@ -724,12 +726,14 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 
 	playAuthSettings := gbconfig.CurrentPlayAuthSettings()
 	activePlayKey, previousPlayKey := gbconfig.PlayAuthKeyMaterialFrom(app.ConfigYml)
+	instanceGeneration := strings.TrimSpace(app.ConfigYml.GetString("token.instancegeneration"))
 	playSigner, signerErr := buildPlaySigner(
 		playAuthSettings,
 		activePlayKey,
 		previousPlayKey,
 		app.ConfigYml.GetString("token.jwttokensignkey"),
 		cfg.ZLM.Secret,
+		instanceGeneration,
 	)
 	var playAuthorization *playauth.AuthorizationService
 	playAuthMetrics = nil
@@ -845,13 +849,28 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	return nil
 }
 
-func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSecret, zlmSecret string) (*playauth.Signer, error) {
+const recoveryGenerationDomain = "uvp-gb28181/recovery-generation/"
+
+func bindRecoveryGeneration(root []byte, purpose, generation string) []byte {
+	generation = strings.TrimSpace(generation)
+	if len(root) == 0 || generation == "" {
+		return root
+	}
+	mac := hmac.New(sha256.New, root)
+	_, _ = mac.Write([]byte(recoveryGenerationDomain + purpose + "/v1\x00" + generation))
+	return mac.Sum(nil)
+}
+
+func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSecret, zlmSecret string, recoveryGeneration ...string) (*playauth.Signer, error) {
 	active = strings.TrimSpace(active)
 	previous = strings.TrimSpace(previous)
+	if len(recoveryGeneration) > 1 {
+		return nil, fmt.Errorf("%w: multiple recovery generations", playauth.ErrKeyInvalid)
+	}
 	if active == "" && !settings.Enabled {
 		return nil, nil
 	}
-	if active == "" {
+	if len(active) < 32 || (previous != "" && len(previous) < 32) {
 		return nil, playauth.ErrKeyInvalid
 	}
 	for _, reused := range []string{strings.TrimSpace(jwtSecret), strings.TrimSpace(zlmSecret)} {
@@ -862,13 +881,17 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 			return nil, fmt.Errorf("%w: previous key must not reuse another application secret", playauth.ErrKeyInvalid)
 		}
 	}
-	activeKey := playauth.KeyMaterial{Secret: []byte(active)}
+	generation := ""
+	if len(recoveryGeneration) > 0 {
+		generation = recoveryGeneration[0]
+	}
+	activeKey := playauth.KeyMaterial{Secret: bindRecoveryGeneration([]byte(active), "play", generation)}
 	var signer *playauth.Signer
 	var err error
 	if previous == "" {
 		signer, err = playauth.NewKeyring(activeKey, nil)
 	} else {
-		previousKey := playauth.KeyMaterial{Secret: []byte(previous)}
+		previousKey := playauth.KeyMaterial{Secret: bindRecoveryGeneration([]byte(previous), "play", generation)}
 		signer, err = playauth.NewKeyring(activeKey, &previousKey)
 	}
 	if err != nil {
@@ -882,6 +905,13 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 		return nil, err
 	}
 	return signer, nil
+}
+
+func buildRecordingCapabilitySigner(root []byte, generation string) (*gbrecording.CapabilitySigner, error) {
+	if len(root) < 32 {
+		return nil, gbrecording.ErrCapabilityKey
+	}
+	return gbrecording.NewCapabilitySigner(bindRecoveryGeneration(root, "recording", generation), "recording-v1")
 }
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
@@ -1087,6 +1117,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	recordingCatalogScheduler.Start(context.Background())
 
 	var capabilitySigner *gbrecording.CapabilitySigner
+	instanceGeneration := strings.TrimSpace(app.ConfigYml.GetString("token.instancegeneration"))
 	jwtRootKey := strings.TrimSpace(app.ConfigYml.GetString("token.jwttokensignkey"))
 	capabilityKey := strings.TrimSpace(os.Getenv(strings.TrimSpace(cfg.Recording.CapabilityKeyEnv)))
 	explicitCapabilityKey := capabilityKey != ""
@@ -1112,7 +1143,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	}
 	if keyReused {
 		app.ZapLog.Warn("GB28181 云端录像 capability 密钥拒绝装配(禁止复用 JWT/ZLM secret)")
-	} else if signer, err := gbrecording.NewCapabilitySigner([]byte(capabilityKey), "recording-v1"); err != nil {
+	} else if signer, err := buildRecordingCapabilitySigner([]byte(capabilityKey), instanceGeneration); err != nil {
 		app.ZapLog.Warn("GB28181 云端录像 capability 密钥未配置或长度不足")
 	} else {
 		capabilitySigner = signer
