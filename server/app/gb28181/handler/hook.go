@@ -195,6 +195,7 @@ type HookController struct {
 	recordMP4         RecordMP4Indexer
 	recordResolver    NodeUUIDResolver
 	observer          StreamObserver
+	playbackMediaMu   sync.RWMutex
 	playbackMedia     PlaybackMediaSink
 	flowMu            sync.RWMutex
 	flowResolver      FlowReportNodeResolver
@@ -271,6 +272,8 @@ func (h *HookController) SetStreamObserver(observer StreamObserver) {
 }
 
 func (h *HookController) SetPlaybackMediaSink(sink PlaybackMediaSink) {
+	h.playbackMediaMu.Lock()
+	defer h.playbackMediaMu.Unlock()
 	h.playbackMedia = sink
 }
 
@@ -388,7 +391,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			}
 		}(body.Stream, body.Regist)
 	}
-	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
+	if !body.Regist && body.Stream != "" {
 		h.notifyPlaybackEnded(body.Stream, "media-offline")
 	}
 	if !body.Regist && body.App == "rtp" && body.Stream != "" && body.MediaServerID != "" {
@@ -566,7 +569,7 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 			}
 		}(body.StreamID)
 	}
-	if h.playbackMedia != nil && body.StreamID != "" {
+	if body.StreamID != "" {
 		h.notifyPlaybackEnded(body.StreamID, "rtp-timeout")
 	}
 	hookOK(c)
@@ -585,10 +588,18 @@ func (h *HookController) stopCleanupPending(ref stream.LiveRef, failureMessage s
 }
 
 func (h *HookController) notifyPlaybackEnded(streamID, reason string) {
+	h.playbackMediaMu.RLock()
+	sink := h.playbackMedia
+	h.playbackMediaMu.RUnlock()
+	if sink == nil {
+		return
+	}
+	// Keep the runtime captured before detach; teardown may clear the field
+	// before this asynchronous notification starts.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := h.playbackMedia.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
+		if err := sink.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
 			app.ZapLog.Debug("回放媒体终态未命中活动会话", zap.String("stream", streamID), zap.String("reason", reason), zap.Error(err))
 		}
 	}()
