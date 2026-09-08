@@ -44,9 +44,12 @@ type InstanceConfig struct {
 	values          map[string]any
 }
 
-func (c InstanceConfig) String() string        { return "standalone configuration sha256=" + c.ConfigSHA256 }
-func (c InstanceConfig) GoString() string      { return c.String() }
-func (c InstanceConfig) JWTSecret() string     { return configString(c.values, "token", "jwttokensignkey") }
+func (c InstanceConfig) String() string    { return "standalone configuration sha256=" + c.ConfigSHA256 }
+func (c InstanceConfig) GoString() string  { return c.String() }
+func (c InstanceConfig) JWTSecret() string { return configString(c.values, "token", "jwttokensignkey") }
+func (c InstanceConfig) InstanceGeneration() string {
+	return configString(c.values, "token", "instancegeneration")
+}
 func (c InstanceConfig) RedisPassword() string { return configString(c.values, "redis", "password") }
 func (c InstanceConfig) ZLMSecret() string     { return configString(c.values, "gb28181", "zlm", "secret") }
 func (c InstanceConfig) RedisAddress() string {
@@ -224,6 +227,11 @@ func decodeInstanceConfig(raw []byte) (map[string]any, error) {
 		}
 	}
 	keys := [][]string{{"token", "jwttokensignkey"}, {"redis", "password"}, {"gb28181", "zlm", "secret"}}
+	if token, ok := values["token"].(map[string]any); ok {
+		if _, present := token["instancegeneration"]; present {
+			keys = append(keys, []string{"token", "instancegeneration"})
+		}
+	}
 	seen := map[string]bool{}
 	for _, key := range keys {
 		secret := configString(values, key...)
@@ -358,7 +366,7 @@ func configInt(values map[string]any, keys ...string) int {
 }
 
 func newInstanceConfigValues() (map[string]any, error) {
-	secrets := make([]string, 3)
+	secrets := make([]string, 4)
 	for i := range secrets {
 		var raw [32]byte
 		if _, err := rand.Read(raw[:]); err != nil {
@@ -372,7 +380,7 @@ func newInstanceConfigValues() (map[string]any, error) {
 		"httpserver": map[string]any{"port": "127.0.0.1:8280", "serverrootpath": "/public", "allowcrossdomain": false, "read_timeout": 30, "write_timeout": 30, "idle_timeout": 60, "handler_timeout": 30, "trustedproxies": []string{}},
 		"safe":       map[string]any{"loginlockthreshold": 3, "loginlockexpire": 60, "loginlockduration": 600, "minpasswordlength": 6, "requirespecialchar": true},
 		"captcha":    map[string]any{"open": false, "length": 4},
-		"token":      map[string]any{"jwttokensignkey": secrets[0], "jwttokenexpire": 43200, "jwttokenrefreshexpire": 2592000, "cachekeyprefix": "uvp-gb28181:", "iscache": false},
+		"token":      map[string]any{"jwttokensignkey": secrets[0], "instancegeneration": secrets[3], "jwttokenexpire": 43200, "jwttokenrefreshexpire": 2592000, "cachekeyprefix": "uvp-gb28181:", "iscache": false},
 		"redis":      map[string]any{"host": "127.0.0.1", "port": 16379, "password": secrets[1], "indexdb": 0},
 		"gormv2":     map[string]any{"usedbtype": "sqlite"},
 		"logs":       map[string]any{"level": "info", "console": true, "textformat": "console", "timeprecision": "millisecond", "maxsize": 5, "maxbackups": 7, "maxage": 15, "compress": false},
