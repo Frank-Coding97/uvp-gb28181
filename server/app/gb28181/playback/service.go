@@ -99,9 +99,13 @@ type ServiceConfig struct {
 	// original-epoch preflight; Intents additionally requires both child factories.
 	DeviceOperations *playauth.DeviceOperationBarrier
 	Intents          *playauth.DeviceOperationIntentStore
-	ServerID         string
-	Metrics          *Metrics
-	MediaWait        time.Duration
+	// Root policy is read at admission, not cached for a legacy instance.
+	// Stop/Close remain available; replacement requires closing and joining the
+	// old fixed-mode service before publishing a new durable instance.
+	RequireIntents func() bool
+	ServerID       string
+	Metrics        *Metrics
+	MediaWait      time.Duration
 }
 
 type Service struct {
@@ -152,6 +156,10 @@ func (s *Service) beginOperation(ctx context.Context) (context.Context, func(), 
 	if s.closing {
 		s.producerMu.Unlock()
 		return nil, nil, ErrRegistryClosed
+	}
+	if s.config.Intents == nil && s.config.RequireIntents != nil && s.config.RequireIntents() {
+		s.producerMu.Unlock()
+		return nil, nil, ErrRTPUnavailable
 	}
 	s.addProducerLocked()
 	s.producerMu.Unlock()

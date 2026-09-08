@@ -52,6 +52,8 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
+	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
@@ -855,7 +857,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
-	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations)
+	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations, deviceIntents)
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
 	installZLMManagementController()
@@ -1006,7 +1008,7 @@ func stopPlaybackRuntime(ctx context.Context) error {
 	return nil
 }
 
-func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier) {
+func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier, intents *playauth.DeviceOperationIntentStore) {
 	if inviter == nil || deviceOperations == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
 		SetPlaybackService(nil, nil)
@@ -1014,6 +1016,21 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		playbackMetrics = nil
 		app.ZapLog.Info("GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)")
 		return
+	}
+	var opener gbplayback.RTPOpener
+	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
+		bindings, err := LoadStartupOpenAPIControlBindingsOnce()
+		if err != nil || bindings == nil || intents == nil {
+			SetPlaybackService(nil, nil)
+			playbackRegistry, playbackMetrics = nil, nil
+			app.ZapLog.Warn("强制鉴权回放缺少持久操作或启动信任，拒绝装配", zap.Error(err))
+			return
+		}
+		resolver := openapimedia.NewTrustedRevocationFactory(zlmRegistry, bindings, openapiconfig.NewNodeRuntimeStore(app.DB(), time.Now))
+		opener = gbplayback.NewZLMIntentRTPOpener(zlmRegistry, zlmLocationMap, resolver)
+	} else {
+		intents = nil
+		opener = gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
 	}
 	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
 		IdleTimeout: cfg.Playback.IdleTimeout(),
@@ -1024,10 +1041,11 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 	service := gbplayback.NewService(
 		registry,
 		gbplayback.NewZLMNodePicker(zlmScheduler, cfg.SIP.ServerID),
-		gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil),
+		opener,
 		uac.NewPlaybackAdapter(inviter),
 		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
-		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics, DeviceOperations: deviceOperations},
+		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics, DeviceOperations: deviceOperations, Intents: intents,
+			RequireIntents: func() bool { return gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI }},
 	)
 	if trafficResolver != nil {
 		service.SetMediaReadyObserver(func(session gbplayback.Session) {
