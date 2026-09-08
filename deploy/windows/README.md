@@ -274,3 +274,29 @@ Never overwrite a running launcher or remove its old release and backup.
 Normal Redis startup rejects a truncated AOF. Preserve the damaged files and
 use the verified recovery procedure; do not delete AOF files or initialize an
 empty database to make startup appear successful.
+
+## Abnormal exit recovery (T27 candidate)
+
+The qualified candidate blocks normal startup when it finds an intact marker
+from an unfinished run. Use its separately qualified abnormal recovery command:
+
+```powershell
+.\UVP.exe recover --snapshot 'D:\UVP Backups\abnormal-01' --recordings-dir 'G:\UVP 录像'
+.\UVP.exe recovery-confirm --operation '<operation printed by recover>'
+```
+
+The snapshot destination must be new and outside the installation and recordings
+trees. Use the actual recordings directory. Recovery preserves the abnormal
+scene, checks SQLite through an isolated copy, revokes sessions, rotates JWT and
+generation, and rebuilds Redis from audited restrictions. It keeps the current
+version selected and requires local administrator confirmation before reopening
+an initialized installation. An untouched first installation with no users,
+grants or sessions can instead receive a separate first-use receipt.
+
+The command leaves components stopped. After successful recovery and any required
+confirmation, start `UVP.exe` normally. An interrupted operation can be resumed
+with `recover` and the same recordings option, omitting `--snapshot`; it remains
+bound to the original snapshot. A published snapshot missing `complete.json`,
+corrupt source data or failed validation stays blocked and requires diagnosis.
+Preserve the snapshot, maintenance gate and recovered archive; do not delete the
+run marker to bypass recovery. This command is absent from the delivered r2 ZIP.
