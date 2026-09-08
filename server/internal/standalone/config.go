@@ -158,7 +158,7 @@ func initializeConfig(paths Paths, hook func(string) error) (InstanceConfig, err
 		// are accepted by the bundled Cygwin runtime, including Chinese paths.
 		relative = filepath.ToSlash(relative)
 		quotedDir := strconv.Quote(relative)
-		redis := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir %s\nappendonly yes\nappendfilename appendonly.aof\nappendfsync always\nsave \"\"\nmaxmemory-policy noeviction\nrequirepass %s\nlogfile \"\"\n", configInt(values, "redis", "port"), quotedDir, result.RedisPassword())
+		redis := fmt.Sprintf("bind 127.0.0.1\nport %d\nprotected-mode yes\ndaemonize no\nsupervised no\ndir %s\nappendonly yes\naof-load-truncated no\nappendfilename appendonly.aof\nappendfsync always\nsave \"\"\nmaxmemory-policy noeviction\nrequirepass %s\nlogfile \"\"\n", configInt(values, "redis", "port"), quotedDir, result.RedisPassword())
 		if err := writeSecureConfigFile(result.RedisConfigPath, []byte(redis), true, prefixConfigHook("redis", hook)); err != nil {
 			return err
 		}

@@ -61,6 +61,17 @@ func TestInstanceConfigIndependentSecretsAndRepeat(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestInstanceConfigRedisRejectsTruncatedAOF(t *testing.T) {
+	paths := configTestPaths(t)
+	_, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(filepath.Join(paths.ConfigDir, "redis.conf"))
+	require.NoError(t, err)
+	if !strings.Contains(string(raw), "aof-load-truncated no\n") {
+		t.Fatal("normal Redis configuration must reject truncated AOF loading")
+	}
+}
+
 func TestInstanceConfigRejectsRecordingRootINISeparators(t *testing.T) {
 	for _, separator := range []string{";", "\r", "\n"} {
 		paths := configTestPaths(t)
