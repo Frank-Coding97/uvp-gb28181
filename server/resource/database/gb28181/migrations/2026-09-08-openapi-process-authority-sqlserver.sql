@@ -1,7 +1,6 @@
 -- Root registers generations only while holding the protected local lifetime lock.
 -- No seed owner or historical backfill. Retain this ledger across application rollback.
 IF OBJECT_ID(N'dbo.sys_openapi_process_generation', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.sys_openapi_process_generation (
     generation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
     domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
@@ -14,9 +13,7 @@ CREATE TABLE dbo.sys_openapi_process_generation (
         AND domain_id <> '00000000000000000000000000000000'
     )
 );
-END;
 IF OBJECT_ID(N'dbo.sys_openapi_process_authority', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.sys_openapi_process_authority (
     id BIGINT NOT NULL PRIMARY KEY,
     domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
@@ -26,4 +23,3 @@ CREATE TABLE dbo.sys_openapi_process_authority (
     CONSTRAINT fk_openapi_authority_generation FOREIGN KEY (domain_id, current_generation_id)
         REFERENCES dbo.sys_openapi_process_generation (domain_id, generation_id)
 );
-END;

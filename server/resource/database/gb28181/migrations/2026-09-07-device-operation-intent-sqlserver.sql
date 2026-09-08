@@ -1,7 +1,6 @@
 -- Durable reservation only. dispatched means may-have-dispatched, not success.
 -- Append-only safety history; no cascading deletion or automatic completion.
 IF OBJECT_ID(N'dbo.gb_device_operation_intent', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.gb_device_operation_intent (
     operation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
     contract_version BIGINT NOT NULL,
@@ -37,5 +36,4 @@ CREATE TABLE dbo.gb_device_operation_intent (
         )
     )
 );
-CREATE INDEX ix_device_intent_recovery ON dbo.gb_device_operation_intent (device_pk, device_epoch, state, operation_id);
-END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.gb_device_operation_intent') AND name = N'ix_device_intent_recovery') CREATE INDEX ix_device_intent_recovery ON dbo.gb_device_operation_intent (device_pk, device_epoch, state, operation_id);

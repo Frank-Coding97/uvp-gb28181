@@ -42,3 +42,16 @@ func TestDeviceOperationIntentMigrationAndInitialization(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceOperationIntentSQLServerMigrationStatements(t *testing.T) {
+	body, err := migrationsfs.FS.ReadFile("migrations/2026-09-07-device-operation-intent-sqlserver.sql")
+	require.NoError(t, err)
+	statements := splitStatements(string(body))
+	require.Len(t, statements, 2, "table and index must each be a complete independently idempotent statement")
+	require.True(t, strings.HasPrefix(statements[0], "IF OBJECT_ID("))
+	require.NotContains(t, statements[0], "\nBEGIN\n")
+	require.Contains(t, statements[0], "CREATE TABLE dbo.gb_device_operation_intent")
+	require.True(t, strings.HasPrefix(statements[1], "IF NOT EXISTS (SELECT 1 FROM sys.indexes"))
+	require.Contains(t, statements[1], "object_id = OBJECT_ID(N'dbo.gb_device_operation_intent')")
+	require.Contains(t, statements[1], "CREATE INDEX ix_device_intent_recovery")
+}

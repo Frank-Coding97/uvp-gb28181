@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	playauth "uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -24,6 +25,14 @@ type cleanupBarrierConfig struct {
 	migration string
 	upName    string
 	downName  string
+}
+
+func TestCleanupBarrierSQLServerConfig(t *testing.T) {
+	cfg, skip, err := resolveCleanupBarrierConfig("sqlserver", "explicit-test-dsn", t.TempDir(), true)
+	require.NoError(t, err)
+	require.False(t, skip)
+	require.Equal(t, "2026-09-06-device-cleanup-barrier-sqlserver.sql", cfg.upName)
+	require.Equal(t, "2026-09-06-device-cleanup-barrier-sqlserver-down.sql", cfg.downName)
 }
 
 func resolveCleanupBarrierConfig(dialect, dsn, migrationDir string, required bool) (cleanupBarrierConfig, bool, error) {
@@ -50,6 +59,9 @@ func resolveCleanupBarrierConfig(dialect, dsn, migrationDir string, required boo
 	case "postgresql":
 		upName = "2026-09-06-device-cleanup-barrier-postgresql.sql"
 		downName = "2026-09-06-device-cleanup-barrier-postgresql-down.sql"
+	case "sqlserver":
+		upName = "2026-09-06-device-cleanup-barrier-sqlserver.sql"
+		downName = "2026-09-06-device-cleanup-barrier-sqlserver-down.sql"
 	default:
 		return cleanupBarrierConfig{}, false, fmt.Errorf("unsupported cleanup-barrier dialect %q", dialect)
 	}
@@ -126,7 +138,11 @@ func createCleanupBarrierFixture(t *testing.T, ctx context.Context, conn *sql.Co
 	t.Helper()
 	// Keep the fixture deliberately smaller than the production device table:
 	// the migration contract only requires these two security columns.
-	_, err := conn.ExecContext(ctx, "CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, access_epoch BIGINT NOT NULL, deleted_at TIMESTAMP NULL)")
+	dateType := "TIMESTAMP"
+	if dialect == "sqlserver" {
+		dateType = "DATETIME2(6)"
+	}
+	_, err := conn.ExecContext(ctx, "CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, access_epoch BIGINT NOT NULL, deleted_at "+dateType+" NULL)")
 	require.NoError(t, err, "create %s cleanup fixture", dialect)
 	_, err = conn.ExecContext(ctx, "INSERT INTO gb_device (id, device_id, access_epoch, deleted_at) VALUES (1, '34020000001320000001', 2, NULL)")
 	require.NoError(t, err)
@@ -142,6 +158,8 @@ func assertNativeCleanupStoreConcurrentComplete(t *testing.T, ctx context.Contex
 		dialector = mysql.New(mysql.Config{Conn: connection.db})
 	case "postgresql":
 		dialector = postgres.New(postgres.Config{Conn: connection.db, PreferSimpleProtocol: true})
+	case "sqlserver":
+		dialector = sqlserver.New(sqlserver.Config{Conn: connection.db})
 	default:
 		t.Fatalf("unsupported cleanup store dialect %q", cfg.dialect)
 	}

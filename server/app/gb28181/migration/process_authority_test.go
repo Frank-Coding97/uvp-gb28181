@@ -42,3 +42,16 @@ func TestProcessAuthorityMigrationAndInitialization(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessAuthoritySQLServerMigrationStatements(t *testing.T) {
+	body, err := migrationsfs.FS.ReadFile("migrations/2026-09-08-openapi-process-authority-sqlserver.sql")
+	require.NoError(t, err)
+	statements := splitStatements(string(body))
+	require.Len(t, statements, 2, "the actual runner must send two complete conditional CREATE statements")
+	for _, statement := range statements {
+		require.True(t, strings.HasPrefix(statement, "IF OBJECT_ID("))
+		require.Contains(t, statement, "CREATE TABLE dbo.sys_openapi_process_")
+		require.NotContains(t, statement, "\nBEGIN\n", "single conditional CREATE needs no split-prone block")
+		require.True(t, strings.HasSuffix(statement, ");"))
+	}
+}

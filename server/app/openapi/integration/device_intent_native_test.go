@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -31,7 +32,7 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	}
 	dialect, dsn := os.Getenv("UVP_OPENAPI_TEST_DIALECT"), os.Getenv("UVP_OPENAPI_TEST_DSN")
 	require.NotEmpty(t, dsn, "explicit fixture DSN required")
-	require.Contains(t, []string{"mysql", "postgresql"}, dialect, "SQL Server needs its own licensed fixture; never substitute SQLite")
+	require.Contains(t, []string{"mysql", "postgresql", "sqlserver"}, dialect, "an explicit supported native database is required; never substitute SQLite")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	connection, err := openFullInitializationConnection(ctx, fullInitializationConfig{dialect: dialect, dsn: dsn})
@@ -48,16 +49,21 @@ func TestOpenAPIDeviceOperationIntentNative(t *testing.T) {
 	connection.db.SetMaxIdleConns(8)
 	var driver gorm.Dialector
 	suffix := ""
-	if dialect == "mysql" {
+	dateType := "TIMESTAMP"
+	switch dialect {
+	case "mysql":
 		driver = mysql.New(mysql.Config{Conn: connection.db})
-	} else {
+	case "postgresql":
 		driver = postgres.New(postgres.Config{Conn: connection.db, PreferSimpleProtocol: true})
 		suffix = "-postgresql"
+	case "sqlserver":
+		driver = sqlserver.New(sqlserver.Config{Conn: connection.db})
+		suffix, dateType = "-sqlserver", "DATETIME2(6)"
 	}
 	db, err := gorm.Open(driver, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
-	require.NoError(t, db.Exec(`CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, access_epoch BIGINT NOT NULL, cleanup_completed_epoch BIGINT NOT NULL, deleted_at TIMESTAMP NULL)`).Error)
-	require.NoError(t, db.Exec(`CREATE TABLE gb_channel (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, channel_id VARCHAR(20) NOT NULL, deleted_at TIMESTAMP NULL)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, access_epoch BIGINT NOT NULL, cleanup_completed_epoch BIGINT NOT NULL, deleted_at `+dateType+` NULL)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE gb_channel (id BIGINT PRIMARY KEY, device_id VARCHAR(20) NOT NULL, channel_id VARCHAR(20) NOT NULL, deleted_at `+dateType+` NULL)`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO gb_device VALUES (1,'34020000001320000001',1,1,NULL), (2,'34020000001320000002',1,1,NULL)`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO gb_channel VALUES (11,'34020000001320000001','34020000001320000003',NULL), (12,'34020000001320000002','34020000001320000003',NULL)`).Error)
 	stem := "migrations/2026-09-07-device-operation-intent" + suffix

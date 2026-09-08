@@ -5055,7 +5055,6 @@ SELECT 1, 0, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM sys_openapi_security_state 
 -- Durable reservation only. dispatched means may-have-dispatched, not success.
 -- Append-only safety history; no cascading deletion or automatic completion.
 IF OBJECT_ID(N'dbo.gb_device_operation_intent', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.gb_device_operation_intent (
     operation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
     contract_version BIGINT NOT NULL,
@@ -5091,8 +5090,7 @@ CREATE TABLE dbo.gb_device_operation_intent (
         )
     )
 );
-CREATE INDEX ix_device_intent_recovery ON dbo.gb_device_operation_intent (device_pk, device_epoch, state, operation_id);
-END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.gb_device_operation_intent') AND name = N'ix_device_intent_recovery') CREATE INDEX ix_device_intent_recovery ON dbo.gb_device_operation_intent (device_pk, device_epoch, state, operation_id);
 -- device-operation-intent:end
 
 -- device-operation-rtp-steps:begin
@@ -5117,7 +5115,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id = OBJE
 -- Root registers generations only while holding the protected local lifetime lock.
 -- No seed owner or historical backfill. Retain this ledger across application rollback.
 IF OBJECT_ID(N'dbo.sys_openapi_process_generation', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.sys_openapi_process_generation (
     generation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
     domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
@@ -5130,9 +5127,7 @@ CREATE TABLE dbo.sys_openapi_process_generation (
         AND domain_id <> '00000000000000000000000000000000'
     )
 );
-END;
 IF OBJECT_ID(N'dbo.sys_openapi_process_authority', N'U') IS NULL
-BEGIN
 CREATE TABLE dbo.sys_openapi_process_authority (
     id BIGINT NOT NULL PRIMARY KEY,
     domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
@@ -5142,5 +5137,4 @@ CREATE TABLE dbo.sys_openapi_process_authority (
     CONSTRAINT fk_openapi_authority_generation FOREIGN KEY (domain_id, current_generation_id)
         REFERENCES dbo.sys_openapi_process_generation (domain_id, generation_id)
 );
-END;
 -- openapi-process-authority:end
