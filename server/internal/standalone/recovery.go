@@ -20,7 +20,7 @@ func restoreStoppedWithRunners(ctx context.Context, paths Paths, operation, trus
 		return result, err
 	}
 	defer func() { failure = errors.Join(failure, lock.Close()) }()
-	outer, err := ReadMaintenanceJournal(paths.InstallDir)
+	outer, err := admitInterruptedRecovery(ctx, paths.InstallDir, operation, trust, backupPublish)
 	if err != nil {
 		return result, err
 	}
