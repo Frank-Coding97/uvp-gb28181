@@ -224,3 +224,53 @@ the manifest. This does not protect against loss of the recordings disk.
 Backup creation does not implement restore or upgrade. Never replace an active
 Redis directory with backup files or launch an older binary against a migrated
 database; those actions require the separate recovery workflow.
+
+## Upgrade and local recovery confirmation (T25/T26 candidate)
+
+These commands require a qualified launcher built with the SHA256 allowlist for
+both backend builds. The previously delivered `20260908-r2` trial launcher does
+not contain this workflow. A valid manifest alone does not qualify an arbitrary
+backend for offline maintenance.
+
+Keep the old release directory. Place the complete qualified candidate under
+`releases/<version>`, then run:
+
+```powershell
+.\UVP.exe upgrade --version '1.1.1' --backup 'D:\UVP Backups\upgrade-01' --recordings-dir 'G:\UVP 录像'
+```
+
+The command stops the instance, verifies a new backup, runs offline migration
+and checks, and verifies candidate components before changing `current.json`.
+Success leaves the instance stopped; double-click `UVP.exe` to start it. A
+failure requiring recovery retains a maintenance gate and blocks normal startup.
+Do not delete that gate or edit `current.json` to bypass it.
+
+For the interrupted upgrade recorded by this installation:
+
+```powershell
+.\UVP.exe restore --recordings-dir 'G:\UVP 录像'
+.\UVP.exe recovery-confirm --operation '<operation printed by restore>'
+```
+
+`restore` uses the verified backup bound to the pending operation; it is not an
+arbitrary backup-directory import command. It preserves the failed configuration
+and data, rebuilds Redis restrictions, revokes sessions, rotates short-term
+credentials, and restores the old version before entering local confirmation.
+
+Run `recovery-confirm` in a Windows console as the installation's Windows user.
+Review the backup time and reported historical authorization changes, enter the
+restored system administrator's username and password (without echo), and type
+the exact `CONFIRM <operation>` phrase. Password arguments, environment inputs
+and pipes are not supported. Unsupported authorization schemas, failed checks
+or cancellation retain the gate. Confirmation archives the entire gate and
+failed scene as `.uvp-recovered-<operation>`; it does not start services. Keep the
+archive private, then start `UVP.exe` normally after successful confirmation.
+
+The root `UVP.exe` is updated separately from versioned releases: first stop the
+instance with `UVP.exe --stop`, wait for the launcher console and its processes
+to exit, and only then replace the executable with the qualified launcher.
+Never overwrite a running launcher or remove its old release and backup.
+
+Normal Redis startup rejects a truncated AOF. Preserve the damaged files and
+use the verified recovery procedure; do not delete AOF files or initialize an
+empty database to make startup appear successful.
