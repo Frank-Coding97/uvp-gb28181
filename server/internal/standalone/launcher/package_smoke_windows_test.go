@@ -49,6 +49,7 @@ func TestWindowsFinalPackageFreshBrowser(t *testing.T) {
 		t.Fatal("fresh setup page displayed an error")
 	}
 	if path := os.Getenv("UVP_FINAL_SCREENSHOT"); path != "" {
+		time.Sleep(time.Second)
 		if err = browser.captureScreenshot(ctx, path); err != nil {
 			t.Fatal(err)
 		}
