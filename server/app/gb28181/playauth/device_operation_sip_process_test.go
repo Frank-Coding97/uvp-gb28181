@@ -135,25 +135,141 @@ func TestDeviceSIPInviteProcessHelper(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 	store, ctx, id := NewDeviceOperationIntentStore(db), context.Background(), intentIdentity(1)
+	if os.Getenv("UVP_SIP_INVITE_PROCESS_ACTION") == "info" {
+		id.Kind = "playback"
+	}
 	loaded, err := store.LoadSIPInviteSteps(ctx, id)
 	require.NoError(t, err)
-	out, err := store.DispatchSIPInviteStep(ctx, id, loaded.Intent.RowVersion, sipStepIdentity(1).StepID)
-	require.ErrorIs(t, err, ErrDeviceIntentConflict, "another actual process cannot dispatch the prepared original INVITE")
+	var out DeviceSIPInviteSteps
+	switch os.Getenv("UVP_SIP_INVITE_PROCESS_ACTION") {
+	case "ack":
+		out, err = store.DispatchSIPKnownBranchACK(ctx, id, loaded.Intent.RowVersion, sipKnownBranch())
+	case "cancel":
+		out, err = store.DispatchSIPCancel(ctx, id, loaded.Intent.RowVersion, loaded.Steps[0].Cancel.Identity)
+	case "info":
+		out, err = store.DispatchSIPINFO(ctx, id, loaded.Intent.RowVersion, loaded.Steps[0].KnownBranch.InfoSteps[0].Identity.InfoID)
+	default:
+		out, err = store.DispatchSIPInviteStep(ctx, id, loaded.Intent.RowVersion, sipStepIdentity(1).StepID)
+	}
+	require.ErrorIs(t, err, ErrDeviceIntentConflict, "another actual process cannot take over the original SIP operation")
 	require.Empty(t, out.Intent.OperationID)
 }
 
+func TestDeviceSIPOriginalACKAndCancelRejectForeignProcess(t *testing.T) {
+	for _, action := range []string{"ack", "prepare-cancel", "dispatch-cancel"} {
+		for _, owner := range []string{"", strings.Repeat("f", 32)} {
+			t.Run(action+"-"+owner, func(t *testing.T) {
+				f, store, id := newSIPStepFixture(t)
+				ctx := context.Background()
+				_, err := store.AddSIPInviteStep(ctx, id, 2, sipStepIdentity(1))
+				require.NoError(t, err)
+				out, err := store.DispatchSIPInviteStep(ctx, id, 3, sipStepIdentity(1).StepID)
+				require.NoError(t, err)
+				cancel := DeviceSIPCancelIdentity(sipStepIdentity(1))
+				cancel.ContentType, cancel.BodyLength, cancel.BodySHA256 = "", 0, sipEmptyBodySHA256
+				switch action {
+				case "ack":
+					out, err = store.ObserveSIPKnownBranch(ctx, id, out.Intent.RowVersion, sipKnownBranch())
+				case "dispatch-cancel":
+					out, err = store.PrepareSIPCancel(ctx, id, out.Intent.RowVersion, cancel)
+				}
+				require.NoError(t, err)
+				wire := sipInviteStepsWire{Version: 1, Steps: []sipInviteStepWire{sipStepToWire(out.Steps[0])}}
+				wire.Steps[0].OwnerProcessID = owner
+				raw, err := json.Marshal(wire)
+				require.NoError(t, err)
+				require.NoError(t, f.db.Exec("UPDATE gb_device_operation_intent SET sip_steps_json=?", string(raw)).Error)
+				switch action {
+				case "ack":
+					out, err = store.DispatchSIPKnownBranchACK(ctx, id, out.Intent.RowVersion, sipKnownBranch())
+				case "prepare-cancel":
+					out, err = store.PrepareSIPCancel(ctx, id, out.Intent.RowVersion, cancel)
+				case "dispatch-cancel":
+					out, err = store.DispatchSIPCancel(ctx, id, out.Intent.RowVersion, cancel)
+				}
+				require.ErrorIs(t, err, ErrDeviceIntentConflict)
+				require.Empty(t, out.Intent.OperationID)
+				var after string
+				require.NoError(t, f.db.Table("gb_device_operation_intent").Select("sip_steps_json").Scan(&after).Error)
+				require.Equal(t, string(raw), after)
+			})
+		}
+	}
+}
+
+func TestDeviceSIPOriginalINFORejectsForeignProcess(t *testing.T) {
+	for _, action := range []string{"prepare", "dispatch"} {
+		for _, owner := range []string{"", strings.Repeat("f", 32)} {
+			t.Run(action+"-"+owner, func(t *testing.T) {
+				f, store, id := sipINFOFixture(t)
+				ctx := context.Background()
+				identity := sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"})
+				out, err := store.LoadSIPInviteSteps(ctx, id)
+				require.NoError(t, err)
+				if action == "dispatch" {
+					out, err = store.PrepareSIPINFO(ctx, id, out.Intent.RowVersion, identity)
+					require.NoError(t, err)
+				}
+				wire := sipInviteStepsWire{Version: 1, Steps: []sipInviteStepWire{sipStepToWire(out.Steps[0])}}
+				wire.Steps[0].OwnerProcessID = owner
+				raw, err := json.Marshal(wire)
+				require.NoError(t, err)
+				require.NoError(t, f.db.Exec("UPDATE gb_device_operation_intent SET sip_steps_json=?", string(raw)).Error)
+				if action == "prepare" {
+					out, err = store.PrepareSIPINFO(ctx, id, out.Intent.RowVersion, identity)
+				} else {
+					out, err = store.DispatchSIPINFO(ctx, id, out.Intent.RowVersion, identity.InfoID)
+				}
+				require.ErrorIs(t, err, ErrDeviceIntentConflict)
+				require.Empty(t, out.Intent.OperationID)
+				var after string
+				require.NoError(t, f.db.Table("gb_device_operation_intent").Select("sip_steps_json").Scan(&after).Error)
+				require.Equal(t, string(raw), after)
+			})
+		}
+	}
+}
+
 func TestDeviceSIPInviteActualOtherProcessCannotDispatch(t *testing.T) {
-	f, store, id := newSIPStepFixture(t)
-	_, err := store.AddSIPInviteStep(context.Background(), id, 2, sipStepIdentity(1))
-	require.NoError(t, err)
-	path := filepath.Join(t.TempDir(), "invite.db")
-	require.NoError(t, f.db.Exec("VACUUM INTO ?", path).Error)
-	binary, err := os.Executable()
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "-test.run=^TestDeviceSIPInviteProcessHelper$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "UVP_SIP_INVITE_PROCESS_DB="+path)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "%s", out)
+	for _, action := range []string{"invite", "ack", "cancel", "info"} {
+		t.Run(action, func(t *testing.T) {
+			ctx := context.Background()
+			var f *deviceCleanupFixture
+			if action == "info" {
+				var store *DeviceOperationIntentStore
+				var id DeviceOperationIntentIdentity
+				f, store, id = sipINFOFixture(t)
+				_, err := store.PrepareSIPINFO(ctx, id, 6, sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"}))
+				require.NoError(t, err)
+			} else {
+				var store *DeviceOperationIntentStore
+				var id DeviceOperationIntentIdentity
+				f, store, id = newSIPStepFixture(t)
+				_, err := store.AddSIPInviteStep(ctx, id, 2, sipStepIdentity(1))
+				require.NoError(t, err)
+				if action != "invite" {
+					_, err = store.DispatchSIPInviteStep(ctx, id, 3, sipStepIdentity(1).StepID)
+					require.NoError(t, err)
+					if action == "ack" {
+						_, err = store.ObserveSIPKnownBranch(ctx, id, 4, sipKnownBranch())
+					} else {
+						identity := DeviceSIPCancelIdentity(sipStepIdentity(1))
+						identity.ContentType, identity.BodyLength, identity.BodySHA256 = "", 0, sipEmptyBodySHA256
+						_, err = store.PrepareSIPCancel(ctx, id, 4, identity)
+					}
+					require.NoError(t, err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "invite.db")
+			require.NoError(t, f.db.Exec("VACUUM INTO ?", path).Error)
+			binary, err := os.Executable()
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, binary, "-test.run=^TestDeviceSIPInviteProcessHelper$", "-test.count=1")
+			cmd.Env = append(os.Environ(), "UVP_SIP_INVITE_PROCESS_DB="+path, "UVP_SIP_INVITE_PROCESS_ACTION="+action)
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", out)
+		})
+	}
 }

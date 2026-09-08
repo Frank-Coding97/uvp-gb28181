@@ -76,13 +76,17 @@ func readSIPCancel(w *sipCancelWire, step DeviceSIPInviteStep, updatedAt time.Ti
 }
 
 func (s *DeviceOperationIntentStore) PrepareSIPCancel(ctx context.Context, id DeviceOperationIntentIdentity, version int64, identity DeviceSIPCancelIdentity) (DeviceSIPInviteSteps, error) {
+	processID, err := sipCleanupProcessID()
+	if err != nil {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
 	return s.mutateSIPCancelStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
 			if step.Identity.StepID != identity.StepID {
 				continue
 			}
-			if !sipCancelMatchesInvite(identity, *step) {
+			if step.OwnerProcessID != processID || !sipCancelMatchesInvite(identity, *step) {
 				return false, ErrDeviceIntentConflict
 			}
 			if step.Cancel != nil {
@@ -106,6 +110,10 @@ func (s *DeviceOperationIntentStore) PrepareSIPCancel(ctx context.Context, id De
 // Load do not grant a second attempt. A later 2xx is still a live branch fact,
 // never evidence that this cancellation succeeded.
 func (s *DeviceOperationIntentStore) DispatchSIPCancel(ctx context.Context, id DeviceOperationIntentIdentity, version int64, identity DeviceSIPCancelIdentity) (DeviceSIPInviteSteps, error) {
+	processID, err := sipCleanupProcessID()
+	if err != nil {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
 	return s.mutateSIPCancelStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
@@ -113,7 +121,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPCancel(ctx context.Context, id D
 				continue
 			}
 			c := step.Cancel
-			if c == nil || !sipCancelMatchesInvite(identity, *step) || c.Identity != identity || c.State != SIPStepPrepared || step.KnownBranch != nil {
+			if step.OwnerProcessID != processID || c == nil || !sipCancelMatchesInvite(identity, *step) || c.Identity != identity || c.State != SIPStepPrepared || step.KnownBranch != nil {
 				return false, ErrDeviceIntentConflict
 			}
 			c.State, c.RowVersion, c.DispatchStartedAt = SIPStepMayHaveDispatched, 2, &now

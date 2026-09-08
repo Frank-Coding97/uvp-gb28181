@@ -146,7 +146,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPINFO(ctx context.Context, id Devi
 			if step.Identity.StepID != identity.Request.Request.StepID || b == nil {
 				continue
 			}
-			if b.ACKState != SIPStepMayHaveDispatched || sipBranchBusinessClosed(*step) || len(b.InfoSteps) >= maxSIPINFOSteps {
+			if step.OwnerProcessID != runID || b.ACKState != SIPStepMayHaveDispatched || sipBranchBusinessClosed(*step) || len(b.InfoSteps) >= maxSIPINFOSteps {
 				return false, ErrDeviceIntentConflict
 			}
 			if len(b.InfoSteps) != 0 {
@@ -194,7 +194,7 @@ func (s *DeviceOperationIntentStore) mutateSIPINFO(ctx context.Context, id Devic
 				if a.Identity.InfoID != infoID {
 					continue
 				}
-				if !observation && (sipBranchBusinessClosed(out.Steps[si]) || a.OwnerRunID != runID || a.LocalQuiescedAt != nil || ai != len(b.InfoSteps)-1) {
+				if !observation && (out.Steps[si].OwnerProcessID != runID || sipBranchBusinessClosed(out.Steps[si]) || a.OwnerRunID != runID || a.LocalQuiescedAt != nil || ai != len(b.InfoSteps)-1) {
 					return false, ErrDeviceIntentConflict
 				}
 				return mutate(a, now, runID)

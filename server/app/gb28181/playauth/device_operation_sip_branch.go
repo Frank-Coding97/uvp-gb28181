@@ -207,6 +207,10 @@ func (s *DeviceOperationIntentStore) DispatchSIPKnownBranchACK(ctx context.Conte
 	if !validSIPKnownBranchIdentity(identity) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
 	}
+	processID, err := sipCleanupProcessID()
+	if err != nil {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
 	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
 		for index := range out.Steps {
 			step := &out.Steps[index]
@@ -214,7 +218,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPKnownBranchACK(ctx context.Conte
 				continue
 			}
 			b := step.KnownBranch
-			if b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared || sipBranchBusinessClosed(*step) {
+			if step.OwnerProcessID != processID || b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared || sipBranchBusinessClosed(*step) {
 				return false, ErrDeviceIntentConflict
 			}
 			b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt = SIPStepMayHaveDispatched, 2, &now
