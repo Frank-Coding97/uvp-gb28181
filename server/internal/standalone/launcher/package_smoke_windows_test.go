@@ -55,4 +55,13 @@ func TestWindowsFinalPackageFreshBrowser(t *testing.T) {
 		}
 	}
 	t.Log("FINAL_ZIP_FRESH_SETUP_BROWSER_READY")
+	if !browser.close() {
+		t.Fatal("test browser did not close")
+	}
+	status, _, body = client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+	if status != http.StatusOK {
+		t.Fatal("closing browser stopped the backend")
+	}
+	t18AssertSetupStatus(t, body, true, "pending_admin")
+	t.Log("BROWSER_CLOSED_BACKEND_STILL_AVAILABLE")
 }

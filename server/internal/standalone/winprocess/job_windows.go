@@ -150,13 +150,17 @@ func (j *Job) start(spec StartSpec, afterCreate func(windows.ProcessInformation)
 		ProcThreadAttributeList: attributes.List(),
 	}
 	var processInfo windows.ProcessInformation
+	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_NEW_PROCESS_GROUP)
+	if spec.NoConsole {
+		flags |= windows.CREATE_NO_WINDOW
+	}
 	createErr := windows.CreateProcess(
 		executable,
 		commandLine,
 		nil,
 		nil,
 		true,
-		windows.CREATE_UNICODE_ENVIRONMENT|windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_NEW_PROCESS_GROUP,
+		flags,
 		&environment[0],
 		directory,
 		&startup.StartupInfo,

@@ -154,7 +154,7 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		if err != nil {
 			return nil, nil, err
 		}
-		process, err := job.Start(winprocess.StartSpec{Path: path, Args: args, Dir: dir, Env: componentEnvironment(paths), Stdin: stdin, Stdout: log, Stderr: log})
+		process, err := job.Start(winprocess.StartSpec{NoConsole: true, Path: path, Args: args, Dir: dir, Env: componentEnvironment(paths), Stdin: stdin, Stdout: log, Stderr: log})
 		_ = log.Close()
 		if err != nil {
 			return nil, nil, err

@@ -184,6 +184,11 @@ func TestWindowsJobKillsChildIfOwnerCrashesBeforeRegistration(t *testing.T) {
 }
 
 func TestWindowsJobUsesExplicitStandardIO(t *testing.T) {
+	t.Run("console", func(t *testing.T) { testWindowsStandardIO(t, false) })
+	t.Run("no-console", func(t *testing.T) { testWindowsStandardIO(t, true) })
+}
+
+func testWindowsStandardIO(t *testing.T, noConsole bool) {
 	job, err := NewJob()
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +212,9 @@ func TestWindowsJobUsesExplicitStandardIO(t *testing.T) {
 		stdoutWriter.Close()
 		t.Fatal(err)
 	}
-	process, err := job.Start(helperStartSpec("stdio", stdinReader, stdoutWriter, stderrWriter))
+	spec := helperStartSpec("stdio", stdinReader, stdoutWriter, stderrWriter)
+	spec.NoConsole = noConsole
+	process, err := job.Start(spec)
 	if err != nil {
 		t.Fatal(err)
 	}

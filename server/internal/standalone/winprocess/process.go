@@ -11,13 +11,14 @@ import (
 // explicit environment block; a nil Env uses the current process environment.
 // Missing standard streams are connected to NUL.
 type StartSpec struct {
-	Path   string
-	Args   []string
-	Env    []string
-	Dir    string
-	Stdin  *os.File
-	Stdout *os.File
-	Stderr *os.File
+	NoConsole bool
+	Path      string
+	Args      []string
+	Env       []string
+	Dir       string
+	Stdin     *os.File
+	Stdout    *os.File
+	Stderr    *os.File
 }
 
 var (
