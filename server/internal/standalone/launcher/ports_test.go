@@ -59,6 +59,29 @@ func TestPreflightRejectsOccupiedMediaUDPPort(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPreflightRejectsOccupiedIPv4Wildcard(t *testing.T) {
+	for _, network := range []string{"tcp", "udp"} {
+		t.Run(network, func(t *testing.T) {
+			var address string
+			if network == "tcp" {
+				listener, err := net.Listen("tcp4", "0.0.0.0:0")
+				require.NoError(t, err)
+				defer listener.Close()
+				address = listener.Addr().String()
+			} else {
+				listener, err := net.ListenPacket("udp4", "0.0.0.0:0")
+				require.NoError(t, err)
+				defer listener.Close()
+				address = listener.LocalAddr().String()
+			}
+			err := checkPorts(nil, []standalone.MediaListener{{Network: network, Address: address}})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), address)
+		})
+
+	}
+}
+
 func TestPreflightRejectsDuplicateProtocolBinding(t *testing.T) {
 	reserved, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)

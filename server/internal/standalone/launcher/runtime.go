@@ -500,11 +500,22 @@ func checkPorts(addresses []string, media ...[]standalone.MediaListener) error {
 	for _, binding := range bindings {
 		var resource portResource
 		var err error
+		network := binding.Network
+		// Windows can bind an IPv6 wildcard while the required IPv4 socket is occupied.
+		if host, _, splitErr := net.SplitHostPort(binding.Address); splitErr == nil {
+			if ip := net.ParseIP(host); ip != nil {
+				if ip.To4() != nil {
+					network += "4"
+				} else {
+					network += "6"
+				}
+			}
+		}
 		switch binding.Network {
 		case "tcp":
-			resource, err = net.Listen("tcp", binding.Address)
+			resource, err = net.Listen(network, binding.Address)
 		case "udp":
-			resource, err = net.ListenPacket("udp", binding.Address)
+			resource, err = net.ListenPacket(network, binding.Address)
 		default:
 			return fmt.Errorf("unsupported required port network %q", binding.Network)
 		}
