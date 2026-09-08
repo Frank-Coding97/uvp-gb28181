@@ -13,6 +13,9 @@ import (
 // gate continues blocking business startup until all recovery steps succeed.
 func rotateRecoveryCredentials(paths Paths, operationID, expectedConfigSHA256 string, hook func(string) error) error {
 	return withConfigLock(paths.InstallDir, func() error {
+		if err := requireMaintenanceInstanceLock(paths.InstallDir); err != nil {
+			return err
+		}
 		journal, err := ReadMaintenanceJournal(paths.InstallDir)
 		if err != nil {
 			return err

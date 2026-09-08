@@ -64,3 +64,21 @@ func TestInstanceGenerationLegacyCompatibilityAndValidation(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestRecoveryConfigRequiresInstanceOwnership(t *testing.T) {
+	paths := configTestPaths(t)
+	before, err := InitializeConfig(paths)
+	require.NoError(t, err)
+	lock, err := AcquireInstanceLock(paths.InstallDir)
+	require.NoError(t, err)
+	j := maintenanceTestJournal(paths.InstallDir)
+	require.NoError(t, createMaintenanceJournal(paths.InstallDir, j))
+	require.NoError(t, advanceMaintenance(paths.InstallDir, j.OperationID, MaintenanceUpgrading, MaintenanceRestoreRequired))
+	require.NoError(t, advanceMaintenance(paths.InstallDir, j.OperationID, MaintenanceRestoreRequired, MaintenanceRestoring))
+	require.NoError(t, lock.Close())
+	require.Error(t, rotateRecoveryCredentials(paths, j.OperationID, before.ConfigSHA256, nil))
+	after, err := LoadConfig(paths)
+	require.NoError(t, err)
+	require.Equal(t, before.ConfigSHA256, after.ConfigSHA256)
+	require.ErrorIs(t, CheckMaintenanceGate(paths.InstallDir), ErrMaintenanceRequired)
+}
