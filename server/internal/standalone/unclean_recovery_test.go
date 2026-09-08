@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,48 @@ func TestUncleanRecoveryPreservesVersionAndRequiresAppropriateConfirmation(t *te
 				require.FileExists(t, filepath.Join(archive, "pristine-confirmation.json"))
 				require.NoFileExists(t, filepath.Join(archive, "confirmation.json"))
 			}
+		})
+	}
+}
+
+func TestUncleanRecoveryRejectsUnqualifiedOrUnprovenSourceBeforeMutation(t *testing.T) {
+	for _, mode := range []string{"clean-source", "corrupt-marker", "unqualified-backend", "snapshot-inside-install"} {
+		t.Run(mode, func(t *testing.T) {
+			paths := newBackupTestPaths(t)
+			release, err := LoadRelease(paths.InstallDir)
+			require.NoError(t, err)
+			trust, err := releaseFileSHA256(release.BackendExe)
+			require.NoError(t, err)
+			lock, err := AcquireInstanceLock(paths.InstallDir)
+			require.NoError(t, err)
+			if mode != "clean-source" {
+				_, err = BeginRun(paths)
+				require.NoError(t, err)
+			}
+			require.NoError(t, lock.Close())
+			if mode == "corrupt-marker" {
+				require.NoError(t, os.WriteFile(filepath.Join(paths.DataDir, runMarkerName), []byte(`{"nonce":`), 0600))
+			}
+			if mode == "unqualified-backend" {
+				trust = strings.Repeat("0", 64)
+			}
+			destination := filepath.Join(filepath.Dir(paths.InstallDir), "rejected-snapshot")
+			if mode == "snapshot-inside-install" {
+				destination = filepath.Join(paths.InstallDir, "rejected-snapshot")
+			}
+			before, err := recoveryTreeIdentity(t.Context(), paths.InstallDir)
+			require.NoError(t, err)
+			called := false
+			_, err = recoverUncleanStoppedWithTrust(t.Context(), paths, destination, trust,
+				func(context.Context, Paths, string, string, string) error { called = true; return nil },
+				func(context.Context, string, string, string, string, int) error { called = true; return nil })
+			require.Error(t, err)
+			require.False(t, called)
+			after, err := recoveryTreeIdentity(t.Context(), paths.InstallDir)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			require.NoError(t, CheckMaintenanceGate(paths.InstallDir))
+			require.NoDirExists(t, destination)
 		})
 	}
 }
