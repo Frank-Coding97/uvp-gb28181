@@ -122,8 +122,9 @@ func commitHookDB(t *testing.T, db *gorm.DB, failAt int32, committed bool, after
 	require.Positive(t, failAt)
 	raw, err := db.DB()
 	require.NoError(t, err)
-	_, ok := raw.Driver().(*gosqlite.Driver)
-	require.True(t, ok)
+	_, sqliteOK := raw.Driver().(*gosqlite.Driver)
+	_, nativeOK := raw.Driver().(faultDriver)
+	require.True(t, sqliteOK || nativeOK, "pool must be opened with a commit fault connector")
 	out := db.Session(&gorm.Session{NewDB: true, Context: context.Background()})
 	fault := &commitFault{failAt: failAt, committed: committed, after: after}
 	out.Statement.ConnPool = &commitFaultPool{DB: raw, fault: fault}
