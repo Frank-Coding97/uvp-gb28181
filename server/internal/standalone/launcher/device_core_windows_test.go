@@ -96,11 +96,13 @@ type coreDevice struct {
 }
 
 type coreChannel struct {
+	ID        uint   `json:"id"`
 	DeviceID  string `json:"deviceId"`
 	ChannelID string `json:"channelId"`
 }
 
 type coreDirectoryObservation struct {
+	ChannelRowID uint
 	DeviceOnline bool
 	ChannelID    string
 	ChannelCount int
@@ -301,6 +303,9 @@ func runWindowsStandaloneDeviceCorePath(t *testing.T, activeStop bool) {
 	}
 
 	playPath := "/api/gb28181/play/" + url.PathEscape(deviceID) + "/" + url.PathEscape(firstDirectory.ChannelID)
+	if os.Getenv("UVP_CORE_RECORD_STOP") == "1" {
+		coreEnableRecording(t, &client, firstDirectory.ChannelRowID, evidence)
+	}
 	status, headers, body = client.request(t, http.MethodPost, playPath, "", nil)
 	coreAssertResponseSafe(t, headers, body, bootstrapToken, adminPassword, sipPassword)
 	var playResult corePlayObservation
@@ -352,6 +357,9 @@ func runWindowsStandaloneDeviceCorePath(t *testing.T, activeStop bool) {
 	}
 	evidence.Stage = "play_ready"
 	t.Log("PLAY_READY")
+	if os.Getenv("UVP_CORE_RECORD_STOP") == "1" {
+		time.Sleep(15 * time.Second)
+	}
 
 	if continuePath := strings.TrimSpace(os.Getenv(coreContinueFileEnv)); continuePath != "" {
 		if !coreWaitForFile(continuePath, continueTimeout) {
@@ -446,6 +454,9 @@ func runWindowsStandaloneDeviceCorePath(t *testing.T, activeStop bool) {
 		coreFail(t, evidence, "restart_login", "administrator_relogin_rejected")
 	}
 	client.accessToken = accessToken
+	if os.Getenv("UVP_CORE_RECORD_STOP") == "1" {
+		coreVerifyRecording(t, &client, firstDirectory.ChannelRowID, evidence)
+	}
 	t.Log("RESTART_READY_FOR_SIM")
 	if activeStop {
 		status, headers, body = client.request(t, http.MethodGet, "/api/gb28181/sip/setup/status", "", nil)
@@ -655,6 +666,7 @@ func coreReadDirectory(ctx context.Context, client *t18HTTPClient, deviceID stri
 			continue
 		}
 		return coreDirectoryObservation{
+			ChannelRowID: channel.ID,
 			DeviceOnline: true,
 			ChannelID:    channel.ChannelID,
 			ChannelCount: len(channels.List),
