@@ -31,6 +31,12 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
 		os.Exit(runUpgradeCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		os.Exit(runRestoreCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "recovery-confirm" {
+		os.Exit(runRecoveryConfirmCommand(os.Args[2:], filepath.Dir(executable), os.Stdout, os.Stderr))
+	}
 	root := flag.String("install-dir", filepath.Dir(executable), "安装目录")
 	recordings := flag.String("recordings-dir", "", "录像目录（默认安装目录下 recordings）")
 	noBrowser := flag.Bool("no-browser", false, "仅启动组件，不打开浏览器（用于自动测试）")
