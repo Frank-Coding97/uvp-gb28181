@@ -132,6 +132,9 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		return err
 	}
 	defer lock.Close()
+	if err := standalone.CheckMaintenanceGate(installDir); err != nil {
+		return err
+	}
 	job, err := winprocess.NewJob()
 	if err != nil {
 		return err

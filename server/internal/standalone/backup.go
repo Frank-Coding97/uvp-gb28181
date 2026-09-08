@@ -63,6 +63,9 @@ func BackupStopped(ctx context.Context, paths Paths, destination string) (Backup
 	}
 	defer lock.Close()
 	err = withConfigLock(paths.InstallDir, func() error {
+		if err := CheckMaintenanceGate(paths.InstallDir); err != nil {
+			return err
+		}
 		if _, err := os.Lstat(filepath.Join(paths.DataDir, runMarkerName)); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("backup requires a clean stopped instance without a run marker")
 		}
