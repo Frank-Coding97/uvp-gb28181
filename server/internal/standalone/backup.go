@@ -69,13 +69,40 @@ func BackupStopped(ctx context.Context, paths Paths, destination string) (Backup
 // so an upgrade can establish its next state without admitting another launcher.
 // Paths and destination must already have passed their ordinary validation.
 func backupStoppedOwned(ctx context.Context, paths Paths, destination string) (BackupManifest, error) {
+	return backupStoppedAdmitted(ctx, paths, destination, "", "")
+}
+
+func backupPreparingOwned(ctx context.Context, paths Paths, destination, operationID string) (BackupManifest, error) {
+	if operationID == "" {
+		return BackupManifest{}, errors.New("preparing backup requires operation identity")
+	}
+	validated, err := backupDestination(paths, destination)
+	if err != nil {
+		return BackupManifest{}, err
+	}
+	return backupStoppedAdmitted(ctx, paths, validated, operationID, maintenanceBackendSHA256Allowlist)
+}
+
+func backupStoppedAdmitted(ctx context.Context, paths Paths, destination, operationID, trust string) (BackupManifest, error) {
 	var result BackupManifest
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	err := withConfigLock(paths.InstallDir, func() error {
 		if err := requireMaintenanceInstanceLock(paths.InstallDir); err != nil {
 			return err
 		}
-		if err := CheckMaintenanceGate(paths.InstallDir); err != nil {
-			return err
+		var preparedFingerprint string
+		if operationID == "" {
+			if err := CheckMaintenanceGate(paths.InstallDir); err != nil {
+				return err
+			}
+		} else {
+			var err error
+			preparedFingerprint, err = checkPreparingBackupAdmission(paths, destination, operationID, trust)
+			if err != nil {
+				return err
+			}
 		}
 		if _, err := os.Lstat(filepath.Join(paths.DataDir, runMarkerName)); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("backup requires a clean stopped instance without a run marker")
@@ -161,6 +188,15 @@ func backupStoppedOwned(ctx context.Context, paths Paths, destination string) (B
 		}
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if operationID != "" {
+			fingerprint, err := checkPreparingBackupAdmission(paths, destination, operationID, trust)
+			if err != nil {
+				return err
+			}
+			if fingerprint != preparedFingerprint {
+				return errors.New("installed releases changed during preparing backup")
+			}
 		}
 		// Recheck immediately before rename; the platform operation also refuses
 		// an existing target so a competing creator cannot be overwritten.
