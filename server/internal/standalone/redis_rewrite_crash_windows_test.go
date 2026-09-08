@@ -222,6 +222,11 @@ func runRedisRewriteCrashRound(t *testing.T, binary string, round int) (runErr e
 			return fmt.Errorf("confirmed sentinel %s recovered with unexpected value", key)
 		}
 	}
+	recoveredPayload, err := recoveryClient.Get(recoveryCtx, bulkKey).Result()
+	if err != nil || recoveredPayload != payload {
+		recoveryCancel()
+		return errors.New("confirmed rewrite payload did not recover intact")
+	}
 	recoveryCancel()
 
 	// The restart copy is disposable. The preserved evidence directory above

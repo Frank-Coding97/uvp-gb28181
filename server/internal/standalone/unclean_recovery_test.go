@@ -3,6 +3,7 @@ package standalone
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,70 @@ func TestUncleanRecoveryPreservesVersionAndRequiresAppropriateConfirmation(t *te
 				require.FileExists(t, filepath.Join(archive, "pristine-confirmation.json"))
 				require.NoFileExists(t, filepath.Join(archive, "confirmation.json"))
 			}
+		})
+	}
+}
+
+func TestUncleanRecoveryRetriesFailedUnsealedStageWithoutChangingActiveData(t *testing.T) {
+	for _, failureAt := range []string{"maintenance", "redis"} {
+		t.Run(failureAt, func(t *testing.T) {
+			paths := newBackupTestPaths(t)
+			database, err := os.ReadFile(newRecoveryPristineSQLite(t))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(paths.DatabasePath, database, 0600))
+			release, err := LoadRelease(paths.InstallDir)
+			require.NoError(t, err)
+			trust, err := releaseFileSHA256(release.BackendExe)
+			require.NoError(t, err)
+			lock, err := AcquireInstanceLock(paths.InstallDir)
+			require.NoError(t, err)
+			_, err = BeginRun(paths)
+			require.NoError(t, err)
+			require.NoError(t, lock.Close())
+			configBefore, err := recoveryTreeIdentity(t.Context(), paths.ConfigDir)
+			require.NoError(t, err)
+			dataBefore, err := recoveryTreeIdentity(t.Context(), paths.DataDir)
+			require.NoError(t, err)
+			injected := errors.New("injected offline stage failure")
+			fail := true
+			run := func(context.Context, Paths, string, string, string) error {
+				if fail && failureAt == "maintenance" {
+					return injected
+				}
+				return nil
+			}
+			redis := func(_ context.Context, _, _, target, _ string, _ int) error {
+				if fail && failureAt == "redis" {
+					return injected
+				}
+				return os.WriteFile(filepath.Join(target, "fresh"), []byte("safe-fixture"), 0600)
+			}
+			destination := filepath.Join(filepath.Dir(paths.InstallDir), "retry-snapshot")
+			_, err = recoverUncleanStoppedWithTrust(t.Context(), paths, destination, trust, run, redis)
+			if failureAt == "maintenance" {
+				require.ErrorContains(t, err, "recovery session revocation failed")
+			} else {
+				require.ErrorContains(t, err, "recovery Redis staging failed")
+			}
+			require.ErrorIs(t, CheckMaintenanceGate(paths.InstallDir), ErrMaintenanceRequired)
+			journal, err := ReadMaintenanceJournal(paths.InstallDir)
+			require.NoError(t, err)
+			require.Equal(t, MaintenanceRestoring, journal.Phase)
+			for _, item := range []struct{ path, digest string }{{paths.ConfigDir, configBefore}, {paths.DataDir, dataBefore}} {
+				digest, err := recoveryTreeIdentity(t.Context(), item.path)
+				require.NoError(t, err)
+				require.Equal(t, item.digest, digest)
+			}
+			fail = false
+			result, err := recoverUncleanStoppedWithTrust(t.Context(), paths, "", trust, run, redis)
+			require.NoError(t, err)
+			require.Equal(t, journal.OperationID, result.OperationID)
+			require.False(t, result.AwaitingLocalConfirmation)
+			require.NoError(t, CheckMaintenanceGate(paths.InstallDir))
+			failed := filepath.Join(paths.InstallDir, ".uvp-recovered-"+result.OperationID, "failed", result.OperationID, "data")
+			digest, err := recoveryTreeIdentity(t.Context(), failed)
+			require.NoError(t, err)
+			require.Equal(t, dataBefore, digest)
 		})
 	}
 }
