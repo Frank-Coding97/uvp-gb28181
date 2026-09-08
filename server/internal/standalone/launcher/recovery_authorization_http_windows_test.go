@@ -5,7 +5,11 @@ package launcher
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,8 +20,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -63,7 +69,15 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 	if root == "" {
 		t.Skip("requires isolated recovery authorization driver")
 	}
-	require.Equal(t, "complete", strings.TrimSpace(os.Getenv(recoveryAuthorizationCaseEnv)))
+	testCase := strings.TrimSpace(os.Getenv(recoveryAuthorizationCaseEnv))
+	if testCase == "" {
+		testCase = "complete"
+	}
+	switch testCase {
+	case "complete", "unclean":
+	default:
+		t.Fatalf("unsupported recovery authorization case %q", testCase)
+	}
 
 	current, err := standalone.LoadRelease(root)
 	require.NoError(t, err)
@@ -85,7 +99,7 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 	sipPassword := t18RandomPassword(t)
 	adminBody := t18AdminBody(t, adminUsername, adminPassword)
 
-	runs := make([]*t18Launch, 0, 4)
+	runs := make([]*t18Launch, 0, 5)
 	defer func() {
 		for _, run := range runs {
 			run.cancel()
@@ -194,8 +208,15 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 
 	oldCapabilityStarted := time.Now()
 	oldQR := t26GenerateQR(t, client, oldPair.AccessToken, adminPassword, sipPassword)
-	oldPlayToken := t26AuthorizeFixedPlayback(t, client, oldPair.AccessToken, adminPassword, sipPassword)
 	require.NotEmpty(t, oldQR.Token)
+
+	if testCase == "unclean" {
+		third.cancel()
+		require.True(t, t18WaitFinished(t, third, 90*time.Second))
+		t26RunUncleanAOFRecovery(t, root, paths, adminUsername, adminPassword, oldPair, oldQR, oldCapabilityStarted, &client, &runs)
+		return
+	}
+	oldPlayToken := t26AuthorizeFixedPlayback(t, client, oldPair.AccessToken, adminPassword, sipPassword)
 	require.NotEmpty(t, oldPlayToken)
 	third.cancel()
 	require.True(t, t18WaitFinished(t, third, 90*time.Second))
@@ -291,6 +312,9 @@ func TestWindowsRecoveryAuthorizationHTTP(t *testing.T) {
 	}
 	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
 		http.MethodPost, "/api/gb28181/sip/qr/exchange", "", "", oldQRBody)
+	if time.Since(oldCapabilityStarted) >= time.Duration(oldQR.ExpiresInSeconds)*time.Second {
+		t.Fatal("old QR expired while the rejection request was in flight; recovery revocation is unproven")
+	}
 	t26AssertNoSecret(t, headers, body, oldQR.Token, oldPair.AccessToken, oldPair.RefreshToken, adminPassword, sipPassword)
 	t26RequireHTTPStatus(t, "/api/gb28181/sip/qr/exchange", status, http.StatusGone)
 
@@ -563,4 +587,416 @@ func t26SeedDeviceAndChannel(t *testing.T, databasePath, adminUsername, deviceID
 		StreamTransport: "TCP-Passive",
 	}
 	require.NoError(t, db.Create(&channel).Error)
+}
+
+// t26RunUncleanAOFRecovery consumes a real QR key, then restores the exact
+// pre-consumption Redis tree before creating the previous-run marker. The
+// recovery path must therefore remove the old QR during its Redis staging;
+// a direct Redis Set would not prove that contract.
+func t26RunUncleanAOFRecovery(t *testing.T, root string, paths standalone.Paths, adminUsername, adminPassword string, oldPair recoveryAuthorizationTokenPair, oldQR recoveryAuthorizationQR, oldCapabilityStarted time.Time, client *t18HTTPClient, runs *[]*t18Launch) {
+	t.Helper()
+	activeRedis := filepath.Join(paths.DataDir, "redis")
+	// Keep evidence in an independent protected directory below the disposable
+	// fixture root; it must not become part of the active data tree or recovery
+	// snapshot. t.TempDir only supplies mode bits and is not an ACL boundary on
+	// Windows.
+	evidenceRoot := filepath.Join(root, ".t27-redis-evidence")
+	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
+	require.NoError(t, t26ProtectEvidenceRoot(evidenceRoot))
+	t.Cleanup(func() { _ = os.RemoveAll(evidenceRoot) })
+	beforeRedis := filepath.Join(evidenceRoot, "redis-before-consumption")
+	afterRedis := filepath.Join(evidenceRoot, "redis-after-consumption")
+	require.NoError(t, t26CopyRedisTree(activeRedis, beforeRedis))
+	beforeDigest, err := t26RedisTreeDigest(beforeRedis)
+	require.NoError(t, err)
+	beforeHasAOF, err := t26RedisTreeHasAOF(beforeRedis)
+	require.NoError(t, err)
+	require.True(t, beforeHasAOF, "unclean HTTP case requires a durable Redis AOF tree")
+	// Run the first exchange from the copied tree itself. A successful first
+	// exchange then proves that the pre-consumption copy retained the QR state,
+	// rather than merely proving that the original active tree had it.
+	require.NoError(t, os.RemoveAll(activeRedis))
+	require.NoError(t, t26CopyRedisTree(beforeRedis, activeRedis))
+	preflightDigest, err := t26RedisTreeDigest(activeRedis)
+	require.NoError(t, err)
+	require.Equal(t, beforeDigest, preflightDigest, "pre-consumption Redis copy was not installed intact")
+
+	consumeURLs := make(chan string, 1)
+	consumeRun := t18StartWithRecordings(t, root, paths.RecordingsDir, consumeURLs)
+	*runs = append(*runs, consumeRun)
+	consumeEntry, ok := t18WaitBrowserEntry(consumeRun, consumeURLs, 90*time.Second)
+	require.True(t, ok)
+	baseURL, origin, _, ok := t18BrowserEndpoint(consumeEntry, false)
+	require.True(t, ok)
+	client.baseURL, client.origin = baseURL, origin
+	status, headers, body := client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+	t18AssertResponseSafe(t, headers, body, "", adminPassword)
+	t26RequireHTTPStatus(t, "/api/standalone/setup/status", status, http.StatusOK)
+	t18AssertSetupStatus(t, body, true, "complete")
+
+	qrBody, err := json.Marshal(map[string]string{"token": oldQR.Token})
+	require.NoError(t, err)
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/gb28181/sip/qr/exchange", "", "", qrBody)
+	if time.Since(oldCapabilityStarted) >= time.Duration(oldQR.ExpiresInSeconds)*time.Second {
+		t.Fatal("old QR expired while the first exchange request was in flight; QR durability is unproven")
+	}
+	t26AssertNoSecret(t, headers, body, oldQR.Token, oldPair.AccessToken, oldPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/gb28181/sip/qr/exchange", status, http.StatusOK)
+	var exchanged struct {
+		Code int `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(body, &exchanged))
+	require.Zero(t, exchanged.Code)
+
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/gb28181/sip/qr/exchange", "", "", qrBody)
+	if time.Since(oldCapabilityStarted) >= time.Duration(oldQR.ExpiresInSeconds)*time.Second {
+		t.Fatal("old QR expired while the second exchange request was in flight; single-use evidence is unproven")
+	}
+	t26AssertNoSecret(t, headers, body, oldQR.Token, oldPair.AccessToken, oldPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/gb28181/sip/qr/exchange", status, http.StatusGone)
+	consumeRun.cancel()
+	require.True(t, t18WaitFinished(t, consumeRun, 90*time.Second))
+
+	require.NoError(t, t26CopyRedisTree(activeRedis, afterRedis))
+	afterDigest, err := t26RedisTreeDigest(afterRedis)
+	require.NoError(t, err)
+	require.NotEqual(t, beforeDigest, afterDigest, "QR exchange did not change the durable Redis tree")
+	afterHasAOF, err := t26RedisTreeHasAOF(afterRedis)
+	require.NoError(t, err)
+	require.True(t, afterHasAOF, "post-consumption Redis tree lost its durable AOF")
+
+	require.NoError(t, os.RemoveAll(activeRedis))
+	require.NoError(t, t26CopyRedisTree(beforeRedis, activeRedis))
+	restoredDigest, err := t26RedisTreeDigest(activeRedis)
+	require.NoError(t, err)
+	require.Equal(t, beforeDigest, restoredDigest, "active Redis tree was not restored from the pre-consumption copy")
+
+	lock, err := standalone.AcquireInstanceLock(root)
+	require.NoError(t, err)
+	_, err = standalone.BeginRun(paths)
+	require.NoError(t, err)
+	require.NoError(t, lock.Close())
+	require.FileExists(t, filepath.Join(paths.DataDir, ".uvp-running.json"))
+
+	snapshot := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-t27-unclean-recovery")
+	recoverCtx, recoverCancel := context.WithTimeout(context.Background(), recoveryAuthorizationTestTimeout)
+	result, err := RecoverUncleanStopped(recoverCtx, root, paths.RecordingsDir, snapshot)
+	recoverCancel()
+	require.NoError(t, err)
+	require.True(t, result.AwaitingLocalConfirmation)
+	j, err := standalone.ReadMaintenanceJournal(root)
+	require.NoError(t, err)
+	require.Equal(t, 2, j.Schema)
+	require.Equal(t, "unclean_recovery", j.Kind)
+	require.Equal(t, standalone.MaintenanceAwaitingConfirmation, j.Phase)
+	require.ErrorIs(t, standalone.CheckMaintenanceGate(root), standalone.ErrMaintenanceRequired)
+
+	confirmCtx, confirmCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	err = standalone.ConfirmRecovery(confirmCtx, root, j.OperationID,
+		func(info standalone.RecoveryConfirmationInfo) (standalone.RecoveryConfirmationInput, error) {
+			require.Equal(t, j.OperationID, info.OperationID)
+			require.Equal(t, "unclean_recovery", info.Kind)
+			require.False(t, info.BackupTime.IsZero())
+			return standalone.RecoveryConfirmationInput{
+				Username:        adminUsername,
+				Password:        adminPassword,
+				Acknowledgement: "CONFIRM " + j.OperationID,
+			}, nil
+		})
+	confirmCancel()
+	require.NoError(t, err)
+	require.NoError(t, standalone.CheckMaintenanceGate(root))
+	selected, err := standalone.LoadRelease(root)
+	require.NoError(t, err)
+	require.Equal(t, selected.Version, j.OldVersion)
+
+	finalURLs := make(chan string, 1)
+	finalRun := t18StartWithRecordings(t, root, paths.RecordingsDir, finalURLs)
+	*runs = append(*runs, finalRun)
+	finalEntry, ok := t18WaitBrowserEntry(finalRun, finalURLs, 90*time.Second)
+	require.True(t, ok)
+	baseURL, origin, _, ok = t18BrowserEndpoint(finalEntry, false)
+	require.True(t, ok)
+	client.baseURL, client.origin = baseURL, origin
+	client.accessToken = ""
+	status, headers, body = client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+	t18AssertResponseSafe(t, headers, body, "", adminPassword)
+	t26RequireHTTPStatus(t, "/api/standalone/setup/status", status, http.StatusOK)
+	t18AssertSetupStatus(t, body, true, "complete")
+
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/users/session/heartbeat", oldPair.AccessToken, "", nil)
+	t26AssertNoSecret(t, headers, body, oldPair.AccessToken, oldPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/users/session/heartbeat", status, http.StatusUnauthorized)
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/refreshToken", "", oldPair.RefreshToken, nil)
+	t26AssertNoSecret(t, headers, body, oldPair.AccessToken, oldPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/refreshToken", status, http.StatusUnauthorized)
+
+	if time.Since(oldCapabilityStarted) >= time.Duration(oldQR.ExpiresInSeconds)*time.Second {
+		t.Fatal("old QR expired before unclean rejection check; recovery revocation is unproven")
+	}
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/gb28181/sip/qr/exchange", "", "", qrBody)
+	if time.Since(oldCapabilityStarted) >= time.Duration(oldQR.ExpiresInSeconds)*time.Second {
+		t.Fatal("old QR expired while the unclean rejection request was in flight; recovery revocation is unproven")
+	}
+	t26AssertNoSecret(t, headers, body, oldQR.Token, oldPair.AccessToken, oldPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/gb28181/sip/qr/exchange", status, http.StatusGone)
+
+	newPair := t26LoginPair(t, *client, adminUsername, adminPassword)
+	if oldPair.AccessToken == newPair.AccessToken || oldPair.RefreshToken == newPair.RefreshToken {
+		t.Fatal("unclean recovery login reused a previous token")
+	}
+	refreshedPair := t26RefreshPair(t, *client, newPair, adminPassword, "")
+	if newPair.AccessToken == refreshedPair.AccessToken || newPair.RefreshToken == refreshedPair.RefreshToken {
+		t.Fatal("unclean recovery refresh endpoint reused a previous token")
+	}
+	newPair = refreshedPair
+	status, headers, body = t26HTTPCall(t, client.client, client.baseURL, client.origin,
+		http.MethodPost, "/api/users/session/heartbeat", newPair.AccessToken, "", nil)
+	t26AssertNoSecret(t, headers, body, newPair.AccessToken, newPair.RefreshToken, adminPassword)
+	t26RequireHTTPStatus(t, "/api/users/session/heartbeat", status, http.StatusOK)
+
+	finalRun.cancel()
+	require.True(t, t18WaitFinished(t, finalRun, 90*time.Second))
+}
+
+func t26CopyRedisTree(source, target string) error {
+	if source == "" || target == "" || filepath.Clean(source) == filepath.Clean(target) {
+		return fmt.Errorf("invalid Redis tree copy paths")
+	}
+	if err := os.MkdirAll(target, 0700); err != nil {
+		return err
+	}
+	// Replacing the Redis root also replaces its explicit protected DACL.
+	// Restore it before copying persistence files: an inherited ACL on a
+	// non-empty root is deliberately rejected by normal startup.
+	if err := t26ProtectEvidenceRoot(target); err != nil {
+		return err
+	}
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("Redis tree contains a symlink")
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		destination := filepath.Join(target, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0700)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("Redis tree contains a non-regular file")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+			return err
+		}
+		return os.WriteFile(destination, raw, 0600)
+	})
+}
+
+func t26RedisTreeDigest(root string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("Redis tree root is empty")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("Redis tree root is not a directory")
+	}
+	hash := sha256.New()
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("Redis tree contains a symlink")
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." || entry.IsDir() {
+			return nil
+		}
+		fileInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !fileInfo.Mode().IsRegular() {
+			return fmt.Errorf("Redis tree contains a non-regular file")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, _ = hash.Write([]byte(filepath.ToSlash(rel)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(raw)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func t26RedisTreeHasAOF(root string) (bool, error) {
+	if root == "" {
+		return false, fmt.Errorf("Redis tree root is empty")
+	}
+	found := false
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("Redis tree contains a symlink")
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(entry.Name())
+		if name == "manifest" || strings.HasSuffix(name, ".aof") {
+			found = true
+		}
+		return nil
+	})
+	return found, err
+}
+
+func t26ProtectEvidenceRoot(path string) error {
+	if path == "" {
+		return errors.New("Redis evidence root is empty")
+	}
+	userSID, err := t26CurrentWindowsUserSID()
+	if err != nil {
+		return err
+	}
+	systemSID, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return errors.New("build SYSTEM SID")
+	}
+	const fileAllAccessMask windows.ACCESS_MASK = 0x001F01FF
+	inheritance := uint32(windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
+	entries := []windows.EXPLICIT_ACCESS{
+		{
+			AccessPermissions: fileAllAccessMask,
+			AccessMode:        windows.SET_ACCESS,
+			Inheritance:       inheritance,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_USER,
+				TrusteeValue: windows.TrusteeValueFromSID(userSID),
+			},
+		},
+		{
+			AccessPermissions: fileAllAccessMask,
+			AccessMode:        windows.SET_ACCESS,
+			Inheritance:       inheritance,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(systemSID),
+			},
+		},
+	}
+	acl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		return errors.New("build Redis evidence ACL")
+	}
+	if err := windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		acl,
+		nil,
+	); err != nil {
+		return errors.New("set Redis evidence ACL")
+	}
+	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return errors.New("read Redis evidence ACL")
+	}
+	control, _, err := descriptor.Control()
+	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+		return errors.New("Redis evidence ACL is inheritable")
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil || dacl == nil || dacl.AceCount != uint16(len(entries)) {
+		return errors.New("Redis evidence ACL has unexpected entries")
+	}
+	want := map[string]bool{userSID.String(): false, systemSID.String(): false}
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, index, &ace); err != nil || ace == nil {
+			return errors.New("read Redis evidence ACL entry")
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE ||
+			ace.Header.AceFlags != windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE ||
+			ace.Mask != fileAllAccessMask {
+			return errors.New("Redis evidence ACL entry is overbroad")
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !sid.IsValid() {
+			return errors.New("Redis evidence ACL entry has invalid SID")
+		}
+		if _, ok := want[sid.String()]; !ok {
+			return errors.New("Redis evidence ACL contains an unexpected principal")
+		}
+		if want[sid.String()] {
+			return errors.New("Redis evidence ACL contains a duplicate principal")
+		}
+		want[sid.String()] = true
+	}
+	for _, present := range want {
+		if !present {
+			return errors.New("Redis evidence ACL omitted a required principal")
+		}
+	}
+	return nil
+}
+
+func t26CurrentWindowsUserSID() (*windows.SID, error) {
+	token := windows.GetCurrentThreadEffectiveToken()
+	user, err := token.GetTokenUser()
+	if err == nil {
+		return user.User.Sid.Copy()
+	}
+	if !errors.Is(err, windows.ERROR_NO_TOKEN) {
+		return nil, errors.New("query effective Windows user token")
+	}
+	var processToken windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &processToken); err != nil {
+		return nil, errors.New("query process Windows user token")
+	}
+	defer processToken.Close()
+	user, err = processToken.GetTokenUser()
+	if err != nil {
+		return nil, errors.New("query process Windows user token")
+	}
+	return user.User.Sid.Copy()
 }

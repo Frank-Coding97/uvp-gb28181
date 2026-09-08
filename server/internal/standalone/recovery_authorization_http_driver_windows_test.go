@@ -24,6 +24,13 @@ func TestWindowsRecoveryAuthorizationHTTPDriver(t *testing.T) {
 	if launcherTest == "" {
 		t.Skip("requires built Windows launcher test executable")
 	}
+	caseName := strings.TrimSpace(os.Getenv("UVP_RECOVERY_AUTHORIZATION_CASE"))
+	if caseName == "" {
+		caseName = "complete"
+	}
+	if caseName != "complete" && caseName != "unclean" {
+		t.Fatalf("unsupported recovery authorization case %q", caseName)
+	}
 	backend := maintenanceBackendTestPath(t)
 	componentRoot := maintenanceComponentReleaseRoot(t)
 
@@ -39,7 +46,7 @@ func TestWindowsRecoveryAuthorizationHTTPDriver(t *testing.T) {
 	cmd := exec.CommandContext(ctx, launcherTest,
 		"-test.run=^TestWindowsRecoveryAuthorizationHTTP$",
 		"-test.v", "-test.timeout=8m")
-	cmd.Env = recoveryAuthorizationDriverEnvironment(fixture.paths.InstallDir)
+	cmd.Env = recoveryAuthorizationDriverEnvironment(fixture.paths.InstallDir, caseName)
 	output, err := cmd.CombinedOutput()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		t.Fatalf("recovery authorization HTTP test timed out: %v", ctxErr)
@@ -131,7 +138,7 @@ func recoveryAuthorizationHTTPStatusEndpointAllowed(endpoint string) bool {
 	}
 }
 
-func recoveryAuthorizationDriverEnvironment(root string) []string {
+func recoveryAuthorizationDriverEnvironment(root, caseName string) []string {
 	const (
 		rootKey = "UVP_MAINTENANCE_TEST_ROOT"
 		caseKey = "UVP_RECOVERY_AUTHORIZATION_CASE"
@@ -150,5 +157,5 @@ func recoveryAuthorizationDriverEnvironment(root string) []string {
 		}
 		env = append(env, entry)
 	}
-	return append(env, rootKey+"="+root, caseKey+"=complete")
+	return append(env, rootKey+"="+root, caseKey+"="+caseName)
 }
