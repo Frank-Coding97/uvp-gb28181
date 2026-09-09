@@ -776,7 +776,14 @@ async function saveShares() {
     const existingDevices = new Map((shares.value?.devices || []).map(item => [item.sourceDeviceId, item]));
     const existingChannels = new Map((shares.value?.channels || []).map(item => [item.sourceChannelId, item]));
     const allLoadedChannels = [...channelsByDevice.values()].flat().concat(channelRows.value);
-    const loadedChannelMap = new Map(allLoadedChannels.map(item => [item.id, item]));
+    const loadedChannelMap = new Map<number, ChannelOption>();
+    for (const channel of allLoadedChannels) {
+      const previous = loadedChannelMap.get(channel.id);
+      loadedChannelMap.set(channel.id, {
+        ...channel,
+        sourceDeviceId: channel.sourceDeviceId || previous?.sourceDeviceId || channelSourceDeviceIds.value.get(channel.id) || 0
+      });
+    }
     const requiredDeviceIds = new Set(selectedDeviceIds.value);
     const deviceProjection: CascadeDeviceProjection[] = [...requiredDeviceIds].map(id => {
       const source = deviceDirectory.get(id);
