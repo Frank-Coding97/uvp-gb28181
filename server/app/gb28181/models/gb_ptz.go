@@ -206,6 +206,9 @@ const (
 )
 
 type GbPTZOperationAttempt struct {
+	// OS-generation retirement is independent of an observed sender return.
+	RetiredByProcessID *string    `gorm:"column:retired_by_process_id;size:32" json:"-"`
+	RetiredAt          *time.Time `gorm:"column:retired_at" json:"-"`
 	// A lease deadline is not proof that the original sender has exited.
 	OwnerProcessID  *string                   `gorm:"column:owner_process_id;size:32" json:"-"`
 	OwnerRunID      *string                   `gorm:"column:owner_run_id;size:32" json:"-"`

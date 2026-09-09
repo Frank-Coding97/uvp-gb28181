@@ -11,8 +11,10 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
+	"go.uber.org/zap"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -114,6 +116,21 @@ func NewAuthorizedService(db *gorm.DB, sender TrackedSender, now func() time.Tim
 		return nil, err
 	}
 	s.intents, s.barrier = intents, barrier
+	// This constructor runs before SIP callbacks, HTTP routes and schedulers
+	// are published. Recovery has no network effects and grants no permits.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	skipped, err := intents.RecoverRetiredPTZ(ctx)
+	if err != nil {
+		return nil, operationError(ErrorCodeHomePositionUnavailable, "恢复旧进程 PTZ 记录失败", err)
+	}
+	if len(skipped) > 0 && app.ZapLog != nil {
+		ids := make([]uint64, len(skipped))
+		for i, id := range skipped {
+			ids[i] = uint64(id)
+		}
+		app.ZapLog.Warn("PTZ 恢复扫描跳过异常旧进程记录,未伪造退役证书", zap.Uint64s("attemptIds", ids))
+	}
 	s.synchronous = NewScheduler(s)
 	return s, nil
 }

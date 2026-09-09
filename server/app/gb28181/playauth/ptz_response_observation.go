@@ -2,6 +2,7 @@ package playauth
 
 import (
 	"database/sql"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -74,6 +75,21 @@ func (p *PTZResponseObservation) ReserveHomePositionQuery(child gbmodels.GbPTZOp
 	}
 	if !p.consumed.CompareAndSwap(false, true) {
 		return ErrDeviceIntentConflict
+	}
+	// A late ACK may only reopen the observation path for an attempt that the
+	// platform retired with a complete cross-process certificate. An attempt
+	// row that never existed is the regular ACK path, not a retirement.
+	var attempt gbmodels.GbPTZOperationAttempt
+	if err := p.tx.First(&attempt, "operation_id=? AND attempt_no=?", p.original.ID, p.original.Attempt).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else if attempt.Status == gbmodels.PTZOperationAttemptUnknown && attempt.ErrorCode == PTZOwnerProcessRetired {
+		if attempt.RetiredByProcessID == nil || attempt.RetiredAt == nil || attempt.RetiredAt.IsZero() ||
+			!validIntentID(*attempt.RetiredByProcessID) || attempt.OwnerProcessID == nil ||
+			*attempt.RetiredByProcessID == *attempt.OwnerProcessID || attempt.LocalQuiescedAt != nil {
+			return ErrDeviceIntentConflict
+		}
 	}
 	parentID, err := NewDeviceOperationIntentID()
 	if err != nil {

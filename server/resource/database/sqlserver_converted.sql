@@ -5148,3 +5148,10 @@ IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'owner_run_id') IS NULL ALTER TAB
 IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'local_quiesced_at') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD local_quiesced_at DATETIME2(6) NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.gb_ptz_operation') AND name = N'uk_ptz_device_intent') CREATE UNIQUE INDEX uk_ptz_device_intent ON dbo.gb_ptz_operation(device_intent_id) WHERE device_intent_id IS NOT NULL;
 -- ptz-device-intent:end
+
+-- ptz-owner-retirement:begin
+-- Preserve old rows without fabricating a process-retirement certificate.
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_by_process_id') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD retired_by_process_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_at') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD retired_at DATETIME2(3) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.gb_ptz_operation_attempt') AND name=N'ck_ptz_attempt_retirement') ALTER TABLE dbo.gb_ptz_operation_attempt ADD CONSTRAINT ck_ptz_attempt_retirement CHECK ((retired_by_process_id IS NULL AND retired_at IS NULL) OR (retired_by_process_id IS NOT NULL AND retired_at IS NOT NULL AND owner_process_id IS NOT NULL AND owner_run_id IS NOT NULL AND retired_by_process_id <> owner_process_id AND local_quiesced_at IS NULL));
+-- ptz-owner-retirement:end

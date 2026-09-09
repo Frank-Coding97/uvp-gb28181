@@ -50,7 +50,7 @@ func (attempt *GbPTZOperationAttempt) AfterFind(tx *gorm.DB) error {
 		attempt.StartedAt = ptzLocalWallTime(attempt.StartedAt)
 		attempt.LeaseUntil = ptzLocalWallTime(attempt.LeaseUntil)
 		attempt.CreatedAt = ptzLocalWallTime(attempt.CreatedAt)
-		ptzLocalWallPointers(&attempt.SentAt, &attempt.CompletedAt, &attempt.LocalQuiescedAt)
+		ptzLocalWallPointers(&attempt.SentAt, &attempt.CompletedAt, &attempt.LocalQuiescedAt, &attempt.RetiredAt)
 	}
 	return nil
 }

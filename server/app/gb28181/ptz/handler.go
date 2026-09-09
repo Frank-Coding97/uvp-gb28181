@@ -236,11 +236,17 @@ func ptzResponseOperationUpdate(tx *gorm.DB, operation gbmodels.GbPTZOperation, 
 			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
 		})
 	if operation.ResponseRequired {
+		// A retirement-converged operation is terminal for the scheduler, so a
+		// late ACK cannot race a retry: the observed device fact must still be
+		// recorded even once the transport deadline has passed. The reconcile
+		// path separately demands a complete retirement certificate.
 		update = update.Where(`
-			(status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)
+			(status = ? AND error_code = ?)
+			OR (status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)
 			OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
 			OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
 			OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
+			gbmodels.PTZOperationUnknown, playauth.PTZOwnerProcessRetired,
 			gbmodels.PTZOperationUnknown, gbmodels.PTZTimeComparison(tx, observedAt),
 			gbmodels.PTZOperationSent, gbmodels.PTZTimeComparison(tx, observedAt),
 			gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(tx, observedAt),

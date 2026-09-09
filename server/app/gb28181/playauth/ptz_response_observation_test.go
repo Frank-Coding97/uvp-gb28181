@@ -12,7 +12,7 @@ import (
 
 func TestPTZResponseScopeCannotLeaveOrphanOnReuse(t *testing.T) {
 	f, store := newIntentFixture(t)
-	require.NoError(t, f.db.AutoMigrate(&gbmodels.GbPTZOperation{}))
+	require.NoError(t, f.db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}))
 	id := intentIdentity(901)
 	id.Kind = "ptz"
 	op, err := store.ReservePTZOperation(context.Background(), id, gbmodels.GbPTZOperation{

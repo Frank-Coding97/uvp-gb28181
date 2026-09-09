@@ -5240,3 +5240,14 @@ ALTER TABLE gb_ptz_operation_attempt ADD COLUMN IF NOT EXISTS owner_run_id VARCH
 ALTER TABLE gb_ptz_operation_attempt ADD COLUMN IF NOT EXISTS local_quiesced_at TIMESTAMP(6) NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ptz_device_intent ON gb_ptz_operation(device_intent_id);
 -- ptz-device-intent:end
+
+-- ptz-owner-retirement:begin
+-- Preserve old rows without fabricating a process-retirement certificate.
+ALTER TABLE gb_ptz_operation_attempt ADD COLUMN IF NOT EXISTS retired_by_process_id VARCHAR(32) COLLATE "C" NULL;
+ALTER TABLE gb_ptz_operation_attempt ADD COLUMN IF NOT EXISTS retired_at TIMESTAMP(3) NULL;
+DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='gb_ptz_operation_attempt'::regclass AND conname='ck_ptz_attempt_retirement') THEN
+ALTER TABLE gb_ptz_operation_attempt ADD CONSTRAINT ck_ptz_attempt_retirement CHECK ((retired_by_process_id IS NULL AND retired_at IS NULL) OR (retired_by_process_id IS NOT NULL AND retired_at IS NOT NULL AND owner_process_id IS NOT NULL AND owner_run_id IS NOT NULL AND retired_by_process_id <> owner_process_id AND local_quiesced_at IS NULL));
+END IF;
+END $$;
+-- ptz-owner-retirement:end

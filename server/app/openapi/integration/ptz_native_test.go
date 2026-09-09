@@ -104,6 +104,32 @@ func exercisePTZNative(t *testing.T, ctx context.Context, conn *sql.Conn, db *go
 	require.NoError(t, db.First(&preserved, op.ID).Error)
 	require.Equal(t, id.OperationID, *preserved.DeviceIntentID)
 	require.EqualValues(t, 1, *preserved.DeviceEpoch)
+	// The retirement columns arrive through their own migration: the full
+	// initialization baseline stops before the device-intent section. Apply it
+	// twice, converge a foreign-generation attempt through the durable scan,
+	// then prove that down keeps the append-only certificate.
+	retireStem := "migrations/2026-09-08-ptz-owner-retirement" + suffix
+	retireUp, err := migrationsfs.FS.ReadFile(retireStem + ".sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, conn, retireUp)
+	applyCleanupBarrierScript(t, ctx, conn, retireUp)
+	require.NoError(t, db.Exec("UPDATE gb_ptz_operation_attempt SET owner_process_id=?, owner_run_id=? WHERE id=?",
+		"ffffffffffffffffffffffffffffffff", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", attempt.ID).Error)
+	skipped, err := store.RecoverRetiredPTZ(ctx)
+	require.NoError(t, err)
+	require.Empty(t, skipped)
+	var retired gbmodels.GbPTZOperationAttempt
+	require.NoError(t, db.First(&retired, attempt.ID).Error)
+	require.NotNil(t, retired.RetiredByProcessID)
+	require.Equal(t, authority.GenerationID(), *retired.RetiredByProcessID)
+	require.Equal(t, playauth.PTZOwnerProcessRetired, retired.ErrorCode)
+	require.Equal(t, gbmodels.PTZOperationAttemptUnknown, retired.Status)
+	retireDown, err := migrationsfs.FS.ReadFile(retireStem + "-down.sql")
+	require.NoError(t, err)
+	applyCleanupBarrierScript(t, ctx, conn, retireDown)
+	var kept gbmodels.GbPTZOperationAttempt
+	require.NoError(t, db.First(&kept, attempt.ID).Error)
+	require.NotNil(t, kept.RetiredByProcessID, "down must keep the append-only retirement history")
 	exercisePTZNativeCommitFaults(t, ctx, db, store, authority, id)
 	exercisePTZNativeLegacyTimes(t, db, id)
 	t.Log("PTZ native product schema/up twice/down-preserve, alarm channel authority and exact attempt time round-trip passed")
