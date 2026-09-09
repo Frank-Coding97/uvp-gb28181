@@ -29,6 +29,30 @@ func matchCascadeCatalogPeer(req *sip.Request, p model.GbCascadePlatform) bool {
 		strings.EqualFold(host, p.Host) && port == strconv.Itoa(p.Port) && strings.EqualFold(req.Transport(), p.Transport)
 }
 
+func matchCascadeControlPeer(req *sip.Request, p model.GbCascadePlatform) bool {
+	host, port, err := net.SplitHostPort(req.Source())
+	if err != nil {
+		return false
+	}
+	return req.From() != nil && req.From().Address.User == p.UpstreamServerID &&
+		strings.EqualFold(host, p.Host) && port == strconv.Itoa(p.Port) && strings.EqualFold(req.Transport(), p.Transport)
+}
+
+func findCascadeControlPeer(req *sip.Request, platforms []model.GbCascadePlatform) (*model.GbCascadePlatform, bool) {
+	var matched *model.GbCascadePlatform
+	for i := range platforms {
+		p := &platforms[i]
+		if !matchCascadeControlPeer(req, *p) {
+			continue
+		}
+		if matched != nil {
+			return nil, true
+		}
+		matched = p
+	}
+	return matched, false
+}
+
 func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
 		var head struct {
@@ -158,22 +182,20 @@ func newCascadeMessageHandler(store *repository.GormRepository, clients *cascade
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Cascade Control Failed", nil))
 			return true
 		}
-		var matched *model.GbCascadePlatform
-		for i := range platforms {
-			if matchCascadeCatalogPeer(req, platforms[i]) {
-				if matched != nil {
-					_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Ambiguous Cascade Platform", nil))
-					return true
-				}
-				matched = &platforms[i]
-			}
+		matched, ambiguous := findCascadeControlPeer(req, platforms)
+		if matched == nil && !ambiguous {
+			return false
+		}
+		if ambiguous {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Ambiguous Cascade Platform", nil))
+			return true
 		}
 		if matched == nil || !matched.Enabled {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Platform Not Available", nil))
 			return true
 		}
-		// Acknowledge the MESSAGE transaction first. The business result is sent
-		// as a new MANSCDP Response MESSAGE after the lower device responds.
+		// PTZ is a no-response device control in GB/T 28181-2016. Acknowledge the
+		// upstream MESSAGE immediately, then forward it to the shared channel.
 		if err := tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
 			return true
 		}
@@ -183,45 +205,22 @@ func newCascadeMessageHandler(store *repository.GormRepository, clients *cascade
 		}
 		platform := *matched
 		body := append([]byte(nil), req.Body()...)
-		go forwardCascadeControl(store, clients, platform, callID, body, *head)
+		go forwardCascadeControl(store, platform, callID, body, *head)
 		return true
 	}
 }
 
-func forwardCascadeControl(store *repository.GormRepository, clients *cascadePlatformClientFactory, platform model.GbCascadePlatform, callID string, body []byte, head manscdp.MessageHead) {
+func forwardCascadeControl(store *repository.GormRepository, platform model.GbCascadePlatform, callID string, body []byte, head manscdp.MessageHead) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result := manscdp.DeviceControlResultError
-	if ptzService != nil {
-		service := control.NewService(store, control.NewGormTargetLoader(app.DB()), ptzService)
-		if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err == nil {
-			result = manscdp.DeviceControlResultOK
-		} else if app.ZapLog != nil {
-			app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
-		}
-	}
-	client, err := clients.NewClient(platform)
-	if err != nil {
+	if ptzService == nil {
 		if app.ZapLog != nil {
-			app.ZapLog.Warn("级联云台应答客户端不可用", zap.Uint64("platformId", platform.ID), zap.Error(err))
+			app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.String("reason", "PTZ service unavailable"))
 		}
 		return
 	}
-	response := struct {
-		XMLName  xml.Name `xml:"Response"`
-		CmdType  string   `xml:"CmdType"`
-		SN       string   `xml:"SN"`
-		DeviceID string   `xml:"DeviceID"`
-		Result   string   `xml:"Result"`
-	}{CmdType: manscdp.CmdDeviceControl, SN: head.SN, DeviceID: head.DeviceID, Result: string(result)}
-	encoded, err := manscdp.MarshalProfiledXML(protocol.ProfileFor(effectiveCascadeProfile(platform)), response)
-	if err != nil {
-		return
-	}
-	if callID == "" {
-		callID = fmt.Sprintf("cascade-ptz-%d-%d", platform.ID, time.Now().UnixNano())
-	}
-	if sent := client.(*cascadePlatformClient).transactions.SendMessage(ctx, encoded, callID); !sent.Success && app.ZapLog != nil {
-		app.ZapLog.Warn("级联云台应答发送失败", zap.Uint64("platformId", platform.ID), zap.Error(sent.TransportErr), zap.Error(sent.BuildErr))
+	service := control.NewService(store, control.NewGormTargetLoader(app.DB()), ptzService)
+	if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
 	}
 }

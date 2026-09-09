@@ -275,7 +275,7 @@
           :bordered="false"
           :row-selection="{ type: 'checkbox', showCheckedAll: true }"
           :pagination="devicePagination"
-          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          :scroll="{ x: '100%', minWidth: 940, y: 360 }"
           @page-change="handleDevicePageChange"
           @page-size-change="handleDevicePageSizeChange"
           @update:selected-keys="handleDeviceSelectionChange"
@@ -299,6 +299,16 @@
             <a-table-column title="状态" :width="90" align="center">
               <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
             </a-table-column>
+            <a-table-column title="允许云台" :width="100" align="center">
+              <template #cell="{ record }">
+                <a-switch
+                  size="small"
+                  :model-value="devicePTZAllowed(record.id)"
+                  :disabled="!sharingPlatform?.ptzEnabled || !selectedDeviceKeys.includes(record.id)"
+                  @change="(value: boolean | string | number) => setDevicePTZAllowed(record, Boolean(value))"
+                />
+              </template>
+            </a-table-column>
           </template>
           <template #empty><a-empty description="暂无符合条件的设备" /></template>
         </a-table>
@@ -312,7 +322,7 @@
           :bordered="false"
           :row-selection="{ type: 'checkbox', showCheckedAll: true }"
           :pagination="channelPagination"
-          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          :scroll="{ x: '100%', minWidth: 940, y: 360 }"
           @page-change="handleChannelPageChange"
           @page-size-change="handleChannelPageSizeChange"
           @update:selected-keys="handleChannelSelectionChange"
@@ -334,6 +344,16 @@
             </a-table-column>
             <a-table-column title="状态" :width="90" align="center">
               <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
+            </a-table-column>
+            <a-table-column title="允许云台" :width="100" align="center">
+              <template #cell="{ record }">
+                <a-switch
+                  size="small"
+                  :model-value="channelPTZAllowed(record.id)"
+                  :disabled="!sharingPlatform?.ptzEnabled || !selectedChannelIds.includes(record.id)"
+                  @change="(value: boolean | string | number) => setChannelPTZAllowed(record.id, Boolean(value))"
+                />
+              </template>
             </a-table-column>
           </template>
           <template #empty><a-empty description="暂无符合条件的通道" /></template>
@@ -388,7 +408,7 @@ import {
 } from "../device-mgmt/api";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
-import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, validGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, resolveChannelPTZAllowed, validGbId, validateCascadePlatform } from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
 
@@ -644,6 +664,7 @@ const deviceDirectory = reactive(new Map<number, ShareDevice>());
 const channelsByDevice = reactive(new Map<number, ChannelOption[]>());
 const channelRows = ref<ChannelOption[]>([]);
 const selectedChannelIds = ref<number[]>([]);
+const channelPTZPermissions = reactive(new Map<number, boolean>());
 const shareMode = ref<ShareMode>("channel");
 const deviceKeyword = ref("");
 const channelKeyword = ref("");
@@ -683,6 +704,29 @@ function unwrapPage<T>(response: any): T {
 
 function deviceNameByCode(deviceCode: string) {
   return [...deviceDirectory.values()].find(device => device.deviceId === deviceCode)?.name || deviceCode || "-";
+}
+
+function channelPTZAllowed(channelId: number) {
+  return channelPTZPermissions.get(channelId) || false;
+}
+
+function setChannelPTZAllowed(channelId: number, allowed: boolean) {
+  channelPTZPermissions.set(channelId, allowed);
+}
+
+function devicePTZAllowed(deviceId: number) {
+  const channels = channelsByDevice.get(deviceId) || [];
+  return channels.length > 0 && channels.every(channel => channelPTZAllowed(channel.id));
+}
+
+async function setDevicePTZAllowed(device: ShareDevice, allowed: boolean) {
+  const channels = await loadAllDeviceChannels(device);
+  channels.forEach(channel => setChannelPTZAllowed(channel.id, allowed));
+}
+
+function ensureChannelPTZPermission(channelId: number) {
+  if (channelPTZPermissions.has(channelId)) return;
+  channelPTZPermissions.set(channelId, resolveChannelPTZAllowed(undefined, Boolean(sharingPlatform.value?.ptzEnabled)));
 }
 
 async function loadShareDevices(page = 1) {
@@ -777,6 +821,7 @@ async function handleChannelSelectionChange(keys: Array<string | number>) {
   const next = new Set(selectedChannelIds.value.filter(id => !currentIds.has(id)));
   keys.forEach(key => next.add(Number(key)));
   selectedChannelIds.value = [...next];
+  selectedChannelIds.value.forEach(ensureChannelPTZPermission);
   await Promise.all(channelRows.value.filter(channel => next.has(channel.id)).map(resolveChannelSourceDevice));
 }
 
@@ -790,7 +835,14 @@ async function handleDeviceSelectionChange(keys: Array<string | number>) {
     const channelGroups = await Promise.all(changedDevices.map(loadAllDeviceChannels));
     channelGroups.forEach((channels, index) => {
       const isSelected = next.has(changedDevices[index].id);
-      channels.forEach(channel => isSelected ? selected.add(channel.id) : selected.delete(channel.id));
+      channels.forEach(channel => {
+        if (isSelected) {
+          selected.add(channel.id);
+          ensureChannelPTZPermission(channel.id);
+        } else {
+          selected.delete(channel.id);
+        }
+      });
     });
     selectedChannelIds.value = [...selected];
   } finally {
@@ -810,11 +862,13 @@ async function openShare(platform: CascadePlatform) {
   channelPage.page = 1;
   deviceDirectory.clear();
   channelsByDevice.clear();
+  channelPTZPermissions.clear();
   channelRows.value = [];
   try {
     const projectionResponse: any = await getCascadeShares(platform.id);
     shares.value = projectionResponse?.data || projectionResponse;
     selectedChannelIds.value = (shares.value?.channels || []).filter(item => item.active !== false).map(item => item.sourceChannelId);
+    (shares.value?.channels || []).forEach(item => channelPTZPermissions.set(item.sourceChannelId, item.ptzAllowed));
     await Promise.all([loadShareDevices(1), loadShareChannels(1)]);
   } catch {
     shareError.value = "共享资源加载失败，请稍后重试。";
@@ -855,7 +909,7 @@ async function saveShares() {
         publishedChannelId,
         name: existing?.name || source?.name || source?.channelId || "",
         parentOverride: existing?.parentOverride || "",
-        ptzAllowed: existing?.ptzAllowed || false
+        ptzAllowed: resolveChannelPTZAllowed(channelPTZPermissions.get(id) ?? existing?.ptzAllowed, Boolean(sharingPlatform.value?.ptzEnabled))
       };
     });
     if (channelProjection.some(item => !item.sourceDeviceId)) {

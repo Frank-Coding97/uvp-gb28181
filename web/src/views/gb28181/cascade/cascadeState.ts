@@ -21,6 +21,10 @@ export function heartbeatLabel(value: CascadeHeartbeatState): string {
 
 export function validGbId(value: string): boolean { return /^\d{20}$/.test(value.trim()); }
 
+export function resolveChannelPTZAllowed(existing: boolean | undefined, platformEnabled: boolean): boolean {
+  return existing === undefined ? platformEnabled : existing;
+}
+
 /**
  * Keeps a preferred GB identity when it is valid and unused, otherwise creates
  * a deterministic 20-digit local projection identity from the source row id.
