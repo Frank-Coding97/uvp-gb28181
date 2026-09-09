@@ -22,6 +22,8 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
+	cascadeMessageMu   sync.RWMutex
+	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
 	cfg                gbconfig.Config
 	ua                 *sipgo.UserAgent
 	srv                *sipgo.Server
@@ -210,7 +212,15 @@ func (s *Server) registerHandlers() {
 	s.regH = regHandler
 	s.srv.OnRegister(regHandler.Handle)
 	s.msgH = msgHandler
-	s.srv.OnMessage(msgHandler.Handle)
+	s.srv.OnMessage(func(req *siplib.Request, tx siplib.ServerTransaction) {
+		s.cascadeMessageMu.RLock()
+		hook := s.cascadeMessage
+		s.cascadeMessageMu.RUnlock()
+		if hook != nil && hook(req, tx) {
+			return
+		}
+		msgHandler.Handle(req, tx)
+	})
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.notifyH.Handle)
 	s.srv.OnInvite(s.handleBroadcastInvite)
@@ -483,4 +493,10 @@ func (s *Server) shutdownTrace(ctx context.Context) error {
 		}
 	})
 	return err
+}
+
+func (s *Server) SetCascadeMessageHandler(hook func(*siplib.Request, siplib.ServerTransaction) bool) {
+	s.cascadeMessageMu.Lock()
+	defer s.cascadeMessageMu.Unlock()
+	s.cascadeMessage = hook
 }

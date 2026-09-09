@@ -219,3 +219,14 @@ func RefreshDelay(expires int) time.Duration {
 	}
 	return time.Duration(seconds) * time.Second
 }
+
+func (c *TransactionClient) SendMessage(ctx context.Context, body []byte, callID string) TransactionResult {
+	if c == nil || c.factory == nil {
+		return TransactionResult{BuildErr: fmt.Errorf("cascade SIP transaction client is unavailable")}
+	}
+	request, err := c.factory.BuildMessage(body, callID)
+	if err != nil {
+		return TransactionResult{BuildErr: err}
+	}
+	return c.execute(ctx, request)
+}
