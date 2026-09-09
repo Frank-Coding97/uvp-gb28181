@@ -77,6 +77,17 @@ func TestServiceEnforcesPlatformAndChannelAuthorizationBeforeOperation(t *testin
 	}
 }
 
+func TestServiceExplainsChannelAuthorizationFailure(t *testing.T) {
+	executor := &fakeExecutor{}
+	service := testService(true, false, executor)
+	_, err := service.Forward(context.Background(), ForwardRequest{
+		PlatformID: 1, CallID: "call-a", Body: controlBody("2016", 7, "published-a", "A50F0100000000B5"),
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrControlUnauthorized)
+	require.Contains(t, err.Error(), `channel "published-a" PTZ permission disabled`)
+}
+
 func TestServiceRejectsOutOfScopeControlWithoutOperation(t *testing.T) {
 	executor := &fakeExecutor{}
 	service := testService(true, true, executor)
