@@ -148,14 +148,19 @@ describe("device management toolbar layout", () => {
         expect(source).toContain("zlmNodesError");
     });
 
-    it("exposes one shared device maintenance entry and keeps it out of playback", () => {
-        expect(source).toContain("DeviceMaintenanceDialog");
-        expect(source).toContain("canViewMaintenance");
-        expect(source).toContain("设备维护");
-        expect(source).toContain("openDeviceMaintenance(record)");
-        expect(source).toContain("openDeviceMaintenance(item)");
-        expect(source).toContain("openDeviceMaintenance(deviceDetail)");
-        expect(source).toContain("v-model:visible=\"maintenanceVisible\"");
+    it("exposes separate device maintenance actions through all device surfaces", () => {
+        for (const component of ["DeviceRebootDialog", "DeviceFirmwareUpgradeDrawer", "DeviceMaintenanceRecordsDrawer", "DeviceMaintenanceMenu"]) {
+            expect(source).toContain(component);
+        }
+        expect(source).not.toContain("DeviceMaintenanceDialog");
+        for (const target of ["record", "item", "deviceDetail"]) {
+            expect(source).toContain(`openDeviceUpgrade(${target})`);
+            expect(source).toContain(`openDeviceReboot(${target})`);
+            expect(source).toContain(`openMaintenanceRecords(${target})`);
+        }
+        expect(source).toContain('v-model:visible="upgradeVisible"');
+        expect(source).toContain('v-model:visible="rebootVisible"');
+        expect(source).toContain('v-model:visible="recordsVisible"');
 
         const playback = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
         expect(playback).not.toContain("远程重启父设备");

@@ -71,8 +71,7 @@ function mountPanel(props: Record<string, unknown> = {}, attrs: Record<string, u
                 "a-button": {
                     props: ["disabled", "loading"],
                     template: "<button :disabled='disabled' :aria-busy='loading' @click='$emit(`click`)'><slot name='icon' /><slot /></button>"
-                },
-                "a-pagination": { template: "<button />" }
+                }
             }
         }
     });
@@ -88,30 +87,34 @@ describe("DeviceFirmwareUpgradePanel", () => {
         vi.useRealTimers();
     });
 
-    it("allows history but disables submission when the device is offline or is not on profile 2022", async () => {
-        const offline = mountPanel({ device: { ...device, online: false } });
+    it("prefills the vendor and shows field-level validation beside invalid input", async () => {
+        const wrapper = mountPanel();
         await flushPromises();
-        expect(offline.text()).toContain("设备离线");
-        expect(offline.get("[data-testid='firmware-upgrade-submit']").attributes("disabled")).toBeDefined();
-        offline.unmount();
 
-        const legacy = mountPanel({ device: { ...device, effectiveVersion: "2016" } });
-        await flushPromises();
-        expect(legacy.text()).toContain("GB/T 28181-2022");
-        expect(legacy.get("[data-testid='firmware-upgrade-submit']").attributes("disabled")).toBeDefined();
-        legacy.unmount();
+        const inputs = wrapper.findAll("input");
+        expect((inputs[1].element as HTMLInputElement).value).toBe("海康");
+        await inputs[0].setValue("V5.9.0");
+        await inputs[2].setValue("ftp://192.0.2.50/firmware.bin");
+        await wrapper.get("[data-testid='firmware-upgrade-submit']").trigger("click");
+
+        expect(wrapper.get("[data-testid='file-url-error']").text()).toContain("HTTP 或 HTTPS");
+        expect(wrapper.find("[data-testid='firmware-upgrade-confirmation']").exists()).toBe(false);
+        wrapper.unmount();
     });
 
-    it("requires a second confirmation and posts one request with the entered upgrade target", async () => {
-        const wrapper = mountPanel();
+    it("uses separate prepare and confirmation stages, then tracks one submitted task", async () => {
+        const onOperationUpdated = vi.fn();
+        const wrapper = mountPanel({}, { onOperationUpdated });
         await flushPromises();
         const inputs = wrapper.findAll("input");
         await inputs[0].setValue("V5.9.0");
         await inputs[2].setValue("http://192.0.2.50/firmware/V5.9.0.bin");
         await wrapper.get("[data-testid='firmware-upgrade-submit']").trigger("click");
-        expect(wrapper.text()).toContain("确认向设备发起升级");
+
+        expect(wrapper.get("[data-testid='firmware-upgrade-confirmation']").text()).toContain("V5.8.0 → V5.9.0");
+        expect(wrapper.find("[data-testid='firmware-upgrade-form']").exists()).toBe(false);
         await wrapper.get("[data-testid='firmware-upgrade-cancel']").trigger("click");
-        expect(api.upgradeDeviceFirmware).not.toHaveBeenCalled();
+        expect(wrapper.find("[data-testid='firmware-upgrade-form']").exists()).toBe(true);
 
         await wrapper.get("[data-testid='firmware-upgrade-submit']").trigger("click");
         await wrapper.get("[data-testid='firmware-upgrade-confirm']").trigger("click");
@@ -124,64 +127,70 @@ describe("DeviceFirmwareUpgradePanel", () => {
             manufacturer: "海康",
             idempotencyKey: expect.any(String)
         }));
+        expect(wrapper.get("[data-testid='firmware-upgrade-tracking']").text()).toContain("已受理");
+        expect(wrapper.find("[data-testid='firmware-upgrade-history']").exists()).toBe(false);
+        expect(onOperationUpdated).toHaveBeenCalledWith(expect.objectContaining({ operationId: "upgrade-op-1" }));
         wrapper.unmount();
     });
 
-    it("recovers an active operation on open, emits busy, and updates the reported version after success", async () => {
-        vi.useFakeTimers();
+    it("recovers an unfinished operation after close and reopen and emits the operation cache event", async () => {
         const accepted = operation();
-        const succeeded = operation({ status: "succeeded", currentFirmware: "V5.9.0", completedAt: "2026-09-05T03:01:00Z" });
-        api.listFirmwareUpgrades
-            .mockResolvedValueOnce(response([accepted]))
-            .mockResolvedValueOnce(response([succeeded]));
-        const onBusy = vi.fn();
-        const onFirmwareUpdated = vi.fn();
-        const wrapper = mountPanel({}, { onBusy, onFirmwareUpdated });
+        const onOperationUpdated = vi.fn();
+        api.listFirmwareUpgrades.mockResolvedValue(response([accepted]));
+        const wrapper = mountPanel({}, { onOperationUpdated });
         await flushPromises();
-        expect(onBusy).toHaveBeenCalledWith(true);
-        expect(wrapper.text()).toContain("已受理");
+        expect(wrapper.get("[data-testid='firmware-upgrade-tracking']").text()).toContain("已受理");
 
-        await vi.advanceTimersByTimeAsync(2000);
-        await flushPromises();
-        expect(wrapper.text()).toContain("升级成功");
-        expect(onBusy).toHaveBeenLastCalledWith(false);
-        expect(onFirmwareUpdated).toHaveBeenCalledWith("V5.9.0");
-        wrapper.unmount();
-    });
-
-    it("marks an expired active operation as unknown and does not offer a repeat submission", async () => {
-        const onBusy = vi.fn();
-        const wrapper = mountPanel({}, { onBusy });
-        api.listFirmwareUpgrades.mockReset().mockResolvedValue(response([operation({ deadlineAt: "2020-01-01T00:00:00Z" })]));
         await wrapper.setProps({ visible: false });
         await wrapper.setProps({ visible: true });
+        await flushPromises();
+        expect(wrapper.get("[data-testid='firmware-upgrade-tracking']").text()).toContain("已受理");
+        expect(api.upgradeDeviceFirmware).not.toHaveBeenCalled();
+        expect(onOperationUpdated).toHaveBeenCalledWith(expect.objectContaining({ operationId: accepted.operationId }));
+        wrapper.unmount();
+    });
+
+    it("recovers an expired operation as unknown and does not expose a repeat submission", async () => {
+        api.listFirmwareUpgrades.mockResolvedValue(response([operation({ deadlineAt: "2020-01-01T00:00:00Z" })]));
+        const onBusy = vi.fn();
+        const wrapper = mountPanel({}, { onBusy });
         await flushPromises();
 
         expect(wrapper.text()).toContain("结果未知");
         expect(wrapper.text()).toContain("暂不要重复提交");
-        expect(wrapper.get("[data-testid='firmware-upgrade-submit']").attributes("disabled")).toBeDefined();
+        expect(wrapper.find("[data-testid='firmware-upgrade-submit']").exists()).toBe(false);
         expect(onBusy).toHaveBeenLastCalledWith(true);
         expect(api.upgradeDeviceFirmware).not.toHaveBeenCalled();
         wrapper.unmount();
     });
 
-    it("shows the standard failure reason alongside the backend summary", async () => {
-        api.listFirmwareUpgrades.mockResolvedValueOnce(response([operation({
-            status: "failed",
-            errorMessage: "设备升级失败",
-            failedReason: "02"
-        })]));
-        const wrapper = mountPanel();
+    it("shows SIP and operation identifiers only in technical details and opens records", async () => {
+        const onViewRecords = vi.fn();
+        const accepted = operation();
+        const failed = operation({ status: "failed", errorMessage: "设备升级失败", failedReason: "02" });
+        api.listFirmwareUpgrades
+            .mockResolvedValueOnce(response([accepted]))
+            .mockResolvedValueOnce(response([failed]));
+        vi.useFakeTimers();
+        const wrapper = mountPanel({}, { onViewRecords });
+        await flushPromises();
+        await vi.advanceTimersByTimeAsync(2000);
         await flushPromises();
 
         expect(wrapper.text()).toContain("升级包损坏");
         expect(wrapper.text()).toContain("设备升级失败");
+        expect(wrapper.text()).toContain("操作 ID");
+        expect(wrapper.text()).toContain("upgrade-session-1");
+        expect(wrapper.text()).toContain("200");
+        await wrapper.get("[data-testid='firmware-upgrade-view-records']").trigger("click");
+        expect(onViewRecords).toHaveBeenCalledWith("upgrade-op-1");
         wrapper.unmount();
     });
 
-    it("keeps a network failure as an unknown result and never retries the POST", async () => {
+    it("marks a network failure uncertain, prevents a second POST, and asks the parent to cache it", async () => {
         api.upgradeDeviceFirmware.mockRejectedValueOnce(new Error("网络不可用"));
-        const wrapper = mountPanel();
+        const onSubmissionUncertain = vi.fn();
+        const wrapper = mountPanel({}, { onSubmissionUncertain });
         await flushPromises();
         const inputs = wrapper.findAll("input");
         await inputs[0].setValue("V5.9.0");
@@ -192,8 +201,69 @@ describe("DeviceFirmwareUpgradePanel", () => {
 
         expect(wrapper.text()).toContain("网络不可用");
         expect(wrapper.text()).toContain("暂不要重复提交");
-        expect(wrapper.get("[data-testid='firmware-upgrade-submit']").attributes("disabled")).toBeDefined();
+        expect(wrapper.find("[data-testid='firmware-upgrade-submit']").exists()).toBe(false);
+        expect(onSubmissionUncertain).toHaveBeenCalledTimes(1);
+        expect(api.upgradeDeviceFirmware).toHaveBeenCalledTimes(1);
+        await wrapper.setProps({ visible: false });
+        await wrapper.setProps({ visible: true });
+        await flushPromises();
         expect(api.upgradeDeviceFirmware).toHaveBeenCalledTimes(1);
         wrapper.unmount();
     });
+
+    it("emits firmwareUpdated and requires an explicit action before preparing a new upgrade", async () => {
+        const succeeded = operation({ status: "succeeded", currentFirmware: "V5.9.0", completedAt: "2026-09-05T03:01:00Z" });
+        api.upgradeDeviceFirmware.mockResolvedValueOnce({ code: 0, message: "", data: succeeded });
+        const onFirmwareUpdated = vi.fn();
+        const wrapper = mountPanel({}, { onFirmwareUpdated });
+        await flushPromises();
+        const inputs = wrapper.findAll("input");
+        await inputs[0].setValue("V5.9.0");
+        await inputs[2].setValue("https://192.0.2.50/firmware/V5.9.0.bin");
+        await wrapper.get("[data-testid='firmware-upgrade-submit']").trigger("click");
+        await wrapper.get("[data-testid='firmware-upgrade-confirm']").trigger("click");
+        await flushPromises();
+
+        expect(onFirmwareUpdated).toHaveBeenCalledWith("V5.9.0");
+        expect(wrapper.get("[data-testid='firmware-upgrade-new']").text()).toContain("准备新升级");
+        await wrapper.get("[data-testid='firmware-upgrade-new']").trigger("click");
+        expect(wrapper.find("[data-testid='firmware-upgrade-tracking']").exists()).toBe(false);
+        expect((wrapper.findAll("input")[1].element as HTMLInputElement).value).toBe("海康");
+        wrapper.unmount();
+    });
+
+    it("keeps real stage labels while polling from accepted to success", async () => {
+        vi.useFakeTimers();
+        const accepted = operation();
+        const succeeded = operation({ status: "succeeded", currentFirmware: "V5.9.0", completedAt: "2026-09-05T03:01:00Z" });
+        api.listFirmwareUpgrades
+            .mockResolvedValueOnce(response([accepted]))
+            .mockResolvedValueOnce(response([succeeded]));
+        const onFirmwareUpdated = vi.fn();
+        const wrapper = mountPanel({}, { onFirmwareUpdated });
+        await flushPromises();
+        expect(wrapper.text()).toContain("设备已受理，等待升级完成");
+
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushPromises();
+        expect(wrapper.text()).toContain("设备已完成升级");
+        expect(wrapper.text()).not.toMatch(/\d+%/);
+        expect(onFirmwareUpdated).toHaveBeenCalledWith("V5.9.0");
+        wrapper.unmount();
+    });
+    it("shows a new interlock during confirmation and does not submit", async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        const inputs = wrapper.findAll("input");
+        await inputs[0].setValue("V5.9.0");
+        await inputs[2].setValue("http://192.0.2.50/firmware.bin");
+        await wrapper.get("[data-testid='firmware-upgrade-submit']").trigger("click");
+        await wrapper.setProps({ blockedReason: "设备重启请求处理中" });
+        expect(wrapper.get("[data-testid='firmware-upgrade-confirm']").attributes("disabled")).toBeDefined();
+        expect(wrapper.get("[data-testid='firmware-upgrade-confirmation']").text()).toContain("设备重启请求处理中");
+        await wrapper.get("[data-testid='firmware-upgrade-confirm']").trigger("click");
+        expect(api.upgradeDeviceFirmware).not.toHaveBeenCalled();
+        wrapper.unmount();
+    });
+
 });
