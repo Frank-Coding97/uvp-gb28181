@@ -152,14 +152,15 @@ type Service struct {
 	readyWait time.Duration // 仅测试覆盖;生产使用 playCtx 剩余总预算
 	pollEvery time.Duration // 轮询间隔,默认 200ms
 
-	snapshotSvc    SnapshotService // 通道快照(播放触发),可为 nil
-	urlResolver    *URLResolver
-	tokenIssuer    playauth.DirectIssuer
-	nodeClient     func(*node.Node) ZLM
-	diagnosticSink diagnosis.DiagnosticSink
-	liveReady      func(LiveSession)
-	recordingMu    sync.RWMutex
-	recording      PlaybackRecordingLifecycle
+	snapshotSvc      SnapshotService // 通道快照(播放触发),可为 nil
+	urlResolver      *URLResolver
+	tokenIssuer      playauth.DirectIssuer
+	nodeClient       func(*node.Node) ZLM
+	diagnosticSink   diagnosis.DiagnosticSink
+	liveReady        func(LiveSession)
+	recordingMu      sync.RWMutex
+	recording        PlaybackRecordingLifecycle
+	sourceCloseGuard atomic.Pointer[sourceCloseGuardHolder]
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -178,6 +179,16 @@ type SnapshotService interface {
 
 type PlaybackRecordingLifecycle interface {
 	EndPlayback(context.Context, string) error
+}
+
+// SourceCloseGuard arbitrates source teardown with another owner such as a
+// work recording. The guard must call closeFn with the context it wants the
+// teardown transaction to use. That context is passed through to every
+// external cleanup call.
+type SourceCloseGuard = func(context.Context, string, func(context.Context) error) error
+
+type sourceCloseGuardHolder struct {
+	fn SourceCloseGuard
 }
 
 // Option 装配可选能力
@@ -301,6 +312,30 @@ func (s *Service) SetPlaybackRecordingLifecycle(lifecycle PlaybackRecordingLifec
 	s.recordingMu.Lock()
 	s.recording = lifecycle
 	s.recordingMu.Unlock()
+}
+
+// SetSourceCloseGuard installs the source teardown arbitration callback. It
+// is safe to replace or clear the callback while the service is running; the
+// current callback is loaded for each teardown attempt.
+func (s *Service) SetSourceCloseGuard(guard SourceCloseGuard) {
+	if guard == nil {
+		s.sourceCloseGuard.Store(nil)
+		return
+	}
+	s.sourceCloseGuard.Store(&sourceCloseGuardHolder{fn: guard})
+}
+
+func (s *Service) closeSource(ctx context.Context, streamID string, closeFn func(context.Context) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if closeFn == nil {
+		return nil
+	}
+	if holder := s.sourceCloseGuard.Load(); holder != nil && holder.fn != nil {
+		return holder.fn(ctx, streamID, closeFn)
+	}
+	return closeFn(ctx)
 }
 
 func (s *Service) endPlaybackRecording(ctx context.Context, streamID string) {
@@ -669,11 +704,18 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			// 同节点时关 RTP 会误杀新代次的流,不关。
 			if nodeID := s.currentNodeID(liveRef.StreamID); nodeID != 0 && nodeID != liveRef.NodeID {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				rtpCloseErr := client.CloseRtpServer(cleanupCtx, liveRef.StreamID)
+				cleanupStarted := false
+				rtpCloseErr := s.closeSource(cleanupCtx, liveRef.StreamID, func(closeCtx context.Context) error {
+					cleanupStarted = true
+					return client.CloseRtpServer(closeCtx, liveRef.StreamID)
+				})
 				cleanupCancel()
-				if rtpCloseErr != nil {
+				if !cleanupStarted || rtpCloseErr != nil {
 					// RTP 关闭失败:旧节点监听器可能仍活着,SSRC 同样不得回池复用
 					releaseSSRC = false
+				}
+				if !cleanupStarted {
+					return nil, errors.Join(ErrLiveCleanupPending, inviteErr, rtpCloseErr)
 				}
 			}
 			if errors.Is(inviteErr, uac.ErrStaleInviteCleanupFailed) {
@@ -852,17 +894,32 @@ func (s *Service) rollbackFailedStart(
 ) (*Result, error) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var byeErr error
-	if sendBye {
-		byeErr = s.inviter.Bye(cleanupCtx, s.sessions, ref.StreamID)
-	}
-	closeErr := client.CloseRtpServer(cleanupCtx, ref.StreamID)
-	if closeErr != nil {
+	cleanupStarted := false
+	var byeErr, closeErr error
+	cleanupErr := s.closeSource(cleanupCtx, ref.StreamID, func(closeCtx context.Context) error {
+		cleanupStarted = true
+		if sendBye {
+			byeErr = s.inviter.Bye(closeCtx, s.sessions, ref.StreamID)
+		}
+		closeErr = client.CloseRtpServer(closeCtx, ref.StreamID)
+		return errors.Join(byeErr, closeErr)
+	})
+	if !cleanupStarted {
+		// A guard rejection means the start's own reservation may still be
+		// active. Preserve the generation as cleanup-pending and let an exact
+		// retry perform the external cleanup after ownership is released.
 		if releaseSSRC != nil {
 			*releaseSSRC = false
 		}
 		persistErr := s.channels.SetCurrent(cleanupCtx, req.DeviceID, req.ChannelID, ref.StreamID, ref.SSRC)
-		return result, errors.Join(ErrLiveCleanupPending, cause, byeErr, closeErr, persistErr)
+		return result, errors.Join(ErrLiveCleanupPending, cause, cleanupErr, persistErr)
+	}
+	if closeErr != nil || (!cleanupStarted && cleanupErr != nil) {
+		if releaseSSRC != nil {
+			*releaseSSRC = false
+		}
+		persistErr := s.channels.SetCurrent(cleanupCtx, req.DeviceID, req.ChannelID, ref.StreamID, ref.SSRC)
+		return result, errors.Join(ErrLiveCleanupPending, cause, cleanupErr, persistErr)
 	}
 	s.unbindLocation(ref)
 	return nil, errors.Join(cause, byeErr)
@@ -902,42 +959,44 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		}
 	}
 
-	s.endPlaybackRecording(ctx, streamID)
-	byeErr := s.inviter.Bye(ctx, s.sessions, streamID)
+	return s.closeSource(ctx, streamID, func(closeCtx context.Context) error {
+		s.endPlaybackRecording(closeCtx, streamID)
+		byeErr := s.inviter.Bye(closeCtx, s.sessions, streamID)
 
-	client, clientErr := s.clientForStream(streamID)
-	var closeErr error
-	if clientErr != nil {
-		// 多节点路径找不到 client(LocationMap 没记录,可能已被清理)
-		// 单节点不会进这里,只 log;失败不阻塞 BYE
-		closeErr = clientErr
-	} else {
-		closeErr = client.CloseRtpServer(ctx, streamID)
-	}
+		client, clientErr := s.clientForStream(streamID)
+		var closeErr error
+		if clientErr != nil {
+			// 多节点路径找不到 client(LocationMap 没记录,可能已被清理)
+			// 单节点不会进这里,只 log;失败不阻塞 BYE
+			closeErr = clientErr
+		} else {
+			closeErr = client.CloseRtpServer(closeCtx, streamID)
+		}
 
-	// Unbind 总要做(即便 Close 失败,避免 streamID 永远占位)
-	if s.useMultiNode() {
-		s.locationMap.Unbind(streamID)
-	}
-	var clearErr error
-	clearedCurrent := false
-	if currentSSRCPersisted {
-		clearedCurrent, clearErr = s.channels.ClearIfCurrent(ctx, streamID, currentSSRC)
-	} else {
-		clearErr = s.channels.ClearStream(ctx, streamID)
-		clearedCurrent = clearErr == nil
-	}
-	if clearedCurrent && s.ssrcAllocator != nil && currentSSRC != "" {
-		s.ssrcAllocator.Release(currentSSRC)
-	}
+		// Unbind 总要做(即便 Close 失败,避免 streamID 永远占位)
+		if s.useMultiNode() {
+			s.locationMap.Unbind(streamID)
+		}
+		var clearErr error
+		clearedCurrent := false
+		if currentSSRCPersisted {
+			clearedCurrent, clearErr = s.channels.ClearIfCurrent(closeCtx, streamID, currentSSRC)
+		} else {
+			clearErr = s.channels.ClearStream(closeCtx, streamID)
+			clearedCurrent = clearErr == nil
+		}
+		if clearedCurrent && s.ssrcAllocator != nil && currentSSRC != "" {
+			s.ssrcAllocator.Release(currentSSRC)
+		}
 
-	if byeErr != nil {
-		return byeErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return clearErr
+		if byeErr != nil {
+			return byeErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		return clearErr
+	})
 }
 
 // ShouldCloseOnNoneReader 返回通道无人观看时是否应关闭上行流。

@@ -87,50 +87,56 @@ func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bo
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	c.mu.Lock()
-	var entry *coordinatorEntry
-	var key coordinatorKey
-	for candidateKey, candidate := range c.entries {
-		if candidate.result != nil && candidate.result.StreamID == ref.StreamID {
-			entry = candidate
-			key = candidateKey
-			break
+	for {
+		c.mu.Lock()
+		var entry *coordinatorEntry
+		var key coordinatorKey
+		for candidateKey, candidate := range c.entries {
+			if candidate.result != nil && candidate.result.StreamID == ref.StreamID {
+				entry = candidate
+				key = candidateKey
+				break
+			}
 		}
-	}
-	if entry == nil {
-		c.mu.Unlock()
-		return false, nil
-	}
-	if !resultMatchesRef(entry.result, ref) {
-		c.mu.Unlock()
-		return true, nil
-	}
-	if entry.state == LiveStateStopping {
-		c.mu.Unlock()
-		return true, nil
-	}
-	if entry.state != LiveStateReady && entry.state != LiveStateCleanupPending {
-		c.mu.Unlock()
-		return true, nil
-	}
-	if entry.pins > 0 {
-		c.mu.Unlock()
-		return true, ErrLivePinned
-	}
+		if entry == nil {
+			c.mu.Unlock()
+			return false, nil
+		}
+		if !resultMatchesRef(entry.result, ref) {
+			c.mu.Unlock()
+			return true, nil
+		}
+		if entry.state == LiveStateStopping {
+			c.mu.Unlock()
+			return true, nil
+		}
+		if entry.state != LiveStateReady && entry.state != LiveStateCleanupPending {
+			c.mu.Unlock()
+			return true, nil
+		}
+		if entry.stopPreparing {
+			done := entry.stopPrepareDone
+			c.mu.Unlock()
+			if err := waitFor(ctx, done); err != nil {
+				return true, err
+			}
+			continue
+		}
+		if entry.pins > 0 {
+			c.mu.Unlock()
+			return true, ErrLivePinned
+		}
 
-	failureState := entry.state
-	entry.state = LiveStateStopping
-	entry.done = make(chan struct{})
-	result := entry.result
-	c.mu.Unlock()
+		failureState := entry.state
+		entry.stopPreparing = true
+		prepareDone := make(chan struct{})
+		entry.stopPrepareDone = prepareDone
+		result := entry.result
+		c.mu.Unlock()
 
-	var err error
-	if c.stop != nil {
-		err = c.stop(context.WithoutCancel(ctx), result)
+		err := c.runPreparedStop(context.WithoutCancel(ctx), key, entry, failureState, result, prepareDone)
+		return true, err
 	}
-
-	c.finishStop(key, entry, err, failureState)
-	return true, err
 }
 
 func resultMatchesRef(result *Result, ref stream.LiveRef) bool {

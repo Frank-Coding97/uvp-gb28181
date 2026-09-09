@@ -74,9 +74,10 @@ type StreamServiceDependencies struct {
 
 	// NodeExecutor is used to build the production typed action adapter when
 	// Executor is not supplied by a test or an embedding service.
-	NodeExecutor *NodeExecutor
-	Executor     MediaActionExecutor
-	Ownership    StreamOwnership
+	NodeExecutor     *NodeExecutor
+	Executor         MediaActionExecutor
+	Ownership        StreamOwnership
+	SourceCloseGuard SourceCloseGuard
 
 	PreviewIssuer     PreviewIssuer
 	PreviewURLs       PreviewURLResolver
@@ -102,6 +103,7 @@ type StreamService struct {
 	previewIssuer     PreviewIssuer
 	previewURLs       PreviewURLResolver
 	previewClassifier PreviewClassifier
+	sourceCloseGuard  SourceCloseGuard
 	operationTimeout  time.Duration
 }
 
@@ -112,6 +114,7 @@ func NewStreamService(dependencies StreamServiceDependencies, options ...StreamS
 		fresh:             dependencies.Fresh,
 		executor:          dependencies.Executor,
 		ownership:         dependencies.Ownership,
+		sourceCloseGuard:  dependencies.SourceCloseGuard,
 		previewIssuer:     dependencies.PreviewIssuer,
 		previewURLs:       dependencies.PreviewURLs,
 		previewClassifier: dependencies.PreviewClassifier,
@@ -135,10 +138,23 @@ func NewStreamService(dependencies StreamServiceDependencies, options ...StreamS
 
 // NodeMediaExecutor is the sole production adapter that knows about
 // *zlm.Client for T9 actions.
-type NodeMediaExecutor struct{ executor *NodeExecutor }
+type NodeMediaExecutor struct {
+	executor         *NodeExecutor
+	sourceCloseGuard SourceCloseGuard
+}
 
 func NewNodeMediaExecutor(executor *NodeExecutor) *NodeMediaExecutor {
 	return &NodeMediaExecutor{executor: executor}
+}
+
+// SetSourceCloseGuard configures the shared source-close gate for callers
+// that use NodeMediaExecutor directly. StreamService also guards its typed
+// executor boundary so custom MediaActionExecutor implementations are fenced.
+func (e *NodeMediaExecutor) SetSourceCloseGuard(guard SourceCloseGuard) *NodeMediaExecutor {
+	if e != nil {
+		e.sourceCloseGuard = guard
+	}
+	return e
 }
 
 func (e *NodeMediaExecutor) CloseStream(ctx context.Context, nodeID int64, target zlm.StreamTarget, force bool) (zlm.CloseStreamResult, error) {
@@ -146,11 +162,15 @@ func (e *NodeMediaExecutor) CloseStream(ctx context.Context, nodeID int64, targe
 		return zlm.CloseStreamResult{}, NewInternalError(nodeIDString(nodeID), "stream action executor is not configured")
 	}
 	var result zlm.CloseStreamResult
-	err := e.executor.ExecuteWrite(ctx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
-		var err error
-		result, err = client.CloseStream(operationCtx, target, force)
-		return err
-	})
+	operation := func(operationCtx context.Context) error {
+		return e.executor.ExecuteWrite(operationCtx, nodeID, func(clientCtx context.Context, client *zlm.Client) error {
+			var err error
+			result, err = client.CloseStream(clientCtx, target, force)
+			return err
+		})
+	}
+	ownershipTarget := OwnershipTarget{NodeID: nodeID, Media: MediaIdentity{Schema: target.Schema, Vhost: target.VHost, App: target.App, Stream: target.Stream}}
+	err := runMutationGuard(ctx, e.sourceCloseGuard, ownershipTarget, operation)
 	return result, err
 }
 
@@ -708,9 +728,11 @@ func (s *StreamService) executeStreamClose(ctx context.Context, preview StreamCl
 			actionAbsent = true
 			return nil
 		}
-		actionStarted = true
-		_, closeErr = s.executor.CloseStream(actionCtx, target.NodeID, toStreamTarget(target.Media), force)
-		return closeErr
+		return runMutationGuard(actionCtx, s.sourceCloseGuard, target, func(operationCtx context.Context) error {
+			actionStarted = true
+			_, closeErr = s.executor.CloseStream(operationCtx, target.NodeID, toStreamTarget(target.Media), force)
+			return closeErr
+		})
 	}
 	if force {
 		closeErr = s.ownership.ExecuteForce(opCtx, preflight, reason, action)
@@ -834,11 +856,16 @@ func (s *StreamService) CloseStreams(ctx context.Context, preflight OwnershipBat
 			result.Results = append(result.Results, item)
 			return nil
 		}
-		_, err = s.executor.CloseStream(actionCtx, target.NodeID, toStreamTarget(target.Media), false)
+		var actionStarted bool
+		err = runMutationGuard(actionCtx, s.sourceCloseGuard, target, func(operationCtx context.Context) error {
+			actionStarted = true
+			_, closeErr := s.executor.CloseStream(operationCtx, target.NodeID, toStreamTarget(target.Media), false)
+			return closeErr
+		})
 		if err != nil && !isMediaNotFound(err) {
-			item.Uncertain = true
-			item.Retryable = true
-			result.Uncertain = true
+			item.Uncertain = actionStarted
+			item.Retryable = actionStarted
+			result.Uncertain = result.Uncertain || actionStarted
 			result.Results = append(result.Results, item)
 			return err
 		}

@@ -31,6 +31,11 @@ type StartFunc func(context.Context, Request) (*Result, error)
 // StopFunc owns the complete live stop/cleanup transaction.
 type StopFunc func(context.Context, *Result) error
 
+// StopGuard arbitrates a stop before the coordinator publishes Stopping. The
+// callback must invoke stopFn to perform the actual cleanup, and may pass a
+// derived context to it.
+type StopGuard func(context.Context, *Result, func(context.Context) error) error
+
 // stopCompletionError retains cleanup failures after media has definitely
 // stopped. Callers still receive the original failure through errors.Is.
 type stopCompletionError struct {
@@ -57,9 +62,10 @@ func stopReachedMediaTerminal(err error) bool {
 }
 
 var (
-	ErrOwnerNodeMismatch  = errors.New("owner-node-mismatch")
-	ErrLiveStartNilResult = errors.New("live start returned nil result")
-	ErrLiveCleanupPending = errors.New("live start cleanup pending")
+	ErrOwnerNodeMismatch        = errors.New("owner-node-mismatch")
+	ErrLiveStartNilResult       = errors.New("live start returned nil result")
+	ErrLiveCleanupPending       = errors.New("live start cleanup pending")
+	errLiveStopGuardDidNotClose = errors.New("live stop guard did not invoke cleanup")
 )
 
 const cleanupPendingRetryTimeout = 5 * time.Second
@@ -86,12 +92,14 @@ type coordinatorKey struct {
 }
 
 type coordinatorEntry struct {
-	pins      int
-	state     LiveState
-	result    *Result
-	err       error
-	ownerNode int64
-	done      chan struct{}
+	pins            int
+	state           LiveState
+	result          *Result
+	err             error
+	ownerNode       int64
+	done            chan struct{}
+	stopPreparing   bool
+	stopPrepareDone chan struct{}
 }
 
 // Coordinator serializes side effects per device/channel while allowing
@@ -102,6 +110,7 @@ type Coordinator struct {
 	recoveryPending bool
 	start           StartFunc
 	stop            StopFunc
+	stopGuard       StopGuard
 }
 
 func NewCoordinator(start StartFunc) *Coordinator {
@@ -113,6 +122,93 @@ func NewCoordinatorWithStop(start StartFunc, stop StopFunc) *Coordinator {
 		panic("play: nil live start function")
 	}
 	return &Coordinator{entries: make(map[coordinatorKey]*coordinatorEntry), start: start, stop: stop}
+}
+
+func (c *Coordinator) setStopGuard(guard StopGuard) {
+	c.mu.Lock()
+	c.stopGuard = guard
+	c.mu.Unlock()
+}
+
+func (c *Coordinator) runPreparedStop(
+	ctx context.Context,
+	key coordinatorKey,
+	entry *coordinatorEntry,
+	failureState LiveState,
+	result *Result,
+	prepareDone chan struct{},
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupCalled := false
+	var cleanupErr error
+	stopFn := func(stopCtx context.Context) error {
+		if stopCtx == nil {
+			stopCtx = context.Background()
+		}
+		if cleanupCalled {
+			return errLiveStopGuardDidNotClose
+		}
+		cleanupCalled = true
+		c.mu.Lock()
+		if current := c.entries[key]; current != entry || !entry.stopPreparing || entry.stopPrepareDone != prepareDone {
+			c.mu.Unlock()
+			return errLiveStopGuardDidNotClose
+		}
+		entry.state = LiveStateStopping
+		entry.done = make(chan struct{})
+		entry.stopPreparing = false
+		entry.stopPrepareDone = nil
+		close(prepareDone)
+		c.mu.Unlock()
+
+		if c.stop != nil {
+			cleanupErr = c.stop(stopCtx, result)
+		}
+		c.finishStop(key, entry, cleanupErr, failureState)
+		return cleanupErr
+	}
+
+	c.mu.Lock()
+	guard := c.stopGuard
+	c.mu.Unlock()
+	var err error
+	if guard != nil {
+		err = guard(ctx, result, stopFn)
+	} else {
+		err = stopFn(ctx)
+	}
+	if err == nil && cleanupCalled {
+		err = cleanupErr
+	}
+	if err == nil {
+		// A guard that returns nil without invoking its callback has not proved
+		// that cleanup happened. Keep the generation available for a retry.
+		c.mu.Lock()
+		stillPreparing := c.entries[key] == entry && entry.stopPreparing && entry.stopPrepareDone == prepareDone
+		if stillPreparing {
+			entry.stopPreparing = false
+			entry.stopPrepareDone = nil
+			close(prepareDone)
+		}
+		c.mu.Unlock()
+		if stillPreparing {
+			return errLiveStopGuardDidNotClose
+		}
+	}
+	if err != nil {
+		// Guard rejection happens before stopFn and therefore must restore the
+		// original state without publishing Stopping.
+		c.mu.Lock()
+		if c.entries[key] == entry && entry.stopPreparing && entry.stopPrepareDone == prepareDone {
+			entry.stopPreparing = false
+			entry.stopPrepareDone = nil
+			close(prepareDone)
+		}
+		c.mu.Unlock()
+	}
+	return err
 }
 
 // EnsureLive ensures that one live generation exists for the channel. An
@@ -151,6 +247,14 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 
 		switch entry.state {
 		case LiveStateReady:
+			if entry.stopPreparing {
+				done := entry.stopPrepareDone
+				c.mu.Unlock()
+				if err := waitFor(ctx, done); err != nil {
+					return nil, true, err
+				}
+				continue
+			}
 			err := ownerNodeConflict(req, entry)
 			result := entry.result
 			c.mu.Unlock()
@@ -179,16 +283,21 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 				c.mu.Unlock()
 				return nil, true, err
 			}
-			entry.state = LiveStateStopping
-			entry.done = make(chan struct{})
+			if entry.stopPreparing {
+				done := entry.stopPrepareDone
+				c.mu.Unlock()
+				if err := waitFor(ctx, done); err != nil {
+					return nil, true, err
+				}
+				continue
+			}
+			entry.stopPreparing = true
+			prepareDone := make(chan struct{})
+			entry.stopPrepareDone = prepareDone
 			result := entry.result
 			c.mu.Unlock()
 
-			var cleanupErr error
-			if c.stop != nil {
-				cleanupErr = c.stop(context.WithoutCancel(ctx), result)
-			}
-			c.finishStop(key, entry, cleanupErr, LiveStateCleanupPending)
+			cleanupErr := c.runPreparedStop(context.WithoutCancel(ctx), key, entry, LiveStateCleanupPending, result, prepareDone)
 			if cleanupErr != nil {
 				return nil, true, errors.Join(ErrLiveCleanupPending, cleanupErr)
 			}
@@ -305,6 +414,14 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 				return err
 			}
 		case LiveStateReady, LiveStateCleanupPending:
+			if entry.stopPreparing {
+				done := entry.stopPrepareDone
+				c.mu.Unlock()
+				if err := waitFor(ctx, done); err != nil {
+					return err
+				}
+				continue
+			}
 			if entry.pins > 0 {
 				c.mu.Unlock()
 				return ErrLivePinned
@@ -314,16 +431,13 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 				return err
 			}
 			failureState := entry.state
-			entry.state = LiveStateStopping
-			entry.done = make(chan struct{})
+			entry.stopPreparing = true
+			prepareDone := make(chan struct{})
+			entry.stopPrepareDone = prepareDone
 			result := entry.result
 			c.mu.Unlock()
 
-			var err error
-			if c.stop != nil {
-				err = c.stop(context.WithoutCancel(ctx), result)
-			}
-			c.finishStop(key, entry, err, failureState)
+			err := c.runPreparedStop(context.WithoutCancel(ctx), key, entry, failureState, result, prepareDone)
 			return err
 		default:
 			c.mu.Unlock()
@@ -410,7 +524,7 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 func (s *Service) coordinator() *Coordinator {
 	s.liveCoordinatorMu.Lock()
 	if s.liveCoordinator == nil {
-		s.liveCoordinator = NewCoordinatorWithStop(
+		coordinator := NewCoordinatorWithStop(
 			func(ctx context.Context, req Request) (*Result, error) {
 				return s.startDirect(ctx, req)
 			},
@@ -418,6 +532,13 @@ func (s *Service) coordinator() *Coordinator {
 				return s.stopCurrentResult(ctx, result)
 			},
 		)
+		coordinator.setStopGuard(func(ctx context.Context, result *Result, closeFn func(context.Context) error) error {
+			if result == nil {
+				return closeFn(ctx)
+			}
+			return s.closeSource(ctx, result.StreamID, closeFn)
+		})
+		s.liveCoordinator = coordinator
 	}
 	c := s.liveCoordinator
 	s.liveCoordinatorMu.Unlock()

@@ -140,18 +140,20 @@ type RTPCapabilityReader interface {
 }
 
 type RTPDependencies struct {
-	Client     RTPClient
-	Ledger     RTPResourceLedger
-	Ownership  *OwnershipResolver
-	Capability RTPCapabilityReader
+	Client           RTPClient
+	Ledger           RTPResourceLedger
+	Ownership        *OwnershipResolver
+	Capability       RTPCapabilityReader
+	SourceCloseGuard SourceCloseGuard
 }
 
 type RTPService struct {
-	client     RTPClient
-	ledger     RTPResourceLedger
-	ownership  *OwnershipResolver
-	capability RTPCapabilityReader
-	now        func() time.Time
+	client           RTPClient
+	ledger           RTPResourceLedger
+	ownership        *OwnershipResolver
+	capability       RTPCapabilityReader
+	sourceCloseGuard SourceCloseGuard
+	now              func() time.Time
 }
 
 // RtpService is retained for callers that use the protocol acronym as a
@@ -162,7 +164,8 @@ func NewRTPService(dependencies RTPDependencies) *RTPService {
 	return &RTPService{
 		client: dependencies.Client, ledger: dependencies.Ledger,
 		ownership: dependencies.Ownership, capability: dependencies.Capability,
-		now: time.Now,
+		sourceCloseGuard: dependencies.SourceCloseGuard,
+		now:              time.Now,
 	}
 }
 
@@ -248,7 +251,13 @@ func (s *RTPService) CreateServer(ctx context.Context, nodeID int64, actorUserID
 }
 
 func (s *RTPService) compensateCreate(ctx context.Context, nodeID int64, request RTPServerCreateRequest) error {
-	result, err := s.client.CloseRtpServer(ctx, nodeID, request.VHost, request.App, request.Stream)
+	target := OwnershipTarget{NodeID: nodeID, Media: MediaIdentity{Schema: "rtp", Vhost: request.VHost, App: request.App, Stream: request.Stream}}
+	var result *RTPServerCloseResult
+	err := runMutationGuard(ctx, s.sourceCloseGuard, target, func(operationCtx context.Context) error {
+		var err error
+		result, err = s.client.CloseRtpServer(operationCtx, nodeID, request.VHost, request.App, request.Stream)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -428,23 +437,26 @@ func (s *RTPService) closeWithPreflight(ctx context.Context, request RTPServerCl
 	}
 	var closed *RTPServerCloseResult
 	action := func(operationCtx context.Context, _ OwnershipTarget) error {
-		var err error
-		closed, err = s.client.CloseRtpServer(operationCtx, request.NodeID, request.VHost, request.App, request.Stream)
-		if err != nil {
-			return normalizeT11RTPError(err, request.NodeID, "closeRtpServer")
-		}
-		if closed == nil {
-			return NewInternalError(nodeIDString(request.NodeID), "RTP close returned no result")
-		}
-		if !rtpReleaseConfirmed(closed) {
-			return NewInternalError(nodeIDString(request.NodeID), "RTP release could not be confirmed; ledger tombstone was not written")
-		}
-		identity := rtpLedgerIdentity(request.NodeID, request.VHost, request.App, request.Stream)
-		_, tombstoneErr := s.ledger.Tombstone(operationCtx, identity, s.clock())
-		if tombstoneErr != nil && !errors.Is(tombstoneErr, repo.ErrManagedResourceNotFound) {
-			return normalizeT11RTPError(tombstoneErr, request.NodeID, "tombstoneRTPServer")
-		}
-		return nil
+		target := rtpOwnershipTarget(request)
+		return runMutationGuard(operationCtx, s.sourceCloseGuard, target, func(guardedCtx context.Context) error {
+			var err error
+			closed, err = s.client.CloseRtpServer(guardedCtx, request.NodeID, request.VHost, request.App, request.Stream)
+			if err != nil {
+				return normalizeT11RTPError(err, request.NodeID, "closeRtpServer")
+			}
+			if closed == nil {
+				return NewInternalError(nodeIDString(request.NodeID), "RTP close returned no result")
+			}
+			if !rtpReleaseConfirmed(closed) {
+				return NewInternalError(nodeIDString(request.NodeID), "RTP release could not be confirmed; ledger tombstone was not written")
+			}
+			identity := rtpLedgerIdentity(request.NodeID, request.VHost, request.App, request.Stream)
+			_, tombstoneErr := s.ledger.Tombstone(guardedCtx, identity, s.clock())
+			if tombstoneErr != nil && !errors.Is(tombstoneErr, repo.ErrManagedResourceNotFound) {
+				return normalizeT11RTPError(tombstoneErr, request.NodeID, "tombstoneRTPServer")
+			}
+			return nil
+		})
 	}
 	var err error
 	if force {
