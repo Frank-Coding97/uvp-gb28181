@@ -230,3 +230,9 @@ func (c *TransactionClient) SendMessage(ctx context.Context, body []byte, callID
 	}
 	return c.execute(ctx, request)
 }
+
+// MessageFitsUDP includes the SIP envelope and headroom for transaction-added headers.
+func (c *TransactionClient) MessageFitsUDP(body []byte) bool {
+	request, err := c.factory.BuildMessage(body, "catalog-18446744073709551615-9223372036854775807")
+	return err == nil && len(request.String())+96 <= sip.UDPMTUSize-200
+}
