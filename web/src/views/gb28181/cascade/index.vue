@@ -42,11 +42,14 @@
         <s-layout-search class="cascade-search-panel">
           <template #fields>
             <a-input-search v-model="keyword" allow-clear placeholder="平台名称 / 编码 / 地址" class="cascade-search" />
-            <a-select v-model="statusFilter" class="cascade-status-filter" placeholder="全部状态" allow-clear>
+            <div class="cascade-status-filter">
+              <a-select v-model="statusFilter">
+                <a-option value="all">全部状态</a-option>
                 <a-option value="online">在线</a-option>
                 <a-option value="offline">离线</a-option>
                 <a-option value="disabled">已停用</a-option>
-            </a-select>
+              </a-select>
+            </div>
           </template>
           <template #actions>
             <div class="cascade-search-actions">
@@ -390,7 +393,7 @@ const saving = ref(false);
 const actionId = ref<number | null>(null);
 const errorMessage = ref("");
 const keyword = ref("");
-const statusFilter = ref<string>();
+const statusFilter = ref("all");
 const editorVisible = ref(false);
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
@@ -421,7 +424,7 @@ const summary = computed(() => ({
 const filteredPlatforms = computed(() => {
   const q = keyword.value.trim().toLowerCase();
   return platforms.value.filter(item => {
-    const statusMatch = !statusFilter.value || (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
+    const statusMatch = statusFilter.value === "all" || (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
     const keywordMatch = !q || [item.name, item.upstreamServerId, item.host, item.localDeviceId].some(value => String(value || "").toLowerCase().includes(q));
     return statusMatch && keywordMatch;
   });
@@ -832,6 +835,7 @@ onMounted(() => {
 .cascade-search-panel { margin-bottom: 0; }
 .cascade-search { flex: 0 0 280px; width: 280px; }
 .cascade-status-filter { flex: 0 0 148px; width: 148px; }
+.cascade-status-filter :deep(.arco-select) { width: 100%; background: var(--uvp-search-control-bg); color: var(--uvp-text-secondary); }
 .cascade-table { min-height: 260px; }
 .entity-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .entity-cell strong, .entity-cell span { overflow: hidden; color: var(--color-text-1); text-overflow: ellipsis; white-space: nowrap; }
