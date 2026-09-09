@@ -735,3 +735,31 @@ func mustServiceJob(t *testing.T, db *gorm.DB, id string) models.GbWorkRecording
 	require.NoError(t, db.First(&job, "id = ?", id).Error)
 	return job
 }
+
+func TestWorkServiceStoppingOneChannelKeepsOtherRecordingAndLease(t *testing.T) {
+	service, firstClient, prepare, db := serviceFixture(t)
+	secondClient := &serviceMP4Client{}
+	service.recorder.client = func(target MediaTarget) (MP4Client, error) {
+		if target.Stream == "channel-2" {
+			return secondClient, nil
+		}
+		return firstClient, nil
+	}
+	ctx := context.Background()
+	first, err := service.Start(ctx, 7, serviceStartRequest(1, "first-channel"), 30)
+	require.NoError(t, err)
+	second, err := service.Start(ctx, 7, serviceStartRequest(2, "second-channel"), 30)
+	require.NoError(t, err)
+	stopped, err := service.Stop(ctx, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateStopped, stopped.State)
+	require.Equal(t, FileFinalizing, stopped.FileState)
+	require.Equal(t, 1, firstClient.stops)
+	require.Zero(t, secondClient.stops)
+	require.True(t, secondClient.active)
+	require.Equal(t, int32(1), prepare.releases.Load())
+	claim, err := NewClaims(db).Get(ctx, ChannelResource(2))
+	require.NoError(t, err)
+	require.Equal(t, second.ID, claim.OwnerID)
+	require.Equal(t, StateRecording, claim.State)
+}
