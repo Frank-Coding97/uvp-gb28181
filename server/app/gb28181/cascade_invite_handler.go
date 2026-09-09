@@ -18,7 +18,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/media"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
@@ -418,13 +417,6 @@ func stopCascadeVideoRuntime(ctx context.Context) {
 	case <-ctx.Done():
 		h.log("等待级联点播释放超时", 0, ctx.Err())
 	}
-}
-
-func guardCascadeAndRecordingSourceClose(ctx context.Context, streamID string, fn func(context.Context) error) error {
-	if h := cascadeVideo.Load(); h != nil && h.sources.HasLease(streamID) {
-		return play.ErrSourceProtected
-	}
-	return guardRecordingSourceClose(ctx, streamID, fn)
 }
 
 func (h *cascadeVideoRuntime) revalidate(ctx context.Context) error {

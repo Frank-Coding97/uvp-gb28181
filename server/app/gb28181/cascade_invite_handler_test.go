@@ -3,24 +3,29 @@ package gb28181
 import (
 	"context"
 	"fmt"
-	"github.com/emiago/sipgo"
-	"github.com/emiago/sipgo/sip"
-	"github.com/emiago/sipgo/siptest"
-	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
+	"github.com/emiago/sipgo/siptest"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/media"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 func TestCascadeInvitePeerAcceptsPublishedTargetAndSeparatesPorts(t *testing.T) {
@@ -101,8 +106,8 @@ func cascadeDialogRequest(req *sip.Request, res *sip.Response, method sip.Reques
 }
 
 func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVideoRuntime, *gorm.DB, chan string) {
-	db := bootstrapWorkRecordingDB(t)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{}, &model.GbCascadeMediaSession{}))
+	db := cascadeInviteTestDB(t)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{}, &model.GbCascadeMediaSession{}))
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Status: 1}
 	require.NoError(t, db.Create(&device).Error)
 	channel := gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "34020000001320000010", Status: 1}
@@ -145,6 +150,45 @@ func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVide
 	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(db), sources: media.NewProvider(cascadeInviteTestSource{}), sender: media.NewSender(nodes, nil), nodes: nodes, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
 	return h, db, stops
 }
+
+func cascadeInviteTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "cascade-invite.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	raw.SetMaxOpenConns(1)
+	oldDB, oldConfig := app.GormDbMysql, app.ConfigYml
+	app.GormDbMysql = db
+	app.ConfigYml = cascadeInviteTestConfig{}
+	t.Cleanup(func() {
+		app.GormDbMysql, app.ConfigYml = oldDB, oldConfig
+		_ = raw.Close()
+	})
+	return db
+}
+
+type cascadeInviteTestConfig struct{}
+
+func (cascadeInviteTestConfig) ConfigFileChangeListen(...func()) {}
+func (cascadeInviteTestConfig) Get(string) interface{}           { return nil }
+func (cascadeInviteTestConfig) GetString(key string) string {
+	if key == "gormv2.usedbtype" {
+		return "mysql"
+	}
+	return ""
+}
+func (cascadeInviteTestConfig) GetBool(string) bool              { return false }
+func (cascadeInviteTestConfig) GetInt(string) int                { return 0 }
+func (cascadeInviteTestConfig) GetInt32(string) int32            { return 0 }
+func (cascadeInviteTestConfig) GetInt64(string) int64            { return 0 }
+func (cascadeInviteTestConfig) GetFloat64(string) float64        { return 0 }
+func (cascadeInviteTestConfig) GetDuration(string) time.Duration { return 0 }
+func (cascadeInviteTestConfig) GetStringSlice(string) []string   { return nil }
+func (cascadeInviteTestConfig) GetUintSlice(string) []uint       { return nil }
+func (cascadeInviteTestConfig) Set(string, interface{})          {}
+func (cascadeInviteTestConfig) SaveConfig() error                { return nil }
+
 func TestCascadeVideoTwoUpstreamsSameCallIDAndIndependentBye(t *testing.T) {
 	h, db, stops := newCascadeVideoTestRuntime(t)
 	requests := []*sip.Request{cascadeTestRequest(15060, "0200000001"), cascadeTestRequest(16060, "0200000002")}

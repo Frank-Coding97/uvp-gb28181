@@ -780,10 +780,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zlmLocationMap,
 				u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
-			if err := restoreWorkGenerationFloor(context.Background(), playSvc); err != nil {
-				return fmt.Errorf("恢复录像代际失败: %w", err)
-			}
-			playSvc.SetSourceCloseGuard(guardCascadeAndRecordingSourceClose)
 			playSvc.BeginRecovery()
 			recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			recoveryStats, recoveryErr := playSvc.RecoverLiveSessions(recoveryCtx)
@@ -809,10 +805,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			}
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
-			if err := restoreWorkGenerationFloor(context.Background(), playSvc); err != nil {
-				return fmt.Errorf("恢复录像代际失败: %w", err)
-			}
-			playSvc.SetSourceCloseGuard(guardCascadeAndRecordingSourceClose)
 			gbroutes.SetPlayService(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
