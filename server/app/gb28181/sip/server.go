@@ -22,6 +22,7 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
+	cascadeDialog      func(*siplib.Request, siplib.ServerTransaction) bool
 	cascadeMessageMu   sync.RWMutex
 	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
 	cfg                gbconfig.Config
@@ -223,9 +224,9 @@ func (s *Server) registerHandlers() {
 	})
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.notifyH.Handle)
-	s.srv.OnInvite(s.handleBroadcastInvite)
-	s.srv.OnAck(s.handleBroadcastAck)
-	s.srv.OnBye(s.handleBye)
+	s.srv.OnInvite(s.dispatchCascadeDialog(s.handleBroadcastInvite))
+	s.srv.OnAck(s.dispatchCascadeDialog(s.handleBroadcastAck))
+	s.srv.OnBye(s.dispatchCascadeDialog(s.handleBye))
 }
 
 func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -499,4 +500,22 @@ func (s *Server) SetCascadeMessageHandler(hook func(*siplib.Request, siplib.Serv
 	s.cascadeMessageMu.Lock()
 	defer s.cascadeMessageMu.Unlock()
 	s.cascadeMessage = hook
+}
+
+// SetCascadeDialogHandler installs the video UAS after its media dependencies are ready.
+func (s *Server) SetCascadeDialogHandler(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
+	s.cascadeMessageMu.Lock()
+	s.cascadeDialog = fn
+	s.cascadeMessageMu.Unlock()
+}
+func (s *Server) dispatchCascadeDialog(fallback func(*siplib.Request, siplib.ServerTransaction)) func(*siplib.Request, siplib.ServerTransaction) {
+	return func(req *siplib.Request, tx siplib.ServerTransaction) {
+		s.cascadeMessageMu.RLock()
+		hook := s.cascadeDialog
+		s.cascadeMessageMu.RUnlock()
+		if hook != nil && hook(req, tx) {
+			return
+		}
+		fallback(req, tx)
+	}
 }
