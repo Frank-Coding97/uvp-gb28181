@@ -42,7 +42,7 @@
         <s-layout-search class="cascade-search-panel">
           <template #fields>
             <a-input-search v-model="keyword" allow-clear placeholder="平台名称 / 编码 / 地址" class="cascade-search" />
-            <div class="cascade-status-filter">
+            <div class="cascade-status-filter" :class="{ 'is-all': statusFilter === 'all' }">
               <a-select v-model="statusFilter">
                 <a-option value="all">全部状态</a-option>
                 <a-option value="online">在线</a-option>
@@ -835,7 +835,21 @@ onMounted(() => {
 .cascade-search-panel { margin-bottom: 0; }
 .cascade-search { flex: 0 0 280px; width: 280px; }
 .cascade-status-filter { flex: 0 0 148px; width: 148px; }
-.cascade-status-filter :deep(.arco-select) { width: 100%; background: var(--uvp-search-control-bg); color: var(--uvp-text-secondary); }
+.cascade-status-filter :deep(.arco-select) {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.cascade-status-filter :deep(.arco-select-view-focus) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.cascade-status-filter.is-all :deep(.arco-select-view-value) {
+  color: var(--uvp-text-tertiary) !important;
+}
 .cascade-table { min-height: 260px; }
 .entity-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .entity-cell strong, .entity-cell span { overflow: hidden; color: var(--color-text-1); text-overflow: ellipsis; white-space: nowrap; }
