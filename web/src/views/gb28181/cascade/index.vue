@@ -113,14 +113,14 @@
             <a-table-column title="共享" :width="108">
               <template #cell="{ record }"><span>{{ record.projectionRevision ? `版本 ${record.projectionRevision}` : "未配置" }}</span></template>
             </a-table-column>
-            <a-table-column title="操作" :width="250" align="center" :fixed="isMobile ? '' : 'right'">
+            <a-table-column title="操作" :width="280" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions cascade-actions">
-                  <a-link v-if="canManage" @click="openEdit(record)"><Settings2 :size="14" />编辑</a-link>
-                  <a-link v-if="canShare" @click="openShare(record)"><Share2 :size="14" />共享</a-link>
-                  <a-link v-if="canReconnect && record.enabled" :loading="actionId === record.id" @click="reconnect(record)"><RotateCw :size="14" />重连</a-link>
+                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><Settings2 :size="14" />编辑</a-link>
+                  <a-link v-if="canShare" class="uvp-table-action uvp-table-action--assign" @click="openShare(record)"><Share2 :size="14" />共享</a-link>
+                  <a-link v-if="canReconnect && record.enabled" class="uvp-table-action uvp-table-action--sync" :loading="actionId === record.id" @click="reconnect(record)"><RotateCw :size="14" />重连</a-link>
                   <a-dropdown trigger="click">
-                    <a-link><MoreHorizontal :size="16" /></a-link>
+                    <a-link class="uvp-table-action" aria-label="更多操作"><MoreHorizontal :size="16" /></a-link>
                     <template #content>
                       <a-doption v-if="canEnable" @click="toggleEnabled(record)">{{ record.enabled ? "停用" : "启用" }}</a-doption>
                       <a-doption v-if="canManage" class="cascade-danger" @click="confirmDelete(record)">删除</a-doption>
