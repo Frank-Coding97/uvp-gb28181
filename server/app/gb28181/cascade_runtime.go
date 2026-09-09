@@ -232,6 +232,9 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 		return
 	}
 	store := repository.NewGormRepository(db)
+	if runtime != nil {
+		runtime = cascadeVideoManagementRuntime{runtime}
+	}
 	gbroutes.SetCascadeManagementService(cascadeservice.NewManagementService(store, cipher, runtime, nil), db)
 }
 
@@ -287,6 +290,7 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 }
 
 func stopCascadeRuntime(ctx context.Context) {
+	stopCascadeVideoRuntime(ctx)
 	manager := cascadeRuntimeManager
 	cascadeRuntimeManager = nil
 	if manager == nil {
@@ -301,3 +305,31 @@ func stopCascadeRuntime(ctx context.Context) {
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)
 var _ cascaderuntime.ResourceAcquirer = (*cascadeResourceAcquirer)(nil)
+
+// Management changes invalidate media dialogs whose upstream identity changed.
+type cascadeVideoManagementRuntime struct {
+	cascadeservice.ManagementRuntime
+}
+
+func (r cascadeVideoManagementRuntime) Reload(ctx context.Context) error {
+	if h := cascadeVideo.Load(); h != nil {
+		if err := h.revalidate(ctx); err != nil {
+			return err
+		}
+	}
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.Reload(ctx)
+}
+func (r cascadeVideoManagementRuntime) Reconnect(id uint64) {
+	if r.ManagementRuntime != nil {
+		r.ManagementRuntime.Reconnect(id)
+	}
+}
+func (r cascadeVideoManagementRuntime) PlatformIDs() []uint64 {
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.PlatformIDs()
+}

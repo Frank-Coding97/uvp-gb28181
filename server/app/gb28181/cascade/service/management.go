@@ -302,7 +302,15 @@ func (s *ManagementService) ReplaceProjection(ctx context.Context, platformID ui
 	if _, err := s.store.FindPlatform(ctx, platformID); err != nil {
 		return err
 	}
-	return s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels)
+	if err := s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels); err != nil {
+		return err
+	}
+	if s.runtime != nil {
+		if err := s.runtime.Reload(ctx); err != nil {
+			return fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	return nil
 }
 
 func (s *ManagementService) Projection(ctx context.Context, platformID uint64) (*repository.ProjectionSnapshot, error) {

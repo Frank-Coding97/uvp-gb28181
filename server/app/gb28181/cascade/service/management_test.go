@@ -101,7 +101,8 @@ func TestManagementServiceEnableReconnectAndDeleteRespectRuntimeAndSessions(t *t
 
 func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 	store := newManagementStoreFake()
-	service := NewManagementService(store, &credentialSealerFake{}, nil, fakeClock{now: time.Now()})
+	runtime := &managementRuntimeFake{}
+	service := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
 	inputA := validPlatformInput(nil)
 	inputA.Enabled = false
 	inputB := inputA
@@ -114,7 +115,9 @@ func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 
 	devices := []repository.DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000001"}}
 	channels := []repository.ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}}
+	beforeReload := runtime.reloads
 	require.NoError(t, service.ReplaceProjection(context.Background(), a.ID, 0, devices, channels))
+	require.Equal(t, beforeReload+1, runtime.reloads)
 	snapshotA, err := service.Projection(context.Background(), a.ID)
 	require.NoError(t, err)
 	require.Len(t, snapshotA.Channels, 1)
