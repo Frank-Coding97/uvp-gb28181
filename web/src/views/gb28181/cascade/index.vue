@@ -111,8 +111,8 @@
                 <div class="entity-cell"><span>{{ registrationLabel(record.registration) }} / {{ heartbeatLabel(record.heartbeat) }}</span><small>{{ formatRelative(record.heartbeatAt || record.registerAt) }}</small></div>
               </template>
             </a-table-column>
-            <a-table-column title="共享" :width="108">
-              <template #cell="{ record }"><span>{{ record.projectionRevision ? `版本 ${record.projectionRevision}` : "未配置" }}</span></template>
+            <a-table-column title="共享" :width="190">
+              <template #cell="{ record }"><a-link @click="openSharedDevices(record)">{{ sharedSummary(record.id) }}</a-link></template>
             </a-table-column>
             <a-table-column title="操作" :width="280" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
@@ -213,6 +213,20 @@
           <a-button type="primary" :loading="saving" @click="savePlatform">保存</a-button>
         </div>
       </template>
+    </a-modal>
+
+    <a-modal v-model:visible="sharedDevicesVisible" :title="`已共享设备 · ${sharedDevicesPlatform?.name || ''}`" width="min(780px, calc(100vw - 24px))" :footer="false" unmount-on-close>
+      <a-spin :loading="sharedDevicesLoading" style="width: 100%">
+        <a-alert v-if="sharedDevicesError" type="error">{{ sharedDevicesError }} <a-link @click="openSharedDevices(sharedDevicesPlatform!)">重试</a-link></a-alert>
+        <a-table v-else :data="sharedDevicesRows" row-key="sourceDeviceId" :pagination="{ pageSize: 10 }" :bordered="false">
+          <template #columns>
+            <a-table-column title="设备名称" data-index="name" />
+            <a-table-column title="共享设备编号" data-index="publishedDeviceId" />
+            <a-table-column title="已选通道数" data-index="channelCount" :width="110" />
+          </template>
+          <template #empty><a-empty description="尚未共享设备" /></template>
+        </a-table>
+      </a-spin>
     </a-modal>
 
     <a-modal
@@ -434,6 +448,45 @@ const filteredPlatforms = computed(() => {
   });
 });
 
+const sharedSnapshots = reactive(new Map<number, CascadeShares>());
+const sharedDevicesVisible = ref(false);
+const sharedDevicesLoading = ref(false);
+const sharedDevicesError = ref("");
+const sharedDevicesPlatform = ref<CascadePlatform | null>(null);
+const sharedDevicesRows = ref<Array<CascadeDeviceProjection & { channelCount: number }>>([]);
+function sharedSummary(id: number) {
+  const snapshot = sharedSnapshots.get(id);
+  if (!snapshot) return "查看已共享设备";
+  const devices = snapshot.devices.filter(item => item.active !== false);
+  const channels = snapshot.channels.filter(item => item.active !== false);
+  return devices.length || channels.length ? `${devices.length} 个设备 / ${channels.length} 个通道` : "未配置";
+}
+async function loadSharedSnapshot(id: number) {
+  const response: any = await getCascadeShares(id);
+  const snapshot: CascadeShares = response?.data || response;
+  sharedSnapshots.set(id, snapshot);
+  return snapshot;
+}
+async function openSharedDevices(platform: CascadePlatform) {
+  sharedDevicesPlatform.value = platform;
+  sharedDevicesVisible.value = true;
+  sharedDevicesLoading.value = true;
+  sharedDevicesError.value = "";
+  sharedDevicesRows.value = [];
+  try {
+    const snapshot = await loadSharedSnapshot(platform.id);
+    if (sharedDevicesPlatform.value?.id !== platform.id) return;
+    sharedDevicesRows.value = snapshot.devices.filter(item => item.active !== false).map(device => ({
+      ...device,
+      channelCount: snapshot.channels.filter(channel => channel.active !== false && (channel.sourceDeviceId === device.sourceDeviceId || (device.id != null && channel.deviceProjectionId === device.id))).length
+    }));
+  } catch {
+    if (sharedDevicesPlatform.value?.id === platform.id) sharedDevicesError.value = "已共享设备读取失败，请重试。";
+  } finally {
+    if (sharedDevicesPlatform.value?.id === platform.id) sharedDevicesLoading.value = false;
+  }
+}
+
 async function refresh() {
   if (!canView.value) return;
   loading.value = true;
@@ -441,6 +494,8 @@ async function refresh() {
   try {
     const response: any = await listCascadePlatforms();
     platforms.value = response?.list || response?.data?.list || [];
+    sharedSnapshots.clear();
+    await Promise.allSettled(platforms.value.map(platform => loadSharedSnapshot(platform.id)));
   } catch {
     errorMessage.value = "国标级联平台加载失败，请检查服务状态后重试。";
   } finally {
