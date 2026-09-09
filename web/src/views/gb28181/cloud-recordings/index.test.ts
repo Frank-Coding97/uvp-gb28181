@@ -149,7 +149,7 @@ describe("CloudRecordings", () => {
     await flushPromises();
     expect(api.listRecordingFiles).toHaveBeenCalledOnce();
     expect(api.listRecordingOptions).toHaveBeenCalledOnce();
-    expect(api.listReconciliations).toHaveBeenCalledOnce();
+    expect(api.listReconciliations).not.toHaveBeenCalled();
     expect(api.listActiveRecordings).not.toHaveBeenCalled();
     expect(wrapper.emitted("stats")?.some(([payload]) => (payload as { filesTotal?: number }).filesTotal === 1)).toBe(true);
     wrapper.unmount();
@@ -236,13 +236,13 @@ describe("CloudRecordings", () => {
     expect(api.triggerReconciliation).not.toHaveBeenCalled();
   });
 
-  it("retains the reconciliation status indicator", async () => {
+  it("omits reconciliation status and its status request", async () => {
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [{ status: "success" }] } });
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='reconciliation-summary']").text()).toContain("节点目录已对账");
-    expect(wrapper.find("[data-testid='reconciliation-success-icon']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='reconciliation-summary']").exists()).toBe(false);
+    expect(api.listReconciliations).not.toHaveBeenCalled();
   });
 
   it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])("hides access actions for %s", async availability => {
