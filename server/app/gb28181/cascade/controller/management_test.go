@@ -100,7 +100,7 @@ func TestManagementFailureLogsDuplicateWithoutFieldValues(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/platforms", nil))
 	require.Equal(t, 409, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "平台名称或本平台设备 ID")
+	require.Contains(t, recorder.Body.String(), "平台名称或上级接入关系")
 	require.Equal(t, 1, logs.Len())
 	require.Equal(t, uint16(1062), logs.All()[0].ContextMap()["mysql_errno"])
 	require.NotContains(t, recorder.Body.String(), "sensitive-value")

@@ -1,0 +1,1 @@
+ALTER TABLE gb_cascade_platform DROP INDEX uk_cascade_platform_local_identity, ADD UNIQUE INDEX uk_cascade_platform_connection (local_device_id, local_domain, upstream_server_id, host, port, transport);

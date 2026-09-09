@@ -309,7 +309,7 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 		message = "认证密码暂时无法保存，请检查平台数据目录是否可读写"
 	}
 	if duplicate {
-		message = "平台名称或本平台设备 ID 与域已存在，请检查现有上级平台配置"
+		message = "平台名称或上级接入关系已存在，请检查上级地址、端口及平台身份"
 	}
 	if app.ZapLog != nil {
 		fields := []zap.Field{zap.String("method", ctx.Request.Method), zap.String("route", ctx.FullPath()), zap.Int("status", status), zap.String("error_type", fmt.Sprintf("%T", err))}
