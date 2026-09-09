@@ -794,7 +794,7 @@ onBeforeUnmount(() => {
 .slot-grid.layout-6 .screen-slot:first-child { grid-column: span 2; grid-row: span 2; }
 .slot-grid.layout-8 .screen-slot:first-child { grid-column: span 3; grid-row: span 3; }
 .screen-slot { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #0E1014; border: 0; border-radius: 0; outline: 0; }
-.screen-slot::after { position: absolute; z-index: 5; content: ""; inset: 0; border: 2px solid transparent; border-radius: var(--zlm-radius-md); pointer-events: none; transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out), box-shadow var(--zlm-dur-fast) var(--zlm-ease-out); }
+.screen-slot::after { position: absolute; z-index: 7; content: ""; inset: 0; border: 2px solid transparent; border-radius: var(--zlm-radius-md); pointer-events: none; transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out), box-shadow var(--zlm-dur-fast) var(--zlm-ease-out); }
 .screen-slot:hover::after { border-color: rgb(148 163 184 / 38%); }
 .screen-slot:focus-visible, .screen-slot.focused { z-index: 1; }
 .screen-slot:focus-visible::after, .screen-slot.focused::after { border-color: var(--zlm-brand-500); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--zlm-brand-500) 30%, transparent); }
