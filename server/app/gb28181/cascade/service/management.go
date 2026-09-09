@@ -89,6 +89,7 @@ type PlatformView struct {
 	LocalSIPPort         int                          `json:"localSipPort"`
 	MediaAdvertiseIP     string                       `json:"mediaAdvertiseIp,omitempty"`
 	AuthUsername         string                       `json:"authUsername,omitempty"`
+	CredentialNeedsReset bool                         `json:"credentialNeedsReset"`
 	HasPassword          bool                         `json:"hasPassword"`
 	ProfileOverride      model.CascadeProfileOverride `json:"profileOverride"`
 	EffectiveVersion     string                       `json:"effectiveVersion"`
@@ -331,8 +332,21 @@ func (s *ManagementService) applyCredential(platform *model.GbCascadePlatform, p
 
 func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView {
 	state := DerivePlatformState(platform, s.clock, 0)
+	needsReset := false
+	if len(platform.SecretCiphertext) > 0 {
+		if opener, ok := s.sealer.(interface {
+			Decrypt(string, securestore.Envelope) ([]byte, error)
+		}); ok {
+			plain, err := opener.Decrypt(upstreamPasswordPurpose, securestore.Envelope{Ciphertext: platform.SecretCiphertext, Nonce: platform.SecretNonce, Algorithm: platform.SecretAlg, KeyVersion: platform.SecretKeyVersion})
+			needsReset = err != nil
+			clear(plain)
+		} else {
+			needsReset = true
+		}
+	}
 	return PlatformView{
-		ID: platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
+		CredentialNeedsReset: needsReset,
+		ID:                   platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
 		Host: platform.Host, Port: platform.Port, LocalDeviceID: platform.LocalDeviceID, LocalDomain: platform.LocalDomain,
 		LocalSIPIP: platform.LocalSIPIP, LocalSIPPort: platform.LocalSIPPort, MediaAdvertiseIP: platform.MediaAdvertiseIP,
 		AuthUsername: platform.AuthUsername, HasPassword: len(platform.SecretCiphertext) > 0,

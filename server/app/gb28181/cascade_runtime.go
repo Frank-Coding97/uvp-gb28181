@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -234,7 +235,7 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 }
 
 func loadCascadeCredentialCipher() (*securestore.Cipher, error) {
-	cipher, err := securestore.LoadCipherFromEnv(cascadeCredentialKeyEnv, cascadeCredentialVersion)
+	cipher, err := securestore.LoadOrCreateCipher(cascadeCredentialKeyEnv, filepath.Join(app.BasePath, "data", "secrets", "cascade.key"), cascadeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}

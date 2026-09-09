@@ -80,6 +80,7 @@
                 <div class="entity-cell">
                   <strong>{{ record.name }}</strong>
                   <code>{{ record.upstreamServerId }}</code>
+                  <a-tag v-if="record.credentialNeedsReset" color="orange">需重新填写认证密码</a-tag>
                 </div>
               </template>
             </a-table-column>
@@ -181,6 +182,7 @@
             <a-form-item label="媒体宣告地址"><a-input v-model="form.mediaAdvertiseIp" allow-clear /></a-form-item>
             <a-form-item label="认证用户名"><a-input v-model="form.authUsername" allow-clear /></a-form-item>
             <a-form-item label="认证密码">
+              <a-alert v-if="editing?.credentialNeedsReset" type="warning">原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert>
               <a-input-password v-model="form.password" allow-clear :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'" />
             </a-form-item>
           </div>

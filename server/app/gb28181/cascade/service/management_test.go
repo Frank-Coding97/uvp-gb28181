@@ -266,3 +266,20 @@ func TestManagementServiceTypedNilCipherReturnsCredentialUnavailable(t *testing.
 	require.ErrorIs(t, err, ErrCredentialUnavailable)
 	require.ErrorIs(t, err, securestore.ErrKeyUnavailable)
 }
+
+func TestManagementViewDetectsLostKeyAndPasswordReplacement(t *testing.T) {
+	oldKey, err := securestore.NewCipher([]byte("01234567890123456789012345678901"), "v1")
+	require.NoError(t, err)
+	newKey, err := securestore.NewCipher([]byte("11234567890123456789012345678901"), "v1")
+	require.NoError(t, err)
+	svc := NewManagementService(newManagementStoreFake(), oldKey, &managementRuntimeFake{}, fakeClock{})
+	platform := model.GbCascadePlatform{}
+	password := "original"
+	require.NoError(t, svc.applyCredential(&platform, &password))
+	require.False(t, svc.view(platform).CredentialNeedsReset)
+	svc.sealer = newKey
+	require.True(t, svc.view(platform).CredentialNeedsReset)
+	password = "replacement"
+	require.NoError(t, svc.applyCredential(&platform, &password))
+	require.False(t, svc.view(platform).CredentialNeedsReset)
+}
