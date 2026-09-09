@@ -2,9 +2,13 @@ package controller
 
 import (
 	"encoding/json"
+	"github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -82,4 +86,23 @@ func TestPlatformRequestUsesCamelCaseAndKeepsPasswordWriteOnly(t *testing.T) {
 	require.EqualValues(t, 4, request.ExpectedRevision)
 	require.NotNil(t, request.Password)
 	require.Equal(t, "secret", *request.Password)
+}
+
+func TestManagementFailureLogsDuplicateWithoutFieldValues(t *testing.T) {
+	core, logs := observer.New(zap.ErrorLevel)
+	old := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = old })
+	router := gin.New()
+	router.POST("/platforms", func(ctx *gin.Context) {
+		(&ManagementController{}).fail(ctx, &mysql.MySQLError{Number: 1062, Message: "duplicate sensitive-value"})
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/platforms", nil))
+	require.Equal(t, 409, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "平台名称或本平台设备 ID")
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, uint16(1062), logs.All()[0].ContextMap()["mysql_errno"])
+	require.NotContains(t, recorder.Body.String(), "sensitive-value")
+	require.NotContains(t, logs.All()[0].ContextMap(), "error")
 }
