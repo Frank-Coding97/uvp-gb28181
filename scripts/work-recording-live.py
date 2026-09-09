@@ -123,11 +123,21 @@ try:
         raise RuntimeError('media not ready')
     assert api('isRecording', **target)['status'] is False
     assert not records and (not list(root.rglob('*.mp4')))
+    job_directories = {}
+    if args.scenario == 'rapid-isolated':
+        for job in ['A', 'B']:
+            candidate = root / 'work-recordings' / str(uuid.uuid4())
+            listing = api('getMP4RecordFile', customized_path=str(candidate), **target)
+            assert listing['code'] == 0
+            resolved = pathlib.Path(listing['data']['rootPath'])
+            assert resolved.is_absolute() and resolved.is_relative_to(candidate), 'node ignored customized_path'
+            assert not listing['data']['paths'], 'new job directory must be empty'
+            job_directories[job] = candidate
     if args.scenario != 'normal':
         time.sleep(1 - time.time() % 1 + 0.05)
     for job in ['A', 'B']:
         events.append({'job': job, 'event': 'before_start', 'at': time.time()})
-        directory = {'customized_path': str(root / 'jobs' / job)} if args.scenario == 'rapid-isolated' else {}
+        directory = {'customized_path': str(job_directories[job])} if args.scenario == 'rapid-isolated' else {}
         answer = api('startRecord', max_second=2, **target, **directory)
         assert answer['code'] == 0 and answer['result']
         assert api('isRecording', **target)['status'] is True
@@ -151,10 +161,23 @@ try:
     assert records and probes
     hook_paths = {str(pathlib.Path(x['body']['file_path']).resolve()) for x in records}
     assert hook_paths == {str(pathlib.Path(x['path']).resolve()) for x in probes}
+    if args.scenario != 'normal':
+        start_seconds = {int(event['at']) for event in events if event.get('event') == 'before_start'}
+        assert len(start_seconds) == 1, 'rapid recordings did not start within the same second'
     if args.scenario == 'rapid-shared':
         assert len(records) == 2 and len(hook_paths) == 1, 'expected default-path collision was not reproduced'
     else:
         assert len(records) == len(hook_paths), 'distinct recording callbacks collided on a path'
+    if args.scenario == 'rapid-isolated':
+        listed_paths = set()
+        for directory in job_directories.values():
+            dates = api('getMP4RecordFile', customized_path=str(directory), **target)
+            assert dates['code'] == 0
+            for period in dates['data']['paths']:
+                listing = api('getMP4RecordFile', customized_path=str(directory), period=period, **target)
+                assert listing['code'] == 0
+                listed_paths.update(str((pathlib.Path(listing['data']['rootPath']) / name).resolve()) for name in listing['data']['paths'])
+        assert listed_paths == hook_paths, 'custom directory reconciliation missed or crossed job files'
     (root / 'probes.json').write_text(json.dumps(probes, indent=2))
     print(json.dumps({'status': 'expected_collision_reproduced' if args.scenario == 'rapid-shared' else 'control_sequence_passed', 'scenario': args.scenario, 'files': len(probes), 'hooks': len(records), 'directory': str(root)}), flush=True)
 except Exception as e:
