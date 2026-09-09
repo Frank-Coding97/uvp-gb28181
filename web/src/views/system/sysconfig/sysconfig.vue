@@ -49,10 +49,19 @@
                   </a-form-item>
                 </a-col>
 
+                <a-col :span="24">
+                  <a-form-item field="playbackCover" label="多屏播放封面">
+                    <a-radio-group v-model="configData.system.playbackCover" type="button">
+                      <a-radio value="uvp">UVP 封面</a-radio>
+                      <a-radio value="icon">图标封面</a-radio>
+                    </a-radio-group>
+                    <template #extra><div>空闲播放窗口的封面；图标封面不显示 UVP 品牌文字</div></template>
+                  </a-form-item>
+                </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="systemBrand" label="品牌简称">
                     <a-input v-model="configData.system.systemBrand" placeholder="留空隐藏品牌简称" />
-                    <template #extra><div>显示在侧栏和预览封面，留空不显示；GB28181 标识保留</div></template>
+                    <template #extra><div>显示在侧栏，留空不显示；GB28181 标识保留</div></template>
                   </a-form-item>
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">

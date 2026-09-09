@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Video } from "lucide-vue-next";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 const config = useSysConfigStore();
-const brand = computed(() => config.systemConfig.systemBrand?.trim() || "");
-const systemName = computed(() => config.systemConfig.systemName?.trim() || "统一视频接入平台");
+const useIconCover = computed(() => config.systemConfig.playbackCover === "icon");
 
 const props = defineProps<{ index: number }>();
 const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
@@ -16,8 +16,9 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
             <span class="idle-state"><span class="idle-dot" />待接入</span>
         </div>
         <div class="brand-lockup" aria-hidden="true">
-            <strong v-if="brand" class="cover-brand">{{ brand }}</strong>
-            <span class="brand-caption">{{ systemName }}</span>
+            <Video v-if="useIconCover" class="cover-icon" :size="56" :stroke-width="1.2" />
+            <strong v-else class="cover-brand">UVP</strong>
+            <span class="brand-caption">{{ useIconCover ? "等待视频接入" : "统一视频接入平台" }}</span>
         </div>
     </div>
 </template>
@@ -59,6 +60,7 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
     flex-direction: column;
     gap: 10px;
 }
+.cover-icon { color: #778397; }
 .cover-brand {
     color: transparent;
     background: linear-gradient(110deg, #F8FAFC 8%, #C7D7F2 54%, #72A2F5 100%);

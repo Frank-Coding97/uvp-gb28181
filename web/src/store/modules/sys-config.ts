@@ -21,6 +21,7 @@ const sysConfigStore = () => {
         systemLogo: "",
         systemIcon: "",
         systemBrand: "",
+        playbackCover: "uvp",
         systemName: "",
         systemCopyright: "",
         systemRecordNo: "",
@@ -63,7 +64,7 @@ const sysConfigStore = () => {
             const { data } = await getConfigAPI();
 
             if (data) {
-                systemConfig.value = data.system || systemConfig.value;
+                systemConfig.value = data.system ? { ...data.system, playbackCover: data.system.playbackCover === "icon" ? "icon" : "uvp" } : systemConfig.value;
                 safeConfig.value = data.safe || safeConfig.value;
                 captchaConfig.value = data.captcha || captchaConfig.value;
             }
@@ -111,6 +112,7 @@ const sysConfigStore = () => {
             systemLogo: "",
             systemIcon: "",
             systemBrand: "",
+            playbackCover: "uvp",
             systemName: "",
             systemCopyright: "",
             systemRecordNo: "",

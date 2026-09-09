@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -127,4 +128,37 @@ func TestConfigExampleSystemBrandDefaultsToEmpty(t *testing.T) {
 	brand, ok := config.System["systembrand"]
 	require.True(t, ok, "默认模板应声明 systembrand")
 	require.Equal(t, "", brand, "默认模板的 systembrand 应为空")
+}
+
+func TestConfigPlaybackCoverRoundTrip(t *testing.T) {
+	oldLog := app.ZapLog
+	app.ZapLog = zap.NewNop()
+	t.Cleanup(func() { app.ZapLog = oldLog })
+	previousConfig, previousResponse := app.ConfigYml, app.Response
+	t.Cleanup(func() { app.ConfigYml, app.Response = previousConfig, previousResponse })
+	config := &configControllerTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+	app.Response = response.NewResponseHandler()
+	router := newConfigControllerTestRouter()
+	get := httptest.NewRecorder()
+	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/config/get", nil))
+	require.Equal(t, "uvp", configResponseSystem(t, get)["playbackCover"])
+	for _, cover := range []string{"icon", "uvp"} {
+		update := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, "/config/update", strings.NewReader(`{"system":{"playbackCover":"`+cover+`"}}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(update, request)
+		require.Equal(t, http.StatusOK, update.Code)
+		require.Equal(t, cover, config.values["system.playbackcover"])
+		get = httptest.NewRecorder()
+		router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/config/get", nil))
+		require.Equal(t, cover, configResponseSystem(t, get)["playbackCover"])
+	}
+	require.Equal(t, 2, config.saveNum)
+	invalid := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/config/update", strings.NewReader(`{"system":{"playbackCover":"unknown"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	require.PanicsWithValue(t, "request_aborted", func() { router.ServeHTTP(invalid, request) })
+	require.Equal(t, 2, config.saveNum)
+	require.Equal(t, "uvp", config.values["system.playbackcover"])
 }
