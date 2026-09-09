@@ -102,6 +102,7 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		if err != nil {
 			return fail(500, err)
 		}
+		snapshot = snapshot.ChannelsOnly()
 		client, err := clients.NewClient(*matched)
 		if err != nil {
 			return fail(503, err)
