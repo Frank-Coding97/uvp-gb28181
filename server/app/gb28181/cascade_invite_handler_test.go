@@ -65,7 +65,7 @@ func cascadeTestRequest(port int, ssrc string) *sip.Request {
 	req.AppendHeader(sip.NewHeader("From", "<sip:34020000002000000001@3402000000>;tag=upper"))
 	req.AppendHeader(sip.NewHeader("To", "<sip:34020000001320000010@3402000000>"))
 	req.AppendHeader(sip.NewHeader("Contact", fmt.Sprintf("<sip:34020000002000000001@192.168.10.220:%d>", port)))
-	req.AppendHeader(sip.NewHeader("Subject", "34020000001320000010:"+ssrc+",34020000002000000002:0"))
+	req.AppendHeader(sip.NewHeader("Subject", "34020000001320000010:"+ssrc+",34020000002000000001:0"))
 	cid := sip.CallIDHeader("same-call-id")
 	req.AppendHeader(&cid)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
