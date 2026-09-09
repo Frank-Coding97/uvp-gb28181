@@ -36,6 +36,11 @@ func (GbWorkRecording) TableName() string { return "gb_work_recording" }
 // GbRecorderClaim holds a channel or media MP4 resource until its owner has
 // positively resolved stopping/finalization. No TTL transfers an unknown owner.
 type GbRecorderClaim struct {
+	ChannelID   uint   `gorm:"not null;default:0"`
+	NodeID      int64  `gorm:"not null;default:0"`
+	VHost       string `gorm:"size:128;not null;default:''"`
+	App         string `gorm:"size:64;not null;default:''"`
+	Stream      string `gorm:"size:64;not null;default:''"`
 	ResourceKey string `gorm:"size:64;primaryKey"`
 	OwnerKind   string `gorm:"size:20;not null;index:idx_recorder_claim_owner,priority:1"`
 	OwnerID     string `gorm:"size:128;not null;index:idx_recorder_claim_owner,priority:2"`

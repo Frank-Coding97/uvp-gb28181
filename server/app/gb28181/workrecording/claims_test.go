@@ -156,3 +156,22 @@ func TestClaimDatabaseFailureDoesNotReleaseOwnership(t *testing.T) {
 	_, err = s.Acquire(ctx, key, Owner{Kind: OwnerPlan, ID: "b"}, 1)
 	require.ErrorIs(t, err, ErrOwnerConflict)
 }
+
+func TestReacquireClearsReleasedMediaIdentity(t *testing.T) {
+	s := NewClaims(claimDB(t))
+	ctx := context.Background()
+	key := ChannelResource(1)
+	owner := Owner{Kind: OwnerWork, ID: "old"}
+	c, err := s.Acquire(ctx, key, owner, 5)
+	require.NoError(t, err)
+	require.NoError(t, s.db.Model(c).Updates(map[string]any{"node_id": 1, "v_host": "v", "app": "rtp", "stream": "old"}).Error)
+	c, err = s.Transition(ctx, key, owner, c.Version, StateStopping)
+	require.NoError(t, err)
+	c, err = s.Transition(ctx, key, owner, c.Version, StateStopped)
+	require.NoError(t, err)
+	require.NoError(t, s.Release(ctx, key, owner, c.Version))
+	next, err := s.Acquire(ctx, key, Owner{Kind: OwnerWork, ID: "next"}, 0)
+	require.NoError(t, err)
+	require.Empty(t, next.Stream)
+	require.Zero(t, next.NodeID)
+}

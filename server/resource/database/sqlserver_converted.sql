@@ -29,7 +29,7 @@ CREATE TABLE gb_recording_plan_gap (id BIGINT IDENTITY(1,1) PRIMARY KEY, plan_id
 IF OBJECT_ID('gb_recording_plan_execution','U') IS NOT NULL DROP TABLE gb_recording_plan_execution;
 CREATE TABLE gb_recording_plan_execution (id BIGINT IDENTITY(1,1) PRIMARY KEY, plan_id BIGINT NULL, channel_id BIGINT NOT NULL, device_id NVARCHAR(20) NOT NULL DEFAULT '', action NVARCHAR(32) NOT NULL, trigger_source NVARCHAR(32) NOT NULL, stage NVARCHAR(32) NOT NULL DEFAULT '', attempt INT NOT NULL DEFAULT 1, result NVARCHAR(24) NOT NULL, reason_code NVARCHAR(64) NOT NULL DEFAULT '', reason_message NVARCHAR(500) NOT NULL DEFAULT '', stream_id NVARCHAR(64) NOT NULL DEFAULT '', node_id NVARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT NULL, generation BIGINT NOT NULL DEFAULT 0, started_at DATETIME2(3) NOT NULL, ended_at DATETIME2(3) NULL, duration_ms BIGINT NOT NULL DEFAULT 0, created_at DATETIME2(3) NOT NULL);
 IF OBJECT_ID('gb_recording_plan_channel_state','U') IS NOT NULL DROP TABLE gb_recording_plan_channel_state;
-CREATE TABLE gb_recording_plan_channel_state (channel_id BIGINT PRIMARY KEY, plan_id BIGINT NULL, plan_version BIGINT NOT NULL DEFAULT 0, desired_state NVARCHAR(24) NOT NULL, actual_state NVARCHAR(32) NOT NULL, reason_code NVARCHAR(64) NOT NULL DEFAULT '', reason_message NVARCHAR(500) NOT NULL DEFAULT '', next_transition_at DATETIME2(3), next_retry_at DATETIME2(3), reconcile_at DATETIME2(3) NOT NULL, attempt_count INT NOT NULL DEFAULT 0, generation BIGINT NOT NULL DEFAULT 0, stream_id NVARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT, node_id NVARCHAR(64) NOT NULL DEFAULT '', last_media_at DATETIME2(3), last_success_at DATETIME2(3), lease_owner NVARCHAR(128) NOT NULL DEFAULT '', lease_until DATETIME2(3), state_version BIGINT NOT NULL DEFAULT 0, created_at DATETIME2(3) NOT NULL, updated_at DATETIME2(3) NOT NULL);
+CREATE TABLE gb_recording_plan_channel_state (channel_id BIGINT PRIMARY KEY, plan_id BIGINT NULL, plan_version BIGINT NOT NULL DEFAULT 0, recorder_owner_kind NVARCHAR(20) NOT NULL DEFAULT N'', recorder_owner_id NVARCHAR(128) NOT NULL DEFAULT N'', recorder_claim_version BIGINT NOT NULL DEFAULT 0, desired_state NVARCHAR(24) NOT NULL, actual_state NVARCHAR(32) NOT NULL, reason_code NVARCHAR(64) NOT NULL DEFAULT '', reason_message NVARCHAR(500) NOT NULL DEFAULT '', next_transition_at DATETIME2(3), next_retry_at DATETIME2(3), reconcile_at DATETIME2(3) NOT NULL, attempt_count INT NOT NULL DEFAULT 0, generation BIGINT NOT NULL DEFAULT 0, stream_id NVARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT, node_id NVARCHAR(64) NOT NULL DEFAULT '', last_media_at DATETIME2(3), last_success_at DATETIME2(3), lease_owner NVARCHAR(128) NOT NULL DEFAULT '', lease_until DATETIME2(3), state_version BIGINT NOT NULL DEFAULT 0, created_at DATETIME2(3) NOT NULL, updated_at DATETIME2(3) NOT NULL);
 CREATE INDEX idx_recording_plan_state_reconcile ON gb_recording_plan_channel_state(reconcile_at,channel_id);
 IF OBJECT_ID('gb_recording_plan_binding','U') IS NOT NULL DROP TABLE gb_recording_plan_binding;
 CREATE TABLE gb_recording_plan_binding (id BIGINT IDENTITY(1,1) PRIMARY KEY, plan_id BIGINT NOT NULL, channel_id BIGINT NOT NULL, owner_dept_id BIGINT NOT NULL, assigned_by BIGINT NOT NULL DEFAULT 0, assigned_at DATETIME2(3) NOT NULL, created_at DATETIME2(3) NOT NULL, updated_at DATETIME2(3) NOT NULL, CONSTRAINT uk_recording_plan_binding_channel UNIQUE(channel_id));
@@ -4809,6 +4809,11 @@ CREATE TABLE gb_work_recording (
 
 IF OBJECT_ID(N'gb_recorder_claim', N'U') IS NULL
 CREATE TABLE gb_recorder_claim (
+ channel_id BIGINT NOT NULL DEFAULT 0,
+ node_id BIGINT NOT NULL DEFAULT 0,
+ v_host NVARCHAR(128) NOT NULL DEFAULT N'',
+ app NVARCHAR(64) NOT NULL DEFAULT N'',
+ stream NVARCHAR(64) NOT NULL DEFAULT N'',
  resource_key NVARCHAR(64) NOT NULL PRIMARY KEY,
  owner_kind NVARCHAR(20) NOT NULL,
  owner_id NVARCHAR(128) NOT NULL,

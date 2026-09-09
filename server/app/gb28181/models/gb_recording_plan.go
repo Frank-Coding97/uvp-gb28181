@@ -72,6 +72,11 @@ type GbRecordingPlanBinding struct {
 func (GbRecordingPlanBinding) TableName() string { return "gb_recording_plan_binding" }
 
 type GbRecordingPlanChannelState struct {
+	// These identify the original recorder even after plan/mode assignment changes.
+	RecorderOwnerKind    string `gorm:"column:recorder_owner_kind;size:20;not null;default:''" json:"-"`
+	RecorderOwnerID      string `gorm:"column:recorder_owner_id;size:128;not null;default:''" json:"-"`
+	RecorderClaimVersion uint64 `gorm:"column:recorder_claim_version;not null;default:0" json:"-"`
+
 	ChannelID          uint       `gorm:"column:channel_id;primaryKey" json:"channelId"`
 	PlanID             *uint64    `gorm:"column:plan_id;index" json:"planId"`
 	PlanVersion        uint64     `gorm:"column:plan_version;not null;default:0" json:"planVersion"`

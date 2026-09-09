@@ -62,7 +62,7 @@ func (s *Claims) Acquire(ctx context.Context, key string, owner Owner, generatio
 	// request from an earlier run match the next run of the same owner.
 	reused := s.db.WithContext(ctx).Model(&models.GbRecorderClaim{}).
 		Where("resource_key = ? AND state = ?", key, StateIdle).
-		Updates(map[string]any{"owner_kind": owner.Kind, "owner_id": owner.ID, "generation": generation, "state": StateStarting, "version": gorm.Expr("version + 1")})
+		Updates(map[string]any{"owner_kind": owner.Kind, "owner_id": owner.ID, "generation": generation, "state": StateStarting, "version": gorm.Expr("version + 1"), "channel_id": 0, "node_id": 0, "v_host": "", "app": "", "stream": ""})
 	if reused.Error != nil {
 		return nil, reused.Error
 	}
