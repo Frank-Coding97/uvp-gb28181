@@ -17,12 +17,12 @@ import (
 const upstreamPasswordPurpose = "upstream-password"
 
 var (
-	ErrInvalidPlatformConfig     = errors.New("invalid cascade platform config")
-	ErrCredentialUnavailable     = errors.New("cascade credential sealer unavailable")
-	ErrRuntimeUnavailable        = errors.New("cascade runtime unavailable")
+	ErrInvalidPlatformConfig = errors.New("invalid cascade platform config")
+	ErrCredentialUnavailable = errors.New("cascade credential sealer unavailable")
+	ErrRuntimeUnavailable    = errors.New("cascade runtime unavailable")
 	// ErrRuntimeSyncFailed 配置已持久化但运行时同步失败:调用方应返回已提交
 	// 资源而非整体失败,客户端重试会产生唯一键冲突
-	ErrRuntimeSyncFailed = errors.New("cascade config persisted but runtime sync failed")
+	ErrRuntimeSyncFailed         = errors.New("cascade config persisted but runtime sync failed")
 	ErrPlatformDisabled          = errors.New("cascade platform disabled")
 	ErrPlatformHasActiveSessions = errors.New("cascade platform has active media sessions")
 )
@@ -316,6 +316,9 @@ func (s *ManagementService) applyCredential(platform *model.GbCascadePlatform, p
 		return ErrCredentialUnavailable
 	}
 	envelope, err := s.sealer.Encrypt(upstreamPasswordPurpose, []byte(*password))
+	if errors.Is(err, securestore.ErrKeyUnavailable) || errors.Is(err, securestore.ErrInvalidKey) {
+		return fmt.Errorf("%w: %w", ErrCredentialUnavailable, err)
+	}
 	if err != nil {
 		return fmt.Errorf("seal cascade credential: %w", err)
 	}

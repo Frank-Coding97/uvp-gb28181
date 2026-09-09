@@ -305,6 +305,9 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	if status == http.StatusServiceUnavailable {
 		message = "国标级联服务暂不可用"
 	}
+	if errors.Is(err, service.ErrCredentialUnavailable) {
+		message = "级联认证密钥不可用，请配置服务端 UVP_GB28181_CASCADE_KEY 后重启服务"
+	}
 	if duplicate {
 		message = "平台名称或本平台设备 ID 与域已存在，请检查现有上级平台配置"
 	}
