@@ -168,7 +168,15 @@
           <div class="form-grid">
             <a-form-item label="本平台设备 ID" required><a-input v-model="form.localDeviceId" maxlength="20" /></a-form-item>
             <a-form-item label="本平台域" required><a-input v-model="form.localDomain" /></a-form-item>
-            <a-form-item label="本地 SIP 地址" required><a-input v-model="form.localSipIp" placeholder="监听或宣告 IP" /></a-form-item>
+            <a-form-item label="本地 SIP 地址" required>
+              <a-select v-model="form.localSipIp" :loading="networkLoading" allow-search allow-create placeholder="选择本机网卡或输入宣告地址">
+                <a-option v-for="item in localSipAddresses" :key="item.ip" :value="item.ip" :label="item.ip">
+                  {{ item.ip }} <span v-if="item.interfaceName">（{{ item.interfaceName }}）</span>
+                  <a-tag v-if="item.recommended" size="small" color="green">推荐</a-tag>
+                  <a-tag v-if="item.virtual" size="small">虚拟网卡</a-tag>
+                </a-option>
+              </a-select>
+            </a-form-item>
             <a-form-item label="本地 SIP 端口" required><a-input-number v-model="form.localSipPort" :min="1" :max="65535" /></a-form-item>
             <a-form-item label="媒体宣告地址"><a-input v-model="form.mediaAdvertiseIp" allow-clear /></a-form-item>
             <a-form-item label="认证用户名"><a-input v-model="form.authUsername" allow-clear /></a-form-item>
@@ -353,6 +361,7 @@ import {
   type CascadeShares,
   type GbChannel,
   type GbDevice,
+  type SipNetworkAddress,
   type SipConfigSummary
 } from "@/api/gb28181";
 import {
@@ -389,6 +398,21 @@ const editorVisible = ref(false);
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
 const localSipConfig = ref<SipConfigSummary | null>(null);
+const localSipAddresses = ref<SipNetworkAddress[]>([]);
+const networkLoading = ref(false);
+async function loadLocalSipAddresses() {
+  networkLoading.value = true;
+  try {
+    const response = await fetchSipNetworkInterfaces();
+    if (response.code !== 0 || response.data.scanStatus === "failed") throw new Error("network scan failed");
+    localSipAddresses.value = response.data.items.filter(item => !item.loopback && !item.listenOnly && item.ip !== "0.0.0.0");
+  } catch {
+    localSipAddresses.value = [];
+    Message.warning("网卡列表读取失败，可手动输入本地 SIP 地址");
+  } finally {
+    networkLoading.value = false;
+  }
+}
 let localSipConfigRequest: Promise<void> | null = null;
 
 const summary = computed(() => ({
@@ -450,6 +474,7 @@ async function loadLocalSipConfig() {
 }
 
 async function openCreate() {
+  void loadLocalSipAddresses();
   if (!localSipConfig.value) await loadLocalSipConfig();
   editing.value = null;
   Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined));
@@ -457,6 +482,7 @@ async function openCreate() {
 }
 
 function openEdit(platform: CascadePlatform) {
+  void loadLocalSipAddresses();
   editing.value = platform;
   Object.assign(form, defaultCascadePlatform(), {
     name: platform.name,
