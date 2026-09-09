@@ -86,6 +86,7 @@ type coordinatorKey struct {
 }
 
 type coordinatorEntry struct {
+	pins      int
 	state     LiveState
 	result    *Result
 	err       error
@@ -304,6 +305,10 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 				return err
 			}
 		case LiveStateReady, LiveStateCleanupPending:
+			if entry.pins > 0 {
+				c.mu.Unlock()
+				return ErrLivePinned
+			}
 			if err := ownerNodeConflict(req, entry); err != nil {
 				c.mu.Unlock()
 				return err

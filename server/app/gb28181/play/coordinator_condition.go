@@ -113,6 +113,10 @@ func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bo
 		c.mu.Unlock()
 		return true, nil
 	}
+	if entry.pins > 0 {
+		c.mu.Unlock()
+		return true, ErrLivePinned
+	}
 
 	failureState := entry.state
 	entry.state = LiveStateStopping
