@@ -291,9 +291,7 @@ type ProjectionSnapshot struct {
 
 // ReplaceProjection atomically replaces one platform's active authorization projection.
 func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
-	if err := validateProjectionInputs(devices, channels); err != nil {
-		return err
-	}
+	channels = append([]ChannelProjectionInput(nil), channels...)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var platform model.GbCascadePlatform
 		if result := tx.Limit(1).Find(&platform, platformID); result.Error != nil {
@@ -305,6 +303,12 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 		// 两个管理员基于同一旧快照保存时后提交者必须得到冲突而非静默覆盖
 		if platform.ProjectionRevision != expectedProjectionRevision {
 			return ErrRevisionConflict
+		}
+		if err := allocatePublishedChannelIDs(tx, platformID, devices, channels); err != nil {
+			return err
+		}
+		if err := validateProjectionInputs(devices, channels); err != nil {
+			return err
 		}
 		deviceIDs := make(map[uint64]uint64, len(devices))
 		desiredDevices := make([]uint64, 0, len(devices))

@@ -388,7 +388,7 @@ import {
 } from "../device-mgmt/api";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
-import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, uniquePublishedGbId, validGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, validGbId, validateCascadePlatform } from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
 
@@ -845,11 +845,10 @@ async function saveShares() {
       const existing = existingDevices.get(id);
       return { sourceDeviceId: id, publishedDeviceId: existing?.publishedDeviceId || source?.deviceId || "", name: existing?.name || source?.name || source?.deviceId || "" };
     });
-    const usedPublishedIds = new Set(deviceProjection.map(item => item.publishedDeviceId).filter(Boolean));
     const channelProjection: CascadeChannelProjection[] = selectedChannelIds.value.map(id => {
       const source = loadedChannelMap.get(id);
       const existing = existingChannels.get(id);
-      const publishedChannelId = uniquePublishedGbId(existing?.publishedChannelId || source?.channelId || "", id, usedPublishedIds);
+      const publishedChannelId = source?.channelId || existing?.publishedChannelId || "";
       return {
         sourceDeviceId: source?.sourceDeviceId || existing?.sourceDeviceId || 0,
         sourceChannelId: id,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, uniquePublishedGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, validateCascadePlatform } from "./cascadeState";
 
 describe("cascade platform state", () => {
   it("maps runtime facts to product conclusions", () => {
@@ -40,11 +40,4 @@ describe("cascade platform state", () => {
     }).localSipIp).toBe("");
   });
 
-  it("preserves unique published IDs and resolves duplicate channel IDs deterministically", () => {
-    const used = new Set<string>();
-    expect(uniquePublishedGbId("34020000001320000001", 11, used)).toBe("34020000001320000001");
-    expect(uniquePublishedGbId("34020000001320000001", 12, used)).toBe("99000000000000000012");
-    expect(uniquePublishedGbId("", 12, used)).toBe("99000000000000000013");
-    expect([...used]).toHaveLength(3);
-  });
 });
