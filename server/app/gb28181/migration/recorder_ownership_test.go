@@ -96,9 +96,11 @@ func TestRecorderOwnershipMigrationComposesWithBaseSchema(t *testing.T) {
 		App:         "rtp",
 		Stream:      "stream-12",
 	}
-	require.NoError(t, db.Create(&claim).Error)
+	// This test targets the ownership migration; keep the later directory
+	// column out of the historical insert and select contract.
+	require.NoError(t, db.Omit("RecordingRoot").Create(&claim).Error)
 	var restoredClaim models.GbRecorderClaim
-	require.NoError(t, db.First(&restoredClaim, "resource_key = ?", claim.ResourceKey).Error)
+	require.NoError(t, db.Select("channel_id", "node_id", "v_host", "app", "stream").First(&restoredClaim, "resource_key = ?", claim.ResourceKey).Error)
 	require.Equal(t, claim.ChannelID, restoredClaim.ChannelID)
 	require.Equal(t, claim.NodeID, restoredClaim.NodeID)
 	require.Equal(t, claim.VHost, restoredClaim.VHost)

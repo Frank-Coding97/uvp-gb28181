@@ -20,12 +20,12 @@ func TestWorkRecordingSchemaPersistenceAndUniqueness(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		require.NoError(t, db.AutoMigrate(&GbWorkRecording{}, &GbRecorderClaim{}, &GbWorkRecordingFile{}))
 	}
-	job := GbWorkRecording{ID: "job-1", ChannelID: 1, CreatedBy: 2, RequestID: "request-1", State: "unknown", Version: 1, DeviceID: "00000000000000000001", FormJSON: `{"projectName":"测试项目"}`}
+	job := GbWorkRecording{ID: "job-1", ChannelID: 1, CreatedBy: 2, RequestID: "request-1", State: "unknown", Version: 1, RecorderClaimVersion: 7, RecordingRoot: "/var/lib/uvp/work-recordings/job-1", DeviceID: "00000000000000000001", FormJSON: `{"projectName":"测试项目"}`}
 	require.NoError(t, db.Create(&job).Error)
 	duplicate := job
 	duplicate.ID = "job-2"
 	require.Error(t, db.Create(&duplicate).Error)
-	claim := GbRecorderClaim{ResourceKey: "channel-1", OwnerKind: "work_job", OwnerID: job.ID, State: "starting", Version: 1}
+	claim := GbRecorderClaim{ResourceKey: "channel-1", OwnerKind: "work_job", OwnerID: job.ID, State: "starting", Version: 1, RecordingRoot: job.RecordingRoot}
 	require.NoError(t, db.Create(&claim).Error)
 	claim.OwnerID = "other"
 	require.Error(t, db.Create(&claim).Error)
@@ -44,5 +44,10 @@ func TestWorkRecordingSchemaPersistenceAndUniqueness(t *testing.T) {
 	require.NoError(t, db.First(&restored, "id = ?", job.ID).Error)
 	require.Equal(t, job.DeviceID, restored.DeviceID)
 	require.Equal(t, job.FormJSON, restored.FormJSON)
+	require.Equal(t, job.RecorderClaimVersion, restored.RecorderClaimVersion)
+	require.Equal(t, job.RecordingRoot, restored.RecordingRoot)
 	require.Equal(t, "unknown", restored.State)
+	var restoredClaim GbRecorderClaim
+	require.NoError(t, db.First(&restoredClaim, "resource_key = ?", claim.ResourceKey).Error)
+	require.Equal(t, claim.RecordingRoot, restoredClaim.RecordingRoot)
 }

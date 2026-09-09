@@ -38,10 +38,12 @@ func TestWorkRecordingMigrationAndSnapshotSchemas(t *testing.T) {
 					require.NoError(t, db.Exec(stmt).Error)
 				}
 			}
+			// This test targets the historical base migration. Keep later directory
+			// columns out of both the insert and select contract.
 			job := models.GbWorkRecording{ID: "job-1", ChannelID: 1, CreatedBy: 1, RequestID: "req-1", State: "unknown", DesiredAction: "start", Version: 1, DeviceID: "00000000000000000001", FormJSON: `{"projectName":"测试"}`, VHost: "__defaultVhost__"}
-			require.NoError(t, db.Create(&job).Error)
+			require.NoError(t, db.Omit("RecordingRoot", "RecorderClaimVersion").Create(&job).Error)
 			var restored models.GbWorkRecording
-			require.NoError(t, db.First(&restored, "id = ?", job.ID).Error)
+			require.NoError(t, db.Select("id", "form_json", "v_host").First(&restored, "id = ?", job.ID).Error)
 			require.Equal(t, job.FormJSON, restored.FormJSON)
 			require.Equal(t, job.VHost, restored.VHost)
 			require.NoError(t, db.Exec("INSERT INTO gb_recorder_claim(resource_key,owner_kind,owner_id,state,version) VALUES ('resource','work_job','job','unknown',1)").Error)
