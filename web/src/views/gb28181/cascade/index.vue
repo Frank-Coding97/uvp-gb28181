@@ -150,7 +150,7 @@
           <header><Building2 :size="17" /><h3>上级平台</h3></header>
           <div class="form-grid">
             <a-form-item label="平台名称" required><a-input v-model="form.name" maxlength="128" /></a-form-item>
-            <a-form-item label="上级平台 ID" required><a-input v-model="form.upstreamServerId" maxlength="20" /></a-form-item>
+            <a-form-item label="上级平台 ID" required><a-input v-model="form.upstreamServerId" maxlength="20" @input="updateUpstreamDomain" /></a-form-item>
             <a-form-item label="上级域" required><a-input v-model="form.upstreamDomain" /></a-form-item>
             <a-form-item label="上级地址" required><a-input v-model="form.host" /></a-form-item>
             <a-form-item label="上级端口" required><a-input-number v-model="form.port" :min="1" :max="65535" /></a-form-item>
@@ -374,6 +374,8 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, uniquePublishedGbId, validGbId, validateCascadePlatform } from "./cascadeState";
 
+import { deriveDomain } from "../sip/sipSetupRules";
+
 type ShareMode = "device" | "channel";
 type ChannelOption = (GbChannel | ChannelVO) & { sourceDeviceId: number };
 type ShareDevice = GbDevice & Partial<DeviceVO>;
@@ -471,6 +473,10 @@ async function loadLocalSipConfig() {
       localSipConfigRequest = null;
     });
   return localSipConfigRequest;
+}
+
+function updateUpstreamDomain(value: string) {
+  if (validGbId(value)) form.upstreamDomain = deriveDomain(value);
 }
 
 async function openCreate() {
