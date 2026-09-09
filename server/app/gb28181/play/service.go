@@ -460,6 +460,24 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 // 4) UAC INVITE  5) WaitReady  6) 返地址
 // 任一中断都会回滚已开的 RTP 端口 + Unbind LocationMap
 func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error) {
+	startedAt := time.Now()
+	logger := app.Log(ctx).Named("play")
+	logger.Info("点播事务开始", zap.String("event", "gb28181.play.requested"), zap.String("stage", "request"), zap.String("outcome", "started"), zap.String("deviceId", req.DeviceID), zap.String("channelId", req.ChannelID))
+	result, err := s.startDirectTransaction(ctx, req)
+	fields := []zap.Field{zap.String("deviceId", req.DeviceID), zap.String("channelId", req.ChannelID), zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds()))}
+	if err != nil {
+		logger.Warn("点播事务失败", append(fields, zap.String("event", "gb28181.play.failed"), zap.String("stage", "terminal"), zap.String("outcome", "failed"), zap.String("reasonCode", playFailureReason(err)))...)
+		return result, err
+	}
+	fields = append(fields, zap.String("event", "gb28181.play.completed"), zap.String("stage", "terminal"), zap.String("outcome", "succeeded"))
+	if result != nil {
+		fields = append(fields, zap.String("streamId", result.StreamID), zap.Bool("reused", result.Reused))
+	}
+	logger.Info("点播事务完成", fields...)
+	return result, nil
+}
+
+func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Result, error) {
 	deviceID, channelID := req.DeviceID, req.ChannelID
 	// 总超时预算覆盖整个点播事务:前置查询、节点选择、RTP 分配、INVITE 与
 	// 媒体等待全部纳入同一 deadline,任一阶段阻塞都不能超过 PlayTimeout
@@ -484,6 +502,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	if ch == nil {
 		return nil, ErrChannelNotFound
 	}
+	app.Log(playCtx).Named("play").Info("点播设备与通道校验通过", zap.String("event", "gb28181.play.validation_succeeded"), zap.String("stage", "validation"), zap.String("outcome", "succeeded"), zap.String("deviceId", deviceID), zap.String("channelId", channelID))
 
 	// 平台点播仅实现 UDP 与 TCP 被动收流(ZLM tcp_mode 0/1,SDP 仅生成 passive
 	// setup)。TCP-Active 若静默按 UDP 处理,设备按主动模式协商必然失败,
@@ -627,6 +646,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		recvHost = s.cfg.ZLM.EffectiveReceiveHost()
 		rtpFallback = s.cfg.ZLM.RTPPort
 	}
+	app.Log(playCtx).Named("play").Info("点播媒体节点已确定", zap.String("event", "gb28181.play.node_selected"), zap.String("stage", "node_selection"), zap.String("outcome", "succeeded"), zap.String("deviceId", deviceID), zap.String("channelId", channelID), zap.Int64("nodeId", pickedNodeID), zap.String("streamId", streamID))
 
 	// Build and authorize the playback result before opening RTP or sending an
 	// INVITE. A fixed stream must never leave a live upstream session behind
@@ -664,6 +684,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	if recvPort == 0 {
 		recvPort = rtpFallback
 	}
+	app.Log(playCtx).Named("play").Info("点播 RTP 接收资源已分配", zap.String("event", "gb28181.play.rtp_allocated"), zap.String("stage", "rtp_allocation"), zap.String("outcome", "succeeded"), zap.String("deviceId", deviceID), zap.String("channelId", channelID), zap.Int64("nodeId", pickedNodeID), zap.String("streamId", streamID))
 
 	// 6. 构造 SDP + 发 INVITE(任何失败要回滚 RTP 端口 + Unbind)
 	body := sdp.BuildPlaySDP(sdp.PlayParams{
@@ -723,6 +744,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		}
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, cause, errors.Is(playCtx.Err(), context.DeadlineExceeded), &releaseSSRC)
 	}
+	app.Log(playCtx).Named("play").Info("设备已接受点播 INVITE", zap.String("event", "gb28181.play.invite_accepted"), zap.String("stage", "sip_invite"), zap.String("outcome", "succeeded"), zap.String("deviceId", deviceID), zap.String("channelId", channelID), zap.Int64("nodeId", pickedNodeID), zap.String("streamId", streamID), zap.String("correlationId", sess.RequestID))
 
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
 	// target node must still own the stream and report the media online.
@@ -758,6 +780,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		}
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, cause, true, &releaseSSRC)
 	}
+	app.Log(playCtx).Named("play").Info("点播媒体流已就绪", zap.String("event", "gb28181.play.media_ready"), zap.String("stage", "media_ready"), zap.String("outcome", "succeeded"), zap.String("deviceId", deviceID), zap.String("channelId", channelID), zap.Int64("nodeId", pickedNodeID), zap.String("streamId", streamID), zap.String("correlationId", sess.RequestID))
 	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc); err != nil {
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
 	}
@@ -774,6 +797,23 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		startCompleted = true
 	}
 	return result, nil
+}
+
+func playFailureReason(err error) string {
+	switch {
+	case errors.Is(err, ErrDeviceNotFound):
+		return "device_not_found"
+	case errors.Is(err, ErrDeviceOffline):
+		return "device_offline"
+	case errors.Is(err, ErrChannelNotFound):
+		return "channel_not_found"
+	case errors.Is(err, ErrPlayTimeout):
+		return "play_timeout"
+	case errors.Is(err, ErrStreamNotReady):
+		return "media_not_ready"
+	default:
+		return "play_failed"
+	}
 }
 
 func (s *Service) fireSnapshot(ctx context.Context, result *Result, deviceID, channelID string) {
@@ -904,13 +944,24 @@ func (s *Service) rollbackFailedStart(
 }
 
 // Stop 停播:通过协调器执行 Stopping 栅栏，再发 BYE + 关 RTP 端口 + Unbind。
-func (s *Service) Stop(ctx context.Context, streamID string) error {
+func (s *Service) Stop(ctx context.Context, streamID string) (err error) {
+	startedAt := time.Now()
+	logger := app.Log(ctx).Named("play")
+	logger.Info("停播事务开始", zap.String("event", "gb28181.play.stop_requested"), zap.String("stage", "stop_request"), zap.String("outcome", "started"), zap.String("streamId", streamID))
+	defer func() {
+		fields := []zap.Field{zap.String("streamId", streamID), zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds()))}
+		if err != nil {
+			logger.Warn("停播清理失败", append(fields, zap.String("event", "gb28181.play.stop_failed"), zap.String("stage", "cleanup"), zap.String("outcome", "failed"), zap.String("reasonCode", "cleanup_failed"))...)
+			return
+		}
+		logger.Info("停播清理完成", append(fields, zap.String("event", "gb28181.play.stop_completed"), zap.String("stage", "cleanup"), zap.String("outcome", "succeeded"))...)
+	}()
 	c := s.coordinator()
-	if stopped, err := c.StopStream(ctx, streamID); stopped {
-		return err
+	if stopped, stopErr := c.StopStream(ctx, streamID); stopped {
+		return stopErr
 	}
-	if ch, err := s.channels.FindChannelByStream(ctx, streamID); err != nil {
-		return err
+	if ch, findErr := s.channels.FindChannelByStream(ctx, streamID); findErr != nil {
+		return findErr
 	} else if ch != nil {
 		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
 			return s.StopIfPersistedCurrent(ctx, streamID, currentSSRC)

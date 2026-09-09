@@ -379,6 +379,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 					logging.Error(err))
 			} else if restored {
+				logger.Info("GB28181 设备心跳恢复在线", zap.String("event", "gb28181.message.keepalive_restored"), zap.String("stage", "device_status"), zap.String("outcome", "succeeded"), zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 				if h.subscriptionWaker != nil {
 					if err := h.subscriptionWaker.WakeDeviceByCode(ctx, head.DeviceID); err != nil {
 						logger.Warn("GB28181 设备恢复订阅失败",

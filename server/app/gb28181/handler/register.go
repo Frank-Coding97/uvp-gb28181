@@ -292,6 +292,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		return
 	}
+	logger.Info("GB28181 注册鉴权通过", zap.String("event", "gb28181.register.authentication_succeeded"), zap.String("stage", "authentication"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 
 	// 鉴权通过:判断注册 or 注销
 	expires := parseExpires(req)
@@ -350,6 +351,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	logger.Info("GB28181 设备注册成功",
 		zap.String("event", "gb28181.register.succeeded"),
+		zap.String("stage", "terminal"), zap.String("outcome", "succeeded"),
 		zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 		zap.String("transport", req.Transport()),
 		zap.Bool("is_first", isFirst))

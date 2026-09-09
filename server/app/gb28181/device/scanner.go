@@ -84,6 +84,7 @@ func (s *OfflineScanner) scanOnce() {
 		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
 		logger.Info("GB28181 设备超时离线",
 			zap.String("event", "gb28181.device.scanner.device_offline"),
+			zap.String("stage", "device_status"), zap.String("outcome", "succeeded"), zap.String("reason_code", "heartbeat_timeout"),
 			zap.String("device_id", d.DeviceID))
 	}
 }

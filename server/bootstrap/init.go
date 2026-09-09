@@ -150,11 +150,13 @@ func initLogging() {
 	if err != nil {
 		startupFail("logging", err)
 	}
-	runtime, err := logging.OpenRuntime(logging.Options{Config: cfg, Version: app.AppVersion.Version, Instance: uuid.NewString()})
+	instanceID := uuid.NewString()
+	hub := logging.NewEventHubWithInstance(instanceID)
+	runtime, err := logging.OpenRuntime(logging.Options{Config: cfg, Version: app.AppVersion.Version, Instance: instanceID, EventHub: hub})
 	if err != nil {
 		startupFail("logging", err)
 	}
-	app.LogRuntime, app.ZapLog = runtime, runtime.Root
+	app.LogRuntime, app.ZapLog, app.RealtimeLogHub = runtime, runtime.Root, hub
 	logging.InstallStandardBridge(app.ZapLog.Named("stdlib"))
 	for _, notice := range cfg.Notices {
 		app.ZapLog.Named("startup").Warn("legacy logging configuration", zap.String("event", "logging.config_compatibility"), zap.String("notice", notice))

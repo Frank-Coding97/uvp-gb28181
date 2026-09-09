@@ -20,6 +20,7 @@ type Options struct {
 	// process descriptors. OpenRuntime handles real file creation.
 	Sinks       map[string]zapcore.WriteSyncer
 	ErrorOutput zapcore.WriteSyncer
+	EventHub    *EventHub
 }
 type Runtime struct {
 	Root                             *zap.Logger
@@ -100,7 +101,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		r.sinks = append(r.sinks, sink)
 	}
 	inner := zapcore.NewTee(cores...).With([]zap.Field{zap.String("service", opts.Service), zap.String("version", opts.Version), zap.String("instance", opts.Instance)})
-	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, uniformLevel: uniformLevel, keyPolicies: &fieldKeyCache{}, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}}
+	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, uniformLevel: uniformLevel, keyPolicies: &fieldKeyCache{}, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}, eventHub: opts.EventHub, instance: opts.Instance}
 	options := []zap.Option{zap.ErrorOutput(r.emergency)}
 	if opts.Clock != nil {
 		options = append(options, zap.WithClock(opts.Clock))
@@ -183,16 +184,19 @@ func WithIdentity(logger *zap.Logger, fields ...zap.Field) *zap.Logger {
 }
 
 type runtimeCore struct {
-	inner        zapcore.Core
-	config       Config
-	min          zapcore.Level
-	uniformLevel bool
-	keyPolicies  *fieldKeyCache
-	closed       *atomic.Bool
-	gate         *sync.RWMutex
-	bound        map[string]bool
-	used         int
-	truncated    bool
+	inner         zapcore.Core
+	config        Config
+	min           zapcore.Level
+	uniformLevel  bool
+	keyPolicies   *fieldKeyCache
+	closed        *atomic.Bool
+	gate          *sync.RWMutex
+	bound         map[string]bool
+	contextFields []zap.Field
+	eventHub      *EventHub
+	instance      string
+	used          int
+	truncated     bool
 }
 
 func (c *runtimeCore) Enabled(l zapcore.Level) bool { return l >= c.min }
@@ -243,6 +247,7 @@ func (c *runtimeCore) with(fields []zap.Field, trusted bool) *runtimeCore {
 	}
 	clone.used += used
 	clone.truncated = c.truncated || truncated
+	clone.contextFields = append(append([]zap.Field(nil), c.contextFields...), clean...)
 	clone.inner = c.inner.With(clean)
 	return &clone
 }
@@ -256,6 +261,11 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 		e.LoggerName = "app"
 	}
 	if c.canWriteUnchanged(e, fields) {
+		if c.eventHub != nil {
+			if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), fields...)); ok {
+				c.eventHub.Publish(event)
+			}
+		}
 		return c.inner.Write(e, fields)
 	}
 	clean := make([]zap.Field, 0, len(fields)+1)
@@ -279,6 +289,11 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 	clean, _, cutFields := sanitizeFields(clean, fieldBudget-c.used-encodedStringSize(e.Stack), maxFields-len(c.bound))
 	if c.truncated || cutMessage || cutName || cutStack || cutFields {
 		clean = append(clean, zap.Bool("truncated", true))
+	}
+	if c.eventHub != nil {
+		if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), clean...)); ok {
+			c.eventHub.Publish(event)
+		}
 	}
 	return c.inner.Write(e, clean)
 }

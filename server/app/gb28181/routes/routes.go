@@ -92,6 +92,7 @@ var qrController = gbcontrollers.NewQRController()
 
 // traceController 由 bootstrap 按 Trace 开关后置注入。
 var traceController atomic.Pointer[gbcontrollers.TraceController]
+var realtimeLogController = gbcontrollers.NewRealtimeLogController()
 
 func init() {
 	traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
@@ -742,6 +743,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			traceGroup.GET("/stream", func(c *gin.Context) { currentTraceController().Stream(c) })
 			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { currentTraceController().ListSessionMessages(c) })
 			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { currentTraceController().StopCapture(c) })
+		}
+		logs := gb.Group("/logs")
+		{
+			logs.GET("/stream", realtimeLogController.Stream)
 		}
 		securityGroup := gb.Group("/security")
 		{

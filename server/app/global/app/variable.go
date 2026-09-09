@@ -12,6 +12,7 @@ import (
 
 var (
 	LogRuntime       *logging.Runtime          // startup-owned logging runtime
+	RealtimeLogHub   *logging.EventHub         // bounded realtime business log stream
 	BasePath         string                    // 定义项目的根目录
 	ConfigYml        YmlConfigInterf           // 全局配置文件指针
 	GormDbMysql      *gorm.DB                  // mysql数据库连接
