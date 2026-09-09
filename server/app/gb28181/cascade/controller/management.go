@@ -193,12 +193,17 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 	if !ok {
 		return
 	}
+	platform, err := c.service.Get(ctx, id)
+	if err != nil {
+		c.fail(ctx, err)
+		return
+	}
 	var req shareRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.fail(ctx, repository.ErrInvalidProjection)
 		return
 	}
-	devices, channels, err := req.projection()
+	devices, channels, err := req.projection(platform.PTZEnabled)
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -370,7 +375,7 @@ type shareChannel struct {
 	PTZAllowed         *bool  `json:"ptzAllowed"`
 }
 
-func (r shareRequest) projection() ([]repository.DeviceProjectionInput, []repository.ChannelProjectionInput, error) {
+func (r shareRequest) projection(platformPTZEnabled ...bool) ([]repository.DeviceProjectionInput, []repository.ChannelProjectionInput, error) {
 	scope := strings.ToLower(strings.TrimSpace(r.Scope))
 	if scope != "" && scope != "all" && scope != "devices" && scope != "channels" {
 		return nil, nil, repository.ErrInvalidProjection
@@ -387,7 +392,7 @@ func (r shareRequest) projection() ([]repository.DeviceProjectionInput, []reposi
 		if scope == "devices" {
 			continue
 		}
-		ptz := false
+		ptz := len(platformPTZEnabled) > 0 && platformPTZEnabled[0]
 		if item.PTZAllowed != nil {
 			ptz = *item.PTZAllowed
 		}

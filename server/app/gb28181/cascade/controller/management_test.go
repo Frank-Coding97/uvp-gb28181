@@ -64,6 +64,34 @@ func TestShareRequestPreservesPTZAndPublishedIdentity(t *testing.T) {
 	require.True(t, channels[0].PTZAllowed)
 }
 
+func TestShareRequestInheritsPlatformPTZWhenChannelPermissionIsOmitted(t *testing.T) {
+	devices, channels, err := (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002"}},
+	}).projection(true)
+	require.NoError(t, err)
+	require.Empty(t, devices)
+	require.Len(t, channels, 1)
+	require.True(t, channels[0].PTZAllowed)
+
+	_, channels, err = (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002"}},
+	}).projection(false)
+	require.NoError(t, err)
+	require.False(t, channels[0].PTZAllowed)
+}
+
+func TestShareRequestPreservesExplicitPTZDenialWhenPlatformAllowsPTZ(t *testing.T) {
+	ptz := false
+	_, channels, err := (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002", PTZAllowed: &ptz}},
+	}).projection(true)
+	require.NoError(t, err)
+	require.False(t, channels[0].PTZAllowed)
+}
+
 func TestShareResponseIncludesChannelSourceDeviceID(t *testing.T) {
 	response := buildShareResponse(3, &repository.ProjectionSnapshot{
 		Revision: 5,
