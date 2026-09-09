@@ -29,16 +29,6 @@
               <CircleDot data-testid="active-tab-icon" :size="14" aria-hidden="true" />
               正在录像 <span class="recording-view-switch__count">{{ visibleActiveRecordings.length }}</span>
             </button>
-            <button
-              type="button"
-              data-testid="runtime-tab"
-              :class="{ active: activeView === 'runtime' }"
-              :aria-pressed="activeView === 'runtime'"
-              @click="selectView('runtime')"
-            >
-              <SlidersHorizontal :size="14" aria-hidden="true" />
-              运行控制
-            </button>
           </div>
           <div class="cloud-recordings-header__actions">
             <span
@@ -67,16 +57,6 @@
               />
               {{ reconciliationSummary.text }}
             </span>
-            <a-button
-              v-if="activeView === 'files' && canReconcile"
-              class="recording-reconcile-button"
-              data-testid="recording-reconcile"
-              :loading="reconciling"
-              @click="reconcile"
-            >
-              <template #icon><ScanSearch :size="15" /></template>
-              对账
-            </a-button>
             <a-button
               class="uvp-page-action-btn uvp-refresh-btn"
               data-testid="recording-refresh"
@@ -307,7 +287,6 @@
             </div>
         </template>
 
-        <RecordingRuntimeControl v-else ref="runtimeControl" />
       </template>
     </div>
   </div>
@@ -324,8 +303,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, SlidersHorizontal, Trash2, TriangleAlert } from "@lucide/vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, Search, Trash2, TriangleAlert } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
@@ -333,7 +312,6 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { boundedPageRows, boundedPageSize } from "@/views/gb28181/zlm/workbench/boundedData";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
-import RecordingRuntimeControl from "./components/RecordingRuntimeControl.vue";
 import {
   batchDeleteRecordingFiles,
   deleteRecordingFile,
@@ -342,7 +320,6 @@ import {
   listRecordingFiles,
   listRecordingOptions,
   stopActiveRecording,
-  triggerReconciliation,
   type ActiveRecording,
   type RecordingAvailability,
   type RecordingFile,
@@ -399,11 +376,9 @@ const files = ref<RecordingFile[]>([]);
 const options = reactive<RecordingOptions>({ channels: [], devices: [], nodes: [] });
 const activeRecordings = ref<ActiveRecording[]>([]);
 const reconciliations = ref<RecordingReconciliation[]>([]);
-const activeView = ref<"files" | "active" | "runtime">(props.mode === "tasks" ? "active" : "files");
-const runtimeControl = ref<{ refresh: () => void } | null>(null);
+const activeView = ref<"files" | "active">(props.mode === "tasks" ? "active" : "files");
 const loading = ref(false);
 const activeLoading = ref(false);
-const reconciling = ref(false);
 const errorMessage = ref("");
 const activeError = ref("");
 const autoRefreshCountdown = ref(AUTO_REFRESH_INTERVAL_SECONDS);
@@ -586,12 +561,11 @@ function refreshCurrent() {
   if (!props.active || !canView.value) return;
   resetAutoRefreshCountdown();
   if (activeView.value === "active") void loadActive();
-  else if (activeView.value === "runtime") runtimeControl.value?.refresh();
   else void loadFiles();
   if (activeView.value === "files") void loadReconciliationStates();
 }
 
-function selectView(view: "files" | "active" | "runtime") {
+function selectView(view: "files" | "active") {
   if (props.mode === "files" && view !== "files") return;
   if (props.mode === "tasks" && view === "files") return;
   activeView.value = view;
@@ -720,20 +694,6 @@ async function performBatchDelete() {
   }
 }
 
-async function reconcile() {
-  if (!canReconcile.value || reconciling.value) return;
-  reconciling.value = true;
-  try {
-    await triggerReconciliation(form.range.length === 2 ? { start: form.range[0], end: form.range[1] } : {});
-    proxy.$message.success("录像目录对账已进入队列");
-    await loadReconciliationStates();
-  } catch (error) {
-    proxy.$message.error(recordingErrorPresentation(error));
-  } finally {
-    reconciling.value = false;
-  }
-}
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "--";
   const date = new Date(value);
@@ -761,7 +721,6 @@ watch(activeView, view => {
   resetAutoRefreshCountdown();
   if (!props.active || !canView.value) return;
   if (view === "active") void loadActive();
-  else if (view === "runtime") void nextTick(() => runtimeControl.value?.refresh());
   else {
     void loadFiles();
     void loadOptions();
@@ -793,7 +752,6 @@ watch(
       void loadOptions();
       void loadReconciliationStates();
     } else if (activeView.value === "active") void loadActive();
-    else void nextTick(() => runtimeControl.value?.refresh());
     startAutoRefresh();
   },
   { immediate: true }
@@ -844,17 +802,6 @@ defineExpose({ refresh: refreshCurrent });
 .cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
 .cloud-recordings-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
-.recording-reconcile-button {
-  color: color-mix(in srgb, #7c3aed 82%, var(--uvp-text-primary));
-  background: color-mix(in srgb, #7c3aed 9%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, #7c3aed 26%, var(--uvp-panel-border));
-  box-shadow: 0 1px 2px rgb(124 58 237 / 8%);
-}
-.recording-reconcile-button:hover {
-  color: color-mix(in srgb, #6d28d9 88%, var(--uvp-text-primary));
-  background: color-mix(in srgb, #7c3aed 14%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, #7c3aed 38%, var(--uvp-panel-border));
-}
 .recording-date-range { width: 360px; max-width: 100%; }
 .recording-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
 .recording-view-switch__count { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
