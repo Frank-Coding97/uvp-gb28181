@@ -371,3 +371,19 @@ func (timeoutNetworkError) Timeout() bool   { return true }
 func (timeoutNetworkError) Temporary() bool { return true }
 
 var _ net.Error = timeoutNetworkError{}
+
+func TestStartMP4InDirectoryPreservesServerChosenPath(t *testing.T) {
+	calls := 0
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		require.Equal(t, "/index/api/startRecord", r.URL.Path)
+		require.Equal(t, "1", r.URL.Query().Get("type"))
+		require.Equal(t, "./www/work-recordings/job-1", r.URL.Query().Get("customized_path"))
+		_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+	})
+	defer server.Close()
+	require.ErrorIs(t, client.StartMP4RecordInDirectory(context.Background(), "v", "rtp", "s", 0, " "), ErrRecordingPathInvalid)
+	require.Zero(t, calls)
+	require.NoError(t, client.StartMP4RecordInDirectory(context.Background(), "v", "rtp", "s", 0, "./www/work-recordings/job-1"))
+	require.Equal(t, 1, calls)
+}

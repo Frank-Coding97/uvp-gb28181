@@ -118,6 +118,21 @@ func validateTypedRecordingRequest(vhost, appName, stream string, recorderType R
 // StartRecordWithType starts either HLS or MP4 recording for an existing ZLM
 // media source. maxSecond=0 delegates the slice duration to ZLM config.
 func (c *Client) StartRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int) error {
+	return c.startRecord(ctx, vhost, appName, stream, recorderType, maxSecond, "")
+}
+
+// StartMP4RecordInDirectory uses a server-chosen recording root. Work recording
+// callers must persist a unique directory per job; never pass a browser path.
+// Empty paths are rejected because silently falling back to the shared default
+// can overwrite a previous job's file when two recordings start in one second.
+func (c *Client) StartMP4RecordInDirectory(ctx context.Context, vhost, appName, stream string, maxSecond int, directory string) error {
+	if strings.TrimSpace(directory) == "" || strings.ContainsRune(directory, '\x00') {
+		return ErrRecordingPathInvalid
+	}
+	return c.startRecord(ctx, vhost, appName, stream, RecorderMP4, maxSecond, directory)
+}
+
+func (c *Client) startRecord(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int, directory string) error {
 	if err := validateTypedRecordingRequest(vhost, appName, stream, recorderType); err != nil {
 		return err
 	}
@@ -130,6 +145,9 @@ func (c *Client) StartRecordWithType(ctx context.Context, vhost, appName, stream
 	}
 	params := typedRecordingParams(vhost, appName, stream, recorderType)
 	params["max_second"] = strconv.Itoa(maxSecond)
+	if directory != "" {
+		params["customized_path"] = directory
+	}
 	if err := c.call(ctx, "startRecord", params, &response); err != nil {
 		return err
 	}
