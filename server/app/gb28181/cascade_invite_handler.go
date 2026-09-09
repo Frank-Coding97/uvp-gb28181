@@ -183,7 +183,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	parts := strings.Split(subject.Value(), ",")
-	if len(parts) != 2 || strings.SplitN(parts[0], ":", 2)[0] != req.Recipient.User || strings.SplitN(parts[1], ":", 2)[0] != platform.LocalDeviceID {
+	if len(parts) != 2 || strings.SplitN(parts[0], ":", 2)[0] != req.Recipient.User || strings.SplitN(parts[1], ":", 2)[0] != platform.UpstreamServerID {
 		fail(403, fmt.Errorf("Subject identity mismatch"))
 		return
 	}
