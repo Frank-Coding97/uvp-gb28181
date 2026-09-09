@@ -8635,3 +8635,51 @@ DELETE FROM sys_casbin_rule WHERE v0=CONCAT('role_',(SELECT MIN(id) FROM sys_rol
 
 INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT 'p',CONCAT('role_',(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)),a.path,a.method,'*','','' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL) AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
 -- guest-readonly:end
+
+-- custom-ren: work-recording schema
+-- Additive work recording schema. Existing recording history is retained.
+CREATE TABLE IF NOT EXISTS gb_work_recording (
+ id VARCHAR(36) NOT NULL PRIMARY KEY,
+ channel_id BIGINT NOT NULL,
+ created_by BIGINT NOT NULL,
+ request_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ desired_action VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL,
+ node_id BIGINT NOT NULL DEFAULT 0,
+ v_host VARCHAR(128) NOT NULL DEFAULT '',
+ app VARCHAR(64) NOT NULL DEFAULT '',
+ stream VARCHAR(64) NOT NULL DEFAULT '',
+ generation BIGINT NOT NULL DEFAULT 0,
+ started_at DATETIME(6) NULL,
+ stopped_at DATETIME(6) NULL,
+ last_checked_at DATETIME(6) NULL,
+ last_error VARCHAR(500) NOT NULL DEFAULT '',
+ file_state VARCHAR(20) NOT NULL DEFAULT 'pending',
+ form_state VARCHAR(20) NOT NULL DEFAULT 'draft',
+ form_version BIGINT NOT NULL DEFAULT 0,
+ schema_version BIGINT NOT NULL DEFAULT 1,
+ device_id VARCHAR(20) NOT NULL DEFAULT '',
+ form_json LONGTEXT NOT NULL,
+ created_at DATETIME(6) NULL,
+ updated_at DATETIME(6) NULL,
+ CONSTRAINT uk_work_recording_request UNIQUE(created_by, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS gb_recorder_claim (
+ resource_key VARCHAR(64) NOT NULL PRIMARY KEY,
+ owner_kind VARCHAR(20) NOT NULL,
+ owner_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL,
+ generation BIGINT NOT NULL DEFAULT 0,
+ created_at DATETIME(6) NULL,
+ updated_at DATETIME(6) NULL
+);
+
+CREATE TABLE IF NOT EXISTS gb_work_recording_file (
+ file_id BIGINT NOT NULL PRIMARY KEY,
+ work_recording_id VARCHAR(36) NOT NULL,
+ evidence VARCHAR(500) NOT NULL DEFAULT '',
+ created_at DATETIME(6) NULL
+);
