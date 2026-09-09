@@ -223,7 +223,7 @@ func TestReplaceProjectionCreatesRowsWhenRecordNotFoundErrorsAreMasked(t *testin
 	require.EqualValues(t, []uint64{10, 20}, []uint64{snapshot.Devices[0].SourceDeviceID, snapshot.Devices[1].SourceDeviceID})
 }
 
-func TestReplaceProjectionRejectsPublishedIDCollisionAcrossKinds(t *testing.T) {
+func TestReplaceProjectionAllocatesPublishedIDCollisionAcrossKinds(t *testing.T) {
 	repo := newTestRepository(t)
 	ctx := context.Background()
 	platform := newPlatform("upstream-a", "34020000001320000001")
@@ -233,7 +233,10 @@ func TestReplaceProjectionRejectsPublishedIDCollisionAcrossKinds(t *testing.T) {
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}},
 	)
-	require.ErrorIs(t, err, ErrInvalidProjection)
+	require.NoError(t, err)
+	snapshot, err := repo.ProjectionSnapshot(ctx, platform.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, snapshot.Devices[0].PublishedDeviceID, snapshot.Channels[0].PublishedChannelID)
 }
 
 func TestMediaSessionTerminalStateIsMonotonicAndNonterminalScanExcludesClosed(t *testing.T) {
@@ -289,4 +292,30 @@ func TestSameLocalIdentityAcrossUpstreamPorts(t *testing.T) {
 	duplicate := newPlatform("different-name", a.LocalDeviceID)
 	duplicate.Port = 15060
 	require.Error(t, repo.CreatePlatform(context.Background(), duplicate))
+}
+
+func TestAllocatedChannelIDSurvivesRemovalReselectionAndOrderChange(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	p := newPlatform("stable-ids", "34020000002000000001")
+	require.NoError(t, repo.CreatePlatform(ctx, p))
+	devices := []DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001180000001"}, {SourceDeviceID: 2, PublishedDeviceID: "34020000001180000002"}}
+	channels := []ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 11, PublishedChannelID: "34020000001320000001"}, {SourceDeviceID: 2, SourceChannelID: 12, PublishedChannelID: "34020000001320000001"}}
+	require.NoError(t, repo.ReplaceProjection(ctx, p.ID, 0, devices, channels))
+	snapshot, err := repo.ProjectionSnapshot(ctx, p.ID)
+	require.NoError(t, err)
+	ids := map[uint64]string{}
+	for _, c := range snapshot.Channels {
+		ids[c.SourceChannelID] = c.PublishedChannelID
+	}
+	require.NotEqual(t, ids[11], ids[12])
+	require.Equal(t, ids[11][:14], ids[12][:14])
+	require.NoError(t, repo.ReplaceProjection(ctx, p.ID, 1, nil, nil))
+	channels[0], channels[1] = channels[1], channels[0]
+	require.NoError(t, repo.ReplaceProjection(ctx, p.ID, 2, devices, channels))
+	snapshot, err = repo.ProjectionSnapshot(ctx, p.ID)
+	require.NoError(t, err)
+	for _, c := range snapshot.Channels {
+		require.Equal(t, ids[c.SourceChannelID], c.PublishedChannelID)
+	}
 }

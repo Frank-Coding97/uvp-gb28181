@@ -25,24 +25,6 @@ export function validGbId(value: string): boolean { return /^\d{20}$/.test(value
  * Keeps a preferred GB identity when it is valid and unused, otherwise creates
  * a deterministic 20-digit local projection identity from the source row id.
  */
-export function uniquePublishedGbId(preferred: string, sourceRowId: number, used: Set<string>): string {
-  const normalized = preferred.trim();
-  if (validGbId(normalized) && !used.has(normalized)) {
-    used.add(normalized);
-    return normalized;
-  }
-
-  const seed = String(Math.max(0, Math.trunc(sourceRowId))).padStart(18, "0").slice(-18);
-  let candidate = `99${seed}`;
-  let attempt = 0;
-  while (used.has(candidate)) {
-    attempt += 1;
-    candidate = `99${String(Math.max(0, Math.trunc(sourceRowId)) + attempt).padStart(18, "0").slice(-18)}`;
-  }
-  used.add(candidate);
-  return candidate;
-}
-
 export function validPort(value: number): boolean { return Number.isInteger(value) && value >= 1 && value <= 65535; }
 
 export function validHost(value: string): boolean {
