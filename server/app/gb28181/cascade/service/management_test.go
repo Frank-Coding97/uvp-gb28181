@@ -256,3 +256,13 @@ func (s *managementStoreFake) ListNonterminalMediaSessions(_ context.Context, pl
 var _ ManagementStore = (*managementStoreFake)(nil)
 var _ ManagementRuntime = (*managementRuntimeFake)(nil)
 var _ CredentialSealer = (*credentialSealerFake)(nil)
+
+func TestManagementServiceTypedNilCipherReturnsCredentialUnavailable(t *testing.T) {
+	var cipher *securestore.Cipher
+	svc := NewManagementService(newManagementStoreFake(), cipher, &managementRuntimeFake{}, fakeClock{})
+	password := "test-password"
+	result, err := svc.Create(context.Background(), validPlatformInput(&password))
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrCredentialUnavailable)
+	require.ErrorIs(t, err, securestore.ErrKeyUnavailable)
+}
