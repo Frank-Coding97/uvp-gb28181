@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { useSysConfigStore } from "@/store/modules/sys-config";
-import uvpFavicon from "@/assets/logo/uvp-favicon.svg";
+import defaultFavicon from "@/assets/sys/default.svg";
 import { watch } from "vue";
 
 // 初始化主题
@@ -63,7 +63,7 @@ const setFavicon = (iconUrl: string) => {
 
 // 设置默认图标的辅助方法
 const setDefaultFavicon = () => {
-    const defaultIconUrl = uvpFavicon;
+    const defaultIconUrl = defaultFavicon;
     const links = document.querySelectorAll("link[rel='icon']");
     links.forEach(link => {
         link.remove();
@@ -77,9 +77,7 @@ const setDefaultFavicon = () => {
 
 // 设置网站标题
 const setTitle = (title: string) => {
-    if (title) {
-        document.title = title;
-    }
+    document.title = title?.trim() || "统一视频接入平台";
 };
 
 // 监听系统配置变化
@@ -87,9 +85,7 @@ const sysConfigStore = useSysConfigStore();
 watch(
     () => sysConfigStore.systemIcon,
     (newIcon) => {
-        if (newIcon) {
-            setFavicon(newIcon);
-        }
+        setFavicon(newIcon);
     },
     { immediate: true }
 );
@@ -98,9 +94,7 @@ watch(
 watch(
     () => sysConfigStore.systemConfig.systemName,
     (newName) => {
-        if (newName) {
-            setTitle(newName);
-        }
+        setTitle(newName);
     },
     { immediate: true }
 );

@@ -22,7 +22,7 @@ vi.mock("@/store/modules/sys-config", async () => {
     const { ref } = await import("vue");
     return {
         useSysConfigStore: defineStore("sys-config", () => ({
-            systemConfig: ref({ systemName: "UVP 统一视频接入平台", systemLogo: "" })
+            systemConfig: ref({ systemBrand: "客户品牌", systemName: "客户视频平台", systemLogo: "" })
         }))
     };
 });
@@ -40,9 +40,21 @@ vi.mock("@/components/s-logo/index.vue", () => ({
 }));
 
 import Logo from "./index.vue";
+import { useSysConfigStore } from "@/store/modules/sys-config";
 
 describe("Logo", () => {
     beforeEach(() => setActivePinia(createPinia()));
+
+    it("uses the configured brand and hides an empty brand", async () => {
+        const wrapper = mount(Logo);
+        expect(wrapper.find(".logo_title").text()).toBe("客户品牌");
+        expect(wrapper.find(".logo_subtitle").text()).toBe("客户视频平台");
+        expect(wrapper.text()).toContain("GB28181");
+        useSysConfigStore().systemConfig.systemBrand = "  ";
+        await wrapper.vm.$nextTick();
+        expect(wrapper.find(".logo_title").exists()).toBe(false);
+        expect(wrapper.text()).not.toContain("UVP");
+    });
 
     it("fills the 40px logo frame without an inset", () => {
         const wrapper = mount(Logo);

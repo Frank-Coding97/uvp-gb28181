@@ -6,6 +6,7 @@ import { BaseResult } from "./types";
 export interface SystemConfig {
     systemLogo: string;
     systemIcon: string;
+    systemBrand?: string;
     systemName: string;
     systemCopyright: string;
     systemRecordNo: string;

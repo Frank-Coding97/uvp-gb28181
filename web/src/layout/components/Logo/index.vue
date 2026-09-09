@@ -8,7 +8,7 @@
             </div>
             <div class="logo_text" v-if="isTitle">
                 <div class="logo_title_row">
-                    <span :class="isDark ? 'logo_title dark' : 'logo_title'">UVP</span>
+                    <span v-if="brand" :class="isDark ? 'logo_title dark' : 'logo_title'">{{ brand }}</span>
                     <span class="logo_badge">GB28181</span>
                 </div>
                 <span class="logo_subtitle">{{ subtitle }}</span>
@@ -31,17 +31,19 @@ const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
 
 // 全局title
-const title = import.meta.env.VITE_GLOB_APP_TITLE;
+
 
 
 
 // 从系统配置中获取标题
 const bannerTitle = computed(() => {
-    return systemConfig.value?.systemName || title;
+    return systemConfig.value?.systemName?.trim() || "统一视频接入平台";
 });
 
+const brand = computed(() => systemConfig.value?.systemBrand?.trim() || "");
+
 const subtitle = computed(() => {
-    return bannerTitle.value.replace(/^UVP\s*/, "") || "统一视频接入平台";
+    return bannerTitle.value;
 });
 
 // 从系统配置中获取logo

@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useSysConfigStore } from "@/store/modules/sys-config";
+const config = useSysConfigStore();
+const brand = computed(() => config.systemConfig.systemBrand?.trim() || "");
+const systemName = computed(() => config.systemConfig.systemName?.trim() || "统一视频接入平台");
 
 const props = defineProps<{ index: number }>();
 const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
@@ -12,8 +16,8 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
             <span class="idle-state"><span class="idle-dot" />待接入</span>
         </div>
         <div class="brand-lockup" aria-hidden="true">
-            <strong class="cover-brand">UVP</strong>
-            <span class="brand-caption">统一视频接入平台</span>
+            <strong v-if="brand" class="cover-brand">{{ brand }}</strong>
+            <span class="brand-caption">{{ systemName }}</span>
         </div>
     </div>
 </template>

@@ -43,6 +43,7 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 
 	systemConfig["systemLogo"] = app.ConfigYml.GetString("system.systemlogo")           // 系统LOGO图片地址
 	systemConfig["systemIcon"] = app.ConfigYml.GetString("system.systemicon")           // 系统图标地址
+	systemConfig["systemBrand"] = app.ConfigYml.GetString("system.systembrand")         // 品牌简称，空值时由前端隐藏
 	systemConfig["systemName"] = app.ConfigYml.GetString("system.systemname")           // 系统名称
 	systemConfig["systemCopyright"] = app.ConfigYml.GetString("system.systemcopyright") // 版权声明信息
 	systemConfig["systemRecordNo"] = app.ConfigYml.GetString("system.systemrecordno")   // 网站备案号
@@ -93,6 +94,7 @@ func (con ConfigController) UpdateConfig(ctx *gin.Context) {
 	// 更新System配置
 	app.ConfigYml.Set("system.systemlogo", req.System.SystemLogo)
 	app.ConfigYml.Set("system.systemicon", req.System.SystemIcon)
+	app.ConfigYml.Set("system.systembrand", req.System.SystemBrand)
 	app.ConfigYml.Set("system.systemname", req.System.SystemName)
 	app.ConfigYml.Set("system.systemcopyright", req.System.SystemCopyright)
 	app.ConfigYml.Set("system.systemrecordno", req.System.SystemRecordNo)

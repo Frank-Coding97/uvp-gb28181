@@ -50,6 +50,12 @@
                 </a-col>
 
                 <a-col :span="isMobile ? 24 : 12">
+                  <a-form-item field="systemBrand" label="品牌简称">
+                    <a-input v-model="configData.system.systemBrand" placeholder="留空隐藏品牌简称" />
+                    <template #extra><div>显示在侧栏和预览封面，留空不显示；GB28181 标识保留</div></template>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="systemName" label="系统名称">
                     <a-input v-model="configData.system.systemName" placeholder="请输入系统名称" />
                     <template #extra>

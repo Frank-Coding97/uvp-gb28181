@@ -24,6 +24,8 @@ system:
   systemlogo: ""
   #系统图标
   systemicon: ""
+  #品牌简称，留空隐藏
+  systembrand: ""
   #系统名称
   systemname: "GinFast"
   #版权声明

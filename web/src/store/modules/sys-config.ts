@@ -20,6 +20,7 @@ const sysConfigStore = () => {
     const systemConfig = ref<SystemConfig>({
         systemLogo: "",
         systemIcon: "",
+        systemBrand: "",
         systemName: "",
         systemCopyright: "",
         systemRecordNo: "",
@@ -109,6 +110,7 @@ const sysConfigStore = () => {
         systemConfig.value = {
             systemLogo: "",
             systemIcon: "",
+            systemBrand: "",
             systemName: "",
             systemCopyright: "",
             systemRecordNo: "",
