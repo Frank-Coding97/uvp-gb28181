@@ -277,3 +277,16 @@ func TestMediaSessionTerminalStateIsMonotonicAndNonterminalScanExcludesClosed(t 
 	require.Equal(t, model.CascadeMediaSessionStateClosed, stored.State)
 	require.NotNil(t, stored.ClosedAt)
 }
+
+func TestSameLocalIdentityAcrossUpstreamPorts(t *testing.T) {
+	repo := newTestRepository(t)
+	a := newPlatform("upstream-a", "34020000002000000002")
+	a.Port = 15060
+	require.NoError(t, repo.CreatePlatform(context.Background(), a))
+	b := newPlatform("upstream-b", a.LocalDeviceID)
+	b.Port = 16060
+	require.NoError(t, repo.CreatePlatform(context.Background(), b))
+	duplicate := newPlatform("different-name", a.LocalDeviceID)
+	duplicate.Port = 15060
+	require.Error(t, repo.CreatePlatform(context.Background(), duplicate))
+}

@@ -1,0 +1,2 @@
+ALTER TABLE gb_cascade_platform ADD CONSTRAINT uk_cascade_platform_local_identity UNIQUE (local_device_id, local_domain);
+ALTER TABLE gb_cascade_platform DROP CONSTRAINT uk_cascade_platform_connection;
