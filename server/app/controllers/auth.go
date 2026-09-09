@@ -87,7 +87,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	// 根据用户名查找用户
 	user := models.NewUser()
-	err := user.Find(c, func(d *gorm.DB) *gorm.DB {
+	err := user.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("username = ?", req.Username)
 	})
 	if err != nil {
@@ -110,10 +110,12 @@ func (ac *AuthController) Login(c *gin.Context) {
 	loginLockDuration := app.ConfigYml.GetInt("safe.loginlockduration")
 
 	// 如果启用了登录锁定功能
+	// Preserve the existing independent lock-accounting lifetime while carrying log scope.
+	lockContext := context.WithoutCancel(c.Request.Context())
 	if loginLockThreshold > 0 {
 		// 检查账户是否被锁定
 		lockKey := "account_locked:" + req.Username
-		if locked, _ := app.Cache.Exists(context.Background(), lockKey); locked > 0 {
+		if locked, _ := app.Cache.Exists(lockContext, lockKey); locked > 0 {
 			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 			ac.FailAndAbort(c, "账户已被锁定，请稍后再试", nil)
 			return
@@ -126,7 +128,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 			// 获取当前失败次数
 			var failCount int
-			if countStr, err := app.Cache.Get(context.Background(), failCountKey); err == nil && countStr != "" {
+			if countStr, err := app.Cache.Get(lockContext, failCountKey); err == nil && countStr != "" {
 				failCount, _ = strconv.Atoi(countStr)
 			}
 
@@ -134,12 +136,12 @@ func (ac *AuthController) Login(c *gin.Context) {
 			failCount++
 
 			// 更新失败次数，设置过期时间
-			app.Cache.Set(context.Background(), failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
+			app.Cache.Set(lockContext, failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
 
 			// 检查是否达到锁定阈值
 			if failCount >= loginLockThreshold {
 				// 锁定账户
-				app.Cache.Set(context.Background(), lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				app.Cache.Set(lockContext, lockKey, "1", time.Duration(loginLockDuration)*time.Second)
 				ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 				ac.FailAndAbort(c, "密码错误次数过多，账户已被锁定", nil)
 				return
@@ -154,7 +156,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 		// 密码正确，清除失败次数
 		failCountKey := "login_fail_count:" + req.Username
-		app.Cache.Del(context.Background(), failCountKey)
+		app.Cache.Del(lockContext, failCountKey)
 	} else {
 		// 未启用登录锁定功能，使用原有逻辑
 		// 验证密码

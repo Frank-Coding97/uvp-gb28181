@@ -49,11 +49,12 @@ type UAC struct {
 // 关键:不要 WithClientPort 抢 server 已绑定的 5061,否则 client 走备选 socket
 // 设备应答会回到 server 端口但 client dialog 收不到 → WaitAnswer 永久阻塞
 // 让 sipgo 默认共享 server 的 transport;Contact 头我们手动写明 sipIP:sipPort
-func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int, dynamicAdvertise bool) (*UAC, error) {
+func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int, dynamicAdvertise bool, options ...sipgo.ClientOption) (*UAC, error) {
 	clientOptions := make([]sipgo.ClientOption, 0, 1)
 	if !dynamicAdvertise {
 		clientOptions = append(clientOptions, sipgo.WithClientHostname(advertiseIP))
 	}
+	clientOptions = append(clientOptions, options...)
 	client, err := sipgo.NewClient(ua, clientOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("创建 UAC client 失败: %w", err)

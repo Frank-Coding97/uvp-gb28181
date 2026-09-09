@@ -2,13 +2,16 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
 	"time"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -86,7 +89,10 @@ func OperationLogMiddleware() gin.HandlerFunc {
 			// Gin Context 会在 Context 回收复用时产生竞态/跨请求错配
 			record := buildOperationLogRecord(c, startTime, requestBody, writer.body.Bytes())
 			if record != nil {
-				go persistOperationLog(record)
+				persistContext := operationLogContext(c)
+				app.BackgroundWork.Go(func() {
+					persistOperationLog(persistContext, record)
+				})
 			}
 		}()
 
@@ -150,7 +156,7 @@ func buildOperationLogRecord(c *gin.Context, startTime time.Time, requestBody, r
 	operationType := getOperationType(c)
 
 	// 尝试从JWT token获取用户信息
-	claims := common.GetClaims(c)
+	claims := operationLogClaims(c)
 	if claims != nil {
 		userID = claims.UserID
 		username = claims.Username
@@ -192,10 +198,40 @@ func buildOperationLogRecord(c *gin.Context, startTime time.Time, requestBody, r
 	return log
 }
 
+// operationLogClaims returns Claims without retaining a Gin context.
+func operationLogClaims(c *gin.Context) *app.Claims {
+	if claims := common.GetClaims(c); claims != nil {
+		return claims
+	}
+	if c != nil && c.Request != nil {
+		if claims, ok := c.Request.Context().Value(consts.BindContextKeyName).(*app.Claims); ok {
+			return claims
+		}
+	}
+	return nil
+}
+
+// operationLogContext copies only the immutable audit scope into an independent
+// standard context. Request cancellation must not cancel required audit writes.
+func operationLogContext(c *gin.Context) context.Context {
+	ctx := context.Background()
+	if c == nil || c.Request == nil {
+		return ctx
+	}
+	requestContext := c.Request.Context()
+	ctx = logging.WithContext(ctx, app.Log(requestContext))
+	if claims := operationLogClaims(c); claims != nil {
+		copy := *claims
+		ctx = context.WithValue(ctx, consts.BindContextKeyName, &copy)
+	}
+	return ctx
+}
+
 // persistOperationLog 异步持久化日志记录(不接触 Gin Context)
-func persistOperationLog(log *models.SysOperationLog) {
-	if err := app.DB().Create(log).Error; err != nil {
-		app.ZapLog.Error("记录操作日志失败", zap.Error(err))
+func persistOperationLog(ctx context.Context, log *models.SysOperationLog) {
+	if err := app.DBContext(ctx).Create(log).Error; err != nil {
+		app.Log(ctx).Named("audit").Error("记录操作日志失败",
+			zap.String("event", "audit.operation_log.persist_failed"), logging.Error(err))
 	}
 }
 

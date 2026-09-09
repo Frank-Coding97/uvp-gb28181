@@ -8,7 +8,37 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
+
+const (
+	nodeOfflinePersistFailedEvent = "zlm.node.offline_persist_failed"
+	nodeOfflineEvent              = "zlm.node.offline"
+	threadLoadNetFailedEvent      = "zlm.thread_load.net_failed"
+	threadLoadWorkFailedEvent     = "zlm.thread_load.work_failed"
+)
+
+func repeatFailure(ctx context.Context, key logging.RepeatKey, err error) {
+	if runtime := app.LogRuntime; runtime != nil {
+		if repeats := runtime.Repeats(); repeats != nil {
+			repeats.Fail(key, err)
+			return
+		}
+	}
+	app.Log(ctx).Named(key.Component).Warn("Background operation failed",
+		zap.String("event", key.Event),
+		zap.Int64("node_id", key.NodeID),
+		logging.Error(err),
+	)
+}
+
+func repeatRecovered(key logging.RepeatKey) {
+	if runtime := app.LogRuntime; runtime != nil {
+		if repeats := runtime.Repeats(); repeats != nil {
+			repeats.Recovered(key)
+		}
+	}
+}
 
 // Clock 可注入的时钟抽象(便于测试用 FakeClock 推进时间)
 type Clock interface {
@@ -83,28 +113,32 @@ func (w *Watcher) Tick() {
 			continue
 		}
 		if err := w.registry.MarkOffline(context.Background(), n.ID); err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("GB28181 ZLM 标节点离线失败",
-					zap.Int64("nodeId", n.ID),
-					zap.String("uuid", n.MediaServerUUID),
-					zap.Error(err))
-			}
+			repeatFailure(context.Background(), logging.RepeatKey{
+				Component: "zlm",
+				Event:     nodeOfflinePersistFailedEvent,
+				NodeID:    n.ID,
+			}, err)
 			continue
 		}
+		repeatRecovered(logging.RepeatKey{
+			Component: "zlm",
+			Event:     nodeOfflinePersistFailedEvent,
+			NodeID:    n.ID,
+		})
 		if w.notifier != nil {
 			w.notifier.OnNodeOffline(n.ID)
 		}
-		if app.ZapLog != nil {
-			app.ZapLog.Info("GB28181 ZLM 节点已标记离线",
-				zap.Int64("nodeId", n.ID),
-				zap.String("name", n.Name),
-				zap.String("uuid", n.MediaServerUUID),
-				zap.Duration("heartbeatGap", gap))
-		}
+		app.Log(context.Background()).Named("zlm").Info("GB28181 ZLM 节点已标记离线",
+			zap.String("event", nodeOfflineEvent),
+			zap.Int64("node_id", n.ID),
+			zap.String("name", n.Name),
+			zap.String("uuid", n.MediaServerUUID),
+			zap.Duration("heartbeat_gap", gap))
 	}
 }
 
 // Start 启动后台 goroutine,周期跑 Tick,直到 ctx 取消。
+// 返回的 channel 会在 Tick 不再执行后关闭,调用方可用它完成有界停机。
 //
 // 用法:
 //
@@ -112,8 +146,10 @@ func (w *Watcher) Tick() {
 //	ctx, cancel := context.WithCancel(context.Background())
 //	watcher.Start(ctx)
 //	// ... cancel() 时停止
-func (w *Watcher) Start(ctx context.Context) {
+func (w *Watcher) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		tk := time.NewTicker(w.checkInterval)
 		defer tk.Stop()
 		for {
@@ -125,4 +161,5 @@ func (w *Watcher) Start(ctx context.Context) {
 			}
 		}
 	}()
+	return done
 }

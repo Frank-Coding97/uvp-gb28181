@@ -67,7 +67,7 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		fail := func(code int, err error) bool {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, code, "Catalog query rejected", nil))
 			if app.ZapLog != nil {
-				app.ZapLog.Warn("级联目录查询失败", zap.Int("status", code), zap.Error(err))
+				app.ZapLog.Warn("级联目录查询失败", zap.String("event", "cascade.catalog.query_failed"), zap.Int("status", code), zap.Error(err))
 			}
 			return true
 		}
@@ -148,13 +148,13 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 			result := outbound.transactions.SendMessage(ctx, response.Body, fmt.Sprintf("catalog-%d-%d", matched.ID, time.Now().UnixNano()))
 			if !result.Success {
 				if app.ZapLog != nil {
-					app.ZapLog.Warn("级联目录响应发送失败", zap.Uint64("platformId", matched.ID), zap.Int("status", result.StatusCode), zap.Error(result.TransportErr), zap.Error(result.BuildErr))
+					app.ZapLog.Warn("级联目录响应发送失败", zap.String("event", "cascade.catalog.response_send_failed"), zap.Uint64("platformId", matched.ID), zap.Int("status", result.StatusCode), zap.Error(result.TransportErr), zap.Error(result.BuildErr))
 				}
 				return true
 			}
 		}
 		if app.ZapLog != nil {
-			app.ZapLog.Info("级联目录响应完成", zap.Uint64("platformId", matched.ID), zap.Int("items", len(snapshot.Items)), zap.Int("batches", len(responses)))
+			app.ZapLog.Info("级联目录响应完成", zap.String("event", "cascade.catalog.response_completed"), zap.Uint64("platformId", matched.ID), zap.Int("items", len(snapshot.Items)), zap.Int("batches", len(responses)))
 		}
 		return true
 	}
@@ -215,12 +215,12 @@ func forwardCascadeControl(store *repository.GormRepository, platform model.GbCa
 	defer cancel()
 	if ptzService == nil {
 		if app.ZapLog != nil {
-			app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.String("reason", "PTZ service unavailable"))
+			app.ZapLog.Warn("级联云台命令转发失败", zap.String("event", "cascade.control.forward_failed"), zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.String("reason", "PTZ service unavailable"))
 		}
 		return
 	}
 	service := control.NewService(store, control.NewGormTargetLoader(app.DB()), ptzService)
 	if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err != nil && app.ZapLog != nil {
-		app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
+		app.ZapLog.Warn("级联云台命令转发失败", zap.String("event", "cascade.control.forward_failed"), zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
 	}
 }

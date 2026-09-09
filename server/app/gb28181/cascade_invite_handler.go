@@ -53,6 +53,17 @@ type cascadeVideoRuntime struct {
 	wg      sync.WaitGroup
 }
 
+const (
+	cascadeVideoEventACKInvalid       = "cascade.video.ack_invalid"
+	cascadeVideoEventFailed           = "cascade.video.failed"
+	cascadeVideoEventRTPCleanupFailed = "cascade.video.rtp_cleanup_failed"
+	cascadeVideoEventAnswerFailed     = "cascade.video.answer_failed"
+	cascadeVideoEventEstablished      = "cascade.video.established"
+	cascadeVideoEventStateSaveFailed  = "cascade.video.state_save_failed"
+	cascadeVideoEventReleaseTimeout   = "cascade.video.release_timeout"
+	cascadeVideoEventByeFailed        = "cascade.video.bye_failed"
+)
+
 var cascadeVideo atomic.Pointer[cascadeVideoRuntime]
 
 func setupCascadeVideoRuntime(server sipRuntimeServer) error {
@@ -120,7 +131,7 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 	switch req.Method {
 	case sip.ACK:
 		if err := session.dialog.ReadAck(req, tx); err != nil {
-			h.log("级联点播 ACK 无效", session.platform.ID, err)
+			h.log(cascadeVideoEventACKInvalid, session.platform.ID, err)
 		} else {
 			session.acknowledged.Store(true)
 		}
@@ -139,7 +150,7 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction) {
 	responseRequest := req
 	fail := func(code int, err error) {
-		h.log("级联点播失败", 0, err)
+		h.log(cascadeVideoEventFailed, 0, err)
 		_ = tx.Respond(sip.NewResponseFromRequest(responseRequest, code, "Cascade Play Failed", nil))
 	}
 	if req.To() == nil || req.From() == nil || req.CallID() == nil || req.CSeq() == nil {
@@ -299,7 +310,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 					return
 				}
 			} else {
-				h.log("级联 RTP 停止失败，保留占用并重试", platform.ID, stopErr)
+				h.log(cascadeVideoEventRTPCleanupFailed, platform.ID, stopErr)
 			}
 			// Keep the dialog, source lease and sender claim until cleanup is certain.
 			time.Sleep(5 * time.Second)
@@ -331,24 +342,42 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	if err = dialog.RespondSDP(answer); err != nil {
-		h.log("级联点播应答或 ACK 失败", platform.ID, err)
+		h.log(cascadeVideoEventAnswerFailed, platform.ID, err)
 		return
 	}
 	if !h.transition(&row, &state, model.CascadeMediaSessionStateActive) {
 		return
 	}
-	h.log("级联点播已建立", platform.ID, nil)
+	h.log(cascadeVideoEventEstablished, platform.ID, nil)
 	<-sessionCtx.Done()
 	completed = true
 }
 
-func (h *cascadeVideoRuntime) log(message string, platformID uint64, err error) {
-	if app.ZapLog != nil {
-		if err != nil {
-			app.ZapLog.Warn(message, zap.Uint64("platformId", platformID), zap.Error(err))
-		} else {
-			app.ZapLog.Info(message, zap.Uint64("platformId", platformID))
-		}
+func (h *cascadeVideoRuntime) log(event string, platformID uint64, err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	fields := []zap.Field{zap.Uint64("platformId", platformID)}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	switch event {
+	case cascadeVideoEventACKInvalid:
+		app.ZapLog.Warn("级联点播 ACK 无效", append(fields, zap.String("event", "cascade.video.ack_invalid"))...)
+	case cascadeVideoEventFailed:
+		app.ZapLog.Warn("级联点播失败", append(fields, zap.String("event", "cascade.video.failed"))...)
+	case cascadeVideoEventRTPCleanupFailed:
+		app.ZapLog.Warn("级联 RTP 停止失败，保留占用并重试", append(fields, zap.String("event", "cascade.video.rtp_cleanup_failed"))...)
+	case cascadeVideoEventAnswerFailed:
+		app.ZapLog.Warn("级联点播应答或 ACK 失败", append(fields, zap.String("event", "cascade.video.answer_failed"))...)
+	case cascadeVideoEventEstablished:
+		app.ZapLog.Info("级联点播已建立", append(fields, zap.String("event", "cascade.video.established"))...)
+	case cascadeVideoEventStateSaveFailed:
+		app.ZapLog.Warn("级联点播状态保存失败", append(fields, zap.String("event", "cascade.video.state_save_failed"))...)
+	case cascadeVideoEventReleaseTimeout:
+		app.ZapLog.Warn("等待级联点播释放超时", append(fields, zap.String("event", "cascade.video.release_timeout"))...)
+	case cascadeVideoEventByeFailed:
+		app.ZapLog.Warn("级联配置更新时发送 BYE 失败", append(fields, zap.String("event", "cascade.video.bye_failed"))...)
 	}
 }
 func (h *cascadeVideoRuntime) transition(row *model.GbCascadeMediaSession, state *model.CascadeMediaSessionState, to model.CascadeMediaSessionState) bool {
@@ -356,7 +385,7 @@ func (h *cascadeVideoRuntime) transition(row *model.GbCascadeMediaSession, state
 	defer cancel()
 	changed, err := h.store.TransitionMediaSession(ctx, row.DialogKey, *state, to, time.Now())
 	if err != nil || !changed {
-		h.log("级联点播状态保存失败", row.PlatformID, err)
+		h.log(cascadeVideoEventStateSaveFailed, row.PlatformID, err)
 		return false
 	}
 	*state = to
@@ -415,7 +444,7 @@ func stopCascadeVideoRuntime(ctx context.Context) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		h.log("等待级联点播释放超时", 0, ctx.Err())
+		h.log(cascadeVideoEventReleaseTimeout, 0, ctx.Err())
 	}
 }
 
@@ -444,7 +473,7 @@ func (h *cascadeVideoRuntime) revalidate(ctx context.Context) error {
 			err := session.dialog.Bye(byeCtx)
 			cancel()
 			if err != nil {
-				h.log("级联配置更新时发送 BYE 失败", session.platform.ID, err)
+				h.log(cascadeVideoEventByeFailed, session.platform.ID, err)
 			}
 		}
 	}

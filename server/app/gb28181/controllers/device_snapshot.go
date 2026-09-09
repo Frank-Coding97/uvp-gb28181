@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,15 +27,18 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 	registry, service := dc.captureRuntime(), dc.ptzServiceSnapshot()
 	claims := dc.GetClaims(c)
 	if registry == nil || service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "设备抓拍服务未就绪"})
 		return
 	}
 	if claims == nil || claims.UserID == 0 {
+		response.SetBusinessResult(c, 404, false)
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "通道不存在或无权限"})
 		return
 	}
 	var body snapshotCreateBody
 	if err := decodePlaybackJSON(c, &body); err != nil {
+		response.SetBusinessResult(c, 422, false)
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": 422, "message": "抓拍配置参数不合法"})
 		return
 	}
@@ -45,6 +49,7 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 		body.Interval = 1
 	}
 	if body.SnapNum < 1 || body.SnapNum > 10 || body.Interval < 1 || body.Interval > 3600 {
+		response.SetBusinessResult(c, 422, false)
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": 422, "message": "抓拍数量需为 1-10，间隔需为 1-3600 秒"})
 		return
 	}
@@ -57,6 +62,7 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 		return
 	}
 	if target.Profile.Version != protocol.Version2022 {
+		response.SetBusinessResult(c, 409, false)
 		c.JSON(http.StatusConflict, gin.H{"code": 409, "message": "图像抓拍配置仅支持 GB/T 28181-2022 设备"})
 		return
 	}
@@ -67,6 +73,7 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 	uploadURL, err := snapshotUploadURL(c, session.UploadToken)
 	if err != nil {
 		registry.MarkFailed(session.ID, err)
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": err.Error()})
 		return
 	}
@@ -86,6 +93,7 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 	})
 	if err != nil {
 		registry.MarkFailed(session.ID, err)
+		response.SetBusinessResult(c, 502, false)
 		c.JSON(http.StatusBadGateway, gin.H{"code": 502, "message": "下发图像抓拍配置失败: " + err.Error()})
 		return
 	}
@@ -97,11 +105,13 @@ func (dc *DeviceMgmtController) CreateSnapshotSession(c *gin.Context) {
 func (dc *DeviceMgmtController) GetSnapshotSession(c *gin.Context) {
 	registry, claims := dc.captureRuntime(), dc.GetClaims(c)
 	if registry == nil || claims == nil || claims.UserID == 0 {
+		response.SetBusinessResult(c, 404, false)
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "抓拍任务不存在"})
 		return
 	}
 	session, ok := registry.GetForOwner(c.Param("sessionId"), strconv.FormatUint(uint64(claims.UserID), 10))
 	if !ok || session.ChannelID != c.Param("id") {
+		response.SetBusinessResult(c, 404, false)
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "抓拍任务不存在"})
 		return
 	}
@@ -120,9 +130,11 @@ func (dc *DeviceMgmtController) UploadDeviceSnapshot(c *gin.Context) {
 		if errors.Is(err, devicecapture.ErrNotFound) {
 			status = http.StatusNotFound
 		}
+		response.SetBusinessResult(c, status, status == 0)
 		c.JSON(status, gin.H{"code": status, "message": "抓拍图片接收失败"})
 		return
 	}
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"name": file.Name, "size": file.Size}})
 }
 

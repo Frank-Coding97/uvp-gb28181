@@ -20,7 +20,7 @@ func NewUserService() *User {
 func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.UserProfile, err error) {
 
 	user := models.NewUser()
-	err = user.Find(c, func(d *gorm.DB) *gorm.DB {
+	err = user.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Preload("Department").Preload("Roles").Where("id = ?", userID)
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.User
 
 		// 查询角色关联的菜单ID
 		roleMenuList := models.NewSysRoleMenuList()
-		err = roleMenuList.Find(c, func(db *gorm.DB) *gorm.DB {
+		err = roleMenuList.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 			return db.Where("role_id IN ?", roleIDs)
 		})
 		if err != nil {
@@ -61,7 +61,7 @@ func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.User
 			})
 			// 查询已授权且带权限标识的菜单和按钮
 			buttonMenus := models.NewSysMenuList()
-			err = buttonMenus.Find(c, func(db *gorm.DB) *gorm.DB {
+			err = buttonMenus.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 				return db.Select("permission").Where("id IN ? AND type IN ? AND permission !=''", menuIDs, []int{2, 3})
 			})
 			if err != nil {

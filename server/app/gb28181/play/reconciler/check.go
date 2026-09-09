@@ -41,14 +41,16 @@ func (r *Reconciler) judgeOne(ctx context.Context, streamID string) judgeResult 
 	if nodeID, ok := r.locationMap.Lookup(streamID); ok {
 		n, exists := r.registry.Get(nodeID)
 		if !exists {
-			app.ZapLog.Debug("reconciler LocationMap 命中但 registry 无此 node,fallback 跨节点",
+			app.Log(ctx).Named("play.reconcile").Debug("reconciler LocationMap 命中但 registry 无此 node,fallback 跨节点",
+				zap.String("event", "play.reconcile.location_fallback"),
 				zap.String("streamID", streamID),
 				zap.Int64("nodeID", nodeID))
 			return r.judgeAcrossAllNodes(ctx, streamID)
 		}
 		if !n.IsActive() {
 			// Q4: 节点不可达 -> 跳过等恢复,不清也不算 online
-			app.ZapLog.Debug("reconciler 节点非 active 状态,跳过",
+			app.Log(ctx).Named("play.reconcile").Debug("reconciler 节点非 active 状态,跳过",
+				zap.String("event", "play.reconcile.node_inactive"),
 				zap.String("streamID", streamID),
 				zap.Int64("nodeID", nodeID),
 				zap.String("state", string(n.State)))
@@ -56,7 +58,8 @@ func (r *Reconciler) judgeOne(ctx context.Context, streamID string) judgeResult 
 		}
 		online, err := r.probe.IsMediaOnline(ctx, n, streamID)
 		if err != nil {
-			app.ZapLog.Warn("reconciler 探测流状态失败",
+			app.Log(ctx).Named("play.reconcile").Warn("reconciler 探测流状态失败",
+				zap.String("event", "play.reconcile.probe_failed"),
 				zap.String("streamID", streamID),
 				zap.Int64("nodeID", nodeID),
 				zap.Error(err))
@@ -78,7 +81,8 @@ func (r *Reconciler) judgeOne(ctx context.Context, streamID string) judgeResult 
 func (r *Reconciler) judgeSingleNode(ctx context.Context, streamID string) judgeResult {
 	online, err := r.probe.IsMediaOnline(ctx, nil, streamID)
 	if err != nil {
-		app.ZapLog.Warn("reconciler 单节点探测流状态失败",
+		app.Log(ctx).Named("play.reconcile").Warn("reconciler 单节点探测流状态失败",
+			zap.String("event", "play.reconcile.probe_failed"),
 			zap.String("streamID", streamID),
 			zap.Error(err))
 		return judgeProbeError
@@ -96,7 +100,8 @@ func (r *Reconciler) judgeSingleNode(ctx context.Context, streamID string) judge
 func (r *Reconciler) judgeAcrossAllNodes(ctx context.Context, streamID string) judgeResult {
 	nodes := r.registry.List()
 	if len(nodes) == 0 {
-		app.ZapLog.Warn("reconciler 无任何 registered node,判定假阳性",
+		app.Log(ctx).Named("play.reconcile").Warn("reconciler 无任何 registered node,判定假阳性",
+			zap.String("event", "play.reconcile.no_nodes"),
 			zap.String("streamID", streamID))
 		return judgeStale
 	}
@@ -108,7 +113,8 @@ func (r *Reconciler) judgeAcrossAllNodes(ctx context.Context, streamID string) j
 		}
 		online, err := r.probe.IsMediaOnline(ctx, n, streamID)
 		if err != nil {
-			app.ZapLog.Debug("reconciler 跨节点探测单个 node 失败,继续下一个",
+			app.Log(ctx).Named("play.reconcile").Debug("reconciler 跨节点探测单个 node 失败,继续下一个",
+				zap.String("event", "play.reconcile.probe_failed"),
 				zap.String("streamID", streamID),
 				zap.Int64("nodeID", n.ID),
 				zap.Error(err))
@@ -117,7 +123,8 @@ func (r *Reconciler) judgeAcrossAllNodes(ctx context.Context, streamID string) j
 		}
 		anyProbed = true
 		if online {
-			app.ZapLog.Debug("reconciler LocationMap miss 但在跨节点遍历命中",
+			app.Log(ctx).Named("play.reconcile").Debug("reconciler LocationMap miss 但在跨节点遍历命中",
+				zap.String("event", "play.reconcile.cross_node_hit"),
 				zap.String("streamID", streamID),
 				zap.Int64("nodeID", n.ID))
 			return judgeOnline

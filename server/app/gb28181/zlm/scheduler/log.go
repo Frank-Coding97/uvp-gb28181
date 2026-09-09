@@ -162,9 +162,9 @@ func (s *LogService) drainRemaining(ch chan SchedulerLog) {
 func (s *LogService) writeOne(ctx context.Context, entry SchedulerLog) {
 	if err := s.repo.Insert(ctx, entry); err != nil {
 		if app.ZapLog != nil {
-			app.ZapLog.Warn("scheduler log insert failed",
+			app.ZapLog.Named("zlm.scheduler").Warn("scheduler log insert failed", zap.String("event", "zlm.scheduler.persist_failed"),
 				zap.String("algorithm", entry.Algorithm),
-				zap.Int64("nodeID", entry.NodeID),
+				zap.Int64("node_id", entry.NodeID),
 				zap.Error(err))
 		}
 	}
@@ -198,8 +198,8 @@ func (s *LogService) Emit(entry SchedulerLog) {
 		s.mu.Unlock()
 		// 每 100 条 drop 警告一次,避免刷屏
 		if dropped%100 == 1 && app.ZapLog != nil {
-			app.ZapLog.Warn("scheduler log buffer full, entry dropped",
-				zap.Int64("totalDropped", dropped))
+			app.ZapLog.Named("zlm.scheduler").Warn("scheduler log buffer full, entry dropped", zap.String("event", "zlm.scheduler.buffer_full"),
+				zap.Int64("dropped_count", dropped))
 		}
 	}
 }

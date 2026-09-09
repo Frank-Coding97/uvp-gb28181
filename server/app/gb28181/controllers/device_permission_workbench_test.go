@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -38,7 +39,9 @@ func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 func TestPermissionWorkbench_StrictAssignmentFilter(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	previousConfig := app.ConfigYml
-	app.ConfigYml = ymlconfig.CreateYamlFactory(filepath.Join("..", "..", "..", "config"))
+	configDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.yml"), []byte("gb28181:\n  device:\n    default_owner_dept_id: 1\n"), 0600))
+	app.ConfigYml = ymlconfig.CreateYamlFactory(configDir)
 	app.ConfigYml.Set("gb28181.device.default_owner_dept_id", 1)
 	t.Cleanup(func() { app.ConfigYml = previousConfig })
 

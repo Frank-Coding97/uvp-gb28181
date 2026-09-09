@@ -53,7 +53,9 @@ import (
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
+	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -345,12 +347,12 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	return server, nil
 }
 
-func startControlPlane(cfg gbconfig.Config) {
+func startControlPlane(cfg gbconfig.Config) bool {
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
-	if err != nil {
-		app.ZapLog.Warn("国标级联凭据密钥未配置,列表可用但密码写入和启用受限",
-			zap.String("env", cascadeCredentialKeyEnv))
+	credentialWarningReported := cascadeCredentialWarningNeeded(err, false)
+	if credentialWarningReported {
+		warnCascadeCredentialKeyUnavailable()
 	}
 	setupCascadeManagement(nil, cascadeCipher)
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
@@ -371,11 +373,21 @@ func startControlPlane(cfg gbconfig.Config) {
 		persistCtx, cancel := context.WithCancel(context.Background())
 		metricsPersistCancel = cancel
 		metricsRecorder = persistent
-		go persistent.Run(persistCtx, time.Second)
+		persistDone := make(chan struct{})
+		metricsPersistDone = persistDone
+		go func() {
+			defer close(persistDone)
+			persistent.Run(persistCtx, time.Second)
+		}()
 		persistentDashboard = metrics.NewPersistentDashboardSnapshot(db, metricsAgg, time.Local)
 	}
 	metricsCleanupStop = make(chan struct{})
-	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
+	cleanupDone := make(chan struct{})
+	metricsCleanupDone = cleanupDone
+	go func() {
+		defer close(cleanupDone)
+		runMetricsCleanup(metricsAgg, metricsCleanupStop)
+	}()
 	if persistentDashboard != nil {
 		gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg }, persistentDashboard)
 	} else {
@@ -383,7 +395,7 @@ func startControlPlane(cfg gbconfig.Config) {
 	}
 	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
 		gbroutes.SetPlayAttemptStore(gbdashboard.NewPlayAttemptStore(db))
-		dashboardRetentionCancel = startDashboardRetentionRuntime(db, 24*time.Hour, func(result gbdashboard.RetentionResult, err error) {
+		dashboardRetentionCancel, dashboardRetentionDone = startDashboardRetentionRuntimeTracked(db, 24*time.Hour, func(result gbdashboard.RetentionResult, err error) {
 			if err != nil {
 				app.ZapLog.Warn("清理仪表盘历史事实失败", zap.Error(err))
 				return
@@ -414,6 +426,8 @@ func startControlPlane(cfg gbconfig.Config) {
 		}
 		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
 		restartCoordinator := gbzlmsvc.NewRestartCoordinator(zlmRegistry)
+		zlmNodeService = nodeSvc
+		zlmRestartCoordinator = restartCoordinator
 		nodeSvc.SetRestartCoordinator(restartCoordinator)
 		nodeSvc.SetLogger(app.ZapLog)
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
@@ -428,16 +442,19 @@ func startControlPlane(cfg gbconfig.Config) {
 		watcher := heartbeat.NewWatcherWithNotifier(zlmRegistry, heartbeat.RealClock(), 30*time.Second, 90*time.Second, restartCoordinator)
 		var hbCtx context.Context
 		hbCtx, heartbeatCancel = context.WithCancel(context.Background())
-		watcher.Start(hbCtx)
+		heartbeatDone = watcher.Start(hbCtx)
 		app.ZapLog.Info("GB28181 ZLM 心跳 Collector / Watcher 已启动",
 			zap.Duration("checkInterval", 30*time.Second),
 			zap.Duration("offlineThreshold", 90*time.Second))
 
 		threadPoller := heartbeat.NewThreadLoadPoller(zlmRegistry, adapter, 30*time.Second)
-		threadPoller.Start(hbCtx)
+		threadLoadDone = threadPoller.Start(hbCtx)
 		app.ZapLog.Info("GB28181 ZLM 线程负载 Poller 已启动", zap.Duration("interval", 30*time.Second))
 
+		convergenceDone := make(chan struct{})
+		configConvergenceDone = convergenceDone
 		go func() {
+			defer close(convergenceDone)
 			initialCtx, cancel := context.WithTimeout(hbCtx, 30*time.Second)
 			for _, result := range nodeSvc.ApplyActiveConfigs(initialCtx) {
 				if result.Err != nil {
@@ -470,18 +487,28 @@ func startControlPlane(cfg gbconfig.Config) {
 	zlmClient = pickInitialClient(cfg)
 	if zlmClient == nil {
 		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
-		return
+		return credentialWarningReported
 	}
+	return credentialWarningReported
 }
 
 func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report func(gbdashboard.RetentionResult, error)) context.CancelFunc {
+	cancel, _ := startDashboardRetentionRuntimeTracked(db, interval, report)
+	return cancel
+}
+
+func startDashboardRetentionRuntimeTracked(db *gorm.DB, interval time.Duration, report func(gbdashboard.RetentionResult, error)) (context.CancelFunc, <-chan struct{}) {
 	if db == nil || !db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) || !db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) ||
 		!db.Migrator().HasTable(&gbmodels.GbSipMetricGap{}) || !db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
-		return nil
+		return nil, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go gbdashboard.NewDashboardRetention(db, 500).Run(ctx, interval, report)
-	return cancel
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gbdashboard.NewDashboardRetention(db, 500).Run(ctx, interval, report)
+	}()
+	return cancel, done
 }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
@@ -489,6 +516,18 @@ func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report 
 func Start() {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
+	if stopping {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("GB28181 SIP 已进入停止流程,拒绝重复启动")
+		}
+		return
+	}
+	if sipServer != nil {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("GB28181 SIP 已运行,忽略重复启动")
+		}
+		return
+	}
 
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
@@ -496,7 +535,7 @@ func Start() {
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
-	startControlPlane(cfg)
+	credentialWarningReported := startControlPlane(cfg)
 
 	// 老 stack 升级迁移:如果 DB 空 + YAML 有 SIP 段 + gb_device 有历史数据 → 一次性 seed.
 	// 幂等,首启后 DB 有数据下次调用直接 skip.
@@ -526,7 +565,7 @@ func Start() {
 		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.Error(err))
 	}
 
-	if err := startSIPDependencies(sipCfg); err != nil {
+	if err := startSIPDependencies(sipCfg, credentialWarningReported); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
 		return
 	}
@@ -576,7 +615,8 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 			gbroutes.SetSecurityRuntime(runtime)
 			return runtime
 		}
-		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 protect 并关闭新增IP自动封禁", zap.Error(err))
+		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 protect 并关闭新增IP自动封禁",
+			zap.String("event", "gb28181.security.runtime_fallback"), zap.Error(err))
 	}
 	runtime := gbsecurity.NewRuntime(gbsecurity.DefaultPolicy(), clock, agent, secret)
 	// Without authenticated-device history an automatic source ban could lock
@@ -588,7 +628,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
-func startSIPDependencies(cfg gbconfig.Config) error {
+func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) error {
 	runtime := setupSecurityRuntime()
 	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
@@ -668,8 +708,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			setter.SetUpgradeProcessor(newFirmwareUpgradeService)
 		}
 	}
+	sipQuiesce = nil
+	sipGenerationBackground = &asyncgroup.Group{}
 	sipServer = srv
-	if err := startCascadeRuntime(cfg, srv); err != nil {
+	if err := startCascadeRuntime(cfg, srv, credentialWarningReported); err != nil {
 		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.Error(err))
 	} else {
 		app.ZapLog.Info("国标级联运行时已装配")
@@ -883,63 +925,17 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
-func stopSIPDependencies(ctx context.Context) {
-	// Remove the facade before stopping any dependency it can call. Reload
-	// installs a fresh bundle only after all new business runtimes are ready.
-	clearZLMManagementController()
-	stopPlaybackRuntime(ctx)
-	stopRecordQueryRuntime()
-	stopFirmwareUpgradeRuntime()
-	stopPTZRuntime()
-	stopTalkRuntime(ctx)
-	stopRecordingRuntime()
-	if positionHistoryPruneCancel != nil {
-		positionHistoryPruneCancel()
-		positionHistoryPruneCancel = nil
-	}
-	if subscriptionScheduler != nil {
-		subscriptionScheduler.Stop()
-		subscriptionScheduler = nil
-	}
-	subscriptionService = nil
-	if offlineScanner != nil {
-		offlineScanner.Stop()
-		offlineScanner = nil
-	}
-	if playReconciler != nil {
-		playReconciler.Stop()
-		playReconciler = nil
-	}
-	playSvc = nil
-	playAuthMetrics = nil
-	gbroutes.SetPlayService(nil)
-	gbroutes.SetPlayAuthorizer(nil)
-	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
-	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
-	gbroutes.SetDeviceMgmtCaptureRuntime(nil)
-	deviceCaptureRegistry = nil
-	if sipServer != nil {
-		sipServer.SetSnapshotSink(nil)
-	}
-	stopCascadeRuntime(ctx)
-	if sipServer != nil {
-		if err := sipServer.Shutdown(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 SIP 服务优雅关闭失败,忽略继续", zap.Error(err))
-		}
-		sipServer = nil
-	}
-	if securityRuntime != nil {
-		if err := securityRuntime.Close(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 安全事件持久化停止失败,忽略继续", zap.Error(err))
-		}
-		securityRuntime = nil
-	}
-	gbroutes.SetSecurityRuntime(nil)
+func stopSIPDependencies(ctx context.Context) error {
+	runtime := captureSIPShutdownSnapshot()
+	err := stopSIPDependenciesSnapshot(ctx, runtime)
+	clearSIPShutdownGlobals()
+	return err
 }
 
-func stopPlaybackRuntime(ctx context.Context) {
+func stopPlaybackRuntime(ctx context.Context) error {
+	var stopErr error
 	if playbackService != nil {
-		_ = playbackService.Close(ctx)
+		stopErr = playbackService.Close(ctx)
 		playbackService = nil
 	}
 	playbackMetrics = nil
@@ -952,6 +948,7 @@ func stopPlaybackRuntime(ctx context.Context) {
 			u.SetPlaybackEndHook(nil)
 		}
 	}
+	return stopErr
 }
 
 func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
@@ -1134,7 +1131,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
-func stopRecordingRuntime() {
+func stopRecordingRuntime() error {
+	var stopErr error
 	device.SetStatusObserver(nil)
 	gbroutes.SetRecordingPlanStreamObserver(nil)
 	executors.SetRecordingPlanRuntime(nil)
@@ -1147,7 +1145,8 @@ func stopRecordingRuntime() {
 	}
 	if recordingCatalogScheduler != nil {
 		if err := recordingCatalogScheduler.Stop(); err != nil {
-			app.ZapLog.Warn("GB28181 云端录像目录对账停止超时", zap.Error(err))
+			stopErr = err
+			app.Log(context.Background()).Named("recording").Error("Recording catalog shutdown incomplete", zap.String("event", "recording.catalog_shutdown_incomplete"), logging.Error(err))
 		}
 		recordingCatalogScheduler = nil
 	}
@@ -1159,6 +1158,7 @@ func stopRecordingRuntime() {
 	recordingRepo = nil
 	gbroutes.SetCloudRecordingCatalogService(nil)
 	gbroutes.SetRecordingService(nil, nil, nil)
+	return stopErr
 }
 
 type broadcastSIPAdapter struct{ service *gbtalk.Service }
@@ -1230,20 +1230,29 @@ func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
 		broadcastRuntime.SetBroadcastMessageProcessor(service)
 		broadcastRuntime.SetBroadcastInviteProcessor(broadcastSIPAdapter{service: service})
 	}
+	background := sipGenerationBackground
+	if background == nil {
+		background = &asyncgroup.Group{}
+		sipGenerationBackground = background
+	}
 	inviter.SetTalkByeHandler(func(metadata uac.TalkDialogMetadata) {
-		go func() {
+		if !background.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			if err := service.OnRemoteBye(ctx, metadata.CallID); err != nil {
 				app.ZapLog.Warn("设备 TALK BYE 清理失败", zap.String("callId", metadata.CallID), zap.Error(err))
 			}
-		}()
+		}) {
+			app.Log(context.Background()).Named("talk").Warn("TALK BYE 清理未接纳",
+				zap.String("event", "talk.remote_bye_cleanup_rejected"))
+		}
 	})
 	talkCleanupWorker = service.StartCleanupWorker(time.Second)
 	app.ZapLog.Info("GB28181 语音对讲 service / Hook / 租约扫描已装配")
 }
 
-func stopTalkRuntime(ctx context.Context) {
+func stopTalkRuntime(ctx context.Context) error {
+	var stopErr error
 	if talkCleanupWorker != nil {
 		talkCleanupWorker.Stop()
 		talkCleanupWorker = nil
@@ -1260,22 +1269,30 @@ func stopTalkRuntime(ctx context.Context) {
 	}
 	if service != nil {
 		if err := service.Shutdown(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 语音对讲关闭清理存在失败", zap.Error(err))
+			stopErr = err
+			app.Log(ctx).Named("talk").Error("Talk shutdown incomplete", zap.String("event", "talk.shutdown_incomplete"), logging.Error(err))
 		}
 	}
 	talkSvc = nil
 	talkRepo = nil
 	gbroutes.SetTalkService(nil, nil)
+	return stopErr
 }
 
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
 // 由 SetupController.SaveConfig 保存后调用,让用户不需要重启进程.
 // 失败时 runtime state 会被 MarkFailed,不 panic.
 func ReloadSIP() error {
-	sipLifecycleMu.Lock()
-	defer sipLifecycleMu.Unlock()
+	reloadMu.Lock()
+	defer reloadMu.Unlock()
 
 	cfg := gbconfig.Load()
+	sipLifecycleMu.Lock()
+	if stopping {
+		sipLifecycleMu.Unlock()
+		return errors.New("gb28181 正在停止,拒绝 SIP 热重载")
+	}
+	sipLifecycleMu.Unlock()
 	if !cfg.Enabled {
 		return errors.New("gb28181 未在 config.yml 启用,无法热启动")
 	}
@@ -1297,8 +1314,33 @@ func ReloadSIP() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	stopSIPDependencies(ctx)
-	return startSIPDependencies(sipCfg)
+	run, err := reloadSIPGeneration(ctx)
+	if err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
+	if run != nil {
+		if err := run.generation.Wait(ctx); err != nil {
+			if shutdownDone(run.generation) {
+				finishReloadGeneration(run, err)
+			}
+			sipRuntimeStatus.MarkFailed(err.Error())
+			return err
+		}
+		finishReloadGeneration(run, nil)
+	}
+	sipLifecycleMu.Lock()
+	if stopping {
+		sipLifecycleMu.Unlock()
+		return errors.New("gb28181 正在停止,拒绝 SIP 热重载")
+	}
+	err = startSIPDependencies(sipCfg, false)
+	sipLifecycleMu.Unlock()
+	if err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
+	return nil
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
@@ -1360,7 +1402,9 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 		if err != nil {
 			app.ZapLog.Warn("GB28181 ZLM 默认节点 seed 失败", zap.Error(err))
 		} else {
-			app.ZapLog.Info("GB28181 ZLM 已 seed 默认节点", zap.String("uuid", uuidStr), zap.String("host", cfg.ZLM.Host))
+			app.Log(ctx).Named("zlm.node").Info("GB28181 ZLM 已 seed 默认节点",
+				zap.String("event", "zlm.node.default_seeded"), zap.String("uuid", uuidStr),
+				zap.String("endpoint", (node.Node{Host: cfg.ZLM.Host, APIPort: cfg.ZLM.HTTPPort}).HTTPEndpoint()))
 		}
 	}
 	zlmRegistry = reg
@@ -1370,7 +1414,7 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 
 	// 启动主动探活:治"重启后 30 秒点播黑洞"(spec: zlm-startup-probe)
 	// 独立 goroutine 不阻塞主流程;失败降级 = 当前行为(等 ZLM 下次心跳翻转)
-	runStartupProbe(reg)
+	startupProbeDone = runStartupProbe(reg)
 }
 
 // runStartupProbe 对 Registry 中所有节点跑一次主动探活。
@@ -1378,16 +1422,19 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 // 独立 goroutine 内执行,3 秒超时,不阻塞 bootstrap。
 // 探活成功 → registry.MarkActive(节点 State 从 offline 翻回 active,内存+DB)
 // 探活失败 → 保持 State 不动(下次 ZLM 心跳到达时 Collector 会自愈)
-func runStartupProbe(reg *node.Registry) {
+func runStartupProbe(reg *node.Registry) <-chan struct{} {
+	done := make(chan struct{})
 	factory := func(n *node.Node) gbzlmprobe.Client { return gbzlm.NewClientForNode(n) }
 	prober := gbzlmprobe.New(reg, factory, 3*time.Second, app.ZapLog)
 	go func() {
+		defer close(done)
 		// 独立 background ctx:探活是一次性任务,不跟 heartbeat 生命周期绑定
 		// (heartbeatCancel 此时还没建;单节点探活最多 3s 就退,不会泄漏)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		prober.Run(ctx)
 	}()
+	return done
 }
 
 func setupTrafficRuntime() {
@@ -1426,8 +1473,8 @@ func setupTrafficRuntime() {
 	trafficRealtime = realtime
 	gbroutes.SetFlowRuntime(zlmRegistry, flow)
 	gbroutes.SetDeviceTrafficController(gbcontrollers.NewDeviceTrafficController(db, realtime, zlmRegistry, zlmLocationMap))
-	sam.Start(ctx, time.Minute)
-	traffic.StartSessionPruner(ctx, repo, time.Now, func(err error) {
+	trafficDone = sam.Start(ctx, time.Minute)
+	trafficPrunerDone = traffic.StartSessionPruner(ctx, repo, time.Now, func(err error) {
 		app.ZapLog.Warn("GB28181 终态流量会话清理失败", zap.Error(err))
 	})
 	app.ZapLog.Info("GB28181 流量统计 Hook / 采样器已装配", zap.Duration("interval", time.Minute))
@@ -1505,7 +1552,12 @@ func setupZLMSchedulerLog() {
 	zlmSchedulerLog = svc
 	schedulerLogCancel = cancel
 
-	go pruneSchedulerLogDaily(ctx, svc)
+	pruneDone := make(chan struct{})
+	schedulerLogDone = pruneDone
+	go func() {
+		defer close(pruneDone)
+		pruneSchedulerLogDaily(ctx, svc)
+	}()
 
 	app.ZapLog.Info("GB28181 ZLM 调度日志服务已启动(buffer=1000, retention=7d)")
 }
@@ -1628,52 +1680,16 @@ func setupCivilCodeService() {
 	app.ZapLog.Info("GB28181 CivilCode 字典服务已装配", zap.Int("count", svc.AllCount()))
 }
 
-// Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
-func Stop() {
-	sipLifecycleMu.Lock()
-	defer sipLifecycleMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	stopSIPDependencies(ctx)
-	if heartbeatCancel != nil {
-		heartbeatCancel()
-		heartbeatCancel = nil
-	}
-	teardownZLMManagementCore()
-	if trafficCancel != nil {
-		trafficCancel()
-		trafficCancel = nil
-	}
-	if schedulerLogCancel != nil {
-		schedulerLogCancel() // 关 prune ticker 的 ctx
-		schedulerLogCancel = nil
-	}
-	if zlmSchedulerLog != nil {
-		zlmSchedulerLog.Stop() // drain pending,等 worker 退出
-		zlmSchedulerLog = nil
-	}
-	if metricsCleanupStop != nil {
-		close(metricsCleanupStop)
-		metricsCleanupStop = nil
-	}
-	if metricsPersistCancel != nil {
-		metricsPersistCancel()
-		metricsPersistCancel = nil
-	}
-	if dashboardRetentionCancel != nil {
-		dashboardRetentionCancel()
-		dashboardRetentionCancel = nil
-	}
-}
-
 func startPositionHistoryPruner() {
 	if positionHistoryPruneCancel != nil || app.DB() == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	positionHistoryPruneCancel = cancel
+	pruneDone := make(chan struct{})
+	positionHistoryPruneDone = pruneDone
 	go func() {
+		defer close(pruneDone)
 		prune := func() {
 			deleted, err := subscribe.PrunePositionHistory(ctx, app.DB(), time.Now(), subscribe.PositionHistoryRetentionDays())
 			if err != nil {

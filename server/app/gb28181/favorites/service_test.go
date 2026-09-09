@@ -26,6 +26,7 @@ func favoriteFixture(t *testing.T) (*gorm.DB, *gin.Context) {
 	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: "D1", ChannelID: "C1", Name: "东门", OwnerDeptID: 10, Status: 1}).Error)
 	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: "D1", ChannelID: "C2", Name: "西门", OwnerDeptID: 10, Status: 0}).Error)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/favorites", nil)
 	c.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 7}})
 	return db, c
 }

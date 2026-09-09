@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sort"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -54,7 +55,7 @@ func (menu *SysMenu) IsEmpty() bool {
 
 // Find 查找单个菜单
 func (menu *SysMenu) Find(c context.Context, funcs ...func(*gorm.DB) *gorm.DB) (err error) {
-	err = app.DB().Scopes(funcs...).WithContext(c).First(menu).Error
+	err = app.DBContext(c).Scopes(funcs...).First(menu).Error
 	if err == gorm.ErrRecordNotFound {
 		err = nil // 将记录未找到的错误转换为nil，通过IsEmpty()方法判断
 	}
@@ -80,11 +81,12 @@ func (list SysMenuList) GetApis() (res SysApiList) {
 }
 
 func (list *SysMenuList) Find(c context.Context, funcs ...func(*gorm.DB) *gorm.DB) (err error) {
-	err = app.DB().Scopes(funcs...).WithContext(c).Find(list).Error
+	err = app.DBContext(c).Scopes(funcs...).Find(list).Error
 	return
 }
 
-func (list SysMenuList) BuildTree() SysMenuList {
+func (list SysMenuList) BuildTree(contexts ...context.Context) SysMenuList {
+	ctx := modelLogContext(contexts...)
 	// 哈希表存储所有节点
 	nodeMap := make(map[uint]*SysMenu)
 	// 存储顶层节点
@@ -96,7 +98,10 @@ func (list SysMenuList) BuildTree() SysMenuList {
 
 		// 循环引用检测
 		if node.ID == node.ParentID {
-			app.ZapLog.Error(fmt.Sprintf("循环引用: %d -> %d", node.ID, node.ParentID))
+			app.Log(ctx).Error("menu tree cycle detected",
+				zap.String("event", "models.sysmenu.tree_cycle"),
+				zap.Uint("node_id", node.ID),
+				zap.Uint("parent_id", node.ParentID))
 			continue
 		}
 
@@ -120,7 +125,10 @@ func (list SysMenuList) BuildTree() SysMenuList {
 				}
 				parent.Children = append(parent.Children, node)
 			} else {
-				app.ZapLog.Warn(fmt.Sprintf("独立节点 %d: parentId=%d 不存在", node.ID, parentID))
+				app.Log(ctx).Warn("menu tree orphan detected",
+					zap.String("event", "models.sysmenu.tree_orphan"),
+					zap.Uint("node_id", node.ID),
+					zap.Uint("parent_id", parentID))
 			}
 		}
 	}

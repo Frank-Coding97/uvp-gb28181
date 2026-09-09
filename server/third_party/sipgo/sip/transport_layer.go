@@ -20,6 +20,7 @@ var (
 
 	// No need yet to expose
 	errTransportConnectionDoesNotExists = errors.New("connection does not exists")
+	errTransportClosed                  = errors.New("transport is closed")
 )
 
 // TransportLayer implementation.
@@ -785,13 +786,25 @@ func (l *TransportLayer) getConnection(network, addr string) (Connection, error)
 }
 
 func (l *TransportLayer) Close() error {
+	return l.CloseContext(context.Background())
+}
+
+func (l *TransportLayer) CloseContext(ctx context.Context) error {
 	l.log.Debug("Layer is closing")
 	var werr error
 	for _, t := range l.allTransports() {
 		if t == nil {
 			continue
 		}
-		if err := t.Close(); err != nil {
+		var err error
+		if closeContext, ok := t.(interface {
+			CloseContext(context.Context) error
+		}); ok {
+			err = closeContext.CloseContext(ctx)
+		} else {
+			err = t.Close()
+		}
+		if err != nil {
 			werr = errors.Join(werr, err)
 		}
 	}

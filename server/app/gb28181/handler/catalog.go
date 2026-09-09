@@ -10,6 +10,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -166,9 +167,11 @@ func getCatalogPipeline() *catalog.Pipeline {
 //
 // pipeline 不可用时(db nil)回退到旧路径,保证生产兼容
 func HandleCatalogResponse(ctx context.Context, body []byte) {
+	logger := app.Log(ctx).Named("gb28181.catalog")
 	resp, err := manscdp.ParseCatalogResponse(body)
 	if err != nil {
-		app.ZapLog.Warn("Catalog 应答解析失败", zap.Error(err))
+		logger.Warn("Catalog 应答解析失败",
+			zap.String("event", "gb28181.catalog.response_parse_failed"), logging.Error(err))
 		return
 	}
 
@@ -184,19 +187,23 @@ func HandleCatalogResponse(ctx context.Context, body []byte) {
 				items = append(items, manscdpToCatalogItem(it))
 			}
 			if e := pipeline.Ingest(ctx, catalog.Sender{SourceDeviceID: resp.DeviceID}, items); e != nil {
-				app.ZapLog.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",
-					zap.String("deviceId", resp.DeviceID), zap.Error(e))
+				logger.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",
+					zap.String("event", "gb28181.catalog.ingest_failed"),
+					zap.String("device_id", resp.DeviceID), logging.Error(e))
 			}
 		} else {
-			app.ZapLog.Debug("CatalogPipeline 不可用,跳过 catalog 入库", zap.String("deviceId", resp.DeviceID))
+			logger.Debug("CatalogPipeline 不可用,跳过 catalog 入库",
+				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
+				zap.String("device_id", resp.DeviceID))
 		}
 	}
 
-	app.ZapLog.Info("Catalog 应答处理",
-		zap.String("deviceId", resp.DeviceID),
+	logger.Info("Catalog 应答处理",
+		zap.String("event", "gb28181.catalog.response_processed"),
+		zap.String("device_id", resp.DeviceID),
 		zap.Int("sn", resp.SN),
-		zap.Int("本条", len(resp.DeviceList.Items)),
-		zap.Int("累计", received), zap.Int("总数", sumNum), zap.Bool("收齐", done))
+		zap.Int("item_count", len(resp.DeviceList.Items)),
+		zap.Int("received_count", received), zap.Int("total_count", sumNum), zap.Bool("complete", done))
 }
 
 // manscdpToCatalogItem 把 manscdp DTO 转 catalog DTO(无依赖,易测)

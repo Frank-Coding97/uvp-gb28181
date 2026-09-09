@@ -106,6 +106,9 @@ type registerAttemptTracker struct {
 	now      func() time.Time
 	after    func(time.Duration, func()) registerTimer
 	sink     diagnosis.DiagnosticSink
+	active   int
+	closed   bool
+	done     chan struct{}
 }
 
 func newRegisterAttemptTracker(sink diagnosis.DiagnosticSink, now func() time.Time) *registerAttemptTracker {
@@ -145,6 +148,10 @@ func (tracker *registerAttemptTracker) startChallenge(event diagnosis.Event, non
 		attempt.nonceSum = sha256.Sum256([]byte(nonce))
 	}
 	tracker.mu.Lock()
+	if tracker.closed {
+		tracker.mu.Unlock()
+		return
+	}
 	if current := tracker.attempts[event.CorrelationKey]; current != nil && current.timer != nil {
 		current.timer.Stop()
 	}
@@ -153,6 +160,28 @@ func (tracker *registerAttemptTracker) startChallenge(event diagnosis.Event, non
 	}
 	tracker.attempts[event.CorrelationKey] = attempt
 	attempt.timer = tracker.after(tracker.window, func() { tracker.expire(event.CorrelationKey) })
+	tracker.mu.Unlock()
+}
+
+func (tracker *registerAttemptTracker) beginCallback() bool {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if tracker.closed {
+		return false
+	}
+	if tracker.done == nil {
+		tracker.done = make(chan struct{})
+	}
+	tracker.active++
+	return true
+}
+
+func (tracker *registerAttemptTracker) endCallback() {
+	tracker.mu.Lock()
+	tracker.active--
+	if tracker.closed && tracker.active == 0 {
+		close(tracker.done)
+	}
 	tracker.mu.Unlock()
 }
 
@@ -172,6 +201,11 @@ func (tracker *registerAttemptTracker) hasChallenge(deviceID, nonce string) bool
 }
 
 func (tracker *registerAttemptTracker) expire(key string) bool {
+	if !tracker.beginCallback() {
+		return false
+	}
+	defer tracker.endCallback()
+
 	tracker.mu.Lock()
 	attempt := tracker.attempts[key]
 	if attempt == nil || attempt.timedOut {
@@ -188,6 +222,62 @@ func (tracker *registerAttemptTracker) expire(key string) bool {
 	tracker.mu.Unlock()
 	_ = sink.Emit(context.Background(), event)
 	return true
+}
+
+// Close stops future timeout callbacks and waits for a callback already in
+// progress. A deadline reports an incomplete wait while the callback remains
+// owned by the tracker and can finish best-effort.
+func (tracker *registerAttemptTracker) Close(ctx context.Context) error {
+	if tracker == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tracker.mu.Lock()
+	if !tracker.closed {
+		tracker.closed = true
+		for key, attempt := range tracker.attempts {
+			if attempt.timer != nil {
+				attempt.timer.Stop()
+			}
+			delete(tracker.attempts, key)
+		}
+		if tracker.done == nil {
+			tracker.done = make(chan struct{})
+		}
+		if tracker.active == 0 {
+			close(tracker.done)
+		}
+	}
+	done := tracker.done
+	tracker.mu.Unlock()
+
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+// Close joins register diagnosis timers before the owning SIP server closes
+// its trace runtime.
+func (h *RegisterHandler) Close(ctx context.Context) error {
+	if h == nil || h.attempts == nil {
+		return nil
+	}
+	return h.attempts.Close(ctx)
 }
 
 func (tracker *registerAttemptTracker) finish(key string, completedAt time.Time) {

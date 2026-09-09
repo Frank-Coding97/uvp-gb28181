@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
@@ -10,6 +11,7 @@ type JobSchedulerInterf interface {
 	// 生命周期管理
 	Start()
 	Stop()
+	StopContext(context.Context) error
 
 	// 执行器管理
 	RegisterExecutor(executor schedulerhelper.Executor)

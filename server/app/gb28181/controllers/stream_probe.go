@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,12 +33,13 @@ func (c *StreamProbeController) SetDB(dbFunc func() *gorm.DB) { c.dbFunc = dbFun
 
 func (c *StreamProbeController) Run(ctx *gin.Context) {
 	if c.service == nil {
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "视频探针服务未装配"})
 		return
 	}
 	streamID := ctx.Param("streamId")
 	var channel gbmodels.GbChannel
-	result := c.dbFunc().WithContext(ctx).Scopes(ownerDeptScope(ctx)).Select("id").Where("stream_id = ?", streamID).Limit(1).Find(&channel)
+	result := c.dbFunc().WithContext(ctx.Request.Context()).Scopes(ownerDeptScope(ctx)).Select("id").Where("stream_id = ?", streamID).Limit(1).Find(&channel)
 	if result.Error != nil {
 		c.FailAndAbort(ctx, "查询流失败", result.Error)
 		return
@@ -49,10 +51,13 @@ func (c *StreamProbeController) Run(ctx *gin.Context) {
 	snapshot, err := c.service.Run(ctx.Request.Context(), streamID)
 	switch {
 	case errors.Is(err, streamprobe.ErrStreamOffline):
+		response.SetBusinessResult(ctx, 1, false)
 		ctx.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "流已离线"})
 	case errors.Is(err, streamprobe.ErrNodeUnavailable):
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "媒体节点不可达"})
 	case errors.Is(err, context.DeadlineExceeded):
+		response.SetBusinessResult(ctx, 1, false)
 		ctx.JSON(http.StatusGatewayTimeout, gin.H{"code": 1, "message": "视频探针超时"})
 	case err != nil:
 		c.FailAndAbort(ctx, "视频探针执行失败", err)

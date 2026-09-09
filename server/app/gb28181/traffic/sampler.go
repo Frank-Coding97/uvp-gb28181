@@ -42,11 +42,13 @@ func NewSampler(nodes SamplerNodeRegistry, clientFor SamplerClientFactory, repo 
 	return &Sampler{nodes: nodes, clientFor: clientFor, repo: repo, attribution: attribution, realtime: realtime, now: now, failures: make(map[int64]int)}
 }
 
-func (s *Sampler) Start(ctx context.Context, interval time.Duration) {
+func (s *Sampler) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
 	if interval <= 0 {
 		interval = time.Minute
 	}
 	go func() {
+		defer close(done)
 		_ = s.SampleOnce(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -59,6 +61,7 @@ func (s *Sampler) Start(ctx context.Context, interval time.Duration) {
 			}
 		}
 	}()
+	return done
 }
 
 func (s *Sampler) SampleOnce(ctx context.Context) error {

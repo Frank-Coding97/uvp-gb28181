@@ -25,6 +25,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // Stopper 抽象 play.Service.Stop,便于 mock.
@@ -129,12 +130,14 @@ func New(interval time.Duration, stopper Stopper, opts ...Option) *Reconciler {
 // 同一 Reconciler 只能 Start 一次;重复 Start 无副作用(第二次会被忽略).
 func (r *Reconciler) Start(ctx context.Context) {
 	if r.interval <= 0 {
-		app.ZapLog.Info("reconciler 未启动:interval <= 0",
+		app.Log(ctx).Named("play.reconcile").Info("reconciler 未启动:interval <= 0",
+			zap.String("event", "play.reconcile.disabled"),
 			zap.Duration("interval", r.interval))
 		return
 	}
 	if r.cancel != nil {
-		app.ZapLog.Warn("reconciler 已启动,忽略重复 Start")
+		app.Log(ctx).Named("play.reconcile").Warn("reconciler 已启动,忽略重复 Start",
+			zap.String("event", "play.reconcile.duplicate_start"))
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -159,8 +162,10 @@ func (r *Reconciler) loop(ctx context.Context) {
 	defer r.wg.Done()
 	defer func() {
 		if rec := recover(); rec != nil {
-			app.ZapLog.Error("reconciler loop panic",
-				zap.Any("recover", rec))
+			app.Log(ctx).Named("play.reconcile").Error("reconciler loop panic",
+				zap.String("event", "play.reconcile.panic"),
+				zap.String("panic_type", logging.TypeName(rec)),
+				zap.Stack("stack"))
 		}
 	}()
 
@@ -174,7 +179,8 @@ func (r *Reconciler) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			app.ZapLog.Info("reconciler 收到停止信号,loop 退出")
+			app.Log(ctx).Named("play.reconcile").Info("reconciler 收到停止信号,loop 退出",
+				zap.String("event", "play.reconcile.stopped"))
 			return
 		case <-ticker.C:
 			r.runOnce(ctx)
@@ -187,7 +193,8 @@ func (r *Reconciler) loop(ctx context.Context) {
 // 返回 Stats 便于测试断言,内部日志已经记录.
 func (r *Reconciler) runOnce(ctx context.Context) Stats {
 	if !r.running.CompareAndSwap(false, true) {
-		app.ZapLog.Debug("reconciler 上一轮未完成,本轮跳过")
+		app.Log(ctx).Named("play.reconcile").Debug("reconciler 上一轮未完成,本轮跳过",
+			zap.String("event", "play.reconcile.overlap_skipped"))
 		return Stats{}
 	}
 	defer r.running.Store(false)
@@ -197,7 +204,8 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 
 	channels, err := r.lister.ListPlayingChannels(ctx)
 	if err != nil {
-		app.ZapLog.Warn("reconciler 查 DB 失败,本轮跳过",
+		app.Log(ctx).Named("play.reconcile").Warn("reconciler 查 DB 失败,本轮跳过",
+			zap.String("event", "play.reconcile.list_failed"),
 			zap.Error(err))
 		return stats
 	}
@@ -205,7 +213,8 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 
 	for _, ch := range channels {
 		if ctx.Err() != nil {
-			app.ZapLog.Info("reconciler 中途收到停止信号,提前退出")
+			app.Log(ctx).Named("play.reconcile").Info("reconciler 中途收到停止信号,提前退出",
+				zap.String("event", "play.reconcile.interrupted"))
 			break
 		}
 		result := r.judgeOne(ctx, ch.StreamID)
@@ -223,14 +232,16 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 			}
 			if stopErr != nil {
 				stats.Failed++
-				app.ZapLog.Error("reconciler 清理假阳性失败",
+				app.Log(ctx).Named("play.reconcile").Error("reconciler 清理假阳性失败",
+					zap.String("event", "play.reconcile.cleanup_failed"),
 					zap.String("streamID", ch.StreamID),
 					zap.String("deviceID", ch.DeviceID),
 					zap.String("channelID", ch.ChannelID),
 					zap.Error(stopErr))
 			} else {
 				stats.Cleaned++
-				app.ZapLog.Info("reconciler 已清理假阳性",
+				app.Log(ctx).Named("play.reconcile").Info("reconciler 已清理假阳性",
+					zap.String("event", "play.reconcile.cleanup_succeeded"),
 					zap.String("streamID", ch.StreamID),
 					zap.String("deviceID", ch.DeviceID),
 					zap.String("channelID", ch.ChannelID))
@@ -240,7 +251,8 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 		}
 	}
 
-	app.ZapLog.Info("reconciler 一轮对账完成",
+	app.Log(ctx).Named("play.reconcile").Info("reconciler 一轮对账完成",
+		zap.String("event", "play.reconcile.round_completed"),
 		zap.Int("scanned", stats.Scanned),
 		zap.Int("cleaned", stats.Cleaned),
 		zap.Int("skipped", stats.Skipped),

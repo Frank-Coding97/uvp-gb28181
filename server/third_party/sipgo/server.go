@@ -3,11 +3,13 @@ package sipgo
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/emiago/sipgo/sip"
 )
@@ -45,6 +47,8 @@ type Server struct {
 	log *slog.Logger
 
 	requestMiddlewares []func(r *sip.Request)
+	requestLifecycle   sip.RequestLifecycle
+	watchers           sip.Lifecycle
 }
 
 type ServerOption func(s *Server) error
@@ -53,6 +57,15 @@ type ServerOption func(s *Server) error
 func WithServerLogger(logger *slog.Logger) ServerOption {
 	return func(s *Server) error {
 		s.log = logger
+		return nil
+	}
+}
+
+// WithServerRequestLifecycle brackets middleware and the business handler.
+// Transaction termination remains in handleRequest after EndBusiness.
+func WithServerRequestLifecycle(lifecycle sip.RequestLifecycle) ServerOption {
+	return func(s *Server) error {
+		s.requestLifecycle = lifecycle
 		return nil
 	}
 }
@@ -68,6 +81,7 @@ func NewServer(ua *UserAgent, options ...ServerOption) (*Server, error) {
 
 	// Handle our transaction layer requests
 	s.tx.OnRequest(s.handleRequest)
+	s.tx.SetRequestLifecycle(s.requestLifecycle)
 	return s, nil
 }
 
@@ -97,20 +111,34 @@ func newBaseServer(ua *UserAgent, options ...ServerOption) (*Server, error) {
 func (srv *Server) ListenAndServe(ctx context.Context, network string, addr string) error {
 	network = strings.ToLower(network)
 	var connCloser io.Closer
+	var connMu sync.Mutex
 
-	// TODO consider different design to avoid this additional go routines
-	go func() {
+	// Keep the context watcher owned so a shutdown can join its logging and
+	// close callback before the root logger is closed.
+	srv.watchers.Go(func() {
 		select {
 		case <-ctx.Done():
-			if connCloser == nil {
+			connMu.Lock()
+			closer := connCloser
+			connMu.Unlock()
+			if closer == nil {
 				return
 			}
-			if err := connCloser.Close(); err != nil {
+			if err := closer.Close(); err != nil {
 				srv.log.Error("Failed to close listener", "error", err)
 			}
 
 		}
-	}()
+	})
+	setCloser := func(closer io.Closer) {
+		connMu.Lock()
+		connCloser = closer
+		canceled := ctx.Err() != nil
+		connMu.Unlock()
+		if canceled {
+			_ = closer.Close()
+		}
+	}
 
 	switch network {
 	case "udp", "udp4", "udp6":
@@ -125,7 +153,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen udp error. err=%w", err)
 		}
 
-		connCloser = udpConn
+		setCloser(udpConn)
 		listenReadyCtx(ctx, network, udpConn.LocalAddr().String())
 		return srv.tp.ServeUDP(udpConn)
 
@@ -140,7 +168,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen tcp error. err=%w", err)
 		}
 
-		connCloser = conn
+		setCloser(conn)
 		listenReadyCtx(ctx, network, conn.Addr().String())
 
 		return srv.tp.ServeTCP(conn)
@@ -157,7 +185,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen tcp error. err=%w", err)
 		}
 
-		connCloser = conn
+		setCloser(conn)
 		listenReadyCtx(ctx, network, conn.Addr().String())
 		// and uses listener to buffer
 		return srv.tp.ServeWS(conn)
@@ -171,22 +199,25 @@ func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr s
 	network = strings.ToLower(network)
 
 	var connCloser io.Closer
+	var connMu sync.Mutex
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// TODO consider different design to avoid this additional go routines
-	go func() {
+	srv.watchers.Go(func() {
 		select {
 		case <-ctx.Done():
-			if connCloser == nil {
+			connMu.Lock()
+			closer := connCloser
+			connMu.Unlock()
+			if closer == nil {
 				return
 			}
-			if err := connCloser.Close(); err != nil {
+			if err := closer.Close(); err != nil {
 				srv.log.Error("Failed to close listener", "error", err)
 			}
 
 		}
-	}()
+	})
 	// Support explicitp ipv4 vs ipv6
 	tcpNetwork := "tcp"
 	switch network {
@@ -216,7 +247,13 @@ func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr s
 			return fmt.Errorf("listen tls error. err=%w", err)
 		}
 
+		connMu.Lock()
 		connCloser = listener
+		canceled := ctx.Err() != nil
+		connMu.Unlock()
+		if canceled {
+			_ = listener.Close()
+		}
 		listenReadyCtx(ctx, network, listener.Addr().String())
 
 		if network == "wss" {
@@ -256,12 +293,40 @@ func (srv *Server) ServeWSS(l net.Listener) error {
 
 // handleRequest is handling transaction layer
 func (srv *Server) handleRequest(req *sip.Request, tx *sip.ServerTx) {
-	for _, mid := range srv.requestMiddlewares {
-		mid(req)
+	handleBusiness := func(hasLease bool) {
+		accepted := true
+		if srv.requestLifecycle != nil {
+			accepted = srv.requestLifecycle.BeginBusiness(req, tx)
+			if accepted && !hasLease {
+				defer srv.requestLifecycle.EndBusiness()
+			}
+		}
+		if !accepted {
+			return
+		}
+		for _, mid := range srv.requestMiddlewares {
+			mid(req)
+		}
+
+		handler := srv.getHandler(req.Method)
+		handler(req, tx)
 	}
 
-	handler := srv.getHandler(req.Method)
-	handler(req, tx)
+	if tx != nil {
+		if lease := tx.RequestLease(); lease != nil {
+			// The transaction layer also owns this fallback release. Request
+			// leases are idempotent so a handler panic or an alternate server
+			// implementation cannot strand the admission count.
+			func() {
+				defer lease.Release()
+				handleBusiness(true)
+			}()
+		} else {
+			handleBusiness(false)
+		}
+	} else {
+		handleBusiness(false)
+	}
 	if tx != nil {
 		// Must be called to prevent any transaction leaks
 		tx.TerminateGracefully()
@@ -271,6 +336,27 @@ func (srv *Server) handleRequest(req *sip.Request, tx *sip.ServerTx) {
 // WriteResponse will proxy message to transport layer. Use it in stateless mode
 func (srv *Server) WriteResponse(r *sip.Response) error {
 	return srv.tp.WriteMsg(r)
+}
+
+// QuiesceRequests closes new server transaction admission while preserving
+// matching retransmissions, ACK, CANCEL and responses.
+func (srv *Server) QuiesceRequests() {
+	if srv == nil || srv.tx == nil {
+		return
+	}
+	srv.tx.QuiesceRequests()
+}
+
+// CloseContext closes the user agent and joins dispatch, FSM, transport reader
+// and context-watcher callbacks. The caller must cancel listener contexts so
+// ListenAndServe can return.
+func (srv *Server) CloseContext(ctx context.Context) error {
+	if srv == nil {
+		return nil
+	}
+	err := srv.UserAgent.CloseContext(ctx)
+	srv.watchers.Close()
+	return errors.Join(err, srv.watchers.Wait(ctx))
 }
 
 // Close server handle. UserAgent must be closed for full transaction and transport layer closing.

@@ -22,7 +22,7 @@ import (
 )
 
 // PluginsManagerService 插件管理服务
-type PluginsManagerService struct{}
+type PluginsManagerService struct{ scope context.Context }
 
 // NewPluginsManagerService 创建插件管理服务
 func NewPluginsManagerService() *PluginsManagerService {
@@ -383,7 +383,7 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
 	var createTableSQL string
-	err := sqlDB.QueryRow(fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)).Scan(&tableName, &createTableSQL)
+	err := sqlDB.QueryRowContext(pms.logContext(), fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)).Scan(&tableName, &createTableSQL)
 	if err != nil {
 		return err
 	}
@@ -399,7 +399,7 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 	}
 
 	// 获取表中的数据
-	rows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM `%s`", tableName))
+	rows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM `%s`", tableName))
 	if err != nil {
 		return err
 	}
@@ -455,7 +455,7 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 // generatePostgreSQLTableSQL 生成PostgreSQL的建表和数据插入SQL
 func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
-	rows, err := sqlDB.Query(`
+	rows, err := sqlDB.QueryContext(pms.logContext(), `
 		SELECT 
 			'CREATE TABLE ' || t.tablename || ' (' || 
 			string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ') || 
@@ -488,7 +488,7 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 	}
 
 	// 获取表中的数据
-	dataRows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM %s", tableName))
+	dataRows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM %s", tableName))
 	if err != nil {
 		return err
 	}
@@ -542,7 +542,7 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
 	var createTableSQL string
-	err := sqlDB.QueryRow(`
+	err := sqlDB.QueryRowContext(pms.logContext(), `
 		SELECT 
 			'CREATE TABLE [' + TABLE_NAME + '] (' + 
 			STUFF((SELECT ', ' + '[' + COLUMN_NAME + '] ' + DATA_TYPE
@@ -571,7 +571,7 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 	}
 
 	// 获取表中的数据
-	rows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM [%s]", tableName))
+	rows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM [%s]", tableName))
 	if err != nil {
 		return err
 	}
@@ -658,7 +658,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	}
 
 	// 获取菜单数据库连接
-	db := app.DB()
+	db := app.DBContext(pms.logContext())
 	if db == nil {
 		return "", errors.New("数据库连接失败")
 	}
@@ -679,7 +679,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	if len(menuIds) == 0 {
 		return "", nil
 	}
-	ctx := context.Background()
+	ctx := pms.logContext()
 	// 获取所有菜单数据，包括子菜单
 	menuList := models.NewSysMenuList()
 	err := menuList.Find(ctx, func(d *gorm.DB) *gorm.DB {
@@ -700,7 +700,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	}
 
 	// 构建树结构
-	menuTree := menuList.FixOrphanParentIDs().BuildTree()
+	menuTree := menuList.FixOrphanParentIDs().BuildTree(pms.logContext())
 
 	// 生成JSON
 	jsonStr, err := menuTree.Json()
@@ -970,7 +970,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 
 		switch dbType {
 		case "mysql":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
 				tableName,
 			).Scan(&exists)
@@ -979,7 +979,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 			}
 
 		case "postgresql":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
 				tableName,
 			).Scan(&exists)
@@ -988,7 +988,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 			}
 
 		case "sqlserver":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT CASE WHEN EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @TableName) THEN 1 ELSE 0 END",
 				sql.Named("TableName", tableName),
 			).Scan(&exists)
@@ -1123,7 +1123,7 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 		if stmt == "" {
 			continue
 		}
-		if err := db.Exec(stmt).Error; err != nil {
+		if err := db.WithContext(pms.logContext()).Exec(stmt).Error; err != nil {
 			return fmt.Errorf("执行SQL失败: %v", err)
 		}
 	}
@@ -1303,7 +1303,7 @@ func (pms *PluginsManagerService) uninstallMenus(c *gin.Context, pluginMenus []m
 		return nil
 	}
 
-	db := app.DB()
+	db := app.DBContext(pms.logContext())
 	if db == nil {
 		return errors.New("数据库连接失败")
 	}
@@ -1529,23 +1529,39 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 	for _, tableName := range tableNames {
 		switch dbType {
 		case "mysql":
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
 				return fmt.Errorf("删除MySQL表失败 %s: %v", tableName, err)
 			}
 		case "postgresql":
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)).Error; err != nil {
 				return fmt.Errorf("删除PostgreSQL表失败 %s: %v", tableName, err)
 			}
 		case "sqlserver":
-			if err := db.Exec(fmt.Sprintf("IF OBJECT_ID('[%s]') IS NOT NULL DROP TABLE [%s]", tableName, tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("IF OBJECT_ID('[%s]') IS NOT NULL DROP TABLE [%s]", tableName, tableName)).Error; err != nil {
 				return fmt.Errorf("删除SQL Server表失败 %s: %v", tableName, err)
 			}
 		default:
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
 				return fmt.Errorf("删除表失败 %s: %v", tableName, err)
 			}
 		}
 	}
 
 	return nil
+}
+
+// WithContext returns a request-scoped copy; the controller-owned service stays immutable.
+func (pms *PluginsManagerService) WithContext(ctx context.Context) *PluginsManagerService {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	clone := *pms
+	clone.scope = context.WithoutCancel(ctx)
+	return &clone
+}
+func (pms *PluginsManagerService) logContext() context.Context {
+	if pms.scope == nil {
+		return context.Background()
+	}
+	return pms.scope
 }

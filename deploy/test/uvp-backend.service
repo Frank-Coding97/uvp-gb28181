@@ -16,6 +16,7 @@ EnvironmentFile=/opt/uvp-gb28181/config/sip-trace-backend.env
 ExecStart=/opt/uvp-gb28181/current/backend/uvp-gb28181
 Restart=on-failure
 RestartSec=3s
+TimeoutStopSec=45s
 NoNewPrivileges=true
 PrivateTmp=true
 # ProtectHome would make /root read-only; the Go runtime needs /root/.cache.

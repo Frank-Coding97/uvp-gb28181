@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -389,9 +390,11 @@ func SIPTraceRetentionDays() int {
 	if app.ConfigYml != nil && app.ConfigYml.Get(SIPTraceRetentionDaysConfigKey) != nil {
 		configured := app.ConfigYml.GetInt(SIPTraceRetentionDaysConfigKey)
 		if configured < MinSIPTraceRetentionDays || configured > MaxSIPTraceRetentionDays {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("SIP trace retention days is invalid; using default", zap.Int("configured", configured), zap.Int("default", days))
-			}
+			app.Log(context.Background()).Named("gb28181.config").Warn(
+				"SIP trace retention days is invalid; using default",
+				zap.String("event", "gb28181.config.trace_retention_invalid"),
+				zap.Int("configured", configured), zap.Int("default", days),
+			)
 		}
 	}
 	return days

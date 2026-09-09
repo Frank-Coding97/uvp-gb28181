@@ -73,7 +73,7 @@ func New(reg Registry, factory ClientFactory, timeout time.Duration, logger *zap
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
-	return &Prober{reg: reg, factory: factory, timeout: timeout, logger: logger}
+	return &Prober{reg: reg, factory: factory, timeout: timeout, logger: logger.Named("zlm.probe")}
 }
 
 // Run 并发对所有节点跑一次探活。maintenance 节点直接跳过。
@@ -84,7 +84,7 @@ func New(reg Registry, factory ClientFactory, timeout time.Duration, logger *zap
 func (p *Prober) Run(ctx context.Context) []Result {
 	nodes := p.reg.List()
 	if len(nodes) == 0 {
-		p.logger.Info("GB28181 ZLM 启动探活 skip:注册表为空")
+		p.logger.Info("GB28181 ZLM 启动探活 skip:注册表为空", zap.String("event", "zlm.probe.empty"))
 		return nil
 	}
 
@@ -103,8 +103,8 @@ func (p *Prober) Run(ctx context.Context) []Result {
 		if n.State == node.StateMaintenance {
 			results[i].Skipped = true
 			atomic.AddInt64(&skipCount, 1)
-			p.logger.Info("GB28181 ZLM 启动探活 skip(maintenance)",
-				zap.Int64("nodeId", n.ID), zap.String("name", n.Name))
+			p.logger.Info("GB28181 ZLM 启动探活 skip(maintenance)", zap.String("event", "zlm.probe.maintenance_skipped"),
+				zap.Int64("node_id", n.ID), zap.String("name", n.Name))
 			continue
 		}
 
@@ -124,12 +124,12 @@ func (p *Prober) Run(ctx context.Context) []Result {
 			if err != nil {
 				r.Err = err
 				atomic.AddInt64(&failCount, 1)
-				p.logger.Warn("GB28181 ZLM 启动探活 fail",
-					zap.Int64("nodeId", target.ID),
+				p.logger.Warn("GB28181 ZLM 启动探活 fail", zap.String("event", "zlm.probe.failed"),
+					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
-					zap.Int64("durationMs", r.DurationMS),
-					zap.String("stateBefore", string(r.StateBefore)),
+					zap.String("endpoint", target.HTTPEndpoint()),
+					zap.Int64("duration_ms", r.DurationMS),
+					zap.String("state_before", string(r.StateBefore)),
 					zap.Error(err))
 				return
 			}
@@ -137,8 +137,8 @@ func (p *Prober) Run(ctx context.Context) []Result {
 			// 探活通过:翻 State 到 active + 刷 LastHeartbeatAt + 落库
 			if err := p.reg.MarkActive(ctx, target.ID); err != nil {
 				// 内存翻了但 DB 没写成,记 warn,不算 fail(下次心跳到时 Watcher 也不会误伤)
-				p.logger.Warn("GB28181 ZLM 启动探活 pass 但 MarkActive 失败",
-					zap.Int64("nodeId", target.ID),
+				p.logger.Warn("GB28181 ZLM 启动探活 pass 但 MarkActive 失败", zap.String("event", "zlm.probe.activation_failed"),
+					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
 					zap.Error(err))
 			}
@@ -147,24 +147,24 @@ func (p *Prober) Run(ctx context.Context) []Result {
 			atomic.AddInt64(&passCount, 1)
 
 			if r.StateBefore == node.StateOffline {
-				p.logger.Info("GB28181 ZLM 节点启动探活翻转 offline→active",
-					zap.Int64("nodeId", target.ID),
+				p.logger.Info("GB28181 ZLM 节点启动探活翻转 offline→active", zap.String("event", "zlm.probe.node_active"),
+					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
-					zap.Int64("durationMs", r.DurationMS))
+					zap.String("endpoint", target.HTTPEndpoint()),
+					zap.Int64("duration_ms", r.DurationMS))
 			} else {
-				p.logger.Info("GB28181 ZLM 启动探活 pass",
-					zap.Int64("nodeId", target.ID),
+				p.logger.Info("GB28181 ZLM 启动探活 pass", zap.String("event", "zlm.probe.passed"),
+					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
-					zap.Int64("durationMs", r.DurationMS),
-					zap.String("stateBefore", string(r.StateBefore)))
+					zap.String("endpoint", target.HTTPEndpoint()),
+					zap.Int64("duration_ms", r.DurationMS),
+					zap.String("state_before", string(r.StateBefore)))
 			}
 		}(i, n)
 	}
 	wg.Wait()
 
-	p.logger.Info("GB28181 ZLM 启动探活完成",
+	p.logger.Info("GB28181 ZLM 启动探活完成", zap.String("event", "zlm.probe.completed"),
 		zap.Int("total", len(nodes)),
 		zap.Int64("pass", atomic.LoadInt64(&passCount)),
 		zap.Int64("fail", atomic.LoadInt64(&failCount)),

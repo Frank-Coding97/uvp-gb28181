@@ -123,7 +123,7 @@ func visibleDirectoryDeptIDs(c *gin.Context, db *gorm.DB) ([]uint, error) {
 	set := map[uint]struct{}{}
 	for _, model := range []any{&gbmodels.GbDevice{}, &gbmodels.GbCustomGroup{}} {
 		var ids []uint
-		if err := db.WithContext(context.Background()).Model(model).Scopes(ownerDeptScope(c)).Distinct("owner_dept_id").Pluck("owner_dept_id", &ids).Error; err != nil {
+		if err := db.WithContext(c.Request.Context()).Model(model).Scopes(ownerDeptScope(c)).Distinct("owner_dept_id").Pluck("owner_dept_id", &ids).Error; err != nil {
 			return nil, err
 		}
 		for _, id := range ids {

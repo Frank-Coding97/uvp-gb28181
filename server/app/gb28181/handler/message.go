@@ -14,6 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -203,6 +204,9 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 
 // Handle 处理 MESSAGE 请求
 func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
+	callID, cseq := sipPairKey(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.message")
 	// 解析 MANSCDP body(兼容 GB2312/GB18030 编码)
 	head, err := manscdp.ParseHead(req.Body())
 	if err != nil {
@@ -216,14 +220,14 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			status = http.StatusBadRequest
 			reason = http.StatusText(status)
 		}
-		app.ZapLog.Warn("GB28181 MESSAGE 解析失败,忽略", zap.Error(err))
+		logger.Warn("GB28181 MESSAGE 解析失败,忽略",
+			zap.String("event", "gb28181.message.parse_failed"),
+			zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
 		return
 	}
 
 	kind := txKindFromCmd(head.CmdType)
-	callID, cseq := sipPairKey(req)
-	ctx := context.Background()
 	responseSent := false
 	// 已知 Kind 的入向事件:Begin + End 一起打(瞬时事务,server 端立刻应答)
 	// Catalog Response 也走入向计数,即便 UAC 端没埋点也至少有一条
@@ -266,7 +270,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 					_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
 					responseSent = true
 					if processErr != nil {
-						app.ZapLog.Warn("GB28181 设备升级最终结果处理失败", zap.String("deviceId", head.DeviceID), zap.Int("status", status), zap.Error(processErr))
+						logger.Warn("GB28181 设备升级最终结果处理失败",
+							zap.String("event", "gb28181.message.upgrade_result_failed"),
+							zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+							zap.Int("sip_status", status), logging.Error(processErr))
 					}
 					if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
 						h.recorder.End(callID, cseq, status, processErr == nil)
@@ -286,7 +293,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			consumed, processErr := processor.OnUpgradeMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body())
 			if consumed || processErr != nil {
 				if processErr != nil {
-					app.ZapLog.Warn("GB28181 设备升级响应处理失败", zap.String("deviceId", head.DeviceID), zap.Error(processErr))
+					logger.Warn("GB28181 设备升级响应处理失败",
+						zap.String("event", "gb28181.message.upgrade_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(processErr))
 				}
 				if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
 					h.recorder.End(callID, cseq, 200, processErr == nil)
@@ -301,7 +311,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if processor := h.getBroadcastProcessor(); processor != nil {
 				if err := processor.OnBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 Broadcast Response 处理失败", zap.Error(err))
+					logger.Warn("GB28181 Broadcast Response 处理失败",
+						zap.String("event", "gb28181.message.broadcast_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
 				}
 			}
 			return
@@ -310,7 +323,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if sink := h.getSnapshotSink(); sink != nil {
 				if err := sink.OnSnapshotNotify(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 SnapShot Notify 处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+					logger.Warn("GB28181 SnapShot Notify 处理失败",
+						zap.String("event", "gb28181.message.snapshot_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
 				}
 			}
 			return
@@ -322,7 +338,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 			if sink := h.getPlaybackEndSink(); sink != nil {
 				if err := sink.OnPlaybackFileToEnd(ctx, callID, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 回放自然结束处理失败", zap.String("callId", callID), zap.Error(err))
+					logger.Warn("GB28181 回放自然结束处理失败",
+						zap.String("event", "gb28181.message.playback_end_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
 				}
 			}
 			return
@@ -334,13 +353,20 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 			sink := h.getRecordInfoSink()
 			if sink == nil {
-				app.ZapLog.Warn("GB28181 RecordInfo sink 未装配,忽略响应",
-					zap.String("senderDeviceCode", ptzDeviceCode(req, "")))
+				logger.Warn("GB28181 RecordInfo sink 未装配,忽略响应",
+					zap.String("event", "gb28181.message.record_info_sink_unavailable"),
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq))
 				return
 			}
 			if err := sink.OnRecordInfoMessage(ctx, ptzDeviceCode(req, ""), req.Body()); err != nil {
-				app.ZapLog.Warn("GB28181 RecordInfo 响应处理失败",
-					zap.String("senderDeviceCode", ptzDeviceCode(req, "")), zap.Error(err))
+				logger.Warn("GB28181 RecordInfo 响应处理失败",
+					zap.String("event", "gb28181.message.record_info_failed"),
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
 			}
 			return
 		}
@@ -348,11 +374,17 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdKeepalive:
 			restored, err := device.Keepalive(ctx, head.DeviceID)
 			if err != nil {
-				app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+				logger.Error("GB28181 心跳处理失败",
+					zap.String("event", "gb28181.message.keepalive_failed"),
+					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
 			} else if restored {
 				if h.subscriptionWaker != nil {
 					if err := h.subscriptionWaker.WakeDeviceByCode(ctx, head.DeviceID); err != nil {
-						app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+						logger.Warn("GB28181 设备恢复订阅失败",
+							zap.String("event", "gb28181.message.subscription_wake_failed"),
+							zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+							logging.Error(err))
 					}
 				}
 				if h.catalogTrigger != nil && req.Source() != "" && gbconfig.SyncChannelsOnOnline() {
@@ -370,19 +402,28 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdDeviceControl:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 PTZ DeviceControl 应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+					logger.Warn("GB28181 PTZ DeviceControl 应答处理失败",
+						zap.String("event", "gb28181.message.ptz_failed"),
+						zap.String("operation", "device_control"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
 			}
 		case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 PTZ 查询应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+					logger.Warn("GB28181 PTZ 查询应答处理失败",
+						zap.String("event", "gb28181.message.ptz_failed"),
+						zap.String("operation", "status_query"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
 			}
 		case manscdp.CmdAlarm:
 			if h.alarmProcessor != nil {
 				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
-					app.ZapLog.Warn("GB28181 MESSAGE 报警处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+					logger.Warn("GB28181 MESSAGE 报警处理失败",
+						zap.String("event", "gb28181.message.alarm_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
 				}
 			}
 		}

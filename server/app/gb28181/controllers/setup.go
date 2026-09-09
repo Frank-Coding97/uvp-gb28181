@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -103,7 +104,7 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		sc.Fail(c, "保存 SIP 配置失败", err, http.StatusInternalServerError)
 		return
 	}
-	app.ZapLog.Info("SIP 配置已保存",
+	app.Log(c.Request.Context()).Info("SIP 配置已保存", zap.String("event", "setup.saveconfig.info"),
 		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
 		zap.String("deploymentMode", string(view.DeploymentMode)),
 		zap.String("listenIp", view.ListenIP),
@@ -119,7 +120,7 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		if err := sc.reload(); err != nil {
 			reloadOK = false
 			reloadErrText = err.Error()
-			app.ZapLog.Error("SIP 保存后热启动失败", zap.Error(err))
+			app.Log(c.Request.Context()).Error("SIP 保存后热启动失败", zap.String("event", "setup.saveconfig.error"), logging.Error(err))
 		}
 	}
 
@@ -136,7 +137,7 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 // 前端用 sessionStorage 记住"本次登录已跳过",下次登录会再次弹出提示.
 // 该端点保留,只是为了记录审计日志,让运维知道用户暂缓过引导.
 func (sc *SetupController) Skip(c *gin.Context) {
-	app.ZapLog.Info("SIP 首次安装引导已暂缓(前端行为,后端不持久化)",
+	app.Log(c.Request.Context()).Info("SIP 首次安装引导已暂缓(前端行为,后端不持久化)", zap.String("event", "setup.skip.info"),
 		zap.Uint("operatorId", sc.GetCurrentUserID(c)))
 	sc.Success(c, gin.H{"acknowledged": true})
 }

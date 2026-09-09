@@ -44,12 +44,16 @@ func (s *CatalogReconcileScheduler) FailureStats() (int64, string) {
 }
 
 // recordFailure 记日志并累计失败 —— 后台任务失败不得静默
-func (s *CatalogReconcileScheduler) recordFailure(scope string, err error) {
+func (s *CatalogReconcileScheduler) recordFailure(scope string, err error, requestContexts ...context.Context) {
 	s.failureCount.Add(1)
 	s.lastFailure.Store(scope + ": " + err.Error())
-	if app.ZapLog != nil {
-		app.ZapLog.Error("录像目录后台任务失败", zap.String("scope", scope), zap.Error(err))
+	ctx := context.Background()
+	if len(requestContexts) > 0 && requestContexts[0] != nil {
+		ctx = requestContexts[0]
 	}
+	app.Log(ctx).Named("recording.catalog").Error("录像目录后台任务失败",
+		zap.String("event", "recording.catalog.reconcile_failed"),
+		zap.String("scope", scope), zap.Error(err))
 }
 
 func NewCatalogReconcileScheduler(reconciler *CatalogReconciler, nodes CatalogNodeLookup, interval, stopWait time.Duration) *CatalogReconcileScheduler {
@@ -101,11 +105,11 @@ func (s *CatalogReconcileScheduler) Enqueue(trigger string, nodeIDs []int64, sta
 		go func() {
 			defer s.finishJob(nodeID)
 			if err := s.reconciler.MarkQueued(ctx, nodeID, trigger, start, end); err != nil {
-				s.recordFailure("mark-queued:node="+strconv.FormatInt(nodeID, 10), err)
+				s.recordFailure("mark-queued:node="+strconv.FormatInt(nodeID, 10), err, ctx)
 				return
 			}
 			if _, err := s.reconciler.RunNode(ctx, nodeID, trigger, start, end); err != nil {
-				s.recordFailure("run-node:node="+strconv.FormatInt(nodeID, 10), err)
+				s.recordFailure("run-node:node="+strconv.FormatInt(nodeID, 10), err, ctx)
 			}
 		}()
 	}
@@ -151,7 +155,7 @@ func (s *CatalogReconcileScheduler) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if _, err := s.Enqueue(ReconcileTriggerScheduled, nil, nil, nil); err != nil && !errors.Is(err, ErrCatalogSchedulerStopped) {
-				s.recordFailure("enqueue-scheduled", err)
+				s.recordFailure("enqueue-scheduled", err, ctx)
 			}
 		}
 	}

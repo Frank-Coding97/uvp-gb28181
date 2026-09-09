@@ -21,6 +21,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 func canonicalPayload(payload map[string]interface{}) (string, error) {
@@ -299,8 +300,8 @@ func (s *Service) sendLegacyOperation(ctx context.Context, target Target, operat
 	if err := ptzWriter(s.db).WithContext(persistCtx).First(&operation, operation.ID).Error; err != nil {
 		return operation, err
 	}
-	if syncErr := s.SyncPresetOperation(persistCtx, operation); syncErr != nil && app.ZapLog != nil {
-		app.ZapLog.Warn("预置位乐观入库失败", zap.String("operationId", operation.OperationID), zap.Error(syncErr))
+	if syncErr := s.SyncPresetOperation(persistCtx, operation); syncErr != nil {
+		app.Log(persistCtx).Named("ptz").Warn("预置位乐观入库失败", zap.String("event", "ptz.preset_cache_failed"), zap.String("operationId", operation.OperationID), logging.Error(syncErr))
 	}
 	return operation, nil
 }

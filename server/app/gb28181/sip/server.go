@@ -2,7 +2,9 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -16,6 +18,8 @@ import (
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -25,6 +29,7 @@ type Server struct {
 	cascadeDialog      func(*siplib.Request, siplib.ServerTransaction) bool
 	cascadeMessageMu   sync.RWMutex
 	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
+	logger             *slog.Logger
 	cfg                gbconfig.Config
 	ua                 *sipgo.UserAgent
 	srv                *sipgo.Server
@@ -35,14 +40,197 @@ type Server struct {
 	recorder           metrics.Recorder
 	onError            func(error)
 	cancel             context.CancelFunc
-	wg                 sync.WaitGroup
+	listenerWork       *asyncgroup.Group
+	businessWork       *requestBusinessGate
+	deviceInfoWork     *asyncgroup.Group
+	quiesce            lifecyclePhase
+	shutdown           lifecyclePhase
 	started            bool
 	trace              gbtrace.Runtime
 	traceOnce          sync.Once
+	traceErr           error
 	security           handler.RegisterSecurity
 	broadcastDialogs   *sipgo.DialogServerCache
 	broadcastProcessor handler.BroadcastInviteProcessor
 	broadcastSessions  sync.Map
+}
+
+// requestBusinessGate tracks the synchronous middleware and business handler
+// portion of an admitted SIP request. It deliberately keeps already admitted
+// requests runnable after Close; only the admission decision is closed.
+type requestBusinessGate struct {
+	mu     sync.Mutex
+	active int
+	closed bool
+	done   chan struct{}
+}
+
+func (g *requestBusinessGate) enter() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return false
+	}
+	if g.done == nil {
+		g.done = make(chan struct{})
+	}
+	g.active++
+	return true
+}
+
+func (g *requestBusinessGate) leave() {
+	g.mu.Lock()
+	g.active--
+	if g.closed && g.active == 0 {
+		close(g.done)
+	}
+	g.mu.Unlock()
+}
+
+func (g *requestBusinessGate) close() {
+	g.mu.Lock()
+	if !g.closed {
+		g.closed = true
+		if g.done == nil {
+			g.done = make(chan struct{})
+		}
+		if g.active == 0 {
+			close(g.done)
+		}
+	}
+	g.mu.Unlock()
+}
+
+func (g *requestBusinessGate) wait(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	g.mu.Lock()
+	done := g.done
+	if done == nil {
+		done = make(chan struct{})
+		g.done = done
+		if g.closed && g.active == 0 {
+			close(done)
+		}
+	}
+	g.mu.Unlock()
+
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+type requestBusinessLease struct {
+	gate *requestBusinessGate
+	once sync.Once
+}
+
+func (l *requestBusinessLease) Release() {
+	if l == nil || l.gate == nil {
+		return
+	}
+	l.once.Do(l.gate.leave)
+}
+
+type sipRequestLifecycle struct{ business *requestBusinessGate }
+
+func (l *sipRequestLifecycle) ReserveBusiness(_ *siplib.Request, _ siplib.ServerTransaction) (siplib.RequestLease, bool) {
+	if l == nil || l.business == nil {
+		return nil, true
+	}
+	if !l.business.enter() {
+		return nil, false
+	}
+	return &requestBusinessLease{gate: l.business}, true
+}
+
+func (l *sipRequestLifecycle) BeginBusiness(_ *siplib.Request, tx siplib.ServerTransaction) bool {
+	if l == nil || l.business == nil {
+		return true
+	}
+	if tx != nil {
+		if provider, ok := tx.(interface{ RequestLease() siplib.RequestLease }); ok && provider.RequestLease() != nil {
+			return true
+		}
+	}
+	return l.business.enter()
+}
+
+func (l *sipRequestLifecycle) EndBusiness() {
+	if l != nil && l.business != nil {
+		l.business.leave()
+	}
+}
+
+type lifecyclePhase struct {
+	mu      sync.Mutex
+	started bool
+	done    chan struct{}
+	err     error
+}
+
+func (p *lifecyclePhase) run(ctx context.Context, fn func(context.Context) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.mu.Lock()
+	if p.started {
+		done := p.done
+		p.mu.Unlock()
+		return waitLifecyclePhase(ctx, done, p)
+	}
+	p.started = true
+	p.done = make(chan struct{})
+	p.mu.Unlock()
+
+	err := fn(ctx)
+	p.mu.Lock()
+	p.err = err
+	close(p.done)
+	p.mu.Unlock()
+	return err
+}
+
+func waitLifecyclePhase(ctx context.Context, done <-chan struct{}, p *lifecyclePhase) error {
+	select {
+	case <-done:
+		p.mu.Lock()
+		err := p.err
+		p.mu.Unlock()
+		return err
+	default:
+	}
+	select {
+	case <-done:
+		p.mu.Lock()
+		err := p.err
+		p.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		select {
+		case <-done:
+			p.mu.Lock()
+			err := p.err
+			p.mu.Unlock()
+			return err
+		default:
+			return ctx.Err()
+		}
+	}
 }
 
 type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
@@ -93,7 +281,7 @@ func (s *Server) NewCascadeClient() (*sipgo.Client, error) {
 	if s == nil || s.ua == nil {
 		return nil, fmt.Errorf("GB28181 shared SIP UA is unavailable")
 	}
-	return sipgo.NewClient(s.ua)
+	return sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger))
 }
 
 // TraceRuntime returns the optional trace runtime for controller bootstrap wiring.
@@ -121,8 +309,13 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		option(&opts)
 	}
 
+	root := app.ZapLog
+	if root == nil {
+		root = zap.NewNop()
+	}
+	logger := slog.New(logging.NewSlogHandler(root.Named("sipgo")))
 	var traceRuntime gbtrace.Runtime
-	uaOptions := []sipgo.UserAgentOption{sipgo.WithUserAgent("UVP-GB28181")}
+	uaOptions := []sipgo.UserAgentOption{sipgo.WithUserAgent("UVP-GB28181"), sipgo.WithUserAgentTransactionLayerOptions(siplib.WithTransactionLayerLogger(logger))}
 	if cfg.Trace.Enabled && opts.traceFactory != nil {
 		traceRuntime = opts.traceFactory(cfg.Trace)
 		if traceRuntime != nil {
@@ -150,8 +343,8 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 			}
 		}
 	}
-	if readFilter != nil || closeObserver != nil || traceRuntime != nil {
-		transportOptions := []siplib.TransportLayerOption{}
+	{
+		transportOptions := []siplib.TransportLayerOption{siplib.WithTransportLayerLogger(logger)}
 		if readFilter != nil {
 			transportOptions = append(transportOptions, siplib.WithTransportLayerReadFilter(readFilter))
 		}
@@ -171,11 +364,25 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		}
 		return nil, fmt.Errorf("创建 SIP UA 失败: %w", err)
 	}
-	srv, err := sipgo.NewServer(ua)
+	businessWork := &requestBusinessGate{}
+	srv, err := sipgo.NewServer(ua,
+		sipgo.WithServerLogger(logger),
+		sipgo.WithServerRequestLifecycle(&sipRequestLifecycle{business: businessWork}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("创建 SIP server 失败: %w", err)
 	}
-	s := &Server{cfg: cfg, ua: ua, srv: srv, trace: traceRuntime, security: opts.registerSecurity}
+	s := &Server{
+		logger:         logger,
+		cfg:            cfg,
+		ua:             ua,
+		srv:            srv,
+		trace:          traceRuntime,
+		security:       opts.registerSecurity,
+		businessWork:   businessWork,
+		deviceInfoWork: &asyncgroup.Group{},
+		listenerWork:   &asyncgroup.Group{},
+	}
 	s.registerHandlers()
 	return s, nil
 }
@@ -189,23 +396,27 @@ func (s *Server) registerHandlers() {
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
-	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise); err != nil {
-		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise, sipgo.WithClientLogger(s.logger)); err != nil {
+		app.Log(context.Background()).Named("gb28181.sip").Warn(
+			"GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发",
+			zap.String("event", "gb28181.sip.uac_init_failed"), logging.Error(err))
 	} else {
 		s.uac = u
 		catalogTrigger := handler.NewUACCatalogTrigger(u)
 		regHandler.SetCatalogTrigger(catalogTrigger)
 		msgHandler.SetCatalogTrigger(catalogTrigger)
-		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u))
+		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u, s.deviceInfoWork))
 		contactHost := strings.TrimSpace(s.cfg.SIP.AdvertiseIP)
 		if contactHost == "" {
 			contactHost = strings.TrimSpace(s.cfg.SIP.ListenIP)
 		}
 		if contactHost != "" && contactHost != "0.0.0.0" && contactHost != "::" {
-			if client, clientErr := sipgo.NewClient(s.ua); clientErr == nil {
+			if client, clientErr := sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger)); clientErr == nil {
 				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
 			} else {
-				app.ZapLog.Warn("GB28181 Broadcast UAS client 初始化失败", zap.Error(clientErr))
+				app.Log(context.Background()).Named("gb28181.sip").Warn(
+					"GB28181 Broadcast UAS client 初始化失败",
+					zap.String("event", "gb28181.sip.broadcast_client_init_failed"), logging.Error(clientErr))
 			}
 		}
 	}
@@ -280,38 +491,49 @@ func (s *Server) handleBroadcastAck(req *siplib.Request, tx siplib.ServerTransac
 		return
 	}
 	callID := requestCallID(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.sip")
 	if _, ok := s.broadcastSessions.Load(callID); !ok {
 		return
 	}
 	if err := s.broadcastDialogs.ReadAck(req, tx); err != nil {
-		app.ZapLog.Warn("处理设备 Broadcast ACK 失败", zap.String("callId", callID), zap.Error(err))
+		logger.Warn("处理设备 Broadcast ACK 失败",
+			zap.String("event", "gb28181.sip.broadcast_ack_failed"), zap.String("call_id", callID), logging.Error(err))
 		return
 	}
 	if s.broadcastProcessor != nil {
 		if err := s.broadcastProcessor.OnBroadcastAck(context.Background(), callID); err != nil {
-			app.ZapLog.Warn("激活 Broadcast 会话失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("激活 Broadcast 会话失败",
+				zap.String("event", "gb28181.sip.broadcast_activation_failed"), zap.String("call_id", callID),
+				logging.Error(err))
 		}
 	}
 }
 
 func (s *Server) handleBye(req *siplib.Request, tx siplib.ServerTransaction) {
 	callID := requestCallID(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.sip")
 	if _, ok := s.broadcastSessions.Load(callID); ok && s.broadcastDialogs != nil {
 		if err := s.broadcastDialogs.ReadBye(req, tx); err != nil {
-			app.ZapLog.Warn("处理设备 Broadcast BYE 失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("处理设备 Broadcast BYE 失败",
+				zap.String("event", "gb28181.sip.broadcast_bye_failed"), zap.String("call_id", callID), logging.Error(err))
 			return
 		}
 		s.broadcastSessions.Delete(callID)
 		if s.broadcastProcessor != nil {
 			if err := s.broadcastProcessor.OnBroadcastBye(context.Background(), callID); err != nil {
-				app.ZapLog.Warn("设备 Broadcast BYE 清理失败", zap.String("callId", callID), zap.Error(err))
+				logger.Warn("设备 Broadcast BYE 清理失败",
+					zap.String("event", "gb28181.sip.broadcast_bye_cleanup_failed"), zap.String("call_id", callID),
+					logging.Error(err))
 			}
 		}
 		return
 	}
 	if strings.HasPrefix(callID, "talk-") && s.uac != nil {
 		if _, err := s.uac.HandleTalkBye(req, tx); err != nil {
-			app.ZapLog.Warn("处理设备 TALK BYE 失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("处理设备 TALK BYE 失败",
+				zap.String("event", "gb28181.sip.talk_bye_failed"), zap.String("call_id", callID), logging.Error(err))
 		}
 		return
 	}
@@ -445,55 +667,92 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.ListenIP, s.cfg.SIP.Port)
 	for _, tran := range s.cfg.SIP.Transport {
 		t := tran
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			app.ZapLog.Info("GB28181 SIP 监听启动", zap.String("transport", t), zap.String("addr", addr))
+		if s.listenerWork == nil {
+			s.listenerWork = &asyncgroup.Group{}
+		}
+		s.listenerWork.Go(func() {
+			logger := app.Log(ctx).Named("gb28181.sip")
+			logger.Info("GB28181 SIP 监听启动",
+				zap.String("event", "gb28181.sip.listener_started"),
+				zap.String("transport", t), zap.String("address", addr))
 			if err := s.srv.ListenAndServe(ctx, t, addr); err != nil && ctx.Err() == nil {
-				app.ZapLog.Error("GB28181 SIP 监听失败", zap.String("transport", t), zap.Error(err))
+				logger.Error("GB28181 SIP 监听失败",
+					zap.String("event", "gb28181.sip.listener_failed"),
+					zap.String("transport", t), zap.String("address", addr), logging.Error(err))
 				if s.onError != nil {
 					s.onError(err)
 				}
 			}
-		}()
+		})
 	}
 	return nil
 }
 
-// Shutdown 优雅关闭
+// QuiesceRequests 停止新业务事务入场,并等待已接纳的 middleware/handler 返回。
+// UAC 出站传输仍保持可用,供根生命周期继续完成依赖清理。
+func (s *Server) QuiesceRequests(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.quiesce.run(ctx, func(ctx context.Context) error {
+		if s.srv != nil {
+			s.srv.QuiesceRequests()
+		}
+		var err error
+		if s.businessWork != nil {
+			s.businessWork.close()
+			err = errors.Join(err, s.businessWork.wait(ctx))
+		}
+		// DeviceInfo is deliberately launched after a successful 200 response;
+		// close its owner only after the synchronous handler set is drained.
+		if s.deviceInfoWork != nil {
+			err = errors.Join(err, s.deviceInfoWork.StopContext(ctx))
+		}
+		if s.regH != nil {
+			err = errors.Join(err, s.regH.Close(ctx))
+		}
+		return err
+	})
+}
+
+// Shutdown 优雅关闭。调用方应先完成其他服务依赖的 drain,再进入本方法。
 func (s *Server) Shutdown(ctx context.Context) error {
-	if !s.started {
-		return s.shutdownTrace(ctx)
+	if s == nil {
+		return nil
 	}
-	if s.cancel != nil {
-		s.cancel()
-	}
-	if s.srv != nil {
-		_ = s.srv.Close()
-	}
-	done := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
-		return s.shutdownTrace(ctx)
-	case <-ctx.Done():
-		_ = s.shutdownTrace(ctx)
-		return ctx.Err()
-	}
+	return s.shutdown.run(ctx, func(ctx context.Context) error {
+		var err error
+		err = errors.Join(err, s.QuiesceRequests(ctx))
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.listenerWork != nil {
+			err = errors.Join(err, s.listenerWork.StopContext(ctx))
+		}
+		if s.srv != nil {
+			err = errors.Join(err, s.srv.CloseContext(ctx))
+		}
+		// Trace must be the final producer closed by the SIP owner.
+		err = errors.Join(err, s.shutdownTrace(ctx))
+		logger := app.Log(ctx).Named("gb28181.sip")
+		if err == nil {
+			logger.Info("GB28181 SIP 服务已优雅关闭",
+				zap.String("event", "gb28181.sip.shutdown_complete"))
+		} else {
+			logger.Warn("GB28181 SIP 服务关闭未完成",
+				zap.String("event", "gb28181.sip.shutdown_incomplete"), logging.Error(err))
+		}
+		return err
+	})
 }
 
 func (s *Server) shutdownTrace(ctx context.Context) error {
-	var err error
 	s.traceOnce.Do(func() {
 		if s.trace != nil {
-			err = s.trace.Shutdown(ctx)
+			s.traceErr = s.trace.Shutdown(ctx)
 		}
 	})
-	return err
+	return s.traceErr
 }
 
 func (s *Server) SetCascadeMessageHandler(hook func(*siplib.Request, siplib.ServerTransaction) bool) {

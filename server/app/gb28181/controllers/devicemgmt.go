@@ -195,7 +195,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
 
 	q, err := applyAssignmentFilter(q, c.Query("assignment"))
 	if err != nil {
@@ -231,22 +231,22 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
 			var root gbmodels.GbCatalogNode
-			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
+			if db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
 				var deviceIDs []uint
-				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+				db.WithContext(c.Request.Context()).Model(&gbmodels.GbCatalogNode{}).
 					Scopes(ownerDeptScope(c)).
 					Where("node_type = ? AND path LIKE ? AND device_id IS NOT NULL", gbmodels.NodeTypeDevice, root.Path+"%").
 					Pluck("device_id", &deviceIDs)
 
 				var channelIDs []uint
-				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+				db.WithContext(c.Request.Context()).Model(&gbmodels.GbCatalogNode{}).
 					Scopes(ownerDeptScope(c)).
 					Where("node_type = ? AND path LIKE ? AND channel_id IS NOT NULL", gbmodels.NodeTypeChannel, root.Path+"%").
 					Pluck("channel_id", &channelIDs)
 
 				var channelDeviceCodes []string
 				if len(channelIDs) > 0 {
-					db.WithContext(c).Model(&gbmodels.GbChannel{}).
+					db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 						Scopes(visibleScope(c)).
 						Where("id IN ?", channelIDs).
 						Distinct().
@@ -376,8 +376,8 @@ func (s chStats) rate() float64 {
 
 func (dc *DeviceMgmtController) channelAggregate(c *gin.Context, db *gorm.DB, deviceID string) chStats {
 	var total, online int64
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
+	_ = db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
+	_ = db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
 	return chStats{total: total, online: online}
 }
 
@@ -392,7 +392,7 @@ func (dc *DeviceMgmtController) channelAggregates(c *gin.Context, db *gorm.DB, d
 		Online   int64
 	}
 	var rows []aggregateRow
-	err := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 		Scopes(visibleScope(c)).
 		Select("device_id, COUNT(*) AS total, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS online", gbmodels.ChannelStatusOnline).
 		Where("device_id IN ?", deviceIDs).
@@ -432,7 +432,7 @@ func (dc *DeviceMgmtController) GetDevice(c *gin.Context) {
 		return
 	}
 	var d gbmodels.GbDevice
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&d)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&d)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -468,7 +468,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		pageSize = 40
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c))
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c))
 	if c.Query("directoryView") != "" || c.Query("directoryKey") != "" {
 		if c.Query("nodeId") != "" {
 			dc.Fail(c, "新旧目录参数不能同时使用", nil, http.StatusBadRequest)
@@ -493,10 +493,10 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
 			var root gbmodels.GbCatalogNode
-			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
+			if db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
 				// 子树下的所有 channel_id
 				var chIDs []uint
-				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+				db.WithContext(c.Request.Context()).Model(&gbmodels.GbCatalogNode{}).
 					Scopes(ownerDeptScope(c)).
 					Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, root.Path+"%").
 					Pluck("channel_id", &chIDs)
@@ -549,7 +549,7 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		return
 	}
 	var ch gbmodels.GbChannel
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -559,7 +559,7 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		return
 	}
 	var device gbmodels.GbDevice
-	if err := db.WithContext(c).Select("transport").Where("device_id = ?", ch.DeviceID).Limit(1).Find(&device).Error; err != nil {
+	if err := db.WithContext(c.Request.Context()).Select("transport").Where("device_id = ?", ch.DeviceID).Limit(1).Find(&device).Error; err != nil {
 		dc.FailAndAbort(c, "查询所属设备失败", err)
 		return
 	}
@@ -595,7 +595,7 @@ func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
 		dc.FailAndAbort(c, "流传输模式非法,仅支持 UDP/TCP-Active/TCP-Passive", nil)
 		return
 	}
-	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	res := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 		Scopes(visibleScope(c)).
 		Where("id = ?", id).
 		Update("stream_transport", body.StreamTransport)
@@ -655,7 +655,7 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 		dc.FailAndAbort(c, "没有可更新的字段", nil)
 		return
 	}
-	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	res := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 		Scopes(visibleScope(c)).
 		Where("id = ?", id).
 		Updates(updates)
@@ -694,7 +694,7 @@ func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	}
 
 	var mounts []gbmodels.GbChannelMount
-	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
+	if err := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).
 		Where("channel_id = ?", id).
 		Order("is_primary DESC, sort_order, id").
 		Find(&mounts).Error; err != nil {
@@ -705,7 +705,7 @@ func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	out := make([]mountVO, 0, len(mounts))
 	for _, m := range mounts {
 		var node gbmodels.GbCatalogNode
-		db.WithContext(c).Scopes(ownerDeptScope(c)).Select("id, name, path").Where("id = ?", m.ParentNodeID).Limit(1).Find(&node)
+		db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Select("id, name, path").Where("id = ?", m.ParentNodeID).Limit(1).Find(&node)
 		out = append(out, mountVO{
 			ID:           m.ID,
 			ParentNodeID: m.ParentNodeID,
@@ -736,7 +736,7 @@ func (dc *DeviceMgmtController) ChannelTimeline(c *gin.Context) {
 		return
 	}
 	var ch gbmodels.GbChannel
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
