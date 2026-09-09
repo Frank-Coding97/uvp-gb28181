@@ -12,6 +12,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"go.uber.org/zap"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/catalog"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/control"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
@@ -132,5 +133,95 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 			app.ZapLog.Info("级联目录响应完成", zap.Uint64("platformId", matched.ID), zap.Int("items", len(snapshot.Items)), zap.Int("batches", len(responses)))
 		}
 		return true
+	}
+}
+
+// newCascadeMessageHandler handles inbound catalog queries and cascaded PTZ
+// controls before the ordinary device-response handler. A Control message is
+// an instruction from the upstream platform, not a response to a local PTZ
+// operation; sending it through ptz.OnPTZMessage would therefore always log
+// an unmatched response.
+func newCascadeMessageHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
+	catalogHandler := newCascadeCatalogHandler(store, clients)
+	return func(req *sip.Request, tx sip.ServerTransaction) bool {
+		if catalogHandler(req, tx) {
+			return true
+		}
+		head, err := manscdp.ParseHead(req.Body())
+		if err != nil || head.CmdType != manscdp.CmdDeviceControl || !strings.Contains(string(req.Body()), "<Control") {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		platforms, err := store.ListPlatforms(ctx)
+		if err != nil {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Cascade Control Failed", nil))
+			return true
+		}
+		var matched *model.GbCascadePlatform
+		for i := range platforms {
+			if matchCascadeCatalogPeer(req, platforms[i]) {
+				if matched != nil {
+					_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Ambiguous Cascade Platform", nil))
+					return true
+				}
+				matched = &platforms[i]
+			}
+		}
+		if matched == nil || !matched.Enabled {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Platform Not Available", nil))
+			return true
+		}
+		// Acknowledge the MESSAGE transaction first. The business result is sent
+		// as a new MANSCDP Response MESSAGE after the lower device responds.
+		if err := tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
+			return true
+		}
+		callID := ""
+		if header := req.CallID(); header != nil {
+			callID = header.Value()
+		}
+		platform := *matched
+		body := append([]byte(nil), req.Body()...)
+		go forwardCascadeControl(store, clients, platform, callID, body, *head)
+		return true
+	}
+}
+
+func forwardCascadeControl(store *repository.GormRepository, clients *cascadePlatformClientFactory, platform model.GbCascadePlatform, callID string, body []byte, head manscdp.MessageHead) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result := manscdp.DeviceControlResultError
+	if ptzService != nil {
+		service := control.NewService(store, control.NewGormTargetLoader(app.DB()), ptzService)
+		if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err == nil {
+			result = manscdp.DeviceControlResultOK
+		} else if app.ZapLog != nil {
+			app.ZapLog.Warn("级联云台命令转发失败", zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
+		}
+	}
+	client, err := clients.NewClient(platform)
+	if err != nil {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("级联云台应答客户端不可用", zap.Uint64("platformId", platform.ID), zap.Error(err))
+		}
+		return
+	}
+	response := struct {
+		XMLName  xml.Name `xml:"Response"`
+		CmdType  string   `xml:"CmdType"`
+		SN       string   `xml:"SN"`
+		DeviceID string   `xml:"DeviceID"`
+		Result   string   `xml:"Result"`
+	}{CmdType: manscdp.CmdDeviceControl, SN: head.SN, DeviceID: head.DeviceID, Result: string(result)}
+	encoded, err := manscdp.MarshalProfiledXML(protocol.ProfileFor(effectiveCascadeProfile(platform)), response)
+	if err != nil {
+		return
+	}
+	if callID == "" {
+		callID = fmt.Sprintf("cascade-ptz-%d-%d", platform.ID, time.Now().UnixNano())
+	}
+	if sent := client.(*cascadePlatformClient).transactions.SendMessage(ctx, encoded, callID); !sent.Success && app.ZapLog != nil {
+		app.ZapLog.Warn("级联云台应答发送失败", zap.Uint64("platformId", platform.ID), zap.Error(sent.TransportErr), zap.Error(sent.BuildErr))
 	}
 }
