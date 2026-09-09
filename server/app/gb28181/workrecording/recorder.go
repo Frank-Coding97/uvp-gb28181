@@ -15,6 +15,7 @@ type MediaTarget struct {
 	NodeID             int64
 	VHost, App, Stream string
 	Generation         uint64
+	RecordingRoot      string
 }
 
 func (m MediaTarget) valid() bool {
@@ -22,7 +23,7 @@ func (m MediaTarget) valid() bool {
 }
 func (m MediaTarget) key() string { return MediaResource(m.NodeID, m.VHost, m.App, m.Stream) }
 func targetOf(c *models.GbRecorderClaim) MediaTarget {
-	return MediaTarget{NodeID: c.NodeID, VHost: c.VHost, App: c.App, Stream: c.Stream, Generation: c.Generation}
+	return MediaTarget{NodeID: c.NodeID, VHost: c.VHost, App: c.App, Stream: c.Stream, Generation: c.Generation, RecordingRoot: c.RecordingRoot}
 }
 
 type RecorderHandle struct {
@@ -34,6 +35,10 @@ type MP4Client interface {
 	IsRecording(context.Context, string, string, string) (bool, error)
 	StartRecord(context.Context, string, string, string, int) error
 	StopRecord(context.Context, string, string, string) error
+}
+
+type directoryMP4Client interface {
+	StartMP4RecordInDirectory(context.Context, string, string, string, int, string) error
 }
 
 // Recorder serializes actual MP4 operations in one active control process.
@@ -110,7 +115,7 @@ func (r *Recorder) bind(ctx context.Context, h RecorderHandle, target MediaTarge
 		if media.State != StateStarting || (media.ChannelID != 0 && media.ChannelID != h.ChannelID) {
 			return ErrOwnerConflict
 		}
-		values := map[string]any{"channel_id": h.ChannelID, "node_id": target.NodeID, "v_host": target.VHost, "app": target.App, "stream": target.Stream, "generation": target.Generation}
+		values := map[string]any{"channel_id": h.ChannelID, "node_id": target.NodeID, "v_host": target.VHost, "app": target.App, "stream": target.Stream, "generation": target.Generation, "recording_root": target.RecordingRoot}
 		if err = tx.Model(media).Updates(values).Error; err != nil {
 			return err
 		}
@@ -198,6 +203,9 @@ func (r *Recorder) Start(ctx context.Context, h RecorderHandle, target MediaTarg
 	if !target.valid() || maxSecond < 0 {
 		return h, ErrInvalidRequest
 	}
+	if h.Owner.Kind == OwnerWork && !ownsWorkDirectory(target.RecordingRoot, h.Owner.ID) {
+		return h, ErrInvalidRequest
+	}
 	unlock := r.lock(h.ChannelID)
 	defer unlock()
 	var err error
@@ -210,6 +218,10 @@ func (r *Recorder) Start(ctx context.Context, h RecorderHandle, target MediaTarg
 		return h, err
 	}
 	defer release()
+	directoryClient, supportsDirectory := client.(directoryMP4Client)
+	if h.Owner.Kind == OwnerWork && !supportsDirectory {
+		return h, ErrInvalidRequest
+	}
 	active, err := client.IsRecording(ctx, target.VHost, target.App, target.Stream)
 	if err != nil {
 		return h, err
@@ -224,7 +236,12 @@ func (r *Recorder) Start(ctx context.Context, h RecorderHandle, target MediaTarg
 	if err != nil {
 		return h, err
 	}
-	if err = client.StartRecord(ctx, target.VHost, target.App, target.Stream, maxSecond); err != nil {
+	if h.Owner.Kind == OwnerWork {
+		err = directoryClient.StartMP4RecordInDirectory(ctx, target.VHost, target.App, target.Stream, maxSecond, target.RecordingRoot)
+	} else {
+		err = client.StartRecord(ctx, target.VHost, target.App, target.Stream, maxSecond)
+	}
+	if err != nil {
 		return h, err
 	}
 	active, err = client.IsRecording(ctx, target.VHost, target.App, target.Stream)
@@ -271,6 +288,49 @@ func (r *Recorder) Stop(ctx context.Context, h RecorderHandle) (RecorderHandle, 
 		next, writeErr := r.pairState(ctx, h, StateUnknown, false)
 		return next, errors.Join(ErrAttributionUnknown, err, writeErr)
 	}
-	// Files may still be finalizing. This method deliberately retains both claims.
+	// File completion remains independent. ReleaseStopped is a separate atomic
+	// operation so the caller can persist the stop fact before yielding ownership.
 	return r.pairState(ctx, h, StateStopped, false)
+}
+
+// ReleaseStopped yields both recorder resources after confirmed stop. Work
+// files remain attached to their original, durable unique job directory.
+func (r *Recorder) ReleaseStopped(ctx context.Context, h RecorderHandle) error {
+	unlock := r.lock(h.ChannelID)
+	defer unlock()
+	return r.claims.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		claims := NewClaims(tx)
+		row, err := claims.Get(ctx, ChannelResource(h.ChannelID))
+		if err != nil {
+			return err
+		}
+		if row.State == StateIdle && row.Version == h.Version+1 {
+			return nil
+		}
+		row, err = claims.owned(ctx, row.ResourceKey, h.Owner, h.Version)
+		if err != nil {
+			return err
+		}
+		if row.State != StateStopped {
+			return ErrVersionConflict
+		}
+		if h.Owner.Kind == OwnerWork && !ownsWorkDirectory(row.RecordingRoot, h.Owner.ID) {
+			return ErrInvalidRequest
+		}
+		target := targetOf(row)
+		if !target.valid() {
+			return ErrInvalidRequest
+		}
+		media, err := claims.Get(ctx, target.key())
+		if err != nil {
+			return err
+		}
+		if media.ChannelID != h.ChannelID || targetOf(media) != target {
+			return ErrOwnerConflict
+		}
+		if err := claims.Release(ctx, media.ResourceKey, h.Owner, media.Version); err != nil {
+			return err
+		}
+		return claims.Release(ctx, row.ResourceKey, h.Owner, h.Version)
+	})
 }

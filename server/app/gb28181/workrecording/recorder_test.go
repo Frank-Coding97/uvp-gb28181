@@ -11,6 +11,7 @@ import (
 
 type testRecorderClient struct {
 	active                  bool
+	directories             []string
 	starts, stops           int
 	startErr, stopErr       error
 	beforeStart, beforeStop func()
@@ -65,7 +66,7 @@ func TestRecorderRejectsEveryForeignOwnerBeforeExternalCalls(t *testing.T) {
 				ctx := context.Background()
 				h, err := r.Reserve(ctx, 1, Owner{Kind: first, ID: "first"})
 				require.NoError(t, err)
-				h, err = r.Start(ctx, h, testMedia(), 0)
+				h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 				require.NoError(t, err)
 				_, err = r.Reserve(ctx, 1, Owner{Kind: second, ID: "second"})
 				require.ErrorIs(t, err, ErrOwnerConflict)
@@ -85,12 +86,12 @@ func TestRecorderUnknownStartIsNotRetriedOrAdopted(t *testing.T) {
 	c.startErr = errors.New("timeout")
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "job"})
 	require.NoError(t, err)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.Error(t, err)
 	claim, err := r.claims.Get(ctx, ChannelResource(1))
 	require.NoError(t, err)
 	require.Equal(t, StateUnknown, claim.State)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.Error(t, err)
 	require.Equal(t, 1, c.starts)
 	h, err = r.Stop(ctx, h)
@@ -109,7 +110,7 @@ func TestRecorderDoesNotAdoptExistingMP4(t *testing.T) {
 	ctx := context.Background()
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "job"})
 	require.NoError(t, err)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.ErrorIs(t, err, ErrAttributionUnknown)
 	require.Zero(t, c.starts)
 	require.Zero(t, c.stops)
@@ -124,7 +125,7 @@ func TestRecorderStaleGenerationAndStaleHandleCannotStop(t *testing.T) {
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerPlan, ID: "run"})
 	require.NoError(t, err)
 	old := h
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	_, err = r.Stop(ctx, old)
 	require.ErrorIs(t, err, ErrVersionConflict)
@@ -139,11 +140,11 @@ func TestRecorderMediaCollisionDoesNotCallSecondStart(t *testing.T) {
 	ctx := context.Background()
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
 	require.NoError(t, err)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	other, err := r.Reserve(ctx, 2, Owner{Kind: OwnerWork, ID: "b"})
 	require.NoError(t, err)
-	_, err = r.Start(ctx, other, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, other, testMedia(), 0)
 	require.ErrorIs(t, err, ErrOwnerConflict)
 	require.Equal(t, 1, c.starts)
 }
@@ -153,7 +154,7 @@ func TestRecorderIntentWriteFailurePreventsStart(t *testing.T) {
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
 	require.NoError(t, err)
 	require.NoError(t, r.claims.db.Exec("CREATE TRIGGER fail_intent BEFORE UPDATE ON gb_recorder_claim WHEN NEW.state = 'unknown' BEGIN SELECT RAISE(ABORT,'unavailable'); END").Error)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.Error(t, err)
 	require.Zero(t, c.starts)
 }
@@ -164,7 +165,7 @@ func TestRecorderRestartAfterConfirmationWriteFailureKeepsIntent(t *testing.T) {
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "job"})
 	require.NoError(t, err)
 	require.NoError(t, r.claims.db.Exec("CREATE TRIGGER reject_confirmation BEFORE UPDATE ON gb_recorder_claim WHEN NEW.state = 'recording' BEGIN SELECT RAISE(ABORT,'unavailable'); END").Error)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.Error(t, err)
 	require.Equal(t, 1, c.starts)
 	require.NoError(t, r.claims.db.Exec("DROP TRIGGER reject_confirmation").Error)
@@ -172,12 +173,12 @@ func TestRecorderRestartAfterConfirmationWriteFailureKeepsIntent(t *testing.T) {
 	restored, err := restarted.Reserve(ctx, 1, h.Owner)
 	require.NoError(t, err)
 	require.Equal(t, h, restored)
-	_, err = restarted.Start(ctx, restored, testMedia(), 0)
+	_, err = startTestRecording(restarted, ctx, restored, testMedia(), 0)
 	require.Error(t, err)
 	require.Equal(t, 1, c.starts)
 	restored, err = restarted.Stop(ctx, restored)
 	require.NoError(t, err)
-	_, err = restarted.Start(ctx, restored, testMedia(), 0)
+	_, err = startTestRecording(restarted, ctx, restored, testMedia(), 0)
 	require.Error(t, err)
 	require.Equal(t, 1, c.starts)
 }
@@ -186,12 +187,12 @@ func TestRecorderStoppedClaimRejectsDelayedStartAndStopIsIdempotent(t *testing.T
 	ctx := context.Background()
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "job"})
 	require.NoError(t, err)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	beforeStop := h
 	h, err = r.Stop(ctx, h)
 	require.NoError(t, err)
-	_, err = r.Start(ctx, beforeStop, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, beforeStop, testMedia(), 0)
 	require.ErrorIs(t, err, ErrVersionConflict)
 	_, err = r.Stop(ctx, h)
 	require.NoError(t, err)
@@ -203,7 +204,7 @@ func TestRecorderPairWriteFailureRollsBackChannelAndPreventsStop(t *testing.T) {
 	ctx := context.Background()
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "job"})
 	require.NoError(t, err)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	require.NoError(t, r.claims.db.Exec("CREATE TRIGGER reject_media BEFORE UPDATE ON gb_recorder_claim WHEN NEW.resource_key = '"+testMedia().key()+"' AND NEW.state = 'stopping' BEGIN SELECT RAISE(ABORT,'unavailable'); END").Error)
 	_, err = r.Stop(ctx, h)
@@ -235,7 +236,7 @@ func TestRecorderPinsGenerationAcrossExternalWriteAndConfirmation(t *testing.T) 
 	c.beforeStop = assertPinned
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
 	require.NoError(t, err)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	_, err = r.Stop(ctx, h)
 	require.NoError(t, err)
@@ -252,7 +253,7 @@ func TestRecorderReleasesPinOnExternalFailure(t *testing.T) {
 	c.startErr = errors.New("timeout")
 	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
 	require.NoError(t, err)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.Error(t, err)
 	require.True(t, released)
 }
@@ -267,7 +268,11 @@ func TestRecorderConcurrentChannelsShareOneMediaOwner(t *testing.T) {
 	ready := make(chan struct{})
 	results := make(chan error, 2)
 	for _, h := range []RecorderHandle{a, b} {
-		go func(h RecorderHandle) { <-ready; _, err := r.Start(ctx, h, testMedia(), 0); results <- err }(h)
+		go func(h RecorderHandle) {
+			<-ready
+			_, err := startTestRecording(r, ctx, h, testMedia(), 0)
+			results <- err
+		}(h)
 	}
 	close(ready)
 	wins := 0
@@ -288,7 +293,7 @@ func TestRecorderOldHandleCannotStopNextRunOfSameOwner(t *testing.T) {
 	owner := Owner{Kind: OwnerContinuous, ID: "channel-1"}
 	h, err := r.Reserve(ctx, 1, owner)
 	require.NoError(t, err)
-	h, err = r.Start(ctx, h, testMedia(), 0)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	h, err = r.Stop(ctx, h)
 	require.NoError(t, err)
@@ -301,10 +306,96 @@ func TestRecorderOldHandleCannotStopNextRunOfSameOwner(t *testing.T) {
 	require.NoError(t, r.claims.Release(ctx, ChannelResource(1), owner, h.Version))
 	h, err = r.Reserve(ctx, 1, owner)
 	require.NoError(t, err)
-	_, err = r.Start(ctx, h, testMedia(), 0)
+	_, err = startTestRecording(r, ctx, h, testMedia(), 0)
 	require.NoError(t, err)
 	_, err = r.Stop(ctx, old)
 	require.ErrorIs(t, err, ErrVersionConflict)
 	require.Equal(t, 1, c.stops)
 	require.True(t, c.active)
+}
+
+func TestRecorderReleaseStoppedAllowsNextJobBeforeFileFinalization(t *testing.T) {
+	r, c, _ := recorderFixture(t)
+	ctx := context.Background()
+	a := Owner{Kind: OwnerWork, ID: "a"}
+	h, err := r.Reserve(ctx, 1, a)
+	require.NoError(t, err)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
+	require.NoError(t, err)
+	require.ErrorIs(t, r.ReleaseStopped(ctx, h), ErrVersionConflict)
+	h, err = r.Stop(ctx, h)
+	require.NoError(t, err)
+	require.NoError(t, r.ReleaseStopped(ctx, h))
+	require.NoError(t, r.ReleaseStopped(ctx, h))
+	next, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "b"})
+	require.NoError(t, err)
+	next, err = startTestRecording(r, ctx, next, testMedia(), 0)
+	require.NoError(t, err)
+	_, err = r.Stop(ctx, h)
+	require.Error(t, err)
+	require.Equal(t, 1, c.stops)
+	require.Equal(t, 2, c.starts)
+	require.Equal(t, []string{"/tmp/work-recordings/a", "/tmp/work-recordings/b"}, c.directories)
+	row, err := r.claims.Get(ctx, ChannelResource(1))
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/work-recordings/b", row.RecordingRoot)
+}
+func TestRecorderRejectsWorkStartWithoutOwnedDirectory(t *testing.T) {
+	r, c, _ := recorderFixture(t)
+	ctx := context.Background()
+	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
+	require.NoError(t, err)
+	_, err = r.Start(ctx, h, testMedia(), 0)
+	require.ErrorIs(t, err, ErrInvalidRequest)
+	require.Zero(t, c.starts)
+	m := testMedia()
+	m.RecordingRoot = "/tmp/work-recordings/b"
+	_, err = r.Start(ctx, h, m, 0)
+	require.ErrorIs(t, err, ErrInvalidRequest)
+	require.Zero(t, c.starts)
+}
+
+func startTestRecording(r *Recorder, ctx context.Context, h RecorderHandle, target MediaTarget, maxSecond int) (RecorderHandle, error) {
+	if h.Owner.Kind == OwnerWork {
+		target.RecordingRoot = "/tmp/work-recordings/" + h.Owner.ID
+	}
+	return r.Start(ctx, h, target, maxSecond)
+}
+func (c *testRecorderClient) StartMP4RecordInDirectory(ctx context.Context, vhost, app, stream string, maxSecond int, directory string) error {
+	c.directories = append(c.directories, directory)
+	return c.StartRecord(ctx, vhost, app, stream, maxSecond)
+}
+
+func TestRecorderReleaseStoppedRollsBackBothClaims(t *testing.T) {
+	r, _, _ := recorderFixture(t)
+	ctx := context.Background()
+	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
+	require.NoError(t, err)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
+	require.NoError(t, err)
+	h, err = r.Stop(ctx, h)
+	require.NoError(t, err)
+	require.NoError(t, r.claims.db.Exec("CREATE TRIGGER reject_release BEFORE UPDATE ON gb_recorder_claim WHEN NEW.resource_key = '"+ChannelResource(1)+"' AND NEW.state = 'idle' BEGIN SELECT RAISE(ABORT,'unavailable'); END").Error)
+	require.Error(t, r.ReleaseStopped(ctx, h))
+	for _, key := range []string{ChannelResource(1), testMedia().key()} {
+		claim, err := r.claims.Get(ctx, key)
+		require.NoError(t, err)
+		require.Equal(t, StateStopped, claim.State)
+		require.Equal(t, "a", claim.OwnerID)
+	}
+}
+
+func TestRecorderReleaseRejectsMissingPersistentDirectory(t *testing.T) {
+	r, _, _ := recorderFixture(t)
+	ctx := context.Background()
+	h, err := r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "a"})
+	require.NoError(t, err)
+	h, err = startTestRecording(r, ctx, h, testMedia(), 0)
+	require.NoError(t, err)
+	h, err = r.Stop(ctx, h)
+	require.NoError(t, err)
+	require.NoError(t, r.claims.db.Exec("UPDATE gb_recorder_claim SET recording_root = ''").Error)
+	require.ErrorIs(t, r.ReleaseStopped(ctx, h), ErrInvalidRequest)
+	_, err = r.Reserve(ctx, 1, Owner{Kind: OwnerWork, ID: "b"})
+	require.ErrorIs(t, err, ErrOwnerConflict)
 }

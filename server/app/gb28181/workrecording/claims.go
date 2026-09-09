@@ -62,7 +62,7 @@ func (s *Claims) Acquire(ctx context.Context, key string, owner Owner, generatio
 	// request from an earlier run match the next run of the same owner.
 	reused := s.db.WithContext(ctx).Model(&models.GbRecorderClaim{}).
 		Where("resource_key = ? AND state = ?", key, StateIdle).
-		Updates(map[string]any{"owner_kind": owner.Kind, "owner_id": owner.ID, "generation": generation, "state": StateStarting, "version": gorm.Expr("version + 1"), "channel_id": 0, "node_id": 0, "v_host": "", "app": "", "stream": ""})
+		Updates(map[string]any{"owner_kind": owner.Kind, "owner_id": owner.ID, "generation": generation, "state": StateStarting, "version": gorm.Expr("version + 1"), "channel_id": 0, "node_id": 0, "v_host": "", "app": "", "stream": "", "recording_root": ""})
 	if reused.Error != nil {
 		return nil, reused.Error
 	}
@@ -139,8 +139,8 @@ func (s *Claims) Transition(ctx context.Context, key string, owner Owner, versio
 	return s.Get(ctx, key)
 }
 
-// Release requires an explicitly resolved stopped claim. The caller must also
-// resolve file finalization before advancing the claim to stopped.
+// Release requires an explicitly resolved stopped claim. Runtime callers use
+// Recorder.ReleaseStopped to atomically release channel and media resources.
 func (s *Claims) Release(ctx context.Context, key string, owner Owner, version uint64) error {
 	row, err := s.owned(ctx, key, owner, version)
 	if err != nil {
