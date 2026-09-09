@@ -73,7 +73,7 @@ func TestOpenAPIStartupRejectsMissingSchemaAndInvalidConfiguration(t *testing.T)
 				require.NoError(t, db.Create(&models.Audit{RequestID: "interrupted", Result: "started"}).Error)
 				require.NoError(t, db.Exec("CREATE TRIGGER reject_recovery BEFORE UPDATE ON sys_openapi_audit BEGIN SELECT RAISE(ABORT, 'recovery denied'); END").Error)
 			}
-			gate, admin, err := InitializeRuntime(context.Background(), db, runtimePermissions{}, settings)
+			gate, admin, err := InitializeRuntime(context.Background(), db, runtimePermissions{}, settings, nil)
 			if failure == "none" {
 				require.NoError(t, err)
 				require.NotNil(t, gate)
@@ -100,11 +100,11 @@ func (s runtimeTestSettings) GetStringSlice(string) []string { return nil }
 
 func TestOpenAPIStartupDisabledDoesNotRequireOrReadSecrets(t *testing.T) {
 	t.Setenv("UVP_OPENAPI_MASTER_KEY", "not-a-real-key")
-	gate, admin, err := InitializeRuntime(context.Background(), nil, nil, runtimeTestSettings{})
+	gate, admin, err := InitializeRuntime(context.Background(), nil, nil, runtimeTestSettings{}, nil)
 	require.NoError(t, err)
 	require.Nil(t, gate)
 	require.Nil(t, admin)
-	_, _, err = InitializeRuntime(context.Background(), nil, nil, runtimeTestSettings{enabled: true})
+	_, _, err = InitializeRuntime(context.Background(), nil, nil, runtimeTestSettings{enabled: true}, nil)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "not-a-real-key")
 }

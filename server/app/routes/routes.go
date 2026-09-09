@@ -9,6 +9,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gb28181 "uvplatform.cn/uvp-gb28181/app/gb28181"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -54,13 +55,28 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	}
 	var openAPIGateway *openapiauth.Gateway
 	var openAPIAdmin *openapicontrollers.ClientAdminController
+	if app.ConfigYml.GetBool("openapi.play_enabled") {
+		if !app.ConfigYml.GetBool("openapi.enabled") {
+			panic("OpenAPI initialization failed; ingress remains closed")
+		}
+	}
 	if app.ConfigYml.GetBool("openapi.enabled") || app.ConfigYml.GetBool("openapi.play_enabled") {
 		startupContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var err error
-		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml)
+		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml, gb28181.OpenAPIMediaRuntime())
 		cancel()
 		if err != nil {
 			panic("OpenAPI initialization failed; ingress remains closed")
+		}
+	}
+	if app.ConfigYml.GetBool("openapi.play_enabled") {
+		// Complete schema/key/Gateway construction before committing the one-way
+		// media-auth latch. The boundary is installed only after the latch succeeds.
+		activationContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := openapiroutes.ActivateMediaSecurity(activationContext, app.DB(), gbconfig.RequirePlayAuth)
+		cancel()
+		if err != nil {
+			panic("OpenAPI media security activation failed; ingress remains closed")
 		}
 	}
 	if err := openapiroutes.InstallPublicBoundary(engine, openAPIGateway, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {

@@ -27,6 +27,15 @@ var _ LivePlayer = (*LivePlayerRuntime)(nil)
 
 func NewLivePlayerRuntime() *LivePlayerRuntime { return &LivePlayerRuntime{} }
 
+func (r *LivePlayerRuntime) Ready() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.current != nil && !r.current.retired
+}
+
 func (r *LivePlayerRuntime) Publish(player LivePlayer) error {
 	if r == nil || interfaceIsNil(player) {
 		return ErrLiveApplicationUnavailable

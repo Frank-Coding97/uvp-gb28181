@@ -12,8 +12,9 @@ import (
 
 type openAPIRootConfig struct {
 	app.YmlConfigInterf
-	staticDir string
-	enabled   bool
+	staticDir   string
+	enabled     bool
+	playEnabled bool
 }
 type openAPIRootCasbin struct{ app.CasbinInterf }
 
@@ -37,6 +38,9 @@ func (c openAPIRootConfig) GetString(key string) string {
 func (c openAPIRootConfig) GetBool(key string) bool {
 	if key == "openapi.enabled" {
 		return c.enabled
+	}
+	if key == "openapi.play_enabled" {
+		return c.playEnabled
 	}
 	return key == "httpserver.allowcrossdomain"
 }

@@ -131,7 +131,13 @@ func NewLiveApplication(provider QualificationProvider, player LivePlayer, grant
 // dependencies and feature flag. It is a startup/configuration check; it
 // does not qualify a node or assert T18 media-runtime eligibility.
 func (application *LiveApplication) Ready() bool {
-	return application != nil && application.authEnable && !interfaceIsNil(application.provider) && !interfaceIsNil(application.player) && !interfaceIsNil(application.grants)
+	if application == nil || !application.authEnable || interfaceIsNil(application.provider) || interfaceIsNil(application.player) || interfaceIsNil(application.grants) {
+		return false
+	}
+	if readiness, ok := application.player.(interface{ Ready() bool }); ok {
+		return readiness.Ready()
+	}
+	return true
 }
 
 // Preflight obtains a fresh immutable qualification ticket. It never picks

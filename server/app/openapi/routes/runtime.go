@@ -27,17 +27,16 @@ type RuntimeSettings interface {
 // RestoreMediaSecurity still runs unconditionally at the application root.
 // Enabled gateway startup
 // cannot silently fall back after recovery/configuration/dependency failure.
-func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings) (*auth.Gateway, *controllers.ClientAdminController, error) {
+func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings, media auth.MediaDispatcher) (*auth.Gateway, *controllers.ClientAdminController, error) {
 	if settings == nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	// The qualified media application is not wired yet. Root's independent
-	// revocation compensation never grants playback eligibility. A hot/raw flag
-	// cannot activate media or write a sticky commitment before full preflight.
-	if settings.GetBool("openapi.play_enabled") {
+	enabled := settings.GetBool("openapi.enabled")
+	playEnabled := settings.GetBool("openapi.play_enabled")
+	if playEnabled && (!enabled || media == nil) {
 		return nil, nil, auth.ErrUnavailable
 	}
-	if !settings.GetBool("openapi.enabled") {
+	if !enabled {
 		return nil, nil, nil
 	}
 	if db == nil || permissions == nil {
@@ -69,7 +68,11 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	gate, err := auth.NewGateway(ctx, db, keys, auth.GatewayConfig{Audience: settings.GetString("openapi.audience"), TLSProxies: settings.GetStringSlice("openapi.tls_terminator_proxies"), Timeout: time.Duration(timeout) * time.Second, AuditReserve: time.Second, MaxInFlight: 64})
+	options := make([]auth.GatewayOption, 0, 1)
+	if playEnabled {
+		options = append(options, auth.WithMediaDispatcher(media))
+	}
+	gate, err := auth.NewGateway(ctx, db, keys, auth.GatewayConfig{Audience: settings.GetString("openapi.audience"), TLSProxies: settings.GetStringSlice("openapi.tls_terminator_proxies"), Timeout: time.Duration(timeout) * time.Second, AuditReserve: time.Second, MaxInFlight: 64}, options...)
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
@@ -84,6 +87,21 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 		return controllers.RevocationView{Status: state.Status, Pending: state.Pending, Closed: state.Closed}, nil
 	}
 	return gate, controllers.NewClientAdminController(db, service, permissions, progress), nil
+}
+
+// ActivateMediaSecurity commits the one-way authentication latch before any
+// media root can become ready. Runtime projection changes only after the
+// durable transaction succeeds.
+func ActivateMediaSecurity(ctx context.Context, db *gorm.DB, requireAuth func()) error {
+	if requireAuth == nil {
+		return openapiconfig.ErrUnavailable
+	}
+	state, err := openapiconfig.NewMustAuthStore(db, time.Now).Latch(ctx)
+	if err != nil || !state.MustAuthLocked {
+		return openapiconfig.ErrUnavailable
+	}
+	requireAuth()
+	return nil
 }
 
 // RestoreMediaSecurity is mandatory before GB/HTTP startup even when OpenAPI

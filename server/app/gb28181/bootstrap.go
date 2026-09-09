@@ -790,6 +790,14 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else {
 		gbroutes.SetPlayAuthorizer(nil)
 	}
+	var openAPICandidate *openAPIMediaRootCandidate
+	var openAPIValidator play.QualifiedNodeValidator
+	if playAuthSettings.RequiredByOpenAPI {
+		openAPICandidate, openAPIValidator, err = prepareOpenAPIMediaRoot(deviceDB, playSigner)
+		if err != nil {
+			return fmt.Errorf("装配 OpenAPI 媒体授权根失败: %w", err)
+		}
+	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	if u := srv.UAC(); u != nil {
@@ -804,6 +812,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 				play.WithDeviceOperationBarrier(deviceOperations),
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
+			}
+			if openAPIValidator != nil {
+				opts = append(opts, play.WithQualifiedNodeValidator(openAPIValidator))
 			}
 			if trafficResolver != nil {
 				opts = append(opts, play.WithLiveReadyObserver(func(session play.LiveSession) {
@@ -885,6 +896,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	if playSvc != nil && zlmRegistry != nil && zlmScheduler != nil {
 		if err := openAPILivePlayer.Publish(playSvc); err != nil {
 			return fmt.Errorf("OpenAPI 播放运行时上一代尚未退出: %w", err)
+		}
+		if err := publishOpenAPIMediaRoot(openAPICandidate); err != nil {
+			return fmt.Errorf("发布 OpenAPI 媒体授权根失败: %w", err)
 		}
 	}
 	return nil

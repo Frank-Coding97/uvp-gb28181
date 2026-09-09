@@ -52,7 +52,7 @@ func TestSIPRootStartsAndRetainsPlaybackRecovery(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	app.GormDbMysql = db
 	authority := authoritytest.Register(t, db, "")
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
 	require.NoError(t, db.Exec("CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id TEXT, access_epoch BIGINT, cleanup_completed_epoch BIGINT, deleted_at DATETIME)").Error)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var enteredOnce, releaseOnce sync.Once

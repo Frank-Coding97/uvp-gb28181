@@ -267,6 +267,15 @@ func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	}
 }
 
+func SetOpenAPIMediaAuthorization(
+	verifier gbhandler.OpenAPIPlayTokenVerifier,
+	binder gbhandler.OpenAPIViewerBinder,
+	observer gbhandler.OpenAPIFlowObserver,
+) {
+	hookController.SetOpenAPIPlayAuthorization(verifier, binder)
+	hookController.SetOpenAPIFlowObserver(observer)
+}
+
 func SetStreamMonitorService(service *streammonitor.Service) {
 	streamMonitorController = gbcontrollers.NewStreamMonitorController(service)
 }
