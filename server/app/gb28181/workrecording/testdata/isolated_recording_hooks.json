@@ -1,0 +1,26 @@
+[
+  {
+    "received_at": 1788930746.213175,
+    "body": {
+      "app": "rtp",
+      "file_name": "2026-09-09-13-12-26-0.mp4",
+      "file_path": "/node/work-recordings/a9f391ad-aeb3-402c-aa2a-b594eb080ebb/record/rtp/controlled-c83374925517/2026-09-09/2026-09-09-13-12-26-0.mp4",
+      "start_time": 1788930746,
+      "stream": "controlled-c83374925517",
+      "time_len": 0.4399999976158142,
+      "vhost": "__defaultVhost__"
+    }
+  },
+  {
+    "received_at": 1788930746.42522,
+    "body": {
+      "app": "rtp",
+      "file_name": "2026-09-09-13-12-26-0.mp4",
+      "file_path": "/node/work-recordings/95768f97-7a23-43bb-b7dc-f32bb54fd876/record/rtp/controlled-c83374925517/2026-09-09/2026-09-09-13-12-26-0.mp4",
+      "start_time": 1788930746,
+      "stream": "controlled-c83374925517",
+      "time_len": 0.6399999856948853,
+      "vhost": "__defaultVhost__"
+    }
+  }
+]
