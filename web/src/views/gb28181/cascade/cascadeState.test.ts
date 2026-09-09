@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, resolveChannelPTZAllowed, validateCascadePlatform } from "./cascadeState";
 
 describe("cascade platform state", () => {
   it("maps runtime facts to product conclusions", () => {
@@ -38,6 +38,16 @@ describe("cascade platform state", () => {
       domain: "3402000000",
       serverId: "34020000001320000001"
     }).localSipIp).toBe("");
+  });
+
+  it("defaults new shared channels to the platform PTZ setting", () => {
+    expect(resolveChannelPTZAllowed(undefined, true)).toBe(true);
+    expect(resolveChannelPTZAllowed(undefined, false)).toBe(false);
+  });
+
+  it("preserves an existing per-channel PTZ setting", () => {
+    expect(resolveChannelPTZAllowed(false, true)).toBe(false);
+    expect(resolveChannelPTZAllowed(true, false)).toBe(true);
   });
 
 });
