@@ -102,15 +102,19 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		if err != nil {
 			return fail(500, err)
 		}
-		responses, err := catalog.PlanCatalogResponses(protocol.ProfileFor(effectiveCascadeProfile(*matched)), matched.LocalDeviceID, snapshot, matched.CatalogBatchSize, req.Body())
-		if err != nil {
-			return fail(400, err)
-		}
 		client, err := clients.NewClient(*matched)
 		if err != nil {
 			return fail(503, err)
 		}
 		outbound := client.(*cascadePlatformClient)
+		var fits func([]byte) bool
+		if strings.EqualFold(matched.Transport, "UDP") {
+			fits = outbound.transactions.MessageFitsUDP
+		}
+		responses, err := catalog.PlanCatalogResponsesWithinLimit(protocol.ProfileFor(effectiveCascadeProfile(*matched)), matched.LocalDeviceID, snapshot, matched.CatalogBatchSize, req.Body(), fits)
+		if err != nil {
+			return fail(400, err)
+		}
 		if err = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
 			return true
 		}
