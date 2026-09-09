@@ -23,6 +23,7 @@ import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
+import { useWorkRecording } from "./useWorkRecording";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
@@ -52,6 +53,8 @@ const permissions = computed(() => userStore.account.permissions ?? []);
 const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
+const canStartWorkRecording = computed(() => hasPermission("gb28181:work-recording:start"));
+const canStopWorkRecording = computed(() => hasPermission("gb28181:work-recording:stop"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
 const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPermission("gb28181:ptz:control"));
 const monitorAreaRef = ref<HTMLElement | null>(null);
@@ -69,6 +72,7 @@ const pollingError = ref("");
 const pollingRemainingSeconds = ref(0);
 const playAllLoading = ref(false);
 const ptzMotion = ref<{ channelId: number; direction: PtzDirection } | null>(null);
+const workRecording = useWorkRecording();
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let pollingCountdownTimer: ReturnType<typeof setInterval> | null = null;
 let pollingNextCycleAt = 0;
@@ -83,6 +87,62 @@ const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => 
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
+const focusedWorkChannel = computed(() => focusedSlot.value?.channel || null);
+const focusedWorkSnapshot = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.snapshot(channel.id) : null;
+});
+const focusedWorkLoadState = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.loadState(channel.id) : "idle";
+});
+const focusedWorkAction = computed(() => {
+    const channel = focusedWorkChannel.value;
+    const snapshot = focusedWorkSnapshot.value;
+    if (!channel) return "开始录制";
+    const action = workRecording.pendingAction(channel.id);
+    if (action === "start" || snapshot?.state === "starting") return "开始中";
+    if (action === "stop" || snapshot?.state === "stopping") return "结束中";
+    if (focusedWorkLoadState.value !== "ready") return "待核实";
+    if (snapshot?.state === "unknown") return snapshot.id && canStopWorkRecording.value ? "重试结束" : "待核实";
+    return snapshot?.state === "recording" ? "结束录制" : "开始录制";
+});
+const focusedWorkStatus = computed(() => {
+    const channel = focusedWorkChannel.value;
+    const snapshot = focusedWorkSnapshot.value;
+    if (!channel) return "请选择播放窗口";
+    if (focusedWorkLoadState.value === "loading") return "正在查询录像状态";
+    if (focusedWorkLoadState.value !== "ready") return "录像状态待核实";
+    if (!snapshot) return "录像状态待核实";
+    if (snapshot.state === "unknown") return "录像状态待核实";
+    if (snapshot.state === "recording") return "录像中";
+    if (snapshot.state === "starting") return "开始中";
+    if (snapshot.state === "stopping") return "结束中";
+    if (snapshot.state === "stopped") return "已结束";
+    if (snapshot.state === "failed") return "开始失败";
+    return "未录制";
+});
+const focusedWorkTargetLabel = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? (channel.name || channel.alias || channel.channelId) : "未选择播放窗口";
+});
+const workRecordingToggleDisabled = computed(() => {
+    const channel = focusedWorkChannel.value;
+    if (!channel) return true;
+    const snapshot = focusedWorkSnapshot.value;
+    const action = workRecording.pendingAction(channel.id);
+    if (action || focusedWorkLoadState.value !== "ready" || !snapshot || snapshot.state === "starting" || snapshot.state === "stopping") return true;
+    if (snapshot.state === "recording" || snapshot.state === "unknown") return !snapshot.id || !canStopWorkRecording.value;
+    return !canStartWorkRecording.value;
+});
+const workRecordingToggleIsStop = computed(() => {
+    const snapshot = focusedWorkSnapshot.value;
+    return snapshot?.state === "recording" || (snapshot?.state === "unknown" && Boolean(snapshot.id));
+});
+const workRecordingToggleLabel = computed(() => {
+    const target = focusedWorkTargetLabel.value;
+    return `${focusedWorkAction.value}（${target}）`;
+});
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
 const pollingProgressDegrees = computed(() => {
     if (!pollingSettings.intervalSeconds) return 0;
@@ -173,6 +233,7 @@ async function assignChannel(channel: ChannelVO) {
     }
     target.channel = channel;
     focusedIndex.value = target.index;
+    void workRecording.refresh([channel.id]);
     await playSlot(target);
 }
 
@@ -188,6 +249,23 @@ async function retrySlot(slot: PlaybackSlot) {
 
 function focusSlot(slot: PlaybackSlot) {
     focusedIndex.value = slot.index;
+    if (slot.channel) {
+        const channelId = slot.channel.id;
+        const current = workRecording.snapshot(channelId);
+        if (workRecording.loadState(channelId) !== "ready" || current?.state === "unknown") void workRecording.refresh([channelId]);
+        else void workRecording.ensureStatus(channelId);
+    }
+}
+
+async function toggleWorkRecording() {
+    const channel = focusedWorkChannel.value;
+    if (!channel || workRecordingToggleDisabled.value) return;
+    const result = workRecordingToggleIsStop.value
+        ? await workRecording.stop(channel.id)
+        : await workRecording.start(channel.id);
+    if (result) return;
+    const reason = workRecording.error(channel.id);
+    if (reason) Message.error(reason);
 }
 
 function handlePtzActionChange(value: { channelId: number; action: string } | null) {
@@ -520,6 +598,15 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
+                    <div class="work-recording-actions" role="group" aria-label="作业录像控制">
+                        <span class="work-recording-target" data-test="work-recording-target">{{ focusedWorkTargetLabel }}</span>
+                        <button type="button" data-test="work-recording-toggle" :class="{ active: workRecordingToggleIsStop }" :disabled="workRecordingToggleDisabled" :aria-label="workRecordingToggleLabel" :title="workRecordingToggleLabel" @click="toggleWorkRecording">
+                            <CircleStop v-if="workRecordingToggleIsStop" :size="16" aria-hidden="true" />
+                            <Play v-else :size="16" aria-hidden="true" />
+                            <span class="work-recording-label">{{ focusedWorkAction }}</span>
+                        </button>
+                        <span class="work-recording-status" data-test="work-recording-status" role="status">{{ focusedWorkStatus }}</span>
+                    </div>
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
                         <button v-if="canManageFavorites" type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
@@ -599,6 +686,7 @@ onBeforeUnmount(() => {
 .slot-topline,
 .layout-switcher,
 .playback-actions,
+.work-recording-actions,
 .slot-title,
 .slot-actions,
 .text-action {
@@ -613,6 +701,16 @@ onBeforeUnmount(() => {
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
 .monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
 .monitor-toolbar { flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
+.work-recording-actions { min-width: 0; gap: 6px; }
+.work-recording-actions button { display: inline-flex; min-width: 104px; height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
+.work-recording-actions button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
+.work-recording-actions button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
+.work-recording-actions button.active { color: var(--zlm-danger-600, #DC2626); background: var(--zlm-danger-50, #FEF2F2); border-color: var(--zlm-danger-200, #FECACA); }
+.work-recording-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.65; }
+.work-recording-actions button:disabled:hover { background: transparent; border-color: transparent; }
+.work-recording-target { max-width: 140px; overflow: hidden; color: var(--zlm-text-2); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.work-recording-label { white-space: nowrap; }
+.work-recording-status { color: var(--zlm-text-3); font-size: 11px; white-space: nowrap; }
 .layout-switcher { gap: 4px; }
 .layout-switcher button,
 .playback-actions button,
@@ -733,9 +831,12 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 480px) {
     .monitor-toolbar { align-items: center; justify-content: space-between; gap: 6px; overflow-x: hidden; }
-    .layout-switcher, .playback-actions { flex: 0 0 auto; }
+    .layout-switcher, .playback-actions, .work-recording-actions { flex: 0 0 auto; }
     .layout-switcher, .playback-actions { gap: 2px; }
     .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
+    .work-recording-target, .work-recording-status { display: none; }
+    .work-recording-actions button { min-width: 30px; width: 30px; height: 30px; padding: 0; }
+    .work-recording-label { display: none; }
     .playback-actions button.polling-control.counting { width: 30px; padding: 0; }
     .countdown-ring { width: 24px; height: 24px; flex-basis: 24px; }
     .layout-glyph { width: 16px; height: 16px; }
