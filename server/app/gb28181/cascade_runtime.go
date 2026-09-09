@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo"
+	sipwire "github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
@@ -274,6 +275,11 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 	if err := manager.Reload(ctx); err != nil {
 		_ = manager.Shutdown(ctx)
 		return fmt.Errorf("load cascade platforms: %w", err)
+	}
+	if receiver, ok := server.(interface {
+		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	}); ok {
+		receiver.SetCascadeMessageHandler(newCascadeCatalogHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
 	}
 	cascadeRuntimeManager = manager
 	setupCascadeManagement(manager, cipher)
