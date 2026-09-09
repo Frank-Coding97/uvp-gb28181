@@ -44,6 +44,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/traffic"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/workrecording"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -589,6 +590,12 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
 func startSIPDependencies(cfg gbconfig.Config) error {
+	protectionCtx, protectionCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	protectionErr := recoverRecordingProtection(protectionCtx)
+	protectionCancel()
+	if protectionErr != nil {
+		return protectionErr
+	}
 	runtime := setupSecurityRuntime()
 	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
@@ -780,6 +787,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zlmLocationMap,
 				u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
+			if err := restoreWorkGenerationFloor(context.Background(), playSvc); err != nil {
+				return fmt.Errorf("恢复录像代际失败: %w", err)
+			}
+			playSvc.SetSourceCloseGuard(guardRecordingSourceClose)
 			playSvc.BeginRecovery()
 			recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			recoveryStats, recoveryErr := playSvc.RecoverLiveSessions(recoveryCtx)
@@ -805,6 +816,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			}
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
+			if err := restoreWorkGenerationFloor(context.Background(), playSvc); err != nil {
+				return fmt.Errorf("恢复录像代际失败: %w", err)
+			}
+			playSvc.SetSourceCloseGuard(guardRecordingSourceClose)
 			gbroutes.SetPlayService(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
@@ -1035,15 +1050,24 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 		recordingRepo = nil
 		recordingSvc = nil
 		gbroutes.SetRecordingService(nil, nil, nil)
+		gbroutes.SetWorkRecordingController(nil)
 		app.ZapLog.Info("GB28181 云端录像 service 跳过装配(play/registry/locationMap 未就绪)")
 		return
 	}
 	repo := gbrecording.NewGormRepo(app.DB())
 	recordingRepo = repo
+	workRecorder := newWorkRecorder(playSvc)
+	workLeases := play.NewSourceLeaseRegistry()
+	workService := workrecording.NewService(app.DB(), workRecorder, prepareWorkRecording(playSvc, workLeases))
+	gbroutes.SetWorkRecordingSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{workLeases, persistedWorkLeases{}})
+	gbroutes.SetWorkRecordingController(gbcontrollers.NewWorkRecordingController(workService))
 	recordingSvc = gbrecording.NewService(repo, zlmLocationMap, zlmRegistry,
-		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
+		func(n *node.Node) gbrecording.RecorderClient {
+			return gbrecording.GuardRecorderClient(gbzlm.NewClientForNode(n), recordingMutationGate.Load(), n.ID, repo.FindChannelByStream)
+		})
+	recordingSvc.SetOperationGuard(guardLegacyRecordingOperation)
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
-	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
+	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, gbrecording.NewWorkFileIndexer(app.DB(), indexer))
 	recordingPlanLeases = play.NewSourceLeaseRegistry()
 	recordingPlanOrchestrator := recordingplan.NewOrchestrator(playSvc, recordingSvc, recordingPlanLeases, nil)
 	planEnabled := cfg.Recording.PlanEnabled
