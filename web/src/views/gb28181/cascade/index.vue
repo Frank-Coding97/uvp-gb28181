@@ -48,7 +48,8 @@
                 <a-option value="online">在线</a-option>
                 <a-option value="offline">离线</a-option>
                 <a-option value="disabled">已停用</a-option>
-            </a-select>
+              </a-select>
+            </div>
           </template>
           <template #actions>
             <div class="cascade-search-actions">
@@ -392,7 +393,7 @@ const saving = ref(false);
 const actionId = ref<number | null>(null);
 const errorMessage = ref("");
 const keyword = ref("");
-const statusFilter = ref<string>();
+const statusFilter = ref("all");
 const editorVisible = ref(false);
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
@@ -423,7 +424,7 @@ const summary = computed(() => ({
 const filteredPlatforms = computed(() => {
   const q = keyword.value.trim().toLowerCase();
   return platforms.value.filter(item => {
-    const statusMatch = !statusFilter.value || (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
+    const statusMatch = statusFilter.value === "all" || (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
     const keywordMatch = !q || [item.name, item.upstreamServerId, item.host, item.localDeviceId].some(value => String(value || "").toLowerCase().includes(q));
     return statusMatch && keywordMatch;
   });
