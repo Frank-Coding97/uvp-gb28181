@@ -320,3 +320,22 @@ func validatePublishedID(id string) error {
 	}
 	return nil
 }
+
+// ChannelsOnly exposes selected video resources without publishing device grouping nodes.
+// Source-device ownership and the reverse lookup remain available internally.
+func (s Snapshot) ChannelsOnly() Snapshot {
+	result := s
+	result.Items = make([]CatalogItem, 0, len(s.channels))
+	result.publishedIDs = make(map[string]struct{}, len(s.channels))
+	for _, item := range s.Items {
+		if item.Kind != CatalogItemChannel {
+			continue
+		}
+		item.ParentID = ""
+		item.Parental = 0
+		result.Items = append(result.Items, item)
+		result.publishedIDs[item.ID] = struct{}{}
+	}
+	result.SumNum = len(result.Items)
+	return result
+}
