@@ -282,7 +282,7 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 	if receiver, ok := server.(interface {
 		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
 	}); ok {
-		receiver.SetCascadeMessageHandler(newCascadeCatalogHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
+		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
 	}
 	cascadeRuntimeManager = manager
 	setupCascadeManagement(manager, cipher)
