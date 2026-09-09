@@ -81,8 +81,12 @@ func (s *Claims) Acquire(ctx context.Context, key string, owner Owner, generatio
 
 func (s *Claims) Get(ctx context.Context, key string) (*models.GbRecorderClaim, error) {
 	var row models.GbRecorderClaim
-	if err := s.db.WithContext(ctx).First(&row, "resource_key = ?", key).Error; err != nil {
-		return nil, err
+	result := s.db.WithContext(ctx).First(&row, "resource_key = ?", key)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &row, nil
 }

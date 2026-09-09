@@ -28,6 +28,10 @@ function responseData<T>(response: ApiResponse<T>) {
     return response.data;
 }
 
+function errorMessage(reason: any, fallback: string) {
+    return reason?.response?.data?.message || reason?.message || fallback;
+}
+
 function uncertain(reason: any) {
     const code = String(reason?.code || "").toUpperCase();
     const message = String(reason?.message || "").toLowerCase();
@@ -100,15 +104,17 @@ export function useWorkRecording() {
     async function refresh(channelIds: number[]) {
         const ids = [...new Set(channelIds.filter(channelId => Number.isSafeInteger(channelId) && channelId > 0))];
         if (!ids.length) return false;
-        const sequences = new Map(ids.map(channelId => [channelId, nextSequence(channelId)]));
-        ids.forEach(channelId => {
+        const queryIds = ids.filter(channelId => !actions.has(channelId) && !inFlight.has(channelId));
+        if (!queryIds.length) return false;
+        const sequences = new Map(queryIds.map(channelId => [channelId, nextSequence(channelId)]));
+        queryIds.forEach(channelId => {
             loadStates.set(channelId, "loading");
             errors.delete(channelId);
         });
         try {
-            const response = responseData(await getWorkRecordingStatus(ids));
+            const response = responseData(await getWorkRecordingStatus(queryIds));
             const byChannel = new Map((response || []).map(item => [item.channelId, item]));
-            ids.forEach(channelId => {
+            queryIds.forEach(channelId => {
                 if (sequences.get(channelId) !== currentSequence(channelId)) return;
                 const item = byChannel.get(channelId);
                 if (!item) {
@@ -121,10 +127,10 @@ export function useWorkRecording() {
             });
             return true;
         } catch (reason: any) {
-            ids.forEach(channelId => {
+            queryIds.forEach(channelId => {
                 if (sequences.get(channelId) !== currentSequence(channelId)) return;
                 loadStates.set(channelId, "error");
-                errors.set(channelId, reason?.message || "查询录像状态失败");
+                errors.set(channelId, errorMessage(reason, "查询录像状态失败"));
             });
             return false;
         }
@@ -167,10 +173,10 @@ export function useWorkRecording() {
                         if (failedSnapshot.state === "failed") requestIds.delete(channelId);
                     } else if (uncertain(reason)) {
                         const current = snapshot(channelId);
-                        if (current) snapshots.set(channelId, { ...current, state: "unknown", lastError: reason?.message || "开始录像状态待核实" });
+                        if (current) snapshots.set(channelId, { ...current, state: "unknown", lastError: errorMessage(reason, "开始录像状态待核实") });
                         loadStates.set(channelId, "error");
                     }
-                    errors.set(channelId, reason?.message || "开始录像失败");
+                    errors.set(channelId, errorMessage(reason, "开始录像失败"));
                 }
                 return null;
             } finally {
@@ -206,10 +212,10 @@ export function useWorkRecording() {
                         loadStates.set(channelId, "ready");
                     } else if (uncertain(reason)) {
                         const current = snapshot(channelId);
-                        if (current) snapshots.set(channelId, { ...current, state: "unknown", lastError: reason?.message || "结束录像状态待核实" });
+                        if (current) snapshots.set(channelId, { ...current, state: "unknown", lastError: errorMessage(reason, "结束录像状态待核实") });
                         loadStates.set(channelId, "error");
                     }
-                    errors.set(channelId, reason?.message || "结束录像失败");
+                    errors.set(channelId, errorMessage(reason, "结束录像失败"));
                 }
                 return null;
             } finally {

@@ -34,3 +34,52 @@ export const getWorkRecordingStatus = (channelIds: number[]) =>
   http.request<BaseResult<WorkRecordingSnapshot[]>>("get", baseUrlApi(`${path}/status`), {
     params: { channelIds: channelIds.join(",") }
   });
+
+export interface WorkRecordingListItem extends WorkRecordingSnapshot {
+  channelName: string;
+}
+export interface WorkRecordingList {
+  items: WorkRecordingListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export const listWorkRecordings = (page = 1, state?: "active") =>
+  http.request<BaseResult<WorkRecordingList>>("get", baseUrlApi(path), {
+    params: { page, pageSize: 10, state }
+  });
+
+export interface WorkRecordingForm {
+  projectName: string;
+  major: string;
+  stationArea: string;
+  mileage: string;
+  anchorSectionNo: string;
+  startAnchorPillarNo: string;
+  endAnchorPillarNo: string;
+  workLeader: string;
+  workPersonnel: string[];
+  tensionWireCarModel: string;
+  tensionWireCarNo: string;
+  setTension: string;
+  straightenerStatus: string;
+  straightenerInspector: string;
+  wireLayingProcess: string;
+  remark: string;
+}
+export interface WorkRecordingFormDetail {
+  jobId: string;
+  channelId: number;
+  formVersion: number;
+  formState: string;
+  schemaVersion: number;
+  deviceId: string;
+  editable: boolean;
+  form: WorkRecordingForm;
+}
+export const getWorkRecordingForm = (id: string) =>
+  http.request<BaseResult<WorkRecordingFormDetail>>("get", baseUrlApi(`${path}/${encodeURIComponent(id)}/form`));
+export const saveWorkRecordingForm = (id: string, formVersion: number, form: WorkRecordingForm) =>
+  http.request<BaseResult<WorkRecordingFormDetail>>("put", baseUrlApi(`${path}/${encodeURIComponent(id)}/form`), {
+    data: { formVersion, form }
+  });

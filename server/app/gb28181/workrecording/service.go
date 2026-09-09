@@ -433,17 +433,24 @@ func (s *Service) findRequest(ctx context.Context, actor uint, requestID string)
 
 func (s *Service) findRequestByID(ctx context.Context, actor uint, requestID string) (*models.GbWorkRecording, error) {
 	var job models.GbWorkRecording
-	err := s.db.WithContext(ctx).Where("created_by = ? AND request_id = ?", actor, requestID).First(&job).Error
-	if err != nil {
-		return nil, err
+	result := s.db.WithContext(ctx).Where("created_by = ? AND request_id = ?", actor, requestID).First(&job)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &job, nil
 }
 
 func (s *Service) findJob(ctx context.Context, jobID string) (*models.GbWorkRecording, error) {
 	var job models.GbWorkRecording
-	if err := s.db.WithContext(ctx).First(&job, "id = ?", jobID).Error; err != nil {
-		return nil, err
+	result := s.db.WithContext(ctx).First(&job, "id = ?", jobID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &job, nil
 }

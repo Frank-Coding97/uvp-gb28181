@@ -21,6 +21,8 @@ import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
+import WorkRecordingJobs from "./WorkRecordingJobs.vue";
+import WorkRecordingFormDialog from "./WorkRecordingFormDialog.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { useWorkRecording } from "./useWorkRecording";
@@ -45,6 +47,8 @@ interface FavoriteChannelGroup {
     channels: ChannelVO[];
 }
 
+const workJobsVisible = ref(false);
+const workFormJob = ref<{ id: string; channelName: string } | null>(null);
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const playbackConsole = usePlaybackConsoleStore();
@@ -54,6 +58,7 @@ const hasPermission = (permission: string) => permissions.value.includes("*:*:*"
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canStartWorkRecording = computed(() => hasPermission("gb28181:work-recording:start"));
+const canEditWorkForm = computed(() => hasPermission("gb28181:work-recording:form"));
 const canStopWorkRecording = computed(() => hasPermission("gb28181:work-recording:stop"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
 const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPermission("gb28181:ptz:control"));
@@ -95,6 +100,10 @@ const focusedWorkSnapshot = computed(() => {
 const focusedWorkLoadState = computed(() => {
     const channel = focusedWorkChannel.value;
     return channel ? workRecording.loadState(channel.id) : "idle";
+});
+const focusedWorkError = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.error(channel.id) || focusedWorkSnapshot.value?.lastError || "" : "";
 });
 const focusedWorkAction = computed(() => {
     const channel = focusedWorkChannel.value;
@@ -260,10 +269,18 @@ function focusSlot(slot: PlaybackSlot) {
 async function toggleWorkRecording() {
     const channel = focusedWorkChannel.value;
     if (!channel || workRecordingToggleDisabled.value) return;
-    const result = workRecordingToggleIsStop.value
+    const stopping = workRecordingToggleIsStop.value;
+    const channelName = channel.name || channel.alias || channel.channelId;
+    const result = stopping
         ? await workRecording.stop(channel.id)
         : await workRecording.start(channel.id);
-    if (result) return;
+    if (result) {
+        if (!stopping && result.state === "recording" && result.id) {
+            if (!workFormJob.value) workFormJob.value = { id: result.id, channelName };
+            else Message.info(`${channelName}已开始录制，可在作业记录中填写表单`);
+        }
+        return;
+    }
     const reason = workRecording.error(channel.id);
     if (reason) Message.error(reason);
 }
@@ -291,6 +308,8 @@ function setLayout(value: LayoutSize) {
 
 function stopAll() {
     const hadChannels = slots.some(slot => slot.channel);
+    workStatusDisposed = true;
+    if (workStatusTimer) clearTimeout(workStatusTimer);
     playAllToken += 1;
     stopPolling();
     slots.forEach(resetSlot);
@@ -573,8 +592,28 @@ function onPlayerError(slot: PlaybackSlot, message: string) {
     slot.error = message || "播放器拉流失败";
 }
 
-onMounted(() => document.addEventListener("fullscreenchange", syncFullscreenState));
+let workStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let workStatusDisposed = false;
+async function pollWorkStatus() {
+    try {
+        if (document.visibilityState !== "hidden") {
+            const ids = visibleSlots.value.flatMap(slot => slot.channel ? [slot.channel.id] : []);
+            await workRecording.refresh(ids);
+        }
+    } finally {
+        if (!workStatusDisposed) workStatusTimer = setTimeout(pollWorkStatus, 3000);
+    }
+}
+function refreshFocusedWorkStatus() {
+    if (focusedWorkChannel.value) void workRecording.refresh([focusedWorkChannel.value.id]);
+}
+onMounted(() => {
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    workStatusTimer = setTimeout(pollWorkStatus, 3000);
+});
 onBeforeUnmount(() => {
+    workStatusDisposed = true;
+    if (workStatusTimer) clearTimeout(workStatusTimer);
     playAllToken += 1;
     stopPolling();
     document.removeEventListener("fullscreenchange", syncFullscreenState);
@@ -599,6 +638,8 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="work-recording-actions" role="group" aria-label="作业录像控制">
+                        <button v-if="canStartWorkRecording || canStopWorkRecording || canEditWorkForm" type="button" data-test="work-recording-jobs" @click="workJobsVisible = true">作业记录</button>
+                        <button v-if="focusedWorkSnapshot?.id" type="button" data-test="work-recording-form" @click="workFormJob = { id: focusedWorkSnapshot.id, channelName: focusedWorkTargetLabel }">作业表单</button>
                         <span class="work-recording-target" data-test="work-recording-target">{{ focusedWorkTargetLabel }}</span>
                         <button type="button" data-test="work-recording-toggle" :class="{ active: workRecordingToggleIsStop }" :disabled="workRecordingToggleDisabled" :aria-label="workRecordingToggleLabel" :title="workRecordingToggleLabel" @click="toggleWorkRecording">
                             <CircleStop v-if="workRecordingToggleIsStop" :size="16" aria-hidden="true" />
@@ -606,6 +647,8 @@ onBeforeUnmount(() => {
                             <span class="work-recording-label">{{ focusedWorkAction }}</span>
                         </button>
                         <span class="work-recording-status" data-test="work-recording-status" role="status">{{ focusedWorkStatus }}</span>
+                        <button v-if="focusedWorkChannel" type="button" data-test="work-recording-refresh" aria-label="刷新录像状态" title="刷新录像状态" :disabled="focusedWorkLoadState === 'loading' || Boolean(workRecording.pendingAction(focusedWorkChannel.id))" @click="refreshFocusedWorkStatus"><RefreshCw :size="15" /></button>
+                        <span v-if="focusedWorkError" data-test="work-recording-error" class="work-recording-error" :title="focusedWorkError" role="status">{{ focusedWorkError }}</span>
                     </div>
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
                         <button v-if="canManageFavorites" type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
@@ -650,6 +693,8 @@ onBeforeUnmount(() => {
                         <UnplayedCover v-else :index="slot.index" />
                     </article>
                 </div>
+                <WorkRecordingJobs :visible="workJobsVisible" :can-stop="canStopWorkRecording" @close="workJobsVisible = false" @changed="refreshFocusedWorkStatus" @form="job => { workJobsVisible = false; workFormJob = { id: job.id, channelName: job.channelName }; }" />
+                <WorkRecordingFormDialog :visible="Boolean(workFormJob)" :job-id="workFormJob?.id || ''" :channel-name="workFormJob?.channelName || ''" :can-edit="canEditWorkForm" @close="workFormJob = null" @saved="refreshFocusedWorkStatus" />
                 <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
@@ -700,9 +745,9 @@ onBeforeUnmount(() => {
 
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
 .monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
-.monitor-toolbar { flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
-.work-recording-actions { min-width: 0; gap: 6px; }
-.work-recording-actions button { display: inline-flex; min-width: 104px; height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
+.monitor-toolbar { flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.work-recording-actions { order: 3; flex: 1 0 100%; min-width: 0; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--zlm-border); }
+.work-recording-actions button { display: inline-flex; min-width: 34px; white-space: nowrap; height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
 .work-recording-actions button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
 .work-recording-actions button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
 .work-recording-actions button.active { color: var(--zlm-danger-600, #DC2626); background: var(--zlm-danger-50, #FEF2F2); border-color: var(--zlm-danger-200, #FECACA); }
@@ -711,7 +756,7 @@ onBeforeUnmount(() => {
 .work-recording-target { max-width: 140px; overflow: hidden; color: var(--zlm-text-2); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .work-recording-label { white-space: nowrap; }
 .work-recording-status { color: var(--zlm-text-3); font-size: 11px; white-space: nowrap; }
-.layout-switcher { gap: 4px; }
+.layout-switcher { gap: 4px; margin-right: auto; }
 .layout-switcher button,
 .playback-actions button,
 .polling-settings header button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; }
@@ -831,11 +876,11 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 480px) {
     .monitor-toolbar { align-items: center; justify-content: space-between; gap: 6px; overflow-x: hidden; }
-    .layout-switcher, .playback-actions, .work-recording-actions { flex: 0 0 auto; }
+    .layout-switcher, .playback-actions { flex: 0 0 auto; }
     .layout-switcher, .playback-actions { gap: 2px; }
     .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
     .work-recording-target, .work-recording-status { display: none; }
-    .work-recording-actions button { min-width: 30px; width: 30px; height: 30px; padding: 0; }
+    .work-recording-actions button { min-width: 30px; width: auto; height: 30px; padding: 0 8px; }
     .work-recording-label { display: none; }
     .playback-actions button.polling-control.counting { width: 30px; padding: 0; }
     .countdown-ring { width: 24px; height: 24px; flex-basis: 24px; }
@@ -846,4 +891,8 @@ onBeforeUnmount(() => {
     .spin { animation: none; }
     .screen-slot::after { transition: none; }
 }
+</style>
+
+<style scoped>
+.work-recording-error { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--danger-6)); font-size: 12px; }
 </style>

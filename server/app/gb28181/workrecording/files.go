@@ -55,6 +55,9 @@ func (r *FileAttributionRepository) Resolve(ctx context.Context, input FileAttri
 		}
 		return nil, result.Error
 	}
+	if result.RowsAffected == 0 {
+		return nil, ErrAttributionUnknown
+	}
 	// Some business databases use case-insensitive text collations. Verify
 	// the exact media tuple again before accepting the directory evidence.
 	if job.NodeID != input.NodeID || job.VHost != input.VHost || job.App != input.App || job.Stream != input.Stream || !workRootContainsFile(job.RecordingRoot, job.ID, filePath) {

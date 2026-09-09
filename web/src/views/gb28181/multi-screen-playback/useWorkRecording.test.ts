@@ -140,43 +140,86 @@ describe("useWorkRecording", () => {
         expect(recording.snapshot(7)).toMatchObject({ id: "job-b", state: "recording", version: 3 });
     });
 
-    it("drops a late old-job response after a newer job was returned by status", async () => {
-        const oldStop = deferred<{ code: number; data: WorkRecordingSnapshot; message: string }>();
-        api.getWorkRecordingStatus
-            .mockResolvedValueOnce({ code: 0, data: [snapshot(7, "recording", 8, "job-a")], message: "" })
-            .mockResolvedValueOnce({ code: 0, data: [snapshot(7, "recording", 3, "job-b")], message: "" });
-        api.stopWorkRecording.mockReturnValueOnce(oldStop.promise);
+    it("drops a late old-job status response after a newer job status", async () => {
+        const oldStatus = deferred<{ code: number; data: WorkRecordingSnapshot[]; message: string }>();
+        const newStatus = deferred<{ code: number; data: WorkRecordingSnapshot[]; message: string }>();
+        api.getWorkRecordingStatus.mockReturnValueOnce(oldStatus.promise).mockReturnValueOnce(newStatus.promise);
         const recording = useWorkRecording();
-        await recording.refresh([7]);
 
-        const stop = recording.stop(7);
-        const refresh = recording.refresh([7]);
-        await refresh;
-        oldStop.resolve({ code: 0, data: snapshot(7, "stopped", 9, "job-a"), message: "" });
-        await stop;
+        const oldRequest = recording.refresh([7]);
+        const newRequest = recording.refresh([7]);
+        newStatus.resolve({ code: 0, data: [snapshot(7, "recording", 3, "job-b")], message: "" });
+        await newRequest;
+        oldStatus.resolve({ code: 0, data: [snapshot(7, "recording", 9, "job-a")], message: "" });
+        await oldRequest;
 
         expect(recording.snapshot(7)).toMatchObject({ id: "job-b", state: "recording", version: 3 });
     });
 
-    it("uses versions to keep a newer query result over a late start response", async () => {
+    it("keeps the start response effective when refresh is requested during the action", async () => {
         const startResponse = deferred<{ code: number; data: WorkRecordingSnapshot; message: string }>();
-        const refreshResponse = deferred<{ code: number; data: WorkRecordingSnapshot[]; message: string }>();
-        api.getWorkRecordingStatus
-            .mockResolvedValueOnce({ code: 0, data: [snapshot(7, "idle", 0)], message: "" })
-            .mockReturnValueOnce(refreshResponse.promise);
+        api.getWorkRecordingStatus.mockResolvedValueOnce({ code: 0, data: [snapshot(7, "idle", 0)], message: "" });
         api.startWorkRecording.mockReturnValueOnce(startResponse.promise);
         const recording = useWorkRecording();
         await recording.refresh([7]);
 
         const start = recording.start(7);
         const refresh = recording.refresh([7]);
-        refreshResponse.resolve({ code: 0, data: [snapshot(7, "recording", 2, "job-2")], message: "" });
-        await refresh;
+        expect(await refresh).toBe(false);
+        expect(api.getWorkRecordingStatus).toHaveBeenCalledTimes(1);
+        expect(recording.snapshot(7)).toMatchObject({ state: "idle", version: 0, id: "" });
+
         startResponse.resolve({ code: 0, data: snapshot(7, "recording", 1, "job-1"), message: "" });
         await start;
 
-        expect(recording.snapshot(7)).toMatchObject({ state: "recording", version: 2, id: "job-2" });
+        expect(recording.snapshot(7)).toMatchObject({ state: "recording", version: 1, id: "job-1" });
         expect(recording.pendingAction(7)).toBeNull();
+    });
+
+    it("does not let a refresh overwrite the state while a stop action is pending", async () => {
+        const stopResponse = deferred<{ code: number; data: WorkRecordingSnapshot; message: string }>();
+        api.getWorkRecordingStatus.mockResolvedValueOnce({ code: 0, data: [snapshot(7, "recording", 5, "job-7")], message: "" });
+        api.stopWorkRecording.mockReturnValueOnce(stopResponse.promise);
+        const recording = useWorkRecording();
+        await recording.refresh([7]);
+
+        const stop = recording.stop(7);
+        const refresh = recording.refresh([7]);
+        expect(recording.pendingAction(7)).toBe("stop");
+        expect(await refresh).toBe(false);
+        expect(api.getWorkRecordingStatus).toHaveBeenCalledTimes(1);
+        expect(recording.snapshot(7)).toMatchObject({ state: "recording", version: 5, id: "job-7" });
+
+        stopResponse.resolve({ code: 0, data: snapshot(7, "stopped", 6, "job-7"), message: "" });
+        await stop;
+        expect(recording.snapshot(7)).toMatchObject({ state: "stopped", version: 6, id: "job-7" });
+        expect(recording.pendingAction(7)).toBeNull();
+    });
+
+    it("prefers the server error message over Axios's generic request error", async () => {
+        api.getWorkRecordingStatus.mockResolvedValueOnce({ code: 0, data: [snapshot(7, "idle", 0)], message: "" });
+        api.startWorkRecording.mockRejectedValueOnce(Object.assign(new Error("Request failed with status code 503"), {
+            response: { data: { message: "录像服务暂不可用" } }
+        }));
+        const recording = useWorkRecording();
+        await recording.refresh([7]);
+
+        await recording.start(7);
+
+        expect(recording.error(7)).toBe("录像服务暂不可用");
+    });
+
+    it("prefers the server error message when stopping fails", async () => {
+        api.getWorkRecordingStatus.mockResolvedValueOnce({ code: 0, data: [snapshot(7, "recording", 5, "job-7")], message: "" });
+        api.stopWorkRecording.mockRejectedValueOnce(Object.assign(new Error("Request failed with status code 503"), {
+            response: { data: { message: "录像服务拒绝停止" } }
+        }));
+        const recording = useWorkRecording();
+        await recording.refresh([7]);
+
+        await recording.stop(7);
+
+        expect(recording.error(7)).toBe("录像服务拒绝停止");
     });
 
     it("allows a stop retry for a queried unknown job with a durable id", async () => {

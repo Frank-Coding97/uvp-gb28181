@@ -45,8 +45,9 @@ func (c *WorkRecordingController) ready(ctx *gin.Context) bool {
 }
 func (c *WorkRecordingController) visibleChannel(ctx *gin.Context, id uint) bool {
 	var channel models.GbChannel
-	err := c.db().WithContext(ctx).Scopes(visibleScope(ctx)).Select("id").First(&channel, id).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	query := c.db().WithContext(ctx).Scopes(visibleScope(ctx)).Select("id").First(&channel, id)
+	err := query.Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && query.RowsAffected == 0) {
 		workFailure(ctx, http.StatusNotFound, "通道不存在")
 		return false
 	}
@@ -83,8 +84,9 @@ func (c *WorkRecordingController) Start(ctx *gin.Context) {
 }
 func (c *WorkRecordingController) job(ctx *gin.Context) (*models.GbWorkRecording, bool) {
 	var job models.GbWorkRecording
-	if err := c.db().WithContext(ctx).First(&job, "id = ?", ctx.Param("id")).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	query := c.db().WithContext(ctx).First(&job, "id = ?", ctx.Param("id"))
+	if err := query.Error; err != nil || query.RowsAffected == 0 {
+		if errors.Is(err, gorm.ErrRecordNotFound) || err == nil {
 			workFailure(ctx, http.StatusNotFound, "作业不存在")
 		} else {
 			workFailure(ctx, http.StatusServiceUnavailable, "作业查询失败")
@@ -158,15 +160,17 @@ func (c *WorkRecordingController) Status(ctx *gin.Context) {
 	snapshots := make([]workrecording.Snapshot, 0, len(ids))
 	for _, id := range ids {
 		var claim models.GbRecorderClaim
-		err := c.db().WithContext(ctx).First(&claim, "resource_key = ?", workrecording.ChannelResource(id)).Error
+		query := c.db().WithContext(ctx).First(&claim, "resource_key = ?", workrecording.ChannelResource(id))
+		err := query.Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			workFailure(ctx, http.StatusServiceUnavailable, "录像状态查询失败")
 			return
 		}
 		snapshot := workrecording.Snapshot{ChannelID: id, State: workrecording.StateIdle}
-		if err == nil && claim.State != workrecording.StateIdle {
+		if err == nil && query.RowsAffected > 0 && claim.State != workrecording.StateIdle {
 			snapshot.State = workrecording.StateUnknown
 			snapshot.Version = claim.Version
+			snapshot.LastError = "该通道存在其他录像占用，请先核实原录像状态"
 			if claim.OwnerKind == workrecording.OwnerWork {
 				snapshot, err = c.service.Get(ctx.Request.Context(), claim.OwnerID)
 				if err != nil || snapshot.ChannelID != id || snapshot.ID != claim.OwnerID {

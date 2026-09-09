@@ -127,8 +127,12 @@ func loadLegacyIdleChannel(ctx context.Context, db *gorm.DB, channelID uint) (*m
 		return nil, ErrInvalidRequest
 	}
 	var channel models.GbChannel
-	if err := db.WithContext(ctx).First(&channel, "id = ?", channelID).Error; err != nil {
-		return nil, err
+	result := db.WithContext(ctx).First(&channel, "id = ?", channelID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &channel, nil
 }

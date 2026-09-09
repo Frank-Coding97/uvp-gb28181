@@ -40,6 +40,9 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 		"POST /api/gb28181/work-recordings/:id/stop": false,
 		"GET /api/gb28181/work-recordings/status":    false,
 		"GET /api/gb28181/work-recordings/:id":       false,
+		"GET /api/gb28181/work-recordings":           false,
+		"GET /api/gb28181/work-recordings/:id/form":  false,
+		"PUT /api/gb28181/work-recordings/:id/form":  false,
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path
@@ -59,6 +62,9 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 		{http.MethodPost, "/api/gb28181/work-recordings/job/stop"},
 		{http.MethodGet, "/api/gb28181/work-recordings/status?channelIds=1"},
 		{http.MethodGet, "/api/gb28181/work-recordings/job"},
+		{http.MethodGet, "/api/gb28181/work-recordings"},
+		{http.MethodGet, "/api/gb28181/work-recordings/job/form"},
+		{http.MethodPut, "/api/gb28181/work-recordings/job/form"},
 	}
 	for _, request := range requests {
 		response := httptest.NewRecorder()

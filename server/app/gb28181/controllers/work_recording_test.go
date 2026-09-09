@@ -40,6 +40,9 @@ func workRecordingRouter(t *testing.T, db *gorm.DB, api gbcontrollers.WorkRecord
 	r.POST("/work-recordings", c.Start)
 	r.POST("/work-recordings/:id/stop", c.Stop)
 	r.GET("/work-recordings/status", c.Status)
+	r.GET("/work-recordings", c.List)
+	r.GET("/work-recordings/:id/form", c.Form)
+	r.PUT("/work-recordings/:id/form", c.SaveForm)
 	return r
 }
 func workRequest(r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
@@ -144,6 +147,7 @@ func (m *workHTTPRecorder) IsRecording(context.Context, string, string, string) 
 }
 func TestWorkRecordingHTTPStartRefreshStopAndNextJob(t *testing.T) {
 	db := newScopedDeviceDB(t)
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("production:not_found", func(tx *gorm.DB) { tx.Statement.RaiseErrorOnNotFound = false }))
 	seedDeptScopedUser(t, db, 100, 10)
 	require.NoError(t, db.AutoMigrate(&models.GbWorkRecording{}, &models.GbRecorderClaim{}))
 	channel := models.GbChannel{DeviceID: "ours", ChannelID: "own", OwnerDeptID: 10}
@@ -162,6 +166,14 @@ func TestWorkRecordingHTTPStartRefreshStopAndNextJob(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &started))
 	require.NotEmpty(t, started.Data.ID)
+	formPath := "/work-recordings/" + started.Data.ID + "/form"
+	response = workRequest(router, "GET", formPath, "")
+	require.Equal(t, 200, response.Code, response.Body.String())
+	response = workRequest(router, "PUT", formPath, `{"formVersion":0,"form":{"projectName":"集成测试项目","workPersonnel":["张三","李四"]}}`)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "集成测试项目")
+	require.True(t, media.active)
+	require.Zero(t, media.stops)
 	response = workRequest(router, "POST", "/work-recordings", startBody)
 	require.Equal(t, 200, response.Code)
 	require.Equal(t, 1, media.starts)
@@ -183,4 +195,36 @@ func TestWorkRecordingHTTPStartRefreshStopAndNextJob(t *testing.T) {
 	require.Equal(t, 1, media.stops)
 	require.True(t, media.active)
 	require.Equal(t, nextRoot, media.root)
+	response = workRequest(refreshed, "GET", formPath, "")
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "集成测试项目")
+	require.Contains(t, response.Body.String(), started.Data.ID)
+	response = workRequest(refreshed, "GET", "/work-recordings?page=1&pageSize=10", "")
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), started.Data.ID)
+}
+
+func TestWorkRecordingControllerProductionNotFoundHook(t *testing.T) {
+	db := newScopedDeviceDB(t)
+	seedDeptScopedUser(t, db, 100, 10)
+	require.NoError(t, db.AutoMigrate(&models.GbRecorderClaim{}, &models.GbWorkRecording{}))
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("production:not_found", func(tx *gorm.DB) { tx.Statement.RaiseErrorOnNotFound = false }))
+	channel := models.GbChannel{DeviceID: "ours", ChannelID: "own", OwnerDeptID: 10}
+	require.NoError(t, db.Create(&channel).Error)
+	api := &workRecordingAPIFake{}
+	router := workRecordingRouter(t, db, api, 100)
+	response := workRequest(router, "GET", "/work-recordings/status?channelIds="+uintStr(channel.ID), "")
+	require.Equal(t, 200, response.Code)
+	var result struct {
+		Data []workrecording.Snapshot `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+	require.Len(t, result.Data, 1)
+	require.Equal(t, workrecording.StateIdle, result.Data[0].State)
+	response = workRequest(router, "POST", "/work-recordings", `{"channelId":999999,"requestId":"missing"}`)
+	require.Equal(t, 404, response.Code)
+	require.Zero(t, api.starts)
+	response = workRequest(router, "POST", "/work-recordings/missing/stop", "")
+	require.Equal(t, 404, response.Code)
+	require.Zero(t, api.stops)
 }

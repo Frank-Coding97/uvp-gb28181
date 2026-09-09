@@ -654,6 +654,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		workRecordings := gb.Group("/work-recordings")
 		{
 			workRecordings.POST("", func(c *gin.Context) { currentWorkRecordingController().Start(c) })
+			workRecordings.GET("", func(c *gin.Context) { currentWorkRecordingController().List(c) })
+			workRecordings.GET("/:id/form", func(c *gin.Context) { currentWorkRecordingController().Form(c) })
+			workRecordings.PUT("/:id/form", func(c *gin.Context) { currentWorkRecordingController().SaveForm(c) })
 			workRecordings.GET("/status", func(c *gin.Context) { currentWorkRecordingController().Status(c) })
 			workRecordings.POST("/:id/stop", func(c *gin.Context) { currentWorkRecordingController().Stop(c) })
 			workRecordings.GET("/:id", func(c *gin.Context) { currentWorkRecordingController().Detail(c) })

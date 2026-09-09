@@ -88,8 +88,12 @@ func newWorkRecorder(live *play.Service) *workrecording.Recorder {
 
 func checkLegacyRecordingIdle(ctx context.Context, channelID uint, target workrecording.MediaTarget) error {
 	var channel models.GbChannel
-	if err := app.DB().WithContext(ctx).Select("id", "cloud_recording_enabled").First(&channel, channelID).Error; err != nil {
-		return err
+	result := app.DB().WithContext(ctx).Select("id", "cloud_recording_enabled").First(&channel, channelID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
 	}
 	if channel.CloudRecordingEnabled {
 		return workrecording.ErrOwnerConflict
@@ -97,7 +101,7 @@ func checkLegacyRecordingIdle(ctx context.Context, channelID uint, target workre
 	var active int64
 	err := app.DB().WithContext(ctx).Model(&models.GbRecordingSession{}).
 		Where("state <> ?", models.RecordingSessionStateStopped).
-		Where("channel_id = ? OR (node_id = ? AND v_host = ? AND app = ? AND stream = ?)", channelID, target.NodeID, target.VHost, target.App, target.Stream).Count(&active).Error
+		Where("channel_id = ? OR (node_id = ? AND vhost = ? AND app = ? AND stream = ?)", channelID, target.NodeID, target.VHost, target.App, target.Stream).Count(&active).Error
 	if err != nil {
 		return err
 	}
@@ -173,8 +177,12 @@ func prepareWorkRecording(live *play.Service, leases *play.SourceLeaseRegistry) 
 	return func(ctx context.Context, channelID uint, jobID string) (workrecording.PreparedRecording, error) {
 		var prepared workrecording.PreparedRecording
 		var channel models.GbChannel
-		if err := app.DB().WithContext(ctx).First(&channel, channelID).Error; err != nil {
-			return prepared, err
+		queryResult := app.DB().WithContext(ctx).First(&channel, channelID)
+		if queryResult.Error != nil {
+			return prepared, queryResult.Error
+		}
+		if queryResult.RowsAffected == 0 {
+			return prepared, gorm.ErrRecordNotFound
 		}
 		result, err := live.EnsureLive(ctx, play.Request{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, Trigger: "work-recording"})
 		if err != nil {
