@@ -284,7 +284,7 @@ describe("CloudRecordings", () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("284");
+    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("200");
     expect(wrapper.get(".cloud-recording-actions").classes()).toContain("cloud-recording-actions");
     expect(wrapper.get("[data-testid='detail-9007199254740993']").text()).toContain("详情");
     expect(wrapper.find("[data-testid='detail-icon-9007199254740993']").exists()).toBe(true);

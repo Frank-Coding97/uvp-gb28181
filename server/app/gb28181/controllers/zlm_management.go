@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -128,6 +129,7 @@ func writeManagementSuccess(c *gin.Context, data any) {
 	if c == nil {
 		return
 	}
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "", "data": data})
 }
 
@@ -138,6 +140,7 @@ func writeManagementError(c *gin.Context, err error) {
 	nodeID := nodeIDFromContext(c)
 	var validation *management.ValidationError
 	if errors.As(err, &validation) && validation != nil {
+		response.SetBusinessStringResult(c, string(validation.Code), false)
 		c.JSON(http.StatusBadRequest, validation)
 		return
 	}
@@ -159,10 +162,12 @@ func writeManagementError(c *gin.Context, err error) {
 	normalized := management.NormalizeError(err, nodeID)
 	validation = nil
 	if errors.As(normalized, &validation) && validation != nil {
+		response.SetBusinessStringResult(c, string(validation.Code), false)
 		c.JSON(http.StatusBadRequest, validation)
 		return
 	}
 	if typed, ok := management.AsManagementError(normalized); ok && typed != nil {
+		response.SetBusinessStringResult(c, string(typed.Code), false)
 		c.JSON(typed.HTTPStatus(), typed)
 		return
 	}
@@ -170,6 +175,7 @@ func writeManagementError(c *gin.Context, err error) {
 	// cause. Keep this fallback defensive so a future service cannot make a
 	// controller leak an arbitrary error string.
 	fallback := management.NewInternalError(nodeID, "internal management error")
+	response.SetBusinessStringResult(c, string(fallback.Code), false)
 	c.JSON(fallback.HTTPStatus(), fallback)
 }
 

@@ -54,6 +54,25 @@ func TestMigrationFileContract(t *testing.T) {
 	}
 }
 
+func TestRealtimeBusinessLogPermissionMigrations(t *testing.T) {
+	for _, name := range []string{
+		"2026-09-10-realtime-business-log-permissions.sql",
+		"2026-09-10-realtime-business-log-permissions-postgresql.sql",
+		"2026-09-10-realtime-business-log-permissions-sqlserver.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := migrationsfs.FS.ReadFile("migrations/" + name)
+			require.NoError(t, err)
+			normalized := strings.NewReplacer("`", "", "[", "", "]", "").Replace(strings.ToLower(string(body)))
+			normalized = strings.Join(strings.Fields(normalized), " ")
+			for _, token := range []string{"/api/gb28181/logs/stream", "/gb28181/realtime-log", "gb28181:log:view", "sys_menu_api", "sys_casbin_rule", "not exists"} {
+				require.Contains(t, normalized, token)
+			}
+			require.Contains(t, normalized, "where m.permission='gb28181:log:view'", "API 只能绑定到独立实时日志权限")
+		})
+	}
+}
+
 func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
 	files := []string{
 		"2026-08-15-device-assignment-permissions.sql",

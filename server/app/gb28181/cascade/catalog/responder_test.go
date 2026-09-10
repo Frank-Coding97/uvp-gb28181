@@ -167,3 +167,23 @@ func TestParseCatalogQueryRejectsMalformedInput(t *testing.T) {
 	require.Equal(t, 7, query.SN)
 	require.True(t, strings.HasPrefix(query.DeviceID, "340200"))
 }
+
+func TestCatalogByteLimitSplitsWithoutLosingTotalOrItems(t *testing.T) {
+	profile := baseprotocol.ProfileFor(baseprotocol.Version2016)
+	body, err := manscdp.BuildCatalogQueryWithProfile(profile, "34020000002000000001", 42)
+	require.NoError(t, err)
+	items := []CatalogItem{{ID: "34020000001320000001", Name: strings.Repeat("名", 20)}, {ID: "34020000001320000002", Name: strings.Repeat("名", 20)}}
+	one, err := PlanCatalogResponses(profile, "34020000002000000001", Snapshot{Items: items}, 1, body)
+	require.NoError(t, err)
+	limit := len(one[0].Body)
+	batches, err := PlanCatalogResponsesWithinLimit(profile, "34020000002000000001", Snapshot{Items: items}, 100, body, func(b []byte) bool { return len(b) <= limit })
+	require.NoError(t, err)
+	require.Len(t, batches, 2)
+	for _, b := range batches {
+		require.Equal(t, 2, b.SumNum)
+		require.Equal(t, 42, b.SN)
+		require.LessOrEqual(t, len(b.Body), limit)
+	}
+	_, err = PlanCatalogResponsesWithinLimit(profile, "34020000002000000001", Snapshot{Items: items}, 100, body, func([]byte) bool { return false })
+	require.ErrorContains(t, err, "TCP")
+}

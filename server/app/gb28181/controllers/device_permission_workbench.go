@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -12,6 +13,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
@@ -48,7 +50,7 @@ func (dc *DeviceMgmtController) PermissionWorkbenchSummary(c *gin.Context) {
 		return
 	}
 	deptIDs, needFilter := datascope.GetOwnerDeptIDsWithDB(c, db)
-	result, err := assign.NewQueryService(db, visibleScope(c)).Summary(c, deptIDs, needFilter)
+	result, err := assign.NewQueryService(db, visibleScope(c)).Summary(c.Request.Context(), deptIDs, needFilter)
 	if err != nil {
 		dc.FailAndAbort(c, "查询设备权限汇总失败", err)
 		return
@@ -69,7 +71,7 @@ func (dc *DeviceMgmtController) ResolvePermissionWorkbenchDevices(c *gin.Context
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	result, err := assign.NewQueryService(db, visibleScope(c)).Resolve(c, body.DeviceIDs)
+	result, err := assign.NewQueryService(db, visibleScope(c)).Resolve(c.Request.Context(), body.DeviceIDs)
 	if err != nil {
 		dc.FailAndAbort(c, "解析设备失败", err)
 		return
@@ -90,7 +92,7 @@ func (dc *DeviceMgmtController) QueryPermissionWorkbenchGrants(c *gin.Context) {
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	result, err := grant.NewService(db, visibleScope(c)).Query(c, body.DeviceIDs)
+	result, err := grant.NewService(db, visibleScope(c)).Query(c.Request.Context(), body.DeviceIDs)
 	if err != nil {
 		dc.Fail(c, "查询共享授权失败", err, http.StatusInternalServerError)
 		return
@@ -111,7 +113,7 @@ func (dc *DeviceMgmtController) SearchPermissionWorkbenchGrantTargets(c *gin.Con
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	access, err := datascope.ResolveOwnerDeptAccessByUserID(c, db, dc.GetCurrentUserID(c))
+	access, err := datascope.ResolveOwnerDeptAccessByUserID(c.Request.Context(), db, dc.GetCurrentUserID(c))
 	if err != nil {
 		if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
 			dc.Fail(c, "无可授权的数据范围", err, http.StatusForbidden)
@@ -120,7 +122,7 @@ func (dc *DeviceMgmtController) SearchPermissionWorkbenchGrantTargets(c *gin.Con
 		dc.Fail(c, "解析可授权范围失败", err, http.StatusInternalServerError)
 		return
 	}
-	result, err := grant.NewService(db, nil).SearchTargets(c, targetType, c.Query("q"), page, pageSize, access)
+	result, err := grant.NewService(db, nil).SearchTargets(c.Request.Context(), targetType, c.Query("q"), page, pageSize, access)
 	if err != nil {
 		if errors.Is(err, grant.ErrTargetTypeInvalid) {
 			dc.Fail(c, err.Error(), err, http.StatusBadRequest)
@@ -146,7 +148,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchGrants(c *gin.Context) {
 	access := datascope.OwnerDeptAccess{}
 	if request.Mode == grant.ApplyModeAdd {
 		var err error
-		access, err = datascope.ResolveOwnerDeptAccessByUserID(c, db, dc.GetCurrentUserID(c))
+		access, err = datascope.ResolveOwnerDeptAccessByUserID(c.Request.Context(), db, dc.GetCurrentUserID(c))
 		if err != nil {
 			if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
 				dc.Fail(c, "无可授权的数据范围", err, http.StatusForbidden)
@@ -157,7 +159,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchGrants(c *gin.Context) {
 		}
 	}
 	request.CreatedBy = currentOperatorID(c)
-	result, err := grant.NewService(db, transactionalVisibleScope(c)).Apply(c, request, access)
+	result, err := grant.NewService(db, transactionalVisibleScope(c)).Apply(c.Request.Context(), request, access)
 	if err != nil {
 		if errors.Is(err, grant.ErrApplyRequestInvalid) {
 			dc.Fail(c, err.Error(), err, http.StatusBadRequest)
@@ -201,6 +203,9 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 		dc.FailAndAbort(c, "调整设备归属失败", err)
 		return
 	}
+	if result.Summary.Changed > 0 {
+		playauth.BumpRevocation(time.Now())
+	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",
 		"mode":            "devices",
@@ -240,7 +245,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 		return
 	}
 
-	query := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
+	query := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
 	if body.SourceDeptID == 0 {
 		query = query.Where("owner_dept_id = ?", 0)
 	} else {
@@ -263,6 +268,9 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	if err != nil {
 		dc.FailAndAbort(c, "整部门调整归属失败", err)
 		return
+	}
+	if result.Summary.Changed > 0 {
+		playauth.BumpRevocation(time.Now())
 	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",
@@ -324,7 +332,7 @@ func resolveAssignmentSourceDepartments(c *gin.Context, db *gorm.DB, sourceDeptI
 		return nil, assign.ErrDeviceNotVisible
 	}
 	var departments []basemodels.SysDepartment
-	query := db.WithContext(c).Where("status = ? OR status IS NULL", 1)
+	query := db.WithContext(c.Request.Context()).Where("status = ? OR status IS NULL", 1)
 	if needFilter {
 		query = query.Where("id IN ?", visibleDeptIDs)
 	}

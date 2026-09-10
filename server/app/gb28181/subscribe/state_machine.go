@@ -22,6 +22,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // StateMachine 订阅能力状态机
@@ -60,8 +61,11 @@ func (sm *StateMachine) OnRegister(ctx context.Context, deviceID string) {
 	case gbmodels.SubscribeUnknown:
 		// Phase 1 简化:模拟 SUBSCRIBE 失败 → 直接 fallback
 		// Phase 2 真正发 SIP SUBSCRIBE 请求 + 等 200 OK,根据 response 决定
-		sm.logger.Info("subscribe: trying SUBSCRIBE (simulated)",
-			zap.String("deviceId", deviceID))
+		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability probe (simulated)",
+			zap.String("event", "subscribe.capability.probe"), zap.Bool("simulated", true),
+			zap.String("device_id", deviceID),
+			zap.String("from", string(gbmodels.SubscribeUnknown)),
+			zap.String("to", string(gbmodels.SubscribeFallback)))
 		sm.transition(ctx, &dev, gbmodels.SubscribeFallback, now)
 
 	case gbmodels.SubscribeFallback:
@@ -69,8 +73,11 @@ func (sm *StateMachine) OnRegister(ctx context.Context, deviceID string) {
 		if dev.SubscribeLastTest != nil && time.Since(*dev.SubscribeLastTest) < 24*time.Hour {
 			return
 		}
-		sm.logger.Info("subscribe: retrying SUBSCRIBE for fallback device",
-			zap.String("deviceId", deviceID))
+		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability retry (simulated)",
+			zap.String("event", "subscribe.capability.retry"), zap.Bool("simulated", true),
+			zap.String("device_id", deviceID),
+			zap.String("from", string(gbmodels.SubscribeFallback)),
+			zap.String("to", string(gbmodels.SubscribeFallback)))
 		sm.transition(ctx, &dev, gbmodels.SubscribeFallback, now)
 
 	case gbmodels.SubscribeSubscribed:
@@ -106,9 +113,11 @@ func (sm *StateMachine) OnNotify(ctx context.Context, deviceID string) {
 	// 升级到 subscribed
 	now := time.Now()
 	expires := now.Add(30 * time.Minute)
-	sm.logger.Info("subscribe: device confirmed SUBSCRIBE support, upgrading",
-		zap.String("deviceId", deviceID),
-		zap.String("from", string(dev.SubscribeCapability)))
+	logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability confirmed",
+		zap.String("event", "subscribe.capability.upgraded"),
+		zap.String("device_id", deviceID),
+		zap.String("from", string(dev.SubscribeCapability)),
+		zap.String("to", string(gbmodels.SubscribeSubscribed)))
 	sm.db.WithContext(ctx).Model(&dev).Updates(map[string]any{
 		"subscribe_capability":  gbmodels.SubscribeSubscribed,
 		"subscribe_last_test":   now,
@@ -131,8 +140,12 @@ func (sm *StateMachine) DegradeToFallback(ctx context.Context, deviceID, reason 
 		return // 已经是 fallback
 	}
 
-	sm.logger.Warn("subscribe: degrading to fallback",
-		zap.String("deviceId", deviceID), zap.String("reason", reason))
+	logging.FromContext(ctx, sm.logger).Named("subscribe").Warn("SUBSCRIBE capability degraded",
+		zap.String("event", "subscribe.capability.degraded"),
+		zap.String("device_id", deviceID),
+		zap.String("from", string(dev.SubscribeCapability)),
+		zap.String("to", string(gbmodels.SubscribeFallback)),
+		zap.Bool("reason_present", reason != ""))
 	now := time.Now()
 	sm.transition(ctx, &dev, gbmodels.SubscribeFallback, now)
 }

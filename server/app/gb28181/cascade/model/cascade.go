@@ -33,13 +33,13 @@ const (
 type GbCascadePlatform struct {
 	ID               uint64 `gorm:"primaryKey" json:"id"`
 	Name             string `gorm:"column:name;size:128;not null;uniqueIndex:uk_cascade_platform_name" json:"name"`
-	UpstreamServerID string `gorm:"column:upstream_server_id;size:20;not null" json:"upstreamServerId"`
+	UpstreamServerID string `gorm:"column:upstream_server_id;size:20;not null;uniqueIndex:uk_cascade_platform_connection,priority:3" json:"upstreamServerId"`
 	UpstreamDomain   string `gorm:"column:upstream_domain;size:255;not null" json:"upstreamDomain"`
-	Host             string `gorm:"column:host;size:255;not null" json:"host"`
-	Port             int    `gorm:"column:port;not null" json:"port"`
+	Host             string `gorm:"column:host;size:255;not null;uniqueIndex:uk_cascade_platform_connection,priority:4" json:"host"`
+	Port             int    `gorm:"column:port;not null;uniqueIndex:uk_cascade_platform_connection,priority:5" json:"port"`
 
-	LocalDeviceID string `gorm:"column:local_device_id;size:20;not null;uniqueIndex:uk_cascade_platform_local_identity,priority:1" json:"localDeviceId"`
-	LocalDomain   string `gorm:"column:local_domain;size:255;not null;uniqueIndex:uk_cascade_platform_local_identity,priority:2" json:"localDomain"`
+	LocalDeviceID string `gorm:"column:local_device_id;size:20;not null;uniqueIndex:uk_cascade_platform_connection,priority:1" json:"localDeviceId"`
+	LocalDomain   string `gorm:"column:local_domain;size:255;not null;uniqueIndex:uk_cascade_platform_connection,priority:2" json:"localDomain"`
 	LocalSIPIP    string `gorm:"column:local_sip_ip;size:45;not null" json:"localSipIp"`
 	LocalSIPPort  int    `gorm:"column:local_sip_port;not null" json:"localSipPort"`
 
@@ -61,7 +61,7 @@ type GbCascadePlatform struct {
 	RegisterExpires   int    `gorm:"column:register_expires;not null;default:3600" json:"registerExpires"`
 	KeepaliveInterval int    `gorm:"column:keepalive_interval;not null;default:60" json:"keepaliveInterval"`
 	RetryPolicy       string `gorm:"column:retry_policy;type:text" json:"retryPolicy"`
-	Transport         string `gorm:"column:transport;size:16;not null;default:UDP" json:"transport"`
+	Transport         string `gorm:"column:transport;size:16;not null;default:UDP;uniqueIndex:uk_cascade_platform_connection,priority:6" json:"transport"`
 
 	CatalogBatchSize int  `gorm:"column:catalog_batch_size;not null;default:100" json:"catalogBatchSize"`
 	PublishPlatform  bool `gorm:"column:publish_platform;not null;default:false" json:"publishPlatform"`

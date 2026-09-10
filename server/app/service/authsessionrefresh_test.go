@@ -22,7 +22,8 @@ func TestAuthSessionRefreshCASAllowsExactlyOneWinner(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(8)
 
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	// Token parsing uses the wall clock; keep this fixture inside its real validity window.
+	now := time.Now().UTC().Truncate(time.Second)
 	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
 	refresh, err := tokens.GenerateRefreshTokenForSessionUntil(7, "sid-a", "refresh-jti", now.Add(24*time.Hour))
 	require.NoError(t, err)
@@ -66,7 +67,8 @@ func TestRefreshAndForceLogoutAlwaysEndOffline(t *testing.T) {
 			require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
 				g.Statement.RaiseErrorOnNotFound = false
 			}))
-			now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+			// Token parsing uses the wall clock; keep this fixture inside its real validity window.
+			now := time.Now().UTC().Truncate(time.Second)
 			tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
 			refresh, err := tokens.GenerateRefreshTokenForSessionUntil(7, "sid-a", "refresh-jti", now.Add(24*time.Hour))
 			require.NoError(t, err)

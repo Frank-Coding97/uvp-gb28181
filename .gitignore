@@ -75,3 +75,7 @@ release-output/
 !server/**/*.png
 check-*.json
 test-long-text.json
+
+# Local credential keys
+**/secrets/cascade.key
+**/secrets/.cascade-key-*

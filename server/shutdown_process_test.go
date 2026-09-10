@@ -37,7 +37,8 @@ func (c shutdownHTTPConfig) GetString(key string) string {
 	}
 	return ""
 }
-func (shutdownHTTPConfig) GetInt(string) int { return 0 }
+func (shutdownHTTPConfig) GetInt(string) int   { return 0 }
+func (shutdownHTTPConfig) GetBool(string) bool { return false }
 
 // Explicit source-file invocation excludes main.go and its production bootstrap
 // init. The child uses actual StartServer, SIP Server, and recovery worker, with
@@ -159,7 +160,7 @@ func runShutdownChild(t *testing.T) {
 	}
 	defer func() { _ = stop(context.Background()) }()
 	<-entered
-	serveErr := ginhelper.StartServer(gin.New())
+	serveErr := ginhelper.StartServer(gin.New(), func(context.Context) error { return nil })
 	var bindErr *net.OpError
 	if !errors.As(serveErr, &bindErr) || bindErr.Op != "listen" {
 		t.Fatalf("expected actual bind error: %v", serveErr)

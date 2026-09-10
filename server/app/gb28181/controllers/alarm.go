@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -227,7 +228,7 @@ func (controller *AlarmController) ClearAll(c *gin.Context) {
 		return
 	}
 	var deletedCount int64
-	err := db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		deviceScope := tx.Model(&gbmodels.GbDevice{}).
 			Select("id").
 			Scopes(datascope.OwnerDeptScopeWithDB(c, tx, "owner_dept_id"))
@@ -252,7 +253,7 @@ func (controller *AlarmController) deleteAndRespond(c *gin.Context, ids []uint64
 		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
 		return
 	}
-	err := db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var visible int64
 		if err := controller.scopedQuery(c, tx, alarmQuery{Page: 1, PageSize: 20}).Where("alarm.id IN ?", ids).Count(&visible).Error; err != nil {
 			return err
@@ -296,7 +297,7 @@ func (controller *AlarmController) database() *gorm.DB {
 }
 
 func (controller *AlarmController) scopedQuery(c *gin.Context, db *gorm.DB, queryParams alarmQuery) *gorm.DB {
-	query := db.WithContext(c).Table("gb_alarm_event AS alarm").
+	query := db.WithContext(c.Request.Context()).Table("gb_alarm_event AS alarm").
 		Joins("JOIN gb_device AS device ON device.id = alarm.device_id AND device.deleted_at IS NULL").
 		Joins("LEFT JOIN gb_channel AS channel ON channel.id = alarm.channel_id").
 		Scopes(datascope.VisibilityScopeWithDB(c, db, "device.owner_dept_id", "device.device_id"))
@@ -411,10 +412,12 @@ func derefString(value *string) string {
 }
 
 func alarmHTTPSuccess(c *gin.Context, data any) {
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "操作成功", "data": data})
 }
 
 func alarmHTTPError(c *gin.Context, status int, errorCode, message string) {
+	response.SetBusinessResult(c, status, status == 0)
 	c.JSON(status, gin.H{"code": status, "message": message, "data": gin.H{"errorCode": errorCode}})
 }
 

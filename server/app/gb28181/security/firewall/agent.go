@@ -67,6 +67,10 @@ func New(backend Backend, clock security.Clock, allowlist []net.IPNet) *Agent {
 	return &Agent{backend: backend, clock: clock, allowlist: allowlist, rules: make(map[string]security.BanDecision)}
 }
 
+func (*Agent) Capability() security.AgentCapabilityState {
+	return security.AgentCapabilitySupported
+}
+
 func (a *Agent) Ban(decision security.BanDecision) error {
 	ip, err := security.ValidateSource(decision.SourceIP)
 	if err != nil {
@@ -118,12 +122,12 @@ func (a *Agent) Status() security.AgentStatus {
 	defer a.mu.Unlock()
 	if err != nil {
 		a.lastError = err.Error()
-		return security.AgentStatus{Connected: false, AppliedRules: 0, LastError: a.lastError, CheckedAt: a.clock.Now()}
+		return security.AgentStatus{Connected: false, AppliedRules: 0, Capability: security.AgentCapabilitySupported, LastError: a.lastError, CheckedAt: a.clock.Now()}
 	}
 	if a.lastError != "" {
 		a.lastError = ""
 	}
-	return security.AgentStatus{Connected: true, AppliedRules: len(rules), LastError: "", CheckedAt: a.clock.Now()}
+	return security.AgentStatus{Connected: true, AppliedRules: len(rules), Capability: security.AgentCapabilitySupported, LastError: "", CheckedAt: a.clock.Now()}
 }
 
 func (a *Agent) Reconcile(decisions []security.BanDecision) error {
@@ -180,6 +184,8 @@ func sameReconcileDecision(applied, desired security.BanDecision) bool {
 }
 
 func (a *Agent) setError(err error) { a.mu.Lock(); a.lastError = err.Error(); a.mu.Unlock() }
+
+var _ security.FirewallAgentCapabilityProvider = (*Agent)(nil)
 
 type request struct {
 	Action    string                 `json:"action"`

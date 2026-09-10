@@ -151,28 +151,34 @@ type UpdateNodeReq struct {
 
 // NodeService 节点 CRUD + 状态切换
 type NodeService struct {
-	registry       *node.Registry
-	probe          ZLMProbe
-	tuning         MediaTuning
-	applyMu        sync.Mutex
-	applying       map[int64]struct{}
-	locksMu        sync.Mutex
-	locks          map[int64]*sync.Mutex
-	impactMu       sync.RWMutex
-	impactProvider NodeImpactProvider
-	logger         *zap.Logger
-	restart        *RestartCoordinator
+	registry        *node.Registry
+	probe           ZLMProbe
+	tuning          MediaTuning
+	scheduleMu      sync.Mutex
+	scheduleWG      sync.WaitGroup
+	scheduleStopped bool
+	scheduleDone    chan struct{}
+	scheduleWait    sync.Once
+	applyMu         sync.Mutex
+	applying        map[int64]struct{}
+	locksMu         sync.Mutex
+	locks           map[int64]*sync.Mutex
+	impactMu        sync.RWMutex
+	impactProvider  NodeImpactProvider
+	logger          *zap.Logger
+	restart         *RestartCoordinator
 }
 
 // NewNodeService 构造
 func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *NodeService {
 	s := &NodeService{
-		registry: reg,
-		probe:    probe,
-		tuning:   tuning,
-		applying: make(map[int64]struct{}),
-		locks:    make(map[int64]*sync.Mutex),
-		logger:   zap.NewNop(),
+		registry:     reg,
+		probe:        probe,
+		tuning:       tuning,
+		applying:     make(map[int64]struct{}),
+		locks:        make(map[int64]*sync.Mutex),
+		logger:       zap.NewNop(),
+		scheduleDone: make(chan struct{}),
 	}
 	s.restart = NewRestartCoordinator(reg)
 	s.restart.SetConverger(s.ConvergeNodeConfig)
@@ -181,7 +187,7 @@ func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *Nod
 
 func (s *NodeService) SetLogger(logger *zap.Logger) {
 	if logger != nil {
-		s.logger = logger
+		s.logger = logger.Named("zlm.node")
 	}
 }
 
@@ -613,14 +619,27 @@ func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) erro
 // ScheduleConfigConvergence is non-blocking and de-duplicates per node. A
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
+	// Admission and WaitGroup.Add must be serialized with StopContext's
+	// WaitGroup.Wait. Do not hold this lifecycle lock while waiting for the
+	// per-node lock: an in-flight apply may hold it for the full ZLM timeout.
+	s.scheduleMu.Lock()
+	if s.scheduleStopped {
+		s.scheduleMu.Unlock()
+		return false
+	}
+	s.scheduleWG.Add(1)
+	s.scheduleMu.Unlock()
+
 	lock := s.nodeLock(nodeID)
 	lock.Lock()
 	current, ok := s.beginConfigConvergence(nodeID)
 	lock.Unlock()
 	if !ok {
+		s.scheduleWG.Done()
 		return false
 	}
 	go func() {
+		defer s.scheduleWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		lock := s.nodeLock(nodeID)
@@ -628,13 +647,57 @@ func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
 		err := s.applyClaimedConfig(ctx, current)
 		lock.Unlock()
 		if err != nil {
-			s.logger.Warn("GB28181 ZLM 节点配置恢复失败",
-				zap.Int64("nodeId", nodeID), zap.Error(err))
+			s.logger.Warn("GB28181 ZLM 节点配置恢复失败", zap.String("event", "zlm.node.restore_failed"),
+				zap.Int64("node_id", nodeID), zap.Error(err))
 			return
 		}
-		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.Int64("nodeId", nodeID))
+		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.String("event", "zlm.node.restored"), zap.Int64("node_id", nodeID))
 	}()
 	return true
+}
+
+// StopContext prevents new scheduled convergence workers and waits for every
+// worker admitted before shutdown. The workers retain their historical
+// detached 15-second timeout, so a caller deadline can report an incomplete
+// stop while the in-flight apply continues to its own bounded conclusion.
+func (s *NodeService) StopContext(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.scheduleMu.Lock()
+	s.scheduleStopped = true
+	done := s.scheduleDone
+	if done == nil {
+		done = make(chan struct{})
+		s.scheduleDone = done
+	}
+	s.scheduleMu.Unlock()
+
+	s.scheduleWait.Do(func() {
+		go func() {
+			s.scheduleWG.Wait()
+			close(done)
+		}()
+	})
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
 }
 
 func (s *NodeService) beginConfigConvergence(nodeID int64) (*node.Node, bool) {

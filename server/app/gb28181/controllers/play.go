@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -100,8 +101,8 @@ func (pc *PlayController) Start(c *gin.Context) {
 	if pc.attemptStore != nil {
 		var attemptErr error
 		attemptID, attemptErr = pc.attemptStore.Begin(c.Request.Context(), pc.GetCurrentUserID(c), deviceID, channelID)
-		if attemptErr != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("记录点播 attempt 开始失败", zap.Error(attemptErr))
+		if attemptErr != nil {
+			app.Log(c.Request.Context()).Warn("记录点播 attempt 开始失败", zap.String("event", "play.attempt_begin_failed"), logging.Error(attemptErr))
 		}
 	}
 	defer func() {
@@ -115,8 +116,8 @@ func (pc *PlayController) Start(c *gin.Context) {
 				nodeID = attemptResult.Node.ID
 			}
 		}
-		if err := pc.attemptStore.Finish(context.WithoutCancel(c.Request.Context()), attemptID, attemptOutcome, attemptFailureStage, nodeID, reused); err != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("记录点播 attempt 结果失败", zap.Error(err))
+		if err := pc.attemptStore.Finish(context.WithoutCancel(c.Request.Context()), attemptID, attemptOutcome, attemptFailureStage, nodeID, reused); err != nil {
+			app.Log(c.Request.Context()).Warn("记录点播 attempt 结果失败", zap.String("event", "play.attempt_finish_failed"), logging.Error(err))
 		}
 	}()
 	var res *play.Result
@@ -142,8 +143,8 @@ func (pc *PlayController) Start(c *gin.Context) {
 	attemptFailureStage = ""
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	if pc.recordingStarter != nil && res != nil && res.StreamID != "" {
-		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("点播成功后启动云端录像失败", zap.String("streamId", res.StreamID), zap.Error(err))
+		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil {
+			app.Log(c.Request.Context()).Warn("点播成功后启动云端录像失败", zap.String("event", "play.recording_start_failed"), zap.String("streamId", res.StreamID), logging.Error(err))
 		}
 	}
 	finishPlaybackAuthorizationAudit(audit, res)
@@ -334,7 +335,7 @@ func (pc *PlayController) authorizedChannel(c *gin.Context, deviceID, channelID 
 
 func (pc *PlayController) streamVisible(c *gin.Context, streamID string) bool {
 	var ch gbmodels.GbChannel
-	result := app.DB().WithContext(c).
+	result := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("stream_id = ?", streamID).
 		Limit(1).

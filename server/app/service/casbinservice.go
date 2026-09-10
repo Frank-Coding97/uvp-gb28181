@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"go.uber.org/zap"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 
@@ -74,7 +75,7 @@ func (ps *PermissionService) AddRoleInheritance(c context.Context, roleID uint, 
 
 	// 检查角色是否已继承自父角色
 	if roleID == parentRoleID || parentRoleID == 0 {
-		app.ZapLog.Warn("child role ID cannot be equal to parent role ID or parent role ID is 0")
+		app.Log(c).Warn("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbinservice.addroleinheritance.warn"))
 		return nil
 	}
 
@@ -89,7 +90,7 @@ func (ps *PermissionService) EditRoleInheritance(c context.Context, roleID uint,
 	domain := ps.GetDomain(c)
 
 	if roleID == parentRoleID {
-		app.ZapLog.Warn("child role ID cannot be equal to parent role ID")
+		app.Log(c).Warn("child role ID cannot be equal to parent role ID", zap.String("event", "casbinservice.editroleinheritance.warn"))
 		return nil
 	}
 	// 删除角色的所有继承关系
@@ -114,7 +115,7 @@ func (ps *PermissionService) DeleteRoleInheritance(c context.Context, roleID uin
 
 	// 检查角色是否已继承自父角色
 	if roleID == parentRoleID || parentRoleID == 0 {
-		app.ZapLog.Warn("child role ID cannot be equal to parent role ID or parent role ID is 0")
+		app.Log(c).Warn("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbinservice.deleteroleinheritance.warn"))
 		return nil
 	}
 	// 删除角色的继承关系
@@ -221,7 +222,7 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, 
 
 	// 1. 通过api_id查找关联的menu_id
 	var menuIds []uint
-	err = app.DB().WithContext(c).Model(&models.SysMenuApi{}).Where("api_id = ?", apiID).Pluck("menu_id", &menuIds).Error
+	err = app.DBContext(c).Model(&models.SysMenuApi{}).Where("api_id = ?", apiID).Pluck("menu_id", &menuIds).Error
 	if err != nil {
 		return
 	}

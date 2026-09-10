@@ -137,6 +137,11 @@ func persistSystemJob(ctx context.Context, db *gorm.DB, job *schedulerhelper.Job
 
 // LoadJobsFromDB 从数据库加载启用的任务并注册到调度器
 func LoadJobsFromDB() {
+	// Attach the result consumer before any database load or job admission.
+	// This also keeps later manual or API-triggered results drainable when the
+	// initial query fails.
+	StartResultHandler()
+
 	ctx := context.Background()
 
 	// 查询所有启用的任务 (status=1)
@@ -196,7 +201,4 @@ func LoadJobsFromDB() {
 			zap.String("name", job.Name),
 			zap.String("cron", job.CronExpression))
 	}
-
-	// 启动任务结果处理器，将任务执行结果保存到数据库
-	StartResultHandler()
 }

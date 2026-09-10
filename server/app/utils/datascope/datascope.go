@@ -1,6 +1,7 @@
 package datascope
 
 import (
+	"context"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,13 +13,37 @@ import (
 	"gorm.io/gorm"
 )
 
-// 获取用户角色列表
-func getUserRoles(userID uint) ([]*models.SysRole, error) {
-	return getUserRolesWithDB(app.DB(), userID)
+func requestContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		if ctx := c.Request.Context(); ctx != nil {
+			return ctx
+		}
+	}
+	return context.Background()
 }
 
-func getUserRolesWithDB(db *gorm.DB, userID uint) ([]*models.SysRole, error) {
-	db = db.Session(&gorm.Session{NewDB: true})
+func ensureContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+// bindScopeContext updates the per-query statement in place so a scope can
+// preserve both request cancellation and the query value returned by GORM.
+func bindScopeContext(db *gorm.DB, ctx context.Context) {
+	if db != nil && db.Statement != nil {
+		db.Statement.Context = ensureContext(ctx)
+	}
+}
+
+// 获取用户角色列表
+func getUserRoles(ctx context.Context, userID uint) ([]*models.SysRole, error) {
+	return getUserRolesWithDB(ctx, app.DB(), userID)
+}
+
+func getUserRolesWithDB(ctx context.Context, db *gorm.DB, userID uint) ([]*models.SysRole, error) {
+	db = db.Session(&gorm.Session{NewDB: true, Initialized: true}).WithContext(ensureContext(ctx))
 	var user models.User
 	err := db.Model(&models.User{}).Preload("Roles").Where("id = ?", userID).First(&user).Error
 	if err != nil {
@@ -94,12 +119,12 @@ func stringToUintSlice(s string) ([]uint, error) {
 }
 
 // 获取用户所属部门ID
-func getUserDepartmentID(userID uint) (uint, error) {
-	return getUserDepartmentIDWithDB(app.DB(), userID)
+func getUserDepartmentID(ctx context.Context, userID uint) (uint, error) {
+	return getUserDepartmentIDWithDB(ctx, app.DB(), userID)
 }
 
-func getUserDepartmentIDWithDB(db *gorm.DB, userID uint) (uint, error) {
-	db = db.Session(&gorm.Session{NewDB: true})
+func getUserDepartmentIDWithDB(ctx context.Context, db *gorm.DB, userID uint) (uint, error) {
+	db = db.Session(&gorm.Session{NewDB: true, Initialized: true}).WithContext(ensureContext(ctx))
 	var user models.User
 	err := db.Model(&models.User{}).Select("dept_id").Where("id = ?", userID).First(&user).Error
 	if err != nil {
@@ -109,13 +134,13 @@ func getUserDepartmentIDWithDB(db *gorm.DB, userID uint) (uint, error) {
 }
 
 // 根据部门ID获取用户ID列表
-func getUserIDsByDepartmentIDs(deptIDs []uint) ([]uint, error) {
+func getUserIDsByDepartmentIDs(ctx context.Context, deptIDs []uint) ([]uint, error) {
 	if len(deptIDs) == 0 {
 		return []uint{}, nil
 	}
 
 	var users []models.User
-	err := app.DB().Select("id").Where("dept_id IN ?", deptIDs).Find(&users).Error
+	err := app.DBContext(ensureContext(ctx)).Select("id").Where("dept_id IN ?", deptIDs).Find(&users).Error
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +160,7 @@ func GetOwnerDeptIDs(c *gin.Context) ([]uint, bool) {
 
 // GetOwnerDeptIDsWithDB 返回当前用户可见的部门 ID 集合,使用传入 DB 查询用户/角色/部门。
 func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
+	ctx := requestContext(c)
 	claims := common.GetClaims(c)
 	if claims == nil || claims.UserID == 0 {
 		return nil, false
@@ -151,11 +177,11 @@ func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
 		}
 	}
 
-	roles, err := getUserRolesWithDB(db, userID)
+	roles, err := getUserRolesWithDB(ctx, db, userID)
 	if err != nil {
 		return []uint{}, true
 	}
-	userDeptID, _ := getUserDepartmentIDWithDB(db, userID)
+	userDeptID, _ := getUserDepartmentIDWithDB(ctx, db, userID)
 	if len(roles) == 0 {
 		if userDeptID == 0 {
 			return []uint{}, true
@@ -165,8 +191,8 @@ func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
 
 	var allDepartments models.SysDepartmentList
 	departmentTree := models.SysDepartmentList{}
-	if err := db.Session(&gorm.Session{NewDB: true}).Model(&models.SysDepartment{}).Find(&allDepartments).Error; err == nil {
-		departmentTree = allDepartments.BuildTree()
+	if err := db.Session(&gorm.Session{NewDB: true, Initialized: true}).WithContext(ctx).Model(&models.SysDepartment{}).Find(&allDepartments).Error; err == nil {
+		departmentTree = allDepartments.BuildTree(ctx)
 	}
 
 	allowedDeptIDs := make(map[uint]bool)
@@ -224,10 +250,18 @@ func OwnerDeptScope(c *gin.Context, column string) func(db *gorm.DB) *gorm.DB {
 // OwnerDeptScopeWithDB 按 owner_dept_id 过滤,并用 lookupDB 查询当前用户的部门权限。
 func OwnerDeptScopeWithDB(c *gin.Context, lookupDB *gorm.DB, column string) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
-		if lookupDB == nil {
-			lookupDB = db
+		ctx := requestContext(c)
+		bindScopeContext(db, ctx)
+		lookup := lookupDB
+		if lookup == nil {
+			lookup = db
 		}
-		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookupDB)
+		// Do not replace the scoped query with the WithContext clone: callers
+		// commonly reuse it for Count and Find, and GORM does not copy the
+		// returned clone's clauses back to the original query. Bind the context
+		// above in place and use the clone only for permission lookups.
+		lookup = lookup.WithContext(ctx)
+		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookup)
 		if !needFilter {
 			return db
 		}
@@ -245,6 +279,8 @@ func OwnerDeptScopeWithDB(c *gin.Context, lookupDB *gorm.DB, column string) func
 func GetDataScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 	// 定义数据权限函数
 	return func(db *gorm.DB) *gorm.DB {
+		ctx := requestContext(c)
+		bindScopeContext(db, ctx)
 		claims := common.GetClaims(c)
 		if claims == nil {
 			return db.Where("1 = 0")
@@ -264,7 +300,7 @@ func GetDataScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 		}
 
 		// 获取用户角色
-		roles, err := getUserRoles(userID)
+		roles, err := getUserRoles(ctx, userID)
 		if err != nil || len(roles) == 0 {
 			// 如果没有角色或查询失败，默认只能查看自己的数据
 			return db.Where("created_by = ?", userID)
@@ -288,17 +324,17 @@ func GetDataScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 		allowedDeptIDs := make(map[uint]bool)
 
 		// 获取用户所属部门ID（只查询一次）
-		userDeptID, _ := getUserDepartmentID(userID)
+		userDeptID, _ := getUserDepartmentID(ctx, userID)
 
 		// 构建部门树
 		var allDepartments models.SysDepartmentList
-		err = app.DB().Find(&allDepartments).Error
+		err = app.DBContext(ctx).Find(&allDepartments).Error
 		if err != nil {
 			// 查询失败，默认只能查看自己的数据
 			return db.Where("created_by = ?", userID)
 		}
 		// 构建部门树
-		departmentTree := allDepartments.BuildTree()
+		departmentTree := allDepartments.BuildTree(ctx)
 
 		// 收集所有需要处理的部门ID
 		var allDeptIDs []uint
@@ -341,7 +377,7 @@ func GetDataScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 		// 批量查询所有相关部门的用户ID
 		var allowedUserIDs []uint
 		if len(deptIDSlice) > 0 {
-			userIDs, err := getUserIDsByDepartmentIDs(deptIDSlice)
+			userIDs, err := getUserIDsByDepartmentIDs(ctx, deptIDSlice)
 			if err == nil {
 				allowedUserIDs = append(allowedUserIDs, userIDs...)
 			}

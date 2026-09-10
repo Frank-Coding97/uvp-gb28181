@@ -103,14 +103,13 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Node) (*Snapshot, error) {
 	list, err := s.clientFor(mediaNode).GetMediaList(ctx, defaultVHost, defaultApp, streamID)
 	if err != nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("读取 ZLM 流概况失败",
-				zap.String("streamId", streamID),
-				zap.Int64("nodeId", mediaNode.ID),
-				zap.String("host", mediaNode.Host),
-				zap.Int("apiPort", mediaNode.APIPort),
-				zap.Error(err))
-		}
+		app.Log(ctx).Named("streammonitor").Warn("读取 ZLM 流概况失败",
+			zap.String("event", "streammonitor.media_read_failed"),
+			zap.String("streamId", streamID),
+			zap.Int64("nodeId", mediaNode.ID),
+			zap.String("endpoint", mediaNode.HTTPEndpoint()),
+			zap.Int("apiPort", mediaNode.APIPort),
+			zap.Error(err))
 		return nil, fmt.Errorf("%w: %v", ErrNodeUnavailable, err)
 	}
 	if len(list) == 0 {

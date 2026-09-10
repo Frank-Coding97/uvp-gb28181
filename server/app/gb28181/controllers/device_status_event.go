@@ -43,7 +43,7 @@ func (dc *DeviceMgmtController) ListDeviceStatusEvents(c *gin.Context) {
 	}
 
 	var device gbmodels.GbDevice
-	deviceResult := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	deviceResult := db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
 	if deviceResult.Error != nil {
 		dc.FailAndAbort(c, "查询设备失败", deviceResult.Error)
 		return
@@ -59,7 +59,7 @@ func (dc *DeviceMgmtController) ListDeviceStatusEvents(c *gin.Context) {
 		pageSize = 200
 	}
 
-	q := db.WithContext(c).
+	q := db.WithContext(c.Request.Context()).
 		Table("gb_device_status_event AS e").
 		Select("e.*").
 		Joins("JOIN gb_device AS d ON d.id = e.device_id AND d.deleted_at IS NULL").

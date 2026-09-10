@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -48,6 +49,7 @@ func (dc *DeviceMgmtController) GetControlCapabilities(c *gin.Context) {
 func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "设备控制服务未就绪"})
 		return
 	}

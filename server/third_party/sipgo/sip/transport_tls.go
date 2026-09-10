@@ -88,8 +88,11 @@ func (t *TransportTLS) CreateConnection(ctx context.Context, laddr Addr, raddr A
 		return nil, err
 	}
 	c := conn.(*TCPConnection)
-	if isNew {
-		go t.readConnection(c, c.LocalAddr().String(), c.RemoteAddr().String(), handler)
+	if isNew && !t.startReadConnection(c, c.LocalAddr().String(), c.RemoteAddr().String(), handler) {
+		t.pool.Delete(raddr.String())
+		t.pool.Delete(c.LocalAddr().String())
+		_ = c.Close()
+		return nil, errTransportClosed
 	}
 	return c, nil
 }

@@ -47,9 +47,6 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 		if zlmManagementCore.overview != nil {
 			zlmManagementCore.overview.Close()
 		}
-		if zlmManagementCore.restart != nil && zlmManagementCore.restart != restart {
-			zlmManagementCore.restart.Close()
-		}
 	}
 	zlmManagementCore = nil
 	if zlmRegistry == nil || nodeService == nil || restart == nil {
@@ -69,7 +66,7 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 	)
 	overview.Start(func(err error) {
 		if app.ZapLog != nil {
-			app.ZapLog.Warn("ZLM 媒体实时速率采样失败", zap.Error(err))
+			app.ZapLog.Named("zlm.metrics").Warn("ZLM 媒体实时速率采样失败", zap.String("event", "zlm.metrics.sample_failed"), zap.Error(err))
 		}
 	})
 	zlmManagementCore = &zlmManagementCoreRuntime{
@@ -121,9 +118,6 @@ func teardownZLMManagementCore() {
 	gbroutes.SetRestartStartedNotifier(nil)
 	if zlmManagementCore != nil && zlmManagementCore.overview != nil {
 		zlmManagementCore.overview.Close()
-	}
-	if zlmManagementCore != nil && zlmManagementCore.restart != nil {
-		zlmManagementCore.restart.Close()
 	}
 	zlmManagementCore = nil
 }

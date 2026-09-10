@@ -122,6 +122,7 @@ func (c *TalkController) Delete(ctx *gin.Context) {
 
 func (c *TalkController) ready(ctx *gin.Context) bool {
 	if c == nil || c.service == nil || c.dbFunc == nil || c.dbFunc() == nil {
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "语音对讲服务未装配"})
 		return false
 	}

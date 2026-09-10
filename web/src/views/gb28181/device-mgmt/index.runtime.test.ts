@@ -35,6 +35,8 @@ const api = vi.hoisted(() => ({
     listMapClusters: vi.fn(),
     listMapMarkers: vi.fn(),
     listDeviceSubscriptions: vi.fn(),
+    listMaintenanceOperations: vi.fn(),
+    listFirmwareUpgrades: vi.fn(),
     refreshDeviceCatalog: vi.fn(),
     updateCloudRecording: vi.fn(),
     updateChannelStreamTransport: vi.fn(),
@@ -170,7 +172,7 @@ function mountPage() {
                 "a-doption": passthroughStub,
                 "a-pagination": passthroughStub,
                 "a-tooltip": passthroughStub,
-                "a-dropdown": passthroughStub,
+                "a-dropdown": { template: "<div><slot /><slot name='content' /></div>" },
                 "a-spin": passthroughStub,
                 "a-empty": passthroughStub,
                 "a-switch": passthroughStub,
@@ -187,6 +189,7 @@ function mountPage() {
 describe("device-mgmt round-2 修复回归", () => {
     beforeEach(() => {
         vi.useFakeTimers();
+        user.account.permissions = ["gb28181:device:view"];
         // happy-dom 元素无布局尺寸:容器永远 0 宽会让 ensureMap 无限 rAF 重试
         Object.defineProperty(HTMLElement.prototype, "clientWidth", { get: () => 800, configurable: true });
         Object.defineProperty(HTMLElement.prototype, "clientHeight", { get: () => 600, configurable: true });
@@ -196,6 +199,8 @@ describe("device-mgmt round-2 修复回归", () => {
         api.listMapClusters.mockReset().mockResolvedValue({ code: 0, message: "", data: { clusters: [] } });
         api.listDeviceStatusEvents.mockReset().mockResolvedValue(okList());
         api.listDeviceSubscriptions.mockReset().mockResolvedValue(okList());
+        api.listMaintenanceOperations.mockReset().mockResolvedValue(okList());
+        api.listFirmwareUpgrades.mockReset().mockResolvedValue(okList());
     });
 
     afterEach(() => {
@@ -296,4 +301,40 @@ describe("device-mgmt round-2 修复回归", () => {
         expect(api.listChannels).toHaveBeenCalledTimes(3);
         wrapper.unmount();
     });
+    it("opens each card action directly and preserves upgrade interlock after closing", async () => {
+        user.account.permissions = ["*:*:*"];
+        window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "card");
+        const device = { id: 31, deviceId: "34020000001320000001", name: "北门录像机", online: true, channelCount: 8, channelOnlineCount: 0, firmware: "v1", effectiveVersion: "2022" };
+        api.listDevices.mockResolvedValue(okList(1, [device]));
+        api.getDevice.mockResolvedValue({ code: 0, data: device });
+        const wrapper = mountPage();
+        await flushPromises();
+        const menu = wrapper.findComponent({ name: "DeviceMaintenanceMenu" });
+        expect(menu.exists()).toBe(true);
+        menu.vm.$emit("upgrade");
+        await flushPromises();
+        const upgrade = wrapper.findComponent({ name: "DeviceFirmwareUpgradeDrawer" });
+        expect(upgrade.props("visible")).toBe(true);
+        const operation = { operationId: "upgrade-31", deviceId: 31, status: "accepted", firmware: "v2" };
+        upgrade.vm.$emit("operationUpdated", operation);
+        upgrade.vm.$emit("update:visible", false);
+        api.listFirmwareUpgrades.mockResolvedValue(okList(1, [operation]));
+        await flushPromises();
+        expect(wrapper.text()).toContain("升级处理中");
+        menu.vm.$emit("reboot");
+        await flushPromises();
+        const reboot = wrapper.findComponent({ name: "DeviceRebootDialog" });
+        expect(reboot.props("visible")).toBe(true);
+        expect(reboot.props("blockedReason")).toContain("升级");
+        expect(upgrade.props("visible")).toBe(false);
+        reboot.vm.$emit("viewRecords", "reboot-31");
+        await flushPromises();
+        const records = wrapper.findComponent({ name: "DeviceMaintenanceRecordsDrawer" });
+        expect(records.props("visible")).toBe(true);
+        expect(records.props("initialType")).toBe("reboot");
+        expect(records.props("operationId")).toBe("reboot-31");
+        expect(reboot.props("visible")).toBe(false);
+        wrapper.unmount();
+    });
+
 });

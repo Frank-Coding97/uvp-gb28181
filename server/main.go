@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,7 +18,9 @@ import (
 	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/routes"
+	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
 
 	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
@@ -39,32 +41,80 @@ import (
 // @host localhost:8080
 // @BasePath /api
 func main() {
-	// 运维入口:-migrate-up 仅执行主数据库待处理迁移并退出,不启动 Casbin、任务调度、HTTP 或 SIP。
-	if migrateUpRequested(os.Args[1:]) {
-		if err := runMigrateUp(); err != nil {
-			log.Fatal("migrate-up 失败: " + err.Error())
-		}
-		return
+	finishApplication(runApplication())
+}
+
+func finishApplication(err error) {
+	if app.LogRuntime != nil {
+		app.LogRuntime.Repeats().Close()
 	}
-	// 运维入口:-migrate-down=<文件名> 手动回滚单个迁移后退出
-	if downFile := parseArgs(os.Args[1:]); downFile != "" {
-		if err := runMigrateDown(downFile); err != nil {
-			log.Fatal("migrate-down 失败: " + err.Error())
+	root := app.Log(context.Background()).Named("lifecycle")
+	if err != nil {
+		root.Error("Application shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), logging.Error(err))
+	} else {
+		root.Info("Application work stopped", zap.String("event", "lifecycle.stopped"))
+	}
+	if app.LogRuntime != nil {
+		err = errors.Join(err, app.LogRuntime.Close())
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func stopApplication(ctx context.Context) error {
+	return ginhelper.Shutdown(ctx, app.Log(ctx),
+		ginhelper.ShutdownStep{Component: "config_callbacks", Stop: func(ctx context.Context) error {
+			if config, ok := app.ConfigYml.(interface{ StopContext(context.Context) error }); ok {
+				return config.StopContext(ctx)
+			}
+			return nil
+		}},
+		ginhelper.ShutdownStep{Component: "scheduler", Stop: func(ctx context.Context) error {
+			if app.JobScheduler == nil {
+				return nil
+			}
+			return app.JobScheduler.StopContext(ctx)
+		}},
+		ginhelper.ShutdownStep{Component: "job_results", Stop: scheduler.StopResultHandlerContext},
+		ginhelper.ShutdownStep{Component: "sip_requests", Stop: gb28181.QuiesceRequests},
+		ginhelper.ShutdownStep{Component: "http_background", Stop: app.BackgroundWork.StopContext},
+		ginhelper.ShutdownStep{Component: "gb28181", Stop: gb28181.StopContext},
+		ginhelper.ShutdownStep{Component: "casbin", Stop: func(ctx context.Context) error {
+			if policy, ok := app.CasbinV2.(interface{ CloseContext(context.Context) error }); ok {
+				return policy.CloseContext(ctx)
+			}
+			return nil
+		}},
+	)
+}
+
+func runApplication() (err error) {
+	// 迁移入口同样等待配置回调退出，然后由 main 关闭根日志。
+	migrateUp := migrateUpRequested(os.Args[1:])
+	downFile := parseArgs(os.Args[1:])
+	if migrateUp || downFile != "" {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err = errors.Join(err, stopApplication(ctx))
+		}()
+		if migrateUp {
+			return runMigrateUp()
 		}
-		return
+		return runMigrateDown(downFile)
 	}
 	// Own the local domain for the whole API process, not one SIP generation.
 	// Migrations are complete; no HTTP routes or device effect runtime exists.
 	authorityLock, err := processauthority.AcquireLocalLock(app.ConfigYml.GetString("processauthority.state_dir"))
 	if err != nil {
-		log.Fatal("进程授权目录或排他锁不可用: " + err.Error())
+		return fmt.Errorf("进程授权目录或排他锁不可用: %w", err)
 	}
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 10*time.Second)
 	authority, err := processauthority.Register(registerCtx, app.DB(), authorityLock)
 	cancelRegister()
 	if err != nil {
-		_ = authorityLock.Close()
-		log.Fatal("进程授权注册失败: " + err.Error())
+		return errors.Join(fmt.Errorf("进程授权注册失败: %w", err), authorityLock.Close())
 	}
 	app.JobScheduler.Start()
 	// 获取Gin引擎实例
@@ -99,8 +149,6 @@ func main() {
 		} else {
 			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.Error(revocationErr))
 		}
-	} else {
-		defer stopRevocation()
 	}
 	maintenanceDone := make(chan struct{})
 	go func() {
@@ -109,31 +157,33 @@ func main() {
 			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.Error(err))
 		})
 	}()
-	defer func() { cancelMaintenance(); <-maintenanceDone }()
 	// 启动服务器(阻塞直到收到退出信号)
-	serveErr := ginhelper.StartServer(engine)
-	if serveErr != nil {
-		app.ZapLog.Error("HTTP 服务异常结束,继续清理其余运行时", zap.Error(serveErr))
+	var stopOnce sync.Once
+	stopOpenAPI := func(ctx context.Context) error {
+		cancelMaintenance()
+		if stopRevocation != nil {
+			stopRevocation()
+		}
+		select {
+		case <-maintenanceDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	cancelMaintenance()
-	if stopRevocation != nil {
-		stopRevocation()
+	shutdown := func(ctx context.Context) error {
+		var openAPIErr error
+		stopOnce.Do(func() { openAPIErr = stopOpenAPI(ctx) })
+		shutdownErr := errors.Join(openAPIErr, stopApplication(ctx))
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		// All HTTP, maintenance and GB owners have joined. Do not release this
+		// process authority in GB Stop/Reload, or before the last owner exits.
+		authority.Seal()
+		return authorityLock.Close()
 	}
-	<-maintenanceDone
-	// 优雅关闭 GB28181 SIP 服务
-	waitForSIPShutdown(gb28181.Stop, func(err error) {
-		app.ZapLog.Error("GB28181 停机尚未排空,保留进程与依赖并重试", zap.Error(err))
-	}, time.Second)
-	// All HTTP, maintenance and GB owners have joined. Do not release this
-	// process authority in GB Stop/Reload, or before the last retry succeeds.
-	authority.Seal()
-	if err := authorityLock.Close(); err != nil {
-		app.ZapLog.Error("进程授权锁释放失败", zap.Error(err))
-		serveErr = errors.Join(serveErr, err)
-	}
-	if serveErr != nil {
-		os.Exit(1) // Preserve startup/serve failure status only after owned runtimes drain.
-	}
+	return ginhelper.StartServer(engine, shutdown)
 }
 
 func migrateUpRequested(args []string) bool {
@@ -160,7 +210,11 @@ func runMigrateUp() error {
 	if err := db.Raw(databaseIdentitySQL(dialect)).Scan(&identity).Error; err != nil {
 		return fmt.Errorf("读取数据库身份失败: %w", err)
 	}
-	log.Printf("migrate-up 目标: database=%s version=%s dialect=%s", identity.DatabaseName, identity.DatabaseVersion, dialect)
+	app.Log(context.Background()).Named("migration").Info("migrate-up 目标",
+		zap.String("event", "migration.target"),
+		zap.String("database", identity.DatabaseName),
+		zap.String("database_version", identity.DatabaseVersion),
+		zap.String("dialect", string(dialect)))
 	before, err := appliedMigrationVersions(db)
 	if err != nil {
 		return fmt.Errorf("读取迁移基线失败: %w", err)
@@ -172,7 +226,10 @@ func runMigrateUp() error {
 	if err != nil {
 		return fmt.Errorf("读取迁移结果失败: %w", err)
 	}
-	log.Printf("migrate-up 完成: before=%d after=%d newly_applied=%v", len(before), len(after), migrationDifference(before, after))
+	app.Log(context.Background()).Named("migration").Info("migrate-up 完成",
+		zap.String("event", "migration.completed"),
+		zap.Int("before_count", len(before)), zap.Int("after_count", len(after)),
+		zap.Strings("newly_applied", migrationDifference(before, after)))
 	return nil
 }
 

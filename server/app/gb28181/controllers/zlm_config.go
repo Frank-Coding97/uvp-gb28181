@@ -30,7 +30,7 @@ func (zc *ZLMConfigController) Get(c *gin.Context) {
 		return
 	}
 	markManagementAudit(c, "config.read", id, nil, "", "", "requested")
-	groups, err := zc.svc.GetGrouped(c, id)
+	groups, err := zc.svc.GetGrouped(c.Request.Context(), id)
 	if err != nil {
 		markManagementAudit(c, "config.read", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
@@ -60,7 +60,7 @@ func (zc *ZLMConfigController) Update(c *gin.Context) {
 		zc.FailAndAbort(c, "请求参数非法", err)
 		return
 	}
-	resp, err := zc.svc.Update(c, id, req)
+	resp, err := zc.svc.Update(c.Request.Context(), id, req)
 	if err != nil {
 		markManagementAudit(c, "config.update", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
@@ -84,7 +84,7 @@ func (zc *ZLMConfigController) TestConnection(c *gin.Context) {
 		return
 	}
 	markManagementAudit(c, "config.test_connection", id, nil, "", "", "requested")
-	res, err := zc.svc.TestConnection(c, id)
+	res, err := zc.svc.TestConnection(c.Request.Context(), id)
 	if err != nil {
 		markManagementAudit(c, "config.test_connection", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {

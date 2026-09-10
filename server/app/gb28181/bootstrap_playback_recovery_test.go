@@ -155,11 +155,15 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	require.Contains(t, start[configure:register], "srv.UAC(), deviceDB, deviceIntents, deviceOperations")
 	require.Equal(t, 1, strings.Count(start, "authorizedRootIntentStore(deviceDB, authority)"))
 	require.Less(t, strings.Index(start, "authorizedRootIntentStore(deviceDB, authority)"), strings.Index(start, "startSIPRuntime("))
-	stopBegin, stopEnd := strings.Index(source, "func stopSIPDependencies("), strings.Index(source, "func stopPlaybackRuntime(")
-	require.Greater(t, stopEnd, stopBegin)
-	stop := source[stopBegin:stopEnd]
-	detach := strings.Index(stop, "gbroutes.SetDeviceTransferBarrier(nil)")
+	shutdownData, err := os.ReadFile("bootstrap_shutdown.go")
+	require.NoError(t, err)
+	shutdownSource := string(shutdownData)
+	stopBegin := strings.Index(shutdownSource, "func stopSIPDependenciesSnapshot(")
+	require.GreaterOrEqual(t, stopBegin, 0)
+	snapshot := shutdownSource[stopBegin:]
+	detach := strings.Index(snapshot, "gbroutes.SetDeviceTransferBarrier(nil)")
 	require.GreaterOrEqual(t, detach, 0)
-	require.Less(t, detach, strings.Index(stop, "stopPlaybackRuntime(ctx)"))
-	require.Less(t, detach, strings.Index(stop, "sipServer.Shutdown(ctx)"))
+	require.Less(t, detach, strings.Index(snapshot, "openAPILivePlayer.Retire(ctx)"))
+	require.Less(t, strings.Index(snapshot, "openAPILivePlayer.Retire(ctx)"), strings.Index(snapshot, "r.playback.Close(ctx)"))
+	require.Less(t, strings.Index(snapshot, "r.playback.Close(ctx)"), strings.Index(snapshot, "r.server.Shutdown(ctx)"))
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -26,6 +27,7 @@ func (dc *DeviceMgmtController) UpgradeDeviceFirmware(c *gin.Context) {
 	}
 	service := dc.firmwareUpgradeServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, http.StatusServiceUnavailable, false)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "设备升级服务未就绪"})
 		return
 	}
@@ -74,6 +76,7 @@ func (dc *DeviceMgmtController) ListFirmwareUpgrades(c *gin.Context) {
 	}
 	service := dc.firmwareUpgradeServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, http.StatusServiceUnavailable, false)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "设备升级服务未就绪"})
 		return
 	}

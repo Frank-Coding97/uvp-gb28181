@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,6 +33,7 @@ func (c *StreamMonitorController) SetDB(dbFunc func() *gorm.DB) { c.dbFunc = dbF
 
 func (c *StreamMonitorController) Get(ctx *gin.Context) {
 	if c.service == nil {
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "流概况服务未装配"})
 		return
 	}
@@ -41,7 +43,7 @@ func (c *StreamMonitorController) Get(ctx *gin.Context) {
 		return
 	}
 	var channel gbmodels.GbChannel
-	result := c.dbFunc().WithContext(ctx).
+	result := c.dbFunc().WithContext(ctx.Request.Context()).
 		Scopes(ownerDeptScope(ctx)).
 		Select("id").
 		Where("stream_id = ?", streamID).
@@ -58,10 +60,12 @@ func (c *StreamMonitorController) Get(ctx *gin.Context) {
 
 	snapshot, err := c.service.Get(ctx.Request.Context(), streamID)
 	if errors.Is(err, streammonitor.ErrStreamOffline) {
+		response.SetBusinessResult(ctx, 1, false)
 		ctx.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "流已离线"})
 		return
 	}
 	if errors.Is(err, streammonitor.ErrNodeUnavailable) {
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "媒体节点不可达"})
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -51,7 +52,7 @@ func (dc *DeviceMgmtController) findSubscriptionDevice(c *gin.Context) (*gbmodel
 		return nil, false
 	}
 	var device gbmodels.GbDevice
-	result := dc.db().WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	result := dc.db().WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "设备不存在", result.Error)
 		return nil, false
@@ -66,7 +67,7 @@ func (dc *DeviceMgmtController) ListSubscriptions(c *gin.Context) {
 		return
 	}
 	var rows []gbmodels.GbDeviceSubscription
-	if err := dc.db().WithContext(c).Where("device_id = ?", device.ID).Find(&rows).Error; err != nil {
+	if err := dc.db().WithContext(c.Request.Context()).Where("device_id = ?", device.ID).Find(&rows).Error; err != nil {
 		dc.FailAndAbort(c, "查询订阅失败", err)
 		return
 	}
@@ -106,7 +107,7 @@ func (dc *DeviceMgmtController) ListAlarms(c *gin.Context) {
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
-	query := dc.db().WithContext(c).Model(&gbmodels.GbAlarmEvent{}).Where("device_id = ?", device.ID)
+	query := dc.db().WithContext(c.Request.Context()).Model(&gbmodels.GbAlarmEvent{}).Where("device_id = ?", device.ID)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		dc.FailAndAbort(c, "查询报警失败", err)
@@ -123,6 +124,7 @@ func (dc *DeviceMgmtController) ListAlarms(c *gin.Context) {
 func parseSubscriptionKind(c *gin.Context) (gbmodels.SubscriptionKind, bool) {
 	kind := gbmodels.SubscriptionKind(c.Param("kind"))
 	if !kind.Valid() {
+		response.SetBusinessResult(c, 400, false)
 		c.JSON(400, gin.H{"code": 400, "message": "订阅类型不合法"})
 		return "", false
 	}
@@ -162,10 +164,11 @@ func (dc *DeviceMgmtController) UpdateSubscription(c *gin.Context) {
 		}
 	}
 	if dc.subscriptionManager == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "订阅服务未就绪"})
 		return
 	}
-	sub, err := dc.subscriptionManager.Configure(c, device, kind, body.Enabled, body.ExpiresSeconds, body.IntervalSeconds)
+	sub, err := dc.subscriptionManager.Configure(c.Request.Context(), device, kind, body.Enabled, body.ExpiresSeconds, body.IntervalSeconds)
 	if err != nil || sub == nil {
 		if err == nil {
 			err = fmt.Errorf("订阅状态未返回")
@@ -186,10 +189,11 @@ func (dc *DeviceMgmtController) RenewSubscription(c *gin.Context) {
 		return
 	}
 	if dc.subscriptionManager == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "订阅服务未就绪"})
 		return
 	}
-	sub, err := dc.subscriptionManager.Renew(c, device, kind)
+	sub, err := dc.subscriptionManager.Renew(c.Request.Context(), device, kind)
 	if err != nil || sub == nil {
 		dc.FailAndAbort(c, "续订失败", err)
 		return

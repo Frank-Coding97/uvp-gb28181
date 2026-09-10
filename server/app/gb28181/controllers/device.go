@@ -50,7 +50,7 @@ func (dc *DeviceController) List(c *gin.Context) {
 		pageSize = 20
 	}
 
-	list, total, err := gbmodels.ListPaged(c, page, pageSize, datascope.VisibilityScope(c, "owner_dept_id", "device_id"))
+	list, total, err := gbmodels.ListPaged(c.Request.Context(), page, pageSize, datascope.VisibilityScope(c, "owner_dept_id", "device_id"))
 	if err != nil {
 		dc.FailAndAbort(c, "获取设备列表失败", err)
 		return
@@ -74,7 +74,7 @@ func (dc *DeviceController) List(c *gin.Context) {
 func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	var d gbmodels.GbDevice
-	result := app.DB().WithContext(c).
+	result := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ?", deviceID).
 		Limit(1).
@@ -110,7 +110,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 
 	// 查询设备（带权限）
 	var device gbmodels.GbDevice
-	result := app.DB().WithContext(c).
+	result := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ?", deviceID).
 		Limit(1).
@@ -166,7 +166,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 		}
 		if *body.ZLMNodeID > 0 {
 			var mediaNode zlmrepo.MetaNode
-			result := app.DB().WithContext(c).Where("id = ?", *body.ZLMNodeID).Limit(1).Find(&mediaNode)
+			result := app.DB().WithContext(c.Request.Context()).Where("id = ?", *body.ZLMNodeID).Limit(1).Find(&mediaNode)
 			if result.Error != nil {
 				dc.FailAndAbort(c, "查询 ZLM 节点失败", result.Error)
 				return
@@ -189,7 +189,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	}
 
 	// 执行更新
-	if err := app.DB().WithContext(c).Model(&device).Updates(updates).Error; err != nil {
+	if err := app.DB().WithContext(c.Request.Context()).Model(&device).Updates(updates).Error; err != nil {
 		dc.FailAndAbort(c, "更新失败", err)
 		return
 	}
@@ -206,7 +206,7 @@ func (dc *DeviceController) ListChannels(c *gin.Context) {
 		return
 	}
 	var device gbmodels.GbDevice
-	deviceResult := app.DB().WithContext(c).
+	deviceResult := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ?", deviceID).
 		Limit(1).
@@ -221,7 +221,7 @@ func (dc *DeviceController) ListChannels(c *gin.Context) {
 	}
 
 	var list gbmodels.GbChannelList
-	err := app.DB().WithContext(c).
+	err := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ?", deviceID).
 		Order("channel_id").

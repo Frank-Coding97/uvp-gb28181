@@ -12,13 +12,14 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 // CodeGenService 代码生成服务
-type CodeGenService struct{}
+type CodeGenService struct{ scope context.Context }
 
 // NewCodeGenService 创建代码生成服务
 func NewCodeGenService() *CodeGenService {
@@ -60,7 +61,7 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 	// 根据数据库类型执行不同的查询
 	switch dbType {
 	case "mysql":
-		rows, err := sqlDB.Query("SHOW DATABASES")
+		rows, err := sqlDB.QueryContext(cgs.logContext(), "SHOW DATABASES")
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +75,7 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 			databases = append(databases, dbName)
 		}
 	case "postgresql":
-		rows, err := sqlDB.Query("SELECT datname FROM pg_database WHERE datistemplate = false")
+		rows, err := sqlDB.QueryContext(cgs.logContext(), "SELECT datname FROM pg_database WHERE datistemplate = false")
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +89,7 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 			databases = append(databases, dbName)
 		}
 	case "sqlserver":
-		rows, err := sqlDB.Query("SELECT name FROM sys.databases")
+		rows, err := sqlDB.QueryContext(cgs.logContext(), "SELECT name FROM sys.databases")
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +150,7 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 	// 根据数据库类型执行不同的查询
 	switch dbType {
 	case "mysql":
-		rows, err := sqlDB.Query("SELECT TABLE_NAME, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?", database)
+		rows, err := sqlDB.QueryContext(cgs.logContext(), "SELECT TABLE_NAME, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?", database)
 		if err != nil {
 			return nil, err
 		}
@@ -164,10 +165,10 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 		}
 	case "postgresql":
 		// PostgreSQL需要先切换到指定数据库
-		_, err := sqlDB.Exec("USE " + database)
+		_, err := sqlDB.ExecContext(cgs.logContext(), "USE "+database)
 		if err != nil {
 			// 如果USE命令失败，尝试直接查询
-			rows, err := sqlDB.Query(`
+			rows, err := sqlDB.QueryContext(cgs.logContext(), `
 				SELECT 
 					t.tablename,
 					obj_description(c.oid) as tablecomment
@@ -187,7 +188,7 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 				tables = append(tables, table)
 			}
 		} else {
-			rows, err := sqlDB.Query(`
+			rows, err := sqlDB.QueryContext(cgs.logContext(), `
 				SELECT 
 					t.tablename,
 					obj_description(c.oid) as tablecomment
@@ -208,7 +209,7 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 			}
 		}
 	case "sqlserver":
-		rows, err := sqlDB.Query(`
+		rows, err := sqlDB.QueryContext(cgs.logContext(), `
 			SELECT 
 				t.TABLE_NAME,
 				ISNULL(ep.value, '') as TABLE_COMMENT
@@ -278,7 +279,7 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 	// 根据数据库类型执行不同的查询
 	switch dbType {
 	case "mysql":
-		rows, err := sqlDB.Query(`
+		rows, err := sqlDB.QueryContext(cgs.logContext(), `
 			SELECT
 				COLUMN_NAME,
 				DATA_TYPE,
@@ -320,10 +321,10 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 		}
 	case "postgresql":
 		// PostgreSQL需要先切换到指定数据库
-		_, err := sqlDB.Exec("USE " + database)
+		_, err := sqlDB.ExecContext(cgs.logContext(), "USE "+database)
 		if err != nil {
 			// 如果USE命令失败，尝试直接查询
-			rows, err := sqlDB.Query(`
+			rows, err := sqlDB.QueryContext(cgs.logContext(), `
 				SELECT
 					c.column_name,
 					c.data_type,
@@ -374,7 +375,7 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 				columns = append(columns, column)
 			}
 		} else {
-			rows, err := sqlDB.Query(`
+			rows, err := sqlDB.QueryContext(cgs.logContext(), `
 				SELECT
 					c.column_name,
 					c.data_type,
@@ -426,7 +427,7 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 			}
 		}
 	case "sqlserver":
-		rows, err := sqlDB.Query(`
+		rows, err := sqlDB.QueryContext(cgs.logContext(), `
 			SELECT
 				c.COLUMN_NAME,
 				c.DATA_TYPE,
@@ -1163,7 +1164,7 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	// 获取当前工作目录
 	wd, err := os.Getwd()
 	if err != nil {
-		app.ZapLog.Error("获取工作目录失败", zap.Error(err))
+		app.Log(cgs.logContext()).Error("获取工作目录失败", zap.String("event", "codegen.working_directory_failed"), logging.Error(err))
 		return ""
 	}
 
@@ -1173,14 +1174,14 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	// 读取模板文件
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
-		app.ZapLog.Error("读取模板文件失败", zap.String("templatePath", templatePath), zap.Error(err))
+		app.Log(cgs.logContext()).Error("读取模板文件失败", zap.String("event", "codegen.template_read_failed"), zap.String("templatePath", templatePath), logging.Error(err))
 		return ""
 	}
 
 	// 解析模板
 	tmpl, err := template.New(templateName).Parse(string(templateContent))
 	if err != nil {
-		app.ZapLog.Error("解析模板失败", zap.String("templateName", templateName), zap.Error(err))
+		app.Log(cgs.logContext()).Error("解析模板失败", zap.String("event", "codegen.template_parse_failed"), zap.String("templateName", templateName), logging.Error(err))
 		return ""
 	}
 
@@ -1188,7 +1189,7 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	var buf strings.Builder
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
-		app.ZapLog.Error("执行模板失败", zap.String("templateName", templateName), zap.Error(err))
+		app.Log(cgs.logContext()).Error("执行模板失败", zap.String("event", "codegen.template_execute_failed"), zap.String("templateName", templateName), logging.Error(err))
 		return ""
 	}
 
@@ -1207,7 +1208,7 @@ func (cgs *CodeGenService) writeCodeToFileWithCover(filePath string, content str
 	if !isCover {
 		if _, err := os.Stat(filePath); err == nil {
 			// 文件已存在，跳过写入
-			app.ZapLog.Info("文件已存在，跳过生成", zap.String("filePath", filePath))
+			app.Log(cgs.logContext()).Info("文件已存在，跳过生成", zap.String("event", "codegen.file_skipped"), zap.String("filePath", filePath))
 			return nil
 		}
 	}
@@ -1223,7 +1224,7 @@ func (cgs *CodeGenService) writeCodeToFileWithCover(filePath string, content str
 // InsertMenuAndApiData 在生成代码时插入菜单和API数据
 func (cgs *CodeGenService) InsertMenuAndApiData(ctx context.Context, menuApiCtx *models.MenuApiContext, isTree bool) error {
 	// 获取数据库连接
-	db := app.DB()
+	db := app.DBContext(ctx)
 
 	// 生成菜单和API数据
 	menuData, apiData, err := cgs.generateMenuAndApiData(menuApiCtx.FileName, menuApiCtx.DirName, menuApiCtx.Comment, isTree)
@@ -1581,7 +1582,7 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 	switch dbType {
 	case "mysql":
 		// MySQL通过information_schema.TABLES获取表注释
-		row := sqlDB.QueryRow(`
+		row := sqlDB.QueryRowContext(cgs.logContext(), `
 			SELECT TABLE_COMMENT 
 			FROM INFORMATION_SCHEMA.TABLES 
 			WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`, database, table)
@@ -1596,7 +1597,7 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 		}
 	case "postgresql":
 		// PostgreSQL通过pg_class和pg_namespace获取表注释
-		row := sqlDB.QueryRow(`
+		row := sqlDB.QueryRowContext(cgs.logContext(), `
 			SELECT obj_description(c.oid) 
 			FROM pg_class c 
 			JOIN pg_namespace n ON n.oid = c.relnamespace 
@@ -1612,7 +1613,7 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 		}
 	case "sqlserver":
 		// SQL Server通过sys.extended_properties获取表注释
-		row := sqlDB.QueryRow(`
+		row := sqlDB.QueryRowContext(cgs.logContext(), `
 			SELECT ISNULL(ep.value, '') 
 			FROM sys.tables t 
 			LEFT JOIN sys.schemas s ON t.schema_id = s.schema_id 
@@ -1633,4 +1634,20 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 	}
 
 	return tableComment, nil
+}
+
+// WithContext returns a request-scoped copy; the controller-owned service stays immutable.
+func (cgs *CodeGenService) WithContext(ctx context.Context) *CodeGenService {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	clone := *cgs
+	clone.scope = ctx
+	return &clone
+}
+func (cgs *CodeGenService) logContext() context.Context {
+	if cgs.scope == nil {
+		return context.Background()
+	}
+	return cgs.scope
 }

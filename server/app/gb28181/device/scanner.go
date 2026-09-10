@@ -2,10 +2,12 @@ package device
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -18,6 +20,7 @@ type OfflineScanner struct {
 	grace        int
 	stop         chan struct{}
 	done         chan struct{}
+	stopOnce     sync.Once
 }
 
 // NewOfflineScanner 创建离线扫描器
@@ -59,25 +62,35 @@ func (s *OfflineScanner) Start() {
 
 // Stop 停止扫描
 func (s *OfflineScanner) Stop() {
-	close(s.stop)
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
 }
 
 // scanOnce 执行一次扫描:查 status=1 但心跳超时的设备,置离线
 func (s *OfflineScanner) scanOnce() {
 	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.device.scanner")
 	stale, err := gbmodels.ListStaleOnline(ctx, s.timeoutCount, s.grace)
 	if err != nil {
-		app.ZapLog.Error("GB28181 离线扫描:查询超时设备失败", zap.Error(err))
+		logger.Error("GB28181 离线扫描:查询超时设备失败",
+			zap.String("event", "gb28181.device.scanner.query_failed"), logging.Error(err))
 		return
 	}
 	for _, d := range stale {
 		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
-			app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
+			logger.Error("GB28181 离线扫描:置离线失败",
+				zap.String("event", "gb28181.device.scanner.mark_offline_failed"),
+				zap.String("device_id", d.DeviceID), logging.Error(err))
 			continue
 		}
 		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
-		app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
+		logger.Info("GB28181 设备超时离线",
+			zap.String("event", "gb28181.device.scanner.device_offline"),
+			zap.String("stage", "device_status"), zap.String("outcome", "succeeded"), zap.String("reason_code", "heartbeat_timeout"),
+			zap.String("device_id", d.DeviceID))
 	}
 }
 

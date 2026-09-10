@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
@@ -54,6 +55,7 @@ func parseExtendedAction(value string) (manscdp.PTZExtendedAction, error) {
 func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	sender, service := dc.ptzRuntimeSnapshot()
 	if sender == nil && service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "SIP UAC 未就绪,无法下发云台控制"})
 		return
 	}
@@ -83,7 +85,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	}
 
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	result := db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询通道失败", result.Error)
 		return
@@ -98,7 +100,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	}
 
 	var device gbmodels.GbDevice
-	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询设备失败", result.Error)
 		return
@@ -134,7 +136,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			return
 		}
 		profile := target.Profile
-		op, executeErr := service.Execute(c, target, ptz.Command{
+		op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
 			Profile: profile, Payload: map[string]interface{}{"action": action, "speed": request.Speed},
 			Build: func(operationSN int) ([]byte, error) {
@@ -145,6 +147,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			dc.FailAndAbort(c, "下发云台控制失败", executeErr)
 			return
 		}
+		response.SetBusinessResult(c, 0, true)
 		c.JSON(200, gin.H{"code": 0, "data": gin.H{
 			"operationId": op.OperationID, "deviceId": device.DeviceID, "channelId": channel.ChannelID,
 			"action": action, "speed": request.Speed, "sn": op.SN, "status": op.Status,
@@ -161,7 +164,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 		return
 	}
 	dest := net.JoinHostPort(device.IP, strconv.Itoa(device.Port))
-	if err := sender.SendMessage(c, device.DeviceID, dest, device.Transport, body); err != nil {
+	if err := sender.SendMessage(c.Request.Context(), device.DeviceID, dest, device.Transport, body); err != nil {
 		dc.FailAndAbort(c, "下发云台控制失败", fmt.Errorf("%w: %v", err, dest))
 		return
 	}
@@ -179,6 +182,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -216,12 +220,12 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 		dc.FailAndAbort(c, "通道 ID 不合法", parseErr)
 		return
 	}
-	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
+	result := db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "通道不存在或无权限", result.Error)
 		return
 	}
-	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return
@@ -236,7 +240,7 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
 	}
-	op, executeErr := service.Execute(c, target, ptz.Command{
+	op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
 		Profile: target.Profile,
 		Payload: map[string]interface{}{"action": action, "id": id, "speed": request.Speed},
@@ -248,12 +252,14 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 		dc.FailAndAbort(c, "下发 PTZ 扩展控制失败", executeErr)
 		return
 	}
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"operationId": op.OperationID, "channelId": channel.ChannelID, "action": action, "id": id, "sn": op.SN, "status": op.Status}})
 }
 
 func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -277,13 +283,13 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 		return
 	}
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
+	result := db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "通道不存在或无权限", result.Error)
 		return
 	}
 	var device gbmodels.GbDevice
-	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return
@@ -300,6 +306,7 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	}
 	profile := target.Profile
 	if !profile.SupportsPrecisePTZ() {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{
 			"code":    1,
 			"message": "当前有效国标协议不支持标准精准云台控制",
@@ -307,7 +314,7 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 		})
 		return
 	}
-	op, executeErr := service.Execute(c, target, ptz.Command{
+	op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: "precise", IdempotencyKey: key, Profile: profile,
 		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},
 		Build: func(sn int) ([]byte, error) {
@@ -319,5 +326,6 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 		dc.FailAndAbort(c, "下发精准云台控制失败", executeErr)
 		return
 	}
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"operationId": op.OperationID, "channelId": channel.ChannelID, "sn": op.SN, "status": op.Status}})
 }

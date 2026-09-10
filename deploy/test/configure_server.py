@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import base64
 import json
 import os
@@ -14,6 +15,40 @@ TRACE_BACKEND_ENV_PATH = BASE / "config" / "sip-trace-backend.env"
 DATABASE_NAME = "uvp_gb28181"
 DATABASE_USER = "uvp_gb28181"
 TRUSTED_PROXIES = ["127.0.0.1", "::1", "172.18.0.3"]
+LOG_FILEPATH = "./resource/logs/uvp-gb28181.log"
+
+
+def logging_replacements(profile: str = "container") -> dict[tuple[str, ...], object]:
+    """Return the complete logging contract for an explicit deployment profile."""
+    if profile == "development":
+        outputs = ["file", "stdout"]
+        textformat = "console"
+        stdoutformat = "console"
+    elif profile == "direct":
+        outputs = ["file"]
+        textformat = "json"
+        stdoutformat = "json"
+    elif profile == "container":
+        outputs = ["stdout"]
+        textformat = "json"
+        stdoutformat = "json"
+    else:
+        raise ValueError(f"Unsupported logging profile: {profile}")
+
+    return {
+        ("logs", "outputs"): outputs,
+        ("logs", "filepath"): LOG_FILEPATH,
+        ("logs", "textformat"): textformat,
+        ("logs", "stdoutformat"): stdoutformat,
+        ("logs", "level"): "info",
+        ("logs", "modules", "access"): "info",
+        ("logs", "modules", "scheduler"): "info",
+        ("logs", "routes"): False,
+        ("logs", "maxsize"): 5,
+        ("logs", "maxbackups"): 7,
+        ("logs", "maxage"): 15,
+        ("logs", "compress"): False,
+    }
 
 
 def container_env(name: str) -> dict[str, str]:
@@ -64,6 +99,7 @@ def yaml_scalar(value: object) -> str:
 def render_config(template: str, replacements: dict[tuple[str, ...], object]) -> str:
     rendered: list[str] = []
     stack: list[tuple[int, str]] = []
+    found_paths: set[tuple[str, ...]] = set()
     key_pattern = re.compile(r"^(\s*)([A-Za-z0-9_]+)\s*:(.*)$")
 
     for line in template.splitlines():
@@ -79,6 +115,7 @@ def render_config(template: str, replacements: dict[tuple[str, ...], object]) ->
         path = tuple(item[1] for item in stack) + (key,)
 
         if path in replacements:
+            found_paths.add(path)
             rendered.append(f"{indent_text}{key}: {yaml_scalar(replacements[path])}")
             continue
 
@@ -87,9 +124,7 @@ def render_config(template: str, replacements: dict[tuple[str, ...], object]) ->
         if not stripped_remainder or stripped_remainder.startswith("#"):
             stack.append((indent, key))
 
-    missing = [".".join(path) for path in replacements if not any(
-        re.match(rf"^\s*{re.escape(path[-1])}\s*:", line) for line in rendered
-    )]
+    missing = [".".join(path) for path in replacements if path not in found_paths]
     if missing:
         raise RuntimeError(f"Config keys not found: {', '.join(missing)}")
     return "\n".join(rendered) + "\n"
@@ -134,6 +169,15 @@ def ensure_trace_env() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Configure a UVP GB28181 deployment")
+    parser.add_argument(
+        "--logging-profile",
+        choices=("development", "direct", "container"),
+        default="container",
+        help="logging output profile (default: container)",
+    )
+    args = parser.parse_args()
+
     BASE.joinpath("data", "logs").mkdir(parents=True, exist_ok=True)
     BASE.joinpath("data", "uploads").mkdir(parents=True, exist_ok=True)
     ensure_trace_env()
@@ -183,9 +227,6 @@ def main() -> None:
         ("redis", "host"): "wvp-redis",
         ("redis", "port"): 6379,
         ("redis", "password"): redis_env.get("REDIS_PASSWORD", ""),
-        ("logs", "ginlogname"): "./resource/logs/gin.log",
-        ("logs", "zaplogname"): "./resource/logs/uvp-gb28181.log",
-        ("logs", "level"): "info",
         ("gormv2", "usedbtype"): "mysql",
         ("gormv2", "mysql", "write", "host"): "wvp-mysql",
         ("gormv2", "mysql", "write", "database"): DATABASE_NAME,
@@ -198,7 +239,6 @@ def main() -> None:
         ("gormv2", "mysql", "read", "user"): DATABASE_USER,
         ("gormv2", "mysql", "read", "pass"): database_password,
         ("upload", "local_path"): "./resource/public/uploads",
-        ("scheduler", "log", "dir"): "./resource/logs/scheduler",
         ("gb28181", "enabled"): True,
         ("gb28181", "trace", "enabled"): True,
         ("gb28181", "zlm", "host"): "wvp-zlmediakit",
@@ -208,6 +248,7 @@ def main() -> None:
         ("gb28181", "media", "hookhost"): "wvp-backend",
         ("gb28181", "media", "hookport"): 18978,
     }
+    replacements.update(logging_replacements(args.logging_profile))
 
     template = CONFIG_TEMPLATE.read_text(encoding="utf-8")
     config = render_config(template, replacements)

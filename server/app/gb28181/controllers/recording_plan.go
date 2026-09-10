@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -43,7 +44,7 @@ func (c *RecordingPlanController) Page(ctx *gin.Context) {
 		value := false
 		enabled = &value
 	}
-	rows, total, err := recordingplan.NewService(c.dbFunc()).PageSummaries(ctx, deptID, ctx.Query("keyword"), enabled, page, pageSize)
+	rows, total, err := recordingplan.NewService(c.dbFunc()).PageSummaries(ctx.Request.Context(), deptID, ctx.Query("keyword"), enabled, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -64,7 +65,7 @@ func (c *RecordingPlanController) Create(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "请求参数不合法")
 		return
 	}
-	result, err := recordingplan.NewService(c.dbFunc()).Create(ctx, deptID, actorID, input)
+	result, err := recordingplan.NewService(c.dbFunc()).Create(ctx.Request.Context(), deptID, actorID, input)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -81,7 +82,7 @@ func (c *RecordingPlanController) Detail(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := recordingplan.NewService(c.dbFunc()).Get(ctx, deptID, planID)
+	result, err := recordingplan.NewService(c.dbFunc()).Get(ctx.Request.Context(), deptID, planID)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -103,7 +104,7 @@ func (c *RecordingPlanController) Update(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "请求参数不合法")
 		return
 	}
-	result, err := recordingplan.NewService(c.dbFunc()).Update(ctx, deptID, actorID, planID, input)
+	result, err := recordingplan.NewService(c.dbFunc()).Update(ctx.Request.Context(), deptID, actorID, planID, input)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -127,7 +128,7 @@ func (c *RecordingPlanController) SetEnabled(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "enabled 必须是布尔值")
 		return
 	}
-	result, err := recordingplan.NewService(c.dbFunc()).SetEnabled(ctx, deptID, actorID, planID, *input.Enabled)
+	result, err := recordingplan.NewService(c.dbFunc()).SetEnabled(ctx.Request.Context(), deptID, actorID, planID, *input.Enabled)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -144,7 +145,7 @@ func (c *RecordingPlanController) Delete(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := recordingplan.NewService(c.dbFunc()).Delete(ctx, deptID, planID); err != nil {
+	if err := recordingplan.NewService(c.dbFunc()).Delete(ctx.Request.Context(), deptID, planID); err != nil {
 		c.respondError(ctx, err)
 		return
 	}
@@ -167,7 +168,7 @@ func (c *RecordingPlanController) SearchDevices(ctx *gin.Context) {
 		value := false
 		online = &value
 	}
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchDevicesFiltered(ctx, deptID, ctx.Query("keyword"), online, page, pageSize)
+	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchDevicesFiltered(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -190,7 +191,7 @@ func (c *RecordingPlanController) SearchChannels(ctx *gin.Context) {
 		online = &value
 	}
 	page, pageSize := pagination(ctx)
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchChannels(ctx, deptID, ctx.Query("keyword"), online, page, pageSize)
+	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchChannels(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -208,7 +209,7 @@ func (c *RecordingPlanController) Assign(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "分配参数不合法")
 		return
 	}
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).Assign(ctx, deptID, actorID, planID, selection)
+	result, err := recordingplan.NewAssignmentService(c.dbFunc()).Assign(ctx.Request.Context(), deptID, actorID, planID, selection)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -233,7 +234,7 @@ func (c *RecordingPlanController) SetChannelMode(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "录像模式不合法")
 		return
 	}
-	if err := recordingplan.NewAssignmentService(c.dbFunc()).SetMode(ctx, deptID, uint(channelID64), input.Mode); err != nil {
+	if err := recordingplan.NewAssignmentService(c.dbFunc()).SetMode(ctx.Request.Context(), deptID, uint(channelID64), input.Mode); err != nil {
 		c.respondError(ctx, err)
 		return
 	}
@@ -259,7 +260,7 @@ func (c *RecordingPlanController) PlanChannels(ctx *gin.Context) {
 		value := false
 		online = &value
 	}
-	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).PagePlanChannels(ctx, deptID, planID, recordingplan.ChannelStatusQuery{
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).PagePlanChannels(ctx.Request.Context(), deptID, planID, recordingplan.ChannelStatusQuery{
 		Keyword: ctx.Query("keyword"), DeviceID: ctx.Query("deviceId"), ActualState: ctx.Query("actualState"),
 		ReasonCode: ctx.Query("reasonCode"), Online: online, Page: page, PageSize: pageSize,
 	})
@@ -280,7 +281,7 @@ func (c *RecordingPlanController) ChannelTimeline(ctx *gin.Context) {
 		return
 	}
 	page, pageSize := pagination(ctx)
-	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).Timeline(ctx, deptID, channelID, page, pageSize)
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).Timeline(ctx.Request.Context(), deptID, channelID, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -297,7 +298,7 @@ func (c *RecordingPlanController) DiagnoseChannel(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).DiagnoseChannel(ctx, deptID, channelID)
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).DiagnoseChannel(ctx.Request.Context(), deptID, channelID)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -314,7 +315,7 @@ func (c *RecordingPlanController) assignmentIdentity(ctx *gin.Context) (uint, ui
 	if !ok {
 		return 0, 0, 0, false
 	}
-	if _, err := recordingplan.NewService(c.dbFunc()).Get(ctx, deptID, planID); err != nil {
+	if _, err := recordingplan.NewService(c.dbFunc()).Get(ctx.Request.Context(), deptID, planID); err != nil {
 		c.respondError(ctx, err)
 		return 0, 0, 0, false
 	}
@@ -328,7 +329,7 @@ func (c *RecordingPlanController) identity(ctx *gin.Context) (uint, uint, bool) 
 		return 0, 0, false
 	}
 	var user appmodels.User
-	result := c.dbFunc().WithContext(ctx).Select("id", "dept_id", "status").Where("id = ?", actorID).Limit(1).Find(&user)
+	result := c.dbFunc().WithContext(ctx.Request.Context()).Select("id", "dept_id", "status").Where("id = ?", actorID).Limit(1).Find(&user)
 	if result.Error != nil {
 		c.failure(ctx, http.StatusInternalServerError, "读取用户数据范围失败")
 		return 0, 0, false
@@ -372,6 +373,7 @@ func (c *RecordingPlanController) respondError(ctx *gin.Context, err error) {
 		case recordingplan.ErrPlanHasBindings.Code:
 			status = http.StatusConflict
 		}
+		response.SetBusinessResult(ctx, status, false)
 		ctx.JSON(status, gin.H{"code": status, "message": domainErr.Message, "data": domainErr.Details})
 		return
 	}
@@ -379,10 +381,12 @@ func (c *RecordingPlanController) respondError(ctx *gin.Context, err error) {
 }
 
 func (c *RecordingPlanController) success(ctx *gin.Context, data any) {
+	response.SetBusinessResult(ctx, 0, true)
 	ctx.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": data})
 }
 
 func (c *RecordingPlanController) failure(ctx *gin.Context, status int, message string) {
+	response.SetBusinessResult(ctx, status, false)
 	ctx.JSON(status, gin.H{"code": status, "message": message, "data": nil})
 }
 

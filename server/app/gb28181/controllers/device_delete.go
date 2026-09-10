@@ -142,7 +142,7 @@ func (dc *DeviceMgmtController) BatchDeleteChannels(c *gin.Context) {
 // 必须用 .Unscoped() 才能真正 DELETE。否则被软删的 device_id 仍占用 uk_device_id
 // 唯一索引,设备再次 REGISTER 时 Upsert 会撞索引报 Duplicate entry。
 func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id uint) error {
-	return db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	return db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 1. 查设备(dept-scoped)
 		var dev gbmodels.GbDevice
 		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&dev)
@@ -239,7 +239,7 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 
 // deleteChannelByID 事务内物理删除单个通道及其级联数据
 func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, id uint) error {
-	return db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	return db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 1. 查通道(dept-scoped)
 		var ch gbmodels.GbChannel
 		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)

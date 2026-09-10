@@ -68,9 +68,9 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		cancel()
 		if err != nil {
 			errs = append(errs, err)
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("云端录像通道对账失败", zap.Uint("channelId", channelID), zap.Error(err))
-			}
+			app.Log(channelCtx).Named("recording.reconcile").Warn("云端录像通道对账失败",
+				zap.String("event", "recording.reconcile.channel_failed"),
+				zap.Uint("channelId", channelID), zap.Error(err))
 		}
 	}
 	return errors.Join(errs...)

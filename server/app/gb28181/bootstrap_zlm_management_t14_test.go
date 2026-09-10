@@ -50,12 +50,18 @@ func newT14ManagementCore(t *testing.T) (*zlmManagementCoreRuntime, *gorm.DB) {
 	require.NoError(t, err)
 	require.NotZero(t, current.ID)
 	executor := gbzlmmanagement.NewNodeExecutor(reg, func(*node.Node) *zlm.Client { return nil })
+	runtime := gbzlmmanagement.NewRuntimeReader(executor)
+	overview := gbzlmmanagement.NewOverviewSampler(
+		gbzlmmanagement.NewOverviewService(gbzlmmanagement.OverviewDependencies{Registry: reg, Runtime: runtime, Media: runtime}),
+		nil,
+	)
 	return &zlmManagementCoreRuntime{
 		registry: reg,
 		executor: executor,
-		runtime:  gbzlmmanagement.NewRuntimeReader(executor),
+		runtime:  runtime,
 		ledger:   gbzlmrepo.NewManagedResourceRepo(db),
 		restart:  gbzlmsvc.NewRestartCoordinator(reg),
+		overview: overview,
 	}, db
 }
 
@@ -120,6 +126,7 @@ func TestZLMManagementT14_ControllerInstallAndTeardownAreRepeatable(t *testing.T
 	engine.ServeHTTP(unavailable, httptest.NewRequest(http.MethodGet, "/api/gb28181/zlm/overview", nil))
 	require.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
 
+	core.restart.Close()
 	_, err := core.restart.Begin(1)
 	require.ErrorIs(t, err, gbzlmsvc.ErrRestartCoordinatorClosed)
 }

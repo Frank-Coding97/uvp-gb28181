@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -60,6 +61,7 @@ func (dc *DeviceMgmtController) GetDeviceStatus(c *gin.Context) {
 	if c.Query("refresh") == "true" {
 		service := dc.ptzServiceSnapshot()
 		if service == nil {
+			response.SetBusinessResult(c, http.StatusServiceUnavailable, false)
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "PTZ Service 未就绪"})
 			return
 		}

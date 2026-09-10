@@ -1,0 +1,226 @@
+[
+  {
+    "file": "app/gb28181/zlm/heartbeat/watcher.go",
+    "sha256": "5e9c58364e304864dee40f46a39993637605446edce23e12cbf882c692f9bdfa",
+    "reason": "Reviewed T11 fallback: bounded RepeatKey uses constants from watcher/poller call sites; typed errors use SafeCore.",
+    "calls": [
+      {
+        "function": "repeatFailure",
+        "receiver": "",
+        "method": "Warn",
+        "kind": "dynamic_event",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "app/utils/logging/repeat.go",
+    "sha256": "24ee0034e408bf769728b512b089d93e90be15d08a9118a3cd317d5fccc7fb09",
+    "reason": "Reviewed T11 owned repeater: bounded stored event label or fixed summary/recovery events; only primitive fields are emitted.",
+    "calls": [
+      {
+        "function": "emit",
+        "receiver": "*Repeater",
+        "method": "Info",
+        "kind": "dynamic_event",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*Repeater",
+        "method": "Warn",
+        "kind": "dynamic_event",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "file": "app/utils/schedulerhelper/options.go",
+    "sha256": "3d09ff826e5e230cf870d14020c065447e555de7f6db5aee290d98b77b8d7b31",
+    "reason": "Explicit standalone FileJobLogger opt-in only. Production bootstrap injects ZapJobLogger and never calls WithLoggerConfig; original CLI failure semantics retained.",
+    "calls": [
+      {
+        "function": "WithLoggerConfig",
+        "receiver": "",
+        "method": "Fatalf",
+        "kind": "stdlib_log",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "app/utils/schedulerhelper/scheduler.go",
+    "sha256": "9852bfe92aade2513b3621bc49c34f9ce4f6559923f23674d4606dfdfe97747e",
+    "reason": "Reviewed T10/T12 JobLogger interface: production gets the shared ZapJobLogger, whose compatibility methods omit format arguments and retain typed errors. File output is explicit standalone opt-in; no implicit file fallback.",
+    "calls": [
+      {
+        "function": "Start",
+        "receiver": "*JobScheduler",
+        "method": "Debug",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "Stop",
+        "receiver": "*JobScheduler",
+        "method": "Error",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "finishStop",
+        "receiver": "*JobScheduler",
+        "method": "Info",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "RegisterExecutor",
+        "receiver": "*JobScheduler",
+        "method": "Debug",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "canExecuteLocked",
+        "receiver": "*JobScheduler",
+        "method": "Warn",
+        "kind": "unresolved_logger",
+        "count": 4
+      },
+      {
+        "function": "executeJob",
+        "receiver": "*JobScheduler",
+        "method": "Debug",
+        "kind": "unresolved_logger",
+        "count": 2
+      },
+      {
+        "function": "executeJob",
+        "receiver": "*JobScheduler",
+        "method": "Warn",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "executeJob",
+        "receiver": "*JobScheduler",
+        "method": "Info",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "executeJob",
+        "receiver": "*JobScheduler",
+        "method": "Error",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "logExecutionResult",
+        "receiver": "*JobScheduler",
+        "method": "Debug",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "logExecutionResult",
+        "receiver": "*JobScheduler",
+        "method": "Error",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "EnableJob",
+        "receiver": "*JobScheduler",
+        "method": "Error",
+        "kind": "unresolved_logger",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "app/utils/schedulerhelper/zap_logger.go",
+    "sha256": "784eeffcabe8e6d7e168320e7e00fafe9d5bcc8c7ced785239d517ad1d4b3607",
+    "reason": "Reviewed T10 adapter: private emit receives static event/message selections from adapter methods; arbitrary legacy formats are omitted, errors summarized, shared logger ownership retained.",
+    "calls": [
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Debug",
+        "kind": "dynamic_event",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Debug",
+        "kind": "dynamic_message",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Info",
+        "kind": "dynamic_event",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Info",
+        "kind": "dynamic_message",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Warn",
+        "kind": "dynamic_event",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Warn",
+        "kind": "dynamic_message",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Error",
+        "kind": "dynamic_event",
+        "count": 1
+      },
+      {
+        "function": "emit",
+        "receiver": "*ZapJobLogger",
+        "method": "Error",
+        "kind": "dynamic_message",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "app/utils/gormhelper/log.go",
+    "sha256": "38666e11c78312c4edf0435677678a7aa7d950fd64d842dcd372762158b54727",
+    "reason": "Reviewed T07 Trace: shared context logger Check filters before fc/Explain; static message, three constant events, SQL structure fingerprint and typed safe fields only. CheckedEntry.Write retains SafeCore; no raw SQL or parameters. Exact Check/Write calls and source digest require re-review on change.",
+    "calls": [
+      {
+        "function": "Trace",
+        "receiver": "*logger",
+        "method": "Check",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "Trace",
+        "receiver": "*logger",
+        "method": "Write",
+        "kind": "unresolved_logger",
+        "count": 1
+      }
+    ]
+  }
+]

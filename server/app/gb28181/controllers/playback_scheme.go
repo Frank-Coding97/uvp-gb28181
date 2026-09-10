@@ -66,7 +66,7 @@ func (pc *PlaybackSchemeController) List(c *gin.Context) {
 		pageSize = 20
 	}
 	owner := pc.GetCurrentUserID(c)
-	query := pc.db().WithContext(c).Model(&gbmodels.GbPlaybackScheme{}).Where("owner_user_id = ?", owner)
+	query := pc.db().WithContext(c.Request.Context()).Model(&gbmodels.GbPlaybackScheme{}).Where("owner_user_id = ?", owner)
 	if keyword := strings.TrimSpace(c.Query("q")); keyword != "" {
 		query = query.Where("name LIKE ?", "%"+keyword+"%")
 	}
@@ -89,7 +89,7 @@ func (pc *PlaybackSchemeController) Detail(c *gin.Context) {
 		return
 	}
 	var stored []gbmodels.GbPlaybackSchemeSlot
-	if err := pc.db().WithContext(c).Where("scheme_id = ?", scheme.ID).Order("slot_index ASC").Find(&stored).Error; err != nil {
+	if err := pc.db().WithContext(c.Request.Context()).Where("scheme_id = ?", scheme.ID).Order("slot_index ASC").Find(&stored).Error; err != nil {
 		pc.writeSchemeError(c, err)
 		return
 	}
@@ -129,7 +129,7 @@ func (pc *PlaybackSchemeController) Create(c *gin.Context) {
 		return
 	}
 	var user basemodels.User
-	if result := db.WithContext(c).Select("dept_id").Where("id = ?", owner).Limit(1).Find(&user); result.Error != nil || result.RowsAffected == 0 {
+	if result := db.WithContext(c.Request.Context()).Select("dept_id").Where("id = ?", owner).Limit(1).Find(&user); result.Error != nil || result.RowsAffected == 0 {
 		pc.writeSchemeError(c, errors.New("当前用户不存在"))
 		return
 	}
@@ -138,7 +138,7 @@ func (pc *PlaybackSchemeController) Create(c *gin.Context) {
 		OwnerUserID: owner, OwnerDeptID: user.DeptID, Name: name, LayoutSize: int16(body.LayoutSize),
 		SlotCount: len(slots), CreatedBy: owner, UpdatedBy: owner, CreatedAt: now, UpdatedAt: now,
 	}
-	err = db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&scheme).Error; err != nil {
 			return err
 		}
@@ -180,7 +180,7 @@ func (pc *PlaybackSchemeController) Rename(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{"name": name, "updated_by": pc.GetCurrentUserID(c), "updated_at": time.Now()}
-	if err := pc.db().WithContext(c).Model(&gbmodels.GbPlaybackScheme{}).Where("id = ? AND owner_user_id = ?", scheme.ID, scheme.OwnerUserID).Updates(updates).Error; err != nil {
+	if err := pc.db().WithContext(c.Request.Context()).Model(&gbmodels.GbPlaybackScheme{}).Where("id = ? AND owner_user_id = ?", scheme.ID, scheme.OwnerUserID).Updates(updates).Error; err != nil {
 		pc.writeSchemeError(c, err)
 		return
 	}
@@ -204,7 +204,7 @@ func (pc *PlaybackSchemeController) ReplaceLayout(c *gin.Context) {
 	}
 	actor := pc.GetCurrentUserID(c)
 	now := time.Now()
-	err = pc.db().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = pc.db().WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&gbmodels.GbPlaybackScheme{}).
 			Where("id = ? AND owner_user_id = ?", scheme.ID, actor).
 			Updates(map[string]any{"layout_size": body.LayoutSize, "slot_count": len(slots), "updated_by": actor, "updated_at": now})
@@ -235,7 +235,7 @@ func (pc *PlaybackSchemeController) Delete(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := pc.db().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err := pc.db().WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("scheme_id = ?", scheme.ID).Delete(&gbmodels.GbPlaybackSchemeSlot{}).Error; err != nil {
 			return err
 		}
@@ -275,7 +275,7 @@ func (pc *PlaybackSchemeController) buildSlots(c *gin.Context, db *gorm.DB, layo
 		channels[key] = struct{}{}
 
 		var channel gbmodels.GbChannel
-		found := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ? AND channel_id = ?", deviceCode, channelCode).Limit(1).Find(&channel)
+		found := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("device_id = ? AND channel_id = ?", deviceCode, channelCode).Limit(1).Find(&channel)
 		if found.Error != nil {
 			return nil, found.Error
 		}
@@ -283,7 +283,7 @@ func (pc *PlaybackSchemeController) buildSlots(c *gin.Context, db *gorm.DB, layo
 			return nil, schemeError("SCHEME_CHANNEL_NOT_VISIBLE", "通道不存在或无权访问", http.StatusBadRequest)
 		}
 		var device gbmodels.GbDevice
-		db.WithContext(c).Scopes(ownerDeptScope(c)).Select("name", "alias").Where("device_id = ?", deviceCode).Limit(1).Find(&device)
+		db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Select("name", "alias").Where("device_id = ?", deviceCode).Limit(1).Find(&device)
 		deviceName := strings.TrimSpace(device.Alias)
 		if deviceName == "" {
 			deviceName = strings.TrimSpace(device.Name)
@@ -313,12 +313,12 @@ func (pc *PlaybackSchemeController) resolveSlot(c *gin.Context, slot gbmodels.Gb
 		"availability": "missing", "channelRecordId": nil, "channelStatus": nil, "audioEnabled": false,
 	}
 	var existing gbmodels.GbChannel
-	lookup := pc.db().WithContext(c).Where("device_id = ? AND channel_id = ?", slot.DeviceCode, slot.ChannelCode).Limit(1).Find(&existing)
+	lookup := pc.db().WithContext(c.Request.Context()).Where("device_id = ? AND channel_id = ?", slot.DeviceCode, slot.ChannelCode).Limit(1).Find(&existing)
 	if lookup.Error != nil || lookup.RowsAffected == 0 {
 		return response
 	}
 	var visible gbmodels.GbChannel
-	visibleResult := pc.db().WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", existing.ID).Limit(1).Find(&visible)
+	visibleResult := pc.db().WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", existing.ID).Limit(1).Find(&visible)
 	if visibleResult.Error != nil || visibleResult.RowsAffected == 0 {
 		response["availability"] = "forbidden"
 		response["deviceName"] = ""
@@ -343,7 +343,7 @@ func (pc *PlaybackSchemeController) ownedScheme(c *gin.Context, db *gorm.DB) (*g
 		return nil, false
 	}
 	var scheme gbmodels.GbPlaybackScheme
-	result := db.WithContext(c).Where("id = ? AND owner_user_id = ?", uint(id), pc.GetCurrentUserID(c)).Limit(1).Find(&scheme)
+	result := db.WithContext(c.Request.Context()).Where("id = ? AND owner_user_id = ?", uint(id), pc.GetCurrentUserID(c)).Limit(1).Find(&scheme)
 	if result.Error != nil {
 		pc.writeSchemeError(c, result.Error)
 		return nil, false
@@ -356,7 +356,7 @@ func (pc *PlaybackSchemeController) ownedScheme(c *gin.Context, db *gorm.DB) (*g
 }
 
 func (pc *PlaybackSchemeController) schemeNameExists(c *gin.Context, db *gorm.DB, owner uint, name string, exceptID uint) bool {
-	query := db.WithContext(c).Model(&gbmodels.GbPlaybackScheme{}).Where("owner_user_id = ? AND name = ?", owner, name)
+	query := db.WithContext(c.Request.Context()).Model(&gbmodels.GbPlaybackScheme{}).Where("owner_user_id = ? AND name = ?", owner, name)
 	if exceptID != 0 {
 		query = query.Where("id <> ?", exceptID)
 	}

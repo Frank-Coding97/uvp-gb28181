@@ -346,9 +346,12 @@ watch([viewMode, drillCallId, liveEnabled], () => {
 
 onMounted(async () => {
     // 从 URL 读取预填参数(来自设备管理页的诊断按钮)
-    const { deviceIds, from, to } = route.query;
+    const { deviceIds, callId, from, to } = route.query;
     if (deviceIds && typeof deviceIds === "string") {
         filters.value.keyword = deviceIds;
+    }
+    if (callId && typeof callId === "string") {
+        filters.value.keyword = callId;
     }
     if (from && typeof from === "string" && to && typeof to === "string") {
         filters.value.range = [from, to];
@@ -356,6 +359,10 @@ onMounted(async () => {
     }
 
     await Promise.all([loadHealth(), loadSessions(), loadStats()]);
+    if (callId && typeof callId === "string") {
+        const session = sessions.value.find(item => item.callId === callId);
+        if (session) onSelectSession(session);
+    }
     // 初始进入表格视图,启动实时订阅
     if (viewMode.value === "table" && liveEnabled.value) {
         openLiveSubscription();
@@ -498,7 +505,7 @@ onBeforeUnmount(() => {
                         <template #icon><icon-search /></template>
                         <span>查询</span>
                     </a-button>
-                    <a-button class="filter-refresh-btn uvp-refresh-btn" :disabled="sessionLoading" @click="refresh">
+                    <a-button class="filter-refresh-btn uvp-page-action-btn uvp-refresh-btn" :disabled="sessionLoading" @click="refresh">
                         <template #icon><RefreshCcw :size="14" :class="{ spin: sessionLoading }" /></template>
                         <span>刷新</span>
                     </a-button>

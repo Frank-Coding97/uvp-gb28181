@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Request identifies one channel-level live ensure operation.
@@ -374,7 +375,9 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	close(entry.done)
 	c.mu.Unlock()
 	if retryCleanup {
-		go c.retryCleanupPending(retryReq)
+		app.BackgroundWork.Go(func() {
+			c.retryCleanupPending(startCtx, retryReq)
+		})
 	}
 	return result, err
 }
@@ -383,8 +386,8 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 // has been published as CleanupPending. This closes the gap where a ZLM timeout
 // hook arrived while the start was still in-flight and therefore had no current
 // generation to stop. Further retries remain serialized through Stop/EnsureLive.
-func (c *Coordinator) retryCleanupPending(req Request) {
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupPendingRetryTimeout)
+func (c *Coordinator) retryCleanupPending(parentCtx context.Context, req Request) {
+	ctx, cancel := context.WithTimeout(detachedContext(parentCtx), cleanupPendingRetryTimeout)
 	defer cancel()
 	_ = c.Stop(ctx, req)
 }

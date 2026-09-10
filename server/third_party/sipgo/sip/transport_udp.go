@@ -25,6 +25,12 @@ type TransportUDP struct {
 	connectionReuse bool
 	readFilter      TransportReadFilter
 	writeObserver   TransportWriteObserver
+
+	readers    lifecycleGate
+	closeOnce  sync.Once
+	closeErr   error
+	listenerMu sync.Mutex
+	listener   net.PacketConn
 }
 
 func (t *TransportUDP) init(par *Parser) {
@@ -44,12 +50,41 @@ func (t *TransportUDP) Network() string {
 }
 
 func (t *TransportUDP) Close() error {
-	return t.pool.Clear()
-	// Closing listeners is caller thing.
+	return t.CloseContext(context.Background())
+}
+
+func (t *TransportUDP) CloseContext(ctx context.Context) error {
+	t.closeOnce.Do(func() {
+		t.readers.close()
+		if t.pool != nil {
+			t.closeErr = t.pool.Clear()
+		}
+		t.listenerMu.Lock()
+		listener := t.listener
+		t.listenerMu.Unlock()
+		if listener != nil {
+			t.closeErr = errors.Join(t.closeErr, listener.Close())
+		}
+	})
+	return errors.Join(t.closeErr, t.readers.wait(ctx))
 }
 
 // ServeConn is direct way to provide conn on which this worker will listen
 func (t *TransportUDP) Serve(conn net.PacketConn, handler MessageHandler) error {
+	t.listenerMu.Lock()
+	t.listener = conn
+	t.listenerMu.Unlock()
+	if t.readers.isClosed() {
+		_ = conn.Close()
+		return errTransportClosed
+	}
+	defer func() {
+		t.listenerMu.Lock()
+		if t.listener == conn {
+			t.listener = nil
+		}
+		t.listenerMu.Unlock()
+	}()
 	t.log.Debug("begin listening", "network", t.Network(), "addr", conn.LocalAddr().String())
 	/*
 		Multiple readers makes problem, which can delay writing response
@@ -62,6 +97,12 @@ func (t *TransportUDP) Serve(conn net.PacketConn, handler MessageHandler) error 
 	}
 
 	t.pool.Add(c.PacketAddr, c)
+	if !t.readers.enter() {
+		t.pool.Delete(c.PacketAddr)
+		_ = conn.Close()
+		return errTransportClosed
+	}
+	defer t.readers.leave()
 	t.readListenerConnection(c, c.PacketAddr, handler)
 	return nil
 }
@@ -85,6 +126,7 @@ func (t *TransportUDP) CreateConnection(ctx context.Context, laddr Addr, raddr A
 }
 
 func (t *TransportUDP) createConnection(ctx context.Context, laddr Addr, raddr Addr, handler MessageHandler) (Connection, error) {
+	isNew := false
 	laddrStr := laddr.String()
 	lc := &net.ListenConfig{}
 
@@ -109,19 +151,36 @@ func (t *TransportUDP) createConnection(ctx context.Context, laddr Addr, raddr A
 			refcount: 2 + TransportIdleConnection,
 		}
 		t.log.Debug("New connection", "raddr", addr)
-		go t.readUDPConnection(c, addr, c.PacketAddr, handler)
+		isNew = true
 		return c, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	c := conn.(*UDPConnection)
+	if isNew && !t.startReadUDPConnection(c, addr, c.PacketAddr, handler) {
+		t.pool.Delete(addr)
+		t.pool.Delete(c.PacketAddr)
+		_ = c.Close()
+		return nil, errTransportClosed
+	}
 	return c, nil
 }
 
 func (t *TransportUDP) readUDPConnection(conn *UDPConnection, raddr string, laddr string, handler MessageHandler) {
 	defer t.pool.Delete(raddr) // should be closed in previous defer
 	t.readListenerConnection(conn, laddr, handler)
+}
+
+func (t *TransportUDP) startReadUDPConnection(conn *UDPConnection, raddr string, laddr string, handler MessageHandler) bool {
+	if !t.readers.enter() {
+		return false
+	}
+	go func() {
+		defer t.readers.leave()
+		t.readUDPConnection(conn, raddr, laddr, handler)
+	}()
+	return true
 }
 
 func (t *TransportUDP) readListenerConnection(conn *UDPConnection, laddr string, handler MessageHandler) {

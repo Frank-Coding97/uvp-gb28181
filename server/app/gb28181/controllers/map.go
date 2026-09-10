@@ -45,9 +45,9 @@ func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
 			var root gbmodels.GbCatalogNode
-			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
+			if db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
 				var channelIDs []uint
-				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
+				db.WithContext(c.Request.Context()).Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 					Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, root.Path+"%").Pluck("channel_id", &channelIDs)
 				if len(channelIDs) > 0 {
 					q = q.Where("gb_channel.id IN ?", channelIDs)
@@ -95,7 +95,7 @@ func latestPositionByChannel(c *gin.Context, db *gorm.DB, ids []uint) map[uint]g
 		return nil
 	}
 	var positions []gbmodels.GbMobilePositionLatest
-	if err := db.WithContext(c).Where("channel_id IN ?", ids).Find(&positions).Error; err != nil {
+	if err := db.WithContext(c.Request.Context()).Where("channel_id IN ?", ids).Find(&positions).Error; err != nil {
 		return nil
 	}
 	out := make(map[uint]gbmodels.GbMobilePositionLatest, len(positions))
@@ -125,7 +125,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 		limit = 500
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
@@ -199,7 +199,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
@@ -264,7 +264,7 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin)
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin)
 	q = applyMapFilters(c, db, q).Where("(COALESCE(position_latest.latitude, gb_channel.latitude) = 0 OR COALESCE(position_latest.longitude, gb_channel.longitude) = 0)")
 	q, err := applyMapDirectoryFilter(c, db, q)
 	if err != nil {

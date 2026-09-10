@@ -71,12 +71,15 @@ type RestartCoordinator struct {
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
 
-	mu          sync.Mutex
-	closed      bool
-	operations  map[int64]*RestartOperation
-	generations map[int64]uint64
-	timers      map[int64]*time.Timer
-	converge    func(context.Context, int64) error
+	mu              sync.Mutex
+	closed          bool
+	operations      map[int64]*RestartOperation
+	generations     map[int64]uint64
+	timers          map[int64]*time.Timer
+	converge        func(context.Context, int64) error
+	convergenceWG   sync.WaitGroup
+	convergenceDone chan struct{}
+	convergenceWait sync.Once
 }
 
 // NewRestartCoordinator constructs an in-memory coordinator. timeout is
@@ -96,6 +99,7 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 		operations:      make(map[int64]*RestartOperation),
 		generations:     make(map[int64]uint64),
 		timers:          make(map[int64]*time.Timer),
+		convergenceDone: make(chan struct{}),
 	}
 }
 
@@ -238,6 +242,9 @@ func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 	c.setStatusLocked(op, RestartStatusConverging, "")
 	generation := op.Generation
 	converge := c.converge
+	if converge != nil {
+		c.convergenceWG.Add(1)
+	}
 	c.mu.Unlock()
 
 	if converge == nil {
@@ -245,6 +252,7 @@ func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 		return
 	}
 	go func() {
+		defer c.convergenceWG.Done()
 		c.runConvergence(nodeID, generation, converge)
 	}()
 }
@@ -285,12 +293,16 @@ func (c *RestartCoordinator) MarkHeartbeatForGeneration(nodeID int64, generation
 	}
 	c.setStatusLocked(op, RestartStatusConverging, "")
 	converge := c.converge
+	if converge != nil {
+		c.convergenceWG.Add(1)
+	}
 	c.mu.Unlock()
 	if converge == nil {
 		c.FailGeneration(nodeID, generation, errors.New("restart convergence unavailable"))
 		return true
 	}
 	go func() {
+		defer c.convergenceWG.Done()
 		c.runConvergence(nodeID, generation, converge)
 	}()
 	return true
@@ -451,29 +463,64 @@ func UnknownOperation(nodeID int64) RestartOperation {
 	return RestartOperation{NodeID: nodeID, Status: RestartStatusUnknown}
 }
 
-// Close ends the coordinator process lifecycle. It stops pending deadline
-// callbacks and cancels in-flight convergence without inventing a durable
-// terminal outcome: a process restart has no persisted operation state and is
-// reported as unknown by the next coordinator.
-func (c *RestartCoordinator) Close() {
+// StopContext ends the coordinator process lifecycle and waits for accepted
+// convergence goroutines to exit. A deadline returns its error while canceled
+// goroutines may continue best-effort until their own context exits.
+func (c *RestartCoordinator) StopContext(ctx context.Context) error {
 	if c == nil {
-		return
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return
-	}
-	c.closed = true
-	for nodeID, timer := range c.timers {
-		if timer != nil {
-			timer.Stop()
+	if !c.closed {
+		c.closed = true
+		for nodeID, timer := range c.timers {
+			if timer != nil {
+				timer.Stop()
+			}
+			delete(c.timers, nodeID)
 		}
-		delete(c.timers, nodeID)
 	}
 	cancel := c.lifecycleCancel
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+	c.mu.Lock()
+	done := c.convergenceDone
+	if done == nil {
+		done = make(chan struct{})
+		c.convergenceDone = done
+	}
+	c.mu.Unlock()
+	c.convergenceWait.Do(func() {
+		go func() {
+			c.convergenceWG.Wait()
+			close(done)
+		}()
+	})
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+// Close preserves the legacy no-error lifecycle API while waiting for the
+// coordinator's accepted work to observe cancellation.
+func (c *RestartCoordinator) Close() {
+	_ = c.StopContext(context.Background())
 }

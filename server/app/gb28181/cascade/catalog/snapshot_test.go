@@ -115,3 +115,25 @@ func deviceItem(id string) CatalogItem {
 func channelItem(id, parentID string) CatalogItem {
 	return CatalogItem{ID: id, ParentID: parentID, Kind: CatalogItemChannel, Status: ResourceStatusOnline}
 }
+
+func TestChannelsOnlyOmitsDeviceNodeAndRetainsSourceOwnership(t *testing.T) {
+	original := Snapshot{Items: []CatalogItem{
+		{ID: "device", Kind: CatalogItemDevice, Parental: 1},
+		{ID: "one", Kind: CatalogItemChannel, ParentID: "device"},
+		{ID: "two", Kind: CatalogItemChannel, ParentID: "device"},
+		{ID: "three", Kind: CatalogItemChannel, ParentID: "device"},
+	}, channels: map[string]PublishedChannelTarget{"one": {PlatformID: 1, SourceDeviceID: 10, SourceChannelID: 20}}}
+	flat := original.ChannelsOnly()
+	require.Equal(t, 3, flat.SumNum)
+	require.Len(t, flat.Items, 3)
+	for _, item := range flat.Items {
+		require.Empty(t, item.ParentID)
+		require.Zero(t, item.Parental)
+		require.Equal(t, CatalogItemChannel, item.Kind)
+	}
+	require.False(t, flat.HasPublishedID("device"))
+	target, ok := flat.LookupPublishedChannel("one")
+	require.True(t, ok)
+	require.Equal(t, uint64(10), target.SourceDeviceID)
+	require.Len(t, original.Items, 4)
+}

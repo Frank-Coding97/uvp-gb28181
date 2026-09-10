@@ -88,7 +88,7 @@ func (s *Service) visibleChannel(c *gin.Context, db *gorm.DB, deviceCode, channe
 		return nil, &DomainError{ErrChannelInvalid, "设备编码和通道编码不能为空"}
 	}
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	result := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 		Scopes(datascope.VisibilityScopeWithDB(c, db, "owner_dept_id", "device_id")).
 		Where("device_id = ? AND channel_id = ?", deviceCode, channelCode).Limit(1).Find(&channel)
 	if result.Error != nil {
@@ -102,7 +102,7 @@ func (s *Service) visibleChannel(c *gin.Context, db *gorm.DB, deviceCode, channe
 
 func (s *Service) group(c *gin.Context, db *gorm.DB, id, actor uint) (*gbmodels.GbChannelFavoriteGroup, error) {
 	var group gbmodels.GbChannelFavoriteGroup
-	result := db.WithContext(c).Where("id = ? AND owner_user_id = ?", id, actor).Limit(1).Find(&group)
+	result := db.WithContext(c.Request.Context()).Where("id = ? AND owner_user_id = ?", id, actor).Limit(1).Find(&group)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -118,13 +118,13 @@ func channelDTO(ch *gbmodels.GbChannel) *ChannelDTO {
 
 func (s *Service) List(c *gin.Context, actor uint) ([]GroupDTO, error) {
 	var groups []gbmodels.GbChannelFavoriteGroup
-	if err := s.db.WithContext(c).Where("owner_user_id = ?", actor).Order("id ASC").Find(&groups).Error; err != nil {
+	if err := s.db.WithContext(c.Request.Context()).Where("owner_user_id = ?", actor).Order("id ASC").Find(&groups).Error; err != nil {
 		return nil, err
 	}
 	result := make([]GroupDTO, 0, len(groups))
 	for _, group := range groups {
 		var items []gbmodels.GbChannelFavoriteItem
-		if err := s.db.WithContext(c).Where("group_id = ?", group.ID).Order("id ASC").Find(&items).Error; err != nil {
+		if err := s.db.WithContext(c.Request.Context()).Where("group_id = ?", group.ID).Order("id ASC").Find(&items).Error; err != nil {
 			return nil, err
 		}
 		dto := GroupDTO{ID: group.ID, Name: group.Name, Items: make([]ItemDTO, 0)}
@@ -155,7 +155,7 @@ func (s *Service) Create(c *gin.Context, actor uint, req CreateRequest) (GroupDT
 		return GroupDTO{}, &DomainError{ErrGroupNameInvalid, "收藏组名称和通道不能为空"}
 	}
 	var dto GroupDTO
-	err := s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var group gbmodels.GbChannelFavoriteGroup
 		if err := tx.Where("owner_user_id = ? AND name = ?", actor, name).Limit(1).Find(&group).Error; err != nil {
 			return err
@@ -191,7 +191,7 @@ func (s *Service) Create(c *gin.Context, actor uint, req CreateRequest) (GroupDT
 
 func (s *Service) deviceName(c *gin.Context, db *gorm.DB, ch *gbmodels.GbChannel) string {
 	var device gbmodels.GbDevice
-	if result := db.WithContext(c).Select("name, alias").Where("device_id = ?", ch.DeviceID).Limit(1).Find(&device); result.Error == nil && result.RowsAffected > 0 {
+	if result := db.WithContext(c.Request.Context()).Select("name, alias").Where("device_id = ?", ch.DeviceID).Limit(1).Find(&device); result.Error == nil && result.RowsAffected > 0 {
 		if strings.TrimSpace(device.Alias) != "" {
 			return device.Alias
 		}
@@ -207,7 +207,7 @@ func (s *Service) Append(c *gin.Context, actor, groupID uint, inputs []ChannelIn
 	if len(inputs) == 0 {
 		return result, &DomainError{ErrChannelInvalid, "通道不能为空"}
 	}
-	return result, s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	return result, s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if _, err := s.group(c, tx, groupID, actor); err != nil {
 			return err
 		}
@@ -238,11 +238,11 @@ func (s *Service) Remove(c *gin.Context, actor, groupID uint, deviceCode, channe
 	if _, err := s.group(c, s.db, groupID, actor); err != nil {
 		return err
 	}
-	return s.db.WithContext(c).Where("group_id = ? AND device_code = ? AND channel_code = ?", groupID, deviceCode, channelCode).Delete(&gbmodels.GbChannelFavoriteItem{}).Error
+	return s.db.WithContext(c.Request.Context()).Where("group_id = ? AND device_code = ? AND channel_code = ?", groupID, deviceCode, channelCode).Delete(&gbmodels.GbChannelFavoriteItem{}).Error
 }
 
 func (s *Service) Delete(c *gin.Context, actor, groupID uint) error {
-	return s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if _, err := s.group(c, tx, groupID, actor); err != nil {
 			return err
 		}

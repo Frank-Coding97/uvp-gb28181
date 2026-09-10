@@ -172,6 +172,7 @@ export interface CascadePlatform {
   localSipPort: number;
   mediaAdvertiseIp?: string;
   authUsername?: string;
+  credentialNeedsReset?: boolean;
   hasPassword: boolean;
   profileOverride: CascadeProfileOverride;
   effectiveVersion: string;
@@ -203,6 +204,7 @@ export interface CascadePlatform {
 export type CascadePlatformInput = Omit<
   CascadePlatform,
   | "id"
+  | "credentialNeedsReset"
   | "hasPassword"
   | "effectiveVersion"
   | "effectiveVersionFrom"

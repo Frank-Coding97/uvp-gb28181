@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -39,6 +40,7 @@ func (c *CloudRecordingController) SetDB(dbFunc func() *gorm.DB) {
 
 func (c *CloudRecordingController) Update(ctx *gin.Context) {
 	if c.manager == nil {
+		response.SetBusinessResult(ctx, 503, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "云端录像服务未装配"})
 		return
 	}
@@ -56,7 +58,7 @@ func (c *CloudRecordingController) Update(ctx *gin.Context) {
 	}
 
 	var channel gbmodels.GbChannel
-	result := c.dbFunc().WithContext(ctx).
+	result := c.dbFunc().WithContext(ctx.Request.Context()).
 		Scopes(ownerDeptScope(ctx)).
 		Select("id").
 		First(&channel, uint(id))

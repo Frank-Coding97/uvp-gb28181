@@ -189,7 +189,7 @@ defineExpose({ refresh });
     <template v-if="props.view === 'network'">
         <s-layout-search class="session-search">
           <template #fields><a-input-search v-model="networkFilter.peerIp" allow-clear placeholder="远端 IP" class="peer-filter" @search="queryNetwork" /><a-input v-model="networkFilter.localPort" allow-clear placeholder="本地端口" class="port-filter" @press-enter="queryNetwork" /></template>
-          <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all'" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
+          <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all'" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
           <template #extra><span class="scope-note">{{ props.scope === 'all' ? '请先选择节点' : `当前范围：${scopeLabel}` }}</span></template>
         </s-layout-search>
 
@@ -205,7 +205,7 @@ defineExpose({ refresh });
     <template v-else>
         <s-layout-search class="session-search">
           <template #fields><a-input v-model="viewerFilter.schema" allow-clear placeholder="Schema" class="media-filter-short" /><a-input v-model="viewerFilter.vhost" allow-clear placeholder="VHost" class="media-filter-vhost" /><a-input v-model="viewerFilter.app" allow-clear placeholder="App" class="media-filter-app" /><a-input-search v-model="viewerFilter.stream" allow-clear placeholder="Stream" class="media-filter-stream" @search="queryViewers" /></template>
-          <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryViewers">查询</a-button><a-button @click="resetViewers">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all' || !viewerTarget" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
+          <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryViewers">查询</a-button><a-button @click="resetViewers">重置</a-button><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all' || !viewerTarget" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
           <template #extra><span class="scope-note">{{ props.scope === 'all' ? '请先选择节点' : '需完整 MediaIdentity，踢除还需 kickable=true' }}</span></template>
         </s-layout-search>
 

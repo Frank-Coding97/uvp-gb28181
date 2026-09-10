@@ -681,7 +681,8 @@ func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt
 		s.pendingMu.Unlock()
 		// 写回失败不得无声:否则 attempt 停留 dispatching,直到租约恢复才可能被发现
 		if app.ZapLog != nil {
-			app.ZapLog.Error("PTZ 调度结果持久化失败",
+			app.Log(persistCtx).Named("ptz.scheduler").Error("PTZ 调度结果持久化失败",
+				zap.String("event", "ptz.scheduler.persist_failed"),
 				zap.Uint("attempt", attempt.ID), zap.Uint("operation", attempt.OperationID), zap.Error(persistErr))
 		}
 		return persistErr

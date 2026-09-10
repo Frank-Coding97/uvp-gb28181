@@ -11,6 +11,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -89,7 +90,7 @@ func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.Chunk
 	// 查询该fileMd5是否已有上传中的分片（断点续传）
 	uploadedChunks := []int{}
 	existingChunks := models.NewSysAffixChunkList()
-	if err := app.DB().WithContext(ctx).
+	if err := app.DBContext(ctx).
 		Where("file_md5 = ? AND status = 0", req.FileMd5).
 		Find(existingChunks).Error; err == nil && len(*existingChunks) > 0 {
 		// 找到已有分片，复用第一个uploadId
@@ -156,13 +157,13 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 
 	// 检查是否已存在该分片记录（幂等处理）
 	var existingCount int64
-	app.DB().WithContext(ctx).Model(&models.SysAffixChunk{}).
+	app.DBContext(ctx).Model(&models.SysAffixChunk{}).
 		Where("upload_id = ? AND chunk_index = ?", req.UploadId, req.ChunkIndex).
 		Count(&existingCount)
 
 	if existingCount > 0 {
 		// 更新已有记录
-		app.DB().WithContext(ctx).Model(&models.SysAffixChunk{}).
+		app.DBContext(ctx).Model(&models.SysAffixChunk{}).
 			Where("upload_id = ? AND chunk_index = ?", req.UploadId, req.ChunkIndex).
 			Updates(map[string]interface{}{
 				"chunk_path": chunkPath,
@@ -296,7 +297,7 @@ func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string
 	// 删除临时分片目录
 	tmpDir := filepath.Join(localPath, "tmp", uploadId)
 	if err := os.RemoveAll(tmpDir); err != nil {
-		app.ZapLog.Warn("清理临时分片目录失败", zap.Error(err))
+		app.Log(ctx).Warn("清理临时分片目录失败", zap.String("event", "sysaffixservice.cancelchunkupload.warn"), logging.Error(err))
 	}
 
 	// 更新分片记录状态为已取消

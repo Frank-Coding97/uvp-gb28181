@@ -55,8 +55,9 @@ const (
 )
 
 var (
-	ErrInvalidAddress = errors.New("invalid source address")
-	ErrInvalidPolicy  = errors.New("invalid security policy")
+	ErrInvalidAddress      = errors.New("invalid source address")
+	ErrInvalidPolicy       = errors.New("invalid security policy")
+	ErrFirewallUnsupported = errors.New("host firewall unsupported on this platform")
 )
 
 type TTLStep struct {
@@ -246,9 +247,32 @@ type FirewallAgentClient interface {
 	Status() AgentStatus
 }
 
+type AgentCapabilityState string
+
+const (
+	AgentCapabilityUnknown     AgentCapabilityState = "unknown"
+	AgentCapabilitySupported   AgentCapabilityState = "supported"
+	AgentCapabilityUnsupported AgentCapabilityState = "unsupported"
+)
+
+const (
+	AgentStatePending     = "pending"
+	AgentStateApplied     = "applied"
+	AgentStateFailed      = "failed"
+	AgentStateUnsupported = "unsupported"
+)
+
+// FirewallAgentCapabilityProvider exposes compile-time capability without an
+// RPC or socket operation. It is optional to keep FirewallAgentClient
+// compatible with existing fakes and integrations.
+type FirewallAgentCapabilityProvider interface {
+	Capability() AgentCapabilityState
+}
+
 type AgentStatus struct {
-	Connected    bool      `json:"connected"`
-	AppliedRules int       `json:"appliedRules"`
-	LastError    string    `json:"lastError,omitempty"`
-	CheckedAt    time.Time `json:"checkedAt"`
+	Connected    bool                 `json:"connected"`
+	AppliedRules int                  `json:"appliedRules"`
+	Capability   AgentCapabilityState `json:"capability"`
+	LastError    string               `json:"lastError,omitempty"`
+	CheckedAt    time.Time            `json:"checkedAt"`
 }

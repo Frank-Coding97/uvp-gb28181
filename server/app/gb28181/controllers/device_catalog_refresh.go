@@ -33,7 +33,7 @@ func (dc *DeviceMgmtController) RefreshDeviceCatalog(c *gin.Context) {
 	}
 
 	var d gbmodels.GbDevice
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&d)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&d)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -52,6 +52,6 @@ func (dc *DeviceMgmtController) RefreshDeviceCatalog(c *gin.Context) {
 	}
 
 	dest := fmt.Sprintf("%s:%d", d.IP, d.Port)
-	dc.catalogTrigger.Trigger(context.Background(), d.DeviceID, dest, d.Transport)
+	dc.catalogTrigger.Trigger(context.WithoutCancel(c.Request.Context()), d.DeviceID, dest, d.Transport)
 	dc.Success(c, gin.H{"deviceId": d.DeviceID, "dest": dest, "transport": d.Transport, "ok": true})
 }

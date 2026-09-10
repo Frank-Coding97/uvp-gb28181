@@ -1,13 +1,16 @@
 package casbinhelper
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -28,8 +31,15 @@ const (
 // CasbinService Casbin服务
 // 实现 app.CasbinInterf 接口
 type CasbinHelper struct {
-	enforcer *casbin.Enforcer
-	stopChan chan struct{} // 用于停止定期重载goroutine
+	enforcer    *casbin.Enforcer
+	reloadMu    sync.Mutex
+	reloadState *policyReloadState
+}
+
+type policyReloadState struct {
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // 编译时检查是否实现了接口
@@ -74,19 +84,25 @@ func (s *CasbinHelper) InitCasbin(db *gorm.DB, config string) error {
 	}
 
 	// 创建Casbin执行器，使用数据库适配器
-	s.enforcer, err = casbin.NewEnforcer(m, adapter)
+	enforcer, err := casbin.NewEnforcer(m, adapter)
 	if err != nil {
 		return fmt.Errorf("failed to create enforcer: %v", err)
 	}
 
 	// 为角色关系(g)启用域模式匹配
-	s.enforcer.AddNamedDomainMatchingFunc("g", "KeyMatch2", util.KeyMatch2)
+	enforcer.AddNamedDomainMatchingFunc("g", "KeyMatch2", util.KeyMatch2)
 
 	// 加载策略
-	err = s.enforcer.LoadPolicy()
+	err = enforcer.LoadPolicy()
 	if err != nil {
 		return fmt.Errorf("failed to load policy: %v", err)
 	}
+
+	// Re-initialization is supported: finish the previous reload goroutine
+	// before replacing the enforcer it captured. A failed new initialization
+	// therefore leaves the existing helper running unchanged.
+	s.StopAutoLoadPolicy()
+	s.enforcer = enforcer
 
 	// 启动定期重载策略的goroutine
 	s.startAutoLoadPolicy()
@@ -132,6 +148,12 @@ func (s *CasbinHelper) GetEnforcer() *casbin.Enforcer {
 // CasbinMiddleware Casbin权限中间件
 func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		requestContext := context.Background()
+		if c.Request != nil {
+			requestContext = c.Request.Context()
+		}
+		logger := app.Log(requestContext).Named("casbin")
+
 		// 从上下文中获取用户ID
 		userID := common.GetCurrentUserID(c)
 		if userID == 0 {
@@ -152,6 +174,7 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 
 		// 获取请求路径和方法
 		path := c.Request.URL.Path
+		route := c.FullPath()
 		method := c.Request.Method
 
 		// 使用带前缀的用户ID进行权限检查
@@ -160,14 +183,17 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 		var ok bool
 		var err error
 
-		app.ZapLog.Info("Permission check",
+		logger.Info("Permission check",
+			zap.String("event", "casbin.permission.check"),
 			zap.String("uid", userSubject),
-			zap.String("path", path),
+			zap.String("route", route),
 			zap.String("method", method))
 		ok, err = s.Enforce(userSubject, path, method, domain)
 
 		if err != nil {
-			app.ZapLog.Error("Permission check error", zap.Error(err))
+			logger.Error("Permission check error",
+				zap.String("event", "casbin.permission.check_failed"),
+				logging.Error(err))
 			// 500 服务器内部错误
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "权限检查时出现错误"})
 			c.Abort()
@@ -175,9 +201,10 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 		}
 
 		if !ok {
-			app.ZapLog.Warn("Permission denied",
+			logger.Warn("Permission denied",
+				zap.String("event", "casbin.permission.denied"),
 				zap.String("uid", userSubject),
-				zap.String("path", path),
+				zap.String("route", route),
 				zap.String("method", method))
 			// 403 禁止访问
 			c.JSON(http.StatusForbidden, gin.H{"message": "您没有权限访问此资源"})
@@ -452,47 +479,138 @@ func (s *CasbinHelper) GetPermissionsForUser(userID uint, domain ...string) ([][
 	return s.enforcer.GetPermissionsForUser(userSubject, s.HandlerDomain(domain)...)
 }
 
-// startAutoLoadPolicy 启动定期重载策略的goroutine
+// startAutoLoadPolicy 从配置读取间隔并启动定期重载策略的goroutine。
 func (s *CasbinHelper) startAutoLoadPolicy() {
-	// 从配置文件读取自动重载间隔
-	autoLoadSeconds := app.ConfigYml.GetInt("casbin.autoloadpolicyseconds")
-	if autoLoadSeconds <= 0 {
-		app.ZapLog.Info("AutoLoadPolicySeconds not configured or invalid, skip auto reload policy")
+	autoLoadSeconds := 0
+	if app.ConfigYml != nil {
+		autoLoadSeconds = app.ConfigYml.GetInt("casbin.autoloadpolicyseconds")
+	}
+	s.startAutoLoadPolicyWithInterval(time.Duration(autoLoadSeconds) * time.Second)
+}
+
+// startAutoLoadPolicyWithInterval is kept separate so lifecycle tests can use
+// a short interval without loading the application configuration or database.
+func (s *CasbinHelper) startAutoLoadPolicyWithInterval(interval time.Duration) {
+	logger := app.Log(context.Background()).Named("casbin")
+	if interval <= 0 {
+		_ = s.CloseContext(context.Background())
+		logger.Info("AutoLoadPolicySeconds not configured or invalid, skip auto reload policy",
+			zap.String("event", "casbin.policy_reload.disabled"))
 		return
 	}
 
-	// 初始化停止通道
-	s.stopChan = make(chan struct{})
+	state := &policyReloadState{
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	s.reloadMu.Lock()
+	previous := s.reloadState
+	s.reloadState = state
+	enforcer := s.enforcer
+	s.reloadMu.Unlock()
 
-	go func() {
-		ticker := time.NewTicker(time.Duration(autoLoadSeconds) * time.Second)
+	if previous != nil {
+		previous.stopOnce.Do(func() { close(previous.stop) })
+		<-previous.done
+	}
+
+	go func(enforcer *casbin.Enforcer, reload *policyReloadState) {
+		defer close(reload.done)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		app.ZapLog.Info("Started auto reload policy goroutine",
-			zap.Int("interval_seconds", autoLoadSeconds))
+		logger.Info("Started auto reload policy goroutine",
+			zap.String("event", "casbin.policy_reload.started"),
+			zap.Int("interval_seconds", int(interval/time.Second)))
 
 		for {
 			select {
 			case <-ticker.C:
-				if s.enforcer != nil {
-					if err := s.enforcer.LoadPolicy(); err != nil {
-						app.ZapLog.Error("Failed to auto reload policy", zap.Error(err))
-					} else {
-						app.ZapLog.Debug("Auto reload policy successfully")
-					}
+				select {
+				case <-reload.stop:
+					logger.Info("Auto reload policy goroutine stopped",
+						zap.String("event", "casbin.policy_reload.stopped"))
+					return
+				default:
 				}
-			case <-s.stopChan:
-				app.ZapLog.Info("Auto reload policy goroutine stopped")
+				if enforcer == nil {
+					continue
+				}
+				if err := enforcer.LoadPolicy(); err != nil {
+					logger.Error("Failed to auto reload policy",
+						zap.String("event", "casbin.policy_reload.failed"),
+						logging.Error(err))
+				} else {
+					logger.Debug("Auto reload policy successfully",
+						zap.String("event", "casbin.policy_reload.succeeded"))
+				}
+			case <-reload.stop:
+				logger.Info("Auto reload policy goroutine stopped",
+					zap.String("event", "casbin.policy_reload.stopped"))
 				return
 			}
 		}
-	}()
+	}(enforcer, state)
 }
 
-// StopAutoLoadPolicy 停止定期重载策略的goroutine
-func (s *CasbinHelper) StopAutoLoadPolicy() {
-	if s.stopChan != nil {
-		close(s.stopChan)
-		s.stopChan = nil
+// CloseContext stops future policy reloads and waits for the current reload and
+// its final lifecycle log. Every caller waits on the same state.done channel.
+func (s *CasbinHelper) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+
+	s.reloadMu.Lock()
+	state := s.reloadState
+	if state != nil {
+		state.stopOnce.Do(func() { close(state.stop) })
+	}
+	s.reloadMu.Unlock()
+	if state == nil {
+		return nil
+	}
+
+	// Prefer an already completed stop when both channels are ready. A plain
+	// two-way select is deliberately random in that case and can report the
+	// caller's deadline after the reload has already finished.
+	select {
+	case <-state.done:
+		s.reloadMu.Lock()
+		if s.reloadState == state {
+			s.reloadState = nil
+		}
+		s.reloadMu.Unlock()
+		return nil
+	default:
+	}
+
+	select {
+	case <-state.done:
+		s.reloadMu.Lock()
+		if s.reloadState == state {
+			s.reloadState = nil
+		}
+		s.reloadMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		// Completion may have raced with context cancellation between the
+		// first check and this select. Check once more before returning the
+		// timeout so a completed stop is never reported as incomplete.
+		select {
+		case <-state.done:
+			s.reloadMu.Lock()
+			if s.reloadState == state {
+				s.reloadState = nil
+			}
+			s.reloadMu.Unlock()
+			return nil
+		default:
+		}
+		return ctx.Err()
+	}
+}
+
+// StopAutoLoadPolicy 停止定期重载策略的goroutine并等待其完成。
+func (s *CasbinHelper) StopAutoLoadPolicy() {
+	_ = s.CloseContext(context.Background())
 }

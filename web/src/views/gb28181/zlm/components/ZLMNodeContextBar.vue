@@ -115,7 +115,7 @@ function select(value: string | number | undefined) {
     </div>
 
     <a-button
-      class="zlm-node-context__refresh uvp-refresh-btn"
+      class="zlm-node-context__refresh uvp-page-action-btn uvp-refresh-btn"
       :loading="loading"
       :disabled="disabled"
       aria-label="刷新媒体节点"

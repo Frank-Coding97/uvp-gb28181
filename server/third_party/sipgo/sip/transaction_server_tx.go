@@ -21,9 +21,10 @@ type ServerTx struct {
 	timer_1xx    *time.Timer
 	timer_l      *time.Timer
 	reliable     bool
+	requestLease RequestLease
 }
 
-func NewServerTx(key string, origin *Request, conn Connection, logger *slog.Logger) *ServerTx {
+func NewServerTx(key string, origin *Request, conn Connection, logger *slog.Logger, work ...*lifecycleGate) *ServerTx {
 	tx := new(ServerTx)
 	tx.key = key
 	tx.conn = conn
@@ -33,6 +34,9 @@ func NewServerTx(key string, origin *Request, conn Connection, logger *slog.Logg
 	// tx.cancels = make(chan *Request)
 	tx.done = make(chan struct{})
 	tx.log = logger
+	if len(work) > 0 {
+		tx.work = work[0]
+	}
 	tx.origin = origin // NOTE: user may do some changes on this request which creates RACE
 	tx.reliable = IsReliable(origin.Transport())
 	return tx
@@ -52,7 +56,7 @@ func (tx *ServerTx) Init() error {
 	// RFC 3261 - 17.2.1
 	if tx.Origin().IsInvite() {
 		tx.mu.Lock()
-		tx.timer_1xx = time.AfterFunc(Timer_1xx, func() {
+		tx.timer_1xx = tx.afterFunc(Timer_1xx, func() {
 			trying := NewResponseFromRequest(
 				tx.Origin(),
 				100,
@@ -72,6 +76,22 @@ func (tx *ServerTx) Init() error {
 
 func (tx *ServerTx) Connection() Connection {
 	return tx.conn
+}
+
+func (tx *ServerTx) setRequestLease(lease RequestLease) {
+	tx.mu.Lock()
+	tx.requestLease = lease
+	tx.mu.Unlock()
+}
+
+// RequestLease returns the admission lease reserved for this transaction, if
+// any. The lease is intentionally retained after Release so independent
+// cleanup owners can safely call Release through its idempotent contract.
+func (tx *ServerTx) RequestLease() RequestLease {
+	tx.mu.Lock()
+	lease := tx.requestLease
+	tx.mu.Unlock()
+	return lease
 }
 
 // Receive is endpoint for handling received server requests.
@@ -148,7 +168,7 @@ func (tx *ServerTx) ackSendAsync(r *Request) {
 	}
 
 	// Go routines should be cheap and it will prevent blocking
-	go tx.ackSend(r)
+	tx.goTracked(func() { tx.ackSend(r) })
 }
 
 func (tx *ServerTx) Terminate() {

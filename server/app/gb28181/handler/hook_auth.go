@@ -12,7 +12,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 )
 
 type HookAuthNodeResolver interface {
@@ -105,19 +105,19 @@ func hookPayloadNodeMatches(c *gin.Context, event playauth.HookEvent, payloadNod
 	if !authenticated || payloadNodeID == "" || identity.MediaServerUUID == payloadNodeID {
 		return true
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Warn("ZLM Hook 载荷节点不匹配",
-			zap.String("event", string(event)),
-			zap.String("node", identity.MediaServerUUID),
-			zap.String("payloadNode", payloadNodeID))
-	}
+	hookLog(c).Warn("ZLM Hook 载荷节点不匹配",
+		zap.String("event", "gb28181.hook.auth.node_mismatch"),
+		zap.String("hook_event", string(event)),
+		zap.String("node", identity.MediaServerUUID),
+		zap.String("payloadNode", payloadNodeID))
 	return false
 }
 
 func rejectHook(c *gin.Context, event playauth.HookEvent, mode HookRejectMode, reason string, authenticator *HookAuthenticator) {
-	if shouldLogHookRejection(authenticator) && app.ZapLog != nil {
-		app.ZapLog.Warn("ZLM Hook 认证已拒绝",
-			zap.String("event", string(event)),
+	if shouldLogHookRejection(authenticator) {
+		hookLog(c).Warn("ZLM Hook 认证已拒绝",
+			zap.String("event", "gb28181.hook.auth.rejected"),
+			zap.String("hook_event", string(event)),
 			zap.String("node", safeHookNodeQuery(c)),
 			zap.String("sourceIp", hookSourceIP(c.Request.RemoteAddr)),
 			zap.String("reason", reason))
@@ -125,10 +125,13 @@ func rejectHook(c *gin.Context, event playauth.HookEvent, mode HookRejectMode, r
 	c.Abort()
 	switch mode {
 	case HookRejectAdmission:
+		response.SetBusinessResult(c, -1, false)
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "hook authorization denied"})
 	case HookRejectNoneReader:
+		response.SetBusinessResult(c, 0, true)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "close": false})
 	default:
+		response.SetBusinessResult(c, 0, true)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
 	}
 }

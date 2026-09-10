@@ -24,6 +24,12 @@ type TransportTCP struct {
 
 	pool *connectionPool
 
+	readers    lifecycleGate
+	closeOnce  sync.Once
+	closeErr   error
+	listenerMu sync.Mutex
+	listener   net.Listener
+
 	DialerCreate func(laddr net.Addr) net.Dialer
 
 	onConnClose func(conn Connection)
@@ -56,12 +62,46 @@ func (t *TransportTCP) Network() string {
 }
 
 func (t *TransportTCP) Close() error {
-	// return t.connections.Done()
-	return t.pool.Clear()
+	return t.CloseContext(context.Background())
+}
+
+func (t *TransportTCP) CloseContext(ctx context.Context) error {
+	t.closeOnce.Do(func() {
+		t.readers.close()
+		if t.pool != nil {
+			t.closeErr = t.pool.Clear()
+		}
+		t.listenerMu.Lock()
+		listener := t.listener
+		t.listenerMu.Unlock()
+		if listener != nil {
+			t.closeErr = errors.Join(t.closeErr, listener.Close())
+		}
+	})
+	return errors.Join(t.closeErr, t.readers.wait(ctx))
 }
 
 // Serve is direct way to provide conn on which this worker will listen
 func (t *TransportTCP) Serve(l net.Listener, handler MessageHandler) error {
+	t.listenerMu.Lock()
+	t.listener = l
+	t.listenerMu.Unlock()
+	if t.readers.isClosed() {
+		_ = l.Close()
+		return errTransportClosed
+	}
+	if !t.readers.enter() {
+		_ = l.Close()
+		return errTransportClosed
+	}
+	defer t.readers.leave()
+	defer func() {
+		t.listenerMu.Lock()
+		if t.listener == l {
+			t.listener = nil
+		}
+		t.listenerMu.Unlock()
+	}()
 	t.log.Debug("begin listening on", "network", t.Network(), "laddr", l.Addr().String())
 	for {
 		conn, err := l.Accept()
@@ -69,7 +109,9 @@ func (t *TransportTCP) Serve(l net.Listener, handler MessageHandler) error {
 			t.log.Debug("Fail to accept conenction", "error", err)
 			return err
 		}
-		t.initConnection(conn, conn.RemoteAddr().String(), handler)
+		if t.initConnection(conn, conn.RemoteAddr().String(), handler) == nil {
+			return errTransportClosed
+		}
 	}
 }
 
@@ -79,6 +121,7 @@ func (t *TransportTCP) GetConnection(addr string) Connection {
 }
 
 func (t *TransportTCP) CreateConnection(ctx context.Context, laddr Addr, raddr Addr, handler MessageHandler) (Connection, error) {
+	isNew := false
 	// We are letting transport layer to resolve our address
 	// raddr, err := net.ResolveTCPAddr("tcp", addr)
 	// if err != nil {
@@ -124,8 +167,7 @@ func (t *TransportTCP) CreateConnection(ctx context.Context, laddr Addr, raddr A
 			transport:     t.Network(),
 			writeObserver: t.writeObserver,
 		}
-
-		go t.readConnection(c, c.LocalAddr().String(), c.RemoteAddr().String(), handler)
+		isNew = true
 		return c, nil
 	})
 	if err != nil {
@@ -133,6 +175,12 @@ func (t *TransportTCP) CreateConnection(ctx context.Context, laddr Addr, raddr A
 	}
 
 	c := conn.(*TCPConnection)
+	if isNew && !t.startReadConnection(c, c.LocalAddr().String(), c.RemoteAddr().String(), handler) {
+		t.pool.Delete(raddr.String())
+		t.pool.Delete(c.LocalAddr().String())
+		_ = c.Close()
+		return nil, errTransportClosed
+	}
 	return c, nil
 }
 
@@ -149,8 +197,28 @@ func (t *TransportTCP) initConnection(conn net.Conn, raddr string, handler Messa
 	}
 	t.pool.Add(laddr, c)
 	t.pool.Add(raddr, c)
-	go t.readConnection(c, laddr, raddr, handler)
+	if !t.readers.enter() {
+		t.pool.Delete(laddr)
+		t.pool.Delete(raddr)
+		_ = c.Close()
+		return nil
+	}
+	go func() {
+		defer t.readers.leave()
+		t.readConnection(c, laddr, raddr, handler)
+	}()
 	return c
+}
+
+func (t *TransportTCP) startReadConnection(conn *TCPConnection, laddr string, raddr string, handler MessageHandler) bool {
+	if !t.readers.enter() {
+		return false
+	}
+	go func() {
+		defer t.readers.leave()
+		t.readConnection(conn, laddr, raddr, handler)
+	}()
+	return true
 }
 
 // This should performe better to avoid any interface allocation

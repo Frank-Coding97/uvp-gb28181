@@ -209,8 +209,8 @@ function changePageSize(next: number) { pageSize.value = next; page.value = 1; i
   <section class="ingress-panel" aria-label="FFmpeg 源管理">
     <header class="panel-toolbar">
       <div class="toolbar-actions">
-        <a-button class="uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
-        <a-button type="primary" :disabled="!props.active || !createDecision.allowed || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建源</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
+        <a-button class="uvp-page-action-btn uvp-create-btn" type="primary" :disabled="!props.active || !createDecision.allowed || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建源</a-button>
       </div>
     </header>
     <div v-if="scopeBlocked" class="scope-warning" role="status"><strong>全部节点范围</strong><span>FFmpeg 源列表和写操作需要先选择一个具体节点。</span></div>

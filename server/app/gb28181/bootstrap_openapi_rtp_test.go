@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -82,7 +83,11 @@ func TestSIPRootRecoversRTPWithSharedStartupTrust(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	app.GormDbMysql = db
 	authority := authoritytest.Register(t, db, "")
-	require.NoError(t, db.AutoMigrate(&playauth.DeviceOperationIntent{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
+	require.NoError(t, db.AutoMigrate(
+		&playauth.DeviceOperationIntent{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}, &gbmodels.GbDeviceFirmwareUpgrade{},
+		&cascademodel.GbCascadePlatform{}, &cascademodel.GbCascadeDeviceProjection{}, &cascademodel.GbCascadeChannelProjection{}, &cascademodel.GbCascadeMediaSession{},
+		&gbmodels.GbMobilePositionHistory{},
+	))
 	for _, sql := range []string{
 		"ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT NULL",
 		"ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT NULL",

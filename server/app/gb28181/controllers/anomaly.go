@@ -53,7 +53,7 @@ func (ac *AnomalyController) List(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c))
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c))
 	switch c.DefaultQuery("resolved", "0") {
 	case "0":
 		q = q.Where("resolved = ?", false)
@@ -76,7 +76,7 @@ func (ac *AnomalyController) List(c *gin.Context) {
 	vos := make([]anomalyVO, 0, len(list))
 	for _, r := range list {
 		var n gbmodels.GbCatalogNode
-		_ = db.WithContext(c).
+		_ = db.WithContext(c.Request.Context()).
 			Scopes(ownerDeptScope(c)).
 			Select("id, name, path").
 			Where("id = ?", r.CatalogNodeID).
@@ -168,7 +168,7 @@ func (ac *AnomalyController) BatchResolve(c *gin.Context) {
 
 // applyResolve 实际执行 resolve(单条,事务内)
 func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, id uint, body resolveAction) error {
-	return db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	return db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var rec gbmodels.GbAnomalyRecord
 		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&rec)
 		if res.Error != nil {

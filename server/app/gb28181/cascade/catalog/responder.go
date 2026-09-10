@@ -54,6 +54,11 @@ func ParseCatalogQuery(profile protocol.Profile, body []byte) (manscdp.CatalogQu
 // encoded response batches. Every response uses the request SN and full item
 // count, as required for a multi-response Catalog result.
 func PlanCatalogResponses(profile protocol.Profile, targetID string, snapshot Snapshot, batchSize int, body []byte) ([]CatalogResponse, error) {
+	return PlanCatalogResponsesWithinLimit(profile, targetID, snapshot, batchSize, body, nil)
+}
+
+// PlanCatalogResponsesWithinLimit preserves SN and total while respecting encoded transport size.
+func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, snapshot Snapshot, batchSize int, body []byte, fits func([]byte) bool) ([]CatalogResponse, error) {
 	query, err := ParseCatalogQuery(profile, body)
 	if err != nil {
 		return nil, err
@@ -75,7 +80,7 @@ func PlanCatalogResponses(profile protocol.Profile, targetID string, snapshot Sn
 	}
 
 	responses := make([]CatalogResponse, 0, (total+batchSize-1)/batchSize)
-	for start := 0; start < total; start += batchSize {
+	for start := 0; start < total; {
 		end := start + batchSize
 		if end > total {
 			end = total
@@ -84,7 +89,18 @@ func PlanCatalogResponses(profile protocol.Profile, targetID string, snapshot Sn
 		if err != nil {
 			return nil, err
 		}
+		for fits != nil && !fits(response.Body) {
+			if end-start == 1 {
+				return nil, fmt.Errorf("catalog item exceeds UDP packet limit; configure TCP transport")
+			}
+			end = start + (end-start)/2
+			response, err = marshalCatalogResponse(profile, query, snapshot.Items[start:end], total)
+			if err != nil {
+				return nil, err
+			}
+		}
 		responses = append(responses, response)
+		start = end
 	}
 	return responses, nil
 }

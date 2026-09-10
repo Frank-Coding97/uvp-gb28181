@@ -1,9 +1,5 @@
 package sip
 
-import (
-	"time"
-)
-
 // TODO v2
 // Originally forked from https://github.com/ghettovoice/gosip by @ghetovoice
 // Better design could by passing some context through fsm state
@@ -185,7 +181,7 @@ func (tx *ServerTx) actRespondComplete() fsmInput {
 		tx.mu.Lock()
 		if tx.timer_g == nil {
 
-			tx.timer_g = time.AfterFunc(tx.timer_g_time, func() {
+			tx.timer_g = tx.afterFunc(tx.timer_g_time, func() {
 				tx.spinFsm(server_input_timer_g)
 			})
 		} else {
@@ -201,7 +197,7 @@ func (tx *ServerTx) actRespondComplete() fsmInput {
 
 	tx.mu.Lock()
 	if tx.timer_h == nil {
-		tx.timer_h = time.AfterFunc(Timer_H, func() {
+		tx.timer_h = tx.afterFunc(Timer_H, func() {
 			tx.spinFsm(server_input_timer_h)
 		})
 	}
@@ -216,7 +212,7 @@ func (tx *ServerTx) actRespondAccept() fsmInput {
 	}
 
 	tx.mu.Lock()
-	tx.timer_l = time.AfterFunc(Timer_L, func() {
+	tx.timer_l = tx.afterFunc(Timer_L, func() {
 		tx.spinFsm(server_input_timer_l)
 	})
 	tx.mu.Unlock()
@@ -240,7 +236,7 @@ func (tx *ServerTx) actFinal() fsmInput {
 	//    Timer J to fire in 64*T1 seconds for unreliable transports, and zero
 	//    seconds for reliable transports.
 	tx.mu.Lock()
-	tx.timer_j = time.AfterFunc(tx.timer_j_time, func() {
+	tx.timer_j = tx.afterFunc(tx.timer_j_time, func() {
 		tx.spinFsm(server_input_timer_j)
 	})
 	tx.mu.Unlock()
@@ -283,7 +279,7 @@ func (tx *ServerTx) actConfirm() fsmInput {
 	}
 
 	// If transport is reliable this will be 0 and fire imediately
-	tx.timer_i = time.AfterFunc(tx.timer_i_time, func() {
+	tx.timer_i = tx.afterFunc(tx.timer_i_time, func() {
 		tx.spinFsm(server_input_timer_i)
 	})
 

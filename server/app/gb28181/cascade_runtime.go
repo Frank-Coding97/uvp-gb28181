@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/emiago/sipgo"
+	sipwire "github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
@@ -21,14 +23,17 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
 
 const (
-	cascadeCredentialKeyEnv  = "UVP_GB28181_CASCADE_KEY"
-	cascadeCredentialPurpose = "upstream-password"
-	cascadeCredentialVersion = "v1"
+	cascadeCredentialKeyEnv            = "UVP_GB28181_CASCADE_KEY"
+	cascadeCredentialPurpose           = "upstream-password"
+	cascadeCredentialVersion           = "v1"
+	cascadeCredentialKeyWarningMessage = "国标级联凭据密钥不可用,配置写入受限,已有加密凭据平台运行受限"
+	cascadeCredentialKeyWarningEvent   = "cascade.credential_key_unavailable"
 )
 
 type cascadeRuntimeLifecycle interface {
@@ -230,18 +235,36 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 		return
 	}
 	store := repository.NewGormRepository(db)
+	if runtime != nil {
+		runtime = cascadeVideoManagementRuntime{runtime}
+	}
 	gbroutes.SetCascadeManagementService(cascadeservice.NewManagementService(store, cipher, runtime, nil), db)
 }
 
 func loadCascadeCredentialCipher() (*securestore.Cipher, error) {
-	cipher, err := securestore.LoadCipherFromEnv(cascadeCredentialKeyEnv, cascadeCredentialVersion)
+	cipher, err := securestore.LoadOrCreateCipher(cascadeCredentialKeyEnv, filepath.Join(app.BasePath, "data", "secrets", "cascade.key"), cascadeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
 	return cipher, nil
 }
 
-func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
+func cascadeCredentialWarningNeeded(err error, alreadyReported bool) bool {
+	return err != nil && !alreadyReported
+}
+
+func warnCascadeCredentialKeyUnavailable() {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn(cascadeCredentialKeyWarningMessage,
+		zap.String("event", cascadeCredentialKeyWarningEvent),
+		zap.String("env", cascadeCredentialKeyEnv),
+		zap.String("config_write", "restricted"),
+		zap.String("encrypted_platform_runtime", "restricted"))
+}
+
+func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentialWarningReported bool) error {
 	provider, ok := server.(cascadeClientProvider)
 	if !ok {
 		return fmt.Errorf("shared SIP server does not expose a cascade client")
@@ -258,9 +281,8 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 	if cipherErr != nil && !errors.Is(cipherErr, securestore.ErrKeyUnavailable) {
 		return cipherErr
 	}
-	if cipherErr != nil {
-		app.ZapLog.Warn("国标级联凭据密钥未配置,已有加密凭据的平台将保持配置错误",
-			zap.String("env", cascadeCredentialKeyEnv))
+	if cascadeCredentialWarningNeeded(cipherErr, credentialWarningReported) {
+		warnCascadeCredentialKeyUnavailable()
 	}
 	store := repository.NewGormRepository(app.DB())
 	manager := cascaderuntime.NewManager(cascaderuntime.Dependencies{
@@ -274,23 +296,57 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 		_ = manager.Shutdown(ctx)
 		return fmt.Errorf("load cascade platforms: %w", err)
 	}
+	if receiver, ok := server.(interface {
+		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	}); ok {
+		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
+	}
 	cascadeRuntimeManager = manager
 	setupCascadeManagement(manager, cipher)
 	return nil
 }
 
-func stopCascadeRuntime(ctx context.Context) {
+func stopCascadeRuntime(ctx context.Context) error {
+	stopCascadeVideoRuntime(ctx)
 	manager := cascadeRuntimeManager
 	cascadeRuntimeManager = nil
 	if manager == nil {
-		return
+		return nil
 	}
-	if err := manager.Shutdown(ctx); err != nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("国标级联运行时关闭失败,忽略继续关闭共享 SIP", zap.Error(err))
-		}
+	err := manager.Shutdown(ctx)
+	if err != nil {
+		app.Log(ctx).Named("cascade").Error("Cascade shutdown incomplete", zap.String("event", "cascade.shutdown_incomplete"), logging.Error(err))
 	}
+	return err
 }
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)
 var _ cascaderuntime.ResourceAcquirer = (*cascadeResourceAcquirer)(nil)
+
+// Management changes invalidate media dialogs whose upstream identity changed.
+type cascadeVideoManagementRuntime struct {
+	cascadeservice.ManagementRuntime
+}
+
+func (r cascadeVideoManagementRuntime) Reload(ctx context.Context) error {
+	if h := cascadeVideo.Load(); h != nil {
+		if err := h.revalidate(ctx); err != nil {
+			return err
+		}
+	}
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.Reload(ctx)
+}
+func (r cascadeVideoManagementRuntime) Reconnect(id uint64) {
+	if r.ManagementRuntime != nil {
+		r.ManagementRuntime.Reconnect(id)
+	}
+}
+func (r cascadeVideoManagementRuntime) PlatformIDs() []uint64 {
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.PlatformIDs()
+}

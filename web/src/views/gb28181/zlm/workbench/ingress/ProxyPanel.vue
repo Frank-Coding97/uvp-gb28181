@@ -251,8 +251,8 @@ function changePageSize(pageSize: number) {
   <section class="ingress-panel" aria-label="代理接入管理">
     <header class="panel-toolbar">
       <div class="toolbar-actions">
-        <a-button class="uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
-        <a-button type="primary" :disabled="!props.active || !canManage || !capabilityView.actionable || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建代理</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
+        <a-button class="uvp-page-action-btn uvp-create-btn" type="primary" :disabled="!props.active || !canManage || !capabilityView.actionable || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建代理</a-button>
       </div>
     </header>
 

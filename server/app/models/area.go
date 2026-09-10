@@ -1,12 +1,14 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
 	"sync"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -18,26 +20,38 @@ var (
 	once     sync.Once
 )
 
+func modelLogContext(contexts ...context.Context) context.Context {
+	if len(contexts) > 0 && contexts[0] != nil {
+		return contexts[0]
+	}
+	return context.Background()
+}
+
 func NewAreaModel() *AreaModel {
 	return &AreaModel{}
 }
 
-func GetAreaListInstance() AreaModelList {
+func GetAreaListInstance(contexts ...context.Context) AreaModelList {
+	ctx := modelLogContext(contexts...)
 
 	once.Do(func() {
 		file, err := os.Open(AREAPATH)
 		if err != nil {
-			app.ZapLog.Error("打开地区数据文件失败",
+			app.Log(ctx).Error("area data load failed",
+				zap.String("event", "models.area.load_failed"),
+				zap.String("phase", "open"),
 				zap.String("path", AREAPATH),
-				zap.Error(err))
+				logging.Error(err))
 			return
 		}
 		defer file.Close()
 
 		if err := json.NewDecoder(file).Decode(&instance); err != nil {
-			app.ZapLog.Error("解析地区数据文件失败",
+			app.Log(ctx).Error("area data load failed",
+				zap.String("event", "models.area.load_failed"),
+				zap.String("phase", "decode"),
 				zap.String("path", AREAPATH),
-				zap.Error(err))
+				logging.Error(err))
 		}
 	})
 	return instance

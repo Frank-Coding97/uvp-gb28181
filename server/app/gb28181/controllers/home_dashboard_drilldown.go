@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,17 +14,20 @@ import (
 
 func (controller *HomeDashboardController) SIPHistory(c *gin.Context) {
 	if len(c.QueryArray("range")) > 1 {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": "range 只能传一次"})
 		return
 	}
 	now := time.Now()
 	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	db := controller.db()
 	if db == nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": 1, "message": "仪表盘聚合服务未初始化"})
 		return
 	}
@@ -40,27 +44,32 @@ func (controller *HomeDashboardController) SIPHistory(c *gin.Context) {
 
 func (controller *HomeDashboardController) TrafficHistory(c *gin.Context) {
 	if len(c.QueryArray("range")) > 1 {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": "range 只能传一次"})
 		return
 	}
 	now := time.Now()
 	window, err := dashboard.ResolveTrafficHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	page, err := positiveQueryInt(c, "page", 1)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	pageSize, err := positiveQueryInt(c, "pageSize", 20)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	db := controller.db()
 	if db == nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": 1, "message": "仪表盘聚合服务未初始化"})
 		return
 	}
@@ -94,17 +103,20 @@ func (err *dashboardQueryError) Error() string { return err.name + " 必须为�
 
 func (controller *HomeDashboardController) PlayHistory(c *gin.Context) {
 	if len(c.QueryArray("range")) > 1 {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": "range 只能传一次"})
 		return
 	}
 	now := time.Now()
 	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	db := controller.db()
 	if db == nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": 1, "message": "仪表盘聚合服务未初始化"})
 		return
 	}

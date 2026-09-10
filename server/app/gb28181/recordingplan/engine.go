@@ -7,12 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan/schedule"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 type ChannelOperator interface {
@@ -56,6 +60,48 @@ type Engine struct {
 	runMu      sync.Mutex
 	deviceMu   sync.Mutex
 	devices    map[string]*deviceLimiter
+}
+
+func logRecordingAction(ctx context.Context, action, result string, err error, fields ...zap.Field) {
+	if action == "" {
+		return
+	}
+	logger := app.Log(ctx).Named("scheduler.recordingplan")
+	if execution, ok := schedulerhelper.ExecutionContextFromContext(ctx); ok {
+		logger = logging.WithIdentity(logger, zap.String("execution_id", execution.ExecutionID))
+		fields = append(fields,
+			zap.Int("attempt", execution.Attempt),
+			zap.String("executor", execution.ExecutorName),
+			zap.String("trigger", recordingActionTrigger(execution.ExecutorName)),
+		)
+		if execution.JobID != "" {
+			fields = append(fields, zap.String("job_id", execution.JobID))
+		}
+	}
+	fields = append([]zap.Field{
+		zap.String("event", "recording_plan.action"),
+		zap.String("action", action),
+		zap.String("result", result),
+	}, fields...)
+	if err != nil {
+		fields = append(fields, logging.Error(err))
+	}
+	if result == "success" {
+		logger.Info("recording plan action completed", fields...)
+		return
+	}
+	logger.Error("recording plan action failed", fields...)
+}
+
+func recordingActionTrigger(executorName string) string {
+	switch executorName {
+	case "recording-plan-heal-executor":
+		return "heal"
+	case "recording-plan-dispatch-executor":
+		return "dispatch"
+	default:
+		return "scheduler"
+	}
 }
 
 func (e *Engine) SetLiveCurrentProvider(provider LiveCurrentProvider) { e.current = provider }
@@ -236,6 +282,10 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	}
 	streamID, generation, nodeID := state.StreamID, state.Generation, state.NodeID
 	execution := models.GbRecordingPlanExecution{PlanID: state.PlanID, ChannelID: channel.ID, DeviceID: channel.DeviceID, TriggerSource: "scheduler", Attempt: state.AttemptCount + 1, StartedAt: now, CreatedAt: now}
+	actionFields := []zap.Field{zap.Uint("channel_id", channel.ID), zap.String("device_id", channel.DeviceID), zap.String("channel_code", channel.ChannelID)}
+	if state.PlanID != nil {
+		actionFields = append(actionFields, zap.Uint64("plan_id", *state.PlanID))
+	}
 	if decision.Action == ActionStart {
 		execution.Action, execution.Stage = ActionStart, FailureStreamStart
 		releaseDevice, acquireErr := e.acquireDevice(ctx, channel.DeviceID)
@@ -252,6 +302,7 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 			}
 			decision = DecideReconcile(ReconcileInput{Mode: channel.RecordingMode, PlanEnabled: input.PlanEnabled, ScheduleMatched: input.ScheduleMatched, DeviceOnline: input.DeviceOnline, FailureStage: failureStage, FailureMessage: message, Attempt: state.AttemptCount, Now: now})
 			execution.Result, execution.ReasonCode, execution.ReasonMessage = "failed", decision.ReasonCode, message
+			logRecordingAction(ctx, ActionStart, "failed", err, append(actionFields, zap.String("stage", failureStage))...)
 		} else {
 			decision.ActualState, decision.Attempt, decision.CloseGap = models.RecordingStateRecording, 0, true
 			decision.NextRetryAt = nil
@@ -264,6 +315,7 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 					nodeID = execution.NodeID
 				}
 			}
+			logRecordingAction(ctx, ActionStart, "success", nil, append(actionFields, zap.String("stage", execution.Stage))...)
 		}
 	} else if decision.Action == ActionStop {
 		execution.Action, execution.Stage = ActionStop, "record_stop"
@@ -279,9 +331,11 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 			decision.NextRetryAt = &retry
 			decision.Attempt = state.AttemptCount + 1
 			execution.Result, execution.ReasonCode, execution.ReasonMessage = "failed", decision.ReasonCode, err.Error()
+			logRecordingAction(ctx, ActionStop, "failed", err, append(actionFields, zap.String("stage", execution.Stage))...)
 		} else {
 			decision.ActualState, decision.Attempt = models.RecordingStateIdle, 0
 			execution.Result = "success"
+			logRecordingAction(ctx, ActionStop, "success", nil, append(actionFields, zap.String("stage", execution.Stage))...)
 		}
 	}
 	if decision.OpenGap {

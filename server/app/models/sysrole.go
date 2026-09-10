@@ -2,10 +2,10 @@ package models
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -38,7 +38,7 @@ func (r *SysRole) IsEmpty() bool {
 }
 
 func (r *SysRole) Find(c context.Context, funcs ...func(*gorm.DB) *gorm.DB) error {
-	return app.DB().WithContext(c).Scopes(funcs...).Find(r).Error
+	return app.DBContext(c).Scopes(funcs...).Find(r).Error
 }
 
 type SysRoleList []*SysRole
@@ -68,13 +68,13 @@ func (list SysRoleList) GetRoleIDs() []uint {
 }
 
 func (list *SysRoleList) Find(c context.Context, funcs ...func(*gorm.DB) *gorm.DB) (err error) {
-	err = app.DB().WithContext(c).Scopes(funcs...).Find(list).Error
+	err = app.DBContext(c).Scopes(funcs...).Find(list).Error
 	return
 }
 
 func (list SysRoleList) GetTotal(ctx context.Context, query ...func(*gorm.DB) *gorm.DB) (int64, error) {
 	var total int64
-	err := app.DB().WithContext(ctx).Model(&SysRole{}).Scopes(query...).Count(&total).Error
+	err := app.DBContext(ctx).Model(&SysRole{}).Scopes(query...).Count(&total).Error
 	if err != nil {
 		return 0, err
 	}
@@ -82,7 +82,8 @@ func (list SysRoleList) GetTotal(ctx context.Context, query ...func(*gorm.DB) *g
 }
 
 // BuildTree
-func (list SysRoleList) BuildTree() SysRoleList {
+func (list SysRoleList) BuildTree(contexts ...context.Context) SysRoleList {
+	ctx := modelLogContext(contexts...)
 	// 哈希表存储所有节点
 	nodeMap := make(map[uint]*SysRole)
 	// 存储顶层节点
@@ -94,7 +95,10 @@ func (list SysRoleList) BuildTree() SysRoleList {
 
 		// 循环引用检测
 		if node.ID == node.ParentID {
-			app.ZapLog.Error(fmt.Sprintf("角色循环引用: %d -> %d", node.ID, node.ParentID))
+			app.Log(ctx).Error("role tree cycle detected",
+				zap.String("event", "models.sysrole.tree_cycle"),
+				zap.Uint("node_id", node.ID),
+				zap.Uint("parent_id", node.ParentID))
 			continue
 		}
 
@@ -118,7 +122,10 @@ func (list SysRoleList) BuildTree() SysRoleList {
 				}
 				parent.Children = append(parent.Children, node)
 			} else {
-				app.ZapLog.Warn(fmt.Sprintf("独立角色节点 %d: parentId=%d 不存在", node.ID, parentID))
+				app.Log(ctx).Warn("role tree orphan detected",
+					zap.String("event", "models.sysrole.tree_orphan"),
+					zap.Uint("node_id", node.ID),
+					zap.Uint("parent_id", parentID))
 			}
 		}
 	}

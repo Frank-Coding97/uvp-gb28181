@@ -2,193 +2,204 @@ package gormhelper
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
-	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
+	gormLog "gorm.io/gorm/logger"
 	"strings"
 	"time"
-
-	"go.uber.org/zap"
-	gormLog "gorm.io/gorm/logger"
-	"gorm.io/gorm/utils"
+	"unicode"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
-// 自定义日志格式, 对 gorm 自带日志进行拦截重写
-func createCustomGormLog(sqlType string, options ...Options) gormLog.Interface {
-	var (
-		infoStr      = "%s\n[info] "
-		warnStr      = "%s\n[warn] "
-		errStr       = "%s\n[error] "
-		traceStr     = "%s\n[%.3fms] [rows:%v] %s"
-		traceWarnStr = "%s %s\n[%.3fms] [rows:%v] %s"
-		traceErrStr  = "%s %s\n[%.3fms] [rows:%v] %s"
-	)
-	/**
-	gorm 日志级别:
-	- Silent : 不打印任何日志
-	- Error  : 只打印错误日志
-	- Warn   : 打印警告和错误日志（推荐生产环境，避免空转查询刷屏）
-	- Info   : 打印所有日志，包括SQL语句（调试用）
-	**/
-	logLevelStr := strings.ToLower(app.ConfigYml.GetString("gormv2." + sqlType + ".loglevel"))
-	var logLevel gormLog.LogLevel
-	switch logLevelStr {
+func createCustomGormLog(sqlType string) gormLog.Interface {
+	level := gormLog.Warn
+	switch strings.ToLower(app.ConfigYml.GetString("gormv2." + sqlType + ".loglevel")) {
 	case "silent":
-		logLevel = gormLog.Silent
+		level = gormLog.Silent
 	case "error":
-		logLevel = gormLog.Error
+		level = gormLog.Error
 	case "info":
-		logLevel = gormLog.Info
-	default: // "warn" 或空值都走这里
-		logLevel = gormLog.Warn
+		level = gormLog.Info
 	}
-	logConf := gormLog.Config{
-		SlowThreshold: time.Second * app.ConfigYml.GetDuration("gormv2."+sqlType+".slowthreshold"),
-		LogLevel:      logLevel,
-		Colorful:      false,
-	}
-	log := &logger{
-		Writer:       logOutPut{},
-		Config:       logConf,
-		infoStr:      infoStr,
-		warnStr:      warnStr,
-		errStr:       errStr,
-		traceStr:     traceStr,
-		traceWarnStr: traceWarnStr,
-		traceErrStr:  traceErrStr,
-	}
-	for _, val := range options {
-		val.apply(log)
-	}
-	return log
-}
-
-type logOutPut struct{}
-
-func (l logOutPut) Printf(strFormat string, args ...interface{}) {
-	logRes := fmt.Sprintf(strFormat, args...)
-	logFlag := "gorm_v2 日志:"
-	detailFlag := "详情："
-	if strings.HasPrefix(strFormat, "[info]") || strings.HasPrefix(strFormat, "[traceStr]") {
-		app.ZapLog.Info(logFlag, zap.String(detailFlag, logRes))
-	} else if strings.HasPrefix(strFormat, "[error]") || strings.HasPrefix(strFormat, "[traceErr]") {
-		app.ZapLog.Error(logFlag, zap.String(detailFlag, logRes))
-	} else if strings.HasPrefix(strFormat, "[warn]") || strings.HasPrefix(strFormat, "[traceWarn]") {
-		app.ZapLog.Warn(logFlag, zap.String(detailFlag, logRes))
-	}
-
-}
-
-// 尝试从外部重写内部相关的格式化变量
-type Options interface {
-	apply(*logger)
-}
-type OptionFunc func(log *logger)
-
-func (f OptionFunc) apply(log *logger) {
-	f(log)
-}
-
-// 定义 6 个函数修改内部变量
-func SetInfoStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.infoStr = format
-	})
-}
-
-func SetWarnStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.warnStr = format
-	})
-}
-
-func SetTraceErrStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.errStr = format
-	})
-}
-
-func SetTraceStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.traceStr = format
-	})
-}
-func SetTraceWarnStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.traceWarnStr = format
-	})
-}
-
-func SetTracErrStrFormat(format string) Options {
-	return OptionFunc(func(log *logger) {
-		log.traceErrStr = format
-	})
+	threshold := app.ConfigYml.GetDuration("gormv2."+sqlType+".slowthreshold") * time.Second
+	return &logger{Config: gormLog.Config{LogLevel: level, SlowThreshold: threshold}, dialect: sqlType}
 }
 
 type logger struct {
-	gormLog.Writer
 	gormLog.Config
-	infoStr, warnStr, errStr            string
-	traceStr, traceErrStr, traceWarnStr string
+	dialect string
+	now     func() time.Time
 }
 
-// LogMode log mode
 func (l *logger) LogMode(level gormLog.LogLevel) gormLog.Interface {
-	newlogger := *l
-	newlogger.LogLevel = level
-	return &newlogger
+	clone := *l
+	clone.LogLevel = level
+	return &clone
 }
 
-// Info print info
-func (l logger) Info(_ context.Context, msg string, data ...interface{}) {
+// ParamsFilter runs before Dialector.Explain; binding values never reach it.
+func (l *logger) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
+	return sql, nil
+}
+func (l *logger) Info(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Info {
-		l.Printf(l.infoStr+msg, append([]interface{}{utils.FileWithLineNum()}, data...)...)
+		app.Log(ctx).Named("db").Info("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
-
-// Warn print warn messages
-func (l logger) Warn(_ context.Context, msg string, data ...interface{}) {
+func (l *logger) Warn(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Warn {
-		l.Printf(l.warnStr+msg, append([]interface{}{utils.FileWithLineNum()}, data...)...)
+		app.Log(ctx).Named("db").Warn("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
-
-// Error print error messages
-func (l logger) Error(_ context.Context, msg string, data ...interface{}) {
+func (l *logger) Error(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Error {
-		l.Printf(l.errStr+msg, append([]interface{}{utils.FileWithLineNum()}, data...)...)
+		app.Log(ctx).Named("db").Error("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
-
-// Trace print sql message
-func (l logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+func (l *logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	if l.LogLevel <= gormLog.Silent {
 		return
 	}
-
-	elapsed := time.Since(begin)
+	now := time.Now
+	if l.now != nil {
+		now = l.now
+	}
+	elapsed := now().Sub(begin)
+	level, event := zapcore.InfoLevel, "db.query"
 	switch {
 	case err != nil && l.LogLevel >= gormLog.Error && (!errors.Is(err, gormLog.ErrRecordNotFound) || !l.IgnoreRecordNotFoundError):
-		sql, rows := fc()
-		if rows == -1 {
-			l.Printf(l.traceErrStr, utils.FileWithLineNum(), err, float64(elapsed.Nanoseconds())/1e6, "-1", sql)
-		} else {
-			l.Printf(l.traceErrStr, utils.FileWithLineNum(), err, float64(elapsed.Nanoseconds())/1e6, rows, sql)
-		}
+		level, event = zapcore.ErrorLevel, "db.query_failed"
 	case elapsed > l.SlowThreshold && l.SlowThreshold != 0 && l.LogLevel >= gormLog.Warn:
-		sql, rows := fc()
-		slowLog := fmt.Sprintf("SLOW SQL >= %v", l.SlowThreshold)
-		if rows == -1 {
-			l.Printf(l.traceWarnStr, utils.FileWithLineNum(), slowLog, float64(elapsed.Nanoseconds())/1e6, "-1", sql)
-		} else {
-			l.Printf(l.traceWarnStr, utils.FileWithLineNum(), slowLog, float64(elapsed.Nanoseconds())/1e6, rows, sql)
-		}
+		level, event = zapcore.WarnLevel, "db.slow_query"
 	case l.LogLevel == gormLog.Info:
-		sql, rows := fc()
-		if rows == -1 {
-			l.Printf(l.traceStr, utils.FileWithLineNum(), float64(elapsed.Nanoseconds())/1e6, "-1", sql)
-		} else {
-			l.Printf(l.traceStr, utils.FileWithLineNum(), float64(elapsed.Nanoseconds())/1e6, rows, sql)
-		}
+	default:
+		return
 	}
+	entry := app.Log(ctx).Named("db").Check(level, "database statement completed")
+	if entry == nil {
+		return
+	}
+	sql, rows := fc()
+	operation, fingerprint := statementSummary(sql)
+	fields := []zap.Field{zap.String("event", event), zap.String("dialect", l.dialect), zap.String("operation", operation), zap.String("template_fingerprint", fingerprint), zap.Float64("duration_ms", float64(elapsed)/float64(time.Millisecond)), zap.Int64("rows", rows)}
+	if table, ok := ctx.Value(schemaTableKey{}).(string); ok {
+		fields = append(fields, zap.String("table", table))
+	}
+	if err != nil {
+		fields = append(fields, logging.Error(err))
+	}
+	entry.Write(fields...)
+}
+
+// Fingerprints describe only SQL structure: identifiers and literals are
+// opaque markers. This deliberately groups equivalent query shapes across
+// tables; a statically parsed GORM schema supplies the separate table field.
+func statementSummary(sql string) (string, string) {
+	if len(sql) > 65536 {
+		return "unknown", "oversized"
+	}
+	operation := "unknown"
+	var shape strings.Builder
+	shape.Grow(min(len(sql), 4096))
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		if c == '\'' || c == '"' || c == '`' || c == '[' {
+			end := c
+			if c == '[' {
+				end = ']'
+			}
+			i++
+			for i < len(sql) {
+				if sql[i] == '\\' {
+					i += min(2, len(sql)-i)
+					continue
+				}
+				if sql[i] == end {
+					i++
+					if i < len(sql) && sql[i] == end {
+						i++
+						continue
+					}
+					break
+				}
+				i++
+			}
+			shape.WriteString("? ")
+			continue
+		}
+		if i+1 < len(sql) && sql[i:i+2] == "--" {
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if i+1 < len(sql) && sql[i:i+2] == "/*" {
+			i += 2
+			for i+1 < len(sql) && sql[i:i+2] != "*/" {
+				i++
+			}
+			i = min(i+2, len(sql))
+			continue
+		}
+		if unicode.IsSpace(rune(c)) {
+			i++
+			continue
+		}
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' {
+			start := i
+			for i < len(sql) && (sql[i] >= 'a' && sql[i] <= 'z' || sql[i] >= 'A' && sql[i] <= 'Z' || sql[i] >= '0' && sql[i] <= '9' || sql[i] == '_') {
+				i++
+			}
+			word := strings.ToUpper(sql[start:i])
+			switch word {
+			case "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP":
+				if operation == "unknown" {
+					operation = strings.ToLower(word)
+				}
+				shape.WriteString(word)
+			case "FROM", "WHERE", "INTO", "SET", "VALUES", "JOIN", "ON", "AND", "OR", "IN", "LIMIT", "ORDER", "BY", "GROUP", "AS", "NULL", "IS", "NOT", "RETURNING":
+				shape.WriteString(word)
+			default:
+				shape.WriteByte('?')
+			}
+			shape.WriteByte(' ')
+			continue
+		}
+		if c >= '0' && c <= '9' || c == '$' || c == '?' || c == '@' {
+			i++
+			for i < len(sql) && (sql[i] >= '0' && sql[i] <= '9' || sql[i] == '.' || sql[i] >= 'a' && sql[i] <= 'z') {
+				i++
+			}
+			shape.WriteString("? ")
+			continue
+		}
+		switch c {
+		case '(', ')', ',', '=', '<', '>', '+', '-', '*', '/', ';':
+			shape.WriteByte(c)
+		default:
+			shape.WriteByte('?')
+		}
+		i++
+	}
+	sum := sha256.Sum256([]byte(shape.String()))
+	return operation, hex.EncodeToString(sum[:8])
+}
+
+type schemaTableKey struct{}
+
+func attachSchemaTable(db *gorm.DB) {
+	if db.Statement.Schema != nil && db.Statement.Schema.Table != "" {
+		db.Statement.Context = context.WithValue(db.Statement.Context, schemaTableKey{}, db.Statement.Schema.Table)
+	}
+}
+func installLogContext(db *gorm.DB) {
+	db.Callback().Query().Before("gorm:query").Register("logging:schema", attachSchemaTable)
+	db.Callback().Create().Before("gorm:create").Register("logging:schema", attachSchemaTable)
+	db.Callback().Update().Before("gorm:update").Register("logging:schema", attachSchemaTable)
+	db.Callback().Delete().Before("gorm:delete").Register("logging:schema", attachSchemaTable)
 }

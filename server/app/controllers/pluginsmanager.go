@@ -36,7 +36,7 @@ func NewPluginsManagerController() *PluginsManagerController {
 // @Router /pluginsmanager/exports [get]
 // @Security ApiKeyAuth
 func (pmc *PluginsManagerController) GetPluginsExport(c *gin.Context) {
-	pluginsExports, err := pmc.service.GetPluginsExportList()
+	pluginsExports, err := pmc.service.WithContext(c.Request.Context()).GetPluginsExportList()
 	if err != nil {
 		pmc.FailAndAbort(c, "读取plugins目录失败", err, 500)
 	}
@@ -79,7 +79,7 @@ func (pmc *PluginsManagerController) ExportPlugin(c *gin.Context) {
 
 	// 先写入到内存中，需要先设置响应头
 	buf := new(bytes.Buffer)
-	version, err := pmc.service.ExportPluginToWriter(folderName, buf, includeData)
+	version, err := pmc.service.WithContext(c.Request.Context()).ExportPluginToWriter(folderName, buf, includeData)
 	if err != nil {
 		pmc.FailAndAbort(c, err.Error(), err, 500)
 	}
@@ -141,7 +141,7 @@ func (pmc *PluginsManagerController) ImportPlugin(c *gin.Context) {
 	defer src.Close()
 
 	// 调用服务层导入插件
-	existingItems, err := pmc.service.ImportPluginFromReader(c, src, req)
+	existingItems, err := pmc.service.WithContext(c.Request.Context()).ImportPluginFromReader(c, src, req)
 	if err != nil {
 		pmc.FailAndAbort(c, err.Error(), err, 500)
 	}
@@ -177,7 +177,7 @@ func (pmc *PluginsManagerController) UninstallPlugin(c *gin.Context) {
 	}
 
 	// 调用服务层卸载插件
-	err := pmc.service.UninstallPlugin(c, folderName)
+	err := pmc.service.WithContext(c.Request.Context()).UninstallPlugin(c, folderName)
 	if err != nil {
 		pmc.FailAndAbort(c, err.Error(), err, 500)
 	}

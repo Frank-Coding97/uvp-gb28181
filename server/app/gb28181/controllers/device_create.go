@@ -54,7 +54,7 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 
 	// 检查是否已存在
 	var existing gbmodels.GbDevice
-	res := db.WithContext(c).Where("device_id = ?", body.DeviceID).Limit(1).Find(&existing)
+	res := db.WithContext(c.Request.Context()).Where("device_id = ?", body.DeviceID).Limit(1).Find(&existing)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -74,12 +74,12 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 
 	// 归属部门 = 创建人当前部门,必须存在且启用
 	var user basemodels.User
-	if err := db.WithContext(c).Select("dept_id").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+	if err := db.WithContext(c.Request.Context()).Select("dept_id").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
 		dc.FailAndAbort(c, "查询创建人部门失败", err)
 		return
 	}
 	var deptCount int64
-	if err := db.WithContext(c).Table("sys_department").
+	if err := db.WithContext(c.Request.Context()).Table("sys_department").
 		Where("id = ? AND (status = 1 OR status IS NULL) AND deleted_at IS NULL", user.DeptID).Count(&deptCount).Error; err != nil {
 		dc.FailAndAbort(c, "校验部门失败", err)
 		return
@@ -103,7 +103,7 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		SubscribeCapability: gbmodels.SubscribeUnknown,
 	}
 
-	if err := db.WithContext(c).Create(&device).Error; err != nil {
+	if err := db.WithContext(c.Request.Context()).Create(&device).Error; err != nil {
 		dc.FailAndAbort(c, "创建失败", err)
 		return
 	}

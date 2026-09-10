@@ -1,6 +1,6 @@
 <template>
-  <div class="snow-page alarm-management-page">
-    <div class="snow-inner uvp-page-shell-flat">
+  <div class="snow-fill alarm-management-page">
+    <div class="snow-fill-inner uvp-page-shell-flat alarm-management-shell">
       <a-alert v-if="!canView" class="alarm-state" type="warning">无权查看告警，请联系管理员分配告警查看权限。</a-alert>
 
       <template v-else>
@@ -456,22 +456,34 @@ onMounted(() => {
 .alarm-management-page {
   box-sizing: border-box;
   width: 100%;
+  height: 100%;
   max-width: 100vw;
   min-width: 0;
-  overflow-x: hidden;
+  min-height: 0;
+  overflow: hidden;
   contain: inline-size;
   color: var(--uvp-text-primary);
 }
 
-.alarm-management-page > .snow-inner {
+.alarm-management-shell {
   box-sizing: border-box;
+  display: flex;
   width: 100%;
+  height: 100%;
   max-width: 100%;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .alarm-state {
+  flex: 0 0 auto;
   margin-bottom: 12px;
+}
+
+.alarm-management-shell > :deep(.uvp-search-panel) {
+  flex: 0 0 auto;
 }
 
 .alarm-management-page :deep(.alarm-clear-all-btn.arco-btn-primary) {
@@ -528,6 +540,7 @@ onMounted(() => {
 
 .alarm-batch-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -551,11 +564,18 @@ onMounted(() => {
 }
 
 .alarm-table-wrap {
+  flex: 1;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  min-height: 0;
+  overflow: hidden;
   contain: inline-size;
   border-radius: 6px;
+}
+
+.alarm-table-wrap :deep(.uvp-data-table) {
+  height: 100%;
+  min-height: 0;
 }
 
 .alarm-entity-cell {

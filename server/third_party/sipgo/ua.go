@@ -1,7 +1,9 @@
 package sipgo
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 
 	"github.com/emiago/sipgo/sip"
@@ -103,11 +105,24 @@ func NewUA(options ...UserAgentOption) (*UserAgent, error) {
 }
 
 func (ua *UserAgent) Close() error {
-	// stop transaction layer
-	ua.tx.Close()
+	return ua.CloseContext(context.Background())
+}
 
-	// stop transport layer
-	return ua.tp.Close()
+// CloseContext closes transports before terminating transactions so a blocked
+// transaction write is released by its underlying connection. It then waits
+// for dispatch/FSM and transport reader work admitted by those layers.
+func (ua *UserAgent) CloseContext(ctx context.Context) error {
+	if ua == nil {
+		return nil
+	}
+	var err error
+	if ua.tp != nil {
+		err = errors.Join(err, ua.tp.CloseContext(ctx))
+	}
+	if ua.tx != nil {
+		err = errors.Join(err, ua.tx.CloseContext(ctx))
+	}
+	return err
 }
 
 func (ua *UserAgent) Name() string {

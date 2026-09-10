@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,29 @@ import (
 type TransactionRequestHandler func(req *Request, tx *ServerTx)
 type UnhandledResponseHandler func(req *Response)
 type ErrorHandler func(err error)
+
+// RequestLifecycle brackets the middleware and business handler portion of a
+// server request. TerminateGracefully remains outside that bracket so the
+// application can quiesce handlers without waiting for UDP Timer J.
+type RequestLifecycle interface {
+	BeginBusiness(*Request, ServerTransaction) bool
+	EndBusiness()
+}
+
+// RequestLease is reserved while a new server transaction is admitted. Its
+// Release method must be idempotent because both the transaction layer and the
+// outer server handler own a cleanup path.
+type RequestLease interface {
+	Release()
+}
+
+// RequestAdmission is an optional extension implemented by an application
+// lifecycle owner that needs to reserve business work under the transaction
+// store admission lock. Implementations return false without a lease when the
+// application is already quiescing.
+type RequestAdmission interface {
+	ReserveBusiness(*Request, ServerTransaction) (RequestLease, bool)
+}
 
 func defaultRequestHandler(r *Request, tx *ServerTx) {
 	DefaultLogger().Info("Unhandled sip request. OnRequest handler not added", "caller", "transactionLayer", "msg", r.Short())
@@ -31,7 +55,13 @@ type TransactionLayer struct {
 	clientTransactions *transactionStore[*ClientTx]
 	serverTransactions *transactionStore[*ServerTx]
 
-	terminateOnConnClose bool
+	terminateOnConnClose  bool
+	requestLifecycle      RequestLifecycle
+	dispatchWork          *lifecycleGate
+	fsmWork               *lifecycleGate
+	serverAdmissionClosed bool
+	clientAdmissionClosed bool
+	closeOnce             sync.Once
 
 	log *slog.Logger
 }
@@ -68,6 +98,8 @@ func NewTransactionLayer(tpl *TransportLayer, options ...TransactionLayerOption)
 		tpl:                tpl,
 		clientTransactions: newTransactionStore[*ClientTx](),
 		serverTransactions: newTransactionStore[*ServerTx](),
+		dispatchWork:       &lifecycleGate{},
+		fsmWork:            &lifecycleGate{},
 
 		reqHandler:    defaultRequestHandler,
 		unRespHandler: defaultUnhandledRespHandler,
@@ -102,6 +134,20 @@ func (txl *TransactionLayer) OnRequest(h TransactionRequestHandler) {
 	txl.reqHandler = h
 }
 
+func (txl *TransactionLayer) SetRequestLifecycle(lifecycle RequestLifecycle) {
+	txl.requestLifecycle = lifecycle
+}
+
+// QuiesceRequests closes only new server-transaction admission. Existing
+// transactions remain routable for retransmissions, ACK, CANCEL and responses.
+// The transaction-store mutex is deliberately held while flipping the bit so
+// a request cannot race the admission decision.
+func (txl *TransactionLayer) QuiesceRequests() {
+	txl.serverTransactions.lock()
+	txl.serverAdmissionClosed = true
+	txl.serverTransactions.unlock()
+}
+
 // OnConnectionClose is called when a reliable transport connection (TCP, TLS,
 // WS, WSS) is closed by the remote side or due to a read error.
 func (txl *TransactionLayer) OnConnectionClose(conn Connection) {
@@ -116,8 +162,8 @@ func (txl *TransactionLayer) terminateClientTransactions(conn Connection) {
 	txl.clientTransactions.mu.RLock()
 	for _, tx := range txl.clientTransactions.items {
 		if tx.conn == conn {
-			go tx.spinFsmWithError(client_input_transport_err,
-				fmt.Errorf("connection closed: %w", ErrTransactionTransport))
+			err := fmt.Errorf("connection closed: %w", ErrTransactionTransport)
+			tx.goTracked(func() { tx.spinFsmWithError(client_input_transport_err, err) })
 		}
 	}
 	txl.clientTransactions.mu.RUnlock()
@@ -127,8 +173,8 @@ func (txl *TransactionLayer) terminateServerTransactions(conn Connection) {
 	txl.serverTransactions.mu.RLock()
 	for _, tx := range txl.serverTransactions.items {
 		if tx.conn == conn {
-			go tx.spinFsmWithError(server_input_transport_err,
-				fmt.Errorf("connection closed: %w", ErrTransactionTransport))
+			err := fmt.Errorf("connection closed: %w", ErrTransactionTransport)
+			tx.goTracked(func() { tx.spinFsmWithError(server_input_transport_err, err) })
 		}
 	}
 	txl.serverTransactions.mu.RUnlock()
@@ -142,12 +188,12 @@ func (txl *TransactionLayer) handleMessage(msg Message) {
 
 	switch msg := msg.(type) {
 	case *Request:
-		go txl.handleRequestBackground(msg)
+		txl.dispatchWork.goRun(func() { txl.handleRequestBackground(msg) })
 	case *Response:
 		txl.captureClientResponse(msg)
-		go txl.handleResponseBackground(msg)
+		txl.dispatchWork.goRun(func() { txl.handleResponseBackground(msg) })
 	default:
-		txl.log.Error("unsupported message, skip it")
+		txl.dispatchWork.goRun(func() { txl.log.Error("unsupported message, skip it") })
 	}
 }
 
@@ -241,6 +287,13 @@ func (txl *TransactionLayer) serverTxRequest(req *Request, key string) error {
 		}
 		return nil
 	}
+	if txl.serverAdmissionClosed {
+		txl.serverTransactions.unlock()
+		// The request has already passed transport read filtering and SIP
+		// parsing. During quiesce, a new unmatched request is intentionally
+		// dropped without adding a protocol response or auth bypass.
+		return nil
+	}
 
 	tx, err := txl.serverTxCreate(req, key)
 	if err != nil {
@@ -248,7 +301,27 @@ func (txl *TransactionLayer) serverTxRequest(req *Request, key string) error {
 		return err
 	}
 
-	// put tx to store
+	var lease RequestLease
+	if admission, ok := txl.requestLifecycle.(RequestAdmission); ok {
+		var accepted bool
+		lease, accepted = admission.ReserveBusiness(req, tx)
+		if !accepted {
+			if lease != nil {
+				lease.Release()
+			}
+			txl.serverTransactions.unlock()
+			tx.Terminate()
+			return nil
+		}
+		if lease != nil {
+			defer lease.Release()
+		}
+		tx.setRequestLease(lease)
+	}
+
+	// Put the admitted transaction in the store while the same lock still
+	// protects the admission decision. A later QuiesceRequests call therefore
+	// cannot close the business gate between reservation and insertion.
 	txl.serverTransactions.items[key] = tx
 	tx.OnTerminate(txl.serverTxTerminate)
 	txl.serverTransactions.unlock()
@@ -268,7 +341,7 @@ func (txl *TransactionLayer) serverTxCreate(req *Request, key string) (*ServerTx
 		return nil, fmt.Errorf("server tx get connection failed: %w", err)
 	}
 
-	tx := NewServerTx(key, req, conn, txl.log)
+	tx := NewServerTx(key, req, conn, txl.log, txl.fsmWork)
 	return tx, tx.Init()
 }
 
@@ -339,8 +412,13 @@ func (txl *TransactionLayer) clientTxRequest(ctx context.Context, req *Request, 
 		conn.TryClose()
 		return nil, fmt.Errorf("client transaction %q already exists", key)
 	}
-	tx = NewClientTx(key, req, conn, txl.log)
+	tx = NewClientTx(key, req, conn, txl.log, txl.fsmWork)
 
+	if txl.clientAdmissionClosed {
+		txl.clientTransactions.unlock()
+		_, _ = conn.TryClose()
+		return nil, ErrTransactionLayerClosed
+	}
 	txl.clientTransactions.items[key] = tx
 	tx.OnTerminate(txl.clientTxTerminate)
 	txl.clientTransactions.unlock()
@@ -398,11 +476,31 @@ func (txl *TransactionLayer) getServerTx(key string) (*ServerTx, bool) {
 	// return tx.(*ServerTx), true
 }
 
+var ErrTransactionLayerClosed = errors.New("transaction layer is closed")
+
+// CloseContext terminates transactions first so a dispatch blocked in
+// TerminateGracefully is released before its completion gate is joined.
+func (txl *TransactionLayer) CloseContext(ctx context.Context) error {
+	txl.closeOnce.Do(func() {
+		txl.serverTransactions.lock()
+		txl.serverAdmissionClosed = true
+		txl.serverTransactions.unlock()
+		txl.clientTransactions.lock()
+		txl.clientAdmissionClosed = true
+		txl.clientTransactions.unlock()
+
+		txl.clientTransactions.terminateAll()
+		txl.serverTransactions.terminateAll()
+		txl.dispatchWork.close()
+		txl.fsmWork.close()
+		txl.log.Debug("transaction layer closed")
+	})
+	return errors.Join(txl.dispatchWork.wait(ctx), txl.fsmWork.wait(ctx))
+}
+
 func (txl *TransactionLayer) Close() {
 	txl.closeResponseObservers()
-	txl.clientTransactions.terminateAll()
-	txl.serverTransactions.terminateAll()
-	txl.log.Debug("transaction layer closed")
+	_ = txl.CloseContext(context.Background())
 }
 
 func (txl *TransactionLayer) Transport() *TransportLayer {

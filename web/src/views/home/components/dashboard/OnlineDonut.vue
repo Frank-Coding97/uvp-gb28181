@@ -33,7 +33,7 @@ const chartSpec = computed<MediaChartSpec>(() => ({
   roundCap: true,
   cornerRadius: 8,
   padding: 0,
-  progress: { style: { fill: "var(--uvp-brand-cyan)", fillOpacity: 1 } },
+  progress: { style: { fill: "var(--uvp-brand-cyan)", fillOpacity: ratio.value > 0 ? 1 : 0 } },
   track: { style: { fill: "var(--uvp-panel-border)", fillOpacity: 0.82 } },
   axes: [
     { orient: "angle", type: "linear", min: 0, max: 1, visible: false },

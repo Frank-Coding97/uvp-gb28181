@@ -71,22 +71,8 @@ func TestServerShutdownDoesNotForgetTraceFailure(t *testing.T) {
 	t.Cleanup(func() { _ = server.ua.Close() })
 	require.Error(t, server.Shutdown(context.Background()))
 	require.Error(t, server.Shutdown(context.Background()), "a once-local error cannot disappear on retry")
-	require.NoError(t, server.Shutdown(context.Background()))
-	require.NoError(t, server.Shutdown(context.Background()))
-	require.Equal(t, 3, runtime.calls)
-}
-
-func TestServerShutdownRetainsUncertainUACloseResult(t *testing.T) {
-	server, err := NewServer(testConfig())
-	require.NoError(t, err)
-	defer server.ua.Close()
-	// Model a completed first close with an uncertain result. The transport
-	// pool may already be empty; calling UA.Close again cannot prove success.
-	server.uaCloseDone = make(chan struct{})
-	server.uaCloseErr = errors.New("fixture first UA close unknown")
-	close(server.uaCloseDone)
-	require.ErrorIs(t, server.Shutdown(context.Background()), server.uaCloseErr)
-	require.ErrorIs(t, server.Shutdown(context.Background()), server.uaCloseErr)
+	require.Error(t, server.Shutdown(context.Background()))
+	require.Equal(t, 1, runtime.calls, "an uncertain first close must remain sticky")
 }
 
 func TestServerConcurrentStartAndShutdownCannotRestart(t *testing.T) {

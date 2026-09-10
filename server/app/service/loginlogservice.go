@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 const (
@@ -30,15 +31,18 @@ func RecordLoginAttempt(parent context.Context, recorder app.LoginLogRecorderInt
 	if recorder == nil {
 		return
 	}
+	logger := app.Log(parent).Named("audit")
 	ctx, cancel := context.WithTimeout(parent, loginLogWriteTimeout)
 	defer cancel()
 	defer func() {
-		if recovered := recover(); recovered != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("登录日志记录异常", zap.Any("panic", recovered))
+		if recovered := recover(); recovered != nil {
+			logger.Warn("登录日志记录异常",
+				zap.String("event", "auth.login_audit.panic"),
+				zap.String("panic_type", logging.TypeName(recovered)))
 		}
 	}()
 	if err := recorder.RecordLogin(ctx, event); err != nil {
-		recordLoginFailure(event, err)
+		recordLoginFailure(parent, event, err)
 	}
 }
 
@@ -92,11 +96,11 @@ func (s *LoginLogService) CleanupBefore(ctx context.Context, cutoff time.Time, b
 	}
 }
 
-func recordLoginFailure(event app.LoginLogEvent, err error) {
+func recordLoginFailure(ctx context.Context, event app.LoginLogEvent, err error) {
 	if err == nil {
 		return
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Warn("登录日志记录失败", zap.Error(err), zap.String("result", event.Result), zap.String("username", event.Username))
-	}
+	app.Log(ctx).Named("audit").Warn("登录日志记录失败",
+		zap.String("event", "auth.login_audit.persist_failed"), logging.Error(err),
+		zap.String("result", event.Result), zap.String("username", event.Username))
 }

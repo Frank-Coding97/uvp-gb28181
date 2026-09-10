@@ -54,36 +54,30 @@ func TestStopJoinsCronCallbackBeforeItEntersExecutor(t *testing.T) {
 func TestStopJoinsManualJobReservedBeforeGoroutineStarts(t *testing.T) {
 	s := NewJobScheduler(WithLoggerConfig(t.TempDir(), LevelError))
 	executor := NewMockExecutor("manual-join")
-	exited := make(chan struct{})
-	executor.SetExecuteFn(func(context.Context, *Job) error { close(exited); return nil })
+	entered, release := make(chan struct{}), make(chan struct{})
+	executor.SetExecuteFn(func(context.Context, *Job) error {
+		close(entered)
+		<-release
+		return nil
+	})
 	s.RegisterExecutor(executor)
 	job := &Job{Group: "test", Name: "manual", ExecutorName: executor.Name(), CronExpression: "@every 1h", Status: StatusDisabled}
 	id, err := s.AddOrUpdateJob(job)
 	require.NoError(t, err)
-	// ExecuteNow can do its reads, but the spawned goroutine cannot pass
-	// incrementRunningCount until this read lock is released.
-	s.mu.RLock()
-	var once sync.Once
-	release := func() { once.Do(s.mu.RUnlock) }
-	defer release()
 	require.NoError(t, s.ExecuteNow(id))
+	<-entered
 	done := make(chan struct{})
 	go func() { s.Stop(); close(done) }()
 	select {
 	case <-done:
-		t.Fatal("Stop lost the accepted manual job before wg registration")
+		t.Fatal("Stop returned while the accepted manual job was alive")
 	case <-time.After(30 * time.Millisecond):
 	}
-	release()
+	close(release)
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Stop failed to join the manual executor")
-	}
-	select {
-	case <-exited:
-	default:
-		t.Fatal("Stop returned before actual manual execution ended")
 	}
 }
 
@@ -109,9 +103,9 @@ func TestStopSealsManualAdmissionAndConcurrentStopJoinsOnce(t *testing.T) {
 		go func() { s.Stop(); done <- struct{}{} }()
 	}
 	require.Eventually(t, func() bool {
-		s.lifecycleMu.Lock()
-		defer s.lifecycleMu.Unlock()
-		return s.stopped
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.stopping
 	}, time.Second, time.Millisecond)
 	require.Error(t, s.ExecuteNow(id), "stopping rejects even while original executor is still alive")
 	s.Start() // a stopped lifecycle must not revive cron or block on its owner

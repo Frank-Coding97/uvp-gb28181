@@ -118,11 +118,11 @@ func (uc *UserController) List(c *gin.Context) {
 	}
 
 	userList := models.NewUserList()
-	total, err := userList.GetTotal(c, req.Handle())
+	total, err := userList.GetTotal(c.Request.Context(), req.Handle())
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
-	err = userList.Find(c, req.Paginate(), req.Handle(), func(d *gorm.DB) *gorm.DB {
+	err = userList.Find(c.Request.Context(), req.Paginate(), req.Handle(), func(d *gorm.DB) *gorm.DB {
 		return d.Omit("password").Preload("Roles").Preload("Department")
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	}
 	// 检查用户名是否已存在
 	user := models.NewUser()
-	err := user.GetUserByUsername(c, req.UserName)
+	err := user.GetUserByUsername(c.Request.Context(), req.UserName)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -194,7 +194,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -206,7 +206,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -222,7 +222,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	}
 
 	// 使用事务创建用户和角色关联
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 创建用户
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -259,7 +259,7 @@ func (uc *UserController) Add(c *gin.Context) {
 		uc.FailAndAbort(c, "Failed to create user", err)
 	}
 
-	if err = uc.CasbinService.AddRoleForUser(c, user.ID, req.Roles); err != nil {
+	if err = uc.CasbinService.AddRoleForUser(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "Failed to create user", err)
 	}
 
@@ -286,7 +286,7 @@ func (uc *UserController) Update(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, req.Id)
+	err := user.GetUserByID(c.Request.Context(), req.Id)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -296,7 +296,7 @@ func (uc *UserController) Update(c *gin.Context) {
 
 	// 检查用户名是否与其他用户冲突（排除当前用户）
 	existUser := models.NewUser()
-	err = existUser.GetUserByUsername(c, req.UserName)
+	err = existUser.GetUserByUsername(c.Request.Context(), req.UserName)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -307,7 +307,7 @@ func (uc *UserController) Update(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -319,7 +319,7 @@ func (uc *UserController) Update(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -329,7 +329,7 @@ func (uc *UserController) Update(c *gin.Context) {
 	}
 
 	// 使用事务更新用户、角色关联及停用后的会话撤销。
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 更新用户信息
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -385,7 +385,7 @@ func (uc *UserController) Update(c *gin.Context) {
 		uc.FailAndAbort(c, "更新用户失败", err)
 	}
 
-	if err = uc.CasbinService.EditUserRoles(c, user.ID, req.Roles); err != nil {
+	if err = uc.CasbinService.EditUserRoles(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "更新用户失败", err)
 	}
 
@@ -412,7 +412,7 @@ func (uc *UserController) Delete(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, req.Id)
+	err := user.GetUserByID(c.Request.Context(), req.Id)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -421,7 +421,7 @@ func (uc *UserController) Delete(c *gin.Context) {
 	}
 
 	// 使用事务删除用户和角色关联,并撤销该用户的全部会话。
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := uc.revokeUserSessionsTx(tx, user.ID, "user_deleted"); err != nil {
 			return err
 		}
@@ -441,7 +441,7 @@ func (uc *UserController) Delete(c *gin.Context) {
 		uc.FailAndAbort(c, "删除用户失败", err)
 	}
 
-	if err = uc.CasbinService.DeleteUserRoles(c, user.ID, nil); err != nil {
+	if err = uc.CasbinService.DeleteUserRoles(c.Request.Context(), user.ID, nil); err != nil {
 		uc.FailAndAbort(c, "删除用户失败", err)
 	}
 	uc.SuccessWithMessage(c, "删除成功", nil)
@@ -468,7 +468,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	currentUserID := common.GetCurrentUserID(c)
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, currentUserID)
+	err := user.GetUserByID(c.Request.Context(), currentUserID)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -479,7 +479,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -491,7 +491,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -517,7 +517,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 		user.Email = req.Email
 	}
 
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户信息失败", err)
 	}
 
@@ -565,7 +565,7 @@ func (uc *UserController) UploadAvatar(c *gin.Context) {
 
 	// 获取用户信息
 	user := models.NewUser()
-	err = user.GetUserByID(c, claims.UserID)
+	err = user.GetUserByID(c.Request.Context(), claims.UserID)
 	if err != nil {
 		uc.FailAndAbort(c, "获取用户信息失败", err)
 	}
@@ -575,7 +575,7 @@ func (uc *UserController) UploadAvatar(c *gin.Context) {
 
 	// 更新用户头像字段
 	user.Avatar = response.Url
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户头像失败", err)
 	}
 
@@ -608,7 +608,7 @@ func (uc *UserController) UpdateBasicInfo(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, currentUserID)
+	err := user.GetUserByID(c.Request.Context(), currentUserID)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -621,7 +621,7 @@ func (uc *UserController) UpdateBasicInfo(c *gin.Context) {
 	user.Sex = req.Sex
 	user.Description = req.Description
 
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户基本信息失败", err)
 	}
 

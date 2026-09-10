@@ -11,6 +11,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/imagehelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -92,7 +93,7 @@ func (ac *SysAffixController) Upload(c *gin.Context) {
 		// 生成缩略图
 		if err := imagehelper.GenerateThumbnail(response.Path, thumbnailPath, req.Width, req.Height); err != nil {
 			// 缩略图生成失败不影响原图上传，记录日志即可
-			app.ZapLog.Warn("生成缩略图失败", zap.Error(err))
+			app.Log(c.Request.Context()).Warn("生成缩略图失败", zap.String("event", "sysaffix.upload.warn"), logging.Error(err))
 		} else {
 			// 缩略图生成成功，保存缩略图信息
 			affix.ThumbnailName = thumbnailName
@@ -111,7 +112,7 @@ func (ac *SysAffixController) Upload(c *gin.Context) {
 	}
 
 	// 保存到数据库
-	if err := affix.Create(c); err != nil {
+	if err := affix.Create(c.Request.Context()); err != nil {
 		ac.FailAndAbort(c, "保存文件记录失败", err)
 	}
 
@@ -156,26 +157,26 @@ func (ac *SysAffixController) Delete(c *gin.Context) {
 
 	// 查找文件记录
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, req.ID); err != nil {
+	if err := affix.GetByID(c.Request.Context(), req.ID); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
 	// 删除物理文件
 	if err := app.UploadService.DeleteFile(affix.Path); err != nil {
 		// 报错后继续删除数据库记录
-		app.ZapLog.Error("删除物理文件失败", zap.Error(err))
+		app.Log(c.Request.Context()).Error("删除物理文件失败", zap.String("event", "sysaffix.delete.error"), logging.Error(err))
 	}
 
 	// 删除缩略图文件（如果存在）
 	if affix.ThumbnailPath != "" {
 		if err := app.UploadService.DeleteFile(affix.ThumbnailPath); err != nil {
 			// 缩略图删除失败不影响主流程，记录日志即可
-			app.ZapLog.Warn("删除缩略图文件失败", zap.Error(err))
+			app.Log(c.Request.Context()).Warn("删除缩略图文件失败", zap.String("event", "sysaffix.delete.warn"), logging.Error(err))
 		}
 	}
 
 	// 删除数据库记录
-	if err := affix.Delete(c); err != nil {
+	if err := affix.Delete(c.Request.Context()); err != nil {
 		ac.FailAndAbort(c, "删除文件记录失败", err)
 	}
 
@@ -203,13 +204,13 @@ func (ac *SysAffixController) UpdateName(c *gin.Context) {
 
 	// 查找文件记录
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, req.ID); err != nil {
+	if err := affix.GetByID(c.Request.Context(), req.ID); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
 	// 更新文件名
 	affix.Name = req.Name
-	if err := affix.Update(c); err != nil {
+	if err := affix.Update(c.Request.Context()); err != nil {
 		ac.FailAndAbort(c, "更新文件名失败", err)
 	}
 
@@ -248,13 +249,13 @@ func (ac *SysAffixController) List(c *gin.Context) {
 
 	// 获取总数
 	affixList := models.NewSysAffixList()
-	total, err := affixList.GetTotal(c, query, datascope.GetDataScope(c))
+	total, err := affixList.GetTotal(c.Request.Context(), query, datascope.GetDataScope(c))
 	if err != nil {
 		ac.FailAndAbort(c, "获取文件总数失败", err)
 	}
 
 	// 获取了分页数据及数据权限
-	err = affixList.Find(c, req.Paginate(), query, func(d *gorm.DB) *gorm.DB {
+	err = affixList.Find(c.Request.Context(), req.Paginate(), query, func(d *gorm.DB) *gorm.DB {
 		return d.Preload("User", func(d *gorm.DB) *gorm.DB {
 			return d.Preload("Department")
 		})
@@ -292,7 +293,7 @@ func (ac *SysAffixController) GetByID(c *gin.Context) {
 
 	// 查找文件记录
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, uint(id)); err != nil {
+	if err := affix.GetByID(c.Request.Context(), uint(id)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -329,7 +330,7 @@ func (ac *SysAffixController) Download(c *gin.Context) {
 
 	// 查找文件记录
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, uint(id)); err != nil {
+	if err := affix.GetByID(c.Request.Context(), uint(id)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -361,7 +362,7 @@ func (ac *SysAffixController) ChunkInit(c *gin.Context) {
 	}
 
 	// 调用 Service 处理初始化逻辑
-	result, err := ac.affixService.InitChunkUpload(c, &req)
+	result, err := ac.affixService.InitChunkUpload(c.Request.Context(), &req)
 	if err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
@@ -415,7 +416,7 @@ func (ac *SysAffixController) ChunkUpload(c *gin.Context) {
 	userID := ac.GetCurrentUserID(c)
 
 	// 调用 Service 保存分片
-	if err := ac.affixService.SaveChunk(c, &req, userID); err != nil {
+	if err := ac.affixService.SaveChunk(c.Request.Context(), &req, userID); err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
@@ -445,7 +446,7 @@ func (ac *SysAffixController) ChunkMerge(c *gin.Context) {
 	userID := ac.GetCurrentUserID(c)
 
 	// 调用 Service 合并分片
-	affix, err := ac.affixService.MergeChunks(c, &req, userID)
+	affix, err := ac.affixService.MergeChunks(c.Request.Context(), &req, userID)
 	if err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
@@ -478,7 +479,7 @@ func (ac *SysAffixController) ChunkCancel(c *gin.Context) {
 	}
 
 	// 调用 Service 取消上传
-	if err := ac.affixService.CancelChunkUpload(c, req.UploadId); err != nil {
+	if err := ac.affixService.CancelChunkUpload(c.Request.Context(), req.UploadId); err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 

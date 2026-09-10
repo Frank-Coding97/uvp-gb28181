@@ -323,13 +323,21 @@ func (s *DialogServerSession) WriteResponse(res *sip.Response) error {
 	// https://datatracker.ietf.org/doc/html/rfc3261#section-13.3.1.4
 
 	// We are following RFC 6026, which states that this is TU thing and not Transaction layer.
-	timer := time.NewTimer(sip.T1)
-	defer timer.Stop()
+	retransmitInterval := sip.T1
+	retransmitTimer := time.NewTimer(retransmitInterval)
+	defer retransmitTimer.Stop()
+
+	ackDeadline := time.Now().Add(64 * sip.T1)
+	deadlineTimer := time.NewTimer(time.Until(ackDeadline))
+	defer deadlineTimer.Stop()
 
 	state := sip.DialogStateEstablished
 	for state == sip.DialogStateEstablished {
 		select {
-		case <-timer.C:
+		case <-retransmitTimer.C:
+			if !time.Now().Before(ackDeadline) {
+				return fmt.Errorf("No ACK received")
+			}
 			if err := tx.Respond(res); err != nil {
 				return err
 			}
@@ -337,14 +345,20 @@ func (s *DialogServerSession) WriteResponse(res *sip.Response) error {
 			//    interval that starts at T1 seconds and doubles for each
 			//    retransmission until it reaches T2 seconds (T1 and T2 are defined in
 			//    Section 17).
-			timer.Reset(max(2*sip.T1, sip.T2))
+			retransmitInterval *= 2
+			if retransmitInterval > sip.T2 {
+				retransmitInterval = sip.T2
+			}
+			retransmitTimer.Reset(retransmitInterval)
 
-		case <-time.After(64 * sip.T1):
+		case <-deadlineTimer.C:
 			// If the server retransmits the 2xx response for 64*T1 seconds without
-			// receiving an ACK, the dialog is confirmed, but the session SHOULD be
-			// terminated.  This is accomplished with a BYE, as described in Section
-			// 15.
-			state = sip.DialogStateConfirmed
+			// receiving an ACK, the session should be terminated.
+			return fmt.Errorf("No ACK received")
+
+		case <-tx.Done():
+			return tx.Err()
+
 		case state = <-readStateCh:
 		}
 	}
