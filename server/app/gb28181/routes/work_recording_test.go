@@ -36,21 +36,16 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 	RegisterRoutes(engine.Group("/api"))
 
 	want := map[string]bool{
-		"POST /api/gb28181/work-recordings":                               false,
-		"POST /api/gb28181/work-recordings/:id/stop":                      false,
-		"GET /api/gb28181/work-recordings/status":                         false,
-		"GET /api/gb28181/work-recordings/:id":                            false,
-		"GET /api/gb28181/work-recordings":                                false,
-		"GET /api/gb28181/work-recordings/:id/form":                       false,
-		"PUT /api/gb28181/work-recordings/:id/form":                       false,
-		"POST /api/gb28181/work-recordings/batches":                       false,
-		"GET /api/gb28181/work-recordings/batches":                        false,
-		"GET /api/gb28181/work-recordings/batches/:batchId":               false,
-		"POST /api/gb28181/work-recordings/batches/:batchId/stop":         false,
-		"GET /api/gb28181/work-recordings/batches/:batchId/form":          false,
-		"PUT /api/gb28181/work-recordings/batches/:batchId/form":          false,
-		"GET /api/gb28181/work-recordings/batches/:batchId/download":      false,
-		"GET /api/gb28181/work-recordings/batches/:batchId/files/:fileId": false,
+		"POST /api/gb28181/work-orders":                  false,
+		"GET /api/gb28181/work-orders":                   false,
+		"GET /api/gb28181/work-orders/active":            false,
+		"GET /api/gb28181/work-orders/:id":               false,
+		"POST /api/gb28181/work-orders/:id/stop":         false,
+		"GET /api/gb28181/work-orders/:id/download":      false,
+		"GET /api/gb28181/work-orders/:id/files/:fileId": false,
+		"POST /api/gb28181/work-orders/batch-delete":     false,
+		"DELETE /api/gb28181/work-orders/:id":            false,
+
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path
@@ -62,25 +57,27 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 		require.True(t, found, route)
 	}
 
+	// 旧的两条并行链路（单通道作业 / 批次台账）必须彻底消失。
+	for _, route := range engine.Routes() {
+		require.NotContains(t, route.Path, "/work-recordings", "旧录像路由应已删除")
+	}
+
 	requests := []struct {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/gb28181/work-recordings"},
-		{http.MethodPost, "/api/gb28181/work-recordings/job/stop"},
-		{http.MethodGet, "/api/gb28181/work-recordings/status?channelIds=1"},
-		{http.MethodGet, "/api/gb28181/work-recordings/job"},
-		{http.MethodGet, "/api/gb28181/work-recordings"},
-		{http.MethodGet, "/api/gb28181/work-recordings/job/form"},
-		{http.MethodPut, "/api/gb28181/work-recordings/job/form"},
-		{http.MethodPost, "/api/gb28181/work-recordings/batches"},
-		{http.MethodGet, "/api/gb28181/work-recordings/batches"},
-		{http.MethodGet, "/api/gb28181/work-recordings/batches/job"},
-		{http.MethodPost, "/api/gb28181/work-recordings/batches/job/stop"},
-		{http.MethodGet, "/api/gb28181/work-recordings/batches/job/form"},
-		{http.MethodPut, "/api/gb28181/work-recordings/batches/job/form"},
-		{http.MethodGet, "/api/gb28181/work-recordings/batches/job/download"},
-		{http.MethodGet, "/api/gb28181/work-recordings/batches/job/files/1"},
+		{http.MethodPost, "/api/gb28181/work-orders"},
+		{http.MethodGet, "/api/gb28181/work-orders"},
+		// /active must reach its own handler rather than being swallowed by :id.
+		{http.MethodGet, "/api/gb28181/work-orders/active"},
+		{http.MethodGet, "/api/gb28181/work-orders/job"},
+		{http.MethodPost, "/api/gb28181/work-orders/job/stop"},
+		{http.MethodGet, "/api/gb28181/work-orders/job/download"},
+		{http.MethodGet, "/api/gb28181/work-orders/job/files/1"},
+		// batch-delete 是静态段，必须命中自己的处理器而不是被 :id 吞掉。
+		{http.MethodPost, "/api/gb28181/work-orders/batch-delete"},
+		{http.MethodDelete, "/api/gb28181/work-orders/job"},
+
 	}
 	for _, request := range requests {
 		response := httptest.NewRecorder()

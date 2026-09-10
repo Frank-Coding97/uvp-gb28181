@@ -1,28 +1,24 @@
 package workrecording
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"unicode/utf8"
-
-	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
 var (
 	ErrFormInvalid     = errors.New("作业表单参数不合法")
+	ErrFormRequired    = errors.New("作业表单缺少必填项")
 	ErrFormNotFound    = errors.New("作业不存在")
 	ErrFormForbidden   = errors.New("无权编辑作业表单")
 	ErrFormSubmitted   = errors.New("作业表单已提交，不能修改")
 	ErrFormNotEditable = errors.New("作业表单当前不可编辑")
 )
 
-// Form is the durable, optional work-recording form. Values remain strings
-// because the business has not yet fixed units or validation rules for them.
+// Form 是作业单表单。字段保持字符串，因为业务尚未固定单位与取值规则。
 type Form struct {
 	ProjectName           string   `json:"projectName"`
 	Major                 string   `json:"major"`
@@ -55,7 +51,12 @@ func (f Form) normalized() Form {
 	return f
 }
 
+// Validate 同时校验业务必填项与各字段的长度上限。
+// 「先填作业单再录制」是唯一创建路径，因此必填校验就在这里，不再区分草稿态。
 func (f Form) Validate() error {
+	if missing := f.missingRequiredFields(); len(missing) > 0 {
+		return fmt.Errorf("%w: %s", ErrFormRequired, strings.Join(missing, "、"))
+	}
 	short := []string{
 		f.ProjectName, f.Major, f.StationArea, f.Mileage, f.AnchorSectionNo,
 		f.StartAnchorPillarNo, f.EndAnchorPillarNo, f.WorkLeader,
@@ -81,133 +82,33 @@ func (f Form) Validate() error {
 	return nil
 }
 
-// FormRecord contains the form envelope returned by both GET and PUT.
-type FormRecord struct {
-	JobID         string `json:"jobId"`
-	ChannelID     uint   `json:"channelId"`
-	FormVersion   uint64 `json:"formVersion"`
-	FormState     string `json:"formState"`
-	SchemaVersion uint   `json:"schemaVersion"`
-	DeviceID      string `json:"deviceId"`
-	Editable      bool   `json:"editable"`
-	Form          Form   `json:"form"`
-	CreatedBy     uint   `json:"-"`
-}
-
-func GetForm(ctx context.Context, db *gorm.DB, jobID string) (FormRecord, error) {
-	job, err := findFormJob(ctx, db, jobID)
-	if err != nil {
-		return FormRecord{}, err
+// missingRequiredFields 是开始录制所需的业务最小集合。其余字段选填，现场按进度补。
+// 必须与前端 `web/src/views/gb28181/work-orders/orderState.ts` 的 workOrderRequiredFields 保持同步。
+func (f Form) missingRequiredFields() []string {
+	missing := make([]string, 0, 5)
+	if strings.TrimSpace(f.ProjectName) == "" {
+		missing = append(missing, "项目名称")
 	}
-	return formRecord(*job)
-}
-
-// SaveDraft stores one draft using formVersion as the compare-and-swap value.
-// Only form columns are updated; recording state, version, timestamps and
-// device identity are deliberately left untouched.
-func SaveDraft(ctx context.Context, db *gorm.DB, jobID string, actor uint, expectedVersion uint64, form Form) (FormRecord, error) {
-	if db == nil || actor == 0 || strings.TrimSpace(jobID) == "" {
-		return FormRecord{}, ErrFormInvalid
+	if strings.TrimSpace(f.StationArea) == "" {
+		missing = append(missing, "站区")
 	}
-	form = form.normalized()
-	if err := form.Validate(); err != nil {
-		return FormRecord{}, err
+	if strings.TrimSpace(f.AnchorSectionNo) == "" {
+		missing = append(missing, "锚段号")
 	}
-	encoded, err := json.Marshal(form)
-	if err != nil {
-		return FormRecord{}, fmt.Errorf("编码作业表单: %w", err)
+	if strings.TrimSpace(f.WorkLeader) == "" {
+		missing = append(missing, "作业负责人")
 	}
-
-	job, err := findFormJob(ctx, db, jobID)
-	if err != nil {
-		return FormRecord{}, err
-	}
-	if job.CreatedBy != actor {
-		return FormRecord{}, ErrFormForbidden
-	}
-	if job.FormState == FormSubmitted {
-		return FormRecord{}, ErrFormSubmitted
-	}
-	if job.FormState != FormDraft {
-		return FormRecord{}, ErrFormNotEditable
-	}
-	if job.FormVersion != expectedVersion {
-		return FormRecord{}, ErrVersionConflict
-	}
-
-	result := db.WithContext(ctx).
-		Model(&models.GbWorkRecording{}).
-		Where("id = ? AND created_by = ? AND form_version = ? AND form_state = ?", jobID, actor, expectedVersion, FormDraft).
-		UpdateColumns(map[string]any{
-			"form_json":    string(encoded),
-			"form_state":   FormDraft,
-			"form_version": expectedVersion + 1,
-		})
-	if result.Error != nil {
-		return FormRecord{}, result.Error
-	}
-	if result.RowsAffected != 1 {
-		return classifySaveConflict(ctx, db, jobID, actor, expectedVersion)
-	}
-	job.FormJSON = string(encoded)
-	job.FormState = FormDraft
-	job.FormVersion = expectedVersion + 1
-	return formRecord(*job)
-}
-
-func findFormJob(ctx context.Context, db *gorm.DB, jobID string) (*models.GbWorkRecording, error) {
-	if db == nil || strings.TrimSpace(jobID) == "" {
-		return nil, ErrFormNotFound
-	}
-	var job models.GbWorkRecording
-	result := db.WithContext(ctx).Where("id = ?", jobID).First(&job)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, ErrFormNotFound
+	named := false
+	for _, person := range f.WorkPersonnel {
+		if strings.TrimSpace(person) != "" {
+			named = true
+			break
 		}
-		return nil, result.Error
 	}
-	if result.RowsAffected == 0 {
-		return nil, ErrFormNotFound
+	if !named {
+		missing = append(missing, "作业人员")
 	}
-	return &job, nil
-}
-
-func classifySaveConflict(ctx context.Context, db *gorm.DB, jobID string, actor uint, expectedVersion uint64) (FormRecord, error) {
-	job, err := findFormJob(ctx, db, jobID)
-	if err != nil {
-		return FormRecord{}, err
-	}
-	if job.CreatedBy != actor {
-		return FormRecord{}, ErrFormForbidden
-	}
-	if job.FormState == FormSubmitted {
-		return FormRecord{}, ErrFormSubmitted
-	}
-	if job.FormState != FormDraft {
-		return FormRecord{}, ErrFormNotEditable
-	}
-	if job.FormVersion != expectedVersion {
-		return FormRecord{}, ErrVersionConflict
-	}
-	return FormRecord{}, ErrVersionConflict
-}
-
-func formRecord(job models.GbWorkRecording) (FormRecord, error) {
-	form, err := decodeStoredForm(job.FormJSON)
-	if err != nil {
-		return FormRecord{}, err
-	}
-	return FormRecord{
-		JobID:         job.ID,
-		ChannelID:     job.ChannelID,
-		FormVersion:   job.FormVersion,
-		FormState:     job.FormState,
-		SchemaVersion: job.SchemaVersion,
-		DeviceID:      job.DeviceID,
-		Form:          form,
-		CreatedBy:     job.CreatedBy,
-	}, nil
+	return missing
 }
 
 func decodeStoredForm(raw string) (Form, error) {

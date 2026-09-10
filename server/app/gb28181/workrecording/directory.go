@@ -60,3 +60,46 @@ func ownsWorkDirectory(root, ownerID string) bool {
 	normalized := cleanNodePath(root)
 	return absoluteNodePath(normalized) && strings.HasSuffix(normalized, "/work-recordings/"+ownerID) && !strings.ContainsRune(normalized, '\x00')
 }
+
+// AbsoluteNodePath reports whether value is an absolute path on a recording
+// node. Relative values are unusable for work recording: the node echoes them
+// back relative, and ResolvedWorkDirectory refuses anything that is not
+// absolute, so a relative root can never own a job directory.
+func AbsoluteNodePath(value string) bool {
+	return absoluteNodePath(cleanNodePath(value))
+}
+
+// DefaultRecordAppName is ZLM's built-in record app name. A node that never had
+// record.appName written down still uses this value, so it is the correct
+// assumption when the key is absent.
+const DefaultRecordAppName = "record"
+
+// RecordRootFromProbe recovers a node's record root from an uncustomized
+// getMP4RecordFile answer.
+//
+// A node resolves such a probe to <root>/<record.appName>/<app>/<stream>/, so the
+// root is that answer with the stream-specific tail removed. The tail is matched
+// exactly instead of trimmed by position: a response that does not end in the app
+// and stream we asked about tells us nothing about the root, and guessing here
+// would place every work directory somewhere the node never agreed to.
+func RecordRootFromProbe(probedRoot, appName, app, stream string) (string, error) {
+	app = strings.TrimSpace(app)
+	stream = strings.TrimSpace(stream)
+	if app == "" || stream == "" || strings.ContainsAny(app+stream, "/\\") {
+		return "", ErrInvalidRequest
+	}
+	appName = strings.TrimSpace(appName)
+	if appName == "" {
+		appName = DefaultRecordAppName
+	}
+	root := cleanNodePath(probedRoot)
+	suffix := "/" + appName + "/" + app + "/" + stream
+	if !strings.HasSuffix(root, suffix) {
+		return "", ErrAttributionUnknown
+	}
+	resolved := strings.TrimSuffix(root, suffix)
+	if resolved == "" || resolved == root || !absoluteNodePath(resolved) {
+		return "", ErrAttributionUnknown
+	}
+	return resolved, nil
+}

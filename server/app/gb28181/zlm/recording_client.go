@@ -237,6 +237,14 @@ func (c *Client) GetMP4RecordFilesInDirectory(ctx context.Context, vhost, appNam
 	return c.getMP4RecordFiles(ctx, vhost, appName, stream, period, directory)
 }
 
+// ProbeMP4RecordRoot asks the node where it records this stream when it is left
+// to decide. This is the only way to learn a node's record root: ZLM keeps its
+// default in code, so a node that never had record.filePath written into
+// config.ini does not report that key through getServerConfig at all.
+func (c *Client) ProbeMP4RecordRoot(ctx context.Context, vhost, appName, stream string) (*MP4RecordListing, error) {
+	return c.getMP4RecordFiles(ctx, vhost, appName, stream, "", "")
+}
+
 func (c *Client) getMP4RecordFiles(ctx context.Context, vhost, appName, stream, period, directory string) (*MP4RecordListing, error) {
 	var response struct {
 		baseResp

@@ -122,14 +122,14 @@ func assertWorkRecordingFormPermissionCounts(t *testing.T, db interface {
 }) {
 	t.Helper()
 	queries := map[string]int64{
-		"SELECT COUNT(*) FROM sys_api WHERE path LIKE '/api/gb28181/work-recordings%' AND deleted_at IS NULL":                                                                                                          7,
-		"SELECT COUNT(*) FROM sys_menu WHERE permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form') AND deleted_at IS NULL":                                        3,
-		"SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id WHERE rm.role_id=1 AND m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')": 3,
-		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')":                   13,
-		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop')":                   10,
+		"SELECT COUNT(*) FROM sys_api WHERE path LIKE '/api/gb28181/work-recordings%' AND deleted_at IS NULL":                                                                                                              7,
+		"SELECT COUNT(*) FROM sys_menu WHERE permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form') AND deleted_at IS NULL":                                            3,
+		"SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id WHERE rm.role_id=1 AND m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')":     3,
+		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')":                       13,
+		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop')":                                                     10,
 		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id JOIN sys_api a ON a.id=ma.api_id WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND a.method='PUT'": 0,
-		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id JOIN sys_api a ON a.id=ma.api_id WHERE m.permission='gb28181:work-recording:form' AND a.method='PUT'": 1,
-		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v0='role_1' AND v1 LIKE '/api/gb28181/work-recordings%'":                                                                                                           7,
+		"SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id JOIN sys_api a ON a.id=ma.api_id WHERE m.permission='gb28181:work-recording:form' AND a.method='PUT'":                                     1,
+		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v0='role_1' AND v1 LIKE '/api/gb28181/work-recordings%'":                                                                                                               7,
 		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v0='role_2'": 1,
 	}
 	for query, want := range queries {

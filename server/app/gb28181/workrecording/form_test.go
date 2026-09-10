@@ -1,20 +1,15 @@
 package workrecording
 
 import (
-	"context"
-	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 )
 
 func formDB(t *testing.T, path string) *gorm.DB {
@@ -39,101 +34,86 @@ func formJob(id string, channelID, actor uint, started, stopped time.Time) model
 	}
 }
 
-func TestFormValidateAcceptsChineseAndEnforcesRuneLimits(t *testing.T) {
-	valid := Form{
-		ProjectName:       strings.Repeat("界", 256),
-		WireLayingProcess: strings.Repeat("过程", 2000),
-		Remark:            strings.Repeat("备注", 2000),
-		WorkPersonnel:     make([]string, 50),
+// 业务最小必填集合，其余字段留空。
+func requiredForm() Form {
+	return Form{
+		ProjectName:     "沪宁线放线作业",
+		StationArea:     "南京南—江宁",
+		AnchorSectionNo: "A-12",
+		WorkLeader:      "张伟",
+		WorkPersonnel:   []string{"张伟"},
 	}
+}
+
+func TestFormValidateAcceptsChineseAndEnforcesRuneLimits(t *testing.T) {
+	valid := requiredForm()
+	valid.ProjectName = strings.Repeat("界", 256)
+	valid.WireLayingProcess = strings.Repeat("过程", 2000)
+	valid.Remark = strings.Repeat("备注", 2000)
+	valid.WorkPersonnel = make([]string, 50)
 	for i := range valid.WorkPersonnel {
 		valid.WorkPersonnel[i] = "张三"
 	}
 	require.NoError(t, valid.Validate())
 
-	tooLong := valid
-	tooLong.ProjectName = strings.Repeat("界", 257)
-	require.ErrorIs(t, tooLong.Validate(), ErrFormInvalid)
-	tooLong = valid
-	tooLong.WireLayingProcess = strings.Repeat("过", 4001)
-	require.ErrorIs(t, tooLong.Validate(), ErrFormInvalid)
-	tooLong = valid
-	tooLong.Remark = strings.Repeat("注", 4001)
-	require.ErrorIs(t, tooLong.Validate(), ErrFormInvalid)
-	tooLong = valid
-	tooLong.WorkPersonnel = append(tooLong.WorkPersonnel, "李四")
-	require.ErrorIs(t, tooLong.Validate(), ErrFormInvalid)
-	tooLong = valid
-	tooLong.WorkPersonnel[0] = strings.Repeat("人", 257)
-	require.ErrorIs(t, tooLong.Validate(), ErrFormInvalid)
+	for _, mutate := range []func(*Form){
+		func(f *Form) { f.ProjectName = strings.Repeat("界", 257) },
+		func(f *Form) { f.WireLayingProcess = strings.Repeat("过", 4001) },
+		func(f *Form) { f.Remark = strings.Repeat("注", 4001) },
+		func(f *Form) { f.WorkPersonnel = append(f.WorkPersonnel, "李四") },
+		func(f *Form) { f.WorkPersonnel = []string{strings.Repeat("人", 257)} },
+	} {
+		broken := valid
+		broken.WorkPersonnel = append([]string{}, valid.WorkPersonnel...)
+		mutate(&broken)
+		require.ErrorIs(t, broken.Validate(), ErrFormInvalid)
+	}
 }
 
-func TestFormSaveDraftSurvivesReopenAndPreservesRecordingFacts(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "work-form.db")
-	started := time.Date(2026, 9, 9, 10, 11, 12, 0, time.UTC)
-	stopped := started.Add(time.Hour)
-	job := formJob(uuid.NewString(), 8, 100, started, stopped)
-	db := formDB(t, path)
-	require.NoError(t, db.Create(&job).Error)
-	input := Form{ProjectName: "接触网中文项目", Major: "接触网", WorkPersonnel: []string{"张三", "李四"}, Remark: "草稿"}
-	saved, err := SaveDraft(context.Background(), db, job.ID, job.CreatedBy, 0, input)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, saved.FormVersion)
-	require.Equal(t, FormDraft, saved.FormState)
-	require.Equal(t, input.ProjectName, saved.Form.ProjectName)
-	require.Equal(t, input.WorkPersonnel, saved.Form.WorkPersonnel)
+// 「先填作业单再录制」是唯一创建路径，所以必填校验与长度校验都在 Validate 上。
+func TestFormValidateRequiresTheBusinessMinimum(t *testing.T) {
+	require.NoError(t, requiredForm().Validate())
 
-	var persisted models.GbWorkRecording
-	require.NoError(t, db.First(&persisted, "id = ?", job.ID).Error)
-	require.Equal(t, job.State, persisted.State)
-	require.Equal(t, job.Version, persisted.Version)
-	require.Equal(t, job.DeviceID, persisted.DeviceID)
-	require.Equal(t, job.StartedAt, persisted.StartedAt)
-	require.Equal(t, job.StoppedAt, persisted.StoppedAt)
+	// 空白不算填了
+	blank := requiredForm()
+	blank.ProjectName = "   "
+	require.ErrorIs(t, blank.Validate(), ErrFormRequired)
 
-	raw, err := db.DB()
-	require.NoError(t, err)
-	require.NoError(t, raw.Close())
-	reopened := formDB(t, path)
-	restored, err := GetForm(context.Background(), reopened, job.ID)
-	require.NoError(t, err)
-	require.Equal(t, input.ProjectName, restored.Form.ProjectName)
-	require.Equal(t, input.WorkPersonnel, restored.Form.WorkPersonnel)
-	require.EqualValues(t, 1, restored.FormVersion)
+	for _, drop := range []func(*Form){
+		func(f *Form) { f.ProjectName = "" },
+		func(f *Form) { f.StationArea = "" },
+		func(f *Form) { f.AnchorSectionNo = "" },
+		func(f *Form) { f.WorkLeader = "" },
+		func(f *Form) { f.WorkPersonnel = nil },
+		func(f *Form) { f.WorkPersonnel = []string{} },
+		func(f *Form) { f.WorkPersonnel = []string{"  "} },
+	} {
+		broken := requiredForm()
+		drop(&broken)
+		require.ErrorIs(t, broken.Validate(), ErrFormRequired)
+	}
 }
 
-func TestFormSaveDraftUsesCASAndRejectsSubmittedRows(t *testing.T) {
-	db := formDB(t, filepath.Join(t.TempDir(), "cas.db"))
-	job := formJob(uuid.NewString(), 8, 100, time.Now().UTC(), time.Now().UTC())
-	require.NoError(t, db.Create(&job).Error)
-	_, err := SaveDraft(context.Background(), db, job.ID, job.CreatedBy, 0, Form{ProjectName: "第一次"})
+func TestFormValidateNamesEveryMissingField(t *testing.T) {
+	err := Form{}.Validate()
+	require.ErrorIs(t, err, ErrFormRequired)
+	for _, field := range []string{"项目名称", "站区", "锚段号", "作业负责人", "作业人员"} {
+		require.Contains(t, err.Error(), field)
+	}
+}
+
+func TestDecodeStoredFormAcceptsEmptyAndRejectsTrailingContent(t *testing.T) {
+	empty, err := decodeStoredForm("")
 	require.NoError(t, err)
-	_, err = SaveDraft(context.Background(), db, job.ID, job.CreatedBy, 0, Form{ProjectName: "覆盖"})
-	require.ErrorIs(t, err, ErrVersionConflict)
-	require.NoError(t, db.Model(&models.GbWorkRecording{}).Where("id = ?", job.ID).Updates(map[string]any{"form_state": FormSubmitted}).Error)
-	_, err = SaveDraft(context.Background(), db, job.ID, job.CreatedBy, 1, Form{ProjectName: "提交后"})
-	require.ErrorIs(t, err, ErrFormSubmitted)
-	var persisted models.GbWorkRecording
-	require.NoError(t, db.First(&persisted, "id = ?", job.ID).Error)
-	require.Equal(t, `{"projectName":"第一次","major":"","stationArea":"","mileage":"","anchorSectionNo":"","startAnchorPillarNo":"","endAnchorPillarNo":"","workLeader":"","workPersonnel":[],"tensionWireCarModel":"","tensionWireCarNo":"","setTension":"","straightenerStatus":"","straightenerInspector":"","wireLayingProcess":"","remark":""}`, persisted.FormJSON)
-}
+	require.Equal(t, []string{}, empty.WorkPersonnel)
 
-func TestFormQueriesTreatRowsAffectedZeroAsNotFound(t *testing.T) {
-	db := formDB(t, filepath.Join(t.TempDir(), "not-found.db"))
-	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("workrecording:form_not_found", gormhelper.MaskNotDataError))
-	missing := uuid.NewString()
-	_, err := GetForm(context.Background(), db, missing)
-	require.ErrorIs(t, err, ErrFormNotFound)
-	_, err = SaveDraft(context.Background(), db, missing, 100, 0, Form{})
-	require.ErrorIs(t, err, ErrFormNotFound)
-}
+	decoded, err := decodeStoredForm(`{"projectName":"沪宁线放线作业","workPersonnel":["张伟","李强"]}`)
+	require.NoError(t, err)
+	require.Equal(t, "沪宁线放线作业", decoded.ProjectName)
+	require.Equal(t, []string{"张伟", "李强"}, decoded.WorkPersonnel)
 
-func TestFormSaveDraftRejectsCorruptStoredJSON(t *testing.T) {
-	db := formDB(t, filepath.Join(t.TempDir(), "corrupt.db"))
-	job := formJob(uuid.NewString(), 8, 100, time.Now().UTC(), time.Now().UTC())
-	job.FormJSON = "not-json"
-	require.NoError(t, db.Create(&job).Error)
-	_, err := GetForm(context.Background(), db, job.ID)
-	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrFormNotFound))
+	for _, raw := range []string{"not-json", `{"projectName":"甲"}{"projectName":"乙"}`} {
+		_, err := decodeStoredForm(raw)
+		require.Error(t, err, raw)
+	}
 }

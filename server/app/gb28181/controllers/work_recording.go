@@ -7,8 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
-	"os"
+
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,7 +19,9 @@ import (
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/workrecording"
+	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -28,16 +31,22 @@ type WorkRecordingAPI interface {
 	Get(context.Context, string) (workrecording.Snapshot, error)
 }
 type WorkRecordingBatchAPI interface {
-	Start(context.Context, uint, workrecording.BatchStartRequest) (workrecording.BatchSnapshot, error)
+	StartOrder(context.Context, uint, workrecording.OrderStartRequest) (workrecording.BatchSnapshot, error)
 	Stop(context.Context, string) (workrecording.BatchSnapshot, error)
 	Get(context.Context, string) (workrecording.BatchSnapshot, error)
-	List(context.Context, uint, int, int) ([]workrecording.BatchSnapshot, int64, error)
+	List(context.Context, workrecording.BatchListFilter) ([]workrecording.BatchSnapshot, int64, error)
+	Active(context.Context, uint) (workrecording.BatchSnapshot, error)
+	Delete(context.Context, uint, workrecording.BatchDeleteRequest) (workrecording.BatchDeleteResult, error)
+	ListFormHistory(context.Context, string, int) ([]workrecording.FormHistoryEntry, error)
+
 }
 type WorkRecordingController struct {
 	controllers.Common
 	service      WorkRecordingAPI
 	batchService WorkRecordingBatchAPI
 	db           func() *gorm.DB
+	fileSources  WorkRecordingFileSourceFactory
+
 }
 
 func NewWorkRecordingController(service WorkRecordingAPI) *WorkRecordingController {
@@ -47,6 +56,37 @@ func (c *WorkRecordingController) SetDB(provider func() *gorm.DB) { c.db = provi
 func (c *WorkRecordingController) SetBatchService(service WorkRecordingBatchAPI) {
 	c.batchService = service
 }
+
+// workRecordingContentProxy streams one recorded slice from the node that stores
+// it, forwarding the node's own headers so range playback keeps working. The
+// proxy carries no per-request state, so one instance serves every request.
+var workRecordingContentProxy = gbrecording.NewContentProxy()
+
+// WorkRecordingFileSource is the file-serving endpoint of the ZLM node that
+// stores a recording. A work recording lives on that node's filesystem, so the
+// control process can only read one by asking the node to serve it: opening the
+// stored path locally fails for every remote node, which is the normal
+// deployment and not a degraded one.
+type WorkRecordingFileSource interface {
+	DownloadFile(ctx context.Context, filePath, byteRange string) (*gbzlm.DownloadResponse, error)
+}
+
+// WorkRecordingFileSourceFactory resolves the node that stores a recording. It
+// reports false when the node is unknown or currently unreachable.
+type WorkRecordingFileSourceFactory func(nodeID int64) (WorkRecordingFileSource, bool)
+
+// SetFileSourceFactory installs the node resolver used by every file download.
+func (c *WorkRecordingController) SetFileSourceFactory(factory WorkRecordingFileSourceFactory) {
+	c.fileSources = factory
+}
+
+func (c *WorkRecordingController) fileSource(nodeID int64) (WorkRecordingFileSource, bool) {
+	if c == nil || c.fileSources == nil || nodeID <= 0 {
+		return nil, false
+	}
+	return c.fileSources(nodeID)
+}
+
 func (c *WorkRecordingController) ready(ctx *gin.Context) bool {
 	if c.GetCurrentUserID(ctx) == 0 {
 		workFailure(ctx, http.StatusUnauthorized, "请先登录")
@@ -72,92 +112,13 @@ func (c *WorkRecordingController) visibleChannel(ctx *gin.Context, id uint) bool
 	}
 	return true
 }
-func (c *WorkRecordingController) Start(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	var request workrecording.StartRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 2048))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		workFailure(ctx, http.StatusBadRequest, "开始参数不合法")
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		workFailure(ctx, http.StatusBadRequest, "开始参数不合法")
-		return
-	}
-	if err := request.Validate(); err != nil {
-		workFailure(ctx, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !c.visibleChannel(ctx, request.ChannelID) {
-		return
-	}
-	snapshot, err := c.service.Start(ctx.Request.Context(), c.GetCurrentUserID(ctx), request, 0)
-	c.result(ctx, snapshot, err)
-}
-
-func (c *WorkRecordingController) StartBatch(ctx *gin.Context) {
+func (c *WorkRecordingController) WorkOrderList(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
 	service, ok := c.batchService.(WorkRecordingBatchAPI)
 	if !ok || service == nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "录像批次服务未就绪")
-		return
-	}
-	var request workrecording.BatchStartRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 4096))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		workFailure(ctx, http.StatusBadRequest, "录像批次参数不合法")
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		workFailure(ctx, http.StatusBadRequest, "录像批次参数不合法")
-		return
-	}
-	if err := request.Validate(); err != nil {
-		workFailure(ctx, http.StatusBadRequest, err.Error())
-		return
-	}
-	for _, channelID := range request.ChannelIDs {
-		if !c.visibleChannel(ctx, channelID) {
-			return
-		}
-	}
-	snapshot, err := service.Start(ctx.Request.Context(), c.GetCurrentUserID(ctx), request)
-	c.batchResult(ctx, snapshot, err)
-}
-
-func (c *WorkRecordingController) BatchDetail(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	if !c.visibleBatch(ctx) {
-		return
-	}
-	service, ok := c.batchService.(WorkRecordingBatchAPI)
-	if !ok || service == nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "录像批次服务未就绪")
-		return
-	}
-	snapshot, err := service.Get(ctx.Request.Context(), ctx.Param("batchId"))
-	if err == nil {
-		c.Success(ctx, snapshot)
-		return
-	}
-	c.batchFailure(ctx, err)
-}
-
-func (c *WorkRecordingController) BatchList(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	service, ok := c.batchService.(WorkRecordingBatchAPI)
-	if !ok || service == nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "录像批次服务未就绪")
+		workFailure(ctx, http.StatusServiceUnavailable, "作业单服务未就绪")
 		return
 	}
 	page, pageSize, valid := workRecordingListPagination(ctx)
@@ -165,7 +126,12 @@ func (c *WorkRecordingController) BatchList(ctx *gin.Context) {
 		workFailure(ctx, http.StatusBadRequest, "分页参数不合法")
 		return
 	}
-	items, total, err := service.List(ctx.Request.Context(), c.GetCurrentUserID(ctx), page, pageSize)
+	filter, ok := c.batchListFilterFromQuery(ctx, page, pageSize)
+
+	if !ok {
+		return
+	}
+	items, total, err := service.List(ctx.Request.Context(), filter)
 	if err != nil {
 		c.batchFailure(ctx, err)
 		return
@@ -173,7 +139,60 @@ func (c *WorkRecordingController) BatchList(ctx *gin.Context) {
 	c.Success(ctx, gin.H{"items": items, "total": total, "page": page, "pageSize": pageSize})
 }
 
-func (c *WorkRecordingController) StopBatch(ctx *gin.Context) {
+// batchListFilterFromQuery reads the ledger list filters shared by the legacy
+// /work-recordings/batches listing and the /work-orders listing, so both stay
+// consistent as the legacy route is retired.
+func (c *WorkRecordingController) batchListFilterFromQuery(ctx *gin.Context, page, pageSize int) (workrecording.BatchListFilter, bool) {
+	filter := workrecording.BatchListFilter{
+		Actor: c.GetCurrentUserID(ctx), Page: page, PageSize: pageSize,
+		Keyword: strings.TrimSpace(ctx.Query("keyword")),
+	}
+	if states := strings.TrimSpace(ctx.Query("state")); states != "" {
+		for _, state := range strings.Split(states, ",") {
+			if trimmed := strings.TrimSpace(state); trimmed != "" {
+				filter.States = append(filter.States, trimmed)
+
+			}
+		}
+	}
+	if raw := strings.TrimSpace(ctx.Query("channelId")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			workFailure(ctx, http.StatusBadRequest, "通道参数不合法")
+			return workrecording.BatchListFilter{}, false
+		}
+		filter.ChannelID = uint(parsed)
+	}
+	for _, spec := range []struct {
+		name   string
+		target **time.Time
+	}{{"startTime", &filter.From}, {"endTime", &filter.To}} {
+		raw := strings.TrimSpace(ctx.Query(spec.name))
+		if raw == "" {
+			continue
+		}
+		parsed, err := parseWorkRecordingTime(raw)
+		if err != nil {
+			workFailure(ctx, http.StatusBadRequest, "时间参数不合法")
+			return workrecording.BatchListFilter{}, false
+		}
+		*spec.target = &parsed
+	}
+	return filter, true
+}
+
+var workRecordingTimeLayouts = []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"}
+
+func parseWorkRecordingTime(value string) (time.Time, error) {
+	for _, layout := range workRecordingTimeLayouts {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, errors.New("无法解析的时间格式")
+}
+
+func (c *WorkRecordingController) StopWorkOrder(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
@@ -182,27 +201,27 @@ func (c *WorkRecordingController) StopBatch(ctx *gin.Context) {
 	}
 	service, ok := c.batchService.(WorkRecordingBatchAPI)
 	if !ok || service == nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "录像批次服务未就绪")
+		workFailure(ctx, http.StatusServiceUnavailable, "作业单服务未就绪")
 		return
 	}
-	snapshot, err := service.Stop(ctx.Request.Context(), ctx.Param("batchId"))
+	snapshot, err := service.Stop(ctx.Request.Context(), ctx.Param("id"))
 	c.batchResult(ctx, snapshot, err)
 }
 
 func (c *WorkRecordingController) visibleBatch(ctx *gin.Context) bool {
 	var batch models.GbWorkRecordingBatch
-	query := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("batchId"), c.GetCurrentUserID(ctx)).First(&batch)
+	query := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("id"), c.GetCurrentUserID(ctx)).First(&batch)
 	if query.Error != nil || query.RowsAffected == 0 {
 		if errors.Is(query.Error, gorm.ErrRecordNotFound) || query.RowsAffected == 0 {
-			workFailure(ctx, http.StatusNotFound, "台账不存在")
+			workFailure(ctx, http.StatusNotFound, "作业单不存在")
 		} else {
-			workFailure(ctx, http.StatusServiceUnavailable, "台账查询失败")
+			workFailure(ctx, http.StatusServiceUnavailable, "作业单查询失败")
 		}
 		return false
 	}
 	var jobs []models.GbWorkRecording
 	if err := c.db().WithContext(ctx).Where("batch_id = ?", batch.ID).Find(&jobs).Error; err != nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "台账录像查询失败")
+		workFailure(ctx, http.StatusServiceUnavailable, "作业单录像查询失败")
 		return false
 	}
 	for _, job := range jobs {
@@ -213,25 +232,30 @@ func (c *WorkRecordingController) visibleBatch(ctx *gin.Context) bool {
 	return true
 }
 
-// BatchDownload streams all completed local MP4 slices for one ledger batch
-// as one ZIP. The source files stay on the recording node after download.
-func (c *WorkRecordingController) BatchDownload(ctx *gin.Context) {
+// BatchDownload streams all completed local MP4 slices for one work ledger
+// batch as a single stored ZIP. MP4 slices are already compressed, so deflating
+// them only burns CPU and slows the transfer. Every slice is stat-ed before the
+// response headers go out: a file that vanished from the recording node after it
+// was archived has to fail the whole request with a bounded error, not truncate
+// an archive the operator only discovers is broken after the transfer ends. The
+// source files stay on the recording node after download.
+func (c *WorkRecordingController) WorkOrderDownload(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
 	var batch models.GbWorkRecordingBatch
-	result := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("batchId"), c.GetCurrentUserID(ctx)).First(&batch)
+	result := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("id"), c.GetCurrentUserID(ctx)).First(&batch)
 	if result.Error != nil || result.RowsAffected == 0 {
-		workFailure(ctx, http.StatusNotFound, "台账不存在")
+		workFailure(ctx, http.StatusNotFound, "作业单不存在")
 		return
 	}
 	var jobs []models.GbWorkRecording
 	if err := c.db().WithContext(ctx).Where("batch_id = ?", batch.ID).Order("channel_id ASC").Find(&jobs).Error; err != nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "查询台账录像失败")
+		workFailure(ctx, http.StatusServiceUnavailable, "查询作业单录像失败")
 		return
 	}
 	if len(jobs) == 0 || len(jobs) > workrecording.BatchMaxCameraCount {
-		workFailure(ctx, http.StatusConflict, "录像批次没有有效的摄像头记录")
+		workFailure(ctx, http.StatusConflict, "作业单没有有效的摄像头记录")
 		return
 	}
 	for _, job := range jobs {
@@ -243,21 +267,45 @@ func (c *WorkRecordingController) BatchDownload(ctx *gin.Context) {
 			return
 		}
 	}
-	type zipFile struct {
-		job  models.GbWorkRecording
-		file models.GbRecordingFile
-		name string
-	}
-	files := make([]zipFile, 0)
+	// Two batched reads replace the previous per-camera, per-slice lookups, so a
+	// four-camera batch no longer costs one round-trip for every stored slice.
+	jobIDs := make([]string, 0, len(jobs))
 	for _, job := range jobs {
-		var links []models.GbWorkRecordingFile
-		if err := c.db().WithContext(ctx).Where("work_recording_id = ?", job.ID).Find(&links).Error; err != nil {
+		jobIDs = append(jobIDs, job.ID)
+	}
+	var links []models.GbWorkRecordingFile
+	if err := c.db().WithContext(ctx).Where("work_recording_id IN ?", jobIDs).Find(&links).Error; err != nil {
+		workFailure(ctx, http.StatusServiceUnavailable, "查询录像分片失败")
+		return
+	}
+	linksByJob := make(map[string][]models.GbWorkRecordingFile, len(jobs))
+	fileIDs := make([]uint64, 0, len(links))
+	for _, link := range links {
+		linksByJob[link.WorkRecordingID] = append(linksByJob[link.WorkRecordingID], link)
+		fileIDs = append(fileIDs, link.FileID)
+	}
+	storedByID := make(map[uint64]models.GbRecordingFile, len(fileIDs))
+	if len(fileIDs) > 0 {
+		var stored []models.GbRecordingFile
+		if err := c.db().WithContext(ctx).Where("id IN ?", fileIDs).Find(&stored).Error; err != nil {
 			workFailure(ctx, http.StatusServiceUnavailable, "查询录像分片失败")
 			return
 		}
-		for _, link := range links {
-			var file models.GbRecordingFile
-			if err := c.db().WithContext(ctx).First(&file, link.FileID).Error; err != nil {
+		for _, file := range stored {
+			storedByID[file.ID] = file
+		}
+	}
+	type zipFile struct {
+		job    models.GbWorkRecording
+		file   models.GbRecordingFile
+		name   string
+		source WorkRecordingFileSource
+	}
+	files := make([]zipFile, 0, len(fileIDs))
+	for _, job := range jobs {
+		for _, link := range linksByJob[job.ID] {
+			file, ok := storedByID[link.FileID]
+			if !ok {
 				workFailure(ctx, http.StatusConflict, "录像分片尚未归档")
 				return
 			}
@@ -265,47 +313,104 @@ func (c *WorkRecordingController) BatchDownload(ctx *gin.Context) {
 				workFailure(ctx, http.StatusConflict, "存在未完成或不可访问的录像分片")
 				return
 			}
-			files = append(files, zipFile{job: job, file: file, name: zipEntryName(job.ChannelID, file.FileName, len(files))})
+			source, ok := c.fileSource(file.NodeID)
+			if !ok {
+				workFailure(ctx, http.StatusServiceUnavailable, "录像所在媒体节点不可用")
+				return
+			}
+			// Ask the node to confirm the slice before committing to a 200 and a
+			// ZIP header. The probe body is dropped because the slice is fetched
+			// again while streaming, so a node that lost the file cannot turn the
+			// download into a plausible-looking archive with a hole in it.
+			probe, err := source.DownloadFile(ctx.Request.Context(), file.FilePath, "")
+			if err != nil {
+				workFailure(ctx, http.StatusBadGateway, "读取录像分片失败")
+				return
+			}
+			closeDownloadBody(probe)
+			if probe == nil || probe.StatusCode != http.StatusOK {
+				workFailure(ctx, http.StatusConflict, "录像分片在媒体节点上不可读")
+				return
+			}
+			files = append(files, zipFile{job: job, file: file, name: zipEntryName(job.ChannelID, file.FileName, len(files)), source: source})
 		}
 	}
 	if len(files) == 0 {
-		workFailure(ctx, http.StatusConflict, "台账尚无可下载录像")
+		workFailure(ctx, http.StatusConflict, "作业单尚无可下载录像")
 		return
 	}
 	ctx.Header("Content-Type", "application/zip")
-	ctx.Header("Content-Disposition", `attachment; filename="work-recording-`+batch.ID+`.zip"`)
+	ctx.Header("Content-Disposition", workArchiveDisposition(batch))
 	zw := zip.NewWriter(ctx.Writer)
 	for _, item := range files {
-		src, err := os.Open(item.file.FilePath)
-		if err != nil {
-			_ = zw.Close()
-			workFailure(ctx, http.StatusBadGateway, "读取录像分片失败")
-			return
+		response, err := item.source.DownloadFile(ctx.Request.Context(), item.file.FilePath, "")
+		if err != nil || response == nil || response.StatusCode != http.StatusOK {
+			closeDownloadBody(response)
+			// Headers are committed by now, so a JSON error body would be spliced
+			// straight into the ZIP stream. Stop instead: the client observes a
+			// truncated archive rather than a plausible-looking corrupted one.
+			break
 		}
-		header := &zip.FileHeader{Name: item.name, Method: zip.Deflate}
+		header := &zip.FileHeader{Name: item.name, Method: zip.Store}
+		if item.file.StartTime != nil {
+			header.SetModTime(item.file.StartTime.UTC())
+		}
 		dst, err := zw.CreateHeader(header)
 		if err == nil {
-			_, err = io.Copy(dst, src)
+			_, err = io.Copy(dst, response.Body)
 		}
-		_ = src.Close()
+		closeDownloadBody(response)
 		if err != nil {
-			_ = zw.Close()
-			return
+			break
 		}
 	}
-	if err := zw.Close(); err != nil {
-		return
+	_ = zw.Close()
+}
+
+// closeDownloadBody releases an opened node response, tolerating the nil result
+// an error path can produce.
+func closeDownloadBody(response *gbzlm.DownloadResponse) {
+	if response != nil && response.Body != nil {
+		_ = response.Body.Close()
 	}
 }
 
-func (c *WorkRecordingController) BatchFile(ctx *gin.Context) {
+// WorkOrderFormHistory 拉取某字段的历史值（项目名称/站区/作业负责人/作业人员），
+// 给前端 a-auto-complete 的下拉框喂数据。field 在 4 个白名单内，否则 400。
+// 直接用 AbortWithStatusJSON：c.Common.Fail 在测试环境里因为 app.Response 初始化路径不同，
+// 会偶发不写状态码；这里用 gin 原生 API 把契约固化在控制器层。
+func (c *WorkRecordingController) WorkOrderFormHistory(ctx *gin.Context) {
+	field := strings.TrimSpace(ctx.Query("field"))
+	if !models.IsValidFormHistoryField(field) {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": "field 必须在 4 个白名单字段内"})
+		return
+	}
+	limit := 0
+	if raw := strings.TrimSpace(ctx.Query("limit")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil {
+			limit = v
+		}
+	}
+	entries, err := c.batchService.ListFormHistory(ctx, field, limit)
+	if err != nil {
+		if errors.Is(err, workrecording.ErrFormHistoryInvalidField) {
+			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": "field 必须在 4 个白名单字段内"})
+			return
+		}
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "读取表单历史值失败: " + err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": entries}})
+}
+
+func (c *WorkRecordingController) WorkOrderFile(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
 	var batch models.GbWorkRecordingBatch
-	result := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("batchId"), c.GetCurrentUserID(ctx)).First(&batch)
+	result := c.db().WithContext(ctx).Where("id = ? AND created_by = ?", ctx.Param("id"), c.GetCurrentUserID(ctx)).First(&batch)
 	if result.Error != nil || result.RowsAffected == 0 {
-		workFailure(ctx, http.StatusNotFound, "台账不存在")
+		workFailure(ctx, http.StatusNotFound, "作业单不存在")
 		return
 	}
 	fileID, err := strconv.ParseUint(ctx.Param("fileId"), 10, 64)
@@ -324,20 +429,26 @@ func (c *WorkRecordingController) BatchFile(ctx *gin.Context) {
 		workFailure(ctx, http.StatusConflict, "录像文件不可访问")
 		return
 	}
-	info, err := os.Stat(file.FilePath)
-	if err != nil || info.IsDir() {
-		workFailure(ctx, http.StatusNotFound, "录像文件尚未生成")
+	source, ok := c.fileSource(file.NodeID)
+	if !ok {
+		workFailure(ctx, http.StatusServiceUnavailable, "录像所在媒体节点不可用")
 		return
 	}
-	ctx.Header("Content-Type", "video/mp4")
-	ctx.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", filepath.Base(file.FileName)))
-	f, err := os.Open(file.FilePath)
-	if err != nil {
-		workFailure(ctx, http.StatusBadGateway, "读取录像文件失败")
-		return
+	// The proxy validates the client range, asks the node for exactly those bytes
+	// and forwards the node's own headers, so playback works without this process
+	// ever touching the recording's filesystem.
+	err = workRecordingContentProxy.Stream(ctx.Request.Context(), ctx.Writer, source, gbrecording.ContentRequest{
+		FilePath: file.FilePath,
+		FileName: filepath.Base(file.FileName),
+		FileSize: file.FileSize,
+		Mode:     gbrecording.CapabilityModePlay,
+		Range:    ctx.GetHeader("Range"),
+	})
+	if err != nil && !ctx.Writer.Written() {
+		// Only reachable before the body starts: once headers are committed, a
+		// JSON error would be spliced straight into the media stream.
+		workFailure(ctx, http.StatusConflict, "录像文件在媒体节点上不可读")
 	}
-	defer f.Close()
-	http.ServeContent(ctx.Writer, ctx.Request, filepath.Base(file.FileName), info.ModTime().In(time.UTC), f)
 }
 
 func localWorkFile(job models.GbWorkRecording, filePath string) bool {
@@ -356,129 +467,65 @@ func zipEntryName(channelID uint, fileName string, index int) string {
 	}
 	return fmt.Sprintf("camera-%d/%s", channelID, base)
 }
-func (c *WorkRecordingController) job(ctx *gin.Context) (*models.GbWorkRecording, bool) {
-	var job models.GbWorkRecording
-	query := c.db().WithContext(ctx).First(&job, "id = ?", ctx.Param("id"))
-	if err := query.Error; err != nil || query.RowsAffected == 0 {
-		if errors.Is(err, gorm.ErrRecordNotFound) || err == nil {
-			workFailure(ctx, http.StatusNotFound, "作业不存在")
-		} else {
-			workFailure(ctx, http.StatusServiceUnavailable, "作业查询失败")
-		}
-		return nil, false
+
+// workArchiveDisposition names the download after the work ledger instead of its
+// raw UUID, so operators can tell which site and which day an archive belongs
+// to. mime.FormatMediaType emits the RFC 5987 form on its own, which is required
+// because the project names these ledgers carry are usually Chinese.
+func workArchiveDisposition(batch models.GbWorkRecordingBatch) string {
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": workArchiveName(batch)})
+	if disposition == "" {
+		return `attachment; filename="work-recording.zip"`
 	}
-	if !c.visibleChannel(ctx, job.ChannelID) {
-		return nil, false
-	}
-	return &job, true
-}
-func (c *WorkRecordingController) Stop(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	job, ok := c.job(ctx)
-	if !ok {
-		return
-	}
-	// Until a cross-user policy is agreed, a work job is stopped by its initiator.
-	if job.CreatedBy != c.GetCurrentUserID(ctx) {
-		workFailure(ctx, http.StatusForbidden, "仅作业发起人可以停止录像")
-		return
-	}
-	snapshot, err := c.service.Stop(ctx.Request.Context(), job.ID)
-	c.result(ctx, snapshot, err)
-}
-func (c *WorkRecordingController) Detail(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	job, ok := c.job(ctx)
-	if !ok {
-		return
-	}
-	snapshot, err := c.service.Get(ctx.Request.Context(), job.ID)
-	c.result(ctx, snapshot, err)
-}
-func (c *WorkRecordingController) Status(ctx *gin.Context) {
-	if !c.ready(ctx) {
-		return
-	}
-	values := strings.Split(ctx.Query("channelIds"), ",")
-	if len(values) == 0 || len(values) > 64 {
-		workFailure(ctx, http.StatusBadRequest, "通道数量不合法")
-		return
-	}
-	ids := make([]uint, 0, len(values))
-	seen := map[uint]bool{}
-	for _, value := range values {
-		parsed, err := strconv.ParseUint(value, 10, 32)
-		if err != nil || parsed == 0 {
-			workFailure(ctx, http.StatusBadRequest, "通道ID不合法")
-			return
-		}
-		id := uint(parsed)
-		if !seen[id] {
-			ids = append(ids, id)
-			seen[id] = true
-		}
-	}
-	var channels []models.GbChannel
-	if err := c.db().WithContext(ctx).Scopes(visibleScope(ctx)).Select("id", "cloud_recording_enabled").Where("id IN ?", ids).Find(&channels).Error; err != nil {
-		workFailure(ctx, http.StatusServiceUnavailable, "通道权限查询失败")
-		return
-	}
-	if len(channels) != len(ids) {
-		workFailure(ctx, http.StatusNotFound, "通道不存在")
-		return
-	}
-	cloudRecordingEnabled := make(map[uint]bool, len(channels))
-	for _, channel := range channels {
-		cloudRecordingEnabled[channel.ID] = channel.CloudRecordingEnabled
-	}
-	snapshots := make([]workrecording.Snapshot, 0, len(ids))
-	for _, id := range ids {
-		var claim models.GbRecorderClaim
-		query := c.db().WithContext(ctx).First(&claim, "resource_key = ?", workrecording.ChannelResource(id))
-		err := query.Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			workFailure(ctx, http.StatusServiceUnavailable, "录像状态查询失败")
-			return
-		}
-		snapshot := workrecording.Snapshot{ChannelID: id, State: workrecording.StateIdle}
-		if err == nil && query.RowsAffected > 0 && claim.State != workrecording.StateIdle {
-			snapshot.State = workrecording.StateUnknown
-			snapshot.Version = claim.Version
-			snapshot.LastError = "该通道存在其他录像占用，请先核实原录像状态"
-			if claim.OwnerKind == workrecording.OwnerLegacy && cloudRecordingEnabled[id] {
-				snapshot.LastError = "该通道已启用云端连续录像，请先关闭云端录像再开始作业录像"
-			}
-			if claim.OwnerKind == workrecording.OwnerWork {
-				snapshot, err = c.service.Get(ctx.Request.Context(), claim.OwnerID)
-				if err != nil || snapshot.ChannelID != id || snapshot.ID != claim.OwnerID {
-					workFailure(ctx, http.StatusServiceUnavailable, "作业状态待核实")
-					return
-				}
-			}
-		}
-		snapshots = append(snapshots, snapshot)
-	}
-	c.Success(ctx, snapshots)
-}
-func (c *WorkRecordingController) result(ctx *gin.Context, snapshot workrecording.Snapshot, err error) {
-	if err == nil {
-		c.Success(ctx, snapshot)
-		return
-	}
-	status := http.StatusServiceUnavailable
-	if errors.Is(err, workrecording.ErrInvalidRequest) {
-		status = http.StatusBadRequest
-	}
-	if errors.Is(err, workrecording.ErrOwnerConflict) || errors.Is(err, workrecording.ErrVersionConflict) || errors.Is(err, workrecording.ErrRequestConflict) || errors.Is(err, workrecording.ErrAttributionUnknown) {
-		status = http.StatusConflict
-	}
-	ctx.JSON(status, gin.H{"code": status, "message": "作业录像操作未完成，请查询当前状态", "data": snapshot})
+	return disposition
 }
 
+func workArchiveName(batch models.GbWorkRecordingBatch) string {
+	project := ""
+	var form workrecording.Form
+	if err := json.Unmarshal([]byte(batch.FormJSON), &form); err == nil {
+		project = sanitizeArchiveSegment(form.ProjectName)
+	}
+	if project == "" {
+		project = "作业录像"
+	}
+	day := batch.CreatedAt
+	if day.IsZero() {
+		day = time.Now()
+	}
+	serial := strings.ReplaceAll(batch.ID, "-", "")
+	if len(serial) > 8 {
+		serial = serial[:8]
+	}
+	if serial == "" {
+		serial = "unknown"
+	}
+	return fmt.Sprintf("%s_%s_%s.zip", project, day.Format("20060102"), serial)
+}
+
+// sanitizeArchiveSegment replaces characters that are illegal in a filename on
+// any supported client OS and bounds the result to a sane length.
+func sanitizeArchiveSegment(value string) string {
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			continue
+		case strings.ContainsRune(`<>:"/\|?*`, r):
+			builder.WriteRune('_')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	trimmed := strings.Trim(builder.String(), " .")
+	if trimmed == "" {
+		return ""
+	}
+	if runes := []rune(trimmed); len(runes) > 60 {
+		trimmed = string(runes[:60])
+	}
+	return strings.Trim(trimmed, " .")
+}
 func (c *WorkRecordingController) batchResult(ctx *gin.Context, snapshot workrecording.BatchSnapshot, err error) {
 	if err == nil {
 		c.Success(ctx, snapshot)
@@ -498,12 +545,14 @@ func (c *WorkRecordingController) batchFailure(ctx *gin.Context, err error, snap
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		status = http.StatusNotFound
 	}
-	response := gin.H{"code": status, "message": "录像批次操作未完成，请查询台账状态"}
+	response := gin.H{"code": status, "message": "作业单操作未完成，请查询作业单状态"}
 	if len(snapshots) > 0 && snapshots[0].ID != "" {
 		response["data"] = snapshots[0]
 	}
 	ctx.JSON(status, response)
 }
+
+
 func workFailure(ctx *gin.Context, status int, message string) {
 	ctx.JSON(status, gin.H{"code": status, "message": message})
 }

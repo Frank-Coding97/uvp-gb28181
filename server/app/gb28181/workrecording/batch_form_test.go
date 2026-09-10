@@ -21,45 +21,39 @@ func batchFormDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestBatchFormPersistsOnLedgerWithCAS(t *testing.T) {
+// 作业单在创建时就已提交表单，因此详情读取到的表单是只读的。
+func TestBatchFormReadsTheSubmittedOrderForm(t *testing.T) {
 	db := batchFormDB(t)
 	batch := models.GbWorkRecordingBatch{
 		ID: uuid.NewString(), CreatedBy: 100, RequestID: "request-1", State: StateRecording,
-		Version: 7, FormState: FormDraft, SchemaVersion: 1, FormJSON: "{}",
+		Version: 1, FormState: FormSubmitted, FormVersion: 1, SchemaVersion: 1,
+		FormJSON: `{"projectName":"沪宁线放线作业","workPersonnel":["张伟","李强"]}`,
 	}
 	require.NoError(t, db.Create(&batch).Error)
 
-	saved, err := SaveBatchDraft(context.Background(), db, batch.ID, 100, 0, Form{
-		ProjectName: "四路放线作业", WorkPersonnel: []string{"张三", "李四"},
-	})
+	record, err := GetBatchForm(context.Background(), db, batch.ID, 100)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, saved.FormVersion)
-	require.Equal(t, batch.ID, saved.BatchID)
-	require.Equal(t, "四路放线作业", saved.Form.ProjectName)
-	require.Equal(t, []string{"张三", "李四"}, saved.Form.WorkPersonnel)
-
-	var persisted models.GbWorkRecordingBatch
-	require.NoError(t, db.First(&persisted, "id = ?", batch.ID).Error)
-	require.EqualValues(t, 7, persisted.Version, "saving the ledger form must not mutate recording state version")
-	require.Equal(t, StateRecording, persisted.State)
-
-	_, err = SaveBatchDraft(context.Background(), db, batch.ID, 100, 0, Form{})
-	require.ErrorIs(t, err, ErrVersionConflict)
-	_, err = SaveBatchDraft(context.Background(), db, batch.ID, 200, 1, Form{})
-	require.ErrorIs(t, err, ErrFormForbidden)
+	require.Equal(t, batch.ID, record.BatchID)
+	require.Equal(t, "沪宁线放线作业", record.Form.ProjectName)
+	require.Equal(t, []string{"张伟", "李强"}, record.Form.WorkPersonnel)
+	require.False(t, record.Editable)
 }
 
-func TestBatchFormRejectsSubmittedAndCorruptLedgers(t *testing.T) {
+func TestBatchFormRejectsForeignActorsMissingAndCorruptLedgers(t *testing.T) {
 	db := batchFormDB(t)
 	batch := models.GbWorkRecordingBatch{
 		ID: uuid.NewString(), CreatedBy: 100, RequestID: "request-2", State: StateStopped,
 		Version: 3, FormState: FormSubmitted, FormVersion: 2, SchemaVersion: 1, FormJSON: "{}",
 	}
 	require.NoError(t, db.Create(&batch).Error)
-	_, err := SaveBatchDraft(context.Background(), db, batch.ID, 100, 2, Form{})
-	require.ErrorIs(t, err, ErrFormSubmitted)
 
-	require.NoError(t, db.Model(&batch).Updates(map[string]any{"form_state": FormDraft, "form_json": "{"}).Error)
+	_, err := GetBatchForm(context.Background(), db, batch.ID, 200)
+	require.ErrorIs(t, err, ErrFormForbidden)
+
+	_, err = GetBatchForm(context.Background(), db, uuid.NewString(), 100)
+	require.ErrorIs(t, err, ErrFormNotFound)
+
+	require.NoError(t, db.Model(&batch).Updates(map[string]any{"form_json": "{"}).Error)
 	_, err = GetBatchForm(context.Background(), db, batch.ID, 100)
 	require.Error(t, err)
 }

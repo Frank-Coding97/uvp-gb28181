@@ -2,7 +2,6 @@ package workrecording
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -28,42 +27,6 @@ func GetBatchForm(ctx context.Context, db *gorm.DB, batchID string, actor uint) 
 	if actor == 0 || batch.CreatedBy != actor {
 		return BatchFormRecord{}, ErrFormForbidden
 	}
-	return batchFormRecord(*batch)
-}
-
-func SaveBatchDraft(ctx context.Context, db *gorm.DB, batchID string, actor uint, expectedVersion uint64, form Form) (BatchFormRecord, error) {
-	if db == nil || actor == 0 || strings.TrimSpace(batchID) == "" {
-		return BatchFormRecord{}, ErrFormInvalid
-	}
-	form = form.normalized()
-	if err := form.Validate(); err != nil {
-		return BatchFormRecord{}, err
-	}
-	encoded, err := json.Marshal(form)
-	if err != nil {
-		return BatchFormRecord{}, err
-	}
-	batch, err := findBatchForm(ctx, db, batchID)
-	if err != nil {
-		return BatchFormRecord{}, err
-	}
-	if batch.CreatedBy != actor {
-		return BatchFormRecord{}, ErrFormForbidden
-	}
-	if batch.FormState == FormSubmitted {
-		return BatchFormRecord{}, ErrFormSubmitted
-	}
-	if batch.FormVersion != expectedVersion {
-		return BatchFormRecord{}, ErrVersionConflict
-	}
-	result := db.WithContext(ctx).Model(&models.GbWorkRecordingBatch{}).Where("id = ? AND created_by = ? AND form_version = ? AND form_state = ?", batchID, actor, expectedVersion, FormDraft).UpdateColumns(map[string]any{"form_json": string(encoded), "form_version": expectedVersion + 1})
-	if result.Error != nil {
-		return BatchFormRecord{}, result.Error
-	}
-	if result.RowsAffected != 1 {
-		return BatchFormRecord{}, ErrVersionConflict
-	}
-	batch.FormJSON, batch.FormVersion = string(encoded), expectedVersion+1
 	return batchFormRecord(*batch)
 }
 

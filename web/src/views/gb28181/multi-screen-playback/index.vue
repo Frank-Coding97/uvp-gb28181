@@ -21,13 +21,12 @@ import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
-import WorkRecordingJobs from "./WorkRecordingJobs.vue";
-import WorkRecordingBatches from "./WorkRecordingBatches.vue";
-import WorkRecordingFormDialog from "./WorkRecordingFormDialog.vue";
+import WorkOrderFormDialog from "../work-orders/WorkOrderFormDialog.vue";
+import { formatWorkOrderSize, isWorkOrderActive, workOrderSliceCount, workOrderStateLabel, workOrderTotalBytes } from "../work-orders/orderState";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
-import { useWorkRecording } from "./useWorkRecording";
-import { startWorkRecordingBatch, stopWorkRecordingBatch, type WorkRecordingBatchSnapshot } from "@/api/gb28181-work-recording";
+import { getActiveWorkOrder, getWorkOrder, stopWorkOrder, workOrderDownloadUrl, type WorkOrderSnapshot } from "@/api/gb28181-work-recording";
+
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
@@ -49,13 +48,42 @@ interface FavoriteChannelGroup {
     channels: ChannelVO[];
 }
 
-const workJobsVisible = ref(false);
-const workBatchesVisible = ref(false);
-const workBatchAction = ref<"start" | "stop" | null>(null);
-const workBatchError = ref("");
-const activeWorkBatch = ref<WorkRecordingBatchSnapshot | null>(null);
-const workFormJob = ref<{ id: string; channelName: string } | null>(null);
-const workFormBatch = ref<string | null>(null);
+/** 作业单：录制的唯一入口。填写表单并提交后才开始录制。 */
+const workOrderDialogVisible = ref(false);
+const workOrderAction = ref<"start" | "stop" | null>(null);
+const workOrderError = ref("");
+const activeWorkOrder = ref<WorkOrderSnapshot | null>(null);
+
+/**
+ * 结束录像后的下载询问。ZLM 是在停止录制那一刻才落 MP4（on_record_mp4 钩子），
+ * 所以停下来之后分片可能还没入库，这里先问一句，同时短暂等归档完成。
+ */
+const downloadPrompt = reactive({
+    visible: false,
+    orderId: "",
+    projectName: "",
+    channelCount: 0,
+    slices: 0,
+    bytes: 0,
+    waiting: false,
+    // ZIP 要求每一路都已结束且分片已归档，否则后端会直接 409。
+    ready: false
+});
+const ARCHIVE_POLL_ATTEMPTS = 5;
+const ARCHIVE_POLL_INTERVAL_MS = 1500;
+
+/** 从作业单快照派生归档进度：下载按钮的可点条件与提示文案都由它决定。 */
+function archiveProgress(snapshot: WorkOrderSnapshot) {
+    const cameras = snapshot.cameras || [];
+    return {
+        channelCount: cameras.length,
+        slices: workOrderSliceCount(snapshot),
+        bytes: workOrderTotalBytes(snapshot),
+        ready: cameras.length > 0 && cameras.every(camera => camera.state === "stopped") && workOrderSliceCount(snapshot) > 0
+    };
+}
+
+
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const playbackConsole = usePlaybackConsoleStore();
@@ -64,9 +92,8 @@ const permissions = computed(() => userStore.account.permissions ?? []);
 const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
-const canStartWorkRecording = computed(() => hasPermission("gb28181:work-recording:start"));
-const canEditWorkForm = computed(() => hasPermission("gb28181:work-recording:form"));
-const canStopWorkRecording = computed(() => hasPermission("gb28181:work-recording:stop"));
+const canCreateWorkOrder = computed(() => hasPermission("gb28181:work-order:create"));
+const canStopWorkOrder = computed(() => hasPermission("gb28181:work-order:stop"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
 const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPermission("gb28181:ptz:control"));
 const monitorAreaRef = ref<HTMLElement | null>(null);
@@ -84,7 +111,6 @@ const pollingError = ref("");
 const pollingRemainingSeconds = ref(0);
 const playAllLoading = ref(false);
 const ptzMotion = ref<{ channelId: number; direction: PtzDirection } | null>(null);
-const workRecording = useWorkRecording();
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let pollingCountdownTimer: ReturnType<typeof setInterval> | null = null;
 let pollingNextCycleAt = 0;
@@ -105,65 +131,43 @@ const workBatchToggleLabel = computed(() => workBatchAction.value ? (workBatchAc
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
-const focusedWorkChannel = computed(() => focusedSlot.value?.channel || null);
-const focusedWorkSnapshot = computed(() => {
-    const channel = focusedWorkChannel.value;
-    return channel ? workRecording.snapshot(channel.id) : null;
+
+/**
+ * 本次将录制的画面 = 当前分屏里「正在播放」的通道，按通道去重。
+ * 「正在播放」严格取 status === "playing"：只录真正出画的画面。
+ */
+const recordingTargets = computed(() => {
+    const seen = new Set<number>();
+    return visibleSlots.value.flatMap(slot => {
+        if (slot.status !== "playing" || !slot.channel) return [];
+        if (seen.has(slot.channel.id)) return [];
+        seen.add(slot.channel.id);
+        return [slot.channel];
+    });
 });
-const focusedWorkLoadState = computed(() => {
-    const channel = focusedWorkChannel.value;
-    return channel ? workRecording.loadState(channel.id) : "idle";
+const recordingChannelOptions = computed(() =>
+    recordingTargets.value.map(channel => ({ id: channel.id, label: channel.name || channel.alias || channel.channelId })));
+
+/** 服务端派生的作业单状态，页面加载与轮询都会刷新，刷新后不会误判为未录制。 */
+const workOrderRunning = computed(() => Boolean(activeWorkOrder.value && isWorkOrderActive(activeWorkOrder.value.state)));
+const workOrderToggleDisabled = computed(() => {
+    if (workOrderAction.value !== null) return true;
+    if (workOrderRunning.value) return !activeWorkOrder.value?.id || !canStopWorkOrder.value;
+    return recordingTargets.value.length === 0 || !canCreateWorkOrder.value;
 });
-const focusedWorkError = computed(() => {
-    const channel = focusedWorkChannel.value;
-    return channel ? workRecording.error(channel.id) || focusedWorkSnapshot.value?.lastError || "" : "";
+const workOrderToggleLabel = computed(() =>
+    workOrderAction.value === "start" ? "开始中…" : workOrderAction.value === "stop" ? "结束中…" : workOrderRunning.value ? "结束录像" : "开始录像");
+const workOrderToggleHint = computed(() => {
+    if (workOrderToggleDisabled.value && workOrderAction.value === null && !workOrderRunning.value) {
+        return recordingTargets.value.length === 0 ? "请先播放需要录制的画面" : "缺少作业单权限";
+    }
+    return workOrderToggleLabel.value;
 });
-const focusedWorkAction = computed(() => {
-    const channel = focusedWorkChannel.value;
-    const snapshot = focusedWorkSnapshot.value;
-    if (!channel) return "开始录制";
-    const action = workRecording.pendingAction(channel.id);
-    if (action === "start" || snapshot?.state === "starting") return "开始中";
-    if (action === "stop" || snapshot?.state === "stopping") return "结束中";
-    if (focusedWorkLoadState.value !== "ready") return "待核实";
-    if (snapshot?.state === "unknown") return snapshot.id && canStopWorkRecording.value ? "重试结束" : "待核实";
-    return snapshot?.state === "recording" ? "结束录制" : "开始录制";
-});
-const focusedWorkStatus = computed(() => {
-    const channel = focusedWorkChannel.value;
-    const snapshot = focusedWorkSnapshot.value;
-    if (!channel) return "请选择播放窗口";
-    if (focusedWorkLoadState.value === "loading") return "正在查询录像状态";
-    if (focusedWorkLoadState.value !== "ready") return "录像状态待核实";
-    if (!snapshot) return "录像状态待核实";
-    if (snapshot.state === "unknown") return "录像状态待核实";
-    if (snapshot.state === "recording") return "录像中";
-    if (snapshot.state === "starting") return "开始中";
-    if (snapshot.state === "stopping") return "结束中";
-    if (snapshot.state === "stopped") return "已结束";
-    if (snapshot.state === "failed") return "开始失败";
-    return "未录制";
-});
-const focusedWorkTargetLabel = computed(() => {
-    const channel = focusedWorkChannel.value;
-    return channel ? (channel.name || channel.alias || channel.channelId) : "未选择播放窗口";
-});
-const workRecordingToggleDisabled = computed(() => {
-    const channel = focusedWorkChannel.value;
-    if (!channel) return true;
-    const snapshot = focusedWorkSnapshot.value;
-    const action = workRecording.pendingAction(channel.id);
-    if (action || focusedWorkLoadState.value !== "ready" || !snapshot || snapshot.state === "starting" || snapshot.state === "stopping") return true;
-    if (snapshot.state === "recording" || snapshot.state === "unknown") return !snapshot.id || !canStopWorkRecording.value;
-    return !canStartWorkRecording.value;
-});
-const workRecordingToggleIsStop = computed(() => {
-    const snapshot = focusedWorkSnapshot.value;
-    return snapshot?.state === "recording" || (snapshot?.state === "unknown" && Boolean(snapshot.id));
-});
-const workRecordingToggleLabel = computed(() => {
-    const target = focusedWorkTargetLabel.value;
-    return `${focusedWorkAction.value}（${target}）`;
+const workOrderStatusText = computed(() => {
+    const order = activeWorkOrder.value;
+    if (!order) return "当前没有进行中的作业单";
+    const cameras = order.cameras?.length || 0;
+    return `作业单 ${order.id.slice(0, 8)} · ${workOrderStateLabel(order.state)} · ${cameras} 路`;
 });
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
 const pollingProgressDegrees = computed(() => {
@@ -255,7 +259,6 @@ async function assignChannel(channel: ChannelVO) {
     }
     target.channel = channel;
     focusedIndex.value = target.index;
-    void workRecording.refresh([channel.id]);
     await playSlot(target);
 }
 
@@ -271,31 +274,97 @@ async function retrySlot(slot: PlaybackSlot) {
 
 function focusSlot(slot: PlaybackSlot) {
     focusedIndex.value = slot.index;
-    if (slot.channel) {
-        const channelId = slot.channel.id;
-        const current = workRecording.snapshot(channelId);
-        if (workRecording.loadState(channelId) !== "ready" || current?.state === "unknown") void workRecording.refresh([channelId]);
-        else void workRecording.ensureStatus(channelId);
+}
+
+/**
+ * 从服务端拉取进行中的作业单。页面加载与轮询都走这里，
+ * 因此刷新页面后按钮状态仍然正确（修掉原来本地 ref 一刷新就丢状态的问题）。
+ */
+async function refreshActiveWorkOrder() {
+    try {
+        const response = await getActiveWorkOrder();
+        if (response.code !== 0) throw new Error(response.message || "作业单状态查询失败");
+        activeWorkOrder.value = response.data || null;
+        workOrderError.value = "";
+    } catch (reason: any) {
+        workOrderError.value = reason?.response?.data?.message || reason?.message || "作业单状态查询失败";
     }
 }
 
-async function toggleWorkRecording() {
-    const channel = focusedWorkChannel.value;
-    if (!channel || workRecordingToggleDisabled.value) return;
-    const stopping = workRecordingToggleIsStop.value;
-    const channelName = channel.name || channel.alias || channel.channelId;
-    const result = stopping
-        ? await workRecording.stop(channel.id)
-        : await workRecording.start(channel.id);
-    if (result) {
-        if (!stopping && result.state === "recording" && result.id) {
-            if (!workFormJob.value) workFormJob.value = { id: result.id, channelName };
-            else Message.info(`${channelName}已开始录制，可在作业记录中填写表单`);
+async function stopActiveWorkOrder() {
+    const order = activeWorkOrder.value;
+    if (!order?.id || workOrderToggleDisabled.value) return;
+    workOrderAction.value = "stop";
+    workOrderError.value = "";
+    try {
+        const response = await stopWorkOrder(order.id);
+        if (response.code !== 0) throw new Error(response.message || "结束录像失败");
+        activeWorkOrder.value = response.data;
+        Message.success("已结束录像");
+        await refreshActiveWorkOrder();
+        void openDownloadPrompt(response.data);
+    } catch (reason: any) {
+        const failure = reason?.response?.data?.message || reason?.message || "结束录像失败，请刷新核实";
+        // 失败后仍以服务端为准。刷新会清空错误提示，所以必须在刷新之后再写回来。
+        await refreshActiveWorkOrder();
+        workOrderError.value = failure;
+        Message.error(failure);
+    } finally {
+        workOrderAction.value = null;
+    }
+}
+
+/**
+ * 结束录像后询问是否立即下载。分片尚未归档时短暂轮询作业单详情，
+ * 让"立刻下载"这个动作尽量一次点成，而不是丢给用户一个 409。
+ */
+async function openDownloadPrompt(snapshot: WorkOrderSnapshot) {
+    downloadPrompt.orderId = snapshot.id;
+    downloadPrompt.projectName = snapshot.projectName || "";
+    applyArchiveProgress(snapshot);
+    // 只有「分片还没入库」值得等：通道卡在未结束的状态时再等也不会变。
+    downloadPrompt.waiting = downloadPrompt.slices === 0;
+    downloadPrompt.visible = true;
+    for (let attempt = 0; attempt < ARCHIVE_POLL_ATTEMPTS && downloadPrompt.waiting; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, ARCHIVE_POLL_INTERVAL_MS));
+        try {
+            const response = await getWorkOrder(downloadPrompt.orderId);
+            if (response.code !== 0) continue;
+            applyArchiveProgress(response.data.snapshot);
+            if (downloadPrompt.ready) break;
+        } catch {
+            // 归档探测失败不该报错：最后会提示去作业单里下载。
         }
+    }
+    downloadPrompt.waiting = false;
+}
+
+function applyArchiveProgress(snapshot: WorkOrderSnapshot) {
+    const progress = archiveProgress(snapshot);
+    downloadPrompt.channelCount = progress.channelCount;
+    downloadPrompt.slices = progress.slices;
+    downloadPrompt.bytes = progress.bytes;
+    downloadPrompt.ready = progress.ready;
+}
+
+function downloadRecordingNow() {
+    if (!downloadPrompt.orderId || !downloadPrompt.ready) return;
+    window.open(workOrderDownloadUrl(downloadPrompt.orderId), "_blank", "noopener");
+    downloadPrompt.visible = false;
+}
+
+/** 只有一个按钮：有进行中作业单就结束，否则先填作业单再开录。 */
+async function toggleWorkOrderRecording() {
+    if (workOrderToggleDisabled.value) return;
+    if (workOrderRunning.value) {
+        await stopActiveWorkOrder();
         return;
     }
-    const reason = workRecording.error(channel.id);
-    if (reason) Message.error(reason);
+    workOrderDialogVisible.value = true;
+}
+
+async function handleWorkOrderCreated() {
+    await refreshActiveWorkOrder();
 }
 
 function newBatchRequestId() {
@@ -348,8 +417,6 @@ function setLayout(value: LayoutSize) {
 
 function stopAll() {
     const hadChannels = slots.some(slot => slot.channel);
-    workStatusDisposed = true;
-    if (workStatusTimer) clearTimeout(workStatusTimer);
     playAllToken += 1;
     stopPolling();
     slots.forEach(resetSlot);
@@ -632,28 +699,26 @@ function onPlayerError(slot: PlaybackSlot, message: string) {
     slot.error = message || "播放器拉流失败";
 }
 
-let workStatusTimer: ReturnType<typeof setTimeout> | null = null;
-let workStatusDisposed = false;
-async function pollWorkStatus() {
+// 作业单是单一实体，只需轮询一次「进行中作业单」，
+// 不必再按通道逐个查状态；隐藏标签页时跳过以省资源。
+let workOrderStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let workOrderStatusDisposed = false;
+const workOrderPollIntervalMs = 5000;
+async function pollActiveWorkOrder() {
     try {
-        if (document.visibilityState !== "hidden") {
-            const ids = visibleSlots.value.flatMap(slot => slot.channel ? [slot.channel.id] : []);
-            await workRecording.refresh(ids);
-        }
+        if (document.visibilityState !== "hidden") await refreshActiveWorkOrder();
     } finally {
-        if (!workStatusDisposed) workStatusTimer = setTimeout(pollWorkStatus, 3000);
+        if (!workOrderStatusDisposed) workOrderStatusTimer = setTimeout(pollActiveWorkOrder, workOrderPollIntervalMs);
     }
-}
-function refreshFocusedWorkStatus() {
-    if (focusedWorkChannel.value) void workRecording.refresh([focusedWorkChannel.value.id]);
 }
 onMounted(() => {
     document.addEventListener("fullscreenchange", syncFullscreenState);
-    workStatusTimer = setTimeout(pollWorkStatus, 3000);
+    void refreshActiveWorkOrder();
+    workOrderStatusTimer = setTimeout(pollActiveWorkOrder, workOrderPollIntervalMs);
 });
 onBeforeUnmount(() => {
-    workStatusDisposed = true;
-    if (workStatusTimer) clearTimeout(workStatusTimer);
+    workOrderStatusDisposed = true;
+    if (workOrderStatusTimer) clearTimeout(workOrderStatusTimer);
     playAllToken += 1;
     stopPolling();
     document.removeEventListener("fullscreenchange", syncFullscreenState);
@@ -678,19 +743,23 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="work-recording-actions" role="group" aria-label="作业录像控制">
-                        <button v-if="canStartWorkRecording || canStopWorkRecording" type="button" data-test="work-recording-batch-toggle" :disabled="workBatchToggleDisabled" :aria-label="workBatchToggleLabel" :title="workBatchToggleDisabled && !workBatchRecording && workBatchChannels.length === 0 ? '请先在前四个画面放入至少 1 个摄像头' : workBatchToggleLabel" @click="toggleWorkBatchRecording"><CircleStop v-if="workBatchRecording" :size="16" aria-hidden="true" /><Play v-else :size="16" aria-hidden="true" /><span>{{ workBatchToggleLabel }}</span></button>
-                        <button v-if="canStartWorkRecording || canEditWorkForm" type="button" data-test="work-recording-batches" @click="workBatchesVisible = true">作业台账</button>
-                        <button v-if="canStartWorkRecording || canStopWorkRecording || canEditWorkForm" type="button" data-test="work-recording-jobs" @click="workJobsVisible = true">作业记录</button>
-                        <button v-if="focusedWorkSnapshot?.id" type="button" data-test="work-recording-form" @click="workFormJob = { id: focusedWorkSnapshot.id, channelName: focusedWorkTargetLabel }">作业表单</button>
-                        <span class="work-recording-target" data-test="work-recording-target">{{ focusedWorkTargetLabel }}</span>
-                        <button type="button" data-test="work-recording-toggle" :class="{ active: workRecordingToggleIsStop }" :disabled="workRecordingToggleDisabled" :aria-label="workRecordingToggleLabel" :title="workRecordingToggleLabel" @click="toggleWorkRecording">
-                            <CircleStop v-if="workRecordingToggleIsStop" :size="16" aria-hidden="true" />
+                        <button
+                            v-if="canCreateWorkOrder || canStopWorkOrder"
+                            type="button"
+                            data-test="work-order-toggle"
+                            :class="{ active: workOrderRunning }"
+                            :disabled="workOrderToggleDisabled"
+                            :aria-label="workOrderToggleLabel"
+                            :title="workOrderToggleHint"
+                            @click="toggleWorkOrderRecording"
+                        >
+                            <CircleStop v-if="workOrderRunning" :size="16" aria-hidden="true" />
+
                             <Play v-else :size="16" aria-hidden="true" />
-                            <span class="work-recording-label">{{ focusedWorkAction }}</span>
+                            <span class="work-recording-label">{{ workOrderToggleLabel }}</span>
                         </button>
-                        <span class="work-recording-status" data-test="work-recording-status" role="status">{{ focusedWorkStatus }}</span>
-                        <button v-if="focusedWorkChannel" type="button" data-test="work-recording-refresh" aria-label="刷新录像状态" title="刷新录像状态" :disabled="focusedWorkLoadState === 'loading' || Boolean(workRecording.pendingAction(focusedWorkChannel.id))" @click="refreshFocusedWorkStatus"><RefreshCw :size="15" /></button>
-                        <span v-if="focusedWorkError" data-test="work-recording-error" class="work-recording-error" :title="focusedWorkError" role="status">{{ focusedWorkError }}</span>
+                        <span class="work-recording-status" data-test="work-order-status" role="status">{{ workOrderStatusText }}</span>
+                        <span v-if="workOrderError" data-test="work-order-error" class="work-recording-error" :title="workOrderError" role="status">{{ workOrderError }}</span>
                     </div>
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
                         <button v-if="canManageFavorites" type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
@@ -735,9 +804,29 @@ onBeforeUnmount(() => {
                         <UnplayedCover v-else :index="slot.index" />
                     </article>
                 </div>
-                <WorkRecordingJobs :visible="workJobsVisible" :can-stop="canStopWorkRecording" @close="workJobsVisible = false" @changed="refreshFocusedWorkStatus" @form="job => { workJobsVisible = false; workFormJob = { id: job.id, channelName: job.channelName }; }" />
-                <WorkRecordingBatches :visible="workBatchesVisible" :can-stop="canStopWorkRecording" @close="workBatchesVisible = false" @form="batch => { workBatchesVisible = false; workFormBatch = batch.id; }" />
-                <WorkRecordingFormDialog :visible="Boolean(workFormJob || workFormBatch)" :job-id="workFormJob?.id" :batch-id="workFormBatch || undefined" :channel-name="workFormJob?.channelName || (workFormBatch ? '批次摄像头' : '')" :can-edit="canEditWorkForm" @close="workFormJob = null; workFormBatch = null" @saved="refreshFocusedWorkStatus" />
+                <WorkOrderFormDialog
+                    :visible="workOrderDialogVisible"
+                    :channels="recordingChannelOptions"
+                    :can-create="canCreateWorkOrder"
+                    @close="workOrderDialogVisible = false"
+                    @created="handleWorkOrderCreated"
+                />
+                <a-modal v-model:visible="downloadPrompt.visible" modal-class="uvp-system-dialog" :title="downloadPrompt.projectName ? `结束录像 · ${downloadPrompt.projectName}` : '结束录像'" :width="440" :mask-closable="false" :footer="false">
+                    <div class="work-order-download" data-test="work-order-download">
+                        <p v-if="downloadPrompt.waiting">录像已结束，正在归档录像分片…</p>
+                        <p v-else-if="downloadPrompt.ready">
+                            录像已结束：{{ downloadPrompt.channelCount }} 路画面，{{ downloadPrompt.slices }} 个分片（{{ formatWorkOrderSize(downloadPrompt.bytes) }}）。
+                            是否立即下载？
+                        </p>
+                        <p v-else-if="downloadPrompt.slices">部分通道尚未结束，暂不能打包下载。请到「作业单」页面核实后重试。</p>
+                        <p v-else>录像已结束，但分片尚未归档完成。可稍后在「作业单」页面下载。</p>
+                        <div class="work-order-download-actions">
+                            <a-button data-test="work-order-download-later" @click="downloadPrompt.visible = false">稍后</a-button>
+                            <a-button type="primary" data-test="work-order-download-now" :disabled="!downloadPrompt.ready" @click="downloadRecordingNow">立即下载</a-button>
+                        </div>
+                    </div>
+                </a-modal>
+
                 <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
@@ -788,8 +877,9 @@ onBeforeUnmount(() => {
 
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
 .monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
-.monitor-toolbar { flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.work-recording-actions { order: 3; flex: 1 0 100%; min-width: 0; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--zlm-border); }
+.monitor-toolbar { flex: 0 0 auto; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+/* 录像控制与布局、批量播放同处一行：它只有一个按钮 + 一段状态，独占整行会平白多出一行高度。 */
+.work-recording-actions { flex: 0 1 auto; min-width: 0; gap: 6px; }
 .work-recording-actions button { display: inline-flex; min-width: 34px; white-space: nowrap; height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
 .work-recording-actions button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
 .work-recording-actions button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
@@ -798,8 +888,8 @@ onBeforeUnmount(() => {
 .work-recording-actions button:disabled:hover { background: transparent; border-color: transparent; }
 .work-recording-target { max-width: 140px; overflow: hidden; color: var(--zlm-text-2); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .work-recording-label { white-space: nowrap; }
-.work-recording-status { color: var(--zlm-text-3); font-size: 11px; white-space: nowrap; }
-.layout-switcher { gap: 4px; margin-right: auto; }
+.work-recording-status { min-width: 0; max-width: 240px; overflow: hidden; color: var(--zlm-text-3); text-overflow: ellipsis; font-size: 11px; white-space: nowrap; }
+.layout-switcher { gap: 4px; }
 .layout-switcher button,
 .playback-actions button,
 .polling-settings header button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; }
@@ -811,7 +901,7 @@ onBeforeUnmount(() => {
 .polling-settings button:focus-visible,
 .polling-settings input:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
 .layout-switcher button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); }
-.playback-actions { gap: 4px; }
+.playback-actions { gap: 4px; margin-left: auto; }
 .playback-actions button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-200); box-shadow: inset 0 -2px 0 var(--zlm-brand-500); }
 .playback-actions button.polling-control.counting { width: 44px; flex-shrink: 0; padding: 0; }
 .polling-countdown { display: flex; align-items: center; justify-content: center; }
@@ -820,7 +910,7 @@ onBeforeUnmount(() => {
 .countdown-ring strong { position: relative; z-index: 1; min-width: 2ch; color: var(--zlm-brand-700); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1; text-align: center; }
 .playback-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.52; }
 .playback-actions button:disabled:hover { background: transparent; border-color: transparent; }
-.toolbar-divider { width: 1px; height: 20px; background: var(--zlm-border); }
+.toolbar-divider { flex: 0 0 auto; width: 1px; height: 20px; background: var(--zlm-border); }
 .layout-glyph { display: grid; width: 18px; height: 18px; gap: 1px; }
 .layout-glyph i { display: block; min-width: 0; min-height: 0; background: currentColor; }
 .glyph-1 { grid-template: 1fr / 1fr; }
@@ -919,7 +1009,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 480px) {
     .monitor-toolbar { align-items: center; justify-content: space-between; gap: 6px; overflow-x: hidden; }
-    .layout-switcher, .playback-actions { flex: 0 0 auto; }
+    .layout-switcher, .playback-actions, .work-recording-actions { flex: 0 0 auto; }
     .layout-switcher, .playback-actions { gap: 2px; }
     .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
     .work-recording-target, .work-recording-status { display: none; }
@@ -938,4 +1028,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .work-recording-error { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--danger-6)); font-size: 12px; }
+.work-order-download p { margin: 0 0 16px; line-height: 1.6; }
+.work-order-download-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>
