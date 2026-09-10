@@ -47,6 +47,11 @@ type Service struct {
 
 	leaseMu sync.Mutex
 	leases  map[string]func()
+
+	// stateObserverMu guards stateObserver, which is installed once at startup
+	// but read from every recorder goroutine.
+	stateObserverMu sync.RWMutex
+	stateObserver   func(context.Context, string)
 }
 
 func NewService(db *gorm.DB, recorder *Recorder, prepare PrepareFunc) *Service {
@@ -56,6 +61,28 @@ func NewService(db *gorm.DB, recorder *Recorder, prepare PrepareFunc) *Service {
 		prepare:  prepare,
 		now:      time.Now,
 		leases:   make(map[string]func()),
+	}
+}
+
+// SetStateObserver registers a best-effort listener invoked with the owning
+// ledger id whenever a child recording changes state. It exists so an aggregate
+// ledger can refresh itself without the recorder engine having to know anything
+// about ledgers. The observer must not fail the caller.
+func (s *Service) SetStateObserver(observer func(context.Context, string)) {
+	s.stateObserverMu.Lock()
+	defer s.stateObserverMu.Unlock()
+	s.stateObserver = observer
+}
+
+func (s *Service) notifyStateObserver(ctx context.Context, batchID string) {
+	if batchID == "" {
+		return
+	}
+	s.stateObserverMu.RLock()
+	observer := s.stateObserver
+	s.stateObserverMu.RUnlock()
+	if observer != nil {
+		observer(ctx, batchID)
 	}
 }
 
@@ -473,7 +500,16 @@ func (s *Service) updateJob(ctx context.Context, job *models.GbWorkRecording, va
 	if result.RowsAffected != 1 {
 		return nil, ErrVersionConflict
 	}
-	return s.findJob(ctx, job.ID)
+	updated, err := s.findJob(ctx, job.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Every child state transition funnels through here, so this is the one
+	// place an aggregate ledger needs to hear about.
+	if _, stateChanged := values["state"]; stateChanged {
+		s.notifyStateObserver(ctx, updated.BatchID)
+	}
+	return updated, nil
 }
 
 func (s *Service) failStart(job *models.GbWorkRecording, state string, claimVersion uint64, cause error) (Snapshot, error) {

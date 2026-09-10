@@ -38,3 +38,48 @@ func TestWorkDirectoryRejectsNestedJobNamespaces(t *testing.T) {
 	_, err = ResolvedWorkDirectory("/srv/work-recordings/another/work-recordings/"+id+"/record/rtp/s/", id)
 	require.ErrorIs(t, err, ErrAttributionUnknown)
 }
+
+// The shape below is what a real ZLM node answers when asked where it would
+// record a stream with no custom path: <root>/<record.appName>/<app>/<stream>/.
+func TestRecordRootFromProbeStripsTheStreamTail(t *testing.T) {
+	root, err := RecordRootFromProbe("/opt/media/bin/www/record/rtp/0200000000/", "record", "rtp", "0200000000")
+	require.NoError(t, err)
+	require.Equal(t, "/opt/media/bin/www", root)
+
+	// A node that never had record.appName written down still uses ZLM's default.
+	root, err = RecordRootFromProbe("/srv/zlm/www/record/rtp/stream/", "", "rtp", "stream")
+	require.NoError(t, err)
+	require.Equal(t, "/srv/zlm/www", root)
+
+	root, err = RecordRootFromProbe(`C:\zlm\www\record\rtp\stream\`, "record", "rtp", "stream")
+	require.NoError(t, err)
+	require.Equal(t, "C:/zlm/www", root)
+}
+
+func TestRecordRootFromProbeRefusesToGuess(t *testing.T) {
+	// The answer is about a different stream, so it says nothing about our root.
+	_, err := RecordRootFromProbe("/srv/zlm/www/record/rtp/other/", "record", "rtp", "stream")
+	require.ErrorIs(t, err, ErrAttributionUnknown)
+	// A relative answer can never own a job directory.
+	_, err = RecordRootFromProbe("www/record/rtp/stream/", "record", "rtp", "stream")
+	require.ErrorIs(t, err, ErrAttributionUnknown)
+	// Stripping the tail would leave nothing behind.
+	_, err = RecordRootFromProbe("/record/rtp/stream/", "record", "rtp", "stream")
+	require.ErrorIs(t, err, ErrAttributionUnknown)
+	_, err = RecordRootFromProbe("", "record", "rtp", "stream")
+	require.ErrorIs(t, err, ErrAttributionUnknown)
+
+	for _, tc := range []struct{ app, stream string }{{"", "stream"}, {"rtp", ""}, {"r/tp", "stream"}, {"rtp", "st/ream"}} {
+		_, err := RecordRootFromProbe("/srv/zlm/www/record/rtp/stream/", "record", tc.app, tc.stream)
+		require.ErrorIs(t, err, ErrInvalidRequest, tc.app+"/"+tc.stream)
+	}
+}
+
+func TestAbsoluteNodePathDistinguishesUsableRecordRoots(t *testing.T) {
+	for _, value := range []string{"/opt/media/bin/www", `C:\zlm\www`, "C:/zlm/www", "//host/share"} {
+		require.True(t, AbsoluteNodePath(value), value)
+	}
+	for _, value := range []string{"", "  ", "./www/record", "www/record", "record"} {
+		require.False(t, AbsoluteNodePath(value), value)
+	}
+}

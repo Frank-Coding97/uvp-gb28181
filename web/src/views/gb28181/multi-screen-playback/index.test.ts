@@ -14,10 +14,11 @@ const playback = vi.hoisted(() => ({
     controlPtz: vi.fn(),
     getControlCapabilities: vi.fn()
 }));
-const workRecording = vi.hoisted(() => ({
-    getWorkRecordingStatus: vi.fn(),
-    startWorkRecording: vi.fn(),
-    stopWorkRecording: vi.fn()
+const workOrders = vi.hoisted(() => ({
+    getActiveWorkOrder: vi.fn(),
+    getWorkOrder: vi.fn(),
+    stopWorkOrder: vi.fn(),
+    workOrderDownloadUrl: vi.fn((id: string) => `/api/gb28181/work-orders/${id}/download?token=t`)
 }));
 const message = vi.hoisted(() => ({
     success: vi.fn(),
@@ -29,7 +30,7 @@ const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
 vi.mock("../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => playback);
-vi.mock("@/api/gb28181-work-recording", () => workRecording);
+vi.mock("@/api/gb28181-work-recording", () => workOrders);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@arco-design/web-vue", () => ({ Message: message }));
 vi.mock("./PlaybackSourceTree.vue", () => ({
@@ -65,11 +66,34 @@ vi.mock("../components/PlayWindow.vue", () => ({
         template: "<div class=\"mock-play-window\" :data-url=\"url\" :data-zlm-webrtc=\"String(Boolean(zlmWebrtc))\" />"
     }
 }));
-vi.mock("./WorkRecordingJobs.vue", () => ({ default: { props: ["visible"], template: '<div v-if="visible" data-test="work-jobs" />' } }));
-vi.mock("./WorkRecordingFormDialog.vue", () => ({ default: { props: ["visible", "jobId", "channelName", "canEdit"], template: '<div v-if="visible" data-test="work-form-dialog" :data-job-id="jobId">{{ channelName }}</div>' } }));
+// 作业单表单弹窗单独测试；页面测试只关心它拿到了哪些通道。
+vi.mock("../work-orders/WorkOrderFormDialog.vue", () => ({
+    default: {
+        name: "WorkOrderFormDialog",
+        props: ["visible", "channels", "canCreate"],
+        template:
+            '<div v-if="visible" data-test="work-order-form-dialog" :data-channels="(channels || []).map(c => c.id).join(\',\')" :data-labels="(channels || []).map(c => c.label).join(\',\')" />'
+    }
+}));
 import MultiScreenPlayback from "./index.vue";
 import type { ChannelVO } from "../device-mgmt/api";
 import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
+
+/**
+ * `<script setup>` 暴露的状态在类型上不可见，测试通过这个视图读取，
+ * 避免 `wrapper.vm.xxx` 触发 TS2339（build:prod 会跑 vue-tsc）。
+ */
+interface DownloadPromptView {
+    visible: boolean;
+    waiting: boolean;
+    ready: boolean;
+    slices: number;
+    channelCount: number;
+}
+
+function prompt(wrapper: { vm: unknown }): DownloadPromptView {
+    return (wrapper.vm as unknown as { downloadPrompt: DownloadPromptView }).downloadPrompt;
+}
 
 describe("multi-screen playback page", () => {
     beforeEach(() => {
@@ -97,52 +121,16 @@ describe("multi-screen playback page", () => {
             code: 0,
             data: { basicPtz: { state: "supported", reason: "" } }
         });
-        workRecording.getWorkRecordingStatus.mockImplementation(async (channelIds: number[]) => ({
+        // 默认没有进行中的作业单；个别用例再覆盖。
+        workOrders.getActiveWorkOrder.mockResolvedValue({ code: 0, data: null, message: "" });
+        workOrders.stopWorkOrder.mockResolvedValue({
             code: 0,
-            data: channelIds.map(channelId => ({
-                id: "",
-                channelId,
-                state: "idle",
-                version: 0,
-                lastCheckedAt: null,
-                startedAt: null,
-                stoppedAt: null,
-                fileState: "pending",
-                formState: "draft",
-                lastError: ""
-            })),
-            message: ""
-        }));
-        workRecording.startWorkRecording.mockResolvedValue({
-            code: 0,
-            data: {
-                id: "job-1",
-                channelId: 1,
-                state: "recording",
-                version: 1,
-                lastCheckedAt: null,
-                startedAt: null,
-                stoppedAt: null,
-                fileState: "pending",
-                formState: "draft",
-                lastError: ""
-            },
+            data: { id: "order-1", requestId: "request-1", state: "stopped", formState: "submitted", formVersion: 2, cameras: [] },
             message: ""
         });
-        workRecording.stopWorkRecording.mockResolvedValue({
+        workOrders.getWorkOrder.mockResolvedValue({
             code: 0,
-            data: {
-                id: "job-1",
-                channelId: 1,
-                state: "stopped",
-                version: 2,
-                lastCheckedAt: null,
-                startedAt: null,
-                stoppedAt: null,
-                fileState: "finalizing",
-                formState: "draft",
-                lastError: ""
-            },
+            data: { snapshot: { id: "order-1", requestId: "request-1", state: "stopped", formState: "submitted", formVersion: 2, cameras: [] } },
             message: ""
         });
         message.success.mockReset();
@@ -151,166 +139,225 @@ describe("multi-screen playback page", () => {
         message.error.mockReset();
     });
 
-    it("keeps the work recording control disabled until the selected channel status is loaded", async () => {
+    // 决策：只录「正在播放」的画面，没有正在播放的画面时按钮必须禁用并说明原因。
+    it("keeps the recording button disabled until something is actually playing", async () => {
         const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
 
-        const toggle = wrapper.get("[data-test=work-recording-toggle]");
+        const toggle = wrapper.get("[data-test=work-order-toggle]");
         expect(toggle.attributes("disabled")).toBeDefined();
-        expect(wrapper.get("[data-test=work-recording-status]").text()).toBe("请选择播放窗口");
+        expect(toggle.attributes("title")).toBe("请先播放需要录制的画面");
+        expect(wrapper.get("[data-test=work-order-status]").text()).toContain("没有进行中的作业单");
 
         await wrapper.get("[data-test=source-channel-1]").trigger("click");
         await flushPromises();
+
+        const ready = wrapper.get("[data-test=work-order-toggle]");
+        expect(ready.attributes("disabled")).toBeUndefined();
+        expect(ready.text()).toContain("开始录像");
+    });
+
+    // 决策：先填作业单再开录，所以按钮只负责打开表单，不直接开录。
+    it("opens the work order form with exactly the playing channels", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await wrapper.get("[data-test=source-channel-2]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+
+        const dialog = wrapper.get("[data-test=work-order-form-dialog]");
+        expect(dialog.attributes("data-channels")).toBe("1,2");
+        expect(dialog.attributes("data-labels")).toBe("东门,西门");
+        expect(workOrders.stopWorkOrder).not.toHaveBeenCalled();
+    });
+
+    it("opens the work order form only for channels that reached playing", async () => {
+        playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => (channelId === "channel-2"
+            ? { code: 1, message: "点播失败", data: null }
+            : { code: 0, data: { streamId: `stream-${channelId}`, ssrc: `ssrc-${channelId}`, app: "rtp", urls: { wsFlv: `ws://zlm/${channelId}.live.flv` }, wsflvUrl: `ws://zlm/${channelId}.live.flv`, httpFlvUrl: "", hlsUrl: "", expireAt: 0 } }));
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await wrapper.get("[data-test=source-channel-2]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        expect(wrapper.get("[data-test=work-order-form-dialog]").attributes("data-channels")).toBe("1");
+    });
+
+    // 刷新后按钮状态必须来自服务端，否则会显示"未录制"而其实还在录。
+    it("restores the recording button from the server after a reload", async () => {
+        workOrders.getActiveWorkOrder.mockResolvedValue({
+            code: 0,
+            data: {
+                id: "9b057ecd-215f-4caf-af40-6ca570ff1f62",
+                requestId: "request-1",
+                state: "recording",
+                formState: "submitted",
+                formVersion: 1,
+                cameras: [{ channelId: 1, jobId: "job-1", state: "recording", fileState: "pending", startedAt: null, stoppedAt: null }]
+            },
+            message: ""
+        });
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        const toggle = wrapper.get("[data-test=work-order-toggle]");
+        // 即使当前没有任何画面在播，服务端有进行中作业单也必须能结束录像
+        expect(toggle.text()).toContain("结束录像");
         expect(toggle.attributes("disabled")).toBeUndefined();
-        expect(toggle.text()).toContain("开始录制");
-        expect(workRecording.startWorkRecording).not.toHaveBeenCalled();
+        const status = wrapper.get("[data-test=work-order-status]").text();
+        expect(status).toContain("9b057ecd");
+        expect(status).toContain("录像中");
+        expect(status).toContain("1 路");
     });
 
-    it("retries a failed status read without starting a recording", async () => {
-        workRecording.getWorkRecordingStatus.mockRejectedValueOnce(new Error("录像状态查询失败"));
+    it("stops the running work order from the same button", async () => {
+        workOrders.getActiveWorkOrder.mockResolvedValue({
+            code: 0,
+            data: { id: "order-1", requestId: "request-1", state: "recording", formState: "submitted", formVersion: 1, cameras: [] },
+            message: ""
+        });
         const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
         await flushPromises();
-        expect(wrapper.get("[data-test=work-recording-error]").text()).toContain("录像状态查询失败");
-        expect(wrapper.get("[data-test=work-recording-toggle]").attributes("disabled")).toBeDefined();
-        await wrapper.get("[data-test=work-recording-refresh]").trigger("click");
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
         await flushPromises();
-        expect(wrapper.get("[data-test=work-recording-toggle]").attributes("disabled")).toBeUndefined();
-        expect(workRecording.startWorkRecording).not.toHaveBeenCalled();
-        wrapper.unmount();
+
+        expect(workOrders.stopWorkOrder).toHaveBeenCalledWith("order-1");
+        expect(message.success).toHaveBeenCalled();
     });
 
-    it("refreshes visible recording status and stops polling on unmount", async () => {
+    it("falls back to the server state when stopping fails", async () => {
+        workOrders.getActiveWorkOrder.mockResolvedValue({
+            code: 0,
+            data: { id: "order-1", requestId: "request-1", state: "recording", formState: "submitted", formVersion: 1, cameras: [] },
+            message: ""
+        });
+        workOrders.stopWorkOrder.mockRejectedValue(new Error("网络超时"));
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.get("[data-test=work-order-error]").text()).toContain("网络超时");
+        // 失败后仍以服务端为准，避免界面停在错误状态
+        expect(workOrders.getActiveWorkOrder.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    /** 已结束、带一段已归档分片的作业单快照。 */
+    const stoppedOrderWithSlice = (files: Array<Record<string, unknown>>) => ({
+        id: "order-1",
+        requestId: "request-1",
+        state: "stopped",
+        formState: "submitted",
+        formVersion: 2,
+        projectName: "沪宁线放线作业",
+        cameras: [
+            {
+                channelId: 12,
+                channelName: "K12+300 左线",
+                jobId: "job-1",
+                state: "stopped",
+                fileState: "ready",
+                startedAt: null,
+                stoppedAt: null,
+                files
+            }
+        ]
+    });
+
+    // 结束录像后顺势问一句「是否立即下载」，省掉再跑一趟作业单列表。
+    it("asks whether to download the recording right after stopping", async () => {
+        const stopped = stoppedOrderWithSlice([{ id: 88, channelId: 12, fileName: "12.mp4", fileSize: 1048576, state: "ready" }]);
+        workOrders.getActiveWorkOrder
+            .mockResolvedValueOnce({ code: 0, data: { ...stopped, state: "recording" }, message: "" })
+            .mockResolvedValue({ code: 0, data: null, message: "" });
+        workOrders.stopWorkOrder.mockResolvedValue({ code: 0, data: stopped, message: "" });
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+
+        expect(prompt(wrapper).visible).toBe(true);
+        expect(prompt(wrapper).waiting).toBe(false);
+        expect(prompt(wrapper).slices).toBe(1);
+        const promptText = wrapper.get("[data-test=work-order-download]").text();
+        expect(promptText).toContain("是否立即下载");
+        expect(promptText).toContain("1 个分片");
+    });
+
+    it("downloads the archive straight away when the operator confirms", async () => {
+        const stopped = stoppedOrderWithSlice([{ id: 88, channelId: 12, fileName: "12.mp4", fileSize: 1048576, state: "ready" }]);
+        workOrders.getActiveWorkOrder
+            .mockResolvedValueOnce({ code: 0, data: { ...stopped, state: "recording" }, message: "" })
+            .mockResolvedValue({ code: 0, data: null, message: "" });
+        workOrders.stopWorkOrder.mockResolvedValue({ code: 0, data: stopped, message: "" });
+        const open = vi.spyOn(window, "open").mockImplementation(() => null);
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+        await wrapper.get("[data-test=work-order-download-now]").trigger("click");
+
+        expect(open).toHaveBeenCalledWith("/api/gb28181/work-orders/order-1/download?token=t", "_blank", "noopener");
+        expect(prompt(wrapper).visible).toBe(false);
+        open.mockRestore();
+    });
+
+    // 只要有一路没结束，后端打包必然 409，所以这里不给「立即下载」。
+    it("withholds the download until every camera has stopped", async () => {
+        const stopped = stoppedOrderWithSlice([{ id: 88, channelId: 12, fileName: "12.mp4", fileSize: 1048576, state: "ready" }]);
+        stopped.cameras[0].state = "unknown";
+        workOrders.getActiveWorkOrder
+            .mockResolvedValueOnce({ code: 0, data: { ...stopped, state: "recording" }, message: "" })
+            .mockResolvedValue({ code: 0, data: null, message: "" });
+        workOrders.stopWorkOrder.mockResolvedValue({ code: 0, data: stopped, message: "" });
+        const open = vi.spyOn(window, "open").mockImplementation(() => null);
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+
+        expect(prompt(wrapper).ready).toBe(false);
+        expect(wrapper.get("[data-test=work-order-download]").text()).toContain("部分通道尚未结束");
+        expect(wrapper.get("[data-test=work-order-download-now]").attributes("disabled")).toBeDefined();
+        await wrapper.get("[data-test=work-order-download-now]").trigger("click");
+        expect(open).not.toHaveBeenCalled();
+        open.mockRestore();
+    });
+
+    // 分片还没入库时（ZLM 停止录制那一刻才落 MP4）短暂等待，等不到就引导去作业单页。
+    it("waits for archiving and then points at the work-order page", async () => {
         vi.useFakeTimers();
-        const wrapper = mount(MultiScreenPlayback);
         try {
-            await wrapper.get("[data-test=source-channel-1]").trigger("click");
+            const stopped = stoppedOrderWithSlice([]);
+            workOrders.getActiveWorkOrder
+                .mockResolvedValueOnce({ code: 0, data: { ...stopped, state: "recording" }, message: "" })
+                .mockResolvedValue({ code: 0, data: null, message: "" });
+            workOrders.stopWorkOrder.mockResolvedValue({ code: 0, data: stopped, message: "" });
+            workOrders.getWorkOrder.mockResolvedValue({ code: 0, data: { snapshot: stopped }, message: "" });
+            const wrapper = mount(MultiScreenPlayback);
             await flushPromises();
-            workRecording.getWorkRecordingStatus.mockClear();
-            await vi.advanceTimersByTimeAsync(3000);
-            expect(workRecording.getWorkRecordingStatus).toHaveBeenCalledWith([1]);
-            wrapper.unmount();
-            workRecording.getWorkRecordingStatus.mockClear();
-            await vi.advanceTimersByTimeAsync(6000);
-            expect(workRecording.getWorkRecordingStatus).not.toHaveBeenCalled();
-            expect(workRecording.stopWorkRecording).not.toHaveBeenCalled();
+
+            await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+            await flushPromises();
+            expect(prompt(wrapper).waiting).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(1500 * 5 + 100);
+            await flushPromises();
+
+            expect(prompt(wrapper).waiting).toBe(false);
+            expect(wrapper.get("[data-test=work-order-download]").text()).toContain("稍后在「作业单」页面下载");
+            expect(wrapper.get("[data-test=work-order-download-now]").attributes("disabled")).toBeDefined();
         } finally {
-            wrapper.unmount();
             vi.useRealTimers();
         }
-    });
-
-    it("starts only the focused channel and keeps the operation tied to it after switching windows", async () => {
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await wrapper.get("[data-test=source-channel-2]").trigger("click");
-        await flushPromises();
-
-        await wrapper.findAll("[data-test=screen-slot]")[0].trigger("click");
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await flushPromises();
-
-        expect(workRecording.startWorkRecording).toHaveBeenCalledTimes(1);
-        expect(workRecording.startWorkRecording).toHaveBeenCalledWith({ channelId: 1, requestId: expect.any(String) });
-        expect(wrapper.get("[data-test=work-recording-target]").text()).toContain("东门");
-        expect(wrapper.get("[data-test=work-recording-status]").text()).toBe("录像中");
-
-        await wrapper.findAll("[data-test=screen-slot]")[1].trigger("click");
-        expect(wrapper.get("[data-test=work-recording-target]").text()).toContain("西门");
-        expect(wrapper.get("[data-test=work-recording-toggle]").text()).toContain("开始录制");
-        expect(workRecording.stopWorkRecording).not.toHaveBeenCalled();
-    });
-
-    it("does not replace an open form when another channel starts", async () => {
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await wrapper.get("[data-test=source-channel-2]").trigger("click");
-        await flushPromises();
-        await wrapper.findAll("[data-test=screen-slot]")[0].trigger("click");
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await flushPromises();
-        const originalJob = wrapper.get("[data-test=work-form-dialog]").attributes("data-job-id");
-        await wrapper.findAll("[data-test=screen-slot]")[1].trigger("click");
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await flushPromises();
-        expect(wrapper.get("[data-test=work-form-dialog]").attributes("data-job-id")).toBe(originalJob);
-        expect(wrapper.get("[data-test=work-form-dialog]").text()).toBe("东门");
-        expect(workRecording.startWorkRecording).toHaveBeenCalledTimes(2);
-        wrapper.unmount();
-    });
-
-    it("does not open a form when starting is unconfirmed", async () => {
-        workRecording.startWorkRecording.mockResolvedValueOnce({ code: 0, data: { id: "job-uncertain", channelId: 1, state: "unknown", version: 1, formState: "draft" }, message: "" });
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await flushPromises();
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await flushPromises();
-        expect(wrapper.find("[data-test=work-form-dialog]").exists()).toBe(false);
-        wrapper.unmount();
-    });
-
-    it("allows a stop retry for an unknown job with an id while keeping start disabled", async () => {
-        workRecording.getWorkRecordingStatus.mockResolvedValueOnce({
-            code: 0,
-            data: [{ id: "job-unknown", channelId: 1, state: "unknown", version: 4, lastCheckedAt: null, startedAt: null, stoppedAt: null, fileState: "unknown", formState: "draft", lastError: "节点不可达" }],
-            message: ""
-        });
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await flushPromises();
-
-        expect(wrapper.get("[data-test=work-recording-status]").text()).toBe("录像状态待核实");
-        expect(wrapper.get("[data-test=work-recording-toggle]").attributes("disabled")).toBeUndefined();
-        expect(wrapper.get("[data-test=work-recording-toggle]").text()).toContain("重试结束");
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await flushPromises();
-        expect(workRecording.startWorkRecording).not.toHaveBeenCalled();
-        expect(workRecording.stopWorkRecording).toHaveBeenCalledWith("job-unknown");
-    });
-
-    it("keeps a legacy unknown state with no job id disabled", async () => {
-        workRecording.getWorkRecordingStatus.mockResolvedValueOnce({
-            code: 0,
-            data: [{ id: "", channelId: 1, state: "unknown", version: 4, lastCheckedAt: null, startedAt: null, stoppedAt: null, fileState: "unknown", formState: "draft", lastError: "存在未知录像" }],
-            message: ""
-        });
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await flushPromises();
-
-        expect(wrapper.get("[data-test=work-recording-status]").text()).toBe("录像状态待核实");
-        expect(wrapper.get("[data-test=work-recording-toggle]").attributes("disabled")).toBeDefined();
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        expect(workRecording.startWorkRecording).not.toHaveBeenCalled();
-        expect(workRecording.stopWorkRecording).not.toHaveBeenCalled();
-    });
-
-    it("updates the original channel when a delayed start completes after focus moves", async () => {
-        const startResult = {
-            code: 0,
-            data: { id: "job-1", channelId: 1, state: "recording", version: 1, lastCheckedAt: null, startedAt: null, stoppedAt: null, fileState: "pending", formState: "draft", lastError: "" },
-            message: ""
-        };
-        let resolveStart!: (value: typeof startResult) => void;
-        const delayedStart = new Promise<typeof startResult>(resolve => { resolveStart = resolve; });
-        workRecording.startWorkRecording.mockReturnValueOnce(delayedStart);
-        const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await wrapper.get("[data-test=source-channel-2]").trigger("click");
-        await flushPromises();
-        await wrapper.findAll("[data-test=screen-slot]")[0].trigger("click");
-        await wrapper.get("[data-test=work-recording-toggle]").trigger("click");
-        await wrapper.findAll("[data-test=screen-slot]")[1].trigger("click");
-
-        resolveStart(startResult);
-        await flushPromises();
-
-        expect(wrapper.get("[data-test=work-recording-target]").text()).toContain("西门");
-        expect(wrapper.get("[data-test=work-form-dialog]").attributes("data-job-id")).toBe("job-1");
-        expect(wrapper.get("[data-test=work-form-dialog]").text()).toBe("东门");
-        await wrapper.findAll("[data-test=screen-slot]")[0].trigger("click");
-        expect(wrapper.get("[data-test=work-recording-status]").text()).toBe("录像中");
-        expect(workRecording.stopWorkRecording).not.toHaveBeenCalled();
     });
 
     it("does not stop a work recording when a window, all windows, or the page is removed", async () => {
@@ -321,7 +368,7 @@ describe("multi-screen playback page", () => {
         await wrapper.get("[data-test=stop-all]").trigger("click");
         wrapper.unmount();
 
-        expect(workRecording.stopWorkRecording).not.toHaveBeenCalled();
+        expect(workOrders.stopWorkOrder).not.toHaveBeenCalled();
     });
 
     it("renders four stable slots and the dedicated playback source tree", async () => {

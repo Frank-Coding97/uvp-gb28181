@@ -131,7 +131,7 @@ func TestWorkRecordingDirectoryMigrationComposesWithBaseSchema(t *testing.T) {
 		RecordingRoot:        "/srv/uvp/work-recordings/job-directory-1",
 		FormJSON:             `{}`,
 	}
-	require.NoError(t, db.Create(&job).Error)
+	require.NoError(t, db.Omit("BatchID").Create(&job).Error)
 	claim := models.GbRecorderClaim{
 		ResourceKey:   "channel-directory-12",
 		OwnerKind:     "work_job",

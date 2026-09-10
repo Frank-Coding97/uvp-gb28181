@@ -443,12 +443,43 @@ func (s *Service) buildReuseResult(ctx context.Context, ch *gbmodels.GbChannel, 
 			ssrc = sess.SSRC
 		}
 	}
+	// A reused stream must keep the identity of the media it describes. Callers
+	// that fence on the generation (work recording treats a zero generation as
+	// unattributable, and the location binding compares generations) would
+	// otherwise be told that a stream which is demonstrably online cannot be
+	// accounted for, and refuse to record it.
+	generation := s.currentLiveGeneration(streamID)
 	if mediaNode != nil {
-		return s.buildNodeResult(ctx, streamID, ssrc, mediaNode, true)
+		result := s.buildNodeResult(ctx, streamID, ssrc, mediaNode, true)
+		result.Generation = generation
+		return result
 	}
 	result := s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 	result.Reused = true
+	result.Generation = generation
 	return result
+}
+
+// currentLiveGeneration returns the generation currently bound to a live stream.
+// The versioned location map is the only store that keeps it once the
+// coordinator entry is gone, so a store that cannot answer leaves the zero value
+// and callers keep treating the stream as unattributable instead of inventing an
+// identity for it.
+func (s *Service) currentLiveGeneration(streamID string) uint64 {
+	if streamID == "" || s.locationMap == nil {
+		return 0
+	}
+	lookup, ok := s.locationMap.(interface {
+		LookupCurrent(string) (stream.LiveRef, bool)
+	})
+	if !ok {
+		return 0
+	}
+	ref, found := lookup.LookupCurrent(streamID)
+	if !found {
+		return 0
+	}
+	return ref.Generation
 }
 
 // Start 发起点播并通过通道级协调器合并并发请求。

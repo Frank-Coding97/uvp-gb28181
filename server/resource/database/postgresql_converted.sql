@@ -4908,6 +4908,7 @@ INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT 'p',CONCAT(
 -- Additive work recording schema. Existing recording history is retained.
 CREATE TABLE IF NOT EXISTS gb_work_recording (
  id VARCHAR(36) NOT NULL PRIMARY KEY,
+ batch_id VARCHAR(36) NOT NULL DEFAULT '',
  channel_id BIGINT NOT NULL,
  created_by BIGINT NOT NULL,
  request_id VARCHAR(128) NOT NULL,
@@ -4935,6 +4936,24 @@ CREATE TABLE IF NOT EXISTS gb_work_recording (
  updated_at TIMESTAMP NULL,
  CONSTRAINT uk_work_recording_request UNIQUE(created_by, request_id)
 );
+
+CREATE TABLE IF NOT EXISTS gb_work_recording_batch (
+ id VARCHAR(36) NOT NULL PRIMARY KEY,
+ created_by BIGINT NOT NULL,
+ request_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL DEFAULT 1,
+ form_state VARCHAR(20) NOT NULL DEFAULT 'draft',
+ form_version BIGINT NOT NULL DEFAULT 0,
+ schema_version BIGINT NOT NULL DEFAULT 1,
+ device_id VARCHAR(20) NOT NULL DEFAULT '',
+ form_json TEXT NOT NULL,
+ last_error VARCHAR(500) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NULL,
+ updated_at TIMESTAMP NULL,
+ CONSTRAINT uk_work_recording_batch_request UNIQUE(created_by, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_work_recording_batch ON gb_work_recording(batch_id);
 
 CREATE TABLE IF NOT EXISTS gb_recorder_claim (
  channel_id BIGINT NOT NULL DEFAULT 0,
@@ -4987,12 +5006,17 @@ INSERT INTO sys_menu_api(menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
 WHERE m.permission='gb28181:work-recording:start' AND m.deleted_at IS NULL
   AND ((a.path='/api/gb28181/work-recordings' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches' AND a.method IN ('POST','GET'))
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId' AND a.method='GET')
     OR (a.path IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a.method='GET'))
   AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 INSERT INTO sys_menu_api(menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
 WHERE m.permission='gb28181:work-recording:stop' AND m.deleted_at IS NULL
   AND ((a.path='/api/gb28181/work-recordings/:id/stop' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId/stop' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches' AND a.method='GET')
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId' AND a.method='GET')
     OR (a.path IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a.method='GET'))
   AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
@@ -5019,6 +5043,10 @@ WHERE m.permission='gb28181:work-recording:form' AND m.deleted_at IS NULL
 INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
 SELECT s.title,s.path,s.method,'GB28181 作业录像',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM (
  SELECT '我的作业列表' AS title,'/api/gb28181/work-recordings' AS path,'GET' AS method
+ UNION ALL SELECT '查询作业台账','/api/gb28181/work-recordings/batches','GET'
+ UNION ALL SELECT '查询作业台账详情','/api/gb28181/work-recordings/batches/:batchId','GET'
+ UNION ALL SELECT '查询台账表单','/api/gb28181/work-recordings/batches/:batchId/form','GET'
+ UNION ALL SELECT '保存台账草稿','/api/gb28181/work-recordings/batches/:batchId/form','PUT'
  UNION ALL SELECT '查询作业表单','/api/gb28181/work-recordings/:id/form','GET'
  UNION ALL SELECT '保存作业草稿','/api/gb28181/work-recordings/:id/form','PUT'
 ) s
@@ -5027,12 +5055,13 @@ WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.met
 INSERT INTO sys_menu_api(menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
 WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m.deleted_at IS NULL
-  AND a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form')
+  AND a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form')
   AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 INSERT INTO sys_menu_api(menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
 WHERE m.permission='gb28181:work-recording:form' AND m.deleted_at IS NULL
-  AND ((a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form'))
+  AND ((a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form'))
+    OR (a.method='PUT' AND a.path='/api/gb28181/work-recordings/batches/:batchId/form')
     OR (a.method='PUT' AND a.path='/api/gb28181/work-recordings/:id/form'))
   AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
@@ -5044,3 +5073,193 @@ JOIN sys_menu_api ma ON ma.menu_id=m.id
 JOIN sys_api a ON a.id=ma.api_id
 WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form') AND m.deleted_at IS NULL AND a.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_'||rm.role_id AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
+
+-- 作业单菜单与权限（PostgreSQL 12+，幂等）。
+-- 作业单是录制的唯一入口：先填作业单、校验通过后才开始录制。
+-- 组件路径对应 web/src/views/gb28181/work-orders/index.vue。
+-- GB28181 菜单为根级平铺（parent_id = 0），排序接在 cascade(13) 之后。
+
+-- 1) 菜单
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT 0,'/gb28181/work-orders','gb28181-work-orders','gb28181/work-orders/index','作业单',0,0,14,2,'','lucide:ClipboardList',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/gb28181/work-orders' AND deleted_at IS NULL);
+
+-- 2) 按钮权限
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/work-orders' AND type=2 AND deleted_at IS NULL),0),'','Permission_gb28181_work_order_create','','新建作业单',1,0,1,3,'gb28181:work-order:create','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-order:create' AND deleted_at IS NULL);
+
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/work-orders' AND type=2 AND deleted_at IS NULL),0),'','Permission_gb28181_work_order_stop','','结束作业单录制',1,0,2,3,'gb28181:work-order:stop','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-order:stop' AND deleted_at IS NULL);
+
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/work-orders' AND type=2 AND deleted_at IS NULL),0),'','Permission_gb28181_work_order_view','','查看作业单',1,0,3,3,'gb28181:work-order:view','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-order:view' AND deleted_at IS NULL);
+
+-- 3) 角色绑定（菜单本身 + 三个按钮权限）
+INSERT INTO sys_role_menu (role_id,menu_id)
+SELECT 1,m.id FROM sys_menu m
+WHERE m.deleted_at IS NULL
+  AND (m.path='/gb28181/work-orders' OR m.permission IN ('gb28181:work-order:create','gb28181:work-order:stop','gb28181:work-order:view'))
+  AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=1 AND x.menu_id=m.id);
+
+-- 4) API 权限
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,created_by)
+SELECT s.title,s.path,s.method,'GB28181 作业单',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM (
+ SELECT '新建作业单' AS title,'/api/gb28181/work-orders' AS path,'POST' AS method
+ UNION ALL SELECT '作业单列表','/api/gb28181/work-orders','GET'
+ UNION ALL SELECT '进行中作业单','/api/gb28181/work-orders/active','GET'
+ UNION ALL SELECT '作业单详情','/api/gb28181/work-orders/:id','GET'
+ UNION ALL SELECT '结束作业单录制','/api/gb28181/work-orders/:id/stop','POST'
+ UNION ALL SELECT '下载作业单录像','/api/gb28181/work-orders/:id/download','GET'
+ UNION ALL SELECT '播放作业单录像分片','/api/gb28181/work-orders/:id/files/:fileId','GET'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.method AND a.deleted_at IS NULL);
+
+-- 5) 菜单与 API 的精确绑定
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-order:view' AND m.deleted_at IS NULL
+  AND a.method='GET' AND a.path IN ('/api/gb28181/work-orders','/api/gb28181/work-orders/active','/api/gb28181/work-orders/:id','/api/gb28181/work-orders/:id/download','/api/gb28181/work-orders/:id/files/:fileId')
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-order:create' AND m.deleted_at IS NULL
+  AND a.method='POST' AND a.path='/api/gb28181/work-orders'
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-order:stop' AND m.deleted_at IS NULL
+  AND a.method='POST' AND a.path='/api/gb28181/work-orders/:id/stop'
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+-- 6) Casbin 规则（同一角色可能通过菜单与按钮命中同一 API，写入前必须去重）
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_'||rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm
+JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id
+JOIN sys_api a ON a.id=ma.api_id
+WHERE (m.path='/gb28181/work-orders' OR m.permission IN ('gb28181:work-order:create','gb28181:work-order:stop','gb28181:work-order:view'))
+  AND m.deleted_at IS NULL AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_'||rm.role_id AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
+
+-- 退役旧的单通道/批次录像权限元数据（PostgreSQL 12+，幂等）。
+-- 背景：单通道与批次录像的对外路由（/api/gb28181/work-recordings*）与处理器已被删除，
+--       该能力由作业单（/api/gb28181/work-orders）统一接管。
+--       但历史迁移写入的菜单 / API / 授权记录仍留在库里，指向已不存在的端点，
+--       会在菜单树里留下点不动、且与作业单重复的按钮权限。
+-- 本迁移只退役这些孤儿记录，不触碰任何其它权限。
+-- 幂等：可重复执行；尚未写入过这些记录的环境执行时为空操作。
+-- 注意：sys_casbin_rule / sys_menu_api / sys_role_menu 无 deleted_at 列，只能物理删除；
+--       sys_menu / sys_api 走软删（deleted_at）以保留审计痕迹。
+
+-- 1) Casbin 规则
+DELETE FROM sys_casbin_rule WHERE v1 LIKE '/api/gb28181/work-recordings%';
+
+-- 2) 菜单与 API 的绑定（先按 API 命中，再按菜单命中，覆盖两种绑定来源）
+DELETE FROM sys_menu_api WHERE api_id IN (
+  SELECT id FROM sys_api WHERE path LIKE '/api/gb28181/work-recordings%'
+);
+DELETE FROM sys_menu_api WHERE menu_id IN (
+  SELECT id FROM sys_menu
+  WHERE permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')
+);
+
+-- 3) 角色与菜单的绑定
+DELETE FROM sys_role_menu WHERE menu_id IN (
+  SELECT id FROM sys_menu
+  WHERE permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')
+);
+
+-- 4) 按钮权限菜单软删
+UPDATE sys_menu SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+WHERE permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form')
+  AND deleted_at IS NULL;
+
+-- 5) API 记录软删
+UPDATE sys_api SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+WHERE path LIKE '/api/gb28181/work-recordings%'
+  AND deleted_at IS NULL;
+
+-- 作业单删除权限（PostgreSQL 12+，幂等）。
+-- 列表页新增「删除」与「批量删除」两个动作，对应两条接口：
+--   DELETE /api/gb28181/work-orders/:id          单条删除
+--   POST   /api/gb28181/work-orders/batch-delete 勾选批量删除
+-- 删除只允许作用于已结束/失败的作业单，正在录制的由服务端跳过并回报，
+-- 所以它是一项独立于「结束录像」的权限，单独授予。
+
+-- 1) 按钮权限（挂在作业单菜单下）
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/work-orders' AND type=2 AND deleted_at IS NULL),0),'','Permission_gb28181_work_order_delete','','删除作业单',1,0,4,3,'gb28181:work-order:delete','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-order:delete' AND deleted_at IS NULL);
+
+-- 2) 角色绑定
+INSERT INTO sys_role_menu (role_id,menu_id)
+SELECT 1,m.id FROM sys_menu m
+WHERE m.permission='gb28181:work-order:delete' AND m.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=1 AND x.menu_id=m.id);
+
+-- 3) API 权限
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,created_by)
+SELECT s.title,s.path,s.method,'GB28181 作业单',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM (
+ SELECT '删除作业单' AS title,'/api/gb28181/work-orders/:id' AS path,'DELETE' AS method
+ UNION ALL SELECT '批量删除作业单','/api/gb28181/work-orders/batch-delete','POST'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.method AND a.deleted_at IS NULL);
+
+-- 4) 菜单与 API 的精确绑定
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-order:delete' AND m.deleted_at IS NULL
+  AND ((a.method='DELETE' AND a.path='/api/gb28181/work-orders/:id')
+    OR (a.method='POST' AND a.path='/api/gb28181/work-orders/batch-delete'))
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+-- 5) Casbin 规则（同一角色可能通过菜单与按钮命中同一 API，写入前必须去重）
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_'||rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm
+JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id
+JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission='gb28181:work-order:delete'
+  AND m.deleted_at IS NULL AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_'||rm.role_id AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
+
+-- 作业单表单历史值（PostgreSQL 12+）。
+CREATE TABLE IF NOT EXISTS gb_work_order_form_history (
+  id BIGSERIAL PRIMARY KEY,
+  field_key VARCHAR(64) NOT NULL,
+  value VARCHAR(256) NOT NULL,
+  use_count INTEGER NOT NULL DEFAULT 1,
+  last_used_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  updated_at TIMESTAMP NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_gb_work_order_form_history_field_value
+  ON gb_work_order_form_history (field_key, value);
+CREATE INDEX IF NOT EXISTS idx_gb_work_order_form_history_field_used
+  ON gb_work_order_form_history (field_key, last_used_at);
+CREATE INDEX IF NOT EXISTS idx_gb_work_order_form_history_field_count
+  ON gb_work_order_form_history (field_key, use_count);
+
+-- 作业单表单历史值接口权限（PostgreSQL 12+，幂等）。
+INSERT INTO sys_api (title, path, method, api_group, created_at, updated_at, created_by)
+SELECT '作业单表单历史值', '/api/gb28181/work-orders/form-history', 'GET', 'GB28181 作业单', NOW(), NOW(), 1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path='/api/gb28181/work-orders/form-history' AND a.method='GET' AND a.deleted_at IS NULL);
+
+INSERT INTO sys_menu_api (menu_id, api_id)
+SELECT m.id, a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-order:view' AND m.deleted_at IS NULL
+  AND a.method='GET' AND a.path='/api/gb28181/work-orders/form-history'
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+INSERT INTO sys_casbin_rule (ptype, v0, v1, v2, v3, v4, v5)
+SELECT DISTINCT 'p', 'role_1', a.path, a.method, '*', '', ''
+FROM sys_api a
+WHERE a.path='/api/gb28181/work-orders/form-history' AND a.method='GET' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_1' AND c.v1=a.path AND c.v2=a.method AND c.v3='*');

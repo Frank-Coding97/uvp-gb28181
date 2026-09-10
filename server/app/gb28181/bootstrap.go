@@ -292,6 +292,12 @@ var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
 var recordingCatalogService *gbrecording.CatalogService
 var recordingPlanEngine *recordingplan.Engine
 var recordingPlanLeases *play.SourceLeaseRegistry
+
+// workClaimReconciler 回收被中断的启动留下的通道占用：占用停在 starting 时，
+// 引擎自身的读取路径(Observe/Get)无法推进它，只有 Stop 能释放。没有这个兜底，
+// 一次失败的启动会让该通道的云录像/作业录像永久返回"资源已被其他任务占用"。
+var workClaimReconciler *workrecording.AbandonedStartReconciler
+
 var talkSvc *gbtalk.Service
 var talkRepo *gbtalk.GormRepo
 var talkCleanupWorker *gbtalk.CleanupWorker
@@ -1063,7 +1069,36 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	workLeases := play.NewSourceLeaseRegistry()
 	workService := workrecording.NewService(app.DB(), workRecorder, prepareWorkRecording(playSvc, workLeases))
 	gbroutes.SetWorkRecordingSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{workLeases, persistedWorkLeases{}})
-	gbroutes.SetWorkRecordingController(gbcontrollers.NewWorkRecordingController(workService))
+	workController := gbcontrollers.NewWorkRecordingController(workService)
+	workLedger := workrecording.NewBatchService(app.DB(), workService)
+	// The ledger row is the single source of truth for a work order's state, so
+	// the engine notifies it on every child transition instead of letting each
+	// reader re-derive the aggregate.
+	workService.SetStateObserver(workLedger.ObserveJobState)
+	workController.SetBatchService(workLedger)
+	// Work recordings are written on the ZLM node that produced them, so every
+	// download has to be served by that node: reading the stored path from this
+	// process only works when the record directory happens to be shared, which a
+	// remote node never is.
+	workController.SetFileSourceFactory(func(nodeID int64) (gbcontrollers.WorkRecordingFileSource, bool) {
+		if zlmRegistry == nil {
+			return nil, false
+		}
+		n, ok := zlmRegistry.Get(nodeID)
+		if !ok || n == nil {
+			return nil, false
+		}
+		return gbzlm.NewClientForNode(n), true
+	})
+	gbroutes.SetWorkRecordingController(workController)
+	// A start that fails after reserving the channel but before binding media
+	// leaves the claim in starting, which every reader treats as live. Sweep
+	// those once they are provably past the start deadline.
+	stopWorkClaimReconciler()
+	workClaimReconciler = workrecording.NewAbandonedStartReconciler(workService, workrecording.AbandonedStartInterval, workrecording.AbandonedStartGrace)
+	if workClaimReconciler != nil {
+		workClaimReconciler.Start(context.Background())
+	}
 	recordingSvc = gbrecording.NewService(repo, zlmLocationMap, zlmRegistry,
 		func(n *node.Node) gbrecording.RecorderClient {
 			return gbrecording.GuardRecorderClient(gbzlm.NewClientForNode(n), recordingMutationGate.Load(), n.ID, repo.FindChannelByStream)
@@ -1158,7 +1193,18 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
+// stopWorkClaimReconciler stops the abandoned-start sweeper if it is running.
+// Safe to call when it was never started (disabled) and on hot reload.
+func stopWorkClaimReconciler() {
+	if workClaimReconciler == nil {
+		return
+	}
+	workClaimReconciler.Stop()
+	workClaimReconciler = nil
+}
+
 func stopRecordingRuntime() {
+	stopWorkClaimReconciler()
 	device.SetStatusObserver(nil)
 	gbroutes.SetRecordingPlanStreamObserver(nil)
 	executors.SetRecordingPlanRuntime(nil)

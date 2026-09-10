@@ -651,15 +651,20 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
 		}
-		workRecordings := gb.Group("/work-recordings")
+		// 作业单：录制的唯一入口，表单先填、校验通过后才开始录制。
+		// 旧的单通道 /work-recordings 与批次台账路由已随重构删除。
+		workOrders := gb.Group("/work-orders")
 		{
-			workRecordings.POST("", func(c *gin.Context) { currentWorkRecordingController().Start(c) })
-			workRecordings.GET("", func(c *gin.Context) { currentWorkRecordingController().List(c) })
-			workRecordings.GET("/:id/form", func(c *gin.Context) { currentWorkRecordingController().Form(c) })
-			workRecordings.PUT("/:id/form", func(c *gin.Context) { currentWorkRecordingController().SaveForm(c) })
-			workRecordings.GET("/status", func(c *gin.Context) { currentWorkRecordingController().Status(c) })
-			workRecordings.POST("/:id/stop", func(c *gin.Context) { currentWorkRecordingController().Stop(c) })
-			workRecordings.GET("/:id", func(c *gin.Context) { currentWorkRecordingController().Detail(c) })
+			workOrders.POST("", func(c *gin.Context) { currentWorkRecordingController().CreateWorkOrder(c) })
+			workOrders.GET("", func(c *gin.Context) { currentWorkRecordingController().WorkOrderList(c) })
+			workOrders.GET("/active", func(c *gin.Context) { currentWorkRecordingController().ActiveWorkOrder(c) })
+			workOrders.GET("/form-history", func(c *gin.Context) { currentWorkRecordingController().WorkOrderFormHistory(c) })
+			workOrders.GET("/:id", func(c *gin.Context) { currentWorkRecordingController().WorkOrderDetail(c) })
+			workOrders.POST("/:id/stop", func(c *gin.Context) { currentWorkRecordingController().StopWorkOrder(c) })
+			workOrders.GET("/:id/download", func(c *gin.Context) { currentWorkRecordingController().WorkOrderDownload(c) })
+			workOrders.GET("/:id/files/:fileId", func(c *gin.Context) { currentWorkRecordingController().WorkOrderFile(c) })
+			workOrders.POST("/batch-delete", func(c *gin.Context) { currentWorkRecordingController().BatchDeleteWorkOrders(c) })
+			workOrders.DELETE("/:id", func(c *gin.Context) { currentWorkRecordingController().DeleteWorkOrder(c) })
 		}
 		recordingPlans := gb.Group("/recording-plans")
 		{

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"strings"
 	"sync/atomic"
 	"time"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
@@ -152,6 +154,7 @@ func guardManagementSource(ctx context.Context, target gbzlmmanagement.Ownership
 type workDirectoryAPI interface {
 	GetServerConfig(context.Context) (map[string]string, error)
 	GetMP4RecordFilesInDirectory(context.Context, string, string, string, string, string) (*gbzlm.MP4RecordListing, error)
+	ProbeMP4RecordRoot(context.Context, string, string, string) (*gbzlm.MP4RecordListing, error)
 }
 
 func prepareWorkDirectory(ctx context.Context, client workDirectoryAPI, target workrecording.MediaTarget, jobID string) (string, error) {
@@ -159,7 +162,11 @@ func prepareWorkDirectory(ctx context.Context, client workDirectoryAPI, target w
 	if err != nil {
 		return "", err
 	}
-	candidate, err := workrecording.WorkDirectory(config["record.filePath"], jobID)
+	root, err := resolveWorkRecordRoot(ctx, client, config, target)
+	if err != nil {
+		return "", err
+	}
+	candidate, err := workrecording.WorkDirectory(root, jobID)
 	if err != nil {
 		return "", err
 	}
@@ -171,6 +178,46 @@ func prepareWorkDirectory(ctx context.Context, client workDirectoryAPI, target w
 		return "", workrecording.ErrAttributionUnknown
 	}
 	return workrecording.ResolvedWorkDirectory(listing.RootPath, jobID)
+}
+
+// resolveWorkRecordRoot returns the absolute node directory under which per-job
+// work directories are created.
+//
+// An explicitly configured absolute record.filePath wins, because the operator's
+// declaration is authoritative. When it is absent the node's own root is used
+// instead: ZLM keeps its default in code, so a node that never had the key
+// written into config.ini reports nothing for it, and demanding a human copy a
+// value the node already knows is what made every fresh node fail to record.
+//
+// A configured value that is not absolute is deliberately ignored rather than
+// used: the node echoes a relative custom path back relative, and
+// ResolvedWorkDirectory refuses anything that is not absolute, so trusting it
+// would fail later with a message that points at the wrong thing.
+func resolveWorkRecordRoot(ctx context.Context, client workDirectoryAPI, config map[string]string, target workrecording.MediaTarget) (string, error) {
+	configured := strings.TrimSpace(config["record.filePath"])
+	if configured != "" && !workrecording.AbsoluteNodePath(configured) && app.ZapLog != nil {
+		// Do not fail here: the node's own root is usable and the configuration
+		// mistake is worth reporting without blocking recording.
+		app.ZapLog.Warn("节点录像根目录配置为相对路径，已改用节点默认根目录",
+			zap.String("recordFilePath", configured),
+			zap.String("app", target.App),
+			zap.String("stream", target.Stream))
+	}
+	if workrecording.AbsoluteNodePath(configured) {
+		return configured, nil
+	}
+	listing, err := client.ProbeMP4RecordRoot(ctx, target.VHost, target.App, target.Stream)
+	if err != nil {
+		return "", err
+	}
+	if listing == nil {
+		return "", workrecording.ErrAttributionUnknown
+	}
+	root, err := workrecording.RecordRootFromProbe(listing.RootPath, config["record.appName"], target.App, target.Stream)
+	if err != nil {
+		return "", fmt.Errorf("%w: 无法确定节点录像根目录(record.filePath 未配置且探测结果不可用)，请在「媒体管理」中设置录像文件路径", err)
+	}
+	return root, nil
 }
 
 func prepareWorkRecording(live *play.Service, leases *play.SourceLeaseRegistry) workrecording.PrepareFunc {
