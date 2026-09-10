@@ -122,12 +122,6 @@ function createSlot(index: number): PlaybackSlot {
 }
 
 const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => createSlot(index)));
-const workBatchChannels = computed(() => slots.slice(0, 4).flatMap(slot => slot.channel ? [slot.channel] : []));
-const workBatchRecording = ref(false);
-const workBatchToggleDisabled = computed(() => workBatchAction.value !== null || (workBatchRecording.value
-    ? (!activeWorkBatch.value?.id || !canStopWorkRecording.value)
-    : (workBatchChannels.value.length < 1 || workBatchChannels.value.length > 4 || !canStartWorkRecording.value)));
-const workBatchToggleLabel = computed(() => workBatchAction.value ? (workBatchAction.value === "start" ? "批次开始中" : "批次结束中") : workBatchRecording.value ? "结束批次录制" : "开始批次录制");
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
@@ -367,32 +361,6 @@ async function handleWorkOrderCreated() {
     await refreshActiveWorkOrder();
 }
 
-function newBatchRequestId() {
-    return typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `work-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-async function toggleWorkBatchRecording() {
-    if (workBatchToggleDisabled.value) return;
-    const channelIds = workBatchChannels.value.map(channel => channel.id);
-    workBatchAction.value = workBatchRecording.value ? "stop" : "start";
-    workBatchError.value = "";
-    try {
-        if (workBatchRecording.value) {
-            if (!activeWorkBatch.value?.id) throw new Error("没有找到正在录制的批次，请打开台账核实");
-            const stopResponse = await stopWorkRecordingBatch(activeWorkBatch.value.id);
-            if (stopResponse.code !== 0) throw new Error(stopResponse.message || "结束批次录制失败");
-            activeWorkBatch.value = stopResponse.data;
-            workBatchRecording.value = false;
-        } else {
-            const response = await startWorkRecordingBatch({ channelIds, requestId: newBatchRequestId() });
-            if (response.code !== 0) throw new Error(response.message || "开始批次录制失败");
-            activeWorkBatch.value = response.data;
-            workBatchRecording.value = response.data.state === "recording";
-            workBatchesVisible.value = true;
-        }
-    } catch (reason: any) { workBatchError.value = reason?.response?.data?.message || reason?.message || "批次录像操作失败"; Message.error(workBatchError.value); }
-    finally { workBatchAction.value = null; }
-}
 
 function handlePtzActionChange(value: { channelId: number; action: string } | null) {
     const direction = value ? ptzDirectionByAction[value.action] : null;

@@ -134,11 +134,6 @@ describe("multi-screen playback page", () => {
             data: { snapshot: { id: "order-1", requestId: "request-1", state: "stopped", formState: "submitted", formVersion: 2, cameras: [] } },
             message: ""
         });
-        workRecording.startWorkRecordingBatch.mockResolvedValue({
-            code: 0,
-            data: { id: "batch-1", requestId: "request-1", state: "recording", formState: "draft", formVersion: 0, cameras: [] },
-            message: ""
-        });
         message.success.mockReset();
         message.info.mockReset();
         message.warning.mockReset();

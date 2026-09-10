@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type Component } from "vue";
+import { computed, ref, watch, type Component } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { AlertTriangle, CheckCircle2, FileText, Info, SlidersHorizontal, UserRound, Video } from "lucide-vue-next";
 import { createWorkOrder, listWorkOrderFormHistory, type WorkOrderFormHistoryEntry, type WorkOrderSnapshot, type WorkRecordingForm } from "@/api/gb28181-work-recording";
