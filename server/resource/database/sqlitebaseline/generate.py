@@ -24,8 +24,8 @@ MIGRATIONS = [
     ROOT.parent / "gb28181" / "migrations" / "2026-09-02-home-dashboard.sql",
 ]
 BASELINE_TIMESTAMP = "2026-09-07 00:00:00"
-VERSION = "sqlite-baseline-20260907-ren-r3"
-SOURCE_COMMIT = "af558ce57b1805e05fa7fa107d73afb3fde460a0"
+VERSION = "sqlite-baseline-20260910-ren-r4"
+SOURCE_COMMIT = "fdcb63da29c320b0962157574e98f851a751ff41"
 
 
 def split_sql(text: str) -> list[str]:

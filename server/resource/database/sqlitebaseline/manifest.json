@@ -1,8 +1,8 @@
 {
-  "version": "sqlite-baseline-20260907-ren-r3",
-  "source_commit": "af558ce57b1805e05fa7fa107d73afb3fde460a0",
-  "sha256": "8a0fb8b4575ea7d9dffe749a7d7d0d764e64f79dd8a2018ee23737c848786a61",
-  "tables": 90,
+  "version": "sqlite-baseline-20260910-ren-r4",
+  "source_commit": "fdcb63da29c320b0962157574e98f851a751ff41",
+  "sha256": "e24e21e14bdd97a77c26de6271ee0c781ceff47ee2aef90b2eb14f537d96b712",
+  "tables": 91,
   "table_names": [
     "gb_alarm_binding",
     "gb_alarm_event",
@@ -84,6 +84,7 @@
     "gb_work_recording_batch",
     "gb_recorder_claim",
     "gb_work_recording_file",
+    "gb_work_order_form_history",
     "gb_device_grant",
     "gb_device_traffic_session",
     "gb_device_traffic_daily",
@@ -95,7 +96,7 @@
     "gb_sip_metric_gap",
     "gb_play_attempt"
   ],
-  "indexes": 242,
+  "indexes": 245,
   "index_manifest": [
     {
       "table": "gb_alarm_binding",
@@ -1582,6 +1583,27 @@
       "unique": false
     },
     {
+      "table": "gb_work_order_form_history",
+      "name": "uk_gb_work_order_form_history_field_value",
+      "source_name": "uk_gb_work_order_form_history_field_value",
+      "columns": "\"field_key\", \"value\"",
+      "unique": true
+    },
+    {
+      "table": "gb_work_order_form_history",
+      "name": "idx_gb_work_order_form_history_field_used",
+      "source_name": "idx_gb_work_order_form_history_field_used",
+      "columns": "\"field_key\", \"last_used_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_work_order_form_history",
+      "name": "idx_gb_work_order_form_history_field_count",
+      "source_name": "idx_gb_work_order_form_history_field_count",
+      "columns": "\"field_key\", \"use_count\"",
+      "unique": false
+    },
+    {
       "table": "gb_device_grant",
       "name": "uk_device_target",
       "source_name": "uk_device_target",
@@ -1792,10 +1814,10 @@
       "unique": false
     }
   ],
-  "seed_statements": 1156,
-  "seed_inserts": 925,
-  "seed_updates": 224,
-  "seed_deletes": 7,
+  "seed_statements": 1180,
+  "seed_inserts": 943,
+  "seed_updates": 226,
+  "seed_deletes": 11,
   "seeded_tables": [
     "gb_sip_security_policy",
     "sys_api",
@@ -1809,7 +1831,7 @@
     "sys_role_menu"
   ],
   "inputs": {
-    "uvp-gb28181.sql": "40beabbe59e4d62e6790c3d315b45f3f33047b51bcb4a66bbf1b0629548ba665",
+    "uvp-gb28181.sql": "adce31ee39ff61afc63c0953bf1e37653faae64da3ce1d825713c8af2c877dbe",
     "2026-08-15-device-grant-table.sql": "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
     "2026-08-15-device-traffic.sql": "9fdaef7450f0de93eaf0467a761acd13bfd468c2b0d7bfa28ad84afd67c3fdfe",
     "2026-08-21-device-traffic-hourly.sql": "6f5ab75f0bef394cbee8dd1e542cb28eb33de207773506c7873454210997bd9b",

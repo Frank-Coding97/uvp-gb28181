@@ -20,7 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
-const expectedBaselineSHA256 = "8a0fb8b4575ea7d9dffe749a7d7d0d764e64f79dd8a2018ee23737c848786a61"
+const expectedBaselineSHA256 = "e24e21e14bdd97a77c26de6271ee0c781ceff47ee2aef90b2eb14f537d96b712"
 
 func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 	t.Helper()
@@ -37,7 +37,7 @@ func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 }
 
 func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
-	require.Equal(t, "sqlite-baseline-20260907-ren-r3", Version)
+	require.Equal(t, "sqlite-baseline-20260910-ren-r4", Version)
 	require.Equal(t, expectedBaselineSHA256, SHA256)
 	require.NotEmpty(t, SQL)
 	digest := sha256.Sum256([]byte(SQL))
@@ -64,18 +64,18 @@ func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &manifest))
 	require.Equal(t, Version, manifest.Version)
-	require.Equal(t, "af558ce57b1805e05fa7fa107d73afb3fde460a0", manifest.SourceCommit)
+	require.Equal(t, "fdcb63da29c320b0962157574e98f851a751ff41", manifest.SourceCommit)
 	require.Equal(t, expectedBaselineSHA256, manifest.SHA256)
-	require.Equal(t, 90, manifest.Tables)
-	require.Len(t, manifest.TableNames, 90)
-	require.Equal(t, 242, manifest.Indexes)
-	require.Len(t, manifest.IndexManifest, 242)
-	require.Equal(t, 1156, manifest.SeedStatements)
-	require.Equal(t, 925, manifest.SeedInserts)
-	require.Equal(t, 224, manifest.SeedUpdates)
-	require.Equal(t, 7, manifest.SeedDeletes)
+	require.Equal(t, 91, manifest.Tables)
+	require.Len(t, manifest.TableNames, 91)
+	require.Equal(t, 245, manifest.Indexes)
+	require.Len(t, manifest.IndexManifest, 245)
+	require.Equal(t, 1180, manifest.SeedStatements)
+	require.Equal(t, 943, manifest.SeedInserts)
+	require.Equal(t, 226, manifest.SeedUpdates)
+	require.Equal(t, 11, manifest.SeedDeletes)
 	require.Equal(t, map[string]string{
-		"uvp-gb28181.sql":                      "40beabbe59e4d62e6790c3d315b45f3f33047b51bcb4a66bbf1b0629548ba665",
+		"uvp-gb28181.sql":                      "adce31ee39ff61afc63c0953bf1e37653faae64da3ce1d825713c8af2c877dbe",
 		"2026-08-15-device-grant-table.sql":    "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
 		"2026-08-15-device-traffic.sql":        "9fdaef7450f0de93eaf0467a761acd13bfd468c2b0d7bfa28ad84afd67c3fdfe",
 		"2026-08-21-device-traffic-hourly.sql": "6f5ab75f0bef394cbee8dd1e542cb28eb33de207773506c7873454210997bd9b",
@@ -88,7 +88,7 @@ func TestBaselineCreatesCompleteSchemaAndSafeSeeds(t *testing.T) {
 
 	var tableCount int
 	require.NoError(t, raw.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).Scan(&tableCount))
-	require.Equal(t, 90, tableCount)
+	require.Equal(t, 91, tableCount)
 	var sqliteVersion string
 	require.NoError(t, raw.QueryRow(`SELECT sqlite_version()`).Scan(&sqliteVersion))
 	require.Equal(t, "3.53.4", sqliteVersion)
@@ -179,7 +179,7 @@ func TestBaselineCreatesCompleteSchemaAndSafeSeeds(t *testing.T) {
 		"gb_recording_plan_binding", "gb_recording_plan_period", "gb_recording_plan", "gb_recording_file", "gb_recording_reconcile_state",
 		"gb_recording_session", "gb_sip_config", "gb_sip_security_access_rule", "gb_sip_security_audit", "gb_sip_security_ban",
 		"gb_sip_security_event", "gb_sip_security_policy", "gb_sip_trace_capture", "gb_sip_trace_message", "gb_sip_trace_session_diagnosis",
-		"gb_talk_session", "meta_node", "gb_zlm_managed_resource", "scheduler_log", "scheduler_setting", "sys_affix",
+		"gb_talk_session", "gb_work_order_form_history", "meta_node", "gb_zlm_managed_resource", "scheduler_log", "scheduler_setting", "sys_affix",
 		"sys_affix_chunk", "sys_api", "sys_casbin_rule", "sys_civil_code", "sys_department", "sys_dict", "sys_dict_item",
 		"sys_gen", "sys_gen_field", "sys_job_results", "sys_jobs", "sys_menu", "sys_menu_api", "sys_operation_logs", "sys_param",
 		"sys_role", "sys_role_menu", "sys_user_role", "sys_users", "sys_user_sessions", "sys_login_logs", "gb_device_firmware_upgrade",
