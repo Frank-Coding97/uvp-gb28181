@@ -103,8 +103,6 @@ function orderIndex(key: string) {
 const fields = ref<Record<string, string>>({});
 /** 已选作业人员列表（下方以可删除 tag 展示）。 */
 const personnelList = ref<string[]>([]);
-/** 人员输入框的 v-model：搜索/输入人名用，选中或回车后即清空。 */
-const personnelFromHistory = ref("");
 const touched = ref(false);
 /** 单字段失焦后即校验，符合项目表单规则「校验走 blur」。 */
 const blurred = ref<Set<string>>(new Set());
@@ -126,7 +124,6 @@ function newRequestId() {
 function reset() {
     fields.value = Object.fromEntries(allFields.map(([key]) => [String(key), ""]));
     personnelList.value = [];
-    personnelFromHistory.value = "";
     touched.value = false;
     blurred.value = new Set();
     error.value = "";
@@ -245,27 +242,6 @@ async function loadFormHistory() {
  * 把一个人名加入已选列表：去重、上限拦截、选完清空输入框。
  * 输入框只承担「搜索 + 选人」，不承载最终值——最终值在下方 tag 列表里。
  */
-function addPersonnel(name: string) {
-    const trimmed = name.trim();
-    void nextTick(() => {
-        personnelFromHistory.value = "";
-    });
-    if (!trimmed) return;
-    if (personnelList.value.includes(trimmed)) return;
-    if (personnelList.value.length >= workOrderPersonnelMax) return;
-    personnelList.value = [...personnelList.value, trimmed];
-}
-
-/** 回车把当前输入框内容当作一个新人员加入。 */
-function addManualPersonnel() {
-    addPersonnel(personnelFromHistory.value);
-}
-
-/** 点 tag 的叉号移除该人员。 */
-function removePersonnel(name: string) {
-    personnelList.value = personnelList.value.filter(n => n !== name);
-}
-
 /** 下拉选项排除已选人员，避免重复选到同一个人。 */
 const personnelOptions = computed(() =>
     (historyByField.value["workPersonnel"] || [])
