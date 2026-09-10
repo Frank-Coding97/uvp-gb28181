@@ -48,7 +48,8 @@ type Service struct {
 	registry NodeLookup
 	client   ClientFactory
 
-	locks *keyedLocker
+	locks          *keyedLocker
+	operationGuard func(context.Context, uint, string, func(context.Context) error) error
 
 	lifecycleMu      sync.Mutex
 	shutdownStarted  bool
@@ -280,12 +281,7 @@ func (s *Service) ObserveStream(ctx context.Context, streamID string, registered
 	return err
 }
 
-func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
-	if err := s.acceptStart(); err != nil {
-		return nil, err
-	}
-	defer s.releaseStart()
-
+func (s *Service) enable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()
 
@@ -300,12 +296,7 @@ func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel
 	return s.repo.SetDesired(ctx, channelID, true)
 }
 
-func (s *Service) BeginPlayback(ctx context.Context, streamID string) error {
-	if err := s.acceptStart(); err != nil {
-		return err
-	}
-	defer s.releaseStart()
-
+func (s *Service) beginPlayback(ctx context.Context, streamID string) error {
 	channel, err := s.repo.FindChannelByStream(ctx, streamID)
 	if err != nil || channel == nil {
 		return err
@@ -321,7 +312,7 @@ func (s *Service) BeginPlayback(ctx context.Context, streamID string) error {
 	return err
 }
 
-func (s *Service) EndPlayback(ctx context.Context, streamID string) error {
+func (s *Service) endPlayback(ctx context.Context, streamID string) error {
 	channel, err := s.repo.FindChannelByStream(ctx, streamID)
 	if err != nil || channel == nil {
 		return err
@@ -337,7 +328,7 @@ func (s *Service) EndPlayback(ctx context.Context, streamID string) error {
 	return err
 }
 
-func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
+func (s *Service) disable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()
 
@@ -356,7 +347,7 @@ func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChanne
 	return s.disableLocked(ctx, channel)
 }
 
-func (s *Service) StopSession(ctx context.Context, channelID uint, sessionID uint64) (*models.GbChannel, error) {
+func (s *Service) stopSession(ctx context.Context, channelID uint, sessionID uint64) (*models.GbChannel, error) {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()
 
@@ -378,7 +369,7 @@ func (s *Service) StopSession(ctx context.Context, channelID uint, sessionID uin
 	return s.stopSessionLocked(ctx, channel, session)
 }
 
-func (s *Service) ReconcileChannel(ctx context.Context, channelID uint) error {
+func (s *Service) reconcileChannel(ctx context.Context, channelID uint) error {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()
 

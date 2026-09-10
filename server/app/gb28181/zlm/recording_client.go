@@ -58,6 +58,14 @@ type MP4RecordFile struct {
 	FileSize   *int64
 }
 
+// MP4RecordListing contains the directory fact returned by ZLM and the files
+// currently visible below it. RootPath is retained even when Files is empty;
+// callers use it to verify the node resolved a persisted recording directory.
+type MP4RecordListing struct {
+	RootPath string
+	Files    []MP4RecordFile
+}
+
 // DownloadResponse keeps the upstream body open for a caller to stream.
 // The caller owns closing Body.
 type DownloadResponse struct {
@@ -118,6 +126,21 @@ func validateTypedRecordingRequest(vhost, appName, stream string, recorderType R
 // StartRecordWithType starts either HLS or MP4 recording for an existing ZLM
 // media source. maxSecond=0 delegates the slice duration to ZLM config.
 func (c *Client) StartRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int) error {
+	return c.startRecord(ctx, vhost, appName, stream, recorderType, maxSecond, "")
+}
+
+// StartMP4RecordInDirectory uses a server-chosen recording root. Work recording
+// callers must persist a unique directory per job; never pass a browser path.
+// Empty paths are rejected because silently falling back to the shared default
+// can overwrite a previous job's file when two recordings start in one second.
+func (c *Client) StartMP4RecordInDirectory(ctx context.Context, vhost, appName, stream string, maxSecond int, directory string) error {
+	if strings.TrimSpace(directory) == "" || strings.ContainsRune(directory, '\x00') {
+		return ErrRecordingPathInvalid
+	}
+	return c.startRecord(ctx, vhost, appName, stream, RecorderMP4, maxSecond, directory)
+}
+
+func (c *Client) startRecord(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int, directory string) error {
 	if err := validateTypedRecordingRequest(vhost, appName, stream, recorderType); err != nil {
 		return err
 	}
@@ -130,6 +153,9 @@ func (c *Client) StartRecordWithType(ctx context.Context, vhost, appName, stream
 	}
 	params := typedRecordingParams(vhost, appName, stream, recorderType)
 	params["max_second"] = strconv.Itoa(maxSecond)
+	if directory != "" {
+		params["customized_path"] = directory
+	}
 	if err := c.call(ctx, "startRecord", params, &response); err != nil {
 		return err
 	}
@@ -194,6 +220,24 @@ func (c *Client) StopRecorder(ctx context.Context, vhost, appName, stream string
 
 // GetMP4RecordFiles lists MP4 files for one known ZLM media tuple and date.
 func (c *Client) GetMP4RecordFiles(ctx context.Context, vhost, appName, stream, period string) ([]MP4RecordFile, error) {
+	listing, err := c.getMP4RecordFiles(ctx, vhost, appName, stream, period, "")
+	if err != nil {
+		return nil, err
+	}
+	return listing.Files, nil
+}
+
+// GetMP4RecordFilesInDirectory lists MP4 files below a caller-selected ZLM
+// recording root. The path is sent as customized_path and RootPath is kept
+// even when ZLM currently reports no files.
+func (c *Client) GetMP4RecordFilesInDirectory(ctx context.Context, vhost, appName, stream, period, directory string) (*MP4RecordListing, error) {
+	if strings.TrimSpace(directory) == "" || strings.ContainsRune(directory, '\x00') {
+		return nil, ErrRecordingPathInvalid
+	}
+	return c.getMP4RecordFiles(ctx, vhost, appName, stream, period, directory)
+}
+
+func (c *Client) getMP4RecordFiles(ctx context.Context, vhost, appName, stream, period, directory string) (*MP4RecordListing, error) {
 	var response struct {
 		baseResp
 		Data struct {
@@ -201,24 +245,34 @@ func (c *Client) GetMP4RecordFiles(ctx context.Context, vhost, appName, stream, 
 			Paths    []string `json:"paths"`
 		} `json:"data"`
 	}
-	if err := c.call(ctx, "getMP4RecordFile", map[string]string{
-		"vhost": vhost, "app": appName, "stream": stream, "period": period,
-	}, &response); err != nil {
+	params := map[string]string{
+		"vhost": vhost, "app": appName, "stream": stream,
+	}
+	if period != "" {
+		params["period"] = period
+	}
+	if directory != "" {
+		params["customized_path"] = directory
+	}
+	if err := c.call(ctx, "getMP4RecordFile", params, &response); err != nil {
 		return nil, classifyRecordingControlError(err)
 	}
 	if response.Code != 0 {
 		return nil, classifyRecordingCode(response.Code)
 	}
 
-	files := make([]MP4RecordFile, 0, len(response.Data.Paths))
+	listing := &MP4RecordListing{
+		RootPath: response.Data.RootPath,
+		Files:    make([]MP4RecordFile, 0, len(response.Data.Paths)),
+	}
 	for _, recordPath := range response.Data.Paths {
-		files = append(files, MP4RecordFile{
+		listing.Files = append(listing.Files, MP4RecordFile{
 			FilePath: joinRecordPath(response.Data.RootPath, recordPath),
 			FileName: path.Base(recordPath),
 			Folder:   response.Data.RootPath,
 		})
 	}
-	return files, nil
+	return listing, nil
 }
 
 // DeleteMP4RecordFile deletes one exact MP4 file. The name parameter is

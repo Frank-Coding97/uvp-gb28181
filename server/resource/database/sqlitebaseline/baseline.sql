@@ -1,4 +1,4 @@
--- SQLite standalone baseline generated from release source e07857cc.
+-- SQLite standalone baseline generated from release source af558ce5.
 -- SQLite storage mapping: integer ids/counters -> INTEGER; DATE/DATETIME/TIMESTAMP keep their declared type; JSON -> TEXT with json_valid checks; decimal -> NUMERIC.
 -- MySQL numeric ranges and VARCHAR/CHAR/VARBINARY lengths are represented by explicit checks where SQLite can preserve them.
 -- Application code owns timestamp updates; no environment rows or credentials are seeded here.
@@ -1121,6 +1121,9 @@ CREATE TABLE IF NOT EXISTS "gb_recording_plan_channel_state" (
   "channel_id" INTEGER NOT NULL,
   "plan_id" INTEGER DEFAULT NULL,
   "plan_version" INTEGER NOT NULL DEFAULT 0,
+  "recorder_owner_kind" TEXT NOT NULL DEFAULT '',
+  "recorder_owner_id" TEXT NOT NULL DEFAULT '',
+  "recorder_claim_version" INTEGER NOT NULL DEFAULT 0,
   "desired_state" TEXT NOT NULL,
   "actual_state" TEXT NOT NULL,
   "reason_code" TEXT NOT NULL DEFAULT '',
@@ -1143,6 +1146,9 @@ CREATE TABLE IF NOT EXISTS "gb_recording_plan_channel_state" (
   CHECK ("channel_id" IS NULL OR (typeof("channel_id") = 'integer' AND "channel_id" BETWEEN 0 AND 4294967295)),
   CHECK ("plan_id" IS NULL OR (typeof("plan_id") = 'integer' AND "plan_id" BETWEEN 0 AND 9223372036854775807)),
   CHECK ("plan_version" IS NULL OR (typeof("plan_version") = 'integer' AND "plan_version" BETWEEN 0 AND 9223372036854775807)),
+  CHECK ("recorder_owner_kind" IS NULL OR length("recorder_owner_kind") <= 20),
+  CHECK ("recorder_owner_id" IS NULL OR length("recorder_owner_id") <= 128),
+  CHECK ("recorder_claim_version" IS NULL OR (typeof("recorder_claim_version") = 'integer' AND "recorder_claim_version" BETWEEN 0 AND 9223372036854775807)),
   CHECK ("desired_state" IS NULL OR length("desired_state") <= 24),
   CHECK ("actual_state" IS NULL OR length("actual_state") <= 32),
   CHECK ("reason_code" IS NULL OR length("reason_code") <= 64),
@@ -2476,6 +2482,124 @@ CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_session" ON "gb_device_f
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_status" ON "gb_device_firmware_upgrade" (device_id,status);
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_time" ON "gb_device_firmware_upgrade" (device_id,created_at);
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_deadline" ON "gb_device_firmware_upgrade" (deadline_at);
+
+CREATE TABLE IF NOT EXISTS "gb_work_recording" (
+  id TEXT NOT NULL PRIMARY KEY,
+  batch_id TEXT NOT NULL DEFAULT '',
+  channel_id INTEGER NOT NULL,
+  created_by INTEGER NOT NULL,
+  request_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  desired_action TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  recorder_claim_version INTEGER NOT NULL DEFAULT 0,
+  node_id INTEGER NOT NULL DEFAULT 0,
+  v_host TEXT NOT NULL DEFAULT '',
+  app TEXT NOT NULL DEFAULT '',
+  stream TEXT NOT NULL DEFAULT '',
+  recording_root TEXT NOT NULL DEFAULT '',
+  generation INTEGER NOT NULL DEFAULT 0,
+  started_at DATETIME NULL,
+  stopped_at DATETIME NULL,
+  last_checked_at DATETIME NULL,
+  last_error TEXT NOT NULL DEFAULT '',
+  file_state TEXT NOT NULL DEFAULT 'pending',
+  form_state TEXT NOT NULL DEFAULT 'draft',
+  form_version INTEGER NOT NULL DEFAULT 0,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  device_id TEXT NOT NULL DEFAULT '',
+  form_json TEXT NOT NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  CONSTRAINT uk_work_recording_request UNIQUE(created_by, request_id),
+  CHECK ("id" IS NULL OR length("id") <= 36),
+  CHECK ("batch_id" IS NULL OR length("batch_id") <= 36),
+  CHECK ("channel_id" IS NULL OR (typeof("channel_id") = 'integer')),
+  CHECK ("created_by" IS NULL OR (typeof("created_by") = 'integer')),
+  CHECK ("request_id" IS NULL OR length("request_id") <= 128),
+  CHECK ("state" IS NULL OR length("state") <= 20),
+  CHECK ("desired_action" IS NULL OR length("desired_action") <= 20),
+  CHECK ("version" IS NULL OR (typeof("version") = 'integer')),
+  CHECK ("recorder_claim_version" IS NULL OR (typeof("recorder_claim_version") = 'integer' AND "recorder_claim_version" BETWEEN 0 AND 9223372036854775807)),
+  CHECK ("node_id" IS NULL OR (typeof("node_id") = 'integer')),
+  CHECK ("v_host" IS NULL OR length("v_host") <= 128),
+  CHECK ("app" IS NULL OR length("app") <= 64),
+  CHECK ("stream" IS NULL OR length("stream") <= 64),
+  CHECK ("recording_root" IS NULL OR length("recording_root") <= 1024),
+  CHECK ("generation" IS NULL OR (typeof("generation") = 'integer')),
+  CHECK ("last_error" IS NULL OR length("last_error") <= 500),
+  CHECK ("file_state" IS NULL OR length("file_state") <= 20),
+  CHECK ("form_state" IS NULL OR length("form_state") <= 20),
+  CHECK ("form_version" IS NULL OR (typeof("form_version") = 'integer')),
+  CHECK ("schema_version" IS NULL OR (typeof("schema_version") = 'integer')),
+  CHECK ("device_id" IS NULL OR length("device_id") <= 20)
+);
+
+CREATE TABLE IF NOT EXISTS "gb_work_recording_batch" (
+  id TEXT NOT NULL PRIMARY KEY,
+  created_by INTEGER NOT NULL,
+  request_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  form_state TEXT NOT NULL DEFAULT 'draft',
+  form_version INTEGER NOT NULL DEFAULT 0,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  device_id TEXT NOT NULL DEFAULT '',
+  form_json TEXT NOT NULL,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  CONSTRAINT uk_work_recording_batch_request UNIQUE(created_by, request_id),
+  CHECK ("id" IS NULL OR length("id") <= 36),
+  CHECK ("created_by" IS NULL OR (typeof("created_by") = 'integer')),
+  CHECK ("request_id" IS NULL OR length("request_id") <= 128),
+  CHECK ("state" IS NULL OR length("state") <= 20),
+  CHECK ("version" IS NULL OR (typeof("version") = 'integer')),
+  CHECK ("form_state" IS NULL OR length("form_state") <= 20),
+  CHECK ("form_version" IS NULL OR (typeof("form_version") = 'integer')),
+  CHECK ("schema_version" IS NULL OR (typeof("schema_version") = 'integer')),
+  CHECK ("device_id" IS NULL OR length("device_id") <= 20),
+  CHECK ("last_error" IS NULL OR length("last_error") <= 500)
+);
+
+CREATE TABLE IF NOT EXISTS "gb_recorder_claim" (
+  channel_id INTEGER NOT NULL DEFAULT 0,
+  node_id INTEGER NOT NULL DEFAULT 0,
+  v_host TEXT NOT NULL DEFAULT '',
+  app TEXT NOT NULL DEFAULT '',
+  stream TEXT NOT NULL DEFAULT '',
+  recording_root TEXT NOT NULL DEFAULT '',
+  resource_key TEXT NOT NULL PRIMARY KEY,
+  owner_kind TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  CHECK ("channel_id" IS NULL OR (typeof("channel_id") = 'integer')),
+  CHECK ("node_id" IS NULL OR (typeof("node_id") = 'integer')),
+  CHECK ("v_host" IS NULL OR length("v_host") <= 128),
+  CHECK ("app" IS NULL OR length("app") <= 64),
+  CHECK ("stream" IS NULL OR length("stream") <= 64),
+  CHECK ("recording_root" IS NULL OR length("recording_root") <= 1024),
+  CHECK ("resource_key" IS NULL OR length("resource_key") <= 64),
+  CHECK ("owner_kind" IS NULL OR length("owner_kind") <= 20),
+  CHECK ("owner_id" IS NULL OR length("owner_id") <= 128),
+  CHECK ("state" IS NULL OR length("state") <= 20),
+  CHECK ("version" IS NULL OR (typeof("version") = 'integer')),
+  CHECK ("generation" IS NULL OR (typeof("generation") = 'integer'))
+);
+
+CREATE TABLE IF NOT EXISTS "gb_work_recording_file" (
+  file_id INTEGER NOT NULL PRIMARY KEY,
+  work_recording_id TEXT NOT NULL,
+  evidence TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NULL,
+  CHECK ("file_id" IS NULL OR (typeof("file_id") = 'integer')),
+  CHECK ("work_recording_id" IS NULL OR length("work_recording_id") <= 36),
+  CHECK ("evidence" IS NULL OR length("evidence") <= 500)
+);
 
 CREATE TABLE IF NOT EXISTS "gb_device_grant" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5146,6 +5270,87 @@ DELETE FROM sys_role_menu WHERE role_id=(SELECT MIN(id) FROM sys_role WHERE name
 INSERT INTO sys_role_menu(role_id,menu_id) SELECT (SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL),m.id FROM sys_menu m WHERE m.deleted_at IS NULL AND m.disable=0 AND ((m.type=2 AND m.path IN ('/home','/gb28181/device-mgmt/index','/gb28181/multi-screen-playback','/gb28181/device-record-playback/:channelId','/gb28181/cloud-recordings','/gb28181/alarm-management')) OR (m.type=3 AND m.permission IN ('gb28181:home:view','gb28181:device:view','gb28181:play:start','gb28181:play:monitor','gb28181:device-record:query','gb28181:device-record:play'))) AND NOT EXISTS(SELECT 1 FROM sys_role_menu x WHERE x.role_id=(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL) AND x.menu_id=m.id);
 DELETE FROM sys_casbin_rule WHERE v0=('role_' || (SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)) AND ((ptype='p' AND (v3<>'*' OR NOT ((v1='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId' AND v2='DELETE') OR (v1='/api/gb28181/alarms' AND v2='GET') OR (v1='/api/gb28181/alarms/:id' AND v2='GET') OR (v1='/api/gb28181/cloud-recordings/active' AND v2='GET') OR (v1='/api/gb28181/cloud-recordings/files' AND v2='GET') OR (v1='/api/gb28181/cloud-recordings/files/:id' AND v2='GET') OR (v1='/api/gb28181/cloud-recordings/files/options' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/catalog/tree' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/catalog/tree/:id' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/catalog/tree/:id/children' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channel/:id' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channel/:id/mounts' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channel/:id/record-query/options' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channel/:id/timeline' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/channels' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/device/:id' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/device/:id/status-events' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/devices' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/directory/tree' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/map/clusters' AND v2='GET') OR (v1='/api/gb28181/device-mgmt/map/markers' AND v2='GET') OR (v1='/api/gb28181/home/drilldown/play' AND v2='GET') OR (v1='/api/gb28181/home/drilldown/sip' AND v2='GET') OR (v1='/api/gb28181/home/drilldown/traffic' AND v2='GET') OR (v1='/api/gb28181/home/layout' AND v2='GET') OR (v1='/api/gb28181/home/summary' AND v2='GET') OR (v1='/api/gb28181/play/:streamId/monitor' AND v2='GET') OR (v1='/api/gb28181/sip/dashboard/snapshot' AND v2='GET') OR (v1='/api/gb28181/sip/service-config/default-playback-protocol' AND v2='GET') OR (v1='/api/gb28181/sip/service-config/fixed-address-playback' AND v2='GET') OR (v1='/api/gb28181/sip/service-config/playback-settings' AND v2='GET') OR (v1='/api/gb28181/zlm/nodes' AND v2='GET') OR (v1='/api/gb28181/zlm/nodes/:id/recordings/runtime/status' AND v2='GET') OR (v1='/api/gb28181/zlm/overview' AND v2='GET') OR (v1='/api/sysMenu/getRouters' AND v2='GET') OR (v1='/api/users/profile' AND v2='GET') OR (v1='/api/gb28181/cloud-recordings/files/:id/access' AND v2='POST') OR (v1='/api/gb28181/device-mgmt/channel/:id/playback-sessions' AND v2='POST') OR (v1='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId/actions' AND v2='POST') OR (v1='/api/gb28181/device-mgmt/channel/:id/record-query' AND v2='POST') OR (v1='/api/gb28181/play/:deviceId/:channelId' AND v2='POST') OR (v1='/api/gb28181/play/:deviceId/:channelId/authorization' AND v2='POST') OR (v1='/api/users/logout' AND v2='POST')))) OR ptype='g');
 INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT 'p',('role_' || (SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)),a.path,a.method,'*','','' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL) AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=('role_' || (SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+INSERT INTO "sys_menu" ("parent_id","path","name","component","title","hide","disable","sort","type","permission","icon","created_at","updated_at","created_by")
+SELECT COALESCE((SELECT MIN("id") FROM "sys_menu" WHERE "path"='/gb28181/multi-screen-playback' AND "type" IN (1,2) AND "deleted_at" IS NULL),0),'','Permission_gb28181_work_recording_start','','开启作业录像',1,0,100,3,'gb28181:work-recording:start','','2026-09-07 00:00:00','2026-09-07 00:00:00',1
+WHERE NOT EXISTS (SELECT 1 FROM "sys_menu" WHERE "permission"='gb28181:work-recording:start' AND "deleted_at" IS NULL);
+INSERT INTO "sys_menu" ("parent_id","path","name","component","title","hide","disable","sort","type","permission","icon","created_at","updated_at","created_by")
+SELECT COALESCE((SELECT MIN("id") FROM "sys_menu" WHERE "path"='/gb28181/multi-screen-playback' AND "type" IN (1,2) AND "deleted_at" IS NULL),0),'','Permission_gb28181_work_recording_stop','','停止作业录像',1,0,100,3,'gb28181:work-recording:stop','','2026-09-07 00:00:00','2026-09-07 00:00:00',1
+WHERE NOT EXISTS (SELECT 1 FROM "sys_menu" WHERE "permission"='gb28181:work-recording:stop' AND "deleted_at" IS NULL);
+INSERT INTO "sys_role_menu" ("role_id","menu_id")
+SELECT 1,m."id" FROM "sys_menu" m
+WHERE m."permission" IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m."deleted_at" IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "sys_role_menu" x WHERE x."role_id"=1 AND x."menu_id"=m."id");
+INSERT INTO "sys_api" ("title","path","method","api_group","created_at","updated_at","created_by")
+SELECT s.title,s.path,s.method,'GB28181 作业录像','2026-09-07 00:00:00','2026-09-07 00:00:00',1 FROM (
+ SELECT '开启作业录像' AS title,'/api/gb28181/work-recordings' AS path,'POST' AS method
+ UNION ALL SELECT '停止作业录像','/api/gb28181/work-recordings/:id/stop','POST'
+ UNION ALL SELECT '查询作业录像状态','/api/gb28181/work-recordings/status','GET'
+ UNION ALL SELECT '查询作业录像详情','/api/gb28181/work-recordings/:id','GET'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM "sys_api" a WHERE a."path"=s.path AND a."method"=s.method AND a."deleted_at" IS NULL);
+INSERT INTO "sys_menu_api" ("menu_id","api_id")
+SELECT m."id",a."id" FROM "sys_menu" m JOIN "sys_api" a ON a."deleted_at" IS NULL
+WHERE m."permission"='gb28181:work-recording:start' AND m."deleted_at" IS NULL
+  AND ((a."path"='/api/gb28181/work-recordings' AND a."method"='POST')
+    OR (a."path"='/api/gb28181/work-recordings/batches' AND a."method" IN ('POST','GET'))
+    OR (a."path"='/api/gb28181/work-recordings/batches/:batchId' AND a."method"='GET')
+    OR (a."path" IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a."method"='GET'))
+  AND NOT EXISTS (SELECT 1 FROM "sys_menu_api" x WHERE x."menu_id"=m."id" AND x."api_id"=a."id");
+INSERT INTO "sys_menu_api" ("menu_id","api_id")
+SELECT m."id",a."id" FROM "sys_menu" m JOIN "sys_api" a ON a."deleted_at" IS NULL
+WHERE m."permission"='gb28181:work-recording:stop' AND m."deleted_at" IS NULL
+  AND ((a."path"='/api/gb28181/work-recordings/:id/stop' AND a."method"='POST')
+    OR (a."path"='/api/gb28181/work-recordings/batches/:batchId/stop' AND a."method"='POST')
+    OR (a."path"='/api/gb28181/work-recordings/batches' AND a."method"='GET')
+    OR (a."path"='/api/gb28181/work-recordings/batches/:batchId' AND a."method"='GET')
+    OR (a."path" IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a."method"='GET'))
+  AND NOT EXISTS (SELECT 1 FROM "sys_menu_api" x WHERE x."menu_id"=m."id" AND x."api_id"=a."id");
+INSERT INTO "sys_casbin_rule" ("ptype","v0","v1","v2","v3","v4","v5")
+SELECT DISTINCT 'p',('role_' || rm."role_id"),a."path",a."method",'*','',''
+FROM "sys_role_menu" rm
+JOIN "sys_menu" m ON m."id"=rm."menu_id"
+JOIN "sys_menu_api" ma ON ma."menu_id"=m."id"
+JOIN "sys_api" a ON a."id"=ma."api_id"
+WHERE m."permission" IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m."deleted_at" IS NULL AND a."deleted_at" IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "sys_casbin_rule" c WHERE c."ptype"='p' AND c."v0"=('role_' || rm."role_id") AND c."v1"=a."path" AND c."v2"=a."method" AND c."v3"='*');
+INSERT INTO "sys_menu" ("parent_id","path","name","component","title","hide","disable","sort","type","permission","icon","created_at","updated_at","created_by")
+SELECT COALESCE((SELECT MIN("id") FROM "sys_menu" WHERE "path"='/gb28181/multi-screen-playback' AND "type" IN (1,2) AND "deleted_at" IS NULL),0),'','Permission_gb28181_work_recording_form','','编辑作业表单',1,0,100,3,'gb28181:work-recording:form','','2026-09-07 00:00:00','2026-09-07 00:00:00',1
+WHERE NOT EXISTS (SELECT 1 FROM "sys_menu" WHERE "permission"='gb28181:work-recording:form' AND "deleted_at" IS NULL);
+INSERT INTO "sys_role_menu" ("role_id","menu_id")
+SELECT 1,m."id" FROM "sys_menu" m
+WHERE m."permission"='gb28181:work-recording:form' AND m."deleted_at" IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "sys_role_menu" x WHERE x."role_id"=1 AND x."menu_id"=m."id");
+INSERT INTO "sys_api" ("title","path","method","api_group","created_at","updated_at","created_by")
+SELECT s.title,s.path,s.method,'GB28181 作业录像','2026-09-07 00:00:00','2026-09-07 00:00:00',1 FROM (
+ SELECT '我的作业列表' AS title,'/api/gb28181/work-recordings' AS path,'GET' AS method
+ UNION ALL SELECT '查询作业台账','/api/gb28181/work-recordings/batches','GET'
+ UNION ALL SELECT '查询作业台账详情','/api/gb28181/work-recordings/batches/:batchId','GET'
+ UNION ALL SELECT '查询台账表单','/api/gb28181/work-recordings/batches/:batchId/form','GET'
+ UNION ALL SELECT '保存台账草稿','/api/gb28181/work-recordings/batches/:batchId/form','PUT'
+ UNION ALL SELECT '查询作业表单','/api/gb28181/work-recordings/:id/form','GET'
+ UNION ALL SELECT '保存作业草稿','/api/gb28181/work-recordings/:id/form','PUT'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM "sys_api" a WHERE a."path"=s.path AND a."method"=s.method AND a."deleted_at" IS NULL);
+INSERT INTO "sys_menu_api" ("menu_id","api_id")
+SELECT m."id",a."id" FROM "sys_menu" m JOIN "sys_api" a ON a."deleted_at" IS NULL
+WHERE m."permission" IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m."deleted_at" IS NULL
+  AND a."method"='GET' AND a."path" IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form')
+  AND NOT EXISTS (SELECT 1 FROM "sys_menu_api" x WHERE x."menu_id"=m."id" AND x."api_id"=a."id");
+INSERT INTO "sys_menu_api" ("menu_id","api_id")
+SELECT m."id",a."id" FROM "sys_menu" m JOIN "sys_api" a ON a."deleted_at" IS NULL
+WHERE m."permission"='gb28181:work-recording:form' AND m."deleted_at" IS NULL
+  AND ((a."method"='GET' AND a."path" IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form'))
+    OR (a."method"='PUT' AND a."path"='/api/gb28181/work-recordings/batches/:batchId/form')
+    OR (a."method"='PUT' AND a."path"='/api/gb28181/work-recordings/:id/form'))
+  AND NOT EXISTS (SELECT 1 FROM "sys_menu_api" x WHERE x."menu_id"=m."id" AND x."api_id"=a."id");
+INSERT INTO "sys_casbin_rule" ("ptype","v0","v1","v2","v3","v4","v5")
+SELECT DISTINCT 'p',('role_' || rm."role_id"),a."path",a."method",'*','',''
+FROM "sys_role_menu" rm
+JOIN "sys_menu" m ON m."id"=rm."menu_id"
+JOIN "sys_menu_api" ma ON ma."menu_id"=m."id"
+JOIN "sys_api" a ON a."id"=ma."api_id"
+WHERE m."permission" IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form') AND m."deleted_at" IS NULL AND a."deleted_at" IS NULL
+  AND NOT EXISTS (SELECT 1 FROM "sys_casbin_rule" c WHERE c."ptype"='p' AND c."v0"=('role_' || rm."role_id") AND c."v1"=a."path" AND c."v2"=a."method" AND c."v3"='*');
 INSERT INTO "sys_menu" ("parent_id","path","name","component","title","type","permission","hide","created_at","updated_at","created_by")
 SELECT ((SELECT MIN("id") FROM "sys_menu" WHERE "path" IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND "deleted_at" IS NULL)),'','','','查看运行监控',3,'gb28181:traffic:view',1,'2026-09-07 00:00:00','2026-09-07 00:00:00',1
 WHERE ((SELECT MIN("id") FROM "sys_menu" WHERE "path" IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND "deleted_at" IS NULL)) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "sys_menu" WHERE "permission"='gb28181:traffic:view' AND "deleted_at" IS NULL);

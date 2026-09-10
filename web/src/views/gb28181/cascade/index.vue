@@ -42,7 +42,7 @@
         <s-layout-search class="cascade-search-panel">
           <template #fields>
             <a-input-search v-model="keyword" allow-clear placeholder="平台名称 / 编码 / 地址" class="cascade-search" />
-            <div class="cascade-status-filter">
+            <div class="cascade-status-filter" :class="{ 'is-all': statusFilter === 'all' }">
               <a-select v-model="statusFilter">
                 <a-option value="all">全部状态</a-option>
                 <a-option value="online">在线</a-option>
@@ -80,6 +80,7 @@
                 <div class="entity-cell">
                   <strong>{{ record.name }}</strong>
                   <code>{{ record.upstreamServerId }}</code>
+                  <a-tag v-if="record.credentialNeedsReset" color="orange">需重新填写认证密码</a-tag>
                 </div>
               </template>
             </a-table-column>
@@ -110,17 +111,17 @@
                 <div class="entity-cell"><span>{{ registrationLabel(record.registration) }} / {{ heartbeatLabel(record.heartbeat) }}</span><small>{{ formatRelative(record.heartbeatAt || record.registerAt) }}</small></div>
               </template>
             </a-table-column>
-            <a-table-column title="共享" :width="108">
-              <template #cell="{ record }"><span>{{ record.projectionRevision ? `版本 ${record.projectionRevision}` : "未配置" }}</span></template>
+            <a-table-column title="共享" :width="190">
+              <template #cell="{ record }"><a-link @click="openSharedDevices(record)">{{ sharedSummary(record.id) }}</a-link></template>
             </a-table-column>
-            <a-table-column title="操作" :width="250" align="center" :fixed="isMobile ? '' : 'right'">
+            <a-table-column title="操作" :width="280" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions cascade-actions">
-                  <a-link v-if="canManage" @click="openEdit(record)"><Settings2 :size="14" />编辑</a-link>
-                  <a-link v-if="canShare" @click="openShare(record)"><Share2 :size="14" />共享</a-link>
-                  <a-link v-if="canReconnect && record.enabled" :loading="actionId === record.id" @click="reconnect(record)"><RotateCw :size="14" />重连</a-link>
+                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><Settings2 :size="14" />编辑</a-link>
+                  <a-link v-if="canShare" class="uvp-table-action uvp-table-action--assign" @click="openShare(record)"><Share2 :size="14" />共享</a-link>
+                  <a-link v-if="canReconnect && record.enabled" class="uvp-table-action uvp-table-action--sync" :loading="actionId === record.id" @click="reconnect(record)"><RotateCw :size="14" />重连</a-link>
                   <a-dropdown trigger="click">
-                    <a-link><MoreHorizontal :size="16" /></a-link>
+                    <a-link class="uvp-table-action" aria-label="更多操作"><MoreHorizontal :size="16" /></a-link>
                     <template #content>
                       <a-doption v-if="canEnable" @click="toggleEnabled(record)">{{ record.enabled ? "停用" : "启用" }}</a-doption>
                       <a-doption v-if="canManage" class="cascade-danger" @click="confirmDelete(record)">删除</a-doption>
@@ -150,7 +151,7 @@
           <header><Building2 :size="17" /><h3>上级平台</h3></header>
           <div class="form-grid">
             <a-form-item label="平台名称" required><a-input v-model="form.name" maxlength="128" /></a-form-item>
-            <a-form-item label="上级平台 ID" required><a-input v-model="form.upstreamServerId" maxlength="20" /></a-form-item>
+            <a-form-item label="上级平台 ID" required><a-input v-model="form.upstreamServerId" maxlength="20" @input="updateUpstreamDomain" /></a-form-item>
             <a-form-item label="上级域" required><a-input v-model="form.upstreamDomain" /></a-form-item>
             <a-form-item label="上级地址" required><a-input v-model="form.host" /></a-form-item>
             <a-form-item label="上级端口" required><a-input-number v-model="form.port" :min="1" :max="65535" /></a-form-item>
@@ -168,11 +169,20 @@
           <div class="form-grid">
             <a-form-item label="本平台设备 ID" required><a-input v-model="form.localDeviceId" maxlength="20" /></a-form-item>
             <a-form-item label="本平台域" required><a-input v-model="form.localDomain" /></a-form-item>
-            <a-form-item label="本地 SIP 地址" required><a-input v-model="form.localSipIp" placeholder="监听或宣告 IP" /></a-form-item>
+            <a-form-item label="本地 SIP 地址" required>
+              <a-select v-model="form.localSipIp" :loading="networkLoading" allow-search allow-create placeholder="选择本机网卡或输入宣告地址">
+                <a-option v-for="item in localSipAddresses" :key="item.ip" :value="item.ip" :label="item.ip">
+                  {{ item.ip }} <span v-if="item.interfaceName">（{{ item.interfaceName }}）</span>
+                  <a-tag v-if="item.recommended" size="small" color="green">推荐</a-tag>
+                  <a-tag v-if="item.virtual" size="small">虚拟网卡</a-tag>
+                </a-option>
+              </a-select>
+            </a-form-item>
             <a-form-item label="本地 SIP 端口" required><a-input-number v-model="form.localSipPort" :min="1" :max="65535" /></a-form-item>
             <a-form-item label="媒体宣告地址"><a-input v-model="form.mediaAdvertiseIp" allow-clear /></a-form-item>
             <a-form-item label="认证用户名"><a-input v-model="form.authUsername" allow-clear /></a-form-item>
             <a-form-item label="认证密码">
+              <a-alert v-if="editing?.credentialNeedsReset" type="warning">原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert>
               <a-input-password v-model="form.password" allow-clear :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'" />
             </a-form-item>
           </div>
@@ -203,6 +213,20 @@
           <a-button type="primary" :loading="saving" @click="savePlatform">保存</a-button>
         </div>
       </template>
+    </a-modal>
+
+    <a-modal v-model:visible="sharedDevicesVisible" :title="`已共享设备 · ${sharedDevicesPlatform?.name || ''}`" width="min(780px, calc(100vw - 24px))" :footer="false" unmount-on-close>
+      <a-spin :loading="sharedDevicesLoading" style="width: 100%">
+        <a-alert v-if="sharedDevicesError" type="error">{{ sharedDevicesError }} <a-link @click="openSharedDevices(sharedDevicesPlatform!)">重试</a-link></a-alert>
+        <a-table v-else :data="sharedDevicesRows" row-key="sourceDeviceId" :pagination="{ pageSize: 10 }" :bordered="false">
+          <template #columns>
+            <a-table-column title="设备名称" data-index="name" />
+            <a-table-column title="共享设备编号" data-index="publishedDeviceId" />
+            <a-table-column title="已选通道数" data-index="channelCount" :width="110" />
+          </template>
+          <template #empty><a-empty description="尚未共享设备" /></template>
+        </a-table>
+      </a-spin>
     </a-modal>
 
     <a-modal
@@ -251,7 +275,7 @@
           :bordered="false"
           :row-selection="{ type: 'checkbox', showCheckedAll: true }"
           :pagination="devicePagination"
-          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          :scroll="{ x: '100%', minWidth: 940, y: 360 }"
           @page-change="handleDevicePageChange"
           @page-size-change="handleDevicePageSizeChange"
           @update:selected-keys="handleDeviceSelectionChange"
@@ -275,6 +299,16 @@
             <a-table-column title="状态" :width="90" align="center">
               <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
             </a-table-column>
+            <a-table-column title="允许云台" :width="100" align="center">
+              <template #cell="{ record }">
+                <a-switch
+                  size="small"
+                  :model-value="devicePTZAllowed(record.id)"
+                  :disabled="!sharingPlatform?.ptzEnabled || !selectedDeviceKeys.includes(record.id)"
+                  @change="(value: boolean | string | number) => setDevicePTZAllowed(record, Boolean(value))"
+                />
+              </template>
+            </a-table-column>
           </template>
           <template #empty><a-empty description="暂无符合条件的设备" /></template>
         </a-table>
@@ -288,7 +322,7 @@
           :bordered="false"
           :row-selection="{ type: 'checkbox', showCheckedAll: true }"
           :pagination="channelPagination"
-          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          :scroll="{ x: '100%', minWidth: 940, y: 360 }"
           @page-change="handleChannelPageChange"
           @page-size-change="handleChannelPageSizeChange"
           @update:selected-keys="handleChannelSelectionChange"
@@ -310,6 +344,16 @@
             </a-table-column>
             <a-table-column title="状态" :width="90" align="center">
               <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
+            </a-table-column>
+            <a-table-column title="允许云台" :width="100" align="center">
+              <template #cell="{ record }">
+                <a-switch
+                  size="small"
+                  :model-value="channelPTZAllowed(record.id)"
+                  :disabled="!sharingPlatform?.ptzEnabled || !selectedChannelIds.includes(record.id)"
+                  @change="(value: boolean | string | number) => setChannelPTZAllowed(record.id, Boolean(value))"
+                />
+              </template>
             </a-table-column>
           </template>
           <template #empty><a-empty description="暂无符合条件的通道" /></template>
@@ -353,6 +397,7 @@ import {
   type CascadeShares,
   type GbChannel,
   type GbDevice,
+  type SipNetworkAddress,
   type SipConfigSummary
 } from "@/api/gb28181";
 import {
@@ -363,7 +408,9 @@ import {
 } from "../device-mgmt/api";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
-import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, uniquePublishedGbId, validGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, resolveChannelPTZAllowed, validGbId, validateCascadePlatform } from "./cascadeState";
+
+import { deriveDomain } from "../sip/sipSetupRules";
 
 type ShareMode = "device" | "channel";
 type ChannelOption = (GbChannel | ChannelVO) & { sourceDeviceId: number };
@@ -389,6 +436,21 @@ const editorVisible = ref(false);
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
 const localSipConfig = ref<SipConfigSummary | null>(null);
+const localSipAddresses = ref<SipNetworkAddress[]>([]);
+const networkLoading = ref(false);
+async function loadLocalSipAddresses() {
+  networkLoading.value = true;
+  try {
+    const response = await fetchSipNetworkInterfaces();
+    if (response.code !== 0 || response.data.scanStatus === "failed") throw new Error("network scan failed");
+    localSipAddresses.value = response.data.items.filter(item => !item.loopback && !item.listenOnly && item.ip !== "0.0.0.0");
+  } catch {
+    localSipAddresses.value = [];
+    Message.warning("网卡列表读取失败，可手动输入本地 SIP 地址");
+  } finally {
+    networkLoading.value = false;
+  }
+}
 let localSipConfigRequest: Promise<void> | null = null;
 
 const summary = computed(() => ({
@@ -406,6 +468,45 @@ const filteredPlatforms = computed(() => {
   });
 });
 
+const sharedSnapshots = reactive(new Map<number, CascadeShares>());
+const sharedDevicesVisible = ref(false);
+const sharedDevicesLoading = ref(false);
+const sharedDevicesError = ref("");
+const sharedDevicesPlatform = ref<CascadePlatform | null>(null);
+const sharedDevicesRows = ref<Array<CascadeDeviceProjection & { channelCount: number }>>([]);
+function sharedSummary(id: number) {
+  const snapshot = sharedSnapshots.get(id);
+  if (!snapshot) return "查看已共享设备";
+  const devices = snapshot.devices.filter(item => item.active !== false);
+  const channels = snapshot.channels.filter(item => item.active !== false);
+  return devices.length || channels.length ? `${devices.length} 个设备 / ${channels.length} 个通道` : "未配置";
+}
+async function loadSharedSnapshot(id: number) {
+  const response: any = await getCascadeShares(id);
+  const snapshot: CascadeShares = response?.data || response;
+  sharedSnapshots.set(id, snapshot);
+  return snapshot;
+}
+async function openSharedDevices(platform: CascadePlatform) {
+  sharedDevicesPlatform.value = platform;
+  sharedDevicesVisible.value = true;
+  sharedDevicesLoading.value = true;
+  sharedDevicesError.value = "";
+  sharedDevicesRows.value = [];
+  try {
+    const snapshot = await loadSharedSnapshot(platform.id);
+    if (sharedDevicesPlatform.value?.id !== platform.id) return;
+    sharedDevicesRows.value = snapshot.devices.filter(item => item.active !== false).map(device => ({
+      ...device,
+      channelCount: snapshot.channels.filter(channel => channel.active !== false && (channel.sourceDeviceId === device.sourceDeviceId || (device.id != null && channel.deviceProjectionId === device.id))).length
+    }));
+  } catch {
+    if (sharedDevicesPlatform.value?.id === platform.id) sharedDevicesError.value = "已共享设备读取失败，请重试。";
+  } finally {
+    if (sharedDevicesPlatform.value?.id === platform.id) sharedDevicesLoading.value = false;
+  }
+}
+
 async function refresh() {
   if (!canView.value) return;
   loading.value = true;
@@ -413,6 +514,8 @@ async function refresh() {
   try {
     const response: any = await listCascadePlatforms();
     platforms.value = response?.list || response?.data?.list || [];
+    sharedSnapshots.clear();
+    await Promise.allSettled(platforms.value.map(platform => loadSharedSnapshot(platform.id)));
   } catch {
     errorMessage.value = "国标级联平台加载失败，请检查服务状态后重试。";
   } finally {
@@ -449,7 +552,12 @@ async function loadLocalSipConfig() {
   return localSipConfigRequest;
 }
 
+function updateUpstreamDomain(value: string) {
+  if (validGbId(value)) form.upstreamDomain = deriveDomain(value);
+}
+
 async function openCreate() {
+  void loadLocalSipAddresses();
   if (!localSipConfig.value) await loadLocalSipConfig();
   editing.value = null;
   Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined));
@@ -457,6 +565,7 @@ async function openCreate() {
 }
 
 function openEdit(platform: CascadePlatform) {
+  void loadLocalSipAddresses();
   editing.value = platform;
   Object.assign(form, defaultCascadePlatform(), {
     name: platform.name,
@@ -555,6 +664,7 @@ const deviceDirectory = reactive(new Map<number, ShareDevice>());
 const channelsByDevice = reactive(new Map<number, ChannelOption[]>());
 const channelRows = ref<ChannelOption[]>([]);
 const selectedChannelIds = ref<number[]>([]);
+const channelPTZPermissions = reactive(new Map<number, boolean>());
 const shareMode = ref<ShareMode>("channel");
 const deviceKeyword = ref("");
 const channelKeyword = ref("");
@@ -594,6 +704,29 @@ function unwrapPage<T>(response: any): T {
 
 function deviceNameByCode(deviceCode: string) {
   return [...deviceDirectory.values()].find(device => device.deviceId === deviceCode)?.name || deviceCode || "-";
+}
+
+function channelPTZAllowed(channelId: number) {
+  return channelPTZPermissions.get(channelId) || false;
+}
+
+function setChannelPTZAllowed(channelId: number, allowed: boolean) {
+  channelPTZPermissions.set(channelId, allowed);
+}
+
+function devicePTZAllowed(deviceId: number) {
+  const channels = channelsByDevice.get(deviceId) || [];
+  return channels.length > 0 && channels.every(channel => channelPTZAllowed(channel.id));
+}
+
+async function setDevicePTZAllowed(device: ShareDevice, allowed: boolean) {
+  const channels = await loadAllDeviceChannels(device);
+  channels.forEach(channel => setChannelPTZAllowed(channel.id, allowed));
+}
+
+function ensureChannelPTZPermission(channelId: number) {
+  if (channelPTZPermissions.has(channelId)) return;
+  channelPTZPermissions.set(channelId, resolveChannelPTZAllowed(undefined, Boolean(sharingPlatform.value?.ptzEnabled)));
 }
 
 async function loadShareDevices(page = 1) {
@@ -688,6 +821,7 @@ async function handleChannelSelectionChange(keys: Array<string | number>) {
   const next = new Set(selectedChannelIds.value.filter(id => !currentIds.has(id)));
   keys.forEach(key => next.add(Number(key)));
   selectedChannelIds.value = [...next];
+  selectedChannelIds.value.forEach(ensureChannelPTZPermission);
   await Promise.all(channelRows.value.filter(channel => next.has(channel.id)).map(resolveChannelSourceDevice));
 }
 
@@ -701,7 +835,14 @@ async function handleDeviceSelectionChange(keys: Array<string | number>) {
     const channelGroups = await Promise.all(changedDevices.map(loadAllDeviceChannels));
     channelGroups.forEach((channels, index) => {
       const isSelected = next.has(changedDevices[index].id);
-      channels.forEach(channel => isSelected ? selected.add(channel.id) : selected.delete(channel.id));
+      channels.forEach(channel => {
+        if (isSelected) {
+          selected.add(channel.id);
+          ensureChannelPTZPermission(channel.id);
+        } else {
+          selected.delete(channel.id);
+        }
+      });
     });
     selectedChannelIds.value = [...selected];
   } finally {
@@ -721,11 +862,13 @@ async function openShare(platform: CascadePlatform) {
   channelPage.page = 1;
   deviceDirectory.clear();
   channelsByDevice.clear();
+  channelPTZPermissions.clear();
   channelRows.value = [];
   try {
     const projectionResponse: any = await getCascadeShares(platform.id);
     shares.value = projectionResponse?.data || projectionResponse;
     selectedChannelIds.value = (shares.value?.channels || []).filter(item => item.active !== false).map(item => item.sourceChannelId);
+    (shares.value?.channels || []).forEach(item => channelPTZPermissions.set(item.sourceChannelId, item.ptzAllowed));
     await Promise.all([loadShareDevices(1), loadShareChannels(1)]);
   } catch {
     shareError.value = "共享资源加载失败，请稍后重试。";
@@ -742,25 +885,31 @@ async function saveShares() {
     const existingDevices = new Map((shares.value?.devices || []).map(item => [item.sourceDeviceId, item]));
     const existingChannels = new Map((shares.value?.channels || []).map(item => [item.sourceChannelId, item]));
     const allLoadedChannels = [...channelsByDevice.values()].flat().concat(channelRows.value);
-    const loadedChannelMap = new Map(allLoadedChannels.map(item => [item.id, item]));
+    const loadedChannelMap = new Map<number, ChannelOption>();
+    for (const channel of allLoadedChannels) {
+      const previous = loadedChannelMap.get(channel.id);
+      loadedChannelMap.set(channel.id, {
+        ...channel,
+        sourceDeviceId: channel.sourceDeviceId || previous?.sourceDeviceId || channelSourceDeviceIds.value.get(channel.id) || 0
+      });
+    }
     const requiredDeviceIds = new Set(selectedDeviceIds.value);
     const deviceProjection: CascadeDeviceProjection[] = [...requiredDeviceIds].map(id => {
       const source = deviceDirectory.get(id);
       const existing = existingDevices.get(id);
       return { sourceDeviceId: id, publishedDeviceId: existing?.publishedDeviceId || source?.deviceId || "", name: existing?.name || source?.name || source?.deviceId || "" };
     });
-    const usedPublishedIds = new Set(deviceProjection.map(item => item.publishedDeviceId).filter(Boolean));
     const channelProjection: CascadeChannelProjection[] = selectedChannelIds.value.map(id => {
       const source = loadedChannelMap.get(id);
       const existing = existingChannels.get(id);
-      const publishedChannelId = uniquePublishedGbId(existing?.publishedChannelId || source?.channelId || "", id, usedPublishedIds);
+      const publishedChannelId = source?.channelId || existing?.publishedChannelId || "";
       return {
         sourceDeviceId: source?.sourceDeviceId || existing?.sourceDeviceId || 0,
         sourceChannelId: id,
         publishedChannelId,
         name: existing?.name || source?.name || source?.channelId || "",
         parentOverride: existing?.parentOverride || "",
-        ptzAllowed: existing?.ptzAllowed || false
+        ptzAllowed: resolveChannelPTZAllowed(channelPTZPermissions.get(id) ?? existing?.ptzAllowed, Boolean(sharingPlatform.value?.ptzEnabled))
       };
     });
     if (channelProjection.some(item => !item.sourceDeviceId)) {
@@ -809,7 +958,21 @@ onMounted(() => {
 .cascade-search-panel { margin-bottom: 0; }
 .cascade-search { flex: 0 0 280px; width: 280px; }
 .cascade-status-filter { flex: 0 0 148px; width: 148px; }
-.cascade-status-filter :deep(.arco-select) { width: 100%; }
+.cascade-status-filter :deep(.arco-select) {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.cascade-status-filter :deep(.arco-select-view-focus) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.cascade-status-filter.is-all :deep(.arco-select-view-value) {
+  color: var(--uvp-text-tertiary) !important;
+}
 .cascade-table { min-height: 260px; }
 .entity-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .entity-cell strong, .entity-cell span { overflow: hidden; color: var(--color-text-1); text-overflow: ellipsis; white-space: nowrap; }

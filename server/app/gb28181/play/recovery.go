@@ -15,6 +15,7 @@ import (
 var (
 	ErrLiveRecoveryPending    = errors.New("live recovery pending")
 	ErrReaderCountUnavailable = errors.New("reader count unavailable")
+	ErrSourceProtected        = errors.New("source protected")
 )
 
 type RecoveryStats struct {
@@ -68,7 +69,11 @@ func (s *Service) RecoverLiveSessions(ctx context.Context) (RecoveryStats, error
 		}
 		if definitelyOffline {
 			if cleanupErr := s.StopIfPersistedCurrent(ctx, channel.StreamID, ssrc); cleanupErr != nil {
-				stats.Failed++
+				if errors.Is(cleanupErr, ErrSourceProtected) {
+					stats.Skipped++
+				} else {
+					stats.Failed++
+				}
 			} else {
 				stats.Cleaned++
 			}
@@ -244,21 +249,23 @@ func (s *Service) StopIfPersistedCurrent(ctx context.Context, streamID, ssrc str
 		_, err := s.StopIfCurrent(ctx, pending)
 		return err
 	}
-	s.endPlaybackRecording(ctx, streamID)
-	if err := s.closePersistedRTP(ctx, streamID); err != nil {
-		return err
-	}
-	cleared, err := s.channels.ClearIfCurrent(ctx, streamID, ssrc)
-	if err != nil || !cleared {
-		return err
-	}
-	if current, ok := s.lookupLocationRef(streamID); ok && current.SSRC == ssrc {
-		s.unbindLocation(current)
-	}
-	if s.ssrcAllocator != nil {
-		s.ssrcAllocator.Release(ssrc)
-	}
-	return nil
+	return s.closeSource(ctx, streamID, func(closeCtx context.Context) error {
+		s.endPlaybackRecording(closeCtx, streamID)
+		if err := s.closePersistedRTP(closeCtx, streamID); err != nil {
+			return err
+		}
+		cleared, err := s.channels.ClearIfCurrent(closeCtx, streamID, ssrc)
+		if err != nil || !cleared {
+			return err
+		}
+		if current, ok := s.lookupLocationRef(streamID); ok && current.SSRC == ssrc {
+			s.unbindLocation(current)
+		}
+		if s.ssrcAllocator != nil {
+			s.ssrcAllocator.Release(ssrc)
+		}
+		return nil
+	})
 }
 
 func (s *Service) closePersistedRTP(ctx context.Context, streamID string) error {

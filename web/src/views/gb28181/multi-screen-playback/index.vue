@@ -21,8 +21,13 @@ import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
+import WorkRecordingJobs from "./WorkRecordingJobs.vue";
+import WorkRecordingBatches from "./WorkRecordingBatches.vue";
+import WorkRecordingFormDialog from "./WorkRecordingFormDialog.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
+import { useWorkRecording } from "./useWorkRecording";
+import { startWorkRecordingBatch, stopWorkRecordingBatch, type WorkRecordingBatchSnapshot } from "@/api/gb28181-work-recording";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
@@ -44,6 +49,13 @@ interface FavoriteChannelGroup {
     channels: ChannelVO[];
 }
 
+const workJobsVisible = ref(false);
+const workBatchesVisible = ref(false);
+const workBatchAction = ref<"start" | "stop" | null>(null);
+const workBatchError = ref("");
+const activeWorkBatch = ref<WorkRecordingBatchSnapshot | null>(null);
+const workFormJob = ref<{ id: string; channelName: string } | null>(null);
+const workFormBatch = ref<string | null>(null);
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const playbackConsole = usePlaybackConsoleStore();
@@ -52,6 +64,9 @@ const permissions = computed(() => userStore.account.permissions ?? []);
 const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
+const canStartWorkRecording = computed(() => hasPermission("gb28181:work-recording:start"));
+const canEditWorkForm = computed(() => hasPermission("gb28181:work-recording:form"));
+const canStopWorkRecording = computed(() => hasPermission("gb28181:work-recording:stop"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
 const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPermission("gb28181:ptz:control"));
 const monitorAreaRef = ref<HTMLElement | null>(null);
@@ -69,6 +84,7 @@ const pollingError = ref("");
 const pollingRemainingSeconds = ref(0);
 const playAllLoading = ref(false);
 const ptzMotion = ref<{ channelId: number; direction: PtzDirection } | null>(null);
+const workRecording = useWorkRecording();
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let pollingCountdownTimer: ReturnType<typeof setInterval> | null = null;
 let pollingNextCycleAt = 0;
@@ -80,9 +96,75 @@ function createSlot(index: number): PlaybackSlot {
 }
 
 const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => createSlot(index)));
+const workBatchChannels = computed(() => slots.slice(0, 4).flatMap(slot => slot.channel ? [slot.channel] : []));
+const workBatchRecording = ref(false);
+const workBatchToggleDisabled = computed(() => workBatchAction.value !== null || (workBatchRecording.value
+    ? (!activeWorkBatch.value?.id || !canStopWorkRecording.value)
+    : (workBatchChannels.value.length < 1 || workBatchChannels.value.length > 4 || !canStartWorkRecording.value)));
+const workBatchToggleLabel = computed(() => workBatchAction.value ? (workBatchAction.value === "start" ? "批次开始中" : "批次结束中") : workBatchRecording.value ? "结束批次录制" : "开始批次录制");
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
+const focusedWorkChannel = computed(() => focusedSlot.value?.channel || null);
+const focusedWorkSnapshot = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.snapshot(channel.id) : null;
+});
+const focusedWorkLoadState = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.loadState(channel.id) : "idle";
+});
+const focusedWorkError = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? workRecording.error(channel.id) || focusedWorkSnapshot.value?.lastError || "" : "";
+});
+const focusedWorkAction = computed(() => {
+    const channel = focusedWorkChannel.value;
+    const snapshot = focusedWorkSnapshot.value;
+    if (!channel) return "开始录制";
+    const action = workRecording.pendingAction(channel.id);
+    if (action === "start" || snapshot?.state === "starting") return "开始中";
+    if (action === "stop" || snapshot?.state === "stopping") return "结束中";
+    if (focusedWorkLoadState.value !== "ready") return "待核实";
+    if (snapshot?.state === "unknown") return snapshot.id && canStopWorkRecording.value ? "重试结束" : "待核实";
+    return snapshot?.state === "recording" ? "结束录制" : "开始录制";
+});
+const focusedWorkStatus = computed(() => {
+    const channel = focusedWorkChannel.value;
+    const snapshot = focusedWorkSnapshot.value;
+    if (!channel) return "请选择播放窗口";
+    if (focusedWorkLoadState.value === "loading") return "正在查询录像状态";
+    if (focusedWorkLoadState.value !== "ready") return "录像状态待核实";
+    if (!snapshot) return "录像状态待核实";
+    if (snapshot.state === "unknown") return "录像状态待核实";
+    if (snapshot.state === "recording") return "录像中";
+    if (snapshot.state === "starting") return "开始中";
+    if (snapshot.state === "stopping") return "结束中";
+    if (snapshot.state === "stopped") return "已结束";
+    if (snapshot.state === "failed") return "开始失败";
+    return "未录制";
+});
+const focusedWorkTargetLabel = computed(() => {
+    const channel = focusedWorkChannel.value;
+    return channel ? (channel.name || channel.alias || channel.channelId) : "未选择播放窗口";
+});
+const workRecordingToggleDisabled = computed(() => {
+    const channel = focusedWorkChannel.value;
+    if (!channel) return true;
+    const snapshot = focusedWorkSnapshot.value;
+    const action = workRecording.pendingAction(channel.id);
+    if (action || focusedWorkLoadState.value !== "ready" || !snapshot || snapshot.state === "starting" || snapshot.state === "stopping") return true;
+    if (snapshot.state === "recording" || snapshot.state === "unknown") return !snapshot.id || !canStopWorkRecording.value;
+    return !canStartWorkRecording.value;
+});
+const workRecordingToggleIsStop = computed(() => {
+    const snapshot = focusedWorkSnapshot.value;
+    return snapshot?.state === "recording" || (snapshot?.state === "unknown" && Boolean(snapshot.id));
+});
+const workRecordingToggleLabel = computed(() => {
+    const target = focusedWorkTargetLabel.value;
+    return `${focusedWorkAction.value}（${target}）`;
+});
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
 const pollingProgressDegrees = computed(() => {
     if (!pollingSettings.intervalSeconds) return 0;
@@ -173,6 +255,7 @@ async function assignChannel(channel: ChannelVO) {
     }
     target.channel = channel;
     focusedIndex.value = target.index;
+    void workRecording.refresh([channel.id]);
     await playSlot(target);
 }
 
@@ -188,6 +271,58 @@ async function retrySlot(slot: PlaybackSlot) {
 
 function focusSlot(slot: PlaybackSlot) {
     focusedIndex.value = slot.index;
+    if (slot.channel) {
+        const channelId = slot.channel.id;
+        const current = workRecording.snapshot(channelId);
+        if (workRecording.loadState(channelId) !== "ready" || current?.state === "unknown") void workRecording.refresh([channelId]);
+        else void workRecording.ensureStatus(channelId);
+    }
+}
+
+async function toggleWorkRecording() {
+    const channel = focusedWorkChannel.value;
+    if (!channel || workRecordingToggleDisabled.value) return;
+    const stopping = workRecordingToggleIsStop.value;
+    const channelName = channel.name || channel.alias || channel.channelId;
+    const result = stopping
+        ? await workRecording.stop(channel.id)
+        : await workRecording.start(channel.id);
+    if (result) {
+        if (!stopping && result.state === "recording" && result.id) {
+            if (!workFormJob.value) workFormJob.value = { id: result.id, channelName };
+            else Message.info(`${channelName}已开始录制，可在作业记录中填写表单`);
+        }
+        return;
+    }
+    const reason = workRecording.error(channel.id);
+    if (reason) Message.error(reason);
+}
+
+function newBatchRequestId() {
+    return typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `work-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function toggleWorkBatchRecording() {
+    if (workBatchToggleDisabled.value) return;
+    const channelIds = workBatchChannels.value.map(channel => channel.id);
+    workBatchAction.value = workBatchRecording.value ? "stop" : "start";
+    workBatchError.value = "";
+    try {
+        if (workBatchRecording.value) {
+            if (!activeWorkBatch.value?.id) throw new Error("没有找到正在录制的批次，请打开台账核实");
+            const stopResponse = await stopWorkRecordingBatch(activeWorkBatch.value.id);
+            if (stopResponse.code !== 0) throw new Error(stopResponse.message || "结束批次录制失败");
+            activeWorkBatch.value = stopResponse.data;
+            workBatchRecording.value = false;
+        } else {
+            const response = await startWorkRecordingBatch({ channelIds, requestId: newBatchRequestId() });
+            if (response.code !== 0) throw new Error(response.message || "开始批次录制失败");
+            activeWorkBatch.value = response.data;
+            workBatchRecording.value = response.data.state === "recording";
+            workBatchesVisible.value = true;
+        }
+    } catch (reason: any) { workBatchError.value = reason?.response?.data?.message || reason?.message || "批次录像操作失败"; Message.error(workBatchError.value); }
+    finally { workBatchAction.value = null; }
 }
 
 function handlePtzActionChange(value: { channelId: number; action: string } | null) {
@@ -213,6 +348,8 @@ function setLayout(value: LayoutSize) {
 
 function stopAll() {
     const hadChannels = slots.some(slot => slot.channel);
+    workStatusDisposed = true;
+    if (workStatusTimer) clearTimeout(workStatusTimer);
     playAllToken += 1;
     stopPolling();
     slots.forEach(resetSlot);
@@ -495,8 +632,28 @@ function onPlayerError(slot: PlaybackSlot, message: string) {
     slot.error = message || "播放器拉流失败";
 }
 
-onMounted(() => document.addEventListener("fullscreenchange", syncFullscreenState));
+let workStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let workStatusDisposed = false;
+async function pollWorkStatus() {
+    try {
+        if (document.visibilityState !== "hidden") {
+            const ids = visibleSlots.value.flatMap(slot => slot.channel ? [slot.channel.id] : []);
+            await workRecording.refresh(ids);
+        }
+    } finally {
+        if (!workStatusDisposed) workStatusTimer = setTimeout(pollWorkStatus, 3000);
+    }
+}
+function refreshFocusedWorkStatus() {
+    if (focusedWorkChannel.value) void workRecording.refresh([focusedWorkChannel.value.id]);
+}
+onMounted(() => {
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    workStatusTimer = setTimeout(pollWorkStatus, 3000);
+});
 onBeforeUnmount(() => {
+    workStatusDisposed = true;
+    if (workStatusTimer) clearTimeout(workStatusTimer);
     playAllToken += 1;
     stopPolling();
     document.removeEventListener("fullscreenchange", syncFullscreenState);
@@ -520,6 +677,21 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
+                    <div class="work-recording-actions" role="group" aria-label="作业录像控制">
+                        <button v-if="canStartWorkRecording || canStopWorkRecording" type="button" data-test="work-recording-batch-toggle" :disabled="workBatchToggleDisabled" :aria-label="workBatchToggleLabel" :title="workBatchToggleDisabled && !workBatchRecording && workBatchChannels.length === 0 ? '请先在前四个画面放入至少 1 个摄像头' : workBatchToggleLabel" @click="toggleWorkBatchRecording"><CircleStop v-if="workBatchRecording" :size="16" aria-hidden="true" /><Play v-else :size="16" aria-hidden="true" /><span>{{ workBatchToggleLabel }}</span></button>
+                        <button v-if="canStartWorkRecording || canEditWorkForm" type="button" data-test="work-recording-batches" @click="workBatchesVisible = true">作业台账</button>
+                        <button v-if="canStartWorkRecording || canStopWorkRecording || canEditWorkForm" type="button" data-test="work-recording-jobs" @click="workJobsVisible = true">作业记录</button>
+                        <button v-if="focusedWorkSnapshot?.id" type="button" data-test="work-recording-form" @click="workFormJob = { id: focusedWorkSnapshot.id, channelName: focusedWorkTargetLabel }">作业表单</button>
+                        <span class="work-recording-target" data-test="work-recording-target">{{ focusedWorkTargetLabel }}</span>
+                        <button type="button" data-test="work-recording-toggle" :class="{ active: workRecordingToggleIsStop }" :disabled="workRecordingToggleDisabled" :aria-label="workRecordingToggleLabel" :title="workRecordingToggleLabel" @click="toggleWorkRecording">
+                            <CircleStop v-if="workRecordingToggleIsStop" :size="16" aria-hidden="true" />
+                            <Play v-else :size="16" aria-hidden="true" />
+                            <span class="work-recording-label">{{ focusedWorkAction }}</span>
+                        </button>
+                        <span class="work-recording-status" data-test="work-recording-status" role="status">{{ focusedWorkStatus }}</span>
+                        <button v-if="focusedWorkChannel" type="button" data-test="work-recording-refresh" aria-label="刷新录像状态" title="刷新录像状态" :disabled="focusedWorkLoadState === 'loading' || Boolean(workRecording.pendingAction(focusedWorkChannel.id))" @click="refreshFocusedWorkStatus"><RefreshCw :size="15" /></button>
+                        <span v-if="focusedWorkError" data-test="work-recording-error" class="work-recording-error" :title="focusedWorkError" role="status">{{ focusedWorkError }}</span>
+                    </div>
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
                         <button v-if="canManageFavorites" type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
@@ -563,6 +735,9 @@ onBeforeUnmount(() => {
                         <UnplayedCover v-else :index="slot.index" />
                     </article>
                 </div>
+                <WorkRecordingJobs :visible="workJobsVisible" :can-stop="canStopWorkRecording" @close="workJobsVisible = false" @changed="refreshFocusedWorkStatus" @form="job => { workJobsVisible = false; workFormJob = { id: job.id, channelName: job.channelName }; }" />
+                <WorkRecordingBatches :visible="workBatchesVisible" :can-stop="canStopWorkRecording" @close="workBatchesVisible = false" @form="batch => { workBatchesVisible = false; workFormBatch = batch.id; }" />
+                <WorkRecordingFormDialog :visible="Boolean(workFormJob || workFormBatch)" :job-id="workFormJob?.id" :batch-id="workFormBatch || undefined" :channel-name="workFormJob?.channelName || (workFormBatch ? '批次摄像头' : '')" :can-edit="canEditWorkForm" @close="workFormJob = null; workFormBatch = null" @saved="refreshFocusedWorkStatus" />
                 <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
@@ -599,6 +774,7 @@ onBeforeUnmount(() => {
 .slot-topline,
 .layout-switcher,
 .playback-actions,
+.work-recording-actions,
 .slot-title,
 .slot-actions,
 .text-action {
@@ -612,8 +788,18 @@ onBeforeUnmount(() => {
 
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
 .monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
-.monitor-toolbar { flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
-.layout-switcher { gap: 4px; }
+.monitor-toolbar { flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.work-recording-actions { order: 3; flex: 1 0 100%; min-width: 0; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--zlm-border); }
+.work-recording-actions button { display: inline-flex; min-width: 34px; white-space: nowrap; height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
+.work-recording-actions button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
+.work-recording-actions button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
+.work-recording-actions button.active { color: var(--zlm-danger-600, #DC2626); background: var(--zlm-danger-50, #FEF2F2); border-color: var(--zlm-danger-200, #FECACA); }
+.work-recording-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.65; }
+.work-recording-actions button:disabled:hover { background: transparent; border-color: transparent; }
+.work-recording-target { max-width: 140px; overflow: hidden; color: var(--zlm-text-2); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.work-recording-label { white-space: nowrap; }
+.work-recording-status { color: var(--zlm-text-3); font-size: 11px; white-space: nowrap; }
+.layout-switcher { gap: 4px; margin-right: auto; }
 .layout-switcher button,
 .playback-actions button,
 .polling-settings header button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; }
@@ -651,7 +837,7 @@ onBeforeUnmount(() => {
 .slot-grid.layout-6 .screen-slot:first-child { grid-column: span 2; grid-row: span 2; }
 .slot-grid.layout-8 .screen-slot:first-child { grid-column: span 3; grid-row: span 3; }
 .screen-slot { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #0E1014; border: 0; border-radius: 0; outline: 0; }
-.screen-slot::after { position: absolute; z-index: 5; content: ""; inset: 0; border: 2px solid transparent; border-radius: var(--zlm-radius-md); pointer-events: none; transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out), box-shadow var(--zlm-dur-fast) var(--zlm-ease-out); }
+.screen-slot::after { position: absolute; z-index: 7; content: ""; inset: 0; border: 2px solid transparent; border-radius: var(--zlm-radius-md); pointer-events: none; transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out), box-shadow var(--zlm-dur-fast) var(--zlm-ease-out); }
 .screen-slot:hover::after { border-color: rgb(148 163 184 / 38%); }
 .screen-slot:focus-visible, .screen-slot.focused { z-index: 1; }
 .screen-slot:focus-visible::after, .screen-slot.focused::after { border-color: var(--zlm-brand-500); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--zlm-brand-500) 30%, transparent); }
@@ -736,6 +922,9 @@ onBeforeUnmount(() => {
     .layout-switcher, .playback-actions { flex: 0 0 auto; }
     .layout-switcher, .playback-actions { gap: 2px; }
     .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
+    .work-recording-target, .work-recording-status { display: none; }
+    .work-recording-actions button { min-width: 30px; width: auto; height: 30px; padding: 0 8px; }
+    .work-recording-label { display: none; }
     .playback-actions button.polling-control.counting { width: 30px; padding: 0; }
     .countdown-ring { width: 24px; height: 24px; flex-basis: 24px; }
     .layout-glyph { width: 16px; height: 16px; }
@@ -745,4 +934,8 @@ onBeforeUnmount(() => {
     .spin { animation: none; }
     .screen-slot::after { transition: none; }
 }
+</style>
+
+<style scoped>
+.work-recording-error { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--danger-6)); font-size: 12px; }
 </style>

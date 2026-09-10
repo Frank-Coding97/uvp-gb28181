@@ -23,6 +23,9 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
+	cascadeDialog      func(*siplib.Request, siplib.ServerTransaction) bool
+	cascadeMessageMu   sync.RWMutex
+	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
 	cfg                gbconfig.Config
 	ua                 *sipgo.UserAgent
 	srv                *sipgo.Server
@@ -221,12 +224,20 @@ func (s *Server) registerHandlers() {
 	s.regH = regHandler
 	s.srv.OnRegister(s.drainHandler(regHandler.Handle))
 	s.msgH = msgHandler
-	s.srv.OnMessage(s.drainHandler(msgHandler.Handle))
+	s.srv.OnMessage(s.drainHandler(func(req *siplib.Request, tx siplib.ServerTransaction) {
+		s.cascadeMessageMu.RLock()
+		hook := s.cascadeMessage
+		s.cascadeMessageMu.RUnlock()
+		if hook != nil && hook(req, tx) {
+			return
+		}
+		msgHandler.Handle(req, tx)
+	}))
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.drainHandler(s.notifyH.Handle))
-	s.srv.OnInvite(s.drainHandler(s.handleBroadcastInvite))
-	s.srv.OnAck(s.drainHandler(s.handleBroadcastAck))
-	s.srv.OnBye(s.drainHandler(s.handleBye))
+	s.srv.OnInvite(s.drainHandler(s.dispatchCascadeDialog(s.handleBroadcastInvite)))
+	s.srv.OnAck(s.drainHandler(s.dispatchCascadeDialog(s.handleBroadcastAck)))
+	s.srv.OnBye(s.drainHandler(s.dispatchCascadeDialog(s.handleBye)))
 }
 
 func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -499,4 +510,28 @@ func (s *Server) shutdownTrace(ctx context.Context) error {
 		}
 	})
 	return err
+}
+
+func (s *Server) SetCascadeMessageHandler(hook func(*siplib.Request, siplib.ServerTransaction) bool) {
+	s.cascadeMessageMu.Lock()
+	defer s.cascadeMessageMu.Unlock()
+	s.cascadeMessage = hook
+}
+
+// SetCascadeDialogHandler installs the video UAS after its media dependencies are ready.
+func (s *Server) SetCascadeDialogHandler(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
+	s.cascadeMessageMu.Lock()
+	s.cascadeDialog = fn
+	s.cascadeMessageMu.Unlock()
+}
+func (s *Server) dispatchCascadeDialog(fallback func(*siplib.Request, siplib.ServerTransaction)) func(*siplib.Request, siplib.ServerTransaction) {
+	return func(req *siplib.Request, tx siplib.ServerTransaction) {
+		s.cascadeMessageMu.RLock()
+		hook := s.cascadeDialog
+		s.cascadeMessageMu.RUnlock()
+		if hook != nil && hook(req, tx) {
+			return
+		}
+		fallback(req, tx)
+	}
 }

@@ -8,7 +8,7 @@ export const isSeedSystemRecordNo = (value?: string) => normalizeText(value) ===
 
 export const getDisplaySystemCopyright = (value?: string) => {
     const text = normalizeText(value);
-    return isSeedSystemCopyright(text) ? "© 2026 UVP 统一视频接入平台" : text || "© 2026 UVP 统一视频接入平台";
+    return isSeedSystemCopyright(text) ? "" : text;
 };
 
 export const getDisplaySystemRecordNo = (value?: string) => {

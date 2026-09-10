@@ -126,3 +126,18 @@ func initialCandidate(platformID uint64, enabled bool, targetID string) InitialC
 		Flow:       InboundFlow{LocalIP: "192.0.2.20", LocalPort: 5061, RemoteIP: "192.0.2.10", RemotePort: 5060, Transport: "UDP"},
 	}
 }
+
+func TestSameIdentityRoutesByUpstreamPort(t *testing.T) {
+	a := initialCandidate(1, true, "local-1")
+	b := a
+	b.PlatformID = 2
+	a.Flow.RemotePort = 15060
+	b.Flow.RemotePort = 16060
+	for _, candidate := range []InitialCandidate{a, b} {
+		request := InitialRequest{Method: MethodMessage, Target: candidate.Target, Local: candidate.Local, Upstream: candidate.Upstream, Flow: candidate.Flow}
+		got := RouteInitial(request, []InitialCandidate{a, b})
+		if got.Kind != DecisionCascade || got.PlatformID != candidate.PlatformID {
+			t.Fatalf("wrong platform: %+v", got)
+		}
+	}
+}

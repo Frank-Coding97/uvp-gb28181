@@ -101,7 +101,8 @@ func TestManagementServiceEnableReconnectAndDeleteRespectRuntimeAndSessions(t *t
 
 func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 	store := newManagementStoreFake()
-	service := NewManagementService(store, &credentialSealerFake{}, nil, fakeClock{now: time.Now()})
+	runtime := &managementRuntimeFake{}
+	service := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
 	inputA := validPlatformInput(nil)
 	inputA.Enabled = false
 	inputB := inputA
@@ -114,7 +115,9 @@ func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 
 	devices := []repository.DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000001"}}
 	channels := []repository.ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}}
+	beforeReload := runtime.reloads
 	require.NoError(t, service.ReplaceProjection(context.Background(), a.ID, 0, devices, channels))
+	require.Equal(t, beforeReload+1, runtime.reloads)
 	snapshotA, err := service.Projection(context.Background(), a.ID)
 	require.NoError(t, err)
 	require.Len(t, snapshotA.Channels, 1)
@@ -256,3 +259,30 @@ func (s *managementStoreFake) ListNonterminalMediaSessions(_ context.Context, pl
 var _ ManagementStore = (*managementStoreFake)(nil)
 var _ ManagementRuntime = (*managementRuntimeFake)(nil)
 var _ CredentialSealer = (*credentialSealerFake)(nil)
+
+func TestManagementServiceTypedNilCipherReturnsCredentialUnavailable(t *testing.T) {
+	var cipher *securestore.Cipher
+	svc := NewManagementService(newManagementStoreFake(), cipher, &managementRuntimeFake{}, fakeClock{})
+	password := "test-password"
+	result, err := svc.Create(context.Background(), validPlatformInput(&password))
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrCredentialUnavailable)
+	require.ErrorIs(t, err, securestore.ErrKeyUnavailable)
+}
+
+func TestManagementViewDetectsLostKeyAndPasswordReplacement(t *testing.T) {
+	oldKey, err := securestore.NewCipher([]byte("01234567890123456789012345678901"), "v1")
+	require.NoError(t, err)
+	newKey, err := securestore.NewCipher([]byte("11234567890123456789012345678901"), "v1")
+	require.NoError(t, err)
+	svc := NewManagementService(newManagementStoreFake(), oldKey, &managementRuntimeFake{}, fakeClock{})
+	platform := model.GbCascadePlatform{}
+	password := "original"
+	require.NoError(t, svc.applyCredential(&platform, &password))
+	require.False(t, svc.view(platform).CredentialNeedsReset)
+	svc.sealer = newKey
+	require.True(t, svc.view(platform).CredentialNeedsReset)
+	password = "replacement"
+	require.NoError(t, svc.applyCredential(&platform, &password))
+	require.False(t, svc.view(platform).CredentialNeedsReset)
+}

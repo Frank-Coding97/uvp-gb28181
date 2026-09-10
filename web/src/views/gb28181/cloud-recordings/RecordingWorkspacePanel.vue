@@ -29,54 +29,8 @@
               <CircleDot data-testid="active-tab-icon" :size="14" aria-hidden="true" />
               正在录像 <span class="recording-view-switch__count">{{ visibleActiveRecordings.length }}</span>
             </button>
-            <button
-              type="button"
-              data-testid="runtime-tab"
-              :class="{ active: activeView === 'runtime' }"
-              :aria-pressed="activeView === 'runtime'"
-              @click="selectView('runtime')"
-            >
-              <SlidersHorizontal :size="14" aria-hidden="true" />
-              运行控制
-            </button>
           </div>
           <div class="cloud-recordings-header__actions">
-            <span
-              v-if="activeView === 'files' && reconciliationSummary"
-              :class="['reconciliation-summary', `is-${reconciliationSummary.tone}`]"
-              data-testid="reconciliation-summary"
-            >
-              <LoaderCircle
-                v-if="reconciliationSummary.tone === 'running'"
-                class="reconciliation-summary__icon is-spinning"
-                :size="14"
-                aria-hidden="true"
-              />
-              <TriangleAlert
-                v-else-if="reconciliationSummary.tone === 'warning'"
-                class="reconciliation-summary__icon"
-                :size="14"
-                aria-hidden="true"
-              />
-              <CircleCheck
-                v-else
-                class="reconciliation-summary__icon"
-                data-testid="reconciliation-success-icon"
-                :size="14"
-                aria-hidden="true"
-              />
-              {{ reconciliationSummary.text }}
-            </span>
-            <a-button
-              v-if="activeView === 'files' && canReconcile"
-              class="recording-reconcile-button"
-              data-testid="recording-reconcile"
-              :loading="reconciling"
-              @click="reconcile"
-            >
-              <template #icon><ScanSearch :size="15" /></template>
-              对账
-            </a-button>
             <a-button
               class="uvp-page-action-btn uvp-refresh-btn"
               data-testid="recording-refresh"
@@ -307,7 +261,6 @@
             </div>
         </template>
 
-        <RecordingRuntimeControl v-else ref="runtimeControl" />
       </template>
     </div>
   </div>
@@ -324,8 +277,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, SlidersHorizontal, Trash2, TriangleAlert } from "@lucide/vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { CircleDot, CircleStop, Download, Eye, FileVideo2, Play, RefreshCw, RotateCcw, Search, Trash2 } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
@@ -333,22 +286,18 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { boundedPageRows, boundedPageSize } from "@/views/gb28181/zlm/workbench/boundedData";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
-import RecordingRuntimeControl from "./components/RecordingRuntimeControl.vue";
 import {
   batchDeleteRecordingFiles,
   deleteRecordingFile,
   listActiveRecordings,
-  listReconciliations,
   listRecordingFiles,
   listRecordingOptions,
   stopActiveRecording,
-  triggerReconciliation,
   type ActiveRecording,
   type RecordingAvailability,
   type RecordingFile,
   type RecordingFileQuery,
-  type RecordingOptions,
-  type RecordingReconciliation
+  type RecordingOptions
 } from "./api";
 import { recordingDownloadCoordinator } from "./recordingDownloadService";
 import {
@@ -381,7 +330,6 @@ const proxy = useGlobalProperties();
 const { isMobile } = useDevicesSize();
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
-const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
 const canDownload = computed(() => hasPermission("gb28181:recording:download"));
 const canDelete = computed(() => hasPermission("gb28181:recording:delete"));
 const canStop = computed(() => hasPermission("gb28181:recording:stop"));
@@ -398,12 +346,9 @@ const form = reactive({
 const files = ref<RecordingFile[]>([]);
 const options = reactive<RecordingOptions>({ channels: [], devices: [], nodes: [] });
 const activeRecordings = ref<ActiveRecording[]>([]);
-const reconciliations = ref<RecordingReconciliation[]>([]);
-const activeView = ref<"files" | "active" | "runtime">(props.mode === "tasks" ? "active" : "files");
-const runtimeControl = ref<{ refresh: () => void } | null>(null);
+const activeView = ref<"files" | "active">(props.mode === "tasks" ? "active" : "files");
 const loading = ref(false);
 const activeLoading = ref(false);
-const reconciling = ref(false);
 const errorMessage = ref("");
 const activeError = ref("");
 const autoRefreshCountdown = ref(AUTO_REFRESH_INTERVAL_SECONDS);
@@ -441,13 +386,6 @@ const pagination = reactive({
 });
 const fileTableScroll = computed(() => ({ x: "100%", minWidth: 1558, ...(files.value.length ? { y: "100%" } : {}) }));
 const activeTableScroll = computed(() => ({ x: "100%", minWidth: canStop.value ? 1222 : 1082, ...(activeRecordings.value.length ? { y: "100%" } : {}) }));
-const reconciliationSummary = computed(() => {
-  const running = reconciliations.value.filter(item => item.status === "queued" || item.status === "running").length;
-  if (running) return { text: `${running} 个节点正在对账`, tone: "running" as const };
-  const failed = reconciliations.value.filter(item => item.status === "failed" || item.status === "partial").length;
-  if (failed) return { text: `${failed} 个节点对账需关注`, tone: "warning" as const };
-  return reconciliations.value.length ? { text: "节点目录已对账", tone: "success" as const } : null;
-});
 const availabilityOptions = [
   { value: "available", label: "可播放" },
   { value: "node_offline", label: "节点离线" },
@@ -547,18 +485,6 @@ async function loadActive() {
   }
 }
 
-async function loadReconciliationStates() {
-  if (!props.active || !canReconcile.value) return;
-  const requestGeneration = panelGeneration;
-  try {
-    const response = await listReconciliations();
-    if (requestGeneration !== panelGeneration || !props.active) return;
-    reconciliations.value = response.data.list ?? [];
-  } catch {
-    if (requestGeneration === panelGeneration && !reconciliations.value.length) reconciliations.value = [];
-  }
-}
-
 function queryFiles() {
   resetAutoRefreshCountdown();
   pagination.current = 1;
@@ -586,12 +512,10 @@ function refreshCurrent() {
   if (!props.active || !canView.value) return;
   resetAutoRefreshCountdown();
   if (activeView.value === "active") void loadActive();
-  else if (activeView.value === "runtime") runtimeControl.value?.refresh();
   else void loadFiles();
-  if (activeView.value === "files") void loadReconciliationStates();
 }
 
-function selectView(view: "files" | "active" | "runtime") {
+function selectView(view: "files" | "active") {
   if (props.mode === "files" && view !== "files") return;
   if (props.mode === "tasks" && view === "files") return;
   activeView.value = view;
@@ -720,20 +644,6 @@ async function performBatchDelete() {
   }
 }
 
-async function reconcile() {
-  if (!canReconcile.value || reconciling.value) return;
-  reconciling.value = true;
-  try {
-    await triggerReconciliation(form.range.length === 2 ? { start: form.range[0], end: form.range[1] } : {});
-    proxy.$message.success("录像目录对账已进入队列");
-    await loadReconciliationStates();
-  } catch (error) {
-    proxy.$message.error(recordingErrorPresentation(error));
-  } finally {
-    reconciling.value = false;
-  }
-}
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "--";
   const date = new Date(value);
@@ -761,11 +671,9 @@ watch(activeView, view => {
   resetAutoRefreshCountdown();
   if (!props.active || !canView.value) return;
   if (view === "active") void loadActive();
-  else if (view === "runtime") void nextTick(() => runtimeControl.value?.refresh());
   else {
     void loadFiles();
     void loadOptions();
-    void loadReconciliationStates();
   }
 });
 
@@ -791,9 +699,7 @@ watch(
     if (activeView.value === "files") {
       void loadFiles();
       void loadOptions();
-      void loadReconciliationStates();
     } else if (activeView.value === "active") void loadActive();
-    else void nextTick(() => runtimeControl.value?.refresh());
     startAutoRefresh();
   },
   { immediate: true }
@@ -844,29 +750,11 @@ defineExpose({ refresh: refreshCurrent });
 .cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
 .cloud-recordings-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
-.recording-reconcile-button {
-  color: color-mix(in srgb, #7c3aed 82%, var(--uvp-text-primary));
-  background: color-mix(in srgb, #7c3aed 9%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, #7c3aed 26%, var(--uvp-panel-border));
-  box-shadow: 0 1px 2px rgb(124 58 237 / 8%);
-}
-.recording-reconcile-button:hover {
-  color: color-mix(in srgb, #6d28d9 88%, var(--uvp-text-primary));
-  background: color-mix(in srgb, #7c3aed 14%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, #7c3aed 38%, var(--uvp-panel-border));
-}
 .recording-date-range { width: 360px; max-width: 100%; }
 .recording-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
 .recording-view-switch__count { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
 .recording-view-switch button.active .recording-view-switch__count { color: currentColor; }
 .recording-refresh-countdown { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
-.reconciliation-summary { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
-.reconciliation-summary.is-success { color: rgb(var(--green-6)); }
-.reconciliation-summary.is-running { color: var(--uvp-brand); }
-.reconciliation-summary.is-warning { color: var(--uvp-warning); }
-.reconciliation-summary__icon { flex: 0 0 auto; }
-.reconciliation-summary__icon.is-spinning { animation: reconciliation-spin 900ms linear infinite; }
-@keyframes reconciliation-spin { to { transform: rotate(360deg); } }
 .cloud-recordings-state { margin: 10px 0 12px; }
 .recording-batch-bar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 0 12px; padding: 10px 14px; color: var(--uvp-text-secondary); background: color-mix(in srgb, var(--uvp-danger) 6%, var(--uvp-panel-bg)); border: 1px solid color-mix(in srgb, var(--uvp-danger) 20%, var(--uvp-panel-border)); border-radius: 8px; }
 .recording-batch-bar__actions { display: flex; align-items: center; gap: 8px; }
@@ -898,7 +786,6 @@ defineExpose({ refresh: refreshCurrent });
   .cloud-recordings-toolbar { align-items: stretch; flex-wrap: wrap; gap: 10px; }
   .recording-view-switch { flex: 1 0 auto; }
   .recording-view-switch button { flex: 1; justify-content: center; }
-  .reconciliation-summary { display: none; }
   .cloud-recordings-header__actions { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
   .cloud-recordings-header__actions :deep(.arco-btn),
   :deep(.uvp-table-action) { min-height: 44px; }
@@ -908,8 +795,5 @@ defineExpose({ refresh: refreshCurrent });
 @media (max-width: 480px) {
   .recording-date-range { width: 100%; }
   .cloud-recordings-header__actions :deep(.arco-btn) { padding-inline: 8px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .reconciliation-summary__icon.is-spinning { animation: none; }
 }
 </style>

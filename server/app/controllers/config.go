@@ -43,9 +43,15 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 
 	systemConfig["systemLogo"] = app.ConfigYml.GetString("system.systemlogo")           // 系统LOGO图片地址
 	systemConfig["systemIcon"] = app.ConfigYml.GetString("system.systemicon")           // 系统图标地址
+	systemConfig["systemBrand"] = app.ConfigYml.GetString("system.systembrand")         // 品牌简称，空值时由前端隐藏
 	systemConfig["systemName"] = app.ConfigYml.GetString("system.systemname")           // 系统名称
 	systemConfig["systemCopyright"] = app.ConfigYml.GetString("system.systemcopyright") // 版权声明信息
 	systemConfig["systemRecordNo"] = app.ConfigYml.GetString("system.systemrecordno")   // 网站备案号
+	cover := app.ConfigYml.GetString("system.playbackcover")
+	if cover != "icon" {
+		cover = "uvp"
+	}
+	systemConfig["playbackCover"] = cover
 	// 获取DemoAccount配置，仅在演示账号开关开启时传递
 	if app.ConfigYml.GetBool("server.demoaccount.enabled") {
 		systemConfig["defaultusername"] = app.ConfigYml.GetString("server.demoaccount.defaultusername") // 演示账号默认用户名
@@ -90,9 +96,15 @@ func (con ConfigController) UpdateConfig(ctx *gin.Context) {
 		con.Common.FailAndAbort(ctx, "参数绑定失败", err)
 	}
 
+	cover := req.System.PlaybackCover
+	if cover == "" {
+		cover = "uvp"
+	}
+	app.ConfigYml.Set("system.playbackcover", cover)
 	// 更新System配置
 	app.ConfigYml.Set("system.systemlogo", req.System.SystemLogo)
 	app.ConfigYml.Set("system.systemicon", req.System.SystemIcon)
+	app.ConfigYml.Set("system.systembrand", req.System.SystemBrand)
 	app.ConfigYml.Set("system.systemname", req.System.SystemName)
 	app.ConfigYml.Set("system.systemcopyright", req.System.SystemCopyright)
 	app.ConfigYml.Set("system.systemrecordno", req.System.SystemRecordNo)

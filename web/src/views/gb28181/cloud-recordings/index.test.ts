@@ -149,7 +149,7 @@ describe("CloudRecordings", () => {
     await flushPromises();
     expect(api.listRecordingFiles).toHaveBeenCalledOnce();
     expect(api.listRecordingOptions).toHaveBeenCalledOnce();
-    expect(api.listReconciliations).toHaveBeenCalledOnce();
+    expect(api.listReconciliations).not.toHaveBeenCalled();
     expect(api.listActiveRecordings).not.toHaveBeenCalled();
     expect(wrapper.emitted("stats")?.some(([payload]) => (payload as { filesTotal?: number }).filesTotal === 1)).toBe(true);
     wrapper.unmount();
@@ -225,27 +225,24 @@ describe("CloudRecordings", () => {
     expect(api.listRecordingFiles.mock.calls.at(-1)?.[0]).toMatchObject({ keyword: "一号" });
   });
 
-  it("allows the admin wildcard permission to view and reconcile recordings", async () => {
+  it("allows admins to view recordings without manual reconciliation controls", async () => {
     account.permissions = ["*:*:*"];
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
     expect(api.listRecordingFiles).toHaveBeenCalledTimes(1);
-    await wrapper.get("[data-testid='recording-reconcile']").trigger("click");
-    await flushPromises();
-    expect(api.triggerReconciliation).toHaveBeenCalledTimes(1);
+    expect(wrapper.find("[data-testid='recording-reconcile']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='runtime-tab']").exists()).toBe(false);
+    expect(api.triggerReconciliation).not.toHaveBeenCalled();
   });
 
-  it("distinguishes reconciliation from the primary query action and renders a success status icon", async () => {
+  it("omits reconciliation status and its status request", async () => {
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [{ status: "success" }] } });
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-reconcile']").classes()).toContain("recording-reconcile-button");
-    expect(wrapper.get("[data-testid='recording-reconcile']").attributes("data-type")).not.toBe("primary");
-    expect(source).toMatch(/\.recording-reconcile-button\s*{[^}]*color-mix\(in srgb, #7c3aed 82%, var\(--uvp-text-primary\)\);[^}]*background:[^;]*#7c3aed 9%/s);
-    expect(wrapper.get("[data-testid='reconciliation-summary']").text()).toContain("节点目录已对账");
-    expect(wrapper.find("[data-testid='reconciliation-success-icon']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='reconciliation-summary']").exists()).toBe(false);
+    expect(api.listReconciliations).not.toHaveBeenCalled();
   });
 
   it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])("hides access actions for %s", async availability => {
@@ -326,13 +323,6 @@ describe("CloudRecordings", () => {
     expect(wrapper.get("[data-testid='active-tab']").attributes("aria-pressed")).toBe("true");
     expect(wrapper.text()).toContain("正在录制");
     expect(wrapper.text()).not.toContain("record.mp4");
-  });
-
-  it("adds typed runtime control without mixing HLS state into the file catalog", () => {
-    expect(source).toContain('data-testid="runtime-tab"');
-    expect(source).toContain("RecordingRuntimeControl");
-    expect(source).toContain("运行控制");
-    expect(source).toContain("activeView === 'runtime'");
   });
 
   it("stops an active ZLMediaKit recording after confirmation when permitted", async () => {

@@ -17,12 +17,12 @@ import (
 const upstreamPasswordPurpose = "upstream-password"
 
 var (
-	ErrInvalidPlatformConfig     = errors.New("invalid cascade platform config")
-	ErrCredentialUnavailable     = errors.New("cascade credential sealer unavailable")
-	ErrRuntimeUnavailable        = errors.New("cascade runtime unavailable")
+	ErrInvalidPlatformConfig = errors.New("invalid cascade platform config")
+	ErrCredentialUnavailable = errors.New("cascade credential sealer unavailable")
+	ErrRuntimeUnavailable    = errors.New("cascade runtime unavailable")
 	// ErrRuntimeSyncFailed 配置已持久化但运行时同步失败:调用方应返回已提交
 	// 资源而非整体失败,客户端重试会产生唯一键冲突
-	ErrRuntimeSyncFailed = errors.New("cascade config persisted but runtime sync failed")
+	ErrRuntimeSyncFailed         = errors.New("cascade config persisted but runtime sync failed")
 	ErrPlatformDisabled          = errors.New("cascade platform disabled")
 	ErrPlatformHasActiveSessions = errors.New("cascade platform has active media sessions")
 )
@@ -89,6 +89,7 @@ type PlatformView struct {
 	LocalSIPPort         int                          `json:"localSipPort"`
 	MediaAdvertiseIP     string                       `json:"mediaAdvertiseIp,omitempty"`
 	AuthUsername         string                       `json:"authUsername,omitempty"`
+	CredentialNeedsReset bool                         `json:"credentialNeedsReset"`
 	HasPassword          bool                         `json:"hasPassword"`
 	ProfileOverride      model.CascadeProfileOverride `json:"profileOverride"`
 	EffectiveVersion     string                       `json:"effectiveVersion"`
@@ -301,7 +302,15 @@ func (s *ManagementService) ReplaceProjection(ctx context.Context, platformID ui
 	if _, err := s.store.FindPlatform(ctx, platformID); err != nil {
 		return err
 	}
-	return s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels)
+	if err := s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels); err != nil {
+		return err
+	}
+	if s.runtime != nil {
+		if err := s.runtime.Reload(ctx); err != nil {
+			return fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	return nil
 }
 
 func (s *ManagementService) Projection(ctx context.Context, platformID uint64) (*repository.ProjectionSnapshot, error) {
@@ -316,6 +325,9 @@ func (s *ManagementService) applyCredential(platform *model.GbCascadePlatform, p
 		return ErrCredentialUnavailable
 	}
 	envelope, err := s.sealer.Encrypt(upstreamPasswordPurpose, []byte(*password))
+	if errors.Is(err, securestore.ErrKeyUnavailable) || errors.Is(err, securestore.ErrInvalidKey) {
+		return fmt.Errorf("%w: %w", ErrCredentialUnavailable, err)
+	}
 	if err != nil {
 		return fmt.Errorf("seal cascade credential: %w", err)
 	}
@@ -328,8 +340,21 @@ func (s *ManagementService) applyCredential(platform *model.GbCascadePlatform, p
 
 func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView {
 	state := DerivePlatformState(platform, s.clock, 0)
+	needsReset := false
+	if len(platform.SecretCiphertext) > 0 {
+		if opener, ok := s.sealer.(interface {
+			Decrypt(string, securestore.Envelope) ([]byte, error)
+		}); ok {
+			plain, err := opener.Decrypt(upstreamPasswordPurpose, securestore.Envelope{Ciphertext: platform.SecretCiphertext, Nonce: platform.SecretNonce, Algorithm: platform.SecretAlg, KeyVersion: platform.SecretKeyVersion})
+			needsReset = err != nil
+			clear(plain)
+		} else {
+			needsReset = true
+		}
+	}
 	return PlatformView{
-		ID: platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
+		CredentialNeedsReset: needsReset,
+		ID:                   platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
 		Host: platform.Host, Port: platform.Port, LocalDeviceID: platform.LocalDeviceID, LocalDomain: platform.LocalDomain,
 		LocalSIPIP: platform.LocalSIPIP, LocalSIPPort: platform.LocalSIPPort, MediaAdvertiseIP: platform.MediaAdvertiseIP,
 		AuthUsername: platform.AuthUsername, HasPassword: len(platform.SecretCiphertext) > 0,

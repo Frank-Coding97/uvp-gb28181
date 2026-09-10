@@ -20,7 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
-const expectedBaselineSHA256 = "785a700f94513851de4b2c4f4ee6854275b6cfec6840d3bdb6ec3f7252db569a"
+const expectedBaselineSHA256 = "8a0fb8b4575ea7d9dffe749a7d7d0d764e64f79dd8a2018ee23737c848786a61"
 
 func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 	t.Helper()
@@ -37,7 +37,7 @@ func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 }
 
 func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
-	require.Equal(t, "sqlite-baseline-20260907-e07857cc", Version)
+	require.Equal(t, "sqlite-baseline-20260907-ren-r3", Version)
 	require.Equal(t, expectedBaselineSHA256, SHA256)
 	require.NotEmpty(t, SQL)
 	digest := sha256.Sum256([]byte(SQL))
@@ -64,18 +64,18 @@ func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &manifest))
 	require.Equal(t, Version, manifest.Version)
-	require.Equal(t, "e07857cce505d0ef6201bafe4a93306c2b84dbc2", manifest.SourceCommit)
+	require.Equal(t, "af558ce57b1805e05fa7fa107d73afb3fde460a0", manifest.SourceCommit)
 	require.Equal(t, expectedBaselineSHA256, manifest.SHA256)
-	require.Equal(t, 86, manifest.Tables)
-	require.Len(t, manifest.TableNames, 86)
+	require.Equal(t, 90, manifest.Tables)
+	require.Len(t, manifest.TableNames, 90)
 	require.Equal(t, 242, manifest.Indexes)
 	require.Len(t, manifest.IndexManifest, 242)
-	require.Equal(t, 1143, manifest.SeedStatements)
-	require.Equal(t, 912, manifest.SeedInserts)
+	require.Equal(t, 1156, manifest.SeedStatements)
+	require.Equal(t, 925, manifest.SeedInserts)
 	require.Equal(t, 224, manifest.SeedUpdates)
 	require.Equal(t, 7, manifest.SeedDeletes)
 	require.Equal(t, map[string]string{
-		"uvp-gb28181.sql":                      "3edc18d3d73510602101c633bb940dc044560ba3e80627e08726749d98fe2f09",
+		"uvp-gb28181.sql":                      "40beabbe59e4d62e6790c3d315b45f3f33047b51bcb4a66bbf1b0629548ba665",
 		"2026-08-15-device-grant-table.sql":    "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
 		"2026-08-15-device-traffic.sql":        "9fdaef7450f0de93eaf0467a761acd13bfd468c2b0d7bfa28ad84afd67c3fdfe",
 		"2026-08-21-device-traffic-hourly.sql": "6f5ab75f0bef394cbee8dd1e542cb28eb33de207773506c7873454210997bd9b",
@@ -88,7 +88,7 @@ func TestBaselineCreatesCompleteSchemaAndSafeSeeds(t *testing.T) {
 
 	var tableCount int
 	require.NoError(t, raw.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).Scan(&tableCount))
-	require.Equal(t, 86, tableCount)
+	require.Equal(t, 90, tableCount)
 	var sqliteVersion string
 	require.NoError(t, raw.QueryRow(`SELECT sqlite_version()`).Scan(&sqliteVersion))
 	require.Equal(t, "3.53.4", sqliteVersion)

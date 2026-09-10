@@ -10,11 +10,22 @@ import (
 // is resolved through NodeExecutor, so a request cannot choose an endpoint or
 // inject arbitrary ZLM parameters.
 type NodeRTPClientAdapter struct {
-	executor *NodeExecutor
+	executor         *NodeExecutor
+	sourceCloseGuard SourceCloseGuard
 }
 
 func NewNodeRTPClientAdapter(executor *NodeExecutor) *NodeRTPClientAdapter {
 	return &NodeRTPClientAdapter{executor: executor}
+}
+
+// SetSourceCloseGuard configures the shared source-close gate for direct
+// adapter callers. RTPService guards its client boundary as well so custom
+// RTPClient implementations receive the same protection.
+func (a *NodeRTPClientAdapter) SetSourceCloseGuard(guard SourceCloseGuard) *NodeRTPClientAdapter {
+	if a != nil {
+		a.sourceCloseGuard = guard
+	}
+	return a
 }
 
 func (a *NodeRTPClientAdapter) ListRtpServers(ctx context.Context, nodeID int64) ([]zlm.RtpServerInfo, error) {
@@ -59,10 +70,13 @@ func (a *NodeRTPClientAdapter) CloseRtpServer(ctx context.Context, nodeID int64,
 		return nil, err
 	}
 	var closed *zlm.RtpServerCloseResult
-	if err := a.executor.ExecuteWrite(ctx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
-		var err error
-		closed, err = client.CloseRtpServerWithResult(operationCtx, vhost, appName, streamID)
-		return err
+	target := OwnershipTarget{NodeID: nodeID, Media: MediaIdentity{Schema: "rtp", Vhost: vhost, App: appName, Stream: streamID}}
+	if err := runMutationGuard(ctx, a.sourceCloseGuard, target, func(operationCtx context.Context) error {
+		return a.executor.ExecuteWrite(operationCtx, nodeID, func(clientCtx context.Context, client *zlm.Client) error {
+			var err error
+			closed, err = client.CloseRtpServerWithResult(clientCtx, vhost, appName, streamID)
+			return err
+		})
 	}); err != nil {
 		return nil, err
 	}

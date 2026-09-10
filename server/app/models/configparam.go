@@ -2,8 +2,10 @@ package models
 
 // ServerConfig 服务器配置参数
 type SystemConfig struct {
+	PlaybackCover   string `json:"playbackCover" yaml:"PlaybackCover" binding:"omitempty,oneof=uvp icon"`
 	SystemLogo      string `json:"systemLogo" yaml:"SystemLogo"`
 	SystemIcon      string `json:"systemIcon" yaml:"SystemIcon"`
+	SystemBrand     string `json:"systemBrand" yaml:"SystemBrand"`
 	SystemName      string `json:"systemName" yaml:"SystemName"`
 	SystemCopyright string `json:"systemCopyright" yaml:"SystemCopyright"`
 	SystemRecordNo  string `json:"systemRecordNo" yaml:"SystemRecordNo"`

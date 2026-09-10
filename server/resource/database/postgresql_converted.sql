@@ -30,7 +30,7 @@ CREATE TABLE gb_recording_plan_gap (id BIGSERIAL PRIMARY KEY, plan_id BIGINT, ch
 DROP TABLE IF EXISTS gb_recording_plan_execution;
 CREATE TABLE gb_recording_plan_execution (id BIGSERIAL PRIMARY KEY, plan_id BIGINT, channel_id BIGINT NOT NULL, device_id VARCHAR(20) NOT NULL DEFAULT '', action VARCHAR(32) NOT NULL, trigger_source VARCHAR(32) NOT NULL, stage VARCHAR(32) NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 1, result VARCHAR(24) NOT NULL, reason_code VARCHAR(64) NOT NULL DEFAULT '', reason_message VARCHAR(500) NOT NULL DEFAULT '', stream_id VARCHAR(64) NOT NULL DEFAULT '', node_id VARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT, generation BIGINT NOT NULL DEFAULT 0, started_at TIMESTAMP(3) NOT NULL, ended_at TIMESTAMP(3), duration_ms BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMP(3) NOT NULL);
 DROP TABLE IF EXISTS gb_recording_plan_channel_state;
-CREATE TABLE gb_recording_plan_channel_state (channel_id BIGINT PRIMARY KEY, plan_id BIGINT, plan_version BIGINT NOT NULL DEFAULT 0, desired_state VARCHAR(24) NOT NULL, actual_state VARCHAR(32) NOT NULL, reason_code VARCHAR(64) NOT NULL DEFAULT '', reason_message VARCHAR(500) NOT NULL DEFAULT '', next_transition_at TIMESTAMP(3), next_retry_at TIMESTAMP(3), reconcile_at TIMESTAMP(3) NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, generation BIGINT NOT NULL DEFAULT 0, stream_id VARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT, node_id VARCHAR(64) NOT NULL DEFAULT '', last_media_at TIMESTAMP(3), last_success_at TIMESTAMP(3), lease_owner VARCHAR(128) NOT NULL DEFAULT '', lease_until TIMESTAMP(3), state_version BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL);
+CREATE TABLE gb_recording_plan_channel_state (channel_id BIGINT PRIMARY KEY, plan_id BIGINT, plan_version BIGINT NOT NULL DEFAULT 0, recorder_owner_kind VARCHAR(20) NOT NULL DEFAULT '', recorder_owner_id VARCHAR(128) NOT NULL DEFAULT '', recorder_claim_version BIGINT NOT NULL DEFAULT 0, desired_state VARCHAR(24) NOT NULL, actual_state VARCHAR(32) NOT NULL, reason_code VARCHAR(64) NOT NULL DEFAULT '', reason_message VARCHAR(500) NOT NULL DEFAULT '', next_transition_at TIMESTAMP(3), next_retry_at TIMESTAMP(3), reconcile_at TIMESTAMP(3) NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, generation BIGINT NOT NULL DEFAULT 0, stream_id VARCHAR(64) NOT NULL DEFAULT '', recording_session_id BIGINT, node_id VARCHAR(64) NOT NULL DEFAULT '', last_media_at TIMESTAMP(3), last_success_at TIMESTAMP(3), lease_owner VARCHAR(128) NOT NULL DEFAULT '', lease_until TIMESTAMP(3), state_version BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL);
 CREATE INDEX idx_recording_plan_state_reconcile ON gb_recording_plan_channel_state(reconcile_at,channel_id);
 DROP TABLE IF EXISTS gb_recording_plan_binding;
 CREATE TABLE gb_recording_plan_binding (id BIGSERIAL PRIMARY KEY, plan_id BIGINT NOT NULL, channel_id BIGINT NOT NULL, owner_dept_id BIGINT NOT NULL, assigned_by BIGINT NOT NULL DEFAULT 0, assigned_at TIMESTAMP(3) NOT NULL, created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL, CONSTRAINT uk_recording_plan_binding_channel UNIQUE(channel_id));
@@ -4903,3 +4903,173 @@ DELETE FROM sys_casbin_rule WHERE v0=CONCAT('role_',(SELECT MIN(id) FROM sys_rol
 
 INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT 'p',CONCAT('role_',(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)),a.path,a.method,'*','','' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL) AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',(SELECT MIN(id) FROM sys_role WHERE name='游客' AND deleted_at IS NULL)) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
 -- guest-readonly:end
+
+-- custom-ren: work-recording schema
+-- Additive work recording schema. Existing recording history is retained.
+CREATE TABLE IF NOT EXISTS gb_work_recording (
+ id VARCHAR(36) NOT NULL PRIMARY KEY,
+ batch_id VARCHAR(36) NOT NULL DEFAULT '',
+ channel_id BIGINT NOT NULL,
+ created_by BIGINT NOT NULL,
+ request_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ desired_action VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL,
+ recorder_claim_version BIGINT NOT NULL DEFAULT 0,
+ node_id BIGINT NOT NULL DEFAULT 0,
+ v_host VARCHAR(128) NOT NULL DEFAULT '',
+ app VARCHAR(64) NOT NULL DEFAULT '',
+ stream VARCHAR(64) NOT NULL DEFAULT '',
+ recording_root VARCHAR(1024) NOT NULL DEFAULT '',
+ generation BIGINT NOT NULL DEFAULT 0,
+ started_at TIMESTAMP NULL,
+ stopped_at TIMESTAMP NULL,
+ last_checked_at TIMESTAMP NULL,
+ last_error VARCHAR(500) NOT NULL DEFAULT '',
+ file_state VARCHAR(20) NOT NULL DEFAULT 'pending',
+ form_state VARCHAR(20) NOT NULL DEFAULT 'draft',
+ form_version BIGINT NOT NULL DEFAULT 0,
+ schema_version BIGINT NOT NULL DEFAULT 1,
+ device_id VARCHAR(20) NOT NULL DEFAULT '',
+ form_json TEXT NOT NULL,
+ created_at TIMESTAMP NULL,
+ updated_at TIMESTAMP NULL,
+ CONSTRAINT uk_work_recording_request UNIQUE(created_by, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS gb_work_recording_batch (
+ id VARCHAR(36) NOT NULL PRIMARY KEY,
+ created_by BIGINT NOT NULL,
+ request_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL DEFAULT 1,
+ form_state VARCHAR(20) NOT NULL DEFAULT 'draft',
+ form_version BIGINT NOT NULL DEFAULT 0,
+ schema_version BIGINT NOT NULL DEFAULT 1,
+ device_id VARCHAR(20) NOT NULL DEFAULT '',
+ form_json TEXT NOT NULL,
+ last_error VARCHAR(500) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NULL,
+ updated_at TIMESTAMP NULL,
+ CONSTRAINT uk_work_recording_batch_request UNIQUE(created_by, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_work_recording_batch ON gb_work_recording(batch_id);
+
+CREATE TABLE IF NOT EXISTS gb_recorder_claim (
+ channel_id BIGINT NOT NULL DEFAULT 0,
+ node_id BIGINT NOT NULL DEFAULT 0,
+ v_host VARCHAR(128) NOT NULL DEFAULT '',
+ app VARCHAR(64) NOT NULL DEFAULT '',
+ stream VARCHAR(64) NOT NULL DEFAULT '',
+ recording_root VARCHAR(1024) NOT NULL DEFAULT '',
+ resource_key VARCHAR(64) NOT NULL PRIMARY KEY,
+ owner_kind VARCHAR(20) NOT NULL,
+ owner_id VARCHAR(128) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ version BIGINT NOT NULL,
+ generation BIGINT NOT NULL DEFAULT 0,
+ created_at TIMESTAMP NULL,
+ updated_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS gb_work_recording_file (
+ file_id BIGINT NOT NULL PRIMARY KEY,
+ work_recording_id VARCHAR(36) NOT NULL,
+ evidence VARCHAR(500) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NULL
+);
+
+-- custom-ren: work-recording permissions (PostgreSQL)
+-- Start and stop are separate buttons; both may read status and job detail.
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/multi-screen-playback' AND type IN (1,2) AND deleted_at IS NULL),0),'','Permission_gb28181_work_recording_start','','开启作业录像',1,0,100,3,'gb28181:work-recording:start','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-recording:start' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/multi-screen-playback' AND type IN (1,2) AND deleted_at IS NULL),0),'','Permission_gb28181_work_recording_stop','','停止作业录像',1,0,100,3,'gb28181:work-recording:stop','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-recording:stop' AND deleted_at IS NULL);
+
+INSERT INTO sys_role_menu(role_id,menu_id)
+SELECT 1,m.id FROM sys_menu m
+WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=1 AND x.menu_id=m.id);
+
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT s.title,s.path,s.method,'GB28181 作业录像',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM (
+ SELECT '开启作业录像' AS title,'/api/gb28181/work-recordings' AS path,'POST' AS method
+ UNION ALL SELECT '停止作业录像','/api/gb28181/work-recordings/:id/stop','POST'
+ UNION ALL SELECT '查询作业录像状态','/api/gb28181/work-recordings/status','GET'
+ UNION ALL SELECT '查询作业录像详情','/api/gb28181/work-recordings/:id','GET'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.method AND a.deleted_at IS NULL);
+
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-recording:start' AND m.deleted_at IS NULL
+  AND ((a.path='/api/gb28181/work-recordings' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches' AND a.method IN ('POST','GET'))
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId' AND a.method='GET')
+    OR (a.path IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a.method='GET'))
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-recording:stop' AND m.deleted_at IS NULL
+  AND ((a.path='/api/gb28181/work-recordings/:id/stop' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId/stop' AND a.method='POST')
+    OR (a.path='/api/gb28181/work-recordings/batches' AND a.method='GET')
+    OR (a.path='/api/gb28181/work-recordings/batches/:batchId' AND a.method='GET')
+    OR (a.path IN ('/api/gb28181/work-recordings/status','/api/gb28181/work-recordings/:id') AND a.method='GET'))
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_'||rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm
+JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id
+JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m.deleted_at IS NULL AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_'||rm.role_id AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
+
+-- custom-ren: work-recording form permissions (PostgreSQL)
+-- Start and stop may read the form; only the form permission may save it.
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT COALESCE((SELECT MIN(id) FROM sys_menu WHERE path='/gb28181/multi-screen-playback' AND type IN (1,2) AND deleted_at IS NULL),0),'','Permission_gb28181_work_recording_form','','编辑作业表单',1,0,100,3,'gb28181:work-recording:form','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:work-recording:form' AND deleted_at IS NULL);
+
+INSERT INTO sys_role_menu(role_id,menu_id)
+SELECT 1,m.id FROM sys_menu m
+WHERE m.permission='gb28181:work-recording:form' AND m.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=1 AND x.menu_id=m.id);
+
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT s.title,s.path,s.method,'GB28181 作业录像',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM (
+ SELECT '我的作业列表' AS title,'/api/gb28181/work-recordings' AS path,'GET' AS method
+ UNION ALL SELECT '查询作业台账','/api/gb28181/work-recordings/batches','GET'
+ UNION ALL SELECT '查询作业台账详情','/api/gb28181/work-recordings/batches/:batchId','GET'
+ UNION ALL SELECT '查询台账表单','/api/gb28181/work-recordings/batches/:batchId/form','GET'
+ UNION ALL SELECT '保存台账草稿','/api/gb28181/work-recordings/batches/:batchId/form','PUT'
+ UNION ALL SELECT '查询作业表单','/api/gb28181/work-recordings/:id/form','GET'
+ UNION ALL SELECT '保存作业草稿','/api/gb28181/work-recordings/:id/form','PUT'
+) s
+WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.method AND a.deleted_at IS NULL);
+
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop') AND m.deleted_at IS NULL
+  AND a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form')
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.deleted_at IS NULL
+WHERE m.permission='gb28181:work-recording:form' AND m.deleted_at IS NULL
+  AND ((a.method='GET' AND a.path IN ('/api/gb28181/work-recordings','/api/gb28181/work-recordings/:id/form','/api/gb28181/work-recordings/batches','/api/gb28181/work-recordings/batches/:batchId','/api/gb28181/work-recordings/batches/:batchId/form'))
+    OR (a.method='PUT' AND a.path='/api/gb28181/work-recordings/batches/:batchId/form')
+    OR (a.method='PUT' AND a.path='/api/gb28181/work-recordings/:id/form'))
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_'||rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm
+JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id
+JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission IN ('gb28181:work-recording:start','gb28181:work-recording:stop','gb28181:work-recording:form') AND m.deleted_at IS NULL AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role_'||rm.role_id AND c.v1=a.path AND c.v2=a.method AND c.v3='*');

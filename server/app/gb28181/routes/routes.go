@@ -66,6 +66,7 @@ var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
 var recordingPlanController = gbcontrollers.NewRecordingPlanController()
 var cloudRecordingCatalogController atomic.Pointer[gbcontrollers.CloudRecordingCatalogController]
 var deviceTrafficController atomic.Pointer[gbcontrollers.DeviceTrafficController]
+var workRecordingController atomic.Pointer[gbcontrollers.WorkRecordingController]
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -81,6 +82,7 @@ var cascadeManagementController *gbcascadecontroller.ManagementController
 var sourceLeaseMu sync.Mutex
 var cascadeSourceLeaseChecker gbhandler.SourceLeaseChecker
 var recordingPlanSourceLeaseChecker gbhandler.SourceLeaseChecker
+var workRecordingSourceLeaseChecker gbhandler.SourceLeaseChecker
 var streamObserverMu sync.Mutex
 var recordingStreamObserver gbhandler.StreamObserver
 var recordingPlanStreamObserver gbhandler.StreamObserver
@@ -98,6 +100,7 @@ func init() {
 	talkController.Store(gbcontrollers.NewTalkController(nil))
 	cloudRecordingCatalogController.Store(gbcontrollers.NewCloudRecordingCatalogController(nil))
 	deviceTrafficController.Store(gbcontrollers.NewDeviceTrafficController(nil, nil, nil, nil))
+	workRecordingController.Store(gbcontrollers.NewWorkRecordingController(nil))
 }
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
@@ -376,9 +379,18 @@ func SetRecordingPlanSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
 	sourceLeaseMu.Unlock()
 }
 
+// SetWorkRecordingSourceLeaseChecker composes work-recording ownership with
+// the other non-browser source leases used by the none-reader hook.
+func SetWorkRecordingSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
+	sourceLeaseMu.Lock()
+	workRecordingSourceLeaseChecker = checker
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
+}
+
 func applySourceLeaseCheckers() {
 	hookController.SetSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{
-		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker,
+		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker, workRecordingSourceLeaseChecker,
 	})
 }
 
@@ -554,6 +566,28 @@ func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUU
 	streamObserverMu.Unlock()
 }
 
+// SetWorkRecordingController injects the work-recording API after its
+// database and media dependencies are ready. A nil controller intentionally
+// restores a stable 503 endpoint until the runtime is available.
+func SetWorkRecordingController(controller *gbcontrollers.WorkRecordingController) {
+	if controller == nil {
+		controller = gbcontrollers.NewWorkRecordingController(nil)
+	}
+	workRecordingController.Store(controller)
+}
+
+func currentWorkRecordingController() *gbcontrollers.WorkRecordingController {
+	controller := workRecordingController.Load()
+	if controller == nil {
+		controller = gbcontrollers.NewWorkRecordingController(nil)
+		if workRecordingController.CompareAndSwap(nil, controller) {
+			return controller
+		}
+		return workRecordingController.Load()
+	}
+	return controller
+}
+
 func SetRecordingPlanStreamObserver(observer gbhandler.StreamObserver) {
 	streamObserverMu.Lock()
 	recordingPlanStreamObserver = observer
@@ -616,6 +650,24 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cloudRecordings.POST("/active/:id/stop", func(c *gin.Context) { currentCloudRecordingCatalogController().StopActiveSession(c) })
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
+		}
+		workRecordings := gb.Group("/work-recordings")
+		{
+			workRecordings.POST("/batches", func(c *gin.Context) { currentWorkRecordingController().StartBatch(c) })
+			workRecordings.GET("/batches", func(c *gin.Context) { currentWorkRecordingController().BatchList(c) })
+			workRecordings.GET("/batches/:batchId", func(c *gin.Context) { currentWorkRecordingController().BatchDetail(c) })
+			workRecordings.GET("/batches/:batchId/form", func(c *gin.Context) { currentWorkRecordingController().BatchForm(c) })
+			workRecordings.PUT("/batches/:batchId/form", func(c *gin.Context) { currentWorkRecordingController().SaveBatchForm(c) })
+			workRecordings.POST("/batches/:batchId/stop", func(c *gin.Context) { currentWorkRecordingController().StopBatch(c) })
+			workRecordings.GET("/batches/:batchId/download", func(c *gin.Context) { currentWorkRecordingController().BatchDownload(c) })
+			workRecordings.GET("/batches/:batchId/files/:fileId", func(c *gin.Context) { currentWorkRecordingController().BatchFile(c) })
+			workRecordings.POST("", func(c *gin.Context) { currentWorkRecordingController().Start(c) })
+			workRecordings.GET("", func(c *gin.Context) { currentWorkRecordingController().List(c) })
+			workRecordings.GET("/:id/form", func(c *gin.Context) { currentWorkRecordingController().Form(c) })
+			workRecordings.PUT("/:id/form", func(c *gin.Context) { currentWorkRecordingController().SaveForm(c) })
+			workRecordings.GET("/status", func(c *gin.Context) { currentWorkRecordingController().Status(c) })
+			workRecordings.POST("/:id/stop", func(c *gin.Context) { currentWorkRecordingController().Stop(c) })
+			workRecordings.GET("/:id", func(c *gin.Context) { currentWorkRecordingController().Detail(c) })
 		}
 		recordingPlans := gb.Group("/recording-plans")
 		{

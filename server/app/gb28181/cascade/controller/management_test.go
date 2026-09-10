@@ -2,9 +2,13 @@ package controller
 
 import (
 	"encoding/json"
+	"github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -60,6 +64,34 @@ func TestShareRequestPreservesPTZAndPublishedIdentity(t *testing.T) {
 	require.True(t, channels[0].PTZAllowed)
 }
 
+func TestShareRequestInheritsPlatformPTZWhenChannelPermissionIsOmitted(t *testing.T) {
+	devices, channels, err := (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002"}},
+	}).projection(true)
+	require.NoError(t, err)
+	require.Empty(t, devices)
+	require.Len(t, channels, 1)
+	require.True(t, channels[0].PTZAllowed)
+
+	_, channels, err = (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002"}},
+	}).projection(false)
+	require.NoError(t, err)
+	require.False(t, channels[0].PTZAllowed)
+}
+
+func TestShareRequestPreservesExplicitPTZDenialWhenPlatformAllowsPTZ(t *testing.T) {
+	ptz := false
+	_, channels, err := (shareRequest{
+		Scope:    "channels",
+		Channels: []shareChannel{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000002", PTZAllowed: &ptz}},
+	}).projection(true)
+	require.NoError(t, err)
+	require.False(t, channels[0].PTZAllowed)
+}
+
 func TestShareResponseIncludesChannelSourceDeviceID(t *testing.T) {
 	response := buildShareResponse(3, &repository.ProjectionSnapshot{
 		Revision: 5,
@@ -82,4 +114,23 @@ func TestPlatformRequestUsesCamelCaseAndKeepsPasswordWriteOnly(t *testing.T) {
 	require.EqualValues(t, 4, request.ExpectedRevision)
 	require.NotNil(t, request.Password)
 	require.Equal(t, "secret", *request.Password)
+}
+
+func TestManagementFailureLogsDuplicateWithoutFieldValues(t *testing.T) {
+	core, logs := observer.New(zap.ErrorLevel)
+	old := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = old })
+	router := gin.New()
+	router.POST("/platforms", func(ctx *gin.Context) {
+		(&ManagementController{}).fail(ctx, &mysql.MySQLError{Number: 1062, Message: "duplicate sensitive-value"})
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/platforms", nil))
+	require.Equal(t, 409, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "平台名称或上级接入关系")
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, uint16(1062), logs.All()[0].ContextMap()["mysql_errno"])
+	require.NotContains(t, recorder.Body.String(), "sensitive-value")
+	require.NotContains(t, logs.All()[0].ContextMap(), "error")
 }

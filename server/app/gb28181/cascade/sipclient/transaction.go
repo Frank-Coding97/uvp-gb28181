@@ -219,3 +219,20 @@ func RefreshDelay(expires int) time.Duration {
 	}
 	return time.Duration(seconds) * time.Second
 }
+
+func (c *TransactionClient) SendMessage(ctx context.Context, body []byte, callID string) TransactionResult {
+	if c == nil || c.factory == nil {
+		return TransactionResult{BuildErr: fmt.Errorf("cascade SIP transaction client is unavailable")}
+	}
+	request, err := c.factory.BuildMessage(body, callID)
+	if err != nil {
+		return TransactionResult{BuildErr: err}
+	}
+	return c.execute(ctx, request)
+}
+
+// MessageFitsUDP includes the SIP envelope and headroom for transaction-added headers.
+func (c *TransactionClient) MessageFitsUDP(body []byte) bool {
+	request, err := c.factory.BuildMessage(body, "catalog-18446744073709551615-9223372036854775807")
+	return err == nil && len(request.String())+96 <= sip.UDPMTUSize-200
+}

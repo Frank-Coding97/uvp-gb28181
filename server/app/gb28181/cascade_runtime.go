@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/emiago/sipgo"
+	sipwire "github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
@@ -230,11 +232,14 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 		return
 	}
 	store := repository.NewGormRepository(db)
+	if runtime != nil {
+		runtime = cascadeVideoManagementRuntime{runtime}
+	}
 	gbroutes.SetCascadeManagementService(cascadeservice.NewManagementService(store, cipher, runtime, nil), db)
 }
 
 func loadCascadeCredentialCipher() (*securestore.Cipher, error) {
-	cipher, err := securestore.LoadCipherFromEnv(cascadeCredentialKeyEnv, cascadeCredentialVersion)
+	cipher, err := securestore.LoadOrCreateCipher(cascadeCredentialKeyEnv, filepath.Join(app.BasePath, "data", "secrets", "cascade.key"), cascadeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -274,12 +279,18 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 		_ = manager.Shutdown(ctx)
 		return fmt.Errorf("load cascade platforms: %w", err)
 	}
+	if receiver, ok := server.(interface {
+		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	}); ok {
+		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
+	}
 	cascadeRuntimeManager = manager
 	setupCascadeManagement(manager, cipher)
 	return nil
 }
 
 func stopCascadeRuntime(ctx context.Context) error {
+	stopCascadeVideoRuntime(ctx)
 	manager := cascadeRuntimeManager
 	cascadeRuntimeManager = nil
 	if manager == nil {
@@ -296,3 +307,31 @@ func stopCascadeRuntime(ctx context.Context) error {
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)
 var _ cascaderuntime.ResourceAcquirer = (*cascadeResourceAcquirer)(nil)
+
+// Management changes invalidate media dialogs whose upstream identity changed.
+type cascadeVideoManagementRuntime struct {
+	cascadeservice.ManagementRuntime
+}
+
+func (r cascadeVideoManagementRuntime) Reload(ctx context.Context) error {
+	if h := cascadeVideo.Load(); h != nil {
+		if err := h.revalidate(ctx); err != nil {
+			return err
+		}
+	}
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.Reload(ctx)
+}
+func (r cascadeVideoManagementRuntime) Reconnect(id uint64) {
+	if r.ManagementRuntime != nil {
+		r.ManagementRuntime.Reconnect(id)
+	}
+}
+func (r cascadeVideoManagementRuntime) PlatformIDs() []uint64 {
+	if r.ManagementRuntime == nil {
+		return nil
+	}
+	return r.ManagementRuntime.PlatformIDs()
+}

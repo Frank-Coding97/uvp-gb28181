@@ -134,6 +134,9 @@ func TestGetMP4RecordFilesSendsTupleAndParsesPaths(t *testing.T) {
 		if r.URL.Path != "/index/api/getMP4RecordFile" {
 			t.Fatalf("path=%q", r.URL.Path)
 		}
+		if _, ok := r.URL.Query()["customized_path"]; ok {
+			t.Fatal("legacy listing must not send customized_path")
+		}
 		for key, want := range map[string]string{
 			"secret": "test-secret", "vhost": "__defaultVhost__", "app": "rtp", "stream": "34020000001320000001", "period": "2026-08-10",
 		} {
@@ -158,6 +161,87 @@ func TestGetMP4RecordFilesSendsTupleAndParsesPaths(t *testing.T) {
 	if files[0].URL != "" || files[0].StartTime != nil || files[0].DurationMS != nil || files[0].FileSize != nil {
 		t.Fatalf("directory listing must retain unavailable metadata as nil: %+v", files[0])
 	}
+}
+
+func TestGetMP4RecordFilesInDirectorySendsCustomPathAndKeepsRootPath(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/getMP4RecordFile" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		for key, want := range map[string]string{
+			"secret": "test-secret", "vhost": "__defaultVhost__", "app": "rtp",
+			"stream": "34020000001320000001", "period": "2026-08-10",
+			"customized_path": "/srv/uvp/work-recordings/job-1",
+		} {
+			if got := r.URL.Query().Get(key); got != want {
+				t.Fatalf("%s=%q, want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":{"rootPath":"/srv/uvp/work-recordings/job-1/record/rtp/camera/2026-08-10/","paths":["090000-091000.mp4"]}}`))
+	})
+	defer server.Close()
+
+	listing, err := client.GetMP4RecordFilesInDirectory(context.Background(), "__defaultVhost__", "rtp", "34020000001320000001", "2026-08-10", "/srv/uvp/work-recordings/job-1")
+	require.NoError(t, err)
+	require.NotNil(t, listing)
+	require.Equal(t, "/srv/uvp/work-recordings/job-1/record/rtp/camera/2026-08-10/", listing.RootPath)
+	require.Len(t, listing.Files, 1)
+	require.Equal(t, "/srv/uvp/work-recordings/job-1/record/rtp/camera/2026-08-10/090000-091000.mp4", listing.Files[0].FilePath)
+}
+
+func TestGetMP4RecordFilesInDirectoryKeepsRootPathWhenEmpty(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/srv/uvp/work-recordings/job-empty", r.URL.Query().Get("customized_path"))
+		_, _ = w.Write([]byte(`{"code":0,"data":{"rootPath":"/srv/uvp/work-recordings/job-empty/record/rtp/camera/2026-08-10/","paths":[]}}`))
+	})
+	defer server.Close()
+
+	listing, err := client.GetMP4RecordFilesInDirectory(context.Background(), "v", "a", "s", "2026-08-10", "/srv/uvp/work-recordings/job-empty")
+	require.NoError(t, err)
+	require.NotNil(t, listing)
+	require.Equal(t, "/srv/uvp/work-recordings/job-empty/record/rtp/camera/2026-08-10/", listing.RootPath)
+	require.Empty(t, listing.Files)
+}
+
+func TestGetMP4RecordFilesInDirectoryWithoutPeriodOmitsPeriod(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/srv/uvp/work-recordings/job-root", r.URL.Query().Get("customized_path"))
+		if _, ok := r.URL.Query()["period"]; ok {
+			t.Fatal("root listing must omit period")
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":{"rootPath":"/srv/uvp/work-recordings/job-root/record/rtp/camera/","paths":[]}}`))
+	})
+	defer server.Close()
+
+	listing, err := client.GetMP4RecordFilesInDirectory(context.Background(), "v", "a", "s", "", "/srv/uvp/work-recordings/job-root")
+	require.NoError(t, err)
+	require.NotNil(t, listing)
+	require.Equal(t, "/srv/uvp/work-recordings/job-root/record/rtp/camera/", listing.RootPath)
+	require.Empty(t, listing.Files)
+}
+
+func TestGetMP4RecordFilesInDirectoryDoesNotReturnRootOnFailure(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-1,"msg":"access denied","data":{"rootPath":"/must-not-be-used/","paths":[]}}`))
+	})
+	defer server.Close()
+
+	listing, err := client.GetMP4RecordFilesInDirectory(context.Background(), "v", "a", "s", "", "/srv/uvp/work-recordings/job-failed")
+	require.ErrorIs(t, err, ErrRecordingAccessUnavailable)
+	require.Nil(t, listing)
+}
+
+func TestGetMP4RecordFilesInDirectoryRejectsInvalidCustomPath(t *testing.T) {
+	calls := 0
+	client, server := newMockClient(t, func(http.ResponseWriter, *http.Request) { calls++ })
+	defer server.Close()
+
+	for _, directory := range []string{"", " ", "\t", "bad\x00path"} {
+		listing, err := client.GetMP4RecordFilesInDirectory(context.Background(), "v", "a", "s", "2026-08-10", directory)
+		require.ErrorIs(t, err, ErrRecordingPathInvalid, "directory=%q", directory)
+		require.Nil(t, listing)
+	}
+	require.Zero(t, calls)
 }
 
 func TestGetMP4RecordFilesClassifiesZLMCode(t *testing.T) {
@@ -394,3 +478,19 @@ func (timeoutNetworkError) Timeout() bool   { return true }
 func (timeoutNetworkError) Temporary() bool { return true }
 
 var _ net.Error = timeoutNetworkError{}
+
+func TestStartMP4InDirectoryPreservesServerChosenPath(t *testing.T) {
+	calls := 0
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		require.Equal(t, "/index/api/startRecord", r.URL.Path)
+		require.Equal(t, "1", r.URL.Query().Get("type"))
+		require.Equal(t, "./www/work-recordings/job-1", r.URL.Query().Get("customized_path"))
+		_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+	})
+	defer server.Close()
+	require.ErrorIs(t, client.StartMP4RecordInDirectory(context.Background(), "v", "rtp", "s", 0, " "), ErrRecordingPathInvalid)
+	require.Zero(t, calls)
+	require.NoError(t, client.StartMP4RecordInDirectory(context.Background(), "v", "rtp", "s", 0, "./www/work-recordings/job-1"))
+	require.Equal(t, 1, calls)
+}

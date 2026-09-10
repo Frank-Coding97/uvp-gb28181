@@ -6,6 +6,8 @@ import { BaseResult } from "./types";
 export interface SystemConfig {
     systemLogo: string;
     systemIcon: string;
+    systemBrand?: string;
+    playbackCover?: "uvp" | "icon";
     systemName: string;
     systemCopyright: string;
     systemRecordNo: string;

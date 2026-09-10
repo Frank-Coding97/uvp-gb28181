@@ -24,7 +24,8 @@ MIGRATIONS = [
     ROOT.parent / "gb28181" / "migrations" / "2026-09-02-home-dashboard.sql",
 ]
 BASELINE_TIMESTAMP = "2026-09-07 00:00:00"
-VERSION = "sqlite-baseline-20260907-e07857cc"
+VERSION = "sqlite-baseline-20260907-ren-r3"
+SOURCE_COMMIT = "af558ce57b1805e05fa7fa107d73afb3fde460a0"
 
 
 def split_sql(text: str) -> list[str]:
@@ -481,7 +482,7 @@ def main() -> None:
             seed_statements.append(statement)
 
     output: list[str] = [
-        "-- SQLite standalone baseline generated from release source e07857cc.",
+        f"-- SQLite standalone baseline generated from release source {SOURCE_COMMIT[:8]}.",
         "-- SQLite storage mapping: integer ids/counters -> INTEGER; DATE/DATETIME/TIMESTAMP keep their declared type; JSON -> TEXT with json_valid checks; decimal -> NUMERIC.",
         "-- MySQL numeric ranges and VARCHAR/CHAR/VARBINARY lengths are represented by explicit checks where SQLite can preserve them.",
         "-- Application code owns timestamp updates; no environment rows or credentials are seeded here.",
@@ -521,7 +522,7 @@ def main() -> None:
     seed_count = sum(seed_counts.values())
     manifest = {
         "version": VERSION,
-        "source_commit": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
+        "source_commit": SOURCE_COMMIT,
         "sha256": sha256,
         "tables": len(tables),
         "table_names": tables,

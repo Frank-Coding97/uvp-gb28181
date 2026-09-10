@@ -78,7 +78,7 @@
 
         <!-- Top brand bar -->
         <header class="brand-bar">
-            <span class="brand-logo-text">UVP 统一视频接入平台</span>
+            <span class="brand-logo-text">{{ displaySystemName }}</span>
             <span class="brand-meta">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
         </header>
 
@@ -87,7 +87,7 @@
             <div class="float-card">
                 <!-- LEFT: brand / slogan -->
                 <aside class="brand-side">
-                    <div class="brand-eyebrow">Unified Video Platform</div>
+                    <div v-if="displayBrand" class="brand-eyebrow">{{ displayBrand }}</div>
                     <div class="brand-title">把所有视频源<br />接入同一张控制台</div>
                     <p class="brand-lede">
                         国标 SIP 接入 · 视频转发 · 录像点播 · 级联调度，
@@ -145,8 +145,8 @@
 
         <!-- Page footer -->
         <footer class="page-foot">
-            <span>{{ displayCopyright }}</span>
-            <span class="sep">·</span>
+            <span v-if="displayCopyright">{{ displayCopyright }}</span>
+            <span v-if="displayCopyright" class="sep">·</span>
             <span>Powered by GB/T 28181-2022</span>
             <span v-if="displayRecordNo" class="sep">·</span>
             <span v-if="displayRecordNo">{{ displayRecordNo }}</span>
@@ -167,6 +167,9 @@ import { APP_VERSION_TEXT } from "@/config/version";
 
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
+
+const displayBrand = computed(() => systemConfig.value?.systemBrand?.trim() || "");
+const displaySystemName = computed(() => systemConfig.value?.systemName?.trim() || "统一视频接入平台");
 
 const displayCopyright = computed(() => {
     return getDisplaySystemCopyright(systemConfig.value?.systemCopyright);

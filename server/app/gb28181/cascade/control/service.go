@@ -89,7 +89,7 @@ func (s *Service) Forward(ctx context.Context, request ForwardRequest) (ForwardR
 		return ForwardResult{}, err
 	}
 	if snapshot == nil || snapshot.Platform.ID != request.PlatformID || !snapshot.Platform.Enabled {
-		return ForwardResult{}, ErrControlUnauthorized
+		return ForwardResult{}, fmt.Errorf("%w: platform disabled or unavailable", ErrControlUnauthorized)
 	}
 	if !snapshot.Platform.PTZEnabled {
 		return ForwardResult{}, ErrFeatureUnavailable
@@ -125,8 +125,11 @@ func (s *Service) resolveForwardTarget(ctx context.Context, snapshot *repository
 	}
 	control = parsed
 	channel, device, ok := resolveProjection(snapshot, control.DeviceID)
-	if !ok || !channel.PTZAllowed {
-		return control, channel, device, ptz.Target{}, ErrControlUnauthorized
+	if !ok {
+		return control, channel, device, ptz.Target{}, fmt.Errorf("%w: shared channel %q not found", ErrControlUnauthorized, control.DeviceID)
+	}
+	if !channel.PTZAllowed {
+		return control, channel, device, ptz.Target{}, fmt.Errorf("%w: channel %q PTZ permission disabled", ErrControlUnauthorized, control.DeviceID)
 	}
 	target, err := s.targets.Load(ctx, device.SourceDeviceID, channel.SourceChannelID)
 	if err != nil {

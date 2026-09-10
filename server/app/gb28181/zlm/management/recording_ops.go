@@ -236,6 +236,7 @@ type RecordingOpsConfig struct {
 	ExistingRecordingService ExistingRecordingService
 	SessionLookup            RecordingSessionLookup
 	Audit                    RecordingAudit
+	MP4MutationGuard         MP4MutationGuard
 }
 
 type RecordingOps struct {
@@ -245,6 +246,7 @@ type RecordingOps struct {
 	recordingService GBRecordingService
 	sessionLookup    RecordingSessionLookup
 	auditSink        RecordingAudit
+	mp4MutationGuard MP4MutationGuard
 
 	mu          sync.Mutex
 	leases      map[string]*manualRecordingLease
@@ -279,13 +281,16 @@ func NewRecordingOps(config RecordingOpsConfig) *RecordingOps {
 	if factory == nil && config.Executor != nil {
 		executor := config.Executor
 		factory = func(target OwnershipTarget) TypedRecorderClient {
-			return NewExecutorTypedRecorder(executor, target)
+			recorder := NewExecutorTypedRecorder(executor, target)
+			recorder.mp4MutationGuard = config.MP4MutationGuard
+			return recorder
 		}
 	}
 	return &RecordingOps{
 		resolver: resolver, recorderFactory: factory, channelResolver: config.ChannelResolver,
 		recordingService: service, sessionLookup: config.SessionLookup, auditSink: config.Audit,
-		leases: make(map[string]*manualRecordingLease), locks: make(map[string]*sync.Mutex),
+		mp4MutationGuard: config.MP4MutationGuard,
+		leases:           make(map[string]*manualRecordingLease), locks: make(map[string]*sync.Mutex),
 	}
 }
 
@@ -505,7 +510,9 @@ func (s *RecordingOps) Start(ctx context.Context, userID uint, request Recording
 		if alreadyRecording {
 			return s.rejectExternalRecording(lease, target, recorderType, &current)
 		}
-		if err := s.recordingService.StartManual(ctx, gbChannel, target.Media); err != nil {
+		if err := runMutationGuard(ctx, s.mp4MutationGuard, target, func(operationCtx context.Context) error {
+			return s.recordingService.StartManual(operationCtx, gbChannel, target.Media)
+		}); err != nil {
 			return s.startFailure(lease, &current, NormalizeError(err, nodeIDString(target.NodeID)))
 		}
 		startedByRequest = true
@@ -684,7 +691,9 @@ func (s *RecordingOps) ForceStop(ctx context.Context, userID uint, request Recor
 		return s.resultForLeaseOrTarget(lease, target, recorderType, &current), NewInternalError(nodeIDString(target.NodeID), "typed recorder is not configured")
 	}
 	if recorderType == zlm.RecorderMP4 {
-		if stopErr := s.recordingService.StopManual(ctx, gbChannel, target.Media); stopErr != nil {
+		if stopErr := runMutationGuard(ctx, s.mp4MutationGuard, target, func(operationCtx context.Context) error {
+			return s.recordingService.StopManual(operationCtx, gbChannel, target.Media)
+		}); stopErr != nil {
 			if lease != nil {
 				lease.State = RecordingStateStopping
 			}
@@ -836,7 +845,9 @@ func (s *RecordingOps) stopLocked(ctx context.Context, userID uint, provided *Re
 		if s.recordingService == nil {
 			return s.resultForLease(lease, &current), NewInternalError(nodeIDString(target.NodeID), "GB recording lifecycle is not configured")
 		}
-		if stopErr := s.recordingService.StopManual(ctx, gbChannel, target.Media); stopErr != nil {
+		if stopErr := runMutationGuard(ctx, s.mp4MutationGuard, target, func(operationCtx context.Context) error {
+			return s.recordingService.StopManual(operationCtx, gbChannel, target.Media)
+		}); stopErr != nil {
 			lease.State = RecordingStateStopping
 			result := s.resultForLease(lease, &current)
 			result.State, result.Retryable, result.Reason = RecordingStateStopping, true, "recording stop is retryable"
@@ -1127,7 +1138,9 @@ func (s *RecordingOps) rollbackStart(ctx context.Context, recorder TypedRecorder
 		if s == nil || s.recordingService == nil {
 			return errors.New("GB recording lifecycle is not configured")
 		}
-		if err := s.recordingService.StopManual(ctx, gbChannel, target.Media); err != nil {
+		if err := runMutationGuard(ctx, s.mp4MutationGuard, target, func(operationCtx context.Context) error {
+			return s.recordingService.StopManual(operationCtx, gbChannel, target.Media)
+		}); err != nil {
 			return err
 		}
 	} else {
@@ -1353,30 +1366,57 @@ func (a *ExistingRecordingServiceAdapter) StopManual(ctx context.Context, channe
 // ExecutorTypedRecorder adapts T6 NodeExecutor to the typed recorder surface.
 // It resolves/authorizes the node independently for every read or write.
 type ExecutorTypedRecorder struct {
-	executor *NodeExecutor
-	target   OwnershipTarget
+	executor         *NodeExecutor
+	target           OwnershipTarget
+	mp4MutationGuard MP4MutationGuard
 }
 
 func NewExecutorTypedRecorder(executor *NodeExecutor, target OwnershipTarget) *ExecutorTypedRecorder {
 	return &ExecutorTypedRecorder{executor: executor, target: target}
 }
 
+// SetMP4MutationGuard configures the shared external gate for direct adapter
+// callers. RecordingOps also wires the same guard when it constructs this
+// adapter from a NodeExecutor.
+func (r *ExecutorTypedRecorder) SetMP4MutationGuard(guard MP4MutationGuard) *ExecutorTypedRecorder {
+	if r != nil {
+		r.mp4MutationGuard = guard
+	}
+	return r
+}
+
 func (r *ExecutorTypedRecorder) StartRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType zlm.RecorderType, maxSecond int) error {
 	if r == nil || r.executor == nil {
 		return errors.New("typed recorder executor is not configured")
 	}
-	return r.executor.ExecuteWrite(nonNilContext(ctx), r.target.NodeID, func(operationCtx context.Context, client *zlm.Client) error {
-		return client.StartRecordWithType(operationCtx, vhost, appName, stream, recorderType, maxSecond)
-	})
+	operation := func(operationCtx context.Context) error {
+		return r.executor.ExecuteWrite(operationCtx, r.target.NodeID, func(clientCtx context.Context, client *zlm.Client) error {
+			return client.StartRecordWithType(clientCtx, vhost, appName, stream, recorderType, maxSecond)
+		})
+	}
+	if recorderType == zlm.RecorderMP4 {
+		actualTarget := r.target
+		actualTarget.Media.Vhost, actualTarget.Media.App, actualTarget.Media.Stream = vhost, appName, stream
+		return runMutationGuard(ctx, r.mp4MutationGuard, actualTarget, operation)
+	}
+	return operation(nonNilContext(ctx))
 }
 
 func (r *ExecutorTypedRecorder) StopRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType zlm.RecorderType) error {
 	if r == nil || r.executor == nil {
 		return errors.New("typed recorder executor is not configured")
 	}
-	return r.executor.ExecuteWrite(nonNilContext(ctx), r.target.NodeID, func(operationCtx context.Context, client *zlm.Client) error {
-		return client.StopRecordWithType(operationCtx, vhost, appName, stream, recorderType)
-	})
+	operation := func(operationCtx context.Context) error {
+		return r.executor.ExecuteWrite(operationCtx, r.target.NodeID, func(clientCtx context.Context, client *zlm.Client) error {
+			return client.StopRecordWithType(clientCtx, vhost, appName, stream, recorderType)
+		})
+	}
+	if recorderType == zlm.RecorderMP4 {
+		actualTarget := r.target
+		actualTarget.Media.Vhost, actualTarget.Media.App, actualTarget.Media.Stream = vhost, appName, stream
+		return runMutationGuard(ctx, r.mp4MutationGuard, actualTarget, operation)
+	}
+	return operation(nonNilContext(ctx))
 }
 
 func (r *ExecutorTypedRecorder) IsRecordingWithType(ctx context.Context, vhost, appName, stream string, recorderType zlm.RecorderType) (bool, error) {

@@ -1,8 +1,8 @@
 {
-  "version": "sqlite-baseline-20260907-e07857cc",
-  "source_commit": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
-  "sha256": "785a700f94513851de4b2c4f4ee6854275b6cfec6840d3bdb6ec3f7252db569a",
-  "tables": 86,
+  "version": "sqlite-baseline-20260907-ren-r3",
+  "source_commit": "af558ce57b1805e05fa7fa107d73afb3fde460a0",
+  "sha256": "8a0fb8b4575ea7d9dffe749a7d7d0d764e64f79dd8a2018ee23737c848786a61",
+  "tables": 90,
   "table_names": [
     "gb_alarm_binding",
     "gb_alarm_event",
@@ -80,6 +80,10 @@
     "sys_user_sessions",
     "sys_login_logs",
     "gb_device_firmware_upgrade",
+    "gb_work_recording",
+    "gb_work_recording_batch",
+    "gb_recorder_claim",
+    "gb_work_recording_file",
     "gb_device_grant",
     "gb_device_traffic_session",
     "gb_device_traffic_daily",
@@ -1788,8 +1792,8 @@
       "unique": false
     }
   ],
-  "seed_statements": 1143,
-  "seed_inserts": 912,
+  "seed_statements": 1156,
+  "seed_inserts": 925,
   "seed_updates": 224,
   "seed_deletes": 7,
   "seeded_tables": [
@@ -1805,7 +1809,7 @@
     "sys_role_menu"
   ],
   "inputs": {
-    "uvp-gb28181.sql": "3edc18d3d73510602101c633bb940dc044560ba3e80627e08726749d98fe2f09",
+    "uvp-gb28181.sql": "40beabbe59e4d62e6790c3d315b45f3f33047b51bcb4a66bbf1b0629548ba665",
     "2026-08-15-device-grant-table.sql": "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
     "2026-08-15-device-traffic.sql": "9fdaef7450f0de93eaf0467a761acd13bfd468c2b0d7bfa28ad84afd67c3fdfe",
     "2026-08-21-device-traffic-hourly.sql": "6f5ab75f0bef394cbee8dd1e542cb28eb33de207773506c7873454210997bd9b",

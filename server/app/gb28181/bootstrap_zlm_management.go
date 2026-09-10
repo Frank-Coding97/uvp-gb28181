@@ -188,11 +188,12 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 	bundle := &gbcontrollers.ZLMManagementBundle{
 		Overview: core.overview,
 		Streams: gbzlmmanagement.NewStreamService(gbzlmmanagement.StreamServiceDependencies{
-			Registry:     core.registry,
-			Runtime:      core.runtime,
-			Fresh:        nil,
-			NodeExecutor: core.executor,
-			Ownership:    ownership,
+			SourceCloseGuard: guardManagementSource,
+			Registry:         core.registry,
+			Runtime:          core.runtime,
+			Fresh:            nil,
+			NodeExecutor:     core.executor,
+			Ownership:        ownership,
 		}),
 		Sessions: gbzlmmanagement.NewSessionService(gbzlmmanagement.SessionServiceDependencies{
 			Registry:     core.registry,
@@ -225,18 +226,20 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 			Capability: ingressCapabilities,
 		})
 
-		rtpClient := gbzlmmanagement.NewNodeRTPClientAdapter(core.executor)
+		rtpClient := gbzlmmanagement.NewNodeRTPClientAdapter(core.executor).SetSourceCloseGuard(guardManagementSource)
 		rtpOwnership := gbzlmmanagement.NewOwnershipResolver(gbzlmmanagement.OwnershipDependencies{
 			Presence: gbzlmmanagement.NewRTPPresenceReader(rtpClient), Sources: managedOnly,
 		})
 		bundle.RTP = gbzlmmanagement.NewRTPService(gbzlmmanagement.RTPDependencies{
-			Client: rtpClient, Ledger: core.ledger, Ownership: rtpOwnership,
+			SourceCloseGuard: guardManagementSource,
+			Client:           rtpClient, Ledger: core.ledger, Ownership: rtpOwnership,
 			Capability: ingressCapabilities,
 		})
 	}
 
 	if business.recordingService != nil && business.recordingChannels != nil && business.recordingLocation != nil {
 		bundle.Recording = gbzlmmanagement.NewRecordingOps(gbzlmmanagement.RecordingOpsConfig{
+			MP4MutationGuard:         guardManagementMP4,
 			Executor:                 core.executor,
 			Resolver:                 ownership,
 			ChannelResolver:          gbzlmmanagement.NewGBChannelResolver(business.recordingChannels, business.recordingLocation),

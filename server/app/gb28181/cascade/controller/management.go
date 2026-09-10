@@ -2,9 +2,13 @@ package controller
 
 import (
 	"errors"
+	"fmt"
+	"github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
 	"net/http"
 	"strconv"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -189,12 +193,17 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 	if !ok {
 		return
 	}
+	platform, err := c.service.Get(ctx, id)
+	if err != nil {
+		c.fail(ctx, err)
+		return
+	}
 	var req shareRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.fail(ctx, repository.ErrInvalidProjection)
 		return
 	}
-	devices, channels, err := req.projection()
+	devices, channels, err := req.projection(platform.PTZEnabled)
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -274,7 +283,11 @@ func (c *ManagementController) authorizeSources(ctx *gin.Context, devices []repo
 
 func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	status := http.StatusInternalServerError
+	var mysqlErr *mysql.MySQLError
+	duplicate := errors.Is(err, gorm.ErrDuplicatedKey) || (errors.As(err, &mysqlErr) && mysqlErr.Number == 1062)
 	switch {
+	case duplicate:
+		status = http.StatusConflict
 	case errors.Is(err, service.ErrInvalidPlatformConfig), errors.Is(err, repository.ErrInvalidProjection):
 		status = http.StatusBadRequest
 	case errors.Is(err, repository.ErrPlatformNotFound):
@@ -296,6 +309,22 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	}
 	if status == http.StatusServiceUnavailable {
 		message = "国标级联服务暂不可用"
+	}
+	if errors.Is(err, service.ErrCredentialUnavailable) {
+		message = "认证密码暂时无法保存，请检查平台数据目录是否可读写"
+	}
+	if duplicate {
+		message = "平台名称或上级接入关系已存在，请检查上级地址、端口及平台身份"
+	}
+	if app.ZapLog != nil {
+		fields := []zap.Field{zap.String("method", ctx.Request.Method), zap.String("route", ctx.FullPath()), zap.Int("status", status), zap.String("error_type", fmt.Sprintf("%T", err))}
+		if mysqlErr != nil {
+			// 数据库原始错误可能带字段值；只记录错误编号和 SQLSTATE。
+			fields = append(fields, zap.Uint16("mysql_errno", mysqlErr.Number), zap.String("sqlstate", string(mysqlErr.SQLState[:])))
+		} else {
+			fields = append(fields, zap.Error(err))
+		}
+		app.ZapLog.Error("国标级联操作失败", fields...)
 	}
 	ctx.JSON(status, gin.H{"code": status, "msg": message})
 }
@@ -327,7 +356,7 @@ type enabledRequest struct {
 }
 
 type shareRequest struct {
-	Scope                     string         `json:"scope"`
+	Scope                      string         `json:"scope"`
 	Devices                    []shareDevice  `json:"devices"`
 	Channels                   []shareChannel `json:"channels"`
 	ExpectedProjectionRevision uint64         `json:"expectedProjectionRevision"`
@@ -346,7 +375,7 @@ type shareChannel struct {
 	PTZAllowed         *bool  `json:"ptzAllowed"`
 }
 
-func (r shareRequest) projection() ([]repository.DeviceProjectionInput, []repository.ChannelProjectionInput, error) {
+func (r shareRequest) projection(platformPTZEnabled ...bool) ([]repository.DeviceProjectionInput, []repository.ChannelProjectionInput, error) {
 	scope := strings.ToLower(strings.TrimSpace(r.Scope))
 	if scope != "" && scope != "all" && scope != "devices" && scope != "channels" {
 		return nil, nil, repository.ErrInvalidProjection
@@ -363,7 +392,7 @@ func (r shareRequest) projection() ([]repository.DeviceProjectionInput, []reposi
 		if scope == "devices" {
 			continue
 		}
-		ptz := false
+		ptz := len(platformPTZEnabled) > 0 && platformPTZEnabled[0]
 		if item.PTZAllowed != nil {
 			ptz = *item.PTZAllowed
 		}

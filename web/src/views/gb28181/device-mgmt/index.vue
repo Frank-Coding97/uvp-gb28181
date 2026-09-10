@@ -32,7 +32,8 @@ import {
     Plus,
     FolderPlus,
     FolderMinus,
-    Wrench
+    RotateCcw,
+    Upload
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
@@ -64,6 +65,8 @@ import {
     type ChannelVO,
     type CreateDeviceDTO,
     type DeviceVO,
+    type DeviceOperationResult,
+    type UpgradeOperation,
     type DeviceStatusEvent,
     type DeviceSubscription,
     type DirectoryNode,
@@ -79,7 +82,11 @@ import { useThemeConfig } from "@/store/modules/theme-config";
 import { useUserStoreHook } from "@/store/modules/user";
 import { storeToRefs } from "pinia";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
-import DeviceMaintenanceDialog from "./DeviceMaintenanceDialog.vue";
+import DeviceRebootDialog from "./DeviceRebootDialog.vue";
+import DeviceFirmwareUpgradeDrawer from "./DeviceFirmwareUpgradeDrawer.vue";
+import DeviceMaintenanceRecordsDrawer from "./DeviceMaintenanceRecordsDrawer.vue";
+import DeviceMaintenanceMenu from "./DeviceMaintenanceMenu.vue";
+import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
@@ -128,8 +135,22 @@ const memberMutationLoading = ref(false);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
-const maintenanceVisible = ref(false);
+const rebootVisible = ref(false);
+const upgradeVisible = ref(false);
+const recordsVisible = ref(false);
+const recordsType = ref<"reboot" | "upgrade">("reboot");
+const recordsOperationId = ref<string>();
+const maintenanceActivity = createMaintenanceActivity();
+const maintenanceChecking = ref(false);
+const maintenanceCheckError = ref("");
+let maintenanceOpenVersion = 0;
+let maintenancePoll: ReturnType<typeof setInterval> | undefined;
 const maintenanceDevice = ref<DeviceVO | null>(null);
+const rebootOperationId = ref<string>();
+const currentRebootResult = computed(() => {
+    const operation = maintenanceDevice.value ? maintenanceActivity.devices[maintenanceDevice.value.id]?.reboot : undefined;
+    return operation && (isRebootPending(operation) || (rebootOperationId.value && operation.operationId === rebootOperationId.value)) ? operation : null;
+});
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
 const rowsLoading = ref(false);
@@ -989,17 +1010,94 @@ async function openDevice(record: DeviceVO) {
     }
 }
 
-function openDeviceMaintenance(record: DeviceVO) {
-    if (!canViewMaintenance.value) return;
+async function prepareMaintenance(record: DeviceVO) {
+    const version = ++maintenanceOpenVersion;
     maintenanceDevice.value = record;
-    maintenanceVisible.value = true;
+    drawerVisible.value = false;
+    recordsVisible.value = false;
+    maintenanceChecking.value = true;
+    maintenanceCheckError.value = "";
+    try {
+        const [detail] = await Promise.all([getDevice(record.id), maintenanceActivity.refresh(record.id)]);
+        if (version !== maintenanceOpenVersion) return;
+        if (detail.code !== 0 || !detail.data) throw new Error("设备详情加载失败");
+        onMaintenanceDeviceUpdated(detail.data);
+    } catch {
+        if (version === maintenanceOpenVersion) maintenanceCheckError.value = "未能核查设备状态，请关闭后重新打开重试。";
+    } finally {
+        if (version === maintenanceOpenVersion) maintenanceChecking.value = false;
+    }
+}
+
+function openDeviceUpgrade(record: DeviceVO) {
+    if (!canViewMaintenance.value || !canUpgradeDevice.value) return;
+    rebootVisible.value = false;
+    upgradeVisible.value = true;
+    void prepareMaintenance(record);
+}
+
+function openDeviceReboot(record: DeviceVO) {
+    if (!canViewMaintenance.value || !canRebootDevice.value) return;
+    upgradeVisible.value = false;
+    rebootOperationId.value = undefined;
+    rebootVisible.value = true;
+    void prepareMaintenance(record);
+}
+
+function openMaintenanceRecords(record: DeviceVO, type: "reboot" | "upgrade" = "reboot", operationId?: string) {
+    if (!canViewMaintenance.value) return;
+    ++maintenanceOpenVersion;
+    maintenanceChecking.value = false;
+    drawerVisible.value = false;
+    rebootVisible.value = false;
+    upgradeVisible.value = false;
+    maintenanceDevice.value = record;
+    recordsType.value = type;
+    recordsOperationId.value = operationId;
+    recordsVisible.value = true;
+}
+
+function viewMaintenanceRecord(type: "reboot" | "upgrade", operationId?: string) {
+    if (maintenanceDevice.value) openMaintenanceRecords(maintenanceDevice.value, type, operationId);
+}
+
+function maintenanceBlockReason(action: "reboot" | "upgrade") {
+    if (maintenanceChecking.value) return "正在核查设备维护状态，请稍候。";
+    if (maintenanceCheckError.value) return maintenanceCheckError.value;
+    return maintenanceDevice.value ? maintenanceActivity.reason(maintenanceDevice.value.id, action) : "";
 }
 
 function onMaintenanceDeviceUpdated(updatedDevice: DeviceVO) {
     const row = devices.value.find(device => device.id === updatedDevice.id);
     if (row) Object.assign(row, updatedDevice);
     if (deviceDetail.value?.id === updatedDevice.id) deviceDetail.value = updatedDevice;
-    maintenanceDevice.value = updatedDevice;
+    if (maintenanceDevice.value?.id === updatedDevice.id) maintenanceDevice.value = updatedDevice;
+}
+
+function onUpgradeOperation(operation: UpgradeOperation) {
+    maintenanceActivity.rememberUpgrade(operation.deviceId, operation);
+}
+
+function onRebootOperation(operation: DeviceOperationResult) {
+    rebootOperationId.value = operation.operationId;
+    if (maintenanceDevice.value) maintenanceActivity.rememberReboot(maintenanceDevice.value.id, operation);
+}
+
+function onMaintenanceUncertain(action: "reboot" | "upgrade") {
+    if (maintenanceDevice.value) maintenanceActivity.markUncertain(maintenanceDevice.value.id, action);
+}
+
+function onMaintenanceFirmwareUpdated(firmware: string) {
+    if (maintenanceDevice.value) onMaintenanceDeviceUpdated({ ...maintenanceDevice.value, firmware });
+}
+
+function openKnownMaintenance(record: DeviceVO) {
+    const state = maintenanceActivity.devices[record.id];
+    if (isUpgradeUnresolved(state?.upgrade) && canUpgradeDevice.value) openDeviceUpgrade(record);
+    else {
+        const upgrade = state?.uncertain === "upgrade" || isUpgradeUnresolved(state?.upgrade);
+        openMaintenanceRecords(record, upgrade ? "upgrade" : "reboot", upgrade ? state?.upgrade?.operationId : state?.reboot?.operationId);
+    }
 }
 
 function openSubscriptionManager(record: DeviceVO) {
@@ -1765,6 +1863,13 @@ function channelStatusClass(record: DeviceVO): string {
 
 onMounted(async () => {
     window.addEventListener("keydown", focusKeyword);
+    maintenancePoll = setInterval(() => {
+        if (!canViewMaintenance.value) return;
+        for (const id of Object.keys(maintenanceActivity.devices).map(Number)) {
+            const state = maintenanceActivity.devices[id];
+            if (!state.error && !state.uncertain && maintenanceActivity.label(id)) void maintenanceActivity.refresh(id);
+        }
+    }, 5000);
     if (viewMode.value === "map") {
         await nextTick(ensureMap);
     }
@@ -1777,6 +1882,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    ++maintenanceOpenVersion;
+    clearInterval(maintenancePoll);
     window.removeEventListener("keydown", focusKeyword);
     cancelKeywordSearch();
     stopAutoRefresh();
@@ -2157,6 +2264,7 @@ onUnmounted(() => {
                                         <a-tooltip :content="deviceNameText(record)" position="top">
                                             <div class="device-name">
                                                 <span class="pri text-ellipsis">{{ deviceNameText(record) }}</span>
+                                                <button v-if="canViewMaintenance && maintenanceActivity.label(record.id)" class="maintenance-task-link" type="button" @click.stop="openKnownMaintenance(record)">{{ maintenanceActivity.label(record.id) }} · 查看</button>
                                             </div>
                                         </a-tooltip>
                                     </template>
@@ -2248,10 +2356,7 @@ onUnmounted(() => {
                                                     <MoreHorizontal :size="13" />
                                                 </a-link>
                                                 <template #content>
-                                                    <a-doption v-if="canViewMaintenance" class="device-action-menu-item" @click="openDeviceMaintenance(record)">
-                                                        <Wrench :size="14" />
-                                                        <span>设备维护</span>
-                                                    </a-doption>
+                                                    <DeviceMaintenanceMenu v-if="canViewMaintenance" :can-upgrade="canUpgradeDevice" :can-reboot="canRebootDevice" @upgrade="openDeviceUpgrade(record)" @records="openMaintenanceRecords(record)" @reboot="openDeviceReboot(record)" />
                                                     <a-doption class="device-action-menu-item" @click="openDevice(record)">
                                                         <Eye :size="14" />
                                                         <span>详情</span>
@@ -2322,6 +2427,7 @@ onUnmounted(() => {
                                 <div><span>最近心跳</span><strong :class="{ warn: !item.online }">{{ dateTime(item.keepaliveTime) }}</strong></div>
                                 <div><span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong></div>
                             </div>
+                            <button v-if="canViewMaintenance && maintenanceActivity.label(item.id)" class="maintenance-task-link" type="button" @click.stop="openKnownMaintenance(item)">{{ maintenanceActivity.label(item.id) }} · 查看</button>
                             <div class="card-actions device-card-actions">
                                 <a-tooltip content="查看通道" position="top">
                                     <button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"><Camera :size="13" /></button>
@@ -2338,9 +2444,12 @@ onUnmounted(() => {
                                 <a-tooltip v-if="canManageSubscriptions" content="订阅管理" position="top">
                                     <button class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip v-if="canViewMaintenance" content="设备维护" position="top">
-                                    <button class="icon-btn small framed" type="button" aria-label="设备维护" @click.stop="openDeviceMaintenance(item)"><Wrench :size="13" /></button>
-                                </a-tooltip>
+                                <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
+                                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作"><MoreHorizontal :size="13" /></button>
+                                    <template #content>
+                                        <DeviceMaintenanceMenu :can-upgrade="canUpgradeDevice" :can-reboot="canRebootDevice" @upgrade="openDeviceUpgrade(item)" @records="openMaintenanceRecords(item)" @reboot="openDeviceReboot(item)" />
+                                    </template>
+                                </a-dropdown>
                                 <a-tooltip v-if="canEditDevice" content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
                                 </a-tooltip>
@@ -2713,10 +2822,11 @@ onUnmounted(() => {
                         </section>
 
                         <div class="drawer-foot">
-                            <a-button v-if="canViewMaintenance" type="primary" data-testid="device-maintenance-open" @click="openDeviceMaintenance(deviceDetail)">
-                                <template #icon><Wrench :size="14" /></template>
-                                <template #default>设备维护</template>
-                            </a-button>
+                            <template v-if="canViewMaintenance">
+                                <a-button :disabled="!canUpgradeDevice" :title="canUpgradeDevice ? '' : '暂无设备升级权限'" @click="openDeviceUpgrade(deviceDetail)"><template #icon><Upload :size="14" /></template>固件升级</a-button>
+                                <a-button @click="openMaintenanceRecords(deviceDetail)"><template #icon><History :size="14" /></template>维护记录</a-button>
+                                <a-button class="maintenance-reboot-entry" :disabled="!canRebootDevice" :title="canRebootDevice ? '' : '暂无设备重启权限'" @click="openDeviceReboot(deviceDetail)"><template #icon><RotateCcw :size="14" /></template>重启设备</a-button>
+                            </template>
                             <a-button v-if="canManageSubscriptions" type="primary" @click="openSubscriptionManager(deviceDetail)">
                                 <template #icon><Bell :size="14" /></template>
                                 <template #default>管理订阅</template>
@@ -2734,13 +2844,36 @@ onUnmounted(() => {
                 </a-spin>
             </a-drawer>
 
-            <DeviceMaintenanceDialog
+            <DeviceRebootDialog
                 v-if="canViewMaintenance"
-                v-model:visible="maintenanceVisible"
+                v-model:visible="rebootVisible"
                 :device="maintenanceDevice"
                 :can-reboot="canRebootDevice"
+                :result="currentRebootResult"
+                :blocked-reason="maintenanceBlockReason('reboot')"
+                @device-updated="onMaintenanceDeviceUpdated"
+                @operation-updated="onRebootOperation"
+                @submission-uncertain="onMaintenanceUncertain('reboot')"
+                @view-records="viewMaintenanceRecord('reboot', $event)"
+            />
+            <DeviceFirmwareUpgradeDrawer
+                v-if="canViewMaintenance"
+                v-model:visible="upgradeVisible"
+                :device="maintenanceDevice"
                 :can-upgrade="canUpgradeDevice"
-                @deviceUpdated="onMaintenanceDeviceUpdated"
+                :reboot-busy="maintenanceDevice ? isRebootPending(maintenanceActivity.devices[maintenanceDevice.id]?.reboot) : false"
+                :blocked-reason="maintenanceBlockReason('upgrade')"
+                @firmware-updated="onMaintenanceFirmwareUpdated"
+                @operation-updated="onUpgradeOperation"
+                @submission-uncertain="onMaintenanceUncertain('upgrade')"
+                @view-records="viewMaintenanceRecord('upgrade', $event)"
+            />
+            <DeviceMaintenanceRecordsDrawer
+                v-if="canViewMaintenance"
+                v-model:visible="recordsVisible"
+                :device="maintenanceDevice"
+                :initial-type="recordsType"
+                :operation-id="recordsOperationId"
             />
 
             <SubscriptionDialog
