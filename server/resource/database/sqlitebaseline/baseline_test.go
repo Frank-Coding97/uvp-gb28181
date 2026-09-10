@@ -37,7 +37,7 @@ func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 }
 
 func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
-	require.Equal(t, "sqlite-baseline-20260910-ren-r4", Version)
+	require.Equal(t, "sqlite-baseline-20260907-ren-r4", Version)
 	require.Equal(t, expectedBaselineSHA256, SHA256)
 	require.NotEmpty(t, SQL)
 	digest := sha256.Sum256([]byte(SQL))
