@@ -10,6 +10,7 @@ import {
     type DirectoryNode,
 } from "../device-mgmt/api";
 import { appendChannelFavoriteGroup, createChannelFavoriteGroup, deleteChannelFavoriteGroup, listChannelFavoriteGroups, removeChannelFavoriteItem, type ChannelFavoriteGroup as ApiFavoriteGroup, type ChannelFavoriteInput } from "@/api/gb28181";
+import { channelDisplayName } from "./channelLabel";
 import { useUserStoreHook } from "@/store/modules/user";
 
 type SourceView = "devices" | "national" | "custom" | "favorites";
@@ -242,7 +243,7 @@ function displayName(device: DeviceVO) {
 }
 
 function displayChannelName(channel: ChannelVO) {
-    return channel.name || channel.alias || channel.channelId;
+    return channelDisplayName(channel);
 }
 
 function directoryNode(node: DirectoryNode, depth = node.depth): SourceTreeNode {

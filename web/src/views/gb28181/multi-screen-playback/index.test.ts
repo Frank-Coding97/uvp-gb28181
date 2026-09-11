@@ -54,6 +54,9 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
                 <button data-test="source-channel-audio" @click="$emit('select', {
                     id: 4, channelId: 'channel-4', deviceId: 'device-1', name: '南门', status: 1, audioEnabled: true
                 })">南门</button>
+                <button data-test="source-channel-alias" @click="$emit('select', {
+                    id: 5, channelId: 'channel-5', deviceId: 'device-1', name: '北门', alias: '北门闸机', status: 1, audioEnabled: false
+                })">北门</button>
                 <button data-test="favorite-group-1" @click="$emit('select-group', {
                     id: 'group-1', name: '重点通道', channels: [{ id: 3, channelId: 'channel-3', deviceId: 'device-1', name: '后门', status: 1, audioEnabled: false }]
                 })">重点通道</button>
@@ -179,6 +182,18 @@ describe("multi-screen playback page", () => {
         const player = wrapper.get(".mock-play-window");
         expect(player.attributes("data-has-audio")).toBe("true");
         expect(player.attributes("data-muted")).toBe("true");
+    });
+
+    // 决策：画面与作业单用的通道名跟左侧设备树保持一致，统一优先取别名。
+    it("labels screens and recording targets with the channel alias", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-alias]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.get(".slot-channel-name").text()).toBe("北门闸机");
+        await wrapper.get("[data-test=work-order-toggle]").trigger("click");
+        await flushPromises();
+        expect(wrapper.get("[data-test=work-order-form-dialog]").attributes("data-labels")).toBe("北门闸机");
     });
 
     // 决策：先填作业单再开录，所以按钮只负责打开表单，不直接开录。

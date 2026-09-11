@@ -25,6 +25,7 @@ import WorkOrderFormDialog from "../work-orders/WorkOrderFormDialog.vue";
 import { formatWorkOrderSize, isWorkOrderActive, workOrderSliceCount, workOrderStateLabel, workOrderTotalBytes } from "../work-orders/orderState";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
+import { channelDisplayName } from "./channelLabel";
 import { getActiveWorkOrder, getWorkOrder, stopWorkOrder, workOrderDownloadUrl, type WorkOrderSnapshot } from "@/api/gb28181-work-recording";
 
 
@@ -140,7 +141,7 @@ const recordingTargets = computed(() => {
     });
 });
 const recordingChannelOptions = computed(() =>
-    recordingTargets.value.map(channel => ({ id: channel.id, label: channel.name || channel.alias || channel.channelId })));
+    recordingTargets.value.map(channel => ({ id: channel.id, label: channelDisplayName(channel) })));
 
 /** 服务端派生的作业单状态，页面加载与轮询都会刷新，刷新后不会误判为未录制。 */
 const workOrderRunning = computed(() => Boolean(activeWorkOrder.value && isWorkOrderActive(activeWorkOrder.value.state)));
@@ -723,7 +724,7 @@ onBeforeUnmount(() => {
                     <article v-for="slot in visibleSlots" :key="slot.index" class="screen-slot" :class="{ focused: focusedIndex === slot.index, empty: !slot.channel }" data-test="screen-slot" tabindex="0" @click="focusSlot(slot)" @keydown.enter="focusSlot(slot)">
                         <template v-if="slot.channel">
                             <div class="slot-topline">
-                                <div class="slot-title"><span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{ slot.channel.name || slot.channel.alias || slot.channel.channelId }}</span><span class="slot-status">{{ statusLabel(slot) }}</span><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span></div>
+                                <div class="slot-title"><span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{ channelDisplayName(slot.channel) }}</span><span class="slot-status">{{ statusLabel(slot) }}</span><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span></div>
                                 <div class="slot-actions">
                                     <button class="slot-action" type="button" :data-test="`slot-console-${slot.index}`" aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><SlidersHorizontal :size="15" aria-hidden="true" /></button>
                                     <button class="slot-action danger" type="button" :data-test="`slot-remove-${slot.index}`" aria-label="关闭当前播放" title="关闭当前播放" @click.stop="removeSlot(slot)"><X :size="15" aria-hidden="true" /></button>

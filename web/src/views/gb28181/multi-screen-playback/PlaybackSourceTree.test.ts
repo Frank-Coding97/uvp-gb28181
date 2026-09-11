@@ -114,6 +114,22 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
     });
 
+    // 决策：设备列表里维护的通道别名是给人看的，树节点要优先显示它。
+    it("shows the channel alias instead of the reported name", async () => {
+        api.listChannels.mockResolvedValue({
+            code: 0,
+            data: { list: [{ ...channel, name: "channel-11", alias: "东门闸机" }] }
+        });
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.get('[data-node-key="root:device:1:channel:11"] .node-name').text()).toBe("东门闸机");
+        expect(wrapper.text()).not.toContain("channel-11");
+        wrapper.unmount();
+    });
+
     it("does not load or expose persistent favorites for a guest", async () => {
         account.permissions = ["gb28181:device:view", "gb28181:play:start"];
         const wrapper = mountTree();

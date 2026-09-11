@@ -22,6 +22,7 @@ import { controlPtz, fetchPTZDefaultSpeedConfig, getControlCapabilities } from "
 import { useUserStoreHook } from "@/store/modules/user";
 import type { ChannelVO } from "../device-mgmt/api";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
+import { channelDisplayName } from "./channelLabel";
 
 const props = defineProps<{
     channel: ChannelVO | null;
@@ -44,7 +45,7 @@ const capabilityState = ref("unknown");
 let capabilityToken = 0;
 let activeAction: { channelId: number; action: string } | null = null;
 
-const focusedName = computed(() => props.channel?.name || props.channel?.alias || props.channel?.channelId || "未选择画面");
+const focusedName = computed(() => channelDisplayName(props.channel, "未选择画面"));
 const disabledReason = computed(() => {
     if (!canControlPtz.value) return "当前账号没有云台控制权限";
     if (!props.channel) return "请先聚焦一个播放画面";
