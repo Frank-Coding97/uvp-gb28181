@@ -44,7 +44,6 @@ type CredentialSealer interface {
 
 type ManagementRuntime interface {
 	Reload(context.Context) error
-	Reconnect(uint64)
 	PlatformIDs() []uint64
 }
 
@@ -116,12 +115,27 @@ type PlatformView struct {
 	LastErrorCode        string                       `json:"lastErrorCode,omitempty"`
 	LastErrorMessage     string                       `json:"lastErrorMessage,omitempty"`
 	LastErrorAt          *time.Time                   `json:"lastErrorAt,omitempty"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+}
+
+// CatalogPusher proactively reports the shared catalog to one upstream platform.
+// Implemented by the SIP boundary; nil means the SIP runtime is not available.
+type CatalogPusher interface {
+	PushCatalog(ctx context.Context, platformID uint64) (items, batches int, err error)
+}
+
+// CatalogPushResult summarizes one manual catalog push.
+type CatalogPushResult struct {
+	Items   int `json:"items"`
+	Batches int `json:"batches"`
 }
 
 type ManagementService struct {
 	store   ManagementStore
 	sealer  CredentialSealer
 	runtime ManagementRuntime
+	pusher  CatalogPusher
 	clock   Clock
 }
 
@@ -130,6 +144,28 @@ func NewManagementService(store ManagementStore, sealer CredentialSealer, runtim
 		clock = managementWallClock{}
 	}
 	return &ManagementService{store: store, sealer: sealer, runtime: runtime, clock: clock}
+}
+
+// SetCatalogPusher wires the SIP-boundary catalog pusher after construction,
+// because the SIP transport becomes available only after the runtime starts.
+func (s *ManagementService) SetCatalogPusher(pusher CatalogPusher) { s.pusher = pusher }
+
+func (s *ManagementService) PushCatalog(ctx context.Context, id uint64) (CatalogPushResult, error) {
+	platform, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return CatalogPushResult{}, err
+	}
+	if !platform.Enabled {
+		return CatalogPushResult{}, ErrPlatformDisabled
+	}
+	if s.pusher == nil {
+		return CatalogPushResult{}, ErrRuntimeUnavailable
+	}
+	items, batches, err := s.pusher.PushCatalog(ctx, id)
+	if err != nil {
+		return CatalogPushResult{}, err
+	}
+	return CatalogPushResult{Items: items, Batches: batches}, nil
 }
 
 func (s *ManagementService) Create(ctx context.Context, input PlatformConfigInput) (*PlatformView, error) {
@@ -245,21 +281,6 @@ func (s *ManagementService) SetEnabled(ctx context.Context, id, expectedRevision
 	return &view, nil
 }
 
-func (s *ManagementService) Reconnect(ctx context.Context, id uint64) error {
-	platform, err := s.store.FindPlatform(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !platform.Enabled {
-		return ErrPlatformDisabled
-	}
-	if s.runtime == nil || !containsPlatformID(s.runtime.PlatformIDs(), id) {
-		return ErrRuntimeUnavailable
-	}
-	s.runtime.Reconnect(id)
-	return nil
-}
-
 func (s *ManagementService) Delete(ctx context.Context, id uint64) error {
 	platform, err := s.store.FindPlatform(ctx, id)
 	if err != nil {
@@ -366,6 +387,7 @@ func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView 
 		Registration: state.Registration, Heartbeat: state.Heartbeat, Overall: state.Overall,
 		RegisterAt: platform.RegisterAt, RegisterExpiresAt: platform.RegisterExpiresAt, HeartbeatAt: platform.HeartbeatAt,
 		LastErrorCode: platform.LastErrorCode, LastErrorMessage: platform.LastErrorMessage, LastErrorAt: platform.LastErrorAt,
+		CreatedAt: platform.CreatedAt, UpdatedAt: platform.UpdatedAt,
 	}
 }
 
@@ -440,16 +462,6 @@ func validProfileOverride(value model.CascadeProfileOverride) bool {
 		return false
 	}
 }
-
-func containsPlatformID(ids []uint64, target uint64) bool {
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
-}
-
 type managementWallClock struct{}
 
 func (managementWallClock) Now() time.Time { return time.Now() }

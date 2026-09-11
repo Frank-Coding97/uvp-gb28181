@@ -54,14 +54,14 @@ describe("cascade platform editor layout", () => {
     const sharing = source.slice(shareStart);
     expect(sharing).toContain('modal-class="uvp-system-dialog cascade-share-dialog"');
     expect(sharing).toContain('width="min(1080px, calc(100vw - 24px))"');
-    expect(sharing).toContain('class="share-mode-switch"');
-    expect(sharing).toContain('<a-radio value="device">按设备</a-radio>');
-    expect(sharing).toContain('<a-radio value="channel">按通道</a-radio>');
-    expect(sharing).toContain('class="share-device-table share-table"');
     expect(sharing).toContain('class="share-channel-table share-table"');
     expect(sharing).toContain('@update:selected-keys="handleChannelSelectionChange"');
-    expect(sharing).toContain('@update:selected-keys="handleDeviceSelectionChange"');
-    expect(sharing).toContain('设备模式下会将该设备的全部通道加入共享');
+    expect(sharing).toContain('placeholder="通道名称 / 国标编号"');
+    // 设备模式已移除:弹窗只允许直接勾选具体通道。
+    expect(sharing).not.toContain("share-mode-switch");
+    expect(sharing).not.toContain('<a-radio value="device">按设备</a-radio>');
+    expect(sharing).not.toContain("share-device-table");
+    expect(sharing).not.toContain("设备模式下会将该设备的全部通道加入共享");
     expect(sharing).not.toContain("<a-drawer");
   });
 
@@ -70,17 +70,52 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain("channelSourceDeviceIds");
     expect(source).toContain("projectionDevices.get(channel.deviceProjectionId)");
     expect(source).toContain("channelKeyword");
-    expect(source).toContain("shareMode");
-    expect(source).toContain("devicePage");
     expect(source).toContain("channelPage");
     expect(source).toContain("listDevicePage");
     expect(source).toContain("listChannelPage");
-    expect(source).toContain("loadAllDeviceChannels");
+  });
+
+  it("exposes register/deregister as an inline enable switch instead of a dropdown option", () => {
+    expect(source).toContain('<a-table-column title="启用"');
+    expect(source).toMatch(/<a-switch[\s\S]*?:model-value="record\.enabled"[\s\S]*?@change="\(value: boolean \| string \| number\) => toggleEnabled\(record, Boolean\(value\)\)"/);
+    expect(source).toContain("async function toggleEnabled(platform: CascadePlatform, next: boolean)");
+    expect(source).not.toContain("<a-doption");
+    expect(source).not.toContain("toggleEnabled(record)");
+    expect(source).toMatch(/class="uvp-table-action uvp-table-action--delete"/);
   });
 
   it("keeps the long form scrollable inside the dialog viewport", () => {
     expect(source).toContain(".cascade-platform-dialog .arco-modal-body");
     expect(source).toContain("max-height: calc(100dvh - 260px);");
     expect(source).toContain("overflow-y: auto;");
+  });
+
+  it("renders the shared-channel summary as an obvious link and the viewer as a system dialog with removal", () => {
+    expect(source).toMatch(/<a-link class="shared-channels-link"[^>]*>\s*<ListVideo :size="14" \/>/s);
+    expect(source).toMatch(/<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?modal-class="uvp-system-dialog shared-devices-dialog"/);
+    expect(source).not.toMatch(/<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?:footer="false"/);
+    expect(source).toContain('title="操作"');
+    expect(source).toContain("function removeSharedChannel(");
+    expect(source).toContain("expectedProjectionRevision: snapshot?.revision ?? 0");
+    expect(source).toContain(".shared-devices-dialog .arco-modal-body");
+  });
+
+  it("follows the form-input template rules in the platform editor dialog", () => {
+    const editorStart = source.indexOf("<a-modal");
+    const editor = source.slice(editorStart, source.search(/<a-modal\s+v-model:visible="sharedDevicesVisible"/));
+    // 硬规则 2:数值输入不使用 a-input-number 的静默 clamp。
+    expect(editor).not.toContain("<a-input-number");
+    expect(editor.match(/<s-number-field/g)?.length).toBeGreaterThanOrEqual(6);
+    // 硬规则 3:20 位国标编码带位数指示。
+    expect(editor.match(/<s-counter-suffix :value="(form\.upstreamServerId|form\.localDeviceId)\.length" :total="20" \/>/g)?.length).toBe(2);
+    // 硬规则 5:密码字段带强度指示。
+    expect(editor).toContain("<s-password-field");
+    expect(editor).not.toContain("<a-input-password");
+    // 硬规则 4:关键字段 blur 后显示逐字段错误。
+    expect(editor.match(/@blur="touched\.\w+ = true"/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(source).toContain("cascadeFormFieldErrors(form, touched)");
+    // 硬规则 1:文本输入开 allow-clear(选择器/密码组件除外)。
+    const inputsMissingClear = (editor.match(/<a-input\b[^>]*\/>/g) ?? []).filter(tag => !tag.includes("allow-clear"));
+    expect(inputsMissingClear).toEqual([]);
   });
 });

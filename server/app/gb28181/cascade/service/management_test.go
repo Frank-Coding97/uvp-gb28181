@@ -68,7 +68,7 @@ func TestManagementServiceValidatesConfigBeforePersistence(t *testing.T) {
 	require.Empty(t, store.platforms)
 }
 
-func TestManagementServiceEnableReconnectAndDeleteRespectRuntimeAndSessions(t *testing.T) {
+func TestManagementServiceEnableAndDeleteRespectRuntimeAndSessions(t *testing.T) {
 	store := newManagementStoreFake()
 	runtime := &managementRuntimeFake{}
 	service := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
@@ -82,9 +82,6 @@ func TestManagementServiceEnableReconnectAndDeleteRespectRuntimeAndSessions(t *t
 	require.NoError(t, err)
 	require.True(t, enabled.Enabled)
 	require.Equal(t, 1, runtime.reloads)
-	runtime.ids = []uint64{created.ID}
-	require.NoError(t, service.Reconnect(context.Background(), created.ID))
-	require.Equal(t, []uint64{created.ID}, runtime.reconnects)
 
 	store.sessions[created.ID] = []model.GbCascadeMediaSession{{PlatformID: created.ID, State: model.CascadeMediaSessionStateActive}}
 	err = service.Delete(context.Background(), created.ID)
@@ -150,7 +147,6 @@ func (s *credentialSealerFake) Encrypt(_ string, plaintext []byte) (securestore.
 
 type managementRuntimeFake struct {
 	reloads    int
-	reconnects []uint64
 	ids        []uint64
 	err        error
 }
@@ -159,7 +155,6 @@ func (r *managementRuntimeFake) Reload(context.Context) error {
 	r.reloads++
 	return r.err
 }
-func (r *managementRuntimeFake) Reconnect(id uint64)   { r.reconnects = append(r.reconnects, id) }
 func (r *managementRuntimeFake) PlatformIDs() []uint64 { return append([]uint64(nil), r.ids...) }
 
 type managementStoreFake struct {
@@ -285,4 +280,51 @@ func TestManagementViewDetectsLostKeyAndPasswordReplacement(t *testing.T) {
 	password = "replacement"
 	require.NoError(t, svc.applyCredential(&platform, &password))
 	require.False(t, svc.view(platform).CredentialNeedsReset)
+}
+
+type catalogPusherFake struct {
+	ids             []uint64
+	items, batches  int
+	err             error
+}
+
+func (p *catalogPusherFake) PushCatalog(_ context.Context, platformID uint64) (int, int, error) {
+	if p.err != nil {
+		return 0, 0, p.err
+	}
+	for _, id := range p.ids {
+		if id == platformID {
+			return p.items, p.batches, nil
+		}
+	}
+	return 0, 0, repository.ErrPlatformNotFound
+}
+
+func TestManagementServicePushCatalogGuardsAndReports(t *testing.T) {
+	store := newManagementStoreFake()
+	service := NewManagementService(store, &credentialSealerFake{}, &managementRuntimeFake{}, fakeClock{now: time.Now()})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	created, err := service.Create(context.Background(), input)
+	require.NoError(t, err)
+
+	pusher := &catalogPusherFake{ids: []uint64{created.ID}, items: 7, batches: 2}
+	service.SetCatalogPusher(pusher)
+
+	// 已停用平台直接拒绝,不允许触发 SIP 外发。
+	_, err = service.PushCatalog(context.Background(), created.ID)
+	require.ErrorIs(t, err, ErrPlatformDisabled)
+
+	// 启用后推送成功并回报条数/批数。
+	_, err = service.SetEnabled(context.Background(), created.ID, created.ConfigRevision, true)
+	require.NoError(t, err)
+	result, err := service.PushCatalog(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, 7, result.Items)
+	require.Equal(t, 2, result.Batches)
+
+	// SIP 边界不可用时明确报错,而不是静默假装成功。
+	service.SetCatalogPusher(nil)
+	_, err = service.PushCatalog(context.Background(), created.ID)
+	require.ErrorIs(t, err, ErrRuntimeUnavailable)
 }

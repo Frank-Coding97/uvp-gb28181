@@ -154,7 +154,6 @@ func TestCascadeResourceAcquirerOnlyUsesExistingSharedListener(t *testing.T) {
 type cascadeRuntimeLifecycleFake struct{ events *[]string }
 
 func (f *cascadeRuntimeLifecycleFake) Reload(context.Context) error { return nil }
-func (f *cascadeRuntimeLifecycleFake) Reconnect(uint64)             {}
 func (f *cascadeRuntimeLifecycleFake) PlatformIDs() []uint64        { return nil }
 func (f *cascadeRuntimeLifecycleFake) Shutdown(context.Context) error {
 	*f.events = append(*f.events, "cascade.shutdown")
@@ -196,7 +195,6 @@ func TestCascadeRuntimeShutdownFailureDoesNotSkipSharedSIPShutdown(t *testing.T)
 type cascadeRuntimeLifecycleFunc func(context.Context) error
 
 func (f cascadeRuntimeLifecycleFunc) Reload(context.Context) error { return nil }
-func (f cascadeRuntimeLifecycleFunc) Reconnect(uint64)             {}
 func (f cascadeRuntimeLifecycleFunc) PlatformIDs() []uint64        { return nil }
 func (f cascadeRuntimeLifecycleFunc) Shutdown(ctx context.Context) error {
 	return f(ctx)

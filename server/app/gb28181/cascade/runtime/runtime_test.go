@@ -26,10 +26,6 @@ func TestManagerKeepsPlatformsIsolatedAndOneTransactionInFlight(t *testing.T) {
 	require.NoError(t, manager.Reload(context.Background()))
 	<-clients.client(1).registerStarted
 	require.Eventually(t, func() bool { return clients.client(2).registerCalls() == 1 }, time.Second, time.Millisecond)
-
-	manager.Reconnect(1)
-	manager.Reconnect(1)
-	require.Equal(t, 1, clients.client(1).registerCalls(), "concurrent reconnects must not duplicate an in-flight REGISTER")
 	require.Equal(t, 1, clients.client(2).registerCalls(), "A's blocked transaction must not hold B")
 
 	close(clients.client(1).registerGate)
@@ -79,6 +75,23 @@ func TestShutdownHonorsDeadlineWhenRegisterDoesNotReturn(t *testing.T) {
 	require.ErrorIs(t, manager.Shutdown(ctx), context.Canceled)
 	require.Eventually(t, func() bool { return resources.releases(1) == 1 }, time.Second, time.Millisecond)
 	close(clients.client(1).registerGate)
+}
+
+func TestFirstKeepaliveIsScheduledShortlyAfterRegistrationSuccess(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	store := newTestStore(platform(1, "a", 1))
+	clients := newTestClients()
+	resources := &testResources{}
+	scheduler := &recordingScheduler{}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: resources, Clock: clock, Scheduler: scheduler, RetryDelay: time.Minute})
+
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		return scheduler.hasSchedule(time.Second) && scheduler.hasSchedule(sipclient.RefreshDelay(3600))
+	}, time.Second, time.Millisecond)
+	require.Equal(t, 2, scheduler.count(), "registration success must schedule exactly refresh + first keepalive")
+	require.NoError(t, manager.Shutdown(context.Background()))
 }
 
 func TestInvalidPlatformDoesNotBlockOtherPlatforms(t *testing.T) {
@@ -289,6 +302,35 @@ type testScheduler struct{}
 func newTestScheduler() *testScheduler { return &testScheduler{} }
 
 func (*testScheduler) Schedule(time.Duration, func()) Timer { return testTimer{} }
+
+type recordingScheduler struct {
+	mu     sync.Mutex
+	delays []time.Duration
+}
+
+func (s *recordingScheduler) Schedule(delay time.Duration, _ func()) Timer {
+	s.mu.Lock()
+	s.delays = append(s.delays, delay)
+	s.mu.Unlock()
+	return testTimer{}
+}
+
+func (s *recordingScheduler) hasSchedule(delay time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, recorded := range s.delays {
+		if recorded == delay {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *recordingScheduler) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.delays)
+}
 
 type testTimer struct{}
 

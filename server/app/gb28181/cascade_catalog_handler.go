@@ -53,6 +53,52 @@ func findCascadeControlPeer(req *sip.Request, platforms []model.GbCascadePlatfor
 	return matched, false
 }
 
+// buildCascadeCatalogSnapshot builds the channel-only catalog snapshot for one
+// upstream platform, restricted to the resources explicitly shared with it.
+// Used by the query responder and the proactive manual push.
+func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepository, platform *model.GbCascadePlatform) (catalog.Snapshot, error) {
+	projection, err := store.ProjectionSnapshot(ctx, platform.ID)
+	if err != nil {
+		return catalog.Snapshot{}, err
+	}
+	facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}}
+	// Read only the resources selected for this upstream, never the entire device catalog.
+	type statusRow struct {
+		ID     uint64
+		Status int
+	}
+	var deviceIDs, channelIDs []uint64
+	for _, d := range projection.Devices {
+		deviceIDs = append(deviceIDs, d.SourceDeviceID)
+	}
+	for _, c := range projection.Channels {
+		channelIDs = append(channelIDs, c.SourceChannelID)
+	}
+	var rows []statusRow
+	if len(deviceIDs) > 0 {
+		if err = app.DB().WithContext(ctx).Table("gb_device").Select("id,status").Where("id IN ?", deviceIDs).Find(&rows).Error; err != nil {
+			return catalog.Snapshot{}, err
+		}
+		for _, r := range rows {
+			facts.DeviceOnline[r.ID] = r.Status == 1
+		}
+	}
+	rows = nil
+	if len(channelIDs) > 0 {
+		if err = app.DB().WithContext(ctx).Table("gb_channel").Select("id,status").Where("id IN ?", channelIDs).Find(&rows).Error; err != nil {
+			return catalog.Snapshot{}, err
+		}
+		for _, r := range rows {
+			facts.ChannelOnline[r.ID] = r.Status == 1
+		}
+	}
+	snapshot, err := catalog.Build(*projection, facts)
+	if err != nil {
+		return catalog.Snapshot{}, err
+	}
+	return snapshot.ChannelsOnly(), nil
+}
+
 func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
 		var head struct {
@@ -88,46 +134,10 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		if matched == nil || !matched.Enabled {
 			return fail(403, fmt.Errorf("unrecognized or disabled upstream"))
 		}
-		projection, err := store.ProjectionSnapshot(ctx, matched.ID)
+		snapshot, err := buildCascadeCatalogSnapshot(ctx, store, matched)
 		if err != nil {
 			return fail(500, err)
 		}
-		facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}}
-		// Read only the resources selected for this upstream, never the entire device catalog.
-		type statusRow struct {
-			ID     uint64
-			Status int
-		}
-		var deviceIDs, channelIDs []uint64
-		for _, d := range projection.Devices {
-			deviceIDs = append(deviceIDs, d.SourceDeviceID)
-		}
-		for _, c := range projection.Channels {
-			channelIDs = append(channelIDs, c.SourceChannelID)
-		}
-		var rows []statusRow
-		if len(deviceIDs) > 0 {
-			if err = app.DB().WithContext(ctx).Table("gb_device").Select("id,status").Where("id IN ?", deviceIDs).Find(&rows).Error; err != nil {
-				return fail(500, err)
-			}
-			for _, r := range rows {
-				facts.DeviceOnline[r.ID] = r.Status == 1
-			}
-		}
-		rows = nil
-		if len(channelIDs) > 0 {
-			if err = app.DB().WithContext(ctx).Table("gb_channel").Select("id,status").Where("id IN ?", channelIDs).Find(&rows).Error; err != nil {
-				return fail(500, err)
-			}
-			for _, r := range rows {
-				facts.ChannelOnline[r.ID] = r.Status == 1
-			}
-		}
-		snapshot, err := catalog.Build(*projection, facts)
-		if err != nil {
-			return fail(500, err)
-		}
-		snapshot = snapshot.ChannelsOnly()
 		client, err := clients.NewClient(*matched)
 		if err != nil {
 			return fail(503, err)

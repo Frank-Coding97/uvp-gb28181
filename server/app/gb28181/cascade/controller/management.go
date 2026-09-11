@@ -155,7 +155,7 @@ func (c *ManagementController) SetEnabled(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, item)
 }
 
-func (c *ManagementController) Reconnect(ctx *gin.Context) {
+func (c *ManagementController) PushCatalog(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
@@ -163,11 +163,12 @@ func (c *ManagementController) Reconnect(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.service.Reconnect(ctx.Request.Context(), id); err != nil {
+	result, err := c.service.PushCatalog(ctx, id)
+	if err != nil {
 		c.fail(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"ok": true, "platformId": id})
+	ctx.JSON(http.StatusOK, gin.H{"ok": true, "platformId": id, "items": result.Items, "batches": result.Batches})
 }
 
 func (c *ManagementController) GetShares(ctx *gin.Context) {

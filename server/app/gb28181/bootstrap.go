@@ -354,7 +354,7 @@ func startControlPlane(cfg gbconfig.Config) bool {
 	if credentialWarningReported {
 		warnCascadeCredentialKeyUnavailable()
 	}
-	setupCascadeManagement(nil, cascadeCipher)
+	setupCascadeManagement(nil, cascadeCipher, nil)
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
 	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)

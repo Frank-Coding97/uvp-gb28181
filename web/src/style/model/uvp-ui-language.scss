@@ -1186,6 +1186,20 @@ body[arco-theme="dark"] .zlm-node-form {
   border-radius: 16px 0 0 16px !important;
 }
 
+/* 弹窗/抽屉内的输入控件用纯白底(仅覆盖弹窗作用域,不影响搜索栏等页面控件);
+   暗色主题需在弹窗作用域重新声明,否则会被上面的白色覆盖。 */
+.uvp-system-dialog,
+.uvp-system-drawer,
+.uvp-system-form {
+  --uvp-dialog-control-bg: #ffffff;
+}
+
+body[arco-theme="dark"] .uvp-system-dialog,
+body[arco-theme="dark"] .uvp-system-drawer,
+body[arco-theme="dark"] .uvp-system-form {
+  --uvp-dialog-control-bg: #101923;
+}
+
 .uvp-system-dialog .arco-modal-header,
 .uvp-system-drawer .arco-drawer-header {
   min-height: 56px;
@@ -1283,10 +1297,39 @@ body[arco-theme="dark"] .zlm-node-form {
   background: var(--uvp-dialog-control-bg);
   border-color: transparent;
   border-radius: 9px;
-  box-shadow: inset 0 0 0 1px rgb(148 163 184 / 16%);
+  box-shadow: inset 0 0 0 1px rgb(100 116 139 / 42%);
   transition:
     background-color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+/* 系统弹窗内控件统一拔高到 large 档（36px），视觉更大气；textarea 不限高。 */
+.uvp-system-dialog .arco-input-wrapper .arco-input,
+.uvp-system-dialog .arco-input-wrapper .arco-input.arco-input-size-mini,
+.uvp-system-dialog .arco-input-wrapper .arco-input.arco-input-size-small,
+.uvp-system-dialog .arco-input-wrapper .arco-input.arco-input-size-medium,
+.uvp-system-dialog .arco-input-wrapper .arco-input.arco-input-size-large,
+.uvp-system-dialog__body .arco-input-wrapper .arco-input,
+.uvp-system-dialog__body .arco-input-wrapper .arco-input.arco-input-size-medium,
+.uvp-system-form .arco-input-wrapper .arco-input,
+.uvp-system-form .arco-input-wrapper .arco-input.arco-input-size-medium {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.uvp-system-dialog .arco-select-view-single,
+.uvp-system-dialog .arco-select-view-multiple,
+.uvp-system-dialog .arco-tree-select-view,
+.uvp-system-dialog .arco-picker,
+.uvp-system-dialog__body .arco-select-view-single,
+.uvp-system-dialog__body .arco-select-view-multiple,
+.uvp-system-dialog__body .arco-tree-select-view,
+.uvp-system-dialog__body .arco-picker,
+.uvp-system-form .arco-select-view-single,
+.uvp-system-form .arco-select-view-multiple,
+.uvp-system-form .arco-tree-select-view,
+.uvp-system-form .arco-picker {
+  min-height: 36px;
 }
 
 .uvp-system-dialog .arco-input-wrapper:hover,
@@ -1309,7 +1352,7 @@ body[arco-theme="dark"] .zlm-node-form {
 .uvp-system-form .arco-textarea-wrapper:hover {
   background: #ffffff;
   border-color: transparent;
-  box-shadow: inset 0 0 0 1px rgb(37 99 235 / 24%);
+  box-shadow: inset 0 0 0 1px rgb(37 99 235 / 45%);
 }
 
 .uvp-system-dialog .arco-input-wrapper.arco-input-focus,
@@ -1346,6 +1389,22 @@ body[arco-theme="dark"] .zlm-node-form {
   color: var(--uvp-text-tertiary);
   background: #f1f5f9;
   box-shadow: inset 0 0 0 1px rgb(148 163 184 / 12%);
+}
+
+.uvp-system-dialog .arco-form-item-error .arco-input-wrapper,
+.uvp-system-dialog .arco-form-item-error .arco-select-view-single,
+.uvp-system-dialog .arco-form-item-error .arco-select-view-multiple,
+.uvp-system-dialog .arco-form-item-error .arco-textarea-wrapper,
+.uvp-system-dialog__body .arco-form-item-error .arco-input-wrapper,
+.uvp-system-dialog__body .arco-form-item-error .arco-select-view-single,
+.uvp-system-dialog__body .arco-form-item-error .arco-select-view-multiple,
+.uvp-system-dialog__body .arco-form-item-error .arco-textarea-wrapper,
+.uvp-system-form .arco-form-item-error .arco-input-wrapper,
+.uvp-system-form .arco-form-item-error .arco-select-view-single,
+.uvp-system-form .arco-form-item-error .arco-select-view-multiple,
+.uvp-system-form .arco-form-item-error .arco-textarea-wrapper {
+  background: #fff7f7;
+  box-shadow: inset 0 0 0 1px rgb(209 67 67 / 55%);
 }
 
 .uvp-system-dialog .arco-radio-group-button,
