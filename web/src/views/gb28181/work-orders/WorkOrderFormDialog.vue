@@ -375,7 +375,7 @@ watch(
                 </p>
                 <div class="footer-actions">
                     <a-button :disabled="submitting" @click="close">取消</a-button>
-                    <a-button type="primary" :loading="submitting" :disabled="submitDisabled" @click="submit">提交并开始录制</a-button>
+                    <a-button type="primary" :loading="submitting" :disabled="submitDisabled" @click="submit">提交并开始作业</a-button>
                 </div>
             </div>
         </template>
