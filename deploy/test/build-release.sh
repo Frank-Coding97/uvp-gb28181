@@ -26,7 +26,7 @@ mkdir -p "$SOURCE_ROOT/server/bin"
 # production server's memory budget (4C/3.8G with ~1.3G available)
 (cd "$SOURCE_ROOT/server" && \
   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
-  go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-gb28181-linux-amd64 main.go)
+  go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-gb28181-linux-amd64 .)
 (cd "$SOURCE_ROOT/server" && \
   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
   go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-firewall-agent-linux-amd64 ./cmd/uvp-firewall-agent)

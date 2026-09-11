@@ -24,7 +24,7 @@ echo   GOARCH=%GOARCH%
 echo   CGO_ENABLED=%CGO_ENABLED%
 echo.
 
-go build -o "%OUTPUT_DIR%/%OUTPUT_NAME%" -ldflags="-s -w" main.go
+go build -o "%OUTPUT_DIR%/%OUTPUT_NAME%" -ldflags="-s -w" .
 
 if %ERRORLEVEL% EQU 0 (
     call :build_success

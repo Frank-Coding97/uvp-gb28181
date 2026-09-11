@@ -27,7 +27,7 @@ echo "  CGO_ENABLED=$CGO_ENABLED"
 echo ""
 
 # 构建Linux可执行文件
-go build -o "$OUTPUT_DIR/$OUTPUT_NAME" -ldflags="-s -w" main.go
+go build -o "$OUTPUT_DIR/$OUTPUT_NAME" -ldflags="-s -w" .
 
 if [ $? -eq 0 ]; then
     echo ""
