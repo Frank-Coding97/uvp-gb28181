@@ -1,4 +1,4 @@
-import type { CascadeHeartbeatState, CascadePlatform, CascadeRegistrationState, SipConfigSummary } from "@/api/gb28181";
+import type { CascadePlatform, SipConfigSummary } from "@/api/gb28181";
 
 export interface CascadePresentation { label: string; color: "green" | "red" | "orange" | "blue" | "gray"; detail: string }
 
@@ -11,12 +11,11 @@ export function cascadePresentation(platform: Pick<CascadePlatform, "enabled" | 
   return { label: "等待注册", color: "blue", detail: "尚未收到上级注册确认" };
 }
 
-export function registrationLabel(value: CascadeRegistrationState): string {
-  return ({ unregistered: "未注册", registered: "已注册", expired: "已过期" } as Record<string, string>)[value] || value || "未知";
-}
-
-export function heartbeatLabel(value: CascadeHeartbeatState): string {
-  return ({ unknown: "未知", healthy: "正常", stale: "超时" } as Record<string, string>)[value] || value || "未知";
+/** 注册/心跳周期展示文本（纯秒数，顺序同表头：注册 / 心跳）；0 视为未配置，按后端默认值（3600s/60s）展示。 */
+export function cascadeCycleLabel(platform: Pick<CascadePlatform, "registerExpires" | "keepaliveInterval">): string {
+  const expires = platform.registerExpires > 0 ? platform.registerExpires : 3600;
+  const keepalive = platform.keepaliveInterval > 0 ? platform.keepaliveInterval : 60;
+  return `${expires} / ${keepalive}`;
 }
 
 export function validGbId(value: string): boolean { return /^\d{20}$/.test(value.trim()); }
@@ -52,6 +51,21 @@ export function validateCascadePlatform(form: { name: string; upstreamServerId: 
   return errors;
 }
 
+/** 编辑弹窗的逐字段错误(硬规则 4:blur 后才显示,提交时全量兜底)。返回的 key 与 form 字段同名。 */
+export function cascadeFormFieldErrors(form: { name: string; upstreamServerId: string; upstreamDomain: string; host: string; localDeviceId: string; localDomain: string; localSipIp: string; mediaAdvertiseIp?: string }, touched: Record<string, boolean>): Record<string, string> {
+  const errorOf = (field: string, message: string) => (touched[field] && message) || "";
+  return {
+    name: errorOf("name", form.name.trim() ? "" : "平台名称不能为空"),
+    upstreamServerId: errorOf("upstreamServerId", !form.upstreamServerId.trim() ? "上级平台 ID 不能为空" : (validGbId(form.upstreamServerId) ? "" : "必须是 20 位数字编码")),
+    upstreamDomain: errorOf("upstreamDomain", form.upstreamDomain.trim() ? "" : "上级域不能为空"),
+    host: errorOf("host", !form.host.trim() ? "上级地址不能为空" : (validHost(form.host) ? "" : "地址格式不正确")),
+    localDeviceId: errorOf("localDeviceId", !form.localDeviceId.trim() ? "本平台设备 ID 不能为空" : (validGbId(form.localDeviceId) ? "" : "必须是 20 位数字编码")),
+    localDomain: errorOf("localDomain", form.localDomain.trim() ? "" : "本平台域不能为空"),
+    localSipIp: errorOf("localSipIp", form.localSipIp.trim() ? (validHost(form.localSipIp) ? "" : "地址格式不正确") : "本地 SIP 地址不能为空"),
+    mediaAdvertiseIp: errorOf("mediaAdvertiseIp", !form.mediaAdvertiseIp || validHost(form.mediaAdvertiseIp) ? "" : "地址格式不正确")
+  };
+}
+
 export function defaultCascadePlatform() {
   return {
     name: "",
@@ -67,7 +81,7 @@ export function defaultCascadePlatform() {
     authUsername: "",
     password: "",
     profileOverride: "auto",
-    charsetOverride: "",
+    charsetOverride: "GB2312",
     registerExpires: 3600,
     keepaliveInterval: 60,
     retryPolicy: "",
@@ -90,6 +104,8 @@ export function cascadeLocalIdentityDefaults(config?: Pick<SipConfigSummary, "li
     localDomain: config.domain,
     localSipIp,
     localSipPort: config.port,
-    mediaAdvertiseIp: localSipIp
+    mediaAdvertiseIp: localSipIp,
+    // GB/T 28181 认证用户名惯例上与本平台设备编码一致，给默认值省得手填
+    authUsername: config.serverId
   };
 }

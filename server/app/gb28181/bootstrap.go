@@ -361,7 +361,7 @@ func startControlPlane(cfg gbconfig.Config) {
 		app.ZapLog.Warn("国标级联凭据密钥未配置,列表可用但密码写入和启用受限",
 			zap.String("env", cascadeCredentialKeyEnv))
 	}
-	setupCascadeManagement(nil, cascadeCipher)
+	setupCascadeManagement(nil, cascadeCipher, nil)
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
 	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)

@@ -818,7 +818,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cascade.POST("/platforms/:id/enable", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
 			cascade.POST("/platforms/:id/disable", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
 			cascade.PUT("/platforms/:id/enabled", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
-			cascade.POST("/platforms/:id/reconnect", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Reconnect(c) }))
+			cascade.POST("/platforms/:id/push-catalog", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.PushCatalog(c) }))
 			cascade.GET("/platforms/:id/shares", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.GetShares(c) }))
 			cascade.PUT("/platforms/:id/shares", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))
 			// Plan-compatible aliases keep channel terminology available to existing clients.

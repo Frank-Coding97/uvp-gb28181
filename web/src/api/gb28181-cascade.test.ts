@@ -22,7 +22,7 @@ describe("cascade API contract", () => {
   it("round-trips projection scope without adding unsupported sessions calls", async () => {
     await getCascadeShares(7);
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/cascade/platforms/7/shares");
-    const data = { scope: "channels" as const, devices: [], channels: [{ sourceDeviceId: 1, sourceChannelId: 2, publishedChannelId: "34020000001320000002", name: "channel", parentOverride: "", ptzAllowed: false }] };
+    const data = { scope: "channels" as const, devices: [], channels: [{ sourceDeviceId: 1, sourceChannelId: 2, publishedChannelId: "34020000001320000002", name: "channel", parentOverride: "", ptzAllowed: false }], expectedProjectionRevision: 3 };
     await replaceCascadeShares(7, data);
     expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/cascade/platforms/7/shares", { data });
   });

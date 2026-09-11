@@ -18,6 +18,9 @@ const (
 	defaultRegisterExpires = 3600
 	defaultKeepalive       = 60 * time.Second
 	defaultRetryDelay      = time.Minute
+	// 注册成功后首条 Keepalive 尽快发出以确认链路,缩短「等待心跳」展示窗口;
+	// 后续心跳仍按平台配置的周期进行。
+	firstKeepaliveDelay = time.Second
 )
 
 // PlatformClient is the per-platform transaction surface. A production adapter
@@ -196,18 +199,6 @@ func (m *Manager) recordPlatformError(ctx context.Context, id uint64, cause erro
 	_ = m.deps.Store.RecordRegistrationFailure(ctx, id, "config", cause.Error(), m.deps.Clock.Now().UTC())
 }
 
-func (m *Manager) Reconnect(platformID uint64) {
-	if m == nil {
-		return
-	}
-	m.mu.RLock()
-	actor := m.actors[platformID]
-	m.mu.RUnlock()
-	if actor != nil {
-		actor.Reconnect()
-	}
-}
-
 func (m *Manager) PlatformIDs() []uint64 {
 	if m == nil {
 		return nil
@@ -318,8 +309,6 @@ func (a *Actor) Start() {
 	go a.run()
 	a.enqueue(context.Background(), commandStart)
 }
-
-func (a *Actor) Reconnect() { a.enqueue(context.Background(), commandReconnect) }
 
 func (a *Actor) Stop(ctx context.Context) error {
 	if a == nil {
@@ -475,10 +464,10 @@ func (a *Actor) run() {
 				if event.result.Success {
 					registered = true
 					_ = a.store.RecordRegistrationSuccess(context.Background(), a.platform.ID, now, now.Add(time.Duration(registerExpires(a.platform))*time.Second))
-					if !stopping {
-						refreshTimer = schedule(sipclient.RefreshDelay(registerExpires(a.platform)), commandRefresh)
-						keepaliveTimer = schedule(keepaliveDelay(a.platform), commandKeepalive)
-					}
+				if !stopping {
+					refreshTimer = schedule(sipclient.RefreshDelay(registerExpires(a.platform)), commandRefresh)
+					keepaliveTimer = schedule(firstKeepaliveDelay, commandKeepalive)
+				}
 				} else {
 					_ = a.store.RecordRegistrationFailure(context.Background(), a.platform.ID, resultCode(event.result), resultMessage(event.result), now)
 					if !stopping {

@@ -9007,3 +9007,33 @@ SELECT DISTINCT 'p','role_1',a.`path`,a.`method`,'*','',''
 FROM `sys_api` a
 WHERE a.`path`='/api/gb28181/work-orders/form-history' AND a.`method`='GET' AND a.`deleted_at` IS NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` c WHERE c.`ptype`='p' AND c.`v0`='role_1' AND c.`v1`=a.`path` AND c.`v2`=a.`method` AND c.`v3`='*');
+
+-- 退役国标级联「重连」权限元数据（MySQL 5.7+，幂等）。
+-- 「重连」操作与 POST /api/gb28181/cascade/platforms/:id/reconnect 端点已删除，
+-- 注册失败的重试由级联运行时内部定时器自动完成，孤儿权限记录在此统一退场。
+
+-- 1) Casbin 规则
+DELETE FROM `sys_casbin_rule` WHERE `v1`='/api/gb28181/cascade/platforms/:id/reconnect' AND `v2`='POST';
+
+-- 2) 菜单与 API 的绑定
+DELETE FROM `sys_menu_api` WHERE `api_id` IN (
+  SELECT `id` FROM `sys_api` WHERE `path`='/api/gb28181/cascade/platforms/:id/reconnect' AND `method`='POST'
+);
+DELETE FROM `sys_menu_api` WHERE `menu_id` IN (
+  SELECT `id` FROM `sys_menu` WHERE `permission`='gb28181:cascade:reconnect'
+);
+
+-- 3) 角色与菜单的绑定
+DELETE FROM `sys_role_menu` WHERE `menu_id` IN (
+  SELECT `id` FROM `sys_menu` WHERE `permission`='gb28181:cascade:reconnect'
+);
+
+-- 4) 按钮权限菜单软删
+UPDATE `sys_menu` SET `deleted_at`=NOW(), `updated_at`=NOW()
+WHERE `permission`='gb28181:cascade:reconnect'
+  AND `deleted_at` IS NULL;
+
+-- 5) API 记录软删
+UPDATE `sys_api` SET `deleted_at`=NOW(), `updated_at`=NOW()
+WHERE `path`='/api/gb28181/cascade/platforms/:id/reconnect' AND `method`='POST'
+  AND `deleted_at` IS NULL;

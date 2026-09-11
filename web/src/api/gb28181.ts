@@ -196,6 +196,8 @@ export interface CascadePlatform {
   registerAt?: string | null;
   registerExpiresAt?: string | null;
   heartbeatAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
   lastErrorCode?: string;
   lastErrorMessage?: string;
   lastErrorAt?: string | null;
@@ -274,8 +276,8 @@ export const setCascadePlatformEnabled = (id: number, enabled: boolean, expected
     data: { enabled, expectedRevision }
   });
 
-export const reconnectCascadePlatform = (id: number) =>
-  http.request<{ ok: boolean; platformId: number }>("post", baseUrlApi(`gb28181/cascade/platforms/${id}/reconnect`));
+export const pushCascadeCatalog = (id: number) =>
+  http.request<{ ok: boolean; platformId: number; items: number; batches: number }>("post", baseUrlApi(`gb28181/cascade/platforms/${id}/push-catalog`));
 
 export const getCascadeShares = (id: number) =>
   http.request<CascadeShares>("get", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`));
@@ -284,6 +286,7 @@ export const replaceCascadeShares = (id: number, data: {
   scope: "all" | "devices" | "channels";
   devices: CascadeDeviceProjection[];
   channels: CascadeChannelProjection[];
+  expectedProjectionRevision: number;
 }) => http.request<CascadeShares>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`), { data });
 
 // ===== 多屏播放方案 =====

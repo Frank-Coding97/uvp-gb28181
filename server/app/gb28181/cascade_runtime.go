@@ -225,7 +225,7 @@ type cascadeClientProvider interface {
 	NewCascadeClient() (*sipgo.Client, error)
 }
 
-func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *securestore.Cipher) {
+func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *securestore.Cipher, pusher cascadeservice.CatalogPusher) {
 	db := app.DB()
 	if db == nil {
 		gbroutes.SetCascadeManagementService(nil, nil)
@@ -235,7 +235,9 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 	if runtime != nil {
 		runtime = cascadeVideoManagementRuntime{runtime}
 	}
-	gbroutes.SetCascadeManagementService(cascadeservice.NewManagementService(store, cipher, runtime, nil), db)
+	service := cascadeservice.NewManagementService(store, cipher, runtime, nil)
+	service.SetCatalogPusher(pusher)
+	gbroutes.SetCascadeManagementService(service, db)
 }
 
 func loadCascadeCredentialCipher() (*securestore.Cipher, error) {
@@ -285,7 +287,7 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer) error {
 		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
 	}
 	cascadeRuntimeManager = manager
-	setupCascadeManagement(manager, cipher)
+	setupCascadeManagement(manager, cipher, newCascadeCatalogPusher(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
 	return nil
 }
 
@@ -323,11 +325,6 @@ func (r cascadeVideoManagementRuntime) Reload(ctx context.Context) error {
 		return nil
 	}
 	return r.ManagementRuntime.Reload(ctx)
-}
-func (r cascadeVideoManagementRuntime) Reconnect(id uint64) {
-	if r.ManagementRuntime != nil {
-		r.ManagementRuntime.Reconnect(id)
-	}
 }
 func (r cascadeVideoManagementRuntime) PlatformIDs() []uint64 {
 	if r.ManagementRuntime == nil {
