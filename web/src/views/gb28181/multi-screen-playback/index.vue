@@ -179,15 +179,6 @@ const ptzDirectionByAction: Record<string, PtzDirection> = {
     right_down: "右下"
 };
 
-const layoutOptions: Array<{ value: LayoutSize; label: string; cells: number }> = [
-    { value: 1, label: "一分屏", cells: 1 },
-    { value: 4, label: "四分屏", cells: 4 },
-    { value: 6, label: "六分屏", cells: 6 },
-    { value: 8, label: "八分屏", cells: 8 },
-    { value: 9, label: "九分屏", cells: 9 },
-    { value: 16, label: "十六分屏", cells: 16 }
-];
-
 function slotGridClass() {
     return `slot-grid layout-${layout.value}`;
 }
@@ -371,16 +362,6 @@ function openConsole(slot: PlaybackSlot) {
     if (!canStartPlayback.value || !slot.channel) return;
     focusSlot(slot);
     playbackConsole.open(slot.channel);
-}
-
-function setLayout(value: LayoutSize) {
-    layout.value = value;
-    if (focusedIndex.value != null && focusedIndex.value >= value) focusedIndex.value = null;
-    if (pollingSettings.enabled) {
-        pollingCursor.value = 0;
-        void runPollingCycle();
-        schedulePolling();
-    }
 }
 
 function stopAll() {
@@ -704,12 +685,6 @@ onBeforeUnmount(() => {
 
             <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
                 <div class="monitor-toolbar">
-                    <div class="layout-switcher" role="group" aria-label="选择分屏布局">
-                        <button v-for="option in layoutOptions" :key="option.value" type="button" :data-test="`layout-${option.value}`" :class="{ active: layout === option.value }" :aria-label="option.label" :aria-pressed="layout === option.value" :title="option.label" @click="setLayout(option.value)">
-                            <span class="layout-glyph" :class="`glyph-${option.value}`" aria-hidden="true"><i v-for="cell in option.cells" :key="cell" /></span>
-                        </button>
-                    </div>
-                    <span class="toolbar-divider" aria-hidden="true" />
                     <div class="work-recording-actions" role="group" aria-label="作业录像控制">
                         <button
                             v-if="canCreateWorkOrder || canStopWorkOrder"
@@ -755,7 +730,9 @@ onBeforeUnmount(() => {
                                 </div>
                             </div>
                             <div class="slot-body">
-                                <PlayWindow v-if="slot.status === 'playing' && slot.source" :url="slot.source.url" :zlm-webrtc="slot.source.zlmWebrtc" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
+                                <!-- 多屏同时出声会互相干扰：无论通道是否开启音频，画面一律静音启动。
+                                     需要听音时可点播放器右下角的喇叭单独开启。 -->
+                                <PlayWindow v-if="slot.status === 'playing' && slot.source" :url="slot.source.url" :zlm-webrtc="slot.source.zlmWebrtc" :has-audio="slot.channel.audioEnabled" :muted="true" @error="onPlayerError(slot, $event)" />
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
                                 <div v-else-if="slot.status === 'offline'" class="slot-state offline-state" role="status"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error || "通道离线" }}</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
@@ -829,7 +806,6 @@ onBeforeUnmount(() => {
 
 .monitor-toolbar,
 .slot-topline,
-.layout-switcher,
 .playback-actions,
 .work-recording-actions,
 .slot-title,
@@ -857,18 +833,13 @@ onBeforeUnmount(() => {
 .work-recording-target { max-width: 140px; overflow: hidden; color: var(--zlm-text-2); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .work-recording-label { white-space: nowrap; }
 .work-recording-status { min-width: 0; max-width: 240px; overflow: hidden; color: var(--zlm-text-3); text-overflow: ellipsis; font-size: 11px; white-space: nowrap; }
-.layout-switcher { gap: 4px; }
-.layout-switcher button,
 .playback-actions button,
 .polling-settings header button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; }
-.layout-switcher button:hover,
 .playback-actions button:hover,
 .polling-settings header button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
-.layout-switcher button:focus-visible,
 .playback-actions button:focus-visible,
 .polling-settings button:focus-visible,
 .polling-settings input:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
-.layout-switcher button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); }
 .playback-actions { gap: 4px; margin-left: auto; }
 .playback-actions button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-200); box-shadow: inset 0 -2px 0 var(--zlm-brand-500); }
 .playback-actions button.polling-control.counting { width: 44px; flex-shrink: 0; padding: 0; }
@@ -878,7 +849,6 @@ onBeforeUnmount(() => {
 .countdown-ring strong { position: relative; z-index: 1; min-width: 2ch; color: var(--zlm-brand-700); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1; text-align: center; }
 .playback-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.52; }
 .playback-actions button:disabled:hover { background: transparent; border-color: transparent; }
-.toolbar-divider { flex: 0 0 auto; width: 1px; height: 20px; background: var(--zlm-border); }
 .layout-glyph { display: grid; width: 18px; height: 18px; gap: 1px; }
 .layout-glyph i { display: block; min-width: 0; min-height: 0; background: currentColor; }
 .glyph-1 { grid-template: 1fr / 1fr; }
@@ -977,16 +947,15 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 480px) {
     .monitor-toolbar { align-items: center; justify-content: space-between; gap: 6px; overflow-x: hidden; }
-    .layout-switcher, .playback-actions, .work-recording-actions { flex: 0 0 auto; }
-    .layout-switcher, .playback-actions { gap: 2px; }
-    .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
+    .playback-actions, .work-recording-actions { flex: 0 0 auto; }
+    .playback-actions { gap: 2px; }
+    .playback-actions button { width: 30px; height: 30px; }
     .work-recording-target, .work-recording-status { display: none; }
     .work-recording-actions button { min-width: 30px; width: auto; height: 30px; padding: 0 8px; }
     .work-recording-label { display: none; }
     .playback-actions button.polling-control.counting { width: 30px; padding: 0; }
     .countdown-ring { width: 24px; height: 24px; flex-basis: 24px; }
     .layout-glyph { width: 16px; height: 16px; }
-    .toolbar-divider { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
     .spin { animation: none; }

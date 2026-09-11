@@ -8,6 +8,12 @@ interface Props {
     /** 录像回放页嵌入模式：填满父容器，由外层提供业务控制栏。 */
     playback?: boolean;
     hasAudio?: boolean;
+    /**
+     * 是否静音。默认 false，沿用各页面历史行为。
+     * 注意 EasyPlayer 的 isMute 选项语义相反（库内部映射为 isNotMute：
+     * isMute:true => 出声、isMute:false => 静音），组件统一用 muted 表达，内部再翻转。
+     */
+    muted?: boolean;
     /** 启用 EasyPlayer 的 ZLMediaKit WebRTC 信令适配。 */
     zlmWebrtc?: boolean;
 }
@@ -30,6 +36,17 @@ const canScreenshot = computed(() => {
     const permissions = userStore.account.permissions ?? [];
     return permissions.includes("*:*:*") || permissions.includes("gb28181:play:snapshot");
 });
+const muted = computed(() => props.muted ?? false);
+
+/** 兜底：选项之外再显式静音一次，避免播放器重连后恢复出声。 */
+function applyMute(target: any) {
+    if (!muted.value || !target || typeof target.mute !== "function") return;
+    try {
+        target.mute(true);
+    } catch (e) {
+        console.warn("EasyPlayerPro mute error", e);
+    }
+}
 
 function destroy() {
     if (player.value) {
@@ -58,6 +75,7 @@ async function play(u: string) {
     if (player.value) {
         try {
             await player.value.play(u);
+            applyMute(player.value);
         } catch (e) {
             errorMsg.value = `切换播放地址失败: ${(e as Error).message || e}`;
             emit("error", errorMsg.value);
@@ -74,7 +92,8 @@ async function play(u: string) {
             bufferTime: 0.2,
             // 国标 IPC 默认 PCMA(G.711),EasyPlayer wasm 路径支持解码 G711
             hasAudio: props.hasAudio ?? true,
-            isMute: true,         // 默认静音(浏览器自动播放策略友好)
+            // EasyPlayer 的 isMute 会被内部翻成 isNotMute：false 才是静音
+            isMute: !muted.value,
             stretch: true,
             isRtcZLM: props.zlmWebrtc ?? false,
             // 解码模式优先级:MSE > WCS > WASM。打开 WASM 兜底,确保 G711/H265 也能放
@@ -110,6 +129,7 @@ async function play(u: string) {
 
         player.value = p;
         await p.play(u);
+        applyMute(p);
     } catch (e) {
         errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
         emit("error", errorMsg.value);

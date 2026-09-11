@@ -97,6 +97,51 @@ describe("PlayWindow playback embedding", () => {
         wrapper.unmount();
     });
 
+    it("maps the muted prop onto EasyPlayer's inverted isMute option", async () => {
+        const options: Record<string, any>[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, value: Record<string, any>) {
+                options.push(value);
+            }
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        // EasyPlayer 内部把 isMute 映射成 isNotMute：静音必须传 isMute:false。
+        const mutedWrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", hasAudio: true, muted: true } });
+        await flushPromises();
+        expect(options[0]).toMatchObject({ hasAudio: true, isMute: false });
+
+        const audibleWrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", hasAudio: true, muted: false } });
+        await flushPromises();
+        expect(options[1]).toMatchObject({ hasAudio: true, isMute: true });
+
+        mutedWrapper.unmount();
+        audibleWrapper.unmount();
+    });
+
+    it("re-applies mute right after play so reconnects stay silent", async () => {
+        const instances: FakeEasyPlayer[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, _value: Record<string, unknown>) {
+                instances.push(this);
+            }
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+            mute = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", muted: true } });
+        await flushPromises();
+
+        expect(instances[0].mute).toHaveBeenCalledWith(true);
+        wrapper.unmount();
+    });
+
     it("enables the ZLM WebRTC adapter only when requested by the caller", async () => {
         const options: Record<string, unknown>[] = [];
         class FakeEasyPlayer {

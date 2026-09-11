@@ -51,6 +51,9 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
                 <button data-test="source-channel-2" @click="$emit('select', {
                     id: 2, channelId: 'channel-2', deviceId: 'device-2', name: '西门', status: 1, audioEnabled: false
                 })">西门</button>
+                <button data-test="source-channel-audio" @click="$emit('select', {
+                    id: 4, channelId: 'channel-4', deviceId: 'device-1', name: '南门', status: 1, audioEnabled: true
+                })">南门</button>
                 <button data-test="favorite-group-1" @click="$emit('select-group', {
                     id: 'group-1', name: '重点通道', channels: [{ id: 3, channelId: 'channel-3', deviceId: 'device-1', name: '后门', status: 1, audioEnabled: false }]
                 })">重点通道</button>
@@ -63,8 +66,9 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
 vi.mock("../components/PlayWindow.vue", () => ({
     default: {
         name: "PlayWindow",
-        props: ["url", "zlmWebrtc"],
-        template: "<div class=\"mock-play-window\" :data-url=\"url\" :data-zlm-webrtc=\"String(Boolean(zlmWebrtc))\" />"
+        props: ["url", "zlmWebrtc", "hasAudio", "muted"],
+        template:
+            "<div class=\"mock-play-window\" :data-url=\"url\" :data-zlm-webrtc=\"String(Boolean(zlmWebrtc))\" :data-has-audio=\"String(Boolean(hasAudio))\" :data-muted=\"String(Boolean(muted))\" />"
     }
 }));
 // 作业单表单弹窗单独测试；页面测试只关心它拿到了哪些通道。
@@ -140,6 +144,14 @@ describe("multi-screen playback page", () => {
         message.error.mockReset();
     });
 
+    it("keeps the four-screen layout fixed without rendering the layout switcher", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        expect(wrapper.find('[aria-label="选择分屏布局"]').exists()).toBe(false);
+        expect(wrapper.get('[aria-label="多屏播放格子"]').classes()).toContain("layout-4");
+    });
+
     // 决策：只录「正在播放」的画面，没有正在播放的画面时按钮必须禁用并说明原因。
     it("keeps the recording button disabled until something is actually playing", async () => {
         const wrapper = mount(MultiScreenPlayback);
@@ -156,6 +168,17 @@ describe("multi-screen playback page", () => {
         const ready = wrapper.get("[data-test=work-order-toggle]");
         expect(ready.attributes("disabled")).toBeUndefined();
         expect(ready.text()).toContain("开始录像");
+    });
+
+    // 决策：多路画面同时出声会互相干扰，就算通道开启了音频，画面也必须静音启动。
+    it("starts every screen muted even when the channel has audio enabled", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-audio]").trigger("click");
+        await flushPromises();
+
+        const player = wrapper.get(".mock-play-window");
+        expect(player.attributes("data-has-audio")).toBe("true");
+        expect(player.attributes("data-muted")).toBe("true");
     });
 
     // 决策：先填作业单再开录，所以按钮只负责打开表单，不直接开录。
@@ -380,7 +403,7 @@ describe("multi-screen playback page", () => {
         expect(wrapper.find("[data-test=playback-source-tree]").exists()).toBe(true);
         expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
-        expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
+        expect(wrapper.find('[aria-label="选择分屏布局"]').exists()).toBe(false);
         expect(wrapper.find("[data-test=my-favorites] .lucide-star").exists()).toBe(true);
     });
 
@@ -540,20 +563,11 @@ describe("multi-screen playback page", () => {
         expect(message.success).toHaveBeenCalledWith("已播放收藏组“重点通道”的 1 路通道");
     });
 
-    it.each([
-        [1, "layout-1"],
-        [4, "layout-4"],
-        [6, "layout-6"],
-        [8, "layout-8"],
-        [9, "layout-9"],
-        [16, "layout-16"]
-    ])("switches to %i visible playback slots", async (count, layoutClass) => {
+    it("keeps four visible playback slots", async () => {
         const wrapper = mount(MultiScreenPlayback);
 
-        await wrapper.get(`[data-test=layout-${count}]`).trigger("click");
-
-        expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(count);
-        expect(wrapper.get("[aria-label=多屏播放格子]").classes()).toContain(layoutClass);
+        expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
+        expect(wrapper.get("[aria-label=多屏播放格子]").classes()).toContain("layout-4");
     });
 
     it("starts independent streams when two sources are assigned", async () => {
@@ -651,16 +665,15 @@ describe("multi-screen playback page", () => {
         api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
         const wrapper = mount(MultiScreenPlayback);
 
-        await wrapper.get("[data-test=layout-6]").trigger("click");
         expect(wrapper.get("[data-test=play-all]").attributes("disabled")).toBeUndefined();
         await wrapper.get("[data-test=play-all]").trigger("click");
         await flushPromises();
 
         expect(api.listChannels).toHaveBeenCalledWith({ status: "online", page: 1, pageSize: 200 });
-        expect(wrapper.findAll(".mock-play-window")).toHaveLength(6);
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(4);
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(0);
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
-            "在线通道1", "在线通道2", "在线通道3", "在线通道4", "在线通道5", "在线通道6"
+            "在线通道1", "在线通道2", "在线通道3", "在线通道4"
         ]);
         expect(message.error).not.toHaveBeenCalled();
     });
