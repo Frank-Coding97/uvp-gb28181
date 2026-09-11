@@ -151,7 +151,7 @@ const workOrderToggleDisabled = computed(() => {
     return recordingTargets.value.length === 0 || !canCreateWorkOrder.value;
 });
 const workOrderToggleLabel = computed(() =>
-    workOrderAction.value === "start" ? "开始中…" : workOrderAction.value === "stop" ? "结束中…" : workOrderRunning.value ? "结束录像" : "开始录像");
+    workOrderAction.value === "start" ? "开始中…" : workOrderAction.value === "stop" ? "结束中…" : workOrderRunning.value ? "结束作业" : "开始作业");
 const workOrderToggleHint = computed(() => {
     if (workOrderToggleDisabled.value && workOrderAction.value === null && !workOrderRunning.value) {
         return recordingTargets.value.length === 0 ? "请先播放需要录制的画面" : "缺少作业单权限";

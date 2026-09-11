@@ -170,7 +170,7 @@ describe("multi-screen playback page", () => {
 
         const ready = wrapper.get("[data-test=work-order-toggle]");
         expect(ready.attributes("disabled")).toBeUndefined();
-        expect(ready.text()).toContain("开始录像");
+        expect(ready.text()).toContain("开始作业");
     });
 
     // 决策：多路画面同时出声会互相干扰，就算通道开启了音频，画面也必须静音启动。
@@ -243,8 +243,8 @@ describe("multi-screen playback page", () => {
         await flushPromises();
 
         const toggle = wrapper.get("[data-test=work-order-toggle]");
-        // 即使当前没有任何画面在播，服务端有进行中作业单也必须能结束录像
-        expect(toggle.text()).toContain("结束录像");
+        // 即使当前没有任何画面在播，服务端有进行中作业单也必须能结束作业
+        expect(toggle.text()).toContain("结束作业");
         expect(toggle.attributes("disabled")).toBeUndefined();
         const status = wrapper.get("[data-test=work-order-status]").text();
         expect(status).toContain("9b057ecd");
