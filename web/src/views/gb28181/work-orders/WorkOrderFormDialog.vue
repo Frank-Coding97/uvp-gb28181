@@ -239,10 +239,10 @@ async function loadFormHistory() {
 }
 
 /**
- * 把一个人名加入已选列表：去重、上限拦截、选完清空输入框。
- * 输入框只承担「搜索 + 选人」，不承载最终值——最终值在下方 tag 列表里。
+ * 作业人员下拉的候选来自历史值（录入后寄存），但历史为空时不能因此锁死录入：
+ * `a-select` 开启了 `allow-create`，用户可直接输入新人名回车添加，与「从历史选用」并行。
+ * 已选人员从候选里排除，避免重复选到同一个人。
  */
-/** 下拉选项排除已选人员，避免重复选到同一个人。 */
 const personnelOptions = computed(() =>
     (historyByField.value["workPersonnel"] || [])
         .map(entry => ({ value: entry.value, label: entry.value }))
@@ -310,9 +310,11 @@ watch(
                             v-if="key === 'workPersonnel'"
                             v-model="personnelList"
                             multiple
+                            allow-search
+                            allow-create
                             :options="personnelOptions"
                             :trigger-props="{ contentStyle: { maxHeight: '180px' }, updateAtScroll: true }"
-                            placeholder="选择作业人员（可多选）"
+                            placeholder="选择或输入作业人员，回车添加"
                             data-test="work-personnel-input"
                             @blur="markBlurred(String(key))"
                         />
