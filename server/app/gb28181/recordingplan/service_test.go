@@ -56,7 +56,7 @@ func TestServiceUpdateBumpsVersionAndSchedulesBoundChannelsNow(t *testing.T) {
 	var state models.GbRecordingPlanChannelState
 	require.NoError(t, db.First(&state, "channel_id = ?", 5).Error)
 	require.EqualValues(t, 2, state.PlanVersion)
-	require.Equal(t, now, state.ReconcileAt)
+	require.True(t, now.Equal(state.ReconcileAt))
 }
 
 func TestServiceDeleteRejectsBoundPlanAndDeletesUnboundPlan(t *testing.T) {

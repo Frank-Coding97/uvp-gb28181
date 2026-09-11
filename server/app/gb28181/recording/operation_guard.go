@@ -17,6 +17,10 @@ func (s *Service) guardOperation(ctx context.Context, id uint, stream string, fn
 	return s.operationGuard(ctx, id, stream, fn)
 }
 func (s *Service) Enable(ctx context.Context, id uint) (result *models.GbChannel, err error) {
+	if err := s.acceptStart(); err != nil {
+		return nil, err
+	}
+	defer s.releaseStart()
 	err = s.guardOperation(ctx, id, "", func(operationCtx context.Context) error { result, err = s.enable(operationCtx, id); return err })
 	return
 }
@@ -46,6 +50,10 @@ func (s *Service) guardPlayback(ctx context.Context, stream string, fn func(cont
 	return s.guardOperation(ctx, id, stream, fn)
 }
 func (s *Service) BeginPlayback(ctx context.Context, stream string) error {
+	if err := s.acceptStart(); err != nil {
+		return err
+	}
+	defer s.releaseStart()
 	return s.guardPlayback(ctx, stream, func(operationCtx context.Context) error { return s.beginPlayback(operationCtx, stream) })
 }
 func (s *Service) EndPlayback(ctx context.Context, stream string) error {

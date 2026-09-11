@@ -27,6 +27,7 @@ import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { getActiveWorkOrder, getWorkOrder, stopWorkOrder, workOrderDownloadUrl, type WorkOrderSnapshot } from "@/api/gb28181-work-recording";
 
+
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
 type PtzDirection = "上" | "右上" | "右" | "右下" | "下" | "左下" | "左" | "左上";
@@ -81,6 +82,7 @@ function archiveProgress(snapshot: WorkOrderSnapshot) {
         ready: cameras.length > 0 && cameras.every(camera => camera.state === "stopped") && workOrderSliceCount(snapshot) > 0
     };
 }
+
 
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
@@ -358,6 +360,7 @@ async function toggleWorkOrderRecording() {
 async function handleWorkOrderCreated() {
     await refreshActiveWorkOrder();
 }
+
 
 function handlePtzActionChange(value: { channelId: number; action: string } | null) {
     const direction = value ? ptzDirectionByAction[value.action] : null;
@@ -719,6 +722,7 @@ onBeforeUnmount(() => {
                             @click="toggleWorkOrderRecording"
                         >
                             <CircleStop v-if="workOrderRunning" :size="16" aria-hidden="true" />
+
                             <Play v-else :size="16" aria-hidden="true" />
                             <span class="work-recording-label">{{ workOrderToggleLabel }}</span>
                         </button>
@@ -790,6 +794,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                 </a-modal>
+
                 <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>

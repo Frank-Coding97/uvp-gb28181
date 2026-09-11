@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
 import {
     activeSipAddresses, deriveDomain, deriveNetworkSelection, evaluatePasswordStrength, formatRegisterUri,
-    identityCanContinue, networkCanContinue, networkOptions, passwordAcceptable
+    identityCanContinue, isMediaIPv4, mediaHostsCanContinue, networkCanContinue, networkOptions, passwordAcceptable,
+    sipAddressAvailability, validateMediaHost
 } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
@@ -31,9 +32,51 @@ describe("SIP network rules", () => {
         expect(networkCanContinue("public", "0.0.0.0", "203.0.113.10")).toBe(true);
     });
 
-    it("does not retain a saved address that disappeared from interfaces", () => {
+    it("keeps a disappeared saved address visible without treating it as current", () => {
         const options = networkOptions(items, "10.10.10.10");
-        expect(options.map(item => item.ip)).not.toContain("10.10.10.10");
+        expect(options.map(item => item.ip)).toContain("10.10.10.10");
+        expect(options.find(item => item.ip === "10.10.10.10")?.unavailable).toBe(true);
+    });
+
+    it("does not report a LAN address change while the saved IPs are present", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items,
+            scanStatus: "ok"
+        })).toBe("ok");
+    });
+
+    it("reports a missing concrete LAN address but ignores dynamic and public NAT addresses", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.20", {
+            items,
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("lan", "0.0.0.0", "", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("ok");
+        expect(sipAddressAvailability("public", "192.168.1.10", "203.0.113.10", {
+            items,
+            scanStatus: "ok"
+        })).toBe("ok");
+        expect(sipAddressAvailability("public", "192.168.1.10", "203.0.113.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("public", "0.0.0.0", "203.0.113.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("ok");
+    });
+
+    it("does not report an address change when the interface scan fails", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items: [],
+            scanStatus: "failed"
+        })).toBe("unavailable");
     });
 
     it("lists only currently scanned addresses for wildcard LAN", () => {
@@ -48,6 +91,25 @@ describe("SIP network rules", () => {
         ]);
         expect(activeSipAddresses("lan", "192.168.1.10", "192.168.10.106", currentItems)).toEqual(["192.168.1.10"]);
         expect(activeSipAddresses("public", "0.0.0.0", "203.0.113.10", currentItems)).toEqual(["203.0.113.10"]);
+    });
+});
+
+describe("standalone media address rules", () => {
+    it("accepts concrete unicast IPv4 including loopback for local verification", () => {
+        expect(isMediaIPv4("127.0.0.1")).toBe(true);
+        expect(isMediaIPv4("192.168.1.10")).toBe(true);
+        expect(isMediaIPv4("0.0.0.0")).toBe(false);
+        expect(isMediaIPv4("224.0.0.1")).toBe(false);
+        expect(isMediaIPv4("255.255.255.255")).toBe(false);
+    });
+
+    it("requires two confirmed media addresses only for the standalone required flow", () => {
+        expect(mediaHostsCanContinue(false, "", "")).toBe(true);
+        expect(mediaHostsCanContinue(true, "192.168.1.10", "127.0.0.1")).toBe(true);
+        expect(mediaHostsCanContinue(true, "", "192.168.1.11")).toBe(false);
+        expect(mediaHostsCanContinue(true, "0.0.0.0", "192.168.1.11")).toBe(false);
+        expect(mediaHostsCanContinue(true, "192.168.1.10", "239.1.1.1")).toBe(false);
+        expect(validateMediaHost("224.0.0.1", "媒体接收地址")).toContain("具体 IPv4");
     });
 });
 

@@ -7,14 +7,16 @@ import "strconv"
 // ZLM 的端口在其自身配置里,不通过 meta_node 表管理;运行时从 API 拉取,给需要构造播放 / 抓帧
 // URL 的场景使用(如通道快照的 rtsp 拉流)。
 type ServerConfig struct {
-	HTTPPort     int // http.port,默认 80,项目里改成了 18080
-	HTTPSPort    int // http.sslport
-	RTSPPort     int // rtsp.port,默认 554,项目里 10554
-	RTSPSPort    int // rtsp.sslport
-	RTMPPort     int // rtmp.port,默认 1935,项目里 11935
-	RTMPSPort    int // rtmp.sslport
-	RTPProxyPort int // rtp_proxy.port(单端口收流)
-	ONVIFPort    int // onvif.port
+	HTTPPort            int  // http.port,默认 80,项目里改成了 18080
+	HTTPSPort           int  // http.sslport
+	RTSPPort            int  // rtsp.port,默认 554,项目里 10554
+	RTSPSPort           int  // rtsp.sslport
+	RTMPPort            int  // rtmp.port,默认 1935,项目里 11935
+	RTMPSPort           int  // rtmp.sslport
+	RTPProxyPort        int  // rtp_proxy.port(单端口收流)
+	ONVIFPort           int  // onvif.port
+	RTCTransportKnown   bool // false preserves older node responses without rtc fields
+	RTCTransportEnabled bool
 
 	// 协议开关缺失时按 ZLM 默认启用,只有明确为 0 才关闭。
 	RTSPEnabled bool
@@ -28,20 +30,25 @@ type ServerConfig struct {
 //
 // 只解析当前需要的字段;无法解析的字段静默跳过(用 0 兜底,调用方判断)。
 func ParseServerConfig(m map[string]string) ServerConfig {
+	_, hasRTCUDP := m["rtc.port"]
+	_, hasRTCTCP := m["rtc.tcpPort"]
+	validPort := func(value string) bool { port := atoiOrZero(value); return port > 0 && port <= 65535 }
 	return ServerConfig{
-		HTTPPort:     atoiOrZero(m["http.port"]),
-		HTTPSPort:    atoiOrZero(m["http.sslport"]),
-		RTSPPort:     atoiOrZero(m["rtsp.port"]),
-		RTSPSPort:    atoiOrZero(m["rtsp.sslport"]),
-		RTMPPort:     atoiOrZero(m["rtmp.port"]),
-		RTMPSPort:    atoiOrZero(m["rtmp.sslport"]),
-		RTPProxyPort: atoiOrZero(m["rtp_proxy.port"]),
-		ONVIFPort:    atoiOrZero(m["onvif.port"]),
-		RTSPEnabled:  protocolEnabled(m["protocol.enable_rtsp"]),
-		RTMPEnabled:  protocolEnabled(m["protocol.enable_rtmp"]),
-		HLSEnabled:   protocolEnabled(m["protocol.enable_hls"]),
-		TSEnabled:    protocolEnabled(m["protocol.enable_ts"]),
-		FMP4Enabled:  protocolEnabled(m["protocol.enable_fmp4"]),
+		RTCTransportKnown:   hasRTCUDP || hasRTCTCP,
+		RTCTransportEnabled: validPort(m["rtc.port"]) || validPort(m["rtc.tcpPort"]),
+		HTTPPort:            atoiOrZero(m["http.port"]),
+		HTTPSPort:           atoiOrZero(m["http.sslport"]),
+		RTSPPort:            atoiOrZero(m["rtsp.port"]),
+		RTSPSPort:           atoiOrZero(m["rtsp.sslport"]),
+		RTMPPort:            atoiOrZero(m["rtmp.port"]),
+		RTMPSPort:           atoiOrZero(m["rtmp.sslport"]),
+		RTPProxyPort:        atoiOrZero(m["rtp_proxy.port"]),
+		ONVIFPort:           atoiOrZero(m["onvif.port"]),
+		RTSPEnabled:         protocolEnabled(m["protocol.enable_rtsp"]),
+		RTMPEnabled:         protocolEnabled(m["protocol.enable_rtmp"]),
+		HLSEnabled:          protocolEnabled(m["protocol.enable_hls"]),
+		TSEnabled:           protocolEnabled(m["protocol.enable_ts"]),
+		FMP4Enabled:         protocolEnabled(m["protocol.enable_fmp4"]),
 	}
 }
 

@@ -6,23 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 )
 
 func TestAuthSessionRefreshCASAllowsExactlyOneWinner(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:refresh-cas?mode=memory&cache=shared&_pragma=busy_timeout(5000)"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	sqlDB.SetMaxOpenConns(8)
+	db := newSQLiteSystemTestDB(t)
 
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
 	refresh, err := tokens.GenerateRefreshTokenForSessionUntil(7, "sid-a", "refresh-jti", now.Add(24*time.Hour))
 	require.NoError(t, err)
@@ -60,13 +53,8 @@ func TestAuthSessionRefreshCASAllowsExactlyOneWinner(t *testing.T) {
 func TestRefreshAndForceLogoutAlwaysEndOffline(t *testing.T) {
 	for _, order := range []string{"refresh-first", "logout-first"} {
 		t.Run(order, func(t *testing.T) {
-			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
-			require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
-				g.Statement.RaiseErrorOnNotFound = false
-			}))
-			now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+			db := newSQLiteSystemTestDB(t)
+			now := time.Now().UTC()
 			tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
 			refresh, err := tokens.GenerateRefreshTokenForSessionUntil(7, "sid-a", "refresh-jti", now.Add(24*time.Hour))
 			require.NoError(t, err)

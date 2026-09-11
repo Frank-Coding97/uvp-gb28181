@@ -44,6 +44,7 @@ type StartRequest struct {
 // recorder claims on one ZLM node.
 const BatchMaxCameraCount = 16
 
+
 type BatchStartRequest struct {
 	ChannelIDs []uint `json:"channelIds"`
 	RequestID  string `json:"requestId"`
@@ -67,6 +68,7 @@ func (r OrderStartRequest) Validate() error {
 	}
 	return r.Form.Validate()
 }
+
 
 func (r BatchStartRequest) Validate() error {
 	if len(r.ChannelIDs) < 1 || len(r.ChannelIDs) > BatchMaxCameraCount || strings.TrimSpace(r.RequestID) == "" || len(r.RequestID) > 128 || strings.TrimSpace(r.RequestID) != r.RequestID {
@@ -95,6 +97,7 @@ type BatchCameraSnapshot struct {
 	ChannelCode string              `json:"channelCode,omitempty"`
 	DeviceID    string              `json:"deviceId,omitempty"`
 	DeviceName  string              `json:"deviceName,omitempty"`
+
 	JobID       string              `json:"jobId"`
 	State       string              `json:"state"`
 	FileState   string              `json:"fileState"`
@@ -121,6 +124,7 @@ type BatchSnapshot struct {
 	FormState   string                `json:"formState"`
 	FormVersion uint64                `json:"formVersion"`
 	ProjectName string                `json:"projectName,omitempty"`
+
 	Cameras     []BatchCameraSnapshot `json:"cameras"`
 	LastError   string                `json:"lastError,omitempty"`
 }
@@ -158,6 +162,7 @@ type BatchDeleteResult struct {
 	Skipped []string `json:"skipped,omitempty"`
 	Missing []string `json:"missing,omitempty"`
 }
+
 
 func (r StartRequest) Validate() error {
 	if r.ChannelID == 0 || strings.TrimSpace(r.RequestID) == "" || len(r.RequestID) > 128 || strings.TrimSpace(r.RequestID) != r.RequestID {

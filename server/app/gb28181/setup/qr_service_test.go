@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 // T1 — QRService.

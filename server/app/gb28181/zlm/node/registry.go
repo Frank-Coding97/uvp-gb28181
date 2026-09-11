@@ -126,6 +126,8 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 	nextBlocked := make(map[int64]bool, len(rows))
 	for i := range rows {
 		n := cloneNode(rows[i])
+		// A repository reload cannot establish authenticated Hook evidence.
+		n.Stats.LastAuthenticatedKeepaliveAt = time.Time{}
 		current, exists := r.nodes[n.ID]
 		staleReload := exists && current.Revision > n.Revision
 		if staleReload {
@@ -526,6 +528,8 @@ func (r *Registry) UpdateStats(uuid string, stats Stats) {
 	if !ok {
 		return
 	}
+	// Generic stats updates cannot manufacture or overwrite authenticated Hook evidence.
+	stats.LastAuthenticatedKeepaliveAt = n.Stats.LastAuthenticatedKeepaliveAt
 	n.Stats = stats
 	// 心跳到达 = 节点 alive,如果之前是 offline 自动恢复 active
 	if n.State == StateOffline {
@@ -552,6 +556,7 @@ func (r *Registry) UpdateHeartbeatFields(uuid string, mediaSourceCount, sessionC
 		return
 	}
 	n.Stats.LastHeartbeatAt = heartbeatAt
+	n.Stats.LastAuthenticatedKeepaliveAt = heartbeatAt
 	n.Stats.MediaSourceCount = mediaSourceCount
 	n.Stats.SessionCount = sessionCount
 	// 心跳到达 = 节点 alive,如果之前是 offline 自动恢复 active

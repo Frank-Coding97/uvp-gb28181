@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,11 +37,23 @@ func NewThreadLoadPoller(reg *node.Registry, fetcher ThreadLoadFetcher, interval
 
 // Tick 一次轮询:并发拉所有 active 节点的 2 个负载,写回 Stats
 func (p *ThreadLoadPoller) Tick(ctx context.Context) {
-	active := p.registry.ListActive()
-	for _, n := range active {
-		nCopy := n
-		go p.fetchOne(ctx, nCopy)
+	if ctx.Err() != nil {
+		return
 	}
+	active := p.registry.ListActive()
+	var wg sync.WaitGroup
+	for _, n := range active {
+		if ctx.Err() != nil {
+			break
+		}
+		nCopy := n
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.fetchOne(ctx, nCopy)
+		}()
+	}
+	wg.Wait()
 }
 
 func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
@@ -48,6 +61,9 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 	defer cancel()
 
 	netLoad, errNet := p.fetcher.GetThreadsLoad(fetchCtx, n)
+	if fetchCtx.Err() != nil {
+		return
+	}
 	workLoad, errWork := p.fetcher.GetWorkThreadsLoad(fetchCtx, n)
 	if errNet != nil || errWork != nil {
 		if app.ZapLog != nil {
@@ -59,18 +75,26 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 		}
 		return
 	}
+	if fetchCtx.Err() != nil {
+		return
+	}
 	// 锁内字段级更新:与 Collector 的心跳字段互不覆盖
 	p.registry.UpdateLoadFields(n.MediaServerUUID, netLoad, workLoad)
 }
 
 // Start 启动 goroutine,周期跑 Tick;ctx 取消 → 退出
-func (p *ThreadLoadPoller) Start(ctx context.Context) {
+func (p *ThreadLoadPoller) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// 启动 5s 后立即跑一次(让 UI 不用等 30s 才看到负载值)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(5 * time.Second):
+			if ctx.Err() != nil {
+				return
+			}
 			p.Tick(ctx)
 		}
 		tk := time.NewTicker(p.interval)
@@ -80,8 +104,12 @@ func (p *ThreadLoadPoller) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-tk.C:
+				if ctx.Err() != nil {
+					return
+				}
 				p.Tick(ctx)
 			}
 		}
 	}()
+	return done
 }

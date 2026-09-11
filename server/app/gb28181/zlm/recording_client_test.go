@@ -357,6 +357,29 @@ func TestDownloadFileStreamsFullAndRangeRequests(t *testing.T) {
 	}
 }
 
+func TestDownloadFileNormalizesWindowsAbsolutePath(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{`C:\录像 目录\record\camera.mp4`, `C:/录像 目录/record/camera.mp4`},
+		{`d:/record\camera.mp4`, `d:/record/camera.mp4`},
+		{`/record/camera\name.mp4`, `/record/camera\name.mp4`},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.Query().Get("file_path"); got != tc.want {
+					t.Errorf("file_path=%q, want %q", got, tc.want)
+				}
+				w.WriteHeader(http.StatusOK)
+			})
+			defer server.Close()
+			response, err := client.DownloadFile(context.Background(), tc.input, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+		})
+	}
+}
+
 func TestDownloadFileDoesNotFollowRedirect(t *testing.T) {
 	redirectTargetHit := false
 	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {

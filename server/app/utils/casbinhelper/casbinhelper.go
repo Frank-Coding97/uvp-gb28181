@@ -1,10 +1,12 @@
 package casbinhelper
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
@@ -29,7 +31,18 @@ const (
 // 实现 app.CasbinInterf 接口
 type CasbinHelper struct {
 	enforcer *casbin.Enforcer
-	stopChan chan struct{} // 用于停止定期重载goroutine
+
+	// reloadMu protects the lifecycle of the auto-reload goroutine. stopChan
+	// is never replaced or set to nil after it is created; this keeps Stop and
+	// Shutdown safe when called concurrently.
+	reloadMu       sync.Mutex
+	stopChan       chan struct{}
+	stopRequested  bool
+	stopping       bool
+	reloadDone     chan struct{}
+	reloadExited   bool
+	reloadDoneSent bool
+	activeReloads  int
 }
 
 // 编译时检查是否实现了接口
@@ -461,12 +474,22 @@ func (s *CasbinHelper) startAutoLoadPolicy() {
 		return
 	}
 
-	// 初始化停止通道
-	s.stopChan = make(chan struct{})
+	s.reloadMu.Lock()
+	if s.stopChan != nil {
+		// InitCasbin may be called more than once; keep one lifecycle and do not
+		// replace the stop channel while an earlier goroutine may still read it.
+		s.reloadMu.Unlock()
+		return
+	}
+	stopChan := make(chan struct{})
+	s.stopChan = stopChan
+	s.reloadDone = make(chan struct{})
+	s.reloadMu.Unlock()
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(autoLoadSeconds) * time.Second)
 		defer ticker.Stop()
+		defer s.markAutoLoadExited()
 
 		app.ZapLog.Info("Started auto reload policy goroutine",
 			zap.Int("interval_seconds", autoLoadSeconds))
@@ -474,14 +497,10 @@ func (s *CasbinHelper) startAutoLoadPolicy() {
 		for {
 			select {
 			case <-ticker.C:
-				if s.enforcer != nil {
-					if err := s.enforcer.LoadPolicy(); err != nil {
-						app.ZapLog.Error("Failed to auto reload policy", zap.Error(err))
-					} else {
-						app.ZapLog.Debug("Auto reload policy successfully")
-					}
+				if enforcer := s.admitPolicyReload(); enforcer != nil {
+					s.reloadPolicy(enforcer)
 				}
-			case <-s.stopChan:
+			case <-stopChan:
 				app.ZapLog.Info("Auto reload policy goroutine stopped")
 				return
 			}
@@ -491,8 +510,93 @@ func (s *CasbinHelper) startAutoLoadPolicy() {
 
 // StopAutoLoadPolicy 停止定期重载策略的goroutine
 func (s *CasbinHelper) StopAutoLoadPolicy() {
-	if s.stopChan != nil {
+	s.requestAutoLoadStop()
+}
+
+// Shutdown 停止定期重载并等待已经获准执行的LoadPolicy完成。
+// ctx到期时返回ctx错误，之后仍可再次调用等待剩余任务排空。
+func (s *CasbinHelper) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.requestAutoLoadStop()
+
+	s.reloadMu.Lock()
+	done := s.reloadDone
+	s.reloadMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// requestAutoLoadStop closes the stable stop channel once. It intentionally
+// does not wait; StopAutoLoadPolicy keeps its historical asynchronous behavior
+// while Shutdown provides the bounded join used by standalone shutdown.
+func (s *CasbinHelper) requestAutoLoadStop() {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	if s.stopChan == nil {
+		return
+	}
+	s.stopping = true
+	if !s.stopRequested {
 		close(s.stopChan)
-		s.stopChan = nil
+		s.stopRequested = true
+	}
+}
+
+// admitPolicyReload atomically admits a ticker event before Shutdown can seal
+// the lifecycle. The returned enforcer is held by the caller for the complete
+// LoadPolicy operation.
+func (s *CasbinHelper) admitPolicyReload() *casbin.Enforcer {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	if s.stopping || s.enforcer == nil {
+		return nil
+	}
+	s.activeReloads++
+	return s.enforcer
+}
+
+func (s *CasbinHelper) reloadPolicy(enforcer *casbin.Enforcer) {
+	defer s.finishPolicyReload()
+	if err := enforcer.LoadPolicy(); err != nil {
+		app.ZapLog.Error("Failed to auto reload policy", zap.Error(err))
+	} else {
+		app.ZapLog.Debug("Auto reload policy successfully")
+	}
+}
+
+func (s *CasbinHelper) finishPolicyReload() {
+	s.reloadMu.Lock()
+	if s.activeReloads > 0 {
+		s.activeReloads--
+	}
+	s.closeReloadDoneIfDrained()
+	s.reloadMu.Unlock()
+}
+
+func (s *CasbinHelper) markAutoLoadExited() {
+	s.reloadMu.Lock()
+	s.reloadExited = true
+	s.closeReloadDoneIfDrained()
+	s.reloadMu.Unlock()
+}
+
+func (s *CasbinHelper) closeReloadDoneIfDrained() {
+	if s.reloadDone != nil && s.reloadExited && s.activeReloads == 0 && !s.reloadDoneSent {
+		close(s.reloadDone)
+		s.reloadDoneSent = true
 	}
 }

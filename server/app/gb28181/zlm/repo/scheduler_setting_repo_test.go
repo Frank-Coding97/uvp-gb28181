@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -14,10 +13,7 @@ import (
 
 func setupSchedulerDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&repo.SchedulerSetting{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func TestSchedulerSettingRepo_GetCurrent_NotFound(t *testing.T) {
@@ -69,6 +65,6 @@ func TestSchedulerSettingRepo_UpdateAlgorithmPreservesExistingMetadata(t *testin
 	require.NoError(t, db.First(&got, 1).Error)
 	require.Equal(t, "weighted", got.Algorithm)
 	require.Equal(t, `{"weight":3}`, got.ConfigJSON)
-	require.Equal(t, createdAt, got.CreatedAt)
+	require.True(t, createdAt.Equal(got.CreatedAt), "stored timestamp must preserve the same instant")
 	require.GreaterOrEqual(t, got.UpdatedAt, before)
 }

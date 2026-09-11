@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -14,10 +13,7 @@ import (
 
 func setupSchedulerLogRepoDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&repo.SchedulerLogDTO{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func TestSchedulerLogRepoT13_ListFilteredUsesPolicyAliasAndTypedPredicates(t *testing.T) {

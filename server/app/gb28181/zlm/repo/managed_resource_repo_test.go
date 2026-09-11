@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -17,13 +16,7 @@ import (
 
 func newManagedResourceDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbZLMManagedResource{}))
-	return db
+	return newSQLiteBaselineRepoDB(t)
 }
 
 func managedResourceIdentity() repo.ManagedResourceIdentity {

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -14,7 +16,9 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
-	_ "uvplatform.cn/uvp-gb28181/bootstrap"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.cn/uvp-gb28181/bootstrap"
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 
 	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
 	_ "uvplatform.cn/uvp-gb28181/plugins"
@@ -34,6 +38,26 @@ import (
 // @host localhost:8080
 // @BasePath /api
 func main() {
+	if operation, admitted := bootstrap.MaintenanceOperation(); admitted {
+		if err := runStandaloneMaintenance(operation); err != nil {
+			log.Fatal("standalone maintenance operation failed: " + operation.Purpose)
+		}
+		return
+	}
+	for _, arg := range os.Args[1:] {
+		if arg == "-bootstrap-db" {
+			if err := runBootstrapDB(); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
+		if arg == "-db-check" {
+			if err := runDBCheck(); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
+	}
 	// 运维入口:-migrate-up 仅执行主数据库待处理迁移并退出,不启动 Casbin、任务调度、HTTP 或 SIP。
 	if migrateUpRequested(os.Args[1:]) {
 		if err := runMigrateUp(); err != nil {
@@ -50,10 +74,27 @@ func main() {
 	}
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
+	var admission *ginhelper.StandaloneAdmission
+	var setup *standaloneSetup
+	if app.DataPath != "" {
+		admission = ginhelper.NewStandaloneAdmission()
+		engine.Use(admission.Middleware())
+		var err error
+		setup, err = prepareStandaloneSetup(engine)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	// 初始化系统路由
 	routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
+	if admission != nil {
+		if err := runStandaloneServer(engine, admission, setup); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
 	// 启动服务器(阻塞直到收到退出信号)
@@ -63,13 +104,41 @@ func main() {
 
 }
 
-func migrateUpRequested(args []string) bool {
-	for _, arg := range args {
-		if arg == "-migrate-up" {
-			return true
-		}
+func runBootstrapDB() error {
+	if app.GormDbSQLite == nil {
+		return errors.New("-bootstrap-db requires sqlite")
 	}
-	return false
+	db := app.DB()
+	raw, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer raw.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := sqlitebootstrap.Initialize(ctx, db)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+// runDBCheck reports runtime settings only; it does not initialize application schema.
+func runDBCheck() error {
+	if app.GormDbSQLite == nil {
+		return errors.New("-db-check requires sqlite")
+	}
+	db := app.DB()
+	raw, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer raw.Close()
+	info, err := gormhelper.InspectSQLite(db)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(info)
 }
 
 type databaseIdentity struct {
@@ -103,17 +172,6 @@ func runMigrateUp() error {
 	return nil
 }
 
-func databaseIdentitySQL(dialect migration.Dialect) string {
-	switch dialect {
-	case migration.DialectPostgres:
-		return "SELECT current_database() AS database_name, version() AS database_version"
-	case migration.DialectSQLServer:
-		return "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS database_version"
-	default:
-		return "SELECT DATABASE() AS database_name, VERSION() AS database_version"
-	}
-}
-
 func appliedMigrationVersions(db *gorm.DB) ([]string, error) {
 	if !db.Migrator().HasTable("gb_schema_migrations") {
 		return nil, nil
@@ -121,30 +179,6 @@ func appliedMigrationVersions(db *gorm.DB) ([]string, error) {
 	var versions []string
 	err := db.Table("gb_schema_migrations").Order("version").Pluck("version", &versions).Error
 	return versions, err
-}
-
-func migrationDifference(before, after []string) []string {
-	existing := make(map[string]struct{}, len(before))
-	for _, version := range before {
-		existing[version] = struct{}{}
-	}
-	added := make([]string, 0)
-	for _, version := range after {
-		if _, ok := existing[version]; !ok {
-			added = append(added, version)
-		}
-	}
-	return added
-}
-
-// parseArgs 解析命令行参数,返回 -migrate-down 指定的迁移文件名(空串=正常启动)。
-func parseArgs(args []string) string {
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "-migrate-down=") {
-			return strings.TrimPrefix(arg, "-migrate-down=")
-		}
-	}
-	return ""
 }
 
 // runMigrateDown 对主数据库手动回滚单个迁移。
@@ -159,6 +193,9 @@ func runMigrateDown(downFile string) error {
 // primaryDB 返回主数据库连接与方言(优先级 MySQL > PostgreSQL > SQL Server,
 // 多库同时启用时 down 仅作用于主库)。
 func primaryDB() (*gorm.DB, migration.Dialect, error) {
+	if app.GormDbSQLite != nil {
+		return app.GormDbSQLite, migration.DialectSQLite, nil
+	}
 	if app.GormDbMysql != nil {
 		return app.GormDbMysql, migration.DialectMySQL, nil
 	}

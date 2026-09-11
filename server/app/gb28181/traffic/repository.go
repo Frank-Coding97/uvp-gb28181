@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -87,15 +88,35 @@ func (r *GormRepository) OpenGap(ctx context.Context, nodeID int64, reason strin
 	if r == nil || r.db == nil || nodeID == 0 || reason == "" || at.IsZero() {
 		return errors.New("invalid traffic gap")
 	}
-	var existing gbmodels.GbDeviceTrafficGap
-	query := r.db.WithContext(ctx).Where("node_id = ? AND reason = ? AND state = ?", nodeID, reason, "open").Limit(1).Find(&existing)
-	if query.Error != nil {
-		return query.Error
+	if !isSQLiteDialect(r.db) {
+		var existing gbmodels.GbDeviceTrafficGap
+		query := r.db.WithContext(ctx).Where("node_id = ? AND reason = ? AND state = ?", nodeID, reason, "open").Limit(1).Find(&existing)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected > 0 {
+			return nil
+		}
+		return r.db.WithContext(ctx).Create(&gbmodels.GbDeviceTrafficGap{NodeID: nodeID, Reason: reason, State: "open", StartedAt: at.UTC()}).Error
 	}
-	if query.RowsAffected > 0 {
-		return nil
-	}
-	return r.db.WithContext(ctx).Create(&gbmodels.GbDeviceTrafficGap{NodeID: nodeID, Reason: reason, State: "open", StartedAt: at.UTC()}).Error
+	// The open-gap predicate has no unique index because closed gaps are
+	// retained. Serialize the check and insert in SQLite's bounded write
+	// transaction so two processes cannot create duplicate open gaps.
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing gbmodels.GbDeviceTrafficGap
+		query := tx.Where("node_id = ? AND reason = ? AND state = ?", nodeID, reason, "open").Limit(1).Find(&existing)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected > 0 {
+			return nil
+		}
+		return tx.Create(&gbmodels.GbDeviceTrafficGap{NodeID: nodeID, Reason: reason, State: "open", StartedAt: at.UTC()}).Error
+	})
+}
+
+func isSQLiteDialect(db *gorm.DB) bool {
+	return db != nil && strings.EqualFold(db.Dialector.Name(), "sqlite")
 }
 
 func (r *GormRepository) CloseGap(ctx context.Context, nodeID int64, reason string, at time.Time) error {

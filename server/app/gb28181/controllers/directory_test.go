@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"

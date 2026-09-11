@@ -6,16 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 )
 
 func TestLoginLogQueryFiltersOrdersAndHidesUserAgentFromList(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
+	db := newSQLiteSystemTestDB(t)
 	created := time.Date(2026, 8, 18, 15, 0, 0, 0, time.Local)
 	require.NoError(t, db.Create([]models.SysLoginLog{
 		{Username: "alice", Result: LoginResultFailure, FailureReason: LoginFailurePasswordIncorrect, IP: "10.0.0.1", Location: "内网", UserAgent: "secret-ua-1", Browser: "Chrome", OS: "macOS", CreatedAt: created},

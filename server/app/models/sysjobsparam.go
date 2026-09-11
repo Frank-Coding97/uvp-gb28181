@@ -3,6 +3,7 @@ package models
 import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // SysJobsListRequest sys_jobs列表请求参数
@@ -30,8 +31,8 @@ func (r *SysJobsListRequest) Handle() func(db *gorm.DB) *gorm.DB {
 			db = db.Where("id = ?", *r.Id)
 		}
 		if r.Group != nil {
-			// 默认等于查询
-			db = db.Where("group = ?", *r.Group)
+			// group is a reserved keyword in SQLite; let GORM quote it per dialect.
+			db = db.Where(clause.Eq{Column: clause.Column{Name: "group"}, Value: *r.Group})
 		}
 		if r.Name != nil {
 			db = db.Where("name LIKE ?", "%"+*r.Name+"%")

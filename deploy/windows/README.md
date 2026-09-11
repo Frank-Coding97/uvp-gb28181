@@ -1,0 +1,302 @@
+# Windows P0 source and environment checks
+
+These tools prepare T01. They do not build a Windows package or certify P0.
+The task definitions and execution results live in Atlas.
+
+## Source verification (build machine)
+
+Requires Python 3.9+ and Git. Use independent, pristine source clones at the
+commits in `sources.lock.json`; initialize ZLM submodules at the pinned gitlinks.
+Build outputs must be outside those clones. The checker never downloads, resets,
+cleans or checks out anything. Even ignored files fail validation because local
+configuration or binaries must not silently become build inputs.
+
+```sh
+python3 deploy/windows/source_lock.py --lock deploy/windows/sources.lock.json \
+  --uvp /path/to/pristine/uvp --zlm /path/to/pristine/zlm \
+  --redis /path/to/pristine/redis
+python3 deploy/windows/source_lock_test.py
+```
+
+The lock pins candidate **source inputs**, not a qualified toolchain or product.
+Redis 7.2.16 is pinned to its official release commit; Cygwin/DLL versions and
+redistribution material still need T02 qualification. Updating a component
+requires updating its commit and complete recursive submodule list together.
+The success JSON deliberately includes `windows_runtime_verified: false`.
+
+## Environment inventory (native Windows)
+
+Build the small standalone probe on a machine with Go 1.25+:
+
+```sh
+cd deploy/windows/environment-probe
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o environment-probe.exe .
+go test ./...
+```
+
+Copy only the resulting EXE to the Windows machines. No Go/Python installation
+is needed on the runtime machine. It uses the built-in Windows PowerShell to
+read OS/CPU metadata, build-tool names on PATH and relevant running process
+names. It does not install software, start/stop processes or change services.
+
+```powershell
+.\environment-probe.exe -role build > build-environment.json
+.\environment-probe.exe -role runtime > runtime-environment.json
+```
+
+The runtime preflight rejects Windows hosts below build 19041, Windows 11, non-native-x64 hosts and detected
+build tools or existing running components. Passing is **inventory only**:
+software absent from PATH or not running can remain installed. T01-C still
+requires a known clean OS image. P0 additionally requires actual native component
+execution; the final package is tested later in T30. ARM64
+Windows running x64 emulation does not satisfy the native-x64 test requirement.
+Exit code 1 means blocked/failed, never a skip/pass. The probe has been executed through native Windows PowerShell 5.1 on Windows 10
+22H2: build inventory passed, and runtime inventory correctly rejected an
+existing development machine with running MySQL/Redis. This does not qualify
+that machine as a clean runtime environment.
+
+## Standalone path verification
+
+`server/cmd/standalone-path-probe/` is a small CGO-free Windows executable for T05. It
+accepts the explicit `UVP_INSTALL_DIR`, `UVP_CONFIG_DIR`, `UVP_RESOURCE_DIR`,
+`UVP_WEB_DIR`, `UVP_DATA_DIR`, and optional `UVP_RECORDINGS_DIR` inputs (the
+same values may be passed as `-uvp-*-dir` arguments). The package root is
+always supplied explicitly because the server binary lives below a versioned
+release directory.
+
+```sh
+cd server
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../release-output/t05/standalone-path-probe.exe ./cmd/standalone-path-probe
+```
+
+Run the resulting executable from another working directory after setting the
+six `UVP_*_DIR` variables above. It reports the current working directory and
+the resolved config/data/web/recordings paths as JSON; it rejects relative,
+UNC, escaped, missing, and non-writable roots without changing the working
+directory or selecting a hidden fallback. Native Win10 execution is required
+for T05 acceptance.
+
+Example on the target machine (the `D:` recordings root is optional and may
+be on another local drive):
+
+```powershell
+$env:UVP_INSTALL_DIR = 'C:\UVP-Windows'
+$env:UVP_CONFIG_DIR = 'C:\UVP-Windows\config'
+$env:UVP_RESOURCE_DIR = 'C:\UVP-Windows\resource'
+$env:UVP_WEB_DIR = 'C:\UVP-Windows\web'
+$env:UVP_DATA_DIR = 'C:\UVP-Windows\data'
+$env:UVP_RECORDINGS_DIR = 'D:\UVP Recordings 中文'
+Set-Location $env:TEMP
+& "$env:UVP_INSTALL_DIR\standalone-path-probe.exe"
+```
+
+### SQLite runtime check
+
+The standalone backend selects `gormv2.usedbtype: sqlite`; `data/uvp.db` is
+fixed by the explicit data directory. Enabling another database at the same
+time is rejected before a connection is opened. Outside standalone mode,
+SQLite requires an absolute `gormv2.sqlite.path`.
+
+`uvp-server.exe -db-check` opens the configured SQLite file, prints runtime
+settings as JSON, then closes it. It may create a new empty database, but does
+not initialize application tables, seed users, start HTTP/SIP, or register
+scheduled jobs. SQLite is pinned to 3.53.4 with WAL, FULL synchronous mode,
+foreign keys, a 5000 ms busy timeout, and one pooled connection. Ordinary write
+transactions reserve the writer at entry (`_txlock=immediate`); explicitly
+read-only transactions retain WAL read concurrency. Incremental migrations
+and normal business startup remain gated until T08 is complete.
+
+`test-db-check.ps1 -ServerExe <absolute-exe> -WorkRoot <new-directory>` checks
+this entry point on Windows with a Chinese/space path, repeated open, unknown
+dialect and conflicting MySQL configuration. Use an isolated temporary root.
+
+### SQLite first initialization
+
+`uvp-server.exe -bootstrap-db` applies the embedded, checksum-pinned SQLite
+release baseline and civil-code dataset in one immediate transaction. It emits
+`version`, `checksum`, and `created` as JSON and closes the database. Repeating
+it verifies the existing baseline marker without replaying seeds or changing
+user data. A non-empty database without the matching marker is rejected.
+Schema, seeds, and marker roll back together on failure; an uncertain rollback
+discards the connection. This command does not create an administrator or start
+HTTP, SIP, media, Redis, or scheduled jobs.
+
+`test-bootstrap-db.ps1 -ServerExe <absolute-exe> -WorkRoot <new-directory>`
+checks first and repeated initialization using the actual backend on Windows,
+including a Chinese/space/hash path and an unchanged database file checksum.
+The Go initialization tests separately cover user/device/role preservation and
+SQL, seed, cancellation, and marker failures.
+
+When using Windows Sandbox, put the test `WorkRoot` on its internal disk
+(for example `C:\uvp-local-tests\bootstrap-001`). Use WSB mapped folders only
+for copying binaries and result logs. A mapped folder reported NTFS and a local
+C: path by Win32 but faulted during SQLite WAL shared-memory access; the same
+backend and tests passed on the Sandbox internal disk. WSB shared storage is
+not a qualified SQLite data location.
+
+### First-install integration fixtures
+
+`prepare-installation-test.ps1` creates a new, isolated `t18-setup` release from
+explicit launcher/backend binaries, Redis/media directories and web/resource
+ZIP files. The web ZIP must contain `index.html` directly at its root and use
+UTF-8 entry names. Existing destinations are rejected. This helper is for test
+fixtures, not the final distribution builder.
+
+Build the native test executable from `server`:
+
+```sh
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c ./internal/standalone/launcher -o launcher-installation.test.exe
+```
+
+On Windows, set `UVP_T18_INSTALL_DIR` to a fresh fixture and run
+`-test.run=TestWindowsStandaloneT18InstallationHTTPFlow`. Setting
+`UVP_T18_SIP_IP` to a local non-loopback IPv4 address additionally exercises SIP
+activation on port 15070 and a third restart preserving completed setup.
+
+Use a different fresh fixture for `UVP_T18_BROWSER_INSTALL_DIR` and
+`-test.run=TestWindowsStandaloneT18InstallationBrowserFlow`. It requires installed
+Edge and uses a separate owned headless browser/profile. Credentials remain in
+memory and CDP navigation; they are never test arguments or output. This does
+not replace Explorer double-click or clean Windows Sandbox acceptance.
+
+## Instance firewall commands (T20 candidate)
+
+The Windows launcher has explicit firewall commands. Normal startup and stop do
+not request elevation or change firewall rules. From the package directory:
+
+```powershell
+.\UVP.exe firewall status
+Get-NetAdapter | Select-Object Name, InterfaceGuid
+.\UVP.exe firewall apply --interface-id <InterfaceGuid>
+.\UVP.exe firewall remove
+```
+
+`apply` prints the exact plan and asks for `yes` before Windows UAC. `remove`
+asks for confirmation and addresses only this installation's four rule names;
+it does not require the previous network adapter or SIP configuration to remain
+available. `--yes` explicitly accepts the printed plan, but does not bypass UAC.
+
+Rules permit only the configured SIP and media ports for the verified program
+paths, inbound on the selected Private interface from `LocalSubnet`. They do not
+expose the management backend or Redis. A Public interface is rejected; the
+command does not change network profiles. System-level automatic IP banning
+remains unsupported on Windows; application SIP protection remains active.
+
+The elevated child reloads the package and read-only SQLite configuration and
+compares a digest of the confirmed plan. Changes to the release, ports or
+interface cause failure. Existing rules with the same names but a different
+ownership group are preserved. A failed or partial operation is never reported
+as successful; inspect `status` before retrying. The JSON `converged` field
+indicates whether the owned rules match. An effective external Block rule makes
+`success` false even when owned rules converge; it is reported without changing
+the external rule. Incomplete diagnostics also fail explicitly.
+
+Use the package's trusted launcher for UAC. Manifest hashes check package
+consistency, not publisher identity. If the elevated account cannot read the
+installation, the command fails without widening its file permissions.
+
+Native rule application/removal, UAC cancellation and LAN traffic acceptance
+remain separate T20/T30 checks; passing unit tests or `status` is insufficient.
+
+## Stopped backup command (T24 candidate)
+
+The candidate launcher provides a maintenance command:
+
+```powershell
+.\UVP.exe backup --output 'D:\UVP Backups\before-upgrade-01' --recordings-dir 'G:\UVP 录像'
+```
+
+Use a new absolute destination outside the installation and recordings trees.
+Supply the same external recordings directory used for startup; omit the option
+only when recordings use the installation's default directory. Existing output
+is never overwritten. The command authenticates a normal stop if necessary,
+then acquires the installation lock before copying. It leaves the instance
+stopped. A competing owner, incomplete shutdown or open database handle causes
+failure.
+
+The backup includes configuration, authoritative data, SQLite companion files,
+Redis persistence and release references. SQLite integrity is checked on the
+copy. Only a fully verified backup receives `complete.json`; partial output is
+not a usable backup. The directory contains secrets and retains private access
+permissions. Video files remain at their original root, which is recorded in
+the manifest. This does not protect against loss of the recordings disk.
+
+Backup creation does not implement restore or upgrade. Never replace an active
+Redis directory with backup files or launch an older binary against a migrated
+database; those actions require the separate recovery workflow.
+
+## Upgrade and local recovery confirmation (T25/T26 candidate)
+
+These commands require a qualified launcher built with the SHA256 allowlist for
+both backend builds. The previously delivered `20260908-r2` trial launcher does
+not contain this workflow. A valid manifest alone does not qualify an arbitrary
+backend for offline maintenance.
+
+Keep the old release directory. Place the complete qualified candidate under
+`releases/<version>`, then run:
+
+```powershell
+.\UVP.exe upgrade --version '1.1.1' --backup 'D:\UVP Backups\upgrade-01' --recordings-dir 'G:\UVP 录像'
+```
+
+The command stops the instance, verifies a new backup, runs offline migration
+and checks, and verifies candidate components before changing `current.json`.
+Success leaves the instance stopped; double-click `UVP.exe` to start it. A
+failure requiring recovery retains a maintenance gate and blocks normal startup.
+Do not delete that gate or edit `current.json` to bypass it.
+
+For the interrupted upgrade recorded by this installation:
+
+```powershell
+.\UVP.exe restore --recordings-dir 'G:\UVP 录像'
+.\UVP.exe recovery-confirm --operation '<operation printed by restore>'
+```
+
+`restore` uses the verified backup bound to the pending operation; it is not an
+arbitrary backup-directory import command. It preserves the failed configuration
+and data, rebuilds Redis restrictions, revokes sessions, rotates short-term
+credentials, and restores the old version before entering local confirmation.
+
+Run `recovery-confirm` in a Windows console as the installation's Windows user.
+Review the backup time and reported historical authorization changes, enter the
+restored system administrator's username and password (without echo), and type
+the exact `CONFIRM <operation>` phrase. Password arguments, environment inputs
+and pipes are not supported. Unsupported authorization schemas, failed checks
+or cancellation retain the gate. Confirmation archives the entire gate and
+failed scene as `.uvp-recovered-<operation>`; it does not start services. Keep the
+archive private, then start `UVP.exe` normally after successful confirmation.
+
+The root `UVP.exe` is updated separately from versioned releases: first stop the
+instance with `UVP.exe --stop`, wait for the launcher console and its processes
+to exit, and only then replace the executable with the qualified launcher.
+Never overwrite a running launcher or remove its old release and backup.
+
+Normal Redis startup rejects a truncated AOF. Preserve the damaged files and
+use the verified recovery procedure; do not delete AOF files or initialize an
+empty database to make startup appear successful.
+
+## Abnormal exit recovery (T27 candidate)
+
+The qualified candidate blocks normal startup when it finds an intact marker
+from an unfinished run. Use its separately qualified abnormal recovery command:
+
+```powershell
+.\UVP.exe recover --snapshot 'D:\UVP Backups\abnormal-01' --recordings-dir 'G:\UVP 录像'
+.\UVP.exe recovery-confirm --operation '<operation printed by recover>'
+```
+
+The snapshot destination must be new and outside the installation and recordings
+trees. Use the actual recordings directory. Recovery preserves the abnormal
+scene, checks SQLite through an isolated copy, revokes sessions, rotates JWT and
+generation, and rebuilds Redis from audited restrictions. It keeps the current
+version selected and requires local administrator confirmation before reopening
+an initialized installation. An untouched first installation with no users,
+grants or sessions can instead receive a separate first-use receipt.
+
+The command leaves components stopped. After successful recovery and any required
+confirmation, start `UVP.exe` normally. An interrupted operation can be resumed
+with `recover` and the same recordings option, omitting `--snapshot`; it remains
+bound to the original snapshot. A published snapshot missing `complete.json`,
+corrupt source data or failed validation stays blocked and requires diagnosis.
+Preserve the snapshot, maintenance gate and recovered archive; do not delete the
+run marker to bypass recovery. This command is absent from the delivered r2 ZIP.

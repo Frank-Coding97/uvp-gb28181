@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
@@ -50,10 +50,14 @@ func newT14ManagementCore(t *testing.T) (*zlmManagementCoreRuntime, *gorm.DB) {
 	require.NoError(t, err)
 	require.NotZero(t, current.ID)
 	executor := gbzlmmanagement.NewNodeExecutor(reg, func(*node.Node) *zlm.Client { return nil })
+	runtime := gbzlmmanagement.NewRuntimeReader(executor)
+	overview := gbzlmmanagement.NewOverviewSampler(gbzlmmanagement.NewOverviewService(gbzlmmanagement.OverviewDependencies{Registry: reg, Runtime: runtime, Media: runtime}), nil)
+	t.Cleanup(overview.Close)
 	return &zlmManagementCoreRuntime{
 		registry: reg,
 		executor: executor,
-		runtime:  gbzlmmanagement.NewRuntimeReader(executor),
+		runtime:  runtime,
+		overview: overview,
 		ledger:   gbzlmrepo.NewManagedResourceRepo(db),
 		restart:  gbzlmsvc.NewRestartCoordinator(reg),
 	}, db

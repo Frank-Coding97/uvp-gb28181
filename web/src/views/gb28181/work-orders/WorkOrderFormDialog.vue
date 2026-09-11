@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type Component } from "vue";
+import { computed, ref, watch, type Component } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { AlertTriangle, CheckCircle2, FileText, Info, SlidersHorizontal, UserRound, Video } from "lucide-vue-next";
 import { createWorkOrder, listWorkOrderFormHistory, type WorkOrderFormHistoryEntry, type WorkOrderSnapshot, type WorkRecordingForm } from "@/api/gb28181-work-recording";
@@ -103,8 +103,6 @@ function orderIndex(key: string) {
 const fields = ref<Record<string, string>>({});
 /** 已选作业人员列表（下方以可删除 tag 展示）。 */
 const personnelList = ref<string[]>([]);
-/** 人员输入框的 v-model：搜索/输入人名用，选中或回车后即清空。 */
-const personnelFromHistory = ref("");
 const touched = ref(false);
 /** 单字段失焦后即校验，符合项目表单规则「校验走 blur」。 */
 const blurred = ref<Set<string>>(new Set());
@@ -126,7 +124,6 @@ function newRequestId() {
 function reset() {
     fields.value = Object.fromEntries(allFields.map(([key]) => [String(key), ""]));
     personnelList.value = [];
-    personnelFromHistory.value = "";
     touched.value = false;
     blurred.value = new Set();
     error.value = "";
@@ -242,31 +239,10 @@ async function loadFormHistory() {
 }
 
 /**
- * 把一个人名加入已选列表：去重、上限拦截、选完清空输入框。
- * 输入框只承担「搜索 + 选人」，不承载最终值——最终值在下方 tag 列表里。
+ * 作业人员下拉的候选来自历史值（录入后寄存），但历史为空时不能因此锁死录入：
+ * `a-select` 开启了 `allow-create`，用户可直接输入新人名回车添加，与「从历史选用」并行。
+ * 已选人员从候选里排除，避免重复选到同一个人。
  */
-function addPersonnel(name: string) {
-    const trimmed = name.trim();
-    void nextTick(() => {
-        personnelFromHistory.value = "";
-    });
-    if (!trimmed) return;
-    if (personnelList.value.includes(trimmed)) return;
-    if (personnelList.value.length >= workOrderPersonnelMax) return;
-    personnelList.value = [...personnelList.value, trimmed];
-}
-
-/** 回车把当前输入框内容当作一个新人员加入。 */
-function addManualPersonnel() {
-    addPersonnel(personnelFromHistory.value);
-}
-
-/** 点 tag 的叉号移除该人员。 */
-function removePersonnel(name: string) {
-    personnelList.value = personnelList.value.filter(n => n !== name);
-}
-
-/** 下拉选项排除已选人员，避免重复选到同一个人。 */
 const personnelOptions = computed(() =>
     (historyByField.value["workPersonnel"] || [])
         .map(entry => ({ value: entry.value, label: entry.value }))
@@ -334,9 +310,11 @@ watch(
                             v-if="key === 'workPersonnel'"
                             v-model="personnelList"
                             multiple
+                            allow-search
+                            allow-create
                             :options="personnelOptions"
                             :trigger-props="{ contentStyle: { maxHeight: '180px' }, updateAtScroll: true }"
-                            placeholder="选择作业人员（可多选）"
+                            placeholder="选择或输入作业人员，回车添加"
                             data-test="work-personnel-input"
                             @blur="markBlurred(String(key))"
                         />

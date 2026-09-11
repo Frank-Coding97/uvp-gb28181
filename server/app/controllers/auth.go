@@ -111,9 +111,17 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	// 如果启用了登录锁定功能
 	if loginLockThreshold > 0 {
+		if app.Cache == nil {
+			ac.failLoginCache(c, user, req.Username, errors.New("login cache is unavailable"))
+		}
+		cacheCtx := c.Request.Context()
 		// 检查账户是否被锁定
 		lockKey := "account_locked:" + req.Username
-		if locked, _ := app.Cache.Exists(context.Background(), lockKey); locked > 0 {
+		locked, cacheErr := app.Cache.Exists(cacheCtx, lockKey)
+		if cacheErr != nil {
+			ac.failLoginCache(c, user, req.Username, cacheErr)
+		}
+		if locked > 0 {
 			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 			ac.FailAndAbort(c, "账户已被锁定，请稍后再试", nil)
 			return
@@ -126,20 +134,31 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 			// 获取当前失败次数
 			var failCount int
-			if countStr, err := app.Cache.Get(context.Background(), failCountKey); err == nil && countStr != "" {
-				failCount, _ = strconv.Atoi(countStr)
+			countStr, err := app.Cache.Get(cacheCtx, failCountKey)
+			if err != nil && !errors.Is(err, app.ErrKeyNotFound) {
+				ac.failLoginCache(c, user, req.Username, err)
+			}
+			if err == nil && countStr != "" {
+				failCount, err = strconv.Atoi(countStr)
+				if err != nil || failCount < 0 {
+					ac.failLoginCache(c, user, req.Username, errors.New("invalid login failure count"))
+				}
 			}
 
 			// 增加失败次数
 			failCount++
 
 			// 更新失败次数，设置过期时间
-			app.Cache.Set(context.Background(), failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
+			if err := app.Cache.Set(cacheCtx, failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second); err != nil {
+				ac.failLoginCache(c, user, req.Username, err)
+			}
 
 			// 检查是否达到锁定阈值
 			if failCount >= loginLockThreshold {
 				// 锁定账户
-				app.Cache.Set(context.Background(), lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				if err := app.Cache.Set(cacheCtx, lockKey, "1", time.Duration(loginLockDuration)*time.Second); err != nil {
+					ac.failLoginCache(c, user, req.Username, err)
+				}
 				ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 				ac.FailAndAbort(c, "密码错误次数过多，账户已被锁定", nil)
 				return
@@ -154,7 +173,9 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 		// 密码正确，清除失败次数
 		failCountKey := "login_fail_count:" + req.Username
-		app.Cache.Del(context.Background(), failCountKey)
+		if err := app.Cache.Del(cacheCtx, failCountKey); err != nil {
+			ac.failLoginCache(c, user, req.Username, err)
+		}
 	} else {
 		// 未启用登录锁定功能，使用原有逻辑
 		// 验证密码
@@ -197,6 +218,14 @@ func (ac *AuthController) Login(c *gin.Context) {
 		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": claims1.ExpiresAt.Unix(),
 	})
+}
+
+func (ac *AuthController) failLoginCache(c *gin.Context, user *models.User, username string, err error) {
+	if err == nil {
+		err = errors.New("login cache is unavailable")
+	}
+	ac.recordLogin(c, user, username, service.LoginResultFailure, service.LoginFailureServerError)
+	ac.FailAndAbort(c, "登录限制服务不可用", err, http.StatusServiceUnavailable)
 }
 
 func (ac *AuthController) recordLogin(c *gin.Context, user *models.User, username, result, reason string) {

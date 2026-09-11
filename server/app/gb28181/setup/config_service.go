@@ -18,6 +18,10 @@ type SaveSIPConfigRequest struct {
 	Domain              string
 	ServerID            string
 	Password            *string
+	// Media hosts are consumed only by the standalone first-install transaction.
+	// The regular SIP configuration service deliberately does not persist them.
+	MediaReceiveHost  string
+	MediaPlaybackHost string
 }
 
 // SIPConfigView 平台内部展示用视图.

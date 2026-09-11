@@ -2,7 +2,11 @@ package models
 
 import (
 	"context"
+	"strings"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -59,32 +63,73 @@ type GbChannelList []*GbChannel
 
 // UpsertChannel 按 device_id+channel_id 唯一键 upsert
 func UpsertChannel(c context.Context, ch *GbChannel) error {
-	var existing GbChannel
-	result := app.DB().WithContext(c).
-		Where("device_id = ? AND channel_id = ?", ch.DeviceID, ch.ChannelID).
-		Limit(1).Find(&existing)
+	return upsertChannel(c, app.DB(), ch)
+}
+
+func isSQLiteDialect(db *gorm.DB) bool {
+	return db != nil && strings.EqualFold(db.Dialector.Name(), "sqlite")
+}
+
+// upsertChannel uses the published device/channel unique index as the
+// conflict arbiter. Keeping the database argument injectable lets callers
+// that already own a transaction or an isolated SQLite file use the same
+// semantics as the legacy global entry point.
+func upsertChannel(c context.Context, db *gorm.DB, ch *GbChannel) error {
+	if db == nil || ch == nil {
+		return gorm.ErrInvalidDB
+	}
+	if !isSQLiteDialect(db) {
+		var existing GbChannel
+		result := db.WithContext(c).
+			Where("device_id = ? AND channel_id = ?", ch.DeviceID, ch.ChannelID).
+			Limit(1).Find(&existing)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return db.WithContext(c).Create(ch).Error
+		}
+		ch.ID = existing.ID
+		updates := map[string]any{
+			"name":          ch.Name,
+			"manufacturer":  ch.Manufacturer,
+			"model":         ch.Model,
+			"owner":         ch.Owner,
+			"civil_code":    ch.CivilCode,
+			"parent_id":     ch.ParentID,
+			"ptz_type":      ch.PTZType,
+			"longitude":     ch.Longitude,
+			"latitude":      ch.Latitude,
+			"status":        ch.Status,
+			"capabilities":  ch.Capabilities,
+			"owner_dept_id": ch.OwnerDeptID,
+		}
+		return db.WithContext(c).Model(&GbChannel{}).Where("id = ?", existing.ID).Updates(updates).Error
+	}
+	row := *ch
+	row.ID = 0
+	result := db.WithContext(c).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "device_id"}, {Name: "channel_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"name", "manufacturer", "model", "owner", "civil_code", "parent_id",
+			"ptz_type", "longitude", "latitude", "status", "capabilities",
+			"owner_dept_id", "updated_at",
+		}),
+	}).Create(&row)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	var stored GbChannel
+	result = db.WithContext(c).Where("device_id = ? AND channel_id = ?", ch.DeviceID, ch.ChannelID).Limit(1).Find(&stored)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return app.DB().WithContext(c).Create(ch).Error
+		return gorm.ErrRecordNotFound
 	}
-	ch.ID = existing.ID
-	updates := map[string]any{
-		"name":          ch.Name,
-		"manufacturer":  ch.Manufacturer,
-		"model":         ch.Model,
-		"owner":         ch.Owner,
-		"civil_code":    ch.CivilCode,
-		"parent_id":     ch.ParentID,
-		"ptz_type":      ch.PTZType,
-		"longitude":     ch.Longitude,
-		"latitude":      ch.Latitude,
-		"status":        ch.Status,
-		"capabilities":  ch.Capabilities,
-		"owner_dept_id": ch.OwnerDeptID,
-	}
-	return app.DB().WithContext(c).Model(&GbChannel{}).Where("id = ?", existing.ID).Updates(updates).Error
+	ch.ID = stored.ID
+	return nil
 }
 
 // ListChannelsByDevice 列出某设备的所有通道

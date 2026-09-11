@@ -109,12 +109,12 @@ func (r *Repository) OpenGap(ctx context.Context, planID *uint64, channelID uint
 	var gap models.GbRecordingPlanGap
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("channel_id = ? AND ended_at IS NULL", channelID).Order("id DESC").First(&gap)
-		if result.Error == nil {
-			return nil
-		}
-		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			Where("channel_id = ? AND ended_at IS NULL", channelID).Order("id DESC").Limit(1).Find(&gap)
+		if result.Error != nil {
 			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			return nil
 		}
 		gap = models.GbRecordingPlanGap{
 			PlanID: planID, ChannelID: channelID, StartedAt: startedAt,
@@ -129,12 +129,12 @@ func (r *Repository) CloseOpenGap(ctx context.Context, channelID uint, endedAt t
 	var gap models.GbRecordingPlanGap
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("channel_id = ? AND ended_at IS NULL", channelID).Order("id DESC").First(&gap)
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil
-		}
+			Where("channel_id = ? AND ended_at IS NULL", channelID).Order("id DESC").Limit(1).Find(&gap)
 		if result.Error != nil {
 			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
 		}
 		duration := endedAt.Sub(gap.StartedAt).Milliseconds()
 		if duration < 0 {

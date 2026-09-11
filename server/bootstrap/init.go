@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/casbinhelper"
@@ -26,7 +26,12 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
+	"uvplatform.cn/uvp-gb28181/internal/standalone"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/installation"
 )
+
+var standalonePaths standalone.Paths
 
 func init() {
 	// 检查必要的文件夹是否存在
@@ -36,24 +41,54 @@ func init() {
 		log.Println("警告: 加载版本信息失败:", err)
 	}
 	// 配置文件
-	app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
-	app.ConfigYml.ConfigFileChangeListen(func() {
-		//配置文件发生变化
-	})
+	if standalonePaths.Explicit {
+		// Database-only maintenance commands do not start authenticated services.
+		// Every business startup must validate secrets and Windows permissions,
+		// including when the backend is invoked directly without the launcher.
+		if !migrationCommandRequested() || admittedMaintenance != nil {
+			if _, err := standalone.LoadConfig(standalonePaths); err != nil {
+				log.Fatal("standalone configuration invalid: " + err.Error())
+			}
+		}
+		app.ConfigYml = ymlconfig.CreateYamlFactoryFromFile(standalonePaths.ConfigFile)
+		normalizeStandaloneConfigPaths()
+		if app.ConfigYml.GetBool("server.appdebug") {
+			log.Fatal("standalone configuration invalid: server.appdebug must be false")
+		}
+
+	} else {
+		app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
+	}
+	// 运维命令只打开配置和数据库，不启动日志工作线程或业务组件。
+	if migrationCommandRequested() {
+		app.ZapLog = zap.NewNop()
+		initDB()
+		return
+	}
+	if standalonePaths.Explicit {
+		app.ConfigYml.ConfigFileChangeListen(normalizeStandaloneConfigPaths)
+	} else {
+		app.ConfigYml.ConfigFileChangeListen(func() {
+			//配置文件发生变化
+		})
+	}
 	// 日志
 	app.ZapLog = createZapFactory(service.ZapLogHandler)
 	// 初始化数据库
 	initDB()
 
-	// -migrate-up / -migrate-down=<文件名> 是纯运维入口:只完成配置+DB 初始化,
-	// 不执行 Up/业务初始化(main 解析参数后直接走 Down)。
-	// 否则迁移失败时回滚命令会先重试同一失败的 Up 并 log.Fatal,永远到不了 Down
-	if migrationCommandRequested() {
-		return
+	if app.GormDbSQLite != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		_, err := sqlitebootstrap.Initialize(ctx, app.GormDbSQLite)
+		cancel()
+		if err != nil {
+			log.Fatal("SQLite initialization failed: " + err.Error())
+		}
 	}
 
 	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
 	if err := migration.RunMigrations(map[string]*gorm.DB{
+		"sqlite":     app.GormDbSQLite,
 		"mysql":      app.GormDbMysql,
 		"sqlserver":  app.GormDbSqlserver,
 		"postgresql": app.GormDbPostgreSql,
@@ -62,6 +97,18 @@ func init() {
 	}
 
 	// 初始化casbin
+	if standalonePaths.Explicit {
+		state, err := installation.NewStore(app.DB()).State(context.Background())
+		if err != nil {
+			log.Fatal("standalone installation state is invalid")
+		}
+		if state.Phase != installation.PhaseComplete {
+			// This first-install process reloads the committed administrator policy
+			// explicitly before allowing login. Keep the periodic loader out of that
+			// transition; normal configured reload resumes on the next full startup.
+			app.ConfigYml.Set("casbin.autoloadpolicyseconds", 0)
+		}
+	}
 	app.CasbinV2 = casbinhelper.NewCasbinHelper()
 	err := app.CasbinV2.InitCasbin(app.DB(), app.ConfigYml.GetString("casbin.modelconfig"))
 	if err != nil {
@@ -81,17 +128,11 @@ func init() {
 	// 初始化文件上传服务
 	app.UploadService = newUploadService()
 
-	// 初始化任务调度器
-	app.JobScheduler = newScheduler()
-
-	// 注册所有执行器
-	scheduler.RegisterExecutors()
-	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
-		log.Fatal("注册系统任务失败: " + err.Error())
+	// Legacy startup starts runtime jobs here. Explicit standalone startup
+	// waits for the installation phase to complete and is started by root.
+	if err := startLegacyRuntimeJobs(); err != nil {
+		log.Fatal("初始化运行时任务失败: " + err.Error())
 	}
-
-	// 从数据库加载启用的任务到调度器及任务结果处理器
-	scheduler.LoadJobsFromDB()
 
 	// 初始化Response
 	app.Response = response.NewResponseHandler()
@@ -99,6 +140,31 @@ func init() {
 
 // 初始化数据库
 func initDB() {
+	primary := app.ConfigYml.GetString("gormv2.usedbtype")
+	enabled := map[string]bool{
+		"sqlite":     primary == "sqlite",
+		"mysql":      app.ConfigYml.GetInt("gormv2.mysql.isinitglobalgormmysql") == 1,
+		"sqlserver":  app.ConfigYml.GetInt("gormv2.sqlserver.isinitglobalgormsqlserver") == 1,
+		"postgresql": app.ConfigYml.GetInt("gormv2.postgresql.isinitglobalgormpostgresql") == 1,
+	}
+	if err := app.ValidateDatabaseSelection(primary, enabled, standalonePaths.Explicit); err != nil {
+		log.Fatal("数据库配置无效: " + err.Error())
+	}
+	if enabled["sqlite"] {
+		path := app.ConfigYml.GetString("gormv2.sqlite.path")
+		if standalonePaths.Explicit {
+			if path != "" && filepath.Clean(path) != standalonePaths.DatabasePath {
+				log.Fatal("gormv2.sqlite.path conflicts with standalone data directory")
+			}
+			path = standalonePaths.DatabasePath
+		}
+		db, err := gormhelper.NewSQLiteClient(path)
+		if err != nil {
+			log.Fatal("SQLite initialization failed: " + err.Error())
+		}
+		app.GormDbSQLite = db
+		return
+	}
 	// mysql
 	if app.ConfigYml.GetInt("gormv2.mysql.isinitglobalgormmysql") == 1 {
 		if dbMysql, err := gormhelper.GetOneMysqlClient(); err != nil {
@@ -127,6 +193,33 @@ func initDB() {
 
 // 检查必要的文件夹是否存在
 func checkRequiredFolders() {
+	paths, err := standalone.ResolveStartupPaths(os.Args[1:], os.Getenv)
+	if err != nil {
+		log.Fatal("单机路径参数无效: " + err.Error())
+	}
+	if paths.Explicit {
+		// Direct backend execution must obey the same maintenance gate as the
+		// launcher, before even path write probes or database-only commands.
+		if err := authorizeMaintenanceStartup(paths); err != nil {
+			log.Fatal(err)
+		}
+		if err := paths.Validate(); err != nil {
+			log.Fatal("单机路径不可用: " + err.Error())
+		}
+		standalonePaths = paths
+		app.BasePath = paths.InstallDir
+		app.ConfigPath = paths.ConfigDir
+		app.ResourcePath = paths.ResourceDir
+		app.WebPath = paths.WebDir
+		app.DataPath = paths.DataDir
+		app.UploadPath = paths.UploadDir
+		app.RecordingsPath = paths.RecordingsDir
+		app.LogsPath = paths.LogsDir
+		app.SchedulerLogPath = paths.SchedulerLogDir
+		log.Println("单机显式路径根目录:", app.BasePath)
+		return
+	}
+
 	// 初始化程序根目录
 	if path, err := os.Getwd(); err == nil {
 		// 路径进行处理，兼容单元测试程序程序启动时的奇怪路径
@@ -135,6 +228,8 @@ func checkRequiredFolders() {
 		} else {
 			app.BasePath = path
 		}
+		app.ConfigPath = app.BasePath + "/config"
+		app.ResourcePath = app.BasePath + "/resource"
 		log.Println("当前项目根目录:", app.BasePath)
 	} else {
 		log.Fatal("获取当前目录失败")
@@ -143,6 +238,20 @@ func checkRequiredFolders() {
 	if _, err := os.Stat(app.BasePath + consts.ConfigFilePath); err != nil {
 		log.Fatal(consts.ConfigFilePath + " not exists: " + err.Error())
 	}
+}
+
+// normalizeStandaloneConfigPaths resolves the path-valued legacy YAML keys
+// before any service reads them. In legacy mode these keys intentionally keep
+// their existing relative behavior.
+func normalizeStandaloneConfigPaths() {
+	// The standalone package owns these roots. Keep uploads under data and
+	// expose only the resource public directory through the legacy static root;
+	// T17 will add the dedicated upload mapping. Do not publish DataPath or use
+	// the versioned WebPath as this old static root.
+	app.ConfigYml.Set("upload.local_path", app.UploadPath)
+	app.ConfigYml.Set("httpserver.serverroot", filepath.Join(app.ResourcePath, "public"))
+	app.ConfigYml.Set("logs.zaplogname", filepath.Join(app.LogsPath, "server.log"))
+	app.ConfigYml.Set("scheduler.log.dir", app.SchedulerLogPath)
 }
 
 // createZapFactory 创建zap日志工厂
@@ -179,6 +288,9 @@ func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
 	}
 	// 写入器
 	fileName := app.BasePath + app.ConfigYml.GetString("logs.zaplogname")
+	if standalonePaths.Explicit {
+		fileName = app.ConfigYml.GetString("logs.zaplogname")
+	}
 	lumberJackLogger := &lumberjack.Logger{
 		Filename:   fileName,                                //日志文件的位置
 		MaxSize:    app.ConfigYml.GetInt("logs.maxsize"),    //在进行切割之前，日志文件的最大大小（以MB为单位）
@@ -274,7 +386,7 @@ func cyanCallerEncoder(c zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder)
 
 // newCache 初始化缓存
 func newCache() app.CacheInterf {
-	cacheType := app.ConfigYml.GetString("server.cachetype")
+	cacheType := strings.ToLower(strings.TrimSpace(app.ConfigYml.GetString("server.cachetype")))
 	if cacheType == "redis" {
 		redisHelper, err := cachehelper.NewRedisHelper(
 			app.ConfigYml.GetString("redis.host")+":"+app.ConfigYml.GetString("redis.port"),
@@ -286,6 +398,9 @@ func newCache() app.CacheInterf {
 		}
 
 		return redisHelper
+	}
+	if standalonePaths.Explicit || strings.EqualFold(strings.TrimSpace(app.ConfigYml.GetString("gormv2.usedbtype")), "sqlite") {
+		panic("SQLite or standalone mode requires Redis cache; memory cache is not supported")
 	}
 	return cachehelper.NewMemoryHelper()
 }
@@ -317,6 +432,9 @@ func newUploadService() app.FileUploadService {
 // newScheduler 初始化任务调度器
 func newScheduler() app.JobSchedulerInterf {
 	logDir := app.BasePath + app.ConfigYml.GetString("scheduler.log.dir")
+	if standalonePaths.Explicit {
+		logDir = app.ConfigYml.GetString("scheduler.log.dir")
+	}
 
 	// 解析日志级别
 	levelStr := app.ConfigYml.GetString("scheduler.log.level")
@@ -356,8 +474,11 @@ func newScheduler() app.JobSchedulerInterf {
 // migrationCommandRequested 判断启动参数是否请求纯迁移运维入口。
 // 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
 func migrationCommandRequested() bool {
+	if admittedMaintenance != nil {
+		return true
+	}
 	for _, arg := range os.Args {
-		if arg == "-migrate-up" {
+		if arg == "-migrate-up" || arg == "-db-check" || arg == "-bootstrap-db" {
 			return true
 		}
 		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {

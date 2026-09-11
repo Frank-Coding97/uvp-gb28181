@@ -37,6 +37,21 @@ func NewSysAffixController() *SysAffixController {
 	}
 }
 
+func (ac *SysAffixController) getScopedAffix(c *gin.Context, id uint) *models.SysAffix {
+	affix := models.NewSysAffix()
+	query := app.DB().WithContext(c).
+		Scopes(datascope.GetDataScope(c)).
+		Where("id = ?", id).
+		First(affix)
+	if query.Error != nil {
+		ac.FailAndAbort(c, "文件不存在", query.Error)
+	}
+	if query.RowsAffected == 0 || affix.ID == 0 {
+		ac.FailAndAbort(c, "文件不存在", gorm.ErrRecordNotFound)
+	}
+	return affix
+}
+
 // Upload 上传文件
 // @Summary 上传文件
 // @Description 上传文件并保存记录，支持生成缩略图
@@ -155,10 +170,7 @@ func (ac *SysAffixController) Delete(c *gin.Context) {
 	}
 
 	// 查找文件记录
-	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, req.ID); err != nil {
-		ac.FailAndAbort(c, "文件不存在", err)
-	}
+	affix := ac.getScopedAffix(c, req.ID)
 
 	// 删除物理文件
 	if err := app.UploadService.DeleteFile(affix.Path); err != nil {
@@ -202,10 +214,7 @@ func (ac *SysAffixController) UpdateName(c *gin.Context) {
 	}
 
 	// 查找文件记录
-	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, req.ID); err != nil {
-		ac.FailAndAbort(c, "文件不存在", err)
-	}
+	affix := ac.getScopedAffix(c, req.ID)
 
 	// 更新文件名
 	affix.Name = req.Name
@@ -291,10 +300,7 @@ func (ac *SysAffixController) GetByID(c *gin.Context) {
 	}
 
 	// 查找文件记录
-	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, uint(id)); err != nil {
-		ac.FailAndAbort(c, "文件不存在", err)
-	}
+	affix := ac.getScopedAffix(c, uint(id))
 
 	// 返回成功响应
 	ac.Success(c, gin.H{
@@ -328,10 +334,7 @@ func (ac *SysAffixController) Download(c *gin.Context) {
 	}
 
 	// 查找文件记录
-	affix := models.NewSysAffix()
-	if err := affix.GetByID(c, uint(id)); err != nil {
-		ac.FailAndAbort(c, "文件不存在", err)
-	}
+	affix := ac.getScopedAffix(c, uint(id))
 
 	// 从URL中提取文件路径
 	// 注意：这里需要根据实际的上传方式（本地或七牛云）来处理文件下载

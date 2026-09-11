@@ -58,7 +58,9 @@ func Build(playbackHost string, cfg node.ServerConfig, app, stream string) URLs 
 			urls.HTTPSTS = stringPtr("http://" + base + "/" + path + ".live.ts")
 		}
 		query := url.Values{"app": {app}, "stream": {stream}, "type": {"play"}}
-		urls.WebRTC = stringPtr(fmt.Sprintf("http://%s/index/api/webrtc?%s", base, query.Encode()))
+		if !cfg.RTCTransportKnown || cfg.RTCTransportEnabled {
+			urls.WebRTC = stringPtr(fmt.Sprintf("http://%s/index/api/webrtc?%s", base, query.Encode()))
+		}
 	}
 	if cfg.HTTPSPort > 0 {
 		base := fmt.Sprintf("%s:%d", playbackHost, cfg.HTTPSPort)
@@ -76,7 +78,9 @@ func Build(playbackHost string, cfg node.ServerConfig, app, stream string) URLs 
 			urls.HTTPSSTS = stringPtr("https://" + base + "/" + path + ".live.ts")
 		}
 		query := url.Values{"app": {app}, "stream": {stream}, "type": {"play"}}
-		urls.WebRTCS = stringPtr(fmt.Sprintf("https://%s/index/api/webrtc?%s", base, query.Encode()))
+		if !cfg.RTCTransportKnown || cfg.RTCTransportEnabled {
+			urls.WebRTCS = stringPtr(fmt.Sprintf("https://%s/index/api/webrtc?%s", base, query.Encode()))
+		}
 	}
 	if cfg.RTMPPort > 0 && cfg.RTMPEnabled {
 		urls.RTMP = stringPtr(fmt.Sprintf("rtmp://%s:%d/%s/%s", playbackHost, cfg.RTMPPort, escapedApp, escapedStream))

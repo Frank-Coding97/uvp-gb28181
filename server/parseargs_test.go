@@ -33,6 +33,8 @@ func TestDatabaseIdentitySQLSupportsConfiguredDialects(t *testing.T) {
 	require.Contains(t, databaseIdentitySQL(migration.DialectMySQL), "DATABASE()")
 	require.Contains(t, databaseIdentitySQL(migration.DialectPostgres), "current_database()")
 	require.Contains(t, databaseIdentitySQL(migration.DialectSQLServer), "DB_NAME()")
+	require.Contains(t, databaseIdentitySQL(migration.DialectSQLite), "sqlite_version()")
+	require.Empty(t, databaseIdentitySQL(migration.DialectUnknown))
 }
 
 func TestMigrationDifference(t *testing.T) {

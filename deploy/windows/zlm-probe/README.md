@@ -1,0 +1,72 @@
+# Windows ZLMediaKit 原生契约 probe
+
+这个独立模块用于 T04 和 T17 媒体边界的 Windows 原生验证。它要求一个完整的
+`MediaServer.exe` 运行目录，先复制整个目录到系统临时目录下带有中文和空格的
+隔离路径，再生成只绑定 `127.0.0.1` 的临时配置和 HTTP 端口，最后启动、检查和
+停止它自己的进程。不会安装服务，也不会按进程名停止已有的 ZLMediaKit。
+
+构建与单测：
+
+```sh
+go test ./...
+go vet ./...
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o zlm-probe.exe .
+```
+
+在目标 Windows 10 x64 环境中运行：
+
+```powershell
+.\zlm-probe.exe `
+  -root 'D:\UVP\media' `
+  -exe 'D:\UVP\media\MediaServer.exe' `
+  -fixture 'D:\UVP\input\zlm-fixture.mp4' `
+  -expected-commit '318726bd94f168d988fb2127042e74b4be207fd7'
+```
+
+只验证服务端 keepalive Hook 的原生状态机时，使用独立的
+`-keepalive-probe` 选项（它不能与 `-shutdown-probe` 同时使用）：
+
+```powershell
+.\zlm-probe.exe -root 'D:\UVP\media' -keepalive-probe
+```
+
+该模式先以 `hook.enable=1` 且空的 `on_server_keepalive` 启动并等待静默窗口，再通过认证的
+`setServerConfig` 热启用并等待真实回调；随后以 `hook.enable=0` 清空配置确认不再回调，
+再切换到新的 Hook URL 代次并确认恢复。它还热改 `alive_interval`，并执行一次无关配置
+reload，检查心跳继续且没有重复 timer。探针复用同一份隔离资源复制和受控 Hook receiver，
+标准输出只包含脱敏 JSON，并在进程退出后检查隔离日志中是否出现实际运行时 credential
+或 capability 值。这个探针只验证 Windows 原生运行时行为，不代替 C++ 修复或完整业务验收。
+
+探针覆盖：
+
+- 完整资源树复制、可执行文件哈希、中文/空格路径和第二次启动；
+- `getApiList`、`getServerConfig` 与构建版本前缀；
+- `openRtpServer`、`listRtpServer`、`closeRtpServer` 的真实生命周期；
+- MP4 加载后的 HTTP-FMP4 播放者、`getMediaPlayerList`、
+  `getMediaTrafficStatistic` 和 `addProbe`；
+- 真实 WebSocket-FMP4：缺失/错误播放 token 被 Hook 拒绝，合法连接持续收到至少两秒
+  MP4 数据，关闭后播放者计数有界恢复，媒体 URL 不含管理 secret；
+- 中文/空格目录下的 `startRecord`、`isRecording`、`stopRecord` 及非空 MP4
+  文件；
+- 无 Cookie 重放的错误 secret 拒绝，响应码必须为 ZLMediaKit 的 `-100`。
+
+标准输出只写不含 secret 的 JSON。ZLMediaKit stdout/stderr 仅写入隔离目录的
+`probe-stdout.log` 和 `probe-stderr.log`；默认运行结束后删除临时目录，排查失败时
+可使用 `-keep-temp` 保留它。
+
+Hook 回调使用探针自身的受控 HTTP receiver，按真实节点 secret 派生每个事件的
+capability，并验证实际 ZLMediaKit POST 的方法、JSON、node/cap、mediaServerId、
+hook_index、事件字段和 `X-VHOST`。它会实际覆盖 server started/keepalive、RTSP
+publish、RTP timeout，以及提供 fixture 时的 stream changed/play/flow/record/
+stream-not-found。播放和推流 token 只是探针 fixture token，不是 UVP 生产授权；这
+一项不等同于完整 UVP 业务验收。`on_stream_none_reader` 若当前 ZLM 媒体源未触发会
+明确列为 `not_executed`。没有提供 `-fixture` 时媒体和相关 Hook 用例同样标记为
+`not_executed`。
+
+测试 fixture 可由 FFmpeg 生成（FFmpeg 只是测试输入工具，不属于 Windows 运行依赖）：
+
+```sh
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=320x240:rate=15 \
+  -t 8 -c:v libx264 -pix_fmt yuv420p -g 15 -movflags +faststart -an -n \
+  /tmp/uvp-zlm-p0-fixture.mp4
+```

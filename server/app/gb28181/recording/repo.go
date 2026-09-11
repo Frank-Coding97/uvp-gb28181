@@ -24,24 +24,30 @@ func NewGormRepo(db *gorm.DB) *GormRepo {
 
 func (r *GormRepo) GetChannel(ctx context.Context, channelID uint) (*models.GbChannel, error) {
 	var channel models.GbChannel
-	result := r.db.WithContext(ctx).First(&channel, channelID)
+	result := r.db.WithContext(ctx).Where("id = ?", channelID).Limit(1).Find(&channel)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrChannelNotFound
 	}
 	if result.Error != nil {
 		return nil, result.Error
 	}
+	if result.RowsAffected == 0 {
+		return nil, ErrChannelNotFound
+	}
 	return &channel, nil
 }
 
 func (r *GormRepo) FindChannelByStream(ctx context.Context, streamID string) (*models.GbChannel, error) {
 	var channel models.GbChannel
-	result := r.db.WithContext(ctx).Where("stream_id = ?", streamID).First(&channel)
+	result := r.db.WithContext(ctx).Where("stream_id = ?", streamID).Limit(1).Find(&channel)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &channel, nil
 }
@@ -109,6 +115,9 @@ func (r *GormRepo) UpsertSession(ctx context.Context, session *models.GbRecordin
 	if err != nil {
 		return err
 	}
+	if stored == nil {
+		return errors.New("recording session missing after upsert")
+	}
 	*session = *stored
 	return nil
 }
@@ -117,24 +126,30 @@ func (r *GormRepo) FindSessionByMedia(ctx context.Context, nodeID int64, vhost, 
 	var session models.GbRecordingSession
 	result := r.db.WithContext(ctx).
 		Where("node_id = ? AND vhost = ? AND app = ? AND stream = ?", nodeID, vhost, appName, stream).
-		First(&session)
+		Limit(1).Find(&session)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &session, nil
 }
 
 func (r *GormRepo) FindSessionByID(ctx context.Context, sessionID uint64) (*models.GbRecordingSession, error) {
 	var session models.GbRecordingSession
-	result := r.db.WithContext(ctx).First(&session, sessionID)
+	result := r.db.WithContext(ctx).Where("id = ?", sessionID).Limit(1).Find(&session)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &session, nil
 }
@@ -144,12 +159,15 @@ func (r *GormRepo) FindLatestSessionByChannel(ctx context.Context, channelID uin
 	result := r.db.WithContext(ctx).
 		Where("channel_id = ?", channelID).
 		Order("id DESC").
-		First(&session)
+		Limit(1).Find(&session)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &session, nil
 }

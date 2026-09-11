@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlserver"
@@ -14,12 +15,15 @@ const (
 	DialectMySQL     Dialect = "mysql"
 	DialectPostgres  Dialect = "postgres"
 	DialectSQLServer Dialect = "sqlserver"
+	DialectSQLite    Dialect = "sqlite"
 	DialectUnknown   Dialect = ""
 )
 
 // DialectOf 从 GORM dialector 判定数据库方言,未知方言返回 DialectUnknown。
 func DialectOf(d gorm.Dialector) Dialect {
 	switch d.(type) {
+	case *sqlite.Dialector, sqlite.Dialector:
+		return DialectSQLite
 	case *mysql.Dialector, mysql.Dialector:
 		return DialectMySQL
 	case *postgres.Dialector, postgres.Dialector:

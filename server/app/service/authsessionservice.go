@@ -200,12 +200,16 @@ func (s *AuthSessionService) RevokeAllForUserTx(tx *gorm.DB, userID uint, reason
 		return fmt.Errorf("%w: invalid user session transaction", ErrSessionStore)
 	}
 	now := s.now()
-	return tx.Model(&models.SysUserSession{}).
+	result := tx.Model(&models.SysUserSession{}).
 		Where("user_id = ? AND revoked_at IS NULL", userID).
 		Updates(map[string]any{
 			"revoked_at": now, "revoke_reason": reason,
 			"refresh_token_hash": nil, "refresh_jti": nil, "updated_at": now,
-		}).Error
+		})
+	if result.Error != nil {
+		return fmt.Errorf("%w: revoke all sessions: %v", ErrSessionStore, result.Error)
+	}
+	return nil
 }
 
 // CleanupTerminal removes revoked or naturally expired sessions older than the cutoff.

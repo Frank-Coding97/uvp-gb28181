@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 )
@@ -57,7 +57,7 @@ func TestPlatformConfigUpdateUsesRevisionCASAndPlatformScope(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, updated.ConfigRevision)
 	require.Equal(t, "198.51.100.10", updated.Host)
-	require.Equal(t, registeredAt, *updated.RegisterAt, "configuration CAS must not overwrite runtime facts")
+	require.True(t, registeredAt.Equal(*updated.RegisterAt), "configuration CAS must not overwrite runtime facts")
 
 	platformA.Host = "203.0.113.20"
 	_, err = repo.UpdatePlatformConfig(ctx, platformA, 1)

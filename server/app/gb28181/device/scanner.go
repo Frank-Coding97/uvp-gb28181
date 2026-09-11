@@ -72,13 +72,21 @@ func (s *OfflineScanner) scanOnce() {
 		return
 	}
 	for _, d := range stale {
-		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
-			app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
-			continue
-		}
-		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
-		app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
+		s.processStale(ctx, d)
 	}
+}
+
+func (s *OfflineScanner) processStale(ctx context.Context, d *gbmodels.GbDevice) {
+	changed, err := gbmodels.MarkOfflineIfStale(ctx, d.DeviceID, s.timeoutCount, s.grace)
+	if err != nil {
+		app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
+		return
+	}
+	if !changed {
+		return
+	}
+	notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
+	app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
 }
 
 // ScanOnceForTest 导出单次扫描供测试调用

@@ -3,8 +3,10 @@ package grant
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
@@ -19,6 +21,10 @@ type Repo struct {
 
 func NewRepo(db *gorm.DB) *Repo {
 	return &Repo{db: db}
+}
+
+func isSQLiteDialect(db *gorm.DB) bool {
+	return db != nil && strings.EqualFold(db.Dialector.Name(), "sqlite")
 }
 
 // Create 创建一条共享授权(幂等):
@@ -38,14 +44,38 @@ func (r *Repo) Create(ctx context.Context, grant *gbmodels.GbDeviceGrant) (bool,
 	}
 
 	var existing gbmodels.GbDeviceGrant
-	err := db.Unscoped().
+	result := db.Unscoped().
 		Where("device_id = ? AND target_type = ? AND target_id = ?", grant.DeviceID, grant.TargetType, grant.TargetID).
-		First(&existing).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return true, db.Create(grant).Error
-	case err != nil:
-		return false, err
+		Limit(1).Find(&existing)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		if !isSQLiteDialect(db) {
+			return true, db.Create(grant).Error
+		}
+		// The configured GORM query hook may mask ErrRecordNotFound. On SQLite,
+		// let the published unique index arbitrate a concurrent insert, then
+		// inspect the winner so a soft-deleted row can still be restored.
+		insert := db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "device_id"}, {Name: "target_type"}, {Name: "target_id"}},
+			DoNothing: true,
+		}).Create(grant)
+		if insert.Error != nil {
+			return false, insert.Error
+		}
+		if insert.RowsAffected > 0 {
+			return true, nil
+		}
+		result = db.Unscoped().
+			Where("device_id = ? AND target_type = ? AND target_id = ?", grant.DeviceID, grant.TargetType, grant.TargetID).
+			Limit(1).Find(&existing)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return false, errors.New("授权冲突后未找到目标记录")
+		}
 	}
 
 	if !existing.DeletedAt.Valid {

@@ -9,6 +9,14 @@ import { useRoutingMethod } from "@/hooks/useRoutingMethod";
 import { hasRefreshToken } from "@/utils/auth";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSystemStore } from "@/store/modules/system";
+import {
+    BOOTSTRAP_TOKEN_QUERY,
+    loadStandaloneSetupStatus,
+    readBootstrapTokenOnce,
+    stripBootstrapTokenQuery,
+    standaloneSetupNavigation,
+    STANDALONE_SETUP_PATH
+} from "@/api/standalone-setup";
 
 
 /**
@@ -41,6 +49,21 @@ const router = createRouter({
  */
 router.beforeEach(async (to: any, _: any, next: any) => {
     NProgress.start(); // 开启进度条
+    readBootstrapTokenOnce(to.query);
+    if (Object.prototype.hasOwnProperty.call(to.query, BOOTSTRAP_TOKEN_QUERY)) {
+        return next({
+            path: to.path,
+            query: stripBootstrapTokenQuery(to.query),
+            hash: to.hash,
+            replace: true
+        });
+    }
+    const standaloneProbe = await loadStandaloneSetupStatus();
+    const standaloneNavigation = standaloneSetupNavigation(to.path, to.query, standaloneProbe, hasRefreshToken());
+    if (standaloneNavigation) return next(standaloneNavigation);
+    if (standaloneProbe.kind === "standalone"
+        && standaloneProbe.status.phase === "pending_admin"
+        && to.path === STANDALONE_SETUP_PATH) return next();
     // 免登录路由白名单(用于原型/demo 页面)
     const publicRoutes = [
         "/play-console-demo",
@@ -49,8 +72,8 @@ router.beforeEach(async (to: any, _: any, next: any) => {
     ];
     if (publicRoutes.includes(to.path)) return next();
     // 新的登录逻辑
-    const tokenExist = hasRefreshToken();
     // 1、去登录页，无token，放行
+    const tokenExist = hasRefreshToken();
     if (to.path === "/login" && !tokenExist) return next();
     // 2、没有token，直接重定向到登录页
     if (!tokenExist) return next("/login");

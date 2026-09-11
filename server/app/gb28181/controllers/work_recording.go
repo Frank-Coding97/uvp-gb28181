@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type WorkRecordingBatchAPI interface {
 	Active(context.Context, uint) (workrecording.BatchSnapshot, error)
 	Delete(context.Context, uint, workrecording.BatchDeleteRequest) (workrecording.BatchDeleteResult, error)
 	ListFormHistory(context.Context, string, int) ([]workrecording.FormHistoryEntry, error)
+
 }
 type WorkRecordingController struct {
 	controllers.Common
@@ -44,6 +46,7 @@ type WorkRecordingController struct {
 	batchService WorkRecordingBatchAPI
 	db           func() *gorm.DB
 	fileSources  WorkRecordingFileSourceFactory
+
 }
 
 func NewWorkRecordingController(service WorkRecordingAPI) *WorkRecordingController {
@@ -83,6 +86,7 @@ func (c *WorkRecordingController) fileSource(nodeID int64) (WorkRecordingFileSou
 	}
 	return c.fileSources(nodeID)
 }
+
 func (c *WorkRecordingController) ready(ctx *gin.Context) bool {
 	if c.GetCurrentUserID(ctx) == 0 {
 		workFailure(ctx, http.StatusUnauthorized, "请先登录")
@@ -123,6 +127,7 @@ func (c *WorkRecordingController) WorkOrderList(ctx *gin.Context) {
 		return
 	}
 	filter, ok := c.batchListFilterFromQuery(ctx, page, pageSize)
+
 	if !ok {
 		return
 	}
@@ -146,6 +151,7 @@ func (c *WorkRecordingController) batchListFilterFromQuery(ctx *gin.Context, pag
 		for _, state := range strings.Split(states, ",") {
 			if trimmed := strings.TrimSpace(state); trimmed != "" {
 				filter.States = append(filter.States, trimmed)
+
 			}
 		}
 	}
@@ -545,6 +551,7 @@ func (c *WorkRecordingController) batchFailure(ctx *gin.Context, err error, snap
 	}
 	ctx.JSON(status, response)
 }
+
 
 func workFailure(ctx *gin.Context, status int, message string) {
 	ctx.JSON(status, gin.H{"code": status, "message": message})

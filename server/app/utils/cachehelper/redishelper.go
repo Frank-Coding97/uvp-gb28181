@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -16,6 +17,8 @@ type redisHelper struct {
 	ctx    context.Context
 }
 
+const redisPingTimeout = 5 * time.Second
+
 // NewRedisHelper 创建Redis助手实例
 func NewRedisHelper(addr, password string, db int) (app.CacheInterf, error) {
 	rdb := redis.NewClient(&redis.Options{
@@ -25,15 +28,17 @@ func NewRedisHelper(addr, password string, db int) (app.CacheInterf, error) {
 	})
 
 	// 测试连接是否成功
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), redisPingTimeout)
+	defer cancel()
 	_, err := rdb.Ping(ctx).Result()
 	if err != nil {
+		_ = rdb.Close()
 		return nil, err
 	}
 
 	return &redisHelper{
 		client: rdb,
-		ctx:    ctx,
+		ctx:    context.Background(),
 	}, nil
 }
 

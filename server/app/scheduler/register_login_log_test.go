@@ -3,7 +3,6 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -11,6 +10,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestLoginLogCleanupSchedulerRegistrationIsIdempotent(t *testing.T) {

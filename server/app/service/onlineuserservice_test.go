@@ -5,17 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 )
 
 func TestOnlineUserListFiltersAndUsesOneActivityCutoff(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysDepartment{}, &models.SysUserSession{}))
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	db := newSQLiteSystemTestDB(t)
+	now := time.Now().UTC()
 	status := int8(1)
 	require.NoError(t, db.Create(&models.SysDepartment{BaseModel: models.BaseModel{ID: 3}, Name: "研发", Status: &status}).Error)
 	require.NoError(t, db.Create(&models.User{BaseModel: models.BaseModel{ID: 7}, Username: "admin", NickName: "管理员", Password: "x", Status: 1, DeptID: 3}).Error)
@@ -37,16 +33,14 @@ func TestOnlineUserListFiltersAndUsesOneActivityCutoff(t *testing.T) {
 }
 
 func TestOnlineUserForceLogoutRejectsCurrentAndIsIdempotent(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	db := newSQLiteSystemTestDB(t)
+	now := time.Now().UTC()
 	require.NoError(t, db.Create(&models.User{BaseModel: models.BaseModel{ID: 7}, Username: "admin", Password: "x", Status: 1}).Error)
 	require.NoError(t, db.Create([]*models.SysUserSession{testSession("sid-current", 7, now), testSession("sid-other", 7, now)}).Error)
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 
-	_, err = service.ForceLogout(context.Background(), "sid-current", "sid-current", 99)
+	_, err := service.ForceLogout(context.Background(), "sid-current", "sid-current", 99)
 	require.ErrorIs(t, err, ErrCurrentSessionForceLogout)
 	first, err := service.ForceLogout(context.Background(), "sid-other", "sid-current", 99)
 	require.NoError(t, err)
@@ -59,14 +53,9 @@ func TestOnlineUserForceLogoutRejectsCurrentAndIsIdempotent(t *testing.T) {
 }
 
 func TestOnlineUserForceLogoutRejectsUnknownSessionWhenNotFoundErrorMasked(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
-	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
-		g.Statement.RaiseErrorOnNotFound = false
-	}))
+	db := newSQLiteSystemTestDB(t)
 
 	service := NewAuthSessionService(db)
-	_, err = service.ForceLogout(context.Background(), "missing", "sid-current", 99)
+	_, err := service.ForceLogout(context.Background(), "missing", "sid-current", 99)
 	require.ErrorIs(t, err, ErrSessionUnavailable)
 }

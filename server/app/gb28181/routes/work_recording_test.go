@@ -45,6 +45,7 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 		"GET /api/gb28181/work-orders/:id/files/:fileId": false,
 		"POST /api/gb28181/work-orders/batch-delete":     false,
 		"DELETE /api/gb28181/work-orders/:id":            false,
+
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path
@@ -76,6 +77,7 @@ func TestWorkRecordingRoutesAreRegisteredAndUnavailableBeforeInjection(t *testin
 		// batch-delete 是静态段，必须命中自己的处理器而不是被 :id 吞掉。
 		{http.MethodPost, "/api/gb28181/work-orders/batch-delete"},
 		{http.MethodDelete, "/api/gb28181/work-orders/job"},
+
 	}
 	for _, request := range requests {
 		response := httptest.NewRecorder()

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/security/preview.vue"), "utf8");
+const apiSource = readFileSync(resolve(process.cwd(), "src/api/gb28181-security.ts"), "utf8");
 
 describe("security preview system integration", () => {
   it("uses the UVP workspace shell and theme tokens", () => {
@@ -82,6 +83,32 @@ describe("security preview system integration", () => {
     expect(source).not.toContain("最后心跳 3 秒前 · 已应用 18 条规则");
   });
 
+  it("models platform capability separately from firewall connectivity", () => {
+    expect(apiSource).toContain('export type SecurityAgentCapability = "supported" | "unsupported" | "unknown";');
+    expect(apiSource).toContain('export type FirewallAgentState = "applied" | "failed" | "pending" | "unsupported" | "unknown";');
+    expect(apiSource).toContain("capability?: SecurityAgentCapability");
+    expect(apiSource).toContain("agentState: FirewallAgentState");
+  });
+
+  it("distinguishes an unsupported firewall from a disconnected agent", () => {
+    expect(source).toContain('securityAgent.value.capability === "unsupported"');
+    expect(source).toContain("主机防火墙不支持");
+    expect(source).toContain("主机防火墙未连接");
+    expect(source).toContain("应用层拦截仍生效");
+    expect(source).toContain("系统防火墙不支持");
+    expect(source).toContain("Agent 不支持");
+  });
+
+  it("keeps application enforcement actions visible for unsupported bans", () => {
+    expect(source).toContain('ban.agentState === "unsupported"');
+    expect(source).toContain("firewallStateLabel");
+    expect(source).toContain("系统防火墙已生效");
+    expect(source).toContain("系统防火墙待同步");
+    expect(source).toContain("系统防火墙不支持");
+    expect(source).toContain("<a-option>不支持</a-option>");
+    expect(source).toContain("unbanPreview(record)");
+  });
+
   it("uses a standalone unit label for policy thresholds", () => {
     expect(source).toContain('class="threshold-control"');
     expect(source).toContain("风险累计封禁阈值");
@@ -113,7 +140,7 @@ describe("security preview system integration", () => {
     expect(source).toContain('<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>');
     expect(source).toContain('activeTab === \'bans\'');
     expect(source).toContain("进入原因");
-    expect(source).toContain("主机防火墙{{ record.firewallState }}");
+    expect(source).toContain("firewallStateLabel(record.firewallState)");
     expect(source).toContain("转为手动黑名单");
     expect(source).toContain("record.location");
   });

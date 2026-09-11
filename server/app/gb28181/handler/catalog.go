@@ -144,8 +144,10 @@ func getCatalogPipeline() *catalog.Pipeline {
 	if p != nil {
 		return p
 	}
-	// 直接读底层 *gorm.DB,避开 app.DB() 在 ConfigYml=nil 时的 panic
 	db := app.GormDbMysql
+	if app.ConfigYml != nil {
+		db = app.DB()
+	}
 	if db == nil {
 		return nil
 	}

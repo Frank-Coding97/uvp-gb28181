@@ -96,21 +96,6 @@ func newBaseServer(ua *UserAgent, options ...ServerOption) (*Server, error) {
 // Network supported: udp, tcp, ws
 func (srv *Server) ListenAndServe(ctx context.Context, network string, addr string) error {
 	network = strings.ToLower(network)
-	var connCloser io.Closer
-
-	// TODO consider different design to avoid this additional go routines
-	go func() {
-		select {
-		case <-ctx.Done():
-			if connCloser == nil {
-				return
-			}
-			if err := connCloser.Close(); err != nil {
-				srv.log.Error("Failed to close listener", "error", err)
-			}
-
-		}
-	}()
 
 	switch network {
 	case "udp", "udp4", "udp6":
@@ -125,7 +110,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen udp error. err=%w", err)
 		}
 
-		connCloser = udpConn
+		defer closeListenerOnCancel(ctx, udpConn)()
 		listenReadyCtx(ctx, network, udpConn.LocalAddr().String())
 		return srv.tp.ServeUDP(udpConn)
 
@@ -140,7 +125,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen tcp error. err=%w", err)
 		}
 
-		connCloser = conn
+		defer closeListenerOnCancel(ctx, conn)()
 		listenReadyCtx(ctx, network, conn.Addr().String())
 
 		return srv.tp.ServeTCP(conn)
@@ -157,7 +142,7 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 			return fmt.Errorf("listen tcp error. err=%w", err)
 		}
 
-		connCloser = conn
+		defer closeListenerOnCancel(ctx, conn)()
 		listenReadyCtx(ctx, network, conn.Addr().String())
 		// and uses listener to buffer
 		return srv.tp.ServeWS(conn)
@@ -170,23 +155,6 @@ func (srv *Server) ListenAndServe(ctx context.Context, network string, addr stri
 func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr string, conf *tls.Config) error {
 	network = strings.ToLower(network)
 
-	var connCloser io.Closer
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// TODO consider different design to avoid this additional go routines
-	go func() {
-		select {
-		case <-ctx.Done():
-			if connCloser == nil {
-				return
-			}
-			if err := connCloser.Close(); err != nil {
-				srv.log.Error("Failed to close listener", "error", err)
-			}
-
-		}
-	}()
 	// Support explicitp ipv4 vs ipv6
 	tcpNetwork := "tcp"
 	switch network {
@@ -216,7 +184,7 @@ func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr s
 			return fmt.Errorf("listen tls error. err=%w", err)
 		}
 
-		connCloser = listener
+		defer closeListenerOnCancel(ctx, listener)()
 		listenReadyCtx(ctx, network, listener.Addr().String())
 
 		if network == "wss" {
@@ -227,6 +195,23 @@ func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr s
 	}
 
 	return sip.ErrTransportNotSuported
+}
+
+// closeListenerOnCancel captures a fully initialized listener. The previous
+// closure read a shared interface while ListenAndServe was still assigning it;
+// cancellation could race that assignment and leave the listener open.
+func closeListenerOnCancel(ctx context.Context, listener io.Closer) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		_ = listener.Close()
+	})
+	return func() {
+		if !stop() {
+			<-done
+		}
+		_ = listener.Close()
+	}
 }
 
 // ServeUDP starts serving request on UDP type listener.

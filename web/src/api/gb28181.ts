@@ -1230,6 +1230,8 @@ export interface SaveSipConfigPayload {
   listenIp: string;
   advertiseIp: string;
   advertiseIpInferred: boolean;
+  mediaReceiveHost?: string;
+  mediaPlaybackHost?: string;
   port: number;
   domain: string;
   serverId: string;

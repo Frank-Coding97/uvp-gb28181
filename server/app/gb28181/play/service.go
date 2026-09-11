@@ -164,6 +164,9 @@ type Service struct {
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
+	startAdmission    playStartAdmission
+	shutdownMu        sync.Mutex
+	shutdownCall      *playShutdownCall
 
 	ssrcAllocator    *RealtimeSSRCAllocator
 	ssrcAllocatorErr error
@@ -487,6 +490,11 @@ func (s *Service) currentLiveGeneration(streamID string) uint64 {
 // 旧调用方继续使用这个签名；实际副作用由 startDirect 执行，避免
 // REST、级联等多个入口在同一通道重复 openRtpServer/INVITE。
 func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
+	release, ok := s.startAdmission.begin()
+	if !ok {
+		return nil, ErrLiveShutdown
+	}
+	defer release()
 	return s.StartAuthorized(ctx, deviceID, channelID, "")
 }
 

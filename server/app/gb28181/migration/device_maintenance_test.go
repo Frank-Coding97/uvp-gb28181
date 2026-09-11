@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestDeviceMaintenancePermissionsAreScopedAndIdempotent(t *testing.T) {
@@ -38,10 +38,8 @@ func TestDeviceMaintenancePermissionsAreScopedAndIdempotent(t *testing.T) {
 			sql := strings.ReplaceAll(string(body), "N'", "'")
 			sql = strings.ReplaceAll(sql, "CONCAT('role_',rm.role_id)", "'role_' || rm.role_id")
 			for i := 0; i < 2; i++ {
-				for _, statement := range strings.Split(sql, ";") {
-					if strings.TrimSpace(statement) != "" {
-						require.NoError(t, db.Exec(statement).Error, statement)
-					}
+				for _, statement := range splitStatements(sql) {
+					require.NoError(t, db.Exec(statement).Error, statement)
 				}
 			}
 			for query, want := range map[string]int64{
@@ -62,10 +60,8 @@ func TestDeviceMaintenancePermissionsAreScopedAndIdempotent(t *testing.T) {
 			require.Zero(t, invalid)
 			down, err := os.ReadFile(filepath.Join("../../../resource/database/gb28181/migrations", "2026-09-05-device-maintenance-permissions"+suffix+"-down.sql"))
 			require.NoError(t, err)
-			for _, statement := range strings.Split(strings.ReplaceAll(string(down), "N'", "'"), ";") {
-				if strings.TrimSpace(statement) != "" {
-					require.NoError(t, db.Exec(statement).Error)
-				}
+			for _, statement := range splitStatements(strings.ReplaceAll(string(down), "N'", "'")) {
+				require.NoError(t, db.Exec(statement).Error)
 			}
 			for query, want := range map[string]int64{
 				"SELECT COUNT(*) FROM sys_api":                                      0,

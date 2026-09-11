@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -22,6 +22,26 @@ func catalogResponseBody(sn, sumNum int, deviceID string, itemIDs ...string) []b
 		items += fmt.Sprintf(`<Item><DeviceID>%s</DeviceID><Name>%s</Name><CivilCode>370112</CivilCode><Status>ON</Status></Item>`, itemID, itemID)
 	}
 	return []byte(fmt.Sprintf(`<Response><CmdType>Catalog</CmdType><SN>%d</SN><DeviceID>%s</DeviceID><SumNum>%d</SumNum><DeviceList Num="%d">%s</DeviceList></Response>`, sn, deviceID, sumNum, len(itemIDs), items))
+}
+
+type catalogSQLiteConfig struct{ app.YmlConfigInterf }
+
+func (catalogSQLiteConfig) GetString(string) string { return "sqlite" }
+
+func TestCatalogPipelineUsesConfiguredSQLite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	oldConfig, oldSQLite, oldMySQL := app.ConfigYml, app.GormDbSQLite, app.GormDbMysql
+	SetCatalogPipeline(nil)
+	t.Cleanup(func() {
+		SetCatalogPipeline(nil)
+		app.ConfigYml, app.GormDbSQLite, app.GormDbMysql = oldConfig, oldSQLite, oldMySQL
+		raw, _ := db.DB()
+		_ = raw.Close()
+	})
+	app.ConfigYml = catalogSQLiteConfig{}
+	app.GormDbSQLite, app.GormDbMysql = db, nil
+	require.NotNil(t, getCatalogPipeline())
 }
 
 func init() {

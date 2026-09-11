@@ -19,6 +19,7 @@ const workOrders = vi.hoisted(() => ({
     getWorkOrder: vi.fn(),
     stopWorkOrder: vi.fn(),
     workOrderDownloadUrl: vi.fn((id: string) => `/api/gb28181/work-orders/${id}/download?token=t`)
+
 }));
 const message = vi.hoisted(() => ({
     success: vi.fn(),
@@ -359,6 +360,7 @@ describe("multi-screen playback page", () => {
             vi.useRealTimers();
         }
     });
+
 
     it("does not stop a work recording when a window, all windows, or the page is removed", async () => {
         const wrapper = mount(MultiScreenPlayback);

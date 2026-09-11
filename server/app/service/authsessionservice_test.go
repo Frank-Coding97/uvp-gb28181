@@ -6,18 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 )
 
 func TestAuthSessionLifecycleTracksIndependentSessionsAndThrottlesActivity(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
+	db := newSQLiteSystemTestDB(t)
 
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 	ctx := context.Background()
@@ -36,13 +32,13 @@ func TestAuthSessionLifecycleTracksIndependentSessionsAndThrottlesActivity(t *te
 	require.NoError(t, service.Touch(ctx, "sid-a"))
 	var touched models.SysUserSession
 	require.NoError(t, db.First(&touched, "sid = ?", "sid-a").Error)
-	require.Equal(t, now, touched.LastActiveAt)
+	require.True(t, now.Equal(touched.LastActiveAt))
 
 	// A second request inside the one-minute write interval must not write again.
 	now = now.Add(30 * time.Second)
 	require.NoError(t, service.Touch(ctx, "sid-a"))
 	require.NoError(t, db.First(&touched, "sid = ?", "sid-a").Error)
-	require.Equal(t, now.Add(-30*time.Second), touched.LastActiveAt)
+	require.True(t, now.Add(-30*time.Second).Equal(touched.LastActiveAt))
 
 	active, idle := service.Status(touched, now), service.Status(models.SysUserSession{SessionExpiresAt: now.Add(time.Hour), LastActiveAt: now.Add(-6 * time.Minute)}, now)
 	require.Equal(t, "active", active)
@@ -50,14 +46,9 @@ func TestAuthSessionLifecycleTracksIndependentSessionsAndThrottlesActivity(t *te
 }
 
 func TestAuthSessionRevokeIsIdempotentAndFailClosed(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
-	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
-		g.Statement.RaiseErrorOnNotFound = false
-	}))
+	db := newSQLiteSystemTestDB(t)
 
-	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	service := NewAuthSessionService(db)
 	service.SetClock(func() time.Time { return now })
 	require.NoError(t, service.Create(context.Background(), testSession("sid-a", 7, now)))

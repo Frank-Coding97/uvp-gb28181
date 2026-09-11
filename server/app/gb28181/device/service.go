@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -34,23 +35,22 @@ type RegisterInfo struct {
 // keepaliveInterval = 该设备期望心跳周期(秒),用于后续在线判定
 // 返回 isFirst:true 表示首次建档或从离线/未知状态重新注册(用于触发 Catalog 等首次动作)
 func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval int) (bool, error) {
-	now := time.Now()
-	var expireAt *time.Time
-	if info.Expires > 0 {
-		t := now.Add(time.Duration(info.Expires) * time.Second)
-		expireAt = &t
-	}
-
 	var isFirst bool
 	err := app.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Lock the current row so a renewal, recovery, and timeout cannot all
 		// classify the same REGISTER from the same stale status.
-		existing, err := gbmodels.FindByDeviceIDWithDB(ctx, tx.Set("gorm:query_option", "FOR UPDATE"), info.DeviceID)
+		existing, err := findDeviceForRegister(ctx, tx, info.DeviceID)
 		if err != nil {
 			return fmt.Errorf("查询设备失败: %w", err)
 		}
 		if existing == nil && gbconfig.PreallocationMode() {
 			return ErrDeviceNotPreallocated
+		}
+		now := time.Now()
+		var expireAt *time.Time
+		if info.Expires > 0 {
+			t := now.Add(time.Duration(info.Expires) * time.Second)
+			expireAt = &t
 		}
 		isFirst = existing == nil || existing.Status != gbmodels.DeviceStatusOnline
 		profile := resolveRegisterProfile(existing, info.ReportedVersion)
@@ -107,6 +107,31 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		notifyStatusObserver(ctx, info.DeviceID, true, "REGISTER_ONLINE")
 	}
 	return isFirst, err
+}
+
+func findDeviceForRegister(ctx context.Context, tx *gorm.DB, deviceID string) (*gbmodels.GbDevice, error) {
+	query := tx.WithContext(ctx)
+	switch strings.ToLower(tx.Dialector.Name()) {
+	case "sqlite":
+		// NewSQLiteClient uses BEGIN IMMEDIATE. The no-op write also keeps the
+		// lock boundary when a caller supplies a deferred SQLite transaction.
+		if result := tx.WithContext(ctx).Exec("UPDATE gb_device SET id = id WHERE device_id = ?", deviceID); result.Error != nil {
+			return nil, result.Error
+		}
+	case "mysql", "postgres", "postgresql":
+		query = query.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
+	case "sqlserver":
+		var device gbmodels.GbDevice
+		result := tx.WithContext(ctx).Raw("SELECT * FROM gb_device WITH (UPDLOCK,HOLDLOCK,ROWLOCK) WHERE device_id = ? AND deleted_at IS NULL", deviceID).Scan(&device)
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.RowsAffected == 0 && device.ID == 0 {
+			return nil, nil
+		}
+		return &device, nil
+	}
+	return gbmodels.FindByDeviceIDWithDB(ctx, query, deviceID)
 }
 
 type resolvedRegisterProfile struct {

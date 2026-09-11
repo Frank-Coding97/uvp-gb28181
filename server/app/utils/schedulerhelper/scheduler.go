@@ -2,6 +2,7 @@ package schedulerhelper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,14 +15,21 @@ import (
 
 // 任务调度器
 type JobScheduler struct {
-	mu         sync.RWMutex
-	cron       *cron.Cron
-	jobs       map[string]*Job     // 任务存储
-	executors  map[string]Executor // 执行器存储
-	jobResults chan *JobResult     // 任务结果通道
-	logger     JobLogger           // 日志记录器
-	wg         sync.WaitGroup      // 等待正在执行的任务完成
+	mu            sync.RWMutex
+	cron          *cron.Cron
+	jobs          map[string]*Job     // 任务存储
+	executors     map[string]Executor // 执行器存储
+	jobResults    chan *JobResult     // 任务结果通道
+	logger        JobLogger           // 日志记录器
+	wg            sync.WaitGroup      // 等待正在执行的任务完成
+	shuttingDown  bool
+	shutdownDone  chan struct{}
+	shutdownErr   error
+	resultsClosed bool
 }
+
+// ErrSchedulerClosed indicates that the scheduler no longer accepts jobs.
+var ErrSchedulerClosed = errors.New("job scheduler is shut down")
 
 // NewJobScheduler 创建新的调度器
 // 使用函数选项模式进行配置，例如：
@@ -65,29 +73,92 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 
 // 启动调度器
 func (s *JobScheduler) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return
+	}
 	s.cron.Start()
 	s.logger.Info("system", "调度器已启动")
 }
 
 // 停止调度器
 func (s *JobScheduler) Stop() {
-	s.cron.Stop()
-	s.logger.Info("system", "调度器已停止")
+	if err := s.Shutdown(context.Background()); err != nil {
+		log.Printf("Failed to shut down scheduler: %v", err)
+	}
+}
 
-	// 等待所有正在执行的任务完成
+// Shutdown stops dispatching, waits for cron and every accepted execution,
+// then closes the result channel and logger. The first caller starts the
+// shutdown; concurrent and repeated callers wait for the same completion.
+// A caller context only bounds its own wait. Once started, shutdown continues
+// in the background so a later caller can observe the eventual completion.
+func (s *JobScheduler) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return ErrSchedulerClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.mu.Lock()
+	if !s.shuttingDown {
+		s.shuttingDown = true
+		s.shutdownDone = make(chan struct{})
+		go s.finishShutdown(s.shutdownDone)
+	}
+	done := s.shutdownDone
+	s.mu.Unlock()
+
+	select {
+	case <-done:
+		return s.shutdownError()
+	default:
+	}
+	select {
+	case <-done:
+		return s.shutdownError()
+	case <-ctx.Done():
+		return fmt.Errorf("scheduler shutdown: %w", ctx.Err())
+	}
+}
+
+func (s *JobScheduler) finishShutdown(done chan struct{}) {
+	cronDone := s.cron.Stop()
+	<-cronDone.Done()
 	s.wg.Wait()
 
-	close(s.jobResults)
-	// 关闭日志记录器
-	if err := s.logger.Close(); err != nil {
-		log.Printf("Failed to close logger: %v", err)
+	s.mu.Lock()
+	if !s.resultsClosed {
+		close(s.jobResults)
+		s.resultsClosed = true
 	}
+	s.mu.Unlock()
+
+	var shutdownErr error
+	if err := s.logger.Close(); err != nil {
+		shutdownErr = fmt.Errorf("close scheduler logger: %w", err)
+	}
+	s.mu.Lock()
+	s.shutdownErr = shutdownErr
+	s.mu.Unlock()
+	close(done)
+}
+
+func (s *JobScheduler) shutdownError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.shutdownErr
 }
 
 // 注册执行器
 func (s *JobScheduler) RegisterExecutor(executor Executor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return
+	}
 	s.executors[executor.Name()] = executor
 	s.logger.Info("system", "注册执行器: %s", executor.Name())
 }
@@ -96,6 +167,9 @@ func (s *JobScheduler) RegisterExecutor(executor Executor) {
 func (s *JobScheduler) AddOrUpdateJob(job *Job) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return "", ErrSchedulerClosed
+	}
 	action := "更新"
 	if _, exists := s.jobs[job.ID]; !exists {
 		action = "创建"
@@ -134,26 +208,46 @@ func (s *JobScheduler) AddOrUpdateJob(job *Job) (string, error) {
 // 创建任务执行函数
 func (s *JobScheduler) createJobFunc(job *Job) func() {
 	return func() {
-		// 检查阻塞策略
-		if !s.canExecute(job) {
-			s.logger.LogJobLifecycle(job, "跳过")
-			return
-		}
-
-		// 增加运行计数
-		s.incrementRunningCount(job.ID)
-		defer s.decrementRunningCount(job.ID)
-
-		// 执行任务
-		s.executeJob(job)
+		s.admitScheduledJob(job)
 	}
+}
+
+func (s *JobScheduler) admitScheduledJob(job *Job) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return
+	}
+	currentJob, exists := s.jobs[job.ID]
+	if !exists {
+		s.logger.Warn(job.ID, "任务不存在，无法执行")
+		return
+	}
+	if !s.canExecuteLocked(currentJob) {
+		return
+	}
+	s.admitJobLocked(currentJob)
+}
+
+func (s *JobScheduler) admitJobLocked(job *Job) {
+	job.RunningCount++
+	acceptedJob := job.Clone()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.decrementRunningCount(acceptedJob.ID)
+		s.executeJob(acceptedJob)
+	}()
 }
 
 // 检查任务是否可以执行
 func (s *JobScheduler) canExecute(job *Job) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.canExecuteLocked(job)
+}
 
+func (s *JobScheduler) canExecuteLocked(job *Job) bool {
 	currentJob, exists := s.jobs[job.ID]
 	if !exists {
 		s.logger.Warn(job.ID, "任务不存在，无法执行")
@@ -196,33 +290,26 @@ func (s *JobScheduler) canExecute(job *Job) bool {
 
 // 立即执行一次任务
 func (s *JobScheduler) ExecuteNow(jobID string) error {
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return fmt.Errorf("%w: %s", ErrSchedulerClosed, jobID)
+	}
 	job, exists := s.jobs[jobID]
-	s.mu.RUnlock()
-
 	if !exists {
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
-	if !s.canExecute(job) {
+	if !s.canExecuteLocked(job) {
 		return fmt.Errorf("job cannot execute due to blocking policy")
 	}
-
-	// 异步执行
-	go func() {
-		s.incrementRunningCount(job.ID)
-		defer s.decrementRunningCount(job.ID)
-		s.executeJob(job)
-	}()
+	s.admitJobLocked(job)
 
 	return nil
 }
 
 // 执行任务（非递归版本）
 func (s *JobScheduler) executeJob(job *Job) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	startTime := time.Now()
 	jobExecutionID := fmt.Sprintf("%s-%d", job.ID, startTime.UnixNano())
 
@@ -292,19 +379,20 @@ func (s *JobScheduler) executeJob(job *Job) {
 	}
 }
 
-// 新增：安全发送结果
+// sendResult blocks until the accepted result is handed to the consumer. The
+// result channel is closed only after all accepted executions have returned,
+// so this cannot race with Shutdown and silently dropping results is avoided.
 func (s *JobScheduler) sendResult(result *JobResult) {
-	select {
-	case s.jobResults <- result:
-	default:
-		return
-	}
+	s.jobResults <- result
 }
 
 // 启用任务
 func (s *JobScheduler) EnableJob(jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return ErrSchedulerClosed
+	}
 
 	job, exists := s.jobs[jobID]
 	if !exists {
@@ -333,6 +421,9 @@ func (s *JobScheduler) EnableJob(jobID string) error {
 func (s *JobScheduler) DisableJob(jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return ErrSchedulerClosed
+	}
 
 	job, exists := s.jobs[jobID]
 	if !exists {
@@ -359,6 +450,9 @@ func (s *JobScheduler) DisableJob(jobID string) error {
 func (s *JobScheduler) DeleteJob(jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.shuttingDown {
+		return ErrSchedulerClosed
+	}
 
 	job, exists := s.jobs[jobID]
 	if !exists {

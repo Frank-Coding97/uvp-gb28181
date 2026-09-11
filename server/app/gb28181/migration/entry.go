@@ -11,7 +11,7 @@ import (
 var runUp = Up
 
 // RunMigrations 对已初始化的数据库连接按名字执行迁移,返回第一个错误。
-// nil 连接被忽略;方言未知的连接跳过(不支持的库不做迁移)。
+// nil 连接被忽略;方言未知的连接明确拒绝。
 func RunMigrations(dbs map[string]*gorm.DB) error {
 	names := make([]string, 0, len(dbs))
 	for name, db := range dbs {
@@ -25,7 +25,7 @@ func RunMigrations(dbs map[string]*gorm.DB) error {
 		db := dbs[name]
 		d := DialectOf(db.Dialector)
 		if d == DialectUnknown {
-			continue
+			return fmt.Errorf("数据库 %s: unsupported migration dialect", name)
 		}
 		if err := runUp(db, d); err != nil {
 			return fmt.Errorf("数据库 %s 迁移失败: %w", name, err)

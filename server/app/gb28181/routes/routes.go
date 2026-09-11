@@ -87,7 +87,7 @@ var streamObserverMu sync.Mutex
 var recordingStreamObserver gbhandler.StreamObserver
 var recordingPlanStreamObserver gbhandler.StreamObserver
 
-var setupController *gbcontrollers.SetupController
+var setupController atomic.Pointer[gbcontrollers.SetupController]
 
 // qrController 扫码接入二维码(token 生成 + 免鉴权兑换),由 bootstrap 后置注入
 var qrController = gbcontrollers.NewQRController()
@@ -122,7 +122,7 @@ func SetMetricsProvider(p gbcontrollers.AggregatorProvider, snapshots ...gbcontr
 	dashboardController = gbcontrollers.NewDashboardController(p, snapshots...)
 }
 
-func SetSetupController(controller *gbcontrollers.SetupController) { setupController = controller }
+func SetSetupController(controller *gbcontrollers.SetupController) { setupController.Store(controller) }
 
 func SetServiceConfigSIPTraceReloader(reload gbcontrollers.SIPTraceReloader) {
 	serviceConfigController.SetSIPTraceReloader(reload)
@@ -665,6 +665,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			workOrders.GET("/:id/files/:fileId", func(c *gin.Context) { currentWorkRecordingController().WorkOrderFile(c) })
 			workOrders.POST("/batch-delete", func(c *gin.Context) { currentWorkRecordingController().BatchDeleteWorkOrders(c) })
 			workOrders.DELETE("/:id", func(c *gin.Context) { currentWorkRecordingController().DeleteWorkOrder(c) })
+
 		}
 		recordingPlans := gb.Group("/recording-plans")
 		{
@@ -959,11 +960,12 @@ func RegisterContentRoutes(engine *gin.Engine) {
 
 func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if setupController == nil {
+		controller := setupController.Load()
+		if controller == nil {
 			c.JSON(503, gin.H{"code": 503, "msg": "SIP 配置服务尚未装配"})
 			return
 		}
-		fn(setupController, c)
+		fn(controller, c)
 	}
 }
 

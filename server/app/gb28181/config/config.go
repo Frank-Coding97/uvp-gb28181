@@ -636,6 +636,7 @@ func (c ZLMConfig) EffectivePlaybackHost() string {
 
 // MediaConfig 媒体/Hook 配置
 type MediaConfig struct {
+	ManageRTCExternIP       bool   // standalone owns the RTC candidate address from its confirmed media node
 	HookBaseURL             string // 完整 Hook 回调根；非空时优先于旧 host/port
 	HookRequireTLS          bool   // 公网部署要求 HTTPS
 	HookHost                string // ZLM Hook 回调可达的本机地址
@@ -787,6 +788,7 @@ func loadFrom(c valueSource) (Config, error) {
 			RTPPort:      c.GetInt("gb28181.zlm.rtpport"),
 		},
 		Media: MediaConfig{
+			ManageRTCExternIP:       c.GetBool("gb28181.media.managertcexternip"),
 			HookBaseURL:             c.GetString("gb28181.media.hookbaseurl"),
 			HookRequireTLS:          c.GetBool("gb28181.media.hookrequiretls"),
 			HookHost:                c.GetString("gb28181.media.hookhost"),

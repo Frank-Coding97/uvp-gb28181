@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -132,6 +133,7 @@ func TestWorkOrderDownloadStreamsAnUncompressedZip(t *testing.T) {
 
 // 归档必须保持不压缩（MP4 本就压缩过），且文件名要带业务信息以便归档辨认。
 func TestWorkOrderDownloadStoresEntriesAndNamesArchiveAfterProject(t *testing.T) {
+
 	db := newScopedDeviceDB(t)
 	seedDeptScopedUser(t, db, 100, 10)
 	channel, _ := seedDownloadableOrder(t, db, "9b057ecd-215f-4caf-af40-6ca570ff1f62", "9710bd64-e63a-4d34-b2bd-7b70547f1215")

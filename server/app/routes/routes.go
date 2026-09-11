@@ -36,6 +36,9 @@ var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // �
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) {
+	if app.DataPath != "" {
+		registerStandaloneReadiness(engine, app.ConfigYml.GetString("token.jwttokensignkey"), probeStandaloneBackend)
+	}
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
@@ -44,8 +47,9 @@ func InitRoutes(engine *gin.Engine) {
 		engine.Use(middleware.CorsNext())
 	}
 
-	// 静态文件
-	engine.Static(app.ConfigYml.GetString("httpserver.serverrootpath"), app.ConfigYml.GetString("httpserver.serverroot"))
+	// 静态文件与生产 Web 产物。单机模式下 uploads 独立映射到 data/uploads，
+	// SPA 回退只由受限文件处理器提供，不能吞掉 API、Hook 或媒体错误。
+	registerConfiguredStaticRoutes(engine)
 
 	// GB28181 ZLMediaKit Hook 回调端点(engine 根,无 /api 前缀,无鉴权)
 	gbroutes.RegisterHookRoutes(engine)
@@ -326,52 +330,7 @@ func InitRoutes(engine *gin.Engine) {
 				sysLoginLog.GET("/:id", sysLoginLogControllers.Detail)
 			}
 
-			// 代码生成配置路由组
-			sysGen := protected.Group("/sysGen")
-			{
-				// 代码生成配置列表（分页查询）
-				sysGen.GET("/list", sysGenControllers.List)
-				// 批量创建代码生成配置
-				sysGen.POST("/batchInsert", sysGenControllers.BatchInsert)
-				// 根据ID获取代码生成配置详情
-				sysGen.GET("/:id", sysGenControllers.GetByID)
-				// 根据ID更新代码生成配置和字段信息
-				sysGen.PUT("/update", sysGenControllers.Update)
-				// 根据ID删除代码生成配置和字段信息
-				sysGen.DELETE("/:id", sysGenControllers.Delete)
-				// 根据ID刷新字段信息
-				sysGen.PUT("/refreshFields", sysGenControllers.RefreshFields)
-			}
-
-			// 代码生成路由组
-			codeGen := protected.Group("/codegen")
-			{
-				// 获取数据库列表
-				codeGen.GET("/databases", codeGenControllers.GetDatabases)
-				// 获取指定数据库中的表
-				codeGen.GET("/tables", codeGenControllers.GetTables)
-				// 获取指定表的字段信息
-				codeGen.GET("/columns", codeGenControllers.GetTableColumns)
-				// 生成代码
-				codeGen.POST("/generate", codeGenControllers.GenerateCode)
-				// 预览代码
-				codeGen.GET("/preview", codeGenControllers.PreviewCode)
-				// 生成菜单
-				codeGen.POST("/insertmenuandapi", codeGenControllers.InsertMenuAndApiData)
-			}
-
-			// 插件管理路由组
-			pluginsManager := protected.Group("/pluginsmanager")
-			{
-				// 获取所有插件导出配置
-				pluginsManager.GET("/exports", pluginsManagerControllers.GetPluginsExport)
-				// 导出插件为压缩包
-				pluginsManager.POST("/export", pluginsManagerControllers.ExportPlugin)
-				// 导入插件
-				pluginsManager.POST("/import", pluginsManagerControllers.ImportPlugin)
-				// 卸载插件
-				pluginsManager.DELETE("/uninstall", pluginsManagerControllers.UninstallPlugin)
-			}
+			registerDeveloperRoutes(protected)
 
 			// 定时任务路由组
 			sysJobs := protected.Group("/sysJobs")

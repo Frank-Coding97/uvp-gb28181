@@ -8,7 +8,6 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // CatalogTreeController 国标多级目录树 REST 接口(plan §4.2 B1)
@@ -26,7 +25,7 @@ type CatalogTreeController struct {
 // NewCatalogTreeController 默认 DB provider 用 app.GormDbMysql
 func NewCatalogTreeController() *CatalogTreeController {
 	return &CatalogTreeController{
-		db: func() *gorm.DB { return app.GormDbMysql },
+		db: configuredDeviceDB,
 	}
 }
 

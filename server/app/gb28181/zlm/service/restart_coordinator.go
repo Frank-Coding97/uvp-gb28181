@@ -71,12 +71,15 @@ type RestartCoordinator struct {
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
 
-	mu          sync.Mutex
-	closed      bool
-	operations  map[int64]*RestartOperation
-	generations map[int64]uint64
-	timers      map[int64]*time.Timer
-	converge    func(context.Context, int64) error
+	mu           sync.Mutex
+	closed       bool
+	operations   map[int64]*RestartOperation
+	generations  map[int64]uint64
+	timers       map[int64]*time.Timer
+	converge     func(context.Context, int64) error
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
+	shutdownDone chan struct{}
 }
 
 // NewRestartCoordinator constructs an in-memory coordinator. timeout is
@@ -96,6 +99,7 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 		operations:      make(map[int64]*RestartOperation),
 		generations:     make(map[int64]uint64),
 		timers:          make(map[int64]*time.Timer),
+		shutdownDone:    make(chan struct{}),
 	}
 }
 
@@ -158,10 +162,12 @@ func (c *RestartCoordinator) Begin(nodeID int64) (RestartOperation, error) {
 	c.operations[nodeID] = op
 	c.registry.SetAdmissionBlocked(nodeID, true)
 	if old := c.timers[nodeID]; old != nil {
-		old.Stop()
+		c.stopTimerLocked(nodeID)
 	}
 	gen := generation
+	c.wg.Add(1)
 	c.timers[nodeID] = time.AfterFunc(c.timeout, func() {
+		defer c.wg.Done()
 		c.FailGeneration(nodeID, gen, errors.New("restart timeout"))
 	})
 	return cloneRestartOperation(*op), nil
@@ -238,15 +244,13 @@ func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 	c.setStatusLocked(op, RestartStatusConverging, "")
 	generation := op.Generation
 	converge := c.converge
-	c.mu.Unlock()
-
 	if converge == nil {
+		c.mu.Unlock()
 		c.FailGeneration(nodeID, generation, errors.New("restart convergence unavailable"))
 		return
 	}
-	go func() {
-		c.runConvergence(nodeID, generation, converge)
-	}()
+	c.startConvergenceLocked(nodeID, generation, converge)
+	c.mu.Unlock()
 }
 
 func (c *RestartCoordinator) MarkHeartbeat(nodeID int64) { c.OnNodeHeartbeat(nodeID) }
@@ -285,15 +289,24 @@ func (c *RestartCoordinator) MarkHeartbeatForGeneration(nodeID int64, generation
 	}
 	c.setStatusLocked(op, RestartStatusConverging, "")
 	converge := c.converge
-	c.mu.Unlock()
 	if converge == nil {
+		c.mu.Unlock()
 		c.FailGeneration(nodeID, generation, errors.New("restart convergence unavailable"))
 		return true
 	}
+	c.startConvergenceLocked(nodeID, generation, converge)
+	c.mu.Unlock()
+	return true
+}
+
+// startConvergenceLocked admits a callback while c.mu is held. Shutdown also
+// takes c.mu before closing admission, so the WaitGroup cannot race Add.
+func (c *RestartCoordinator) startConvergenceLocked(nodeID int64, generation uint64, converge func(context.Context, int64) error) {
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		c.runConvergence(nodeID, generation, converge)
 	}()
-	return true
 }
 
 // runConvergence lets a restart join an equivalent convergence already
@@ -390,10 +403,22 @@ func (c *RestartCoordinator) setStatusLocked(op *RestartOperation, status Restar
 	op.Error = message
 	op.UpdatedAt = c.now()
 	if !isRestartPending(status) {
-		if timer := c.timers[op.NodeID]; timer != nil {
-			timer.Stop()
-			delete(c.timers, op.NodeID)
-		}
+		c.stopTimerLocked(op.NodeID)
+	}
+}
+
+// stopTimerLocked removes a timer and accounts for its callback. A true
+// Timer.Stop result means the callback will never run and must release the
+// corresponding WaitGroup slot here; a false result leaves that responsibility
+// to the callback itself.
+func (c *RestartCoordinator) stopTimerLocked(nodeID int64) {
+	timer := c.timers[nodeID]
+	if timer == nil {
+		return
+	}
+	delete(c.timers, nodeID)
+	if timer.Stop() {
+		c.wg.Done()
 	}
 }
 
@@ -451,29 +476,47 @@ func UnknownOperation(nodeID int64) RestartOperation {
 	return RestartOperation{NodeID: nodeID, Status: RestartStatusUnknown}
 }
 
-// Close ends the coordinator process lifecycle. It stops pending deadline
-// callbacks and cancels in-flight convergence without inventing a durable
-// terminal outcome: a process restart has no persisted operation state and is
-// reported as unknown by the next coordinator.
+// Shutdown ends the coordinator process lifecycle. It stops pending deadline
+// callbacks, cancels in-flight convergence, and waits for all accepted
+// callbacks without inventing a durable terminal outcome. A process restart
+// has no persisted operation state and is reported as unknown by the next
+// coordinator.
+func (c *RestartCoordinator) Shutdown(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.shutdownOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		for nodeID := range c.timers {
+			c.stopTimerLocked(nodeID)
+		}
+		cancel := c.lifecycleCancel
+		c.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		go func() {
+			c.wg.Wait()
+			close(c.shutdownDone)
+		}()
+	})
+	select {
+	case <-c.shutdownDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Close preserves the legacy no-return lifecycle API. New callers should use
+// Shutdown when they need a bounded wait result.
 func (c *RestartCoordinator) Close() {
 	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return
-	}
-	c.closed = true
-	for nodeID, timer := range c.timers {
-		if timer != nil {
-			timer.Stop()
-		}
-		delete(c.timers, nodeID)
-	}
-	cancel := c.lifecycleCancel
-	c.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	_ = c.Shutdown(context.Background())
 }
