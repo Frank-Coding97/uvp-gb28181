@@ -57,6 +57,7 @@ export interface ConvertedRouteItem {
         icon: string;
         sort: number;
         type: number;
+        legacyMedia: boolean;
     };
     children: ConvertedRouteItem[] | null;
 }
@@ -96,7 +97,8 @@ export const convertMenuItemsToRoutes = (menuItems: MenuItem[]): ConvertedRouteI
                 svgIcon: item.svgIcon,
                 icon: item.icon,
                 sort: item.sort,
-                type: item.type
+                type: item.type,
+                legacyMedia: item.component === "gb28181/zlm/workbench/LegacyMediaRoute"
             },
             children: null
         };

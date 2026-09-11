@@ -2,11 +2,10 @@ package controllers
 
 import (
 	"encoding/csv"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 	"strconv"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -39,6 +38,7 @@ func NewSysOperationLogController() *SysOperationLogController {
 // @Param startTime query string false "开始时间"
 // @Param endTime query string false "结束时间"
 // @Param ip query string false "IP地址"
+// @Param path query string false "请求路径"
 // @Success 200 {object} map[string]interface{} "成功返回日志列表"
 // @Failure 500 {object} map[string]interface{} "服务器内部错误"
 // @Router /sysOperationLog/list [get]
@@ -50,14 +50,14 @@ func (c *SysOperationLogController) List(ctx *gin.Context) {
 	}
 
 	logList := models.NewSysOperationLogList()
-	total, err := logList.GetTotal(ctx, req.Handle(), tenanthelper.TenantScope(ctx))
+	total, err := logList.GetTotal(ctx.Request.Context(), req.Handle())
 	if err != nil {
 		c.FailAndAbort(ctx, "获取日志总数失败", err)
 	}
 
-	err = logList.Find(ctx, req.Paginate(), req.Handle(), func(db *gorm.DB) *gorm.DB {
+	err = logList.Find(ctx.Request.Context(), req.Paginate(), req.Handle(), func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at DESC")
-	}, tenanthelper.TenantScope(ctx))
+	})
 	if err != nil {
 		c.FailAndAbort(ctx, "获取日志列表失败", err)
 	}
@@ -86,7 +86,7 @@ func (c *SysOperationLogController) Delete(ctx *gin.Context) {
 		c.FailAndAbort(ctx, err.Error(), err)
 	}
 
-	if err := app.DB().WithContext(ctx).Where("id IN ?", req.IDs).Delete(&models.SysOperationLog{}).Error; err != nil {
+	if err := app.DBContext(ctx.Request.Context()).Where("id IN ?", req.IDs).Delete(&models.SysOperationLog{}).Error; err != nil {
 		c.FailAndAbort(ctx, "删除操作日志失败", err)
 	}
 
@@ -106,6 +106,7 @@ func (c *SysOperationLogController) Delete(ctx *gin.Context) {
 // @Param startTime query string false "开始时间"
 // @Param endTime query string false "结束时间"
 // @Param ip query string false "IP地址"
+// @Param path query string false "请求路径"
 // @Success 200 {file} file "CSV文件"
 // @Failure 500 {object} map[string]interface{} "服务器内部错误"
 // @Router /sysOperationLog/export [get]
@@ -118,7 +119,7 @@ func (c *SysOperationLogController) Export(ctx *gin.Context) {
 
 	// 获取所有符合条件的日志
 	logList := models.NewSysOperationLogList()
-	err := logList.Find(ctx, req.Handle(), func(db *gorm.DB) *gorm.DB {
+	err := logList.Find(ctx.Request.Context(), req.Handle(), func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at DESC").Limit(10000) // 限制导出数量
 	})
 	if err != nil {

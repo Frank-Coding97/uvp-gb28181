@@ -56,12 +56,14 @@ type Job struct {
 // 任务执行结果
 type JobResult struct {
 	JobID           string          `json:"jobId"`           // 任务ID
+	ExecutionID     string          `json:"executionId"`     // 一次执行的关联ID
 	Status          string          `json:"status"`          // 任务状态
 	Error           error           `json:"error,omitempty"` // 错误信息
 	StartTime       time.Time       `json:"startTime"`       // 开始时间
 	EndTime         time.Time       `json:"endTime"`         // 结束时间
 	Duration        time.Duration   `json:"duration"`        // 执行时长
 	RetryCount      int             `json:"retryCount"`      // 重试次数
+	Attempt         int             `json:"attempt"`         // 本次执行尝试序号（从1开始）
 	ExecutionPolicy ExecutionPolicy `json:"executionPolicy"` // 执行策略
 }
 

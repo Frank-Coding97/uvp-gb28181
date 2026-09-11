@@ -1,0 +1,21 @@
+-- 登录日志删除、清空、解锁操作权限增量迁移(MySQL,幂等)。
+INSERT INTO `sys_api` (`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '删除登录日志','/api/sysLoginLog/delete','DELETE','日志管理',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/sysLoginLog/delete' AND `method`='DELETE' AND `deleted_at` IS NULL);
+INSERT INTO `sys_api` (`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '清空登录日志','/api/sysLoginLog/clear','POST','日志管理',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/sysLoginLog/clear' AND `method`='POST' AND `deleted_at` IS NULL);
+INSERT INTO `sys_api` (`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '解锁登录账号','/api/sysLoginLog/unlock','POST','日志管理',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/sysLoginLog/unlock' AND `method`='POST' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT m.`id`,'','SystemLoginLogDelete','','删除登录日志',1,0,1,3,'system:login-log:delete','',NOW(),NOW(),1 FROM `sys_menu` m WHERE m.`permission`='system:login-log:list' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `permission`='system:login-log:delete' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT m.`id`,'','SystemLoginLogClear','','清空登录日志',1,0,2,3,'system:login-log:clear','',NOW(),NOW(),1 FROM `sys_menu` m WHERE m.`permission`='system:login-log:list' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `permission`='system:login-log:clear' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT m.`id`,'','SystemLoginLogUnlock','','解锁登录账号',1,0,3,3,'system:login-log:unlock','',NOW(),NOW(),1 FROM `sys_menu` m WHERE m.`permission`='system:login-log:list' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `permission`='system:login-log:unlock' AND `deleted_at` IS NULL);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 1,m.`id` FROM `sys_menu` m WHERE m.`permission` IN ('system:login-log:delete','system:login-log:clear','system:login-log:unlock') AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=1 AND x.`menu_id`=m.`id`);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) SELECT m.`id`,a.`id` FROM `sys_menu` m JOIN `sys_api` a ON a.`path`='/api/sysLoginLog/delete' AND a.`method`='DELETE' AND a.`deleted_at` IS NULL WHERE m.`permission`='system:login-log:delete' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) SELECT m.`id`,a.`id` FROM `sys_menu` m JOIN `sys_api` a ON a.`path`='/api/sysLoginLog/clear' AND a.`method`='POST' AND a.`deleted_at` IS NULL WHERE m.`permission`='system:login-log:clear' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) SELECT m.`id`,a.`id` FROM `sys_menu` m JOIN `sys_api` a ON a.`path`='/api/sysLoginLog/unlock' AND a.`method`='POST' AND a.`deleted_at` IS NULL WHERE m.`permission`='system:login-log:unlock' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule` (`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) SELECT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','','' FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id` AND m.`deleted_at` IS NULL JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id` AND a.`deleted_at` IS NULL WHERE m.`permission` IN ('system:login-log:delete','system:login-log:clear','system:login-log:unlock') AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` c WHERE c.`ptype`='p' AND c.`v0`=CONCAT('role_',rm.`role_id`) AND c.`v1`=a.`path` AND c.`v2`=a.`method` AND c.`v3`='*');

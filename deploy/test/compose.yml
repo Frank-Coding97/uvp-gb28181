@@ -1,0 +1,63 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
+    container_name: wvp-backend
+    restart: unless-stopped
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "8"
+    env_file:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-backend.env
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:56001:18978"
+      - "0.0.0.0:56002:56002/tcp"
+      - "0.0.0.0:56002:56002/udp"
+    volumes:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/config.yml:/app/config/config.yml:ro
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/data/uploads:/app/resource/public/uploads
+      - /run/uvp:/run/uvp
+    networks:
+      wvp-network:
+        aliases:
+          - uvp-backend
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 18978"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: "uvp-gb28181-frontend:${IMAGE_TAG:-test}"
+    container_name: uvp-frontend
+    restart: unless-stopped
+    ports:
+      - "56000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - wvp-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+networks:
+  wvp-network:
+    external: true
+    name: wvp_docker_compose_wvp-network

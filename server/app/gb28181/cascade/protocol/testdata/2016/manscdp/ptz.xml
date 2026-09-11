@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="GB2312"?>
+<Control>
+  <CmdType>DeviceControl</CmdType>
+  <SN>300</SN>
+  <DeviceID>34020000001320000001</DeviceID>
+  <PTZCmd>A50F0100000000B5</PTZCmd>
+</Control>

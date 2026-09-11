@@ -3,7 +3,6 @@ import { baseUrlApi } from "./utils";
 import { BaseResult } from "./types";
 import { type RoleItem } from "./role";
 import { type DivisionItem } from "./department";
-import { Tenant } from "./tenant";
 export type UserResult = BaseResult<{
     /** `token` */
     accessToken: string;
@@ -42,12 +41,6 @@ export type ProfileItem = {
     description: string;
     roles: Array<RoleItem>;
     department: DivisionItem;
-    tenantID: number;
-    tenantCode: string;
-    tenantName: string;
-    tenantDomain: string;
-    defaultTenant?: Tenant;
-    tenants?: Array<Tenant>;
 }
 
 export type ProfileResult = BaseResult<ProfileItem>;
@@ -149,11 +142,6 @@ export const deleteAccountAPI = (param: any) => {
 // 根据ID获取用户详情
 export const getAccountDetailAPI = (id: number) => {
     return http.request<AccountDetailResult>("get", baseUrlApi(`users/${id}`));
-};
-
-// 切换租户
-export const switchTenantAPI = (tenantId: number) => {
-    return http.request<UserResult>("get", baseUrlApi(`users/switchTenant/${tenantId}`));
 };
 
 // 修改单前登录用户的密码、手机、邮箱

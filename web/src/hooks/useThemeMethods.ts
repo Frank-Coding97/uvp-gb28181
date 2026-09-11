@@ -31,10 +31,12 @@ export const useThemeMethods = () => {
     if (darkMode.value) {
       // 设置为暗黑主题
       document.body.setAttribute("arco-theme", "dark");
+      document.body.removeAttribute("uvp-dark-style");
       asideDark.value = false; // 黑暗模式与侧边栏深色互斥
     } else {
       // 恢复亮色主题
       document.body.removeAttribute("arco-theme");
+      document.body.removeAttribute("uvp-dark-style");
     }
     // 黑暗模式切换后需要更新主题色
     setThemeColor();

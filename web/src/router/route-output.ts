@@ -4,6 +4,10 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { deepClone } from "@/utils/index";
 import { arrayFlattened } from "@/utils/tree-tools";
+import { resolveMediaRouteRenderKey } from "./media-route-identity";
+
+/** Compatibility routes exist only long enough to replace into a canonical workbench URL. */
+export const shouldSkipRouteHistory = (route: { meta?: { legacyMedia?: boolean } }) => route.meta?.legacyMedia === true;
 
 /**
  * 统一处理所有的路由跳转：当前路由高亮、tabs栏数据
@@ -23,13 +27,15 @@ export const currentlyRoute = (current: any) => {
     }
     // 存入当前路由-高亮
     store.setCurrentRoute(route);
+    // 兼容页只做 replace，不进入 tabs 或 keep-alive，避免后退回跳和重复标签。
+    if (shouldSkipRouteHistory(route)) return;
     // 如果是外链路由则不做后续任何缓存操作，条件: 有外链 && 非内嵌
     if (route.meta.link && !route.meta.iframe) return;
     // 存入tabs栏数据，条件：开启tabs
     if (isTabs.value && !route.meta.isFull) store.setTabs(route);
     // 不缓存路由 || 不渲染tabs ，符合任意条件则不缓存路由
     if (!route.meta.keepAlive || !isTabs.value) return;
-    store.setRoutePaths(route.path); // 缓存路由
+    store.setRoutePaths(resolveMediaRouteRenderKey(current)); // 缓存路由
 };
 
 /**

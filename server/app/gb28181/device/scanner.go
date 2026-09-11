@@ -1,0 +1,95 @@
+package device
+
+import (
+	"context"
+	"time"
+
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+
+	"go.uber.org/zap"
+)
+
+// OfflineScanner 离线扫描器:周期从事实(keepalive_time)重新判定,把超时的在线设备置离线
+// 无状态:每轮都从 DB 事实重算,进程重启不影响正确性
+type OfflineScanner struct {
+	interval     time.Duration
+	timeoutCount int
+	grace        int
+	stop         chan struct{}
+	done         chan struct{}
+}
+
+// NewOfflineScanner 创建离线扫描器
+func NewOfflineScanner(intervalSeconds, timeoutCount, graceSeconds int) *OfflineScanner {
+	if intervalSeconds <= 0 {
+		intervalSeconds = 30
+	}
+	if timeoutCount <= 0 {
+		timeoutCount = 3
+	}
+	if graceSeconds < 0 {
+		graceSeconds = 0
+	}
+	return &OfflineScanner{
+		interval:     time.Duration(intervalSeconds) * time.Second,
+		timeoutCount: timeoutCount,
+		grace:        graceSeconds,
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
+	}
+}
+
+// Start 启动周期扫描(独立 goroutine)
+func (s *OfflineScanner) Start() {
+	go func() {
+		defer close(s.done)
+		ticker := time.NewTicker(s.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stop:
+				return
+			case <-ticker.C:
+				s.scanOnce()
+			}
+		}
+	}()
+}
+
+// Stop 停止扫描
+func (s *OfflineScanner) Stop() {
+	close(s.stop)
+	<-s.done
+}
+
+// scanOnce 执行一次扫描:查 status=1 但心跳超时的设备,置离线
+func (s *OfflineScanner) scanOnce() {
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.device.scanner")
+	stale, err := gbmodels.ListStaleOnline(ctx, s.timeoutCount, s.grace)
+	if err != nil {
+		logger.Error("GB28181 离线扫描:查询超时设备失败",
+			zap.String("event", "gb28181.device.scanner.query_failed"), logging.Error(err))
+		return
+	}
+	for _, d := range stale {
+		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
+			logger.Error("GB28181 离线扫描:置离线失败",
+				zap.String("event", "gb28181.device.scanner.mark_offline_failed"),
+				zap.String("device_id", d.DeviceID), logging.Error(err))
+			continue
+		}
+		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
+		logger.Info("GB28181 设备超时离线",
+			zap.String("event", "gb28181.device.scanner.device_offline"),
+			zap.String("stage", "device_status"), zap.String("outcome", "succeeded"), zap.String("reason_code", "heartbeat_timeout"),
+			zap.String("device_id", d.DeviceID))
+	}
+}
+
+// ScanOnceForTest 导出单次扫描供测试调用
+func (s *OfflineScanner) ScanOnceForTest() {
+	s.scanOnce()
+}

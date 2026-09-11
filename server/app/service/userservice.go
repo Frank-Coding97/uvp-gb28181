@@ -20,8 +20,8 @@ func NewUserService() *User {
 func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.UserProfile, err error) {
 
 	user := models.NewUser()
-	err = user.Find(c, func(d *gorm.DB) *gorm.DB {
-		return d.Preload("Department").Preload("Roles").Preload("Tenant").Where("id = ?", userID)
+	err = user.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
+		return d.Preload("Department").Preload("Roles").Where("id = ?", userID)
 	})
 	if err != nil {
 		return
@@ -48,7 +48,7 @@ func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.User
 
 		// 查询角色关联的菜单ID
 		roleMenuList := models.NewSysRoleMenuList()
-		err = roleMenuList.Find(c, func(db *gorm.DB) *gorm.DB {
+		err = roleMenuList.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 			return db.Where("role_id IN ?", roleIDs)
 		})
 		if err != nil {
@@ -59,10 +59,10 @@ func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.User
 			menuIDs := roleMenuList.Map(func(roleMenu *models.SysRoleMenu) uint {
 				return roleMenu.MenuID
 			})
-			// 查询按钮类型的菜单（type=3）
+			// 查询已授权且带权限标识的菜单和按钮
 			buttonMenus := models.NewSysMenuList()
-			err = buttonMenus.Find(c, func(db *gorm.DB) *gorm.DB {
-				return db.Select("permission").Where("id IN ? AND type = ? AND permission !=''", menuIDs, 3)
+			err = buttonMenus.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
+				return db.Select("permission").Where("id IN ? AND type IN ? AND permission !=''", menuIDs, []int{2, 3})
 			})
 			if err != nil {
 				return

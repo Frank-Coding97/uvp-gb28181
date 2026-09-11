@@ -45,15 +45,10 @@ export default {
         ["watermark gap"]: "watermark gap",
         ["system settings"]: "system settings",
         ["anti-debugging"]: "anti-debugging",
-        ["please select"]: "please select",
-        ["global-tenant"]: "Global Tenant",
-        ["switch-tenant"]: "Switch Tenant",
-        ["switch-tenant-title"]: "Switch Tenant",
-        ["switch-tenant-confirm"]: "Are you sure you want to switch to tenant \"{name}\"?",
-        ["switch-global-tenant-confirm"]: "Are you sure you want to switch to global tenant?"
+        ["please select"]: "please select"
     },
     menu: {
-        ["home"]: "home",
+        ["home"]: "Dashboard",
         ["file"]: "file",
         ["document-library"]: "document-library",
         ["table"]: "table",
@@ -147,7 +142,6 @@ export default {
         ["file-manager"]: "file manager",
         ["api-management"]: "api management",
         ["plugin-example"]: "plugin example",
-        ["tenant"]: "tenant management",
         ["codegen"]: "code generation",
         ["plugins-manager"]: "plugins manager",
         ["params-manager"]: "params manager",

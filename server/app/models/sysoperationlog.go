@@ -24,7 +24,6 @@ type SysOperationLog struct {
 	Duration     int64  `gorm:"column:duration;comment:操作耗时(毫秒)" json:"duration"`
 	ErrorMsg     string `gorm:"column:error_msg;type:text;comment:错误信息" json:"errorMsg"`
 	Location     string `gorm:"column:location;size:100;comment:操作地点" json:"location"`
-	TenantID     uint   `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
 }
 
 // TableName 设置表名

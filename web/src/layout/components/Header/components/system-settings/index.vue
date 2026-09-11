@@ -13,10 +13,6 @@
           <a-switch v-model="isAccordion" />
         </div>
         <div class="flex-row">
-          <div>{{ $t(`system.breadcrumb`) }}</div>
-          <a-switch v-model="isBreadcrumb" />
-        </div>
-        <div class="flex-row">
           <div>{{ $t(`system.tab bar`) }}</div>
           <a-switch v-model="isTabs" @change="tabsChange" />
         </div>
@@ -79,7 +75,6 @@ const routerStore = useRouteConfigStore();
 const {
   collapsed,
   isAccordion,
-  isBreadcrumb,
   isTabs,
   isFooter,
   watermark,

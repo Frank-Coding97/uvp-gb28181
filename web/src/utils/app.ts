@@ -51,9 +51,7 @@ export function handleUrl(url: string, baseUrl = '') {
         return url
     }
 
-    if (!baseUrl) {
-        baseUrl = import.meta.env.VITE_APP_BASE_URL
-    }
+    baseUrl = baseUrl || import.meta.env.VITE_APP_BASE_URL || "";
 
     // 规范化基础URL和路径
     const normalizedBase = baseUrl.replace(/\/$/, '');
@@ -68,50 +66,49 @@ export function handleUrl(url: string, baseUrl = '') {
     }
 }
 
-/**
- * 复制文本到剪贴板
- * @param text 要复制的文本
- * @returns Promise<boolean> 复制是否成功
- */
-export async function copyTextToClipboard(text: string): Promise<boolean> {
+/** 使用 Clipboard API,失败时回退到 textarea + execCommand. */
+export async function writeTextToClipboard(text: string): Promise<boolean> {
     try {
-        // 使用现代Clipboard API
-        await navigator.clipboard.writeText(text);
-        Message.success("链接已复制到剪贴板");
-        return true;
-    } catch (error) {
-        // Clipboard API可能因为权限问题失败，尝试备选方案
-        console.error("Clipboard API failed, trying fallback...", error);
-        try {
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-
-            // 避免滚动到底部
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
-
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-
-            const successful = document.execCommand('copy');
-            document.body.removeChild(textArea);
-
-            if (successful) {
-                Message.success("链接已复制到剪贴板");
-                return true;
-            } else {
-                Message.error("复制链接失败");
-                return false;
-            }
-        } catch (fallbackError) {
-            console.error("Fallback failed:", fallbackError);
-            Message.error("复制链接失败");
-            return false;
+        // 使用现代 Clipboard API
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
         }
+    } catch (error) {
+        // Clipboard API 可能因为权限问题失败,继续尝试备选方案
+        console.error("Clipboard API failed, trying fallback...", error);
     }
+
+    let textArea: HTMLTextAreaElement | null = null;
+    try {
+        textArea = document.createElement("textarea");
+        textArea.value = text;
+
+        // 避免滚动到底部
+        textArea.style.top = "0";
+        textArea.style.left = "0";
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        return document.execCommand("copy");
+    } catch (error) {
+        console.error("Fallback failed:", error);
+        return false;
+    } finally {
+        textArea?.remove();
+    }
+}
+
+/** 复制文本并显示通用结果提示. */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+    const successful = await writeTextToClipboard(text);
+    if (successful) Message.success("链接已复制到剪贴板");
+    else Message.error("复制链接失败");
+    return successful;
 }
 
 // 节流的 Modal.confirm 函数，每3秒最多调用一次

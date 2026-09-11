@@ -1,5 +1,5 @@
 server:
-  appdebug: true   # 设置程序所处的模式，debug=true 调试模式，日志优先显示在控制台， debug=false 非调试模式，日志将写入日志文件
+  appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志由 logs.level / logs.outputs 控制，与本开关无关
   cachetype: "redis" #缓存模式 memory OR redis
   syslog: false  # 是否开启系统日志
   notcheckuser: []    # 不检查权限的用户（api、菜单及数据权限均不检查），例如：[1]
@@ -53,6 +53,7 @@ httpserver:
   write_timeout: 30   # TCP写入超时(秒)
   idle_timeout: 60    # TCP空闲连接超时(秒)
   handler_timeout: 30 #  请求处理超时(秒)，超过该时间，将返回超时错误
+  trustedproxies: [] # 明确配置反向代理 IP/CIDR；为空时不信任 X-Forwarded-For
 token:
   jwttokensignkey:  "CHANGE_ME_TO_A_RANDOM_SECRET"   # ⚠️ 部署前必须改成项目专属随机字符串(token 加密签名,泄露=任何人可伪造 token)
   jwttokenexpire:  43200    #设置token过期时间，单位秒 示例:43200=12小时
@@ -70,15 +71,19 @@ redis:
   connfailretrytimes: 3    #从连接池获取连接失败，最大重试次数
   reconnectinterval: 1     # 从连接池获取连接失败，每次重试之间间隔的秒数
 logs:
-  ginlogname: "/resource/logs/gin.log"                  #设置 gin 框架的接口访问日志，v1.5.xx 以后的版本不再生成gin原生的接口访问日志
-  zaplogname: "/resource/logs/ginfast.log"    #设置项目骨架运行时日志文件名，注意该名称不要与上一条重复 ,避免和 gin 框架的日志掺杂一起，造成混乱。
-  textformat: "console"                                   #记录日志的格式，参数选项：console、json ， console 表示一般的文本格式
-  timeprecision: "second"                   #记录日志时，相关的时间精度，该参数选项：second  、 millisecond ， 分别表示 秒 和 毫秒 ,默认为毫秒级别
-  level: "info"                                      #日志级别，参数选项：debug、info、warn、error、fatal、panic，默认为 info, 开发、测试及生产环境建议分别设置为 debug、info、warn
-  maxsize: 5                                             #每个日志的最大尺寸(以MB为单位）， 超过该值，系统将会自动进行切割
-  maxbackups: 7                                        #保留旧日志最大个数
-  maxage: 15                                            #保留旧日志最大天数
-  compress: false                                      #日志备份时，是否进行压缩
+  outputs: [file, stdout]     # 开发默认；直接部署用 [file]，容器用 [stdout]
+  filepath: "./resource/logs/ginfast.log" # 显式绝对路径也支持；不再生成独立 gin 日志
+  textformat: "console"      # 文件：console/json；生产建议 json
+  stdoutformat: "console"    # stdout：console/json；容器建议 json
+  level: "info"              # debug/info/warn/error；变更日志配置需重启
+  modules:
+    access: "info"           # 独立于根 level，保留访问摘要
+    scheduler: "info"
+  routes: false               # 是否输出路由登记日志，不控制调试接口
+  maxsize: 5                  # 单文件 MiB
+  maxbackups: 7               # 归属当前 writer 的备份上限，旧历史文件保留
+  maxage: 15                  # 备份保留天数
+  compress: false
 casbin:
   autoloadpolicyseconds: 120 # 扫描数据库策略的频率(单位：秒)
   tableprefix: "sys_"
@@ -213,13 +218,91 @@ upload:
 #代码生成
 gen:
   # 前端代码生成路径
-  dir: "../ginfast-tenant-ui"
+  dir: "../uvp-gb28181-ui"
 
 # 任务调度器配置
 scheduler:
-  # 日志配置
-  log:
-    dir: "/resource/logs/scheduler"  # 日志目录
-    level: "info"                     # 日志级别: debug, info, warn, error, fatal
+  # 调度日志统一使用 logs.outputs；级别在 logs.modules.scheduler 配置
   # 任务结果通道缓冲大小
   job_results_buffer_size: 1000       # 任务结果通道缓冲大小，默认1000
+
+# GB28181 国标平台配置
+#
+# 2026-07-20 起 SIP 配置改由管理员首次登录时的引导页录入(权威源:gb_sip_config 表).
+# YAML 层不再持有 SIP 明文字段. 老 stack 升级会由 setup.MigrateYAMLToDB 一次性搬迁.
+# 老部署环境如果仍然通过 YAML 供参数,升级到本版本后请手动进入引导页确认或修改.
+gb28181:
+  enabled: true              # 是否启用国标 SIP 服务;关闭后 HTTP 依然运行,SIP 相关路由返 503
+  sip_command_timeout_sec: 10 # 出站 SIP 命令默认等待时间，范围 1-300 秒
+  # SIP 原始报文诊断模块。默认关闭；日志写入当前业务数据库。
+  trace:
+    enabled: false
+    queue_capacity: 8192
+    batch_size: 500
+    flush_interval_ms: 500
+    encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"
+    retention_days: 7
+  device:
+    default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
+    keepalive_interval: 60   # 设备心跳周期(秒)
+    keepalive_timeout_count: 3 # 连续丢失阈值,超过判离线
+    keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
+    offline_scan_interval: 30 # 离线扫描周期(秒)
+    sync_channels_on_online: true # 设备上线或离线恢复时同步 Catalog 通道
+    online_on_heartbeat: true # 收到心跳时将离线设备恢复为在线；关闭后仍更新时间但不恢复状态
+    preallocation_mode: false # 开启后仅允许设备表中预先存在的国标 ID 注册
+  catalog:
+    ignore_channel_offline_status_notify: false # 兼容错误状态上报：忽略 Catalog NOTIFY 的 OFF/VLOST/DEFECT
+  alarm:
+    save_messages: true # 是否将设备报警通知写入报警记录；关闭后仍接收和解析通知
+  position_history:
+    enabled: true             # 是否保存位置历史轨迹；关闭后仍更新最新位置
+    retention_days: 7         # 历史轨迹保留天数，范围 1-365
+  sdp:
+    extension_enabled: false  # 部分设备需要的扩展 SDP 媒体编码兼容模式，一般无需开启
+  ptz:
+    default_speed_level: 6    # 云台控制界面默认速度档位，范围 1-10
+  # ZLMediaKit 媒体服务器 — 首次部署 seed(数据面)
+  #
+  # 仅作 meta_node 表为空时的 seed 兜底:启动时若 DB 已存在节点,本配置忽略,
+  # 运行时通过"流媒体节点"UI 管理多节点。yaml 改值不会影响已 seed 节点。
+  zlm:
+    host: "127.0.0.1"             # ZLM 地址
+    receivehost: ""               # 设备收流地址,留空跟随 host
+    playbackhost: ""              # 播放访问地址,可填公网 IP 或域名,留空跟随 host
+    httpport: 18080               # ZLM HTTP API 端口
+    secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
+    rtpport: 40000                # RTP 单端口收流
+  # 媒体/Hook 配置
+  media:
+    hookbaseurl: ""               # 推荐:完整回调根,如 https://hook.example.com/index/hook
+    hookrequiretls: false          # 公网部署必须设 true；内网/VPN 可按安全边界保留 false
+    hookhost: "127.0.0.1"         # 兼容旧配置:hookbaseurl 为空时与 hookport 派生 HTTP 回调根
+    hookport: 8280                 # 兼容旧配置:后端 HTTP 端口
+    streamnonereadertimeout: 20   # 无人观看多少秒后断流
+    rtpservertimeout: 15          # RTP 收流超时(秒)
+  # 设备/NVR 本地录像查询。时间输入按平台时区墙钟解释，不按浏览器时区转换。
+  record_query:
+    timezone: "Asia/Shanghai"     # 显式 IANA 时区；非法值会阻止查询/回放 runtime 装配
+    timeout_sec: 15               # 必须小于 httpserver.handler_timeout
+    max_range_hours: 24
+    max_active_queries: 128
+    max_records_per_query: 20000
+    result_ttl_sec: 1800
+  playback:
+    media_wait_sec: 10            # SIP 成功后等待回放媒体上线
+    idle_timeout_sec: 60          # 无控制/读取活动后的回收时间
+    max_session_sec: 86400        # 单会话绝对上限，不超过 24 小时
+  play:
+    auth:
+      enabled: false              # 播放地址鉴权，默认关闭以兼容现网
+      bind_client_ip: false       # 可选 IP 绑定，仅在 enabled=true 时生效
+      ttl_seconds: 120            # 播放凭证有效期，前端可配置 60-3600 秒
+      active_key: ""              # 首次完成 SIP 引导时由服务端自动生成；不得复用 JWT/ZLM secret
+      previous_key: ""            # 密钥轮换宽限期旧密钥，可留空
+  recording:
+    reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务
+    catalog_reconcile_interval_sec: 21600 # 录像文件目录周期对账(秒);0 只禁周期,保留手动对账
+    catalog_periodic_lookback_days: 2     # 周期对账逻辑回看天数
+    catalog_manual_lookback_days: 7       # 首次/手动对账默认逻辑回看天数
+    capability_key_env: "UVP_CLOUD_RECORDING_CAPABILITY_KEY" # 可选覆盖；未配置时自动从 JWT 根密钥派生，禁止复用 JWT/ZLM secret

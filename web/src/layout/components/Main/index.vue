@@ -1,25 +1,30 @@
 <template>
-  <a-watermark :content="watermark" v-bind="watermarkConfig">
-    <a-layout-content class="layout-main-content">
-      <Tabs v-if="isTabs" />
-      <router-view v-slot="{ Component, route }">
-        <s-main-transition>
-          <keep-alive :include="cacheRoutes">
-            <component :is="createComponentWrapper(Component, route)" :key="route.fullPath" v-if="refreshPage" />
-          </keep-alive>
-        </s-main-transition>
-      </router-view>
-    </a-layout-content>
-  </a-watermark>
+  <div class="layout-main-shell">
+    <a-watermark :content="watermark" v-bind="watermarkConfig" class="layout-main-watermark">
+      <a-layout-content class="layout-main-content">
+        <router-view v-slot="{ Component, route }">
+          <s-main-transition>
+            <keep-alive :include="cacheRoutes">
+              <component
+                :is="createComponentWrapper(Component, route)"
+                :key="resolveMediaRouteRenderKey(route)"
+                v-if="refreshPage"
+              />
+            </keep-alive>
+          </s-main-transition>
+        </router-view>
+      </a-layout-content>
+    </a-watermark>
+  </div>
 </template>
 
 <script setup lang="ts">
-import Tabs from "@/layout/components/Tabs/index.vue";
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useRouteConfigStore } from "@/store/modules/route-config";
+import { resolveMediaRouteRenderKey } from "./mediaRouteKey";
 const themeStore = useThemeConfig();
-let { refreshPage, isTabs, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
+let { refreshPage, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
 const routerStore = useRouteConfigStore();
 const { cacheRoutes } = storeToRefs(routerStore);
 
@@ -30,9 +35,9 @@ const createComponentWrapper = (component: any, route: any) => {
   // 守卫：组件不存在（如路由未匹配到）则直接返回
   if (!component) return;
   // 如果路由未开启 keepAlive 缓存，则无需包装，直接渲染原始组件
-  if (!route.meta?.keepAlive) return h(component);
-  // 使用路由完整路径（含参数）作为包装器的唯一标识名
-  const wrapperName = route.fullPath;
+  if (!route.meta?.keepAlive) return component;
+  // 包装器名称、组件 key 与 keep-alive include 必须使用同一个路由身份。
+  const wrapperName = resolveMediaRouteRenderKey(route);
   // 从缓存 Map 中查找是否已存在该路径对应的包装器
   let wrapper = wrapperMap.get(wrapperName);
   if (!wrapper) {
@@ -41,8 +46,9 @@ const createComponentWrapper = (component: any, route: any) => {
     // 将包装器存入 Map 缓存，避免重复创建
     wrapperMap.set(wrapperName, wrapper);
   }
-  // 渲染包装器组件（而非直接渲染原始组件），使 keep-alive 能按 fullPath 独立缓存
-  return h(wrapper);
+  // 返回包装器组件定义，让 <component :is> 能正确应用 :key，
+  // 避免返回 VNode 时 key 被忽略导致快速切换白屏
+  return wrapper;
 };
 
 // 水印配置
@@ -53,17 +59,29 @@ const watermarkConfig = computed(() => {
     gap: watermarkGap.value
   };
 });
-
-watch(watermarkConfig, newv => {
-  console.log(newv);
-});
 </script>
 
 <style lang="scss" scoped>
+.layout-main-shell {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.layout-main-watermark) {
+  flex: 1;
+  height: 100%;
+}
+
 .layout-main-content {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 // 修改左侧滚动条宽度-主要针对main窗口内的滚动条

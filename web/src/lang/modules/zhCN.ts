@@ -45,15 +45,10 @@ export default {
         ["watermark gap"]: "水印间隙",
         ["system settings"]: "系统设置",
         ["anti-debugging"]: "防调试",
-        ["please select"]: "请选择",
-        ["global-tenant"]: "全局租户",
-        ["switch-tenant"]: "切换租户",
-        ["switch-tenant-title"]: "切换租户",
-        ["switch-tenant-confirm"]: "确定要切换到租户 \"{name}\" 吗？",
-        ["switch-global-tenant-confirm"]: "确定要切换到全局租户吗？"
+        ["please select"]: "请选择"
     },
     menu: {
-        ["home"]: "首页",
+        ["home"]: "仪表盘",
         ["file"]: "文件管理",
         ["document-library"]: "文件库",
         ["table"]: "列表管理",
@@ -147,7 +142,6 @@ export default {
         ["file-manager"]: "文件管理",
         ["api-management"]: "接口管理",
         ["plugin-example"]: "插件示例",
-        ["tenant"]: "租户管理",
         ["codegen"]: "代码生成",
         ["plugins-manager"]: "插件管理",
         ["params-manager"]: "参数管理",

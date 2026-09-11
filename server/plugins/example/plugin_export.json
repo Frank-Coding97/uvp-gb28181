@@ -6,8 +6,8 @@
     "email": "ginfast@example.com",
     "url": "https://example.com",
     "dependencies": {
-        "ginfast-tenant": "^1.0.0",
-        "ginfast-tenant-ui": "^1.0.0"
+        "uvp-gb28181": "^1.0.0",
+        "uvp-gb28181-ui": "^1.0.0"
     },
     "exportDirs": [    
         "plugins/example/",

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="GB18030"?>
+<Response>
+  <CmdType>Catalog</CmdType>
+  <SN>101</SN>
+  <DeviceID>34020000002000000001</DeviceID>
+  <SumNum>2</SumNum>
+  <DeviceList Num="1"><Item><DeviceID>34020000001320000002</DeviceID></Item></DeviceList>
+</Response>

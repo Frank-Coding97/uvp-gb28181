@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -33,7 +34,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 	}
 
 	// 获取数据库连接
-	db := app.DB()
+	db := app.DBContext(ctx)
 
 	// 开始事务
 	tx := db.WithContext(ctx).Begin()
@@ -43,12 +44,12 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.ZapLog.Error("批量插入代码生成配置事务回滚", zap.Any("recover", r))
+			app.Log(ctx).Error("批量插入代码生成配置事务回滚", zap.String("event", "sysgenservice.batchinsert.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
 	// 创建代码生成服务实例
-	codeGenService := NewCodeGenService()
+	codeGenService := NewCodeGenService().WithContext(ctx)
 
 	// 记录成功和失败的表
 	successTables := make([]string, 0)
@@ -59,7 +60,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 		// 获取表注释
 		describe, err := codeGenService.GetTableComment(database, tableName)
 		if err != nil {
-			app.ZapLog.Error("获取表注释失败", zap.String("table", tableName), zap.Error(err))
+			app.Log(ctx).Error("获取表注释失败", zap.String("event", "sysgenservice.batchinsert.error"), zap.String("table", tableName), logging.Error(err))
 			describe = tableName // 使用表名作为表注释
 		}
 
@@ -132,7 +133,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 
 // insertTableFields 插入表的字段信息到sys_gen_field表
 func (sgs *SysGenService) insertTableFields(ctx context.Context, tx *gorm.DB, database, tableName string, genID uint) error {
-	codeGenService := NewCodeGenService()
+	codeGenService := NewCodeGenService().WithContext(ctx)
 	// 获取表的字段信息
 	columns, err := codeGenService.GetTableColumns(database, tableName)
 	if err != nil {
@@ -174,13 +175,12 @@ func (sgs *SysGenService) insertTableFields(ctx context.Context, tx *gorm.DB, da
 			field.GoType = column.GoType()
 			field.FrontType = column.FrontendType()
 			field.GormTag = column.BuildGormTag()
-			// 添加逻辑：非created_at updated_at deleted_at created_by tenant_id 字段时 ，require  list_show form_show query_show 为1
+			// 添加逻辑：非created_at updated_at deleted_at created_by 字段时，require/list_show/form_show/query_show 为1
 			ignoreFields := map[string]bool{
 				"created_at": true,
 				"updated_at": true,
 				"deleted_at": true,
 				"created_by": true,
-				"tenant_id":  true,
 			}
 
 			if !ignoreFields[column.ColumnName] {
@@ -207,7 +207,7 @@ func (sgs *SysGenService) insertTableFields(ctx context.Context, tx *gorm.DB, da
 // RefreshFields 根据sys_gen的id刷新数据库表字段信息
 func (sgs *SysGenService) RefreshFields(ctx context.Context, id uint) error {
 	// 获取数据库连接
-	db := app.DB()
+	db := app.DBContext(ctx)
 
 	// 根据ID查询sys_gen配置
 	var sysGen models.SysGen
@@ -223,7 +223,7 @@ func (sgs *SysGenService) RefreshFields(ctx context.Context, id uint) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.ZapLog.Error("刷新字段信息事务回滚", zap.Any("recover", r))
+			app.Log(ctx).Error("刷新字段信息事务回滚", zap.String("event", "sysgenservice.refreshfields.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
@@ -270,7 +270,7 @@ func (sgs *SysGenService) Update(ctx context.Context, req *models.SysGenUpdateRe
 	}
 
 	// 开始事务
-	db := app.DB()
+	db := app.DBContext(ctx)
 	tx := db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("开始事务失败: %v", tx.Error)
@@ -278,7 +278,7 @@ func (sgs *SysGenService) Update(ctx context.Context, req *models.SysGenUpdateRe
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.ZapLog.Error("更新代码生成配置事务回滚", zap.Any("recover", r))
+			app.Log(ctx).Error("更新代码生成配置事务回滚", zap.String("event", "sysgenservice.update.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
@@ -420,7 +420,7 @@ func (sgs *SysGenService) Update(ctx context.Context, req *models.SysGenUpdateRe
 // Delete 根据ID删除代码生成配置和关联的字段信息(硬删除)
 func (sgs *SysGenService) Delete(ctx context.Context, id uint) error {
 	// 开始事务
-	db := app.DB()
+	db := app.DBContext(ctx)
 	tx := db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("开始事务失败: %v", tx.Error)
@@ -428,7 +428,7 @@ func (sgs *SysGenService) Delete(ctx context.Context, id uint) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.ZapLog.Error("删除代码生成配置事务回滚", zap.Any("recover", r))
+			app.Log(ctx).Error("删除代码生成配置事务回滚", zap.String("event", "sysgenservice.delete.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 

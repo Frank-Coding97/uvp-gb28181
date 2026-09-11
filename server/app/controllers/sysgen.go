@@ -1,9 +1,9 @@
 package controllers
 
 import (
+	"strconv"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -54,13 +54,13 @@ func (sgc *SysGenController) List(c *gin.Context) {
 
 	// 获取总数
 	genList := models.NewSysGenList()
-	total, err := genList.GetTotal(c, query)
+	total, err := genList.GetTotal(c.Request.Context(), query)
 	if err != nil {
 		sgc.FailAndAbort(c, "获取代码生成配置总数失败", err)
 	}
 
 	// 获取分页数据及数据权限
-	err = genList.Find(c, req.Paginate(), query, func(d *gorm.DB) *gorm.DB {
+	err = genList.Find(c.Request.Context(), req.Paginate(), query, func(d *gorm.DB) *gorm.DB {
 		return d
 	})
 	if err != nil {
@@ -93,7 +93,7 @@ func (sgc *SysGenController) BatchInsert(c *gin.Context) {
 	}
 
 	// 调用服务层方法进行批量插入
-	result, err := sgc.service.BatchInsert(c, &req)
+	result, err := sgc.service.BatchInsert(c.Request.Context(), &req)
 	if err != nil {
 		sgc.FailAndAbort(c, "批量插入代码生成配置失败", err)
 	}
@@ -131,7 +131,7 @@ func (sgc *SysGenController) GetByID(c *gin.Context) {
 	// 创建SysGen实例并查找数据
 	gen := models.NewSysGen()
 	gen.ID = uint(genID)
-	err = gen.Find(c, func(db *gorm.DB) *gorm.DB {
+	err = gen.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 		return db.Preload("SysGenFields").Preload("RelationTreeGen") // 预加载字段信息
 	})
 	if err != nil {
@@ -166,7 +166,7 @@ func (sgc *SysGenController) Update(c *gin.Context) {
 	}
 
 	// 调用服务层方法进行更新
-	err := sgc.service.Update(c, &req)
+	err := sgc.service.Update(c.Request.Context(), &req)
 	if err != nil {
 		sgc.FailAndAbort(c, err.Error(), err)
 	}
@@ -201,7 +201,7 @@ func (sgc *SysGenController) Delete(c *gin.Context) {
 	}
 
 	// 调用服务层方法进行删除
-	err = sgc.service.Delete(c, uint(genID))
+	err = sgc.service.Delete(c.Request.Context(), uint(genID))
 	if err != nil {
 		sgc.FailAndAbort(c, "删除代码生成配置失败", err)
 	}
@@ -229,7 +229,7 @@ func (sgc *SysGenController) RefreshFields(c *gin.Context) {
 	}
 
 	// 调用服务层方法刷新字段信息
-	err := sgc.service.RefreshFields(c, req.ID)
+	err := sgc.service.RefreshFields(c.Request.Context(), req.ID)
 	if err != nil {
 		sgc.FailAndAbort(c, "刷新字段信息失败", err)
 	}

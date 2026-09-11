@@ -23,8 +23,6 @@ type User struct {
 	CreatedBy   uint          `gorm:"column:created_by;default:0;comment:创建人" json:"createdBy"`
 	Roles       SysRoleList   `gorm:"many2many:sys_user_role;foreignKey:id;joinForeignKey:user_id;references:id;joinReferences:role_id" json:"roles"`
 	Department  SysDepartment `gorm:"foreignKey:dept_id;references:id" json:"department"`
-	TenantID    uint          `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
-	Tenant      Tenant        `gorm:"foreignKey:tenant_id;references:id" json:"tenant"`
 }
 
 // TableName 设置User表名

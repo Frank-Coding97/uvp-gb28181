@@ -1,0 +1,122 @@
+/*
+ * UVP Message / Notification 样式覆盖
+ *
+ * 沿用 --uvp-* token 系统, 让 Arco 的 Message / Notification 与
+ * 面板、抽屉、表格保持一致的圆角/阴影/边框语言。
+ */
+
+.arco-message-list {
+  z-index: 10000;
+}
+
+.arco-message {
+  min-width: 240px !important;
+  padding: 10px 16px !important;
+  color: var(--uvp-text-primary) !important;
+  background: var(--uvp-panel-bg) !important;
+  border: 1px solid var(--uvp-panel-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px -12px rgb(15 23 42 / 18%), 0 4px 10px -4px rgb(15 23 42 / 10%) !important;
+  backdrop-filter: blur(6px);
+  transition: all 0.2s ease;
+}
+
+.arco-message + .arco-message {
+  margin-top: 8px;
+}
+
+.arco-message-icon {
+  margin-right: 10px !important;
+  font-size: 16px !important;
+  line-height: 1;
+}
+
+.arco-message-content {
+  color: var(--uvp-text-primary) !important;
+  font-size: 13px !important;
+  font-weight: 550 !important;
+  line-height: 20px !important;
+  letter-spacing: 0.1px;
+}
+
+/* 成功 */
+.arco-message-success {
+  background: color-mix(in srgb, var(--uvp-brand-cyan) 6%, var(--uvp-panel-bg)) !important;
+  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 26%, var(--uvp-panel-border)) !important;
+}
+.arco-message-success .arco-message-icon {
+  color: var(--uvp-brand-cyan) !important;
+}
+.arco-message-success .arco-message-content {
+  color: var(--uvp-text-primary) !important;
+}
+
+/* 信息 */
+.arco-message-info {
+  background: color-mix(in srgb, var(--uvp-brand) 6%, var(--uvp-panel-bg)) !important;
+  border-color: color-mix(in srgb, var(--uvp-brand) 26%, var(--uvp-panel-border)) !important;
+}
+.arco-message-info .arco-message-icon {
+  color: var(--uvp-brand) !important;
+}
+
+/* 警告 */
+.arco-message-warning {
+  background: color-mix(in srgb, var(--uvp-warning) 8%, var(--uvp-panel-bg)) !important;
+  border-color: var(--uvp-warning-border) !important;
+}
+.arco-message-warning .arco-message-icon {
+  color: var(--uvp-warning) !important;
+}
+
+/* 错误 */
+.arco-message-error {
+  background: color-mix(in srgb, var(--uvp-danger) 8%, var(--uvp-panel-bg)) !important;
+  border-color: var(--uvp-danger-border) !important;
+}
+.arco-message-error .arco-message-icon {
+  color: var(--uvp-danger) !important;
+}
+
+/* 加载 */
+.arco-message-loading .arco-message-icon {
+  color: var(--uvp-brand) !important;
+}
+
+/* Notification (顺手对齐, 结构和 message 类似) */
+.arco-notification {
+  padding: 14px 16px;
+  color: var(--uvp-text-primary);
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px -14px rgb(15 23 42 / 22%), 0 4px 10px -4px rgb(15 23 42 / 10%);
+}
+
+.arco-notification-title {
+  color: var(--uvp-text-primary);
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.arco-notification-content {
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.arco-notification-success {
+  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 26%, var(--uvp-panel-border));
+}
+.arco-notification-success .arco-notification-icon {
+  color: var(--uvp-brand-cyan);
+}
+.arco-notification-info .arco-notification-icon {
+  color: var(--uvp-brand);
+}
+.arco-notification-warning .arco-notification-icon {
+  color: var(--uvp-warning);
+}
+.arco-notification-error .arco-notification-icon {
+  color: var(--uvp-danger);
+}
