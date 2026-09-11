@@ -23,6 +23,14 @@ const (
 	PTZActionRightDown PTZAction = "right_down"
 	PTZActionZoomIn    PTZAction = "zoom_in"
 	PTZActionZoomOut   PTZAction = "zoom_out"
+
+	// Standard GB/T 28181 Annex A FI (focus/iris) instructions. They ride the
+	// same A5 front-end command as directional PTZ, so the basic control path
+	// carries them directly.
+	PTZActionFocusFar  PTZAction = "focus_far"
+	PTZActionFocusNear PTZAction = "focus_near"
+	PTZActionIrisOpen  PTZAction = "iris_open"
+	PTZActionIrisClose PTZAction = "iris_close"
 )
 
 // PTZCommand is encoded as the GB28181 front-end PTZ command string.
@@ -36,10 +44,6 @@ type PTZCommand struct {
 type PTZExtendedAction string
 
 const (
-	PTZActionFocusNear        PTZExtendedAction = "focus_near"
-	PTZActionFocusFar         PTZExtendedAction = "focus_far"
-	PTZActionIrisOpen         PTZExtendedAction = "iris_open"
-	PTZActionIrisClose        PTZExtendedAction = "iris_close"
 	PTZActionSetPreset        PTZExtendedAction = "preset_set"
 	PTZActionCallPreset       PTZExtendedAction = "preset_call"
 	PTZActionDeletePreset     PTZExtendedAction = "preset_delete"
@@ -195,6 +199,14 @@ func ParsePTZAction(value string) (PTZAction, error) {
 		return PTZActionZoomIn, nil
 	case "zoom_out", "out", "缩小":
 		return PTZActionZoomOut, nil
+	case "focus_far", "远焦":
+		return PTZActionFocusFar, nil
+	case "focus_near", "近焦":
+		return PTZActionFocusNear, nil
+	case "iris_open", "光圈开":
+		return PTZActionIrisOpen, nil
+	case "iris_close", "光圈关":
+		return PTZActionIrisClose, nil
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 动作: %q", value)
 	}
@@ -311,19 +323,20 @@ func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID stri
 		parameter1 = byte(command.ID)
 	case PTZActionScanStop:
 		// As with cruise stop, stop scanning uses the standard stop command.
-	case PTZActionFocusNear, PTZActionFocusFar, PTZActionIrisOpen, PTZActionIrisClose:
+	case PTZExtendedAction(PTZActionFocusNear), PTZExtendedAction(PTZActionFocusFar),
+		PTZExtendedAction(PTZActionIrisOpen), PTZExtendedAction(PTZActionIrisClose):
 		if command.Profile == nil {
 			return nil, fmt.Errorf("PTZ lens operation requires profile")
 		}
 		var code *byte
 		switch command.Action {
-		case PTZActionFocusNear:
+		case PTZExtendedAction(PTZActionFocusNear):
 			code = command.Profile.FocusNearInstruction
-		case PTZActionFocusFar:
+		case PTZExtendedAction(PTZActionFocusFar):
 			code = command.Profile.FocusFarInstruction
-		case PTZActionIrisOpen:
+		case PTZExtendedAction(PTZActionIrisOpen):
 			code = command.Profile.IrisOpenInstruction
-		case PTZActionIrisClose:
+		case PTZExtendedAction(PTZActionIrisClose):
 			code = command.Profile.IrisCloseInstruction
 		}
 		if code == nil {
@@ -368,6 +381,14 @@ func encodePTZ(command PTZCommand) (string, error) {
 		instruction = 0x10
 	case PTZActionZoomOut:
 		instruction = 0x20
+	case PTZActionFocusFar:
+		instruction = 0x41
+	case PTZActionFocusNear:
+		instruction = 0x42
+	case PTZActionIrisOpen:
+		instruction = 0x44
+	case PTZActionIrisClose:
+		instruction = 0x48
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 动作: %q", command.Action)
 	}

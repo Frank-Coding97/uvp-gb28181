@@ -126,10 +126,14 @@ func TestBuildPTZControl_LeftUp(t *testing.T) {
 
 func TestParsePTZAction(t *testing.T) {
 	tests := map[string]PTZAction{
-		"left":     PTZActionLeft,
-		"RIGHT-UP": PTZActionRightUp,
-		"zoom_out": PTZActionZoomOut,
-		"停止":       PTZActionStop,
+		"left":       PTZActionLeft,
+		"RIGHT-UP":   PTZActionRightUp,
+		"zoom_out":   PTZActionZoomOut,
+		"focus_far":  PTZActionFocusFar,
+		"focus_near": PTZActionFocusNear,
+		"iris_open":  PTZActionIrisOpen,
+		"iris_close": PTZActionIrisClose,
+		"停止":         PTZActionStop,
 	}
 	for input, want := range tests {
 		got, err := ParsePTZAction(input)
@@ -155,6 +159,44 @@ func TestBuildPTZControlRejectsInvalidInput(t *testing.T) {
 	}
 	if _, err := BuildPTZControl("C", 1, PTZCommand{Action: PTZActionLeft, Speed: 256}); err == nil {
 		t.Fatal("speed > 255 should fail")
+	}
+}
+
+func TestBuildPTZControlStandardFIInstructions(t *testing.T) {
+	tests := []struct {
+		name   string
+		action PTZAction
+		want   string
+	}{
+		{"focus far", PTZActionFocusFar, "A50F014108080006"},
+		{"focus near", PTZActionFocusNear, "A50F014208080007"},
+		{"iris open", PTZActionIrisOpen, "A50F014408080009"},
+		{"iris close", PTZActionIrisClose, "A50F01480808000D"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := BuildPTZControl("C", 9, PTZCommand{Action: tt.action, Speed: 8})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var control struct {
+				PTZCmd string `xml:"PTZCmd"`
+			}
+			if err := newDecoder(body).Decode(&control); err != nil {
+				t.Fatal(err)
+			}
+			if control.PTZCmd != tt.want {
+				t.Fatalf("PTZCmd=%s, want %s", control.PTZCmd, tt.want)
+			}
+			// Round-trip: the built command must decode back to the same action.
+			parsed, err := ParsePTZCommand(control.PTZCmd)
+			if err != nil {
+				t.Fatalf("ParsePTZCommand(%s) error = %v", control.PTZCmd, err)
+			}
+			if parsed.Action != string(tt.action) {
+				t.Fatalf("round-trip action = %q, want %q", parsed.Action, tt.action)
+			}
+		})
 	}
 }
 
@@ -199,7 +241,7 @@ func TestBuildExtendedPTZControl_RejectsNonStandardCruiseActions(t *testing.T) {
 }
 
 func TestBuildExtendedPTZControl_RequiresProfileForLens(t *testing.T) {
-	_, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: PTZActionFocusNear, Speed: 8})
+	_, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: PTZExtendedAction(PTZActionFocusNear), Speed: 8})
 	if err == nil || !strings.Contains(err.Error(), "profile") {
 		t.Fatalf("expected profile error, got %v", err)
 	}
