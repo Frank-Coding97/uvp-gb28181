@@ -44,6 +44,99 @@ func TestCascadeInvitePeerAcceptsPublishedTargetAndSeparatesPorts(t *testing.T) 
 	require.False(t, matchCascadeInvitePeer(req, p))
 }
 
+// 线上实况：220 WVP 双网卡（局域网 192.168.10.220 + VPN 10.8.0.2）。
+// 它回复我们的 REGISTER 用 192.168.10.220:8160，主动发 INVITE 却用 10.8.0.2:8160
+// （源地址只取决于到我们这边的路由）。旧口径要求源 IP 等于配置 Host，
+// 于是这类报文一律 403 unknown or disabled upstream，而配置里填哪个 IP 都不对。
+func TestCascadeInvitePeerToleratesUpstreamSignallingFromAnotherAddress(t *testing.T) {
+	p := model.GbCascadePlatform{UpstreamServerID: "35020000002000000001", LocalDeviceID: "34020000002000000002", Host: "192.168.10.220", Port: 8160, Transport: "UDP"}
+	req := sip.NewRequest(sip.INVITE, sip.Uri{User: "34020000001320000001", Host: "10.8.0.3"})
+	req.AppendHeader(&sip.FromHeader{Address: sip.Uri{User: p.UpstreamServerID}})
+	req.AppendHeader(&sip.ToHeader{Address: req.Recipient})
+	req.SetSource("10.8.0.2:8160")
+	req.SetTransport("UDP")
+
+	// 严格口径仍然不认 —— 保留这条断言，防止有人把源地址校验整个删掉。
+	require.False(t, matchCascadeInvitePeer(req, p))
+
+	peer, ok := cascadePeerFromRequest(req)
+	require.True(t, ok)
+	require.True(t, peer.identify(p))
+
+	// 端口是同一上级平台多接入实例之间唯一的分辨依据，不能松。
+	p.Port = 5060
+	require.False(t, peer.identify(p))
+	p.Port = 8160
+	// From 用户是身份本身，同样不能松。
+	p.UpstreamServerID = "34020000002000000001"
+	require.False(t, peer.identify(p))
+	p.UpstreamServerID = "35020000002000000001"
+	// 传输层也要一致，否则 UDP 报文能冒充同端口的 TCP 接入。
+	p.Transport = "TCP"
+	require.False(t, peer.identify(p))
+}
+
+func TestCascadeVideoAcceptsUpstreamSignallingFromAnotherAddress(t *testing.T) {
+	h, _, stops := newCascadeVideoTestRuntime(t)
+	// 同一个 Call-ID 的 ACK/BYE 也从这张网卡回来，必须一起放行，否则建不起来也拆不掉。
+	req := cascadeTestRequestFrom("10.8.0.2", 15060, "0200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	finished := make(chan struct{})
+	go func() { h.Handle(req, tx); close(finished) }()
+
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 200, res.StatusCode)
+
+	ack := cascadeDialogRequest(req, res, sip.ACK)
+	require.True(t, h.Handle(ack, tx))
+
+	bye := cascadeDialogRequest(req, res, sip.BYE)
+	byeTx := siptest.NewServerTxRecorder(bye)
+	defer byeTx.Terminate()
+	require.True(t, h.Handle(bye, byeTx))
+	require.Equal(t, 200, byeTx.Result()[0].StatusCode)
+
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session not released")
+	}
+	select {
+	case ssrc := <-stops:
+		require.Equal(t, "0200000001", ssrc)
+	case <-time.After(time.Second):
+		t.Fatal("sender not stopped")
+	}
+}
+
+// 退回身份匹配不等于「谁的报文都收」：同一上级 ID 的两个接入实例必须仍然分得清。
+func TestCascadeVideoRejectsAmbiguousUpstreamIdentity(t *testing.T) {
+	h, db, _ := newCascadeVideoTestRuntime(t)
+	require.NoError(t, db.Create(&model.GbCascadePlatform{
+		Name: "upper1-shadow", UpstreamServerID: "34020000002000000001", LocalDeviceID: "34020000002000000002",
+		LocalDomain: "3402000000", Host: "10.9.9.9", Port: 15060, Transport: "UDP",
+		LocalSIPIP: "192.168.10.106", LocalSIPPort: 5062, Enabled: true,
+	}).Error)
+
+	req := cascadeTestRequestFrom("10.8.0.2", 15060, "0200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
+}
+
+// 源地址对不上就退回身份匹配，但身份本身（From 用户）仍是硬要求。
+func TestCascadeVideoRejectsUpstreamWithUnknownFromUser(t *testing.T) {
+	h, _, _ := newCascadeVideoTestRuntime(t)
+	req := cascadeTestRequestFrom("10.8.0.2", 15060, "0200000001")
+	req.ReplaceHeader(sip.NewHeader("From", "<sip:35020000002000000001@3502000000>;tag=upper"))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
+}
+
 type cascadeInviteTestNodes struct{ value *node.Node }
 
 func (n cascadeInviteTestNodes) Get(id int64) (*node.Node, bool) { return n.value, id == n.value.ID }
@@ -65,18 +158,24 @@ func (tx *cascadeInviteTestTx) Respond(r *sip.Response) error {
 	return err
 }
 func cascadeTestRequest(port int, ssrc string) *sip.Request {
+	return cascadeTestRequestFrom("192.168.10.220", port, ssrc)
+}
+
+// cascadeTestRequestFrom 允许指定上游的源地址：上级平台双网卡/走 VPN 时，
+// 它主动发 INVITE 的源 IP 可以不是配置里的 Host。
+func cascadeTestRequestFrom(sourceHost string, port int, ssrc string) *sip.Request {
 	req := sip.NewRequest(sip.INVITE, sip.Uri{User: "34020000001320000010", Host: "192.168.10.106"})
-	req.AppendHeader(sip.NewHeader("Via", fmt.Sprintf("SIP/2.0/UDP 192.168.10.220:%d;branch=z9hG4bK-%s", port, ssrc)))
+	req.AppendHeader(sip.NewHeader("Via", fmt.Sprintf("SIP/2.0/UDP %s:%d;branch=z9hG4bK-%s", sourceHost, port, ssrc)))
 	req.AppendHeader(sip.NewHeader("From", "<sip:34020000002000000001@3402000000>;tag=upper"))
 	req.AppendHeader(sip.NewHeader("To", "<sip:34020000001320000010@3402000000>"))
-	req.AppendHeader(sip.NewHeader("Contact", fmt.Sprintf("<sip:34020000002000000001@192.168.10.220:%d>", port)))
+	req.AppendHeader(sip.NewHeader("Contact", fmt.Sprintf("<sip:34020000002000000001@%s:%d>", sourceHost, port)))
 	req.AppendHeader(sip.NewHeader("Subject", "34020000001320000010:"+ssrc+",34020000002000000001:0"))
 	cid := sip.CallIDHeader("same-call-id")
 	req.AppendHeader(&cid)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
-	req.SetSource(fmt.Sprintf("192.168.10.220:%d", port))
+	req.SetSource(fmt.Sprintf("%s:%d", sourceHost, port))
 	req.SetTransport("UDP")
-	req.SetBody([]byte("v=0\r\no=34020000002000000001 0 0 IN IP4 192.168.10.220\r\ns=Play\r\nc=IN IP4 192.168.10.220\r\nt=0 0\r\nm=video 30000 RTP/AVP 96\r\na=recvonly\r\na=rtpmap:96 PS/90000\r\ny=" + ssrc + "\r\n"))
+	req.SetBody([]byte("v=0\r\no=34020000002000000001 0 0 IN IP4 " + sourceHost + "\r\ns=Play\r\nc=IN IP4 " + sourceHost + "\r\nt=0 0\r\nm=video 30000 RTP/AVP 96\r\na=recvonly\r\na=rtpmap:96 PS/90000\r\ny=" + ssrc + "\r\n"))
 	return req
 }
 func cascadeAwaitResponse(t *testing.T, tx *cascadeInviteTestTx) *sip.Response {

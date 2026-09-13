@@ -24,17 +24,88 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
+// cascadePeer 是上级平台在本次事务里实际使用的网络身份。
+//
+// ⚠️ 不要拿源 IP 当身份。同一台上级平台可能双网卡 / 经 NAT / 走 VPN，
+// 主动发起请求时的源地址只取决于到我们这边的路由，跟它回复我们时用的源地址
+// 可以不是一个（220 WVP 实测：回我们 REGISTER 用 192.168.10.220:8160，
+// 发 INVITE 却用 VPN 地址 10.8.0.2:8160）。把 IP 写进匹配条件，
+// 结果就是「同一台平台一半的报文认不出来」，而配置里填哪个 IP 都不对。
+//
+// 稳定的身份是：From 用户（上级 SIP 服务器 ID）+ 端口 + 传输层。
+// 端口不能省 —— 同一台上级平台可以挂多个接入实例，端口是唯一区分依据。
+type cascadePeer struct {
+	host      string
+	port      int
+	transport string
+	fromUser  string
+}
+
+func (p cascadePeer) String() string {
+	if p.host == "" && p.fromUser == "" {
+		return "unparsed"
+	}
+	return fmt.Sprintf("%s:%d/%s from=%s", p.host, p.port, p.transport, p.fromUser)
+}
+
+func cascadePeerFromRequest(req *sip.Request) (cascadePeer, bool) {
+	if req == nil || req.From() == nil {
+		return cascadePeer{}, false
+	}
+	host, portText, err := net.SplitHostPort(req.Source())
+	if err != nil {
+		return cascadePeer{}, false
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return cascadePeer{}, false
+	}
+	return cascadePeer{
+		host:      host,
+		port:      port,
+		transport: strings.ToLower(strings.TrimSpace(req.Transport())),
+		fromUser:  req.From().Address.User,
+	}, true
+}
+
+// identify 按身份认定平台，不看源 IP。上游换网卡/经 NAT 时靠它兜底。
+func (p cascadePeer) identify(platform model.GbCascadePlatform) bool {
+	return p.fromUser == platform.UpstreamServerID &&
+		p.port == platform.Port &&
+		p.transport == strings.ToLower(strings.TrimSpace(platform.Transport))
+}
+
+// match 是严格口径：身份一致之外，源 IP 也要对上配置的 Host。
+func (p cascadePeer) match(platform model.GbCascadePlatform) bool {
+	return p.identify(platform) && strings.EqualFold(p.host, platform.Host)
+}
+
+// sameSession 用于建立后的 ACK/BYE 比对。同一个对话框的后续请求同样可能
+// 换一张网卡发出来，所以只认 From + 端口 + 传输层；端口是阻止
+// 「另一个接入实例拿同一个 Call-ID 拆本对话框」的那道闸。
+func (p cascadePeer) sameSession(observed cascadePeer) bool {
+	return p.fromUser == observed.fromUser && p.port == observed.port && p.transport == observed.transport
+}
+
 // The SIP flow identifies the upper platform. To/Request-URI identifies its
 // published channel, which is resolved only inside that platform's projection.
 func matchCascadeInvitePeer(req *sip.Request, p model.GbCascadePlatform) bool {
-	host, port, err := net.SplitHostPort(req.Source())
-	return err == nil && req.From() != nil && req.From().Address.User == p.UpstreamServerID &&
-		strings.EqualFold(host, p.Host) && port == strconv.Itoa(p.Port) && strings.EqualFold(req.Transport(), p.Transport)
+	peer, ok := cascadePeerFromRequest(req)
+	return ok && peer.match(p)
+}
+
+// matchCascadeSessionPeer 判定 ACK/BYE 是否属于本会话。
+func matchCascadeSessionPeer(req *sip.Request, session *cascadeVideoSession) bool {
+	peer, ok := cascadePeerFromRequest(req)
+	return ok && peer.sameSession(session.peer)
 }
 
 type cascadeVideoSession struct {
-	dialog       *sipgo.DialogServerSession
-	platform     model.GbCascadePlatform
+	dialog   *sipgo.DialogServerSession
+	platform model.GbCascadePlatform
+	// peer 是 INVITE 到达时看到的实际网络身份，后续 ACK/BYE 拿它比对，
+	// 而不是拿可能已经过期的平台配置里的 Host。
+	peer         cascadePeer
 	cancel       context.CancelFunc
 	acknowledged atomic.Bool
 }
@@ -62,6 +133,7 @@ const (
 	cascadeVideoEventStateSaveFailed  = "cascade.video.state_save_failed"
 	cascadeVideoEventReleaseTimeout   = "cascade.video.release_timeout"
 	cascadeVideoEventByeFailed        = "cascade.video.bye_failed"
+	cascadeVideoEventPeerMismatch     = "cascade.video.peer_mismatch"
 )
 
 var cascadeVideo atomic.Pointer[cascadeVideoRuntime]
@@ -122,7 +194,7 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 	if session == nil {
 		return false
 	}
-	if !matchCascadeInvitePeer(req, session.platform) {
+	if !matchCascadeSessionPeer(req, session) {
 		if req.Method != sip.ACK {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Forbidden", nil))
 		}
@@ -149,8 +221,13 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 
 func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction) {
 	responseRequest := req
+	// platformID 只在认定平台后才有值；认定之前它是 0，但报文里必须带上
+	// 实际观测到的 peer —— 否则线上只留一行 {"platformId": 0}，
+	// 而真正需要的信息（源地址/端口/传输层/From）一个都没有，没法排查。
+	var platformID uint64
 	fail := func(code int, err error) {
-		h.log(cascadeVideoEventFailed, 0, err)
+		peer, _ := cascadePeerFromRequest(req)
+		h.log(cascadeVideoEventFailed, platformID, err, zap.String("peer", peer.String()))
 		_ = tx.Respond(sip.NewResponseFromRequest(responseRequest, code, "Cascade Play Failed", nil))
 	}
 	if req.To() == nil || req.From() == nil || req.CallID() == nil || req.CSeq() == nil {
@@ -166,6 +243,11 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(488, err)
 		return
 	}
+	peer, ok := cascadePeerFromRequest(req)
+	if !ok {
+		fail(400, fmt.Errorf("unparsable INVITE source"))
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	platforms, err := h.store.ListPlatforms(ctx)
@@ -174,19 +256,42 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	var platform *model.GbCascadePlatform
+	var strictCount int
+	var identityOnly []model.GbCascadePlatform
 	for i := range platforms {
-		if matchCascadeInvitePeer(req, platforms[i]) {
-			if platform != nil {
-				fail(403, fmt.Errorf("ambiguous upstream"))
-				return
+		switch {
+		case peer.match(platforms[i]):
+			strictCount++
+			if platform == nil {
+				platform = &platforms[i]
 			}
-			platform = &platforms[i]
+		case peer.identify(platforms[i]):
+			identityOnly = append(identityOnly, platforms[i])
+		}
+	}
+	if strictCount > 1 {
+		fail(403, fmt.Errorf("ambiguous upstream: %d platforms match %s", strictCount, peer))
+		return
+	}
+	if strictCount == 0 {
+		// 源 IP 与配置不符：上游双网卡 / 走 VPN / 经 NAT 时会有这一半的报文。
+		// 退一步按身份认定，但仍然要求唯一 —— 认不出来好过认错。
+		if len(identityOnly) > 1 {
+			fail(403, fmt.Errorf("ambiguous upstream: %d platforms match %s", len(identityOnly), peer))
+			return
+		}
+		if len(identityOnly) == 1 {
+			platform = &identityOnly[0]
+			h.log(cascadeVideoEventPeerMismatch, platform.ID, nil,
+				zap.String("peer", peer.String()),
+				zap.String("configuredHost", identityOnly[0].Host))
 		}
 	}
 	if platform == nil || !platform.Enabled {
-		fail(403, fmt.Errorf("unknown or disabled upstream"))
+		fail(403, fmt.Errorf("unknown or disabled upstream (platforms=%d, peer=%s)", len(platforms), peer))
 		return
 	}
+	platformID = platform.ID
 	subject := req.GetHeader("Subject")
 	if subject == nil {
 		fail(400, fmt.Errorf("missing Subject"))
@@ -230,7 +335,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	responseRequest = dialog.InviteRequest
 	sessionCtx, sessionCancel := context.WithCancel(dialog.Context())
-	session := &cascadeVideoSession{dialog: dialog, platform: *platform, cancel: func() { sessionCancel(); tx.Terminate() }}
+	session := &cascadeVideoSession{dialog: dialog, platform: *platform, peer: peer, cancel: func() { sessionCancel(); tx.Terminate() }}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -353,11 +458,15 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	completed = true
 }
 
-func (h *cascadeVideoRuntime) log(event string, platformID uint64, err error) {
+// log 记录一条级联点播事件。extra 用于在固定字段之外附加这次调用特有的信息
+// （例如观测到的 peer 地址），避免把结构化数据拼进消息文本里。
+func (h *cascadeVideoRuntime) log(event string, platformID uint64, err error, extra ...zap.Field) {
 	if app.ZapLog == nil {
 		return
 	}
-	fields := []zap.Field{zap.Uint64("platformId", platformID)}
+	fields := make([]zap.Field, 0, len(extra)+2)
+	fields = append(fields, extra...)
+	fields = append(fields, zap.Uint64("platformId", platformID))
 	if err != nil {
 		fields = append(fields, zap.Error(err))
 	}
@@ -378,6 +487,10 @@ func (h *cascadeVideoRuntime) log(event string, platformID uint64, err error) {
 		app.ZapLog.Warn("等待级联点播释放超时", append(fields, zap.String("event", "cascade.video.release_timeout"))...)
 	case cascadeVideoEventByeFailed:
 		app.ZapLog.Warn("级联配置更新时发送 BYE 失败", append(fields, zap.String("event", "cascade.video.bye_failed"))...)
+	case cascadeVideoEventPeerMismatch:
+		// 源 IP 与平台配置的 Host 不符但身份（From/端口/传输层）唯一命中：
+		// 上游双网卡 / 走 VPN / 经 NAT 时时会这样，属正常放行，不是告警。
+		app.ZapLog.Info("级联点播源地址与配置的 Host 不符，按 From/端口/传输层认定", append(fields, zap.String("event", "cascade.video.peer_mismatch"))...)
 	}
 }
 func (h *cascadeVideoRuntime) transition(row *model.GbCascadeMediaSession, state *model.CascadeMediaSessionState, to model.CascadeMediaSessionState) bool {
