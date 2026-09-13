@@ -51,6 +51,23 @@ export function validateCascadePlatform(form: { name: string; upstreamServerId: 
   return errors;
 }
 
+/**
+ * 「勾选通道 → 所属设备本地主键」的解析是异步的（每个通道一次设备查询），
+ * 而勾选事件不阻塞保存按钮。保存前必须先把这个集合收敛到空：
+ * 否则 sourceDeviceId 还是 0，会被完整性校验拦下，报
+ * 「部分通道无法关联所属设备，请刷新后重新选择。」——
+ * 那只是请求还在路上，不是数据不对（刷新碰巧让请求落地了，所以看着像"刷新能修"）。
+ */
+export function pendingSourceChannelIds(selectedIds: number[], resolvedSourceDeviceIds: Map<number, number>): number[] {
+  return selectedIds.filter(id => !resolvedSourceDeviceIds.get(id));
+}
+
+/** 报错文案里指认通道：优先国标编码（勾选行的 channelId / 历史投影的 publishedChannelId），兜底用本地主键。 */
+export function channelSourceLabel(channel: { channelId?: string; publishedChannelId?: string } | undefined, fallbackId: number): string {
+  const code = (channel?.channelId || channel?.publishedChannelId || "").trim();
+  return code || `#${fallbackId}`;
+}
+
 /** 编辑弹窗的逐字段错误(硬规则 4:blur 后才显示,提交时全量兜底)。返回的 key 与 form 字段同名。 */
 export function cascadeFormFieldErrors(form: { name: string; upstreamServerId: string; upstreamDomain: string; host: string; localDeviceId: string; localDomain: string; localSipIp: string; mediaAdvertiseIp?: string }, touched: Record<string, boolean>): Record<string, string> {
   const errorOf = (field: string, message: string) => (touched[field] && message) || "";

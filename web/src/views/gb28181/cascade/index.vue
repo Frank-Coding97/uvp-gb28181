@@ -418,7 +418,7 @@ import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
 import SNumberField from "@/components/s-number-field/index.vue";
 import SPasswordField from "@/components/s-password-field/index.vue";
-import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, resolveChannelPTZAllowed, validGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, channelSourceLabel, defaultCascadePlatform, pendingSourceChannelIds, resolveChannelPTZAllowed, validGbId, validateCascadePlatform } from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
 
@@ -829,21 +829,59 @@ function handleChannelPageSizeChange(pageSize: number) {
   void loadShareChannels(1);
 }
 
-async function resolveChannelSourceDevice(channel: ChannelOption) {
-  if (channel.sourceDeviceId) return channel.sourceDeviceId;
+// 设备目录（弹窗打开时按前 50 台加载）里按国标编码反查，命中就不必再打一次网络请求。
+function deviceByCode(deviceCode: string) {
+  if (!deviceCode) return undefined;
+  for (const device of deviceDirectory.values()) {
+    if (device.deviceId === deviceCode) return device;
+  }
+  return undefined;
+}
+
+// 同一通道的解析只跑一次：重复勾选/取消勾选要复用同一条在途请求，
+// 否则保存前无法判断"解析还没回来"和"解析彻底失败"。
+const pendingChannelSourceResolutions = new Map<number, Promise<number>>();
+
+async function fetchChannelSourceDevice(channel: ChannelOption) {
   const existing = (shares.value?.channels || []).find(item => item.sourceChannelId === channel.id);
   if (existing?.sourceDeviceId) {
     channel.sourceDeviceId = existing.sourceDeviceId;
     return channel.sourceDeviceId;
   }
-  const response: any = await listDevicePage({ page: 1, pageSize: 1, q: channel.deviceId });
+  const cached = deviceByCode(channel.deviceId);
+  if (cached) {
+    channel.sourceDeviceId = cached.id;
+    return channel.sourceDeviceId;
+  }
+  // 不要用 pageSize:1 —— 命中多于一条时会被截断，拿到的可能不是这台设备，
+  // 后面的精确匹配就会落空（软删设备与重新注册设备同编码时尤其明显）。
+  const response: any = await listDevicePage({ page: 1, pageSize: 20, q: channel.deviceId });
   const payload = unwrapPage<{ list?: ShareDevice[] }>(response) || {};
-  const device = payload.list?.find(item => item.deviceId === channel.deviceId);
+  const device = (payload.list || []).find(item => item.deviceId === channel.deviceId);
   if (device) {
     deviceDirectory.set(device.id, device);
     channel.sourceDeviceId = device.id;
   }
   return channel.sourceDeviceId;
+}
+
+function resolveChannelSourceDevice(channel: ChannelOption): Promise<number> {
+  if (channel.sourceDeviceId) return Promise.resolve(channel.sourceDeviceId);
+  const pending = pendingChannelSourceResolutions.get(channel.id);
+  if (pending) return pending;
+  const task = fetchChannelSourceDevice(channel).finally(() => pendingChannelSourceResolutions.delete(channel.id));
+  pendingChannelSourceResolutions.set(channel.id, task);
+  return task;
+}
+
+// 保存前的收敛点：先等在途请求落地，再对仍缺所属设备的勾选项补算一次。
+// 等不到才交给 saveShares 报错（此时是真解析不出来，不是还没解析）。
+async function settleChannelSourceResolutions() {
+  await Promise.allSettled([...pendingChannelSourceResolutions.values()]);
+  const targets = pendingSourceChannelIds(selectedChannelIds.value, channelSourceDeviceIds.value)
+    .map(id => channelRows.value.find(channel => channel.id === id))
+    .filter((channel): channel is ChannelOption => Boolean(channel));
+  await Promise.allSettled(targets.map(channel => resolveChannelSourceDevice(channel)));
 }
 
 async function handleChannelSelectionChange(keys: Array<string | number>) {
@@ -852,7 +890,7 @@ async function handleChannelSelectionChange(keys: Array<string | number>) {
   keys.forEach(key => next.add(Number(key)));
   selectedChannelIds.value = [...next];
   selectedChannelIds.value.forEach(ensureChannelPTZPermission);
-  await Promise.all(channelRows.value.filter(channel => next.has(channel.id)).map(resolveChannelSourceDevice));
+  await settleChannelSourceResolutions();
 }
 
 async function openShare(platform: CascadePlatform) {
@@ -864,6 +902,7 @@ async function openShare(platform: CascadePlatform) {
   channelPage.page = 1;
   deviceDirectory.clear();
   channelPTZPermissions.clear();
+  pendingChannelSourceResolutions.clear();
   channelRows.value = [];
   try {
     const projectionResponse: any = await getCascadeShares(platform.id);
@@ -883,6 +922,9 @@ async function saveShares() {
   shareSaving.value = true;
   shareError.value = "";
   try {
+    // 勾选后的「通道 → 所属设备」解析是异步的，用户可能在请求回来前就点了保存。
+    // 先收敛在途/缺失的解析，否则会把"还没解析完"误判成"无法关联所属设备"。
+    await settleChannelSourceResolutions();
     const existingDevices = new Map((shares.value?.devices || []).map(item => [item.sourceDeviceId, item]));
     const existingChannels = new Map((shares.value?.channels || []).map(item => [item.sourceChannelId, item]));
     const allLoadedChannels = [...channelRows.value];
@@ -914,7 +956,12 @@ async function saveShares() {
       };
     });
     if (channelProjection.some(item => !item.sourceDeviceId)) {
-      throw new Error("部分通道无法关联所属设备，请刷新后重新选择。");
+      // 到这里说明真的解析不出所属设备（通道/设备已删除、或不在当前数据范围内），
+      // 报错要指名道姓，别让用户对着"部分通道"猜。
+      const labels = channelProjection
+        .filter(item => !item.sourceDeviceId)
+        .map(item => channelSourceLabel(loadedChannelMap.get(item.sourceChannelId) || existingChannels.get(item.sourceChannelId), item.sourceChannelId));
+      throw new Error(`通道 ${labels.join("、")} 无法关联所属设备，请确认对应设备仍在设备列表中。`);
     }
     if (deviceProjection.some(item => !validGbId(item.publishedDeviceId)) || channelProjection.some(item => !validGbId(item.publishedChannelId))) {
       throw new Error("共享资源存在非 20 位国标编码，请先修正设备或通道编码。");

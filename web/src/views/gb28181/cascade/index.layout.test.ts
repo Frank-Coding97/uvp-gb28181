@@ -100,6 +100,23 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain(".shared-devices-dialog .arco-modal-body");
   });
 
+  it("waits for channel-to-device resolution before judging the share payload", () => {
+    // 勾选后的解析是异步的；保存必须先收敛，否则会把"请求还在路上"
+    // 误判成"部分通道无法关联所属设备"，用户只能靠刷新碰运气。
+    expect(source).toContain("async function settleChannelSourceResolutions()");
+    expect(source).toContain("await settleChannelSourceResolutions();");
+    expect(source).toMatch(/shareSaving\.value = true;[\s\S]*?await settleChannelSourceResolutions\(\);/);
+    expect(source).toContain("pendingChannelSourceResolutions");
+    expect(source).toContain("Promise.allSettled");
+    // 同一通道复用同一条在途请求，并在保存前重新补算仍为空的勾选项。
+    expect(source).toMatch(/async function handleChannelSelectionChange[\s\S]*?await settleChannelSourceResolutions\(\);/);
+    // 失败时指名通道，而不是笼统的"部分通道"。
+    expect(source).not.toContain("部分通道无法关联所属设备，请刷新后重新选择。");
+    expect(source).toContain("channelSourceLabel");
+    // 设备查询不能被 pageSize:1 截断成"另一台设备"。
+    expect(source).not.toContain("pageSize: 1, q: channel.deviceId");
+  });
+
   it("follows the form-input template rules in the platform editor dialog", () => {
     const editorStart = source.indexOf("<a-modal");
     const editor = source.slice(editorStart, source.search(/<a-modal\s+v-model:visible="sharedDevicesVisible"/));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, resolveChannelPTZAllowed, validateCascadePlatform } from "./cascadeState";
+import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, channelSourceLabel, defaultCascadePlatform, pendingSourceChannelIds, resolveChannelPTZAllowed, validateCascadePlatform } from "./cascadeState";
 
 describe("cascade platform state", () => {
   it("maps runtime facts to product conclusions", () => {
@@ -79,6 +79,27 @@ describe("cascade platform state", () => {
     expect(errors.upstreamServerId).toBe("");
     expect(errors.localDeviceId).toBe("");
     expect(errors.mediaAdvertiseIp).toBe("地址格式不正确");
+  });
+
+  // 保存共享前必须先收敛「勾选通道 → 所属设备」：解析是异步的，用户可能在请求
+  // 回来前就点保存，此前会把"还没解析完"误判成"部分通道无法关联所属设备"。
+  it("lists selected channels that still have no resolved source device", () => {
+    const resolved = new Map<number, number>([[3537, 5147], [3539, 5147]]);
+    expect(pendingSourceChannelIds([3537, 3538, 3539], resolved)).toEqual([3538]);
+    expect(pendingSourceChannelIds([3537, 3539], resolved)).toEqual([]);
+    expect(pendingSourceChannelIds([], resolved)).toEqual([]);
+  });
+
+  it("treats a not-yet-resolved selection as pending, not as unresolvable", () => {
+    const stillResolving = new Map<number, number>([[3537, 0]]);
+    expect(pendingSourceChannelIds([3537], stillResolving)).toEqual([3537]);
+  });
+
+  it("names the offending channel by its GB code, falling back to the local id", () => {
+    expect(channelSourceLabel({ channelId: "34020000001320000020" }, 3538)).toBe("34020000001320000020");
+    expect(channelSourceLabel({ publishedChannelId: "34020000001320000010" }, 3539)).toBe("34020000001320000010");
+    expect(channelSourceLabel({ channelId: "  " }, 3538)).toBe("#3538");
+    expect(channelSourceLabel(undefined, 3538)).toBe("#3538");
   });
 
 });
