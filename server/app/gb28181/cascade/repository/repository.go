@@ -16,6 +16,9 @@ var (
 	ErrRevisionConflict       = errors.New("cascade platform revision conflict")
 	ErrInvalidProjection      = errors.New("invalid cascade projection")
 	ErrInvalidMediaTransition = errors.New("invalid cascade media transition")
+	// ErrRetiredPlatformConflict 两条已删除的平台分别占着"名称"与"接入关系"两个
+	// 唯一键位,新建的这条平台无法同时接手两行。详见 findRetiredPlatform。
+	ErrRetiredPlatformConflict = errors.New("cascade platform identity claimed by retired rows")
 )
 
 type PlatformStore interface {
@@ -60,6 +63,10 @@ func NewGormRepository(db *gorm.DB) *GormRepository {
 	return &GormRepository{db: db}
 }
 
+// CreatePlatform 新建一个上级平台。
+//
+// 名称与接入关系都命中"已软删的遗留行"时接手那一行而不是 INSERT —— 否则用户
+// 删掉平台再建一个同名(或同上级地址)的平台会撞 1062。理由见 platform_resurrect.go。
 func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbCascadePlatform) error {
 	row := *platform
 	row.ID = 0
@@ -95,11 +102,23 @@ func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbC
 		row.CreatedAt = now
 	}
 	row.UpdatedAt = now
-	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
-		return err
-	}
-	*platform = row
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 两个唯一索引都不含 deleted_at,软删的平台行会继续占着"名称"和"接入关系"
+		// 两个键位。先认领遗留行,否则删掉再建同名平台会撞 1062(见 platform_resurrect.go)。
+		retired, err := findRetiredPlatform(tx, &row)
+		if err != nil {
+			return err
+		}
+		if retired != nil {
+			if err := resurrectPlatform(tx, &row, retired); err != nil {
+				return err
+			}
+		} else if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		*platform = row
+		return nil
+	})
 }
 
 func (r *GormRepository) FindPlatform(ctx context.Context, platformID uint64) (*model.GbCascadePlatform, error) {
@@ -128,9 +147,19 @@ func (r *GormRepository) ListEnabledPlatforms(ctx context.Context) ([]model.GbCa
 }
 
 // UpdatePlatformConfig intentionally excludes runtime facts. Actor events cannot be overwritten by a stale form post.
+//
+// 改名前先确认目标名称/接入关系没有被一条"已删除"的平台占着:那种 UPDATE 会撞
+// 唯一键,接口只回一句"已存在",而用户翻遍平台列表也找不到那个平台(它已经删了)。
 func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error) {
 	if platform == nil || platform.ID == 0 || expectedRevision == 0 {
 		return nil, ErrRevisionConflict
+	}
+	retired, err := findRetiredPlatform(r.db.WithContext(ctx), platform)
+	if err != nil {
+		return nil, err
+	}
+	if retired != nil {
+		return nil, fmt.Errorf("%w: 目标名称或接入关系仍被已删除的平台 id=%d 占用", ErrRetiredPlatformConflict, retired.ID)
 	}
 	updates := platformConfigUpdates(platform)
 	updates["config_revision"] = gorm.Expr("config_revision + ?", 1)
@@ -395,10 +424,26 @@ func upsertDeviceProjection(tx *gorm.DB, platformID uint64, input DeviceProjecti
 	}
 	now := time.Now().UTC()
 	if result.RowsAffected == 0 {
-		row = model.GbCascadeDeviceProjection{PlatformID: platformID, SourceDeviceID: input.SourceDeviceID, CreatedAt: now, Revision: 1}
+		// 按 source_device_id 查不到,但同一个 published_device_id 可能已经被一条
+		// "源设备早已不存在"的历史投影占着 —— 设备删过又重新接入,gb_device 换了
+		// 自增 id,published id 还是同一个国标号。这条路上 INSERT 必撞
+		// uk_cascade_device_published 报 1062,共享接口只能回 409。
+		// 认领那一行(改写 source_device_id)而不是新建:published id 不抖动,
+		// 行 id 不变,挂在上面的通道投影的 device_projection_id 也不会悬空。
+		claimed, claimErr := claimDeviceProjectionByPublishedID(tx, platformID, input.PublishedDeviceID)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		if claimed != nil {
+			row = *claimed
+			row.Revision++
+		} else {
+			row = model.GbCascadeDeviceProjection{PlatformID: platformID, SourceDeviceID: input.SourceDeviceID, CreatedAt: now, Revision: 1}
+		}
 	} else {
 		row.Revision++
 	}
+	row.SourceDeviceID = input.SourceDeviceID
 	row.PublishedDeviceID = input.PublishedDeviceID
 	row.Name = input.Name
 	row.Manufacturer = input.Manufacturer
@@ -413,6 +458,34 @@ func upsertDeviceProjection(tx *gorm.DB, platformID uint64, input DeviceProjecti
 	row.DeletedAt = gorm.DeletedAt{}
 	if err := tx.Unscoped().Save(&row).Error; err != nil {
 		return nil, err
+	}
+	return &row, nil
+}
+
+// claimDeviceProjectionByPublishedID 找出同一个上级平台上占着这个 published id 的投影行,
+// 供 upsertDeviceProjection 在"按 source_device_id 查不到"时认领。查不到返回 nil。
+//
+// 认领不会抢走活设备的投影:设备的 published_device_id 就是它的国标号,而
+// gb_device.device_id 唯一 —— 还活着的另一台设备不可能正占着这个号。能占着的只可能是
+// 设备自己(那会在按 source_device_id 的查询里命中),或者一条源已消失的历史行。
+//
+// 通道投影不走这条路径:通道的 published id 由 allocatePublishedChannelIDs 统一分配,
+// 撞号在分配阶段就被避让到别的号段,落不到 INSERT 撞键这一步。
+//
+// 用 Limit(1).Find 而不是 First:ErrRecordNotFound 可能被调用方关掉
+// (见 TestReplaceProjectionCreatesRowsWhenRecordNotFoundErrorsAreMasked),
+// 只有 RowsAffected 可靠。
+func claimDeviceProjectionByPublishedID(tx *gorm.DB, platformID uint64, publishedDeviceID string) (*model.GbCascadeDeviceProjection, error) {
+	if publishedDeviceID == "" {
+		return nil, nil
+	}
+	var row model.GbCascadeDeviceProjection
+	result := tx.Unscoped().Where("platform_id = ? AND published_device_id = ?", platformID, publishedDeviceID).Limit(1).Find(&row)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &row, nil
 }

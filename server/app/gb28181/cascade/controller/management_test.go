@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -15,6 +16,21 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
 )
+
+// 两条已删除的平台分别占着名称与接入关系键位时,仓库层报 ErrRetiredPlatformConflict。
+// 接口层必须把它翻成 409 + 可执行的提示,而不是 500「国标级联操作失败」——
+// 用户要做的是改名字或改上级地址,不是去查日志。
+func TestManagementControllerMapsRetiredPlatformConflictToConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	controller := NewManagementController(nil, nil)
+
+	controller.fail(ctx, fmt.Errorf("create platform: %w", repository.ErrRetiredPlatformConflict))
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "已删除的平台占用")
+}
 
 func TestManagementControllerUnconfiguredReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)

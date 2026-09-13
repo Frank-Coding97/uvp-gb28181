@@ -5,9 +5,12 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	gbcascaderepo "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // DeleteDevice 单个设备硬删除(dept-scoped)
@@ -18,9 +21,12 @@ import (
 //   - gb_channel_mount(channel_id 属于被删通道)
 //   - gb_catalog_node(device_id 或 channel_id 引用被删设备/通道)
 //   - gb_anomaly_record(catalog_node_id 引用被删节点)
+//   - gb_cascade_device_projection / gb_cascade_channel_projection(源设备/通道的共享投影)
 //
 // 语义:用户主动删除设备 = 该设备本身消失,所有 mount/node 悬空引用一起清。
 // 跟 catalog notify DEL 的 preserve-multi-mounted 不同(那是"从某目录移除")。
+// 级联共享投影也要一起回收:源已经不存在,这些投影行再没有任何可解释的含义,
+// 留着只会让上级目录里出现永不消失的幽灵资源,并且占死 published id 键位。
 func (dc *DeviceMgmtController) DeleteDevice(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -82,6 +88,7 @@ func (dc *DeviceMgmtController) BatchDeleteDevices(c *gin.Context) {
 //   - gb_channel_mount(所有引用该通道的挂载)
 //   - gb_catalog_node(channel_id 引用该通道)
 //   - gb_anomaly_record(catalog_node_id 引用被删节点)
+//   - gb_cascade_channel_projection(源通道的共享投影)
 func (dc *DeviceMgmtController) DeleteChannel(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -233,6 +240,23 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 			Delete(&gbmodels.GbDevice{}).Error; err != nil {
 			return err
 		}
+
+		// 11. 回收该设备及其通道在各上级平台上的共享投影。
+		// 硬删(不是 active=false),理由见 RetireDeletedSources:两张投影表的唯一索引
+		// 不含 deleted_at,停用/软删的行仍然占着 (platform_id, published_*) 键位,
+		// 设备重新接入后再共享会撞 1062 Duplicate entry,只能回 409。
+		sourceChannelIDs := make([]uint64, 0, len(channelIDs))
+		for _, id := range channelIDs {
+			sourceChannelIDs = append(sourceChannelIDs, uint64(id))
+		}
+		retired, err := gbcascaderepo.RetireDeletedSources(tx, []uint64{uint64(dev.ID)}, sourceChannelIDs)
+		if err != nil {
+			return err
+		}
+		if retired > 0 && app.ZapLog != nil {
+			app.ZapLog.Info("删除设备时回收了级联共享投影",
+				zap.String("deviceCode", dev.DeviceID), zap.Int64("retiredProjections", retired))
+		}
 		return nil
 	})
 }
@@ -293,6 +317,16 @@ func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, i
 			Where("id = ?", ch.ID).
 			Delete(&gbmodels.GbChannel{}).Error; err != nil {
 			return err
+		}
+
+		// 7. 回收该通道在各上级平台上的共享投影(同 deleteDeviceByID 第 11 步)
+		retired, err := gbcascaderepo.RetireDeletedSources(tx, nil, []uint64{uint64(ch.ID)})
+		if err != nil {
+			return err
+		}
+		if retired > 0 && app.ZapLog != nil {
+			app.ZapLog.Info("删除通道时回收了级联共享投影",
+				zap.String("channelCode", ch.ChannelID), zap.Int64("retiredProjections", retired))
 		}
 		return nil
 	})

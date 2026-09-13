@@ -297,6 +297,9 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, repository.ErrRevisionConflict), errors.Is(err, service.ErrPlatformHasActiveSessions), errors.Is(err, service.ErrPlatformDisabled):
 		status = http.StatusConflict
+	case errors.Is(err, repository.ErrRetiredPlatformConflict):
+		// 软删的遗留平台仍占着键位,且名称与接入关系分属两条不同的行,接手不了。
+		status = http.StatusConflict
 	case errors.Is(err, service.ErrRuntimeUnavailable), errors.Is(err, service.ErrCredentialUnavailable):
 		status = http.StatusServiceUnavailable
 	}
@@ -318,6 +321,9 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	}
 	if duplicate {
 		message = "平台名称或上级接入关系已存在，请检查上级地址、端口及平台身份"
+	}
+	if errors.Is(err, repository.ErrRetiredPlatformConflict) {
+		message = "平台名称与上级接入关系分别被两条已删除的平台占用，请修改名称或上级地址后重试"
 	}
 	if app.ZapLog != nil {
 		fields := []zap.Field{zap.String("method", ctx.Request.Method), zap.String("route", ctx.FullPath()), zap.Int("status", status), zap.String("error_type", fmt.Sprintf("%T", err))}
