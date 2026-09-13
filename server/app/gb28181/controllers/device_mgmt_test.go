@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -80,7 +81,11 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
 		&basemodels.User{},
-	 &gbmodels.GbDeviceGrant{}))
+		&gbmodels.GbDeviceGrant{},
+		&cascademodel.GbCascadePlatform{},
+		&cascademodel.GbCascadeDeviceProjection{},
+		&cascademodel.GbCascadeChannelProjection{},
+		&cascademodel.GbCascadeMediaSession{}))
 
 	dmgmt := gbcontrollers.NewDeviceMgmtController()
 	dmgmt.SetDB(func() *gorm.DB { return db })
@@ -108,6 +113,8 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.POST("/device/batch-delete", dmgmt.BatchDeleteDevices)
 		gr.GET("/channels", dmgmt.ListChannels)
 		gr.GET("/channel/:id", dmgmt.GetChannel)
+		gr.DELETE("/channel/:id", dmgmt.DeleteChannel)
+		gr.POST("/channel/batch-delete", dmgmt.BatchDeleteChannels)
 		gr.PATCH("/channel/:id", dmgmt.UpdateChannel)
 		gr.GET("/channel/:id/mounts", dmgmt.ListChannelMounts)
 		gr.GET("/channel/:id/timeline", dmgmt.ChannelTimeline)
