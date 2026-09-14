@@ -35,7 +35,7 @@ func NewRealtimeLogController() *RealtimeLogController { return &RealtimeLogCont
 func (c *RealtimeLogController) Stream(ctx *gin.Context) {
 	claims := common.GetClaims(ctx)
 	if claims == nil || claims.UserID == 0 {
-		ctx.JSON(http.StatusForbidden, gin.H{"message": "无权查看实时业务日志"})
+		ctx.JSON(http.StatusForbidden, gin.H{"message": "无权查看实时控制台日志"})
 		return
 	}
 	if app.CasbinV2 == nil {
@@ -44,11 +44,11 @@ func (c *RealtimeLogController) Stream(ctx *gin.Context) {
 	}
 	roles, err := app.CasbinV2.GetRolesForUserByID(claims.UserID)
 	if err != nil || !containsRole(roles, 1) {
-		ctx.JSON(http.StatusForbidden, gin.H{"message": "首版实时业务日志仅系统管理员可用"})
+		ctx.JSON(http.StatusForbidden, gin.H{"message": "首版实时控制台日志仅系统管理员可用"})
 		return
 	}
 	if app.RealtimeLogHub == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"message": "实时业务日志未启用"})
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"message": "实时控制台日志未启用"})
 		return
 	}
 	if app.TokenService == nil {
@@ -105,9 +105,9 @@ func (c *RealtimeLogController) Stream(ctx *gin.Context) {
 	sub, snapshot, gap := app.RealtimeLogHub.Subscribe(ctx.Request.Context(), filter, since)
 	defer app.RealtimeLogHub.Unsubscribe(sub.ID)
 	startedAt := time.Now()
-	app.Log(ctx.Request.Context()).Named("realtime_log").Info("实时业务日志订阅已建立", zap.String("event", "realtime_log.subscription_started"), zap.Uint("user_id", claims.UserID), zap.String("subscription_id", sub.ID))
+	app.Log(ctx.Request.Context()).Named("realtime_log").Info("实时控制台日志订阅已建立", zap.String("event", "realtime_log.subscription_started"), zap.Uint("user_id", claims.UserID), zap.String("subscription_id", sub.ID))
 	defer func() {
-		app.Log(ctx.Request.Context()).Named("realtime_log").Info("实时业务日志订阅已结束", zap.String("event", "realtime_log.subscription_ended"), zap.Uint("user_id", claims.UserID), zap.String("subscription_id", sub.ID), zap.Uint64("dropped", sub.Dropped()), zap.Duration("duration", time.Since(startedAt)))
+		app.Log(ctx.Request.Context()).Named("realtime_log").Info("实时控制台日志订阅已结束", zap.String("event", "realtime_log.subscription_ended"), zap.Uint("user_id", claims.UserID), zap.String("subscription_id", sub.ID), zap.Uint64("dropped", sub.Dropped()), zap.Duration("duration", time.Since(startedAt)))
 	}()
 	write := func(event string, value any) error {
 		b, err := json.Marshal(value)

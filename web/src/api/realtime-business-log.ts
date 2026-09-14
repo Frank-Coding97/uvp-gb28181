@@ -1,6 +1,6 @@
 import { getAccessToken } from "@/utils/auth";
 
-export type RealtimeLogLevel = "info" | "warn" | "error";
+export type RealtimeLogLevel = "debug" | "info" | "warn" | "error" | "dpanic" | "panic" | "fatal";
 export interface RealtimeBusinessLogEvent {
   schemaVersion: string;
   eventId: string;
@@ -24,6 +24,8 @@ export interface RealtimeBusinessLogEvent {
   reasonCode?: string;
   durationMs?: number;
   message: string;
+  fields?: Record<string, unknown>;
+  stack?: string;
   truncated?: boolean;
 }
 

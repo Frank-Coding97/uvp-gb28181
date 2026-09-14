@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestRealtimeHubSlowSubscriberKeepsLatestAndCountsDrop(t *testing.T) {
 	require.Equal(t, uint64(defaultRealtimeQueue+10), last.Sequence)
 }
 
-func TestRuntimePublishesWhitelistedEventWithBoundIdentity(t *testing.T) {
+func TestRuntimePublishesConsoleEventWithBoundIdentity(t *testing.T) {
 	hub := NewEventHub()
 	cfg := Config{Outputs: []string{"stdout"}, Level: zapcore.DebugLevel, Modules: map[string]zapcore.Level{}, FileFormat: "json", StdoutFormat: "json", MaxSizeMB: 1, MaxBackups: 1, MaxAgeDays: 1}
 	runtime, err := NewRuntime(Options{Config: cfg, Instance: "instance-a", EventHub: hub, Sinks: map[string]zapcore.WriteSyncer{"stdout": zapcore.AddSync(io.Discard)}})
@@ -61,20 +62,113 @@ func TestRuntimePublishesWhitelistedEventWithBoundIdentity(t *testing.T) {
 	}
 }
 
-func TestRuntimeExcludesAccessAuditAndLegacyLogs(t *testing.T) {
-	for _, event := range []string{"http.access", "audit.operation", "legacy.log", "zlm.metrics.sample_failed", "play.reconcile.round_completed"} {
-		_, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.InfoLevel}, []zap.Field{zap.String("event", event)})
-		require.False(t, ok, event)
+func TestRuntimeConsoleMirrorMatchesDualOutputAccessPolicy(t *testing.T) {
+	hub := NewEventHub()
+	cfg := Config{Outputs: []string{"file", "stdout"}, Level: zapcore.InfoLevel, Modules: map[string]zapcore.Level{}, FileFormat: "json", StdoutFormat: "json", MaxSizeMB: 1, MaxBackups: 1, MaxAgeDays: 1}
+	runtime, err := NewRuntime(Options{Config: cfg, Instance: "instance-a", EventHub: hub, Sinks: map[string]zapcore.WriteSyncer{"file": zapcore.AddSync(io.Discard), "stdout": zapcore.AddSync(io.Discard)}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	sub, _, _ := hub.Subscribe(context.Background(), RealtimeFilter{}, 0)
+	t.Cleanup(func() { hub.Unsubscribe(sub.ID) })
+
+	runtime.Root.Named("access").Info("request completed", zap.String("event", "http.access"))
+	runtime.Root.Named("scheduler").Info("round completed")
+
+	select {
+	case event := <-sub.Events:
+		require.Equal(t, "scheduler", event.Module)
+		require.Equal(t, "legacy.log", event.Event)
+	case <-time.After(time.Second):
+		t.Fatal("console log not published")
+	}
+	select {
+	case event := <-sub.Events:
+		t.Fatalf("unexpected console log: %#v", event)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 
-func TestRuntimeExcludesDebugBusinessEvents(t *testing.T) {
-	_, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.DebugLevel}, []zap.Field{zap.String("event", "gb28181.play.requested")})
+func TestRuntimeConsoleMirrorKeepsAccessInStdoutOnlyMode(t *testing.T) {
+	hub := NewEventHub()
+	cfg := Config{Outputs: []string{"stdout"}, Level: zapcore.InfoLevel, Modules: map[string]zapcore.Level{}, FileFormat: "json", StdoutFormat: "json", MaxSizeMB: 1, MaxBackups: 1, MaxAgeDays: 1}
+	runtime, err := NewRuntime(Options{Config: cfg, Instance: "instance-a", EventHub: hub, Sinks: map[string]zapcore.WriteSyncer{"stdout": zapcore.AddSync(io.Discard)}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	sub, _, _ := hub.Subscribe(context.Background(), RealtimeFilter{}, 0)
+	t.Cleanup(func() { hub.Unsubscribe(sub.ID) })
+
+	runtime.Root.Named("access").Info("request completed", zap.String("event", "http.access"))
+	select {
+	case event := <-sub.Events:
+		require.Equal(t, "http.access", event.Event)
+	case <-time.After(time.Second):
+		t.Fatal("stdout-only access log not published")
+	}
+}
+
+func TestRuntimeConsoleMirrorPublishesOnlySanitizedFields(t *testing.T) {
+	hub := NewEventHub()
+	cfg := Config{Outputs: []string{"stdout"}, Level: zapcore.InfoLevel, Modules: map[string]zapcore.Level{}, FileFormat: "json", StdoutFormat: "json", MaxSizeMB: 1, MaxBackups: 1, MaxAgeDays: 1}
+	runtime, err := NewRuntime(Options{Config: cfg, Instance: "instance-a", EventHub: hub, Sinks: map[string]zapcore.WriteSyncer{"stdout": zapcore.AddSync(io.Discard)}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	sub, _, _ := hub.Subscribe(context.Background(), RealtimeFilter{}, 0)
+	t.Cleanup(func() { hub.Unsubscribe(sub.ID) })
+
+	runtime.Root.Info("service ready",
+		zap.String("event", "service.ready"),
+		zap.String("access_token", "secret-token"),
+		zap.String("endpoint", "https://example.test/live?token=secret-query&x=1"),
+	)
+	event := <-sub.Events
+	require.Equal(t, "[REDACTED]", event.Fields["access_token"])
+	require.NotContains(t, event.Fields["endpoint"], "secret-query")
+}
+
+func TestRealtimeConsoleIncludesAllEnabledLogCategories(t *testing.T) {
+	for _, event := range []string{"audit.operation", "legacy.log", "zlm.metrics.sample_failed", "play.reconcile.round_completed", "service.started"} {
+		actual, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.InfoLevel}, []zap.Field{zap.String("event", event)}, false)
+		require.True(t, ok, event)
+		require.Equal(t, event, actual.Event)
+	}
+}
+
+func TestRealtimeConsoleIncludesDebugWhenRuntimeLevelAllowsIt(t *testing.T) {
+	actual, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.DebugLevel}, []zap.Field{zap.String("event", "legacy.log")}, false)
+	require.True(t, ok)
+	require.Equal(t, "debug", actual.Level)
+}
+
+func TestRealtimeConsoleMatchesRoutineAccessStdoutPolicy(t *testing.T) {
+	entry := zapcore.Entry{Time: time.Now(), Level: zapcore.InfoLevel, LoggerName: "access"}
+	fields := []zap.Field{zap.String("event", "http.access")}
+	_, ok := buildRealtimeEvent("i", entry, fields, true)
 	require.False(t, ok)
+
+	entry.Level = zapcore.WarnLevel
+	actual, ok := buildRealtimeEvent("i", entry, fields, true)
+	require.True(t, ok)
+	require.Equal(t, "warn", actual.Level)
+}
+
+func TestRealtimeConsoleIncludesSanitizedFieldsAndStack(t *testing.T) {
+	entry := zapcore.Entry{Time: time.Now(), Level: zapcore.ErrorLevel, LoggerName: "db.statement", Message: "query failed", Stack: "main.go:42"}
+	actual, ok := buildRealtimeEvent("i", entry, []zap.Field{
+		zap.String("event", "db.statement_failed"),
+		zap.String("error_code", "DB_QUERY_FAILED"),
+		zap.String("token", "[REDACTED]"),
+	}, false)
+	require.True(t, ok)
+	require.Equal(t, "DB_QUERY_FAILED", actual.Fields["error_code"])
+	require.Equal(t, "[REDACTED]", actual.Fields["token"])
+	require.Equal(t, "db.statement", actual.Module)
+	require.Equal(t, "main.go:42", actual.Stack)
+	_, err := json.Marshal(actual)
+	require.NoError(t, err)
 }
 
 func TestRealtimeMessageRedactsSecretsAndURLQuery(t *testing.T) {
-	event, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.InfoLevel, Message: "authorization: Bearer abc token=xyz url=https://example.test/live?token=secret&x=1"}, []zap.Field{zap.String("event", "gb28181.play.started")})
+	event, ok := buildRealtimeEvent("i", zapcore.Entry{Time: time.Now(), Level: zapcore.InfoLevel, Message: "authorization: Bearer abc token=xyz url=https://example.test/live?token=secret&x=1"}, []zap.Field{zap.String("event", "gb28181.play.started")}, false)
 	require.True(t, ok)
 	require.NotContains(t, event.Message, "abc")
 	require.NotContains(t, event.Message, "secret")

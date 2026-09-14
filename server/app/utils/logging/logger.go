@@ -70,13 +70,16 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 	r := &Runtime{config: cfg, tracked: make(map[string]*trackedSink), emergency: newEmergencyWriter(opts.ErrorOutput, now)}
 	cores := make([]zapcore.Core, 0, len(cfg.Outputs))
-	writeFileAndStdout := false
+	hasFile, hasStdout := false, false
 	for _, target := range cfg.Outputs {
 		if target == "file" {
-			writeFileAndStdout = true
-			break
+			hasFile = true
+		}
+		if target == "stdout" {
+			hasStdout = true
 		}
 	}
+	suppressRoutineAccess := hasFile && hasStdout
 	for _, target := range cfg.Outputs {
 		sink := opts.Sinks[target]
 		if sink == nil {
@@ -105,14 +108,14 @@ func NewRuntime(opts Options) (*Runtime, error) {
 			encoder = zapcore.NewConsoleEncoder(enc)
 		}
 		core := zapcore.NewCore(encoder, sink, zapcore.DebugLevel)
-		if target == "stdout" && writeFileAndStdout {
+		if target == "stdout" && suppressRoutineAccess {
 			core = &stdoutNoiseFilterCore{Core: core}
 		}
 		cores = append(cores, core)
 		r.sinks = append(r.sinks, sink)
 	}
 	inner := zapcore.NewTee(cores...).With([]zap.Field{zap.String("service", opts.Service), zap.String("version", opts.Version), zap.String("instance", opts.Instance)})
-	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, uniformLevel: uniformLevel, keyPolicies: &fieldKeyCache{}, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}, eventHub: opts.EventHub, instance: opts.Instance}
+	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, uniformLevel: uniformLevel, keyPolicies: &fieldKeyCache{}, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}, eventHub: opts.EventHub, instance: opts.Instance, suppressRoutineAccess: suppressRoutineAccess}
 	options := []zap.Option{zap.ErrorOutput(r.emergency)}
 	if opts.Clock != nil {
 		options = append(options, zap.WithClock(opts.Clock))
@@ -151,10 +154,14 @@ func (c *stdoutNoiseFilterCore) With(fields []zapcore.Field) zapcore.Core {
 }
 
 func (c *stdoutNoiseFilterCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
-	if entry.LoggerName == "access" && entry.Level < zapcore.WarnLevel {
+	if isRoutineAccessLog(entry) {
 		return nil
 	}
 	return c.Core.Write(entry, fields)
+}
+
+func isRoutineAccessLog(entry zapcore.Entry) bool {
+	return entry.LoggerName == "access" && entry.Level < zapcore.WarnLevel
 }
 func (r *Runtime) Close() error {
 	if r == nil {
@@ -211,19 +218,20 @@ func WithIdentity(logger *zap.Logger, fields ...zap.Field) *zap.Logger {
 }
 
 type runtimeCore struct {
-	inner         zapcore.Core
-	config        Config
-	min           zapcore.Level
-	uniformLevel  bool
-	keyPolicies   *fieldKeyCache
-	closed        *atomic.Bool
-	gate          *sync.RWMutex
-	bound         map[string]bool
-	contextFields []zap.Field
-	eventHub      *EventHub
-	instance      string
-	used          int
-	truncated     bool
+	inner                 zapcore.Core
+	config                Config
+	min                   zapcore.Level
+	uniformLevel          bool
+	keyPolicies           *fieldKeyCache
+	closed                *atomic.Bool
+	gate                  *sync.RWMutex
+	bound                 map[string]bool
+	contextFields         []zap.Field
+	eventHub              *EventHub
+	instance              string
+	suppressRoutineAccess bool
+	used                  int
+	truncated             bool
 }
 
 func (c *runtimeCore) Enabled(l zapcore.Level) bool { return l >= c.min }
@@ -289,7 +297,7 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 	}
 	if c.canWriteUnchanged(e, fields) {
 		if c.eventHub != nil {
-			if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), fields...)); ok {
+			if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), fields...), c.suppressRoutineAccess); ok {
 				c.eventHub.Publish(event)
 			}
 		}
@@ -318,7 +326,7 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 		clean = append(clean, zap.Bool("truncated", true))
 	}
 	if c.eventHub != nil {
-		if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), clean...)); ok {
+		if event, ok := buildRealtimeEvent(c.instance, e, append(append([]zap.Field(nil), c.contextFields...), clean...), c.suppressRoutineAccess); ok {
 			c.eventHub.Publish(event)
 		}
 	}

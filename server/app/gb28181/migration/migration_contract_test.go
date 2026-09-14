@@ -73,6 +73,24 @@ func TestRealtimeBusinessLogPermissionMigrations(t *testing.T) {
 	}
 }
 
+func TestRealtimeConsoleLogMenuRenameMigrations(t *testing.T) {
+	for _, name := range []string{
+		"2026-09-14-realtime-console-log-menu.sql",
+		"2026-09-14-realtime-console-log-menu-postgresql.sql",
+		"2026-09-14-realtime-console-log-menu-sqlserver.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := migrationsfs.FS.ReadFile("migrations/" + name)
+			require.NoError(t, err)
+			normalized := strings.ToLower(string(body))
+			require.Contains(t, normalized, "/gb28181/realtime-log")
+			require.Contains(t, normalized, "/api/gb28181/logs/stream")
+			require.Contains(t, normalized, "实时日志控制台")
+			require.Contains(t, normalized, "实时控制台日志流")
+		})
+	}
+}
+
 func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
 	files := []string{
 		"2026-08-15-device-assignment-permissions.sql",

@@ -8,12 +8,14 @@ describe("realtime business log stream", () => {
   beforeEach(() => { getAccessToken.mockReturnValue({ accessToken: "token-a" }); vi.restoreAllMocks(); });
 
   it("uses Authorization header and parses SSE blocks", async () => {
-    const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('event: ready\ndata: {"latestSequence":1,"subscriptionId":"s"}\n\nevent: message\ndata: {"eventId":"e","sequence":1,"event":"gb28181.play.started"}\n\n')); controller.close(); } });
+    const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('event: ready\ndata: {"latestSequence":1,"subscriptionId":"s"}\n\nevent: message\ndata: {"eventId":"e","sequence":1,"level":"debug","event":"legacy.log","fields":{"worker":"scanner"},"stack":"main.go:42"}\n\n')); controller.close(); } });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
     const items: any[] = [];
     await openRealtimeLogStream({ deviceId: "device-a", since: 7 }, item => items.push(item), new AbortController().signal);
     expect(fetchMock).toHaveBeenCalledWith("/api/gb28181/logs/stream?deviceId=device-a&since=7", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token-a" }) }));
     expect(items.map(item => item.type)).toEqual(["ready", "message"]);
+    expect(items[1].data.fields).toEqual({ worker: "scanner" });
+    expect(items[1].data.stack).toBe("main.go:42");
   });
 
   it("propagates non-2xx responses and cancels the reader", async () => {

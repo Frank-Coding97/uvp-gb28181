@@ -21,31 +21,33 @@ const (
 	maxRealtimeMessage   = 2048
 )
 
-// RealtimeEvent is the redacted, bounded event exposed to the operator console.
+// RealtimeEvent is the redacted, bounded console log record exposed to operators.
 type RealtimeEvent struct {
-	SchemaVersion string    `json:"schemaVersion"`
-	EventID       string    `json:"eventId"`
-	InstanceID    string    `json:"instanceId"`
-	Sequence      uint64    `json:"sequence"`
-	OccurredAt    time.Time `json:"occurredAt"`
-	ObservedAt    time.Time `json:"observedAt"`
-	Level         string    `json:"level"`
-	Module        string    `json:"module"`
-	Event         string    `json:"event"`
-	Stage         string    `json:"stage,omitempty"`
-	Outcome       string    `json:"outcome,omitempty"`
-	RequestID     string    `json:"requestId,omitempty"`
-	OperationID   string    `json:"operationId,omitempty"`
-	CorrelationID string    `json:"correlationId,omitempty"`
-	DeviceID      string    `json:"deviceId,omitempty"`
-	ChannelID     string    `json:"channelId,omitempty"`
-	NodeID        string    `json:"nodeId,omitempty"`
-	StreamID      string    `json:"streamId,omitempty"`
-	CallID        string    `json:"callId,omitempty"`
-	ReasonCode    string    `json:"reasonCode,omitempty"`
-	DurationMs    float64   `json:"durationMs,omitempty"`
-	Message       string    `json:"message"`
-	Truncated     bool      `json:"truncated,omitempty"`
+	SchemaVersion string         `json:"schemaVersion"`
+	EventID       string         `json:"eventId"`
+	InstanceID    string         `json:"instanceId"`
+	Sequence      uint64         `json:"sequence"`
+	OccurredAt    time.Time      `json:"occurredAt"`
+	ObservedAt    time.Time      `json:"observedAt"`
+	Level         string         `json:"level"`
+	Module        string         `json:"module"`
+	Event         string         `json:"event"`
+	Stage         string         `json:"stage,omitempty"`
+	Outcome       string         `json:"outcome,omitempty"`
+	RequestID     string         `json:"requestId,omitempty"`
+	OperationID   string         `json:"operationId,omitempty"`
+	CorrelationID string         `json:"correlationId,omitempty"`
+	DeviceID      string         `json:"deviceId,omitempty"`
+	ChannelID     string         `json:"channelId,omitempty"`
+	NodeID        string         `json:"nodeId,omitempty"`
+	StreamID      string         `json:"streamId,omitempty"`
+	CallID        string         `json:"callId,omitempty"`
+	ReasonCode    string         `json:"reasonCode,omitempty"`
+	DurationMs    float64        `json:"durationMs,omitempty"`
+	Message       string         `json:"message"`
+	Fields        map[string]any `json:"fields,omitempty"`
+	Stack         string         `json:"stack,omitempty"`
+	Truncated     bool           `json:"truncated,omitempty"`
 }
 
 type RealtimeFilter struct {
@@ -237,18 +239,6 @@ func (h *EventHub) InstanceID() string {
 	return h.instanceID
 }
 
-func isRealtimeEvent(name string) bool {
-	if name == "" || name == "http.access" || strings.HasPrefix(name, "audit.") || strings.HasPrefix(name, "legacy.") || strings.HasPrefix(name, "casbin.") {
-		return false
-	}
-	for _, p := range []string{"gb28181.register.", "gb28181.play.", "gb28181.hook.", "gb28181.device.scanner.", "gb28181.message.keepalive_", "play.attempt_", "play.recording_", "play.auto_start.", "zlm.media_online."} {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
-
 func realtimeString(fields map[string]any, key string) string {
 	if v, ok := fields[key]; ok {
 		switch value := v.(type) {
@@ -310,22 +300,20 @@ func redactRealtimeMessage(message string) string {
 	})
 }
 
-func buildRealtimeEvent(instance string, entry zapcore.Entry, fields []zap.Field) (RealtimeEvent, bool) {
-	if entry.Level < zapcore.InfoLevel {
+func buildRealtimeEvent(instance string, entry zapcore.Entry, fields []zap.Field, suppressRoutineAccess bool) (RealtimeEvent, bool) {
+	if suppressRoutineAccess && isRoutineAccessLog(entry) {
 		return RealtimeEvent{}, false
 	}
 	m := zapcore.NewMapObjectEncoder()
 	for _, f := range fields {
 		f.AddTo(m)
 	}
-	if !isRealtimeEvent(realtimeString(m.Fields, "event")) {
-		return RealtimeEvent{}, false
-	}
 	event := realtimeString(m.Fields, "event")
-	module := entry.LoggerName
-	if i := strings.LastIndex(module, "."); i > 0 {
-		module = module[:i]
+	if event == "" {
+		event = "legacy.log"
+		m.Fields["event"] = event
 	}
+	module := entry.LoggerName
 	outcome := ""
 	if strings.Contains(event, "failed") || strings.Contains(event, "denied") || strings.Contains(event, "timeout") {
 		outcome = "failed"
@@ -349,7 +337,7 @@ func buildRealtimeEvent(instance string, entry zapcore.Entry, fields []zap.Field
 	if outcomeValue == "" {
 		outcomeValue = outcome
 	}
-	return RealtimeEvent{InstanceID: instance, OccurredAt: occurred, ObservedAt: time.Now(), Level: entry.Level.String(), Module: clipRealtimeValue(module), Event: clipRealtimeValue(event), Stage: clipRealtimeValue(stageValue), Outcome: clipRealtimeValue(outcomeValue), RequestID: clipRealtimeValue(realtimeStringAny(m.Fields, "request_id", "requestId")), OperationID: clipRealtimeValue(realtimeStringAny(m.Fields, "operation_id", "operationId")), CorrelationID: clipRealtimeValue(realtimeStringAny(m.Fields, "correlation_id", "correlationId")), DeviceID: clipRealtimeValue(realtimeStringAny(m.Fields, "device_id", "deviceId")), ChannelID: clipRealtimeValue(realtimeStringAny(m.Fields, "channel_id", "channelId")), NodeID: clipRealtimeValue(realtimeStringAny(m.Fields, "node_id", "nodeId")), StreamID: clipRealtimeValue(realtimeStringAny(m.Fields, "stream_id", "streamId", "stream")), CallID: clipRealtimeValue(realtimeStringAny(m.Fields, "call_id", "callId")), ReasonCode: clipRealtimeValue(realtimeStringAny(m.Fields, "reason_code", "reasonCode")), DurationMs: realtimeDuration(m.Fields), Message: redactRealtimeMessage(entry.Message)}, true
+	return RealtimeEvent{InstanceID: instance, OccurredAt: occurred, ObservedAt: time.Now(), Level: entry.Level.String(), Module: clipRealtimeValue(module), Event: clipRealtimeValue(event), Stage: clipRealtimeValue(stageValue), Outcome: clipRealtimeValue(outcomeValue), RequestID: clipRealtimeValue(realtimeStringAny(m.Fields, "request_id", "requestId")), OperationID: clipRealtimeValue(realtimeStringAny(m.Fields, "operation_id", "operationId")), CorrelationID: clipRealtimeValue(realtimeStringAny(m.Fields, "correlation_id", "correlationId")), DeviceID: clipRealtimeValue(realtimeStringAny(m.Fields, "device_id", "deviceId")), ChannelID: clipRealtimeValue(realtimeStringAny(m.Fields, "channel_id", "channelId")), NodeID: clipRealtimeValue(realtimeStringAny(m.Fields, "node_id", "nodeId")), StreamID: clipRealtimeValue(realtimeStringAny(m.Fields, "stream_id", "streamId", "stream")), CallID: clipRealtimeValue(realtimeStringAny(m.Fields, "call_id", "callId")), ReasonCode: clipRealtimeValue(realtimeStringAny(m.Fields, "reason_code", "reasonCode")), DurationMs: realtimeDuration(m.Fields), Message: redactRealtimeMessage(entry.Message), Fields: m.Fields, Stack: entry.Stack}, true
 }
 
 func redactRealtimeURL(raw string) string {

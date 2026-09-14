@@ -1,9 +1,9 @@
--- P5 实时业务日志控制台只读权限（MySQL，幂等）
+-- P5 实时日志控制台只读权限（MySQL，幂等）
 INSERT INTO `sys_api` (`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
-SELECT '实时业务日志流','/api/gb28181/logs/stream','GET','GB28181 日志治理',NOW(),NOW(),1
+SELECT '实时控制台日志流','/api/gb28181/logs/stream','GET','GB28181 日志治理',NOW(),NOW(),1
 WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/logs/stream' AND `method`='GET' AND `deleted_at` IS NULL);
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`type`,`permission`,`hide`,`sort`,`created_at`,`updated_at`,`created_by`)
-SELECT COALESCE((SELECT MIN(id) FROM `sys_menu` WHERE `path`='/media' AND `type` IN (1,2) AND `deleted_at` IS NULL),0),'/gb28181/realtime-log','gb28181-realtime-log','gb28181/realtime-log/index','实时业务日志',2,'gb28181:log:view',0,6,NOW(),NOW(),1
+SELECT COALESCE((SELECT MIN(id) FROM `sys_menu` WHERE `path`='/media' AND `type` IN (1,2) AND `deleted_at` IS NULL),0),'/gb28181/realtime-log','gb28181-realtime-log','gb28181/realtime-log/index','实时日志控制台',2,'gb28181:log:view',0,6,NOW(),NOW(),1
 WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `path`='/gb28181/realtime-log' AND `deleted_at` IS NULL);
 INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT 1,m.`id` FROM `sys_menu` m WHERE m.`permission`='gb28181:log:view' AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=1 AND x.`menu_id`=m.`id`);
 INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a WHERE m.`permission`='gb28181:log:view' AND a.`path`='/api/gb28181/logs/stream' AND a.`method`='GET' AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
