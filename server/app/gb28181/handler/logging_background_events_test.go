@@ -13,6 +13,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 
@@ -178,4 +179,17 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 	require.Equal(t, "new-maker", got.Manufacturer)
 	require.Equal(t, "new-model", got.Model)
 	require.Equal(t, "firmware-secret-t14", got.Firmware)
+}
+
+func TestLoggingDeviceInfoParseFailureIncludesStableReasonAndSIPIdentity(t *testing.T) {
+	_, sink := t14Runtime(t)
+	HandleDeviceInfoResponse(context.Background(), []byte(`<Response><CmdType>DeviceInfo</CmdType>`),
+		zap.String("device_id", "device-parse"),
+		zap.String("call_id", "call-parse"),
+		zap.String("cseq", "9"))
+	row := t14RecordWithEvent(t, sink, "gb28181.deviceinfo.response_parse_failed")
+	require.Equal(t, "device_info_response_invalid", row["reason_code"])
+	require.Equal(t, "device-parse", row["device_id"])
+	require.Equal(t, "call-parse", row["call_id"])
+	require.Equal(t, "9", row["cseq"])
 }

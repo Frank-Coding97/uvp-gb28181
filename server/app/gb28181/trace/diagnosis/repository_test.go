@@ -48,6 +48,23 @@ func TestDiagnosisRepositoryUpsertOrderingAndIdempotency(t *testing.T) {
 	require.Equal(t, StateResolved, rows[0].State)
 }
 
+func TestDiagnosisRepositoryUpdateUsesExplicitNaturalKeyScope(t *testing.T) {
+	repo, db := newDiagnosisRepository(t)
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:require_explicit_scope", func(tx *gorm.DB) {
+		if tx.Statement.Table != "gb_sip_trace_session_diagnosis" {
+			return
+		}
+		if _, ok := tx.Statement.Clauses["WHERE"]; !ok {
+			tx.AddError(gorm.ErrMissingWhereClause)
+		}
+	}))
+	base := diagnosisRecord("explicit-scope", time.Date(2026, 9, 14, 11, 45, 0, 0, time.UTC))
+	require.NoError(t, repo.UpsertBatch(context.Background(), []Record{base}))
+	base.ObservedAt = base.ObservedAt.Add(time.Second)
+	base.State = StateResolved
+	require.NoError(t, repo.UpsertBatch(context.Background(), []Record{base}))
+}
+
 func TestDiagnosisRepositoryKeepsIndependentAttempts(t *testing.T) {
 	repo, db := newDiagnosisRepository(t)
 	first := diagnosisRecord("key-1", time.Now().UTC())

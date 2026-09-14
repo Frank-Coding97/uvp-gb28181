@@ -385,7 +385,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		zap.String("app", body.App),
 		zap.String("stream", body.Stream),
 		zap.String("schema", body.Schema),
-		zap.String("mediaServerId", body.MediaServerID),
+		zap.String("media_server_id", body.MediaServerID),
 		zap.Bool("regist", body.Regist))
 
 	// 流就绪 → 通知正在 WaitReady 的点播 service
@@ -573,7 +573,7 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 	hookLog(c).Info("ZLM Hook on_rtp_server_timeout",
 		zap.String("event", "gb28181.hook.rtp_timeout"),
 		zap.String("stream_id", body.StreamID), zap.String("ssrc", string(body.SSRC)),
-		zap.String("mediaServerId", body.MediaServerID))
+		zap.String("media_server_id", body.MediaServerID))
 
 	_, _, fixedErr := play.ParseFixedStreamID(body.StreamID)
 	isFixedLive := body.App == "rtp" && fixedErr == nil
@@ -847,9 +847,9 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	hookLog(c).Info("自动点播 Hook 已接收",
 		zap.String("event", "gb28181.hook.auto_on_demand.accepted"),
 		zap.String("reason", "accepted"),
-		zap.String("deviceId", deviceID),
-		zap.String("channelId", channelID),
-		zap.Int64("nodeId", mediaNode.ID))
+		zap.String("device_id", deviceID),
+		zap.String("channel_id", channelID),
+		zap.Int64("node_id", mediaNode.ID))
 	response.SetBusinessResult(c, 0, true)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "close": false})
 }
@@ -978,8 +978,8 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		zap.String("event", "gb28181.hook.play.authorized"),
 		zap.String("result", "verified"),
 		zap.String("stream", body.Stream),
-		zap.String("mediaServerId", body.MediaServerID),
-		zap.String("correlationId", playauth.CorrelationID(claims.AuthorizationGeneration)))
+		zap.String("media_server_id", body.MediaServerID),
+		zap.String("correlation_id", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	hookOK(c)
 }
 
@@ -1239,7 +1239,7 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 	if !ok {
 		hookLog(c).Warn("忽略未知 ZLM 节点的录像文件",
 			zap.String("event", "gb28181.hook.recording.node_unknown"),
-			zap.String("mediaServerId", body.MediaServerID))
+			zap.String("media_server_id", body.MediaServerID))
 		hookOK(c)
 		return
 	}
@@ -1251,14 +1251,14 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 	if err != nil {
 		hookLog(c).Error("写入 ZLM 录像文件索引失败",
 			zap.String("event", "gb28181.hook.recording.index_failed"),
-			logging.Error(err), zap.Int64("nodeId", nodeID))
+			logging.Error(err), zap.Int64("node_id", nodeID))
 		response.SetBusinessResult(c, -1, false)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "persist recording file failed"})
 		return
 	}
 	if !indexed {
 		hookLog(c).Warn("忽略无法归属的 ZLM MP4 文件",
-			zap.String("event", "gb28181.hook.recording.unassigned"), zap.Int64("nodeId", nodeID))
+			zap.String("event", "gb28181.hook.recording.unassigned"), zap.Int64("node_id", nodeID))
 	}
 	hookOK(c)
 }

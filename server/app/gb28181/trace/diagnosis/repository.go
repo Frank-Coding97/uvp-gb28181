@@ -76,8 +76,10 @@ func upsertRecord(tx *gorm.DB, record Record) error {
 	if !diagnosisRecordWins(record, recordFromModel(current)) {
 		return nil
 	}
-	row.ID = current.ID
-	return tx.Model(&current).Select("*").Updates(&row).Error
+	return tx.Model(&gbmodels.GbSipTraceSessionDiagnosis{}).
+		Where("session_day = ? AND category = ? AND correlation_key = ?",
+			current.SessionDay, current.Category, current.CorrelationKey).
+		Select("*").Omit("id").Updates(&row).Error
 }
 
 func diagnosisRecordWins(incoming, current Record) bool {

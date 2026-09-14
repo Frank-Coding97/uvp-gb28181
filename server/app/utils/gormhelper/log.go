@@ -92,8 +92,34 @@ func (l *logger) Trace(ctx context.Context, begin time.Time, fc func() (string, 
 	}
 	if err != nil {
 		fields = append(fields, logging.Error(err))
+		if code := gormErrorCode(err); code != "" {
+			fields = append(fields, zap.String("error_class", "database"), zap.String("error_code", code))
+		}
 	}
 	entry.Write(fields...)
+}
+
+func gormErrorCode(err error) string {
+	switch {
+	case errors.Is(err, gorm.ErrInvalidTransaction):
+		return "gorm_invalid_transaction"
+	case errors.Is(err, gorm.ErrMissingWhereClause):
+		return "gorm_missing_where_clause"
+	case errors.Is(err, gorm.ErrPrimaryKeyRequired):
+		return "gorm_primary_key_required"
+	case errors.Is(err, gorm.ErrModelValueRequired):
+		return "gorm_model_value_required"
+	case errors.Is(err, gorm.ErrInvalidData):
+		return "gorm_invalid_data"
+	case errors.Is(err, gorm.ErrInvalidField):
+		return "gorm_invalid_field"
+	case errors.Is(err, gorm.ErrInvalidDB):
+		return "gorm_invalid_db"
+	case errors.Is(err, gorm.ErrInvalidValue):
+		return "gorm_invalid_value"
+	default:
+		return ""
+	}
 }
 
 // Fingerprints describe only SQL structure: identifiers and literals are

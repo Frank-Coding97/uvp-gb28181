@@ -127,6 +127,7 @@ func (r *Repository) OpenGap(ctx context.Context, planID *uint64, channelID uint
 
 func (r *Repository) CloseOpenGap(ctx context.Context, channelID uint, endedAt time.Time, executionID *uint64) (bool, error) {
 	var gap models.GbRecordingPlanGap
+	closed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("channel_id = ? AND ended_at IS NULL", channelID).Order("id DESC").First(&gap)
@@ -140,11 +141,18 @@ func (r *Repository) CloseOpenGap(ctx context.Context, channelID uint, endedAt t
 		if duration < 0 {
 			duration = 0
 		}
-		return tx.Model(&gap).Updates(map[string]any{
-			"ended_at": endedAt, "duration_ms": duration, "recovered": true, "execution_id": executionID,
-		}).Error
+		result = tx.Model(&models.GbRecordingPlanGap{}).
+			Where("id = ? AND ended_at IS NULL", gap.ID).
+			Updates(map[string]any{
+				"ended_at": endedAt, "duration_ms": duration, "recovered": true, "execution_id": executionID,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		closed = result.RowsAffected == 1
+		return nil
 	})
-	return gap.ID != 0, err
+	return closed, err
 }
 
 func isDuplicateError(err error) bool {

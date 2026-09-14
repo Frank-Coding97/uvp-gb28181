@@ -5,6 +5,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"net"
+	"net/http"
 	"os"
 	"syscall"
 	"time"
@@ -53,15 +54,26 @@ func RequestLogging(root *zap.Logger) gin.HandlerFunc {
 		if size < 0 {
 			size = 0
 		}
-		fields = []zap.Field{zap.String("event", "http.access"), zap.String("method", method), zap.String("route", route), zap.Int("http_status", c.Writer.Status()), zap.Float64("duration_ms", float64(time.Since(started))/float64(time.Millisecond)), zap.Int("response_bytes", size)}
+		status := c.Writer.Status()
+		fields = []zap.Field{zap.String("event", "http.access"), zap.String("method", method), zap.String("route", route), zap.Int("http_status", status), zap.Float64("duration_ms", float64(time.Since(started))/float64(time.Millisecond)), zap.Int("response_bytes", size)}
+		businessFailed := false
 		if result, ok := response.BusinessResult(c); ok {
 			code := zap.Int("business_code", result.Code)
 			if result.StringCode != "" {
 				code = zap.String("business_code", result.StringCode)
 			}
 			fields = append(fields, code, zap.Bool("business_success", result.Success))
+			businessFailed = !result.Success
 		}
-		logger.Named("access").Info("HTTP request completed", fields...)
+		access := logger.Named("access")
+		switch {
+		case status >= http.StatusInternalServerError:
+			access.Error("HTTP request completed", fields...)
+		case status >= http.StatusBadRequest || businessFailed:
+			access.Warn("HTTP request completed", fields...)
+		default:
+			access.Info("HTTP request completed", fields...)
+		}
 	}
 }
 

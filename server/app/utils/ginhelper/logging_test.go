@@ -112,6 +112,12 @@ func TestLoggingHTTPResults(t *testing.T) {
 	if rows[3]["response_bytes"] != float64(5) {
 		t.Error("wrong bytes")
 	}
+	wantLevels := []string{"info", "warn", "warn", "info", "error", "warn"}
+	for i, want := range wantLevels {
+		if rows[i]["level"] != want {
+			t.Errorf("row %d level = %v, want %s", i, rows[i]["level"], want)
+		}
+	}
 }
 func TestLoggingHTTPConcurrentIdentity(t *testing.T) {
 	g, b := loggingRouter(t)

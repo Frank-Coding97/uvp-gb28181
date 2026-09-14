@@ -278,7 +278,9 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	}
 	decision := DecideReconcile(input)
 	if mediaLost {
-		_, _ = e.repo.OpenGap(ctx, state.PlanID, channel.ID, ReasonMediaStreamLost, "媒体流已注销", now)
+		if _, err := e.repo.OpenGap(ctx, state.PlanID, channel.ID, ReasonMediaStreamLost, "媒体流已注销", now); err != nil {
+			return err
+		}
 	}
 	streamID, generation, nodeID := state.StreamID, state.Generation, state.NodeID
 	execution := models.GbRecordingPlanExecution{PlanID: state.PlanID, ChannelID: channel.ID, DeviceID: channel.DeviceID, TriggerSource: "scheduler", Attempt: state.AttemptCount + 1, StartedAt: now, CreatedAt: now}
@@ -339,10 +341,14 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		}
 	}
 	if decision.OpenGap {
-		_, _ = e.repo.OpenGap(ctx, state.PlanID, channel.ID, decision.ReasonCode, decision.ReasonMessage, now)
+		if _, err := e.repo.OpenGap(ctx, state.PlanID, channel.ID, decision.ReasonCode, decision.ReasonMessage, now); err != nil {
+			return err
+		}
 	}
 	if decision.CloseGap {
-		_, _ = e.repo.CloseOpenGap(ctx, channel.ID, now, nil)
+		if _, err := e.repo.CloseOpenGap(ctx, channel.ID, now, nil); err != nil {
+			return err
+		}
 	}
 	if execution.Action != "" {
 		ended := e.now()

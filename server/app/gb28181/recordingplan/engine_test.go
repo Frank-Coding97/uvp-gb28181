@@ -2,17 +2,42 @@ package recordingplan
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan/schedule"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
+
+func TestEngineReturnsGapCloseFailureToScheduler(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
+	now := time.Date(2026, 9, 14, 11, 30, 0, 0, time.UTC)
+	channel := models.GbChannel{DeviceID: "D", ChannelID: "C", Status: models.ChannelStatusOnline, RecordingMode: models.RecordingModeContinuous}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, db.Create(&models.GbRecordingPlanChannelState{
+		ChannelID: channel.ID, DesiredState: models.RecordingDesiredRecording,
+		ActualState: models.RecordingStateRecording, ReconcileAt: now.Add(-time.Second),
+	}).Error)
+	require.NoError(t, db.Create(&models.GbRecordingPlanGap{
+		ChannelID: channel.ID, StartedAt: now.Add(-time.Minute), ReasonCode: ReasonDeviceOffline,
+	}).Error)
+	injected := errors.New("injected gap close failure")
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:reject_gap_close", func(tx *gorm.DB) {
+		if tx.Statement.Table == "gb_recording_plan_gap" {
+			tx.AddError(injected)
+		}
+	}))
+	engine := NewEngine(db, &fakeChannelOperator{}, EngineOptions{Now: func() time.Time { return now }})
+	require.ErrorIs(t, engine.Dispatch(context.Background()), injected)
+}
 
 func TestEngineRecoversInsideScheduleAndKeepsOutsideStopped(t *testing.T) {
 	db := newRepositoryTestDB(t)

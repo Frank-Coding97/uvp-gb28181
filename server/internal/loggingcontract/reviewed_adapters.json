@@ -204,8 +204,8 @@
   },
   {
     "file": "app/utils/gormhelper/log.go",
-    "sha256": "38666e11c78312c4edf0435677678a7aa7d950fd64d842dcd372762158b54727",
-    "reason": "Reviewed T07 Trace: shared context logger Check filters before fc/Explain; static message, three constant events, SQL structure fingerprint and typed safe fields only. CheckedEntry.Write retains SafeCore; no raw SQL or parameters. Exact Check/Write calls and source digest require re-review on change.",
+    "sha256": "292d4f7abf3ec37e0712f6ef39da34449ee947089037a3f630fbb17e41883ddb",
+    "reason": "Reviewed T07 Trace: shared context logger Check filters before fc/Explain; static message, three constant events, SQL structure fingerprint, typed safe fields, and stable codes for known GORM framework errors only. CheckedEntry.Write retains SafeCore; no raw SQL, parameters, or raw error text. Exact Check/Write calls and source digest require re-review on change.",
     "calls": [
       {
         "function": "Trace",

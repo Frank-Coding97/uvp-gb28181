@@ -282,9 +282,9 @@ func logAutoStartResult(job autoStartJob, result *Result, err error, requestCont
 	logger := app.Log(ctx).Named("play.auto_start")
 	fields := []zap.Field{
 		zap.String("reason", autoStartResultReason(err)),
-		zap.String("deviceId", job.key.deviceID),
-		zap.String("channelId", job.key.channelID),
-		zap.Int64("nodeId", job.key.requiredNode),
+		zap.String("device_id", job.key.deviceID),
+		zap.String("channel_id", job.key.channelID),
+		zap.Int64("node_id", job.key.requiredNode),
 	}
 	if err != nil {
 		fields = append(fields, zap.String("event", "play.auto_start.failed"))
@@ -292,7 +292,7 @@ func logAutoStartResult(job autoStartJob, result *Result, err error, requestCont
 		return
 	}
 	if result != nil {
-		fields = append(fields, zap.String("streamId", result.StreamID))
+		fields = append(fields, zap.String("stream_id", result.StreamID))
 	}
 	fields = append(fields, zap.String("event", "play.auto_start.succeeded"))
 	logger.Info("自动点播后台启动成功", fields...)

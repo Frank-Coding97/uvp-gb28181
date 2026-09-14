@@ -32,12 +32,12 @@ func TestLoggingBackgroundEvents(t *testing.T) {
 	entry := entries.All()[0]
 	require.Equal(t, "play.auto_start", entry.LoggerName)
 	require.Equal(t, "play.auto_start.failed", entry.ContextMap()["event"])
-	require.Equal(t, "device-1", entry.ContextMap()["deviceId"])
-	require.Equal(t, "channel-1", entry.ContextMap()["channelId"])
-	require.EqualValues(t, 7, entry.ContextMap()["nodeId"])
+	require.Equal(t, "device-1", entry.ContextMap()["device_id"])
+	require.Equal(t, "channel-1", entry.ContextMap()["channel_id"])
+	require.EqualValues(t, 7, entry.ContextMap()["node_id"])
 	require.Equal(t, "auto-start-1", entry.ContextMap()["execution_id"])
 	require.NotContains(t, entry.Message, "device secret")
 	success := entries.All()[1]
 	require.Equal(t, "play.auto_start.succeeded", success.ContextMap()["event"])
-	require.Equal(t, "stream-1", success.ContextMap()["streamId"])
+	require.Equal(t, "stream-1", success.ContextMap()["stream_id"])
 }

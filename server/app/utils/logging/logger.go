@@ -70,6 +70,13 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 	r := &Runtime{config: cfg, tracked: make(map[string]*trackedSink), emergency: newEmergencyWriter(opts.ErrorOutput, now)}
 	cores := make([]zapcore.Core, 0, len(cfg.Outputs))
+	writeFileAndStdout := false
+	for _, target := range cfg.Outputs {
+		if target == "file" {
+			writeFileAndStdout = true
+			break
+		}
+	}
 	for _, target := range cfg.Outputs {
 		sink := opts.Sinks[target]
 		if sink == nil {
@@ -97,7 +104,11 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		} else {
 			encoder = zapcore.NewConsoleEncoder(enc)
 		}
-		cores = append(cores, zapcore.NewCore(encoder, sink, zapcore.DebugLevel))
+		core := zapcore.NewCore(encoder, sink, zapcore.DebugLevel)
+		if target == "stdout" && writeFileAndStdout {
+			core = &stdoutNoiseFilterCore{Core: core}
+		}
+		cores = append(cores, core)
 		r.sinks = append(r.sinks, sink)
 	}
 	inner := zapcore.NewTee(cores...).With([]zap.Field{zap.String("service", opts.Service), zap.String("version", opts.Version), zap.String("instance", opts.Instance)})
@@ -128,6 +139,22 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		}
 	}()
 	return r, nil
+}
+
+// stdoutNoiseFilterCore keeps complete access records in the file sink while
+// preventing routine successful requests from burying operational events in a
+// local console. A stdout-only/container deployment keeps the full stream.
+type stdoutNoiseFilterCore struct{ zapcore.Core }
+
+func (c *stdoutNoiseFilterCore) With(fields []zapcore.Field) zapcore.Core {
+	return &stdoutNoiseFilterCore{Core: c.Core.With(fields)}
+}
+
+func (c *stdoutNoiseFilterCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	if entry.LoggerName == "access" && entry.Level < zapcore.WarnLevel {
+		return nil
+	}
+	return c.Core.Write(entry, fields)
 }
 func (r *Runtime) Close() error {
 	if r == nil {

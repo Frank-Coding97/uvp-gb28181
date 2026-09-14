@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/glebarez/sqlite"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -58,6 +59,21 @@ func TestLoggingGORMModes(t *testing.T) {
 		if tc.want == 1 && !strings.Contains(b.String(), "request-db") {
 			t.Error("missing DB correlation")
 		}
+	}
+}
+
+func TestLoggingGORMKnownFrameworkErrorHasStableCode(t *testing.T) {
+	ctx, b := gormLogFixture(t)
+	l := &logger{Config: gormLog.Config{LogLevel: gormLog.Error}}
+	l.Trace(ctx, time.Now(), func() (string, int64) {
+		return "UPDATE `gb_recording_plan_gap` SET `recovered`=?", 0
+	}, fmt.Errorf("recording gap update: %w", gorm.ErrMissingWhereClause))
+	var row map[string]interface{}
+	if err := json.Unmarshal(b.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row["error_code"] != "gorm_missing_where_clause" {
+		t.Fatalf("error_code = %v", row["error_code"])
 	}
 }
 func TestLoggingGORMSlowThreshold(t *testing.T) {

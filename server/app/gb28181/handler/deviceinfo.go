@@ -17,12 +17,13 @@ import (
 // 语义:设备本体元数据回写 gb_device.name / manufacturer / model / firmware
 // 只覆盖"非空且新值不同"的字段,避免用空串清掉已有数据;
 // 若 DB 未就绪(单测/早启动)直接 no-op,不 panic。
-func HandleDeviceInfoResponse(ctx context.Context, body []byte) {
-	logger := app.Log(ctx).Named("gb28181.deviceinfo")
+func HandleDeviceInfoResponse(ctx context.Context, body []byte, traceFields ...zap.Field) {
+	logger := app.Log(ctx).Named("gb28181.deviceinfo").With(traceFields...)
 	resp, err := manscdp.ParseDeviceInfoResponse(body)
 	if err != nil {
 		logger.Warn("DeviceInfo 应答解析失败",
-			zap.String("event", "gb28181.deviceinfo.response_parse_failed"), logging.Error(err))
+			zap.String("event", "gb28181.deviceinfo.response_parse_failed"),
+			zap.String("reason_code", "device_info_response_invalid"), logging.Error(err))
 		return
 	}
 	if resp.DeviceID == "" {

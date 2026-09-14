@@ -396,10 +396,12 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库
-			HandleCatalogResponse(ctx, req.Body())
+			HandleCatalogResponse(ctx, req.Body(),
+				zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		case manscdp.CmdDeviceInfo:
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
-			HandleDeviceInfoResponse(ctx, req.Body())
+			HandleDeviceInfoResponse(ctx, req.Body(),
+				zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		case manscdp.CmdDeviceControl:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {

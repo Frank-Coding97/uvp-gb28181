@@ -166,12 +166,13 @@ func getCatalogPipeline() *catalog.Pipeline {
 //   - classify/anomaly 兜底)
 //
 // pipeline 不可用时(db nil)回退到旧路径,保证生产兼容
-func HandleCatalogResponse(ctx context.Context, body []byte) {
-	logger := app.Log(ctx).Named("gb28181.catalog")
+func HandleCatalogResponse(ctx context.Context, body []byte, traceFields ...zap.Field) {
+	logger := app.Log(ctx).Named("gb28181.catalog").With(traceFields...)
 	resp, err := manscdp.ParseCatalogResponse(body)
 	if err != nil {
 		logger.Warn("Catalog 应答解析失败",
-			zap.String("event", "gb28181.catalog.response_parse_failed"), logging.Error(err))
+			zap.String("event", "gb28181.catalog.response_parse_failed"),
+			zap.String("reason_code", "catalog_response_invalid"), logging.Error(err))
 		return
 	}
 

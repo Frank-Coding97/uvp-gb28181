@@ -159,6 +159,43 @@ func TestLoggingRuntimeModuleLevels(t *testing.T) {
 		t.Fatalf("module fields %v", rows)
 	}
 }
+
+func TestLoggingRuntimeKeepsRoutineAccessInFileWithoutFloodingStdout(t *testing.T) {
+	c := configForTest(t, values{
+		"logs.outputs":      []string{"file", "stdout"},
+		"logs.textformat":   "json",
+		"logs.stdoutformat": "json",
+		"logs.level":        "warn",
+	})
+	fileSink, stdoutSink := &memorySink{}, &memorySink{}
+	r, err := NewRuntime(Options{
+		Config: c, Service: "uvp", Version: "v1", Instance: "node",
+		Sinks: map[string]zapcore.WriteSyncer{"file": fileSink, "stdout": stdoutSink},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Root.Named("access").Info("HTTP request completed", zap.String("event", "http.access"), zap.Int("http_status", 200))
+	r.Root.Named("access").Warn("HTTP request completed", zap.String("event", "http.access"), zap.Int("http_status", 400))
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(records(t, fileSink)); got != 2 {
+		t.Fatalf("file access records = %d, want 2", got)
+	}
+	stdoutRows := records(t, stdoutSink)
+	if len(stdoutRows) != 1 || stdoutRows[0]["level"] != "warn" {
+		t.Fatalf("stdout access records = %v, want only warn", stdoutRows)
+	}
+}
+
+func TestLoggingRuntimeStdoutOnlyKeepsRoutineAccess(t *testing.T) {
+	r, sink := runtimeForTest(t, values{"logs.level": "warn"})
+	r.Root.Named("access").Info("HTTP request completed", zap.String("event", "http.access"), zap.Int("http_status", 200))
+	if got := len(records(t, sink)); got != 1 {
+		t.Fatalf("stdout-only access records = %d, want 1", got)
+	}
+}
 func TestLoggingRuntimeIdentityAndSnapshot(t *testing.T) {
 	input := values{"logs.level": "warn", "logs.modules": map[string]interface{}{"db": "debug"}}
 	r, b := runtimeForTest(t, input)

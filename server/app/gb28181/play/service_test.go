@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -333,6 +335,35 @@ func TestStartHappyPath(t *testing.T) {
 	}
 	if ch.StreamID != res.StreamID {
 		t.Errorf("点播成功应记录通道 stream_id, got %q want %q", ch.StreamID, res.StreamID)
+	}
+}
+
+func TestPlayLifecycleLogsUseCanonicalFieldsAndSIPCorrelation(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+
+	z := &mockZLM{port: 40000}
+	z.online.Store(true)
+	inv := &mockInviter{}
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	require.NoError(t, err)
+
+	for _, entry := range observed.All() {
+		fields := entry.ContextMap()
+		for _, legacy := range []string{"deviceId", "channelId", "nodeId", "streamId", "correlationId", "reasonCode"} {
+			require.NotContains(t, fields, legacy, "event %v", fields["event"])
+		}
+	}
+	for _, event := range []string{"gb28181.play.invite_accepted", "gb28181.play.media_ready"} {
+		entries := observed.FilterField(zap.String("event", event)).All()
+		require.Len(t, entries, 1)
+		fields := entries[0].ContextMap()
+		require.Equal(t, "mock-call", fields["call_id"])
+		require.Equal(t, "1", fields["cseq"])
+		require.NotEmpty(t, fields["correlation_id"])
 	}
 }
 
