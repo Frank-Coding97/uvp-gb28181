@@ -92,11 +92,15 @@ func GetPluginRouteFuncs() []PluginRouteFunc {
 // supplied by main so SIP remains available to in-flight HTTP and job work.
 func StartServer(engine *gin.Engine, stop func(context.Context) error) error {
 	logRoutes(engine)
+	// http.Server.WriteTimeout is an absolute deadline for the entire response,
+	// so it would terminate the SSE console stream after 30 seconds even while
+	// heartbeats are being written. Ordinary requests retain the handler-level
+	// timeout middleware; long-lived streams own their lifetime in the handler.
 	server := &http.Server{
 		Addr:         app.ConfigYml.GetString("httpserver.port"),
 		Handler:      engine,
 		ReadTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.read_timeout")) * time.Second,
-		WriteTimeout: time.Duration(app.ConfigYml.GetInt("httpserver.write_timeout")) * time.Second,
+		WriteTimeout: 0,
 		IdleTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.idle_timeout")) * time.Second,
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
