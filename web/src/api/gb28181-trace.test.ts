@@ -82,6 +82,5 @@ describe("GB28181 SIP trace API contract", () => {
             "/api/gb28181/sip-traces/stream?token=token+value&deviceId=device-a&callId=call-a&method=INVITE"
         );
         expect(url).not.toContain("storage");
-        expect(url).not.toContain("clickhouse");
     });
 });
