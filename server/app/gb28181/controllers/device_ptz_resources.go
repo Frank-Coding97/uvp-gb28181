@@ -128,7 +128,7 @@ func writeHomePositionFailure(c *gin.Context, failure *homePositionHTTPFailure) 
 		return
 	}
 	if failure.err != nil {
-		app.Log(c.Request.Context()).Warn("PTZ home position failed", zap.String("event", "device_ptz_resources.writehomepositionfailure.warn"), zap.String("errorCode", string(failure.code)), logging.Error(failure.err))
+		app.Log(c.Request.Context()).Warn("PTZ home position failed", zap.String("event", "ptz.home_position.write_failed"), zap.String("error_code", string(failure.code)), logging.Error(failure.err))
 	}
 	data := gin.H{"errorCode": string(failure.code)}
 	if app.Response != nil {
@@ -286,9 +286,9 @@ func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, pro
 	if protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath {
 		if db := dc.db(); db != nil {
 			if err := db.WithContext(c.Request.Context()).Where("channel_id = ? AND track_id = ?", channel.ID, id).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
-				app.Log(c.Request.Context()).Warn("删除巡航本地缓存失败", zap.String("event", "device_ptz_resources.executeptzextendedresourceas.warn"),
-					zap.Uint("channelId", channel.ID),
-					zap.Int("trackId", id),
+				app.Log(c.Request.Context()).Warn("删除巡航本地缓存失败", zap.String("event", "ptz.cruise_cache.delete_failed"),
+					zap.Uint("channel_id", channel.ID),
+					zap.Int("track_id", id),
 					logging.Error(err))
 			}
 		}
@@ -313,8 +313,8 @@ func (dc *DeviceMgmtController) reconcilePresetsAsync(parent context.Context, ta
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
 			app.Log(ctx).Named("ptz").Warn("预置位对账查询下发失败", zap.String("event", "ptz.preset_reconcile_failed"),
-				zap.Uint("channelId", target.ChannelID),
-				zap.String("channelCode", target.ChannelCode),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
 				logging.Error(err))
 		}
 	})
@@ -490,9 +490,9 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 
 	// 只有全部控制指令都成功发送后才写入待对账记录,避免中途失败留下幽灵轨迹。
 	if err := dc.upsertOptimisticCruise(c, target, request); err != nil {
-		app.Log(c.Request.Context()).Warn("巡航待对账记录写入失败", zap.String("event", "device_ptz_resources.createcruisetrack.warn"),
-			zap.Uint("channelId", target.ChannelID),
-			zap.Int("trackId", trackID),
+		app.Log(c.Request.Context()).Warn("巡航待对账记录写入失败", zap.String("event", "ptz.cruise_reconcile_record.write_failed"),
+			zap.Uint("channel_id", target.ChannelID),
+			zap.Int("track_id", trackID),
 			logging.Error(err))
 	}
 	// 异步对账,主流程立即返回 —— HTTP 成功只表示控制指令已发送
@@ -545,8 +545,8 @@ func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, tar
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrackList, 0, "reconcile-cruise-"+uuid.NewString()); err != nil {
 			app.Log(ctx).Named("ptz").Warn("巡航轨迹对账查询下发失败", zap.String("event", "ptz.cruise_reconcile_failed"),
-				zap.Uint("channelId", target.ChannelID),
-				zap.String("channelCode", target.ChannelCode),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
 				logging.Error(err))
 		}
 		if !includeDetail {
@@ -554,9 +554,9 @@ func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, tar
 		}
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrack, trackID, "reconcile-cruise-detail-"+uuid.NewString()); err != nil {
 			app.Log(ctx).Named("ptz").Warn("巡航轨迹详情对账查询下发失败", zap.String("event", "ptz.cruise_detail_reconcile_failed"),
-				zap.Uint("channelId", target.ChannelID),
-				zap.String("channelCode", target.ChannelCode),
-				zap.Int("trackId", trackID),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
+				zap.Int("track_id", trackID),
 				logging.Error(err))
 		}
 	})

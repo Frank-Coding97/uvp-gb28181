@@ -1164,7 +1164,7 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	// 获取当前工作目录
 	wd, err := os.Getwd()
 	if err != nil {
-		app.Log(cgs.logContext()).Error("获取工作目录失败", zap.String("event", "codegen.working_directory_failed"), logging.Error(err))
+		app.Log(cgs.logContext()).Warn("获取工作目录失败", zap.String("event", "codegen.working_directory_failed"), logging.Error(err))
 		return ""
 	}
 
@@ -1174,14 +1174,14 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	// 读取模板文件
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
-		app.Log(cgs.logContext()).Error("读取模板文件失败", zap.String("event", "codegen.template_read_failed"), zap.String("templatePath", templatePath), logging.Error(err))
+		app.Log(cgs.logContext()).Warn("读取模板文件失败", zap.String("event", "codegen.template_read_failed"), zap.String("template_path", templatePath), logging.Error(err))
 		return ""
 	}
 
 	// 解析模板
 	tmpl, err := template.New(templateName).Parse(string(templateContent))
 	if err != nil {
-		app.Log(cgs.logContext()).Error("解析模板失败", zap.String("event", "codegen.template_parse_failed"), zap.String("templateName", templateName), logging.Error(err))
+		app.Log(cgs.logContext()).Warn("解析模板失败", zap.String("event", "codegen.template_parse_failed"), zap.String("template_name", templateName), logging.Error(err))
 		return ""
 	}
 
@@ -1189,7 +1189,7 @@ func (cgs *CodeGenService) executeTemplate(templateName string, data interface{}
 	var buf strings.Builder
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
-		app.Log(cgs.logContext()).Error("执行模板失败", zap.String("event", "codegen.template_execute_failed"), zap.String("templateName", templateName), logging.Error(err))
+		app.Log(cgs.logContext()).Warn("执行模板失败", zap.String("event", "codegen.template_execute_failed"), zap.String("template_name", templateName), logging.Error(err))
 		return ""
 	}
 
@@ -1208,7 +1208,7 @@ func (cgs *CodeGenService) writeCodeToFileWithCover(filePath string, content str
 	if !isCover {
 		if _, err := os.Stat(filePath); err == nil {
 			// 文件已存在，跳过写入
-			app.Log(cgs.logContext()).Info("文件已存在，跳过生成", zap.String("event", "codegen.file_skipped"), zap.String("filePath", filePath))
+			app.Log(cgs.logContext()).Info("文件已存在，跳过生成", zap.String("event", "codegen.file_skipped"), zap.String("file_path", filePath))
 			return nil
 		}
 	}

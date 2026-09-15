@@ -411,7 +411,10 @@ func TestOnStreamNotFoundLogsStableReasonWithoutCredentials(t *testing.T) {
 	entries := observed.FilterMessage("ZLM Hook 认证已拒绝").All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
-	require.Equal(t, "capability-invalid", fields["reason"])
+	require.Equal(t, "capability_invalid", fields["reason_code"])
+	// 短码一律 snake_case（C06 统一；kebab 只此一处，与 register/playauth 的
+	// 受控短码风格不一致会让人以为它们来自不同的枚举）。
+	require.NotContains(t, fields, "reason")
 	encoded, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "do-not-log-capability")

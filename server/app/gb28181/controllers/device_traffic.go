@@ -590,8 +590,8 @@ func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
 		dc.FailAndAbort(c, "强退观看连接失败", err)
 		return
 	}
-	app.Log(c.Request.Context()).Info("GB28181 当前观看连接已强退", zap.String("event", "device_traffic.kickviewer.info"), zap.Uint("operatorId", common.GetCurrentUserID(c)),
-		zap.String("deviceId", scope.DeviceCode), zap.String("channelId", scope.ChannelCode), zap.Int64("nodeId", mediaNode.ID))
+	app.Log(c.Request.Context()).Info("GB28181 当前观看连接已强退", zap.String("event", "gb28181.traffic.viewer_kicked"), zap.Uint("operator_id", common.GetCurrentUserID(c)),
+		zap.String("device_id", scope.DeviceCode), zap.String("channel_id", scope.ChannelCode), zap.Int64("node_id", mediaNode.ID))
 	dc.Success(c, gin.H{"kicked": true})
 }
 

@@ -671,7 +671,7 @@ func TestStop(t *testing.T) {
 	z := &mockZLM{}
 	inv := &mockInviter{}
 	s, _, channels := newSvc(t, z, inv, onlineDevice(), aChannel())
-	if err := s.Stop(context.Background(), "fake-stream"); err != nil {
+	if err := s.Stop(context.Background(), "fake-stream", "", ""); err != nil {
 		t.Fatalf("Stop 失败: %v", err)
 	}
 	if inv.byeCalls.Load() != 1 || z.closeCalls.Load() != 1 {
@@ -693,7 +693,7 @@ func TestStopEndsRecordingBeforeMediaCleanup(t *testing.T) {
 	}}
 	s.SetPlaybackRecordingLifecycle(lifecycle)
 
-	if err := s.Stop(context.Background(), "fake-stream"); err != nil {
+	if err := s.Stop(context.Background(), "fake-stream", "", ""); err != nil {
 		t.Fatalf("Stop 失败: %v", err)
 	}
 	if lifecycle.endCalls.Load() != 1 {

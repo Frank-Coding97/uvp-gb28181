@@ -71,7 +71,7 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 						// 路径在白名单中，允许通过
 						app.Log(c.Request.Context()).Named("auth").Info("演示账号访问白名单路径",
 							zap.String("event", "auth.demo_account.allow_path"),
-							zap.Uint("userID", claims.UserID),
+							zap.Uint("user_id", claims.UserID),
 							zap.String("method", c.Request.Method),
 							zap.String("route", c.FullPath()),
 							zap.Bool("matched_prefix", true))
@@ -82,9 +82,12 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 			}
 
 			// 非GET请求且不在白名单中，拒绝访问
-			app.Log(c.Request.Context()).Named("auth").Warn("演示账号尝试执行非GET操作",
+			// INFO 而非 WARN：演示账号的**写操作被设计性地拒绝**，返回 403 与
+			// "没这个接口"对外等价。这不是"降级但仍在跑"（WARN 的定义），
+			// 而是"按策略拦住了"，没有可执行的动作。
+			app.Log(c.Request.Context()).Named("auth").Info("演示账号尝试执行非GET操作",
 				zap.String("event", "auth.demo_account.denied"),
-				zap.Uint("userID", claims.UserID),
+				zap.Uint("user_id", claims.UserID),
 				zap.String("method", c.Request.Method),
 				zap.String("route", c.FullPath()))
 

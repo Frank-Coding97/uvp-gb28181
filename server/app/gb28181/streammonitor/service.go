@@ -105,10 +105,10 @@ func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Nod
 	if err != nil {
 		app.Log(ctx).Named("streammonitor").Warn("读取 ZLM 流概况失败",
 			zap.String("event", "streammonitor.media_read_failed"),
-			zap.String("streamId", streamID),
-			zap.Int64("nodeId", mediaNode.ID),
+			zap.String("stream_id", streamID),
+			zap.Int64("node_id", mediaNode.ID),
 			zap.String("endpoint", mediaNode.HTTPEndpoint()),
-			zap.Int("apiPort", mediaNode.APIPort),
+			zap.Int("api_port", mediaNode.APIPort),
 			zap.Error(err))
 		return nil, fmt.Errorf("%w: %v", ErrNodeUnavailable, err)
 	}

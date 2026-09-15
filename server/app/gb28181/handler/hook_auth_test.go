@@ -138,6 +138,25 @@ func TestHookAuthenticatorDoesNotLogCapability(t *testing.T) {
 	encoded, err := json.Marshal(observed.All())
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "must-not-appear")
+
+	// 被拒绝时**对方还没通过认证**，所以"是谁"只能由 `source_ip`（谁连过来的）+
+	// `node_id`（它自称是谁）一起回答 —— 只有 reason_code 的拒绝日志等于
+	// "有人被拒了，但不知道是谁"。
+	var rejected map[string]interface{}
+	for _, entry := range observed.All() {
+		if entry.ContextMap()["event"] == "gb28181.hook.auth.rejected" {
+			rejected = entry.ContextMap()
+		}
+	}
+	require.NotNil(t, rejected, "拒绝事件未记录")
+	require.Equal(t, "192.0.2.1", rejected["source_ip"], "拒绝事件必须留下对端地址")
+	require.Equal(t, "node-a", rejected["node_id"], "拒绝事件必须留下载荷自称的节点")
+
+	// 受控短码统一 snake_case（register / playauth 两侧都是），kebab 会让人以为
+	// 它们来自不同的枚举、进而写出互不兼容的过滤规则。
+	reasonCode, _ := rejected["reason_code"].(string)
+	require.NotEmpty(t, reasonCode, "拒绝事件必须给出 reason_code")
+	require.NotContains(t, reasonCode, "-", "受控短码不要用 kebab-case")
 }
 
 func boolPtr(value bool) *bool { return &value }

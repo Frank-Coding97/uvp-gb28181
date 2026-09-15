@@ -236,7 +236,7 @@ func TestAutoStartAuthorizationTerminatesWhenGenerationStops(t *testing.T) {
 	if _, err := authorization.Verify(token, bound); err != nil {
 		t.Fatalf("bound token did not verify: %v", err)
 	}
-	if err := service.Stop(context.Background(), result.StreamID); err != nil {
+	if err := service.Stop(context.Background(), result.StreamID, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := authorization.Verify(token, bound); !errors.Is(err, playauth.ErrAuthorizationTerminal) {

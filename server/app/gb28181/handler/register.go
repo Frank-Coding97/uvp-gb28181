@@ -299,7 +299,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if expires == 0 {
 		// 注销
 		if err := h.handleUnregister(ctx, deviceID); err != nil {
-			logger.Error("GB28181 注销处理失败",
+			logger.Warn("GB28181 注销处理失败",
 				zap.String("event", "gb28181.register.unregister_failed"),
 				zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 				logging.Error(err))
@@ -310,7 +310,8 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		logger.Info("GB28181 设备注销",
 			zap.String("event", "gb28181.register.unregistered"),
-			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			zap.String("peer", req.Source()))
 		_ = tx.Respond(h.buildOKWithExpires(req, 0))
 		h.recordEnd(req, 200, true)
 		h.finishRegisterAttempt(req, deviceID, cred.Nonce)
@@ -330,7 +331,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	isFirst, err := h.handleRegister(ctx, info, h.keepaliveInterval)
 	if err != nil {
 		status, reason := registerFailureResponse(err)
-		logger.Error("GB28181 注册状态更新失败",
+		logger.Warn("GB28181 注册状态更新失败",
 			zap.String("event", "gb28181.register.state_update_failed"),
 			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 			logging.Error(err))
@@ -349,12 +350,31 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 			logging.Error(err))
 	}
+	// 本次注册到底有没有**发起**通道同步 —— 必须在这条日志之前算好。
+	//
+	// 读者看到"设备注册成功"之后立刻会问的就是"那为什么通道没出来"，而这个布尔值
+	// 就是答案的第一个分叉：false 且 is_first=false → 不是首注册（设备一直在，
+	// 本来就不重发 Catalog）；false 且 is_first=true → 同步开关被关了；
+	// true → 已经发出查询，往下看 catalog/deviceinfo 的结果。
+	//
+	// ⚠️ 不要把 `is_first` 改名成 `catalog_triggered`：两者**不等价**。
+	// `is_first` 是"本次注册让设备从离线转在线"（还决定订阅唤醒、DeviceInfo 查询），
+	// 而 Catalog 查询还额外受 `gbconfig.SyncChannelsOnOnline()` 约束。
+	// 改名会让这条日志在"开关关掉"时谎报"已同步"。
+	catalogTriggered := isFirst && h.catalogTrigger != nil && gbconfig.SyncChannelsOnOnline()
 	logger.Info("GB28181 设备注册成功",
 		zap.String("event", "gb28181.register.succeeded"),
 		zap.String("stage", "terminal"), zap.String("outcome", "succeeded"),
 		zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+		// peer = 本次 REGISTER 实际来自哪个地址（设备在 NAT 后面时这就是唯一的回连地址，
+		// 也是"注册成功了但平台发不出消息"时第一个要核对的值）。
+		zap.String("peer", req.Source()),
 		zap.String("transport", req.Transport()),
-		zap.Bool("is_first", isFirst))
+		// expires 之前解析了却没打：它决定"这台设备多久后会判离线"，
+		// 排"设备反复上下线"时它是第一个要看的数。
+		zap.Int("expires", expires),
+		zap.Bool("is_first", isFirst),
+		zap.Bool("catalog_triggered", catalogTriggered))
 	_ = tx.Respond(h.buildOKWithExpires(req, expires))
 	h.recordEnd(req, 200, true)
 	h.finishRegisterAttempt(req, deviceID, cred.Nonce)
@@ -373,7 +393,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 					logging.Error(err))
 			}
 		}
-		if h.catalogTrigger != nil && gbconfig.SyncChannelsOnOnline() {
+		if catalogTriggered {
 			h.catalogTrigger.Trigger(ctx, deviceID, dest, transport)
 		}
 		if h.deviceInfoTrigger != nil {

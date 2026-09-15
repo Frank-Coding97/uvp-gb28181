@@ -37,7 +37,7 @@ func GetAreaListInstance(contexts ...context.Context) AreaModelList {
 	once.Do(func() {
 		file, err := os.Open(AREAPATH)
 		if err != nil {
-			app.Log(ctx).Error("area data load failed",
+			app.Log(ctx).Warn("area data load failed",
 				zap.String("event", "models.area.load_failed"),
 				zap.String("phase", "open"),
 				zap.String("path", AREAPATH),
@@ -47,7 +47,7 @@ func GetAreaListInstance(contexts ...context.Context) AreaModelList {
 		defer file.Close()
 
 		if err := json.NewDecoder(file).Decode(&instance); err != nil {
-			app.Log(ctx).Error("area data load failed",
+			app.Log(ctx).Warn("area data load failed",
 				zap.String("event", "models.area.load_failed"),
 				zap.String("phase", "decode"),
 				zap.String("path", AREAPATH),

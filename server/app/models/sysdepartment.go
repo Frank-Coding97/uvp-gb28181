@@ -89,7 +89,7 @@ func (list SysDepartmentList) BuildTree(contexts ...context.Context) SysDepartme
 
 		// 循环引用检测 - 处理ParentID为指针类型
 		if node.ParentID != nil && node.ID == *node.ParentID {
-			app.Log(ctx).Error("department tree cycle detected",
+			app.Log(ctx).Warn("department tree cycle detected",
 				zap.String("event", "models.sysdepartment.tree_cycle"),
 				zap.Uint("node_id", node.ID),
 				zap.Uint("parent_id", *node.ParentID))

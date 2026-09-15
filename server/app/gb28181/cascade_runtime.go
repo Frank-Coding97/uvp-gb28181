@@ -317,7 +317,7 @@ func stopCascadeRuntime(ctx context.Context) error {
 	}
 	err := manager.Shutdown(ctx)
 	if err != nil {
-		app.Log(ctx).Named("cascade").Error("Cascade shutdown incomplete", zap.String("event", "cascade.shutdown_incomplete"), logging.Error(err))
+		app.Log(ctx).Named("cascade").Warn("Cascade shutdown incomplete", zap.String("event", "cascade.shutdown_incomplete"), logging.Error(err))
 	}
 	return err
 }

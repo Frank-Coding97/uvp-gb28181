@@ -95,7 +95,7 @@ func (list SysRoleList) BuildTree(contexts ...context.Context) SysRoleList {
 
 		// 循环引用检测
 		if node.ID == node.ParentID {
-			app.Log(ctx).Error("role tree cycle detected",
+			app.Log(ctx).Warn("role tree cycle detected",
 				zap.String("event", "models.sysrole.tree_cycle"),
 				zap.Uint("node_id", node.ID),
 				zap.Uint("parent_id", node.ParentID))

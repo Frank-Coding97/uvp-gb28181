@@ -46,19 +46,26 @@ func (l *logger) LogMode(level gormLog.LogLevel) gormLog.Interface {
 func (l *logger) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
 	return sql, nil
 }
+// db.diagnostic 这三支统一走 DEBUG（C03）：
+// GORM 的 logger.Interface 只把"我发了条消息"告诉你，**文本本身被故意丢弃**
+// （`text_omitted: true`，参数是 `_ string`）。它既不说发生了什么，也不带定位字段——
+// 判据②「看到它要做什么」答不出，判据①「定位谁」也答不出。按 C08 的工作，SQL 层面的
+// 真相另有其处：`db.query` / `db.query_failed` / `db.slow_query` 三个事件带
+// dialect/operation/fingerprint/rows/duration_ms。这里再报一次只会制造噪声。
+// ⚠️ 降级前它是全仓**唯一**跨等级的 event（Info/Warn/Error 各一处），降完正好归零。
 func (l *logger) Info(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Info {
-		app.Log(ctx).Named("db").Info("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
+		app.Log(ctx).Named("db").Debug("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
 func (l *logger) Warn(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Warn {
-		app.Log(ctx).Named("db").Warn("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
+		app.Log(ctx).Named("db").Debug("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
 func (l *logger) Error(ctx context.Context, _ string, _ ...interface{}) {
 	if l.LogLevel >= gormLog.Error {
-		app.Log(ctx).Named("db").Error("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
+		app.Log(ctx).Named("db").Debug("GORM diagnostic", zap.String("event", "db.diagnostic"), zap.Bool("text_omitted", true))
 	}
 }
 func (l *logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {

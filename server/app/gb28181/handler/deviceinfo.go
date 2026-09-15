@@ -17,18 +17,27 @@ import (
 // 语义:设备本体元数据回写 gb_device.name / manufacturer / model / firmware
 // 只覆盖"非空且新值不同"的字段,避免用空串清掉已有数据;
 // 若 DB 未就绪(单测/早启动)直接 no-op,不 panic。
-func HandleDeviceInfoResponse(ctx context.Context, body []byte, traceFields ...zap.Field) {
-	logger := app.Log(ctx).Named("gb28181.deviceinfo").With(traceFields...)
+// deviceID / callID / cseq 是显式参数，不是 `traceFields ...zap.Field` ——
+// 理由同 HandleCatalogResponse：`.With(zap.String(...))` 让字段名在日志语句里读不到。
+func HandleDeviceInfoResponse(ctx context.Context, body []byte, deviceID, callID, cseq string) {
+	logger := app.Log(ctx).Named("gb28181.deviceinfo")
 	resp, err := manscdp.ParseDeviceInfoResponse(body)
+	// INFO（两条同一判据）：应答体坏了 / 应答体缺 DeviceID —— 都是**对方的错**，
+	// 我们丢弃该应答并结束，对外行为与"没有这次应答"等价。下面 `device_missing`
+	// （设备不在库）**保持 WARN**：那是本地数据与设备行为不一致，要人去看。
 	if err != nil {
-		logger.Warn("DeviceInfo 应答解析失败",
+		logger.Info("DeviceInfo 应答解析失败",
 			zap.String("event", "gb28181.deviceinfo.response_parse_failed"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 			zap.String("reason_code", "device_info_response_invalid"), logging.Error(err))
 		return
 	}
 	if resp.DeviceID == "" {
-		logger.Warn("DeviceInfo 应答缺少 DeviceID,忽略",
-			zap.String("event", "gb28181.deviceinfo.missing_device_id"))
+		logger.Info("DeviceInfo 应答缺少 DeviceID,忽略",
+			zap.String("event", "gb28181.deviceinfo.missing_device_id"),
+			// 应答体里没有 DeviceID，但信封上有 —— 否则这条 INFO 就成了"某台设备发了
+			// 一个坏应答"里那个说不出是谁的坏应答。
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		return
 	}
 
@@ -36,7 +45,7 @@ func HandleDeviceInfoResponse(ctx context.Context, body []byte, traceFields ...z
 	if db == nil {
 		logger.Debug("DB 未初始化,跳过 DeviceInfo 回写",
 			zap.String("event", "gb28181.deviceinfo.store_unavailable"),
-			zap.String("device_id", resp.DeviceID))
+			zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		return
 	}
 
@@ -44,15 +53,16 @@ func HandleDeviceInfoResponse(ctx context.Context, body []byte, traceFields ...z
 	var dev gbmodels.GbDevice
 	res := db.WithContext(ctx).Where("device_id = ?", resp.DeviceID).Limit(1).Find(&dev)
 	if res.Error != nil {
-		logger.Error("DeviceInfo 回写查设备失败",
+		logger.Warn("DeviceInfo 回写查设备失败",
 			zap.String("event", "gb28181.deviceinfo.lookup_failed"),
-			zap.String("device_id", resp.DeviceID), logging.Error(res.Error))
+			zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			logging.Error(res.Error))
 		return
 	}
 	if res.RowsAffected == 0 {
 		logger.Warn("DeviceInfo 应答对应设备不在库,忽略",
 			zap.String("event", "gb28181.deviceinfo.device_missing"),
-			zap.String("device_id", resp.DeviceID))
+			zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		return
 	}
 
@@ -73,20 +83,21 @@ func HandleDeviceInfoResponse(ctx context.Context, body []byte, traceFields ...z
 	if len(updates) == 0 {
 		logger.Debug("DeviceInfo 应答无字段变更",
 			zap.String("event", "gb28181.deviceinfo.unchanged"),
-			zap.String("device_id", resp.DeviceID))
+			zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		return
 	}
 	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).
 		Where("id = ?", dev.ID).
 		Updates(updates).Error; err != nil {
-		logger.Error("DeviceInfo 回写失败",
+		logger.Warn("DeviceInfo 回写失败",
 			zap.String("event", "gb28181.deviceinfo.update_failed"),
-			zap.String("device_id", resp.DeviceID), logging.Error(err))
+			zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			logging.Error(err))
 		return
 	}
 	logger.Info("DeviceInfo 回写成功",
 		zap.String("event", "gb28181.deviceinfo.updated"),
-		zap.String("device_id", resp.DeviceID),
+		zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 		zap.Int("updated_field_count", len(updates)),
 		zap.Bool("name_updated", updates["name"] != nil),
 		zap.Bool("manufacturer_updated", updates["manufacturer"] != nil),

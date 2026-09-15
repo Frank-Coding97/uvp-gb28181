@@ -104,13 +104,13 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		sc.Fail(c, "保存 SIP 配置失败", err, http.StatusInternalServerError)
 		return
 	}
-	app.Log(c.Request.Context()).Info("SIP 配置已保存", zap.String("event", "setup.saveconfig.info"),
-		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
-		zap.String("deploymentMode", string(view.DeploymentMode)),
-		zap.String("listenIp", view.ListenIP),
-		zap.String("advertiseIp", view.AdvertiseIP),
+	app.Log(c.Request.Context()).Info("SIP 配置已保存", zap.String("event", "setup.config_saved"),
+		zap.Uint("operator_id", sc.GetCurrentUserID(c)),
+		zap.String("deployment_mode", string(view.DeploymentMode)),
+		zap.String("listen_ip", view.ListenIP),
+		zap.String("advertise_ip", view.AdvertiseIP),
 		zap.Int("port", view.Port),
-		zap.String("serverId", view.ServerID))
+		zap.String("server_id", view.ServerID))
 
 	// 保存后立即热启动 SIP 服务,让用户免于重启进程.
 	// 热启动失败时 runtime state 已经被 Reloader 内部置为 failed,原因通过 snapshot 返回给前端.
@@ -120,7 +120,9 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		if err := sc.reload(); err != nil {
 			reloadOK = false
 			reloadErrText = err.Error()
-			app.Log(c.Request.Context()).Error("SIP 保存后热启动失败", zap.String("event", "setup.saveconfig.error"), logging.Error(err))
+			app.Log(c.Request.Context()).Warn("SIP 保存后热启动失败", zap.String("event", "setup.sip_reload_failed"),
+				zap.String("server_id", view.ServerID),
+				logging.Error(err))
 		}
 	}
 
@@ -137,8 +139,8 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 // 前端用 sessionStorage 记住"本次登录已跳过",下次登录会再次弹出提示.
 // 该端点保留,只是为了记录审计日志,让运维知道用户暂缓过引导.
 func (sc *SetupController) Skip(c *gin.Context) {
-	app.Log(c.Request.Context()).Info("SIP 首次安装引导已暂缓(前端行为,后端不持久化)", zap.String("event", "setup.skip.info"),
-		zap.Uint("operatorId", sc.GetCurrentUserID(c)))
+	app.Log(c.Request.Context()).Info("SIP 首次安装引导已暂缓(前端行为,后端不持久化)", zap.String("event", "setup.install_guide_skipped"),
+		zap.Uint("operator_id", sc.GetCurrentUserID(c)))
 	sc.Success(c, gin.H{"acknowledged": true})
 }
 

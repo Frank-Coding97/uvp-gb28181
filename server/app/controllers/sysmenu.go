@@ -571,7 +571,7 @@ func (sm *SysMenuController) SetMenuApis(c *gin.Context) {
 	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 先删除该菜单的所有API关联
 		if err := tx.Where("menu_id = ?", req.MenuID).Delete(&models.SysMenuApi{}).Error; err != nil {
-			app.Log(c.Request.Context()).Error("删除菜单API关联失败", zap.String("event", "sysmenu.setmenuapis.error"), logging.Error(err), zap.Uint("menuId", req.MenuID))
+			app.Log(c.Request.Context()).Warn("删除菜单API关联失败", zap.String("event", "sysmenu.menu_api_delete_failed"), logging.Error(err), zap.Uint("menu_id", req.MenuID))
 			return err
 		}
 
@@ -587,7 +587,7 @@ func (sm *SysMenuController) SetMenuApis(c *gin.Context) {
 			}
 
 			if err := tx.CreateInBatches(menuApis, 100).Error; err != nil {
-				app.Log(c.Request.Context()).Error("批量插入菜单API关联失败", zap.String("event", "sysmenu.setmenuapis.error"), logging.Error(err), zap.Uint("menuId", req.MenuID), zap.Int("resource_count", len(req.ApiIDs)))
+				app.Log(c.Request.Context()).Warn("批量插入菜单API关联失败", zap.String("event", "sysmenu.menu_api_insert_failed"), logging.Error(err), zap.Uint("menu_id", req.MenuID), zap.Int("resource_count", len(req.ApiIDs)))
 				return err
 			}
 		}

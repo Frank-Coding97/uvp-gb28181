@@ -33,7 +33,8 @@ type PlayController struct {
 
 type PlayService interface {
 	Start(context.Context, string, string) (*play.Result, error)
-	Stop(context.Context, string) error
+	// Stop 的 deviceID/channelID 只用于日志定位;调用方没有值时传空。
+	Stop(context.Context, string, string, string) error
 }
 
 type AuthorizedPlayService interface {
@@ -100,7 +101,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 		var attemptErr error
 		attemptID, attemptErr = pc.attemptStore.Begin(c.Request.Context(), pc.GetCurrentUserID(c), deviceID, channelID)
 		if attemptErr != nil {
-			app.Log(c.Request.Context()).Warn("记录点播 attempt 开始失败", zap.String("event", "play.attempt_begin_failed"), logging.Error(attemptErr))
+			app.Log(c.Request.Context()).Warn("记录点播 attempt 开始失败", zap.String("event", "play.attempt_begin_failed"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), logging.Error(attemptErr))
 		}
 	}
 	defer func() {
@@ -115,7 +116,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 			}
 		}
 		if err := pc.attemptStore.Finish(context.WithoutCancel(c.Request.Context()), attemptID, attemptOutcome, attemptFailureStage, nodeID, reused); err != nil {
-			app.Log(c.Request.Context()).Warn("记录点播 attempt 结果失败", zap.String("event", "play.attempt_finish_failed"), logging.Error(err))
+			app.Log(c.Request.Context()).Warn("记录点播 attempt 结果失败", zap.String("event", "play.attempt_finish_failed"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), logging.Error(err))
 		}
 	}()
 	var res *play.Result
@@ -140,7 +141,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	if pc.recordingStarter != nil && res != nil && res.StreamID != "" {
 		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil {
-			app.Log(c.Request.Context()).Warn("点播成功后启动云端录像失败", zap.String("event", "play.recording_start_failed"), zap.String("streamId", res.StreamID), logging.Error(err))
+			app.Log(c.Request.Context()).Warn("点播成功后启动云端录像失败", zap.String("event", "play.recording_start_failed"), zap.String("stream_id", res.StreamID), logging.Error(err))
 		}
 	}
 	finishPlaybackAuthorizationAudit(audit, res)
@@ -257,10 +258,16 @@ func (pc *PlayController) Stop(c *gin.Context) {
 		pc.FailAndAbort(c, "streamId 不能为空", nil)
 		return
 	}
-	if !pc.streamVisible(c, streamID) {
+	ch, visible := pc.streamVisible(c, streamID)
+	if !visible {
 		return
 	}
-	if err := pc.svc.Stop(c.Request.Context(), streamID); err != nil {
+	// 通道行已经查出来了,顺带作为停播日志的定位字段(无额外查询)
+	deviceID, channelID := "", ""
+	if ch != nil {
+		deviceID, channelID = ch.DeviceID, ch.ChannelID
+	}
+	if err := pc.svc.Stop(c.Request.Context(), streamID, deviceID, channelID); err != nil {
 		pc.FailAndAbort(c, "停止流失败", err)
 		return
 	}
@@ -306,7 +313,10 @@ func (pc *PlayController) channelVisible(c *gin.Context, deviceID, channelID str
 	return true
 }
 
-func (pc *PlayController) streamVisible(c *gin.Context, streamID string) bool {
+// streamVisible 校验"流存在且可见"。校验语义与返回 false 的三种拒绝理由一字未变,
+// 只是把本来就要查的整行通道返回给调用方,供停播日志携带 device_id/channel_id,
+// 避免为了两个日志字段再查一次库。
+func (pc *PlayController) streamVisible(c *gin.Context, streamID string) (*gbmodels.GbChannel, bool) {
 	var ch gbmodels.GbChannel
 	result := app.DB().WithContext(c.Request.Context()).
 		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
@@ -315,11 +325,11 @@ func (pc *PlayController) streamVisible(c *gin.Context, streamID string) bool {
 		Find(&ch)
 	if result.Error != nil {
 		pc.FailAndAbort(c, "查询流失败", result.Error)
-		return false
+		return nil, false
 	}
 	if result.RowsAffected == 0 {
 		pc.FailAndAbort(c, "流不存在或无权停播", nil)
-		return false
+		return nil, false
 	}
-	return true
+	return &ch, true
 }

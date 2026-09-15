@@ -101,7 +101,7 @@ func TestServiceStopClearFailureStillClosesMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Stop(context.Background(), result.StreamID); !errors.Is(err, errClear) {
+	if err := service.Stop(context.Background(), result.StreamID, "", ""); !errors.Is(err, errClear) {
 		t.Fatalf("stop error=%v, want clear failure", err)
 	}
 	if z.closeCalls.Load() != 1 || inviter.byeCalls.Load() != 1 {
@@ -131,7 +131,7 @@ func TestServiceStopByeFailureClosesBeforeClearingPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Stop(context.Background(), result.StreamID); !errors.Is(err, errBye) {
+	if err := service.Stop(context.Background(), result.StreamID, "", ""); !errors.Is(err, errBye) {
 		t.Fatalf("stop error=%v, want BYE failure", err)
 	}
 	if !reflect.DeepEqual(events, []string{"bye", "close", "clear"}) {
@@ -174,7 +174,7 @@ func TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable(t *testing.
 	bound := binding
 	bound.MediaGeneration = result.Generation
 
-	if err := service.Stop(context.Background(), result.StreamID); !errors.Is(err, errClose) {
+	if err := service.Stop(context.Background(), result.StreamID, "", ""); !errors.Is(err, errClose) {
 		t.Fatalf("stop error=%v, want close failure", err)
 	}
 	if current, ok := service.CurrentLiveRef(result.StreamID); !ok || current != resultLiveRef(result) {
@@ -196,7 +196,7 @@ func TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable(t *testing.
 	}
 
 	z.SetCloseErr(nil)
-	if err := service.Stop(context.Background(), result.StreamID); err != nil {
+	if err := service.Stop(context.Background(), result.StreamID, "", ""); err != nil {
 		t.Fatalf("retry after close failure: %v", err)
 	}
 	if _, ok := service.CurrentLiveRef(result.StreamID); ok {

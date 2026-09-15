@@ -43,16 +43,16 @@ func (t *uacCatalogTrigger) Trigger(ctx context.Context, deviceID, dest, transpo
 		sn := int(t.sn.Add(1))
 		body, err := manscdp.BuildCatalogQuery(deviceID, sn)
 		if err != nil {
-			logger.Warn("Catalog 查询 XML 构造失败", zap.String("event", "catalog.query_build_failed"), zap.String("device_id", deviceID), logging.Error(err))
+			logger.Warn("Catalog 查询 XML 构造失败", zap.String("event", "gb28181.catalog.query_build_failed"), zap.String("device_id", deviceID), logging.Error(err))
 			return
 		}
 		if err := t.uac.SendMessage(scope, deviceID, dest, transport, body); err != nil {
-			logger.Warn("Catalog 查询发送失败", zap.String("event", "catalog.query_send_failed"),
+			logger.Warn("Catalog 查询发送失败", zap.String("event", "gb28181.catalog.query_send_failed"),
 				zap.String("device_id", deviceID), zap.String("destination", dest),
 				zap.String("transport", transport), logging.Error(err))
 			return
 		}
-		logger.Info("Catalog 查询已发出", zap.String("event", "catalog.query_sent"),
+		logger.Info("Catalog 查询已发出", zap.String("event", "gb28181.catalog.query_sent"),
 			zap.String("device_id", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
 	})
 }

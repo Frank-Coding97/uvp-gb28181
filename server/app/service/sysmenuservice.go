@@ -302,10 +302,10 @@ func (s *SysMenuService) Import(c *gin.Context, menuList models.SysMenuList, use
 	}
 
 	// 记录日志
-	app.Log(c.Request.Context()).Info("菜单导入完成", zap.String("event", "sysmenuservice.import.info"),
-		zap.Int("新增菜单数量", result.TotalMenus),
-		zap.Int("新增API数量", result.TotalApis),
-		zap.String("新增菜单", s.formatMenuNames(newMenus)),
+	app.Log(c.Request.Context()).Info("菜单导入完成", zap.String("event", "sysmenuservice.menu_imported"),
+		zap.Int("added_menus", result.TotalMenus),
+		zap.Int("added_apis", result.TotalApis),
+		zap.String("new_menu_names", s.formatMenuNames(newMenus)),
 	)
 
 	return result, nil

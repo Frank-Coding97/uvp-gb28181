@@ -228,10 +228,19 @@ func operationLogContext(c *gin.Context) context.Context {
 }
 
 // persistOperationLog 异步持久化日志记录(不接触 Gin Context)
+//
+// 留 ERROR（C03.③ 复核过，是全仓唯一一条"留"得需要解释的）：它是**唯一一类
+// "主流程成功、但记录永久丢失"**的失败 —— 业务请求照样返回 200，没有任何下游会因此
+// 报错，也没有第二个信号能暴露它。判据里"功能已不可用"说的是审计这条链路本身，
+// 而这里没有其他日志能替代。降成 WARN 等于把"操作没留痕"降成"又一个可看一眼的失败"，
+// 而审计丢失是不可追回的。其余同类写成失败的（`sysgenservice.*_rollback`、
+// `scheduler.*`）都降了 WARN，不要按"和它们长得一样"来改这一条。
 func persistOperationLog(ctx context.Context, log *models.SysOperationLog) {
 	if err := app.DBContext(ctx).Create(log).Error; err != nil {
 		app.Log(ctx).Named("audit").Error("记录操作日志失败",
-			zap.String("event", "audit.operation_log.persist_failed"), logging.Error(err))
+			zap.String("event", "audit.operation_log.persist_failed"),
+			zap.Uint("user_id", log.UserID), zap.String("route", log.Path),
+			logging.Error(err))
 	}
 }
 

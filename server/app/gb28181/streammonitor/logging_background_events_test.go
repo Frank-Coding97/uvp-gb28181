@@ -33,8 +33,8 @@ func TestLoggingBackgroundEvents(t *testing.T) {
 	entry := entries.All()[0]
 	require.Equal(t, "streammonitor", entry.LoggerName)
 	require.Equal(t, "streammonitor.media_read_failed", entry.ContextMap()["event"])
-	require.Equal(t, "stream-1", entry.ContextMap()["streamId"])
-	require.EqualValues(t, 3, entry.ContextMap()["nodeId"])
+	require.Equal(t, "stream-1", entry.ContextMap()["stream_id"])
+	require.EqualValues(t, 3, entry.ContextMap()["node_id"])
 	require.Equal(t, "monitor-1", entry.ContextMap()["execution_id"])
 }
 

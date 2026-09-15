@@ -163,7 +163,11 @@ func (c *ManagementController) PushCatalog(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := c.service.PushCatalog(ctx, id)
+	// ⚠️ 必须传 `ctx.Request.Context()` 而不是裸 `ctx`:gin.Context 也实现了 context.Context
+	// 接口,所以传裸 ctx **能编译通过**,但它丢掉了标准 request context 里挂着的
+	// request_id/execution_id(见 logging.WithContext)——日志会失去请求级关联,
+	// 而这条链路的日志恰恰靠它串起来。`TestLoggingGBHTTPContextWiring` 就是防这个。
+	result, err := c.service.PushCatalog(ctx.Request.Context(), id)
 	if err != nil {
 		c.fail(ctx, err)
 		return

@@ -220,7 +220,11 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			status = http.StatusBadRequest
 			reason = http.StatusText(status)
 		}
-		logger.Warn("GB28181 MESSAGE 解析失败,忽略",
+		// INFO 而非 WARN：设备发来的 MESSAGE 解析不了，**这是对方的问题**——本平台既改不了
+		// 对方固件、也没有本地对象可修。按判据②，"看到它要做什么"答不出动作：这条报文被
+		// 丢弃，系统对外行为与"没收到"等价。⚠️ 边界：这只是"格式不合法"，不是"身份没通过"
+		// —— 认证/信任类拒绝（register.digest_failed / hook.auth.rejected）仍留 WARN。
+		logger.Info("GB28181 MESSAGE 解析失败,忽略",
 			zap.String("event", "gb28181.message.parse_failed"),
 			zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
@@ -374,7 +378,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdKeepalive:
 			restored, err := device.Keepalive(ctx, head.DeviceID)
 			if err != nil {
-				logger.Error("GB28181 心跳处理失败",
+				logger.Warn("GB28181 心跳处理失败",
 					zap.String("event", "gb28181.message.keepalive_failed"),
 					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 					logging.Error(err))
@@ -396,12 +400,10 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库
-			HandleCatalogResponse(ctx, req.Body(),
-				zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			HandleCatalogResponse(ctx, req.Body(), head.DeviceID, callID, cseq)
 		case manscdp.CmdDeviceInfo:
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
-			HandleDeviceInfoResponse(ctx, req.Body(),
-				zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			HandleDeviceInfoResponse(ctx, req.Body(), head.DeviceID, callID, cseq)
 		case manscdp.CmdDeviceControl:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {

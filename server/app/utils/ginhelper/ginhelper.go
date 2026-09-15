@@ -65,7 +65,7 @@ func RegisterPluginRoutes(routeFunc PluginRouteFunc) {
 // 参数 engine 是Gin引擎实例，会传递给每个已注册的插件路由函数
 func InitPluginRoutes(engine *gin.Engine) {
 	if len(pluginRouteFuncs) == 0 {
-		app.ZapLog.Info("没有注册的插件路由函数")
+		app.ZapLog.Info("没有注册的插件路由函数", zap.String("event", "plugin.routes.none"))
 		return
 	}
 
@@ -73,13 +73,13 @@ func InitPluginRoutes(engine *gin.Engine) {
 	for i, routeFunc := range pluginRouteFuncs {
 		if routeFunc != nil {
 			routeFunc(engine)
-			app.ZapLog.Info("插件路由初始化成功", zap.Int("pluginIndex", i))
+			app.ZapLog.Info("插件路由初始化成功", zap.String("event", "plugin.routes.initialized"), zap.Int("plugin_index", i))
 		} else {
-			app.ZapLog.Warn("插件路由函数为空，跳过初始化", zap.Int("pluginIndex", i))
+			app.ZapLog.Warn("插件路由函数为空，跳过初始化", zap.String("event", "plugin.routes.skipped_nil"), zap.Int("plugin_index", i))
 		}
 	}
 
-	app.ZapLog.Info("所有插件路由初始化完成", zap.Int("pluginCount", len(pluginRouteFuncs)))
+	app.ZapLog.Info("所有插件路由初始化完成", zap.String("event", "plugin.routes.ready"), zap.Int("plugin_count", len(pluginRouteFuncs)))
 }
 
 // GetPluginRouteFuncs 获取已注册的插件路由函数列表

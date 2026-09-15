@@ -13,7 +13,6 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 
@@ -162,7 +161,8 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 		require.NoError(t, sqlDB.Close())
 	})
 
-	HandleDeviceInfoResponse(context.Background(), []byte(`<Response><CmdType>DeviceInfo</CmdType><SN>8</SN><DeviceID>34020000001320000090</DeviceID><DeviceName>new-name</DeviceName><Manufacturer>new-maker</Manufacturer><Model>new-model</Model><Firmware>firmware-secret-t14</Firmware></Response>`))
+	HandleDeviceInfoResponse(context.Background(), []byte(`<Response><CmdType>DeviceInfo</CmdType><SN>8</SN><DeviceID>34020000001320000090</DeviceID><DeviceName>new-name</DeviceName><Manufacturer>new-maker</Manufacturer><Model>new-model</Model><Firmware>firmware-secret-t14</Firmware></Response>`),
+		deviceID, "call-info", "8")
 
 	row := t14RecordWithEvent(t, sink, "gb28181.deviceinfo.updated")
 	require.Equal(t, deviceID, row["device_id"])
@@ -184,9 +184,7 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 func TestLoggingDeviceInfoParseFailureIncludesStableReasonAndSIPIdentity(t *testing.T) {
 	_, sink := t14Runtime(t)
 	HandleDeviceInfoResponse(context.Background(), []byte(`<Response><CmdType>DeviceInfo</CmdType>`),
-		zap.String("device_id", "device-parse"),
-		zap.String("call_id", "call-parse"),
-		zap.String("cseq", "9"))
+		"device-parse", "call-parse", "9")
 	row := t14RecordWithEvent(t, sink, "gb28181.deviceinfo.response_parse_failed")
 	require.Equal(t, "device_info_response_invalid", row["reason_code"])
 	require.Equal(t, "device-parse", row["device_id"])

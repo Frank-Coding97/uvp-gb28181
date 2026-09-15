@@ -74,8 +74,12 @@ func (ps *PermissionService) AddRoleInheritance(c context.Context, roleID uint, 
 	domain := ps.GetDomain(c)
 
 	// 检查角色是否已继承自父角色
+	// INFO 而非 WARN：这是**入参自校验**——子角色不能等于父角色、父角色不能为 0。
+	// 拒绝后 `return nil`（调用方看到的是"成功"），对外行为与"这次调用没发生"等价。
+	// 判据②答不出动作：没有人会为一个非法角色 ID 去修系统。
 	if roleID == parentRoleID || parentRoleID == 0 {
-		app.Log(c).Warn("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbinservice.addroleinheritance.warn"))
+		app.Log(c).Info("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbin.role_inheritance.add_rejected"),
+			zap.Uint("role_id", roleID), zap.Uint("parent_role_id", parentRoleID))
 		return nil
 	}
 
@@ -90,7 +94,8 @@ func (ps *PermissionService) EditRoleInheritance(c context.Context, roleID uint,
 	domain := ps.GetDomain(c)
 
 	if roleID == parentRoleID {
-		app.Log(c).Warn("child role ID cannot be equal to parent role ID", zap.String("event", "casbinservice.editroleinheritance.warn"))
+		app.Log(c).Info("child role ID cannot be equal to parent role ID", zap.String("event", "casbin.role_inheritance.update_rejected"),
+			zap.Uint("role_id", roleID), zap.Uint("parent_role_id", parentRoleID))
 		return nil
 	}
 	// 删除角色的所有继承关系
@@ -115,7 +120,8 @@ func (ps *PermissionService) DeleteRoleInheritance(c context.Context, roleID uin
 
 	// 检查角色是否已继承自父角色
 	if roleID == parentRoleID || parentRoleID == 0 {
-		app.Log(c).Warn("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbinservice.deleteroleinheritance.warn"))
+		app.Log(c).Info("child role ID cannot be equal to parent role ID or parent role ID is 0", zap.String("event", "casbin.role_inheritance.remove_rejected"),
+			zap.Uint("role_id", roleID), zap.Uint("parent_role_id", parentRoleID))
 		return nil
 	}
 	// 删除角色的继承关系

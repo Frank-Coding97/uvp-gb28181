@@ -20,9 +20,10 @@ import (
 
 // fakeStopper 记录 Stop 调用.
 type fakeStopper struct {
-	mu      sync.Mutex
-	calls   []string
-	stopErr error // 非 nil 则 Stop 返回该 err
+	mu         sync.Mutex
+	calls      []string
+	identities []string
+	stopErr    error // 非 nil 则 Stop 返回该 err
 }
 
 type conditionalStopCall struct {
@@ -42,11 +43,21 @@ func (s *fakeConditionalStopper) StopIfPersistedCurrent(_ context.Context, strea
 	return s.stopErr
 }
 
-func (s *fakeStopper) Stop(ctx context.Context, streamID string) error {
+func (s *fakeStopper) Stop(_ context.Context, streamID, deviceID, channelID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, streamID)
+	s.identities = append(s.identities, deviceID+"/"+channelID)
 	return s.stopErr
+}
+
+// Identities 返回每次 Stop 收到的 "deviceID/channelID"(仅日志定位用途)。
+func (s *fakeStopper) Identities() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.identities))
+	copy(out, s.identities)
+	return out
 }
 
 func (s *fakeStopper) Calls() []string {
@@ -315,6 +326,11 @@ func TestT6_6_Q5LocationMissAllOffline(t *testing.T) {
 	calls := stopper.Calls()
 	if len(calls) != 1 || calls[0] != "ssrc-6" {
 		t.Errorf("期望 stopper.Stop(ssrc-6) 一次, 实际 %v", calls)
+	}
+	// 对账时通道行就在手上,必须把设备/通道透传给 Stopper(只用于停播日志定位)
+	identities := stopper.Identities()
+	if len(identities) != 1 || identities[0] != "dev-ssrc-6/ch-ssrc-6" {
+		t.Errorf("期望把通道的 DeviceID/ChannelID 透传给 Stop, 实际 %v", identities)
 	}
 }
 

@@ -53,7 +53,9 @@ func TestLoggingCasbinReloadFailureUsesStaticEventAndSafeError(t *testing.T) {
 
 	entry := waitForCasbinEvent(t, observed, "casbin.policy_reload.failed")
 	require.Equal(t, "casbin", entry.LoggerName)
-	require.Equal(t, zap.ErrorLevel, entry.Level)
+	// WARN 而非 ERROR（C03.③）：策略热重载失败 → 仍在用上一份策略，权限判定照常但已过期，
+	// 属"功能降级但仍在跑"。ERROR 留给"哪块功能整个没了"。
+	require.Equal(t, zap.WarnLevel, entry.Level)
 	fields := entry.ContextMap()
 	require.Equal(t, "casbin.policy_reload.failed", fields["event"])
 	require.NotContains(t, fmt.Sprint(fields), rawError)
@@ -99,7 +101,10 @@ func TestLoggingCasbinPermissionEventsUseRequestLogger(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	entry := waitForCasbinEvent(t, requestObserved, "casbin.permission.denied")
 	require.Equal(t, "casbin", entry.LoggerName)
-	require.Equal(t, zap.WarnLevel, entry.Level)
+	// INFO, not WARN (C03): the request was correctly refused by our own policy,
+	// so the operator has no action to take - the level must not signal one.
+	// The neighbouring error branch (permission *check* failed) stays WARN.
+	require.Equal(t, zap.InfoLevel, entry.Level)
 	require.Equal(t, "casbin-request-1", entry.ContextMap()["request_id"])
 	require.NotContains(t, entry.ContextMap(), "path")
 	require.NotContains(t, fmt.Sprint(entry.ContextMap()), "/private")

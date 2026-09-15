@@ -40,8 +40,8 @@ func TestLoggingBackgroundEvents(t *testing.T) {
 	require.Equal(t, "ptz", entry.LoggerName)
 	require.Equal(t, "ptz.response.unmatched", entry.ContextMap()["event"])
 	require.Equal(t, "ptz-response-1", entry.ContextMap()["request_id"])
-	require.Equal(t, "device-1", entry.ContextMap()["deviceCode"])
-	require.Equal(t, "channel-1", entry.ContextMap()["channelCode"])
+	require.Equal(t, "device-1", entry.ContextMap()["device_code"])
+	require.Equal(t, "channel-1", entry.ContextMap()["channel_code"])
 	require.Equal(t, "no_candidate", entry.ContextMap()["reason"])
 }
 
@@ -77,7 +77,7 @@ func TestLoggingBackgroundEventsQueryKeepsRequestScope(t *testing.T) {
 	require.Equal(t, "ptz.response.ignored", entry.ContextMap()["event"])
 	require.Equal(t, "query-request-1", entry.ContextMap()["request_id"])
 	require.Equal(t, "query-execution-1", entry.ContextMap()["execution_id"])
-	require.Equal(t, operation.OperationID, entry.ContextMap()["operationId"])
+	require.Equal(t, operation.OperationID, entry.ContextMap()["operation_id"])
 }
 
 func TestLoggingBackgroundEventsBodySummaryUsesLength(t *testing.T) {
@@ -115,8 +115,58 @@ func TestLoggingBackgroundEventsBodySummaryUsesLength(t *testing.T) {
 	require.NotContains(t, output, "<Response>")
 	require.NotContains(t, output, "bodySummary")
 	require.Contains(t, output, `"body_bytes":`+strconv.Itoa(len(body)))
-	require.Contains(t, output, `"operationId":"operation-1"`)
-	require.Contains(t, output, `"responseCallId":"response-call-1"`)
+	require.Contains(t, output, `"operation_id":"operation-1"`)
+	require.Contains(t, output, `"response_call_id":"response-call-1"`)
 	require.Contains(t, output, `"request_id":"ptz-runtime-request"`)
 	require.True(t, strings.Contains(output, `"event":"ptz.response.ignored"`), output)
+}
+
+// The unmatched-response WARN is the highest-volume line in the tree, and until
+// the sanitizer stopped omitting "reason" it carried no usable answer: both the
+// cause and the candidate list were hidden from the sink. This pins the whole
+// answer end-to-end through the real sanitizing runtime.
+// Contract: docs/logging-governance/contracts/sanitize-policy.md
+func TestLoggingBackgroundEventsUnmatchedKeepsAnswer(t *testing.T) {
+	cfg, err := logging.ParseConfig(ptzLoggingConfig{
+		"logs.outputs":      []string{"stdout"},
+		"logs.stdoutformat": "json",
+		"logs.level":        "debug",
+	}, t.TempDir())
+	require.NoError(t, err)
+	var sink bytes.Buffer
+	runtime, err := logging.NewRuntime(logging.Options{
+		Config:   cfg,
+		Service:  "uvp-test",
+		Version:  "test",
+		Instance: "ptz-test",
+		Sinks:    map[string]zapcore.WriteSyncer{"stdout": zapcore.AddSync(&sink)},
+	})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, runtime.Close()) }()
+	previous := app.ZapLog
+	app.ZapLog = runtime.Root
+	t.Cleanup(func() { app.ZapLog = previous })
+	ctx := logging.WithContext(context.Background(), logging.WithIdentity(runtime.Root,
+		zap.String("request_id", "ptz-unmatched-request")))
+
+	logUnmatchedPTZResponse(ctx, "device-1", "call-1", "9", manscdp.MessageHead{
+		CmdType: manscdp.CmdPTZPosition, SN: "9", DeviceID: "channel-1",
+	}, []string{"operation-1", "operation-2"}, "ambiguous_candidate", []byte("<Response/>"))
+
+	output := sink.String()
+	require.Contains(t, output, `"reason":"ambiguous_candidate"`)
+	require.Contains(t, output, `"candidate_operation_ids":"operation-1,operation-2"`)
+	require.NotContains(t, output, "[text omitted]")
+	require.NotContains(t, output, "omitted:")
+
+	// An empty candidate list must drop the field rather than render it as an
+	// empty value, which would read as "there was a candidate" to anyone counting.
+	logUnmatchedPTZResponse(ctx, "device-1", "call-2", "10", manscdp.MessageHead{
+		CmdType: manscdp.CmdPTZPosition, SN: "10", DeviceID: "channel-1",
+	}, nil, "no_candidate", []byte("<Response/>"))
+
+	lines := strings.Split(strings.TrimSpace(sink.String()), "\n")
+	last := lines[len(lines)-1]
+	require.Contains(t, last, `"reason":"no_candidate"`)
+	require.NotContains(t, last, "candidateOperationIds")
 }

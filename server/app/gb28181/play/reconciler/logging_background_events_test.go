@@ -112,11 +112,27 @@ func TestLoggingBackgroundEvents(t *testing.T) {
 		require.Equal(t, 1, stats.Failed)
 		record := backgroundRecordWithEvent(t, backgroundRecords(t, sink), "play.reconcile.cleanup_failed")
 		require.Equal(t, "play.reconcile", record["component"])
-		require.Equal(t, "stream-1", record["streamID"])
-		require.Equal(t, "dev-stream-1", record["deviceID"])
-		require.Equal(t, "ch-stream-1", record["channelID"])
+		require.Equal(t, "stream-1", record["stream_id"])
+		require.Equal(t, "dev-stream-1", record["device_id"])
+		require.Equal(t, "ch-stream-1", record["channel_id"])
 		require.Equal(t, "reconcile-1", record["execution_id"])
 		require.NotContains(t, strings.TrimSpace(string(mustJSON(t, record))), "stop secret")
+
+		// 3.6.2: round_completed 要能回答"这一轮扫的是哪批流"(样本流 ID,不打印全量)。
+		round := backgroundRecordWithEvent(t, backgroundRecords(t, sink), "play.reconcile.round_completed")
+		require.Equal(t, "stream-1", round["sample_stream_id"])
+	})
+
+	t.Run("round completed omits sample when nothing scanned", func(t *testing.T) {
+		_, sink := newBackgroundRuntime(t)
+		reconciler := New(0, &fakeStopper{}, WithChannelLister(&fakeLister{}))
+
+		stats := reconciler.runOnce(context.Background())
+		require.Equal(t, 0, stats.Scanned)
+		round := backgroundRecordWithEvent(t, backgroundRecords(t, sink), "play.reconcile.round_completed")
+		// 无样本时必须是字段缺席,而不是 sample_stream_id="" —— 空串会让人以为
+		// "已经带了范围字段"(zap.Skip() 让编码器整个丢弃该字段)。
+		require.NotContains(t, round, "sample_stream_id")
 	})
 
 	t.Run("panic log is type and stack only", func(t *testing.T) {

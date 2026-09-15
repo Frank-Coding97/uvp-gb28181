@@ -93,7 +93,9 @@ func (ac *SysAffixController) Upload(c *gin.Context) {
 		// 生成缩略图
 		if err := imagehelper.GenerateThumbnail(response.Path, thumbnailPath, req.Width, req.Height); err != nil {
 			// 缩略图生成失败不影响原图上传，记录日志即可
-			app.Log(c.Request.Context()).Warn("生成缩略图失败", zap.String("event", "sysaffix.upload.warn"), logging.Error(err))
+			app.Log(c.Request.Context()).Warn("生成缩略图失败", zap.String("event", "sysaffix.thumbnail_generate_failed"),
+				zap.String("file_path", response.Path),
+				logging.Error(err))
 		} else {
 			// 缩略图生成成功，保存缩略图信息
 			affix.ThumbnailName = thumbnailName
@@ -164,14 +166,18 @@ func (ac *SysAffixController) Delete(c *gin.Context) {
 	// 删除物理文件
 	if err := app.UploadService.DeleteFile(affix.Path); err != nil {
 		// 报错后继续删除数据库记录
-		app.Log(c.Request.Context()).Error("删除物理文件失败", zap.String("event", "sysaffix.delete.error"), logging.Error(err))
+		app.Log(c.Request.Context()).Warn("删除物理文件失败", zap.String("event", "sysaffix.physical_file_delete_failed"),
+			zap.String("file_path", affix.Path),
+			logging.Error(err))
 	}
 
 	// 删除缩略图文件（如果存在）
 	if affix.ThumbnailPath != "" {
 		if err := app.UploadService.DeleteFile(affix.ThumbnailPath); err != nil {
 			// 缩略图删除失败不影响主流程，记录日志即可
-			app.Log(c.Request.Context()).Warn("删除缩略图文件失败", zap.String("event", "sysaffix.delete.warn"), logging.Error(err))
+			app.Log(c.Request.Context()).Warn("删除缩略图文件失败", zap.String("event", "sysaffix.thumbnail_delete_failed"),
+				zap.String("file_path", affix.ThumbnailPath),
+				logging.Error(err))
 		}
 	}
 

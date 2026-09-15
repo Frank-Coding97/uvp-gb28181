@@ -3,6 +3,7 @@ package gb28181
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -19,6 +20,43 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+// `cascade.control.forward_failed` 的 reason_code —— 受控短码，不是自由文本。
+// 语义：失败发生在"命令还没到通道之前"还是"转发被拒"。
+const (
+	// PTZ 服务未就绪（本进程自身状态），级联侧无需重试同样的命令。
+	cascadeControlReasonPTZUnavailable = "ptz_service_unavailable"
+	// 已交给 control.Service.Forward 但被拒（通道未共享给该平台、PTZ 权限关闭、
+	// 目标设备离线等）。具体原因看 error 字段。
+	cascadeControlReasonForwardRejected = "forward_rejected"
+)
+
+// cascadeCallID 取本次 SIP 事务的 Call-ID。级联是纯 SIP 链路，没有 HTTP
+// request id 可以继承，能把它和 SIP 报文对上的关联键只有 Call-ID
+// （`gb_sip_trace_message` 也是按它串的）。
+//
+// 这里刻意返回 string 由调用点内联进 `zap.String`，而不是包成
+// `func(...) zap.Field`：字段构造函数会让**扫描脚本**看不见这个字段名
+// （它只认字面量形式的 `zap.String("call_id", ...)`），于是这条日志在
+// 「定位字段覆盖」指标里被算成无定位 —— 治理工具的假阴性比字段本身更麻烦。
+func cascadeCallID(req *sip.Request) string {
+	if req == nil {
+		return ""
+	}
+	if header := req.CallID(); header != nil {
+		return header.Value()
+	}
+	return ""
+}
+
+// cascadePeerLabel 是本次报文实际观测到的对端身份
+// （源地址:端口/传输层 + From 用户）。认定平台靠的正是它，所以"认不出来"时
+// 它更是唯一的身份线索。`cascadePeer.String()` 对残缺报文返回 "unparsed"，
+// 不会留下空值冒充"已带定位字段"。
+func cascadePeerLabel(req *sip.Request) string {
+	peer, _ := cascadePeerFromRequest(req)
+	return peer.String()
+}
 
 func matchCascadeCatalogPeer(req *sip.Request, p model.GbCascadePlatform) bool {
 	host, port, err := net.SplitHostPort(req.Source())
@@ -112,9 +150,15 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		defer cancel()
 		fail := func(code int, err error) bool {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, code, "Catalog query rejected", nil))
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("级联目录查询失败", zap.String("event", "cascade.catalog.query_failed"), zap.Int("status", code), zap.Error(err))
-			}
+			// 这里拿不到 platform_id：多数失败（多个候选 / 认不出上游 / 平台被禁用）
+			// 恰恰发生在认定平台之前。所以身份靠 call_id + peer 承担，
+			// 不要为了"看起来有定位"而塞一个 platform_id=0 进去。
+			app.Log(ctx).Warn("级联目录查询失败",
+				zap.String("event", "cascade.catalog.query_failed"),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.Int("status", code),
+				zap.Error(err))
 			return true
 		}
 		platforms, err := store.ListPlatforms(ctx)
@@ -157,15 +201,22 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		for _, response := range responses {
 			result := outbound.transactions.SendMessage(ctx, response.Body, fmt.Sprintf("catalog-%d-%d", matched.ID, time.Now().UnixNano()))
 			if !result.Success {
-				if app.ZapLog != nil {
-					app.ZapLog.Warn("级联目录响应发送失败", zap.String("event", "cascade.catalog.response_send_failed"), zap.Uint64("platformId", matched.ID), zap.Int("status", result.StatusCode), zap.Error(result.TransportErr), zap.Error(result.BuildErr))
-				}
+				app.Log(ctx).Warn("级联目录响应发送失败",
+					zap.String("event", "cascade.catalog.response_send_failed"),
+					zap.Uint64("platform_id", matched.ID),
+					zap.Int("status", result.StatusCode),
+					// TransportErr 与 BuildErr 互斥（SendMessage 在 build 失败时直接返回），
+					// 合成一个 error 字段 —— 两个 zap.Error 会写出两个同名 "error" 键。
+					zap.Error(errors.Join(result.TransportErr, result.BuildErr)))
+				return true
 				return true
 			}
 		}
-		if app.ZapLog != nil {
-			app.ZapLog.Info("级联目录响应完成", zap.String("event", "cascade.catalog.response_completed"), zap.Uint64("platformId", matched.ID), zap.Int("items", len(snapshot.Items)), zap.Int("batches", len(responses)))
-		}
+		app.Log(ctx).Info("级联目录响应完成",
+			zap.String("event", "cascade.catalog.response_completed"),
+			zap.Uint64("platform_id", matched.ID),
+			zap.Int("items", len(snapshot.Items)),
+			zap.Int("batches", len(responses)))
 		return true
 	}
 }
@@ -224,13 +275,25 @@ func forwardCascadeControl(store *repository.GormRepository, platform model.GbCa
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if ptzService == nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("级联云台命令转发失败", zap.String("event", "cascade.control.forward_failed"), zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.String("reason", "PTZ service unavailable"))
-		}
+		logCascadeControlForwardFailed(ctx, platform.ID, head.DeviceID, cascadeControlReasonPTZUnavailable, nil)
 		return
 	}
 	service := control.NewService(store, control.NewGormTargetLoader(app.DB()), ptzService)
-	if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err != nil && app.ZapLog != nil {
-		app.ZapLog.Warn("级联云台命令转发失败", zap.String("event", "cascade.control.forward_failed"), zap.Uint64("platformId", platform.ID), zap.String("channelId", head.DeviceID), zap.Error(err))
+	if _, err := service.Forward(ctx, control.ForwardRequest{PlatformID: platform.ID, CallID: callID, Body: body}); err != nil {
+		logCascadeControlForwardFailed(ctx, platform.ID, head.DeviceID, cascadeControlReasonForwardRejected, err)
 	}
+}
+
+// logCascadeControlForwardFailed 是 `cascade.control.forward_failed` 的唯一出口。
+//
+// 这条事件原先有两个写法（一处 `reason="PTZ service unavailable"`、一处 `error=<err>`）。
+// **同名事件两种字段集**会让聚合统计与排障都不确定该读哪个键，所以合并成一条：
+// `reason_code` 说"哪一类失败"（受控短码），`error` 说"具体错在哪"（失败在转发时才有）。
+func logCascadeControlForwardFailed(ctx context.Context, platformID uint64, channelID, reasonCode string, err error) {
+	app.Log(ctx).Warn("级联云台命令转发失败",
+		zap.String("event", "cascade.control.forward_failed"),
+		zap.Uint64("platform_id", platformID),
+		zap.String("channel_id", channelID),
+		zap.String("reason_code", reasonCode),
+		zap.Error(err))
 }

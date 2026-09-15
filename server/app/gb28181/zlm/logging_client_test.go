@@ -34,6 +34,7 @@ func TestLoggingGBHTTPZLMIsMediaOnlineSuccessKeepsScopeAndResult(t *testing.T) {
 	require.Equal(t, "zlm", entry.LoggerName)
 	require.Equal(t, "zlm-online-success", entry.ContextMap()["request_id"])
 	require.Equal(t, true, entry.ContextMap()["online"])
+	require.Equal(t, mockZLMNodeID, entry.ContextMap()["node_id"])
 }
 
 func TestLoggingGBHTTPZLMIsMediaOnlineNonZeroKeepsOfflineResult(t *testing.T) {
@@ -52,6 +53,7 @@ func TestLoggingGBHTTPZLMIsMediaOnlineNonZeroKeepsOfflineResult(t *testing.T) {
 	entry := findZLMLog(t, observed, "zlm.media_online.not_ready")
 	require.Equal(t, "zlm-online-missing", entry.ContextMap()["request_id"])
 	require.Equal(t, int64(-500), entry.ContextMap()["code"])
+	require.Equal(t, mockZLMNodeID, entry.ContextMap()["node_id"])
 }
 
 func TestLoggingGBHTTPZLMIsMediaOnlineTransportFailureUsesSafeError(t *testing.T) {
@@ -76,6 +78,7 @@ func TestLoggingGBHTTPZLMIsMediaOnlineTransportFailureUsesSafeError(t *testing.T
 	require.NotEmpty(t, errorField["class"])
 	require.NotEmpty(t, errorField["type"])
 	require.NotContains(t, fmt.Sprint(errorField), rawError)
+	require.Equal(t, mockZLMNodeID, entry.ContextMap()["node_id"])
 }
 
 func findZLMLog(t *testing.T, observed *observer.ObservedLogs, event string) observer.LoggedEntry {

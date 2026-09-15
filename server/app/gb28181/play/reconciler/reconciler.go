@@ -29,8 +29,9 @@ import (
 )
 
 // Stopper 抽象 play.Service.Stop,便于 mock.
+// deviceID/channelID 只用于日志定位:对账时通道行就在手上,直接传。
 type Stopper interface {
-	Stop(ctx context.Context, streamID string) error
+	Stop(ctx context.Context, streamID, deviceID, channelID string) error
 }
 
 type ConditionalStopper interface {
@@ -136,7 +137,9 @@ func (r *Reconciler) Start(ctx context.Context) {
 		return
 	}
 	if r.cancel != nil {
-		app.Log(ctx).Named("play.reconcile").Warn("reconciler 已启动,忽略重复 Start",
+		// INFO：与上一支（`disabled`，已经是 INFO）同类 —— 幂等调用被忽略，
+		// 系统状态与"没调用"完全一致，没有可执行动作。
+		app.Log(ctx).Named("play.reconcile").Info("reconciler 已启动,忽略重复 Start",
 			zap.String("event", "play.reconcile.duplicate_start"))
 		return
 	}
@@ -228,36 +231,45 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 			if conditional, ok := r.stopper.(ConditionalStopper); ok && ch.CurrentSSRC != "" {
 				stopErr = conditional.StopIfPersistedCurrent(ctx, ch.StreamID, ch.CurrentSSRC)
 			} else {
-				stopErr = r.stopper.Stop(ctx, ch.StreamID)
+				stopErr = r.stopper.Stop(ctx, ch.StreamID, ch.DeviceID, ch.ChannelID)
 			}
 			if stopErr != nil {
 				stats.Failed++
-				app.Log(ctx).Named("play.reconcile").Error("reconciler 清理假阳性失败",
+				app.Log(ctx).Named("play.reconcile").Warn("reconciler 清理假阳性失败",
 					zap.String("event", "play.reconcile.cleanup_failed"),
-					zap.String("streamID", ch.StreamID),
-					zap.String("deviceID", ch.DeviceID),
-					zap.String("channelID", ch.ChannelID),
+					zap.String("stream_id", ch.StreamID),
+					zap.String("device_id", ch.DeviceID),
+					zap.String("channel_id", ch.ChannelID),
 					zap.Error(stopErr))
 			} else {
 				stats.Cleaned++
 				app.Log(ctx).Named("play.reconcile").Info("reconciler 已清理假阳性",
 					zap.String("event", "play.reconcile.cleanup_succeeded"),
-					zap.String("streamID", ch.StreamID),
-					zap.String("deviceID", ch.DeviceID),
-					zap.String("channelID", ch.ChannelID))
+					zap.String("stream_id", ch.StreamID),
+					zap.String("device_id", ch.DeviceID),
+					zap.String("channel_id", ch.ChannelID))
 			}
 		case judgeProbeError:
 			stats.Failed++
 		}
 	}
 
+	// 本轮扫的是"哪批流":对账按 DB 全量扫,没有节点维度,给一个样本流 ID 就够定位范围了。
+	// 只取样本不打印全量 —— scanned 可能有数百条,那是为打印而打印。
+	// 没有可扫的流时用 zap.Skip():编码器整个丢弃该字段,而不是打出空串
+	// (空串会渲染成 sample_stream_id="",看似"已带范围字段" —— 同 C04 §2.2e)。
+	sampleField := zap.Skip()
+	if len(channels) > 0 {
+		sampleField = zap.String("sample_stream_id", channels[0].StreamID)
+	}
 	app.Log(ctx).Named("play.reconcile").Info("reconciler 一轮对账完成",
 		zap.String("event", "play.reconcile.round_completed"),
 		zap.Int("scanned", stats.Scanned),
 		zap.Int("cleaned", stats.Cleaned),
 		zap.Int("skipped", stats.Skipped),
 		zap.Int("failed", stats.Failed),
-		zap.Duration("elapsed", time.Since(startAt)))
+		zap.Duration("elapsed", time.Since(startAt)),
+		sampleField)
 	return stats
 }
 

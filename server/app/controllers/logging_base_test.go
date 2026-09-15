@@ -11,6 +11,7 @@ import (
 	"go/ast"
 	"go/types"
 	"golang.org/x/tools/go/packages"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -44,8 +45,13 @@ func TestLoggingBaseHTTPFailure(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("GET", "/", nil).WithContext(logging.WithContext(context.Background(), logging.WithIdentity(rt.Root, zap.String("request_id", "base-test"))))
 	Common{}.Fail(c, "fixture-secret", errors.New("fixture-secret"))
-	if !strings.Contains(b.String(), `"request_id":"base-test"`) || !strings.Contains(b.String(), `"event":"http.operation_failed"`) {
+	if !strings.Contains(b.String(), `"request_id":"base-test"`) || !strings.Contains(b.String(), `"event":"http.operation_rejected"`) {
 		t.Fatalf("failure not correlated: %s", b.String())
+	}
+	// 默认 400 = 请求被拒 = 设计内行为，必须是 INFO。这条断言防的是"输入校验顶着
+	// ERROR 出现"，本出口 884 处调用里 94.7% 走默认 400，等级错了就是 837 条假告警。
+	if !strings.Contains(b.String(), `"level":"info"`) {
+		t.Fatalf("default 400 must not raise an alarm: %s", b.String())
 	}
 	if strings.Contains(b.String(), "fixture-secret") {
 		t.Fatal("error leaked")
@@ -59,8 +65,15 @@ func TestLoggingBaseHTTPFailure(t *testing.T) {
 		}()
 		Common{}.FailAndAbort(c, "fixture-secret", errors.New("fixture-secret"))
 	}()
-	if strings.Count(b.String(), `"event":"http.operation_failed"`) != 1 || strings.Contains(b.String(), "fixture-secret") {
+	if strings.Count(b.String(), `"event":"http.operation_rejected"`) != 1 || strings.Contains(b.String(), "fixture-secret") {
 		t.Fatal("aborted failure unsafe or duplicated")
+	}
+	b.Reset()
+	// 5xx 是我方内部故障，仍留 ERROR，并换成另一个 event 名 —— 同一出口的两种语义
+	// 不能共用一个名字，否则按 event 名聚合会混两种等级（见 event_level_divergence）。
+	Common{}.Fail(c, "fixture-secret", errors.New("fixture-secret"), http.StatusInternalServerError)
+	if !strings.Contains(b.String(), `"event":"http.operation_failed"`) || !strings.Contains(b.String(), `"level":"error"`) {
+		t.Fatalf("5xx must stay ERROR: %s", b.String())
 	}
 }
 

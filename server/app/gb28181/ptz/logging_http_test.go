@@ -24,5 +24,5 @@ func TestLoggingGBHTTPPTZPersistenceFailure(t *testing.T) {
 	fields := entries.All()[0].ContextMap()
 	require.Equal(t, "ptz-persist-request", fields["request_id"])
 	require.Equal(t, "ptz.preset_cache_failed", fields["event"])
-	require.Equal(t, op.OperationID, fields["operationId"])
+	require.Equal(t, op.OperationID, fields["operation_id"])
 }

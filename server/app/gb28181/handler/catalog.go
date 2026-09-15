@@ -166,12 +166,23 @@ func getCatalogPipeline() *catalog.Pipeline {
 //   - classify/anomaly 兜底)
 //
 // pipeline 不可用时(db nil)回退到旧路径,保证生产兼容
-func HandleCatalogResponse(ctx context.Context, body []byte, traceFields ...zap.Field) {
-	logger := app.Log(ctx).Named("gb28181.catalog").With(traceFields...)
+// deviceID / callID / cseq 是**显式参数**而不是 `traceFields ...zap.Field`。
+//
+// 原先的写法是 `logger := ...With(traceFields...)` + 调用点传 `zap.String(...)`：
+// 运行时字段在，但**字段名在调用点的日志语句里读不到** —— 静态扫描把它判成"无定位字段"，
+// 门禁的字段可验证性检查也看不到。"字段有没有"和"字段能不能被验证"是两件事，
+// 后者不做掉，治理就只剩人工翻代码。（同级反模式见 `fields []zap.Field` 容器。）
+func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, cseq string) {
+	logger := app.Log(ctx).Named("gb28181.catalog")
 	resp, err := manscdp.ParseCatalogResponse(body)
 	if err != nil {
-		logger.Warn("Catalog 应答解析失败",
+		// INFO：设备回的 Catalog 应答解析不了，丢弃并结束这次查询 —— 对方的错，
+		// 无可执行动作（`device_id` 仍取自报文信封，所以"是谁发的"照样定位得到）。
+		logger.Info("Catalog 应答解析失败",
 			zap.String("event", "gb28181.catalog.response_parse_failed"),
+			// resp 是 nil，用信封上已经解析出来的 device_id —— 报文解析失败并不代表
+			// 不知道是谁发的（MESSAGE 信封在进入这里之前就解开过了）。
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 			zap.String("reason_code", "catalog_response_invalid"), logging.Error(err))
 		return
 	}
@@ -188,20 +199,21 @@ func HandleCatalogResponse(ctx context.Context, body []byte, traceFields ...zap.
 				items = append(items, manscdpToCatalogItem(it))
 			}
 			if e := pipeline.Ingest(ctx, catalog.Sender{SourceDeviceID: resp.DeviceID}, items); e != nil {
-				logger.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",
+				logger.Warn("Catalog Pipeline.Ingest 失败(部分通道未入库)",
 					zap.String("event", "gb28181.catalog.ingest_failed"),
-					zap.String("device_id", resp.DeviceID), logging.Error(e))
+					zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(e))
 			}
 		} else {
 			logger.Debug("CatalogPipeline 不可用,跳过 catalog 入库",
 				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
-				zap.String("device_id", resp.DeviceID))
+				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		}
 	}
 
 	logger.Info("Catalog 应答处理",
 		zap.String("event", "gb28181.catalog.response_processed"),
-		zap.String("device_id", resp.DeviceID),
+		zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 		zap.Int("sn", resp.SN),
 		zap.Int("item_count", len(resp.DeviceList.Items)),
 		zap.Int("received_count", received), zap.Int("total_count", sumNum), zap.Bool("complete", done))

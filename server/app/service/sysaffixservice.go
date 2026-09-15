@@ -297,7 +297,9 @@ func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string
 	// 删除临时分片目录
 	tmpDir := filepath.Join(localPath, "tmp", uploadId)
 	if err := os.RemoveAll(tmpDir); err != nil {
-		app.Log(ctx).Warn("清理临时分片目录失败", zap.String("event", "sysaffixservice.cancelchunkupload.warn"), logging.Error(err))
+		app.Log(ctx).Warn("清理临时分片目录失败", zap.String("event", "sysaffix.chunk_upload_cancel_failed"),
+			zap.String("upload_id", uploadId),
+			logging.Error(err))
 	}
 
 	// 更新分片记录状态为已取消

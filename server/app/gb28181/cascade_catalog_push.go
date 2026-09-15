@@ -2,6 +2,7 @@ package gb28181
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -80,15 +81,23 @@ func (p *cascadeCatalogPusher) PushCatalog(ctx context.Context, platformID uint6
 	for _, response := range responses {
 		result := outbound.transactions.SendMessage(ctx, response.Body, fmt.Sprintf("catalog-push-%d-%d", matched.ID, time.Now().UnixNano()))
 		if !result.Success {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("级联目录手动推送失败", zap.Uint64("platformId", matched.ID), zap.Int("sent", sent), zap.Int("status", result.StatusCode), zap.Error(result.TransportErr), zap.Error(result.BuildErr))
-			}
+			app.Log(ctx).Warn("级联目录手动推送失败",
+				zap.String("event", "cascade.catalog.push_failed"),
+				zap.Uint64("platform_id", matched.ID),
+				zap.Int("sent", sent),
+				zap.Int("status", result.StatusCode),
+				// TransportErr 与 BuildErr 互斥，合成一个 error 字段（否则写出两个同名键）。
+				zap.Error(errors.Join(result.TransportErr, result.BuildErr)))
 			return len(snapshot.Items), sent, fmt.Errorf("send catalog batch %d/%d failed", sent+1, len(responses))
 		}
 		sent++
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Info("级联目录手动推送完成", zap.Uint64("platformId", matched.ID), zap.Int("items", len(snapshot.Items)), zap.Int("batches", sent))
-	}
+	// 手动推送是 HTTP 管理接口触发的，ctx 里带着请求身份 —— 用 app.Log(ctx)
+	// 才能和这次管理请求的访问日志串起来（之前用全局 logger 是串不上的）。
+	app.Log(ctx).Info("级联目录手动推送完成",
+		zap.String("event", "cascade.catalog.push_completed"),
+		zap.Uint64("platform_id", matched.ID),
+		zap.Int("items", len(snapshot.Items)),
+		zap.Int("batches", sent))
 	return len(snapshot.Items), sent, nil
 }

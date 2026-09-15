@@ -185,14 +185,16 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 
 		logger.Info("Permission check",
 			zap.String("event", "casbin.permission.check"),
-			zap.String("uid", userSubject),
+			zap.String("user_id", userSubject),
 			zap.String("route", route),
 			zap.String("method", method))
 		ok, err = s.Enforce(userSubject, path, method, domain)
 
 		if err != nil {
-			logger.Error("Permission check error",
+			logger.Warn("Permission check error",
 				zap.String("event", "casbin.permission.check_failed"),
+				zap.String("user_id", userSubject), zap.String("route", route),
+				zap.String("method", method),
 				logging.Error(err))
 			// 500 服务器内部错误
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "权限检查时出现错误"})
@@ -200,10 +202,14 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// INFO 而非 WARN：授权拒绝是**系统按设计做对了**——用户没有这个权限，返回 403，
+		// 与"这个路由不存在"一样不需要运维动作。判据②问"看到它要做什么"，没有人会去
+		// "修"一个用户缺权限（那要走角色配置，走的是另一条日志）。
+		// 权限**检查本身出错**（上一支，casbin 返回 err）才是 WARN，两者别混。
 		if !ok {
-			logger.Warn("Permission denied",
+			logger.Info("Permission denied",
 				zap.String("event", "casbin.permission.denied"),
-				zap.String("uid", userSubject),
+				zap.String("user_id", userSubject),
 				zap.String("route", route),
 				zap.String("method", method))
 			// 403 禁止访问
@@ -537,7 +543,7 @@ func (s *CasbinHelper) startAutoLoadPolicyWithInterval(interval time.Duration) {
 					continue
 				}
 				if err := enforcer.LoadPolicy(); err != nil {
-					logger.Error("Failed to auto reload policy",
+					logger.Warn("Failed to auto reload policy",
 						zap.String("event", "casbin.policy_reload.failed"),
 						logging.Error(err))
 				} else {

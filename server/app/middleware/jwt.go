@@ -25,8 +25,11 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		}
 		tokenString, err := common.GetAccessToken(c)
 		if err != nil {
-			app.Log(c.Request.Context()).Named("auth").Error("Get access token failed",
-				zap.String("event", "auth.access_token.read_failed"), logging.Error(err))
+			app.Log(c.Request.Context()).Named("auth").Info("Get access token failed",
+				zap.String("event", "auth.access_token.read_failed"),
+				zap.String("route", c.FullPath()), zap.String("method", c.Request.Method),
+				zap.String("source_ip", c.ClientIP()),
+				logging.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
@@ -36,8 +39,11 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		// 验证token
 		claims, err := app.TokenService.ValidateTokenWithCache(tokenString)
 		if err != nil {
-			app.Log(c.Request.Context()).Named("auth").Error("Invalid token",
-				zap.String("event", "auth.access_token.invalid"), logging.Error(err))
+			app.Log(c.Request.Context()).Named("auth").Info("Invalid token",
+				zap.String("event", "auth.access_token.invalid"),
+				zap.String("route", c.FullPath()), zap.String("method", c.Request.Method),
+				zap.String("source_ip", c.ClientIP()),
+				logging.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
@@ -58,7 +64,9 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		c.Request = c.Request.WithContext(requestContext)
 		if err := app.SessionValidator.TouchSession(c.Request.Context(), claims.SID); err != nil {
 			app.Log(c.Request.Context()).Named("auth").Warn("Update session activity failed",
-				zap.String("event", "auth.session.touch_failed"), logging.Error(err))
+				zap.String("event", "auth.session.touch_failed"),
+				zap.Uint("user_id", claims.UserID), zap.String("route", c.FullPath()),
+				logging.Error(err))
 		}
 		// 继续处理请求
 		c.Next()

@@ -127,7 +127,7 @@ func (m *mockNoneReaderPolicy) ShouldCloseOnNoneReader(context.Context, string) 
 	return m.close, m.err
 }
 
-func (m *mockStopper) Stop(ctx context.Context, streamID string) error {
+func (m *mockStopper) Stop(ctx context.Context, streamID, deviceID, channelID string) error {
 	m.calls.Add(1)
 	m.last.Store(streamID)
 	return m.err

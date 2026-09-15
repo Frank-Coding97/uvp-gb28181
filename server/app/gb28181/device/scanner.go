@@ -70,13 +70,13 @@ func (s *OfflineScanner) scanOnce() {
 	logger := app.Log(ctx).Named("gb28181.device.scanner")
 	stale, err := gbmodels.ListStaleOnline(ctx, s.timeoutCount, s.grace)
 	if err != nil {
-		logger.Error("GB28181 离线扫描:查询超时设备失败",
+		logger.Warn("GB28181 离线扫描:查询超时设备失败",
 			zap.String("event", "gb28181.device.scanner.query_failed"), logging.Error(err))
 		return
 	}
 	for _, d := range stale {
 		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
-			logger.Error("GB28181 离线扫描:置离线失败",
+			logger.Warn("GB28181 离线扫描:置离线失败",
 				zap.String("event", "gb28181.device.scanner.mark_offline_failed"),
 				zap.String("device_id", d.DeviceID), logging.Error(err))
 			continue

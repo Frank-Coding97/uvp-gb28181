@@ -502,7 +502,9 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if ch == nil {
 		return nil, ErrChannelNotFound
 	}
-	app.Log(playCtx).Named("play").Info("点播设备与通道校验通过", zap.String("event", "gb28181.play.validation_succeeded"), zap.String("stage", "validation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID))
+	// DEBUG 而非 INFO:校验通过紧跟在 requested 之后,只表示"请求参数合法",
+	// 运维看到它无动作可做(C04 判据②)。校验失败走 failed 事件,信息不会丢。
+	app.Log(playCtx).Named("play").Debug("点播设备与通道校验通过", zap.String("event", "gb28181.play.validation_succeeded"), zap.String("stage", "validation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID))
 
 	// 平台点播仅实现 UDP 与 TCP 被动收流(ZLM tcp_mode 0/1,SDP 仅生成 passive
 	// setup)。TCP-Active 若静默按 UDP 处理,设备按主动模式协商必然失败,
@@ -944,12 +946,19 @@ func (s *Service) rollbackFailedStart(
 }
 
 // Stop 停播:通过协调器执行 Stopping 栅栏，再发 BYE + 关 RTP 端口 + Unbind。
-func (s *Service) Stop(ctx context.Context, streamID string) (err error) {
+//
+// deviceID/channelID **只用于日志定位**，不参与任何控制流、路由、鉴权或 CAS 判断。
+// 调用方手上有值时直接传(HTTP 停播、reconciler);没有时传空(ZLM webhook 只带 streamID),
+// 由 stopLogIdentity 在内部按零 I/O 的来源兜底。
+func (s *Service) Stop(ctx context.Context, streamID, deviceID, channelID string) (err error) {
 	startedAt := time.Now()
 	logger := app.Log(ctx).Named("play")
-	logger.Info("停播事务开始", zap.String("event", "gb28181.play.stop_requested"), zap.String("stage", "stop_request"), zap.String("outcome", "started"), zap.String("stream_id", streamID))
+	deviceID, channelID = s.stopLogIdentity(streamID, deviceID, channelID)
+	logger.Info("停播事务开始", append(stopLogFields(streamID, deviceID, channelID),
+		zap.String("event", "gb28181.play.stop_requested"), zap.String("stage", "stop_request"), zap.String("outcome", "started"))...)
 	defer func() {
-		fields := []zap.Field{zap.String("stream_id", streamID), zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds()))}
+		fields := append(stopLogFields(streamID, deviceID, channelID),
+			zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds())))
 		if err != nil {
 			logger.Warn("停播清理失败", append(fields, zap.String("event", "gb28181.play.stop_failed"), zap.String("stage", "cleanup"), zap.String("outcome", "failed"), zap.String("reason_code", "cleanup_failed"))...)
 			return
@@ -963,6 +972,13 @@ func (s *Service) Stop(ctx context.Context, streamID string) (err error) {
 	if ch, findErr := s.channels.FindChannelByStream(ctx, streamID); findErr != nil {
 		return findErr
 	} else if ch != nil {
+		// 通道行已经查出来了,顺手补上仍缺失的定位字段(无额外查询、不改控制流)
+		if deviceID == "" {
+			deviceID = ch.DeviceID
+		}
+		if channelID == "" {
+			channelID = ch.ChannelID
+		}
 		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
 			return s.StopIfPersistedCurrent(ctx, streamID, currentSSRC)
 		}
@@ -971,6 +987,52 @@ func (s *Service) Stop(ctx context.Context, streamID string) (err error) {
 		}
 	}
 	return s.stopDirect(ctx, streamID)
+}
+
+// stopLogIdentity 为停播日志补齐设备/通道。调用方已给出的值优先;缺失时依次回退:
+// 内存会话(uac.Session 在发 INVITE 时就写入了这两个字段,纯 map 查找零 I/O)
+// → 固定流 ID 解析(固定流 streamID = deviceID_channelID)。
+//
+// 本函数只服务日志定位:任一来源落空都静默降级,不返回错误、不产生 DB 查询、
+// 不改变控制流(违反即可能把"停播成功"翻成"停播失败")。
+// 契约见 docs/logging-governance/contracts/play.md §2.2.3 / §2.2.4。
+func (s *Service) stopLogIdentity(streamID, deviceID, channelID string) (string, string) {
+	if deviceID != "" && channelID != "" {
+		return deviceID, channelID
+	}
+	if session := s.sessions.Get(streamID); session != nil {
+		if deviceID == "" {
+			deviceID = session.DeviceID
+		}
+		if channelID == "" {
+			channelID = session.ChannelID
+		}
+	}
+	if deviceID == "" || channelID == "" {
+		if fixedDeviceID, fixedChannelID, fixedErr := ParseFixedStreamID(streamID); fixedErr == nil {
+			if deviceID == "" {
+				deviceID = fixedDeviceID
+			}
+			if channelID == "" {
+				channelID = fixedChannelID
+			}
+		}
+	}
+	return deviceID, channelID
+}
+
+// stopLogFields 组装停播三事件的定位字段。**空值不 append** ——
+// 控制台编码器把空串渲染成 `""` 而不是省略,打出 `device_id=""` 会被统计脚本/门禁
+// 当成"已带定位字段",比字段缺席更难发现(契约 §2.2.2 ①)。
+func stopLogFields(streamID, deviceID, channelID string) []zap.Field {
+	fields := make([]zap.Field, 0, 3)
+	if deviceID != "" {
+		fields = append(fields, zap.String("device_id", deviceID))
+	}
+	if channelID != "" {
+		fields = append(fields, zap.String("channel_id", channelID))
+	}
+	return append(fields, zap.String("stream_id", streamID))
 }
 
 // stopDirect performs one stream cleanup without consulting the coordinator.

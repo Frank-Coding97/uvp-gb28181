@@ -488,7 +488,7 @@ func TestServiceStopReleasesCoordinatorGeneration(t *testing.T) {
 		t.Fatalf("first start: %v", err)
 	}
 	z.online.Store(false)
-	if err := s.Stop(context.Background(), stream.StreamID); err != nil {
+	if err := s.Stop(context.Background(), stream.StreamID, "", ""); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if _, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661"); err != nil {

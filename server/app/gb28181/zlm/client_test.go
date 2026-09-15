@@ -104,6 +104,10 @@ func TestGetMediaInfoNotExist(t *testing.T) {
 	}
 }
 
+// mockZLMNodeID 测试用节点主键。显式给值,这样 zlm.* 日志里的 node_id 是可断言的
+// (生产上 node_id 来自 meta_node 主键,必然 > 0)。
+const mockZLMNodeID int64 = 7
+
 // newMockClient 构造一个连到 httptest 假 ZLM 的 Client
 //
 // path 形如 "/index/api/kick_sessions",handler 直接写 JSON 响应体
@@ -123,7 +127,7 @@ func newMockClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 			port = port*10 + int(ch-'0')
 		}
 	}
-	n := &node.Node{Host: host, APIPort: port, APISecret: "test-secret"}
+	n := &node.Node{ID: mockZLMNodeID, Host: host, APIPort: port, APISecret: "test-secret"}
 	return NewClientForNode(n), srv
 }
 

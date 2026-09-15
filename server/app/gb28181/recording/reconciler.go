@@ -70,7 +70,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 			errs = append(errs, err)
 			app.Log(channelCtx).Named("recording.reconcile").Warn("云端录像通道对账失败",
 				zap.String("event", "recording.reconcile.channel_failed"),
-				zap.Uint("channelId", channelID), zap.Error(err))
+				zap.Uint("channel_id", channelID), zap.Error(err))
 		}
 	}
 	return errors.Join(errs...)

@@ -254,7 +254,10 @@ func TestOnPlayLogsStableDenialReasonWithoutToken(t *testing.T) {
 	entries := observed.FilterMessage("播放鉴权 Hook 已拒绝").All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
-	require.Equal(t, "tampered", fields["reason"])
+	require.Equal(t, "tampered", fields["reason_code"])
+	// 拒绝事件必须同时说清"哪条流"和"为什么"：只有 reason_code 等于
+	// "有人被拒了，但不知道是谁"。载荷里带了 stream，所以它必须在场。
+	require.Equal(t, "dynamic-stream", fields["stream_id"])
 	encoded, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "must-not-appear-in-log")

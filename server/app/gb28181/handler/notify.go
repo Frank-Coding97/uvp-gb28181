@@ -76,8 +76,11 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	head, err := manscdp.ParseHead(req.Body())
 	if err != nil {
-		logger.Warn("GB28181 NOTIFY 解析失败",
-			zap.String("event", "gb28181.notify.parse_failed"),
+	// INFO：与 `gb28181.message.parse_failed` 同一判据 —— 对方发来的报文格式不合法，
+	// 我们丢弃它，无可执行动作。注意**下面那支 `subscription_unsupported` 不降级**：
+	// 那是"设备要了一个平台不支持的能力"，属能力缺口，是要人看的。
+	logger.Info("GB28181 NOTIFY 解析失败",
+		zap.String("event", "gb28181.notify.parse_failed"),
 			zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 		return
 	}

@@ -6,10 +6,36 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+// captureCascadeDeleteLogs 把这一轮删除操作期间产生的日志收集下来。
+//
+// `app.Log(ctx)` 在 ctx 里没有 logger 时回落到 `app.ZapLog`，而
+// `newDeviceMgmtRouter` 没装日志中间件，所以这里替换 `app.ZapLog` 就够了 ——
+// 不需要为了测日志去起真实的日志运行时。
+func captureCascadeDeleteLogs(t *testing.T) *observer.ObservedLogs {
+	t.Helper()
+	core, observed := observer.New(zap.InfoLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+	return observed
+}
+
+func logEntryWithEvent(observed *observer.ObservedLogs, event string) map[string]interface{} {
+	for _, entry := range observed.All() {
+		if entry.ContextMap()["event"] == event {
+			return entry.ContextMap()
+		}
+	}
+	return nil
+}
 
 func newCascadeTestPlatform(name, localDeviceID string) *cascademodel.GbCascadePlatform {
 	return &cascademodel.GbCascadePlatform{
@@ -29,6 +55,7 @@ func newCascadeTestPlatform(name, localDeviceID string) *cascademodel.GbCascadeP
 // 所以这里断言的是"物理删除",不是 active=false:两张投影表的唯一索引不含 deleted_at,
 // 留一行停用的行仍然占着 (platform_id, published_*) 键位,等于没回收。
 func TestDeviceMgmt_DeleteDeviceRetiresCascadeShareProjections(t *testing.T) {
+	observed := captureCascadeDeleteLogs(t)
 	r, db := newDeviceMgmtRouter(t)
 	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
 
@@ -76,10 +103,21 @@ func TestDeviceMgmt_DeleteDeviceRetiresCascadeShareProjections(t *testing.T) {
 	var reloaded cascademodel.GbCascadePlatform
 	require.NoError(t, db.First(&reloaded, platform.ID).Error)
 	require.EqualValues(t, platform.ProjectionRevision+1, reloaded.ProjectionRevision)
+
+	// 这条 INFO 之前**没有 event 字段**（全仓门禁最后两条红就是它），字段名还是
+	// camelCase 的 deviceCode/retiredProjections —— 聚合统计不认它、按事件名搜也搜不到。
+	// "幽灵设备"排查的第一站就是这条日志，所以事件名和国标号必须都在。
+	row := logEntryWithEvent(observed, "gb28181.device.delete_shared_projections_retired")
+	require.NotNil(t, row, "删除设备回收共享投影必须带事件名")
+	require.Equal(t, "34020000002000000001", row["device_id"], "设备国标号不能写成自增 id")
+	require.EqualValues(t, 2, row["retired_projections"], "回收的是设备投影 + 它名下通道的投影")
+	require.NotContains(t, row, "deviceCode")
+	require.NotContains(t, row, "retiredProjections")
 }
 
 // 单独删一路通道时,只回收这一路的共享投影,设备投影保留。
 func TestDeviceMgmt_DeleteChannelRetiresItsCascadeShareProjection(t *testing.T) {
+	observed := captureCascadeDeleteLogs(t)
 	r, db := newDeviceMgmtRouter(t)
 	deviceID, channelID, otherChannelID := seedDevicesAndChannels(t, db)
 
@@ -115,4 +153,12 @@ func TestDeviceMgmt_DeleteChannelRetiresItsCascadeShareProjection(t *testing.T) 
 	require.NoError(t, db.Unscoped().Model(&cascademodel.GbCascadeDeviceProjection{}).
 		Where("source_device_id = ?", uint64(deviceID)).Count(&deviceProjections).Error)
 	require.EqualValues(t, 1, deviceProjections, "删通道不该动设备投影")
+
+	// 通道级事件必须报**通道**国标号（不是设备自增 id）—— 上级平台目录里那条
+	// 撤不下来的通道就是按这个号认的。
+	row := logEntryWithEvent(observed, "gb28181.channel.delete_shared_projections_retired")
+	require.NotNil(t, row, "删除通道回收共享投影必须带事件名")
+	require.Equal(t, "37011200001310000001", row["channel_id"])
+	require.EqualValues(t, 1, row["retired_projections"])
+	require.NotContains(t, row, "channelCode")
 }

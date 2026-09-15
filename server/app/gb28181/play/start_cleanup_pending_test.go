@@ -98,7 +98,7 @@ func TestStartRollbackCloseFailureQuarantinesGenerationUntilRetry(t *testing.T) 
 	// quarantine. Wait until it has settled before changing the mock result.
 	_ = waitForCleanupPendingResult(t, coordinator, onlineDevice().DeviceID, aChannel().ChannelID)
 	z.SetCloseErr(nil)
-	if stopErr := service.Stop(context.Background(), result.StreamID); stopErr != nil {
+	if stopErr := service.Stop(context.Background(), result.StreamID, "", ""); stopErr != nil {
 		t.Fatalf("retry cleanup: %v", stopErr)
 	}
 	if _, ok := service.locationMap.Lookup(result.StreamID); ok {

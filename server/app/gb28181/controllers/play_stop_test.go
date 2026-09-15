@@ -44,7 +44,7 @@ func TestPlayControllerStartMapsGlobalTimeoutToGatewayTimeout(t *testing.T) {
 	assert.Equal(t, "点播超时", body["message"])
 }
 
-func (s *stopTestPlayService) Stop(context.Context, string) error {
+func (s *stopTestPlayService) Stop(context.Context, string, string, string) error {
 	s.stopCalls.Add(1)
 	return s.stopErr
 }

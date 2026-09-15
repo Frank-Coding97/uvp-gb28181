@@ -204,8 +204,8 @@
   },
   {
     "file": "app/utils/gormhelper/log.go",
-    "sha256": "292d4f7abf3ec37e0712f6ef39da34449ee947089037a3f630fbb17e41883ddb",
-    "reason": "Reviewed T07 Trace: shared context logger Check filters before fc/Explain; static message, three constant events, SQL structure fingerprint, typed safe fields, and stable codes for known GORM framework errors only. CheckedEntry.Write retains SafeCore; no raw SQL, parameters, or raw error text. Exact Check/Write calls and source digest require re-review on change.",
+    "sha256": "ebb8f2d565a5faa19bac6b1e7e9c1361932f62caff8c498e03688a36fa0ebb9d",
+    "reason": "Reviewed adapter: GORM logger.Interface bridge. The Info/Warn/Error callbacks emit a placeholder db.diagnostic line and were re-graded to DEBUG by C03 (GORM passes a message we deliberately drop via text_omitted, so the line carries no event semantics); Trace still guards through Check/Write so the level travels as data (db.query / db.query_failed / db.slow_query).",
     "calls": [
       {
         "function": "Trace",

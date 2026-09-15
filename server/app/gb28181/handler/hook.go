@@ -32,8 +32,11 @@ import (
 
 // PlayStopper 由点播 service 实现:停掉一路流(BYE + closeRtpServer)
 // 接口化便于 hook 端点接入,且让 handler 包不依赖 play 包(避免循环导入)
+//
+// deviceID/channelID 只用于日志定位:ZLM 回调体里没有这两个值,调用方传空,
+// 由 play.Service 内部按零 I/O 的来源(内存会话 / 固定流 ID 解析)兜底。
 type PlayStopper interface {
-	Stop(ctx context.Context, streamID string) error
+	Stop(ctx context.Context, streamID, deviceID, channelID string) error
 }
 
 type GenerationPlayStopper interface {
@@ -383,7 +386,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	hookLog(c).Info("ZLM Hook on_stream_changed",
 		zap.String("event", "gb28181.hook.stream.changed"),
 		zap.String("app", body.App),
-		zap.String("stream", body.Stream),
+		zap.String("stream_id", body.Stream),
 		zap.String("schema", body.Schema),
 		zap.String("media_server_id", body.MediaServerID),
 		zap.Bool("regist", body.Regist))
@@ -407,7 +410,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			if err := h.observer.ObserveStream(ctx, body.Stream, body.Regist); err != nil {
 				app.Log(ctx).Named("hook").Warn("录像流状态联动失败",
 					zap.String("event", "gb28181.hook.stream.observer_failed"),
-					zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
+					zap.String("stream_id", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
 			}
 		})
 	}
@@ -425,7 +428,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 				if pending, ok := stopper.CleanupPendingLiveRef(body.Stream); ok && pending.NodeID == nodeID {
 					cleanupContext := hookAsyncContext(c)
 					app.BackgroundWork.Go(func() {
-						h.stopCleanupPending(cleanupContext, pending, "流注销清理失败")
+						h.stopCleanupPending(cleanupContext, pending, "stream_unregistered")
 					})
 				}
 			}
@@ -441,7 +444,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 				if err := talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
 					app.Log(ctx).Named("hook").Warn("对讲流状态联动失败",
 						zap.String("event", "gb28181.hook.talk.observer_failed"),
-						zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
+						zap.String("stream_id", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
 				}
 			})
 		}
@@ -463,7 +466,7 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 	_ = c.ShouldBindJSON(&body)
 	hookLog(c).Info("ZLM Hook on_stream_none_reader",
 		zap.String("event", "gb28181.hook.stream.none_reader"),
-		zap.String("app", body.App), zap.String("stream", body.Stream))
+		zap.String("app", body.App), zap.String("stream_id", body.Stream))
 
 	closeStream := true
 	policyFailed := false
@@ -475,7 +478,7 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		if err != nil {
 			hookLog(c).Warn("查询无人观看断流策略失败,沿用默认关闭策略",
 				zap.String("event", "gb28181.hook.stream.none_reader_policy_failed"),
-				zap.String("stream", body.Stream), logging.Error(err))
+				zap.String("stream_id", body.Stream), logging.Error(err))
 			closeStream = true
 			policyFailed = true
 		}
@@ -497,12 +500,12 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 						if _, err := stopper.StopOnNoneReader(ctx, captured); err != nil {
 							app.Log(ctx).Named("hook").Warn("固定流无人观看条件断流失败",
 								zap.String("event", "gb28181.hook.stream.fixed_stop_failed"),
-								zap.String("stream", captured.StreamID), logging.Error(err))
+								zap.String("stream_id", captured.StreamID), logging.Error(err))
 						}
 					})
 				} else if pending, exists := stopper.CleanupPendingLiveRef(body.Stream); exists {
 					app.BackgroundWork.Go(func() {
-						h.stopCleanupPending(asyncContext, pending, "固定流无人观看清理失败")
+						h.stopCleanupPending(asyncContext, pending, "none_reader")
 					})
 				}
 			}
@@ -513,23 +516,23 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		app.BackgroundWork.Go(func() {
 			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, body.Stream); err != nil {
+			if err := h.stopper.Stop(ctx, body.Stream, "", ""); err != nil {
 				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
 					zap.String("event", "gb28181.hook.stream.stop_failed"),
-					zap.String("stream", body.Stream), logging.Error(err))
+					zap.String("stream_id", body.Stream), logging.Error(err))
 			} else {
 				app.Log(ctx).Named("hook").Info("无人观看自动断流",
-					zap.String("event", "gb28181.hook.stream.stopped"), zap.String("stream", body.Stream))
+					zap.String("event", "gb28181.hook.stream.stopped"), zap.String("stream_id", body.Stream))
 			}
 		})
 	} else if closeStream && h.stopper != nil && body.Stream != "" {
 		app.BackgroundWork.Go(func() {
 			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, body.Stream); err != nil {
+			if err := h.stopper.Stop(ctx, body.Stream, "", ""); err != nil {
 				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
 					zap.String("event", "gb28181.hook.stream.stop_failed"),
-					zap.String("stream", body.Stream), logging.Error(err))
+					zap.String("stream_id", body.Stream), logging.Error(err))
 			}
 		})
 	}
@@ -596,7 +599,7 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 					if _, err := stopper.StopIfCurrent(ctx, current); err != nil {
 						app.Log(ctx).Named("hook").Warn("RTP 超时条件清理会话失败",
 							zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
-							zap.String("stream", current.StreamID), logging.Error(err))
+							zap.String("stream_id", current.StreamID), logging.Error(err))
 					}
 				})
 			}
@@ -606,10 +609,11 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 		app.BackgroundWork.Go(func() {
 			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, body.StreamID); err != nil {
+			// 回调体只有 stream_id/ssrc,device/channel 由 play.Service 兜底
+			if err := h.stopper.Stop(ctx, body.StreamID, "", ""); err != nil {
 				app.Log(ctx).Named("hook").Warn("RTP 超时清理会话失败",
 					zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
-					zap.String("stream", body.StreamID), logging.Error(err))
+					zap.String("stream_id", body.StreamID), logging.Error(err))
 			}
 		})
 	}
@@ -619,7 +623,11 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 	hookOK(c)
 }
 
-func (h *HookController) stopCleanupPending(base context.Context, ref stream.LiveRef, failureMessage string) {
+// stopCleanupPending 的条件清理失败 → `gb28181.hook.stream.cleanup_failed`。
+//
+// `reasonCode` 是**受控短码**（触发清理的那条路径），不是给人读的句子；
+// 人类可读的"是哪条路径"已由事件名 + reason_code 回答，句子只会让字段无法聚合。
+func (h *HookController) stopCleanupPending(base context.Context, ref stream.LiveRef, reasonCode string) {
 	stopper, ok := h.stopper.(GenerationPlayStopper)
 	if !ok {
 		return
@@ -627,9 +635,9 @@ func (h *HookController) stopCleanupPending(base context.Context, ref stream.Liv
 	ctx, cancel := context.WithTimeout(base, 5*time.Second)
 	defer cancel()
 	if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
-		app.Log(ctx).Named("hook").Warn("Hook cleanup failed",
+		app.Log(ctx).Named("hook").Warn("未完成的固定流会话条件清理失败",
 			zap.String("event", "gb28181.hook.stream.cleanup_failed"),
-			zap.String("stream", ref.StreamID), zap.String("reason", failureMessage), logging.Error(err))
+			zap.String("stream_id", ref.StreamID), zap.String("reason_code", reasonCode), logging.Error(err))
 	}
 }
 
@@ -640,7 +648,7 @@ func (h *HookController) notifyPlaybackEnded(base context.Context, streamID, rea
 		if err := h.playbackMedia.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
 			app.Log(ctx).Named("hook").Debug("回放媒体终态未命中活动会话",
 				zap.String("event", "gb28181.hook.playback_ended_unmatched"),
-				zap.String("stream", streamID), zap.String("reason", reason), logging.Error(err))
+				zap.String("stream_id", streamID), zap.String("reason", reason), logging.Error(err))
 		}
 	})
 }
@@ -732,7 +740,7 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		return
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnFlowReport, body.MediaServerID) {
-		h.ignoreFlowReport(c, "payload-node-mismatch")
+		h.ignoreFlowReport(c, body.Stream, "payload_node_mismatch")
 		return
 	}
 	resolver, collector := h.flowDependencies()
@@ -742,7 +750,7 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 	}
 	mediaNode, ok := resolver.GetByUUID(body.MediaServerID)
 	if !ok || mediaNode == nil || mediaNode.MediaServerUUID != body.MediaServerID {
-		h.ignoreFlowReport(c, "node-unknown")
+		h.ignoreFlowReport(c, body.Stream, "node_unknown")
 		return
 	}
 	err := collector.CollectFlow(c.Request.Context(), FlowReport{
@@ -754,7 +762,10 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 	if err != nil {
 		hookLog(c).Warn("ZLM on_flow_report 计量失败",
 			zap.String("event", "gb28181.hook.flow.collect_failed"),
-			logging.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
+			zap.String("stream_id", body.Stream),
+			zap.String("media_server_id", body.MediaServerID),
+			zap.Bool("player", body.Player),
+			logging.Error(err))
 	}
 	hookOK(c)
 }
@@ -771,51 +782,52 @@ type onStreamNotFoundBody struct {
 func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	resolver, validator, dispatcher, settingsProvider := h.autoOnDemandDependencies()
 	if resolver == nil || validator == nil || dispatcher == nil || settingsProvider == nil || !dispatcher.Available() {
-		h.denyAutoOnDemand(c, "runtime-unavailable")
+		// 此处 body 还没解出来（运行时未装配），"哪条流"就是"还不知道" → 字段缺席。
+		h.denyAutoOnDemand(c, "", "runtime_unavailable")
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	var body onStreamNotFoundBody
 	decoder := json.NewDecoder(c.Request.Body)
 	if err := decoder.Decode(&body); err != nil {
-		h.denyAutoOnDemand(c, "payload-invalid")
+		h.denyAutoOnDemand(c, body.Stream, "payload_invalid")
 		return
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
-		h.denyAutoOnDemand(c, "payload-invalid")
+		h.denyAutoOnDemand(c, body.Stream, "payload_invalid")
 		return
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnStreamNotFound, body.MediaServerID) {
-		h.denyAutoOnDemand(c, "payload-node-mismatch")
+		h.denyAutoOnDemand(c, body.Stream, "payload_node_mismatch")
 		return
 	}
 	deviceID, channelID, err := play.ParseFixedStreamID(body.Stream)
 	if body.MediaServerID == "" || body.VHost != "__defaultVhost__" || body.App != "rtp" ||
 		!validAutoOnDemandSchema(body.Schema) || err != nil {
-		h.denyAutoOnDemand(c, "media-scope-invalid")
+		h.denyAutoOnDemand(c, body.Stream, "media_scope_invalid")
 		return
 	}
 	settings := settingsProvider()
 	authSettings := gbconfig.CurrentPlayAuthSettings()
 	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled {
-		h.denyAutoOnDemand(c, "feature-disabled")
+		h.denyAutoOnDemand(c, body.Stream, "feature_disabled")
 		return
 	}
 	mediaNode, ok := resolver.ResolveAutoOnDemandNode(body.MediaServerID)
 	if !ok || mediaNode == nil || mediaNode.ID == 0 || !mediaNode.IsActive() || mediaNode.IsNearCapacity() ||
 		mediaNode.MediaServerUUID != body.MediaServerID {
-		h.denyAutoOnDemand(c, "node-unavailable")
+		h.denyAutoOnDemand(c, body.Stream, "node_unavailable")
 		return
 	}
 	if h.autoLimiter == nil || !h.autoLimiter.Allow() {
-		h.denyAutoOnDemand(c, "global-rate-limited")
+		h.denyAutoOnDemand(c, body.Stream, "global_rate_limited")
 		return
 	}
 	var authorizationID string
 	if authSettings.Enabled {
 		params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
 		if err != nil {
-			h.denyAutoOnDemand(c, "params-invalid")
+			h.denyAutoOnDemand(c, body.Stream, "params_invalid")
 			return
 		}
 		playToken, ok := singleValue(params, playauth.QueryParameter)
@@ -824,7 +836,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 			Stream: body.Stream, MediaServerID: body.MediaServerID,
 		})
 		if !ok || !verified {
-			h.denyAutoOnDemand(c, "play-auth-invalid")
+			h.denyAutoOnDemand(c, body.Stream, "play_auth_invalid")
 			return
 		}
 		authorizationID = claims.AuthorizationGeneration
@@ -833,7 +845,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	err = validator.ValidateAutoOnDemandTarget(validateCtx, deviceID, channelID)
 	cancel()
 	if err != nil {
-		h.denyAutoOnDemand(c, "target-invalid")
+		h.denyAutoOnDemand(c, body.Stream, "target_invalid")
 		return
 	}
 	if err := dispatcher.Submit(play.Request{
@@ -841,12 +853,13 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
 		AuthorizationID: authorizationID,
 	}); err != nil {
-		h.denyAutoOnDemand(c, autoOnDemandAdmissionReason(err))
+		h.denyAutoOnDemand(c, body.Stream, autoOnDemandAdmissionReason(err))
 		return
 	}
+	// 这里原本还有一个 `reason="accepted"` —— 它和事件名（`.accepted`）说的是同一件事，
+	// 满足不了判据②（看到它要做什么动作），是纯噪声字段，去掉。
 	hookLog(c).Info("自动点播 Hook 已接收",
 		zap.String("event", "gb28181.hook.auto_on_demand.accepted"),
-		zap.String("reason", "accepted"),
 		zap.String("device_id", deviceID),
 		zap.String("channel_id", channelID),
 		zap.Int64("node_id", mediaNode.ID))
@@ -860,23 +873,23 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	var body onPlayBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		h.denyPlayback(c, "tampered", "invalid playback request")
+		h.denyPlayback(c, body.Stream, "tampered", "invalid playback request")
 		return
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnPlay, body.MediaServerID) {
-		h.denyPlayback(c, "wrong_resource", "hook payload node mismatch")
+		h.denyPlayback(c, body.Stream, "wrong_resource", "hook payload node mismatch")
 		return
 	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
 		class, playToken, mediaToken, ok := classifyPreviewHookParams(classifier, c.Request.Context(), body)
 		if !ok {
-			h.denyPlayback(c, "tampered", "invalid playback authorization")
+			h.denyPlayback(c, body.Stream, "tampered", "invalid playback authorization")
 			return
 		}
 		switch class {
 		case management.PreviewResourceNonGBPreviewable:
 			if mediaToken == "" {
-				h.denyPlayback(c, "missing", "invalid playback authorization")
+				h.denyPlayback(c, body.Stream, "missing", "invalid playback authorization")
 				return
 			}
 			_, err := verifier.Verify(mediaToken, management.PreviewBinding{
@@ -884,32 +897,32 @@ func (h *HookController) OnPlay(c *gin.Context) {
 				App: body.App, Stream: body.Stream, ClientIP: body.IP,
 			})
 			if err != nil {
-				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 				return
 			}
 			hookOK(c)
 			return
 		case management.PreviewResourceLegacyPublic:
 			if playToken != "" || mediaToken != "" {
-				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 				return
 			}
 			hookOK(c)
 			return
 		case management.PreviewResourceGB:
 			if body.App != "rtp" {
-				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 				return
 			}
 			if mediaToken != "" {
-				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 				return
 			}
 		case management.PreviewResourceUnknownConflicted:
-			h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+			h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 			return
 		default:
-			h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+			h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 			return
 		}
 	}
@@ -923,7 +936,7 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		return
 	}
 	if body.Stream == "" || body.MediaServerID == "" {
-		h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+		h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 		return
 	}
 
@@ -932,12 +945,12 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	resolver := h.playResolver
 	h.playAuthMu.RUnlock()
 	if authorizer == nil || resolver == nil {
-		h.denyPlayback(c, "unavailable", "playback authorization unavailable")
+		h.denyPlayback(c, body.Stream, "unavailable", "playback authorization unavailable")
 		return
 	}
 	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
 	if err != nil {
-		h.denyPlayback(c, "tampered", "invalid playback authorization")
+		h.denyPlayback(c, body.Stream, "tampered", "invalid playback authorization")
 		return
 	}
 	binding, err := resolver.ResolvePlaybackMediaContext(body.App, body.Stream, body.MediaServerID)
@@ -952,32 +965,32 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		}
 	}
 	if err != nil {
-		h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+		h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
 		return
 	}
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = body.IP
 	playToken, ok := singleValue(params, playauth.QueryParameter)
 	if !ok {
-		h.denyPlayback(c, "missing", "invalid playback authorization")
+		h.denyPlayback(c, body.Stream, "missing", "invalid playback authorization")
 		return
 	}
 	claims, err := authorizer.Verify(playToken, binding)
 	if err != nil {
-		h.denyPlayback(c, string(playauth.MetricOutcomeForError(playToken, err)), "playback authorization denied")
+		h.denyPlayback(c, body.Stream, string(playauth.MetricOutcomeForError(playToken, err)), "playback authorization denied")
 		return
 	}
 	if binding.MediaGeneration == 0 && binding.BindClientIP {
 		verifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
 		if !ok || verifier.MarkVerifiedClientSource(playToken, claims, binding) != nil {
-			h.denyPlayback(c, "unavailable", "playback authorization unavailable")
+			h.denyPlayback(c, body.Stream, "unavailable", "playback authorization unavailable")
 			return
 		}
 	}
 	hookLog(c).Info("播放鉴权 Hook 已放行",
 		zap.String("event", "gb28181.hook.play.authorized"),
 		zap.String("result", "verified"),
-		zap.String("stream", body.Stream),
+		zap.String("stream_id", body.Stream),
 		zap.String("media_server_id", body.MediaServerID),
 		zap.String("correlation_id", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	hookOK(c)
@@ -1037,9 +1050,27 @@ func parsePreviewHookParams(raw string) (url.Values, string, string, bool) {
 	return params, playValue, mediaValue, true
 }
 
-func (h *HookController) denyPlayback(c *gin.Context, reason, message string) {
-	hookLog(c).Info("播放鉴权 Hook 已拒绝",
-		zap.String("event", "gb28181.hook.play.denied"), zap.String("reason", reason))
+// denyPlayback 是 `gb28181.hook.play.denied` 的唯一出口。
+//
+// `streamID` 拿不到时（JSON 都解不出来）让字段**缺席**而不是打空串：空串会被读日志的
+// 人和扫描脚本都当成"已经带了定位字段"，于是"哪条流被拒了"这个问题被一个空值糊过去。
+// `reasonCode` 受控短码，取值来自 `playauth.MetricOutcome*` 或本文件里的固定字面量。
+//
+// 两支都留 `source_ip`：拒绝发生时对方还没通过认证，"是谁在拒"只能由它回答 ——
+// 与 `gb28181.hook.auth.rejected`、`gb28181.hook.keepalive.*` 同一处置。
+func (h *HookController) denyPlayback(c *gin.Context, streamID, reasonCode, message string) {
+	if streamID == "" {
+		hookLog(c).Info("播放鉴权 Hook 已拒绝",
+			zap.String("event", "gb28181.hook.play.denied"),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	} else {
+		hookLog(c).Info("播放鉴权 Hook 已拒绝",
+			zap.String("event", "gb28181.hook.play.denied"),
+			zap.String("stream_id", streamID),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	}
 	hookDenied(c, message)
 }
 
@@ -1065,9 +1096,22 @@ func (h *HookController) flowDependencies() (FlowReportNodeResolver, FlowCollect
 	return h.flowResolver, h.flowCollector
 }
 
-func (h *HookController) ignoreFlowReport(c *gin.Context, reason string) {
-	hookLog(c).Debug("ZLM on_flow_report 已忽略",
-		zap.String("event", "gb28181.hook.flow.ignored"), zap.String("reason", reason))
+// ignoreFlowReport 是 `gb28181.hook.flow.ignored` 的唯一出口。
+// 它回答的是"这条 flow_report 是谁发的、为什么不算" —— 两个字段缺一不可。
+// `source_ip` 与 `stream_id` 的关系是"谁发的"与"哪条流"：前者永远拿得到，后者常常拿不到。
+func (h *HookController) ignoreFlowReport(c *gin.Context, streamID, reasonCode string) {
+	if streamID == "" {
+		hookLog(c).Debug("ZLM on_flow_report 已忽略",
+			zap.String("event", "gb28181.hook.flow.ignored"),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	} else {
+		hookLog(c).Debug("ZLM on_flow_report 已忽略",
+			zap.String("event", "gb28181.hook.flow.ignored"),
+			zap.String("stream_id", streamID),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	}
 	hookOK(c)
 }
 
@@ -1120,24 +1164,40 @@ func validAutoOnDemandSchema(schema string) bool {
 	}
 }
 
-func (h *HookController) denyAutoOnDemand(c *gin.Context, reason string) {
-	hookLog(c).Debug("自动点播 Hook 已拒绝",
-		zap.String("event", "gb28181.hook.auto_on_demand.denied"), zap.String("reason", reason))
+// denyAutoOnDemand 是 `gb28181.hook.auto_on_demand.denied` 的唯一出口。
+//
+// 多数的拒绝发生在**解析出 stream 之前**（运行时未装配 / JSON 坏 / 节点不匹配），
+// 那时"哪条流"的答案就是"还不知道" —— 字段缺席，而不是空串。
+// `source_ip` 是同一支里唯一**总是拿得到**的定位字段：它把"哪台 ZLM 发了这个
+// 解不出来的请求"钉住，否则这条 Debug 只能说明"某处拒绝过一次"。
+func (h *HookController) denyAutoOnDemand(c *gin.Context, streamID, reasonCode string) {
+	if streamID == "" {
+		hookLog(c).Debug("自动点播 Hook 已拒绝",
+			zap.String("event", "gb28181.hook.auto_on_demand.denied"),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	} else {
+		hookLog(c).Debug("自动点播 Hook 已拒绝",
+			zap.String("event", "gb28181.hook.auto_on_demand.denied"),
+			zap.String("stream_id", streamID),
+			zap.String("reason_code", reasonCode),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	}
 	hookDenied(c, "automatic playback unavailable")
 }
 
 func autoOnDemandAdmissionReason(err error) string {
 	switch {
 	case errors.Is(err, play.ErrAutoStartStopped):
-		return "dispatcher-stopped"
+		return "dispatcher_stopped"
 	case errors.Is(err, play.ErrAutoStartQueueFull):
-		return "queue-full"
+		return "queue_full"
 	case errors.Is(err, play.ErrAutoStartNodeRateLimited):
-		return "node-rate-limited"
+		return "node_rate_limited"
 	case errors.Is(err, play.ErrAutoStartInvalidRequest):
-		return "admission-invalid"
+		return "admission_invalid"
 	default:
-		return "admission-failed"
+		return "admission_failed"
 	}
 }
 
@@ -1175,14 +1235,48 @@ func (h *HookController) OnServerStarted(c *gin.Context) {
 		return
 	}
 
-	hookLog(c).Info("ZLM Hook on_server_started",
-		zap.String("event", "gb28181.hook.server_started"))
-	if body.MediaServerID == "" || h.resolver == nil {
-		hookOK(c)
-		return
+	// 先把 mediaServerId 解析成注册表里的节点主键，再打日志。
+	// 原实现只有一个 `event` 字段，等于说"有节点重启了，但不知道是哪个" ——
+	// 而"哪个节点重启了"正是这条 INFO 唯一要回答的问题。
+	//
+	// 解析不出来时**不再静默 return**：那意味着"节点重启了但重启通知没发下去"，
+	// 查不到任何痕迹。三种原因分别落到 reason_code 上。
+	nodeID, nodeResolved, unresolvedReason := int64(0), false, ""
+	switch {
+	case body.MediaServerID == "":
+		unresolvedReason = "payload_missing_media_server_id"
+	case h.resolver == nil:
+		unresolvedReason = "resolver_unavailable"
+	default:
+		id, ok := h.resolver.IDForUUID(body.MediaServerID)
+		if ok {
+			nodeID, nodeResolved = id, true
+		} else {
+			// 节点在 ZLM 侧存在但不在我们注册表里 —— 这正是"ZLM 换了实例/改了
+			// mediaServerId，平台侧还认旧的"这类故障的现场，media_server_id 必须留下。
+			unresolvedReason = "node_unknown"
+		}
 	}
-	nodeID, ok := h.resolver.IDForUUID(body.MediaServerID)
-	if !ok {
+	if nodeResolved {
+		hookLog(c).Info("ZLM Hook on_server_started",
+			zap.String("event", "gb28181.hook.server_started"),
+			zap.String("media_server_id", body.MediaServerID),
+			zap.Int64("node_id", nodeID))
+	} else if body.MediaServerID != "" {
+		hookLog(c).Warn("ZLM Hook on_server_started 未能定位节点，重启通知未发出",
+			zap.String("event", "gb28181.hook.server_started_node_unresolved"),
+			zap.String("media_server_id", body.MediaServerID),
+			zap.String("reason_code", unresolvedReason))
+	} else {
+		// 连 mediaServerId 都没有：定位对象只能是"本进程的这个回调入口"，不是某个节点。
+		// `source_ip` 仍要留 —— 它能回答"是不是同一台机器在反复发认不出的回调"，
+		// 与 `gb28181.hook.keepalive.*` 的处置一致。
+		hookLog(c).Warn("ZLM Hook on_server_started 未能定位节点，重启通知未发出",
+			zap.String("event", "gb28181.hook.server_started_node_unresolved"),
+			zap.String("reason_code", unresolvedReason),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
+	}
+	if !nodeResolved {
 		hookOK(c)
 		return
 	}
@@ -1249,7 +1343,7 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 		StartTime: time.Unix(body.StartTime, 0), TimeLen: body.TimeLen, FileSize: body.FileSize,
 	})
 	if err != nil {
-		hookLog(c).Error("写入 ZLM 录像文件索引失败",
+		hookLog(c).Warn("写入 ZLM 录像文件索引失败",
 			zap.String("event", "gb28181.hook.recording.index_failed"),
 			logging.Error(err), zap.Int64("node_id", nodeID))
 		response.SetBusinessResult(c, -1, false)
@@ -1273,8 +1367,12 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 func (h *HookController) OnServerKeepalive(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		// 连 payload 都没读出来，"是哪个节点的心跳"无从谈起 —— 定位对象是本进程的
+		// 这个回调入口（组件级）。但 `source_ip` 仍要留：它是唯一能回答
+		// "是不是同一台机器在反复发坏请求"的线索，而 hook 链路没有 call_id 可继承。
 		hookLog(c).Warn("ZLM Hook on_server_keepalive 读 body 失败",
-			zap.String("event", "gb28181.hook.keepalive.read_failed"), logging.Error(err))
+			zap.String("event", "gb28181.hook.keepalive.read_failed"),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)), logging.Error(err))
 		hookOK(c)
 		return
 	}
@@ -1286,15 +1384,30 @@ func (h *HookController) OnServerKeepalive(c *gin.Context) {
 		return
 	}
 	if h.collector == nil {
+		// collector 未装配是本进程的装配问题，"定位谁"的答案仍是本进程（组件级豁免）。
+		// `source_ip` 同样留下：它能区分"只有这台节点在发"还是"所有节点都在发"。
 		hookLog(c).Debug("ZLM Hook on_server_keepalive 收到但 Collector 未装配,忽略",
-			zap.String("event", "gb28181.hook.keepalive.collector_unavailable"))
+			zap.String("event", "gb28181.hook.keepalive.collector_unavailable"),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)))
 		hookOK(c)
 		return
 	}
 	if err := h.collector.Receive(body); err != nil {
-		hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败",
-			zap.String("event", "gb28181.hook.keepalive.process_failed"),
-			logging.Error(err), zap.Int("bodyLen", len(body)))
+		// `identity.MediaServerID` 在 :1288 已经解过（虽然只用于节点比对），
+		// 这里直接复用：心跳处理失败时"是哪个节点的载荷"就是第一个要看的字段。
+		if identity.MediaServerID != "" {
+			hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败",
+				zap.String("event", "gb28181.hook.keepalive.process_failed"),
+				zap.String("media_server_id", identity.MediaServerID),
+				zap.Int("body_len", len(body)), logging.Error(err))
+		} else {
+			// 载荷里连 mediaServerId 都解不出来 —— "谁的心跳"的答案就是"解不出来"，
+			// `media_server_id` 字段缺席而不是打空串；此时 `source_ip` 接棒。
+			hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败（载荷无 mediaServerId）",
+				zap.String("event", "gb28181.hook.keepalive.process_failed"),
+				zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)),
+				zap.Int("body_len", len(body)), logging.Error(err))
+		}
 	}
 	hookOK(c)
 }

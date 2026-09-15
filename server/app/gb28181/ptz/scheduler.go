@@ -502,9 +502,9 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 	defer persistCancel()
 	if persistErr := s.persistAttemptResult(persistCtx, attempt, result, err, observedAt); persistErr != nil {
 		// 写回失败不得无声:否则 attempt 停留 dispatching,直到租约恢复才可能被发现
-		app.Log(persistCtx).Named("ptz.scheduler").Error("PTZ 调度结果持久化失败",
+		app.Log(persistCtx).Named("ptz.scheduler").Warn("PTZ 调度结果持久化失败",
 			zap.String("event", "ptz.scheduler.persist_failed"),
-			zap.Uint("attempt", attempt.ID), zap.Uint("operation", attempt.OperationID), zap.Error(persistErr))
+			zap.Uint("attempt_id", attempt.ID), zap.Uint("operation_id", attempt.OperationID), zap.Error(persistErr))
 	}
 }
 

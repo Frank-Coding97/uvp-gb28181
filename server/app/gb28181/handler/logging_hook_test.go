@@ -126,7 +126,10 @@ func TestLoggingGBHTTPConcurrentStreamCorrelation(t *testing.T) {
 		hookLogs++
 		fields := entry.ContextMap()
 		require.Equal(t, "hook", entry.LoggerName)
-		require.Equal(t, "same-stream", fields["stream"])
+		// hook 链路的流字段在 C06 统一成了 `stream_id`（与 play/cascade 一致，
+		// 也是扫描器/门禁认得的规范名）—— 这里顺带锁住改名不会被回退。
+		require.Equal(t, "same-stream", fields["stream_id"])
+		require.NotContains(t, fields, "stream")
 		require.Equal(t, "gb28181.hook.stream.changed", fields["event"])
 		requestID, ok := fields["request_id"].(string)
 		require.True(t, ok)

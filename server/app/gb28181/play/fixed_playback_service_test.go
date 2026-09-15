@@ -208,7 +208,7 @@ func TestStartModeSwitchKeepsCurrentGenerationAndAppliesAfterStop(t *testing.T) 
 			}
 
 			z.online.Store(false)
-			if err := s.Stop(context.Background(), first.StreamID); err != nil {
+			if err := s.Stop(context.Background(), first.StreamID, "", ""); err != nil {
 				t.Fatalf("stop current generation: %v", err)
 			}
 			next, err := s.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
@@ -331,7 +331,7 @@ func TestStartFixedAddressNewGenerationKeepsPathAndChangesSSRC(t *testing.T) {
 		t.Fatalf("first start: %v", err)
 	}
 	z.online.Store(false)
-	if err := s.Stop(context.Background(), first.StreamID); err != nil {
+	if err := s.Stop(context.Background(), first.StreamID, "", ""); err != nil {
 		t.Fatalf("stop first generation: %v", err)
 	}
 	second, err := s.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)

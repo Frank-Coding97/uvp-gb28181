@@ -532,13 +532,13 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	if r.server != nil {
 		if err := r.server.Shutdown(ctx); err != nil {
 			stopErr = errors.Join(stopErr, shutdownComponentError("sip", err))
-			app.Log(ctx).Named("sip").Error("SIP shutdown incomplete", zap.String("event", "sip.shutdown_incomplete"), logging.Error(err))
+			app.Log(ctx).Named("sip").Warn("SIP shutdown incomplete", zap.String("event", "sip.shutdown_incomplete"), logging.Error(err))
 		}
 	}
 	if r.security != nil {
 		if err := r.security.Close(ctx); err != nil {
 			stopErr = errors.Join(stopErr, shutdownComponentError("security", err))
-			app.Log(ctx).Named("security").Error("Security persistence shutdown incomplete", zap.String("event", "security.shutdown_incomplete"), logging.Error(err))
+			app.Log(ctx).Named("security").Warn("Security persistence shutdown incomplete", zap.String("event", "security.shutdown_incomplete"), logging.Error(err))
 		}
 	}
 	return stopErr

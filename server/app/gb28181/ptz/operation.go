@@ -301,7 +301,7 @@ func (s *Service) sendLegacyOperation(ctx context.Context, target Target, operat
 		return operation, err
 	}
 	if syncErr := s.SyncPresetOperation(persistCtx, operation); syncErr != nil {
-		app.Log(persistCtx).Named("ptz").Warn("预置位乐观入库失败", zap.String("event", "ptz.preset_cache_failed"), zap.String("operationId", operation.OperationID), logging.Error(syncErr))
+		app.Log(persistCtx).Named("ptz").Warn("预置位乐观入库失败", zap.String("event", "ptz.preset_cache_failed"), zap.String("operation_id", operation.OperationID), logging.Error(syncErr))
 	}
 	return operation, nil
 }

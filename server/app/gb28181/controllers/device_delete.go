@@ -253,9 +253,13 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 		if err != nil {
 			return err
 		}
-		if retired > 0 && app.ZapLog != nil {
-			app.ZapLog.Info("删除设备时回收了级联共享投影",
-				zap.String("deviceCode", dev.DeviceID), zap.Int64("retiredProjections", retired))
+		if retired > 0 {
+			// 用请求 logger 而不是全局 app.ZapLog：这条挂在"某次删除操作"上，
+			// 与这次 HTTP 请求的访问日志同一条链，排查时才对得上。
+			app.Log(c.Request.Context()).Info("删除设备时回收了级联共享投影",
+				zap.String("event", "gb28181.device.delete_shared_projections_retired"),
+				zap.String("device_id", dev.DeviceID),
+				zap.Int64("retired_projections", retired))
 		}
 		return nil
 	})
@@ -324,9 +328,11 @@ func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, i
 		if err != nil {
 			return err
 		}
-		if retired > 0 && app.ZapLog != nil {
-			app.ZapLog.Info("删除通道时回收了级联共享投影",
-				zap.String("channelCode", ch.ChannelID), zap.Int64("retiredProjections", retired))
+		if retired > 0 {
+			app.Log(c.Request.Context()).Info("删除通道时回收了级联共享投影",
+				zap.String("event", "gb28181.channel.delete_shared_projections_retired"),
+				zap.String("channel_id", ch.ChannelID),
+				zap.Int64("retired_projections", retired))
 		}
 		return nil
 	})

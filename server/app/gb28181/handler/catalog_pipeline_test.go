@@ -77,7 +77,7 @@ func TestHandleCatalogResponse_PipelineIntegration(t *testing.T) {
 </DeviceList>
 </Response>`)
 
-	HandleCatalogResponse(context.Background(), body)
+	HandleCatalogResponse(context.Background(), body, "dev-1", "call-1", "1")
 
 	// gb_channel 2 条
 	var chCount int64
@@ -107,7 +107,7 @@ func TestHandleCatalogResponse_NoPipelineSafe(t *testing.T) {
 	body := []byte(`<?xml version="1.0"?><Response><CmdType>Catalog</CmdType><SN>1</SN><DeviceID>X</DeviceID><SumNum>0</SumNum><DeviceList Num="0"></DeviceList></Response>`)
 	// 不 panic 即通过
 	require.NotPanics(t, func() {
-		HandleCatalogResponse(context.Background(), body)
+		HandleCatalogResponse(context.Background(), body, "dev-1", "call-1", "1")
 	})
 }
 
@@ -128,13 +128,13 @@ func TestHandleCatalogResponse_AggregatesByDeviceAndSNBeforeIngest(t *testing.T)
 	})
 
 	// SN=10 的第一包未收齐，不能提前把部分目录写入数据库。
-	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"))
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"), "dev-1", "call-1", "1")
 	var count int64
 	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
 	require.Zero(t, count)
 
 	// 重复包不能增加聚合进度。
-	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"))
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"), "dev-1", "call-1", "1")
 	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
 	require.Zero(t, count)
 
@@ -142,12 +142,12 @@ func TestHandleCatalogResponse_AggregatesByDeviceAndSNBeforeIngest(t *testing.T)
 	HandleCatalogResponse(context.Background(), catalogResponseBody(
 		11, 2, deviceID,
 		"37011200001310000002", "37011200001310000003",
-	))
+	), "dev-1", "call-1", "1")
 	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
 	require.EqualValues(t, 2, count)
 
 	// SN=10 补齐后，再一次性落入它自己的两条结果。
-	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000004"))
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000004"), "dev-1", "call-1", "1")
 	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
 	require.EqualValues(t, 4, count)
 }
@@ -157,6 +157,6 @@ func TestHandleCatalogResponse_EmptyResponseDoesNotLeaveBucket(t *testing.T) {
 	catalogAgg.reset()
 	t.Cleanup(func() { catalogAgg.reset() })
 
-	HandleCatalogResponse(context.Background(), catalogResponseBody(7, 0, "empty-device"))
+	HandleCatalogResponse(context.Background(), catalogResponseBody(7, 0, "empty-device"), "dev-1", "call-1", "1")
 	require.Equal(t, 0, catalogAgg.active())
 }

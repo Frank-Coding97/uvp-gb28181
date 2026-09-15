@@ -203,7 +203,7 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 	switch req.Method {
 	case sip.ACK:
 		if err := session.dialog.ReadAck(req, tx); err != nil {
-			h.log(cascadeVideoEventACKInvalid, session.platform.ID, err)
+			h.logACKInvalid(session.platform.ID, session.dialog.ID, err)
 		} else {
 			session.acknowledged.Store(true)
 		}
@@ -227,7 +227,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	var platformID uint64
 	fail := func(code int, err error) {
 		peer, _ := cascadePeerFromRequest(req)
-		h.log(cascadeVideoEventFailed, platformID, err, zap.String("peer", peer.String()))
+		h.logFailed(platformID, cascadeCallID(req), err, peer.String())
 		_ = tx.Respond(sip.NewResponseFromRequest(responseRequest, code, "Cascade Play Failed", nil))
 	}
 	if req.To() == nil || req.From() == nil || req.CallID() == nil || req.CSeq() == nil {
@@ -282,9 +282,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		}
 		if len(identityOnly) == 1 {
 			platform = &identityOnly[0]
-			h.log(cascadeVideoEventPeerMismatch, platform.ID, nil,
-				zap.String("peer", peer.String()),
-				zap.String("configuredHost", identityOnly[0].Host))
+			h.logPeerMismatch(platform.ID, cascadeCallID(req), peer.String(), identityOnly[0].Host)
 		}
 	}
 	if platform == nil || !platform.Enabled {
@@ -415,7 +413,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 					return
 				}
 			} else {
-				h.log(cascadeVideoEventRTPCleanupFailed, platform.ID, stopErr)
+				h.logRTPCleanupFailed(platform.ID, row.DialogKey, stopErr)
 			}
 			// Keep the dialog, source lease and sender claim until cleanup is certain.
 			time.Sleep(5 * time.Second)
@@ -447,58 +445,158 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	if err = dialog.RespondSDP(answer); err != nil {
-		h.log(cascadeVideoEventAnswerFailed, platform.ID, err)
+		h.logAnswerFailed(platform.ID, dialog.ID, err)
 		return
 	}
 	if !h.transition(&row, &state, model.CascadeMediaSessionStateActive) {
 		return
 	}
-	h.log(cascadeVideoEventEstablished, platform.ID, nil)
+	h.logEstablished(platform.ID, dialog.ID)
 	<-sessionCtx.Done()
 	completed = true
 }
 
-// log 记录一条级联点播事件。extra 用于在固定字段之外附加这次调用特有的信息
-// （例如观测到的 peer 地址），避免把结构化数据拼进消息文本里。
-func (h *cascadeVideoRuntime) log(event string, platformID uint64, err error, extra ...zap.Field) {
+// 级联点播的日志出口：**一个事件一个方法，字段在方法体里写全**。
+//
+// ⚠️ 不要改回「攒一个 fields []zap.Field、再 append(..., zap.String("event", ...))... 展开」
+// 的写法。那种写法运行时输出是对的，但**字段静态不可见**——门禁
+// （internal/loggingcontract）报 unresolved_logger，scan-logging.py 把它算作
+// "经 zap.Field 变量展开"。于是「这条日志带了定位字段」这个结论**无法被验证**，
+// 而一个红着的门禁等于没有门禁。拆成具名方法后，每条日志带什么是一眼可读的。
+//
+// 字段约定（与 play 链路一致，全部 snake_case）：
+//
+//	platform_id —— 配置里的上级平台主键；**认定平台之前没有值**，此时字段缺席。
+//	call_id     —— 本次 SIP 事务的 Call-ID。级联是纯 SIP 链路，没有 HTTP
+//	               request id 可继承，能把它和 `gb_sip_trace_message` 对上的只有它。
+//	peer        —— 实际观测到的对端身份（源地址:端口/传输层 + From 用户）。
+func (h *cascadeVideoRuntime) logACKInvalid(platformID uint64, callID string, err error) {
 	if app.ZapLog == nil {
 		return
 	}
-	fields := make([]zap.Field, 0, len(extra)+2)
-	fields = append(fields, extra...)
-	fields = append(fields, zap.Uint64("platformId", platformID))
-	if err != nil {
-		fields = append(fields, zap.Error(err))
-	}
-	switch event {
-	case cascadeVideoEventACKInvalid:
-		app.ZapLog.Warn("级联点播 ACK 无效", append(fields, zap.String("event", "cascade.video.ack_invalid"))...)
-	case cascadeVideoEventFailed:
-		app.ZapLog.Warn("级联点播失败", append(fields, zap.String("event", "cascade.video.failed"))...)
-	case cascadeVideoEventRTPCleanupFailed:
-		app.ZapLog.Warn("级联 RTP 停止失败，保留占用并重试", append(fields, zap.String("event", "cascade.video.rtp_cleanup_failed"))...)
-	case cascadeVideoEventAnswerFailed:
-		app.ZapLog.Warn("级联点播应答或 ACK 失败", append(fields, zap.String("event", "cascade.video.answer_failed"))...)
-	case cascadeVideoEventEstablished:
-		app.ZapLog.Info("级联点播已建立", append(fields, zap.String("event", "cascade.video.established"))...)
-	case cascadeVideoEventStateSaveFailed:
-		app.ZapLog.Warn("级联点播状态保存失败", append(fields, zap.String("event", "cascade.video.state_save_failed"))...)
-	case cascadeVideoEventReleaseTimeout:
-		app.ZapLog.Warn("等待级联点播释放超时", append(fields, zap.String("event", "cascade.video.release_timeout"))...)
-	case cascadeVideoEventByeFailed:
-		app.ZapLog.Warn("级联配置更新时发送 BYE 失败", append(fields, zap.String("event", "cascade.video.bye_failed"))...)
-	case cascadeVideoEventPeerMismatch:
-		// 源 IP 与平台配置的 Host 不符但身份（From/端口/传输层）唯一命中：
-		// 上游双网卡 / 走 VPN / 经 NAT 时时会这样，属正常放行，不是告警。
-		app.ZapLog.Info("级联点播源地址与配置的 Host 不符，按 From/端口/传输层认定", append(fields, zap.String("event", "cascade.video.peer_mismatch"))...)
-	}
+	// INFO 而非 WARN：ACK 无效是**上级平台的错**（按 RFC3261 必须回带同一 Call-ID 的 ACK）。
+	// 本函数只记录，调用方继续跑（不 return）—— 没有我方对象可修，"去看/去联系上级平台"
+	// 也不是一条能落到具体对象的动作。真出问题时下游会自己报：
+	// `cascade.video.release_timeout` / `cascade.video.answer_failed` 仍是 WARN。
+	app.ZapLog.Info("级联点播 ACK 无效",
+		zap.String("event", cascadeVideoEventACKInvalid),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.Error(err))
 }
+
+// logFailed 记录 INVITE 在处理过程中被拒。
+//
+// 失败分两段：**认定平台之前**（报文非法 / SDP 解析失败 / 认不出上游）与**之后**
+// （通道没共享、设备离线、并发超限）。前一段 platformID 还没值，此时
+// `platform_id` **字段缺席**而不是打 0 —— 打 0 会被扫描脚本和人都当成"已带定位字段"，
+// 正是那种"指标绿着、排障瞎着"的假阳性。这种时候身份由 peer 承担。
+func (h *cascadeVideoRuntime) logFailed(platformID uint64, callID string, err error, peer string) {
+	if app.ZapLog == nil {
+		return
+	}
+	if platformID == 0 {
+		app.ZapLog.Warn("级联点播失败",
+			zap.String("event", cascadeVideoEventFailed),
+			zap.String("call_id", callID),
+			zap.String("peer", peer),
+			zap.Error(err))
+		return
+	}
+	app.ZapLog.Warn("级联点播失败",
+		zap.String("event", cascadeVideoEventFailed),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.String("peer", peer),
+		zap.Error(err))
+}
+
+func (h *cascadeVideoRuntime) logRTPCleanupFailed(platformID uint64, callID string, err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("级联 RTP 停止失败，保留占用并重试",
+		zap.String("event", cascadeVideoEventRTPCleanupFailed),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.Error(err))
+}
+
+func (h *cascadeVideoRuntime) logAnswerFailed(platformID uint64, callID string, err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("级联点播应答或 ACK 失败",
+		zap.String("event", cascadeVideoEventAnswerFailed),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.Error(err))
+}
+
+func (h *cascadeVideoRuntime) logEstablished(platformID uint64, callID string) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Info("级联点播已建立",
+		zap.String("event", cascadeVideoEventEstablished),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID))
+}
+
+func (h *cascadeVideoRuntime) logStateSaveFailed(platformID uint64, callID string, err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("级联点播状态保存失败",
+		zap.String("event", cascadeVideoEventStateSaveFailed),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.Error(err))
+}
+
+// logReleaseTimeout 是**进程级**事件：关闭时等不到所有级联会话释放，
+// 定位对象是"本次进程关闭"而不是某台上级平台或某次会话，因此不带 platform_id / call_id。
+func (h *cascadeVideoRuntime) logReleaseTimeout(err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("等待级联点播释放超时",
+		zap.String("event", cascadeVideoEventReleaseTimeout),
+		zap.Error(err))
+}
+
+func (h *cascadeVideoRuntime) logByeFailed(platformID uint64, callID string, err error) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("级联配置更新时发送 BYE 失败",
+		zap.String("event", cascadeVideoEventByeFailed),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.Error(err))
+}
+
+// logPeerMismatch 记录「源 IP 与平台配置的 Host 不符但身份（From/端口/传输层）唯一命中」。
+// 上游双网卡 / 走 VPN / 经 NAT 时会有这一半报文，属正常放行，不是告警 ——
+// 但它解释了「为什么按源 IP 查不到这台平台」，所以两个地址都要留下。
+func (h *cascadeVideoRuntime) logPeerMismatch(platformID uint64, callID, peer, configuredHost string) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Info("级联点播源地址与配置的 Host 不符，按 From/端口/传输层认定",
+		zap.String("event", cascadeVideoEventPeerMismatch),
+		zap.Uint64("platform_id", platformID),
+		zap.String("call_id", callID),
+		zap.String("peer", peer),
+		zap.String("configured_host", configuredHost))
+}
+
 func (h *cascadeVideoRuntime) transition(row *model.GbCascadeMediaSession, state *model.CascadeMediaSessionState, to model.CascadeMediaSessionState) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	changed, err := h.store.TransitionMediaSession(ctx, row.DialogKey, *state, to, time.Now())
 	if err != nil || !changed {
-		h.log(cascadeVideoEventStateSaveFailed, row.PlatformID, err)
+		h.logStateSaveFailed(row.PlatformID, row.DialogKey, err)
 		return false
 	}
 	*state = to
@@ -557,7 +655,7 @@ func stopCascadeVideoRuntime(ctx context.Context) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		h.log(cascadeVideoEventReleaseTimeout, 0, ctx.Err())
+		h.logReleaseTimeout(ctx.Err())
 	}
 }
 
@@ -586,7 +684,7 @@ func (h *cascadeVideoRuntime) revalidate(ctx context.Context) error {
 			err := session.dialog.Bye(byeCtx)
 			cancel()
 			if err != nil {
-				h.log(cascadeVideoEventByeFailed, session.platform.ID, err)
+				h.logByeFailed(session.platform.ID, session.dialog.ID, err)
 			}
 		}
 	}

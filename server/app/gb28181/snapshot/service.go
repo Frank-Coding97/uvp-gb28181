@@ -107,13 +107,13 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 					zap.String("event", snapshotEventPanic),
 					zap.String("panic_type", logging.TypeName(r)),
 					zap.String("stack", string(debug.Stack())),
-					zap.String("device", deviceID), zap.String("channel", channelID))
+					zap.String("device_id", deviceID), zap.String("channel_id", channelID))
 			}
 		}()
 		if err := s.doCaptureContext(captureCtx, nodeID, streamID, deviceID, channelID, playToken); err != nil {
 			logger.Warn("通道快照抓取失败",
 				zap.String("event", snapshotEventCaptureFailed), logging.Error(err),
-				zap.String("device", deviceID), zap.String("channel", channelID))
+				zap.String("device_id", deviceID), zap.String("channel_id", channelID))
 		}
 	})
 }
@@ -176,8 +176,8 @@ func (s *Service) doCaptureContext(parentCtx context.Context, nodeID, streamID, 
 
 	s.logger(ctx).Info("通道快照成功",
 		zap.String("event", snapshotEventCaptured),
-		zap.String("device", deviceID),
-		zap.String("channel", channelID),
+		zap.String("device_id", deviceID),
+		zap.String("channel_id", channelID),
 		zap.Int("bytes", len(bytes)),
 		zap.String("url", relURL))
 	return nil

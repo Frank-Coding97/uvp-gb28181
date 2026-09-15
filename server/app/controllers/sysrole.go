@@ -392,7 +392,7 @@ func (sm *SysRoleController) AddRoleMenu(c *gin.Context) {
 	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 先删除该角色的所有菜单权限
 		if err := tx.Where("role_id = ?", req.RoleID).Delete(&models.SysRoleMenu{}).Error; err != nil {
-			app.Log(c.Request.Context()).Error("删除角色菜单权限失败", zap.String("event", "sysrole.addrolemenu.error"), logging.Error(err), zap.Uint("roleId", req.RoleID))
+			app.Log(c.Request.Context()).Warn("删除角色菜单权限失败", zap.String("event", "sysrole.role_menu_delete_failed"), logging.Error(err), zap.Uint("role_id", req.RoleID))
 			return err
 		}
 
@@ -407,7 +407,7 @@ func (sm *SysRoleController) AddRoleMenu(c *gin.Context) {
 
 		if len(roleMenus) > 0 {
 			if err := tx.CreateInBatches(roleMenus, 100).Error; err != nil {
-				app.Log(c.Request.Context()).Error("批量插入角色菜单权限失败", zap.String("event", "sysrole.addrolemenu.error"), logging.Error(err), zap.Uint("roleId", req.RoleID), zap.Int("resource_count", len(req.MenuID)))
+				app.Log(c.Request.Context()).Warn("批量插入角色菜单权限失败", zap.String("event", "sysrole.role_menu_insert_failed"), logging.Error(err), zap.Uint("role_id", req.RoleID), zap.Int("resource_count", len(req.MenuID)))
 				return err
 			}
 		}

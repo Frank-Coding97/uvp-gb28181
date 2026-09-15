@@ -32,7 +32,9 @@ func (*fixedAuthorizationControllerService) StartAuthorized(context.Context, str
 	}, nil
 }
 
-func (*fixedAuthorizationControllerService) Stop(context.Context, string) error { return nil }
+func (*fixedAuthorizationControllerService) Stop(context.Context, string, string, string) error {
+	return nil
+}
 
 func (s *fixedAuthorizationControllerService) AuthorizeFixedPlayback(context.Context, string, string, string) (*play.Result, error) {
 	s.calls.Add(1)

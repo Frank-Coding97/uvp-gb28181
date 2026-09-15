@@ -47,7 +47,7 @@ func finishApplication(err error) {
 	}
 	root := app.Log(context.Background()).Named("lifecycle")
 	if err != nil {
-		root.Error("Application shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), logging.Error(err))
+		root.Warn("Application shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), logging.Error(err))
 	} else {
 		root.Info("Application work stopped", zap.String("event", "lifecycle.stopped"))
 	}
@@ -153,10 +153,18 @@ func runMigrateUp() error {
 	if err != nil {
 		return fmt.Errorf("读取迁移结果失败: %w", err)
 	}
+	// Joined rather than zap.Strings: the sanitize core refuses third-party array
+	// marshalers, so a []string would sink as [omitted:zap.stringArray] and the
+	// applied version list would be unreadable at exactly the moment it matters.
+	// Contract: docs/logging-governance/contracts/sanitize-policy.md
+	newlyApplied := zap.Skip()
+	if added := migrationDifference(before, after); len(added) > 0 {
+		newlyApplied = zap.String("newly_applied", strings.Join(added, ","))
+	}
 	app.Log(context.Background()).Named("migration").Info("migrate-up 完成",
 		zap.String("event", "migration.completed"),
 		zap.Int("before_count", len(before)), zap.Int("after_count", len(after)),
-		zap.Strings("newly_applied", migrationDifference(before, after)))
+		newlyApplied)
 	return nil
 }
 

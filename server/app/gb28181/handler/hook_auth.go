@@ -56,13 +56,13 @@ func (a *HookAuthenticator) SetResolver(resolver HookAuthNodeResolver) {
 func (a *HookAuthenticator) Middleware(event playauth.HookEvent, rejectMode HookRejectMode) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if a == nil || !event.Valid() {
-			rejectHook(c, event, rejectMode, "auth-runtime-unavailable", a)
+			rejectHook(c, event, rejectMode, "auth_runtime_unavailable", a)
 			return
 		}
 		nodeID, nodeOK := singleValue(c.Request.URL.Query(), "node")
 		capability, capOK := singleValue(c.Request.URL.Query(), "cap")
 		if !nodeOK || !capOK {
-			rejectHook(c, event, rejectMode, "credentials-invalid", a)
+			rejectHook(c, event, rejectMode, "credentials_invalid", a)
 			return
 		}
 
@@ -70,16 +70,16 @@ func (a *HookAuthenticator) Middleware(event playauth.HookEvent, rejectMode Hook
 		resolver := a.resolver
 		a.mu.RUnlock()
 		if resolver == nil {
-			rejectHook(c, event, rejectMode, "auth-runtime-unavailable", a)
+			rejectHook(c, event, rejectMode, "auth_runtime_unavailable", a)
 			return
 		}
 		mediaNode, ok := resolver.GetByUUID(nodeID)
 		if !ok || mediaNode == nil || mediaNode.MediaServerUUID != nodeID {
-			rejectHook(c, event, rejectMode, "node-unknown", a)
+			rejectHook(c, event, rejectMode, "node_unknown", a)
 			return
 		}
 		if !playauth.VerifyHookCapability(mediaNode.APISecret, nodeID, event, capability) {
-			rejectHook(c, event, rejectMode, "capability-invalid", a)
+			rejectHook(c, event, rejectMode, "capability_invalid", a)
 			return
 		}
 
@@ -105,22 +105,27 @@ func hookPayloadNodeMatches(c *gin.Context, event playauth.HookEvent, payloadNod
 	if !authenticated || payloadNodeID == "" || identity.MediaServerUUID == payloadNodeID {
 		return true
 	}
+	// 这条的答案就是"哪个节点、报的是哪个节点"——两边都用事件目录里定义的规范名
+	// `node_id`（`media_server_id` 是同一维度，但 hook 链路统一用 `node_id`）。
 	hookLog(c).Warn("ZLM Hook 载荷节点不匹配",
 		zap.String("event", "gb28181.hook.auth.node_mismatch"),
 		zap.String("hook_event", string(event)),
-		zap.String("node", identity.MediaServerUUID),
-		zap.String("payloadNode", payloadNodeID))
+		zap.String("node_id", identity.MediaServerUUID),
+		zap.String("payload_node_id", payloadNodeID))
 	return false
 }
 
-func rejectHook(c *gin.Context, event playauth.HookEvent, mode HookRejectMode, reason string, authenticator *HookAuthenticator) {
+func rejectHook(c *gin.Context, event playauth.HookEvent, mode HookRejectMode, reasonCode string, authenticator *HookAuthenticator) {
 	if shouldLogHookRejection(authenticator) {
+		// 被拒绝时**对方还没通过认证**，所以"是谁"只能由 `source_ip` + 它自称的
+		// `node_id` 一起回答（`reason_code` 说为什么拒）。三个字段缺一不可：
+		// 只有 reason 的拒绝日志等于"有人被拒了，但不知道是谁"。
 		hookLog(c).Warn("ZLM Hook 认证已拒绝",
 			zap.String("event", "gb28181.hook.auth.rejected"),
 			zap.String("hook_event", string(event)),
-			zap.String("node", safeHookNodeQuery(c)),
-			zap.String("sourceIp", hookSourceIP(c.Request.RemoteAddr)),
-			zap.String("reason", reason))
+			zap.String("node_id", safeHookNodeQuery(c)),
+			zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)),
+			zap.String("reason_code", reasonCode))
 	}
 	c.Abort()
 	switch mode {

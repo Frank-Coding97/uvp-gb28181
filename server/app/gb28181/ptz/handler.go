@@ -61,9 +61,11 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		return nil
 	}
 	if operation.CmdType == manscdp.CmdDeviceControl && !operation.ResponseRequired {
-		app.Log(ctx).Named("ptz").Warn("GB28181 单向操作收到非预期业务应答，保持 sent",
+		// INFO 而非 WARN：单向操作（不需要应答）收到设备主动回的业务应答，属**对方的错**，
+		// 我们保持 sent 不变，系统对外行为与"设备没回"完全等价 —— 运维答不出任何动作（C03 判据②）。
+		app.Log(ctx).Named("ptz").Info("GB28181 单向操作收到非预期业务应答，保持 sent",
 			zap.String("event", "ptz.response.unexpected"),
-			zap.String("operationId", operation.OperationID),
+			zap.String("operation_id", operation.OperationID),
 			zap.String("action", operation.Action),
 			zap.Int("body_bytes", len(body)),
 		)
@@ -190,27 +192,44 @@ func operationProtocolProfile(operation gbmodels.GbPTZOperation) protocol.Profil
 }
 
 func logUnmatchedPTZResponse(ctx context.Context, deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte) {
-	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答无法唯一关联",
+	// The sanitize core never invokes a third-party array marshaler, so a
+	// []string field would reach the sink as [omitted:zap.stringArray] — exactly
+	// the field that says which operations were in play. Join it into a single
+	// line instead, and skip the field outright when the list is empty so an
+	// empty value never masquerades as a real one.
+	// Contract: docs/logging-governance/contracts/sanitize-policy.md
+	candidates := zap.Skip()
+	if len(candidateIDs) > 0 {
+		candidates = zap.String("candidate_operation_ids", strings.Join(candidateIDs, ","))
+	}
+	// INFO 而非 WARN：设备回的应答对不上我们记录在案的任何 operation，本函数只记录、
+	// 调用方随即 `return nil` —— 这条应答被丢弃，系统对外行为与"设备没回"等价。
+	// 触发原因（`reason` 字段）可能是设备重发/回显旧 SN，也可能是本地记录缺失；
+	// 前者是对方的错，后者靠 `reason` + `candidate_operation_ids` 在 INFO 里也查得出来。
+	// 判据②问"看到它要做什么动作"，答案是"核对设备行为"，不是"去修某个对象"。
+	app.Log(ctx).Named("ptz").Info("GB28181 PTZ 应答无法唯一关联",
 		zap.String("event", "ptz.response.unmatched"),
-		zap.String("deviceCode", deviceCode),
-		zap.String("channelCode", head.DeviceID),
+		zap.String("device_code", deviceCode),
+		zap.String("channel_code", head.DeviceID),
 		zap.Int("sn", headSN(head)),
-		zap.String("cmdType", head.CmdType),
-		zap.String("responseCallId", callID),
-		zap.String("responseCseq", cseq),
-		zap.Strings("candidateOperationIds", candidateIDs),
+		zap.String("cmd_type", head.CmdType),
+		zap.String("response_call_id", callID),
+		zap.String("response_cseq", cseq),
+		candidates,
 		zap.String("reason", reason),
 		zap.Int("body_bytes", len(body)),
 	)
 }
 
 func logIgnoredPTZResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) {
-	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
+	// INFO 而非 WARN：operation 已关联但状态机没推进，于是主动**放弃写事实**（保住库里的
+	// 一致性）。这是一次有意的"什么都不做"，丢弃该应答的对外效果与"没收到"等价。
+	app.Log(ctx).Named("ptz").Info("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
 		zap.String("event", "ptz.response.ignored"),
-		zap.String("operationId", operation.OperationID),
-		zap.String("cmdType", head.CmdType),
-		zap.String("responseCallId", callID),
-		zap.String("responseCseq", cseq),
+		zap.String("operation_id", operation.OperationID),
+		zap.String("cmd_type", head.CmdType),
+		zap.String("response_call_id", callID),
+		zap.String("response_cseq", cseq),
 		zap.String("status", string(operation.Status)),
 		zap.Int("body_bytes", len(body)),
 	)
@@ -283,9 +302,13 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		if parseErr == nil {
 			parseErr = fmt.Errorf("DeviceControl 应答标识与 operation 不一致")
 		}
-		app.Log(ctx).Named("ptz").Warn("GB28181 DeviceControl 应答协议非法",
+		// INFO 而非 WARN：应答体的标识跟 operation 对不上（或根本解析不了）—— 这是**对方的
+		// 错**。我们随即以 `ptzErrorProtocolInvalid` 拒绝并结束这次操作，对外行为明确且可预期，
+		// 运维的动作是"看设备固件/协议实现"，不是对着某个对象去修。真正的失败会由
+		// `applyRejectedPTZResponse` 落成 operation 的拒绝事实，不必在这里再打一次 WARN。
+		app.Log(ctx).Named("ptz").Info("GB28181 DeviceControl 应答协议非法",
 			zap.String("event", "ptz.response.protocol_invalid"),
-			zap.String("operationId", operation.OperationID),
+			zap.String("operation_id", operation.OperationID),
 			zap.Int("body_bytes", len(body)),
 			zap.Error(parseErr),
 		)

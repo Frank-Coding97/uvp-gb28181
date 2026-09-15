@@ -42,7 +42,7 @@ func newResultHandler(results <-chan *schedulerhelper.JobResult, save func(conte
 			ctx := logging.WithContext(context.Background(), scope)
 			if err := save(ctx, result); err != nil {
 				h.failed++
-				scope.Named("scheduler").Error("Job result persistence failed", zap.String("event", "scheduler.result.persist_failed"), logging.Error(err))
+				scope.Named("scheduler").Warn("Job result persistence failed", zap.String("event", "scheduler.result.persist_failed"), logging.Error(err))
 			}
 		}
 	}()
@@ -102,7 +102,7 @@ func StopResultHandlerContext(ctx context.Context) error {
 
 func StopResultHandler() {
 	if err := StopResultHandlerContext(context.Background()); err != nil {
-		app.Log(context.Background()).Named("scheduler").Error("Job result drain failed", zap.String("event", "scheduler.result.drain_failed"), logging.Error(err))
+		app.Log(context.Background()).Named("scheduler").Warn("Job result drain failed", zap.String("event", "scheduler.result.drain_failed"), logging.Error(err))
 	}
 }
 
@@ -142,14 +142,14 @@ func saveJobResultContext(ctx context.Context, result *schedulerhelper.JobResult
 	if result.ExecutionPolicy == schedulerhelper.PolicyOnce && result.Status == "SUCCESS" {
 		job := &models.SysJobs{}
 		if err := job.GetByID(ctx, result.JobID); err != nil {
-			app.Log(ctx).Named("scheduler").Error("获取任务信息失败", zap.String("event", "scheduler.once.lookup_failed"),
+			app.Log(ctx).Named("scheduler").Warn("获取任务信息失败", zap.String("event", "scheduler.once.lookup_failed"),
 				zap.String("job_id", result.JobID),
 				logging.Error(err))
 		} else {
 			if job.Status == 1 {
 				job.Status = 0
 				if err := job.Update(ctx); err != nil {
-					app.Log(ctx).Named("scheduler").Error("更新单次执行任务状态失败", zap.String("event", "scheduler.once.disable_failed"),
+					app.Log(ctx).Named("scheduler").Warn("更新单次执行任务状态失败", zap.String("event", "scheduler.once.disable_failed"),
 						zap.String("job_id", result.JobID),
 						logging.Error(err))
 				} else {

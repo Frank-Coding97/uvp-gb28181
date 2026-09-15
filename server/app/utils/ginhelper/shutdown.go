@@ -24,11 +24,11 @@ func Shutdown(ctx context.Context, root *zap.Logger, steps ...ShutdownStep) erro
 	for _, step := range steps {
 		if err := step.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", step.Component, err))
-			root.Named("lifecycle").Error("Component shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), zap.String("shutdown_component", step.Component), zap.Bool("shutdown_timeout", errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)), logging.Error(err))
+			root.Named("lifecycle").Warn("Component shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), zap.String("shutdown_component", step.Component), zap.Bool("shutdown_timeout", errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)), logging.Error(err))
 			var unfinished interface{ UnfinishedComponents() []string }
 			if errors.As(err, &unfinished) {
 				for _, component := range unfinished.UnfinishedComponents() {
-					root.Named("lifecycle").Error("Component work remains active", zap.String("event", "lifecycle.shutdown_incomplete"), zap.String("shutdown_component", component), zap.Bool("shutdown_timeout", true))
+					root.Named("lifecycle").Warn("Component work remains active", zap.String("event", "lifecycle.shutdown_incomplete"), zap.String("shutdown_component", component), zap.Bool("shutdown_timeout", true))
 				}
 			}
 		}

@@ -44,7 +44,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.Log(ctx).Error("批量插入代码生成配置事务回滚", zap.String("event", "sysgenservice.batchinsert.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
+			app.Log(ctx).Error("批量插入代码生成配置事务回滚", zap.String("event", "sysgenservice.batch_insert_rollback"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
@@ -60,7 +60,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 		// 获取表注释
 		describe, err := codeGenService.GetTableComment(database, tableName)
 		if err != nil {
-			app.Log(ctx).Error("获取表注释失败", zap.String("event", "sysgenservice.batchinsert.error"), zap.String("table", tableName), logging.Error(err))
+			app.Log(ctx).Warn("获取表注释失败", zap.String("event", "sysgenservice.table_comment_read_failed"), zap.String("table_name", tableName), logging.Error(err))
 			describe = tableName // 使用表名作为表注释
 		}
 
@@ -223,7 +223,7 @@ func (sgs *SysGenService) RefreshFields(ctx context.Context, id uint) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.Log(ctx).Error("刷新字段信息事务回滚", zap.String("event", "sysgenservice.refreshfields.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
+			app.Log(ctx).Error("刷新字段信息事务回滚", zap.String("event", "sysgenservice.refresh_fields_rollback"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
@@ -278,7 +278,7 @@ func (sgs *SysGenService) Update(ctx context.Context, req *models.SysGenUpdateRe
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.Log(ctx).Error("更新代码生成配置事务回滚", zap.String("event", "sysgenservice.update.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
+			app.Log(ctx).Error("更新代码生成配置事务回滚", zap.String("event", "sysgenservice.update_rollback"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 
@@ -428,7 +428,7 @@ func (sgs *SysGenService) Delete(ctx context.Context, id uint) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
-			app.Log(ctx).Error("删除代码生成配置事务回滚", zap.String("event", "sysgenservice.delete.error"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
+			app.Log(ctx).Error("删除代码生成配置事务回滚", zap.String("event", "sysgenservice.delete_rollback"), zap.String("panic_type", logging.TypeName(r)), zap.Stack("stack"))
 		}
 	}()
 

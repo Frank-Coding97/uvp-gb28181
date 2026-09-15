@@ -148,11 +148,11 @@ func LoadJobsFromDB() {
 	var jobsList models.SysJobsList
 	err := app.DB().WithContext(ctx).Model(&models.SysJobs{}).Where("status = ?", 1).Find(&jobsList).Error
 	if err != nil {
-		app.ZapLog.Error("从数据库加载任务失败", zap.Error(err))
+		app.ZapLog.Error("从数据库加载任务失败", zap.String("event", "scheduler.jobs.load_failed"), zap.Error(err))
 		return
 	}
 
-	app.ZapLog.Info("从数据库加载启用的任务", zap.Int("count", len(jobsList)))
+	app.ZapLog.Info("从数据库加载启用的任务", zap.String("event", "scheduler.jobs.loaded"), zap.Int("count", len(jobsList)))
 
 	// 遍历任务列表，添加到调度器
 	for _, job := range jobsList {
@@ -160,9 +160,9 @@ func LoadJobsFromDB() {
 		var parameters map[string]interface{}
 		if job.Parameters != "" {
 			if err := json.Unmarshal([]byte(job.Parameters), &parameters); err != nil {
-				app.ZapLog.Error("解析任务参数失败",
-					zap.String("jobID", job.Id),
-					zap.String("name", job.Name),
+				app.ZapLog.Warn("解析任务参数失败", zap.String("event", "scheduler.job.parameter_parse_failed"),
+					zap.String("job_id", job.Id),
+					zap.String("job_name", job.Name),
 					zap.Error(err))
 				continue
 			}
@@ -189,16 +189,16 @@ func LoadJobsFromDB() {
 		// 添加到调度器
 		_, err := app.JobScheduler.AddOrUpdateJob(schedulerJob)
 		if err != nil {
-			app.ZapLog.Error("添加任务到调度器失败",
-				zap.String("jobID", job.Id),
-				zap.String("name", job.Name),
+			app.ZapLog.Warn("添加任务到调度器失败", zap.String("event", "scheduler.job.add_failed"),
+				zap.String("job_id", job.Id),
+				zap.String("job_name", job.Name),
 				zap.Error(err))
 			continue
 		}
 
-		app.ZapLog.Info("成功加载任务到调度器",
-			zap.String("jobID", job.Id),
-			zap.String("name", job.Name),
+		app.ZapLog.Info("成功加载任务到调度器", zap.String("event", "scheduler.job.loaded"),
+			zap.String("job_id", job.Id),
+			zap.String("job_name", job.Name),
 			zap.String("cron", job.CronExpression))
 	}
 }

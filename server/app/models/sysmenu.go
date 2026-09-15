@@ -98,7 +98,7 @@ func (list SysMenuList) BuildTree(contexts ...context.Context) SysMenuList {
 
 		// 循环引用检测
 		if node.ID == node.ParentID {
-			app.Log(ctx).Error("menu tree cycle detected",
+			app.Log(ctx).Warn("menu tree cycle detected",
 				zap.String("event", "models.sysmenu.tree_cycle"),
 				zap.Uint("node_id", node.ID),
 				zap.Uint("parent_id", node.ParentID))

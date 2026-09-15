@@ -64,7 +64,7 @@ func (cc *CustomGroupController) Create(c *gin.Context) {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit(c.Request.Context(), "创建自定义分组", actor, group.ID, zap.Uint("parentId", parent))
+	cc.audit(c.Request.Context(), "创建自定义分组", actor, group.ID, zap.Uint("parent_id", parent))
 	cc.Success(c, group)
 }
 
@@ -115,7 +115,7 @@ func (cc *CustomGroupController) Move(c *gin.Context) {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit(c.Request.Context(), "移动自定义分组", cc.GetCurrentUserID(c), id, zap.Uint("targetParentId", target))
+	cc.audit(c.Request.Context(), "移动自定义分组", cc.GetCurrentUserID(c), id, zap.Uint("target_parent_id", target))
 	cc.Success(c, gin.H{"id": id, "parentId": target})
 }
 
@@ -129,7 +129,7 @@ func (cc *CustomGroupController) Delete(c *gin.Context) {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit(c.Request.Context(), "删除自定义分组", cc.GetCurrentUserID(c), id, zap.Int("removedDeviceCount", result.RemovedDeviceCount))
+	cc.audit(c.Request.Context(), "删除自定义分组", cc.GetCurrentUserID(c), id, zap.Int("removed_device_count", result.RemovedDeviceCount))
 	cc.Success(c, result)
 }
 
@@ -212,6 +212,6 @@ func (cc *CustomGroupController) writeError(c *gin.Context, err error) {
 }
 
 func (cc *CustomGroupController) audit(ctx context.Context, action string, actor, groupID uint, fields ...zap.Field) {
-	fields = append(fields, zap.String("event", "directory.custom_group_changed"), zap.String("action", action), zap.Uint("actorId", actor), zap.Uint("groupId", groupID))
+	fields = append(fields, zap.String("event", "directory.custom_group_changed"), zap.String("action", action), zap.Uint("actor_id", actor), zap.Uint("group_id", groupID))
 	app.Log(ctx).Named("directory").Info("Custom group changed", fields...)
 }

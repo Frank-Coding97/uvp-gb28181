@@ -365,6 +365,11 @@ func (c *Client) AddProbe(ctx context.Context, vhost, appName, stream string, pr
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)
 // 用于点播流就绪等待的轮询备份(hook + polling 双源)
 func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (bool, error) {
+	if c.node == nil {
+		// node 由 NewClientForNode 绑定,正常路径必非空;这里只防御手工构造的空客户端,
+		// 否则下面的 node_id 取值会 panic。
+		return false, errors.New("zlm: client is not bound to a node")
+	}
 	var r struct {
 		baseResp
 		Online bool `json:"online"`
@@ -379,9 +384,10 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	if err := c.call(ctx, "isMediaOnline", params, &r); err != nil {
 		logger.Warn("IsMediaOnline 请求失败",
 			zap.String("event", "zlm.media_online.request_failed"),
+			zap.Int64("node_id", c.node.ID),
 			zap.String("endpoint", c.baseURL),
 			zap.String("app", appName),
-			zap.String("stream", stream),
+			zap.String("stream_id", stream),
 			logging.Error(err))
 		return false, err
 	}
@@ -389,17 +395,19 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	if r.Code != 0 {
 		logger.Debug("IsMediaOnline 返回非0 code(流不存在或未就绪)",
 			zap.String("event", "zlm.media_online.not_ready"),
+			zap.Int64("node_id", c.node.ID),
 			zap.String("endpoint", c.baseURL),
 			zap.String("app", appName),
-			zap.String("stream", stream),
+			zap.String("stream_id", stream),
 			zap.Int("code", r.Code))
 		return false, nil
 	}
 	logger.Debug("IsMediaOnline 成功",
 		zap.String("event", "zlm.media_online.ready"),
+		zap.Int64("node_id", c.node.ID),
 		zap.String("endpoint", c.baseURL),
 		zap.String("app", appName),
-		zap.String("stream", stream),
+		zap.String("stream_id", stream),
 		zap.Bool("online", r.Online))
 	return r.Online, nil
 }
