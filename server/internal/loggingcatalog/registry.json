@@ -1,0 +1,1080 @@
+{
+  "events": {
+    "audit.operation_log.persist_failed": [
+      "route",
+      "user_id"
+    ],
+    "auth.access_token.invalid": [
+      "route",
+      "source_ip"
+    ],
+    "auth.access_token.read_failed": [
+      "route",
+      "source_ip"
+    ],
+    "auth.demo_account.allow_path": [
+      "route",
+      "user_id"
+    ],
+    "auth.demo_account.denied": [
+      "route",
+      "user_id"
+    ],
+    "auth.login_audit.panic": [],
+    "auth.login_audit.persist_failed": [
+      "username"
+    ],
+    "auth.member.config_changed": [],
+    "auth.member.token_invalid": [],
+    "auth.member.token_missing": [],
+    "auth.session.touch_failed": [
+      "route",
+      "user_id"
+    ],
+    "casbin.permission.check": [
+      "route",
+      "user_id"
+    ],
+    "casbin.permission.check_failed": [
+      "route",
+      "user_id"
+    ],
+    "casbin.permission.denied": [
+      "route",
+      "user_id"
+    ],
+    "casbin.policy_reload.disabled": [],
+    "casbin.policy_reload.failed": [],
+    "casbin.policy_reload.started": [],
+    "casbin.policy_reload.stopped": [],
+    "casbin.policy_reload.succeeded": [],
+    "casbin.role_inheritance.add_rejected": [
+      "parent_role_id",
+      "role_id"
+    ],
+    "casbin.role_inheritance.remove_rejected": [
+      "parent_role_id",
+      "role_id"
+    ],
+    "casbin.role_inheritance.update_rejected": [
+      "parent_role_id",
+      "role_id"
+    ],
+    "cascade.catalog.push_completed": [
+      "platform_id"
+    ],
+    "cascade.catalog.push_failed": [
+      "platform_id"
+    ],
+    "cascade.catalog.query_failed": [
+      "call_id",
+      "peer"
+    ],
+    "cascade.catalog.response_completed": [
+      "platform_id"
+    ],
+    "cascade.catalog.response_send_failed": [
+      "platform_id"
+    ],
+    "cascade.control.forward_failed": [
+      "channel_id",
+      "platform_id"
+    ],
+    "cascade.credential_key_unavailable": [],
+    "cascade.shutdown_incomplete": [],
+    "cascade.video.ack_invalid": [
+      "call_id",
+      "platform_id"
+    ],
+    "cascade.video.answer_failed": [
+      "call_id",
+      "platform_id"
+    ],
+    "cascade.video.bye_failed": [
+      "call_id",
+      "platform_id"
+    ],
+    "cascade.video.established": [
+      "call_id",
+      "platform_id"
+    ],
+    "cascade.video.failed": [
+      "call_id",
+      "peer",
+      "platform_id"
+    ],
+    "cascade.video.peer_mismatch": [
+      "call_id",
+      "peer",
+      "platform_id"
+    ],
+    "cascade.video.release_timeout": [],
+    "cascade.video.rtp_cleanup_failed": [
+      "call_id",
+      "platform_id"
+    ],
+    "cascade.video.state_save_failed": [
+      "call_id",
+      "platform_id"
+    ],
+    "codegen.file_skipped": [
+      "file_path"
+    ],
+    "codegen.template_execute_failed": [
+      "template_name"
+    ],
+    "codegen.template_parse_failed": [
+      "template_name"
+    ],
+    "codegen.template_read_failed": [
+      "template_path"
+    ],
+    "codegen.working_directory_failed": [],
+    "config.reloaded": [],
+    "db.diagnostic": [],
+    "db.dialector.init_failed": [],
+    "gb28181.cascade.assemble_failed": [],
+    "gb28181.catalog.ingest_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.catalog.pipeline_unavailable": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.catalog.query_build_failed": [
+      "device_id"
+    ],
+    "gb28181.catalog.query_send_failed": [
+      "device_id"
+    ],
+    "gb28181.catalog.query_sent": [
+      "device_id",
+      "sn"
+    ],
+    "gb28181.catalog.response_parse_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.catalog.response_processed": [
+      "call_id",
+      "device_id",
+      "sn"
+    ],
+    "gb28181.channel.delete_shared_projections_retired": [
+      "channel_id"
+    ],
+    "gb28181.civilcode.seed_failed": [],
+    "gb28181.civilcode.seeded": [],
+    "gb28181.civilcode.warm_cache_failed": [],
+    "gb28181.cleanup.dashboard_facts_done": [],
+    "gb28181.cleanup.dashboard_facts_failed": [],
+    "gb28181.cleanup.location_history_done": [],
+    "gb28181.cleanup.location_history_failed": [],
+    "gb28181.cleanup.metrics_pairs_pruned": [],
+    "gb28181.cleanup.scheduler_log_pruned": [],
+    "gb28181.config.trace_retention_invalid": [],
+    "gb28181.device.delete_shared_projections_retired": [
+      "device_id"
+    ],
+    "gb28181.device.scanner.device_offline": [
+      "device_id"
+    ],
+    "gb28181.device.scanner.mark_offline_failed": [
+      "device_id"
+    ],
+    "gb28181.device.scanner.query_failed": [],
+    "gb28181.deviceinfo.device_missing": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.lookup_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.missing_device_id": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.query_build_failed": [
+      "device_id"
+    ],
+    "gb28181.deviceinfo.query_send_failed": [
+      "device_id"
+    ],
+    "gb28181.deviceinfo.query_sent": [
+      "device_id",
+      "sn"
+    ],
+    "gb28181.deviceinfo.response_parse_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.store_unavailable": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.unchanged": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.update_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.deviceinfo.updated": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.hook.auth.node_mismatch": [
+      "node_id"
+    ],
+    "gb28181.hook.auth.rejected": [
+      "node_id",
+      "source_ip"
+    ],
+    "gb28181.hook.auto_on_demand.accepted": [
+      "channel_id",
+      "device_id",
+      "node_id"
+    ],
+    "gb28181.hook.auto_on_demand.denied": [
+      "source_ip",
+      "stream_id"
+    ],
+    "gb28181.hook.flow.collect_failed": [
+      "media_server_id",
+      "stream_id"
+    ],
+    "gb28181.hook.flow.ignored": [
+      "source_ip",
+      "stream_id"
+    ],
+    "gb28181.hook.keepalive.collector_unavailable": [
+      "source_ip"
+    ],
+    "gb28181.hook.keepalive.process_failed": [
+      "media_server_id",
+      "source_ip"
+    ],
+    "gb28181.hook.keepalive.read_failed": [
+      "source_ip"
+    ],
+    "gb28181.hook.play.authorized": [
+      "correlation_id",
+      "media_server_id",
+      "stream_id"
+    ],
+    "gb28181.hook.play.denied": [
+      "source_ip",
+      "stream_id"
+    ],
+    "gb28181.hook.playback_ended_unmatched": [
+      "stream_id"
+    ],
+    "gb28181.hook.recording.index_failed": [
+      "node_id"
+    ],
+    "gb28181.hook.recording.node_unknown": [
+      "media_server_id"
+    ],
+    "gb28181.hook.recording.unassigned": [
+      "node_id"
+    ],
+    "gb28181.hook.rtp_timeout": [
+      "media_server_id",
+      "stream_id"
+    ],
+    "gb28181.hook.rtp_timeout_stop_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.server_started": [
+      "media_server_id",
+      "node_id"
+    ],
+    "gb28181.hook.server_started_node_unresolved": [
+      "media_server_id",
+      "source_ip"
+    ],
+    "gb28181.hook.stream.changed": [
+      "media_server_id",
+      "stream_id"
+    ],
+    "gb28181.hook.stream.cleanup_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.fixed_stop_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.none_reader": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.none_reader_policy_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.observer_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.stop_failed": [
+      "stream_id"
+    ],
+    "gb28181.hook.stream.stopped": [
+      "stream_id"
+    ],
+    "gb28181.hook.talk.observer_failed": [
+      "stream_id"
+    ],
+    "gb28181.lifecycle.civilcode_assembled": [],
+    "gb28181.lifecycle.heartbeat_watcher_started": [],
+    "gb28181.lifecycle.offline_scanner_started": [],
+    "gb28181.lifecycle.play_reconciler_started": [],
+    "gb28181.lifecycle.play_service_assembled": [],
+    "gb28181.lifecycle.recording_catalog_assembled": [],
+    "gb28181.lifecycle.recording_reconciler_started": [],
+    "gb28181.lifecycle.recording_signer_assembled": [],
+    "gb28181.lifecycle.thread_load_poller_started": [],
+    "gb28181.lifecycle.traffic_hook_assembled": [],
+    "gb28181.lifecycle.zlm_scheduler_assembled": [],
+    "gb28181.message.alarm_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.broadcast_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.keepalive_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.keepalive_restored": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.parse_failed": [
+      "call_id"
+    ],
+    "gb28181.message.playback_end_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.ptz_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.record_info_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.record_info_sink_unavailable": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.snapshot_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.subscription_wake_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.upgrade_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.upgrade_result_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.notify.parse_failed": [
+      "call_id"
+    ],
+    "gb28181.notify.process_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.notify.ptz_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.notify.subscription_unsupported": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.play.failed": [],
+    "gb28181.play.invite_accepted": [
+      "call_id",
+      "channel_id",
+      "correlation_id",
+      "device_id",
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.media_ready": [
+      "call_id",
+      "channel_id",
+      "correlation_id",
+      "device_id",
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.node_selected": [
+      "channel_id",
+      "device_id",
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.recording_end_failed": [
+      "stream_id"
+    ],
+    "gb28181.play.requested": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.play.reuse_bound_node_missing": [
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.reuse_bound_node_offline": [
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.reuse_cleanup": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.play.reuse_fallback_hit": [
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.reuse_fallback_node_failed": [
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.reuse_fallback_probe": [
+      "stream_id"
+    ],
+    "gb28181.play.reuse_probe_failed": [
+      "stream_id"
+    ],
+    "gb28181.play.reuse_success": [
+      "channel_id",
+      "device_id",
+      "stream_id"
+    ],
+    "gb28181.play.rtp_allocated": [
+      "channel_id",
+      "device_id",
+      "node_id",
+      "stream_id"
+    ],
+    "gb28181.play.snapshot_node_unavailable": [
+      "channel_id",
+      "device_id",
+      "node_id"
+    ],
+    "gb28181.play.snapshot_token_failed": [
+      "channel_id",
+      "device_id",
+      "stream_id"
+    ],
+    "gb28181.play.snapshot_token_unavailable": [
+      "channel_id",
+      "device_id",
+      "stream_id"
+    ],
+    "gb28181.play.stop_completed": [],
+    "gb28181.play.stop_failed": [],
+    "gb28181.play.stop_requested": [],
+    "gb28181.play.validation_succeeded": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.playauth.key_init_failed": [],
+    "gb28181.playauth.key_init_failed_auth_off": [],
+    "gb28181.playauth.reload_key_init_failed_auth_off": [],
+    "gb28181.register.authentication_succeeded": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.digest_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.endpoint_trust_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.server_id_mismatch": [
+      "call_id",
+      "device_id",
+      "server_id"
+    ],
+    "gb28181.register.state_update_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.subscription_wake_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.succeeded": [
+      "call_id",
+      "device_id",
+      "peer"
+    ],
+    "gb28181.register.unregister_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.register.unregistered": [
+      "call_id",
+      "device_id",
+      "peer"
+    ],
+    "gb28181.security.runtime_fallback": [],
+    "gb28181.sip.broadcast_ack_failed": [
+      "call_id"
+    ],
+    "gb28181.sip.broadcast_activation_failed": [
+      "call_id"
+    ],
+    "gb28181.sip.broadcast_bye_cleanup_failed": [
+      "call_id"
+    ],
+    "gb28181.sip.broadcast_bye_failed": [
+      "call_id"
+    ],
+    "gb28181.sip.broadcast_client_init_failed": [],
+    "gb28181.sip.config_load_failed": [],
+    "gb28181.sip.config_migration_failed": [],
+    "gb28181.sip.listener_failed": [],
+    "gb28181.sip.listener_started": [],
+    "gb28181.sip.shutdown_complete": [],
+    "gb28181.sip.shutdown_incomplete": [],
+    "gb28181.sip.start_failed": [],
+    "gb28181.sip.talk_bye_failed": [
+      "call_id"
+    ],
+    "gb28181.sip.uac_init_failed": [],
+    "gb28181.snapshot.capture_failed": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.snapshot.captured": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.snapshot.panic": [
+      "channel_id",
+      "device_id"
+    ],
+    "gb28181.talk.remote_bye_cleanup_failed": [
+      "call_id"
+    ],
+    "gb28181.talk.startup_cleanup_failed": [],
+    "gb28181.traffic.repository_assemble_failed": [],
+    "gb28181.traffic.session_cleanup_failed": [],
+    "gb28181.traffic.viewer_kicked": [
+      "channel_id",
+      "device_id",
+      "node_id",
+      "operator_id"
+    ],
+    "gin.diagnostic": [],
+    "http.listen_failed": [],
+    "http.operation_failed": [
+      "route",
+      "source_ip"
+    ],
+    "http.operation_rejected": [
+      "route",
+      "source_ip"
+    ],
+    "http.panic": [
+      "route",
+      "source_ip"
+    ],
+    "http.ready": [],
+    "http.route_registered": [
+      "route"
+    ],
+    "legacy.log": [],
+    "lifecycle.shutdown_incomplete": [],
+    "lifecycle.stopped": [],
+    "logging.config_compatibility": [],
+    "logging.restart_required": [],
+    "migration.completed": [],
+    "migration.target": [],
+    "models.area.load_failed": [],
+    "models.sysdepartment.tree_cycle": [
+      "node_id"
+    ],
+    "models.sysdepartment.tree_orphan": [
+      "node_id"
+    ],
+    "models.sysmenu.tree_cycle": [
+      "node_id"
+    ],
+    "models.sysmenu.tree_orphan": [
+      "node_id"
+    ],
+    "models.sysrole.tree_cycle": [
+      "node_id"
+    ],
+    "models.sysrole.tree_orphan": [
+      "node_id"
+    ],
+    "play.attempt_begin_failed": [
+      "channel_id",
+      "device_id"
+    ],
+    "play.attempt_finish_failed": [
+      "channel_id",
+      "device_id"
+    ],
+    "play.reconcile.cleanup_failed": [
+      "channel_id",
+      "device_id",
+      "stream_id"
+    ],
+    "play.reconcile.cleanup_succeeded": [
+      "channel_id",
+      "device_id",
+      "stream_id"
+    ],
+    "play.reconcile.cross_node_hit": [
+      "node_id",
+      "stream_id"
+    ],
+    "play.reconcile.disabled": [],
+    "play.reconcile.duplicate_start": [],
+    "play.reconcile.interrupted": [],
+    "play.reconcile.list_failed": [],
+    "play.reconcile.location_fallback": [
+      "node_id",
+      "stream_id"
+    ],
+    "play.reconcile.no_nodes": [
+      "stream_id"
+    ],
+    "play.reconcile.node_inactive": [
+      "node_id",
+      "stream_id"
+    ],
+    "play.reconcile.overlap_skipped": [],
+    "play.reconcile.panic": [],
+    "play.reconcile.probe_failed": [
+      "node_id",
+      "stream_id"
+    ],
+    "play.reconcile.round_completed": [],
+    "play.reconcile.stopped": [],
+    "play.recording_start_failed": [
+      "stream_id"
+    ],
+    "plugin.example.routes_registered": [],
+    "plugin.routes.initialized": [],
+    "plugin.routes.none": [],
+    "plugin.routes.ready": [],
+    "plugin.routes.skipped_nil": [],
+    "ptz.cruise_cache.delete_failed": [
+      "channel_id"
+    ],
+    "ptz.cruise_detail_reconcile_failed": [
+      "channel_code",
+      "channel_id"
+    ],
+    "ptz.cruise_reconcile_failed": [
+      "channel_code",
+      "channel_id"
+    ],
+    "ptz.cruise_reconcile_record.write_failed": [
+      "channel_id"
+    ],
+    "ptz.home_position.write_failed": [],
+    "ptz.preset_cache_failed": [
+      "operation_id"
+    ],
+    "ptz.preset_reconcile_failed": [
+      "channel_code",
+      "channel_id"
+    ],
+    "ptz.response.ignored": [
+      "operation_id"
+    ],
+    "ptz.response.protocol_invalid": [
+      "operation_id"
+    ],
+    "ptz.response.unexpected": [
+      "operation_id"
+    ],
+    "ptz.response.unmatched": [
+      "channel_code",
+      "device_code",
+      "sn"
+    ],
+    "ptz.scheduler.persist_failed": [
+      "operation_id"
+    ],
+    "realtime_log.subscription_ended": [
+      "subscription_id",
+      "user_id"
+    ],
+    "realtime_log.subscription_started": [
+      "subscription_id",
+      "user_id"
+    ],
+    "recording.catalog.reconcile_failed": [
+      "node_id"
+    ],
+    "recording.catalog_shutdown_incomplete": [],
+    "recording.reconcile.channel_failed": [
+      "channel_id"
+    ],
+    "scheduler.demo.canceled": [
+      "job_id"
+    ],
+    "scheduler.demo.completed": [
+      "job_id"
+    ],
+    "scheduler.demo.started": [
+      "job_id"
+    ],
+    "scheduler.example.canceled": [
+      "job_id"
+    ],
+    "scheduler.example.completed": [
+      "job_id"
+    ],
+    "scheduler.example.started": [
+      "job_id"
+    ],
+    "scheduler.job.add_failed": [
+      "job_id"
+    ],
+    "scheduler.job.loaded": [
+      "job_id"
+    ],
+    "scheduler.job.parameter_parse_failed": [
+      "job_id"
+    ],
+    "scheduler.jobs.load_failed": [],
+    "scheduler.jobs.loaded": [],
+    "scheduler.once.disable_failed": [
+      "job_id"
+    ],
+    "scheduler.once.disabled": [
+      "job_id"
+    ],
+    "scheduler.once.lookup_failed": [
+      "job_id"
+    ],
+    "scheduler.result.drain_failed": [],
+    "scheduler.result.persist_failed": [],
+    "scheduler.result.persisted": [
+      "job_id"
+    ],
+    "security.shutdown_incomplete": [],
+    "setup.config_saved": [
+      "operator_id",
+      "server_id"
+    ],
+    "setup.install_guide_skipped": [
+      "operator_id"
+    ],
+    "setup.sip_reload_failed": [
+      "server_id"
+    ],
+    "sip.shutdown_incomplete": [],
+    "startup.failed": [],
+    "streammonitor.media_read_failed": [
+      "endpoint",
+      "node_id",
+      "stream_id"
+    ],
+    "subscribe.capability.degraded": [
+      "device_id"
+    ],
+    "subscribe.capability.probe": [
+      "device_id"
+    ],
+    "subscribe.capability.retry": [
+      "device_id"
+    ],
+    "subscribe.capability.upgraded": [
+      "device_id"
+    ],
+    "sysaffix.chunk_upload_cancel_failed": [
+      "upload_id"
+    ],
+    "sysaffix.physical_file_delete_failed": [
+      "file_path"
+    ],
+    "sysaffix.thumbnail_delete_failed": [
+      "file_path"
+    ],
+    "sysaffix.thumbnail_generate_failed": [
+      "file_path"
+    ],
+    "sysgenservice.batch_insert_rollback": [],
+    "sysgenservice.delete_rollback": [],
+    "sysgenservice.refresh_fields_rollback": [],
+    "sysgenservice.table_comment_read_failed": [
+      "table_name"
+    ],
+    "sysgenservice.update_rollback": [],
+    "sysmenu.menu_api_delete_failed": [
+      "menu_id"
+    ],
+    "sysmenu.menu_api_insert_failed": [
+      "menu_id"
+    ],
+    "sysmenuservice.menu_imported": [],
+    "sysrole.role_menu_delete_failed": [
+      "role_id"
+    ],
+    "sysrole.role_menu_insert_failed": [
+      "role_id"
+    ],
+    "talk.remote_bye_cleanup_rejected": [],
+    "talk.shutdown_incomplete": [],
+    "zlm.client.unavailable": [],
+    "zlm.controller.scheduler_skipped": [],
+    "zlm.media_online.not_ready": [
+      "endpoint",
+      "node_id",
+      "stream_id"
+    ],
+    "zlm.media_online.ready": [
+      "endpoint",
+      "node_id",
+      "stream_id"
+    ],
+    "zlm.media_online.request_failed": [
+      "endpoint",
+      "node_id",
+      "stream_id"
+    ],
+    "zlm.metrics.sample_failed": [],
+    "zlm.node.config_converge_failed": [
+      "node_id"
+    ],
+    "zlm.node.config_converged": [
+      "node_id"
+    ],
+    "zlm.node.default_seed_failed": [],
+    "zlm.node.default_seeded": [
+      "endpoint",
+      "node_id"
+    ],
+    "zlm.node.offline": [
+      "node_id"
+    ],
+    "zlm.node.restore_failed": [
+      "node_id"
+    ],
+    "zlm.node.restored": [
+      "node_id"
+    ],
+    "zlm.probe.activation_failed": [
+      "node_id"
+    ],
+    "zlm.probe.completed": [],
+    "zlm.probe.empty": [],
+    "zlm.probe.failed": [
+      "endpoint",
+      "node_id"
+    ],
+    "zlm.probe.maintenance_skipped": [
+      "node_id"
+    ],
+    "zlm.probe.node_active": [
+      "endpoint",
+      "node_id"
+    ],
+    "zlm.probe.passed": [
+      "endpoint",
+      "node_id"
+    ],
+    "zlm.registry.db_unavailable": [],
+    "zlm.registry.load_failed": [],
+    "zlm.registry.ready": [],
+    "zlm.scheduler.assemble_failed": [],
+    "zlm.scheduler.buffer_full": [],
+    "zlm.scheduler.persist_failed": [
+      "node_id"
+    ],
+    "zlm.scheduler.registry_unavailable": [],
+    "zlm.scheduler.setting_read_failed": [],
+    "zlm.scheduler.switch_failed": [],
+    "zlm.scheduler_log.db_unavailable": [],
+    "zlm.scheduler_log.prune_failed": [],
+    "zlm.scheduler_log.skipped": []
+  },
+  "locating_free_exceptions": {
+    "recording.catalog.reconcile_failed": "调度器整体失败（Enqueue 自己就失败了）时还没有任何具体节点：此刻硬塞 node_id=0 会把「调度器入队失败」谎报成「0 号节点失败」，属信息错误，比缺字段更糟。判定见 docs/logging-governance/contracts/platform-support.md §5.1，已由 TestLoggingSchedulerFailureOmitsNodeID 锁住；recordNodeFailure 那一支仍必须带 node_id，本例外不覆盖它。"
+  },
+  "fields": [
+    "action",
+    "active_nodes",
+    "added_apis",
+    "added_menus",
+    "address",
+    "advertise_ip",
+    "after_count",
+    "algorithm",
+    "api_port",
+    "app",
+    "attempt_id",
+    "batches",
+    "before_count",
+    "body_bytes",
+    "body_len",
+    "bytes",
+    "call_id",
+    "catalog_triggered",
+    "channel_code",
+    "channel_id",
+    "check_interval",
+    "cleaned",
+    "cmd_type",
+    "code",
+    "complete",
+    "config_write",
+    "configured",
+    "configured_host",
+    "correlation_id",
+    "count",
+    "cron",
+    "cseq",
+    "database",
+    "database_version",
+    "default",
+    "deleted",
+    "deployment_mode",
+    "destination",
+    "device_code",
+    "device_id",
+    "dialect",
+    "dropped",
+    "dropped_count",
+    "duration",
+    "duration_ms",
+    "elapsed",
+    "encrypted_platform_runtime",
+    "endpoint",
+    "env",
+    "error_code",
+    "event",
+    "executor",
+    "expected_server_id",
+    "expires",
+    "fail",
+    "failed",
+    "file_path",
+    "firmware_updated",
+    "from",
+    "heartbeat_gap",
+    "hook_event",
+    "interval",
+    "interval_seconds",
+    "is_first",
+    "item_count",
+    "items",
+    "job_id",
+    "job_name",
+    "key_source",
+    "listen_ip",
+    "manufacturer_updated",
+    "matched_prefix",
+    "media_server_id",
+    "menu_id",
+    "method",
+    "model_updated",
+    "name",
+    "name_updated",
+    "new_menu_names",
+    "node_id",
+    "nodes",
+    "notice",
+    "offline_threshold",
+    "online",
+    "operation",
+    "operation_id",
+    "operator_id",
+    "outcome",
+    "panic_type",
+    "parameter_count",
+    "parent_id",
+    "parent_role_id",
+    "pass",
+    "path",
+    "payload_node_id",
+    "peer",
+    "phase",
+    "platform_id",
+    "player",
+    "plugin_count",
+    "plugin_index",
+    "port",
+    "reason",
+    "reason_code",
+    "reason_present",
+    "received_count",
+    "recovery_cleaned",
+    "recovery_failed",
+    "recovery_restored",
+    "recovery_scanned",
+    "recovery_skipped",
+    "regist",
+    "removed",
+    "requested",
+    "resource_count",
+    "response_call_id",
+    "response_cseq",
+    "result",
+    "retired_projections",
+    "retry_count",
+    "role",
+    "role_id",
+    "route",
+    "scanned",
+    "schema",
+    "sender_device_id",
+    "sent",
+    "server_id",
+    "shutdown_component",
+    "shutdown_timeout",
+    "simulated",
+    "sip_status",
+    "skipped",
+    "sn",
+    "source",
+    "source_ip",
+    "ssrc",
+    "stack",
+    "stage",
+    "stale_stream_id",
+    "state",
+    "state_before",
+    "status",
+    "stream_id",
+    "subscription_id",
+    "table_name",
+    "template_name",
+    "template_path",
+    "text_omitted",
+    "to",
+    "total",
+    "total_count",
+    "track_id",
+    "transport",
+    "updated_field_count",
+    "upload_id",
+    "url",
+    "user_id",
+    "username",
+    "uuid"
+  ]
+}

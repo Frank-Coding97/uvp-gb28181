@@ -27,10 +27,8 @@ import (
 
 const (
 	acceptanceRoutePrefix    = "/api/__logging_acceptance"
-	acceptanceExecutorName   = "logging-acceptance"
 	acceptanceCronExpression = "0 0 0 1 1 *"
 	maxAcceptanceBlockMS     = 5000
-	maxAcceptanceJobMS       = 10000
 )
 
 // Register is called from the tagged main package after bootstrap has created
@@ -227,65 +225,8 @@ func persistAcceptanceJob(ctx context.Context, db *gorm.DB, job *schedulerhelper
 	}).Create(record).Error
 }
 
-type acceptanceExecutor struct{}
-
-func (e *acceptanceExecutor) Name() string { return acceptanceExecutorName }
-
-func (e *acceptanceExecutor) Execute(ctx context.Context, job *schedulerhelper.Job) error {
-	if job == nil {
-		return fmt.Errorf("acceptance job is nil")
-	}
-	durationMS, err := acceptanceDuration(job.Parameters)
-	if err != nil {
-		return err
-	}
-	logger := app.Log(ctx).Named("scheduler.acceptance")
-	logger.Info("acceptance scheduler job started",
-		zap.String("event", "scheduler.acceptance.started"), zap.Int("duration_ms", durationMS))
-	timer := time.NewTimer(time.Duration(durationMS) * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		logger.Info("acceptance scheduler job completed",
-			zap.String("event", "scheduler.acceptance.completed"), zap.Int("duration_ms", durationMS))
-		return nil
-	case <-ctx.Done():
-		logger.Warn("acceptance scheduler job canceled",
-			zap.String("event", "scheduler.acceptance.canceled"), logging.Error(ctx.Err()))
-		return ctx.Err()
-	}
-}
-
-func acceptanceDuration(parameters map[string]interface{}) (int, error) {
-	value, ok := parameters["duration_ms"]
-	if !ok {
-		return 0, fmt.Errorf("duration_ms is required")
-	}
-	var durationMS int
-	switch value := value.(type) {
-	case int:
-		durationMS = value
-	case int8:
-		durationMS = int(value)
-	case int16:
-		durationMS = int(value)
-	case int32:
-		durationMS = int(value)
-	case int64:
-		durationMS = int(value)
-	case float64:
-		if value != float64(int(value)) {
-			return 0, fmt.Errorf("duration_ms must be an integer")
-		}
-		durationMS = int(value)
-	default:
-		return 0, fmt.Errorf("duration_ms must be an integer")
-	}
-	if durationMS < 1 || durationMS > maxAcceptanceJobMS {
-		return 0, fmt.Errorf("duration_ms must be between 1 and 10000")
-	}
-	return durationMS, nil
-}
+// acceptanceExecutorName, acceptanceDuration and validAcceptanceJobID live in
+// acceptance_executor.go without a build tag, so `go test ./...` covers them.
 
 func boundedMilliseconds(raw string, max int) (int, error) {
 	ms, err := strconv.Atoi(raw)
@@ -293,18 +234,6 @@ func boundedMilliseconds(raw string, max int) (int, error) {
 		return 0, fmt.Errorf("milliseconds out of range")
 	}
 	return ms, nil
-}
-
-func validAcceptanceJobID(value string) bool {
-	if len(value) == 0 || len(value) > 64 {
-		return false
-	}
-	for _, char := range []byte(value) {
-		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '.' || char == '_' || char == '-') {
-			return false
-		}
-	}
-	return true
 }
 
 func acceptanceDB() *gorm.DB {

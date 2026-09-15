@@ -1,5 +1,3 @@
-//go:build logging_acceptance
-
 package loggingacceptance
 
 import (
