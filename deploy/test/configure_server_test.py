@@ -86,7 +86,7 @@ class ConfigureServerTests(unittest.TestCase):
         template = (REPO_ROOT / "server" / "config" / "config.example.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('filepath: "./resource/logs/ginfast.log"', template)
+        self.assertIn('filepath: "./resource/logs/uvp-gb28181.log"', template)
         self.assertEqual(
             configure_server.logging_replacements("development")[("logs", "filepath")],
             "./resource/logs/uvp-gb28181.log",

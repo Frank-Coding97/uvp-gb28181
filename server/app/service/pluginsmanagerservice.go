@@ -178,27 +178,27 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 	zipWriter := zip.NewWriter(writer)
 	defer zipWriter.Close()
 
-	// 添加单个文件到zip的ginfastback目录
+	// 添加单个文件到zip的uvpback目录
 	for _, filePath := range filesToAdd {
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastback", filePath)
+		arcPath := filepath.Join("uvpback", filePath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addFileToZip(zipWriter, filePath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加目录到zip的ginfastback目录
+	// 添加目录到zip的uvpback目录
 	for _, dirPath := range dirsToAdd {
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastback", dirPath)
+		arcPath := filepath.Join("uvpback", dirPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addDirToZip(zipWriter, dirPath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加前端文件到zip的ginfastfront目录
+	// 添加前端文件到zip的uvpfront目录
 	for _, filePath := range frontendFilesToAdd {
 		// 获取文件相对于前端根目录的相对路径
 		relPath, err := filepath.Rel(app.ConfigYml.GetString("gen.dir"), filePath)
@@ -206,14 +206,14 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 			return "", err
 		}
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastfront", relPath)
+		arcPath := filepath.Join("uvpfront", relPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addFileToZip(zipWriter, filePath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加前端目录到zip的ginfastfront目录
+	// 添加前端目录到zip的uvpfront目录
 	for _, dirPath := range frontendDirsToAdd {
 		// 获取目录相对于前端根目录的相对路径
 		relPath, err := filepath.Rel(app.ConfigYml.GetString("gen.dir"), dirPath)
@@ -221,7 +221,7 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 			return "", err
 		}
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastfront", relPath)
+		arcPath := filepath.Join("uvpfront", relPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addDirToZip(zipWriter, dirPath, arcPath); err != nil {
 			return "", err
@@ -1018,8 +1018,8 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 		}
 
 		// 处理后端文件
-		if strings.HasPrefix(file.Name, "ginfastback/") {
-			relPath := strings.TrimPrefix(file.Name, "ginfastback/")
+		if strings.HasPrefix(file.Name, "uvpback/") {
+			relPath := strings.TrimPrefix(file.Name, "uvpback/")
 			destPath := filepath.Join(backendRoot, relPath)
 			if err := pms.extractFile(file, destPath); err != nil {
 				return err
@@ -1027,8 +1027,8 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 		}
 
 		// 处理前端文件
-		if frontendRoot != "" && strings.HasPrefix(file.Name, "ginfastfront/") {
-			relPath := strings.TrimPrefix(file.Name, "ginfastfront/")
+		if frontendRoot != "" && strings.HasPrefix(file.Name, "uvpfront/") {
+			relPath := strings.TrimPrefix(file.Name, "uvpfront/")
 			destPath := filepath.Join(frontendRoot, relPath)
 
 			if err := pms.extractFile(file, destPath); err != nil {

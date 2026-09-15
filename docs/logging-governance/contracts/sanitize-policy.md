@@ -62,7 +62,7 @@ required-node-unavailable · recovery-pending · channel-not-found · accepted �
 当前日志文件里：
 
 ```
-$ grep -c '\[text omitted\]' server/resource/logs/ginfast.log
+$ grep -c '\[text omitted\]' server/resource/logs/uvp-gb28181.log
 600
 ```
 

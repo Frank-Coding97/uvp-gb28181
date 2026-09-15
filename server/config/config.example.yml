@@ -25,7 +25,7 @@ system:
   #系统图标
   systemicon: ""
   #系统名称
-  systemname: "GinFast"
+  systemname: "UVP-GB28181"
   #版权声明
   systemcopyright: "Copyright © 2025 -2028  云南奇讯科技有限公司版权所有"
   #备案号
@@ -72,7 +72,7 @@ redis:
   reconnectinterval: 1     # 从连接池获取连接失败，每次重试之间间隔的秒数
 logs:
   outputs: [file, stdout]     # 开发默认；直接部署用 [file]，容器用 [stdout]
-  filepath: "./resource/logs/ginfast.log" # 显式绝对路径也支持；不再生成独立 gin 日志
+  filepath: "./resource/logs/uvp-gb28181.log" # 显式绝对路径也支持；不再生成独立 gin 日志
   textformat: "console"      # 文件：console/json；生产建议 json
   stdoutformat: "console"    # stdout：console/json；容器建议 json
   level: "info"              # debug/info/warn/error；变更日志配置需重启

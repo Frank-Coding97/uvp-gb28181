@@ -7,16 +7,16 @@
   "author": {
     "name": "qixunkeji",
     "email": "396861557@qq.com",
-    "url": "https://github.com/qxkjsoft/ginfast-ui"
+    "url": "https://github.com/Frank-Coding97/uvp-gb28181"
   },
   "license": "MIT",
-  "homepage": "https://github.com/qxkjsoft/ginfast-ui",
+  "homepage": "https://github.com/Frank-Coding97/uvp-gb28181",
   "repository": {
     "type": "git",
-    "url": "https://github.com/qxkjsoft/ginfast-ui.git"
+    "url": "https://github.com/Frank-Coding97/uvp-gb28181.git"
   },
   "bugs": {
-    "url": "https://github.com/qxkjsoft/ginfast-ui/issues"
+    "url": "https://github.com/Frank-Coding97/uvp-gb28181/issues"
   },
   "scripts": {
     "dev": "vite",

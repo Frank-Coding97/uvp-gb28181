@@ -21,7 +21,7 @@ const systemRecordNo = computed(() => {
 });
 
 const onFooter = () => {
-  window.open("https://github.com/qxkjsoft/ginfast-back", "_blank");
+  window.open("https://github.com/Frank-Coding97/uvp-gb28181", "_blank");
 };
 </script>
 

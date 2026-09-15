@@ -1,9 +1,9 @@
 {
-    "name": "ginfastexample",
+    "name": "uvpexample",
     "version": "1.0.0",
-    "description": "ginfast示例插件",
-    "author": "ginfast",
-    "email": "ginfast@example.com",
+    "description": "UVP示例插件",
+    "author": "uvp",
+    "email": "uvp@example.com",
     "url": "https://example.com",
     "dependencies": {
         "uvp-gb28181": "^1.0.0",

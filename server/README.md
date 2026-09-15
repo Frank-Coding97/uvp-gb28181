@@ -519,8 +519,8 @@ GET /api/pluginsmanager/exports
 POST /api/pluginsmanager/export
 ```
 将指定插件打包成压缩包进行下载。压缩包包含：
-- 后端代码文件（ginfastback目录）
-- 前端代码文件（ginfastfront目录）
+- 后端代码文件（uvpback目录）
+- 前端代码文件（uvpfront目录）
 - plugin.json 插件配置文件
 - menus.json 菜单数据（如果有）
 - database.sql 数据库脚本（如果有）

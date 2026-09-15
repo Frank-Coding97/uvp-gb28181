@@ -12,7 +12,7 @@
 |---|---|
 | 后端 | `:8280` 起着，且**跑的是含本次改动的构建** |
 | 确认方法 | `ps -o lstart -p $(lsof -nP -iTCP:8280 -sTCP:LISTEN -t)` 的启动时间 **晚于** 改动文件的 mtime |
-| 日志文件 | `server/resource/logs/ginfast.log`（`logs.textformat: console` 时为人读格式） |
+| 日志文件 | `server/resource/logs/uvp-gb28181.log`（`logs.textformat: console` 时为人读格式） |
 | 依赖 | `192.168.10.220` 的 MySQL 3306 / Redis 6379 / ZLM 18080 可达 |
 | 前端 | `node_modules` 就绪（`web/`） |
 
@@ -92,7 +92,7 @@ cd ../web && npx vitest run src/views/gb28181/realtime-log/
 ## L3 日志形态（~1 分钟，看文件）
 
 ```bash
-tail -30 server/resource/logs/ginfast.log
+tail -30 server/resource/logs/uvp-gb28181.log
 ```
 
 **逐条核对**（这是「人读可读」的验收清单）：
@@ -140,7 +140,7 @@ curl -s -X POST "http://127.0.0.1:8280/api/gb28181/play/<deviceId>/<channelId>" 
 curl -s -X DELETE "http://127.0.0.1:8280/api/gb28181/play/<streamId>" \
   -H "Authorization: Bearer $TOKEN"
 # ③ 看日志
-grep -E "stop_requested|stop_completed" server/resource/logs/ginfast.log | tail -2
+grep -E "stop_requested|stop_completed" server/resource/logs/uvp-gb28181.log | tail -2
 ```
 
 **判据**：停播返回 `released: true`；日志两行都带 `device_id=` **且** `channel_id=`。
@@ -152,8 +152,8 @@ curl -s -X POST "http://127.0.0.1:8280/api/gb28181/play/<deviceId>/<channelId>" 
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 # 什么都不做，等 ZLM 判定无人观看（实测约 30 秒）
 sleep 40
-grep -E "none_reader|无人观看" server/resource/logs/ginfast.log | tail -2
-grep "stop_requested" server/resource/logs/ginfast.log | tail -1
+grep -E "none_reader|无人观看" server/resource/logs/uvp-gb28181.log | tail -2
+grep "stop_requested" server/resource/logs/uvp-gb28181.log | tail -1
 ```
 
 **判据**（这是 A′ 兜底设计的**唯一实机证明**）：
@@ -182,10 +182,10 @@ curl -s "http://127.0.0.1:8280/api/gb28181/play/<streamId>/monitor" \
 
 ```bash
 # ① 空值是否被渲染成空串（看着像带了字段，其实没值）
-grep -c 'device_id=""' server/resource/logs/ginfast.log     # 必须 0
+grep -c 'device_id=""' server/resource/logs/uvp-gb28181.log     # 必须 0
 
 # ② 目标事件是否仍有"无定位字段"的漏网之鱼
-tail -n +<基线行号> server/resource/logs/ginfast.log \
+tail -n +<基线行号> server/resource/logs/uvp-gb28181.log \
   | grep -E "event=gb28181\.play\." \
   | grep -vE "device_id=|node_id=|platform_id="              # 应为空
 ```

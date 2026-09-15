@@ -13,9 +13,9 @@ Redis、ZLMediaKit 或网络拓扑；默认值为 `container`。`server.appdebug
 
 三个 profile 都生成相同的日志基础参数：相对路径
 `./resource/logs/uvp-gb28181.log`，根级别和 access/scheduler 模块级别为
-`info`，关闭路由登记日志，单文件 5 MiB、最多 7 个备份、保留 15 天。仓库
-模板仍保留本地开发基线 `./resource/logs/ginfast.log`；生成配置时显式选择
-profile 才覆盖为部署路径。
+`info`，关闭路由登记日志，单文件 5 MiB、最多 7 个备份、保留 15 天。仓库模板
+（`server/config/config.example.yml`）的默认值与之一致，未选择 profile 时也
+落在这个路径，不再保留其它开发基线。
 
 相对路径按应用 `BasePath` 解析，而 `BasePath` 由进程启动时的工作目录设定。
 因此 `/app` 下的落点是

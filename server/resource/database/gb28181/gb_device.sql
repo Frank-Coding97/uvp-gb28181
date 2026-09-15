@@ -1,5 +1,5 @@
 -- GB28181 国标设备表(注册/心跳主体)
--- 沿用 ginfast 公共字段约定(id/created_at/updated_at/deleted_at/created_by)
+-- 沿用 uvp-gb28181 公共字段约定(id/created_at/updated_at/deleted_at/created_by)
 DROP TABLE IF EXISTS `gb_device`;
 CREATE TABLE `gb_device` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
