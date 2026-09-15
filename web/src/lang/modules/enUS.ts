@@ -144,6 +144,5 @@ export default {
         ["plugin-example"]: "plugin example",
         ["codegen"]: "code generation",
         ["plugins-manager"]: "plugins manager",
-        ["params-manager"]: "params manager",
     }
 };

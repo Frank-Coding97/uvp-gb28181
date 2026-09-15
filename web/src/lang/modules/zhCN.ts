@@ -144,6 +144,5 @@ export default {
         ["plugin-example"]: "插件示例",
         ["codegen"]: "代码生成",
         ["plugins-manager"]: "插件管理",
-        ["params-manager"]: "参数管理",
     },
 };
