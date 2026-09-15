@@ -9,7 +9,6 @@ const pages = [
   "MediaOverview.vue",
   "MediaMonitoring.vue",
   "IngressManagement.vue",
-  "RecordingCenter.vue",
   "NodeManagement.vue",
   "SchedulingManagement.vue"
 ];
@@ -93,7 +92,7 @@ describe("MediaWorkspaceShell", () => {
     expect(source).toMatch(/showToolbarActions:\s*false/);
   });
 
-  it("keeps all six canonical route components on the shared shell contract", () => {
+  it("keeps all five canonical route components on the shared shell contract", () => {
     for (const page of pages) {
       const source = readFileSync(resolve(process.cwd(), `src/views/gb28181/zlm/workbench/${page}`), "utf8");
       expect(source, page).toContain("MediaWorkspaceShell");

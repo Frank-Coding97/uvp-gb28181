@@ -59,8 +59,7 @@ export const staticRoutes = [
         component: () => import(/* webpackChunkName: "media-workbench" */ "@/views/gb28181/zlm/workbench/MediaEntry.vue"),
         meta: {
           title: "流媒体管理",
-          hide: true,
-          legacyMedia: false
+          hide: true
         }
       }
     ]

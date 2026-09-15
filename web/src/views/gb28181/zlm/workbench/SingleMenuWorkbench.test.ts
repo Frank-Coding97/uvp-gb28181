@@ -2,20 +2,21 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { ZLM_WORKSPACES } from "./mediaRoutes";
+import { MEDIA_WORKSPACES } from "./mediaRoutes";
 
 const root = resolve(process.cwd(), "src/views/gb28181/zlm/workbench");
 
 describe("single-menu ZLM workbench", () => {
-  it("groups ZLM operations into five system-sidebar entries and keeps recordings outside", () => {
-    expect(ZLM_WORKSPACES.map(item => [item.key, item.title, item.path])).toEqual([
+  it("groups ZLM operations into five system-sidebar entries and drops the recordings workspace", () => {
+    expect(MEDIA_WORKSPACES.map(item => [item.key, item.title, item.path])).toEqual([
       ["overview", "运行总览", "/media/overview"],
       ["monitoring", "流与会话", "/media/monitoring"],
       ["ingress", "接入管理", "/media/ingress"],
       ["nodes", "节点管理", "/media/nodes"],
       ["scheduling", "调度管理", "/media/scheduling"]
     ]);
-    expect(ZLM_WORKSPACES.map(item => item.key)).not.toContain("recordings");
+    expect(MEDIA_WORKSPACES.map(item => item.key)).not.toContain("recordings");
+    expect(MEDIA_WORKSPACES.map(item => item.path)).not.toContain("/media/recordings");
   });
 
   it("leaves primary navigation to the system sidebar and keeps only local views in the shell", () => {

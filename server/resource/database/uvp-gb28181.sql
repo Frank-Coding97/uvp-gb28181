@@ -1887,12 +1887,7 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `componen
 (140347, 140341, '/system/joblog', 'SystemJoblog', '', 'system/sysjobresults/sysjobresultslist', 'joblog', 0, 0, 0, 1, 0, '', 0, '', 'lucide:History', 0, 2, 0, '', '2026-02-11 11:41:27', '2026-07-08 10:46:25', NULL, 1),
 (140348, 140347, '', '', '', '', '删除', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:sysjobresults:delete', '2026-02-11 11:45:18', '2026-02-11 11:45:18', NULL, 1),
 (140349, 140239, '', '', '', '', '大文件上传', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:affix:bigupload', '2026-04-09 15:47:39', '2026-04-09 15:47:39', NULL, 1),
-(140351, 140355, '/gb28181/zlm/nodes', 'gb28181-zlm-nodes', '', 'gb28181/zlm/NodeList', '流媒体节点', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Server', 10, 2, 0, '', '2026-06-26 15:00:19', '2026-08-09 22:41:04', NULL, 0),
-(140352, 0, '/gb28181/zlm/nodes/:id', 'gb28181-zlm-node-detail', '', 'gb28181/zlm/NodeDetail', '节点详情', 0, 1, 0, 0, 0, '', 0, '', 'lucide:Server', 6, 2, 0, '', '2026-06-26 15:00:19', '2026-08-09 22:41:04', NULL, 0),
-(140353, 140355, '/gb28181/zlm/scheduler', 'gb28181-zlm-scheduler-strategy', '', 'gb28181/zlm/SchedulerStrategy', '调度算法', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Workflow', 11, 2, 0, '', '2026-06-27 18:10:12', '2026-08-09 22:41:04', NULL, 0),
-(140354, 140355, '/gb28181/zlm/scheduler/logs', 'gb28181-zlm-scheduler-log', '', 'gb28181/zlm/SchedulerLog', '调度日志', 0, 0, 0, 0, 0, '', 0, '', 'lucide:History', 12, 2, 0, '', '2026-06-27 18:10:12', '2026-08-09 22:41:04', NULL, 0),
 (140355, 0, '/media', 'Media', '', '', '流媒体管理', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Clapperboard', 36, 1, 0, '', '2026-06-30 09:59:39', '2026-08-11 14:18:57', NULL, 1),
-(140357, 0, '/gb28181/device-mgmt/anomaly', 'device-mgmt-anomaly', '', 'gb28181/device-mgmt/anomaly/index', '目录异常', 0, 1, 0, 0, 0, '', 0, '', 'lucide:Cctv', 6, 2, 0, '', '2026-06-30 13:33:58', '2026-08-09 22:41:04', NULL, 0),
 (140358, 0, '/gb28181/device-mgmt/index', 'device-mgmt-list', '', 'gb28181/device-mgmt/index', '设备列表', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Cctv', 2, 2, 0, '', '2026-06-30 13:37:04', '2026-08-09 22:41:04', NULL, 0),
 (140359, 0, '/gb28181/sip/platform', 'gb28181-sip-platform', NULL, 'gb28181/sip/PlatformInfo', 'SIP 接入信息', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Router', 6, 2, 0, '', '2026-07-09 19:06:03', '2026-08-09 22:41:04', NULL, NULL),
 (140360, 140355, '', '', NULL, '', '查看 SIP 配置', 0, 1, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:sip:config:view', '2026-07-20 09:24:46', '2026-07-20 09:24:46', NULL, 1),
@@ -1906,7 +1901,6 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `componen
 (140369, 0, '/gb28181/sip/config', 'gb28181-sip-service-config', '', 'gb28181/sip/ServiceConfig', '国标服务配置', 0, 0, 0, 0, 0, '', 0, '', 'lucide:ServerCog', 7, 2, 0, '', '2026-08-07 10:42:06', '2026-08-09 22:41:04', NULL, 1),
 (140370, 140355, '', '', NULL, NULL, '管理播放方案', 0, 1, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:playback-scheme:manage', '2026-08-07 17:23:46', '2026-08-07 17:23:46', NULL, 1),
 (140371, 0, '/security-preview', 'security-preview', '', 'gb28181/security/preview', '国标接入安全', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Shield', 5, 2, 0, '', '2026-08-09 11:15:46', '2026-08-10 10:59:35', NULL, 1),
-(140372, 0, '/gb28181/security', 'gb28181-security', '', 'gb28181/security/index', '国标接入安全', 0, 0, 1, 0, 0, '', 0, '', 'lucide:ShieldCheck', 5, 2, 0, '', '2026-08-10 09:27:17', '2026-08-10 10:59:28', NULL, 1),
 (140373, 0, '/gb28181/cloud-recordings', 'gb28181-cloud-recordings', NULL, 'gb28181/cloud-recordings/index', '云端录像', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Cloud', 35, 2, 0, 'gb28181:recording:view', '2026-08-11 08:43:15', '2026-08-11 08:47:36', NULL, 1),
 (140374, 140373, '', '', NULL, '', '执行录像对账', 0, 1, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:recording:reconcile', '2026-08-11 08:43:22', '2026-08-11 08:43:22', NULL, 1),
 (140375, 0, '/gb28181/cascade', 'gb28181-cascade', NULL, 'gb28181/cascade/index', '国标级联', 0, 0, 0, 0, 0, '', 0, '', 'lucide:GitBranch', 13, 2, 0, '', '2026-08-11 08:49:48', '2026-08-11 08:49:48', NULL, 1),
@@ -2075,18 +2069,6 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140370, 257),
 (140370, 258),
 (140370, 259),
-(140372, 277),
-(140372, 278),
-(140372, 279),
-(140372, 280),
-(140372, 281),
-(140372, 282),
-(140372, 283),
-(140372, 284),
-(140372, 292),
-(140372, 293),
-(140372, 294),
-(140372, 295),
 (140373, 310),
 (140373, 311),
 (140373, 312),
@@ -2183,12 +2165,7 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 (1, 140347),
 (1, 140348),
 (1, 140349),
-(1, 140351),
-(1, 140352),
-(1, 140353),
-(1, 140354),
 (1, 140355),
-(1, 140357),
 (1, 140358),
 (1, 140359),
 (1, 140360),
@@ -2202,7 +2179,6 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 (1, 140369),
 (1, 140370),
 (1, 140371),
-(1, 140372),
 (1, 140373),
 (1, 140374),
 (1, 140375),
@@ -8665,3 +8641,70 @@ WHERE `permission`='gb28181:cascade:reconnect'
 UPDATE `sys_api` SET `deleted_at`=NOW(), `updated_at`=NOW()
 WHERE `path`='/api/gb28181/cascade/platforms/:id/reconnect' AND `method`='POST'
   AND `deleted_at` IS NULL;
+
+-- 异步视频探针查询 API（复用 gb28181:play:diagnose）。
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '查询视频探针任务','/api/gb28181/stream-probes/operations/:operationId','GET','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/stream-probes/operations/:operationId' AND `method`='GET' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:play:diagnose' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/stream-probes/operations/:operationId' AND a.`method`='GET' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:play:diagnose' AND a.`path`='/api/gb28181/stream-probes/operations/:operationId' AND a.`method`='GET'
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`=a.`path` AND p.`v2`=a.`method` AND p.`v3`='*');
+
+-- ===== 退役「流媒体管理」目录下的兼容跳转壳菜单（2026-09-15）=====
+-- 12 条 /gb28181/zlm/* 跳转壳与 1 条误配成跳转壳的 /media/recordings 已被 /media/* 五条正典工作台取代。
+-- 上方历史块中的幂等种子会在新装环境重新种出这些菜单，故在此统一收口；
+-- 同时把只挂在跳转壳上的 19 个媒体读接口按语义重定向到正典工作台。
+-- 「流媒体管理」(/media,id=140355)下并存三代菜单:12 条 /gb28181/zlm/* 兼容跳转壳、
+-- 1 条同样误配成跳转壳的 /media/recordings,以及 5 条 /media/* 正典工作台。
+-- 跳转壳自身零子菜单、零写入权限(按钮权限 140411-140478 已全部挂在 /media/* 下),
+-- 仅因库里 hide 由迁移设计的 1 漂移成 0 才在侧栏渲染出 19 条子菜单。
+-- 本次物理删除这 13 条跳转壳,并把只挂在它们身上的 19 个媒体读接口(393-411)
+-- 按语义重定向到对应正典工作台,避免接口失去菜单归属。
+-- 接口运行时鉴权走 sys_casbin_rule(本次不动);sys_menu_api 只是「菜单-接口」归属展示。
+INSERT IGNORE INTO `sys_menu_api` (`menu_id`,`api_id`) SELECT DISTINCT tgt.`id`, ma.`api_id` FROM `sys_menu_api` ma JOIN `sys_menu` src ON src.`id`=ma.`menu_id` AND src.`component`='gb28181/zlm/workbench/LegacyMediaRoute' JOIN `sys_menu` tgt ON tgt.`deleted_at` IS NULL AND tgt.`path`=CASE src.`path` WHEN '/gb28181/zlm/overview' THEN '/media/overview' WHEN '/gb28181/zlm/runtime' THEN '/media/monitoring' WHEN '/gb28181/zlm/streams' THEN '/media/monitoring' WHEN '/gb28181/zlm/sessions' THEN '/media/monitoring' WHEN '/gb28181/zlm/proxies' THEN '/media/ingress' WHEN '/gb28181/zlm/ffmpeg-sources' THEN '/media/ingress' WHEN '/gb28181/zlm/rtp-servers' THEN '/media/ingress' WHEN '/gb28181/zlm/nodes' THEN '/media/nodes' WHEN '/gb28181/zlm/nodes/:id' THEN '/media/nodes' WHEN '/gb28181/zlm/config' THEN '/media/nodes' WHEN '/gb28181/zlm/scheduler' THEN '/media/scheduling' WHEN '/gb28181/zlm/scheduler/logs' THEN '/media/scheduling' ELSE NULL END;
+DELETE ma FROM `sys_menu_api` ma JOIN `sys_menu` m ON m.`id`=ma.`menu_id` WHERE m.`component`='gb28181/zlm/workbench/LegacyMediaRoute';
+DELETE rm FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id` WHERE m.`component`='gb28181/zlm/workbench/LegacyMediaRoute';
+DELETE FROM `sys_menu` WHERE `component`='gb28181/zlm/workbench/LegacyMediaRoute';
+-- 实时日志控制台是平台级日志流,不属于流媒体;移到系统管理下,与 /system/login-log 并列。
+UPDATE `sys_menu` SET `parent_id`=10,`path`='/system/realtime-log',`sort`=2,`updated_at`=NOW() WHERE `path`='/gb28181/realtime-log' AND `deleted_at` IS NULL;
+-- 基线历史块从未烘焙过该菜单(2026-09-10 迁移遗漏),此处补种使新装环境与开发库一致;
+-- 一律按 path 定位并以自增分配 id,避免 menu_id 跨环境漂移导致主键冲突。
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`redirect`,`component`,`title`,`is_full`,`hide`,`disable`,`keep_alive`,`affix`,`link`,`iframe`,`svg_icon`,`icon`,`sort`,`type`,`is_link`,`permission`,`created_by`,`created_at`,`updated_at`)
+SELECT 10,'/system/realtime-log','gb28181-realtime-log','','gb28181/realtime-log/index','实时日志控制台',0,0,0,0,0,'',0,'','',2,2,0,'gb28181:log:view',1,NOW(),NOW()
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `path`='/system/realtime-log' AND `deleted_at` IS NULL);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`)
+SELECT 1,m.`id` FROM `sys_menu` m WHERE m.`path`='/system/realtime-log' AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=1 AND x.`menu_id`=m.`id`);
+
+-- ───────────────────────────────────────────────────────────────
+-- 2026-09-15 重排一级菜单展示顺序（同步自 migrations/2026-09-15-reorder-top-level-menus.sql）
+-- 按功能归类统一 parent_id=0 的 sort；系统类显式给 200+（语义仍是「排在最后」）。
+-- 依据：后端 models.SysMenuList.TreeSort 把 sort=0 当作「未设置」并沉到最底部。
+-- 一律按 path 定位：menu_id 由各环境自增分配，跨环境会漂移。
+-- /gb28181/openapi-client 在本基线里不存在，对应语句在新装环境为 no-op
+--   （该菜单属 codex/aksk-* 在途功能，尚未合入 develop）。
+UPDATE `sys_menu` SET `sort`=10, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/home' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>10);
+UPDATE `sys_menu` SET `sort`=20, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path` IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>20);
+UPDATE `sys_menu` SET `sort`=30, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/multi-screen-playback' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>30);
+UPDATE `sys_menu` SET `sort`=40, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/alarm-management' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>40);
+UPDATE `sys_menu` SET `sort`=80, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/sip/platform' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>80);
+UPDATE `sys_menu` SET `sort`=100, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/sip/config' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>100);
+UPDATE `sys_menu` SET `sort`=110, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/security-preview' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>110);
+UPDATE `sys_menu` SET `sort`=90, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/sip-traces' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>90);
+UPDATE `sys_menu` SET `sort`=70, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/cascade' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>70);
+UPDATE `sys_menu` SET `sort`=140, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/media' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>140);
+UPDATE `sys_menu` SET `sort`=50, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/cloud-recordings' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>50);
+UPDATE `sys_menu` SET `sort`=60, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/recording-schedules' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>60);
+UPDATE `sys_menu` SET `sort`=180, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/device-record-playback/:channelId' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>180);
+UPDATE `sys_menu` SET `sort`=120, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/device-assignment' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>120);
+UPDATE `sys_menu` SET `sort`=130, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/gb28181/openapi-client' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>130);
+UPDATE `sys_menu` SET `sort`=150, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/system' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>150);
+UPDATE `sys_menu` SET `sort`=160, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/sysjobs' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>160);
+UPDATE `sys_menu` SET `sort`=170, `updated_at`=NOW() WHERE (`parent_id`=0 OR `parent_id` IS NULL) AND `path`='/demo' AND `deleted_at` IS NULL AND (`sort` IS NULL OR `sort`<>170);

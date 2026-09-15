@@ -31,7 +31,6 @@ export interface DashboardRoute {
 
 export interface DashboardRouteTargets {
   deviceManagement?: string;
-  directoryAnomaly?: string;
 }
 
 export interface DashboardServiceStatus {
@@ -48,7 +47,6 @@ interface AttentionSources {
   };
   devices?: { status: DashboardLoadState; offline?: number };
   channels?: { status: DashboardLoadState; offline?: number };
-  anomalies?: { status: DashboardLoadState; count?: number };
   alarms?: { status: DashboardLoadState; total?: number; latestDescription?: string };
   zlm?: { status: DashboardLoadState; nodes?: ZlmNodeSummarySource[] };
 }
@@ -62,8 +60,7 @@ const stateLabels: Record<DashboardLoadState, string> = {
 };
 
 const defaultRouteTargets: Required<DashboardRouteTargets> = {
-  deviceManagement: "/gb28181/device-mgmt/index",
-  directoryAnomaly: "/gb28181/device-mgmt/anomaly"
+  deviceManagement: "/gb28181/device-mgmt/index"
 };
 
 export function resolveDashboardRoute(routes: readonly DashboardRoute[], candidates: readonly string[]): string | null {
@@ -178,16 +175,6 @@ export function buildAttentionItems(sources: AttentionSources, routeTargets: Das
       detail: sources.alarms.latestDescription?.trim() || "查看最近设备告警",
       tone: "warning",
       route: "/gb28181/alarm-management"
-    });
-  }
-
-  if (sources.anomalies?.status === "ready" && (sources.anomalies.count ?? 0) > 0) {
-    items.push({
-      id: "catalog-anomalies",
-      title: `${sources.anomalies.count} 项目录异常待处理`,
-      detail: "目录编码、挂载或层级关系需要核查",
-      tone: "warning",
-      route: routes.directoryAnomaly
     });
   }
 

@@ -71,18 +71,14 @@ describe("media menu route compatibility", () => {
     });
   });
 
-  it("marks only the compatibility component so router history can skip transient tabs", () => {
-    const [legacy, regular] = convertMenuItemsToRoutes([
+  it("no longer marks a compatibility component for router history", () => {
+    const [streams] = convertMenuItemsToRoutes([
       backendMenu("/gb28181/zlm/streams", "流媒体", {
         hide: true,
         component: "gb28181/zlm/workbench/LegacyMediaRoute"
-      }),
-      backendMenu("/media/monitoring", "媒体监控", {
-        component: "gb28181/zlm/workbench/MediaMonitoring"
       })
     ]);
 
-    expect(legacy.meta.legacyMedia).toBe(true);
-    expect(regular.meta.legacyMedia).toBe(false);
+    expect(streams.meta).not.toHaveProperty("legacyMedia");
   });
 });

@@ -44,13 +44,13 @@ describe("dashboard state", () => {
   });
 
   it("resolves the first route that is actually registered", () => {
-    const routes = [{ path: "/gb28181/device-mgmt/index" }, { path: "/gb28181/device-mgmt/anomaly" }];
+    const routes = [{ path: "/gb28181/device-mgmt/index" }, { path: "/gb28181/alarm-management" }];
 
     expect(resolveDashboardRoute(routes, ["/gb28181/device-mgmt", "/gb28181/device-mgmt/index"])).toBe(
       "/gb28181/device-mgmt/index"
     );
-    expect(resolveDashboardRoute(routes, ["/gb28181/device-mgmt/anomaly", "/gb28181/device-mgmt/index"])).toBe(
-      "/gb28181/device-mgmt/anomaly"
+    expect(resolveDashboardRoute(routes, ["/gb28181/alarm-management", "/gb28181/device-mgmt/index"])).toBe(
+      "/gb28181/alarm-management"
     );
     expect(resolveDashboardRoute(routes, ["/gb28181/missing"])).toBeNull();
   });
@@ -90,7 +90,6 @@ describe("dashboard state", () => {
       sip: { status: "ready", state: "failed", errorSummary: "监听端口被占用" },
       devices: { status: "ready", offline: 6 },
       channels: { status: "ready", offline: 20 },
-      anomalies: { status: "ready", count: 4 },
       alarms: { status: "ready", total: 3, latestDescription: "设备故障报警" },
       zlm: {
         status: "ready",
@@ -109,25 +108,19 @@ describe("dashboard state", () => {
       "SIP 服务运行异常",
       "1 个媒体节点离线",
       "近 24 小时收到 3 条告警",
-      "4 项目录异常待处理",
-      "6 台设备离线"
+      "6 台设备离线",
+      "20 个视频通道离线"
     ]);
     expect(items[0].detail).toBe("监听端口被占用");
     expect(buildAttentionItems({ devices: { status: "ready", offline: 0 } })).toEqual([]);
   });
 
-  it("uses the registered device and anomaly entries for attention links", () => {
+  it("uses the registered device entry for attention links", () => {
     const items = buildAttentionItems(
-      {
-        devices: { status: "ready", offline: 2 },
-        anomalies: { status: "ready", count: 1 }
-      },
-      {
-        deviceManagement: "/gb28181/device-mgmt/index",
-        directoryAnomaly: "/gb28181/device-mgmt/anomaly"
-      }
+      { devices: { status: "ready", offline: 2 } },
+      { deviceManagement: "/gb28181/device-mgmt/index" }
     );
 
-    expect(items.map(item => item.route)).toEqual(["/gb28181/device-mgmt/anomaly", "/gb28181/device-mgmt/index"]);
+    expect(items.map(item => item.route)).toEqual(["/gb28181/device-mgmt/index"]);
   });
 });

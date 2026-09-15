@@ -3,40 +3,23 @@ import { describe, expect, it } from "vitest";
 import { resolveFirstMediaWorkspace, resolveMediaWorkspaceAccess } from "./mediaAccess";
 
 describe("media workbench access contract", () => {
-  it("derives grouped workspace and view visibility from legacy route unions", () => {
-    const streams = resolveMediaWorkspaceAccess(["/gb28181/zlm/streams"]);
-    expect(streams.workspacePaths).toEqual(["/media/monitoring"]);
-    expect(streams.viewsByWorkspace["/media/monitoring"]).toEqual(["streams"]);
+  it("grants a whole workspace once its sidebar menu is visible", () => {
+    const monitoring = resolveMediaWorkspaceAccess(["/media/monitoring"]);
+    expect(monitoring.workspacePaths).toEqual(["/media/monitoring"]);
+    expect(monitoring.viewsByWorkspace["/media/monitoring"]).toEqual(["streams", "sessions", "viewers"]);
 
-    const sessions = resolveMediaWorkspaceAccess(["/gb28181/zlm/sessions"]);
-    expect(sessions.workspacePaths).toEqual(["/media/monitoring"]);
-    expect(sessions.viewsByWorkspace["/media/monitoring"]).toEqual(["sessions", "viewers"]);
-
-    const config = resolveMediaWorkspaceAccess(["/gb28181/zlm/config"]);
-    expect(config.workspacePaths).toEqual(["/media/nodes"]);
-    expect(config.viewsByWorkspace["/media/nodes"]).toEqual(["config"]);
+    const ingress = resolveMediaWorkspaceAccess(["/media/ingress"]);
+    expect(ingress.workspacePaths).toEqual(["/media/ingress"]);
+    expect(ingress.viewsByWorkspace["/media/ingress"]).toEqual(["pull", "push", "ffmpeg", "rtp"]);
   });
 
-  it("does not expand one legacy capability into sibling views", () => {
-    const access = resolveMediaWorkspaceAccess([
-      "/gb28181/zlm/streams",
-      "/gb28181/zlm/ffmpeg-sources",
-      "/gb28181/recording-schedules",
-      "/gb28181/zlm/scheduler/logs"
-    ]);
+  it("keeps sidebar order regardless of the grant order", () => {
+    const access = resolveMediaWorkspaceAccess(["/media/scheduling", "/media/overview", "/media/ingress"]);
 
-    expect(access.workspacePaths).toEqual([
-      "/media/monitoring",
-      "/media/ingress",
-      "/media/scheduling"
-    ]);
-    expect(access.workspacePaths).not.toContain("/media/recordings");
-    expect(access.viewsByWorkspace["/media/monitoring"]).toEqual(["streams"]);
-    expect(access.viewsByWorkspace["/media/ingress"]).toEqual(["ffmpeg"]);
-    expect(access.viewsByWorkspace["/media/scheduling"]).toEqual(["logs"]);
+    expect(access.workspacePaths).toEqual(["/media/overview", "/media/ingress", "/media/scheduling"]);
   });
 
-  it("grants all five ZLM workspaces only to an explicit wildcard admin", () => {
+  it("grants all five workspaces only to an explicit wildcard admin", () => {
     const access = resolveMediaWorkspaceAccess([], { wildcard: true });
 
     expect(access.workspacePaths).toEqual([
@@ -49,24 +32,28 @@ describe("media workbench access contract", () => {
     expect(access.viewsByWorkspace["/media/ingress"]).toEqual(["pull", "push", "ffmpeg", "rtp"]);
   });
 
-  it("selects the first accessible grouped workspace instead of assuming overview", () => {
-    expect(resolveFirstMediaWorkspace(["/gb28181/zlm/rtp-servers"])).toBe("/media/ingress");
-    expect(resolveFirstMediaWorkspace(["/gb28181/zlm/scheduler/logs"])).toBe("/media/scheduling");
+  it("selects the first accessible workspace instead of assuming overview", () => {
+    expect(resolveFirstMediaWorkspace(["/media/ingress"])).toBe("/media/ingress");
+    expect(resolveFirstMediaWorkspace(["/media/scheduling"])).toBe("/media/scheduling");
     expect(resolveFirstMediaWorkspace([])).toBeNull();
   });
 
-  it("normalizes dynamic node detail and ignores unrelated paths", () => {
-    const access = resolveMediaWorkspaceAccess(["/gb28181/zlm/nodes/:id", "/gb28181/device-mgmt/devices"]);
+  it("resolves the hidden node detail route to its parent workspace and ignores unrelated paths", () => {
+    const access = resolveMediaWorkspaceAccess(["/media/nodes/:id", "/gb28181/device-mgmt/devices"]);
 
     expect(access.workspacePaths).toEqual(["/media/nodes"]);
     expect(access.viewsByWorkspace["/media/nodes"]).toEqual(["list", "overview", "runtime", "config"]);
   });
 
-  it("keeps grouped workspace grants usable during rolling deployment", () => {
-    const access = resolveMediaWorkspaceAccess(["/media/monitoring", "/media/ingress"]);
+  it("ignores the retired compatibility addresses entirely", () => {
+    const access = resolveMediaWorkspaceAccess([
+      "/gb28181/zlm/streams",
+      "/gb28181/zlm/config",
+      "/gb28181/zlm/nodes/:id",
+      "/media/recordings"
+    ]);
 
-    expect(access.workspacePaths).toEqual(["/media/monitoring", "/media/ingress"]);
-    expect(access.viewsByWorkspace["/media/monitoring"]).toEqual(["streams", "sessions", "viewers"]);
-    expect(access.viewsByWorkspace["/media/ingress"]).toEqual(["pull", "push", "ffmpeg", "rtp"]);
+    expect(access.workspacePaths).toEqual([]);
+    expect(access.viewsByWorkspace).toEqual({});
   });
 });

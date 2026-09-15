@@ -1,4 +1,4 @@
-import { MEDIA_PAGES, MEDIA_WORKSPACES, ZLM_WORKSPACES } from "./mediaRoutes";
+import { MEDIA_WORKSPACES } from "./mediaRoutes";
 
 export interface MediaWorkspaceAccess {
   workspacePaths: string[];
@@ -9,75 +9,52 @@ export interface MediaWorkspaceAccessOptions {
   wildcard?: boolean;
 }
 
-const NODE_DETAIL_PATTERN = /^\/gb28181\/zlm\/nodes\/(?:\d+|:id)$/;
-const pagePaths = new Set(MEDIA_PAGES.map(page => page.path));
+/** 节点详情是挂在 /media/nodes 下的隐藏子路由，按其父工作台授予视图。 */
+const NODE_DETAIL_PATTERN = /^\/media\/nodes\/(?:\d+|:id)$/;
 
-const legacyCapabilityByPage: Readonly<Record<string, { workspace: string; views: readonly string[] }>> = {
-  "/gb28181/zlm/overview": { workspace: "/media/overview", views: ["overview"] },
-  "/gb28181/zlm/runtime": { workspace: "/media/monitoring", views: [] },
-  "/gb28181/zlm/streams": { workspace: "/media/monitoring", views: ["streams"] },
-  "/gb28181/zlm/sessions": { workspace: "/media/monitoring", views: ["sessions", "viewers"] },
-  "/gb28181/zlm/proxies": { workspace: "/media/ingress", views: ["pull", "push"] },
-  "/gb28181/zlm/ffmpeg-sources": { workspace: "/media/ingress", views: ["ffmpeg"] },
-  "/gb28181/zlm/rtp-servers": { workspace: "/media/ingress", views: ["rtp"] },
-  "/gb28181/cloud-recordings": { workspace: "/media/recordings", views: ["files", "tasks"] },
-  "/gb28181/recording-schedules": { workspace: "/media/recordings", views: ["plans"] },
-  "/gb28181/zlm/nodes": { workspace: "/media/nodes", views: ["list"] },
-  "/gb28181/zlm/config": { workspace: "/media/nodes", views: ["config"] },
-  "/gb28181/zlm/scheduler": { workspace: "/media/scheduling", views: ["strategy"] },
-  "/gb28181/zlm/scheduler/logs": { workspace: "/media/scheduling", views: ["logs"] }
-};
-
-const allLegacyViews: Readonly<Record<string, readonly string[]>> = {
+const allViewsByWorkspace: Readonly<Record<string, readonly string[]>> = {
   "/media/overview": ["overview"],
   "/media/monitoring": ["streams", "sessions", "viewers"],
   "/media/ingress": ["pull", "push", "ffmpeg", "rtp"],
-  "/media/recordings": ["files", "tasks", "plans"],
   "/media/nodes": ["list", "overview", "runtime", "config"],
   "/media/scheduling": ["strategy", "logs"]
 };
 
-function canonicalPage(path: string): string | undefined {
-  if (NODE_DETAIL_PATTERN.test(path)) return "/gb28181/zlm/nodes";
-  return pagePaths.has(path) ? path : undefined;
+function resolveWorkspacePath(path: string): string | undefined {
+  if (NODE_DETAIL_PATTERN.test(path)) return "/media/nodes";
+  return MEDIA_WORKSPACES.some(workspace => workspace.path === path) ? path : undefined;
 }
 
 export function resolveMediaWorkspaceAccess(
-  legacyPaths: Iterable<string>,
+  grantedPaths: Iterable<string>,
   options: MediaWorkspaceAccessOptions = {}
 ): MediaWorkspaceAccess {
-  const legacyViews = new Map<string, Set<string>>();
+  const grantedViews = new Map<string, Set<string>>();
 
   if (options.wildcard) {
-    MEDIA_WORKSPACES.forEach(workspace => legacyViews.set(workspace.path, new Set(allLegacyViews[workspace.path])));
+    MEDIA_WORKSPACES.forEach(workspace => grantedViews.set(workspace.path, new Set(allViewsByWorkspace[workspace.path])));
   } else {
-    for (const path of legacyPaths) {
-      const workspace = MEDIA_WORKSPACES.find(item => item.path === path);
-      if (workspace) legacyViews.set(workspace.path, new Set(allLegacyViews[workspace.path]));
-      const page = canonicalPage(path);
-      const capability = legacyCapabilityByPage[page ?? path];
-      if (!capability) continue;
-      const views = legacyViews.get(capability.workspace) ?? new Set<string>();
-      capability.views.forEach(view => views.add(view));
-      if (NODE_DETAIL_PATTERN.test(path)) ["overview", "runtime", "config"].forEach(view => views.add(view));
-      legacyViews.set(capability.workspace, views);
+    for (const path of grantedPaths) {
+      const workspace = resolveWorkspacePath(path);
+      if (!workspace) continue;
+      grantedViews.set(workspace, new Set(allViewsByWorkspace[workspace]));
     }
   }
 
-  const workspacePaths = ZLM_WORKSPACES
+  const workspacePaths = MEDIA_WORKSPACES
     .map(workspace => workspace.path)
-    .filter(path => (legacyViews.get(path)?.size ?? 0) > 0);
+    .filter(path => (grantedViews.get(path)?.size ?? 0) > 0);
   const viewsByWorkspace: Record<string, string[]> = {};
-  for (const [workspace, views] of legacyViews) {
-    viewsByWorkspace[workspace] = allLegacyViews[workspace].filter(view => views.has(view));
+  for (const [workspace, views] of grantedViews) {
+    viewsByWorkspace[workspace] = allViewsByWorkspace[workspace].filter(view => views.has(view));
   }
 
   return { workspacePaths, viewsByWorkspace };
 }
 
 export function resolveFirstMediaWorkspace(
-  legacyPaths: Iterable<string>,
+  grantedPaths: Iterable<string>,
   options: MediaWorkspaceAccessOptions = {}
 ): string | null {
-  return resolveMediaWorkspaceAccess(legacyPaths, options).workspacePaths[0] ?? null;
+  return resolveMediaWorkspaceAccess(grantedPaths, options).workspacePaths[0] ?? null;
 }

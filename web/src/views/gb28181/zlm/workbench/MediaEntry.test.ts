@@ -40,12 +40,11 @@ describe("MediaEntry", () => {
 
   it("replaces the root with overview for a fully authorized administrator", async () => {
     const wrapper = await mountWith([
-      "/gb28181/zlm/overview",
-      "/gb28181/zlm/streams",
-      "/gb28181/zlm/proxies",
-      "/gb28181/cloud-recordings",
-      "/gb28181/zlm/nodes",
-      "/gb28181/zlm/scheduler"
+      "/media/overview",
+      "/media/monitoring",
+      "/media/ingress",
+      "/media/nodes",
+      "/media/scheduling"
     ]);
 
     expect(router.replace).toHaveBeenCalledOnce();
@@ -54,7 +53,7 @@ describe("MediaEntry", () => {
   });
 
   it("chooses the first authorized workspace instead of assuming overview", async () => {
-    const wrapper = await mountWith(["/gb28181/zlm/rtp-servers"]);
+    const wrapper = await mountWith(["/media/ingress"]);
 
     expect(router.replace).toHaveBeenCalledOnce();
     expect(router.replace).toHaveBeenCalledWith("/media/ingress");
