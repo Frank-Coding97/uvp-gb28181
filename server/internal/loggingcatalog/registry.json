@@ -902,6 +902,9 @@
       "endpoint",
       "node_id"
     ],
+    "gb28181.stream_probe.redis_unavailable": [],
+    "gb28181.stream_probe.worker_rejected": [],
+    "gb28181.stream_probe.worker_started": [],
     "zlm.registry.db_unavailable": [],
     "zlm.registry.load_failed": [],
     "zlm.registry.ready": [],
