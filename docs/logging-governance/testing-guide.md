@@ -2,7 +2,7 @@
 
 > 适用对象：任何一次「日志改动」的验收（新增定位字段 / 改字段名 / **调等级** / 改输出形态）。
 > 原则：**自动化能证明的，不要靠眼睛；眼睛能证明的，必须真的跑一遍。**
-> 最后更新：2026-09-15（C03 等级校准时补入"改等级的连带义务"与 `event_level_divergence`）
+> 最后更新：2026-09-15（C03.④ 假阴性复核 —— 补入"零连带的第二次验证"与扫描器隐藏目录口径）
 
 ---
 
@@ -322,3 +322,34 @@ C03 主体连带红了两处，本轮两处都没红，差别只有一句话 —
 - `app/gb28181` `TestZLMManagementT14_BuildsTypedCore…` 与 `…_ControllerInstallAndTeardownAreRepeatable` panic
 - `app/gb28181/migration` **[build failed]**（陈旧符号）
 - `app/utils/logging` 的 `runT15Load` 本机超时
+
+---
+
+## 附：C03.④ 假阴性复核实测记录 · 2026-09-15
+
+| 层 | 结果 |
+|---|---|
+| L1 门禁 | ① `internal/loggingcatalog` ✅ 0 findings（**没有新增事件名**；`event_level_divergence` 不受影响 —— 5 条改动的 event 各自只有一个调用点）<br>② `internal/loggingcontract` ✅ 0 findings —— **本轮零连带**（原因见下） |
+| L2 自动化 | `go build ./...` ✅；`go test ./app/service/ ./app/gb28181/sip/` ✅（本轮改动的两个包）；改动的 3 个文件 `gofmt -l` 干净 |
+| L3 形态 | 不适用（只改等级，控制台版式不变） |
+| L4 场景 | 不适用（等级改动没有可实机复现的新路径） |
+| 负面判据 | **"升级不得靠感觉"**：3 条升 `ERROR` 各有一句可引用的硬证据 —— `uac_init_failed` 是同一段注释里的"点播也不可用"；`login_audit.persist_failed` 是 `operationlog.go` 里"全仓唯一一类"的**反面**（同类第二条）；`login_audit.panic` 是另外 3 条 panic 全为 `ERROR`。**判不出来就不升** —— 另有 6 条候选被明确判为"故意不升"，理由同样写进代码注释 |
+
+**复扫结果**：
+
+```
+等级分布  Warn 178 → 173     Error 20 → 23     Info 126 → 128     Debug 27 不变
+调用点总  351（不变）        唯一 event 331（不变）
+分桶      业务域 135/248 → 132/248 = 53%    auth 3 → 1    gb28181 81 → 78
+```
+
+**"零连带"是 §八 规律的第二次验证**：C03 主体因为改了 3 条**无静态 `event`** 的调用点
+（`bootstrap.go`）而红两处；C03.③ 与 C03.④ 改的调用点**全都带静态 `event`**，
+两次都没红。→ **改等级前先看一眼"这条在豁免清单里吗"**，就能预判要不要同步基线。
+
+**⚠️ 顺带修掉一个会让指标虚高的口径漏洞**：`scan-logging.py` 的 `SKIP_DIRS`
+原先不含隐藏目录，而仓库约定"跨分支另建 worktree"会落在 `.claude/worktrees/<name>/`
+—— 那是**整份 `server/` 的拷贝**，被一并计入扫描：**486 vs 真实 351**
+（唯一 event 331 → 358、唯一字段 161 → 200，看起来像"前几轮成果全部回流"）。
+已改为一律跳过 `.` 开头的目录。**复现方法**：在有 worktree 的工作区跑一次扫描，
+数字会比 `--root` 指到干净目录时明显偏大。

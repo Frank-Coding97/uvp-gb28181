@@ -182,7 +182,8 @@ go test ./internal/loggingcatalog/     # 含 event_level_divergence
 2. **没做 C03.7 原本提的"消息文本不得是纯流程叙述"。** 那是自然语言判断，做不成门禁
    （"已运行"和"已重试成功"在正则眼里一样）。换成第五节的等级唯一性规则 ——
    它是同一诉求的**可机检**版本。
-3. ~~没改 `ERROR` 的分布。~~ **C03.③ 已补做，见第九节。** 本轮（C03 主体）只校准
+3. ~~没改 `ERROR` 的分布。~~ **C03.③ 已补做（查"被高估"），见第九节；
+   C03.④ 又补了反方向（查"被低估"的假阴性），见第十节。** 本轮（C03 主体）只校准
    `WARN`；当时分开做的理由现在仍然成立 —— 两种等级的判据不同（`WARN` 判"要不要人看一眼"，
    `ERROR` 判"哪块功能整个没了"），混在一轮里容易用同一把尺子量两件事。70 条的逐条复核
    放在第九节，与本节结论不冲突：第 1 条说的"启动期装配失败不升 ERROR"依然是边界。
@@ -232,6 +233,12 @@ go test ./internal/loggingcatalog/     # 含 event_level_divergence
 就是靠它留下的 —— 它是全仓唯一一类"主流程成功、记录永久丢失、且没有任何下游会因此报错"
 的失败（见 9.4）。
 
+> ⚠️ **"全仓唯一一类"这个说法在 C03.④ 被修正为"一类"** —— 同类的第二条是
+> `auth.login_audit.persist_failed`，当时没被对照到（它在另一个文件、事件名也不同）。
+> **门禁的 `event_level_divergence` 只查同一个 `event` 名跨等级，
+> 结构上查不到"不同名、同语义"** —— 这一类只能靠"按事件名末段分组"再人工裁决，
+> 方法见第十节。
+
 ### 9.2 70 条的分布
 
 | 分组 | 条数 | 处置 |
@@ -279,7 +286,8 @@ go test ./internal/loggingcatalog/     # 含 event_level_divergence
 
 ### 9.4 两条需要解释的判定
 
-**① `audit.operation_log.persist_failed` 留 `ERROR`** —— 全仓唯一一条"留"得需要解释的。
+**① `audit.operation_log.persist_failed` 留 `ERROR`** —— 当时以为全仓只有这一条"留"得
+需要解释的（C03.④ 找到了同类的第二条 `auth.login_audit.persist_failed`，见第十节）。
 它长得像其他"写库失败"（那些都降了 WARN），但性质不同：业务请求照样返回 200，
 **没有任何下游会因此报错，也没有第二个信号能暴露它**。判据里"功能已不可用"说的是
 审计这条链路本身，而它没有替代品。降成 WARN 等于把"操作没留痕"降成"又一个可看一眼的失败"，
@@ -316,4 +324,99 @@ SIP 起不来 = 设备全掉线；DB 驱动没有 = 一切都没有；调度器�
 
 C03 已撤销比例目标（第二节），这里也一样：**`Warn` 占比不是指标，"每条 Warn 答得出动作"才是。**
 第二、三条已机检（`event_level_divergence`，零例外）。
+
+---
+
+## 十、假阴性复核（C03.④，2026-09-15）
+
+### 10.1 这一轮问的是相反的问题
+
+C03 前两轮都在问"**有没有被高估的**"（Warn 通胀 → 主体；`ERROR` 泛化 → C03.③）。
+这一轮问"**有没有被低估的**"：本该 `ERROR`、却因为名字起得像一次普通失败而留在 `WARN` 里。
+
+难点不在判据（三条判据没变），在**看不见** ——
+"没有的东西看不出形状"：一条打成 `WARN` 的日志不会告诉你它其实是整块能力没了。
+
+所以没有靠通读 178 条，而是先用两条**可机检**的线索把候选缩到个位数，再逐条读代码。
+
+### 10.2 线索一：同语义族跨等级
+
+**门禁查不到这一半。** `event_level_divergence`（第五节）的判据是"同一个 `event` 名不得跨等级"，
+它抓得到 `play.reconcile.probe_failed` 两处 `WARN` 一处 `DEBUG`；
+但抓不到 `auth.login_audit.persist_failed`(`WARN`) 与 `audit.operation_log.persist_failed`(`ERROR`)
+—— **两个名字、一个语义**。
+
+做法：取事件名末段作为"结果词"（`persist_failed` / `panic` / `init_failed` / `load_failed`…），
+按末段分组，列出每组的等级分布，**只看跨等级的组**。全仓 351 个调用点得 **15 组**，逐组读代码判定。
+
+### 10.3 线索二：完全静默的失败
+
+线索一只能查到"打了日志但打错等级"。真正的假阴性还包括**根本没打日志**的失败路径。
+
+扫法：全仓装配 / 启动 / 后台函数（`setup*` / `start*` / `init*` / `Run*` / `Watch*`…）里
+「`err != nil` 分支**既不打日志、也不向上传播 `error`**」的分支。
+
+结果：**8 条候选，全是假候选** —— 项目自封装的日志出口（`FailAndAbort` / `writeError` /
+`writeManagementError`）脚本认不出，其余是 `errors.Join(...)` 向上返回。
+
+**这个否定性结论本身有价值**：它说明 C07/C08 给装配期日志补 `event` 的那一轮，
+顺带把"失败必须留痕"也补齐了 —— `bootstrap.go` 里每个"跳过装配"的 `return` 前都有
+`Warn`/`Info`，且多数还有链式的下游信号（`zlmRegistry == nil` 会让 `setupTrafficRuntime`
+打一条"未就绪,跳过装配"）。
+
+⚠️ **别把这个扫描做成门禁**：它的准确率取决于"项目自封装出口"白名单，
+而白名单会随代码演进失效（这次第一版就漏了 `FailAndAbort` 和 `writeError`，
+854 条假候选）。它是**一次性审计工具**，不是规则。
+
+### 10.4 判定：升 `ERROR` 3 条
+
+| 事件 | 原 | 为什么 |
+|---|---|---|
+| `gb28181.sip.uac_init_failed` | `WARN` | 代码注释原文写"创建失败仅警告:注册仍可工作"，但**同一段注释后半句是"点播也不可用"**。没有 UAC → Catalog 自动触发 / DeviceInfo 查询 / 点播全部不可用，且是**启动期一次性、不会自愈**的。属 C03.③ 第三组"SIP 子系统装配失败"—— 同组的 `gb28181.sip.start_failed` / `gb28181.sip.config_load_failed` 都是 `ERROR` |
+| `auth.login_audit.persist_failed` | `WARN` | 与 `audit.operation_log.persist_failed` **完全同构**。`RecordLoginAttempt` 的文件头注释写着 "isolates audit failures from authentication responses"（登录照样成功返回）；`SysLoginLog` 就是审计行（`CleanupBefore` 注释 "immutable audit rows"）。判据第三条成立：无下游信号 |
+| `auth.login_audit.panic` | `WARN` | panic 在全仓统一 `ERROR`（`http.panic` / `gb28181.snapshot.panic` / `play.reconcile.panic`），唯独这条在 `WARN`；recover 之后同样无人察觉 |
+
+三处都在代码里就地写了理由（含"别改回去"）—— 因为它们的**名字**都不像大事。
+
+### 10.5 判定：降 `INFO` 2 条（同轮翻出的**反方向**错配）
+
+| 事件 | 原 | 为什么 |
+|---|---|---|
+| `gb28181.playauth.key_init_failed_auth_off` | `WARN` | 在 `if CurrentPlayAuthSettings().Enabled` 的 **else 支** —— 鉴权**本来就关着**，密钥生成失败**没有牺牲任何东西**，答不出判据②"降了什么"。同函数另一支（鉴权开着却没密钥）才是 `ERROR` |
+| `gb28181.playauth.reload_key_init_failed_auth_off` | `WARN` | `ReloadSIP` 里的同一判定 |
+
+留着这两条 `WARN` 等于**每台没开鉴权的机器每次启动都多一条告警** ——
+正是第二节"WARN 一旦能拿不准就放进来，就不再是告警"的实例，只是方向相反。
+
+### 10.6 判定：**故意不升**的几条（理由写进了代码注释）
+
+| 事件 | 为什么不升 |
+|---|---|
+| `gb28181.sip.broadcast_client_init_failed` | 广播是**子能力**，不是核心链路；且缺失时有替代信号 —— `handleBroadcastInvite` 在 `broadcastDialogs == nil` 时回 **503 "Broadcast Service Unavailable"**，上游明确知道它不可用 |
+| `zlm.registry.load_failed` | `LoadAll` 失败后 **`return` 走 deprecated 单节点路径**，是设计内的降级容错 |
+| `gb28181.traffic.repository_assemble_failed` | 上游有链式信号（"DB/ZLM 未就绪"的 `Info`、"表未迁移"的 `Warn`）；流量统计是观测功能，缺失不影响任何人干活 |
+| `setup.sip_reload_failed` | **最容易误判的一条**：它是 HTTP 请求内的失败，**把 `reloadedOk:false` + `reloadError` 返回给前端**并展示 —— 判据第三条不成立。它不是"SIP 挂了"，是"这次保存没生效" |
+| `zlm.probe.failed` | 多节点并发探活，单节点失败只让该节点不可用；"全部节点都失败"应由**汇总**日志表达，不是把单条升级 |
+| `casbin.policy_reload.failed` | 周期性重试，失败一次不影响当前已生效的策略；持续失败会每次都刷 |
+
+### 10.7 结果
+
+```
+等级分布   Warn 178 → 173      Error 20 → 23      Info 126 → 128      Debug 27 不变
+调用点总数 351（不变）         唯一 event 值 331（不变，没有新增事件名）
+业务域 Warn 135/248 → 132/248 = 53%     auth 分桶 Warn 3 → 1     gb28181 分桶 Warn 81 → 78
+门禁       双门禁 0 findings，且**零连带**
+```
+
+⚠️ **这次完全没有连带义务（§八），与 C03 主体和 C03.③ 都不同。**
+原因正是 §八 那条规律：**连带只在"改的是被豁免的调用点"时才触发**。
+本次改的 5 处全都带静态 `event`，本来就不在 `reviewed_legacy.json` 里，
+也没碰被 SHA 封印的适配器文件。
+
+### 10.8 这一轮的教训：**"唯一"是个危险的说法**
+
+9.1 里写"全仓唯一一类"、9.4 里写"全仓唯一一条"，两处都在本轮被推翻 ——
+不是判断错了，是**当时的对照范围只覆盖"同一个 `event` 名"**。
+写"唯一"的时候要说清"在什么口径下唯一"，否则下一个做反方向复核的人会从这句话里
+读出错误的边界。
 

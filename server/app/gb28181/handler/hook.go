@@ -1395,18 +1395,20 @@ func (h *HookController) OnServerKeepalive(c *gin.Context) {
 	if err := h.collector.Receive(body); err != nil {
 		// `identity.MediaServerID` 在 :1288 已经解过（虽然只用于节点比对），
 		// 这里直接复用：心跳处理失败时"是哪个节点的载荷"就是第一个要看的字段。
+		// C02 顺带：字段名原为 `body_len`，与同仓 `body_bytes`（4 处）**同义不同名** ——
+		// 裸数字（`zap.Int`）的字段名必须自带单位，"len" 不说单位。
 		if identity.MediaServerID != "" {
 			hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败",
 				zap.String("event", "gb28181.hook.keepalive.process_failed"),
 				zap.String("media_server_id", identity.MediaServerID),
-				zap.Int("body_len", len(body)), logging.Error(err))
+				zap.Int("body_bytes", len(body)), logging.Error(err))
 		} else {
 			// 载荷里连 mediaServerId 都解不出来 —— "谁的心跳"的答案就是"解不出来"，
 			// `media_server_id` 字段缺席而不是打空串；此时 `source_ip` 接棒。
 			hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败（载荷无 mediaServerId）",
 				zap.String("event", "gb28181.hook.keepalive.process_failed"),
 				zap.String("source_ip", hookSourceIP(c.Request.RemoteAddr)),
-				zap.Int("body_len", len(body)), logging.Error(err))
+				zap.Int("body_bytes", len(body)), logging.Error(err))
 		}
 	}
 	hookOK(c)

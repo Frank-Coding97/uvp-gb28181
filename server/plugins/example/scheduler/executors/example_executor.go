@@ -29,7 +29,10 @@ func (e *ExampleExecutor) Execute(ctx context.Context, job *schedulerhelper.Job)
 			zap.String("job_name", job.Name))
 		return nil
 	case <-ctx.Done():
-		app.Log(ctx).Named("scheduler.example").Warn("ExampleExecutor 任务被取消", zap.String("event", "scheduler.example.canceled"),
+		// C01.4 顺带统一：内置的 `demo_executor.go` 这一支打的是 Info，本插件示例打的是 Warn ——
+		// 两个文件是镜像实现。任务被取消意味着调度器正在停，什么都没坏
+		// （levels.md 判据④"什么都没发生"），答不出判据②的"降了什么"。
+		app.Log(ctx).Named("scheduler.example").Info("ExampleExecutor 任务被取消", zap.String("event", "scheduler.example.canceled"),
 			zap.String("job_id", job.ID),
 			zap.Error(ctx.Err()))
 		return ctx.Err()

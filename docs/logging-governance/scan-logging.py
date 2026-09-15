@@ -158,6 +158,10 @@ APPEND_RE = re.compile(r"append\(\s*([A-Za-z_][A-Za-z0-9_]*)")
 BARE_RE = re.compile(r",\s*([A-Za-z_][A-Za-z0-9_]*)\.{3}\s*\)")
 
 SKIP_DIRS = {"node_modules", ".git", "vendor", "third_party"}
+# 隐藏目录一律跳过。仓库约定是「跨分支做事另建 worktree」，而 worktree 默认落在
+# `.claude/worktrees/<name>/` 下——那是**整份 server/ 的拷贝**，扫进来会让所有指标
+# 成倍虚高（实测 486 vs 351 调用点）。IDE 缓存目录同理。
+SKIP_HIDDEN_DIRS = True
 SKIP_PATH_PARTS = ("/loggingacceptance/", "/loggingcontract/")
 
 
@@ -313,7 +317,11 @@ def main():
     plain_seg = []    # ⑤ 疑似函数名横拼（仅提示）
 
     for root, dirs, files in os.walk(root_dir):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in SKIP_DIRS and not (SKIP_HIDDEN_DIRS and d.startswith("."))
+        ]
         for f in sorted(files):
             if not f.endswith(".go") or f.endswith("_test.go"):
                 continue

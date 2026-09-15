@@ -70,9 +70,9 @@ done
 
 | 编号 | 治理项 | 状态 | 详情 |
 |---|---|---|---|
-| C01 | 事件目录（Event Registry） | 🔄 `play` 链路 45 类已登记（种子） | [event-catalog.md](./contracts/event-catalog.md) |
-| C02 | 字段字典（统一命名） | 🔄 `play` + `cascade` 已统一 snake_case | [content-plan.md](./content-plan.md#c02) |
-| C03 | 等级校准（Warn 通胀） | ✅ **已完成**（2026-09-15，Warn 43% → **37%**；撤销 <10% 目标，改为三条可判定目标） | [contracts/levels.md](./contracts/levels.md) |
+| C01 | 事件目录（Event Registry） | ✅ **已完成**（2026-09-15；登记处由 C09 的 `registry.json` + `unregistered_event` 落地，本项收尾：拆 2 个"一名多义"事件、统一 1 条等级、判定不做常量收拢） | [event-catalog.md](./contracts/event-catalog.md) · [registry.md](./contracts/registry.md) |
+| C02 | 字段字典（统一命名） | ✅ **已完成**（2026-09-15；风格统一由 C08 完成、门禁由 C09 完成。本项裁决"同义不同名"：收敛 **1 处**、登记 **5 组"伪别名"不许合并**） | [field-naming.md](./contracts/field-naming.md) |
+| C03 | 等级校准（Warn 通胀） | ✅ **已完成**（2026-09-15，含 C03.③ `ERROR` 复核 70→20、C03.④ 假阴性复核；撤销 <10% 目标，改为三条可判定目标） | [contracts/levels.md](./contracts/levels.md) |
 | C04 | `play` 链路定位契约 | ✅ **已完成 + 已实机验收**（2026-09-15） | [contracts/play.md](./contracts/play.md) |
 | C05 | `cascade` 链路定位契约 | ✅ **已完成**（2026-09-15，门禁 cascade 部分归零） | [contracts/cascade.md](./contracts/cascade.md) |
 | C06 | `gb28181` 核心链路定位契约 | ✅ **已完成**（2026-09-15，**门禁 2 → 0 全绿**） | [contracts/gb28181-core.md](./contracts/gb28181-core.md) |
@@ -84,8 +84,9 @@ done
 
 ## 四、实测基线（2026-09-15，脚本全量扫描生产代码）
 
-扫描口径：`server/**/*.go`，排除 `_test.go` / `internal/loggingacceptance` / `internal/loggingcontract`，
-共 **351 个日志调用点**。（337 → 343（C06）→ 349（C07）→ **351**（C08）。两个方向都要小心：
+扫描口径：`server/**/*.go`，排除 `_test.go` / `internal/loggingacceptance` / `internal/loggingcontract`
+**以及所有隐藏目录**，共 **351 个日志调用点**。（337 → 343（C06）→ 349（C07）→ **351**（C08）。
+两个方向都要小心：
 条件分支会把一条调用点拆成两支 → 分母变大不等于日志变多；而**没有任何 `zap.Field` 参数的
 调用根本不计入**（`calls_in()` 要求段内有 `zap.`）→ 给它补上 `event` 会让分母变大、
 "无定位"一起变大，是**看得见的更多，不是变得更多**。见下面 C07 后记。）
@@ -95,7 +96,7 @@ done
 | 无任何定位字段 | **121 / 351 = 34%**（172 → 167 → 146 → 152 → 125 → **121**，末段是 C09 补的 4 处 `hook.go` 拒绝出口） | < 10%（组件级事件豁免） |
 | 等级分布 | **Warn 178（50.7%）** > Info 126 > Error 20 > Debug 27 | 见 C03 后记（原「Warn < 10%」已撤销；**比例不是指标**） |
 | 业务链路 Warn 占比 | **54%**（业务域 248 条里 135 条 WARN） | 见 C03 后记 |
-| 字段名唯一值 | **161 个**（device 有 4 种写法、channel 5 种、node 5 种） | 收敛到一本字典 |
+| 字段名唯一值 | **160 个**（= 字典 **159** + `event` 本身）。⚠️ device/channel/node 的"多种写法"经核实是**不同对象**（`device_id` 主键 vs `device_code` 国标编码、`server_id` SIP 身份 vs `node_id` 媒体节点），**不是别名** | ✅ 一本字典（[field-naming.md](./contracts/field-naming.md)） |
 | 唯一 event 值 | **331 个**（269 → 272 → 287 → 330 → **331**：末个是 C03.③ 把 881 处调用共用的失败出口按状态码拆名） | 全部进目录 |
 | 登记册门禁（C09） | **0 findings**（331 事件 / 160 字段 / 1 条带理由的例外） | 保持 0（**不是**"基线为 0 才正常"，见 C09 后记） |
 | 事件等级唯一性（C03） | **0 findings**（331 个事件里没有一个跨等级） | 保持 0 |
@@ -106,6 +107,16 @@ done
 **进程框架域** 17/17 = 100%（全豁免）· **未归类** `其他` **0**、`(无 event)` **1**。
 （`其他` 与 `(无 event)` 里大量是启动期/生命周期日志——它们的定位对象是"进程/配置"而非设备，
 判据应另设，不能一并算作不合格。）
+
+> ⛔ **2026-09-15 修掉一个会让全部指标虚高的口径漏洞：隐藏目录没被排除。**
+> 仓库约定是「跨分支做事另建 worktree」，而 worktree 默认落在
+> `.claude/worktrees/<name>/` —— 那是**整份 `server/` 的拷贝**。
+> 旧脚本的 `SKIP_DIRS` 只管 `node_modules`/`.git`/`vendor`/`third_party`，
+> 于是副本里的日志调用点被一并计入：实测 **486 vs 真实 351**，
+> 唯一 event 值 331 → 358、唯一字段名 161 → 200 ——
+> **看着就像"前几轮的治理成果全部回流了"。**
+> 现在 `SKIP_HIDDEN_DIRS` 一律跳过以 `.` 开头的目录（顺带覆盖 `.venv`/`.vscode` 等 IDE 缓存）。
+> → **指标突然大幅变差时，先怀疑口径，再怀疑代码**；跑之前确认工作区没有未排除的副本。
 
 > ⚠️ **口径变化（2026-09-15）**：脚本补上了**事件名常量化**的读取能力。
 > C01 的方向就是把事件名收敛成常量（`zap.String("event", cascadeVideoEventFailed)`），
@@ -181,6 +192,80 @@ done
 > —— 全仓唯一"主流程成功、记录永久丢失、且没有任何下游会因此报错"的失败，
 > 判据第三条（**没有别的信号能暴露它**）就是为它加的。逐条判定表见
 > [`contracts/levels.md`](./contracts/levels.md) 第九节。
+
+> ⚠️ **C03.④ 假阴性复核（2026-09-15）：从 178 条 `WARN` 里翻出 3 条该是 `ERROR` 的，另有 2 条反向错配。**
+> 它是 C03.③ 的**反方向** —— 前两轮都在问"有没有被高估的"，这轮问"有没有被低估的"。
+> 难点是"**没有的东西看不出形状**"，所以没有靠通读，而是用两条可机检的判据：
+>
+> 1. **同语义族跨等级**（`event_level_divergence` 管不到的那一半）。门禁只查**同一个 event 名**
+>    跨等级；而 `auth.login_audit.persist_failed`(WARN) 与 `audit.operation_log.persist_failed`(ERROR)
+>    是**不同名、同语义** —— 前者恰好是被后者那句"全仓唯一一类主流程成功、记录永久丢失"
+>    的注释漏掉的。按事件名末段（结果词）分组后得 **15 个跨等级语义族**，逐族判定。
+> 2. **完全静默的失败**（连日志都没有）。扫全仓装配/启动/后台函数里
+>    「`err != nil` 分支既不打日志、也不向上传播 `error`」的分支 —— **8 条候选全是假候选**
+>    （项目自封装的出口 `FailAndAbort`/`writeError`，或 `errors.Join` 向上返回）。
+>    **否定性结论也算结论**：装配路径的记录在 C07/C08 补 event 那一轮已经补齐了。
+>
+> 升 `ERROR` 的 3 条（每处都就地写了"别改回去"的理由）：
+>
+> | 事件 | 原 | 为什么 |
+> |---|---|---|
+> | `gb28181.sip.uac_init_failed` | WARN | 原文写"创建失败仅警告，注册仍可工作"，但后果是 **Catalog 自动触发 / DeviceInfo 查询 / 点播全部不可用** —— 属 C03.③ 第三组"SIP 子系统装配失败"（同组 `sip.start_failed` / `sip.config_load_failed` 都是 ERROR） |
+> | `auth.login_audit.persist_failed` | WARN | 与 `audit.operation_log.persist_failed` **完全同构**（登录照常成功、审计行永久丢失、无下游信号）。`SysLoginLog` 就是审计行（`CleanupBefore` 注释原话 "immutable audit rows"） |
+> | `auth.login_audit.panic` | WARN | panic 在全仓统一是 ERROR（另外 3 条都是），唯独这条在 WARN —— recover 之后同样无人察觉 |
+>
+> **反方向（降 `INFO`）2 条**：`gb28181.playauth.key_init_failed_auth_off` 与
+> `…reload_key_init_failed_auth_off` —— 它们在 `if CurrentPlayAuthSettings().Enabled` 的 **else 支**，
+> 即**鉴权本来就关着**，这次失败没有牺牲任何东西，答不出判据②的"降了什么"。
+> 同一函数另一支（鉴权开着却没密钥）才是 `ERROR`。留着等于**每台没开鉴权的机器启动都多一条告警**。
+>
+> ⛔ **故意没升的几条，理由写在代码注释里**，防止后人按"长得像"跟风：
+> - `gb28181.sip.broadcast_client_init_failed` —— 广播是**子能力**，且缺失时
+>   `handleBroadcastInvite` 回 **503 "Broadcast Service Unavailable"** → 有替代信号。
+> - `zlm.registry.load_failed`（走 deprecated 单节点路径）、
+>   `gb28181.traffic.repository_assemble_failed`（上游有链式 Info/Warn）、
+>   `setup.sip_reload_failed`（**把 `reloadedOk:false` 返回给前端**）。
+>   `setup.sip_reload_failed` 尤其容易被误判成"SIP 挂了"：它只是 HTTP 请求内的失败，前端当场收到原因。
+>
+> 结果：`Warn 178 → 173`、`Error 20 → 23`、`Info 126 → 128`；
+> **调用点总数 351 与唯一 event 数 331 都没动** —— 与 C03.③ 一样是**转移，不是新增**。
+> 双门禁 0 findings 且**这次零连带**：改的调用点全都带静态 `event`，不在
+> `reviewed_legacy.json` 的豁免清单里 —— 正好印证 §八 那条"连带只在改被豁免的调用点时才触发"。
+
+> ⚠️ **C01 + C02（2026-09-15）的共同结论：两项的目标都已被 C09 达成，只剩收尾 ——
+> 而收尾时各自翻出一个"计划本身错了"的地方。**
+>
+> | | C01 事件目录 | C02 字段字典 |
+> |---|---|---|
+> | 原目标 | 唯一登记处 + 新增/改名可发现 | 一本字典、一套命名 |
+> | 实际由谁达成 | **C09**：`registry.json` + `unregistered_event` | **C08**（camelCase 58 → 0）+ **C09**（三条字典规则） |
+> | 本项做的 | 拆 **2 个"一名多义"事件**（`gb28181.message.ptz_failed` → `…ptz_control_failed` / `…ptz_query_failed`；`lifecycle.shutdown_incomplete` 的第 3 处 → `lifecycle.shutdown_work_active`）+ 统一 1 条等级 | 收敛 **1 处**真别名（`body_len` → `body_bytes`） |
+> | 计划里被推翻的 | "把 50 个局部常量收拢成 Go 包" —— 会让事件名有两个来源 | 那张"别名映射表"：6 组里 **5 组是伪命题**（`server_id` 是 SIP ServerID 不是 `node_id`、`peer` 不是 `source_ip`、`device_code` 不是 `device_id`…） |
+>
+> ⛔ **两项一起给出的教训**：**计划里的"改名 / 合并 / 收拢"建议，先去代码里核对语义再执行。**
+> C06 的 `is_first`、C02 的 `server_id`、C01 的"常量收拢"都是同一类 ——
+> 计划写在通读代码**之前**，而语义只藏在代码里。
+> **合并两个不同对象的名字，是把"信息不完整"变成"信息错误"，比两个名字更糟。**
+>
+> ⚠️ **两项都刻意"少建一个维护点"**：C01 不收拢事件常量（JSON 名册已是唯一来源），
+> C02 不手写"核心 20 个字段"表（字典从源码扫出）。**一个名字只能有一个定义点。**
+>
+> ⚠️ **C01.4 的"一名多义"检测只做人工裁决、不做门禁**：同一事件在不同调用点写不同消息
+> 并不都是错的（带不带原因、带不带上下文），做成门禁会大量误报。
+> 门禁只留能零例外的那条（`event_level_divergence`，同一个 `event` 名跨等级）。
+>
+> 数字影响（接在 C03.④ 之后）：唯一 event **331 → 333**、唯一字段名 **160**
+> （字典 **159** + `event` 本身）、`Warn 173 → 172`（`scheduler.example.canceled` 降 `INFO`）。
+> ⚠️ **顺带修了一处门禁可读性**：`stale_field_dictionary_entry` 原先**报不出是哪个字段**
+> —— 该 finding 没有 `File`/`Line`，而 `Finding.String()` 只打印「位置 + 类型 + 描述」。
+> 收敛 `body_len` 时实测撞上，得靠读 diff 反推。已让 `String()` 带上 `event=` / `field=`。
+
+> ⚠️ **另外修掉一个会让全部指标虚高的口径漏洞（2026-09-15）**：`scan-logging.py` 的
+> `SKIP_DIRS` 原先不含隐藏目录，而仓库约定"跨分支另建 worktree"会落在
+> `.claude/worktrees/<name>/` —— 那是**整份 `server/` 的拷贝**，被一并计入扫描：
+> 实测 **486 vs 真实 351**（唯一 event 331 → 358、字段 161 → 200），
+> 看着像"前几轮成果全部回流"。现在一律跳过 `.` 开头的目录。
+> **指标突然大幅变差时，先怀疑口径，再怀疑代码。**
 
 > ⚠️ **C09 加的是"门禁"，不是"文档"。它的第一批产出是 6 条基线 findings，不是 0 条。**
 > 如果一项治理做完之后门禁直接是绿的，那说明**它只把已有做法写了下来**。
@@ -324,11 +409,11 @@ done
 > 已于 2026-09-15 修复，见 [`contracts/sanitize-policy.md`](./contracts/sanitize-policy.md)；
 > 复核命令见 [`testing-guide.md`](./testing-guide.md) 的 L3.2。
 
-**字段命名风格**（按出现次数，不含 `event`/`stage` 这类单段小写）：
-`snake_case` **296** / `camelCase` **95** / 驼峰加大写 ID（`streamID`）**5**。
-（C04 把 `play` 链路的 18 处大写 ID 与 6 个 camelCase 字段名统一后，
-大写 ID 从 **23 → 5**、唯一字段名从 **173 → 161**。**C08 后 camelCase 归零**：
-`58 → 0`（57 处 / 12 个文件），"驼峰+大写ID"同步归零 —— 目标"只剩 snake_case"**已达成**。）
+**字段命名风格**（按出现次数）：`snake_case` **496** + 单段小写 **591**（`event` / `stage` 这类）
+—— **`camelCase` 与驼峰大写 ID 均已归零**。
+（C04 把 `play` 链路的 18 处大写 ID 与 6 个 camelCase 统一后，大写 ID 23 → 5、唯一字段名 173 → 161；
+**C08 后 camelCase 58 → 0**（57 处 / 12 文件）；**C09 用纯格式规则 `^[a-z][a-z0-9_]*$` 把它永久钉住** ——
+目标"只剩 snake_case"**已达成**。）
 
 **复跑（权威口径）**：
 

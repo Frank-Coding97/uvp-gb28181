@@ -6,9 +6,12 @@
 
 ---
 
-## C01 · 事件目录（Event Registry）
+## C01 · 事件目录（Event Registry）· ✅ 2026-09-15 完成
 
 **目标**：250 个 event 有唯一登记处，新增/改名/删除有人能发现。
+
+**实际结果：331 → 332 个事件进了 `internal/loggingcatalog/registry.json`，
+`unregistered_event` 门禁负责"新增/改名有人能发现"。** 逐项判定见文末勾选区。
 
 **好消息：基础已经有一半。** 仓库里**已经存在 50 个事件常量**，只是散落在 9 个文件里各自定义：
 
@@ -39,31 +42,84 @@ app/utils/logging/realtime.go / repeat.go    （框架自身）
    **填不出"等级 + 触发条件"的事件，说明它本来就不该存在**——填表过程本身就是一次清理。
 3. 用 `scan-logging.py` 从现网代码生成 250 条初稿，人工裁决（合并同义、删噪声、补缺失）。
 
-**勾选**：
+**勾选** —— ✅ **2026-09-15 完成**。结论：本项的目标是"**250 个 event 有唯一登记处，
+新增/改名/删除有人能发现**"，**这两点由 C09 落地**（`registry.json` + `unregistered_event` 门禁），
+C01 剩下的只是收尾。逐项判定如下。
+
+> ⚠️ **落地形态变了三处，都是"少一个必须同步的地方"**：登记处不是 Go 包而是 JSON 名册、
+> 常量不收拢、四格表的另三格不重复登记。理由写在 C01.1/C01.2 里。 
+> **教训：一个名字只能有一个定义点。** "Go 常量 + JSON 名册"看起来更规范，
+> 实际是同一个事实两处存 —— 而门禁本来就**读得懂源码里的字面量和常量**
+> （`scan-logging.py` 的 `CONST_EVENT_RE` + `const_strings()`），常量带来的增量只有"改名时多一道引用检查"。
 
 - [x] C01.0（前置，2026-09-14）`play` 链路 **45 类事件**已按四格登记 →
       [`contracts/event-catalog.md`](./contracts/event-catalog.md)。
       这是 C01 的种子，同时产出了一个关键概念：**定位维度分层**
       （`device` / `stream` / `node` / `component`）——没有它，"组件级事件该不该补 `device_id`"就无据可依。
-- [ ] C01.1 确定登记处的包路径与数据结构（把 `event-catalog.md` 迁成 Go 包，供门禁读取）
-- [ ] C01.2 迁移已有 50 个局部常量
-- [ ] C01.3 生成 250 条初稿（脚本）
-- [ ] C01.4 人工裁决：合并 / 删除 / 补全
-- [ ] C01.5 `acceptance.*` / `fixture.*` / `legacy.*` 等测试与示例事件移出业务命名空间
-- [ ] C01.6 门禁校验：调用点的 `event` 值必须在目录中
+- [x] C01.1 确定登记处的包路径与数据结构 —— **形态变了**：用 C09 的
+      `internal/loggingcatalog/registry.json`，**不是**把 `event-catalog.md` 迁成 Go 包。
+      迁成 Go 包 = 同一份事件名在**常量**和**名册**里各存一次，
+      而门禁 `unregistered_event` 已经能直接从源码比出"这个 `event` 值在不在名册里"。
+- [x] ~~C01.2 迁移已有 50 个局部常量~~ —— **判定不做**，理由同上。那些常量
+      （`playEvent*` / `snapshotEvent*` / `*Event`）留在原处没有问题：门禁读得懂它们，
+      收拢反而让"事件名"有了第二个来源。
+- [x] C01.3 生成初稿 —— 实测 **331 → 332 条**，生成器是
+      `UVP_LOGGING_CATALOG_UPDATE=1 go test ./internal/loggingcatalog/ -run TestLoggingCatalogRegenerate`
+      （**先判定、后跑生成器**，diff 就是审查）
+- [x] C01.4 人工裁决：合并 / 删除 / 补全 —— 本次做了它的**可机检形态**：
+      「**同一 `event` 名对应多条不同消息**」= 一名多义。全仓 332 个事件里只有 **5 个**，逐条判定：
+
+      | 事件 | 判定 |
+      |---|---|
+      | `gb28181.message.ptz_failed` | **拆** → `…ptz_control_failed` + `…ptz_query_failed`（DeviceControl 应答 vs 一批查询应答，是两种报文） |
+      | `lifecycle.shutdown_incomplete` | **拆**第 3 处 → `lifecycle.shutdown_work_active`（"还有这些组件的活没跑完" ≠ "Stop 返回了 error"；前者连 `error` 字段都没有） |
+      | `gb28181.hook.keepalive.process_failed` ×2 | 保留（同一语义，第二条只是把原因写进消息） |
+      | `gb28181.hook.rtp_timeout_stop_failed` ×2 | 保留（同一语义，措辞略异） |
+      | `play.reconcile.probe_failed` ×3 | 保留（C04 已裁决：三条都降 `DEBUG`） |
+
+      顺带统一 `scheduler.example.canceled` `WARN` → `INFO` —— 镜像文件 `demo_executor.go`
+      同一支本来就是 `INFO`，而"任务被取消"是判据④"什么都没发生"。
+      ⚠️ **这条规则只做人工裁决、不做门禁**：同一事件在不同调用点写不同消息并不都是错的
+      （带不带原因、带不带上下文），做成门禁会大量误报 —— 门禁只做能零例外的那条
+      （`event_level_divergence`，同名跨等级）。
+- [x] C01.5 测试与示例事件移出业务命名空间 —— **实测基本已达成**：`_test.go` 本来就被扫描器排除
+      （`calls_in()` 只在非测试文件跑）；`registry.json` 里带测试语义的只剩 `legacy.log` 一条，
+      而 `legacy` 已在**进程框架域**；示例执行器的事件在 `scheduler.`（**平台支撑域**）下。
+      没有需要迁移的。
+- [x] C01.6 门禁校验：调用点的 `event` 值必须在目录中 —— `unregistered_event`（C09 建的）。
+      本次拆分**立刻被它挡了一次**（3 条），这正是门禁该有的反应；
+      连带还报了 2 条 `locating_field_lost`（旧名 `ptz_failed` 已无调用点）——
+      两条一起在 diff 里被看见，然后才跑生成器。
 
 ---
 
-## C02 · 字段字典（统一命名）
+## C02 · 字段字典（统一命名）· ✅ 2026-09-15 完成
 
 **目标**：一本字典，一套命名。
 
-**现状（实测）**：173 个唯一字段名；命名风格三套并存——`snake_case` 269 / `camelCase` 95 /
-驼峰大写 ID（`streamID`）23；
-同一语义多写法：`device_id`(63) / `deviceId` / `deviceCode` / `deviceID`；
-`channel` 5 种、`node` 5 种（含 `media_server_id`、`server_id`）。
+**结论写在前**：**计划里那张"别名映射表"大半不成立。** 逐组去代码里核对后，
+6 组假设里 **5 组是伪命题** —— 那两个名字指的是**不同的对象**（最典型：
+`server_id` 是 **SIP ServerID**，不是 `node_id`；`peer` 是 **SIP 复合身份**，
+不是 `source_ip`）。真正需要合并的"同义别名"只有 **1 处**
+（`body_len` → `body_bytes`）。判定正本见
+[`contracts/field-naming.md`](./contracts/field-naming.md)。
 
-**做法**：
+> ⚠️ 与 C06 的 `is_first` / `catalog_triggered` 是同一类教训：
+> **计划里的"改名 / 合并"建议，一律先去代码里核对语义。**
+> 合并两个不同对象的名字 = 把"信息不完整"变成"信息错误"。
+>
+> 风格统一那半边由 **C08** 做掉（camelCase 58 → 0），门禁那半边由 **C09** 做掉
+> （`field_not_in_dictionary` / `field_name_not_snake_case` / `stale_field_dictionary_entry`）
+> —— 本项只收尾"同义不同名"的裁决。
+
+**原计划（留档）**：173 个唯一字段名；命名风格三套并存——`snake_case` 269 / `camelCase` 95 /
+驼峰大写 ID（`streamID`）23；同一语义多写法：`device_id`(63) / `deviceId` / `deviceCode` / `deviceID`；
+`channel` 5 种、`node` 5 种（含 `media_server_id`、`server_id`）。做法是
+"先定核心 20 个字段 → 出别名映射表 → 按模块批量改"。
+
+⚠️ **下面这三步是原计划，照做会犯错**（第 1 步表里的 5 组"别名"经核实是不同对象）。
+
+**做法（原计划，仅留档）**：
 
 1. 先定**核心 20 个**字段（覆盖 80% 调用点），别一上来搞 194 个。
 
@@ -83,15 +139,38 @@ app/utils/logging/realtime.go / repeat.go    （框架自身）
 
 **勾选**：
 
-- [ ] C02.1 定核心 20 个规范字段
-- [ ] C02.2 出别名映射表（含每个别名的现存次数）
+- [x] C02.1 定核心规范字段 —— **形态变了**：不手写"核心 20 个"表，
+      而是让 **C09 的字典**成为唯一来源（**159 条**，`registry.json` 的 `fields` 段）。
+      手写 20 条等于同一个名字两处定义；而字典是**从源码扫出来的**，
+      `field_not_in_dictionary` 保证"新名字必须显式登记"。
+      规范本身（"一个名字一件事""**单位跟值类型走**"）写在 `field-naming.md` §一、§五。
+- [x] C02.2 出别名映射表 —— **做了，结论是"表基本是空的"**：
+
+      | 别名 | 规范名 | 现状 |
+      |---|---|---|
+      | `body_len` | `body_bytes` | ✅ **本次收敛**（2 处，`hook.go`） |
+      | `deviceId` / `channelId` / `streamId` / `streamID` 等**大小写变体** | `device_id` / … | ✅ C08 已清零（58 → 0） |
+      | `deviceCode` / `channelCode` / `server_id` / `media_server_id` / `peer` / `state` | ❌ **不是别名** | 登记在 `field-naming.md` §三，**不许合并**（各自指向不同对象） |
+
 - [x] C02.3 改 `play`（见 C04）—— 2026-09-14：`reconciler` 18 处 + `snapshot` 4 处 → snake_case；
       `play` 链路 camelCase / 大写 ID **清零**。⚠️ 顺带登记的例外：`reuse_cleanup` 用
       `stale_stream_id`（语义确实不同，**不能并入 `stream_id`**）
-- [ ] C02.4 改 `cascade`
-- [ ] C02.5 改 `gb28181` 核心
-- [ ] C02.6 改 `zlm` / `ptz` / 其余
-- [ ] C02.7 门禁校验：字段名必须在字典中
+- [x] C02.4 改 `cascade` —— **由 C08 完成**（`platformId` → `platform_id` 等在 C05 已改，
+      其余 camelCase 归入 C08 的 57 处）
+- [x] C02.5 改 `gb28181` 核心 —— **由 C08 完成**
+- [x] C02.6 改 `zlm` / `ptz` / 其余 —— **由 C08 完成**。⚠️ 且**不能按名字硬扫**：
+      `nodeId` / `channelId` / `serverId` 同时是 **HTTP API 的 JSON 字段名**，
+      只能匹配 `zap.<Method>("camelName"`，全局替换会破坏接口契约
+      （见 `contracts/platform-support.md` §五）
+- [x] C02.7 门禁校验：字段名必须在字典中 —— **由 C09 完成**（三条规则：
+      `field_not_in_dictionary` / `field_name_not_snake_case` / `stale_field_dictionary_entry`）
+
+**顺带修的一处门禁可读性**：`stale_field_dictionary_entry` 原先**报不出是哪个字段** ——
+这条 finding 没有 `File`/`Line`，而 `Finding.String()` 只打印「位置 + 类型 + 描述」。
+收敛 `body_len` 时实测撞上，得靠读 diff 才能反推。已让 `String()` 带上 `event=` / `field=`。
+
+**完成判据（复跑）**：命名风格扫描只剩 `snake_case` + 单段小写 `event`；
+`grep -rn '"body_len"' app/` 无输出；`go test ./internal/loggingcatalog/` 0 findings。
 
 ---
 
@@ -155,6 +234,15 @@ A + B 占 90%。凑出 < 10% 只能把它们一起降，那等于把"断流失�
       `http.operation_rejected`（`INFO`）/ `http.operation_failed`（`ERROR`，保留原名）。
       另 45 条降 `WARN`（关停不完整 8 + 单次写库/查询/清理失败 37）、4 条降 `INFO`、
       19 条留 `ERROR`。逐条判定表见 [`contracts/levels.md`](./contracts/levels.md) 第九节
+- [x] C03.④ **假阴性复核**（2026-09-15 补做，见 `levels.md` 第十节）：178 条 `WARN` 里
+      翻出 **3 条该是 `ERROR`**（`sip.uac_init_failed` / `login_audit.persist_failed` /
+      `login_audit.panic`）+ **2 条反向错配降 `INFO`**（`playauth.key_init_failed_auth_off` ×2）。
+      两条可机检线索：① **同语义族跨等级**（按事件名末段分组，15 组，门禁只查同名跨等级、
+      查不到"不同名同语义"）；② **完全静默的失败**（扫装配/后台函数里既不打日志也不
+      向上传播 `err` 的分支 → 8 条候选**全是假候选**，是**否定性结论**：
+      C07/C08 补 `event` 那一轮已顺带补齐了装配路径的留痕）。
+      结果 `Warn 178 → 173` / `Error 20 → 23` / `Info 126 → 128`，**总数 351 与 event 331 不变**，
+      双门禁 0 findings 且**零连带**（改的调用点都带静态 `event`，不在豁免清单里）
 
 **`zlm` 桶 19 条 Warn 一条没动，这是判定不是遗漏**：17 条是 `zlm.registry.*` /
 `zlm.scheduler*.*` 装配链降级（进程继续跑其他功能 = `WARN` 的标准情形），
@@ -167,6 +255,9 @@ A + B 占 90%。凑出 < 10% 只能把它们一起降，那等于把"断流失�
    70 条逐条判定，20 条留 `ERROR`、45 条降 `WARN`、4 条降 `INFO`，另有 1 处出口拆成两个事件名。
    还没做的是**反方向**：本该 `ERROR` 却打在 `WARN` 里的子系统级失败（假阴性），
    要第三轮同样量级的判定 —— 那比这一轮难，因为"没有的东西"看不出形状。
+   **→ 已于 2026-09-15 补做（C03.④）**：用"同语义族跨等级"（按事件名末段分组，15 组）
+   与"完全静默的失败"（8 条候选全是假候选）两条机检线索把范围缩到个位数，再逐条读代码。
+   3 条升 `ERROR`、2 条反向降 `INFO`，见 `levels.md` 第十节。
 2. **启动期装配失败没有升 `ERROR`**。按定义它们"功能缺一块"，但那是"带伤运行"，
    升 `ERROR` 会被值班当成"服务挂了"。这条边界要动就得一次性重排全部 24 条，不能零散改。
 3. **约 24 条无 `zap.Field` 的启动期 Warn 仍缺 `event`**（`(无 event)` 归零属 C08 收尾）。

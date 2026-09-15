@@ -571,7 +571,11 @@ func Start() {
 			app.ZapLog.Error("GB28181 播放鉴权密钥初始化失败", zap.String("event", "gb28181.playauth.key_init_failed"), zap.Error(err))
 			return
 		}
-		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.String("event", "gb28181.playauth.key_init_failed_auth_off"), zap.Error(err))
+		// 降 INFO（C03.④ 顺带翻出的**反向**错配）：走到这里说明 `playauth.Enabled` 本来就是
+		// 关的 —— 也就是说这次失败**没有牺牲任何东西**（密钥在鉴权关闭时无人使用），
+		// 答不出 levels.md 判据②的"降了什么"。上面那支（鉴权开着却没密钥）才是 ERROR。
+		// 保持 WARN 会让"每一台没开鉴权的机器"启动时都多一条告警。
+		app.ZapLog.Info("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.String("event", "gb28181.playauth.key_init_failed_auth_off"), zap.Error(err))
 	}
 
 	if err := startSIPDependencies(sipCfg, credentialWarningReported); err != nil {
@@ -1319,7 +1323,8 @@ func ReloadSIP() error {
 			sipRuntimeStatus.MarkFailed(err.Error())
 			return fmt.Errorf("初始化播放鉴权密钥失败: %w", err)
 		}
-		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.String("event", "gb28181.playauth.reload_key_init_failed_auth_off"), zap.Error(err))
+		// 降 INFO：判定同 Start 里那一处（鉴权本就关闭 → 没牺牲任何能力），见上文注释。
+		app.ZapLog.Info("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.String("event", "gb28181.playauth.reload_key_init_failed_auth_off"), zap.Error(err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

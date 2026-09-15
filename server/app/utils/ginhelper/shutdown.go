@@ -28,7 +28,11 @@ func Shutdown(ctx context.Context, root *zap.Logger, steps ...ShutdownStep) erro
 			var unfinished interface{ UnfinishedComponents() []string }
 			if errors.As(err, &unfinished) {
 				for _, component := range unfinished.UnfinishedComponents() {
-					root.Named("lifecycle").Warn("Component work remains active", zap.String("event", "lifecycle.shutdown_incomplete"), zap.String("shutdown_component", component), zap.Bool("shutdown_timeout", true))
+					// C01.4：这一条**原先与上一行共用** `lifecycle.shutdown_incomplete`。
+					// 但两者是不同的事 —— 上一行是"某组件 Stop 返回了 error"，
+					// 这一行是"Stop 说还有这些组件的活没跑完"（**没有 error 字段**，列出清单）。
+					// 同一个名字会让"关停不完整的次数"和"还剩几个组件在跑"混成一个数。
+					root.Named("lifecycle").Warn("Component work remains active", zap.String("event", "lifecycle.shutdown_work_active"), zap.String("shutdown_component", component), zap.Bool("shutdown_timeout", true))
 				}
 			}
 		}

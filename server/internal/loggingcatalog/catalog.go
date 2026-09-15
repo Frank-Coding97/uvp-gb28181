@@ -73,7 +73,17 @@ func (f Finding) String() string {
 	if f.Line != 0 {
 		location = fmt.Sprintf("%s:%d", f.File, f.Line)
 	}
-	return fmt.Sprintf("%s %s %s", location, f.Kind, f.Description)
+	// 带上"它在说谁"。少了这一项，`stale_field_dictionary_entry` 只会报
+	// "某个字段不再出现" —— 值班得靠读 diff 才能反推出是哪个字段
+	// （C02 收敛 `body_len` 时实测踩到，那条 finding 的 File/Line 是空的）。
+	subject := ""
+	if f.Event != "" {
+		subject = " event=" + f.Event
+	}
+	if f.Field != "" {
+		subject += " field=" + f.Field
+	}
+	return fmt.Sprintf("%s %s%s %s", location, f.Kind, subject, f.Description)
 }
 
 // Registry is the single source of truth for event names, field names, and the

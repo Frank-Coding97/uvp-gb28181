@@ -34,9 +34,13 @@ func RecordLoginAttempt(parent context.Context, recorder app.LoginLogRecorderInt
 	logger := app.Log(parent).Named("audit")
 	ctx, cancel := context.WithTimeout(parent, loginLogWriteTimeout)
 	defer cancel()
+	// 留 ERROR（C03.④ 复核）：panic 在全仓统一是 ERROR（`http.panic` / `gb28181.snapshot.panic` /
+	// `play.reconcile.panic`），这条原先孤零零地打在 WARN —— 是"同语义族跨等级"的漏网。
+	// panic 意味着 recorder 实现有缺陷，且 recover 之后没有任何下游会因此报错，
+	// 只能靠这条日志暴露。别按"它只是记个审计日志"降回去。
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logger.Warn("登录日志记录异常",
+			logger.Error("登录日志记录异常",
 				zap.String("event", "auth.login_audit.panic"),
 				zap.String("panic_type", logging.TypeName(recovered)))
 		}
@@ -96,11 +100,17 @@ func (s *LoginLogService) CleanupBefore(ctx context.Context, cutoff time.Time, b
 	}
 }
 
+// recordLoginFailure 留 ERROR（C03.④ 复核）：与 `audit.operation_log.persist_failed`
+// 是同一类 —— 登录**照样成功返回**（见文件头 RecordLoginAttempt 的隔离说明），
+// 而这条审计记录永久丢失，没有任何下游会因此报错，也没有第二个信号能暴露它。
+// `SysLoginLog` 就是审计行（CleanupBefore 的注释原话是 "immutable audit rows"）。
+// 不要因为它"长得像一次普通写库失败"就降成 WARN —— 那条判据已被
+// `audit.operation_log.persist_failed` 之外的其余 `*_persist_failed` 用掉了。
 func recordLoginFailure(ctx context.Context, event app.LoginLogEvent, err error) {
 	if err == nil {
 		return
 	}
-	app.Log(ctx).Named("audit").Warn("登录日志记录失败",
+	app.Log(ctx).Named("audit").Error("登录日志记录失败",
 		zap.String("event", "auth.login_audit.persist_failed"), logging.Error(err),
 		zap.String("result", event.Result), zap.String("username", event.Username))
 }

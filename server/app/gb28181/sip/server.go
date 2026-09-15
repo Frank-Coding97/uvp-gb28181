@@ -395,9 +395,14 @@ func (s *Server) registerHandlers() {
 	msgHandler := handler.NewMessageHandler(s.cfg)
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
-	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
+	// 留 ERROR（C03.④ 复核）：原文写的是"创建失败仅警告，注册仍可工作"，但后果并不轻 ——
+	// 没有 UAC 就没有 **Catalog 自动触发 / DeviceInfo 查询，点播也不可用**。这是启动期
+	// 一次性的、不会自愈的整块能力缺失，属于 C03.③ 第三组"SIP 子系统装配失败"
+	// （同组的 `gb28181.sip.start_failed` / `gb28181.sip.config_load_failed` 都是 ERROR）。
+	// ⚠️ 紧邻的 Broadcast client 失败**不升**：`handleBroadcastInvite` 在
+	// `broadcastDialogs == nil` 时会回 503 "Broadcast Service Unavailable" —— 有替代信号。
 	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise, sipgo.WithClientLogger(s.logger)); err != nil {
-		app.Log(context.Background()).Named("gb28181.sip").Warn(
+		app.Log(context.Background()).Named("gb28181.sip").Error(
 			"GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发",
 			zap.String("event", "gb28181.sip.uac_init_failed"), logging.Error(err))
 	} else {
@@ -414,6 +419,9 @@ func (s *Server) registerHandlers() {
 			if client, clientErr := sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger)); clientErr == nil {
 				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
 			} else {
+				// 留 WARN（C03.④ 复核过）：广播是**子能力**，不是核心链路；缺失时有替代
+				// 信号 —— `handleBroadcastInvite` 会回 503 "Broadcast Service Unavailable"，
+				// 上游明确知道它不可用。别按"和上面 UAC 那条长得一样"把它升成 ERROR。
 				app.Log(context.Background()).Named("gb28181.sip").Warn(
 					"GB28181 Broadcast UAS client 初始化失败",
 					zap.String("event", "gb28181.sip.broadcast_client_init_failed"), logging.Error(clientErr))

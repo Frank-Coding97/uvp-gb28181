@@ -407,8 +407,12 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdDeviceControl:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
+					// C01.4：与下面那支（查询类命令）**原先共用** `gb28181.message.ptz_failed`
+					// 一个名字，但两支是不同报文、不同消息 —— 按 event 名聚合时"PTZ 控制失败"
+					// 会被查询失败稀释。理由同 C03 的 `event_level_divergence`：一个名字装一件事。
+					// 别按"消息里已经写了 operation 字段"把它们合回去：字段只有知道它存在的人才用得上。
 					logger.Warn("GB28181 PTZ DeviceControl 应答处理失败",
-						zap.String("event", "gb28181.message.ptz_failed"),
+						zap.String("event", "gb28181.message.ptz_control_failed"),
 						zap.String("operation", "device_control"), zap.String("device_id", head.DeviceID),
 						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
@@ -417,7 +421,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					logger.Warn("GB28181 PTZ 查询应答处理失败",
-						zap.String("event", "gb28181.message.ptz_failed"),
+						zap.String("event", "gb28181.message.ptz_query_failed"),
 						zap.String("operation", "status_query"), zap.String("device_id", head.DeviceID),
 						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
