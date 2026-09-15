@@ -90,7 +90,9 @@ func CustomRecovery() gin.HandlerFunc {
 			if text, ok := value.(string); ok && text == consts.RequestAborted {
 				return
 			}
-			app.Log(c.Request.Context()).Named("http").Error("HTTP handler panicked", zap.String("event", "http.panic"), zap.String("panic_type", logging.TypeName(value)), zap.StackSkip("stack", 1))
+			app.Log(c.Request.Context()).Named("http").Error("HTTP handler panicked", zap.String("event", "http.panic"), zap.String("panic_type", logging.TypeName(value)),
+				zap.String("route", c.FullPath()), zap.String("method", c.Request.Method),
+				zap.String("source_ip", c.ClientIP()), zap.StackSkip("stack", 1))
 			if isBrokenConnection(value) || c.Writer.Written() {
 				return
 			}

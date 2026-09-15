@@ -29,6 +29,10 @@ func TestLoggingUnchangedEntrySafety(t *testing.T) {
 		{name: "sensitive", fields: append(append([]zap.Field{}, safe...), zap.String("Access_Token", "fixture-secret")), entry: entry},
 		{name: "unknown", fields: append(append([]zap.Field{}, safe...), zap.Any("object", map[string]any{"x": "fixture-secret"})), entry: entry},
 		{name: "raw_error", fields: append(append([]zap.Field{}, safe...), zap.String("error", "fixture-secret")), entry: entry},
+		// reason is a controlled diagnostic code, not error-derived text: it rides
+		// the unchanged path, and the want:true branch below proves that path
+		// produces byte-identical output to the sanitizer.
+		{name: "reason_is_plain", fields: append(append([]zap.Field{}, safe...), zap.String("reason", "no_candidate")), entry: entry, want: true},
 		{name: "endpoint", fields: append(append([]zap.Field{}, safe...), zap.String("endpoint", "https://u:fixture-secret@example.test/private")), entry: entry},
 		{name: "identity_override", fields: append(append([]zap.Field{}, safe...), zap.String("request_id", "spoof")), entry: entry},
 		{name: "fixed_override", fields: append(append([]zap.Field{}, safe...), zap.String("service", "spoof")), entry: entry},
@@ -123,7 +127,11 @@ func TestLoggingUnchangedEntryRejectsUnprovenBounds(t *testing.T) {
 		fields []zap.Field
 	}{
 		{"long_key", entry, append(append([]zap.Field{}, fields...), zap.Int(strings.Repeat("a", 129), 1))},
-		{"reason", entry, append(append([]zap.Field{}, fields...), zap.String("reason", "fixture-secret"))},
+		// "reason" is an ordinary string now (see contracts/sanitize-policy.md), so
+		// the key that proves the omit rule still forces the slow path is "detail".
+		{"omitted_text", entry, append(append([]zap.Field{}, fields...), zap.String("detail", "fixture-secret"))},
+		// A long reason does not ride the fast path either: it needs the clip.
+		{"long_reason", entry, append(append([]zap.Field{}, fields...), zap.String("reason", strings.Repeat("x", 342)))},
 		{"namespace", entry, append(append([]zap.Field{}, fields...), zap.Namespace("nested"))},
 		{"too_many_fields", entry, append(fields, make([]zap.Field, maxFields)...)},
 	}

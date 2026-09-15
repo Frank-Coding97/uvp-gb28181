@@ -89,12 +89,13 @@
               <span class="log-level">{{ item.level.toUpperCase() }}</span>
               <span class="log-module">{{ item.module || "app" }}</span>
               <span class="log-message">{{ item.message || item.event }}</span>
-              <span v-if="formatFields(item.fields)" class="log-fields">{{ formatFields(item.fields) }}</span>
+              <span v-if="fieldsOf(item).length" class="log-fields"><span v-for="field in fieldsOf(item)" :key="field.key" :class="['field', { muted: field.muted }]"><span class="field-key">{{ field.key }}</span><span class="field-eq">=</span><span class="field-value">{{ field.display }}</span></span></span>
               <span v-if="item.truncated" class="truncated">[TRUNCATED]</span>
             </div>
             <pre v-if="item.stack" class="log-stack">{{ item.stack }}</pre>
             <div class="line-actions">
-              <button type="button" title="复制此行完整 JSON" @click="copyEvent(item)"><Copy :size="13" /></button>
+              <button type="button" title="复制此行纯文本" @click="copyLine(item)"><Copy :size="13" /></button>
+              <button type="button" title="复制此行完整 JSON" @click="copyEvent(item)"><Braces :size="13" /></button>
               <button v-if="item.callId" type="button" title="查看对应 SIP Trace" @click="openTrace(item.callId)"><ExternalLink :size="13" /></button>
             </div>
           </div>
@@ -114,8 +115,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "v
 import { useRouter } from "vue-router";
 import dayjs from "dayjs";
 import { Message } from "@arco-design/web-vue";
-import { CircleDot, Copy, Download, Eraser, ExternalLink, Pause, Play, RefreshCcw, RotateCcw, Search } from "lucide-vue-next";
+import { Braces, CircleDot, Copy, Download, Eraser, ExternalLink, Pause, Play, RefreshCcw, RotateCcw, Search } from "lucide-vue-next";
 import { openRealtimeLogStream, type RealtimeBusinessLogEvent } from "@/api/realtime-business-log";
+import { displayFields, renderLogLine, type DisplayField } from "./log-line";
 
 const router = useRouter();
 const filter = reactive({ keyword: "", level: "", module: "" });
@@ -201,16 +203,29 @@ function resetFilters() { filter.keyword = ""; filter.level = ""; filter.module 
 function clearEvents() { events.value = []; dropped.value = 0; }
 function levelClass(level: string) { return level.toLowerCase(); }
 function formatTime(value: string) { return value ? dayjs(value).format("YYYY-MM-DD HH:mm:ss.SSS") : "---- -- -- --:--:--.---"; }
-function formatFields(fields?: Record<string, unknown>) { return fields && Object.keys(fields).length ? JSON.stringify(fields) : ""; }
+
+// 字段排序与转义规则在 ./log-line.ts（纯函数，带单测），组件只负责画。
+// 每条记录只算一次：SSE 连续推流时避免每帧对全部缓冲记录重复排序。
+const fieldCache = new WeakMap<object, DisplayField[]>();
+function fieldsOf(item: RealtimeBusinessLogEvent): DisplayField[] {
+  let cached = fieldCache.get(item);
+  if (!cached) {
+    cached = displayFields(item.fields);
+    fieldCache.set(item, cached);
+  }
+  return cached;
+}
 function eventDetails(item: RealtimeBusinessLogEvent) { return JSON.stringify(item, null, 2); }
-async function copyEvent(item: RealtimeBusinessLogEvent) {
+async function copyText(text: string, label: string) {
   try {
-    await navigator.clipboard.writeText(eventDetails(item));
-    Message.success("日志已复制");
+    await navigator.clipboard.writeText(text);
+    Message.success(label);
   } catch {
     Message.error("复制失败，请检查浏览器剪贴板权限");
   }
 }
+function copyLine(item: RealtimeBusinessLogEvent) { return copyText(renderLine(item), "日志行已复制"); }
+function copyEvent(item: RealtimeBusinessLogEvent) { return copyText(eventDetails(item), "日志 JSON 已复制"); }
 function openTrace(callId: string) { router.push({ path: "/gb28181/sip-traces", query: { callId } }); }
 function jumpToBottom() { if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight; }
 function toggleFollowing() { following.value = !following.value; if (following.value) nextTick(jumpToBottom); }
@@ -219,10 +234,17 @@ function onScroll() {
   const distance = listRef.value.scrollHeight - listRef.value.scrollTop - listRef.value.clientHeight;
   if (distance > 80) following.value = false;
 }
+// 与后端 console 编码器同版式，保证「页面看到的」和「文件里 grep 到的」是同一条文本。
 function renderLine(item: RealtimeBusinessLogEvent): string {
-  const fields = formatFields(item.fields);
-  const line = `${formatTime(item.occurredAt || item.observedAt)} ${item.level.toUpperCase().padEnd(6)} ${item.module || "app"} ${item.message || item.event}${fields ? ` ${fields}` : ""}`;
-  return item.stack ? `${line}\n${item.stack}` : line;
+  return renderLogLine({
+    time: formatTime(item.occurredAt || item.observedAt),
+    level: item.level,
+    module: item.module,
+    message: item.message,
+    event: item.event,
+    stack: item.stack,
+    fields: item.fields
+  });
 }
 function downloadLogs() {
   const blob = new Blob([visibleEvents.value.map(renderLine).join("\n")], { type: "text/plain;charset=utf-8" });
@@ -261,7 +283,11 @@ onBeforeUnmount(() => controller?.abort());
 .log-entry { position: relative; padding: 2px 76px 2px 12px; border-left: 2px solid transparent; }.log-entry:hover { background: rgb(255 255 255 / 4%); }
 .log-entry.level-debug { color: #8b949e; }.log-entry.level-info { color: #c9d1d9; }.log-entry.level-warn { color: #e3b341; border-left-color: #d29922; }.log-entry.level-error, .log-entry.level-dpanic, .log-entry.level-panic, .log-entry.level-fatal { color: #ff7b72; border-left-color: #f85149; }
 .log-line { display: flex; align-items: baseline; gap: 10px; min-width: max-content; }.log-time { color: #7d8590; white-space: nowrap; }.log-level { width: 48px; font-weight: 700; }.log-module { width: 150px; color: #79c0ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-message { color: inherit; white-space: pre-wrap; word-break: break-word; }.log-fields { color: #a5d6ff; white-space: pre-wrap; word-break: break-all; }.truncated { color: #d29922; }
+.log-message { color: inherit; white-space: pre-wrap; word-break: break-word; }.log-fields { color: #a5d6ff; white-space: pre-wrap; word-break: break-all; }
+.field + .field { margin-left: 11px; }
+.field-key { color: #6f8296; }.field-eq { color: #4d5b69; }.field-value { color: #a5d6ff; }
+.field.muted .field-key { color: #4d5b69; }.field.muted .field-value { color: #6e7681; }
+.truncated { color: #d29922; }
 .log-stack { margin: 2px 0 4px 250px; color: #ffa198; font: inherit; white-space: pre-wrap; word-break: break-all; }
 .line-actions { position: absolute; top: 1px; right: 12px; display: none; gap: 4px; }.log-entry:hover .line-actions { display: flex; }
 .line-actions button { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; padding: 0; color: #8b949e; background: #21262d; border: 1px solid #30363d; border-radius: 5px; cursor: pointer; }.line-actions button:hover { color: #fff; background: #30363d; }

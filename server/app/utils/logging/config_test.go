@@ -121,8 +121,14 @@ func TestLoggingRuntimeFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = r.Close()
+			// The console layout is the operator contract: local wall-clock time
+			// with no offset suffix. JSON keeps RFC3339 for machine consumers.
+			wantTimestamp := "2026-09-05 12:13:14.123"
+			if format == "json" {
+				wantTimestamp = "2026-09-05T12:13:14.123+08:00"
+			}
 			for _, sink := range []*memorySink{a, b} {
-				if strings.Contains(sink.String(), "\x1b[") || !strings.Contains(sink.String(), "2026-09-05T12:13:14.123+08:00") {
+				if strings.Contains(sink.String(), "\x1b[") || !strings.Contains(sink.String(), wantTimestamp) {
 					t.Fatalf("timestamp/ANSI contract: %s", sink.String())
 				}
 				if sink.syncs != 1 || sink.closes != 1 {

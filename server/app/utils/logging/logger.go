@@ -97,15 +97,23 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		enc.MessageKey = "message"
 		enc.NameKey = "component"
 		enc.StacktraceKey = "stack"
-		enc.EncodeTime = func(t time.Time, a zapcore.PrimitiveArrayEncoder) {
-			a.AppendString(t.Format("2006-01-02T15:04:05.000Z07:00"))
-		}
 		enc.EncodeDuration = zapcore.MillisDurationEncoder
 		var encoder zapcore.Encoder
 		if format == "json" {
+			// Machine format: unambiguous RFC3339 offset timestamp, JSON body.
+			enc.EncodeTime = func(t time.Time, a zapcore.PrimitiveArrayEncoder) {
+				a.AppendString(t.Format("2006-01-02T15:04:05.000Z07:00"))
+			}
 			encoder = zapcore.NewJSONEncoder(enc)
 		} else {
-			encoder = zapcore.NewConsoleEncoder(enc)
+			// Operator format: local wall-clock time, uppercase level, and bare
+			// key=value pairs instead of a trailing JSON object. See
+			// console_encoder.go for the layout contract.
+			enc.EncodeTime = func(t time.Time, a zapcore.PrimitiveArrayEncoder) {
+				a.AppendString(t.Format("2006-01-02 15:04:05.000"))
+			}
+			enc.EncodeLevel = zapcore.CapitalLevelEncoder
+			encoder = newConsoleEncoder(enc, consoleConstants(opts.Service, opts.Version, opts.Instance))
 		}
 		core := zapcore.NewCore(encoder, sink, zapcore.DebugLevel)
 		if target == "stdout" && suppressRoutineAccess {

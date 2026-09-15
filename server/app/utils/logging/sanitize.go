@@ -229,10 +229,26 @@ const (
 
 // Shared by normalization and the unchanged-entry proof; adding a special
 // string source here automatically keeps it out of the fast path.
+//
+// The omit list is a guard for text the core cannot vouch for, not a list of
+// "uninteresting" fields. Every member is error-derived and has a sanctioned
+// structured alternative: logging.Error(err) renders class/type/code instead of
+// pasting raw text, so omitting the string form forces call sites to that path.
+// Keep them even though no call site currently uses them — they are the tripwire
+// that stops a future zap.String("error", err.Error()) from leaking a DSN.
+//
+// "reason" used to sit in this list by mistake. It is a controlled diagnostic
+// code at every call site ("no_candidate", "ambiguous_attempt", "accepted", ...),
+// never free text, and omitting it hid the answer on the highest-volume WARN in
+// the tree (ptz.response.unmatched, ~600 lines per log file). It now flows
+// through the ordinary string path: retained, bounded by the 2048-byte clip, and
+// counted by "truncated" when cut. If a future call site needs to pass genuinely
+// untrusted text, pre-scrub it there rather than re-adding the key here.
+// Contract: docs/logging-governance/contracts/sanitize-policy.md
 func stringFieldPolicy(key string) stringFieldRule {
 	k := strings.ToLower(key)
 	switch k {
-	case "error", "err", "reason", "panic", "recover", "detail":
+	case "error", "err", "panic", "recover", "detail":
 		return stringFieldOmit
 	}
 	if strings.Contains(k, "url") || k == "uri" || k == "endpoint" {
