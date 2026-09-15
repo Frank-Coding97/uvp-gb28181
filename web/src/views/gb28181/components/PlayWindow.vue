@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount, shallowRef, nextTick } from "vue";
 import { useUserStoreHook } from "@/store/modules/user";
+import { PlayerSmoothness, type SmoothnessSnapshot } from "./playerSmoothness";
 
 interface Props {
     /** 流地址(http-flv / ws-flv / hls 等),传空字符串关闭播放器 */
@@ -17,6 +18,7 @@ const emit = defineEmits<{
     (e: "error", msg: string): void;
     (e: "timeupdate", timestamp: number): void;
     (e: "loading", value: boolean): void;
+    (e: "smoothness", snapshot: SmoothnessSnapshot): void;
 }>();
 
 // EasyPlayerPro 由 index.html 静态引入(public/easyplayer/EasyPlayer-pro.js),挂在 window
@@ -24,6 +26,7 @@ declare const EasyPlayerPro: any;
 
 const containerRef = ref<HTMLDivElement | null>(null);
 const player = shallowRef<any>(null);
+const smoothness = shallowRef<PlayerSmoothness | null>(null);
 const errorMsg = ref("");
 const userStore = useUserStoreHook();
 const canScreenshot = computed(() => {
@@ -32,6 +35,8 @@ const canScreenshot = computed(() => {
 });
 
 function destroy() {
+    smoothness.value?.dispose();
+    smoothness.value = null;
     if (player.value) {
         try {
             player.value.destroy();
@@ -109,6 +114,14 @@ async function play(u: string) {
         p.on("loading", (value: unknown) => emit("loading", Boolean(value)));
 
         player.value = p;
+
+        // 原生控制栏流畅度徽标:只消费播放器每秒统计,不干预播放链路
+        if (containerRef.value) {
+            const badge = new PlayerSmoothness(containerRef.value);
+            badge.bind(p, (snapshot) => emit("smoothness", snapshot));
+            smoothness.value = badge;
+        }
+
         await p.play(u);
     } catch (e) {
         errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
@@ -125,7 +138,12 @@ watch(canScreenshot, () => {
 });
 onBeforeUnmount(destroy);
 
-defineExpose({ stop: destroy });
+/** 供父组件读取当前流畅度(卡片展示等),未播放时返回 null。 */
+function getSmoothness(): SmoothnessSnapshot | null {
+    return smoothness.value?.snapshot() ?? null;
+}
+
+defineExpose({ stop: destroy, getSmoothness });
 </script>
 
 <template>
@@ -138,23 +156,23 @@ defineExpose({ stop: destroy });
 
 <style scoped>
 .play-window {
-    box-sizing: border-box;
     position: relative;
+    box-sizing: border-box;
     width: 100%;
     min-height: 0;
     aspect-ratio: 16 / 9;
+    overflow: hidden;
     background:
         radial-gradient(circle at 50% 50%, rgb(30 41 59 / 32%) 0%, rgb(2 6 23 / 94%) 72%),
         #020617;
     border: 1px solid rgb(148 163 184 / 18%);
     border-radius: 14px;
-    overflow: hidden;
 }
 
 .play-window.playback {
     height: 100%;
     aspect-ratio: auto;
-    background: #000;
+    background: #000000;
     border: 0;
     border-radius: 0;
 }
@@ -169,18 +187,94 @@ defineExpose({ stop: destroy });
     min-height: 100%;
 }
 
+/* EasyPlayer 原生控制栏上的流畅度徽标:运行时插入,需穿透 scoped 才能命中 */
+.play-window :deep(.uvp-smooth-badge) {
+    display: inline-flex;
+    flex: none;
+    gap: 5px;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+    margin-right: 8px;
+    font-size: 12px;
+    line-height: 1;
+    color: rgb(255 255 255 / 62%);
+    white-space: nowrap;
+    user-select: none;
+    background: rgb(255 255 255 / 10%);
+    border-radius: 10px;
+    transition:
+        color 0.2s ease,
+        background-color 0.2s ease;
+}
+
+.play-window :deep(.uvp-smooth-dot) {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    background: currentcolor;
+    border-radius: 999px;
+}
+
+.play-window :deep(.uvp-smooth-badge.is-smooth) {
+    color: #4ade80;
+    background: rgb(74 222 128 / 16%);
+}
+
+.play-window :deep(.uvp-smooth-badge.is-fair) {
+    color: #fbbf24;
+    background: rgb(251 191 36 / 16%);
+}
+
+.play-window :deep(.uvp-smooth-badge.is-laggy) {
+    color: #f87171;
+    background: rgb(248 113 113 / 18%);
+}
+
+.play-window :deep(.uvp-smooth-badge.is-stalled) {
+    color: #fca5a5;
+    background: rgb(239 68 68 / 26%);
+}
+
+.play-window :deep(.uvp-smooth-badge.is-stalled .uvp-smooth-dot) {
+    animation: uvp-smooth-pulse 1.2s ease-in-out infinite;
+}
+
+.play-window :deep(.uvp-smooth-badge.is-compact) {
+    padding: 0 6px;
+}
+
+.play-window :deep(.uvp-smooth-badge.is-compact .uvp-smooth-text) {
+    display: none;
+}
+
+.play-window :deep(.uvp-smooth-badge.is-hidden) {
+    display: none;
+}
+
+@keyframes uvp-smooth-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.25;
+    }
+}
+
 .err {
     position: absolute;
     right: 12px;
     bottom: 12px;
     left: 12px;
+    z-index: 5;
+    padding: 10px 12px;
+    font-size: 12px;
     color: #fecaca;
     background: rgb(127 29 29 / 78%);
-    padding: 10px 12px;
     border: 1px solid rgb(248 113 113 / 34%);
     border-radius: 10px;
-    font-size: 12px;
-    z-index: 5;
     backdrop-filter: blur(10px);
 }
 
@@ -194,9 +288,9 @@ defineExpose({ stop: destroy });
     align-items: center;
     justify-content: center;
     width: min(72%, 320px);
-    color: rgb(203 213 225 / 88%);
     font-size: 14px;
     line-height: 1.5;
+    color: rgb(203 213 225 / 88%);
     text-align: center;
     transform: translate(-50%, -50%);
 }
@@ -211,7 +305,7 @@ defineExpose({ stop: destroy });
     box-shadow: 0 0 0 1px rgb(148 163 184 / 18%);
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
     .play-window {
         aspect-ratio: 4 / 3;
     }

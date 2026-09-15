@@ -105,12 +105,12 @@ type DrawerTarget =
 const viewModeStorageKey = "uvp.gb28181.device-mgmt.view-mode";
 const AUTO_REFRESH_INTERVAL_SECONDS = 10;
 function initialViewMode(): ViewMode {
-    if (typeof window === "undefined") return "list";
+    if (typeof window === "undefined") return "card";
     try {
         const stored = window.localStorage.getItem(viewModeStorageKey);
-        return stored === "card" || stored === "map" ? stored : "list";
+        return stored === "list" || stored === "card" || stored === "map" ? stored : "card";
     } catch {
-        return "list";
+        return "card";
     }
 }
 const viewMode = ref<ViewMode>(initialViewMode());

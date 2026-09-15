@@ -289,40 +289,48 @@ function themeColor(name: string, fallback: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
+function buildTrendChartSpec() {
+  const brand = themeColor("--uvp-brand", "#2563eb");
+  const danger = themeColor("--uvp-danger", "#d14343");
+  const tertiary = themeColor("--uvp-text-tertiary", "#6b7280");
+  const border = themeColor("--uvp-panel-border", "#e8edf5");
+  return {
+    type: "line",
+    data: [{ id: "trend", values: trendData.value.points }],
+    xField: "time",
+    yField: "value",
+    seriesField: "series",
+    color: [brand, danger],
+    background: "transparent",
+    padding: { top: 14, right: 12, bottom: 4, left: 4 },
+    point: { visible: false },
+    line: { style: { lineWidth: 2 } },
+    area: { visible: true, style: { fillOpacity: 0.06 } },
+    axes: [
+      { orient: "left", grid: { visible: true, style: { stroke: border, lineDash: [3, 4] } }, label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { visible: false }, tick: { visible: false } },
+      { orient: "bottom", label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { style: { stroke: border } }, tick: { visible: false } }
+    ],
+    legends: { visible: false },
+    tooltip: { mark: { content: [{ key: (datum: { series: string }) => datum.series, value: (datum: { value: number }) => `${datum.value} 次` }] } },
+    animationAppear: { duration: 360, easing: "cubicOut" },
+    animationUpdate: { duration: 220, easing: "cubicOut" }
+  } as any;
+}
+
 function renderTrendChart() {
   if (!chartElement.value || activeTab.value !== "overview" || !trendData.value.hasData) {
     chart?.release();
     chart = null;
     return;
   }
-  const brand = themeColor("--uvp-brand", "#2563eb");
-  const danger = themeColor("--uvp-danger", "#d14343");
-  const tertiary = themeColor("--uvp-text-tertiary", "#6b7280");
-  const border = themeColor("--uvp-panel-border", "#e8edf5");
-  chart?.release();
-  chart = new VChart(
-    {
-      type: "line",
-      data: [{ id: "trend", values: trendData.value.points }],
-      xField: "time",
-      yField: "value",
-      seriesField: "series",
-      color: [brand, danger],
-      background: "transparent",
-      padding: { top: 14, right: 12, bottom: 4, left: 4 },
-      point: { visible: false },
-      line: { style: { lineWidth: 2 } },
-      area: { visible: true, style: { fillOpacity: 0.06 } },
-      axes: [
-        { orient: "left", grid: { visible: true, style: { stroke: border, lineDash: [3, 4] } }, label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { visible: false }, tick: { visible: false } },
-        { orient: "bottom", label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { style: { stroke: border } }, tick: { visible: false } }
-      ],
-      legends: { visible: false },
-      tooltip: { mark: { content: [{ key: (datum: { series: string }) => datum.series, value: (datum: { value: number }) => `${datum.value} 次` }] } },
-      animationAppear: { duration: 360, easing: "cubicOut" }
-    } as any,
-    { dom: chartElement.value }
-  );
+  const spec = buildTrendChartSpec();
+  if (!chart) {
+    chart = new VChart(spec, { dom: chartElement.value });
+    chart.renderSync();
+    return;
+  }
+  // 与仪表盘一致：保留实例做增量更新，数据变化走 update 过渡动画而不是整图重画。
+  chart.updateSpecSync(spec, true);
   chart.renderSync();
 }
 

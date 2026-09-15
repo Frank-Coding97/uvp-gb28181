@@ -126,6 +126,13 @@ describe("security preview system integration", () => {
     expect(source).toContain("暂无高频来源");
   });
 
+  it("updates the trend chart incrementally instead of recreating it on refresh", () => {
+    const renderBody = source.match(/function renderTrendChart\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(renderBody).toContain("chart.updateSpecSync(spec, true)");
+    expect(renderBody).not.toMatch(/release\(\);\s*chart\s*=\s*new VChart/);
+    expect(source).toContain("animationUpdate");
+  });
+
   it("moves the automatic refresh countdown into the refresh action", () => {
     expect(source).not.toContain('class="score-block"');
     expect(source).toContain("const refreshCountdown = ref(10)");

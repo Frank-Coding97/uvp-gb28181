@@ -31,7 +31,6 @@ const pageSources = [
   "src/views/system/sysconfig/sysconfig.vue",
   "src/views/system/sysjobresults/sysjobresultslist.vue",
   "src/views/system/sysjobs/sysjobslist.vue",
-  "src/views/system/sysparam/sysparam.vue",
   "src/views/system/userinfo/userinfo.vue"
 ];
 

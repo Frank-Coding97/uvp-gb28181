@@ -209,6 +209,26 @@ describe("device-mgmt round-2 修复回归", () => {
         vi.unstubAllGlobals();
     });
 
+    it("没有历史偏好时默认选中卡片视图", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        const cardButton = wrapper.get('[aria-label="卡片视图"]');
+        expect(cardButton.attributes("aria-pressed")).toBe("true");
+        expect(wrapper.find(".card-view").exists()).toBe(true);
+        wrapper.unmount();
+    });
+
+    it("保留用户已保存的列表视图偏好", async () => {
+        window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "list");
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.get('[aria-label="列表视图"]').attributes("aria-pressed")).toBe("true");
+        expect(wrapper.find(".table-view").exists()).toBe(true);
+        wrapper.unmount();
+    });
+
     it("#5 统计轮询只拉当前资产类型(设备视图只查设备)", async () => {
         const wrapper = mountPage();
         await flushPromises();
