@@ -1471,7 +1471,13 @@ const monitorBytesSpeedText = computed(() => formatBytes(monitorSnapshot.value?.
 const monitorTotalBytesText = computed(() => formatBytes(monitorSnapshot.value?.network.totalBytes));
 
 type ProbeState = "idle" | "sampling" | "complete";
+const probeDurations = [
+    { value: 3000, label: "3 秒" },
+    { value: 10000, label: "10 秒" },
+    { value: 60000, label: "60 秒" }
+] as const;
 const probeState = ref<ProbeState>("idle");
+const probeDurationMs = ref(probeDurations[0].value);
 const probeRemainingMs = ref(3000);
 const probeFinishedAt = ref("");
 const probeSnapshot = ref<ProbeSnapshot | null>(null);
@@ -1486,8 +1492,9 @@ const probeStatusText = computed(() => {
 });
 const probeButtonText = computed(() => {
     if (probeState.value === "sampling") return `检测中 ${(probeRemainingMs.value / 1000).toFixed(1)}s`;
-    if (probeState.value === "complete") return "重新检测 3 秒";
-    return "开始 3 秒检测";
+    const durationLabel = probeDurations.find(item => item.value === probeDurationMs.value)?.label || "3 秒";
+    if (probeState.value === "complete") return `重新检测 ${durationLabel}`;
+    return `开始 ${durationLabel}检测`;
 });
 const probeResult = computed(() => probeSnapshot.value);
 
@@ -1512,12 +1519,12 @@ async function startProbe() {
     clearProbeTimers();
     probeState.value = "sampling";
     probeSnapshot.value = null;
-    probeRemainingMs.value = 3000;
+    probeRemainingMs.value = probeDurationMs.value;
     probeCountdownTimer = window.setInterval(() => {
         probeRemainingMs.value = Math.max(0, probeRemainingMs.value - 100);
     }, 100);
     try {
-        const response = await runStreamProbe(streamId);
+        const response = await runStreamProbe(streamId, probeDurationMs.value);
         if (token !== probeToken || session !== sessionToken || playResult.value?.streamId !== streamId) return;
         if (response.code !== 0 || !response.data) throw new Error(response.message || "视频探针执行失败");
         probeSnapshot.value = response.data;
@@ -1696,6 +1703,7 @@ function resetSessionState() {
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
+    probeDurationMs.value = probeDurations[0].value;
     probeRemainingMs.value = 3000;
     probeSnapshot.value = null;
     liveMetrics.value = { bitrate: 0, videoLoss: null, audioLoss: null };
@@ -3999,17 +4007,27 @@ onBeforeUnmount(() => {
                                 </span>
                             </div>
 
-                            <button
-                                v-if="canDiagnosePlayback"
-                                class="probe-action"
-                                data-testid="probe-start"
-                                :disabled="phase !== 'playing' || probeState === 'sampling'"
-                                @click="startProbe"
-                            >
-                                <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
-                                <Play v-else :size="14" />
-                                <span>{{ probeButtonText }}</span>
-                            </button>
+                            <div v-if="canDiagnosePlayback" class="probe-action-row">
+                                <button
+                                    class="probe-action"
+                                    data-testid="probe-start"
+                                    :disabled="phase !== 'playing' || probeState === 'sampling'"
+                                    @click="startProbe"
+                                >
+                                    <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
+                                    <Play v-else :size="14" />
+                                    <span>{{ probeButtonText }}</span>
+                                </button>
+                                <a-select
+                                    v-model="probeDurationMs"
+                                    class="probe-duration"
+                                    data-testid="probe-duration"
+                                    aria-label="采样时长"
+                                    :disabled="probeState === 'sampling'"
+                                >
+                                    <a-option v-for="duration in probeDurations" :key="duration.value" :value="duration.value">{{ duration.label }}</a-option>
+                                </a-select>
+                            </div>
 
                             <div class="probe-summary" :class="{ muted: probeState !== 'complete' }">
                                 <div>
@@ -4037,15 +4055,6 @@ onBeforeUnmount(() => {
                                 <CheckCircle2 v-if="probeResult?.health.status === 'ok'" :size="14" />
                                 <AlertTriangle v-else :size="14" />
                                 <strong>{{ probeResult?.health.status === 'ok' ? '流健康，帧序与时间戳连续' : '检测发现需要关注的问题' }}</strong>
-                            </div>
-                            <!-- 只在采样中出现。未检测时这里原本是一句"尚未执行深度检测",
-                                 跟右上角状态角标和按钮文案说的是同一件事,纯占位,腾给流信息。 -->
-                            <div v-else-if="probeState === 'sampling'" class="probe-verdict pending">
-                                <Activity :size="15" />
-                                <div>
-                                    <strong>正在采集音视频帧</strong>
-                                    <span>结果将在采样结束后生成</span>
-                                </div>
                             </div>
                         </section>
 
@@ -5732,13 +5741,19 @@ onBeforeUnmount(() => {
 .probe-status.sampling { color: var(--uvp-warning); border-color: var(--uvp-warning-border); }
 .probe-status.sampling .dot { animation: pulse 1s ease-in-out infinite; }
 .probe-status.complete { color: var(--uvp-brand-cyan); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 30%, var(--uvp-panel-border)); }
+.probe-action-row { display: flex; align-items: stretch; gap: 6px; }
 .probe-action {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 30px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1 1 auto; width: auto; min-height: 30px; padding: 0 12px;
     color: #fff; background: var(--uvp-brand); border: 0; border-radius: 7px;
     cursor: pointer; font-size: 11.5px; font-weight: 600; transition: all 0.15s ease;
 }
 .probe-action:hover:not(:disabled) { background: var(--uvp-brand-strong); }
 .probe-action:disabled { cursor: not-allowed; opacity: 0.56; }
+.probe-duration {
+    min-width: 68px; padding: 0 7px; color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 7px; font-size: 11px;
+}
+.probe-duration:disabled { cursor: not-allowed; opacity: 0.56; }
 .probe-summary {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
@@ -5760,17 +5775,12 @@ onBeforeUnmount(() => {
     background: color-mix(in srgb, var(--uvp-brand-cyan) 7%, transparent);
     border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, var(--uvp-panel-border)); border-radius: 8px;
 }
-.probe-verdict.pending { color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg); border-color: var(--uvp-panel-border); }
 .probe-verdict > svg { flex-shrink: 0; }
 .probe-verdict strong {
     overflow: hidden;
     color: var(--uvp-text-primary); font-size: 10.5px; font-weight: 600;
     text-overflow: ellipsis; white-space: nowrap;
 }
-/* pending 态仍有内部两行(主+副),用旧的 grid 结构:保持采样中的清晰引导 */
-.probe-verdict.pending { display: grid; grid-template-columns: 18px 1fr; gap: 7px; align-items: start; padding: 7px 10px; }
-.probe-verdict.pending > div { display: grid; gap: 2px; }
-.probe-verdict.pending span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
 .section-meta.good { color: var(--uvp-brand-cyan); }
 .sidebar .probe-panel { gap: 8px; }
 /* 检测卡三格摘要:紧凑内边距,让概览卡有更多空间放 2×2 指标。

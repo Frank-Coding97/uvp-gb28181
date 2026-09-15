@@ -72,9 +72,14 @@ describe("国标服务配置 API", () => {
   });
 
   it("视频探针使用独立的流探针路径", async () => {
-    await runStreamProbe("stream-1");
+    await runStreamProbe("stream-1", 10000);
 
-    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/stream-probes/stream-1");
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/api/gb28181/stream-probes/stream-1",
+      { data: { durationMs: 10000 } },
+      { showErrorMessage: false, timeout: 20000 }
+    );
   });
 
   it("读取移动位置历史轨迹开关", async () => {

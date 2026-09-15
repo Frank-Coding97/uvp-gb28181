@@ -30,17 +30,26 @@ func (f serviceNodes) ListActive() []*node.Node {
 }
 
 type countingProbeClient struct {
-	calls   atomic.Int32
-	delay   time.Duration
-	started chan struct{}
-	once    sync.Once
+	calls             atomic.Int32
+	durations         chan int
+	deadlineRemaining chan time.Duration
+	delay             time.Duration
+	started           chan struct{}
+	once              sync.Once
 }
 
 func (f *countingProbeClient) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
 	return &zlm.MediaInfo{Online: true}, nil
 }
-func (f *countingProbeClient) AddProbe(ctx context.Context, _, _, _ string, _ int) ([]zlm.ProbeFrame, error) {
+func (f *countingProbeClient) AddProbe(ctx context.Context, _, _, _ string, durationMS int) ([]zlm.ProbeFrame, error) {
 	f.calls.Add(1)
+	if f.durations != nil {
+		f.durations <- durationMS
+	}
+	if f.deadlineRemaining != nil {
+		deadline, _ := ctx.Deadline()
+		f.deadlineRemaining <- time.Until(deadline)
+	}
 	if f.started != nil {
 		f.once.Do(func() { close(f.started) })
 	}
@@ -65,7 +74,7 @@ func TestServiceSingleFlightSameStream(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := service.Run(context.Background(), "stream"); err != nil {
+			if _, err := service.Run(context.Background(), "stream", DefaultDurationMS); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -81,10 +90,10 @@ func TestCallerCancellationDoesNotCancelSharedProbe(t *testing.T) {
 	service := newProbeService(client)
 	ctx, cancel := context.WithCancel(context.Background())
 	firstDone := make(chan error, 1)
-	go func() { _, err := service.Run(ctx, "stream"); firstDone <- err }()
+	go func() { _, err := service.Run(ctx, "stream", DefaultDurationMS); firstDone <- err }()
 	<-client.started
 	secondDone := make(chan error, 1)
-	go func() { _, err := service.Run(context.Background(), "stream"); secondDone <- err }()
+	go func() { _, err := service.Run(context.Background(), "stream", DefaultDurationMS); secondDone <- err }()
 	cancel()
 	if err := <-firstDone; err == nil {
 		t.Fatal("first caller should be canceled")
@@ -103,7 +112,46 @@ func TestDifferentStreamsRunIndependently(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, stream := range []string{"stream", "other"} {
 		wg.Add(1)
-		go func(stream string) { defer wg.Done(); _, _ = service.Run(context.Background(), stream) }(stream)
+		go func(stream string) {
+			defer wg.Done()
+			_, _ = service.Run(context.Background(), stream, DefaultDurationMS)
+		}(stream)
+	}
+	wg.Wait()
+	if client.calls.Load() != 2 {
+		t.Fatalf("calls=%d", client.calls.Load())
+	}
+}
+
+func TestServicePassesSelectedDurationAndExtendsDeadline(t *testing.T) {
+	client := &countingProbeClient{
+		durations:         make(chan int, 1),
+		deadlineRemaining: make(chan time.Duration, 1),
+	}
+	service := newProbeService(client)
+
+	_, err := service.Run(context.Background(), "stream", 60000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duration := <-client.durations; duration != 60000 {
+		t.Fatalf("duration=%d", duration)
+	}
+	if remaining := <-client.deadlineRemaining; remaining < 60*time.Second {
+		t.Fatalf("deadline remaining=%s", remaining)
+	}
+}
+
+func TestDifferentDurationsRunIndependently(t *testing.T) {
+	client := &countingProbeClient{delay: 30 * time.Millisecond}
+	service := newProbeService(client)
+	var wg sync.WaitGroup
+	for _, durationMS := range []int{3000, 10000} {
+		wg.Add(1)
+		go func(durationMS int) {
+			defer wg.Done()
+			_, _ = service.Run(context.Background(), "stream", durationMS)
+		}(durationMS)
 	}
 	wg.Wait()
 	if client.calls.Load() != 2 {

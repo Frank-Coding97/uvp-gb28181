@@ -12,9 +12,10 @@ import (
 // 为每个请求设置全局超时时间，防止长时间运行的请求阻塞服务器
 func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		path := strings.TrimSuffix(c.Request.URL.Path, "/")
 		// SSE streams own their lifetime and emit application-level heartbeats;
-		// applying the ordinary request timeout would terminate them after 30s.
-		if strings.TrimSuffix(c.Request.URL.Path, "/") == "/api/gb28181/logs/stream" {
+		// stream probes own a duration-specific deadline in the probe service.
+		if path == "/api/gb28181/logs/stream" || strings.HasPrefix(path, "/api/gb28181/stream-probes/") {
 			c.Next()
 			return
 		}

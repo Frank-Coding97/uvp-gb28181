@@ -882,7 +882,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.get("[data-testid='stream-brief']").text()).toContain("累计 3");
     await wrapper.get("[data-testid='probe-start']").trigger("click");
     await flushPromises();
-    expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1");
+    expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1", 3000);
     // 轨道明细里不再重复 codec(流信息块已有编码),改断言探针独有的采样帧与精确 FPS
     expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("76");
     expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("精确 FPS");
@@ -1036,6 +1036,45 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("采样中仅保留右上角状态，不显示重复的采集提示卡", async () => {
+    let resolveProbe!: (value: unknown) => void;
+    api.runStreamProbe.mockReturnValueOnce(new Promise(resolve => { resolveProbe = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    await wrapper.get("[data-testid='probe-start']").trigger("click");
+    await nextTick();
+
+    expect(wrapper.get("[data-testid='probe-check'] .probe-status").text()).toContain("采样中");
+    expect(wrapper.find("[data-testid='probe-check'] .probe-verdict.pending").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='probe-check']").text()).not.toContain("正在采集音视频帧");
+
+    resolveProbe({ code: 0, message: "", data: null });
+    wrapper.unmount();
+  });
+
+  it("支持选择采样时长并将选项传给探针接口", async () => {
+    api.runStreamProbe.mockReturnValueOnce(new Promise(() => undefined));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    const duration = wrapper.findComponent("[data-testid='probe-duration']") as unknown as VueWrapper;
+    expect(duration.findAll("option").map(option => option.text())).toEqual(["3 秒", "10 秒", "60 秒"]);
+    expect(duration.attributes("modelvalue")).toBe("3000");
+
+    duration.vm.$emit("update:modelValue", 10000);
+    await nextTick();
+    expect(wrapper.get("[data-testid='probe-start']").text()).toContain("开始 10 秒检测");
+    await wrapper.get("[data-testid='probe-start']").trigger("click");
+    expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1", 10000);
+    expect(wrapper.get("[data-testid='probe-start']").attributes("disabled")).toBeDefined();
+    expect(duration.attributes("disabled")).toBeDefined();
+
+    wrapper.unmount();
+  });
+
   it("联动详情横跨弹窗并统一使用紧凑高度", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
 
@@ -1064,6 +1103,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(
       /\.sidebar\s+\[data-testid="linked-side-advanced"\]\s+\.adv-actions\s*\{[^}]*grid-template-columns:\s*1fr/s
     );
+  });
+
+  it("检测按钮占满时长选择器之外的剩余宽度", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+
+    expect(source).toMatch(/\.probe-action\s*\{[^}]*flex:\s*1 1 auto/s);
+    expect(source).toMatch(/\.probe-duration\s*\{[^}]*min-width:\s*68px/s);
   });
 
   it("大量预置位和巡航通过摘要与管理抽屉承载", async () => {

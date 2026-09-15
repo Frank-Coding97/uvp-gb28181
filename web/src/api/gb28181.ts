@@ -445,8 +445,13 @@ export interface ProbeSnapshot {
   };
 }
 
-export const runStreamProbe = (streamId: string) =>
-  http.request<BaseResult<ProbeSnapshot>>("post", baseUrlApi(`gb28181/stream-probes/${streamId}`));
+export const runStreamProbe = (streamId: string, durationMs = 3000) =>
+  http.request<BaseResult<ProbeSnapshot>>(
+    "post",
+    baseUrlApi(`gb28181/stream-probes/${streamId}`),
+    { data: { durationMs } },
+    { ...silentRequestConfig, timeout: durationMs + 10000 }
+  );
 
 export interface ControlCapability {
   state: "supported" | "unsupported" | "unknown" | string;

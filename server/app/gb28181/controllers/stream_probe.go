@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
@@ -16,7 +17,11 @@ import (
 )
 
 type StreamProbeService interface {
-	Run(context.Context, string) (*streamprobe.ProbeSnapshot, error)
+	Run(context.Context, string, int) (*streamprobe.ProbeSnapshot, error)
+}
+
+type streamProbeRequest struct {
+	DurationMS *int `json:"durationMs"`
 }
 
 type StreamProbeController struct {
@@ -38,6 +43,19 @@ func (c *StreamProbeController) Run(ctx *gin.Context) {
 		return
 	}
 	streamID := ctx.Param("streamId")
+	durationMS := streamprobe.DefaultDurationMS
+	var request streamProbeRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		c.Fail(ctx, "视频探针参数不合法", err, http.StatusBadRequest)
+		return
+	}
+	if request.DurationMS != nil {
+		durationMS = *request.DurationMS
+	}
+	if !streamprobe.IsSupportedDuration(durationMS) {
+		c.Fail(ctx, "durationMs 仅支持 3000、10000 或 60000", nil, http.StatusBadRequest)
+		return
+	}
 	var channel gbmodels.GbChannel
 	result := c.dbFunc().WithContext(ctx.Request.Context()).Scopes(ownerDeptScope(ctx)).Select("id").Where("stream_id = ?", streamID).Limit(1).Find(&channel)
 	if result.Error != nil {
@@ -48,7 +66,7 @@ func (c *StreamProbeController) Run(ctx *gin.Context) {
 		c.FailAndAbort(ctx, "流不存在", nil)
 		return
 	}
-	snapshot, err := c.service.Run(ctx.Request.Context(), streamID)
+	snapshot, err := c.service.Run(ctx.Request.Context(), streamID, durationMS)
 	switch {
 	case errors.Is(err, streamprobe.ErrStreamOffline):
 		response.SetBusinessResult(ctx, 1, false)

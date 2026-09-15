@@ -11,7 +11,11 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
-const ProbeDurationMS = 3000
+const DefaultDurationMS = 3000
+
+func IsSupportedDuration(durationMS int) bool {
+	return durationMS == 3000 || durationMS == 10000 || durationMS == 60000
+}
 
 var (
 	ErrNodeUnavailable = errors.New("media node unavailable")
@@ -47,6 +51,11 @@ type probeCall struct {
 	err    error
 }
 
+type probeKey struct {
+	streamID   string
+	durationMS int
+}
+
 type Service struct {
 	nodes     ProbeNodeRegistry
 	locations ProbeLocations
@@ -54,7 +63,7 @@ type Service struct {
 	timeout   time.Duration
 	now       func() time.Time
 	mu        sync.Mutex
-	running   map[string]*probeCall
+	running   map[probeKey]*probeCall
 }
 
 func NewService(nodes ProbeNodeRegistry, locations ProbeLocations, clientFor func(*node.Node) ProbeClient, timeout time.Duration, now func() time.Time) *Service {
@@ -67,16 +76,17 @@ func NewService(nodes ProbeNodeRegistry, locations ProbeLocations, clientFor fun
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{nodes: nodes, locations: locations, clientFor: clientFor, timeout: timeout, now: now, running: make(map[string]*probeCall)}
+	return &Service{nodes: nodes, locations: locations, clientFor: clientFor, timeout: timeout, now: now, running: make(map[probeKey]*probeCall)}
 }
 
-func (s *Service) Run(ctx context.Context, streamID string) (*ProbeSnapshot, error) {
+func (s *Service) Run(ctx context.Context, streamID string, durationMS int) (*ProbeSnapshot, error) {
+	key := probeKey{streamID: streamID, durationMS: durationMS}
 	s.mu.Lock()
-	call := s.running[streamID]
+	call := s.running[key]
 	if call == nil {
 		call = &probeCall{done: make(chan struct{})}
-		s.running[streamID] = call
-		go s.execute(streamID, call)
+		s.running[key] = call
+		go s.execute(key, call)
 	}
 	s.mu.Unlock()
 	select {
@@ -87,13 +97,14 @@ func (s *Service) Run(ctx context.Context, streamID string) (*ProbeSnapshot, err
 	}
 }
 
-func (s *Service) execute(streamID string, call *probeCall) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+func (s *Service) execute(key probeKey, call *probeCall) {
+	timeout := max(s.timeout, time.Duration(key.durationMS)*time.Millisecond+2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	mediaNode, client, err := s.locate(ctx, streamID)
+	mediaNode, client, err := s.locate(ctx, key.streamID)
 	if err == nil {
 		var frames []zlm.ProbeFrame
-		frames, err = client.AddProbe(ctx, "__defaultVhost__", "rtp", streamID, ProbeDurationMS)
+		frames, err = client.AddProbe(ctx, "__defaultVhost__", "rtp", key.streamID, key.durationMS)
 		if err != nil {
 			err = fmt.Errorf("%w: %w", ErrProbeFailed, err)
 		}
@@ -103,7 +114,7 @@ func (s *Service) execute(streamID string, call *probeCall) {
 	}
 	call.err = err
 	s.mu.Lock()
-	delete(s.running, streamID)
+	delete(s.running, key)
 	close(call.done)
 	s.mu.Unlock()
 }
