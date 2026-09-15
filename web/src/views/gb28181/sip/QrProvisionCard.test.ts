@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QrProvisionCard from "./QrProvisionCard.vue";
@@ -11,8 +13,9 @@ vi.mock("@arco-design/web-vue", () => ({
     Message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() }
 }));
 
-function mountCard() {
+function mountCard(props: { canGenerate?: boolean } = {}) {
     return mount(QrProvisionCard, {
+        props,
         global: {
             stubs: {
                 SQrcodeDraw: { template: "<span data-qrcode />" },
@@ -175,5 +178,37 @@ describe("QrProvisionCard 自动续码", () => {
         vi.advanceTimersByTime(30000);
         await flushPromises();
         expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("QrProvisionCard 模拟器下载入口", () => {
+    const source = readFileSync(
+        resolve(process.cwd(), "src/views/gb28181/sip/QrProvisionCard.vue"),
+        "utf8"
+    );
+
+    it("keeps the simulator download hover surface theme-aware", () => {
+        const hoverRule = source.match(/\.qr-download:hover\s*\{([^}]*)\}/)?.[1] || "";
+
+        expect(hoverRule).toContain("var(--uvp-panel-bg");
+        expect(hoverRule).not.toContain("var(--uvp-brand-soft, #e8f2ff) 70%, #ffffff");
+    });
+
+    it("opens the public download site in a new tab", () => {
+        expect(source).toContain('href="https://download.uvplatform.cn/"');
+        expect(source).toContain('target="_blank"');
+        expect(source).toContain('rel="noopener noreferrer"');
+    });
+
+    it("shows the download entry even without qr permission", async () => {
+        api.generateSipQrToken.mockResolvedValue(okResponse("tok-1", 60));
+
+        const wrapper = mountCard({ canGenerate: false });
+        await flushPromises();
+
+        expect(api.generateSipQrToken).not.toHaveBeenCalled();
+        expect(wrapper.find(".qr-download").exists()).toBe(true);
+        expect(wrapper.find(".qr-stage").exists()).toBe(false);
+        wrapper.unmount();
     });
 });

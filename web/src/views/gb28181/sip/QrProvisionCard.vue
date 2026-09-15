@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { Clock, QrCode, RefreshCw, ShieldAlert, Smartphone } from "lucide-vue-next";
+import { ChevronRight, Clock, Download, QrCode, RefreshCw, ShieldAlert } from "lucide-vue-next";
 import { generateSipQrToken } from "@/api/gb28181";
 import { buildQrUrl, formatCountdown, normalizeBaseUrl, validateBaseUrl } from "./qrProvisionState";
+
+// 模拟器下载是公开资源,不该被「生成二维码」的权限卡住:
+// 无出码权限时卡片仍然渲染,只是不显示出码区.
+const props = withDefaults(defineProps<{ canGenerate?: boolean }>(), { canGenerate: true });
 
 const loading = ref(false);
 const token = ref("");
@@ -80,6 +84,7 @@ async function autoRenew() {
 }
 
 async function generate(silent = false): Promise<boolean> {
+    if (!props.canGenerate) return false;
     touched.value.baseUrl = true;
     // 手动生成时取消挂起的自动续码重试,避免新旧请求竞争
     if (!silent) {
@@ -139,67 +144,82 @@ onMounted(() => {
             <span class="qr-card__header-hint">设备扫码后自动填入接入信息</span>
         </header>
 
-        <div class="qr-note">
-            <Smartphone :size="14" />
-            <span>需配合 UVP 国标 28181 移动端国标模拟器扫码接入</span>
-        </div>
+        <a
+            class="qr-download"
+            href="https://download.uvplatform.cn/"
+            target="_blank"
+            rel="noopener noreferrer"
+        >
+            <span class="qr-download__icon"><Download :size="15" /></span>
+            <span class="qr-download__body">
+                <strong>移动端国标模拟器下载</strong>
+                <small>Android 端,扫码接入前请先安装本 App</small>
+            </span>
+            <ChevronRight :size="15" />
+        </a>
 
-        <a-form layout="vertical">
-            <a-form-item
-                label="平台访问地址"
-                required
-                :validate-status="baseUrlError ? 'error' : ''"
-                :help="baseUrlError || '设备需要能访问到这个地址,跨网段时请改成设备侧可达的地址。'"
-            >
-                <a-input
-                    v-model="baseUrl"
-                    placeholder="http://192.168.1.10:8280"
-                    allow-clear
-                    @blur="touched.baseUrl = true"
-                />
-            </a-form-item>
-        </a-form>
+        <p v-if="!canGenerate" class="qr-locked">
+            当前账号无生成接入二维码的权限,如需扫码请联系管理员。
+        </p>
 
-        <div class="qr-stage">
-            <!-- :key 必须有: SQrcodeDraw 只在 onMounted 生成,不 watch text.
-                 token 是异步拿到的,没有 :key 会渲染空白码. -->
-            <div v-if="showQr" class="qr-canvas">
-                <SQrcodeDraw :key="qrUrl" :text="qrUrl" :options="{ width: 220, margin: 1 }" />
+        <template v-if="canGenerate">
+            <a-form layout="vertical">
+                <a-form-item
+                    label="平台访问地址"
+                    required
+                    :validate-status="baseUrlError ? 'error' : ''"
+                    :help="baseUrlError || '设备需要能访问到这个地址,跨网段时请改成设备侧可达的地址。'"
+                >
+                    <a-input
+                        v-model="baseUrl"
+                        placeholder="http://192.168.1.10:8280"
+                        allow-clear
+                        @blur="touched.baseUrl = true"
+                    />
+                </a-form-item>
+            </a-form>
+
+            <div class="qr-stage">
+                <!-- :key 必须有: SQrcodeDraw 只在 onMounted 生成,不 watch text.
+                     token 是异步拿到的,没有 :key 会渲染空白码. -->
+                <div v-if="showQr" class="qr-canvas">
+                    <SQrcodeDraw :key="qrUrl" :text="qrUrl" :options="{ width: 220, margin: 1 }" />
+                </div>
+                <div v-else class="qr-placeholder" :class="{ 'is-expired': expired }">
+                    <span v-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
+                    <span v-else-if="expired">二维码已失效</span>
+                    <span v-else-if="loading">正在生成…</span>
+                    <span v-else-if="!baseUrlValid">请先填写合法的平台访问地址</span>
+                    <span v-else>点击下方按钮生成二维码</span>
+                </div>
+
+                <div class="qr-meta">
+                    <Clock :size="14" />
+                    <span v-if="expired">已失效,请重新生成</span>
+                    <span v-else-if="token">{{ countdownText }} 后失效</span>
+                    <span v-else>尚未生成</span>
+                </div>
+
+                <div v-if="qrUrl" class="qr-url">
+                    <span class="qr-url__label">二维码链接</span>
+                    <code class="qr-url__value">{{ qrUrl }}</code>
+                    <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
+                </div>
+
+                <a-button type="primary" class="qr-generate" :loading="loading" @click="generate()">
+                    <template #icon><RefreshCw :size="15" /></template>
+                    {{ token ? "重新生成" : "生成二维码" }}
+                </a-button>
             </div>
-            <div v-else class="qr-placeholder" :class="{ 'is-expired': expired }">
-                <span v-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
-                <span v-else-if="expired">二维码已失效</span>
-                <span v-else-if="loading">正在生成…</span>
-                <span v-else-if="!baseUrlValid">请先填写合法的平台访问地址</span>
-                <span v-else>点击下方按钮生成二维码</span>
-            </div>
 
-            <div class="qr-meta">
-                <Clock :size="14" />
-                <span v-if="expired">已失效,请重新生成</span>
-                <span v-else-if="token">{{ countdownText }} 后失效</span>
-                <span v-else>尚未生成</span>
+            <div class="qr-tips">
+                <span class="qr-tips__icon"><ShieldAlert :size="15" /></span>
+                <div class="qr-tips__body">
+                    <span>二维码含平台接入凭据,请勿截图外传;建议在可信网络内使用。</span>
+                    <span>点击重新生成后,旧二维码在原到期时间前仍然有效。</span>
+                </div>
             </div>
-
-            <div v-if="qrUrl" class="qr-url">
-                <span class="qr-url__label">二维码链接</span>
-                <code class="qr-url__value">{{ qrUrl }}</code>
-                <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
-            </div>
-
-            <a-button type="primary" class="qr-generate" :loading="loading" @click="generate()">
-                <template #icon><RefreshCw :size="15" /></template>
-                {{ token ? "重新生成" : "生成二维码" }}
-            </a-button>
-        </div>
-
-        <div class="qr-tips">
-            <span class="qr-tips__icon"><ShieldAlert :size="15" /></span>
-            <div class="qr-tips__body">
-                <span>二维码含平台接入凭据,请勿截图外传;建议在可信网络内使用。</span>
-                <span>点击重新生成后,旧二维码在原到期时间前仍然有效。</span>
-            </div>
-        </div>
+        </template>
     </section>
 </template>
 
@@ -360,20 +380,66 @@ onMounted(() => {
     font-size: 11px;
 }
 
-.qr-note {
+/* 模拟器下载入口:扫码接入的前置动作,放在出码区之前 */
+.qr-download {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 6px 9px;
+    gap: 10px;
+    padding: 9px 10px;
     color: var(--uvp-brand-strong, #1d4ed8);
     background: var(--uvp-brand-soft, #e8f2ff);
     border: 1px solid rgb(37 99 235 / 16%);
-    border-radius: 7px;
-    font-size: 11.5px;
-    line-height: 1.4;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: background-color 160ms ease, border-color 160ms ease;
 }
 
-.qr-note > svg {
+.qr-download:hover {
+    background: color-mix(in srgb, var(--uvp-brand, #2563eb) 16%, var(--uvp-panel-bg, #ffffff));
+    border-color: rgb(37 99 235 / 30%);
+}
+
+.qr-download__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    color: #ffffff;
+    background: var(--uvp-brand, #2563eb);
+    border-radius: 7px;
+}
+
+.qr-download__body {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.qr-download__body strong {
+    color: var(--uvp-text-primary, #1f2937);
+    font-size: 12.5px;
+}
+
+.qr-download__body small {
+    color: var(--uvp-text-tertiary, #6b7280);
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+
+.qr-download > svg {
+    flex-shrink: 0;
+    color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-locked {
+    margin: 0;
+    color: var(--uvp-text-tertiary, #6b7280);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
 }
 </style>

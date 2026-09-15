@@ -20,10 +20,9 @@ describe("SIP platform deployment card", () => {
         expect(introRule).not.toMatch(/,\s*#fff(?:fff)?\s+62%/);
     });
 
-    it("keeps the simulator download hover surface theme-aware", () => {
-        const hoverRule = source.match(/\.guide-download:hover\s*\{([^}]*)\}/)?.[1] || "";
-
-        expect(hoverRule).toContain("var(--uvp-panel-bg");
-        expect(hoverRule).not.toContain("var(--uvp-brand-soft, #e8f2ff) 70%, #ffffff");
+    it("keeps the simulator download entry out of the guide card", () => {
+        // 下载入口已搬到扫码接入卡(见 QrProvisionCard.vue),这里只防回归
+        expect(source).not.toContain("guide-download");
+        expect(source).not.toContain("download.uvplatform.cn");
     });
 });

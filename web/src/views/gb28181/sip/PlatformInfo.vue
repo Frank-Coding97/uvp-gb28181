@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { BookOpen, Check, ChevronRight, Copy, Download, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
+import { BookOpen, Check, Copy, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
 import {
     fetchSipPlatformInfo,
     fetchSipSetupStatus,
@@ -278,20 +278,6 @@ onMounted(refresh);
                                         </div>
                                     </li>
                                 </ol>
-
-                                <a
-                                    class="guide-download"
-                                    href="https://download.uvplatform.cn/"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                >
-                                    <Download :size="15" />
-                                    <span>
-                                        <strong>国标模拟器下载</strong>
-                                        <small>Android 移动端模拟器,可模拟设备接入与联调</small>
-                                    </span>
-                                    <ChevronRight :size="15" />
-                                </a>
                             </section>
                         </div>
 
@@ -330,7 +316,7 @@ onMounted(refresh);
                             </section>
 
                             <!-- 扫码接入卡 -->
-                            <QrProvisionCard v-if="canGenerateQr && config" />
+                            <QrProvisionCard v-if="config" :can-generate="canGenerateQr" />
                         </aside>
                     </div>
                 </a-spin>
@@ -678,49 +664,6 @@ onMounted(refresh);
     font-family: "SFMono-Regular", Consolas, Menlo, monospace;
     font-weight: 600;
     text-align: right;
-}
-
-.guide-download {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 6px;
-    padding: 12px 14px;
-    color: var(--uvp-brand-strong, #1d4ed8);
-    background: var(--uvp-brand-soft, #e8f2ff);
-    border: 1px solid rgb(37 99 235 / 18%);
-    border-radius: 8px;
-    text-decoration: none;
-    transition: background-color 160ms ease, border-color 160ms ease;
-}
-
-.guide-download:hover {
-    background: color-mix(in srgb, var(--uvp-brand, #2563eb) 18%, var(--uvp-panel-bg, #ffffff));
-    border-color: rgb(37 99 235 / 32%);
-}
-
-.guide-download > span {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.guide-download strong {
-    color: var(--uvp-text-primary, #1f2937);
-    font-size: 12.5px;
-}
-
-.guide-download small {
-    color: var(--uvp-text-tertiary, #6b7280);
-    font-size: 11.5px;
-    line-height: 1.45;
-}
-
-.guide-download > svg:last-child {
-    flex-shrink: 0;
-    color: var(--uvp-text-tertiary, #6b7280);
 }
 
 @media (max-width: 1080px) {
