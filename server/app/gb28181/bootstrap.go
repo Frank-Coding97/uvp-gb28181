@@ -54,6 +54,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
+	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
@@ -236,6 +237,7 @@ var recordQueryService *recordquery.Service
 var recordQueryMetrics *recordquery.Metrics
 var playbackMetrics *gbplayback.Metrics
 var positionHistoryPruneCancel context.CancelFunc
+var streamProbeWorkerCancel context.CancelFunc
 
 type ptzSchedulerLifecycle interface {
 	Start(context.Context)
@@ -845,7 +847,7 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 			playSvc.FinishRecovery()
 			gbroutes.SetPlayService(playSvc)
 			gbroutes.SetStreamMonitorService(streammonitor.NewService(zlmRegistry, zlmLocationMap, nil, time.Now))
-			gbroutes.SetStreamProbeService(streamprobe.NewService(zlmRegistry, zlmLocationMap, nil, 5*time.Second, time.Now))
+			setupStreamProbeRuntime(streamprobe.NewService(zlmRegistry, zlmLocationMap, nil, 5*time.Second, time.Now))
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)", zap.String("event", "gb28181.lifecycle.play_service_assembled"),
 				zap.Int("recovery_scanned", recoveryStats.Scanned),
@@ -895,6 +897,35 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
 	}
 	return nil
+}
+
+// setupStreamProbeRuntime wires the asynchronous Redis-backed probe queue.
+// Redis is deliberately required here: falling back to an in-memory queue
+// would lose tasks on restart and break deduplication across workers.
+func setupStreamProbeRuntime(service *streamprobe.Service) {
+	if service == nil || sipGenerationBackground == nil {
+		gbroutes.SetStreamProbeTaskService(nil)
+		return
+	}
+	client, ok := cachehelper.RedisClient(app.Cache)
+	if !ok {
+		gbroutes.SetStreamProbeTaskService(nil)
+		app.ZapLog.Warn("GB28181 视频探针异步队列未装配: Redis 缓存不可用", zap.String("event", "gb28181.stream_probe.redis_unavailable"))
+		return
+	}
+	store := streamprobe.NewRedisTaskStore(client, service)
+	workerCtx, cancel := context.WithCancel(context.Background())
+	streamProbeWorkerCancel = cancel
+	consumer := "gb28181-probe-" + uuid.NewString()
+	if !sipGenerationBackground.Go(func() { store.RunWorker(workerCtx, consumer, 1) }) {
+		cancel()
+		streamProbeWorkerCancel = nil
+		gbroutes.SetStreamProbeTaskService(nil)
+		app.ZapLog.Warn("GB28181 视频探针异步 worker 未启动: SIP 后台已停止", zap.String("event", "gb28181.stream_probe.worker_rejected"))
+		return
+	}
+	gbroutes.SetStreamProbeTaskService(store)
+	app.ZapLog.Info("GB28181 视频探针异步队列已装配", zap.String("event", "gb28181.stream_probe.worker_started"))
 }
 
 func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSecret, zlmSecret string) (*playauth.Signer, error) {

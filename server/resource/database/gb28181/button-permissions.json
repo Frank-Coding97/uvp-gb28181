@@ -546,6 +546,10 @@
         {
           "method": "POST",
           "path": "/api/gb28181/stream-probes/:streamId"
+        },
+        {
+          "method": "GET",
+          "path": "/api/gb28181/stream-probes/operations/:operationId"
         }
       ],
       "source": "web/src/views/gb28181/components/PlayConsoleLinked.vue:1476-1504,3952; web/src/api/gb28181.ts:443-444; server/app/gb28181/routes/routes.go:664-669",
@@ -3866,6 +3870,10 @@
         {
           "method": "POST",
           "path": "/api/gb28181/stream-probes/:streamId"
+        },
+        {
+          "method": "GET",
+          "path": "/api/gb28181/stream-probes/operations/:operationId"
         }
       ],
       "source": [

@@ -2,9 +2,38 @@ package zlm
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
+
+type delayedProbeRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f delayedProbeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestProbeHTTPTimeoutFollowsSamplingDuration(t *testing.T) {
+	if got, want := probeHTTPTimeout(3000), 13*time.Second; got != want {
+		t.Fatalf("3s probe timeout=%s, want %s", got, want)
+	}
+	if got, want := probeHTTPTimeout(60000), 70*time.Second; got != want {
+		t.Fatalf("60s probe timeout=%s, want %s", got, want)
+	}
+}
+
+func TestAddProbeDoesNotUseShortControlPlaneTimeout(t *testing.T) {
+	c := NewClientForNode(&node.Node{Host: "127.0.0.1", APIPort: 80, APISecret: "test-secret"})
+	c.http = &http.Client{Timeout: time.Millisecond, Transport: delayedProbeRoundTripper(func(*http.Request) (*http.Response, error) {
+		time.Sleep(20 * time.Millisecond)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"code":0,"data":[]}`)), Header: make(http.Header)}, nil
+	})}
+	if _, err := c.AddProbe(context.Background(), "__defaultVhost__", "rtp", "stream-1", 3000); err != nil {
+		t.Fatalf("addProbe should use duration-aware timeout: %v", err)
+	}
+}
 
 func TestAddProbeParsesFramesAndUsesFixedDuration(t *testing.T) {
 	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {

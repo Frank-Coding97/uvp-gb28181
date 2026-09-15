@@ -70,6 +70,13 @@ func (e redactedTransportError) Unwrap() error { return e.err }
 
 // call 发起 GET 请求(ZLM API 多为 GET + query 参数),解析到 out
 func (c *Client) call(ctx context.Context, api string, params map[string]string, out interface{}) error {
+	return c.callWithClient(ctx, c.http, api, params, out)
+}
+
+func (c *Client) callWithClient(ctx context.Context, httpClient *http.Client, api string, params map[string]string, out interface{}) error {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
 	q := url.Values{}
 	q.Set("secret", c.secret)
 	for k, v := range params {
@@ -80,7 +87,7 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		secrets := []string{c.secret}
 		for key, rawHook := range params {
@@ -353,13 +360,33 @@ func (c *Client) AddProbe(ctx context.Context, vhost, appName, stream string, pr
 		"stream":   stream,
 		"probe_ms": strconv.Itoa(probeMS),
 	}
-	if err := c.call(ctx, "addProbe", params, &response); err != nil {
+	// ZLM holds this request until the sampling window is complete. The normal
+	// control-plane client timeout is intentionally short, so use a cloned
+	// client with a duration-aware timeout only for this long-poll endpoint.
+	baseHTTPClient := c.http
+	if baseHTTPClient == nil {
+		baseHTTPClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	httpClient := *baseHTTPClient
+	httpClient.Timeout = probeHTTPTimeout(probeMS)
+	if err := c.callWithClient(ctx, &httpClient, "addProbe", params, &response); err != nil {
 		return nil, err
 	}
 	if response.Code != 0 {
 		return nil, fmt.Errorf("addProbe code=%d msg=%s", response.Code, response.Msg)
 	}
 	return response.Data, nil
+}
+
+func probeHTTPTimeout(probeMS int) time.Duration {
+	if probeMS < 0 {
+		probeMS = 0
+	}
+	timeout := time.Duration(probeMS)*time.Millisecond + 10*time.Second
+	if timeout < 10*time.Second {
+		return 10 * time.Second
+	}
+	return timeout
 }
 
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)

@@ -21,12 +21,27 @@ import (
 type fakeProbeService struct {
 	calls      int
 	durationMS []int
+	tasks      map[string]*streamprobe.Task
+	err        error
 }
 
-func (f *fakeProbeService) Run(_ context.Context, _ string, durationMS int) (*streamprobe.ProbeSnapshot, error) {
+func (f *fakeProbeService) Create(_ context.Context, streamID string, durationMS int) (*streamprobe.Task, error) {
 	f.calls++
 	f.durationMS = append(f.durationMS, durationMS)
-	return &streamprobe.ProbeSnapshot{}, nil
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &streamprobe.Task{OperationID: "probe-op-1", StreamID: streamID, DurationMS: durationMS, Status: streamprobe.TaskQueued}, nil
+}
+
+func (f *fakeProbeService) Get(_ context.Context, operationID string) (*streamprobe.Task, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if task := f.tasks[operationID]; task != nil {
+		return task, nil
+	}
+	return nil, streamprobe.ErrTaskNotFound
 }
 
 func TestStreamProbeControllerScopesStream(t *testing.T) {
@@ -74,9 +89,27 @@ func TestStreamProbeControllerAcceptsSupportedDurationAndDefaults(t *testing.T) 
 			req.Header.Set("Content-Type", "application/json")
 		}
 		router.ServeHTTP(recorder, req)
-		require.Equal(t, http.StatusOK, recorder.Code, test.name)
+		require.Equal(t, http.StatusAccepted, recorder.Code, test.name)
 		require.Equal(t, test.want, service.durationMS[len(service.durationMS)-1], test.name)
 	}
+}
+
+func TestStreamProbeControllerGetRechecksStreamScope(t *testing.T) {
+	db := newScopedDeviceDB(t)
+	seedDeptScopedUser(t, db, 100, 10)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: "d", ChannelID: "c", StreamID: "hidden", OwnerDeptID: 20}).Error)
+	service := &fakeProbeService{tasks: map[string]*streamprobe.Task{
+		"probe-op-1": {OperationID: "probe-op-1", StreamID: "hidden", DurationMS: 3000, Status: streamprobe.TaskCompleted},
+	}}
+	controller := gbcontrollers.NewStreamProbeController(service)
+	controller.SetDB(func() *gorm.DB { return db })
+	app.Response = response.NewResponseHandler()
+	router := gin.New()
+	router.Use(gin.Recovery(), withClaims(100))
+	router.GET("/stream-probes/operations/:operationId", controller.Get)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/stream-probes/operations/probe-op-1", nil))
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 func TestStreamProbeControllerRejectsUnsupportedDuration(t *testing.T) {

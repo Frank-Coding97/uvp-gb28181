@@ -445,12 +445,37 @@ export interface ProbeSnapshot {
   };
 }
 
-export const runStreamProbe = (streamId: string, durationMs = 3000) =>
-  http.request<BaseResult<ProbeSnapshot>>(
+export type StreamProbeTaskStatus = "queued" | "sampling" | "completed" | "failed";
+
+export interface StreamProbeTask {
+  operationId: string;
+  streamId: string;
+  durationMs: number;
+  status: StreamProbeTaskStatus;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  deadlineAt: string;
+  snapshot?: ProbeSnapshot;
+  error?: string;
+}
+
+const streamProbeRequestConfig = { ...silentRequestConfig, timeout: 10000 };
+
+export const createStreamProbe = (streamId: string, durationMs = 3000) =>
+  http.request<BaseResult<StreamProbeTask>>(
     "post",
     baseUrlApi(`gb28181/stream-probes/${streamId}`),
     { data: { durationMs } },
-    { ...silentRequestConfig, timeout: durationMs + 10000 }
+    streamProbeRequestConfig
+  );
+
+export const getStreamProbeOperation = (operationId: string) =>
+  http.request<BaseResult<StreamProbeTask>>(
+    "get",
+    baseUrlApi(`gb28181/stream-probes/operations/${operationId}`),
+    undefined,
+    streamProbeRequestConfig
   );
 
 export interface ControlCapability {

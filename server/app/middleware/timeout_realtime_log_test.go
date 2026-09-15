@@ -24,13 +24,13 @@ func TestTimeoutMiddlewareLeavesRealtimeLogStreamUnbounded(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, response.Code)
 }
 
-func TestTimeoutMiddlewareLeavesStreamProbeUnbounded(t *testing.T) {
+func TestTimeoutMiddlewareKeepsStreamProbeRequestsBounded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(TimeoutMiddleware(time.Second))
 	router.POST("/api/gb28181/stream-probes/:streamId", func(c *gin.Context) {
 		_, bounded := c.Request.Context().Deadline()
-		require.False(t, bounded)
+		require.True(t, bounded)
 		c.Status(http.StatusNoContent)
 	})
 	response := httptest.NewRecorder()

@@ -65,6 +65,7 @@ type sipShutdownSnapshot struct {
 
 	positionPruneCancel context.CancelFunc
 	positionPruneDone   <-chan struct{}
+	streamProbeCancel   context.CancelFunc
 
 	recordingReconciler       *gbrecording.Reconciler
 	recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
@@ -149,6 +150,7 @@ func captureSIPShutdownSnapshot() sipShutdownSnapshot {
 		subscriptionScheduler: subscriptionScheduler,
 		offlineScanner:        offlineScanner, playReconciler: playReconciler,
 		positionPruneCancel: positionHistoryPruneCancel, positionPruneDone: positionHistoryPruneDone,
+		streamProbeCancel:   streamProbeWorkerCancel,
 		recordingReconciler: recordingReconciler, recordingCatalogScheduler: recordingCatalogScheduler,
 		recordingCatalogService: recordingCatalogService, talkService: talkSvc,
 		talkCleanupWorker: talkCleanupWorker, background: sipGenerationBackground,
@@ -487,6 +489,9 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 		r.ptzService.Retire()
 	}
 	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+	if r.streamProbeCancel != nil {
+		r.streamProbeCancel()
+	}
 	if r.background != nil {
 		stopErr = errors.Join(stopErr, shutdownComponentError("sip.background", r.background.StopContext(ctx)))
 	}
@@ -637,6 +642,7 @@ func clearSIPShutdownGlobals() {
 	offlineScanner, playReconciler = nil, nil
 	playSvc, playAuthMetrics = nil, nil
 	positionHistoryPruneCancel, positionHistoryPruneDone = nil, nil
+	streamProbeWorkerCancel = nil
 	recordingSvc, recordingRepo = nil, nil
 	recordingReconciler, recordingCatalogScheduler, recordingCatalogService = nil, nil, nil
 	recordingPlanEngine, recordingPlanLeases = nil, nil
@@ -644,6 +650,7 @@ func clearSIPShutdownGlobals() {
 	sipGenerationBackground = nil
 	zlmClient, zlmLocationMap = nil, nil
 	gbroutes.SetSecurityRuntime(nil)
+	gbroutes.SetStreamProbeTaskService(nil)
 }
 
 func clearControlPlaneGlobals() {

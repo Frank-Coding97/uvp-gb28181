@@ -265,7 +265,7 @@ func SetStreamMonitorService(service *streammonitor.Service) {
 	streamMonitorController = gbcontrollers.NewStreamMonitorController(service)
 }
 
-func SetStreamProbeService(service *streamprobe.Service) {
+func SetStreamProbeTaskService(service streamprobe.TaskStore) {
 	streamProbeController = gbcontrollers.NewStreamProbeController(service)
 }
 
@@ -661,6 +661,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		streamProbes := gb.Group("/stream-probes")
 		{
 			streamProbes.POST("/:streamId", func(c *gin.Context) { streamProbeController.Run(c) })
+			streamProbes.GET("/operations/:operationId", func(c *gin.Context) { streamProbeController.Get(c) })
 		}
 		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
 		play := gb.Group("/play")

@@ -7,6 +7,7 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
   createDeviceSnapshotSession,
+  createStreamProbe,
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
   fetchDefaultPlaybackProtocolConfig,
@@ -29,9 +30,9 @@ import {
   getHomePosition,
   getPtzOperation,
   getStreamMonitor,
+  getStreamProbeOperation,
   listCruiseTracks,
   listPtzPresets,
-  runStreamProbe,
   startPlay,
   updateHomePosition,
   updatePositionHistoryConfig,
@@ -71,14 +72,22 @@ describe("国标服务配置 API", () => {
     );
   });
 
-  it("视频探针使用独立的流探针路径", async () => {
-    await runStreamProbe("stream-1", 10000);
+  it("视频探针创建与查询接口都使用固定短超时", async () => {
+    await createStreamProbe("stream-1", 60000);
 
     expect(request).toHaveBeenCalledWith(
       "post",
       "/api/gb28181/stream-probes/stream-1",
-      { data: { durationMs: 10000 } },
-      { showErrorMessage: false, timeout: 20000 }
+      { data: { durationMs: 60000 } },
+      { showErrorMessage: false, timeout: 10000 }
+    );
+
+    await getStreamProbeOperation("probe-op-1");
+    expect(request).toHaveBeenLastCalledWith(
+      "get",
+      "/api/gb28181/stream-probes/operations/probe-op-1",
+      undefined,
+      { showErrorMessage: false, timeout: 10000 }
     );
   });
 

@@ -91,6 +91,45 @@ func TestRealtimeConsoleLogMenuRenameMigrations(t *testing.T) {
 	}
 }
 
+func TestStreamProbeAsyncPermissionMigrations(t *testing.T) {
+	for _, name := range []string{
+		"2026-09-15-stream-probe-async.sql",
+		"2026-09-15-stream-probe-async-postgresql.sql",
+		"2026-09-15-stream-probe-async-sqlserver.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := migrationsfs.FS.ReadFile("migrations/" + name)
+			require.NoError(t, err)
+			normalized := strings.NewReplacer("`", "", "[", "", "]", "").Replace(strings.ToLower(string(body)))
+			normalized = strings.Join(strings.Fields(normalized), " ")
+			for _, token := range []string{
+				"/api/gb28181/stream-probes/operations/:operationid",
+				"gb28181:play:diagnose",
+				"sys_menu_api",
+				"sys_casbin_rule",
+				"not exists",
+			} {
+				require.Contains(t, normalized, token)
+			}
+		})
+	}
+	body, err := migrationsfs.FS.ReadFile("migrations/2026-09-15-stream-probe-async-down.sql")
+	require.NoError(t, err)
+	normalized := strings.ToLower(string(body))
+	require.Contains(t, normalized, "deleted_at")
+	require.Contains(t, normalized, "/api/gb28181/stream-probes/operations/:operationid")
+}
+
+func TestStreamProbeAsyncFreshBaselinesContainQueryAPI(t *testing.T) {
+	for _, name := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", "..", "resource", "database", name))
+		require.NoError(t, err)
+		normalized := strings.ToLower(string(body))
+		require.Contains(t, normalized, "/api/gb28181/stream-probes/operations/:operationid")
+		require.Contains(t, normalized, "gb28181:play:diagnose")
+	}
+}
+
 func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
 	files := []string{
 		"2026-08-15-device-assignment-permissions.sql",

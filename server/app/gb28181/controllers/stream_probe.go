@@ -16,8 +16,9 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
-type StreamProbeService interface {
-	Run(context.Context, string, int) (*streamprobe.ProbeSnapshot, error)
+type StreamProbeTaskService interface {
+	Create(context.Context, string, int) (*streamprobe.Task, error)
+	Get(context.Context, string) (*streamprobe.Task, error)
 }
 
 type streamProbeRequest struct {
@@ -26,11 +27,11 @@ type streamProbeRequest struct {
 
 type StreamProbeController struct {
 	controllers.Common
-	service StreamProbeService
+	service StreamProbeTaskService
 	dbFunc  func() *gorm.DB
 }
 
-func NewStreamProbeController(service StreamProbeService) *StreamProbeController {
+func NewStreamProbeController(service StreamProbeTaskService) *StreamProbeController {
 	return &StreamProbeController{service: service, dbFunc: func() *gorm.DB { return app.DB() }}
 }
 
@@ -66,20 +67,44 @@ func (c *StreamProbeController) Run(ctx *gin.Context) {
 		c.FailAndAbort(ctx, "流不存在", nil)
 		return
 	}
-	snapshot, err := c.service.Run(ctx.Request.Context(), streamID, durationMS)
-	switch {
-	case errors.Is(err, streamprobe.ErrStreamOffline):
-		response.SetBusinessResult(ctx, 1, false)
-		ctx.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "流已离线"})
-	case errors.Is(err, streamprobe.ErrNodeUnavailable):
+	task, err := c.service.Create(ctx.Request.Context(), streamID, durationMS)
+	if err != nil {
 		response.SetBusinessResult(ctx, 503, false)
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "媒体节点不可达"})
-	case errors.Is(err, context.DeadlineExceeded):
-		response.SetBusinessResult(ctx, 1, false)
-		ctx.JSON(http.StatusGatewayTimeout, gin.H{"code": 1, "message": "视频探针超时"})
-	case err != nil:
-		c.FailAndAbort(ctx, "视频探针执行失败", err)
-	default:
-		c.Success(ctx, snapshot)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "视频探针队列不可用"})
+		return
 	}
+	response.SetBusinessResult(ctx, 0, true)
+	ctx.JSON(http.StatusAccepted, gin.H{"code": 0, "message": "", "data": task})
+}
+
+func (c *StreamProbeController) Get(ctx *gin.Context) {
+	if c.service == nil {
+		response.SetBusinessResult(ctx, 503, false)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "视频探针队列未装配"})
+		return
+	}
+	task, err := c.service.Get(ctx.Request.Context(), ctx.Param("operationId"))
+	if errors.Is(err, streamprobe.ErrTaskNotFound) {
+		response.SetBusinessResult(ctx, 404, false)
+		ctx.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "探针任务不存在"})
+		return
+	}
+	if err != nil {
+		response.SetBusinessResult(ctx, 503, false)
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": 503, "message": "视频探针队列不可用"})
+		return
+	}
+	var channel gbmodels.GbChannel
+	result := c.dbFunc().WithContext(ctx.Request.Context()).Scopes(ownerDeptScope(ctx)).Select("id").Where("stream_id = ?", task.StreamID).Limit(1).Find(&channel)
+	if result.Error != nil {
+		c.FailAndAbort(ctx, "查询流失败", result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		response.SetBusinessResult(ctx, 404, false)
+		ctx.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "探针任务不存在"})
+		return
+	}
+	response.SetBusinessResult(ctx, 0, true)
+	ctx.JSON(http.StatusOK, gin.H{"code": 0, "message": "", "data": task})
 }

@@ -64,7 +64,8 @@ const api = vi.hoisted(() => {
           recording: { mp4: false, hls: false }
         }
       }),
-    runStreamProbe: vi.fn(),
+    createStreamProbe: vi.fn(),
+    getStreamProbeOperation: vi.fn(),
     getControlCapabilities: vi
       .fn()
       .mockResolvedValue({
@@ -844,10 +845,30 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   it("建立真实点播、读取概况、执行探针并在关闭时仅销毁本地播放器", async () => {
-    api.runStreamProbe.mockResolvedValueOnce({
+    api.createStreamProbe.mockResolvedValueOnce({
       code: 0,
       message: "",
       data: {
+        operationId: "probe-op-1",
+        streamId: "stream-1",
+        durationMs: 3000,
+        status: "queued",
+        createdAt: "2026-07-22T10:00:00Z",
+        deadlineAt: "2026-07-22T10:00:13Z"
+      }
+    });
+    api.getStreamProbeOperation.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        operationId: "probe-op-1",
+        streamId: "stream-1",
+        durationMs: 3000,
+        status: "completed",
+        createdAt: "2026-07-22T10:00:00Z",
+        completedAt: "2026-07-22T10:00:03Z",
+        deadlineAt: "2026-07-22T10:00:13Z",
+        snapshot: {
         nodeId: 1,
         nodeName: "ZLM",
         completedAt: "2026-07-22T10:00:03Z",
@@ -867,6 +888,7 @@ describe("PlayConsoleLinked 双区联动", () => {
           }
         ],
         health: { status: "ok", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } }
+        }
       }
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -882,7 +904,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.get("[data-testid='stream-brief']").text()).toContain("累计 3");
     await wrapper.get("[data-testid='probe-start']").trigger("click");
     await flushPromises();
-    expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1", 3000);
+    expect(api.createStreamProbe).toHaveBeenCalledWith("stream-1", 3000);
+    expect(api.getStreamProbeOperation).toHaveBeenCalledWith("probe-op-1");
     // 轨道明细里不再重复 codec(流信息块已有编码),改断言探针独有的采样帧与精确 FPS
     expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("76");
     expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("精确 FPS");
@@ -1037,8 +1060,13 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   it("采样中仅保留右上角状态，不显示重复的采集提示卡", async () => {
-    let resolveProbe!: (value: unknown) => void;
-    api.runStreamProbe.mockReturnValueOnce(new Promise(resolve => { resolveProbe = resolve; }));
+    api.createStreamProbe.mockResolvedValueOnce({
+      code: 0, message: "", data: {
+        operationId: "probe-op-pending", streamId: "stream-1", durationMs: 3000,
+        status: "queued", createdAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-22T10:00:13Z"
+      }
+    });
+    api.getStreamProbeOperation.mockReturnValueOnce(new Promise(() => undefined));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -1050,12 +1078,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find("[data-testid='probe-check'] .probe-verdict.pending").exists()).toBe(false);
     expect(wrapper.get("[data-testid='probe-check']").text()).not.toContain("正在采集音视频帧");
 
-    resolveProbe({ code: 0, message: "", data: null });
     wrapper.unmount();
   });
 
   it("支持选择采样时长并将选项传给探针接口", async () => {
-    api.runStreamProbe.mockReturnValueOnce(new Promise(() => undefined));
+    api.createStreamProbe.mockResolvedValueOnce({
+      code: 0, message: "", data: {
+        operationId: "probe-op-duration", streamId: "stream-1", durationMs: 10000,
+        status: "queued", createdAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-22T10:00:20Z"
+      }
+    });
+    api.getStreamProbeOperation.mockReturnValueOnce(new Promise(() => undefined));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -1068,7 +1101,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await nextTick();
     expect(wrapper.get("[data-testid='probe-start']").text()).toContain("开始 10 秒检测");
     await wrapper.get("[data-testid='probe-start']").trigger("click");
-    expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1", 10000);
+    expect(api.createStreamProbe).toHaveBeenCalledWith("stream-1", 10000);
     expect(wrapper.get("[data-testid='probe-start']").attributes("disabled")).toBeDefined();
     expect(duration.attributes("disabled")).toBeDefined();
 
@@ -3550,7 +3583,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.getHomePosition).not.toHaveBeenCalled();
     expect(api.controlPtz).not.toHaveBeenCalled();
     expect(api.createTalkSession).not.toHaveBeenCalled();
-    expect(api.runStreamProbe).not.toHaveBeenCalled();
+    expect(api.createStreamProbe).not.toHaveBeenCalled();
     expect(api.createDeviceSnapshotSession).not.toHaveBeenCalled();
 
     wrapper.unmount();

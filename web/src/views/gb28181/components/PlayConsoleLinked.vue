@@ -42,7 +42,8 @@ import {
     getStreamMonitor,
     listCruiseTracks,
     listPtzPresets,
-    runStreamProbe,
+    createStreamProbe,
+    getStreamProbeOperation,
     startPlay,
     stopPlay,
     updateHomePosition,
@@ -1484,6 +1485,7 @@ const probeSnapshot = ref<ProbeSnapshot | null>(null);
 let probeCountdownTimer: number | null = null;
 let probeFinishTimer: number | null = null;
 let probeToken = 0;
+const probePollIntervalMs = 1000;
 
 const probeStatusText = computed(() => {
     if (probeState.value === "sampling") return "采样中";
@@ -1524,20 +1526,46 @@ async function startProbe() {
         probeRemainingMs.value = Math.max(0, probeRemainingMs.value - 100);
     }, 100);
     try {
-        const response = await runStreamProbe(streamId, probeDurationMs.value);
+        const response = await createStreamProbe(streamId, probeDurationMs.value);
         if (token !== probeToken || session !== sessionToken || playResult.value?.streamId !== streamId) return;
-        if (response.code !== 0 || !response.data) throw new Error(response.message || "视频探针执行失败");
-        probeSnapshot.value = response.data;
-        probeState.value = "complete";
-        probeFinishedAt.value = new Date(response.data.completedAt).toLocaleTimeString("zh-CN", { hour12: false });
+        if (response.code !== 0 || !response.data?.operationId) throw new Error(response.message || "视频探针任务创建失败");
+        void pollProbeOperation(response.data.operationId, token, session, streamId);
     } catch (error: any) {
         if (token !== probeToken) return;
-        probeState.value = "idle";
-        Message.error(error?.message || "视频探针执行失败");
-    } finally {
-        if (token !== probeToken) return;
-        clearProbeTimers();
-        probeRemainingMs.value = 0;
+        failProbe(error?.message || "视频探针任务创建失败");
+    }
+}
+
+function failProbe(message: string) {
+    clearProbeTimers();
+    probeRemainingMs.value = 0;
+    probeState.value = "idle";
+    Message.error(message);
+}
+
+async function pollProbeOperation(operationId: string, token: number, session: number, streamId: string) {
+    try {
+        const response = await getStreamProbeOperation(operationId);
+        if (token !== probeToken || session !== sessionToken || playResult.value?.streamId !== streamId) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "视频探针任务查询失败");
+        const task = response.data;
+        if (task.status === "completed") {
+            if (!task.snapshot) throw new Error("视频探针任务缺少检测结果");
+            clearProbeTimers();
+            probeRemainingMs.value = 0;
+            probeSnapshot.value = task.snapshot;
+            probeState.value = "complete";
+            probeFinishedAt.value = new Date(task.completedAt || task.snapshot.completedAt).toLocaleTimeString("zh-CN", { hour12: false });
+            return;
+        }
+        if (task.status === "failed") throw new Error(task.error || "视频探针执行失败");
+        if (task.status !== "queued" && task.status !== "sampling") throw new Error("视频探针任务状态异常");
+        probeFinishTimer = window.setTimeout(() => {
+            void pollProbeOperation(operationId, token, session, streamId);
+        }, probePollIntervalMs);
+    } catch (error: any) {
+        if (token !== probeToken || session !== sessionToken || playResult.value?.streamId !== streamId) return;
+        failProbe(error?.message || "视频探针任务查询失败");
     }
 }
 

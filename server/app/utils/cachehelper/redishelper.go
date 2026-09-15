@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -15,6 +15,18 @@ type redisHelper struct {
 	client *redis.Client
 	ctx    context.Context
 }
+
+// RedisClient returns the shared client for subsystems that need Redis data
+// structures beyond the generic key-value cache contract.
+func RedisClient(cache app.CacheInterf) (*redis.Client, bool) {
+	provider, ok := cache.(interface{ RedisClient() *redis.Client })
+	if !ok || provider.RedisClient() == nil {
+		return nil, false
+	}
+	return provider.RedisClient(), true
+}
+
+func (r *redisHelper) RedisClient() *redis.Client { return r.client }
 
 // NewRedisHelper 创建Redis助手实例
 func NewRedisHelper(addr, password string, db int) (app.CacheInterf, error) {
