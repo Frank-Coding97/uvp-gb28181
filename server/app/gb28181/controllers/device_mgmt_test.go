@@ -3,7 +3,6 @@ package controllers_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -91,8 +90,6 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 	dmgmt.SetDB(func() *gorm.DB { return db })
 	mc := gbcontrollers.NewMapController()
 	mc.SetDB(func() *gorm.DB { return db })
-	ac := gbcontrollers.NewAnomalyController()
-	ac.SetDB(func() *gorm.DB { return db })
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -121,9 +118,6 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.GET("/map/markers", mc.Markers)
 		gr.GET("/map/clusters", mc.Clusters)
 		gr.GET("/map/no-coord-count", mc.NoCoordCount)
-		gr.GET("/anomaly", ac.List)
-		gr.POST("/anomaly/:id/resolve", ac.Resolve)
-		gr.POST("/anomaly/batch-resolve", ac.BatchResolve)
 	}
 	return r, db
 }
@@ -603,98 +597,4 @@ func TestMap_Clusters(t *testing.T) {
 	resp := unmarshal(t, w)
 	data := resp["data"].(map[string]any)
 	assert.NotNil(t, data["clusters"])
-}
-
-// ---------- B4 anomaly ----------
-
-func TestAnomaly_List(t *testing.T) {
-	r, db := newDeviceMgmtRouter(t)
-	// 加 2 条 anomaly:1 未处理 + 1 已处理
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 1, RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}).Error)
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 2, RawCode: "Y", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: true}).Error)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/anomaly?resolved=0", nil)
-	r.ServeHTTP(w, req)
-	resp := unmarshal(t, w)
-	data := resp["data"].(map[string]any)
-	assert.EqualValues(t, 1, data["total"], "默认只列未处理")
-}
-
-func TestAnomaly_Resolve_ChangeType(t *testing.T) {
-	r, db := newDeviceMgmtRouter(t)
-	node := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "异常节点", Anomaly: true}
-	require.NoError(t, db.Create(node).Error)
-	rec := &gbmodels.GbAnomalyRecord{CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
-	require.NoError(t, db.Create(rec).Error)
-
-	body, _ := json.Marshal(map[string]any{
-		"action":     "change-type",
-		"targetType": "biz_group",
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/gb28181/device-mgmt/anomaly/"+uintStr(rec.ID)+"/resolve", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// 验证节点类型改了 + anomaly 清了
-	var updated gbmodels.GbCatalogNode
-	require.NoError(t, db.First(&updated, node.ID).Error)
-	assert.Equal(t, gbmodels.NodeTypeBizGroup, updated.NodeType)
-	assert.False(t, updated.Anomaly)
-
-	// 验证 anomaly resolved
-	var ur gbmodels.GbAnomalyRecord
-	require.NoError(t, db.First(&ur, rec.ID).Error)
-	assert.True(t, ur.Resolved)
-	assert.Equal(t, "change-type", ur.ResolvedAction)
-}
-
-func TestAnomaly_Resolve_RejectsOtherOwnerDept(t *testing.T) {
-	const userID = 100
-	r, db := newDeviceMgmtRouter(t, withClaims(userID))
-	seedDeptScopedUser(t, db, userID, 10)
-	node := &gbmodels.GbCatalogNode{OwnerDeptID: 20, NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "外部门异常节点", Anomaly: true}
-	require.NoError(t, db.Create(node).Error)
-	rec := &gbmodels.GbAnomalyRecord{OwnerDeptID: 20, CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
-	require.NoError(t, db.Create(rec).Error)
-
-	body, _ := json.Marshal(map[string]any{
-		"action":     "change-type",
-		"targetType": "biz_group",
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/gb28181/device-mgmt/anomaly/"+uintStr(rec.ID)+"/resolve", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	resp := unmarshal(t, w)
-	assert.NotEqual(t, "success", resp["status"])
-	var ur gbmodels.GbAnomalyRecord
-	require.NoError(t, db.First(&ur, rec.ID).Error)
-	assert.False(t, ur.Resolved)
-}
-
-func TestAnomaly_BatchResolve(t *testing.T) {
-	r, db := newDeviceMgmtRouter(t)
-	ids := []uint{}
-	for i := 0; i < 3; i++ {
-		rec := &gbmodels.GbAnomalyRecord{CatalogNodeID: uint(i + 1), RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
-		require.NoError(t, db.Create(rec).Error)
-		ids = append(ids, rec.ID)
-	}
-	body, _ := json.Marshal(map[string]any{
-		"ids":    ids,
-		"action": "mark-resolved",
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/gb28181/device-mgmt/anomaly/batch-resolve", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-	resp := unmarshal(t, w)
-	data := resp["data"].(map[string]any)
-	succeeded := data["succeeded"].([]any)
-	assert.Len(t, succeeded, 3)
 }

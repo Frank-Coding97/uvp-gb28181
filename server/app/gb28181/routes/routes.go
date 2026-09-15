@@ -36,7 +36,6 @@ var customGroupController = gbcontrollers.NewCustomGroupController()
 var playbackSchemeController = gbcontrollers.NewPlaybackSchemeController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
-var anomalyController = gbcontrollers.NewAnomalyController()
 var alarmController = gbcontrollers.NewAlarmController()
 var channelFavoriteController = gbcontrollers.NewChannelFavoriteController()
 var homeDashboardController = gbcontrollers.NewHomeDashboardController()
@@ -891,10 +890,6 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)
 			dmgmt.GET("/map/no-coord-count", mapController.NoCoordCount)
-			// B4 anomaly:异常治理
-			dmgmt.GET("/anomaly", anomalyController.List)
-			dmgmt.POST("/anomaly/:id/resolve", anomalyController.Resolve)
-			dmgmt.POST("/anomaly/batch-resolve", anomalyController.BatchResolve)
 		}
 	}
 }

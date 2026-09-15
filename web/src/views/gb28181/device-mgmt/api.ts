@@ -347,22 +347,6 @@ export interface MapCluster {
     onlineRate: number;
 }
 
-export interface AnomalyRecord {
-    id: number;
-    catalogNodeId: number;
-    rawCode: string;
-    guessedType: string;
-    fallbackType: string;
-    sourceDeviceId?: number | null;
-    reason: string;
-    resolved: boolean;
-    resolvedAt?: string | null;
-    resolvedAction: string;
-    createdAt: string;
-    nodeName: string;
-    nodePath: string;
-}
-
 export interface DeviceQuery extends DirectoryQuery {
     q?: string;
     nodeId?: number;
@@ -421,9 +405,6 @@ export const listCatalogChildren = (id: number) =>
 
 export const getCatalogNode = (id: number) =>
     http.request<BaseResult<CatalogNode>>("get", baseUrlApi(`gb28181/device-mgmt/catalog/tree/${id}`));
-
-export const getAnomalyCount = () =>
-    http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/catalog/anomaly/count"));
 
 export const listDevices = (params: DeviceQuery) =>
     http.request<BaseResult<DevicePageResult>>("get", baseUrlApi("gb28181/device-mgmt/devices"), { params });
@@ -535,25 +516,6 @@ export const listMapClusters = (params: MapQuery & { zoom: number }) =>
         "get",
         baseUrlApi("gb28181/device-mgmt/map/clusters"),
         { params }
-    );
-
-export const listAnomalies = (params: { resolved?: "0" | "1"; page?: number; pageSize?: number }) =>
-    http.request<BaseResult<PageResult<AnomalyRecord>>>("get", baseUrlApi("gb28181/device-mgmt/anomaly"), {
-        params
-    });
-
-export const resolveAnomaly = (id: number, note?: string) =>
-    http.request<BaseResult<{ id: number; ok: boolean }>>(
-        "post",
-        baseUrlApi(`gb28181/device-mgmt/anomaly/${id}/resolve`),
-        { data: { action: "mark-resolved", note } }
-    );
-
-export const batchResolveAnomalies = (ids: number[]) =>
-    http.request<BaseResult<{ succeeded: number[]; failed: Array<{ id: number; error: string }> }>>(
-        "post",
-        baseUrlApi("gb28181/device-mgmt/anomaly/batch-resolve"),
-        { data: { ids, action: "mark-resolved" } }
     );
 
 export interface BatchDeleteResult {
