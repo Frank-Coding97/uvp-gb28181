@@ -93,9 +93,9 @@ func seedCascadeReconnectRetireFixtures(t *testing.T, db *gorm.DB) {
 func assertCascadeReconnectRetirePreconditions(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	for query, want := range map[string]int64{
-		"SELECT COUNT(*) FROM sys_api WHERE path='" + cascadeReconnectAPIPath + "' AND method='POST' AND deleted_at IS NULL":    1,
-		"SELECT COUNT(*) FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "' AND deleted_at IS NULL":            1,
-		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v1='" + cascadeReconnectAPIPath + "' AND v2='POST'":                          1,
+		"SELECT COUNT(*) FROM sys_api WHERE path='" + cascadeReconnectAPIPath + "' AND method='POST' AND deleted_at IS NULL":                 1,
+		"SELECT COUNT(*) FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "' AND deleted_at IS NULL":                         1,
+		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v1='" + cascadeReconnectAPIPath + "' AND v2='POST'":                                      1,
 		"SELECT COUNT(*) FROM sys_menu_api WHERE menu_id IN (SELECT id FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "')": 1,
 	} {
 		var got int64
@@ -111,8 +111,8 @@ func assertCascadeReconnectRetireCounts(t *testing.T, db *gorm.DB) {
 		"SELECT COUNT(*) FROM sys_api WHERE path='" + cascadeReconnectAPIPath + "' AND method='POST' AND deleted_at IS NULL": 0,
 		"SELECT COUNT(*) FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "' AND deleted_at IS NULL":         0,
 		// 关联与授权清零
-		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v1='" + cascadeReconnectAPIPath + "' AND v2='POST'":                                    0,
-		"SELECT COUNT(*) FROM sys_menu_api WHERE menu_id IN (SELECT id FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "')": 0,
+		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v1='" + cascadeReconnectAPIPath + "' AND v2='POST'":                                       0,
+		"SELECT COUNT(*) FROM sys_menu_api WHERE menu_id IN (SELECT id FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "')":  0,
 		"SELECT COUNT(*) FROM sys_role_menu WHERE menu_id IN (SELECT id FROM sys_menu WHERE permission='" + cascadeReconnectPermission + "')": 0,
 		// 菜单与 API 只是软删，行仍在（保留审计痕迹）
 		"SELECT COUNT(*) FROM sys_api WHERE path='" + cascadeReconnectAPIPath + "' AND method='POST' AND deleted_at IS NOT NULL": 1,

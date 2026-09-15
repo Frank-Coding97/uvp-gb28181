@@ -154,7 +154,6 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 	})
 
 	bundle := &gbcontrollers.ZLMManagementBundle{
-		Overview: core.overview,
 		Streams: gbzlmmanagement.NewStreamService(gbzlmmanagement.StreamServiceDependencies{
 			Registry:     core.registry,
 			Runtime:      core.runtime,
@@ -168,6 +167,16 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 			Fresh:        nil,
 			NodeExecutor: core.executor,
 		}),
+	}
+
+	// Overview 是接口字段（ZLMOverviewAPI），core.overview 是具体指针
+	// （*OverviewSampler）。直接写 `Overview: core.overview` 会把一个 **nil 指针
+	// 装进非 nil 接口**，于是控制器里那句 `bundle.Overview == nil` 变成假守卫：
+	// 请求照样进 GetOverview，在里面解引用 panic（GET /zlm/overview 直崩，
+	// 实测于 T14）。先判具体指针再装，控制器看到的 nil 才是真 nil，
+	// 走的是 serviceUnavailable 而不是崩溃。
+	if core.overview != nil {
+		bundle.Overview = core.overview
 	}
 
 	if core.ledger != nil {
