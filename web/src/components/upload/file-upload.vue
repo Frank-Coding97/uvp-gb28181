@@ -322,16 +322,16 @@ const formatFileSize = (bytes: number): string => {
     justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
-    background-color: var(--color-fill-1);
-    border: 1px solid var(--color-border-2);
-    border-radius: 4px;
+    background-color: var(--uvp-list-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 8px;
     transition: all 0.2s;
     min-height: 40px;
 }
 
 .file-item:hover {
-    background-color: var(--color-fill-2);
-    border-color: var(--color-border-3);
+    background-color: var(--uvp-table-row-hover-bg);
+    border-color: var(--uvp-brand);
 }
 
 .file-info {
@@ -344,8 +344,8 @@ const formatFileSize = (bytes: number): string => {
 }
 
 .file-name {
-    font-size: 14px;
-    color: var(--color-text-1);
+    font-size: 13px;
+    color: var(--uvp-text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -354,7 +354,7 @@ const formatFileSize = (bytes: number): string => {
 
 .file-size {
     font-size: 12px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
     flex-shrink: 0;
 }
 
@@ -367,7 +367,7 @@ const formatFileSize = (bytes: number): string => {
 
 .upload-hint {
     font-size: 12px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
     margin-top: 4px;
 }
 </style>

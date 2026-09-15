@@ -86,7 +86,7 @@ __debug_bin.exe*
 # Roo
 .roo/
 /config/config.yml
-/gin-fast-linux
+/uvp-gb28181-linux
 /resource/public/uploads
 /.qoder
 

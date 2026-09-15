@@ -22,8 +22,7 @@ type SysAffix struct {
 	ThumbnailName string `gorm:"type:varchar(255);comment:缩略图名称" json:"thumbnailName,omitempty"`
 	ThumbnailUrl  string `gorm:"type:varchar(255);comment:缩略图URL" json:"thumbnailUrl,omitempty"`
 	// 添加与User模型的关联
-	User     User `gorm:"foreignKey:id;references:created_by" json:"user"`
-	TenantID uint `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
+	User User `gorm:"foreignKey:id;references:created_by" json:"user"`
 }
 
 // SysAffixList 文件附件列表

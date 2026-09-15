@@ -3,12 +3,20 @@ package tokenhelper
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+)
+
+const (
+	TokenUseAccess  = "access"
+	TokenUseRefresh = "refresh"
+	SessionVersion  = 1
 )
 
 // TokenService Token服务
@@ -27,9 +35,19 @@ type TokenService struct {
 **/
 // GenerateToken 生成JWT令牌
 func (s *TokenService) GenerateToken(user *app.ClaimsUser) (string, error) {
+	return s.GenerateTokenForSession(user, uuid.NewString(), uuid.NewString())
+}
+
+// GenerateTokenForSession generates an access token with mandatory session bindings.
+func (s *TokenService) GenerateTokenForSession(user *app.ClaimsUser, sid, jti string) (string, error) {
+	if err := validateSessionBindings(sid, jti); err != nil {
+		return "", err
+	}
 	claims := &app.Claims{
-		ClaimsUser: *user,
+		ClaimsUser:    *user,
+		SessionClaims: app.SessionClaims{SID: sid, JTI: jti, TokenUse: TokenUseAccess, SessionVersion: SessionVersion},
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.TokenExpire * time.Second)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                                  // 签发时间
 			NotBefore: jwt.NewNumericDate(time.Now()),                                  // 生效时间
@@ -44,13 +62,17 @@ func (s *TokenService) ParseToken(tokenString string) (*app.Claims, error) {
 	claims := &app.Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.JWTSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 	if err != nil {
 		return nil, err
 	}
 	if !token.Valid {
 		return nil, errors.New("invalid token")
+	}
+	claims.JTI = claims.ID
+	if err := validateParsedClaims(claims.SessionClaims, TokenUseAccess); err != nil {
+		return nil, err
 	}
 	return claims, nil
 }
@@ -135,13 +157,35 @@ func (s *TokenService) getTokenKeyWithCache(userID uint, tokenString string) str
 
 /*****************************************refreshToken管理****************************************************/
 // GenerateRefreshToken 生成Refresh Token
-func (s *TokenService) GenerateRefreshToken(userID uint, tenantID uint, tenantCode string) (string, error) {
+func (s *TokenService) GenerateRefreshToken(userID uint) (string, error) {
+	return s.GenerateRefreshTokenForSession(userID, uuid.NewString(), uuid.NewString())
+}
+
+// GenerateRefreshTokenForSession generates a refresh token with mandatory session bindings.
+func (s *TokenService) GenerateRefreshTokenForSession(userID uint, sid, jti string) (string, error) {
 	expirationTime := time.Now().Add(s.RefreshExpire * time.Second)
+	tokenString, err := s.GenerateRefreshTokenForSessionUntil(userID, sid, jti, expirationTime)
+	if err != nil {
+		return "", err
+	}
+	if s.RedisHelper != nil {
+		if err := s.storeRefreshToken(&app.RefreshTokenInfo{UserID: userID, Token: tokenString, ExpiresAt: expirationTime, CreatedAt: time.Now()}); err != nil {
+			return "", err
+		}
+	}
+	return tokenString, nil
+}
+
+// GenerateRefreshTokenForSessionUntil signs a refresh token without a cache side effect.
+func (s *TokenService) GenerateRefreshTokenForSessionUntil(userID uint, sid, jti string, expirationTime time.Time) (string, error) {
+	if err := validateSessionBindings(sid, jti); err != nil {
+		return "", err
+	}
 	claims := &app.RefreshTokenClaims{
-		UserID:     userID,
-		TenantID:   tenantID,
-		TenantCode: tenantCode,
+		UserID:        userID,
+		SessionClaims: app.SessionClaims{SID: sid, JTI: jti, TokenUse: TokenUseRefresh, SessionVersion: SessionVersion},
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
@@ -149,25 +193,7 @@ func (s *TokenService) GenerateRefreshToken(userID uint, tenantID uint, tenantCo
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.JWTSecret))
-	if err != nil {
-		return "", err
-	}
-
-	// 存储refresh token到Redis
-	refreshTokenInfo := &app.RefreshTokenInfo{
-		UserID:    userID,
-		Token:     tokenString,
-		ExpiresAt: expirationTime,
-		CreatedAt: time.Now(),
-	}
-
-	err = s.storeRefreshToken(refreshTokenInfo)
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
+	return token.SignedString([]byte(s.JWTSecret))
 }
 
 // StoreRefreshToken 存储Refresh Token到Redis
@@ -181,12 +207,16 @@ func (s *TokenService) ParseRefreshToken(tokenString string) (*app.RefreshTokenC
 	claims := &app.RefreshTokenClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.JWTSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil {
 		return nil, err
 	}
 	if !token.Valid {
 		return nil, errors.New("invalid refresh token")
+	}
+	claims.JTI = claims.ID
+	if err := validateParsedClaims(claims.SessionClaims, TokenUseRefresh); err != nil {
+		return nil, err
 	}
 	return claims, nil
 }
@@ -219,11 +249,18 @@ func (s *TokenService) RevokeRefreshToken(userID uint) error {
 // RefreshAccessTokenWithCache 使用Refresh Token刷新Access Token 并记录到缓存中
 func (s *TokenService) RefreshAccessTokenWithCache(refreshTokenString string, user *app.ClaimsUser) (string, error) {
 	// 验证refresh token
-	if _, err := s.ValidateRefreshToken(refreshTokenString); err != nil {
+	claims, err := s.ValidateRefreshToken(refreshTokenString)
+	if err != nil {
 		return "", err
 	}
 
-	newAccessToken, err := s.GenerateTokenWithCache(user)
+	newAccessToken, err := s.GenerateTokenForSession(user, claims.SID, uuid.NewString())
+	if err == nil && s.IsCache {
+		err = s.storeTokenWithCache(&app.TokenInfo{
+			UserID: user.UserID, Token: newAccessToken,
+			ExpiresAt: time.Now().Add(s.TokenExpire * time.Second), CreatedAt: time.Now(),
+		})
+	}
 	if err != nil {
 		return "", err
 	}
@@ -251,13 +288,14 @@ func (s *TokenService) RotateRefreshToken(oldRefreshToken string) (string, error
 		return "", fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
-	// 4. 生成新的refresh token，使用剩余的有效时间，保留租户信息
+	// 4. 生成新的refresh token，使用剩余的有效时间
 	expirationTime := now.Add(remainingDuration)
+	newJTI := uuid.NewString()
 	newClaims := &app.RefreshTokenClaims{
-		UserID:     claims.UserID,
-		TenantID:   claims.TenantID,
-		TenantCode: claims.TenantCode,
+		UserID:        claims.UserID,
+		SessionClaims: app.SessionClaims{SID: claims.SID, JTI: newJTI, TokenUse: TokenUseRefresh, SessionVersion: SessionVersion},
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        newJTI,
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
@@ -283,6 +321,32 @@ func (s *TokenService) RotateRefreshToken(oldRefreshToken string) (string, error
 	}
 
 	return newTokenString, nil
+}
+
+func validateSessionBindings(sid, jti string) error {
+	if sid == "" || jti == "" {
+		return errors.New("session token requires sid and jti")
+	}
+	return nil
+}
+
+func validateParsedClaims(claims app.SessionClaims, tokenUse string) error {
+	if err := validateSessionBindings(claims.SID, claims.JTI); err != nil {
+		return err
+	}
+	if claims.TokenUse != tokenUse {
+		return errors.New("invalid token use")
+	}
+	if claims.SessionVersion != SessionVersion {
+		return errors.New("unsupported session token version")
+	}
+	return nil
+}
+
+// refreshTokenHash is kept local for the session service; tokenhelper never logs or exposes it.
+func HashRefreshToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", sum)
 }
 
 // getRefreshTokenKey 获取Redis中存储Refresh Token的key

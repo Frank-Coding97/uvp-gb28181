@@ -1,0 +1,22 @@
+CREATE TABLE `gb_recording_file` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `session_id` bigint unsigned DEFAULT NULL,
+  `channel_id` int unsigned NOT NULL,
+  `device_id` varchar(20) NOT NULL,
+  `node_id` bigint NOT NULL,
+  `vhost` varchar(128) NOT NULL,
+  `app` varchar(64) NOT NULL,
+  `stream` varchar(64) NOT NULL,
+  `file_name` varchar(255) NOT NULL,
+  `file_path` varchar(1000) NOT NULL,
+  `folder` varchar(1000) NOT NULL DEFAULT '',
+  `url` varchar(1000) NOT NULL DEFAULT '',
+  `start_time` datetime NOT NULL,
+  `time_len` decimal(12,3) NOT NULL DEFAULT '0.000',
+  `file_size` bigint unsigned NOT NULL DEFAULT '0',
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_recording_file_node_path` (`node_id`,`file_path`(766)),
+  KEY `idx_recording_file_channel_start` (`channel_id`,`start_time`),
+  KEY `idx_recording_file_device_start` (`device_id`,`start_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='云端录像文件索引';

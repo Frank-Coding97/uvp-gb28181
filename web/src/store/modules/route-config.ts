@@ -3,6 +3,7 @@ import router from "@/router/index";
 import { staticRoutes } from "@/router/route";
 import { moduleReplacement, linearArray } from "@/router/route-output";
 import { getUrlWithParams } from "@/utils/index";
+import { resolveMediaWorkbenchTabGroup } from "@/router/media-route-identity";
 
 import { getRoutersAPI, convertMenuItemsToRoutes } from "@/api/menu";
 /**
@@ -57,6 +58,24 @@ export const routeConfigStore = () => {
         if (staticRoutes.some(item => item.name == route.name)) return;
         // 不在可访问的路由中则不参与tabs
         if (!routeList.value.some((item: any) => item.name == route.name)) return;
+        const workbenchGroup = resolveMediaWorkbenchTabGroup(route.path);
+        if (workbenchGroup) {
+            const groupedIndexes = tabsList.value
+                .map((item: Menu.MenuOptions, index: number) => resolveMediaWorkbenchTabGroup(item.path) === workbenchGroup ? index : -1)
+                .filter((index: number) => index >= 0);
+            const workbenchTab = {
+                ...route,
+                meta: { ...route.meta, title: "流媒体管理" }
+            };
+            if (!groupedIndexes.length) {
+                tabsList.value.push(workbenchTab);
+                return;
+            }
+            const firstIndex = groupedIndexes[0];
+            tabsList.value[firstIndex] = workbenchTab;
+            for (let i = groupedIndexes.length - 1; i > 0; i--) tabsList.value.splice(groupedIndexes[i], 1);
+            return;
+        }
         // 当前路由在tags中是否存在
         let index = tabsList.value.findIndex((item: Menu.MenuOptions) => item.path === route.path);
         // 不存在，直接缓存

@@ -2,19 +2,6 @@
   <a-drawer :width="340" :visible="props.themeOpen" @ok="handleCancel" @cancel="handleCancel" unmount-on-close>
     <template #title> 主题设置 </template>
     <div>
-      <div>
-        <a-divider orientation="center">导航模式</a-divider>
-        <div class="flex-center">
-          <a-tooltip v-for="item in layoutList" :key="item.value" :content="item.label" position="top" mini>
-            <div
-              :class="layoutType === item.value ? `current-layout ${item.class}` : item.class"
-              @click="layouetChange(item.value)"
-            >
-              <icon-check-circle-fill class="layout-icon" />
-            </div>
-          </a-tooltip>
-        </div>
-      </div>
       <div class="box-gap">
         <a-divider orientation="center">主题设置</a-divider>
         <div class="flex-center">
@@ -55,31 +42,11 @@
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useThemeMethods } from "@/hooks/useThemeMethods";
-import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { ColorPicker } from "vue-color-kit";
 import "vue-color-kit/dist/vue-color-kit.css";
 
 const themeStore = useThemeConfig();
-const { layoutType, collapsed, colorWeakMode, grayMode, darkMode, asideDark, transitionPage, themeColor, presetColors } =
-  storeToRefs(themeStore);
-
-const layoutList = reactive({
-  layoutDefaults: {
-    value: "layoutDefaults",
-    label: "默认布局",
-    class: "layout-defaults"
-  },
-  layoutHead: {
-    value: "layoutHead",
-    label: "横向布局",
-    class: "layout-head"
-  },
-  layoutMixing: {
-    value: "layoutMixing",
-    label: "混合布局",
-    class: "layout-mixing"
-  }
-});
+const { colorWeakMode, grayMode, darkMode, asideDark, transitionPage, themeColor, presetColors } = storeToRefs(themeStore);
 
 const transitions = ref([
   { value: "fadeInOut", label: "轻过渡" },
@@ -119,13 +86,6 @@ const onGray = () => {
   setGray();
 };
 
-// 布局变化
-const layouetChange = (type: string) => {
-  layoutType.value = type;
-  const { isPc } = useDevicesSize();
-  collapsed.value = isPc.value ? false : true;
-};
-
 const props = defineProps({
   themeOpen: {
     type: Boolean,
@@ -155,81 +115,6 @@ const handleCancel = () => {
   align-items: center;
   justify-content: center;
   margin-bottom: $margin;
-}
-.layout-defaults,
-.layout-head,
-.layout-mixing {
-  width: 70px;
-  height: 50px;
-  overflow: hidden;
-  background: $color-fill-1;
-  border-radius: $radius-box-1;
-  box-shadow: $shadow-special;
-  .layout-icon {
-    display: none;
-  }
-}
-.current-layout {
-  position: relative;
-  .layout-icon {
-    position: absolute;
-    right: 2px;
-    bottom: 2px;
-    display: block;
-    font-size: $font-size-body-3;
-    color: $color-primary;
-  }
-}
-.layout-defaults {
-  position: relative;
-  &::before {
-    position: absolute;
-    left: 0;
-    width: 10px;
-    height: 100%;
-    content: "";
-    background: #232324;
-  }
-  &::after {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 60px;
-    height: 10px;
-    content: "";
-    background: #c2c4c8;
-  }
-}
-.layout-head {
-  position: relative;
-  &::before {
-    position: absolute;
-    top: 0;
-    width: 100%;
-    height: 10px;
-    content: "";
-    background: #232324;
-  }
-}
-.layout-mixing {
-  position: relative;
-  &::before {
-    position: absolute;
-    top: 0;
-    width: 100%;
-    height: 10px;
-    content: "";
-    background: #232324;
-  }
-  &::after {
-    position: absolute;
-    top: 10px;
-    left: 0;
-    width: 10px;
-    height: calc(100% - 10px);
-    content: "";
-    background: #232324;
-  }
 }
 :deep(.arco-divider-text) {
   background: $color-bg-3;

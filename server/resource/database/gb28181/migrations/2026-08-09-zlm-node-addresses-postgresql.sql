@@ -1,0 +1,5 @@
+-- 2026-08-09 ZLM 节点地址职责拆分。
+ALTER TABLE IF EXISTS meta_node
+  ADD COLUMN IF NOT EXISTS receive_host varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS meta_node
+  ADD COLUMN IF NOT EXISTS playback_host varchar(255) NOT NULL DEFAULT '';

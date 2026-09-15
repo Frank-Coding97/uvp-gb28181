@@ -1,0 +1,149 @@
+/*
+ * UVP Modal.warning / Modal.confirm 函数式弹窗样式覆盖
+ *
+ * Modal.warning({...}) / Modal.confirm({...}) 生成的 simple 模态框
+ * 默认是 Arco 通用蓝白风格, 这里统一到 uvp-system-dialog 的语言:
+ * - 圆角 16px
+ * - 背景/边框/阴影沿用 --uvp-dialog-* token
+ * - 按钮圆角 8px, 对齐 uvp-system-dialog footer
+ */
+
+/* simple 容器 */
+.arco-modal-simple {
+  border-radius: 14px !important;
+  background: var(--uvp-dialog-bg) !important;
+  box-shadow:
+    0 14px 36px -14px rgb(15 23 42 / 22%),
+    0 4px 10px -4px rgb(15 23 42 / 10%),
+    inset 0 1px 2px rgb(15 23 42 / 4%) !important;
+  padding: 20px 24px 20px !important;
+}
+
+/* simple 内容区 */
+.arco-modal-simple .arco-modal-body {
+  padding: 0 0 16px !important;
+  background: transparent !important;
+  color: var(--uvp-text-secondary);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0.1px;
+}
+
+/* simple title */
+.arco-modal-simple .arco-modal-title {
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgb(15 23 42 / 6%);
+  color: var(--uvp-text-primary);
+  font-size: 16px;
+  font-weight: 680;
+  line-height: 24px;
+  letter-spacing: 0;
+}
+
+/* simple 图标 */
+.arco-modal-simple .arco-modal-icon {
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  margin-top: 0;
+  margin-right: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.arco-modal-simple .arco-modal-icon-info {
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+}
+.arco-modal-simple .arco-modal-icon-success {
+  color: var(--uvp-brand-cyan);
+  background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+}
+.arco-modal-simple .arco-modal-icon-warning {
+  color: var(--uvp-warning);
+  background: var(--uvp-warning-soft);
+}
+.arco-modal-simple .arco-modal-icon-error {
+  color: var(--uvp-danger);
+  background: var(--uvp-danger-soft);
+}
+
+/* simple footer */
+.arco-modal-simple .arco-modal-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 !important;
+  margin-top: 24px;
+  background: transparent !important;
+  border-top: 0 !important;
+}
+
+.arco-modal-simple .arco-modal-footer .arco-btn {
+  min-width: 88px;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 8px !important;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+/* 主按钮 */
+.arco-modal-simple .arco-modal-footer .arco-btn-primary {
+  color: #fff;
+  background: var(--uvp-brand) !important;
+  border: 0 !important;
+  box-shadow: 0 2px 4px -2px rgb(37 99 235 / 28%);
+}
+.arco-modal-simple .arco-modal-footer .arco-btn-primary:hover {
+  background: var(--uvp-brand-strong) !important;
+  box-shadow: 0 4px 8px -2px rgb(37 99 235 / 32%);
+}
+
+/* 危险按钮 (删除场景) */
+.arco-modal-simple .arco-modal-footer .arco-btn-primary[status="danger"] {
+  background: var(--uvp-danger) !important;
+  box-shadow: 0 2px 4px -2px rgb(209 67 67 / 28%);
+}
+.arco-modal-simple .arco-modal-footer .arco-btn-primary[status="danger"]:hover {
+  background: color-mix(in srgb, var(--uvp-danger) 90%, #000) !important;
+  box-shadow: 0 4px 8px -2px rgb(209 67 67 / 36%);
+}
+
+/* 次按钮 */
+.arco-modal-simple .arco-modal-footer .arco-btn-secondary {
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-search-secondary-btn-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 88%);
+}
+.arco-modal-simple .arco-modal-footer .arco-btn-secondary:hover {
+  color: var(--uvp-text-primary);
+  background: var(--uvp-search-secondary-btn-hover-bg) !important;
+  border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-search-secondary-btn-border)) !important;
+}
+
+/* 关闭按钮 (右上角) */
+.arco-modal-simple .arco-modal-close-btn {
+  width: 32px;
+  height: 32px;
+  color: var(--uvp-text-tertiary);
+  background: transparent;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+.arco-modal-simple .arco-modal-close-btn:hover {
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+}
+
+/* 蒙层 */
+.arco-modal-mask {
+  background-color: rgb(15 23 42 / 48%);
+  backdrop-filter: blur(3px);
+}

@@ -188,6 +188,47 @@ func (m *memoryHelper) Del(ctx context.Context, keys ...string) error {
 	return nil // 操作成功
 }
 
+// GetDel 原子地取出并删除键，实现 CacheInterf 接口
+// 键不存在或已过期时返回 ("", app.ErrKeyNotFound)
+//
+// 全程持有写锁：读取、过期判断、删除三步在同一临界区内完成，因此并发调用时
+// 只有一个调用方能拿到值。这是一次性凭据（扫码接入 token）的安全前提 ——
+// 用 Get + Del 两步无法保证，两个调用方可能都读到同一个值。
+func (m *memoryHelper) GetDel(ctx context.Context, key string) (string, error) {
+	m.mutex.Lock()         // 加写锁（不是读锁）：读取与删除必须原子
+	defer m.mutex.Unlock() // 函数退出时释放锁
+
+	item, exists := m.data[key] // 从 map 中查找键
+	if !exists {
+		return "", app.ErrKeyNotFound // 键不存在
+	}
+
+	// 零值表示永不过期，跳过过期检查；已过期的项按不存在处理，但仍要清理掉
+	expired := !item.expiration.IsZero() && time.Now().After(item.expiration)
+
+	// 无论是否过期都从堆和 map 中移除（过期项顺手做惰性清理）
+	if !item.expiration.IsZero() { // 有过期时间说明它在堆中
+		heap.Remove(&m.expiryQueue, item.index) // 从堆中移除
+	}
+	delete(m.data, key) // 从 map 中删除
+
+	// 删除后堆顶可能变化，重置定时器以匹配新的最近过期时间
+	if m.expiryQueue.Len() > 0 {
+		m.resetCleanupTimer()
+	}
+
+	if expired {
+		return "", app.ErrKeyNotFound // 已过期，视为不存在
+	}
+
+	val, ok := item.value.(string) // 按 string 语义取值
+	if !ok {
+		// 与 Get 保持一致的约定：同一个 key 不应混用 Set 与 SetInt
+		return "", errors.New("cache value is not a string")
+	}
+	return val, nil
+}
+
 // Exists 检查一个或多个键是否存在
 // 返回存在的键的数量（已过期的不算存在）
 // 永不过期的项（expiration 为零值）始终被视为存在

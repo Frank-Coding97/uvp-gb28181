@@ -18,7 +18,6 @@ type SysAffixChunk struct {
 	ChunkPath   string `gorm:"type:varchar(255);comment:分片文件路径" json:"chunkPath"`
 	Status      int    `gorm:"type:tinyint;default:0;comment:0-上传中 1-已合并 2-已取消" json:"status"`
 	CreatedBy   uint   `gorm:"type:int(11);comment:创建者ID" json:"createdBy"`
-	TenantID    uint   `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
 }
 
 // SysAffixChunkList 分片上传记录列表
@@ -45,44 +44,44 @@ func (m *SysAffixChunk) Create(c context.Context) error {
 }
 
 // GetUploadedChunkIndexes 获取指定uploadId已上传的分片序号列表
-func GetUploadedChunkIndexes(c context.Context, uploadId string, tenantID uint) ([]int, error) {
+func GetUploadedChunkIndexes(c context.Context, uploadId string) ([]int, error) {
 	var indexes []int
 	err := app.DB().WithContext(c).Model(&SysAffixChunk{}).
-		Where("upload_id = ? AND status = 0 AND tenant_id = ?", uploadId, tenantID).
+		Where("upload_id = ? AND status = 0", uploadId).
 		Pluck("chunk_index", &indexes).Error
 	return indexes, err
 }
 
 // GetChunksByUploadId 获取指定uploadId的所有分片记录
-func GetChunksByUploadId(c context.Context, uploadId string, tenantID uint) (*SysAffixChunkList, error) {
+func GetChunksByUploadId(c context.Context, uploadId string) (*SysAffixChunkList, error) {
 	list := NewSysAffixChunkList()
 	err := app.DB().WithContext(c).
-		Where("upload_id = ? AND status = 0 AND tenant_id = ?", uploadId, tenantID).
+		Where("upload_id = ? AND status = 0", uploadId).
 		Order("chunk_index ASC").
 		Find(list).Error
 	return list, err
 }
 
 // UpdateChunkStatus 更新指定uploadId的所有分片状态
-func UpdateChunkStatus(c context.Context, uploadId string, tenantID uint, status int) error {
+func UpdateChunkStatus(c context.Context, uploadId string, status int) error {
 	return app.DB().WithContext(c).
 		Model(&SysAffixChunk{}).
-		Where("upload_id = ? AND tenant_id = ?", uploadId, tenantID).
+		Where("upload_id = ?", uploadId).
 		Update("status", status).Error
 }
 
 // DeleteChunksByUploadId 删除指定uploadId的所有分片记录
-func DeleteChunksByUploadId(c context.Context, uploadId string, tenantID uint) error {
+func DeleteChunksByUploadId(c context.Context, uploadId string) error {
 	return app.DB().WithContext(c).
-		Where("upload_id = ? AND tenant_id = ?", uploadId, tenantID).
+		Where("upload_id = ?", uploadId).
 		Delete(&SysAffixChunk{}).Error
 }
 
 // GetAffixByMd5 根据MD5查找是否已有完整文件（秒传检测）
-func GetAffixByMd5(c context.Context, fileMd5 string, fileSize int64, tenantID uint) (*SysAffix, error) {
+func GetAffixByMd5(c context.Context, fileMd5 string, fileSize int64) (*SysAffix, error) {
 	affix := NewSysAffix()
 	err := app.DB().WithContext(c).
-		Where("file_md5 = ? AND size = ? AND tenant_id = ?", fileMd5, fileSize, tenantID).
+		Where("file_md5 = ? AND size = ?", fileMd5, fileSize).
 		First(affix).Error
 	if err != nil {
 		return nil, err

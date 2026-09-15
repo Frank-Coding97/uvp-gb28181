@@ -2,51 +2,69 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/casbinhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
-	"log"
-	"os"
-	"strings"
-	"time"
-
-	"github.com/natefinch/lumberjack"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func init() {
 	// 检查必要的文件夹是否存在
 	checkRequiredFolders()
-	// 加载版本信息
-	if err := app.LoadVersionInfo(); err != nil {
-		log.Println("警告: 加载版本信息失败:", err)
+	versionErr := app.LoadVersionInfo()
+	var err error
+	app.ConfigYml, err = ymlconfig.LoadYamlFactory(app.BasePath + "/config")
+	if err != nil {
+		startupFail("config", err)
 	}
-	// 配置文件
-	app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
-	app.ConfigYml.ConfigFileChangeListen(func() {
-		//配置文件发生变化
-	})
-	// 日志
-	app.ZapLog = createZapFactory(service.ZapLogHandler)
+	initLogging()
+	if versionErr != nil {
+		logging.ReportStartupFailure(nil, app.ZapLog, "version", versionErr)
+	}
 	// 初始化数据库
 	initDB()
 
+	// -migrate-up / -migrate-down=<文件名> 是纯运维入口:只完成配置+DB 初始化,
+	// 不执行 Up/业务初始化(main 解析参数后直接走 Down)。
+	// 否则迁移失败时回滚命令会先重试同一失败的 Up 并退出,永远到不了 Down
+	if migrationCommandRequested() {
+		return
+	}
+
+	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
+	if err := migration.RunMigrations(map[string]*gorm.DB{
+		"mysql":      app.GormDbMysql,
+		"sqlserver":  app.GormDbSqlserver,
+		"postgresql": app.GormDbPostgreSql,
+	}); err != nil {
+		startupFail("migration", err)
+	}
+
 	// 初始化casbin
 	app.CasbinV2 = casbinhelper.NewCasbinHelper()
-	err := app.CasbinV2.InitCasbin(app.DB(), app.ConfigYml.GetString("casbin.modelconfig"))
+	err = app.CasbinV2.InitCasbin(app.DB(), app.ConfigYml.GetString("casbin.modelconfig"))
 	if err != nil {
-		log.Fatal("CasbinV2.InitCasbin err :" + err.Error())
+		startupFail("casbin", err)
 	}
 
 	// 初始化缓存管理
@@ -54,6 +72,10 @@ func init() {
 
 	// 初始化token管理
 	app.TokenService = newTokenService(app.Cache)
+
+	// 初始化持久化登录会话校验;JWT 中间件在 Casbin 前使用,数据库故障 fail-closed。
+	app.SessionValidator = service.NewAuthSessionService(app.DB())
+	app.LoginLogRecorder = service.NewLoginLogService(app.DB())
 
 	// 初始化文件上传服务
 	app.UploadService = newUploadService()
@@ -63,6 +85,9 @@ func init() {
 
 	// 注册所有执行器
 	scheduler.RegisterExecutors()
+	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
+		startupFail("scheduler", err)
+	}
 
 	// 从数据库加载启用的任务到调度器及任务结果处理器
 	scheduler.LoadJobsFromDB()
@@ -76,7 +101,7 @@ func initDB() {
 	// mysql
 	if app.ConfigYml.GetInt("gormv2.mysql.isinitglobalgormmysql") == 1 {
 		if dbMysql, err := gormhelper.GetOneMysqlClient(); err != nil {
-			log.Fatal(myerrors.ErrorsGormInitFail + err.Error())
+			startupFail("database", err)
 		} else {
 			app.GormDbMysql = dbMysql
 		}
@@ -84,7 +109,7 @@ func initDB() {
 	//sqlserver
 	if app.ConfigYml.GetInt("gormv2.sqlserver.isinitglobalgormsqlserver") == 1 {
 		if dbSqlserver, err := gormhelper.GetOneSqlserverClient(); err != nil {
-			log.Fatal(myerrors.ErrorsGormInitFail + err.Error())
+			startupFail("database", err)
 		} else {
 			app.GormDbSqlserver = dbSqlserver
 		}
@@ -92,7 +117,7 @@ func initDB() {
 	//postgresql
 	if app.ConfigYml.GetInt("gormv2.postgresql.isinitglobalgormpostgresql") == 1 {
 		if dbPostgresql, err := gormhelper.GetOnePostgreSqlClient(); err != nil {
-			log.Fatal(myerrors.ErrorsGormInitFail + err.Error())
+			startupFail("database", err)
 		} else {
 			app.GormDbPostgreSql = dbPostgresql
 		}
@@ -109,96 +134,84 @@ func checkRequiredFolders() {
 		} else {
 			app.BasePath = path
 		}
-		log.Println("当前项目根目录:", app.BasePath)
+		// BasePath is used for resolution, not emitted as free-form text.
 	} else {
-		log.Fatal("获取当前目录失败")
+		startupFail("filesystem", errors.New("working directory unavailable"))
 	}
 	//检查配置文件是否存在
 	if _, err := os.Stat(app.BasePath + consts.ConfigFilePath); err != nil {
-		log.Fatal(consts.ConfigFilePath + " not exists: " + err.Error())
+		startupFail("config", err)
 	}
 }
 
-// createZapFactory 创建zap日志工厂
-func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
-	// 获取程序所处的模式：  开发调试 、 生产
-	appDebug := app.ConfigYml.GetBool("server.appdebug")
-
-	// 判断程序当前所处的模式，调试模式直接返回一个便捷的zap日志管理器地址，所有的日志打印到控制台即可
-	if appDebug == true {
-		if logger, err := zap.NewDevelopment(zap.Hooks(entry)); err == nil {
-			return logger
-		} else {
-			log.Fatal("创建zap日志包失败，详情：" + err.Error())
+// initLogging constructs one immutable runtime before dependencies start.
+func initLogging() {
+	cfg, err := logging.ParseConfig(app.ConfigYml, app.BasePath)
+	if err != nil {
+		startupFail("logging", err)
+	}
+	instanceID := uuid.NewString()
+	hub := logging.NewEventHubWithInstance(instanceID)
+	runtime, err := logging.OpenRuntime(logging.Options{Config: cfg, Version: app.AppVersion.Version, Instance: instanceID, EventHub: hub})
+	if err != nil {
+		startupFail("logging", err)
+	}
+	app.LogRuntime, app.ZapLog, app.RealtimeLogHub = runtime, runtime.Root, hub
+	logging.InstallStandardBridge(app.ZapLog.Named("stdlib"))
+	for _, notice := range cfg.Notices {
+		app.ZapLog.Named("startup").Warn("legacy logging configuration", zap.String("event", "logging.config_compatibility"), zap.String("notice", notice))
+	}
+	app.ConfigYml.ConfigFileChangeListen(func() {
+		next, err := logging.ParseConfig(app.ConfigYml, app.BasePath)
+		if err != nil {
+			logging.ReportStartupFailure(nil, app.ZapLog, "config", err)
+			return
 		}
-	}
+		app.LogRuntime.NoticeReload(next)
+	})
+}
 
-	// 以下才是 非调试（生产）模式所需要的代码
-	encoderConfig := zap.NewProductionEncoderConfig()
-
-	timePrecision := app.ConfigYml.GetString("logs.timeprecision")
-	var recordTimeFormat string
-	switch timePrecision {
-	case "second":
-		recordTimeFormat = "2006-01-02 15:04:05"
-	case "millisecond":
-		recordTimeFormat = "2006-01-02 15:04:05.000"
-	default:
-		recordTimeFormat = "2006-01-02 15:04:05"
-
+func startupFail(phase string, err error) {
+	logging.ReportStartupFailure(nil, app.ZapLog, phase, err)
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cleanupRoot := app.ZapLog
+	if cleanupRoot == nil {
+		cleanupRoot = zap.NewNop()
 	}
-	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-		enc.AppendString(t.Format(recordTimeFormat))
+	steps := make([]ginhelper.ShutdownStep, 0, 4)
+	if stopper, ok := app.ConfigYml.(interface {
+		StopContext(context.Context) error
+	}); ok {
+		steps = append(steps, ginhelper.ShutdownStep{
+			Component: "config",
+			Stop: func(ctx context.Context) error {
+				return stopper.StopContext(ctx)
+			},
+		})
 	}
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-	encoderConfig.TimeKey = "created_at" // 生成json格式日志的时间键字段，默认为 ts,修改以后方便日志导入到 ELK 服务器
-
-	var encoder zapcore.Encoder
-	switch app.ConfigYml.GetString("logs.textformat") {
-	case "console":
-		encoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
-	case "json":
-		encoder = zapcore.NewJSONEncoder(encoderConfig) // json格式
-	default:
-		encoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
+	if app.JobScheduler != nil {
+		steps = append(steps, ginhelper.ShutdownStep{
+			Component: "scheduler",
+			Stop: func(ctx context.Context) error {
+				return app.JobScheduler.StopContext(ctx)
+			},
+		})
 	}
-	// 写入器
-	fileName := app.BasePath + app.ConfigYml.GetString("logs.zaplogname")
-	lumberJackLogger := &lumberjack.Logger{
-		Filename:   fileName,                                //日志文件的位置
-		MaxSize:    app.ConfigYml.GetInt("logs.maxsize"),    //在进行切割之前，日志文件的最大大小（以MB为单位）
-		MaxBackups: app.ConfigYml.GetInt("logs.maxbackups"), //保留旧文件的最大个数
-		MaxAge:     app.ConfigYml.GetInt("logs.maxage"),     //保留旧文件的最大天数
-		Compress:   app.ConfigYml.GetBool("logs.compress"),  //是否压缩/归档旧文件
+	steps = append(steps, ginhelper.ShutdownStep{
+		Component: "scheduler.results",
+		Stop: func(ctx context.Context) error {
+			return scheduler.StopResultHandlerContext(ctx)
+		},
+	})
+	if policy, ok := app.CasbinV2.(interface{ CloseContext(context.Context) error }); ok {
+		steps = append(steps, ginhelper.ShutdownStep{Component: "casbin", Stop: policy.CloseContext})
 	}
-	writer := zapcore.AddSync(lumberJackLogger)
-	// 开始初始化zap日志核心参数，
-	//参数一：编码器
-	//参数二：写入器
-	//参数三：参数级别，debug级别支持后续调用的所有函数写日志，如果是 fatal 高级别，则级别>=fatal 才可以写日志
-
-	// 从配置文件读取日志等级
-	logLevelStr := app.ConfigYml.GetString("logs.level")
-	var logLevel zapcore.Level
-	switch logLevelStr {
-	case "debug":
-		logLevel = zap.DebugLevel
-	case "info":
-		logLevel = zap.InfoLevel
-	case "warn":
-		logLevel = zap.WarnLevel
-	case "error":
-		logLevel = zap.ErrorLevel
-	case "fatal":
-		logLevel = zap.FatalLevel
-	case "panic":
-		logLevel = zap.PanicLevel
-	default:
-		logLevel = zap.InfoLevel // 默认使用 info 级别
+	_ = ginhelper.Shutdown(cleanupContext, cleanupRoot, steps...)
+	if app.LogRuntime != nil {
+		_ = app.LogRuntime.Close()
 	}
-
-	zapCore := zapcore.NewCore(encoder, writer, logLevel)
-	return zap.New(zapCore, zap.AddCaller(), zap.Hooks(entry), zap.AddStacktrace(zap.WarnLevel))
+	os.Exit(1)
 }
 
 // newCache 初始化缓存
@@ -211,7 +224,7 @@ func newCache() app.CacheInterf {
 			app.ConfigYml.GetInt("redis.indexdb"),
 		)
 		if err != nil {
-			panic(err)
+			startupFail("cache", err)
 		}
 
 		return redisHelper
@@ -238,33 +251,13 @@ func newTokenService(cache app.CacheInterf) app.TokenServiceInterface {
 func newUploadService() app.FileUploadService {
 	uploadService, err := uploadhelper.CreateUploadService()
 	if err != nil {
-		log.Fatal("初始化文件上传服务失败: " + err.Error())
+		startupFail("upload", err)
 	}
 	return uploadService
 }
 
 // newScheduler 初始化任务调度器
 func newScheduler() app.JobSchedulerInterf {
-	logDir := app.BasePath + app.ConfigYml.GetString("scheduler.log.dir")
-
-	// 解析日志级别
-	levelStr := app.ConfigYml.GetString("scheduler.log.level")
-	var level schedulerhelper.LogLevel
-	switch levelStr {
-	case "debug":
-		level = schedulerhelper.LevelDebug
-	case "info":
-		level = schedulerhelper.LevelInfo
-	case "warn":
-		level = schedulerhelper.LevelWarn
-	case "error":
-		level = schedulerhelper.LevelError
-	case "fatal":
-		level = schedulerhelper.LevelFatal
-	default:
-		level = schedulerhelper.LevelInfo
-	}
-
 	// 获取结果通道缓冲大小
 	bufferSize := app.ConfigYml.GetInt("scheduler.job_results_buffer_size")
 	if bufferSize <= 0 {
@@ -272,7 +265,7 @@ func newScheduler() app.JobSchedulerInterf {
 	}
 
 	scheduler := schedulerhelper.NewJobScheduler(
-		schedulerhelper.WithLoggerConfig(logDir, level),
+		schedulerhelper.WithLogger(schedulerhelper.NewZapJobLogger(app.ZapLog)),
 		schedulerhelper.WithJobResultsBufferSize(bufferSize),
 	)
 
@@ -280,4 +273,18 @@ func newScheduler() app.JobSchedulerInterf {
 	scheduler.Start()
 
 	return scheduler
+}
+
+// migrationCommandRequested 判断启动参数是否请求纯迁移运维入口。
+// 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
+func migrationCommandRequested() bool {
+	for _, arg := range os.Args {
+		if arg == "-migrate-up" {
+			return true
+		}
+		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {
+			return true
+		}
+	}
+	return false
 }

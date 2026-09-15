@@ -1,0 +1,10 @@
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS target_id VARCHAR(20) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS broadcast_sn BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS broadcast_reply_status VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS signal_phase VARCHAR(40) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS remote_media_ip VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS remote_media_port INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS media_transport VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS gb_talk_session ADD COLUMN IF NOT EXISTS sender_mode VARCHAR(24) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_talk_session_broadcast_match ON gb_talk_session(device_id, target_id, state);
+CREATE INDEX IF NOT EXISTS idx_talk_session_broadcast_sn ON gb_talk_session(broadcast_sn);

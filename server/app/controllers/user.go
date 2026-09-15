@@ -2,17 +2,14 @@ package controllers
 
 import (
 	"errors"
+	"strconv"
 	"strings"
-	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
-
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -29,6 +26,7 @@ type UserController struct {
 	Common
 	UserService   *service.User
 	CasbinService *service.PermissionService
+	AuthSessions  *service.AuthSessionService
 }
 
 // NewUserController 创建用户控制器
@@ -38,6 +36,22 @@ func NewUserController() *UserController {
 		UserService:   service.NewUserService(),
 		CasbinService: service.NewPermissionService(),
 	}
+}
+
+func (uc *UserController) authSessions() *service.AuthSessionService {
+	if uc.AuthSessions != nil {
+		return uc.AuthSessions
+	}
+	sessions, _ := app.SessionValidator.(*service.AuthSessionService)
+	return sessions
+}
+
+func (uc *UserController) revokeUserSessionsTx(tx *gorm.DB, userID uint, reason string) error {
+	sessions := uc.authSessions()
+	if sessions == nil {
+		return service.ErrSessionStore
+	}
+	return sessions.RevokeAllForUserTx(tx, userID, reason)
 }
 
 // GetProfile 获取当前登录用户信息
@@ -64,64 +78,21 @@ func (uc *UserController) GetProfile(c *gin.Context) {
 		uc.FailAndAbort(c, "获取用户信息失败", err)
 	}
 
-	// 通过 claims.TenantID 查询租户信息
-	tenant := models.NewTenant()
-	tenantName := ""
-	tenantDomain := ""
-	if claims.TenantID > 0 {
-		if err := tenant.FindByID(c, claims.TenantID); err == nil && !tenant.IsEmpty() {
-			tenantName = tenant.Name
-			tenantDomain = tenant.Domain
-		}
-	}
-
-	userTenantList := models.NewSysUserTenantList()
-	tenantList := models.NewTenantList() // 关联的租户列表
-	if user.TenantID > 0 {
-		// 获取关联的租户信息
-		if err := userTenantList.Find(c, func(d *gorm.DB) *gorm.DB {
-			return d.Where("user_id = ?", claims.UserID).Preload("Tenant")
-		}); err != nil {
-			uc.FailAndAbort(c, "查询用户关联租户错误", err)
-		}
-		tenantList = userTenantList.GetTenants()
-	} else {
-		// 如果用户默认租户ID，则获取所有关联的租户
-		if err := tenantList.Find(c); err != nil {
-			uc.FailAndAbort(c, "查询用户关联租户错误", err)
-		}
-	}
-
-	defaultUserTenant := userTenantList.Filter(func(ut *models.SysUserTenant) bool {
-		return ut.IsDefault == true
-	})
-	// 默认租户, TenantID为0时无默认租户
-	var defaultTenant *models.Tenant
-	if defaultUserTenant != nil {
-		defaultTenant = defaultUserTenant.Tenant
-	}
-
 	uc.Success(c, gin.H{
-		"id":            user.ID,
-		"avatar":        user.Avatar,
-		"userName":      user.Username,
-		"nickName":      user.NickName,
-		"roleIDs":       user.Roles.GetRoleIDs(),
-		"permissions":   user.Permissions,
-		"sex":           user.Sex,
-		"status":        user.Status,
-		"email":         user.Email,
-		"phone":         user.Phone,
-		"createdAt":     user.CreatedAt,
-		"description":   user.Description,
-		"roles":         user.Roles,
-		"department":    user.Department,
-		"tenantID":      claims.TenantID, // 用户当前登录的租户的ID
-		"tenantCode":    claims.TenantCode,
-		"tenantName":    tenantName,
-		"tenantDomain":  tenantDomain,  // 完整的域名
-		"defaultTenant": defaultTenant, // 默认租户
-		"tenants":       tenantList,    // 关联的租户列表
+		"id":          user.ID,
+		"avatar":      user.Avatar,
+		"userName":    user.Username,
+		"nickName":    user.NickName,
+		"roleIDs":     user.Roles.GetRoleIDs(),
+		"permissions": user.Permissions,
+		"sex":         user.Sex,
+		"status":      user.Status,
+		"email":       user.Email,
+		"phone":       user.Phone,
+		"createdAt":   user.CreatedAt,
+		"description": user.Description,
+		"roles":       user.Roles,
+		"department":  user.Department,
 	})
 }
 
@@ -147,11 +118,11 @@ func (uc *UserController) List(c *gin.Context) {
 	}
 
 	userList := models.NewUserList()
-	total, err := userList.GetTotal(c, req.Handle(), tenanthelper.TenantScope(c))
+	total, err := userList.GetTotal(c.Request.Context(), req.Handle())
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
-	err = userList.Find(c, tenanthelper.TenantScope(c), req.Paginate(), req.Handle(), func(d *gorm.DB) *gorm.DB {
+	err = userList.Find(c.Request.Context(), req.Paginate(), req.Handle(), func(d *gorm.DB) *gorm.DB {
 		return d.Omit("password").Preload("Roles").Preload("Department")
 	})
 	if err != nil {
@@ -212,7 +183,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	}
 	// 检查用户名是否已存在
 	user := models.NewUser()
-	err := user.GetUserByUsername(c, req.UserName)
+	err := user.GetUserByUsername(c.Request.Context(), req.UserName)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -223,7 +194,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -235,7 +206,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -251,7 +222,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	}
 
 	// 使用事务创建用户和角色关联
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 创建用户
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -281,19 +252,6 @@ func (uc *UserController) Add(c *gin.Context) {
 			}
 		}
 
-		// 写入用户租户关联表
-		if currentTenantID := common.GetCurrentTenantID(c); currentTenantID > 0 {
-			err = tx.Create(&models.SysUserTenant{
-				UserID:    user.ID,
-				TenantID:  currentTenantID,
-				IsDefault: true,
-				CreatedAt: time.Now(),
-			}).Error
-			if err != nil {
-				return err
-			}
-		}
-
 		return nil
 	})
 
@@ -301,7 +259,7 @@ func (uc *UserController) Add(c *gin.Context) {
 		uc.FailAndAbort(c, "Failed to create user", err)
 	}
 
-	if err = uc.CasbinService.AddRoleForUser(c, user.ID, req.Roles); err != nil {
+	if err = uc.CasbinService.AddRoleForUser(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "Failed to create user", err)
 	}
 
@@ -328,7 +286,7 @@ func (uc *UserController) Update(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, req.Id)
+	err := user.GetUserByID(c.Request.Context(), req.Id)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -338,7 +296,7 @@ func (uc *UserController) Update(c *gin.Context) {
 
 	// 检查用户名是否与其他用户冲突（排除当前用户）
 	existUser := models.NewUser()
-	err = existUser.GetUserByUsername(c, req.UserName)
+	err = existUser.GetUserByUsername(c.Request.Context(), req.UserName)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -349,7 +307,7 @@ func (uc *UserController) Update(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -361,7 +319,7 @@ func (uc *UserController) Update(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -370,8 +328,8 @@ func (uc *UserController) Update(c *gin.Context) {
 		}
 	}
 
-	// 使用事务更新用户和角色关联
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	// 使用事务更新用户、角色关联及停用后的会话撤销。
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		// 更新用户信息
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -394,6 +352,11 @@ func (uc *UserController) Update(c *gin.Context) {
 
 		if err := tx.Save(user).Error; err != nil {
 			return err
+		}
+		if user.Status != 1 {
+			if err := uc.revokeUserSessionsTx(tx, user.ID, "user_disabled"); err != nil {
+				return err
+			}
 		}
 
 		// 删除现有的用户角色关联
@@ -422,7 +385,7 @@ func (uc *UserController) Update(c *gin.Context) {
 		uc.FailAndAbort(c, "更新用户失败", err)
 	}
 
-	if err = uc.CasbinService.EditUserRoles(c, user.ID, req.Roles); err != nil {
+	if err = uc.CasbinService.EditUserRoles(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "更新用户失败", err)
 	}
 
@@ -449,7 +412,7 @@ func (uc *UserController) Delete(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, req.Id)
+	err := user.GetUserByID(c.Request.Context(), req.Id)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -457,14 +420,13 @@ func (uc *UserController) Delete(c *gin.Context) {
 		uc.FailAndAbort(c, "用户不存在", nil)
 	}
 
-	// 使用事务删除用户和角色关联
-	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
-		// 删除用户角色关联
-		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserRole{}).Error; err != nil {
+	// 使用事务删除用户和角色关联,并撤销该用户的全部会话。
+	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := uc.revokeUserSessionsTx(tx, user.ID, "user_deleted"); err != nil {
 			return err
 		}
-		// 删除用户租户关联
-		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserTenant{}).Error; err != nil {
+		// 删除用户角色关联
+		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserRole{}).Error; err != nil {
 			return err
 		}
 		// 软删除用户
@@ -479,7 +441,7 @@ func (uc *UserController) Delete(c *gin.Context) {
 		uc.FailAndAbort(c, "删除用户失败", err)
 	}
 
-	if err = uc.CasbinService.DeleteUserRoles(c, user.ID, nil); err != nil {
+	if err = uc.CasbinService.DeleteUserRoles(c.Request.Context(), user.ID, nil); err != nil {
 		uc.FailAndAbort(c, "删除用户失败", err)
 	}
 	uc.SuccessWithMessage(c, "删除成功", nil)
@@ -506,7 +468,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	currentUserID := common.GetCurrentUserID(c)
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, currentUserID)
+	err := user.GetUserByID(c.Request.Context(), currentUserID)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -517,7 +479,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	// 检查手机号是否已被其他用户使用
 	if req.Phone != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByPhone(c, req.Phone)
+		err = existUser.GetUserByPhone(c.Request.Context(), req.Phone)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -529,7 +491,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" {
 		existUser := models.NewUser()
-		err = existUser.GetUserByEmail(c, req.Email)
+		err = existUser.GetUserByEmail(c.Request.Context(), req.Email)
 		if err != nil {
 			uc.FailAndAbort(c, err.Error(), err)
 		}
@@ -555,7 +517,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 		user.Email = req.Email
 	}
 
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户信息失败", err)
 	}
 
@@ -603,7 +565,7 @@ func (uc *UserController) UploadAvatar(c *gin.Context) {
 
 	// 获取用户信息
 	user := models.NewUser()
-	err = user.GetUserByID(c, claims.UserID)
+	err = user.GetUserByID(c.Request.Context(), claims.UserID)
 	if err != nil {
 		uc.FailAndAbort(c, "获取用户信息失败", err)
 	}
@@ -613,7 +575,7 @@ func (uc *UserController) UploadAvatar(c *gin.Context) {
 
 	// 更新用户头像字段
 	user.Avatar = response.Url
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户头像失败", err)
 	}
 
@@ -646,7 +608,7 @@ func (uc *UserController) UpdateBasicInfo(c *gin.Context) {
 
 	// 检查用户是否存在
 	user := models.NewUser()
-	err := user.GetUserByID(c, currentUserID)
+	err := user.GetUserByID(c.Request.Context(), currentUserID)
 	if err != nil {
 		uc.FailAndAbort(c, err.Error(), err)
 	}
@@ -659,153 +621,9 @@ func (uc *UserController) UpdateBasicInfo(c *gin.Context) {
 	user.Sex = req.Sex
 	user.Description = req.Description
 
-	if err := app.DB().WithContext(c).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户基本信息失败", err)
 	}
 
 	uc.SuccessWithMessage(c, "基本信息更新成功", nil)
-}
-
-// SwitchTenant 切换租户
-// @Summary 切换租户
-// @Description 切换当前登录用户的租户，注销当前token并生成新token
-// @Tags 用户管理
-// @Accept json
-// @Produce json
-// @Param tenantId path int true "租户ID"
-// @Success 200 {object} map[string]interface{} "成功返回新的访问令牌"
-// @Failure 400 {object} map[string]interface{} "请求参数错误"
-// @Failure 401 {object} map[string]interface{} "用户未登录"
-// @Failure 403 {object} map[string]interface{} "租户不存在或未启用"
-// @Router /users/switchTenant/{tenantId} [get]
-// @Security ApiKeyAuth
-func (uc *UserController) SwitchTenant(c *gin.Context) {
-	// 从上下文中获取用户信息
-	claims := common.GetClaims(c)
-	if claims == nil {
-		uc.FailAndAbort(c, "用户未登录", nil)
-		return
-	}
-
-	// 从路径参数中获取租户ID
-	tenantIdStr := c.Param("tenantId")
-	if tenantIdStr == "" {
-		uc.FailAndAbort(c, "租户ID不能为空", nil)
-		return
-	}
-	tenantId, err := strconv.Atoi(tenantIdStr)
-	if err != nil {
-		uc.FailAndAbort(c, "租户ID格式错误", err)
-		return
-	}
-
-	// 获取用户信息
-	user := models.NewUser()
-	err = user.GetUserByID(c, claims.UserID)
-	if err != nil {
-		uc.FailAndAbort(c, "用户查询错误", err)
-		return
-	}
-	if user.IsEmpty() {
-		uc.FailAndAbort(c, "用户不存在", nil)
-		return
-	}
-
-	var tenantID uint
-	var tenantCode string
-
-	// 当参数tenantId为0且用户的TenantID也为0时，直接使用tenantID=0和tenantCode=""生成token
-	if tenantId == 0 && user.TenantID == 0 {
-		tenantID = 0
-		tenantCode = ""
-	} else {
-		// 查询租户信息
-		tenant := models.NewTenant()
-		err = tenant.FindByID(c, uint(tenantId))
-		if err != nil {
-			uc.FailAndAbort(c, "查询租户错误", err)
-			return
-		}
-		if tenant.IsEmpty() {
-			uc.FailAndAbort(c, "租户不存在", nil)
-			return
-		}
-		if tenant.Status != 1 {
-			uc.FailAndAbort(c, "租户未启用", nil)
-			return
-		}
-
-		// 检查用户是否关联该租户
-		if user.TenantID > 0 {
-			// 用户有默认租户，需要验证是否关联了目标租户
-			userTenant := &models.SysUserTenant{}
-			err = userTenant.Find(c, func(d *gorm.DB) *gorm.DB {
-				return d.Where("user_id = ? AND tenant_id = ?", user.ID, uint(tenantId))
-			})
-			if err != nil {
-				uc.FailAndAbort(c, "查询用户租户关联错误", err)
-				return
-			}
-			if userTenant.IsEmpty() {
-				uc.FailAndAbort(c, "用户未关联该租户", nil)
-				return
-			}
-		}
-
-		tenantID = tenant.ID
-		tenantCode = tenant.Code
-	}
-
-	// 撤销当前 access token
-	tokenString, err := common.GetAccessToken(c)
-	if err == nil && tokenString != "" {
-		app.TokenService.RevokeTokenWithCache(tokenString)
-	}
-
-	// 撤销当前 refresh token
-	err = app.TokenService.RevokeRefreshToken(claims.UserID)
-	if err != nil {
-		uc.FailAndAbort(c, "撤销旧token失败", err)
-		return
-	}
-
-	// 生成新的token
-	user.Password = ""
-	newToken, err := app.TokenService.GenerateTokenWithCache(&app.ClaimsUser{
-		UserID:     user.ID,
-		Username:   user.Username,
-		TenantID:   tenantID,
-		TenantCode: tenantCode,
-	})
-	if err != nil {
-		uc.FailAndAbort(c, "生成新token失败", err)
-		return
-	}
-
-	// 生成新的refresh token
-	newRefreshToken, err := app.TokenService.GenerateRefreshToken(user.ID, tenantID, tenantCode)
-	if err != nil {
-		uc.FailAndAbort(c, "生成新refresh token失败", err)
-		return
-	}
-
-	// 解析token获取过期时间
-	newClaims, err := app.TokenService.ParseToken(newToken)
-	if err != nil {
-		uc.FailAndAbort(c, "解析新token失败", err)
-		return
-	}
-
-	newRefreshClaims, err := app.TokenService.ParseRefreshToken(newRefreshToken)
-	if err != nil {
-		uc.FailAndAbort(c, "解析新refresh token失败", err)
-		return
-	}
-
-	uc.Success(c, gin.H{
-		"accessToken":         newToken,
-		"accessTokenExpires":  newClaims.ExpiresAt.Unix(),
-		"refreshToken":        newRefreshToken,
-		"refreshTokenExpires": newRefreshClaims.ExpiresAt.Unix(),
-	})
 }

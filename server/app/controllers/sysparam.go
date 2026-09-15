@@ -1,9 +1,9 @@
 package controllers
 
 import (
+	"strconv"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,7 +26,7 @@ func (spc *SysParamController) List(c *gin.Context) {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
 
-	list, count, err := sysParamService.List(c, &req)
+	list, count, err := sysParamService.List(c.Request.Context(), &req)
 	if err != nil {
 		spc.FailAndAbort(c, "获取参数列表失败", err)
 	}
@@ -44,7 +44,7 @@ func (spc *SysParamController) GetByID(c *gin.Context) {
 		spc.FailAndAbort(c, "参数ID格式错误", err)
 	}
 
-	param, err := sysParamService.GetByID(c, uint(id))
+	param, err := sysParamService.GetByID(c.Request.Context(), uint(id))
 	if err != nil {
 		spc.FailAndAbort(c, "查询参数失败", err)
 	}
@@ -58,7 +58,7 @@ func (spc *SysParamController) GetByCode(c *gin.Context) {
 		spc.FailAndAbort(c, "参数唯一标识不能为空", nil)
 	}
 
-	param, err := sysParamService.GetByCode(c, code)
+	param, err := sysParamService.GetByCode(c.Request.Context(), code)
 	if err != nil {
 		spc.FailAndAbort(c, "查询参数失败", err)
 	}
@@ -72,7 +72,7 @@ func (spc *SysParamController) Add(c *gin.Context) {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
 
-	param, err := sysParamService.Add(c, &req)
+	param, err := sysParamService.Add(c.Request.Context(), &req)
 	if err != nil {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
@@ -86,7 +86,7 @@ func (spc *SysParamController) Update(c *gin.Context) {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
 
-	param, err := sysParamService.Update(c, &req)
+	param, err := sysParamService.Update(c.Request.Context(), &req)
 	if err != nil {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
@@ -100,7 +100,7 @@ func (spc *SysParamController) Delete(c *gin.Context) {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
 
-	if err := sysParamService.Delete(c, req.ID); err != nil {
+	if err := sysParamService.Delete(c.Request.Context(), req.ID); err != nil {
 		spc.FailAndAbort(c, err.Error(), err)
 	}
 

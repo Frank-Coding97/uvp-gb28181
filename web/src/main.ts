@@ -1,6 +1,7 @@
 
 import { createApp } from "vue";
 import "@/style.css";
+import "@/styles/zlm-tokens.css"; // ZLM 控制台 design tokens(2026-06-28 重设计)
 import App from "@/App.vue";
 
 // vue-router
@@ -17,7 +18,9 @@ import ArcoVue from "@arco-design/web-vue";
 import ArcoVueIcon from "@arco-design/web-vue/es/icon";
 // import "@arco-design/web-vue/dist/arco.css"; // 默认样式
 import '@arco-themes/vue-gi-demo/css/arco.css'; // 自定义主题
+import "@/styles/arco-overrides.scss"; // UVP 全局样式覆盖
 import i18n from "@/lang/index";
+import { startSessionHeartbeat } from "@/services/session-heartbeat";
 
 
 const app = createApp(App);
@@ -33,6 +36,7 @@ app.use(i18n);
 
 // 立即挂载应用，不等待非关键依赖加载
 app.mount("#app");
+startSessionHeartbeat();
 
 // 使用requestIdleCallback在浏览器空闲时加载非关键依赖
 const loadNonCriticalDependencies = () => {

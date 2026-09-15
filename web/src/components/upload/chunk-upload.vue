@@ -450,21 +450,22 @@ defineExpose({
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px dashed var(--color-border-2);
-    border-radius: var(--border-radius-small);
-    padding: 24px;
+    border: 1.5px dashed var(--uvp-panel-border);
+    border-radius: 10px;
+    padding: 28px 24px;
     cursor: pointer;
     transition: all 0.2s;
-    background: var(--color-fill-1);
+    background: var(--uvp-list-panel-bg);
 
     &:hover {
-        border-color: rgb(var(--primary-6));
-        background: var(--color-fill-2);
+        border-color: var(--uvp-brand);
+        background: var(--uvp-brand-soft);
     }
 
     &.is-dragover {
-        border-color: rgb(var(--primary-6));
-        background: rgb(var(--primary-1));
+        border-color: var(--uvp-brand);
+        background: var(--uvp-brand-soft);
+        box-shadow: 0 0 0 3px rgb(37 99 235 / 8%);
     }
 
     &.is-disabled {
@@ -479,17 +480,18 @@ defineExpose({
 
 .dropzone-text {
     margin: 8px 0 4px;
-    color: var(--color-text-2);
+    color: var(--uvp-text-secondary);
     font-size: 14px;
 }
 
 .dropzone-link {
-    color: rgb(var(--primary-6));
+    color: var(--uvp-brand);
+    font-weight: 500;
 }
 
 .dropzone-hint {
     margin: 0;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
     font-size: 12px;
 }
 
@@ -504,14 +506,14 @@ defineExpose({
     display: flex;
     flex-direction: column;
     padding: 10px 12px;
-    background-color: var(--color-fill-1);
-    border: 1px solid var(--color-border-2);
-    border-radius: var(--border-radius-small);
+    background-color: var(--uvp-list-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 8px;
     transition: all 0.2s;
 
     &:hover {
-        background-color: var(--color-fill-2);
-        border-color: var(--color-border-3);
+        background-color: var(--uvp-table-row-hover-bg);
+        border-color: var(--uvp-brand);
     }
 }
 
@@ -523,8 +525,8 @@ defineExpose({
 }
 
 .file-name {
-    font-size: 14px;
-    color: var(--color-text-1);
+    font-size: 13px;
+    color: var(--uvp-text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -533,7 +535,7 @@ defineExpose({
 
 .file-size {
     font-size: 12px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
     flex-shrink: 0;
 }
 
@@ -547,7 +549,7 @@ defineExpose({
     gap: 12px;
     margin-top: 4px;
     font-size: 12px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
 }
 
 .file-actions {
@@ -559,7 +561,7 @@ defineExpose({
 
 .upload-hint {
     font-size: 12px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-tertiary);
     margin-top: 8px;
 }
 </style>

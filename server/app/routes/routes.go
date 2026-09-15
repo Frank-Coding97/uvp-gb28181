@@ -9,6 +9,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 )
@@ -24,17 +25,20 @@ var sysApiControllers = controllers.NewSysApiController()                   // A
 var sysAffixControllers = controllers.NewSysAffixController()               // 文件管理
 var configControllers = controllers.NewConfigController()                   // 配置控制器
 var sysOperationLogControllers = controllers.NewSysOperationLogController() // 操作日志控制器
-var sysTenantControllers = controllers.NewTenantController()                // 租户控制器
-var sysUserTenantControllers = controllers.NewSysUserTenantController()     // 用户租户关联控制器
+var sysLoginLogControllers = controllers.NewSysLoginLogController()         // 登录日志控制器
 var codeGenControllers = controllers.NewCodeGenController()                 // 代码生成控制器
 var sysGenControllers = controllers.NewSysGenController()                   // 代码生成配置控制器
 var pluginsManagerControllers = controllers.NewPluginsManagerController()   // 插件管理控制器
 var sysJobsControllers = controllers.NewSysJobsController()                 // 定时任务控制器
 var sysJobResultsControllers = controllers.NewSysJobResultsController()     // 定时任务执行结果控制器
-var sysParamControllers = controllers.NewSysParamController()                 // 参数管理控制器
+var sysParamControllers = controllers.NewSysParamController()               // 参数管理控制器
+var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // 在线用户控制器
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) {
+	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
+		panic("invalid httpserver.trustedproxies: " + err.Error())
+	}
 	// 全局跨域中间件
 	if app.ConfigYml.GetBool("httpserver.allowcrossdomain") {
 		engine.Use(middleware.CorsNext())
@@ -42,6 +46,13 @@ func InitRoutes(engine *gin.Engine) {
 
 	// 静态文件
 	engine.Static(app.ConfigYml.GetString("httpserver.serverrootpath"), app.ConfigYml.GetString("httpserver.serverroot"))
+
+	// GB28181 ZLMediaKit Hook 回调端点(engine 根,无 /api 前缀,无鉴权)
+	gbroutes.RegisterHookRoutes(engine)
+	// 扫码接入引导页(普通扫码 App 打开二维码 URL 时看到的页面)
+	gbroutes.RegisterQRLandingRoute(engine)
+	// 云端录像内容代理必须绕过全局 30 秒 handler timeout，鉴权由短期 capability 完成。
+	gbroutes.RegisterContentRoutes(engine)
 
 	//	调试模式下注册Swagger路由、查看内存缓存项
 	if app.ConfigYml.GetBool("server.appdebug") {
@@ -79,12 +90,24 @@ func InitRoutes(engine *gin.Engine) {
 		public.GET("/captcha/verify", authControllers.GetVerifyImgString)
 		// 获取配置信息
 		public.GET("/config/get", configControllers.GetConfig)
+		// GB28181 免鉴权端点(设备端无登录态,靠一次性 token 鉴别)
+		gbroutes.RegisterPublicRoutes(public)
+		// 在线心跳只要求有效登录会话，不依赖业务菜单权限。
+		sessionOnly := api.Group("")
+		sessionOnly.Use(middleware.JWTAuthMiddleware())
+		sessionOnly.POST("/users/session/heartbeat", sysOnlineUserControllers.Heartbeat)
 		// 受保护的路由
 		protected := api.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())
 		protected.Use(middleware.DemoAccountMiddleware()) // 添加演示账号中间件
 		protected.Use(middleware.CasbinMiddleware())
 		{
+			sysOnlineUser := protected.Group("/sysOnlineUser")
+			{
+				sysOnlineUser.GET("/list", sysOnlineUserControllers.List)
+				sysOnlineUser.POST("/forceLogout", sysOnlineUserControllers.ForceLogout)
+			}
+
 			// 用户管理路由组
 			users := protected.Group("/users")
 			{
@@ -109,8 +132,6 @@ func InitRoutes(engine *gin.Engine) {
 				users.POST("/uploadAvatar", userControllers.UploadAvatar)
 				// 更新当前登录用户基本信息
 				users.PUT("/updateBasicInfo", userControllers.UpdateBasicInfo)
-				// 切换租户
-				users.GET("/switchTenant/:tenantId", userControllers.SwitchTenant)
 			}
 
 			// 系统菜单路由组
@@ -295,40 +316,14 @@ func InitRoutes(engine *gin.Engine) {
 				sysOperationLog.GET("/export", sysOperationLogControllers.Export)
 			}
 
-			// 租户管理路由组
-			sysTenant := protected.Group("/sysTenant")
+			// 登录日志路由组
+			sysLoginLog := protected.Group("/sysLoginLog")
 			{
-				// 租户列表
-				sysTenant.GET("/list", sysTenantControllers.List)
-				// 根据ID获取租户信息
-				sysTenant.GET("/:id", sysTenantControllers.GetByID)
-				// 新增租户
-				sysTenant.POST("/add", sysTenantControllers.Add)
-				// 更新租户
-				sysTenant.PUT("/edit", sysTenantControllers.Update)
-				// 删除租户
-				sysTenant.DELETE("/:id", sysTenantControllers.Delete)
-			}
-
-			// 用户租户关联管理路由组
-			sysUserTenant := protected.Group("/sysUserTenant")
-			{
-				// 用户租户关联列表
-				sysUserTenant.GET("/list", sysUserTenantControllers.List)
-				// 根据用户ID和租户ID获取用户租户关联信息
-				sysUserTenant.GET("/get", sysUserTenantControllers.GetByID)
-				//批量新增用户租户关联
-				sysUserTenant.POST("/batchAdd", sysUserTenantControllers.BatchAdd)
-				//批量删除用户租户关联
-				sysUserTenant.DELETE("/batchDelete", sysUserTenantControllers.BatchDelete)
-				// 用户列表(不限租户)
-				sysUserTenant.GET("/userListAll", sysUserTenantControllers.UserListAll)
-				// 角色列表(不限租户)
-				sysUserTenant.GET("/getRolesAll", sysUserTenantControllers.GetRolesAll)
-				// 根查询角色ID集合(不限租户)
-				sysUserTenant.GET("/getUserRoleIDs", sysUserTenantControllers.GetUserRoleIDs)
-				// 设置用户角色(不限租户)
-				sysUserTenant.POST("/setUserRoles", sysUserTenantControllers.SetUserRoles)
+				sysLoginLog.GET("/list", sysLoginLogControllers.List)
+				sysLoginLog.DELETE("/delete", sysLoginLogControllers.Delete)
+				sysLoginLog.POST("/clear", sysLoginLogControllers.Clear)
+				sysLoginLog.POST("/unlock", sysLoginLogControllers.Unlock)
+				sysLoginLog.GET("/:id", sysLoginLogControllers.Detail)
 			}
 
 			// 代码生成配置路由组
@@ -409,6 +404,9 @@ func InitRoutes(engine *gin.Engine) {
 				// 删除定时任务执行结果
 				sysJobResults.DELETE("/delete", sysJobResultsControllers.Delete)
 			}
+
+			// GB28181 国标业务路由(设备管理等)
+			gbroutes.RegisterRoutes(protected)
 		}
 	}
 
