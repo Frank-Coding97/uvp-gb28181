@@ -82,8 +82,7 @@ const stubs = {
   },
   "a-range-picker": { template: "<div />" },
   RecordingDetailDrawer: {
-    emits: ["download"],
-    template: "<div><button data-testid='force-detail-download' @click='$emit(`download`, { id: `9007199254740993`, fileName: `record.mp4`, availability: `available` })' /></div>"
+    template: "<div />"
   },
   RecordingPlayerDialog: { template: "<div />" },
   RecordingRuntimeControl: { template: "<div data-testid='runtime-control' />" }
@@ -106,6 +105,7 @@ describe("cloud recording layout", () => {
     expect(source).toMatch(/\.cloud-recordings-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
     expect(source).toMatch(/\.recording-files-view,\s*\.active-recordings-view\s*{[^}]*display:\s*flex;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;/s);
     expect(source).toMatch(/\.cloud-recordings-table-wrap\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(source).toContain('x: 1694');
     expect(source).toContain("...(files.value.length ? { y: \"100%\" } : {})");
   });
 });
@@ -180,6 +180,28 @@ describe("CloudRecordings", () => {
     expect(wrapper.text()).toContain("待完善");
     expect(wrapper.text()).toContain("--");
     expect(wrapper.get("[data-testid='recording-table']").attributes("data-total")).toBe("1");
+  });
+
+  it("orders recording time, duration, device and channel while deriving a missing end time", async () => {
+    const inferred = { ...file(), endTime: null };
+    api.listRecordingFiles.mockResolvedValue(pageResult([inferred]));
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(source).toMatch(/title="录像时间"[^>]*>[\s\S]*?title="时长"[^>]*>[\s\S]*?title="设备"[^>]*>[\s\S]*?title="通道"[^>]*>/);
+    const timeCell = wrapper.get("[data-testid='recording-time-9007199254740993']");
+    expect(timeCell.text()).toContain(new Date("2026-08-10T12:00:00Z").toLocaleString("zh-CN", { hour12: false }));
+    expect(timeCell.text()).toContain(new Date("2026-08-10T12:10:00Z").toLocaleString("zh-CN", { hour12: false }));
+  });
+
+  it("prefers the recorded end time over a duration-derived value", async () => {
+    const recorded = { ...file(), endTime: "2026-08-10T12:20:00Z" };
+    api.listRecordingFiles.mockResolvedValue(pageResult([recorded]));
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    const timeCell = wrapper.get("[data-testid='recording-time-9007199254740993']");
+    expect(timeCell.text()).toContain(new Date("2026-08-10T12:20:00Z").toLocaleString("zh-CN", { hour12: false }));
   });
 
   it("automatically refreshes the current list every 10 seconds with a countdown", async () => {
@@ -276,7 +298,6 @@ describe("CloudRecordings", () => {
     expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
 
     await wrapper.get("[data-testid='play-9007199254740993']").trigger("click");
-    await wrapper.get("[data-testid='force-detail-download']").trigger("click");
     expect(enqueueDownload).not.toHaveBeenCalled();
   });
 
@@ -284,7 +305,10 @@ describe("CloudRecordings", () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("200");
+    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("280");
+    expect(source).toContain('data-testid="recording-actions-column"');
+    expect(source).toMatch(/data-testid="recording-actions-column"[^>]*fixed="right"/);
+    expect(source).not.toMatch(/data-testid="recording-actions-column"[^>]*:fixed="isMobile \? '' : 'right'"/);
     expect(wrapper.get(".cloud-recording-actions").classes()).toContain("cloud-recording-actions");
     expect(wrapper.get("[data-testid='detail-9007199254740993']").text()).toContain("详情");
     expect(wrapper.find("[data-testid='detail-icon-9007199254740993']").exists()).toBe(true);
@@ -328,11 +352,13 @@ describe("CloudRecordings", () => {
     expect(wrapper.text()).not.toContain("record.mp4");
   });
 
-  it("adds typed runtime control without mixing HLS state into the file catalog", () => {
-    expect(source).toContain('data-testid="runtime-tab"');
-    expect(source).toContain("RecordingRuntimeControl");
-    expect(source).toContain("运行控制");
-    expect(source).toContain("activeView === 'runtime'");
+  it("hides runtime control from the cloud recording page", async () => {
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='runtime-tab']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='runtime-control']").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("运行控制");
   });
 
   it("stops an active ZLMediaKit recording after confirmation when permitted", async () => {

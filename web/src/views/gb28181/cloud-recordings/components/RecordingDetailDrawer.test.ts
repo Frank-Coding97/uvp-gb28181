@@ -8,6 +8,7 @@ vi.mock("../api", async importOriginal => ({
 }));
 
 import RecordingDetailDrawer from "./RecordingDetailDrawer.vue";
+import source from "./RecordingDetailDrawer.vue?raw";
 
 const recording = (availability = "available", metadataState = "complete") => ({
   id: "9007199254740993",
@@ -33,7 +34,7 @@ const recording = (availability = "available", metadataState = "complete") => ({
 });
 
 const stubs = {
-  "a-drawer": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+  "a-modal": { props: ["visible"], template: "<section v-if='visible' data-testid='detail-dialog'><slot name='title' /><slot /></section>" },
   "a-spin": { template: "<div><slot /></div>" },
   "a-alert": { template: "<div><slot /></div>" },
   "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
@@ -48,37 +49,31 @@ describe("RecordingDetailDrawer", () => {
     getRecordingDetail.mockResolvedValue({ code: 0, message: "", data: recording() });
   });
 
-  it("keeps opaque IDs, renders public metadata and emits available actions", async () => {
+  it("uses the unified dialog and renders public metadata without business actions", async () => {
     const wrapper = mount(RecordingDetailDrawer, {
-      props: { visible: true, recordingId: "9007199254740993", canPlay: true, canDownload: true },
+      props: { visible: true, recordingId: "9007199254740993" },
       global: { stubs }
     });
     await flushPromises();
+    expect(source).toContain("<a-modal");
+    expect(source).toContain('modal-class="uvp-system-dialog recording-detail-dialog"');
+    expect(source).toContain('class="uvp-system-description uvp-system-description--compact recording-detail-description"');
+    expect(source).not.toContain("<a-drawer");
+    expect(wrapper.find("[data-testid='detail-dialog']").exists()).toBe(true);
     expect(getRecordingDetail).toHaveBeenCalledWith("9007199254740993");
     expect(wrapper.text()).toContain("东门");
     expect(wrapper.text()).toContain("边缘节点 A");
     expect(wrapper.text()).not.toContain("filePath");
-    await wrapper.get("[data-testid='detail-play']").trigger("click");
-    await wrapper.get("[data-testid='detail-download']").trigger("click");
-    expect(wrapper.emitted("play")?.[0]?.[0]).toMatchObject({ id: "9007199254740993" });
-    expect(wrapper.emitted("download")?.[0]?.[0]).toMatchObject({ id: "9007199254740993" });
-  });
-
-  it("keeps playback but hides download for a view-only account", async () => {
-    const wrapper = mount(RecordingDetailDrawer, {
-      props: { visible: true, recordingId: "9007199254740993", canPlay: true, canDownload: false },
-      global: { stubs }
-    });
-    await flushPromises();
-
-    expect(wrapper.find("[data-testid='detail-play']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='detail-play']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='detail-download']").exists()).toBe(false);
+    expect(source).not.toContain("emit('play'");
+    expect(source).not.toContain("emit('download'");
   });
 
   it("shows partial metadata as pending and hides unsupported actions", async () => {
     getRecordingDetail.mockResolvedValue({ code: 0, message: "", data: recording("node_offline", "partial") });
     const wrapper = mount(RecordingDetailDrawer, {
-      props: { visible: true, recordingId: "41", canPlay: false, canDownload: false },
+      props: { visible: true, recordingId: "41" },
       global: { stubs }
     });
     await flushPromises();

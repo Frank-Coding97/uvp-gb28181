@@ -1,11 +1,11 @@
 <template>
-  <a-drawer
+  <a-modal
     :visible="visible"
-    width="min(820px, 94vw)"
+    width="min(94vw, 820px)"
     :footer="false"
     :esc-to-close="true"
     unmount-on-close
-    class="recording-detail-drawer"
+    modal-class="uvp-system-dialog recording-detail-dialog"
     @update:visible="emit('update:visible', $event)"
     @cancel="emit('update:visible', false)"
   >
@@ -57,7 +57,12 @@
                 </a-tag>
               </div>
             </div>
-            <a-descriptions :column="columns" bordered size="medium">
+            <a-descriptions
+              class="uvp-system-description uvp-system-description--compact recording-detail-description"
+              :column="columns"
+              bordered
+              size="medium"
+            >
               <a-descriptions-item label="文件名" :span="columns">{{ detail.fileName || "--" }}</a-descriptions-item>
               <a-descriptions-item label="开始时间">{{ formatDateTime(detail.startTime) }}</a-descriptions-item>
               <a-descriptions-item label="结束时间">{{ formatDateTime(detail.endTime) }}</a-descriptions-item>
@@ -68,16 +73,6 @@
             </a-descriptions>
           </section>
 
-          <div v-if="availability.canAccess && (canPlay || canDownload)" class="recording-detail-actions">
-            <a-button v-if="canDownload" data-testid="detail-download" @click="emit('download', detail)">
-              <template #icon><Download :size="15" /></template>
-              下载
-            </a-button>
-            <a-button v-if="canPlay" type="primary" data-testid="detail-play" @click="emit('play', detail)">
-              <template #icon><Play :size="15" /></template>
-              播放
-            </a-button>
-          </div>
         </template>
 
         <div v-else class="recording-detail-placeholder">
@@ -86,25 +81,21 @@
         </div>
       </div>
     </a-spin>
-  </a-drawer>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Download, FileVideo2, Play } from "@lucide/vue";
+import { FileVideo2 } from "@lucide/vue";
 import { getRecordingDetail, type RecordingFile } from "../api";
 import { availabilityPresentation, recordingErrorPresentation } from "../recordingState";
 
 const props = defineProps<{
   visible: boolean;
   recordingId: string | null;
-  canPlay: boolean;
-  canDownload: boolean;
 }>();
 const emit = defineEmits<{
   (event: "update:visible", value: boolean): void;
-  (event: "play", value: RecordingFile): void;
-  (event: "download", value: RecordingFile): void;
 }>();
 
 const detail = ref<RecordingFile | null>(null);
@@ -188,7 +179,7 @@ watch(
 .recording-detail-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .recording-detail-heading h3 { margin: 0; font-size: 14px; }
 .recording-detail-tags { display: flex; gap: 6px; }
-.recording-detail-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 18px; }
+.recording-detail-description :deep(.arco-descriptions-item-value) { min-width: 0; overflow-wrap: anywhere; }
 .recording-detail-error { margin: 18px; }
 .recording-detail-error__body { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .recording-detail-placeholder { display: flex; min-height: 430px; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: var(--uvp-text-tertiary); }
@@ -197,7 +188,5 @@ watch(
   .recording-detail-content { min-height: 400px; }
   .recording-detail-context { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
   .recording-detail-section { padding: 14px 12px 0; }
-  .recording-detail-actions { padding: 14px 12px; }
-  .recording-detail-actions :deep(.arco-btn) { min-height: 44px; }
 }
 </style>

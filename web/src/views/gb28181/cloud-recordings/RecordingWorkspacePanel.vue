@@ -29,16 +29,6 @@
               <CircleDot data-testid="active-tab-icon" :size="14" aria-hidden="true" />
               正在录像 <span class="recording-view-switch__count">{{ visibleActiveRecordings.length }}</span>
             </button>
-            <button
-              type="button"
-              data-testid="runtime-tab"
-              :class="{ active: activeView === 'runtime' }"
-              :aria-pressed="activeView === 'runtime'"
-              @click="selectView('runtime')"
-            >
-              <SlidersHorizontal :size="14" aria-hidden="true" />
-              运行控制
-            </button>
           </div>
           <div class="cloud-recordings-header__actions">
             <span
@@ -166,24 +156,29 @@
                   @page-size-change="handlePageSizeChange"
                 >
                   <template #columns>
-                    <a-table-column title="开始时间" :width="176">
-                      <template #cell="{ record }"><span class="mono">{{ formatDateTime(record.startTime) }}</span></template>
-                    </a-table-column>
-                    <a-table-column title="通道" :width="200">
+                    <a-table-column title="录像时间" :width="210">
                       <template #cell="{ record }">
-                        <div class="recording-entity-cell"><span>{{ record.channelName || record.channelCode || "--" }}</span><small>{{ record.channelCode || "--" }}</small></div>
+                        <div :data-testid="`recording-time-${record.id}`" class="recording-time-cell mono">
+                          <span><small>开始</small>{{ formatDateTime(record.startTime) }}</span>
+                          <span><small>结束</small>{{ formatDateTime(recordingEndTime(record)) }}</span>
+                        </div>
                       </template>
+                    </a-table-column>
+                    <a-table-column title="时长" :width="110">
+                      <template #cell="{ record }">{{ formatDuration(record.timeLen) }}</template>
                     </a-table-column>
                     <a-table-column title="设备" :width="190">
                       <template #cell="{ record }">
                         <div class="recording-entity-cell"><span>{{ record.deviceName || record.deviceId || "--" }}</span><small>{{ record.deviceId || "--" }}</small></div>
                       </template>
                     </a-table-column>
+                    <a-table-column title="通道" :width="200">
+                      <template #cell="{ record }">
+                        <div class="recording-entity-cell"><span>{{ record.channelName || record.channelCode || "--" }}</span><small>{{ record.channelCode || "--" }}</small></div>
+                      </template>
+                    </a-table-column>
                     <a-table-column title="文件" :width="220" :ellipsis="true" :tooltip="true">
                       <template #cell="{ record }">{{ record.fileName || "--" }}</template>
-                    </a-table-column>
-                    <a-table-column title="时长" :width="110">
-                      <template #cell="{ record }">{{ formatDuration(record.timeLen) }}</template>
                     </a-table-column>
                     <a-table-column title="大小" :width="110">
                       <template #cell="{ record }">{{ formatFileSize(record.fileSize) }}</template>
@@ -208,9 +203,9 @@
                     <a-table-column
                       title="操作"
                       data-testid="recording-actions-column"
-                      :width="200"
+                      :width="280"
                       align="center"
-                      :fixed="isMobile ? '' : 'right'"
+                      fixed="right"
                     >
                       <template #cell="{ record }">
                         <div class="uvp-table-actions cloud-recording-actions">
@@ -315,17 +310,13 @@
   <RecordingDetailDrawer
     v-model:visible="detailVisible"
     :recording-id="detailId"
-    :can-play="canView"
-    :can-download="canDownload"
-    @play="playFromDetail"
-    @download="download"
   />
   <RecordingPlayerDialog v-model:visible="playerVisible" :recording="playingRecording" />
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, SlidersHorizontal, Trash2, TriangleAlert } from "@lucide/vue";
+import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, TriangleAlert } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
@@ -439,7 +430,7 @@ const pagination = reactive({
   showPageSize: true,
   pageSizeOptions: [10, 20, 50, 100]
 });
-const fileTableScroll = computed(() => ({ x: "100%", minWidth: 1558, ...(files.value.length ? { y: "100%" } : {}) }));
+const fileTableScroll = computed(() => ({ x: 1694, ...(files.value.length ? { y: "100%" } : {}) }));
 const activeTableScroll = computed(() => ({ x: "100%", minWidth: canStop.value ? 1222 : 1082, ...(activeRecordings.value.length ? { y: "100%" } : {}) }));
 const reconciliationSummary = computed(() => {
   const running = reconciliations.value.filter(item => item.status === "queued" || item.status === "running").length;
@@ -623,11 +614,6 @@ function play(recording: RecordingFile) {
   playerVisible.value = true;
 }
 
-function playFromDetail(recording: RecordingFile) {
-  detailVisible.value = false;
-  play(recording);
-}
-
 function download(recording: RecordingFile) {
   if (!canDownload.value || !availabilityPresentation(recording.availability).canAccess) return;
   void recordingDownloadCoordinator.enqueue({
@@ -738,6 +724,14 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return "--";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "--" : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function recordingEndTime(record: Pick<RecordingFile, "startTime" | "endTime" | "timeLen">) {
+  if (record.endTime) return record.endTime;
+  if (!record.startTime || record.timeLen == null || record.timeLen < 0) return null;
+  const startedAt = new Date(record.startTime).getTime();
+  if (!Number.isFinite(startedAt)) return null;
+  return new Date(startedAt + record.timeLen * 1000).toISOString();
 }
 
 function formatDuration(seconds: number | null) {
@@ -877,6 +871,9 @@ defineExpose({ refresh: refreshCurrent });
 .cloud-recordings-table-wrap { flex: 1; max-width: 100%; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; border-radius: 6px; }
 .cloud-recordings-table-wrap :deep(.uvp-data-table) { height: 100%; min-height: 0; }
 .recording-entity-cell { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.recording-time-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.35; white-space: nowrap; }
+.recording-time-cell span { display: flex; align-items: baseline; gap: 6px; }
+.recording-time-cell small { color: var(--uvp-text-tertiary); font-family: inherit; font-size: 11px; }
 .recording-entity-cell span,
 .recording-entity-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recording-entity-cell small { margin-top: 2px; color: var(--uvp-text-tertiary); font-size: 11px; }
