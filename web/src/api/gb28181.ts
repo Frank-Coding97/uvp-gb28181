@@ -40,6 +40,8 @@ export interface GbChannel {
   parentId: string;
   status: number;
   streamId: string;
+  /** 通道音频开关（点播是否接收音频），播放器据此决定是否出声并显示音频控件 */
+  audioEnabled?: boolean;
   /** 通道最新快照 URL(相对路径 /public/gb-channel-snapshot/...);无为空字符串或 null */
   snapshotUrl?: string | null;
   /** 通道最新快照抓拍时间(ISO 8601);无为 null */

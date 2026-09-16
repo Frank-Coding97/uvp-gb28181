@@ -19,6 +19,8 @@ const playLoading = ref(false);
 const playing = ref<{
     deviceId: string;
     channelId: string;
+    /** 通道音频开关，透传给播放器决定是否出声/显示音频控件 */
+    audioEnabled: boolean;
     result: PlayResult;
 } | null>(null);
 
@@ -128,6 +130,9 @@ async function onChannelClick(node: TreeNode) {
         playing.value = {
             deviceId: node.deviceId,
             channelId: node.channelId,
+            audioEnabled:
+                (channelsCache.value[node.deviceId] || []).find((c) => c.channelId === node.channelId)
+                    ?.audioEnabled === true,
             result: res.data
         };
         Message.success(`点播成功 streamId=${res.data.streamId}`);
@@ -212,6 +217,7 @@ onMounted(loadDevices);
             <a-spin :loading="playLoading" style="display: block">
                 <PlayWindow
                     :url="playing?.result.httpFlvUrl || ''"
+                    :has-audio="playing?.audioEnabled === true"
                     @error="onPlayerError"
                 />
                 <div v-if="playing" class="play-meta">

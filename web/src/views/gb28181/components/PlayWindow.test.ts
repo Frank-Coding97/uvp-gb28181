@@ -169,4 +169,64 @@ describe("PlayWindow playback embedding", () => {
         wrapper.unmount();
         expect(instances[0].destroy).toHaveBeenCalledTimes(1);
     });
+
+    /**
+     * 通道音频开关 → 播放器音频链路/控件/出声状态。
+     * ⚠️ EasyPlayer 的 `isMute` 语义与命名相反（库内 `void 0!==e.isMute&&(t.isNotMute=e.isMute)`），
+     * 传 true 才是「不静音」，所以通道开音频时它必须是 true。
+     */
+    function mountWithAudio(hasAudio?: boolean) {
+        const options: Record<string, any>[] = [];
+        const instances: any[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, value: Record<string, any>) {
+                options.push(value);
+                instances.push(this);
+            }
+            on = vi.fn();
+            play = vi.fn().mockResolvedValue(undefined);
+            destroy = vi.fn();
+            setMute = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+        const props: { url: string; hasAudio?: boolean } = { url: "ws://zlm/live.flv" };
+        if (hasAudio !== undefined) props.hasAudio = hasAudio;
+        return { options, instances, props };
+    }
+
+    it("开启音频的通道：建音频链路、播放后解锁静音并显示音频控件", async () => {
+        const { options, instances, props } = mountWithAudio(true);
+
+        const wrapper = mount(PlayWindow, { props });
+        await flushPromises();
+
+        expect(options[0]).toMatchObject({ hasAudio: true, isMute: true });
+        expect(instances[0].setMute).toHaveBeenCalledWith(0);
+
+        wrapper.unmount();
+    });
+
+    it("关闭音频的通道：不建音频链路、不出现音频控件、也不解锁静音", async () => {
+        const { options, instances, props } = mountWithAudio(false);
+
+        const wrapper = mount(PlayWindow, { props });
+        await flushPromises();
+
+        expect(options[0]).toMatchObject({ hasAudio: false, isMute: false });
+        expect(instances[0].setMute).not.toHaveBeenCalled();
+
+        wrapper.unmount();
+    });
+
+    it("未声明 hasAudio 时按无音频处理", async () => {
+        const { options, instances, props } = mountWithAudio();
+
+        const wrapper = mount(PlayWindow, { props });
+        await flushPromises();
+
+        expect(options[0]).toMatchObject({ hasAudio: false, isMute: false });
+        expect(instances[0].setMute).not.toHaveBeenCalled();
+
+        wrapper.unmount();
+    });
 });

@@ -123,6 +123,8 @@ interface PlaybackChannel {
     ptzType?: number;
     status: number;
     streamTransport?: string;
+    /** 通道音频开关（点播是否接收音频），透传给播放器决定是否出声/显示音频控件 */
+    audioEnabled?: boolean;
 }
 
 const props = withDefaults(defineProps<{
@@ -3239,6 +3241,7 @@ onBeforeUnmount(() => {
                             <PlayWindow
                                 :url="currentProtocolUrl"
                                 :zlm-webrtc="currentProtocolUsesZlmWebRtc"
+                                :has-audio="channel?.audioEnabled === true"
                                 @error="handlePlayerError"
                             />
                             <div v-if="phase === 'paused'" class="paused-mask">

@@ -8,12 +8,22 @@ interface Props {
     url: string;
     /** 录像回放页嵌入模式：填满父容器，由外层提供业务控制栏。 */
     playback?: boolean;
+    /**
+     * 通道音频开关（即 `gb_channel.audio_enabled`）。
+     * - `true`：播放器出声，原生控制栏出现音频控制图标
+     * - `false` / 不传：不建音频链路，控制栏也不出现音频图标
+     *
+     * 各调用点需显式传通道的 `audioEnabled`；不传一律按「无音频」处理。
+     */
     hasAudio?: boolean;
     /** 启用 EasyPlayer 的 ZLMediaKit WebRTC 信令适配。 */
     zlmWebrtc?: boolean;
 }
 
 const props = defineProps<Props>();
+
+/** 通道音频开关：不传按「无音频」处理。 */
+const audioEnabled = computed(() => props.hasAudio === true);
 const emit = defineEmits<{
     (e: "error", msg: string): void;
     (e: "timeupdate", timestamp: number): void;
@@ -63,6 +73,7 @@ async function play(u: string) {
     if (player.value) {
         try {
             await player.value.play(u);
+            applyAudioState(player.value);
         } catch (e) {
             errorMsg.value = `切换播放地址失败: ${(e as Error).message || e}`;
             emit("error", errorMsg.value);
@@ -78,8 +89,12 @@ async function play(u: string) {
             isLive: true,
             bufferTime: 0.2,
             // 国标 IPC 默认 PCMA(G.711),EasyPlayer wasm 路径支持解码 G711
-            hasAudio: props.hasAudio ?? true,
-            isMute: true,         // 默认静音(浏览器自动播放策略友好)
+            // 通道关音频时库自己会摘掉音频按钮(内部 `operateBtns.audio = false`)
+            hasAudio: audioEnabled.value,
+            // ⚠️ 库里 isMute 的语义与命名相反:归一化时 `void 0!==e.isMute&&(t.isNotMute=e.isMute)`,
+            // 传 true 等于「不静音」——play() 里 `_opt.isNotMute && this.mute(false)` 会主动取消静音。
+            // 所以这里传的是「通道是否开音频」,才能做到「通道开音频 → 播放器出声」。
+            isMute: audioEnabled.value,
             stretch: true,
             isRtcZLM: props.zlmWebrtc ?? false,
             // 解码模式优先级:MSE > WCS > WASM。打开 WASM 兜底,确保 G711/H265 也能放
@@ -123,6 +138,7 @@ async function play(u: string) {
         }
 
         await p.play(u);
+        applyAudioState(p);
     } catch (e) {
         errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
         emit("error", errorMsg.value);
@@ -137,6 +153,22 @@ watch(canScreenshot, () => {
     void play(currentUrl);
 });
 onBeforeUnmount(destroy);
+
+/**
+ * 播放后对齐一次音频状态。
+ *
+ * 原生控制栏的两个音频图标是同级的 DOM:`.easyplayer-icon-audio` 默认 `display:none`、
+ * `.easyplayer-icon-mute` 默认可见,只有收到 `volumechange` 才会互换——复位过一次,
+ * 就不会出现「通道开了音频,图标却停在静音」的状态。通道关音频时不调用(控件本就不渲染)。
+ */
+function applyAudioState(instance: any) {
+    if (!audioEnabled.value) return;
+    try {
+        instance.setMute?.(0);
+    } catch (e) {
+        console.warn("EasyPlayerPro setMute error", e);
+    }
+}
 
 /** 供父组件读取当前流畅度(卡片展示等),未播放时返回 null。 */
 function getSmoothness(): SmoothnessSnapshot | null {

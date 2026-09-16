@@ -142,9 +142,9 @@ vi.mock("@/api/gb28181", () => api);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 vi.mock("./PlayWindow.vue", () => ({
   default: {
-    props: ["url", "zlmWebrtc"],
+    props: ["url", "zlmWebrtc", "hasAudio"],
     emits: ["error"],
-    template: "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' @click=\"$emit('error', '拉流超时')\" />"
+    template: "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' :data-has-audio='String(Boolean(hasAudio))' @click=\"$emit('error', '拉流超时')\" />"
   }
 }));
 
@@ -458,6 +458,39 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(wrapper.find("[data-testid='ptz-direction-indicator']").exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  it("把通道音频开关透传给播放器", async () => {
+    const playable = {
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-audio",
+        ssrc: "0102030406",
+        app: "rtp",
+        urls: { wsFlv: "ws://zlm/rtp/audio.live.flv" },
+        wsflvUrl: "ws://legacy/rtp/audio.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    };
+
+    api.startPlay.mockResolvedValueOnce(playable);
+    const withAudio = mount(PlayConsoleLinked, {
+      props: { visible: true, channel: { ...channel, audioEnabled: true } }
+    });
+    await flushPromises();
+    expect(withAudio.get("[data-testid='play-window']").attributes("data-has-audio")).toBe("true");
+    withAudio.unmount();
+
+    api.startPlay.mockResolvedValueOnce(playable);
+    const withoutAudio = mount(PlayConsoleLinked, {
+      props: { visible: true, channel: { ...channel, audioEnabled: false } }
+    });
+    await flushPromises();
+    expect(withoutAudio.get("[data-testid='play-window']").attributes("data-has-audio")).toBe("false");
+    withoutAudio.unmount();
   });
 
   it("按返回地址动态展示协议并优先选择可播放的 WS-FLV", async () => {
