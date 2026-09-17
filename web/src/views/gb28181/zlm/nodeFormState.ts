@@ -20,7 +20,7 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
     host: node?.host ?? "",
     receiveHost: node?.receiveHost ?? "",
     playbackHost: node?.playbackHost ?? "",
-    apiPort: String(node?.apiPort ?? 18080),
+    apiPort: node ? String(node.apiPort) : "",
     apiSecret: "",
     weight: String(node?.weight ?? 50),
     rtpPortStart: String(node?.rtpPortStart ?? 30000),
@@ -38,7 +38,7 @@ function integerError(value: string, label: string, min: number, max: number) {
 
 export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFormErrors {
   const errors: NodeFormErrors = {};
-  if (!form.name.trim()) errors.name = "请输入节点名";
+  if (editing && !form.name.trim()) errors.name = "请输入节点名";
   if (!form.host.trim()) errors.host = "请输入后端可访问的管理地址";
   if (!editing && !form.apiSecret.trim()) errors.apiSecret = "新建节点必须填写 API Secret";
 
@@ -58,7 +58,6 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
 
 export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZLMNodeReq | UpdateZLMNodeReq {
   const request: CreateZLMNodeReq = {
-    name: form.name.trim(),
     host: form.host.trim(),
     receiveHost: form.receiveHost.trim(),
     playbackHost: form.playbackHost.trim(),
@@ -68,6 +67,7 @@ export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZ
     rtpPortStart: Number(form.rtpPortStart),
     rtpPortEnd: Number(form.rtpPortEnd)
   };
+  if (editing) request.name = form.name.trim();
   if (editing && !request.apiSecret) {
     const update: UpdateZLMNodeReq = { ...request };
     delete update.apiSecret;

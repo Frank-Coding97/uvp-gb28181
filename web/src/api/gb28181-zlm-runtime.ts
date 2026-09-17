@@ -133,6 +133,15 @@ export interface ZLMObjectStatistics {
   rtmpPacket: number;
 }
 
+export interface ZLMRuntimeTrendSample {
+  sampledAt: number;
+  streamCount?: number;
+  viewerCount?: number;
+  throughput?: number;
+  sessionCount?: number;
+  objectStatistics?: ZLMObjectStatistics;
+}
+
 export interface ZLMRuntimeMedia {
   nodeId: number;
   media: ZLMMediaIdentity;
@@ -161,6 +170,8 @@ export interface ZLMNodeRuntime {
   metricsComplete: boolean;
   mediaFreshness: ZLMRuntimeFreshness;
   streams?: ZLMRuntimeMedia[];
+  mediaRateSamples?: ZLMMediaRateSample[];
+  trendSamples?: ZLMRuntimeTrendSample[];
   error?: ZLMRuntimeError;
   errors?: ZLMRuntimeError[];
 }

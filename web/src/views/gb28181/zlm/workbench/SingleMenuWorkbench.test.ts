@@ -13,7 +13,7 @@ describe("single-menu ZLM workbench", () => {
       ["monitoring", "流与会话", "/media/monitoring"],
       ["ingress", "接入管理", "/media/ingress"],
       ["nodes", "节点管理", "/media/nodes"],
-      ["scheduling", "调度管理", "/media/scheduling"]
+      ["scheduling", "调度日志", "/media/scheduling"]
     ]);
     expect(MEDIA_WORKSPACES.map(item => item.key)).not.toContain("recordings");
     expect(MEDIA_WORKSPACES.map(item => item.path)).not.toContain("/media/recordings");
@@ -45,10 +45,12 @@ describe("single-menu ZLM workbench", () => {
     expect(systemMenu).toContain("query: { nodeId }");
   });
 
-  it("uses one stable outer tab identity for every workbench sub-route", () => {
+  it("does not collapse workbench menus into one outer tab", () => {
     const routeStore = readFileSync(resolve(process.cwd(), "src/store/modules/route-config.ts"), "utf8");
+    const routeIdentity = readFileSync(resolve(process.cwd(), "src/router/media-route-identity.ts"), "utf8");
     expect(routeStore).toContain("resolveMediaWorkbenchTabGroup");
-    expect(routeStore).toContain('title: "流媒体管理"');
+    expect(routeStore).not.toContain('title: "流媒体管理"');
+    expect(routeIdentity).not.toContain('return "media-workbench"');
   });
 
   it("makes the overview a concrete-node runtime screen", () => {

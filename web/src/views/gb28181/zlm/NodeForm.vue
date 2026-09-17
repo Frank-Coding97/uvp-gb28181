@@ -36,16 +36,15 @@ const loading = ref(false);
 const currentStep = ref(1);
 const probeResult = ref<ZLMNodeProbeResult | null>(null);
 const editing = computed(() => Boolean(props.node));
-const enabledProtocols = computed(() => {
+const protocolItems = computed(() => {
   const config = probeResult.value?.serverConfig;
-  if (!config) return [];
   return [
-    ["RTSP", config.rtspEnabled],
-    ["RTMP", config.rtmpEnabled],
-    ["HLS", config.hlsEnabled],
-    ["TS", config.tsEnabled],
-    ["fMP4", config.fmp4Enabled]
-  ].filter((item) => item[1]).map((item) => item[0] as string);
+    { label: "RTSP", enabled: Boolean(config?.rtspEnabled) },
+    { label: "RTMP", enabled: Boolean(config?.rtmpEnabled) },
+    { label: "HLS", enabled: Boolean(config?.hlsEnabled) },
+    { label: "TS", enabled: Boolean(config?.tsEnabled) },
+    { label: "fMP4", enabled: Boolean(config?.fmp4Enabled) }
+  ];
 });
 
 watch(
@@ -112,6 +111,7 @@ async function handleSubmit() {
   }
 
   loading.value = true;
+  let saved = false;
   try {
     const request = buildNodeRequest(form.value, editing.value);
     const response = editing.value
@@ -119,14 +119,16 @@ async function handleSubmit() {
       : await createZLMNode(request as CreateZLMNodeReq);
     if (response.code !== 0) throw new Error(response.message || "节点保存失败");
 
-    form.value = clearNodeSecret(form.value);
+    saved = true;
     Message.success(editing.value ? "候选连接已验证并更新" : "节点已验证并创建");
-    emit("saved");
-    emit("update:visible", false);
   } catch (error) {
     Message.error(zlmErrorPresentation(error).label);
   } finally {
     loading.value = false;
+    if (saved) {
+      close();
+      emit("saved");
+    }
   }
 }
 </script>
@@ -136,7 +138,7 @@ async function handleSubmit() {
     :visible="visible"
     :title="editing ? '编辑流媒体节点' : '添加流媒体节点'"
     modal-class="uvp-system-dialog zlm-node-form"
-    :width="720"
+    :width="820"
     :mask-closable="!loading"
     :esc-to-close="!loading"
     :closable="!loading"
@@ -157,7 +159,7 @@ async function handleSubmit() {
 
     <a-form v-if="editing || currentStep === 1" :model="form" layout="vertical" @submit-success="handleSubmit">
       <div v-if="!editing" class="form-section-title">必填参数</div>
-      <a-form-item label="节点名" required :validate-status="errors.name ? 'error' : undefined" :help="errors.name">
+      <a-form-item v-if="editing" label="节点名" required :validate-status="errors.name ? 'error' : undefined" :help="errors.name">
         <a-input
           v-model="form.name"
           allow-clear
@@ -168,12 +170,12 @@ async function handleSubmit() {
         />
       </a-form-item>
 
-      <a-form-item label="管理地址（API Host）" required :validate-status="errors.host ? 'error' : undefined" :help="errors.host">
+      <a-form-item :label="editing ? '管理地址（API Host）' : 'IP 地址'" required :validate-status="errors.host ? 'error' : undefined" :help="errors.host">
         <a-input
           v-model="form.host"
           allow-clear
           :max-length="255"
-          placeholder="后端访问 ZLM 的 IP 或域名"
+          :placeholder="editing ? '后端访问 ZLM 的 IP 或域名' : '后端可访问的 ZLM IP'"
           @blur="validateField('host')"
         />
         <div v-if="editing" class="form-tip">编辑时允许提交候选地址；后端探测通过前不会覆盖旧连接。</div>
@@ -199,7 +201,7 @@ async function handleSubmit() {
         <a-input-password
           v-model="form.apiSecret"
           allow-clear
-          :invisible-button="false"
+          :invisible-button="true"
           autocomplete="new-password"
           :max-length="512"
           :placeholder="editing ? '不修改时保持为空' : '填写 ZLM api.secret'"
@@ -275,28 +277,27 @@ async function handleSubmit() {
         </div>
       </div>
 
-      <a-descriptions class="uvp-system-description uvp-system-description--compact" :column="2" bordered size="medium">
-        <a-descriptions-item label="节点名称">{{ form.name }}</a-descriptions-item>
-        <a-descriptions-item label="管理地址">{{ form.host }}:{{ form.apiPort }}</a-descriptions-item>
-        <a-descriptions-item label="ZL mediaServerId" :span="2">
+      <a-descriptions class="probe-details" :column="2" bordered size="medium">
+        <a-descriptions-item label="IP 地址"><span class="probe-value">{{ form.host }}</span></a-descriptions-item>
+        <a-descriptions-item label="API 端口"><span class="probe-value">{{ form.apiPort }}</span></a-descriptions-item>
+        <a-descriptions-item label="API Secret"><span class="secret-confirmed">已填写（不回显）</span></a-descriptions-item>
+        <a-descriptions-item label="mediaServerId"><span class="probe-value">
           {{ probeResult?.mediaServerId || "未配置（登记后由平台生成）" }}
-        </a-descriptions-item>
-        <a-descriptions-item label="HTTP / HTTPS">
-          {{ probeResult?.serverConfig.httpPort || "未开放" }} / {{ probeResult?.serverConfig.httpsPort || "未开放" }}
-        </a-descriptions-item>
-        <a-descriptions-item label="RTSP / RTSPS">
-          {{ probeResult?.serverConfig.rtspPort || "未开放" }} / {{ probeResult?.serverConfig.rtspsPort || "未开放" }}
-        </a-descriptions-item>
-        <a-descriptions-item label="RTMP / RTMPS">
-          {{ probeResult?.serverConfig.rtmpPort || "未开放" }} / {{ probeResult?.serverConfig.rtmpsPort || "未开放" }}
-        </a-descriptions-item>
-        <a-descriptions-item label="RTP Proxy / ONVIF">
-          {{ probeResult?.serverConfig.rtpProxyPort || "未开放" }} / {{ probeResult?.serverConfig.onvifPort || "未开放" }}
-        </a-descriptions-item>
-        <a-descriptions-item label="已启用协议" :span="2">
+        </span></a-descriptions-item>
+        <a-descriptions-item label="HTTP PORT"><span class="probe-value">{{ probeResult?.serverConfig.httpPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="HTTPS PORT"><span class="probe-value">{{ probeResult?.serverConfig.httpsPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTSP PORT"><span class="probe-value">{{ probeResult?.serverConfig.rtspPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTSPS PORT"><span class="probe-value">{{ probeResult?.serverConfig.rtspsPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTMP PORT"><span class="probe-value">{{ probeResult?.serverConfig.rtmpPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTMPS PORT"><span class="probe-value">{{ probeResult?.serverConfig.rtmpsPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTP Proxy PORT"><span class="probe-value">{{ probeResult?.serverConfig.rtpProxyPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="ONVIF PORT"><span class="probe-value">{{ probeResult?.serverConfig.onvifPort || "未开放" }}</span></a-descriptions-item>
+        <a-descriptions-item label="RTP 端口范围"><span class="probe-value">{{ form.rtpPortStart }} - {{ form.rtpPortEnd }}</span></a-descriptions-item>
+        <a-descriptions-item label="协议状态" :span="2">
           <a-space wrap>
-            <a-tag v-for="protocol in enabledProtocols" :key="protocol" color="arcoblue">{{ protocol }}</a-tag>
-            <span v-if="enabledProtocols.length === 0">未读取到协议开关</span>
+            <a-tag v-for="protocol in protocolItems" :key="protocol.label" :color="protocol.enabled ? 'green' : 'gray'">
+              {{ protocol.label }} · {{ protocol.enabled ? "启用" : "关闭" }}
+            </a-tag>
           </a-space>
         </a-descriptions-item>
       </a-descriptions>
@@ -325,6 +326,11 @@ async function handleSubmit() {
 .probe-preview__indicator { width: 10px; height: 10px; flex: 0 0 auto; background: var(--zlm-success-500, #00a870); border-radius: 50%; box-shadow: 0 0 0 5px rgb(0 168 112 / 12%); }
 .probe-preview__title { color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); }
 .probe-preview__subtitle { margin-top: 3px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
+.probe-details { width: 100%; }
+.probe-details :deep(.arco-descriptions-item-label) { width: 132px; color: var(--zlm-text-3); font-weight: var(--zlm-fw-medium); }
+.probe-details :deep(.arco-descriptions-item-value) { color: var(--zlm-text-1); }
+.probe-value { font-family: var(--zlm-font-mono); }
+.secret-confirmed { color: var(--zlm-success-600); }
 .form-tip { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
 .form-tip-inline { color: var(--zlm-text-3); }
 .port-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); width: 100%; }

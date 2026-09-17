@@ -9,7 +9,7 @@ describe("media workspace route contract", () => {
       ["monitoring", "流与会话", "/media/monitoring", 20],
       ["ingress", "接入管理", "/media/ingress", 30],
       ["nodes", "节点管理", "/media/nodes", 40],
-      ["scheduling", "调度管理", "/media/scheduling", 50]
+      ["scheduling", "调度日志", "/media/scheduling", 50]
     ]);
     expect(new Set(MEDIA_WORKSPACES.map(item => item.path)).size).toBe(5);
   });
@@ -30,5 +30,10 @@ describe("media workspace route contract", () => {
       expect(workspace.allowedViews, workspace.key).toContain(workspace.defaultView);
       expect(workspace.allowedViews.length, workspace.key).toBeGreaterThan(0);
     }
+  });
+
+  it("keeps node management tabless and scheduling focused on logs", () => {
+    expect(MEDIA_WORKSPACES.find(item => item.key === "nodes")).toMatchObject({ defaultView: "list", allowedViews: ["list"] });
+    expect(MEDIA_WORKSPACES.find(item => item.key === "scheduling")).toMatchObject({ defaultView: "logs", allowedViews: ["logs"] });
   });
 });

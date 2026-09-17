@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { CirclePower, Eye, MoreHorizontal, Pencil, Radar, Wrench } from "lucide-vue-next";
+import { CirclePower, LogOut, Pencil, Radar, RotateCw, Settings, Trash2, Wrench } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import {
@@ -65,6 +65,8 @@ const actionVisible = ref(false);
 const actionNode = ref<ZLMNode | null>(null);
 const action = ref<NodeDangerAction | null>(null);
 const opLoading = ref<Record<number, string | null>>({});
+const AUTO_REFRESH_SECONDS = 10;
+const refreshCountdown = ref(AUTO_REFRESH_SECONDS);
 let requestGeneration = 0;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -85,6 +87,9 @@ const filteredNodes = computed(() => filterNodeRecords(scopedNodes.value, {
 const loading = computed(() => props.nodes === undefined ? legacyLoading.value : props.loading);
 const loadError = computed(() => props.nodes === undefined ? legacyError.value : props.error);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
+const refreshButtonLabel = computed(() => props.active && props.autoRefresh
+  ? `刷新（${refreshCountdown.value}s）`
+  : "刷新");
 
 function clearRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
@@ -133,10 +138,25 @@ function resetFilters() {
   queryRows();
 }
 
+function tickRefreshCountdown() {
+  if (refreshCountdown.value > 1) {
+    refreshCountdown.value -= 1;
+    return;
+  }
+  refreshCountdown.value = AUTO_REFRESH_SECONDS;
+  refreshRows();
+}
+
 function scheduleRefresh() {
   clearRefreshTimer();
+  refreshCountdown.value = AUTO_REFRESH_SECONDS;
   if (!props.active || !props.autoRefresh) return;
-  refreshTimer = setInterval(refreshRows, 30_000);
+  refreshTimer = setInterval(tickRefreshCountdown, 1_000);
+}
+
+function handleManualRefresh() {
+  refreshRows();
+  scheduleRefresh();
 }
 
 watch(() => props.nodes, value => {
@@ -153,10 +173,10 @@ onBeforeUnmount(() => {
   clearRefreshTimer();
 });
 
-function gotoDetail(node: ZLMNode) {
+function openServiceConfig(node: ZLMNode) {
   context.selectNode(node.id);
   const path = props.canonical ? `/media/nodes/${node.id}` : `/gb28181/zlm/nodes/${node.id}`;
-  void router.push({ path, query: { view: "overview", nodeId: String(node.id) } });
+  void router.push({ path, query: { nodeId: String(node.id) } });
 }
 
 function openCreate() {
@@ -185,10 +205,6 @@ function openAction(node: ZLMNode, nextAction: NodeDangerAction) {
   actionNode.value = node;
   action.value = nextAction;
   actionVisible.value = true;
-}
-
-function canShowMore(node: ZLMNode) {
-  return canManage.value || (node.state !== "offline" && (canKick.value || canRestart.value));
 }
 
 async function withOp(node: ZLMNode, name: string, run: () => Promise<void>) {
@@ -280,8 +296,7 @@ function relativeTime(value?: string) {
         <a-button @click="resetFilters"><template #icon><icon-refresh /></template>重置</a-button>
       </template>
       <template #extra>
-        <span class="filter-meta">{{ filteredNodes.length }} / {{ scopedNodes.length }} 节点</span>
-        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refreshRows"><template #icon><icon-refresh /></template>刷新</a-button>
+        <a-button class="node-refresh-button uvp-page-action-btn uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="handleManualRefresh"><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button>
         <a-button v-if="canManage" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate"><template #icon><icon-plus /></template>添加节点</a-button>
       </template>
     </s-layout-search>
@@ -295,23 +310,21 @@ function relativeTime(value?: string) {
     <section v-else class="node-table-wrap">
       <a-table :data="filteredNodes" :loading="loading" row-key="id" :pagination="false" class="node-table uvp-data-table">
         <template #columns>
-          <a-table-column title="节点" :width="230"><template #cell="{ record }"><button type="button" class="cell-node" :aria-label="`查看节点 ${record.name}`" @click="gotoDetail(record)"><span class="cell-node-name">{{ record.name }}</span><span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span></button></template></a-table-column>
+          <a-table-column title="节点" :width="230"><template #cell="{ record }"><div class="cell-node"><span class="cell-node-name">{{ record.name }}</span><span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span></div></template></a-table-column>
           <a-table-column title="状态" :width="110"><template #cell="{ record }"><LifecycleDot :state="record.state" /></template></a-table-column>
           <a-table-column title="健康度" :width="170"><template #cell="{ record }"><HealthBadge :health="nodeHealth(record)" :reason="nodeHealthReason(record)" /><span v-if="record.recoveryRequired" class="recovery-mark">恢复隔离</span></template></a-table-column>
           <a-table-column title="流 / 会话" :width="120"><template #cell="{ record }"><span v-if="record.state === 'offline'">—</span><span v-else class="numeric">{{ record.stats?.mediaSourceCount ?? 0 }} / {{ record.stats?.sessionCount ?? 0 }}</span></template></a-table-column>
           <a-table-column title="调度" :width="130"><template #cell="{ record }"><span v-if="record.state !== 'active'" class="muted">不参与</span><span v-else-if="record.autoOnDemandReady" class="ready">可调度 · {{ record.weight }}</span><span v-else class="warning">等待收敛</span></template></a-table-column>
           <a-table-column title="最后心跳" :width="130"><template #cell="{ record }"><span :title="record.stats?.lastHeartbeatAt">{{ relativeTime(record.stats?.lastHeartbeatAt) }}</span></template></a-table-column>
-          <a-table-column title="操作" :width="300" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions">
-            <a-link class="uvp-table-action uvp-table-action--detail" @click="gotoDetail(record)"><template #icon><Eye :size="13" /></template>详情</a-link>
+          <a-table-column title="操作" :width="340" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions node-row-actions">
+            <a-link class="uvp-table-action uvp-table-action--detail" @click="openServiceConfig(record)"><template #icon><Settings :size="13" /></template>服务配置</a-link>
             <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><template #icon><Pencil :size="13" /></template>编辑</a-link>
             <a-link v-if="canManage && record.state === 'active'" class="uvp-table-action uvp-table-action--scope" @click="openAction(record, 'maintenance')"><template #icon><Wrench :size="13" /></template>维护</a-link>
             <a-link v-else-if="canManage && record.state === 'maintenance'" class="uvp-table-action uvp-table-action--execute" :loading="opLoading[record.id] === 'activate'" @click="handleActivate(record)"><template #icon><CirclePower :size="13" /></template>激活</a-link>
             <a-link v-else-if="canManage && record.state === 'offline'" class="uvp-table-action uvp-table-action--sync" :loading="opLoading[record.id] === 'reprobe'" @click="handleReprobe(record)"><template #icon><Radar :size="13" /></template>探测</a-link>
-            <a-dropdown v-if="canShowMore(record)" trigger="click" position="br"><a-link class="uvp-table-action uvp-table-action--more">更多<MoreHorizontal :size="13" /></a-link><template #content>
-              <a-doption v-if="canKick && record.state !== 'offline'" @click="openAction(record, 'kick')">驱逐全部会话</a-doption>
-              <a-doption v-if="canRestart && record.state !== 'offline'" @click="openAction(record, 'restart')">重启 ZLM</a-doption>
-              <a-doption v-if="canManage" class="danger" @click="openAction(record, 'delete')">删除节点</a-doption>
-            </template></a-dropdown>
+            <a-link v-if="canKick && record.state !== 'offline'" class="uvp-table-action uvp-table-action--scope" @click="openAction(record, 'kick')"><template #icon><LogOut :size="13" /></template>驱逐</a-link>
+            <a-link v-if="canRestart && record.state !== 'offline'" class="uvp-table-action uvp-table-action--execute" @click="openAction(record, 'restart')"><template #icon><RotateCw :size="13" /></template>重启</a-link>
+            <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="openAction(record, 'delete')"><template #icon><Trash2 :size="13" /></template>删除</a-link>
           </div></template></a-table-column>
         </template>
         <template #empty><div class="empty" role="status"><icon-cloud class="empty-icon" /><strong>{{ scopedNodes.length ? "没有符合筛选条件的节点" : "还没有 ZLM 节点" }}</strong><span>{{ scopedNodes.length ? "清空筛选条件后重试。" : "添加第一个节点后，后端会先执行连接探测。" }}</span></div></template>
@@ -329,11 +342,12 @@ function relativeTime(value?: string) {
 .node-search-panel { margin-bottom: 16px; }
 .node-search-panel :deep(.arco-select-view) { box-sizing: border-box; background: var(--uvp-search-control-bg) !important; border: 1px solid var(--uvp-search-secondary-btn-border) !important; border-radius: 10px !important; box-shadow: var(--uvp-search-control-shadow) !important; }
 .node-search-panel :deep(.arco-select-view:hover), .node-search-panel :deep(.arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
-.filter-meta { display: inline-flex; align-items: center; min-height: 34px; color: var(--zlm-text-3); font-size: 12px; }
+.node-refresh-button { min-width: 104px; justify-content: center; }
 .recovery-mark { display: inline-block; margin-left: 6px; color: var(--zlm-danger-600); font-size: 11px; }
 .page-state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; padding: 16px; color: var(--zlm-text-3); text-align: center; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); }
 .page-state--warning { min-height: auto; align-items: flex-start; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.page-state--error { color: var(--zlm-danger-600); }
 .node-table-wrap { overflow: hidden; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
-.cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; padding: 0; text-align: left; background: transparent; border: 0; cursor: pointer; }.cell-node:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 3px; border-radius: 5px; }.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }.cell-node:hover .cell-node-name { color: var(--zlm-brand-600); }.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
-.numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }.danger { color: var(--zlm-danger-600); }
+.cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; text-align: left; }.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
+.node-row-actions { flex-wrap: wrap; }
+.numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }
 </style>

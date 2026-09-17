@@ -6,20 +6,16 @@ import { getZLMNodeRuntime, type ZLMNodeRuntime, type ZLMObjectStatistics } from
 
 import StatCard from "../../components/StatCard.vue";
 import Sparkline from "../../components/Sparkline.vue";
-import MediaVChart from "../components/MediaVChart.vue";
+import MediaRateArea from "../../../components/MediaRateArea.vue";
 import { formatZLMByteRate, zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import {
-  appendRuntimeSnapshot,
-  buildRuntimeTrendChartState,
-  createRuntimeTrendHistory,
+  runtimeMediaRateSamples,
   runtimeSnapshot,
-  type RuntimeTrendHistory
+  runtimeTrendSamples
 } from "../chart/runtimeChart";
 import {
-  appendObjectStatisticSample,
-  objectStatisticTrend,
-  type ObjectStatisticSample
+  objectStatisticTrend
 } from "./objectStatisticState";
 import {
   busiestEventThreads,
@@ -44,21 +40,20 @@ const emit = defineEmits<{
 }>();
 
 const runtime = ref<ZLMNodeRuntime | null>(null);
-const history = ref<RuntimeTrendHistory>(createRuntimeTrendHistory({ nodeId: props.nodeId, range: `node:${props.nodeId ?? "none"}` }));
-const objectStatisticHistory = ref<ObjectStatisticSample[]>([]);
 const loading = ref(false);
 const loadError = ref<unknown>(null);
 const objectDetailsVisible = ref(false);
 
 const requestNodeId = computed(() => props.nodeId);
 const summary = computed(() => runtime.value ? runtimeSnapshot(runtime.value) : null);
-const chart = computed(() => buildRuntimeTrendChartState(history.value));
+const mediaRateSamples = computed(() => runtimeMediaRateSamples(runtime.value));
+const trendSamples = computed(() => runtimeTrendSamples(runtime.value));
 const metricsAvailable = computed(() => runtime.value?.metricsComplete === true);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const streamTrend = computed(() => history.value.samples.map(point => point.streamCount ?? undefined).filter((point): point is number => point !== undefined));
-const viewerTrend = computed(() => history.value.samples.map(point => point.viewerCount ?? undefined).filter((point): point is number => point !== undefined));
-const throughputTrend = computed(() => history.value.samples.map(point => point.throughput ?? undefined).filter((point): point is number => point !== undefined));
-const sessionTrend = computed(() => history.value.samples.map(point => point.sessionCount ?? undefined).filter((point): point is number => point !== undefined));
+const streamTrend = computed(() => trendSamples.value.flatMap(point => point.streamCount === undefined ? [] : [point.streamCount]));
+const viewerTrend = computed(() => trendSamples.value.flatMap(point => point.viewerCount === undefined ? [] : [point.viewerCount]));
+const throughputTrend = computed(() => trendSamples.value.flatMap(point => point.throughput === undefined ? [] : [point.throughput]));
+const sessionTrend = computed(() => trendSamples.value.flatMap(point => point.sessionCount === undefined ? [] : [point.sessionCount]));
 const eventThreadLoads = computed(() => runtime.value?.metrics.eventThreadLoads ?? []);
 const eventThreadSummary = computed(() => summarizeEventThreadLoads(eventThreadLoads.value));
 const eventThreadDistribution = computed(() => eventThreadLoadDistribution(eventThreadLoads.value));
@@ -95,7 +90,7 @@ const objectStatisticItems = computed(() => {
   return objectStatisticMeta.map(item => ({
     ...item,
     value: statistics[item.key],
-    trend: objectStatisticTrend(objectStatisticHistory.value, item.key)
+    trend: objectStatisticTrend(trendSamples.value, item.key)
   }));
 });
 
@@ -115,11 +110,6 @@ const { refresh } = useZLMRuntimePolling<ZLMNodeRuntime>({
   },
   publish(value) {
     runtime.value = value;
-    objectStatisticHistory.value = appendObjectStatisticSample(objectStatisticHistory.value, value);
-    history.value = appendRuntimeSnapshot(history.value, value, {
-      nodeId: props.nodeId,
-      range: `node:${props.nodeId ?? "none"}`
-    });
     loadError.value = null;
     loading.value = false;
   },
@@ -134,11 +124,6 @@ watch(() => props.nodeId, () => {
   loadError.value = null;
   loading.value = props.nodeId !== null;
   objectDetailsVisible.value = false;
-  objectStatisticHistory.value = [];
-  history.value = createRuntimeTrendHistory({
-    nodeId: props.nodeId,
-    range: `node:${props.nodeId ?? "none"}`
-  });
   if (props.active) refresh();
 });
 
@@ -165,7 +150,7 @@ defineExpose({ refresh });
     <div v-else-if="loadError && !runtime" class="monitoring-state monitoring-state--error" role="alert">
       <Server :size="34" /><strong>{{ errorPresentation.label }}</strong><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
     </div>
-    <div v-else-if="!runtime" class="monitoring-state" role="status"><Server :size="34" /><strong>等待运行态采样</strong><span>进入页面后才开始记录趋势。</span></div>
+    <div v-else-if="!runtime" class="monitoring-state" role="status"><Server :size="34" /><strong>等待运行态采样</strong><span>后端将持续保留最近 5 分钟趋势。</span></div>
 
     <template v-if="runtime && summary">
       <section class="runtime-summary-kpis" aria-label="运行关键指标">
@@ -190,19 +175,12 @@ defineExpose({ refresh });
       </section>
 
       <section class="runtime-summary-grid">
-        <MediaVChart
-          aria-label="实时媒体速率"
-          :title="chart.title"
-          :spec="chart.spec"
-          :status="chart.status"
-          :summary="chart.summary"
-          :warning="chart.warning"
-          :sampled-label="chart.sampledLabel"
-          legend-label="媒体速率（KB/s）"
-          :show-summary="false"
-          :active="active"
-          status-text="进入页面后等待运行态采样"
-        />
+        <section class="runtime-rate-panel" aria-labelledby="runtime-rate-title">
+          <header class="runtime-rate-panel__header">
+            <div><h3 id="runtime-rate-title">实时媒体速率</h3><p>展示最近 5 分钟在线媒体流的实时传输速率合计</p></div>
+          </header>
+          <MediaRateArea :samples="mediaRateSamples" :active="active" />
+        </section>
         <section class="runtime-object-panel runtime-object-panel--summary" aria-labelledby="runtime-object-title">
           <header class="runtime-object-panel__header">
             <div><h3 id="runtime-object-title">对象实例</h3><p>关注媒体、会话和缓冲对象的数量变化</p></div>
@@ -324,11 +302,13 @@ defineExpose({ refresh });
 .monitoring-state { display: flex; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .runtime-summary-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 0; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
 .runtime-summary-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: stretch; gap: 12px; margin-top: 8px; }
-.runtime-thread-panel, .runtime-object-panel { min-width: 0; padding: 13px 15px 12px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
+.runtime-thread-panel, .runtime-object-panel, .runtime-rate-panel { min-width: 0; padding: 13px 15px 12px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
+.runtime-rate-panel { display: flex; min-height: 220px; flex-direction: column; }
+.runtime-rate-panel :deep(.media-rate-area) { height: auto; min-height: 160px; flex: 1; }
 .runtime-thread-panel--full { margin-top: 8px; padding-bottom: 10px; }
-.runtime-thread-panel__header, .runtime-object-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.runtime-thread-panel h3, .runtime-object-panel h3 { margin: 0; color: var(--zlm-text-1); font-size: 14px; }
-.runtime-thread-panel p, .runtime-object-panel p { margin: 2px 0 0; color: var(--zlm-text-3); font-size: 12px; line-height: 1.35; }
+.runtime-thread-panel__header, .runtime-object-panel__header, .runtime-rate-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.runtime-thread-panel h3, .runtime-object-panel h3, .runtime-rate-panel h3 { margin: 0; color: var(--zlm-text-1); font-size: 14px; }
+.runtime-thread-panel p, .runtime-object-panel p, .runtime-rate-panel p { margin: 2px 0 0; color: var(--zlm-text-3); font-size: 12px; line-height: 1.35; }
 .thread-load-content { display: grid; gap: 10px; }
 .thread-load-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding-bottom: 8px; border-bottom: 1px solid var(--zlm-border); }
 .thread-load-summary > div { min-width: 0; padding: 0 14px; border-left: 1px solid var(--zlm-border); }

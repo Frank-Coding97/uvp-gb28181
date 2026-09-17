@@ -44,6 +44,33 @@ describe("ZLMDangerActionDialog", () => {
     expect(wrapper.text()).toContain("操作理由");
   });
 
+  it("allows direct confirmation when phrase input is disabled", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    useZLMContextStore().initialize([{ id: 7, name: "边缘节点 A", state: "active" }], "7");
+    const wrapper = mount(ZLMDangerActionDialog, {
+      props: {
+        visible: true,
+        nodeId: 7,
+        nodeName: "边缘节点 A",
+        targetKey: "node:7:delete",
+        targetLabel: "媒体节点 边缘节点 A",
+        fingerprint: "fp-delete",
+        confirmPhrase: "删除 边缘节点 A",
+        requireReason: false,
+        requireConfirmPhrase: false,
+        actionLabel: "删除节点"
+      },
+      global: { plugins: [testPinia], stubs }
+    });
+
+    expect(wrapper.text()).not.toContain("请输入确认短语");
+    await wrapper.get("button:last-child").trigger("click");
+    expect(wrapper.emitted("confirm")).toEqual([[
+      { nodeId: 7, targetKey: "node:7:delete", fingerprint: "fp-delete", reason: "" }
+    ]]);
+  });
+
   it("closes as stale when the selected node changes", async () => {
     const testPinia = createPinia();
     setActivePinia(testPinia);

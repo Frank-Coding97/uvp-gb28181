@@ -34,6 +34,11 @@ const existingNode = {
 };
 
 describe("ZLM node form state", () => {
+  it("does not guess an API port for a new node", () => {
+    expect(createNodeFormState().apiPort).toBe("");
+    expect(createNodeFormState(existingNode).apiPort).toBe("18080");
+  });
+
   it("loads editable connection candidates without ever loading the existing secret", () => {
     const form = createNodeFormState(existingNode);
     expect(form).toMatchObject({ host: "10.0.0.7", apiPort: "18080", apiSecret: "" });
@@ -57,6 +62,18 @@ describe("ZLM node form state", () => {
     });
   });
 
+  it("creates a node from only host, API port and secret without sending a name", () => {
+    const form = createNodeFormState();
+    Object.assign(form, { host: "10.0.0.7", apiPort: "18080", apiSecret: "secret" });
+    expect(validateNodeForm(form, false)).toEqual({});
+    expect(buildNodeRequest(form, false)).toMatchObject({
+      host: "10.0.0.7",
+      apiPort: 18080,
+      apiSecret: "secret"
+    });
+    expect(buildNodeRequest(form, false)).not.toHaveProperty("name");
+  });
+
   it("submits edited host and API port while omitting an unchanged secret", () => {
     const form = createNodeFormState(existingNode);
     form.host = "10.0.0.9";
@@ -70,6 +87,12 @@ describe("ZLM node form state", () => {
     form.apiSecret = "do-not-retain";
     expect(clearNodeSecret(form).apiSecret).toBe("");
     expect(form.apiSecret).toBe("do-not-retain");
+  });
+
+  it("finishes loading and closes the modal before refreshing the node list", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    expect(source).toMatch(/finally \{[\s\S]*loading\.value = false;[\s\S]*if \(saved\) \{[\s\S]*close\(\);[\s\S]*emit\("saved"\)/);
+    expect(source).not.toMatch(/emit\("saved"\);\s*emit\("update:visible", false\)/);
   });
 
   it("keeps connection fields editable and uses clearable project controls", () => {
@@ -87,6 +110,12 @@ describe("ZLM node form state", () => {
     expect(source).not.toContain("arco-drawer-title");
   });
 
+  it("allows the API Secret to be revealed with the password eye button", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    expect(source).toContain(":invisible-button=\"true\"");
+    expect(source).not.toContain(":invisible-button=\"false\"");
+  });
+
   it("guides creation through required connection fields and a real ZLM preview", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
     expect(source).toContain("<a-steps");
@@ -95,5 +124,30 @@ describe("ZLM node form state", () => {
     expect(source).toContain("probeZLMNode");
     expect(source).toContain("连接并读取");
     expect(source).toContain("确认添加");
+    expect(source).toContain('<a-form-item v-if="editing" label="节点名"');
+    expect(source).toContain("editing ? '管理地址（API Host）' : 'IP 地址'");
+    expect(source).not.toContain('<a-descriptions-item label="节点名称">');
+  });
+
+  it("shows the detected ZLM connection details as a two-column confirmation", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    for (const label of [
+      "IP 地址",
+      "API 端口",
+      "API Secret",
+      "mediaServerId",
+      "HTTP PORT",
+      "HTTPS PORT",
+      "RTSP PORT",
+      "RTSPS PORT",
+      "RTMP PORT",
+      "RTMPS PORT",
+      "RTP Proxy PORT",
+      "ONVIF PORT",
+      "RTP 端口范围",
+      "协议状态"
+    ]) expect(source).toContain(`label="${label}"`);
+    expect(source).toContain("已填写（不回显）");
+    expect(source).toContain('class="probe-details" :column="2"');
   });
 });

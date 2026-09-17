@@ -45,18 +45,16 @@ describe("node impact actions", () => {
     })).toEqual(["活动流 4 路", "录制任务 1 个", "网络会话 6 个"]);
   });
 
-  it("wires both node pages through the shared danger dialog instead of native confirmation", () => {
+  it("wires node list actions through the shared danger dialog instead of native confirmation", () => {
     const list = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeList.vue"), "utf8");
     const detail = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeDetail.vue"), "utf8");
     const dialog = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ZLMNodeActionDialog.vue"), "utf8");
     expect(list).toContain("ZLMNodeActionDialog");
-    expect(detail).toContain("ZLMNodeActionDialog");
+    expect(detail).not.toContain("ZLMNodeActionDialog");
     expect(list).not.toContain("Modal.warning");
-    expect(detail).not.toContain("Modal.warning");
     expect(dialog).toContain("ZLMDangerActionDialog");
     expect(dialog).toContain("fingerprint");
     expect(list).toContain("gb28181:zlm:node:manage");
     expect(list).toContain("gb28181:zlm:node:kick");
-    expect(detail).toContain("gb28181:zlm:restart");
   });
 });

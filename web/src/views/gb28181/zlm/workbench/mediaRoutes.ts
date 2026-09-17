@@ -50,10 +50,10 @@ export const MEDIA_WORKSPACES: readonly MediaWorkspaceDefinition[] = [
   },
   {
     key: "scheduling",
-    title: "调度管理",
+    title: "调度日志",
     path: "/media/scheduling",
     sort: 50,
-    defaultView: "strategy",
-    allowedViews: ["strategy", "logs"]
+    defaultView: "logs",
+    allowedViews: ["logs"]
   }
 ];

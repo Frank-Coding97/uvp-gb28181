@@ -53,7 +53,8 @@ const DangerStub = defineComponent({
   props: {
     visible: Boolean,
     fingerprint: { type: String, default: "" },
-    impacts: { type: Array, default: () => [] }
+    impacts: { type: Array, default: () => [] },
+    requireConfirmPhrase: { type: Boolean, default: true }
   },
   emits: ["confirm", "update:visible", "stale"],
   setup(props, { emit }) {
@@ -135,5 +136,42 @@ describe("ZLMNodeActionDialog", () => {
     expect(wrapper.text()).toContain("未执行任何管理动作");
     expect(wrapper.find(".confirm-danger").exists()).toBe(false);
     expect(mocks.setMaintenance).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes after confirmation without requiring a phrase", async () => {
+    mocks.deleteNode
+      .mockResolvedValueOnce({
+        code: 0,
+        data: {
+          nodeId: 7,
+          action: "delete",
+          impact: { streams: 0, recordings: 0, sessions: 0, truncated: false },
+          fingerprint: "fp-delete",
+          observedAt: "2026-08-30T00:00:00Z"
+        }
+      })
+      .mockResolvedValueOnce({ code: 0, data: { ok: true } });
+
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(ZLMNodeActionDialog, {
+      props: { visible: true, node, action: "delete" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ZLMDangerActionDialog: DangerStub,
+          "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+          "a-spin": { template: "<span />" }
+        }
+      }
+    });
+
+    await flushPromises();
+    expect(wrapper.getComponent(DangerStub).props("requireConfirmPhrase")).toBe(false);
+    await wrapper.get(".confirm-danger").trigger("click");
+    await flushPromises();
+
+    expect(mocks.deleteNode).toHaveBeenNthCalledWith(2, 7, "fp-delete");
+    expect(wrapper.emitted("done")).toEqual([[{ action: "delete" }]]);
   });
 });

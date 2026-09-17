@@ -17,7 +17,7 @@ const allViewsByWorkspace: Readonly<Record<string, readonly string[]>> = {
   "/media/monitoring": ["streams", "sessions", "viewers"],
   "/media/ingress": ["pull", "push", "ffmpeg", "rtp"],
   "/media/nodes": ["list", "overview", "runtime", "config"],
-  "/media/scheduling": ["strategy", "logs"]
+  "/media/scheduling": ["logs"]
 };
 
 function resolveWorkspacePath(path: string): string | undefined {

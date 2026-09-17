@@ -3,6 +3,6 @@ import NodeDetailPanel from "./workbench/nodes/NodeDetail.vue";
 </script>
 
 <template>
-  <!-- Legacy route shell: NodeDetailPanel owns ZLMNodeActionDialog and keeps gb28181:zlm:restart permission gating. -->
+  <!-- Legacy route shell: reuse the canonical node service configuration page. -->
   <NodeDetailPanel :canonical="false" />
 </template>

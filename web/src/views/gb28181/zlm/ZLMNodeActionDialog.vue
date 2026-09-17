@@ -209,6 +209,7 @@ async function confirm(payload: { fingerprint: string }) {
     :fingerprint="fingerprint"
     :impacts="impacts"
     :confirm-phrase="copy.confirmPhrase"
+    :require-confirm-phrase="action !== 'delete'"
     :require-reason="false"
     :action-label="copy.actionLabel"
     :busy="executing"

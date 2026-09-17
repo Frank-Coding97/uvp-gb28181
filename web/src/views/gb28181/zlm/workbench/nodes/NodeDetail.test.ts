@@ -4,41 +4,29 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/nodes/NodeDetail.vue"), "utf8");
 
-describe("canonical node detail", () => {
-  it("supports overview/runtime/config without rewriting a missing initial view", () => {
-    for (const view of ["overview", "runtime", "config"]) expect(source).toContain(view);
-    expect(source).toContain("resolveNodeDetailView");
-    expect(source).not.toMatch(/watch\([^\n]*route\.query\.view[\s\S]{0,500}router\.replace/);
-  });
-
-  it("keeps node detail inside the shared content shell without duplicating the system sidebar", () => {
-    expect(source).toContain("MediaWorkspaceShell");
-    expect(source).toContain('@update:active-view="setView"');
-    expect(source).toContain('@update:scope="switchNode"');
-    expect(source).not.toContain("MediaWorkspaceTabs");
-    expect(source).toMatch(/@container\s+media-workspace-content\s*\(max-width:\s*720px\)/);
-  });
-
-  it("uses route id runtime and the shared config/recovery action components", () => {
-    expect(source).toContain("NodeRuntimePanel");
+describe("node service config route", () => {
+  it("renders service config as the only route function", () => {
+    expect(source).toContain('title="服务配置"');
     expect(source).toContain("NodeConfigView");
-    expect(source).toContain("ZLMNodeActionDialog");
-    expect(source).toContain("getZLMNode");
     expect(source).toContain("gb28181:zlm:config:update");
-    expect(source).toContain("activateZLMNode");
-    expect(source).toContain("testZLMNodeConnection");
-    expect(source).toContain("openAction('maintenance')");
-    expect(source).toContain("runtimeVisited");
-    expect(source).toContain("configVisited");
+    expect(source).not.toContain("NodeRuntimePanel");
+    expect(source).not.toContain("StatCard");
+    expect(source).not.toContain("getZLMNode");
+    expect(source).not.toContain("ZLMNodeActionDialog");
+    expect(source).not.toContain("NodeForm");
+  });
+
+  it("keeps service config inside the shared content shell", () => {
+    expect(source).toContain("MediaWorkspaceShell");
+    expect(source).toContain('@update:scope="switchNode"');
     expect(source).toContain("@dirty-change");
     expect(source).toContain("onBeforeRouteLeave");
     expect(source).toContain("onBeforeRouteUpdate");
-    expect(source).toContain("v-show=\"currentView === 'config'\"");
+    expect(source).toContain("返回节点管理");
   });
 
-  it("keeps unauthorized detail explicit instead of silently selecting another node", () => {
-    expect(source).toContain("没有节点详情权限");
-    expect(source).toContain("返回节点列表");
+  it("keeps invalid node ids explicit instead of silently selecting another node", () => {
+    expect(source).toContain("节点地址无效");
     expect(source).not.toContain("nodes[0]");
   });
 });

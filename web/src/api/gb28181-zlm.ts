@@ -42,7 +42,7 @@ export interface ZLMNode {
 }
 
 export interface CreateZLMNodeReq {
-    name: string;
+    name?: string;
     host: string;
     receiveHost?: string;
     playbackHost?: string;
@@ -94,13 +94,13 @@ export const getZLMNode = (id: number) =>
     http.request<BaseResult<ZLMNode>>("get", baseUrlApi(`gb28181/zlm/nodes/${id}`));
 
 export const createZLMNode = (body: CreateZLMNodeReq) =>
-    http.request<BaseResult<ZLMNode>>("post", baseUrlApi("gb28181/zlm/nodes"), { data: body });
+    http.request<BaseResult<ZLMNode>>("post", baseUrlApi("gb28181/zlm/nodes"), { data: body }, { showErrorMessage: false });
 
 export const probeZLMNode = (body: CreateZLMNodeReq) =>
-    http.request<BaseResult<ZLMNodeProbeResult>>("post", baseUrlApi("gb28181/zlm/nodes/probe"), { data: body });
+    http.request<BaseResult<ZLMNodeProbeResult>>("post", baseUrlApi("gb28181/zlm/nodes/probe"), { data: body }, { showErrorMessage: false });
 
 export const updateZLMNode = (id: number, body: UpdateZLMNodeReq) =>
-    http.request<BaseResult<ZLMNode>>("put", baseUrlApi(`gb28181/zlm/nodes/${id}`), { data: body });
+    http.request<BaseResult<ZLMNode>>("put", baseUrlApi(`gb28181/zlm/nodes/${id}`), { data: body }, { showErrorMessage: false });
 
 function impactConfirmationConfig(fingerprint?: string) {
     return fingerprint ? { headers: { "X-Impact-Fingerprint": fingerprint } } : undefined;

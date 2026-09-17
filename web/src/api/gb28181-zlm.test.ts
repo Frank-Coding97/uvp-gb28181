@@ -4,7 +4,7 @@ const request = vi.hoisted(() => vi.fn());
 vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
-import { getZLMNodeRestartStatus, listSchedulerLogs, probeZLMNode, restartZLMNode, updateZLMNode } from "./gb28181-zlm";
+import { createZLMNode, getZLMNodeRestartStatus, listSchedulerLogs, probeZLMNode, restartZLMNode, updateZLMNode } from "./gb28181-zlm";
 
 describe("ZLM node and scheduler API contract", () => {
   beforeEach(() => {
@@ -16,13 +16,29 @@ describe("ZLM node and scheduler API contract", () => {
     await updateZLMNode(7, { host: "10.0.0.7", apiPort: 8080 });
     expect(request).toHaveBeenCalledWith("put", "/api/gb28181/zlm/nodes/7", {
       data: { host: "10.0.0.7", apiPort: 8080 }
-    });
+    }, { showErrorMessage: false });
   });
 
   it("probes a candidate node without creating it", async () => {
     const candidate = { name: "edge-a", host: "10.0.0.8", apiPort: 18080, apiSecret: "secret" };
     await probeZLMNode(candidate);
-    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/zlm/nodes/probe", { data: candidate });
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/api/gb28181/zlm/nodes/probe",
+      { data: candidate },
+      { showErrorMessage: false }
+    );
+  });
+
+  it("lets the node form own create errors without a duplicate global message", async () => {
+    const candidate = { host: "10.0.0.8", apiPort: 18080, apiSecret: "secret" };
+    await createZLMNode(candidate);
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/api/gb28181/zlm/nodes",
+      { data: candidate },
+      { showErrorMessage: false }
+    );
   });
 
   it("starts and polls an accepted restart operation", async () => {

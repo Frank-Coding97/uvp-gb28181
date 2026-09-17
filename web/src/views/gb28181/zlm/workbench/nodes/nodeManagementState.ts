@@ -1,6 +1,5 @@
 import type { ZLMNode, ZLMNodeState } from "@/api/gb28181-zlm";
 
-export type NodeDetailView = "overview" | "runtime" | "config";
 export type NodeHealth = "healthy" | "warning" | "critical" | "unknown";
 
 export interface NodeListRecord {
@@ -18,14 +17,6 @@ export interface NodeListFilter {
   keyword?: string;
   state?: ZLMNodeState;
   health?: NodeHealth;
-}
-
-const NODE_DETAIL_VIEWS: readonly NodeDetailView[] = ["overview", "runtime", "config"];
-
-export function resolveNodeDetailView(value: unknown): NodeDetailView {
-  return typeof value === "string" && NODE_DETAIL_VIEWS.includes(value as NodeDetailView)
-    ? value as NodeDetailView
-    : "overview";
 }
 
 export function nodeHealth(node: Pick<ZLMNode, "state"> & Partial<Pick<ZLMNode, "recoveryRequired" | "nearCapacity" | "autoOnDemandReady">>): NodeHealth {
@@ -50,8 +41,4 @@ export function filterNodeRecords<T extends NodeListRecord>(nodes: readonly T[],
     if (filter.state && node.state !== filter.state) return false;
     return !filter.health || nodeHealth(node) === filter.health;
   });
-}
-
-export function isNodeDetailView(value: unknown): value is NodeDetailView {
-  return NODE_DETAIL_VIEWS.includes(value as NodeDetailView);
 }

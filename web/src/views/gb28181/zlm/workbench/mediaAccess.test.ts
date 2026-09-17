@@ -38,6 +38,12 @@ describe("media workbench access contract", () => {
     expect(resolveFirstMediaWorkspace([])).toBeNull();
   });
 
+  it("grants only the log view from the scheduling menu", () => {
+    const access = resolveMediaWorkspaceAccess(["/media/scheduling"]);
+
+    expect(access.viewsByWorkspace["/media/scheduling"]).toEqual(["logs"]);
+  });
+
   it("resolves the hidden node detail route to its parent workspace and ignores unrelated paths", () => {
     const access = resolveMediaWorkspaceAccess(["/media/nodes/:id", "/gb28181/device-mgmt/devices"]);
 

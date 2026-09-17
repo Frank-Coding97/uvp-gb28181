@@ -31,6 +31,17 @@ describe("NodeListPanel", () => {
     expect(source).toContain("fingerprint");
   });
 
+  it("shows a ten-second countdown and refreshes the node list in a loop", () => {
+    expect(source).toContain("const AUTO_REFRESH_SECONDS = 10");
+    expect(source).toContain("const refreshCountdown = ref(AUTO_REFRESH_SECONDS)");
+    expect(source).toContain("refreshTimer = setInterval(tickRefreshCountdown, 1_000)");
+    expect(source).toContain("function handleManualRefresh()")
+    expect(source).toContain("scheduleRefresh();")
+    expect(source).toContain("const refreshButtonLabel = computed")
+    expect(source).toContain("刷新（${refreshCountdown.value}s）")
+    expect(source).toContain("{{ refreshButtonLabel }}")
+  });
+
   it("does not repeat cluster summary cards above the node table", () => {
     expect(source).not.toContain("StatCard");
     expect(source).not.toContain('class="kpi-row"');
@@ -47,14 +58,25 @@ describe("NodeListPanel", () => {
     expect(source).not.toContain(".search, .filter-select { width: 100%; }");
     expect(source).toContain("background: var(--uvp-search-control-bg) !important");
     expect(source).toContain("border: 1px solid var(--uvp-search-secondary-btn-border) !important");
+    expect(source).not.toContain('class="filter-meta"');
   });
 
   it("uses the system table action language without the redundant scope hint", () => {
     expect(source).not.toContain("当前范围：");
     expect(source).not.toContain('class="scope-hint"');
-    expect(source).toContain('class="uvp-table-actions"');
-    expect(source).toContain('class="uvp-table-action uvp-table-action--detail"');
+    expect(source).toContain('class="uvp-table-actions node-row-actions"');
+    expect(source).toContain('title="操作" :width="340"');
+    expect(source).toContain("openServiceConfig(record)");
+    expect(source).toContain("服务配置");
     expect(source).toContain('class="uvp-table-action uvp-table-action--edit"');
+    expect(source).toContain("openAction(record, 'kick')");
+    expect(source).toContain("openAction(record, 'restart')");
+    expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
+    expect(source).toContain("openAction(record, 'delete')");
+    expect(source).not.toContain("gotoDetail");
+    expect(source).not.toContain("MoreHorizontal");
+    expect(source).not.toContain("<a-dropdown");
+    expect(source).not.toContain(">详情</a-link>");
     expect(source).not.toContain('class="cell-ops"');
   });
 });

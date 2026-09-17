@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   fingerprint?: string;
   impacts?: string[];
   confirmPhrase: string;
+  requireConfirmPhrase?: boolean;
   requireReason?: boolean;
   actionLabel?: string;
   busy?: boolean;
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   fingerprint: "",
   impacts: () => [],
+  requireConfirmPhrase: true,
   requireReason: true,
   actionLabel: "确认执行",
   busy: false,
@@ -92,7 +94,7 @@ watch(
 const canConfirm = computed(() => {
   const opening = snapshot.value;
   if (!opening || props.busy || !isCurrent()) return false;
-  if (typedPhrase.value !== opening.confirmPhrase) return false;
+  if (props.requireConfirmPhrase && typedPhrase.value !== opening.confirmPhrase) return false;
   return !opening.requireReason || reason.value.trim().length > 0;
 });
 
@@ -156,7 +158,7 @@ function confirm() {
         <a-textarea v-model="reason" :max-length="256" show-word-limit placeholder="请输入可审计的操作理由" :disabled="busy" />
       </label>
 
-      <label class="zlm-danger-dialog__field">
+      <label v-if="requireConfirmPhrase" class="zlm-danger-dialog__field">
         <span>请输入确认短语：<strong>{{ snapshot.confirmPhrase }}</strong></span>
         <a-input v-model="typedPhrase" autocomplete="off" placeholder="输入上方完整短语" :disabled="busy" />
       </label>
