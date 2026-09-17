@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from "vite";
+import fs from "node:fs";
 import path from "path";
 import { resolve } from "path";
 import { include } from "./build/optimize";
@@ -14,6 +15,18 @@ export default defineConfig(({ mode }) => {
     // 获取跟路径对应的文件
     const env: any = loadEnv(mode, root);
     const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
+
+    // 开发环境 HTTPS：certs/ 下存在 mkcert 证书则自动启用，无证书回落 HTTP。
+    // 仅供需要安全上下文的功能（平板 getUserMedia 摄像头等）使用。
+    // ⚠️ 启用后手机模拟器（Ktor CIO 无 TLS 豁免）扫码接入会握手失败，按需取舍。
+    const certDir = path.resolve(__dirname, "certs");
+    const certKeyPath = path.join(certDir, "dev-key.pem");
+    const certCrtPath = path.join(certDir, "dev.pem");
+    const devHttps =
+        fs.existsSync(certKeyPath) && fs.existsSync(certCrtPath)
+            ? { key: fs.readFileSync(certKeyPath), cert: fs.readFileSync(certCrtPath) }
+            : undefined;
+
     return {
         // 生产环境服务的公共基础路径-用于生出环境的代理的路径
         base: "/",
@@ -21,6 +34,7 @@ export default defineConfig(({ mode }) => {
             host: "0.0.0.0",
             open: false,
             port: 5177,
+            https: devHttps,
             // 为开发服务器配置自定义代理规则-用于开发时的代理
             proxy: {
                 "/api": {
