@@ -200,19 +200,48 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		localPort = result.LocalPort
 	}
 	if session.State == models.TalkSessionPublishing {
+		// ⛔ 这里的 session.State 是本轮开头 FindPendingBroadcast 的**旧快照**，中间隔着
+		// ParseBroadcastOffer / ClaimBroadcastDialog / GetMediaInfo / StartSendRtpPassive
+		// 两次 ZLM HTTP 调用（实测 100ms+）。而 onBroadcastPublished（on_stream_changed
+		// 触发）同样会做 publishing→inviting —— CAS 的 from 用旧值必然落空。
+		// 落空**不等于失败**：状态已经前进到 inviting 正是我们要的结果，继续应答即可。
 		changed, transitionErr := s.repo.Transition(ctx, session.SessionID, models.TalkSessionPublishing, models.TalkSessionInviting, TransitionPatch{})
-		if transitionErr != nil || !changed {
+		if transitionErr != nil {
 			_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 			return PreparedBroadcastInvite{}, transitionErr
+		}
+		if !changed {
+			latest, findErr := s.repo.FindBySession(ctx, session.SessionID)
+			if findErr != nil {
+				_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
+				return PreparedBroadcastInvite{}, findErr
+			}
+			if latest == nil {
+				_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
+				return PreparedBroadcastInvite{}, ErrTalkSessionNotFound
+			}
+			if latest.State.IsTerminal() || latest.State == models.TalkSessionStopping {
+				_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
+				return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 480, Reason: "Broadcast 会话已结束"}
+			}
+			session = latest
 		}
 	}
 	phase := models.TalkSignalPhaseWaitingAck
 	transport := strings.ToLower(media.Transport)
 	senderMode := string(media.SenderMode)
 	changed, err := s.repo.UpdateBroadcastFacts(ctx, session.SessionID, BroadcastFactsPatch{SignalPhase: &phase, RemoteMediaIP: &media.RemoteIP, RemotePort: &media.RemotePort, Transport: &transport, SenderMode: &senderMode, LocalPort: &localPort})
-	if err != nil || !changed {
+	if err != nil {
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, err
+	}
+	if !changed {
+		// 媒体事实没落库 = 会话已离开可协商状态（被清理 / 租约回收）。
+		// ⛔ 绝不能 `return PreparedBroadcastInvite{}, err`（此时 err 为 nil）：那会让 SIP 层
+		// 回一个**没有 SDP 正文的 200 OK**，设备解析不出平台收流地址，只能 ACK 后立刻 BYE
+		// （模拟器日志："语音广播编码不可接受(payloadTypes=null) → BYE"）。明确失败更好。
+		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
+		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 480, Reason: "Broadcast 会话状态已变化"}
 	}
 	answer, err := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: mediaNode.Host, LocalPort: localPort, SSRC: session.SSRC, SenderMode: media.SenderMode})
 	if err != nil {

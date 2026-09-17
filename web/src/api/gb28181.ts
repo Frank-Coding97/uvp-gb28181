@@ -918,19 +918,21 @@ export const getPtzPreciseStatus = (channelId: number, refresh = false) =>
     { params: refresh ? { refresh: true } : undefined }
   );
 
+/** 上行入口描述。地址由平台按请求实际到达的 host 拼装,不含媒体节点信息。 */
+export interface TalkUplinkDescriptor {
+  protocol: string;
+  url: string;
+  contentType: string;
+  /** 跨网段所需的 STUN/TURN。为空表示节点未开 RTC,此时仅同网段可用。 */
+  iceServers?: { urls: string[] }[];
+}
+
 export interface TalkCreateResult {
   sessionId: string;
   mode: "broadcast" | "talk";
   state: string;
-  phase?: string;
-  nodeId: number;
-  nodeName: string;
-  sourceStream: string;
-  recvStream: string;
-  ssrc: string;
-  publishUrl: string;
-  publishToken: string;
   expiresAt: string;
+  uplink: TalkUplinkDescriptor;
 }
 
 export interface TalkSessionView {

@@ -67,4 +67,25 @@ describe("PlayConsole 视频探针", () => {
 
         wrapper.unmount();
     });
+
+    it("对讲说话中显示采集波形，停止后收起", async () => {
+        const wrapper = mount(PlayConsole, {
+            props: { visible: true, channel },
+        });
+        await flushPromises();
+
+        expect(wrapper.find("[data-testid='talk-wave']").exists()).toBe(false);
+        await wrapper.get(".talk-button").trigger("click");
+        await flushPromises();
+
+        const wave = wrapper.get("[data-testid='talk-wave']");
+        expect(wave.findAll("i")).toHaveLength(4);
+        // ⛔ mock 页没有真实采集，电平必须保持默认 —— 不许为了「看起来更活」编一个假电平。
+        expect(wave.attributes("style")).toBeUndefined();
+
+        await wrapper.get(".talk-button").trigger("click");
+        await flushPromises();
+        expect(wrapper.find("[data-testid='talk-wave']").exists()).toBe(false);
+        wrapper.unmount();
+    });
 });

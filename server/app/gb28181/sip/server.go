@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/emiago/sipgo"
 	siplib "github.com/emiago/sipgo/sip"
@@ -53,6 +55,14 @@ type Server struct {
 	broadcastDialogs   *sipgo.DialogServerCache
 	broadcastProcessor handler.BroadcastInviteProcessor
 	broadcastSessions  sync.Map
+	// deviceLinkSink 接收「可靠传输通道断开」通知。见 DeviceLinkSink 的注释:
+	// 为什么这件事必须由设备域而不是 sip 层来完成。
+	deviceLinkSink DeviceLinkSink
+	// linkLossMuted 在关停开始时置位,用于**停止**把断开上抛成设备离线。
+	// 平台自己 Close 时每条 TCP 都会被关掉,若照常判定,一次重启会写出成百上千条
+	// 「链路断开」事件,还可能撞上已经先关掉的数据库。设备在这段时间确实失联,
+	// 但那是重启的既定后果,由重启后的注册/心跳重新收敛,不必在这里留痕。
+	linkLossMuted atomic.Bool
 }
 
 // requestBusinessGate tracks the synchronous middleware and business handler
@@ -241,6 +251,7 @@ type serverOptions struct {
 	traceFactory      TraceFactory
 	securityAdmission *gbsecurity.Admission
 	registerSecurity  handler.RegisterSecurity
+	deviceLinkSink    DeviceLinkSink
 }
 
 func WithTraceFactory(factory TraceFactory) ServerOption {
@@ -343,6 +354,25 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 			}
 		}
 	}
+
+	// GB/T 28181-2022 §9.1.1 f):「若 TCP 通道断开,则认为 SIP 代理异常掉线」。
+	// 包在链路最外层(最后执行) —— trace 与 security 是「记录 / 风控」,它们先跑完;
+	// 离线判定会改设备状态,放最后保证前两者无论设备域是否装配都照常收到回调。
+	//
+	// ⛔ 这里用 serverRef 而不是直接捕获 s:closeObserver 在 NewServer 里构造时
+	// Server 实例还没 new 出来(它在下面才创建)。也别改成"在闭包里查全局单例"。
+	var serverRef *Server
+	if opts.deviceLinkSink != nil {
+		previousClose := closeObserver
+		closeObserver = func(info siplib.TransportReadProps) {
+			if previousClose != nil {
+				previousClose(info)
+			}
+			if serverRef != nil {
+				serverRef.notifyLinkLoss(info)
+			}
+		}
+	}
 	{
 		transportOptions := []siplib.TransportLayerOption{siplib.WithTransportLayerLogger(logger)}
 		if readFilter != nil {
@@ -382,7 +412,11 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		businessWork:   businessWork,
 		deviceInfoWork: &asyncgroup.Group{},
 		listenerWork:   &asyncgroup.Group{},
+		deviceLinkSink: opts.deviceLinkSink,
 	}
+	// 让上面那个连接断开观察者拿到 Server —— 它是在 NewServer 前段构造的闭包,
+	// 那时还没有 Server 实例可取。
+	serverRef = s
 	s.registerHandlers()
 	return s, nil
 }
@@ -411,11 +445,8 @@ func (s *Server) registerHandlers() {
 		regHandler.SetCatalogTrigger(catalogTrigger)
 		msgHandler.SetCatalogTrigger(catalogTrigger)
 		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u, s.deviceInfoWork))
-		contactHost := strings.TrimSpace(s.cfg.SIP.AdvertiseIP)
-		if contactHost == "" {
-			contactHost = strings.TrimSpace(s.cfg.SIP.ListenIP)
-		}
-		if contactHost != "" && contactHost != "0.0.0.0" && contactHost != "::" {
+		contactHost := resolveBroadcastContactHost(s.cfg.SIP.AdvertiseIP, s.cfg.SIP.ListenIP)
+		if contactHost != "" {
 			if client, clientErr := sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger)); clientErr == nil {
 				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
 			} else {
@@ -426,6 +457,12 @@ func (s *Server) registerHandlers() {
 					"GB28181 Broadcast UAS client 初始化失败",
 					zap.String("event", "gb28181.sip.broadcast_client_init_failed"), logging.Error(clientErr))
 			}
+		} else {
+			app.Log(context.Background()).Named("gb28181.sip").Warn(
+				"GB28181 Broadcast UAS 缺少可用 Contact 地址,语音广播将不可用(设备 INVITE 会被回 503)",
+				zap.String("event", "gb28181.sip.broadcast_contact_host_unavailable"),
+				zap.String("advertise_ip", strings.TrimSpace(s.cfg.SIP.AdvertiseIP)),
+				zap.String("listen_ip", strings.TrimSpace(s.cfg.SIP.ListenIP)))
 		}
 	}
 
@@ -480,6 +517,19 @@ func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTran
 			status = statusProvider.SIPStatus()
 		}
 		_ = dialog.Respond(status, prepareErr.Error(), nil)
+		_ = dialog.Close()
+		return
+	}
+	// 设备（UAC）收到 2xx 必须回 ACK，然后才能用 BYE 取消 —— 而 BYE 的理由通常是
+	// "应答里没有可用的媒体描述"。所以**没有 SDP 的 200 OK 是协议级错误**：
+	// 设备拿不到平台收流地址，只能立刻 ACK+BYE，表现为广播"偶发建立失败"。
+	// 这里兜住上游任何"空 answer + nil error"的走漏，让它变成一次明确失败的 INVITE。
+	if strings.TrimSpace(prepared.AnswerSDP) == "" || strings.TrimSpace(prepared.SessionID) == "" {
+		app.Log(context.Background()).Named("gb28181.sip").Warn(
+			"Broadcast INVITE 应答缺少 SDP，拒绝以 200 OK 应答",
+			zap.String("event", "gb28181.sip.broadcast_answer_missing"),
+			zap.String("call_id", callID), zap.String("session_id", prepared.SessionID))
+		_ = dialog.Respond(siplib.StatusInternalServerError, "Broadcast Answer Unavailable", nil)
 		_ = dialog.Close()
 		return
 	}
@@ -631,6 +681,83 @@ func (s *Server) SetBroadcastInviteProcessor(processor handler.BroadcastInvitePr
 	s.broadcastProcessor = processor
 }
 
+// resolveBroadcastContactHost 决定 Broadcast UAS(等设备主动 INVITE)写进 Contact 头的本机地址。
+//
+// ⛔ 通配监听时**不能**把 ListenIP 直接当 Contact Host:`0.0.0.0` / `::` 写进 Contact 是无意义
+// 地址,原先的做法是"整块跳过创建"——而跳过是**静默**的,于是设备发来的 Broadcast INVITE 会被
+// `handleBroadcastInvite` 一律回 503 "Broadcast Service Unavailable",现象是前端一直停在
+// 「正在建立广播」,而 SIP 报文里能看到设备 INVITE 明明白白到达。
+//
+// LAN + 通配监听本身是**允许**的部署(`setup.allowDynamicAdvertise`):此时内核路由与实时网卡
+// 扫描才是权威,持久化的 advertise_ip 可能是过期值(同 `setup.ActiveSIPAddresses` 的口径)。
+// 所以 advertise_ip 为空时退回实时枚举本机非回环 IPv4 —— 只在"本来必然失败"的路径上兜底,
+// 静态配置的既有行为不变。
+func resolveBroadcastContactHost(advertiseIP, listenIP string) string {
+	if host := concreteSIPHost(advertiseIP); host != "" {
+		return host
+	}
+	if host := concreteSIPHost(listenIP); host != "" {
+		return host
+	}
+	return firstLocalIPv4()
+}
+
+func concreteSIPHost(raw string) string {
+	host := strings.TrimSpace(raw)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return ""
+	}
+	return host
+}
+
+func firstLocalIPv4() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if isVirtualInterfaceName(iface.Name) {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	return ""
+}
+
+// isVirtualInterfaceName 与 `setup.isVirtualInterface`(setup/network.go) **同口径**:
+// VPN / 容器 / 虚拟机网卡上的地址设备路由不到,不能被选成 Contact Host。
+// 两处规则要一起改,别只改一边。
+func isVirtualInterfaceName(name string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{
+		"br-", "bridge", "cali", "cni", "docker", "flannel", "kube",
+		"podman", "tap", "tailscale", "tun", "utun", "vboxnet", "veth",
+		"virbr", "vmnet", "wg",
+	} {
+		if strings.HasPrefix(lowered, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) ByeBroadcast(ctx context.Context, callID string) error {
 	value, ok := s.broadcastSessions.Load(strings.TrimSpace(callID))
 	if !ok {
@@ -729,6 +856,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return s.shutdown.run(ctx, func(ctx context.Context) error {
+		// 先静音链路断开判定:下面 srv.CloseContext 会把所有 TCP 一起关掉,
+		// 那是平台自己断的,不是设备掉线(见 linkLossMuted 的注释)。
+		s.linkLossMuted.Store(true)
 		var err error
 		err = errors.Join(err, s.QuiesceRequests(ctx))
 		if s.cancel != nil {

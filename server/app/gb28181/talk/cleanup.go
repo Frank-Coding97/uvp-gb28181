@@ -11,7 +11,31 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
-const defaultCleanupTimeout = 15 * time.Second
+const (
+	defaultCleanupTimeout = 15 * time.Second
+
+	// sipTeardownTimeout 是拆 SIP 对话(BYE)的独立预算。
+	//
+	// 必须单独给:**交叉 BYE**(双方在毫秒内各发一个 BYE)时对端不会回 200,
+	// 我方拆除事务只能按 T1 退避一路重传(实测 52.892 / 53.893 / 55.894 /
+	// 59.895 / 03.896 五次)。这一条就能把整个清理预算吃光。SIP 事务是清理链路里
+	// 唯一由对端决定快慢的步骤,不能让它独占预算。
+	sipTeardownTimeout = 3 * time.Second
+
+	// mediaReleaseTimeout 是每个 ZLM 释放步骤的独立预算。
+	mediaReleaseTimeout = 5 * time.Second
+)
+
+// stepBudget 给单个清理步骤开一份独立预算。
+//
+// 两个要点缺一不可:
+//   - context.WithoutCancel:摘掉父 ctx 的取消信号。父 ctx 到期不该让**后续**
+//     步骤全部短路,否则会留下没释放的媒体资源(实测 stopSendRtp / close source
+//     就是这样被跳过的:Hook 侧看是"流已断",ZLM 侧其实还挂着发送会话)。
+//   - 各自的短超时:任何一步都不允许吃掉整个清理预算。
+func stepBudget(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), d)
+}
 
 type cleanupCall struct {
 	done chan struct{}
@@ -81,17 +105,26 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 			} else {
 				session = reloaded
 				if session.State != models.TalkSessionStopping {
-					record("cleanup state conflict", fmt.Errorf("state=%s", session.State))
+					// CAS 落空说明**另一路并发推进了状态**，典型是设备 ACK 把 inviting 推到
+					// active（实测 ACK 与 BYE 相隔 0.36ms）。这是良性竞争而非故障：用最新状态
+					// 再抢一次即可。原来直接记 conflict，会把假错误写进会话 error 列，看着像故障。
+					retried, retryErr := s.repo.Transition(ctx, sessionID, session.State, models.TalkSessionStopping, TransitionPatch{})
+					record("mark stopping", retryErr)
+					if retryErr == nil && !retried {
+						record("cleanup state conflict", fmt.Errorf("state=%s", session.State))
+					}
 				}
 			}
 		}
 	}
 	if session.CallID != "" && s.activation != nil {
+		sipCtx, cancelSIP := stepBudget(ctx, sipTeardownTimeout)
 		if session.Mode == models.TalkSessionModeBroadcast && s.activation.deps.BroadcastDialogs != nil {
-			record("Broadcast BYE", s.activation.deps.BroadcastDialogs.ByeBroadcast(ctx, session.CallID))
+			record("Broadcast BYE", s.activation.deps.BroadcastDialogs.ByeBroadcast(sipCtx, session.CallID))
 		} else if session.Mode == models.TalkSessionModeTalk && s.activation.deps.Inviter != nil {
-			record("TALK BYE", s.activation.deps.Inviter.ByeTalk(ctx, session.CallID))
+			record("TALK BYE", s.activation.deps.Inviter.ByeTalk(sipCtx, session.CallID))
 		}
+		cancelSIP()
 	}
 	var client TalkMediaClient
 	if s.activation == nil || s.activation.deps.ClientFor == nil || s.nodes == nil {
@@ -105,10 +138,14 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 		}
 	}
 	if client != nil && session.SourceStream != "" && session.SSRC != "" {
-		record("stopSendRtp", client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC))
+		stopCtx, cancelStop := stepBudget(ctx, mediaReleaseTimeout)
+		record("stopSendRtp", client.StopSendRtp(stopCtx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC))
+		cancelStop()
 	}
 	if client != nil && session.SourceStream != "" {
-		record("close source", client.CloseTalkSource(ctx, defaultTalkVHost, session.App, session.SourceStream))
+		closeCtx, cancelClose := stepBudget(ctx, mediaReleaseTimeout)
+		record("close source", client.CloseTalkSource(closeCtx, defaultTalkVHost, session.App, session.SourceStream))
+		cancelClose()
 	}
 	message := strings.TrimSpace(reason)
 	if firstErr != nil {

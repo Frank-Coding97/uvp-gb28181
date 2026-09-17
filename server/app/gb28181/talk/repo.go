@@ -285,6 +285,26 @@ func (r *GormRepo) ConsumeTokenForPublish(ctx context.Context, sessionID, publis
 	return err == nil && session != nil && session.PublishID == publishID, err
 }
 
+// ReissuePublishToken 覆盖式轮换一次性发布令牌,并清空上一次的消费痕迹。
+//
+// 平台代持模式下令牌不下发浏览器:由 PrepareUplink 在转发前签发,使本次转发
+// 能通过 ZLM on_publish 回调(AuthorizePublish)的校验。
+// 只在预留态生效 —— 进入 publishing 之后再换令牌无法通过 AuthorizePublish 的
+// 「非 reserved 即拒绝」分支,与其签出一把用不了的令牌,不如让调用方看到冲突。
+func (r *GormRepo) ReissuePublishToken(ctx context.Context, sessionID, publishToken string, now time.Time) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(publishToken) == "" {
+		return false, ErrEmptyPublishToken
+	}
+	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+		Where("session_id = ? AND state = ? AND expires_at > ?", sessionID, models.TalkSessionReserved, now).
+		Updates(map[string]any{
+			"publish_token_hash": hashPublishToken(publishToken),
+			"token_consumed_at":  nil,
+			"publish_id":         "",
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
 func (r *GormRepo) ListNonterminal(ctx context.Context) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
 	err := r.db.WithContext(ctx).

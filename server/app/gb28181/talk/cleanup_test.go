@@ -53,6 +53,39 @@ func TestCleanupContinuesAfterEachStepFailureAndReleasesLease(t *testing.T) {
 	require.Contains(t, stored.Error, "bye failed")
 }
 
+// 交叉 BYE —— 双方在毫秒内各发一个 BYE，对端不会回 200，我方拆除事务只能按
+// T1 退避重传到超时。实测 2026-09-17 21:28 那次，这一步把整个 15s 清理预算吃光：
+//   - stopSendRtp / close source 一条都没跑 → ZLM 侧发送会话残留；
+//   - DELETE 收到超时错误 → 用户点「停止对讲」看到 504。
+//
+// 本用例锁住「单步超时不得饿死后续步骤」。
+func TestCleanupSIPTerminationTimeoutDoesNotStarveMediaRelease(t *testing.T) {
+	media := &fakeActivationMedia{}
+	inviter := &fakeTalkInviter{byeBlocks: true}
+	service, repo, _ := newActivationService(t, media, inviter)
+	session := activateSessionForCleanup(t, repo, "cleanup-bye-hang", 79, "call-bye-hang", time.Now().Add(time.Minute))
+
+	started := time.Now()
+	err := service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "user stopped")
+	elapsed := time.Since(started)
+
+	require.ErrorContains(t, err, "TALK BYE")
+	// 关键：BYE 卡住之后，媒体释放步骤必须仍然跑在**活的** ctx 上。
+	// 只要它们落在父 ctx 到期之后才执行，真实 ZLM 客户端会立刻返回 ctx.Err()，
+	// 等于没释放 —— 实测里 stopSendRtp / close source 就是这么丢的。
+	require.Equal(t, 1, media.stops, "stopSendRtp 仍须执行")
+	require.NoError(t, media.stopCtxErr, "stopSendRtp 必须拿到未过期的 ctx")
+	require.Equal(t, 1, media.closes, "close source 仍须执行")
+	require.NoError(t, media.closeCtxErr, "close source 必须拿到未过期的 ctx")
+	require.GreaterOrEqual(t, elapsed, sipTeardownTimeout, "BYE 必须真的用满自己那份预算")
+	require.Less(t, elapsed, defaultCleanupTimeout, "BYE 卡住不得吃掉整个清理预算")
+	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionEnded, stored.State)
+	require.Nil(t, stored.LeaseKey)
+	require.Contains(t, stored.Error, "TALK BYE")
+}
+
 func TestCleanupIsSingleFlightAndIdempotent(t *testing.T) {
 	media := &fakeActivationMedia{}
 	inviter := &fakeTalkInviter{}

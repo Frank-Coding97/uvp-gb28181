@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -25,6 +26,10 @@ type fakeTalkSessionService struct {
 	request     talk.CreateRequest
 	createErr   error
 	session     *gbmodels.GbTalkSession
+
+	uplinkCalls int
+	uplink      *talk.UplinkTarget
+	uplinkErr   error
 }
 
 func (f *fakeTalkSessionService) Create(_ context.Context, request talk.CreateRequest) (*talk.CreateResult, error) {
@@ -33,7 +38,21 @@ func (f *fakeTalkSessionService) Create(_ context.Context, request talk.CreateRe
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
-	return &talk.CreateResult{SessionID: "talk-session", Mode: request.Mode, State: "reserved"}, nil
+	return &talk.CreateResult{
+		SessionID: "talk-session", Mode: request.Mode, State: "reserved",
+		Uplink: talk.UplinkDescriptor{
+			Protocol: "whip", Path: "/talk-sessions/talk-session/uplink",
+			ContentType: "application/sdp", ICEServers: []talk.ICEServer{{URLs: []string{"stun:media.example.test:3478"}}},
+		},
+	}, nil
+}
+
+func (f *fakeTalkSessionService) PrepareUplink(context.Context, string) (*talk.UplinkTarget, error) {
+	f.uplinkCalls++
+	if f.uplinkErr != nil {
+		return nil, f.uplinkErr
+	}
+	return f.uplink, nil
 }
 
 func (f *fakeTalkSessionService) Get(context.Context, string) (*gbmodels.GbTalkSession, error) {
@@ -70,6 +89,7 @@ func newTalkControllerRouter(t *testing.T, service gbcontrollers.TalkSessionServ
 	router.POST("/channel/:id/talk-sessions", controller.Create)
 	router.GET("/channel/:id/talk-sessions/:sessionId", controller.Get)
 	router.DELETE("/channel/:id/talk-sessions/:sessionId", controller.Delete)
+	router.POST("/talk-sessions/:sessionId/uplink", controller.Uplink)
 	return router, db, channelOwn.ID, channelHidden.ID
 }
 
@@ -172,4 +192,115 @@ func TestTalkControllerReturns503WhenUnconfigured(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/channel/1/talk-sessions", nil))
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+}
+
+func TestTalkControllerCreateReturnsPlatformUplinkEntry(t *testing.T) {
+	service := &fakeTalkSessionService{}
+	router, _, ownID, _ := newTalkControllerRouter(t, service)
+	path := "/channel/" + strconv.FormatUint(uint64(ownID), 10) + "/talk-sessions"
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"mode":"talk"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	data, ok := unmarshal(t, recorder)["data"].(map[string]any)
+	require.True(t, ok)
+	uplink, ok := data["uplink"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "whip", uplink["protocol"])
+	require.Equal(t, "application/sdp", uplink["contentType"])
+	// 上行入口指向平台自己:host 取自请求、路径取自注册模式串,
+	// 与网关 / 端口无关 —— 平台不得硬编码对外端口。
+	require.Equal(t, "http://example.com/talk-sessions/talk-session/uplink", uplink["url"])
+
+	// 信令契约里不得出现实现细节。ICE 服务器是例外:媒体面是浏览器直连媒体节点,
+	// 这个地址必须给出去,否则跨网段根本不可用。
+	body := recorder.Body.String()
+	for _, leak := range []string{"18443", "token", "sourceStream", "recvStream", "ssrc", "nodeId", "nodeName"} {
+		require.NotContains(t, body, leak)
+	}
+	require.Contains(t, body, "stun:media.example.test:3478")
+}
+
+func TestTalkControllerUplinkProxiesOfferAndHidesUpstreamLocation(t *testing.T) {
+	var gotOffer, gotContentType string
+	// 用 TLS 服务端:自签证书正好验证转发客户端确实跳过了证书校验,
+	// 浏览器不再需要为媒体的自签证书做任何例外。
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		raw, _ := io.ReadAll(r.Body)
+		gotOffer = string(raw)
+		w.Header().Set("Content-Type", "application/sdp")
+		w.Header().Set("Location", "https://10.0.0.9:18443/index/api/whip/resource-1")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("v=0\r\nanswer"))
+	}))
+	defer upstream.Close()
+
+	service := &fakeTalkSessionService{uplink: &talk.UplinkTarget{
+		URL: upstream.URL + "/index/api/whip?app=talk&stream=s&token=secret", ContentType: "application/sdp",
+	}}
+	router, _, _, _ := newTalkControllerRouter(t, service)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/talk-sessions/talk-session/uplink", strings.NewReader("v=0\r\noffer"))
+	request.Header.Set("Content-Type", "application/sdp")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Equal(t, "v=0\r\noffer", gotOffer)
+	require.Equal(t, "application/sdp", gotContentType)
+	require.Equal(t, "v=0\r\nanswer", recorder.Body.String())
+	// 上游的媒体节点地址不得回到浏览器。
+	require.Equal(t, "http://example.com/talk-sessions/talk-session", recorder.Header().Get("Location"))
+	require.NotContains(t, recorder.Body.String(), "10.0.0.9")
+}
+
+// 对外地址必须跟着挂载位置走:挂在 /api/gb28181/device-mgmt 下,拼出来的地址
+// 就带上这段前缀 —— 而不是在任何地方硬编码出来的。
+func TestTalkControllerUplinkLocationFollowsMountedPrefix(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "https://10.0.0.9:18443/index/api/whip/resource-9")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer upstream.Close()
+
+	service := &fakeTalkSessionService{uplink: &talk.UplinkTarget{URL: upstream.URL, ContentType: "application/sdp"}}
+	controller := gbcontrollers.NewTalkController(service)
+	controller.SetDB(func() *gorm.DB { return newScopedDeviceDB(t) })
+	app.Response = response.NewResponseHandler()
+	engine := gin.New()
+	engine.Use(gin.Recovery(), withClaims(100))
+	engine.Group("/api/gb28181/device-mgmt").POST(gbcontrollers.TalkUplinkRoute, controller.Uplink)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/talk-sessions/s-1/uplink", strings.NewReader("v=0"))
+	request.Header.Set("Content-Type", "application/sdp")
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Equal(t, "http://example.com/api/gb28181/device-mgmt/talk-sessions/s-1", recorder.Header().Get("Location"))
+}
+
+func TestTalkControllerUplinkMapsPreparationFailures(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"会话不存在", talk.ErrTalkSessionNotFound, http.StatusNotFound},
+		{"会话已过期", talk.ErrTalkSessionExpired, http.StatusGone},
+		{"已开始发布", talk.ErrUplinkNotReserved, http.StatusConflict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeTalkSessionService{uplinkErr: tc.err}
+			router, _, _, _ := newTalkControllerRouter(t, service)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/talk-sessions/talk-session/uplink", strings.NewReader("v=0"))
+			request.Header.Set("Content-Type", "application/sdp")
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, tc.want, recorder.Code)
+		})
+	}
 }

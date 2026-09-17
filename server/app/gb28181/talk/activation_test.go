@@ -25,6 +25,11 @@ type fakeActivationMedia struct {
 	starts    int
 	stops     int
 	closes    int
+	// stopCtxErr / closeCtxErr 记录释放步骤被调用时那份 ctx 的状态。
+	// 真实客户端拿到已过期的 ctx 会立刻返回 ctx.Err()，等于什么都没释放，
+	// 所以"这一步有没有跑"必须看 ctx 活不活，不能只看调用次数。
+	stopCtxErr  error
+	closeCtxErr error
 }
 
 func (f *fakeActivationMedia) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
@@ -41,16 +46,18 @@ func (f *fakeActivationMedia) StartSendRtpPassive(context.Context, zlm.TalkSendR
 	return &zlm.StartSendRtpPassiveResult{LocalPort: f.localPort}, nil
 }
 
-func (f *fakeActivationMedia) StopSendRtp(context.Context, string, string, string, string) error {
+func (f *fakeActivationMedia) StopSendRtp(ctx context.Context, _, _, _, _ string) error {
 	f.mu.Lock()
 	f.stops++
+	f.stopCtxErr = ctx.Err()
 	f.mu.Unlock()
 	return f.stopErr
 }
 
-func (f *fakeActivationMedia) CloseTalkSource(context.Context, string, string, string) error {
+func (f *fakeActivationMedia) CloseTalkSource(ctx context.Context, _, _, _ string) error {
 	f.mu.Lock()
 	f.closes++
+	f.closeCtxErr = ctx.Err()
 	f.mu.Unlock()
 	return f.closeErr
 }
@@ -60,8 +67,10 @@ type fakeTalkInviter struct {
 	release chan struct{}
 	err     error
 	byeErr  error
-	invites int
-	byes    int
+	// byeBlocks 让 ByeTalk 一直等到 ctx 到期(模拟交叉 BYE 时对端不回 200)。
+	byeBlocks bool
+	invites   int
+	byes      int
 }
 
 func (f *fakeTalkInviter) InviteTalk(context.Context, uac.TalkInviteRequest) (uac.TalkDialogMetadata, error) {
@@ -73,8 +82,13 @@ func (f *fakeTalkInviter) InviteTalk(context.Context, uac.TalkInviteRequest) (ua
 	return uac.TalkDialogMetadata{CallID: "talk-call", CSeq: 7, StatusCode: 200}, f.err
 }
 
-func (f *fakeTalkInviter) ByeTalk(context.Context, string) error {
+func (f *fakeTalkInviter) ByeTalk(ctx context.Context, _ string) error {
 	f.byes++
+	if f.byeBlocks {
+		// 模拟交叉 BYE:对端不回 200,事务只能等到自己的预算耗尽。
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return f.byeErr
 }
 

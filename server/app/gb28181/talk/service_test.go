@@ -2,7 +2,9 @@ package talk
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,7 +48,21 @@ func talkCreateRequest(channelID uint) CreateRequest {
 	}
 }
 
-func TestTalkServiceCreatePrefersPlaybackNodeAndStoresOnlyTokenHash(t *testing.T) {
+// prepareUplinkFacts 走一次真实的上行准备,从上游地址里取回流标识与一次性令牌。
+//
+// CreateResult 里已经拿不到令牌了 —— 这正是平台代持的目的:令牌只在
+// PrepareUplink → 上游转发这一步存在于后端内存。
+func prepareUplinkFacts(t *testing.T, service *Service, sessionID string) (string, string) {
+	t.Helper()
+	target, err := service.PrepareUplink(context.Background(), sessionID)
+	require.NoError(t, err)
+	parsed, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	require.Equal(t, "talk", parsed.Query().Get("app"))
+	return parsed.Query().Get("stream"), parsed.Query().Get("token")
+}
+
+func TestTalkServiceCreatePrefersPlaybackNodeAndKeepsImplementationPrivate(t *testing.T) {
 	db := newTalkRepoTestDB(t)
 	repo := NewGormRepo(db)
 	locations := stream.NewLocationMap()
@@ -59,24 +75,28 @@ func TestTalkServiceCreatePrefersPlaybackNodeAndStoresOnlyTokenHash(t *testing.T
 
 	result, err := service.Create(context.Background(), talkCreateRequest(42))
 	require.NoError(t, err)
-	require.EqualValues(t, 2, result.NodeID)
 	require.Zero(t, picker.calls.Load())
 	require.True(t, result.ExpiresAt.Equal(now.Add(30*time.Second)))
-	parsed, err := url.Parse(result.PublishURL)
+	require.Equal(t, "whip", result.Uplink.Protocol)
+	require.Equal(t, "application/sdp", result.Uplink.ContentType)
+	require.Equal(t, "/talk-sessions/"+result.SessionID+"/uplink", result.Uplink.Path)
+	// URL 由 controller 按请求实际到达的 host / scheme 回填,service 不碰对外地址。
+	require.Empty(t, result.Uplink.URL)
+
+	// 契约不得泄漏实现:媒体节点地址、端口、流标识、SSRC、发布令牌一个都不能出现。
+	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
-	require.Equal(t, "https", parsed.Scheme)
-	require.Equal(t, "talk.example.test:18443", parsed.Host)
-	require.Equal(t, "talk", parsed.Query().Get("app"))
-	require.Equal(t, result.SourceStream, parsed.Query().Get("stream"))
-	require.Equal(t, result.PublishToken, parsed.Query().Get("token"))
+	for _, leak := range []string{"talk.example.test", "18443", "token", "Token", "SourceStream", "ssrc", "SSRC", "nodeId", "nodeName"} {
+		require.NotContains(t, string(encoded), leak)
+	}
 
 	stored, err := repo.FindBySession(context.Background(), result.SessionID)
 	require.NoError(t, err)
-	require.NotEqual(t, result.PublishToken, stored.PublishTokenHash)
-	require.NotContains(t, stored.PublishTokenHash, result.PublishToken)
 	require.Equal(t, models.TalkSessionReserved, stored.State)
-	require.Equal(t, result.RecvStream, stored.RecvStream)
-	require.Equal(t, result.SSRC, stored.SSRC)
+	require.NotEmpty(t, stored.PublishTokenHash)
+	require.Equal(t, "talk_"+strings.ReplaceAll(result.SessionID, "-", ""), stored.SourceStream)
+	require.NotEmpty(t, stored.RecvStream)
+	require.NotEmpty(t, stored.SSRC)
 }
 
 func TestTalkServiceDoesNotGateCreateOnCapabilityMetadata(t *testing.T) {
@@ -214,7 +234,8 @@ func TestTalkServiceAuthorizePublishConsumesTokenOnceButAllowsSameHookRetry(t *t
 		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, time.Now)
 	created, err := service.Create(context.Background(), talkCreateRequest(5))
 	require.NoError(t, err)
-	auth := PublishAuthorization{NodeID: 1, App: "talk", SourceStream: created.SourceStream, PublishToken: created.PublishToken, PublishID: "pub-1"}
+	sourceStream, publishToken := prepareUplinkFacts(t, service, created.SessionID)
+	auth := PublishAuthorization{NodeID: 1, App: "talk", SourceStream: sourceStream, PublishToken: publishToken, PublishID: "pub-1"}
 	allowed, err := service.AuthorizePublish(context.Background(), auth)
 	require.NoError(t, err)
 	require.True(t, allowed)
@@ -245,10 +266,11 @@ func TestTalkServiceAuthorizePublishRejectsExpiredToken(t *testing.T) {
 		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, func() time.Time { return now })
 	created, err := service.Create(context.Background(), talkCreateRequest(6))
 	require.NoError(t, err)
+	sourceStream, publishToken := prepareUplinkFacts(t, service, created.SessionID)
 	now = now.Add(31 * time.Second)
 
 	allowed, err := service.AuthorizePublish(context.Background(), PublishAuthorization{
-		NodeID: 1, App: "talk", SourceStream: created.SourceStream, PublishToken: created.PublishToken, PublishID: "pub-expired",
+		NodeID: 1, App: "talk", SourceStream: sourceStream, PublishToken: publishToken, PublishID: "pub-expired",
 	})
 	require.NoError(t, err)
 	require.False(t, allowed)

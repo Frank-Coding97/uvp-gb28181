@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/url"
 	"strings"
 	"time"
 
@@ -35,6 +34,7 @@ type TalkRepo interface {
 	ClaimBroadcastDialog(context.Context, string, string, uint) (bool, error)
 	UpdateBroadcastFacts(context.Context, string, BroadcastFactsPatch) (bool, error)
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
+	ReissuePublishToken(context.Context, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)
 	RenewActive(context.Context, string, time.Time) (bool, error)
 	ListNonterminal(context.Context) ([]models.GbTalkSession, error)
@@ -77,18 +77,30 @@ type CreateRequest struct {
 	Mode        models.TalkSessionMode
 }
 
+// uplinkPathPrefix 是上行入口在 device-mgmt 分组内的相对路径片段。
+// 与 routes 里注册的模式必须一致(uplink_route_test.go 守住)。
+const uplinkPathPrefix = "/talk-sessions/"
+
+// UplinkDescriptor 描述调用方应当把上行音频推往何处。
+//
+// 这里刻意不出现媒体节点地址、流标识、SSRC、发布令牌等实现细节:
+//   - Path 是平台内部的相对路径片段,由 controller 按请求实际到达的 host /
+//     scheme 拼成 URL(平台不得硬编码对外端口,同一份代码要能跑在任意域名端口下);
+//   - 刷新协议只需换 Protocol,调用方代码不变。
+type UplinkDescriptor struct {
+	Protocol    string      `json:"protocol"`
+	Path        string      `json:"-"`
+	URL         string      `json:"url"`
+	ContentType string      `json:"contentType"`
+	ICEServers  []ICEServer `json:"iceServers,omitempty"`
+}
+
 type CreateResult struct {
-	SessionID    string                 `json:"sessionId"`
-	Mode         models.TalkSessionMode `json:"mode"`
-	State        string                 `json:"state"`
-	NodeID       int64                  `json:"nodeId"`
-	NodeName     string                 `json:"nodeName"`
-	SourceStream string                 `json:"sourceStream"`
-	RecvStream   string                 `json:"recvStream"`
-	SSRC         string                 `json:"ssrc"`
-	PublishURL   string                 `json:"publishUrl"`
-	PublishToken string                 `json:"publishToken"`
-	ExpiresAt    time.Time              `json:"expiresAt"`
+	SessionID string                 `json:"sessionId"`
+	Mode      models.TalkSessionMode `json:"mode"`
+	State     string                 `json:"state"`
+	ExpiresAt time.Time              `json:"expiresAt"`
+	Uplink    UplinkDescriptor       `json:"uplink"`
 }
 
 type PublishAuthorization struct {
@@ -151,12 +163,16 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	if err := s.repo.Create(ctx, session, token); err != nil {
 		return nil, err
 	}
-	query := url.Values{"app": {"talk"}, "stream": {sourceStream}, "token": {token}}
-	publishURL := fmt.Sprintf("https://%s:%d/index/api/whip?%s", mediaNode.Host, config.HTTPSPort, query.Encode())
+	// 这里生成的令牌只用于满足 repo.Create 的非空约束,随后会被 PrepareUplink
+	// 在转发前轮换掉 —— 明文令牌永不离开后端,响应里也没有它的位置。
 	return &CreateResult{
-		SessionID: sessionID, Mode: session.Mode, State: string(session.State), NodeID: mediaNode.ID, NodeName: mediaNode.Name,
-		SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
-		PublishURL: publishURL, PublishToken: token, ExpiresAt: expiresAt,
+		SessionID: sessionID, Mode: session.Mode, State: string(session.State), ExpiresAt: expiresAt,
+		Uplink: UplinkDescriptor{
+			Protocol:    "whip",
+			Path:        uplinkPathPrefix + sessionID + "/uplink",
+			ContentType: "application/sdp",
+			ICEServers:  BuildICEServers(config),
+		},
 	}, nil
 }
 

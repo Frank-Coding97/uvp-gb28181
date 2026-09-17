@@ -859,9 +859,11 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
 			dmgmt.GET("/channel/:id/device-status", deviceMgmtController.GetDeviceStatus)
 			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
-			dmgmt.POST("/channel/:id/talk-sessions", func(c *gin.Context) { talkController.Load().Create(c) })
+			dmgmt.POST(gbcontrollers.TalkCreateRoute, func(c *gin.Context) { talkController.Load().Create(c) })
 			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Get(c) })
 			dmgmt.DELETE("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Delete(c) })
+			// 上行入口:浏览器把 WHIP 发布请求发给平台,由平台转发到媒体节点。
+			dmgmt.POST(gbcontrollers.TalkUplinkRoute, func(c *gin.Context) { talkController.Load().Uplink(c) })
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
 			dmgmt.POST("/channel/:id/ptz/precise", deviceMgmtController.ControlPTZPrecise)
 			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)

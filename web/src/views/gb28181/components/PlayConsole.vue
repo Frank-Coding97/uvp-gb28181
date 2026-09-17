@@ -490,6 +490,16 @@ function saveHomePosition() {
 
 /* ────────────────────────── 语音对讲(mock) ────────────────────────── */
 
+// ⭐ 对讲是**点击开关**（与真控制台 PlayConsoleLinked 同口径）：点一下开始、
+// 按钮文字变「停止对讲」，再点一下停止。
+function toggleTalk() {
+    if (talkState.value === "talking") {
+        stopTalk();
+        return;
+    }
+    startTalk();
+}
+
 function startTalk() {
     if (talkState.value === "talking") return;
     if (!isAudioCapable.value) {
@@ -497,7 +507,7 @@ function startTalk() {
         return;
     }
     talkState.value = "talking";
-    Message.info("[Mock] 语音对讲已开始 · 按住说话");
+    Message.info("[Mock] 语音对讲已开始 · 再点一次停止");
 }
 
 function stopTalk() {
@@ -769,13 +779,13 @@ onBeforeUnmount(() => {
                                 :class="{ active: talkState === 'talking' }"
                                 :disabled="!isAudioCapable"
                                 :aria-pressed="talkState === 'talking'"
-                                @pointerdown.prevent="startTalk"
-                                @pointerup.prevent="stopTalk"
-                                @pointerleave="stopTalk"
-                                @pointercancel="stopTalk"
+                                @click="toggleTalk"
                             >
                                 <Mic :size="14" />
-                                <span>{{ talkState === "talking" ? "对讲中 · 松开结束" : "按住对讲" }}</span>
+                                <span v-if="talkState === 'talking'" class="talk-wave" data-testid="talk-wave" aria-hidden="true">
+                                    <i v-for="bar in 4" :key="bar" :style="{ animationDelay: `${(bar - 1) * -0.17}s` }"></i>
+                                </span>
+                                <span>{{ talkState === "talking" ? "停止对讲" : "开始对讲" }}</span>
                             </button>
 
                             <div class="speed-row">
@@ -1486,6 +1496,27 @@ onBeforeUnmount(() => {
     border-color: var(--uvp-danger-border); box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-danger) 10%, transparent);
 }
 .talk-button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* 与真控制台 PlayConsoleLinked 同口径：说话中显示采集波形。
+ * ⛔ 本页是 mock、没有真实采集，所以 --talk-level 恒为默认 0 —— 波形只做静态起伏。
+ * 这是诚实的降级，别为了「看起来更活」在这里编一个假电平。 */
+.talk-wave {
+    display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+    width: 16px; height: 13px; flex: none;
+    transform: scaleY(calc(0.4 + var(--talk-level, 0) * 0.6));
+    transform-origin: center; transition: transform 0.08s linear;
+}
+.talk-wave i {
+    width: 2px; height: 100%; border-radius: 1px; background: currentColor;
+    animation: talk-wave-pulse 0.9s ease-in-out infinite;
+}
+@keyframes talk-wave-pulse {
+    0%, 100% { transform: scaleY(0.32); }
+    50% { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .talk-wave i { animation: none; transform: scaleY(0.8); }
+}
 
 .speed-row { padding: 6px 2px; }
 .speed-row label { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; color: var(--uvp-text-tertiary); font-size: 11px; }
