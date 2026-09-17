@@ -17,12 +17,13 @@
 - 状态标记：`☐` 待办 · `◐` 进行中 · `☑` 完成 · `✗` 不做
 - 优先级：
   - **P0** 地基 / 能立刻做出端到端可视闭环（16 条）
-  - **P1** 家族补齐 / 现有能力收口（21 条）
-  - **P2** 视级联深度与交付要求取舍（24 条）
+  - **P1** 家族补齐 / 现有能力收口（22 条）
+  - **P2** 视级联深度与交付要求取舍（23 条）
 - ⚠️ 标了「待核原文」的条目，落地前先回标准原文确认一次再动手。
+- ⛔ **引条款号前先验它真的存在**：本单已有两起因二手解读引入**虚条款号**的返工（`F-6` 的「§9.5.4」两版均不存在；抓拍口径的私有值被当成标准值）。凡新增/复述条款，**先回 `.workbuddy/ocr/` 的两版全文搜一次**。
 
-**总计 61 条** = 前置契约 6 + 设备配置家族 13 + 目录与编码 8 + 设备查询 1 + 设备控制与维护 6 +
-图像抓拍整改 7 + 信令与传输 9 + 音频 4 + 级联 3 + 合规细节 4。
+**总计 62 条** = 前置契约 6 + 设备配置家族 13 + 目录与编码 8 + 设备查询 1 + 设备控制与维护 6 +
+图像抓拍整改 7 + 信令与传输 10（含 2026-09-17 新增 `F-10`、关闭 `F-6`）+ 音频 4 + 级联 3 + 合规细节 4。
 
 ---
 
@@ -42,7 +43,8 @@
 | SIP Date 校时 | 已实现 | 已实现 | — | 9.10 |
 | NTP 校时 | 缺失 | 已实现 | F-5 | 9.10 |
 | 多响应消息聚合 | 仅 Catalog | 已实现（50/包） | F-1 | 附录 M |
-| MobilePosition 的 MESSAGE 形态 | 缺失（仅 NOTIFY 可用） | 已实现 | F-6 | 9.5.4 |
+| MobilePosition 的 MESSAGE 形态 | ✗ 不做（**标准里没有这个形态**） | 私有扩展（WVP 兼容口径，非对标能力） | ✗ F-6（已关闭 2026-09-17） | **无** —— 原引「§9.5.4」两版均不存在 |
+| MobilePosition NOTIFY 形态（**2022 列表**） | 缺失（仅识 2016 扁平） | 缺失（仅出 2016 扁平） | F-10 | 9.11.2.3 c）/ A.2.5.6 |
 | 注册重定向 302 | ✗ 不做 | ✗ 不做 | — | 9.1.2.3 |
 
 ### 1.2 目录与编码
@@ -279,7 +281,8 @@
 | ☑ F-2 | **X-GB-Ver 补全**（附录 I）✅ 2026-09-17 | ✅ `handler/register.go` 鉴权通过后按 `WarningCode` 四类异常留 `gb28181.register.version_header_abnormal` 告警（missing/invalid/unknown/legacy）—— 此前 `protocol.Resolve` 产出的 `Warning` **全仓零消费**。⛔ 原描述「200 OK 响应也带」已更正：**设备不产生注册响应**，附录 I 的「注册及其响应」对设备侧只剩出站一半；响应侧平台早已覆盖（`newRegisterResponse` 对 200/401/403/500 全带头） | ✅ `sip/GbVersionNegotiation.kt`（parse + min 协商）+ `RegistrationCoordinator.platformVersion` 流（解析 200/401/4xx **全部**响应头；注销时清空）+ `ManscdpContext.effectiveGbVersion` → Catalog/DeviceInfo/DeviceStatus/AlarmStatus 按 **min(本机, 平台)** 出站 + 设置页显示协商结果 | 模拟器切 2016 后平台门禁生效；反向（平台 2.0 × 设备 2022）时设备应答降级为 2016 形态 | P1 |
 | ☐ F-3 | **NAT 场景 TCP 长连接**（建立 · 复用 · 断链自愈）（§9.1.1 f、§5.2）**⛔ 原 F-4 已并入本条** | ① ✅ **「连接复用」已具备，勿再当缺口**：`bootstrap.go:613` 硬编码监听 `{udp,tcp}`；accept 的 TCP 连接按**远端地址**入池（`transport_tcp.go:198-199` `pool.Add(raddr, c)`）；`connectionReuse` 默认 `true`（`transport_layer.go:139`）→ 下行 `ClientRequestConnection` 用 `GetConnection(raddr.String())` 命中**同一条**已建连接（两侧同为 `net.JoinHostPort` 格式）；下行 transport 全部取 `device.Transport`（`ptz/operation.go:276`、`ptz/device_reboot.go:290`、`subscribe/service.go:292`、`play/service.go:710`、`cascade/control/target_loader.go:59`、`upgrade/service.go:347`、`talk/activation.go:169`）。⛔ **2026-09-17 上一轮写的「现每次 `SetDestination()` 重新 Dial」是误判**，特此更正 ② ✅ **「TCP 断开立即判设备掉线」已实现**（2026-09-17，见本节末「平台侧实现清单」）—— 原缺口：`closeObserver` 只接了 trace 与 security（`sip/server.go:336-346`），设备在线靠心跳超时（`keepalive_interval=60` × `keepalive_timeout_count=3` = **180s**），与 f)「若 TCP 通道断开，则认为 SIP 代理异常掉线」不符 | ① ✅ **断链自愈已完成**（2026-09-17，`domain/SipReconnect.kt`：被动断开 → 停活跃流 + 作废注册会话 → 1s 起指数退避封顶 30s、**次数不封顶** → `close()`+`connect()` → 重新注册；`TcpSipTransport` 上报 `ConnectionLost` + 世代号守卫；18 单测）② ⛔ 默认 `transport = UDP`（标准要求 NAT 内侧**用 TCP**）③ ✅ **`received`/`rport` 回填已消费**（2026-09-17）—— 落点是**自发现**（解析平台回值 → 判定 DIRECT/NAT/UNKNOWN → 设置页「地址转换」行展示，NAT 时提示改用 TCP），**不是改 Contact**：⛔ 平台只读 Contact 头里的 `expires` 参数（`handler/register.go:568-585`），**地址部分完全不用**，改它属伪需求 | ① 设备 TCP 注册后，平台**所有**下行（点播/控制/查询/广播）复用同一条连接 ② **拔网线 / 杀连接 → 平台秒级判离线**（不是 180s）③ 设备自愈重连后平台恢复在线且绑定正确 | P1（原 F-3 P2 + F-4 P1 合并后取 P1） |
 | ☐ F-5 | **NTP 校时**（§9.10） | 补 NTP 客户端（现仅 SIP Date），前端可发起 | 已有 NTP 客户端 → 复核可用性 | 平台发起校时 → 设备时间同步 | P2 |
-| ☐ F-6 | **MobilePosition 的 MESSAGE 形态**（§9.5.4） | 补 MESSAGE 分支（常量存在但分支缺失，现仅 NOTIFY 可用） | MESSAGE 形态的响应/上报 | 按 MESSAGE 形态查询位置能得到应答 | P2 |
+| ✗ F-6 | **MobilePosition 的 MESSAGE 形态**（原引 §9.5.4）**⛔ 已关闭 2026-09-17 —— 标准里不存在这个形态，勿再当成缺口开工**（依据见下方「📌 F-6 条款号核验」） | 不做（不补 MESSAGE 分支；`manscdp.CmdMobilePosition` 的现存用途只有订阅体构造 / NOTIFY 解析 / Event 判定，**服务的是订阅链路，不是 MESSAGE**） | 私有扩展，**非对标能力**：`CatalogSubRouter.kt:55` → `MobilePositionResponse.kt`（KDoc 原写「§9.5.4」= 虚号源头） | — | — |
+| ☐ F-10 | **MobilePosition NOTIFY 2022 列表形态 + 2016 向下兼容**（§9.11.2.3 c）/ A.2.5.6 / A.2.1.14） | ⛔ `manscdp.MobilePositionNotify`（`subscription.go:107`）只有 2016 扁平字段，**无 `SumNum` / `DeviceList` / `Item`** → 收 2022 报文时**不报错**（顶层 `DeviceID` 两版都有，`ParseMobilePositionNotify` 的 `DeviceID != ""` 守卫会放行，`Longitude=0` 也落在 `[-180,180]` 内），而是被 `subscribe/position.go` 的「位置坐标不能为 0」**静默拒收** → 该设备在前端地图上永远没有位置。**必须在同一解析器内认两种形态**（2022 优先、扁平回落），并让落库拿到 `Item` 内的 `DeviceID` | 按**本仓既有双版本套路**扩 `MobilePositionNotify.build`：`ManscdpContext.effectiveGbVersion == 2022` 出列表形态、2016 出扁平形态（照 `AlarmStatusResponse.kt` / `DeviceStatusResponse.kt` 的双版本分支写法，**不是新发明机制**）；`Item` 内字段 `DeviceID` / `CaptureTime` / `Longitude` / `Latitude` / `Speed?` / `Direction?` / `Altitude?` / `Height?`，单位口径沿用现有 builder（speed m/s→km/h） | ① **2022**：模拟器切 2022 → 平台侧能收到位置、前端「设备管理 · 地图」显示该设备（不是 0 坐标被拒）② **2016 不能被打破**：切 2016 → 平台照旧收到（回归必须绿）③ 平台解析器对两种形态都出正确坐标与 DeviceID；④ 单测覆盖「2022 列表 / 2016 扁平 / 两版切换」三路 | P1 |
 | ☐ F-7 | **媒体流保活 / 丢失释放**（附录 K） | RTP 静默超时判定 + 链路释放（现只有 BYE + 点播对账 `play/reconciler`） | 静默/丢包检测与链路释放 | 设备侧停流 → 平台在超时内释放会话 | P2 |
 | ☐ F-8 | **RTCP 反馈**（RFC3550） | 消费反馈（可先只记录入日志/库；现状未确认） | 补 RR / NACK / PLI / FIR（现只发 SR） | 抓包能看到反馈报文；丢包时平台可请求关键帧 | P2 |
 | ☐ F-9 | **Subject 媒体链路标识**（附录 L） | 核对现有 Subject 构造与 2022 口径 | 同上 | 点播/回放/广播的 Subject 符合标准 | P2 ⚠️**待核原文**口径 |
@@ -315,6 +318,35 @@
 **测试**：`sip/link_loss_test.go` 9 例 + `device/link_watch_test.go` 8 例，全绿。
 
 复核命令：`swift .workbuddy/ocr/ocr.swift "<pdf>" out.txt <起> <止>`，产物在 git 已忽略的 `.workbuddy/ocr/`。
+
+#### 📌 F-6 条款号核验：原引「§9.5.4」两版都不存在（2026-09-17 核，勿再转述二手解读）
+
+- ⛔ **虚条款号**：GB/T 28181-2022 与 2016 的 §9.5（网络设备信息查询）**都只有 9.5.1 / 9.5.2 / 9.5.3**，**没有 §9.5.4**。两版 §9.5.1 的查询命令枚举均为「设备目录 / 前端设备信息 / 前端设备状态信息 / 设备配置 / 预置位」——**都没有移动位置**。2022 修订说明把查询命令族限定为 `A.2.4.10～A.2.4.14`（**不含 A.2.4.9**）；2016 修订说明原文是「增加了移动设备**订阅通知**要求（见 9.11.1、A.2.4 和 A.2.5）」。
+- ✅ **标准里 MobilePosition 只有一条路（订阅 + 通知）**：`§9.11.1.3 c)` 规定 SUBSCRIBE 的消息体用 **A.2.4.9**；`§9.11.2.3 c)` 规定 NOTIFY 的消息体用 **A.2.5.6**。**A.2.6（应答命令）里没有 MobilePosition 条目** → 标准里从来没有「查询 / 应答」这一对，「MESSAGE 形态」是我们自己的私有扩展。
+- ⛔ **虚号传染链（6 处，2026-09-17 已逐处修正）**：模拟器 `MobilePositionResponse.kt` KDoc → `docs/gb28181-2022-gap-inventory.md` 的 `P-11` → 本文档 `F-6` → Atlas 能力矩阵 `3.7 / 7.6 / 7.7 / 8.3` 四行。**同类前科**：图像抓拍口径（标准值全仓零匹配）——「自家联调能跑通」不等于对标。
+
+#### 📌 F-10 标准原文：2022 A.2.5.6 改了 NOTIFY 形态（2026-09-17 核）
+
+**GB/T 28181-2022 A.2.5.6「移动设备位置数据通知」（标准印刷页 87–88，PDF 页 = 标准页 + 7）**，结构为：
+
+```
+<Notify>
+  <CmdType>MobilePosition</CmdType>   ← 必选
+  <SN>…</SN>                          ← 必选
+  <DeviceID>…</DeviceID>              ← 必选（**两版都有**，所以旧解析器不会报错，只会拿到 0 坐标）
+  <Time>…</Time>                      ← 必选（**上报通知时间**）
+  <SumNum>…</SumNum>                  ← 必选（**移动设备位置总数**）
+  <DeviceList Num="…">                ← minOccurs=0
+    <Item>…</Item>                    ← itemMobilePositionType（A.2.1.14）
+  </DeviceList>
+</Notify>
+```
+
+**A.2.1.14 `itemMobilePositionType`（标准印刷页 64–65）** = `DeviceID` / `CaptureTime` / `Longitude`（WGS-84）/ `Latitude`（WGS-84）/ `Speed?`（km/h）/ `Direction?`（0≤x<360，正北顺时针）/ `Altitude?`（米）/ `Height?`（地面高度，米）。
+
+- **2016 版**：`Time` / `Longitude` / `Latitude` / `Speed` / `Direction` / `Altitude` 直挂 `<Notify>`（无 `SumNum` / `DeviceList` / `Item`，无 `CaptureTime`，**无 `Height`**）。
+- **差异落点**：2022 把「单设备单点」改成「**一次通知多个设备位置**」，`Time` 语义从「采集时间」变成「**上报通知时间**」，采集时间下沉到 `Item/CaptureTime`；新增可选的 `Height`（地面高度，意义不同于 `Altitude` 海拔）。
+- ⛔ **兼容是硬约束**：GB/T 28181-2016 设备仍在网，**2022 形态与 2016 形态必须在同一解析器/构造器内并存**，由 `gbVersion` / `effectiveGbVersion`（min 协商）切换 —— 与 3.3 / 3.9 / 3.10 的既有双版本做法一致。**不允许"改造 2022 就打破 2016"**。
 
 ### 4.G 音频
 
@@ -361,7 +393,7 @@
 | 目录订阅与增量 NOTIFY | `handler/notify.go` | 已实现 | 回归 |
 | 目录多父级挂载（A/B 拆分） | `catalog/dto.go:28`、`gb_channel_mount` | ✗（见 B-7） | B-7 改完后 |
 | 报警上报 / 报警复位 AlarmCmd | `manscdp/device_advanced.go:146,221` | 已实现 | 回归 |
-| MobilePosition（NOTIFY 形态） | `handler/notify.go` | 已实现 | F-6 改完后 |
+| MobilePosition（NOTIFY 形态，**2016 扁平**） | `handler/notify.go`、`manscdp/subscription.go:107` | `MobilePositionNotify.kt`（扁平） | 回归 —— ⚠️ **2022 列表形态见 F-10**，两版都由 `gbVersion` 切换后才算闭环 |
 | RecordInfo / Playback / Download / MediaStatus | `manscdp/record_info.go` | 已实现 | 回归 |
 | TeleBoot / RecordCmd / GuardCmd / IFameCmd / DragZoom | `manscdp/device_advanced.go` | 已实现 | D-5 中三个占位接完后 |
 | 设备软件升级下发 + 结果状态机 | `manscdp/device_upgrade.go`、`upgrade/service.go` | 假进度（见 D-4） | D-3/D-4 改完后 |
@@ -395,8 +427,9 @@
 
 **批次 4 — 家族补齐与收口**
 `A-5` `A-9` → `A-6` `A-7` `A-8` → `A-10` `A-11` `A-12` → `D-6`（统一入口）
-→ `C-1` `D-3` `D-4` `D-5` → `F-1` `F-3`
-（原列的 `F-2` / `I-1` 已于 2026-09-17 完成，移出待办；**原 `F-4` 已并入 `F-3`**——NAT/TCP 长连接是「建立 · 复用 · 断链恢复」一件事）
+→ `C-1` `D-3` `D-4` `D-5` → `F-1` `F-3` **`F-10`（两侧对称改，且 2016 形态回归必须一起跑）**
+（原列的 `F-2` / `I-1` 已于 2026-09-17 完成，移出待办；**原 `F-4` 已并入 `F-3`**——NAT/TCP 长连接是「建立 · 复用 · 断链恢复」一件事；
+**原 `F-6` 已于 2026-09-17 关闭**——标准里不存在 MESSAGE 形态，替代项是新增的 `F-10`）
 
 ---
 

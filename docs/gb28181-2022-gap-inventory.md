@@ -114,7 +114,7 @@
 | P-8 | **SDP 扩展：SVC、媒体编号** | 附录 G | 有 s/t/m/y(SSRC)，无 `a=ssvcratio`（**❌ 已决策不做**），无 a 字段媒体编号 |
 | P-9 | **音频编码扩展** | 4.3.1 | 语音广播/对讲硬编码 PCMA/8000 且硬拒其他（`talk/activation.go:30,228`）；无 G.722.1、无 AAC |
 | P-10 | **安全：TLS / 信令完整性 / GB 35114** | 第 8 章 | 无 SIP over TLS、无完整性保护；现有为接入准入/限速/封禁 |
-| P-11 | **MobilePosition 的 MESSAGE 形态** | 9.5.4 | 常量存在但 MESSAGE 分支缺失，仅 NOTIFY 可用 |
+| P-11 | ~~**MobilePosition 的 MESSAGE 形态**~~ **❌ 已关闭（2026-09-17）—— 标准里不存在这个形态** | ~~9.5.4~~ **无** | 原判据「常量存在但 MESSAGE 分支缺失，仅 NOTIFY 可用」**不成立**：`manscdp.CmdMobilePosition` 服务的是**订阅链路**（订阅体构造 / NOTIFY 解析 / Event 判定），与 MESSAGE 无关；两版 §9.5 均**无 9.5.4**，A.2.6（应答命令）**无 MobilePosition 条目**。原「缺失」实为「标准无此形态，我们不补」。**替代项见 P-19** |
 | P-12 | **设备配置：读取（ConfigDownload）** | 9.3.5 / A.2.5 | 无常量、无查询构造、无应答解析。平台**读不到任何设备配置** |
 | P-13 | **设备配置：下发族缺失** | 9.3.5 / A.2.3.2 | 无 `CmdDeviceConfig` 常量；除 SnapShotConfig 外全部配置项均无下发能力 |
 | P-14 | **多响应聚合通用化** | 附录 M | 仅 Catalog 实现；无通用按 SN 聚合、无条数上限约束 |
@@ -122,6 +122,7 @@
 | P-16 | **NTP 校时** | 9.10 | 无 NTP 客户端（仅 SIP Date） |
 | P-17 | 报警实时推送 | 工程项 | 入库/查询有，缺 Webhook/WebSocket 实时外推 |
 | P-18 | **目录 2022 新字段不解析** | 附录 J | `manscdp/catalog.go:34-50` 无 `IPAddress`/`Port`/`PositionType`/`RoomType`/`UseType`/`SupplyLightType`/`DirectionType`/`Resolution` → **即使设备上报也会被静默丢弃** |
+| P-19 | **MobilePosition NOTIFY 2022 列表形态不识别（且须兼容 2016 扁平）** | 9.11.2.3 c）/ A.2.5.6 | `manscdp.MobilePositionNotify`（`subscription.go:107`）只有 2016 扁平字段，无 `SumNum`/`DeviceList`/`Item`。⛔ 后果**不是报错而是静默吞掉**：顶层 `DeviceID` 两版都有 → `DeviceID != ""` 守卫放行；`Longitude/Latitude` 解出 0 → 通过 `[-180,180]` 范围校验；再到 `subscribe/position.go` 的「位置坐标不能为 0」**被拒收** → 该设备在前端「设备管理 · 地图」永远没有位置。**修法：同一解析器内认两种形态（2022 优先、扁平回落），并把 `Item` 内的 `DeviceID` 落库**；**2016 路径必须回归通过**。⚠️ 与 S-27 成对，只改一侧看不到变化 |
 
 ### 2.3 ⚠️ 合规疑点：图像抓拍走的是私有口径（能跑通 ≠ 合规）
 
@@ -147,7 +148,7 @@
 精准云台控制与精准状态查询、看守位（含设备侧自动归位）、巡航轨迹列表/详情、辅助控制、
 TeleBoot / RecordCmd / GuardCmd / AlarmCmd / IFameCmd / DragZoom、DeviceUpgrade（含结果 NOTIFY）、
 图像抓拍协议链（SnapShotCmd + SnapShotConfig + 上传引擎 + NOTIFY）、目标跟踪与格式化 SD 卡**解析**、
-目录订阅与增量 NOTIFY、报警上报与报警状态查询、MobilePosition（查询/订阅/NOTIFY）、
+目录订阅与增量 NOTIFY、报警上报与报警状态查询、MobilePosition（**订阅 + 周期 NOTIFY**，⚠️ 现仅 **2016 扁平**形态，见 S-27）、
 PTZ 精准位置订阅与通知、RecordInfo / Playback / Download / MediaStatus(121/122/123)、
 语音广播下行、H.264/H.265 编码 + PS 封装、G.711A/AAC、RTP over UDP/TCP、RTCP SR、
 多响应分包（SumNum + Num，默认 50/包）、目录树多通道与业务分组/虚拟组织模板、
@@ -168,8 +169,8 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 | S-5 | **字符集声明与字节不一致** | 6.10 | 声明 `GB2312`，但 `String.encodeToByteArray()` 输出 UTF-8，全仓无 GB2312/GB18030 转码（`SipResponseBuilders.kt:107`、`SipInviteBuilders.kt:177`） |
 | S-6 | **注册重定向不跟随** | 9.1.2.3 | `RegistrationCoordinatorImpl.handleRegisterResponse` 只处理 2xx/401/407/4xx — **❌ 已决策暂不做** |
 | S-7 | **NAT 增强不完整** | 9.1.1 | Contact 恒为 `localIp:localPort`，不用 received/rport 回填实际来源端点 |
-| S-8 | **SIP over TCP 断链不自愈** | 5.2 | read loop 断即 close，无自动重连（仅用户重连/首连 connect） |
-| S-9 | **X-GB-Ver 半套** | 附录 I | 仅 REGISTER/Unregister 出站带版本；200 OK 响应不带，也不解析平台声明的版本（`SipRegisterBuilders.kt:40`，全仓仅此一处） |
+| S-8 | ~~**SIP over TCP 断链不自愈**~~ **✅ 已实现（2026-09-17）** | 5.2 | `domain/SipReconnect.kt`：read loop 被动终止 → 停活跃流 + 作废注册会话（`RegistrationCoordinatorImpl.onConnectionLost`）→ 1s 起指数退避封顶 30s、**次数不封顶** → `close()`+`connect()` → 重新注册；`TcpSipTransport` 上报 `ConnectionLost` + 世代号守卫 + `isConnected = socket && readChannel`；UI 横幅 + `RECONNECT` 日志分类。18 单测 |
+| S-9 | ~~**X-GB-Ver 半套**~~ **✅ 已实现（2026-09-17）** | 附录 I | `sip/GbVersionNegotiation.kt`（parse + min 协商）+ `RegistrationCoordinator.platformVersion` 流（解析 200/401/4xx **全部**响应头，注销时清空）+ `ManscdpContext.effectiveGbVersion` → Catalog/DeviceInfo/DeviceStatus/AlarmStatus 按 min(本机, 平台) 出站。⚠️ 原文「200 OK 响应不带」不成立：**设备不产生注册响应**，附录 I 对设备侧只剩出站一半 |
 | S-10 | **摄像机访问路径头无** | 附录 H | 无 `X-PreferredPath` / `X-RoutePath` |
 | S-11 | **域间目录订阅通知无** | 附录 N | 全仓无 |
 | S-12 | **多父级目录无** | 附录 H/N | `CatalogNode` 仅单 `parentId` |
@@ -187,6 +188,7 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 | S-24 | **SVAC 编码配置不响应** | 附录 C | `ConfigDownloadResponse.kt:61` 显式忽略仍回 OK |
 | S-25 | **设备配置家族只有 2 项且静默假成功** | 9.3.5 / A.2.3.2 | 读只支持 `BasicParam`+`VideoParamOpt`；其余 ConfigType 忽略仍回 OK。**写侧**仅认 `<BasicParam>`（`DeviceControlDispatcher.kt:122`）、且只提取 Name/心跳四个字段发 `ConfigChanged` effect，**不落盘**。无 `CmdType=DeviceConfig` 的独立分派（靠元素名猜） |
 | S-26 | **抓拍完成通知用私有 CmdType** | 9.14 / A.2.5.7 | `CmdType=Notify`+`SubCmd=SnapShot`+`SnapShotID`，标准为 `UploadSnapShotFinished`+`SnapShotList/SnapShotFileID`。见 2.3 |
+| S-27 | **MobilePosition NOTIFY 只出 2016 扁平形态** | 9.11.2.3 c）/ A.2.5.6 | `MobilePositionNotify.build` 恒出扁平 `<Notify>`（`Time`+`Longitude`+`Latitude`+`Speed`+`Direction`+`Altitude`），**无 `SumNum`/`DeviceList`/`Item`，切到 2022 也不变**。2022 A.2.5.6 要求列表形态（`Time` 语义变为**上报通知时间**，采集时间下沉 `Item/CaptureTime`，新增可选 `Height`）。**修法照本仓既有双版本套路**（同 3.3/3.9/3.10）：按 `ManscdpContext.effectiveGbVersion` 分支 —— **2022 出列表、2016 出扁平，两版并存不得打破**。⚠️ 与 P-19 成对 |
 
 ---
 
@@ -220,6 +222,9 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 **第二梯队**
 5. 设备配置家族其余项（`PictureMask` / `FrameMirror` / `VideoParamAttribute` / `AlarmReport`）
 6. S-9 / P-11 X-GB-Ver 与 MobilePosition MESSAGE 形态补齐
+   —— **⚠️ 2026-09-17 修订：两项都已作废**。S-9 已由 F-2 完成（2026-09-17，见第 2 章核对）；
+   P-11 已判「标准无此形态」关闭。替代项 = **P-19 + S-27（MobilePosition NOTIFY 2022 列表形态，
+   且 2016 扁平形态必须继续可用）**，两台侧成对做
 7. P-14 多响应聚合通用化（附录 M）
 8. P-1 + S-3 存储卡状态查询对齐
 9. P-13 固件分发 HTTP 服务（升级链路闭环）
