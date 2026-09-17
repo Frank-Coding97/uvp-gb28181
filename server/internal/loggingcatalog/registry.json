@@ -543,6 +543,9 @@
     "gb28181.sip.broadcast_activation_failed": [
       "call_id"
     ],
+    "gb28181.sip.broadcast_answer_missing": [
+      "call_id"
+    ],
     "gb28181.sip.broadcast_bye_cleanup_failed": [
       "call_id"
     ],
@@ -550,6 +553,7 @@
       "call_id"
     ],
     "gb28181.sip.broadcast_client_init_failed": [],
+    "gb28181.sip.broadcast_contact_host_unavailable": [],
     "gb28181.sip.config_load_failed": [],
     "gb28181.sip.config_migration_failed": [],
     "gb28181.sip.listener_failed": [],
@@ -573,10 +577,15 @@
       "channel_id",
       "device_id"
     ],
+    "gb28181.stream_probe.redis_unavailable": [],
+    "gb28181.stream_probe.worker_rejected": [],
+    "gb28181.stream_probe.worker_started": [],
     "gb28181.talk.remote_bye_cleanup_failed": [
       "call_id"
     ],
     "gb28181.talk.startup_cleanup_failed": [],
+    "gb28181.talk.uplink_forward_failed": [],
+    "gb28181.talk.uplink_prepare_failed": [],
     "gb28181.traffic.repository_assemble_failed": [],
     "gb28181.traffic.session_cleanup_failed": [],
     "gb28181.traffic.viewer_kicked": [
@@ -695,6 +704,10 @@
       "channel_id"
     ],
     "ptz.cruise_reconcile_record.write_failed": [
+      "channel_id"
+    ],
+    "ptz.cruise_reconcile_skipped": [
+      "channel_code",
       "channel_id"
     ],
     "ptz.home_position.write_failed": [],
@@ -891,6 +904,10 @@
       "endpoint",
       "node_id"
     ],
+    "zlm.probe.identity_mismatch": [
+      "endpoint",
+      "node_id"
+    ],
     "zlm.probe.maintenance_skipped": [
       "node_id"
     ],
@@ -902,9 +919,6 @@
       "endpoint",
       "node_id"
     ],
-    "gb28181.stream_probe.redis_unavailable": [],
-    "gb28181.stream_probe.worker_rejected": [],
-    "gb28181.stream_probe.worker_started": [],
     "zlm.registry.db_unavailable": [],
     "zlm.registry.load_failed": [],
     "zlm.registry.ready": [],
@@ -1003,6 +1017,7 @@
     "name_updated",
     "new_menu_names",
     "node_id",
+    "node_uuid",
     "nodes",
     "notice",
     "offline_threshold",
@@ -1025,6 +1040,7 @@
     "plugin_count",
     "plugin_index",
     "port",
+    "protocol_version",
     "reason",
     "reason_code",
     "reason_present",
@@ -1036,6 +1052,7 @@
     "recovery_skipped",
     "regist",
     "removed",
+    "reported_uuid",
     "requested",
     "resource_count",
     "response_call_id",
@@ -1051,6 +1068,7 @@
     "sender_device_id",
     "sent",
     "server_id",
+    "session_id",
     "shutdown_component",
     "shutdown_timeout",
     "simulated",
