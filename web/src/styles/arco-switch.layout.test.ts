@@ -11,6 +11,15 @@ describe("global switch styling", () => {
         expect(source).toMatch(/&\[disabled\]\s*\{[^}]*opacity:\s*0\.5/s);
     });
 
+    it("keeps the checked switch crisp in dark mode without translucent overlays", () => {
+        expect(source).toMatch(
+            /body\[arco-theme="dark"\]\s+\.arco-switch\.arco-switch-checked\s*\{[^}]*background-color:\s*#2563eb\s*!important;[^}]*box-shadow:\s*none\s*!important;/s
+        );
+        expect(source).toMatch(
+            /body\[arco-theme="dark"\]\s+\.arco-switch\.arco-switch-checked\s+\.arco-switch-handle\s*\{[^}]*background-color:\s*#fff\s*!important;[^}]*box-shadow:\s*none\s*!important;/s
+        );
+    });
+
     it("provides a distinct adaptive color for refresh actions", () => {
         expect(source).toMatch(/\.uvp-refresh-btn\s*\{[^}]*background:\s*var\(--uvp-refresh-btn-bg\)/s);
         expect(source).toMatch(/\.uvp-refresh-btn\s*\{[^}]*border-color:\s*var\(--uvp-refresh-btn-border\)/s);

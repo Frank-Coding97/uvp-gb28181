@@ -30,6 +30,24 @@
   }
 }
 
+body[arco-theme="dark"] .arco-switch.arco-switch-checked {
+  background-color: #2563eb !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme="dark"] .arco-switch.arco-switch-checked:not([disabled]):hover {
+  background-color: #1d4ed8 !important;
+}
+
+body[arco-theme="dark"] .arco-switch.arco-switch-checked .arco-switch-handle {
+  background-color: #fff !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
+  background-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)) !important;
+}
+
 // ========== Select 下拉框 ==========
 .arco-select-view {
   border-radius: 8px !important;
