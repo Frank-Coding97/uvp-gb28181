@@ -294,6 +294,24 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	logger.Info("GB28181 注册鉴权通过", zap.String("event", "gb28181.register.authentication_succeeded"), zap.String("stage", "authentication"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 
+	// 附录 I「协议版本标识」:设备应在 REGISTER 里声明自己支持的协议版本,双方据此在后续
+	// 交互中「版本更高一方避免发送对方不能识别的消息」。
+	//
+	// 缺失/格式无效/无法识别都**不阻断注册**(一律回落 2016 兼容 profile),但必须留痕:
+	// profile 决定了下行命令的门禁(精准云台/看守位查询/巡航轨迹查询),没有这条日志,
+	// 「某台设备的 2022 功能点不动」在排障时只能靠反推设备型号。
+	if advertised.Resolution.WarningCode != protocol.WarningNone {
+		logger.Warn("GB28181 设备协议版本标识异常",
+			zap.String("event", "gb28181.register.version_header_abnormal"),
+			zap.String("stage", "negotiation"), zap.String("outcome", "warning"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			zap.String("x_gb_ver", advertised.Raw),
+			zap.String("effective_version", string(advertised.Resolution.Profile.Version)),
+			zap.String("warning_code", string(advertised.Resolution.WarningCode)),
+			zap.String("reason", advertised.Resolution.Warning),
+		)
+	}
+
 	// 鉴权通过:判断注册 or 注销
 	expires := parseExpires(req)
 	if expires == 0 {
