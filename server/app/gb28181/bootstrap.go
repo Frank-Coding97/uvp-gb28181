@@ -645,8 +645,15 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
 func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) error {
 	runtime := setupSecurityRuntime()
+	// GB/T 28181-2022 §9.1.1 f):TCP 通道断开即判设备掉线。
+	// ⛔ 必须在这一层接线:device 包不能反向 import sip(否则 sip → handler → device → sip
+	// 会成环),它只按方法签名**隐式**满足 sip.DeviceLinkSink —— 签名对不上时这里会编译报错,
+	// 因为 WithDeviceLinkSink 的参数类型是 sip.DeviceLinkSink。
 	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
-		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
+		return gbsip.NewServer(cfg,
+			gbsip.WithSecurityRuntime(runtime),
+			gbsip.WithDeviceLinkSink(device.NewLinkWatcher(app.DB(), app.ZapLog)),
+		)
 	})
 	if err != nil {
 		_ = runtime.Close(context.Background())

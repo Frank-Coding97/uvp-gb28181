@@ -15,11 +15,18 @@ const (
 	DeviceEventHeartbeatTimeout   DeviceStatusEventType = "heartbeat_timeout"
 	DeviceEventHeartbeatRecovered DeviceStatusEventType = "heartbeat_recovered"
 	DeviceEventRegisterRenewed    DeviceStatusEventType = "register_renewed"
+	// DeviceEventLinkClosed 是「可靠传输通道断开」——GB/T 28181-2022 §9.1.1 f) 要求
+	// TCP 通道断开即「认为 SIP 代理异常掉线」。它和心跳超时是**两条独立的离线通路**：
+	// 心跳超时要等 keepalive_interval × keepalive_timeout_count（缺省 60×3 = 180s），
+	// 而 TCP 断开是**瞬时**可知的。两者共用同一套置离线落库（MarkOfflineWithReason），
+	// 只在事件类型上区分 —— 事后看事件表就能判断这台设备当时是「网线被拔」
+	// 还是「TCP 会话还在、但设备进程卡死不再心跳」。
+	DeviceEventLinkClosed DeviceStatusEventType = "link_closed"
 )
 
 func (t DeviceStatusEventType) Valid() bool {
 	switch t {
-	case DeviceEventRegisterOnline, DeviceEventUnregisterOffline, DeviceEventHeartbeatTimeout, DeviceEventHeartbeatRecovered, DeviceEventRegisterRenewed:
+	case DeviceEventRegisterOnline, DeviceEventUnregisterOffline, DeviceEventHeartbeatTimeout, DeviceEventHeartbeatRecovered, DeviceEventRegisterRenewed, DeviceEventLinkClosed:
 		return true
 	default:
 		return false
@@ -38,6 +45,8 @@ func (t DeviceStatusEventType) DisplayName() string {
 		return "心跳恢复"
 	case DeviceEventRegisterRenewed:
 		return "注册续订"
+	case DeviceEventLinkClosed:
+		return "链路断开"
 	default:
 		return string(t)
 	}
@@ -50,6 +59,8 @@ const (
 	DeviceEventSourceUnregister     DeviceStatusEventSource = "unregister"
 	DeviceEventSourceKeepalive      DeviceStatusEventSource = "keepalive"
 	DeviceEventSourceOfflineScanner DeviceStatusEventSource = "offline_scanner"
+	// DeviceEventSourceLinkWatcher 表示离线判定来自「可靠传输断开」而非心跳超时扫描器。
+	DeviceEventSourceLinkWatcher DeviceStatusEventSource = "link_watcher"
 )
 
 type StatusEventMetadata struct {
