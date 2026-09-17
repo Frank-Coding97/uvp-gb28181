@@ -390,7 +390,7 @@ func (s *Service) applyAcceptedHomePositionControl(ctx context.Context, operatio
 		}); err != nil {
 			return err
 		}
-		allowed, err := automaticHomePositionReconcileAllowed(tx, operation.ChannelID)
+		allowed, err := automaticHomePositionReconcileAllowed(tx, operation)
 		if err != nil || !allowed {
 			return err
 		}
@@ -413,9 +413,27 @@ func decodeHomePositionControlPayload(payloadJSON string) (homePositionControlVa
 	return decoded, nil
 }
 
-func automaticHomePositionReconcileAllowed(tx *gorm.DB, channelID uint) (bool, error) {
+// automaticHomePositionReconcileAllowed 决定是否要为刚被设备确认的看守位控制
+// operation 追加一次"主动查询对账"。它拦两种**没有人要求过**的发送:
+//
+//  1. 父 operation 是在 2022 之前的 profile 下发出的。对账子 operation 会原样继承
+//     父的 profile_version(见 createHomePositionReconcile),而 scheduler 是按
+//     operation 自带的 profile 重建报文的(见 buildScheduledPTZBody),所以这条
+//     子 operation 注定是"把 2022 的查询发给 2016 设备",只会白耗一个 SN 和
+//     三次重试预算。
+//  2. 设备已明确声明不支持 home_position_query。能力提示可以否决一次平台自发的
+//     动作 —— 但它绝不能否决操作者明确要求的手动查询。
+//
+// 第 1 条只作用于**自动对账**。手动查询路径(Refresh 的 QueryHomePosition 分支、
+// RefreshHomePosition)刻意不加版本门禁:设备登记的版本只是提示不是事实,手动发出
+// 一帧正是发现"登记成 2016、实际按 2022 应答"设备的唯一途径,响应一旦落库就会被
+// ResolveHomePositionCapabilities 的历史证据分支记成支持。
+func automaticHomePositionReconcileAllowed(tx *gorm.DB, parent gbmodels.GbPTZOperation) (bool, error) {
+	if !operationProtocolProfile(parent).SupportsHomePositionQuery() {
+		return false, nil
+	}
 	var channel gbmodels.GbChannel
-	result := tx.Select("id", "capabilities").Where("id = ?", channelID).Limit(1).Find(&channel)
+	result := tx.Select("id", "capabilities").Where("id = ?", parent.ChannelID).Limit(1).Find(&channel)
 	if result.Error != nil {
 		return false, result.Error
 	}

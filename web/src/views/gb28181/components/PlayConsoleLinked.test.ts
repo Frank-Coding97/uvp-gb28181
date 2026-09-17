@@ -1344,6 +1344,75 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("镜头按钮按住下发 FI 指令，松手用 FI 族的停止码收尾", async () => {
+    // GB/T 28181 表 A.6:FI 族(聚焦/光圈)跟方向族一样是"带速度的开始动作",但**停止码不同**
+    // —— 方向族停 0x00、FI 族停 0x40。松手时对 FI 发 0x00 设备不会停,镜头会一直走下去。
+    // 之前这两个按钮是单击式且不补停止,等于把"开始动作"当"走一步"发。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const irisOpen = wrapper.get("[title='开大(按住连续)']");
+    await irisOpen.trigger("pointerdown");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(
+      1,
+      channel.id,
+      expect.objectContaining({ action: "iris_open" })
+    );
+    await irisOpen.trigger("pointerup");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(
+      2,
+      channel.id,
+      expect.objectContaining({ action: "lens_stop" })
+    );
+
+    const focusFar = wrapper.get("[title='远焦(按住连续)']");
+    await focusFar.trigger("pointerdown");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(
+      3,
+      channel.id,
+      expect.objectContaining({ action: "focus_far" })
+    );
+    await focusFar.trigger("pointerup");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(
+      4,
+      channel.id,
+      expect.objectContaining({ action: "lens_stop" })
+    );
+    wrapper.unmount();
+  });
+
+  it("变倍仍然用方向族的停止码", async () => {
+    // 反向守卫:变倍属于方向族(0x00),不能被上面那条改动一并带成 lens_stop。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const zoomIn = wrapper.get("[title='放大']");
+    await zoomIn.trigger("pointerdown");
+    await zoomIn.trigger("pointerup");
+
+    expect(api.controlPtz).toHaveBeenNthCalledWith(
+      2,
+      channel.id,
+      expect.objectContaining({ action: "stop" })
+    );
+    expect(api.controlPtz).not.toHaveBeenCalledWith(
+      channel.id,
+      expect.objectContaining({ action: "lens_stop" })
+    );
+    wrapper.unmount();
+  });
+
+  it("不保留自动聚焦与自动光圈开关", async () => {
+    // 自动聚焦/自动光圈不是 GB/T 28181 的能力(表 A.6 只有四个镜头动作 + 本族停止),
+    // 是厂商私有概念。留着就是一个点了不发任何标准指令的假开关。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.find("[title='自动聚焦']").exists()).toBe(false);
+    expect(wrapper.find("[title='自动光圈']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("麦克风授权期间松手不会创建后端会话", async () => {
     let resolveMedia!: (value: any) => void;
     const stop = vi.fn();
@@ -2234,6 +2303,52 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("预置位为空时看守位不可启用:给出提示、禁用保存,但查询与关闭仍可用", async () => {
+    // 看守位的语义是「空闲 ResetTime 秒后回到 PresetIndex 指向的那个预置位」——
+    // 设备上没有预置位就等于没有归位目标,下发一个谁都不存在的编号毫无意义。
+    // 而平台里 0 号预置位**永远创建不出来**:创建接口强制 presetId>0
+    // (controllers/device_ptz_resources.go),列预置位也 `.filter(id>0)`(loadPresets)。
+    api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
+    api.getHomePosition.mockResolvedValueOnce(homeResponse({
+      homePosition: {
+        enabled: false,
+        resetTime: null,
+        presetId: 0, // 设备未配置看守位时回的占位值,不是「0 号预置位」
+        confirmedAt: "2026-07-22T10:00:00Z",
+        source: "device_query",
+        verification: "verified"
+      }
+    }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    // 1) 下拉里只剩占位项(没有任何真实预置位),0 号也不再作为选项出现。
+    //    ⚠️ 占位项**故意不是 disabled**:Chromium 对被选中的 disabled option 用
+    //    GrayText 渲染闭合框,暗色主题下文字与底色无法区分(实测 (38,54,72) vs
+    //    卡片底 (23,35,52)),下拉看起来就是空的。所以这里断言的是「只剩占位项」,
+    //    而不是「没有任何可选项」—— 拦提交靠的是 homePositionCanSave(见下)。
+    const presetSelect = wrapper.get("[data-testid='home-preset']");
+    const options = presetSelect.findAll("option");
+    expect(options).toHaveLength(1);
+    expect(options[0].text()).toContain("请选择预置位");
+    expect(wrapper.find("[data-testid='home-preset'] option[value='0']").exists()).toBe(false);
+
+    // 2) 拨开开关 → 说明「为什么不能启用」,且保存被挡住、点击也不发请求
+    await wrapper.get("[data-testid='home-toggle']").setValue(true);
+    await wrapper.get("[data-testid='home-reset-time']").setValue("30");
+    expect(wrapper.get("[data-testid='home-preset-required']").text()).toContain("设备当前没有预置位");
+    expect(wrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
+    await wrapper.get("[data-testid='home-save']").trigger("click");
+    await flushPromises();
+    expect(api.updateHomePosition).not.toHaveBeenCalled();
+
+    // 3) 但开关本身没被禁用、查询也照常可用 —— 设备端本来就开着看守位时,
+    //    「看一眼现在什么状态」和「把它关掉」必须永远做得到,缺预置位只挡「启用」。
+    expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).disabled).toBe(false);
+    expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it("有数据时顶部保存按钮同样打开 dialog(下一个可用编号)", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -2799,9 +2914,14 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       const confirmed = wrapper.get("[data-testid='home-confirmed-values']").text();
+      // 「确认值」照实显示设备回的原始编号 —— 0 在 wire 上表示「尚未配置」
+      // (标准没定义"查不到"的应答形态,模拟器统一回 Enabled=0/ResetTime=0/PresetIndex=0),
+      // 这一层不替设备撒谎,所以 #0 仍然要显示出来。
       expect(confirmed).toContain("#0");
       expect(confirmed).toContain(expected);
-      expect(wrapper.find("[data-testid='home-preset'] option[value='0']").exists()).toBe(true);
+      // 但下拉里**不能**再出现 0 号选项:平台里 0 号预置位永远不可能存在
+      // (创建接口强制 presetId>0、列预置位也 `.filter(id>0)`),它是个指向空气的选项。
+      expect(wrapper.find("[data-testid='home-preset'] option[value='0']").exists()).toBe(false);
       expect(wrapper.get("[data-testid='home-range-warning']").text()).toContain("超出平台可编辑范围");
       wrapper.unmount();
     });
@@ -2907,7 +3027,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     const nowIso = "2026-07-22T10:00:00.000Z";
     const deadline = (seconds: number) => new Date(Date.parse(nowIso) + seconds * 1000).toISOString();
 
-    it("启用保留 #0 边界，非法启用零请求，关闭只发送 enabled=false", async () => {
+    it("启用必须挑一个真实存在的预置位，非法启用零请求，关闭只发送 enabled=false", async () => {
       api.getHomePosition.mockResolvedValueOnce(homeResponse({
         homePosition: {
           enabled: false,
@@ -2922,14 +3042,16 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       await enableWrapper.get("[data-testid='home-toggle']").setValue(true);
-      await enableWrapper.get("[data-testid='home-preset']").setValue("0");
+      // 预置位列表里只有 1..20(mock),这里挑一个真实存在的。
+      // ⛔ 别再写 "0":0 号在平台里创建不出来,下拉里已经没有这个选项了。
+      await enableWrapper.get("[data-testid='home-preset']").setValue("1");
       await enableWrapper.get("[data-testid='home-reset-time']").setValue("10");
       await enableWrapper.get("[data-testid='home-save']").trigger("click");
       await flushPromises();
 
       expect(api.updateHomePosition).toHaveBeenCalledWith(
         channel.id,
-        { enabled: true, resetTime: 10, presetId: 0 },
+        { enabled: true, resetTime: 10, presetId: 1 },
         expect.stringMatching(/^home-control-/)
       );
       enableWrapper.unmount();
@@ -3312,7 +3434,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       await wrapper.get("[data-testid='home-toggle']").setValue(true);
-      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-preset']").setValue("1");
       await wrapper.get("[data-testid='home-reset-time']").setValue("30");
       await wrapper.get("[data-testid='home-save']").trigger("click");
       await vi.advanceTimersByTimeAsync(1000);
@@ -3325,7 +3447,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
       expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
       expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
-      expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("0");
+      // 草稿在读取失败后保留的是**用户提交的值**(而不是被清回默认)。
+      expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("1");
       expect((wrapper.get("[data-testid='home-reset-time']").element as HTMLInputElement).value).toBe("30");
       expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
       wrapper.unmount();
@@ -3402,7 +3525,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       await wrapper.get("[data-testid='home-toggle']").setValue(true);
-      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-preset']").setValue("1");
       await wrapper.get("[data-testid='home-reset-time']").setValue("30");
       await wrapper.get("[data-testid='home-save']").trigger("click");
       await vi.advanceTimersByTimeAsync(1000);
@@ -3497,7 +3620,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       await wrapper.get("[data-testid='home-toggle']").setValue(true);
-      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-preset']").setValue("1");
       await wrapper.get("[data-testid='home-reset-time']").setValue("30");
       await wrapper.get("[data-testid='home-save']").trigger("click");
       await vi.advanceTimersByTimeAsync(2000);

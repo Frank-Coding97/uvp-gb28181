@@ -626,8 +626,12 @@ func (dc *DeviceMgmtController) UpdatePTZHomePosition(c *gin.Context) {
 		CmdType: manscdp.CmdDeviceControl, Action: "home_position", IdempotencyKey: idempotencyKey,
 		Payload: payload, ResponseRequired: true, MaxAttempts: 1,
 		ActorID: actorID, ActorDeptID: actorDeptID,
+		// Carry the profile onto the operation so the scheduler's rebuild path
+		// uses the same charset/declaration as this first send instead of
+		// falling back to the 2016 compatibility profile.
+		Profile: target.Profile,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildHomePositionControl(channel.ChannelID, sn, manscdp.HomePositionControl{
+			return manscdp.BuildHomePositionControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.HomePositionControl{
 				Enabled: enabled, ResetTime: resetTime, PresetIndex: presetID,
 			})
 		},

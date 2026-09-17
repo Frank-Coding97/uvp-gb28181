@@ -61,6 +61,11 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 		command.ResponseRequired, command.MaxAttempts = true, 3
 		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildPresetQueryWithProfile(profile, targetCode, sn) }
 	case QueryHomePosition:
+		// 看守位信息查询是 2022 新增命令,但这里**刻意不加版本门禁**:设备登记的
+		// 版本只是提示,不是事实。真的 2022 设备被登记成 2016 时,发出这一帧是
+		// 平台唯一的发现手段 —— 响应一旦落库,ResolveHomePositionCapabilities 的
+		// 历史证据分支就会把它记成"支持"。拒发会把这条发现路径永久焊死。
+		// 只对**没人要求过**的自动对账加门禁(见 automaticHomePositionReconcileAllowed)。
 		command.CmdType, command.Action = manscdp.CmdHomePositionQuery, "refresh_home_position"
 		command.ResponseRequired, command.MaxAttempts = true, 3
 		command.Build = func(sn int) ([]byte, error) {
@@ -98,6 +103,9 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 // deliberately separate from Refresh so existing resource queries keep their
 // legacy actor semantics while the home-position endpoint records the actual
 // user who initiated the query.
+//
+// 与 Refresh 的 QueryHomePosition 一样,这里不为版本设门禁:手动查询是操作者
+// 明确要求的动作,也是发现"登记成 2016 但实际按 2022 应答"的唯一途径。
 func (s *Service) RefreshHomePosition(ctx context.Context, target Target, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
 	profile := target.Profile
 	if profile.Version == "" {

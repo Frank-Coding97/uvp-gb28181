@@ -23,7 +23,38 @@ const (
 	PTZActionRightDown PTZAction = "right_down"
 	PTZActionZoomIn    PTZAction = "zoom_in"
 	PTZActionZoomOut   PTZAction = "zoom_out"
+
+	// Lens FI family. GB/T 28181 Annex A.2.1 encodes focus and iris in the
+	// same eight-byte front-end command as the directional moves: byte 4 uses
+	// the 0x4x group (bit6 set) and the two lens axes occupy the 0x4 bit pair.
+	//
+	// The 2022 revision explicitly stops extending PTZCmd ("不再对 PTZCmd 命令
+	// 进行增补"), so these codes are unchanged from 2016 and stay the only
+	// standard channel for focus/iris. PTZPreciseCtrl is NOT an alternative:
+	// it carries Pan/Tilt/Zoom only.
+	//
+	// Note the deliberate asymmetry of the speed byte — focus speed travels in
+	// data1 (byte 5) while iris speed travels in data2 (byte 6).
+	PTZActionFocusFar  PTZAction = "focus_far"
+	PTZActionFocusNear PTZAction = "focus_near"
+	PTZActionIrisOpen  PTZAction = "iris_open"
+	PTZActionIrisClose PTZAction = "iris_close"
+	// PTZActionLensStop is the FI-family stop (0x40). The directional stop
+	// (0x00) is not interchangeable: a device tracking the FI sub-family stops
+	// only on its own stop instruction.
+	PTZActionLensStop PTZAction = "lens_stop"
 )
+
+// Speedless reports whether the action ignores the speed bytes. Only the two
+// stop instructions qualify; every other action carries a speed.
+func (a PTZAction) Speedless() bool {
+	switch a {
+	case PTZActionStop, PTZActionLensStop:
+		return true
+	default:
+		return false
+	}
+}
 
 // PTZCommand is encoded as the GB28181 front-end PTZ command string.
 type PTZCommand struct {
@@ -32,14 +63,12 @@ type PTZCommand struct {
 }
 
 // PTZExtendedAction covers standard device-control operations beyond the
-// directional A5 command. Lens operations require an explicit device profile.
+// directional A5 command. These are the ops that carry a numbered target
+// (preset / cruise / scan); focus and iris live in PTZAction because their
+// instruction codes are fixed by the standard, not by a vendor profile.
 type PTZExtendedAction string
 
 const (
-	PTZActionFocusNear        PTZExtendedAction = "focus_near"
-	PTZActionFocusFar         PTZExtendedAction = "focus_far"
-	PTZActionIrisOpen         PTZExtendedAction = "iris_open"
-	PTZActionIrisClose        PTZExtendedAction = "iris_close"
 	PTZActionSetPreset        PTZExtendedAction = "preset_set"
 	PTZActionCallPreset       PTZExtendedAction = "preset_call"
 	PTZActionDeletePreset     PTZExtendedAction = "preset_delete"
@@ -57,22 +86,12 @@ const (
 	PTZActionScanStop         PTZExtendedAction = "scan_stop"
 )
 
-// PTZProfile supplies vendor-specific lens instruction bytes. A nil field
-// means the device has not declared that operation and it must be rejected.
-type PTZProfile struct {
-	FocusNearInstruction *byte
-	FocusFarInstruction  *byte
-	IrisOpenInstruction  *byte
-	IrisCloseInstruction *byte
-}
-
 type PTZExtendedCommand struct {
 	Action  PTZExtendedAction
 	ID      int
 	Speed   int
 	SubID   int // 0x84/0x85 的预置位号;0x85 中为 0 表示删除整条巡航
 	Value16 int // 0x86/0x87 的 12 bit 值:低 8 位放 P2,高 4 位放 P3 高半字节
-	Profile *PTZProfile
 }
 
 type deviceControl struct {
@@ -195,6 +214,17 @@ func ParsePTZAction(value string) (PTZAction, error) {
 		return PTZActionZoomIn, nil
 	case "zoom_out", "out", "缩小":
 		return PTZActionZoomOut, nil
+	case "focus_far", "far", "远焦", "聚焦远":
+		return PTZActionFocusFar, nil
+	case "focus_near", "near", "近焦", "聚焦近":
+		return PTZActionFocusNear, nil
+	case "iris_open", "iris_wide", "光圈+", "光圈开大", "开大":
+		return PTZActionIrisOpen, nil
+	// 归一化会把 "-" 换成 "_",所以界面上写的「光圈-」到这里是「光圈_」。
+	case "iris_close", "iris_narrow", "光圈_", "光圈缩小":
+		return PTZActionIrisClose, nil
+	case "lens_stop", "fi_stop":
+		return PTZActionLensStop, nil
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 动作: %q", value)
 	}
@@ -215,7 +245,10 @@ func BuildPTZControlWithProfile(profile protocol.Profile, channelID string, sn i
 	if sn <= 0 {
 		return nil, fmt.Errorf("SN 必须为正数")
 	}
-	if command.Speed < 1 || command.Speed > 255 {
+	if command.Speed < 0 || command.Speed > 255 {
+		return nil, fmt.Errorf("PTZ 速度必须在 0-255 之间")
+	}
+	if command.Speed < 1 && !command.Action.Speedless() {
 		return nil, fmt.Errorf("PTZ 速度必须在 1-255 之间")
 	}
 	ptz, err := encodePTZ(command)
@@ -232,8 +265,10 @@ func BuildPTZControlWithProfile(profile protocol.Profile, channelID string, sn i
 }
 
 // BuildExtendedPTZControl builds standard DeviceControl operations such as
-// preset, cruise and scan commands. Focus/iris use profile bytes
-// because their encoding is not interoperable across vendor families.
+// preset, cruise and scan commands. Focus and iris are deliberately NOT here:
+// their instruction codes are fixed by GB/T 28181 (0x41/0x42/0x44/0x48), so
+// they travel through BuildPTZControlWithProfile with PTZCommand like every
+// other front-end command.
 func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedCommand) ([]byte, error) {
 	return BuildExtendedPTZControlWithProfile(protocol.ProfileFor(protocol.Version2016), channelID, sn, command)
 }
@@ -311,27 +346,6 @@ func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID stri
 		parameter1 = byte(command.ID)
 	case PTZActionScanStop:
 		// As with cruise stop, stop scanning uses the standard stop command.
-	case PTZActionFocusNear, PTZActionFocusFar, PTZActionIrisOpen, PTZActionIrisClose:
-		if command.Profile == nil {
-			return nil, fmt.Errorf("PTZ lens operation requires profile")
-		}
-		var code *byte
-		switch command.Action {
-		case PTZActionFocusNear:
-			code = command.Profile.FocusNearInstruction
-		case PTZActionFocusFar:
-			code = command.Profile.FocusFarInstruction
-		case PTZActionIrisOpen:
-			code = command.Profile.IrisOpenInstruction
-		case PTZActionIrisClose:
-			code = command.Profile.IrisCloseInstruction
-		}
-		if code == nil {
-			return nil, fmt.Errorf("PTZ lens operation requires profile instruction")
-		}
-		instruction = *code
-		parameter1 = byte(command.Speed)
-		parameter2 = byte(command.Speed)
 	default:
 		return nil, fmt.Errorf("不支持的 PTZ 扩展动作: %q", command.Action)
 	}
@@ -348,6 +362,7 @@ func encodePTZ(command PTZCommand) (string, error) {
 	var instruction byte
 	switch command.Action {
 	case PTZActionStop:
+		// 0x00 with all-zero data is the front-end stop instruction.
 	case PTZActionLeft:
 		instruction = 0x02
 	case PTZActionRight:
@@ -368,24 +383,50 @@ func encodePTZ(command PTZCommand) (string, error) {
 		instruction = 0x10
 	case PTZActionZoomOut:
 		instruction = 0x20
+	case PTZActionLensStop:
+		// FI-family stop. 0x00 is the directional stop and is not a reliable
+		// substitute for a device that is mid focus/iris travel.
+		instruction = 0x40
+	case PTZActionFocusFar:
+		instruction = 0x41
+	case PTZActionFocusNear:
+		instruction = 0x42
+	case PTZActionIrisOpen:
+		instruction = 0x44
+	case PTZActionIrisClose:
+		instruction = 0x48
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 动作: %q", command.Action)
 	}
 
-	moveSpeed := byte(command.Speed)
-	zoomSpeed := byte(0)
-	if command.Action == PTZActionZoomIn || command.Action == PTZActionZoomOut {
-		// The zoom nibble occupies the high half-byte. Values below 0x10
-		// are accepted by the API but normalized to the protocol minimum.
+	// Byte 5 = data1, byte 6 = data2, byte 7 (high nibble) = zoom speed.
+	var data1, data2, zoomSpeed byte
+	switch command.Action {
+	case PTZActionStop, PTZActionLensStop:
+		// Stop instructions carry no speed; all-zero data bytes are standard.
+	case PTZActionFocusFar, PTZActionFocusNear:
+		// 聚焦速度按标准放数据1(字节5)。
+		data1 = byte(command.Speed)
+	case PTZActionIrisOpen, PTZActionIrisClose:
+		// 光圈速度按标准放数据2(字节6)。与聚焦不对称是标准本身如此,
+		// 不是笔误 —— 两处都塞速度会被严格设备判为非法报文。
+		data2 = byte(command.Speed)
+	case PTZActionZoomIn, PTZActionZoomOut:
+		// The zoom nibble occupies the high half-byte of byte 7. Values below
+		// 0x10 are accepted by the API but normalized to the protocol minimum.
 		zoom := command.Speed
 		if zoom < 0x10 {
 			zoom = 0x10
 		}
 		zoomSpeed = byte(zoom & 0xF0)
-		moveSpeed = 0
+	default:
+		// Directional moves carry the speed on both axes: pan in data1,
+		// tilt in data2.
+		data1 = byte(command.Speed)
+		data2 = byte(command.Speed)
 	}
 
-	bytes := [8]byte{0xA5, 0x0F, 0x01, instruction, moveSpeed, moveSpeed, zoomSpeed, 0}
+	bytes := [8]byte{0xA5, 0x0F, 0x01, instruction, data1, data2, zoomSpeed, 0}
 	for i := 0; i < len(bytes)-1; i++ {
 		bytes[7] += bytes[i]
 	}

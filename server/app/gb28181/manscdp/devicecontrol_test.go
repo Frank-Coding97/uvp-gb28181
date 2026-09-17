@@ -1,6 +1,7 @@
 package manscdp
 
 import (
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -198,10 +199,103 @@ func TestBuildExtendedPTZControl_RejectsNonStandardCruiseActions(t *testing.T) {
 	}
 }
 
-func TestBuildExtendedPTZControl_RequiresProfileForLens(t *testing.T) {
-	_, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: PTZActionFocusNear, Speed: 8})
-	if err == nil || !strings.Contains(err.Error(), "profile") {
-		t.Fatalf("expected profile error, got %v", err)
+// GB/T 28181 Annex A.2.1 FI 子族:byte4 = 0x41/0x42/0x44/0x48 与 FI 停止 0x40。
+// 速度字节是不对称的 —— 聚焦速度在数据1(字节5),光圈速度在数据2(字节6)。
+func TestBuildPTZControl_LensInstructionAndSpeedByteLayout(t *testing.T) {
+	tests := []struct {
+		name   string
+		action PTZAction
+		speed  int
+		want   string
+	}{
+		{"focus far", PTZActionFocusFar, 0x20, "A50F014120000016"},
+		{"focus near", PTZActionFocusNear, 0x20, "A50F014220000017"},
+		{"iris open", PTZActionIrisOpen, 0x20, "A50F014400200019"},
+		{"iris close", PTZActionIrisClose, 0x20, "A50F01480020001D"},
+		{"lens stop", PTZActionLensStop, 0, "A50F0140000000F5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := BuildPTZControl("C", 9, PTZCommand{Action: tt.action, Speed: tt.speed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var control struct {
+				PTZCmd string `xml:"PTZCmd"`
+			}
+			if err := newDecoder(body).Decode(&control); err != nil {
+				t.Fatal(err)
+			}
+			if control.PTZCmd != tt.want {
+				t.Fatalf("PTZCmd=%s, want %s", control.PTZCmd, tt.want)
+			}
+		})
+	}
+}
+
+// 镜头动作只在数据1 或 数据2 之一带速度,另一个必须留零 —— 两头都塞会被严格设备判为非法。
+func TestBuildPTZControl_LensSpeedNeverLandsOnBothDataBytes(t *testing.T) {
+	body, err := BuildPTZControl("C", 9, PTZCommand{Action: PTZActionFocusFar, Speed: 0x20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var control struct {
+		PTZCmd string `xml:"PTZCmd"`
+	}
+	if err := newDecoder(body).Decode(&control); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := hex.DecodeString(control.PTZCmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded[4] != 0x20 || decoded[5] != 0x00 {
+		t.Fatalf("focus speed must sit in data1 only, got data1=0x%02X data2=0x%02X", decoded[4], decoded[5])
+	}
+}
+
+// 停止指令不带速度,允许 speed=0;其余动作仍必须给出 1-255。
+func TestBuildPTZControl_StopAllowsZeroSpeedButMovesDoNot(t *testing.T) {
+	for _, action := range []PTZAction{PTZActionStop, PTZActionLensStop} {
+		if _, err := BuildPTZControl("C", 9, PTZCommand{Action: action, Speed: 0}); err != nil {
+			t.Fatalf("%s with speed 0 should build: %v", action, err)
+		}
+	}
+	for _, action := range []PTZAction{PTZActionLeft, PTZActionFocusFar, PTZActionIrisOpen} {
+		if _, err := BuildPTZControl("C", 9, PTZCommand{Action: action, Speed: 0}); err == nil {
+			t.Fatalf("%s with speed 0 should be rejected", action)
+		}
+	}
+}
+
+// 镜头动作现在走 PTZAction 主干,扩展构造器不再接受它们。
+func TestBuildExtendedPTZControl_RejectsLensActions(t *testing.T) {
+	for _, action := range []PTZExtendedAction{"focus_far", "focus_near", "iris_open", "iris_close"} {
+		if _, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: action, Speed: 8}); err == nil {
+			t.Fatalf("lens action %s should not be built by the extended builder", action)
+		}
+	}
+}
+
+func TestParsePTZActionAcceptsLensVocabulary(t *testing.T) {
+	for input, want := range map[string]PTZAction{
+		"focus_far":  PTZActionFocusFar,
+		"远焦":         PTZActionFocusFar,
+		"focus_near": PTZActionFocusNear,
+		"近焦":         PTZActionFocusNear,
+		"iris_open":  PTZActionIrisOpen,
+		"光圈+":        PTZActionIrisOpen,
+		"iris_close": PTZActionIrisClose,
+		"光圈-":        PTZActionIrisClose,
+		"lens_stop":  PTZActionLensStop,
+	} {
+		got, err := ParsePTZAction(input)
+		if err != nil {
+			t.Fatalf("ParsePTZAction(%q) failed: %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("ParsePTZAction(%q)=%s, want %s", input, got, want)
+		}
 	}
 }
 

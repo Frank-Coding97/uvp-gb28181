@@ -78,7 +78,12 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 		dc.FailAndAbort(c, "PTZ 动作不合法", err)
 		return
 	}
-	if request.Speed < 1 || request.Speed > 255 {
+	if request.Speed < 0 || request.Speed > 255 {
+		dc.FailAndAbort(c, "PTZ 速度需在 0-255 之间", nil)
+		return
+	}
+	// Stop instructions (0x00 / 0x40) carry no speed byte.
+	if request.Speed < 1 && !action.Speedless() {
 		dc.FailAndAbort(c, "PTZ 速度需在 1-255 之间", nil)
 		return
 	}

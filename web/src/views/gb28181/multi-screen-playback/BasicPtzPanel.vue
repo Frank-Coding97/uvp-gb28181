@@ -44,6 +44,12 @@ const capabilityState = ref("unknown");
 let capabilityToken = 0;
 let activeAction: { channelId: number; action: string } | null = null;
 
+/**
+ * FI 族(聚焦/光圈)的动作名。用于在松手时选对停止码 —— 这一族停 0x40,方向族停 0x00,
+ * 见 [stopActive]。动作名与后端 `manscdp.ParsePTZAction` 的词表一一对应。
+ */
+const LENS_ACTIONS = new Set(["focus_far", "focus_near", "iris_open", "iris_close"]);
+
 const focusedName = computed(() => props.channel?.name || props.channel?.alias || props.channel?.channelId || "未选择画面");
 const disabledReason = computed(() => {
     if (!canControlPtz.value) return "当前账号没有云台控制权限";
@@ -78,7 +84,10 @@ async function stopActive(force = false) {
     activeAction = null;
     emit("actionChange", null);
     const channelId = target?.channelId || props.channel?.id;
-    if (channelId) await send(channelId, "stop");
+    // FI 族(聚焦/光圈)有**自己的**停止码。方向族停 0x00、FI 族停 0x40(GB/T 28181
+    // 表 A.6),设备只在本族的停止指令上才停 —— 对 FI 按下却发 0x00,镜头会一直走下去。
+    const stopAction = target && LENS_ACTIONS.has(target.action) ? "lens_stop" : "stop";
+    if (channelId) await send(channelId, stopAction);
 }
 
 async function startAction(action: string) {

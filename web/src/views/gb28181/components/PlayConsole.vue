@@ -167,8 +167,9 @@ const elapsedText = computed(() =>
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(6); // 1-10 步进,转发时 * 25 得 GB28181 1-255
-const focusMode = ref<"auto" | "manual">("auto");
-const irisMode = ref<"auto" | "manual">("auto");
+// 自动聚焦 / 自动光圈已摘除:GB/T 28181 的 FI 指令族(表 A.6)只有"光圈放大/缩小"与
+// "聚焦近/远"四个动作 + 本族停止,没有自动档位 —— 那是厂商私有概念。原型页是给评审看
+// 交互的,留一个点了不发任何标准指令的开关只会误导。
 type JoystickDirection = "左上" | "上" | "右上" | "左" | "右" | "左下" | "下" | "右下";
 const joystickDragging = ref(false);
 const joystickPointerId = ref<number | null>(null);
@@ -796,17 +797,15 @@ onBeforeUnmount(() => {
                                 <div class="lens-item">
                                     <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
                                     <div class="lens-btns">
-                                        <button title="远焦" @click="sendPtz('远焦')">远</button>
-                                        <button title="近焦" @click="sendPtz('近焦')">近</button>
-                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="远焦(按住连续)" @pointerdown.prevent="sendPtz('远焦')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">远</button>
+                                        <button title="近焦(按住连续)" @pointerdown.prevent="sendPtz('近焦')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">近</button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><Circle :size="12" />光圈</span>
                                     <div class="lens-btns">
-                                        <button title="开大" @click="sendPtz('光圈+')">+</button>
-                                        <button title="缩小" @click="sendPtz('光圈-')">−</button>
-                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="开大(按住连续)" @pointerdown.prevent="sendPtz('光圈+')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">+</button>
+                                        <button title="缩小(按住连续)" @pointerdown.prevent="sendPtz('光圈-')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">−</button>
                                     </div>
                                 </div>
                             </div>
@@ -1514,7 +1513,6 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 .lens-btns button:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
-.lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
 
 
 /* 精准 PTZ */

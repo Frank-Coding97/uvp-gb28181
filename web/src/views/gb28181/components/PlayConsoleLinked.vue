@@ -476,8 +476,9 @@ const talkAvailable = computed(() => props.channel?.status === 1 && canTalk.valu
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(DEFAULT_PTZ_SPEED_LEVEL);
-const focusMode = ref<"auto" | "manual">("auto");
-const irisMode = ref<"auto" | "manual">("auto");
+// 自动聚焦 / 自动光圈已摘除:那是厂商私有概念,GB/T 28181 的 FI 指令族(表 A.6)里
+// 只有"光圈放大/缩小"和"聚焦近/远"四个动作 + 本族停止,没有任何自动档位。留一个点了
+// 不发任何标准指令的开关,只会让人以为它在生效。
 type JoystickDirection = "左上" | "上" | "右上" | "左" | "右" | "左下" | "下" | "右下";
 const joystickDragging = ref(false);
 const joystickPointerId = ref<number | null>(null);
@@ -824,6 +825,27 @@ type HomePositionPending = { kind: "control" | "refresh"; operationId: string | 
 type HomePositionDraft = { enabled: boolean; presetId: number | null; resetTime: number | null };
 type HomePositionPresentationState = "unknown" | "loading" | "pending" | "unsupported" | "unconfigured" | "enabled" | "disabled" | "error" | "offline";
 
+/** 设备返回的看守位配置 → 编辑草稿。
+ *
+ * ⛔ `presetId` 的 **0 必须归一成 `null`**。设备从未被配置过看守位时,标准没有定义
+ * 「查不到」的应答形态,模拟器统一回 `Enabled=0 / ResetTime=0 / PresetIndex=0`,
+ * 所以 0 在 wire 上是「尚未配置」的占位值,而不是「0 号预置位」。而 0 号在平台里
+ * **永远不存在**:创建接口强制 `presetId > 0`(`controllers/device_ptz_resources.go`),
+ * 读列表时前端也 `.filter(id > 0)`(`loadPresets`)。若把 0 原样塞进 draft,
+ * 下拉里就会出现一个指向空气的选项、还能被原样提交回设备 —— 2026-09-17 用户上报的
+ * 「#0 · 标准预置位 0」就是这么来的。
+ * 非 0 的未知编号**保留**:那是设备真有的点位,由模板如实标注成「设备侧预置位」,
+ * 不能替操作员抹掉。 */
+function homeDraftFrom(config: HomePositionConfig | null): HomePositionDraft {
+    if (!config) return { enabled: false, presetId: null, resetTime: 300 };
+    const presetId = typeof config.presetId === "number"
+        && Number.isInteger(config.presetId)
+        && config.presetId > 0
+        ? config.presetId
+        : null;
+    return { enabled: config.enabled, presetId, resetTime: config.resetTime };
+}
+
 const unknownHomeSupport = (): HomePositionSupport => ({ status: "unknown", reason: "能力尚未确认" });
 const homeConfirmed = ref<HomePositionConfig | null>(null);
 const homeDraft = ref<HomePositionDraft>({ enabled: false, presetId: null, resetTime: 300 });
@@ -838,10 +860,14 @@ const homeMismatch = ref("");
 const homePositionCanSave = computed(() => {
     if (!homeDraft.value.enabled) return true;
     const { presetId, resetTime } = homeDraft.value;
-    return Number.isInteger(presetId)
-        && Number(presetId) >= 0
-        && Number(presetId) <= 255
-        && Number.isInteger(resetTime)
+    // 看守位的语义是「空闲 ResetTime 秒后回到 PresetIndex 指向的那个预置位」——
+    // 没有预置位就等于没有归位目标,下发一个平台和设备都不存在的编号毫无意义。
+    // 判定以**平台预置位列表**为准:`presets` 在 loadPresets 里已经过滤掉
+    // `id <= 0`,平台创建接口也强制 `presetId > 0`,所以 0 号在这里天然不合格。
+    // ⛔ 只挡「启用」。查询与关闭各自有自己的闸门(homeCanRefresh / `!enabled` 时
+    //    本函数直接放行),设备端本来就开着看守位时操作员必须还能查询和关掉它。
+    if (!Number.isInteger(presetId) || !presets.value.some((p) => p.id === presetId)) return false;
+    return Number.isInteger(resetTime)
         && Number(resetTime) >= 10
         && Number(resetTime) <= 3600;
 });
@@ -949,9 +975,7 @@ function resetHomePositionState() {
 
 function applyHomePositionResult(result: HomePositionResult) {
     homeConfirmed.value = result.homePosition ? { ...result.homePosition } : null;
-    homeDraft.value = result.homePosition
-        ? { enabled: result.homePosition.enabled, presetId: result.homePosition.presetId, resetTime: result.homePosition.resetTime }
-        : { enabled: false, presetId: null, resetTime: 300 };
+    homeDraft.value = homeDraftFrom(result.homePosition);
     homeControlSupport.value = result.controlSupport;
     homeQuerySupport.value = result.querySupport;
     homeError.value = "";
@@ -1067,10 +1091,7 @@ function nextHomePositionIdempotencyKey(kind: "control" | "refresh", channelId: 
 }
 
 function restoreHomeDraftFromConfirmed() {
-    const confirmed = homeConfirmed.value;
-    homeDraft.value = confirmed
-        ? { enabled: confirmed.enabled, presetId: confirmed.presetId, resetTime: confirmed.resetTime }
-        : { enabled: false, presetId: null, resetTime: 300 };
+    homeDraft.value = homeDraftFrom(homeConfirmed.value);
 }
 
 function prepareHomePositionOperation(operationId: string) {
@@ -2140,12 +2161,15 @@ async function loadHomePosition(channelId = props.channel?.id, token = sessionTo
 const ptzActions: Record<string, string> = {
     "左上": "left_up", "上": "up", "右上": "right_up", "左": "left", "右": "right", "左下": "left_down", "下": "down", "右下": "right_down",
     "放大": "zoom_in", "缩小": "zoom_out", "远焦": "focus_far", "近焦": "focus_near", "光圈+": "iris_open", "光圈-": "iris_close", "停止": "stop",
+    // FI 族(聚焦/光圈)有**自己的**停止码:方向族停 0x00、FI 族停 0x40(GB/T 28181 表 A.6)。
+    // 松手时对 FI 发 0x00 设备不会停 —— 它只认本族的停止指令。
+    "镜头停止": "lens_stop",
 };
 let activePtzAction = "";
 
 async function sendPtz(action: string) {
     if (!canControlPtz.value || !props.channel) return;
-    if (action === "停止") activePtzAction = "";
+    if (action === "停止" || action === "镜头停止") activePtzAction = "";
     else activePtzAction = action;
     try {
         const response = await controlPtz(props.channel.id, {
@@ -3282,7 +3306,7 @@ onBeforeUnmount(() => {
                                 <AlertTriangle :size="42" />
                                 <strong>点播未完成</strong>
                                 <span>{{ phaseHint }}</span>
-                                <button class="btn-primary" @click="reconnect"><RefreshCcw :size="14" />重试</button>
+                                <button class="btn-primary player-retry" @click="reconnect"><RefreshCcw :size="14" />重试</button>
                             </div>
                         </template>
                         <template v-else>
@@ -3610,7 +3634,20 @@ onBeforeUnmount(() => {
                                         >
                                             <Info :size="12" />
                                         </span>
-                                        <label v-if="homePresentation.showControls" class="toggle">
+                                        <!-- 开关本身**不禁用**:设备端可能本来就开着看守位
+                                             (或它自己设的点位平台还没同步),操作员必须还能
+                                             把它关掉、也必须还能查询设备当前状态 ——
+                                             见 homeCanSubmit / homeCanRefresh 各自的门槛。
+                                             缺预置位时只挡「启用」并给提示;这里额外挂一个
+                                             title,让操作员在拨动之前就知道原因(与巡航「添加」
+                                             按钮 disabled + title 的做法一致)。 -->
+                                        <label
+                                            v-if="homePresentation.showControls"
+                                            class="toggle"
+                                            :title="presets.length === 0 && !homeDraft.enabled
+                                                ? '设备暂无预置位，需先在「预置位」卡片设置点位后再启用看守位'
+                                                : undefined"
+                                        >
                                         <input
                                             v-model="homeDraft.enabled"
                                             data-testid="home-toggle"
@@ -3673,19 +3710,49 @@ onBeforeUnmount(() => {
                                                     data-testid="home-preset"
                                                     :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
                                                 >
-                                                    <option disabled :value="null">请选择预置位</option>
-                                                    <option :value="0">#0 · 标准预置位 0</option>
+                                                    <!-- ⛔ 这个占位项**不能**加 `disabled`:
+                                                         Chromium 对「被选中的 disabled option」用
+                                                         GrayText 着色渲染**闭合状态**的 select,
+                                                         暗色主题下几乎等同于底色 —— 实测文本最亮
+                                                         (38,54,72),与卡片底 (23,35,52) 无法区分,
+                                                         而且 `option:disabled { color: … }` 覆盖无效
+                                                         (覆盖后仍是 (38,54,72))。结果就是下拉看起来
+                                                         完全是空的、操作员不知道要选什么。
+                                                         改成可选中的占位项,「没挑到真预置位就不许提交」
+                                                         交给 homePositionCanSave 拦。 -->
+                                                    <option :value="null">请选择预置位</option>
+                                                    <!-- ⛔ 这里原来有一条硬编码的 `<option :value="0">#0 · 标准预置位 0</option>`。
+                                                         它存在的唯一理由是:设备从未被配置过看守位时,标准没有定义
+                                                         「查不到」的应答形态,模拟器统一回 `PresetIndex=0`
+                                                         (见模拟器 DeviceControlSubRouter 的说明),前端为了不让
+                                                         下拉空白就补了这么一个选项。但 0 号预置位在平台里
+                                                         **根本不可能存在**:
+                                                           - 创建接口强制 `presetId > 0`(controllers/device_ptz_resources.go)
+                                                           - 读列表时前端也 `.filter(id > 0)`(loadPresets)
+                                                         所以它是个永远指向空气的选项,还会让操作员误以为
+                                                         「0 号」是个平台定义的标准预置位。
+                                                         改成:设备真回了一个平台列表里没有的编号时如实标注来源,
+                                                         不再伪造一个「标准预置位」。 -->
+                                                    <option
+                                                        v-if="homeDraft.presetId != null && !presets.some((p) => p.id === homeDraft.presetId)"
+                                                        :value="homeDraft.presetId"
+                                                    >#{{ homeDraft.presetId }} · 设备侧预置位（不在平台列表）</option>
                                                     <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
                                                 </select>
                                             </label>
                                             <label class="home-row">
-                                                <span>空闲</span>
+                                                <!-- 单位必须写在界面上:这个字段就是 GB/T 28181 的
+                                                     `ResetTime`(秒),但光看「空闲 10」看不出单位是
+                                                     秒还是分钟。摘要行本来就写「空闲 10 秒」,这里对齐。 -->
+                                                <span>空闲(秒)</span>
                                                 <input
                                                     v-model.number="homeDraft.resetTime"
                                                     data-testid="home-reset-time"
                                                     type="number"
                                                     min="10"
                                                     max="3600"
+                                                    aria-label="看守位空闲时间（秒）"
+                                                    title="无云台操作后等待多少秒自动归位（10–3600）"
                                                     :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
                                                 />
                                             </label>
@@ -3716,8 +3783,25 @@ onBeforeUnmount(() => {
                                             </button>
                                         </div>
                                     </div>
-                                    <p v-if="homePresentation.showControls && homeDraft.enabled && !homePositionCanSave" class="home-error" data-testid="home-validation">
-                                        启用需要预置位 #0..#255，等待时间为 10..3600 秒整数。
+                                    <!-- 预置位为空是**独立的**一种情况,不能只靠下面那条通用校验提示 ——
+                                         它的成因是「设备上没有归位目标」,而不是「填错了」,所以单列一条
+                                         并给出可执行的下一步(先去预置位卡片设点 / 刷新同步)。
+                                         注意:**只挡「启用」**,不挡查询与关闭 —— 设备端可能本来就开着看守位
+                                         (或它自己设的点位平台还没同步),那两种操作必须永远可用,
+                                         否则操作员连「看一眼设备现在什么状态」和「把它关掉」都做不到。 -->
+                                    <p
+                                        v-if="homePresentation.showControls && homeDraft.enabled && presets.length === 0"
+                                        class="home-hint"
+                                        data-testid="home-preset-required"
+                                    >
+                                        设备当前没有预置位。看守位要有一个「归位目标」，请先在上方「预置位」卡片设置点位（若设备侧已有点位，点该卡的刷新按钮同步）。
+                                    </p>
+                                    <p
+                                        v-else-if="homePresentation.showControls && homeDraft.enabled && !homePositionCanSave"
+                                        class="home-error"
+                                        data-testid="home-validation"
+                                    >
+                                        启用需要选择一个已存在的预置位，等待时间为 10..3600 秒整数。
                                     </p>
                                 </div>
                             </section>
@@ -3948,17 +4032,15 @@ onBeforeUnmount(() => {
                                 <div class="lens-item">
                                     <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
                                     <div class="lens-btns">
-                                        <button title="远焦" @click="sendPtz('远焦')">远</button>
-                                        <button title="近焦" @click="sendPtz('近焦')">近</button>
-                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="远焦(按住连续)" @pointerdown.prevent="sendPtz('远焦')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">远</button>
+                                        <button title="近焦(按住连续)" @pointerdown.prevent="sendPtz('近焦')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">近</button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><Circle :size="12" />光圈</span>
                                     <div class="lens-btns">
-                                        <button title="开大" @click="sendPtz('光圈+')">+</button>
-                                        <button title="缩小" @click="sendPtz('光圈-')">−</button>
-                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="开大(按住连续)" @pointerdown.prevent="sendPtz('光圈+')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">+</button>
+                                        <button title="缩小(按住连续)" @pointerdown.prevent="sendPtz('光圈-')" @pointerup.prevent="sendPtz('镜头停止')" @pointerleave="sendPtz('镜头停止')" @pointercancel="sendPtz('镜头停止')">−</button>
                                     </div>
                                 </div>
                             </div>
@@ -4990,14 +5072,21 @@ onBeforeUnmount(() => {
 .spin { animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 播放器控制条(悬浮画面下) */
-.btn-primary {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 14px; margin-top: 4px;
-    color: #fff; background: var(--uvp-brand); border: 0; border-radius: 8px; cursor: pointer;
-    font-size: 12px; font-weight: 600;
-}
-.btn-primary:hover { background: var(--uvp-brand-strong); }
+/* 播放器控制条(悬浮画面下)的「重试」按钮:在通用按钮基础上多加 4px 上边距。
+ *
+ * ⛔ 选择器**必须**带 `.player-retry` 这一层 class,不能只写 `.btn-primary`。
+ *    这里原来是一份完整的 `.btn-primary` 定义(display/gap/padding/radius/font… +
+ *    `margin-top: 4px`),但它在源序上排在下方「通用按钮」区**之前**,两者特异性
+ *    同为 0,1,0 —— 于是除 `margin-top` 以外的声明全被后者覆盖掉,实际只有
+ *    `margin-top: 4px` 生效,并且泄漏到了**页面上每一个** `.btn-primary`
+ *    (后面那两次重定义都没声明 margin,等于没覆盖)。看守位卡片的「保存」按钮
+ *    因此被往下顶 4px:它在 32dp 行里顶到行首、底部多出 4px,和同一行的 28dp
+ *    输入框不再居中对齐。2026-09-17 由用户截图上报,复现页实测:
+ *    泄漏时按钮顶 - 输入框顶 = 0、底 - 底 = +4;收窄后上差 -2、下差 +2(居中)。
+ *
+ * 既然原本生效的只有那一条,这里就只保留它 —— 其余交给下方「通用按钮」区的
+ * 唯一真源,既不泄漏,也不改变「重试」按钮自身的观感(它此前用的就是通用那套值)。 */
+.btn-primary.player-retry { margin-top: 4px; }
 
 /* 多协议切换器 */
 /* 底部两角要自己写,不能只靠父级 .video-frame 的 border-radius + overflow: hidden:
@@ -5546,7 +5635,6 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 .lens-btns button:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
-.lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
 
 /* 精准 PTZ */
 /* 面板盒填满高度后,内容若仍挤在顶部就会留出一块空腔。让当前模式的内容块
@@ -5696,9 +5784,12 @@ onBeforeUnmount(() => {
 .home-config.state-success .home-state-icon { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent); }
 .home-config.state-danger .home-state-icon { color: var(--uvp-danger); background: var(--uvp-danger-soft); }
 .home-config.state-loading .home-state-icon { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
-.home-warning, .home-error { margin: 0; font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
+/* `.home-hint` 与警告/错误同一排版,只是语气不同:提示是「还缺前置条件」,
+ * 不是「你填错了」,所以用次级文字色而不是红/黄,免得跟真正的校验失败混在一起。 */
+.home-warning, .home-error, .home-hint { margin: 0; font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .home-warning { color: var(--uvp-warning); }
 .home-error { color: var(--uvp-danger); }
+.home-hint { color: var(--uvp-text-tertiary); }
 .home-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
 .home-editor.query-only { grid-template-columns: minmax(0, 1fr); }
 .home-fields { display: grid; grid-template-columns: minmax(130px, 1fr) 92px; gap: 6px; }
@@ -6005,13 +6096,21 @@ onBeforeUnmount(() => {
 .image-adjust label { display: grid; grid-template-columns: 60px 1fr; gap: 8px; align-items: center; color: var(--uvp-text-tertiary); font-size: 11px; }
 .image-adjust input[type="range"] { accent-color: var(--uvp-brand); }
 
-/* ═══════════ 通用按钮 ═══════════ */
+/* ═══════════ 通用按钮 ═══════════
+ * ⚠️ `.btn-primary` 在本文件里被定义过多次(这里 / 悬浮播放器的 `.player-retry` /
+ *    全局 `styles/arco-overrides.scss`),各自的 border-radius 是 7px / 8px / 10px ——
+ *    同特异性下**后写的赢**,实际生效的是这一份的 7px,另外两个值是死代码。
+ *    要改按钮圆角请改这里,别只改 arco-overrides(不生效,会白排查一轮)。
+ * ⚠️ transition 只列具体属性,不用 `all`:暗色主题下按钮背景是 `linear-gradient`,
+ *    `all` 会把 `background-image` 和 `box-shadow` 一起纳入过渡 —— 渐变不可插值时
+ *    Chromium 会退化成整帧重绘,叠加 transform 后的合成层容易留下半张画面的残影。 */
 .btn-primary, .btn-danger, .btn-ghost {
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     padding: 7px 12px;
     color: #fff; background: var(--uvp-brand); border: 0; border-radius: 7px; cursor: pointer;
     font-size: 11.5px; font-weight: 600;
-    transition: all 0.15s ease;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease,
+        opacity 0.15s ease, transform 0.15s ease;
 }
 .btn-primary:hover:not(:disabled) { background: var(--uvp-brand-strong); }
 .btn-primary:disabled { cursor: not-allowed; opacity: 0.5; }

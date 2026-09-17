@@ -56,10 +56,15 @@ const (
 )
 
 // Capabilities contains capabilities that are part of a protocol profile.
-// Device-reported capability hints are intentionally not represented here;
-// those hints must never become a sending gate for standard controls.
+// These are version-derived, not device-reported. Device-reported capability
+// hints are intentionally not represented here; those hints must never become
+// a sending gate for standard controls.
 type Capabilities struct {
 	PrecisePTZ bool
+	// HomePositionQuery is the 2022-only "看守位信息查询" command. The control
+	// half (DeviceControl/HomePosition) exists since 2016 and is always
+	// available; only the read-back query is version-gated.
+	HomePositionQuery bool
 }
 
 // ResponseSemantic captures whether an action has a standard application
@@ -140,7 +145,7 @@ func ProfileFor(version Version) Profile {
 			Version:       Version(Version2022),
 			Charset:       Charset(CharsetGB18030),
 			IFrameElement: "IFrameCmd",
-			Capabilities:  Capabilities{PrecisePTZ: true},
+			Capabilities:  Capabilities{PrecisePTZ: true, HomePositionQuery: true},
 			PrecisePTZ:    true,
 			Responses:     defaultResponsePolicy(),
 		}
@@ -149,7 +154,7 @@ func ProfileFor(version Version) Profile {
 		Version:       Version(Version2016),
 		Charset:       Charset(CharsetGB2312),
 		IFrameElement: "IFameCmd",
-		Capabilities:  Capabilities{PrecisePTZ: false},
+		Capabilities:  Capabilities{PrecisePTZ: false, HomePositionQuery: false},
 		PrecisePTZ:    false,
 		Responses:     defaultResponsePolicy(),
 	}
@@ -218,6 +223,14 @@ func (p Profile) ResultRequired(action Action) bool {
 // profile. It does not inspect or infer device capability declarations.
 func (p Profile) SupportsPrecisePTZ() bool {
 	return p.Capabilities.PrecisePTZ || p.PrecisePTZ
+}
+
+// SupportsHomePositionQuery reports whether this profile may send the
+// HomePositionQuery command. 看守位信息查询 is a 2022 addition; a 2016 device
+// has no defined behaviour for it, so sending one only burns an SN and a
+// three-attempt retry budget before timing out.
+func (p Profile) SupportsHomePositionQuery() bool {
+	return p.Capabilities.HomePositionQuery
 }
 
 // AdvertisedVersion is the normalized result of parsing X-GB-Ver.

@@ -604,9 +604,38 @@ func TestHandlerHomeControlExplicitUnsupportedSkipsAutomaticReconcile(t *testing
 	require.Zero(t, children)
 }
 
+func TestHandlerHomeControlPre2022ParentSkipsAutomaticReconcile(t *testing.T) {
+	// 看守位信息查询是 2022 新增命令。父操作是 2016 时,对账子操作会继承 2016
+	// 的 profile_version,scheduler 便会把一条 2022 查询发给 2016 设备 —— 没人
+	// 要求过这种发送,应该在排队前就掐掉,而不是让它白耗三次重试。
+	service, db, _, _ := newPTZHandlerTestService(t, nil)
+	control := createHandlerHomeControl(t, service, "control-pre2022", true, nil, nil)
+	require.Equal(t, "2016", storedOperation(t, db, control.OperationID).ProfileVersion)
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "response", "1", deviceControlResponse(control.SN, "OK")))
+
+	stored := storedOperation(t, db, control.OperationID)
+	require.Equal(t, gbmodels.PTZOperationAccepted, stored.Status, "控制本身仍应被确认")
+	require.Nil(t, stored.ReconcileOperationID)
+	var children int64
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("trigger_operation_id = ?", control.OperationID).Count(&children).Error)
+	require.Zero(t, children)
+
+	// 与"显式声明不支持"不同:这里设备没有声明任何东西,被拦下的理由只有版本,
+	// 所以手动查询路径必须仍然放行,否则这条设备就再也没机会被发现了。
+	target := testTarget()
+	_, err := service.Refresh(context.Background(), target, QueryHomePosition, 0, "manual-refresh-2016")
+	require.NoError(t, err, "手动查询不得被版本门禁拦下")
+}
+
 func TestHandlerHomeControlTransactionRollsBackWhenReconcileCreateFails(t *testing.T) {
 	service, db, _, now := newPTZHandlerTestService(t, nil)
 	control := createHandlerHomeControl(t, service, "control-rollback", false, nil, nil)
+	// 本用例考察的是事务完整性,不是版本门禁,所以父操作要补成 2022 —— 否则
+	// automaticHomePositionReconcileAllowed 会先一步判定"2016 设备不该发 2022 查询"
+	// 而根本不进入插入,这条用例就测不到它想测的回滚。
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("operation_id = ?", control.OperationID).Updates(map[string]interface{}{
+		"profile_version": "2022", "profile_charset": "GB18030",
+	}).Error)
 	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Create(map[string]interface{}{
 		"operation_id": "conflicting-reconcile", "idempotency_key": "home-reconcile:" + control.OperationID,
 		"device_id": 2, "device_code": "D", "channel_id": 1, "channel_code": "C",

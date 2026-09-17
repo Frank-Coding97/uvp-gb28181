@@ -158,6 +158,10 @@ func BuildHomePositionQuery(deviceID string, sn int) ([]byte, error) {
 	return BuildHomePositionQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
 }
 
+// BuildHomePositionQueryWithProfile 只负责把报文序列化出来,不判断"该不该发"。
+// 看守位信息查询确实是 2022 新增命令,但 profile 在这里只决定字符集与 XML 声明;
+// 是否允许发送是调用方的策略问题,而调用方里只有**自动对账**需要被拦
+// (见 ptz.automaticHomePositionReconcileAllowed)。
 func BuildHomePositionQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
 	return buildPTZQuery(profile, CmdHomePositionQuery, deviceID, sn, nil)
 }

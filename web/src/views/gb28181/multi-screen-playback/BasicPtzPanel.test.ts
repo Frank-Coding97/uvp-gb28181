@@ -117,6 +117,65 @@ describe("BasicPtzPanel", () => {
         );
     });
 
+    it("releases a lens action with the FI stop byte instead of the directional one", async () => {
+        // FI 族(聚焦/光圈)停 0x40、方向族停 0x00(GB/T 28181 表 A.6)。设备只认本族的
+        // 停止指令 —— 给 FI 发 0x00 镜头会一直走下去。
+        const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+        await flushPromises();
+
+        await wrapper.get("[title='光圈开大']").trigger("pointerdown");
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            1,
+            onlineChannel.id,
+            expect.objectContaining({ action: "iris_open" })
+        );
+        await wrapper.get("[title='光圈开大']").trigger("pointerup");
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            2,
+            onlineChannel.id,
+            expect.objectContaining({ action: "lens_stop" })
+        );
+
+        await wrapper.get("[title='远焦']").trigger("pointerdown");
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            3,
+            onlineChannel.id,
+            expect.objectContaining({ action: "focus_far" })
+        );
+        await wrapper.get("[title='远焦']").trigger("pointerup");
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            4,
+            onlineChannel.id,
+            expect.objectContaining({ action: "lens_stop" })
+        );
+    });
+
+    it("still releases zoom and movement with the directional stop byte", async () => {
+        // 反向守卫:变倍/方向属于方向族,不能被上面那条改动一并带成 lens_stop。
+        const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+        await flushPromises();
+
+        await wrapper.get("[title='放大']").trigger("pointerdown");
+        await wrapper.get("[title='放大']").trigger("pointerup");
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
+
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            2,
+            onlineChannel.id,
+            expect.objectContaining({ action: "stop" })
+        );
+        expect(api.controlPtz).toHaveBeenNthCalledWith(
+            4,
+            onlineChannel.id,
+            expect.objectContaining({ action: "stop" })
+        );
+        expect(api.controlPtz).not.toHaveBeenCalledWith(
+            onlineChannel.id,
+            expect.objectContaining({ action: "lens_stop" })
+        );
+    });
+
     it("stops an active action on channel change and window blur", async () => {
         const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
         await flushPromises();
