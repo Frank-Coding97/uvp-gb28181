@@ -8,14 +8,26 @@
 //	    ↓
 //	probe.Run 并发对每节点跑 GetServerConfig (3s 超时)
 //	    ↓
-//	成功 → registry.MarkActive(id) → State=active + LastHeartbeatAt=now + 落 DB
+//	成功且端点自报的 mediaServerId 就是本节点 UUID → registry.MarkActive(id)
+//	                                  → State=active + LastHeartbeatAt=now + 落 DB
+//	端点可达但自报身份是别的节点 → 跳过激活(保持原状态,记 WARN)
 //	失败 → 只 warn,不改状态(下次 ZLM 心跳到达时 Collector 会自愈)
+//
+// 为什么探活必须核对身份,而不只是"端口活着":
+//
+//	同一台 ZLM(host:port)被登记成两行节点时(手工重复添加、改端口后重新添加),
+//	两行的 UUID 不同,而 ZLM 的 general.mediaServerId 只可能是其中一行。
+//	只按可达性激活,会把"影子行"翻成 active → 调度器把点播/对讲会话绑到影子行 →
+//	ZLM 回调里带的是它自己认的 UUID → 反查到的节点与会话预留的节点不是同一个 →
+//	节点级鉴权失败(典型:对讲 `talk publish denied` / WHIP 406)。
+//	影子行保持 offline 才是自洽状态:它一被调度出去就是坏会话。
 //
 // 独立包好处:HTTP + State 翻转的组合逻辑单独可测,不跟 heartbeat 心跳语义混。
 package probe
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +45,13 @@ type Client interface {
 // ClientFactory 从节点造 Client(生产:zlm.NewClientForNode 适配;测试:直接返回 fake)
 type ClientFactory func(n *node.Node) Client
 
+// mediaServerIDKey 端点自报身份的配置键。
+//
+// 平台在 zlm.ApplyConfigForNode 里把 `node.MediaServerUUID` 写进 ZLM 的
+// `general.mediaServerId`,并回读校验 —— 也就是说**同一时刻一台 ZLM 只会认一个
+// 节点行的 UUID**。因此它是"这台端点是不是这个节点"的唯一权威答案。
+const mediaServerIDKey = "general.mediaServerId"
+
 // Registry probe 只依赖 List + MarkActive(便于打桩,同时避免直接依赖具体 *node.Registry)
 type Registry interface {
 	List() []*node.Node
@@ -49,15 +68,15 @@ type Prober struct {
 
 // Result 单节点探活结果(供测试断言 + summary 聚合)
 type Result struct {
-	NodeID       int64
-	Name         string
-	Host         string
-	StateBefore  node.State
-	StateAfter   node.State
-	Pass         bool
-	Skipped      bool // maintenance 节点
-	DurationMS   int64
-	Err          error
+	NodeID      int64
+	Name        string
+	Host        string
+	StateBefore node.State
+	StateAfter  node.State
+	Pass        bool
+	Skipped     bool // 未激活:maintenance 节点,或端点自报身份不是本节点
+	DurationMS  int64
+	Err         error
 }
 
 // New 构造 Prober
@@ -118,7 +137,7 @@ func (p *Prober) Run(ctx context.Context) []Result {
 			defer cancel()
 
 			client := p.factory(target)
-			_, err := client.GetServerConfig(cctx)
+			config, err := client.GetServerConfig(cctx)
 			r.DurationMS = time.Since(start).Milliseconds()
 
 			if err != nil {
@@ -131,6 +150,26 @@ func (p *Prober) Run(ctx context.Context) []Result {
 					zap.Int64("duration_ms", r.DurationMS),
 					zap.String("state_before", string(r.StateBefore)),
 					zap.Error(err))
+				return
+			}
+
+			// 身份核对:端点自报的 mediaServerId 必须就是本节点登记的 UUID。
+			// 只证"端口活着"不够 —— 同一台 ZLM 被登记成两行节点时,它只认其中一行,
+			// 激活影子行会让调度器把会话绑到 ZLM 不承认的节点上(见包注释)。
+			// 基准或自报值缺失时无从比对,沿用旧行为(激活),避免把可达端点判死。
+			nodeUUID := strings.TrimSpace(target.MediaServerUUID)
+			reportedUUID := strings.TrimSpace(config[mediaServerIDKey])
+			if nodeUUID != "" && reportedUUID != "" && reportedUUID != nodeUUID {
+				r.Skipped = true
+				atomic.AddInt64(&skipCount, 1)
+				p.logger.Warn("GB28181 ZLM 启动探活跳过:端点自报身份不是本节点",
+					zap.String("event", "zlm.probe.identity_mismatch"),
+					zap.Int64("node_id", target.ID),
+					zap.String("name", target.Name),
+					zap.String("endpoint", target.HTTPEndpoint()),
+					zap.String("node_uuid", nodeUUID),
+					zap.String("reported_uuid", reportedUUID),
+					zap.String("state_before", string(r.StateBefore)))
 				return
 			}
 

@@ -188,6 +188,19 @@ func TestZLMNodeAPI_CreateAndList_E2E(t *testing.T) {
 	require.Equal(t, "play.example.com", list[0].(map[string]any)["playbackHost"])
 }
 
+func TestZLMNodeAPI_CreateRequiresOnlyEndpointAndSecret(t *testing.T) {
+	r, _ := setupRouter(t)
+
+	w, resp := do(t, r, "POST", "/api/gb28181/zlm/nodes", map[string]any{
+		"host": "1.2.3.4", "apiPort": 18080, "apiSecret": "s",
+	})
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, resp["data"])
+	created := resp["data"].(map[string]any)
+	require.Equal(t, "1.2.3.4:18080", created["name"])
+}
+
 func TestZLMNodeAPI_Get_NotFound(t *testing.T) {
 	r, _ := setupRouter(t)
 	w, _ := do(t, r, "GET", "/api/gb28181/zlm/nodes/9999", nil)

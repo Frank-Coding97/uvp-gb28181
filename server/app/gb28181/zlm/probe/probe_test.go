@@ -222,3 +222,77 @@ func TestProber_Run_MarkActiveError_StillCountsAsPass(t *testing.T) {
 	require.Len(t, results, 1)
 	require.True(t, results[0].Pass, "MarkActive 失败仍算 pass(内存已知节点活着,DB 写失败下次探活能重试)")
 }
+
+// 影子节点:同一台 ZLM(host:port)被登记成两行,只有一行是 ZLM 当前认的 UUID。
+// 探活只证"端口活着",把影子行翻成 active 就会让会话绑到 ZLM 不承认的节点上。
+func TestProber_Run_EndpointIdentityMismatch_DoesNotActivate(t *testing.T) {
+	shadow := &node.Node{
+		ID: 4, Name: "192.168.10.220:21080", Host: "192.168.10.220",
+		MediaServerUUID: "d03ac803-db5f-4fab-a17f-249bee8aa949", State: node.StateOffline,
+	}
+	reg := newFakeRegistry(shadow)
+	// 端点现在认的是另一行节点的 UUID
+	factory := func(_ *node.Node) probe.Client {
+		return &fakeClient{cfg: map[string]string{"general.mediaServerId": "56e37a2a-41ff-4346-832b-58c24ae93911"}}
+	}
+
+	p := probe.New(reg, factory, 500*time.Millisecond, nil)
+	results := p.Run(context.Background())
+
+	require.Len(t, results, 1)
+	require.True(t, results[0].Skipped, "身份不符应标记 skipped")
+	require.False(t, results[0].Pass)
+	require.Equal(t, node.StateOffline, results[0].StateAfter, "影子行必须保持 offline")
+	require.Equal(t, 0, reg.markCalls[4], "身份不符不得 MarkActive")
+}
+
+func TestProber_Run_EndpointIdentityMatch_Activates(t *testing.T) {
+	owner := &node.Node{
+		ID: 3, Name: "192.168.10.220:21080", Host: "192.168.10.220",
+		MediaServerUUID: "56e37a2a-41ff-4346-832b-58c24ae93911", State: node.StateOffline,
+	}
+	reg := newFakeRegistry(owner)
+	factory := func(_ *node.Node) probe.Client {
+		return &fakeClient{cfg: map[string]string{"general.mediaServerId": " 56e37a2a-41ff-4346-832b-58c24ae93911 "}}
+	}
+
+	p := probe.New(reg, factory, 500*time.Millisecond, nil)
+	results := p.Run(context.Background())
+
+	require.True(t, results[0].Pass)
+	require.False(t, results[0].Skipped)
+	require.Equal(t, node.StateActive, results[0].StateAfter)
+	require.Equal(t, 1, reg.markCalls[3])
+}
+
+// 端点上没有可比对的自报身份(老数据 / 未下发过配置)时沿用旧行为,不把可达端点判死。
+func TestProber_Run_MissingReportedIdentity_KeepsLegacyActivation(t *testing.T) {
+	n := &node.Node{ID: 1, Name: "a", MediaServerUUID: "uuid-a", State: node.StateOffline}
+	reg := newFakeRegistry(n)
+	factory := func(_ *node.Node) probe.Client { return &fakeClient{cfg: map[string]string{"hook.enable": "1"}} }
+
+	p := probe.New(reg, factory, 500*time.Millisecond, nil)
+	results := p.Run(context.Background())
+
+	require.True(t, results[0].Pass)
+	require.Equal(t, 1, reg.markCalls[1])
+}
+
+// 影子行与真身共存时,只有真身被激活。
+func TestProber_Run_DuplicateEndpoint_OnlyOwnerActivated(t *testing.T) {
+	owner := &node.Node{ID: 3, Name: "owner", Host: "10.0.0.9", MediaServerUUID: "uuid-owner", State: node.StateOffline}
+	shadow := &node.Node{ID: 4, Name: "shadow", Host: "10.0.0.9", MediaServerUUID: "uuid-shadow", State: node.StateOffline}
+	reg := newFakeRegistry(owner, shadow)
+	byName := map[string]string{"owner": "uuid-owner", "shadow": "uuid-owner"}
+	factory := func(n *node.Node) probe.Client {
+		return &fakeClient{cfg: map[string]string{"general.mediaServerId": byName[n.Name]}}
+	}
+
+	p := probe.New(reg, factory, 500*time.Millisecond, nil)
+	results := p.Run(context.Background())
+
+	require.True(t, results[0].Pass)
+	require.Equal(t, 1, reg.markCalls[3])
+	require.True(t, results[1].Skipped)
+	require.Equal(t, 0, reg.markCalls[4], "影子行不得被激活")
+}

@@ -168,6 +168,19 @@ func TestNodeService_Create_ProbesZLM_ThenWritesUUID(t *testing.T) {
 	require.True(t, n.AutoOnDemandReady)
 }
 
+func TestNodeService_CreateGeneratesNameFromEndpointWhenOmitted(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	svc := newSvc(repo, probe)
+
+	n, err := svc.Create(context.Background(), service.CreateNodeReq{
+		Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "1.2.3.4:18080", n.Name)
+}
+
 func TestNodeService_ProbeCreateReadsZLMWithoutPersistingOrReturningSecret(t *testing.T) {
 	repo := newMemoryRepo()
 	probe := &mockProbe{getServerConfig: map[string]string{

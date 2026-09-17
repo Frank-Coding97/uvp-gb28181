@@ -1,6 +1,9 @@
 package node
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // ServerConfig ZLMediaKit 节点服务端口配置(对应 ZLM `/index/api/getServerConfig` 返回值中的端口字段)
 //
@@ -15,6 +18,15 @@ type ServerConfig struct {
 	RTMPSPort    int // rtmp.sslport
 	RTPProxyPort int // rtp_proxy.port(单端口收流)
 	ONVIFPort    int // onvif.port
+
+	// WebRTC(rtc.*)段。与 rtp_proxy.port_range 无关:后者是 GB28181 设备推流的收流段,
+	// 这里是浏览器 WebRTC 媒体面走的端口。
+	RTCUDPPort int // rtc.port,WebRTC 媒体 UDP 单端口(默认 8000);所有 rtc 客户端共用这一个
+	RTCTCPPort int // rtc.tcpPort,WebRTC over TCP 回退端口(udp 不通时启用)
+	RTCICEPort int // rtc.icePort,内置 STUN/TURN 的 UDP 监听端口(默认 3478)
+	// RTCExternalIP 对应 rtc.externIP,会被写进 SDP 的候选地址。为空表示未配置,
+	// 此时 ZLM 只能给出本机网卡地址,跨网段对端连不上。
+	RTCExternalIP string
 
 	// 协议开关缺失时按 ZLM 默认启用,只有明确为 0 才关闭。
 	RTSPEnabled bool
@@ -37,7 +49,13 @@ func ParseServerConfig(m map[string]string) ServerConfig {
 		RTMPSPort:    atoiOrZero(m["rtmp.sslport"]),
 		RTPProxyPort: atoiOrZero(m["rtp_proxy.port"]),
 		ONVIFPort:    atoiOrZero(m["onvif.port"]),
-		RTSPEnabled:  protocolEnabled(m["protocol.enable_rtsp"]),
+
+		RTCUDPPort:    atoiOrZero(m["rtc.port"]),
+		RTCTCPPort:    atoiOrZero(m["rtc.tcpPort"]),
+		RTCICEPort:    atoiOrZero(m["rtc.icePort"]),
+		RTCExternalIP: strings.TrimSpace(m["rtc.externIP"]),
+
+		RTSPEnabled: protocolEnabled(m["protocol.enable_rtsp"]),
 		RTMPEnabled:  protocolEnabled(m["protocol.enable_rtmp"]),
 		HLSEnabled:   protocolEnabled(m["protocol.enable_hls"]),
 		TSEnabled:    protocolEnabled(m["protocol.enable_ts"]),

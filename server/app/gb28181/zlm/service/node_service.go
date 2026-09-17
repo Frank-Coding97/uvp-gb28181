@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,7 +100,7 @@ type NodeDTO struct {
 
 // CreateNodeReq 新建节点入参
 type CreateNodeReq struct {
-	Name         string            `json:"name" binding:"required"`
+	Name         string            `json:"name"`
 	Host         string            `json:"host" binding:"required"`
 	ReceiveHost  string            `json:"receiveHost"`
 	PlaybackHost string            `json:"playbackHost"`
@@ -421,9 +423,13 @@ func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 	if err := validateNodeFields(req.Host, req.APIPort, weight, rtpStart, rtpEnd, req.APISecret); err != nil {
 		return nil, err
 	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = net.JoinHostPort(strings.TrimSpace(req.Host), strconv.Itoa(req.APIPort))
+	}
 
 	return &node.Node{
-		Name:            req.Name,
+		Name:            name,
 		Host:            req.Host,
 		ReceiveHost:     req.ReceiveHost,
 		PlaybackHost:    req.PlaybackHost,
