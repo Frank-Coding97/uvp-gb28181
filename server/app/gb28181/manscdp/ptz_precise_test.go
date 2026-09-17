@@ -343,6 +343,72 @@ func TestParseHomeAndCruiseResponses(t *testing.T) {
 	}
 }
 
+// 巡航点参数域 —— 由 A.2.6.14 的应答字段落到的边界。
+//
+// ⛔ **回归锚点**:`Speed` 原来只允许 **1-15**,而本仓**写侧**允许 1-4095
+// (创建接口 `request.Speed` 0-4095、`0x86` 编码 12 位、前端默认 128)——
+// 两侧自相矛盾。后果不是"报个错",而是设备如实回显 128 时平台以
+// 「巡航点参数不合法」把**整条应答**丢掉,于是 `upsertCruiseTrack` 永远跑不到,
+// 巡航卡片在界面上永远停在"未验证",操作员完全看不出原因。
+//
+// 这里把域的两端、以及"越界仍要拒"一起钉住:不能为了兼容把校验整个拆掉。
+func TestParseCruiseTrackResponse_CruisePointDomain(t *testing.T) {
+	build := func(preset, stayTime, speed int) []byte {
+		return []byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID>` +
+			`<Number>0</Number><Name>T0</Name><SumNum>1</SumNum><CruisePointList Num="1"><CruisePoint>` +
+			`<PresetIndex>` + strconv.Itoa(preset) + `</PresetIndex>` +
+			`<StayTime>` + strconv.Itoa(stayTime) + `</StayTime>` +
+			`<Speed>` + strconv.Itoa(speed) + `</Speed>` +
+			`</CruisePoint></CruisePointList></Response>`)
+	}
+
+	// Speed:写侧真实会发的值(128 是前端默认)与 12 位的两端都要能吃下
+	for _, speed := range []int{1, 15, 16, 128, 255, 256, 4095} {
+		if _, err := ParseCruiseTrackResponse(build(3, 30, speed)); err != nil {
+			t.Fatalf("Speed=%d 应当被接受(与控制层同为 12 位域),err=%v", speed, err)
+		}
+	}
+	// 0 表示"没设过"、>4095 说明设备在乱发 —— 都不能放进来
+	for _, speed := range []int{0, 4096, -1} {
+		if _, err := ParseCruiseTrackResponse(build(3, 30, speed)); err == nil {
+			t.Fatalf("Speed=%d 应当被拒绝", speed)
+		}
+	}
+
+	// StayTime:0 合法(停留 0 秒 = 直接过),12 位上限 4095 合法,越界拒绝
+	for _, stay := range []int{0, 1, 4095} {
+		if _, err := ParseCruiseTrackResponse(build(3, stay, 128)); err != nil {
+			t.Fatalf("StayTime=%d 应当被接受,err=%v", stay, err)
+		}
+	}
+	if _, err := ParseCruiseTrackResponse(build(3, 4096, 128)); err == nil {
+		t.Fatal("StayTime=4096 应当被拒绝")
+	}
+
+	// PresetIndex 是整字节 1-255。0 是"没有归位目标"的哨兵(标准里预置位号从 01H 起),
+	// 不能当"预置位 0"收下 —— 收下的话设备侧会去查一个永远不存在的点位。
+	if _, err := ParseCruiseTrackResponse(build(1, 30, 128)); err != nil {
+		t.Fatalf("PresetIndex=1 应当被接受,err=%v", err)
+	}
+	if _, err := ParseCruiseTrackResponse(build(255, 30, 128)); err != nil {
+		t.Fatalf("PresetIndex=255 应当被接受,err=%v", err)
+	}
+	for _, preset := range []int{0, 256, -1} {
+		if _, err := ParseCruiseTrackResponse(build(preset, 30, 128)); err == nil {
+			t.Fatalf("PresetIndex=%d 应当被拒绝", preset)
+		}
+	}
+
+	// 元素缺失不能静默变成"合法的 0":<Speed> 不在时整条应答必须被拒,
+	// 否则一个漏发的字段会被当成"速度 0"存进库里。
+	missingSpeed := []byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID>` +
+		`<Number>0</Number><Name>T0</Name><SumNum>1</SumNum><CruisePointList Num="1"><CruisePoint>` +
+		`<PresetIndex>3</PresetIndex><StayTime>30</StayTime></CruisePoint></CruisePointList></Response>`)
+	if _, err := ParseCruiseTrackResponse(missingSpeed); err == nil {
+		t.Fatal("缺 <Speed> 应当被拒绝,不能当成速度 0")
+	}
+}
+
 func TestParsePresetResponse_PreservesCompleteList(t *testing.T) {
 	var items strings.Builder
 	for i := 1; i <= 20; i++ {

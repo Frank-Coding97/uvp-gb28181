@@ -507,7 +507,6 @@ func (dc *DeviceMgmtController) upsertOptimisticCruise(c *gin.Context, target pt
 	if dc.db == nil {
 		return nil
 	}
-	enabled := false
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = "巡航 " + strconv.Itoa(*request.TrackID)
@@ -521,20 +520,52 @@ func (dc *DeviceMgmtController) upsertOptimisticCruise(c *gin.Context, target pt
 		"dwellSec": request.DwellSec,
 		"source":   "reconcile-pending",
 	})
+	// ⛔ 平台**不写 `enabled`**,也不在冲突时更新它 —— `nil` 的语义是「设备未上报」。
+	//
+	// 这里原来是 `enabled := false` + `Enabled: &enabled`,理由写得也对(「设备详情回包前
+	// 不能标 enabled」),但它把平台自己编的 false 当成了设备状态,而**没有任何东西能把它
+	// 翻回来**:`<Enabled>` 在 A.2.6.13/A.2.6.14 的元素表里根本没有(本仓当扩展字段用),
+	// 真机与模拟器都不回,`upsertCruiseTrack` 于是永远走「保留库里原值」那条分支 ——
+	// 库里那"原值"恰恰就是这个 false。前端 `enabled: item.enabled !== false && !pending`
+	// 一见 false 就把 tile 焊死,操作员再也点不动自己刚建好的轨迹。
+	//
+	// 所以「设备确认前」这件事只能由 `source: "reconcile-pending"`(前端据此显示「未验证」
+	// 并允许试运行)**表达**,不能用 `enabled=false` 表达:后者在 wire 上和「设备明确报告
+	// 已停用」是同一个值,而设备永远不会替我们撤销它。
 	track := gbmodels.GbPTZCruiseTrack{
 		DeviceID: target.DeviceID, ChannelID: target.ChannelID, TrackID: *request.TrackID,
-		Name: name, Enabled: &enabled, DetailJSON: string(detail),
+		Name: name, DetailJSON: string(detail),
 		RawSummary: "reconcile-pending", UpdatedAt: time.Now(),
 	}
 	return dc.db().WithContext(c.Request.Context()).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "track_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "enabled", "detail_json", "raw_summary", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "detail_json", "raw_summary", "updated_at"}),
 	}).Create(&track).Error
 }
 
 // reconcileCruiseAsync 用独立 context 后台下发列表查询,创建/失败批次再查询对应轨迹详情。
 // 删除只查列表;创建与部分失败同时查详情,用设备真实点位覆盖客户端提交的待对账数据。
+//
+// ⛔ **版本门禁只挡这里,不挡操作员点出来的那次查询。**
+//
+// 对账是平台**自己决定要发**的:操作员点的是"建立巡航"(控制层 PTZCmd,2016 就有),
+// 并没有要求回读。而 `CruiseTrackListQuery`/`CruiseTrackQuery` 是 2022 新增命令,
+// 2016 设备没有定义行为 —— 发给它只会烧掉一个 SN 和三次重试预算再超时。
+// 所以登记为 2016 的设备直接跳过,日志留痕。
+//
+// 为什么这样不会把"发现路径"焊死:前端的「同步」按钮走的是手动刷新
+// (`refreshPTZ` → `?refresh=true`),那条路径**刻意不加门禁**(同看守位的口径,
+// 见 protocol.SupportsHomePositionQuery 的注释)——真的 2022 设备被误登记成 2016 时,
+// 操作员点一下同步就能把它查出来并留下历史证据。
 func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, target ptz.Target, trackID int, includeDetail bool) {
+	if !target.Profile.SupportsCruiseTrackQuery() {
+		app.Log(parent).Named("ptz").Info("巡航对账跳过:设备协议档案不支持 2022 巡航轨迹查询",
+			zap.String("event", "ptz.cruise_reconcile_skipped"),
+			zap.Uint("channel_id", target.ChannelID),
+			zap.String("channel_code", target.ChannelCode),
+			zap.String("protocol_version", string(target.Profile.Version)))
+		return
+	}
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
 		return

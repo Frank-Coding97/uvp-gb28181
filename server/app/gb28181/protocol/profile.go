@@ -65,6 +65,10 @@ type Capabilities struct {
 	// half (DeviceControl/HomePosition) exists since 2016 and is always
 	// available; only the read-back query is version-gated.
 	HomePositionQuery bool
+	// CruiseTrackQuery is the 2022-only "巡航轨迹列表查询 / 巡航轨迹查询"
+	// command pair. 同 HomePositionQuery:控制层(PTZCmd 0x84~0x88)2016 就有,
+	// 只有**回读**这一半是 2022 新增(标准修订说明:9.5.3、A.2.4.10~A.2.4.14)。
+	CruiseTrackQuery bool
 }
 
 // ResponseSemantic captures whether an action has a standard application
@@ -145,7 +149,7 @@ func ProfileFor(version Version) Profile {
 			Version:       Version(Version2022),
 			Charset:       Charset(CharsetGB18030),
 			IFrameElement: "IFrameCmd",
-			Capabilities:  Capabilities{PrecisePTZ: true, HomePositionQuery: true},
+			Capabilities:  Capabilities{PrecisePTZ: true, HomePositionQuery: true, CruiseTrackQuery: true},
 			PrecisePTZ:    true,
 			Responses:     defaultResponsePolicy(),
 		}
@@ -154,7 +158,7 @@ func ProfileFor(version Version) Profile {
 		Version:       Version(Version2016),
 		Charset:       Charset(CharsetGB2312),
 		IFrameElement: "IFameCmd",
-		Capabilities:  Capabilities{PrecisePTZ: false, HomePositionQuery: false},
+		Capabilities:  Capabilities{PrecisePTZ: false, HomePositionQuery: false, CruiseTrackQuery: false},
 		PrecisePTZ:    false,
 		Responses:     defaultResponsePolicy(),
 	}
@@ -231,6 +235,17 @@ func (p Profile) SupportsPrecisePTZ() bool {
 // three-attempt retry budget before timing out.
 func (p Profile) SupportsHomePositionQuery() bool {
 	return p.Capabilities.HomePositionQuery
+}
+
+// SupportsCruiseTrackQuery reports whether this profile may send the
+// CruiseTrackListQuery / CruiseTrackQuery pair. 巡航轨迹查询 is a 2022
+// addition, so a 2016 device has no defined behaviour for it — sending one
+// only burns an SN and a three-attempt retry budget before timing out.
+//
+// ⚠️ 只用于**自动对账**这类"平台自己决定要发"的场合。操作员点「同步」触发的那次
+// 查询**不能**用它挡 —— 门禁只拦平台自发,不拦操作员点出来的(同 SupportsHomePositionQuery)。
+func (p Profile) SupportsCruiseTrackQuery() bool {
+	return p.Capabilities.CruiseTrackQuery
 }
 
 // AdvertisedVersion is the normalized result of parsing X-GB-Ver.

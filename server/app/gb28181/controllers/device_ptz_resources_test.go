@@ -121,6 +121,24 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 	return controller, db, channel, sender
 }
 
+// newPTZResourceController2022 同上,但把设备登记成 **2022**。
+//
+// 巡航轨迹的**回读**(CruiseTrackListQuery/CruiseTrackQuery)是 2022 新增命令,
+// 平台只在设备档案是 2022 时才自动对账(见 reconcileCruiseAsync 的版本门禁),
+// 所以"创建/删除巡航会排一次对账查询"这类用例必须用 2022 设备。
+//
+// ⚠️ 别把默认 fixture 改成 2022:它被几十个用例共用,`EffectiveVersion` 一变
+// `SupportsPrecisePTZ()` 等能力也跟着变(精确状态查询的 CmdType 就会换),
+// 会连带改掉一批与本主题无关的用例的期望值。
+func newPTZResourceController2022(t *testing.T) (*gbcontrollers.DeviceMgmtController, *gorm.DB, *gbmodels.GbChannel, *resourcePTZSender) {
+	t.Helper()
+	controller, db, channel, sender := newPTZResourceController(t)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).
+		Where("device_id = ?", channel.DeviceID).
+		Update("effective_version", "2022").Error)
+	return controller, db, channel, sender
+}
+
 func TestDeviceMgmt_CreatePTZPreset_TriggersPresetQueryReconcile(t *testing.T) {
 	// 老板选的落库策略:乐观入库 + 保存后自动查一次。
 	// 查询属于 durable operation,由生产 scheduler 负责后续 SIP 下发。
@@ -268,7 +286,7 @@ func TestDeviceMgmt_ControlPTZCruiseRejectsNonStandardPauseAndResume(t *testing.
 }
 
 func TestDeviceMgmt_DeleteCruiseZeroClearsCacheAndSchedulesReconcile(t *testing.T) {
-	controller, db, channel, _ := newPTZResourceController(t)
+	controller, db, channel, _ := newPTZResourceController2022(t)
 	enabled := true
 	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
 		DeviceID: 1, ChannelID: channel.ID, TrackID: 0, Name: "零号轨迹", Enabled: &enabled,
@@ -391,7 +409,7 @@ func (s *failAfterNSender) SendMessageTracked(_ context.Context, _, _, _ string,
 }
 
 func TestDeviceMgmt_CreateCruiseTrack_DispatchesAddStopSpeedDwellAndReconciles(t *testing.T) {
-	controller, db, channel, sender := newPTZResourceController(t)
+	controller, db, channel, sender := newPTZResourceController2022(t)
 	router := gin.New()
 	router.POST("/channel/:id/ptz/cruise/tracks", controller.CreateCruiseTrack)
 
@@ -407,13 +425,18 @@ func TestDeviceMgmt_CreateCruiseTrack_DispatchesAddStopSpeedDwellAndReconciles(t
 	require.Contains(t, w.Body.String(), `"reconciled":false`)
 	require.Contains(t, w.Body.String(), `"reconcileScheduled":true`)
 
-	// 所有子命令发完后才写待对账记录；设备未确认前不能标 enabled。
+	// 所有子命令发完后才写待对账记录。「设备未确认」只能由 `source: reconcile-pending`
+	// 表达 —— `enabled` 必须留 NULL(= 设备未上报),不能写 false。
+	//
+	// 写 false 的后果不是"保守一点":`<Enabled>` 在标准元素表里没有依据,真机与模拟器都不回,
+	// 没有任何应答能把它翻回来,前端 `enabled !== false` 于是把 tile 永久焊死(操作员点不动
+	// 自己刚建好的轨迹)。详见 upsertOptimisticCruise 的注释。
 	var track gbmodels.GbPTZCruiseTrack
 	require.NoError(t, db.Where("channel_id = ? AND track_id = ?", channel.ID, 2).First(&track).Error)
 	require.Equal(t, "夜间巡逻", track.Name)
 	require.Equal(t, "reconcile-pending", track.RawSummary)
-	require.NotNil(t, track.Enabled)
-	require.False(t, *track.Enabled)
+	require.Nil(t, track.Enabled, "平台不得替设备编 enabled;设备未上报就是 NULL")
+	require.Contains(t, track.DetailJSON, `"source":"reconcile-pending"`)
 	require.Contains(t, track.DetailJSON, `"speed":256`)
 	require.Contains(t, track.DetailJSON, `"dwellSec":5`)
 
@@ -440,9 +463,45 @@ func TestDeviceMgmt_CreateCruiseTrack_DispatchesAddStopSpeedDwellAndReconciles(t
 	require.Contains(t, joined, "A50F018702050043", "缺少 0x87 停留 5 秒")
 }
 
+// 巡航对账的**版本门禁**:2016 设备不发 2022 的巡航回读查询,但控制层照发。
+//
+// 控制层(PTZCmd 0x84/0x86/0x87/0x88)2016 版就有,`CruiseTrackListQuery` /
+// `CruiseTrackQuery` 才是 2022 新增(标准修订说明:9.5.3、A.2.4.10~A.2.4.14)。
+// 发给 2016 设备只会烧掉一个 SN 和三次重试预算再超时,操作员那边表现为"卡了一下"。
+//
+// ⛔ 门禁**只挡自动对账**,不挡操作员点「同步」触发的那次(见 refreshPTZ —— 那条路径
+// 刻意无门禁,是真的 2022 设备被误登记成 2016 时唯一的发现手段)。
+func TestDeviceMgmt_CreateCruiseTrack_2016SkipsReconcileButStillSendsControl(t *testing.T) {
+	// 默认 fixture 的设备没有 effective_version → 按 2016 兼容档案处理
+	controller, db, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.POST("/channel/:id/ptz/cruise/tracks", controller.CreateCruiseTrack)
+
+	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/cruise/tracks",
+		strings.NewReader(`{"trackId":3,"name":"legacy","speed":128,"dwellSec":30,"stops":[{"presetId":1},{"presetId":2}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	sender.mu.Lock()
+	bodyCount := len(sender.bodies)
+	sender.mu.Unlock()
+	require.Equal(t, 4, bodyCount, "2 个 add_stop + speed + dwell 必须照常下发:控制层是 2016 能力,门禁不许拦")
+
+	// 给足时间窗再断言"没有"—— 门禁在 reconcileCruiseAsync 里是**同步**早返回,
+	// 所以这里不会 flaky;垫一下是为了万一将来门禁挪到 goroutine 里也不会假过。
+	time.Sleep(200 * time.Millisecond)
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).
+		Where("action IN ?", []string{"refresh_cruise_tracks", "refresh_cruise_track"}).
+		Count(&count).Error)
+	require.Zero(t, count, "2016 设备不应收到 2022 的巡航回读查询")
+}
+
 func TestDeviceMgmt_CreateCruiseTrack_ReturnsPartialWhenMidStopFails(t *testing.T) {
 	// 前 1 次通过(第 1 个 add_stop),第 2 次开始报错。期望 status=add_stop_failed, completedStops=1
-	controller, db, channel, _ := newPTZResourceController(t)
+	controller, db, channel, _ := newPTZResourceController2022(t)
 	failSender := &failAfterNSender{failAfter: 1, failErr: context.DeadlineExceeded}
 	controller.SetPTZService(mustPTZService(t, db, failSender))
 	router := gin.New()
@@ -473,7 +532,7 @@ func TestDeviceMgmt_CreateCruiseTrack_ReturnsPartialWhenMidStopFails(t *testing.
 	require.Equal(t, gbmodels.PTZOperationQueued, reconcile.Status)
 }
 
-func TestDeviceMgmt_CreateCruiseTrack_SuccessStoresDisabledPendingRecord(t *testing.T) {
+func TestDeviceMgmt_CreateCruiseTrack_RecreateKeepsDeviceReportedEnabled(t *testing.T) {
 	controller, db, channel, _ := newPTZResourceController(t)
 	enabled := true
 	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
@@ -493,8 +552,11 @@ func TestDeviceMgmt_CreateCruiseTrack_SuccessStoresDisabledPendingRecord(t *test
 	require.NoError(t, db.Where("channel_id = ? AND track_id = ?", channel.ID, 3).First(&track).Error)
 	require.Equal(t, "新名字", track.Name)
 	require.Equal(t, "reconcile-pending", track.RawSummary)
+	// ⛔ 重建**不碰** `enabled`:它是"设备上报的状态",平台重建自己那条轨迹不该把它抹掉。
+	// 原来这里是 `require.False(t, *track.Enabled)`("设备详情回包前不能标 enabled"),
+	// 那正是把 tile 焊死的那个写法的另一半 —— 它顺手也能把设备明确报过的 true 清成 false。
 	require.NotNil(t, track.Enabled)
-	require.False(t, *track.Enabled, "设备详情回包前不能把待对账轨迹标为 enabled")
+	require.True(t, *track.Enabled, "重建轨迹不得覆盖设备已上报的 enabled")
 }
 
 func TestDeviceMgmt_CreateCruiseTrack_RejectsInvalidInput(t *testing.T) {

@@ -13,13 +13,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { copyTextToClipboard } from "@/utils/app";
+import { formatToken, getAccessToken } from "@/utils/auth";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
 import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
 import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
-import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
+import { assertPCMA8000, createAudioLevelMeter, preferPCMA8000, waitForIceGatheringComplete, type AudioLevelMeter } from "./talkPublisher";
 import {
     authorizeFixedPlayback,
     controlDevice,
@@ -35,6 +36,7 @@ import {
     deleteTalkSession,
     fetchPTZDefaultSpeedConfig,
     getControlCapabilities,
+    getCruiseTrack,
     getDeviceStatus,
     getDeviceSnapshotSession,
     getHomePosition,
@@ -511,6 +513,43 @@ const visiblePresets = computed(() =>
     hasMorePresets.value ? presets.value.slice(0, maxVisibleTiles - 1) : presets.value,
 );
 const presetMoreVisible = ref(false);
+// 「从设备同步」的状态。预置位和巡航这两张卡片展示的都是**设备侧资源**,平台只是
+// 一份镜像 —— 设备上早就存在的预置位/巡航在界面上只有靠回读才可能出现。
+const presetFreshness = ref<PTZResourceFreshness>("unknown");
+const presetSyncing = ref(false);
+const presetSyncError = ref("");
+/** 「从设备同步」药丸的共用文案。预置位与巡航两张卡片的状态机必须**逐字一致**:
+ *  同一种状态在两处叫法不同时,操作员会以为是两件事(「设备数据已同步」和「已同步」
+ *  并排出现时,没人能判断哪个更权威)。所以这里只有一份措辞。
+ *
+ *  ⛔ 文案一律**短于 6 个汉字**。卡片是详情条三等分,头部一行还要并排放「添加」
+ *  按钮;原来那句「数据过期,点击同步」9 个字会把动作标题挤出卡片(卡片 overflow:
+ *  hidden,直接裁掉而不是换行)。"点击同步"这个意思由按钮形态本身和 tooltip 承担。 */
+function resourceSyncPillLabel(state: {
+    syncing: boolean;
+    failed: boolean;
+    freshness: PTZResourceFreshness;
+    /** 从没回读过时的文案 —— 卡片上还没有任何设备数据,说的应该是"去同步"这个动作。 */
+    fallback: string;
+}): string {
+    if (state.syncing) return "同步中";
+    if (state.failed) return "同步失败";
+    if (state.freshness === "fresh") return "已同步";
+    if (state.freshness === "stale") return "数据过期";
+    return state.fallback;
+}
+const presetSyncLabel = computed(() => resourceSyncPillLabel({
+    syncing: presetSyncing.value,
+    failed: Boolean(presetSyncError.value),
+    freshness: presetFreshness.value,
+    fallback: "从设备同步",
+}));
+/** 药丸的 tooltip。**失败原因写在最前面** —— 药丸上放不下「设备未应答」这类
+ *  具体原因(卡只有三分之一宽),但不说出来的话操作员只会反复点同一个按钮。 */
+const presetSyncTitle = computed(() => {
+    const reason = presetSyncError.value ? `${presetSyncError.value}。` : "";
+    return `${reason}从设备重新读取预置位清单(预置位以设备为准,平台只存镜像)`;
+});
 function nextPresetId(): number {
     return presets.value.length ? Math.max(...presets.value.map((p) => p.id)) + 1 : 1;
 }
@@ -533,15 +572,29 @@ const cruiseFreshness = ref<PTZResourceFreshness>("unknown");
 const cruiseRefreshPending = ref(false);
 const cruiseLoadError = ref("");
 const cruiseRefreshError = ref("");
+// 整个「从设备同步」流程是否在进行中(列表查询 → 等应答 → 重读 → 补点位链)。
+// 与 cruiseRefreshPending 不是一回事:后者只表示"最近一次响应里说有一个查询还在飞"。
+const cruiseSyncing = ref(false);
 const unconfirmedCruiseCount = computed(() => cruiseTracks.value.filter((track) => track.pending).length);
 const cruiseSyncLabel = computed(() => {
+    // ⛔ 「同步中」必须排在最前。原来的顺序把「N 条未验证」放在「正在同步」之前,
+    //    于是刚好在同步进行中时,按钮显示的是上一轮的遗留结论,操作员看不到任何反馈。
+    if (cruiseSyncing.value) return "同步中";
     if (cruiseLoadError.value) return "加载失败";
     if (cruiseRefreshError.value) return "同步失败";
     if (unconfirmedCruiseCount.value > 0) return `${unconfirmedCruiseCount.value} 条未验证`;
     if (cruiseRefreshPending.value) return "正在同步";
-    if (cruiseFreshness.value === "fresh") return "设备数据已同步";
-    if (cruiseFreshness.value === "stale") return "缓存数据已过期";
-    return "设备状态待查询";
+    return resourceSyncPillLabel({
+        syncing: false,
+        failed: false,
+        freshness: cruiseFreshness.value,
+        fallback: "从设备同步",
+    });
+});
+/** 同 presetSyncTitle:失败原因前置,药丸上只放得下短状态词。 */
+const cruiseSyncTitle = computed(() => {
+    const reason = cruiseRefreshError.value || cruiseLoadError.value;
+    return `${reason ? `${reason}。` : ""}从设备重新读取巡航轨迹清单,并逐条回读各自的点位链`;
 });
 const CRUISE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 let cruiseReconcileTimer: number | null = null;
@@ -567,6 +620,182 @@ function scheduleCruiseReconcilePolling(channelId: number, token: number) {
     };
     pollNext();
 }
+
+/* ────────────────── 设备资源回读(「从设备同步」) ──────────────────
+ *
+ * 预置位与巡航这两张卡片画的都是**设备侧的资源**,平台库里存的是镜像。在此之前
+ * 整个前端**没有任何地方发起过回读**:`listPtzPresets(channelId)` 与
+ * `loadCruises(..., false)` 的 refresh 参数一律是 false,于是设备上早就存在的预置位
+ * 和巡航轨迹在界面上永远不出现,而巡航卡片头顶那行小字还在一直说「缓存数据已过期」
+ * —— 提示了一个问题,却不给任何可点的地方去解决它。
+ *
+ * ⛔ 回读是**两段式**的,不能只看那一个 HTTP 返回。
+ *
+ * `?refresh=true` 的语义是「把查询发给设备」,它的 HTTP 返回里带的是**查询之前**的
+ * 缓存行 + 一个 `refreshOperationId`。设备应答是异步的 —— 它要走 SIP 命令的重试
+ * 与截止时间。所以必须拿这个 id 去轮询 PTZ 操作直到终止态,再重读列表;只发不等的话,
+ * 设备稍微慢一点界面就什么都不变,操作员会认为按钮坏了,然后反复点。
+ */
+
+const RESOURCE_SYNC_POLL_INTERVAL_MS = 250;
+/** 等设备应答的总上限。SIP 命令超时(默认 5s)加三次重试的重试间隔之外再留余量。 */
+const RESOURCE_SYNC_TIMEOUT_MS = 15000;
+/** 连续几次轮询都失败就放弃等 —— 读取操作状态的接口被拒(如只读账号)时,
+ *  不能把操作员按在一个 15 秒的转圈上。 */
+const RESOURCE_SYNC_MAX_POLL_FAILURES = 3;
+/** 一次同步最多补几条巡航轨迹的点位链。每条要一条独立的 SIP 查询
+ *  (`CruiseTrackQuery`),清单查询的应答里**没有**点位集合,只能逐条问。 */
+const CRUISE_DETAIL_SYNC_MAX = 9;
+
+/** PTZ 操作的终止态。`unknown` **不算**终止 —— 它表示"还没拿到设备的最终说法",
+ *  仍可能在截止前收到应答(见服务端 `queryOperationCanStillRespond`)。 */
+const PTZ_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["accepted", "rejected", "timeout", "cancelled"]);
+
+function waitResourceSyncTick(ms: number) {
+    return new Promise<void>((resolve) => { window.setTimeout(resolve, ms); });
+}
+
+/** 等一次查询操作落地。只区分三件事:拿到设备应答(`settled`)、没拿到(`timeout`)、
+ *  上下文已经换了(`stale` —— 切了通道或关了面板,调用方必须直接放弃)。
+ *
+ *  具体错误码对操作员没有意义:他没有办法因为 `rejected` 和 `timeout` 做不同的事,
+ *  两种情况的下一步都是"再点一次同步"。 */
+async function waitPTZOperationSettled(
+    channelId: number,
+    token: number,
+    operationId: string,
+): Promise<"settled" | "timeout" | "stale"> {
+    const deadline = Date.now() + RESOURCE_SYNC_TIMEOUT_MS;
+    let failures = 0;
+    for (;;) {
+        if (token !== sessionToken || props.channel?.id !== channelId) return "stale";
+        try {
+            const response = await getPtzOperation(channelId, operationId);
+            failures = 0;
+            const status = String(response.data?.status ?? "");
+            if (PTZ_TERMINAL_STATUSES.has(status)) {
+                return status === "accepted" ? "settled" : "timeout";
+            }
+        } catch {
+            failures += 1;
+            if (failures >= RESOURCE_SYNC_MAX_POLL_FAILURES) return "timeout";
+        }
+        if (Date.now() >= deadline) return "timeout";
+        await waitResourceSyncTick(RESOURCE_SYNC_POLL_INTERVAL_MS);
+    }
+}
+
+/** 下拉一次预置位:发查询 → 等设备应答 → 重读列表。
+ *
+ *  ⛔ 顺序不能省。少了"等应答"这一步,重读拿到的还是查询前的缓存,按钮看起来
+ *  什么都没干;而预置位的列表查询会比对设备实际报回的编号,把没报的标记为已删除,
+ *  所以读早了还会看到一份短暂错误的清单。 */
+async function syncPresets() {
+    const channelId = props.channel?.id;
+    const token = sessionToken;
+    if (!canViewPtz.value || !channelId || presetSyncing.value) return;
+    presetSyncing.value = true;
+    presetSyncError.value = "";
+    try {
+        const response = await listPtzPresets(channelId, true);
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
+        if (response.code !== 0 || !response.data) {
+            presetSyncError.value = response.message || "同步预置位失败,请重试";
+            return;
+        }
+        if (response.data.refreshError) presetSyncError.value = response.data.refreshError;
+        const outcome = response.data.refreshOperationId
+            ? await waitPTZOperationSettled(channelId, token, response.data.refreshOperationId)
+            : "settled";
+        if (outcome === "stale") return;
+        if (outcome === "timeout" && !presetSyncError.value) {
+            // 设备对 `PresetQuery` 不答,绝大多数情况是它根本没走到这一帧:
+            // SIP 已经不可达,或者设备不认识这个命令。都不该说成"同步失败"就完事。
+            presetSyncError.value = "设备未应答";
+        }
+        await loadPresets(channelId, token, false);
+    } catch {
+        if (token === sessionToken && props.channel?.id === channelId) {
+            presetSyncError.value = "同步预置位失败,请重试";
+        }
+    } finally {
+        if (token === sessionToken) presetSyncing.value = false;
+    }
+}
+
+/** 从设备回读某一条巡航轨迹的点位链。返回这轮查询的 operationId(拿不到就是空串)。 */
+async function requestCruiseDetail(channelId: number, trackId: number): Promise<string> {
+    try {
+        const response = await getCruiseTrack(channelId, trackId, true);
+        if (response.code !== 0 || !response.data) return "";
+        return response.data.refreshOperationId || "";
+    } catch {
+        return "";
+    }
+}
+
+/** 下拉巡航轨迹:清单查询 → 等应答 → 重读 → 给点位未知的轨迹逐条补详情。
+ *
+ *  ⛔ 第 4 步不是可选优化。`CruiseTrackListQuery` 的设备应答里只有 `<Number/>` 和
+ *  `<Name/>`(标准 A.2.6.13),**没有点位集合**;要是止步于重读列表,设备侧发现的
+ *  轨迹会永远停在「点位待查询」,操作员看得到轨迹名却看不到它串了哪几个预置位 ——
+ *  而"串了哪几个预置位"正是他点同步最想确认的事。
+ *
+ *  ⛔ 详情查询并发下发,不串行。每条都要走一轮 SIP 往返,串行 9 条最坏能拖到两分钟,
+ *  操作员会以为卡死了。它们在设备侧是互相独立的分组,没有顺序依赖。 */
+async function syncCruises() {
+    const channelId = props.channel?.id;
+    const token = sessionToken;
+    if (!canViewPtz.value || !channelId || cruiseSyncing.value) return;
+    cruiseSyncing.value = true;
+    cruiseLoadError.value = "";
+    cruiseRefreshError.value = "";
+    try {
+        const listed = await listCruiseTracks(channelId, true);
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
+        if (listed.code !== 0 || !listed.data) {
+            cruiseLoadError.value = listed.message || "加载巡航轨迹失败,请重试";
+            return;
+        }
+        // ⛔ 结论要**留到最后再写**。中间的每一次重读(`loadCruises(..., false)`)都会把
+        //    `cruiseRefreshError` 重置成响应里的空值;先写就等于被自己抹掉,
+        //    操作员看到「同步中」闪一下又回到「已同步」,设备没答这件事整个消失。
+        let failure = listed.data.refreshError || "";
+        const outcome = listed.data.refreshOperationId
+            ? await waitPTZOperationSettled(channelId, token, listed.data.refreshOperationId)
+            : "settled";
+        if (outcome === "stale") return;
+        if (outcome === "timeout" && !failure) failure = "设备未应答";
+
+        // 重读:设备侧新发现的轨迹到这一步才会出现(清单查询会把它们插进平台库)。
+        await loadCruises(channelId, token, false);
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
+
+        const needDetail = cruiseTracks.value.filter((track) => track.points === null).slice(0, CRUISE_DETAIL_SYNC_MAX);
+        if (needDetail.length > 0) {
+            const operationIds = (await Promise.all(
+                needDetail.map((track) => requestCruiseDetail(channelId, track.id)),
+            )).filter((operationId) => operationId !== "");
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            const detailOutcomes = await Promise.all(
+                operationIds.map((operationId) => waitPTZOperationSettled(channelId, token, operationId)),
+            );
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            await loadCruises(channelId, token, false);
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            if (!failure && detailOutcomes.every((item) => item === "timeout")) {
+                failure = "设备未回读点位";
+            }
+        }
+        cruiseRefreshError.value = failure;
+    } catch {
+        if (token === sessionToken && props.channel?.id === channelId) {
+            cruiseLoadError.value = "加载巡航轨迹失败,请重试";
+        }
+    } finally {
+        if (token === sessionToken) cruiseSyncing.value = false;
+    }
+}
 // 巡航卡片布局 1:1 复刻预置位 —— 3 列 × 3 行 = 9 格,溢出保留 8 条 tile + 1 「更多」chip
 const CRUISE_GRID_SLOTS = 9;
 const RESOURCE_TOOLTIP_ENTER_DELAY_MS = 80;
@@ -582,12 +811,21 @@ function cruiseTileState(c: { id: number; enabled: boolean; pending: boolean }):
     if (!c.enabled) return "disabled";
     return "idle";
 }
-function cruiseTileTitle(c: { id: number; name: string; enabled: boolean; pending: boolean }): string {
+/** 悬浮提示 = 「这条轨迹是什么」+「现在点一下会发生什么」。
+ *
+ *  带点位链是刻意的:tile 只有一格宽(2 列网格 + 单行省略),放不下第二个信息行,
+ *  而悬浮提示是操作员唯一能核对「设备上这条轨迹的点位顺序对不对」的地方。
+ *
+ *  文案刻意不写标准附录号(原来的「尚未返回 GB/T 28181-2022 巡航轨迹查询结果」)——
+ *  操作员不读 A.2.6.13,他只想知道现在能不能点、点了会发生什么。
+ */
+function cruiseTileTitle(c: CruiseTrack): string {
     const state = cruiseTileState(c);
-    if (state === "pending") return `#${c.id} ${c.name} · 配置指令已发送，但设备尚未返回 GB/T 28181-2022 巡航轨迹查询结果；点击试运行验证`;
-    if (state === "disabled") return `#${c.id} ${c.name} · 已禁用`;
-    if (state === "stop") return `#${c.id} ${c.name} · 启动指令已发送,点击停止`;
-    return `#${c.id} ${c.name} · 点击开始巡航`;
+    const head = `#${c.id} ${c.name} · ${cruiseTrackDetailText(c)}`;
+    if (state === "pending") return `${head}；配置已下发,设备还没回传轨迹内容。点一下可以试运行验证`;
+    if (state === "disabled") return `${head}；设备报告这条轨迹已停用`;
+    if (state === "stop") return `${head}；启动指令已下发,点一下停止`;
+    return `${head}；点一下开始巡航`;
 }
 
 function parseCruiseDetail(raw: string | CruiseTrackDetailResource | null | undefined): {
@@ -613,9 +851,13 @@ function parseCruiseDetail(raw: string | CruiseTrackDetailResource | null | unde
             : null;
     if (!rawPoints) return { points: null, source: detail.source || "" };
 
+    // ⛔ 上限是 **4095**,不是 15。写侧允许 1-4095(`cruiseDraftError`、`a-input-number`
+    //    的 :max),平台解析侧也按 1-4095 收(`manscdp.ParseCruiseTrackResponse`)——
+    //    只有这里卡在 1-15。后果不是"少显示一个数":设备如实回显 128 时这里返回 null,
+    //    界面上变成「速度未知」,看着像设备没回话,实际是前端把合法值丢了。
     const normalizeQuerySpeed = (value: unknown): number | null => {
         const speed = Number(value);
-        return Number.isInteger(speed) && speed >= 1 && speed <= 15 ? speed : null;
+        return Number.isInteger(speed) && speed >= 1 && speed <= 4095 ? speed : null;
     };
     const globalSpeed = normalizeQuerySpeed(detail.speed);
     const globalDwell = Number.isFinite(Number(detail.dwellSec)) ? Number(detail.dwellSec) : null;
@@ -631,18 +873,45 @@ function parseCruiseDetail(raw: string | CruiseTrackDetailResource | null | unde
     return { points, source: detail.source || "" };
 }
 
+/** 点位链最长显示几个预置位编号。32 个点的全链会占满一整行还把后面的
+ *  「每点停留 / 速度」挤掉,而头几个点已足够认出这条轨迹是不是自己配的那条。
+ *  截断时补「等 N 个」把真实数量交代清楚,不让人误以为只有 6 个点。 */
+const CRUISE_CHAIN_HEAD = 6;
+
+/** 把「巡航轨迹」的核心信息拼成一行:**点位链 + 顺序 + 单位齐全的参数**。
+ *
+ *  ⛔ 这里必须出现**点位链**。巡航轨迹的语义就是「按顺序走一串预置位」
+ *  (见技能 uvp-gb28181-ptz-linkage),只报「3 个点位」等于把这条轨迹最可识别的
+ *  信息丢了 —— 操作员无法据此判断设备上跑的到底是不是自己排的那条顺序。
+ *  模拟器侧的设备 HUD 用同一种写法(`#1 ▶ 1→3→5`),两边看起来是一回事。
+ *
+ *  ⛔ 单位必须写出来:`0x86`/`0x87` 的参数是 12 位裸整数(1-4095),`128` 单独放着
+ *  没人知道是档位还是百分比;停留时间也只有「秒」一种解释。同款坑平台侧修过
+ *  (看守位的「空闲」字段),这里保持一致。
+ */
 function cruiseTrackDetailText(track: CruiseTrack): string {
-    if (track.points === null) return "详情待查询";
-    if (track.points.length === 0) return "暂无点位";
+    if (track.points === null) return "点位待查询";
+    if (track.points.length === 0) return "设备上还没有点位";
+    const ids = track.points.map((point) => point.presetId);
+    // 单点不画箭头链(「预置位 3」比「预置位 3→」好读);多点才需要让顺序显形。
+    const chain = ids.length === 1
+        ? `${ids[0]}`
+        : ids.length <= CRUISE_CHAIN_HEAD
+            ? ids.join("→")
+            : `${ids.slice(0, CRUISE_CHAIN_HEAD).join("→")} 等 ${ids.length} 个`;
     const dwellValues = [...new Set(track.points.map((point) => point.dwellSec).filter((value): value is number => value !== null))];
     const speedValues = [...new Set(track.points.map((point) => point.speed).filter((value): value is number => value !== null))];
+    const dwellText = dwellValues.length === 1
+        ? `每点停留 ${dwellValues[0]} 秒`
+        : dwellValues.length > 1
+            ? "停留时间按点不同"
+            : "停留时间未上报";
     const speedText = speedValues.length === 1
-        ? ` · 设备速度 ${speedValues[0]}`
+        ? `速度 ${speedValues[0]}`
         : speedValues.length > 1
-            ? " · 按点位设置设备速度"
-            : " · 设备速度未知";
-    const dwellText = dwellValues.length === 1 ? ` · 停留 ${dwellValues[0]}s` : dwellValues.length > 1 ? " · 按点位停留" : "";
-    return `${track.points.length} 个点位${speedText}${dwellText}`;
+            ? "速度按点不同"
+            : "速度未上报";
+    return `预置位 ${chain} · ${dwellText} · ${speedText}`;
 }
 
 function cruiseTrackMeta(track: CruiseTrack): string {
@@ -691,9 +960,11 @@ const cruiseDraftError = computed(() => {
     if (!Number.isInteger(draft.trackId) || draft.trackId < 0 || draft.trackId > 255) return "巡航编号必须在 0-255 之间";
     if (!draft.replaceExisting && cruiseTracks.value.some((c) => c.id === draft.trackId)) return `巡航编号 #${draft.trackId} 已存在,请换一个或勾选清空重建`;
     if (draft.name.length > 32) return "名称最多 32 个字符";
-    if (draft.stops.length === 0) return "至少选择 1 个站点";
-    if (draft.stops.length > 32) return "站点数量最多 32 个";
-    if (draft.stops.some((s) => !presets.value.some((p) => p.id === s.presetId))) return "存在无效的预置位站点";
+    // 用词统一成「巡航点」:模态里原本「站点」「巡航点」混着说
+    // (标签写「站点」、按钮写「添加巡航点」、提示写「巡航点」),同一样东西三个叫法。
+    if (draft.stops.length === 0) return "至少选择 1 个巡航点";
+    if (draft.stops.length > 32) return "巡航点最多 32 个";
+    if (draft.stops.some((s) => !presets.value.some((p) => p.id === s.presetId))) return "选中的预置位已不存在,请重新选择";
     if (draft.sendSpeed && (!Number.isInteger(draft.speed) || draft.speed < 1 || draft.speed > 4095)) return "速度必须在 1-4095 之间";
     if (draft.sendDwell && (!Number.isInteger(draft.dwellSec) || draft.dwellSec < 1 || draft.dwellSec > 4095)) return "停留时间必须在 1-4095 秒之间";
     return "";
@@ -773,7 +1044,7 @@ async function handleSaveCruiseBeforeOk(done: (closable?: boolean) => void) {
             return;
         }
         if (response.code === 0) {
-            Message.info(`巡航 #${draft.trackId} 配置指令已发送,待设备对账 (${response.data?.completedStops ?? 0}/${response.data?.totalStops ?? 0} 站)`);
+            Message.info(`巡航 #${draft.trackId} 配置已下发,等设备回传确认(${response.data?.completedStops ?? 0}/${response.data?.totalStops ?? 0} 个巡航点)`);
             await loadCruises(channelId, token, false);
             if (token !== sessionToken || props.channel?.id !== channelId || cruiseDraft.value !== draft) {
                 done(false);
@@ -789,8 +1060,8 @@ async function handleSaveCruiseBeforeOk(done: (closable?: boolean) => void) {
         const data = response.data;
         const completed = data?.completedStops ?? 0;
         const total = data?.totalStops ?? draft.stops.length;
-        cruiseDraftSubmitError.value = `已有 ${completed}/${total} 站指令发送,请关闭后刷新设备状态再重建:${response.message || data?.error || "未知原因"}`;
-        Message.warning(`巡航 #${draft.trackId} 配置指令部分发送 (${completed}/${total} 站),请先核对设备状态`);
+        cruiseDraftSubmitError.value = `已有 ${completed}/${total} 个巡航点下发成功,请关闭后刷新设备状态再重建:${response.message || data?.error || "未知原因"}`;
+        Message.warning(`巡航 #${draft.trackId} 只下发了 ${completed}/${total} 个巡航点,请先核对设备状态`);
         scheduleCruiseReconcilePolling(channelId, token);
         done(false);
     } catch (error: any) {
@@ -856,6 +1127,9 @@ const homePending = ref<HomePositionPending | null>(null);
 const homeOperationId = ref<string | null>(null);
 const homeError = ref("");
 const homeMismatch = ref("");
+const homeSettingsDialogVisible = ref(false);
+const homeSettingsTouched = ref(false);
+const homeSettingsSubmitting = ref(false);
 
 const homePositionCanSave = computed(() => {
     if (!homeDraft.value.enabled) return true;
@@ -871,23 +1145,45 @@ const homePositionCanSave = computed(() => {
         && Number(resetTime) >= 10
         && Number(resetTime) <= 3600;
 });
-const homeControlPending = computed(() => homePending.value?.kind === "control");
+// 三个闸门(homeCanConfigure / homeCanRefresh / homeCanClose)都自带
+// `homePending.value === null`,模态内部另有 homeSettingsSubmitting —— 原来那个
+// `homeControlPending` 只挡这三处,已经全被覆盖,留着就是死代码(vue-tsc 会报未使用)。
 const homeCanSubmit = computed(() => props.channel?.status === 1 && homePending.value === null && homePositionCanSave.value);
 const homeCanRefresh = computed(() => props.channel?.status === 1 && homePending.value === null);
+const homeCanConfigure = computed(() => canUpdatePtzHome.value
+    && props.channel?.status === 1
+    && homePending.value === null
+    && homeControlSupport.value.status !== "unsupported"
+    && presets.value.length > 0);
+const homeCanClose = computed(() => canUpdatePtzHome.value
+    && props.channel?.status === 1
+    && homePending.value === null
+    && homeConfirmed.value?.enabled === true);
 const homeIsBusy = computed(() => homePhase.value === "loading" || homePending.value !== null);
 const homeConfirmedValuesText = computed(() => {
     const confirmed = homeConfirmed.value;
     if (!confirmed?.enabled) return "";
-    const preset = confirmed.presetId == null ? "未返回" : `#${confirmed.presetId}`;
-    const resetTime = confirmed.resetTime == null ? "未返回" : `${confirmed.resetTime} 秒`;
-    return `回位 ${preset} · 空闲 ${resetTime}`;
+    const preset = Number.isInteger(confirmed.presetId) && Number(confirmed.presetId) > 0
+        ? `归位到 #${confirmed.presetId}`
+        : "归位位置未配置";
+    const resetTime = Number.isInteger(confirmed.resetTime) && Number(confirmed.resetTime) > 0
+        ? `无操作 ${confirmed.resetTime} 秒后归位`
+        : "等待时间未配置";
+    return `${preset} · ${resetTime}`;
+});
+const homeConfirmedAtText = computed(() => {
+    const value = homeConfirmed.value?.confirmedAt;
+    if (!value) return "";
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return "";
+    return `设备确认于 ${new Date(timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}`;
 });
 const homeConfirmedOutsideEditableRange = computed(() => {
     const confirmed = homeConfirmed.value;
     if (!confirmed?.enabled) return false;
     return confirmed.presetId == null
         || !Number.isInteger(confirmed.presetId)
-        || confirmed.presetId < 0
+        || confirmed.presetId <= 0
         || confirmed.presetId > 255
         || confirmed.resetTime == null
         || !Number.isInteger(confirmed.resetTime)
@@ -898,9 +1194,9 @@ const homePresentationState = computed<HomePositionPresentationState>(() => {
     if (props.channel?.status !== 1) return "offline";
     if (homePhase.value === "loading") return "loading";
     if (homePending.value) return "pending";
-    if (homeConfirmed.value) return homeConfirmed.value.enabled ? "enabled" : "disabled";
     if (homeControlSupport.value.status === "unsupported" && homeQuerySupport.value.status === "unsupported") return "unsupported";
-    if (homePhase.value === "error" || homePhase.value === "accepted" || (homeOperationId.value && homeError.value)) return "error";
+    if (homePhase.value === "error" || homePhase.value === "accepted" || homeError.value) return "error";
+    if (homeConfirmed.value) return homeConfirmed.value.enabled ? "enabled" : "disabled";
     if (homeControlSupport.value.status === "supported" || homeQuerySupport.value.status === "supported") return "unconfigured";
     return "unknown";
 });
@@ -922,29 +1218,40 @@ const homePresentation = computed(() => {
         },
         enabled: { label: "已启用", description: "", tone: "success" },
         disabled: { label: "已关闭", description: "", tone: "muted" },
-        error: { label: "暂时无法确认设备状态", description: "请稍后重试", tone: "danger" },
+        error: { label: "当前状态未确认", description: "", tone: "danger" },
         offline: { label: "设备离线", description: "连接恢复后可继续操作", tone: "muted" },
     } as const;
-    const showControls = Boolean(homeConfirmed.value)
-        || (state === "unconfigured" && homeControlSupport.value.status === "supported");
     return {
         state,
         ...copy[state],
-        showControls,
         showQuery: state !== "unsupported" && state !== "loading" && state !== "offline",
         queryLabel: state === "error" ? "重试" : state === "pending" ? "查询中" : "查询设备",
+        // 控制能力明确不支持时**不渲染**「配置」按钮。
+        //
+        // 只靠 `:disabled="!homeCanConfigure"` 拦不住观感:homeCanConfigure 已经把
+        // `controlSupport === "unsupported"` 算进去了,按钮会以主子色渲染出来再被禁灰,
+        // 操作员看到的是一个点不动、也没有理由的按钮。而 homePresentationState 在
+        // 「控制不支持 + 查询未知 + 有一份已确认配置」这种**混合能力**下会落到
+        // enabled/disabled,那条分支的 description 是空的,连解释都没有。
+        // 直接不渲染,理由交给 home-diagnostics 的悬浮说明和状态行去讲。
+        showConfigure: homeControlSupport.value.status !== "unsupported",
     };
 });
 const homeLastConfirmedText = computed(() => {
-    if (!homeConfirmed.value || homePresentationState.value !== "offline") return "";
+    if (!homeConfirmed.value || !["offline", "error"].includes(homePresentationState.value)) return "";
     if (!homeConfirmed.value.enabled) return "上次确认：已关闭";
     return `上次确认：已启用 · ${homeConfirmedValuesText.value}`;
 });
 const homeNoticeText = computed(() => {
     if (homeMismatch.value) return homeMismatch.value;
-    if (!homeError.value || homePresentationState.value === "error") return "";
+    if (!homeError.value) return "";
+    const normalized = homeError.value.toUpperCase();
+    if (normalized.includes("TIMEOUT") || normalized.includes("DEADLINE") || normalized.includes("超时")) {
+        return "查询设备超时，请重试";
+    }
     return homeConfirmed.value ? "设备状态可能已变化，请重新查询" : "暂时无法确认设备状态，请重试";
 });
+const homeSettingsActionLabel = computed(() => homeConfirmed.value?.enabled ? "保存修改" : "启用看守位");
 const homeDiagnosticsTitle = computed(() => {
     const supportText = (support: HomePositionSupport) => ({
         supported: "支持",
@@ -971,6 +1278,9 @@ function resetHomePositionState() {
     homeOperationId.value = null;
     homeError.value = "";
     homeMismatch.value = "";
+    homeSettingsDialogVisible.value = false;
+    homeSettingsTouched.value = false;
+    homeSettingsSubmitting.value = false;
 }
 
 function applyHomePositionResult(result: HomePositionResult) {
@@ -2076,17 +2386,21 @@ async function loadPanelData() {
     ]);
 }
 
-async function loadPresets(channelId = props.channel?.id, token = sessionToken) {
+async function loadPresets(channelId = props.channel?.id, token = sessionToken, refresh = false) {
     if (!canViewPtz.value || !channelId) return;
     try {
-        const response = await listPtzPresets(channelId);
+        const response = await listPtzPresets(channelId, refresh);
         if (token === sessionToken && props.channel?.id === channelId && response.code === 0 && response.data) {
+            presetFreshness.value = response.data.freshness || "unknown";
             presets.value = response.data.list.map((item) => ({
                 id: Number(item.presetId ?? item.id), name: String(item.name || `预置位 ${item.presetId ?? item.id}`), setAt: item.updatedAt ? String(item.updatedAt) : undefined,
             })).filter((item) => item.id > 0);
         }
     } catch {
-        if (token === sessionToken) presets.value = [];
+        if (token === sessionToken) {
+            presets.value = [];
+            presetFreshness.value = "unknown";
+        }
     }
 }
 
@@ -2394,7 +2708,7 @@ function toggleCruise(id: number) {
     if (!isCurrent && unconfirmed) {
         Modal.warning({
             title: "试运行未验证轨迹",
-            content: `轨迹 #${id} 尚未收到设备确认。试运行可能调用设备中原有的同编号轨迹,请确认现场允许云台移动。`,
+            content: `轨迹 #${id} 还没收到设备回执,设备上实际存的内容可能跟这里显示的不一致(同编号轨迹可能是之前配的)。试运行会让云台真的动起来,请先确认现场安全。`,
             hideCancel: false,
             okText: "继续试运行",
             cancelText: "取消",
@@ -2429,7 +2743,7 @@ async function deleteCruise(id: number) {
             if (token !== sessionToken || props.channel?.id !== channelId) return;
             if (response.code !== 0) throw new Error(response.message || "删除巡航失败");
             if (activeCruiseId.value === id) { activeCruiseId.value = null; cruiseState.value = "stopped"; }
-            Message.info(`巡航 #${id} 删除指令已发送,待设备对账`);
+            Message.info(`巡航 #${id} 删除指令已下发,等设备回传确认`);
             await loadCruises(channelId, token, false);
         } catch (error: any) { Message.error(error?.message || "删除巡航失败"); }
     } });
@@ -2453,8 +2767,47 @@ function closeAssetManager() {
     assetSearch.value = "";
 }
 
+function openHomeSettingsDialog() {
+    if (!homeCanConfigure.value) return;
+    const draft = homeDraftFrom(homeConfirmed.value);
+    homeDraft.value = {
+        enabled: true,
+        presetId: draft.presetId,
+        resetTime: Number.isInteger(draft.resetTime) && Number(draft.resetTime) >= 10 && Number(draft.resetTime) <= 3600
+            ? draft.resetTime
+            : 300,
+    };
+    homeSettingsTouched.value = false;
+    homeSettingsDialogVisible.value = true;
+}
+
+function closeHomeSettingsDialog() {
+    if (homeSettingsSubmitting.value) return;
+    homeSettingsDialogVisible.value = false;
+    homeSettingsTouched.value = false;
+    restoreHomeDraftFromConfirmed();
+}
+
+async function submitHomeSettings() {
+    homeSettingsTouched.value = true;
+    if (!homePositionCanSave.value || homeSettingsSubmitting.value) return;
+    homeSettingsSubmitting.value = true;
+    const submitted = await saveHomePosition();
+    homeSettingsSubmitting.value = false;
+    if (submitted) {
+        homeSettingsDialogVisible.value = false;
+        homeSettingsTouched.value = false;
+    }
+}
+
+async function closeHomePosition() {
+    if (!homeCanClose.value) return;
+    homeDraft.value = { enabled: false, presetId: null, resetTime: null };
+    await saveHomePosition();
+}
+
 async function saveHomePosition() {
-    if (!canUpdatePtzHome.value || !props.channel || !homeCanSubmit.value) return;
+    if (!canUpdatePtzHome.value || !props.channel || !homeCanSubmit.value) return false;
     const channelId = props.channel.id;
     const token = sessionToken;
     const generation = beginHomePositionOperation();
@@ -2495,6 +2848,7 @@ async function saveHomePosition() {
             Message.info("看守位请求已受理，等待设备确认");
             scheduleHomePositionPoll(channelId, token, generation);
         }
+        return !["rejected", "timeout", "cancelled"].includes(response.data.status);
     } catch (error: any) {
         if (!isCurrentHomePositionContext(channelId, token, generation)) return;
         clearHomePositionPolling(false);
@@ -2503,6 +2857,7 @@ async function saveHomePosition() {
         homeError.value = error?.message || "保存看守位失败";
         restoreHomeDraftFromConfirmed();
         Message.error(homeError.value);
+        return false;
     }
 }
 
@@ -2948,14 +3303,58 @@ let talkSessionChannelId: number | null = null;
 let talkPollTimer: number | null = null;
 let talkToken = 0;
 
+/**
+ * 「正在说话」的实时电平（0..1），由采集流的 AnalyserNode 驱动，用于按钮上的波形反馈。
+ * 拿不到 AudioContext 时恒为 0 —— 波形退化成静态起伏，不影响对讲本身。
+ */
+const talkLevel = ref(0);
+let talkMeter: AudioLevelMeter | null = null;
+
+function stopTalkMeter() {
+    talkMeter?.stop();
+    talkMeter = null;
+    talkLevel.value = 0;
+}
+
+function startTalkMeter() {
+    stopTalkMeter();
+    if (!talkStream) return;
+    talkMeter = createAudioLevelMeter(talkStream, (level) => { talkLevel.value = level; });
+}
+
 const talkButtonText = computed(() => {
+    const label = talkMode.value === "broadcast" ? "广播" : "对讲";
     if (talkState.value === "permission") return "正在申请麦克风";
     if (talkState.value === "publishing") return "正在发布音源";
-    if (talkState.value === "signaling") return talkMode.value === "broadcast" ? "正在建立广播" : "正在建立对讲";
-    if (talkState.value === "talking") return talkMode.value === "broadcast" ? "广播中 · 松开结束" : "对讲中 · 松开结束";
+    if (talkState.value === "signaling") return `正在建立${label}`;
+    // ⭐ 说话中显示的是**动作**（再点一下就停），不是「松开结束」——对讲已改成点击开关，
+    // 见 toggleTalk。
+    if (talkState.value === "talking") return `停止${label}`;
     if (talkState.value === "stopping") return "正在停止";
-    return talkMode.value === "broadcast" ? "按住广播" : "按住对讲";
+    return `开始${label}`;
 });
+
+/**
+ * ⭐ 对讲是**点击开关**，不是长按。
+ *
+ * 原来的长按版本用 `pointerdown` 起、`pointerup/pointerleave/pointercancel` 收尾，在触屏上
+ * 手指稍微滑出按钮就断话，而且「松开即停」意味着没法一边说话一边去点别处。
+ * 现在：点一下开始（按钮文字变成「停止广播 / 停止对讲」），再点一下停止。
+ *
+ * ⛔ 过渡态（`permission` / `publishing` / `signaling`）里的第二次点击是**取消**，不能忽略：
+ * 麦克风授权弹窗可能久等不来、WHIP/信令可能卡住，那是操作员唯一的退出口。
+ * 取消走 `stopTalk` → `cleanupTalkLocally` 里的 `talkToken++`，还在途中的建会话流程会自己放弃
+ * （`startTalk` 每一段 await 后都比对 token）。
+ */
+function toggleTalk() {
+    if (!canTalk.value) return;
+    if (talkState.value === "stopping") return;
+    if (talkState.value === "idle") {
+        void startTalk();
+        return;
+    }
+    void stopTalk();
+}
 
 function clearTalkPoll() {
     if (talkPollTimer) window.clearInterval(talkPollTimer);
@@ -3033,17 +3432,35 @@ async function startTalk() {
         }
         talkSession.value = response.data;
         talkSessionChannelId = channelId;
-        talkConnection = new RTCPeerConnection();
+        // ICE 服务器由平台下发，且只在节点声明了 rtc.externIP（跨网段）时才下发：
+        // 那种场景必须靠 STUN 拿到 NAT 上的映射地址，只产 host candidate 连不上。
+        // 同网段部署平台不下发，浏览器只产 host candidate，也就不会去等一个可能不可达的 STUN。
+        const uplink = response.data.uplink;
+        talkConnection = new RTCPeerConnection({ iceServers: uplink?.iceServers || [] });
         const transceiver = talkConnection.addTransceiver(audioTrack, { direction: "sendonly", streams: [talkStream] });
         const audioCodecs = typeof RTCRtpSender === "undefined" ? [] : RTCRtpSender.getCapabilities?.("audio")?.codecs || [];
         preferPCMA8000(transceiver, audioCodecs);
         const offer = await talkConnection.createOffer();
         await talkConnection.setLocalDescription(offer);
-        await waitForIceGatheringComplete(talkConnection);
+        // 收集超时不致命：按已收集到的候选继续发布，同网段靠 host candidate 就能建连。
+        const iceGathered = await waitForIceGatheringComplete(talkConnection);
+        if (!iceGathered) {
+            console.warn("[talk] ICE 收集未在预算内完成，按已有候选发布（STUN 可能不可达）");
+        }
         const offerSdp = talkConnection.localDescription?.sdp || "";
         assertPCMA8000(offerSdp);
         if (token !== talkToken) return;
-        const answer = await fetch(response.data.publishUrl, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offerSdp });
+        // 上行发给平台自己，由平台转发到媒体节点：媒体节点地址与自签证书不再经手浏览器。
+        // 带上 Authorization 是因为平台侧要认人，而这条裸 fetch 不走 http 封装。
+        const access = getAccessToken();
+        const answer = await fetch(uplink.url, {
+            method: "POST",
+            headers: {
+                "Content-Type": uplink.contentType || "application/sdp",
+                ...(access?.accessToken ? { Authorization: formatToken(access.accessToken) } : {})
+            },
+            body: offerSdp
+        });
         if (!answer.ok) throw new Error(`WHIP 发布失败(${answer.status})`);
         const answerSdp = await answer.text();
         assertPCMA8000(answerSdp);
@@ -3052,6 +3469,7 @@ async function startTalk() {
         if (token !== talkToken) return;
         talkStream.getAudioTracks().forEach((track) => { track.enabled = true; });
         talkState.value = "talking";
+        startTalkMeter();
         beginTalkPoll(channelId, response.data.sessionId);
     } catch (error: any) {
         if (token !== talkToken) {
@@ -3066,6 +3484,7 @@ async function startTalk() {
 function cleanupTalkLocally() {
     talkToken++;
     clearTalkPoll();
+    stopTalkMeter();
     if (talkStream) talkStream.getTracks().forEach((track) => {
         track.enabled = false;
         track.stop();
@@ -3081,8 +3500,14 @@ async function stopTalk() {
     const session = talkSession.value;
     const channelId = talkSessionChannelId;
     talkState.value = "stopping";
-    cleanupTalkLocally();
+    // ⛔ 顺序要紧：先静音、再拆会话、最后才停流关 PeerConnection。
+    // 反过来（先 close 掉 pc）媒体面先死，设备发现收不到 RTP 会**抢在我们的 BYE
+    // 之前**发它自己的 BYE，形成交叉 BYE —— 对端不会回我们 200，拆除事务只能重传
+    // 到超时（实测 15s）：用户看到 504，平台侧 ZLM 释放也被跳过。
+    // 静音只是 track.enabled=false，RTP 仍在流（送静音），不会触发设备端 BYE。
+    if (talkStream) talkStream.getAudioTracks().forEach((track) => { track.enabled = false; });
     if (hasPermission("gb28181:talk:control") && channelId && session?.sessionId) await deleteTalkSession(channelId, session.sessionId).catch(() => undefined);
+    cleanupTalkLocally();
     talkState.value = "idle";
 }
 
@@ -3392,17 +3817,32 @@ onBeforeUnmount(() => {
                             <section class="linked-section linked-card">
                                 <header class="linked-card-hd">
                                     <span class="section-title"><Hash :size="13" />预置位<em v-if="presets.length" class="preset-count">{{ presets.length }}</em></span>
-                                    <button
-                                        class="preset-save-btn"
-                                        data-testid="preset-save-btn"
-                                        @click="openSavePresetDialog"
-                                    >
-                                        <Plus :size="12" /><span>添加</span>
-                                    </button>
+                                    <span class="linked-card-actions">
+                                        <button
+                                            class="resource-sync-btn"
+                                            data-testid="preset-sync-btn"
+                                            :class="{ syncing: presetSyncing }"
+                                            :disabled="presetSyncing"
+                                            :title="presetSyncTitle"
+                                            @click="syncPresets"
+                                        >
+                                            <Loader2 v-if="presetSyncing" :size="11" class="resource-sync-spin" />
+                                            <RefreshCcw v-else :size="11" />
+                                            <span>{{ presetSyncLabel }}</span>
+                                        </button>
+                                        <button
+                                            class="preset-save-btn"
+                                            data-testid="preset-save-btn"
+                                            @click="openSavePresetDialog"
+                                        >
+                                            <Plus :size="12" /><span>添加</span>
+                                        </button>
+                                    </span>
                                 </header>
                                     <div v-if="presets.length === 0" class="preset-empty" data-testid="preset-empty">
                                         <Inbox :size="24" class="preset-empty-glyph" />
                                         <p class="preset-empty-line">暂无预置位</p>
+                                        <p class="preset-empty-hint">设备上已有的可用「同步」读回</p>
                                     </div>
                                     <div v-else class="preset-grid">
                                         <div
@@ -3495,7 +3935,6 @@ onBeforeUnmount(() => {
                                 <header class="linked-card-hd">
                                     <span class="section-title">
                                         <Route :size="13" />巡航轨迹<em v-if="cruiseTracks.length" class="preset-count">{{ cruiseTracks.length }}</em>
-                                        <small class="cruise-freshness" data-testid="cruise-freshness">{{ cruiseSyncLabel }}</small>
                                         <button
                                             v-if="activeCruiseId !== null && cruiseState !== 'stopped'"
                                             class="cruise-running-chip"
@@ -3508,23 +3947,44 @@ onBeforeUnmount(() => {
                                             <Square :size="10" />
                                         </button>
                                     </span>
-                                    <button
-                                        class="preset-save-btn"
-                                        data-testid="cruise-add-btn"
-                                        :disabled="presets.length === 0"
-                                        :title="presets.length === 0 ? '需要先添加预置位才能新建巡航轨迹' : '新建巡航轨迹(按顺序串联多个预置位)'"
-                                        @click="openSaveCruiseDialog"
-                                    >
-                                        <Plus :size="12" /><span>添加</span>
-                                    </button>
+                                    <span class="linked-card-actions">
+                                        <!-- 「同步」从标题里的一行小字改成了动作区的按钮。
+                                             它原来是个 <small>,既不可点、又挤在标题中间,
+                                             而它写的偏偏是「缓存数据已过期」这种**要求你
+                                             去做点什么**的话 —— 提示了问题却不给入口。
+                                             现在与预置位卡片的药丸同一位置、同一套文案。 -->
+                                        <button
+                                            class="resource-sync-btn"
+                                            data-testid="cruise-sync-btn"
+                                            :class="{ syncing: cruiseSyncing }"
+                                            :disabled="cruiseSyncing"
+                                            :title="cruiseSyncTitle"
+                                            @click="syncCruises"
+                                        >
+                                            <Loader2 v-if="cruiseSyncing" :size="11" class="resource-sync-spin" />
+                                            <RefreshCcw v-else :size="11" />
+                                            <span>{{ cruiseSyncLabel }}</span>
+                                        </button>
+                                        <button
+                                            class="preset-save-btn"
+                                            data-testid="cruise-add-btn"
+                                            :disabled="presets.length === 0"
+                                            :title="presets.length === 0 ? '需要先添加预置位才能新建巡航轨迹' : '新建巡航轨迹(按顺序串联多个预置位)'"
+                                            @click="openSaveCruiseDialog"
+                                        >
+                                            <Plus :size="12" /><span>添加</span>
+                                        </button>
+                                    </span>
                                 </header>
                                 <div v-if="cruiseLoadError" class="preset-empty" data-testid="cruise-load-error">
                                     <AlertTriangle :size="24" class="preset-empty-glyph" />
                                     <p class="preset-empty-line">{{ cruiseLoadError }}</p>
+                                    <p class="preset-empty-hint">点「同步」重试</p>
                                 </div>
                                 <div v-else-if="cruiseTracks.length === 0" class="preset-empty" data-testid="cruise-empty">
                                     <Inbox :size="24" class="preset-empty-glyph" />
                                     <p class="preset-empty-line">暂无巡航轨迹</p>
+                                    <p class="preset-empty-hint">设备上已有的可用「同步」读回</p>
                                 </div>
                                 <div v-else class="preset-grid">
                                     <a-tooltip
@@ -3624,7 +4084,7 @@ onBeforeUnmount(() => {
 
                             <section class="linked-section linked-card" data-testid="home-card">
                                 <div class="section-hd first">
-                                    <span class="section-title"><Home :size="13" />看守位<span class="tag-2022">2022</span></span>
+                                    <span class="section-title"><Home :size="13" />看守位<span class="tag-2022" title="GB/T 28181-2022 扩展能力">2022</span></span>
                                     <div class="home-header-actions">
                                         <span
                                             class="home-diagnostics"
@@ -3634,28 +4094,6 @@ onBeforeUnmount(() => {
                                         >
                                             <Info :size="12" />
                                         </span>
-                                        <!-- 开关本身**不禁用**:设备端可能本来就开着看守位
-                                             (或它自己设的点位平台还没同步),操作员必须还能
-                                             把它关掉、也必须还能查询设备当前状态 ——
-                                             见 homeCanSubmit / homeCanRefresh 各自的门槛。
-                                             缺预置位时只挡「启用」并给提示;这里额外挂一个
-                                             title,让操作员在拨动之前就知道原因(与巡航「添加」
-                                             按钮 disabled + title 的做法一致)。 -->
-                                        <label
-                                            v-if="homePresentation.showControls"
-                                            class="toggle"
-                                            :title="presets.length === 0 && !homeDraft.enabled
-                                                ? '设备暂无预置位，需先在「预置位」卡片设置点位后再启用看守位'
-                                                : undefined"
-                                        >
-                                        <input
-                                            v-model="homeDraft.enabled"
-                                            data-testid="home-toggle"
-                                            type="checkbox"
-                                            :disabled="props.channel?.status !== 1 || homeControlPending"
-                                        />
-                                        <span></span>
-                                        </label>
                                     </div>
                                 </div>
                                 <div
@@ -3686,123 +4124,46 @@ onBeforeUnmount(() => {
                                                 v-else-if="homeConfirmedValuesText"
                                                 data-testid="home-confirmed-values"
                                             >{{ homeConfirmedValuesText }}</span>
+                                            <span v-if="homeConfirmedAtText && !homeLastConfirmedText" class="home-confirmed-at">{{ homeConfirmedAtText }}</span>
                                         </div>
                                     </div>
                                     <p v-if="homeConfirmedOutsideEditableRange" class="home-warning" data-testid="home-range-warning">
-                                        设备原值缺失或超出平台可编辑范围；关闭仍可下发，再次启用前请修改。
+                                        设备返回的归位配置不完整，修改后才能再次启用。
                                     </p>
                                     <p v-if="homeNoticeText" class="home-error" data-testid="home-notice">{{ homeNoticeText }}</p>
-                                    <div
-                                        v-if="homePresentation.showControls || homePresentation.showQuery"
-                                        class="home-editor"
-                                        :class="{ 'query-only': !homePresentation.showControls }"
-                                    >
-                                        <div
-                                            v-if="homePresentation.showControls"
-                                            class="home-fields"
-                                            :class="{ disabled: !homeDraft.enabled }"
-                                            data-testid="home-fields"
+                                    <p v-if="presets.length === 0 && homeControlSupport.status !== 'unsupported'" class="home-hint" data-testid="home-preset-required">
+                                        请先添加预置位，再配置看守位。
+                                    </p>
+                                    <div class="home-card-actions">
+                                        <button
+                                            v-if="homePresentation.showConfigure && (homePresentation.state === 'enabled' || homePresentation.state === 'disabled' || homePresentation.state === 'unconfigured' || (homePresentation.state === 'error' && homeConfirmed))"
+                                            class="btn-primary sm"
+                                            data-testid="home-configure"
+                                            :disabled="!homeCanConfigure"
+                                            :title="presets.length === 0 ? '请先添加预置位' : undefined"
+                                            @click="openHomeSettingsDialog"
                                         >
-                                            <label class="home-row">
-                                                <span>回位</span>
-                                                <select
-                                                    v-model.number="homeDraft.presetId"
-                                                    data-testid="home-preset"
-                                                    :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
-                                                >
-                                                    <!-- ⛔ 这个占位项**不能**加 `disabled`:
-                                                         Chromium 对「被选中的 disabled option」用
-                                                         GrayText 着色渲染**闭合状态**的 select,
-                                                         暗色主题下几乎等同于底色 —— 实测文本最亮
-                                                         (38,54,72),与卡片底 (23,35,52) 无法区分,
-                                                         而且 `option:disabled { color: … }` 覆盖无效
-                                                         (覆盖后仍是 (38,54,72))。结果就是下拉看起来
-                                                         完全是空的、操作员不知道要选什么。
-                                                         改成可选中的占位项,「没挑到真预置位就不许提交」
-                                                         交给 homePositionCanSave 拦。 -->
-                                                    <option :value="null">请选择预置位</option>
-                                                    <!-- ⛔ 这里原来有一条硬编码的 `<option :value="0">#0 · 标准预置位 0</option>`。
-                                                         它存在的唯一理由是:设备从未被配置过看守位时,标准没有定义
-                                                         「查不到」的应答形态,模拟器统一回 `PresetIndex=0`
-                                                         (见模拟器 DeviceControlSubRouter 的说明),前端为了不让
-                                                         下拉空白就补了这么一个选项。但 0 号预置位在平台里
-                                                         **根本不可能存在**:
-                                                           - 创建接口强制 `presetId > 0`(controllers/device_ptz_resources.go)
-                                                           - 读列表时前端也 `.filter(id > 0)`(loadPresets)
-                                                         所以它是个永远指向空气的选项,还会让操作员误以为
-                                                         「0 号」是个平台定义的标准预置位。
-                                                         改成:设备真回了一个平台列表里没有的编号时如实标注来源,
-                                                         不再伪造一个「标准预置位」。 -->
-                                                    <option
-                                                        v-if="homeDraft.presetId != null && !presets.some((p) => p.id === homeDraft.presetId)"
-                                                        :value="homeDraft.presetId"
-                                                    >#{{ homeDraft.presetId }} · 设备侧预置位（不在平台列表）</option>
-                                                    <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
-                                                </select>
-                                            </label>
-                                            <label class="home-row">
-                                                <!-- 单位必须写在界面上:这个字段就是 GB/T 28181 的
-                                                     `ResetTime`(秒),但光看「空闲 10」看不出单位是
-                                                     秒还是分钟。摘要行本来就写「空闲 10 秒」,这里对齐。 -->
-                                                <span>空闲(秒)</span>
-                                                <input
-                                                    v-model.number="homeDraft.resetTime"
-                                                    data-testid="home-reset-time"
-                                                    type="number"
-                                                    min="10"
-                                                    max="3600"
-                                                    aria-label="看守位空闲时间（秒）"
-                                                    title="无云台操作后等待多少秒自动归位（10–3600）"
-                                                    :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
-                                                />
-                                            </label>
-                                        </div>
-                                        <div class="home-actions" :class="{ single: !homePresentation.showControls || !homePresentation.showQuery }">
-                                            <button
-                                                v-if="homePresentation.showControls"
-                                                class="btn-primary sm"
-                                                data-testid="home-save"
-                                                :disabled="!homeCanSubmit"
-                                                :title="homeDraft.enabled ? '保存看守位' : '关闭看守位'"
-                                                :aria-label="homeDraft.enabled ? '保存看守位' : '关闭看守位'"
-                                                @click="saveHomePosition"
-                                            >
-                                                <ShieldCheck :size="12" /><span class="home-save-label">{{ homeDraft.enabled ? "保存" : "关闭" }}</span>
-                                            </button>
-                                            <button
-                                                v-if="homePresentation.showQuery"
-                                                class="btn-ghost sm uvp-refresh-btn"
-                                                :class="{ 'icon-only': homePresentation.showControls }"
-                                                data-testid="home-refresh"
-                                                :disabled="!homeCanRefresh"
-                                                :title="homePresentation.showControls ? '查询设备状态' : undefined"
-                                                :aria-label="homePresentation.showControls ? '查询设备状态' : homePresentation.queryLabel"
-                                                @click="refreshHomePosition"
-                                            >
-                                                <RefreshCcw :size="12" /><span v-if="!homePresentation.showControls">{{ homePresentation.queryLabel }}</span>
-                                            </button>
-                                        </div>
+                                            <Settings :size="12" />{{ homeConfirmed?.enabled ? "修改设置" : "配置并启用" }}
+                                        </button>
+                                        <button
+                                            v-if="homeConfirmed?.enabled"
+                                            class="btn-ghost sm home-close-btn"
+                                            data-testid="home-close"
+                                            :disabled="!homeCanClose"
+                                            @click="closeHomePosition"
+                                        >
+                                            <CircleSlash :size="12" />关闭
+                                        </button>
+                                        <button
+                                            v-if="homePresentation.showQuery"
+                                            class="btn-ghost sm uvp-refresh-btn"
+                                            data-testid="home-refresh"
+                                            :disabled="!homeCanRefresh"
+                                            @click="refreshHomePosition"
+                                        >
+                                            <RefreshCcw :size="12" />{{ homePresentation.queryLabel }}
+                                        </button>
                                     </div>
-                                    <!-- 预置位为空是**独立的**一种情况,不能只靠下面那条通用校验提示 ——
-                                         它的成因是「设备上没有归位目标」,而不是「填错了」,所以单列一条
-                                         并给出可执行的下一步(先去预置位卡片设点 / 刷新同步)。
-                                         注意:**只挡「启用」**,不挡查询与关闭 —— 设备端可能本来就开着看守位
-                                         (或它自己设的点位平台还没同步),那两种操作必须永远可用,
-                                         否则操作员连「看一眼设备现在什么状态」和「把它关掉」都做不到。 -->
-                                    <p
-                                        v-if="homePresentation.showControls && homeDraft.enabled && presets.length === 0"
-                                        class="home-hint"
-                                        data-testid="home-preset-required"
-                                    >
-                                        设备当前没有预置位。看守位要有一个「归位目标」，请先在上方「预置位」卡片设置点位（若设备侧已有点位，点该卡的刷新按钮同步）。
-                                    </p>
-                                    <p
-                                        v-else-if="homePresentation.showControls && homeDraft.enabled && !homePositionCanSave"
-                                        class="home-error"
-                                        data-testid="home-validation"
-                                    >
-                                        启用需要选择一个已存在的预置位，等待时间为 10..3600 秒整数。
-                                    </p>
                                 </div>
                             </section>
 
@@ -3908,12 +4269,55 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-if="canAdvancedPanel" v-show="activeTab === 'advanced'" class="linked-detail" data-testid="linked-detail-advanced">
-                        <div class="linked-standard-note">
-                            <Info :size="14" />
-                            <div>
-                                <strong>高级控制按设备应答显示结果</strong>
-                                <span>图像调节不属于 GB/T 28181 标准控制字段，本面板不提供未接入的伪控制滑杆。</span>
-                            </div>
+                        <div class="linked-advanced-layout">
+                            <section class="linked-section linked-card">
+                                <header class="linked-card-hd">
+                                    <span class="section-title"><Video :size="13" />媒体控制</span>
+                                    <span class="section-meta" title="图像调节不属于 GB/T 28181 标准控制字段，本面板不提供未接入的伪控制滑杆。">
+                                        <Info :size="11" />标准控制字段
+                                    </span>
+                                </header>
+                                <div class="adv-actions">
+                                    <button class="adv-btn" data-testid="advanced-iframe" :title="capabilityActionTitle('iFrame', '请求关键帧')" :disabled="isAdvancedPending('iframe')" @click="runAdvancedAction('iframe')">
+                                        <Video :size="14" /><div><strong>请求关键帧</strong><small>发送到设备,执行结果不回传</small></div>
+                                    </button>
+                                    <div class="adv-action-pair">
+                                        <button class="adv-btn" data-testid="advanced-record" :title="capabilityActionTitle('record', advancedActionLabel('record'))" :disabled="isAdvancedPending(recordState === 'on' ? 'record_stop' : 'record_start')" @click="runAdvancedAction(recordState === 'on' ? 'record_stop' : 'record_start')">
+                                            <Circle :size="14" /><div><strong>{{ advancedActionLabel('record') }}</strong><small>{{ advancedOperationStatus[recordState === 'on' ? 'record_stop' : 'record_start'] || '以设备应答为准' }}</small></div>
+                                        </button>
+                                        <button v-if="recordState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-record-stop" :title="capabilityActionTitle('record', '请求停止设备录制')" :disabled="isAdvancedPending('record_stop')" @click="runAdvancedAction('record_stop')">
+                                            <Square :size="14" /><div><strong>请求停止设备录制</strong><small>当前状态未知,按需显式选择</small></div>
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+                            <section class="linked-section linked-card">
+                                <header class="linked-card-hd"><span class="section-title"><ShieldCheck :size="13" />安防控制</span><span class="section-meta">以设备应答为准</span></header>
+                                <div class="adv-actions">
+                                    <div class="adv-action-pair">
+                                        <button class="adv-btn" data-testid="advanced-guard" :title="capabilityActionTitle('guard', advancedActionLabel('guard'))" :disabled="isAdvancedPending(guardState === 'armed' ? 'guard_reset' : 'guard_set')" @click="runAdvancedAction(guardState === 'armed' ? 'guard_reset' : 'guard_set')">
+                                            <ShieldCheck :size="14" /><div><strong>{{ advancedActionLabel('guard') }}</strong><small>{{ advancedOperationStatus[guardState === 'armed' ? 'guard_reset' : 'guard_set'] || '以设备应答为准' }}</small></div>
+                                        </button>
+                                        <button v-if="guardState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-guard-reset" :title="capabilityActionTitle('guard', '请求撤防')" :disabled="isAdvancedPending('guard_reset')" @click="runAdvancedAction('guard_reset')">
+                                            <ShieldCheck :size="14" /><div><strong>请求撤防</strong><small>当前状态未知,按需显式选择</small></div>
+                                        </button>
+                                    </div>
+                                    <button class="adv-btn" :title="capabilityActionTitle('alarmReset', '报警复位')" :disabled="isAdvancedPending('alarm_reset')" @click="runAdvancedAction('alarm_reset')">
+                                        <AlertTriangle :size="14" /><div><strong>报警复位</strong><small>等待设备业务应答</small></div>
+                                    </button>
+                                </div>
+                            </section>
+                            <section class="linked-section linked-card">
+                                <header class="linked-card-hd"><span class="section-title"><Move3d :size="13" />画面控制</span></header>
+                                <div class="adv-actions">
+                                    <button class="adv-btn" :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }" data-testid="advanced-drag-zoom" :title="capabilityActionTitle('dragZoom', '3D 放大')" :disabled="isAdvancedPending('drag_zoom_in')" @click="toggleDragZoomMode('drag_zoom_in')">
+                                        <Move3d :size="14" /><div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_in' ? '取消 3D 放大' : '3D 放大' }}</strong><small>按显示窗口像素拖框</small></div>
+                                    </button>
+                                    <button class="adv-btn" :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }" data-testid="advanced-drag-zoom-out" :title="capabilityActionTitle('dragZoom', '3D 缩小')" :disabled="isAdvancedPending('drag_zoom_out')" @click="toggleDragZoomMode('drag_zoom_out')">
+                                        <ZoomOut :size="14" /><div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_out' ? '取消 3D 缩小' : '3D 缩小' }}</strong><small>按显示窗口像素拖框</small></div>
+                                    </button>
+                                </div>
+                            </section>
                         </div>
                     </div>
                 </div>
@@ -3923,7 +4327,7 @@ onBeforeUnmount(() => {
             <aside
                 v-if="!sideCollapsed && visibleTabs.length"
                 class="sidebar"
-                :class="{ 'sidebar-probe': activeTab === 'probe' }"
+                :class="{ 'sidebar-probe': activeTab === 'probe', 'sidebar-advanced': activeTab === 'advanced' }"
             >
                 <!-- Tabs -->
                 <div class="tabs">
@@ -4004,12 +4408,18 @@ onBeforeUnmount(() => {
                                 :disabled="!isAudioCapable"
                                 :title="capabilityActionTitle(talkMode, talkMode === 'broadcast' ? '广播对讲' : '双向对讲')"
                                 :aria-pressed="talkState === 'talking'"
-                                @pointerdown.prevent="startTalk"
-                                @pointerup.prevent="stopTalk"
-                                @pointerleave="stopTalk"
-                                @pointercancel="stopTalk"
+                                @click="toggleTalk"
                             >
                                 <Mic :size="14" />
+                                <span
+                                    v-if="talkState === 'talking'"
+                                    class="talk-wave"
+                                    data-testid="talk-wave"
+                                    :style="{ '--talk-level': String(talkLevel) }"
+                                    aria-hidden="true"
+                                >
+                                    <i v-for="bar in 4" :key="bar" :style="{ animationDelay: `${(bar - 1) * -0.17}s` }"></i>
+                                </span>
                                 <span>{{ talkButtonText }}</span>
                             </button>
 
@@ -4216,11 +4626,11 @@ onBeforeUnmount(() => {
                     </div>
                     <!-- ═══════════ 高级 ═══════════ -->
                     <div v-if="canAdvancedPanel" v-show="activeTab === 'advanced'" class="panel" data-testid="linked-side-advanced">
-                        <div class="section-hd first">
-                            <span class="section-title"><Settings :size="13" />设备控制</span>
-                            <span class="section-meta">GB28181 DeviceControl</span>
-                        </div>
                         <div class="advanced-fact-status" data-testid="advanced-fact-status" aria-live="polite">
+                            <div class="section-hd first">
+                                <span class="section-title"><Settings :size="13" />设备控制</span>
+                                <span class="section-meta">DeviceStatus</span>
+                            </div>
                             <div class="advanced-fact-heading">
                                 <span>DeviceStatus 事实</span>
                                 <span :class="{ pending: deviceStatusPending, error: !!deviceStatusError }">{{ deviceStatusText() }}</span>
@@ -4239,8 +4649,7 @@ onBeforeUnmount(() => {
                                 <RefreshCcw :size="11" />刷新事实状态
                             </button>
                         </div>
-                        <div class="adv-actions">
-                            <div class="snapshot-config" data-testid="snapshot-config">
+                        <div class="snapshot-config" data-testid="snapshot-config">
                                 <div class="snapshot-config-heading"><span><Camera :size="13" />图像抓拍配置</span><em>GB/T 28181-2022</em></div>
                                 <div class="snapshot-config-fields">
                                     <label>张数<input v-model.number="snapshotCount" data-testid="snapshot-count" type="number" min="1" max="10" /></label>
@@ -4255,39 +4664,6 @@ onBeforeUnmount(() => {
                                         <img :src="file.url" :alt="file.name" /><span>{{ file.name }}</span>
                                     </a>
                                 </div>
-                            </div>
-                            <button class="adv-btn" data-testid="advanced-iframe" :title="capabilityActionTitle('iFrame', '请求关键帧')" :disabled="isAdvancedPending('iframe')" @click="runAdvancedAction('iframe')">
-                                <Video :size="14" />
-                                <div><strong>请求关键帧</strong><small>发送到设备,执行结果不回传</small></div>
-                            </button>
-                            <button class="adv-btn" data-testid="advanced-record" :title="capabilityActionTitle('record', advancedActionLabel('record'))" :disabled="isAdvancedPending(recordState === 'on' ? 'record_stop' : 'record_start')" @click="runAdvancedAction(recordState === 'on' ? 'record_stop' : 'record_start')">
-                                <Circle :size="14" />
-                                <div><strong>{{ advancedActionLabel('record') }}</strong><small>{{ advancedOperationStatus[recordState === 'on' ? 'record_stop' : 'record_start'] || '以设备应答为准' }}</small></div>
-                            </button>
-                            <button v-if="recordState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-record-stop" :title="capabilityActionTitle('record', '请求停止设备录制')" :disabled="isAdvancedPending('record_stop')" @click="runAdvancedAction('record_stop')">
-                                <Square :size="14" />
-                                <div><strong>请求停止设备录制</strong><small>当前状态未知,按需显式选择</small></div>
-                            </button>
-                            <button class="adv-btn" data-testid="advanced-guard" :title="capabilityActionTitle('guard', advancedActionLabel('guard'))" :disabled="isAdvancedPending(guardState === 'armed' ? 'guard_reset' : 'guard_set')" @click="runAdvancedAction(guardState === 'armed' ? 'guard_reset' : 'guard_set')">
-                                <ShieldCheck :size="14" />
-                                <div><strong>{{ advancedActionLabel('guard') }}</strong><small>{{ advancedOperationStatus[guardState === 'armed' ? 'guard_reset' : 'guard_set'] || '以设备应答为准' }}</small></div>
-                            </button>
-                            <button v-if="guardState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-guard-reset" :title="capabilityActionTitle('guard', '请求撤防')" :disabled="isAdvancedPending('guard_reset')" @click="runAdvancedAction('guard_reset')">
-                                <ShieldCheck :size="14" />
-                                <div><strong>请求撤防</strong><small>当前状态未知,按需显式选择</small></div>
-                            </button>
-                            <button class="adv-btn" :title="capabilityActionTitle('alarmReset', '报警复位')" :disabled="isAdvancedPending('alarm_reset')" @click="runAdvancedAction('alarm_reset')">
-                                <AlertTriangle :size="14" />
-                                <div><strong>报警复位</strong><small>等待设备业务应答</small></div>
-                            </button>
-                            <button class="adv-btn" data-testid="advanced-drag-zoom" :title="capabilityActionTitle('dragZoom', '3D 放大')" :disabled="isAdvancedPending('drag_zoom_in')" @click="toggleDragZoomMode('drag_zoom_in')">
-                                <Move3d :size="14" />
-                                <div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_in' ? '取消 3D 放大' : '3D 放大' }}</strong><small>按显示窗口像素拖框</small></div>
-                            </button>
-                            <button class="adv-btn" data-testid="advanced-drag-zoom-out" :title="capabilityActionTitle('dragZoom', '3D 缩小')" :disabled="isAdvancedPending('drag_zoom_out')" @click="toggleDragZoomMode('drag_zoom_out')">
-                                <ZoomOut :size="14" />
-                                <div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_out' ? '取消 3D 缩小' : '3D 缩小' }}</strong><small>按显示窗口像素拖框</small></div>
-                            </button>
                         </div>
 
                     </div>
@@ -4421,6 +4797,70 @@ onBeforeUnmount(() => {
             />
 
             <a-modal
+                v-if="homeSettingsDialogVisible"
+                v-model:visible="homeSettingsDialogVisible"
+                title="设置看守位"
+                modal-class="uvp-system-dialog home-settings-modal"
+                :width="430"
+                :footer="false"
+                :mask-closable="!homeSettingsSubmitting"
+                :closable="!homeSettingsSubmitting"
+                :esc-to-close="!homeSettingsSubmitting"
+                unmount-on-close
+                @cancel="closeHomeSettingsDialog"
+                @close="closeHomeSettingsDialog"
+            >
+                <div class="home-settings-form" data-testid="home-settings-dialog">
+                    <div class="home-settings-field">
+                        <label for="home-position-preset">归位预置位 <span>*</span></label>
+                        <select
+                            id="home-position-preset"
+                            v-model.number="homeDraft.presetId"
+                            data-testid="home-preset"
+                            :disabled="homeSettingsSubmitting"
+                            @change="homeSettingsTouched = true"
+                        >
+                            <option :value="null">请选择预置位</option>
+                            <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
+                        </select>
+                    </div>
+                    <div class="home-settings-field">
+                        <label for="home-position-reset-time">无云台操作后 <span>*</span></label>
+                        <div class="home-settings-time">
+                            <input
+                                id="home-position-reset-time"
+                                v-model.number="homeDraft.resetTime"
+                                data-testid="home-reset-time"
+                                type="number"
+                                min="10"
+                                max="3600"
+                                :disabled="homeSettingsSubmitting"
+                                @input="homeSettingsTouched = true"
+                            />
+                            <span>秒自动归位</span>
+                        </div>
+                    </div>
+                    <p class="home-settings-description">连续无云台操作达到指定时间后，设备将自动返回所选预置位。</p>
+                    <p v-if="homeSettingsTouched && !homePositionCanSave" class="home-settings-error" data-testid="home-validation">
+                        请选择一个已存在的预置位，等待时间必须是 10 至 3600 秒整数。
+                    </p>
+                    <div class="home-settings-actions">
+                        <button class="btn-ghost sm" :disabled="homeSettingsSubmitting" @click="closeHomeSettingsDialog">取消</button>
+                        <button
+                            class="btn-primary sm"
+                            data-testid="home-dialog-submit"
+                            :disabled="homeSettingsSubmitting || !homePositionCanSave"
+                            @click="submitHomeSettings"
+                        >
+                            <Loader2 v-if="homeSettingsSubmitting" :size="13" class="spin" />
+                            <ShieldCheck v-else :size="13" />
+                            {{ homeSettingsActionLabel }}
+                        </button>
+                    </div>
+                </div>
+            </a-modal>
+
+            <a-modal
                 v-if="canSavePtzPreset && savePresetDialogVisible"
                 v-model:visible="savePresetDialogVisible"
                 title="保存预置位"
@@ -4489,7 +4929,7 @@ onBeforeUnmount(() => {
                 <div v-if="cruiseDraft" class="cruise-save-form" data-testid="cruise-save-dialog">
                     <div class="cruise-save-notice">
                         <Info :size="14" />
-                        <span>配置会直接下发到设备。部分旧版设备无法回传确认,下发后可通过“试运行”验证。</span>
+                        <span>设备会按下面列出的顺序依次走到每个预置位、各停一会儿,然后循环执行。配置会直接写进设备;部分老设备不回传确认,下发后可用「试运行」核对。</span>
                     </div>
                     <div class="cruise-save-row">
                         <label class="cruise-save-label">名称</label>
@@ -4513,7 +4953,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     <div class="cruise-save-row">
-                        <label class="cruise-save-label">站点</label>
+                        <label class="cruise-save-label">巡航点</label>
                         <div class="cruise-save-field">
                             <div ref="cruiseStopsListEl" class="cruise-stops-list" data-testid="cruise-stops-list">
                                 <div v-for="(stop, index) in cruiseDraft.stops" :key="stop.key" class="cruise-stop-row" data-testid="cruise-stop-row">
@@ -4529,7 +4969,7 @@ onBeforeUnmount(() => {
                                     </a-select>
                                     <button class="cruise-stop-move" :disabled="cruiseDraft.submitting || index === 0" title="上移" aria-label="上移巡航点" @click="moveCruiseStop(index, -1)">↑</button>
                                     <button class="cruise-stop-move" :disabled="cruiseDraft.submitting || index === cruiseDraft.stops.length - 1" title="下移" aria-label="下移巡航点" @click="moveCruiseStop(index, 1)">↓</button>
-                                    <button class="cruise-stop-del" :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1" title="删除该站点" aria-label="删除巡航点" @click="removeCruiseStop(index)">
+                                    <button class="cruise-stop-del" :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1" title="删除该巡航点" aria-label="删除巡航点" @click="removeCruiseStop(index)">
                                         <X :size="11" />
                                     </button>
                                 </div>
@@ -4544,11 +4984,11 @@ onBeforeUnmount(() => {
                                 <span>{{ cruiseDraft.stops.length >= 32 ? "已达到 32 站上限" : "添加巡航点" }}</span>
                                 <small v-if="cruiseDraft.stops.length < 32" class="cruise-stop-add-count">还可添加 {{ 32 - cruiseDraft.stops.length }} 个</small>
                             </button>
-                            <p class="preset-save-hint">已选择 {{ cruiseDraft.stops.length }} 个巡航点,设备将按列表顺序循环执行。</p>
+                            <p class="preset-save-hint">已选 {{ cruiseDraft.stops.length }} 个巡航点。列表从上到下就是设备实际走的顺序,可用 ↑ ↓ 调整。</p>
                         </div>
                     </div>
                     <div class="cruise-save-row">
-                        <label class="cruise-save-label">控制编码速度</label>
+                        <label class="cruise-save-label">巡航速度</label>
                         <div class="cruise-save-field">
                             <div class="cruise-param-line">
                                 <a-input-number
@@ -4574,7 +5014,7 @@ onBeforeUnmount(() => {
                             </div>
                             <p class="preset-save-hint">
                                 {{ cruiseDraft.sendSpeed
-                                    ? "下发端控制编码范围 1-4095;查询端设备速度独立显示为 1-15。无统一物理单位,实际快慢由设备决定。"
+                                    ? "取值范围 1-4095,整条轨迹共用一个值(协议按组下发,不支持逐点设置)。快慢由设备自己解释,没有统一物理单位,不同厂家同一个数的实际转速可能不同。"
                                     : "本次不下发速度设置,设备保持当前设置。" }}
                             </p>
                         </div>
@@ -4607,7 +5047,7 @@ onBeforeUnmount(() => {
                             </div>
                             <p class="preset-save-hint">
                                 {{ cruiseDraft.sendDwell
-                                    ? "控制端停留时间单位为秒,范围 1-4095 秒,最长 68 分 15 秒。查询结果缺失时不伪造默认值。"
+                                    ? "单位是秒,范围 1-4095(最长约 68 分钟)。每个预置位停多久由这一个值决定 —— 整条轨迹共用,不支持逐点设置。"
                                     : "本次不下发停留时间设置,设备保持当前设置。" }}
                             </p>
                         </div>
@@ -5163,6 +5603,7 @@ onBeforeUnmount(() => {
 }
 .linked-detail > .linked-ptz-layout,
 .linked-detail > .linked-probe-layout,
+.linked-detail > .linked-advanced-layout,
 .linked-detail > .linked-image-layout,
 .linked-detail > .linked-advanced-empty { flex: 1 1 0; min-height: 0; }
 .linked-detail-hint {
@@ -5301,11 +5742,20 @@ onBeforeUnmount(() => {
 .preset-popover-call:disabled,
 .preset-popover-del:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* 预置位卡片头部行(标题 + 保存按钮),复用 .linked-card 提供的实线蓝框容器 */
+/* 预置位/巡航卡片头部行(标题 + 动作),复用 .linked-card 提供的实线蓝框容器。
+ *
+ * 头部现在承载**两个**动作(「同步」药丸 + 「添加」按钮),而卡片是详情条三等分
+ * (148px 高的条里塞三张卡),一行放不下时必须换行而不是被裁掉 —— 卡片是
+ * overflow: hidden,溢出的部分会直接消失,按钮点都点不到。
+ * 头部本身是 flex: 0 0 auto,换行只会吃掉卡片主体的高度(主体本来就 overflow:hidden),
+ * 不会把卡片撑破。 */
 .linked-card-hd {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    flex-wrap: wrap; row-gap: 4px;
 }
-.linked-card-hd .section-title { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 600; }
+.linked-card-hd .section-title { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 600; min-width: 0; }
+/* 动作区整体不参与收缩:宁可让标题在极窄卡片上换行,也不能把按钮压成一条线。 */
+.linked-card-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .preset-count {
     display: inline-flex; align-items: center; padding: 1px 6px; margin-left: 4px;
     color: var(--uvp-brand); background: var(--uvp-brand-soft);
@@ -5321,9 +5771,51 @@ onBeforeUnmount(() => {
 }
 .preset-save-btn:hover:not(:disabled) { color: #fff; background: var(--uvp-brand); border-color: var(--uvp-brand); }
 .preset-save-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 「从设备同步」药丸:预置位与巡航两张卡片共用同一个形态,位置也相同(动作区最左)。
+ *
+ * ⛔ 字号压到 9.5px、文案限长到 6 个汉字,是被版面逼出来的:卡片宽度是详情条的
+ *    1/3,头部还要并排放「添加」。原来那句「数据过期,点击同步」9 个字会让整个
+ *    动作区越界,而卡片是 overflow: hidden —— 结果不是换行,是「添加」按钮被裁掉。
+ *    "点我"这层意思交给按钮形态和 tooltip,不占字宽。 */
+.resource-sync-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 6px;
+    color: var(--uvp-text-tertiary); background: transparent;
+    border: 1px solid var(--uvp-panel-border); border-radius: 5px;
+    cursor: pointer; font-size: 9.5px; font-weight: 500; line-height: 1.6; white-space: nowrap;
+    transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.resource-sync-btn:hover:not(:disabled) {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
+}
+.resource-sync-btn:disabled { cursor: progress; }
+/* 同步中:药丸本身点亮,和「什么都不做」区分开。转圈用 Loader2 + 旋转,
+   不用 CSS 动画换图标 —— 换图标会在旋转中闪。 */
+.resource-sync-btn.syncing {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-panel-border));
+}
+.resource-sync-spin { animation: resource-sync-rotate 0.9s linear infinite; }
+@keyframes resource-sync-rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 .preset-empty {
     display: grid; place-items: center; gap: 2px;
+    /* ⛔ 上下的 padding 是**卡片高度预算**的一部分:详情条总高 148px,三张卡片等分,
+        空态能用的余量只有个位数像素。这里每加一行文字都必须重算,否则最后一行会被
+        卡片自己的 overflow: hidden 裁掉(表现在"设备上已有的可用「同步」读回"这行
+        只露上半截)。 */
     padding: 18px 12px 14px;
+}
+/* 空态的第二行:交代"平台没记录 ≠ 设备上没有"。原来的「暂无预置位」只说了前半句,
+   操作员看到设备明明有预置位、界面却说没有,会直接判定平台坏了。 */
+.preset-empty-hint {
+    margin: 0; color: var(--uvp-text-tertiary); font-size: 10px; line-height: 1.4;
+    opacity: 0.85; text-align: center;
 }
 .resource-summary-action {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -5335,8 +5827,6 @@ onBeforeUnmount(() => {
 .preset-grid > .resource-summary-action { grid-column: 1 / -1; }
 .resource-summary-action:hover { border-color: var(--uvp-brand); }
 .linked-detail .home-config { gap: 5px; padding-top: 2px; }
-.linked-detail .home-row select,
-.linked-detail .home-row input { height: 26px; }
 /* stretch 而不是 center:两栏撑满详情条高度,跟 .linked-ptz-layout 保持一致。
  * 用 center 的话,删掉提示行让出来的高度只会变成上下留白,内容一点没多。 */
 /* 三栏:轨道明细 / 时间戳监控 / 帧到达时间线。
@@ -5377,16 +5867,6 @@ onBeforeUnmount(() => {
  * 因为它是"两条轨道之间的分隔"而不是"跟卡片外的分隔"。 */
 /* 概览条的柱高不再写死:交给 .frame-overview 的 1fr 行按剩余空间分配,
  * 下限见 .frame-overview-bars 的 min-height,避免详情条被压缩时糊成一条线。 */
-.linked-standard-note {
-    display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start;
-    padding: 12px; color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px; line-height: 1.6;
-}
-.linked-standard-note > svg { color: var(--uvp-warning); margin-top: 2px; }
-.linked-standard-note > div { display: grid; gap: 3px; }
-.linked-standard-note strong { color: var(--uvp-text-secondary); font-size: 11px; }
-.linked-standard-note span { font-size: 10px; }
-
 @media (max-width: 720px) {
     .linked-detail-hint { margin-bottom: 6px; }
     .linked-detail { height: auto; overflow: visible; }
@@ -5456,7 +5936,8 @@ onBeforeUnmount(() => {
 }
 /* 探针 tab 已经用两张独立 .probe-card 分块了,外层大卡片显得多余(卡里套卡)。
  * 用 activeTab 联动的 .sidebar-probe class 精确关掉,不动其他 tab 共用的样式。 */
-.sidebar-probe .panels {
+.sidebar-probe .panels,
+.sidebar-advanced .panels {
     padding: 0;
     background: transparent;
     border-color: transparent;
@@ -5608,6 +6089,27 @@ onBeforeUnmount(() => {
 }
 .talk-button:disabled { cursor: not-allowed; opacity: 0.45; }
 
+/* 「正在说话」的波形：4 根 bar 相位错开各自起伏，整体幅度再由采集电平（--talk-level，0..1）缩放。
+ * 静态动画保证「一直在动」，电平缩放保证「动得和声音有关」。拿不到 AudioContext 时电平恒为 0，
+ * 波形仍以 0.4 倍显示，不会变成空按钮。 */
+.talk-wave {
+    display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+    width: 16px; height: 13px; flex: none;
+    transform: scaleY(calc(0.4 + var(--talk-level, 0) * 0.6));
+    transform-origin: center; transition: transform 0.08s linear;
+}
+.talk-wave i {
+    width: 2px; height: 100%; border-radius: 1px; background: currentColor;
+    animation: talk-wave-pulse 0.9s ease-in-out infinite;
+}
+@keyframes talk-wave-pulse {
+    0%, 100% { transform: scaleY(0.32); }
+    50% { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .talk-wave i { animation: none; transform: scaleY(0.8); }
+}
+
 .speed-row { padding: 6px 2px; }
 .speed-row label { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; color: var(--uvp-text-tertiary); font-size: 11px; }
 .speed-row label > span { display: inline-flex; align-items: center; gap: 4px; }
@@ -5736,7 +6238,6 @@ onBeforeUnmount(() => {
 .preset-tile.cruise-tile:hover:not(.disabled) { border-color: color-mix(in srgb, var(--uvp-brand-cyan) 40%, var(--uvp-panel-border)); }
 .preset-tile.cruise-tile.pending { background: var(--uvp-warning-soft); border-color: var(--uvp-warning-border); }
 .cruise-tile-icon { color: var(--uvp-text-tertiary); flex-shrink: 0; }
-.cruise-freshness { color: var(--uvp-text-tertiary); font-size: 9.5px; font-weight: 500; white-space: nowrap; }
 .cruise-status-badge {
     flex: 0 0 auto; padding: 0 4px;
     color: var(--uvp-warning); background: var(--uvp-warning-soft);
@@ -5781,6 +6282,8 @@ onBeforeUnmount(() => {
 .home-state-copy { display: grid; min-width: 0; gap: 1px; line-height: 1.4; }
 .home-state-copy strong { color: var(--uvp-text-primary); font-size: 11px; }
 .home-state-copy span { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.home-state-copy [data-testid="home-confirmed-values"] { color: var(--uvp-text-secondary); white-space: normal; }
+.home-confirmed-at { font-size: 9px !important; }
 .home-config.state-success .home-state-icon { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent); }
 .home-config.state-danger .home-state-icon { color: var(--uvp-danger); background: var(--uvp-danger-soft); }
 .home-config.state-loading .home-state-icon { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
@@ -5790,50 +6293,33 @@ onBeforeUnmount(() => {
 .home-warning { color: var(--uvp-warning); }
 .home-error { color: var(--uvp-danger); }
 .home-hint { color: var(--uvp-text-tertiary); }
-.home-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
-.home-editor.query-only { grid-template-columns: minmax(0, 1fr); }
-.home-fields { display: grid; grid-template-columns: minmax(130px, 1fr) 92px; gap: 6px; }
-.home-fields.disabled { opacity: 0.42; pointer-events: none; }
-.home-row {
-    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px; align-items: center;
-    min-width: 0; color: var(--uvp-text-tertiary); font-size: 9.5px;
-}
-.home-row > span { white-space: nowrap; }
-.home-row select, .home-row input {
-    width: 100%; min-width: 0; height: 28px; padding: 0 6px;
-    color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
+.home-card-actions { display: flex; min-width: 0; gap: 6px; margin-top: auto; }
+.home-card-actions button { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
+.home-card-actions .uvp-refresh-btn { margin-left: auto; }
+.home-close-btn { color: var(--uvp-danger); border-color: var(--uvp-danger-border); }
+.home-close-btn:hover:not(:disabled) { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger); }
+
+.home-settings-form { display: grid; gap: 18px; padding-top: 4px; }
+.home-settings-field { display: grid; gap: 7px; }
+.home-settings-field > label { color: var(--uvp-text-secondary); font-size: 12px; font-weight: 600; }
+.home-settings-field > label > span { color: var(--uvp-danger); }
+.home-settings-field select,
+.home-settings-field input {
+    box-sizing: border-box; width: 100%; height: 36px; padding: 0 10px;
+    color: var(--uvp-text-primary); background: var(--uvp-list-toolbar-bg);
     border: 1px solid var(--uvp-panel-border); border-radius: 6px;
-    font-size: 11px;
+    font-size: 12px; outline: none;
 }
-.toggle { position: relative; display: inline-block; width: 34px; height: 18px; }
-.toggle input { position: absolute; opacity: 0; }
-.toggle span {
-    position: absolute; inset: 0;
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
-    border-radius: 999px; cursor: pointer; transition: all 0.2s ease;
-}
-.toggle span::before {
-    position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
-    background: var(--uvp-text-tertiary); border-radius: 50%; content: "";
-    transition: all 0.2s ease;
-}
-.toggle input:checked + span { background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); }
-.toggle input:checked + span::before { transform: translateX(16px); background: var(--uvp-brand); }
-.toggle input:disabled + span { cursor: not-allowed; opacity: 0.5; }
-.home-actions { display: grid; grid-template-columns: auto 28px; gap: 6px; }
-.home-actions.single { grid-template-columns: auto; }
-.home-actions button { min-width: 0; }
-.home-actions .icon-only { width: 28px; padding: 0; }
-@container (max-width: 340px) {
-    .home-fields { grid-template-columns: minmax(100px, 1fr) 70px; }
-    .home-row { grid-template-columns: minmax(0, 1fr); }
-    .home-row > span {
-        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-    }
-    .home-actions .btn-primary { width: 28px; padding: 0; }
-    .home-save-label { display: none; }
-}
+.home-settings-field select:focus,
+.home-settings-field input:focus { border-color: var(--uvp-brand); }
+.home-settings-time { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; }
+.home-settings-time > span { color: var(--uvp-text-secondary); font-size: 12px; }
+.home-settings-description,
+.home-settings-error { margin: -4px 0 0; font-size: 11px; line-height: 1.6; }
+.home-settings-description { color: var(--uvp-text-tertiary); }
+.home-settings-error { color: var(--uvp-danger); }
+.home-settings-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.home-settings-actions button { display: inline-flex; min-width: 86px; align-items: center; justify-content: center; gap: 5px; }
 
 /* ═══════════ 探针面板 ═══════════ */
 .probe-panel { gap: 12px; }
@@ -6047,7 +6533,7 @@ onBeforeUnmount(() => {
 
 /* ═══════════ 高级面板 ═══════════ */
 .advanced-fact-status {
-    display: grid; gap: 7px; margin-bottom: 8px; padding: 9px 10px;
+    display: grid; gap: 7px; padding: 12px;
     background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
 }
 .advanced-fact-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--uvp-text-secondary); font-size: 10px; }
@@ -6077,8 +6563,35 @@ onBeforeUnmount(() => {
 .snapshot-results a { display: grid; gap: 3px; color: var(--uvp-text-secondary); font-size: 8px; text-decoration: none; overflow: hidden; }
 .snapshot-results img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
 .adv-actions { display: grid; gap: 6px; }
-.sidebar [data-testid="linked-side-advanced"] .adv-actions { grid-template-columns: 1fr; }
-.sidebar [data-testid="linked-side-advanced"] .adv-btn { gap: 7px; padding: 8px; }
+.linked-advanced-layout {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr); gap: 10px; min-height: 0;
+}
+.linked-advanced-layout .adv-actions { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.adv-action-pair { display: flex; gap: 6px; min-width: 0; }
+.adv-action-pair > .adv-btn { flex: 1 1 0; min-width: 0; }
+.linked-advanced-layout .adv-btn {
+    grid-template-columns: 16px minmax(0, 1fr); gap: 7px; min-height: 40px; padding: 6px 8px;
+    background: var(--uvp-panel-bg); border-color: var(--uvp-panel-border); border-radius: 6px;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease,
+        box-shadow 0.15s ease, transform 0.15s ease;
+}
+.linked-advanced-layout .adv-btn > svg { color: var(--uvp-brand); }
+.linked-advanced-layout .adv-btn:hover:not(:disabled),
+.linked-advanced-layout .adv-btn.active {
+    color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: var(--uvp-brand);
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
+}
+.linked-advanced-layout .adv-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.linked-advanced-layout .adv-btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
+.linked-advanced-layout .adv-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--uvp-brand) 42%, transparent); outline-offset: 1px;
+}
+.linked-advanced-layout .adv-btn strong { font-size: 10.5px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.linked-advanced-layout .adv-btn small { font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+.sidebar-advanced .snapshot-config { padding: 12px; background: var(--uvp-list-toolbar-bg); border-color: var(--uvp-panel-border); border-radius: 8px; }
+.sidebar-advanced .snapshot-results { max-height: 160px; overflow-y: auto; }
 .adv-btn {
     display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: center;
     padding: 10px;
@@ -6131,6 +6644,14 @@ onBeforeUnmount(() => {
     .video-frame { grid-column: 1; grid-row: 1; }
     .sidebar { grid-column: 1; grid-row: 2; max-height: none; }
     .linked-info-bar { grid-column: 1; grid-row: 3; }
+    .linked-advanced-layout .adv-action-pair { flex-direction: column; }
+    [data-testid="linked-detail-advanced"] { height: auto; overflow: visible; }
+    .linked-advanced-layout .linked-card { height: auto; }
+}
+@media (max-width: 720px) {
+    .linked-advanced-layout { grid-template-columns: 1fr; grid-template-rows: none; }
+    .linked-advanced-layout .adv-actions { flex: 0 0 auto; overflow: visible; }
+    .linked-advanced-layout .adv-btn { min-height: 40px; }
 }
 @media (max-width: 640px) {
     .console-title { flex-wrap: wrap; }

@@ -351,10 +351,8 @@ func (s *Service) persistQueryCacheTx(ctx context.Context, tx *gorm.DB, operatio
 		if err != nil {
 			return false, err
 		}
-		if response.CruiseTrack.Enabled == nil {
-			enabled := true
-			response.CruiseTrack.Enabled = &enabled
-		}
+		// 不再替设备编 `Enabled`:设备没报就传 nil,由 upsertCruiseTrack 保留库里原值
+		// (新行落 NULL = "设备未上报"),而不是默认成 true。
 		if err := upsertCruiseTrack(tx, operation, response.CruiseTrack, body, now, true); err != nil {
 			return false, err
 		}
@@ -472,37 +470,64 @@ func (s *Service) finalizeQueryStageTx(ctx context.Context, tx *gorm.DB, operati
 				DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, PresetID: item.ID,
 				Name: item.Name, Status: gbmodels.PTZPresetActive, LastOperationID: operation.OperationID, UpdatedAt: now,
 			}
+			// ⛔ `name` 刻意**不在** DoUpdates 里 —— 预置位名字归平台所有。
+			//
+			// 设备应答里那个 `<PresetName>` 是**设备自己编的**（真实球机/模拟器只会回
+			// "Preset 1" 这类出厂名）。标准里**没有**「平台把名字下发到设备」的路径:
+			// 设置预置位的 PTZCmd(`0x81`)只有编号,payload 里的 `name` 从不进 wire
+			// (`BuildExtendedPTZControlWithProfile` 只带 Action + ID)。所以名字是
+			// **纯平台侧**属性,设备永远不知道它,自然也无从"回显"它。
+			//
+			// 原来这里把 name 一起更新,后果是:操作员在平台敲的「大门」先由
+			// `SyncPresetOperation` 正确入库、界面显示正确,紧接着
+			// `reconcilePresetsAsync` 自动下发的那次 PresetQuery 就把它覆盖成设备的
+			// "Preset 1" —— 看起来像平台把用户的输入凭空弄丢了。带上它还有一种更隐蔽的
+			// 危害:设备回空 `<PresetName>`(大量球机如此)时,平台名字会被**写空**,
+			// 前端 fallback 渲染成「预置位 N」,同样看不出是平台自己抹掉的。
+			//
+			// 把 name 移出更新列即可两全:新行(纯设备侧发现的预置位,平台还没有这一行)
+			// 仍用设备报的名字落库,已有行保留平台名。与 `upsertCruiseTrack` 同一口径。
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "channel_id"}, {Name: "preset_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "status", "last_operation_id", "updated_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"device_id", "status", "last_operation_id", "updated_at"}),
 			}).Create(&preset).Error; err != nil {
 				return err
 			}
 		}
-		missing := tx.Model(&gbmodels.GbPTZPreset{}).Where("channel_id = ?", operation.ChannelID)
-		if len(ids) > 0 {
-			missing = missing.Where("preset_id NOT IN ?", ids)
+		// ⛔ 空表**不裁剪**。原来 `len(ids) == 0` 时 `NOT IN` 条件被整个跳过,于是
+		// 「设备回 0 条」退化成「把本通道所有预置位标记为已删除」—— 这是把最不可信的
+		// 答案当成最权威的结论。命令没实现的设备、被工厂复位过的设备、应答被截断的
+		// 设备,回的都是一张空表;而这一帧的触发点现在只是操作员点了一下「同步」,
+		// 删掉的是他刚配好的东西。若非空表才证明设备确实在枚举,这时没被列出的才算
+		// 设备上已经不存在。
+		if len(ids) == 0 {
+			return nil
 		}
-		return missing.Update("status", gbmodels.PTZPresetDeleted).Error
+		return tx.Model(&gbmodels.GbPTZPreset{}).
+			Where("channel_id = ?", operation.ChannelID).
+			Where("preset_id NOT IN ?", ids).
+			Update("status", gbmodels.PTZPresetDeleted).Error
 
 	case manscdp.CmdCruiseTrackListQuery:
 		ids := sortedCruiseTrackIDs(stage.tracks)
 		for _, id := range ids {
 			staged := stage.tracks[id]
-			item := staged.item
-			if item.Enabled == nil {
-				enabled := true
-				item.Enabled = &enabled
-			}
-			if err := upsertCruiseTrack(tx, operation, item, staged.body, now, false); err != nil {
+			// 同 persistQueryCacheTx:不替设备编 `Enabled`,设备没报就让 upsert 保留原值。
+			if err := upsertCruiseTrack(tx, operation, staged.item, staged.body, now, false); err != nil {
 				return err
 			}
 		}
-		missing := tx.Where("channel_id = ?", operation.ChannelID)
-		if len(ids) > 0 {
-			missing = missing.Where("track_id NOT IN ?", ids)
+		// ⛔ 同预置位分支:空表不裁剪。
+		//
+		// 这里原来是**硬删除**(`missing.Delete`),比预置位的软删除更狠 —— 预置位被
+		// 误删还能在库里把 status 改回来,巡航轨迹被误删则连行带点位链一起没了,操作员
+		// 只能凭记忆重配。触发条件却只是「设备这一次没列出它」。
+		if len(ids) == 0 {
+			return nil
 		}
-		return missing.Delete(&gbmodels.GbPTZCruiseTrack{}).Error
+		return tx.Where("channel_id = ?", operation.ChannelID).
+			Where("track_id NOT IN ?", ids).
+			Delete(&gbmodels.GbPTZCruiseTrack{}).Error
 	}
 	return fmt.Errorf("不支持的 PTZ 查询暂存类型: %s", stage.cmdType)
 }
@@ -610,7 +635,25 @@ func upsertCruiseTrack(db *gorm.DB, operation gbmodels.GbPTZOperation, item mans
 		DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, TrackID: item.ID,
 		Name: item.Name, Enabled: item.Enabled, DetailJSON: string(detail), RawSummary: summarizePTZBody(body), UpdatedAt: now,
 	}
-	updateColumns := []string{"device_id", "name", "enabled", "raw_summary", "updated_at"}
+	// ⛔ `name` 刻意**不在** updateColumns 里 —— 名字归平台所有。
+	//
+	// 设备应答里那个 `<Name>` 是**设备自己编的**(真实球机只会回"巡航 1"这类出厂名,
+	// 标准里也没有"平台把名字下发给设备"的路径 —— 名字只存在于查询应答里)。所以一旦
+	// 对账里带上它,操作员在平台敲的"车间巡检"会被设备名覆盖掉,看起来像平台把用户的
+	// 输入弄丢了。删除 name 出列表即可两全:新行(纯设备侧发现的轨迹)用设备名插入,
+	// 已有行保留平台名。
+	//
+	// ⛔ `enabled` 只在设备**真的报了** `<Enabled>` 时才写。
+	//
+	// `<Enabled>` 在 A.2.6.13/A.2.6.14 里找不到依据(标准解读只说应答返回"编号、名称、
+	// 各个预置点的编号、预置点停留时间、云台速度**等信息**"),本仓当扩展字段用。
+	// 原来在 `item.Enabled == nil` 时**默认 true** 再落库 —— 那是在替设备编状态:
+	// 平台创建时乐观写 false、对账一跑就自己翻成 true,前端还拿它渲染 tile。
+	// 现在设备没报就保持库里原值(新行落 NULL = "设备未上报")。
+	updateColumns := []string{"device_id", "raw_summary", "updated_at"}
+	if item.Enabled != nil {
+		updateColumns = append(updateColumns, "enabled")
+	}
 	if includePoints {
 		updateColumns = append(updateColumns, "detail_json")
 	} else {

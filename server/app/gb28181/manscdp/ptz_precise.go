@@ -666,7 +666,22 @@ func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {
 		if !point.stayTimeSet || !point.speedSet {
 			return nil, fmt.Errorf("巡航点停留时间和设备速度不能为空")
 		}
-		if point.PresetIndex <= 0 || point.PresetIndex > 255 || point.StayTime < 0 || point.StayTime > 4095 || point.Speed < 1 || point.Speed > 15 {
+		// ⛔ `Speed` 的取值域是 **1-4095(12 位)**,不是 1-15。
+		//
+		// 依据是**同一条链路的控制层**:`0x86 设置巡航速度` / `0x87 设置巡航停留时间`
+		// 的参数就是 12 位(标准:取值范围 01H-FFFH),低 8 位进 PTZCmd 字节6、高 4 位进
+		// 字节7 高半字节 —— 见 `BuildExtendedPTZControlWithProfile`。应答里的 `Speed`
+		// 描述的是同一个量,没有理由换一套量纲。
+		//
+		// 这里原来写的是 `point.Speed < 1 || point.Speed > 15`,跟本仓**写侧**自相矛盾
+		// (创建接口允许 1-4095、前端默认 128),于是设备如实回显 128 时平台会以
+		// 「巡航点参数不合法」把**整条应答**丢掉 —— 巡航卡片从此永远停在"未验证"。
+		// 1-15 那个数的来源查不到依据(像是把 PTZCmd 字节7 的**变倍速度** 0H-FH 当成了
+		// 巡航速度),保留它等于让平台永远看不到自己设过的值。
+		//
+		// ⚠️ A.2.6.14 的逐字定义没有拿到(国家标准全文公开系统未收录该条),所以这里
+		// 取"与控制层同域"这个**可自洽、可验证**的口径,而不是继续用一个说不出来源的窄域。
+		if point.PresetIndex <= 0 || point.PresetIndex > 255 || point.StayTime < 0 || point.StayTime > 4095 || point.Speed < 1 || point.Speed > 4095 {
 			return nil, fmt.Errorf("巡航点参数不合法")
 		}
 	}

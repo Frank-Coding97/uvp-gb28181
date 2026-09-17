@@ -700,14 +700,19 @@ export interface CruiseTrackPointResource {
   presetId?: number;
   stayTime?: number;
   dwellSec?: number;
-  /** Query-side business speed. The standard query range is 1..15. */
+  /** 点位巡航速度。⛔ 取值域是 **1..4095(12 位)**,与创建/控制侧同一个量纲。
+   *
+   * 这里原来写的是「查询端 1..15」,于是前端把设备如实回显的 128 判成非法值丢掉,
+   * 界面上退化成「设备速度未知」,看着像设备没回话。1..15 这个数在标准里找不到依据:
+   * 控制层 `0x86`/`0x87` 的参数明确是 01H–FFFH,平台的 `BuildExtendedPTZControlWithProfile`
+   * 与应答解析 `ParseCruiseTrackResponse` 都按 1..4095 处理,前后端三处必须同域。 */
   speed?: number | null;
 }
 
-/** Explicit query DTO. Do not validate this with the create/control range. */
+/** 显式查询 DTO。跟创建/控制是同一个量纲,不是另一套值域。 */
 export type CruiseTrackQueryPoint = CruiseTrackPointResource;
 
-/** Create/control input uses the 12-bit value (1..4095) when present. */
+/** 创建/控制入参,12 位值(1..4095);传 0 表示本次不下发该项。 */
 export interface CruiseTrackControlInput {
   trackId: number;
   name?: string;
@@ -724,10 +729,26 @@ export interface CruiseTrackDetailResource {
   sumNum?: number;
   cruisePoints?: CruiseTrackPointResource[];
   stops?: CruiseTrackPointResource[];
-  /** Query-side values are separate from the create/control 12-bit value. */
+  /** 组级速度,同样是 12 位值(1..4095),与创建/控制侧一致。 */
   speed?: number | null;
   dwellSec?: number | null;
   source?: string;
+}
+
+/** 设备资源回读(`?refresh=true`)的统一返回形状 —— 预置位与巡航共用。
+ *
+ *  ⛔ 这两个字段只在刷新时出现,而且是**异步**语义:`refreshOperationId` 是"这次查询"
+ *  的操作号,设备应答落地之前 `list` 里还是查询前的旧数据;`refreshError` 是"查询根本
+ *  没发出去"的原因(设备离线、PTZ Service 未就绪等)。
+ *
+ *  所以前端**不能**看到 HTTP 200 就当同步完成 —— 必须拿 operationId 去轮询 PTZ 操作
+ *  到终止态再重读,否则设备稍慢一点界面就什么都不变(见 PlayConsoleLinked 的
+ *  `waitPTZOperationSettled`)。 */
+export interface PTZResourceListResult<T> {
+  list: T[];
+  freshness: PTZResourceFreshness;
+  refreshOperationId?: string;
+  refreshError?: string;
 }
 
 export interface CruiseTrackResource {
@@ -739,12 +760,7 @@ export interface CruiseTrackResource {
   updatedAt?: string;
 }
 
-export interface CruiseTrackListResult {
-  list: CruiseTrackResource[];
-  freshness: PTZResourceFreshness;
-  refreshOperationId?: string;
-  refreshError?: string;
-}
+export type CruiseTrackListResult = PTZResourceListResult<CruiseTrackResource>;
 
 export const createCruiseTrack = (
   channelId: number,
@@ -757,7 +773,7 @@ export const createCruiseTrack = (
   );
 
 export const listPtzPresets = (channelId: number, refresh = false) =>
-  http.request<BaseResult<{ list: Array<Record<string, unknown>>; freshness: string }>>(
+  http.request<BaseResult<PTZResourceListResult<Record<string, unknown>>>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets`),
     { params: refresh ? { refresh: true } : undefined },
@@ -768,6 +784,30 @@ export const listCruiseTracks = (channelId: number, refresh = false) =>
   http.request<BaseResult<CruiseTrackListResult>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+export interface CruiseTrackDetailResult {
+  track: CruiseTrackResource;
+  freshness: PTZResourceFreshness;
+  refreshOperationId?: string;
+  refreshError?: string;
+}
+
+/** 单条巡航轨迹回读(`CruiseTrackQuery` / A.2.6.14)。
+ *
+ * 列表查询(`CruiseTrackListQuery`)的设备应答里**只有编号和名字** —— 标准
+ * A.2.6.13 的元素表就是 `<Number/>` + `<Name/>`,没有点位集合。所以「设备上这
+ * 条轨迹走哪几个预置位」只能靠这一条命令逐条问。设备侧发现的轨迹(平台从没下发
+ * 过)因此必须走这里才能从「点位待查询」变成真实的点位链。
+ *
+ * `refresh=true` 时才真的下发查询;设备应答是异步的,返回的是**查询前**的缓存行
+ * 加上 `refreshOperationId`,调用方要拿这个 id 去轮询 PTZ 操作,落地后重读列表。 */
+export const getCruiseTrack = (channelId: number, trackId: number, refresh = false) =>
+  http.request<BaseResult<CruiseTrackDetailResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks/${trackId}`),
     { params: refresh ? { refresh: true } : undefined },
     silentRequestConfig
   );
