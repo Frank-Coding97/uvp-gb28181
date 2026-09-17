@@ -105,7 +105,7 @@ import { APP_VERSION_TEXT } from "@/config/version";
 import { DASHBOARD_WIDGET_REGISTRY, DEFAULT_DASHBOARD_LAYOUT, normalizeDashboardLayout, type DashboardLayout, type DashboardWidgetId } from "./dashboardRegistry";
 import CardTitle from "./components/dashboard/CardTitle.vue";
 import MiniTrend from "./components/dashboard/MiniTrend.vue";
-import MediaRateArea from "./components/dashboard/MediaRateArea.vue";
+import MediaRateArea from "@/views/gb28181/components/MediaRateArea.vue";
 import OnlineDonut from "./components/dashboard/OnlineDonut.vue";
 import SipDashboardCard from "./components/sip-dashboard/index.vue";
 import DashboardDrilldownDialog from "./components/drilldown/DashboardDrilldownDialog.vue";

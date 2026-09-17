@@ -22,6 +22,11 @@ describe("lucide menu icons", () => {
     expect(getLucideIconComponent("lucide:Gauge")).toBeDefined();
   });
 
+  it("resolves the media overview icon stored in the database", () => {
+    expect(getLucideIconName("lucide:LayoutDashboard")).toBe("LayoutDashboard");
+    expect(getLucideIconComponent("lucide:LayoutDashboard")).toBeDefined();
+  });
+
   it("resolves the online user menu icon stored in the database", () => {
     expect(getLucideIconName("lucide:UsersRound")).toBe("UsersRound");
     expect(getLucideIconComponent("lucide:UsersRound")).toBeDefined();

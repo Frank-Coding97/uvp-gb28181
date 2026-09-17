@@ -95,7 +95,7 @@ export default {
         ["menu"]: "菜单管理",
         ["division"]: "部门管理",
         ["dictionary"]: "字典管理",
-        ["log"]: "系统日志",
+        ["log"]: "操作日志",
         ["about"]: "关于项目",
         ["link"]: "外部链接",
         ["internal"]: "内部",

@@ -95,7 +95,7 @@ export default {
         ["menu"]: "menu",
         ["division"]: "division",
         ["dictionary"]: "dictionary",
-        ["log"]: "log",
+        ["log"]: "Operation Log",
         ["about"]: "about",
         ["link"]: "link",
         ["internal"]: "internal",

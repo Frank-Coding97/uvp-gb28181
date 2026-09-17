@@ -59,11 +59,11 @@ describe("media route render key", () => {
     );
   });
 
-  it("groups only the canonical workbench paths into the shared outer tab", () => {
+  it("gives each canonical workbench menu its own outer tab", () => {
     for (const path of WORKBENCH_PATHS) {
-      expect(resolveMediaWorkbenchTabGroup(path), path).toBe("media-workbench");
+      expect(resolveMediaWorkbenchTabGroup(path), path).toBe(path);
     }
-    expect(resolveMediaWorkbenchTabGroup("/media/nodes/7?view=runtime")).toBe("media-workbench");
+    expect(resolveMediaWorkbenchTabGroup("/media/nodes/7?view=runtime")).toBe("/media/nodes");
     expect(resolveMediaWorkbenchTabGroup("/gb28181/zlm/streams")).toBeNull();
     expect(resolveMediaWorkbenchTabGroup("/gb28181/device-mgmt/devices")).toBeNull();
   });

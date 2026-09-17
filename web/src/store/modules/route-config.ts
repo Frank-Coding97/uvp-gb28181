@@ -65,7 +65,7 @@ export const routeConfigStore = () => {
                 .filter((index: number) => index >= 0);
             const workbenchTab = {
                 ...route,
-                meta: { ...route.meta, title: "流媒体管理" }
+                meta: { ...route.meta }
             };
             if (!groupedIndexes.length) {
                 tabsList.value.push(workbenchTab);

@@ -1,53 +1,27 @@
-<template>
-  <div class="media-rate-area">
-    <div class="media-rate-area__plot">
-      <DashboardChart
-        v-if="props.samples.length"
-        :spec="chartSpec"
-        title="媒体实时速率"
-        :summary="summary"
-      />
-      <div v-else class="media-rate-area__empty" role="status">暂无采样</div>
-    </div>
-  </div>
-</template>
+import type { ChartDatum, MediaChartSpec } from "../zlm/workbench/chart/overviewChart";
 
-<script setup lang="ts">
-import { computed } from "vue";
-import type { ChartDatum, MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overviewChart";
-import DashboardChart from "./DashboardChart.vue";
+export const MEDIA_RATE_WINDOW_MS = 5 * 60 * 1000;
+const DATA_ID = "media-rate";
 
-interface MediaRateSample {
-  upstream: number;
-  downstream: number;
+export interface MediaRateSample {
+  upstream: number | null;
+  downstream: number | null;
   sampledAt: number;
 }
 
-const props = defineProps<{ samples: MediaRateSample[] }>();
+export function createMediaRateChartSpec(samples: readonly MediaRateSample[]): MediaChartSpec {
+  const latest = samples.at(-1)?.sampledAt ?? null;
+  const windowStart = latest === null ? null : latest - MEDIA_RATE_WINDOW_MS;
+  const values = windowStart === null ? [] : samples.filter(sample => sample.sampledAt >= windowStart);
+  const numericRates = values.flatMap(sample => [sample.upstream, sample.downstream])
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  const axisMax = Math.max(1, ...numericRates);
+  const timeDomain = windowStart === null || latest === null ? {} : { min: windowStart, max: latest };
 
-const WINDOW_MS = 5 * 60 * 1000;
-const DATA_ID = "dashboard-media-rate";
-
-const latestSampledAt = computed(() => props.samples.at(-1)?.sampledAt ?? null);
-const windowStart = computed(() => latestSampledAt.value === null ? null : latestSampledAt.value - WINDOW_MS);
-const axisMax = computed(() => props.samples.length
-  ? Math.max(1, ...props.samples.flatMap(sample => [sample.upstream, sample.downstream]))
-  : 1);
-const values = computed<ChartDatum[]>(() => props.samples.map(sample => ({
-  upstream: sample.upstream,
-  downstream: sample.downstream,
-  sampledAt: sample.sampledAt
-})));
-const summary = computed(() => props.samples.length ? `最近 5 分钟已记录 ${props.samples.length} 个采样点` : "暂无采样");
-
-const chartSpec = computed<MediaChartSpec>(() => {
-  const latest = latestSampledAt.value;
-  const start = windowStart.value;
-  const timeDomain = start === null || latest === null ? {} : { min: start, max: latest };
   return {
     type: "common",
     background: "transparent",
-    data: [{ id: DATA_ID, values: values.value }],
+    data: [{ id: DATA_ID, values: values.map(sample => ({ ...sample })) }],
     series: [
       createRateSeries("upstream", "实时上行", "var(--uvp-brand)", 0.22, latest),
       createRateSeries("downstream", "实时下行", "var(--uvp-brand-cyan)", 0.18, latest)
@@ -57,7 +31,7 @@ const chartSpec = computed<MediaChartSpec>(() => {
         orient: "left",
         type: "linear",
         min: 0,
-        max: axisMax.value,
+        max: axisMax,
         nice: false,
         label: { formatMethod: (value: number) => formatRate(value), autoHide: true, style: { fill: "var(--uvp-text-tertiary)" } },
         grid: { visible: true, style: { stroke: "var(--uvp-panel-border)" } },
@@ -83,7 +57,7 @@ const chartSpec = computed<MediaChartSpec>(() => {
     animationAppear: { duration: 220 },
     animationUpdate: { duration: 220, easing: "linear" }
   };
-});
+}
 
 function createRateSeries(field: "upstream" | "downstream", label: string, color: string, fillOpacity: number, latest: number | null) {
   return {
@@ -131,16 +105,10 @@ function createRateSeries(field: "upstream" | "downstream", label: string, color
 }
 
 function formatRate(value: unknown): string {
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  const rate = Math.max(0, numeric);
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const rate = Math.max(0, value);
   if (rate >= 1024 ** 3) return `${(rate / 1024 ** 3).toFixed(1)} GB/s`;
   if (rate >= 1024 ** 2) return `${(rate / 1024 ** 2).toFixed(1)} MB/s`;
   if (rate >= 1024) return `${(rate / 1024).toFixed(1)} KB/s`;
   return `${rate.toFixed(rate > 0 && rate < 1 ? 1 : 0)} B/s`;
 }
-</script>
-
-<style scoped>
-.media-rate-area{display:flex;flex-direction:column;height:calc(100% - 74px);min-height:150px;min-width:0;overflow:hidden}.media-rate-area__plot{display:grid;flex:1;grid-template-rows:minmax(0,1fr);min-height:0;overflow:hidden}.media-rate-area__plot :deep(.dashboard-chart){width:100%;height:100%;min-height:0}.media-rate-area__empty{display:flex;align-items:center;justify-content:center;min-height:150px;color:var(--uvp-text-tertiary);font-size:12px}
-</style>

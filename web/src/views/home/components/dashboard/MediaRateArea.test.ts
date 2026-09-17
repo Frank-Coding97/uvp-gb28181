@@ -4,16 +4,16 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-const dashboardChartStub = vi.hoisted(() => ({
-  name: "DashboardChart",
-  props: ["spec", "title", "summary"],
-  template: "<div class='dashboard-chart-stub'><span>{{ summary }}</span></div>"
+const mediaVChartStub = vi.hoisted(() => ({
+  name: "MediaVChart",
+  props: ["spec", "title", "summary", "active"],
+  template: "<div class='media-vchart-stub'><span>{{ summary }}</span></div>"
 }));
-vi.mock("./DashboardChart.vue", () => ({ default: dashboardChartStub }));
+vi.mock("@/views/gb28181/zlm/workbench/components/MediaVChart.vue", () => ({ default: mediaVChartStub }));
 
-import MediaRateArea from "./MediaRateArea.vue";
+import MediaRateArea from "@/views/gb28181/components/MediaRateArea.vue";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/home/components/dashboard/MediaRateArea.vue"), "utf8");
+const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/MediaRateArea.vue"), "utf8");
 
 interface MediaChartSpecLike {
   type: string;
@@ -25,11 +25,11 @@ interface MediaChartSpecLike {
 }
 
 const sampledAt = (time: string) => Date.parse(`2026-09-05T${time}+08:00`);
-const mountChart = (samples: Array<{ upstream: number; downstream: number; sampledAt: number }>) => mount(MediaRateArea, {
+const mountChart = (samples: Array<{ upstream: number | null; downstream: number | null; sampledAt: number }>) => mount(MediaRateArea, {
   props: { samples },
-  global: { stubs: { DashboardChart: dashboardChartStub } }
+  global: { stubs: { MediaVChart: mediaVChartStub } }
 });
-const getSpec = (wrapper: ReturnType<typeof mount>): MediaChartSpecLike => wrapper.getComponent(dashboardChartStub).props("spec") as MediaChartSpecLike;
+const getSpec = (wrapper: ReturnType<typeof mount>): MediaChartSpecLike => wrapper.getComponent(mediaVChartStub).props("spec") as MediaChartSpecLike;
 
 describe("MediaRateArea", () => {
   it("plots upstream and downstream together as smooth five-minute area series", () => {
@@ -126,7 +126,14 @@ describe("MediaRateArea", () => {
     const wrapper = mountChart([]);
 
     expect(wrapper.get("[role='status']").text()).toContain("暂无采样");
-    expect(wrapper.findComponent(dashboardChartStub).exists()).toBe(false);
+    expect(wrapper.findComponent(mediaVChartStub).exists()).toBe(false);
+  });
+
+  it("does not draw unavailable directional rates as zero", () => {
+    const wrapper = mountChart([{ upstream: null, downstream: null, sampledAt: sampledAt("10:05:00") }]);
+
+    expect(wrapper.get("[role='status']").text()).toContain("暂无采样");
+    expect(wrapper.findComponent(mediaVChartStub).exists()).toBe(false);
   });
 
   it("keeps a single real sample visible inside the five-minute domain", () => {

@@ -25,9 +25,10 @@ function routePath(value: string) {
   return value.split(/[?#]/, 1)[0];
 }
 
-export function resolveMediaWorkbenchTabGroup(pathOrFullPath: string): "media-workbench" | null {
+export function resolveMediaWorkbenchTabGroup(pathOrFullPath: string): string | null {
   const path = routePath(pathOrFullPath);
-  if (MEDIA_WORKBENCH_PATHS.has(path) || NODE_DETAIL_PATH.test(path)) return "media-workbench";
+  if (MEDIA_WORKBENCH_PATHS.has(path)) return path;
+  if (NODE_DETAIL_PATH.test(path)) return "/media/nodes";
   return null;
 }
 
