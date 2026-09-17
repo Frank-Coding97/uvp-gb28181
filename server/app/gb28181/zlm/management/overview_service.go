@@ -213,6 +213,15 @@ type RuntimeObjectStatistics struct {
 	RtmpPacket            uint64 `json:"rtmpPacket"`
 }
 
+type RuntimeTrendSample struct {
+	SampledAt        int64                    `json:"sampledAt"`
+	StreamCount      *int64                   `json:"streamCount,omitempty"`
+	ViewerCount      *int64                   `json:"viewerCount,omitempty"`
+	Throughput       *uint64                  `json:"throughput,omitempty"`
+	SessionCount     *int64                   `json:"sessionCount,omitempty"`
+	ObjectStatistics *RuntimeObjectStatistics `json:"objectStatistics,omitempty"`
+}
+
 type RuntimeNodeError struct {
 	Stage     string              `json:"stage"`
 	Code      ManagementErrorCode `json:"code"`
@@ -221,20 +230,22 @@ type RuntimeNodeError struct {
 }
 
 type NodeRuntimeView struct {
-	NodeID             int64              `json:"nodeId"`
-	Name               string             `json:"name"`
-	State              node.State         `json:"state"`
-	Status             RuntimeNodeStatus  `json:"status"`
-	Freshness          RuntimeFreshness   `json:"freshness"`
-	AsOf               time.Time          `json:"asOf"`
-	HeartbeatAsOf      time.Time          `json:"heartbeatAsOf,omitempty"`
-	HeartbeatFreshness RuntimeFreshness   `json:"heartbeatFreshness"`
-	Metrics            NodeRuntimeMetrics `json:"metrics"`
-	MetricsComplete    bool               `json:"metricsComplete"`
-	MediaFreshness     RuntimeFreshness   `json:"mediaFreshness"`
-	Streams            []RuntimeMedia     `json:"streams,omitempty"`
-	Error              *RuntimeNodeError  `json:"error,omitempty"`
-	Errors             []RuntimeNodeError `json:"errors,omitempty"`
+	NodeID             int64                `json:"nodeId"`
+	Name               string               `json:"name"`
+	State              node.State           `json:"state"`
+	Status             RuntimeNodeStatus    `json:"status"`
+	Freshness          RuntimeFreshness     `json:"freshness"`
+	AsOf               time.Time            `json:"asOf"`
+	HeartbeatAsOf      time.Time            `json:"heartbeatAsOf,omitempty"`
+	HeartbeatFreshness RuntimeFreshness     `json:"heartbeatFreshness"`
+	Metrics            NodeRuntimeMetrics   `json:"metrics"`
+	MetricsComplete    bool                 `json:"metricsComplete"`
+	MediaFreshness     RuntimeFreshness     `json:"mediaFreshness"`
+	Streams            []RuntimeMedia       `json:"streams,omitempty"`
+	MediaRateSamples   []MediaRateSample    `json:"mediaRateSamples,omitempty"`
+	TrendSamples       []RuntimeTrendSample `json:"trendSamples,omitempty"`
+	Error              *RuntimeNodeError    `json:"error,omitempty"`
+	Errors             []RuntimeNodeError   `json:"errors,omitempty"`
 }
 
 type OverviewMetrics struct {

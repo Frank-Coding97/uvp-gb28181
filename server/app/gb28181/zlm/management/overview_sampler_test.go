@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -15,15 +16,17 @@ type overviewSamplerCacheFake struct {
 	app.CacheInterf
 	mu     sync.Mutex
 	values map[string]string
+	ttls   map[string]time.Duration
 }
 
 func newOverviewSamplerCacheFake() *overviewSamplerCacheFake {
-	return &overviewSamplerCacheFake{values: make(map[string]string)}
+	return &overviewSamplerCacheFake{values: make(map[string]string), ttls: make(map[string]time.Duration)}
 }
 
-func (cache *overviewSamplerCacheFake) Set(_ context.Context, key, value string, _ time.Duration) error {
+func (cache *overviewSamplerCacheFake) Set(_ context.Context, key, value string, ttl time.Duration) error {
 	cache.mu.Lock()
 	cache.values[key] = value
+	cache.ttls[key] = ttl
 	cache.mu.Unlock()
 	return nil
 }
@@ -51,12 +54,60 @@ func (source *overviewSamplerSourceFake) GetOverview(context.Context) (OverviewR
 	return source.result, nil
 }
 
-func (source *overviewSamplerSourceFake) GetNodeRuntime(context.Context, int64) (NodeRuntimeView, error) {
-	return NodeRuntimeView{}, nil
+func (source *overviewSamplerSourceFake) GetNodeRuntime(_ context.Context, nodeID int64) (NodeRuntimeView, error) {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	for _, runtime := range source.result.Nodes {
+		if runtime.NodeID == nodeID {
+			return runtime, nil
+		}
+	}
+	return NodeRuntimeView{NodeID: nodeID}, nil
 }
 
 func (source *overviewSamplerSourceFake) ListStreams(context.Context, StreamFilter, PageRequest) (StreamDistribution, error) {
 	return StreamDistribution{}, nil
+}
+
+func nodeRateOverview(at time.Time, nodes ...NodeRuntimeView) OverviewResult {
+	result := exactRateOverview(at, 0, 0)
+	result.Metrics.SampledNodeCount = int64(len(nodes))
+	result.Metrics.MediaTrafficSampledNodes = 0
+	result.Nodes = nodes
+	for _, runtime := range nodes {
+		if !runtime.Metrics.MediaTrafficAvailable {
+			continue
+		}
+		result.Metrics.MediaTrafficSampledNodes++
+		result.Metrics.UpstreamBytesPerSecond += runtime.Metrics.UpstreamBytesPerSecond
+		result.Metrics.DownstreamBytesPerSecond += runtime.Metrics.DownstreamBytesPerSecond
+	}
+	return result
+}
+
+func nodeRateRuntime(nodeID int64, upstream, downstream uint64, available bool) NodeRuntimeView {
+	return NodeRuntimeView{
+		NodeID: nodeID,
+		Metrics: NodeRuntimeMetrics{
+			UpstreamBytesPerSecond:   upstream,
+			DownstreamBytesPerSecond: downstream,
+			MediaTrafficAvailable:    available,
+		},
+	}
+}
+
+func nodeTrendRuntime(nodeID int64, upstream, downstream uint64, streams, viewers int, throughput uint64, sessions int) NodeRuntimeView {
+	runtime := nodeRateRuntime(nodeID, upstream, downstream, true)
+	runtime.MediaFreshness = RuntimeFreshnessFresh
+	runtime.MetricsComplete = true
+	runtime.Metrics.NetworkSessionCount = sessions
+	runtime.Metrics.ObjectStatistics = RuntimeObjectStatistics{MediaSource: uint64(streams), Socket: uint64(sessions)}
+	runtime.Streams = make([]RuntimeMedia, streams)
+	for index := range runtime.Streams {
+		runtime.Streams[index].BytesSpeed = throughput / uint64(streams)
+		runtime.Streams[index].ReaderCount = viewers / streams
+	}
+	return runtime
 }
 
 func (source *overviewSamplerSourceFake) set(result OverviewResult) {
@@ -121,4 +172,101 @@ func TestOverviewSamplerSkipsInexactSamplesAndPrunesExpiredHistory(t *testing.T)
 	source.set(exactRateOverview(now, 300, 400))
 	require.NoError(t, sampler.SampleOnce(ctx))
 	require.Equal(t, []MediaRateSample{{SampledAt: now.UnixMilli(), Upstream: 300, Downstream: 400}}, sampler.historySnapshot())
+}
+
+func TestOverviewSamplerPersistsNodeMediaRateHistoryInRedis(t *testing.T) {
+	ctx := context.Background()
+	cache := newOverviewSamplerCacheFake()
+	now := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	source := &overviewSamplerSourceFake{result: nodeRateOverview(now,
+		nodeTrendRuntime(11, 1024, 2048, 2, 4, 6000, 7),
+		nodeRateRuntime(22, 4096, 8192, true),
+	)}
+	sampler := NewOverviewSampler(source, cache, WithOverviewSamplerClock(func() time.Time { return now }))
+
+	require.NoError(t, sampler.SampleOnce(ctx))
+	now = now.Add(DefaultMediaRateSampleInterval)
+	source.set(nodeRateOverview(now,
+		nodeTrendRuntime(11, 3072, 6144, 3, 6, 9000, 8),
+		nodeRateRuntime(22, 5120, 10240, true),
+	))
+	require.NoError(t, sampler.SampleOnce(ctx))
+
+	node11, err := sampler.GetNodeRuntime(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, []MediaRateSample{
+		{SampledAt: now.Add(-DefaultMediaRateSampleInterval).UnixMilli(), Upstream: 1024, Downstream: 2048},
+		{SampledAt: now.UnixMilli(), Upstream: 3072, Downstream: 6144},
+	}, node11.MediaRateSamples)
+	require.Len(t, node11.TrendSamples, 2)
+	require.EqualValues(t, 3, *node11.TrendSamples[1].StreamCount)
+	require.EqualValues(t, 6, *node11.TrendSamples[1].ViewerCount)
+	require.EqualValues(t, 9000, *node11.TrendSamples[1].Throughput)
+	require.EqualValues(t, 8, *node11.TrendSamples[1].SessionCount)
+	require.EqualValues(t, 3, node11.TrendSamples[1].ObjectStatistics.MediaSource)
+	node22, err := sampler.GetNodeRuntime(ctx, 22)
+	require.NoError(t, err)
+	require.Equal(t, []MediaRateSample{
+		{SampledAt: now.Add(-DefaultMediaRateSampleInterval).UnixMilli(), Upstream: 4096, Downstream: 8192},
+		{SampledAt: now.UnixMilli(), Upstream: 5120, Downstream: 10240},
+	}, node22.MediaRateSamples)
+
+	cache.mu.Lock()
+	var persisted []MediaRateSample
+	require.NoError(t, json.Unmarshal([]byte(cache.values[nodeMediaRateHistoryCacheKey(11)]), &persisted))
+	require.Equal(t, node11.MediaRateSamples, persisted)
+	require.Equal(t, defaultMediaRateHistoryTTL, cache.ttls[nodeMediaRateHistoryCacheKey(11)])
+	var persistedTrend []RuntimeTrendSample
+	require.NoError(t, json.Unmarshal([]byte(cache.values[nodeRuntimeTrendHistoryCacheKey(11)]), &persistedTrend))
+	require.Len(t, persistedTrend, 2)
+	require.Equal(t, defaultMediaRateHistoryTTL, cache.ttls[nodeRuntimeTrendHistoryCacheKey(11)])
+	cache.mu.Unlock()
+
+	restarted := NewOverviewSampler(source, cache, WithOverviewSamplerClock(func() time.Time { return now }))
+	restoredNode, err := restarted.GetNodeRuntime(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, node11.MediaRateSamples, restoredNode.MediaRateSamples)
+	require.Equal(t, node11.TrendSamples, restoredNode.TrendSamples)
+}
+
+func TestOverviewSamplerRestoresAndIsolatesNodeMediaRateHistory(t *testing.T) {
+	ctx := context.Background()
+	cache := newOverviewSamplerCacheFake()
+	now := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	source := &overviewSamplerSourceFake{result: nodeRateOverview(now,
+		nodeRateRuntime(11, 100, 200, true),
+		nodeRateRuntime(22, 900, 1000, true),
+	)}
+	first := NewOverviewSampler(source, cache, WithOverviewSamplerClock(func() time.Time { return now }))
+	require.NoError(t, first.SampleOnce(ctx))
+
+	now = now.Add(DefaultMediaRateSampleInterval)
+	source.set(nodeRateOverview(now,
+		nodeRateRuntime(11, 300, 400, true),
+		nodeRateRuntime(22, 0, 0, false),
+	))
+	restarted := NewOverviewSampler(source, cache, WithOverviewSamplerClock(func() time.Time { return now }))
+	require.NoError(t, restarted.SampleOnce(ctx))
+
+	node11, err := restarted.GetNodeRuntime(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, []MediaRateSample{
+		{SampledAt: now.Add(-DefaultMediaRateSampleInterval).UnixMilli(), Upstream: 100, Downstream: 200},
+		{SampledAt: now.UnixMilli(), Upstream: 300, Downstream: 400},
+	}, node11.MediaRateSamples)
+	node22, err := restarted.GetNodeRuntime(ctx, 22)
+	require.NoError(t, err)
+	require.Equal(t, []MediaRateSample{
+		{SampledAt: now.Add(-DefaultMediaRateSampleInterval).UnixMilli(), Upstream: 900, Downstream: 1000},
+	}, node22.MediaRateSamples, "不可用采样不能伪造成 0，也不能混入其他节点")
+
+	now = now.Add(DefaultMediaRateHistoryWindow)
+	source.set(nodeRateOverview(now, nodeRateRuntime(11, 500, 600, true)))
+	require.NoError(t, restarted.SampleOnce(ctx))
+	node11, err = restarted.GetNodeRuntime(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, []MediaRateSample{
+		{SampledAt: now.Add(-DefaultMediaRateHistoryWindow).UnixMilli(), Upstream: 300, Downstream: 400},
+		{SampledAt: now.UnixMilli(), Upstream: 500, Downstream: 600},
+	}, node11.MediaRateSamples)
 }
