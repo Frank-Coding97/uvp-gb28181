@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { BookOpen, Check, Copy, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
+import { BookOpen, Check, Copy, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
 import {
     fetchSipPlatformInfo,
     fetchSipSetupStatus,
@@ -149,16 +149,10 @@ onMounted(refresh);
                         </a-tag>
                     </div>
                     <div class="toolbar-actions">
-                        <a-button v-if="config" class="uvp-page-action-btn" @click="copyAll">
+                        <a-button v-if="config" class="uvp-page-action-btn sip-copy-btn" @click="copyAll">
                             <template #icon><Copy :size="15" /></template>
                             复制 SIP 接入信息
                         </a-button>
-                        <a-tooltip content="刷新状态">
-                            <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" @click="refresh">
-                                <template #icon><RefreshCw :size="16" /></template>
-                                刷新状态
-                            </a-button>
-                        </a-tooltip>
                         <a-button v-if="canEdit && status?.config" class="uvp-page-action-btn" type="primary" @click="wizardVisible = true">
                             <template #icon><Settings2 :size="16" /></template>
                             编辑配置
@@ -363,6 +357,20 @@ onMounted(refresh);
 }
 .toolbar-actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
 
+.sip-copy-btn {
+    color: #ffffff !important;
+    background: #0f766e !important;
+    border-color: #0f766e !important;
+    box-shadow: none !important;
+}
+
+.sip-copy-btn:hover,
+.sip-copy-btn:focus-visible {
+    color: #ffffff !important;
+    background: #115e59 !important;
+    border-color: #115e59 !important;
+}
+
 .status-label {
     color: var(--uvp-text-tertiary);
     font-size: 12px;
@@ -436,7 +444,7 @@ onMounted(refresh);
     width: 30px;
     height: 30px;
     color: #ffffff;
-    background: var(--uvp-brand, #2563eb);
+    background: #2563eb;
     border-radius: 8px;
     flex-shrink: 0;
 }

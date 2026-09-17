@@ -194,6 +194,13 @@ describe("QrProvisionCard 模拟器下载入口", () => {
         expect(hoverRule).not.toContain("var(--uvp-brand-soft, #e8f2ff) 70%, #ffffff");
     });
 
+    it("uses a solid brand blue for the download icon", () => {
+        const iconRule = source.match(/\.qr-download__icon\s*\{([^}]*)\}/)?.[1] || "";
+
+        expect(iconRule).toContain("background: #2563eb;");
+        expect(iconRule).not.toContain("background: var(--uvp-brand");
+    });
+
     it("opens the public download site in a new tab", () => {
         expect(source).toContain('href="https://download.uvplatform.cn/"');
         expect(source).toContain('target="_blank"');

@@ -72,7 +72,15 @@ describe("security preview system integration", () => {
     expect(source).toContain("成功认证共享出口");
     expect(source).toContain("单向 UDP 未验证来源只拒绝并记录");
     expect(source).toContain("INVITE 自动 IP 封禁同样适用");
-    expect(source).toContain("扫描枚举即使结果为“已拒绝”也属正常");
+  });
+
+  it("does not render explanatory note cards below the defense chain", () => {
+    expect(source).not.toContain("命中自动封禁策略的来源将永久封禁，需人工解封。");
+    expect(source).not.toContain('<div class="panel-note"><ShieldCheck :size="16" /><span>{{ sourceVerificationNote }}</span></div>');
+  });
+
+  it("does not render an explanatory note above the security event table", () => {
+    expect(source).not.toContain("高危是风险等级；扫描枚举即使结果为“已拒绝”也属正常，永久封 IP 仍需通过来源验证门禁。");
   });
 
   it("renders firewall agent health from the live snapshot instead of demo text", () => {

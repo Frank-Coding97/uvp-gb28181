@@ -407,7 +407,7 @@ onMounted(() => {
     width: 28px;
     height: 28px;
     color: #ffffff;
-    background: var(--uvp-brand, #2563eb);
+    background: #2563eb;
     border-radius: 7px;
 }
 

@@ -23,8 +23,7 @@ import {
   SlidersHorizontal,
   Trash2,
   TriangleAlert,
-  UserRoundCheck,
-  Zap
+  UserRoundCheck
 } from "lucide-vue-next";
 import {
   createSecurityAccessRule,
@@ -620,8 +619,6 @@ onBeforeUnmount(() => {
               <i class="chain-line active" />
               <div class="defense-item active"><span><Fingerprint :size="19" /></span><div><strong>应用协议防护</strong><small>限速 · 鉴权 · 风险评分</small></div><a-tag color="green"><Check :size="12" />保护</a-tag></div>
             </div>
-            <div class="panel-note"><Zap :size="16" /><span>命中自动封禁策略的来源将永久封禁，需人工解封。</span></div>
-            <div class="panel-note"><ShieldCheck :size="16" /><span>{{ sourceVerificationNote }}</span></div>
           </article>
         </section>
 
@@ -653,7 +650,6 @@ onBeforeUnmount(() => {
           </template>
           <template #actions><a-button @click="resetEventSearch">重置</a-button></template>
         </s-layout-search>
-        <div class="panel-note event-note"><ShieldCheck :size="16" /><span>高危是风险等级；扫描枚举即使结果为“已拒绝”也属正常，永久封 IP 仍需通过来源验证门禁。</span></div>
         <a-table class="security-table uvp-data-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050, y: '100%' }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
           <template #columns>
             <a-table-column title="风险" :width="90"><template #cell="{ record }"><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"><i />{{ record.severity }}</span></template></a-table-column>
@@ -797,7 +793,6 @@ onBeforeUnmount(() => {
 .chart-legend,
 .chart-legend span,
 .defense-item,
-.panel-note,
 .live-toggle,
 .signal-row,
 .rule-safety,
@@ -1183,7 +1178,6 @@ onBeforeUnmount(() => {
 }
 
 .defense-item small,
-.panel-note,
 .signal-row small {
   color: var(--uvp-text-tertiary);
   line-height: 1.45;
@@ -1199,15 +1193,6 @@ onBeforeUnmount(() => {
 
 .chain-line.active {
   background: color-mix(in srgb, var(--uvp-brand-cyan) 42%, var(--uvp-panel-border));
-}
-
-.panel-note {
-  gap: 8px;
-  margin-top: 12px;
-  padding: 10px 12px;
-  color: var(--uvp-brand-cyan);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 7%, var(--uvp-list-panel-bg));
 }
 
 .lower-grid {
