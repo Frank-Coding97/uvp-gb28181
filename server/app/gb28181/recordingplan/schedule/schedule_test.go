@@ -1,11 +1,18 @@
 package schedule
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestPeriodJSONUsesFrontendContractFieldNames(t *testing.T) {
+	encoded, err := json.Marshal(Period{Weekday: 1, StartSlot: 16, EndSlot: 36})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"weekday":1,"startSlot":16,"endSlot":36}`, string(encoded))
+}
 
 func beijingTime(t *testing.T, value string) time.Time {
 	t.Helper()

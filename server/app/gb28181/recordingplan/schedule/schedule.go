@@ -12,9 +12,9 @@ var beijingLocation = time.FixedZone("UTC+8", 8*60*60)
 
 // Period is one normalized half-hour range. Weekday uses 1=Monday ... 7=Sunday.
 type Period struct {
-	Weekday   int
-	StartSlot int
-	EndSlot   int
+	Weekday   int `json:"weekday"`
+	StartSlot int `json:"startSlot"`
+	EndSlot   int `json:"endSlot"`
 }
 
 type Evaluation struct {
