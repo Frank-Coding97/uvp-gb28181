@@ -14,6 +14,11 @@ const (
 
 	largeArrivalGapMS int64 = 500
 	keyFrameWindowMS  int64 = 3000
+
+	// maxTimelineFrames 限制逐帧明细的下发条数。60 秒采样按 25fps 视频 +
+	// 20ms 音频帧估算约 4500 帧,这里留出两倍余量。真正触发裁剪时会通过
+	// TimelineTruncated 显式告知调用方,不再静默丢弃。
+	maxTimelineFrames = 10000
 )
 
 type Result struct {
@@ -22,7 +27,9 @@ type Result struct {
 	Audio      *TrackStats      `json:"audio"`
 	Timestamps TimestampMetrics `json:"timestamps"`
 	Timeline   []TimelineFrame  `json:"timeline"`
-	Health     Health           `json:"health"`
+	// TimelineTruncated 为真表示 Timeline 只保留了末尾一段,完整条数见 Summary.FrameCount。
+	TimelineTruncated bool   `json:"timelineTruncated"`
+	Health            Health `json:"health"`
 }
 
 type Summary struct {
@@ -131,7 +138,7 @@ func Analyze(frames []zlm.ProbeFrame) Result {
 		threshold, observed := keyFrameWindowMS, result.Summary.SampleDurationMS
 		result.warn(Issue{Code: "missing_keyframe", Message: "三秒视频采样窗口内没有关键帧", ThresholdMS: &threshold, ObservedMS: &observed})
 	}
-	result.Timeline = buildTimeline(frames, minRecv)
+	result.Timeline, result.TimelineTruncated = buildTimeline(frames, minRecv)
 	return result
 }
 
@@ -245,10 +252,14 @@ func (r *Result) warn(issue Issue) {
 	r.Health.Issues = append(r.Health.Issues, issue)
 }
 
-func buildTimeline(frames []zlm.ProbeFrame, start int64) []TimelineFrame {
+// buildTimeline 返回逐帧到达明细。帧数超过 maxTimelineFrames 时只保留末尾一段
+// (排障关心的是最近的到达情况),并把裁剪事实通过第二个返回值交给调用方显式上报。
+func buildTimeline(frames []zlm.ProbeFrame, start int64) ([]TimelineFrame, bool) {
 	from := 0
-	if len(frames) > 32 {
-		from = len(frames) - 32
+	truncated := false
+	if len(frames) > maxTimelineFrames {
+		from = len(frames) - maxTimelineFrames
+		truncated = true
 	}
 	result := make([]TimelineFrame, 0, len(frames)-from)
 	for i := from; i < len(frames); i++ {
@@ -259,7 +270,7 @@ func buildTimeline(frames []zlm.ProbeFrame, start int64) []TimelineFrame {
 			RelativeTimeMS: frame.RecvStamp - start, FrameSize: frame.FrameSize,
 		})
 	}
-	return result
+	return result, truncated
 }
 
 func positiveDTSIntervals(frames []zlm.ProbeFrame) []float64 {

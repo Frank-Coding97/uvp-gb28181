@@ -16,6 +16,8 @@ import { copyTextToClipboard } from "@/utils/app";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
 import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
+import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
+import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
 import {
@@ -1502,11 +1504,31 @@ const probeButtonText = computed(() => {
 });
 const probeResult = computed(() => probeSnapshot.value);
 
-const probeTimeline = computed(() => (probeResult.value?.timeline || []).map((frame) => ({
-    type: frame.trackType,
-    keyFrame: frame.keyFrame,
-    height: frame.trackType === "video" ? 62 : 30,
-})));
+// 侧栏这一栏只有约 250px 可用宽,而 60 秒采样能到四千多帧 —— 逐帧渲染既放不下
+// (每根柱子不足 0.1px)也会把 DOM 撑爆。所以这里只放按时间分桶的聚合概览,
+// 逐帧明细进弹窗看。
+const probeOverview = computed(() => buildProbeOverview(probeResult.value));
+const probeTimelineDialogVisible = ref(false);
+
+function openProbeTimelineDialog() {
+    if (!probeOverview.value) return;
+    probeTimelineDialogVisible.value = true;
+}
+
+const frameOverviewAriaLabel = computed(() => {
+    const data = probeOverview.value;
+    if (!data) return "帧到达概览：暂无数据";
+    const tail = data.stallCount > 0
+        ? `${data.stallCount} 处到达断档，最长 ${Math.round(data.maxGapMs)} 毫秒`
+        : "未发现到达断档";
+    return `帧到达概览：共 ${data.totalFrames} 帧，${tail}；打开查看逐帧详情`;
+});
+
+const frameOverviewMeta = computed(() => {
+    const data = probeOverview.value;
+    if (!data) return probeState.value === "sampling" ? "采样中" : "无数据";
+    return data.stallCount > 0 ? `${data.stallCount} 处断档` : "无断档";
+});
 
 function clearProbeTimers() {
     if (probeCountdownTimer) window.clearInterval(probeCountdownTimer);
@@ -3751,32 +3773,52 @@ onBeforeUnmount(() => {
                                 </div>
                             </section>
 
+                            <!-- 概览层:按时间分桶看全量帧的到达密度与断档位置。
+                                 逐帧散点在弹窗里看 —— 侧栏这一栏约 250px 宽,放不下也不该放。 -->
                             <section class="linked-section probe-detail-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Signal :size="13" />帧到达时间线</span>
-                                    <span class="section-meta">{{ probeState === "complete" ? "最近 32 帧" : "无数据" }}</span>
+                                    <span
+                                        class="section-meta"
+                                        :class="{ good: probeOverview && probeOverview.stallCount === 0 }"
+                                    >{{ frameOverviewMeta }}</span>
                                 </div>
-                                <div class="frame-timeline linked-timeline" :class="{ muted: probeState !== 'complete' }">
-                                    <div class="frame-bars">
-                                        <template v-if="probeState === 'complete' && probeTimeline.length">
-                                            <span v-for="(frame, index) in probeTimeline" :key="index" :class="[frame.type, { keyframe: frame.keyFrame }]" :style="{ height: `${frame.height}%` }"></span>
-                                        </template>
-                                        <!-- 空态与采样中态:柱状区中央的引导层。图例保持在底部,让用户提前认色。 -->
-                                        <div v-else class="frame-bars-empty">
-                                            <template v-if="probeState === 'sampling'">
-                                                <Loader2 :size="18" class="spin" />
-                                                <span>正在采集帧到达数据</span>
-                                            </template>
-                                            <template v-else>
-                                                <Activity :size="18" />
-                                                <span>启动检测后展示最近 32 帧的到达序列</span>
-                                            </template>
+                                <button
+                                    type="button"
+                                    class="frame-overview"
+                                    :class="{ muted: !probeOverview }"
+                                    :disabled="!probeOverview"
+                                    data-testid="probe-timeline-open"
+                                    :aria-label="frameOverviewAriaLabel"
+                                    @click="openProbeTimelineDialog"
+                                >
+                                    <template v-if="probeOverview">
+                                        <div class="frame-overview-bars">
+                                            <span
+                                                v-for="(bucket, index) in probeOverview.buckets"
+                                                :key="index"
+                                                class="frame-overview-bar"
+                                                :class="{ stalled: bucket.stalled, empty: bucket.count === 0 }"
+                                                :style="{ height: `${probeBucketHeight(bucket)}%` }"
+                                            ></span>
                                         </div>
+                                        <div class="frame-overview-foot">
+                                            <span>{{ probeOverview.totalFrames }} 帧<template v-if="probeOverview.truncated"> · 明细含末尾 {{ probeOverview.sampledFrames }} 帧</template></span>
+                                            <span class="frame-overview-cta">查看逐帧详情<Maximize2 :size="11" /></span>
+                                        </div>
+                                    </template>
+                                    <!-- 空态与采样中态:柱状区中央的引导层。 -->
+                                    <div v-else class="frame-overview-empty">
+                                        <template v-if="probeState === 'sampling'">
+                                            <Loader2 :size="18" class="spin" />
+                                            <span>正在采集帧到达数据</span>
+                                        </template>
+                                        <template v-else>
+                                            <Activity :size="18" />
+                                            <span>启动检测后展示全量帧到达概览</span>
+                                        </template>
                                     </div>
-                                    <div class="frame-legend">
-                                        <span><i class="key"></i>关键帧</span><span><i class="video"></i>视频帧</span><span><i class="audio"></i>音频帧</span>
-                                    </div>
-                                </div>
+                                </button>
                             </section>
                         </div>
                     </div>
@@ -4287,6 +4329,14 @@ onBeforeUnmount(() => {
                     </aside>
                 </div>
             </Transition>
+
+            <!-- 帧到达时间线详情:侧栏概览条点击后打开。
+                 逐帧散点需要的横向空间比概览条大得多,所以单独给弹窗。 -->
+            <ProbeTimelineDialog
+                v-if="canDiagnosePlayback"
+                v-model:visible="probeTimelineDialogVisible"
+                :snapshot="probeResult"
+            />
 
             <a-modal
                 v-if="canSavePtzPreset && savePresetDialogVisible"
@@ -5214,10 +5264,10 @@ onBeforeUnmount(() => {
 .linked-probe-layout > .linked-section > .section-hd { flex: 0 0 auto; }
 .linked-probe-layout > .linked-section > .probe-track-merged,
 .linked-probe-layout > .linked-section > .probe-health-grid,
-.linked-probe-layout > .linked-section > .frame-timeline { flex: 1 1 0; min-height: 0; }
+.linked-probe-layout > .linked-section > .frame-overview { flex: 1 1 0; min-height: 0; }
 
 /* 底部三块套上跟侧栏 .probe-card 同款卡片外壳(浅底 + 描边 + 圆角)。
- * 加了外壳后,内部原来那层 .probe-track-merged / .probe-health-grid / .frame-timeline 的
+ * 加了外壳后,内部原来那层 .probe-track-merged / .probe-health-grid / .frame-overview 的
  * 独立底色和边框会跟卡片形成"套框",逐一去掉,只留骨架。
  * 相邻两卡之间的分隔线也一并去掉 —— 卡片本身的间距和边框已经足够表达"这是三块"。 */
 .probe-detail-card {
@@ -5229,16 +5279,15 @@ onBeforeUnmount(() => {
 .probe-detail-card > .section-hd.first { margin-top: 0; }
 .probe-detail-card > .probe-track-merged,
 .probe-detail-card > .probe-health-grid,
-.probe-detail-card > .frame-timeline {
+.probe-detail-card > .frame-overview {
     padding: 0;
     background: transparent;
     border: 0;
 }
 /* 轨道明细里的"视频/音频"分割线原来是靠 border-top,套进卡片后保留就好,
  * 因为它是"两条轨道之间的分隔"而不是"跟卡片外的分隔"。 */
-/* 不再写死 46px:交给 .linked-timeline 的 1fr 行按剩余空间分配,
- * 同时留一个下限,避免详情条被压缩时波形糊成一条线。 */
-.linked-timeline .frame-bars { height: auto; min-height: 46px; }
+/* 概览条的柱高不再写死:交给 .frame-overview 的 1fr 行按剩余空间分配,
+ * 下限见 .frame-overview-bars 的 min-height,避免详情条被压缩时糊成一条线。 */
 .linked-standard-note {
     display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start;
     padding: 12px; color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
@@ -5772,19 +5821,23 @@ onBeforeUnmount(() => {
 .probe-status.sampling { color: var(--uvp-warning); border-color: var(--uvp-warning-border); }
 .probe-status.sampling .dot { animation: pulse 1s ease-in-out infinite; }
 .probe-status.complete { color: var(--uvp-brand-cyan); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 30%, var(--uvp-panel-border)); }
+/* 主操作按钮 : 采样时长选择器 = 7 : 3。
+ * ⚠️ 下拉框必须走 :deep() —— a-select 的根节点是 Arco 内部渲染的 <span>,
+ * 拿不到本组件的 scoped 属性(实测 hasScopeAttr=false),写成 .probe-duration
+ * 能编译通过却永远匹配不到它,那时它只剩 Arco 自带的 width:100%,
+ * 会把按钮挤成竖排窄条(只剩 padding 撑出的 24px)。
+ * 两侧都显式 min-width:0 —— flex item 默认 min-width:auto 会被内容顶住。 */
 .probe-action-row { display: flex; align-items: stretch; gap: 6px; }
 .probe-action {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1 1 auto; width: auto; min-height: 30px; padding: 0 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 7 1 0; min-width: 0; width: auto; min-height: 30px; padding: 0 12px;
     color: #fff; background: var(--uvp-brand); border: 0; border-radius: 7px;
     cursor: pointer; font-size: 11.5px; font-weight: 600; transition: all 0.15s ease;
 }
 .probe-action:hover:not(:disabled) { background: var(--uvp-brand-strong); }
 .probe-action:disabled { cursor: not-allowed; opacity: 0.56; }
-.probe-duration {
-    min-width: 68px; padding: 0 7px; color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 7px; font-size: 11px;
-}
-.probe-duration:disabled { cursor: not-allowed; opacity: 0.56; }
+/* 这里只管布局:边框/底色/圆角/字号统一由 styles/arco-overrides.scss 的
+ * .arco-select-view 提供,避免两处规则打架 */
+:deep(.probe-duration) { flex: 3 1 0; min-width: 0; }
 .probe-summary {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
@@ -5859,34 +5912,44 @@ onBeforeUnmount(() => {
 }
 .probe-health-grid strong { color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
 .probe-health-grid em { grid-column: 1 / -1; color: var(--uvp-text-tertiary); font-size: 9px; font-style: normal; }
-.frame-timeline {
-    display: grid; gap: 7px; padding: 9px 10px;
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+/* 帧到达概览条:按时间分桶的密度条,点击进弹窗看逐帧。
+ * 桶数固定(见 probeOverview.ts 的 PROBE_OVERVIEW_BUCKETS),所以帧再多也不会溢出 ——
+ * 旧版逐帧一根柱子,60 秒采样下 min-width 会把整栏撑到九千多像素。
+ * 空桶只留一条底线:空白本身就是「这段时间没有帧到达」。 */
+.frame-overview {
+    display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 6px;
+    width: 100%; padding: 4px 6px;
+    background: transparent; border: 0; border-radius: 8px;
+    cursor: pointer; text-align: left; transition: background 0.14s ease;
 }
-.frame-timeline.muted { opacity: 0.46; }
-.frame-bars { display: flex; align-items: end; gap: 3px; height: 46px; border-bottom: 1px solid var(--uvp-panel-border); }
-/* 详情条里的时间线:柱状区吃掉剩余高度,波形越高越容易看出帧间隔异常。
- * 图例按内容高,不参与分配。 */
-.linked-timeline { grid-template-rows: minmax(0, 1fr) auto; }
-.linked-timeline .frame-legend { align-self: end; }
-.frame-bars > span { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; transition: height 0.2s ease; }
-/* 空态引导:柱状区中央的图标 + 一句说明。muted 状态下父级 .frame-timeline 会整体
- * opacity 0.46,让引导条自身颜色不用再淡化;font-size 跟其他 meta 一档保持层级一致。 */
-.frame-bars-empty {
+.frame-overview:hover:not(:disabled) { background: var(--uvp-brand-soft); }
+.frame-overview:disabled { cursor: default; }
+.frame-overview.muted { opacity: 0.46; }
+.frame-overview-bars {
+    display: flex; align-items: flex-end; gap: 1px;
+    min-height: 46px; padding-bottom: 1px; border-bottom: 1px solid var(--uvp-panel-border);
+}
+.frame-overview-bar {
+    flex: 1 1 0; min-width: 0; border-radius: 1px 1px 0 0;
+    background: color-mix(in srgb, var(--uvp-brand) 62%, transparent);
+    transition: height 0.2s ease;
+}
+.frame-overview-bar.empty { background: var(--uvp-panel-border); }
+.frame-overview-bar.stalled { background: var(--uvp-warning); }
+.frame-overview-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    color: var(--uvp-text-tertiary); font-size: 10px;
+}
+.frame-overview-cta { display: inline-flex; align-items: center; gap: 3px; color: var(--uvp-brand); }
+.frame-overview:hover:not(:disabled) .frame-overview-cta { text-decoration: underline; }
+/* 空态引导:柱状区中央的图标 + 一句说明。muted 状态下父级会整体淡化,
+ * 引导条自身不用再降透明度;font-size 跟其他 meta 一档保持层级一致。 */
+.frame-overview-empty {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    width: 100%; height: 100%;
+    width: 100%; min-height: 46px;
     color: var(--uvp-text-tertiary); font-size: 10.5px;
 }
-.frame-bars-empty > svg { color: var(--uvp-text-tertiary); }
-.frame-bars > span.video { background: color-mix(in srgb, var(--uvp-brand) 68%, transparent); }
-.frame-bars > span.audio { background: color-mix(in srgb, var(--uvp-brand-cyan) 68%, transparent); }
-.frame-bars > span.keyframe { background: var(--uvp-warning); box-shadow: 0 0 5px color-mix(in srgb, var(--uvp-warning) 44%, transparent); }
-.frame-legend { display: flex; align-items: center; justify-content: flex-end; gap: 9px; color: var(--uvp-text-tertiary); font-size: 8.5px; }
-.frame-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.frame-legend i { width: 6px; height: 6px; border-radius: 2px; }
-.frame-legend i.key { background: var(--uvp-warning); }
-.frame-legend i.video { background: var(--uvp-brand); }
-.frame-legend i.audio { background: var(--uvp-brand-cyan); }
+.frame-overview-empty > svg { color: var(--uvp-text-tertiary); }
 
 /* ═══════════ 录制面板 ═══════════ */
 .empty { padding: 24px; color: var(--uvp-text-tertiary); text-align: center; font-size: 11px; }

@@ -55,7 +55,7 @@ func TestAnalyzeEmptyAndSingleTrack(t *testing.T) {
 	}
 }
 
-func TestAnalyzeWarningsAndLast32TimelineFrames(t *testing.T) {
+func TestAnalyzeWarningsAndFullTimeline(t *testing.T) {
 	frames := make([]zlm.ProbeFrame, 40)
 	for i := range frames {
 		frames[i] = zlm.ProbeFrame{Codec: "H264", TrackType: "video", DTS: int64(i * 40), PTS: int64(i * 40), RecvStamp: int64(i * 40), FrameSize: 100}
@@ -66,8 +66,31 @@ func TestAnalyzeWarningsAndLast32TimelineFrames(t *testing.T) {
 	if result.Health.Status != HealthWarning || len(result.Health.Issues) < 2 {
 		t.Fatalf("expected traceable warnings: %+v", result.Health)
 	}
-	if len(result.Timeline) != 32 || result.Timeline[0].Sequence != 8 || result.Timeline[31].Sequence != 39 {
+	// 40 帧远低于上限,必须全量下发(此前这里被硬裁到末尾 32 帧)。
+	if len(result.Timeline) != 40 || result.Timeline[0].Sequence != 0 || result.Timeline[39].Sequence != 39 {
 		t.Fatalf("unexpected timeline: %+v", result.Timeline)
+	}
+	if result.TimelineTruncated {
+		t.Fatalf("timeline must not be flagged truncated at 40 frames")
+	}
+}
+
+func TestBuildTimelineCapsAtLimitAndFlagsTruncation(t *testing.T) {
+	total := maxTimelineFrames + 8
+	frames := make([]zlm.ProbeFrame, total)
+	for i := range frames {
+		frames[i] = zlm.ProbeFrame{Codec: "H264", TrackType: "video", RecvStamp: int64(i * 40), FrameSize: 100}
+	}
+	timeline, truncated := buildTimeline(frames, 0)
+	if !truncated {
+		t.Fatalf("expected truncation flag for %d frames", total)
+	}
+	if len(timeline) != maxTimelineFrames {
+		t.Fatalf("expected %d frames, got %d", maxTimelineFrames, len(timeline))
+	}
+	// 裁剪保留末尾一段:首条序号应为 total - maxTimelineFrames。
+	if timeline[0].Sequence != total-maxTimelineFrames || timeline[len(timeline)-1].Sequence != total-1 {
+		t.Fatalf("unexpected window: first=%d last=%d", timeline[0].Sequence, timeline[len(timeline)-1].Sequence)
 	}
 }
 

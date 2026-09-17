@@ -368,7 +368,7 @@ func (c *Client) AddProbe(ctx context.Context, vhost, appName, stream string, pr
 		baseHTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
 	httpClient := *baseHTTPClient
-	httpClient.Timeout = probeHTTPTimeout(probeMS)
+	httpClient.Timeout = ProbeHTTPTimeout(probeMS)
 	if err := c.callWithClient(ctx, &httpClient, "addProbe", params, &response); err != nil {
 		return nil, err
 	}
@@ -378,15 +378,21 @@ func (c *Client) AddProbe(ctx context.Context, vhost, appName, stream string, pr
 	return response.Data, nil
 }
 
-func probeHTTPTimeout(probeMS int) time.Duration {
+// ProbeHTTPGrace 是 addProbe 在采样窗口之外留给传输层、以及 ZLM 侧聚合与序列化的宽限。
+// 探针报文按 60 秒采样(约 5000 帧)估算接近 1MB,不能照搬普通控制面请求的尺度。
+const ProbeHTTPGrace = 10 * time.Second
+
+// ProbeHTTPTimeout 返回一次 addProbe 往返允许占用的时间。
+//
+// 导出是为了让上层能把「调用预算」排在它之上:外层若比传输层先到期,addProbe 返回的是
+// 不带 "(Client.Timeout exceeded while awaiting headers)" 后缀的裸 context deadline
+// exceeded,现场就无法区分"节点慢"和"调用方主动放弃"。这条次序由 streamprobe 的
+// probeCallBudget 保证,并由两边的测试钉住。
+func ProbeHTTPTimeout(probeMS int) time.Duration {
 	if probeMS < 0 {
 		probeMS = 0
 	}
-	timeout := time.Duration(probeMS)*time.Millisecond + 10*time.Second
-	if timeout < 10*time.Second {
-		return 10 * time.Second
-	}
-	return timeout
+	return time.Duration(probeMS)*time.Millisecond + ProbeHTTPGrace
 }
 
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)

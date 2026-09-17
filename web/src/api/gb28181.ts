@@ -440,6 +440,8 @@ export interface ProbeSnapshot {
     relativeTimeMs: number;
     frameSize: number;
   }>;
+  /** 为真表示 timeline 只保留了末尾一段，完整条数见 summary.frameCount。 */
+  timelineTruncated?: boolean;
   health: {
     status: "ok" | "warning" | "error" | string;
     issues: Array<{ code: string; message: string; thresholdMs?: number; observedMs?: number }>;

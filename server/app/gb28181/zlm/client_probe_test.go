@@ -16,11 +16,15 @@ type delayedProbeRoundTripper func(*http.Request) (*http.Response, error)
 func (f delayedProbeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestProbeHTTPTimeoutFollowsSamplingDuration(t *testing.T) {
-	if got, want := probeHTTPTimeout(3000), 13*time.Second; got != want {
+	if got, want := ProbeHTTPTimeout(3000), 13*time.Second; got != want {
 		t.Fatalf("3s probe timeout=%s, want %s", got, want)
 	}
-	if got, want := probeHTTPTimeout(60000), 70*time.Second; got != want {
+	if got, want := ProbeHTTPTimeout(60000), 70*time.Second; got != want {
 		t.Fatalf("60s probe timeout=%s, want %s", got, want)
+	}
+	// 负值按 0 处理,退化成单档宽限而不是立即超时。
+	if got, want := ProbeHTTPTimeout(-1), ProbeHTTPGrace; got != want {
+		t.Fatalf("negative probe timeout=%s, want %s", got, want)
 	}
 }
 

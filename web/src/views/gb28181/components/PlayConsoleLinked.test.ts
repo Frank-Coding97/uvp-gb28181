@@ -5,6 +5,33 @@ import { resolve } from "node:path";
 import { defineComponent, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// VChart 会拉起 lottie-web 这类浏览器专属依赖,jsdom 下拿不到 canvas 上下文就会整包
+// 加载失败。本文件只覆盖概览条与弹窗的开关行为,图表细节由 ProbeTimelineDialog 自己负责。
+const vchartStub = vi.hoisted(() => ({ created: 0, rendered: 0, updated: 0, resized: 0, released: 0 }));
+
+vi.mock("@visactor/vchart", () => ({
+  default: class {
+    constructor() {
+      vchartStub.created += 1;
+    }
+    renderSync() {
+      vchartStub.rendered += 1;
+    }
+    updateSpecSync() {
+      vchartStub.updated += 1;
+    }
+    resize() {
+      vchartStub.resized += 1;
+    }
+    release() {
+      vchartStub.released += 1;
+    }
+    on() {
+      return undefined;
+    }
+  }
+}));
+
 const api = vi.hoisted(() => {
   const presets = Array.from({ length: 20 }, (_, index) => ({
     presetId: index + 1,
@@ -952,6 +979,78 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("探针完成后侧栏展示全量帧到达概览，点击打开逐帧详情弹窗", async () => {
+    const ModalStub = defineComponent({
+      name: "ProbeTimelineModalStub",
+      inheritAttrs: false,
+      props: { visible: Boolean },
+      template: `<div v-if="visible"><slot name="title" /><slot /></div>`,
+    });
+    const timeline = [
+      { sequence: 0, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 0, frameSize: 20480 },
+      { sequence: 1, trackType: "video", codec: "H264", keyFrame: false, configFrame: false, relativeTimeMs: 40, frameSize: 3072 },
+      { sequence: 2, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 60, frameSize: 200 },
+      // 40ms 与 1200ms 之间断了 1160ms,超过后端阈值 500ms,概览条必须能标出来。
+      { sequence: 3, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 1200, frameSize: 21504 },
+      { sequence: 4, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 1220, frameSize: 200 },
+    ];
+    api.createStreamProbe.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "probe-op-2", streamId: "stream-1", durationMs: 3000, status: "queued", createdAt: "", deadlineAt: "" },
+    });
+    api.getStreamProbeOperation.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        operationId: "probe-op-2",
+        streamId: "stream-1",
+        durationMs: 3000,
+        status: "completed",
+        createdAt: "",
+        completedAt: "",
+        deadlineAt: "",
+        snapshot: {
+          nodeId: 1,
+          nodeName: "ZLM",
+          completedAt: "",
+          summary: { sampleDurationMs: 3000, frameCount: 246, totalBytes: 786432, averageBitrateKbps: 2097.1 },
+          video: null,
+          audio: null,
+          timestamps: { videoDtsIntervalMeanMs: null, arrivalJitterMs: null, ptsDtsMaxMs: null, avArrivalSkewMaxMs: null },
+          timeline,
+          health: { status: "warning", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } },
+        },
+      },
+    });
+
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel },
+      global: { stubs: { "a-modal": ModalStub } },
+    });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    await wrapper.get("[data-testid='probe-start']").trigger("click");
+    await flushPromises();
+
+    const overview = wrapper.get("[data-testid='probe-timeline-open']");
+    // 概览按时间分桶,柱子数固定,不随采样帧数增长(旧版逐帧一根柱子会溢出侧栏)。
+    expect(overview.findAll(".frame-overview-bar").length).toBeGreaterThan(0);
+    expect(overview.text()).toContain("246 帧");
+    // 断档区间要在概览条上标出来,而不是只报一个总数。
+    expect(overview.findAll(".frame-overview-bar.stalled").length).toBeGreaterThan(0);
+    expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("1 处断档");
+
+    // 详情弹窗按需打开,而不是一直挂在 DOM 里。
+    expect(wrapper.find("[data-testid='probe-timeline-dialog']").exists()).toBe(false);
+    await overview.trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='probe-timeline-dialog']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='probe-timeline-summary']").text()).toContain("1 处到达断档");
+
+    wrapper.unmount();
+  });
+
   it("点播请求尚未返回时关闭弹窗也不补发停播请求", async () => {
     let resolveStart!: (value: any) => void;
     api.startPlay.mockReturnValueOnce(new Promise(resolve => { resolveStart = resolve; }));
@@ -1171,11 +1270,19 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
   });
 
-  it("检测按钮占满时长选择器之外的剩余宽度", () => {
+  it("检测按钮与时长选择器按 7:3 分配宽度", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
 
-    expect(source).toMatch(/\.probe-action\s*\{[^}]*flex:\s*1 1 auto/s);
-    expect(source).toMatch(/\.probe-duration\s*\{[^}]*min-width:\s*68px/s);
+    expect(source).toMatch(/\.probe-action\s*\{[^}]*flex:\s*7 1 0/s);
+    // flex item 默认 min-width:auto 会被内容顶住,两侧都必须显式清零
+    expect(source).toMatch(/\.probe-action\s*\{[^}]*min-width:\s*0/s);
+
+    // a-select 的根节点由 Arco 内部渲染,拿不到本组件的 scoped 属性(实测 hasScopeAttr=false)。
+    // 裸类名选择器编译得过却永远匹配不到它,下拉会退回 Arco 自带的 width:100%,
+    // 把按钮挤成竖排窄条 —— 所以必须写成 :deep() 后代选择器。
+    expect(source).toMatch(/:deep\(\.probe-duration\)\s*\{[^}]*flex:\s*3 1 0/s);
+    expect(source).toMatch(/:deep\(\.probe-duration\)\s*\{[^}]*min-width:\s*0/s);
+    expect(source).not.toMatch(/^\s*\.probe-duration\s*[\{,:]/m);
   });
 
   it("大量预置位和巡航通过摘要与管理抽屉承载", async () => {

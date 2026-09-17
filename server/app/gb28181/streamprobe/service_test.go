@@ -137,8 +137,47 @@ func TestServicePassesSelectedDurationAndExtendsDeadline(t *testing.T) {
 	if duration := <-client.durations; duration != 60000 {
 		t.Fatalf("duration=%d", duration)
 	}
-	if remaining := <-client.deadlineRemaining; remaining < 60*time.Second {
+	// ⛔ 关键次序:服务侧的调用预算必须**严格大于** zlm 的传输层超时。相等或更小的话,
+	// addProbe 会先被外层 ctx 掐掉,报出裸 context deadline exceeded,与"传输层自己放弃"
+	// 无法区分 —— 这正是 60 秒探针在现场的表现。原来的断言只查 "< 60s",漏掉了这条次序。
+	remaining := <-client.deadlineRemaining
+	transport := zlm.ProbeHTTPTimeout(60000)
+	if remaining <= transport {
+		t.Fatalf("调用预算剩余=%s 必须大于传输层超时=%s", remaining, transport)
+	}
+	if remaining <= 60*time.Second {
 		t.Fatalf("deadline remaining=%s", remaining)
+	}
+}
+
+func TestProbeCallBudgetOutlivesTransportTimeout(t *testing.T) {
+	for _, durationMS := range []int{3000, 10000, 60000} {
+		budget := probeCallBudget(5*time.Second, durationMS)
+		transport := zlm.ProbeHTTPTimeout(durationMS)
+		if budget <= transport {
+			t.Fatalf("duration=%d 预算=%s 必须大于传输层超时=%s", durationMS, budget, transport)
+		}
+		if min := time.Duration(durationMS) * time.Millisecond; budget < min {
+			t.Fatalf("duration=%d 预算=%s 盖不住采样窗口 %s", durationMS, budget, min)
+		}
+	}
+	// 配置的 base 更大时原样生效(它是兜底下限,不是上限)。
+	if got := probeCallBudget(time.Hour, 3000); got != time.Hour {
+		t.Fatalf("大 base 应原样生效, got %s", got)
+	}
+}
+
+func TestProbeTaskDeadlineOutlivesCallBudgetButStaysClaimable(t *testing.T) {
+	created := time.Unix(1700000000, 0)
+	for _, durationMS := range []int{3000, 10000, 60000} {
+		span := probeTaskDeadline(created, durationMS).Sub(created)
+		if budget := probeCallBudget(5*time.Second, durationMS); span <= budget {
+			t.Fatalf("duration=%d 任务预算 %s 必须大于调用预算 %s", durationMS, span, budget)
+		}
+		// ⛔ 同时不能超过认领空闲时间,否则一次正常的长探针会被别的 worker 当成死消息抢走。
+		if span >= probeClaimIdle {
+			t.Fatalf("duration=%d 任务预算 %s 必须小于认领空闲 %s", durationMS, span, probeClaimIdle)
+		}
 	}
 }
 

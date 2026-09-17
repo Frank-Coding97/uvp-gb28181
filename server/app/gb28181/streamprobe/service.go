@@ -13,6 +13,21 @@ import (
 
 const DefaultDurationMS = 3000
 
+// probeLocateGrace 覆盖 locate() 的节点探测:位置缓存未命中时要逐个节点问 GetMediaInfo,
+// 这段耗时与采样窗口是串行的,必须算进调用预算。
+const probeLocateGrace = 10 * time.Second
+
+// probeCallBudget 是一次探测在服务侧的总预算,刻意由 zlm 的传输层超时派生。
+//
+// ⛔ 次序不能反。外层 ctx 若比传输层先到期,会有两个后果:
+//  1. 超时被报成不带 "(Client.Timeout exceeded while awaiting headers)" 后缀的裸
+//     context deadline exceeded,和"调用方取消 / 节点不可达"混在一起,现场分不出来;
+//  2. 外层收得比传输层还早,白白浪费掉传输层剩下的窗口。原来的 durationMS+2s 就是这种
+//     情形:2 秒余量覆盖不了节点定位往返 + 近 1MB 探针报文的聚合与传输,60 秒探针必挂。
+func probeCallBudget(base time.Duration, durationMS int) time.Duration {
+	return max(base, zlm.ProbeHTTPTimeout(durationMS)+probeLocateGrace)
+}
+
 func IsSupportedDuration(durationMS int) bool {
 	return durationMS == 3000 || durationMS == 10000 || durationMS == 60000
 }
@@ -98,8 +113,7 @@ func (s *Service) Run(ctx context.Context, streamID string, durationMS int) (*Pr
 }
 
 func (s *Service) execute(key probeKey, call *probeCall) {
-	timeout := max(s.timeout, time.Duration(key.durationMS)*time.Millisecond+2*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), probeCallBudget(s.timeout, key.durationMS))
 	defer cancel()
 	mediaNode, client, err := s.locate(ctx, key.streamID)
 	if err == nil {

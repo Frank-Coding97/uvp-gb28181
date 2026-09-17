@@ -19,8 +19,22 @@ const (
 	probePrefix    = "uvp:streamprobe:task:"
 	probeDedupPre  = "uvp:streamprobe:dedup:"
 	probeTaskTTL   = 10 * time.Minute
-	probeClaimIdle = 75 * time.Second
+
+	// probeQueueGrace 覆盖从「任务创建」到「worker 真正开始采样」之间的排队与调度耗时。
+	// DeadlineAt 是从创建时刻起算的绝对值,所以它必须比服务侧的调用预算再宽一档,否则
+	// 排到队尾的任务会在采样还没结束时就先被判超时,把已经在手的快照丢掉。
+	probeQueueGrace = 15 * time.Second
+
+	// probeClaimIdle 是 pending 消息可被其它 worker 认领前的最小空闲时间。
+	// ⛔ 必须大于「最长的合法任务预算」,否则一次正常的长探针会被另一个 worker 当成死消息
+	// 抢走并重复采样 —— 单实例下由 Service 的 single-flight 兜住,多实例下兜不住。
+	probeClaimIdle = 120 * time.Second
 )
+
+// probeTaskDeadline 是任务的绝对截止时间(从创建时刻起算)。
+func probeTaskDeadline(created time.Time, durationMS int) time.Time {
+	return created.Add(probeCallBudget(0, durationMS) + probeQueueGrace)
+}
 
 var (
 	ErrTaskNotFound     = errors.New("stream probe task not found")
@@ -86,7 +100,7 @@ func (s *RedisTaskStore) Create(ctx context.Context, streamID string, durationMS
 		return nil, err
 	}
 	now := time.Now().UTC()
-	task := &Task{OperationID: uuid.NewString(), StreamID: streamID, DurationMS: durationMS, Status: TaskQueued, CreatedAt: now, DeadlineAt: now.Add(time.Duration(durationMS)*time.Millisecond + 10*time.Second)}
+	task := &Task{OperationID: uuid.NewString(), StreamID: streamID, DurationMS: durationMS, Status: TaskQueued, CreatedAt: now, DeadlineAt: probeTaskDeadline(now, durationMS)}
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return nil, err
