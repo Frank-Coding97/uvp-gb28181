@@ -70,6 +70,25 @@ describe("MediaWorkspaceShell", () => {
     expect(wrapper.find("button[aria-label='刷新运行总览']").exists()).toBe(false);
   });
 
+  it("can hide the node scope without hiding workspace status", () => {
+    const wrapper = mount(MediaWorkspaceShell, {
+      props: {
+        title: "节点管理",
+        description: "节点目录",
+        views: [{ key: "list", label: "节点列表" }],
+        activeView: "list",
+        scope: 2,
+        nodes: [{ id: 2, name: "zlm-220", state: "active" }],
+        showScope: false,
+        status: "error",
+        statusText: "节点目录刷新失败"
+      }
+    });
+
+    expect(wrapper.find("[aria-label='媒体节点范围']").exists()).toBe(false);
+    expect(wrapper.get("[role='alert']").text()).toBe("节点目录刷新失败");
+  });
+
   it("uses a borderless tray-style active indicator for workspace views", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/MediaWorkspaceShell.vue"), "utf8");
     expect(source).toMatch(/\.media-workspace-shell__tabs\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;/s);

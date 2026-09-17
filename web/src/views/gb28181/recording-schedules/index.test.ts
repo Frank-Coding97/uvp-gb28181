@@ -98,6 +98,12 @@ describe("recording schedule prototype", () => {
     expect(source).not.toContain("Asia/Shanghai");
   });
 
+  it("keeps the plan action column compact and marks delete as destructive", () => {
+    expect(source).toContain('<a-table-column title="操作" :width="230"');
+    expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
+    expect(source).not.toContain("uvp-table-action--danger");
+  });
+
   it("keeps plan expectation and actual recording state visually distinct", () => {
     expect(drawerSource).toContain("当前时段");
     expect(source).toContain("实际状态");

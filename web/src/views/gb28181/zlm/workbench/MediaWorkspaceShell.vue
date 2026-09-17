@@ -25,6 +25,7 @@ withDefaults(defineProps<{
   autoRefresh?: boolean;
   showAutoRefresh?: boolean;
   showToolbarActions?: boolean;
+  showScope?: boolean;
   allowAll?: boolean;
   requiresNode?: boolean;
   scopeLoading?: boolean;
@@ -38,6 +39,7 @@ withDefaults(defineProps<{
   autoRefresh: true,
   showAutoRefresh: true,
   showToolbarActions: false,
+  showScope: true,
   allowAll: true,
   requiresNode: false,
   scopeLoading: false,
@@ -58,8 +60,9 @@ const emit = defineEmits<{
   <div class="media-workspace-shell">
     <h1 class="sr-only">{{ title }}</h1>
 
-    <div class="media-workspace-shell__scope" data-shell-block="scope">
+    <div v-if="showScope || (status !== 'ready' && statusText)" class="media-workspace-shell__scope" data-shell-block="scope">
       <MediaScopeBar
+        v-if="showScope"
         :model-value="scope"
         :nodes="nodes"
         :allow-all="allowAll"

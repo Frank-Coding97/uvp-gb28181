@@ -10,6 +10,7 @@ describe("canonical node management workbench", () => {
     expect(source).toContain("NodeListPanel");
     expect(source).toContain('useMediaWorkspaceRoute("nodes")');
     expect(source).toContain('key: "list"');
+    expect(source).toContain(':show-scope="false"');
   });
 
   it("does not own a duplicate node catalog or rewrite the initial view query", () => {

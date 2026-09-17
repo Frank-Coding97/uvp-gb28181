@@ -66,13 +66,13 @@
                 </template>
               </a-table-column>
               <a-table-column title="最近更新" :width="172" data-index="updatedAt" />
-			  <a-table-column title="操作" :width="260" align="center" fixed="right">
+			  <a-table-column title="操作" :width="230" align="center" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions schedule-actions">
                     <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)"><template #icon><Eye :size="13" /></template>查看</a-link>
                     <a-link v-if="canMaintain" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><template #icon><Pencil :size="13" /></template>编辑</a-link>
                     <a-link v-if="canAssign" class="uvp-table-action uvp-table-action--assign" @click="openAssign(record)"><template #icon><Link2 :size="13" /></template>分配通道</a-link>
-					<a-popconfirm v-if="canMaintain" content="确认删除该录像计划？已分配通道的计划将拒绝删除。" @ok="removePlan(record)"><a-link class="uvp-table-action uvp-table-action--danger"><template #icon><Trash2 :size="13" /></template>删除</a-link></a-popconfirm>
+					<a-popconfirm v-if="canMaintain" content="确认删除该录像计划？已分配通道的计划将拒绝删除。" @ok="removePlan(record)"><a-link class="uvp-table-action uvp-table-action--delete"><template #icon><Trash2 :size="13" /></template>删除</a-link></a-popconfirm>
                   </div>
                 </template>
               </a-table-column>
