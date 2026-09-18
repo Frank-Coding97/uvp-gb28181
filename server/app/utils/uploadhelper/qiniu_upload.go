@@ -4,12 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

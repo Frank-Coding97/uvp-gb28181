@@ -146,9 +146,9 @@ func (s *credentialSealerFake) Encrypt(_ string, plaintext []byte) (securestore.
 }
 
 type managementRuntimeFake struct {
-	reloads    int
-	ids        []uint64
-	err        error
+	reloads int
+	ids     []uint64
+	err     error
 }
 
 func (r *managementRuntimeFake) Reload(context.Context) error {
@@ -283,9 +283,9 @@ func TestManagementViewDetectsLostKeyAndPasswordReplacement(t *testing.T) {
 }
 
 type catalogPusherFake struct {
-	ids             []uint64
-	items, batches  int
-	err             error
+	ids            []uint64
+	items, batches int
+	err            error
 }
 
 func (p *catalogPusherFake) PushCatalog(_ context.Context, platformID uint64) (int, int, error) {

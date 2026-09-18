@@ -75,7 +75,7 @@ func TestResolveCivilCode(t *testing.T) {
 		},
 		{
 			name:            "L1 格式错(非 6 位)降 L2",
-			itemCivilCode:   "37",    // 长度错
+			itemCivilCode:   "37",     // 长度错
 			clsCivilCode:    "370100", // 有效
 			parentCivilCode: "",
 			want:            "370100", // L2
@@ -90,7 +90,7 @@ func TestResolveCivilCode(t *testing.T) {
 		{
 			name:            "L2 格式错降 L3",
 			itemCivilCode:   "",
-			clsCivilCode:    "37",    // 长度错
+			clsCivilCode:    "37", // 长度错
 			parentCivilCode: "370100",
 			want:            "370100", // L3
 		},
@@ -98,7 +98,7 @@ func TestResolveCivilCode(t *testing.T) {
 			name:            "L3 格式错降 L4",
 			itemCivilCode:   "",
 			clsCivilCode:    "",
-			parentCivilCode: "37", // 长度错
+			parentCivilCode: "37",     // 长度错
 			want:            "000000", // L4
 		},
 	}

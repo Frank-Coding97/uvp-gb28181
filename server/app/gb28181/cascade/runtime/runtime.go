@@ -464,10 +464,10 @@ func (a *Actor) run() {
 				if event.result.Success {
 					registered = true
 					_ = a.store.RecordRegistrationSuccess(context.Background(), a.platform.ID, now, now.Add(time.Duration(registerExpires(a.platform))*time.Second))
-				if !stopping {
-					refreshTimer = schedule(sipclient.RefreshDelay(registerExpires(a.platform)), commandRefresh)
-					keepaliveTimer = schedule(firstKeepaliveDelay, commandKeepalive)
-				}
+					if !stopping {
+						refreshTimer = schedule(sipclient.RefreshDelay(registerExpires(a.platform)), commandRefresh)
+						keepaliveTimer = schedule(firstKeepaliveDelay, commandKeepalive)
+					}
 				} else {
 					_ = a.store.RecordRegistrationFailure(context.Background(), a.platform.ID, resultCode(event.result), resultMessage(event.result), now)
 					if !stopping {

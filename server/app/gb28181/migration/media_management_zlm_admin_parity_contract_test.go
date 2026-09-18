@@ -80,14 +80,26 @@ func TestMediaZLMAdminParityRunsAfterWorkbenchV2(t *testing.T) {
 	entries, err := migrationsfs.FS.ReadDir("migrations")
 	require.NoError(t, err)
 	names := make([]string, 0, len(entries))
-	for _, entry := range entries { names = append(names, entry.Name()) }
-	for _, tc := range []struct{ dialect Dialect; v2, v3 string }{
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	for _, tc := range []struct {
+		dialect Dialect
+		v2, v3  string
+	}{
 		{DialectMySQL, mediaWorkbenchV2Migration + ".sql", mediaZLMAdminParityMigration + ".sql"},
 		{DialectPostgres, mediaWorkbenchV2Migration + "-postgresql.sql", mediaZLMAdminParityMigration + "-postgresql.sql"},
 		{DialectSQLServer, mediaWorkbenchV2Migration + "-sqlserver.sql", mediaZLMAdminParityMigration + "-sqlserver.sql"},
 	} {
 		files := FilterUpFiles(names, tc.dialect)
-		index := func(name string) int { for i, file := range files { if file == name { return i } }; return -1 }
+		index := func(name string) int {
+			for i, file := range files {
+				if file == name {
+					return i
+				}
+			}
+			return -1
+		}
 		require.Greater(t, index(tc.v3), index(tc.v2), "%s V3 必须在 V2 之后执行", tc.dialect)
 	}
 }

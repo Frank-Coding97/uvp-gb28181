@@ -1,8 +1,8 @@
 package filehelper
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 )
 
 // GetFileTypeBySuffix 根据文件后缀判断文件类型

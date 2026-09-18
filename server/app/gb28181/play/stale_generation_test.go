@@ -54,9 +54,9 @@ func TestStartStaleInviteGenerationDoesNotKillCurrentSession(t *testing.T) {
 // fakeLocationStore 固定返回指定节点的 LocationStore(模拟新代次已绑定到该节点)
 type fakeLocationStore struct{ nodeID int64 }
 
-func (f *fakeLocationStore) Bind(string, int64)                {}
-func (f *fakeLocationStore) Lookup(string) (int64, bool)       { return f.nodeID, f.nodeID != 0 }
-func (f *fakeLocationStore) Unbind(string)                     {}
+func (f *fakeLocationStore) Bind(string, int64)          {}
+func (f *fakeLocationStore) Lookup(string) (int64, bool) { return f.nodeID, f.nodeID != 0 }
+func (f *fakeLocationStore) Unbind(string)               {}
 
 func staleService(t *testing.T, inviter *mockInviter, loc LocationStore) (*Service, *mockZLM, *node.Node) {
 	t.Helper()

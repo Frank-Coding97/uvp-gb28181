@@ -209,7 +209,6 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 					// 合成一个 error 字段 —— 两个 zap.Error 会写出两个同名 "error" 键。
 					zap.Error(errors.Join(result.TransportErr, result.BuildErr)))
 				return true
-				return true
 			}
 		}
 		app.Log(ctx).Info("级联目录响应完成",

@@ -40,11 +40,11 @@ func NewStateMachine(db *gorm.DB, logger *zap.Logger) *StateMachine {
 // OnRegister 设备注册成功事件 → 尝试 SUBSCRIBE
 //
 // 行为:
-//   1. 查 subscribe_capability:
-//      - unknown → 尝试 SUBSCRIBE(本期模拟:直接标 fallback,真实 SUBSCRIBE 需 UAC 发 SIP 请求)
-//      - subscribed → 不动(已订阅,等 NOTIFY)
-//      - fallback → 如果距离上次 test > 24h,重试
-//   2. 更新 subscribe_last_test = now
+//  1. 查 subscribe_capability:
+//     - unknown → 尝试 SUBSCRIBE(本期模拟:直接标 fallback,真实 SUBSCRIBE 需 UAC 发 SIP 请求)
+//     - subscribed → 不动(已订阅,等 NOTIFY)
+//     - fallback → 如果距离上次 test > 24h,重试
+//  2. 更新 subscribe_last_test = now
 func (sm *StateMachine) OnRegister(ctx context.Context, deviceID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -119,9 +119,9 @@ func (sm *StateMachine) OnNotify(ctx context.Context, deviceID string) {
 		zap.String("from", string(dev.SubscribeCapability)),
 		zap.String("to", string(gbmodels.SubscribeSubscribed)))
 	sm.db.WithContext(ctx).Model(&dev).Updates(map[string]any{
-		"subscribe_capability":  gbmodels.SubscribeSubscribed,
-		"subscribe_last_test":   now,
-		"subscribe_expires_at":  expires,
+		"subscribe_capability": gbmodels.SubscribeSubscribed,
+		"subscribe_last_test":  now,
+		"subscribe_expires_at": expires,
 	})
 }
 

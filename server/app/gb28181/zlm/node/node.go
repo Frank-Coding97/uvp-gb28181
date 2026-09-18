@@ -17,21 +17,21 @@ const (
 
 // Node 一台 ZLM 节点的逻辑表示
 type Node struct {
-	ID                  int64             // DB 自增主键
-	Revision            uint64            // 持久化版本,用于跨调用方 CAS
-	Name                string            // 显示名
-	Host                string            // ZLM API host
-	ReceiveHost         string            // 设备收流地址,写入 SDP 的 c= 地址
-	PlaybackHost        string            // 播放访问地址,返回给浏览器/客户端
-	APIPort             int               // ZLM API port
-	APISecret           string            // ZLM api.secret
-	MediaServerUUID     string            // 业务侧生成,启动时写入 ZLM general.mediaServerId
-	Weight              int               // 0-100,加权轮询,默认 50
-	Tags                map[string]string // 任意标签
-	State               State
+	ID              int64             // DB 自增主键
+	Revision        uint64            // 持久化版本,用于跨调用方 CAS
+	Name            string            // 显示名
+	Host            string            // ZLM API host
+	ReceiveHost     string            // 设备收流地址,写入 SDP 的 c= 地址
+	PlaybackHost    string            // 播放访问地址,返回给浏览器/客户端
+	APIPort         int               // ZLM API port
+	APISecret       string            // ZLM api.secret
+	MediaServerUUID string            // 业务侧生成,启动时写入 ZLM general.mediaServerId
+	Weight          int               // 0-100,加权轮询,默认 50
+	Tags            map[string]string // 任意标签
+	State           State
 	// AdminState is the operator-controlled admission intent. Empty means
 	// enabled for backwards compatibility with nodes created before this field.
-	AdminState           string
+	AdminState          string
 	RecoveryRequired    bool   // 外部配置收敛不确定时 fail-close
 	RecoveryReason      string // 安全、有限长的恢复原因
 	RecoveryFingerprint string // candidate endpoint 的不透明 SHA-256 指纹

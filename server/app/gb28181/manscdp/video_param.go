@@ -95,7 +95,7 @@ var resolutionWxHRe = regexp.MustCompile(`^[1-9][0-9]*x[1-9][0-9]*$`)
 // 其余五个是**取值**问题，宽松收（设备回什么收什么，是否合规由对账/校验判定）。
 type VideoParamItem struct {
 	// StreamNumber 标准明文：0=主码流；1=子码流1；2=子码流2…
-	StreamNumber int `json:"streamNumber"`
+	StreamNumber int    `json:"streamNumber"`
 	VideoFormat  string `json:"videoFormat"`
 	Resolution   string `json:"resolution"`
 	// FrameRate 附录 G 取值 0~99。
@@ -216,8 +216,8 @@ type configDownloadResponseWire struct {
 }
 
 type videoParamAttributeWire struct {
-	Num   *int                  `xml:"Num,attr"`
-	Items []videoParamItemWire  `xml:"Item"`
+	Num   *int                 `xml:"Num,attr"`
+	Items []videoParamItemWire `xml:"Item"`
 }
 
 type videoParamItemWire struct {

@@ -17,12 +17,12 @@ import (
 type kickProbe struct {
 	mockProbe
 
-	kickReturn  int
-	kickErr     error
-	kickCalls   int
+	kickReturn int
+	kickErr    error
+	kickCalls  int
 
-	restartErr      error
-	restartCalls    int
+	restartErr       error
+	restartCalls     int
 	lastRestartGrace int
 }
 

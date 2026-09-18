@@ -190,8 +190,8 @@ func TestManagementErrorRedactsMediaIdentityInsideImpacts(t *testing.T) {
 		Stream: "stream?access_token=" + secret,
 	}
 	err := NewOwnershipConflictError("node-1", "resource changed").WithImpacts([]Impact{{
-		ResourceType: "pull_proxy",
-		ResourceKey:  "key",
+		ResourceType:  "pull_proxy",
+		ResourceKey:   "key",
 		MediaIdentity: &media,
 	}})
 

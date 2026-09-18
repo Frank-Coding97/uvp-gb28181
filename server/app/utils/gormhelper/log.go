@@ -46,6 +46,7 @@ func (l *logger) LogMode(level gormLog.LogLevel) gormLog.Interface {
 func (l *logger) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
 	return sql, nil
 }
+
 // db.diagnostic 这三支统一走 DEBUG（C03）：
 // GORM 的 logger.Interface 只把"我发了条消息"告诉你，**文本本身被故意丢弃**
 // （`text_omitted: true`，参数是 `_ string`）。它既不说发生了什么，也不带定位字段——

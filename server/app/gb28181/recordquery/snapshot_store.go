@@ -56,7 +56,7 @@ type ResultSnapshotStore struct {
 	generations map[ownerChannel]string
 	// invalidatedScopes 记录被显式失效过的查询范围:旧 RecordKey 报"过期"
 	invalidatedScopes map[ownerChannel]struct{}
-	closed      bool
+	closed            bool
 	// maxSnapshots 快照总量硬上限,0 表示不设限(测试用)
 	maxSnapshots int
 }

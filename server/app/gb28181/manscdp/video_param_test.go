@@ -148,24 +148,24 @@ func TestBuildVideoParamAttributeConfigRejectsAppendixGViolations(t *testing.T) 
 	}
 
 	cases := map[string][]manscdp.VideoParamItem{
-		"VideoFormat 越界": {base(func(i *manscdp.VideoParamItem) { i.VideoFormat = "9" })},
+		"VideoFormat 越界":  {base(func(i *manscdp.VideoParamItem) { i.VideoFormat = "9" })},
 		"VideoFormat 人读串": {base(func(i *manscdp.VideoParamItem) { i.VideoFormat = "H.264" })},
 		"VideoFormat 缺失":  {base(func(i *manscdp.VideoParamItem) { i.VideoFormat = "" })},
 		"Resolution 非法":   {base(func(i *manscdp.VideoParamItem) { i.Resolution = "abc" })},
 		// 目录 Info 里设备用的是 1920*1080，但本处是平台按标准拼的码值，
 		// 附录 G 写的是 WxH(x)，两者不能互相宽容。
-		"Resolution 用星号": {base(func(i *manscdp.VideoParamItem) { i.Resolution = "1920*1080" })},
-		"Resolution 前导零": {base(func(i *manscdp.VideoParamItem) { i.Resolution = "0640x480" })},
-		"FrameRate 越界":   {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "100" })},
-		"FrameRate 为负":   {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "-1" })},
-		"FrameRate 非数字":  {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "25fps" })},
-		"FrameRate 缺失":   {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "" })},
-		"BitRateType 越界": {base(func(i *manscdp.VideoParamItem) { i.BitRateType = "3" })},
+		"Resolution 用星号":  {base(func(i *manscdp.VideoParamItem) { i.Resolution = "1920*1080" })},
+		"Resolution 前导零":  {base(func(i *manscdp.VideoParamItem) { i.Resolution = "0640x480" })},
+		"FrameRate 越界":    {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "100" })},
+		"FrameRate 为负":    {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "-1" })},
+		"FrameRate 非数字":   {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "25fps" })},
+		"FrameRate 缺失":    {base(func(i *manscdp.VideoParamItem) { i.FrameRate = "" })},
+		"BitRateType 越界":  {base(func(i *manscdp.VideoParamItem) { i.BitRateType = "3" })},
 		"BitRateType 人读串": {base(func(i *manscdp.VideoParamItem) { i.BitRateType = "VBR" })},
-		"CBR 缺码率":       {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = nil })},
-		"CBR 码率越界":      {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("100001") })},
-		"CBR 码率为负":      {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("-1") })},
-		"CBR 码率为空串":     {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("") })},
+		"CBR 缺码率":         {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = nil })},
+		"CBR 码率越界":        {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("100001") })},
+		"CBR 码率为负":        {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("-1") })},
+		"CBR 码率为空串":       {base(func(i *manscdp.VideoParamItem) { i.VideoBitRate = strPtr("") })},
 		"VBR 不该带码率": {
 			base(func(i *manscdp.VideoParamItem) { i.BitRateType = manscdp.BitRateTypeVBR }),
 		},
@@ -220,9 +220,9 @@ func TestBuildConfigDownloadQueryDeduplicatesTypes(t *testing.T) {
 
 func TestBuildConfigDownloadQueryRejectsMalformedTypes(t *testing.T) {
 	for name, types := range map[string][]string{
-		"空列表":   nil,
-		"空项":    {manscdp.ConfigTypeVideoParamAttribute, "  "},
-		"含分隔符":  {"VideoParamOpt/VideoParamAttribute"},
+		"空列表":  nil,
+		"空项":   {manscdp.ConfigTypeVideoParamAttribute, "  "},
+		"含分隔符": {"VideoParamOpt/VideoParamAttribute"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := manscdp.BuildConfigDownloadQuery(videoParamDeviceID, 1, types)

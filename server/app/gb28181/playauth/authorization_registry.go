@@ -468,10 +468,10 @@ func (r authorizationRecord) matchesClaims(claims Claims) bool {
 // AuthorizationService combines stateless HMAC validation for live media with
 // the process-local lifecycle registry required by cold-stream preauthorization.
 type AuthorizationService struct {
-	signer          *Signer
-	registry        *AuthorizationRegistry
-	metrics         *Metrics
-	authority       DeviceSecurityAuthority
+	signer           *Signer
+	registry         *AuthorizationRegistry
+	metrics          *Metrics
+	authority        DeviceSecurityAuthority
 	operationBarrier *DeviceOperationBarrier
 }
 

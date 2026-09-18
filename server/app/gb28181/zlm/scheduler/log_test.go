@@ -18,14 +18,14 @@ import (
 //   - insertErr:Insert 注入错误
 //   - 持久化已插入条目供断言
 type fakeSchedulerLogRepo struct {
-	mu             sync.Mutex
-	rows           []scheduler.SchedulerLog
-	sleepOnInsert  time.Duration
-	insertErr      error
-	prunedBefore   time.Time
-	prunedCount    int64
-	nowFn          func() time.Time
-	insertCounter  int
+	mu            sync.Mutex
+	rows          []scheduler.SchedulerLog
+	sleepOnInsert time.Duration
+	insertErr     error
+	prunedBefore  time.Time
+	prunedCount   int64
+	nowFn         func() time.Time
+	insertCounter int
 }
 
 func newFakeSchedulerLogRepo() *fakeSchedulerLogRepo {

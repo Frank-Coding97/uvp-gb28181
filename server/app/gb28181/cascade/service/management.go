@@ -462,6 +462,7 @@ func validProfileOverride(value model.CascadeProfileOverride) bool {
 		return false
 	}
 }
+
 type managementWallClock struct{}
 
 func (managementWallClock) Now() time.Time { return time.Now() }

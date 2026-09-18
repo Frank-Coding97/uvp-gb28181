@@ -3,11 +3,11 @@ package cachehelper
 import (
 	"context"
 	"errors"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/stretchr/testify/assert"
 )

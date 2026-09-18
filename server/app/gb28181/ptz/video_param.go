@@ -467,12 +467,12 @@ const (
 
 // VideoParamReconcileState 是透出给前端的"最近一次回读结论"。
 type VideoParamReconcileState struct {
-	State           string     `json:"state"`
-	OperationID     string     `json:"operationId,omitempty"`
-	Status          string     `json:"status,omitempty"`
-	ResponseHasData *bool      `json:"responseHasData,omitempty"`
-	ErrorCode       string     `json:"errorCode,omitempty"`
-	ErrorMessage    string     `json:"errorMessage,omitempty"`
+	State           string `json:"state"`
+	OperationID     string `json:"operationId,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ResponseHasData *bool  `json:"responseHasData,omitempty"`
+	ErrorCode       string `json:"errorCode,omitempty"`
+	ErrorMessage    string `json:"errorMessage,omitempty"`
 	// DeviceError 是"设备侧原话"：type_absent 的判定理由（设备没带那个元素）走这里，
 	// error_message 则用于对账不一致的逐格差异。两者都要透出 ——
 	// 前端要能说清"为什么这一格是空的"，而不只是"空着"。

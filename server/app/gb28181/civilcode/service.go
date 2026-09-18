@@ -11,13 +11,13 @@ import (
 // Service 行政区划字典查询服务(进程内缓存)
 // WarmCache 启动期填充 sync.Map,后续 Lookup/Children/Search 全部 O(1)/O(n) 走缓存
 type Service struct {
-	db         *gorm.DB
-	byCode     sync.Map // code -> *SysCivilCode
-	byParent   sync.Map // parent_code -> []*SysCivilCode
-	all        []*SysCivilCode
-	allMu      sync.RWMutex
-	warmMu     sync.Mutex
-	warmed     bool
+	db       *gorm.DB
+	byCode   sync.Map // code -> *SysCivilCode
+	byParent sync.Map // parent_code -> []*SysCivilCode
+	all      []*SysCivilCode
+	allMu    sync.RWMutex
+	warmMu   sync.Mutex
+	warmed   bool
 }
 
 // NewService 构造 Service(不自动 warm,调用方在 bootstrap 显式 WarmCache)

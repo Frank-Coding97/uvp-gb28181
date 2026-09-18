@@ -9,15 +9,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
-	"go.uber.org/zap"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 type TrackedSender interface {

@@ -83,7 +83,9 @@ func (c *fakeClient) GetServerConfig(ctx context.Context) (map[string]string, er
 func TestProber_Run_SingleNodeSuccess_FlipsOfflineToActive(t *testing.T) {
 	n := &node.Node{ID: 1, Name: "zlm-a", Host: "10.0.0.1", State: node.StateOffline}
 	reg := newFakeRegistry(n)
-	factory := func(_ *node.Node) probe.Client { return &fakeClient{cfg: map[string]string{"general.mediaServerId": "u"}} }
+	factory := func(_ *node.Node) probe.Client {
+		return &fakeClient{cfg: map[string]string{"general.mediaServerId": "u"}}
+	}
 
 	p := probe.New(reg, factory, 500*time.Millisecond, nil)
 	results := p.Run(context.Background())

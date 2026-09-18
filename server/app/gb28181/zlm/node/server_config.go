@@ -56,10 +56,10 @@ func ParseServerConfig(m map[string]string) ServerConfig {
 		RTCExternalIP: strings.TrimSpace(m["rtc.externIP"]),
 
 		RTSPEnabled: protocolEnabled(m["protocol.enable_rtsp"]),
-		RTMPEnabled:  protocolEnabled(m["protocol.enable_rtmp"]),
-		HLSEnabled:   protocolEnabled(m["protocol.enable_hls"]),
-		TSEnabled:    protocolEnabled(m["protocol.enable_ts"]),
-		FMP4Enabled:  protocolEnabled(m["protocol.enable_fmp4"]),
+		RTMPEnabled: protocolEnabled(m["protocol.enable_rtmp"]),
+		HLSEnabled:  protocolEnabled(m["protocol.enable_hls"]),
+		TSEnabled:   protocolEnabled(m["protocol.enable_ts"]),
+		FMP4Enabled: protocolEnabled(m["protocol.enable_fmp4"]),
 	}
 }
 

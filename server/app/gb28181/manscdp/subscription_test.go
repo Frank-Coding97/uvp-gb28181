@@ -156,7 +156,7 @@ func TestMobilePositionNotifyPositions_FlatFormNormalizesToSingleItem(t *testing
 func TestParseMobilePositionNotify_Empty2022ListYieldsNoPositions(t *testing.T) {
 	cases := map[string]string{
 		"SumNum 与 DeviceList 都在但 Item 为空": `<Notify><CmdType>MobilePosition</CmdType><SN>1</SN><DeviceID>D</DeviceID><Time>2026-09-17T22:00:00</Time><SumNum>0</SumNum><DeviceList Num="0"></DeviceList></Notify>`,
-		"只有 SumNum 没有 DeviceList":        `<Notify><CmdType>MobilePosition</CmdType><SN>1</SN><DeviceID>D</DeviceID><Time>2026-09-17T22:00:00</Time><SumNum>0</SumNum></Notify>`,
+		"只有 SumNum 没有 DeviceList":         `<Notify><CmdType>MobilePosition</CmdType><SN>1</SN><DeviceID>D</DeviceID><Time>2026-09-17T22:00:00</Time><SumNum>0</SumNum></Notify>`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
