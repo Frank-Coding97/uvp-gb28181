@@ -5,15 +5,18 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/nodes/NodeListPanel.vue"), "utf8");
 
 describe("NodeListPanel", () => {
-  it("keeps node governance controls and independent permissions in the panel", () => {
-    expect(source).toContain("testZLMNodeConnection");
-    expect(source).toContain("activateZLMNode");
+  it("keeps only the routine node actions in the list", () => {
+    expect(source).toContain("enableZLMNode");
+    expect(source).toContain("disableZLMNode");
     expect(source).toContain("ZLMNodeActionDialog");
     expect(source).toContain("gb28181:zlm:node:manage");
-    expect(source).toContain("gb28181:zlm:node:kick");
-    expect(source).toContain("gb28181:zlm:restart");
     expect(source).toContain("recoveryRequired");
     expect(source).toContain("autoOnDemandReady");
+    expect(source).not.toContain("testZLMNodeConnection");
+    expect(source).not.toContain("activateZLMNode");
+    expect(source).not.toContain("openAction(record, 'maintenance')");
+    expect(source).not.toContain("openAction(record, 'kick')");
+    expect(source).not.toContain("openAction(record, 'restart')");
   });
 
   it("accepts canonical scope data and does not use a guessed node for writes", () => {
@@ -65,12 +68,11 @@ describe("NodeListPanel", () => {
     expect(source).not.toContain("当前范围：");
     expect(source).not.toContain('class="scope-hint"');
     expect(source).toContain('class="uvp-table-actions node-row-actions"');
-    expect(source).toContain('title="操作" :width="340"');
+    expect(source).toContain('title="操作" :width="280"');
     expect(source).toContain("openServiceConfig(record)");
     expect(source).toContain("服务配置");
     expect(source).toContain('class="uvp-table-action uvp-table-action--edit"');
-    expect(source).toContain("openAction(record, 'kick')");
-    expect(source).toContain("openAction(record, 'restart')");
+    expect(source).toContain("handleEnabled(record)");
     expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
     expect(source).toContain("openAction(record, 'delete')");
     expect(source).not.toContain("gotoDetail");
@@ -78,5 +80,12 @@ describe("NodeListPanel", () => {
     expect(source).not.toContain("<a-dropdown");
     expect(source).not.toContain(">详情</a-link>");
     expect(source).not.toContain('class="cell-ops"');
+  });
+
+  it("separates operator admission from heartbeat health", () => {
+    expect(source).toContain('title="管理状态"');
+    expect(source).toContain('title="在线状态"');
+    expect(source).toContain('placeholder="管理状态"');
+    expect(source).toContain('placeholder="在线状态"');
   });
 });

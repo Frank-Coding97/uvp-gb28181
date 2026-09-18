@@ -131,6 +131,14 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 		return
 	}
 	markManagementAudit(c, "node.delete", id, nil, "", "", "requested")
+	// 强制移除旁路:节点不可达时普通删除无法完成影响预检(PurgeUnreachable 里有
+	// 完整说明)。这里复用同一个 DELETE 路由与权限点,
+	// 不新增 API,省掉 permission/菜单绑定的迁移。是否真的允许删除由 service 判定 ——
+	// 探针一旦读得通就会返回 ErrNodeReachable,force 不会变成绕过两道闸的后门。
+	if zc.purgeUnreachableRequested(c) {
+		zc.purgeUnreachable(c, id)
+		return
+	}
 	if zc.svc.HasNodeImpactProvider() {
 		fingerprint, confirmed := zc.impactConfirmation(c, id, service.NodeImpactActionDelete)
 		if !confirmed {
@@ -147,10 +155,6 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 	}
 	if err := zc.svc.Delete(c.Request.Context(), id); err != nil {
 		markManagementAudit(c, "node.delete", id, nil, "", "", "failed")
-		if errors.Is(err, service.ErrNodeNotInMaintenance) {
-			zc.FailAndAbort(c, "请先把节点切到维护态再删除", err)
-			return
-		}
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
 			return
@@ -162,7 +166,77 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 	zc.Success(c, gin.H{"ok": true})
 }
 
-// SetMaintenance POST /api/gb28181/zlm/nodes/:id/maintenance
+// Disable POST /api/gb28181/zlm/nodes/:id/disable
+func (zc *ZLMNodeController) Disable(c *gin.Context) {
+	zc.setEnabled(c, false, "node.disable")
+}
+
+// Enable POST /api/gb28181/zlm/nodes/:id/enable
+func (zc *ZLMNodeController) Enable(c *gin.Context) {
+	zc.setEnabled(c, true, "node.enable")
+}
+
+func (zc *ZLMNodeController) setEnabled(c *gin.Context, enabled bool, auditAction string) {
+	markManagementAudit(c, auditAction, 0, nil, "", "", "requested")
+	id, err := zc.parseID(c)
+	if err != nil {
+		markManagementAudit(c, auditAction, 0, nil, "", "", "failed")
+		zc.FailAndAbort(c, "节点 ID 非法", err)
+		return
+	}
+	markManagementAudit(c, auditAction, id, nil, "", "", "requested")
+	if enabled {
+		err = zc.svc.Enable(c.Request.Context(), id)
+	} else {
+		err = zc.svc.Disable(c.Request.Context(), id)
+	}
+	if err != nil {
+		markManagementAudit(c, auditAction, id, nil, "", "", "failed")
+		if errors.Is(err, service.ErrNodeNotFound) {
+			zc.FailAndAbort(c, "节点不存在", err, http.StatusNotFound)
+			return
+		}
+		zc.FailAndAbort(c, "更新节点启停状态失败", err)
+		return
+	}
+	markManagementAudit(c, auditAction, id, nil, "", "", "success")
+	zc.Success(c, gin.H{"ok": true, "enabled": enabled})
+}
+
+// purgeUnreachableRequested 读取强制移除标记(header 优先,兼容 query)。
+// 必须显式传值才为真,避免把普通删除误判成强制移除。
+func (zc *ZLMNodeController) purgeUnreachableRequested(c *gin.Context) bool {
+	value := strings.TrimSpace(c.GetHeader("X-Purge-Unreachable"))
+	if value == "" {
+		value = strings.TrimSpace(c.Query("purge"))
+	}
+	return strings.EqualFold(value, "1") || strings.EqualFold(value, "unreachable")
+}
+
+// purgeUnreachable 执行强制移除并留下独立审计(action=node.purge,reason=force)。
+// 「允许删」的最终判定在 service 里:节点只要还读得通就会被拒。
+func (zc *ZLMNodeController) purgeUnreachable(c *gin.Context, id int64) {
+	markManagementAudit(c, "node.purge", id, nil, "", "force", "requested")
+	result, err := zc.svc.PurgeUnreachable(c.Request.Context(), id)
+	if err != nil {
+		markManagementAudit(c, "node.purge", id, nil, "", "force", "failed")
+		switch {
+		case errors.Is(err, service.ErrNodeReachable):
+			zc.FailAndAbort(c, "节点当前可达，请使用普通删除流程", err, http.StatusConflict)
+		case errors.Is(err, service.ErrNodeReferenceCleanerUnavailable):
+			zc.FailAndAbort(c, "引用清理器未装配，暂不支持强制移除", err, http.StatusServiceUnavailable)
+		case errors.Is(err, service.ErrNodeNotFound):
+			zc.FailAndAbort(c, "节点不存在", err, http.StatusNotFound)
+		default:
+			zc.FailAndAbort(c, "强制移除节点失败", err)
+		}
+		return
+	}
+	markManagementAudit(c, "node.purge", id, nil, "", "force", "success")
+	zc.Success(c, gin.H{"ok": true, "purged": result})
+}
+
+// SetMaintenance is the backwards-compatible alias for Disable.
 func (zc *ZLMNodeController) SetMaintenance(c *gin.Context) {
 	markManagementAudit(c, "node.maintenance", 0, nil, "", "", "requested")
 	id, err := zc.parseID(c)
@@ -199,7 +273,7 @@ func (zc *ZLMNodeController) SetMaintenance(c *gin.Context) {
 	zc.Success(c, gin.H{"ok": true})
 }
 
-// Activate POST /api/gb28181/zlm/nodes/:id/activate
+// Activate is the backwards-compatible alias for Enable.
 func (zc *ZLMNodeController) Activate(c *gin.Context) {
 	markManagementAudit(c, "node.activate", 0, nil, "", "", "requested")
 	id, err := zc.parseID(c)
@@ -209,7 +283,7 @@ func (zc *ZLMNodeController) Activate(c *gin.Context) {
 		return
 	}
 	markManagementAudit(c, "node.activate", id, nil, "", "", "requested")
-	if err := zc.svc.Activate(c.Request.Context(), id); err != nil {
+	if err := zc.svc.Enable(c.Request.Context(), id); err != nil {
 		markManagementAudit(c, "node.activate", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
@@ -335,11 +409,9 @@ func (zc *ZLMNodeController) handleNodeActionError(c *gin.Context, message strin
 	case errors.Is(err, service.ErrNodeImpactChanged):
 		zc.FailAndAbort(c, "节点影响已变化，请重新预检", err, http.StatusConflict)
 	case errors.Is(err, service.ErrNodeImpactConflict):
-		zc.FailAndAbort(c, "节点仍有活动影响，未执行操作", err, http.StatusConflict)
+		zc.FailAndAbort(c, "节点已停用，但仍有活动流、录制或会话，请等待排空后重试删除", err, http.StatusConflict)
 	case errors.Is(err, service.ErrNodeNotFound):
 		zc.FailAndAbort(c, "节点不存在", err, http.StatusNotFound)
-	case errors.Is(err, service.ErrNodeNotInMaintenance):
-		zc.FailAndAbort(c, "请先把节点切到维护态再删除", err, http.StatusConflict)
 	default:
 		zc.FailAndAbort(c, message, err)
 	}

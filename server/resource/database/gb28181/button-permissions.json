@@ -4870,6 +4870,14 @@
         },
         {
           "method": "POST",
+          "path": "/api/gb28181/zlm/nodes/:id/disable"
+        },
+        {
+          "method": "POST",
+          "path": "/api/gb28181/zlm/nodes/:id/enable"
+        },
+        {
+          "method": "POST",
           "path": "/api/gb28181/zlm/nodes/:id/activate"
         },
         {

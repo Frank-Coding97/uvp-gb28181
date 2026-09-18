@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from "vue";
-import { Server } from "lucide-vue-next";
+import { RefreshCw, Server } from "lucide-vue-next";
 
 import { getZLMNodeRuntime, type ZLMNodeRuntime, type ZLMObjectStatistics } from "@/api/gb28181-zlm-runtime";
 
@@ -59,6 +59,17 @@ const eventThreadSummary = computed(() => summarizeEventThreadLoads(eventThreadL
 const eventThreadDistribution = computed(() => eventThreadLoadDistribution(eventThreadLoads.value));
 const busiestThreads = computed(() => busiestEventThreads(eventThreadLoads.value));
 const eventThreadColumns = computed(() => eventThreadHeatmapColumns(eventThreadLoads.value.length));
+const runtimeUpdatedAt = computed(() => {
+  if (!runtime.value?.asOf) return "";
+  const timestamp = new Date(runtime.value.asOf);
+  if (Number.isNaN(timestamp.getTime())) return runtime.value.asOf;
+  return timestamp.toLocaleTimeString("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+});
 
 const objectStatisticMeta: Array<{
   key: keyof ZLMObjectStatistics;
@@ -136,6 +147,21 @@ defineExpose({ refresh });
 
 <template>
   <div class="monitoring-panel runtime-summary-panel">
+    <header class="runtime-context-toolbar" aria-label="运行总览节点与刷新">
+      <div class="runtime-context-toolbar__scope">
+        <Server :size="16" aria-hidden="true" />
+        <slot name="scope" />
+      </div>
+      <div class="runtime-context-toolbar__meta">
+        <span v-if="runtimeUpdatedAt">数据更新于 {{ runtimeUpdatedAt }}</span>
+        <span v-else>{{ loading ? "正在更新数据" : "等待首次采样" }}</span>
+        <button type="button" :disabled="loading" aria-label="刷新节点运行态" @click="refresh">
+          <RefreshCw :size="14" :class="{ 'is-spinning': loading }" aria-hidden="true" />
+          刷新
+        </button>
+      </div>
+    </header>
+
     <div v-if="loadError && runtime" class="monitoring-banner monitoring-banner--warning" role="status">
       本次采样失败：{{ errorPresentation.label }}；页面保留 {{ runtime.asOf }} 的上一次成功结果。
     </div>
@@ -298,6 +324,17 @@ defineExpose({ refresh });
 
 <style scoped>
 .monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }
+.runtime-context-toolbar { display: flex; min-width: 0; min-height: 44px; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; padding: 0 2px 9px; background: transparent; border-bottom: 1px solid var(--zlm-border); }
+.runtime-context-toolbar__scope, .runtime-context-toolbar__meta { display: flex; min-width: 0; align-items: center; }
+.runtime-context-toolbar__scope { gap: 8px; }
+.runtime-context-toolbar__scope > svg { flex: none; color: var(--zlm-text-3); }
+.runtime-context-toolbar__meta { flex: none; gap: 10px; color: var(--zlm-text-3); font-size: 12px; }
+.runtime-context-toolbar__meta button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 9px; color: var(--zlm-brand-600); background: transparent; border: 0; border-radius: var(--zlm-radius-md); cursor: pointer; }
+.runtime-context-toolbar__meta button:hover { background: var(--zlm-brand-50); }
+.runtime-context-toolbar__meta button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
+.runtime-context-toolbar__meta button:disabled { cursor: wait; opacity: .65; }
+.runtime-context-toolbar .is-spinning { animation: runtime-context-spin .8s linear infinite; }
+@keyframes runtime-context-spin { to { transform: rotate(360deg); } }
 .monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.monitoring-banner--danger { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .monitoring-state { display: flex; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .runtime-summary-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 0; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
@@ -371,5 +408,6 @@ defineExpose({ refresh });
 @media (max-width: 1400px) { .runtime-summary-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }.thread-analysis-grid { grid-template-columns: 1fr; }.thread-insights { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 0 0; border-top: 1px solid var(--zlm-border); border-left: 0; } }
 @media (max-width: 1100px) { .thread-analysis-grid { grid-template-columns: 1fr; }.thread-insights { padding: 12px 0 0; border-top: 1px solid var(--zlm-border); border-left: 0; } }
 @media (max-width: 820px) { .runtime-thread-panel__header { flex-direction: column; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }.thread-heatmap { grid-template-columns: repeat(8, minmax(0, 1fr)); }.thread-insights, .object-detail-grid { grid-template-columns: 1fr; } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
+@media (max-width: 640px) { .runtime-context-toolbar { align-items: stretch; flex-direction: column; gap: 8px; }.runtime-context-toolbar__meta { justify-content: space-between; } }
 @media (max-width: 560px) { .runtime-summary-kpis { grid-template-columns: 1fr; } }
 </style>

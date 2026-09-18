@@ -344,6 +344,7 @@ defineExpose({ refresh });
 
     <s-layout-search class="stream-search">
       <template #fields>
+        <slot name="scope" />
         <a-input v-model="filters.schema" allow-clear placeholder="Schema" class="filter-short" @press-enter="applyFilters" />
         <a-input v-model="filters.vhost" allow-clear placeholder="VHost" class="filter-vhost" @press-enter="applyFilters" />
         <a-input v-model="filters.app" allow-clear placeholder="App" class="filter-app" @press-enter="applyFilters" />

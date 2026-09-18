@@ -14,6 +14,7 @@ CREATE TABLE `meta_node` (
   `weight` int NOT NULL DEFAULT '50' COMMENT '加权轮询用 0-100,默认 50',
   `tags_json` text COMMENT '任意标签 JSON 字典',
   `state` varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active/maintenance/offline',
+  `enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否允许接收新调度',
   `recovery_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '外部配置不确定时禁止调度',
   `recovery_reason` varchar(255) NOT NULL DEFAULT '' COMMENT '安全、有限长的恢复原因',
   `recovery_fingerprint` char(64) NOT NULL DEFAULT '' COMMENT 'opaque recovery operation marker',
@@ -23,5 +24,6 @@ CREATE TABLE `meta_node` (
   `updated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_media_server_uuid` (`media_server_uuid`),
-  KEY `idx_state` (`state`)
+  KEY `idx_state` (`state`),
+  KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='ZLM 媒体节点表';

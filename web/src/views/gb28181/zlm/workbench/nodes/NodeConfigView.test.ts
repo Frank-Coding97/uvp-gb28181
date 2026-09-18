@@ -11,6 +11,7 @@ describe("NodeConfigView", () => {
     expect(source).toContain("configDirty");
     expect(source).toContain("草稿");
     expect(source).toContain("不会回显");
+    expect(source).toContain('<slot name="heading">');
   });
 
   it("keeps the accepted restart state machine visible until ready or failed", () => {

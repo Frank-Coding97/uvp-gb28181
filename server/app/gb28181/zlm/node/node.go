@@ -29,6 +29,9 @@ type Node struct {
 	Weight              int               // 0-100,加权轮询,默认 50
 	Tags                map[string]string // 任意标签
 	State               State
+	// AdminState is the operator-controlled admission intent. Empty means
+	// enabled for backwards compatibility with nodes created before this field.
+	AdminState           string
 	RecoveryRequired    bool   // 外部配置收敛不确定时 fail-close
 	RecoveryReason      string // 安全、有限长的恢复原因
 	RecoveryFingerprint string // candidate endpoint 的不透明 SHA-256 指纹
@@ -77,4 +80,15 @@ func (n Node) HTTPEndpoint() string {
 // IsActive 是否处于调度池
 func (n Node) IsActive() bool {
 	return n.State == StateActive
+}
+
+// IsEnabled reports whether operators allow this node to receive new work.
+// Legacy maintenance rows remain disabled until explicitly activated.
+func (n Node) IsEnabled() bool {
+	return n.AdminState != "disabled" && n.State != StateMaintenance
+}
+
+// IsSchedulable is the shared admission predicate for new work.
+func (n Node) IsSchedulable() bool {
+	return n.IsActive() && n.IsEnabled()
 }

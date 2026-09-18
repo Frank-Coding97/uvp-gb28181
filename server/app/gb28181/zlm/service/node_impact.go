@@ -231,7 +231,7 @@ func fingerprintNodeImpact(n *node.Node, action NodeImpactAction, impact NodeImp
 	values := []string{
 		strconv.FormatInt(n.ID, 10), string(action), n.Name, n.Host,
 		strconv.Itoa(n.APIPort), n.ReceiveHost, n.PlaybackHost,
-		n.MediaServerUUID, strconv.Itoa(n.Weight), string(n.State),
+		n.MediaServerUUID, strconv.Itoa(n.Weight), string(n.State), strconv.FormatBool(n.IsEnabled()),
 		strconv.Itoa(n.RTPPortStart), strconv.Itoa(n.RTPPortEnd),
 		n.UpdatedAt.UTC().Format(time.RFC3339Nano), hex.EncodeToString(secretHash[:]),
 		strconv.Itoa(impact.Streams), strconv.Itoa(impact.Recordings),
@@ -280,15 +280,16 @@ func (s *NodeService) ExecuteNodeAction(ctx context.Context, id int64, action No
 	result := NodeActionResult{Action: action}
 	switch action {
 	case NodeImpactActionDelete:
-		if cur.State != node.StateMaintenance {
-			return result, ErrNodeNotInMaintenance
+		cur.AdminState = "disabled"
+		if err := s.registry.Update(ctx, *cur); err != nil {
+			return result, err
 		}
 		if impactHasResources(preflight.Impact) || cur.Stats.SessionCount > 0 || cur.Stats.MediaSourceCount > 0 {
 			return result, ErrNodeImpactConflict
 		}
 		return result, s.registry.Delete(ctx, id)
 	case NodeImpactActionMaintenance:
-		cur.State = node.StateMaintenance
+		cur.AdminState = "disabled"
 		return result, s.registry.Update(ctx, *cur)
 	case NodeImpactActionKick:
 		count, kickErr := s.probe.KickSessions(ctx, cur)

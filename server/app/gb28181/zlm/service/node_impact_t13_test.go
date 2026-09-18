@@ -192,12 +192,43 @@ func TestNodeImpactT13_DeleteRejectsLiveImpactAndProviderErrorsStayStable(t *tes
 	preflight, err := svc.PreflightDelete(context.Background(), n.ID)
 	require.NoError(t, err)
 	require.ErrorIs(t, svc.DeleteConfirmed(context.Background(), n.ID, preflight.Fingerprint), service.ErrNodeImpactConflict)
-	_, ok := reg.Get(n.ID)
+	retained, ok := reg.Get(n.ID)
 	require.True(t, ok)
+	require.False(t, retained.IsEnabled(), "a rejected delete must still close admission")
+	require.Equal(t, node.StateMaintenance, retained.State, "legacy health state is not rewritten by delete")
 
 	provider.err = errors.New("upstream secret=" + n.APISecret)
 	_, err = svc.PreflightDelete(context.Background(), n.ID)
 	require.ErrorIs(t, err, service.ErrNodeImpactUnavailable)
 	require.True(t, strings.Contains(err.Error(), "node impact unavailable"))
 	require.NotContains(t, err.Error(), n.APISecret)
+}
+
+func TestNodeImpactT13_DeleteDisablesAnActiveNodeBeforeRemoval(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	provider := &t13ImpactProvider{impact: service.NodeImpact{EvidenceFingerprint: "sha256-delete-empty"}}
+	svc := service.NewNodeService(reg, &t13Probe{}, service.MediaTuning{})
+	svc.SetNodeImpactProvider(provider)
+
+	preflight, err := svc.PreflightDelete(context.Background(), n.ID)
+	require.NoError(t, err)
+	require.NoError(t, svc.DeleteConfirmed(context.Background(), n.ID, preflight.Fingerprint))
+	_, ok := reg.Get(n.ID)
+	require.False(t, ok)
+}
+
+func TestNodeImpactT13_FingerprintIncludesAdmissionIntent(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	provider := &t13ImpactProvider{impact: service.NodeImpact{EvidenceFingerprint: "sha256-admission"}}
+	svc := service.NewNodeService(reg, &t13Probe{}, service.MediaTuning{})
+	svc.SetNodeImpactProvider(provider)
+
+	preflight, err := svc.PreflightDelete(context.Background(), n.ID)
+	require.NoError(t, err)
+	require.NoError(t, svc.Disable(context.Background(), n.ID))
+	require.ErrorIs(t, svc.DeleteConfirmed(context.Background(), n.ID, preflight.Fingerprint), service.ErrNodeImpactChanged)
 }

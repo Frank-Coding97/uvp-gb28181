@@ -791,6 +791,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			zlm.GET("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Get(c) }))
 			zlm.PUT("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Update(c) }))
 			zlm.DELETE("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Delete(c) }))
+			zlm.POST("/nodes/:id/enable", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Enable(c) }))
+			zlm.POST("/nodes/:id/disable", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Disable(c) }))
 			zlm.POST("/nodes/:id/maintenance", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.SetMaintenance(c) }))
 			zlm.POST("/nodes/:id/activate", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Activate(c) }))
 			zlm.POST("/nodes/:id/kick", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.KickSessions(c) }))

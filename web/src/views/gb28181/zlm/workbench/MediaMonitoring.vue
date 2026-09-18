@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 
+import MediaScopeBar from "./components/MediaScopeBar.vue";
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
 import NetworkSessionPanel from "./monitoring/NetworkSessionPanel.vue";
 import StreamPanel from "./monitoring/StreamPanel.vue";
@@ -38,13 +39,21 @@ function refreshAll() {
     :status-text="workspace.statusText.value" :last-success-at="workspace.lastSuccessAt.value"
     :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
-    :allow-all="false" :requires-node="true"
+    :allow-all="false" :requires-node="true" :show-scope="false"
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="refreshAll" @refresh-scope="workspace.refreshScope"
   >
     <template #content>
       <section v-show="workspace.activeView.value === 'streams'" class="media-monitoring-view" data-panel-view="streams">
-        <StreamPanel ref="streamPanel" :active="workspace.activeView.value === 'streams'" :scope="workspace.scope.value" :node-id="nodeId" :initial-query="route.query" />
+        <StreamPanel ref="streamPanel" :active="workspace.activeView.value === 'streams'" :scope="workspace.scope.value" :node-id="nodeId" :initial-query="route.query">
+          <template #scope>
+            <MediaScopeBar
+              compact :model-value="workspace.scope.value" :nodes="workspace.nodes.value" :allow-all="false" :requires-node="true"
+              :loading="workspace.scopeLoading.value" :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''" :show-refresh="false"
+              @update:model-value="workspace.setScope"
+            />
+          </template>
+        </StreamPanel>
       </section>
       <section v-show="['sessions', 'viewers'].includes(workspace.activeView.value)" class="media-monitoring-view" :data-panel-view="workspace.activeView.value">
         <NetworkSessionPanel
@@ -54,7 +63,15 @@ function refreshAll() {
           :scope="workspace.scope.value"
           :node-id="nodeId"
           :initial-query="route.query"
-        />
+        >
+          <template #scope>
+            <MediaScopeBar
+              compact :model-value="workspace.scope.value" :nodes="workspace.nodes.value" :allow-all="false" :requires-node="true"
+              :loading="workspace.scopeLoading.value" :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''" :show-refresh="false"
+              @update:model-value="workspace.setScope"
+            />
+          </template>
+        </NetworkSessionPanel>
       </section>
     </template>
   </MediaWorkspaceShell>

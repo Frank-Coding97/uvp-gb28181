@@ -32,6 +32,16 @@ describe("MediaScopeBar", () => {
     expect(source).toMatch(/\.media-scope-bar__notice\s*\{[^}]*flex:\s*none/);
   });
 
+  it("offers a compact filter-row presentation", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/components/MediaScopeBar.vue"), "utf8");
+    expect(source).toContain("'media-scope-bar--compact': compact");
+    expect(source).toContain('<span v-if="!compact" class="media-scope-bar__label">当前节点</span>');
+    expect(source).toMatch(/\.media-scope-bar--compact \.media-scope-bar__field\s*\{[^}]*height:\s*40px/);
+    expect(source).toMatch(/\.media-scope-bar--compact \.media-scope-bar__field\s*\{[^}]*width:\s*170px/);
+    expect(source).toMatch(/\.media-scope-bar--compact \.media-scope-bar__field\s*\{[^}]*background:\s*transparent/);
+    expect(source).toMatch(/\.media-scope-bar--compact \.media-scope-bar__field\s*\{[^}]*box-shadow:\s*none/);
+  });
+
   it("offers all nodes only when the workspace supports an aggregate scope", async () => {
     const wrapper = mount(MediaScopeBar, { props: { modelValue: "all", nodes, allowAll: true } });
 

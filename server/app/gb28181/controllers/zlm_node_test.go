@@ -128,6 +128,8 @@ func setupRouter(t *testing.T) (*gin.Engine, *service.NodeService) {
 		g.GET("/nodes/:id", ctrl.Get)
 		g.PUT("/nodes/:id", ctrl.Update)
 		g.DELETE("/nodes/:id", ctrl.Delete)
+		g.POST("/nodes/:id/enable", ctrl.Enable)
+		g.POST("/nodes/:id/disable", ctrl.Disable)
 		g.POST("/nodes/:id/maintenance", ctrl.SetMaintenance)
 		g.POST("/nodes/:id/activate", ctrl.Activate)
 	}
@@ -209,7 +211,7 @@ func TestZLMNodeAPI_Get_NotFound(t *testing.T) {
 	require.NotEqual(t, 500, w.Code)
 }
 
-func TestZLMNodeAPI_LifecycleMaintenanceDelete(t *testing.T) {
+func TestZLMNodeAPI_EnableDisableAndDirectDelete(t *testing.T) {
 	r, _ := setupRouter(t)
 
 	w, resp := do(t, r, "POST", "/api/gb28181/zlm/nodes", service.CreateNodeReq{
@@ -220,15 +222,19 @@ func TestZLMNodeAPI_LifecycleMaintenanceDelete(t *testing.T) {
 	id := int64(idF)
 	idStr := pathInt(id)
 
-	// 活跃态直接删 → 失败
-	w1, _ := do(t, r, "DELETE", "/api/gb28181/zlm/nodes/"+idStr, nil)
-	require.NotEqual(t, 500, w1.Code)
-
-	// 切维护
-	w2, _ := do(t, r, "POST", "/api/gb28181/zlm/nodes/"+idStr+"/maintenance", nil)
+	// 停用只改变管理意图，健康状态仍保持 active。
+	w2, _ := do(t, r, "POST", "/api/gb28181/zlm/nodes/"+idStr+"/disable", nil)
 	require.Equal(t, 200, w2.Code)
+	_, disabledResp := do(t, r, "GET", "/api/gb28181/zlm/nodes/"+idStr, nil)
+	disabled := disabledResp["data"].(map[string]any)
+	require.Equal(t, false, disabled["enabled"])
+	require.Equal(t, "active", disabled["health"])
 
-	// 删
+	// 重新启用。
+	wEnable, _ := do(t, r, "POST", "/api/gb28181/zlm/nodes/"+idStr+"/enable", nil)
+	require.Equal(t, 200, wEnable.Code)
+
+	// 不需要先停用，删除内部会完成停用和影响检查。
 	w3, _ := do(t, r, "DELETE", "/api/gb28181/zlm/nodes/"+idStr, nil)
 	require.Equal(t, 200, w3.Code)
 

@@ -4,6 +4,7 @@ import { Message } from "@arco-design/web-vue";
 import {
   deleteZLMNode,
   kickZLMNodeSessions,
+  purgeUnreachableZLMNode,
   restartZLMNode,
   setZLMNodeMaintenance,
   type ZLMNode,
@@ -37,7 +38,13 @@ const preflight = ref<ZLMNodeImpactPreflight | null>(null);
 const preflightLoading = ref(false);
 const executing = ref(false);
 const loadError = ref("");
+const purgeConfirming = ref(false);
+const purging = ref(false);
 let generation = 0;
+
+// 只有「删除」且预检确实失败时才给强制移除的出口:它用于处理节点不可达时
+// 无法读取影响、普通删除无法继续的死角。
+const canPurge = computed(() => props.action === "delete" && !!props.node && !!loadError.value);
 
 const copy = computed(() => props.node && props.action ? nodeActionCopy(props.action, props.node.name) : null);
 const dialogReady = computed(() => {
@@ -114,14 +121,38 @@ watch(
       loadError.value = "";
       preflightLoading.value = false;
       executing.value = false;
+      purgeConfirming.value = false;
+      purging.value = false;
     }
   },
   { immediate: true }
 );
 
 function close() {
-  if (executing.value) return;
+  if (executing.value || purging.value) return;
   emit("update:visible", false);
+}
+
+async function purgeUnreachable() {
+  const node = props.node;
+  if (!node) return;
+  purging.value = true;
+  try {
+    const response = await purgeUnreachableZLMNode(node.id);
+    if (response.code !== 0) throw new Error(response.message || "强制移除失败");
+    const detached = response.data?.detachedRows ?? 0;
+    Message.success(`已移除节点「${node.name}」，${detached} 个设备的首选节点已重置为自动调度`);
+    emit("done", { action: "delete" });
+    emit("update:visible", false);
+  } catch (error) {
+    // 409 = 此刻节点其实是可读的,后端拒绝了 force —— 这恰恰是我们要的保护。
+    const message = zlmErrorPresentation(error).label;
+    loadError.value = message;
+    Message.error(message);
+    purgeConfirming.value = false;
+  } finally {
+    purging.value = false;
+  }
 }
 
 async function confirm(payload: { fingerprint: string }) {
@@ -160,6 +191,12 @@ async function confirm(payload: { fingerprint: string }) {
     const status = (error as { response?: { status?: number } })?.response?.status;
     const message = zlmErrorPresentation(error).label;
     if (status === 409) {
+      if (action === "delete") {
+        Message.warning(`${message}；节点已停用，等待活动流、录制和会话排空后重试删除`);
+        emit("done", { action });
+        emit("update:visible", false);
+        return;
+      }
       const latestImpacts = nodeImpactItemsFromError(error);
       const impactText = latestImpacts.length ? `；后端返回影响：${latestImpacts.join("，")}` : "";
       Message.error(`${message}${impactText}；影响已变化，请重新打开确认`);
@@ -192,10 +229,31 @@ async function confirm(payload: { fingerprint: string }) {
     <div v-else class="preflight-state preflight-state--error" role="alert">
       <strong>未执行任何管理动作</strong>
       <span>{{ loadError }}</span>
-      <div>
+      <div v-if="!purgeConfirming">
         <a-button @click="close">取消</a-button>
         <a-button type="primary" @click="loadPreflight">重新预检</a-button>
+        <a-button
+          v-if="canPurge"
+          status="danger"
+          data-test="purge-entry"
+          @click="purgeConfirming = true"
+        >强制移除</a-button>
       </div>
+      <template v-if="canPurge">
+        <p v-if="!purgeConfirming" class="purge-hint">
+          节点不可达时后端读不到它上面的流和会话，普通删除无法完成影响确认。
+        </p>
+        <div v-else class="purge-confirm">
+          <strong>确认强制移除该节点？</strong>
+          <span>后端会先探一次：此刻如果读得通就会拒绝删除。</span>
+          <span>由于读不到影响，它上面是否还有流、录制和级联会话是未知的；重新上线后需手动清理残留。</span>
+          <span>指向它的设备「首选节点」会被重置为自动调度。</span>
+          <div>
+            <a-button :disabled="purging" @click="purgeConfirming = false">返回</a-button>
+            <a-button status="danger" data-test="purge-confirm" :loading="purging" @click="purgeUnreachable">确认移除</a-button>
+          </div>
+        </div>
+      </template>
     </div>
   </a-modal>
 
@@ -222,5 +280,9 @@ async function confirm(payload: { fingerprint: string }) {
 <style scoped>
 .preflight-state { display: flex; min-height: 150px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--zlm-text-3); text-align: center; }
 .preflight-state--error { color: var(--zlm-danger-600); }
-.preflight-state--error div { display: flex; gap: 8px; margin-top: 8px; }
+.preflight-state--error div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+.purge-hint { max-width: 420px; margin: 4px 0 0; color: var(--zlm-text-3); font-size: 12px; line-height: 1.6; }
+.purge-confirm { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; max-width: 460px; }
+.purge-confirm span { color: var(--zlm-text-3); font-size: 12px; line-height: 1.6; }
+.purge-confirm strong { color: var(--zlm-danger-600); font-size: 13px; }
 </style>

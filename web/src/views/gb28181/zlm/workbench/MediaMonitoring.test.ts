@@ -47,6 +47,20 @@ describe("media monitoring workbench", () => {
     expect(panel).not.toContain("所有列表、详情和危险操作都通过 UVP 后端");
   });
 
+  it("places the shared node selector inside every monitoring filter row", () => {
+    const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
+    const streamPanel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+    const sessionPanel = readFileSync(resolve(root, "workbench/monitoring/NetworkSessionPanel.vue"), "utf8");
+
+    expect(page).toContain('import MediaScopeBar from "./components/MediaScopeBar.vue"');
+    expect(page).toContain(':show-scope="false"');
+    expect(page.match(/<template #scope>/g)).toHaveLength(2);
+    expect(page.match(/<MediaScopeBar/g)).toHaveLength(2);
+    expect(page.match(/compact/g)).toHaveLength(2);
+    expect(streamPanel).toMatch(/<template #fields>\s*<slot name="scope" \/>/s);
+    expect(sessionPanel.match(/<template #fields><slot name="scope" \/>/g)).toHaveLength(2);
+  });
+
   it("keeps the recording status select at the system filter width", () => {
     const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
     expect(panel).toContain('style="width: 132px; min-width: 132px; max-width: 132px; flex: 0 0 132px"');

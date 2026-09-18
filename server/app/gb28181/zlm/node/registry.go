@@ -302,7 +302,7 @@ func (r *Registry) SetAutoOnDemandReadyIfRevision(id int64, revision uint64, rea
 	if !ok || current.Revision != revision {
 		return false
 	}
-	if ready && (!current.IsActive() || current.RecoveryRequired) {
+	if ready && (!current.IsSchedulable() || current.RecoveryRequired) {
 		return false
 	}
 	r.autoOnDemandReady[id] = ready
@@ -447,7 +447,7 @@ func (r *Registry) ResolveAutoOnDemandNode(uuid string) (*Node, bool) {
 		return nil, false
 	}
 	n, ok := r.nodes[id]
-	if !ok || !n.IsActive() || n.IsNearCapacity() {
+	if !ok || !n.IsSchedulable() || n.IsNearCapacity() {
 		return nil, false
 	}
 	copy := cloneNode(*n)
@@ -500,7 +500,7 @@ func (r *Registry) ListSchedulable() []*Node {
 	defer r.mu.RUnlock()
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		if n.IsActive() && !n.IsNearCapacity() && !r.admissionBlocked[n.ID] {
+		if n.IsSchedulable() && !n.IsNearCapacity() && !r.admissionBlocked[n.ID] {
 			copy := cloneNode(*n)
 			out = append(out, &copy)
 		}

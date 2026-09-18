@@ -9,6 +9,8 @@ describe("SchedulingManagement", () => {
     expect(source).toMatch(/#logs=\"\{\s*active\s*\}\"/);
     expect(source).toContain(":active=\"active\"");
     expect(source).toContain("MediaWorkspaceShell");
+    expect(source).toContain(':show-scope="false"');
+    expect(source).toContain('@update:scope="workspace.setScope"');
     expect(source).not.toContain("SchedulerStrategyPanel");
     expect(source).not.toContain('key: "strategy"');
   });

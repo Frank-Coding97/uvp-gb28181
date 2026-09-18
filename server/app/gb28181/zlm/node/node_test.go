@@ -42,3 +42,10 @@ func TestNode_IsActive(t *testing.T) {
 		require.Equal(t, c.active, n.IsActive(), "state=%s", c.state)
 	}
 }
+
+func TestNode_SchedulableSeparatesOperatorIntentFromHealth(t *testing.T) {
+	require.True(t, (node.Node{State: node.StateActive}).IsSchedulable())
+	require.False(t, (node.Node{State: node.StateActive, AdminState: "disabled"}).IsSchedulable())
+	require.False(t, (node.Node{State: node.StateOffline}).IsSchedulable())
+	require.False(t, (node.Node{State: node.StateMaintenance}).IsEnabled(), "legacy maintenance rows stay disabled")
+}

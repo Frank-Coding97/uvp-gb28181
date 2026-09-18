@@ -29,6 +29,8 @@ export interface ZLMNode {
     weight: number;
     tags?: Record<string, string>;
     state: ZLMNodeState;
+    enabled?: boolean;
+    health?: ZLMNodeState;
     recoveryRequired: boolean;
     recoveryReason?: string;
     recoveryFingerprint?: string;
@@ -137,6 +139,22 @@ export const deleteZLMNode = (id: number, fingerprint?: string) =>
         impactConfirmationConfig(fingerprint)
     );
 
+// 强制移除一条「影响预检读不到」的节点记录。
+// 后端仍会先探一次：节点只要读得通就返回 409，不会真的删。
+export interface ZLMNodePurgeResult {
+    nodeId: number;
+    detachedRows: number;
+    impactUncertain: boolean;
+}
+
+export const purgeUnreachableZLMNode = (id: number) =>
+    http.request<BaseResult<ZLMNodePurgeResult>>(
+        "delete",
+        baseUrlApi(`gb28181/zlm/nodes/${id}`),
+        { params: { purge: "unreachable" } },
+        { headers: { "X-Purge-Unreachable": "1" } }
+    );
+
 export const setZLMNodeMaintenance = (id: number, fingerprint?: string) =>
     http.request<BaseResult<ZLMNodeActionResponse>>(
         "post",
@@ -147,6 +165,12 @@ export const setZLMNodeMaintenance = (id: number, fingerprint?: string) =>
 
 export const activateZLMNode = (id: number) =>
     http.request<BaseResult<{ ok: boolean }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/activate`));
+
+export const enableZLMNode = (id: number) =>
+    http.request<BaseResult<{ ok: boolean; enabled: true }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/enable`));
+
+export const disableZLMNode = (id: number) =>
+    http.request<BaseResult<{ ok: boolean; enabled: false }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/disable`));
 
 // 驱逐节点全部会话(高危,UI 必须二次确认),返回被踢的会话数
 export const kickZLMNodeSessions = (id: number, fingerprint?: string) =>

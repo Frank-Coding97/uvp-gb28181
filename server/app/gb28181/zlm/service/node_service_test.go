@@ -322,7 +322,7 @@ func TestNodeService_Create_ApplyConfigFails_RollsBack(t *testing.T) {
 	require.Empty(t, repo.rows, "Apply 失败应回滚 DB 节点")
 }
 
-func TestNodeService_Delete_RequiresMaintenance(t *testing.T) {
+func TestNodeService_Delete_DisablesAndDeletesWithoutManualMaintenance(t *testing.T) {
 	repo := newMemoryRepo()
 	probe := &mockProbe{}
 	svc := newSvc(repo, probe)
@@ -331,24 +331,33 @@ func TestNodeService_Delete_RequiresMaintenance(t *testing.T) {
 		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
 	})
 
-	err := svc.Delete(context.Background(), n.ID)
-	require.ErrorIs(t, err, service.ErrNodeNotInMaintenance)
-}
-
-func TestNodeService_Delete_AfterSetMaintenance_OK(t *testing.T) {
-	repo := newMemoryRepo()
-	probe := &mockProbe{}
-	svc := newSvc(repo, probe)
-
-	n, _ := svc.Create(context.Background(), service.CreateNodeReq{
-		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
-	})
-	require.NoError(t, svc.SetMaintenance(context.Background(), n.ID))
 	require.NoError(t, svc.Delete(context.Background(), n.ID))
 	require.Empty(t, repo.rows)
 }
 
-func TestNodeService_SetMaintenance_Activate(t *testing.T) {
+func TestNodeService_Delete_WithActiveStatsKeepsNodeDisabled(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	reg := node.NewRegistry(repo)
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	n, _ := svc.Create(context.Background(), service.CreateNodeReq{
+		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
+	})
+	stored := repo.rows[n.ID]
+	stored.Stats.SessionCount = 2
+	repo.rows[n.ID] = stored
+	reg.UpdateStats(stored.MediaServerUUID, stored.Stats)
+
+	err := svc.Delete(context.Background(), n.ID)
+	require.ErrorIs(t, err, service.ErrNodeImpactConflict)
+	got, getErr := svc.Get(context.Background(), n.ID)
+	require.NoError(t, getErr)
+	require.False(t, got.Enabled)
+	require.Equal(t, node.StateActive, got.Health)
+}
+
+func TestNodeService_LegacyMaintenanceActivateOnlyChangesAdmission(t *testing.T) {
 	repo := newMemoryRepo()
 	probe := &mockProbe{}
 	svc := newSvc(repo, probe)
@@ -362,11 +371,49 @@ func TestNodeService_SetMaintenance_Activate(t *testing.T) {
 
 	require.NoError(t, svc.SetMaintenance(context.Background(), n.ID))
 	got, _ = svc.Get(context.Background(), n.ID)
-	require.Equal(t, node.StateMaintenance, got.State)
+	require.False(t, got.Enabled)
+	require.Equal(t, node.StateActive, got.State)
 
 	require.NoError(t, svc.Activate(context.Background(), n.ID))
 	got, _ = svc.Get(context.Background(), n.ID)
+	require.True(t, got.Enabled)
 	require.Equal(t, node.StateActive, got.State)
+}
+
+func TestNodeService_EnableOfflinePersistsIntentUntilHeartbeat(t *testing.T) {
+	repo := newMemoryRepo()
+	reg := node.NewRegistry(repo)
+	added, err := reg.Add(context.Background(), node.Node{
+		Name: "n1", MediaServerUUID: "uuid-a", State: node.StateOffline, AdminState: "disabled",
+	})
+	require.NoError(t, err)
+	svc := service.NewNodeService(reg, &mockProbe{}, service.MediaTuning{})
+
+	require.NoError(t, svc.Enable(context.Background(), added.ID))
+	got, ok := reg.Get(added.ID)
+	require.True(t, ok)
+	require.True(t, got.IsEnabled())
+	require.Equal(t, node.StateOffline, got.State)
+	require.Empty(t, reg.ListSchedulable())
+
+	reg.UpdateHeartbeatFields("uuid-a", 0, 0, time.Now())
+	require.Len(t, reg.ListSchedulable(), 1)
+}
+
+func TestNodeService_DisableDoesNotKickOrOverwriteHealth(t *testing.T) {
+	repo := newMemoryRepo()
+	reg := node.NewRegistry(repo)
+	added, err := reg.Add(context.Background(), node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	require.NoError(t, err)
+	probe := &mockProbe{}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	require.NoError(t, svc.Disable(context.Background(), added.ID))
+	got, ok := reg.Get(added.ID)
+	require.True(t, ok)
+	require.Equal(t, node.StateActive, got.State)
+	require.False(t, got.IsEnabled())
+	require.NotContains(t, probe.calls, "KickSessions")
 }
 
 func TestNodeService_List_ReturnsAll(t *testing.T) {

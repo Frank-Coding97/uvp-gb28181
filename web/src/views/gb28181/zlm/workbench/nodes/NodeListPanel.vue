@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { CirclePower, LogOut, Pencil, Radar, RotateCw, Settings, Trash2, Wrench } from "lucide-vue-next";
+import { CirclePower, Pencil, PowerOff, Settings, Trash2 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import {
-  activateZLMNode,
+  disableZLMNode,
+  enableZLMNode,
   listZLMNodes,
-  testZLMNodeConnection,
   type ZLMNode
 } from "@/api/gb28181-zlm";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
@@ -23,6 +23,7 @@ import {
   filterNodeRecords,
   nodeHealth,
   nodeHealthReason,
+  nodeOnlineState,
   type NodeHealth
 } from "./nodeManagementState";
 
@@ -55,9 +56,11 @@ const legacyLoading = ref(false);
 const legacyError = ref<unknown>(null);
 const search = ref("");
 const filterState = ref<string>();
+const filterEnabled = ref<boolean>();
 const filterHealth = ref<NodeHealth>();
 const appliedSearch = ref("");
 const appliedFilterState = ref<string>();
+const appliedFilterEnabled = ref<boolean>();
 const appliedFilterHealth = ref<NodeHealth>();
 const formVisible = ref(false);
 const formNode = ref<ZLMNode | null>(null);
@@ -73,8 +76,6 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*")
   || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:node:manage"));
-const canKick = computed(() => hasPermission("gb28181:zlm:node:kick"));
-const canRestart = computed(() => hasPermission("gb28181:zlm:restart"));
 const sourceNodes = computed<readonly ZLMNode[]>(() => props.nodes === undefined ? legacyNodes.value : props.nodes as readonly ZLMNode[]);
 const scopedNodes = computed(() => props.scope === "all"
   ? sourceNodes.value
@@ -82,6 +83,7 @@ const scopedNodes = computed(() => props.scope === "all"
 const filteredNodes = computed(() => filterNodeRecords(scopedNodes.value, {
   keyword: appliedSearch.value,
   state: appliedFilterState.value as ZLMNode["state"] | undefined,
+  enabled: appliedFilterEnabled.value,
   health: appliedFilterHealth.value
 }));
 const loading = computed(() => props.nodes === undefined ? legacyLoading.value : props.loading);
@@ -128,12 +130,14 @@ function refreshRows() {
 function queryRows() {
   appliedSearch.value = search.value.trim();
   appliedFilterState.value = filterState.value;
+  appliedFilterEnabled.value = filterEnabled.value;
   appliedFilterHealth.value = filterHealth.value;
 }
 
 function resetFilters() {
   search.value = "";
   filterState.value = undefined;
+  filterEnabled.value = undefined;
   filterHealth.value = undefined;
   queryRows();
 }
@@ -191,13 +195,8 @@ function openEdit(node: ZLMNode) {
   formVisible.value = true;
 }
 
-function openAction(node: ZLMNode, nextAction: NodeDangerAction) {
-  const allowed = nextAction === "kick"
-    ? canKick.value
-    : nextAction === "restart"
-      ? canRestart.value
-      : canManage.value;
-  if (!allowed) {
+function openAction(node: ZLMNode, nextAction: "delete") {
+  if (!canManage.value) {
     Message.warning("没有执行该节点操作的权限");
     return;
   }
@@ -216,33 +215,18 @@ async function withOp(node: ZLMNode, name: string, run: () => Promise<void>) {
   }
 }
 
-async function handleActivate(node: ZLMNode) {
+async function handleEnabled(node: ZLMNode) {
   if (!canManage.value) return;
-  await withOp(node, "activate", async () => {
+  const nextEnabled = node.enabled === false;
+  await withOp(node, nextEnabled ? "enable" : "disable", async () => {
     try {
-      const response = await activateZLMNode(node.id);
-      if (response.code !== 0) throw new Error(response.message || "激活失败");
-      Message.success("节点已激活并重新允许调度");
-      refreshRows();
-    } catch (error) {
-      Message.error(zlmErrorPresentation(error).label);
-    }
-  });
-}
-
-async function handleReprobe(node: ZLMNode) {
-  if (!canManage.value) return;
-  await withOp(node, "reprobe", async () => {
-    try {
-      const response = await testZLMNodeConnection(node.id);
-      if (response.code !== 0 || !response.data?.online) {
-        throw new Error(response.data?.error || response.message || "节点仍不可达");
+      const response = nextEnabled ? await enableZLMNode(node.id) : await disableZLMNode(node.id);
+      if (response.code !== 0) throw new Error(response.message || (nextEnabled ? "启用失败" : "停用失败"));
+      if (nextEnabled) {
+        Message.success(nodeOnlineState(node) === "active" ? "节点已启用，可参与新任务调度" : "节点已启用，在线后将自动参与调度");
+      } else {
+        Message.success("节点已停用，不再接收新任务；现有流不会中断");
       }
-      if (node.state === "offline") {
-        const activate = await activateZLMNode(node.id);
-        if (activate.code !== 0) throw new Error(activate.message || "连接已恢复，但激活失败");
-      }
-      Message.success("候选连接探测成功，节点状态已回读");
       refreshRows();
     } catch (error) {
       Message.error(zlmErrorPresentation(error).label);
@@ -279,9 +263,12 @@ function relativeTime(value?: string) {
     <s-layout-search class="node-search-panel">
       <template #fields>
         <a-input v-model="search" allow-clear placeholder="节点名称 / Host" style="width: 260px" @press-enter="queryRows" />
-        <a-select v-model="filterState" allow-clear placeholder="生命周期" style="width: 150px" :options="[
-          { label: '活跃', value: 'active' },
-          { label: '维护', value: 'maintenance' },
+        <a-select v-model="filterEnabled" allow-clear placeholder="管理状态" style="width: 150px" :options="[
+          { label: '启用', value: true },
+          { label: '停用', value: false }
+        ]" />
+        <a-select v-model="filterState" allow-clear placeholder="在线状态" style="width: 150px" :options="[
+          { label: '在线', value: 'active' },
           { label: '离线', value: 'offline' }
         ]" />
         <a-select v-model="filterHealth" allow-clear placeholder="健康度" style="width: 150px" :options="[
@@ -311,19 +298,16 @@ function relativeTime(value?: string) {
       <a-table :data="filteredNodes" :loading="loading" row-key="id" :pagination="false" class="node-table uvp-data-table">
         <template #columns>
           <a-table-column title="节点" :width="230"><template #cell="{ record }"><div class="cell-node"><span class="cell-node-name">{{ record.name }}</span><span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span></div></template></a-table-column>
-          <a-table-column title="状态" :width="110"><template #cell="{ record }"><LifecycleDot :state="record.state" /></template></a-table-column>
+          <a-table-column title="管理状态" :width="110"><template #cell="{ record }"><span :class="['admin-state', record.enabled === false ? 'admin-state--disabled' : 'admin-state--enabled']">{{ record.enabled === false ? "停用" : "启用" }}</span></template></a-table-column>
+          <a-table-column title="在线状态" :width="110"><template #cell="{ record }"><LifecycleDot :state="nodeOnlineState(record)" /></template></a-table-column>
           <a-table-column title="健康度" :width="170"><template #cell="{ record }"><HealthBadge :health="nodeHealth(record)" :reason="nodeHealthReason(record)" /><span v-if="record.recoveryRequired" class="recovery-mark">恢复隔离</span></template></a-table-column>
-          <a-table-column title="流 / 会话" :width="120"><template #cell="{ record }"><span v-if="record.state === 'offline'">—</span><span v-else class="numeric">{{ record.stats?.mediaSourceCount ?? 0 }} / {{ record.stats?.sessionCount ?? 0 }}</span></template></a-table-column>
-          <a-table-column title="调度" :width="130"><template #cell="{ record }"><span v-if="record.state !== 'active'" class="muted">不参与</span><span v-else-if="record.autoOnDemandReady" class="ready">可调度 · {{ record.weight }}</span><span v-else class="warning">等待收敛</span></template></a-table-column>
+          <a-table-column title="流 / 会话" :width="120"><template #cell="{ record }"><span v-if="nodeOnlineState(record) === 'offline'">—</span><span v-else class="numeric">{{ record.stats?.mediaSourceCount ?? 0 }} / {{ record.stats?.sessionCount ?? 0 }}</span></template></a-table-column>
+          <a-table-column title="调度" :width="130"><template #cell="{ record }"><span v-if="record.enabled === false || nodeOnlineState(record) !== 'active'" class="muted">不参与</span><span v-else-if="record.autoOnDemandReady" class="ready">可调度 · {{ record.weight }}</span><span v-else class="warning">等待收敛</span></template></a-table-column>
           <a-table-column title="最后心跳" :width="130"><template #cell="{ record }"><span :title="record.stats?.lastHeartbeatAt">{{ relativeTime(record.stats?.lastHeartbeatAt) }}</span></template></a-table-column>
-          <a-table-column title="操作" :width="340" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions node-row-actions">
+          <a-table-column title="操作" :width="280" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions node-row-actions">
             <a-link class="uvp-table-action uvp-table-action--detail" @click="openServiceConfig(record)"><template #icon><Settings :size="13" /></template>服务配置</a-link>
             <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><template #icon><Pencil :size="13" /></template>编辑</a-link>
-            <a-link v-if="canManage && record.state === 'active'" class="uvp-table-action uvp-table-action--scope" @click="openAction(record, 'maintenance')"><template #icon><Wrench :size="13" /></template>维护</a-link>
-            <a-link v-else-if="canManage && record.state === 'maintenance'" class="uvp-table-action uvp-table-action--execute" :loading="opLoading[record.id] === 'activate'" @click="handleActivate(record)"><template #icon><CirclePower :size="13" /></template>激活</a-link>
-            <a-link v-else-if="canManage && record.state === 'offline'" class="uvp-table-action uvp-table-action--sync" :loading="opLoading[record.id] === 'reprobe'" @click="handleReprobe(record)"><template #icon><Radar :size="13" /></template>探测</a-link>
-            <a-link v-if="canKick && record.state !== 'offline'" class="uvp-table-action uvp-table-action--scope" @click="openAction(record, 'kick')"><template #icon><LogOut :size="13" /></template>驱逐</a-link>
-            <a-link v-if="canRestart && record.state !== 'offline'" class="uvp-table-action uvp-table-action--execute" @click="openAction(record, 'restart')"><template #icon><RotateCw :size="13" /></template>重启</a-link>
+            <a-link v-if="canManage" :class="['uvp-table-action', record.enabled === false ? 'uvp-table-action--execute' : 'uvp-table-action--scope']" :loading="opLoading[record.id] === (record.enabled === false ? 'enable' : 'disable')" @click="handleEnabled(record)"><template #icon><CirclePower v-if="record.enabled === false" :size="13" /><PowerOff v-else :size="13" /></template>{{ record.enabled === false ? "启用" : "停用" }}</a-link>
             <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="openAction(record, 'delete')"><template #icon><Trash2 :size="13" /></template>删除</a-link>
           </div></template></a-table-column>
         </template>
@@ -343,11 +327,12 @@ function relativeTime(value?: string) {
 .node-search-panel :deep(.arco-select-view) { box-sizing: border-box; background: var(--uvp-search-control-bg) !important; border: 1px solid var(--uvp-search-secondary-btn-border) !important; border-radius: 10px !important; box-shadow: var(--uvp-search-control-shadow) !important; }
 .node-search-panel :deep(.arco-select-view:hover), .node-search-panel :deep(.arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
 .node-refresh-button { min-width: 104px; justify-content: center; }
+.admin-state { display: inline-flex; align-items: center; gap: 5px; color: var(--zlm-text-2); font-size: var(--zlm-fs-caption); font-weight: var(--zlm-fw-medium); }.admin-state::before { width: 7px; height: 7px; background: var(--zlm-success-500); border-radius: 50%; content: ""; }.admin-state--disabled { color: var(--zlm-text-3); }.admin-state--disabled::before { background: var(--zlm-text-4); }
 .recovery-mark { display: inline-block; margin-left: 6px; color: var(--zlm-danger-600); font-size: 11px; }
 .page-state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; padding: 16px; color: var(--zlm-text-3); text-align: center; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); }
 .page-state--warning { min-height: auto; align-items: flex-start; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.page-state--error { color: var(--zlm-danger-600); }
 .node-table-wrap { overflow: hidden; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
 .cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; text-align: left; }.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
-.node-row-actions { flex-wrap: wrap; }
+.node-row-actions .uvp-table-action { flex: none; white-space: nowrap; }
 .numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }
 </style>

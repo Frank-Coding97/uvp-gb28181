@@ -86,6 +86,8 @@ type NodeDTO struct {
 	Weight              int               `json:"weight"`
 	Tags                map[string]string `json:"tags,omitempty"`
 	State               node.State        `json:"state"`
+	Enabled             bool              `json:"enabled"`
+	Health              node.State        `json:"health"`
 	RecoveryRequired    bool              `json:"recoveryRequired"`
 	RecoveryReason      string            `json:"recoveryReason,omitempty"`
 	RecoveryFingerprint string            `json:"recoveryFingerprint,omitempty"`
@@ -167,8 +169,12 @@ type NodeService struct {
 	locks           map[int64]*sync.Mutex
 	impactMu        sync.RWMutex
 	impactProvider  NodeImpactProvider
-	logger          *zap.Logger
-	restart         *RestartCoordinator
+	// referenceCleaner 由 bootstrap 注入(service 不碰 DB)。强制移除不可达节点前
+	// 用它摘掉 gb_device.zlm_node_id 之类的引用,避免留下指向已删节点的悬空值。
+	cleanerMu        sync.RWMutex
+	referenceCleaner NodeReferenceCleaner
+	logger           *zap.Logger
+	restart          *RestartCoordinator
 }
 
 // NewNodeService 构造
@@ -209,6 +215,8 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		Weight:              n.Weight,
 		Tags:                cloneTags(n.Tags),
 		State:               n.State,
+		Enabled:             n.IsEnabled(),
+		Health:              n.State,
 		RecoveryRequired:    n.RecoveryRequired,
 		RecoveryReason:      publicNodeRecoveryReason(n),
 		RecoveryFingerprint: publicNodeRecoveryFingerprint(n),
@@ -887,9 +895,8 @@ func (s *NodeService) rollbackNodeLocked(ctx context.Context, old *node.Node) er
 	return nil
 }
 
-// Delete 删除前必须 state=maintenance 且已排空流量:
-// 维护态允许旧流自然结束,但节点上仍有活跃会话/媒体源时删除会让
-// 注册表与监控中留下无法关联的媒体会话
+// Delete first closes admission, then removes a drained node. A node with
+// active work remains registered and disabled so operators can retry later.
 func (s *NodeService) Delete(ctx context.Context, id int64) error {
 	lock := s.nodeLock(id)
 	lock.Lock()
@@ -901,16 +908,17 @@ func (s *NodeService) Delete(ctx context.Context, id int64) error {
 	if s.nodeImpactProvider() != nil {
 		return ErrNodeImpactConfirmationRequired
 	}
-	if cur.State != node.StateMaintenance {
-		return ErrNodeNotInMaintenance
+	cur.AdminState = "disabled"
+	if err := s.registry.Update(ctx, *cur); err != nil {
+		return err
 	}
 	if cur.Stats.SessionCount > 0 || cur.Stats.MediaSourceCount > 0 {
-		return fmt.Errorf("节点仍有 %d 个会话 / %d 个媒体源,请等待排空后再删除", cur.Stats.SessionCount, cur.Stats.MediaSourceCount)
+		return fmt.Errorf("%w: 节点仍有 %d 个会话 / %d 个媒体源", ErrNodeImpactConflict, cur.Stats.SessionCount, cur.Stats.MediaSourceCount)
 	}
 	return s.registry.Delete(ctx, id)
 }
 
-// SetMaintenance 切到维护态
+// SetMaintenance is kept for old clients and now means Disable.
 func (s *NodeService) SetMaintenance(ctx context.Context, id int64) error {
 	if s.nodeImpactProvider() != nil {
 		if _, ok := s.registry.Get(id); !ok {
@@ -918,15 +926,13 @@ func (s *NodeService) SetMaintenance(ctx context.Context, id int64) error {
 		}
 		return ErrNodeImpactConfirmationRequired
 	}
-	return s.setState(ctx, id, node.StateMaintenance)
+	return s.Disable(ctx, id)
 }
 
-// Activate 切回 active
-//
-// 关键:同时把 LastHeartbeatAt 重置为 now,给 ZLM 一个 90s 宽限期
-// 让真实心跳上报。否则刚 Activate 完 Watcher 下一个 Tick 看到旧的
-// LastHeartbeatAt 又把它标回 offline。
-func (s *NodeService) Activate(ctx context.Context, id int64) error {
+// Disable stops new scheduling without interrupting existing sessions. The
+// health State is intentionally left untouched so an online disabled node is
+// distinguishable from an unreachable one.
+func (s *NodeService) Disable(ctx context.Context, id int64) error {
 	lock := s.nodeLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -934,14 +940,31 @@ func (s *NodeService) Activate(ctx context.Context, id int64) error {
 	if !ok {
 		return ErrNodeNotFound
 	}
-	cur.State = node.StateActive
-	cur.Stats.LastHeartbeatAt = time.Now()
-	if err := s.registry.Update(ctx, *cur); err != nil {
-		return err
+	cur.AdminState = "disabled"
+	return s.registry.Update(ctx, *cur)
+}
+
+// Enable restores the operator admission intent. Offline nodes remain offline
+// until a heartbeat arrives, at which point the normal scheduler gate opens.
+func (s *NodeService) Enable(ctx context.Context, id int64) error {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	cur, ok := s.registry.Get(id)
+	if !ok {
+		return ErrNodeNotFound
 	}
-	// Update 不带 Stats(Stats 只在内存),需单独 reset 内存里的 LastHeartbeatAt
-	s.registry.UpdateStats(cur.MediaServerUUID, cur.Stats)
-	return nil
+	cur.AdminState = ""
+	if cur.State == node.StateMaintenance {
+		cur.State = node.StateOffline
+	}
+	return s.registry.Update(ctx, *cur)
+}
+
+// Activate is kept for old clients and now means Enable. It must not invent a
+// heartbeat or turn an unreachable node healthy.
+func (s *NodeService) Activate(ctx context.Context, id int64) error {
+	return s.Enable(ctx, id)
 }
 
 func (s *NodeService) setState(ctx context.Context, id int64, state node.State) error {
@@ -953,6 +976,9 @@ func (s *NodeService) setState(ctx context.Context, id int64, state node.State) 
 		return ErrNodeNotFound
 	}
 	cur.State = state
+	if state == node.StateMaintenance {
+		cur.AdminState = "disabled"
+	}
 	return s.registry.Update(ctx, *cur)
 }
 

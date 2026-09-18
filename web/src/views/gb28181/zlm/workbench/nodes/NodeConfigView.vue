@@ -190,7 +190,12 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="node-config-view" aria-label="节点服务配置">
-    <header class="config-heading"><div><h2>服务配置</h2><p>只允许热更新项进入提交；保存结果必须经过 ZLMediaKit 实际值回读。Secret 不会回显。</p></div><a-button v-if="canRestart" status="danger" :loading="restartPolling" :disabled="!active || configDirty || restartPolling" @click="requestRestart"><template #icon><RotateCw :size="15" /></template>重启当前节点</a-button></header>
+    <header class="config-heading">
+      <slot name="heading">
+        <div><h2>服务配置</h2><p>只允许热更新项进入提交；保存结果必须经过 ZLMediaKit 实际值回读。Secret 不会回显。</p></div>
+      </slot>
+      <a-button v-if="canRestart" status="danger" :loading="restartPolling" :disabled="!active || configDirty || restartPolling" @click="requestRestart"><template #icon><RotateCw :size="15" /></template>重启当前节点</a-button>
+    </header>
     <a-alert v-if="pollingNotice" type="warning" class="config-page-alert">{{ pollingNotice }}</a-alert>
     <section v-if="restartOperation || restartError" :class="['restart-state', `restart-state--${restartView.tone}`]">
       <div class="restart-state__icon"><ServerCog :size="20" /></div>

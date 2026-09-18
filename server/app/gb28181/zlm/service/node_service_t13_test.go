@@ -445,7 +445,8 @@ func TestNodeServiceT13_NodeLockSerializesUpdateAndState(t *testing.T) {
 	require.NoError(t, <-stateDone)
 	got, ok := reg.Get(old.ID)
 	require.True(t, ok)
-	require.Equal(t, node.StateMaintenance, got.State)
+	require.Equal(t, node.StateActive, got.State)
+	require.False(t, got.IsEnabled())
 }
 
 func TestNodeServiceT13_CandidateCommitCannotBeOverwrittenByStaleMarkOffline(t *testing.T) {

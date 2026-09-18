@@ -25,6 +25,7 @@ type MetaNode struct {
 	Weight              int       `gorm:"column:weight;not null;default:50"`
 	TagsJSON            string    `gorm:"column:tags_json;type:text"`
 	State               string    `gorm:"column:state;size:16;not null;default:'active';index:idx_state"`
+	Enabled             bool      `gorm:"column:enabled;not null;default:true;index:idx_enabled"`
 	RecoveryRequired    bool      `gorm:"column:recovery_required;not null;default:false;index:idx_recovery_required"`
 	RecoveryReason      string    `gorm:"column:recovery_reason;size:255;not null;default:''"`
 	RecoveryFingerprint string    `gorm:"column:recovery_fingerprint;size:64;not null;default:''"`
@@ -36,6 +37,13 @@ type MetaNode struct {
 
 // TableName 显式表名(不走 gorm 的 pluralize 复数化)
 func (MetaNode) TableName() string { return "meta_node" }
+
+func adminState(enabled bool) string {
+	if enabled {
+		return ""
+	}
+	return "disabled"
+}
 
 // ToDomain MetaNode 行 → 业务侧 node.Node
 func (m MetaNode) ToDomain() node.Node {
@@ -56,6 +64,7 @@ func (m MetaNode) ToDomain() node.Node {
 		Weight:              m.Weight,
 		Tags:                tags,
 		State:               node.State(m.State),
+		AdminState:          adminState(m.Enabled),
 		RecoveryRequired:    m.RecoveryRequired,
 		RecoveryReason:      m.RecoveryReason,
 		RecoveryFingerprint: m.RecoveryFingerprint,
@@ -86,6 +95,7 @@ func fromDomain(n node.Node) MetaNode {
 		Weight:              n.Weight,
 		TagsJSON:            tagsJSON,
 		State:               string(n.State),
+		Enabled:             n.IsEnabled(),
 		RecoveryRequired:    n.RecoveryRequired,
 		RecoveryReason:      n.RecoveryReason,
 		RecoveryFingerprint: n.RecoveryFingerprint,
@@ -183,6 +193,7 @@ func (r *MetaNodeRepo) UpdateCAS(ctx context.Context, n node.Node, expectedRevis
 		"weight":               row.Weight,
 		"tags_json":            row.TagsJSON,
 		"state":                row.State,
+		"enabled":              row.Enabled,
 		"recovery_required":    row.RecoveryRequired,
 		"recovery_reason":      row.RecoveryReason,
 		"recovery_fingerprint": row.RecoveryFingerprint,

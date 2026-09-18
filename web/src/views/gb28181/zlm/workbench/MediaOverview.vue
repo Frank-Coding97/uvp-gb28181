@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 
+import MediaScopeBar from "./components/MediaScopeBar.vue";
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
 import RuntimeSummaryPanel from "./monitoring/RuntimeSummaryPanel.vue";
@@ -31,6 +32,7 @@ function drilldown(view: "streams" | "sessions") {
     :status-text="workspace.statusText.value"
     :last-success-at="workspace.lastSuccessAt.value"
     :show-toolbar-actions="false"
+    :show-scope="false"
     :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
     :allow-all="false"
@@ -43,7 +45,20 @@ function drilldown(view: "streams" | "sessions") {
         :active="workspace.activeView.value === 'overview'"
         :node-id="nodeId"
         @drilldown="drilldown"
-      />
+      >
+        <template #scope>
+          <MediaScopeBar
+            compact
+            :model-value="workspace.scope.value"
+            :nodes="workspace.nodes.value"
+            :allow-all="false"
+            :requires-node="true"
+            :loading="workspace.scopeLoading.value"
+            :show-refresh="false"
+            @update:model-value="workspace.setScope"
+          />
+        </template>
+      </RuntimeSummaryPanel>
     </template>
   </MediaWorkspaceShell>
 </template>

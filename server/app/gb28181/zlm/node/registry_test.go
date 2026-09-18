@@ -117,6 +117,28 @@ func TestRegistry_ListActive_SkipsOfflineAndMaintenance(t *testing.T) {
 	require.Equal(t, "a", active[0].Name)
 }
 
+func TestRegistry_ListSchedulableSkipsOnlineDisabledNode(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	mustAdd(t, r, node.Node{Name: "enabled", MediaServerUUID: "enabled", State: node.StateActive})
+	mustAdd(t, r, node.Node{Name: "disabled", MediaServerUUID: "disabled", State: node.StateActive, AdminState: "disabled"})
+
+	schedulable := r.ListSchedulable()
+	require.Len(t, schedulable, 1)
+	require.Equal(t, "enabled", schedulable[0].Name)
+}
+
+func TestRegistry_HeartbeatDoesNotEnableDisabledNode(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	added := mustAdd(t, r, node.Node{Name: "disabled", MediaServerUUID: "disabled", State: node.StateOffline, AdminState: "disabled"})
+
+	r.UpdateHeartbeatFields("disabled", 1, 2, time.Now())
+	got, ok := r.Get(added.ID)
+	require.True(t, ok)
+	require.Equal(t, node.StateActive, got.State)
+	require.False(t, got.IsEnabled())
+	require.Empty(t, r.ListSchedulable())
+}
+
 func TestRegistry_MarkOffline(t *testing.T) {
 	r := node.NewRegistry(newMemoryRepo())
 	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateActive})

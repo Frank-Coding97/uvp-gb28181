@@ -3,7 +3,7 @@ import NodeListPanel from "./workbench/nodes/NodeListPanel.vue";
 </script>
 
 <template>
-  <!-- Legacy route shell: NodeListPanel retains testZLMNodeConnection, ZLMNodeActionDialog,
-       gb28181:zlm:node:manage and gb28181:zlm:node:kick permission gates, impact fingerprint and danger confirmation. -->
+  <!-- Legacy route shell: NodeListPanel keeps routine actions behind gb28181:zlm:node:manage;
+       deletion still uses ZLMNodeActionDialog impact fingerprint confirmation. -->
   <NodeListPanel :canonical="false" />
 </template>

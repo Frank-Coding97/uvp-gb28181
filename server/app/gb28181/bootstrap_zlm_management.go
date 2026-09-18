@@ -1,9 +1,12 @@
 package gb28181
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	gbzlmmanagement "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
@@ -80,6 +83,16 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 	nodeService.SetNodeImpactProvider(gbzlmmanagement.NewRuntimeNodeImpactProvider(
 		gbzlmmanagement.NewExecutorNodeImpactSnapshotReader(executor),
 	))
+	// 强制移除不可达节点前摘掉引用:设备「首选节点」指向已删节点会让点播带着一个
+	// 不存在的 PreferredNodeID 进去,所以这个清理器是 PurgeUnreachable 的前置条件
+	// (未装配时该方法 fail-close,宁可不删)。
+	nodeService.SetNodeReferenceCleaner(func(ctx context.Context, nodeID int64) (int64, error) {
+		tx := app.DB().WithContext(ctx).
+			Model(&models.GbDevice{}).
+			Where("zlm_node_id = ?", nodeID).
+			Update("zlm_node_id", 0)
+		return tx.RowsAffected, tx.Error
+	})
 	installZLMManagementController()
 }
 

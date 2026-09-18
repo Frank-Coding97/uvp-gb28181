@@ -130,6 +130,37 @@ func TestStreamProbeAsyncFreshBaselinesContainQueryAPI(t *testing.T) {
 	}
 }
 
+func TestZLMNodeEnabledMySQLPermissionComparisonNormalizesCollation(t *testing.T) {
+	files := []struct {
+		name string
+		read func() ([]byte, error)
+	}{
+		{
+			name: "incremental migration",
+			read: func() ([]byte, error) {
+				return migrationsfs.FS.ReadFile("migrations/2026-09-18-zlm-node-enabled.sql")
+			},
+		},
+		{
+			name: "fresh MySQL baseline",
+			read: func() ([]byte, error) {
+				return os.ReadFile(filepath.Join("..", "..", "..", "resource", "database", "uvp-gb28181.sql"))
+			},
+		},
+	}
+
+	for _, file := range files {
+		t.Run(file.name, func(t *testing.T) {
+			body, err := file.read()
+			require.NoError(t, err)
+			normalized := strings.NewReplacer("`", "", "\n", " ", "\t", " ").Replace(strings.ToLower(string(body)))
+			normalized = strings.Join(strings.Fields(normalized), " ")
+			require.Contains(t, normalized, "convert(p.v1 using utf8mb4) collate utf8mb4_unicode_ci=a.path")
+			require.Contains(t, normalized, "convert(p.v2 using utf8mb4) collate utf8mb4_unicode_ci=a.method")
+		})
+	}
+}
+
 func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
 	files := []string{
 		"2026-08-15-device-assignment-permissions.sql",

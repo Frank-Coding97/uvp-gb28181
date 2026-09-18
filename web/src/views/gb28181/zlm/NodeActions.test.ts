@@ -54,7 +54,10 @@ describe("node impact actions", () => {
     expect(list).not.toContain("Modal.warning");
     expect(dialog).toContain("ZLMDangerActionDialog");
     expect(dialog).toContain("fingerprint");
+    expect(dialog).not.toContain("转不了维护态");
     expect(list).toContain("gb28181:zlm:node:manage");
-    expect(list).toContain("gb28181:zlm:node:kick");
+    const detailPanel = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/nodes/NodeDetail.vue"), "utf8");
+    expect(list).not.toContain("gb28181:zlm:node:kick");
+    expect(detailPanel).toContain("gb28181:zlm:node:kick");
   });
 });
