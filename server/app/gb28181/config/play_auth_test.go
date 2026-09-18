@@ -8,12 +8,38 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 type playAuthMutableSource struct {
+	app.YmlConfigInterf
 	values    map[string]interface{}
 	saveErr   error
 	saveCalls int
+}
+
+func TestOpenAPIMustAuthPolicySurvivesRawConfigChanges(t *testing.T) {
+	previous, oldSource := mustAuthRequired.Load(), app.ConfigYml
+	mustAuthRequired.Store(false)
+	t.Cleanup(func() { mustAuthRequired.Store(previous); app.ConfigYml = oldSource })
+	source := &playAuthMutableSource{values: map[string]interface{}{PlayAuthEnabledConfigKey: false}}
+	app.ConfigYml = source
+	require.False(t, CurrentPlayAuthSettings().Enabled, "never activated backend remains unchanged")
+	RequirePlayAuth()
+	RequirePlayAuth()
+	require.True(t, CurrentPlayAuthSettings().Enabled)
+	source.Set("openapi.enabled", false)
+	source.Set("openapi.play_enabled", false)
+	source.Set(PlayAuthEnabledConfigKey, false)
+	require.True(t, CurrentPlayAuthSettings().Enabled, "YAML reload cannot remove the persisted requirement")
+	require.ErrorIs(t, SavePlayAuthSettings(source, PlayAuthSettings{TTLSeconds: 120}), ErrPlayAuthRequired)
+	require.Zero(t, source.saveCalls)
+	require.False(t, source.GetBool(PlayAuthEnabledConfigKey), "do not silently rewrite YAML")
+	require.True(t, PlayAuthConfigConflict())
+	require.NoError(t, SavePlayAuthSettings(source, PlayAuthSettings{Enabled: true, TTLSeconds: 120}))
+	require.False(t, PlayAuthConfigConflict())
+	app.ConfigYml = nil
+	require.True(t, CurrentPlayAuthSettings().Enabled, "missing source is never an authoff fallback after locking")
 }
 
 func (s *playAuthMutableSource) Get(key string) interface{} { return s.values[key] }

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 )
@@ -24,6 +26,8 @@ var (
 
 type NodeInfo struct {
 	ID, DeviceID, ServerID string
+	NodeUUID               string
+	NodeRevision           uint64
 	Destination, Transport string
 	RecvIP                 string
 	TCPMode                bool
@@ -65,6 +69,9 @@ type UACInvite struct {
 
 type DialogInfo struct {
 	CallID string
+	// On error, only this explicit marker identifies a retained cleanup-only
+	// dialog. A generated CallID alone does not prove such a resource exists.
+	CleanupRequired bool
 }
 
 type PlaybackInviter interface {
@@ -88,30 +95,81 @@ type MediaWaiter interface {
 }
 
 type ServiceConfig struct {
-	ServerID  string
-	Metrics   *Metrics
-	MediaWait time.Duration
+	// The application shares this barrier. Without Intents this is only the
+	// original-epoch preflight; Intents additionally requires both child factories.
+	DeviceOperations *playauth.DeviceOperationBarrier
+	Intents          *playauth.DeviceOperationIntentStore
+	// Root policy is read at admission, not cached for a legacy instance.
+	// Stop/Close remain available; replacement requires closing and joining the
+	// old fixed-mode service before publishing a new durable instance.
+	RequireIntents func() bool
+	ServerID       string
+	Metrics        *Metrics
+	MediaWait      time.Duration
 }
 
 type Service struct {
-	registry      *Registry
-	picker        NodePicker
-	rtp           RTPOpener
-	inviter       PlaybackInviter
-	media         MediaWaiter
-	config        ServiceConfig
-	sweeperOnce   sync.Once
-	sweeperCancel context.CancelFunc
-	sweeperWG     sync.WaitGroup
-	lifecycle     context.Context
-	lifecycleStop context.CancelFunc
-	mediaReady    func(Session)
+	registry       *Registry
+	picker         NodePicker
+	rtp            RTPOpener
+	inviter        PlaybackInviter
+	media          MediaWaiter
+	config         ServiceConfig
+	producerMu     sync.Mutex
+	closing        bool
+	producers      int
+	producersDone  chan struct{}
+	sweeperStarted bool
+	lifecycle      context.Context
+	lifecycleStop  context.CancelFunc
+	mediaReady     func(Session)
 }
 
 func NewService(registry *Registry, picker NodePicker, rtp RTPOpener, inviter PlaybackInviter, media MediaWaiter, config ServiceConfig) *Service {
 	lifecycle, cancel := context.WithCancel(context.Background())
+	idle := make(chan struct{})
+	close(idle)
 	return &Service{registry: registry, picker: picker, rtp: rtp, inviter: inviter, media: media, config: config,
-		lifecycle: lifecycle, lifecycleStop: cancel}
+		lifecycle: lifecycle, lifecycleStop: cancel, producersDone: idle}
+}
+
+// Admission and the last-producer signal share a lock. A closing service cannot
+// miss a partially initialized Create/Action or a concurrently started sweeper.
+func (s *Service) addProducerLocked() {
+	if s.producers == 0 {
+		s.producersDone = make(chan struct{})
+	}
+	s.producers++
+}
+
+func (s *Service) finishProducer() {
+	s.producerMu.Lock()
+	defer s.producerMu.Unlock()
+	s.producers--
+	if s.producers == 0 {
+		close(s.producersDone)
+	}
+}
+
+func (s *Service) beginOperation(ctx context.Context) (context.Context, func(), error) {
+	s.producerMu.Lock()
+	if s.closing {
+		s.producerMu.Unlock()
+		return nil, nil, ErrRegistryClosed
+	}
+	if s.config.Intents == nil && s.config.RequireIntents != nil && s.config.RequireIntents() {
+		s.producerMu.Unlock()
+		return nil, nil, ErrRTPUnavailable
+	}
+	s.addProducerLocked()
+	s.producerMu.Unlock()
+	operationCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.lifecycle, cancel)
+	return operationCtx, func() {
+		stop()
+		cancel()
+		s.finishProducer()
+	}, nil
 }
 
 // SetMediaReadyObserver reports a successfully established playback stream.
@@ -169,44 +227,138 @@ func (r allocationResources) Unbind(context.Context) error {
 func (s *Service) fail(ctx context.Context, sessionID, stage, code string, cause error, resources CleanupResources) error {
 	_ = s.registry.Update(sessionID, func(session *Session) error {
 		session.ErrorStage, session.ErrorCode, session.Error = stage, code, cause
-		if resources != nil {
+		_, managed := session.Resources.(*playbackIntentOwner)
+		if resources != nil && !managed {
 			session.Resources = resources
 		}
 		return nil
 	})
-	started, finalizeErr := s.registry.FinalizeContextOnce(ctx, sessionID, StateFailed, stage+": "+cause.Error())
+	if session, ok := s.registry.Get(sessionID); ok {
+		if owner, managed := session.Resources.(*playbackIntentOwner); managed && owner.initializing() {
+			// Create's deferred join publishes all children before finalization;
+			// waiting here would make initialization wait on its own ready signal.
+			return &ServiceError{Stage: stage, Code: code, Err: cause}
+		}
+	}
+	terminal := StateFailed
+	// Close cancels in-flight work before closing the registry. Both racing
+	// paths must classify that cancellation as a stop, not a business failure.
+	if s.lifecycle != nil && s.lifecycle.Err() != nil && errors.Is(cause, context.Canceled) {
+		terminal = StateStopped
+	}
+	started, finalizeErr := s.registry.FinalizeContextOnce(ctx, sessionID, terminal, stage+": "+cause.Error())
 	if started && s.config.Metrics != nil {
-		s.config.Metrics.Failed.Add(1)
+		if terminal == StateFailed {
+			s.config.Metrics.Failed.Add(1)
+		}
 		s.config.Metrics.Cleaned.Add(1)
 	}
 	return &ServiceError{Stage: stage, Code: code, Err: errors.Join(cause, finalizeErr)}
 }
 
-func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResult, error) {
+func (s *Service) Create(ctx context.Context, request CreateRequest) (out CreateResult, createErr error) {
 	if s == nil || s.registry == nil || s.picker == nil || s.rtp == nil || s.inviter == nil || s.media == nil {
 		return CreateResult{}, ErrRTPUnavailable
 	}
 	if !gbconfig.IsSupportedPlaybackProtocol(request.DefaultProtocol) {
 		request.DefaultProtocol = gbconfig.DefaultPlaybackProtocol
 	}
-	operationCtx, operationCancel := context.WithCancel(ctx)
-	stopLifecycleCancel := context.AfterFunc(s.lifecycle, operationCancel)
-	defer func() {
-		stopLifecycleCancel()
-		operationCancel()
-	}()
+	operationCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	defer finish()
 	ctx = operationCtx
+	// Older component-only callers have no authorization snapshot. A real
+	// controller request or configured runtime must never fall back to that path.
+	if request.Authorization != (AuthorizationSnapshot{}) || s.config.DeviceOperations != nil {
+		a := request.Authorization
+		if s.config.DeviceOperations == nil || a.DevicePK <= 0 || a.ChannelPK <= 0 || a.DeviceEpoch <= 0 ||
+			a.CleanupCompletedEpoch != a.DeviceEpoch || a.DeviceCode != request.DeviceID || a.ChannelCode != request.SIPChannelID ||
+			len(a.ChannelCode) != 20 || strings.Trim(a.ChannelCode, "0123456789") != "" ||
+			strconv.FormatInt(a.ChannelPK, 10) != request.ChannelID {
+			return CreateResult{}, playauth.ErrDeviceOperationUnavailable
+		}
+		if err := s.config.DeviceOperations.AuthorizeEpoch(ctx, a.DeviceCode, a.DeviceEpoch); err != nil {
+			return CreateResult{}, err
+		}
+	}
+	var owner *playbackIntentOwner
+	if s.config.Intents != nil {
+		if _, ok := s.rtp.(IntentRTPFactory); !ok {
+			return CreateResult{}, ErrRTPUnavailable
+		}
+		if _, ok := s.inviter.(IntentSIPFactory); !ok {
+			return CreateResult{}, ErrRTPUnavailable
+		}
+		owner, err = newPlaybackIntentOwner(s.lifecycle, s.config.Intents, s.config.DeviceOperations, request)
+		if err != nil {
+			return CreateResult{}, err
+		}
+		request.Resources = owner
+	}
 	created, err := s.registry.Create(ctx, request)
 	if err != nil {
+		if owner != nil {
+			owner.cancel()
+			owner.finishInitialization()
+		}
 		return CreateResult{}, err
 	}
 	if s.config.Metrics != nil && !created.Existing {
 		s.config.Metrics.Created.Add(1)
 	}
 	if created.Existing {
+		if owner != nil {
+			owner.cancel()
+			owner.finishInitialization()
+		}
 		return CreateResult{Session: created.Session, Existing: true}, nil
 	}
 	session := created.Session
+	if owner != nil {
+		defer func() {
+			owner.finishInitialization()
+			if createErr != nil {
+				owner.cancel()
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				terminal := StateFailed
+				if s.lifecycle.Err() != nil && errors.Is(createErr, context.Canceled) {
+					terminal = StateStopped
+				}
+				started, cleanupErr := s.registry.FinalizeContextOnce(cleanupCtx, session.ID, terminal, "initialization failed")
+				if started && s.config.Metrics != nil {
+					if terminal == StateFailed {
+						s.config.Metrics.Failed.Add(1)
+					}
+					s.config.Metrics.Cleaned.Add(1)
+				}
+				createErr = errors.Join(createErr, cleanupErr)
+			}
+		}()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		stopOwner := context.AfterFunc(owner.ctx, cancel)
+		stopRequest := context.AfterFunc(ctx, owner.cancel)
+		defer func() { stopRequest(); stopOwner(); cancel() }()
+		if err := owner.begin(ctx); err != nil {
+			return CreateResult{}, s.fail(ctx, session.ID, "intent", "unavailable", err, owner)
+		}
+		// This watcher is a child of the already-admitted Create. Register it
+		// before Create can finish, even if Close has since sealed admission;
+		// the shared producer signal cannot become idle between the two.
+		s.producerMu.Lock()
+		s.addProducerLocked()
+		s.producerMu.Unlock()
+		go func() {
+			defer s.finishProducer()
+			<-owner.ctx.Done()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.Stop(cleanupCtx, session.ID, "operation cancelled")
+		}()
+	}
 	streamID, ssrc := randomPlaybackValue("pb-"), randomPlaybackSSRC()
 	node, err := s.picker.Pick(ctx, PickRequest{OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID,
 		SIPChannelID: request.SIPChannelID, RecordKey: request.RecordKey, StreamID: streamID,
@@ -217,8 +369,23 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if strings.TrimSpace(node.RecvIP) == "" {
 		return CreateResult{}, s.fail(ctx, session.ID, "node", "invalid", fmt.Errorf("%w: receive IP missing", ErrNodeUnavailable), nil)
 	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "node", "cancelled", err, nil)
+	}
 	tcpMode := request.TCPMode || node.TCPMode
-	allocation, err := s.rtp.Open(ctx, RTPRequest{NodeID: node.ID, StreamID: streamID, SSRC: ssrc, TCPMode: tcpMode})
+	rtpRequest := RTPRequest{NodeID: node.ID, StreamID: streamID, SSRC: ssrc, TCPMode: tcpMode}
+	var allocation RTPAllocation
+	if owner == nil {
+		allocation, err = s.rtp.Open(ctx, rtpRequest)
+	} else {
+		owner.rtp, err = s.rtp.(IntentRTPFactory).PrepareIntent(ctx, owner.store, owner.id, owner.version, node, rtpRequest)
+		if err == nil && owner.rtp == nil {
+			err = ErrRTPUnavailable
+		}
+		if err == nil {
+			allocation, err = owner.rtp.Open(ctx)
+		}
+	}
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "unavailable", fmt.Errorf("%w: %w", ErrRTPUnavailable, err), nil)
 	}
@@ -229,10 +396,16 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		ssrc = allocation.SSRC
 	}
 	resources := allocationResources{allocation: allocation}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "cancelled", err, resources)
+	}
 	if allocation.Bind != nil {
 		if err := allocation.Bind(); err != nil {
 			return CreateResult{}, s.fail(ctx, session.ID, "rtp", "bind_failed", err, resources)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "rtp", "cancelled", err, resources)
 	}
 	start, end := session.SegmentStart, session.SegmentEnd
 	playFrom := session.PlayFrom
@@ -268,18 +441,57 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if transport == "" {
 		transport = node.Transport
 	}
-	dialog, err := s.inviter.Invite(ctx, UACInvite{DeviceID: request.DeviceID, ChannelID: sipChannelID, Destination: destination,
-		Transport: transport, SSRC: ssrc, SDP: body})
+	invite := UACInvite{DeviceID: request.DeviceID, ChannelID: sipChannelID, Destination: destination, Transport: transport, SSRC: ssrc, SDP: body}
+	var dialog DialogInfo
+	if owner == nil {
+		dialog, err = s.inviter.Invite(ctx, invite)
+	} else {
+		var stored playauth.DeviceRTPResourceSteps
+		stored, err = owner.store.LoadRTPResourceSteps(ctx, owner.id)
+		var stepID string
+		if err == nil {
+			stepID, err = playauth.NewDeviceOperationIntentID()
+		}
+		if err == nil {
+			owner.sip, err = s.inviter.(IntentSIPFactory).PrepareIntent(owner.ctx, owner.store, owner.barrier, owner.lease, owner.id, stored.Intent.RowVersion, stepID, invite)
+		}
+		if err == nil && owner.sip == nil {
+			err = ErrRTPUnavailable
+		}
+		if err == nil {
+			dialog, err = owner.sip.Invite(ctx)
+		}
+	}
+	if dialog.CleanupRequired {
+		resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }
+		if dialog.CallID == "" && dialog.CleanupRequired {
+			resources.teardown = func(context.Context) error { return ErrPlaybackNotFound }
+		}
+	}
 	if err != nil {
+		if dialog.CleanupRequired && dialog.CallID != "" {
+			updateErr := s.registry.Update(session.ID, func(value *Session) error {
+				value.NodeID, value.StreamID, value.SSRC, value.CallID = node.ID, streamID, ssrc, dialog.CallID
+				return nil
+			})
+			err = errors.Join(err, updateErr)
+		}
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "failed", err, resources)
 	}
 	resources.teardown = func(teardownCtx context.Context) error { return s.inviter.Teardown(teardownCtx, dialog.CallID) }
+	var publishedResources CleanupResources = resources
+	if owner != nil {
+		publishedResources = owner
+	}
 	if err := s.registry.Update(session.ID, func(value *Session) error {
 		value.NodeID, value.StreamID, value.SSRC, value.CallID = node.ID, streamID, ssrc, dialog.CallID
-		value.PlayFrom, value.State, value.Resources = playFrom, StateBuffering, resources
+		value.PlayFrom, value.State, value.Resources = playFrom, StateBuffering, publishedResources
 		return nil
 	}); err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "session_update", err, resources)
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "invite", "cancelled", err, resources)
 	}
 	mediaCtx := ctx
 	mediaCancel := func() {}
@@ -290,6 +502,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	mediaCancel()
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "timeout", fmt.Errorf("%w: %w", ErrMediaWait, err), resources)
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "cancelled", err, resources)
 	}
 	if err := s.registry.Update(session.ID, func(value *Session) error {
 		selected := playurl.Select(playurl.FromMap(ready.URLs), request.DefaultProtocol, request.Secure)
@@ -305,6 +520,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	}
 	if s.mediaReady != nil {
 		s.mediaReady(*result)
+	}
+	if err := ctx.Err(); err != nil {
+		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "cancelled", err, resources)
 	}
 	return CreateResult{Session: result, Existing: created.Existing}, nil
 }
@@ -347,12 +565,17 @@ func (s *Service) Close(ctx context.Context) error {
 	if s == nil || s.registry == nil {
 		return nil
 	}
+	s.producerMu.Lock()
+	s.closing = true
+	done := s.producersDone
+	s.producerMu.Unlock()
 	if s.lifecycleStop != nil {
 		s.lifecycleStop()
 	}
-	if s.sweeperCancel != nil {
-		s.sweeperCancel()
-		s.sweeperWG.Wait()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	cleaned, err := s.registry.CloseOnce(ctx)
 	if cleaned > 0 && s.config.Metrics != nil {
@@ -365,16 +588,19 @@ func (s *Service) StartSweeper(parent context.Context, interval time.Duration) {
 	if s == nil || s.registry == nil || interval <= 0 {
 		return
 	}
-	s.sweeperOnce.Do(func() {
+	s.producerMu.Lock()
+	defer s.producerMu.Unlock()
+	if !s.closing && !s.sweeperStarted {
+		s.sweeperStarted = true
 		if parent == nil {
 			parent = context.Background()
 		}
 		ctx, cancel := context.WithCancel(s.lifecycle)
 		stopParent := context.AfterFunc(parent, cancel)
-		s.sweeperCancel = cancel
-		s.sweeperWG.Add(1)
+		s.addProducerLocked()
 		go func() {
-			defer s.sweeperWG.Done()
+			defer s.finishProducer()
+			defer cancel()
 			defer stopParent()
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
@@ -390,7 +616,7 @@ func (s *Service) StartSweeper(parent context.Context, interval time.Duration) {
 				}
 			}
 		}()
-	})
+	}
 }
 
 func (s *Service) MetricsSnapshot() MetricsSnapshot {
@@ -464,6 +690,15 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if s == nil || s.registry == nil {
 		return nil, ErrPlaybackNotFound
 	}
+	operationCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	ctx = operationCtx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	session, ok := s.registry.GetForOwner(sessionID, ownerID)
 	if !ok || session.State.IsTerminal() {
 		return nil, ErrPlaybackNotFound
@@ -481,12 +716,27 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if request.Action != "pause" && request.Action != "resume" && request.Action != "seek" && request.Action != "scale" {
 		return nil, ErrInvalidSession
 	}
-	actioner, ok := s.inviter.(PlaybackActioner)
-	if !ok {
-		return nil, ErrRTPUnavailable
+	position, scale := request.PositionSeconds, request.Scale
+	if owner, managed := session.Resources.(*playbackIntentOwner); managed {
+		command := playauth.DeviceSIPINFOCommand{Action: request.Action}
+		if request.Action == "seek" {
+			command.PositionNanos, command.SegmentDurationNanos = int64(time.Duration(position*float64(time.Second))), int64(duration)
+		}
+		if request.Action == "scale" {
+			command.Scale = scale
+		}
+		err = owner.action(ctx, command)
+	} else {
+		actioner, ok := s.inviter.(PlaybackActioner)
+		if !ok {
+			return nil, ErrRTPUnavailable
+		}
+		position, scale, err = actioner.Action(ctx, session.CallID, request.Action, request.PositionSeconds, request.Scale, duration)
 	}
-	position, scale, err := actioner.Action(ctx, session.CallID, request.Action, request.PositionSeconds, request.Scale, duration)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s.config.Metrics != nil {

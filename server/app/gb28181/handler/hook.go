@@ -157,7 +157,7 @@ type TalkStreamObserver interface {
 }
 
 type PlayAuthorizer interface {
-	Verify(string, playauth.Binding) (playauth.Claims, error)
+	VerifyContext(context.Context, string, playauth.Binding) (playauth.Claims, error)
 }
 
 type PlaybackMediaContextResolver interface {
@@ -188,29 +188,34 @@ var ErrPreviewRuntimeIncomplete = errors.New("management preview runtime must pr
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier          *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper           PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	policy            NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
-	leaseChecker      SourceLeaseChecker   // 级联 source lease,可为 nil
-	collector         KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver          NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
-	binder            StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
-	restartMu         sync.RWMutex
-	restartNotifier   RestartStartedNotifier
-	recordMP4         RecordMP4Indexer
-	recordResolver    NodeUUIDResolver
-	observer          StreamObserver
-	playbackMedia     PlaybackMediaSink
-	flowMu            sync.RWMutex
-	flowResolver      FlowReportNodeResolver
-	flowCollector     FlowCollector
-	talkResolver      NodeUUIDResolver
-	talkAuthorizer    TalkPublishAuthorizer
-	talkObserver      TalkStreamObserver
-	talkMu            sync.RWMutex
-	playAuthorizer    PlayAuthorizer
-	playResolver      PlaybackMediaContextResolver
-	playAuthMu        sync.RWMutex
+	notifier        *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper         PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy          NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	leaseChecker    SourceLeaseChecker   // 级联 source lease,可为 nil
+	collector       KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver        NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder          StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	restartMu       sync.RWMutex
+	restartNotifier RestartStartedNotifier
+	recordMP4       RecordMP4Indexer
+	recordResolver  NodeUUIDResolver
+	observer        StreamObserver
+	playbackMedia   PlaybackMediaSink
+	flowMu          sync.RWMutex
+	flowResolver    FlowReportNodeResolver
+	flowCollector   FlowCollector
+	talkResolver    NodeUUIDResolver
+	talkAuthorizer  TalkPublishAuthorizer
+	talkObserver    TalkStreamObserver
+	talkMu          sync.RWMutex
+	playAuthorizer  PlayAuthorizer
+	playResolver    PlaybackMediaContextResolver
+	playAuthMu      sync.RWMutex
+
+	openAPIPlayVerifier OpenAPIPlayTokenVerifier
+	openAPIPlayBinder   OpenAPIViewerBinder
+	openAPIFlowObserver OpenAPIFlowObserver
+
 	previewClassifier management.PreviewClassifier
 	previewVerifier   management.PreviewTokenVerifier
 	previewMu         sync.RWMutex
@@ -706,6 +711,9 @@ func (h *HookController) talkDependencies() (NodeUUIDResolver, TalkPublishAuthor
 }
 
 type onPlayBody struct {
+	ID            string `json:"id"`
+	BootNonce     string `json:"bootNonce"`
+	Protocol      string `json:"protocol"`
 	App           string `json:"app"`
 	Stream        string `json:"stream"`
 	Schema        string `json:"schema"`
@@ -718,6 +726,8 @@ type onPlayBody struct {
 type onFlowReportBody struct {
 	ID            string `json:"id"`
 	MediaServerID string `json:"mediaServerId"`
+	BootNonce     string `json:"bootNonce"`
+	Protocol      string `json:"protocol"`
 	Schema        string `json:"schema"`
 	VHost         string `json:"vhost"`
 	App           string `json:"app"`
@@ -743,6 +753,7 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		h.ignoreFlowReport(c, body.Stream, "payload_node_mismatch")
 		return
 	}
+	h.observeOpenAPIFlow(c, body)
 	resolver, collector := h.flowDependencies()
 	if resolver == nil || collector == nil {
 		hookOK(c)
@@ -823,6 +834,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, body.Stream, "global_rate_limited")
 		return
 	}
+	var claims playauth.Claims
 	var authorizationID string
 	if authSettings.Enabled {
 		params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
@@ -831,7 +843,8 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 			return
 		}
 		playToken, ok := singleValue(params, playauth.QueryParameter)
-		claims, verified := h.verifyAutoStartToken(playToken, playauth.Binding{
+		var verified bool
+		claims, verified = h.verifyAutoStartToken(c.Request.Context(), playToken, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: body.App,
 			Stream: body.Stream, MediaServerID: body.MediaServerID,
 		})
@@ -849,7 +862,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		return
 	}
 	if err := dispatcher.Submit(play.Request{
-		DeviceID: deviceID, ChannelID: channelID,
+		DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: claims.DeviceEpoch,
 		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
 		AuthorizationID: authorizationID,
 	}); err != nil {
@@ -878,6 +891,9 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnPlay, body.MediaServerID) {
 		h.denyPlayback(c, body.Stream, "wrong_resource", "hook payload node mismatch")
+		return
+	}
+	if h.handleOpenAPIPlay(c, body) {
 		return
 	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
@@ -975,14 +991,14 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		h.denyPlayback(c, body.Stream, "missing", "invalid playback authorization")
 		return
 	}
-	claims, err := authorizer.Verify(playToken, binding)
+	claims, err := authorizer.VerifyContext(c.Request.Context(), playToken, binding)
 	if err != nil {
 		h.denyPlayback(c, body.Stream, string(playauth.MetricOutcomeForError(playToken, err)), "playback authorization denied")
 		return
 	}
 	if binding.MediaGeneration == 0 && binding.BindClientIP {
-		verifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
-		if !ok || verifier.MarkVerifiedClientSource(playToken, claims, binding) != nil {
+		verifier, ok := authorizer.(playauth.ContextVerifiedClientAutoStartVerifier)
+		if !ok || verifier.MarkVerifiedClientSourceContext(c.Request.Context(), playToken, claims, binding) != nil {
 			h.denyPlayback(c, body.Stream, "unavailable", "playback authorization unavailable")
 			return
 		}
@@ -1115,23 +1131,23 @@ func (h *HookController) ignoreFlowReport(c *gin.Context, streamID, reasonCode s
 	hookOK(c)
 }
 
-func (h *HookController) verifyAutoStartToken(token string, binding playauth.Binding) (playauth.Claims, bool) {
+func (h *HookController) verifyAutoStartToken(ctx context.Context, token string, binding playauth.Binding) (playauth.Claims, bool) {
 	h.playAuthMu.RLock()
 	authorizer := h.playAuthorizer
 	h.playAuthMu.RUnlock()
-	verifier, ok := authorizer.(playauth.AutoStartVerifier)
+	verifier, ok := authorizer.(playauth.ContextAutoStartVerifier)
 	if !ok || verifier == nil || token == "" {
 		return playauth.Claims{}, false
 	}
-	claims, err := verifier.VerifyForAutoStart(token, binding)
+	claims, err := verifier.VerifyForAutoStartContext(ctx, token, binding)
 	if err == nil {
 		return claims, true
 	}
-	verifiedClientVerifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
+	verifiedClientVerifier, ok := authorizer.(playauth.ContextVerifiedClientAutoStartVerifier)
 	if !ok {
 		return playauth.Claims{}, false
 	}
-	claims, err = verifiedClientVerifier.VerifyForVerifiedClientAutoStart(token, binding)
+	claims, err = verifiedClientVerifier.VerifyForVerifiedClientAutoStartContext(ctx, token, binding)
 	return claims, err == nil
 }
 

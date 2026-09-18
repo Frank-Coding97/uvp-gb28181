@@ -23,7 +23,7 @@ func TestLoggingRequestBusinessGateClosesAdmissionButJoinsAcceptedWork(t *testin
 	require.NoError(t, gate.wait(context.Background()))
 }
 
-func TestLoggingShutdownReportsIncompleteBusinessAndKeepsTheSameResult(t *testing.T) {
+func TestLoggingShutdownCallerTimeoutDoesNotCancelOwnedDrain(t *testing.T) {
 	server, err := NewServer(testConfig())
 	require.NoError(t, err)
 	require.True(t, server.businessWork.enter())
@@ -35,5 +35,5 @@ func TestLoggingShutdownReportsIncompleteBusinessAndKeepsTheSameResult(t *testin
 	require.True(t, errors.Is(firstErr, context.DeadlineExceeded))
 
 	server.businessWork.leave()
-	require.ErrorIs(t, server.Shutdown(context.Background()), context.DeadlineExceeded)
+	require.NoError(t, server.Shutdown(context.Background()))
 }

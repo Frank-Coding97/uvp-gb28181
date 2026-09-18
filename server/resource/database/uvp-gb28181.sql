@@ -439,9 +439,14 @@ CREATE TABLE `gb_device` (
   `effective_version` varchar(8) NOT NULL DEFAULT 2016 COMMENT '当前生效协议版本',
   `effective_version_source` varchar(16) NOT NULL DEFAULT 'default' COMMENT '生效版本来源',
   `effective_version_at` datetime(3) DEFAULT NULL COMMENT '生效版本更新时间',
+  `access_epoch` bigint NOT NULL DEFAULT 1 COMMENT '设备访问授权世代',
+  `legacy_revoked_before` datetime DEFAULT NULL COMMENT '旧授权撤销时间边界',
+  `cleanup_completed_epoch` bigint NOT NULL DEFAULT 1 COMMENT '清理完成授权世代',
   `zlm_node_id` bigint NOT NULL DEFAULT 0 COMMENT '首选 ZLM 节点,0 表示自动调度',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,
+  CONSTRAINT `ck_gb_device_access_epoch` CHECK (`access_epoch` > 0),
+  CONSTRAINT `ck_gb_device_cleanup_completed_epoch` CHECK (`cleanup_completed_epoch` > 0 AND `cleanup_completed_epoch` <= `access_epoch`),
   KEY `idx_deleted_at` (`deleted_at`),
   KEY `idx_status_keepalive` (`status`, `keepalive_time`),
   KEY `idx_subscribe_capability` (`subscribe_capability`, `subscribe_last_test`),
@@ -782,7 +787,7 @@ CREATE TABLE `gb_ptz_state` (
   UNIQUE KEY `uk_ptz_state_channel` (`channel_id`),
   KEY `idx_ptz_state_device` (`device_id`),
   KEY `idx_ptz_state_received` (`received_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 latest PTZ state';;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 latest PTZ state';
 
 -- Recording plan domain tables
 DROP TABLE IF EXISTS `gb_recording_plan_gap`;
@@ -8871,3 +8876,426 @@ JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api
 WHERE m.`permission`='gb28181:zlm:node:manage' AND a.`path` IN ('/api/gb28181/zlm/nodes/:id/enable','/api/gb28181/zlm/nodes/:id/disable') AND a.`method`='POST'
   AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND CONVERT(p.`v1` USING utf8mb4) COLLATE utf8mb4_unicode_ci=a.`path` AND CONVERT(p.`v2` USING utf8mb4) COLLATE utf8mb4_unicode_ci=a.`method` AND p.`v3`='*');
 -- zlm-node-enabled-permissions:end
+-- openapi-aksk-core:begin
+-- T01 foundation only. No clients or permissions are provisioned by migration.
+CREATE TABLE IF NOT EXISTS sys_openapi_client (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    ak VARCHAR(36) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    owner_dept_id BIGINT NOT NULL,
+    responsible_user_id BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'disabled',
+    secret_ciphertext VARBINARY(64) NOT NULL,
+    secret_iv VARBINARY(12) NOT NULL,
+    secret_key_id VARCHAR(64) NOT NULL,
+    secret_version BIGINT NOT NULL DEFAULT 1,
+    auth_epoch BIGINT NOT NULL DEFAULT 1,
+    rate_limit INT NOT NULL DEFAULT 10,
+    burst INT NOT NULL DEFAULT 20,
+    viewer_quota INT NOT NULL DEFAULT 10,
+    row_version BIGINT NOT NULL DEFAULT 1,
+    created_by BIGINT NOT NULL,
+    updated_by BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT pk_openapi_client PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    INDEX idx_openapi_client_dept (owner_dept_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS sys_openapi_client_scope (
+    client_id BIGINT NOT NULL,
+    scope VARCHAR(64) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    updated_by BIGINT NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT pk_openapi_client_scope PRIMARY KEY (client_id, scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS sys_openapi_nonce (
+    client_id BIGINT NOT NULL,
+    nonce VARCHAR(32) NOT NULL,
+    accepted_at DATETIME(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    CONSTRAINT uk_openapi_nonce PRIMARY KEY (client_id, nonce),
+    INDEX idx_openapi_nonce_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS sys_openapi_audit (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    request_id VARCHAR(64) NOT NULL,
+    client_id BIGINT NULL,
+    ak_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+    scope VARCHAR(64) NOT NULL DEFAULT '',
+    resource_type VARCHAR(32) NOT NULL DEFAULT '',
+    resource_id VARCHAR(128) NOT NULL DEFAULT '',
+    result VARCHAR(24) NOT NULL,
+    reason_class VARCHAR(64) NOT NULL DEFAULT '',
+    source VARCHAR(64) NOT NULL DEFAULT '',
+    latency_ms BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL,
+    completed_at DATETIME(6) NULL,
+    CONSTRAINT pk_openapi_audit PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_audit_request UNIQUE (request_id),
+    INDEX idx_openapi_audit_client_time (client_id, created_at),
+    INDEX idx_openapi_audit_time (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- openapi-aksk-core:end
+
+-- openapi-aksk-media:begin
+CREATE TABLE IF NOT EXISTS gb_openapi_play_grant (
+    grant_id CHAR(36) COLLATE utf8mb4_bin NOT NULL,
+    client_id BIGINT NOT NULL,
+    scope VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    device_id VARCHAR(20) COLLATE utf8mb4_bin NULL,
+    channel_id VARCHAR(20) COLLATE utf8mb4_bin NULL,
+    client_epoch BIGINT NOT NULL DEFAULT 1,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    device_epoch BIGINT NOT NULL DEFAULT 1,
+    node_uuid VARCHAR(64) COLLATE utf8mb4_bin NULL,
+    boot_nonce CHAR(32) COLLATE utf8mb4_bin NULL,
+    `schema` VARCHAR(32) COLLATE utf8mb4_bin NULL,
+    vhost VARCHAR(128) COLLATE utf8mb4_bin NULL,
+    app VARCHAR(64) COLLATE utf8mb4_bin NULL,
+    stream VARCHAR(255) COLLATE utf8mb4_bin NULL,
+    media_generation BIGINT NULL,
+    protocol VARCHAR(16) COLLATE utf8mb4_bin NULL,
+    issued_at DATETIME(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    state VARCHAR(16) COLLATE utf8mb4_bin NOT NULL DEFAULT 'pending',
+    reason VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
+    CONSTRAINT ck_openapi_grant_state CHECK (state IN ('pending','issued','bound','revoked','expired','failed')),
+    CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND device_id <> '' AND channel_id IS NOT NULL AND channel_id <> '' AND node_uuid IS NOT NULL AND node_uuid <> '' AND boot_nonce IS NOT NULL AND boot_nonce <> '' AND CHAR_LENGTH(boot_nonce) = 32 AND `schema` IS NOT NULL AND `schema` <> '' AND vhost IS NOT NULL AND vhost <> '' AND app IS NOT NULL AND app <> '' AND stream IS NOT NULL AND stream <> '' AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL AND protocol <> '')),
+    INDEX idx_openapi_grant_client_state (client_id, state),
+    INDEX idx_openapi_grant_expires (expires_at),
+    INDEX idx_openapi_grant_node_boot (node_uuid, boot_nonce)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE IF NOT EXISTS gb_openapi_viewer (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    grant_id CHAR(36) COLLATE utf8mb4_bin NOT NULL,
+    node_uuid VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    boot_nonce CHAR(32) COLLATE utf8mb4_bin NOT NULL,
+    identifier VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,
+    `schema` VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
+    vhost VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,
+    app VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    stream VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
+    media_generation BIGINT NOT NULL,
+    state VARCHAR(16) COLLATE utf8mb4_bin NOT NULL DEFAULT 'pending',
+    last_seen_at DATETIME(6) NULL,
+    retry_at DATETIME(6) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error_class VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT fk_openapi_viewer_grant FOREIGN KEY (grant_id) REFERENCES gb_openapi_play_grant (grant_id) ON DELETE RESTRICT,
+    CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid, boot_nonce, identifier),
+    CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> '' AND boot_nonce <> '' AND CHAR_LENGTH(boot_nonce) = 32 AND identifier <> ''),
+    CONSTRAINT ck_openapi_viewer_media_binding CHECK (`schema` <> '' AND vhost <> '' AND app <> '' AND stream <> '' AND media_generation > 0),
+    CONSTRAINT ck_openapi_viewer_state CHECK (state IN ('pending','active','revoke_pending','closed')),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation > 0),
+    CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0),
+    INDEX idx_openapi_viewer_state_retry (state, retry_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+SET @openapi_schema_name := DATABASE();
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='current_boot_nonce')=0,'ALTER TABLE `meta_node` ADD COLUMN `current_boot_nonce` CHAR(32) NULL','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='retired_boot_history')=0,'ALTER TABLE `meta_node` ADD COLUMN `retired_boot_history` TEXT NULL','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='runtime_epoch')=0,'ALTER TABLE `meta_node` ADD COLUMN `runtime_epoch` BIGINT NOT NULL DEFAULT 0','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='runtime_protocol_version')=0,'ALTER TABLE `meta_node` ADD COLUMN `runtime_protocol_version` BIGINT NOT NULL DEFAULT 0','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='runtime_confirmed_revision')=0,'ALTER TABLE `meta_node` ADD COLUMN `runtime_confirmed_revision` BIGINT NOT NULL DEFAULT 0','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='runtime_confirmed_at')=0,'ALTER TABLE `meta_node` ADD COLUMN `runtime_confirmed_at` DATETIME(6) NULL','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+SET @openapi_sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@openapi_schema_name AND table_name='meta_node' AND column_name='runtime_identity_status')=0,'ALTER TABLE `meta_node` ADD COLUMN `runtime_identity_status` VARCHAR(16) NOT NULL DEFAULT ''unknown''','SELECT 1');
+PREPARE openapi_stmt FROM @openapi_sql; EXECUTE openapi_stmt; DEALLOCATE PREPARE openapi_stmt;
+-- openapi-aksk-media:end
+
+-- openapi-aksk-permissions:begin
+-- T04 management permission catalog. IDs are resolved by natural keys; only
+-- the existing system-admin role receives the initial grant.
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '查看 OpenAPI 客户端列表','/api/gb28181/openapi-clients','GET','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients' AND method='GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '创建 OpenAPI 客户端','/api/gb28181/openapi-clients','POST','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '查看 OpenAPI 能力目录','/api/gb28181/openapi-clients/capabilities','GET','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/capabilities' AND method='GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '查看 OpenAPI 客户端详情','/api/gb28181/openapi-clients/:id','GET','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id' AND method='GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '分配 OpenAPI 客户端能力','/api/gb28181/openapi-clients/:id/scopes','PUT','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/scopes' AND method='PUT' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '轮换 OpenAPI 客户端密钥','/api/gb28181/openapi-clients/:id/rotate-secret','POST','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/rotate-secret' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '启用 OpenAPI 客户端','/api/gb28181/openapi-clients/:id/enable','POST','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/enable' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '停用 OpenAPI 客户端','/api/gb28181/openapi-clients/:id/disable','POST','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/disable' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '撤销 OpenAPI 客户端','/api/gb28181/openapi-clients/:id/revoke','POST','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/revoke' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '查看 OpenAPI 客户端审计','/api/gb28181/openapi-clients/:id/audits','GET','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/audits' AND method='GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '查看 OpenAPI 客户端撤销进度','/api/gb28181/openapi-clients/:id/revocation-status','GET','GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/openapi-clients/:id/revocation-status' AND method='GET' AND deleted_at IS NULL);
+
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_read','','查看 OpenAPI 客户端',1,0,100,3,'gb28181:openapi:client:read','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:read' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_create','','创建 OpenAPI 客户端',1,0,100,3,'gb28181:openapi:client:create','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:create' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_grant','','分配 OpenAPI 客户端能力',1,0,100,3,'gb28181:openapi:client:grant','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:grant' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_rotate','','轮换 OpenAPI 客户端密钥',1,0,100,3,'gb28181:openapi:client:rotate','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:rotate' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_status','','启停或撤销 OpenAPI 客户端',1,0,100,3,'gb28181:openapi:client:status','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:status' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,'','Permission_gb28181_openapi_client_audit','','查看 OpenAPI 客户端审计',1,0,100,3,'gb28181:openapi:client:audit','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:client:audit' AND deleted_at IS NULL);
+
+INSERT INTO sys_role_menu(role_id,menu_id) SELECT r.id,m.id FROM sys_role r CROSS JOIN sys_menu m WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL AND m.permission IN ('gb28181:openapi:client:read','gb28181:openapi:client:create','gb28181:openapi:client:grant','gb28181:openapi:client:rotate','gb28181:openapi:client:status','gb28181:openapi:client:audit') AND m.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=r.id AND x.menu_id=m.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:read' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND ((a.path='/api/gb28181/openapi-clients' AND a.method='GET') OR (a.path='/api/gb28181/openapi-clients/capabilities' AND a.method='GET') OR (a.path='/api/gb28181/openapi-clients/:id' AND a.method='GET')) AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:create' AND a.path='/api/gb28181/openapi-clients' AND a.method='POST' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:grant' AND a.path='/api/gb28181/openapi-clients/:id/scopes' AND a.method='PUT' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:rotate' AND a.path='/api/gb28181/openapi-clients/:id/rotate-secret' AND a.method='POST' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:status' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND ((a.path='/api/gb28181/openapi-clients/:id/enable' AND a.method='POST') OR (a.path='/api/gb28181/openapi-clients/:id/disable' AND a.method='POST') OR (a.path='/api/gb28181/openapi-clients/:id/revoke' AND a.method='POST') OR (a.path='/api/gb28181/openapi-clients/:id/revocation-status' AND a.method='GET')) AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:openapi:client:audit' AND a.path='/api/gb28181/openapi-clients/:id/audits' AND a.method='GET' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','','' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=1 AND EXISTS (SELECT 1 FROM sys_role r WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL) AND m.permission LIKE 'gb28181:openapi:client:%' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0=CONCAT('role_',rm.role_id) AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
+-- openapi-aksk-permissions:end
+
+-- openapi-client-menu:begin
+-- T14 dynamic menu entry. This migration owns one page row and only reparents
+-- the six pre-existing OpenAPI management buttons; it never creates APIs.
+-- The temporary duplicate-key guard makes a foreign page/button collision fail
+-- before any persistent row is changed.
+
+CREATE TEMPORARY TABLE IF NOT EXISTS `__openapi_client_menu_guard` (
+  `id` TINYINT UNSIGNED NOT NULL PRIMARY KEY
+);
+INSERT INTO `__openapi_client_menu_guard` (`id`)
+VALUES (1);
+INSERT INTO `__openapi_client_menu_guard` (`id`)
+SELECT 1
+WHERE
+  EXISTS (
+    SELECT 1 FROM `sys_menu`
+    WHERE `deleted_at` IS NULL AND `path`='/gb28181/openapi-client'
+      AND (`parent_id`<>0 OR COALESCE(`name`,'')<>'gb28181-openapi-client'
+        OR COALESCE(`component`,'')<>'gb28181/openapi-client/index'
+        OR COALESCE(`title`,'')<>'OpenAPI 客户端' OR COALESCE(`redirect`,'')<>''
+        OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>0 OR COALESCE(`disable`,0)<>0
+        OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>''
+        OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'lucide:KeyRound'
+        OR COALESCE(`sort`,0)<>15 OR COALESCE(`type`,0)<>2 OR COALESCE(`is_link`,0)<>0 OR COALESCE(`permission`,'')<>'')
+  )
+  OR EXISTS (
+    SELECT 1 FROM `sys_menu`
+    WHERE `deleted_at` IS NULL AND `name`='gb28181-openapi-client'
+      AND `path`<>'/gb28181/openapi-client'
+  )
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `path`='/gb28181/openapi-client')>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:read')<>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:create')<>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:grant')<>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:rotate')<>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:status')<>1
+  OR (SELECT COUNT(*) FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:audit')<>1
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:read' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_read' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'查看 OpenAPI 客户端' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:create' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_create' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'创建 OpenAPI 客户端' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:grant' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_grant' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'分配 OpenAPI 客户端能力' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:rotate' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_rotate' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'轮换 OpenAPI 客户端密钥' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:status' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_status' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'启停或撤销 OpenAPI 客户端' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (SELECT 1 FROM `sys_menu` WHERE `deleted_at` IS NULL AND `permission`='gb28181:openapi:client:audit' AND (COALESCE(`name`,'')<>'Permission_gb28181_openapi_client_audit' OR COALESCE(`path`,'')<>'' OR COALESCE(`redirect`,'')<>'' OR COALESCE(`component`,'')<>'' OR COALESCE(`title`,'')<>'查看 OpenAPI 客户端审计' OR COALESCE(`is_full`,0)<>0 OR COALESCE(`hide`,0)<>1 OR COALESCE(`disable`,0)<>0 OR COALESCE(`keep_alive`,0)<>0 OR COALESCE(`affix`,0)<>0 OR COALESCE(`link`,'')<>'' OR COALESCE(`iframe`,0)<>0 OR COALESCE(`svg_icon`,'')<>'' OR COALESCE(`icon`,'')<>'' OR COALESCE(`sort`,0)<>100 OR COALESCE(`type`,0)<>3 OR COALESCE(`is_link`,0)<>0))
+  OR EXISTS (
+    SELECT 1 FROM `sys_menu` b
+    WHERE b.`deleted_at` IS NULL
+      AND b.`permission` IN ('gb28181:openapi:client:read','gb28181:openapi:client:create','gb28181:openapi:client:grant','gb28181:openapi:client:rotate','gb28181:openapi:client:status','gb28181:openapi:client:audit')
+      AND b.`parent_id`<>0
+      AND (NOT EXISTS (SELECT 1 FROM `sys_menu` p WHERE p.`deleted_at` IS NULL AND p.`path`='/gb28181/openapi-client' AND p.`name`='gb28181-openapi-client' AND p.`component`='gb28181/openapi-client/index' AND p.`parent_id`=0 AND p.`type`=2)
+        OR b.`parent_id`<>(SELECT MIN(p.`id`) FROM `sys_menu` p WHERE p.`deleted_at` IS NULL AND p.`path`='/gb28181/openapi-client' AND p.`name`='gb28181-openapi-client' AND p.`component`='gb28181/openapi-client/index' AND p.`parent_id`=0 AND p.`type`=2))
+  );
+DROP TEMPORARY TABLE IF EXISTS `__openapi_client_menu_guard`;
+
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`redirect`,`component`,`title`,`is_full`,`hide`,`disable`,`keep_alive`,`affix`,`link`,`iframe`,`svg_icon`,`icon`,`sort`,`type`,`is_link`,`permission`,`created_at`,`updated_at`,`created_by`)
+SELECT 0,'/gb28181/openapi-client','gb28181-openapi-client','','gb28181/openapi-client/index','OpenAPI 客户端',0,0,0,0,0,'',0,'','lucide:KeyRound',15,2,0,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `path`='/gb28181/openapi-client' AND `deleted_at` IS NULL);
+
+UPDATE `sys_menu`
+SET `parent_id`=(SELECT `id` FROM (SELECT MIN(p.`id`) AS `id` FROM `sys_menu` p WHERE p.`path`='/gb28181/openapi-client' AND p.`name`='gb28181-openapi-client' AND p.`component`='gb28181/openapi-client/index' AND p.`deleted_at` IS NULL) AS page)
+WHERE `permission` IN ('gb28181:openapi:client:read','gb28181:openapi:client:create','gb28181:openapi:client:grant','gb28181:openapi:client:rotate','gb28181:openapi:client:status','gb28181:openapi:client:audit')
+  AND `deleted_at` IS NULL AND `parent_id`=0;
+
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`)
+SELECT r.`id`,m.`id`
+FROM `sys_role` r CROSS JOIN `sys_menu` m
+WHERE r.`id`=1 AND r.`status`=1 AND r.`deleted_at` IS NULL
+  AND m.`path`='/gb28181/openapi-client' AND m.`name`='gb28181-openapi-client' AND m.`component`='gb28181/openapi-client/index' AND m.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=r.`id` AND x.`menu_id`=m.`id`);
+
+-- openapi-client-menu:end
+
+-- openapi-must-auth:begin
+-- Append-only security commitment: never reset an existing row during upgrade.
+CREATE TABLE IF NOT EXISTS sys_openapi_security_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    must_auth_locked TINYINT NOT NULL DEFAULT 0,
+    locked_at DATETIME(6) NULL,
+    lock_version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_openapi_security_singleton CHECK (id = 1),
+    CONSTRAINT ck_openapi_security_state CHECK (
+        (must_auth_locked = 0 AND lock_version = 0 AND locked_at IS NULL)
+        OR (must_auth_locked = 1 AND lock_version > 0 AND locked_at IS NOT NULL)
+    )
+) ENGINE=InnoDB;
+INSERT INTO sys_openapi_security_state (id, must_auth_locked, locked_at, lock_version)
+SELECT 1, 0, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM sys_openapi_security_state WHERE id = 1);
+-- openapi-must-auth:end
+
+-- device-operation-intent:begin
+-- Durable reservation only. dispatched means may-have-dispatched, not success.
+-- Append-only safety history; no cascading deletion or automatic completion.
+CREATE TABLE IF NOT EXISTS gb_device_operation_intent (
+    operation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+    contract_version BIGINT NOT NULL,
+    device_pk BIGINT NOT NULL,
+    device_code VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    device_epoch BIGINT NOT NULL,
+    target_scope VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    target_pk BIGINT NOT NULL,
+    target_code VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    row_version BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    dispatch_started_at DATETIME(6) NULL,
+    cancelled_at DATETIME(6) NULL,
+    CONSTRAINT ck_device_intent_identity CHECK (
+        contract_version = 1 AND device_pk > 0 AND device_epoch > 0 AND target_pk > 0
+        AND REGEXP_LIKE(operation_id, '^[0-9a-f]{32}$', 'c')
+        AND REGEXP_LIKE(device_code, '^[0-9]{20}$', 'c')
+        AND REGEXP_LIKE(target_code, '^[0-9]{20}$', 'c')
+        AND (target_scope = 'channel' OR
+            (target_scope = 'device' AND target_pk = device_pk AND target_code = device_code))
+        AND kind IN ('live', 'playback', 'download', 'talk', 'ptz')
+    ),
+    CONSTRAINT ck_device_intent_phase CHECK (
+        updated_at >= created_at AND (
+            (state = 'reserved' AND row_version = 1 AND dispatch_started_at IS NULL AND cancelled_at IS NULL)
+            OR (state = 'dispatched' AND row_version >= 2 AND cancelled_at IS NULL
+                AND dispatch_started_at IS NOT NULL AND dispatch_started_at >= created_at AND dispatch_started_at <= updated_at)
+            OR (state = 'cancelled' AND row_version >= 2 AND dispatch_started_at IS NULL
+                AND cancelled_at IS NOT NULL AND cancelled_at >= created_at AND cancelled_at <= updated_at)
+        )
+    ),
+    INDEX ix_device_intent_recovery (device_pk, device_epoch, state, operation_id)
+) ENGINE=InnoDB;
+-- device-operation-intent:end
+
+-- device-operation-rtp-steps:begin
+-- RTP-only fixed evidence. NULL preserves unknown legacy history.
+-- TEXT preserves canonical bytes; the application validates the full contract.
+SET @rtp_steps_column_exists := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'gb_device_operation_intent' AND column_name = 'rtp_steps_json');
+SET @rtp_steps_sql := IF(@rtp_steps_column_exists = 0,
+    'ALTER TABLE gb_device_operation_intent ADD COLUMN rtp_steps_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', 'SELECT 1');
+PREPARE rtp_steps_stmt FROM @rtp_steps_sql;
+EXECUTE rtp_steps_stmt;
+DEALLOCATE PREPARE rtp_steps_stmt;
+SET @rtp_steps_constraint_exists := (SELECT COUNT(*) FROM information_schema.table_constraints
+    WHERE constraint_schema = DATABASE() AND table_name = 'gb_device_operation_intent' AND constraint_name = 'ck_device_intent_rtp_size');
+SET @rtp_steps_sql := IF(@rtp_steps_constraint_exists = 0,
+    'ALTER TABLE gb_device_operation_intent ADD CONSTRAINT ck_device_intent_rtp_size CHECK (rtp_steps_json IS NULL OR OCTET_LENGTH(rtp_steps_json) BETWEEN 1 AND 32768)', 'SELECT 1');
+PREPARE rtp_steps_stmt FROM @rtp_steps_sql;
+EXECUTE rtp_steps_stmt;
+DEALLOCATE PREPARE rtp_steps_stmt;
+-- device-operation-rtp-steps:end
+
+-- device-operation-sip-steps:begin
+-- SIP INVITE-only fixed evidence. NULL preserves unknown legacy history.
+-- TEXT preserves canonical bytes; the application validates the full contract.
+SET @sip_steps_column_exists := (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'gb_device_operation_intent' AND column_name = 'sip_steps_json');
+SET @sip_steps_sql := IF(@sip_steps_column_exists = 0,
+    'ALTER TABLE gb_device_operation_intent ADD COLUMN sip_steps_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', 'SELECT 1');
+PREPARE sip_steps_stmt FROM @sip_steps_sql;
+EXECUTE sip_steps_stmt;
+DEALLOCATE PREPARE sip_steps_stmt;
+SET @sip_steps_constraint_exists := (SELECT COUNT(*) FROM information_schema.table_constraints
+    WHERE constraint_schema = DATABASE() AND table_name = 'gb_device_operation_intent' AND constraint_name = 'ck_device_intent_sip_size');
+SET @sip_steps_sql := IF(@sip_steps_constraint_exists = 0,
+    'ALTER TABLE gb_device_operation_intent ADD CONSTRAINT ck_device_intent_sip_size CHECK (sip_steps_json IS NULL OR OCTET_LENGTH(sip_steps_json) BETWEEN 1 AND 32768)', 'SELECT 1');
+PREPARE sip_steps_stmt FROM @sip_steps_sql;
+EXECUTE sip_steps_stmt;
+DEALLOCATE PREPARE sip_steps_stmt;
+-- device-operation-sip-steps:end
+
+-- openapi-process-authority:begin
+-- Root registers generations only while holding the protected local lifetime lock.
+-- No seed owner or historical backfill. Retain this ledger across application rollback.
+CREATE TABLE IF NOT EXISTS sys_openapi_process_generation (
+    generation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+    domain_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    started_at DATETIME(6) NOT NULL,
+    CONSTRAINT uk_openapi_generation_domain UNIQUE (domain_id, generation_id),
+    CONSTRAINT ck_openapi_generation_identity CHECK (
+        LENGTH(generation_id) = 32 AND generation_id NOT REGEXP '[^0-9a-f]'
+        AND generation_id <> '00000000000000000000000000000000'
+        AND LENGTH(domain_id) = 32 AND domain_id NOT REGEXP '[^0-9a-f]'
+        AND domain_id <> '00000000000000000000000000000000'
+    )
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS sys_openapi_process_authority (
+    id BIGINT NOT NULL PRIMARY KEY,
+    domain_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    current_generation_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    row_version BIGINT NOT NULL,
+    CONSTRAINT ck_openapi_authority_singleton CHECK (id = 1 AND row_version > 0),
+    CONSTRAINT fk_openapi_authority_generation FOREIGN KEY (domain_id, current_generation_id)
+        REFERENCES sys_openapi_process_generation (domain_id, generation_id)
+) ENGINE=InnoDB;
+-- openapi-process-authority:end
+
+-- ptz-device-intent:begin
+-- Original PTZ authorization; historical rows deliberately remain NULL.
+SET @ptz_epoch_column = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation' AND column_name = 'device_epoch');
+SET @ptz_epoch_sql = IF(@ptz_epoch_column = 0, 'ALTER TABLE gb_ptz_operation ADD COLUMN device_epoch BIGINT NULL', 'SELECT 1');
+PREPARE ptz_epoch_stmt FROM @ptz_epoch_sql;
+EXECUTE ptz_epoch_stmt;
+DEALLOCATE PREPARE ptz_epoch_stmt;
+SET @ptz_intent_column = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation' AND column_name = 'device_intent_id');
+SET @ptz_intent_sql = IF(@ptz_intent_column = 0, 'ALTER TABLE gb_ptz_operation ADD COLUMN device_intent_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL', 'SELECT 1');
+PREPARE ptz_intent_stmt FROM @ptz_intent_sql;
+EXECUTE ptz_intent_stmt;
+DEALLOCATE PREPARE ptz_intent_stmt;
+SET @ptz_owner_column = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation_attempt' AND column_name = 'owner_process_id');
+SET @ptz_owner_sql = IF(@ptz_owner_column = 0, 'ALTER TABLE gb_ptz_operation_attempt ADD COLUMN owner_process_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL', 'SELECT 1');
+PREPARE ptz_owner_stmt FROM @ptz_owner_sql;
+EXECUTE ptz_owner_stmt;
+DEALLOCATE PREPARE ptz_owner_stmt;
+SET @ptz_owner_column = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation_attempt' AND column_name = 'owner_run_id');
+SET @ptz_owner_sql = IF(@ptz_owner_column = 0, 'ALTER TABLE gb_ptz_operation_attempt ADD COLUMN owner_run_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL', 'SELECT 1');
+PREPARE ptz_owner_stmt FROM @ptz_owner_sql;
+EXECUTE ptz_owner_stmt;
+DEALLOCATE PREPARE ptz_owner_stmt;
+SET @ptz_owner_column = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation_attempt' AND column_name = 'local_quiesced_at');
+SET @ptz_owner_sql = IF(@ptz_owner_column = 0, 'ALTER TABLE gb_ptz_operation_attempt ADD COLUMN local_quiesced_at DATETIME(6) NULL', 'SELECT 1');
+PREPARE ptz_owner_stmt FROM @ptz_owner_sql;
+EXECUTE ptz_owner_stmt;
+DEALLOCATE PREPARE ptz_owner_stmt;
+SET @ptz_intent_index = (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'gb_ptz_operation' AND index_name = 'uk_ptz_device_intent');
+SET @ptz_intent_index_sql = IF(@ptz_intent_index = 0, 'CREATE UNIQUE INDEX uk_ptz_device_intent ON gb_ptz_operation(device_intent_id)', 'SELECT 1');
+PREPARE ptz_intent_index_stmt FROM @ptz_intent_index_sql;
+EXECUTE ptz_intent_index_stmt;
+DEALLOCATE PREPARE ptz_intent_index_stmt;
+-- ptz-device-intent:end
+
+-- ptz-owner-retirement:begin
+-- Preserve old rows without fabricating a process-retirement certificate.
+SET @ptz_retire_exists = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='gb_ptz_operation_attempt' AND column_name='retired_by_process_id');
+SET @ptz_retire_sql = IF(@ptz_retire_exists=0, 'ALTER TABLE gb_ptz_operation_attempt ADD COLUMN retired_by_process_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL', 'SELECT 1');
+PREPARE ptz_retire_stmt FROM @ptz_retire_sql;
+EXECUTE ptz_retire_stmt;
+DEALLOCATE PREPARE ptz_retire_stmt;
+SET @ptz_retire_exists = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='gb_ptz_operation_attempt' AND column_name='retired_at');
+SET @ptz_retire_sql = IF(@ptz_retire_exists=0, 'ALTER TABLE gb_ptz_operation_attempt ADD COLUMN retired_at DATETIME(3) NULL', 'SELECT 1');
+PREPARE ptz_retire_stmt FROM @ptz_retire_sql;
+EXECUTE ptz_retire_stmt;
+DEALLOCATE PREPARE ptz_retire_stmt;
+SET @ptz_retire_exists = (SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='gb_ptz_operation_attempt' AND constraint_name='ck_ptz_attempt_retirement');
+SET @ptz_retire_sql = IF(@ptz_retire_exists=0, 'ALTER TABLE gb_ptz_operation_attempt ADD CONSTRAINT ck_ptz_attempt_retirement CHECK ((retired_by_process_id IS NULL AND retired_at IS NULL) OR (retired_by_process_id IS NOT NULL AND retired_at IS NOT NULL AND owner_process_id IS NOT NULL AND owner_run_id IS NOT NULL AND retired_by_process_id <> owner_process_id AND local_quiesced_at IS NULL))', 'SELECT 1');
+PREPARE ptz_retire_stmt FROM @ptz_retire_sql;
+EXECUTE ptz_retire_stmt;
+DEALLOCATE PREPARE ptz_retire_stmt;
+-- ptz-owner-retirement:end

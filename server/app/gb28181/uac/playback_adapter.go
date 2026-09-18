@@ -2,6 +2,7 @@ package uac
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
@@ -21,6 +22,11 @@ func (a *PlaybackAdapter) Invite(ctx context.Context, in gbplayback.UACInvite) (
 		Transport: in.Transport, SSRC: in.SSRC, SDP: in.SDP,
 	})
 	if err != nil {
+		// Only return a cleanup handle that the UAC actually retained. A
+		// generated Call-ID alone (e.g. a rejected INVITE) is not such a handle.
+		if errors.Is(err, ErrPlaybackACKPending) && a.UAC != nil && a.UAC.playbackDialogs.get(metadata.CallID) != nil {
+			return gbplayback.DialogInfo{CallID: metadata.CallID, CleanupRequired: true}, err
+		}
 		return gbplayback.DialogInfo{}, err
 	}
 	return gbplayback.DialogInfo{CallID: metadata.CallID}, nil

@@ -35,6 +35,11 @@ func ResolveOwnerDeptAccessByUserID(ctx context.Context, db *gorm.DB, userID uin
 	if result.Error != nil {
 		return OwnerDeptAccess{}, fmt.Errorf("resolve owner department user: %w", result.Error)
 	}
+	// Production may mask gorm.ErrRecordNotFound; an empty user must never
+	// inherit remaining role bindings (especially a full-access role).
+	if result.RowsAffected != 1 || user.ID != userID {
+		return OwnerDeptAccess{}, ErrOwnerDeptAccessDenied
+	}
 
 	var roles []models.SysRole
 	if err := db.WithContext(ctx).

@@ -2,8 +2,11 @@ package ginhelper
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +42,114 @@ func GetEngine() *gin.Engine {
 		pprof.Register(engine)
 	}
 	return engine
+}
+
+func accessLogger(output io.Writer) gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		Formatter: accessLogFormatter,
+		Output:    output,
+	})
+}
+
+func accessLogFormatter(param gin.LogFormatterParams) string {
+	path := redactAccessLogPath(param.Path)
+	method := param.Method
+	errorMessage := param.ErrorMessage
+	if isOpenAPIAccessLogPath(param.Path) {
+		// OpenAPI authentication material is not safe to copy into the general
+		// access log, including through Gin's error string.
+		errorMessage = ""
+		if !isStandardAccessLogMethod(method) {
+			method = "UNKNOWN"
+		}
+	}
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
+		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+		param.StatusCode,
+		param.Latency,
+		param.ClientIP,
+		method,
+		path,
+		errorMessage,
+	)
+}
+
+func isStandardAccessLogMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions,
+		http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func redactAccessLogPath(path string) string {
+	if isOpenAPIAccessLogPath(path) {
+		return "/openapi"
+	}
+
+	parsed, err := url.ParseRequestURI(path)
+	if err != nil {
+		return redactAccessLogPathFallback(path)
+	}
+	query := parsed.Query()
+	redacted := false
+	for _, key := range []string{"play_token", "media_access_token", "cap"} {
+		if _, exists := query[key]; exists {
+			query.Set(key, "REDACTED")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return path
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.RequestURI()
+}
+
+func redactAccessLogPathFallback(path string) string {
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "media_access_token=") || strings.Contains(lower, "cap=") {
+		if index := strings.IndexByte(path, '?'); index >= 0 {
+			return path[:index] + "?REDACTED"
+		}
+	}
+	return path
+}
+
+func isOpenAPIAccessLogPath(path string) bool {
+	pathEnd := len(path)
+	if index := strings.IndexAny(path, "?#"); index >= 0 {
+		pathEnd = index
+	}
+	rawPath := path[:pathEnd]
+	if rawPath == "" || rawPath[0] != '/' {
+		return false
+	}
+
+	if decodedPath, err := url.PathUnescape(rawPath); err == nil {
+		return isOpenAPIAccessLogPathValue(decodedPath)
+	}
+
+	// A malformed suffix must not bypass the namespace redaction. Decode only
+	// the first segment, which is enough to identify the fixed namespace.
+	firstSegment := rawPath[1:]
+	if separator := strings.IndexByte(firstSegment, '/'); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if separator := strings.Index(strings.ToLower(firstSegment), "%2f"); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if decodedSegment, err := url.PathUnescape(firstSegment); err == nil {
+		return strings.EqualFold(decodedSegment, "openapi") || strings.HasPrefix(strings.ToLower(decodedSegment), "openapi/")
+	}
+	return strings.EqualFold(firstSegment, "openapi") || strings.HasPrefix(strings.ToLower(firstSegment), "openapi%")
+}
+
+func isOpenAPIAccessLogPathValue(path string) bool {
+	return strings.EqualFold(path, "/openapi") || strings.HasPrefix(strings.ToLower(path), "/openapi/")
 }
 
 // PluginRouteFunc 插件路由函数类型

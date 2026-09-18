@@ -68,7 +68,17 @@ type CleanupResources interface {
 	Unbind(context.Context) error
 }
 
+// AuthorizationSnapshot is captured with personnel visibility in the original
+// channel query. It is internal authority, never a client-supplied DTO.
+type AuthorizationSnapshot struct {
+	DevicePK, DeviceEpoch, CleanupCompletedEpoch int64
+	DeviceCode                                   string
+	ChannelPK                                    int64
+	ChannelCode                                  string
+}
+
 type Session struct {
+	Authorization   AuthorizationSnapshot `json:"-"`
 	ID              string
 	OwnerID         string
 	DeviceID        string
@@ -105,6 +115,7 @@ type Session struct {
 }
 
 type CreateRequest struct {
+	Authorization                                     AuthorizationSnapshot `json:"-"`
 	OwnerID, DeviceID, ChannelID, SIPChannelID        string
 	RecordKey, IdempotencyKey, Destination, Transport string
 	PreferredNodeID                                   int64

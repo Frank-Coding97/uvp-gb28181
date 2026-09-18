@@ -3,6 +3,7 @@ package sip
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,13 @@ type ClientTx struct {
 	timer_m      *time.Timer
 
 	onRetransmission FnTxResponse
+
+	lifeMu          sync.Mutex
+	quiescing       bool
+	activeWork      int
+	cleanupTailDone bool
+	quiescedClosed  bool
+	quiesced        chan struct{}
 }
 
 func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logger, work ...*lifecycleGate) *ClientTx {
@@ -27,6 +35,7 @@ func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logg
 	// buffer chan - about ~10 retransmit responses
 	tx.responses = make(chan *Response)
 	tx.done = make(chan struct{})
+	tx.quiesced = make(chan struct{})
 	tx.log = logger
 	if len(work) > 0 {
 		tx.work = work[0]
@@ -37,7 +46,14 @@ func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logg
 }
 
 func (tx *ClientTx) Init() error {
+	if !tx.beginWork() {
+		return ErrTransactionTerminated
+	}
+	defer tx.endWork()
 	tx.initFSM()
+	if tx.isQuiescing() {
+		return ErrTransactionTerminated
+	}
 
 	if err := tx.conn.WriteMsg(tx.origin); err != nil {
 		e := fmt.Errorf("fail to write request on init req=%q: %w", tx.origin.StartLine(), err)
@@ -45,10 +61,13 @@ func (tx *ClientTx) Init() error {
 	}
 
 	reliable := IsReliable(tx.origin.Transport())
-	if reliable {
-		tx.mu.Lock()
-		tx.timer_d_time = 0
+	tx.mu.Lock()
+	if tx.closed {
 		tx.mu.Unlock()
+		return ErrTransactionTerminated
+	}
+	if reliable {
+		tx.timer_d_time = 0
 	} else {
 		// RFC 3261 valueWrite- 17.1.1.2.
 		// If an unreliable transport is being used, the client transaction MUST start timer A with a value of T1.
@@ -56,7 +75,6 @@ func (tx *ClientTx) Init() error {
 		// start timer A (Timer A controls request retransmissions).
 		// Timer A - retransmission
 
-		tx.mu.Lock()
 		tx.timer_a_time = Timer_A
 
 		tx.timer_a = tx.afterFunc(tx.timer_a_time, func() {
@@ -64,11 +82,9 @@ func (tx *ClientTx) Init() error {
 		})
 		// Timer D is set to 32 seconds for unreliable transports
 		tx.timer_d_time = Timer_D
-		tx.mu.Unlock()
 	}
 
 	// Timer B - timeout
-	tx.mu.Lock()
 	tx.timer_b = tx.afterFunc(Timer_B, func() {
 		tx.spinFsmWithError(client_input_timer_b, fmt.Errorf("Timer_B timed out. %w", ErrTransactionTimeout))
 	})
@@ -120,11 +136,10 @@ func (tx *ClientTx) registerOnResponse(f FnTxResponse) {
 // }
 
 func (tx *ClientTx) Terminate() {
-	// select {
-	// case <-tx.done:
-	// 	return
-	// default:
-	// }
+	if !tx.beginTermination() {
+		return
+	}
+	defer tx.endWork()
 
 	if tx.delete(ErrTransactionTerminated) {
 		tx.fsmMu.Lock()
@@ -224,6 +239,7 @@ func (tx *ClientTx) resend() {
 }
 
 func (tx *ClientTx) delete(err error) bool {
+	tx.beginClosing()
 	tx.mu.Lock()
 	if tx.closed {
 		tx.mu.Unlock()
@@ -246,15 +262,20 @@ func (tx *ClientTx) delete(err error) bool {
 		tx.timer_d.Stop()
 		tx.timer_d = nil
 	}
+	if tx.timer_m != nil {
+		tx.timer_m.Stop()
+		tx.timer_m = nil
+	}
 	tx.mu.Unlock()
 	// Maybe there is better way
 	if onterm != nil {
-		tx.onTerminate(tx.key, err)
+		onterm(tx.key, err)
 	}
 
 	if _, err := tx.conn.TryClose(); err != nil {
 		tx.log.Info("Closing connection returned error", "error", err, "tx", tx.Key())
 	}
 	tx.log.Debug("Client transaction destroyed", "tx", tx.Key())
+	tx.finishCleanupTail()
 	return true
 }

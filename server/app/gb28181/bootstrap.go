@@ -52,6 +52,9 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
+	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
@@ -335,7 +338,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	server, err := factory(cfg)
 	if err != nil {
 		status.MarkFailed(err.Error())
-		return nil, err
+		return server, err // A partially constructed instance still owns resources.
 	}
 	server.SetRecorder(recorder)
 	server.SetErrorHandler(func(err error) {
@@ -343,13 +346,13 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	})
 	if err := server.Start(); err != nil {
 		status.MarkFailed(err.Error())
-		return nil, err
+		return server, err
 	}
 	status.MarkRunning()
 	return server, nil
 }
 
-func startControlPlane(cfg gbconfig.Config) bool {
+func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authority) bool {
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
 	credentialWarningReported := cascadeCredentialWarningNeeded(err, false)
@@ -357,8 +360,9 @@ func startControlPlane(cfg gbconfig.Config) bool {
 		warnCascadeCredentialKeyUnavailable()
 	}
 	setupCascadeManagement(nil, cascadeCipher, nil)
-	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
-	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
+	reload := func() error { return ReloadSIP(authority) }
+	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, reload))
+	gbroutes.SetServiceConfigSIPTraceReloader(reload)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
@@ -518,7 +522,7 @@ func startDashboardRetentionRuntimeTracked(db *gorm.DB, interval time.Duration, 
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过。SIP 未配置时不启 SIP 依赖,由前端引导页录入并触发热启动。
-func Start() {
+func Start(authority *processauthority.Authority) {
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
 	if stopping {
@@ -530,21 +534,26 @@ func Start() {
 		}
 		return
 	}
-	if sipServer != nil {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil || ptzService != nil || ptzScheduler != nil {
 		if app.ZapLog != nil {
-			// C03：同上一支，幂等调用被忽略。属于"正常"，不是"降级"。
-			app.ZapLog.Info("GB28181 SIP 已运行,忽略重复启动")
+			app.ZapLog.Warn("GB28181 旧运行时尚未释放,拒绝重复启动",
+				zap.String("event", "gb28181.sip.duplicate_start_rejected"))
 		}
 		return
 	}
 
+	if _, err := authorizedRootIntentStore(app.DB(), authority); err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		app.ZapLog.Error("GB28181 缺少有效进程授权，拒绝启动", zap.Error(err))
+		return
+	}
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
 		sipRuntimeStatus.MarkDisabled()
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
-	credentialWarningReported := startControlPlane(cfg)
+	credentialWarningReported := startControlPlane(cfg, authority)
 
 	// 老 stack 升级迁移:如果 DB 空 + YAML 有 SIP 段 + gb_device 有历史数据 → 一次性 seed.
 	// 幂等,首启后 DB 有数据下次调用直接 skip.
@@ -580,7 +589,7 @@ func Start() {
 		app.ZapLog.Info("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.String("event", "gb28181.playauth.key_init_failed_auth_off"), zap.Error(err))
 	}
 
-	if err := startSIPDependencies(sipCfg, credentialWarningReported); err != nil {
+	if err := startSIPDependencies(sipCfg, authority, credentialWarningReported); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.String("event", "gb28181.sip.start_failed"), zap.Error(err))
 		return
 	}
@@ -643,24 +652,49 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
-func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) error {
-	runtime := setupSecurityRuntime()
-	// GB/T 28181-2022 §9.1.1 f):TCP 通道断开即判设备掉线。
-	// ⛔ 必须在这一层接线:device 包不能反向 import sip(否则 sip → handler → device → sip
-	// 会成环),它只按方法签名**隐式**满足 sip.DeviceLinkSink —— 签名对不上时这里会编译报错,
-	// 因为 WithDeviceLinkSink 的参数类型是 sip.DeviceLinkSink。
-	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+func startSIPDependencies(cfg gbconfig.Config, authority *processauthority.Authority, credentialWarningReported bool) error {
+	return startSIPDependenciesWithFactory(cfg, authority, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+		// device 包通过接口接入 TCP 断链通知，避免 sip -> handler -> device -> sip 的反向依赖。
 		return gbsip.NewServer(cfg,
-			gbsip.WithSecurityRuntime(runtime),
+			gbsip.WithSecurityRuntime(securityRuntime),
 			gbsip.WithDeviceLinkSink(device.NewLinkWatcher(app.DB(), app.ZapLog)),
 		)
-	})
+	}, credentialWarningReported)
+}
+
+// Caller holds sipLifecycleMu. Register every owned object before any later
+// fallible assembly; rollback must preserve the original instance on failure.
+func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauthority.Authority, factory sipRuntimeFactory, credentialWarning ...bool) (err error) {
+	if sipServer != nil || securityRuntime != nil || playbackService != nil || ptzService != nil || ptzScheduler != nil {
+		return errors.New("GB28181 旧运行时尚未释放,拒绝替换")
+	}
+	deviceDB := app.DB()
+	deviceIntents, err := authorizedRootIntentStore(deviceDB, authority)
 	if err != nil {
-		_ = runtime.Close(context.Background())
-		gbroutes.SetSecurityRuntime(nil)
 		return err
 	}
-	securityRuntime = runtime
+	deviceSecurity := playauth.NewDeviceSecurityStore(deviceDB)
+	deviceOperations, err := playauth.NewAuthorizedDeviceOperationBarrier(deviceSecurity, authority)
+	if err != nil {
+		return err
+	}
+	securityRuntime = setupSecurityRuntime()
+	defer func() {
+		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = errors.Join(err, stopSIPDependencies(ctx))
+			cancel()
+			sipRuntimeStatus.MarkFailed(err.Error())
+		}
+	}()
+	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, factory)
+	sipServer = srv
+	if err != nil {
+		return err
+	}
+	if deviceDB == nil || srv.UAC() == nil {
+		return fmt.Errorf("装配持久回放恢复缺少数据库或 UAC: %w", uac.ErrPlaybackUnavailable)
+	}
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	var newFirmwareUpgradeService *upgrade.Service
@@ -673,9 +707,6 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 			Location:           cfg.RecordQuery.Location,
 		})
 		if queryErr != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = srv.Shutdown(shutdownCtx)
-			cancel()
 			sipRuntimeStatus.MarkFailed(queryErr.Error())
 			return fmt.Errorf("装配设备录像查询 service 失败: %w", queryErr)
 		}
@@ -683,16 +714,13 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 		recordQueryMetrics = recordquery.NewMetrics()
 		srv.SetRecordInfoSink(newRecordQueryService)
 		gbroutes.SetDeviceMgmtRecordQueryRuntime(newRecordQueryService, cfg.RecordQuery, recordQueryMetrics)
-		newPTZService, err = ptz.NewService(app.DB(), u, time.Now)
+		newPTZService, err = ptz.NewAuthorizedService(deviceDB, u, time.Now, deviceIntents, deviceOperations)
 		if err != nil {
 			newRecordQueryService.Close()
 			recordQueryService = nil
 			recordQueryMetrics = nil
 			gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 			srv.SetRecordInfoSink(nil)
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = srv.Shutdown(shutdownCtx)
-			cancel()
 			sipRuntimeStatus.MarkFailed(err.Error())
 			return fmt.Errorf("装配 PTZ service 失败: %w", err)
 		}
@@ -706,9 +734,6 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 				recordQueryMetrics = nil
 				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 				srv.SetRecordInfoSink(nil)
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = srv.Shutdown(shutdownCtx)
-				cancel()
 				sipRuntimeStatus.MarkFailed(err.Error())
 				return fmt.Errorf("装配设备固件升级 service 失败: %w", err)
 			}
@@ -721,9 +746,6 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 				recordQueryMetrics = nil
 				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 				srv.SetRecordInfoSink(nil)
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = srv.Shutdown(shutdownCtx)
-				cancel()
 				sipRuntimeStatus.MarkFailed("SIP server 未提供设备升级消息路由")
 				return errors.New("SIP server 未提供设备升级消息路由")
 			}
@@ -733,6 +755,7 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 	sipQuiesce = nil
 	sipGenerationBackground = &asyncgroup.Group{}
 	sipServer = srv
+	credentialWarningReported := len(credentialWarning) > 0 && credentialWarning[0]
 	if err := startCascadeRuntime(cfg, srv, credentialWarningReported); err != nil {
 		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.String("event", "gb28181.cascade.assemble_failed"), zap.Error(err))
 	} else {
@@ -790,6 +813,21 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 		cfg.ZLM.Secret,
 	)
 	var playAuthorization *playauth.AuthorizationService
+	if err := configurePlaybackRTPCleanup(srv.UAC(), deviceDB, deviceIntents, deviceOperations); err != nil {
+		return fmt.Errorf("装配持久RTP清理失败: %w", err)
+	}
+	// The same UAC owns this worker through ShutdownPlaybackIntents. Do not
+	// create a second runner/stop owner or cancel it when assembly returns.
+	if _, err := srv.UAC().StartPlaybackRecovery(context.Background(),
+		playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations,
+		func(_ uac.PlaybackRecoveryTick, err error) {
+			if err != nil {
+				app.ZapLog.Error("持久回放恢复尚未完成", zap.Error(err))
+			}
+		}); err != nil {
+		return fmt.Errorf("装配持久回放恢复失败: %w", err)
+	}
+	gbroutes.SetDeviceTransferBarrier(deviceOperations)
 	playAuthMetrics = nil
 	if signerErr != nil {
 		gbroutes.SetPlayAuthorizer(nil)
@@ -803,11 +841,21 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 			playSigner,
 			playauth.NewAuthorizationRegistry(),
 			playauth.WithAuthorizationMetrics(playAuthMetrics),
+			playauth.WithDeviceSecurityAuthority(deviceSecurity),
+			playauth.WithDeviceOperationBarrier(deviceOperations),
 		)
 		gbroutes.SetPlayAuthorizer(playAuthorization)
 		app.ZapLog.Info("GB28181 播放鉴权服务已装配")
 	} else {
 		gbroutes.SetPlayAuthorizer(nil)
+	}
+	var openAPICandidate *openAPIMediaRootCandidate
+	var openAPIValidator play.QualifiedNodeValidator
+	if playAuthSettings.RequiredByOpenAPI {
+		openAPICandidate, openAPIValidator, err = prepareOpenAPIMediaRoot(deviceDB, playSigner)
+		if err != nil {
+			return fmt.Errorf("装配 OpenAPI 媒体授权根失败: %w", err)
+		}
 	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
@@ -820,8 +868,12 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
 			snapshotSvc := buildSnapshotService()
 			opts := []play.Option{
+				play.WithDeviceOperationBarrier(deviceOperations),
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
+			}
+			if openAPIValidator != nil {
+				opts = append(opts, play.WithQualifiedNodeValidator(openAPIValidator))
 			}
 			if trafficResolver != nil {
 				opts = append(opts, play.WithLiveReadyObserver(func(session play.LiveSession) {
@@ -863,7 +915,7 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 				zap.Int("recovery_skipped", recoveryStats.Skipped),
 				zap.Int("recovery_failed", recoveryStats.Failed))
 		} else {
-			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv))}
+			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv)), play.WithDeviceOperationBarrier(deviceOperations)}
 			if playAuthorization != nil {
 				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}
@@ -878,7 +930,7 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 	if err := setupCascadeVideoRuntime(srv); err != nil {
 		return fmt.Errorf("装配级联点播失败: %w", err)
 	}
-	setupPlaybackRuntime(cfg, srv.UAC())
+	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations, deviceIntents)
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
 	installZLMManagementController()
@@ -902,6 +954,14 @@ func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) e
 		}
 	} else if playSvc != nil {
 		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
+	}
+	if playSvc != nil && zlmRegistry != nil && zlmScheduler != nil {
+		if err := openAPILivePlayer.Publish(playSvc); err != nil {
+			return fmt.Errorf("OpenAPI 播放运行时上一代尚未退出: %w", err)
+		}
+		if err := publishOpenAPIMediaRoot(openAPICandidate); err != nil {
+			return fmt.Errorf("发布 OpenAPI 媒体授权根失败: %w", err)
+		}
 	}
 	return nil
 }
@@ -977,21 +1037,34 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) error {
+	// Revoke transfer admission before stopping the barrier's runtime. A new
+	// facade is published only after its recovery worker has been registered.
+	gbroutes.SetDeviceTransferBarrier(nil)
+	if err := openAPILivePlayer.Retire(ctx); err != nil {
+		return fmt.Errorf("OpenAPI 播放申请尚未排空，保留依赖等待重试: %w", err)
+	}
+	// Remove the facade before stopping any dependency it can call. Reload
+	// installs a fresh bundle only after all new business runtimes are ready.
 	runtime := captureSIPShutdownSnapshot()
 	err := stopSIPDependenciesSnapshot(ctx, runtime)
-	clearSIPShutdownGlobals()
+	if err == nil {
+		clearSIPShutdownGlobals()
+	}
 	return err
 }
 
 func stopPlaybackRuntime(ctx context.Context) error {
 	var stopErr error
+	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	if playbackService != nil {
 		stopErr = playbackService.Close(ctx)
+		if stopErr != nil {
+			return stopErr
+		}
 		playbackService = nil
 	}
 	playbackMetrics = nil
 	playbackRegistry = nil
-	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	gbroutes.SetPlaybackMediaSink(nil)
 	if sipServer != nil {
 		sipServer.SetPlaybackEndSink(nil)
@@ -1002,14 +1075,29 @@ func stopPlaybackRuntime(ctx context.Context) error {
 	return stopErr
 }
 
-func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
-	if inviter == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
+func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier, intents *playauth.DeviceOperationIntentStore) {
+	if inviter == nil || deviceOperations == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
 		SetPlaybackService(nil, nil)
 		playbackRegistry = nil
 		playbackMetrics = nil
 		app.ZapLog.Info("GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)")
 		return
+	}
+	var opener gbplayback.RTPOpener
+	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
+		bindings, err := LoadStartupOpenAPIControlBindingsOnce()
+		if err != nil || bindings == nil || intents == nil {
+			SetPlaybackService(nil, nil)
+			playbackRegistry, playbackMetrics = nil, nil
+			app.ZapLog.Warn("强制鉴权回放缺少持久操作或启动信任，拒绝装配", zap.Error(err))
+			return
+		}
+		resolver := openapimedia.NewTrustedRevocationFactory(zlmRegistry, bindings, openapiconfig.NewNodeRuntimeStore(app.DB(), time.Now))
+		opener = gbplayback.NewZLMIntentRTPOpener(zlmRegistry, zlmLocationMap, resolver)
+	} else {
+		intents = nil
+		opener = gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
 	}
 	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
 		IdleTimeout: cfg.Playback.IdleTimeout(),
@@ -1020,10 +1108,11 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 	service := gbplayback.NewService(
 		registry,
 		gbplayback.NewZLMNodePicker(zlmScheduler, cfg.SIP.ServerID),
-		gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil),
+		opener,
 		uac.NewPlaybackAdapter(inviter),
 		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
-		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics},
+		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics, DeviceOperations: deviceOperations, Intents: intents,
+			RequireIntents: func() bool { return gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI }},
 	)
 	if trafficResolver != nil {
 		service.SetMediaReadyObserver(func(session gbplayback.Session) {
@@ -1051,16 +1140,36 @@ func stopRecordQueryRuntime() {
 	recordQueryMetrics = nil
 }
 
-func stopPTZRuntime() {
-	if ptzScheduler != nil {
-		ptzScheduler.Stop()
-		ptzScheduler = nil
+func stopPTZRuntime() error {
+	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+	if sipServer != nil {
+		if setter, ok := sipServer.(interface {
+			SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
+		}); ok {
+			setter.SetPTZMessageProcessor(nil)
+		}
 	}
 	if ptzService != nil {
 		ptzService.Retire()
 	}
+	if ptzScheduler != nil {
+		ptzScheduler.Stop()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if owner, ok := ptzScheduler.(interface{ FlushResults(context.Context) error }); ok {
+		if err := owner.FlushResults(ctx); err != nil {
+			return err
+		}
+	}
+	if ptzService != nil {
+		if err := ptzService.FlushResults(ctx); err != nil {
+			return err
+		}
+	}
+	ptzScheduler = nil
 	ptzService = nil
-	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+	return nil
 }
 
 func stopFirmwareUpgradeRuntime() {
@@ -1096,7 +1205,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
 	recordingPlanLeases = play.NewSourceLeaseRegistry()
-	recordingPlanOrchestrator := recordingplan.NewOrchestrator(playSvc, recordingSvc, recordingPlanLeases, nil)
+	recordingPlanLive := play.NewSystemLiveEnsurer(playSvc, playauth.NewDeviceSecurityStore(app.DB()))
+	recordingPlanOrchestrator := recordingplan.NewOrchestrator(recordingPlanLive, recordingSvc, recordingPlanLeases, nil)
 	planEnabled := cfg.Recording.PlanEnabled
 	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
 		InstanceID: uuid.NewString(), BatchSize: 200, Workers: 8, DeviceConcurrency: 2,
@@ -1333,7 +1443,7 @@ func stopTalkRuntime(ctx context.Context) error {
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
 // 由 SetupController.SaveConfig 保存后调用,让用户不需要重启进程.
 // 失败时 runtime state 会被 MarkFailed,不 panic.
-func ReloadSIP() error {
+func ReloadSIP(authority *processauthority.Authority) error {
 	reloadMu.Lock()
 	defer reloadMu.Unlock()
 
@@ -1386,7 +1496,7 @@ func ReloadSIP() error {
 		sipLifecycleMu.Unlock()
 		return errors.New("gb28181 正在停止,拒绝 SIP 热重载")
 	}
-	err = startSIPDependencies(sipCfg, false)
+	err = startSIPDependencies(sipCfg, authority, false)
 	sipLifecycleMu.Unlock()
 	if err != nil {
 		sipRuntimeStatus.MarkFailed(err.Error())

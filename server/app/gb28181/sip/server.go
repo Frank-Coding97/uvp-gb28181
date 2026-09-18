@@ -47,7 +47,9 @@ type Server struct {
 	deviceInfoWork     *asyncgroup.Group
 	quiesce            lifecyclePhase
 	shutdown           lifecyclePhase
+	lifecycleStateMu   sync.Mutex
 	started            bool
+	stopping           bool
 	trace              gbtrace.Runtime
 	traceOnce          sync.Once
 	traceErr           error
@@ -205,14 +207,19 @@ func (p *lifecyclePhase) run(ctx context.Context, fn func(context.Context) error
 	}
 	p.started = true
 	p.done = make(chan struct{})
+	done := p.done
 	p.mu.Unlock()
 
-	err := fn(ctx)
-	p.mu.Lock()
-	p.err = err
-	close(p.done)
-	p.mu.Unlock()
-	return err
+	// The phase owns the drain once it starts. A caller deadline only stops that
+	// caller from waiting; it must not cancel the shared shutdown generation.
+	go func() {
+		err := fn(context.Background())
+		p.mu.Lock()
+		p.err = err
+		close(done)
+		p.mu.Unlock()
+	}()
+	return waitLifecyclePhase(ctx, done, p)
 }
 
 func waitLifecyclePhase(ctx context.Context, done <-chan struct{}, p *lifecyclePhase) error {
@@ -795,6 +802,14 @@ func (s *Server) SetPlaybackEndSink(sink handler.PlaybackEndSink) {
 
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
 func (s *Server) Start() error {
+	s.lifecycleStateMu.Lock()
+	defer s.lifecycleStateMu.Unlock()
+	if s.started || s.srv == nil {
+		return fmt.Errorf("SIP server cannot start in its current lifecycle state")
+	}
+	if s.stopping {
+		return fmt.Errorf("SIP server cannot start in its current lifecycle state")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.started = true
@@ -855,12 +870,18 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.lifecycleStateMu.Lock()
+	s.stopping = true
+	s.lifecycleStateMu.Unlock()
 	return s.shutdown.run(ctx, func(ctx context.Context) error {
 		// 先静音链路断开判定:下面 srv.CloseContext 会把所有 TCP 一起关掉,
 		// 那是平台自己断的,不是设备掉线(见 linkLossMuted 的注释)。
 		s.linkLossMuted.Store(true)
 		var err error
 		err = errors.Join(err, s.QuiesceRequests(ctx))
+		if s.uac != nil {
+			err = errors.Join(err, s.uac.ShutdownPlaybackIntents(ctx))
+		}
 		if s.cancel != nil {
 			s.cancel()
 		}

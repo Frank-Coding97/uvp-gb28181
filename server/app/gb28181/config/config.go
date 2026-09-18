@@ -202,6 +202,9 @@ type PlayAuthSettings struct {
 	Enabled      bool `json:"authEnabled"`
 	BindClientIP bool `json:"authBindClientIP"`
 	TTLSeconds   int  `json:"authTTLSeconds"`
+	// Read-only effective-policy metadata, never saved from client input.
+	RequiredByOpenAPI bool `json:"authRequiredByOpenAPI"`
+	ConfigConflict    bool `json:"authConfigConflict"`
 }
 
 func PlayAuthSettingsFrom(c valueSource) PlayAuthSettings {
@@ -229,7 +232,11 @@ func playAuthTTLSecondsFrom(c valueSource) int {
 func CurrentPlayAuthSettings() PlayAuthSettings {
 	fixedAddressPlaybackMu.RLock()
 	defer fixedAddressPlaybackMu.RUnlock()
-	return PlayAuthSettingsFrom(app.ConfigYml)
+	settings := PlayAuthSettingsFrom(app.ConfigYml)
+	settings.RequiredByOpenAPI = mustAuthRequired.Load()
+	settings.ConfigConflict = settings.RequiredByOpenAPI && !settings.Enabled
+	settings.Enabled = settings.Enabled || settings.RequiredByOpenAPI
+	return settings
 }
 
 func ValidatePlayAuthSettings(settings PlayAuthSettings, fixed FixedAddressPlaybackSettings) error {
@@ -249,6 +256,9 @@ func SavePlayAuthSettings(c mutableValueSource, settings PlayAuthSettings) error
 	}
 	fixedAddressPlaybackMu.Lock()
 	defer fixedAddressPlaybackMu.Unlock()
+	if !settings.Enabled && mustAuthRequired.Load() {
+		return ErrPlayAuthRequired
+	}
 	if err := ValidatePlayAuthSettings(settings, FixedAddressPlaybackSettingsFrom(c)); err != nil {
 		return err
 	}

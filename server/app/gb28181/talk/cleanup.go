@@ -92,14 +92,21 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 			firstErr = fmt.Errorf("%s: %w", step, stepErr)
 		}
 	}
+	retryRequired := false
+	recordRetryable := func(step string, stepErr error) {
+		if stepErr != nil {
+			retryRequired = true
+			record(step, stepErr)
+		}
+	}
 	if session.State != models.TalkSessionStopping {
 		changed, transitionErr := s.repo.Transition(ctx, sessionID, session.State, models.TalkSessionStopping, TransitionPatch{})
-		record("mark stopping", transitionErr)
+		recordRetryable("mark stopping", transitionErr)
 		if transitionErr == nil && !changed {
 			reloaded, reloadErr := s.repo.FindBySession(ctx, sessionID)
-			record("reload cleanup state", reloadErr)
+			recordRetryable("reload cleanup state", reloadErr)
 			if reloaded == nil {
-				record("reload cleanup state", ErrTalkSessionNotFound)
+				recordRetryable("reload cleanup state", ErrTalkSessionNotFound)
 			} else if reloaded.State.IsTerminal() {
 				return firstErr
 			} else {
@@ -109,9 +116,9 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 					// active（实测 ACK 与 BYE 相隔 0.36ms）。这是良性竞争而非故障：用最新状态
 					// 再抢一次即可。原来直接记 conflict，会把假错误写进会话 error 列，看着像故障。
 					retried, retryErr := s.repo.Transition(ctx, sessionID, session.State, models.TalkSessionStopping, TransitionPatch{})
-					record("mark stopping", retryErr)
+					recordRetryable("mark stopping", retryErr)
 					if retryErr == nil && !retried {
-						record("cleanup state conflict", fmt.Errorf("state=%s", session.State))
+						recordRetryable("cleanup state conflict", fmt.Errorf("state=%s", session.State))
 					}
 				}
 			}
@@ -128,24 +135,27 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	}
 	var client TalkMediaClient
 	if s.activation == nil || s.activation.deps.ClientFor == nil || s.nodes == nil {
-		record("ZLM client", ErrTalkActivationUnavailable)
+		recordRetryable("ZLM client", ErrTalkActivationUnavailable)
 	} else if mediaNode, ok := s.nodes.Get(session.NodeID); !ok || mediaNode == nil {
-		record("ZLM node", ErrTalkNodeUnavailable)
+		recordRetryable("ZLM node", ErrTalkNodeUnavailable)
 	} else {
 		client = s.activation.deps.ClientFor(mediaNode)
 		if client == nil {
-			record("ZLM client", ErrTalkActivationUnavailable)
+			recordRetryable("ZLM client", ErrTalkActivationUnavailable)
 		}
 	}
 	if client != nil && session.SourceStream != "" && session.SSRC != "" {
 		stopCtx, cancelStop := stepBudget(ctx, mediaReleaseTimeout)
-		record("stopSendRtp", client.StopSendRtp(stopCtx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC))
+		recordRetryable("stopSendRtp", client.StopSendRtp(stopCtx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC))
 		cancelStop()
 	}
 	if client != nil && session.SourceStream != "" {
 		closeCtx, cancelClose := stepBudget(ctx, mediaReleaseTimeout)
-		record("close source", client.CloseTalkSource(closeCtx, defaultTalkVHost, session.App, session.SourceStream))
+		recordRetryable("close source", client.CloseTalkSource(closeCtx, defaultTalkVHost, session.App, session.SourceStream))
 		cancelClose()
+	}
+	if retryRequired {
+		return firstErr
 	}
 	message := strings.TrimSpace(reason)
 	if firstErr != nil {

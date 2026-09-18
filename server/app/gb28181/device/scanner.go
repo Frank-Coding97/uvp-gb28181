@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -19,6 +20,7 @@ type OfflineScanner struct {
 	grace        int
 	stop         chan struct{}
 	done         chan struct{}
+	stopOnce     sync.Once
 }
 
 // NewOfflineScanner 创建离线扫描器
@@ -60,7 +62,10 @@ func (s *OfflineScanner) Start() {
 
 // Stop 停止扫描
 func (s *OfflineScanner) Stop() {
-	close(s.stop)
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
 }
 

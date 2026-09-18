@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
@@ -41,6 +42,11 @@ func init() {
 	if versionErr != nil {
 		logging.ReportStartupFailure(nil, app.ZapLog, "version", versionErr)
 	}
+	app.ConfigYml.ConfigFileChangeListen(func() {
+		if gbconfig.PlayAuthConfigConflict() && app.ZapLog != nil {
+			app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required")
+		}
+	})
 	// 初始化数据库
 	initDB()
 
@@ -269,9 +275,8 @@ func newScheduler() app.JobSchedulerInterf {
 		schedulerhelper.WithJobResultsBufferSize(bufferSize),
 	)
 
-	// 启动调度器
-	scheduler.Start()
-
+	// main starts the scheduler only after process authority registration.
+	// Jobs can be loaded now, but must not execute during package init.
 	return scheduler
 }
 

@@ -3,6 +3,7 @@ package models_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -158,12 +159,46 @@ func TestDualVersionFullSchemasCreateDeviceBaseline(t *testing.T) {
 			text := normalizeAlarmDDL(string(body))
 			deviceTable := ddlTableSection(text, "gb_device")
 			require.Contains(t, text, "create table gb_device (")
-			require.NotContains(t, text, "alter table gb_device", "全量脚本不能依赖不存在的设备表")
+			require.NotRegexp(t, regexp.MustCompile(`alter table (?:if exists )?(?:dbo\.)?gb_device(?:\s|$)`), text, "全量脚本不能依赖不存在的设备表")
 			for _, column := range []string{
 				"device_id", "reported_version", "reported_version_at", "protocol_override",
 				"effective_version", "effective_version_source", "effective_version_at",
 			} {
 				require.Contains(t, deviceTable, column, "设备基线表必须包含 "+column)
+			}
+		})
+	}
+}
+
+func TestOpenAPIFullSchemasPreserveFreshInstallConstraints(t *testing.T) {
+	root := dualVersionDDLRoot(t)
+	paths := []string{
+		"resource/database/uvp-gb28181.sql",
+		"resource/database/postgresql_converted.sql",
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(root, path))
+			require.NoError(t, err)
+			text := normalizeAlarmDDL(string(body))
+			deviceTable := ddlTableSection(text, "gb_device")
+			intentTable := ddlTableSection(text, "gb_device_operation_intent")
+
+			for _, constraint := range []string{
+				"access_epoch > 0",
+				"cleanup_completed_epoch > 0",
+				"cleanup_completed_epoch <= access_epoch",
+			} {
+				require.Contains(t, deviceTable, constraint, "fresh device schema must enforce "+constraint)
+			}
+			for _, constraint := range []string{
+				"ck_device_intent_rtp_size",
+				"rtp_steps_json is null or octet_length(rtp_steps_json) between 1 and 32768",
+				"ck_device_intent_sip_size",
+				"sip_steps_json is null or octet_length(sip_steps_json) between 1 and 32768",
+			} {
+				require.Contains(t, intentTable, constraint, "fresh operation-intent schema must enforce "+constraint)
 			}
 		})
 	}

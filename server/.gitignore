@@ -75,9 +75,10 @@ go.work.sum
 config/*.local.yml
 config/config.yml
 
-# config 目录配置 - 只提交 config.example.yml
+# config 目录配置 - 只提交明确的无凭据示例
 /config/*
 !/config/config.example.yml
+!/config/openapi-revocation.example.yml
 
 # 调试生成的文件
 __debug_bin.exe*

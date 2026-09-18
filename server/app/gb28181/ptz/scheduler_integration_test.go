@@ -15,11 +15,12 @@ import (
 )
 
 type schedulerRetryBlockingSender struct {
-	mu            sync.Mutex
-	calls         int
-	firstEntered  chan struct{}
-	firstCanceled chan struct{}
-	secondSent    chan struct{}
+	mu             sync.Mutex
+	calls          int
+	firstEntered   chan struct{}
+	firstCanceled  chan struct{}
+	secondSent     chan struct{}
+	allowFirstExit <-chan struct{}
 }
 
 func (s *schedulerRetryBlockingSender) SendMessageTracked(ctx context.Context, _, _, _ string, _ []byte) (uac.TrackedMessageResult, error) {
@@ -31,10 +32,52 @@ func (s *schedulerRetryBlockingSender) SendMessageTracked(ctx context.Context, _
 		close(s.firstEntered)
 		<-ctx.Done()
 		close(s.firstCanceled)
+		if s.allowFirstExit != nil {
+			<-s.allowFirstExit
+		}
 		return uac.TrackedMessageResult{CallID: "slow-1", CSeq: "1", Attempted: true}, ctx.Err()
 	}
 	close(s.secondSent)
 	return uac.TrackedMessageResult{CallID: "retry-2", CSeq: "2", StatusCode: 200, Attempted: true}, nil
+}
+
+func TestSchedulerExpiredSenderMustExitBeforeRetry(t *testing.T) {
+	f := newSchedulerFixture(t, 1)
+	allowExit := make(chan struct{})
+	sender := &schedulerRetryBlockingSender{
+		firstEntered: make(chan struct{}), firstCanceled: make(chan struct{}),
+		secondSent: make(chan struct{}), allowFirstExit: allowExit,
+	}
+	f.scheduler.service.sender = sender
+	s := NewScheduler(f.scheduler.service, WithSchedulerCapacity(2))
+	defer s.Stop()
+	var release sync.Once
+	defer release.Do(func() { close(allowExit) })
+	op := f.createOperation(t, 3)
+	t0 := f.clock.Now()
+	require.NoError(t, s.RunDue(t0))
+	<-sender.firstEntered
+	f.clock.Set(t0.Add(time.Second))
+	finished := make(chan error, 1)
+	go func() { finished <- s.RunDue(f.clock.Now()) }()
+	<-sender.firstCanceled
+	returned := false
+	select {
+	case err := <-finished:
+		returned = true
+		require.NoError(t, err)
+		require.Len(t, loadSchedulerAttempts(t, f.db, op.ID), 1, "cancel is not sender exit")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-sender.secondSent:
+		t.Fatal("retry entered the network before original sender exited")
+	default:
+	}
+	release.Do(func() { close(allowExit) })
+	if !returned {
+		require.NoError(t, <-finished)
+	}
 }
 
 type schedulerStopBlockingSender struct {

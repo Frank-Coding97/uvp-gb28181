@@ -25,7 +25,8 @@ func TestDirectTokenRoundTripAndBinding(t *testing.T) {
 	}
 	binding := Binding{
 		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
-		App: "rtp", Stream: "37010301021320000014_37010301021320000001",
+		DeviceEpoch: 1,
+		App:         "rtp", Stream: "37010301021320000014_37010301021320000001",
 		MediaServerID: "node-a",
 	}
 
@@ -67,7 +68,8 @@ func TestDirectTokenRejectsTamperingExpiryAndMalformedValues(t *testing.T) {
 	}
 	binding := Binding{
 		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
-		App: "rtp", Stream: "37010301021320000014_37010301021320000001", MediaServerID: "node-a",
+		DeviceEpoch: 1,
+		App:         "rtp", Stream: "37010301021320000014_37010301021320000001", MediaServerID: "node-a",
 	}
 	grant, err := signer.IssueDirect(binding)
 	if err != nil {
@@ -130,7 +132,8 @@ func TestIssueDirectRejectsInvalidIdentity(t *testing.T) {
 	}
 	valid := Binding{
 		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
-		App: "rtp", Stream: "37010301021320000014_37010301021320000001", MediaServerID: "node-a",
+		DeviceEpoch: 1,
+		App:         "rtp", Stream: "37010301021320000014_37010301021320000001", MediaServerID: "node-a",
 	}
 	for name, mutate := range map[string]func(Binding) Binding{
 		"device":  func(v Binding) Binding { v.DeviceID = "device"; return v },

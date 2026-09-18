@@ -71,7 +71,7 @@ func (dc *DeviceMgmtController) createHistoricalSession(c *gin.Context, mode gbp
 		writePlaybackFailure(c, http.StatusNotFound, playbackNotFound, "回放会话不存在", "not_found", "not_found")
 		return
 	}
-	target, ok := dc.loadRecordQueryTargetByID(c, channelID)
+	target, authorization, ok := dc.loadPlaybackTarget(c, channelID)
 	if !ok {
 		return
 	}
@@ -109,7 +109,8 @@ func (dc *DeviceMgmtController) createHistoricalSession(c *gin.Context, mode gbp
 			return
 		}
 		result, createErr := service.Create(c.Request.Context(), gbplayback.CreateRequest{OwnerID: strconv.FormatUint(uint64(claims.UserID), 10), DeviceID: target.device.DeviceID,
-			ChannelID: strconv.FormatUint(uint64(channelID), 10), SIPChannelID: snapshot.ChannelCode,
+			Authorization: authorization,
+			ChannelID:     strconv.FormatUint(uint64(channelID), 10), SIPChannelID: snapshot.ChannelCode,
 			RecordKey: snapshot.RecordKey, IdempotencyKey: key,
 			PreferredNodeID: target.device.ZLMNodeID,
 			Destination:     net.JoinHostPort(target.device.IP, strconv.Itoa(target.device.Port)), Transport: target.device.Transport,

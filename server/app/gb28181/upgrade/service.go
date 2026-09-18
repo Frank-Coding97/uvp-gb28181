@@ -213,7 +213,7 @@ func activeUpgradeStatuses() []gbmodels.FirmwareUpgradeStatus {
 func hasRecentDeviceReboot(tx *gorm.DB, deviceID uint, now time.Time) (bool, error) {
 	var count int64
 	err := tx.Model(&gbmodels.GbPTZOperation{}).
-		Where("device_id = ? AND action = ? AND created_at >= ? AND status IN ?", deviceID, "teleboot", now.Add(-time.Minute), []gbmodels.PTZOperationStatus{
+		Where("device_id = ? AND action = ? AND created_at >= ? AND status IN ?", deviceID, "teleboot", gbmodels.PTZTimeComparison(tx, now.Add(-time.Minute)), []gbmodels.PTZOperationStatus{
 			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationAccepted, gbmodels.PTZOperationUnknown,
 		}).Count(&count).Error
 	return count > 0, err

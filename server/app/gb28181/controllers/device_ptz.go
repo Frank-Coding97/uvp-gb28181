@@ -8,6 +8,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -136,6 +137,9 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 			Profile:       profileForDevice(&device),
 		}
+		if !dc.authorizePTZTarget(c, &target) {
+			return
+		}
 		profile := target.Profile
 		op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
@@ -153,6 +157,10 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			"operationId": op.OperationID, "deviceId": device.DeviceID, "channelId": channel.ChannelID,
 			"action": action, "speed": request.Speed, "sn": op.SN, "status": op.Status,
 		}})
+		return
+	}
+	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
+		dc.FailAndAbort(c, "PTZ 授权服务未就绪", nil)
 		return
 	}
 	body, err := manscdp.BuildPTZControlWithProfile(profileForDevice(&device), channel.ChannelID, sn, manscdp.PTZCommand{Action: action, Speed: request.Speed})
@@ -230,6 +238,9 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
 		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, Profile: profileForDevice(&device)}
+	if !dc.authorizePTZTarget(c, &target) {
+		return
+	}
 	key := request.IdempotencyKey
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
@@ -295,6 +306,9 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
 		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, Profile: profileForDevice(&device)}
+	if !dc.authorizePTZTarget(c, &target) {
+		return
+	}
 	profile := target.Profile
 	if !profile.SupportsPrecisePTZ() {
 		response.SetBusinessResult(c, 1, false)

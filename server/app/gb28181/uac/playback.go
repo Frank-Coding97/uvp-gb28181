@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	ErrPlaybackUnavailable = errors.New("playback dialog unavailable")
-	ErrPlaybackClosed      = errors.New("playback dialog closed")
-	ErrPlaybackRejected    = errors.New("playback control rejected")
+	ErrPlaybackUnavailable    = errors.New("playback dialog unavailable")
+	ErrPlaybackClosed         = errors.New("playback dialog closed")
+	ErrPlaybackRejected       = errors.New("playback control rejected")
+	ErrPlaybackCleanupUnknown = errors.New("playback dialog cleanup unconfirmed")
+	ErrPlaybackACKPending     = errors.New("playback ACK unconfirmed; cleanup required")
 )
 
 const playbackTeardownTimeout = 2 * time.Second
@@ -98,8 +100,24 @@ func (d *sipgoPlaybackDialog) Ack(ctx context.Context) error { return d.session.
 func (d *sipgoPlaybackDialog) Do(ctx context.Context, req *sip.Request) (*sip.Response, error) {
 	return d.session.Do(ctx, req)
 }
-func (d *sipgoPlaybackDialog) Bye(ctx context.Context) error { return d.session.Bye(ctx) }
-func (d *sipgoPlaybackDialog) Close() error                  { return d.session.Close() }
+func (d *sipgoPlaybackDialog) Bye(ctx context.Context) error {
+	// ReadBye and ACK retransmission failures can end sipgo's local state
+	// without an acknowledged outbound BYE. Record operations are serialized.
+	if d.session.LoadState() == sip.DialogStateEnded {
+		return ErrPlaybackCleanupUnknown
+	}
+	if err := d.session.Bye(ctx); err != nil {
+		return err
+	}
+	// Require the normal cancellation cause, not errors.Is: an asynchronous
+	// ACK error can wrap context.Canceled. The state/cause publication gap is
+	// also unknown, never a successful receipt.
+	if d.session.LoadState() != sip.DialogStateEnded || context.Cause(d.session.Context()) != context.Canceled {
+		return ErrPlaybackCleanupUnknown
+	}
+	return nil
+}
+func (d *sipgoPlaybackDialog) Close() error { return d.session.Close() }
 func (d *sipgoPlaybackDialog) ReadBye(req *sip.Request, tx sip.ServerTransaction) error {
 	return d.session.ReadBye(req, tx)
 }
@@ -140,10 +158,14 @@ func (d *sipgoPlaybackDialog) Metadata() PlaybackDialogMetadata {
 }
 
 type playbackDialogRecord struct {
-	mu       sync.Mutex
-	dialog   playbackDialog
-	metadata PlaybackDialogMetadata
-	closed   bool
+	mu             sync.Mutex
+	dialog         playbackDialog
+	metadata       PlaybackDialogMetadata
+	closed         bool
+	closing        bool
+	byeConfirmed   bool
+	ackPending     bool
+	inboundByeCSeq *uint32
 }
 
 type PlaybackDialogStore struct {
@@ -253,13 +275,16 @@ func (u *UAC) InvitePlayback(ctx context.Context, in PlaybackInviteRequest) (Pla
 	dialogMetadata.ChannelID = metadata.ChannelID
 	dialogMetadata.SSRC = metadata.SSRC
 	record := &playbackDialogRecord{dialog: dialog, metadata: dialogMetadata}
+	// Publishing the record must not allow control/cleanup to race the ACK.
+	record.mu.Lock()
 	u.playbackDialogs.put(record)
 	if err := dialog.Ack(ctx); err != nil {
-		u.playbackDialogs.remove(metadata.CallID, record)
-		_ = dialog.Close()
+		record.closing, record.ackPending = true, true
+		record.mu.Unlock()
 		u.recordEnd(metadata.CallID, cseq, dialogMetadata.StatusCode, false)
-		return dialogMetadata, fmt.Errorf("发送 PLAYBACK ACK 失败: %w", err)
+		return dialogMetadata, errors.Join(ErrPlaybackACKPending, fmt.Errorf("发送 PLAYBACK ACK 失败: %w", err))
 	}
+	record.mu.Unlock()
 	u.recordEnd(metadata.CallID, cseq, dialogMetadata.StatusCode, true)
 	return dialogMetadata, nil
 }
@@ -293,7 +318,7 @@ func (u *UAC) SendPlaybackInfo(ctx context.Context, callID string, request Playb
 	}
 	record.mu.Lock()
 	defer record.mu.Unlock()
-	if record.closed {
+	if record.closed || record.closing {
 		return PlaybackControlResult{}, ErrPlaybackClosed
 	}
 
@@ -354,55 +379,113 @@ func (u *UAC) Action(ctx context.Context, callID, action string, positionSeconds
 	return positionSeconds, scale, nil
 }
 
+type PlaybackTeardownResult string
+
+const (
+	PlaybackTeardownMissing PlaybackTeardownResult = "missing"
+	PlaybackTeardownPending PlaybackTeardownResult = "pending"
+	PlaybackTeardownClosed  PlaybackTeardownResult = "sip_dialog_closed"
+)
+
+// TeardownPlayback retains the legacy missing-is-idempotent behavior. Its nil
+// error is not cleanup evidence; evidence consumers must inspect the typed result.
 func (u *UAC) TeardownPlayback(ctx context.Context, callID string) error {
 	if u == nil || u.playbackDialogs == nil {
 		return nil
 	}
+	_, err := u.TeardownPlaybackResult(ctx, callID)
+	return err
+}
+
+// TeardownPlaybackResult describes only the original in-memory SIP dialog.
+// Missing after restart or a previous deletion is never a closed receipt, and
+// even sip_dialog_closed says nothing about RTP, viewers or device cleanup.
+func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result PlaybackTeardownResult, err error) {
+	if u == nil || u.playbackDialogs == nil {
+		return PlaybackTeardownMissing, ErrPlaybackUnavailable
+	}
 	record := u.playbackDialogs.get(callID)
 	if record == nil {
-		return nil
+		return PlaybackTeardownMissing, nil
 	}
 	record.mu.Lock()
-	defer record.mu.Unlock()
+	notifyEnd := false
+	metadata := record.metadata
+	defer func() {
+		record.mu.Unlock()
+		if notifyEnd {
+			err = errors.Join(err, u.playbackEnded(context.Background(), metadata, "bye"))
+		}
+	}()
 	if record.closed {
-		return nil
+		return PlaybackTeardownClosed, nil
 	}
-	record.closed = true
-	u.playbackDialogs.remove(callID, record)
+	if record.ackPending && !record.byeConfirmed {
+		// Keep the known answer for cleanup, but do not gain permission for an
+		// automatic ACK retry from a legacy error path. A precise inbound BYE
+		// may still close this dialog; durable retry authorization comes later.
+		return PlaybackTeardownPending, ErrPlaybackCleanupUnknown
+	}
+	if record.inboundByeCSeq != nil && !record.byeConfirmed {
+		// sipgo already set Ended before attempting the inbound response.
+		// Only the same inbound exchange may resolve this uncertainty.
+		return PlaybackTeardownPending, ErrPlaybackCleanupUnknown
+	}
 
-	cseq := record.metadata.CSeq + 1
-	body, buildErr := mansrtsp.BuildTeardown(cseq)
 	var controlErr error
-	if buildErr == nil {
-		controlCtx, controlCancel := context.WithTimeout(ctx, playbackTeardownTimeout)
-		req := sip.NewRequest(sip.INFO, u.deviceURI(record.metadata.ChannelID))
-		req.SetBody(body)
-		req.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
-		callIDHeader := sip.CallIDHeader(record.metadata.CallID)
-		req.AppendHeader(&callIDHeader)
-		req.AppendHeader(&sip.CSeqHeader{SeqNo: cseq, MethodName: sip.INFO})
-		response, err := record.dialog.Do(controlCtx, req)
-		controlCancel()
-		if err != nil {
-			controlErr = fmt.Errorf("发送 PLAYBACK TEARDOWN 失败: %w", err)
-		} else if !is2xx(response.StatusCode) {
-			controlErr = fmt.Errorf("%w: SIP %d %s", ErrPlaybackRejected, response.StatusCode, response.Reason)
-		} else if len(response.Body()) == 0 {
-			// GB/T 28181-2016 9.8.3.2 permits a SIP 200 response without a MANSRTSP body.
-		} else if result, err := mansrtsp.ParseResponse(response.Body()); err != nil {
-			controlErr = err
-		} else if result.Status != mansrtsp.ResultAccepted {
-			controlErr = fmt.Errorf("%w: MANSRTSP %d %s", ErrPlaybackRejected, result.StatusCode, result.Reason)
+	if !record.closing {
+		record.closing = true
+		cseq := record.metadata.CSeq + 1
+		body, buildErr := mansrtsp.BuildTeardown(cseq)
+		controlErr = buildErr
+		if buildErr == nil {
+			record.metadata.CSeq = cseq
+			controlCtx, controlCancel := context.WithTimeout(ctx, playbackTeardownTimeout)
+			req := sip.NewRequest(sip.INFO, u.deviceURI(record.metadata.ChannelID))
+			req.SetBody(body)
+			req.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
+			callIDHeader := sip.CallIDHeader(record.metadata.CallID)
+			req.AppendHeader(&callIDHeader)
+			req.AppendHeader(&sip.CSeqHeader{SeqNo: cseq, MethodName: sip.INFO})
+			response, err := record.dialog.Do(controlCtx, req)
+			controlCancel()
+			if err != nil {
+				controlErr = fmt.Errorf("发送 PLAYBACK TEARDOWN 失败: %w", err)
+			} else if !is2xx(response.StatusCode) {
+				controlErr = fmt.Errorf("%w: SIP %d %s", ErrPlaybackRejected, response.StatusCode, response.Reason)
+			} else if len(response.Body()) == 0 {
+				// GB/T 28181-2016 9.8.3.2 permits a SIP 200 response without a MANSRTSP body.
+			} else if result, err := mansrtsp.ParseResponse(response.Body()); err != nil {
+				controlErr = err
+			} else if result.CSeq != cseq {
+				controlErr = fmt.Errorf("%w: response CSeq %d, want %d", mansrtsp.ErrProtocol, result.CSeq, cseq)
+			} else if result.Status != mansrtsp.ResultAccepted {
+				controlErr = fmt.Errorf("%w: MANSRTSP %d %s", ErrPlaybackRejected, result.StatusCode, result.Reason)
+			}
 		}
 	}
-	byeCtx, byeCancel := context.WithTimeout(context.WithoutCancel(ctx), playbackTeardownTimeout)
-	byeErr := record.dialog.Bye(byeCtx)
-	byeCancel()
+	if !record.byeConfirmed {
+		byeCtx, byeCancel := context.WithTimeout(context.WithoutCancel(ctx), playbackTeardownTimeout)
+		byeErr := record.dialog.Bye(byeCtx)
+		byeCancel()
+		if byeErr != nil {
+			return PlaybackTeardownPending, errors.Join(controlErr, byeErr)
+		}
+		record.byeConfirmed = true
+	}
 	closeErr := record.dialog.Close()
-	if byeErr == nil && (errors.Is(controlErr, context.Canceled) || errors.Is(controlErr, context.DeadlineExceeded)) {
+	if closeErr == nil {
+		record.closed = true
+		u.playbackDialogs.remove(callID, record)
+		notifyEnd = record.inboundByeCSeq != nil
+	}
+	if errors.Is(controlErr, context.Canceled) || errors.Is(controlErr, context.DeadlineExceeded) {
 		controlErr = nil
 	}
-	return errors.Join(controlErr, byeErr, closeErr)
+	if closeErr != nil {
+		return PlaybackTeardownPending, errors.Join(controlErr, closeErr)
+	}
+	return PlaybackTeardownClosed, controlErr
 }
 
 func (u *UAC) HandlePlaybackBye(req *sip.Request, tx sip.ServerTransaction) (bool, error) {
@@ -423,19 +506,38 @@ func (u *UAC) HandlePlaybackBye(req *sip.Request, tx sip.ServerTransaction) (boo
 		return false, err
 	}
 	record.mu.Lock()
-	if record.closed {
+	fromTag, toTag := "", ""
+	if from := req.From(); from != nil {
+		fromTag, _ = from.Params.Get("tag")
+	}
+	if to := req.To(); to != nil {
+		toTag, _ = to.Params.Get("tag")
+	}
+	cseq := req.CSeq()
+	if record.closed || req.Method != sip.BYE || cseq == nil || cseq.MethodName != sip.BYE ||
+		fromTag == "" || toTag == "" || fromTag != record.metadata.RemoteTag || toTag != record.metadata.LocalTag ||
+		(record.inboundByeCSeq != nil && *record.inboundByeCSeq != cseq.SeqNo) {
 		record.mu.Unlock()
 		err := tx.Respond(sip.NewResponseFromRequest(req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
 		return false, err
 	}
-	record.closed = true
+	record.closing = true
+	if record.inboundByeCSeq == nil {
+		seq := cseq.SeqNo
+		record.inboundByeCSeq = &seq
+	}
 	metadata := record.metadata
-	u.playbackDialogs.remove(callID, record)
 	if err := record.dialog.ReadBye(req, tx); err != nil {
 		record.mu.Unlock()
 		return true, err
 	}
-	_ = record.dialog.Close()
+	record.byeConfirmed = true
+	if err := record.dialog.Close(); err != nil {
+		record.mu.Unlock()
+		return true, err
+	}
+	record.closed = true
+	u.playbackDialogs.remove(callID, record)
 	record.mu.Unlock()
 	if err := u.playbackEnded(context.Background(), metadata, "bye"); err != nil {
 		return true, err

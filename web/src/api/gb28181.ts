@@ -1378,6 +1378,9 @@ export interface PlayAuthConfig {
   authEnabled: boolean;
   authBindClientIP: boolean;
   authTTLSeconds: number;
+  /** Read-only persistent OpenAPI media authorization requirement. */
+  authRequiredByOpenAPI?: boolean;
+  authConfigConflict?: boolean;
 }
 
 export const fetchPlayAuthConfig = () =>

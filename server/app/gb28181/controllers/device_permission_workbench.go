@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,7 +12,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
@@ -25,6 +23,22 @@ func deptValidatorFor(c *gin.Context) assign.DeptValidator {
 		deptIDs, needFilter := datascope.GetOwnerDeptIDsWithDB(c, db)
 		return deptIDs, needFilter, nil
 	}
+}
+
+// SetDeviceTransferBarrier installs the process-wide barrier shared with media
+// operations. A missing dependency denies assignment; never build one per HTTP
+// request because that would leave already-running media outside the guard.
+func (dc *DeviceMgmtController) SetDeviceTransferBarrier(barrier assign.DeviceTransferBarrier) {
+	dc.transferBarrierMu.Lock()
+	defer dc.transferBarrierMu.Unlock()
+	dc.transferBarrier = barrier
+}
+
+func (dc *DeviceMgmtController) assignmentService(c *gin.Context, db *gorm.DB) *assign.Service {
+	dc.transferBarrierMu.RLock()
+	barrier := dc.transferBarrier
+	dc.transferBarrierMu.RUnlock()
+	return assign.NewService(db, deptValidatorFor(c), assign.WithDeviceTransferBarrier(barrier))
 }
 
 func (dc *DeviceMgmtController) PermissionWorkbenchSummary(c *gin.Context) {
@@ -182,13 +196,10 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), body.Items, body.TargetDeptID)
+	result, err := dc.assignmentService(c, db).AssignBatchV2(c.Request.Context(), body.Items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "调整设备归属失败", err)
 		return
-	}
-	if result.Summary.Changed > 0 {
-		playauth.BumpRevocation(time.Now())
 	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",
@@ -248,13 +259,10 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	for _, device := range devices {
 		items = append(items, assign.AssignmentInput{DeviceID: device.ID, ExpectedOwnerDeptID: device.OwnerDeptID})
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), items, body.TargetDeptID)
+	result, err := dc.assignmentService(c, db).AssignBatchV2(c.Request.Context(), items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "整部门调整归属失败", err)
 		return
-	}
-	if result.Summary.Changed > 0 {
-		playauth.BumpRevocation(time.Now())
 	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",

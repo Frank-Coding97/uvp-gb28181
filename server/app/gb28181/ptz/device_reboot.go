@@ -277,7 +277,7 @@ func findDeviceRebootByKey(db *gorm.DB, deviceID uint, key string) (gbmodels.GbP
 func findRecentDeviceReboot(db *gorm.DB, deviceID uint, since time.Time) (gbmodels.GbPTZOperation, bool, error) {
 	var operation gbmodels.GbPTZOperation
 	result := db.Model(&gbmodels.GbPTZOperation{}).
-		Where("device_id = ? AND action = ? AND created_at >= ?", deviceID, deviceRebootAction, since).
+		Where("device_id = ? AND action = ? AND created_at >= ?", deviceID, deviceRebootAction, gbmodels.PTZTimeComparison(db, since)).
 		Where("status IN ?", []gbmodels.PTZOperationStatus{
 			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationAccepted, gbmodels.PTZOperationUnknown,
 		}).Order("id DESC").Limit(1).Find(&operation)

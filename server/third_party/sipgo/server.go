@@ -266,6 +266,23 @@ func (srv *Server) ListenAndServeTLS(ctx context.Context, network string, addr s
 	return sip.ErrTransportNotSuported
 }
 
+// Publish an immutable, fully created listener to the cancellation goroutine.
+// The old shared variable raced both assignment and socket initialization;
+// early cancellation could also observe nil and leave a later listener alive.
+// Join on every Serve return, including errors without parent cancellation.
+func (srv *Server) closeListenerOnCancel(ctx context.Context, listener io.Closer) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		if err := listener.Close(); err != nil {
+			srv.log.Error("Failed to close listener", "error", err)
+		}
+	}()
+	return func() { cancel(); <-done }
+}
+
 // ServeUDP starts serving request on UDP type listener.
 func (srv *Server) ServeUDP(l net.PacketConn) error {
 	return srv.tp.ServeUDP(l)

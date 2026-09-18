@@ -103,7 +103,7 @@ func TestLoggingGBHTTPPlayProbeUsesRequestLogger(t *testing.T) {
 	probeErr := errors.New("probe unavailable")
 	z := &mockZLM{onlineErr: probeErr}
 	svc := &Service{zlm: z}
-	_, err := svc.tryReuseStream(requestCtx, &gbmodels.GbChannel{StreamID: "stream-1"})
+	_, err := svc.tryReuseStream(requestCtx, &gbmodels.GbChannel{StreamID: "stream-1"}, Request{})
 	require.NoError(t, err)
 	require.Len(t, entries.All(), 1)
 	fields := entries.All()[0].ContextMap()

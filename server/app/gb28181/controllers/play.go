@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -38,11 +39,11 @@ type PlayService interface {
 }
 
 type AuthorizedPlayService interface {
-	StartAuthorized(context.Context, string, string, string) (*play.Result, error)
+	StartAuthorized(context.Context, play.AuthorizedRequest) (*play.Result, error)
 }
 
 type FixedPlaybackAuthorizationService interface {
-	AuthorizeFixedPlayback(context.Context, string, string, string) (*play.Result, error)
+	AuthorizeFixedPlayback(context.Context, play.AuthorizedRequest) (*play.Result, error)
 }
 
 type PlaybackRecordingStarter interface {
@@ -89,7 +90,8 @@ func (pc *PlayController) Start(c *gin.Context) {
 		pc.FailAndAbort(c, "deviceId/channelId 不能为空", nil)
 		return
 	}
-	if !pc.channelVisible(c, deviceID, channelID) {
+	playRequest, visible := pc.authorizedChannel(c, deviceID, channelID)
+	if !visible {
 		audit["result"] = "denied"
 		return
 	}
@@ -122,7 +124,9 @@ func (pc *PlayController) Start(c *gin.Context) {
 	var res *play.Result
 	var err error
 	if authorized, ok := pc.svc.(AuthorizedPlayService); ok {
-		res, err = authorized.StartAuthorized(c.Request.Context(), deviceID, channelID, requestPlaybackSourceIP(c.Request))
+		res, err = authorized.StartAuthorized(c.Request.Context(), playRequest)
+	} else if gbconfig.CurrentPlayAuthSettings().Enabled {
+		err = play.ErrPlayAuthorizationUnavailable
 	} else {
 		res, err = pc.svc.Start(c.Request.Context(), deviceID, channelID)
 	}
@@ -166,12 +170,13 @@ func (pc *PlayController) Authorize(c *gin.Context) {
 		pc.FailAndAbort(c, "deviceId/channelId 不能为空", nil)
 		return
 	}
-	if !pc.channelVisible(c, deviceID, channelID) {
+	playRequest, visible := pc.authorizedChannel(c, deviceID, channelID)
+	if !visible {
 		audit["result"] = "denied"
 		return
 	}
 	result, err := service.AuthorizeFixedPlayback(
-		c.Request.Context(), deviceID, channelID, requestPlaybackSourceIP(c.Request),
+		c.Request.Context(), playRequest,
 	)
 	if err != nil {
 		audit["result"] = playAuthorizationAuditResult(err)
@@ -295,22 +300,42 @@ func mapPlayErr(err error) string {
 	}
 }
 
-func (pc *PlayController) channelVisible(c *gin.Context, deviceID, channelID string) bool {
-	var ch gbmodels.GbChannel
-	result := app.DB().WithContext(c.Request.Context()).
-		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
-		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
-		Limit(1).
-		Find(&ch)
+// authorizedChannel reads personnel visibility and the root device epoch in
+// the same statement. Reading the epoch later could upgrade a stale permission
+// check after an ownership transfer.
+func (pc *PlayController) authorizedChannel(c *gin.Context, deviceID, channelID string) (play.AuthorizedRequest, bool) {
+	var rows []struct {
+		AccessEpoch        *int64
+		ChannelOwnerDeptID uint
+		RootOwnerDeptID    uint
+	}
+	db := app.DB()
+	if db == nil {
+		pc.FailAndAbort(c, "查询通道失败", nil)
+		return play.AuthorizedRequest{}, false
+	}
+	lookup := db.WithContext(c.Request.Context())
+	result := lookup.Table("gb_channel").
+		Select("play_root.access_epoch, gb_channel.owner_dept_id AS channel_owner_dept_id, play_root.owner_dept_id AS root_owner_dept_id").
+		Joins("JOIN gb_device play_root ON play_root.device_id = gb_channel.device_id AND play_root.deleted_at IS NULL").
+		Scopes(datascope.VisibilityScopeWithDB(c, lookup, "gb_channel.owner_dept_id", "gb_channel.device_id")).
+		Where("gb_channel.device_id = ? AND gb_channel.channel_id = ? AND gb_channel.deleted_at IS NULL", deviceID, channelID).
+		Limit(2).Find(&rows)
 	if result.Error != nil {
 		pc.FailAndAbort(c, "查询通道失败", result.Error)
-		return false
+		return play.AuthorizedRequest{}, false
 	}
-	if result.RowsAffected == 0 {
+	if result.RowsAffected != 1 || len(rows) != 1 {
 		pc.FailAndAbort(c, "通道不存在", nil)
-		return false
+		return play.AuthorizedRequest{}, false
 	}
-	return true
+	if rows[0].AccessEpoch == nil || *rows[0].AccessEpoch <= 0 || rows[0].ChannelOwnerDeptID != rows[0].RootOwnerDeptID {
+		app.Log(c.Request.Context()).Warn("后台播放设备安全投影不一致", zap.String("deviceId", deviceID), zap.String("channelId", channelID))
+		pc.FailAndAbort(c, "通道不存在", nil)
+		return play.AuthorizedRequest{}, false
+	}
+	return play.AuthorizedRequest{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: *rows[0].AccessEpoch,
+		ClientIP: requestPlaybackSourceIP(c.Request)}, true
 }
 
 // streamVisible 校验"流存在且可见"。校验语义与返回 false 的三种拒绝理由一字未变,

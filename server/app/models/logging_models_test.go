@@ -83,9 +83,9 @@ func TestLoggingBaseHTTPModels(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chdir(oldWorkingDirectory) })
 
-		oldOnce, oldInstance := once, instance
+		oldInstance := instance
 		once, instance = sync.Once{}, nil
-		t.Cleanup(func() { once, instance = oldOnce, oldInstance })
+		t.Cleanup(func() { once = sync.Once{}; instance = oldInstance })
 
 		if got := GetAreaListInstance(ctx); !got.IsEmpty() {
 			t.Fatalf("missing area file returned %#v", got)

@@ -197,6 +197,10 @@ func (tx *ClientTx) stateTerminated(s fsmInput) fsmInput {
 // Define actions
 func (tx *ClientTx) actInviteResend() fsmInput {
 	tx.mu.Lock()
+	if tx.closed {
+		tx.mu.Unlock()
+		return FsmInputNone
+	}
 
 	tx.timer_a_time *= 2
 
@@ -220,6 +224,10 @@ func (tx *ClientTx) actResend() fsmInput {
 	// tx.Log().Debug("actResend")
 
 	tx.mu.Lock()
+	if tx.closed {
+		tx.mu.Unlock()
+		return FsmInputNone
+	}
 
 	tx.timer_a_time *= 2
 	// For non-INVITE, cap timer A at T2 seconds.
@@ -265,6 +273,10 @@ func (tx *ClientTx) actInviteFinal() fsmInput {
 	tx.fsmPassUp()
 
 	tx.mu.Lock()
+	if tx.closed {
+		tx.mu.Unlock()
+		return FsmInputNone
+	}
 
 	if tx.timer_a != nil {
 		tx.timer_a.Stop()
@@ -291,6 +303,9 @@ func (tx *ClientTx) actFinal() fsmInput {
 
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
+	if tx.closed {
+		return FsmInputNone
+	}
 
 	if tx.timer_a != nil {
 		tx.timer_a.Stop()
@@ -393,6 +408,10 @@ func (tx *ClientTx) actPassupAccept() fsmInput {
 	tx.fsmPassUp()
 
 	tx.mu.Lock()
+	if tx.closed {
+		tx.mu.Unlock()
+		return FsmInputNone
+	}
 	if tx.timer_a != nil {
 		tx.timer_a.Stop()
 		tx.timer_a = nil

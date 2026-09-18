@@ -179,7 +179,9 @@ func TestInviteTrackedSuccessCapturesResponseAndACK(t *testing.T) {
 	if err != nil || outcome.FinalStatus != sip.StatusOK || outcome.FinalResponseAt.IsZero() {
 		t.Fatalf("outcome=%+v err=%v, want successful response", outcome, err)
 	}
-	if !outcome.RequestSent || !outcome.AckSucceeded || outcome.AckAt.IsZero() || !outcome.AckAt.After(outcome.FinalResponseAt) {
+	// Consecutive clock reads can share a tick; ACK must not predate the
+	// final response, but a positive clock delta is not a protocol guarantee.
+	if !outcome.RequestSent || !outcome.AckSucceeded || outcome.AckAt.IsZero() || outcome.AckAt.Before(outcome.FinalResponseAt) {
 		t.Fatalf("success outcome=%+v", outcome)
 	}
 	if s.State != StateEstablished || m.Get(s.StreamID) != s {

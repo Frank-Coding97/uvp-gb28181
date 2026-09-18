@@ -1,0 +1,668 @@
+openapi: 3.0.3
+info:
+  title: UVP machine-client API
+  version: 1.0.0
+  description: >-
+    Server-to-server machine-client boundary. The access key identifies a
+    client and the server resolves its owner and enabled scopes. The external
+    business API never returns SK; controlled administrative creation or
+    rotation displays it once for secure server-side delivery.
+servers:
+  - url: /
+x-uvp-secret-handling: >-
+  The external business API never returns SK. The controlled administrative
+  create or rotate response is the sole one-time display for secure delivery;
+  the receiving backend must store it server-side. Never embed SK in a browser,
+  frontend, mobile app, or browser persistent storage.
+x-uvp-signature-contract:
+  algorithm: HMAC-SHA256
+  requiredHeaders:
+    - X-UVP-Sign-Version
+    - X-UVP-Access-Key
+    - X-UVP-Timestamp
+    - X-UVP-Nonce
+    - X-UVP-Signature
+  queryAllowlist:
+    - keyword
+    - page
+    - pageSize
+    - status
+  pathRule: ASCII literal paths only; encoded paths and ambiguous percent escapes are rejected.
+  queryRule: Parse key=value pairs, reject raw +, duplicate or empty keys, missing equals, semicolons, and invalid percent escapes; spaces must be encoded as %20 and remain valid; decode once, RFC3986-encode, then sort.
+  duplicateRule: Duplicate headers or query keys and comma-joined header values are rejected; leading/trailing whitespace is rejected only in headers.
+  utf8Rule: Query and JSON strings must be valid UTF-8; invalid UTF-8 is rejected.
+  canonical:
+    lineSeparator: LF
+    finalLineHasNoLF: true
+    lines:
+      - 'UVP-HMAC-SHA256/1'
+      - '<AK>'
+      - '<Timestamp>'
+      - '<Nonce>'
+      - '<UPPERCASE HTTP Method>'
+      - '<CanonicalPath>'
+      - '<CanonicalQuery, possibly empty>'
+      - '<ContentType: application/json or empty>'
+      - '<BodySHA256, lowercase hexadecimal>'
+      - '<ServiceAudience, deployment-fixed OpenAPI audience>'
+    hmacKey: Decode the base64url-without-padding SK to 32 bytes before HMAC; never use the displayed SK text bytes.
+    audience:
+      source: deployment-fixed
+      clientSupplied: false
+    timestamp:
+      maxSkewSeconds: 300
+      rule: absolute difference from server time must be at most maxSkewSeconds
+    nonce:
+      minimumRetentionSeconds: 660
+      uniqueBy: (client_id, nonce)
+      persistent: true
+      survivesSecretRotation: true
+x-uvp-retry-policy:
+  GET: Retry only with a fresh timestamp, nonce, and signature.
+  POST: Do not automatically retry after a timeout; callers must decide whether to retry.
+x-uvp-transport-contract:
+  httpVersion: HTTP/1.1
+  post:
+    body:
+      contentLength:
+        required: true
+        minimum: 1
+        maximum: 65536
+        value: exact body byte length
+        signed: false
+      transferEncoding:
+        allowed: false
+        chunked: false
+      contentEncoding:
+        allowed: false
+      contentType: application/json
+      json:
+        exactFields: [protocol]
+        rejectUnknownFields: true
+        rejectDuplicateFields: true
+    automaticRetry: false
+x-uvp-error-classification:
+  missingRequiredAuthHeader: 401
+  malformedAuthHeader: 400
+  unknownInactiveOrInvalidHMAC: 401
+  expired: 401
+  replayed: 401
+  dependencyUnavailable: 503
+x-uvp-request-limits:
+  bodyBytes: 65536
+  queryBytes: 8192
+  bodyHash: Hash the original request bytes; do not reserialize JSON before signing.
+  duplicateJsonMembers: Reject duplicate JSON object member names.
+security:
+  - uvpHmac: []
+paths:
+  /openapi/v1/devices:
+    get:
+      operationId: listDevices
+      summary: List devices owned by the authenticated machine client
+      x-uvp-scope: device:list
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+        - $ref: '#/components/parameters/Status'
+      responses:
+        '200':
+          description: Device list
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceListResponse'
+        '400': &invalidRequestResponse
+          description: Invalid request
+          headers: &noStoreHeader
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content: &errorContent
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401': &authenticationFailedResponse
+          description: Authentication failed (AUTHENTICATION_FAILED), expired (REQUEST_EXPIRED), or replayed (REQUEST_REPLAYED).
+          headers: *noStoreHeader
+          content: *errorContent
+        '403': &capabilityDeniedResponse
+          description: Capability denied
+          headers: *noStoreHeader
+          content: *errorContent
+        '404': &resourceNotFoundResponse
+          description: Resource not found
+          headers: *noStoreHeader
+          content: *errorContent
+        '405': &methodNotAllowedResponse
+          description: Method not allowed; an HTTP HEAD response has no body.
+          headers: *noStoreHeader
+        '429': &rateLimitedResponse
+          description: Rate limited or quota exceeded
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+            Retry-After:
+              required: true
+              schema:
+                type: integer
+                minimum: 1
+          content: *errorContent
+        '503': &serviceUnavailableResponse
+          description: Service unavailable
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}:
+    get:
+      operationId: getDevice
+      summary: Get one device owned by the authenticated machine client
+      x-uvp-scope: device:detail
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Device
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/status:
+    get:
+      operationId: getDeviceStatus
+      summary: Get the status of one owned device
+      x-uvp-scope: device:status
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Device status
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceStatusResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels:
+    get:
+      operationId: listChannels
+      summary: List channels of one owned device
+      x-uvp-scope: channel:list
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Keyword'
+        - $ref: '#/components/parameters/Status'
+      responses:
+        '200':
+          description: Channel list
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelListResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}:
+    get:
+      operationId: getChannel
+      summary: Get one channel of one owned device
+      x-uvp-scope: channel:detail
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Channel
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/status:
+    get:
+      operationId: getChannelStatus
+      summary: Get the status of one owned channel
+      x-uvp-scope: channel:status
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Channel status
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelStatusResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations:
+    post:
+      operationId: createLiveAuthorization
+      summary: Reserved live authorization operation
+      description: >-
+        Disabled until the approved media protocol capability gate is enabled.
+        The 200 response is a reserved contract only; this server currently
+        returns 503 and never claims a playable protocol.
+      x-uvp-scope: play:live:apply
+      x-uvp-enabled: false
+      x-uvp-current-status: 503
+      x-uvp-expires-ttl-seconds: 120
+      x-uvp-content-type: application/json
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAuthorizationRequest'
+      responses:
+        '200':
+          description: Disabled reserved response; media authorization is not enabled.
+          x-uvp-enabled: false
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveAuthorizationResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+components:
+  securitySchemes:
+    uvpHmac:
+      type: apiKey
+      in: header
+      name: X-UVP-Signature
+      description: HMAC-SHA256 signature produced with the server-side secret key.
+  parameters:
+    SignVersion:
+      name: X-UVP-Sign-Version
+      in: header
+      required: true
+      description: Signature version. Only v1 is accepted.
+      schema:
+        type: string
+        enum: ['1']
+    AccessKey:
+      name: X-UVP-Access-Key
+      in: header
+      required: true
+      description: Public access key; the matching secret key remains server-side.
+      schema:
+        type: string
+        pattern: '^uvp_[0-9a-f]{32}$'
+    Timestamp:
+      name: X-UVP-Timestamp
+      in: header
+      required: true
+      description: Unix timestamp in seconds, decimal without leading zero, at most 19 digits and no greater than 9223372036854775807.
+      schema:
+        type: string
+        pattern: '^(0|[1-9][0-9]{0,18})$'
+    Nonce:
+      name: X-UVP-Nonce
+      in: header
+      required: true
+      description: Single-use request nonce; duplicate and comma-joined values are rejected.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+    Signature:
+      name: X-UVP-Signature
+      in: header
+      required: true
+      description: Lowercase hexadecimal HMAC-SHA256 signature over the canonical request.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{64}$'
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{20}$'
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{20}$'
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+    Keyword:
+      name: keyword
+      in: query
+      required: false
+      description: Valid UTF-8 search text, limited to 100 Unicode characters; an empty value is valid.
+      schema:
+        type: string
+        maxLength: 100
+    Status:
+      name: status
+      in: query
+      required: false
+      description: Optional device or channel status filter; an explicit empty value is rejected.
+      schema:
+        type: string
+        enum: [online, offline, unknown]
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code:
+          type: string
+          enum: [INVALID_REQUEST, AUTHENTICATION_FAILED, REQUEST_EXPIRED, REQUEST_REPLAYED, CAPABILITY_DENIED, RESOURCE_NOT_FOUND, CONFLICT, RATE_LIMITED, QUOTA_EXCEEDED, SERVICE_UNAVAILABLE]
+        message:
+          type: string
+        requestId:
+          type: string
+        data:
+          type: object
+          nullable: true
+    Device:
+      type: object
+      additionalProperties: false
+      required: [deviceId, name, alias, manufacturer, model, status]
+      properties:
+        deviceId: {type: string}
+        name: {type: string}
+        alias: {type: string}
+        manufacturer: {type: string}
+        model: {type: string}
+        status:
+          type: string
+          enum: [online, offline, unknown]
+    DevicePage:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Device'}
+        page: {type: integer, minimum: 1}
+        pageSize: {type: integer, minimum: 1, maximum: 100}
+        total: {type: integer, format: int64, minimum: 0}
+    DeviceStatus:
+      type: object
+      additionalProperties: false
+      required: [deviceId, status]
+      properties:
+        deviceId: {type: string}
+        status:
+          type: string
+          enum: [online, offline, unknown]
+    Channel:
+      type: object
+      additionalProperties: false
+      required: [deviceId, channelId, name, alias, manufacturer, model, status, ptzType]
+      properties:
+        deviceId: {type: string}
+        channelId: {type: string}
+        name: {type: string}
+        alias: {type: string}
+        manufacturer: {type: string}
+        model: {type: string}
+        status:
+          type: string
+          enum: [online, offline, unknown]
+        ptzType: {type: integer, format: int32}
+    ChannelPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Channel'}
+        page: {type: integer, minimum: 1}
+        pageSize: {type: integer, minimum: 1, maximum: 100}
+        total: {type: integer, format: int64, minimum: 0}
+    ChannelStatus:
+      type: object
+      additionalProperties: false
+      required: [deviceId, channelId, status]
+      properties:
+        deviceId: {type: string}
+        channelId: {type: string}
+        status:
+          type: string
+          enum: [online, offline, unknown]
+    DeviceListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DevicePage'}
+    DeviceResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/Device'}
+    DeviceStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceStatus'}
+    ChannelListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/ChannelPage'}
+    ChannelResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/Channel'}
+    ChannelStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/ChannelStatus'}
+    LiveAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol]
+      properties:
+        protocol:
+          type: string
+          enum: [https-flv, wss-flv]
+    LiveAuthorizationResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [authorizationId, protocol, url, expiresAt]
+          properties:
+            authorizationId: {type: string}
+            protocol: {type: string, enum: [https-flv, wss-flv]}
+            url: {type: string, format: uri}
+            expiresAt: {type: string, format: date-time}

@@ -77,26 +77,28 @@ func (f *fakeAutoDispatcher) count() int {
 }
 
 type autoOnDemandFixture struct {
-	controller *handler.HookController
-	engine     *gin.Engine
-	resolver   *fakeAutoNodeResolver
-	validator  *fakeAutoTargetValidator
-	dispatcher *fakeAutoDispatcher
-	signer     *playauth.Signer
-	clock      *autoAuthorizationClock
-	authID     string
-	settings   gbconfig.FixedAddressPlaybackSettings
-	deviceID   string
-	channelID  string
-	streamID   string
-	capability string
-	token      string
-	path       string
-	peer       string
-	clientIP   string
-	body       map[string]interface{}
-	raw        []byte
-	xff        string
+	controller  *handler.HookController
+	engine      *gin.Engine
+	resolver    *fakeAutoNodeResolver
+	validator   *fakeAutoTargetValidator
+	dispatcher  *fakeAutoDispatcher
+	signer      *playauth.Signer
+	authority   *hookDeviceAuthority
+	clock       *autoAuthorizationClock
+	deviceEpoch int64
+	authID      string
+	settings    gbconfig.FixedAddressPlaybackSettings
+	deviceID    string
+	channelID   string
+	streamID    string
+	capability  string
+	token       string
+	path        string
+	peer        string
+	clientIP    string
+	body        map[string]interface{}
+	raw         []byte
+	xff         string
 }
 
 type autoAuthorizationClock struct{ now time.Time }
@@ -113,8 +115,11 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 		playauth.WithNow(clock.Now),
 	)
 	require.NoError(t, err)
+	deviceEpoch := int64(7)
+	authority := newHookDeviceAuthority(deviceEpoch)
 	authorization := playauth.NewAuthorizationService(signer,
-		playauth.NewAuthorizationRegistry(playauth.WithAuthorizationRegistryNow(clock.Now)))
+		playauth.NewAuthorizationRegistry(playauth.WithAuthorizationRegistryNow(clock.Now)),
+		playauth.WithDeviceSecurityAuthority(authority))
 	deviceID := "37010301021320000014"
 	channelID := "37010301021320000001"
 	streamID := deviceID + "_" + channelID
@@ -129,6 +134,7 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 		DeviceID: deviceID, ChannelID: channelID, App: "rtp",
 		Stream: streamID, MediaServerID: mediaNode.MediaServerUUID,
 		BindClientIP: bindIP, ClientIP: "203.0.113.9",
+		DeviceEpoch: deviceEpoch,
 	})
 	require.NoError(t, err)
 	capability, err := playauth.HookCapability(mediaNode.APISecret, mediaNode.MediaServerUUID, playauth.HookOnStreamNotFound)
@@ -152,7 +158,8 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 	fixture := &autoOnDemandFixture{
 		controller: controller, engine: engine, resolver: resolver,
 		validator: validator, dispatcher: dispatcher, signer: signer,
-		clock: clock, authID: grant.AuthorizationGeneration,
+		authority: authority, clock: clock,
+		deviceEpoch: deviceEpoch, authID: grant.AuthorizationGeneration,
 		settings: settings, deviceID: deviceID, channelID: channelID,
 		streamID: streamID, capability: capability, token: grant.Token,
 		peer: "192.0.2.1:1234", clientIP: "203.0.113.9",
@@ -177,6 +184,7 @@ func TestOnStreamNotFoundIPBoundPreauthorizationRequiresVerifiedOnPlay(t *testin
 		coldBinding: playauth.Binding{
 			DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
 			App: "rtp", Stream: fixture.streamID, MediaServerID: fixture.resolver.node.MediaServerUUID,
+			BindClientIP: true, ClientIP: fixture.clientIP, DeviceEpoch: fixture.deviceEpoch,
 		},
 	})
 	fixture.engine.POST("/index/hook/on_play", fixture.controller.OnPlay)
@@ -203,6 +211,31 @@ func TestOnStreamNotFoundIPBoundPreauthorizationRequiresVerifiedOnPlay(t *testin
 	response = fixture.serve(t)
 	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
 	require.Equal(t, 1, fixture.dispatcher.count())
+}
+
+func TestOnStreamNotFoundVerifiedClientRejectsOldDeviceEpoch(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t, true)
+	fixture.controller.SetPlaybackMediaContextResolver(hookMediaResolver{
+		err: play.ErrPlaybackMediaNotCurrent,
+		coldBinding: playauth.Binding{
+			DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
+			App: "rtp", Stream: fixture.streamID, MediaServerID: fixture.resolver.node.MediaServerUUID,
+			BindClientIP: true, ClientIP: fixture.clientIP, DeviceEpoch: fixture.deviceEpoch,
+		},
+	})
+	fixture.engine.POST("/index/hook/on_play", fixture.controller.OnPlay)
+
+	response := postJSON(t, fixture.engine, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": fixture.streamID, "schema": "fmp4",
+		"mediaServerId": fixture.resolver.node.MediaServerUUID, "ip": fixture.clientIP,
+		"params": url.Values{playauth.QueryParameter: {fixture.token}}.Encode(),
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+
+	fixture.authority.setEpoch(fixture.deviceEpoch + 1)
+	response = fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	require.Zero(t, fixture.dispatcher.count())
 }
 
 func (f *autoOnDemandFixture) serve(t *testing.T) *httptest.ResponseRecorder {
@@ -238,7 +271,8 @@ func TestOnStreamNotFoundAcceptsAuthorizedFixedRequest(t *testing.T) {
 	require.Equal(t, 1, fixture.dispatcher.count())
 	require.Equal(t, play.Request{
 		DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
-		Trigger: "on_stream_not_found", RequiredNode: fixture.resolver.node.ID,
+		DeviceEpoch: fixture.deviceEpoch,
+		Trigger:     "on_stream_not_found", RequiredNode: fixture.resolver.node.ID,
 		AuthorizationID: fixture.authID,
 	}, fixture.dispatcher.requests[0])
 }
@@ -290,8 +324,9 @@ func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 		{name: "play token invalid", mutate: func(f *autoOnDemandFixture) {
 			f.body["params"] = url.Values{playauth.QueryParameter: {"invalid"}}.Encode()
 		}},
-		{name: "signer without authorization registry", mutate: func(f *autoOnDemandFixture) {
-			f.controller.SetPlayAuthorizer(f.signer)
+		{name: "authorization service without device authority", mutate: func(f *autoOnDemandFixture) {
+			f.controller.SetPlayAuthorizer(playauth.NewAuthorizationService(f.signer,
+				playauth.NewAuthorizationRegistry(playauth.WithAuthorizationRegistryNow(f.clock.Now))))
 		}},
 		{name: "authorization near expiry", mutate: func(f *autoOnDemandFixture) {
 			f.clock.now = f.clock.now.Add(91 * time.Second)

@@ -22,6 +22,7 @@ func TestBumpRevocation_InvalidatesOldTokens(t *testing.T) {
 	binding := Binding{
 		DeviceID:        "34020000002000000001",
 		ChannelID:       "37011200001310000001",
+		DeviceEpoch:     1,
 		App:             "rtp",
 		Stream:          "live",
 		MediaServerID:   "node-1",
@@ -54,6 +55,7 @@ func TestBumpRevocation_NewTokensStillValid(t *testing.T) {
 	binding := Binding{
 		DeviceID:        "34020000002000000001",
 		ChannelID:       "37011200001310000001",
+		DeviceEpoch:     1,
 		App:             "rtp",
 		Stream:          "live",
 		MediaServerID:   "node-1",

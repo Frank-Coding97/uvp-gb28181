@@ -562,66 +562,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
--- 登录审计事件与操作菜单 seed。
-IF OBJECT_ID(N'sys_login_logs', N'U') IS NULL CREATE TABLE [sys_login_logs] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,[user_id] BIGINT NULL,[username] NVARCHAR(100) NOT NULL,[result] NVARCHAR(16) NOT NULL,[failure_reason] NVARCHAR(48) NULL,[ip] NVARCHAR(50) NOT NULL DEFAULT N'',[location] NVARCHAR(100) NOT NULL DEFAULT N'未知',[user_agent] NVARCHAR(500) NOT NULL DEFAULT N'',[browser] NVARCHAR(100) NOT NULL DEFAULT N'未知',[os] NVARCHAR(100) NOT NULL DEFAULT N'未知',[created_at] DATETIME2 NOT NULL,[updated_at] DATETIME2 NULL,[deleted_at] DATETIME2 NULL);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_login_logs_created_at' AND object_id=OBJECT_ID(N'sys_login_logs')) CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (341,N'登录日志列表',N'/api/sysLoginLog/list',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,N'登录日志详情',N'/api/sysLoginLog/:id',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,N'删除登录日志',N'/api/sysLoginLog/delete',N'DELETE',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,N'清空登录日志',N'/api/sysLoginLog/clear',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,N'解锁登录账号',N'/api/sysLoginLog/unlock',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140384,10,N'/system/login-log',N'SystemLoginLog',N'system/login-log/index',N'登录日志',0,0,1,2,N'system:login-log:list',N'lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140385,140384,N'',N'SystemLoginLogDelete',N'',N'删除登录日志',1,0,1,3,N'system:login-log:delete',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140386,140384,N'',N'SystemLoginLogClear',N'',N'清空登录日志',1,0,2,3,N'system:login-log:clear',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140387,140384,N'',N'SystemLoginLogUnlock',N'',N'解锁登录账号',1,0,3,3,N'system:login-log:unlock',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140384),(1,140385),(1,140386),(1,140387); INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES (7808,N'p',N'role_1',N'/api/sysLoginLog/list',N'GET',N'*',N'',N''),(7809,N'p',N'role_1',N'/api/sysLoginLog/:id',N'GET',N'*',N'',N''),(7810,N'p',N'role_1',N'/api/sysLoginLog/delete',N'DELETE',N'*',N'',N''),(7811,N'p',N'role_1',N'/api/sysLoginLog/clear',N'POST',N'*',N'',N''),(7812,N'p',N'role_1',N'/api/sysLoginLog/unlock',N'POST',N'*',N'',N'');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
--- Playback schemes reuse the multi-screen page and expose one hidden permission.
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
-(228,N'查询播放方案','/api/gb28181/playback-schemes','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(229,N'查看播放方案','/api/gb28181/playback-schemes/:id','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(230,N'创建播放方案','/api/gb28181/playback-schemes','POST',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(231,N'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(232,N'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(233,N'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
-(140362,140355,'','','',N'管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140362);
-INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
-(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
-(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
-(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
-(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
-(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
-(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
-(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
--- GB28181 cascade API/menu/Casbin seed for fresh SQL Server installs.
-SET IDENTITY_INSERT [sys_api] ON;
-INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
-(234,N'查看级联平台列表',N'/api/gb28181/cascade/platforms',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(235,N'创建级联平台',N'/api/gb28181/cascade/platforms',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(236,N'查看级联平台',N'/api/gb28181/cascade/platforms/:id',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(237,N'修改级联平台',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(238,N'删除级联平台',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(239,N'启停级联平台',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(240,N'启用级联平台',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(241,N'停用级联平台',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(242,N'重连级联平台',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(243,N'查看级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(244,N'更新级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(245,N'共享级联通道',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(246,N'取消级联通道共享',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
-SET IDENTITY_INSERT [sys_api] OFF;
-SET IDENTITY_INSERT [sys_menu] ON;
-INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
-(140370,0,N'/gb28181/cascade',N'gb28181-cascade',N'gb28181/cascade/index',N'国标级联',0,0,13,2,N'',N'lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
-(140363,140370,N'',N'',N'',N'查看国标级联',1,3,N'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,N'',N'',N'',N'管理国标级联',1,3,N'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,N'',N'',N'',N'启停国标级联',1,3,N'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,N'',N'',N'',N'共享国标级联',1,3,N'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,N'',N'',N'',N'重连国标级联',1,3,N'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-SET IDENTITY_INSERT [sys_menu] OFF;
-INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140370),(1,140363),(1,140364),(1,140365),(1,140366),(1,140367);
-INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140363,234),(140363,236),(140363,243),(140364,235),(140364,237),(140364,238),(140365,239),(140365,240),(140365,241),(140366,244),(140366,245),(140366,246),(140367,242);
-SET IDENTITY_INSERT [sys_casbin_rule] ON;
-INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
-(7578,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'GET',N'*',N'',N''),(7579,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'POST',N'*',N'',N''),(7580,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'GET',N'*',N'',N''),(7581,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'*',N'',N''),(7582,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'*',N'',N''),(7583,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'*',N'',N''),(7584,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'*',N'',N''),(7585,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'*',N'',N''),(7586,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'*',N'',N''),(7587,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'*',N'',N''),(7588,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'*',N'',N''),(7589,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'*',N'',N''),(7590,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'*',N'',N'');
-SET IDENTITY_INSERT [sys_casbin_rule] OFF;
-
 -- ZLM media-node registry and durable endpoint-recovery gate.
 IF OBJECT_ID(N'meta_node', N'U') IS NOT NULL DROP TABLE [meta_node];
 CREATE TABLE [meta_node] (
@@ -683,9 +623,14 @@ CREATE TABLE [gb_device] (
     [effective_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_effective_version] DEFAULT N'2016',
     [effective_version_source] NVARCHAR(16) NOT NULL CONSTRAINT [df_gb_device_effective_source] DEFAULT N'default',
     [effective_version_at] DATETIME2(3) NULL,
+    [access_epoch] BIGINT NOT NULL CONSTRAINT [df_gb_device_access_epoch] DEFAULT 1,
+    [legacy_revoked_before] DATETIME2(0) NULL,
+    [cleanup_completed_epoch] BIGINT NOT NULL CONSTRAINT [df_gb_device_cleanup_completed_epoch] DEFAULT 1,
     [zlm_node_id] BIGINT NOT NULL CONSTRAINT [df_gb_device_zlm_node] DEFAULT 0,
     CONSTRAINT [pk_gb_device] PRIMARY KEY ([id]),
-    CONSTRAINT [uk_gb_device_id] UNIQUE ([device_id])
+    CONSTRAINT [uk_gb_device_id] UNIQUE ([device_id]),
+    CONSTRAINT [ck_gb_device_access_epoch] CHECK ([access_epoch] > 0),
+    CONSTRAINT [ck_gb_device_cleanup_completed_epoch] CHECK ([cleanup_completed_epoch] > 0 AND [cleanup_completed_epoch] <= [access_epoch])
 );
 CREATE INDEX [idx_gb_device_deleted_at] ON [gb_device] ([deleted_at]);
 CREATE INDEX [idx_gb_device_owner_dept_deleted] ON [gb_device] ([owner_dept_id], [deleted_at]);
@@ -1617,6 +1562,66 @@ WHERE [id] IN (
 );
 
 SET NOCOUNT OFF;
+
+-- 登录审计事件与操作菜单 seed。
+IF OBJECT_ID(N'sys_login_logs', N'U') IS NULL CREATE TABLE [sys_login_logs] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,[user_id] BIGINT NULL,[username] NVARCHAR(100) NOT NULL,[result] NVARCHAR(16) NOT NULL,[failure_reason] NVARCHAR(48) NULL,[ip] NVARCHAR(50) NOT NULL DEFAULT N'',[location] NVARCHAR(100) NOT NULL DEFAULT N'未知',[user_agent] NVARCHAR(500) NOT NULL DEFAULT N'',[browser] NVARCHAR(100) NOT NULL DEFAULT N'未知',[os] NVARCHAR(100) NOT NULL DEFAULT N'未知',[created_at] DATETIME2 NOT NULL,[updated_at] DATETIME2 NULL,[deleted_at] DATETIME2 NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_login_logs_created_at' AND object_id=OBJECT_ID(N'sys_login_logs')) CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (341,N'登录日志列表',N'/api/sysLoginLog/list',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,N'登录日志详情',N'/api/sysLoginLog/:id',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,N'删除登录日志',N'/api/sysLoginLog/delete',N'DELETE',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,N'清空登录日志',N'/api/sysLoginLog/clear',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,N'解锁登录账号',N'/api/sysLoginLog/unlock',N'POST',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140384,10,N'/system/login-log',N'SystemLoginLog',N'system/login-log/index',N'登录日志',0,0,1,2,N'system:login-log:list',N'lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140385,140384,N'',N'SystemLoginLogDelete',N'',N'删除登录日志',1,0,1,3,N'system:login-log:delete',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140386,140384,N'',N'SystemLoginLogClear',N'',N'清空登录日志',1,0,2,3,N'system:login-log:clear',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(140387,140384,N'',N'SystemLoginLogUnlock',N'',N'解锁登录账号',1,0,3,3,N'system:login-log:unlock',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140384),(1,140385),(1,140386),(1,140387); INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES (7808,N'p',N'role_1',N'/api/sysLoginLog/list',N'GET',N'*',N'',N''),(7809,N'p',N'role_1',N'/api/sysLoginLog/:id',N'GET',N'*',N'',N''),(7810,N'p',N'role_1',N'/api/sysLoginLog/delete',N'DELETE',N'*',N'',N''),(7811,N'p',N'role_1',N'/api/sysLoginLog/clear',N'POST',N'*',N'',N''),(7812,N'p',N'role_1',N'/api/sysLoginLog/unlock',N'POST',N'*',N'',N'');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
+-- Playback schemes reuse the multi-screen page and expose one hidden permission.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(228,N'查询播放方案','/api/gb28181/playback-schemes','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(229,N'查看播放方案','/api/gb28181/playback-schemes/:id','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(230,N'创建播放方案','/api/gb28181/playback-schemes','POST',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(231,N'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(232,N'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(233,N'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
+(140362,140355,'','','',N'管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140362);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
+(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
+(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
+(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
+(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
+(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
+(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
+-- GB28181 cascade API/menu/Casbin seed for fresh SQL Server installs.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(234,N'查看级联平台列表',N'/api/gb28181/cascade/platforms',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(235,N'创建级联平台',N'/api/gb28181/cascade/platforms',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(236,N'查看级联平台',N'/api/gb28181/cascade/platforms/:id',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(237,N'修改级联平台',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(238,N'删除级联平台',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(239,N'启停级联平台',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(240,N'启用级联平台',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(241,N'停用级联平台',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(242,N'重连级联平台',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(243,N'查看级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(244,N'更新级联共享',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(245,N'共享级联通道',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(246,N'取消级联通道共享',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
+(140370,0,N'/gb28181/cascade',N'gb28181-cascade',N'gb28181/cascade/index',N'国标级联',0,0,13,2,N'',N'lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
+(140363,140370,N'',N'',N'',N'查看国标级联',1,3,N'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,N'',N'',N'',N'管理国标级联',1,3,N'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,N'',N'',N'',N'启停国标级联',1,3,N'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,N'',N'',N'',N'共享国标级联',1,3,N'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,N'',N'',N'',N'重连国标级联',1,3,N'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140370),(1,140363),(1,140364),(1,140365),(1,140366),(1,140367);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140363,234),(140363,236),(140363,243),(140364,235),(140364,237),(140364,238),(140365,239),(140365,240),(140365,241),(140366,244),(140366,245),(140366,246),(140367,242);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7578,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'GET',N'*',N'',N''),(7579,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'POST',N'*',N'',N''),(7580,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'GET',N'*',N'',N''),(7581,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'*',N'',N''),(7582,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'*',N'',N''),(7583,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'*',N'',N''),(7584,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'*',N'',N''),(7585,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'*',N'',N''),(7586,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'*',N'',N''),(7587,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'*',N'',N''),(7588,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'*',N'',N''),(7589,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'*',N'',N''),(7590,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'*',N'',N'');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
 -- SIP setup API, UI permissions and administrator policies.
 SET IDENTITY_INSERT [sys_api] ON;
@@ -2650,8 +2655,8 @@ UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL),[component]='gb28181/zlm/SchedulerStrategy',[title]=N'调度策略',[icon]='lucide:Workflow',[sort]=100,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/scheduler' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL),[component]='gb28181/zlm/SchedulerLog',[title]=N'调度日志',[icon]='lucide:History',[sort]=110,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/scheduler/logs' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=0,[component]='gb28181/zlm/NodeDetail',[title]=N'节点详情',[hide]=1,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/zlm/nodes/:id' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=(SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[component]='gb28181/cloud-recordings/index',[title]=N'云端录像',[icon]='lucide:Cloud',[sort]=35,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/cloud-recordings' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=(SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[component]='gb28181/recording-schedules/index',[title]=N'录像计划',[icon]='lucide:CalendarClock',[sort]=36,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/recording-schedules' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=COALESCE((SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[parent_id]),[component]='gb28181/cloud-recordings/index',[title]=N'云端录像',[icon]='lucide:Cloud',[sort]=35,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/cloud-recordings' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=COALESCE((SELECT TOP 1 dm.[parent_id] FROM [sys_menu] dm WHERE dm.[path] IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.[deleted_at] IS NULL ORDER BY CASE WHEN dm.[path]='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.[id]),[parent_id]),[component]='gb28181/recording-schedules/index',[title]=N'录像计划',[icon]='lucide:CalendarClock',[sort]=36,[hide]=0,[updated_at]=CURRENT_TIMESTAMP WHERE [path]='/gb28181/recording-schedules' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [component]='gb28181/zlm/workbench/LegacyMediaRoute',[hide]=1,[updated_at]=CURRENT_TIMESTAMP WHERE [path] IN ('/media/overview','/media/monitoring','/media/ingress','/media/recordings','/media/nodes','/media/scheduling','/media/nodes/:id') AND [deleted_at] IS NULL;
 -- zlm-admin-parity-v3:end
 
@@ -2673,14 +2678,14 @@ AND a.[path] IN ('/api/gb28181/zlm/overview','/api/gb28181/zlm/nodes','/api/gb28
 AND NOT EXISTS (SELECT 1 FROM [sys_casbin_rule] c WHERE c.[ptype]='p' AND c.[v0]='role_'+CAST(rm.[role_id] AS varchar(20)) AND c.[v1]=a.[path] AND c.[v2]=a.[method] AND c.[v3]='*');
 -- zlm-overview-merge:end
 -- zlm-single-menu-workbench:start
-DECLARE @media_menu_id BIGINT;
-SELECT @media_menu_id=MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL;
+DECLARE @workbench_media_menu_id BIGINT;
+SELECT @workbench_media_menu_id=MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [redirect]='/media/overview',[component]='',[title]=N'流媒体管理',[icon]='lucide:Clapperboard',[sort]=9,[type]=1,[hide]=0,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaOverview',[title]=N'运行总览',[sort]=10,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/overview' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaMonitoring',[title]=N'流与会话',[sort]=20,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/monitoring' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/IngressManagement',[title]=N'接入管理',[sort]=30,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/ingress' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/NodeManagement',[title]=N'节点管理',[sort]=40,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes' AND [deleted_at] IS NULL;
-UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/SchedulingManagement',[title]=N'调度管理',[sort]=50,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/scheduling' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/MediaOverview',[title]=N'运行总览',[sort]=10,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/overview' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/MediaMonitoring',[title]=N'流与会话',[sort]=20,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/monitoring' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/IngressManagement',[title]=N'接入管理',[sort]=30,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/ingress' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/NodeManagement',[title]=N'节点管理',[sort]=40,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@workbench_media_menu_id,[component]='gb28181/zlm/workbench/SchedulingManagement',[title]=N'调度管理',[sort]=50,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/scheduling' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media/nodes' AND [deleted_at] IS NULL),[component]='gb28181/zlm/workbench/nodes/NodeDetail',[title]=N'节点详情',[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes/:id' AND [deleted_at] IS NULL;
 UPDATE [sys_menu] SET [component]='gb28181/zlm/workbench/LegacyMediaRoute',[hide]=1,[updated_at]=GETDATE() WHERE [path] IN ('/gb28181/zlm/overview','/gb28181/zlm/runtime','/gb28181/zlm/streams','/gb28181/zlm/sessions','/gb28181/zlm/proxies','/gb28181/zlm/ffmpeg-sources','/gb28181/zlm/rtp-servers','/gb28181/zlm/nodes','/gb28181/zlm/nodes/:id','/gb28181/zlm/config','/gb28181/zlm/scheduler','/gb28181/zlm/scheduler/logs') AND [deleted_at] IS NULL;
 -- zlm-single-menu-workbench:end
@@ -5035,3 +5040,378 @@ JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
 WHERE m.permission=N'gb28181:zlm:node:manage' AND a.path IN (N'/api/gb28181/zlm/nodes/:id/enable',N'/api/gb28181/zlm/nodes/:id/disable') AND a.method=N'POST'
   AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',rm.role_id) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
 -- zlm-node-enabled-permissions:end
+-- openapi-aksk-core:begin
+-- T01 foundation only. No clients or permissions are provisioned by migration.
+IF OBJECT_ID(N'dbo.sys_openapi_client', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_client (
+    id BIGINT IDENTITY(1,1) NOT NULL,
+    ak NVARCHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    name NVARCHAR(100) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    owner_dept_id BIGINT NOT NULL,
+    responsible_user_id BIGINT NOT NULL DEFAULT 0,
+    status NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT 'disabled',
+    secret_ciphertext VARBINARY(64) NOT NULL,
+    secret_iv VARBINARY(12) NOT NULL,
+    secret_key_id NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    secret_version BIGINT NOT NULL DEFAULT 1,
+    auth_epoch BIGINT NOT NULL DEFAULT 1,
+    rate_limit INT NOT NULL DEFAULT 10,
+    burst INT NOT NULL DEFAULT 20,
+    viewer_quota INT NOT NULL DEFAULT 10,
+    row_version BIGINT NOT NULL DEFAULT 1,
+    created_by BIGINT NOT NULL,
+    updated_by BIGINT NOT NULL,
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_client PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_ak UNIQUE (ak)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_client_dept' AND object_id = OBJECT_ID(N'dbo.sys_openapi_client'))
+CREATE INDEX idx_openapi_client_dept ON dbo.sys_openapi_client (owner_dept_id);
+
+IF OBJECT_ID(N'dbo.sys_openapi_client_scope', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_client_scope (
+    client_id BIGINT NOT NULL,
+    scope NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    enabled BIT NOT NULL DEFAULT 0,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    updated_by BIGINT NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_client_scope PRIMARY KEY (client_id, scope)
+);
+
+IF OBJECT_ID(N'dbo.sys_openapi_nonce', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_nonce (
+    client_id BIGINT NOT NULL,
+    nonce NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    accepted_at DATETIME2(6) NOT NULL,
+    expires_at DATETIME2(6) NOT NULL,
+    CONSTRAINT uk_openapi_nonce PRIMARY KEY (client_id, nonce)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_nonce_expiry' AND object_id = OBJECT_ID(N'dbo.sys_openapi_nonce'))
+CREATE INDEX idx_openapi_nonce_expiry ON dbo.sys_openapi_nonce (expires_at);
+
+IF OBJECT_ID(N'dbo.sys_openapi_audit', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_audit (
+    id BIGINT IDENTITY(1,1) NOT NULL,
+    request_id NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    client_id BIGINT NULL,
+    ak_fingerprint NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    scope NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    resource_type NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    resource_id NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    result NVARCHAR(24) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    reason_class NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    source NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT '',
+    latency_ms BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME2(6) NOT NULL,
+    completed_at DATETIME2(6) NULL,
+    CONSTRAINT pk_openapi_audit PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_audit_request UNIQUE (request_id)
+);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_audit_client_time' AND object_id = OBJECT_ID(N'dbo.sys_openapi_audit'))
+CREATE INDEX idx_openapi_audit_client_time ON dbo.sys_openapi_audit (client_id, created_at);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_audit_time' AND object_id = OBJECT_ID(N'dbo.sys_openapi_audit'))
+CREATE INDEX idx_openapi_audit_time ON dbo.sys_openapi_audit (created_at);
+
+-- openapi-aksk-core:end
+
+-- openapi-aksk-media:begin
+IF OBJECT_ID(N'dbo.gb_openapi_play_grant', N'U') IS NULL
+CREATE TABLE dbo.gb_openapi_play_grant (
+    grant_id CHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    client_id BIGINT NOT NULL,
+    scope NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    device_id NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NULL,
+    channel_id NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NULL,
+    client_epoch BIGINT NOT NULL DEFAULT 1,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    device_epoch BIGINT NOT NULL DEFAULT 1,
+    node_uuid NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NULL,
+    boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NULL,
+    [schema] NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL,
+    vhost NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NULL,
+    app NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NULL,
+    stream NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NULL,
+    media_generation BIGINT NULL,
+    protocol NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NULL,
+    issued_at DATETIME2(6) NOT NULL,
+    expires_at DATETIME2(6) NOT NULL,
+    state NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'pending',
+    reason NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'',
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
+    CONSTRAINT ck_openapi_grant_state CHECK (state IN (N'pending',N'issued',N'bound',N'revoked',N'expired',N'failed')),
+    CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN (N'issued',N'bound') OR (device_id IS NOT NULL AND device_id <> N'' AND channel_id IS NOT NULL AND channel_id <> N'' AND node_uuid IS NOT NULL AND node_uuid <> N'' AND boot_nonce IS NOT NULL AND boot_nonce <> N'' AND LEN(boot_nonce) = 32 AND [schema] IS NOT NULL AND [schema] <> N'' AND vhost IS NOT NULL AND vhost <> N'' AND app IS NOT NULL AND app <> N'' AND stream IS NOT NULL AND stream <> N'' AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL AND protocol <> N''))
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_client_state' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_client_state ON dbo.gb_openapi_play_grant (client_id,state);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_expires' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_expires ON dbo.gb_openapi_play_grant (expires_at);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_node_boot' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_node_boot ON dbo.gb_openapi_play_grant (node_uuid,boot_nonce);
+IF OBJECT_ID(N'dbo.gb_openapi_viewer', N'U') IS NULL
+CREATE TABLE dbo.gb_openapi_viewer (
+    id BIGINT IDENTITY(1,1) NOT NULL,
+    grant_id CHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    node_uuid NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    identifier NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [schema] NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    vhost NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    app NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    stream NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    media_generation BIGINT NOT NULL,
+    state NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'pending',
+    last_seen_at DATETIME2(6) NULL,
+    retry_at DATETIME2(6) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error_class NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'',
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT fk_openapi_viewer_grant FOREIGN KEY (grant_id) REFERENCES dbo.gb_openapi_play_grant (grant_id) ON DELETE NO ACTION,
+    CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid,boot_nonce,identifier),
+    CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> N'' AND boot_nonce <> N'' AND LEN(boot_nonce)=32 AND identifier <> N''),
+    CONSTRAINT ck_openapi_viewer_media_binding CHECK ([schema] <> N'' AND vhost <> N'' AND app <> N'' AND stream <> N'' AND media_generation > 0),
+    CONSTRAINT ck_openapi_viewer_state CHECK (state IN (N'pending',N'active',N'revoke_pending',N'closed')),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation > 0),
+    CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_viewer_state_retry' AND object_id=OBJECT_ID(N'dbo.gb_openapi_viewer')) CREATE INDEX idx_openapi_viewer_state_retry ON dbo.gb_openapi_viewer (state,retry_at);
+IF COL_LENGTH(N'dbo.meta_node',N'current_boot_nonce') IS NULL ALTER TABLE dbo.meta_node ADD current_boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'retired_boot_history') IS NULL ALTER TABLE dbo.meta_node ADD retired_boot_history NVARCHAR(MAX) NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_epoch') IS NULL ALTER TABLE dbo.meta_node ADD runtime_epoch BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_epoch DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_protocol_version') IS NULL ALTER TABLE dbo.meta_node ADD runtime_protocol_version BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_protocol_version DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_confirmed_revision') IS NULL ALTER TABLE dbo.meta_node ADD runtime_confirmed_revision BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_confirmed_revision DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_confirmed_at') IS NULL ALTER TABLE dbo.meta_node ADD runtime_confirmed_at DATETIME2(6) NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_identity_status') IS NULL ALTER TABLE dbo.meta_node ADD runtime_identity_status NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL CONSTRAINT df_meta_node_runtime_identity_status DEFAULT N'unknown';
+-- openapi-aksk-media:end
+
+-- openapi-aksk-permissions:begin
+-- T04 management permission catalog. IDs are resolved by natural keys; only
+-- the existing system-admin role receives the initial grant.
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看 OpenAPI 客户端列表',N'/api/gb28181/openapi-clients',N'GET',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'创建 OpenAPI 客户端',N'/api/gb28181/openapi-clients',N'POST',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看 OpenAPI 能力目录',N'/api/gb28181/openapi-clients/capabilities',N'GET',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/capabilities' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看 OpenAPI 客户端详情',N'/api/gb28181/openapi-clients/:id',N'GET',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'分配 OpenAPI 客户端能力',N'/api/gb28181/openapi-clients/:id/scopes',N'PUT',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/scopes' AND method=N'PUT' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'轮换 OpenAPI 客户端密钥',N'/api/gb28181/openapi-clients/:id/rotate-secret',N'POST',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/rotate-secret' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'启用 OpenAPI 客户端',N'/api/gb28181/openapi-clients/:id/enable',N'POST',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/enable' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'停用 OpenAPI 客户端',N'/api/gb28181/openapi-clients/:id/disable',N'POST',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/disable' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'撤销 OpenAPI 客户端',N'/api/gb28181/openapi-clients/:id/revoke',N'POST',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/revoke' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看 OpenAPI 客户端审计',N'/api/gb28181/openapi-clients/:id/audits',N'GET',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/audits' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看 OpenAPI 客户端撤销进度',N'/api/gb28181/openapi-clients/:id/revocation-status',N'GET',N'GB28181 OpenAPI 客户端',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/openapi-clients/:id/revocation-status' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_read',N'',N'查看 OpenAPI 客户端',1,0,100,3,N'gb28181:openapi:client:read',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:read' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_create',N'',N'创建 OpenAPI 客户端',1,0,100,3,N'gb28181:openapi:client:create',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:create' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_grant',N'',N'分配 OpenAPI 客户端能力',1,0,100,3,N'gb28181:openapi:client:grant',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:grant' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_rotate',N'',N'轮换 OpenAPI 客户端密钥',1,0,100,3,N'gb28181:openapi:client:rotate',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:rotate' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_status',N'',N'启停或撤销 OpenAPI 客户端',1,0,100,3,N'gb28181:openapi:client:status',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:status' AND deleted_at IS NULL);
+INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT 0,N'',N'Permission_gb28181_openapi_client_audit',N'',N'查看 OpenAPI 客户端审计',1,0,100,3,N'gb28181:openapi:client:audit',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission=N'gb28181:openapi:client:audit' AND deleted_at IS NULL);
+INSERT INTO sys_role_menu(role_id,menu_id) SELECT r.id,m.id FROM sys_role r CROSS JOIN sys_menu m WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL AND m.permission IN (N'gb28181:openapi:client:read',N'gb28181:openapi:client:create',N'gb28181:openapi:client:grant',N'gb28181:openapi:client:rotate',N'gb28181:openapi:client:status',N'gb28181:openapi:client:audit') AND m.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=r.id AND x.menu_id=m.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:read' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND ((a.path=N'/api/gb28181/openapi-clients' AND a.method=N'GET') OR (a.path=N'/api/gb28181/openapi-clients/capabilities' AND a.method=N'GET') OR (a.path=N'/api/gb28181/openapi-clients/:id' AND a.method=N'GET')) AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:create' AND a.path=N'/api/gb28181/openapi-clients' AND a.method=N'POST' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:grant' AND a.path=N'/api/gb28181/openapi-clients/:id/scopes' AND a.method=N'PUT' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:rotate' AND a.path=N'/api/gb28181/openapi-clients/:id/rotate-secret' AND a.method=N'POST' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:status' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND ((a.path=N'/api/gb28181/openapi-clients/:id/enable' AND a.method=N'POST') OR (a.path=N'/api/gb28181/openapi-clients/:id/disable' AND a.method=N'POST') OR (a.path=N'/api/gb28181/openapi-clients/:id/revoke' AND a.method=N'POST') OR (a.path=N'/api/gb28181/openapi-clients/:id/revocation-status' AND a.method=N'GET')) AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:audit' AND a.path=N'/api/gb28181/openapi-clients/:id/audits' AND a.method=N'GET' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT N'p',CONCAT(N'role_',rm.role_id),a.path,a.method,N'*',N'',N'' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=1 AND EXISTS (SELECT 1 FROM sys_role r WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL) AND m.permission LIKE N'gb28181:openapi:client:%' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype=N'p' AND c.v0=CONCAT(N'role_',rm.role_id) AND c.v1=a.path AND c.v2=a.method AND c.v3=N'*');
+-- openapi-aksk-permissions:end
+
+-- openapi-client-menu:begin
+-- T14 dynamic menu entry. This migration owns one page row and only reparents
+-- the six pre-existing OpenAPI management buttons; it never creates APIs.
+-- The temporary duplicate-key guard makes a foreign page/button collision fail
+-- before any persistent row is changed.
+
+IF OBJECT_ID('tempdb..#openapi_client_menu_guard') IS NOT NULL DROP TABLE #openapi_client_menu_guard;
+CREATE TABLE #openapi_client_menu_guard ([id] TINYINT NOT NULL PRIMARY KEY);
+INSERT INTO #openapi_client_menu_guard ([id])
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM #openapi_client_menu_guard WHERE [id]=1);
+INSERT INTO #openapi_client_menu_guard ([id])
+SELECT 1
+WHERE
+  EXISTS (
+    SELECT 1 FROM [sys_menu]
+    WHERE [deleted_at] IS NULL AND [path]=N'/gb28181/openapi-client'
+      AND ([parent_id]<>0 OR COALESCE([name],N'')<>N'gb28181-openapi-client'
+        OR COALESCE([component],N'')<>N'gb28181/openapi-client/index'
+        OR COALESCE([title],N'')<>N'OpenAPI 客户端' OR COALESCE([redirect],N'')<>N''
+        OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>0 OR COALESCE([disable],0)<>0
+        OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N''
+        OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'lucide:KeyRound'
+        OR COALESCE([sort],0)<>15 OR COALESCE([type],0)<>2 OR COALESCE([is_link],0)<>0 OR COALESCE([permission],N'')<>N'')
+  )
+  OR EXISTS (
+    SELECT 1 FROM [sys_menu]
+    WHERE [deleted_at] IS NULL AND [name]=N'gb28181-openapi-client'
+      AND [path]<>N'/gb28181/openapi-client'
+  )
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [path]=N'/gb28181/openapi-client')>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:read')<>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:create')<>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:grant')<>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:rotate')<>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:status')<>1
+  OR (SELECT COUNT(*) FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:audit')<>1
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:read' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_read' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'查看 OpenAPI 客户端' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:create' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_create' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'创建 OpenAPI 客户端' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:grant' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_grant' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'分配 OpenAPI 客户端能力' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:rotate' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_rotate' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'轮换 OpenAPI 客户端密钥' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:status' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_status' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'启停或撤销 OpenAPI 客户端' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (SELECT 1 FROM [sys_menu] WHERE [deleted_at] IS NULL AND [permission]=N'gb28181:openapi:client:audit' AND (COALESCE([name],N'')<>N'Permission_gb28181_openapi_client_audit' OR COALESCE([path],N'')<>N'' OR COALESCE([redirect],N'')<>N'' OR COALESCE([component],N'')<>N'' OR COALESCE([title],N'')<>N'查看 OpenAPI 客户端审计' OR COALESCE([is_full],0)<>0 OR COALESCE([hide],0)<>1 OR COALESCE([disable],0)<>0 OR COALESCE([keep_alive],0)<>0 OR COALESCE([affix],0)<>0 OR COALESCE([link],N'')<>N'' OR COALESCE([iframe],0)<>0 OR COALESCE([svg_icon],N'')<>N'' OR COALESCE([icon],N'')<>N'' OR COALESCE([sort],0)<>100 OR COALESCE([type],0)<>3 OR COALESCE([is_link],0)<>0))
+  OR EXISTS (
+    SELECT 1 FROM [sys_menu] b
+    WHERE b.[deleted_at] IS NULL
+      AND b.[permission] IN (N'gb28181:openapi:client:read',N'gb28181:openapi:client:create',N'gb28181:openapi:client:grant',N'gb28181:openapi:client:rotate',N'gb28181:openapi:client:status',N'gb28181:openapi:client:audit')
+      AND b.[parent_id]<>0
+      AND (NOT EXISTS (SELECT 1 FROM [sys_menu] p WHERE p.[deleted_at] IS NULL AND p.[path]=N'/gb28181/openapi-client' AND p.[name]=N'gb28181-openapi-client' AND p.[component]=N'gb28181/openapi-client/index' AND p.[parent_id]=0 AND p.[type]=2)
+        OR b.[parent_id]<>(SELECT MIN(p.[id]) FROM [sys_menu] p WHERE p.[deleted_at] IS NULL AND p.[path]=N'/gb28181/openapi-client' AND p.[name]=N'gb28181-openapi-client' AND p.[component]=N'gb28181/openapi-client/index' AND p.[parent_id]=0 AND p.[type]=2))
+  );
+DROP TABLE #openapi_client_menu_guard;
+
+INSERT INTO [sys_menu] ([parent_id],[path],[name],[redirect],[component],[title],[is_full],[hide],[disable],[keep_alive],[affix],[link],[iframe],[svg_icon],[icon],[sort],[type],[is_link],[permission],[created_at],[updated_at],[created_by])
+SELECT 0,N'/gb28181/openapi-client',N'gb28181-openapi-client',N'',N'gb28181/openapi-client/index',N'OpenAPI 客户端',0,0,0,0,0,N'',0,N'',N'lucide:KeyRound',15,2,0,N'',GETDATE(),GETDATE(),1
+WHERE NOT EXISTS (SELECT 1 FROM [sys_menu] WHERE [path]=N'/gb28181/openapi-client' AND [deleted_at] IS NULL);
+
+UPDATE b
+SET [parent_id]=(SELECT MIN(p.[id]) FROM [sys_menu] p WHERE p.[path]=N'/gb28181/openapi-client' AND p.[name]=N'gb28181-openapi-client' AND p.[component]=N'gb28181/openapi-client/index' AND p.[deleted_at] IS NULL)
+FROM [sys_menu] b
+WHERE b.[permission] IN (N'gb28181:openapi:client:read',N'gb28181:openapi:client:create',N'gb28181:openapi:client:grant',N'gb28181:openapi:client:rotate',N'gb28181:openapi:client:status',N'gb28181:openapi:client:audit')
+  AND b.[deleted_at] IS NULL AND b.[parent_id]=0;
+
+INSERT INTO [sys_role_menu] ([role_id],[menu_id])
+SELECT r.[id],m.[id]
+FROM [sys_role] r CROSS JOIN [sys_menu] m
+WHERE r.[id]=1 AND r.[status]=1 AND r.[deleted_at] IS NULL
+  AND m.[path]=N'/gb28181/openapi-client' AND m.[name]=N'gb28181-openapi-client' AND m.[component]=N'gb28181/openapi-client/index' AND m.[deleted_at] IS NULL
+  AND NOT EXISTS (SELECT 1 FROM [sys_role_menu] x WHERE x.[role_id]=r.[id] AND x.[menu_id]=m.[id]);
+
+-- openapi-client-menu:end
+
+-- openapi-must-auth:begin
+-- Append-only security commitment: never reset an existing row during upgrade.
+IF OBJECT_ID(N'dbo.sys_openapi_security_state', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_security_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    must_auth_locked BIT NOT NULL DEFAULT 0,
+    locked_at DATETIME2(6) NULL,
+    lock_version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_openapi_security_singleton CHECK (id = 1),
+    CONSTRAINT ck_openapi_security_state CHECK (
+        (must_auth_locked = 0 AND lock_version = 0 AND locked_at IS NULL)
+        OR (must_auth_locked = 1 AND lock_version > 0 AND locked_at IS NOT NULL)
+    )
+);
+INSERT INTO sys_openapi_security_state (id, must_auth_locked, locked_at, lock_version)
+SELECT 1, 0, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM sys_openapi_security_state WHERE id = 1);
+-- openapi-must-auth:end
+
+-- device-operation-intent:begin
+-- Durable reservation only. dispatched means may-have-dispatched, not success.
+-- Append-only safety history; no cascading deletion or automatic completion.
+IF OBJECT_ID(N'dbo.gb_device_operation_intent', N'U') IS NULL
+CREATE TABLE dbo.gb_device_operation_intent (
+    operation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
+    contract_version BIGINT NOT NULL,
+    device_pk BIGINT NOT NULL,
+    device_code VARCHAR(20) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    device_epoch BIGINT NOT NULL,
+    target_scope VARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    target_pk BIGINT NOT NULL,
+    target_code VARCHAR(20) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    kind VARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    state VARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    row_version BIGINT NOT NULL,
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    dispatch_started_at DATETIME2(6) NULL,
+    cancelled_at DATETIME2(6) NULL,
+    CONSTRAINT ck_device_intent_identity CHECK (
+        contract_version = 1 AND device_pk > 0 AND device_epoch > 0 AND target_pk > 0
+        AND LEN(operation_id) = 32 AND operation_id NOT LIKE '%[^0-9a-f]%'
+        AND LEN(device_code) = 20 AND device_code NOT LIKE '%[^0-9]%'
+        AND LEN(target_code) = 20 AND target_code NOT LIKE '%[^0-9]%'
+        AND (target_scope = 'channel' OR
+            (target_scope = 'device' AND target_pk = device_pk AND target_code = device_code))
+        AND kind IN ('live', 'playback', 'download', 'talk', 'ptz')
+    ),
+    CONSTRAINT ck_device_intent_phase CHECK (
+        updated_at >= created_at AND (
+            (state = 'reserved' AND row_version = 1 AND dispatch_started_at IS NULL AND cancelled_at IS NULL)
+            OR (state = 'dispatched' AND row_version >= 2 AND cancelled_at IS NULL
+                AND dispatch_started_at IS NOT NULL AND dispatch_started_at >= created_at AND dispatch_started_at <= updated_at)
+            OR (state = 'cancelled' AND row_version >= 2 AND dispatch_started_at IS NULL
+                AND cancelled_at IS NOT NULL AND cancelled_at >= created_at AND cancelled_at <= updated_at)
+        )
+    )
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.gb_device_operation_intent') AND name = N'ix_device_intent_recovery') CREATE INDEX ix_device_intent_recovery ON dbo.gb_device_operation_intent (device_pk, device_epoch, state, operation_id);
+-- device-operation-intent:end
+
+-- device-operation-rtp-steps:begin
+-- RTP-only fixed evidence. NULL preserves unknown legacy history.
+-- NVARCHAR is UTF-16: DB limit is 32768 code units; the application additionally
+-- enforces the stricter 32768-byte UTF-8 canonical JSON budget before every write.
+IF OBJECT_ID(N'dbo.gb_device_operation_intent', N'U') IS NULL THROW 51000, N'RTP steps require device operation intent', 1;
+IF COL_LENGTH(N'dbo.gb_device_operation_intent', N'rtp_steps_json') IS NULL ALTER TABLE dbo.gb_device_operation_intent ADD rtp_steps_json NVARCHAR(MAX) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.gb_device_operation_intent') AND name = N'ck_device_intent_rtp_size') ALTER TABLE dbo.gb_device_operation_intent ADD CONSTRAINT ck_device_intent_rtp_size CHECK (rtp_steps_json IS NULL OR DATALENGTH(rtp_steps_json) BETWEEN 2 AND 65536);
+-- device-operation-rtp-steps:end
+
+-- device-operation-sip-steps:begin
+-- SIP INVITE-only fixed evidence. NULL preserves unknown legacy history.
+-- NVARCHAR is UTF-16: DB limit is 32768 code units; the application additionally
+-- enforces the stricter 32768-byte UTF-8 canonical JSON budget before every write.
+IF OBJECT_ID(N'dbo.gb_device_operation_intent', N'U') IS NULL THROW 51000, N'SIP INVITE steps require device operation intent', 1;
+IF COL_LENGTH(N'dbo.gb_device_operation_intent', N'sip_steps_json') IS NULL ALTER TABLE dbo.gb_device_operation_intent ADD sip_steps_json NVARCHAR(MAX) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.gb_device_operation_intent') AND name = N'ck_device_intent_sip_size') ALTER TABLE dbo.gb_device_operation_intent ADD CONSTRAINT ck_device_intent_sip_size CHECK (sip_steps_json IS NULL OR DATALENGTH(sip_steps_json) BETWEEN 2 AND 65536);
+-- device-operation-sip-steps:end
+
+-- openapi-process-authority:begin
+-- Root registers generations only while holding the protected local lifetime lock.
+-- No seed owner or historical backfill. Retain this ledger across application rollback.
+IF OBJECT_ID(N'dbo.sys_openapi_process_generation', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_process_generation (
+    generation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY,
+    domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    started_at DATETIME2(6) NOT NULL,
+    CONSTRAINT uk_openapi_generation_domain UNIQUE (domain_id, generation_id),
+    CONSTRAINT ck_openapi_generation_identity CHECK (
+        DATALENGTH(generation_id) = 32 AND generation_id NOT LIKE '%[^0-9a-f]%'
+        AND generation_id <> '00000000000000000000000000000000'
+        AND DATALENGTH(domain_id) = 32 AND domain_id NOT LIKE '%[^0-9a-f]%'
+        AND domain_id <> '00000000000000000000000000000000'
+    )
+);
+IF OBJECT_ID(N'dbo.sys_openapi_process_authority', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_process_authority (
+    id BIGINT NOT NULL PRIMARY KEY,
+    domain_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    current_generation_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    row_version BIGINT NOT NULL,
+    CONSTRAINT ck_openapi_authority_singleton CHECK (id = 1 AND row_version > 0),
+    CONSTRAINT fk_openapi_authority_generation FOREIGN KEY (domain_id, current_generation_id)
+        REFERENCES dbo.sys_openapi_process_generation (domain_id, generation_id)
+);
+-- openapi-process-authority:end
+
+-- ptz-device-intent:begin
+-- Original PTZ authorization; historical rows deliberately remain NULL.
+IF COL_LENGTH(N'dbo.gb_ptz_operation',N'device_epoch') IS NULL ALTER TABLE dbo.gb_ptz_operation ADD device_epoch BIGINT NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation',N'device_intent_id') IS NULL ALTER TABLE dbo.gb_ptz_operation ADD device_intent_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'owner_process_id') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD owner_process_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'owner_run_id') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD owner_run_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'local_quiesced_at') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD local_quiesced_at DATETIME2(6) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.gb_ptz_operation') AND name = N'uk_ptz_device_intent') CREATE UNIQUE INDEX uk_ptz_device_intent ON dbo.gb_ptz_operation(device_intent_id) WHERE device_intent_id IS NOT NULL;
+-- ptz-device-intent:end
+
+-- ptz-owner-retirement:begin
+-- Preserve old rows without fabricating a process-retirement certificate.
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_by_process_id') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD retired_by_process_id VARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_at') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD retired_at DATETIME2(3) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.gb_ptz_operation_attempt') AND name=N'ck_ptz_attempt_retirement') ALTER TABLE dbo.gb_ptz_operation_attempt ADD CONSTRAINT ck_ptz_attempt_retirement CHECK ((retired_by_process_id IS NULL AND retired_at IS NULL) OR (retired_by_process_id IS NOT NULL AND retired_at IS NOT NULL AND owner_process_id IS NOT NULL AND owner_run_id IS NOT NULL AND retired_by_process_id <> owner_process_id AND local_quiesced_at IS NULL));
+-- ptz-owner-retirement:end

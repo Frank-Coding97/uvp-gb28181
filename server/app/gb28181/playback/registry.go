@@ -20,11 +20,18 @@ const (
 )
 
 type sessionRecord struct {
-	mu          sync.Mutex
-	session     Session
-	stopStarted bool
-	stopDone    chan struct{}
-	stopErr     error
+	mu              sync.Mutex
+	session         Session
+	stopCall        *cleanupCall
+	pendingTerminal State
+	pendingReason   string
+}
+
+// A call owns its immutable result after done closes. Later retries must not
+// overwrite the result observed by waiters of a previous attempt.
+type cleanupCall struct {
+	done chan struct{}
+	err  error
 }
 
 type Registry struct {
@@ -38,8 +45,7 @@ type Registry struct {
 	activeByScope   map[string]string
 	idempotentByKey map[string]string
 	cleanup         CleanupRunner
-	closeDone       chan struct{}
-	closeErr        error
+	closeCall       *cleanupCall
 }
 
 func NewRegistry(config RegistryConfig) *Registry {
@@ -108,6 +114,9 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 				record.mu.Lock()
 				session := record.session.clone()
 				record.mu.Unlock()
+				if session.Authorization != request.Authorization || session.DeviceID != request.DeviceID || session.Mode != request.Mode {
+					return CreateResult{}, ErrPlaybackBusy
+				}
 				return CreateResult{Session: session, Existing: true}, nil
 			}
 		}
@@ -118,7 +127,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 			record.mu.Lock()
 			active := record.session.clone()
 			record.mu.Unlock()
-			if !active.State.IsTerminal() && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
+			if !active.State.IsTerminal() && active.Authorization == request.Authorization && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
 				active.SegmentStart.Equal(request.SegmentStart) && active.SegmentEnd.Equal(request.SegmentEnd) {
 				if request.IdempotencyKey != "" {
 					r.idempotentByKey[idempotencyKey(request.OwnerID, request.ChannelID, request.IdempotencyKey)] = activeID
@@ -139,7 +148,8 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 		idleDeadline = now.Add(r.maxSession)
 	}
 	session := Session{ID: id, OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
-		Mode: request.Mode, DownloadSpeed: request.DownloadSpeed,
+		Authorization: request.Authorization,
+		Mode:          request.Mode, DownloadSpeed: request.DownloadSpeed,
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
 		PlayFrom: request.PlayFrom,
 		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
@@ -329,41 +339,45 @@ func (r *Registry) removeActive(session Session) {
 func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason string, terminal State) (bool, error) {
 	record.mu.Lock()
 	if record.session.State.IsTerminal() {
-		err := record.stopErr
 		record.mu.Unlock()
-		return false, err
+		return false, nil
 	}
-	if record.stopStarted {
-		done := record.stopDone
+	if call := record.stopCall; call != nil {
 		record.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
-		case <-done:
-			record.mu.Lock()
-			err := record.stopErr
-			record.mu.Unlock()
-			return false, err
+		case <-call.done:
+			return false, call.err
 		}
 	}
-	record.stopStarted, record.stopDone = true, make(chan struct{})
+	if record.pendingTerminal == "" {
+		record.pendingTerminal, record.pendingReason = terminal, reason
+	}
+	call := &cleanupCall{done: make(chan struct{})}
+	record.stopCall = call
 	record.session.State = StateStopping
 	resources := record.session.Resources
 	session := record.session
-	done := record.stopDone
 	record.mu.Unlock()
 
 	err := r.cleanup.Run(ctx, resources)
 	record.mu.Lock()
-	record.session.State = terminal
 	record.session.LastActivityAt = r.now()
-	record.session.EndReason = reason
+	record.session.EndReason = record.pendingReason
 	if err != nil {
-		record.session.Error, record.session.EndReason = err, reason+": "+err.Error()
+		record.session.EndReason += ": " + err.Error()
+	} else {
+		record.session.State = record.pendingTerminal
+		record.pendingTerminal, record.pendingReason = "", ""
 	}
-	record.stopErr = err
-	close(done)
+	call.err = err
+	record.stopCall = nil
+	close(call.done)
 	record.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
 	r.removeActive(session)
 	r.pruneTerminal(r.now())
 	return true, err
@@ -461,23 +475,18 @@ func (r *Registry) Close(ctx context.Context) error {
 
 func (r *Registry) CloseOnce(ctx context.Context) (int, error) {
 	r.mu.Lock()
-	if r.closed {
-		done := r.closeDone
+	if call := r.closeCall; call != nil {
 		r.mu.Unlock()
-		if done != nil {
-			select {
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			case <-done:
-			}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-call.done:
+			return 0, call.err
 		}
-		r.mu.RLock()
-		err := r.closeErr
-		r.mu.RUnlock()
-		return 0, err
 	}
 	r.closed = true
-	r.closeDone = make(chan struct{})
+	call := &cleanupCall{done: make(chan struct{})}
+	r.closeCall = call
 	records := make([]*sessionRecord, 0, len(r.sessions))
 	for _, record := range r.sessions {
 		records = append(records, record)
@@ -493,11 +502,14 @@ func (r *Registry) CloseOnce(ctx context.Context) (int, error) {
 		result = errors.Join(result, err)
 	}
 	r.mu.Lock()
-	r.sessions = make(map[string]*sessionRecord)
-	r.activeByScope = make(map[string]string)
-	r.idempotentByKey = make(map[string]string)
-	r.closeErr = result
-	close(r.closeDone)
+	if result == nil {
+		r.sessions = make(map[string]*sessionRecord)
+		r.activeByScope = make(map[string]string)
+		r.idempotentByKey = make(map[string]string)
+	}
+	call.err = result
+	r.closeCall = nil
+	close(call.done)
 	r.mu.Unlock()
 	return cleaned, result
 }

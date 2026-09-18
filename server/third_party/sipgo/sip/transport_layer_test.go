@@ -39,7 +39,9 @@ func TestTransportLayerClosing(t *testing.T) {
 
 			tp.Close()
 			c := conn.(*UDPConnection)
-			require.Error(t, c.Close(), "It is not closed already")
+			require.NoError(t, c.Close(), "repeated shutdown preserves the first close result")
+			_, err = c.PacketConn.WriteTo([]byte("closed"), c.LocalAddr())
+			require.ErrorIs(t, err, net.ErrClosed, "observe the socket, not a second close error")
 		})
 	}
 }
@@ -202,7 +204,7 @@ func TestTransportLayerClientConnectionReuse(t *testing.T) {
 		conn3, err := tp.ClientRequestConnection(context.TODO(), req)
 
 		require.NoError(t, err)
-		require.NotEqual(t, conn, conn3)
+		require.NotSame(t, conn, conn3) // Compare identity, not mutable live socket internals.
 	})
 
 	testParallel := func(t *testing.T, transport string) {
@@ -276,7 +278,7 @@ func TestTransportLayerClientConnectionNoReuse(t *testing.T) {
 		conn2, err := tp.ClientRequestConnection(context.TODO(), req)
 		require.NoError(t, err)
 
-		require.NotEqual(t, conn, conn2)
+		require.NotSame(t, conn, conn2) // Compare identity, not mutable live socket internals.
 	})
 
 	t.Run("WithClientHostPort", func(t *testing.T) {
@@ -302,7 +304,7 @@ func TestTransportLayerClientConnectionNoReuse(t *testing.T) {
 		conn3, err := tp.ClientRequestConnection(context.TODO(), req)
 		require.NoError(t, err)
 
-		require.NotEqual(t, conn, conn3)
+		require.NotSame(t, conn, conn3) // Compare identity, not mutable live socket internals.
 	})
 }
 

@@ -108,9 +108,11 @@ type Result struct {
 }
 
 type ResultNode struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	Host string `json:"host"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	Host            string `json:"host"`
+	MediaServerUUID string `json:"-"`
+	Revision        uint64 `json:"-"`
 }
 
 // 常量
@@ -173,14 +175,17 @@ type Service struct {
 	readyWait time.Duration // 仅测试覆盖;生产使用 playCtx 剩余总预算
 	pollEvery time.Duration // 轮询间隔,默认 200ms
 
-	snapshotSvc    SnapshotService // 通道快照(播放触发),可为 nil
-	urlResolver    *URLResolver
-	tokenIssuer    playauth.DirectIssuer
-	nodeClient     func(*node.Node) ZLM
-	diagnosticSink diagnosis.DiagnosticSink
-	liveReady      func(LiveSession)
-	recordingMu    sync.RWMutex
-	recording      PlaybackRecordingLifecycle
+	snapshotSvc              SnapshotService // 通道快照(播放触发),可为 nil
+	urlResolver              *URLResolver
+	tokenIssuer              playauth.ContextDirectIssuer
+	operationBarrier         *playauth.DeviceOperationBarrier
+	operationBarrierRequired bool
+	nodeClient               func(*node.Node) ZLM
+	qualifiedValidator       QualifiedNodeValidator
+	diagnosticSink           diagnosis.DiagnosticSink
+	liveReady                func(LiveSession)
+	recordingMu              sync.RWMutex
+	recording                PlaybackRecordingLifecycle
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -213,12 +218,19 @@ func WithURLResolver(resolver *URLResolver) Option {
 	return func(s *Service) { s.urlResolver = resolver }
 }
 
-func WithPlayTokenIssuer(issuer playauth.DirectIssuer) Option {
+func WithPlayTokenIssuer(issuer playauth.ContextDirectIssuer) Option {
 	return func(s *Service) { s.tokenIssuer = issuer }
 }
 
 func WithNodeClientFactory(factory func(*node.Node) ZLM) Option {
 	return func(s *Service) { s.nodeClient = factory }
+}
+
+// WithQualifiedNodeValidator wires the local adapter that checks an external
+// qualification ticket against a managed node snapshot. It does not expose a
+// pool, picker, or network client to the play service.
+func WithQualifiedNodeValidator(validator QualifiedNodeValidator) Option {
+	return func(s *Service) { s.qualifiedValidator = validator }
 }
 
 func WithDiagnosticSink(sink diagnosis.DiagnosticSink) Option {
@@ -351,10 +363,13 @@ func (s *Service) endPlaybackRecording(ctx context.Context, streamID string) {
 //  2. LocationMap 无 binding(多节点内存丢失等) → 遍历所有活跃节点探测并兜底 Bind
 //  3. 任一节点确认流在线 → 复用
 //  4. 所有节点都返回"不在线"→ 才判定流不存在
-func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*Result, error) {
+func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel, req Request) (*Result, error) {
 	streamID := ch.StreamID
 	if streamID == "" {
 		return nil, nil
+	}
+	if req.IsQualified() {
+		return s.tryReuseQualifiedStream(ctx, ch, req)
 	}
 
 	// 单节点路径:直接用 s.zlm 探测
@@ -426,6 +441,85 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 	return nil, nil
 }
 
+// tryReuseQualifiedStream is deliberately stricter than the legacy recovery
+// probe. A qualified request may inspect only its RequiredNode; it cannot
+// enumerate all active nodes to guess ownership or clean up an uncertain
+// stream. A known owner on another node is a hard conflict, while a missing
+// location binding can be restored only after the exact node reports online.
+func (s *Service) tryReuseQualifiedStream(ctx context.Context, ch *gbmodels.GbChannel, req Request) (*Result, error) {
+	if !s.useMultiNode() || s.registry == nil || s.locationMap == nil || req.RequiredNode <= 0 {
+		return nil, ErrQualifiedPlaybackUnavailable
+	}
+	streamID := ch.StreamID
+	ownerID, bound := s.locationMap.Lookup(streamID)
+	if bound && ownerID != req.RequiredNode {
+		return nil, &OwnerNodeMismatchError{
+			DeviceID: ch.DeviceID, ChannelID: ch.ChannelID,
+			RequiredNode: req.RequiredNode, OwnerNode: ownerID,
+		}
+	}
+
+	mediaNode, ok := s.registry.Get(req.RequiredNode)
+	if !ok || mediaNode == nil {
+		return nil, ErrQualifiedOwnerUnknown
+	}
+	online, err := s.clientForNode(mediaNode).IsMediaOnline(ctx, zlmApp, streamID)
+	if err != nil {
+		return nil, ErrQualifiedOwnerUnknown
+	}
+	if !online {
+		// Both a missing binding and a stale binding are fail-closed here.
+		// A false probe is not authority to drive StopIfPersistedCurrent;
+		// the dedicated recovery/cleanup owner must establish exact
+		// generation ownership before clearing a residual row.
+		return nil, ErrQualifiedOwnerUnknown
+	}
+	if !bound {
+		s.locationMap.Bind(streamID, mediaNode.ID)
+	}
+	return s.buildReuseResult(ctx, ch, mediaNode), nil
+}
+
+func (s *Service) validateQualifiedNode(ctx context.Context, req Request, mediaNode *node.Node) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateQualifiedRequestShape(req); err != nil {
+		return err
+	}
+	if s.qualifiedValidator == nil || mediaNode == nil || mediaNode.ID != req.RequiredNode ||
+		mediaNode.MediaServerUUID == "" || !mediaNode.IsActive() {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	snapshot := NodeQualificationSnapshot{
+		ID:              mediaNode.ID,
+		Revision:        mediaNode.Revision,
+		MediaServerUUID: mediaNode.MediaServerUUID,
+		State:           string(mediaNode.State),
+	}
+	if err := s.qualifiedValidator.Validate(ctx, req, snapshot); err != nil {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	return nil
+}
+
+func (s *Service) validateQualifiedResult(ctx context.Context, req Request, result *Result) error {
+	if result == nil || result.Node == nil || result.Node.ID != req.RequiredNode || s.registry == nil {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	mediaNode, ok := s.registry.Get(result.Node.ID)
+	if !ok || mediaNode == nil {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	if result.Node.MediaServerUUID != mediaNode.MediaServerUUID || result.Node.Revision != mediaNode.Revision {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	return s.validateQualifiedNode(ctx, req, mediaNode)
+}
+
 // buildReuseResult constructs a result from the persisted current media SSRC.
 // Legacy dynamic rows can derive it from their 10-digit stream ID; a fixed
 // stream must never be misreported as its own SSRC.
@@ -447,10 +541,10 @@ func (s *Service) buildReuseResult(ctx context.Context, ch *gbmodels.GbChannel, 
 
 // Start 发起点播并通过通道级协调器合并并发请求。
 //
-// 旧调用方继续使用这个签名；实际副作用由 startDirect 执行，避免
-// REST、级联等多个入口在同一通道重复 openRtpServer/INVITE。
+// 兼容无播放鉴权的旧调用方。鉴权开启时，签发入口必须改用携带
+// 已授权设备版本的 StartAuthorized；此方法不会自动读取最新版本。
 func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
-	return s.StartAuthorized(ctx, deviceID, channelID, "")
+	return s.StartAuthorized(ctx, AuthorizedRequest{DeviceID: deviceID, ChannelID: channelID})
 }
 
 // startDirect 发起一次不经过协调器的点播事务。调用方必须已经持有通道
@@ -483,6 +577,13 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	// 媒体等待全部纳入同一 deadline,任一阶段阻塞都不能超过 PlayTimeout
 	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
 	defer playCancel()
+	if req.AuthorizationID != "" {
+		// Waiting for an earlier generation to stop can outlive the entry
+		// preflight. Recheck before probes, location repairs or stale cleanup.
+		if err := s.validateQueuedAuthorization(playCtx, req); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+	}
 
 	// 1. 校验设备 + 通道
 	dev, err := s.devices.FindByDeviceID(playCtx, deviceID)
@@ -512,6 +613,30 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if ch.StreamTransport == "TCP-Active" {
 		return nil, fmt.Errorf("通道流传输模式为 TCP-Active,平台点播暂不支持,请改为 UDP 或 TCP-Passive")
 	}
+	if req.IsQualified() {
+		// This is the first qualification gate: the device/channel snapshot
+		// is known, but no reuse probe or media side effect has happened yet.
+		// A bound stream on another node is reported before invoking the
+		// ticket adapter so the owner-mismatch contract stays deterministic.
+		if ch.StreamID != "" && s.useMultiNode() {
+			if ownerID, bound := s.locationMap.Lookup(ch.StreamID); bound && ownerID != req.RequiredNode {
+				return nil, &OwnerNodeMismatchError{
+					DeviceID: deviceID, ChannelID: channelID,
+					RequiredNode: req.RequiredNode, OwnerNode: ownerID,
+				}
+			}
+		}
+		if !s.useMultiNode() || s.registry == nil {
+			return nil, ErrQualifiedPlaybackUnavailable
+		}
+		mediaNode, ok := s.registry.Get(req.RequiredNode)
+		if !ok || mediaNode == nil {
+			return nil, ErrQualifiedPlaybackUnavailable
+		}
+		if err := s.validateQualifiedNode(playCtx, req, mediaNode); err != nil {
+			return nil, err
+		}
+	}
 
 	// 2. 检查通道是否已在播放 —— 尝试流复用
 	//
@@ -522,7 +647,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	//     不主动清理,尝试从 registry 里遍历所有节点探测 (兜底恢复 LocationMap)
 	//   - 所有节点都探测失败 → 才走清理路径(此时说明流真的不在了)
 	if ch.StreamID != "" {
-		if reused, err := s.tryReuseStream(playCtx, ch); err != nil {
+		if reused, err := s.tryReuseStream(playCtx, ch, req); err != nil {
 			return nil, err
 		} else if reused != nil {
 			if _, _, parseErr := ParseFixedStreamID(reused.StreamID); parseErr == nil {
@@ -592,7 +717,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	authorizationBound := false
 	startCompleted := false
 	if req.AuthorizationID != "" {
-		if err := s.bindAuthorization(req.AuthorizationID, generation); err != nil {
+		if err := s.bindAuthorization(playCtx, req, generation); err != nil {
 			return nil, ErrPlayAuthorizationUnavailable
 		}
 		authorizationBound = true
@@ -627,6 +752,16 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 			})
 			if err != nil {
 				return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
+			}
+		}
+		if req.IsQualified() {
+			// The second gate runs after the exact node is selected but
+			// before LocationMap bind, RTP allocation, or INVITE.
+			if selectedNode == nil {
+				return nil, ErrQualifiedPlaybackUnavailable
+			}
+			if err := s.validateQualifiedNode(playCtx, req, selectedNode); err != nil {
+				return nil, err
 			}
 		}
 		client = s.clientForNode(selectedNode)
@@ -818,7 +953,8 @@ func playFailureReason(err error) string {
 	}
 }
 
-func (s *Service) fireSnapshot(ctx context.Context, result *Result, deviceID, channelID string) {
+func (s *Service) fireSnapshot(ctx context.Context, result *Result, req Request) {
+	deviceID, channelID := req.DeviceID, req.ChannelID
 	if s.snapshotSvc == nil || result == nil || result.StreamID == "" {
 		return
 	}
@@ -848,9 +984,12 @@ func (s *Service) fireSnapshot(ctx context.Context, result *Result, deviceID, ch
 				zap.Int64("node_id", result.Node.ID))
 			return
 		}
-		grant, err := s.tokenIssuer.IssueDirect(playauth.Binding{
+		tokenCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		grant, err := s.tokenIssuer.IssueDirectContext(tokenCtx, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: zlmApp,
-			Stream: result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
+			DeviceEpoch: req.DeviceEpoch,
+			Stream:      result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
 			MediaGeneration: result.Generation,
 			BindClientIP:    authSettings.BindClientIP,
 			ClientIP:        "127.0.0.1",
@@ -1130,12 +1269,15 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, mediaNode *node.Node, reused bool) *Result {
 	urls, warnings := s.urlResolver.Resolve(ctx, mediaNode, zlmApp, streamID)
 	result := &Result{
-		StreamID:    streamID,
-		SSRC:        ssrc,
-		App:         zlmApp,
-		Reused:      reused,
-		Status:      "online",
-		Node:        &ResultNode{ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host},
+		StreamID: streamID,
+		SSRC:     ssrc,
+		App:      zlmApp,
+		Reused:   reused,
+		Status:   "online",
+		Node: &ResultNode{
+			ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host,
+			MediaServerUUID: mediaNode.MediaServerUUID, Revision: mediaNode.Revision,
+		},
 		URLs:        urls,
 		URLWarnings: warnings,
 		ExpireAt:    time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),

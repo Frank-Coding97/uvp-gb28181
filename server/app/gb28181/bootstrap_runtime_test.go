@@ -19,6 +19,8 @@ import (
 
 type fakeSIPRuntimeServer struct {
 	startErr                error
+	shutdownErr             error
+	uac                     *uac.UAC
 	onError                 func(error)
 	started                 bool
 	events                  *[]string
@@ -45,12 +47,12 @@ func (f *fakeSIPRuntimeServer) Start() error {
 	f.started = true
 	return f.startErr
 }
-func (f *fakeSIPRuntimeServer) UAC() *uac.UAC { return nil }
+func (f *fakeSIPRuntimeServer) UAC() *uac.UAC { return f.uac }
 func (f *fakeSIPRuntimeServer) Shutdown(context.Context) error {
 	if f.events != nil {
 		*f.events = append(*f.events, "sip.shutdown")
 	}
-	return nil
+	return f.shutdownErr
 }
 
 type fakePTZSchedulerLifecycle struct {
@@ -69,10 +71,11 @@ func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 	t.Run("start failure", func(t *testing.T) {
 		status := gbsetup.NewRuntimeStatus()
 		server := &fakeSIPRuntimeServer{startErr: errors.New("bind failed")}
-		_, err := startSIPRuntime(gbconfig.Config{}, nil, status, func(gbconfig.Config) (sipRuntimeServer, error) {
+		got, err := startSIPRuntime(gbconfig.Config{}, nil, status, func(gbconfig.Config) (sipRuntimeServer, error) {
 			return server, nil
 		})
 		require.Error(t, err)
+		require.Same(t, server, got, "failed Start must return its owned instance for root rollback")
 		require.Equal(t, gbsetup.RuntimeFailed, status.Snapshot().State)
 	})
 
@@ -121,6 +124,31 @@ func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
 	require.Nil(t, ptzScheduler)
 	require.Nil(t, ptzService)
 	require.Nil(t, sipServer)
+}
+
+type pendingPTZRuntime struct{ err error }
+
+func (*pendingPTZRuntime) Start(context.Context)                {}
+func (*pendingPTZRuntime) Stop()                                {}
+func (p *pendingPTZRuntime) FlushResults(context.Context) error { return p.err }
+
+func TestPTZFailedWritebackRetainsRuntimeForRetry(t *testing.T) {
+	oldScheduler, oldService := ptzScheduler, ptzService
+	defer func() { ptzScheduler, ptzService = oldScheduler, oldService }()
+	owner := &pendingPTZRuntime{err: errors.New("result persistence unavailable")}
+	ptzScheduler, ptzService = owner, nil
+	require.Error(t, stopPTZRuntime())
+	require.Same(t, owner, ptzScheduler, "unflushed facts must not lose their owner")
+	called := false
+	err := startSIPDependenciesWithFactory(gbconfig.Config{}, nil, func(gbconfig.Config) (sipRuntimeServer, error) {
+		called = true
+		return nil, errors.New("unexpected replacement")
+	})
+	require.ErrorContains(t, err, "旧运行时尚未释放")
+	require.False(t, called)
+	owner.err = nil
+	require.NoError(t, stopPTZRuntime())
+	require.Nil(t, ptzScheduler)
 }
 
 type recordQueryRuntimeSender struct{}

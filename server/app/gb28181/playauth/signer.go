@@ -24,9 +24,11 @@ const (
 	QueryParameter = "play_token"
 	DefaultTTL     = 120 * time.Second
 
-	tokenVersion             = 2
+	tokenVersionV2           = 2
+	tokenVersionV4           = 4
 	tokenAudience            = "gb28181-play"
 	playKeyContext           = "uvp-gb28181/play-authorization/v2"
+	playV4KeyContext         = "uvp-gb28181/play-authorization/v4"
 	ipKeyContext             = "uvp-gb28181/play-ip-binding/v1"
 	callbackCapabilityDomain = "uvp-gb28181/on-stream-not-found-callback/v1"
 	hookCapabilityDomain     = "uvp-gb28181/zlm-hook-callback/v2"
@@ -98,6 +100,7 @@ type KeyMaterial struct {
 type Binding struct {
 	DeviceID        string
 	ChannelID       string
+	DeviceEpoch     int64
 	App             string
 	Stream          string
 	MediaServerID   string
@@ -113,6 +116,7 @@ type Claims struct {
 	KeyID                   string `json:"kid"`
 	DeviceID                string `json:"did"`
 	ChannelID               string `json:"cid"`
+	DeviceEpoch             int64  `json:"depoch,omitempty"`
 	App                     string `json:"app"`
 	Stream                  string `json:"stream"`
 	MediaServerID           string `json:"node"`
@@ -148,8 +152,10 @@ type Verifier interface {
 type Option func(*Signer) error
 
 type derivedKey struct {
-	sign []byte
-	ip   []byte
+	sign    []byte
+	v4      []byte
+	ip      []byte
+	openapi []byte
 }
 
 type Signer struct {
@@ -211,11 +217,19 @@ func buildKey(material KeyMaterial) (string, derivedKey, error) {
 	if err != nil {
 		return "", derivedKey{}, err
 	}
+	v4Key, err := deriveKey(material.Secret, playV4KeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
 	ipKey, err := deriveKey(material.Secret, ipKeyContext)
 	if err != nil {
 		return "", derivedKey{}, err
 	}
-	return id, derivedKey{sign: signKey, ip: ipKey}, nil
+	openAPIKey, err := deriveKey(material.Secret, openAPIPlayKeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
+	return id, derivedKey{sign: signKey, v4: v4Key, ip: ipKey, openapi: openAPIKey}, nil
 }
 
 func WithTTL(ttl time.Duration) Option {
@@ -274,18 +288,18 @@ func (s *Signer) Prepare() (Prepared, error) {
 }
 
 func (s *Signer) Bind(prepared Prepared, binding Binding) (Grant, error) {
-	if s == nil || !validBinding(binding) || prepared.Nonce == "" || prepared.AuthorizationGeneration == "" ||
+	if s == nil || !validV4Binding(binding) || prepared.Nonce == "" || prepared.AuthorizationGeneration == "" ||
 		prepared.IssuedAt.IsZero() || !prepared.ExpiresAt.After(prepared.IssuedAt) {
 		return Grant{}, ErrTokenInvalid
 	}
 	key, ok := s.keys[s.activeID]
-	if !ok {
+	if !ok || len(key.v4) == 0 {
 		return Grant{}, ErrKeyInvalid
 	}
 	claims := Claims{
-		Version: tokenVersion, Audience: tokenAudience, Mode: ModeDirect, KeyID: s.activeID,
-		DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, App: binding.App,
-		Stream: binding.Stream, MediaServerID: binding.MediaServerID, MediaGeneration: binding.MediaGeneration,
+		Version: tokenVersionV4, Audience: tokenAudience, Mode: ModeDirect, KeyID: s.activeID,
+		DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, DeviceEpoch: binding.DeviceEpoch,
+		App: binding.App, Stream: binding.Stream, MediaServerID: binding.MediaServerID, MediaGeneration: binding.MediaGeneration,
 		IssuedAt: prepared.IssuedAt.Unix(), ExpiresAt: prepared.ExpiresAt.Unix(), Nonce: prepared.Nonce,
 		AuthorizationGeneration: prepared.AuthorizationGeneration,
 	}
@@ -302,7 +316,7 @@ func (s *Signer) Bind(prepared Prepared, binding Binding) (Grant, error) {
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
 	return Grant{
-		Token:                   encoded + "." + base64.RawURLEncoding.EncodeToString(signature(key.sign, []byte(encoded))),
+		Token:                   encoded + "." + base64.RawURLEncoding.EncodeToString(signature(key.v4, []byte(encoded))),
 		ExpiresAt:               prepared.ExpiresAt,
 		AuthorizationGeneration: prepared.AuthorizationGeneration,
 	}, nil
@@ -317,7 +331,41 @@ func (s *Signer) IssueDirect(binding Binding) (Grant, error) {
 }
 
 func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
-	if s == nil || !validBinding(expected) {
+	if s == nil || !validResourceBinding(expected) {
+		return Claims{}, ErrTokenInvalid
+	}
+	claims, err := s.authenticateBoundToken(token, expected)
+	if err != nil {
+		return Claims{}, err
+	}
+	if !claimsEpochMatchesExpected(claims, expected, true) {
+		return Claims{}, ErrTokenBindingMismatch
+	}
+	if expected.BindClientIP && claims.ClientIPDigest == "" {
+		return Claims{}, ErrTokenIPMismatch
+	}
+	if claims.ClientIPDigest != "" {
+		key, ok := s.keys[claims.KeyID]
+		if !ok {
+			return Claims{}, ErrTokenTampered
+		}
+		digest, digestErr := clientIPDigest(key.ip, expected.ClientIP)
+		if digestErr != nil || !hmac.Equal([]byte(claims.ClientIPDigest), []byte(digest)) {
+			return Claims{}, ErrTokenIPMismatch
+		}
+	}
+	if err := s.validateLifetimeAndRevocation(claims); err != nil {
+		return Claims{}, err
+	}
+	return claims, nil
+}
+
+// authenticateBoundToken validates only the signed token shape, version-key
+// selection, and resource/media binding. It deliberately leaves IP and time
+// checks to the caller so the verified-client cold fallback can use its
+// already-recorded OnPlay proof without inventing a client address.
+func (s *Signer) authenticateBoundToken(token string, expected Binding) (Claims, error) {
+	if s == nil || !validResourceBinding(expected) {
 		return Claims{}, ErrTokenInvalid
 	}
 	parts := strings.Split(token, ".")
@@ -336,11 +384,26 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	if !ok || claims.KeyID == "" {
 		return Claims{}, ErrTokenTampered
 	}
-	providedSignature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || !hmac.Equal(providedSignature, signature(key.sign, []byte(parts[0]))) {
+	var verifyKey []byte
+	switch claims.Version {
+	case tokenVersionV2:
+		if claims.DeviceEpoch != 0 || expected.DeviceEpoch != 0 {
+			return Claims{}, ErrTokenBindingMismatch
+		}
+		verifyKey = key.sign
+	case tokenVersionV4:
+		if claims.DeviceEpoch <= 0 || (expected.DeviceEpoch != 0 && claims.DeviceEpoch != expected.DeviceEpoch) {
+			return Claims{}, ErrTokenBindingMismatch
+		}
+		verifyKey = key.v4
+	default:
 		return Claims{}, ErrTokenTampered
 	}
-	if claims.Version != tokenVersion || claims.Audience != tokenAudience || claims.Mode != ModeDirect ||
+	providedSignature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || !hmac.Equal(providedSignature, signature(verifyKey, []byte(parts[0]))) {
+		return Claims{}, ErrTokenTampered
+	}
+	if claims.Audience != tokenAudience || claims.Mode != ModeDirect ||
 		claims.Nonce == "" || claims.AuthorizationGeneration == "" || claims.DeviceID != expected.DeviceID ||
 		claims.ChannelID != expected.ChannelID || claims.App != expected.App || claims.Stream != expected.Stream ||
 		claims.MediaServerID != expected.MediaServerID {
@@ -349,26 +412,41 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	if claims.MediaGeneration != expected.MediaGeneration {
 		return Claims{}, ErrTokenMediaGenerationMismatch
 	}
-	if expected.BindClientIP && claims.ClientIPDigest == "" {
-		return Claims{}, ErrTokenIPMismatch
-	}
-	if claims.ClientIPDigest != "" {
-		digest, digestErr := clientIPDigest(key.ip, expected.ClientIP)
-		if digestErr != nil || !hmac.Equal([]byte(claims.ClientIPDigest), []byte(digest)) {
-			return Claims{}, ErrTokenIPMismatch
-		}
+	return claims, nil
+}
+
+func (s *Signer) validateLifetimeAndRevocation(claims Claims) error {
+	if s == nil || s.now == nil {
+		return ErrTokenInvalid
 	}
 	now := s.now().UTC()
 	if claims.IssuedAt <= 0 || claims.ExpiresAt <= claims.IssuedAt || time.Unix(claims.IssuedAt, 0).After(now.Add(maxClockSkew)) {
-		return Claims{}, ErrTokenTampered
+		return ErrTokenTampered
 	}
 	if !now.Before(time.Unix(claims.ExpiresAt, 0)) {
-		return Claims{}, ErrTokenExpired
+		return ErrTokenExpired
 	}
 	if revoked := revokedBefore.Load(); revoked > 0 && claims.IssuedAt < revoked {
-		return Claims{}, ErrTokenRevoked
+		return ErrTokenRevoked
 	}
-	return claims, nil
+	return nil
+}
+
+func claimsEpochMatchesExpected(claims Claims, expected Binding, requireV4Epoch bool) bool {
+	switch claims.Version {
+	case tokenVersionV2:
+		return claims.DeviceEpoch == 0 && expected.DeviceEpoch == 0
+	case tokenVersionV4:
+		if claims.DeviceEpoch <= 0 {
+			return false
+		}
+		if requireV4Epoch && expected.DeviceEpoch <= 0 {
+			return false
+		}
+		return expected.DeviceEpoch == claims.DeviceEpoch
+	default:
+		return false
+	}
 }
 
 // CorrelationID is safe for logs and audit records. It is not a bearer
@@ -471,7 +549,10 @@ func deriveKey(root []byte, context string) ([]byte, error) {
 	return signature(root, []byte(context)), nil
 }
 
-func validBinding(binding Binding) bool {
+func validResourceBinding(binding Binding) bool {
+	if binding.DeviceEpoch < 0 {
+		return false
+	}
 	if !validGBID(binding.DeviceID) || !validGBID(binding.ChannelID) || strings.TrimSpace(binding.App) == "" ||
 		strings.TrimSpace(binding.Stream) == "" || strings.TrimSpace(binding.MediaServerID) == "" {
 		return false
@@ -481,6 +562,17 @@ func validBinding(binding Binding) bool {
 		return err == nil
 	}
 	return true
+}
+
+func validV4Binding(binding Binding) bool {
+	return validResourceBinding(binding) && binding.DeviceEpoch > 0
+}
+
+// validBinding is retained for the registry's shared resource checks. Token
+// issuance uses validV4Binding and legacy verification separately enforces a
+// zero epoch.
+func validBinding(binding Binding) bool {
+	return validResourceBinding(binding)
 }
 
 func validGBID(value string) bool {

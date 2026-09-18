@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,6 +15,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
@@ -101,16 +104,86 @@ func runApplication() (err error) {
 		}
 		return runMigrateDown(downFile)
 	}
+	// Own the local domain for the whole API process, not one SIP generation.
+	// Migrations are complete; no HTTP routes or device effect runtime exists.
+	authorityLock, err := processauthority.AcquireLocalLock(app.ConfigYml.GetString("processauthority.state_dir"))
+	if err != nil {
+		return fmt.Errorf("进程授权目录或排他锁不可用: %w", err)
+	}
+	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 10*time.Second)
+	authority, err := processauthority.Register(registerCtx, app.DB(), authorityLock)
+	cancelRegister()
+	if err != nil {
+		return errors.Join(fmt.Errorf("进程授权注册失败: %w", err), authorityLock.Close())
+	}
+	app.JobScheduler.Start()
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
 	// 初始化系统路由
-	routes.InitRoutes(engine)
+	openAPI := routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
+	// Prime process-lifetime trust before SIP recovery starts; both consumers
+	// reuse this exact snapshot, including a sticky startup failure.
+	controlBindings, controlBindingsErr := gb28181.LoadStartupOpenAPIControlBindingsOnce()
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
-	gb28181.Start()
+	gb28181.Start(authority)
+	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
+	defer cancelMaintenance()
+	var stopRevocation func()
+	revocationErr := controlBindingsErr
+	if revocationErr == nil {
+		stopRevocation, revocationErr = openapimedia.StartRevocationWithBindings(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
+			controlBindings, func(result openapimedia.RevocationTickResult, err error) {
+				if err != nil {
+					app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.Error(err))
+				} else if result.Alarms > 0 {
+					app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
+				}
+			})
+	}
+	if revocationErr != nil {
+		// Keep metadata/admin available; missing trust never means legacy control.
+		if errors.Is(revocationErr, openapimedia.ErrRevocationNotConfigured) {
+			app.ZapLog.Warn("OpenAPI revocation control is not configured; pending cleanup is not running")
+		} else {
+			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.Error(revocationErr))
+		}
+	}
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		openAPI.RunMaintenance(maintenanceContext, func(err error) {
+			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.Error(err))
+		})
+	}()
 	// 启动服务器(阻塞直到收到退出信号)
-	return ginhelper.StartServer(engine, stopApplication)
+	var stopOnce sync.Once
+	stopOpenAPI := func(ctx context.Context) error {
+		cancelMaintenance()
+		if stopRevocation != nil {
+			stopRevocation()
+		}
+		select {
+		case <-maintenanceDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	shutdown := func(ctx context.Context) error {
+		var openAPIErr error
+		stopOnce.Do(func() { openAPIErr = stopOpenAPI(ctx) })
+		shutdownErr := errors.Join(openAPIErr, stopApplication(ctx))
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		// All HTTP, maintenance and GB owners have joined. Do not release this
+		// process authority in GB Stop/Reload, or before the last owner exits.
+		authority.Seal()
+		return authorityLock.Close()
+	}
+	return ginhelper.StartServer(engine, shutdown)
 }
 
 func migrateUpRequested(args []string) bool {

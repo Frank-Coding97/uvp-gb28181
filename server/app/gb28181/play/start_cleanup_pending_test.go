@@ -17,7 +17,7 @@ func TestStartRollbackCloseFailureQuarantinesGenerationUntilRetry(t *testing.T) 
 	z := &mockZLM{port: 40000, closeErr: errors.New("close failed")}
 	inviter := &mockInviter{inviteErr: errors.New("invite failed")}
 	service, authorization, _, _, _ := newFixedAuthorizationService(t, true, z, inviter)
-	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestStartRollbackCloseFailureQuarantinesGenerationUntilRetry(t *testing.T) 
 	_, err = service.EnsureLive(context.Background(), Request{
 		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
 		Trigger: "on_stream_not_found", RequiredNode: 1,
-		AuthorizationID: claims.AuthorizationGeneration,
+		AuthorizationID: claims.AuthorizationGeneration, DeviceEpoch: claims.DeviceEpoch,
 	})
 	if !errors.Is(err, ErrLiveCleanupPending) {
 		t.Fatalf("cleanup failure error=%v, want ErrLiveCleanupPending", err)

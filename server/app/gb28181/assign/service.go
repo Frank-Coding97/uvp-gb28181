@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
@@ -45,6 +45,7 @@ type AssignmentResultItemV2 struct {
 	Name       string           `json:"name"`
 	Status     AssignmentStatus `json:"status"`
 	Message    string           `json:"message"`
+	Receipt    *TransferReceipt `json:"-"`
 }
 
 type AssignmentResultV2 struct {
@@ -70,12 +71,24 @@ type AssignResult struct {
 
 // Service 设备归属分配(单事务,逐台)。
 type Service struct {
-	db       *gorm.DB
-	validate DeptValidator
+	db               *gorm.DB
+	validate         DeptValidator
+	clock            func() time.Time
+	transferRecorder DeviceTransferRecorder
+	transferBarrier  DeviceTransferBarrier
 }
 
-func NewService(db *gorm.DB, validate DeptValidator) *Service {
-	return &Service{db: db, validate: validate}
+func NewService(db *gorm.DB, validate DeptValidator, options ...ServiceOption) *Service {
+	service := &Service{db: db, validate: validate, clock: time.Now}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	if service.transferRecorder == nil {
+		service.transferRecorder = newDefaultTransferRecorder(db, service.clock)
+	}
+	return service
 }
 
 func (s *Service) AssignBatchV2(ctx context.Context, inputs []AssignmentInput, targetDeptID uint) (AssignmentResultV2, error) {
@@ -134,38 +147,64 @@ func (s *Service) AssignBatch(ctx context.Context, deviceIDs []uint, targetDeptI
 
 // AssignOne 单台设备归属流转(单事务,含八类关联对象)。
 func (s *Service) AssignOne(ctx context.Context, deviceID uint, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var device gbmodels.GbDevice
-		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", deviceID)
-		if needFilter {
-			q = q.Where("owner_dept_id IN ?", visibleDeptIDs)
-		}
-		if err := q.First(&device).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrDeviceNotVisible
-			}
-			return err
-		}
-
-		return cascadeAssignment(tx, &device, targetDeptID)
-	})
+	_, err := s.AssignOneWithReceipt(ctx, deviceID, targetDeptID, visibleDeptIDs, needFilter)
+	return err
 }
 
-func (s *Service) assignOneV2(ctx context.Context, input AssignmentInput, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) AssignmentResultItemV2 {
-	item := AssignmentResultItemV2{DeviceID: input.DeviceID, Status: AssignmentFailed}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var device gbmodels.GbDevice
-		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", input.DeviceID)
-		if needFilter {
-			q = q.Where("owner_dept_id IN ?", visibleDeptIDs)
-		}
-		if err := q.First(&device).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrDeviceNotVisible
-			}
+// AssignOneWithReceipt performs one ownership transfer and returns an internal
+// post-commit receipt. The receipt is intentionally not part of any HTTP DTO;
+// callers may use it only to start later, device-scoped cleanup.
+func (s *Service) AssignOneWithReceipt(ctx context.Context, deviceID uint, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) (TransferReceipt, error) {
+	if ctx == nil {
+		return TransferReceipt{}, ErrAssignmentSecurityUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, assignmentTransferTimeout)
+	defer cancel()
+	guard, err := s.lockTransfer(ctx, deviceID)
+	if err != nil {
+		return TransferReceipt{}, err
+	}
+	defer guard.Release()
+	var receipt *TransferReceipt
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		device, err := lockAssignmentDevice(tx, deviceID, visibleDeptIDs, needFilter)
+		if err != nil {
 			return err
 		}
-		item.DeviceCode = device.DeviceID
+		receipt, err = s.transferLocked(ctx, tx, device, targetDeptID)
+		return err
+	})
+	if err != nil {
+		return TransferReceipt{}, normalizeAssignmentError(err)
+	}
+	if receipt == nil {
+		return TransferReceipt{}, nil
+	}
+	guard.Commit(receipt.NewEpoch)
+	return *receipt, nil
+}
+
+func (s *Service) assignOneV2WithReceipt(ctx context.Context, input AssignmentInput, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) (AssignmentResultItemV2, *TransferReceipt) {
+	item := AssignmentResultItemV2{DeviceID: input.DeviceID, Status: AssignmentFailed}
+	if ctx == nil {
+		item.Message = ErrAssignmentSecurityUnavailable.Error()
+		return item, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, assignmentTransferTimeout)
+	defer cancel()
+	guard, err := s.lockTransfer(ctx, input.DeviceID)
+	if err != nil {
+		item.Message = err.Error()
+		return item, nil
+	}
+	defer guard.Release()
+	var receipt *TransferReceipt
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		device, err := lockAssignmentDevice(tx, input.DeviceID, visibleDeptIDs, needFilter)
+		if err != nil {
+			return err
+		}
+		item.DeviceCode = device.DeviceCode
 		item.Name = device.Name
 		if device.OwnerDeptID != input.ExpectedOwnerDeptID {
 			return ErrAssignmentStale
@@ -175,7 +214,8 @@ func (s *Service) assignOneV2(ctx context.Context, input AssignmentInput, target
 			item.Message = "设备已属于目标部门"
 			return nil
 		}
-		if err := cascadeAssignment(tx, &device, targetDeptID); err != nil {
+		receipt, err = s.transferLocked(ctx, tx, device, targetDeptID)
+		if err != nil {
 			return err
 		}
 		item.Status = AssignmentChanged
@@ -183,23 +223,34 @@ func (s *Service) assignOneV2(ctx context.Context, input AssignmentInput, target
 		return nil
 	})
 	if err != nil {
+		err = normalizeAssignmentError(err)
 		item.Status = AssignmentFailed
 		item.Message = err.Error()
+		return item, nil
 	}
+	if receipt != nil {
+		guard.Commit(receipt.NewEpoch)
+	}
+	item.Receipt = receipt
+	return item, receipt
+}
+
+func (s *Service) assignOneV2(ctx context.Context, input AssignmentInput, targetDeptID uint, visibleDeptIDs []uint, needFilter bool) AssignmentResultItemV2 {
+	item, _ := s.assignOneV2WithReceipt(ctx, input, targetDeptID, visibleDeptIDs, needFilter)
 	return item
 }
 
-func cascadeAssignment(tx *gorm.DB, device *gbmodels.GbDevice, targetDeptID uint) error {
+func cascadeAssignment(tx *gorm.DB, device assignmentDevice, targetDeptID uint) error {
 	if err := tx.Model(&gbmodels.GbDevice{}).Where("id = ?", device.ID).
 		UpdateColumn("owner_dept_id", targetDeptID).Error; err != nil {
 		return err
 	}
-	if err := tx.Model(&gbmodels.GbChannel{}).Where("device_id = ?", device.DeviceID).
+	if err := tx.Model(&gbmodels.GbChannel{}).Where("device_id = ?", device.DeviceCode).
 		UpdateColumn("owner_dept_id", targetDeptID).Error; err != nil {
 		return err
 	}
 	// 3. 录像文件(按编码)
-	if err := tx.Model(&gbmodels.GbRecordingFile{}).Where("device_id = ?", device.DeviceID).
+	if err := tx.Model(&gbmodels.GbRecordingFile{}).Where("device_id = ?", device.DeviceCode).
 		UpdateColumn("owner_dept_id", targetDeptID).Error; err != nil {
 		return err
 	}
@@ -218,7 +269,7 @@ func cascadeAssignment(tx *gorm.DB, device *gbmodels.GbDevice, targetDeptID uint
 		return err
 	}
 	if err := tx.Exec("DELETE FROM gb_channel_mount WHERE channel_id IN (SELECT id FROM gb_channel WHERE device_id = ?)",
-		device.DeviceID).Error; err != nil {
+		device.DeviceCode).Error; err != nil {
 		return err
 	}
 	// 7. 自定义分组关系

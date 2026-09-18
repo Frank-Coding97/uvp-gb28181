@@ -17,14 +17,22 @@ import (
 )
 
 type fixedAuthorizationControllerService struct {
-	calls atomic.Int32
+	calls     atomic.Int32
+	request   play.AuthorizedRequest
+	authorize func(play.AuthorizedRequest) error
 }
 
 func (*fixedAuthorizationControllerService) Start(context.Context, string, string) (*play.Result, error) {
 	return nil, nil
 }
 
-func (*fixedAuthorizationControllerService) StartAuthorized(context.Context, string, string, string) (*play.Result, error) {
+func (s *fixedAuthorizationControllerService) StartAuthorized(_ context.Context, req play.AuthorizedRequest) (*play.Result, error) {
+	s.request = req
+	if s.authorize != nil {
+		if err := s.authorize(req); err != nil {
+			return nil, err
+		}
+	}
 	return &play.Result{
 		StreamID: "dynamic-stream", App: "rtp",
 		Node: &play.ResultNode{ID: 7}, AuthorizationExpiresAt: 1_800_000_120,
@@ -36,8 +44,14 @@ func (*fixedAuthorizationControllerService) Stop(context.Context, string, string
 	return nil
 }
 
-func (s *fixedAuthorizationControllerService) AuthorizeFixedPlayback(context.Context, string, string, string) (*play.Result, error) {
+func (s *fixedAuthorizationControllerService) AuthorizeFixedPlayback(_ context.Context, req play.AuthorizedRequest) (*play.Result, error) {
 	s.calls.Add(1)
+	s.request = req
+	if s.authorize != nil {
+		if err := s.authorize(req); err != nil {
+			return nil, err
+		}
+	}
 	return &play.Result{
 		StreamID: "34020000002000000010_37011200001310000010",
 		App:      "rtp", Node: &play.ResultNode{ID: 9}, AuthorizationExpiresAt: 1_800_000_120,

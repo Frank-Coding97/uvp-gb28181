@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 func activateSessionForCleanup(t *testing.T, repo *GormRepo, sessionID string, channelID uint, callID string, expiresAt time.Time) *models.GbTalkSession {
@@ -35,7 +37,7 @@ func activateSessionForCleanup(t *testing.T, repo *GormRepo, sessionID string, c
 	return session
 }
 
-func TestCleanupContinuesAfterEachStepFailureAndReleasesLease(t *testing.T) {
+func TestCleanupContinuesAfterEachStepFailureAndRetainsLease(t *testing.T) {
 	media := &fakeActivationMedia{stopErr: errors.New("stop failed"), closeErr: errors.New("close failed")}
 	inviter := &fakeTalkInviter{byeErr: errors.New("bye failed")}
 	service, repo, _ := newActivationService(t, media, inviter)
@@ -48,9 +50,118 @@ func TestCleanupContinuesAfterEachStepFailureAndReleasesLease(t *testing.T) {
 	require.Equal(t, 1, media.closes)
 	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
 	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionStopping, stored.State)
+	require.NotNil(t, stored.LeaseKey)
+	require.NotNil(t, stored.SourceKey)
+	require.Nil(t, stored.EndedAt)
+}
+
+func TestCleanupMediaFailureRetainsStoppingLeaseForRetry(t *testing.T) {
+	media := &fakeActivationMedia{closeErr: errors.New("close failed")}
+	service, repo, _ := newActivationService(t, media, &fakeTalkInviter{})
+	session := activateSessionForCleanup(t, repo, "cleanup-retry", 79, "call-retry", time.Now().Add(time.Minute))
+
+	err := service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "user stopped")
+	require.ErrorContains(t, err, "close source")
+	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionStopping, stored.State)
+	require.NotNil(t, stored.LeaseKey)
+	require.NotNil(t, stored.SourceKey)
+	require.Nil(t, stored.EndedAt)
+
+	media.mu.Lock()
+	media.closeErr = nil
+	media.mu.Unlock()
+	other := activateSessionForCleanup(t, repo, "cleanup-other", 80, "call-other", time.Now().Add(time.Minute))
+	require.NoError(t, service.Cleanup(context.Background(), other.SessionID, models.TalkSessionEnded, "other session"))
+	otherStored, findErr := repo.FindBySession(context.Background(), other.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionEnded, otherStored.State)
+	firstStored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionStopping, firstStored.State)
+	require.NotNil(t, firstStored.LeaseKey)
+
+	require.NoError(t, service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "retry"))
+	stored, findErr = repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
 	require.Equal(t, models.TalkSessionEnded, stored.State)
 	require.Nil(t, stored.LeaseKey)
-	require.Contains(t, stored.Error, "bye failed")
+
+	closeCalls := media.closes
+	require.NoError(t, service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "idempotent retry"))
+	require.Equal(t, closeCalls, media.closes)
+}
+
+type blockingCleanupMedia struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (m *blockingCleanupMedia) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
+	return nil, nil
+}
+
+func (m *blockingCleanupMedia) StartSendRtpPassive(context.Context, zlm.TalkSendRtpRequest) (*zlm.StartSendRtpPassiveResult, error) {
+	return nil, nil
+}
+
+func (m *blockingCleanupMedia) StopSendRtp(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (m *blockingCleanupMedia) CloseTalkSource(ctx context.Context, _, _, _ string) error {
+	m.once.Do(func() { close(m.started) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.release:
+		return nil
+	}
+}
+
+func TestCleanupCancelledWaiterCannotReportFalseSuccess(t *testing.T) {
+	service, repo, _ := newActivationService(t, &fakeActivationMedia{}, &fakeTalkInviter{})
+	media := &blockingCleanupMedia{started: make(chan struct{}), release: make(chan struct{})}
+	service.activation.deps.ClientFor = func(*node.Node) TalkMediaClient { return media }
+	session := activateSessionForCleanup(t, repo, "cleanup-waiter", 84, "call-waiter", time.Now().Add(time.Minute))
+
+	ownerDone := make(chan error, 1)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(media.release) }) }
+	defer release()
+	go func() {
+		ownerDone <- service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "owner")
+	}()
+	select {
+	case <-media.started:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup owner did not reach media close")
+	}
+
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, service.Cleanup(waiterCtx, session.SessionID, models.TalkSessionEnded, "waiter"), context.Canceled)
+	stored, err := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionStopping, stored.State)
+	require.NotNil(t, stored.LeaseKey)
+
+	release()
+	ownerTimer := time.NewTimer(time.Second)
+	defer ownerTimer.Stop()
+	select {
+	case ownerErr := <-ownerDone:
+		require.NoError(t, ownerErr)
+	case <-ownerTimer.C:
+		t.Fatal("cleanup owner did not finish after media release")
+	}
+	stored, err = repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionEnded, stored.State)
+	require.Nil(t, stored.LeaseKey)
 }
 
 // 交叉 BYE —— 双方在毫秒内各发一个 BYE，对端不会回 200，我方拆除事务只能按

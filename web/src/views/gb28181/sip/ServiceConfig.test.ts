@@ -380,6 +380,23 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("false");
     });
 
+    it("OpenAPI持久保护锁定鉴权并显示配置冲突", async () => {
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0, message: "",
+            data: { authEnabled: true, authBindClientIP: false, authTTLSeconds: 120,
+                authRequiredByOpenAPI: true, authConfigConflict: true }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+        const authSwitch = wrapper.find("[data-field='authEnabled'] button");
+        expect(authSwitch.element).toHaveProperty("disabled", true);
+        expect(wrapper.text()).toContain("停用 OpenAPI 不会解除此保护");
+        expect(wrapper.text()).toContain("配置文件请求关闭鉴权，当前仍强制开启");
+        await authSwitch.trigger("click");
+        expect(api.updatePlayAuthConfig).not.toHaveBeenCalled();
+        wrapper.unmount();
+    });
+
     it("联动播放鉴权与客户端 IP 绑定开关", async () => {
         api.fetchPlayAuthConfig.mockResolvedValue({
             code: 0,

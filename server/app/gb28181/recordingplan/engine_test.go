@@ -57,7 +57,7 @@ func TestEngineRecoversInsideScheduleAndKeepsOutsideStopped(t *testing.T) {
 	operator := &fakeChannelOperator{}
 	engine := NewEngine(db, operator, EngineOptions{InstanceID: "test", BatchSize: 10, Now: func() time.Time { return now }})
 	require.NoError(t, engine.Dispatch(context.Background()))
-	require.Equal(t, []uint{inside.ID, outside.ID}, operator.started, "both share the same currently matching plan")
+	require.ElementsMatch(t, []uint{inside.ID, outside.ID}, operator.started, "both share the same currently matching plan")
 
 	now = now.Add(2 * time.Hour)
 	require.NoError(t, engine.Heal(context.Background()))

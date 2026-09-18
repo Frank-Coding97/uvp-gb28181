@@ -6,7 +6,7 @@ import (
 )
 
 // revokedBefore 播放授权全局失效分界(Unix 秒):IssuedAt 早于该时刻的 token 一律拒绝。
-// 设备归属调整 / 取消共享时 BumpRevocation,替代逐 token 撤销。
+// 仅保留进程级全局失效能力；设备归属调整使用持久化 epoch / legacy cutoff，不能调用此全局开关。
 var revokedBefore atomic.Int64
 
 // BumpRevocation 使所有签发时刻早于 now 的播放授权立即失效。

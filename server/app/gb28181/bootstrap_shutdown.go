@@ -187,9 +187,6 @@ func (r *bootstrapShutdownRun) signal() {
 	if r.sip.positionPruneCancel != nil {
 		r.sip.positionPruneCancel()
 	}
-	if r.process.Load() {
-		r.signalControl()
-	}
 }
 
 func (r *bootstrapShutdownRun) signalControl() {
@@ -213,11 +210,18 @@ func (r *bootstrapShutdownRun) bindControlGeneration(ctx context.Context) {
 		ctx = context.Background()
 	}
 	sipGeneration := r.generation
-	r.controlGeneration = newShutdownGeneration(ctx, r.signalControl, []shutdownStep{
+	r.controlGeneration = newShutdownGeneration(context.Background(), nil, []shutdownStep{
 		{name: "control-plane", stop: func(ctx context.Context) error {
 			if sipGeneration != nil {
 				<-sipGeneration.Done()
+				if err := sipGeneration.result(); err != nil {
+					// Keep control-plane owners alive when the SIP generation
+					// did not drain. A later process-stop attempt must retain
+					// the same references for retry.
+					return err
+				}
 			}
+			r.signalControl()
 			return stopControlPlaneSnapshot(ctx, r.control)
 		}},
 	})
@@ -402,7 +406,9 @@ func newBootstrapShutdownRun(ctx context.Context, sip sipShutdownSnapshot, contr
 	}
 	run := &bootstrapShutdownRun{sip: sip, control: control, quiesce: quiesce}
 	run.process.Store(process)
-	run.generation = newShutdownGeneration(ctx, run.signal, run.steps())
+	// The captured generation owns shutdown after admission closes. The caller's
+	// context only bounds Wait; a later caller must be able to join the same work.
+	run.generation = newShutdownGeneration(context.Background(), run.signal, run.steps())
 	if process {
 		run.bindControlGeneration(ctx)
 	}
@@ -451,10 +457,18 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Stop new transfers and OpenAPI play admissions before any generation
+	// dependency they can call is detached.
+	gbroutes.SetDeviceTransferBarrier(nil)
+	if err := openAPILivePlayer.Retire(ctx); err != nil {
+		return shutdownComponentError("openapi.live_player", err)
+	}
 	var stopErr error
 	clearZLMManagementController()
 	if r.playback != nil {
-		stopErr = errors.Join(stopErr, shutdownComponentError("playback", r.playback.Close(ctx)))
+		if err := r.playback.Close(ctx); err != nil {
+			return shutdownComponentError("playback", err)
+		}
 	}
 	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	gbroutes.SetPlaybackMediaSink(nil)
@@ -533,6 +547,10 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	if r.server != nil {
 		r.server.SetSnapshotSink(nil)
 	}
+	// The video runtime is installed beside the cascade manager and owns its
+	// own dialog/source wait group. It must be drained before the next SIP
+	// generation can publish a new cascade handler.
+	stopCascadeVideoRuntime(ctx)
 	stopErr = errors.Join(stopErr, shutdownComponentError("cascade", stopCascadeSnapshot(ctx, r.cascade)))
 	if r.server != nil {
 		if err := r.server.Shutdown(ctx); err != nil {
@@ -724,11 +742,11 @@ func StopContext(ctx context.Context) error {
 	return finalizeProcessShutdown(ctx, run, err)
 }
 
-// Stop preserves the historical no-result API for process callers.
-func Stop() {
+// Stop preserves the historical bounded process-stop API.
+func Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = StopContext(ctx)
+	return StopContext(ctx)
 }
 
 // ReloadSIP is implemented in bootstrap.go; this helper is kept here to make

@@ -106,21 +106,31 @@ func TestRegistryStopIsIdempotentAndContinuesCleanupAfterFailure(t *testing.T) {
 	request := playbackRequest(now, "u1", "c1", "r1")
 	request.Resources = resources
 	created, _ := r.Create(context.Background(), request)
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); _ = r.Stop(context.Background(), created.Session.ID, "user stop") }()
+	if err := r.Stop(context.Background(), created.Session.ID, "user stop"); err == nil {
+		t.Fatal("cleanup failure must be returned")
 	}
-	wg.Wait()
-	if resources.teardown.Load() != 1 || resources.close.Load() != 1 || resources.unbind.Load() != 1 {
+	if resources.teardown.Load() != 1 || resources.close.Load() != 1 || resources.unbind.Load() != 0 {
 		t.Fatalf("cleanup counts teardown=%d close=%d unbind=%d", resources.teardown.Load(), resources.close.Load(), resources.unbind.Load())
 	}
 	session, _ := r.Get(created.Session.ID)
-	if session.State != StateStopped || session.EndReason == "" {
+	if session.State != StateStopping || session.EndReason == "" {
 		t.Fatalf("session=%+v", session)
 	}
 	if err := r.Stop(context.Background(), created.Session.ID, "repeat"); err == nil {
 		t.Fatal("cleanup error must be returned to the owner")
+	}
+	if resources.close.Load() != 2 {
+		t.Fatal("pending cleanup must be retried")
+	}
+	resources.closeErr = nil
+	if err := r.Stop(context.Background(), created.Session.ID, "retry success"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stop(context.Background(), created.Session.ID, "repeat success"); err != nil {
+		t.Fatal(err)
+	}
+	if resources.close.Load() != 3 || resources.unbind.Load() != 1 || r.MustGet(created.Session.ID).State != StateStopped {
+		t.Fatal("successful terminal cleanup must be idempotent")
 	}
 }
 

@@ -24,6 +24,12 @@ services:
       - ${UVP_ROOT:-/opt/uvp-gb28181}/config/config.yml:/app/config/config.yml:ro
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/uploads:/app/resource/public/uploads
+      # Pre-provision privately; Docker must not auto-create a permissive path.
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/data/process-authority
+        target: /var/lib/uvp/process-authority
+        bind:
+          create_host_path: false
       - /run/uvp:/run/uvp
     networks:
       wvp-network:

@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
@@ -37,6 +38,8 @@ import (
 type DeviceMgmtController struct {
 	controllers.Common
 	db                  func() *gorm.DB
+	transferBarrierMu   sync.RWMutex
+	transferBarrier     assign.DeviceTransferBarrier
 	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
 	subscriptionManager SubscriptionManager
 	ptzRuntimeMu        sync.RWMutex
