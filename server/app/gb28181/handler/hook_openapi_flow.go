@@ -66,7 +66,7 @@ func (h *HookController) observeOpenAPIFlow(c *gin.Context, body onFlowReportBod
 	if err != nil && app.ZapLog != nil {
 		// Keep the Hook fail-open and log only a fixed reason. The observer may
 		// wrap a database error containing credentials or request material.
-		app.ZapLog.Warn("OpenAPI flow observation failed", zap.String("reason", "observer-error"))
+		app.ZapLog.Warn("OpenAPI flow observation failed", zap.String("event", "gb28181.hook.flow.observer_failed"), zap.String("reason", "observer-error"))
 	}
 }
 

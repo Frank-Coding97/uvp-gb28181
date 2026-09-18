@@ -330,7 +330,7 @@ func (pc *PlayController) authorizedChannel(c *gin.Context, deviceID, channelID 
 		return play.AuthorizedRequest{}, false
 	}
 	if rows[0].AccessEpoch == nil || *rows[0].AccessEpoch <= 0 || rows[0].ChannelOwnerDeptID != rows[0].RootOwnerDeptID {
-		app.Log(c.Request.Context()).Warn("后台播放设备安全投影不一致", zap.String("deviceId", deviceID), zap.String("channelId", channelID))
+		app.Log(c.Request.Context()).Warn("后台播放设备安全投影不一致", zap.String("event", "gb28181.play.security_projection_mismatch"), zap.String("device_id", deviceID), zap.String("channel_id", channelID))
 		pc.FailAndAbort(c, "通道不存在", nil)
 		return play.AuthorizedRequest{}, false
 	}

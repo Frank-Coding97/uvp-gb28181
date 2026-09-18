@@ -47,15 +47,15 @@ func TestLoggingCascadeWarning(t *testing.T) {
 		t.Fatalf("startControlPlane warning helper calls = %d, want 1", got)
 	}
 
-	startDeps := requireLoggingCascadeFunction(t, bootstrap, "startSIPDependencies")
+	startDeps := requireLoggingCascadeFunction(t, bootstrap, "startSIPDependenciesWithFactory")
 	if got := countLoggingCascadeCalls(startDeps.Body, "startCascadeRuntime"); got != 1 {
-		t.Fatalf("startSIPDependencies startCascadeRuntime calls = %d, want 1", got)
+		t.Fatalf("startSIPDependenciesWithFactory startCascadeRuntime calls = %d, want 1", got)
 	}
 	if got := loggingCascadeCallArgCounts(startDeps.Body, "startCascadeRuntime"); len(got) != 1 || got[0] != 3 {
-		t.Fatalf("startCascadeRuntime args from startSIPDependencies = %v, want [3]", got)
+		t.Fatalf("startCascadeRuntime args from startSIPDependenciesWithFactory = %v, want [3]", got)
 	}
 	if got := countLoggingCascadeCalls(startDeps.Body, "warnCascadeCredentialKeyUnavailable"); got != 0 {
-		t.Fatalf("startSIPDependencies must not own a second warning, got %d", got)
+		t.Fatalf("startSIPDependenciesWithFactory must not own a second warning, got %d", got)
 	}
 
 	startCascade := requireLoggingCascadeFunction(t, cascade, "startCascadeRuntime")
@@ -69,19 +69,19 @@ func TestLoggingCascadeWarning(t *testing.T) {
 	start := requireLoggingCascadeFunction(t, bootstrap, "Start")
 	warningState := requireLoggingCascadeAssignmentResult(t, start.Body, "startControlPlane")
 	startDependenciesCall := requireLoggingCascadeCall(t, start.Body, "startSIPDependencies")
-	if got := loggingCascadeCallArgCounts(start.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("Start startSIPDependencies args = %v, want [2]", got)
+	if got := loggingCascadeCallArgCounts(start.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 3 {
+		t.Fatalf("Start startSIPDependencies args = %v, want [3]", got)
 	}
-	if got := loggingCascadeIdentArg(startDependenciesCall, 1); got != warningState {
+	if got := loggingCascadeIdentArg(startDependenciesCall, 2); got != warningState {
 		t.Fatalf("Start warning state arg = %q, want %q", got, warningState)
 	}
 	reload := requireLoggingCascadeFunction(t, bootstrap, "ReloadSIP")
 	reloadDependenciesCall := requireLoggingCascadeCall(t, reload.Body, "startSIPDependencies")
-	if got := loggingCascadeCallArgCounts(reload.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("ReloadSIP startSIPDependencies args = %v, want [2]", got)
+	if got := loggingCascadeCallArgCounts(reload.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 3 {
+		t.Fatalf("ReloadSIP startSIPDependencies args = %v, want [3]", got)
 	}
-	if !loggingCascadeIsFalse(reloadDependenciesCall.Args[1]) {
-		t.Fatalf("ReloadSIP warning state arg = %s, want false", loggingCascadeExprName(reloadDependenciesCall.Args[1]))
+	if !loggingCascadeIsFalse(reloadDependenciesCall.Args[2]) {
+		t.Fatalf("ReloadSIP warning state arg = %s, want false", loggingCascadeExprName(reloadDependenciesCall.Args[2]))
 	}
 	if got := loggingCascadeIdentArg(requireLoggingCascadeCall(t, startDeps.Body, "startCascadeRuntime"), 2); got != warningState {
 		t.Fatalf("startCascadeRuntime warning state arg = %q, want %q", got, warningState)

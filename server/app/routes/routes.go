@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"go.uber.org/zap"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gb28181 "uvplatform.cn/uvp-gb28181/app/gb28181"
@@ -48,7 +49,7 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 		panic("OpenAPI media security state unavailable; HTTP and GB startup remain closed")
 	}
 	if gbconfig.PlayAuthConfigConflict() && app.ZapLog != nil {
-		app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required")
+		app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required", zap.String("event", "security.lock_overrides_authoff"))
 	}
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())

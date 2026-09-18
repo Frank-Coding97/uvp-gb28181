@@ -129,7 +129,7 @@ func NewAuthorizedService(db *gorm.DB, sender TrackedSender, now func() time.Tim
 		for i, id := range skipped {
 			ids[i] = uint64(id)
 		}
-		app.ZapLog.Warn("PTZ 恢复扫描跳过异常旧进程记录,未伪造退役证书", zap.Uint64s("attemptIds", ids))
+		app.ZapLog.Warn("PTZ 恢复扫描跳过异常旧进程记录,未伪造退役证书", zap.String("event", "ptz.recovery_skipped"), zap.Uint64s("attempt_ids", ids))
 	}
 	s.synchronous = NewScheduler(s)
 	return s, nil

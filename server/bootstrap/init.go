@@ -44,7 +44,7 @@ func init() {
 	}
 	app.ConfigYml.ConfigFileChangeListen(func() {
 		if gbconfig.PlayAuthConfigConflict() && app.ZapLog != nil {
-			app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required")
+			app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required", zap.String("event", "security.lock_overrides_authoff"))
 		}
 	})
 	// 初始化数据库

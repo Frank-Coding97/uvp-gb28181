@@ -25,16 +25,6 @@
     "function": "Start",
     "receiver": "",
     "method": "Info",
-    "message": "GB28181 SIP 已运行,忽略重复启动",
-    "count": 1,
-    "reason": "Reviewed T12 historical startup/background site (level re-graded by C03 to INFO: idempotent duplicate start / unconfigured first boot are normal states, not degradation); static message, no fields; plan 4.3 permits legacy.log."
-  },
-  {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
-    "file": "app/gb28181/bootstrap.go",
-    "function": "Start",
-    "receiver": "",
-    "method": "Info",
     "message": "GB28181 未启用,跳过 SIP 服务启动",
     "count": 1,
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
@@ -62,7 +52,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "国标级联运行时已装配",
@@ -72,7 +62,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Warn",
     "message": "GB28181 播放鉴权 signer 未装配，播放鉴权保持关闭",
@@ -82,7 +72,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "GB28181 播放鉴权服务已装配",
@@ -92,7 +82,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "GB28181 通道快照 service 已装配",
@@ -102,7 +92,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)",
@@ -112,7 +102,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Warn",
     "message": "GB28181 UAC 不可用,点播 service 跳过装配",
@@ -122,7 +112,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "GB28181 点播对账 reconciler 跳过装配(单节点路径 deprecated,无 registry/locationMap)",
@@ -132,7 +122,7 @@
   {
     "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
-    "function": "startSIPDependencies",
+    "function": "startSIPDependenciesWithFactory",
     "receiver": "",
     "method": "Info",
     "message": "GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)",

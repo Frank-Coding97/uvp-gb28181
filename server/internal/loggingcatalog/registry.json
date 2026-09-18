@@ -177,6 +177,9 @@
     "gb28181.device.delete_shared_projections_retired": [
       "device_id"
     ],
+    "gb28181.device.link_closed_offline": [
+      "device_id"
+    ],
     "gb28181.device.scanner.device_offline": [
       "device_id"
     ],
@@ -250,6 +253,7 @@
       "source_ip",
       "stream_id"
     ],
+    "gb28181.hook.flow.observer_failed": [],
     "gb28181.hook.keepalive.collector_unavailable": [
       "source_ip"
     ],
@@ -329,9 +333,13 @@
     "gb28181.lifecycle.offline_scanner_started": [],
     "gb28181.lifecycle.play_reconciler_started": [],
     "gb28181.lifecycle.play_service_assembled": [],
+    "gb28181.lifecycle.playback_recovery_incomplete": [],
+    "gb28181.lifecycle.playback_trust_missing": [],
     "gb28181.lifecycle.recording_catalog_assembled": [],
     "gb28181.lifecycle.recording_reconciler_started": [],
     "gb28181.lifecycle.recording_signer_assembled": [],
+    "gb28181.lifecycle.rtp_cleanup_registry_missing": [],
+    "gb28181.lifecycle.rtp_cleanup_trust_missing": [],
     "gb28181.lifecycle.thread_load_poller_started": [],
     "gb28181.lifecycle.traffic_hook_assembled": [],
     "gb28181.lifecycle.zlm_scheduler_assembled": [],
@@ -340,6 +348,10 @@
       "device_id"
     ],
     "gb28181.message.broadcast_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.device_config_failed": [
       "call_id",
       "device_id"
     ],
@@ -472,6 +484,10 @@
       "node_id",
       "stream_id"
     ],
+    "gb28181.play.security_projection_mismatch": [
+      "channel_id",
+      "device_id"
+    ],
     "gb28181.play.snapshot_node_unavailable": [
       "channel_id",
       "device_id",
@@ -536,6 +552,10 @@
       "device_id",
       "peer"
     ],
+    "gb28181.register.version_header_abnormal": [
+      "call_id",
+      "device_id"
+    ],
     "gb28181.security.runtime_fallback": [],
     "gb28181.sip.broadcast_ack_failed": [
       "call_id"
@@ -556,11 +576,14 @@
     "gb28181.sip.broadcast_contact_host_unavailable": [],
     "gb28181.sip.config_load_failed": [],
     "gb28181.sip.config_migration_failed": [],
+    "gb28181.sip.duplicate_start_rejected": [],
+    "gb28181.sip.link_superseded": [],
     "gb28181.sip.listener_failed": [],
     "gb28181.sip.listener_started": [],
     "gb28181.sip.shutdown_complete": [],
     "gb28181.sip.shutdown_incomplete": [],
     "gb28181.sip.start_failed": [],
+    "gb28181.sip.start_rejected_unauthorized": [],
     "gb28181.sip.talk_bye_failed": [
       "call_id"
     ],
@@ -718,6 +741,7 @@
       "channel_code",
       "channel_id"
     ],
+    "ptz.recovery_skipped": [],
     "ptz.response.ignored": [
       "operation_id"
     ],
@@ -735,6 +759,7 @@
     "ptz.scheduler.persist_failed": [
       "operation_id"
     ],
+    "ptz.scheduler.stop_flush_failed": [],
     "realtime_log.subscription_ended": [
       "subscription_id",
       "user_id"
@@ -793,6 +818,7 @@
     "scheduler.result.persisted": [
       "job_id"
     ],
+    "security.lock_overrides_authoff": [],
     "security.shutdown_incomplete": [],
     "setup.config_saved": [
       "operator_id",
@@ -806,6 +832,11 @@
     ],
     "sip.shutdown_incomplete": [],
     "startup.failed": [],
+    "startup.openapi_maintenance_failed": [],
+    "startup.openapi_revocation_maintenance_failed": [],
+    "startup.openapi_revocation_pending_overdue": [],
+    "startup.openapi_revocation_startup_failed": [],
+    "startup.openapi_revocation_unconfigured": [],
     "streammonitor.media_read_failed": [
       "endpoint",
       "node_id",
@@ -821,6 +852,9 @@
       "device_id"
     ],
     "subscribe.capability.upgraded": [
+      "device_id"
+    ],
+    "subscribe.position.partial_persist": [
       "device_id"
     ],
     "sysaffix.chunk_upload_cancel_failed": [
@@ -889,6 +923,9 @@
     "zlm.node.offline": [
       "node_id"
     ],
+    "zlm.node.purged_unreachable": [
+      "node_id"
+    ],
     "zlm.node.restore_failed": [
       "node_id"
     ],
@@ -945,10 +982,12 @@
     "address",
     "advertise_ip",
     "after_count",
+    "alarms",
     "algorithm",
     "api_port",
     "app",
     "attempt_id",
+    "attempt_ids",
     "batches",
     "before_count",
     "body_bytes",
@@ -975,6 +1014,7 @@
     "deleted",
     "deployment_mode",
     "destination",
+    "detached_rows",
     "device_code",
     "device_id",
     "dialect",
@@ -982,6 +1022,7 @@
     "dropped_count",
     "duration",
     "duration_ms",
+    "effective_version",
     "elapsed",
     "encrypted_platform_runtime",
     "endpoint",
@@ -1034,6 +1075,7 @@
     "path",
     "payload_node_id",
     "peer",
+    "pending",
     "phase",
     "platform_id",
     "player",
@@ -1051,6 +1093,7 @@
     "recovery_scanned",
     "recovery_skipped",
     "regist",
+    "remote_addr",
     "removed",
     "reported_uuid",
     "requested",
@@ -1063,6 +1106,7 @@
     "role",
     "role_id",
     "route",
+    "saved",
     "scanned",
     "schema",
     "sender_device_id",
@@ -1100,6 +1144,8 @@
     "url",
     "user_id",
     "username",
-    "uuid"
+    "uuid",
+    "warning_code",
+    "x_gb_ver"
   ]
 }

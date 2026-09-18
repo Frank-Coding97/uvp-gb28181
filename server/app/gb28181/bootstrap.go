@@ -544,7 +544,7 @@ func Start(authority *processauthority.Authority) {
 
 	if _, err := authorizedRootIntentStore(app.DB(), authority); err != nil {
 		sipRuntimeStatus.MarkFailed(err.Error())
-		app.ZapLog.Error("GB28181 缺少有效进程授权，拒绝启动", zap.Error(err))
+		app.ZapLog.Error("GB28181 缺少有效进程授权，拒绝启动", zap.String("event", "gb28181.sip.start_rejected_unauthorized"), zap.Error(err))
 		return
 	}
 	cfg := gbconfig.Load()
@@ -822,7 +822,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations,
 		func(_ uac.PlaybackRecoveryTick, err error) {
 			if err != nil {
-				app.ZapLog.Error("持久回放恢复尚未完成", zap.Error(err))
+				app.ZapLog.Error("持久回放恢复尚未完成", zap.String("event", "gb28181.lifecycle.playback_recovery_incomplete"), zap.Error(err))
 			}
 		}); err != nil {
 		return fmt.Errorf("装配持久回放恢复失败: %w", err)
@@ -1090,7 +1090,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		if err != nil || bindings == nil || intents == nil {
 			SetPlaybackService(nil, nil)
 			playbackRegistry, playbackMetrics = nil, nil
-			app.ZapLog.Warn("强制鉴权回放缺少持久操作或启动信任，拒绝装配", zap.Error(err))
+			app.ZapLog.Warn("强制鉴权回放缺少持久操作或启动信任，拒绝装配", zap.String("event", "gb28181.lifecycle.playback_trust_missing"), zap.Error(err))
 			return
 		}
 		resolver := openapimedia.NewTrustedRevocationFactory(zlmRegistry, bindings, openapiconfig.NewNodeRuntimeStore(app.DB(), time.Now))

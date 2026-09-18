@@ -136,25 +136,25 @@ func runApplication() (err error) {
 		stopRevocation, revocationErr = openapimedia.StartRevocationWithBindings(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
 			controlBindings, func(result openapimedia.RevocationTickResult, err error) {
 				if err != nil {
-					app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.Error(err))
+					app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.String("event", "startup.openapi_revocation_maintenance_failed"), zap.Error(err))
 				} else if result.Alarms > 0 {
-					app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
+					app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.String("event", "startup.openapi_revocation_pending_overdue"), zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
 				}
 			})
 	}
 	if revocationErr != nil {
 		// Keep metadata/admin available; missing trust never means legacy control.
 		if errors.Is(revocationErr, openapimedia.ErrRevocationNotConfigured) {
-			app.ZapLog.Warn("OpenAPI revocation control is not configured; pending cleanup is not running")
+			app.ZapLog.Warn("OpenAPI revocation control is not configured; pending cleanup is not running", zap.String("event", "startup.openapi_revocation_unconfigured"))
 		} else {
-			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.Error(revocationErr))
+			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.String("event", "startup.openapi_revocation_startup_failed"), zap.Error(revocationErr))
 		}
 	}
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)
 		openAPI.RunMaintenance(maintenanceContext, func(err error) {
-			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.Error(err))
+			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.String("event", "startup.openapi_maintenance_failed"), zap.Error(err))
 		})
 	}()
 	// 启动服务器(阻塞直到收到退出信号)

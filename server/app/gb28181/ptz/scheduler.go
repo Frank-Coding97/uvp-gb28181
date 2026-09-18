@@ -256,7 +256,7 @@ func (s *Scheduler) Stop() {
 	ctx, finish := context.WithTimeout(context.Background(), 2*time.Second)
 	defer finish()
 	if err := s.flushPendingResults(ctx); err != nil && app.ZapLog != nil {
-		app.ZapLog.Error("PTZ 停止后仍有未持久化结果，保留设备租约", zap.Error(err))
+		app.ZapLog.Error("PTZ 停止后仍有未持久化结果，保留设备租约", zap.String("event", "ptz.scheduler.stop_flush_failed"), zap.Error(err))
 	}
 }
 

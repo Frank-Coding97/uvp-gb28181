@@ -67,6 +67,7 @@ func (s *NodeService) PurgeUnreachable(ctx context.Context, id int64) (NodePurge
 	}
 	if s.logger != nil {
 		s.logger.Named("purge").Warn("强制移除不可达的 ZLM 节点",
+			zap.String("event", "zlm.node.purged_unreachable"),
 			zap.Int64("node_id", id), zap.Int64("detached_rows", detached))
 	}
 	return NodePurgeResult{NodeID: id, DetachedRows: detached, ImpactUncertain: true}, nil

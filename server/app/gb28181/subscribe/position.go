@@ -77,7 +77,8 @@ func (p *PositionProcessor) Process(ctx context.Context, device *gbmodels.GbDevi
 		// 部分成功必须留痕：静默丢弃正是本次要修的毛病。
 		logging.FromContext(ctx, nil).Named("subscribe").Warn(
 			"位置通知部分条目未落地",
-			zap.String("deviceId", device.DeviceID),
+			zap.String("event", "subscribe.position.partial_persist"),
+			zap.String("device_id", device.DeviceID),
 			zap.Int("total", len(positions)),
 			zap.Int("saved", saved),
 			zap.Int("skipped", skipped),

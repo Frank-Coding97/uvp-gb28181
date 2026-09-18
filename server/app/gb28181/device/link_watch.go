@@ -17,6 +17,17 @@ import (
 // linkLossBudget 单次离线判定的整体时间预算(解析地址 + 查设备 + 事务置离线)。
 const linkLossBudget = 5 * time.Second
 
+// linkLossWarnMessages 是「跳过离线判定」的固定原因文案。日志门禁要求 logger
+// message 为编译期常量，所以原因以常量形式集中在这里，warn 按常量分派后再落日志；
+// 未登记的原因不允许把变量直接交给 logger（那会让门禁形同虚设）。
+const (
+	linkLossAddrUnparsable    = "可靠传输断开的远端地址无法拆分主机与端口,跳过离线判定"
+	linkLossPortInvalid       = "可靠传输断开的远端端口不是合法数字,跳过离线判定"
+	linkLossDeviceQueryFailed = "按端点查设备失败,跳过离线判定"
+	linkLossMarkOfflineFailed = "置设备离线失败"
+	linkLossUnclassified      = "可靠传输断开处置跳过(原因未分类)"
+)
+
 // LinkWatcher 把「可靠传输通道断开」翻译成设备离线状态。
 //
 // **它实现 sip 侧的 DeviceLinkSink,但刻意不 import sip** —— sip → handler → device
@@ -55,12 +66,12 @@ func (w *LinkWatcher) markEndpointOffline(transport, remoteAddr string) {
 
 	host, portText, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		w.warn("可靠传输断开的远端地址无法拆分主机与端口,跳过离线判定", transport, remoteAddr, err)
+		w.warn(linkLossAddrUnparsable, transport, remoteAddr, err)
 		return
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 {
-		w.warn("可靠传输断开的远端端口不是合法数字,跳过离线判定", transport, remoteAddr, err)
+		w.warn(linkLossPortInvalid, transport, remoteAddr, err)
 		return
 	}
 	host = strings.TrimSpace(host)
@@ -76,7 +87,7 @@ func (w *LinkWatcher) markEndpointOffline(transport, remoteAddr string) {
 		Limit(1).
 		Find(&dev)
 	if query.Error != nil {
-		w.warn("按端点查设备失败,跳过离线判定", transport, remoteAddr, query.Error)
+		w.warn(linkLossDeviceQueryFailed, transport, remoteAddr, query.Error)
 		return
 	}
 	if query.RowsAffected == 0 {
@@ -97,7 +108,7 @@ func (w *LinkWatcher) markEndpointOffline(transport, remoteAddr string) {
 	if err := gbmodels.MarkOfflineWithReason(
 		ctx, dev.DeviceID, gbmodels.DeviceEventLinkClosed, gbmodels.DeviceEventSourceLinkWatcher,
 	); err != nil {
-		w.warn("置设备离线失败", transport, remoteAddr, err)
+		w.warn(linkLossMarkOfflineFailed, transport, remoteAddr, err)
 		return
 	}
 	if w.logger != nil {
@@ -123,5 +134,16 @@ func (w *LinkWatcher) warn(message, transport, remoteAddr string, err error) {
 	if err != nil {
 		fields = append(fields, zap.Error(err))
 	}
-	w.logger.Warn(message, fields...)
+	switch message {
+	case linkLossAddrUnparsable:
+		w.logger.Warn(linkLossAddrUnparsable, fields...)
+	case linkLossPortInvalid:
+		w.logger.Warn(linkLossPortInvalid, fields...)
+	case linkLossDeviceQueryFailed:
+		w.logger.Warn(linkLossDeviceQueryFailed, fields...)
+	case linkLossMarkOfflineFailed:
+		w.logger.Warn(linkLossMarkOfflineFailed, fields...)
+	default:
+		w.logger.Warn(linkLossUnclassified, fields...)
+	}
 }

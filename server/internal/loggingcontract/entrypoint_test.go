@@ -55,18 +55,41 @@ func TestLoggingEntrypointShutdownOwnership(t *testing.T) {
 			t.Errorf("shutdown order = %v", components)
 		}
 	}
-	attached := false
+	// StartServer 挂的是 shutdown 闭包（先关 OpenAPI、再 drain），所以这里不再
+	// 直达 stopApplication：既要确认闭包被挂上，也要确认闭包体内真的走了 drain，
+	// 否则一个名字对但空转的闭包也能骗过这条检查。
+	attached, drains := false, false
 	ast.Inspect(funcs["runApplication"].Body, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
 			if s, ok := c.Fun.(*ast.SelectorExpr); ok && s.Sel.Name == "StartServer" && len(c.Args) == 2 {
-				if arg, ok := c.Args[1].(*ast.Ident); ok && arg.Name == "stopApplication" {
+				if arg, ok := c.Args[1].(*ast.Ident); ok && arg.Name == "shutdown" {
 					attached = true
 				}
 			}
 		}
+		if a, ok := n.(*ast.AssignStmt); ok && len(a.Lhs) == len(a.Rhs) {
+			for i, lhs := range a.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || id.Name != "shutdown" {
+					continue
+				}
+				literal, ok := a.Rhs[i].(*ast.FuncLit)
+				if !ok {
+					continue
+				}
+				ast.Inspect(literal.Body, func(m ast.Node) bool {
+					if c, ok := m.(*ast.CallExpr); ok {
+						if id, ok := c.Fun.(*ast.Ident); ok && id.Name == "stopApplication" {
+							drains = true
+						}
+					}
+					return true
+				})
+			}
+		}
 		return true
 	})
-	if !attached {
+	if !attached || !drains {
 		t.Error("HTTP lifecycle does not invoke application drain")
 	}
 	deferredMigrationStop := false
