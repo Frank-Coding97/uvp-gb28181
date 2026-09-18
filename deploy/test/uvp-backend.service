@@ -1,0 +1,33 @@
+# UVP GB28181 backend (bare-process deployment)
+# ExecStart resolves /opt/uvp-gb28181/current at each start, so a release
+# switch is: point the current symlink at the new release, then restart.
+[Unit]
+Description=UVP GB28181 backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/uvp-gb28181/current/backend
+Environment=TZ=Asia/Shanghai
+EnvironmentFile=/opt/uvp-gb28181/config/sip-trace-backend.env
+ExecStart=/opt/uvp-gb28181/current/backend/uvp-gb28181
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=45s
+NoNewPrivileges=true
+PrivateTmp=true
+# ProtectHome would make /root read-only; the Go runtime needs /root/.cache.
+# ProtectSystem=strict keeps /usr /etc read-only, but the backend writes its
+# logs into ./resource/logs relative to the working directory, i.e. inside
+# the release tree, so /opt/uvp-gb28181 must stay writable. config/, logs/
+# and uploads/ are symlinked into the release tree by deploy-uvp.sh so they
+# survive release switches and cleanup.
+ProtectSystem=strict
+ReadWritePaths=/opt/uvp-gb28181
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

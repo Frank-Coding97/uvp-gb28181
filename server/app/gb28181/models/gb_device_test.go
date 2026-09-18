@@ -1,0 +1,252 @@
+package models
+
+import (
+	"context"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+// setupTestDB 初始化测试用 GORM 连接(指向 config.yml 配置的 MySQL)
+// 用轻量裸连,避开底座 ZapLog/BasePath 全局初始化的 cwd 依赖
+func setupTestDB(t *testing.T) {
+	if app.GormDbMysql != nil {
+		migrateDualVersionTestColumns(t, app.GormDbMysql)
+		return
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	// <server>/app/gb28181/models/gb_device_test.go → 上溯 3 层到 server
+	configDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config")
+	if app.ConfigYml == nil {
+		app.ConfigYml = ymlconfig.CreateYamlFactory(configDir)
+	}
+	c := app.ConfigYml
+	host := c.GetString("gormv2.mysql.write.host")
+	port := c.GetInt("gormv2.mysql.write.port")
+	user := c.GetString("gormv2.mysql.write.user")
+	pass := c.GetString("gormv2.mysql.write.pass")
+	dbname := c.GetString("gormv2.mysql.write.database")
+	dsn := user + ":" + pass + "@tcp(" + host + ":" + itoa(port) + ")/" + dbname + "?charset=utf8mb4&parseTime=True&loc=Local"
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Skipf("跳过(无法连接测试库 %s:%d): %v", host, port, err)
+		return
+	}
+	// 复现底座全局 hook:查不到记录时不报 ErrRecordNotFound(与真机行为一致)
+	// 否则单测用裸连无法复现 Upsert 的存在性判断 bug
+	_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) {
+		g.Statement.RaiseErrorOnNotFound = false
+	})
+	app.GormDbMysql = db
+	migrateDualVersionTestColumns(t, db)
+}
+
+func migrateDualVersionTestColumns(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, field := range []string{
+		"ReportedVersion", "ReportedVersionAt", "ProtocolOverride",
+		"EffectiveVersion", "EffectiveVersionSource", "EffectiveVersionAt",
+	} {
+		if db.Migrator().HasColumn(&GbDevice{}, field) {
+			continue
+		}
+		if err := db.Migrator().AddColumn(&GbDevice{}, field); err != nil {
+			t.Fatalf("测试库补充 GbDevice.%s 失败: %v", field, err)
+		}
+	}
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	neg := i < 0
+	if neg {
+		i = -i
+	}
+	var b [20]byte
+	p := len(b)
+	for i > 0 {
+		p--
+		b[p] = byte('0' + i%10)
+		i /= 10
+	}
+	if neg {
+		p--
+		b[p] = '-'
+	}
+	return string(b[p:])
+}
+
+// cleanup 删除测试数据(按 device_id 前缀)
+func cleanup(deviceIDs ...string) {
+	for _, id := range deviceIDs {
+		app.GormDbMysql.Unscoped().Where("device_id = ?", id).Delete(&GbDevice{})
+	}
+}
+
+type listPagedTestConfig struct{}
+
+func (listPagedTestConfig) ConfigFileChangeListen(...func()) {}
+func (listPagedTestConfig) Get(string) interface{}           { return nil }
+func (listPagedTestConfig) GetString(string) string          { return "mysql" }
+func (listPagedTestConfig) GetBool(string) bool              { return false }
+func (listPagedTestConfig) GetInt(string) int                { return 0 }
+func (listPagedTestConfig) GetInt32(string) int32            { return 0 }
+func (listPagedTestConfig) GetInt64(string) int64            { return 0 }
+func (listPagedTestConfig) GetFloat64(string) float64        { return 0 }
+func (listPagedTestConfig) GetDuration(string) time.Duration { return 0 }
+func (listPagedTestConfig) GetStringSlice(string) []string   { return nil }
+func (listPagedTestConfig) GetUintSlice(string) []uint       { return nil }
+func (listPagedTestConfig) Set(string, interface{})          {}
+func (listPagedTestConfig) SaveConfig() error                { return nil }
+
+func TestListPaged_DefaultSort(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开 SQLite 失败: %v", err)
+	}
+	if err := db.AutoMigrate(&GbDevice{}); err != nil {
+		t.Fatalf("迁移设备表失败: %v", err)
+	}
+	originalDB, originalConfig := app.GormDbMysql, app.ConfigYml
+	app.GormDbMysql = db
+	app.ConfigYml = listPagedTestConfig{}
+	t.Cleanup(func() {
+		app.GormDbMysql = originalDB
+		app.ConfigYml = originalConfig
+	})
+
+	now := time.Now()
+	latestOnline := now.Add(-time.Minute)
+	olderOnline := now.Add(-time.Hour)
+	devices := []GbDevice{
+		{DeviceID: "online-bravo", Name: "Bravo", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-alpha-old-id", Name: "Alpha", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-alpha-new-id", Name: "Alpha", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-old", Name: "Zulu", Status: DeviceStatusOnline, RegisterTime: &olderOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "offline-newest", Name: "Zulu", Status: DeviceStatusOffline, RegisterTime: &now, SubscribeCapability: SubscribeUnknown},
+	}
+	if err := db.Create(&devices).Error; err != nil {
+		t.Fatalf("创建设备测试数据失败: %v", err)
+	}
+
+	list, total, err := ListPaged(context.Background(), 1, 20)
+	if err != nil {
+		t.Fatalf("查询设备列表失败: %v", err)
+	}
+	if total != 5 || len(list) != 5 {
+		t.Fatalf("设备数量不符: total=%d len=%d", total, len(list))
+	}
+	want := []string{"online-bravo", "online-alpha-new-id", "online-alpha-old-id", "online-old", "offline-newest"}
+	for i := range want {
+		if list[i].DeviceID != want[i] {
+			t.Fatalf("第 %d 个设备不符: want=%s got=%s", i, want[i], list[i].DeviceID)
+		}
+	}
+}
+
+// skipIfDeviceSchemaStale 老 schema(无 subscribe_capability 列)时跳过
+//
+// A1 加 subscribe_* 列后,既有 MySQL dev 库需先跑 migration
+// 2026-06-26-catalog-b-plus.sql 才能跑这些测试。
+func skipIfDeviceSchemaStale(t *testing.T) {
+	t.Helper()
+	if app.GormDbMysql == nil {
+		return
+	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "subscribe_capability") {
+		t.Skipf("跳过(MySQL gb_device 缺 subscribe_capability 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
+	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "owner_dept_id") {
+		t.Skipf("跳过(MySQL gb_device 缺 owner_dept_id 列,请先跑 migration 2026-07-11-owner-dept-phase1.sql)")
+	}
+	if app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "tenant_id") {
+		t.Skipf("跳过(MySQL gb_device 仍有 tenant_id 列,请先跑 Phase 2 去租户迁移)")
+	}
+}
+
+// TestUpsertInsert T2-测1: Upsert 新设备 → 表里出现,字段正确
+func TestUpsertInsert(t *testing.T) {
+	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
+	ctx := context.TODO()
+	const did = "34020000001320000099"
+	cleanup(did)
+	defer cleanup(did)
+
+	d := &GbDevice{DeviceID: did, Name: "测试设备", Transport: "UDP", IP: "1.2.3.4", Port: 5060, Status: DeviceStatusOnline}
+	if err := Upsert(ctx, d); err != nil {
+		t.Fatalf("Upsert 插入失败: %v", err)
+	}
+	got, err := FindByDeviceID(ctx, did)
+	if err != nil || got == nil {
+		t.Fatalf("插入后查不到: err=%v", err)
+	}
+	if got.Name != "测试设备" || got.Transport != "UDP" || got.Status != DeviceStatusOnline {
+		t.Errorf("字段不符: %+v", got)
+	}
+}
+
+// TestUpsertUpdate T2-测2: Upsert 已存在 device_id → 更新而非重复插入
+func TestUpsertUpdate(t *testing.T) {
+	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
+	ctx := context.TODO()
+	const did = "34020000001320000098"
+	cleanup(did)
+	defer cleanup(did)
+
+	_ = Upsert(ctx, &GbDevice{DeviceID: did, Name: "旧名", Transport: "UDP"})
+	_ = Upsert(ctx, &GbDevice{DeviceID: did, Name: "新名", Transport: "TCP"})
+
+	var count int64
+	app.GormDbMysql.Model(&GbDevice{}).Where("device_id = ?", did).Count(&count)
+	if count != 1 {
+		t.Errorf("期望 1 条记录(更新), 实际 %d 条(重复插入)", count)
+	}
+	got, _ := FindByDeviceID(ctx, did)
+	if got.Name != "新名" || got.Transport != "TCP" {
+		t.Errorf("更新未生效: %+v", got)
+	}
+}
+
+// TestFindByDeviceID T2-测3: 命中/未命中
+func TestFindByDeviceID(t *testing.T) {
+	setupTestDB(t)
+	ctx := context.TODO()
+	got, err := FindByDeviceID(ctx, "00000000000000000000")
+	if err != nil {
+		t.Fatalf("未命中应返回 nil,nil,实际 err=%v", err)
+	}
+	if got != nil {
+		t.Errorf("未命中应返回 nil,实际 %+v", got)
+	}
+}
+
+// TestUpdateStatus T2-测4: 更新在线状态
+func TestUpdateStatus(t *testing.T) {
+	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
+	ctx := context.TODO()
+	const did = "34020000001320000097"
+	cleanup(did)
+	defer cleanup(did)
+
+	_ = Upsert(ctx, &GbDevice{DeviceID: did, Status: DeviceStatusOnline})
+	if err := UpdateStatus(ctx, did, DeviceStatusOffline); err != nil {
+		t.Fatalf("UpdateStatus 失败: %v", err)
+	}
+	got, _ := FindByDeviceID(ctx, did)
+	if got.Status != DeviceStatusOffline {
+		t.Errorf("期望离线,实际 status=%d", got.Status)
+	}
+}

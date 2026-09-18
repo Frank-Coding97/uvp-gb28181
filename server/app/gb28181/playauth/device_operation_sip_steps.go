@@ -1,0 +1,326 @@
+package playauth
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"math"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+const (
+	SIPStepPrepared          = "prepared"
+	SIPStepMayHaveDispatched = "may_have_dispatched"
+	maxIntentSIPSteps        = 16
+	maxIntentSIPBytes        = 32768
+)
+
+type DeviceSIPInviteStep struct {
+	Identity                       DeviceSIPInviteIdentity `json:"-"`
+	State                          string                  `json:"-"`
+	RowVersion                     int64                   `json:"-"`
+	PreparedAt                     time.Time               `json:"-"`
+	DispatchStartedAt              *time.Time              `json:"-"`
+	KnownBranch                    *DeviceSIPKnownBranch   `json:"-"`
+	Cancel                         *DeviceSIPCancel        `json:"-"`
+	AdditionalBranches             []DeviceSIPKnownBranch  `json:"-"`
+	BranchInventoryFault           string                  `json:"-"`
+	BranchInventoryFaultObservedAt *time.Time              `json:"-"`
+	OwnerProcessID                 string                  `json:"-"`
+}
+
+// The selected and bounded additional observed branches are evidence, never
+// complete coverage or terminal state. Empty steps prove no absence of effects.
+type DeviceSIPInviteSteps struct {
+	Intent DeviceOperationIntent `json:"-"`
+	Steps  []DeviceSIPInviteStep `json:"-"`
+}
+
+type sipInviteStepWire struct {
+	Version                        int                   `json:"version"`
+	Action                         string                `json:"action"`
+	Identity                       sipInviteIdentityWire `json:"identity"`
+	State                          string                `json:"state"`
+	RowVersion                     int64                 `json:"rowVersion"`
+	PreparedAt                     time.Time             `json:"preparedAt"`
+	DispatchStartedAt              *time.Time            `json:"dispatchStartedAt"`
+	KnownBranch                    *sipKnownBranchWire   `json:"knownBranch,omitempty"`
+	Cancel                         *sipCancelWire        `json:"cancel,omitempty"`
+	AdditionalBranches             []sipKnownBranchWire  `json:"additionalBranches,omitempty"`
+	BranchInventoryFault           string                `json:"branchInventoryFault,omitempty"`
+	BranchInventoryFaultObservedAt *time.Time            `json:"branchInventoryFaultObservedAt,omitempty"`
+	OwnerProcessID                 string                `json:"ownerProcessID,omitempty"`
+}
+
+type sipInviteStepsWire struct {
+	Version int                 `json:"version"`
+	Steps   []sipInviteStepWire `json:"steps"`
+}
+
+type sipIntentRow struct {
+	DeviceOperationIntent `gorm:"embedded" json:"-"`
+	SIPStepsJSON          *string `gorm:"column:sip_steps_json" json:"-"`
+}
+
+func sipStepToWire(s DeviceSIPInviteStep) sipInviteStepWire {
+	w := sipInviteStepWire{Version: 1, Action: "invite", Identity: s.Identity.wire(), State: s.State, RowVersion: s.RowVersion,
+		PreparedAt: s.PreparedAt, DispatchStartedAt: s.DispatchStartedAt, KnownBranch: sipKnownBranchToWire(s.KnownBranch), Cancel: sipCancelToWire(s.Cancel), OwnerProcessID: s.OwnerProcessID}
+	if len(s.AdditionalBranches) != 0 || s.BranchInventoryFault != "" {
+		w.Version = 2
+		for index := range s.AdditionalBranches {
+			w.AdditionalBranches = append(w.AdditionalBranches, *sipKnownBranchToWire(&s.AdditionalBranches[index]))
+		}
+		w.BranchInventoryFault, w.BranchInventoryFaultObservedAt = s.BranchInventoryFault, s.BranchInventoryFaultObservedAt
+	}
+	return w
+}
+
+func validSIPStepTime(value time.Time) bool {
+	_, offset := value.Zone()
+	return !value.IsZero() && offset == 0 && value.Nanosecond()%1000 == 0
+}
+
+func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSIPInviteSteps, error) {
+	var rows []sipIntentRow
+	// An unmigrated database must fail, not appear to have empty evidence.
+	err := tx.Table("gb_device_operation_intent").Select("gb_device_operation_intent.*, sip_steps_json").
+		Where("operation_id = ?", id.OperationID).Limit(1).Find(&rows).Error
+	if err != nil {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	if len(rows) != 1 {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentConflict
+	}
+	row := rows[0]
+	if !validIntentRow(row.DeviceOperationIntent) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	if row.DeviceOperationIntentIdentity != id || row.State != IntentDispatched {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentConflict
+	}
+	out := DeviceSIPInviteSteps{Intent: row.DeviceOperationIntent}
+	if row.SIPStepsJSON == nil {
+		return out, nil
+	}
+	raw := []byte(*row.SIPStepsJSON)
+	if len(raw) == 0 || len(raw) > maxIntentSIPBytes {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	var wire sipInviteStepsWire
+	if json.Unmarshal(raw, &wire) != nil || wire.Version != 1 || wire.Steps == nil || len(wire.Steps) > maxIntentSIPSteps {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	canonical, err := json.Marshal(wire)
+	if err != nil || !bytes.Equal(raw, canonical) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	ids := map[string]bool{}
+	cleanupIDs := map[string]bool{}
+	infoIDs := map[string]bool{}
+	type inviteKey struct{ callID, localTag string }
+	invites := map[inviteKey]bool{}
+	for _, w := range wire.Steps {
+		i := DeviceSIPInviteIdentity(w.Identity)
+		key := inviteKey{i.CallID, i.LocalTag}
+		if (w.Version != 1 && w.Version != 2) || w.Action != "invite" || !validSIPInviteIdentity(i) || ids[i.StepID] || invites[key] ||
+			(w.OwnerProcessID != "" && (!validIntentID(w.OwnerProcessID) || w.OwnerProcessID == "00000000000000000000000000000000")) ||
+			!validSIPStepTime(w.PreparedAt) || w.PreparedAt.Before(*row.DispatchStartedAt) || w.PreparedAt.After(row.UpdatedAt) {
+			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+		}
+		switch w.State {
+		case SIPStepPrepared:
+			if w.RowVersion != 1 || w.DispatchStartedAt != nil {
+				return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+			}
+		case SIPStepMayHaveDispatched:
+			if w.RowVersion != 2 || w.DispatchStartedAt == nil || !validSIPStepTime(*w.DispatchStartedAt) || w.DispatchStartedAt.Before(w.PreparedAt) || w.DispatchStartedAt.After(row.UpdatedAt) {
+				return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+			}
+		default:
+			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+		}
+		ids[i.StepID], invites[key] = true, true
+		step := DeviceSIPInviteStep{Identity: i, State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt, OwnerProcessID: w.OwnerProcessID}
+		if w.KnownBranch != nil {
+			branch, err := readSIPKnownBranch(w.KnownBranch, step, row.UpdatedAt)
+			if err != nil {
+				return DeviceSIPInviteSteps{}, err
+			}
+			step.KnownBranch = branch
+		}
+		if err := readSIPBranchInventory(w, &step, row.UpdatedAt); err != nil {
+			return DeviceSIPInviteSteps{}, err
+		}
+		for _, branch := range sipObservedBranches(&step) {
+			if len(branch.InfoSteps) != 0 && (id.Kind != "playback" || id.TargetScope != "channel") {
+				return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+			}
+			for _, info := range branch.InfoSteps {
+				if infoIDs[info.Identity.InfoID] {
+					return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+				}
+				infoIDs[info.Identity.InfoID] = true
+			}
+			for _, attempt := range branch.CleanupAttempts {
+				if cleanupIDs[attempt.Identity.AttemptID] {
+					return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+				}
+				cleanupIDs[attempt.Identity.AttemptID] = true
+			}
+		}
+		if w.Cancel != nil {
+			cancel, err := readSIPCancel(w.Cancel, step, row.UpdatedAt)
+			if err != nil {
+				return DeviceSIPInviteSteps{}, err
+			}
+			step.Cancel = cancel
+		}
+		out.Steps = append(out.Steps, step)
+	}
+	if !validSIPInventoryHistory(out) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	return out, nil
+}
+
+// LoadSIPInviteSteps is recovery observation, including after device transfer.
+// Neither persisted state authorizes sending or retrying an INVITE.
+func (s *DeviceOperationIntentStore) LoadSIPInviteSteps(ctx context.Context, id DeviceOperationIntentIdentity) (DeviceSIPInviteSteps, error) {
+	if !s.available(ctx) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	if !validIntentIdentity(id) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
+	}
+	return readSIPInviteSteps(s.db.WithContext(ctx), id)
+}
+
+func (s *DeviceOperationIntentStore) AddSIPInviteStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, identity DeviceSIPInviteIdentity) (DeviceSIPInviteSteps, error) {
+	if !validSIPInviteIdentity(identity) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
+	}
+	processID, err := sipCleanupProcessID()
+	if err != nil || !validIntentID(processID) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	return s.mutateSIPInviteStep(ctx, id, version, func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+		for _, old := range out.Steps {
+			if old.Identity.StepID == identity.StepID {
+				if old.Identity == identity {
+					return false, nil
+				}
+				return false, ErrDeviceIntentConflict
+			}
+			if old.Identity.CallID == identity.CallID && old.Identity.LocalTag == identity.LocalTag {
+				return false, ErrDeviceIntentConflict
+			}
+		}
+		if len(out.Steps) >= maxIntentSIPSteps {
+			return false, ErrDeviceIntentConflict
+		}
+		out.Steps = append(out.Steps, DeviceSIPInviteStep{Identity: identity, State: SIPStepPrepared, RowVersion: 1, PreparedAt: now, OwnerProcessID: processID})
+		return true, nil
+	})
+}
+
+// Only this call's confirmed CAS winner can gain permission for future network
+// dispatch. Commit failure/unknown returns an empty result. Do not infer the
+// permission by reading back, and retain the shared device operation lease
+// through actual dispatch. There is no production executor in this store.
+func (s *DeviceOperationIntentStore) DispatchSIPInviteStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, stepID string) (DeviceSIPInviteSteps, error) {
+	if !validIntentID(stepID) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
+	}
+	processID, err := sipCleanupProcessID()
+	if err != nil || !validIntentID(processID) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	return s.mutateSIPStepChecked(ctx, id, version, s.effectDeviceCheck(authorizeIntentDevice), func(out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+		for index := range out.Steps {
+			step := &out.Steps[index]
+			if step.Identity.StepID != stepID {
+				continue
+			}
+			if step.State != SIPStepPrepared || step.OwnerProcessID != processID {
+				return false, ErrDeviceIntentConflict
+			}
+			step.State, step.RowVersion, step.DispatchStartedAt = SIPStepMayHaveDispatched, 2, &now
+			return true, nil
+		}
+		return false, ErrDeviceIntentConflict
+	})
+}
+
+func (s *DeviceOperationIntentStore) mutateSIPInviteStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	return s.mutateSIPStep(ctx, id, version, false, mutate)
+}
+
+// observationOnly permits recording a late branch for an already dispatched
+// INVITE after transfer. Only ObserveSIPKnownBranch uses this private path;
+// INVITE/ACK permission continues to require current-epoch authorization.
+// CANCEL compensation uses its own private gate, never observationOnly.
+func (s *DeviceOperationIntentStore) mutateSIPStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, observationOnly bool, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	check := authorizeIntentDevice
+	if observationOnly {
+		check = observeSIPBranchDevice
+	}
+	return s.mutateSIPStepChecked(ctx, id, version, check, mutate)
+}
+
+func (s *DeviceOperationIntentStore) mutateSIPStepChecked(ctx context.Context, id DeviceOperationIntentIdentity, version int64, check func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	return s.mutateSIPStepTx(ctx, id, version, check, func(_ *gorm.DB, out *DeviceSIPInviteSteps, now time.Time) (bool, error) {
+		return mutate(out, now)
+	})
+}
+
+func (s *DeviceOperationIntentStore) mutateSIPStepTx(ctx context.Context, id DeviceOperationIntentIdentity, version int64, check func(*gorm.DB, context.Context, DeviceOperationIntentIdentity) error, mutate func(*gorm.DB, *DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	if !s.available(ctx) {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+	}
+	if !validIntentIdentity(id) || version < 2 || version == math.MaxInt64 {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
+	}
+	var out DeviceSIPInviteSteps
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := check(tx, ctx, id); err != nil {
+			return err
+		}
+		var err error
+		out, err = readSIPInviteSteps(tx, id)
+		if err != nil {
+			return err
+		}
+		if out.Intent.RowVersion != version {
+			return ErrDeviceIntentConflict
+		}
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		if now.Before(out.Intent.UpdatedAt) {
+			return ErrDeviceIntentUnavailable
+		}
+		changed, err := mutate(tx, &out, now)
+		if err != nil || !changed {
+			return err
+		}
+		body, err := encodeSIPInviteSteps(out)
+		if err != nil || !sipInventoryFits(out, len(body)) || !validSIPInventoryHistory(out) {
+			return ErrDeviceIntentUnavailable
+		}
+		result := tx.Model(&DeviceOperationIntent{}).
+			Where("operation_id = ? AND contract_version = 1 AND state = ? AND row_version = ?", id.OperationID, IntentDispatched, version).
+			Updates(map[string]any{"sip_steps_json": string(body), "row_version": version + 1, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrDeviceIntentConflict
+		}
+		out.Intent.RowVersion, out.Intent.UpdatedAt = version+1, now
+		return nil
+	})
+	if err != nil {
+		return DeviceSIPInviteSteps{}, normalizeIntentError(err)
+	}
+	return out, nil
+}

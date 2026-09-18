@@ -4,6 +4,7 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { deepClone } from "@/utils/index";
 import { arrayFlattened } from "@/utils/tree-tools";
+import { resolveMediaRouteRenderKey } from "./media-route-identity";
 
 /**
  * 统一处理所有的路由跳转：当前路由高亮、tabs栏数据
@@ -29,7 +30,7 @@ export const currentlyRoute = (current: any) => {
     if (isTabs.value && !route.meta.isFull) store.setTabs(route);
     // 不缓存路由 || 不渲染tabs ，符合任意条件则不缓存路由
     if (!route.meta.keepAlive || !isTabs.value) return;
-    store.setRoutePaths(route.path); // 缓存路由
+    store.setRoutePaths(resolveMediaRouteRenderKey(current)); // 缓存路由
 };
 
 /**

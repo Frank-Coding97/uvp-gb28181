@@ -1,9 +1,9 @@
 package tokeneasy
 
 import (
+	"net/http"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -18,7 +18,7 @@ func FrontMemberJWT() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := common.GetAccessToken(c)
 		if err != nil {
-			app.ZapLog.Error("Get access token failed", zap.Error(err))
+			app.Log(c.Request.Context()).Named("auth.member").Info("Get access token failed", zap.String("event", "auth.member.token_missing"), zap.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
@@ -27,7 +27,7 @@ func FrontMemberJWT() gin.HandlerFunc {
 		// 验证AccessToken
 		claims, err := GetTokenService().ValidateTokenWithCache(tokenString)
 		if err != nil {
-			app.ZapLog.Error("Invalid token", zap.Error(err))
+			app.Log(c.Request.Context()).Named("auth.member").Info("Invalid token", zap.String("event", "auth.member.token_invalid"), zap.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()

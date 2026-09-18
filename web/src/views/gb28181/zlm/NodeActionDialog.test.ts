@@ -1,0 +1,280 @@
+import { defineComponent, h } from "vue";
+import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  setMaintenance: vi.fn(),
+  deleteNode: vi.fn(),
+  kickSessions: vi.fn(),
+  restartNode: vi.fn(),
+  purgeNode: vi.fn()
+}));
+
+vi.mock("@/api/gb28181-zlm", () => ({
+  setZLMNodeMaintenance: mocks.setMaintenance,
+  deleteZLMNode: mocks.deleteNode,
+  kickZLMNodeSessions: mocks.kickSessions,
+  restartZLMNode: mocks.restartNode,
+  purgeUnreachableZLMNode: mocks.purgeNode
+}));
+
+import ZLMNodeActionDialog from "./ZLMNodeActionDialog.vue";
+import type { NodeDangerAction } from "./nodeActionState";
+
+const node = {
+  id: 7,
+  revision: 1,
+  name: "zlm-a",
+  host: "10.0.0.7",
+  receiveHost: "",
+  playbackHost: "",
+  apiPort: 18080,
+  mediaServerUUID: "uuid-a",
+  weight: 50,
+  state: "active" as const,
+  recoveryRequired: false,
+  rtpPortStart: 30000,
+  rtpPortEnd: 35000,
+  stats: {
+    lastHeartbeatAt: "2026-08-30T00:00:00Z",
+    mediaSourceCount: 3,
+    sessionCount: 5,
+    netThreadLoadAvg: 0,
+    workThreadLoadAvg: 0,
+    memoryUsageBytes: 0,
+    totalBytesIn: 0,
+    totalBytesOut: 0
+  },
+  autoOnDemandReady: true,
+  createdAt: "2026-08-30T00:00:00Z",
+  updatedAt: "2026-08-30T00:00:00Z"
+};
+
+function mountDialog(action: NodeDangerAction) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  return mount(ZLMNodeActionDialog, {
+    props: { visible: true, node, action },
+    global: {
+      plugins: [pinia],
+      stubs: {
+        ZLMDangerActionDialog: DangerStub,
+        "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+        "a-spin": { template: "<span />" }
+      }
+    }
+  });
+}
+
+const preflightFailure = new Error("节点影响预检失败");
+
+async function rejectPreflight(action: "delete" | "maintenance") {
+  const target = action === "delete" ? mocks.deleteNode : mocks.setMaintenance;
+  target.mockRejectedValueOnce(Object.assign(preflightFailure, { response: { status: 500 } }));
+}
+
+describe("ZLMNodeActionDialog forced purge", () => {
+  it("offers forced purge for delete when preflight fails and reports detached devices", async () => {
+    await rejectPreflight("delete");
+    mocks.purgeNode.mockResolvedValueOnce({
+      code: 0,
+      data: { nodeId: 7, detachedRows: 4, impactUncertain: true }
+    });
+
+    const wrapper = mountDialog("delete");
+    await flushPromises();
+    expect(wrapper.text()).toContain("未执行任何管理动作");
+
+    await wrapper.get("[data-test='purge-entry']").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("确认强制移除该节点");
+
+    await wrapper.get("[data-test='purge-confirm']").trigger("click");
+    await flushPromises();
+
+    expect(mocks.purgeNode).toHaveBeenCalledWith(7);
+    expect(wrapper.emitted("done")).toEqual([[{ action: "delete" }]]);
+  });
+
+  it("does not offer forced purge for non-delete actions", async () => {
+    await rejectPreflight("maintenance");
+    const wrapper = mountDialog("maintenance");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("未执行任何管理动作");
+    expect(wrapper.find("[data-test='purge-entry']").exists()).toBe(false);
+    expect(mocks.purgeNode).not.toHaveBeenCalled();
+  });
+
+  it("stays open when the backend refuses because the node turned out reachable", async () => {
+    await rejectPreflight("delete");
+    mocks.purgeNode.mockRejectedValueOnce(
+      Object.assign(new Error("节点当前可达"), { response: { status: 409 } })
+    );
+
+    const wrapper = mountDialog("delete");
+    await flushPromises();
+    await wrapper.get("[data-test='purge-entry']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-test='purge-confirm']").trigger("click");
+    await flushPromises();
+
+    expect(mocks.purgeNode).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted("done")).toBeUndefined();
+    expect(wrapper.emitted("update:visible")).toBeUndefined();
+  });
+});
+const DangerStub = defineComponent({
+  name: "DangerStub",
+  props: {
+    visible: Boolean,
+    fingerprint: { type: String, default: "" },
+    impacts: { type: Array, default: () => [] },
+    requireConfirmPhrase: { type: Boolean, default: true }
+  },
+  emits: ["confirm", "update:visible", "stale"],
+  setup(props, { emit }) {
+    return () => props.visible
+      ? h("button", {
+        class: "confirm-danger",
+        onClick: () => emit("confirm", { fingerprint: props.fingerprint, reason: "", nodeId: 7, targetKey: "node" })
+      }, (props.impacts as string[]).join("|"))
+      : null;
+  }
+});
+
+describe("ZLMNodeActionDialog", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    mocks.setMaintenance.mockReset();
+    mocks.deleteNode.mockReset();
+    mocks.kickSessions.mockReset();
+    mocks.restartNode.mockReset();
+    mocks.purgeNode.mockReset();
+  });
+
+  it("preflights first and only executes with the exact backend fingerprint", async () => {
+    mocks.setMaintenance
+      .mockResolvedValueOnce({
+        code: 0,
+        data: {
+          nodeId: 7,
+          action: "maintenance",
+          impact: { streams: 3, recordings: 2, sessions: 5, truncated: false },
+          fingerprint: "fp-7",
+          observedAt: "2026-08-30T00:00:00Z"
+        }
+      })
+      .mockResolvedValueOnce({ code: 0, data: { ok: true } });
+
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(ZLMNodeActionDialog, {
+      props: { visible: true, node, action: "maintenance" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ZLMDangerActionDialog: DangerStub,
+          "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+          "a-spin": { template: "<span />" }
+        }
+      }
+    });
+
+    await flushPromises();
+    expect(mocks.setMaintenance).toHaveBeenNthCalledWith(1, 7);
+    expect(wrapper.text()).toContain("活动流 3 路");
+    expect(wrapper.text()).toContain("录制任务 2 个");
+
+    await wrapper.get(".confirm-danger").trigger("click");
+    await flushPromises();
+
+    expect(mocks.setMaintenance).toHaveBeenNthCalledWith(2, 7, "fp-7");
+    expect(wrapper.emitted("done")).toEqual([[{ action: "maintenance" }]]);
+  });
+
+  it("fails closed when the backend does not return a fingerprint", async () => {
+    mocks.setMaintenance.mockResolvedValueOnce({ code: 0, data: { ok: true } });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(ZLMNodeActionDialog, {
+      props: { visible: true, node, action: "maintenance" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ZLMDangerActionDialog: DangerStub,
+          "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+          "a-spin": { template: "<span />" }
+        }
+      }
+    });
+
+    await flushPromises();
+    expect(wrapper.text()).toContain("未执行任何管理动作");
+    expect(wrapper.find(".confirm-danger").exists()).toBe(false);
+    expect(mocks.setMaintenance).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes after confirmation without requiring a phrase", async () => {
+    mocks.deleteNode
+      .mockResolvedValueOnce({
+        code: 0,
+        data: {
+          nodeId: 7,
+          action: "delete",
+          impact: { streams: 0, recordings: 0, sessions: 0, truncated: false },
+          fingerprint: "fp-delete",
+          observedAt: "2026-08-30T00:00:00Z"
+        }
+      })
+      .mockResolvedValueOnce({ code: 0, data: { ok: true } });
+
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(ZLMNodeActionDialog, {
+      props: { visible: true, node, action: "delete" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          ZLMDangerActionDialog: DangerStub,
+          "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
+          "a-spin": { template: "<span />" }
+        }
+      }
+    });
+
+    await flushPromises();
+    expect(wrapper.getComponent(DangerStub).props("requireConfirmPhrase")).toBe(false);
+    await wrapper.get(".confirm-danger").trigger("click");
+    await flushPromises();
+
+    expect(mocks.deleteNode).toHaveBeenNthCalledWith(2, 7, "fp-delete");
+    expect(wrapper.emitted("done")).toEqual([[{ action: "delete" }]]);
+  });
+
+  it("closes and refreshes after delete reports the node was disabled but is not drained", async () => {
+    mocks.deleteNode
+      .mockResolvedValueOnce({
+        code: 0,
+        data: {
+          nodeId: 7,
+          action: "delete",
+          impact: { streams: 0, recordings: 0, sessions: 0, truncated: false },
+          fingerprint: "fp-delete",
+          observedAt: "2026-08-30T00:00:00Z"
+        }
+      })
+      .mockRejectedValueOnce(Object.assign(new Error("节点已停用，等待排空后重试"), {
+        response: { status: 409 }
+      }));
+
+    const wrapper = mountDialog("delete");
+    await flushPromises();
+    await wrapper.get(".confirm-danger").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.emitted("done")).toEqual([[{ action: "delete" }]]);
+    expect(wrapper.emitted("update:visible")).toEqual([[false]]);
+  });
+});

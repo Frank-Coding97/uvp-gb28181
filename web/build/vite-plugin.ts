@@ -26,7 +26,22 @@ export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOptio
     createSvgIconsPlugin({
       // 配置src下存放svg的路径，这里表示在src/assets/svgs文件夹下
       iconDirs: [resolve(process.cwd(), "src/assets/svgs")],
-      symbolId: "icon-[dir]-[name]"
+      symbolId: "icon-[dir]-[name]",
+      // 保留 stroke 相关属性,让 lucide 风格 (stroke=currentColor) svg 能正常渲染
+      // svgo 默认会优化掉 stroke-width 等属性,这里禁用 cleanupAttrs / removeUselessStrokeAndFill
+      svgoOptions: {
+        plugins: [
+          {
+            name: "preset-default",
+            params: {
+              overrides: {
+                removeUselessStrokeAndFill: false,
+                cleanupAttrs: false
+              }
+            }
+          }
+        ]
+      }
     }),
     AutoImport({
       // 自动导入 Vue 相关函数，如：ref, reactive, toRef 等

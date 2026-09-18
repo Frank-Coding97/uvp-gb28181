@@ -146,16 +146,3 @@ server:
       - "/api/demo/"          # 演示数据API
       - "/api/upload/temp/"   # 临时文件上传
 ```
-
-### 示例3：多租户环境
-
-在多租户环境中，可以限制演示账号只能操作特定租户的数据：
-
-```yaml
-server:
-  demoaccount:
-    enabled: true
-    userids: [4]
-    allowpathprefixes:
-      - "/api/tenant/demo/"   # 只能操作演示租户的数据
-```

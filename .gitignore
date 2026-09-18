@@ -19,6 +19,7 @@ ehthumbs.db
 
 # AI 工具
 .claude/
+.codex/
 CLAUDE.md
 AGENTS.md
 .trae/
@@ -47,3 +48,34 @@ temp/
 .env
 .env.local
 .env.production
+
+# VS Code dlv 调试临时二进制
+server/__debug_bin*
+__debug_bin*
+
+# 编译出的服务端二进制
+server/uvp-gb28181
+server/main
+
+# 本地 MCP / Playwright 调试配置(可能含密钥)
+.mcp.json
+.playwright-mcp/
+server/.playwright-mcp/
+
+# 本地 CI/CD 临时密钥（仅用于初始化 GitHub Secrets，严禁提交）
+.ci-secrets/
+
+# 发布产物(打包脚本输出,不入库)
+release-output/
+
+# 临时截图 / 调试 JSON(开发过程产物,不入库)
+*.png
+!web/public/**/*.png
+!web/src/**/*.png
+!server/**/*.png
+check-*.json
+test-long-text.json
+
+# Local credential keys
+**/secrets/cascade.key
+**/secrets/.cascade-key-*

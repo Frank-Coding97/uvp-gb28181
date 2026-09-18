@@ -2,9 +2,11 @@ package executors
 
 import (
 	"context"
-	"log"
 	"time"
 
+	"go.uber.org/zap"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
@@ -13,15 +15,17 @@ type DemoExecutor struct{}
 
 // Execute 执行任务
 func (e *DemoExecutor) Execute(ctx context.Context, job *schedulerhelper.Job) error {
-	log.Printf("Executor %s executing job %s with params: %v",
-		e.Name(), job.Name, job.Parameters)
+	logger := app.Log(ctx).Named("scheduler.demo")
+	logger.Info("Demo job started", zap.String("event", "scheduler.demo.started"),
+		zap.String("job_id", job.ID), zap.String("job_name", job.Name), zap.Int("parameter_count", len(job.Parameters)))
 
 	// 模拟任务执行
 	select {
 	case <-time.After(2 * time.Second):
-		log.Printf("Job %s completed successfully", job.Name)
+		logger.Info("Demo job completed", zap.String("event", "scheduler.demo.completed"), zap.String("job_id", job.ID))
 		return nil
 	case <-ctx.Done():
+		logger.Info("Demo job canceled", zap.String("event", "scheduler.demo.canceled"), zap.String("job_id", job.ID))
 		return ctx.Err()
 	}
 }

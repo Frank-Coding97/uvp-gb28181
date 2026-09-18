@@ -27,6 +27,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import uvpMark from "@/assets/logo/uvp-mark.svg"
 
 interface Props {
   // 图片URL
@@ -46,7 +47,7 @@ const props = withDefaults(defineProps<Props>(), {
   width: 32,
   height: 32,
   alt: '系统logo',
-  defaultImageUrl: '/src/assets/sys/default.svg'
+  defaultImageUrl: uvpMark
 })
 
 // 图片加载状态

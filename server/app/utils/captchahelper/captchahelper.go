@@ -1,8 +1,8 @@
 package captchahelper
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sync"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/mojocn/base64Captcha"
 )

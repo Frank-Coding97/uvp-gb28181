@@ -2,17 +2,15 @@ package ginhelper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
+	"net/url"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
 
 	"io"
 
@@ -22,69 +20,136 @@ import (
 )
 
 func GetEngine() *gin.Engine {
-	var engine *gin.Engine
-	if !app.ConfigYml.GetBool("server.appdebug") {
-		// 生产环境下，关闭调试模式，提高性能
-		gin.SetMode(gin.ReleaseMode)
-		// 生产环境下，关闭gin框架默认的日志输出，避免日志重复输出
-		gin.DefaultWriter = io.Discard
-		engine = gin.New()
-		engine.Use(gin.Logger(), CustomRecovery())
-	} else {
-		// 开发环境下，开启调试模式，方便开发调试
+	debug := app.ConfigYml.GetBool("server.appdebug")
+	if debug {
 		gin.SetMode(gin.DebugMode)
-		engine = gin.New()
-		engine.Use(gin.Logger(), CustomRecovery())
-
-		/**
-		注册pprof后，可以通过以下HTTP端点访问性能数据：
-		- /debug/pprof/ - 性能分析首页
-		- /debug/pprof/profile - CPU性能分析
-		- /debug/pprof/heap - 堆内存分析
-		- /debug/pprof/goroutine - Goroutine信息
-		- /debug/pprof/block - 阻塞分析
-		- /debug/pprof/threadcreate - 线程创建分析
-		**/
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	root := app.ZapLog
+	if root == nil {
+		root = zap.NewNop()
+	}
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+	gin.DebugPrintFunc = func(string, ...interface{}) {
+		root.Named("gin").Debug("Gin framework diagnostic", zap.String("event", "gin.diagnostic"))
+	}
+	gin.DebugPrintRouteFunc = func(string, string, string, int) {}
+	engine := gin.New()
+	engine.Use(RequestLogging(root), CustomRecovery())
+	if debug {
 		pprof.Register(engine)
 	}
 	return engine
-
 }
 
-// CustomRecovery 自定义错误(panic等)拦截中间件、对可能发生的错误进行拦截、统一记录
-func CustomRecovery() gin.HandlerFunc {
-	DefaultErrorWriter := &PanicExceptionRecord{}
-	return gin.RecoveryWithWriter(DefaultErrorWriter, func(c *gin.Context, err interface{}) {
-		// 检查是否为请求中止类型的panic
-		if err == consts.RequestAborted {
-			// 这是由FailAndAbort方法触发的panic，已经处理了响应，不需要额外处理
-			return
-		}
-
-		// 其他类型的 panic 使用默认处理
-		app.ZapLog.Error("服务器内部错误",
-			zap.Any("panic", err),
-			zap.String("path", c.Request.URL.Path),
-			zap.String("method", c.Request.Method),
-		)
-
-		// 对于其他类型的panic，记录错误并返回系统错误响应
-		// 但需要检查是否已经发送过响应，避免重复响应
-		if !c.Writer.Written() {
-			// 这里的 err 数据类型为 ：runtime.boundsError  ，需要转为普通数据类型才可以输出
-			app.Response.ErrorSystem(c, "", fmt.Sprintf("%s", err))
-		}
+func accessLogger(output io.Writer) gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		Formatter: accessLogFormatter,
+		Output:    output,
 	})
 }
 
-// PanicExceptionRecord  panic等异常记录
-type PanicExceptionRecord struct{}
+func accessLogFormatter(param gin.LogFormatterParams) string {
+	path := redactAccessLogPath(param.Path)
+	method := param.Method
+	errorMessage := param.ErrorMessage
+	if isOpenAPIAccessLogPath(param.Path) {
+		// OpenAPI authentication material is not safe to copy into the general
+		// access log, including through Gin's error string.
+		errorMessage = ""
+		if !isStandardAccessLogMethod(method) {
+			method = "UNKNOWN"
+		}
+	}
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
+		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+		param.StatusCode,
+		param.Latency,
+		param.ClientIP,
+		method,
+		path,
+		errorMessage,
+	)
+}
 
-func (p *PanicExceptionRecord) Write(b []byte) (n int, err error) {
-	errStr := string(b)
-	err = errors.New(errStr)
-	//app.ZapLog.Error(consts.ServerOccurredErrorMsg, zap.String("errStrace", errStr))
-	return len(errStr), err
+func isStandardAccessLogMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions,
+		http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func redactAccessLogPath(path string) string {
+	if isOpenAPIAccessLogPath(path) {
+		return "/openapi"
+	}
+
+	parsed, err := url.ParseRequestURI(path)
+	if err != nil {
+		return redactAccessLogPathFallback(path)
+	}
+	query := parsed.Query()
+	redacted := false
+	for _, key := range []string{"play_token", "media_access_token", "cap"} {
+		if _, exists := query[key]; exists {
+			query.Set(key, "REDACTED")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return path
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.RequestURI()
+}
+
+func redactAccessLogPathFallback(path string) string {
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "media_access_token=") || strings.Contains(lower, "cap=") {
+		if index := strings.IndexByte(path, '?'); index >= 0 {
+			return path[:index] + "?REDACTED"
+		}
+	}
+	return path
+}
+
+func isOpenAPIAccessLogPath(path string) bool {
+	pathEnd := len(path)
+	if index := strings.IndexAny(path, "?#"); index >= 0 {
+		pathEnd = index
+	}
+	rawPath := path[:pathEnd]
+	if rawPath == "" || rawPath[0] != '/' {
+		return false
+	}
+
+	if decodedPath, err := url.PathUnescape(rawPath); err == nil {
+		return isOpenAPIAccessLogPathValue(decodedPath)
+	}
+
+	// A malformed suffix must not bypass the namespace redaction. Decode only
+	// the first segment, which is enough to identify the fixed namespace.
+	firstSegment := rawPath[1:]
+	if separator := strings.IndexByte(firstSegment, '/'); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if separator := strings.Index(strings.ToLower(firstSegment), "%2f"); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if decodedSegment, err := url.PathUnescape(firstSegment); err == nil {
+		return strings.EqualFold(decodedSegment, "openapi") || strings.HasPrefix(strings.ToLower(decodedSegment), "openapi/")
+	}
+	return strings.EqualFold(firstSegment, "openapi") || strings.HasPrefix(strings.ToLower(firstSegment), "openapi%")
+}
+
+func isOpenAPIAccessLogPathValue(path string) bool {
+	return strings.EqualFold(path, "/openapi") || strings.HasPrefix(strings.ToLower(path), "/openapi/")
 }
 
 // PluginRouteFunc 插件路由函数类型
@@ -111,7 +176,7 @@ func RegisterPluginRoutes(routeFunc PluginRouteFunc) {
 // 参数 engine 是Gin引擎实例，会传递给每个已注册的插件路由函数
 func InitPluginRoutes(engine *gin.Engine) {
 	if len(pluginRouteFuncs) == 0 {
-		app.ZapLog.Info("没有注册的插件路由函数")
+		app.ZapLog.Info("没有注册的插件路由函数", zap.String("event", "plugin.routes.none"))
 		return
 	}
 
@@ -119,13 +184,13 @@ func InitPluginRoutes(engine *gin.Engine) {
 	for i, routeFunc := range pluginRouteFuncs {
 		if routeFunc != nil {
 			routeFunc(engine)
-			app.ZapLog.Info("插件路由初始化成功", zap.Int("pluginIndex", i))
+			app.ZapLog.Info("插件路由初始化成功", zap.String("event", "plugin.routes.initialized"), zap.Int("plugin_index", i))
 		} else {
-			app.ZapLog.Warn("插件路由函数为空，跳过初始化", zap.Int("pluginIndex", i))
+			app.ZapLog.Warn("插件路由函数为空，跳过初始化", zap.String("event", "plugin.routes.skipped_nil"), zap.Int("plugin_index", i))
 		}
 	}
 
-	app.ZapLog.Info("所有插件路由初始化完成", zap.Int("pluginCount", len(pluginRouteFuncs)))
+	app.ZapLog.Info("所有插件路由初始化完成", zap.String("event", "plugin.routes.ready"), zap.Int("plugin_count", len(pluginRouteFuncs)))
 }
 
 // GetPluginRouteFuncs 获取已注册的插件路由函数列表
@@ -134,95 +199,33 @@ func GetPluginRouteFuncs() []PluginRouteFunc {
 	return pluginRouteFuncs
 }
 
-// PrintStartupBanner 打印启动横幅信息
-func PrintStartupBanner() {
-	// 从配置获取信息
-	port := app.ConfigYml.GetString("httpserver.port")
-	serverRoot := app.ConfigYml.GetString("httpserver.serverroot")
-	dbType := app.ConfigYml.GetString("gormv2.usedbtype")
-
-	// 获取数据库名称
-	dbName := app.ConfigYml.GetString("gormv2." + dbType + ".write.database")
-	if dbName == "" {
-		dbName = "unknown"
-	}
-
-	// 版本信息
-	version := app.AppVersion.Version
-	if version == "" {
-		version = "unknown"
-	}
-
-	// 打印启动信息（简洁纯文本格式）
-	fmt.Println()
-	fmt.Println("===========================================")
-	fmt.Println("  GinFast Framework")
-	fmt.Println("===========================================")
-	fmt.Printf("  Version    : %s\n", version)
-	fmt.Printf("  Port       : %s\n", port)
-	fmt.Printf("  ServerRoot : %s\n", serverRoot)
-	fmt.Printf("  DbType     : %s\n", dbType)
-	fmt.Printf("  Database   : %s\n", dbName)
-	fmt.Println("===========================================")
-	fmt.Println()
-}
-
-// StartServer 配置并启动HTTP服务器，支持优雅关闭
-func StartServer(engine *gin.Engine) error {
-	// 打印启动横幅
-	PrintStartupBanner()
-
-	// 配置HTTP服务器超时设置
+// StartServer binds HTTP before announcing readiness. Application shutdown is
+// supplied by main so SIP remains available to in-flight HTTP and job work.
+func StartServer(engine *gin.Engine, stop func(context.Context) error) error {
+	logRoutes(engine)
+	// http.Server.WriteTimeout is an absolute deadline for the entire response,
+	// so it would terminate the SSE console stream after 30 seconds even while
+	// heartbeats are being written. Ordinary requests retain the handler-level
+	// timeout middleware; long-lived streams own their lifetime in the handler.
 	server := &http.Server{
 		Addr:         app.ConfigYml.GetString("httpserver.port"),
 		Handler:      engine,
 		ReadTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.read_timeout")) * time.Second,
-		WriteTimeout: time.Duration(app.ConfigYml.GetInt("httpserver.write_timeout")) * time.Second,
+		WriteTimeout: 0,
 		IdleTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.idle_timeout")) * time.Second,
 	}
-
-	// 在 goroutine 中启动服务器
-	go func() {
-		app.ZapLog.Info("服务器启动", zap.String("addr", server.Addr))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.ZapLog.Fatal("服务器启动失败", zap.Error(err))
-		}
-	}()
-
-	// 监听系统信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit,
-		syscall.SIGINT,  // Ctrl+C
-		syscall.SIGTERM, // kill 命令
-		syscall.SIGQUIT, // Ctrl+\
-	)
-
-	sig := <-quit
-	app.ZapLog.Info("收到退出信号，开始优雅关闭...", zap.String("signal", sig.String()))
-
-	// 设置超时上下文，防止关闭时间过长
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
+	return serveUntilCanceled(ctx, server, app.Log(context.Background()), stop)
+}
 
-	// 优雅关闭服务器
-	if err := server.Shutdown(ctx); err != nil {
-		app.ZapLog.Error("服务器关闭失败", zap.Error(err))
-		return err
+// Emit registered routes after registration, including release mode. This does
+// not change which routes are registered or their access control.
+func logRoutes(engine *gin.Engine) {
+	if !app.ConfigYml.GetBool("logs.routes") {
+		return
 	}
-
-	// 停止任务结果处理器
-	// 注意：必须在停止调度器之前停止，确保所有结果都被保存
-	app.ZapLog.Info("正在停止任务结果处理器...")
-	scheduler.StopResultHandler()
-	app.ZapLog.Info("任务结果处理器已停止")
-
-	// 停止任务调度器
-	if app.JobScheduler != nil {
-		app.ZapLog.Info("正在停止任务调度器...")
-		app.JobScheduler.Stop()
-		app.ZapLog.Info("任务调度器已停止")
+	for _, route := range engine.Routes() {
+		app.Log(context.Background()).Named("routes").Info("HTTP route registered", zap.String("event", "http.route_registered"), zap.String("method", route.Method), zap.String("route", route.Path))
 	}
-
-	app.ZapLog.Info("服务器已优雅关闭")
-	return nil
 }

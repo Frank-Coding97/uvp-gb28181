@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 设备管理 · 详情抽屉</title>
+<link rel="stylesheet" href="./common.css" />
+<style>
+  /* ============ 抽屉专用 ============ */
+
+  .drawer {
+    background: var(--color-bg-2);
+    border-left: 1px solid var(--color-border-2);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-shadow: var(--shadow-card);
+    animation: drawer-in var(--duration-slow) var(--ease-out);
+  }
+  @keyframes drawer-in {
+    from { transform: translateX(40px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* 抽屉顶部:面包屑 + 关闭 */
+  .drawer-head {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-border-1);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .drawer-head .crumb {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--font-12);
+    color: var(--color-text-3);
+    overflow: hidden;
+  }
+  .drawer-head .crumb .seg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawer-head .crumb .sep { color: var(--color-text-4); opacity: 0.5; flex-shrink: 0; }
+  .drawer-head .crumb .cur { color: var(--color-text-1); font-weight: 500; flex-shrink: 0; }
+  .drawer-head .close-btn {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-1);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--color-text-3);
+    flex-shrink: 0;
+  }
+  .drawer-head .close-btn:hover { color: var(--color-text-1); background: var(--color-bg-3); }
+
+  /* 标题块:大快照 + 标题 */
+  .drawer-hero {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-border-1);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .drawer-hero .big-snap {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-3);
+    overflow: hidden;
+    position: relative;
+    background: var(--color-bg-1);
+  }
+  .drawer-hero .big-snap .snap-placeholder { font-size: 48px; }
+  .drawer-hero .big-snap .snap-overlay {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: var(--space-2) var(--space-3);
+    background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.75) 100%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: #fff;
+    font-size: var(--font-12);
+  }
+  .drawer-hero .big-snap .snap-overlay .live-dot {
+    margin-left: auto;
+    font-size: 10px;
+  }
+  .drawer-hero .big-snap .corner {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    display: flex;
+    gap: 4px;
+  }
+  .drawer-hero .big-snap .corner .corner-badge {
+    width: 24px; height: 24px;
+    border-radius: var(--radius-1);
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(4px);
+    color: rgba(255,255,255,0.9);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+
+  .drawer-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .drawer-title-row .info { flex: 1; min-width: 0; }
+  .drawer-title-row .name {
+    font-size: var(--font-16);
+    font-weight: 600;
+    color: var(--color-text-1);
+    letter-spacing: -0.2px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .drawer-title-row .code {
+    font-size: var(--font-12);
+    color: var(--color-text-3);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
+  .drawer-title-row .quick-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .drawer-title-row .quick-actions button {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-2);
+    border: 1px solid var(--color-border-2);
+    color: var(--color-text-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+  }
+  .drawer-title-row .quick-actions button:hover { color: var(--color-text-1); border-color: var(--color-border-3); background: var(--color-bg-3); }
+  .drawer-title-row .quick-actions button.fav.active { color: var(--status-danger); border-color: rgba(239,68,68,0.32); background: rgba(239,68,68,0.08); }
+
+  /* tab */
+  .drawer-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--color-border-1);
+    padding: 0 var(--space-4);
+    gap: var(--space-4);
+  }
+  .drawer-tabs .tab {
+    height: 40px;
+    color: var(--color-text-3);
+    font-size: var(--font-13);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    position: relative;
+    cursor: pointer;
+    transition: color var(--duration-fast);
+  }
+  .drawer-tabs .tab:hover { color: var(--color-text-1); }
+  .drawer-tabs .tab.active { color: var(--primary-5); }
+  .drawer-tabs .tab.active::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: var(--primary-6);
+    border-radius: 2px 2px 0 0;
+  }
+  .drawer-tabs .tab .count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: var(--radius-pill);
+    background: var(--color-bg-3);
+    color: var(--color-text-3);
+  }
+  .drawer-tabs .tab.active .count { background: var(--primary-fade-16); color: var(--primary-5); }
+
+  /* 抽屉滚动主体 */
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* 信息 group(标签 + 字段表) */
+  .info-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .info-group .group-label {
+    font-size: 11px;
+    color: var(--color-text-4);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .field-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px var(--space-3);
+    font-size: var(--font-13);
+  }
+  .field-grid .k { color: var(--color-text-3); padding-top: 1px; white-space: nowrap; }
+  .field-grid .v {
+    color: var(--color-text-2);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+  }
+  .field-grid .v.mono { font-family: var(--font-mono); font-size: var(--font-12); letter-spacing: 0.02em; }
+  .field-grid .v.muted { color: var(--color-text-3); }
+  .field-grid .v code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 0 4px;
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-1);
+    color: var(--color-text-2);
+  }
+
+  /* 挂载位置列表(Q3 多挂载) */
+  .mount-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .mount-list .mount-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border-1);
+    border-radius: var(--radius-2);
+    font-size: var(--font-12);
+    transition: border-color var(--duration-fast), background var(--duration-fast);
+    cursor: pointer;
+  }
+  .mount-list .mount-item:hover { border-color: var(--color-border-3); background: var(--color-bg-3); }
+  .mount-list .mount-item.primary {
+    border-color: rgba(6, 182, 212, 0.32);
+    background: rgba(6, 182, 212, 0.06);
+  }
+  .mount-list .mount-item .path-segs {
+    flex: 1;
+    color: var(--color-text-2);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .mount-list .mount-item .path-segs .seg-sep { color: var(--color-text-4); opacity: 0.5; }
+  .mount-list .mount-item .primary-tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: var(--radius-1);
+    background: rgba(6, 182, 212, 0.16);
+    color: var(--node-mount);
+    font-weight: 500;
+  }
+
+  /* 能力 chip(PTZ / Audio / Recording 等) */
+  .capability-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .cap-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 var(--space-2);
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    color: var(--color-text-2);
+  }
+  .cap-chip.on {
+    background: var(--status-online-fade);
+    border-color: rgba(16, 185, 129, 0.24);
+    color: var(--status-online);
+  }
+  .cap-chip.off {
+    background: var(--color-bg-3);
+    color: var(--color-text-4);
+  }
+
+  /* 时序 mini timeline(最近 24h 在线/离线) */
+  .timeline {
+    height: 32px;
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border-1);
+    border-radius: var(--radius-2);
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+  .timeline .slot {
+    flex: 1;
+    transition: opacity var(--duration-fast);
+  }
+  .timeline .slot.online { background: var(--status-online); opacity: 0.85; }
+  .timeline .slot.offline { background: var(--status-offline); opacity: 0.4; }
+  .timeline .slot.warning { background: var(--status-warning); opacity: 0.85; }
+  .timeline .slot:hover { opacity: 1; }
+  .timeline-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--color-text-4);
+    font-family: var(--font-mono);
+    margin-top: 4px;
+    padding: 0 2px;
+  }
+
+  /* 抽屉底部 sticky CTA */
+  .drawer-foot {
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--color-border-2);
+    background: var(--color-bg-2);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+  .drawer-foot .play-cta {
+    flex: 1;
+    height: 38px;
+    border-radius: var(--radius-2);
+    background: var(--primary-6);
+    color: #fff;
+    font-size: var(--font-14);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    transition: background var(--duration-fast), transform var(--duration-fast);
+  }
+  .drawer-foot .play-cta:hover { background: var(--primary-7); transform: translateY(-1px); }
+  .drawer-foot .icon-btn-l {
+    width: 38px; height: 38px;
+    border-radius: var(--radius-2);
+    border: 1px solid var(--color-border-2);
+    color: var(--color-text-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drawer-foot .icon-btn-l:hover { background: var(--color-bg-3); color: var(--color-text-1); }
+
+  /* 让主区域的 list 在 with-drawer 下挤紧些 */
+  .workspace.with-drawer .main-body { padding-right: var(--space-4); }
+  .workspace.with-drawer .device-table thead th.col-action,
+  .workspace.with-drawer .device-table tbody td:nth-last-child(1),
+  .workspace.with-drawer .device-table thead th.col-heart,
+  .workspace.with-drawer .device-table tbody td:nth-last-child(2) {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 顶栏(简化) -->
+  <div class="topbar">
+    <div class="logo"><span class="dot"></span>UVP</div>
+    <div class="breadcrumb">
+      <span>设备管理</span>
+      <span class="sep">/</span>
+      <span>历城区</span>
+      <span class="sep">/</span>
+      <span class="cur">A 小区 · 大门入口枪机</span>
+    </div>
+    <div class="cmdk">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>搜索设备 / 通道 / 编码 ...</span>
+      <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+    </div>
+    <div class="view-switch">
+      <button class="active" onclick="location.href='./list.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button onclick="location.href='./card.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button onclick="location.href='./map.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+      </button>
+    </div>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
+    <button class="btn-primary">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      新建设备
+    </button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></button>
+  </div>
+
+  <!-- 主工作区:目录树 + 列表 + 抽屉 -->
+  <div class="workspace with-drawer">
+
+    <!-- 左侧目录树(精简) -->
+    <aside class="aside">
+      <div class="aside-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-3H5a2 2 0 0 0-2 2z"/></svg>
+        <span class="title">目录</span>
+        <button class="icon-btn" style="width:24px;height:24px"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+      </div>
+      <div class="aside-search"><input placeholder="筛选节点 ..." /></div>
+      <nav class="tree">
+        <div class="tree-node lv-1 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">山东省·济南市</span>
+          <span class="count">124</span>
+        </div>
+        <div class="tree-node lv-2 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">历城区</span>
+          <span class="count">42</span>
+        </div>
+        <div class="tree-node lv-3 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大路街道</span>
+          <span class="count">18</span>
+        </div>
+        <div class="tree-node lv-4 active">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大南路 A 小区</span>
+          <span class="count">6</span>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- 主区域:精简列表(只留核心列) -->
+    <main class="main">
+      <div class="main-head">
+        <div class="title-zone">
+          <span class="title">A 小区 · 通道列表</span>
+          <span class="desc">6 设备 · 38 通道 · 在线 89%</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn-ghost">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            刷新
+          </button>
+        </div>
+      </div>
+
+      <div class="main-body">
+        <table class="device-table">
+          <thead>
+            <tr>
+              <th class="col-check"><div class="checkbox"></div></th>
+              <th class="col-thumb">缩略图</th>
+              <th class="col-name sorted">通道名 / 编码 <span class="sort-ico"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg></span></th>
+              <th class="col-vendor">厂商 / 型号</th>
+              <th class="col-channels">类型</th>
+              <th class="col-online">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="selected">
+              <td class="col-check"><div class="checkbox checked"></div></td>
+              <td><div class="thumb"><div class="snap-placeholder hk">HK</div></div></td>
+              <td>
+                <div class="device-name">
+                  <span class="pri">大门入口枪机
+                    <span class="mount-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"/></svg>2</span>
+                  </span>
+                  <span class="sec">34010500001310000001</span>
+                </div>
+              </td>
+              <td><div class="vendor-cell"><span class="v">海康威视</span><span class="m">DS-2CD2T46WD</span></div></td>
+              <td><span class="tag" style="color:var(--primary-5); border-color:var(--primary-fade-24)">枪机</span></td>
+              <td style="text-align:center"><span class="status-dot online"></span></td>
+            </tr>
+            <tr>
+              <td class="col-check"><div class="checkbox"></div></td>
+              <td><div class="thumb"><div class="snap-placeholder dh">DH</div></div></td>
+              <td>
+                <div class="device-name">
+                  <span class="pri">停车场球机</span>
+                  <span class="sec">34010500001320000007</span>
+                </div>
+              </td>
+              <td><div class="vendor-cell"><span class="v">大华股份</span><span class="m">DH-SD-6C82</span></div></td>
+              <td><span class="tag" style="color:var(--node-civil); border-color:rgba(167,139,250,0.32)">球机</span></td>
+              <td style="text-align:center"><span class="status-dot online"></span></td>
+            </tr>
+            <tr>
+              <td class="col-check"><div class="checkbox"></div></td>
+              <td><div class="thumb"><div class="snap-placeholder dh">DH</div></div></td>
+              <td>
+                <div class="device-name">
+                  <span class="pri">周界报警球机</span>
+                  <span class="sec">34010500001320000012</span>
+                </div>
+              </td>
+              <td><div class="vendor-cell"><span class="v">大华股份</span><span class="m">DH-IPC-HFW2230</span></div></td>
+              <td><span class="tag" style="color:var(--node-civil); border-color:rgba(167,139,250,0.32)">球机</span></td>
+              <td style="text-align:center"><span class="status-dot warning"></span></td>
+            </tr>
+            <tr>
+              <td class="col-check"><div class="checkbox"></div></td>
+              <td><div class="thumb offline"><div class="snap-placeholder hk">HK</div></div></td>
+              <td>
+                <div class="device-name">
+                  <span class="pri" style="color:var(--color-text-3)">3 单元电梯厅</span>
+                  <span class="sec">34010500001310000003</span>
+                </div>
+              </td>
+              <td><div class="vendor-cell"><span class="v">海康威视</span><span class="m">DS-2CD3T46G2</span></div></td>
+              <td><span class="tag" style="color:var(--primary-5); border-color:var(--primary-fade-24)">枪机</span></td>
+              <td style="text-align:center"><span class="status-dot offline"></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <!-- 右侧详情抽屉 -->
+    <aside class="drawer">
+
+      <!-- 顶部面包屑 + 关闭 -->
+      <div class="drawer-head">
+        <div class="crumb">
+          <span class="seg">历城区</span>
+          <span class="sep">/</span>
+          <span class="seg">山大路</span>
+          <span class="sep">/</span>
+          <span class="seg">A 小区</span>
+          <span class="sep">/</span>
+          <span class="cur">大门入口枪机</span>
+        </div>
+        <button class="close-btn" title="关闭(Esc)">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- Hero:大快照 + 标题块 -->
+      <div class="drawer-hero">
+        <div class="big-snap">
+          <div class="snap-placeholder hk">HK</div>
+          <div class="corner">
+            <div class="corner-badge" title="支持云台">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+            </div>
+            <div class="corner-badge" title="支持音频">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+            </div>
+          </div>
+          <div class="snap-overlay">
+            <span class="status-dot online"></span>
+            <span>在线 · 3 秒前</span>
+            <span class="live-dot">LIVE</span>
+          </div>
+        </div>
+
+        <div class="drawer-title-row">
+          <div class="info">
+            <div class="name">
+              大门入口枪机
+              <span class="mount-badge" title="同时挂载在 2 处">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"/></svg>
+                2
+              </span>
+            </div>
+            <div class="code">34010500001310000001</div>
+          </div>
+          <div class="quick-actions">
+            <button class="fav active" title="收藏">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
+            <button title="复制编码">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button title="在地图上查看">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/></svg>
+            </button>
+            <button title="更多">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="drawer-tabs">
+        <div class="tab active">详情</div>
+        <div class="tab">配置</div>
+        <div class="tab">事件 <span class="count">12</span></div>
+        <div class="tab">回放</div>
+      </div>
+
+      <!-- 滚动主体 -->
+      <div class="drawer-body">
+
+        <!-- 能力 -->
+        <div class="info-group">
+          <div class="group-label">能力</div>
+          <div class="capability-chips">
+            <span class="cap-chip on">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+              PTZ
+            </span>
+            <span class="cap-chip on">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/></svg>
+              音频
+            </span>
+            <span class="cap-chip on">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              录像
+            </span>
+            <span class="cap-chip">
+              H.265
+            </span>
+            <span class="cap-chip off">夜视</span>
+            <span class="cap-chip off">报警 IO</span>
+          </div>
+        </div>
+
+        <!-- 国标信息 -->
+        <div class="info-group">
+          <div class="group-label">国标 GB/T 28181</div>
+          <div class="field-grid">
+            <span class="k">设备编码</span>
+            <span class="v mono">34010500001310000001</span>
+            <span class="k">行政区码</span>
+            <span class="v mono">340105 <span class="muted">/ 历城区</span></span>
+            <span class="k">行业编码</span>
+            <span class="v mono">00</span>
+            <span class="k">节点类型</span>
+            <span class="v"><code>131</code> 视频通道(枪机)</span>
+            <span class="k">注册状态</span>
+            <span class="v"><span class="status-dot online" style="width:6px;height:6px"></span> 已注册 · 2026-06-25 09:14:22</span>
+            <span class="k">最近心跳</span>
+            <span class="v">3 秒前 <span class="muted mono">(10:36:50)</span></span>
+            <span class="k">SIP 会话</span>
+            <span class="v"><code>fromTag:8a3c2f</code> <code>callId:b29e1a</code></span>
+          </div>
+        </div>
+
+        <!-- 挂载位置(Q3 多挂载) -->
+        <div class="info-group">
+          <div class="group-label">挂载位置 · 2 处</div>
+          <div class="mount-list">
+            <div class="mount-item primary">
+              <span class="node-chip t-civil" style="width:18px;height:18px">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg>
+              </span>
+              <div class="path-segs">
+                <span>历城区</span><span class="seg-sep">›</span>
+                <span>山大路街道</span><span class="seg-sep">›</span>
+                <span>A 小区</span><span class="seg-sep">›</span>
+                <span class="text-1 fw-500">大门入口枪机</span>
+              </div>
+              <span class="primary-tag">主</span>
+            </div>
+            <div class="mount-item">
+              <span class="node-chip t-virtual" style="width:18px;height:18px">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              </span>
+              <div class="path-segs">
+                <span>业务分组</span><span class="seg-sep">›</span>
+                <span>重点目标</span><span class="seg-sep">›</span>
+                <span class="text-1 fw-500">大门入口枪机</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 最近 24h 在线时序 -->
+        <div class="info-group">
+          <div class="group-label">最近 24h 在线时序</div>
+          <div class="timeline" title="按 30 分钟分桶">
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot offline" title="离线 03:00-03:30"></div><div class="slot offline"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot warning" title="告警 13:00-13:30"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div><div class="slot online"></div><div class="slot online"></div>
+            <div class="slot online"></div><div class="slot online"></div>
+          </div>
+          <div class="timeline-axis">
+            <span>10:36 昨</span>
+            <span>00:00</span>
+            <span>06:00</span>
+            <span>12:00</span>
+            <span>10:36 今</span>
+          </div>
+        </div>
+
+        <!-- 设备信息 -->
+        <div class="info-group">
+          <div class="group-label">设备信息</div>
+          <div class="field-grid">
+            <span class="k">所属设备</span>
+            <span class="v">A 小区 · 大门 NVR <span class="muted">(同框 16 通道)</span></span>
+            <span class="k">厂商</span>
+            <span class="v">海康威视</span>
+            <span class="k">型号</span>
+            <span class="v">DS-2CD2T46WD-I8</span>
+            <span class="k">固件</span>
+            <span class="v mono">V5.7.3 build 220720</span>
+            <span class="k">网络</span>
+            <span class="v mono">192.168.10.21:5060 <span class="muted">SIP/UDP</span></span>
+            <span class="k">公网 IP</span>
+            <span class="v mono">221.218.34.157 <span class="muted">(联通 山东·济南)</span></span>
+            <span class="k">经纬度</span>
+            <span class="v mono">36.6852°N, 117.0568°E</span>
+            <span class="k">物理地址</span>
+            <span class="v">济南市历城区山大路 12 号 · A 小区南门</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 底部 sticky CTA -->
+      <div class="drawer-foot">
+        <button class="play-cta">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          立即点播
+        </button>
+        <button class="icon-btn-l" title="云台控制">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+        </button>
+        <button class="icon-btn-l" title="抓图">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </button>
+        <button class="icon-btn-l" title="历史回放">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+</div>
+</body>
+</html>

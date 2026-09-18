@@ -1,0 +1,12 @@
+-- zlm-global-sidebar-menu:start
+-- Display the five canonical ZLM workspaces under the global media sidebar (MySQL).
+SET @media_menu_id := (SELECT MIN(`id`) FROM `sys_menu` WHERE `path`='/media' AND `deleted_at` IS NULL);
+UPDATE `sys_menu` SET `redirect`='/media/overview',`component`='',`title`='流媒体管理',`icon`='lucide:Clapperboard',`sort`=9,`type`=1,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/MediaOverview',`title`='运行总览',`sort`=10,`type`=2,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/overview' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/MediaMonitoring',`title`='流与会话',`sort`=20,`type`=2,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/monitoring' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/IngressManagement',`title`='接入管理',`sort`=30,`type`=2,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/ingress' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/NodeManagement',`title`='节点管理',`sort`=40,`type`=2,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/nodes' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/SchedulingManagement',`title`='调度管理',`sort`=50,`type`=2,`hide`=0,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/scheduling' AND `deleted_at` IS NULL;
+SET @media_nodes_menu_id := (SELECT MIN(`id`) FROM `sys_menu` WHERE `path`='/media/nodes' AND `deleted_at` IS NULL);
+UPDATE `sys_menu` SET `parent_id`=@media_nodes_menu_id,`component`='gb28181/zlm/workbench/nodes/NodeDetail',`title`='节点详情',`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/nodes/:id' AND `deleted_at` IS NULL;
+-- zlm-global-sidebar-menu:end

@@ -3,14 +3,13 @@
     aria-hidden="true"
     :class="svgClass"
     :style="{
-      color: color,
-      fill: color,
+      color: color || 'currentColor',
       width: iconSize,
       height: iconSize
     }"
     v-bind="$attrs"
   >
-    <use :xlink:href="iconName" :fill="color" />
+    <use :xlink:href="iconName" />
   </svg>
 </template>
 
@@ -52,11 +51,20 @@ const svgClass = computed<string>(() => {
 });
 </script>
 
-<style lang="scss" scope>
+<style lang="scss" scoped>
 .svg-icon {
   flex-shrink: 0;
   width: auto;
   height: auto;
   vertical-align: middle;
+  // 让 lucide 风格(stroke=currentColor)和老的 fill 风格 svg 都能跟随父元素颜色
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 0;
+
+  // lucide stroke 风格 svg 的 use 节点,需要 stroke 而非 fill
+  :deep(use) {
+    fill: inherit;
+  }
 }
 </style>

@@ -17,12 +17,12 @@ const themeConfig = () => {
   const darkMode = ref<boolean>(false);
   // 菜单手风琴
   const isAccordion = ref<boolean>(true);
-  // 面包屑渲染
-  const isBreadcrumb = ref<boolean>(true);
+  // 面包屑已从默认工作区移除，保留状态字段兼容旧布局配置
+  const isBreadcrumb = ref<boolean>(false);
   // 标签栏渲染
   const isTabs = ref<boolean>(true);
   // 页脚渲染
-  const isFooter = ref<boolean>(true);
+  const isFooter = ref<boolean>(false);
   // 水印
   const watermark = ref<string>("");
   // 水印风格
@@ -67,6 +67,16 @@ const themeConfig = () => {
     "#42b883",
     "#b1d391"
   ]);
+
+  watch(
+    layoutType,
+    value => {
+      if (value !== "layoutDefaults") {
+        layoutType.value = "layoutDefaults";
+      }
+    },
+    { immediate: true }
+  );
 
   // 折叠菜单
   function setCollapsed(data: boolean) {

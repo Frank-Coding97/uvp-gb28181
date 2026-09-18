@@ -1,0 +1,9 @@
+-- 回退「存储卡状态查询」：软删 API 与菜单绑定，再删掉落库表。
+-- ⛔ 与既有 down 一致使用**软删除**语义（deleted_at），不是物理删 sys_api 行。
+DELETE FROM sys_casbin_rule WHERE v1=N'/api/gb28181/device-mgmt/channel/:id/storage-cards' AND v2=N'GET';
+DELETE FROM sys_menu_api WHERE api_id IN (SELECT id FROM sys_api WHERE path=N'/api/gb28181/device-mgmt/channel/:id/storage-cards' AND method=N'GET');
+UPDATE sys_api SET deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+WHERE path=N'/api/gb28181/device-mgmt/channel/:id/storage-cards' AND method=N'GET' AND deleted_at IS NULL;
+
+IF OBJECT_ID(N'gb_device_storage_card', N'U') IS NOT NULL
+    DROP TABLE [gb_device_storage_card];

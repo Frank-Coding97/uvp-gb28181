@@ -1,19 +1,17 @@
 <template>
-  <div class="header_crumb">
+  <div class="header_left">
     <ButtonCollapsed />
-    <Breadcrumb />
   </div>
 </template>
 
 <script setup lang="ts">
-import Breadcrumb from "@/layout/components/Header/components/Breadcrumb/index.vue";
 import ButtonCollapsed from "@/layout/components/Header/components/button-collapsed/index.vue";
 </script>
 
 <style lang="scss" scoped>
-.header_crumb {
+.header_left {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  width: 100%;
 }
 </style>

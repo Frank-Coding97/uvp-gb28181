@@ -1,9 +1,9 @@
 package controllers
 
 import (
+	"strconv"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,7 +46,7 @@ func (sdic *SysDictItemController) List(c *gin.Context) {
 
 	// 查询列表数据（无分页）
 	dictItemList := models.NewSysDictItemList()
-	err := dictItemList.Find(c, req.Handler())
+	err := dictItemList.Find(c.Request.Context(), req.Handler())
 	if err != nil {
 		sdic.FailAndAbort(c, "获取字典项列表失败", err)
 	}
@@ -78,7 +78,7 @@ func (sdic *SysDictItemController) GetByID(c *gin.Context) {
 
 	// 查询字典项信息
 	dictItem := models.NewSysDictItem()
-	err = dictItem.FindByID(c, uint(id))
+	err = dictItem.FindByID(c.Request.Context(), uint(id))
 	if err != nil {
 		sdic.FailAndAbort(c, "查询字典项失败", err)
 	}
@@ -106,14 +106,14 @@ func (sdic *SysDictItemController) Add(c *gin.Context) {
 
 	// 检查所属字典是否存在
 	dict := models.NewSysDict()
-	err := dict.FindByID(c, req.DictID)
+	err := dict.FindByID(c.Request.Context(), req.DictID)
 	if err != nil {
 		sdic.FailAndAbort(c, "所属字典不存在", err)
 	}
 
 	// 检查同一字典下字典项值是否已存在
 	var count int64
-	err = app.DB().WithContext(c).Model(&models.SysDictItem{}).
+	err = app.DBContext(c.Request.Context()).Model(&models.SysDictItem{}).
 		Where("dict_id = ? AND value = ?", req.DictID, req.Value).
 		Count(&count).Error
 	if err != nil {
@@ -130,7 +130,7 @@ func (sdic *SysDictItemController) Add(c *gin.Context) {
 	dictItem.Status = &req.Status
 	dictItem.DictID = &req.DictID
 
-	err = dictItem.Create(c)
+	err = dictItem.Create(c.Request.Context())
 	if err != nil {
 		sdic.FailAndAbort(c, "新增字典项失败", err)
 	}
@@ -158,21 +158,21 @@ func (sdic *SysDictItemController) Update(c *gin.Context) {
 
 	// 检查字典项是否存在
 	dictItem := models.NewSysDictItem()
-	err := dictItem.FindByID(c, req.ID)
+	err := dictItem.FindByID(c.Request.Context(), req.ID)
 	if err != nil {
 		sdic.FailAndAbort(c, "字典项不存在", err)
 	}
 
 	// 检查所属字典是否存在
 	dict := models.NewSysDict()
-	err = dict.FindByID(c, req.DictID)
+	err = dict.FindByID(c.Request.Context(), req.DictID)
 	if err != nil {
 		sdic.FailAndAbort(c, "所属字典不存在", err)
 	}
 
 	// 检查同一字典下字典项值是否已被其他字典项使用
 	var count int64
-	err = app.DB().WithContext(c).Model(&models.SysDictItem{}).
+	err = app.DBContext(c.Request.Context()).Model(&models.SysDictItem{}).
 		Where("dict_id = ? AND value = ? AND id != ?", req.DictID, req.Value, req.ID).
 		Count(&count).Error
 	if err != nil {
@@ -188,7 +188,7 @@ func (sdic *SysDictItemController) Update(c *gin.Context) {
 	dictItem.Status = &req.Status
 	dictItem.DictID = &req.DictID
 
-	err = dictItem.Update(c)
+	err = dictItem.Update(c.Request.Context())
 	if err != nil {
 		sdic.FailAndAbort(c, "更新字典项失败", err)
 	}
@@ -216,13 +216,13 @@ func (sdic *SysDictItemController) Delete(c *gin.Context) {
 
 	// 检查字典项是否存在
 	dictItem := models.NewSysDictItem()
-	err := dictItem.FindByID(c, req.ID)
+	err := dictItem.FindByID(c.Request.Context(), req.ID)
 	if err != nil {
 		sdic.FailAndAbort(c, "字典项不存在", err)
 	}
 
 	// 执行删除
-	err = dictItem.Delete(c)
+	err = dictItem.Delete(c.Request.Context())
 	if err != nil {
 		sdic.FailAndAbort(c, "删除字典项失败", err)
 	}
@@ -252,14 +252,14 @@ func (sdic *SysDictItemController) GetByDictID(c *gin.Context) {
 
 	// 检查字典是否存在
 	dict := models.NewSysDict()
-	err = dict.FindByID(c, uint(dictId))
+	err = dict.FindByID(c.Request.Context(), uint(dictId))
 	if err != nil {
 		sdic.FailAndAbort(c, "字典不存在", err)
 	}
 
 	// 查询字典项列表
 	dictItem := models.NewSysDictItem()
-	dictItems, err := dictItem.FindByDictID(c, uint(dictId))
+	dictItems, err := dictItem.FindByDictID(c.Request.Context(), uint(dictId))
 	if err != nil {
 		sdic.FailAndAbort(c, "获取字典项列表失败", err)
 	}
@@ -290,14 +290,14 @@ func (sdic *SysDictItemController) GetByDictCode(c *gin.Context) {
 
 	// 检查字典是否存在
 	dict := models.NewSysDict()
-	err := dict.FindByCode(c, dictCode)
+	err := dict.FindByCode(c.Request.Context(), dictCode)
 	if err != nil {
 		sdic.FailAndAbort(c, "字典不存在", err)
 	}
 
 	// 查询字典项列表
 	dictItem := models.NewSysDictItem()
-	dictItems, err := dictItem.FindByDictCode(c, dictCode)
+	dictItems, err := dictItem.FindByDictCode(c.Request.Context(), dictCode)
 	if err != nil {
 		sdic.FailAndAbort(c, "获取字典项列表失败", err)
 	}

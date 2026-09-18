@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"strconv"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 )
 
 // CodeGenContext 代码生成上下文 - 统一参数结构体
@@ -26,7 +26,6 @@ type CodeGenContext struct {
 	PrimaryKey   *ColumnTemplate    `json:"primaryKey"`   // 主键
 	HasTimeField bool               `json:"hasTimeField"` // 是否有时间字段
 	HasCreatedBy bool               `json:"hasCreatedBy"` // 是否有created_by字段
-	HasTenantID  bool               `json:"hasTenantID"`  // 是否有tenant_id字段
 
 	// 参数模型中的时间字段判断
 	HasTimeFieldInQuery bool `json:"hasTimeFieldInQuery"` // 是否在查询中有时间字段
@@ -75,7 +74,6 @@ func NewCodeGenContext(tableName, dirName, fileName, comment string, columns Col
 		ExtraParams:         make(map[string]interface{}),
 		HasTimeField:        columns.HasTimeField(),
 		HasCreatedBy:        columns.HasCreatedBy(),
-		HasTenantID:         columns.HasTenantID(),
 		HasTimeFieldInQuery: hasTimeInQuery,
 		HasTimeFieldInForm:  hasTimeInForm,
 		IsTree:              isTree,
@@ -411,7 +409,6 @@ func (tcs TableColumns) ColumnTemplate() ColumnTemplateList {
 			"UpdatedAt": true,
 			"DeletedAt": true,
 			"CreatedBy": true,
-			"TenantId":  true,
 		}
 
 		// 主键字段
@@ -526,16 +523,6 @@ func (c ColumnTemplateList) HasTimeField() bool {
 func (c ColumnTemplateList) HasCreatedBy() bool {
 	for _, col := range c {
 		if col.DataName == "created_by" {
-			return true
-		}
-	}
-	return false
-}
-
-// HasTenantID 是否有tenant_id字段
-func (c ColumnTemplateList) HasTenantID() bool {
-	for _, col := range c {
-		if col.DataName == "tenant_id" {
 			return true
 		}
 	}

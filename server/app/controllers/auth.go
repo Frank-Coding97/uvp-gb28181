@@ -2,11 +2,14 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
 
 	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
@@ -20,13 +23,48 @@ import (
 
 type AuthController struct {
 	Common
+	sessions   authSessionLifecycle
+	tokens     app.TokenServiceInterface
+	sessionTTL func() time.Duration
+}
+
+type authSessionLifecycle interface {
+	CreateLogin(context.Context, *models.User, service.LoginMetadata, app.TokenServiceInterface, time.Duration) (*service.SessionTokenPair, error)
+	RotateRefresh(context.Context, string, app.TokenServiceInterface) (*service.SessionTokenPair, error)
+	Revoke(context.Context, string, string, *uint) (bool, error)
 }
 
 // NewAuthController 创建认证控制器
 func NewAuthController() *AuthController {
 	return &AuthController{
-		Common: Common{},
+		Common:     Common{},
+		sessionTTL: configuredSessionTTL,
 	}
+}
+
+func newAuthControllerWithDependencies(sessions authSessionLifecycle, tokens app.TokenServiceInterface, sessionTTL time.Duration) *AuthController {
+	return &AuthController{Common: Common{}, sessions: sessions, tokens: tokens, sessionTTL: func() time.Duration { return sessionTTL }}
+}
+
+func (ac *AuthController) authSessions() authSessionLifecycle {
+	if ac.sessions != nil {
+		return ac.sessions
+	}
+	if sessions, ok := app.SessionValidator.(authSessionLifecycle); ok {
+		return sessions
+	}
+	return nil
+}
+
+func (ac *AuthController) tokenService() app.TokenServiceInterface {
+	if ac.tokens != nil {
+		return ac.tokens
+	}
+	return app.TokenService
+}
+
+func configuredSessionTTL() time.Duration {
+	return app.ConfigYml.GetDuration("token.jwttokenrefreshexpire") * time.Second
 }
 
 // Login 用户登录
@@ -43,86 +81,27 @@ func NewAuthController() *AuthController {
 func (ac *AuthController) Login(c *gin.Context) {
 	var req models.LoginRequest
 	if err := req.Validate(c); err != nil {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
 	// 根据用户名查找用户
 	user := models.NewUser()
-	err := user.Find(c, func(d *gorm.DB) *gorm.DB {
-		return d.Where("username = ?", req.Username).Preload("Tenant")
+	err := user.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
+		return d.Where("username = ?", req.Username)
 	})
 	if err != nil {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "用户查询错误", err)
 	}
 
 	if user.IsEmpty() {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureUserNotFound)
 		ac.FailAndAbort(c, "用户不存在", nil)
 	}
 	if user.Status != 1 {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureUserDisabled)
 		ac.FailAndAbort(c, "用户未启用", nil)
-	}
-
-	var tenantID uint
-	var tenantCode string
-
-	// 检查租户是否存在, 并验证用户是否关联该租户, 通过后用户token的租户ID将设置成请求的租户编码相关的租户ID
-	if req.TenantCode != "" {
-		if user.TenantID > 0 {
-			// 查询用户关联的所有租户
-			userTenantList := models.NewSysUserTenantList()
-			err = userTenantList.Find(c, func(db *gorm.DB) *gorm.DB {
-				return db.Where("user_id = ?", user.ID).Preload("Tenant")
-			})
-			if err != nil {
-				ac.FailAndAbort(c, "查询用户租户关联信息错误", err)
-			}
-
-			// 构建用户关联的租户映射
-			userTenants := make(map[string]*models.Tenant)
-			for _, ut := range userTenantList {
-				if ut.Tenant != nil && ut.Tenant.Code != "" {
-					userTenants[ut.Tenant.Code] = ut.Tenant
-				}
-			}
-			// 检查请求的租户编码是否在用户关联的租户集合中
-			tenant, exists := userTenants[req.TenantCode]
-			if !exists {
-				ac.FailAndAbort(c, "租户编码不在用户关联的租户列表中", nil)
-			}
-
-			if tenant.Status != 1 {
-				ac.FailAndAbort(c, "租户未启用", nil)
-			}
-
-			tenantID = tenant.ID
-			tenantCode = tenant.Code
-		} else {
-			// 全局租户无需检查关联租户
-			tenant := models.NewTenant()
-			err = tenant.Find(c, func(d *gorm.DB) *gorm.DB {
-				return d.Where("code = ?", req.TenantCode)
-			})
-			if err != nil {
-				ac.FailAndAbort(c, "查询租户错误", err)
-			}
-			if tenant.IsEmpty() {
-				ac.FailAndAbort(c, "租户不存在", nil)
-			}
-			if tenant.Status != 1 {
-				ac.FailAndAbort(c, "租户未启用", nil)
-			}
-			tenantID = tenant.ID
-			tenantCode = tenant.Code
-		}
-
-	} else {
-		// 不输入租户编码则使用用户默认租户
-		// 非全局租户需检查启用状态
-		if user.Tenant.ID > 0 && user.Tenant.Status != 1 {
-			ac.FailAndAbort(c, "租户未启用", nil)
-		}
-		tenantID = user.Tenant.ID
-		tenantCode = user.Tenant.Code
 	}
 
 	// 获取安全配置
@@ -131,10 +110,13 @@ func (ac *AuthController) Login(c *gin.Context) {
 	loginLockDuration := app.ConfigYml.GetInt("safe.loginlockduration")
 
 	// 如果启用了登录锁定功能
+	// Preserve the existing independent lock-accounting lifetime while carrying log scope.
+	lockContext := context.WithoutCancel(c.Request.Context())
 	if loginLockThreshold > 0 {
 		// 检查账户是否被锁定
 		lockKey := "account_locked:" + req.Username
-		if locked, _ := app.Cache.Exists(context.Background(), lockKey); locked > 0 {
+		if locked, _ := app.Cache.Exists(lockContext, lockKey); locked > 0 {
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 			ac.FailAndAbort(c, "账户已被锁定，请稍后再试", nil)
 			return
 		}
@@ -146,7 +128,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 			// 获取当前失败次数
 			var failCount int
-			if countStr, err := app.Cache.Get(context.Background(), failCountKey); err == nil && countStr != "" {
+			if countStr, err := app.Cache.Get(lockContext, failCountKey); err == nil && countStr != "" {
 				failCount, _ = strconv.Atoi(countStr)
 			}
 
@@ -154,66 +136,82 @@ func (ac *AuthController) Login(c *gin.Context) {
 			failCount++
 
 			// 更新失败次数，设置过期时间
-			app.Cache.Set(context.Background(), failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
+			app.Cache.Set(lockContext, failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
 
 			// 检查是否达到锁定阈值
 			if failCount >= loginLockThreshold {
 				// 锁定账户
-				app.Cache.Set(context.Background(), lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				app.Cache.Set(lockContext, lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 				ac.FailAndAbort(c, "密码错误次数过多，账户已被锁定", nil)
 				return
 			}
 
 			// 返回密码错误，并提示剩余尝试次数
 			remainingAttempts := loginLockThreshold - failCount
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
 			ac.FailAndAbort(c, "密码错误，剩余尝试次数: "+strconv.Itoa(remainingAttempts), nil)
 			return
 		}
 
 		// 密码正确，清除失败次数
 		failCountKey := "login_fail_count:" + req.Username
-		app.Cache.Del(context.Background(), failCountKey)
+		app.Cache.Del(lockContext, failCountKey)
 	} else {
 		// 未启用登录锁定功能，使用原有逻辑
 		// 验证密码
 		if err = passwordhelper.ComparePassword(user.Password, req.Password); err != nil {
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
 			ac.FailAndAbort(c, "密码错误", err)
 		}
 	}
 
-	// 生成token
+	// 会话落库成功后才向客户端返回 token。
 	user.Password = ""
-	token, err := app.TokenService.GenerateTokenWithCache(&app.ClaimsUser{
-		UserID:     user.ID,
-		Username:   user.Username,
-		TenantID:   tenantID,
-		TenantCode: tenantCode,
-	})
-
-	if err != nil {
-		ac.FailAndAbort(c, "生成token失败", err)
+	sessions, tokens := ac.authSessions(), ac.tokenService()
+	if sessions == nil || tokens == nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureSessionCreate)
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
 	}
-
-	// 生成refresh token
-	refreshToken, err := app.TokenService.GenerateRefreshToken(user.ID, tenantID, tenantCode)
-	if err != nil {
-		ac.FailAndAbort(c, "生成refresh token失败", err)
+	pair, err := sessions.CreateLogin(c.Request.Context(), user, loginMetadata(c), tokens, ac.sessionTTL())
+	if err != nil || pair == nil {
+		if err == nil {
+			err = service.ErrSessionStore
+		}
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureSessionCreate)
+		ac.FailAndAbort(c, "创建登录会话失败", err, http.StatusServiceUnavailable)
 	}
-	claims, err := app.TokenService.ParseToken(token)
+	claims, err := tokens.ParseToken(pair.AccessToken)
 	if err != nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "解析token失败", err)
 	}
-	claims1, err := app.TokenService.ParseRefreshToken(refreshToken)
+	claims1, err := tokens.ParseRefreshToken(pair.RefreshToken)
 	if err != nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "解析refreshToken失败", err)
 	}
 
+	ac.recordLogin(c, user, req.Username, service.LoginResultSuccess, "")
 	ac.Success(c, gin.H{
-		"accessToken":         token,
+		"accessToken":         pair.AccessToken,
 		"accessTokenExpires":  claims.ExpiresAt.Unix(),
-		"refreshToken":        refreshToken,
+		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": claims1.ExpiresAt.Unix(),
 	})
+}
+
+func (ac *AuthController) recordLogin(c *gin.Context, user *models.User, username, result, reason string) {
+	var userID *uint
+	if user != nil && user.ID != 0 {
+		id := user.ID
+		userID = &id
+	}
+	event := app.LoginLogEvent{UserID: userID, Username: username, Result: result, FailureReason: reason}
+	metadata := service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	event.IP, event.Location, event.UserAgent = metadata.ClientIP, metadata.LoginLocation, metadata.UserAgent
+	event.Browser, event.OS = metadata.Browser, metadata.OS
+	service.RecordLoginAttempt(c.Request.Context(), app.LoginLogRecorder, event)
 }
 
 // RefreshToken 刷新访问令牌
@@ -239,54 +237,31 @@ func (ac *AuthController) RefreshToken(c *gin.Context) {
 		refreshToken = req.RefreshToken
 	}
 
-	// 解析refreshToken获取用户ID和租户信息
-	claims, err := app.TokenService.ParseRefreshToken(refreshToken)
+	sessions, tokens := ac.authSessions(), ac.tokenService()
+	if sessions == nil || tokens == nil {
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
+	}
+	pair, err := sessions.RotateRefresh(c.Request.Context(), refreshToken, tokens)
 	if err != nil {
-		ac.FailAndAbort(c, "无效的refreshToken", err)
+		status := http.StatusUnauthorized
+		if errors.Is(err, service.ErrSessionStore) {
+			status = http.StatusServiceUnavailable
+		}
+		ac.FailAndAbort(c, "refresh token刷新失败", err, status)
 	}
-
-	// 从数据库中获取用户信息
-	var user models.User
-	if err = app.DB().WithContext(c).First(&user, claims.UserID).Error; err != nil {
-		ac.FailAndAbort(c, "用户不存在", err)
-	}
-
-	// 从refresh token claims中获取租户信息
-	tenantID := claims.TenantID
-	tenantCode := claims.TenantCode
-
-	// 使用refresh token刷新access token
-	user.Password = ""
-	newAccessToken, err := app.TokenService.RefreshAccessTokenWithCache(refreshToken, &app.ClaimsUser{
-		UserID:     user.ID,
-		Username:   user.Username,
-		TenantID:   tenantID,
-		TenantCode: tenantCode,
-	})
-	if err != nil {
-		ac.FailAndAbort(c, "refresh token刷新失败", err)
-	}
-	claims1, err := app.TokenService.ParseToken(newAccessToken)
+	claims1, err := tokens.ParseToken(pair.AccessToken)
 	if err != nil {
 		ac.FailAndAbort(c, "refresh token解析失败", err)
 	}
-
-	// 取消旧的refresh token生成新的refresh token
-	newRefreshToken, err := app.TokenService.RotateRefreshToken(refreshToken)
-	if err != nil {
-		ac.FailAndAbort(c, "轮换refresh token失败", err)
-	}
-
-	// 解析新refresh token的过期时间
-	newRefreshClaims, err := app.TokenService.ParseRefreshToken(newRefreshToken)
+	newRefreshClaims, err := tokens.ParseRefreshToken(pair.RefreshToken)
 	if err != nil {
 		ac.FailAndAbort(c, "解析新refresh token失败", err)
 	}
 
 	ac.Success(c, gin.H{
-		"accessToken":         newAccessToken,
+		"accessToken":         pair.AccessToken,
 		"accessTokenExpires":  claims1.ExpiresAt.Unix(),
-		"refreshToken":        newRefreshToken,
+		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": newRefreshClaims.ExpiresAt.Unix(),
 	})
 }
@@ -308,22 +283,31 @@ func (ac *AuthController) Logout(c *gin.Context) {
 		return
 	}
 
-	// 撤销 access token
+	// 兼容已开启 access-token cache 的部署,但会话失效以数据库 sid 为准。
 	tokenString, err := common.GetAccessToken(c)
 	if err == nil && tokenString != "" {
-		// 尝试撤销access token，即使失败也继续执行
-		app.TokenService.RevokeTokenWithCache(tokenString)
+		_ = ac.tokenService().RevokeTokenWithCache(tokenString)
 	}
-
-	// 撤销refresh token
-	err = app.TokenService.RevokeRefreshToken(claims.UserID)
+	sessions := ac.authSessions()
+	if sessions == nil {
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
+	}
+	_, err = sessions.Revoke(c.Request.Context(), claims.SID, "logout", nil)
 	if err != nil {
-		ac.FailAndAbort(c, "登出失败", err)
+		ac.FailAndAbort(c, "登出失败", err, http.StatusServiceUnavailable)
 	}
 
 	ac.Success(c, gin.H{
 		"message": "登出成功",
 	})
+}
+
+func loginMetadata(c *gin.Context) service.LoginMetadata {
+	return service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+}
+
+func loginLocation(rawIP string) string {
+	return service.LoginMetadataFrom(rawIP, "").LoginLocation
 }
 
 // GetVerifyImgString 获取验证码图片字符串

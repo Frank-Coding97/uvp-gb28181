@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>UVP Logo · v2 校验</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, "PingFang SC", sans-serif;
+  background: #f0f2f5;
+  padding: 40px;
+  color: #333;
+}
+h1 { font-size: 22px; margin-bottom: 8px; }
+.lede { color: #666; font-size: 13px; margin-bottom: 24px; line-height: 1.6; }
+.lede code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: rgba(0,0,0,.05); padding: 1px 6px; border-radius: 3px; }
+.row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 24px; }
+.cell {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.cell.dark { background: #0c1a33; color: rgba(255,255,255,.7); }
+.cell.deep { background: linear-gradient(135deg, #0a1424 0%, #122242 100%); color: rgba(255,255,255,.7); }
+.cell.gray { background: #fafafa; }
+.label { font-size: 11px; color: #999; font-family: "JetBrains Mono", monospace; letter-spacing: .08em; }
+.cell.dark .label, .cell.deep .label { color: rgba(255,255,255,.55); }
+.box { display: flex; align-items: center; justify-content: center; padding: 12px; min-width: 80px; min-height: 80px; }
+img { display: block; }
+
+.section-title {
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #999;
+  margin: 32px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e8e8e8;
+  font-weight: 600;
+}
+
+.tab-strip {
+  background: linear-gradient(180deg, #e4e6eb 0%, #d1d4d9 100%);
+  border-radius: 8px 8px 0 0;
+  padding: 8px 8px 0;
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  background: #fff;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 12px 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  font-size: 12px;
+  color: #666;
+}
+.tab img { width: 16px; height: 16px; }
+.tab .x { margin-left: auto; opacity: .5; font-size: 14px; line-height: 1; }
+.tab-window { background: #fff; border: 1px solid #e8e8e8; border-top: none; padding: 16px 20px; font-size: 12px; color: #999; font-family: "JetBrains Mono", monospace; }
+</style>
+</head>
+<body>
+<h1>UVP Logo · v2 精修</h1>
+<p class="lede">
+  改动:<br/>
+  • 删掉描摹 SVG 的 <code>fill="#fff"</code> 白底 path(深底白圈问题已解决)<br/>
+  • 通过 <code>viewBox</code> 裁切出 wordmark / mark 两个形态<br/>
+  • favicon 用全新极简版(蓝底 + 系统字体白色 UVP),16/32px 清晰可读
+</p>
+
+<div class="section-title">01 · 四种形态在白底</div>
+<div class="row">
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-full.svg" style="height: 200px;"/></div>
+    <div class="label">uvp-full.svg / 完整</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-wordmark.svg" style="height: 80px;"/></div>
+    <div class="label">uvp-wordmark.svg / 横版字标</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-mark.svg" style="height: 120px;"/></div>
+    <div class="label">uvp-mark.svg / 方形 mark</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-favicon.svg" style="height: 80px;"/></div>
+    <div class="label">uvp-favicon.svg / 32px favicon</div>
+  </div>
+</div>
+
+<div class="section-title">02 · 在深底测试(03c 登录页底色)</div>
+<p class="lede" style="margin-bottom: 12px;">关键看白圈问题修没修好。</p>
+<div class="row">
+  <div class="cell deep">
+    <div class="box"><img src="../src/assets/logo/uvp-full.svg" style="height: 200px;"/></div>
+    <div class="label">full / 深底</div>
+  </div>
+  <div class="cell deep">
+    <div class="box"><img src="../src/assets/logo/uvp-wordmark.svg" style="height: 80px;"/></div>
+    <div class="label">wordmark / 深底</div>
+  </div>
+  <div class="cell deep">
+    <div class="box"><img src="../src/assets/logo/uvp-mark.svg" style="height: 120px;"/></div>
+    <div class="label">mark / 深底</div>
+  </div>
+  <div class="cell deep">
+    <div class="box"><img src="../src/assets/logo/uvp-favicon.svg" style="height: 80px;"/></div>
+    <div class="label">favicon / 深底</div>
+  </div>
+</div>
+
+<div class="section-title">03 · 缩放下限测试</div>
+<div class="row">
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-favicon.svg" style="width: 16px; height: 16px;"/></div>
+    <div class="label">favicon @ 16</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-favicon.svg" style="width: 32px; height: 32px;"/></div>
+    <div class="label">favicon @ 32</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-favicon.svg" style="width: 48px; height: 48px;"/></div>
+    <div class="label">favicon @ 48</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-mark.svg" style="width: 32px; height: 32px;"/></div>
+    <div class="label">mark @ 32</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-mark.svg" style="width: 48px; height: 48px;"/></div>
+    <div class="label">mark @ 48</div>
+  </div>
+  <div class="cell">
+    <div class="box"><img src="../src/assets/logo/uvp-mark.svg" style="width: 64px; height: 64px;"/></div>
+    <div class="label">mark @ 64</div>
+  </div>
+</div>
+
+<div class="section-title">04 · 真实场景 · 浏览器 tab</div>
+<div style="max-width: 720px">
+  <div class="tab-strip">
+    <div class="tab">
+      <img src="../src/assets/logo/uvp-favicon.svg" alt=""/>
+      <span>UVP 控制台</span>
+      <span class="x">×</span>
+    </div>
+  </div>
+  <div class="tab-window">▸ https://uvp.example.com/dashboard</div>
+</div>
+
+<div class="section-title">05 · 真实场景 · 登录页顶栏(浅色)</div>
+<div style="background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 0 24px; height: 56px; display: flex; align-items: center;">
+  <img src="../src/assets/logo/uvp-wordmark.svg" alt="UVP" style="height: 32px"/>
+</div>
+
+<div class="section-title">06 · 真实场景 · 登录页顶栏(深色 / 03c 风格)</div>
+<div style="background: linear-gradient(135deg, #0a1424 0%, #122242 100%); border-radius: 8px; padding: 0 24px; height: 64px; display: flex; align-items: center;">
+  <img src="../src/assets/logo/uvp-wordmark.svg" alt="UVP" style="height: 36px"/>
+</div>
+
+<div class="section-title">07 · 真实场景 · 主控台侧边栏</div>
+<div style="display: flex; gap: 20px;">
+  <div style="background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden; width: 220px;">
+    <div style="height: 56px; display: flex; align-items: center; padding: 0 18px; border-bottom: 1px solid #e8e8e8">
+      <img src="../src/assets/logo/uvp-wordmark.svg" alt="UVP" style="height: 28px"/>
+    </div>
+    <div style="padding: 12px 18px; color: #999; font-size: 12px;">主导航 ↓</div>
+  </div>
+
+  <div style="background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden; width: 64px;">
+    <div style="height: 56px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #e8e8e8">
+      <img src="../src/assets/logo/uvp-mark.svg" alt="UVP" style="height: 36px"/>
+    </div>
+    <div style="padding: 12px 0; color: #999; font-size: 11px; text-align: center;">折叠态</div>
+  </div>
+</div>
+
+</body>
+</html>

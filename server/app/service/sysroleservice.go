@@ -23,7 +23,7 @@ func NewSysRoleService() *SysRoleService {
 func (s *SysRoleService) Update(c *gin.Context, req models.SysRoleUpdateRequest) (*models.SysRole, error) {
 	// 检查角色名称是否与其他角色冲突（排除当前角色）
 	existRole := models.NewSysRole()
-	err := existRole.Find(c, func(d *gorm.DB) *gorm.DB {
+	err := existRole.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("name = ? AND id != ?", req.Name, req.ID)
 	})
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *SysRoleService) Update(c *gin.Context, req models.SysRoleUpdateRequest)
 			return nil, fmt.Errorf("不能将自己设置为父级角色")
 		}
 		parentRole := models.NewSysRole()
-		err := parentRole.Find(c, func(d *gorm.DB) *gorm.DB {
+		err := parentRole.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 			return d.Where("id = ?", req.ParentID)
 		})
 		if err != nil {
@@ -56,7 +56,7 @@ func (s *SysRoleService) Update(c *gin.Context, req models.SysRoleUpdateRequest)
 
 	// 更新角色信息
 	role := models.NewSysRole()
-	err = role.Find(c, func(d *gorm.DB) *gorm.DB {
+	err = role.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("id = ?", req.ID)
 	})
 	if err != nil {
@@ -71,13 +71,13 @@ func (s *SysRoleService) Update(c *gin.Context, req models.SysRoleUpdateRequest)
 	role.Description = req.Description
 	role.ParentID = req.ParentID
 
-	err = app.DB().WithContext(c).Save(role).Error
+	err = app.DB().WithContext(c.Request.Context()).Save(role).Error
 	if err != nil {
 		return nil, err
 	}
 
 	// 编辑角色继承关系
-	if err := s.CasbinService.EditRoleInheritance(c, role.ID, req.ParentID); err != nil {
+	if err := s.CasbinService.EditRoleInheritance(c.Request.Context(), role.ID, req.ParentID); err != nil {
 		return nil, err
 	}
 	return role, nil
@@ -91,7 +91,7 @@ func (s *SysRoleService) checkCircularReference(c *gin.Context, currentRoleID ui
 
 	// 获取所有角色用于构建角色树
 	allRoles := models.NewSysRoleList()
-	err := allRoles.Find(c, func(db *gorm.DB) *gorm.DB {
+	err := allRoles.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 		return db
 	})
 	if err != nil {

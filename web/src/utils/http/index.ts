@@ -172,16 +172,7 @@ class Http {
                             }
                         });
                     } else if (status === 401) {
-                        // 401错误时，提示用户刷新页面重试（带节流功能）
-                        throttledModalConfirm({
-                            title: '提示',
-                            content: '登录状态已过期，请刷新页面重试',
-                            okText: '刷新页面',
-                            cancelText: '取消',
-                            onOk: () => {
-                                window.location.reload();
-                            }
-                        });
+                        Http.redirectLoginPage();
                     }
                 }
                 // 所有的响应异常 区分来源为取消请求/非取消请求
@@ -212,8 +203,16 @@ class Http {
                     resolve(response);
                 })
                 .catch(async error => {
+                    if ((error as HttpError)?.isCancelRequest || Axios.isCancel(error)) {
+                        reject(error);
+                        return;
+                    }
                     console.error("http.error:", error);
                     const { response } = error;
+                    if (config.showErrorMessage === false) {
+                        reject(error);
+                        return;
+                    }
                     if (response && response.data instanceof Blob) {
                         try {
                             const text = await response.data.text();

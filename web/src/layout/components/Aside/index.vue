@@ -1,7 +1,7 @@
 <template>
-  <div :class="asideDark ? 'aside dark' : 'aside'">
+  <div :class="['aside', { dark: asideDark, collapsed }]">
     <Logo />
-    <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="220">
+    <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="256">
       <a-scrollbar style="height: 100%; overflow: auto" outer-class="scrollbar"><Menu :route-tree="routeTree" /></a-scrollbar>
     </a-layout-sider>
   </div>
@@ -21,9 +21,10 @@ const { routeTree } = storeToRefs(routerStore);
 
 <style lang="scss" scoped>
 .aside {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .dark {
   background: #232324;
@@ -31,6 +32,7 @@ const { routeTree } = storeToRefs(routerStore);
 .layout_side {
   flex: 1;
   overflow: hidden;
+  padding-top: 18px;
   .scrollbar {
     height: 100%;
   }
@@ -39,12 +41,12 @@ const { routeTree } = storeToRefs(routerStore);
 // 修改左侧滚动条宽度
 :deep(.arco-scrollbar-thumb-direction-vertical .arco-scrollbar-thumb-bar) {
   width: 4px;
-  margin-left: 8px;
+  margin-left: 10px;
 }
 
 // 去掉右侧阴影并替换为边线
 :deep(.arco-layout-sider-light) {
-  border-right: $border-1 solid $color-border-2;
+  border-right: 0;
   box-shadow: unset;
 }
 
@@ -54,12 +56,10 @@ const { routeTree } = storeToRefs(routerStore);
   .arco-menu-has-icon {
     justify-content: center;
     padding: 0;
-  }
 
-  // 消除icon的自带margin-right值，并且设置icon的padding值以保留icon空隙
-  .arco-menu-icon {
-    padding: 10px 0;
-    margin-right: 0;
+    .arco-menu-icon {
+      margin-right: 0;
+    }
   }
 
   // 消除title占位
@@ -70,6 +70,6 @@ const { routeTree } = storeToRefs(routerStore);
 
 // 去掉sider背景
 .arco-layout-sider {
-  background: unset;
+  background: var(--uvp-navigation-bg);
 }
 </style>

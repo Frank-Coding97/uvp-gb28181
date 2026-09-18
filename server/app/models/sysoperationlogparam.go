@@ -16,6 +16,7 @@ type SysOperationLogListRequest struct {
 	StartTime string `form:"startTime"` // 开始时间
 	EndTime   string `form:"endTime"`   // 结束时间
 	IP        string `form:"ip"`        // IP地址
+	Path      string `form:"path"`      // 请求路径
 }
 
 func (r *SysOperationLogListRequest) Validate(c *gin.Context) error {
@@ -43,6 +44,9 @@ func (r *SysOperationLogListRequest) Handle() func(db *gorm.DB) *gorm.DB {
 		}
 		if r.IP != "" {
 			db = db.Where("ip LIKE ?", "%"+r.IP+"%")
+		}
+		if r.Path != "" {
+			db = db.Where("path LIKE ?", "%"+r.Path+"%")
 		}
 		if r.StartTime != "" && r.EndTime != "" {
 			db = db.Where("created_at BETWEEN ? AND ?", r.StartTime, r.EndTime)

@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "roleName": "游客",
+  "description": "只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改",
+  "pages": [
+    "/home",
+    "/gb28181/device-mgmt/index",
+    "/gb28181/multi-screen-playback",
+    "/gb28181/device-record-playback/:channelId",
+    "/gb28181/cloud-recordings",
+    "/gb28181/alarm-management"
+  ],
+  "permissions": [
+    "gb28181:home:view",
+    "gb28181:device:view",
+    "gb28181:play:start",
+    "gb28181:play:monitor",
+    "gb28181:device-record:query",
+    "gb28181:device-record:play"
+  ],
+  "bindings": [
+    {
+      "menuPath": "/home",
+      "apis": [
+        {
+          "method": "GET",
+          "path": "/api/users/profile"
+        },
+        {
+          "method": "GET",
+          "path": "/api/sysMenu/getRouters"
+        },
+        {
+          "method": "POST",
+          "path": "/api/users/logout"
+        }
+      ]
+    },
+    {
+      "permission": "gb28181:home:view",
+      "apis": [
+        {
+          "method": "GET",
+          "path": "/api/gb28181/sip/dashboard/snapshot"
+        },
+        {
+          "method": "GET",
+          "path": "/api/gb28181/zlm/overview"
+        }
+      ]
+    },
+    {
+      "permission": "gb28181:play:start",
+      "apis": [
+        {
+          "method": "GET",
+          "path": "/api/gb28181/sip/service-config/default-playback-protocol"
+        },
+        {
+          "method": "GET",
+          "path": "/api/gb28181/sip/service-config/playback-settings"
+        },
+        {
+          "method": "GET",
+          "path": "/api/gb28181/sip/service-config/fixed-address-playback"
+        }
+      ]
+    }
+  ],
+  "allowedAPIs": [
+    {
+      "method": "DELETE",
+      "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/alarms"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/alarms/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/cloud-recordings/active"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/cloud-recordings/files"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/cloud-recordings/files/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/cloud-recordings/files/options"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/catalog/tree"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/catalog/tree/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/catalog/tree/:id/children"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channel/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channel/:id/mounts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channel/:id/record-query/options"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channel/:id/timeline"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/device/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/device/:id/status-events"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/devices"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/directory/tree"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/map/clusters"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/device-mgmt/map/markers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/home/drilldown/play"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/home/drilldown/sip"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/home/drilldown/traffic"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/home/layout"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/home/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/play/:streamId/monitor"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/sip/dashboard/snapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/sip/service-config/default-playback-protocol"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/sip/service-config/fixed-address-playback"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/sip/service-config/playback-settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sysMenu/getRouters"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/cloud-recordings/files/:id/access"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId/actions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/device-mgmt/channel/:id/record-query"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/play/:deviceId/:channelId"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gb28181/play/:deviceId/:channelId/authorization"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/logout"
+    }
+  ],
+  "newButtons": [
+    {
+      "title": "复制或分享播放地址",
+      "permission": "gb28181:play:share",
+      "parentPath": "/gb28181/multi-screen-playback",
+      "apis": [],
+      "source": [
+        "web/src/views/gb28181/components/PlayConsoleLinked.vue:2967"
+      ],
+      "notes": "复制播放地址为前端业务动作；播放所需临时凭据仍由实时观看权限获取，不虚构分享API。",
+      "module": "main"
+    },
+    {
+      "title": "播放器本地图像截图",
+      "permission": "gb28181:play:snapshot",
+      "parentPath": "/gb28181/multi-screen-playback",
+      "apis": [],
+      "source": [
+        "web/src/views/gb28181/components/PlayWindow.vue:83"
+      ],
+      "notes": "播放器本地截图为独立前端动作，不触发设备抓拍命令；无后端API。",
+      "module": "main"
+    }
+  ]
+}
