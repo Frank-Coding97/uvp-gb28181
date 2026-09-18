@@ -25,6 +25,30 @@ CREATE INDEX idx_gb_zlm_managed_resource_observed ON gb_zlm_managed_resource(nod
 CREATE INDEX idx_gb_zlm_managed_resource_tombstone ON gb_zlm_managed_resource(node_id,tombstoned_at);
 
 DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS recording_mode VARCHAR(16) NOT NULL DEFAULT 'off'; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS room_type SMALLINT NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS supply_light_type SMALLINT NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS direction_type SMALLINT NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS resolution VARCHAR(32) NOT NULL DEFAULT ''; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64) NOT NULL DEFAULT ''; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS port INTEGER NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS position_type SMALLINT NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS use_type SMALLINT NOT NULL DEFAULT 0; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS photoelectric_imaging_type VARCHAR(32) NOT NULL DEFAULT ''; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS capture_position_type VARCHAR(32) NOT NULL DEFAULT ''; END IF; END $$;
+DO $$ BEGIN IF to_regclass('public.gb_channel') IS NOT NULL THEN ALTER TABLE gb_channel ADD COLUMN IF NOT EXISTS stream_number_list VARCHAR(32) NOT NULL DEFAULT ''; END IF; END $$;
+-- ptz_type 字典项补齐到 2022 值域(5/6/7),依据 GB/T 28181-2022 附录 A。
+INSERT INTO sys_dict_item (name,value,status,dict_id)
+SELECT '遥控半球','5',TRUE,d.id FROM sys_dict d
+WHERE d.code='ptz_type' AND d.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_dict_item i WHERE i.dict_id=d.id AND i.value='5') ORDER BY d.id LIMIT 1;
+INSERT INTO sys_dict_item (name,value,status,dict_id)
+SELECT '多目设备的全景/拼接通道','6',TRUE,d.id FROM sys_dict d
+WHERE d.code='ptz_type' AND d.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_dict_item i WHERE i.dict_id=d.id AND i.value='6') ORDER BY d.id LIMIT 1;
+INSERT INTO sys_dict_item (name,value,status,dict_id)
+SELECT '多目设备的分割通道','7',TRUE,d.id FROM sys_dict d
+WHERE d.code='ptz_type' AND d.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_dict_item i WHERE i.dict_id=d.id AND i.value='7') ORDER BY d.id LIMIT 1;
 DROP TABLE IF EXISTS gb_recording_plan_gap;
 CREATE TABLE gb_recording_plan_gap (id BIGSERIAL PRIMARY KEY, plan_id BIGINT, channel_id BIGINT NOT NULL, started_at TIMESTAMP(3) NOT NULL, ended_at TIMESTAMP(3), duration_ms BIGINT NOT NULL DEFAULT 0, reason_code VARCHAR(64) NOT NULL, reason_message VARCHAR(500) NOT NULL DEFAULT '', recovered BOOLEAN NOT NULL DEFAULT FALSE, execution_id BIGINT, created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL);
 DROP TABLE IF EXISTS gb_recording_plan_execution;
@@ -1647,6 +1671,7 @@ CREATE TABLE meta_node (
     weight INTEGER NOT NULL DEFAULT 50,
     tags_json TEXT,
     state VARCHAR(16) NOT NULL DEFAULT 'active',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
     recovery_required BOOLEAN NOT NULL DEFAULT FALSE,
     recovery_reason VARCHAR(255) NOT NULL DEFAULT '',
     recovery_fingerprint CHAR(64) NOT NULL DEFAULT '',
@@ -1658,6 +1683,7 @@ CREATE TABLE meta_node (
     CONSTRAINT uk_media_server_uuid UNIQUE (media_server_uuid)
 );
 CREATE INDEX idx_state ON meta_node (state);
+CREATE INDEX idx_enabled ON meta_node (enabled);
 CREATE INDEX idx_recovery_required ON meta_node (recovery_required);
 
 -- GB28181 device registry and dual-version profile archive.
@@ -5054,3 +5080,87 @@ WHERE m.deleted_at IS NULL
   AND m.path IN ('/gb28181/sip-traces','/system/realtime-log','/system/login-log','/system/log','/system/joblog')
 ON CONFLICT DO NOTHING;
 -- log-center-menu:end
+
+-- channel-video-param:start（同步自 migrations/2026-09-18-channel-video-param-postgresql.sql）
+-- GB/T 28181-2022 A.2.1.13 / A.2.3.2.5「视频参数属性」(VideoParamAttribute)，**每码流一行**
+-- （见 models.GbDeviceVideoParam）。
+--
+-- ⛔ 这一块必须与迁移文件保持一致。runner 在「空版本表 + 基线探测表已存在」时会把全部迁移
+--    直接标记为已应用而**不执行**（见 app/gb28181/migration/runner.go），所以**快照里没有的物件
+--    在快照建出来的新库上永远不会出现**，增量迁移补不回来。
+-- gb_channel.stream_number_list 列已随结构段一起烘焙（在 capture_position_type 之后），此处不重复。
+CREATE TABLE IF NOT EXISTS gb_device_video_param (
+    id BIGSERIAL,
+    device_id BIGINT NOT NULL,
+    target_code VARCHAR(20) NOT NULL,
+    stream_number INTEGER NOT NULL,
+    video_format VARCHAR(8) NOT NULL DEFAULT '',
+    resolution VARCHAR(32) NOT NULL DEFAULT '',
+    frame_rate VARCHAR(8) NOT NULL DEFAULT '',
+    bit_rate_type VARCHAR(8) NOT NULL DEFAULT '',
+    video_bit_rate VARCHAR(16),
+    source_operation_seq BIGINT NOT NULL DEFAULT 0,
+    source_sn INTEGER NOT NULL DEFAULT 0,
+    source_operation_id VARCHAR(64),
+    observed_at TIMESTAMP(3) NOT NULL,
+    raw_summary TEXT,
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_video_param_target UNIQUE (device_id, target_code, stream_number)
+);
+CREATE INDEX IF NOT EXISTS idx_video_param_device ON gb_device_video_param (device_id, observed_at);
+-- channel-video-param:end
+
+-- channel-video-param-permissions:start（同步自 migrations/2026-09-18-channel-video-param-postgresql.sql）
+-- 读沿用 gb28181:ptz:view，写绑定 gb28181:ptz:control（写入有副作用，会真的改设备配置）。
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT '读取视频参数','/api/gb28181/device-mgmt/channel/:id/video-params','GET','按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/device-mgmt/channel/:id/video-params' AND method='GET' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission='gb28181:ptz:view' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path='/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method='GET' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_' || rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission='gb28181:ptz:view' AND a.path='/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method='GET'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0='role_' || rm.role_id AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT '下发视频参数','/api/gb28181/device-mgmt/channel/:id/video-params','POST','按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/device-mgmt/channel/:id/video-params' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission='gb28181:ptz:control' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path='/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method='POST' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_' || rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission='gb28181:ptz:control' AND a.path='/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method='POST'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0='role_' || rm.role_id AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+-- channel-video-param-permissions:end
+
+-- zlm-node-enabled-permissions:start
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT '启用媒体节点','/api/gb28181/zlm/nodes/:id/enable','POST','按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/zlm/nodes/:id/enable' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT '停用媒体节点','/api/gb28181/zlm/nodes/:id/disable','POST','按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/zlm/nodes/:id/disable' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission='gb28181:zlm:node:manage' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path IN ('/api/gb28181/zlm/nodes/:id/enable','/api/gb28181/zlm/nodes/:id/disable') AND a.method='POST' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p','role_' || rm.role_id,a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission='gb28181:zlm:node:manage' AND a.path IN ('/api/gb28181/zlm/nodes/:id/enable','/api/gb28181/zlm/nodes/:id/disable') AND a.method='POST'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0='role_' || rm.role_id AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+-- zlm-node-enabled-permissions:end

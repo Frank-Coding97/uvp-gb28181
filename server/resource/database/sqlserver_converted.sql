@@ -24,6 +24,24 @@ CREATE INDEX idx_gb_zlm_managed_resource_observed ON gb_zlm_managed_resource(nod
 CREATE INDEX idx_gb_zlm_managed_resource_tombstone ON gb_zlm_managed_resource(node_id,tombstoned_at);
 
 IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','recording_mode') IS NULL ALTER TABLE gb_channel ADD recording_mode NVARCHAR(16) NOT NULL DEFAULT 'off';
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','room_type') IS NULL ALTER TABLE gb_channel ADD room_type SMALLINT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','supply_light_type') IS NULL ALTER TABLE gb_channel ADD supply_light_type SMALLINT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','direction_type') IS NULL ALTER TABLE gb_channel ADD direction_type SMALLINT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','resolution') IS NULL ALTER TABLE gb_channel ADD resolution NVARCHAR(32) NOT NULL DEFAULT N'';
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','ip_address') IS NULL ALTER TABLE gb_channel ADD ip_address NVARCHAR(64) NOT NULL DEFAULT N'';
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','port') IS NULL ALTER TABLE gb_channel ADD port INT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','position_type') IS NULL ALTER TABLE gb_channel ADD position_type SMALLINT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','use_type') IS NULL ALTER TABLE gb_channel ADD use_type SMALLINT NOT NULL DEFAULT 0;
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','photoelectric_imaging_type') IS NULL ALTER TABLE gb_channel ADD photoelectric_imaging_type NVARCHAR(32) NOT NULL DEFAULT N'';
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','capture_position_type') IS NULL ALTER TABLE gb_channel ADD capture_position_type NVARCHAR(32) NOT NULL DEFAULT N'';
+IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','stream_number_list') IS NULL ALTER TABLE gb_channel ADD stream_number_list NVARCHAR(32) NOT NULL DEFAULT N'';
+-- ptz_type 字典项补齐到 2022 值域(5/6/7),依据 GB/T 28181-2022 附录 A。
+IF NOT EXISTS (SELECT 1 FROM [sys_dict_item] WHERE [dict_id]=(SELECT TOP (1) [id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL ORDER BY [id]) AND [value]='5')
+  INSERT INTO [sys_dict_item] ([name],[value],[status],[dict_id]) SELECT N'遥控半球','5',1,[id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL;
+IF NOT EXISTS (SELECT 1 FROM [sys_dict_item] WHERE [dict_id]=(SELECT TOP (1) [id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL ORDER BY [id]) AND [value]='6')
+  INSERT INTO [sys_dict_item] ([name],[value],[status],[dict_id]) SELECT N'多目设备的全景/拼接通道','6',1,[id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL;
+IF NOT EXISTS (SELECT 1 FROM [sys_dict_item] WHERE [dict_id]=(SELECT TOP (1) [id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL ORDER BY [id]) AND [value]='7')
+  INSERT INTO [sys_dict_item] ([name],[value],[status],[dict_id]) SELECT N'多目设备的分割通道','7',1,[id] FROM [sys_dict] WHERE [code]='ptz_type' AND [deleted_at] IS NULL;
 IF OBJECT_ID('gb_recording_plan_gap','U') IS NOT NULL DROP TABLE gb_recording_plan_gap;
 CREATE TABLE gb_recording_plan_gap (id BIGINT IDENTITY(1,1) PRIMARY KEY, plan_id BIGINT NULL, channel_id BIGINT NOT NULL, started_at DATETIME2(3) NOT NULL, ended_at DATETIME2(3) NULL, duration_ms BIGINT NOT NULL DEFAULT 0, reason_code NVARCHAR(64) NOT NULL, reason_message NVARCHAR(500) NOT NULL DEFAULT '', recovered BIT NOT NULL DEFAULT 0, execution_id BIGINT NULL, created_at DATETIME2(3) NOT NULL, updated_at DATETIME2(3) NOT NULL);
 IF OBJECT_ID('gb_recording_plan_execution','U') IS NOT NULL DROP TABLE gb_recording_plan_execution;
@@ -619,6 +637,7 @@ CREATE TABLE [meta_node] (
     [weight] INT NOT NULL CONSTRAINT [df_meta_node_weight] DEFAULT 50,
     [tags_json] NVARCHAR(MAX),
     [state] NVARCHAR(16) NOT NULL CONSTRAINT [df_meta_node_state] DEFAULT N'active',
+    [enabled] BIT NOT NULL CONSTRAINT [df_meta_node_enabled] DEFAULT 1,
     [recovery_required] BIT NOT NULL CONSTRAINT [df_meta_node_recovery_required] DEFAULT 0,
     [recovery_reason] NVARCHAR(255) NOT NULL CONSTRAINT [df_meta_node_recovery_reason] DEFAULT N'',
     [recovery_fingerprint] CHAR(64) NOT NULL CONSTRAINT [df_meta_node_recovery_fingerprint] DEFAULT N'',
@@ -630,6 +649,7 @@ CREATE TABLE [meta_node] (
     CONSTRAINT [uk_media_server_uuid] UNIQUE ([media_server_uuid])
 );
 CREATE INDEX [idx_state] ON [meta_node] ([state]);
+CREATE INDEX [idx_enabled] ON [meta_node] ([enabled]);
 CREATE INDEX [idx_recovery_required] ON [meta_node] ([recovery_required]);
 
 -- GB28181 device registry and dual-version profile archive.
@@ -4924,3 +4944,94 @@ WHERE m.[deleted_at] IS NULL
   AND m.[path] IN (N'/gb28181/sip-traces',N'/system/realtime-log',N'/system/login-log',N'/system/log',N'/system/joblog')
   AND NOT EXISTS (SELECT 1 FROM [sys_role_menu] x WHERE x.[role_id]=rm.[role_id] AND x.[menu_id]=lc.[id]);
 -- log-center-menu:end
+
+-- channel-video-param:start（同步自 migrations/2026-09-18-channel-video-param-sqlserver.sql）
+-- GB/T 28181-2022 A.2.1.13 / A.2.3.2.5「视频参数属性」(VideoParamAttribute)，**每码流一行**
+-- （见 models.GbDeviceVideoParam）。
+--
+-- ⛔ 这一块必须与迁移文件保持一致。runner 在「空版本表 + 基线探测表已存在」时会把全部迁移
+--    直接标记为已应用而**不执行**（见 app/gb28181/migration/runner.go），所以**快照里没有的物件
+--    在快照建出来的新库上永远不会出现**，增量迁移补不回来。
+-- gb_channel.stream_number_list 列已随结构段一起烘焙（在 capture_position_type 之后），此处不重复。
+IF OBJECT_ID(N'gb_device_video_param', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_device_video_param] (
+        [id] BIGINT IDENTITY(1,1) NOT NULL,
+        [device_id] BIGINT NOT NULL,
+        [target_code] NVARCHAR(20) NOT NULL,
+        [stream_number] INT NOT NULL,
+        [video_format] NVARCHAR(8) NOT NULL CONSTRAINT [df_video_param_video_format] DEFAULT N'',
+        [resolution] NVARCHAR(32) NOT NULL CONSTRAINT [df_video_param_resolution] DEFAULT N'',
+        [frame_rate] NVARCHAR(8) NOT NULL CONSTRAINT [df_video_param_frame_rate] DEFAULT N'',
+        [bit_rate_type] NVARCHAR(8) NOT NULL CONSTRAINT [df_video_param_bit_rate_type] DEFAULT N'',
+        [video_bit_rate] NVARCHAR(16),
+        [source_operation_seq] BIGINT NOT NULL CONSTRAINT [df_video_param_source_seq] DEFAULT 0,
+        [source_sn] INT NOT NULL CONSTRAINT [df_video_param_source_sn] DEFAULT 0,
+        [source_operation_id] NVARCHAR(64),
+        [observed_at] DATETIME2(3) NOT NULL,
+        [raw_summary] NVARCHAR(MAX),
+        [created_at] DATETIME2(3) NOT NULL,
+        [updated_at] DATETIME2(3) NOT NULL,
+        CONSTRAINT [pk_video_param] PRIMARY KEY ([id]),
+        CONSTRAINT [uk_video_param_target] UNIQUE ([device_id], [target_code], [stream_number])
+    );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_video_param') AND name = N'uk_video_param_target')
+    CREATE UNIQUE INDEX [uk_video_param_target] ON [gb_device_video_param] ([device_id], [target_code], [stream_number]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_video_param') AND name = N'idx_video_param_device')
+    CREATE INDEX [idx_video_param_device] ON [gb_device_video_param] ([device_id], [observed_at]);
+-- channel-video-param:end
+
+-- channel-video-param-permissions:start（同步自 migrations/2026-09-18-channel-video-param-sqlserver.sql）
+-- 读沿用 gb28181:ptz:view，写绑定 gb28181:ptz:control（写入有副作用，会真的改设备配置）。
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'读取视频参数',N'/api/gb28181/device-mgmt/channel/:id/video-params',N'GET',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission=N'gb28181:ptz:view' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method=N'GET' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission=N'gb28181:ptz:view' AND a.path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method=N'GET'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',rm.role_id) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'下发视频参数',N'/api/gb28181/device-mgmt/channel/:id/video-params',N'POST',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission=N'gb28181:ptz:control' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method=N'POST' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission=N'gb28181:ptz:control' AND a.path=N'/api/gb28181/device-mgmt/channel/:id/video-params' AND a.method=N'POST'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',rm.role_id) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+-- channel-video-param-permissions:end
+
+-- zlm-node-enabled-permissions:start
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'启用媒体节点',N'/api/gb28181/zlm/nodes/:id/enable',N'POST',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/zlm/nodes/:id/enable' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'停用媒体节点',N'/api/gb28181/zlm/nodes/:id/disable',N'POST',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/zlm/nodes/:id/disable' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission=N'gb28181:zlm:node:manage' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path IN (N'/api/gb28181/zlm/nodes/:id/enable',N'/api/gb28181/zlm/nodes/:id/disable') AND a.method=N'POST' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','',''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission=N'gb28181:zlm:node:manage' AND a.path IN (N'/api/gb28181/zlm/nodes/:id/enable',N'/api/gb28181/zlm/nodes/:id/disable') AND a.method=N'POST'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype='p' AND p.v0=CONCAT('role_',rm.role_id) AND p.v1=a.path AND p.v2=a.method AND p.v3='*');
+-- zlm-node-enabled-permissions:end
