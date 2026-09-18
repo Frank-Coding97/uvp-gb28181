@@ -17,6 +17,7 @@ import { formatToken, getAccessToken } from "@/utils/auth";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
 import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
+import DeviceConfigDrawer from "../device-mgmt/DeviceConfigDrawer.vue";
 import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
@@ -38,6 +39,9 @@ import {
     getControlCapabilities,
     getCruiseTrack,
     getDeviceStatus,
+    getChannelStorageCards,
+    getChannelVideoParams,
+    applyChannelVideoParams,
     getDeviceSnapshotSession,
     getHomePosition,
     getPtzOperation,
@@ -68,10 +72,29 @@ import {
     type ProbeSnapshot,
     type PTZOperation,
     type PTZResourceFreshness,
+    type StorageCard,
     type StreamMonitorSnapshot,
     type TalkCreateResult,
+    type VideoParam,
+    type VideoParamReconcileStateName,
+    type VideoParamResult,
 } from "@/api/gb28181";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
+import {
+    bitRateTypeText,
+    canEditVideoParams,
+    frameRateText,
+    parseStreamNumberList,
+    resolutionText,
+    validateVideoParamItems,
+    videoBitRateRequired,
+    videoBitRateText,
+    videoFormatText,
+    videoParamEmptyText,
+    videoParamReconcileText,
+    videoParamReconcileTone,
+    type VideoParamCodecItem
+} from "../videoParamCodec";
 import {
     Activity,
     AlertTriangle,
@@ -85,6 +108,7 @@ import {
     Crosshair,
     Focus as FocusIcon,
     Gauge,
+    HardDrive,
     Hash,
     Home,
     Info,
@@ -287,8 +311,16 @@ const canPtzPanel = computed(() => canViewPtz.value || canControlPtz.value || ca
 const canAdvancedPanel = computed(() => canControlDevice.value || canSnapshot.value);
 
 /* "流信息"tab 已并入"视频探针":概览卡承担全部实时监视信息(媒体节点/流 ID/视频音频参数/
- * 数据速率/丢包/当前观看)。删掉独立 tab 让侧栏窄一档、层级也更清爽。 */
-type TabKey = "ptz" | "probe" | "advanced";
+ * 数据速率/丢包/当前观看)。删掉独立 tab 让侧栏窄一档、层级也更清爽。
+ *
+ * "视频参数"2026-09-18 从"高级"里拆成独立 tab:它是 A.2.3.2 设备配置类
+ * (读 A.2.4.7 ConfigDownload / 写 A.2.3.2.5 DeviceConfig),语义上是"设备侧配置",
+ * 与"高级"那栏的关键帧/布防/重启不是一类。挤在同一栏里既让"高级"变成四张卡的杂货铺,
+ * 也让这块配置没有独立入口。
+ * ⛔ 可见性用 `canViewPtz`(gb28181:ptz:view),**不是** `canAdvancedPanel` ——
+ * 本卡每个加载函数(loadVideoParams / 回读轮询 / 下发)都以 `ptz:view` 为门禁,
+ * 挂到 control/snapshot 上会出现"有读权限却看不见"或"看得见但读不出"的错配。 */
+type TabKey = "ptz" | "probe" | "advanced" | "videoparam";
 const activeTab = ref<TabKey>("ptz");
 const sideCollapsed = ref(false);
 
@@ -296,11 +328,13 @@ const tabs: Array<{ key: TabKey; label: string; icon: any; description: string }
     { key: "ptz", label: "云台控制", icon: Compass, description: "GB28181-2022 全能力" },
     { key: "probe", label: "视频探针", icon: Activity, description: "实时监视 + 逐帧采样" },
     { key: "advanced", label: "高级", icon: Settings, description: "关键帧 · 布防 · 重启" },
+    { key: "videoparam", label: "视频参数", icon: Video, description: "A.2.1.13 读取 / 下发" },
 ];
 const visibleTabs = computed(() => tabs.filter(tab => (
     (tab.key === "ptz" && canPtzPanel.value)
     || (tab.key === "probe" && (canMonitorPlayback.value || canDiagnosePlayback.value))
     || (tab.key === "advanced" && canAdvancedPanel.value)
+    || (tab.key === "videoparam" && canViewPtz.value)
 )));
 watch(visibleTabs, nextTabs => {
     if (nextTabs.length > 0 && !nextTabs.some(tab => tab.key === activeTab.value)) activeTab.value = nextTabs[0].key;
@@ -1616,6 +1650,40 @@ const deviceStatusFreshness = ref<PTZResourceFreshness>("unknown");
 const deviceStatusError = ref("");
 const deviceStatusPending = ref(false);
 const deviceStatusOperationId = ref<string | null>(null);
+// 存储卡状态(A.2.4.14/A.2.6.16)。与 DeviceStatus 分开维护:两者是不同的协议命令、
+// 不同的查询节拍 —— 合并成一个 pending 会让"查卡"把"查录像状态"的按钮一起转圈。
+const storageCards = ref<StorageCard[]>([]);
+const storageCardsFreshness = ref<PTZResourceFreshness>("unknown");
+const storageCardsError = ref("");
+const storageCardsPending = ref(false);
+/** 是否成功读到过一份结果。用来区分"还没查过"与"设备确实没有卡"。 */
+const storageCardsLoaded = ref(false);
+/*
+ * 视频参数属性(A.2.1.13 / A.2.4.7 / A.2.3.2.5)。
+ *
+ * ⛔ 与存储卡分开维护同一条理由(不同的协议命令、不同的节拍);但这里还多一层:
+ * 写入的应答(A.2.6.8)没有任何回显,`Result=OK` 只说"收到并接受",所以本面板的
+ * **权威值来自回读**,不是来自下发 —— 除了 list 还要存一份"最近一次回读的结论"。
+ * 这正是左栏那句「不提供未接入的伪控制滑杆」的可执行版本。
+ */
+const videoParams = ref<VideoParam[]>([]);
+/** 面板上的可编辑副本。与 `videoParams` 分开:要能算出"改了哪几格"并支持还原。 */
+const videoParamsDraft = ref<VideoParamCodecItem[]>([]);
+/** 目录 <Info> 的 StreamNumberList,决定面板按几段码流渲染;空 = 设备未上报。 */
+const videoParamStreamNumberList = ref("");
+/** 设备当前生效的协议版本。⛔ 只用来选提示措辞,不参与任何门禁判断(§十③)。 */
+const videoParamRegisteredVersion = ref("");
+const videoParamReconcile = ref<VideoParamReconcileStateName>("never_read");
+const videoParamReconcileDetail = ref<{
+    errorMessage?: string;
+    deviceError?: string;
+    responseHasData?: boolean;
+    operationId?: string;
+}>({});
+const videoParamsFreshness = ref<PTZResourceFreshness>("unknown");
+const videoParamsError = ref("");
+const videoParamsPending = ref(false);
+const videoParamsApplying = ref(false);
 const advancedOperationPhase = ref<Record<string, AdvancedOperationPhase>>({});
 const advancedOperationIds = ref<Record<string, string | null>>({});
 const advancedOperationDeadline = ref<Record<string, string | null>>({});
@@ -2083,6 +2151,11 @@ function resetSessionState() {
     clearSnapshotPolling();
     snapshotPending.value = false;
     snapshotSession.value = null;
+    // 视频参数回读的轮询必须跟着会话一起停：关面板/切通道后它已经没有接收方，
+    // 而 pending/applying 若留着 true，下次打开会在"按钮永远转圈"的状态里开始。
+    clearVideoParamPolling();
+    videoParamsPending.value = false;
+    videoParamsApplying.value = false;
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
@@ -2367,6 +2440,110 @@ async function loadDeviceStatus(
     }
 }
 
+/* ─────────────────── 存储卡状态(A.2.4.14 / A.2.6.16) ─────────────────── */
+
+function storageCardStateText(state: string) {
+    switch (state) {
+        case "ok": return "正常";
+        case "formatting": return "格式化中";
+        case "unformatted": return "未格式化";
+        case "idle": return "空闲";
+        case "error": return "异常";
+        default: return "未知";
+    }
+}
+
+function storageCardUsedPercent(card: StorageCard) {
+    if (!card.capacityMb || card.capacityMb <= 0) return 0;
+    const free = Math.max(0, Math.min(card.freeSpaceMb, card.capacityMb));
+    return Math.max(0, Math.min(100, Math.round(((card.capacityMb - free) / card.capacityMb) * 100)));
+}
+
+function formatStorageCapacity(mb: number | null | undefined) {
+    if (!mb || mb <= 0) return "0 MB";
+    if (mb >= 1024 * 1024) return `${(mb / 1024 / 1024).toFixed(1)} TB`;
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb} MB`;
+}
+
+function storageCardsEmptyText() {
+    if (storageCardsPending.value) return "正在查询存储卡…";
+    if (!storageCardsLoaded.value) return "尚未查询过存储卡状态";
+    // 空列表是**合法结果**：设备可以没装卡（标准的 SumNum=0 且不带列表）。
+    return "设备未安装存储卡";
+}
+
+const storageCardPollDelays = [300, 600, 1200, 2000, 3000, 5000];
+let storageCardPollTimer: number | null = null;
+let storageCardPollGeneration = 0;
+
+function clearStorageCardPolling() {
+    if (storageCardPollTimer !== null) window.clearTimeout(storageCardPollTimer);
+    storageCardPollTimer = null;
+    storageCardPollGeneration += 1;
+}
+
+/**
+ * 读取/发起存储卡状态查询。
+ *
+ * refresh=true 时服务端只是**发起**一次 SDCardStatus 查询（SIP 应答是异步的），
+ * 拿到的还是上一次的事实；所以必须再轮询 operation 到终态，然后重读一次列表。
+ */
+async function loadStorageCards(channelId = props.channel?.id, token = sessionToken, refresh = false) {
+    const contextKey = channelContextKey();
+    if (!channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
+    clearStorageCardPolling();
+    const generation = storageCardPollGeneration;
+    // 不带 refresh 时是"静默重读"（轮询收尾/切通道），不点亮按钮转圈。
+    if (refresh) storageCardsPending.value = true;
+    storageCardsError.value = "";
+    try {
+        const response = await getChannelStorageCards(channelId, refresh);
+        if (generation !== storageCardPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "查询存储卡状态失败");
+        storageCards.value = response.data.list || [];
+        storageCardsFreshness.value = response.data.freshness || "unknown";
+        storageCardsLoaded.value = true;
+        if (response.data.refreshError) storageCardsError.value = response.data.refreshError;
+        const operationId = response.data.refreshOperationId;
+        if (refresh && operationId) {
+            scheduleStorageCardPoll(channelId, token, operationId, 0, contextKey);
+            return; // pending 保持 true，等轮询收尾时再熄灭
+        }
+    } catch (error: any) {
+        if (generation !== storageCardPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
+        storageCardsError.value = error?.message || "查询存储卡状态失败";
+    }
+    storageCardsPending.value = false;
+}
+
+function storageCardOperationSettled(status: string | undefined) {
+    return status === "accepted" || status === "rejected" || status === "timeout"
+        || status === "unknown" || status === "cancelled";
+}
+
+function scheduleStorageCardPoll(channelId: number, token: number, operationId: string, attempt: number, contextKey: string) {
+    const delay = storageCardPollDelays[Math.min(attempt, storageCardPollDelays.length - 1)];
+    storageCardPollTimer = window.setTimeout(async () => {
+        storageCardPollTimer = null;
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        let settled = false;
+        try {
+            const response = await getPtzOperation(channelId, operationId);
+            settled = storageCardOperationSettled(response.data?.status);
+        } catch {
+            // 读 operation 失败按"未终态"处理，继续退避重试；
+            // 次数用尽后无论如何收尾一次，不让按钮永远转圈。
+        }
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        if (settled || attempt >= storageCardPollDelays.length - 1) {
+            await loadStorageCards(channelId, token, false);
+            return;
+        }
+        scheduleStorageCardPoll(channelId, token, operationId, attempt + 1, contextKey);
+    }, delay);
+}
+
 async function loadPanelData() {
     const channel = props.channel;
     if (!canViewPtz.value || !channel) return;
@@ -2383,6 +2560,11 @@ async function loadPanelData() {
         loadPresets(channel.id, token),
         loadCruises(channel.id, token, false),
         loadHomePosition(channel.id, token),
+        loadStorageCards(channel.id, token, false),
+        // 只读平台里"上次回读得到的配置"(refresh=false,不发 SIP 报文)。
+        // ⛔ 与存储卡同一条口径:缓存为空时面板停在 never_read(表单禁用,
+        // 不让用户在空白上猜数字);有缓存才展示,并带 freshness 说明不是刚问的。
+        loadVideoParams(channel.id, token, false),
     ]);
 }
 
@@ -2468,6 +2650,346 @@ async function loadHomePosition(channelId = props.channel?.id, token = sessionTo
             homeError.value = error?.message || "加载看守位失败";
         }
     }
+}
+
+/* ─────────────────── 视频参数属性(A.2.1.13 / A.2.4.7 / A.2.3.2.5) ─────────────────── */
+
+/**
+ * 回读结果 → 面板可编辑副本。
+ *
+ * ⛔ 逐格拷贝而不是把 `VideoParam` 直接当草稿:回读值是"设备怎么说的"(只读事实),
+ * 草稿是"用户想改成什么"。两者混成一个对象后,"已改 N 项"与"还原"就没法算了。
+ */
+function videoParamsToDraft(params: VideoParam[]): VideoParamCodecItem[] {
+    return params
+        .slice()
+        .sort((left, right) => left.streamNumber - right.streamNumber)
+        .map((row) => ({
+            streamNumber: row.streamNumber,
+            videoFormat: String(row.videoFormat ?? ""),
+            resolution: String(row.resolution ?? ""),
+            frameRate: String(row.frameRate ?? ""),
+            bitRateType: String(row.bitRateType ?? ""),
+            videoBitRate: row.videoBitRate ?? null
+        }));
+}
+
+/** 面板该渲染几段:优先用目录上报的 StreamNumberList,它没上报时才退化成按回读行数。 */
+const videoParamStreamNumbers = computed(() => {
+    const declared = parseStreamNumberList(videoParamStreamNumberList.value);
+    if (declared.length) return declared;
+    return videoParamsDraft.value.map((row) => row.streamNumber);
+});
+
+/** 改了哪几格。用于「已改 N 项」与「还原」,也是"该不该亮下发按钮"的依据。 */
+const videoParamDirtyCount = computed(() => {
+    const original = new Map(videoParams.value.map((row) => [row.streamNumber, row]));
+    let changed = 0;
+    for (const draft of videoParamsDraft.value) {
+        const source = original.get(draft.streamNumber);
+        if (!source) {
+            changed += 1;
+            continue;
+        }
+        if (
+            String(source.videoFormat ?? "") !== draft.videoFormat ||
+            String(source.resolution ?? "") !== draft.resolution ||
+            String(source.frameRate ?? "") !== draft.frameRate ||
+            String(source.bitRateType ?? "") !== draft.bitRateType ||
+            String(source.videoBitRate ?? "") !== String(draft.videoBitRate ?? "")
+        ) {
+            changed += 1;
+        }
+    }
+    return changed;
+});
+
+/**
+ * 能不能改 + 下发。
+ *
+ * ⛔ 判据是"手上有值 + 没有读取在飞",**不是**"设备支不支持"(见 videoParamCodec 的注释):
+ * 被误登记成 2016 的真 2022 设备,不试一次就永远用不了。设备离线是另一回事 ——
+ * 报文根本发不出去,按钮只能禁用,并在文案里说明原因。
+ */
+const videoParamEditable = computed(
+    () =>
+        videoParamsDraft.value.length > 0 &&
+        canEditVideoParams(videoParamReconcile.value, videoParamsDraft.value.length > 0) &&
+        props.channel?.status === 1 &&
+        !videoParamsPending.value &&
+        !videoParamsApplying.value
+);
+
+/**
+ * 设备配置窗口（专业客户端形态：分组导航 + 参数微调）的开关。
+ *
+ * 入口有**两处**且都开同一个窗口:① 控制台标题栏(开窗即见,不依赖 tab);
+ * ② 侧栏「视频参数属性」表头(就近入口)。本页侧栏那套表单是 A-5 的轻量闭环
+ * (读 / 下发 / 对照),窗口承载的是同一批参数外加其余 7 个分组 —— 两者用同一个
+ * channelId,但**各读各的快照**,不互相写草稿(否则一边改了另一边看不出来,反而更乱)。
+ */
+const deviceConfigVisible = ref(false);
+
+// ⛔ 只在**换通道**时收窗口,不跟 activeTab 走:入口已经在控制台标题栏上
+// (开窗即见,不用先切 tab),再"切 tab 就关"会让人一脸问号 —— 在云台栏打开、
+// 点一下别的 tab 就没了。真正必须收的理由只有一个:窗口里是按 channelId
+// 拉的一次性快照,留着上一个通道的数据比直接关掉更糟。
+watch(
+    () => props.channel?.id,
+    () => {
+        deviceConfigVisible.value = false;
+    }
+);
+
+function videoParamReconcileTextText() {
+    return videoParamReconcileText(videoParamReconcile.value, {
+        registeredVersion: videoParamRegisteredVersion.value
+    });
+}
+
+/**
+ * 空表单的占位文案。
+ * ⛔ 不能写死"尚未读取"：`type_absent` 时列表同样是空的，但设备已经明确回过
+ * "我没有这个配置类型" —— 说成"尚未读取"就是把能力问题说成操作问题（§十④）。
+ */
+function videoParamEmptyTextText() {
+    return videoParamEmptyText(videoParamReconcile.value, { pending: videoParamsPending.value });
+}
+
+function videoParamReconcileClass() {
+    return `reconcile-${videoParamReconcileTone(videoParamReconcile.value)}`;
+}
+
+/**
+ * 对账不一致时的逐格差异,由后端给出(error_message)。
+ * ⛔ mismatch 不是失败:典型来源是设备能力边界(下发 1080P、实际 720P),设备没做错,
+ * 所以这块文案是黄色提示而不是红色报错。
+ */
+function videoParamMismatchDetail() {
+    if (videoParamReconcile.value !== "mismatch") return "";
+    return videoParamReconcileDetail.value.errorMessage || "";
+}
+
+/** 设备"没返回这个配置类型"时的补充说明(设备侧原话优先)。 */
+function videoParamAbsentDetail() {
+    if (videoParamReconcile.value !== "type_absent") return "";
+    return videoParamReconcileDetail.value.deviceError || "";
+}
+
+/** 每格的来源徽标:回读命中 = 设备,设备没给(条件必选缺席) = 缺省。 */
+function videoParamCellBadge(row: VideoParamCodecItem, field: keyof VideoParamCodecItem) {
+    const value = row[field];
+    if (value === null || value === undefined || String(value).trim() === "") return "缺省";
+    return "设备";
+}
+
+function videoParamRowText(row: VideoParamCodecItem) {
+    return `码流 ${row.streamNumber}`;
+}
+
+function videoParamDraftChanged(row: VideoParamCodecItem) {
+    const source = videoParams.value.find((item) => item.streamNumber === row.streamNumber);
+    if (!source) return true;
+    return (
+        String(source.videoFormat ?? "") !== row.videoFormat ||
+        String(source.resolution ?? "") !== row.resolution ||
+        String(source.frameRate ?? "") !== row.frameRate ||
+        String(source.bitRateType ?? "") !== row.bitRateType ||
+        String(source.videoBitRate ?? "") !== String(row.videoBitRate ?? "")
+    );
+}
+
+function revertVideoParams() {
+    videoParamsDraft.value = videoParamsToDraft(videoParams.value);
+    videoParamsError.value = "";
+}
+
+/** VBR 时码率格应禁用(该元素在报文里不出现),不是"可以填但忽略"。 */
+function videoParamBitRateDisabled(row: VideoParamCodecItem) {
+    return videoBitRateRequired(row.bitRateType) === false;
+}
+
+/**
+ * 对照区取哪一路码流:优先 0 号主码流,没有就用第一路。
+ *
+ * ⛔ 为什么必须同屏:"平台改分辨率 → 拉流实测分辨率变化(探针/ffprobe)"就是
+ * A-5 的验收闭环。改在哪、验在哪必须挨着看,否则改完还要切到别的模块找验证点。
+ * 实测值是**当前正在播的那一路**,所以只能跟"我们认定的主码流"比 ——
+ * 这个对应关系要写在界面上,不能让人以为三行天然同源。
+ */
+const videoParamCompareStream = computed(() => {
+    const rows = videoParamsDraft.value;
+    if (!rows.length) return null;
+    return rows.find((row) => row.streamNumber === 0) ?? rows[0];
+});
+
+function videoParamCompareHeading(row: VideoParamCodecItem) {
+    return `对照(码流 ${row.streamNumber})`;
+}
+
+/**
+ * 对照区里的「回读」一行取**设备最近一次回读**的值(不是草稿值)。
+ *
+ * ⛔ 必须用 `videoParams`(回读事实)而不是 `videoParamsDraft`(用户编辑中的值):
+ * 否则用户一改分辨率,「回读」行就跟着变,三行对照立刻失去意义 ——
+ * 那样看到的是"我改了什么",而不是"设备实际是什么"。
+ */
+function videoParamCompareReadRow(): VideoParam | undefined {
+    const streamNumber = videoParamCompareStream.value?.streamNumber;
+    if (streamNumber === undefined) return undefined;
+    return videoParams.value.find((item) => item.streamNumber === streamNumber);
+}
+
+/**
+ * 把一次回读应答落进面板。
+ *
+ * ⛔ 参数类型直接用接口的 `VideoParamResult`，不再手抄一份子集 ——
+ * 手抄的子集会在后端加字段时**静默落后**（本次新增 registeredVersion 时就撞上了）。
+ */
+function applyVideoParamResult(data: VideoParamResult) {
+    videoParams.value = data.list || [];
+    videoParamsDraft.value = videoParamsToDraft(videoParams.value);
+    videoParamsFreshness.value = data.freshness || "unknown";
+    // ⛔ 目录没上报 StreamNumberList 时**不要**把上一次的值留着:那是另一台设备/另一次上报的事实。
+    videoParamStreamNumberList.value = data.streamNumberList || "";
+    videoParamRegisteredVersion.value = data.registeredVersion || "";
+    videoParamReconcile.value = data.reconcile?.state || "never_read";
+    videoParamReconcileDetail.value = {
+        errorMessage: data.reconcile?.errorMessage,
+        deviceError: data.reconcile?.deviceError,
+        responseHasData: data.reconcile?.responseHasData,
+        operationId: data.reconcile?.operationId
+    };
+    if (data.refreshError) videoParamsError.value = data.refreshError;
+}
+
+const videoParamPollDelays = [400, 800, 1500, 2500, 4000, 6000, 6000];
+let videoParamPollTimer: number | null = null;
+let videoParamPollGeneration = 0;
+
+function clearVideoParamPolling() {
+    if (videoParamPollTimer !== null) window.clearTimeout(videoParamPollTimer);
+    videoParamPollTimer = null;
+    videoParamPollGeneration += 1;
+}
+
+/**
+ * 读取视频参数。
+ *
+ * refresh=true 时后端只是**发起**一次 ConfigDownload(SIP 应答异步),拿到的还是上一次
+ * 的事实;所以要轮询 operation 到终态,再重读一次列表拿到新的 `reconcile` 结论。
+ * 这套节拍与存储卡完全一致,但“读什么”不同:这里读的是面板的权威值。
+ */
+async function loadVideoParams(channelId = props.channel?.id, token = sessionToken, refresh = false) {
+    const contextKey = channelContextKey();
+    if (!channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
+    clearVideoParamPolling();
+    const generation = videoParamPollGeneration;
+    // 不带 refresh 时是"静默重读"(轮询收尾/切通道),不点亮按钮转圈。
+    if (refresh) videoParamsPending.value = true;
+    videoParamsError.value = "";
+    try {
+        const response = await getChannelVideoParams(channelId, refresh);
+        if (generation !== videoParamPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "读取视频参数失败");
+        applyVideoParamResult(response.data);
+        const operationId = response.data.refreshOperationId;
+        if (refresh && operationId) {
+            scheduleVideoParamPoll(channelId, token, operationId, 0, contextKey);
+            return; // pending 保持 true,等轮询收尾时再熄灭
+        }
+    } catch (error: any) {
+        if (generation !== videoParamPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
+        videoParamsError.value = error?.message || "读取视频参数失败";
+    }
+    videoParamsPending.value = false;
+}
+
+function videoParamOperationSettled(status: string | undefined) {
+    return status === "accepted" || status === "rejected" || status === "timeout"
+        || status === "unknown" || status === "cancelled";
+}
+
+function scheduleVideoParamPoll(channelId: number, token: number, operationId: string, attempt: number, contextKey: string) {
+    const delay = videoParamPollDelays[Math.min(attempt, videoParamPollDelays.length - 1)];
+    videoParamPollTimer = window.setTimeout(async () => {
+        videoParamPollTimer = null;
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        let settled = false;
+        try {
+            const response = await getPtzOperation(channelId, operationId);
+            settled = videoParamOperationSettled(response.data?.status);
+        } catch {
+            // 读 operation 失败按"未终态"处理,继续退避重试;次数用尽后无论如何收尾一次。
+            settled = false;
+        }
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        if (settled || attempt >= videoParamPollDelays.length - 1) {
+            // 静默重读:这一次会把新的 reconcile 状态与回读值一起带回来。
+            await loadVideoParams(channelId, token, false);
+            videoParamsPending.value = false;
+            videoParamsApplying.value = false;
+            return;
+        }
+        scheduleVideoParamPoll(channelId, token, operationId, attempt + 1, contextKey);
+    }, delay);
+}
+
+/**
+ * 下发视频参数。
+ *
+ * ⛔ 这里**不把 200 当成功**:`Result=OK` 只说"收到并接受",没有回显。
+ * 所以下发完成后必须接着看回读结论 —— 服务层在收到 ack 的同一事务里已经排好了一条
+ * ConfigDownload 对账,面板要做的就是等它落地并重读。
+ * 校验在本地先做一遍(与后端同一条规则):无效取值**不发报文**。
+ */
+async function applyVideoParams(channelId = props.channel?.id, token = sessionToken) {
+    if (!channelId) return;
+    const contextKey = channelContextKey();
+    if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+    const items = videoParamsDraft.value;
+    if (!items.length) {
+        videoParamsError.value = "尚未读取到设备视频参数";
+        return;
+    }
+    const failure = validateVideoParamItems(items);
+    if (failure) {
+        // ⛔ 本地拦住就不发报文:平台发出的取值必须落在附录 G 内,
+        // 否则对端会静默当 0 处理,而这种错在回读对账里只表现为"设备没照做"。
+        videoParamsError.value = failure;
+        return;
+    }
+    clearVideoParamPolling();
+    videoParamsApplying.value = true;
+    videoParamsError.value = "";
+    try {
+        const response = await applyChannelVideoParams(
+            channelId,
+            items.map((row) => ({
+                streamNumber: row.streamNumber,
+                videoFormat: row.videoFormat,
+                resolution: row.resolution,
+                frameRate: row.frameRate,
+                bitRateType: row.bitRateType,
+                videoBitRate: row.videoBitRate ?? null
+            })),
+            `video-param-${channelId}-${Date.now()}`
+        );
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "下发视频参数失败");
+        // 命令已发出但结论未定:轮询到终态后再重读,由 reconcile 给出真正结论。
+        const operationId = response.data.operationId;
+        if (operationId) {
+            scheduleVideoParamPoll(channelId, token, operationId, 0, contextKey);
+            return; // applying 保持 true
+        }
+    } catch (error: any) {
+        if (!isCurrentChannelContext(channelId, token, contextKey)) return;
+        // 失败时保留表单内容可重试(§五 状态机:failed 不清空草稿)。
+        videoParamsError.value = error?.message || "下发视频参数失败";
+    }
+    videoParamsApplying.value = false;
+    videoParamsPending.value = false;
 }
 
 /* ────────────────────────── 云台指令 ────────────────────────── */
@@ -3598,6 +4120,8 @@ onBeforeUnmount(() => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     finishMiniPlayerDrag();
     clearProbeTimers();
+    clearStorageCardPolling();
+    clearVideoParamPolling();
     clearTimer();
     clearMonitor();
     void stopTalk();
@@ -3640,6 +4164,22 @@ onBeforeUnmount(() => {
                 </span>
                 <div class="console-window-actions">
                     <template v-if="!isMinimized">
+                        <!-- 设备配置中心入口。⛔ 放标题栏而不是「视频参数」那栏的表头:
+                             它管的是 8 个 ConfigType 分组(视频参数只是其中 1 个),
+                             且放这儿开窗即见,不用先切 tab。 -->
+                        <button
+                            v-if="canViewPtz"
+                            type="button"
+                            class="console-window-action is-config"
+                            data-testid="play-console-open-device-config"
+                            title="打开设备配置中心（分组导航 + 参数微调）"
+                            aria-label="打开设备配置中心"
+                            @pointerdown.stop
+                            @click.stop="deviceConfigVisible = true"
+                        >
+                            <Settings :size="14" aria-hidden="true" />
+                            <span>设备配置</span>
+                        </button>
                         <button
                             type="button"
                             class="console-window-action is-minimize"
@@ -4320,6 +4860,42 @@ onBeforeUnmount(() => {
                             </section>
                         </div>
                     </div>
+
+                    <div v-if="canViewPtz" v-show="activeTab === 'videoparam'" class="linked-detail" data-testid="linked-detail-videoparam">
+                        <div class="linked-videoparam-layout">
+                            <section class="linked-section linked-card">
+                                <header class="linked-card-hd">
+                                    <span class="section-title"><Video :size="13" />参数对照</span>
+                                    <span class="section-meta" title="三行不同源：下发=本次提交的期望值；回读=设备最近一次回读事实(不是草稿)；实测=当前正在播那一路的采样。">改在哪 · 验在哪</span>
+                                </header>
+                                <!-- 对照区:下发值 / 回读值 / 实测值。
+                                     ⛔ 三行**不同源**,对应关系必须写在界面上,不能让人以为天然同源:
+                                        · 下发 = 本次提交的期望值(草稿)
+                                        · 回读 = 设备最近一次回读事实(不是草稿,否则一改就跟着变)
+                                        · 实测 = 当前正在播的那一路的采样(探针/ffprobe)
+                                     ⭐ 这里就是 A-5 的验收闭环:平台改分辨率 → 拉流实测跟着变。
+                                     2026-09-18 从右侧「视频参数」卡搬来 —— 横向三行比侧栏窄卡里读得清。 -->
+                                <div v-if="videoParamCompareStream" class="vpc-grid" data-testid="video-param-compare">
+                                    <div class="vpc-hd">{{ videoParamCompareHeading(videoParamCompareStream) }}</div>
+                                    <div class="vpc-row" data-testid="video-param-compare-apply">
+                                        <span>下发</span>
+                                        <strong>{{ videoFormatText(videoParamCompareStream.videoFormat) }} / {{ resolutionText(videoParamCompareStream.resolution) }} / {{ frameRateText(videoParamCompareStream.frameRate) }}</strong>
+                                    </div>
+                                    <div class="vpc-row" data-testid="video-param-compare-read">
+                                        <span>回读</span>
+                                        <strong>{{ videoFormatText(videoParamCompareReadRow()?.videoFormat) }} / {{ resolutionText(videoParamCompareReadRow()?.resolution) }} / {{ frameRateText(videoParamCompareReadRow()?.frameRate) }}</strong>
+                                    </div>
+                                    <div class="vpc-row" data-testid="video-param-compare-measured">
+                                        <span>实测</span>
+                                        <strong>{{ streamInfo.videoCodec }} / {{ streamInfo.resolution }} / {{ streamInfo.videoFps || "—" }} fps · {{ liveMetrics.bitrate ? `${liveMetrics.bitrate} kbps` : "—" }}</strong>
+                                    </div>
+                                </div>
+                                <p v-else class="vpc-empty" data-testid="video-param-compare-empty">
+                                    还没有回读值 —— 先在右侧点「读取设备参数」，拿到设备事实后这里显示三行对照。
+                                </p>
+                            </section>
+                        </div>
+                    </div>
                 </div>
 
             </section>
@@ -4327,7 +4903,7 @@ onBeforeUnmount(() => {
             <aside
                 v-if="!sideCollapsed && visibleTabs.length"
                 class="sidebar"
-                :class="{ 'sidebar-probe': activeTab === 'probe', 'sidebar-advanced': activeTab === 'advanced' }"
+                :class="{ 'sidebar-probe': activeTab === 'probe', 'sidebar-advanced': activeTab === 'advanced', 'sidebar-videoparam': activeTab === 'videoparam' }"
             >
                 <!-- Tabs -->
                 <div class="tabs">
@@ -4649,6 +5225,43 @@ onBeforeUnmount(() => {
                                 <RefreshCcw :size="11" />刷新事实状态
                             </button>
                         </div>
+                        <div class="storage-card-status" data-testid="storage-card-status" aria-live="polite">
+                            <div class="storage-card-heading">
+                                <span><HardDrive :size="13" />存储卡状态</span>
+                                <em>GB/T 28181-2022</em>
+                            </div>
+                            <div v-if="storageCards.length" class="storage-card-list" data-testid="storage-card-list">
+                                <div
+                                    v-for="card in storageCards"
+                                    :key="card.cardId"
+                                    class="storage-card-item"
+                                    :data-status="card.status"
+                                    :data-testid="`storage-card-${card.cardId}`"
+                                >
+                                    <div class="storage-card-line">
+                                        <span class="storage-card-name">{{ card.hddName || `SD 卡 ${card.cardId}` }}</span>
+                                        <em class="storage-card-state" :class="`state-${card.status}`">{{ storageCardStateText(card.status) }}</em>
+                                    </div>
+                                    <div class="storage-card-bar" :title="`已用 ${storageCardUsedPercent(card)}%`">
+                                        <i :style="{ width: `${storageCardUsedPercent(card)}%` }"></i>
+                                    </div>
+                                    <div class="storage-card-meta">
+                                        <span>{{ formatStorageCapacity(card.freeSpaceMb) }} 可用 / {{ formatStorageCapacity(card.capacityMb) }}</span>
+                                        <span v-if="card.formatProgress !== null && card.formatProgress !== undefined">格式化 {{ card.formatProgress }}%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p v-else class="storage-card-empty">{{ storageCardsEmptyText() }}</p>
+                            <p v-if="storageCardsError" class="storage-card-error" data-testid="storage-card-error">{{ storageCardsError }}</p>
+                            <button
+                                class="btn-ghost xs storage-card-refresh uvp-refresh-btn"
+                                data-testid="storage-card-refresh"
+                                :disabled="storageCardsPending || props.channel?.status !== 1"
+                                @click="loadStorageCards(props.channel?.id, sessionToken, true)"
+                            >
+                                <Loader2 v-if="storageCardsPending" :size="11" class="spin" /><RefreshCcw v-else :size="11" />查询存储卡
+                            </button>
+                        </div>
                         <div class="snapshot-config" data-testid="snapshot-config">
                                 <div class="snapshot-config-heading"><span><Camera :size="13" />图像抓拍配置</span><em>GB/T 28181-2022</em></div>
                                 <div class="snapshot-config-fields">
@@ -4665,10 +5278,161 @@ onBeforeUnmount(() => {
                                     </a>
                                 </div>
                         </div>
+                    </div>
+                    <!-- ═══════════ 视频参数 ═══════════
+                         2026-09-18 从"高级"拆出:它是 A.2.3.2 设备配置类(读 A.2.4.7 / 写 A.2.3.2.5),
+                         与"高级"那栏的关键帧/布防/重启不是一类。可见性用 canViewPtz(见 TabKey 处的注释)。 -->
+                    <div v-if="canViewPtz" v-show="activeTab === 'videoparam'" class="panel" data-testid="linked-side-videoparam">
+                        <!-- ═══ 视频参数属性(A.2.1.13/A.2.4.7/A.2.3.2.5) ═══
+                             ⛔ 本卡只展示**回读得到的**事实:DeviceConfig 的应答没有回显,
+                             Result=OK 什么也不说明,所以面板的权威值来自回读,不是来自下发。 -->
+                        <div class="video-param-config" data-testid="video-param-config">
+                            <div class="video-param-heading">
+                                <span><Video :size="13" />视频参数属性</span>
+                                <em>GB/T 28181-2022</em>
+                                <!-- 完整配置的入口:本卡是 A-5 的轻量闭环(读/下发/对账),
+                                     分组导航 + 滑杆微调 + 其余 7 组在窗口里。
+                                     ⛔ 放侧栏不是详情区 —— 详情区整体在 `phase === 'playing'` 下,
+                                     放那儿就没播放时开不了。 -->
+                                <button
+                                    type="button"
+                                    class="preset-save-btn device-config-open-btn"
+                                    data-testid="linked-open-device-config"
+                                    title="打开设备配置窗口（分组导航 + 参数微调）"
+                                    @click="deviceConfigVisible = true"
+                                >
+                                    <Settings :size="11" />设备配置
+                                </button>
+                            </div>
+                            <p class="video-param-reconcile" :class="videoParamReconcileClass()" data-testid="video-param-reconcile" aria-live="polite">
+                                {{ videoParamReconcileTextText() }}
+                            </p>
+                            <p v-if="videoParamMismatchDetail()" class="video-param-mismatch" data-testid="video-param-mismatch">{{ videoParamMismatchDetail() }}</p>
+                            <p v-else-if="videoParamAbsentDetail()" class="video-param-absent" data-testid="video-param-absent">{{ videoParamAbsentDetail() }}</p>
+                            <!-- 码流分段数的出处要写在界面上:来自目录 <Info> 的 StreamNumberList 是
+                                 **设备声明**的能力;否则只能按已回读到的行数退化成"我们看到几路"。 -->
+                            <p
+                                v-if="videoParamStreamNumbers.length"
+                                class="video-param-streams"
+                                data-testid="video-param-streams"
+                                :data-source="videoParamStreamNumberList ? '设备声明' : '按回读行'"
+                            >
+                                码流分段：{{ videoParamStreamNumbers.join(" / ") }}（{{ videoParamStreamNumberList ? "设备声明" : "按已读取到的行" }}）
+                            </p>
+
+                            <div v-if="videoParamsDraft.length" class="video-param-list" data-testid="video-param-list">
+                                <div
+                                    v-for="row in videoParamsDraft"
+                                    :key="row.streamNumber"
+                                    class="video-param-row"
+                                    :data-dirty="videoParamDraftChanged(row) ? '1' : '0'"
+                                    :data-testid="`video-param-row-${row.streamNumber}`"
+                                >
+                                    <div class="video-param-row-hd">
+                                        <span>{{ videoParamRowText(row) }}</span>
+                                        <em v-if="videoParamDraftChanged(row)">已改</em>
+                                    </div>
+                                    <div class="video-param-fields">
+                                        <label>
+                                            编码格式
+                                            <select v-model="row.videoFormat" :disabled="!videoParamEditable" :data-testid="`video-param-format-${row.streamNumber}`">
+                                                <option value="1">MPEG-4</option>
+                                                <option value="2">H.264</option>
+                                                <option value="3">SVAC</option>
+                                                <option value="4">3GP</option>
+                                                <option value="5">H.265</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            分辨率
+                                            <input v-model.trim="row.resolution" :disabled="!videoParamEditable" :data-testid="`video-param-resolution-${row.streamNumber}`" placeholder="5 或 1920x1080" />
+                                        </label>
+                                        <label>
+                                            帧率
+                                            <input v-model.trim="row.frameRate" :disabled="!videoParamEditable" :data-testid="`video-param-frame-rate-${row.streamNumber}`" placeholder="0-99" />
+                                        </label>
+                                        <label>
+                                            码率类型
+                                            <select v-model="row.bitRateType" :disabled="!videoParamEditable" :data-testid="`video-param-bit-rate-type-${row.streamNumber}`">
+                                                <option value="1">CBR</option>
+                                                <option value="2">VBR</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            码率(kb/s)
+                                            <!-- ⛔ VBR 时该元素在报文里不出现,所以这一格必须禁用而不是"填了忽略" -->
+                                            <input
+                                                v-model.trim="row.videoBitRate"
+                                                :disabled="!videoParamEditable || videoParamBitRateDisabled(row)"
+                                                :data-testid="`video-param-bit-rate-${row.streamNumber}`"
+                                                placeholder="0-100000"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="video-param-hints">
+                                        <span :data-source="videoParamCellBadge(row, 'videoFormat')">{{ videoFormatText(row.videoFormat) }}</span>
+                                        <span :data-source="videoParamCellBadge(row, 'resolution')">{{ resolutionText(row.resolution) }}</span>
+                                        <span :data-source="videoParamCellBadge(row, 'frameRate')">{{ frameRateText(row.frameRate) }}</span>
+                                        <span :data-source="videoParamCellBadge(row, 'bitRateType')">{{ bitRateTypeText(row.bitRateType) }}</span>
+                                        <span :data-source="videoParamCellBadge(row, 'videoBitRate')">{{ videoBitRateText(row.videoBitRate) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p v-else class="video-param-empty" data-testid="video-param-empty">
+                                {{ videoParamEmptyTextText() }}
+                            </p>
+
+                            <!-- 对照区已搬到播放器下方的「视频参数」详情条 —— 横向三行读得更清,
+                                 也和"改在哪、验在哪"的大区语义一致。侧栏这里只留编辑表单与状态文案。
+                                 ⛔ 别把「回读」一行搬回来:它取的是设备事实(videoParams)而不是草稿,
+                                 放在编辑表单旁边容易被误读成"我刚改的值"。 -->
+
+                            <p v-if="videoParamsError" class="video-param-error" data-testid="video-param-error">{{ videoParamsError }}</p>
+                            <div class="video-param-actions">
+                                <button
+                                    class="btn-ghost xs uvp-refresh-btn"
+                                    data-testid="video-param-refresh"
+                                    :disabled="videoParamsPending || props.channel?.status !== 1"
+                                    @click="loadVideoParams(props.channel?.id, sessionToken, true)"
+                                >
+                                    <Loader2 v-if="videoParamsPending" :size="11" class="spin" /><RefreshCcw v-else :size="11" />读取设备参数
+                                </button>
+                                <button
+                                    class="btn-primary video-param-submit"
+                                    data-testid="video-param-submit"
+                                    :disabled="!videoParamEditable || videoParamDirtyCount === 0"
+                                    @click="applyVideoParams()"
+                                >
+                                    <Loader2 v-if="videoParamsApplying" :size="13" class="spin" /><Video v-else :size="13" />下发
+                                </button>
+                                <button v-if="videoParamDirtyCount > 0" class="btn-ghost xs" data-testid="video-param-revert" @click="revertVideoParams">还原</button>
+                                <span v-if="videoParamDirtyCount > 0" class="video-param-dirty" data-testid="video-param-dirty">已改 {{ videoParamDirtyCount }} 项</span>
+                            </div>
+                            <p v-if="props.channel?.status !== 1" class="video-param-offline" data-testid="video-param-offline">设备离线，无法读取或下发</p>
+                        </div>
 
                     </div>
                 </div>
             </aside>
+
+            <!-- 设备配置窗口（专业客户端形态）。⛔ 挂在顶层而不是详情区里 ——
+                 详情区整体在 `phase === 'playing'` 下,放进去就没播放时开不了。
+                 窗口的回读走它自己按 channelId 拉的那一次快照,不共用本页的 videoParamsDraft。
+                 ⛔ can-apply 也不能传本页的 videoParamEditable:它挂在本页草稿上
+                 (draft.length > 0),本页没点过「读取设备参数」时恒为 false,
+                 会把窗口的下发按钮永久按住。下发门禁只需「设备在线」,
+                 权限由 tab 的 canViewPtz 保证。 -->
+            <DeviceConfigDrawer
+                v-if="canViewPtz"
+                v-model:visible="deviceConfigVisible"
+                :device-code="props.channel?.deviceId || ''"
+                :online="props.channel?.status === 1"
+                :effective-version="videoParamRegisteredVersion"
+                :channel-id="props.channel?.id ?? null"
+                :channel-name="props.channel?.alias?.trim() || props.channel?.name?.trim() || ''"
+                :can-read="canViewPtz"
+                :can-apply="props.channel?.status === 1"
+            />
 
             <Transition name="asset-drawer">
                 <div v-if="canPtzPanel && assetManagerVisible" class="asset-manager-layer" data-testid="asset-manager">
@@ -5152,6 +5916,15 @@ onBeforeUnmount(() => {
     color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); border-color: var(--uvp-brand);
     box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
 }
+.console-window-action.is-config {
+    color: var(--uvp-brand-strong, var(--uvp-brand));
+    background: color-mix(in srgb, var(--uvp-brand) 5%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
+}
+.console-window-action.is-config:hover {
+    color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); border-color: var(--uvp-brand);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
+}
 .console-window-action.is-close {
     color: color-mix(in srgb, var(--uvp-danger) 76%, var(--uvp-text-secondary));
     background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-panel-bg));
@@ -5604,6 +6377,7 @@ onBeforeUnmount(() => {
 .linked-detail > .linked-ptz-layout,
 .linked-detail > .linked-probe-layout,
 .linked-detail > .linked-advanced-layout,
+.linked-detail > .linked-videoparam-layout,
 .linked-detail > .linked-image-layout,
 .linked-detail > .linked-advanced-empty { flex: 1 1 0; min-height: 0; }
 .linked-detail-hint {
@@ -5770,6 +6544,8 @@ onBeforeUnmount(() => {
     transition: background 0.12s ease, border-color 0.12s ease;
 }
 .preset-save-btn:hover:not(:disabled) { color: #fff; background: var(--uvp-brand); border-color: var(--uvp-brand); }
+/* 「设备配置」入口:同款描边小按钮,压在动作区最右。 */
+.device-config-open-btn { font-weight: 500; white-space: nowrap; }
 .preset-save-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 「从设备同步」药丸:预置位与巡航两张卡片共用同一个形态,位置也相同(动作区最左)。
  *
@@ -5937,6 +6713,7 @@ onBeforeUnmount(() => {
 /* 探针 tab 已经用两张独立 .probe-card 分块了,外层大卡片显得多余(卡里套卡)。
  * 用 activeTab 联动的 .sidebar-probe class 精确关掉,不动其他 tab 共用的样式。 */
 .sidebar-probe .panels,
+.sidebar-videoparam .panels,
 .sidebar-advanced .panels {
     padding: 0;
     background: transparent;
@@ -6550,6 +7327,29 @@ onBeforeUnmount(() => {
 .advanced-alarm-facts { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--uvp-text-secondary); font-size: 9px; }
 .advanced-fact-error { margin: 0; color: var(--uvp-danger); font-size: 9px; line-height: 1.4; }
 .advanced-status-refresh { justify-self: start; }
+/* 存储卡状态(A.2.4.14/A.2.6.16)：与"图像抓拍配置"同级的一张卡片。
+   用青色系而非品牌主色，避免和抓拍配置那张"要下发配置"的卡片在视觉上混为一类
+   —— 这张是**只读查询**。 */
+.storage-card-status { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; background: color-mix(in srgb, var(--uvp-brand-cyan) 5%, transparent); border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 20%, transparent); border-radius: 7px; }
+.storage-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.storage-card-heading span { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11px; font-weight: 600; }
+.storage-card-heading em { color: var(--uvp-brand-cyan); font-size: 9px; font-style: normal; }
+.storage-card-list { display: grid; gap: 7px; }
+.storage-card-item { display: grid; gap: 5px; }
+.storage-card-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.storage-card-name { min-width: 0; overflow: hidden; color: var(--uvp-text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.storage-card-state { flex: none; color: var(--uvp-text-tertiary); font-size: 9px; font-style: normal; }
+.storage-card-state.state-ok { color: var(--uvp-brand-cyan); }
+.storage-card-state.state-formatting, .storage-card-state.state-idle { color: var(--uvp-warning); }
+.storage-card-state.state-error { color: var(--uvp-danger); }
+.storage-card-bar { position: relative; height: 5px; overflow: hidden; background: var(--uvp-border); border-radius: 3px; }
+.storage-card-bar i { display: block; height: 100%; background: var(--uvp-brand-cyan); border-radius: 3px; }
+.storage-card-item[data-status="error"] .storage-card-bar i { background: var(--uvp-danger); }
+.storage-card-item[data-status="formatting"] .storage-card-bar i { background: var(--uvp-warning); }
+.storage-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--uvp-text-tertiary); font-size: 9px; }
+.storage-card-empty { margin: 0; color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.storage-card-error { margin: 0; color: var(--uvp-danger); font-size: 9px; line-height: 1.4; }
+.storage-card-refresh { display: inline-flex; align-items: center; justify-self: start; gap: 5px; }
 .snapshot-config { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; background: color-mix(in srgb, var(--uvp-brand) 6%, transparent); border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, transparent); border-radius: 7px; }
 .snapshot-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .snapshot-config-heading span { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11px; font-weight: 600; }
@@ -6562,6 +7362,54 @@ onBeforeUnmount(() => {
 .snapshot-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .snapshot-results a { display: grid; gap: 3px; color: var(--uvp-text-secondary); font-size: 8px; text-decoration: none; overflow: hidden; }
 .snapshot-results img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
+/* ─── 视频参数属性(A.2.1.13/A.2.4.7/A.2.3.2.5) ───
+   与存储卡/抓拍配置同族配色,单独一套类名:三张卡各自独立开关,
+   复用同一个类名会让"只改这一张卡"变成"三张一起动"。 */
+.video-param-config { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; background: color-mix(in srgb, var(--uvp-brand) 5%, transparent); border: 1px solid color-mix(in srgb, var(--uvp-brand) 20%, transparent); border-radius: 7px; }
+.video-param-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.video-param-heading span { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11px; font-weight: 600; }
+.video-param-heading em { margin-left: auto; color: var(--uvp-brand-cyan); font-size: 9px; font-style: normal; }
+/* ⛔ 语气分级靠类名而不是行内样式:mismatch 是"黄"不是"红"(设备没做错)。 */
+.video-param-reconcile { margin: 0; font-size: 9.5px; line-height: 1.45; }
+.video-param-reconcile.reconcile-idle { color: var(--uvp-text-tertiary); }
+.video-param-reconcile.reconcile-busy { color: var(--uvp-text-secondary); }
+.video-param-reconcile.reconcile-ok { color: var(--uvp-brand-cyan); }
+.video-param-reconcile.reconcile-warn { color: var(--uvp-warning); }
+.video-param-reconcile.reconcile-error { color: var(--uvp-danger); }
+.video-param-mismatch { margin: 0; color: var(--uvp-warning); font-size: 9px; line-height: 1.45; }
+.video-param-absent { margin: 0; color: var(--uvp-text-tertiary); font-size: 9px; line-height: 1.45; }
+.video-param-streams { margin: 0; color: var(--uvp-text-tertiary); font-size: 9px; line-height: 1.45; }
+.video-param-streams[data-source="设备声明"] { color: var(--uvp-text-secondary); }
+.video-param-list { display: grid; gap: 8px; }
+.video-param-row { display: grid; gap: 5px; padding: 7px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 6px; }
+.video-param-row[data-dirty="1"] { border-color: color-mix(in srgb, var(--uvp-warning) 45%, transparent); }
+.video-param-row-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--uvp-text-secondary); font-size: 10px; }
+.video-param-row-hd em { color: var(--uvp-warning); font-size: 9px; font-style: normal; }
+.video-param-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.video-param-fields label { display: grid; gap: 4px; min-width: 0; color: var(--uvp-text-tertiary); font-size: 9px; }
+.video-param-fields input, .video-param-fields select { width: 100%; min-width: 0; padding: 6px 7px; color: var(--uvp-text-primary); background: var(--uvp-bg); border: 1px solid var(--uvp-border); border-radius: 5px; }
+.video-param-fields input:disabled, .video-param-fields select:disabled { color: var(--uvp-text-tertiary); cursor: not-allowed; opacity: 0.7; }
+.video-param-hints { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--uvp-text-tertiary); font-size: 9px; }
+/* 来源徽标:回读命中=设备,设备没给=缺省。⛔ 不是装饰 —— 条件必选字段的缺席
+   必须一眼看得出,否则用户会把"设备没给"读成"设备给了个 0"。 */
+.video-param-hints span[data-source="设备"] { color: var(--uvp-text-secondary); }
+.video-param-hints span[data-source="缺省"] { color: var(--uvp-warning); }
+.video-param-empty { margin: 0; color: var(--uvp-text-tertiary); font-size: 9.5px; }
+/* 「视频参数」详情条(2026-09-18 从侧栏卡搬到 linked-detail-videoparam)。
+   148px 定高下只放一张卡:横向三行对照。值字号比侧栏大一档 —— 大区本来就窄不了。 */
+.linked-videoparam-layout { display: grid; grid-template-rows: minmax(0, 1fr); gap: 10px; min-height: 0; }
+.linked-videoparam-layout > .linked-section { display: flex; flex-direction: column; min-height: 0; }
+.vpc-grid { display: grid; flex: 1 1 0; gap: 5px; min-height: 0; align-content: start; padding: 8px 10px; background: color-mix(in srgb, var(--uvp-brand-cyan) 5%, transparent); border-radius: 6px; overflow-y: auto; }
+.vpc-hd { color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.vpc-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.vpc-row span { color: var(--uvp-text-tertiary); font-size: 10px; }
+.vpc-row strong { min-width: 0; color: var(--uvp-text-secondary); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.vpc-empty { margin: 0; padding: 10px 2px; color: var(--uvp-text-tertiary); font-size: 10.5px; line-height: 1.5; }
+.video-param-error { margin: 0; color: var(--uvp-danger); font-size: 9px; line-height: 1.4; }
+.video-param-offline { margin: 0; color: var(--uvp-text-tertiary); font-size: 9px; }
+.video-param-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.video-param-submit { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; border: 0; border-radius: 5px; cursor: pointer; }
+.video-param-dirty { color: var(--uvp-warning); font-size: 9px; }
 .adv-actions { display: grid; gap: 6px; }
 .linked-advanced-layout {
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));

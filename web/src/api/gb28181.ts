@@ -578,6 +578,196 @@ export const getDeviceStatus = (channelId: number, refresh = false) =>
     silentRequestConfig
   );
 
+/** A.2.6.16 的 Status 取值域（小写，与线上报文一致）。 */
+export type StorageCardState = "ok" | "formatting" | "unformatted" | "idle" | "error" | "unknown" | string;
+
+/**
+ * 一张存储卡的最近一次查询事实（GB/T 28181-2022 A.2.6.16 SDCardStatusInfo/Item）。
+ *
+ * 注意 Capacity/FreeSpace 单位都是 **MB**（标准原文「存储容量，单位：MB」），
+ * 服务端不做单位换算，换算交给展示层。
+ */
+export interface StorageCard {
+  id: number;
+  deviceId: number;
+  /** 本次查询用的目标编码：按设备查还是按通道查，决定这份卡列表属于哪条路径。 */
+  targetCode: string;
+  /** 标准里的 SD卡编号，从 1 开始。 */
+  cardId: number;
+  hddName: string;
+  status: StorageCardState;
+  /** 可选字段：只在 status=formatting 时有意义，0-100。null 表示设备没给。 */
+  formatProgress?: number | null;
+  capacityMb: number;
+  freeSpaceMb: number;
+  observedAt: string;
+  sourceSn?: number;
+}
+
+export interface StorageCardResult {
+  list: StorageCard[];
+  freshness: PTZResourceFreshness;
+  targetCode?: string;
+  observedAt?: string;
+  /** refresh=true 时服务端发起的 SIP 查询，前端据此轮询 operation 直到终态。 */
+  refreshOperationId?: string | null;
+  refreshError?: string | null;
+}
+
+/**
+ * 存储卡状态查询（GB/T 28181-2022 A.2.4.14 / A.2.6.16）。
+ *
+ * 与 device-status 同构：不带 refresh 只读平台缓存的事实；refresh=true 会先发起一次
+ * SDCardStatus 查询（SIP 应答异步），再用 refreshOperationId 去轮询。
+ * 空列表是合法结果（设备没装卡），不是错误。
+ */
+export const getChannelStorageCards = (channelId: number, refresh = false) =>
+  http.request<BaseResult<StorageCardResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/storage-cards`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+/**
+ * 一条码流的最近一次回读事实（GB/T 28181-2022 A.2.6.9 ConfigDownload 应答）。
+ *
+ * ⛔ 五个取值列**原样是附录 G 的码值字符串**（如 videoFormat="2"、resolution="5"）。
+ * 后端不做码值→人读串的转换，展示层也不要就地转 —— 一律走 `videoParamCodec.ts`
+ * 那组纯函数，否则对账时比的是两套表示。
+ */
+export interface VideoParam {
+  id: number;
+  deviceId: number;
+  /** 本次回读用的目标编码：按设备查还是按通道查，决定这份配置属于哪条路径。 */
+  targetCode: string;
+  /** 标准里的一路码流编号：0=主码流，1=子码流 1 … */
+  streamNumber: number;
+  videoFormat: string;
+  resolution: string;
+  frameRate: string;
+  bitRateType: string;
+  /**
+   * 单位 kb/s（附录 G）。**条件必选**：仅 CBR(1) 时才有值。
+   * null = 设备这一帧没给这个元素（VBR 下本就该缺席），与"设备给了个 0"是两件事。
+   */
+  videoBitRate?: string | null;
+  observedAt: string;
+  sourceSn?: number;
+}
+
+/** 面板四态（+ 两个过渡态）。判据由后端单点推导，前端只负责选文案。 */
+export type VideoParamReconcileStateName =
+  | "never_read"
+  | "pending"
+  | "read_ok"
+  | "type_absent"
+  | "mismatch"
+  | "failed";
+
+/**
+ * 「最近一次回读」的结论。⛔ 这是本面板与存储卡面板最大的不同：
+ * 写入的 ack（`Result=OK`）不构成终态（A.2.6.8 没有任何回显），
+ * 只有回读才说得清"设备认不认这个配置类型、值到底生效没有"。
+ */
+export interface VideoParamReconcile {
+  state: VideoParamReconcileStateName;
+  operationId?: string;
+  status?: string;
+  /** false = 设备回了 OK 但**没带** VideoParamAttribute 元素（= 不支持该类型）。 */
+  responseHasData?: boolean;
+  errorCode?: string;
+  /** 对账不一致时的逐格差异文本。 */
+  errorMessage?: string;
+  /** 设备侧原话（type_absent 的判定理由走这里）。 */
+  deviceError?: string;
+  completedAt?: string | null;
+  /** 该回读是否由一次下发派生（手动读取触发的回读不参与 mismatch 判定）。 */
+  derivedFromApply?: boolean;
+}
+
+export interface VideoParamResult {
+  list: VideoParam[];
+  freshness: PTZResourceFreshness;
+  targetCode?: string;
+  observedAt?: string;
+  /**
+   * 目录 `<Info>` 里的 StreamNumberList（2022 独有），决定面板按几段码流渲染。
+   * 空串 = 设备本次未上报目录属性，前端应退化成"按已回读到的行渲染"。
+   */
+  streamNumberList?: string;
+  /**
+   * 设备当前生效的协议版本（`gb_device.effective_version`）。
+   * ⛔ 只用来选提示措辞，**不参与任何门禁判断**：登记成 2022 的也可能没实现，
+   * 登记成 2016 的也可能提前实现 —— 唯一可靠判据是回读结果本身。
+   */
+  registeredVersion?: string;
+  reconcile: VideoParamReconcile;
+  /** refresh=true 时服务端发起的 SIP 读取，前端据此轮询 operation 直到终态。 */
+  refreshOperationId?: string | null;
+  refreshError?: string | null;
+}
+
+/** 下发的入参形状。⛔ streamNumber 必填：0 号是合法主码流，不能用"缺省"表达。 */
+export interface ApplyVideoParamItem {
+  streamNumber: number;
+  videoFormat: string;
+  resolution: string;
+  frameRate: string;
+  bitRateType: string;
+  /** 仅 CBR 必填；VBR 时留空（空串会被后端归一成"不发这个元素"）。 */
+  videoBitRate?: string | null;
+}
+
+export interface ApplyVideoParamsResult {
+  operationId?: string;
+  channelId?: string;
+  action: string;
+  sn?: number;
+  status?: PTZOperationStatus | string;
+  streamCount?: number;
+  /**
+   * ⛔ true 表示"命令已下发、结论未定"：ack 之后平台会自动回读对账，
+   * 界面必须轮询 GET 的 `reconcile` 收敛，不能把这次 200 当成功终态。
+   */
+  reconcilePending?: boolean;
+}
+
+/**
+ * 读取通道的视频参数（GB/T 28181-2022 A.2.4.7 ConfigDownload）。
+ *
+ * 与 storage-cards 同构：不带 refresh 只读平台缓存的事实；refresh=true 会先发起一次
+ * 读取（SIP 应答异步），再用 refreshOperationId 去轮询，收尾后重读一次。
+ * 空列表**不是**错误：可能是"还没读过"或"设备不认识这个配置类型"，看 `reconcile.state`。
+ */
+export const getChannelVideoParams = (channelId: number, refresh = false) =>
+  http.request<BaseResult<VideoParamResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/video-params`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+/**
+ * 下发通道的视频参数（GB/T 28181-2022 A.2.3.2.5 DeviceConfig）。
+ *
+ * ⛔ 写入**有副作用**（会真的改设备配置）：调用前必须先在本地校验取值
+ * （`videoParamCodec.ts` 的校验函数），否则服务端会拒发。
+ */
+export const applyChannelVideoParams = (
+  channelId: number,
+  items: ApplyVideoParamItem[],
+  idempotencyKey?: string
+) =>
+  http.request<BaseResult<ApplyVideoParamsResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/video-params`),
+    {
+      data: { items },
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    }
+  );
+
 export interface DeviceOperationResult {
   operationId?: string;
   channelId?: string;

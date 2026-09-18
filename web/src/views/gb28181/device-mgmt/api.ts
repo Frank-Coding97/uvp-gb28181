@@ -240,6 +240,21 @@ export interface ChannelVO {
     civilCode: string;
     parentId: string;
     ptzType: number;
+    // ---- 设备上报的通道属性(GB/T 28181 附录 A / §9.3.1)----
+    // ⛔ 0 / '' 一律表示"设备未上报该属性",不是"属性为 0"。
+    // 两版共有的四项在 Catalog Item 的 <Info> 容器内:
+    roomType: number; // 1-室外 2-室内(2016/2022 编码一致)
+    supplyLightType: number; // 1-无补光 2-红外 3-白光;2022 新增 4-激光 9-其他
+    directionType: number; // 1-东 2-西 3-南 4-北 5-东南 6-东北 7-西南 8-西北(两版一致)
+    resolution: string; // 如 1920*1080
+    // 两版共有的两项在 Catalog Item 层:
+    ipAddress: string;
+    port: number;
+    // 版本独有四项 —— 哪一组有值就说明设备报的是哪一版目录形态:
+    positionType: number; // 2016 独有:1-省际检查站 … 10-交通干线
+    useType: number; // 2016 独有:1-治安 2-交通 3-重点
+    photoelectricImagingType: string; // 2022 独有,可多值 "/" 分隔
+    capturePositionType: string; // 2022 独有,见 2022 附录 O
     longitude: number;
     latitude: number;
     status: number;

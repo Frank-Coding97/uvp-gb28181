@@ -562,6 +562,31 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 	switch operation.CmdType {
 	case manscdp.CmdDeviceStatus:
 		return manscdp.BuildDeviceStatusQueryWithProfile(profile, targetCode, operation.SN)
+	case manscdp.CmdSDCardStatus:
+		// 重试路径必须也能重建这一帧,否则超时后的第 2/3 次尝试会直接失败。
+		return manscdp.BuildSDCardStatusQueryWithProfile(profile, targetCode, operation.SN)
+	case manscdp.CmdConfigDownload:
+		var payload struct {
+			ConfigTypes []string `json:"configTypes"`
+		}
+		if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+			return nil, err
+		}
+		if len(payload.ConfigTypes) == 0 {
+			// 与 ReadVideoParams 建 operation 时写进去的取值保持一致。
+			// 空列表在这里兜底而不是报错:monitoring 里那些只带
+			// triggerOperationId 的对账 operation 也该能重建。
+			payload.ConfigTypes = []string{manscdp.ConfigTypeVideoParamAttribute}
+		}
+		return manscdp.BuildConfigDownloadQueryWithProfile(profile, targetCode, operation.SN, payload.ConfigTypes)
+	case manscdp.CmdDeviceConfig:
+		var payload struct {
+			Items []manscdp.VideoParamItem `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+			return nil, err
+		}
+		return manscdp.BuildVideoParamAttributeConfigWithProfile(profile, targetCode, operation.SN, payload.Items)
 	case manscdp.CmdHomePositionQuery:
 		return manscdp.BuildHomePositionQueryWithProfile(profile, targetCode, operation.SN)
 	case manscdp.CmdPresetQuery:

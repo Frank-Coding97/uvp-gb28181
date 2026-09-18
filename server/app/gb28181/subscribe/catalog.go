@@ -138,11 +138,37 @@ func isNegativeChannelStatusEvent(event string) bool {
 	return event == "OFF" || event == "VLOST" || event == "DEFECT"
 }
 
+// catalogItemFromMANSCDP 把 manscdp DTO 转 catalog DTO。
+//
+// ⛔ 必须与 handler/catalog.go 的 manscdpToCatalogItem **保持完全一致**:
+// 两者分别是「订阅 NOTIFY 路径」与「查询应答路径」的适配器,字段漏映射会让同一条目录项
+// 走两条路径落出不同结果 —— 此前这里漏了 BusinessGroupID,导致订阅来的通道
+// 在目录树里挂不到业务组织下(只有查询应答路径能挂)。
+//
+// ⛔ 通道属性都在 `<Info>` 容器内,经 InfoOrEmpty() 取。
+// ⛔ 版本独有属性(PositionType/UseType vs PhotoelectricImagingType/CapturePositionType)
+// 两版各自解析、并存落库,不做版本分支 —— 理由见 handler 侧同函数的注释。
 func catalogItemFromMANSCDP(item manscdp.CatalogItem) catalog.CatalogItem {
+	info := item.InfoOrEmpty()
 	return catalog.CatalogItem{
 		DeviceID: item.DeviceID, Name: item.Name, Manufacturer: item.Manufacturer,
 		Model: item.Model, Owner: item.Owner, CivilCode: item.CivilCode,
-		ParentID: item.ParentID, PTZType: item.PTZType, Longitude: item.Longitude,
+		ParentID: item.ParentID, BusinessGroupID: item.BusinessGroupID,
+		Parental: item.Parental, PTZType: item.PTZType, Longitude: item.Longitude,
 		Latitude: item.Latitude, StatusOn: item.IsOnline(),
+		Address: item.Address, Secrecy: int8(item.Secrecy), RegisterWay: int8(item.RegisterWay),
+
+		IPAddress:       item.IPAddress,
+		Port:            item.Port,
+		RoomType:        manscdp.ParseAttrInt(info.RoomType),
+		SupplyLightType: manscdp.ParseAttrInt(info.SupplyLightType),
+		DirectionType:   manscdp.ParseAttrInt(info.DirectionType),
+		Resolution:      info.Resolution,
+
+		PositionType:             manscdp.ParseAttrInt(info.PositionType),
+		UseType:                  manscdp.ParseAttrInt(info.UseType),
+		PhotoelectricImagingType: info.PhotoelectricImagingType,
+		CapturePositionType:      info.CapturePositionType,
+		StreamNumberList:         info.StreamNumberList,
 	}
 }

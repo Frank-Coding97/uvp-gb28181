@@ -15,17 +15,40 @@ const (
 
 // GbChannel 国标通道(设备下的视频通道,Catalog 填充)
 type GbChannel struct {
-	ID                      uint       `gorm:"primarykey" json:"id"`
-	ChannelID               string     `gorm:"column:channel_id;size:20;comment:通道国标编码" json:"channelId"`
-	DeviceID                string     `gorm:"column:device_id;size:20;comment:所属设备编码" json:"deviceId"`
-	Name                    string     `gorm:"column:name;size:255;comment:通道名称" json:"name"`
-	Alias                   string     `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
-	Manufacturer            string     `gorm:"column:manufacturer;size:255" json:"manufacturer"`
-	Model                   string     `gorm:"column:model;size:255" json:"model"`
-	Owner                   string     `gorm:"column:owner;size:64" json:"owner"`
-	CivilCode               string     `gorm:"column:civil_code;size:32;comment:行政区划" json:"civilCode"`
-	ParentID                string     `gorm:"column:parent_id;size:20;comment:父节点编码" json:"parentId"`
-	PTZType                 int8       `gorm:"column:ptz_type;comment:云台类型" json:"ptzType"`
+	ID           uint   `gorm:"primarykey" json:"id"`
+	ChannelID    string `gorm:"column:channel_id;size:20;comment:通道国标编码" json:"channelId"`
+	DeviceID     string `gorm:"column:device_id;size:20;comment:所属设备编码" json:"deviceId"`
+	Name         string `gorm:"column:name;size:255;comment:通道名称" json:"name"`
+	Alias        string `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
+	Manufacturer string `gorm:"column:manufacturer;size:255" json:"manufacturer"`
+	Model        string `gorm:"column:model;size:255" json:"model"`
+	Owner        string `gorm:"column:owner;size:64" json:"owner"`
+	CivilCode    string `gorm:"column:civil_code;size:32;comment:行政区划" json:"civilCode"`
+	ParentID     string `gorm:"column:parent_id;size:20;comment:父节点编码" json:"parentId"`
+	PTZType      int8   `gorm:"column:ptz_type;comment:云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道(5-7 为 2022 新增)" json:"ptzType"`
+	// ---- 通道属性(GB/T 28181 附录 A / §9.3.1),全部来自 Catalog Item 的 <Info> 容器 ----
+	// ⛔ 0 / '' 表示"设备未上报该属性",不是"该属性为 0" —— 落库侧据此决定是否覆盖。
+	RoomType        int8   `gorm:"column:room_type;default:0;comment:室内外 0未上报 1室外 2室内(两版编码一致)" json:"roomType"`
+	SupplyLightType int8   `gorm:"column:supply_light_type;default:0;comment:补光方式 0未上报 1无补光 2红外 3白光 4激光 9其他" json:"supplyLightType"`
+	DirectionType   int8   `gorm:"column:direction_type;default:0;comment:方向 0未上报" json:"directionType"`
+	Resolution      string `gorm:"column:resolution;size:32;default:'';comment:分辨率,如 1920*1080" json:"resolution"`
+	// ---- 版本独有属性:2016 与 2022 各占一半,并存落库 ----
+	// 设备上报哪一组,就说明它用的是哪一版目录形态;两组同时为空表示设备没报 <Info>。
+	// ⛔ 不做版本分支:设备注册声明的 EffectiveVersion 有 default:2016,对 2022 设备会误判。
+	PositionType             int8   `gorm:"column:position_type;default:0;comment:位置类型 0未上报 2016独有 1省际检查站…10交通干线" json:"positionType"`
+	UseType                  int8   `gorm:"column:use_type;default:0;comment:用途 0未上报 2016独有 1治安 2交通 3重点" json:"useType"`
+	PhotoelectricImagingType string `gorm:"column:photoelectric_imaging_type;size:32;default:'';comment:光电成像类型 2022独有,可多值 / 分隔" json:"photoelectricImagingType"`
+	CapturePositionType      string `gorm:"column:capture_position_type;size:32;default:'';comment:采集部位类型 2022独有,见附录O" json:"capturePositionType"`
+	// StreamNumberList 是设备声明的"支持的码流编号"列表（2022 独有，A.2.1.9 <Info> 内），
+	// 形如 "0/1" 或 "0/1/2"；空串 = 设备本次未上报。
+	//
+	// ⛔ 它在视频参数面板里是「按几段码流渲染」的唯一出处，**不是** VideoParamOpt ——
+	// 后者只有 DownloadSpeed + Resolution 两个字段，跟码流数量无关。
+	// 之前 B-2 那批判定它属"点播取流能力"而只解析不落库，本轮面板需要它，故补落。
+	StreamNumberList string `gorm:"column:stream_number_list;size:32;default:'';comment:支持的码流编号 2022独有,可多值 / 分隔,如 0/1 或 0/1/2" json:"streamNumberList"`
+	// IPAddress / Port 来自 Catalog Item 层(不是 <Info>),为设备声明的通道取流地址
+	IPAddress               string     `gorm:"column:ip_address;size:64;default:'';comment:设备声明的通道 IP(Catalog Item 层)" json:"ipAddress"`
+	Port                    int        `gorm:"column:port;default:0;comment:设备声明的通道端口(Catalog Item 层)" json:"port"`
 	Longitude               float64    `gorm:"column:longitude;comment:经度" json:"longitude"`
 	Latitude                float64    `gorm:"column:latitude;comment:纬度" json:"latitude"`
 	Status                  int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
@@ -71,13 +94,26 @@ func UpsertChannel(c context.Context, ch *GbChannel) error {
 	}
 	ch.ID = existing.ID
 	updates := map[string]any{
-		"name":          ch.Name,
-		"manufacturer":  ch.Manufacturer,
-		"model":         ch.Model,
-		"owner":         ch.Owner,
-		"civil_code":    ch.CivilCode,
-		"parent_id":     ch.ParentID,
-		"ptz_type":      ch.PTZType,
+		"name":              ch.Name,
+		"manufacturer":      ch.Manufacturer,
+		"model":             ch.Model,
+		"owner":             ch.Owner,
+		"civil_code":        ch.CivilCode,
+		"parent_id":         ch.ParentID,
+		"ptz_type":          ch.PTZType,
+		"room_type":         ch.RoomType,
+		"supply_light_type": ch.SupplyLightType,
+		"direction_type":    ch.DirectionType,
+		"resolution":        ch.Resolution,
+
+		"position_type":              ch.PositionType,
+		"use_type":                   ch.UseType,
+		"photoelectric_imaging_type": ch.PhotoelectricImagingType,
+		"capture_position_type":      ch.CapturePositionType,
+		"stream_number_list":         ch.StreamNumberList,
+
+		"ip_address":    ch.IPAddress,
+		"port":          ch.Port,
 		"longitude":     ch.Longitude,
 		"latitude":      ch.Latitude,
 		"status":        ch.Status,

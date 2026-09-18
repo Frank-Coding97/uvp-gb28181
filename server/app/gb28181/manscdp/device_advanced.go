@@ -461,7 +461,13 @@ func ParseControlCapabilities(raw *string, ptzType int8) ControlCapabilities {
 
 func basicPTZCapability(ptzType int8) ControlCapability {
 	switch ptzType {
-	case 1, 2, 4:
+	case 1, 2, 4, 5:
+		// 1球机 / 2半球 / 4遥控枪机 / 5遥控半球 —— 都是"可遥控"的云台结构。
+		// ⛔ 5 是 GB/T 28181-2022 新增(值域由 1-4 扩到 1-7):漏掉它会让 2022 设备上报的
+		// 遥控半球被判成 CapabilityUnknown,前端不显示云台控件。
+		// ⛔ 6(多目设备的全景/拼接通道)、7(多目设备的分割通道)**刻意不列入**:
+		// 标准未声明这两种结构必带云台,不能因"值域内"就臆断为支持 —— 保持
+		// CapabilityUnknown,由设备的能力 JSON 上报来定。
 		return ControlCapability{State: CapabilitySupported, Reason: "PTZType 明确为可控云台"}
 	case 3:
 		return ControlCapability{State: CapabilityUnsupported, Reason: "PTZType 明确为固定枪机"}

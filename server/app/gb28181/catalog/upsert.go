@@ -139,15 +139,28 @@ func upsertChannel(
 			recordingState = gbmodels.CloudRecordingStateWaiting
 		}
 		ch = gbmodels.GbChannel{
-			ChannelID:             item.DeviceID,
-			DeviceID:              sourceDeviceID,
-			Name:                  fallbackName(item.Name, item.DeviceID),
-			Manufacturer:          item.Manufacturer,
-			Model:                 item.Model,
-			Owner:                 item.Owner,
-			CivilCode:             resolvedCivilCode,
-			ParentID:              item.ParentID,
-			PTZType:               int8(item.PTZType),
+			ChannelID:       item.DeviceID,
+			DeviceID:        sourceDeviceID,
+			Name:            fallbackName(item.Name, item.DeviceID),
+			Manufacturer:    item.Manufacturer,
+			Model:           item.Model,
+			Owner:           item.Owner,
+			CivilCode:       resolvedCivilCode,
+			ParentID:        item.ParentID,
+			PTZType:         int8(item.PTZType),
+			RoomType:        int8(item.RoomType),
+			SupplyLightType: int8(item.SupplyLightType),
+			DirectionType:   int8(item.DirectionType),
+			Resolution:      item.Resolution,
+
+			PositionType:             int8(item.PositionType),
+			UseType:                  int8(item.UseType),
+			PhotoelectricImagingType: item.PhotoelectricImagingType,
+			CapturePositionType:      item.CapturePositionType,
+			StreamNumberList:         item.StreamNumberList,
+
+			IPAddress:             item.IPAddress,
+			Port:                  item.Port,
 			Longitude:             item.Longitude,
 			Latitude:              item.Latitude,
 			Status:                status,
@@ -182,10 +195,48 @@ func upsertChannel(
 			"owner":        item.Owner,
 			"civil_code":   resolvedCivilCode,
 			"parent_id":    item.ParentID,
-			"ptz_type":     int8(item.PTZType),
 			"longitude":    item.Longitude,
 			"latitude":     item.Latitude,
 			"status":       status,
+		}
+		// ⛔ 通道属性只在设备**本次确实上报了**才覆盖:0 / "" 一律按"未上报"处理。
+		// 无条件写会把上一次的已知属性清零 —— 设备这一轮没发 <Info>、或只带 Status 的
+		// UPDATE 事件,都会把已有的云台类型/室内外/补光方式/分辨率抹掉。
+		// (ptz_type 一并纳入:解析层修好 <Info> 之后它才第一次真能拿到值,原样无条件覆盖
+		//  反而会变成新的丢数据点。)
+		for column, value := range map[string]int8{
+			"ptz_type":          int8(item.PTZType),
+			"room_type":         int8(item.RoomType),
+			"supply_light_type": int8(item.SupplyLightType),
+			"direction_type":    int8(item.DirectionType),
+			// 版本独有属性:2016 的 PositionType/UseType 与 2022 的
+			// PhotoelectricImagingType/CapturePositionType 互斥,各自按"本次是否上报"覆盖。
+			"position_type": int8(item.PositionType),
+			"use_type":      int8(item.UseType),
+		} {
+			if value != 0 {
+				updates[column] = value
+			}
+		}
+		if item.PhotoelectricImagingType != "" {
+			updates["photoelectric_imaging_type"] = item.PhotoelectricImagingType
+		}
+		if item.CapturePositionType != "" {
+			updates["capture_position_type"] = item.CapturePositionType
+		}
+		// StreamNumberList 同理：只有本次真的带了这个元素才覆盖，
+		// 否则一次只报 Status 的 UPDATE 事件会把已学到的码流清单抹掉。
+		if item.StreamNumberList != "" {
+			updates["stream_number_list"] = item.StreamNumberList
+		}
+		if item.Resolution != "" {
+			updates["resolution"] = item.Resolution
+		}
+		if item.IPAddress != "" {
+			updates["ip_address"] = item.IPAddress
+		}
+		if item.Port != 0 {
+			updates["port"] = item.Port
 		}
 		if ownerDeptID != 0 && ch.OwnerDeptID == 0 {
 			updates["owner_dept_id"] = ownerDeptID

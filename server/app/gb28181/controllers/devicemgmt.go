@@ -624,7 +624,7 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 	}
 	var body struct {
 		Alias        *string `json:"alias"`
-		PTZType      *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机
+		PTZType      *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道
 		AudioEnabled *bool   `json:"audioEnabled"`
 		OnDemandLive *bool   `json:"onDemandLive"` // 无人观看时是否自动关闭
 	}
@@ -632,9 +632,12 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 		dc.FailAndAbort(c, "请求体不合法", err)
 		return
 	}
-	// 校验 PTZType 合法性
-	if body.PTZType != nil && (*body.PTZType < 0 || *body.PTZType > 4) {
-		dc.FailAndAbort(c, "摄像头类型非法,仅支持 0-4", nil)
+	// 校验 PTZType 合法性。
+	// ⛔ 上限是 7 不是 4:GB/T 28181-2022 附录 A 把云台结构类型从 1-4 扩到了 1-7
+	// (5遥控半球 / 6多目设备的全景·拼接通道 / 7多目设备的分割通道)。
+	// 旧校验 `> 4` 会把这些 2022 设备上报的真实类型判为非法,人工也改不了。
+	if body.PTZType != nil && (*body.PTZType < 0 || *body.PTZType > 7) {
+		dc.FailAndAbort(c, "摄像头类型非法,仅支持 0-7(5-7 为 2022 新增)", nil)
 		return
 	}
 	// 构建更新字段

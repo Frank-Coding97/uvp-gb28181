@@ -122,6 +122,43 @@ const api = vi.hoisted(() => {
         refreshError: null
       }
     }),
+    // 存储卡状态(A.2.4.14/A.2.6.16)。默认回**空列表** —— 空列表是合法结果
+    // （设备没装卡），不是错误；需要"有卡"的用例自己 mockResolvedValueOnce 覆盖。
+    getChannelStorageCards: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { list: [], freshness: "unknown", refreshOperationId: null, refreshError: null }
+    }),
+    // 视频参数属性(A.2.1.13 写 / A.2.3.2.5 读)。默认回**空列表 + never_read** ——
+    // "设备还没被回读过视频参数"是合法状态(2016 设备本就无此配置类型),不是错误;
+    // 需要"有值"的用例自己 mockResolvedValueOnce 覆盖。
+    // ⛔ 应答里**没有**下发回显:Result=OK 不代表配置生效,结论只能来自 reconcile。
+    getChannelVideoParams: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        list: [],
+        freshness: "unknown",
+        targetCode: "0411212755",
+        streamNumberList: "",
+        reconcile: { state: "never_read" },
+        refreshOperationId: null,
+        refreshError: null
+      }
+    }),
+    applyChannelVideoParams: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        operationId: "video-param-op-1",
+        channelId: "1",
+        action: "refresh_video_params",
+        sn: 1,
+        status: "queued",
+        streamCount: 1,
+        reconcilePending: true
+      }
+    }),
     fetchPTZDefaultSpeedConfig: vi.fn().mockResolvedValue({ code: 0, message: "", data: { level: 6 } }),
     listPtzPresets: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: presets, freshness: "fresh" } }),
     listCruiseTracks: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: cruises, freshness: "fresh" } }),
@@ -243,6 +280,43 @@ async function requestDeviceStatus(wrapper: VueWrapper) {
   await flushPromises();
 }
 
+/** 视频参数回读应答。`reconcile` 是唯一权威结论(下发应答没有回显)。 */
+function videoParamsResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    code: 0,
+    message: "",
+    data: {
+      list: [],
+      freshness: "unknown",
+      targetCode: channel.channelId,
+      streamNumberList: "",
+      registeredVersion: "2022",
+      reconcile: { state: "never_read" },
+      refreshOperationId: null,
+      refreshError: null,
+      ...overrides
+    }
+  };
+}
+
+/** 一路码流的回读值（码值字符串，不是人读串）。 */
+function videoParamRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    deviceId: 1,
+    targetCode: channel.channelId,
+    streamNumber: 0,
+    videoFormat: "2",
+    resolution: "6",
+    frameRate: "25",
+    bitRateType: "1",
+    videoBitRate: "4096",
+    observedAt: "2026-09-18T10:00:00Z",
+    sourceSn: 7,
+    ...overrides
+  };
+}
+
 async function openHomeSettings(wrapper: VueWrapper) {
   await wrapper.get("[data-testid='home-configure']").trigger("click");
   await nextTick();
@@ -342,6 +416,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     api.getTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", mode: "broadcast", state: "active", expiresAt: "" } });
     api.deleteTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", state: "ended" } });
+    api.getChannelVideoParams.mockReset();
+    api.getChannelVideoParams.mockResolvedValue(videoParamsResponse());
+    api.applyChannelVideoParams.mockReset();
+    api.applyChannelVideoParams.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        operationId: "video-param-op-1",
+        channelId: "1",
+        action: "apply_video_params",
+        sn: 1,
+        status: "queued",
+        streamCount: 1,
+        reconcilePending: true
+      }
+    });
   });
 
   afterEach(() => {
@@ -1137,7 +1227,64 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("侧栏与详情条按 tab 分工，云台/探针/高级各司其职", async () => {
+  it("「视频参数」tab 的侧栏入口能打开设备配置窗口，换通道后自动收起", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel }
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    // 没点入口之前窗口不该渲染（它是 v-if 挂载的浮层）
+    expect(wrapper.find(".dcg-window").exists()).toBe(false);
+
+    const open = wrapper.get("[data-testid='linked-open-device-config']");
+    expect(open.text()).toContain("设备配置");
+    await open.trigger("click");
+    await flushPromises();
+
+    const drawer = wrapper.get(".dcg-window");
+    // 上下文必须是当前通道：设备编码 + 通道名都在标题栏上
+    expect(drawer.text()).toContain("设备配置");
+    expect(drawer.text()).toContain(channel.deviceId);
+    expect(drawer.text()).toContain(channel.name);
+
+    // ⛔ 不跟 activeTab 走:入口已经在标题栏上,切 tab 就关会让人一脸问号。
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".dcg-window").exists()).toBe(true);
+
+    // 真正必须收的理由:窗口里是按 channelId 拉的一次性快照,换通道留着会串数据。
+    await wrapper.setProps({ channel: { ...channel, id: 999, channelId: "34020000001320000099" } });
+    await flushPromises();
+    expect(wrapper.find(".dcg-window").exists()).toBe(false);
+  });
+
+  it("标题栏入口不依赖 tab：开窗即见，云台栏下也能开", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel }
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    // 默认落在云台控制栏 —— 侧栏那处入口此时是 v-show 隐藏的
+    expect(wrapper.get("[data-testid='linked-tab-ptz']").classes()).toContain("active");
+    expect(wrapper.find(".dcg-window").exists()).toBe(false);
+
+    const open = wrapper.get("[data-testid='play-console-open-device-config']");
+    expect(open.text()).toContain("设备配置");
+    await open.trigger("click");
+    await flushPromises();
+
+    const drawer = wrapper.get(".dcg-window");
+    expect(drawer.text()).toContain(channel.deviceId);
+  });
+
+  it("侧栏与详情条按 tab 分工，云台/探针/高级/视频参数各司其职", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel }
@@ -1186,7 +1333,50 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(advancedDetail.text()).not.toContain("亮度");
     expect(advancedDetail.text()).not.toContain("接口待接入");
     expect(advancedDetail.text()).toContain("标准控制字段");
+    // ⛔ 视频参数已从"高级"拆成独立 tab（2026-09-18）。别让它被顺手加回"高级" ——
+    //    那样"高级"又变回四张卡的杂货铺，而且这块配置会失去独立入口。
+    expect(advancedSide.text()).not.toContain("视频参数属性");
 
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    const vpSide = wrapper.get("[data-testid='linked-side-videoparam']");
+    const vpDetail = wrapper.get("[data-testid='linked-detail-videoparam']");
+    // 侧栏留编辑表单与状态文案；三行对照下移到详情条（见"对照搬到详情条"用例）。
+    expect(vpSide.text()).toContain("视频参数属性");
+    expect(vpSide.text()).not.toContain("设备控制");
+    expect(vpSide.text()).not.toContain("图像抓拍配置");
+    // ⛔ 对照区必须**只在**详情条：留在编辑表单旁边会被误读成"我刚改的值"。
+    expect(vpSide.find("[data-testid='video-param-compare']").exists()).toBe(false);
+    expect(vpDetail.text()).toContain("参数对照");
+    expect(vpDetail.findAll(".linked-videoparam-layout > .linked-section")).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
+  it("视频参数：三行对照渲染在播放器下方详情条，侧栏只留编辑表单", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        list: [videoParamRow({ id: 1, streamNumber: 0, resolution: "6" })],
+        freshness: "fresh",
+        reconcile: { state: "read_ok", operationId: "vp-op-0", status: "accepted", responseHasData: true }
+      })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    const detail = wrapper.get("[data-testid='linked-detail-videoparam']");
+    const compare = detail.get("[data-testid='video-param-compare']");
+    // 三行都在详情条里 —— 这是"改在哪、验在哪同屏"的落点。
+    expect(compare.text()).toContain("下发");
+    expect(compare.text()).toContain("回读");
+    expect(compare.text()).toContain("实测");
+    // ⛔ 「回读」行取**设备事实**（码值 6 → 1080P），不是草稿值。
+    expect(detail.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
+
+    // 侧栏留表单、不留对照；对照只在详情条。
+    const side = wrapper.get("[data-testid='linked-side-videoparam']");
+    expect(side.find("[data-testid='video-param-compare']").exists()).toBe(false);
+    expect(side.find("[data-testid='video-param-row-0']").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -1762,6 +1952,320 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(facts).toContain("设备未录制");
     expect(facts).toContain("已布防");
     expect(facts).not.toContain("设备录制中");
+    wrapper.unmount();
+  });
+
+  it("渲染存储卡状态并可发起查询", async () => {
+    api.getChannelStorageCards.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        list: [
+          {
+            id: 1,
+            deviceId: 1,
+            targetCode: "0411212755",
+            cardId: 1,
+            hddName: "SD Card 1",
+            status: "ok",
+            formatProgress: null,
+            capacityMb: 32768,
+            freeSpaceMb: 24576,
+            observedAt: "2026-09-17T10:00:00Z"
+          }
+        ],
+        freshness: "fresh",
+        refreshOperationId: null,
+        refreshError: null
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    const card = wrapper.get("[data-testid='storage-card-status']");
+    expect(card.text()).toContain("存储卡状态");
+    expect(card.text()).toContain("SD Card 1");
+    expect(card.text()).toContain("正常");
+    // 容量单位在展示层换算：32768 MB → 32.0 GB，24576 MB → 24.0 GB。
+    expect(card.text()).toContain("24.0 GB 可用 / 32.0 GB");
+
+    api.getChannelStorageCards.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { list: [], freshness: "unknown", refreshOperationId: "sc-op-1", refreshError: null }
+    });
+    await wrapper.get("[data-testid='storage-card-refresh']").trigger("click");
+    await flushPromises();
+    // refresh=true 只是"发起查询"，真正的应答要靠轮询 operation。
+    expect(api.getChannelStorageCards).toHaveBeenLastCalledWith(channel.id, true);
+    wrapper.unmount();
+  });
+
+  it("设备无存储卡时展示空态而不是错误", async () => {
+    // 空列表是合法结果（标准 SumNum=0 且不带 SDCardStatusInfo），
+    // 不能和"查询失败"用同一套措辞 —— 否则现场会把正常设备当成故障。
+    api.getChannelStorageCards.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { list: [], freshness: "fresh", refreshOperationId: null, refreshError: null }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    const card = wrapper.get("[data-testid='storage-card-status']");
+    expect(card.text()).toContain("设备未安装存储卡");
+    expect(wrapper.find("[data-testid='storage-card-error']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("渲染视频参数回读事实：码值只在这一层转人读串，码流分段来自目录声明", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        list: [
+          videoParamRow({ id: 1, streamNumber: 0 }),
+          videoParamRow({ id: 2, streamNumber: 1, resolution: "5", bitRateType: "2", videoBitRate: null })
+        ],
+        freshness: "fresh",
+        streamNumberList: "0/1",
+        reconcile: { state: "read_ok", operationId: "vp-op-0", status: "accepted", responseHasData: true }
+      })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    // 打开面板只读平台缓存，**不发 SIP 报文**（refresh=false）。
+    expect(api.getChannelVideoParams).toHaveBeenCalledWith(channel.id, false);
+    expect(wrapper.get("[data-testid='video-param-reconcile']").text()).toBe("已读取设备当前配置");
+
+    // 「按几段码流渲染」的出处是目录 <Info> 的 StreamNumberList，不是"我们看到几行"。
+    const streams = wrapper.get("[data-testid='video-param-streams']");
+    expect(streams.text()).toContain("0 / 1");
+    expect(streams.attributes("data-source")).toBe("设备声明");
+
+    // ⛔ 码值→人读串只发生在展示层：库里与报文里永远是 "2"/"6"/"25"。
+    // 因此这里断言的是提示行与控件的**取值**，而不是 select 的文本 ——
+    // select 的文本把全部候选项都算在内，断言它等于什么都没断言。
+    const row0 = wrapper.get("[data-testid='video-param-row-0']");
+    expect(row0.get(".video-param-hints").text()).toBe("H.2641080P25 fpsCBR4096 kb/s");
+    expect((row0.get("[data-testid='video-param-format-0']").element as HTMLSelectElement).value).toBe("2");
+    expect((row0.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("6");
+
+    // 子码流是 VBR → 码率元素缺席，显示"未提供"；这与"设备报了个 0"是两件事。
+    const row1 = wrapper.get("[data-testid='video-param-row-1']");
+    expect(row1.get(".video-param-hints").text()).toBe("H.264720P25 fpsVBR未提供");
+
+    // 对照区的「回读」行取设备事实：改草稿不该动它（下方 mismatch 用例另有锁定）。
+    expect(wrapper.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
+    wrapper.unmount();
+  });
+
+  it("视频参数面板：VBR 时码率格禁用，越界取值本地拦住不发报文", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    const bitRate = wrapper.get("[data-testid='video-param-bit-rate-0']").element as HTMLInputElement;
+    expect(bitRate.disabled).toBe(false);
+
+    // CBR → VBR：该元素在报文里根本不出现，所以这一格必须禁用，
+    // 而不是"可以填但会被忽略"（填了忽略会让人以为填的值生效了）。
+    await wrapper.get("[data-testid='video-param-bit-rate-type-0']").setValue("2");
+    await nextTick();
+    expect(bitRate.disabled).toBe(true);
+
+    // 帧率 120 超附录 G 的范围：本地拦住，一个字节都不发。
+    await wrapper.get("[data-testid='video-param-frame-rate-0']").setValue("120");
+    await nextTick();
+    const submit = wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement;
+    expect(submit.disabled).toBe(false); // 有脏值即可下发，越界与否由点击时的校验拦
+    await wrapper.get("[data-testid='video-param-submit']").trigger("click");
+    await flushPromises();
+
+    expect(api.applyChannelVideoParams).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='video-param-error']").text()).toContain("帧率必须是 0-99 的整数");
+    wrapper.unmount();
+  });
+
+  it("下发视频参数不把 200 当终态：轮询回读后展示设备结论", async () => {
+    // 写入应答（A.2.6.8）没有任何回显 —— Result=OK 只说明"收到并接受"。
+    // 所以下发之后必须等自动回读落地，界面结论只能来自 reconcile。
+    vi.useFakeTimers();
+    api.getChannelVideoParams
+      .mockResolvedValueOnce(
+        videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
+      )
+      .mockResolvedValue(
+        videoParamsResponse({
+          // 真实形态就是这样：设备从没给出过数据，所以一行都没落库。
+          list: [],
+          freshness: "fresh",
+          reconcile: {
+            state: "type_absent",
+            operationId: "vp-op-1",
+            status: "accepted",
+            responseHasData: false,
+            deviceError: "应答未携带 VideoParamAttribute 元素"
+          }
+        })
+      );
+    api.getPtzOperation.mockResolvedValue(operationResponse("accepted", "video-param-op-1", null));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await nextTick();
+    expect(wrapper.get("[data-testid='video-param-row-0']").attributes("data-dirty")).toBe("1");
+    expect(wrapper.get("[data-testid='video-param-dirty']").text()).toBe("已改 1 项");
+
+    await wrapper.get("[data-testid='video-param-submit']").trigger("click");
+    await flushPromises();
+    expect(api.applyChannelVideoParams).toHaveBeenCalledWith(
+      channel.id,
+      [expect.objectContaining({ streamNumber: 0, videoFormat: "2", resolution: "5", frameRate: "25", bitRateType: "1", videoBitRate: "4096" })],
+      expect.stringContaining("video-param-")
+    );
+
+    // 轮询到终态后静默重读一次，把 reconcile 结论带回来。
+    await vi.advanceTimersByTimeAsync(400);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "video-param-op-1");
+
+    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
+    expect(reconcile.text()).toBe("设备未返回此配置类型（厂商未实现该类型）");
+    // ⛔ type_absent 是"一种结论"而不是失败：设备回了 OK 却没带该元素
+    // （2016 设备与未实现该类型的厂商都是这个形态）→ 黄色提示，不是红色报错。
+    expect(reconcile.classes()).toContain("reconcile-warn");
+    expect(wrapper.get("[data-testid='video-param-absent']").text()).toContain("VideoParamAttribute");
+    // 列表空着的时候也不能说成"尚未读取" —— 那会把能力问题说成操作问题。
+    expect(wrapper.get("[data-testid='video-param-empty']").text()).toBe("设备未返回该配置类型的参数");
+    wrapper.unmount();
+  });
+
+  it("生效版本 2016 只加版本提示，不动按钮也不改判据", async () => {
+    // §十③：被误登记成 2016 的真 2022 设备，不试一次就永远用不了这功能。
+    // 所以版本只影响措辞 —— 按钮照样能用，结论照样由回读给出。
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        registeredVersion: "2016",
+        reconcile: {
+          state: "type_absent",
+          operationId: "vp-op-9",
+          status: "accepted",
+          responseHasData: false,
+          deviceError: "应答未携带 VideoParamAttribute 元素"
+        }
+      })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
+    expect(reconcile.text()).toContain("平台按 2016 版处理");
+    // ⛔ "设备不支持"不是"用户不许试"的理由：读取按钮仍可用。
+    expect((wrapper.get("[data-testid='video-param-refresh']").element as HTMLButtonElement).disabled).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("对账不一致按提示展示，且不因此禁用编辑与下发", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        list: [videoParamRow()],
+        freshness: "fresh",
+        reconcile: {
+          state: "mismatch",
+          operationId: "vp-op-2",
+          status: "accepted",
+          responseHasData: true,
+          errorCode: "VIDEO_PARAM_RECONCILE_MISMATCH",
+          errorMessage: '设备已接受命令，但回读值不一致 —— 码流 0 的 Resolution: 下发 "5" 回读 "6"'
+        }
+      })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
+    expect(reconcile.text()).toBe("设备已接受命令，但值未生效");
+    // ⛔ mismatch 是能力边界（下发 1080P、设备只到 720P），设备没做错 → 黄不是红。
+    expect(reconcile.classes()).toContain("reconcile-warn");
+    expect(reconcile.classes()).not.toContain("reconcile-error");
+    // 逐格差异必须露出来，否则用户只知道"没生效"、不知道差在哪一格。
+    expect(wrapper.get("[data-testid='video-param-mismatch']").text()).toContain("Resolution");
+
+    // ⛔ 设备给的结论不是"用户不许试"的理由：字段仍可改、改完仍可下发。
+    const resolution = wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement;
+    expect(resolution.disabled).toBe(false);
+    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await nextTick();
+    expect((wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement).disabled).toBe(false);
+
+    // 还原回设备事实，脏值计数归零。
+    await wrapper.get("[data-testid='video-param-revert']").trigger("click");
+    await nextTick();
+    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("6");
+    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("设备离线时视频参数面板禁用读写并说明原因", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel: { ...channel, status: 0 } } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    expect(wrapper.get("[data-testid='video-param-offline']").text()).toContain("设备离线");
+    expect((wrapper.get("[data-testid='video-param-refresh']").element as HTMLButtonElement).disabled).toBe(true);
+    expect((wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement).disabled).toBe(true);
+    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).disabled).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("切换通道后视频参数面板换成新通道的回读值，不残留上一台的草稿", async () => {
+    api.getChannelVideoParams
+      .mockResolvedValueOnce(
+        videoParamsResponse({
+          list: [videoParamRow()],
+          freshness: "fresh",
+          streamNumberList: "0/1",
+          reconcile: { state: "read_ok" }
+        })
+      )
+      .mockResolvedValue(
+        videoParamsResponse({
+          list: [videoParamRow({ id: 3, targetCode: "0411212888", resolution: "4", videoBitRate: "2048" })],
+          freshness: "fresh",
+          streamNumberList: "",
+          reconcile: { state: "read_ok" }
+        })
+      );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+
+    // 先制造一格"脏草稿"，再切通道 —— 新通道的值不能被旧草稿遮住。
+    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await nextTick();
+    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(true);
+
+    const nextChannel = { ...channel, id: 2, channelId: "0411212888", deviceId: "34020000001320000003", name: "园区西门" };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+
+    expect(api.getChannelVideoParams).toHaveBeenLastCalledWith(2, false);
+    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("4");
+    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(false);
+    // 新通道目录没上报 StreamNumberList → 退化成"按已读取到的行"，并如实标注来源。
+    expect(wrapper.get("[data-testid='video-param-streams']").attributes("data-source")).toBe("按回读行");
     wrapper.unmount();
   });
 
@@ -4113,14 +4617,19 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find("[data-testid='linked-tab-probe']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='linked-tab-ptz']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(false);
+    // 「视频参数」tab 用 canViewPtz 门禁 —— 游客没有 ptz:view，整栏都不该挂载。
+    expect(wrapper.find("[data-testid='linked-tab-videoparam']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-side-ptz']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-side-advanced']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-side-videoparam']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-detail-ptz']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-detail-advanced']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-detail-videoparam']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='probe-start']").exists()).toBe(false);
     expect(wrapper.find(".protocol-copy-btn").exists()).toBe(false);
     expect(api.getControlCapabilities).not.toHaveBeenCalled();
     expect(api.getHomePosition).not.toHaveBeenCalled();
+    expect(api.getChannelVideoParams).not.toHaveBeenCalled();
     expect(api.controlPtz).not.toHaveBeenCalled();
     expect(api.createTalkSession).not.toHaveBeenCalled();
     expect(api.createStreamProbe).not.toHaveBeenCalled();

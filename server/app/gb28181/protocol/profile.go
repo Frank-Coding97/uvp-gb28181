@@ -69,6 +69,20 @@ type Capabilities struct {
 	// command pair. 同 HomePositionQuery:控制层(PTZCmd 0x84~0x88)2016 就有,
 	// 只有**回读**这一半是 2022 新增(标准修订说明:9.5.3、A.2.4.10~A.2.4.14)。
 	CruiseTrackQuery bool
+	// VideoParamAttribute is the 2022-only "视频参数属性" **配置类型**
+	// (A.2.1.13 / A.2.3.2.5)。⛔ 注意它的粒度比上面两个细一层:
+	// `DeviceConfig` / `ConfigDownload` 这两条**命令** 2016 就有
+	// (2016 的 ConfigType 有 4 个取值),2022 新增的是**配置类型清单**里的
+	// VideoParamAttribute / VideoRecordPlan / … 那 8 项。
+	// 所以"命令发得出去"与"设备认这个类型"是两件事 —— 详见
+	// docs/gb28181-2022-device-config-ambiguity.md §六 与
+	// docs/gb28181-2022-video-param-attribute-panel.md §十。
+	//
+	// ⚠️ 当前**没有调用方**,刻意保留为"平台自己决定要发写入"的判据位:
+	// 操作员手点「下发」、以及 ack 之后自动追加的**回读**对账都不该被它挡
+	// —— 前者是"不试一次就永远用不了"的探明手段,后者是一次读、最坏只烧一个 SN,
+	// 而它恰好是判定"设备到底认不认这个类型"的唯一可靠依据。
+	VideoParamAttribute bool
 }
 
 // ResponseSemantic captures whether an action has a standard application
@@ -149,7 +163,7 @@ func ProfileFor(version Version) Profile {
 			Version:       Version(Version2022),
 			Charset:       Charset(CharsetGB18030),
 			IFrameElement: "IFrameCmd",
-			Capabilities:  Capabilities{PrecisePTZ: true, HomePositionQuery: true, CruiseTrackQuery: true},
+			Capabilities:  Capabilities{PrecisePTZ: true, HomePositionQuery: true, CruiseTrackQuery: true, VideoParamAttribute: true},
 			PrecisePTZ:    true,
 			Responses:     defaultResponsePolicy(),
 		}
@@ -158,7 +172,7 @@ func ProfileFor(version Version) Profile {
 		Version:       Version(Version2016),
 		Charset:       Charset(CharsetGB2312),
 		IFrameElement: "IFameCmd",
-		Capabilities:  Capabilities{PrecisePTZ: false, HomePositionQuery: false, CruiseTrackQuery: false},
+		Capabilities:  Capabilities{PrecisePTZ: false, HomePositionQuery: false, CruiseTrackQuery: false, VideoParamAttribute: false},
 		PrecisePTZ:    false,
 		Responses:     defaultResponsePolicy(),
 	}
@@ -246,6 +260,24 @@ func (p Profile) SupportsHomePositionQuery() bool {
 // 查询**不能**用它挡 —— 门禁只拦平台自发,不拦操作员点出来的(同 SupportsHomePositionQuery)。
 func (p Profile) SupportsCruiseTrackQuery() bool {
 	return p.Capabilities.CruiseTrackQuery
+}
+
+// SupportsVideoParamAttribute reports whether this profile's ConfigType list
+// includes "视频参数属性" — a 2022 addition (2016 has only 4 config types).
+//
+// ⚠️ 当前**没有调用方**，且刻意如此。它只为"平台自己决定要发一次写入"这类
+// 动作准备判断位；下面两种情况都**不该**被它挡：
+//
+//   - 操作员手点「下发」：被误登记成 2016 的真 2022 设备，不试一次就永远
+//     用不了这个功能（同 SupportsHomePositionQuery 的既有口径）。
+//   - ack 之后自动追加的**回读**对账：那是一次读，最坏结果只是超时烧一个 SN，
+//     而它正是"设备到底认不认这个类型"的唯一可靠依据 —— 挡掉判定手段等于
+//     把结论也一起挡掉。
+//
+// 判定"设备不支持"必须**以回读结果为准**（应答里没有 `VideoParamAttribute`
+// 元素），不以本方法为准：登记值只是"登记的说法"，回读才是设备的实际回答。
+func (p Profile) SupportsVideoParamAttribute() bool {
+	return p.Capabilities.VideoParamAttribute
 }
 
 // AdvertisedVersion is the normalized result of parsing X-GB-Ver.

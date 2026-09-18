@@ -80,6 +80,19 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 	switch head.CmdType {
 	case manscdp.CmdDeviceStatus:
 		return s.applyDeviceStatusResponse(ctx, operation, callID, cseq, body)
+	case manscdp.CmdSDCardStatus:
+		// 存储卡状态查询是一次应答即终态，与 PresetQuery 那族的 queryStage
+		// 聚合无关（见 applyStorageCardResponse 的注释），所以单独一支。
+		return s.applyStorageCardResponse(ctx, operation, callID, cseq, body)
+	case manscdp.CmdConfigDownload:
+		// 视频参数属性的**回读**。它同时服务于两个入口：操作员手点的「读取设备参数」，
+		// 以及 DeviceConfig 被设备 ack 之后平台自动追加的对账子 operation。
+		return s.applyConfigDownloadResponse(ctx, operation, callID, cseq, body)
+	case manscdp.CmdDeviceConfig:
+		// 配置写入应答（A.2.6.8）。⛔ 这一支内部**不会**把 operation 收在 accepted：
+		// 它会在同一个事务里追加一条 ConfigDownload 对账子 operation，
+		// 因为写入应答没有回显，Result=OK 说明不了值有没有生效。
+		return s.applyDeviceConfigResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
 		return s.applyQueryResponse(ctx, operation, callID, cseq, *head, body)
 	case manscdp.CmdDeviceControl:
@@ -146,7 +159,9 @@ func (s *Service) findPTZMessageOperation(ctx context.Context, deviceCode, callI
 	if head.CmdType == manscdp.CmdDeviceStatus || head.CmdType == manscdp.CmdPresetQuery ||
 		head.CmdType == manscdp.CmdHomePositionQuery || head.CmdType == manscdp.CmdCruiseTrackListQuery ||
 		head.CmdType == manscdp.CmdCruiseTrackQuery || head.CmdType == manscdp.CmdDeviceControl ||
-		head.CmdType == manscdp.CmdPTZPreciseStatusQuery || head.CmdType == manscdp.CmdPTZPosition {
+		head.CmdType == manscdp.CmdPTZPreciseStatusQuery || head.CmdType == manscdp.CmdPTZPosition ||
+		head.CmdType == manscdp.CmdSDCardStatus || head.CmdType == manscdp.CmdConfigDownload ||
+		head.CmdType == manscdp.CmdDeviceConfig {
 		query = query.Where("status IN ?", []gbmodels.PTZOperationStatus{
 			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
 		})

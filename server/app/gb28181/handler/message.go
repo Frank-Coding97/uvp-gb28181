@@ -194,7 +194,10 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxRecord
 	case manscdp.CmdDeviceControl:
 		return metrics.TxPTZ
-	case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+	case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdSDCardStatus, manscdp.CmdConfigDownload, manscdp.CmdDeviceConfig:
+		// 设备配置族(ConfigDownload 读 / DeviceConfig 写)归 TxPTZ:
+		// TxKind 是固定 8 类的枚举(AllTxKinds 有测试锁死长度),而配置同属
+		// "平台主动发起、等设备应答"的那一类事务,与 SDCardStatus 的既有归法一致。
 		return metrics.TxPTZ
 	case "Alarm":
 		return metrics.TxAlarm
@@ -417,12 +420,25 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
 			}
-		case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+		case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdSDCardStatus:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					logger.Warn("GB28181 PTZ 查询应答处理失败",
 						zap.String("event", "gb28181.message.ptz_query_failed"),
 						zap.String("operation", "status_query"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
+				}
+			}
+		case manscdp.CmdConfigDownload, manscdp.CmdDeviceConfig:
+			// 设备配置族。⛔ 与上面那支**分开**:按本仓 C01.4 的既有判据,
+			// 一个 event 名只装一件事 —— 配置失败混进 "ptz_query_failed" 会被
+			// PTZ 查询失败稀释,而这两类报文与处置都不同(配置写入还挂着一条
+			// "下发 → 自动回读 → 对账"的链路)。
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
+					logger.Warn("GB28181 设备配置应答处理失败",
+						zap.String("event", "gb28181.message.device_config_failed"),
+						zap.String("operation", "device_config"), zap.String("device_id", head.DeviceID),
 						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
 				}
 			}

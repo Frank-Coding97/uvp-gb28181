@@ -101,6 +101,11 @@ func ParseCatalogNotify(body []byte) (*CatalogNotify, error) {
 	if notify.CmdType != CmdCatalog || notify.DeviceID == "" {
 		return nil, fmt.Errorf("非法 Catalog NOTIFY")
 	}
+	// ⛔ 同 ParseCatalogResponse:PTZType / BusinessGroupID 在 <Info> 内,
+	// 解码阶段拿不到,必须逐项归一化。漏了这一步只影响订阅路径,极难发现。
+	for i := range notify.DeviceList.Items {
+		notify.DeviceList.Items[i].normalize()
+	}
 	return &notify, nil
 }
 

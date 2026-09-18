@@ -7,7 +7,12 @@
  * 数据: 全 mock,不发任何真实请求
  */
 import { ref } from "vue";
+import { useUserStoreHook } from "@/store/modules/user";
 import PlayConsoleLinked from "./components/PlayConsoleLinked.vue";
+
+// 原型页没有登录态 ⇒ userStore 权限为空 ⇒ 云台 / 探针 / 视频参数这些 tab 全都不显示。
+// 补上演示权限，让原型页能看到完整联动布局（真实页面仍走后端下发的权限）。
+useUserStoreHook().account.permissions = ["*:*:*"];
 
 const visible = ref(true);
 const displayMode = ref<"expanded" | "minimized">("expanded");

@@ -220,7 +220,15 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 }
 
 // manscdpToCatalogItem 把 manscdp DTO 转 catalog DTO(无依赖,易测)
+//
+// ⛔ 通道属性(RoomType / SupplyLightType / DirectionType / Resolution)都在 `<Info>` 容器内,
+// 经 manscdp.CatalogItem.InfoOrEmpty() 取;容器缺失(minOccurs=0)时为零值 = "未上报"。
+// ⛔ 版本独有属性同样在 `<Info>` 内:2016 的 PositionType/UseType 与 2022 的
+// PhotoelectricImagingType/CapturePositionType **两版各自解析、并存落库**,不做版本分支 ——
+// 设备注册声明的版本(GbDevice.EffectiveVersion)有 `default:2016`,对 2022 设备会误判,
+// 而这两组字段在 XSD 上互斥,谁来上报就落谁,天然可以反推设备实际形态。
 func manscdpToCatalogItem(it manscdp.CatalogItem) catalog.CatalogItem {
+	info := it.InfoOrEmpty()
 	return catalog.CatalogItem{
 		DeviceID:        it.DeviceID,
 		Name:            it.Name,
@@ -238,5 +246,20 @@ func manscdpToCatalogItem(it manscdp.CatalogItem) catalog.CatalogItem {
 		Address:         it.Address,
 		Secrecy:         int8(it.Secrecy),
 		RegisterWay:     int8(it.RegisterWay),
+
+		IPAddress:       it.IPAddress,
+		Port:            it.Port,
+		RoomType:        manscdp.ParseAttrInt(info.RoomType),
+		SupplyLightType: manscdp.ParseAttrInt(info.SupplyLightType),
+		DirectionType:   manscdp.ParseAttrInt(info.DirectionType),
+		Resolution:      info.Resolution,
+
+		PositionType:             manscdp.ParseAttrInt(info.PositionType),
+		UseType:                  manscdp.ParseAttrInt(info.UseType),
+		PhotoelectricImagingType: info.PhotoelectricImagingType,
+		CapturePositionType:      info.CapturePositionType,
+		// 码流编号列表：2022 独有。视频参数面板按它渲染码流分段，
+		// 空值 = 设备本次未上报，面板据此退化成"按已知回读行数渲染"。
+		StreamNumberList: info.StreamNumberList,
 	}
 }

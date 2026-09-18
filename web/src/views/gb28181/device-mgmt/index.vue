@@ -93,6 +93,7 @@ import AddToGroupDialog from "./components/AddToGroupDialog.vue";
 import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
+import { catalogShapeFromAttributes, catalogShapeText, channelAttributeEntries } from "./channelAttributeText";
 import { createDirectoryState, customGroupBatchActions, directoryQuery, findDirectoryNode, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
@@ -450,6 +451,17 @@ function cameraTypeText(ptzType?: number | null) {
     if (ptzType === null || ptzType === undefined) return "未知";
     const item = ptzTypeOptions.value.find(opt => Number(opt.value) === ptzType);
     return item?.name || "未知";
+}
+// 通道详情里的「设备上报属性」区块(GB/T 28181 附录 A / §9.3.1)。
+// 2016 与 2022 的版本独有属性(2016: 位置类型/用途;2022: 光电成像类型/采集部位类型)并存展示,
+// 哪一组有值就说明设备报的是哪一版目录形态 —— 不读设备声明的 effectiveGbVersion(它有 default:2016,
+// 对 2022 设备会误判)。映射与判定逻辑都在 channelAttributeText.ts,此处只取数。
+const channelAttributeRows = computed(() => channelAttributeEntries(channelDetail.value ?? {}));
+const channelCatalogShapeText = computed(() => catalogShapeText(catalogShapeFromAttributes(channelDetail.value ?? {})));
+function channelAttributeScopeText(scope: "both" | "2016" | "2022") {
+    if (scope === "2016") return "仅 2016";
+    if (scope === "2022") return "仅 2022";
+    return "两版共有";
 }
 function modelVersionText(item: { model?: string; firmware?: string }) {
     return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
@@ -2683,6 +2695,21 @@ onUnmounted(() => {
                         <div v-if="timeline.length" class="timeline-strip">
                             <span v-for="slot in timeline" :key="slot.start" :class="{ online: slot.status === 'online' }"></span>
                         </div>
+                        <section class="info-group catalog-attr-group">
+                            <div class="group-label">
+                                设备上报属性
+                                <span class="attr-shape">{{ channelCatalogShapeText }}</span>
+                            </div>
+                            <div class="field-grid">
+                                <template v-for="row in channelAttributeRows" :key="row.key">
+                                    <span class="k">
+                                        {{ row.label }}
+                                        <em v-if="row.scope !== 'both'" class="attr-scope">{{ channelAttributeScopeText(row.scope) }}</em>
+                                    </span>
+                                    <span class="v" :class="{ unreported: !row.reported }">{{ row.value }}</span>
+                                </template>
+                            </div>
+                        </section>
                         <section class="info-group meta-group">
                             <div class="group-label">元数据</div>
                             <div class="field-grid">
@@ -4821,6 +4848,27 @@ onUnmounted(() => {
 .field-grid .v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, "PingFang SC", monospace; }
 .field-grid .v .muted { color: var(--uvp-text-tertiary); font-size: 12px; margin-left: 4px; }
 .field-grid .v .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* 设备上报属性区块:把「未上报」与「值为 0」在视觉上区分开(未上报用弱化斜体),
+   并把版本独有属性的归属(仅 2016 / 仅 2022)标出来,便于一眼分辨设备报的是哪一版形态。 */
+.catalog-attr-group .group-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.catalog-attr-group .attr-shape {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--uvp-shell-muted);
+    color: var(--uvp-text-secondary);
+}
+.field-grid .k .attr-scope {
+    margin-left: 4px;
+    font-style: normal;
+    font-size: 10px;
+    color: var(--uvp-text-tertiary);
+    opacity: 0.8;
+}
+.field-grid .v.unreported { color: var(--uvp-text-tertiary); font-style: italic; }
 .inline-dot {
     display: inline-block;
     width: 6px;

@@ -858,6 +858,11 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
 			dmgmt.GET("/channel/:id/device-status", deviceMgmtController.GetDeviceStatus)
+			dmgmt.GET("/channel/:id/storage-cards", deviceMgmtController.GetChannelStorageCards)
+			// 视频参数属性(GB/T 28181-2022 A.2.1.13):读走 ConfigDownload,写走 DeviceConfig。
+			// ⛔ 两者同路径不同方法,权限也分档:读 gb28181:ptz:view、写 gb28181:ptz:control。
+			dmgmt.GET("/channel/:id/video-params", deviceMgmtController.GetChannelVideoParams)
+			dmgmt.POST("/channel/:id/video-params", deviceMgmtController.ApplyChannelVideoParams)
 			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
 			dmgmt.POST(gbcontrollers.TalkCreateRoute, func(c *gin.Context) { talkController.Load().Create(c) })
 			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Get(c) })

@@ -33,6 +33,12 @@ func skipIfChannelSchemaStale(t *testing.T) {
 	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "current_ssrc") {
 		t.Skipf("跳过(MySQL gb_channel 缺 current_ssrc 列,请先跑 migration 2026-08-10-fixed-address-current-ssrc.sql)")
 	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "room_type") {
+		t.Skipf("跳过(MySQL gb_channel 缺 room_type 列,请先跑 migration 2026-09-18-channel-catalog-attributes.sql)")
+	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "stream_number_list") {
+		t.Skipf("跳过(MySQL gb_channel 缺 stream_number_list 列,请先跑 migration 2026-09-18-channel-video-param.sql)")
+	}
 	if app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "tenant_id") {
 		t.Skipf("跳过(MySQL gb_channel 仍有 tenant_id 列,请先跑 Phase 2 去租户迁移)")
 	}
