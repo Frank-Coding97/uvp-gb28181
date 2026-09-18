@@ -4,6 +4,8 @@
 > **`docs/gb28181-2022-master-backlog.md`**（全量 61 条实施单，组织口径：模拟器实现功能、平台有操作入口）。
 >
 > 核查日期：2026-09-17（v2，补「设备配置」家族 + 修正图像抓拍结论）
+> ⚠️ **2026-09-18 局部更新**：§1.1 的 `VideoParamAttribute` 已随 A-5 落地
+> （见 §1.1-A 的两处补记与 §2.1 末行）。**其余结论仍是 09-17 口径**，未重新核查。
 > 核查方式：代码级逐项核对（非依赖既有文档结论）
 > 核查对象：
 > - 平台（SIP 服务端 / 上级平台）`/Users/menglulu/code/uvp/UVP-GB28181`，分支 `develop`
@@ -31,7 +33,7 @@
 | 10 | 增加 **看守位信息查询、巡航轨迹列表查询、巡航轨迹查询、PTZ 精准状态查询、存储卡状态查询**及应答 | 9.5.3、A.2.4.10~14、A.2.6.12~16 |
 | 11 | 增加 **PTZ 精准位置变化事件订阅和通知** | 9.11.1、9.11.2 |
 | 12 | 增加 **设备软件升级、图像抓拍**信令流程和协议接口 | 9.13、9.14 |
-| 13 | 附录 A 扩充：Info→**ExtraInfo** 标签、Channel 字段格式变更、A.4 联网系统扩展应用 | 附录 A |
+| 13 | 附录 A 扩充：~~Info→**ExtraInfo** 标签~~（⛔ 2026-09-17 核实**不成立**：`ExtraInfo` 全标准出现 0 次，容器名仍为 `Info`）、Channel 字段格式变更、A.4 联网系统扩展应用 | 附录 A |
 | 14 | 附录 D 基于 TCP 的视音频媒体传输（原 2016 附录 L） | 附录 D |
 | 15 | 附录 E 扩展类型编码：第 14 位改 **网络标识**、新增县以下区划代码 | 附录 E |
 | 16 | 附录 G SDP 扩展：**a=ssvcratio（SVC）**、a 字段可带**媒体编号**（主/子码流选择）、s 字段删除 Talk | 附录 G |
@@ -57,7 +59,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `BasicParam` | 基本参数（名称/注册有效期/心跳） | 有 | 有 | 未实现 | 读 ✅ / 写 只记录 |
 | `VideoParamOpt` | 视频参数范围 | 有 | 有 | 未实现 | 读 ✅ / 写 ✗ |
-| `VideoParamAttribute` | 视频参数属性（编码格式/分辨率/帧率/码率） | ✗ | **新增** | 未实现 | ✗ |
+| `VideoParamAttribute` | 视频参数属性（编码格式/分辨率/帧率/码率） | ✗ | **新增** | ✅ 已实现（2026-09-18，写+读+回读对账；见 §1.1-A） | ✗ |
 | `SVACEncodeConfig` / `SVACDecodeConfig` | SVAC 编解码配置 | 有 | 有 | 未实现 | ✗（显式忽略仍回 OK） |
 | `VideoRecordPlan` | 录像计划 | ✗ | **新增** | 未实现 | ✗ |
 | `VideoAlarmRecord` | 报警录像 | ✗ | **新增** | 未实现 | ✗ |
@@ -67,10 +69,47 @@
 | `AlarmReport` | 报警上报开关（按事件类型配置上报） | ✗ | **新增** | 未实现 | ✗ |
 | `SnapShotConfig` | 图像抓拍配置（一次性，非常驻配置） | ✗ | **新增** | ⚠️ 能下发但 CmdType 用错 | 能收但 Android 未落地 |
 
-**平台侧整体结论**：`server/` 全仓 **`ConfigDownload` / `ConfigType` / `BasicParam` /
-`VideoParamOpt` / `VideoParamAttribute` / `PictureMask` / `FrameMirror` / `OSDConfig` /
-`AlarmReport` 零匹配**。也就是说平台**连「读设备当前配置」都做不到**，
-只有 `SnapShotConfig` 一处（且 CmdType 不合规，见 2.3）。
+> ⛔ **「2016」列的判定依据（2026-09-18 钉死，勿再写「待查」）**：2016 版附录 A
+> A.2.4 的注释**逐字列出的可查配置类型只有 4 个** —— `BasicParam`、`VideoParamOpt`、
+> `SVACEncodeConfig`、`SVACDecodeConfig`（OCR 原文见
+> `docs/gb28181-2022-device-config-ambiguity.md` §六）。上表 8 个标 **`✗`** 的类型
+> （含 `VideoParamAttribute` **与 `VideoRecordPlan` / `VideoAlarmRecord`**）
+> **全部是 2022 新增**，2016 全文不含这些词 —— 不是「待查」。
+> ⚠️ 但要注意：**「2016 没有这个类型」不等于「发出去会坏」** ——
+> 协议骨架是向后兼容的同层追加（同上文档 §六-A），2016 设备**一定能解析**报文，
+> 只是不认识那个 `ConfigType`；危害在于「宽松解析器回 `Result=OK` 却什么都没改」
+> 这种**假成功**，因此 A-5 的判定手段是**强制回读对账**，不是 profile 门禁
+> （见下 §1.1-A）。
+
+**平台侧整体结论**（⚠️ **2026-09-18 部分失效，见下方补记**）：`server/` 全仓
+**`ConfigDownload` / `ConfigType` / `BasicParam` / `VideoParamOpt` / `VideoParamAttribute` /
+`PictureMask` / `FrameMirror` / `OSDConfig` / `AlarmReport` 零匹配**。也就是说平台
+**连「读设备当前配置」都做不到**，只有 `SnapShotConfig` 一处（且 CmdType 不合规，见 2.3）。
+
+> **⚠️ 补记（2026-09-18）**：上段是 **2026-09-17 的核查快照**，其中
+> **`VideoParamAttribute` 一项已失效** —— 该类型已随 A-5 落地：
+> `manscdp/video_param.go`（构建/解析/附录 G 校验）、`ptz/video_param.go`（写 `DeviceConfig`、
+> 读 `ConfigDownload`、ack 同事务排自动回读对账、逐格 diff）、
+> `models/gb_device_video_param.go`（+ `gb_channel.stream_number_list`）、
+> `controllers/device_video_param.go`（`GET/POST /channel/:id/video-params`）、
+> 前端 `videoParamCodec.ts` + 播放控制台「高级」第 4 张卡。
+> 其余八项（`BasicParam` / `VideoParamOpt` / SVAC 两族 / `PictureMask` / `FrameMirror` /
+> `OSDConfig` / `AlarmReport` / 录像计划两族）**仍未实现**，该结论继续成立。
+>
+> **§1.1-A `VideoParamAttribute` 的关键口径（写给后来人）**：
+> 1. **不加 profile 门禁**。2016 设备收到不认识的 `ConfigType` 时，标准**没规定**怎么回；
+>    最危险的是「宽松解析器回 `Result=OK` 却什么都没改」= **假成功**。
+>    ⇒ 真相由**强制回读对账**暴露，不由 profile 断言；被误登记成 2016 的真 2022 设备
+>    不试一次就永远用不了这功能。
+> 2. **`Result=OK` 不是终态**。写入应答 A.2.6.8 **没有回显** ⇒ 平台在 ack 的同一事务里
+>    追加一条 `ConfigDownload` 对账子 operation，逐格比对后才出结论。
+> 3. **四态判据**（`ptz.DeriveVideoParamReconcileState`，纯函数）：
+>    `never_read` / `pending` / `read_ok` / `type_absent`（回 OK 但**没带**该元素 ⇒
+>    等价「设备不支持」，**最可靠判据**）/ `mismatch`（已接受但值未生效 ⇒ **能力边界提示，
+>    不是失败**）/ `failed`。
+> 4. **取值出处是附录 G 的 SDP `f` 字段**（标准页 130），不是 `VideoParamOpt` 的回读范围；
+>    且**码流段数**由目录 `Info/StreamNumberList` 决定 —— 详见
+>    `docs/gb28181-2022-video-param-attribute-panel.md`。
 
 **模拟器侧**：有 `ConfigDownloadResponse.kt`，但只支持 `BasicParam` + `VideoParamOpt`
 两个读，其余 `ConfigType` **显式忽略但仍回 `Result=OK`**（`ConfigDownloadResponse.kt:61`）
@@ -92,6 +131,8 @@
 | 多父级挂载（A/B 拆分） | `catalog/dto.go:28`、`gb_channel_mount`、`pipeline.go:251` |
 | 精准云台控制 PTZPreciseCtrl | `manscdp/ptz_precise.go` |
 | 精准状态查询 / 看守位查询 / 巡航轨迹列表 / 轨迹详情 | `ptz/query.go:34-39`（QueryKind 五类） |
+| **存储卡状态查询**（2026-09-17，**刻意不走 `QueryKind`**，见 2.2 P-1） | `manscdp/storage_card.go`、`ptz/storage_card.go`、`models/gb_storage_card.go`、`controllers/device_storage_card.go`、`routes/routes.go` |
+| **视频参数属性读写 `VideoParamAttribute`**（2026-09-18，配置家族第一项落地；写 `DeviceConfig` / 读 `ConfigDownload` + **强制回读对账**） | `manscdp/video_param.go`、`ptz/video_param.go`（含 `DeriveVideoParamReconcileState`）、`models/gb_device_video_param.go`、`controllers/device_video_param.go`、`routes/routes.go`、`web/src/views/gb28181/videoParamCodec.ts`、`web/src/views/gb28181/components/PlayConsoleLinked.vue`（高级 tab 第 4 卡） |
 | 图像抓拍：下发 + 完成通知接收 + HTTP 收图落盘（⚠️ 默认私有口径，见 2.3） | `manscdp/snapshot.go`、`controllers/device_snapshot.go:89`、`devicecapture/registry.go:125,175` |
 | 设备软件升级：下发 + 升级结果状态机 | `manscdp/device_upgrade.go`、`upgrade/service.go`、`controllers/device_firmware_upgrade.go` |
 | 拉框放大/缩小 DragZoom | `manscdp/device_advanced.go:85,242` |
@@ -104,7 +145,7 @@
 
 | # | 缺失能力 | 条款 | 现状说明 |
 | --- | --- | --- | --- |
-| P-1 | **存储卡状态查询** | A.2.4.14 | 全仓 `*.go` 无 `SDCard`/`StorageCard`；`ptz/query.go` 的 QueryKind 只有 5 类，无卡状态 |
+| ~~P-1~~ | ~~**存储卡状态查询**~~ **✅ 已实现（2026-09-17，主单 C-1）** | A.2.4.14 / A.2.6.16 | 原判「全仓 `*.go` 无 `SDCard`/`StorageCard`」**已过时**：现为 `manscdp/storage_card.go`（报文，27 单测）+ `ptz/storage_card.go`（收发落库，9 单测）+ `models/gb_storage_card.go` + `controllers/device_storage_card.go` + `routes.go` 路由 + 三方言迁移 6 文件。⚠️ **未走 `ptz/query.go` 的 `QueryKind`**（该处只有 5 类，本项刻意不并入）—— 理由见主单 C-1：附录 M 的多响应聚合三类**不含** `SDCardStatus`，A.2.6.16 一次应答即终态 |
 | P-2 | **格式化 SD 卡** | A.2.3.1.13 | 无任何代码（⚠️ 破坏性命令，若做必须带权限门禁） |
 | P-3 | **目标跟踪 TargetTrack** | A.2.3.1.14 | 无任何代码 |
 | P-4 | **注册重定向（302）** | 9.1.2.3 | 无 302 应答（仅 third_party/sipgo 常量）— **❌ 已决策暂不做** |
@@ -121,8 +162,8 @@
 | P-15 | **固件分发 HTTP 服务** | 9.13 | 升级 FileURL 由外部提供，平台不托管固件下载 |
 | P-16 | **NTP 校时** | 9.10 | 无 NTP 客户端（仅 SIP Date） |
 | P-17 | 报警实时推送 | 工程项 | 入库/查询有，缺 Webhook/WebSocket 实时外推 |
-| P-18 | **目录 2022 新字段不解析** | 附录 J | `manscdp/catalog.go:34-50` 无 `IPAddress`/`Port`/`PositionType`/`RoomType`/`UseType`/`SupplyLightType`/`DirectionType`/`Resolution` → **即使设备上报也会被静默丢弃** |
-| P-19 | **MobilePosition NOTIFY 2022 列表形态不识别（且须兼容 2016 扁平）** | 9.11.2.3 c）/ A.2.5.6 | `manscdp.MobilePositionNotify`（`subscription.go:107`）只有 2016 扁平字段，无 `SumNum`/`DeviceList`/`Item`。⛔ 后果**不是报错而是静默吞掉**：顶层 `DeviceID` 两版都有 → `DeviceID != ""` 守卫放行；`Longitude/Latitude` 解出 0 → 通过 `[-180,180]` 范围校验；再到 `subscribe/position.go` 的「位置坐标不能为 0」**被拒收** → 该设备在前端「设备管理 · 地图」永远没有位置。**修法：同一解析器内认两种形态（2022 优先、扁平回落），并把 `Item` 内的 `DeviceID` 落库**；**2016 路径必须回归通过**。⚠️ 与 S-27 成对，只改一侧看不到变化 |
+| P-18 | **目录通道属性字段不解析** | 附录 J | ✅ **已修复（2026-09-18，B-2）**。原状：`manscdp/catalog.go` 只声明 `PTZType`+`BusinessGroupID` 且**都在 `Item` 层**，而标准把它们放在 `<Info>` 内、Go `encoding/xml` 不递归 → `IPAddress`/`Port`/`PositionType`/`RoomType`/`UseType`/`SupplyLightType`/`DirectionType`/`Resolution` **即使设备上报也被静默丢弃**（连带 `gb_channel.ptz_type` 恒为 0）。现：新增 `CatalogInfo` 双版本并存解析 + `gb_channel` 十列 + 通道详情展示。⚠️ 原记「2022 新字段」不准确 —— 其中 `PositionType`/`UseType` 是 **2016 独有**（2022 已删），详见 `gb28181-2022-master-backlog.md` 的 B-1/B-2 行 |
+| P-19 | ~~**MobilePosition NOTIFY 2022 列表形态不识别**~~ **✅ 已实现（2026-09-17）** | 9.11.2.3 c）/ A.2.5.6 | `manscdp.MobilePositionNotify` 改造为**双形态共存**：新增 `MobilePositionItem`（A.2.1.14，含 `Height`）+ `MobilePositionDeviceList`，`SumNum` / `DeviceList` 用**指针**（区分「元素不存在」与「值为 0 / 空」），新增 `Positions()` 做跨版本归一化（照 `ParseAlarmNotify` 的「根字段 + 嵌套 `Info` 双读」先例）。⭐ **判定为列表形态后就在列表语义里走到底**：`DeviceList` 在场但 `Item` 为空 → 空切片，**绝不回落扁平字段**（回落会拿根上 0 值坐标合成 (0,0) 假位置）。`PositionProcessor.Process` 改为遍历 `Positions()`：单条脏数据只跳过该条 + zap warn、**不连坐同包其它设备**，整包全废才报错；`SumNum=0` 返回 `nil`（返回 error 会让 `notify.go:73` 提前 return、`last_notify_at` 不更新）。⚠️ 与 S-27 成对 —— 两侧都改完才算通。`Height` 目前**只解析不落库**（无对应列，需另开迁移单） |
 
 ### 2.3 ⚠️ 合规疑点：图像抓拍走的是私有口径（能跑通 ≠ 合规）
 
@@ -148,7 +189,8 @@
 精准云台控制与精准状态查询、看守位（含设备侧自动归位）、巡航轨迹列表/详情、辅助控制、
 TeleBoot / RecordCmd / GuardCmd / AlarmCmd / IFameCmd / DragZoom、DeviceUpgrade（含结果 NOTIFY）、
 图像抓拍协议链（SnapShotCmd + SnapShotConfig + 上传引擎 + NOTIFY）、目标跟踪与格式化 SD 卡**解析**、
-目录订阅与增量 NOTIFY、报警上报与报警状态查询、MobilePosition（**订阅 + 周期 NOTIFY**，⚠️ 现仅 **2016 扁平**形态，见 S-27）、
+**存储卡状态查询（标准 `SDCardStatus` 收发 + 随机假数据，2026-09-17）**、
+目录订阅与增量 NOTIFY、报警上报与报警状态查询、MobilePosition（**订阅 + 周期 NOTIFY**，2026-09-17 起**双版本并存**：2022 列表 / 2016 扁平，按 `effectiveGbVersion` 分支）、
 PTZ 精准位置订阅与通知、RecordInfo / Playback / Download / MediaStatus(121/122/123)、
 语音广播下行、H.264/H.265 编码 + PS 封装、G.711A/AAC、RTP over UDP/TCP、RTCP SR、
 多响应分包（SumNum + Num，默认 50/包）、目录树多通道与业务分组/虚拟组织模板、
@@ -164,7 +206,7 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 | --- | --- | --- | --- |
 | S-1 | **Catalog 的 2022 新增字段实际未输出** | 9.3.1 / 附录 J | `CatalogResponse.kt:87 buildGb2022Fields()` 备好 10 个字段，但生产路径 `CatalogSubRouter.kt:62 → buildAllFromTree → CatalogNotifyBuilder.renderItem:281` 只输出基础字段 + BusinessGroupID。**实缺 9 个**：IPAddress / Port / PTZType / PositionType / RoomType / UseType / SupplyLightType / DirectionType / Resolution。⚠️ **平台侧也不解析这 9 个**（见 P-18）→ 只补模拟器在平台上看不到任何变化，必须两侧同改 |
 | S-2 | **Android 图像抓拍未真正落地** | 9.14 | `SnapshotCapture.android.kt:25 takeJpeg` 恒返 `null`（2026-06-17 骨架，注释里 T5 待办未完成），无 CameraX `ImageCapture` 绑定。运行期表现：平台下发 SnapShotConfig → `CaptureSkipped` → 无 PUT、无完成 NOTIFY，但平台仍收到 200 OK。iOS 侧有真实现（`IosSnapshotSourceHolder`）。⚠️ 与能力矩阵 2026-07-13 标记 ✅ 不一致，需真机复核 |
-| S-3 | **存储卡状态查询只有 mock，且命令名不兼容** | A.2.4.14 | 只认 `StorageCardStatusQuery`（写死 1 卡 32G/24G）；`SDCardStatus` 名称落入「未识别 cmdType」（`ManscdpRouterImpl.kt:616`） |
+| ~~S-3~~ | ~~**存储卡状态查询只有 mock，且命令名不兼容**~~ **✅ 已实现（2026-09-17，主单 C-1）** | A.2.4.14 / A.2.6.16 | 原判「只认 `StorageCardStatusQuery`（写死 1 卡 32G/24G）；`SDCardStatus` 落入未识别 cmdType」**已过时**：现以标准名 `SDCardStatus` 为主入口（旧名保留为兼容别名、应答一律标准名）；报文骨架改为 `SDCardStatusInfo/Item`（`ID`/`HddName`/`Status`/`FormatProgress?`/`Capacity`/`FreeSpace`）+ `SumNum`，`Status` 取值改标准枚举。**mock 改为可注入随机源**：张数/容量只掷一次、状态与剩余空间每次抖动；`FormatProgress` 仅 `formatting` 时输出。16 单测（含 40 seed 不变量轮跑） |
 | S-4 | **设备升级是假进度** | 9.13 | 5s 假进度流，不下载、不烧写（`SystemHandler.kt:136`） |
 | S-5 | **字符集声明与字节不一致** | 6.10 | 声明 `GB2312`，但 `String.encodeToByteArray()` 输出 UTF-8，全仓无 GB2312/GB18030 转码（`SipResponseBuilders.kt:107`、`SipInviteBuilders.kt:177`） |
 | S-6 | **注册重定向不跟随** | 9.1.2.3 | `RegistrationCoordinatorImpl.handleRegisterResponse` 只处理 2xx/401/407/4xx — **❌ 已决策暂不做** |
@@ -188,7 +230,7 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 | S-24 | **SVAC 编码配置不响应** | 附录 C | `ConfigDownloadResponse.kt:61` 显式忽略仍回 OK |
 | S-25 | **设备配置家族只有 2 项且静默假成功** | 9.3.5 / A.2.3.2 | 读只支持 `BasicParam`+`VideoParamOpt`；其余 ConfigType 忽略仍回 OK。**写侧**仅认 `<BasicParam>`（`DeviceControlDispatcher.kt:122`）、且只提取 Name/心跳四个字段发 `ConfigChanged` effect，**不落盘**。无 `CmdType=DeviceConfig` 的独立分派（靠元素名猜） |
 | S-26 | **抓拍完成通知用私有 CmdType** | 9.14 / A.2.5.7 | `CmdType=Notify`+`SubCmd=SnapShot`+`SnapShotID`，标准为 `UploadSnapShotFinished`+`SnapShotList/SnapShotFileID`。见 2.3 |
-| S-27 | **MobilePosition NOTIFY 只出 2016 扁平形态** | 9.11.2.3 c）/ A.2.5.6 | `MobilePositionNotify.build` 恒出扁平 `<Notify>`（`Time`+`Longitude`+`Latitude`+`Speed`+`Direction`+`Altitude`），**无 `SumNum`/`DeviceList`/`Item`，切到 2022 也不变**。2022 A.2.5.6 要求列表形态（`Time` 语义变为**上报通知时间**，采集时间下沉 `Item/CaptureTime`，新增可选 `Height`）。**修法照本仓既有双版本套路**（同 3.3/3.9/3.10）：按 `ManscdpContext.effectiveGbVersion` 分支 —— **2022 出列表、2016 出扁平，两版并存不得打破**。⚠️ 与 P-19 成对 |
+| S-27 | ~~**MobilePosition NOTIFY 只出 2016 扁平形态**~~ **✅ 已实现（2026-09-17）** | 9.11.2.3 c）/ A.2.5.6 | `MobilePositionNotify.build` 加**必传** `gbVersion`（**刻意不给默认值** —— 默认成 2016 会把「忘了传版本」变成一次静默的错误形态上报），按 `ManscdpContext.effectiveGbVersion` 分支：**2022 出列表、2016 出扁平**。⭐ 两形态根 `<DeviceID>` 语义不同故拆两参（2016 根 = 位置来源通道；2022 根 = 目标设备、通道下沉到 `Item/DeviceID`）；⭐ 采集时间两形态共用同一算法，2022 根 `<Time>` 是**上报通知时间**（走东八区）；可选 `Height` 无数据源 → 不发。16 单测（含两份整包 golden）+ 2 例端到端接线。⚠️ 与 P-19 成对 |
 
 ---
 
@@ -197,9 +239,9 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 | 能力 | 平台 | 模拟器 | 影响 |
 | --- | --- | --- | --- |
 | **设备配置家族（含 OSD / 遮挡 / 翻转 / 上报开关 / 编码属性）** | 未实现 | 只 2 项 + 静默假成功 | **最大整块空白**：平台改不了设备画面与行为 |
-| 目录 2022 新字段（9 个） | 不解析（P-18） | 不输出（S-1） | 两侧同改才有意义，单改无效 |
+| 目录通道属性字段（**2016/2022 两套形态，非「2022 新字段」**） | ✅ 已解析 + 落库 + 展示（B-2，2026-09-18） | ✅ 已输出（B-1，2026-09-17） | ✅ 两侧同改已完成 |
 | 图像抓拍 | 已实现但默认私有口径 | Android 未落地 + 通知 CmdType 私有 | 自家联调正常，接第三方必挂 |
-| 存储卡状态查询 | 未实现 | 只有 mock + 命名不兼容 | 2022 五大新增查询里唯一没闭环的一组 |
+| ~~存储卡状态查询~~ **存储卡状态查询 ✅ 两侧已实现（2026-09-17，C-1）** | ✅ `manscdp/storage_card.go` + `ptz/storage_card.go` + `gb_device_storage_card` + 控制台入口 | ✅ 标准报文 + 随机假数据 | ~~2022 五大新增查询里唯一没闭环的一组~~ → **五大新增查询至此全部闭环**；遗留可选项：D-2「格式化 SD 卡」尚未做（独立单） |
 | 注册重定向 | 未实现 | 不跟随 | **❌ 已决策暂不做** |
 | 摄像机访问路径（附录 H） | 未实现 | 未实现 | 多路径级联点播无法验证 |
 | 域间目录订阅（附录 N） | 未实现 | 未实现 | 级联目录同步无法验证 |
@@ -215,18 +257,21 @@ SIP Date 校时 + NTP 客户端、**自带 OSD 画面叠加渲染管线**（`osd
 **第一梯队（能立刻闭环、现场有感）**
 1. **设备配置家族：`OSDConfig` 打通**（平台下发/读取 + 模拟器接自家 OSD 渲染管线）
    —— 唯一能做「改配置 → 画面文字真的变」可视闭环的项，演示价值最高
-2. S-1 + P-18 **目录 2022 九字段两侧同改**（改模拟器 `renderItem` + 平台 `CatalogItem` 与存储/展示）
+2. ~~S-1 + P-18 **目录通道属性字段两侧同改**（改模拟器 `renderItem` + 平台 `CatalogItem` 与存储/展示）~~
+   —— **✅ 已完成（S-1 = 2026-09-17 B-1；P-18 = 2026-09-18 B-2）**。两侧形态**有意不同**：
+   模拟器按 `effectiveGbVersion` 双分支输出；平台侧不做版本分支，改为**两组版本独有属性并存落库、
+   由设备实际报了哪一组反推形态**（`EffectiveVersion` 有 `default:2016`，按它分支会误判 2022 设备）
 3. P-12 设备配置**读取（ConfigDownload）**——平台连"读设备配置"都没有，是最基础的能力空缺
 4. S-2 模拟器 Android 抓拍落地（CameraX ImageCapture），顺带按 2.3 复核抓拍口径
 
 **第二梯队**
 5. 设备配置家族其余项（`PictureMask` / `FrameMirror` / `VideoParamAttribute` / `AlarmReport`）
-6. S-9 / P-11 X-GB-Ver 与 MobilePosition MESSAGE 形态补齐
+6. ~~S-9 / P-11 X-GB-Ver 与 MobilePosition MESSAGE 形态补齐~~（S-9、P-11 均已收口）
    —— **⚠️ 2026-09-17 修订：两项都已作废**。S-9 已由 F-2 完成（2026-09-17，见第 2 章核对）；
    P-11 已判「标准无此形态」关闭。替代项 = **P-19 + S-27（MobilePosition NOTIFY 2022 列表形态，
    且 2016 扁平形态必须继续可用）**，两台侧成对做
 7. P-14 多响应聚合通用化（附录 M）
-8. P-1 + S-3 存储卡状态查询对齐
+8. ~~P-1 + S-3 存储卡状态查询对齐~~ **✅ 已完成（2026-09-17，主单 C-1）**
 9. P-13 固件分发 HTTP 服务（升级链路闭环）
 
 **第三梯队（按交付要求取舍）**

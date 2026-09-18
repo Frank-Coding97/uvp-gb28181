@@ -154,6 +154,55 @@ OCR 产物（原文可检索）已归档在 `.workbuddy/ocr/`（该目录已被 
 
 ---
 
+## 六-A、协议骨架是**向后兼容**的（2022 是同层追加，不是重构）
+
+上表只回答「多出哪些类型」，还需回答「平台多发这些类型，会不会把 2016 设备弄坏」。
+逐字段对照两版的 `DeviceConfig` 请求骨架（2016 A.2.4 b) / 2022 A.2.3.2.1~.13）：
+
+| 位置 | 2016 | 2022 | 兼容性 |
+| --- | --- | --- | --- |
+| `CmdType` | `fixed="DeviceConfig"` | 同 | ✅ |
+| `SN` | `integer minInclusive=1` | `tg:SNType`（具名类型，语义同为 ≥1 整数） | ✅ 可同报文 |
+| `DeviceID` | `tg:deviceIDType` | 同 | ✅ |
+| `ConfigType`（查询侧） | 元素名 `ConfigType` | 同（§六-C 排除 OCR 噪声后） | ✅ |
+| 配置元素容器 | 同层 `sequence` 直接放元素 | 同层 `sequence` 直接放元素 | ✅ |
+
+2022 的配置元素是在**同一层 `sequence` 里按 A.2.3.2.2 → A.2.3.2.13 顺序追加**，
+且 2016 已有的三个（`BasicParam` / `SVACEncodeConfig` / `SVACDecodeConfig`）
+**名字、层级、语义都没动**。
+
+⇒ **平台按 2016 骨架发的报文，2016 设备一定解析得了。** 风险不在"报文发不出去"，
+而在"新元素它不认识"——那是**行为判定**问题，不是**协议兼容**问题。
+门禁策略见 `docs/gb28181-2022-video-param-attribute-panel.md` §十一。
+
+## 六-B、平台**接收侧**要容忍的两处字段差异
+
+1. ⛔ **`BasicParam` 字段数变了。**
+   2016 的 `ConfigDownload` 应答里 `BasicParam` 有 **7 个**字段
+   （`Name` / `Expiration` / `HeartBeatInterval` / `HeartBeatCount` /
+   `PositionCapability` / `Longitude` / `Latitude`，见 2016 A.2.4 j)）；
+   2022 的 `basicParamCfgType`（标准页 74-75，`appA.txt:537`）**只剩 4 个** ——
+   定位能力已移出，改由独立的移动设备位置订阅承担。
+   ⇒ 平台解析 2016 设备应答时**必须容忍多出来的那 3 个字段**，
+   不能因为「2022 没定义」就丢弃、更不能报错。
+2. ✅ **`VideoParamOpt` 两版结构完全一致**（`DownloadSpeed` + `Resolution`，均 `minOccurs="0"`）。
+   唯一差别是注释引用的附录号：2016 写「参见附录 **F** 中 SDP f 字段规定」，2022 写「附录 **G**」。
+   ⇒ 解析层零差异；但**给 2016 设备用的界面/文档引附录号时别指向错的那本**。
+
+## 六-C、`Config Type`（带空格）是 OCR 噪声
+
+2022 全文里 `<element name="Config Type" type="string"/>` 只在 `full2022.txt:3944` 出现一次，
+而 `ConfigType`（无空格）在 2022 全文 **零命中**（`grep -c` = 0）—— 表面上像"元素名改了"。
+判为噪声的依据：**XSD 的元素名是 `NCName`，不允许含空格**，
+且同一份 schema 里其他元素名（`DeviceID` / `BasicParam`…）都无空格。
+⇒ **两版元素名都是 `ConfigType`**，无需在代码里做双写兼容。
+
+> 同类噪声另有 2016 的 `<element name="VideoParamOpt"" minOccurs="0">`（重复引号）、
+> 2022 的 `<attribute name = "Num" ...>`（等号两侧空格）。**落地改代码前建议肉眼核对应 PDF 页一次**，
+> 本仓 OCR 脚本与页码定位方法见 §二。
+
+---
+
 ## 七、证据边界
 
 - 本审查**全部回到标准原文**（2022 版 + 2016 版），不再依赖解读文章或厂商文档。

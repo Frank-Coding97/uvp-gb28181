@@ -13,7 +13,7 @@
 
 - **一条 = 一个可独立验证的交付单元**，做完把 `☐` 改成 `☑`。
 - ⛔ **成对原则**：平台侧与模拟器侧都写内容的条目，**必须成对做**。只做一侧，另一端看不见任何变化
-  （典型：目录九字段、抓拍口径、设备配置家族）。
+  （典型：目录通道属性字段、抓拍口径、设备配置家族）。
 - 状态标记：`☐` 待办 · `◐` 进行中 · `☑` 完成 · `✗` 不做
 - 优先级：
   - **P0** 地基 / 能立刻做出端到端可视闭环（16 条）
@@ -44,7 +44,7 @@
 | NTP 校时 | 缺失 | 已实现 | F-5 | 9.10 |
 | 多响应消息聚合 | 仅 Catalog | 已实现（50/包） | F-1 | 附录 M |
 | MobilePosition 的 MESSAGE 形态 | ✗ 不做（**标准里没有这个形态**） | 私有扩展（WVP 兼容口径，非对标能力） | ✗ F-6（已关闭 2026-09-17） | **无** —— 原引「§9.5.4」两版均不存在 |
-| MobilePosition NOTIFY 形态（**2022 列表**） | 缺失（仅识 2016 扁平） | 缺失（仅出 2016 扁平） | F-10 | 9.11.2.3 c）/ A.2.5.6 |
+| MobilePosition NOTIFY 形态（**2022 列表**） | ✅ 已实现（2026-09-17）—— 双形态共存，`Positions()` 归一化 | ✅ 已实现（2026-09-17）—— 按 `effectiveGbVersion` 分支，两版并存 | ☑ F-10 | 9.11.2.3 c）/ A.2.5.6 |
 | 注册重定向 302 | ✗ 不做 | ✗ 不做 | — | 9.1.2.3 |
 
 ### 1.2 目录与编码
@@ -52,13 +52,13 @@
 | 能力 | 平台 | 模拟器 | 单号 | 条款 |
 | --- | --- | --- | --- | --- |
 | 目录订阅与增量 NOTIFY | 已实现 | 已实现 | — | 9.11 |
-| 目录 2022 九字段 | 不解析 | 不输出 | B-1 / B-2 | 附录 J |
+| 目录通道属性字段（2022 清单 · 2016/2022 双形态） | ✅ **已解析 + 落库 + 展示**（2026-09-18，`<Info>` 双版本并存、不做版本分支） | ✅ 已输出（2026-09-17，按 `effectiveGbVersion` 双分支） | ☑ B-1 / ☑ B-2 | 附录 J / §9.3.1 |
 | 组织级查询与应答 | 部分（有业务分组/虚拟组织维度） | 部分 | B-3 | 附录 J |
-| 行政区划节点 | 部分 | 不可作真节点（typeCode 为空） | B-4 | 附录 E/J |
+| 行政区划节点 | 部分 | ✅ **空 `typeCode` 是合规的**（2026-09-17 核附录 J：区划条目用 2/4/6/8 位民政码本身当 `DeviceID`，**没有类型码段**） | B-4 | 附录 E/J |
 | 目录多父级 | 已实现（A/B 拆分） | 单 `parentId` | B-7 | 附录 H/N |
 | 20 位统一编码校验 | 部分 | 部分（只查 20 位数字） | B-8 | 附录 E |
 | 附录 O 采集部位类型 | 待核原文 | 待核原文 | B-5 | 附录 O |
-| ExtraInfo / Channel 字段格式 | 待核原文 | 待核原文 | B-6 | 附录 A |
+| ExtraInfo / Channel 字段格式 | ✗ **不成立**（2026-09-17 核：`ExtraInfo` 在 166 页 2022 OCR 中出现 **0 次**，容器名没改） | ✗ 同上 | ✗ B-6 **建议销单** | 附录 A |
 
 ### 1.3 设备查询（2022 五大新增查询）
 
@@ -69,7 +69,7 @@
 | PTZ 精准位置订阅通知 | 已实现 | 已实现 | — | 9.11.1/2 |
 | 看守位信息查询 | 已实现 | 已实现 | — | A.2.4.11 |
 | 巡航轨迹列表 / 详情查询 | 已实现 | 已实现 | — | A.2.4.12/13 |
-| **存储卡状态查询** | **缺失** | 仅 mock + 命名不兼容 | C-1 | A.2.4.14 |
+| **存储卡状态查询** | ✅ 已实现（2026-09-17）—— 收发/落库/前端入口全链 | ✅ 已实现（2026-09-17）—— 标准报文 + 随机假数据 + **设备屏幕「存储卡」OSD（查询到达亮起）** | ☑ C-1 | A.2.4.14 / A.2.6.16 |
 
 ### 1.4 设备配置家族（`DeviceConfig` 写 / `ConfigDownload` 读）
 
@@ -79,7 +79,7 @@
 | 配置下发 `DeviceConfig` | 缺失（无常量） | 按元素名猜，非按 `CmdType` | A-2 | A.2.3.2.1 |
 | 配置落盘 / 变更可见 | — | 不落盘 | A-3 | 工程 |
 | `OSDConfig` 前端 OSD | 缺失 | 有渲染管线、无协议入口 | A-4 | A.2.1.12 |
-| `VideoParamAttribute` 视频参数属性 | 缺失 | 缺失 | A-5 | 2022 新增 |
+| `VideoParamAttribute` 视频参数属性 | ✅ 已实现（2026-09-18）—— 写+读+**强制回读对账**+前端卡片 | 缺失 | ☑ A-5 | 2022 新增（**2016 不适用**） |
 | `VideoParamOpt` 视频参数范围 | 缺失 | 已实现（读） | A-9 | 2016 已有 |
 | `BasicParam` 基本参数 | 缺失 | 只记不落盘 | A-8 | A.2.1.19 |
 | `PictureMask` 画面遮挡 | 缺失 | 缺失 | A-6 | A.2.1.17 |
@@ -102,7 +102,7 @@
 | 格式化 SD 卡 | 缺失 | 只解析 | D-2 | A.2.3.1.13 |
 | 拉框放大 DragZoom | 已实现 | 已实现 | — | A.2.3.1 |
 | 报警复位 `AlarmCmd` | 已实现 | 已实现 | — | — |
-| TeleBoot / RecordCmd / GuardCmd / IFameCmd | 已实现（控制台 3 处占位未接） | 已实现 | D-5 | — |
+| TeleBoot / RecordCmd / GuardCmd / IFameCmd | ✅ 已实现（2026-09-18 复核：控制台**真实调用**，原写「3 处占位未接」有误） | 已实现 | ~~D-5~~ ✗ 销单 | — |
 | 辅助控制（雨刷/红外/加热） | 已实现 | 已实现 | — | — |
 
 ### 1.6 媒体
@@ -160,7 +160,7 @@
 | 入口 | 文件 | 现状 |
 | --- | --- | --- |
 | 主控制台（联动版） | `web/src/views/gb28181/components/PlayConsoleLinked.vue` | 已承载精准 PTZ / 预置位 / 巡航轨迹 / 看守位 / 流诊断 —— **设备动作类入口优先挂这里** |
-| 简化控制台 | `web/src/views/gb28181/components/ControlConsole.vue` | 右侧「设备动作」面板有 3 个「待接入」占位按钮（设备信息 / 请求关键帧 / 远程重启）→ 见 D-5 |
+| ~~简化控制台~~ 🗑️ **孤儿，已删除（2026-09-18）** | ~~`web/src/views/gb28181/components/ControlConsole.vue`~~ | 🗑️ `cb49bc1b`（2026-07-23）已「将 ControlConsole 替换为已上线的 PlayConsoleLinked」，此后**无任何 import、无菜单行指向**；它那 3 个「待接入」占位按钮（设备信息 / 请求关键帧 / 远程重启）**从未上线过** → **2026-09-18 物理删除**。⚠️ 教训（别忘）：① `router/route-output.ts:70` 有 `import.meta.glob("@/views/**/*.vue")` → **孤儿组件也会出 dist chunk**，**别据「dist 里有 chunk」判活**；② **同源孤儿** `ChannelSnapshotCell.vue`（全历史 `-S` 零引用）**已于同日一并删除** —— 它实现的「快照缩略图」能力现在由 `device-mgmt/index.vue:428 snapshotImageUrl()` 内联实现，删的是抽象不是功能。真入口见上一行；远程重启在设备管理页 |
 | 设备管理页 | `web/src/views/gb28181/device-mgmt/index.vue` + `DeviceMaintenanceMenu.vue` + 各 Drawer | 已有「固件升级 / 维护记录 / 重启设备」；**配置类入口建议在此新建统一 Drawer** → 见 D-6 |
 
 ### 2.2 模拟器侧（uvp-gb28181-sim）
@@ -215,11 +215,11 @@
 | ☐ A-2 | **配置下发通道 `DeviceConfig`**<br>（A.2.3.2.1 / A.2.6.8 / §9.3.1 e)） | `manscdp/device_config.go` 写构造器（一条报文可带多个配置元素）；应答按 `CmdType=DeviceConfig` + `Result` 解析；下发走 0-5 决定的通道 | 新增 `CmdType=DeviceConfig` 的独立分派分支（现靠元素名猜） | 平台下发任一配置 → 设备回 `CmdType=DeviceConfig` + `Result=OK` → 平台记录并展示结果 | P0 |
 | ☐ A-3 | **模拟器配置落盘 + 变更可见**（工程地基） | 无需改（A-1 读回来的即真值） | 新增 ConfigurationStore 持久化；所有配置读写走它；变更产生 effect → 模拟中心可见「配置已变更：xxx」 | 下发配置 → **重启模拟器** → 再读回仍是新值 | P0 |
 | ☐ A-4 | **`OSDConfig` 前端 OSD 字符叠加**<br>（A.2.1.12） | 写+读 DTO（时间显示开关/方式/坐标/文字内容/显示方式）；前端 OSD 编辑器（可拖动位置预览）；下发 | 接自家 OSD 渲染管线 `osd/OsdRenderer.kt` + `OsdFontAtlas.kt` + `OsdTextPass.kt` + `IosOsdBitmapRenderer.kt` → **画面叠加真的变** | 平台改 OSD 文字 → 模拟器画面文字真的变（前后截图对比） | P0 ⭐ |
-| ☐ A-5 | **`VideoParamAttribute` 视频参数属性**（2022 新增） | 写+读；前端表单（编码格式 / 分辨率 / 帧率 / 码率）；输入范围取 A-9 的设备回读值 | 改**实际编码参数**（H.264/H.265、分辨率、帧率、码率），出的流参数真变 | 平台改分辨率 → 拉流实测分辨率变化（探针/ffprobe） | P0 |
+| ☑ A-5 | **`VideoParamAttribute` 视频参数属性**（2022 新增）<br>✅ **2026-09-18 完成**（设计+实施全记录见 `docs/gb28181-2022-video-param-attribute-panel.md`）。落地要点五条：<br>① **码流分段由「目录」决定**，不是由 `VideoParamOpt` 决定 —— 出处是产物 `Catalog Item/Info/StreamNumberList`（2022 独有，可多值 `/` 分隔）。为此补落 `gb_channel.stream_number_list` 列 + 加进 `ChannelVO`；面板按它渲染几路码流，未上报时退化成「按已回读到的行」。<br>② **`VideoBitRate` 是条件必选**：仅 `BitRateType=1`(CBR) 时出现；VBR 时**报文里不含该元素**（前端把该格**禁用**而不是「填了忽略」，后端同样拒发）。<br>③ **取值唯一出处是附录 G 的 SDP `f` 字段（标准页 130）**：`VideoFormat` 1=MPEG-4/2=H.264/3=SVAC/4=3GP/5=H.265；`Resolution` 1=QCIF…6=1080P，其余用 `WxH`；`FrameRate` 0~99；`BitRateType` 1=CBR/2=VBR；`VideoBitRate` 0~100000 kb/s。**报文里发码值，人读串只允许出现在前端**（库列原样存码值串，否则对账会比两套表示）。<br>④ **对账闭环**：写入应答 A.2.6.8 **没有回显** ⇒ `Result=OK` 只说明「收到并接受」，**不许当终态**。服务层在 ack 的**同一事务**里追加一条 `ConfigDownload` 对账子 operation，逐格比对下发值与回读值；不一致标 `VIDEO_PARAM_RECONCILE_MISMATCH` 落 `mismatch`（是**能力边界提示，不是失败**）。<br>⑤ **2016 不适用**：`VideoParamAttribute` 不在 2016 的 4 个 `ConfigType` 里。解法是**不加 profile 门禁 + 强制回读**：`Result=OK` 但应答**没带**该元素 ⇒ `type_absent`，等价「设备不支持」（最可靠判据）。门禁只用于「平台自动下发」（`Capabilities.VideoParamAttribute`），**绝不挡操作员手点**。<br>⚠️ 仍待：模拟器侧 `ConfigDownloadResponse` 只输出 2 类配置（其余静默丢弃）、A-2 的 `DeviceControlDispatcher` 只有 `<BasicParam>` 一个分支 ⇒ **端到端（真机/模拟器）验收前可能要补模拟器侧** | 改**实际编码参数**（H.264/H.265、分辨率、帧率、码率），出的流参数真变 | 平台改分辨率 → 拉流实测分辨率变化（探针/ffprobe） | P0 |
 | ☐ A-6 | **`PictureMask` 视频画面遮挡**（2022 新增，A.2.1.17） | 写+读（≤4 区域）；前端**可视化画框**编辑器；区域坐标按 0-1 契约 | 画面上真的绘遮挡；遮挡方式与是否影响录像按契约写明 | 平台画 2 个区域 → 模拟器画面出现遮挡（截图） | P1 |
 | ☐ A-7 | **`FrameMirror` 画面翻转**（2022 新增） | 写+读；前端下拉（关 / 上下 / 左右 / 中心） | 渲染管线真翻转（含录像/回放是否同步翻转的取舍） | 平台选「左右镜像」→ 画面左右翻转（截图对比） | P1 |
 | ☐ A-8 | **`BasicParam` 基本参数**（2016 已有，A.2.1.19） | 写+读（设备名称 / 注册有效期 / 心跳间隔）；前端表单 | **真落盘并生效**（心跳间隔真改、有效期真用）；现只提 4 个字段发 effect，不落盘 | 平台改心跳 30s → 抓包/日志看心跳实际 30s；改名称 → 目录与设备信息里名字变 | P1 |
-| ☐ A-9 | **`VideoParamOpt` 视频参数范围**（2016 已有） | 读；用回读范围**约束 A-5 表单**，超出即前端拦下 | 读应答字段完整度核对（现支持但需核字段） | 平台表单可选范围来自设备真实回读，越界值被拦 | P1 |
+| ☑ A-9 | **`VideoParamOpt` 视频参数范围**（2016 已有）<br>⛔ **原写「用回读范围约束 A-5 表单 / 输入范围取 A-9 的设备回读值」有误（2026-09-18 随 A-5 落地核出）**：`VideoParamOpt` 只有 `DownloadSpeed` + `Resolution` 两个字段，**帧率与码率没有范围可用**；而 `Resolution` 的**取值出处是附录 G 的码值表**（1-6 或 `WxH`），不是「设备支持哪些档位」。<br>⇒ **A-5 表单的合法性判据一律取附录 G**（`manscdp.ValidateVideoParamItems` 与前端 `videoParamCodec.ts` 同一套规则，严格发）；A-9 的定位**降级为「展示设备支持的档位」**这一只读信息（若日后要做，也只作**可选提示**，不作合法性判据 —— 设备报的范围窄于标准时不该把标准允许的值判成非法）。<br>⚠️ 模拟器侧已修一处同源缺陷（`ConfigDownloadResponse` 原发人读串 `"1920×1080"`，且只报当前值不报档位全集）→ 现发码值全集 `4/5/6`；`CatalogNode.resolution` 的 `*` 分隔归一为 `WxH` **仍未动**（见 `gb28181-2022-video-param-attribute-panel.md` §九-2） | 设备**实际支持**的档位可见；A-5 表单的合法性判据见左栏 | 读应答字段完整度核对（现支持但需核字段） | 平台能展示设备支持的档位；A-5 表单**不因 A-9 缺失而阻塞**（合法性只认附录 G） | P1 |
 | ☐ A-10 | **`VideoRecordPlan` 录像计划**（2022 新增） | 写+读；前端计划编辑器（星期 × 时段 × 码流） | 落盘 + 屏幕展示「已生效的录像计划」 | 下发计划 → 读回一致 → 设备屏幕显示该计划 | P1 |
 | ☐ A-11 | **`VideoAlarmRecord` 报警录像**（2022 新增） | 写+读；前端开关/条件 | 落盘 + 与报警上报联动（触发报警时标记录像） | 下发开关 → 读回一致 → 设备侧报警录像状态可查 | P1 |
 | ☐ A-12 | **`AlarmReport` 报警上报开关**（2022 新增，A.2.1.18） | 写+读；前端按事件类型勾选 ⚠️ 标准只定义 2 个开关且**都必选** → 按 0-2 契约定「只想改一个」怎么办 | 开关**真生效**：关掉移动侦测 → 该类报警不再上报 | 关掉某类 → 触发该类事件 → 平台**收不到**；打开 → 收得到 | P1 |
@@ -229,12 +229,12 @@
 
 | 编号 | 任务（条款） | 平台侧（后端 · 前端入口） | 模拟器侧 | 验收闭环 | P |
 | --- | --- | --- | --- | --- | --- |
-| ☐ B-1 | **目录 2022 九字段 · 设备侧输出**（附录 J / §9.3.1） | 无需改（但 B-2 不做则平台看不到） | `CatalogNotifyBuilder.renderItem` 补 9 字段：`IPAddress` / `Port` / `PTZType` / `PositionType` / `RoomType` / `UseType` / `SupplyLightType` / `DirectionType` / `Resolution`<br>⛔ 现 `CatalogResponse.buildGb2022Fields()` 已备好字段，但**生产路径不走它** | SIP 明文/设备日志里目录应答含这 9 个字段 | P0 |
-| ☐ B-2 | **目录 2022 九字段 · 平台解析+存储+展示** | `manscdp/catalog.go` 加字段解析；`gb_channel` 相关列 + 三方言迁移；目录列表/详情展示（云台类型、室内外、补光方式、分辨率…） | 无需改 | 平台通道详情能看到设备上报的云台类型/分辨率等真实值 | P0 ⚠️**必须与 B-1 同批** |
+| ☑ B-1 | **目录通道属性字段 · 设备侧输出**（§9.3.1 / 附录 A）<br>⛔ **原写「2022 九字段」有误**（2026-09-17 核原文）：`PositionType` / `UseType` 是 **2016 字段、2022 已删除**；且这一组字段**在 `<Info>` 容器内**，不是 `Item` 直接子级 | 无需改（但 B-2 不做则平台看不到） | ✅ **2026-09-17 完成** —— `CatalogNotifyBuilder.renderItem` **按 `effectiveGbVersion` 双分支**：<br>· 共有（`<Info>` 内）：`PTZType` / `RoomType` / `SupplyLightType` / `DirectionType` / `Resolution`<br>· 共有（`Item` 层）：`IPAddress` / `Port`<br>· **V2016**：`<Info>` 内多出 `PositionType` / `UseType`，`BusinessGroupID` **留在 `<Info>` 内**<br>· **V2022**：`<Info>` 内多出 `PhotoelectricImagingType` / `CapturePositionType` / `StreamNumberList`，`BusinessGroupID` **提到 `Item` 层**<br>⛔ **不得合并成「一条报文两版都写」的超集** —— 严格 XSD 校验下两版都不合规，且同字段双写会产生「哪个说了算」歧义<br>⛔ 已删除死代码 `CatalogResponse.buildGb2022Fields()`（它把字段平铺在 `Item` 层，两版都不符合）<br>⚠️ 顺带修正 4 个枚举值域：`RoomType` 编码曾写反（标准 1-室外 / 2-室内）、`PositionType` 值域整体重写（1-省际检查站…10-交通干线）、`PtzType` 补 2022 的 5-7、`SupplyLightType` 补 2022 的 4/9 | SIP 明文/设备日志里目录应答含上述字段，且 **2016 与 2022 两种形态各自正确**（2016 支不缺 `PositionType`/`UseType`；2022 支不出现它们） | P0 |
+| ☑ B-2 | **目录通道属性字段 · 平台解析+存储+展示**（§9.3.1 / 附录 A）<br>✅ **2026-09-18 完成**。<br>· **解析层**：新增 `manscdp.CatalogInfo`（12 字段，全 `string` 收原文）+ `CatalogItem.normalize()`（`Item` 层与 `<Info>` 层双读、`<Info>` 优先），`ParseCatalogResponse` / `ParseCatalogNotify` 两条路径都调用；新增导出 `ParseAttrInt()` 供适配器转数值。<br>· **⛔ 刻意不做版本分支**（与 B-1 的设备侧相反）：设备注册声明的 `GbDevice.EffectiveVersion` 有 `default:2016`，对 2022 设备会误判；而 2016 的 `PositionType`/`UseType` 与 2022 的 `PhotoelectricImagingType`/`CapturePositionType` 在 XSD 上**互斥**，谁来上报就落谁，天然可反推设备实际形态 → 两组**并存落库**即可，且比按 `effectiveGbVersion` 分支更稳。（`RoomType` 两版编码一致；`DirectionType` 两版一致;`SupplyLightType` 2016 只到 3、2022 加 4/9 → 用并集表不会误判。）<br>· **落库层**：`gb_channel` 新增 **十列**（`room_type`/`supply_light_type`/`direction_type`/`resolution`/`ip_address`/`port` + 版本独有的 `position_type`/`use_type`/`photoelectric_imaging_type`/`capture_position_type`），六文件迁移 `2026-09-18-channel-catalog-attributes{,-postgresql,-sqlserver}{,-down}.sql` + 4 个快照同步（`gb_channel.sql` / 三个全量快照）。**已在 220 开发库实测 up→幂等重跑→down→再 up**。<br>· **展示层**：`ChannelVO` 扩 10 字段；新增 `web/src/views/gb28181/device-mgmt/channelAttributeText.ts`（枚举映射 + `channelAttributeEntries()` + `catalogShapeFromAttributes()`）与通道详情抽屉「设备上报属性」区块；`0`/`''` 一律渲染为**未上报**（弱化斜体），与「值为 0」区分开；版本独有属性带「仅 2016 / 仅 2022」角标，并用 `catalogShapeText()` 直接标出设备报的是哪一版形态。<br>· **枚举同步**：`devicemgmt.go` 手工编辑校验 `>4` → `>7`（消息同步）；`sys_dict_item` 补 `5遥控半球 / 6多目设备的全景·拼接通道 / 7多目设备的分割通道`；`basicPTZCapability` `case 1,2,4` → `case 1,2,4,5`（**6/7 故意留 Unknown** —— 标准未声明多目通道具备云台）。⚠️ **前端无同源错处**：真控制台 `PlayConsoleLinked.vue` 的云台面板按**权限**（`gb28181:ptz:*`）门禁、不看 `ptzType`；曾有的 `ControlConsole.vue`（原型里的 `[1,2,4]`）已于同日作为孤儿组件删除（commit `ac491830`），故前端无需同步。<br>· **回归锚点**（`subscribe/catalog_test.go`）：2016 形态（`BusinessGroupID` 在 `<Info>` 内）与 2022 形态（在 `Item` 层）**各一条 XML→管道→目录树挂载**端到端用例 + 一条「不带 `<Info>` 的 UPDATE 不得清零已知属性」数据保全用例。变异自检：把 `<Info>` 内 `BusinessGroupID` 回填短路后，**只有 2016 用例变红**、2022 用例保持绿 —— 证明锚点确实守住了 ① 的回归。<br>✅ 门禁：`go build ./...` 干净；`go test ./app/gb28181/...`（60 包）全绿；`vue-tsc --noEmit` 干净；前端 `vitest` 1423/1424（唯一红项 `zlm/SchedulerStrategy.test.ts` 为 **develop 上既存失败**，与本单无关，见 §9 P-1）。<br>⛔ **原写「2022 九字段」有误**（同 B-1）：字段在 `<Info>` 容器内、非 `Item` 子级；`PositionType`/`UseType` 是 **2016 字段**不是 2022 新增 | ⛔ **开工前现状（2026-09-18 复核，含一次自我纠错；下列为历史记录，现已全部修复）**：`manscdp/catalog.go:33-51` 的 `CatalogItem` **只声明了 `PTZType int` + `BusinessGroupID string`**（且**都在 Item 层**），其余字段连结构体字段都没有；`grep -E 'xml:"Info' app/` → Catalog 的 `<Info>` **无任何反序列化**（`xml:"Info"` 只出现在 MobilePosition/报警复位/云台控制/广播，可照抄这个嵌套写法）。⚠️ **前一版此处误写「`BusinessGroupID` 解析完即丢、0 消费者」——错**（根因：BSD grep 不支持 BRE 交替写法「反斜杠+竖线」→ 静默空结果）。实际两者**都有消费者，且都是承重字段**：<br>· `BusinessGroupID` → `catalog/pipeline.go:96-105 resolveBusinessParent` → `SplitParentIDs(it.BusinessGroupID)` 决定**通道在目录树挂到哪个父节点**（业务组织优先于物理 ParentID）。`SplitParentIDs("")` 返回**空切片**（`dto.go:30-42` 对 `""` 直接 `continue`）。<br>· `PTZType` → `catalog/upsert.go:150,185` 落 `gb_channel.ptz_type` 列；`handler/catalog.go:234`、`subscribe/catalog.go:145`、`DeviceAdvancedControl` 的 `ParseControlCapabilities(channel.Capabilities, channel.PTZType)` 也读它。<br>⛔⛔ **由此确认三个真实缺陷**：<br>① **`PTZType` 被声明在 `Item` 层，但标准把它放在 `<Info>` 内** → Go 不递归 → **合规设备（含 B-1 后的模拟器）上报的 `PTZType` 平台根本收不到，`gb_channel.ptz_type` 恒为 0**（模拟器 B-1 前压根不发该字段，B-1 后发在 `<Info>` 里，两种情况都读不到 → 无回归，但功能一直缺失）。<br>② 🔴 **B-1 引入一处 2016 回归（本行必须与 B-1 同批的直接理由）**：模拟器 V2016 现在把 `BusinessGroupID` 写进 `<Info>`（**这是 2016 标准要求的正确位置**），而平台只读 Item 层 → 2016 设备 `it.BusinessGroupID` 变空 → **目录树里通道不再挂到业务组织下**（退化为只按 ParentID/行政区划）。**是平台侧潜在 bug 被 B-1 暴露，不是 B-1 写错**。<br>③ `devicemgmt.go:636` 手动编辑校验 `*body.PTZType > 4` **显式拒绝 2022 的 5/6/7**；`gb_channel.ptz_type` 列注释也是 2016 值域（`0未知1球机2半球3固定枪机4遥控枪机`）→ 平台侧枚举需同步扩。<br>⛔ `PTZType` 现声明为 `int`，而 2022 附录 A 已改为 `string` → 需一并改。<br>⭐ 要做：补 `<Info>` 反序列化（`Info struct` 内含各版本字段）+ `Item` 层 `IPAddress`/`Port`；`gb_channel` 落库列 + **三方言迁移 up/down 齐全**；目录列表/详情展示（云台类型、室内外、补光方式、分辨率…）。<br>⛔ **范围界定（2026-09-18 核，回答「级联用不用」）**：**级联不用这些字段，本行也不含级联**。级联上行走独立一套 —— `cascade/catalog/responder.go:142 catalogItemXML` 只有 **11 个字段**（DeviceID/Name/Manufacturer/Model/Owner/CivilCode/Address/Parental/ParentID/Secrecy/Status，**连 `<Info>` 容器都没有**），`cascade/catalog/snapshot.go:45 CatalogItem` 同样无这些属性；且级联**想发也发不了**（`gb_channel` 没这些列）→ **B-2 是级联能发这些字段的前置条件，但 B-2 ≠ 级联要改**；级联若需发出，是**另一条独立单**（先确认客户/上级平台是否真要求，再开）。<br>⛔ **原约束修正（2026-09-18，落 B-2 时发现原表述会误伤实现）**：原文写「解析与展示**必须按 `effectiveGbVersion` 双分支，禁止全局替换字段表**」。**「禁止全局替换字段表」这个意图保留且已满足**（2016 `RoomType`(1-2)/`PTZType`(1-4) + `PositionType`/`UseType` 与 2022 `PTZType`(1-7) + `PhotoelectricImagingType` 等**并存**，没有任何一版的字段被丢掉；`RoomType`/`DirectionType` 两版编码一致故共用表，`SupplyLightType` 用并集表），**但「必须按 `effectiveGbVersion` 双分支」这条做法在平台侧被否决**：<br>· `GbDevice.EffectiveVersion` 带 `default:2016`，对没声明版本的 2022 设备会**误判成 2016**，按它分支会整段丢掉 2022 属性；<br>· 目录报文里 2016 的 `PositionType`/`UseType` 与 2022 的 `PhotoelectricImagingType`/`CapturePositionType` 在 XSD 上**互斥**，**报文自己就带了版本证据**，比设备注册声明更可靠。<br>→ 故平台侧采用**「两组并存落库 + 由上报了哪一组反推形态」**（`catalogShapeFromAttributes()`），设备侧（模拟器）仍按 `effectiveGbVersion` 双分支输出 —— **两侧做法不同是有意的**：设备侧要「按声明挑一套写」，平台侧要「不管声明、按收到的识别」。<br>⚠️ 顺带：B-1 已修正模拟器侧 4 个枚举值域，**平台侧同源错处已定位**（`gb_channel.ptz_type` 列注释 + `devicemgmt.go:636` 的 `>4` 校验）→ 需一并扩到 2022 值域 | 无需改 | 平台通道详情能看到设备上报的云台类型/室内外/补光方式/分辨率等真实值；**且 2016 设备（`PositionType`/`UseType`、`<Info>` 内 `BusinessGroupID`）与 2022 设备（`BusinessGroupID` 在 `Item` 层、`PTZType` 5-7）上报后都能正确区分与展示** | P0 ⚠️**必须与 B-1 同批** |
 | ☐ B-3 | **组织级查询与应答**（附录 J） | 支持按组织维度发起目录查询并解析 | 行政区划 / 业务分组 / 虚拟组织三种节点均可作查询目标；虚拟组织 `ParentID` 按 2022 新语义 | 分别查三种组织节点 → 各自返回正确子树 | P1 |
-| ☐ B-4 | **行政区划节点可用**（附录 E/J） | 目录树正确展示行政区划层级 | `AdministrativeRegion` 的 `typeCode` 补全，可作**真实区划节点**（现在为空，只能拿 VirtualOrg + CivilCode 模拟） | 设备建「省-市-区」区划节点 → 平台目录树正确分层 | P1 |
+| ☐ B-4 | **行政区划节点可用**（附录 E/J）<br>⛔ **原描述「`typeCode` 补全」方向有误**（2026-09-17 核附录 J）：区划条目在 `DeviceID` 位直接放 **2/4/6/8 位民政区划码本身**，**没有类型码段可补** → `CatalogTree.kt:12 AdministrativeRegion("", 1)` 的空 `typeCode` **是合规的，不是缺陷**。真正待办是「能否作为可挂载的真实区划节点出现在目录树」 | 目录树正确展示行政区划层级 | 核 `AdministrativeRegion` 是否被当作可挂载节点处理（当前只能拿 VirtualOrg + CivilCode 模拟）；若平台要求区划节点具备 `ParentID` 分层，需核对附录 J 的父子表达方式 | 设备建「省-市-区」区划节点 → 平台目录树正确分层 | P1 |
 | ☐ B-5 | **附录 O 摄像机采集部位类型代码** | 枚举 + 展示 | 上报部位类型 | 设备上报部位 → 平台正确展示 | P2 ⚠️**待核原文**该字段在哪个命令里 |
-| ☐ B-6 | **附录 A 扩充：`Info`→`ExtraInfo`、Channel 字段格式变更** | 解析对齐 | 应答对齐 | 设备信息/目录应答符合 2022 格式 | P2 ⚠️**待核原文** |
+| ✗ B-6 | **附录 A 扩充：`Info`→`ExtraInfo`、Channel 字段格式变更**<br>⛔ **已销单 2026-09-17 —— 该改动不存在**：全 166 页 2022 标准 OCR 中 `ExtraInfo` 出现 **0 次**，容器名**仍是 `Info`**。真正的 2022 变化是**字段内容**（新增 `PhotoelectricImagingType` 等、`PTZType` 扩到 1-7、`BusinessGroupID` 上提），**不是容器改名** → 该变化已被 **B-1/B-2 覆盖**，勿再按原名开工 | — | — | — | ✗ 销单 |
 | ☐ B-7 | **目录多父级**（附录 H/N） | 已有 A/B 拆分（`gb_channel_mount`）→ 复核是否满足 2022 多父级语义 | `CatalogNode` 仅单 `parentId` → 支持多父级 | 同一通道挂两个父节点 → 平台两处都能看到 | P2 |
 | ☐ B-8 | **20 位统一编码校验**（附录 E） | 校验类型码段 / 区划段 / ID 类型码与节点类型一致 | `IdEncoder.kt`、`CatalogTreeStore.kt:243` 同上（现只校验 20 位全数字） | 编一个区划段非法的 ID → 被拒且给出明确原因 | P2 |
 
@@ -242,10 +242,34 @@
 
 | 编号 | 任务（条款） | 平台侧（后端 · 前端入口） | 模拟器侧 | 验收闭环 | P |
 | --- | --- | --- | --- | --- | --- |
-| ☐ C-1 | **存储卡状态查询**<br>（A.2.4.14 / A.2.6.16）<br>⛔ 2022 五大新增查询里**唯一没闭环**的一组 | `ptz/query.go` 的 `QueryKind` 加一类 + 构造器 + 应答解析（卡号/容量/剩余/状态）；controller + 路由 + 菜单按钮权限 + 迁移；前端在控制台或设备详情加入口 | ① 命令名兼容（`SDCardStatus` **与** `StorageCardStatusQuery` 都认，现只认后者，前者落「未识别 cmdType」）② 去掉写死的 mock（1 卡 32G/24G）→ 可配置真值 | 平台点「存储卡状态」→ 显示模拟器配置的容量/剩余/状态 | P1 |
+| ☑ C-1 | **存储卡状态查询**（A.2.4.14 / A.2.6.16）✅ **2026-09-17 完成**<br>原写「2022 五大新增查询里唯一没闭环」→ 现已闭环，**五大新增查询全部收口**<br>⭐ **2022 新增性已核**：2016 版附录 A OCR（`.workbuddy/ocr/appA2016.txt`）里 `SDCard` / `存储卡` **零命中** → 确属 2022 新增（不是改名） | ✅ 报文层 `manscdp/storage_card.go`（`BuildSDCardStatusQuery` / `BuildSDCardStatusQueryWithProfile` / `ParseSDCardStatusResponse[For]`，**27 单测**）<br>✅ 落库层 `models/gb_storage_card.go`（`gb_device_storage_card`，唯一键 **(device_id, target_code, card_id) 三元组**）<br>✅ 收发放 `ptz/storage_card.go`（`RefreshStorageCards` / `applyStorageCardResponse` / `persistStorageCardsWithDB`，**9 单测**）<br>✅ 分派 `ptz/handler.go`（`case manscdp.CmdSDCardStatus` + 「只查未终态」白名单）+ 重试重建 `ptz/scheduler.go` + `handler/message.go` 两处 `TxPTZ` 归类<br>✅ 接口 `GET /api/gb28181/device-mgmt/channel/:id/storage-cards[?refresh=true]`（`controllers/device_storage_card.go`）+ `routes.go`<br>✅ 权限与迁移：`sys_api` / `sys_menu_api`（绑既有 `gb28181:ptz:view`）+ `sys_casbin_rule`；**三方言 up/down 共 6 个文件**（契约门禁 `contractThreshold=2026-08-14` 已过）<br>✅ 前端 `PlayConsoleLinked.vue` 控制台「高级」tab（见右栏） | ✅ `DeviceControlSubRouter.kt`：`CmdType` 由自造的 `StorageCardStatusQuery` 改标准 **`SDCardStatus`**（旧名仍作为兼容入口，但应答一律标准名）+ 容器 `StorageList` → `SDCardStatusInfo/Item` + 字段改为 `ID`/`HddName`/`Status`/`FormatProgress`/`Capacity`/`FreeSpace` + `SumNum`；`Status` 取值由 `Normal` 改标准枚举<br>✅ 随机假数据（可注入 `Random`，惯例同 `MockGpsSource`）：**张数/容量只掷一次（物理属性）、状态与剩余空间每次抖动**；0/1/2 张、8G~128G；`FormatProgress` 仅在 `formatting` 时输出（**其余状态不得补 0**）<br>✅ `DeviceControlSubRouterTest` **19 例**（含 40 seed 不变量轮跑、同实例连查两次容量/名称必须稳定、旧名入口→标准名应答；**本轮 +3 例锁单一真源**：报文读数 ≡ Model 读数、查询命令不动 `lastCommand`、`storageCardQueryCount` 每次 +1）<br>✅ **单一真源** `shared/domain/StorageCard.kt` 的 `VirtualStorageCards`（`AppEngine` 装配 → `ManscdpRouterImpl` → `DeviceControlSubRouter`，UI 与报文共用同一实例）+ `VirtualStorageCardsTest` **6 例**<br>✅ **设备屏幕「存储卡」OSD** `ui/simulate/StorageCardPanel.kt`（落在模拟中心 3D 画布**右上角**，避开右下角 PtzThumbnail 与左上角 Aux 角标；`LaunchedEffect(storageCardQueryCount)` → 亮起 1.8s 衰减，**触发键用计数不用时间戳**）+ `StorageCardPanelUiTest` **9 例** | 平台点「存储卡状态」→ 平台列表显示容量/剩余/状态，**同时设备屏幕右上角那张卡片亮起、显示同一份读数**（两侧数字必然一致，见刻意决策 ⑦） | ☑ P1 |
+> 已实现的 2022 新增查询（看守位 / 巡航轨迹列表 / 巡航轨迹详情 / PTZ 精准状态 / **存储卡状态**）**两侧 + 前端入口都齐**，
+> 列入第 5 节回归清单，不在本组重复开工。**2022 五大新增查询至此全部收口。**
 
-> 已实现的 2022 新增查询（看守位 / 巡航轨迹列表 / 巡航轨迹详情 / PTZ 精准状态）**两侧 + 前端入口都齐**，
-> 列入第 5 节回归清单，不在本组重复开工。
+> ⭐ **C-1 八处刻意决策**（改前必读，避免"顺手改回去"）：
+> ① **不做 2022 版本门禁** —— 理由同 `RefreshHomePosition`：profile 只是登记的说法、不是事实；
+>    被登记成 2016 而实际按 2022 应答的设备，发这一帧是平台唯一的发现手段。
+> ② **不走 `queryStage` 聚合、不加 `QueryKind` 类** —— 附录 M 点名的多响应聚合三类是
+>    「目录查询响应 / 文件查询响应 / 订阅后的通知消息」，**不含 `SDCardStatus`**；A.2.6.16 本身就是完整列表
+>    （`Item maxOccurs="8"`），一次应答即终态。原计划里的「`ptz/query.go` 的 `QueryKind` 加一类」**已作废**。
+> ③ **清理"本轮没再出现的卡"用 `source_operation_seq < operation.ID`，不用「不在本次列表里」** ——
+>    后者会误删另一个 `target_code` 的行，或更晚一次查询刚写进来的行
+>    （专门防回归测试：`TestPersistStorageCardsDoesNotTouchOtherTargets`）。
+> ④ **不校验 `Result`** —— A.2.6.16 的 schema 里**没有 `Result` 元素**，校严了会把合规应答判成失败。
+> ⑤ **未识别 `Status` 落 `unknown` 而非 `error`** ——「设备报了个新状态 ≠ 卡坏了」；
+>    报文层 `SDCardState` / 落库层 `StorageCardState` / 前端 TS 联合，**三层字面量一致**。
+> ⑥ **`FormatProgress` 用 `*int`** —— 标准标了 `minOccurs="0"`，必须区分「设备没给」与「给了 0」。
+> ⑦ **模拟器侧读数只掷一次骰子**（2026-09-18 补）—— `shared/domain/StorageCard.kt` 的
+>    `VirtualStorageCards` 一个实例同时喂「回给平台的报文」与「设备屏幕上的 OSD 卡片」；
+>    `sendStorageCardStatusResponse` 里 `read()` **只调一次**再对半分给两边。
+>    否则两处各掷各的骰子 → **平台上 64G / 设备屏幕上 32G**，是验收时最难解释的一种"假失败"。
+>    同时：**查询命令绝不写 `lastCommand`** —— 它是云台活动信号，`CameraActivity` 靠它清零看守位空闲倒计时。
+> ⑧ **OSD 亮起用 `storageCardQueryCount` 当 key，不用 `storageCardQueriedAtMs`**（2026-09-18 补）——
+>    同一毫秒内的两次查询时间戳相同，`LaunchedEffect` 键不变 → **动效不重播**（连点两次只亮一次）。
+>
+> ⛔ **标准本身的两个反直觉点**（写代码时最容易做错）：
+> · **请求与应答的 `CmdType` 同名，都叫 `SDCardStatus`** —— 与「查询问 / 应答答」那族（如 `HomePositionQuery` / `CruiseTrackListQuery`）的命名习惯**不同**，别照抄那族的命名。
+> · **元素名是 `HddName`**（不是 `SDCardName`），照字段语义猜名字会全部解析不到。
 
 ### 4.D 设备控制与维护
 
@@ -255,7 +279,7 @@
 | ☐ D-2 | **格式化 SD 卡 `FormatSDCard`**（A.2.3.1.13） | 下发 + **权限门禁**（破坏性）+ 二次确认 + 前端入口；操作记入维护记录 | 执行语义（清空模拟存储卡）+ 应答 | 授权用户二次确认后下发 → 存储卡剩余变满值；未授权用户按钮不可用 | P2 |
 | ☐ D-3 | **固件分发 HTTP 服务**（§9.13） | 平台托管固件文件 + 生成 `FileURL`（现在靠外部喂 URL）+ 下载鉴权/过期 | 真下载固件（替代 5s 假进度） | 平台选固件 → 设备真发起 HTTP 下载 → 进度真实递进 | P1 |
 | ☐ D-4 | **模拟器升级真进度**（§9.13） | 复核升级结果状态机能接收各阶段（已实现） | `SystemHandler.kt:136` 的 5s 假进度 → 真下载 + 分阶段进度 + 状态机 | 升级过程中平台看到阶段推进，最终收到 `DeviceUpgradeResult` | P1 ⚠️**与 D-3 成对** |
-| ☐ D-5 | **控制台「待接入」按钮接线**（工程） | `ControlConsole.vue:365-367` 的「设备信息 / 请求关键帧 / 远程重启」三个占位 → 接后端已有接口（DeviceInfo / IFameCmd / TeleBoot） | 已有实现 → 复核应答 | 三个按钮点了有真实动作（设备屏幕/日志可见） | P1 |
+| ✗ D-5 | ~~**控制台「待接入」按钮接线**（工程）~~ ⛔ **2026-09-18 销单 —— 前提失效，该做的基本都已经做了**<br>原写「`ControlConsole.vue:365-367` 三个占位 → 接后端已有接口」，但 `ControlConsole.vue` 是**孤儿文件**（`cb49bc1b` 2026-07-23 已被 `PlayConsoleLinked` 替换，此后无人 import、无菜单行指向）→ 那 3 个占位**从未上线**，接它等于给死文件接线。<br>⭐ 复核真实链路（2026-09-18 逐条核）→ **4 个动作全已是真实调用**：<br>· `IFameCmd` 请求关键帧 → `PlayConsoleLinked.vue:4398` `runAdvancedAction('iframe')`<br>· `RecordCmd` 录像 → 同文件 `4402`/`4405` `record_start`/`record_stop`<br>· `GuardCmd` 布防·撤防 → 同文件 `4415`/`4418` `guard_set`/`guard_reset`<br>· `TeleBoot` 远程重启 → **不在控制台**，在设备管理页 `device-mgmt/DeviceRebootDialog.vue`（← `index.vue:85`）+ 权限门禁 `gb28181:device:reboot` + 维护记录 + 轮询<br>（`runAdvancedAction` = `PlayConsoleLinked.vue:3333` 真链路：`controlDevice(channelId,{action,idempotencyKey})` → 按 `operationId` 轮询到终态）<br>⭐ **且「设备信息」连缺口都不算**：后端 `handler/deviceinfo_trigger.go:44 uacDeviceInfoTrigger.Trigger` **注册时自动异步发 DeviceInfo 查询**（失败仅记日志）→ 无需按钮<br>🗑️ **纯清理已执行（2026-09-18）**：`ControlConsole.vue` 已物理删除。⚠️ 纠正上次的一处误述——**并不存在「`control-console-modal` 样式」**：全仓（含 `dist`）只有 1 处 `control-console-modal` 命中，是 Arco `modal-class` 的**属性名**，从未有 CSS 定义，无可连带删除。连带扫描另发现**第二个孤儿** `ChannelSnapshotCell.vue`（`444a3835`「T6 add ChannelSnapshotCell component」引入，`git log --all -S` 全历史**零引用**，且它仅剩的 2 处注释还在引用已删的 ControlConsole）→ **已于同日一并删除**（其「快照缩略图」能力现由 `device-mgmt/index.vue:428 snapshotImageUrl()` + `:2466`/`:2083` 的 `v-if="…snapshotUrl"` 内联实现，**功能未丢，删的只是没人用的抽象**）。已应用迁移 `2026-07-20-channel-snapshot.sql` 里的同名注释**刻意保留**（迁移是历史记录，不重写） | — | — | — | ✗ 销单 |
 | ☐ D-6 | **设备配置家族统一前端入口**（A 组收口） | 新建 `web/src/views/gb28181/device-mgmt/DeviceConfigDrawer.vue`，分 Tab 承载 A-4~A-13；挂到设备管理行操作 + 控制台 | 无需改 | 一个入口能看到全部配置项，**读回值与下发值一致** | P1 ⚠️A 组做完再做，避免每项各开一个入口 |
 
 ### 4.E 图像抓拍口径整改（跨两侧，**当前是私有口径**）
@@ -281,8 +305,8 @@
 | ☑ F-2 | **X-GB-Ver 补全**（附录 I）✅ 2026-09-17 | ✅ `handler/register.go` 鉴权通过后按 `WarningCode` 四类异常留 `gb28181.register.version_header_abnormal` 告警（missing/invalid/unknown/legacy）—— 此前 `protocol.Resolve` 产出的 `Warning` **全仓零消费**。⛔ 原描述「200 OK 响应也带」已更正：**设备不产生注册响应**，附录 I 的「注册及其响应」对设备侧只剩出站一半；响应侧平台早已覆盖（`newRegisterResponse` 对 200/401/403/500 全带头） | ✅ `sip/GbVersionNegotiation.kt`（parse + min 协商）+ `RegistrationCoordinator.platformVersion` 流（解析 200/401/4xx **全部**响应头；注销时清空）+ `ManscdpContext.effectiveGbVersion` → Catalog/DeviceInfo/DeviceStatus/AlarmStatus 按 **min(本机, 平台)** 出站 + 设置页显示协商结果 | 模拟器切 2016 后平台门禁生效；反向（平台 2.0 × 设备 2022）时设备应答降级为 2016 形态 | P1 |
 | ☐ F-3 | **NAT 场景 TCP 长连接**（建立 · 复用 · 断链自愈）（§9.1.1 f、§5.2）**⛔ 原 F-4 已并入本条** | ① ✅ **「连接复用」已具备，勿再当缺口**：`bootstrap.go:613` 硬编码监听 `{udp,tcp}`；accept 的 TCP 连接按**远端地址**入池（`transport_tcp.go:198-199` `pool.Add(raddr, c)`）；`connectionReuse` 默认 `true`（`transport_layer.go:139`）→ 下行 `ClientRequestConnection` 用 `GetConnection(raddr.String())` 命中**同一条**已建连接（两侧同为 `net.JoinHostPort` 格式）；下行 transport 全部取 `device.Transport`（`ptz/operation.go:276`、`ptz/device_reboot.go:290`、`subscribe/service.go:292`、`play/service.go:710`、`cascade/control/target_loader.go:59`、`upgrade/service.go:347`、`talk/activation.go:169`）。⛔ **2026-09-17 上一轮写的「现每次 `SetDestination()` 重新 Dial」是误判**，特此更正 ② ✅ **「TCP 断开立即判设备掉线」已实现**（2026-09-17，见本节末「平台侧实现清单」）—— 原缺口：`closeObserver` 只接了 trace 与 security（`sip/server.go:336-346`），设备在线靠心跳超时（`keepalive_interval=60` × `keepalive_timeout_count=3` = **180s**），与 f)「若 TCP 通道断开，则认为 SIP 代理异常掉线」不符 | ① ✅ **断链自愈已完成**（2026-09-17，`domain/SipReconnect.kt`：被动断开 → 停活跃流 + 作废注册会话 → 1s 起指数退避封顶 30s、**次数不封顶** → `close()`+`connect()` → 重新注册；`TcpSipTransport` 上报 `ConnectionLost` + 世代号守卫；18 单测）② ⛔ 默认 `transport = UDP`（标准要求 NAT 内侧**用 TCP**）③ ✅ **`received`/`rport` 回填已消费**（2026-09-17）—— 落点是**自发现**（解析平台回值 → 判定 DIRECT/NAT/UNKNOWN → 设置页「地址转换」行展示，NAT 时提示改用 TCP），**不是改 Contact**：⛔ 平台只读 Contact 头里的 `expires` 参数（`handler/register.go:568-585`），**地址部分完全不用**，改它属伪需求 | ① 设备 TCP 注册后，平台**所有**下行（点播/控制/查询/广播）复用同一条连接 ② **拔网线 / 杀连接 → 平台秒级判离线**（不是 180s）③ 设备自愈重连后平台恢复在线且绑定正确 | P1（原 F-3 P2 + F-4 P1 合并后取 P1） |
 | ☐ F-5 | **NTP 校时**（§9.10） | 补 NTP 客户端（现仅 SIP Date），前端可发起 | 已有 NTP 客户端 → 复核可用性 | 平台发起校时 → 设备时间同步 | P2 |
-| ✗ F-6 | **MobilePosition 的 MESSAGE 形态**（原引 §9.5.4）**⛔ 已关闭 2026-09-17 —— 标准里不存在这个形态，勿再当成缺口开工**（依据见下方「📌 F-6 条款号核验」） | 不做（不补 MESSAGE 分支；`manscdp.CmdMobilePosition` 的现存用途只有订阅体构造 / NOTIFY 解析 / Event 判定，**服务的是订阅链路，不是 MESSAGE**） | 私有扩展，**非对标能力**：`CatalogSubRouter.kt:55` → `MobilePositionResponse.kt`（KDoc 原写「§9.5.4」= 虚号源头） | — | — |
-| ☐ F-10 | **MobilePosition NOTIFY 2022 列表形态 + 2016 向下兼容**（§9.11.2.3 c）/ A.2.5.6 / A.2.1.14） | ⛔ `manscdp.MobilePositionNotify`（`subscription.go:107`）只有 2016 扁平字段，**无 `SumNum` / `DeviceList` / `Item`** → 收 2022 报文时**不报错**（顶层 `DeviceID` 两版都有，`ParseMobilePositionNotify` 的 `DeviceID != ""` 守卫会放行，`Longitude=0` 也落在 `[-180,180]` 内），而是被 `subscribe/position.go` 的「位置坐标不能为 0」**静默拒收** → 该设备在前端地图上永远没有位置。**必须在同一解析器内认两种形态**（2022 优先、扁平回落），并让落库拿到 `Item` 内的 `DeviceID` | 按**本仓既有双版本套路**扩 `MobilePositionNotify.build`：`ManscdpContext.effectiveGbVersion == 2022` 出列表形态、2016 出扁平形态（照 `AlarmStatusResponse.kt` / `DeviceStatusResponse.kt` 的双版本分支写法，**不是新发明机制**）；`Item` 内字段 `DeviceID` / `CaptureTime` / `Longitude` / `Latitude` / `Speed?` / `Direction?` / `Altitude?` / `Height?`，单位口径沿用现有 builder（speed m/s→km/h） | ① **2022**：模拟器切 2022 → 平台侧能收到位置、前端「设备管理 · 地图」显示该设备（不是 0 坐标被拒）② **2016 不能被打破**：切 2016 → 平台照旧收到（回归必须绿）③ 平台解析器对两种形态都出正确坐标与 DeviceID；④ 单测覆盖「2022 列表 / 2016 扁平 / 两版切换」三路 | P1 |
+| ✗ F-6 | **MobilePosition 的 MESSAGE 形态**（原引 §9.5.4）**⛔ 已关闭 2026-09-17 —— 标准里不存在这个形态，勿再当成缺口开工**（依据见下方「📌 F-6 条款号核验」；**替代项 = 紧邻的 `F-10`**） | 不做（不补 MESSAGE 分支；`manscdp.CmdMobilePosition` 的现存用途只有订阅体构造 / NOTIFY 解析 / Event 判定，**服务的是订阅链路，不是 MESSAGE**） | 私有扩展，**非对标能力**：`CatalogSubRouter.kt:55` → `MobilePositionResponse.kt`（KDoc 原写「§9.5.4」= 虚号源头） | — | — |
+| ☑ F-10 | **MobilePosition NOTIFY 2022 列表形态 + 2016 向下兼容**（§9.11.2.3 c）/ A.2.5.6 / A.2.1.14）✅ 2026-09-17 | ✅ `manscdp.MobilePositionNotify`（`subscription.go`）改造为**双形态共存**：保留 2016 扁平根字段，新增 `MobilePositionItem`（A.2.1.14，含 `Height`）+ `MobilePositionDeviceList`；`SumNum` / `DeviceList` 用**指针**（为的是区分「元素不存在」与「值为 0 / 空」，裸 `int` 做不到），`Positions()` 做跨版本归一化。⭐ **一旦判定为列表形态就在列表语义里走到底**：`DeviceList` 在场但 `Item` 为空 → 返回**空切片**，**绝不回落扁平字段** —— 回落会拿根上的 0 值坐标合成一条 (0,0) **假位置**（前端地图上漂到几内亚湾）。`PositionProcessor.Process` 改为遍历 `Positions()`、抽出 `saveOne`：**单条脏数据只跳过该条 + zap warn，不连坐同包其它设备**，整包全废才返回首个错误（保持改动前「零坐标必须报错」契约 —— 单设备场景恰好 1 条）；`SumNum=0` 空列表返回 `nil`（返回 error 会让 `notify.go:73` 直接 return，连 `last_notify_at` 都不更新） | ✅ `MobilePositionNotify.build` 加**必传** `gbVersion`（**刻意不给默认值** —— 默认成 2016 会把「忘了传版本」变成一次静默的错误形态上报）：2022 出列表形态、2016 出扁平形态（**逐字节不变**）。⭐ 两形态的根 `<DeviceID>` 语义不同故拆两参：2016 根 = 位置来源通道（平台按它定位通道 / 写 `SourceCode`）；2022 根 = **目标设备**，通道**下沉到 `Item/DeviceID`**（传错会让合规平台认不出订阅目标而丢弃整条 NOTIFY）。⭐ 采集时间两形态**共用同一算法**（同一个 fix 在两版报文里必须是同一串字符），2022 根 `<Time>` 是**上报通知时间**（新 `notifyTimeMs`，走东八区而非跟随系统时区）；可选 `Height` 本仓无数据源 → **不发**。调用点 `SubscriptionNotifyHandler.sendPositionNotify` 传 `ctx.effectiveGbVersion` + `config.device.deviceId` | ① ✅ 单测覆盖「2022 列表 / 2016 扁平 / 两版切换」三路：模拟器 **16 例**（含**两份整包 golden** 锁死元素序 + CRLF） + **2 例端到端接线**（守「有效版本真的传到构造器」，builder 单测抓不到接错版本源）；平台 `manscdp` **5 例** + `subscribe` **4 例** ② ✅ **2016 回归**：既有 9 例**显式标 `V2016`** + golden 逐字节锁，两版并存被证明而非假设 ③ ✅ 变异自证：让 `Positions()` 退回「只认扁平」→ **6 例红**，失败输出正是那条 `{… 0 0 0 0 0 0}` 假位置 ④ ⚠️ **真机 e2e（模拟器 2022 → 平台 → 前端「设备管理 · 地图」）未跑** | P1 |
 | ☐ F-7 | **媒体流保活 / 丢失释放**（附录 K） | RTP 静默超时判定 + 链路释放（现只有 BYE + 点播对账 `play/reconciler`） | 静默/丢包检测与链路释放 | 设备侧停流 → 平台在超时内释放会话 | P2 |
 | ☐ F-8 | **RTCP 反馈**（RFC3550） | 消费反馈（可先只记录入日志/库；现状未确认） | 补 RR / NACK / PLI / FIR（现只发 SR） | 抓包能看到反馈报文；丢包时平台可请求关键帧 | P2 |
 | ☐ F-9 | **Subject 媒体链路标识**（附录 L） | 核对现有 Subject 构造与 2022 口径 | 同上 | 点播/回放/广播的 Subject 符合标准 | P2 ⚠️**待核原文**口径 |
@@ -389,17 +413,19 @@
 | PTZ 精准状态查询 | `ptz/query.go:34-39` | 已实现 | 回归 |
 | 看守位查询 + 设备侧自动归位 | `ptz/query.go`、`controllers/device_ptz_home_position_test.go` | 已实现 | 回归 |
 | 巡航轨迹列表 / 详情查询 | `ptz/query.go`、`controllers/device_ptz_query.go` | 已实现 | 回归 |
-| 上述四项的**前端入口** | `PlayConsoleLinked.vue`（精准模式 / 预置位 / 巡航轨迹 / 看守位卡片 + 管理抽屉） | — | 回归 |
+| **存储卡状态查询**（A.2.4.14 / A.2.6.16） | `manscdp/storage_card.go`、`ptz/storage_card.go`、`gb_device_storage_card`、`controllers/device_storage_card.go`（27 + 9 单测） | ✅ `DeviceControlSubRouter.kt`（标准报文 + 随机假数据，19 单测）+ `VirtualStorageCards`（6 单测）+ **设备屏幕 OSD `StorageCardPanel.kt`**（9 单测） | 回归（C-1 已完成 2026-09-17，OSD 于 2026-09-18 补）—— **`Status` 各枚举取值、0 卡空列表、`FormatProgress` 缺席三条要各跑一遍**；另加两条设备侧观感：**连点两次查询卡片必须亮两次**（计数当 key）、**平台列表数字与设备屏幕数字必须逐字相同**（单一真源） |
+| 上述**五项**的**前端入口** | `PlayConsoleLinked.vue`（精准模式 / 预置位 / 巡航轨迹 / 看守位 / **存储卡状态**卡片 + 管理抽屉） | — | 回归 |
 | 目录订阅与增量 NOTIFY | `handler/notify.go` | 已实现 | 回归 |
+| 目录项字段渲染（`Item` 基字段 + `<Info>` 容器，**2016 含 `PositionType`/`UseType`/Info 内 `BusinessGroupID`；2022 含 `PhotoelectricImagingType`/`CapturePositionType`/`StreamNumberList`/`SSVCRatioSupportList`、`PTZType` 1-7、`BusinessGroupID` 上提 `Item` 层**） | ✅ **2026-09-18 完成**：`manscdp.CatalogInfo` 双版本并存解析 + `gb_channel` 十列 + 通道详情「设备上报属性」区块（`StreamNumberList`/`SSVCRatioSupportList` 属取流能力、非属性展示，**仍在 manscdp 层解析但不落库**，见 B-2 行） | ✅ `gb28181/CatalogNotifyBuilder.kt` 按 `effectiveGbVersion` 双分支 | 回归 —— **2016 形态回归必须一起跑**（模拟器侧 `CatalogResponseTest` 的 `infoBody()` 锚点 + 平台侧 `subscribe/catalog_test.go` 的 2016/2022 端到端 XML 锚点） |
 | 目录多父级挂载（A/B 拆分） | `catalog/dto.go:28`、`gb_channel_mount` | ✗（见 B-7） | B-7 改完后 |
 | 报警上报 / 报警复位 AlarmCmd | `manscdp/device_advanced.go:146,221` | 已实现 | 回归 |
-| MobilePosition（NOTIFY 形态，**2016 扁平**） | `handler/notify.go`、`manscdp/subscription.go:107` | `MobilePositionNotify.kt`（扁平） | 回归 —— ⚠️ **2022 列表形态见 F-10**，两版都由 `gbVersion` 切换后才算闭环 |
+| MobilePosition（NOTIFY 形态，**2016 扁平 + 2022 列表**双版本） | `handler/notify.go`、`manscdp/subscription.go`（`Positions()` 归一化） | `MobilePositionNotify.kt`（按 `effectiveGbVersion` 分支） | 回归 —— **2016 形态回归必须一起跑** |
 | RecordInfo / Playback / Download / MediaStatus | `manscdp/record_info.go` | 已实现 | 回归 |
-| TeleBoot / RecordCmd / GuardCmd / IFameCmd / DragZoom | `manscdp/device_advanced.go` | 已实现 | D-5 中三个占位接完后 |
+| TeleBoot / RecordCmd / GuardCmd / IFameCmd / DragZoom | `manscdp/device_advanced.go` | 已实现 | 回归（2026-09-18 核：控制台/设备管理页均为**真实调用**，`D-5` 已销单） |
 | 设备软件升级下发 + 结果状态机 | `manscdp/device_upgrade.go`、`upgrade/service.go` | 假进度（见 D-4） | D-3/D-4 改完后 |
 | 语音广播（下行） | `manscdp/broadcast.go`、`talk/activation.go` | 已实现 | G-1/G-4 改完后 |
 | H.264/H.265 编码 + PS 封装 | 委托 ZLMediaKit | 已实现 | 回归 |
-| 目录 2022 维度（CivilCode / BusinessGroupID / 业务分组 / 虚拟组织） | `manscdp/catalog.go:33-51`、`catalog/classifier.go` | 部分 | B-1/B-2 改完后 |
+| 目录 2022 维度（CivilCode / BusinessGroupID / 业务分组 / 虚拟组织） | `manscdp/catalog.go`、`catalog/classifier.go`、`catalog/pipeline.go` | ✅ B-1/B-2 已改完（`<Info>` 内 `BusinessGroupID` 的 2016 路径已有端到端锚点） | 回归 |
 | 探针/流健康检测 | `probe/` | — | 回归 |
 
 ---
@@ -420,16 +446,18 @@
 
 **批次 2 — 打通最大空白 + 拿可视闭环**
 `A-1` `A-2` `A-3`（配置读写通道 + 设备落盘）→ `A-4`（OSD，**画面文字真的变**）
-→ `B-1` + `B-2`（目录九字段，**必须同批**）
+→ `B-1` + `B-2`（目录通道属性字段，**必须同批**）
 
 **批次 3 — 修私有口径（越晚越贵）**
 `E-1` `E-2` `E-3`（抓拍口径）→ `E-6`（Android 抓拍落地）
 
 **批次 4 — 家族补齐与收口**
 `A-5` `A-9` → `A-6` `A-7` `A-8` → `A-10` `A-11` `A-12` → `D-6`（统一入口）
-→ `C-1` `D-3` `D-4` `D-5` → `F-1` `F-3` **`F-10`（两侧对称改，且 2016 形态回归必须一起跑）**
-（原列的 `F-2` / `I-1` 已于 2026-09-17 完成，移出待办；**原 `F-4` 已并入 `F-3`**——NAT/TCP 长连接是「建立 · 复用 · 断链恢复」一件事；
-**原 `F-6` 已于 2026-09-17 关闭**——标准里不存在 MESSAGE 形态，替代项是新增的 `F-10`）
+→ `D-3` `D-4` → `F-1` `F-3`
+（原列的 `F-2` / `I-1` / **`F-10`** 已于 2026-09-17 完成，移出待办；**原 `F-4` 已并入 `F-3`**——NAT/TCP 长连接是「建立 · 复用 · 断链恢复」一件事；
+**原 `F-6` 已于 2026-09-17 关闭**——标准里不存在 MESSAGE 形态，替代项是新增的 `F-10`；
+**`C-1` 已于 2026-09-17 完成**，移出待办 —— 2022 五大新增查询至此全部收口；
+**`D-5` 已于 2026-09-18 销单**——其引用的 `ControlConsole.vue` 是孤儿文件，四个动作在 `PlayConsoleLinked.vue` / 设备管理页**早就是真实调用**，无需开工；该孤儿文件已于同日删除）
 
 ---
 
@@ -446,3 +474,36 @@
   A 档「注释与 Schema 矛盾」与 C-1「`A.2.3.2.13` 不存在」这类结论，**改代码前建议肉眼复核对应 PDF 页一次**
   （PDF 页 = 标准页 + 7（2022）/ + 5（2016），各条页码见 ambiguity 文档）。
 - 既有 `gb28181-coverage.md`（2026-06-15）已严重滞后，**勿再作为进度依据**。
+
+## 9. 既存问题登记（**不是本单条目，不并进任何单据结论**）
+
+> 做 B-1/B-2 期间顺带发现、**与 B-1/B-2 无关**的问题。按项目约定单独列出，避免混进主结论。
+> 处理这些不需要开本单的条目，需另立工单。
+
+### P-1 · `web/src/views/gb28181/zlm/SchedulerStrategy.test.ts` 在 develop 上是红的
+
+- **事实**：该测试断言 `SchedulerStrategyPanel.vue` 含 `effectiveFrom` 与「只影响新点播」，但
+  **同一提交里面板文件并不含这两个串**。已用 `git show HEAD:` 逐文件核对：
+  测试文件（HEAD 版本）含 `effectiveFrom`，面板文件（HEAD 版本）**不含** → **develop 上既存失败**，
+  与本次改动无关（本次未触碰 `web/src/views/gb28181/zlm/` 任何文件，`git status` 该路径为空）。
+- **影响**：前端全量 `vitest` 恒有 1 红，会掩盖真正的回归。
+- **修法二选一**：① 补齐面板实现（`effectiveFrom` + 「只影响新点播」文案）；② 若该需求已撤销，
+  删掉这两条断言。**需先确认需求是否仍在**，不要直接删测试。
+
+### P-2 · `postgresql_converted.sql` / `sqlserver_converted.sql` 两个转换快照与 MySQL 快照严重漂移
+
+- **事实**（2026-09-18 核，`CREATE TABLE` 计数）：MySQL 全量快照 **76** 张；
+  `postgresql_converted.sql` **53** 张；`sqlserver_converted.sql` **57** 张。
+  **25 张表只存在于 MySQL 快照**，含 `gb_channel`、`gb_catalog_node`、`gb_cascade_platform` 等核心表。
+- **且**：两个转换快照里仍留有 `initialization_contract_test.go` **明令禁止**的
+  `demo_students` / `demo_teacher` / `example` 表。
+- **为什么现在测试还是绿的**：`initialization_contract_test.go` 只断言「**存在/不存在某些 token**」，
+  **不校验表集合相等**，所以漏表与残留表都逃过门禁。
+- **为什么本次没顺手修**：这是**既存**问题，且修它等于把 PG/SQL Server 快照整个重建，
+  超出 B-2 范围、会把 B-2 的 diff 淹没。本次按既有惯例（参照更早的 `recording_mode`）
+  在这两个快照里**追加了守卫式 `ALTER TABLE gb_channel ADD ...` 补丁**，
+  保证「快照路径」与「增量迁移路径」在新列上一致。
+- **影响**：任何依赖这两个快照建库的 PG / SQL Server 部署，都会得到**缺 25 张表**的库。
+- **建议**：另立工单 —— 要么用转换脚本重新全量生成两个快照，要么给 `initialization_contract_test.go`
+  加「表集合与 MySQL 快照相等」的断言把漂移钉死。
+
