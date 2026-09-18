@@ -78,6 +78,7 @@
 
         <!-- Top brand bar -->
         <header class="brand-bar">
+            <img class="brand-mark" :src="uvpMark" alt="统一视频接入平台" />
             <span class="brand-logo-text">UVP 统一视频接入平台</span>
             <span class="brand-meta">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
         </header>
@@ -164,6 +165,7 @@ import {
     getDisplaySystemRecordNo
 } from "@/utils/system-footer";
 import { APP_VERSION_TEXT } from "@/config/version";
+import uvpMark from "@/assets/logo/uvp-mark.svg";
 
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
@@ -245,6 +247,13 @@ $primary-light: #69c0ff;
     font-weight: 600;
     letter-spacing: .5px;
     color: #fff;
+}
+.brand-mark {
+    display: block;
+    width: 30px;
+    height: 30px;
+    margin-right: 10px;
+    object-fit: contain;
 }
 .brand-meta {
     margin-left: auto;
@@ -457,6 +466,11 @@ $primary-light: #69c0ff;
     }
     .brand-logo-text {
         font-size: 15px;
+    }
+    .brand-mark {
+        width: 28px;
+        height: 28px;
+        margin-right: 8px;
     }
     .float-card {
         grid-template-columns: 1fr;

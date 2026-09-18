@@ -82,6 +82,15 @@ export const staticRoutes = [
       hide: true
     }
   },
+  {
+    path: "/device-config-demo",
+    name: "device-config-demo",
+    component: () => import(/* webpackChunkName: "device-config-demo" */ "@/views/gb28181/DeviceConfigDemo.vue"),
+    meta: {
+      title: "设备配置中心原型",
+      hide: true
+    }
+  },
   ...recordQueryDemoRoutes
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中

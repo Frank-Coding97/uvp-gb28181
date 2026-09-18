@@ -45,6 +45,7 @@ router.beforeEach(async (to: any, _: any, next: any) => {
     const publicRoutes = [
         "/play-console-demo",
         "/play-console-linked-demo",
+        "/device-config-demo",
         ...(import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true" ? ["/device-record-query-demo"] : [])
     ];
     if (publicRoutes.includes(to.path)) return next();
