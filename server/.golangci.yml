@@ -1,0 +1,41 @@
+# golangci-lint 配置（v2 格式）
+#
+# 本仓已弃用 GitHub Actions，静态检查由 scripts/quality-gate.sh 在本地承担。
+# 运行方式（注意必须在 server/ 下，go.mod 在这一层）：
+#   cd server && golangci-lint run
+# 或直接：
+#   scripts/quality-gate.sh
+#
+# 工具安装：
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+version: "2"
+
+run:
+  timeout: 10m
+  # 测试文件也纳入检查（存量问题里有相当一部分来自 _test.go）。
+  tests: true
+
+linters:
+  # standard = errcheck + govet + ineffassign + staticcheck + unused
+  # （v2 把这五个作为内置默认集，无需逐个 enable）
+  default: standard
+
+  # 暂不开 gocritic / revive 等激进检查器：存量债尚未清零，
+  # 一次开出几百条新问题会让门禁彻底失去信号。等存量收敛后再加。
+  # enable:
+  #   - gocritic
+
+  exclusions:
+    generated: lax
+    paths:
+      # 上游 fork（sipgo）不参与本仓规范检查。
+      - third_party
+
+issues:
+  # ⚠️ 必须显式设为 0（不限制）。
+  # 默认值是每 linter 50 条、同类问题 50 条，会把真实存量**静默截断**，
+  # 让人误以为「就这么多问题」—— 实测默认值下 staticcheck 与 errcheck
+  # 都恰好停在 50，看起来像巧合，实际是撞上了上限。
+  max-issues-per-linter: 0
+  max-same-issues: 0
