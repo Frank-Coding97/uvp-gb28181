@@ -3,104 +3,64 @@ import fs from "node:fs";
 import path from "path";
 import { resolve } from "path";
 import { include } from "./build/optimize";
-import postcssPresetEnv from "postcss-preset-env";
 import { createVitePlugins } from "./build/vite-plugin";
-// const themePath = normalizePath(path.normalize("./src/style/global-theme.scss"));
+import postcssPresetEnv from "postcss-preset-env";
 
-
-// https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-    // 根路径
-    const root = process.cwd();
-    // 获取跟路径对应的文件
-    const env: any = loadEnv(mode, root);
-    const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
+  const root = process.cwd();
+  const env: any = loadEnv(mode, root);
+  const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
 
-    // 开发环境 HTTPS：certs/ 下存在 mkcert 证书则自动启用，无证书回落 HTTP。
-    // 仅供需要安全上下文的功能（平板 getUserMedia 摄像头等）使用。
-    // ⚠️ 启用后手机模拟器（Ktor CIO 无 TLS 豁免）扫码接入会握手失败，按需取舍。
-    const certDir = path.resolve(__dirname, "certs");
-    const certKeyPath = path.join(certDir, "dev-key.pem");
-    const certCrtPath = path.join(certDir, "dev.pem");
-    const devHttps =
-        fs.existsSync(certKeyPath) && fs.existsSync(certCrtPath)
-            ? { key: fs.readFileSync(certKeyPath), cert: fs.readFileSync(certCrtPath) }
-            : undefined;
+  const certDir = path.resolve(__dirname, "certs");
+  const certKeyPath = path.join(certDir, "dev-key.pem");
+  const certCrtPath = path.join(certDir, "dev.pem");
+  const devHttps =
+    fs.existsSync(certKeyPath) && fs.existsSync(certCrtPath)
+      ? { key: fs.readFileSync(certKeyPath), cert: fs.readFileSync(certCrtPath) }
+      : undefined;
 
-    return {
-        // 生产环境服务的公共基础路径-用于生出环境的代理的路径
-        base: "/",
-        server: {
-            host: "0.0.0.0",
-            open: false,
-            port: 5177,
-            https: devHttps,
-            // 为开发服务器配置自定义代理规则-用于开发时的代理
-            proxy: {
-                "/api": {
-                    target: apiProxyTarget,
-                    changeOrigin: true,
-                    xfwd: true
-                    //rewrite: path => path.replace(/^\/api/, "")
-                },
-                // 后端 Gin static:通道快照 / 上传文件等,由 httpserver.serverrootpath 挂载
-                "/public": {
-                    target: apiProxyTarget,
-                    changeOrigin: true
-                }
-            }
-        },
-        // 插件：路径build/vite-plugin
-        plugins: [
-            ...createVitePlugins(env)
-        ],
-        resolve: {
-            // 配置别名-绝对路径
-            alias: {
-                "@assets": path.join(__dirname, "src/assets"),
-                "@": resolve(__dirname, "./src")
-            }
-        },
-        css: {
-            postcss: {
-                plugins: [postcssPresetEnv()]
-            },
-            preprocessorOptions: {
-                scss: {
-                    // additionalData的内容会在每个scss文件的开头自动注入
-                    additionalData: `@use "@/style/var/index.scss" as *; `
-                }
-            }
-        },
-        // 依赖预加载 https://cn.vitejs.dev/config/dep-optimization-options.html#dep-optimization-options
-        optimizeDeps: {
-            include
-        },
-        build: {
-            outDir: "dist", // 指定打包路径，默认为项目根目录下的dist目录
-            // minify: "esbuild", // esbuild打包更快但是不能去除console.log，terser打包慢但能去除console.log
-            //minify: "terser", // Vite 2.6.x 以上需要配置 minify："terser"，terserOptions才能生效，terser可以去除 console.log
-            minify: "terser", // 开发环境使用更快的esbuild
-            terserOptions: {
-                compress: {
-                    keep_infinity: true, // 防止 Infinity 被压缩成 1/0，这可能会导致 Chrome 上的性能问题
-                    drop_console: true, // 生产环境去除 console
-                    drop_debugger: true // 生产环境去除 debugger
-                },
-                format: {
-                    comments: false // 删除注释
-                }
-            },
-            assetsInlineLimit: 50 * 1024, // 生产环境降低内联阈值
-            chunkSizeWarningLimit: 50000, // 规定触发警告的 chunk 大小, 这里设置阈值为50kb, 消除打包大小超过500kb警告
-            // 静态资源打包到dist下的不同目录,将文件类型css、js、jpg等文件分开存储
-            rollupOptions: {
-                output: {
-                    chunkFileNames: "static/js/[name]-[hash].js",
-                    entryFileNames: "static/js/[name]-[hash].js",
-                    assetFileNames: "static/[ext]/[name]-[hash].[ext]"
-                }
-            }
+  return {
+    base: "/",
+    server: {
+      host: "0.0.0.0",
+      open: false,
+      port: 5177,
+      https: false,
+      proxy: {
+        "/api": { target: apiProxyTarget, changeOrigin: true, xfwd: true },
+        "/public": { target: apiProxyTarget, changeOrigin: true }
+      }
+    },
+    plugins: [...createVitePlugins(env)],
+    resolve: {
+      alias: {
+        "@assets": path.join(__dirname, "src/assets"),
+        "@": resolve(__dirname, "./src")
+      }
+    },
+    css: {
+      postcss: { plugins: [postcssPresetEnv()] },
+      preprocessorOptions: {
+        scss: { additionalData: `@use "@/style/var/index.scss" as *; ` }
+      }
+    },
+    optimizeDeps: { include },
+    build: {
+      outDir: "dist",
+      minify: "terser",
+      terserOptions: {
+        compress: { keep_infinity: true, drop_console: true, drop_debugger: true },
+        format: { comments: false }
+      },
+      assetsInlineLimit: 50 * 1024,
+      chunkSizeWarningLimit: 50000,
+      rollupOptions: {
+        output: {
+          chunkFileNames: "static/js/[name]-[hash].js",
+          entryFileNames: "static/js/[name]-[hash].js",
+          assetFileNames: "static/[ext]/[name]-[hash].[ext]"
         }
-    };
+      }
+    }
+  };
 });
