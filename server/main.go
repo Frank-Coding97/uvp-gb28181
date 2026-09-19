@@ -106,14 +106,25 @@ func runApplication() (err error) {
 	}
 	// Own the local domain for the whole API process, not one SIP generation.
 	// Migrations are complete; no HTTP routes or device effect runtime exists.
-	authorityLock, err := processauthority.AcquireLocalLock(app.ConfigYml.GetString("processauthority.state_dir"))
+	stateDir, err := processauthority.PrepareStateDir(app.ConfigYml.GetString("processauthority.state_dir"))
 	if err != nil {
+		logProcessAuthorityStartupFailure("state_prepare_failed", err)
+		return fmt.Errorf("进程授权目录准备失败: %w", err)
+	}
+	authorityLock, err := processauthority.AcquireLocalLock(stateDir)
+	if err != nil {
+		logProcessAuthorityStartupFailure(processAuthorityFailureReason(err), err)
 		return fmt.Errorf("进程授权目录或排他锁不可用: %w", err)
 	}
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 10*time.Second)
 	authority, err := processauthority.Register(registerCtx, app.DB(), authorityLock)
 	cancelRegister()
 	if err != nil {
+		reason := "database_registration_failed"
+		if errors.Is(err, processauthority.ErrProcessAuthorityDomainMismatch) {
+			reason = processAuthorityFailureReason(err)
+		}
+		logProcessAuthorityStartupFailure(reason, err)
 		return errors.Join(fmt.Errorf("进程授权注册失败: %w", err), authorityLock.Close())
 	}
 	app.JobScheduler.Start()
@@ -184,6 +195,24 @@ func runApplication() (err error) {
 		return authorityLock.Close()
 	}
 	return ginhelper.StartServer(engine, shutdown)
+}
+
+func processAuthorityFailureReason(err error) string {
+	if errors.Is(err, processauthority.ErrLocalAuthorityBusy) {
+		return "already_running"
+	}
+	if errors.Is(err, processauthority.ErrProcessAuthorityDomainMismatch) {
+		return "database_domain_mismatch"
+	}
+	return "state_unavailable"
+}
+
+func logProcessAuthorityStartupFailure(reason string, err error) {
+	app.Log(context.Background()).Named("startup").Error("Process authority startup failed",
+		zap.String("event", "startup.failed"),
+		zap.String("phase", "process_authority"),
+		zap.String("reason", reason),
+		logging.Error(err))
 }
 
 func migrateUpRequested(args []string) bool {

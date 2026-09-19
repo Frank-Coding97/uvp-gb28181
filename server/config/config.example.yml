@@ -1,7 +1,7 @@
 server:
   appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志由 logs.level / logs.outputs 控制，与本开关无关
-  cachetype: "redis" #缓存模式 memory OR redis
-  syslog: false  # 是否开启系统日志
+  cachetype: "redis" # 缓存模式 memory(单机/测试) OR redis(多实例必须)
+  syslog: false  # 是否记录 HTTP 操作日志到数据库(全局操作日志中间件)；与 logs.* 文件日志无关
   notcheckuser: []    # 不检查权限的用户（api、菜单及数据权限均不检查），例如：[1]
   # 演示账号配置
   demoaccount:
@@ -19,11 +19,11 @@ server:
     #   - "/api/plugins/test/"  # 测试插件API
     allowpathprefixes: []
 
-system: 
+system: # 品牌信息：登录页与系统设置展示，由配置接口下发给前端
   #系统LOGO
-  systemlogo: ""
+  systemlogo: ""     # 留空则用内置默认图
   #系统图标
-  systemicon: ""
+  systemicon: ""     # 浏览器页签 favicon
   #系统名称
   systemname: "UVP-GB28181"
   #版权声明
@@ -41,11 +41,11 @@ safe:
   minpasswordlength: 6
   #密码是否必须包含特殊字符
   requirespecialchar: true
-captcha:
-  open : false  # 是否开启验证码功能
+captcha: # 登录验证码
+  open : false  # 是否开启验证码功能（开启后登录接口要求携带验证码ID与答案）
   length: 4   # 验证码生成时的长度
 httpserver:
-  port: ":8080"    # 服务端口
+  port: ":8080"    # 监听地址，冒号不能省略；改端口后注意同步 gb28181.media.hookport
   allowcrossdomain: true    #是否允许跨域
   serverrootpath: "/public" # 静态资源路由路径
   serverroot: "./resource/public" # 静态资源根目录
@@ -55,10 +55,11 @@ httpserver:
   handler_timeout: 30 #  请求处理超时(秒)，超过该时间，将返回超时错误
   trustedproxies: [] # 明确配置反向代理 IP/CIDR；为空时不信任 X-Forwarded-For
 processauthority:
-  # 必填：预置的本地持久私有目录，绝对路径、非符号链接、运行用户所有。
+  # 留空时按当前运行账户使用平台默认目录并自动创建；高级部署可覆盖为绝对路径。
+  # 显式配置的目录仍必须预先存在、非符号链接、运行用户所有。
   # Unix 0700；Windows 仅运行账户/SYSTEM/Administrators 可访问。
   # 不放在 current/releases、公开 uploads、日志或临时目录；升级保留目录和锁文件。
-  state_dir: "" # 例如 /opt/uvp-gb28181/data/process-authority；无默认，空值正常启动失败
+  state_dir: "" # 例如 /opt/uvp-gb28181/data/process-authority
 openapi:
   enabled: false # 首版单 API 进程；启动时决定，默认关闭；媒体申请仍受独立门禁
   play_enabled: false # 仅启动期激活；需完整媒体门禁，启用后的持久鉴权锁不随关闭接入解除
@@ -74,34 +75,30 @@ token:
   jwttokenrefreshexpire:  2592000  #设置刷新token过期时间，单位秒 示例:2592000=30天
   cachekeyprefix: "uvp-gb28181:"  # 缓存前缀
   isCache: false  # 是否开启token缓存 (注意开启后会降低token验证的性能,但是注销token后token立即失效)
+# 仅当 server.cachetype=redis 时生效；连接池由 go-redis 自行管理，本段不再提供池参数
 redis:
-  host: "127.0.0.1"
-  port: 6379
-  password: ""  # 设置你的redis密码
-  maxidle: 10
-  maxactive: 1000
-  idletimeout: 60
-  indexdb: 1               # 默认连接的redis是1号数据库，不是0号数据库
-  connfailretrytimes: 3    #从连接池获取连接失败，最大重试次数
-  reconnectinterval: 1     # 从连接池获取连接失败，每次重试之间间隔的秒数
+  host: "127.0.0.1"        # Redis 地址
+  port: 6379               # Redis 端口
+  password: ""             # Redis 密码，无密码留空
+  indexdb: 1               # 使用的 DB 序号；默认是 1 号库，不是 0 号库
 logs:
   outputs: [file, stdout]     # 开发默认；直接部署用 [file]，容器用 [stdout]
   filepath: "./resource/logs/uvp-gb28181.log" # 显式绝对路径也支持；不再生成独立 gin 日志
   textformat: "console"      # 文件：console/json；生产建议 json
   stdoutformat: "console"    # stdout：console/json；容器建议 json
   level: "info"              # debug/info/warn/error；变更日志配置需重启
-  modules:
+  modules:                    # 按子系统单独设置级别，未列出的子系统跟随 level
     access: "info"           # 独立于根 level，保留访问摘要
-    scheduler: "info"
+    scheduler: "info"        # 调度与定时任务日志
   routes: false               # 是否输出路由登记日志，不控制调试接口
   maxsize: 5                  # 单文件 MiB
   maxbackups: 7               # 归属当前 writer 的备份上限，旧历史文件保留
   maxage: 15                  # 备份保留天数
-  compress: false
-casbin:
-  autoloadpolicyseconds: 120 # 扫描数据库策略的频率(单位：秒)
-  tableprefix: "sys_"
-  tablename: "casbin_rule" 
+  compress: false             # 轮转出来的备份是否 gzip 压缩
+casbin:                       # 权限模型（RBAC），策略存于数据库
+  autoloadpolicyseconds: 120  # 扫描数据库策略的频率(单位：秒)
+  tableprefix: "sys_"         # 策略表前缀，与迁移脚本保持一致
+  tablename: "casbin_rule"    # 策略表名
   modelconfig: | # 竖线 | 表示以下整段文本保持换行格式
     [request_definition]
     r = sub, obj, act, dom
@@ -113,30 +110,30 @@ casbin:
     e = some(where (p.eft == allow))
     [matchers]
     m =  g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act) && (r.dom == p.dom || p.dom == "*")
+# 数据库连接。三个方言块结构完全一致，实际用哪个由 usedbtype 与各自的 isinitglobalgorm* 决定
 gormv2: # 只针对 gorm  操作数据库有效
   usedbtype: "mysql"   # 默认使用的数据库类型（mysql、sqlserver、postgresql）
   mysql:
     isinitglobalgormmysql: 1      # 随项目启动初始化一个全局变量 gorm.Db（1=开启、0=关闭）
-    slowthreshold: 30            # 慢 SQL 阈值(sql执行时间超过此时间单位（秒），就会触发系统日志记录)
-    timezone: "Local"            # 时区配置，例如: Local, Asia/Shanghai, UTC 等
-    write:
-      host: "127.0.0.1"
-      database: "uvp_gb28181"
-      port: 3306
-      prefix: ""
-      user: "root"
-      pass: "root"
-      charset: "utf8mb4"
+    slowthreshold: 30            # 慢 SQL 阈值（秒）；⚠️ 必须写裸数字(30)，禁止写 "30s" —— 代码已 GetDuration×time.Second，带单位会溢出成负数
+    loglevel: "warn"             # SQL 日志级别：silent/error/warn/info；未配置或未知值=warn。info 会打印每条 SQL，生产勿开
+    timezone: "Local"            # 时区配置，写入 DSN 的 parseTime/loc；例如: Local, Asia/Shanghai, UTC 等
+    write:                       # 写库(主库)连接参数，始终生效
+      host: "127.0.0.1"          # 数据库地址
+      database: "uvp_gb28181"    # 库名
+      port: 3306                 # 端口
+      user: "root"               # 账号
+      pass: "root"               # 密码
+      charset: "utf8mb4"         # 连接字符集
       setmaxidleconns: 10    # 最大空闲连接数
       setmaxopenconns: 128   # 最大打开连接数
       setconnmaxlifetime: 60    # 连接最大生存时间(秒)
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
     isopenreaddb: 0                     # 是否开启读写分离配置（1=开启、0=关闭），IsOpenReadDb=1,Read 部分参数有效，否则Read部分参数直接忽略
-    read:
+    read:                       # 读库(从库)连接参数，仅 isopenreaddb=1 时装配
       host: "127.0.0.1"
       database: "uvp_gb28181"
       port: 3306                        #注意，非3306，请自行调整
-      prefix: ""
       user: "root"
       pass: "root"  # 修改为你自己的数据库密码
       charset: "utf8mb4"
@@ -146,25 +143,24 @@ gormv2: # 只针对 gorm  操作数据库有效
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
   sqlserver:
     isinitglobalgormsqlserver: 0  # 随项目启动初始一个全局变量 gorm.Db（1=开启、0=关闭）
-    slowthreshold: 30
+    slowthreshold: 30            # 慢 SQL 阈值（秒），裸数字，不要带单位
+    loglevel: "warn"             # SQL 日志级别：silent/error/warn/info；缺省=warn
     timezone: ""                  # SQL Server 不需要时区配置
-    write:
+    write:                       # 写库(主库)连接参数
       host: "127.0.0.1"
       database: "uvp_gb28181"
       port: 1433
-      prefix: ""
       user: ""
       pass: ""
-      setmaxidleconns: 10
-      setmaxopenconns: 128
-      setconnmaxlifetime: 60
+      setmaxidleconns: 10    # 最大空闲连接数
+      setmaxopenconns: 128   # 最大打开连接数
+      setconnmaxlifetime: 60    # 连接最大生存时间(秒)
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
     isopenreaddb: 0            # 是否开启读写分离配置（1=开启、0=关闭
-    read:
+    read:                       # 读库(从库)连接参数，仅 isopenreaddb=1 时装配
       host: "127.0.0.1"
       database: "uvp_gb28181"
       port: 1433
-      prefix: ""
       user: ""
       pass: ""
       setmaxidleconns: 10   
@@ -173,30 +169,29 @@ gormv2: # 只针对 gorm  操作数据库有效
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
   postgresql:
     isinitglobalgormpostgresql: 0   # 随项目启动初始一个全局变量 gorm.Db（1=开启、0=关闭）
-    slowthreshold: 30
+    slowthreshold: 30            # 慢 SQL 阈值（秒），裸数字，不要带单位
+    loglevel: "warn"             # SQL 日志级别：silent/error/warn/info；缺省=warn
     timezone: "Asia/Shanghai"       # 时区配置，例如: Asia/Shanghai, UTC 等
-    write:
+    write:                       # 写库(主库)连接参数
       host: "127.0.0.1"
       database: "uvp_gb28181"
       port: 5432
-      prefix: ""
       user: ""
       pass: ""
-      setmaxidleconns: 10
-      setmaxopenconns: 128
-      setconnmaxlifetime: 60
+      setmaxidleconns: 10    # 最大空闲连接数
+      setmaxopenconns: 128   # 最大打开连接数
+      setconnmaxlifetime: 60    # 连接最大生存时间(秒)
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
     isopenreaddb: 0            # 是否开启读写分离配置（1=开启、0=关闭），IsOpenReadDb=1,Read  部分参数有效，否则Read部分参数直接忽略
-    read:
+    read:                       # 读库(从库)连接参数，仅 isopenreaddb=1 时装配
       host: "127.0.0.1"
       database: "uvp_gb28181"
       port: 5432
-      prefix: ""
       user: ""
       pass: ""
-      setmaxidleconns: 10
-      setmaxopenconns: 128
-      setconnmaxlifetime: 60
+      setmaxidleconns: 10    # 最大空闲连接数
+      setmaxopenconns: 128   # 最大打开连接数
+      setconnmaxlifetime: 60    # 连接最大生存时间(秒)
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
 
 # 文件上传配置
@@ -237,8 +232,7 @@ gen:
 # 任务调度器配置
 scheduler:
   # 调度日志统一使用 logs.outputs；级别在 logs.modules.scheduler 配置
-  # 任务结果通道缓冲大小
-  job_results_buffer_size: 1000       # 任务结果通道缓冲大小，默认1000
+  job_results_buffer_size: 1000       # 任务结果通道缓冲大小，默认1000；缓冲满会阻塞结果回收
 
 # GB28181 国标平台配置
 #
@@ -250,12 +244,12 @@ gb28181:
   sip_command_timeout_sec: 10 # 出站 SIP 命令默认等待时间，范围 1-300 秒
   # SIP 原始报文诊断模块。默认关闭；日志写入当前业务数据库。
   trace:
-    enabled: false
-    queue_capacity: 8192
-    batch_size: 500
-    flush_interval_ms: 500
-    encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"
-    retention_days: 7
+    enabled: false                                        # 关闭后不再落库，历史表保留
+    queue_capacity: 8192                                  # 内存队列容量；溢出会丢弃报文诊断
+    batch_size: 500                                       # 单批入库条数
+    flush_interval_ms: 500                                # 未攒满时的最大落库间隔(毫秒)
+    encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"    # 存放报文加密密钥的环境变量名，不在此文件写明文
+    retention_days: 7                                     # 报文保留天数，到期清理
   device:
     default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
     keepalive_interval: 60   # 设备心跳周期(秒)
@@ -267,6 +261,11 @@ gb28181:
     preallocation_mode: false # 开启后仅允许设备表中预先存在的国标 ID 注册
   catalog:
     ignore_channel_offline_status_notify: false # 兼容错误状态上报：忽略 Catalog NOTIFY 的 OFF/VLOST/DEFECT
+    # 以下四项是「新建目录通道」入库时写入的默认值；改这里只影响之后建档的通道，存量通道不变
+    default_channel_stream_transport: "TCP-Passive" # UDP / TCP-Active / TCP-Passive；非法值回落 TCP-Passive
+    default_channel_audio_enabled: true             # 新通道默认是否开启音频
+    default_channel_on_demand_live: true            # 新通道默认点播按需拉流
+    default_channel_cloud_recording_enabled: false  # 新通道默认云端录像
   alarm:
     save_messages: true # 是否将设备报警通知写入报警记录；关闭后仍接收和解析通知
   position_history:
@@ -276,6 +275,10 @@ gb28181:
     extension_enabled: false  # 部分设备需要的扩展 SDP 媒体编码兼容模式，一般无需开启
   ptz:
     default_speed_level: 6    # 云台控制界面默认速度档位，范围 1-10
+  # 全局默认订阅项：还没有设备级订阅行时使用，可在"设备-订阅"覆盖
+  subscribe:
+    global_items: ["catalog", "mobile_position", "alarm", "ptz_precise_position"]
+    # 四项之外的值会被静默忽略并去重；不配=空数组(不建立任何订阅)
   # ZLMediaKit 媒体服务器 — 首次部署 seed(数据面)
   #
   # 仅作 meta_node 表为空时的 seed 兜底:启动时若 DB 已存在节点,本配置忽略,
@@ -298,16 +301,23 @@ gb28181:
   # 设备/NVR 本地录像查询。时间输入按平台时区墙钟解释，不按浏览器时区转换。
   record_query:
     timezone: "Asia/Shanghai"     # 显式 IANA 时区；非法值会阻止查询/回放 runtime 装配
-    timeout_sec: 15               # 必须小于 httpserver.handler_timeout
-    max_range_hours: 24
-    max_active_queries: 128
-    max_records_per_query: 20000
-    result_ttl_sec: 1800
+    timeout_sec: 15               # 单条查询超时；必须小于 httpserver.handler_timeout
+    max_range_hours: 24           # 单次查询允许的最大时间跨度(小时)
+    max_active_queries: 128       # 并发查询上限，超出直接拒绝
+    max_records_per_query: 20000  # 单设备单查询返回的最大记录条数
+    result_ttl_sec: 1800          # 查询结果缓存有效期(秒)
   playback:
+    default_protocol: "ws-flv"    # ws-flv / http-flv / hls / webrtc；非法值回落 ws-flv，已建会话不受影响
     media_wait_sec: 10            # SIP 成功后等待回放媒体上线
     idle_timeout_sec: 60          # 无控制/读取活动后的回收时间
     max_session_sec: 86400        # 单会话绝对上限，不超过 24 小时
   play:
+    # 点播会话兜底对账 goroutine 的扫描周期(秒)；0=禁用 reconciler（开发/调试场景）。
+    # ⚠️ 不配即为 0：代码用 GetInt 直取，没有兜底值,所以这里显式写出 300，别整行删掉
+    reconcile_interval_sec: 300
+    request_timeout_ms: 10000     # 点播请求超时(毫秒)；有效范围 1000-300000，越界回落 10000
+    fixed_address_enabled: false  # 固定播放地址；开启后同一通道的点播地址保持稳定
+    auto_on_demand_enabled: false # 自动按需推流；依赖上项=true，否则校验直接报错
     auth:
       enabled: false              # 播放地址鉴权，默认关闭以兼容现网
       bind_client_ip: false       # 可选 IP 绑定，仅在 enabled=true 时生效
@@ -315,6 +325,9 @@ gb28181:
       active_key: ""              # 首次完成 SIP 引导时由服务端自动生成；不得复用 JWT/ZLM secret
       previous_key: ""            # 密钥轮换宽限期旧密钥，可留空
   recording:
+    # 云端录像计划总开关。⚠️ 缺省为 true —— 代码判 `Get()==nil || GetBool()`，
+    # 只有显式写 false 才是关闭；想关必须写出来，删掉整行反而开启
+    plan_enabled: true
     reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务
     catalog_reconcile_interval_sec: 21600 # 录像文件目录周期对账(秒);0 只禁周期,保留手动对账
     catalog_periodic_lookback_days: 2     # 周期对账逻辑回看天数

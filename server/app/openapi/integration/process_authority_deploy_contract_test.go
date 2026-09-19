@@ -41,8 +41,11 @@ func TestProcessAuthorityDeploymentUsesDedicatedPersistentDirectory(t *testing.T
 	deploy, err := os.ReadFile(filepath.Join(root, "deploy/test/deploy-uvp.sh"))
 	require.NoError(t, err)
 	source := string(deploy)
+	provision := strings.Index(source, `install -d -m 0700 "$ROOT/data/process-authority"`)
 	gate := strings.Index(source, `stat -c '%a:%u:%g' "$ROOT/data/process-authority"`)
+	require.GreaterOrEqual(t, provision, 0)
 	require.GreaterOrEqual(t, gate, 0)
+	require.Less(t, provision, gate)
 	require.Less(t, gate, strings.Index(source, `install -d -m 0755 "$RELEASES"`))
 	require.Contains(t, source, `! -L "$ROOT/data/process-authority"`)
 }

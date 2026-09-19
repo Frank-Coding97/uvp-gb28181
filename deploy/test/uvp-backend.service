@@ -12,6 +12,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/uvp-gb28181/current/backend
 Environment=TZ=Asia/Shanghai
+Environment=UVP_PROCESS_AUTHORITY_DIR=/opt/uvp-gb28181/data/process-authority
 EnvironmentFile=/opt/uvp-gb28181/config/sip-trace-backend.env
 ExecStart=/opt/uvp-gb28181/current/backend/uvp-gb28181
 Restart=on-failure

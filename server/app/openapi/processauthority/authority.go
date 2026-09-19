@@ -15,7 +15,10 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
-var ErrProcessAuthorityUnavailable = errors.New("process authority unavailable")
+var (
+	ErrProcessAuthorityUnavailable    = errors.New("process authority unavailable")
+	ErrProcessAuthorityDomainMismatch = errors.New("process authority domain mismatch")
+)
 
 var processID = sync.OnceValues(func() (string, error) {
 	var raw [16]byte
@@ -100,7 +103,10 @@ func (r *registrationLatch) register(ctx context.Context, db *gorm.DB, lock *Loc
 			}
 		} else {
 			row := current[0]
-			if row.ID != 1 || row.DomainID != domain || !validProcessIdentity(row.CurrentGenerationID) || row.CurrentGenerationID == id || row.RowVersion <= 0 || row.RowVersion == math.MaxInt64 {
+			if row.DomainID != domain {
+				return errors.Join(ErrProcessAuthorityUnavailable, ErrProcessAuthorityDomainMismatch)
+			}
+			if row.ID != 1 || !validProcessIdentity(row.CurrentGenerationID) || row.CurrentGenerationID == id || row.RowVersion <= 0 || row.RowVersion == math.MaxInt64 {
 				return ErrProcessAuthorityUnavailable
 			}
 			var old models.ProcessGeneration
@@ -127,6 +133,9 @@ func (r *registrationLatch) register(ctx context.Context, db *gorm.DB, lock *Loc
 		}
 		return lock.Check()
 	})
+	if errors.Is(err, ErrProcessAuthorityDomainMismatch) {
+		return nil, err
+	}
 	if err != nil || ctx.Err() != nil || lock.Check() != nil {
 		return nil, ErrProcessAuthorityUnavailable
 	}

@@ -689,7 +689,8 @@ func (c MediaConfig) EffectiveHookBaseURL() (*url.URL, error) {
 type PlayConfig struct {
 	// ReconcileIntervalSec 兜底对账 goroutine 扫描周期(秒).
 	// 0 = 禁用 reconciler(适合开发/调试场景).
-	// 默认 300(5 分钟).
+	// ⚠️ loadFrom 用 GetInt 直取，没有兜底值：YAML 不配就是 0(禁用)，
+	// 想要 5 分钟对账必须在配置里显式写 300(deploy 模板已写)。
 	ReconcileIntervalSec int
 }
 

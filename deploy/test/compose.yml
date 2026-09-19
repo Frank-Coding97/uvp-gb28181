@@ -16,6 +16,7 @@ services:
       - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-backend.env
     environment:
       TZ: Asia/Shanghai
+      UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
     ports:
       - "127.0.0.1:56001:18978"
       - "0.0.0.0:56002:56002/tcp"
@@ -24,7 +25,6 @@ services:
       - ${UVP_ROOT:-/opt/uvp-gb28181}/config/config.yml:/app/config/config.yml:ro
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/uploads:/app/resource/public/uploads
-      # Pre-provision privately; Docker must not auto-create a permissive path.
       - type: bind
         source: ${UVP_ROOT:-/opt/uvp-gb28181}/data/process-authority
         target: /var/lib/uvp/process-authority

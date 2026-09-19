@@ -1,19 +1,20 @@
 # Process authority deployment prerequisite
 
-Normal API startup now requires `processauthority.state_dir`. The directory
+Normal API startup uses a private process-authority directory. An omitted
+`processauthority.state_dir` selects and creates the current account's platform
+default. An explicit value remains an advanced deployment override. The directory
 anchors the single API process to one database across restarts. Missing,
 relative, replaced, symlinked or unsafe state fails startup; turning OpenAPI
 off does not disable this protection. Migration-only commands do not register.
 
 ## Bare process
 
-The checked-in `uvp-backend.service` runs as root. Before deploying this version,
-an operator must provision `/opt/uvp-gb28181/data/process-authority` as a real
-directory on local persistent storage, owned by root, mode `0700`, with no ACL
-granting access to other users. If the directory already exists, inspect it;
-do not recreate it or change its identity to get past a startup failure.
+The checked-in `uvp-backend.service` runs as root and supplies the persistent
+location through its environment. The deployer creates it with mode `0700` on
+first install. If the directory already exists, it is validated but never
+recreated or repaired during upgrade.
 
-Set the runtime configuration explicitly:
+An advanced deployment may override the service environment in YAML:
 
 ```yaml
 processauthority:
@@ -27,9 +28,10 @@ account and update the unit/deploy prerequisite together.
 
 ## Container
 
-The compose file binds the same dedicated host directory to
-`/var/lib/uvp/process-authority`. Docker is forbidden from creating a missing
-host path. Configure the **container** path in the mounted configuration:
+The deployer creates the private host directory on first install, and Compose
+binds it to `/var/lib/uvp/process-authority`. No manual host-directory or YAML
+setup is required through the supported deployment flow. Advanced deployments
+may still configure the **container** path explicitly:
 
 ```yaml
 processauthority:

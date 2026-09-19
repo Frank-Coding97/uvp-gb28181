@@ -101,6 +101,9 @@ func TestProcessAuthorityRegistrationFailureIsSticky(t *testing.T) {
 			var root registrationLatch
 			authority, err := root.register(context.Background(), db, lock)
 			require.ErrorIs(t, err, ErrProcessAuthorityUnavailable)
+			if kind == "domain-mismatch" {
+				require.ErrorIs(t, err, ErrProcessAuthorityDomainMismatch)
+			}
 			require.Nil(t, authority)
 			// Supplying a different pristine fixture cannot reset failed root registration.
 			authority, err = root.register(context.Background(), authorityDB(t), authorityLock(t))
