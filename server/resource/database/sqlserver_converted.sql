@@ -1733,6 +1733,11 @@ BEGIN
         [target_code] NVARCHAR(20) NOT NULL,
         [record_state] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_control_state_record] DEFAULT N'unknown',
         [guard_state] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_control_state_guard] DEFAULT N'unknown',
+        [online_state] NVARCHAR(8) NULL,
+        [selftest_state] NVARCHAR(16) NULL,
+        [encode_state] NVARCHAR(8) NULL,
+        [device_time] DATETIME2(3) NULL,
+        [alarm_input_count] INT NULL,
         [freshness] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_control_state_freshness] DEFAULT N'unknown',
         [observed_at] DATETIME2(3) NOT NULL,
         [source] NVARCHAR(32) NOT NULL CONSTRAINT [df_full_control_state_source] DEFAULT N'device_status',
@@ -5048,6 +5053,7 @@ CREATE TABLE dbo.sys_openapi_client (
     ak NVARCHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
     name NVARCHAR(100) COLLATE Latin1_General_100_BIN2 NOT NULL,
     owner_dept_id BIGINT NOT NULL,
+    data_scope TINYINT NOT NULL CONSTRAINT df_openapi_client_data_scope DEFAULT 3,
     responsible_user_id BIGINT NOT NULL DEFAULT 0,
     status NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT 'disabled',
     secret_ciphertext VARBINARY(64) NOT NULL,
@@ -5064,7 +5070,8 @@ CREATE TABLE dbo.sys_openapi_client (
     created_at DATETIME2(6) NOT NULL,
     updated_at DATETIME2(6) NOT NULL,
     CONSTRAINT pk_openapi_client PRIMARY KEY (id),
-    CONSTRAINT uk_openapi_ak UNIQUE (ak)
+    CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    CONSTRAINT ck_openapi_client_data_scope CHECK (data_scope IN (3,4))
 );
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_client_dept' AND object_id = OBJECT_ID(N'dbo.sys_openapi_client'))
@@ -5415,3 +5422,69 @@ IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_by_process_id') IS NULL 
 IF COL_LENGTH(N'dbo.gb_ptz_operation_attempt',N'retired_at') IS NULL ALTER TABLE dbo.gb_ptz_operation_attempt ADD retired_at DATETIME2(3) NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.gb_ptz_operation_attempt') AND name=N'ck_ptz_attempt_retirement') ALTER TABLE dbo.gb_ptz_operation_attempt ADD CONSTRAINT ck_ptz_attempt_retirement CHECK ((retired_by_process_id IS NULL AND retired_at IS NULL) OR (retired_by_process_id IS NOT NULL AND retired_at IS NOT NULL AND owner_process_id IS NOT NULL AND owner_run_id IS NOT NULL AND retired_by_process_id <> owner_process_id AND local_quiesced_at IS NULL));
 -- ptz-owner-retirement:end
+-- device-config-family:start（同步自 migrations/2026-09-19-device-config-family-sqlserver.sql）
+-- GB/T 28181 配置家族（A.2.4.7 ConfigDownload 查询 / A.2.3.2.5 DeviceConfig 下发），
+-- 每 (设备, 目标编码, 配置类型) 一行，存该组配置最近一次回读得到的规范化 JSON
+-- （见 models.GbDeviceConfig）。
+--
+-- ⛔ 这一块必须与迁移文件保持一致。runner 在「空版本表 + 基线探测表已存在」时会把全部迁移
+--    直接标记为已应用而**不执行**（见 app/gb28181/migration/runner.go），所以**快照里没有的物件
+--    在快照建出来的新库上永远不会出现**，增量迁移补不回来。
+IF OBJECT_ID(N'gb_device_config', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_device_config] (
+        [id] BIGINT IDENTITY(1,1) NOT NULL,
+        [device_id] BIGINT NOT NULL,
+        [target_code] NVARCHAR(20) NOT NULL,
+        [config_type] NVARCHAR(32) NOT NULL,
+        [payload_json] NVARCHAR(MAX) NOT NULL,
+        [source_operation_seq] BIGINT NOT NULL CONSTRAINT [df_device_config_source_seq] DEFAULT 0,
+        [source_sn] INT NOT NULL CONSTRAINT [df_device_config_source_sn] DEFAULT 0,
+        [source_operation_id] NVARCHAR(64),
+        [observed_at] DATETIME2(3) NOT NULL,
+        [raw_summary] NVARCHAR(MAX),
+        [created_at] DATETIME2(3) NOT NULL,
+        [updated_at] DATETIME2(3) NOT NULL,
+        CONSTRAINT [pk_device_config] PRIMARY KEY ([id]),
+        CONSTRAINT [uk_device_config_target] UNIQUE ([device_id], [target_code], [config_type])
+    );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_config') AND name = N'uk_device_config_target')
+    CREATE UNIQUE INDEX [uk_device_config_target] ON [gb_device_config] ([device_id], [target_code], [config_type]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_config') AND name = N'idx_device_config_device')
+    CREATE INDEX [idx_device_config_device] ON [gb_device_config] ([device_id], [observed_at]);
+-- device-config-family:end
+
+-- device-config-family-permissions:start（同步自 migrations/2026-09-19-device-config-family-sqlserver.sql）
+-- 读沿用 gb28181:ptz:view（与 video-params / storage-cards / device-status 同族：都是"看设备事实"），
+-- 写绑定 gb28181:ptz:control（写入有副作用，会真的改设备配置）。
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'读取设备配置',N'/api/gb28181/device-mgmt/channel/:id/device-configs',N'GET',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission=N'gb28181:ptz:view' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.method=N'GET' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p',CONCAT(N'role_',rm.role_id),a.path,a.method,N'*',N'',N''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission=N'gb28181:ptz:view' AND a.path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.method=N'GET'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype=N'p' AND p.v0=CONCAT(N'role_',rm.role_id) AND p.v1=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND p.v2=N'GET' AND p.v3=N'*');
+
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by)
+SELECT N'下发设备配置',N'/api/gb28181/device-mgmt/channel/:id/device-configs',N'POST',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_menu_api(menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
+WHERE m.permission=N'gb28181:ptz:control' AND m.type=3 AND m.deleted_at IS NULL
+  AND a.path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.method=N'POST' AND a.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
+INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5)
+SELECT DISTINCT 'p',CONCAT(N'role_',rm.role_id),a.path,a.method,N'*',N'',N''
+FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id
+WHERE m.permission=N'gb28181:ptz:control' AND a.path=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.method=N'POST'
+  AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule p WHERE p.ptype=N'p' AND p.v0=CONCAT(N'role_',rm.role_id) AND p.v1=N'/api/gb28181/device-mgmt/channel/:id/device-configs' AND p.v2=N'POST' AND p.v3=N'*');
+-- device-config-family-permissions:end

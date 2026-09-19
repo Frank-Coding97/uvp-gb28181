@@ -464,6 +464,11 @@ CREATE TABLE `gb_device_control_state` (
   `target_code` varchar(20) NOT NULL,
   `record_state` varchar(8) NOT NULL DEFAULT 'unknown',
   `guard_state` varchar(8) NOT NULL DEFAULT 'unknown',
+  `online_state` varchar(8) DEFAULT NULL,
+  `selftest_state` varchar(16) DEFAULT NULL,
+  `encode_state` varchar(8) DEFAULT NULL,
+  `device_time` datetime(3) DEFAULT NULL,
+  `alarm_input_count` int DEFAULT NULL,
   `freshness` varchar(8) NOT NULL DEFAULT 'unknown',
   `observed_at` datetime(3) NOT NULL,
   `source` varchar(32) NOT NULL DEFAULT 'device_status',
@@ -8883,6 +8888,7 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     ak VARCHAR(36) NOT NULL,
     name VARCHAR(100) NOT NULL,
     owner_dept_id BIGINT NOT NULL,
+    data_scope TINYINT NOT NULL DEFAULT 3 COMMENT '数据范围 3本部门 4本部门及以下',
     responsible_user_id BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(16) NOT NULL DEFAULT 'disabled',
     secret_ciphertext VARBINARY(64) NOT NULL,
@@ -8900,6 +8906,7 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     updated_at DATETIME(6) NOT NULL,
     CONSTRAINT pk_openapi_client PRIMARY KEY (id),
     CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    CONSTRAINT ck_openapi_client_data_scope CHECK (data_scope IN (3,4)),
     INDEX idx_openapi_client_dept (owner_dept_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
@@ -9299,3 +9306,63 @@ PREPARE ptz_retire_stmt FROM @ptz_retire_sql;
 EXECUTE ptz_retire_stmt;
 DEALLOCATE PREPARE ptz_retire_stmt;
 -- ptz-owner-retirement:end
+-- device-config-family:start（同步自 migrations/2026-09-19-device-config-family.sql）
+-- GB/T 28181 配置家族（A.2.4.7 ConfigDownload 查询 / A.2.3.2.5 DeviceConfig 下发），
+-- 每 (设备, 目标编码, 配置类型) 一行，存该组配置最近一次回读得到的规范化 JSON
+-- （见 models.GbDeviceConfig）。
+--
+-- ⛔ 这一块必须与迁移文件保持一致。runner 在「空版本表 + 基线探测表已存在」时会把全部迁移
+--    直接标记为已应用而**不执行**（见 app/gb28181/migration/runner.go），所以**快照里没有的物件
+--    在快照建出来的新库上永远不会出现**，增量迁移补不回来。
+CREATE TABLE IF NOT EXISTS `gb_device_config` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `target_code` varchar(20) NOT NULL,
+  `config_type` varchar(32) NOT NULL,
+  `payload_json` text NOT NULL,
+  `source_operation_seq` bigint unsigned NOT NULL DEFAULT 0,
+  `source_sn` int NOT NULL DEFAULT 0,
+  `source_operation_id` varchar(64) DEFAULT NULL,
+  `observed_at` datetime(3) NOT NULL,
+  `raw_summary` text,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_device_config_target` (`device_id`,`target_code`,`config_type`),
+  KEY `idx_device_config_device` (`device_id`,`observed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- device-config-family:end
+
+-- device-config-family-permissions:start（同步自 migrations/2026-09-19-device-config-family.sql）
+-- 读沿用 gb28181:ptz:view（与 video-params / storage-cards / device-status 同族：都是"看设备事实"），
+-- 写绑定 gb28181:ptz:control（写入有副作用，会真的改设备配置）。
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '读取设备配置','/api/gb28181/device-mgmt/channel/:id/device-configs','GET','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND `method`='GET' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:ptz:view' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.`method`='GET' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:ptz:view' AND a.`path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.`method`='GET'
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND p.`v2`='GET' AND p.`v3`='*');
+
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '下发设备配置','/api/gb28181/device-mgmt/channel/:id/device-configs','POST','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND `method`='POST' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:ptz:control' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.`method`='POST' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:ptz:control' AND a.`path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.`method`='POST'
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND p.`v2`='POST' AND p.`v3`='*');
+-- device-config-family-permissions:end
