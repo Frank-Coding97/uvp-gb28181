@@ -1,14 +1,17 @@
 import { HOME_PATH } from "@/config/index";
 //import Layout from "@/layout/index.vue";
 
-const recordQueryDemoRoutes = import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true"
-  ? [{
-      path: "/device-record-query-demo",
-      name: "device-record-query-demo",
-      component: () => import(/* @vite-ignore */ "/src/views/gb28181/device-record-playback/index.vue"),
-      meta: { title: "设备录像回放预览", hide: true }
-    }]
-  : [];
+const recordQueryDemoRoutes =
+  import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true"
+    ? [
+        {
+          path: "/device-record-query-demo",
+          name: "device-record-query-demo",
+          component: () => import(/* @vite-ignore */ "/src/views/gb28181/device-record-playback/index.vue"),
+          meta: { title: "设备录像回放预览", hide: true }
+        }
+      ]
+    : [];
 /**
  * 路由path路径与文件夹名称相同，找文件可以浏览器地址快速查找，方便定位文件
  *
@@ -76,7 +79,7 @@ export const staticRoutes = [
   {
     path: "/play-console-linked-demo",
     name: "play-console-linked-demo",
-    component: () => import(/* webpackChunkName: "play-console-linked-demo" */ "@/views/gb28181/PlayConsoleLinkedDemo.vue"),
+    component: () => import(/* webpackChunkName: "play-console-linked-demo" */ "@/views/gb28181/WorkbenchPreview.vue"),
     meta: {
       title: "播放控制台联动原型",
       hide: true
