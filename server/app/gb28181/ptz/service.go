@@ -101,8 +101,13 @@ type Service struct {
 	locks        map[uint]*channelLockEntry
 	queryStageMu sync.Mutex
 	queryStages  map[string]queryResponseStage
-	lifecycleMu  sync.RWMutex
-	retired      bool
+	// configReadMu / configReadStages 是配置读取(A.2.4.7)的"同 SN 多响应"收集期,
+	// 与 queryStages 同构但语义不同(按配置类型聚合,判据见 device_config_read.go),
+	// 所以单独一张表 —— 混进 queryStages 会让两套收敛判据互相解释。
+	configReadMu     sync.Mutex
+	configReadStages map[string]configReadStage
+	lifecycleMu      sync.RWMutex
+	retired          bool
 }
 
 // NewAuthorizedService borrows the root's shared intent store and barrier.
@@ -162,7 +167,8 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "PTZ operation SN 非法", nil)
 	}
 	service := &Service{db: db, sender: sender, now: now, queryStages: make(map[string]queryResponseStage),
-		locks: make(map[uint]*channelLockEntry)}
+		configReadStages: make(map[string]configReadStage),
+		locks:            make(map[uint]*channelLockEntry)}
 	service.sn.Store(uint64(maxSN))
 	return service, nil
 }
@@ -247,6 +253,7 @@ func (s *Service) Retire() {
 		s.synchronous.Stop()
 	}
 	s.clearQueryStages()
+	s.clearConfigReadStages()
 }
 
 // FlushResults preserves synchronous sends across a failed root teardown.

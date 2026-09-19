@@ -94,13 +94,22 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		// 聚合无关（见 applyStorageCardResponse 的注释），所以单独一支。
 		return s.applyStorageCardResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdConfigDownload:
-		// 视频参数属性的**回读**。它同时服务于两个入口：操作员手点的「读取设备参数」，
-		// 以及 DeviceConfig 被设备 ack 之后平台自动追加的对账子 operation。
+		// 配置读取的**两条链路共用这一个 CmdType**，靠 action 分流，别按 CmdType 猜：
+		//  - 视频参数属性（A-5）：按码流逐行落 gb_device_video_param；
+		//  - 配置家族（通用容器）：按 config_type 整块落 gb_device_config。
+		// ⛔ 漏掉任一支的后果不对称：视频参数那条是**已上线**的链路，回落到通用容器
+		// 后它的值会被写进另一张表，面板从此读不到新数据而两侧都不报错。
+		if operation.Action == actionRefreshDeviceConfigs {
+			return s.applyDeviceConfigReadResponse(ctx, operation, callID, cseq, body)
+		}
 		return s.applyConfigDownloadResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdDeviceConfig:
-		// 配置写入应答（A.2.6.8）。⛔ 这一支内部**不会**把 operation 收在 accepted：
-		// 它会在同一个事务里追加一条 ConfigDownload 对账子 operation，
+		// 配置写入应答（A.2.6.8）。两条支路都**不会**把 operation 收在 accepted 就结束：
+		// 它们会在同一个事务里追加一条 ConfigDownload 对账子 operation，
 		// 因为写入应答没有回显，Result=OK 说明不了值有没有生效。
+		if operation.Action == actionApplyDeviceConfig {
+			return s.applyDeviceConfigAckResponse(ctx, operation, callID, cseq, body)
+		}
 		return s.applyDeviceConfigResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
 		return s.applyQueryResponse(ctx, operation, callID, cseq, *head, body)

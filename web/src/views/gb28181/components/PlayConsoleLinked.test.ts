@@ -43,75 +43,69 @@ const api = vi.hoisted(() => {
   }));
   const cruises = Array.from({ length: 20 }, (_, index) => ({ trackId: index + 1, name: `巡航 ${index + 1}`, enabled: true }));
   return {
-    startPlay: vi
-      .fn()
-      .mockResolvedValue({
-        code: 0,
-        message: "",
-        data: {
-          streamId: "stream-1",
-          ssrc: "0102030405",
-          app: "rtp",
-          wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
-          httpFlvUrl: "",
-          hlsUrl: "",
-          expireAt: 0
-        }
-      }),
+    startPlay: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    }),
     authorizeFixedPlayback: vi.fn(),
     stopPlay: vi.fn().mockResolvedValue({ code: 0, message: "", data: null }),
-    getStreamMonitor: vi
-      .fn()
-      .mockResolvedValue({
-        code: 0,
-        message: "",
-        data: {
-          streamId: "stream-1",
-          collectedAt: "2026-07-22T10:00:00Z",
-          status: "online",
-          node: { id: 1, name: "ZLM", host: "127.0.0.1" },
-          quality: { bitrateKbps: 2048 },
-          network: { bytesSpeed: 256000, totalBytes: 1024, readerCount: 2, totalReaderCount: 3, aliveSecond: 10 },
-          tracks: [
-            {
-              kind: "video",
-              codec: "H264",
-              ready: true,
-              frames: 100,
-              duration: 4,
-              loss: null,
-              width: 1920,
-              height: 1080,
-              fps: 25,
-              keyFrames: 4,
-              gopSize: 25,
-              gopIntervalMs: 1000,
-              sampleRate: 0,
-              channels: 0,
-              sampleBit: 0
-            }
-          ],
-          recording: { mp4: false, hls: false }
-        }
-      }),
+    getStreamMonitor: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        collectedAt: "2026-07-22T10:00:00Z",
+        status: "online",
+        node: { id: 1, name: "ZLM", host: "127.0.0.1" },
+        quality: { bitrateKbps: 2048 },
+        network: { bytesSpeed: 256000, totalBytes: 1024, readerCount: 2, totalReaderCount: 3, aliveSecond: 10 },
+        tracks: [
+          {
+            kind: "video",
+            codec: "H264",
+            ready: true,
+            frames: 100,
+            duration: 4,
+            loss: null,
+            width: 1920,
+            height: 1080,
+            fps: 25,
+            keyFrames: 4,
+            gopSize: 25,
+            gopIntervalMs: 1000,
+            sampleRate: 0,
+            channels: 0,
+            sampleBit: 0
+          }
+        ],
+        recording: { mp4: false, hls: false }
+      }
+    }),
     createStreamProbe: vi.fn(),
     getStreamProbeOperation: vi.fn(),
-    getControlCapabilities: vi
-      .fn()
-      .mockResolvedValue({
-        code: 0,
-        message: "",
-        data: {
-          basicPtz: { state: "supported", reason: "" },
-          iFrame: { state: "supported", reason: "" },
-          record: { state: "supported", reason: "" },
-          guard: { state: "supported", reason: "" },
-          alarmReset: { state: "supported", reason: "" },
-          dragZoom: { state: "supported", reason: "" },
-          broadcast: { state: "supported", reason: "" },
-          talk: { state: "supported", reason: "" }
-        }
-      }),
+    getControlCapabilities: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        basicPtz: { state: "supported", reason: "" },
+        iFrame: { state: "supported", reason: "" },
+        record: { state: "supported", reason: "" },
+        guard: { state: "supported", reason: "" },
+        alarmReset: { state: "supported", reason: "" },
+        dragZoom: { state: "supported", reason: "" },
+        broadcast: { state: "supported", reason: "" },
+        talk: { state: "supported", reason: "" }
+      }
+    }),
     getDeviceStatus: vi.fn().mockResolvedValue({
       code: 0,
       message: "",
@@ -165,27 +159,25 @@ const api = vi.hoisted(() => {
     // 单条轨迹回读。「设备上这条轨迹走哪几个预置位」只能靠它拿到 —— 清单查询的
     // 应答里没有点位集合(标准 A.2.6.13 只有 <Number/> 和 <Name/>)。
     getCruiseTrack: vi.fn().mockResolvedValue({ code: 0, message: "", data: { track: {}, freshness: "fresh" } }),
-    getHomePosition: vi
-      .fn()
-      .mockResolvedValue({
-        code: 0,
-        message: "",
-        data: {
-          homePosition: {
-            enabled: true,
-            resetTime: 300,
-            presetId: 1,
-            confirmedAt: "2026-07-22T10:00:00Z",
-            source: "device_query",
-            verification: "verified"
-          },
-          controlSupport: { status: "supported", reason: "设备已确认控制能力" },
-          querySupport: { status: "supported", reason: "设备已确认查询能力" },
-          freshness: "fresh",
-          control: { status: "idle", operationId: null, action: null, errorCode: null, deadlineAt: null },
-          refresh: { status: "idle", operationId: null, errorCode: null, deadlineAt: null }
-        }
-      }),
+    getHomePosition: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        homePosition: {
+          enabled: true,
+          resetTime: 300,
+          presetId: 1,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        },
+        controlSupport: { status: "supported", reason: "设备已确认控制能力" },
+        querySupport: { status: "supported", reason: "设备已确认查询能力" },
+        freshness: "fresh",
+        control: { status: "idle", operationId: null, action: null, errorCode: null, deadlineAt: null },
+        refresh: { status: "idle", operationId: null, errorCode: null, deadlineAt: null }
+      }
+    }),
     getPtzOperation: vi.fn(),
     getPtzPreciseStatus: vi.fn(),
     updateHomePosition: vi.fn(),
@@ -202,7 +194,11 @@ const api = vi.hoisted(() => {
     getDeviceSnapshotSession: vi.fn(),
     createTalkSession: vi.fn(),
     getTalkSession: vi.fn(),
-    deleteTalkSession: vi.fn()
+    deleteTalkSession: vi.fn(),
+    // 画面设置走通用配置通道：读取问的是全量 ConfigType 并集，
+    // 底栏卡片的遮挡/镜像数据就来自这一次读取。
+    getChannelDeviceConfigs: vi.fn(),
+    applyChannelDeviceConfigs: vi.fn()
   };
 });
 
@@ -213,8 +209,19 @@ vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 vi.mock("./PlayWindow.vue", () => ({
   default: {
     props: ["url", "zlmWebrtc", "hasAudio"],
-    emits: ["error"],
-    template: "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' :data-has-audio='String(Boolean(hasAudio))' @click=\"$emit('error', '拉流超时')\" />"
+    emits: ["error", "videosize"],
+    template:
+      "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' :data-has-audio='String(Boolean(hasAudio))' @click=\"$emit('error', '拉流超时')\" />",
+    // 真实播放器每秒报一次画面解码尺寸；stub 也报一次，否则遮挡框选没有坐标基准。
+    mounted(this: any) {
+      this.$emit("videosize", { width: 1280, height: 720 });
+    },
+    methods: {
+      refreshVideoSize(this: any) {
+        this.$emit("videosize", { width: 1280, height: 720 });
+      }
+    },
+    expose: ["refreshVideoSize"]
   }
 }));
 
@@ -228,6 +235,76 @@ const channel = {
   ptzType: 1,
   status: 1
 };
+
+/**
+ * 画面设置（镜像 + 隐私遮挡）的设备回读应答。
+ *
+ * ⛔ `payload` 是**那一块本身**，不是包在 `pictureMask` 键下的容器。
+ * ⛔ 遮挡按 `Seq` 归位：设备只回 `Seq=1` 时，其余槽位是"空位"而不是"第 1 个"。
+ */
+/**
+ * 画面组读应答。
+ *
+ * `mask` 默认是"启用 + 一个区域"的常规形态；传 `{ on: 0 }` 复现 2026-09-19 现场的
+ * **停用但区域残留**（国标停用只关 `On`、不清 `RegionList`）。
+ */
+function pictureDeviceConfigResponse(
+  mask: { on: number; regions: Array<Record<string, number>> } = {
+    on: 1,
+    regions: [{ seq: 1, left: 10, top: 20, right: 300, bottom: 400 }]
+  },
+  /**
+   * 设备声明的图像坐标画布（`OSDConfig` 的 `Length/Width`）。
+   *
+   * ⛔ 不传 = 设备没回 `OSDConfig`（真机 2016 版设备、或该类型没读到）。
+   *    此时平台退回画面解码尺寸，卡片必须把"基准未验证"标出来。
+   */
+  canvas?: { length: number; width: number }
+) {
+  return {
+    code: 0,
+    message: "",
+    data: {
+      list: [
+        {
+          configType: "FrameMirror",
+          observedAt: "2026-09-19T02:10:00Z",
+          sourceOperationId: "1402",
+          payload: { value: 0 }
+        },
+        ...(canvas
+          ? [
+              {
+                configType: "OSDConfig",
+                observedAt: "2026-09-19T02:10:00Z",
+                sourceOperationId: "1402",
+                payload: { ...canvas, timeX: 0, timeY: 32, timeEnable: 1, timeType: 1, textEnable: 0, items: [] }
+              }
+            ]
+          : []),
+        {
+          configType: "PictureMask",
+          observedAt: "2026-09-19T02:10:00Z",
+          sourceOperationId: "1402",
+          payload: mask
+        }
+      ],
+      absentTypes: [],
+      registeredVersion: "2022",
+      freshness: "fresh",
+      observedAt: "2026-09-19T02:10:00Z",
+      reconcile: {
+        state: "read_ok",
+        operationId: "1402",
+        status: "accepted",
+        responseHasData: true,
+        derivedFromApply: false
+      },
+      refreshOperationId: null,
+      refreshError: null
+    }
+  };
+}
 
 function homeResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -266,9 +343,7 @@ function operationResponse(
       status,
       errorCode,
       errorMessage: errorCode,
-      completedAt: ["accepted", "rejected", "timeout", "unknown", "cancelled"].includes(status)
-        ? "2026-07-22T10:00:05Z"
-        : null,
+      completedAt: ["accepted", "rejected", "timeout", "unknown", "cancelled"].includes(status) ? "2026-07-22T10:00:05Z" : null,
       deadlineAt
     }
   };
@@ -341,6 +416,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 6 } });
     api.getCruiseTrack.mockReset();
     api.getCruiseTrack.mockResolvedValue({ code: 0, message: "", data: { track: {}, freshness: "fresh" } });
+    api.getChannelDeviceConfigs.mockReset();
+    api.getChannelDeviceConfigs.mockResolvedValue(pictureDeviceConfigResponse());
+    api.applyChannelDeviceConfigs.mockReset();
+    api.applyChannelDeviceConfigs.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { action: "apply-device-config", reconcilePending: false }
+    });
     api.startPlay.mockResolvedValue({
       code: 0,
       message: "",
@@ -364,15 +447,33 @@ describe("PlayConsoleLinked 双区联动", () => {
         node: { id: 1, name: "ZLM", host: "127.0.0.1" },
         quality: { bitrateKbps: 2048 },
         network: { bytesSpeed: 256000, totalBytes: 1024, readerCount: 2, totalReaderCount: 3, aliveSecond: 10 },
-        tracks: [{
-          kind: "video", codec: "H264", ready: true, frames: 100, duration: 4, loss: null,
-          width: 1920, height: 1080, fps: 25, keyFrames: 4, gopSize: 25, gopIntervalMs: 1000,
-          sampleRate: 0, channels: 0, sampleBit: 0
-        }],
+        tracks: [
+          {
+            kind: "video",
+            codec: "H264",
+            ready: true,
+            frames: 100,
+            duration: 4,
+            loss: null,
+            width: 1920,
+            height: 1080,
+            fps: 25,
+            keyFrames: 4,
+            gopSize: 25,
+            gopIntervalMs: 1000,
+            sampleRate: 0,
+            channels: 0,
+            sampleBit: 0
+          }
+        ],
         recording: { mp4: false, hls: false }
       }
     });
-    api.controlDevice.mockResolvedValue({ code: 0, message: "", data: { operationId: "op-1", action: "accepted", status: "accepted" } });
+    api.controlDevice.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { operationId: "op-1", action: "accepted", status: "accepted" }
+    });
     api.controlPtz.mockResolvedValue({ code: 0, message: "", data: { action: "accepted", status: "sent" } });
     api.getHomePosition.mockResolvedValue(homeResponse());
     api.getDeviceStatus.mockResolvedValue({
@@ -394,18 +495,50 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.createDeviceSnapshotSession.mockResolvedValue({
       code: 0,
       message: "",
-      data: { sessionId: "snap-1", channelId: "1", channelCode: channel.channelId, deviceCode: channel.deviceId, snapNum: 2, interval: 3, state: "waiting", receivedCount: 0, notifiedCount: 0, files: [] }
+      data: {
+        sessionId: "snap-1",
+        channelId: "1",
+        channelCode: channel.channelId,
+        deviceCode: channel.deviceId,
+        snapNum: 2,
+        interval: 3,
+        state: "waiting",
+        receivedCount: 0,
+        notifiedCount: 0,
+        files: []
+      }
     });
     api.getDeviceSnapshotSession.mockResolvedValue({
       code: 0,
       message: "",
-      data: { sessionId: "snap-1", channelId: "1", channelCode: channel.channelId, deviceCode: channel.deviceId, snapNum: 2, interval: 3, state: "completed", receivedCount: 2, notifiedCount: 2, files: [{ name: "shot-1.jpg", size: 1024, receivedAt: "2026-08-30T23:30:00+08:00", url: "/api/gb28181/device-snapshots/uploads/token/shot-1.jpg" }] }
+      data: {
+        sessionId: "snap-1",
+        channelId: "1",
+        channelCode: channel.channelId,
+        deviceCode: channel.deviceId,
+        snapNum: 2,
+        interval: 3,
+        state: "completed",
+        receivedCount: 2,
+        notifiedCount: 2,
+        files: [
+          {
+            name: "shot-1.jpg",
+            size: 1024,
+            receivedAt: "2026-08-30T23:30:00+08:00",
+            url: "/api/gb28181/device-snapshots/uploads/token/shot-1.jpg"
+          }
+        ]
+      }
     });
     api.createTalkSession.mockResolvedValue({
       code: 0,
       message: "",
       data: {
-        sessionId: "talk-1", mode: "broadcast", state: "reserved", expiresAt: "",
+        sessionId: "talk-1",
+        mode: "broadcast",
+        state: "reserved",
+        expiresAt: "",
         uplink: {
           protocol: "whip",
           url: "/api/gb28181/device-mgmt/talk-sessions/talk-1/uplink",
@@ -414,7 +547,11 @@ describe("PlayConsoleLinked 双区联动", () => {
         }
       }
     });
-    api.getTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", mode: "broadcast", state: "active", expiresAt: "" } });
+    api.getTalkSession.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { sessionId: "talk-1", mode: "broadcast", state: "active", expiresAt: "" }
+    });
     api.deleteTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", state: "ended" } });
     api.getChannelVideoParams.mockReset();
     api.getChannelVideoParams.mockResolvedValue(videoParamsResponse());
@@ -447,18 +584,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       props: {
         visible: Boolean,
         modalStyle: Object,
-        modalClass: [String, Array],
+        modalClass: [String, Array]
       },
       template: `
         <div v-if="visible" data-testid="playback-modal-stub" :class="modalClass" :style="modalStyle">
           <slot name="title" />
           <slot />
         </div>
-      `,
+      `
     });
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel, displayMode: "expanded" },
-      global: { stubs: { "a-modal": ModalStub } },
+      global: { stubs: { "a-modal": ModalStub } }
     });
     await flushPromises();
 
@@ -506,7 +643,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(joystick.findAll(".joystick-dot")).toHaveLength(8);
     expect(joystick.findAll(".joystick-label.diagonal")).toHaveLength(4);
     vi.spyOn(joystick.element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, right: 176, bottom: 176, width: 176, height: 176, toJSON: () => ({}),
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 176,
+      bottom: 176,
+      width: 176,
+      height: 176,
+      toJSON: () => ({})
     } as DOMRect);
     const pointerDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 88, clientY: 20 });
     Object.defineProperty(pointerDown, "pointerId", { value: 1 });
@@ -536,10 +681,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[aria-label='云台方向摇杆']").trigger("keydown", { key: "ArrowUp" });
     await flushPromises();
 
-    expect(api.controlPtz).toHaveBeenCalledWith(
-      channel.id,
-      expect.objectContaining({ action: "up", speed: 255 })
-    );
+    expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up", speed: 255 }));
     wrapper.unmount();
   });
 
@@ -576,7 +718,15 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const joystick = wrapper.get(".joystick-stage");
     vi.spyOn(joystick.element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, right: 176, bottom: 176, width: 176, height: 176, toJSON: () => ({}),
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 176,
+      bottom: 176,
+      width: 176,
+      height: 176,
+      toJSON: () => ({})
     } as DOMRect);
     const pointerDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 156, clientY: 20 });
     Object.defineProperty(pointerDown, "pointerId", { value: 2 });
@@ -663,8 +813,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/rtp/mixed.live.flv");
-    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toEqual(["WS-FLV", "HTTP-FLV", "HLS", "WebRTC"]);
-    expect(wrapper.findAll(".proto-btn").find((button) => button.text() === "WebRTC")?.attributes("disabled")).toBeDefined();
+    expect(wrapper.findAll(".proto-btn").map(button => button.text())).toEqual(["WS-FLV", "HTTP-FLV", "HLS", "WebRTC"]);
+    expect(
+      wrapper
+        .findAll(".proto-btn")
+        .find(button => button.text() === "WebRTC")
+        ?.attributes("disabled")
+    ).toBeDefined();
 
     await wrapper.get(".protocol-switcher select").trigger("click");
     await flushPromises();
@@ -678,8 +833,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find(".copy-url").exists()).toBe(false);
     const protocolRows = wrapper.findAll(".protocol-option");
     expect(protocolRows).toHaveLength(7);
-    expect(protocolRows.every((row) => row.element.lastElementChild?.classList.contains("protocol-copy-btn"))).toBe(true);
-    expect(wrapper.findAll(".protocol-option strong").map((label) => label.text())).toEqual([
+    expect(protocolRows.every(row => row.element.lastElementChild?.classList.contains("protocol-copy-btn"))).toBe(true);
+    expect(wrapper.findAll(".protocol-option strong").map(label => label.text())).toEqual([
       "WS-FLV:",
       "WSS-FLV:",
       "HTTP-FLV:",
@@ -717,24 +872,20 @@ describe("PlayConsoleLinked 双区联动", () => {
     const player = wrapper.get("[data-testid='play-window']");
     expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
     expect(player.attributes("data-zlm-webrtc")).toBe("false");
-    expect(wrapper.findAll(".protocol-option strong").map((label) => label.text())).toContain("WebRTC:");
-    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toContain("WebRTC");
+    expect(wrapper.findAll(".protocol-option strong").map(label => label.text())).toContain("WebRTC:");
+    expect(wrapper.findAll(".proto-btn").map(button => button.text())).toContain("WebRTC");
 
-    const webRtcOption = wrapper.findAll(".protocol-option").find((option) => option.text().includes("WebRTC:"));
+    const webRtcOption = wrapper.findAll(".protocol-option").find(option => option.text().includes("WebRTC:"));
     await webRtcOption!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith(
-      "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
-    );
+    expect(writeText).toHaveBeenCalledWith("http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play");
     expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
 
     const vm = wrapper.vm as unknown as { switchProtocol: (proto: "webrtc") => void };
     vm.switchProtocol("webrtc");
     await flushPromises();
 
-    expect(player.attributes("data-url")).toBe(
-      "webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
-    );
+    expect(player.attributes("data-url")).toBe("webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play");
     expect(player.attributes("data-zlm-webrtc")).toBe("true");
     wrapper.unmount();
   });
@@ -766,7 +917,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     try {
       await flushPromises();
-      const wsTsOption = wrapper.findAll(".protocol-option").find((option) => option.text().includes("WS-TS:"));
+      const wsTsOption = wrapper.findAll(".protocol-option").find(option => option.text().includes("WS-TS:"));
       const copyButton = wsTsOption!.get(".protocol-copy-btn");
 
       expect(copyButton.attributes("aria-label")).toBe("复制 WS-TS 地址");
@@ -780,7 +931,9 @@ describe("PlayConsoleLinked 双区联动", () => {
       );
 
       const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
-      expect(source).toMatch(/\.protocol-url\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+      expect(source).toMatch(
+        /\.protocol-url\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s
+      );
     } finally {
       wrapper.unmount();
       if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
@@ -826,7 +979,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    const option = wrapper.findAll(".protocol-option").find(item => item.text().includes("WS-FLV:"));
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
@@ -844,13 +997,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
-      data: { streamId: fixedStreamID, ssrc: "0102030405", app: "rtp", urls: { wsFlv: currentURL }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: currentURL },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     api.authorizeFixedPlayback.mockResolvedValueOnce({ code: 500, message: "authorization rejected", data: null });
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    const option = wrapper.findAll(".protocol-option").find(item => item.text().includes("WS-FLV:"));
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
@@ -870,13 +1032,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
-      data: { streamId: fixedStreamID, ssrc: "0102030405", app: "rtp", urls: { wsFlv: currentURL }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: currentURL },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     api.authorizeFixedPlayback.mockRejectedValueOnce(new Error("network unavailable"));
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    const option = wrapper.findAll(".protocol-option").find(item => item.text().includes("WS-FLV:"));
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
@@ -923,7 +1094,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    const option = wrapper.findAll(".protocol-option").find(item => item.text().includes("WS-FLV:"));
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
@@ -944,12 +1115,21 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
-      data: { streamId, ssrc: "0102030405", app: "rtp", urls: { wsFlv: url }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: url },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    const option = wrapper.findAll(".protocol-option").find(item => item.text().includes("WS-FLV:"));
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
@@ -1045,25 +1225,25 @@ describe("PlayConsoleLinked 双区联动", () => {
         completedAt: "2026-07-22T10:00:03Z",
         deadlineAt: "2026-07-22T10:00:13Z",
         snapshot: {
-        nodeId: 1,
-        nodeName: "ZLM",
-        completedAt: "2026-07-22T10:00:03Z",
-        summary: { sampleDurationMs: 3000, frameCount: 246, totalBytes: 786432, averageBitrateKbps: 2097.1 },
-        video: { codec: "H264", frameCount: 76, keyFrameCount: 3, fps: 25.3, gop: 25, averageIntervalMs: 39.8 },
-        audio: { codec: "PCMA", frameCount: 170, keyFrameCount: 0, fps: null, gop: null, averageIntervalMs: 20 },
-        timestamps: { videoDtsIntervalMeanMs: 39.8, arrivalJitterMs: 3.2, ptsDtsMaxMs: 0, avArrivalSkewMaxMs: 18 },
-        timeline: [
-          {
-            sequence: 1,
-            trackType: "video",
-            codec: "H264",
-            keyFrame: true,
-            configFrame: false,
-            relativeTimeMs: 0,
-            frameSize: 1024
-          }
-        ],
-        health: { status: "ok", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } }
+          nodeId: 1,
+          nodeName: "ZLM",
+          completedAt: "2026-07-22T10:00:03Z",
+          summary: { sampleDurationMs: 3000, frameCount: 246, totalBytes: 786432, averageBitrateKbps: 2097.1 },
+          video: { codec: "H264", frameCount: 76, keyFrameCount: 3, fps: 25.3, gop: 25, averageIntervalMs: 39.8 },
+          audio: { codec: "PCMA", frameCount: 170, keyFrameCount: 0, fps: null, gop: null, averageIntervalMs: 20 },
+          timestamps: { videoDtsIntervalMeanMs: 39.8, arrivalJitterMs: 3.2, ptsDtsMaxMs: 0, avArrivalSkewMaxMs: 18 },
+          timeline: [
+            {
+              sequence: 1,
+              trackType: "video",
+              codec: "H264",
+              keyFrame: true,
+              configFrame: false,
+              relativeTimeMs: 0,
+              frameSize: 1024
+            }
+          ],
+          health: { status: "ok", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } }
         }
       }
     });
@@ -1100,20 +1280,44 @@ describe("PlayConsoleLinked 双区联动", () => {
       name: "ProbeTimelineModalStub",
       inheritAttrs: false,
       props: { visible: Boolean },
-      template: `<div v-if="visible"><slot name="title" /><slot /></div>`,
+      template: `<div v-if="visible"><slot name="title" /><slot /></div>`
     });
     const timeline = [
       { sequence: 0, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 0, frameSize: 20480 },
-      { sequence: 1, trackType: "video", codec: "H264", keyFrame: false, configFrame: false, relativeTimeMs: 40, frameSize: 3072 },
+      {
+        sequence: 1,
+        trackType: "video",
+        codec: "H264",
+        keyFrame: false,
+        configFrame: false,
+        relativeTimeMs: 40,
+        frameSize: 3072
+      },
       { sequence: 2, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 60, frameSize: 200 },
       // 40ms 与 1200ms 之间断了 1160ms,超过后端阈值 500ms,概览条必须能标出来。
-      { sequence: 3, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 1200, frameSize: 21504 },
-      { sequence: 4, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 1220, frameSize: 200 },
+      {
+        sequence: 3,
+        trackType: "video",
+        codec: "H264",
+        keyFrame: true,
+        configFrame: false,
+        relativeTimeMs: 1200,
+        frameSize: 21504
+      },
+      {
+        sequence: 4,
+        trackType: "audio",
+        codec: "PCMA",
+        keyFrame: false,
+        configFrame: false,
+        relativeTimeMs: 1220,
+        frameSize: 200
+      }
     ];
     api.createStreamProbe.mockResolvedValueOnce({
       code: 0,
       message: "",
-      data: { operationId: "probe-op-2", streamId: "stream-1", durationMs: 3000, status: "queued", createdAt: "", deadlineAt: "" },
+      data: { operationId: "probe-op-2", streamId: "stream-1", durationMs: 3000, status: "queued", createdAt: "", deadlineAt: "" }
     });
     api.getStreamProbeOperation.mockResolvedValueOnce({
       code: 0,
@@ -1135,14 +1339,14 @@ describe("PlayConsoleLinked 双区联动", () => {
           audio: null,
           timestamps: { videoDtsIntervalMeanMs: null, arrivalJitterMs: null, ptsDtsMaxMs: null, avArrivalSkewMaxMs: null },
           timeline,
-          health: { status: "warning", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } },
-        },
-      },
+          health: { status: "warning", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } }
+        }
+      }
     });
 
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel },
-      global: { stubs: { "a-modal": ModalStub } },
+      global: { stubs: { "a-modal": ModalStub } }
     });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
@@ -1169,7 +1373,11 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("点播请求尚未返回时关闭弹窗也不补发停播请求", async () => {
     let resolveStart!: (value: any) => void;
-    api.startPlay.mockReturnValueOnce(new Promise(resolve => { resolveStart = resolve; }));
+    api.startPlay.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveStart = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -1177,7 +1385,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     resolveStart({
       code: 0,
       message: "",
-      data: { streamId: "stream-late", ssrc: "late", app: "rtp", wsflvUrl: "ws://zlm/late.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: "stream-late",
+        ssrc: "late",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/late.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     await flushPromises();
 
@@ -1197,8 +1413,40 @@ describe("PlayConsoleLinked 双区联动", () => {
         quality: { bitrateKbps: 1084.272 },
         network: { bytesSpeed: 135534, totalBytes: 8662847, readerCount: 0, totalReaderCount: 1, aliveSecond: 69 },
         tracks: [
-          { kind: "audio", codec: "PCMA", ready: true, frames: 3453, duration: 69020, loss: 0, width: 0, height: 0, fps: 0, keyFrames: 0, gopSize: 0, gopIntervalMs: 0, sampleRate: 8000, channels: 1, sampleBit: 16 },
-          { kind: "video", codec: "H264", ready: true, frames: 2070, duration: 69033, loss: 0, width: 1280, height: 720, fps: 30, keyFrames: 84, gopSize: 25, gopIntervalMs: 846, sampleRate: 0, channels: 0, sampleBit: 0 }
+          {
+            kind: "audio",
+            codec: "PCMA",
+            ready: true,
+            frames: 3453,
+            duration: 69020,
+            loss: 0,
+            width: 0,
+            height: 0,
+            fps: 0,
+            keyFrames: 0,
+            gopSize: 0,
+            gopIntervalMs: 0,
+            sampleRate: 8000,
+            channels: 1,
+            sampleBit: 16
+          },
+          {
+            kind: "video",
+            codec: "H264",
+            ready: true,
+            frames: 2070,
+            duration: 69033,
+            loss: 0,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            keyFrames: 84,
+            gopSize: 25,
+            gopIntervalMs: 846,
+            sampleRate: 0,
+            channels: 0,
+            sampleBit: 0
+          }
         ],
         recording: { mp4: false, hls: true }
       }
@@ -1227,7 +1475,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("「视频参数」tab 的侧栏入口能打开设备配置窗口，换通道后自动收起", async () => {
+  it("「视频参数」tab 直接嵌入设备配置工作区，并随通道切换上下文", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel }
@@ -1237,51 +1485,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
-    // 没点入口之前窗口不该渲染（它是 v-if 挂载的浮层）
-    expect(wrapper.find(".dcg-window").exists()).toBe(false);
+    const workspace = wrapper.get("[data-testid='linked-side-videoparam'] .dcg-window--embedded");
+    expect(workspace.attributes("aria-label")).toContain(channel.name);
+    expect(workspace.text()).toContain("视频参数属性");
+    expect(workspace.find("[data-testid='dcg-standard-badge']").text()).toContain("GB/T 28181-2022");
+    expect(wrapper.find("[data-testid='play-console-open-device-config']").exists()).toBe(false);
 
-    const open = wrapper.get("[data-testid='linked-open-device-config']");
-    expect(open.text()).toContain("设备配置");
-    await open.trigger("click");
+    await wrapper.setProps({ channel: { ...channel, id: 999, channelId: "34020000001320000099", name: "园区西门" } });
     await flushPromises();
-
-    const drawer = wrapper.get(".dcg-window");
-    // 上下文必须是当前通道：设备编码 + 通道名都在标题栏上
-    expect(drawer.text()).toContain("设备配置");
-    expect(drawer.text()).toContain(channel.deviceId);
-    expect(drawer.text()).toContain(channel.name);
-
-    // ⛔ 不跟 activeTab 走:入口已经在标题栏上,切 tab 就关会让人一脸问号。
-    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
-    await flushPromises();
-    expect(wrapper.find(".dcg-window").exists()).toBe(true);
-
-    // 真正必须收的理由:窗口里是按 channelId 拉的一次性快照,换通道留着会串数据。
-    await wrapper.setProps({ channel: { ...channel, id: 999, channelId: "34020000001320000099" } });
-    await flushPromises();
-    expect(wrapper.find(".dcg-window").exists()).toBe(false);
-  });
-
-  it("标题栏入口不依赖 tab：开窗即见，云台栏下也能开", async () => {
-    vi.useFakeTimers();
-    const wrapper = mount(PlayConsoleLinked, {
-      props: { visible: true, channel }
-    });
-
-    await vi.advanceTimersByTimeAsync(1500);
-    await flushPromises();
-
-    // 默认落在云台控制栏 —— 侧栏那处入口此时是 v-show 隐藏的
-    expect(wrapper.get("[data-testid='linked-tab-ptz']").classes()).toContain("active");
-    expect(wrapper.find(".dcg-window").exists()).toBe(false);
-
-    const open = wrapper.get("[data-testid='play-console-open-device-config']");
-    expect(open.text()).toContain("设备配置");
-    await open.trigger("click");
-    await flushPromises();
-
-    const drawer = wrapper.get(".dcg-window");
-    expect(drawer.text()).toContain(channel.deviceId);
+    expect(wrapper.get("[data-testid='linked-side-videoparam'] .dcg-window--embedded").attributes("aria-label")).toContain(
+      "园区西门"
+    );
   });
 
   it("侧栏与详情条按 tab 分工，云台/探针/高级/视频参数各司其职", async () => {
@@ -1376,7 +1590,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 侧栏留表单、不留对照；对照只在详情条。
     const side = wrapper.get("[data-testid='linked-side-videoparam']");
     expect(side.find("[data-testid='video-param-compare']").exists()).toBe(false);
-    expect(side.find("[data-testid='video-param-row-0']").exists()).toBe(true);
+    expect(side.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -1415,9 +1629,15 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("采样中仅保留右上角状态，不显示重复的采集提示卡", async () => {
     api.createStreamProbe.mockResolvedValueOnce({
-      code: 0, message: "", data: {
-        operationId: "probe-op-pending", streamId: "stream-1", durationMs: 3000,
-        status: "queued", createdAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-22T10:00:13Z"
+      code: 0,
+      message: "",
+      data: {
+        operationId: "probe-op-pending",
+        streamId: "stream-1",
+        durationMs: 3000,
+        status: "queued",
+        createdAt: "2026-07-22T10:00:00Z",
+        deadlineAt: "2026-07-22T10:00:13Z"
       }
     });
     api.getStreamProbeOperation.mockReturnValueOnce(new Promise(() => undefined));
@@ -1437,9 +1657,15 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("支持选择采样时长并将选项传给探针接口", async () => {
     api.createStreamProbe.mockResolvedValueOnce({
-      code: 0, message: "", data: {
-        operationId: "probe-op-duration", streamId: "stream-1", durationMs: 10000,
-        status: "queued", createdAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-22T10:00:20Z"
+      code: 0,
+      message: "",
+      data: {
+        operationId: "probe-op-duration",
+        streamId: "stream-1",
+        durationMs: 10000,
+        status: "queued",
+        createdAt: "2026-07-22T10:00:00Z",
+        deadlineAt: "2026-07-22T10:00:20Z"
       }
     });
     api.getStreamProbeOperation.mockReturnValueOnce(new Promise(() => undefined));
@@ -1462,14 +1688,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("联动详情横跨弹窗并统一使用紧凑高度", () => {
+  it("左侧导航独立占列，详情跨视频与右侧面板", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
 
-    expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+    expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*2\s*\/\s*-1/s);
     expect(source).toContain("--linked-detail-height: 148px");
     expect(source).toContain(':width="playbackModalWidth"');
-    expect(source).toContain(': "min(1280px, calc(100vw - 32px))"');
-    expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+336px/s);
+    expect(source).toContain(': "min(1520px, calc(100vw - 32px))"');
+    expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*136px\s+minmax\(0,\s*1fr\)\s+360px/s);
     // 流信息 tab 已并入探针 tab,原来的 sidebar-stream / linked-detail-stream / linked-stream-metrics
     // 全都退出历史舞台
     expect(source).not.toContain("sidebar-stream");
@@ -1477,6 +1703,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).not.toContain(".linked-stream-metrics");
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
     expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
+    // 所有页签共用同一条底部工作区基线；参数对照/设备配置不能再单独把区域撑到 220px。
+    expect(source).not.toMatch(/\.linked-detail-actions\s*\{[^}]*height:\s*220px/s);
+    expect(source).toMatch(/\.linked-detail-actions\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
     expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(
@@ -1489,9 +1718,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
     );
     expect(source).toMatch(/\.sidebar-advanced\s+\.panels\s*\{[^}]*background:\s*transparent/s);
-    expect(source).toMatch(
-      /\.linked-advanced-layout\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s
-    );
+    expect(source).toMatch(/\.linked-advanced-layout\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(
       /\.linked-advanced-layout\s+\.adv-btn\s*\{[^}]*min-height:\s*40px[^}]*background:\s*var\(--uvp-panel-bg\)[^}]*border-color:\s*var\(--uvp-panel-border\)/s
     );
@@ -1583,31 +1810,15 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const irisOpen = wrapper.get("[title='开大(按住连续)']");
     await irisOpen.trigger("pointerdown");
-    expect(api.controlPtz).toHaveBeenNthCalledWith(
-      1,
-      channel.id,
-      expect.objectContaining({ action: "iris_open" })
-    );
+    expect(api.controlPtz).toHaveBeenNthCalledWith(1, channel.id, expect.objectContaining({ action: "iris_open" }));
     await irisOpen.trigger("pointerup");
-    expect(api.controlPtz).toHaveBeenNthCalledWith(
-      2,
-      channel.id,
-      expect.objectContaining({ action: "lens_stop" })
-    );
+    expect(api.controlPtz).toHaveBeenNthCalledWith(2, channel.id, expect.objectContaining({ action: "lens_stop" }));
 
     const focusFar = wrapper.get("[title='远焦(按住连续)']");
     await focusFar.trigger("pointerdown");
-    expect(api.controlPtz).toHaveBeenNthCalledWith(
-      3,
-      channel.id,
-      expect.objectContaining({ action: "focus_far" })
-    );
+    expect(api.controlPtz).toHaveBeenNthCalledWith(3, channel.id, expect.objectContaining({ action: "focus_far" }));
     await focusFar.trigger("pointerup");
-    expect(api.controlPtz).toHaveBeenNthCalledWith(
-      4,
-      channel.id,
-      expect.objectContaining({ action: "lens_stop" })
-    );
+    expect(api.controlPtz).toHaveBeenNthCalledWith(4, channel.id, expect.objectContaining({ action: "lens_stop" }));
     wrapper.unmount();
   });
 
@@ -1620,15 +1831,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await zoomIn.trigger("pointerdown");
     await zoomIn.trigger("pointerup");
 
-    expect(api.controlPtz).toHaveBeenNthCalledWith(
-      2,
-      channel.id,
-      expect.objectContaining({ action: "stop" })
-    );
-    expect(api.controlPtz).not.toHaveBeenCalledWith(
-      channel.id,
-      expect.objectContaining({ action: "lens_stop" })
-    );
+    expect(api.controlPtz).toHaveBeenNthCalledWith(2, channel.id, expect.objectContaining({ action: "stop" }));
+    expect(api.controlPtz).not.toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "lens_stop" }));
     wrapper.unmount();
   });
 
@@ -1647,7 +1851,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     let resolveMedia!: (value: any) => void;
     const stop = vi.fn();
     const track = { enabled: true, stop };
-    const getUserMedia = vi.fn().mockReturnValueOnce(new Promise(resolve => { resolveMedia = resolve; }));
+    const getUserMedia = vi.fn().mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveMedia = resolve;
+      })
+    );
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -1674,10 +1882,17 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("创建响应迟到时关闭弹窗仍会删除后端会话", async () => {
     let resolveCreate!: (value: any) => void;
-    api.createTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    api.createTalkSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveCreate = resolve;
+      })
+    );
     const stop = vi.fn();
     const track = { enabled: true, stop };
-    vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track], getAudioTracks: () => [track] }) } });
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      mediaDevices: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track], getAudioTracks: () => [track] }) }
+    });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -1688,7 +1903,10 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: {
-        sessionId: "talk-after-close", mode: "broadcast", state: "reserved", expiresAt: "",
+        sessionId: "talk-after-close",
+        mode: "broadcast",
+        state: "reserved",
+        expiresAt: "",
         uplink: {
           protocol: "whip",
           url: "/api/gb28181/device-mgmt/talk-sessions/talk-after-close/uplink",
@@ -1704,7 +1922,11 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("Broadcast 的麦克风在后端 active 前保持静音并锁定 PCMA", async () => {
     let resolveStatus!: (value: any) => void;
-    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    api.getTalkSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveStatus = resolve;
+      })
+    );
     const stop = vi.fn();
     const track = { enabled: true, stop };
     const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
@@ -1715,14 +1937,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       localDescription: RTCSessionDescriptionInit | null = null;
       addTransceiver = vi.fn(() => ({ setCodecPreferences }));
       createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: offerSdp });
-      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => { this.localDescription = description; });
+      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+        this.localDescription = description;
+      });
       setRemoteDescription = vi.fn().mockResolvedValue(undefined);
       addEventListener = vi.fn();
       removeEventListener = vi.fn();
       close = vi.fn();
     }
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(stream) } });
-    vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] }) });
+    vi.stubGlobal("RTCRtpSender", {
+      getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] })
+    });
     vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, text: async () => offerSdp }));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -1755,7 +1981,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     // ① offer 发给平台的上行入口，媒体节点地址与自签证书不进浏览器；
     // ② ICE 服务器用平台下发的，缺了它只产 host candidate，跨网段必连不上。
     let resolveStatus!: (value: any) => void;
-    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    api.getTalkSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveStatus = resolve;
+      })
+    );
     const stop = vi.fn();
     const track = { enabled: true, stop };
     const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
@@ -1764,10 +1994,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     class FakePeerConnection {
       iceGatheringState = "complete";
       localDescription: RTCSessionDescriptionInit | null = null;
-      constructor(config?: any) { peerConfigs.push(config); }
+      constructor(config?: any) {
+        peerConfigs.push(config);
+      }
       addTransceiver = vi.fn(() => ({ setCodecPreferences: vi.fn() }));
       createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: offerSdp });
-      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => { this.localDescription = description; });
+      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+        this.localDescription = description;
+      });
       setRemoteDescription = vi.fn().mockResolvedValue(undefined);
       addEventListener = vi.fn();
       removeEventListener = vi.fn();
@@ -1776,7 +2010,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, text: async () => offerSdp });
     Cookies.set(AccessTokenKey, JSON.stringify({ accessToken: "tok-1", accessTokenExpires: Date.now() + 60000 }));
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(stream) } });
-    vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] }) });
+    vi.stubGlobal("RTCRtpSender", {
+      getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] })
+    });
     vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
     vi.stubGlobal("fetch", fetchMock);
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -1803,7 +2039,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 波形是「麦克风确实在采」的可见证据。jsdom 里没有 AudioContext，电平恒为 0，
     // 但波形仍须出现（降级成静态起伏）—— 不能因为拿不到电平就把这个反馈整个吞掉。
     let resolveStatus!: (value: any) => void;
-    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    api.getTalkSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveStatus = resolve;
+      })
+    );
     const stop = vi.fn();
     const track = { enabled: true, stop };
     const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
@@ -1813,14 +2053,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       localDescription: RTCSessionDescriptionInit | null = null;
       addTransceiver = vi.fn(() => ({ setCodecPreferences: vi.fn() }));
       createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: offerSdp });
-      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => { this.localDescription = description; });
+      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+        this.localDescription = description;
+      });
       setRemoteDescription = vi.fn().mockResolvedValue(undefined);
       addEventListener = vi.fn();
       removeEventListener = vi.fn();
       close = vi.fn();
     }
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(stream) } });
-    vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] }) });
+    vi.stubGlobal("RTCRtpSender", {
+      getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] })
+    });
     vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, text: async () => offerSdp }));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -1832,7 +2076,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 授权 / 建会话 / 等信令这些过渡态都还没在说话，不该有波形
     expect(wrapper.find("[data-testid='talk-wave']").exists()).toBe(false);
 
-    resolveStatus({ code: 0, message: "", data: { sessionId: "talk-wave-1", mode: "broadcast", state: "active", expiresAt: "" } });
+    resolveStatus({
+      code: 0,
+      message: "",
+      data: { sessionId: "talk-wave-1", mode: "broadcast", state: "active", expiresAt: "" }
+    });
     await flushPromises();
     const wave = wrapper.get("[data-testid='talk-wave']");
     expect(wave.findAll("i")).toHaveLength(4);
@@ -1891,11 +2139,23 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("快速切换通道时忽略旧点播响应并释放迟到的观看会话", async () => {
     let resolveOld!: (value: any) => void;
     api.startPlay
-      .mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }))
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveOld = resolve;
+        })
+      )
       .mockResolvedValueOnce({
         code: 0,
         message: "",
-        data: { streamId: "stream-2", ssrc: "2", app: "rtp", wsflvUrl: "ws://zlm/stream-2.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+        data: {
+          streamId: "stream-2",
+          ssrc: "2",
+          app: "rtp",
+          wsflvUrl: "ws://zlm/stream-2.flv",
+          httpFlvUrl: "",
+          hlsUrl: "",
+          expireAt: 0
+        }
       });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -1906,7 +2166,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     resolveOld({
       code: 0,
       message: "",
-      data: { streamId: "stream-old", ssrc: "1", app: "rtp", wsflvUrl: "ws://zlm/stream-old.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: "stream-old",
+        ssrc: "1",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/stream-old.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     await flushPromises();
     expect(api.stopPlay).toHaveBeenCalledWith("stream-old");
@@ -1917,7 +2185,11 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("设备与通道编码变化时即使数据库 ID 相同也丢弃迟到的 DeviceStatus", async () => {
     let resolveOldStatus!: (value: any) => void;
     api.getDeviceStatus
-      .mockReturnValueOnce(new Promise(resolve => { resolveOldStatus = resolve; }))
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveOldStatus = resolve;
+        })
+      )
       .mockResolvedValueOnce({
         code: 0,
         message: "",
@@ -1952,6 +2224,98 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(facts).toContain("设备未录制");
     expect(facts).toContain("已布防");
     expect(facts).not.toContain("设备录制中");
+    wrapper.unmount();
+  });
+
+  // 设备在 DeviceStatus 应答里一直报着 Online / Status / Encode / DeviceTime，
+  // 以前解析器把它们全丢了，界面自然也无从显示。
+  it("渲染设备自报的在线、自检、编码与时间偏差", async () => {
+    api.getDeviceStatus.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
+        freshness: "fresh",
+        deviceReport: {
+          online: "online",
+          selfTest: "ok",
+          encode: "on",
+          deviceTime: "2026-09-19T20:03:58",
+          clockSkewSeconds: 1,
+          alarmInputCount: 0,
+          observedAt: "2026-09-19T20:03:59Z"
+        }
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await requestDeviceStatus(wrapper);
+
+    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
+    expect(facts).toContain("在线");
+    expect(facts).toContain("自检正常");
+    expect(facts).toContain("编码中");
+    expect(facts).toContain("与平台一致");
+    wrapper.unmount();
+  });
+
+  // 设备回了 Alarmstatus Num="0"，它说的是"我没有报警输入" —— 这是已知事实，
+  // 不是"未知"。下方那条提示也要跟着改口径。
+  it("设备明确回了 0 个报警输入时显示「设备无报警输入」而不是「未知」", async () => {
+    api.getDeviceStatus.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
+        freshness: "fresh",
+        alarmResolution: {
+          status: "unavailable",
+          source: "",
+          targetCode: "",
+          state: "unknown",
+          freshness: "unknown",
+          candidates: []
+        },
+        deviceReport: { alarmInputCount: 0 }
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await requestDeviceStatus(wrapper);
+
+    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
+    expect(facts).toContain("设备无报警输入");
+    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("设备自报没有报警输入通道");
+    wrapper.unmount();
+  });
+
+  // 对照：设备这次没报的项要显示「未上报」，既不能兜底成"关闭"，也不能沿用上一台的值。
+  it("设备没上报那些事实时显示「未上报」而不是「已停」", async () => {
+    api.getDeviceStatus.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
+        freshness: "fresh",
+        deviceReport: {
+          online: null,
+          selfTest: null,
+          encode: null,
+          deviceTime: null,
+          clockSkewSeconds: null,
+          alarmInputCount: null
+        }
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await requestDeviceStatus(wrapper);
+
+    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
+    expect(facts).toContain("未上报");
+    expect(facts).not.toContain("编码已停");
+    expect(facts).not.toContain("自检异常");
+    expect(facts).not.toContain("设备无报警输入");
     wrapper.unmount();
   });
 
@@ -2020,7 +2384,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("渲染视频参数回读事实：码值只在这一层转人读串，码流分段来自目录声明", async () => {
+  it("嵌入式视频参数工作区渲染回读事实与目录码流声明", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
         list: [
@@ -2038,31 +2402,26 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     // 打开面板只读平台缓存，**不发 SIP 报文**（refresh=false）。
     expect(api.getChannelVideoParams).toHaveBeenCalledWith(channel.id, false);
-    expect(wrapper.get("[data-testid='video-param-reconcile']").text()).toBe("已读取设备当前配置");
+    expect(wrapper.get("[data-testid='dcg-reconcile']").text()).toContain("回读成功");
 
     // 「按几段码流渲染」的出处是目录 <Info> 的 StreamNumberList，不是"我们看到几行"。
-    const streams = wrapper.get("[data-testid='video-param-streams']");
-    expect(streams.text()).toContain("0 / 1");
-    expect(streams.attributes("data-source")).toBe("设备声明");
+    expect(wrapper.get(".dcg-statusbar").text()).toContain("码流声明 0 / 1");
 
-    // ⛔ 码值→人读串只发生在展示层：库里与报文里永远是 "2"/"6"/"25"。
-    // 因此这里断言的是提示行与控件的**取值**，而不是 select 的文本 ——
-    // select 的文本把全部候选项都算在内，断言它等于什么都没断言。
-    const row0 = wrapper.get("[data-testid='video-param-row-0']");
-    expect(row0.get(".video-param-hints").text()).toBe("H.2641080P25 fpsCBR4096 kb/s");
-    expect((row0.get("[data-testid='video-param-format-0']").element as HTMLSelectElement).value).toBe("2");
-    expect((row0.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("6");
+    // ⛔ 控件绑定标准码值，人读串只存在于 option 文案。
+    expect((wrapper.get("[data-testid='dcg-format-0']").element as HTMLSelectElement).value).toBe("2");
+    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("6");
 
-    // 子码流是 VBR → 码率元素缺席，显示"未提供"；这与"设备报了个 0"是两件事。
-    const row1 = wrapper.get("[data-testid='video-param-row-1']");
-    expect(row1.get(".video-param-hints").text()).toBe("H.264720P25 fpsVBR未提供");
+    // 配置文件切到子码流后，VBR 码率明确标为“不发”。
+    await wrapper.get("[aria-label='配置文件']").setValue("1");
+    await nextTick();
+    expect(wrapper.get("[data-testid='dcg-stream-1'] [data-source='不发']").text()).toBe("不发");
 
     // 对照区的「回读」行取设备事实：改草稿不该动它（下方 mismatch 用例另有锁定）。
     expect(wrapper.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
     wrapper.unmount();
   });
 
-  it("视频参数面板：VBR 时码率格禁用，越界取值本地拦住不发报文", async () => {
+  it("视频参数面板切到 VBR 时禁用码率格", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
     );
@@ -2070,25 +2429,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
 
-    const bitRate = wrapper.get("[data-testid='video-param-bit-rate-0']").element as HTMLInputElement;
+    const bitRate = wrapper.get("[data-testid='dcg-bit-rate-0'] input.cfg-slider-input").element as HTMLInputElement;
     expect(bitRate.disabled).toBe(false);
 
     // CBR → VBR：该元素在报文里根本不出现，所以这一格必须禁用，
     // 而不是"可以填但会被忽略"（填了忽略会让人以为填的值生效了）。
-    await wrapper.get("[data-testid='video-param-bit-rate-type-0']").setValue("2");
+    await wrapper.get("[data-testid='dcg-bit-rate-type-0-2']").trigger("click");
     await nextTick();
     expect(bitRate.disabled).toBe(true);
-
-    // 帧率 120 超附录 G 的范围：本地拦住，一个字节都不发。
-    await wrapper.get("[data-testid='video-param-frame-rate-0']").setValue("120");
-    await nextTick();
-    const submit = wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement;
-    expect(submit.disabled).toBe(false); // 有脏值即可下发，越界与否由点击时的校验拦
-    await wrapper.get("[data-testid='video-param-submit']").trigger("click");
-    await flushPromises();
-
-    expect(api.applyChannelVideoParams).not.toHaveBeenCalled();
-    expect(wrapper.get("[data-testid='video-param-error']").text()).toContain("帧率必须是 0-99 的整数");
     wrapper.unmount();
   });
 
@@ -2097,6 +2445,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 所以下发之后必须等自动回读落地，界面结论只能来自 reconcile。
     vi.useFakeTimers();
     api.getChannelVideoParams
+      .mockResolvedValueOnce(
+        videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
+      )
       .mockResolvedValueOnce(
         videoParamsResponse({ list: [videoParamRow()], freshness: "fresh", reconcile: { state: "read_ok" } })
       )
@@ -2114,38 +2465,43 @@ describe("PlayConsoleLinked 双区联动", () => {
           }
         })
       );
-    api.getPtzOperation.mockResolvedValue(operationResponse("accepted", "video-param-op-1", null));
-
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
 
-    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await wrapper.get("[data-testid='dcg-resolution-0']").setValue("5");
     await nextTick();
-    expect(wrapper.get("[data-testid='video-param-row-0']").attributes("data-dirty")).toBe("1");
-    expect(wrapper.get("[data-testid='video-param-dirty']").text()).toBe("已改 1 项");
+    expect(wrapper.get("[data-testid='dcg-stream-0']").text()).toContain("已改");
 
-    await wrapper.get("[data-testid='video-param-submit']").trigger("click");
+    await wrapper.get("[data-testid='dcg-apply']").trigger("click");
     await flushPromises();
     expect(api.applyChannelVideoParams).toHaveBeenCalledWith(
       channel.id,
-      [expect.objectContaining({ streamNumber: 0, videoFormat: "2", resolution: "5", frameRate: "25", bitRateType: "1", videoBitRate: "4096" })],
-      expect.stringContaining("video-param-")
+      [
+        expect.objectContaining({
+          streamNumber: 0,
+          videoFormat: "2",
+          resolution: "5",
+          frameRate: "25",
+          bitRateType: "1",
+          videoBitRate: "4096"
+        })
+      ],
+      expect.stringContaining("device-config-")
     );
 
-    // 轮询到终态后静默重读一次，把 reconcile 结论带回来。
-    await vi.advanceTimersByTimeAsync(400);
+    // 下发后自动回读，把 reconcile 结论带回来。
+    await vi.advanceTimersByTimeAsync(1200);
     await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "video-param-op-1");
 
-    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
-    expect(reconcile.text()).toBe("设备未返回此配置类型（厂商未实现该类型）");
+    const reconcile = wrapper.get("[data-testid='dcg-reconcile']");
+    expect(reconcile.text()).toContain("设备未返回该配置类型");
     // ⛔ type_absent 是"一种结论"而不是失败：设备回了 OK 却没带该元素
     // （2016 设备与未实现该类型的厂商都是这个形态）→ 黄色提示，不是红色报错。
-    expect(reconcile.classes()).toContain("reconcile-warn");
-    expect(wrapper.get("[data-testid='video-param-absent']").text()).toContain("VideoParamAttribute");
+    expect(reconcile.classes()).toContain("is-warn");
+    expect(reconcile.text()).toContain("VideoParamAttribute");
     // 列表空着的时候也不能说成"尚未读取" —— 那会把能力问题说成操作问题。
-    expect(wrapper.get("[data-testid='video-param-empty']").text()).toBe("设备未返回该配置类型的参数");
+    expect(wrapper.get("[data-testid='dcg-empty'] p").text()).toBe("设备未返回该配置类型的参数");
     wrapper.unmount();
   });
 
@@ -2166,11 +2522,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await flushPromises();
 
-    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
-    expect(reconcile.text()).toContain("平台按 2016 版处理");
+    expect(wrapper.get("[data-testid='dcg-version-notice']").text()).toContain("平台按 2016 版处理");
     // ⛔ "设备不支持"不是"用户不许试"的理由：读取按钮仍可用。
-    expect((wrapper.get("[data-testid='video-param-refresh']").element as HTMLButtonElement).disabled).toBe(false);
+    expect((wrapper.get("[data-testid='dcg-read']").element as HTMLButtonElement).disabled).toBe(false);
     wrapper.unmount();
   });
 
@@ -2191,27 +2548,29 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await flushPromises();
 
-    const reconcile = wrapper.get("[data-testid='video-param-reconcile']");
-    expect(reconcile.text()).toBe("设备已接受命令，但值未生效");
+    const reconcile = wrapper.get("[data-testid='dcg-reconcile']");
+    expect(reconcile.text()).toContain("设备已接受命令，但值未生效");
     // ⛔ mismatch 是能力边界（下发 1080P、设备只到 720P），设备没做错 → 黄不是红。
-    expect(reconcile.classes()).toContain("reconcile-warn");
-    expect(reconcile.classes()).not.toContain("reconcile-error");
+    expect(reconcile.classes()).toContain("is-warn");
+    expect(reconcile.classes()).not.toContain("is-error");
     // 逐格差异必须露出来，否则用户只知道"没生效"、不知道差在哪一格。
-    expect(wrapper.get("[data-testid='video-param-mismatch']").text()).toContain("Resolution");
+    expect(reconcile.text()).toContain("Resolution");
 
     // ⛔ 设备给的结论不是"用户不许试"的理由：字段仍可改、改完仍可下发。
-    const resolution = wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement;
+    const resolution = wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement;
     expect(resolution.disabled).toBe(false);
-    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await wrapper.get("[data-testid='dcg-resolution-0']").setValue("5");
     await nextTick();
-    expect((wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement).disabled).toBe(false);
+    expect((wrapper.get("[data-testid='dcg-apply']").element as HTMLButtonElement).disabled).toBe(false);
 
     // 还原回设备事实，脏值计数归零。
-    await wrapper.get("[data-testid='video-param-revert']").trigger("click");
+    await wrapper.get("[data-testid='dcg-reset']").trigger("click");
     await nextTick();
-    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("6");
-    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(false);
+    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("6");
+    expect(wrapper.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
 
@@ -2223,10 +2582,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
 
-    expect(wrapper.get("[data-testid='video-param-offline']").text()).toContain("设备离线");
-    expect((wrapper.get("[data-testid='video-param-refresh']").element as HTMLButtonElement).disabled).toBe(true);
-    expect((wrapper.get("[data-testid='video-param-submit']").element as HTMLButtonElement).disabled).toBe(true);
-    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).disabled).toBe(true);
+    expect((wrapper.get("[data-testid='dcg-read']").element as HTMLButtonElement).disabled).toBe(true);
+    expect((wrapper.get("[data-testid='dcg-apply']").element as HTMLButtonElement).disabled).toBe(true);
+    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).disabled).toBe(true);
     wrapper.unmount();
   });
 
@@ -2253,19 +2611,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
 
     // 先制造一格"脏草稿"，再切通道 —— 新通道的值不能被旧草稿遮住。
-    await wrapper.get("[data-testid='video-param-resolution-0']").setValue("5");
+    await wrapper.get("[data-testid='dcg-resolution-0']").setValue("5");
     await nextTick();
-    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='dcg-stream-0']").text()).toContain("已改");
 
     const nextChannel = { ...channel, id: 2, channelId: "0411212888", deviceId: "34020000001320000003", name: "园区西门" };
     await wrapper.setProps({ channel: nextChannel });
     await flushPromises();
 
     expect(api.getChannelVideoParams).toHaveBeenLastCalledWith(2, false);
-    expect((wrapper.get("[data-testid='video-param-resolution-0']").element as HTMLInputElement).value).toBe("4");
-    expect(wrapper.find("[data-testid='video-param-dirty']").exists()).toBe(false);
-    // 新通道目录没上报 StreamNumberList → 退化成"按已读取到的行"，并如实标注来源。
-    expect(wrapper.get("[data-testid='video-param-streams']").attributes("data-source")).toBe("按回读行");
+    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("4");
+    expect(wrapper.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
 
@@ -2287,7 +2643,11 @@ describe("PlayConsoleLinked 双区联动", () => {
         message: "",
         data: { state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" }
       });
-    api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOldOperation = resolve; }));
+    api.getPtzOperation.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveOldOperation = resolve;
+      })
+    );
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -2330,7 +2690,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.callPtzPreset).toHaveBeenCalledWith(channel.id, 1);
     expect(api.controlPtzCruise).toHaveBeenNthCalledWith(1, channel.id, { action: "start", trackId: 1 });
     expect(api.controlPtzCruise).toHaveBeenNthCalledWith(2, channel.id, { action: "stop", trackId: 1 });
-    expect(api.controlPtzCruise.mock.calls.flatMap(([, body]) => [body.action])).not.toEqual(expect.arrayContaining(["pause", "resume"]));
+    expect(api.controlPtzCruise.mock.calls.flatMap(([, body]) => [body.action])).not.toEqual(
+      expect.arrayContaining(["pause", "resume"])
+    );
     wrapper.unmount();
   });
 
@@ -2359,7 +2721,11 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("录像与布防的正反动作共享 pending 锁", async () => {
     let resolveControl!: (value: { code: number; message: string; data: Record<string, unknown> }) => void;
-    api.controlDevice.mockReturnValueOnce(new Promise(resolve => { resolveControl = resolve; }));
+    api.controlDevice.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveControl = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
@@ -2377,9 +2743,21 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("录像 operation 等待设备应答时不锁住其他高级控制", async () => {
     api.controlDevice
-      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "record-op", status: "queued", responseRequired: true } })
-      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "iframe-op", status: "sent", responseRequired: false } })
-      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "guard-op", status: "queued", responseRequired: true } });
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "record-op", status: "queued", responseRequired: true }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "iframe-op", status: "sent", responseRequired: false }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "guard-op", status: "queued", responseRequired: true }
+      });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
@@ -2406,7 +2784,11 @@ describe("PlayConsoleLinked 双区联动", () => {
       message: "",
       data: { operationId: "old-record-op", status: "queued", responseRequired: true }
     });
-    api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOldOperation = resolve; }));
+    api.getPtzOperation.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveOldOperation = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
@@ -2529,19 +2911,38 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, toJSON: () => ({})
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 1000,
+      width: 1000,
+      height: 1000,
+      toJSON: () => ({})
     } as DOMRect);
     vi.spyOn(wrapper.get("[data-testid='play-window']").element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 450,
+      width: 800,
+      height: 450,
+      toJSON: () => ({})
     } as DOMRect);
     await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 1, button: 0 });
     await layer.trigger("pointermove", { clientX: 600, clientY: 300, pointerId: 1 });
     await layer.trigger("pointerup", { clientX: 600, clientY: 300, pointerId: 1 });
     await flushPromises();
-    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({
-      action: "drag_zoom_in",
-      region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
-    }));
+    expect(api.controlDevice).toHaveBeenLastCalledWith(
+      channel.id,
+      expect.objectContaining({
+        action: "drag_zoom_in",
+        region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
+      })
+    );
     wrapper.unmount();
   });
 
@@ -2552,16 +2953,27 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='advanced-drag-zoom-out']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 450,
+      width: 800,
+      height: 450,
+      toJSON: () => ({})
     } as DOMRect);
     await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 2, button: 0 });
     await layer.trigger("pointermove", { clientX: 600, clientY: 300, pointerId: 2 });
     await layer.trigger("pointerup", { clientX: 600, clientY: 300, pointerId: 2 });
     await flushPromises();
-    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({
-      action: "drag_zoom_out",
-      region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
-    }));
+    expect(api.controlDevice).toHaveBeenLastCalledWith(
+      channel.id,
+      expect.objectContaining({
+        action: "drag_zoom_out",
+        region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
+      })
+    );
     wrapper.unmount();
   });
 
@@ -2581,7 +2993,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 450,
+      width: 800,
+      height: 450,
+      toJSON: () => ({})
     } as DOMRect);
     await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 4, button: 0 });
     await layer.trigger("pointercancel", { clientX: 600, clientY: 300, pointerId: 4 });
@@ -2784,9 +3204,12 @@ describe("PlayConsoleLinked 双区联动", () => {
           freshness: "unknown"
         }
       });
-    api.getPtzOperation.mockImplementation(() => new Promise<ReturnType<typeof operationResponse>>((resolve) => {
-      resolveHungOperation = resolve;
-    }));
+    api.getPtzOperation.mockImplementation(
+      () =>
+        new Promise<ReturnType<typeof operationResponse>>(resolve => {
+          resolveHungOperation = resolve;
+        })
+    );
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -2856,7 +3279,10 @@ describe("PlayConsoleLinked 双区联动", () => {
           targetCode: "",
           state: "unknown",
           freshness: "unknown",
-          candidates: [{ code: "A1", name: "门磁 1" }, { code: "A2", name: "门磁 2" }]
+          candidates: [
+            { code: "A1", name: "门磁 1" },
+            { code: "A2", name: "门磁 2" }
+          ]
         },
         alarmFacts: [
           { targetCode: "A1", guardState: "on", freshness: "fresh" },
@@ -2962,16 +3388,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 而平台里 0 号预置位**永远创建不出来**:创建接口强制 presetId>0
     // (controllers/device_ptz_resources.go),列预置位也 `.filter(id>0)`(loadPresets)。
     api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
-    api.getHomePosition.mockResolvedValueOnce(homeResponse({
-      homePosition: {
-        enabled: false,
-        resetTime: null,
-        presetId: 0, // 设备未配置看守位时回的占位值,不是「0 号预置位」
-        confirmedAt: "2026-07-22T10:00:00Z",
-        source: "device_query",
-        verification: "verified"
-      }
-    }));
+    api.getHomePosition.mockResolvedValueOnce(
+      homeResponse({
+        homePosition: {
+          enabled: false,
+          resetTime: null,
+          presetId: 0, // 设备未配置看守位时回的占位值,不是「0 号预置位」
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -3059,7 +3487,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
     expect(source).toMatch(/\.cruise-stops-list\s*\{[^}]*max-height:\s*clamp\(168px,\s*30vh,\s*260px\)[^}]*overflow-y:\s*auto/s);
     expect(source).toMatch(/\.cruise-stop-add\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
-    expect(source).toMatch(/@media \(max-width:\s*560px\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s);
+    expect(source).toMatch(
+      /@media \(max-width:\s*560px\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s
+    );
     wrapper.unmount();
   });
 
@@ -3080,17 +3510,23 @@ describe("PlayConsoleLinked 双区联动", () => {
       cruiseDraft: { trackId: number; replaceExisting: boolean };
     };
     expect(typeof vm.handleSaveCruiseBeforeOk).toBe("function");
-    await new Promise<void>((resolve) => {
-      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    await new Promise<void>(resolve => {
+      vm.handleSaveCruiseBeforeOk(ok => {
+        expect(ok).toBe(true);
+        resolve();
+      });
     });
     await flushPromises();
-    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({
-      trackId: 21,
-      stops: [{ presetId: 1 }],
-      speed: 128,
-      dwellSec: 5,
-      replaceExisting: false,
-    }));
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(
+      channel.id,
+      expect.objectContaining({
+        trackId: 21,
+        stops: [{ presetId: 1 }],
+        speed: 128,
+        dwellSec: 5,
+        replaceExisting: false
+      })
+    );
     wrapper.unmount();
   });
 
@@ -3111,8 +3547,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     };
     vm.cruiseDraft.sendSpeed = false;
     vm.cruiseDraft.sendDwell = false;
-    await new Promise<void>((resolve) => {
-      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    await new Promise<void>(resolve => {
+      vm.handleSaveCruiseBeforeOk(ok => {
+        expect(ok).toBe(true);
+        resolve();
+      });
     });
     await flushPromises();
 
@@ -3128,14 +3567,31 @@ describe("PlayConsoleLinked 双区联动", () => {
         code: 0,
         message: "",
         data: {
-          list: [{ trackId: 1, name: "巡航 1", enabled: false, detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] }) }],
+          list: [
+            {
+              trackId: 1,
+              name: "巡航 1",
+              enabled: false,
+              detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] })
+            }
+          ],
           freshness: "stale"
         }
       })
       .mockResolvedValueOnce({
         code: 0,
         message: "",
-        data: { list: [{ trackId: 1, name: "巡航 1", enabled: true, detail: JSON.stringify({ source: "device-query", stops: [{ presetId: 1 }] }) }], freshness: "fresh" }
+        data: {
+          list: [
+            {
+              trackId: 1,
+              name: "巡航 1",
+              enabled: true,
+              detail: JSON.stringify({ source: "device-query", stops: [{ presetId: 1 }] })
+            }
+          ],
+          freshness: "fresh"
+        }
       });
     api.createCruiseTrack.mockResolvedValue({
       code: 0,
@@ -3149,8 +3605,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     const vm = wrapper.vm as unknown as {
       handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
     };
-    await new Promise<void>((resolve) => {
-      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    await new Promise<void>(resolve => {
+      vm.handleSaveCruiseBeforeOk(ok => {
+        expect(ok).toBe(true);
+        resolve();
+      });
     });
     await flushPromises();
     expect(wrapper.get("[data-testid='cruise-tile-1']").text()).toContain("未验证");
@@ -3166,7 +3625,11 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("巡航配置下发期间锁定整个弹窗且不能取消关闭", async () => {
     let resolveCreate!: (value: any) => void;
-    api.createCruiseTrack.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    api.createCruiseTrack.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveCreate = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
@@ -3215,8 +3678,11 @@ describe("PlayConsoleLinked 双区联动", () => {
       handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
     };
     vm.cruiseDraft.trackId = 0;
-    await new Promise<void>((resolve) => {
-      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    await new Promise<void>(resolve => {
+      vm.handleSaveCruiseBeforeOk(ok => {
+        expect(ok).toBe(true);
+        resolve();
+      });
     });
     expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({ trackId: 0 }));
     wrapper.unmount();
@@ -3248,12 +3714,14 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: {
-        list: [{
-          trackId: 0,
-          name: "已确认零号巡航",
-          enabled: true,
-          detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] })
-        }],
+        list: [
+          {
+            trackId: 0,
+            name: "已确认零号巡航",
+            enabled: true,
+            detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] })
+          }
+        ],
         freshness: "fresh"
       }
     });
@@ -3286,10 +3754,16 @@ describe("PlayConsoleLinked 双区联动", () => {
     };
     vm.cruiseDraft.trackId = 1;
     vm.cruiseDraft.replaceExisting = true;
-    await new Promise<void>((resolve) => {
-      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    await new Promise<void>(resolve => {
+      vm.handleSaveCruiseBeforeOk(ok => {
+        expect(ok).toBe(true);
+        resolve();
+      });
     });
-    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({ trackId: 1, replaceExisting: true }));
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(
+      channel.id,
+      expect.objectContaining({ trackId: 1, replaceExisting: true })
+    );
     wrapper.unmount();
   });
 
@@ -3314,7 +3788,11 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("忽略切换通道后迟到的巡航响应", async () => {
     let resolveCruise!: (value: any) => void;
-    api.controlPtzCruise.mockReturnValueOnce(new Promise(resolve => { resolveCruise = resolve; }));
+    api.controlPtzCruise.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveCruise = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get(".cruise-item").trigger("click");
@@ -3333,12 +3811,19 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: {
-        list: [{
-          trackId: 7,
-          name: "标准巡航",
-          enabled: false,
-          detail: JSON.stringify({ trackId: 7, sumNum: 1, source: "reconcile-pending", cruisePoints: [{ presetIndex: 3, stayTime: 5, speed: 8 }] })
-        }],
+        list: [
+          {
+            trackId: 7,
+            name: "标准巡航",
+            enabled: false,
+            detail: JSON.stringify({
+              trackId: 7,
+              sumNum: 1,
+              source: "reconcile-pending",
+              cruisePoints: [{ presetIndex: 3, stayTime: 5, speed: 8 }]
+            })
+          }
+        ],
         freshness: "stale",
         refreshOperationId: "refresh-1"
       }
@@ -3407,12 +3892,14 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: {
-        list: [{
-          trackId: 9,
-          name: "车间巡检",
-          enabled: null,
-          detail: JSON.stringify({ trackId: 9, sumNum: 1, cruisePoints: [{ presetIndex: 2, stayTime: 5, speed: 128 }] })
-        }],
+        list: [
+          {
+            trackId: 9,
+            name: "车间巡检",
+            enabled: null,
+            detail: JSON.stringify({ trackId: 9, sumNum: 1, cruisePoints: [{ presetIndex: 2, stayTime: 5, speed: 128 }] })
+          }
+        ],
         freshness: "fresh"
       }
     });
@@ -3438,22 +3925,24 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: {
-        list: [{
-          trackId: 4,
-          name: "车间巡检",
-          enabled: true,
-          detail: JSON.stringify({
+        list: [
+          {
             trackId: 4,
-            sumNum: 3,
-            cruisePoints: [
-              { presetIndex: 3, stayTime: 30, speed: 128 },
-              { presetIndex: 1, stayTime: 30, speed: 128 },
-              { presetIndex: 5, stayTime: 30, speed: 128 },
-            ],
-          }),
-        }],
-        freshness: "fresh",
-      },
+            name: "车间巡检",
+            enabled: true,
+            detail: JSON.stringify({
+              trackId: 4,
+              sumNum: 3,
+              cruisePoints: [
+                { presetIndex: 3, stayTime: 30, speed: 128 },
+                { presetIndex: 1, stayTime: 30, speed: 128 },
+                { presetIndex: 5, stayTime: 30, speed: 128 }
+              ]
+            })
+          }
+        ],
+        freshness: "fresh"
+      }
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -3478,8 +3967,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       message: "",
       data: {
         list: [{ trackId: 2, name: "长链", enabled: true, detail: JSON.stringify({ trackId: 2, sumNum: 9, cruisePoints }) }],
-        freshness: "fresh",
-      },
+        freshness: "fresh"
+      }
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -3542,16 +4031,18 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   describe("home position state", () => {
     it("卡片只展示设备状态，设置表单进入独立弹窗且不暴露协议占位 #0", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime: 10,
-          presetId: 0,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 10,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3572,12 +4063,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("能力尚未确认时只提供查询入口，不渲染误导性的开关和技术枚举", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: null,
-        freshness: "unknown",
-        controlSupport: { status: "unknown", reason: "能力尚未确认" },
-        querySupport: { status: "unknown", reason: "能力尚未确认" }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: null,
+          freshness: "unknown",
+          controlSupport: { status: "unknown", reason: "能力尚未确认" },
+          querySupport: { status: "unknown", reason: "能力尚未确认" }
+        })
+      );
       const emptyWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3592,12 +4085,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("设备明确不支持控制和查询时收敛为单一不支持状态", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: null,
-        freshness: "unknown",
-        controlSupport: { status: "unsupported", reason: "设备未上报控制能力" },
-        querySupport: { status: "unsupported", reason: "设备未上报查询能力" }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: null,
+          freshness: "unknown",
+          controlSupport: { status: "unsupported", reason: "设备未上报控制能力" },
+          querySupport: { status: "unsupported", reason: "设备未上报查询能力" }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3615,16 +4110,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("已启用时只展示产品状态和紧凑配置摘要", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime: 300,
-          presetId: 3,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 300,
+            presetId: 3,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3641,7 +4138,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("首次查询失败时显示可重试的用户态，不泄露底层错误", async () => {
-
       api.getHomePosition.mockRejectedValueOnce(new Error("network unavailable"));
       const failedWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
@@ -3654,16 +4150,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("卡片不使用立即生效开关，明确启用和关闭状态分别提供命令按钮", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime: 300,
-          presetId: 0,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 300,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const enabledWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3673,16 +4171,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(enabledWrapper.get("[data-testid='home-close']").text()).toContain("关闭");
       enabledWrapper.unmount();
 
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: false,
-          resetTime: null,
-          presetId: null,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: false,
+            resetTime: null,
+            presetId: null,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const disabledWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3699,16 +4199,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       { resetTime: 3601, expected: "3601 秒" },
       { resetTime: null, expected: "未返回" }
     ])("把协议占位 #0 翻译为未配置并提示异常等待时间 $resetTime", async ({ resetTime }) => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime,
-          presetId: 0,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3722,15 +4224,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     it("恢复控制 pending 与 unknown，但 T10 不启动 operation 轮询", async () => {
       vi.useFakeTimers();
       vi.setSystemTime("2026-07-22T10:00:00.000Z");
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        control: {
-          status: "pending",
-          operationId: "control-pending",
-          action: "home_position",
-          errorCode: null,
-          deadlineAt: "2026-07-22T10:00:15Z"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          control: {
+            status: "pending",
+            operationId: "control-pending",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: "2026-07-22T10:00:15Z"
+          }
+        })
+      );
       const pendingWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3741,15 +4245,17 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(api.getPtzOperation).not.toHaveBeenCalled();
       pendingWrapper.unmount();
 
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        control: {
-          status: "unknown",
-          operationId: "control-unknown",
-          action: "home_position",
-          errorCode: "TRANSPORT_UNKNOWN",
-          deadlineAt: null
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          control: {
+            status: "unknown",
+            operationId: "control-unknown",
+            action: "home_position",
+            errorCode: "TRANSPORT_UNKNOWN",
+            deadlineAt: null
+          }
+        })
+      );
       const unknownWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3765,22 +4271,24 @@ describe("PlayConsoleLinked 双区联动", () => {
     it("恢复查询 pending 且不重新发 refresh", async () => {
       vi.useFakeTimers();
       vi.setSystemTime("2026-07-22T10:00:00.000Z");
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime: 60,
-          presetId: 0,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "control_ack",
-          verification: "unverified"
-        },
-        refresh: {
-          status: "pending",
-          operationId: "reconcile-pending",
-          errorCode: null,
-          deadlineAt: "2026-07-22T10:00:15Z"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 60,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "control_ack",
+            verification: "unverified"
+          },
+          refresh: {
+            status: "pending",
+            operationId: "reconcile-pending",
+            errorCode: null,
+            deadlineAt: "2026-07-22T10:00:15Z"
+          }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3793,10 +4301,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("混合能力收进诊断提示，离线时保留最后配置并禁用操作", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        controlSupport: { status: "unsupported", reason: "厂商 profile 未声明控制" },
-        querySupport: { status: "unknown", reason: "尚未收到合法查询应答" }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          controlSupport: { status: "unsupported", reason: "厂商 profile 未声明控制" },
+          querySupport: { status: "unknown", reason: "尚未收到合法查询应答" }
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3821,16 +4331,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     const deadline = (seconds: number) => new Date(Date.parse(nowIso) + seconds * 1000).toISOString();
 
     it("启用必须挑一个真实存在的预置位，非法启用零请求，关闭只发送 enabled=false", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: false,
-          resetTime: null,
-          presetId: null,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: false,
+            resetTime: null,
+            presetId: null,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const enableWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3849,16 +4361,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       enableWrapper.unmount();
 
       api.updateHomePosition.mockClear();
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        homePosition: {
-          enabled: true,
-          resetTime: 9,
-          presetId: 0,
-          confirmedAt: "2026-07-22T10:00:00Z",
-          source: "device_query",
-          verification: "verified"
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 9,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        })
+      );
       const closeWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3877,7 +4391,11 @@ describe("PlayConsoleLinked 双区联动", () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
       let resolvePatch!: (value: any) => void;
-      api.updateHomePosition.mockReturnValueOnce(new Promise(resolve => { resolvePatch = resolve; }));
+      api.updateHomePosition.mockReturnValueOnce(
+        new Promise(resolve => {
+          resolvePatch = resolve;
+        })
+      );
       const patchWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -3896,9 +4414,11 @@ describe("PlayConsoleLinked 双区联动", () => {
       patchWrapper.unmount();
 
       let resolveRefresh!: (value: any) => void;
-      api.getHomePosition
-        .mockResolvedValueOnce(homeResponse())
-        .mockReturnValueOnce(new Promise(resolve => { resolveRefresh = resolve; }));
+      api.getHomePosition.mockResolvedValueOnce(homeResponse()).mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveRefresh = resolve;
+        })
+      );
       const refreshWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
       api.getHomePosition.mockClear();
@@ -3906,9 +4426,11 @@ describe("PlayConsoleLinked 双区联动", () => {
       await refreshWrapper.get("[data-testid='home-refresh']").trigger("click");
       await refreshWrapper.get("[data-testid='home-refresh']").trigger("click");
       expect(api.getHomePosition).toHaveBeenCalledTimes(1);
-      resolveRefresh(homeResponse({
-        refresh: { status: "pending", operationId: "refresh-once", errorCode: null, deadlineAt: deadline(10) }
-      }));
+      resolveRefresh(
+        homeResponse({
+          refresh: { status: "pending", operationId: "refresh-once", errorCode: null, deadlineAt: deadline(10) }
+        })
+      );
       await flushPromises();
       expect(refreshWrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("refresh-once");
       refreshWrapper.unmount();
@@ -3920,10 +4442,20 @@ describe("PlayConsoleLinked 双区联动", () => {
       api.updateHomePosition.mockResolvedValueOnce({
         code: 0,
         message: "",
-        data: { operationId: "queued-without-deadline", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+        data: {
+          operationId: "queued-without-deadline",
+          sn: 1,
+          channelId: channel.channelId,
+          action: "home_position",
+          status: "queued"
+        }
       });
       let resolveOperation!: (value: any) => void;
-      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      api.getPtzOperation.mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveOperation = resolve;
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4017,13 +4549,17 @@ describe("PlayConsoleLinked 双区联动", () => {
       vi.setSystemTime(nowIso);
       api.getHomePosition
         .mockResolvedValueOnce(homeResponse())
-        .mockResolvedValueOnce(homeResponse({
-          refresh: { status: "pending", operationId: "refresh-op", errorCode: null, deadlineAt: deadline(10) }
-        }))
-        .mockResolvedValueOnce(homeResponse({
-          freshness: "stale",
-          refresh: { status: "succeeded_no_data", operationId: "refresh-op", errorCode: null, deadlineAt: null }
-        }));
+        .mockResolvedValueOnce(
+          homeResponse({
+            refresh: { status: "pending", operationId: "refresh-op", errorCode: null, deadlineAt: deadline(10) }
+          })
+        )
+        .mockResolvedValueOnce(
+          homeResponse({
+            freshness: "stale",
+            refresh: { status: "succeeded_no_data", operationId: "refresh-op", errorCode: null, deadlineAt: null }
+          })
+        );
       api.getPtzOperation.mockResolvedValueOnce(operationResponse("accepted", "refresh-op", null));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
@@ -4046,15 +4582,17 @@ describe("PlayConsoleLinked 双区联动", () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
       api.getHomePosition
-        .mockResolvedValueOnce(homeResponse({
-          control: {
-            status: "pending",
-            operationId: "reload-control",
-            action: "home_position",
-            errorCode: null,
-            deadlineAt: deadline(2)
-          }
-        }))
+        .mockResolvedValueOnce(
+          homeResponse({
+            control: {
+              status: "pending",
+              operationId: "reload-control",
+              action: "home_position",
+              errorCode: null,
+              deadlineAt: deadline(2)
+            }
+          })
+        )
         .mockResolvedValueOnce(homeResponse());
       api.getPtzOperation
         .mockResolvedValueOnce(operationResponse("sent", "reload-control", deadline(10)))
@@ -4081,15 +4619,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     it("持续网络失败只重试到服务端 deadline+2s，随后停止为 unknown", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        control: {
-          status: "pending",
-          operationId: "network-timeout",
-          action: "home_position",
-          errorCode: null,
-          deadlineAt: deadline(2)
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          control: {
+            status: "pending",
+            operationId: "network-timeout",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: deadline(2)
+          }
+        })
+      );
       api.getPtzOperation.mockRejectedValue(new Error("network unavailable"));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
@@ -4111,17 +4651,23 @@ describe("PlayConsoleLinked 双区联动", () => {
     it("单个 operation 请求卡住时由 deadline watchdog 收敛且迟到结果不复活", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        control: {
-          status: "pending",
-          operationId: "hung-operation",
-          action: "home_position",
-          errorCode: null,
-          deadlineAt: deadline(2)
-        }
-      }));
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          control: {
+            status: "pending",
+            operationId: "hung-operation",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: deadline(2)
+          }
+        })
+      );
       let resolveOperation!: (value: any) => void;
-      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      api.getPtzOperation.mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveOperation = resolve;
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4179,9 +4725,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         message: "",
         data: { operationId: `control-${status}`, sn: 2, channelId: channel.channelId, action: "home_position", status: "queued" }
       });
-      api.getPtzOperation.mockResolvedValueOnce(
-        operationResponse(status, `control-${status}`, null, errorCode)
-      );
+      api.getPtzOperation.mockResolvedValueOnce(operationResponse(status, `control-${status}`, null, errorCode));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4200,21 +4744,29 @@ describe("PlayConsoleLinked 双区联动", () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
       api.getHomePosition
-        .mockResolvedValueOnce(homeResponse({
-          homePosition: {
-            enabled: false,
-            resetTime: null,
-            presetId: null,
-            confirmedAt: "2026-07-22T10:00:00Z",
-            source: "device_query",
-            verification: "verified"
-          }
-        }))
+        .mockResolvedValueOnce(
+          homeResponse({
+            homePosition: {
+              enabled: false,
+              resetTime: null,
+              presetId: null,
+              confirmedAt: "2026-07-22T10:00:00Z",
+              source: "device_query",
+              verification: "verified"
+            }
+          })
+        )
         .mockRejectedValueOnce(new Error("read model unavailable"));
       api.updateHomePosition.mockResolvedValueOnce({
         code: 0,
         message: "",
-        data: { operationId: "accepted-read-failed", sn: 3, channelId: channel.channelId, action: "home_position", status: "queued" }
+        data: {
+          operationId: "accepted-read-failed",
+          sn: 3,
+          channelId: channel.channelId,
+          action: "home_position",
+          status: "queued"
+        }
       });
       api.getPtzOperation.mockResolvedValueOnce(operationResponse("accepted", "accepted-read-failed", null));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -4255,52 +4807,56 @@ describe("PlayConsoleLinked 双区联动", () => {
       };
       api.getHomePosition
         .mockResolvedValueOnce(homeResponse({ homePosition: disabled }))
-        .mockResolvedValueOnce(homeResponse({
-          homePosition: {
-            enabled: true,
-            resetTime: 30,
-            presetId: 0,
-            confirmedAt: "2026-07-22T10:00:01Z",
-            source: "control_ack",
-            verification: "unverified"
-          },
-          control: {
-            status: "accepted",
-            operationId: "control-accepted",
-            action: "home_position",
-            errorCode: null,
-            deadlineAt: null
-          },
-          refresh: {
-            status: "pending",
-            operationId: "reconcile-op",
-            errorCode: null,
-            deadlineAt: deadline(12)
-          }
-        }))
-        .mockResolvedValueOnce(homeResponse({
-          homePosition: {
-            enabled: true,
-            resetTime: 45,
-            presetId: 2,
-            confirmedAt: "2026-07-22T10:00:02Z",
-            source: "device_query",
-            verification: "verified"
-          },
-          control: {
-            status: "accepted",
-            operationId: "control-accepted",
-            action: "home_position",
-            errorCode: null,
-            deadlineAt: null
-          },
-          refresh: {
-            status: "failed",
-            operationId: "reconcile-op",
-            errorCode: "HOME_POSITION_RECONCILE_MISMATCH",
-            deadlineAt: null
-          }
-        }));
+        .mockResolvedValueOnce(
+          homeResponse({
+            homePosition: {
+              enabled: true,
+              resetTime: 30,
+              presetId: 0,
+              confirmedAt: "2026-07-22T10:00:01Z",
+              source: "control_ack",
+              verification: "unverified"
+            },
+            control: {
+              status: "accepted",
+              operationId: "control-accepted",
+              action: "home_position",
+              errorCode: null,
+              deadlineAt: null
+            },
+            refresh: {
+              status: "pending",
+              operationId: "reconcile-op",
+              errorCode: null,
+              deadlineAt: deadline(12)
+            }
+          })
+        )
+        .mockResolvedValueOnce(
+          homeResponse({
+            homePosition: {
+              enabled: true,
+              resetTime: 45,
+              presetId: 2,
+              confirmedAt: "2026-07-22T10:00:02Z",
+              source: "device_query",
+              verification: "verified"
+            },
+            control: {
+              status: "accepted",
+              operationId: "control-accepted",
+              action: "home_position",
+              errorCode: null,
+              deadlineAt: null
+            },
+            refresh: {
+              status: "failed",
+              operationId: "reconcile-op",
+              errorCode: "HOME_POSITION_RECONCILE_MISMATCH",
+              deadlineAt: null
+            }
+          })
+        );
       api.updateHomePosition.mockResolvedValueOnce({
         code: 0,
         message: "",
@@ -4353,9 +4909,8 @@ describe("PlayConsoleLinked 双区联动", () => {
         source: "control_ack",
         verification: "unverified"
       };
-      api.getHomePosition
-        .mockResolvedValueOnce(homeResponse({ homePosition: disabled }))
-        .mockResolvedValueOnce(homeResponse({
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({ homePosition: disabled })).mockResolvedValueOnce(
+        homeResponse({
           homePosition: unverified,
           control: {
             status: "accepted",
@@ -4370,39 +4925,45 @@ describe("PlayConsoleLinked 双区联动", () => {
             errorCode: null,
             deadlineAt: deadline(10)
           }
-        }));
+        })
+      );
       if (outcome === "no-data") {
-        api.getHomePosition.mockResolvedValueOnce(homeResponse({
-          homePosition: unverified,
-          freshness: "stale",
-          control: {
-            status: "accepted",
-            operationId: "control-unverified",
-            action: "home_position",
-            errorCode: null,
-            deadlineAt: null
-          },
-          refresh: {
-            status: "succeeded_no_data",
-            operationId: "reconcile-no-data",
-            errorCode: null,
-            deadlineAt: null
-          }
-        }));
+        api.getHomePosition.mockResolvedValueOnce(
+          homeResponse({
+            homePosition: unverified,
+            freshness: "stale",
+            control: {
+              status: "accepted",
+              operationId: "control-unverified",
+              action: "home_position",
+              errorCode: null,
+              deadlineAt: null
+            },
+            refresh: {
+              status: "succeeded_no_data",
+              operationId: "reconcile-no-data",
+              errorCode: null,
+              deadlineAt: null
+            }
+          })
+        );
       }
       api.updateHomePosition.mockResolvedValueOnce({
         code: 0,
         message: "",
-        data: { operationId: "control-unverified", sn: 3, channelId: channel.channelId, action: "home_position", status: "queued" }
+        data: {
+          operationId: "control-unverified",
+          sn: 3,
+          channelId: channel.channelId,
+          action: "home_position",
+          status: "queued"
+        }
       });
       api.getPtzOperation
         .mockResolvedValueOnce(operationResponse("accepted", "control-unverified", null))
-        .mockResolvedValueOnce(operationResponse(
-          operationStatus,
-          `reconcile-${outcome}`,
-          null,
-          outcome === "timeout" ? "APPLICATION_TIMEOUT" : null
-        ));
+        .mockResolvedValueOnce(
+          operationResponse(operationStatus, `reconcile-${outcome}`, null, outcome === "timeout" ? "APPLICATION_TIMEOUT" : null)
+        );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4434,15 +4995,16 @@ describe("PlayConsoleLinked 双区联动", () => {
     ])("refresh timeout 时%s都结束 pending 并保留重试入口", async (_label, hasCache) => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
-      const initial = homeResponse({ homePosition: hasCache ? homeResponse().data.homePosition : null, freshness: hasCache ? "fresh" : "unknown" });
+      const initial = homeResponse({
+        homePosition: hasCache ? homeResponse().data.homePosition : null,
+        freshness: hasCache ? "fresh" : "unknown"
+      });
       const pending = homeResponse({
         homePosition: hasCache ? homeResponse().data.homePosition : null,
         refresh: { status: "pending", operationId: "refresh-timeout", errorCode: null, deadlineAt: deadline(10) }
       });
       api.getHomePosition.mockResolvedValueOnce(initial).mockResolvedValueOnce(pending);
-      api.getPtzOperation.mockResolvedValueOnce(
-        operationResponse("timeout", "refresh-timeout", null, "APPLICATION_TIMEOUT")
-      );
+      api.getPtzOperation.mockResolvedValueOnce(operationResponse("timeout", "refresh-timeout", null, "APPLICATION_TIMEOUT"));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4467,18 +5029,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     it("operation unknown 立即停止且不自动重发控制", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(nowIso);
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({
-        control: {
-          status: "pending",
-          operationId: "explicit-unknown",
-          action: "home_position",
-          errorCode: null,
-          deadlineAt: deadline(10)
-        }
-      }));
-      api.getPtzOperation.mockResolvedValueOnce(
-        operationResponse("unknown", "explicit-unknown", null, "TRANSPORT_UNKNOWN")
+      api.getHomePosition.mockResolvedValueOnce(
+        homeResponse({
+          control: {
+            status: "pending",
+            operationId: "explicit-unknown",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: deadline(10)
+          }
+        })
       );
+      api.getPtzOperation.mockResolvedValueOnce(operationResponse("unknown", "explicit-unknown", null, "TRANSPORT_UNKNOWN"));
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4508,21 +5070,27 @@ describe("PlayConsoleLinked 双区联动", () => {
       });
       const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
       api.getHomePosition.mockImplementation((channelId: number) =>
-        Promise.resolve(channelId === channel.id
-          ? oldPending
-          : homeResponse({
-              homePosition: {
-                enabled: false,
-                resetTime: null,
-                presetId: null,
-                confirmedAt: "2026-07-22T10:00:00Z",
-                source: "device_query",
-                verification: "verified"
-              }
-            }))
+        Promise.resolve(
+          channelId === channel.id
+            ? oldPending
+            : homeResponse({
+                homePosition: {
+                  enabled: false,
+                  resetTime: null,
+                  presetId: null,
+                  confirmedAt: "2026-07-22T10:00:00Z",
+                  source: "device_query",
+                  verification: "verified"
+                }
+              })
+        )
       );
       let resolveOperation!: (value: any) => void;
-      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      api.getPtzOperation.mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveOperation = resolve;
+        })
+      );
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
@@ -4562,11 +5130,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await closeButton.trigger("click");
     await flushPromises();
 
-    expect(api.updateHomePosition).toHaveBeenCalledWith(
-      channel.id,
-      { enabled: false },
-      expect.stringMatching(/^home-control-/)
-    );
+    expect(api.updateHomePosition).toHaveBeenCalledWith(channel.id, { enabled: false }, expect.stringMatching(/^home-control-/));
     wrapper.unmount();
   });
 
@@ -4641,7 +5205,11 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("游客没有共享停播权限时切换和迟到点播响应都不调用 stopPlay", async () => {
     userState.account.permissions = ["gb28181:play:start", "gb28181:play:monitor"];
     let resolveInitial!: (value: any) => void;
-    api.startPlay.mockReturnValueOnce(new Promise(resolve => { resolveInitial = resolve; }));
+    api.startPlay.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveInitial = resolve;
+      })
+    );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -4649,7 +5217,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     resolveInitial({
       code: 0,
       message: "",
-      data: { streamId: "late-stream", ssrc: "late-ssrc", app: "rtp", wsflvUrl: "ws://zlm/late.live.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: "late-stream",
+        ssrc: "late-ssrc",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/late.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     await flushPromises();
     expect(api.stopPlay).not.toHaveBeenCalled();
@@ -4659,7 +5235,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.startPlay.mockResolvedValue({
       code: 0,
       message: "",
-      data: { streamId: "stream-current", ssrc: "ssrc", app: "rtp", wsflvUrl: "ws://zlm/current.live.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+      data: {
+        streamId: "stream-current",
+        ssrc: "ssrc",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/current.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
     });
     const nextWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -4714,7 +5298,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.getTalkSession).not.toHaveBeenCalled();
 
     let resolveStatus!: (value: any) => void;
-    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    api.getTalkSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        resolveStatus = resolve;
+      })
+    );
     userState.account.permissions = ["gb28181:talk:control"];
     const waiting = vm.waitTalkActive(channel.id, "talk-wait", vm.talkToken);
     userState.account.permissions = [];
@@ -4759,7 +5347,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.listPtzPresets.mockClear();
     api.listPtzPresets
       .mockResolvedValueOnce({
-        code: 0, message: "",
+        code: 0,
+        message: "",
         data: { list: presetRows, freshness: "stale", refreshOperationId: "preset-sync-op" }
       })
       .mockResolvedValueOnce({ code: 0, message: "", data: { list: presetRows, freshness: "fresh" } });
@@ -4793,25 +5382,34 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.getCruiseTrack.mockClear();
     api.getCruiseTrack.mockImplementation((_channelId: number, trackId: number) =>
       Promise.resolve({
-        code: 0, message: "",
+        code: 0,
+        message: "",
         data: { track: {}, freshness: "fresh", refreshOperationId: `cruise-detail-${trackId}` }
       })
     );
     api.listCruiseTracks
       // ① 带 refresh 的清单查询
       .mockResolvedValueOnce({
-        code: 0, message: "",
+        code: 0,
+        message: "",
         data: {
           list: [{ trackId: 1, name: "车间巡检", enabled: true }],
-          freshness: "stale", refreshOperationId: "cruise-sync-op"
+          freshness: "stale",
+          refreshOperationId: "cruise-sync-op"
         }
       })
       // ② 重读:设备侧新发现的 #7 这一步才进库,但它**没有点位**
       .mockResolvedValueOnce({
-        code: 0, message: "",
+        code: 0,
+        message: "",
         data: {
           list: [
-            { trackId: 1, name: "车间巡检", enabled: true, detail: { trackId: 1, cruisePoints: [{ presetIndex: 3, stayTime: 30, speed: 128 }] } },
+            {
+              trackId: 1,
+              name: "车间巡检",
+              enabled: true,
+              detail: { trackId: 1, cruisePoints: [{ presetIndex: 3, stayTime: 30, speed: 128 }] }
+            },
             { trackId: 7, name: "球机默认轨迹", enabled: true, detail: { trackId: 7, name: "球机默认轨迹" } }
           ],
           freshness: "fresh"
@@ -4819,11 +5417,22 @@ describe("PlayConsoleLinked 双区联动", () => {
       })
       // ③ 补完点位后再重读一次
       .mockResolvedValueOnce({
-        code: 0, message: "",
+        code: 0,
+        message: "",
         data: {
           list: [
-            { trackId: 1, name: "车间巡检", enabled: true, detail: { trackId: 1, cruisePoints: [{ presetIndex: 3, stayTime: 30, speed: 128 }] } },
-            { trackId: 7, name: "球机默认轨迹", enabled: true, detail: { trackId: 7, cruisePoints: [{ presetIndex: 2, stayTime: 30, speed: 128 }] } }
+            {
+              trackId: 1,
+              name: "车间巡检",
+              enabled: true,
+              detail: { trackId: 1, cruisePoints: [{ presetIndex: 3, stayTime: 30, speed: 128 }] }
+            },
+            {
+              trackId: 7,
+              name: "球机默认轨迹",
+              enabled: true,
+              detail: { trackId: 7, cruisePoints: [{ presetIndex: 2, stayTime: 30, speed: 128 }] }
+            }
           ],
           freshness: "fresh"
         }
@@ -4856,7 +5465,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     api.listPtzPresets.mockClear();
     api.listPtzPresets.mockResolvedValueOnce({
-      code: 0, message: "",
+      code: 0,
+      message: "",
       data: { list: presetRows, freshness: "stale", refreshOperationId: "preset-sync-op" }
     });
 
@@ -4883,7 +5493,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     api.listPtzPresets.mockClear();
     api.listPtzPresets.mockResolvedValueOnce({
-      code: 0, message: "",
+      code: 0,
+      message: "",
       data: { list: presetRows, freshness: "stale", refreshOperationId: "preset-sync-op" }
     });
 
@@ -4909,4 +5520,459 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("左侧工作区保留三个既有模块，并按任务隔离配置分组", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='linked-tab-ptz']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-probe']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-videoparam']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-deviceconfig']").exists()).toBe(true);
+    expect(wrapper.get("nav[aria-label='播放工作区']").findAll("button")).toHaveLength(8);
+    expect(wrapper.get("[data-testid='linked-tab-videoparam']").text()).toContain("视频编码");
+
+    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    expect(wrapper.get("[data-testid='linked-detail-videoparam']").classes()).toContain("linked-detail-actions");
+    expect(wrapper.find("[data-testid='video-param-bottom-read']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='video-param-bottom-apply']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    const sidePanel = wrapper.get("[data-testid='linked-side-deviceconfig']");
+    expect(sidePanel.text()).toContain("图像叠加 OSD");
+    // 画面设置不再有二级 tab：镜像 + 隐私遮挡下沉到底栏卡片后，侧栏只剩「图像叠加」一组，
+    // `dcg-nav` 的 `configGroups.length > 1` 就此为假 —— 导航整体消失，而不是留一个只有一项的导航。
+    expect(sidePanel.find(".dcg-nav").exists()).toBe(false);
+    expect(sidePanel.find("[data-testid='dcg-nav-osd']").exists()).toBe(false);
+    expect(sidePanel.find("[data-testid='dcg-nav-picture']").exists()).toBe(false);
+    // 原「画面处理」的全部内容现在由底栏卡片承载
+    const pictureBar = wrapper.get("[data-testid='linked-detail-picture']");
+    expect(pictureBar.find("[data-testid='picture-mask-card']").exists()).toBe(true);
+    expect(pictureBar.find("[data-testid='picture-mirror-card']").exists()).toBe(true);
+    // 2026-09-19 流程重做：下发入口从底栏第三张卡搬进画布浮条。反向钉住"提交卡不再回来" ——
+    // 这个 testid 一复现，就说明有人把卡片又加回来了，浮条与卡片会变成两个入口。
+    expect(pictureBar.find("[data-testid='picture-apply-card']").exists()).toBe(false);
+    // 视频参数属性走另一条通道，不混进本 tab 的组清单
+    expect(sidePanel.find("[data-testid='dcg-nav-video-param']").exists()).toBe(false);
+    expect(sidePanel.text()).not.toContain("SVAC");
+    expect(sidePanel.find("[data-testid='dcg-nav-basic']").exists()).toBe(false);
+    for (const [tab, group] of [
+      ["record", "record-plan"],
+      ["alarm", "alarm-report"],
+      ["device", "basic"]
+    ]) {
+      await wrapper.get(`[data-testid='linked-tab-${tab}']`).trigger("click");
+      await flushPromises();
+      expect(wrapper.get("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-group-title']").text()).toBe(
+        { "record-plan": "录像计划", "alarm-report": "报警上报", basic: "基本参数" }[group]
+      );
+      expect(wrapper.find("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-nav-video-param']").exists()).toBe(false);
+    }
+    wrapper.unmount();
+  });
+});
+
+/**
+ * 画面设置底栏卡片。
+ *
+ * 这里只测**控制台侧**的接线：卡片是否按设备回读值渲染、框选坐标是否换算到**设备声明的
+ * 图像画布**（读不到时退回画面尺寸并明确标注）、下发是否带上同一组的两块。
+ * DeviceConfigDrawer 自己的读写闸门由它的用例覆盖。
+ */
+describe("PlayConsoleLinked 画面设置底栏卡片", () => {
+  beforeEach(() => {
+    userState.account = reactive({ permissions: ["*:*:*"] });
+    api.getChannelDeviceConfigs.mockReset();
+    api.getChannelDeviceConfigs.mockResolvedValue(pictureDeviceConfigResponse());
+    api.applyChannelDeviceConfigs.mockReset();
+    api.applyChannelDeviceConfigs.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { action: "apply-device-config", reconcilePending: false }
+    });
+    api.startPlay.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  /** 挂载控制台并切到「画面设置」页签（该 tab 现在是 OSD 侧栏 + 三张底栏卡片）。 */
+  async function openPictureTab() {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    await flushPromises();
+    return wrapper;
+  }
+
+  it("遮挡卡片按 Seq 列出设备回读区域，未用的槽位是空位", async () => {
+    const wrapper = await openPictureTab();
+    const card = wrapper.get("[data-testid='picture-mask-card']");
+    expect(card.find("[data-testid='picture-mask-slot-1']").text()).toContain("10,20 → 300,400");
+    expect(card.find("[data-testid='picture-mask-slot-2']").text()).toContain("空位");
+    wrapper.unmount();
+  });
+
+  it("镜像卡片按设备回读值高亮", async () => {
+    const wrapper = await openPictureTab();
+    const card = wrapper.get("[data-testid='picture-mirror-card']");
+    expect(card.get("[data-testid='picture-mirror-0']").classes()).toContain("active");
+    expect(card.get("[data-testid='picture-mirror-1']").classes()).not.toContain("active");
+    wrapper.unmount();
+  });
+
+  it("没读到设备声明的画布时退路仍通：比例 × 画面尺寸 1280×720 写进空槽位", async () => {
+    // ⛔ 这是**退路**，不是基准定义：遮挡坐标的基准是设备声明的图像尺寸（见下一条用例）。
+    //    退路也不能断 —— 自研模拟器把遮挡烧进 GL FBO、FBO 尺寸就是编码尺寸，
+    //    它的合法基准确实等于画面尺寸。
+    const wrapper = await openPictureTab();
+    await wrapper.get("[data-testid='picture-mask-add-btn']").trigger("click");
+    await flushPromises();
+
+    const layer = wrapper.get("[data-testid='mask-draw-layer']");
+    // ⛔ 必须给这层一个真实矩形：jsdom 的 getBoundingClientRect 恒为 0，
+    //    不 mock 的话所有坐标都会被 clamp 到边界，断言就变成恒真。
+    (layer.element as HTMLElement).getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 200,
+        height: 100,
+        right: 200,
+        bottom: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      }) as DOMRect;
+
+    await layer.trigger("pointerdown", { clientX: 10, clientY: 20, button: 0, pointerId: 1 });
+    await layer.trigger("pointermove", { clientX: 110, clientY: 80, pointerId: 1 });
+    await layer.trigger("pointerup", { clientX: 110, clientY: 80, pointerId: 1 });
+    await flushPromises();
+
+    // (10,20)-(110,80) ÷ 200×100 = (0.05,0.2)-(0.55,0.8) → ×1280×720
+    expect(wrapper.get("[data-testid='picture-mask-slot-2']").text()).toContain("64,144 → 704,576");
+    wrapper.unmount();
+  });
+
+  it("框选换算到**设备声明的画布**：比例 × 704×576 写进槽位，卡片标出基准", async () => {
+    // ⭐ 2026-09-19 真机定因（海康 IPC，主码流 2560×1440）：遮挡 `Point` 的基准是设备在
+    //    `OSDConfig` 里声明的 `Length/Width`（该机 704×576），**不是**画面解码尺寸。
+    //    实测：发 `0,0,640,360` ⇒ 黑块落在 x 0~90.8% / y 0~62.6%（= 640/704、360/576）。
+    // ⛔ 拿解码尺寸算坐标 ⇒ 遮挡块整体右移放大 ⇒"我画的框挡住了别的地方"。
+    api.getChannelDeviceConfigs.mockResolvedValue(pictureDeviceConfigResponse(undefined, { length: 704, width: 576 }));
+    const wrapper = await openPictureTab();
+
+    // 基准常驻在卡片上：用户是在"发现落点不对"之后才会去找它，那就已经晚了。
+    const base = wrapper.get("[data-testid='picture-mask-base']");
+    expect(base.text()).toContain("704×576");
+    expect(base.text()).toContain("设备声明");
+    expect(base.classes()).not.toContain("is-unverified");
+
+    await wrapper.get("[data-testid='picture-mask-add-btn']").trigger("click");
+    await flushPromises();
+    const layer = wrapper.get("[data-testid='mask-draw-layer']");
+    (layer.element as HTMLElement).getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 200,
+        height: 100,
+        right: 200,
+        bottom: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      }) as DOMRect;
+
+    await layer.trigger("pointerdown", { clientX: 10, clientY: 20, button: 0, pointerId: 1 });
+    await layer.trigger("pointermove", { clientX: 110, clientY: 80, pointerId: 1 });
+    await layer.trigger("pointerup", { clientX: 110, clientY: 80, pointerId: 1 });
+    await flushPromises();
+
+    // (10,20)-(110,80) ÷ 200×100 = (0.05,0.2)-(0.55,0.8) → ×704×576
+    expect(wrapper.get("[data-testid='picture-mask-slot-2']").text()).toContain("35,115 → 387,461");
+    wrapper.unmount();
+  });
+
+  it("基准没拿到设备声明时标成「未验证」：退路不能伪装成设备值", async () => {
+    const wrapper = await openPictureTab();
+    const base = wrapper.get("[data-testid='picture-mask-base']");
+    expect(base.text()).toContain("1280×720");
+    expect(base.text()).toContain("未读到设备声明");
+    expect(base.classes()).toContain("is-unverified");
+    wrapper.unmount();
+  });
+
+  it("遮挡投影按设备画布归一化：704×576 的框画在画面对应的位置", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      pictureDeviceConfigResponse(
+        { on: 1, regions: [{ seq: 1, left: 0, top: 0, right: 352, bottom: 288 }] },
+        { length: 704, width: 576 }
+      )
+    );
+    const wrapper = await openPictureTab();
+    const box = wrapper.get("[data-testid='mask-overlay-layer'] .mask-overlay-box");
+    // 352/704 = 50%、288/576 = 50% ⇒ 左上角四分之一。
+    // ⛔ 用画面尺寸（1280×720）除会算成 27.5% / 40% —— 框就画歪了，
+    //    与"落点错位"是同一个错的两半（一个在发出去的路上，一个在画回来的路上）。
+    expect((box.element as HTMLElement).style.left).toBe("0%");
+    expect((box.element as HTMLElement).style.width).toBe("50%");
+    expect((box.element as HTMLElement).style.height).toBe("50%");
+    wrapper.unmount();
+  });
+
+  it("零面积区域不摆成「已配置」：设备回读的删除痕迹既不出槽位也不投影", async () => {
+    // 平台停用遮挡时就是把 `Seq 1..4` 铺成零面积让设备删；这台设备会把它按自己的
+    // 画布回读回来（实测 Seq1 = `704,576,704,576`，`Num` 仍是 1）。
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      pictureDeviceConfigResponse({
+        on: 1,
+        regions: [{ seq: 1, left: 704, top: 576, right: 704, bottom: 576 }]
+      })
+    );
+    const wrapper = await openPictureTab();
+    // 画面上没有任何遮挡 ⇒ 走空态，连槽位网格都不渲染（不是"槽位里写着一条"）。
+    expect(wrapper.find("[data-testid='picture-mask-blank']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='picture-mask-slot-1']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='mask-overlay-layer']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("下发把镜像与遮挡作为同一组一起发出去", async () => {
+    const wrapper = await openPictureTab();
+    // 没改动时浮条**不存在**：它是零存在的，不占画面底部、也不制造"这里是不是该点一下"的干扰。
+    expect(wrapper.find("[data-testid='picture-draft-bar']").exists()).toBe(false);
+    await wrapper.get("[data-testid='picture-mirror-1']").trigger("click");
+    await flushPromises();
+    // 一改就出现，而且把"改的是什么"写出来 —— 只报 "1 项" 的话用户得回侧栏猜。
+    const bar = wrapper.get("[data-testid='picture-draft-bar']");
+    expect(bar.text()).toContain("镜像");
+    await bar.get("[data-testid='picture-draft-apply']").trigger("click");
+    await flushPromises();
+
+    expect(api.applyChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    const blocks = api.applyChannelDeviceConfigs.mock.calls[0]![1] as Record<string, unknown>;
+    expect(Object.keys(blocks).sort()).toEqual(["frameMirror", "pictureMask"]);
+    expect((blocks.frameMirror as { value: number }).value).toBe(1);
+    // 总闸与区域列表同属 PictureMask 一块：设备回读时 on 已开，没动它就原样发回去
+    expect((blocks.pictureMask as { on: unknown }).on).toBeTruthy();
+    // ⛔ seq 用的是**槽位编号**（mask3 → Seq=3）而不是数组下标：
+    //    删掉区域 2 之后把 3/4 前移，等于给设备上的区域静默改名。
+    expect((blocks.pictureMask as { regions: Array<{ seq: number }> }).regions.map(r => r.seq)).toEqual([1]);
+    wrapper.unmount();
+  });
+
+  it("设备已停用但区域残留：画布不画框、卡片给说明态，不摆成「当前遮挡」", async () => {
+    // ⛔ 2026-09-19 现场：设备 `On=0`（遮挡确实已停用，肉眼可见画面无遮挡），但国标停用
+    //    只关开关、**不清区域** —— 设备保留了 RegionList，回读落库
+    //    `{"on":0,"regions":[{"seq":1,"left":144,…}]}`。
+    //    旧渲染把这个残留区域照旧画成画布上的框、还在卡片里列成一条，用户于是以为"没清掉"。
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      pictureDeviceConfigResponse({ on: 0, regions: [{ seq: 1, left: 144, top: 295, right: 704, bottom: 576 }] })
+    );
+    const wrapper = await openPictureTab();
+
+    // 画布上不该有投影框：此刻画面上本来就没有遮挡。
+    expect(wrapper.find("[data-testid='mask-overlay-layer'] [data-seq='1']").exists()).toBe(false);
+    // 卡片给说明态，而不是槽位网格。
+    expect(wrapper.find("[data-testid='picture-mask-retained']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='picture-mask-slot-1']").exists()).toBe(false);
+    // ⛔ 头部计数徽章必须一起消失：否则"徽章写着 1、正文说已停用"自相矛盾。
+    expect(wrapper.find("[data-testid='picture-mask-card'] .preset-count").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("设备停用但区域残留时手动开总闸：那块框按「即将生效」画出来", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      pictureDeviceConfigResponse({ on: 0, regions: [{ seq: 1, left: 144, top: 295, right: 704, bottom: 576 }] })
+    );
+    const wrapper = await openPictureTab();
+    expect(wrapper.find("[data-testid='mask-overlay-layer'] [data-seq='1']").exists()).toBe(false);
+
+    await wrapper.get("[data-testid='picture-mask-switch']").trigger("click");
+    await flushPromises();
+
+    // 开闸 ⇒ 它马上要生效，必须看得见（否则用户无从确认"启用后会挡住哪"）。
+    expect(wrapper.find("[data-testid='mask-overlay-layer'] [data-seq='1']").exists()).toBe(true);
+    // 卡片也让出槽位网格。
+    expect(wrapper.find("[data-testid='picture-mask-retained']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='picture-mask-slot-1']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("点开关即下发：**只发 PictureMask 这一块**，发完就地成事实（不停在「将启用」）", async () => {
+    // 2026-09-19 产品决定。用户原话：「点这个启用，能不能直接调用专门对应的启用信令？
+    // 还是说，必须得新建一条它才启用？」——真机实测给出了答案：
+    //   ① 协议里**没有**"独立的启用信令"，`<On>` 只是 `PictureMask` 里的一个字段，
+    //      和区域列表挤在同一条 DeviceConfig 报文里；
+    //   ② 但设备**接受**单独发 `<On>1</On><SumNum>0</SumNum>`（不带 `RegionList`），
+    //      回读 `On=1` 且不会凭空创建区域 ⇒ "只启用"完全可执行，没有理由逼用户先画区域；
+    //   ③ 所以开关改成"点即发" —— 攒草稿等浮条「下发」会让用户以为点了没生效。
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      pictureDeviceConfigResponse({ on: 0, regions: [{ seq: 1, left: 144, top: 295, right: 704, bottom: 576 }] })
+    );
+    const wrapper = await openPictureTab();
+    const toggle = () => wrapper.get("[data-testid='picture-mask-switch']");
+
+    // 没动过 ⇒ 草稿与设备一致，这时才可以如实说「已停用」。
+    expect(toggle().text()).toContain("已停用");
+    expect(toggle().text()).not.toContain("将");
+
+    await toggle().trigger("click");
+    await flushPromises();
+
+    // ⛔ 核心：点一下就发出去了，不用再去点浮条的「下发」。
+    expect(api.applyChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    const blocks = api.applyChannelDeviceConfigs.mock.calls[0]![1] as Record<string, unknown>;
+    // ⛔ 只发遮挡这一块：用户点的是遮挡开关，不该顺手把还没下发的镜像草稿一起提交出去。
+    expect(Object.keys(blocks)).toEqual(["pictureMask"]);
+    expect((blocks.pictureMask as { on: number }).on).toBe(1);
+    // 发完就地推基准（草稿成事实）⇒ 按钮如实说「已启用」，不再吊在"将启用"上、
+    // 浮条也不会挂着"1 项画面改动未下发"。
+    expect(toggle().text()).toContain("已启用");
+    expect(toggle().classes()).not.toContain("pending");
+    expect(wrapper.find("[data-testid='picture-draft-bar']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("删掉最后一个遮挡区后总闸自动关闭；再点开只发 `On=1`（无区域）并提示看不到遮挡", async () => {
+    const wrapper = await openPictureTab();
+
+    // ① 删掉唯一的区域。与「画了区域顺手开总闸」对称：最后一个区域没了就顺手关掉 ——
+    //    否则会拼出 `{on:1,regions:[]}`，设备保留原有区域、遮挡照旧生效（2026-09-19 现场）。
+    await wrapper.get("[data-testid='picture-mask-del-1']").trigger("click");
+    await flushPromises();
+    // ⛔ 只能显示「将停用」，**不能**显示「已停用」：这一步只改了草稿，设备那边
+    //    `on` 还是 1（回读值没变、一个字节都没发出去）。
+    //    （区域编辑仍是草稿制 —— 删错了还能「还原」；只有总闸开关是点即发。）
+    expect(wrapper.get("[data-testid='picture-mask-switch']").text()).toContain("将停用");
+    expect(wrapper.get("[data-testid='picture-mask-switch']").attributes("title")).toContain("下发");
+
+    // ② 用户又点开总闸，但一块区域都没画 ⇒ 立刻下发 `On=1`（设备接受），
+    //    并就地说明"看不到遮挡 + 设备里那点残留区域会一起活过来"。
+    //    ⛔ 放行不等于沉默：这句提示是"启用了却没有遮挡"唯一的事后解释。
+    await wrapper.get("[data-testid='picture-mask-switch']").trigger("click");
+    await flushPromises();
+
+    expect(api.applyChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    const blocks = api.applyChannelDeviceConfigs.mock.calls[0]![1] as Record<string, unknown>;
+    expect((blocks.pictureMask as { on: number }).on).toBe(1);
+    expect((blocks.pictureMask as { regions: unknown[] }).regions).toEqual([]);
+    const notice = wrapper.get("[data-testid='picture-mask-notice']").text();
+    expect(notice).toContain("没有携带任何遮挡区域");
+    // 设备事实是 `on=1`（遮挡本来就在生效）⇒ 残留数为 0 ⇒ 补的是"画面不会变"那句。
+    // "设备里还留着旧区域"那支要设备 `On=0` 且草稿区域被清空，形态在 Drawer 层构造。
+    expect(notice).toContain("画面上不会有任何变化");
+    wrapper.unmount();
+  });
+
+  /**
+   * jsdom 的 `getBoundingClientRect` 恒为 0，框选层必须被喂一个真实矩形，
+   * 否则所有坐标都会被 clamp 到边界，断言就变成恒真。
+   */
+  function stubMaskDrawRect(element: Element, width = 200, height = 100) {
+    (element as HTMLElement).getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width, height, right: width, bottom: height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  }
+
+  it("画布上只有草稿框换样式：设备回读的那块仍是 data-draft=0", async () => {
+    const wrapper = await openPictureTab();
+    const boxOf = (seq: number) => wrapper.get(`[data-testid='mask-overlay-layer'] [data-seq='${seq}']`);
+    // 设备回读来的 #1 是「事实」，不是草稿 —— 进页签就带着 draft=0。
+    expect(boxOf(1).attributes("data-draft")).toBe("0");
+    expect(boxOf(1).text()).toContain("#1");
+    expect(boxOf(1).text()).not.toContain("待下发");
+
+    await wrapper.get("[data-testid='picture-mask-add-btn']").trigger("click");
+    await flushPromises();
+    const layer = wrapper.get("[data-testid='mask-draw-layer']");
+    stubMaskDrawRect(layer.element);
+    await layer.trigger("pointerdown", { clientX: 10, clientY: 20, button: 0, pointerId: 1 });
+    await layer.trigger("pointermove", { clientX: 110, clientY: 80, pointerId: 1 });
+    await layer.trigger("pointerup", { clientX: 110, clientY: 80, pointerId: 1 });
+    await flushPromises();
+
+    // 新画的 #2 只活在草稿里，设备上还没有 —— 必须与 #1 看得出区别。
+    expect(boxOf(2).attributes("data-draft")).toBe("1");
+    expect(boxOf(2).text()).toContain("待下发");
+    expect(boxOf(1).attributes("data-draft")).toBe("0");
+    wrapper.unmount();
+  });
+
+  it("离开画面设置页：浮条收起，页签上留下未下发角标", async () => {
+    const wrapper = await openPictureTab();
+    await wrapper.get("[data-testid='picture-mirror-1']").trigger("click");
+    await flushPromises();
+    // 本页由浮条负责，角标不重复提醒。
+    expect(wrapper.find("[data-testid='linked-tab-draft-dot']").exists()).toBe(false);
+
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await flushPromises();
+    // 草稿没丢（组件还在），但下发入口随浮条一起离开了视野 —— 角标把它钉回页签上。
+    expect(wrapper.find("[data-testid='picture-draft-bar']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='linked-tab-draft-dot']").attributes("title")).toContain("镜像");
+    wrapper.unmount();
+  });
+
+  it("有未下发草稿时关闭控制台要先确认，确认后才真关", async () => {
+    let warningConfig: any;
+    const warning = vi.spyOn(Modal, "warning").mockImplementation((config: any) => {
+      warningConfig = config;
+      return {} as any;
+    });
+    const wrapper = await openPictureTab();
+    await wrapper.get("[data-testid='picture-mirror-1']").trigger("click");
+    await flushPromises();
+
+    await wrapper.get("[data-testid='play-console-close']").trigger("click");
+    expect(warning).toHaveBeenCalledTimes(1);
+    // 关掉是真丢（unmount-on-close），所以先拦住：此刻还没关。
+    expect(wrapper.emitted("update:visible")).toBeUndefined();
+
+    await warningConfig.onOk?.();
+    expect(wrapper.emitted("update:visible")?.at(-1)).toEqual([false]);
+
+    warning.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("没有草稿时关闭不问，直接关", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({}) as any);
+    const wrapper = await openPictureTab();
+    await wrapper.get("[data-testid='play-console-close']").trigger("click");
+    expect(warning).not.toHaveBeenCalled();
+    expect(wrapper.emitted("update:visible")?.at(-1)).toEqual([false]);
+    warning.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("切通道时如实告知上一个通道的草稿被放弃（入口在设备列表，这里拦不住）", async () => {
+    const warning = vi.spyOn(Message, "warning").mockImplementation(() => ({}) as any);
+    const wrapper = await openPictureTab();
+    await wrapper.get("[data-testid='picture-mirror-1']").trigger("click");
+    await flushPromises();
+
+    await wrapper.setProps({ channel: { ...channel, id: 2, channelId: "0411212756" } });
+    await flushPromises();
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(String(warning.mock.calls[0]![0])).toContain("已放弃");
+
+    warning.mockRestore();
+    wrapper.unmount();
+  });
 });

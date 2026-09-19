@@ -405,6 +405,50 @@ func TestBuildScheduledPTZBodyRecordUsesOperationProfileStreamNumber(t *testing.
 	}
 }
 
+// ⛔ 回归锚点（2026-09-19 真机验证发现）：`VideoParamAttribute`（A-5）与配置族共用
+// `CmdType=DeviceConfig`，重建时**只能按 Action 分流**。曾经只看 CmdType，把所有配置族
+// 下发都重建成 `<VideoParamAttribute Num="0">`（一块配置都没有），而设备照回 `Result=OK`、
+// 平台回读只表现为 `mismatch` —— 遮挡 / 镜像 / OSD / 基本参数 / 录像计划 / 报警上报**整族失效**，
+// 且症状酷似"设备没照做"。
+func TestBuildScheduledPTZBodyDeviceConfigSplitsByAction(t *testing.T) {
+	apply := gbmodels.GbPTZOperation{
+		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+		CmdType: manscdp.CmdDeviceConfig, Action: ActionApplyDeviceConfig,
+		ProfileVersion: string(protocol.Version2022), SN: 795,
+		PayloadJSON: `{"configTypes":["PictureMask"],"blocks":{"pictureMask":{"on":1,` +
+			`"regions":[{"seq":1,"left":10,"top":10,"right":100,"bottom":100}]}}}`,
+	}
+	body, err := buildScheduledPTZBody(apply)
+	require.NoError(t, err)
+	text := string(body)
+	require.Contains(t, text, "<PictureMask>", "配置族下发必须发自己的块: %s", text)
+	require.Contains(t, text, "<On>1</On>", text)
+	require.Contains(t, text, "<Seq>1</Seq>", text)
+	require.Contains(t, text, "<Point>10,10,100,100</Point>", text)
+	require.NotContains(t, text, "VideoParamAttribute", "别把配置族重建成 A-5 的报文: %s", text)
+
+	// A-5 自己那一路不能被这次改动带走。
+	videoParam := gbmodels.GbPTZOperation{
+		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+		CmdType: manscdp.CmdDeviceConfig, Action: actionApplyVideoParams,
+		ProfileVersion: string(protocol.Version2022), SN: 796,
+		PayloadJSON: `{"items":[{"streamNumber":0,"videoFormat":"2",` +
+			`"resolution":"5","frameRate":"25","bitRateType":"1","videoBitRate":"2048"}]}`,
+	}
+	body, err = buildScheduledPTZBody(videoParam)
+	require.NoError(t, err)
+	text = string(body)
+	require.Contains(t, text, "<VideoParamAttribute", text)
+	require.Contains(t, text, `<VideoParamAttribute Num="1">`, text)
+	require.Contains(t, text, "<Resolution>5</Resolution>", text)
+
+	// 配置族形态却缺 blocks：**必须报错，不许发空块** —— 发空块会让故障又变成"设备没照做"。
+	broken := apply
+	broken.PayloadJSON = `{"configTypes":["PictureMask"]}`
+	_, err = buildScheduledPTZBody(broken)
+	require.Error(t, err)
+}
+
 func TestBuildScheduledPTZBodyUsesPersistedProfileCharset(t *testing.T) {
 	operation := gbmodels.GbPTZOperation{
 		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",

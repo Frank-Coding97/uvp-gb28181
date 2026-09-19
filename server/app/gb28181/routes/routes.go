@@ -880,6 +880,12 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			// ⛔ 两者同路径不同方法,权限也分档:读 gb28181:ptz:view、写 gb28181:ptz:control。
 			dmgmt.GET("/channel/:id/video-params", deviceMgmtController.GetChannelVideoParams)
 			dmgmt.POST("/channel/:id/video-params", deviceMgmtController.ApplyChannelVideoParams)
+			// 配置家族(GB/T 28181 A.2.1.12/15/16/17/19/23 等):读走 ConfigDownload,写走 DeviceConfig。
+			// ⛔ 与 video-params 是**两条独立链路**(各有一张落库表、各有对账粒度),所以路径也分开:
+			// 把它们合成一条会让"视频参数按码流分行"与"其余按类型整块"两种粒度互相污染。
+			// 权限分档与 video-params 一致:读 gb28181:ptz:view、写 gb28181:ptz:control。
+			dmgmt.GET("/channel/:id/device-configs", deviceMgmtController.GetChannelDeviceConfigs)
+			dmgmt.POST("/channel/:id/device-configs", deviceMgmtController.ApplyChannelDeviceConfigs)
 			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
 			dmgmt.POST(gbcontrollers.TalkCreateRoute, func(c *gin.Context) { talkController.Load().Create(c) })
 			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Get(c) })

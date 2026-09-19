@@ -24,6 +24,12 @@ const (
 	// 表示"设备已接受命令，但回读值与下发值不一致"。⛔ 它不是失败：
 	// 典型来源是手机的摄像头能力边界（下发 1080P、实际 720P），设备没做错。
 	ptzErrorVideoParamReconcileMismatch = "VIDEO_PARAM_RECONCILE_MISMATCH"
+	// ptzErrorDeviceConfigReconcileMismatch 是**配置家族**（通用容器）的对账不一致码。
+	//
+	// ⭐ 为什么不复用上面那个：`error_code` 是会被持久化、被前端按值判断的**对外标识**，
+	// 拿 "VIDEO_PARAM" 去描述 OSD / 遮挡 / 录像计划的不一致，后面排障的人会先去找
+	// 视频参数的表。两者语义相同、标识分开，由 [isReconcileMismatchCode] 统一识别。
+	ptzErrorDeviceConfigReconcileMismatch = "DEVICE_CONFIG_RECONCILE_MISMATCH"
 
 	videoParamReconcileAttempts = 3
 )
@@ -509,7 +515,7 @@ func DeriveVideoParamReconcileState(latest *gbmodels.GbPTZOperation) VideoParamR
 		state.State = VideoParamStateFailed
 	case gbmodels.PTZOperationAccepted:
 		switch {
-		case latest.ErrorCode == ptzErrorVideoParamReconcileMismatch:
+		case isReconcileMismatchCode(latest.ErrorCode):
 			state.State = VideoParamStateMismatch
 		case latest.ResponseHasData != nil && !*latest.ResponseHasData:
 			state.State = VideoParamStateTypeAbsent

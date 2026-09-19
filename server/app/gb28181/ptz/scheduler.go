@@ -356,6 +356,11 @@ func (s *Scheduler) runDue(ctx context.Context, now time.Time) error {
 	if err := s.service.cleanupQueryStages(ctx, now); err != nil {
 		return err
 	}
+	// 配置读取的静止收敛：设备少回几条时不能干等到 transport deadline,
+	// 否则"设备不支持这些类型"（正确的 type_absent 结论）会被误报成超时。
+	if err := s.service.settleConfigReadStages(ctx, now); err != nil {
+		return err
+	}
 	return s.claimDue(ctx, now)
 }
 
@@ -764,6 +769,27 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		}
 		return manscdp.BuildConfigDownloadQueryWithProfile(profile, targetCode, operation.SN, payload.ConfigTypes)
 	case manscdp.CmdDeviceConfig:
+		// ⛔ `VideoParamAttribute`（A-5）与配置族共用 `CmdType=DeviceConfig`，所以这里
+		// **必须按 Action 分流**，只看 CmdType 会把两者混成一件事。
+		//
+		// 只看 CmdType 的历史后果（2026-09-19 真机验证发现，已提交的回归）：配置族的
+		// 下发全部被重建成 A-5 的报文 `<VideoParamAttribute Num="0">`（payload 里没有
+		// `items`，Items 为 nil），**一块配置都发不出去**；设备照回 `Result=OK`，平台回读
+		// 只表现为 `mismatch` —— 症状酷似"设备没照做"，归因成本极高。
+		if operation.Action == actionApplyDeviceConfig {
+			var payload struct {
+				Blocks manscdp.DeviceConfigBlocks `json:"blocks"`
+			}
+			if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+				return nil, err
+			}
+			// 重建必须能复现"构建"：payload 里没有配置块就说明这条 operation 不是配置族
+			// 下发的形态，**报错而不是发一个空块** —— 发空块会让故障变成"设备没照做"。
+			if payload.Blocks.IsEmpty() {
+				return nil, errors.New("设备配置下发无法重建:operation payload 缺少 blocks")
+			}
+			return manscdp.BuildDeviceConfigBlocksWithProfile(profile, targetCode, operation.SN, payload.Blocks)
+		}
 		var payload struct {
 			Items []manscdp.VideoParamItem `json:"items"`
 		}
