@@ -3,9 +3,11 @@ package controllers
 import (
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
+
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
@@ -191,9 +193,58 @@ func deviceStatusResponse(channelCode string, resolution catalog.AlarmTargetReso
 			"status": resolution.Status, "source": resolution.Source, "targetCode": alarmTargetCode,
 			"state": guardState, "freshness": alarmFact.Freshness, "candidates": candidates,
 		},
+		"deviceReport":       deviceReportView(recordFact),
 		"alarmFacts":         alarmFactViews,
 		"refreshOperationId": nil, "recordRefreshOperationId": nil, "alarmRefreshOperationId": nil,
 	}
+}
+
+// deviceReportView 暴露设备在 DeviceStatus 应答里自报的事实。
+//
+// 每一项都可能是 null —— 那表示"设备这次没有上报这一项"，与 false / 0 不是一回事：
+// alarmInputCount 为 0 是**设备明确声明自己没有报警输入**，null 才是"设备没提"。
+// 前端必须照着 null 显示"未上报"，不要兜底成关闭。
+func deviceReportView(fact deviceControlFact) gin.H {
+	view := gin.H{
+		"online": nil, "selfTest": nil, "encode": nil,
+		"deviceTime": nil, "clockSkewSeconds": nil, "alarmInputCount": nil,
+		"observedAt": nil,
+	}
+	if !fact.Found {
+		return view
+	}
+	state := fact.State
+	if state.OnlineState != nil {
+		view["online"] = *state.OnlineState
+	}
+	if state.SelfTestState != nil {
+		view["selfTest"] = *state.SelfTestState
+	}
+	if state.EncodeState != nil {
+		view["encode"] = *state.EncodeState
+	}
+	if state.DeviceTime != nil {
+		view["deviceTime"] = state.DeviceTime
+		view["clockSkewSeconds"] = deviceClockSkewSeconds(state)
+	}
+	if state.AlarmInputCount != nil {
+		view["alarmInputCount"] = *state.AlarmInputCount
+	}
+	if !state.ObservedAt.IsZero() {
+		view["observedAt"] = state.ObservedAt
+	}
+	return view
+}
+
+// deviceClockSkewSeconds = 平台观测时刻 − 设备自报时刻，四舍五入到秒。
+// 设备自报时间只精确到秒，所以这个差值自带约 1 秒的量化误差，只适合回答
+// "设备时间是不是差了几分钟/几小时"，别拿去当毫秒级结论。
+func deviceClockSkewSeconds(state gbmodels.GbDeviceControlState) *int64 {
+	if state.DeviceTime == nil || state.ObservedAt.IsZero() {
+		return nil
+	}
+	skew := int64(math.Round(state.ObservedAt.Sub(*state.DeviceTime).Seconds()))
+	return &skew
 }
 
 func combineDeviceStatusFreshness(record, alarm string, alarmResolved bool) string {
@@ -210,7 +261,17 @@ func deviceStatusCompleteness(recordFact, alarmFact deviceControlFact, resolutio
 	if recordFact.Found && resolution.Status == catalog.AlarmTargetResolved && alarmFact.Found {
 		return "complete"
 	}
+	// 设备明确回了 Alarmstatus Num="0"（自己没有报警输入），目录里也确实解析不到报警目标 ——
+	// 这种情况下「报警事实」本来就是个空集，再报 partial 等于把"设备没有这个能力"
+	// 说成"平台没收到"，用户会一直以为还有东西没查到。
+	if recordFact.Found && resolution.Status == catalog.AlarmTargetUnavailable && declaresNoAlarmInputs(recordFact) {
+		return "complete"
+	}
 	return "partial"
+}
+
+func declaresNoAlarmInputs(fact deviceControlFact) bool {
+	return fact.State.AlarmInputCount != nil && *fact.State.AlarmInputCount == 0
 }
 
 func scopedDeviceStatusKey(base, scope string) string {

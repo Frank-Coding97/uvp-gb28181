@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
@@ -28,6 +29,25 @@ const (
 	DutyStatusUnknown DutyStatus = "UNKNOWN"
 )
 
+// DeviceOnlineState 是设备自报在线状态（<Online>）规范化后的取值。
+type DeviceOnlineState string
+
+const (
+	DeviceOnlineStateOnline  DeviceOnlineState = "online"
+	DeviceOnlineStateOffline DeviceOnlineState = "offline"
+	DeviceOnlineStateUnknown DeviceOnlineState = "unknown"
+)
+
+// DeviceSelfTestState 是设备自检结果（<Status>）规范化后的取值。
+// 未识别的原文一律归入 unknown，不做臆测。
+type DeviceSelfTestState string
+
+const (
+	DeviceSelfTestOK      DeviceSelfTestState = "ok"
+	DeviceSelfTestError   DeviceSelfTestState = "error"
+	DeviceSelfTestUnknown DeviceSelfTestState = "unknown"
+)
+
 type DeviceStatusExpectation struct {
 	SN       int
 	DeviceID string
@@ -45,8 +65,17 @@ type DeviceStatus struct {
 	DeviceID   string
 	Result     string
 	Record     ControlState
-	AlarmNum   int
-	AlarmItems []DeviceStatusAlarmItem
+	Encode     ControlState
+	Online     DeviceOnlineState
+	SelfTest   DeviceSelfTestState
+	DeviceTime string
+	// AlarmNumKnown 为 true 表示设备在应答里明确给出了报警输入数量。
+	// 它必须与 AlarmNum 分开看：已知的 0（设备声明自己没有报警输入）和
+	// "设备什么都没说"是两种不同的事实，混成一个 0 会让"没有报警能力"
+	// 这件事永远停留在未知。
+	AlarmNumKnown bool
+	AlarmNum      int
+	AlarmItems    []DeviceStatusAlarmItem
 }
 
 type DeviceStatusErrorCode string
@@ -83,7 +112,11 @@ type deviceStatusWire struct {
 	SN          int                   `xml:"SN"`
 	DeviceID    string                `xml:"DeviceID"`
 	Result      string                `xml:"Result"`
+	Online      string                `xml:"Online"`
+	Status      string                `xml:"Status"`
+	Encode      string                `xml:"Encode"`
 	Record      string                `xml:"Record"`
+	DeviceTime  string                `xml:"DeviceTime"`
 	Alarmstatus *deviceStatusListWire `xml:"Alarmstatus"`
 	AlarmStatus *deviceStatusListWire `xml:"AlarmStatus"`
 }
@@ -91,6 +124,7 @@ type deviceStatusWire struct {
 type deviceStatusListWire struct {
 	NumLower string                 `xml:"num,attr"`
 	NumUpper string                 `xml:"Num,attr"`
+	NumText  string                 `xml:"Num"`
 	Items    []deviceStatusItemWire `xml:"Item"`
 }
 
@@ -132,22 +166,20 @@ func ParseDeviceStatusResponse(body []byte) (DeviceStatus, error) {
 		return DeviceStatus{}, &DeviceStatusParseError{Code: DeviceStatusErrorResult, Msg: fmt.Sprintf("got %q", wire.Result)}
 	}
 	status := DeviceStatus{
-		CmdType:  wire.CmdType,
-		SN:       wire.SN,
-		DeviceID: strings.TrimSpace(wire.DeviceID),
-		Result:   result,
-		Record:   parseControlState(wire.Record),
+		CmdType:    wire.CmdType,
+		SN:         wire.SN,
+		DeviceID:   strings.TrimSpace(wire.DeviceID),
+		Result:     result,
+		Record:     parseControlState(wire.Record),
+		Encode:     parseControlState(wire.Encode),
+		Online:     parseOnlineState(wire.Online),
+		SelfTest:   parseSelfTestState(wire.Status),
+		DeviceTime: strings.TrimSpace(wire.DeviceTime),
 	}
+	status.AlarmNumKnown, status.AlarmNum = parseAlarmInputCount(&wire)
 	for _, list := range []*deviceStatusListWire{wire.Alarmstatus, wire.AlarmStatus} {
 		if list == nil {
 			continue
-		}
-		listNum := parseNum(list.NumUpper)
-		if listNum == 0 {
-			listNum = parseNum(list.NumLower)
-		}
-		if listNum > 0 && status.AlarmNum == 0 {
-			status.AlarmNum = listNum
 		}
 		for _, item := range list.Items {
 			num := parseNum(item.NumLower)
@@ -160,6 +192,78 @@ func ParseDeviceStatusResponse(body []byte) (DeviceStatus, error) {
 		}
 	}
 	return status, nil
+}
+
+// parseAlarmInputCount 读设备声明的报警输入数量。
+// 实测两种形态并存：<Alarmstatus Num="0"> 用属性，<Alarmstatus><Num>1</Num> 用子元素，
+// 所以三级都要试。返回值第一项表示"设备到底有没有给出这个数字" —— 设备明确写了 0
+// 与设备整段没写是两回事，不能都塌成 0。
+func parseAlarmInputCount(wire *deviceStatusWire) (bool, int) {
+	for _, list := range []*deviceStatusListWire{wire.Alarmstatus, wire.AlarmStatus} {
+		if list == nil {
+			continue
+		}
+		for _, raw := range []string{list.NumText, list.NumUpper, list.NumLower} {
+			if declared, ok := parseDeclaredCount(raw); ok {
+				return true, declared
+			}
+		}
+		return false, 0
+	}
+	return false, 0
+}
+
+// parseDeclaredCount 与 parseNum 的差别在于 0 是合法取值。
+func parseDeclaredCount(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// ParseDeviceClock 解析应答里的设备时间。报文不带时区，按本地时区解释。
+func ParseDeviceClock(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseOnlineState(value string) DeviceOnlineState {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "ONLINE":
+		return DeviceOnlineStateOnline
+	case "OFFLINE":
+		return DeviceOnlineStateOffline
+	default:
+		return DeviceOnlineStateUnknown
+	}
+}
+
+func parseSelfTestState(value string) DeviceSelfTestState {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "OK":
+		return DeviceSelfTestOK
+	case "ERROR":
+		return DeviceSelfTestError
+	default:
+		return DeviceSelfTestUnknown
+	}
 }
 
 func ParseDeviceStatusResponseFor(body []byte, expectation DeviceStatusExpectation) (DeviceStatus, error) {

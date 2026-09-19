@@ -88,6 +88,16 @@ const (
 	ControlStateUnknown = "unknown"
 )
 
+// 设备自报事实的规范化取值（DeviceStatus 应答里的 Online 与 Status）。
+// 未知/未上报一律不进这两个常量集合 —— 那些情况用列的 NULL 表达。
+const (
+	DeviceOnlineStateOnline  = "online"
+	DeviceOnlineStateOffline = "offline"
+
+	DeviceSelfTestOK    = "ok"
+	DeviceSelfTestError = "error"
+)
+
 type ControlStateFreshness = string
 
 const (
@@ -100,13 +110,22 @@ const (
 // RecordState and GuardState remain unknown until a matching device response
 // is parsed; the row is therefore safe to expose to a UI as a fact cache.
 type GbDeviceControlState struct {
-	ID                 uint                  `gorm:"primaryKey" json:"id"`
-	DeviceID           uint                  `gorm:"column:device_id;not null;index:idx_control_state_device_target,priority:1;uniqueIndex:uk_control_state_target,priority:1" json:"deviceId"`
-	ChannelID          uint                  `gorm:"column:channel_id;not null;default:0;index:idx_control_state_channel" json:"channelId"`
-	TargetScope        string                `gorm:"column:target_scope;size:16;not null;index:idx_control_state_device_target,priority:2;uniqueIndex:uk_control_state_target,priority:2" json:"targetScope"`
-	TargetCode         string                `gorm:"column:target_code;size:20;not null;index:idx_control_state_device_target,priority:3;uniqueIndex:uk_control_state_target,priority:3" json:"targetCode"`
-	RecordState        ControlStateValue     `gorm:"column:record_state;size:8;not null;default:unknown" json:"recordState"`
-	GuardState         ControlStateValue     `gorm:"column:guard_state;size:8;not null;default:unknown" json:"guardState"`
+	ID          uint              `gorm:"primaryKey" json:"id"`
+	DeviceID    uint              `gorm:"column:device_id;not null;index:idx_control_state_device_target,priority:1;uniqueIndex:uk_control_state_target,priority:1" json:"deviceId"`
+	ChannelID   uint              `gorm:"column:channel_id;not null;default:0;index:idx_control_state_channel" json:"channelId"`
+	TargetScope string            `gorm:"column:target_scope;size:16;not null;index:idx_control_state_device_target,priority:2;uniqueIndex:uk_control_state_target,priority:2" json:"targetScope"`
+	TargetCode  string            `gorm:"column:target_code;size:20;not null;index:idx_control_state_device_target,priority:3;uniqueIndex:uk_control_state_target,priority:3" json:"targetCode"`
+	RecordState ControlStateValue `gorm:"column:record_state;size:8;not null;default:unknown" json:"recordState"`
+	GuardState  ControlStateValue `gorm:"column:guard_state;size:8;not null;default:unknown" json:"guardState"`
+	// 以下五列是设备在 DeviceStatus 应答里自报的事实，全部可空。
+	// nil 的意思是"设备这次应答没有这一项"，不是"关"也不是"未知值" —— 它同样不等同于
+	// AlarmInputCount 指向的 0（那是设备明确声明自己没有报警输入）。别在读取处用
+	// valueOrDefault 之类的兜底把它填成默认值。
+	OnlineState        *string               `gorm:"column:online_state;size:8" json:"onlineState,omitempty"`
+	SelfTestState      *string               `gorm:"column:selftest_state;size:16" json:"selfTestState,omitempty"`
+	EncodeState        *string               `gorm:"column:encode_state;size:8" json:"encodeState,omitempty"`
+	DeviceTime         *time.Time            `gorm:"column:device_time" json:"deviceTime,omitempty"`
+	AlarmInputCount    *int                  `gorm:"column:alarm_input_count" json:"alarmInputCount,omitempty"`
 	Freshness          ControlStateFreshness `gorm:"column:freshness;size:8;not null;default:unknown" json:"freshness"`
 	ObservedAt         time.Time             `gorm:"column:observed_at;not null" json:"observedAt"`
 	Source             string                `gorm:"column:source;size:32;not null;default:device_status" json:"source"`

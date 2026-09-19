@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -45,9 +46,18 @@ func (s *Service) persistDeviceStatusWithDB(ctx context.Context, db *gorm.DB, op
 	if recordState == "" {
 		recordState = gbmodels.ControlStateUnknown
 	}
-	if err := s.persistControlStateFact(ctx, db, operation, targetScopeOrChannel(operation), operationTargetCode(operation), operation.ChannelID, map[string]interface{}{
-		"record_state": recordState,
-	}, body); err != nil {
+	// 这一行的 observed_at / source_sn 属于**这一条应答**，所以设备没报的项要显式写 NULL，
+	// 而不是留着上一次的值 —— 否则观测时刻是新的、内容是旧的，读的人无从分辨。
+	// （对照 persistDeviceControlAck：那条路径不碰这五列，自然也不会抹掉它们。）
+	facts := map[string]interface{}{
+		"record_state":      recordState,
+		"online_state":      derefFact(deviceOnlineStateFact(status.Online)),
+		"selftest_state":    derefFact(deviceSelfTestStateFact(status.SelfTest)),
+		"encode_state":      derefFact(deviceEncodeStateFact(status.Encode)),
+		"device_time":       derefFact(deviceClockFact(status.DeviceTime)),
+		"alarm_input_count": derefFact(deviceAlarmInputCountFact(status)),
+	}
+	if err := s.persistControlStateFact(ctx, db, operation, targetScopeOrChannel(operation), operationTargetCode(operation), operation.ChannelID, facts, body); err != nil {
 		return err
 	}
 
@@ -222,4 +232,69 @@ func targetScopeOrChannel(operation gbmodels.GbPTZOperation) string {
 		return strings.TrimSpace(operation.TargetScope)
 	}
 	return gbmodels.ControlTargetScopeChannel
+}
+
+// —— 设备自报事实的翻译层：manscdp 的规范化取值 → 落库列。
+// 返回 nil 表示"设备这次没有上报这一项"，调用处必须原样落成 NULL。
+
+func deviceOnlineStateFact(state manscdp.DeviceOnlineState) *string {
+	switch state {
+	case manscdp.DeviceOnlineStateOnline:
+		return stringPtr(gbmodels.DeviceOnlineStateOnline)
+	case manscdp.DeviceOnlineStateOffline:
+		return stringPtr(gbmodels.DeviceOnlineStateOffline)
+	default:
+		return nil
+	}
+}
+
+func deviceSelfTestStateFact(state manscdp.DeviceSelfTestState) *string {
+	switch state {
+	case manscdp.DeviceSelfTestOK:
+		return stringPtr(gbmodels.DeviceSelfTestOK)
+	case manscdp.DeviceSelfTestError:
+		return stringPtr(gbmodels.DeviceSelfTestError)
+	default:
+		return nil
+	}
+}
+
+func deviceEncodeStateFact(state manscdp.ControlState) *string {
+	switch state {
+	case manscdp.ControlStateOn:
+		return stringPtr(gbmodels.ControlStateOn)
+	case manscdp.ControlStateOff:
+		return stringPtr(gbmodels.ControlStateOff)
+	default:
+		return nil
+	}
+}
+
+func deviceClockFact(value string) *time.Time {
+	parsed, ok := manscdp.ParseDeviceClock(value)
+	if !ok {
+		return nil
+	}
+	return &parsed
+}
+
+// deviceAlarmInputCountFact 只在设备真的给出了数量时才落库。
+// 已知的 0（设备声明自己一个报警输入都没有）与"设备整段没提"必须落成 0 与 NULL 两个不同的值。
+func deviceAlarmInputCountFact(status manscdp.DeviceStatus) *int {
+	if !status.AlarmNumKnown {
+		return nil
+	}
+	count := status.AlarmNum
+	return &count
+}
+
+func stringPtr(value string) *string { return &value }
+
+// derefFact 把可空的翻译结果摊平成写库用的 interface{}。nil 原样传下去，
+// gorm 的 Updates(map) 会把它写成 NULL；绝不能在这里兜底成默认值。
+func derefFact[T any](value *T) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
 }

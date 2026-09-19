@@ -159,3 +159,110 @@ func TestFindPTZMessageOperationExcludesTerminalDeviceStatus(t *testing.T) {
 	require.False(t, matched)
 	require.Equal(t, "no_candidate", reason)
 }
+
+func loadDeviceStatusFact(t *testing.T, db *gorm.DB, deviceID uint, scope, targetCode string) gbmodels.GbDeviceControlState {
+	t.Helper()
+	var state gbmodels.GbDeviceControlState
+	require.NoError(t, db.Where("device_id = ? AND target_scope = ? AND target_code = ?", deviceID, scope, targetCode).First(&state).Error)
+	return state
+}
+
+// 设备在应答里报的四项事实必须真的落库 —— 这正是它们此前被解析器丢掉的地方。
+func TestPersistDeviceStatusStoresDeviceReportedFacts(t *testing.T) {
+	service, db := newDeviceStatusTestService(t)
+	operation := createDeviceStatusOperation(t, db, "facts-op", 1, 11, "C")
+
+	require.NoError(t, service.persistDeviceStatus(context.Background(), operation, manscdp.DeviceStatus{
+		Record:        manscdp.ControlStateOn,
+		Encode:        manscdp.ControlStateOn,
+		Online:        manscdp.DeviceOnlineStateOnline,
+		SelfTest:      manscdp.DeviceSelfTestOK,
+		DeviceTime:    "2026-09-19T20:03:58",
+		AlarmNumKnown: true,
+		AlarmNum:      0,
+	}, []byte("facts")))
+
+	state := loadDeviceStatusFact(t, db, 1, gbmodels.ControlTargetScopeChannel, "C")
+	require.NotNil(t, state.OnlineState)
+	require.Equal(t, gbmodels.DeviceOnlineStateOnline, *state.OnlineState)
+	require.NotNil(t, state.SelfTestState)
+	require.Equal(t, gbmodels.DeviceSelfTestOK, *state.SelfTestState)
+	require.NotNil(t, state.EncodeState)
+	require.Equal(t, gbmodels.ControlStateOn, *state.EncodeState)
+	require.NotNil(t, state.DeviceTime)
+	require.Equal(t, 20, state.DeviceTime.Hour())
+	require.NotNil(t, state.AlarmInputCount, "设备明确给了数量就必须落库")
+	require.Zero(t, *state.AlarmInputCount, "设备声明的 0 个报警输入要落成 0,不是 NULL")
+}
+
+func TestPersistDeviceStatusStoresOfflineAndErrorFacts(t *testing.T) {
+	service, db := newDeviceStatusTestService(t)
+	operation := createDeviceStatusOperation(t, db, "facts-offline", 1, 11, "C")
+
+	require.NoError(t, service.persistDeviceStatus(context.Background(), operation, manscdp.DeviceStatus{
+		Record:   manscdp.ControlStateOff,
+		Encode:   manscdp.ControlStateOff,
+		Online:   manscdp.DeviceOnlineStateOffline,
+		SelfTest: manscdp.DeviceSelfTestError,
+	}, []byte("offline")))
+
+	state := loadDeviceStatusFact(t, db, 1, gbmodels.ControlTargetScopeChannel, "C")
+	require.Equal(t, gbmodels.DeviceOnlineStateOffline, *state.OnlineState)
+	require.Equal(t, gbmodels.DeviceSelfTestError, *state.SelfTestState)
+	require.Equal(t, gbmodels.ControlStateOff, *state.EncodeState)
+}
+
+// 「设备没提」不能沿用上一条应答的值：这一行的 observed_at 已经换成了新应答的时刻，
+// 内容却是旧的，读的人分不出来。
+func TestPersistDeviceStatusClearsFactsTheDeviceDidNotReport(t *testing.T) {
+	service, db := newDeviceStatusTestService(t)
+	ctx := context.Background()
+
+	first := createDeviceStatusOperation(t, db, "facts-first", 1, 11, "C")
+	require.NoError(t, service.persistDeviceStatus(ctx, first, manscdp.DeviceStatus{
+		Record:        manscdp.ControlStateOn,
+		Online:        manscdp.DeviceOnlineStateOnline,
+		SelfTest:      manscdp.DeviceSelfTestOK,
+		Encode:        manscdp.ControlStateOn,
+		DeviceTime:    "2026-09-19T20:03:58",
+		AlarmNumKnown: true,
+		AlarmNum:      0,
+	}, []byte("first")))
+
+	second := createDeviceStatusOperation(t, db, "facts-second", 1, 11, "C")
+	require.NoError(t, service.persistDeviceStatus(ctx, second, manscdp.DeviceStatus{
+		Record: manscdp.ControlStateOff,
+	}, []byte("second")))
+
+	state := loadDeviceStatusFact(t, db, 1, gbmodels.ControlTargetScopeChannel, "C")
+	require.Equal(t, gbmodels.ControlStateOff, state.RecordState)
+	require.Nil(t, state.OnlineState, "新应答没报在线状态,列要回到 NULL")
+	require.Nil(t, state.SelfTestState)
+	require.Nil(t, state.EncodeState)
+	require.Nil(t, state.DeviceTime)
+	require.Nil(t, state.AlarmInputCount, "设备没提报警输入数时不得沿用上一条的 0")
+}
+
+// 报警输入的 0 与"设备整段没提"必须是两个不同的事实：前者是已知的能力缺失，
+// 后者是未知。这个区分就是 guard_state 能不能摆脱永久 unknown 的前提。
+func TestPersistDeviceStatusSeparatesZeroAlarmInputsFromUnreported(t *testing.T) {
+	service, db := newDeviceStatusTestService(t)
+	declared := createDeviceStatusOperation(t, db, "alarm-declared-zero", 1, 11, "C")
+	require.NoError(t, service.persistDeviceStatus(context.Background(), declared, manscdp.DeviceStatus{
+		Record:        manscdp.ControlStateOn,
+		AlarmNumKnown: true,
+		AlarmNum:      0,
+	}, []byte("declared")))
+
+	state := loadDeviceStatusFact(t, db, 1, gbmodels.ControlTargetScopeChannel, "C")
+	require.NotNil(t, state.AlarmInputCount)
+	require.Zero(t, *state.AlarmInputCount)
+
+	silent := createDeviceStatusOperation(t, db, "alarm-silent", 2, 22, "D")
+	require.NoError(t, service.persistDeviceStatus(context.Background(), silent, manscdp.DeviceStatus{
+		Record: manscdp.ControlStateOn,
+	}, []byte("silent")))
+
+	other := loadDeviceStatusFact(t, db, 2, gbmodels.ControlTargetScopeChannel, "D")
+	require.Nil(t, other.AlarmInputCount, "设备没提数量时是未知,不能塌成 0")
+}
