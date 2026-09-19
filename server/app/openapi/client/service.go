@@ -49,6 +49,7 @@ type ClientView struct {
 	AK                string    `json:"ak"`
 	Name              string    `json:"name"`
 	OwnerDeptID       uint      `json:"ownerDeptId"`
+	DataScope         int8      `json:"dataScope"`
 	ResponsibleUserID uint      `json:"responsibleUserId"`
 	Status            string    `json:"status"`
 	SecretVersion     int64     `json:"secretVersion"`
@@ -75,6 +76,7 @@ type ScopeView struct {
 type CreateRequest struct {
 	Name              string
 	OwnerDeptID       uint
+	DataScope         int8
 	ResponsibleUserID uint
 	CreatedBy         uint
 }
@@ -109,6 +111,15 @@ type RevocationIntentStore interface {
 type ManagementBoundary interface {
 	AuthorizeCreate(ctx context.Context, actorID uint, ownerDeptID uint) error
 	AuthorizeClient(ctx context.Context, actorID uint, action string, ownerDeptID uint) error
+}
+
+// CreateDataScopeManagementBoundary is an optional extension implemented by
+// the production management boundary. Keeping it separate preserves source
+// compatibility for existing integrations and test fakes, which continue to
+// mean the historical exact-owner scope when they only implement
+// ManagementBoundary.
+type CreateDataScopeManagementBoundary interface {
+	AuthorizeCreateWithDataScope(ctx context.Context, actorID uint, ownerDeptID uint, dataScope int8) error
 }
 
 type ServiceOption func(*Service)
@@ -158,14 +169,24 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (ClientView
 	if strings.TrimSpace(request.Name) == "" || request.OwnerDeptID == 0 {
 		return ClientView{}, "", ErrInvalidArgument
 	}
+	request.DataScope = models.NormalizeDataScope(request.DataScope)
+	if !models.ValidDataScope(request.DataScope) {
+		return ClientView{}, "", ErrInvalidArgument
+	}
 	if request.CreatedBy == 0 {
 		return ClientView{}, "", ErrAuthorizationUnavailable
 	}
 	if s.managementBoundary == nil {
 		return ClientView{}, "", ErrAuthorizationUnavailable
 	}
-	if err := s.managementBoundary.AuthorizeCreate(normalizeContext(ctx), request.CreatedBy, request.OwnerDeptID); err != nil {
-		return ClientView{}, "", err
+	var authorizeErr error
+	if scopedBoundary, ok := s.managementBoundary.(CreateDataScopeManagementBoundary); ok {
+		authorizeErr = scopedBoundary.AuthorizeCreateWithDataScope(normalizeContext(ctx), request.CreatedBy, request.OwnerDeptID, request.DataScope)
+	} else {
+		authorizeErr = s.managementBoundary.AuthorizeCreate(normalizeContext(ctx), request.CreatedBy, request.OwnerDeptID)
+	}
+	if authorizeErr != nil {
+		return ClientView{}, "", authorizeErr
 	}
 	ak, err := s.secretManager.GenerateAccessKey()
 	if err != nil {
@@ -186,6 +207,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (ClientView
 			AK:                ak,
 			Name:              request.Name,
 			OwnerDeptID:       request.OwnerDeptID,
+			DataScope:         request.DataScope,
 			ResponsibleUserID: request.ResponsibleUserID,
 			Status:            models.StatusActive,
 			SecretCiphertext:  initialCiphertext,
@@ -694,6 +716,7 @@ func toClientView(row models.Client) ClientView {
 		AK:                row.AK,
 		Name:              row.Name,
 		OwnerDeptID:       row.OwnerDeptID,
+		DataScope:         models.NormalizeDataScope(row.DataScope),
 		ResponsibleUserID: row.ResponsibleUserID,
 		Status:            row.Status,
 		SecretVersion:     row.SecretVersion,

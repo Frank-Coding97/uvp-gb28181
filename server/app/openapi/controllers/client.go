@@ -93,9 +93,10 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 			var input struct {
 				Name              string `json:"name"`
 				OwnerDeptID       uint   `json:"ownerDeptId"`
+				DataScope         int8   `json:"dataScope"`
 				ResponsibleUserID uint   `json:"responsibleUserId"`
 			}
-			if err := decodeAdminBody(c, &input, "name", "ownerDeptId", "responsibleUserId"); err != nil || utf8.RuneCountInString(input.Name) > 100 {
+			if err := decodeAdminBody(c, &input, "name", "ownerDeptId", "dataScope", "responsibleUserId"); err != nil || utf8.RuneCountInString(input.Name) > 100 {
 				adminError(c, client.ErrInvalidArgument)
 				return
 			}
@@ -103,7 +104,7 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 				adminError(c, client.ErrNotFound)
 				return
 			}
-			view, secret, err := a.service.Create(c.Request.Context(), client.CreateRequest{Name: input.Name, OwnerDeptID: input.OwnerDeptID, ResponsibleUserID: input.ResponsibleUserID, CreatedBy: actor})
+			view, secret, err := a.service.Create(c.Request.Context(), client.CreateRequest{Name: input.Name, OwnerDeptID: input.OwnerDeptID, DataScope: input.DataScope, ResponsibleUserID: input.ResponsibleUserID, CreatedBy: actor})
 			if err != nil {
 				adminError(c, err)
 				return
@@ -211,7 +212,7 @@ func adminOwns(access datascope.OwnerDeptAccess, id uint) bool {
 	return false
 }
 
-const adminClientColumns = "id,ak,name,owner_dept_id,responsible_user_id,status,secret_version,auth_epoch,rate_limit,burst,viewer_quota,row_version,created_by,updated_by,created_at,updated_at"
+const adminClientColumns = "id,ak,name,owner_dept_id,data_scope,responsible_user_id,status,secret_version,auth_epoch,rate_limit,burst,viewer_quota,row_version,created_by,updated_by,created_at,updated_at"
 
 func (a *ClientAdminController) scopedClients(c *gin.Context, access datascope.OwnerDeptAccess) *gorm.DB {
 	query := a.db.WithContext(c.Request.Context()).Model(&models.Client{}).Select(adminClientColumns)
@@ -222,8 +223,9 @@ func (a *ClientAdminController) scopedClients(c *gin.Context, access datascope.O
 }
 
 type adminOwnerDepartment struct {
-	ID   uint   `json:"id"`
-	Name string `json:"name"`
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	ParentID *uint  `json:"parentId,omitempty"`
 }
 
 func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptAccess) {
@@ -272,7 +274,7 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 		}
 		// Options are scoped server-side, independent from the current client
 		// page/filter. Never expose the general unscoped department tree here.
-		options := tx.Table("sys_department").Select("id, name").Where("status = ? AND deleted_at IS NULL", 1)
+		options := tx.Table("sys_department").Select("id, name, parent_id").Where("status = ? AND deleted_at IS NULL", 1)
 		if !access.FullAccess {
 			options = options.Where("id IN ?", access.DeptIDs)
 		}

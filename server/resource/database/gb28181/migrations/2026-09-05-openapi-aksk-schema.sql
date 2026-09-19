@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     ak VARCHAR(36) NOT NULL,
     name VARCHAR(100) NOT NULL,
     owner_dept_id BIGINT NOT NULL,
+    data_scope TINYINT NOT NULL DEFAULT 3 COMMENT '数据范围 3本部门 4本部门及以下',
     responsible_user_id BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(16) NOT NULL DEFAULT 'disabled',
     secret_ciphertext VARBINARY(64) NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     updated_at DATETIME(6) NOT NULL,
     CONSTRAINT pk_openapi_client PRIMARY KEY (id),
     CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    CONSTRAINT ck_openapi_client_data_scope CHECK (data_scope IN (3,4)),
     INDEX idx_openapi_client_dept (owner_dept_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 

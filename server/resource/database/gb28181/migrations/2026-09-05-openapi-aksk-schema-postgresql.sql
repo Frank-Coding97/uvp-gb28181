@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     ak VARCHAR(36) NOT NULL,
     name VARCHAR(100) NOT NULL,
     owner_dept_id BIGINT NOT NULL,
+    data_scope SMALLINT NOT NULL DEFAULT 3,
     responsible_user_id BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(16) NOT NULL DEFAULT 'disabled',
     secret_ciphertext BYTEA NOT NULL,
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sys_openapi_client (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT pk_openapi_client PRIMARY KEY (id),
-    CONSTRAINT uk_openapi_ak UNIQUE (ak)
+    CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    CONSTRAINT ck_openapi_client_data_scope CHECK (data_scope IN (3,4))
 );
 
 CREATE INDEX IF NOT EXISTS idx_openapi_client_dept ON sys_openapi_client (owner_dept_id);

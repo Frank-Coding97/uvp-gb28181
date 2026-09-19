@@ -6,6 +6,7 @@ CREATE TABLE dbo.sys_openapi_client (
     ak NVARCHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
     name NVARCHAR(100) COLLATE Latin1_General_100_BIN2 NOT NULL,
     owner_dept_id BIGINT NOT NULL,
+    data_scope TINYINT NOT NULL CONSTRAINT df_openapi_client_data_scope DEFAULT 3,
     responsible_user_id BIGINT NOT NULL DEFAULT 0,
     status NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT 'disabled',
     secret_ciphertext VARBINARY(64) NOT NULL,
@@ -22,7 +23,8 @@ CREATE TABLE dbo.sys_openapi_client (
     created_at DATETIME2(6) NOT NULL,
     updated_at DATETIME2(6) NOT NULL,
     CONSTRAINT pk_openapi_client PRIMARY KEY (id),
-    CONSTRAINT uk_openapi_ak UNIQUE (ak)
+    CONSTRAINT uk_openapi_ak UNIQUE (ak),
+    CONSTRAINT ck_openapi_client_data_scope CHECK (data_scope IN (3,4))
 );
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'idx_openapi_client_dept' AND object_id = OBJECT_ID(N'dbo.sys_openapi_client'))

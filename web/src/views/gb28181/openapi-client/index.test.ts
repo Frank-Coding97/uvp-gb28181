@@ -4,6 +4,7 @@ import { defineComponent, h, KeepAlive, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OpenAPIClientPage from "./index.vue";
 import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
+import OpenAPIClientCreateDialog from "./OpenAPIClientCreateDialog.vue";
 
 const userState = vi.hoisted(() => ({ account: { id: 7, permissions: [] as string[] } }));
 const userStore = reactive(userState);
@@ -80,8 +81,8 @@ const pageStubs = {
   "a-spin": { template: "<div><slot /></div>" },
   "a-checkbox-group": { template: "<div><slot /></div>" },
   "a-checkbox": { template: "<label><slot /></label>", props: ["value"] },
-  "OpenAPIClientDrawer": { template: "<div />", props: ["visible"] },
-  "OpenAPISecretDialog": { template: "<div />", props: ["visible"] },
+  OpenAPIClientDrawer: { template: "<div />", props: ["visible"] },
+  OpenAPISecretDialog: { template: "<div />", props: ["visible"] },
   Search: true,
   RotateCcw: true,
   RefreshCw: true,
@@ -118,7 +119,9 @@ function mountDrawer(overrides: Record<string, unknown> = {}) {
       visible: true,
       mode: "detail",
       client,
-      scopes: [{ clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }],
+      scopes: [
+        { clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }
+      ],
       capabilities: ["device:list"],
       departments: [{ id: 10, name: "平台运维部" }],
       submitting: false,
@@ -173,7 +176,11 @@ describe("OpenAPI client page", () => {
   beforeEach(() => {
     userStore.account.id = 7;
     userStore.account.permissions = ["*:*:*"];
-    api.list.mockReset().mockResolvedValue(ok({ items: [client], page: 1, pageSize: 20, total: 1, ownerDepartments: [{ id: 10, name: "平台运维部" }] }));
+    api.list
+      .mockReset()
+      .mockResolvedValue(
+        ok({ items: [client], page: 1, pageSize: 20, total: 1, ownerDepartments: [{ id: 10, name: "平台运维部" }] })
+      );
     api.capabilities.mockReset().mockResolvedValue(ok(["device:list", "play:live:apply"]));
     api.get.mockReset().mockResolvedValue(ok({ client, scopes: [] }));
     api.create.mockReset().mockResolvedValue(ok({ client, secretKey: "one-time-secret" }));
@@ -203,7 +210,7 @@ describe("OpenAPI client page", () => {
       }
     });
     await flushPromises();
-    expect(wrapper.findAll("th").map(cell => cell.text())).toContain("归属部门（精确）");
+    expect(wrapper.findAll("th").map(cell => cell.text())).toContain("归属部门与数据范围");
     expect(wrapper.find("tbody").text()).toContain(client.name);
     expect(wrapper.find("tbody").text()).toContain("详情");
   });
@@ -225,6 +232,40 @@ describe("OpenAPI client page", () => {
     await (wrapper.vm as any).closeSecret();
     expect((wrapper.vm as any).secretPayload).toBeNull();
     expect(wrapper.text()).not.toContain("one-time-secret");
+  });
+
+  it("sends the selected client data scope when creating a client", async () => {
+    const wrapper = mount(OpenAPIClientCreateDialog, {
+      props: {
+        visible: true,
+        departments: [{ id: 10, name: "平台运维部" }],
+        submitting: false,
+        error: ""
+      },
+      global: {
+        stubs: {
+          "a-modal": { template: "<div><slot /></div>" },
+          "a-alert": { template: "<div><slot /></div>" },
+          "a-form": { template: "<form><slot /></form>" },
+          "a-form-item": { template: "<label><slot /></label>" },
+          "a-input": { template: "<input />" },
+          "a-tree-select": { template: "<div />" },
+          "a-select": { template: "<select><slot /></select>" },
+          "a-option": { template: "<option><slot /></option>" }
+        }
+      }
+    });
+
+    const vm = wrapper.vm as any;
+    expect(vm.form.dataScope).toBe(3);
+    expect(wrapper.text()).toContain("本部门");
+    vm.form.name = "下级部门接入";
+    vm.form.ownerDeptId = 10;
+    vm.form.dataScope = 4;
+    await vm.submit();
+
+    expect(wrapper.emitted("create")?.[0]).toEqual([{ name: "下级部门接入", ownerDeptId: 10, dataScope: 4 }]);
+    expect(wrapper.text()).toContain("本部门及以下");
   });
 
   it("reloads the row after a 409 and keeps the conflict tied to rowVersion", async () => {
@@ -340,7 +381,14 @@ describe("OpenAPI client page", () => {
     await flushPromises();
     second.resolve(ok({ client: secondClient, scopes: [] }));
     await secondTask;
-    first.resolve(ok({ client, scopes: [{ clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }] }));
+    first.resolve(
+      ok({
+        client,
+        scopes: [
+          { clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }
+        ]
+      })
+    );
     await firstTask;
     expect((wrapper.vm as any).currentClient).toEqual(secondClient);
     expect((wrapper.vm as any).currentScopes).toEqual([]);
@@ -485,10 +533,18 @@ describe("OpenAPI client page", () => {
 
   it("guards every mutation behind its matching UI permission", async () => {
     const cases = [
-      { permission: "gb28181:openapi:client:create", api: api.create, invoke: (vm: any) => vm.performCreate({ name: "新客户端", ownerDeptId: 10 }) },
+      {
+        permission: "gb28181:openapi:client:create",
+        api: api.create,
+        invoke: (vm: any) => vm.performCreate({ name: "新客户端", ownerDeptId: 10 })
+      },
       { permission: "gb28181:openapi:client:rotate", api: api.rotate, invoke: (vm: any) => vm.performRotate(client) },
       { permission: "gb28181:openapi:client:status", api: api.disable, invoke: (vm: any) => vm.performStatus("disable", client) },
-      { permission: "gb28181:openapi:client:grant", api: api.scopes, invoke: (vm: any) => vm.saveScopes(client.id, ["device:list"], client.rowVersion) },
+      {
+        permission: "gb28181:openapi:client:grant",
+        api: api.scopes,
+        invoke: (vm: any) => vm.saveScopes(client.id, ["device:list"], client.rowVersion)
+      },
       { permission: "gb28181:openapi:client:audit", api: api.audits, invoke: (vm: any) => vm.loadAudits() }
     ];
     for (const item of cases) {

@@ -26,6 +26,7 @@ import {
   type OpenAPIScopeView
 } from "@/api/gb28181-openapi";
 import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
+import OpenAPIClientCreateDialog from "./OpenAPIClientCreateDialog.vue";
 import OpenAPISecretDialog from "./OpenAPISecretDialog.vue";
 
 type StatusAction = "enable" | "disable" | "revoke";
@@ -404,7 +405,8 @@ async function saveScopes(id: number, scopes: string[], rowVersion: number) {
     !currentClient.value ||
     currentClient.value.id !== id ||
     currentClient.value.rowVersion !== rowVersion
-  ) return;
+  )
+    return;
   const generation = lifecycleGeneration;
   drawerLoading.value = true;
   drawerError.value = "";
@@ -422,7 +424,11 @@ async function saveScopes(id: number, scopes: string[], rowVersion: number) {
     if (handleAccessDenied(cause)) return;
     if (httpStatus(cause) === 409) {
       drawerError.value = conflictMessage(rowVersion);
-      try { await refreshDetail(id, generation); } catch { /* keep the explicit conflict message */ }
+      try {
+        await refreshDetail(id, generation);
+      } catch {
+        /* keep the explicit conflict message */
+      }
     } else {
       drawerError.value = errorMessage(cause, "保存客户端能力失败");
     }
@@ -482,14 +488,21 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
         const refreshed = await refreshDetail(result.data.client.id, generation);
         if (!refreshed && isCurrentGeneration(generation)) drawerError.value = "状态已更新，但当前详情刷新失败，请重试。";
       } catch (detailCause: unknown) {
-        if (isCurrentGeneration(generation)) drawerError.value = `状态已更新，但当前详情刷新失败：${errorMessage(detailCause, "请重试")}`;
+        if (isCurrentGeneration(generation))
+          drawerError.value = `状态已更新，但当前详情刷新失败：${errorMessage(detailCause, "请重试")}`;
       }
     } else {
       revocationStatus.value = null;
       revocationError.value = "";
     }
     if (!isCurrentGeneration(generation)) return;
-    Message.success(action === "enable" ? "客户端已启用" : action === "disable" ? "客户端认证已停用，清退进度另行确认" : "客户端已撤销，清退进度另行确认");
+    Message.success(
+      action === "enable"
+        ? "客户端已启用"
+        : action === "disable"
+          ? "客户端认证已停用，清退进度另行确认"
+          : "客户端已撤销，清退进度另行确认"
+    );
     if (action !== "enable") drawerVisible.value = true;
   } catch (cause: unknown) {
     if (!isCurrentGeneration(generation)) return;
@@ -514,7 +527,7 @@ function requestRotate(record: OpenAPIClientView) {
     okText: "确认轮换 SK",
     cancelText: "取消",
     okButtonProps: { status: "warning" },
-    onOk: () => isCurrentGeneration(generation) ? performRotate(record) : undefined
+    onOk: () => (isCurrentGeneration(generation) ? performRotate(record) : undefined)
   });
 }
 
@@ -532,7 +545,7 @@ function requestStatus(action: StatusAction, record: OpenAPIClientView) {
     okText: isRevoke ? "确认撤销" : action === "disable" ? "确认停用" : "确认启用",
     cancelText: "取消",
     okButtonProps: isRevoke || action === "disable" ? { status: "danger" } : undefined,
-    onOk: () => isCurrentGeneration(generation) ? performStatus(action, record) : undefined
+    onOk: () => (isCurrentGeneration(generation) ? performStatus(action, record) : undefined)
   });
 }
 
@@ -654,13 +667,19 @@ defineExpose({
           <template #fields>
             <div class="openapi-client-filter">
               <a-select v-model="form.ownerDeptId" placeholder="归属部门" allow-clear allow-search>
-                <a-option v-for="department in ownerDepartments" :key="department.id" :value="department.id">{{ department.name }}</a-option>
+                <a-option v-for="department in ownerDepartments" :key="department.id" :value="department.id">{{
+                  department.name
+                }}</a-option>
               </a-select>
             </div>
           </template>
           <template #actions>
-            <a-button type="primary" @click="search"><template #icon><Search :size="16" /></template>查询</a-button>
-            <a-button @click="reset"><template #icon><RotateCcw :size="16" /></template>重置</a-button>
+            <a-button type="primary" @click="search"
+              ><template #icon><Search :size="16" /></template>查询</a-button
+            >
+            <a-button @click="reset"
+              ><template #icon><RotateCcw :size="16" /></template>重置</a-button
+            >
           </template>
           <template #extra>
             <a-tooltip content="刷新 OpenAPI 客户端" position="top">
@@ -668,7 +687,9 @@ defineExpose({
                 <template #icon><RefreshCw :size="16" /></template>刷新
               </a-button>
             </a-tooltip>
-            <a-button v-if="canCreate" type="primary" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
+            <a-button v-if="canCreate" type="primary" @click="openCreate"
+              ><template #icon><Plus :size="16" /></template>新建客户端</a-button
+            >
           </template>
         </s-layout-search>
 
@@ -676,7 +697,9 @@ defineExpose({
           <span>{{ error }}</span>
           <a-button size="small" @click="load">重试</a-button>
         </div>
-        <div v-if="capabilitiesError" class="openapi-client-page__notice" role="status">{{ capabilitiesError }}；能力授权暂不可用。</div>
+        <div v-if="capabilitiesError" class="openapi-client-page__notice" role="status">
+          {{ capabilitiesError }}；能力授权暂不可用。
+        </div>
         <div v-if="!error" class="openapi-client-page__boundary-note">
           所有客户端只允许访问归属部门的设备，不包含下级部门或共享设备；认证状态与观看连接清退状态分别确认。
         </div>
@@ -708,20 +731,59 @@ defineExpose({
               </template>
             </a-table-column>
             <a-table-column title="认证状态" :width="110">
-              <template #cell="{ record }"><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template>
+              <template #cell="{ record }"
+                ><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template
+              >
             </a-table-column>
             <a-table-column title="密钥版本" data-index="secretVersion" :width="100" />
             <a-table-column title="rowVersion" data-index="rowVersion" :width="100" />
             <a-table-column title="操作" :width="520" fixed="right">
               <template #cell="{ record }">
                 <div class="openapi-client-table__actions">
-                  <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"><template #icon><Eye :size="15" /></template>详情</a-button>
-                  <a-button v-if="canGrant" type="text" class="uvp-table-action uvp-table-action--permission" @click="openDetail(record)"><template #icon><ShieldCheck :size="15" /></template>能力</a-button>
-                  <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="requestRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
-                  <a-button v-if="canStatus && record.status === 'active'" type="text" status="warning" @click="requestStatus('disable', record)"><template #icon><ShieldOff :size="15" /></template>停用</a-button>
-                  <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"><template #icon><ShieldCheck :size="15" /></template>启用</a-button>
-                  <a-button v-if="canStatus && record.status !== 'revoked'" type="text" status="danger" @click="requestStatus('revoke', record)"><template #icon><Ban :size="15" /></template>撤销</a-button>
-                  <a-button v-if="canAudit" type="text" class="uvp-table-action" @click="openDetail(record); loadAudits()"><template #icon><ScrollText :size="15" /></template>审计</a-button>
+                  <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"
+                    ><template #icon><Eye :size="15" /></template>详情</a-button
+                  >
+                  <a-button
+                    v-if="canGrant"
+                    type="text"
+                    class="uvp-table-action uvp-table-action--permission"
+                    @click="openDetail(record)"
+                    ><template #icon><ShieldCheck :size="15" /></template>能力</a-button
+                  >
+                  <a-button
+                    v-if="canRotate && record.status !== 'revoked'"
+                    type="text"
+                    class="uvp-table-action"
+                    @click="requestRotate(record)"
+                    ><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button
+                  >
+                  <a-button
+                    v-if="canStatus && record.status === 'active'"
+                    type="text"
+                    status="warning"
+                    @click="requestStatus('disable', record)"
+                    ><template #icon><ShieldOff :size="15" /></template>停用</a-button
+                  >
+                  <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"
+                    ><template #icon><ShieldCheck :size="15" /></template>启用</a-button
+                  >
+                  <a-button
+                    v-if="canStatus && record.status !== 'revoked'"
+                    type="text"
+                    status="danger"
+                    @click="requestStatus('revoke', record)"
+                    ><template #icon><Ban :size="15" /></template>撤销</a-button
+                  >
+                  <a-button
+                    v-if="canAudit"
+                    type="text"
+                    class="uvp-table-action"
+                    @click="
+                      openDetail(record);
+                      loadAudits();
+                    "
+                    ><template #icon><ScrollText :size="15" /></template>审计</a-button
+                  >
                 </div>
               </template>
             </a-table-column>
@@ -731,9 +793,19 @@ defineExpose({
       <a-empty v-else description="没有 OpenAPI 客户端查看权限" />
     </div>
 
-    <OpenAPIClientDrawer
+    <OpenAPIClientCreateDialog
+      v-if="drawerMode === 'create'"
       :visible="drawerVisible"
-      :mode="drawerMode"
+      :departments="ownerDepartments"
+      :submitting="drawerLoading"
+      :error="drawerError"
+      @close="closeDrawer"
+      @create="performCreate"
+    />
+    <OpenAPIClientDrawer
+      v-else
+      :visible="drawerVisible"
+      mode="detail"
       :client="currentClient"
       :scopes="currentScopes"
       :capabilities="capabilities"
@@ -781,12 +853,12 @@ defineExpose({
 .openapi-client-page__notice,
 .openapi-client-page__boundary-note {
   display: flex;
-  align-items: center;
   gap: 12px;
-  margin: 12px 0;
+  align-items: center;
   padding: 10px 14px;
-  border-radius: 4px;
+  margin: 12px 0;
   font-size: 13px;
+  border-radius: 4px;
 }
 
 .openapi-client-page__error {
@@ -806,23 +878,23 @@ defineExpose({
 }
 
 .openapi-client-table__name {
-  color: var(--color-text-1);
   font-weight: 600;
+  color: var(--color-text-1);
 }
 
 .openapi-client-table__ak {
   display: block;
   margin-top: 4px;
-  color: var(--color-text-3);
   font-size: 11px;
+  color: var(--color-text-3);
   overflow-wrap: anywhere;
 }
 
 .openapi-client-table__hint {
   display: block;
   margin-top: 3px;
-  color: var(--color-text-3);
   font-size: 11px;
+  color: var(--color-text-3);
 }
 
 .openapi-client-table__actions {
@@ -835,7 +907,7 @@ defineExpose({
   min-height: 34px;
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .openapi-client-filter {
     width: 100%;
   }

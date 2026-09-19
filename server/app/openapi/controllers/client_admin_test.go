@@ -218,7 +218,7 @@ func TestOpenAPIAdminHTTPRejectsEmptyManagementRange(t *testing.T) {
 
 func TestOpenAPIAdminHTTPCreateSecretAndScopedReads(t *testing.T) {
 	db, ctrl, _ := newAdminHTTP(t)
-	out, marked := adminRequest(t, ctrl, 7, "create", "POST", "/api/gb28181/openapi-clients", `{"name":"A","ownerDeptId":10}`)
+	out, marked := adminRequest(t, ctrl, 7, "create", "POST", "/api/gb28181/openapi-clients", `{"name":"A","ownerDeptId":10,"dataScope":4}`)
 	require.Equal(t, 200, out.Code, out.Body.String())
 	require.True(t, marked)
 	require.Equal(t, "no-store", out.Header().Get("Cache-Control"))
@@ -230,6 +230,7 @@ func TestOpenAPIAdminHTTPCreateSecretAndScopedReads(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out.Body.Bytes(), &response))
 	require.NotEmpty(t, response.Data.Secret)
+	require.Equal(t, models.DataScopeDepartmentAndChildren, response.Data.Client.DataScope)
 	require.NoError(t, db.Create(&models.Client{ID: 90, AK: "test-b", Name: "hidden", OwnerDeptID: 20, Status: models.StatusActive, SecretCiphertext: []byte{1}, SecretIV: []byte{1}, SecretKeyID: "test"}).Error)
 	list, _ := adminRequest(t, ctrl, 7, "list", "GET", "/api/gb28181/openapi-clients", "")
 	require.Equal(t, 200, list.Code)
@@ -245,6 +246,14 @@ func TestOpenAPIAdminHTTPCreateSecretAndScopedReads(t *testing.T) {
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("admin_mask_not_found", func(query *gorm.DB) { query.Statement.RaiseErrorOnNotFound = false }))
 	denied, _ := adminRequest(t, ctrl, 7, "list", "GET", "/api/gb28181/openapi-clients", "")
 	require.Equal(t, 403, denied.Code)
+}
+
+func TestOpenAPIAdminHTTPRejectsUnsupportedClientDataScope(t *testing.T) {
+	_, ctrl, _ := newAdminHTTP(t)
+	for _, dataScope := range []string{"1", "2", "5"} {
+		out, _ := adminRequest(t, ctrl, 7, "create", "POST", "/api/gb28181/openapi-clients", `{"name":"A","ownerDeptId":10,"dataScope":`+dataScope+`}`)
+		require.Equal(t, 400, out.Code, out.Body.String())
+	}
 }
 
 func TestOpenAPIAdminHTTPRejectsAmbiguousCreate(t *testing.T) {

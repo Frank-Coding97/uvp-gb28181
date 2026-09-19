@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	clientmodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
@@ -56,6 +57,46 @@ func NewManagementScopeBoundary(db *gorm.DB, authorizer ManagementPermissionAuth
 
 func (b *ManagementScopeBoundary) AuthorizeCreate(ctx context.Context, actorID uint, ownerDeptID uint) error {
 	return b.authorize(ctx, actorID, managementPermissionForCategory(ManagementActionCreate), ownerDeptID)
+}
+
+// AuthorizeCreateWithDataScope is the optional data-scope-aware extension of
+// ManagementBoundary. Existing callers that only know the historical
+// AuthorizeCreate method retain exact-owner semantics; the client service uses
+// this method when the production boundary provides it.
+func (b *ManagementScopeBoundary) AuthorizeCreateWithDataScope(ctx context.Context, actorID uint, ownerDeptID uint, dataScope int8) error {
+	dataScope = clientmodels.NormalizeDataScope(dataScope)
+	if !clientmodels.ValidDataScope(dataScope) {
+		return ErrManagementBoundaryDenied
+	}
+	if dataScope == clientmodels.DataScopeDepartment {
+		return b.AuthorizeCreate(ctx, actorID, ownerDeptID)
+	}
+	if b == nil || b.db == nil || b.authorizer == nil || actorID == 0 || ownerDeptID == 0 {
+		return ErrAuthorizationUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	access, err := datascope.ResolveOwnerDeptAccessByUserID(ctx, b.db, actorID)
+	if err != nil {
+		if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+			return ErrManagementBoundaryDenied
+		}
+		return fmt.Errorf("%w: resolve trusted management scope: %v", ErrAuthorizationUnavailable, err)
+	}
+	if !access.FullAccess {
+		targets, err := departmentAndChildren(ctx, b.db, ownerDeptID)
+		if err != nil {
+			return fmt.Errorf("%w: resolve target department tree: %v", ErrAuthorizationUnavailable, err)
+		}
+		for _, targetID := range targets {
+			if !containsDepartment(access.DeptIDs, targetID) {
+				return ErrManagementBoundaryDenied
+			}
+		}
+	}
+	return b.AuthorizeCreate(ctx, actorID, ownerDeptID)
 }
 
 func (b *ManagementScopeBoundary) AuthorizeRead(ctx context.Context, actorID uint, ownerDeptID uint) error {
@@ -192,4 +233,32 @@ func containsDepartment(departmentIDs []uint, wanted uint) bool {
 		}
 	}
 	return false
+}
+
+// departmentAndChildren expands a client owner department from the same
+// persisted department tree used by the trusted role scope. It deliberately
+// uses an iterative traversal so malformed cycles cannot recurse forever.
+func departmentAndChildren(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]uint, error) {
+	var departments []appmodels.SysDepartment
+	if err := db.WithContext(ctx).Find(&departments).Error; err != nil {
+		return nil, err
+	}
+	children := make(map[uint][]uint, len(departments))
+	for _, department := range departments {
+		if department.ParentID != nil && *department.ParentID != 0 {
+			children[*department.ParentID] = append(children[*department.ParentID], department.ID)
+		}
+	}
+	seen := map[uint]struct{}{ownerDeptID: {}}
+	ids := []uint{ownerDeptID}
+	for index := 0; index < len(ids); index++ {
+		for _, childID := range children[ids[index]] {
+			if _, exists := seen[childID]; exists {
+				continue
+			}
+			seen[childID] = struct{}{}
+			ids = append(ids, childID)
+		}
+	}
+	return ids, nil
 }

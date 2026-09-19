@@ -93,6 +93,7 @@ func TestOpenAPIAdminBoundaryUsesCurrentTrustedUserAndRealPermissions(t *testing
 	ctx := context.Background()
 
 	require.NoError(t, boundary.AuthorizeCreate(ctx, 7, 10))
+	assertManagementDenied(t, boundary.AuthorizeCreateWithDataScope(ctx, 7, 10, 4), "a department-only role must not grant a child-department client")
 	require.NoError(t, boundary.AuthorizeRead(ctx, 7, 10))
 	require.NoError(t, boundary.AuthorizeRotate(ctx, 7, 10))
 	require.NoError(t, boundary.AuthorizeGrant(ctx, 7, 10))
@@ -134,6 +135,21 @@ func TestOpenAPIAdminBoundaryUsesCurrentTrustedUserAndRealPermissions(t *testing
 	}
 	require.Equal(t, "user_7", calls[0].subject)
 	require.Equal(t, "*", calls[0].domain)
+}
+
+func TestOpenAPIAdminBoundaryAllowsChildScopeOnlyWhenOperatorManagesAllDescendants(t *testing.T) {
+	db := newManagementBoundaryDB(t)
+	seedManagementDepartments(t, db)
+	seedManagementUser(t, db, 7, 10, 1, 4, "", true)
+	enforcer := newManagementBoundaryEnforcer(t)
+	_, err := enforcer.AddGroupingPolicy("user_7", "role_1", "*")
+	require.NoError(t, err)
+	_, err = enforcer.AddPolicy("role_1", managementBoundaryTestRoutes()[0].path, managementBoundaryTestRoutes()[0].method, "*")
+	require.NoError(t, err)
+
+	boundary := NewManagementScopeBoundary(db, &casbinManagementAuthorizer{enforcer: enforcer})
+	require.NoError(t, boundary.AuthorizeCreateWithDataScope(context.Background(), 7, 10, 4))
+	assertManagementDenied(t, boundary.AuthorizeCreateWithDataScope(context.Background(), 7, 10, 2), "unsupported client data scope must fail closed")
 }
 
 func TestOpenAPIAdminBoundaryChecksEachPermissionIndependently(t *testing.T) {

@@ -13,8 +13,36 @@ import (
 var (
 	ErrResourceNotFound    = errors.New("resource not found")
 	ErrInvalidListOptions  = errors.New("invalid resource list options")
+	ErrInvalidDepartmentScope = errors.New("invalid department data scope")
 	ErrResourceUnavailable = errors.New("resource database unavailable")
 )
+
+// The values intentionally match the role data-scope contract used by the
+// administration UI: 3 is the current department and 4 includes all active
+// descendants. OpenAPI clients do not support the role-level "all" or
+// "custom" modes.
+const (
+	DataScopeDepartment           int8 = 3
+	DataScopeDepartmentAndChildren int8 = 4
+)
+
+// DepartmentScope is the immutable department boundary attached to an
+// authenticated OpenAPI client. OwnerDeptID is trusted from the client row,
+// never from an HTTP request.
+type DepartmentScope struct {
+	OwnerDeptID uint
+	DataScope   int8
+}
+
+func (scope DepartmentScope) validate() error {
+	if scope.OwnerDeptID == 0 {
+		return ErrResourceNotFound
+	}
+	if scope.DataScope != DataScopeDepartment && scope.DataScope != DataScopeDepartmentAndChildren {
+		return ErrInvalidDepartmentScope
+	}
+	return nil
+}
 
 // Service performs resource queries using a trusted, exact owner department.
 // ownerDeptID is supplied by the OpenAPI authentication chain; it is never

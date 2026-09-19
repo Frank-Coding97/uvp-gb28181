@@ -39,6 +39,23 @@ func (allowAllManagementBoundary) AuthorizeClient(context.Context, uint, string,
 	return nil
 }
 
+type dataScopeManagementBoundary struct {
+	dataScope int8
+}
+
+func (dataScopeManagementBoundary) AuthorizeCreate(context.Context, uint, uint) error {
+	return nil
+}
+
+func (dataScopeManagementBoundary) AuthorizeClient(context.Context, uint, string, uint) error {
+	return nil
+}
+
+func (b *dataScopeManagementBoundary) AuthorizeCreateWithDataScope(_ context.Context, _ uint, _ uint, dataScope int8) error {
+	b.dataScope = dataScope
+	return nil
+}
+
 func (s *recordingRevocationStore) RecordRevocationIntent(_ context.Context, tx *gorm.DB, intent RevocationIntent) error {
 	if tx == nil {
 		return errors.New("missing transaction")
@@ -136,6 +153,51 @@ func TestOpenAPIClientCreateGeneratesIndependentCredentials(t *testing.T) {
 		require.NotContains(t, log.RequestData, firstSecret)
 		require.NotContains(t, log.RequestData, secondSecret)
 	}
+}
+
+func TestOpenAPIClientCreateDefaultsAndPersistsDepartmentDataScope(t *testing.T) {
+	service, db := newClientTestService(t, &recordingRevocationStore{})
+	defaultView, _, err := service.Create(context.Background(), CreateRequest{Name: "default-scope", OwnerDeptID: 10, CreatedBy: 7})
+	require.NoError(t, err)
+	require.Equal(t, models.DataScopeDepartment, defaultView.DataScope)
+
+	childView, _, err := service.Create(context.Background(), CreateRequest{Name: "child-scope", OwnerDeptID: 10, DataScope: models.DataScopeDepartmentAndChildren, CreatedBy: 7})
+	require.NoError(t, err)
+	require.Equal(t, models.DataScopeDepartmentAndChildren, childView.DataScope)
+
+	var row models.Client
+	require.NoError(t, db.First(&row, childView.ID).Error)
+	require.Equal(t, models.DataScopeDepartmentAndChildren, row.DataScope)
+	got, err := service.Get(context.Background(), childView.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DataScopeDepartmentAndChildren, got.DataScope)
+}
+
+func TestOpenAPIClientCreateRejectsUnsupportedDataScope(t *testing.T) {
+	service, db := newClientTestService(t, &recordingRevocationStore{})
+	for _, dataScope := range []int8{1, 2, 5, -1} {
+		_, _, err := service.Create(context.Background(), CreateRequest{Name: "invalid-scope", OwnerDeptID: 10, DataScope: dataScope, CreatedBy: 7})
+		require.ErrorIs(t, err, ErrInvalidArgument, "data scope %d", dataScope)
+	}
+	var count int64
+	require.NoError(t, db.Model(&models.Client{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestOpenAPIClientCreatePassesDataScopeToOptionalManagementBoundary(t *testing.T) {
+	boundary := &dataScopeManagementBoundary{}
+	dsn := fmt.Sprintf("file:openapi_client_scope_boundary_%d?mode=memory&cache=shared", testDatabaseID.Add(1))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Audit{}))
+	masterKey := bytes.Repeat([]byte{0xA5}, 32)
+	secrets, err := NewSecretManager(masterKey, "test-key-1")
+	require.NoError(t, err)
+	service, err := NewService(db, secrets, WithManagementBoundary(boundary))
+	require.NoError(t, err)
+	_, _, err = service.Create(context.Background(), CreateRequest{Name: "scoped", OwnerDeptID: 10, DataScope: models.DataScopeDepartmentAndChildren, CreatedBy: 7})
+	require.NoError(t, err)
+	require.Equal(t, models.DataScopeDepartmentAndChildren, boundary.dataScope)
 }
 
 func TestOpenAPIClientSecretIsShownOnlyOnSuccessfulCreateOrRotate(t *testing.T) {

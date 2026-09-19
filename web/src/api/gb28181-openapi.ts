@@ -13,15 +13,33 @@ export interface OpenAPIResponse<T> {
 export interface OpenAPIManagedDepartment {
   id: number;
   name: string;
+  parentId?: number | null;
+  children?: OpenAPIManagedDepartment[];
 }
 
 export type OpenAPIClientStatus = "active" | "disabled" | "revoked";
+
+export type OpenAPIClientDataScope = 3 | 4;
+
+export interface OpenAPIClientDataScopeOption {
+  value: OpenAPIClientDataScope;
+  label: string;
+  description: string;
+}
+
+export const OPENAPI_CLIENT_DEFAULT_DATA_SCOPE: OpenAPIClientDataScope = 3;
+
+export const OPENAPI_CLIENT_DATA_SCOPE_OPTIONS: OpenAPIClientDataScopeOption[] = [
+  { value: 3, label: "本部门", description: "仅访问归属部门的设备，不包含下级部门。" },
+  { value: 4, label: "本部门及以下", description: "访问归属部门及其所有下级部门的设备。" }
+];
 
 export interface OpenAPIClientView {
   id: number;
   ak: string;
   name: string;
   ownerDeptId: number;
+  dataScope: OpenAPIClientDataScope;
   responsibleUserId: number;
   status: OpenAPIClientStatus;
   secretVersion: number;
@@ -67,6 +85,7 @@ export interface OpenAPIClientDetail {
 export interface OpenAPIClientCreateInput {
   name: string;
   ownerDeptId: number;
+  dataScope?: OpenAPIClientDataScope;
   responsibleUserId?: number;
 }
 
@@ -156,6 +175,8 @@ export const listOpenAPIClientAudits = (id: number) =>
 export const getOpenAPIClientRevocationStatus = (id: number) =>
   http.request<OpenAPIResponse<OpenAPIRevocationStatus>>("get", baseUrlApi(`${path}/${id}/revocation-status`));
 
-export function isOpenAPISuccess<T>(response: OpenAPIResponse<T> | null | undefined): response is OpenAPIResponse<T> & { code: "OK" } {
+export function isOpenAPISuccess<T>(
+  response: OpenAPIResponse<T> | null | undefined
+): response is OpenAPIResponse<T> & { code: "OK" } {
   return response?.code === "OK";
 }

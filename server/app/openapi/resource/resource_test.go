@@ -25,6 +25,7 @@ const (
 	resourceInvalid   = "34020000002000000040"
 	resourceDeleted   = "34020000002000000050"
 	resourceChannel   = "37011200001310000010"
+	resourceChildChannel = "37011200001310000011"
 	resourceWrongRoot = "37011200001310000011"
 	resourceBadOwner  = "37011200001310000012"
 	resourceDuplicate = "37011200001310000013"
@@ -74,6 +75,7 @@ func seedResourceRows(t *testing.T, db *gorm.DB) {
 	}
 	channels := []gbmodels.GbChannel{
 		{DeviceID: resourceDevice, ChannelID: resourceChannel, Name: "正常通道", Alias: "通道别名", Manufacturer: "厂商A", Model: "型号A", PTZType: 1, Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 10},
+		{DeviceID: resourceChild, ChannelID: resourceChildChannel, Name: "子部门通道", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 11},
 		{DeviceID: resourceDevice, ChannelID: resourceWrongRoot, Name: "正常但请求错根", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 10},
 		{DeviceID: resourceDevice, ChannelID: resourceBadOwner, Name: "归属副本错误", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 20},
 		{DeviceID: resourceDevice, ChannelID: resourceDuplicate, Name: "重复链一", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 10},
@@ -83,6 +85,46 @@ func seedResourceRows(t *testing.T, db *gorm.DB) {
 	for i := range channels {
 		require.NoError(t, db.Create(&channels[i]).Error)
 	}
+}
+
+func TestOpenAPIResourceDepartmentScopeIncludesActiveDescendants(t *testing.T) {
+	db := newResourceTestDB(t)
+	svc := New(db)
+	ctx := context.Background()
+	scope := DepartmentScope{OwnerDeptID: resourceOwnerDept, DataScope: DataScopeDepartmentAndChildren}
+
+	ids, err := ResolveDepartmentIDs(ctx, db, scope)
+	require.NoError(t, err)
+	assert.Equal(t, []uint{resourceOwnerDept, 11}, ids)
+
+	devices, err := svc.ListDevicesInScope(ctx, scope, DeviceListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), devices.Total)
+	assert.Equal(t, resourceDevice, devices.Items[0].DeviceID)
+	assert.Equal(t, resourceChild, devices.Items[1].DeviceID)
+
+	child, err := svc.GetDeviceInScope(ctx, scope, resourceChild)
+	require.NoError(t, err)
+	assert.Equal(t, resourceChild, child.DeviceID)
+	childStatus, err := svc.GetDeviceStatusInScope(ctx, scope, resourceChild)
+	require.NoError(t, err)
+	assert.Equal(t, "online", childStatus.Status)
+
+	channels, err := svc.ListChannelsInScope(ctx, scope, resourceChild, ChannelListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), channels.Total)
+	assert.Equal(t, resourceChildChannel, channels.Items[0].ChannelID)
+	channel, err := svc.GetChannelInScope(ctx, scope, resourceChild, resourceChildChannel)
+	require.NoError(t, err)
+	assert.Equal(t, resourceChildChannel, channel.ChannelID)
+	channelStatus, err := svc.GetChannelStatusInScope(ctx, scope, resourceChild, resourceChildChannel)
+	require.NoError(t, err)
+	assert.Equal(t, "online", channelStatus.Status)
+
+	_, err = svc.GetDeviceInScope(ctx, DepartmentScope{OwnerDeptID: resourceOwnerDept, DataScope: 2}, resourceDevice)
+	assert.ErrorIs(t, err, ErrInvalidDepartmentScope)
+	_, err = svc.GetDeviceInScope(ctx, DepartmentScope{OwnerDeptID: 40, DataScope: DataScopeDepartmentAndChildren}, resourceInvalid)
+	assert.ErrorIs(t, err, ErrResourceNotFound)
 }
 
 func TestOpenAPIResourceMetadataUsesExactOwnerAndValidDepartment(t *testing.T) {

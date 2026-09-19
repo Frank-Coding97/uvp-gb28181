@@ -8,7 +8,31 @@ const (
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
 	StatusRevoked  = "revoked"
+
+	// DataScopeDepartment limits a client to its configured owner department.
+	DataScopeDepartment int8 = 3
+	// DataScopeDepartmentAndChildren includes the owner department and all of
+	// its descendants in the current department tree.
+	DataScopeDepartmentAndChildren int8 = 4
 )
+
+// NormalizeDataScope keeps rows created before the data-scope column existed
+// compatible with the historical exact-owner behavior.
+func NormalizeDataScope(dataScope int8) int8 {
+	if dataScope == 0 {
+		return DataScopeDepartment
+	}
+	return dataScope
+}
+
+func ValidDataScope(dataScope int8) bool {
+	switch NormalizeDataScope(dataScope) {
+	case DataScopeDepartment, DataScopeDepartmentAndChildren:
+		return true
+	default:
+		return false
+	}
+}
 
 // Client is not an HTTP response DTO. Verification material is additionally
 // hidden from JSON so accidental diagnostic serialization cannot reveal it.
@@ -17,6 +41,7 @@ type Client struct {
 	AK                string    `gorm:"column:ak;size:36;not null;uniqueIndex:uk_openapi_ak" json:"ak"`
 	Name              string    `gorm:"size:100;not null" json:"name"`
 	OwnerDeptID       uint      `gorm:"column:owner_dept_id;not null;index:idx_openapi_client_dept" json:"ownerDeptId"`
+	DataScope         int8      `gorm:"column:data_scope;not null;default:3" json:"dataScope"`
 	ResponsibleUserID uint      `gorm:"column:responsible_user_id;not null;default:0" json:"responsibleUserId"`
 	Status            string    `gorm:"size:16;not null;default:disabled" json:"status"`
 	SecretCiphertext  []byte    `gorm:"column:secret_ciphertext;not null" json:"-"`
