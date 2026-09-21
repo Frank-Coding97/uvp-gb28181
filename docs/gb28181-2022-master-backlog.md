@@ -64,7 +64,7 @@
 
 | 能力 | 平台 | 模拟器 | 单号 | 条款 |
 | --- | --- | --- | --- | --- |
-| 精准云台控制 PTZPreciseCtrl | 已实现 | 已实现 | — | 9.5 |
+| 精准云台控制 PTZPreciseCtrl | ✅ 已实现；⭐ **2026-09-20 海康真机逐字节核对通过**（平台侧信令正确），⛔ **但真机不执行且平台无法观测** —— 详见 §5 同行注释 | 已实现 | — | 9.5 / A.2.3.1.11 |
 | PTZ 精准状态查询 | 已实现 | 已实现 | — | A.2.4.10 |
 | PTZ 精准位置订阅通知 | 已实现 | 已实现 | — | 9.11.1/2 |
 | 看守位信息查询 | 已实现 | 已实现 | — | A.2.4.11 |
@@ -99,7 +99,7 @@
 | 抓拍失败语义（部分失败） | 未处理 | 未处理 | E-5 | A.2.5.7 |
 | 设备软件升级 | 已实现（FileURL 靠外部喂） | 假进度（5s） | D-3 / D-4 | 9.13 |
 | 目标跟踪 `TargetTrack` | 缺失 | 只解析 | D-1 | A.2.3.1.14 |
-| 格式化 SD 卡 | 缺失 | 只解析 | D-2 | A.2.3.1.13 |
+| 格式化 SD 卡 | ✅ 已实现（2026-09-20）—— 独立路由 + 独立权限码 `gb28181:device:format_sd` + 二次确认 + 8 轮观察窗跟踪 | ✅ 已实现（2026-09-20）—— `VirtualStorageCards.format()` 真执行语义 + 进度 + 完成态 | ☑ D-2 | A.2.3.1.13 |
 | 拉框放大 DragZoom | 已实现 | 已实现 | — | A.2.3.1 |
 | 报警复位 `AlarmCmd` | 已实现 | 已实现 | — | — |
 | TeleBoot / RecordCmd / GuardCmd / IFameCmd | ✅ 已实现（2026-09-18 复核：控制台**真实调用**，原写「3 处占位未接」有误） | 已实现 | ~~D-5~~ ✗ 销单 | — |
@@ -276,7 +276,7 @@
 | 编号 | 任务（条款） | 平台侧（后端 · 前端入口） | 模拟器侧 | 验收闭环 | P |
 | --- | --- | --- | --- | --- | --- |
 | ☐ D-1 | **目标跟踪 `TargetTrack`**（A.2.3.1.14） | 下发 + 前端入口（选择目标 / 开启关闭） | 现只解析写 effect → 至少回**合规应答** + 屏幕状态可见；真行为依赖设备 AI，可用「模拟目标框」表达 | 平台开目标跟踪 → 设备屏幕显示跟踪状态 | P2 |
-| ☐ D-2 | **格式化 SD 卡 `FormatSDCard`**（A.2.3.1.13） | 下发 + **权限门禁**（破坏性）+ 二次确认 + 前端入口；操作记入维护记录 | 执行语义（清空模拟存储卡）+ 应答 | 授权用户二次确认后下发 → 存储卡剩余变满值；未授权用户按钮不可用 | P2 |
+| ☑ D-2 | **格式化 SD 卡 `FormatSDCard`**（A.2.3.1.13）✅ **2026-09-20 完成（平台 + 模拟器双侧）**<br>⛔⛔ **本轮最重大结论:这是一条「无应答命令」**。标准三处证据:① **9.3.1 d)**（OCR 行 1300-1306）把「存储卡格式化」与云台控制 / 远程启动 / 强制关键帧 / 拉框放大缩小 / PTZ 精准控制 / 目标跟踪**列在同一句**——「目标设备**不发送应答命令**」;② **表 1 序号 12** 的应答命令章节写作「**（无）**」。⇒ `ResponseRequired: false`（同族先例 `TeleBoot`）。⛔ 设成 `true` 的后果**不是「多等一会儿」,而是把一个成功当失败报**:设备按标准不回 → operation 排到 transport deadline 才落 timeout/unknown → 前端把一次正常下发显示成「结果未知」。<br>⭐ **「格式化成没成」的唯一判据 = 事后再查一次 SDCardStatus**（`Status=formatting` + `FormatProgress` 0-100,或已回到 `ok`/`unformatted`）。⛔ 2022 全文里 SDCardStatus **只有「查询 + 应答」这一对,没有 NOTIFY/推送那一半** ⇒ 不主动查永远看不到进度。平台侧因此做 **8 轮 × 6s ≈ 50s 观察窗**（`FORMAT_WATCH_ROUNDS`/`FORMAT_WATCH_DELAY_MS`）,每轮 = 一次真实 SIP MESSAGE;卡回到非 formatting 立即收工、切页/手动查询立即停。⛔ 续跟踪只能在**重读完列表之后**判断（`await load()` 之后）,否则拿上一轮事实会过早收工。<br>⛔ **`DiskNum` 是自造名（2022 全文 / 2022 附录 A / 2016 附录 A 三处 0 命中）,本轮从两侧拔掉**。**`FormatSDCard` 的元素值本身就是卡号**:A.2.3.1.13 = `<element name="FormatSDCard" minOccurs="0">` + `restriction base="integer"` + `<minInclusive value="0"/>`,注释原文「SD 卡编号,从1开始编号。**该值0时,对所有存储卡进行格式化**」。⛔ **解析失败绝不回落成 `0`**（= 全部卡 = 最重的破坏性操作）;模拟器原 `?: 0` 已改为「记 Warning + 只写 `lastCommand` + 不下发」,平台侧请求体用 `*int` 区分「没传」与「给了 0」,前端**不得对 0 做 falsy 兜底**。<br>⛔ **必须走独立路由 `POST /channel/:id/storage-cards/format`**:`POST /channel/:id/device-control` 整条绑 `gb28181:device:control`（`2026-09-05-button-permission-catalog.sql:769`）⇒ 做成它的 action 在 casbin 层同权,**新权限码形同虚设**。新增独立权限码 **`gb28181:device:format_sd`**（照「设备重启」先例;三方言 up/down + 三快照齐全）。**破坏性动作门禁顺序 = 登录 → 显式确认 → 权限 → 参数**（确认在权限**之前**,避免泄露「这账号有没有格式化权限」）。<br>⭐ **UI 措辞纪律**:无应答命令的结果只能叫「已下发」,**不允许出现「已完成」**。<br>⭐ `ptz.Execute` 双语义（`operation.go:229-334`）:**无应答命令由 Execute 同步发出**,一次调用后即终态 `sent` ⇒ 断言从 `queued` 改 `sent`、`sender.calls` 从 0 改 1。 | ✅ 后端: `ptz/storage_card.go`（`FormatStorageCard` + `ResponseRequired:false` + `MaxAttempts:1` + 强制回读对账）+ 独立控制器 `device_storage_card.go` + 新权限码三方言迁移/三快照 + 维护记录<br>✅ 前端: `api/gb28181.ts` 新增 `formatStorageCard`（统一补 `confirmed:true`,独立路由）+ `StorageCardFormatDialog.vue`（二次确认,`oneWay` 由**服务端** `responseRequired` 字段判断,不前端写死）+ `StorageCardStatusPanel.vue`（卡片行「格式化」按钮,**禁用而非隐藏**;`canFormat` fail-closed;下发后进 8 轮跟踪,`freshnessText` 跟踪态优先）+ `index.vue` 接线 `canFormatStorageCard = hasPermission("gb28181:device:format_sd")` | ✅ 模拟器（`uvp-gb28181-sim`）: `VirtualStorageCards` 原为**只读随机源** ⇒ 平台下发后设备读数毫无变化、闭环在设备侧断开（且**看起来正常**）。本轮补写操作 `format(cardIndex): StorageCardFormatOutcome`（`Accepted`/`Rejected`）+ 格式化会话 + **完成态持久覆盖**（否则剩余空间会从满值掉回去）+ 注入 `nowMs` 时钟 + `FORMAT_DURATION_MS = 15_000`（由平台观察窗反推:观察窗里依次看到 ≈0% → ≈40% → ≈80% → 已完成）。落点 **5 处**（单一真源类 / `DeviceControlActions` 接口 / `SystemHandler` / `ManscdpRouterImpl` 匿名对象**必须用注入实例** / `SimulateScreen` 措辞）+ **源码级装配防回归测试**（`StorageCardFormatWiringTest`,4 条） | 授权用户二次确认后下发 → 存储卡剩余变满值;未授权用户按钮不可用 ✅<br>✅ **2026-09-20 海康真机验证通过**：平台下发 → 真设备格式化成功。这一跳**反证了 `ResponseRequired:false`**——若当初写成 `true`,海康按 9.3.1 d) 不回执,前端只会把这次成功显示成「结果未知」。<br>⛔ **待回填**：真机上的**中间态与耗时**（有没有真看到 `formatting` + `FormatProgress`?耗时是否在 8×6s ≈ 50s 观察窗内?）——决定观察窗轮数要不要调;模拟器侧 `FORMAT_DURATION_MS=15_000` 仍是按观察窗反推的估值,未与真机对齐。 | P2 |
 | ☐ D-3 | **固件分发 HTTP 服务**（§9.13） | 平台托管固件文件 + 生成 `FileURL`（现在靠外部喂 URL）+ 下载鉴权/过期 | 真下载固件（替代 5s 假进度） | 平台选固件 → 设备真发起 HTTP 下载 → 进度真实递进 | P1 |
 | ☐ D-4 | **模拟器升级真进度**（§9.13） | 复核升级结果状态机能接收各阶段（已实现） | `SystemHandler.kt:136` 的 5s 假进度 → 真下载 + 分阶段进度 + 状态机 | 升级过程中平台看到阶段推进，最终收到 `DeviceUpgradeResult` | P1 ⚠️**与 D-3 成对** |
 | ✗ D-5 | ~~**控制台「待接入」按钮接线**（工程）~~ ⛔ **2026-09-18 销单 —— 前提失效，该做的基本都已经做了**<br>原写「`ControlConsole.vue:365-367` 三个占位 → 接后端已有接口」，但 `ControlConsole.vue` 是**孤儿文件**（`cb49bc1b` 2026-07-23 已被 `PlayConsoleLinked` 替换，此后无人 import、无菜单行指向）→ 那 3 个占位**从未上线**，接它等于给死文件接线。<br>⭐ 复核真实链路（2026-09-18 逐条核）→ **4 个动作全已是真实调用**：<br>· `IFameCmd` 请求关键帧 → `PlayConsoleLinked.vue:4398` `runAdvancedAction('iframe')`<br>· `RecordCmd` 录像 → 同文件 `4402`/`4405` `record_start`/`record_stop`<br>· `GuardCmd` 布防·撤防 → 同文件 `4415`/`4418` `guard_set`/`guard_reset`<br>· `TeleBoot` 远程重启 → **不在控制台**，在设备管理页 `device-mgmt/DeviceRebootDialog.vue`（← `index.vue:85`）+ 权限门禁 `gb28181:device:reboot` + 维护记录 + 轮询<br>（`runAdvancedAction` = `PlayConsoleLinked.vue:3333` 真链路：`controlDevice(channelId,{action,idempotencyKey})` → 按 `operationId` 轮询到终态）<br>⭐ **且「设备信息」连缺口都不算**：后端 `handler/deviceinfo_trigger.go:44 uacDeviceInfoTrigger.Trigger` **注册时自动异步发 DeviceInfo 查询**（失败仅记日志）→ 无需按钮<br>🗑️ **纯清理已执行（2026-09-18）**：`ControlConsole.vue` 已物理删除。⚠️ 纠正上次的一处误述——**并不存在「`control-console-modal` 样式」**：全仓（含 `dist`）只有 1 处 `control-console-modal` 命中，是 Arco `modal-class` 的**属性名**，从未有 CSS 定义，无可连带删除。连带扫描另发现**第二个孤儿** `ChannelSnapshotCell.vue`（`444a3835`「T6 add ChannelSnapshotCell component」引入，`git log --all -S` 全历史**零引用**，且它仅剩的 2 处注释还在引用已删的 ControlConsole）→ **已于同日一并删除**（其「快照缩略图」能力现由 `device-mgmt/index.vue:428 snapshotImageUrl()` + `:2466`/`:2083` 的 `v-if="…snapshotUrl"` 内联实现，**功能未丢，删的只是没人用的抽象**）。已应用迁移 `2026-07-20-channel-snapshot.sql` 里的同名注释**刻意保留**（迁移是历史记录，不重写） | — | — | — | ✗ 销单 |
@@ -290,12 +290,177 @@
 | 编号 | 任务（条款） | 平台侧（后端 · 前端入口） | 模拟器侧 | 验收闭环 | P |
 | --- | --- | --- | --- | --- | --- |
 | ☐ E-1 | **抓拍下发 CmdType 改标准口径**<br>（§9.14.3 b) / A.2.3.2.1 / A.2.3.2.12） | `manscdp/snapshot.go:59` 的 `CmdDeviceControl` → `DeviceConfig`；收到的应答按 `DeviceConfig`+`Result` 校验 | `<SnapShotConfig>` 分支从 DeviceControlDispatcher 迁到 `DeviceConfig` 分派 | SIP 明文可见 `CmdType>DeviceConfig` + `<SnapShotConfig>` | P0 |
-| ☐ E-2 | **完成通知改 `UploadSnapShotFinished`**（A.2.5.7） | `handler/notify.go` 按新 CmdType 解析（现只认 `Notify/SubCmd=SnapShot`） | `SnapShotNotifyBuilder.kt:28` → `CmdType=UploadSnapShotFinished` + `SnapShotList/SnapShotFileID`（可多张） | 全仓搜标准值**有**匹配；抓拍完成后平台收到通知并关联到会话 | P0 |
-| ☐ E-3 | **图片上传 HTTP 落地**（§9.14.3 c) 留白 → 按 0-4 契约） | 收图接口兼容新口径 + 落盘 + 入库（现有 registry 收图链路复用） | 按契约真上传（Android 侧当前根本没上传） | 抓拍 → 图片落到平台并可预览 | P0 |
-| ☐ E-4 | **抓拍文件命名 41 位**（§9.14.1 + 表4） | 解析校验（不合规可告警） | 按 `设备编码 20 + 图像编码 02 + 时间 17 + 序列码 2` 生成 | 平台收到的文件名符合 41 位规则 | P1 |
+| ◐ E-2 | **完成通知改 `UploadSnapShotFinished`**（A.2.5.7） | ✅ **平台侧已修（2026-09-20）**：① `handler/message.go` 放行 `CmdType=UploadSnapShotFinished`（新增分支，与私有形态那支**并列**、各走各的 sink 方法）；② `manscdp.ParseUploadSnapShotFinished` 新增（一对多，见下方"落点更正"）；③ `devicecapture` 的完成计数由"按通知条数"改为**按文件标识去重计数**（`session.notified`→`notifiedIDs`）。⛔ 原落点 `handler/notify.go` 写错，见下 | ⏳ 未做：`SnapShotNotifyBuilder.kt:28` → `CmdType=UploadSnapShotFinished` + `SnapShotList/SnapShotFileID`（可多张）。⚠️ 平台侧已**双向兼容**，故此侧不阻塞联调，只是模拟器暂不覆盖标准路径 | ✅ 真机原文锚点 `TestParseUploadSnapShotFinished_FollowsHikvisionWire`（海康 `37010301021320000002`，2026-09-20 13:31:04 原文）；入站门禁 `TestMessageHandlerDispatchesUploadSnapShotFinished`；会话终结 `TestRegistryCompletesSessionOnStandardFinishedNotify` | P0 |
+| ✅ E-3 | **图片上传 HTTP 落地**（§9.14.3 c) 留白 → 按 0-4 契约） | ✅ **平台侧全链完成（2026-09-20）**：① 收图接口兼容真机三形态（POST catch-all + multipart 流式 + 文件名从部件头取）；② 落盘搬出公开静态目录（`<serverroot 父目录>/gb-device-snapshots/…`）；③ **入库** `gb_channel_snapshot`（三方言迁移 + 三快照，唯一键 `(channel_code,file_name)` 让重传幂等）；④ **稳定读接口** `GET /api/gb28181/device-mgmt/snapshots/:id/content`（JWT + `gb28181:device:snapshot`，按库行 id 取图，不随会话过期）；⑤ **图像库入口后端就绪**：列表接口 `GET /api/gb28181/device-mgmt/snapshots`（筛选/分页/按通道归属套数据范围）+ 一级菜单行「图像库」+ 角色授权（三方言 + 三快照）。真机端到端实测 136273B 真 JPEG 落盘并通过读接口取回。⑥ **图像库前端页**（2026-09-20 **与菜单行同批收口**）：`web/src/views/gb28181/snapshot-library/index.vue`（设备/通道/来源/时间筛选 + 缩略图网格 + 大图预览 + 分页），并在抓拍会话面板加「在图像库中查看本次抓拍」入口（带 `sessionId` 深链）。✅ **菜单已打进开发库（2026-09-20）**：刷新页面即见（不需要重启后端），并修正了菜单 `sort` 撞车（80→55）。⏳ **未做**：目录按天分桶（§2.3）与保留期清理（§2.5） | 按契约真上传（Android 侧当前根本没上传） | 抓拍 → 图片落到平台、入库、可按 id 预览（**平台侧已达成**；模拟器侧未做） | P0 |
+| ◐ E-4 | **抓拍文件命名 41 位**（§9.14.1 + 表4） | ✅ **平台侧解析已做（2026-09-20）**：`manscdp.ParseSnapshotFileID` 按"设备码 20 + 图像码 2 + 时间 17 + 序列码"从**前往后**切，反解 `captured_at` 落库；`StandardCompliant()` 单独报告是否严格 41 位。⛔ **不按 41 位硬校验**（真机是 40 位，见 §4.E 的 ③）⇒ 不合规只影响 `captured_at` 回落接收时刻，不拒收 | 按 `设备编码 20 + 图像编码 02 + 时间 17 + 序列码` 生成；⚠️ **补零到 2 位**（真机不补零，模拟器按标准补零更规范） | 平台收到的文件名能反解出拍摄时刻；不合规不影响收图 | P1 |
 | ☐ E-5 | **抓拍失败语义**（A.2.5.7 注释） | 按「文件标识个数 < 要求张数 = 部分失败」展示 | 缺失时如实少报标识 | 故意让 1/3 张失败 → 平台显示**部分失败**而非整体成功 | P1 |
 | ☐ E-6 | **Android 抓拍真落地**（CameraX ImageCapture） | 无需改 | `SnapshotCapture.android.kt:25 takeJpeg` 恒返 `null` → 接 CameraX；iOS 侧 `IosSnapshotSourceHolder` 已有真实现可参考 | Android 真机抓拍产出 JPEG | P1 ⚠️**必须等 E-1~E-3 口径定完再动手** |
 | ☐ E-7 | **抓拍配置读取**（走 ConfigDownload 家族） | 纳入 A-1 的 12 类 `ConfigType` | 同上 | 能读回最近一次抓拍配置 | P2 |
+
+#### 📌 E-2 落点更正与真机形态（2026-09-20 核，勿再按原描述找落点）
+
+**① 原落点路径写错**：原写 `handler/notify.go`，但那是**订阅 NOTIFY** 处理器
+（`NotifyHandler` / `SubscriptionState` / `PTZPrecisePosition`），与抓拍无关。真实门禁在
+`handler/message.go` 的 `head.CmdType == manscdp.CmdNotify`（`CmdNotify = "Notify"`）——
+真机发的是 `UploadSnapShotFinished` ⇒ **连分支都进不去**，所以症状一直是"平台收不到完成通知"。
+
+**② 真机原文**（海康 `37010301021320000002`，2026-09-20 13:31:04，`SN=9402` 那次 `DeviceConfig`
+下发 3 张抓拍后主动上报）：
+
+```xml
+<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>9402</SN>
+<DeviceID>37010301021320000002</DeviceID><SessionID>probe-b-…</SessionID>
+<SnapShotList><SnapShotFileID>37010301021320000002022026092013305816101</SnapShotFileID></SnapShotList>
+<SnapShotList><SnapShotFileID>3701030102132000000202202609201331014002</SnapShotFileID></SnapShotList>
+<SnapShotList><SnapShotFileID>3701030102132000000202202609201331044003</SnapShotFileID></SnapShotList></Notify>
+```
+
+⛔ **三个必须照抄的点**（少一个就静默解析出 0 个标识，两侧都不报错）：
+1. 根元素是 **`<Notify>`** 不是 `<Response>` ⇒ 解析结构体**不能带 `XMLName`**；
+2. `<SnapShotList>` 是**一张一个的并列元素**（真机 3 张 = 3 个并列 `SnapShotList`），而标准文字
+   写的是"一个 `SnapShotList` 里放 N 个 `SnapShotFileID`" ⇒ **外层收切片、内层再收切片**，
+   两种写法都要吃下（只认真机那种 = 把厂商实现当标准）；
+3. `DeviceID` **有** ⇒ 能落在 `handler/message.go` 的 `head.DeviceID != ""` 分支内。
+
+**③ 顺带拿到 E-4 的真机锚点 —— 而且它同时是个反例（2026-09-20 复核更正）**：
+`SnapShotFileID` = 设备编码 20 + 图像编码 2 + 时间 17（`yyyyMMddHHmmss` + **3 位毫秒**）+ 序列码。
+
+⛔⛔ **序列码不补零，总长不一定是 41 位**。真机三张的实际长度是 **41 / 40 / 40**：
+
+| 文件名 | 长度 | 时间字段 | 序列码 |
+| --- | --- | --- | --- |
+| `37010301021320000002022026092013305816101` | 41 | `…133058` + `161` | `01` |
+| `3701030102132000000202202609201331014002` | **40** | `…133101` + `400` | `2` |
+| `3701030102132000000202202609201331044003` | **40** | `…133104` + `400` | `3` |
+
+⛔ 本文档上一版把后两条记成"`…133101400`+`02`"（按 2 位序列码从后往前切）—— 那是**错的**：
+按那个切法时间字段会少一位（`…13310140`），解出的拍摄时刻整体偏移。正确切法是
+**从前往后**：前 22 位是设备码+图像码，紧接着固定 17 位是时间，**剩下的（可能只有 1 位）才是序列码**。
+判定与解析见 `manscdp.ParseSnapshotFileID`（`snapshot_file_id.go`，含连拍时刻递增的锚点用例）。
+
+⭐ 所以平台的策略是「**能解析就解析，合规性单独判**」：`StandardCompliant()` 报告是否严格 41 位
+（用于告警/治理），而**解析不要求 41 位** —— 按 41 位硬校验会让真机 3 张里 2 张的时间轴回落到接收时刻。
+
+**④ ⛔ 为什么必须同时改"计数口径"，光放行报文不够**：`devicecapture.Registry.completeLocked`
+的条件是 `len(Files) >= SnapNum && NotifiedCount >= SnapNum`。标准形态是**一条报文带 N 个标识**，
+而原实现按"收到一条通知 +1"计（`session.notified` 按**单个** `SnapShotID` 去重）⇒
+即使放行了报文，`NotifiedCount` 最多到 1，**会话永远完不成**，前端轮询到的一直是"未完成"。
+现在按**文件标识**去重计数（`session.notifiedIDs`），且两种形态共用同一份记账
+（`devicecapture.Registry.recordFinished`）—— 形态可以有两种，"哪些标识算完成"只能有一个答案。
+
+**⑤ 变异自检暴露的用例盲区（已补）**：只写"来源设备也外来"的归属用例时，把报文 `DeviceID`
+那道校验删掉**仍然全绿**（来源校验先把它挡住了）⇒ 归属校验的**两条独立通道各要一条用例**
+（来源不对 / 来源对但报文声称别的设备）。
+
+#### 📌 E-3 真机收图形态（2026-09-20 实测 → **当天平台侧已修并真机验证**）
+
+问「海康的抓拍图片现在能传上来吗」→ 修之前 **不能**。不是配置问题，是**接口形态三处不兼容**，
+每一处单独就足以失败（真机 `37010301021320000002`，假收图端点 + 探针直接下 `SnapShotConfig` 取证）：
+
+| # | 设备实际发出 | 平台现在的接口 | 实测 |
+| --- | --- | --- | --- |
+| 1 | **`POST`** | 只注册了 `PUT` | gin **路由级 404**（`404 page not found` 纯文本，**没进 handler**） |
+| 2 | 路径到 `/uploads/<token>/` 就结束，**没有文件名段** | `/uploads/:token/:filename`（`:filename` 必填） | 同上（路由不匹配） |
+| 3 | body 是 **`multipart/form-data`**（部件 `name="file"`，文件名在**部件头**），部件内 `Content-Type: image/jpeg` | 要求 body 是**裸 JPEG**（首尾 `ffd8`/`ffd9` + 请求头 `image/jpeg`） | 即便路由放行，`Registry.Upload` 也返 `ErrInvalidImage` ⇒ 422 |
+
+**真机请求原文**（`SessionID` 是**查询串**不是路径段）：
+```
+POST /api/gb28181/device-snapshots/uploads/<token>/?SessionID=<sessionId> HTTP/1.1
+User-Agent: IP Camera
+Content-Type: multipart/form-data; boundary=------------------------6c38787168025c9d
+Content-Length: 136980
+--…  Content-Disposition: form-data; name="file"; filename="37010301021320000002022026092014090311401.jpg"
+```
+⭐ **判别两种 404**：`404 page not found`（纯文本）＝ gin **没匹配上路由**；
+`{"code":404,"message":"抓拍图片接收失败"}`＝**进了**控制器但 token 不认识。
+
+**两条顺带事实**：
+- `SnapShotFileID`（完成通知里）＝ 上传文件名**去掉 `.jpg`** ⇒ 可据此把"落盘的图"与"通知里的标识"对上（补上 E-4 的另一半）。
+- ⛔⛔ **完成通知 ≠ 上传成功**：A/B 那次 `UploadURL` 指向 `192.168.10.120:9/probe`（discard 端口、必然拒连），
+  设备**照样**回 `UploadSnapShotFinished` 带 3 个标识。⇒ 判"有没有传上来"**只能看平台有没有收到字节**。
+- ⚠️ **另有第 4 处隐患（本次未改）**：`snapshotUploadURL` 的 host —— ⛔ **更正**：代码**已经**优先读
+  `X-Forwarded-Host`、只在为空时才回落 `c.Request.Host`（`controllers/device_snapshot.go:188-191`），
+  所以代码侧是对的，**缺陷在 nginx 只设 `X-Forwarded-Proto`、没设 `X-Forwarded-Host`**
+  ⇒ 操作员用 `localhost` 打开控制台时下发的地址是 `http://localhost/…`，设备连不到
+  （与扫码引导页那个坑同源）。修的时候改 nginx 或改配置项，**别去改这个函数**。
+
+**验收锚点**：真机上传成功 ⇒ `GET /channel/:id/snapshot-sessions/:sessionId` 的 `files` 非空、
+`receivedCount` 等于 `snapNum`，且文件名 = 通知里 `SnapShotFileID` + `.jpg`。
+取证配方与脚本固化在技能 `uvp-device-config-family` §19.7/§19.8（`scripts/snap_upload_capture.py` / `send_snapconfig.py` / `scripts/snap_e2e/`）。
+
+**✅ 平台侧修法（2026-09-20）**：
+
+| # | 改法 | 落点 |
+| --- | --- | --- |
+| 1 | POST 注册 **catch-all** `…/uploads/*token`。⛔ **不能**用 `:token` + gin 的 `RedirectTrailingSlash` 307 兜（307 要设备跟着重发，**设备不跟随**）；gin 也不允许同一层同时注册 `:token` 与 `*token`（panic） | `routes/routes.go` |
+| 2 | `resolveDeviceSnapshotUploadTarget` 统一剥 catch-all 的前导/尾斜杠、切出 token 与路径文件名（PUT 具名参数形态同时兼容） | `controllers/device_snapshot.go` |
+| 3 | 按 `Content-Type` 分流：multipart 走**流式** `MultipartReader()`（不落临时文件），文件名/类型从**部件头**取；判"文件部件"看 `FileName()` 是否为空，**不死认 `name="file"`**。裸 JPEG 老路保留兼容 PUT | 同上 |
+| 4 | 落盘搬出公开静态目录：`bootstrap.deviceCaptureBaseDir()` 取 `serverroot` 的**父目录** ⇒ 默认 `./resource/gb-device-snapshots/…`（⛔ 基目录必须返回父目录：`Registry.Upload` 里已拼了一层 `gb-device-snapshots`，返回它本身会重复一层） | `bootstrap.go` |
+
+⭐ **真机端到端已实测通过**（用生产代码另起端点，**不重启后端**）：设备回传
+**136273B / 2560×1440 真 JPEG**，落盘名 = 部件头里的 41 位标识
+`37010301021320000002022026092014333016801.jpg`；读接口 `200 / 136273B / image/jpeg`，
+错 token 与错文件名均 `404`。6/6 变异精确红。
+
+#### 📌 E-3 第三批（图像库列表接口 + 一级菜单入库）—— 验证与**两条被纠正的口径**
+
+改动面：列表接口 `GET /api/gb28181/device-mgmt/snapshots`（筛选 / 分页封顶 200 / 按 `gb_channel`
+归属套数据范围）+ 一级菜单行「图像库」+ 列表接口登记与角色授权（三方言迁移 + 三份全量快照）。
+**20/20 变异精确红 + sha256 全部还原**（驱动：`tmp/run_mutations_snapshot_library.py`）。
+
+⛔⛔ **纠正 ①：失败响应不是"HTTP 200 + 业务码"，是 `HTTP 400 + {"code":1}`。**
+`DefaultResponseHandler.Fail`（`app/utils/response/response.go:82`）默认
+`httpCode = http.StatusBadRequest`，而 `ListSnapshots` 调 `FailAndAbort` 时**从不显式传状态码**。
+之前按 200 记录，是因为同包 `zlm_node_test.go` 的 `init()` 把全局 `app.Response` 换成了
+`mockResponse`（其 `Fail` 硬编码 200）——**单跑看见的是 mock，全量跑才看见真相**。
+⇒ 这类用例必须先 `useRealResponseHandler(t)`（同包既有 helper，save/restore 模式）。
+
+⛔⛔ **纠正 ②：`routes["GET "+常量]` 不能证明"路由与迁移登记同路径"** —— 拿常量断言常量，
+常量与路由一起改歪时两侧同时变、照样绿；而迁移里写的是字面量。
+⇒ 在常量定义侧（`models` 包）加 `TestSnapshotLibraryPathConstantsMatchTheMigrationLiterals`
+把常量比到字面量；`routes` 包保留"确实注册在该路径上"的断言，注释不再声明未覆盖的性质。
+
+⭐ 本批变异自检新增 3 类必须背下来的坑（详见技能 §21.10）：全局可变量被同包 mock 泄漏、
+拿常量断言常量、**播种断言缺"若不过滤就会被命中"的归属行**（`type=3` 那条因此存活过一轮）。
+
+#### 📌 E-3 第四批（图像库**前端页** + 会话深链）—— 前端契约与 3 条前端坑
+
+改动面：`web/src/views/gb28181/snapshot-library/{index.vue,snapshotLibraryState.ts,*.test.ts}`、
+`api/gb28181.ts` 的列表接口、`device-mgmt/SnapshotConfigPanel.vue` 的图像库入口。
+**10/10 变异精确红 + sha256 全部还原**（驱动：`tmp/run_mutations_snapshot_library_web.py`）。
+
+| # | 前端必须遵守的点 | 落点 |
+| --- | --- | --- |
+| 1 | ⛔ **缩略图不能直连 `item.url`**：取图接口在鉴权组内，`<img>` 带不了 Authorization 头 ⇒ 整页 401 破图且不报错。统一经 `snapshotContentImageUrl(url, token, baseUrl)` 补 `?token=` | `snapshotLibraryState.ts` |
+| 2 | ⛔ **`pageSize` 选项别超 200**：后端硬截到 200，给 500 会变成"显示 500/页、实际只回 200 条"，页数也跟着错 | 同上 |
+| 3 | ⛔ **跳图像库前先探测路由**（`router.resolve(...).matched.length`）：菜单行没生效时路由不存在，`push` 会落到 404 白屏，比按钮置灰更难懂 | `SnapshotConfigPanel.vue` |
+
+⭐ **跨端契约断言**（`index.layout.test.ts`）：直接读 Go 侧迁移与 models 源码，断言
+① 菜单 `component` 指向的文件**真实存在**（否则菜单点开空白）、② 前端请求路径与后端路由常量一致、
+③ `SNAPSHOT_LIBRARY_PATH` 与迁移里的菜单 `path` 逐字相同。文件不存在时自动跳过，不影响独立打包场景。
+
+⛔⛔ 变异自检抓到**第 4 个假锚点**（同一形态第 4 次）：源码断言
+`toContain("if (token !== requestToken) return;")` —— 该行在 try/catch 各出现一次，
+把**主路径**那处删掉仍然绿。⇒ 判据：断言"某语句在不在"时，匹配串必须带上**只有该处才有的邻句**。
+（前三次：菜单 path 被授权语句带上、`routes["GET "+常量]`、拿常量断言常量。）
+
+#### 📌 E-3 第五批（菜单**打进开发库** + 一处真缺陷修正）—— 2026-09-20
+
+背景：用户"没看到菜单"，需把迁移打进开发库（220 `uvp_gb28181`）。
+
+| # | 做了什么 | 结论 |
+| --- | --- | --- |
+| 1 | 三查开发库现状 | **只跑过上一批**：`gb_channel_snapshot` 表已建、读图接口 `sys_api` 已登记；本批的列表接口 / 菜单行 / 授权**一条都没进** |
+| 2 | 手工执行 `2026-09-20-channel-snapshot-library.sql` | 菜单行 id `140509`、`sys_api` 589(列表)/587(取图)、`sys_menu_api` 绑到抓拍按钮 `140450`、`sys_role_menu` role 1、casbin 2 条 —— 全部落地 |
+| 3 | 验证 | 库侧逐项计数；路由侧**不带 token 打新接口 = 401（不是 404）⇒ 运行中的后端已含本批代码**（零成本判据） |
+| 4 | ⛔ 生效条件澄清 | **本批不需要重启后端**：菜单 `getRouters` 每次查库 + 前端 route store 无 `persist` ⇒ 刷新即见；casbin `autoloadpolicyseconds=120` 自动重载 ⇒ ≤2min 自行生效。（建表类迁移仍需重启） |
+
+⛔⛔ **修正一处真缺陷：菜单 `sort` 撞车**。初版给图像库取 `sort=80`，撞上已有的
+「SIP 接入信息」(80)。而一级菜单排序走 `TreeSort()` —— **`sort.Slice`（非稳定）+ 相等时
+`return aSort < bSort` = false，没有任何 tiebreak** ⇒ 同 sort 两项**顺序不确定**，
+表现为"菜单栏位置偶尔会变"（极难归因）。已改 `sort=55`（「云端录像」50 与「录像计划」60 之间，
+与云端录像同属"历史媒体资源浏览"同组），**六处同步**（三方言迁移 + 三快照）。
+⇒ 通用判据：**给菜单类迁移定 `sort` 前，先查同层现有取值**（技能 §24.4）。
 
 ### 4.F 信令与传输
 
@@ -409,7 +574,7 @@
 | X-GB-Ver 解析 + 2016/2022 双版本 profile 与门禁 | `protocol/profile.go` | 出站带版本（`GbVersionNegotiation` 做 min 协商） | 回归（F-2 已完成 2026-09-17） |
 | GB18030 真实转码 | `manscdp/codec.go:100-163` | ✅ `gb28181/SignalingCharset.kt`（双向真转码） | 回归（I-1 已完成 2026-09-17） |
 | NAT / TCP 长连接（复用 + 断链自愈 + **断链判离线**） | `bootstrap.go:613`、`transport_layer.go:464-467`、`sip/link_loss.go` + `device/link_watch.go` | ✅ 已实现 + **断链自愈**（`domain/SipReconnect.kt`）+ **rport 自发现**（`sip/ViaObservedEndpoint.kt`） | 回归（F-3 平台侧 + 模拟器自发现均已落地 2026-09-17） |
-| 精准云台控制 PTZPreciseCtrl | `manscdp/ptz_precise.go` | 已实现 | 回归 |
+| 精准云台控制 PTZPreciseCtrl | `manscdp/ptz_precise.go`（2022 profile → `DeviceControl` + `PTZPreciseCtrl/Pan,Tilt,Zoom`） | 已实现 | ⭐ **2026-09-20 海康真机实测（DS-2DC2C40MY-DE，channel 3748，SN 10110）**：平台帧经 SIP trace 解密与 A.2.3.1.11 + A.2.1.11 **逐字节一致**、设备 **9ms 回 `200 OK`**，但**画面完全不变**（Pan/Tilt/Zoom 多组组合、含 `Zoom=3`/`Zoom=4` 均无变倍）；**同一条链路上** `PTZCmd left 6s` 画面明显转动 ⇒ **链路是通的，是这条命令设备不执行**。⛔ 该机型规格是 **PT-定焦**（2.8mm 定焦、**无光学变倍**、水平 0°~350°/垂直 0°~100°、水平≤20°/s）；对**同属 2022 精准定位特性族**的 `PTZPosition` 查询直接回 `<Result>ERROR</Result><Reason>Cann't get ptz position</Reason>`。⛔⛔ 标准**表 1 序号 10** 的「应答命令」列写作「**（无）**」⇒ 平台**永远**拿不到执行反馈；且 7.3 b) 把「PTZ 精准控制」列为「**宜**」（可选）⇒ **这不是信令 bug，是设备能力边界 + 标准的可观测性缺口**。<br>**平台侧真缺口 = 不可观测（待做）**：① `SupportsPrecisePTZ()` 只按 `effective_version` 派生（本机 report 3.0 → 判 2022 → 按钮可用），**没有负向证据通道**（`PTZPosition` 收到 `Result=ERROR` 未落库成「该设备不支持精准定位」，不同于 `ResolveHomePositionCapabilities` 的历史证据机制）；② 前端**无条件**提示「精准定位请求已受理」，把「已发出」说成「已受理」。建议：把 `Result=ERROR/Reason` 收成负向能力证据并在卡片上区分「未验证/不支持/已下发」，文案改「**已下发（设备无应答命令，须以画面为准）**」。 | 回归 |
 | PTZ 精准状态查询 | `ptz/query.go:34-39` | 已实现 | 回归 |
 | 看守位查询 + 设备侧自动归位 | `ptz/query.go`、`controllers/device_ptz_home_position_test.go` | 已实现 | 回归 |
 | 巡航轨迹列表 / 详情查询 | `ptz/query.go`、`controllers/device_ptz_query.go` | 已实现 | 回归 |
@@ -507,3 +672,79 @@
 - **建议**：另立工单 —— 要么用转换脚本重新全量生成两个快照，要么给 `initialization_contract_test.go`
   加「表集合与 MySQL 快照相等」的断言把漂移钉死。
 
+
+#### 📌 E-3 第六批（**建表漏 COLLATE ⇒ 列表接口恒 400** 的定位与修复）—— 2026-09-20
+
+现象：用户报「查询图像库失败，请稍后重试」+「统计抓拍图片失败」。
+
+| 环节 | 事实 |
+| --- | --- |
+| 日志 | `ERROR db … event=db.query_failed error={type=*mysql.MySQLError code=1267}` + `route=/api/gb28181/device-mgmt/snapshots http_status=400` |
+| `1267` | `ER_CANT_AGGREGATE_2COLLATIONS`（Illegal mix of collations） |
+| 根因 | 建表写成 `DEFAULT CHARSET=utf8mb4`（无 `COLLATE`）⇒ MySQL 取**该字符集的默认排序规则** `utf8mb4_0900_ai_ci`，而 `gb_channel`/`gb_device` 与库默认都是 `utf8mb4_general_ci` ⇒ `ch.channel_id = s.channel_code` 两侧不一致 |
+| 为什么只在列表炸 | MySQL 只在**列对列**比较时报 1267；`列 = 参数` 按列规则走 ⇒ 建表、收图写入、按 id 读图全正常，唯独带 JOIN 的列表接口必挂 |
+| 那两句用户文案 | 「统计抓拍图片失败」= 后端 **COUNT** 查询（同样带 JOIN）的失败文案；「查询图像库失败」= 前端页面兜底文案。**同一个根因** |
+
+修复（三处，缺一不可）：
+1. **DDL 源码**：`migrations/2026-09-20-channel-snapshot-library.sql` + MySQL 全量快照
+   `uvp-gb28181.sql` 的建表收尾补 `COLLATE=utf8mb4_general_ci`（仓库既有 73 张表都是这个写法；
+   PG/SQL Server 快照不用改 —— 没有 per-table collation）。
+2. **开发库已建出来的表**：`ALTER TABLE gb_channel_snapshot CONVERT TO CHARACTER SET
+   utf8mb4 COLLATE utf8mb4_general_ci;`
+   ⛔⛔ `CREATE TABLE IF NOT EXISTS` 让"改完 DDL 重跑"**修不好已建出来的表**；
+   且该迁移文件 **15:08 已被 `gb_schema_migrations` 记账** ⇒ 之后往文件里追加的内容一条都不会自动进库。
+3. **防回归锚点**：`TestChannelSnapshotDeclaresGeneralCollationOnMySQL`（在 `models` 包，
+   断言迁移文本 + MySQL 快照建表块内含 `charset=utf8mb4 collate=utf8mb4_general_ci`）——
+   ⛔ 必须做**文本**断言：行为测试只跑权限段 DML，方言 DDL 在 sqlite 上被跳过，覆盖不到建表收尾那一行。
+
+⭐ 端到端验证**不重启后端**完成：自签 JWT（复用活跃会话，见技能 `uvp-local-dev-setup`
+的 `scripts/mint_dev_token.py`）打正在跑的进程，一次拿到 5 条契约证据 ——
+`?source=device` 200 / `?source=alien` 400+`source 不合法` / `?pageSize=500` 回落 200 /
+`?channelId=abc` 400 / 正常查询 200 `{code:0,total:0}`。全量回归 EXIT=0。
+
+⚠️ 周边（**不在本批**）：本库另有 11 张表是 `0900_ai_ci`、1 张是 `unicode_ci`（历史批次同样漏写），
+当前无活 bug（只按 int/参数 JOIN），但**将来给它们加"按编码 JOIN"就会重犯**。
+
+#### 📌 E-3 第七批（**抓拍报文从未发出**：`snapshot_config` 没被 ptz 认识）—— 2026-09-20
+
+现象：用户报「海康的设备我下发了抓拍设备没上传」。会话起得来、operation 记
+`accepted` + `device_result=OK`，**设备一张图都不上传**，两侧日志全绿。
+
+| 环节 | 事实 |
+| --- | --- |
+| trace 取证 | `gb_sip_trace_message` 里三条 `snapshot_config` 操作（SN **10179/10181/10183**）的**出向 MESSAGE 正文全部是** `<Control><CmdType>DeviceConfig</CmdType><SN>…</SN><DeviceID>…</DeviceID><VideoParamAttribute Num="0"></VideoParamAttribute></Control>` |
+| 也就是说 | 平台发的是「把视频参数清空」，`SnapShotConfig` **一个字节都没发出去**；设备那句 `Result=OK` 是对空视频参数配置的应答 |
+| 根因 | `snapshot_config` 只是 `controllers/device_snapshot.go` 里的**字符串字面量**，`ptz` 包完全不认识它 ⇒ **三处「按 action 分流」全部落到 A-5 视频参数分支** |
+
+三处断面（**漏一个都不算修好**）：
+
+| # | 位置 | 不修的后果 |
+| --- | --- | --- |
+| 1 | `ptz/scheduler.go::buildScheduledPTZBody` | **报文错**（本次的直接原因） |
+| 2 | `ptz/handler.go::OnPTZMessage` 的 `CmdDeviceConfig` 支 | ack 按 A-5 走，派生的对账去回读 `VideoParamAttribute` |
+| 3 | 由 2 派生的对账 | 与父 payload 的块一个都对不上 ⇒ 差异 0 条 ⇒ **判 read_ok = 没对账**（比不排对账更坏：它报"正常"） |
+
+修复（**判据换维度**，不是补一条白名单）：
+1. `ptz/device_config.go` 新增导出常量 `ActionSnapshotConfig` + 判定函数
+   `deviceConfigOperationForm(action, payloadJSON)`：判据取 **payload 里 `blocks` 是否非空**
+   这个**数据事实**；名单里声明属于配置族却没有 `blocks` ⇒ **报错**（不许回落成 A-5）。
+   ⇒ 将来新增配置族 action 只要用 `blocks` 装 payload 就自动走对，**不会再漏**。
+2. `scheduler.go` / `handler.go` **共用这一个函数**；`controllers` 改用常量，字面量清零。
+3. 防回归锚点 3 条（全部通过变异自检「精确红 + sha256 还原」）：
+   `TestBuildScheduledPTZBodyBlocksPayloadNeverRebuildsAsVideoParamAttribute`（**性质测试**，
+   含一个不存在的 action 名代表"将来的新 action"）、
+   `TestOnPTZMessageRoutesSnapshotConfigAckToBlockFamily`、
+   `controllers/device_snapshot_upload_url_test.go`。
+   ⛔ 变异注入坑：把 handler 的**参数**换成常量是**等价变异**（payload 有 blocks 时判据与 action
+   无关）会假绿，必须**同时短路 payload 判据**才复刻出原缺陷。
+
+⭐ **同批加固的第二个断点**（独立于上面，属同一类"下发了个设备够不着的地址"的静默失效）：
+`snapshotUploadURL` 用**浏览器请求的 Host** 派生 UploadURL，而前端 dev server 的 `xfwd: true`
+会把原始 Host 透传 ⇒ **用 `localhost:5177` 开平台就会下发出 `http://localhost:5177/…`**，
+设备解析成自己，永远传不上来且平台不报错。已加门禁 `snapshotUploadHostUnreachableForDevice`：
+localhost / 回环 / 通配 **当场拒发**（503 + 文案），**域名一律放行**。
+⇒ 操作口径：**用平台所在机器的局域网 IP 开平台**。
+
+⚠️ 生效条件：**必须重启后端**（dev 是 VSCode 调试会话 ⇒ F5），重启后重新下发一次抓拍
+（设备侧记住的仍是上一轮手工实验的配置，`UploadURL` 指向早已关闭的实验端口）。
+全量 `go test ./app/gb28181/... ./resource/... -p 1` → 66 包 ok / 零 FAIL。
