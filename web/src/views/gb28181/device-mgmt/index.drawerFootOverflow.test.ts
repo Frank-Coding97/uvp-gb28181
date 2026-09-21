@@ -42,9 +42,13 @@ describe("device detail drawer footer must not force a horizontal scrollbar", ()
   it("按钮本身不被压缩，靠换行而不是挤压来收场", () => {
     // `flex: 0 0 auto` = 不缩不胀；配合上面的 wrap，超宽时按钮整体掉到下一行，
     // 而不是把文字挤到重叠（按钮里是 nowrap 文本，压缩只会更难读）。
-    expect(source).toContain(".drawer-foot .arco-btn { flex: 0 0 auto; }");
+    //
+    // ⛔ 走 [ruleBody] 而不是整串 `toContain(".drawer-foot .arco-btn { flex: 0 0 auto; }")`：
+    // 单声明块在 prettier 手里是**多行**写法（提交钩子会跑 prettier --write），
+    // 断言整串等于把「格式」也钉进了契约 —— 样式没改、只是被格式化过就会红。
+    expect(ruleBody(".drawer-foot .arco-btn")).toContain("flex: 0 0 auto");
     // 主按钮仍然独占剩余空间（保持"主操作"的视觉权重）。
-    expect(source).toContain(".drawer-foot .arco-btn-primary { flex: 1; }");
+    expect(ruleBody(".drawer-foot .arco-btn-primary")).toContain("flex: 1");
   });
 
   it("留下机制说明，避免后人当成冗余样式删掉", () => {

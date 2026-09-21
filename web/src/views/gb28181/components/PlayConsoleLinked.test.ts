@@ -1757,7 +1757,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(
-      /@media \(max-width: 720px\)[\s\S]*?\.linked-detail\s*>\s*\.linked-ptz-layout\s*\{[^}]*flex:\s*0 0 auto;[^}]*grid-template-rows:\s*none;[^}]*height:\s*auto/s
+      // ⛔ 媒体查询两种写法都要接受：stylelint 的 media-feature-range-notation 会把
+      //    `(max-width: 720px)` 自动 fix 成 `(width <= 720px)`（提交钩子会跑 --fix），
+      //    只认一种写法的话，样式没改、只是被格式化过也会红。
+      /@media \((?:max-width:\s*720px|width <= 720px)\)[\s\S]*?\.linked-detail\s*>\s*\.linked-ptz-layout\s*\{[^}]*flex:\s*0 0 auto;[^}]*grid-template-rows:\s*none;[^}]*height:\s*auto/s
     );
     expect(source).toMatch(/\.home-card-actions\s*\{[^}]*display:\s*flex/s);
     expect(source).toMatch(/\.home-settings-form\s*\{[^}]*display:\s*grid/s);
@@ -1765,7 +1768,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
     );
-    expect(source).toMatch(/\.sidebar-probe\s+\.panels\s*\{[^}]*background:\s*transparent/s);
+    // ⛔ `[^{]*` 而不是 `\s*`：这条规则可能与 `.sidebar-deviceconfig .panels` **并列成一条**
+    //   （`.a .panels,\n.b .panels {`），语义没变但选择器后面不再紧跟着 `{`。
+    expect(source).toMatch(/\.sidebar-probe\s+\.panels[^{]*\{[^}]*background:\s*transparent/s);
     // ⛔ 2026-09-20：「高级」页签退役，它的视觉契约（sidebar-advanced / linked-advanced-layout /
     //    adv-btn 族）必须**整体消失**，不能只剩一堆没人用的死样式挂在文件末尾 ——
     //    死 CSS 会被后来的人当成"还有这个面板"的证据，也会在改配色时被"顺手同步"。
@@ -3147,7 +3152,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(/\.cruise-stops-list\s*\{[^}]*max-height:\s*clamp\(168px,\s*30vh,\s*260px\)[^}]*overflow-y:\s*auto/s);
     expect(source).toMatch(/\.cruise-stop-add\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
     expect(source).toMatch(
-      /@media \(max-width:\s*560px\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s
+      // ⛔ 同上：两种媒体查询写法都接受（stylelint --fix 会把 max-width 改成 width <=）。
+      /@media \((?:max-width:\s*560px|width <= 560px)\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s
     );
     wrapper.unmount();
   });
