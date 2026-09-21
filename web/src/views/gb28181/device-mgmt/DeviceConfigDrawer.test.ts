@@ -146,7 +146,7 @@ function mountDrawer(props: Record<string, unknown> = {}) {
       effectiveVersion: "2022",
       channelId: 3539,
       // 默认按「播放控制台里那份」挂：那边外面有画布，OSD 面板才长成完整形态。
-      // ⛔ 不写这条的话测的是 `DeviceConfigDemo`（免登录预览页）的形态 ——
+      // ⛔ 不写这条的话测的是「宿主没有画面」的形态 ——
       //    没有画布 ⇒ 没有「调整位置」、精确数值默认展开。两种形态各有一条用例钉着。
       osdCanvasLinked: true,
       ...props
@@ -437,9 +437,9 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     expect(wrapper.find("[data-testid='osd-time-pos']").text()).toBe("X 10 · Y 20");
   });
 
-  it("没有可拖的画布时不渲染「调整位置」（预览页没有画面，那会是个点了没用的按钮）", async () => {
+  it("没有可拖的画布时不渲染「调整位置」（宿主没有画面时，那会是个点了没用的按钮）", async () => {
     api.getChannelDeviceConfigs.mockResolvedValue(deviceConfigOk([osdEntry()]));
-    // `osd-canvas-linked` 关掉，正是 `DeviceConfigDemo` 那个免登录预览页的情形。
+    // `osd-canvas-linked` 关掉，正是「宿主没有画面」（设备详情那种用法）的情形。
     const wrapper = mountDrawer({ osdCanvasLinked: false });
     await flushPromises();
     await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");

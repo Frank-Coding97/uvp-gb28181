@@ -111,8 +111,8 @@ const props = withDefaults(
     /**
      * 抽屉外面有没有一块可拖画的 OSD 画布。
      *
-     * ⛔ 默认 `false`：`DeviceConfigDemo` 那个免登录预览页也挂这个抽屉，但它没有画面 ——
-     *    那种场景下渲染「调整位置」就是个点了没反应的按钮。
+     * ⛔ 默认 `false`：挂在**没有画面的宿主**上时（如设备详情里那种用法），
+     *    渲染「调整位置」就是个点了没反应的按钮。
      */
     osdCanvasLinked?: boolean;
     /**

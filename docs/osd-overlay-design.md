@@ -290,8 +290,8 @@ top   = Y / Width  * 100%
       （`PlayConsoleLinked` 的 `osdEditMode`），抽屉只读它（`:osd-editing`）并发"我要切一下"的意图
       （`@toggle-osd-edit`）—— 画布自己的退出路径（Esc / 换页签 / 换通道）也要能收干净，
       状态存两份必然搞岔。
-    - ⛔ **没有画布的宿主不渲染这个按钮**（`:osd-canvas-linked` 默认 `false`，如免登录预览页
-      `DeviceConfigDemo`）：那种场景下它点下去什么都不会发生。此时**精确数值默认展开**，
+    - ⛔ **没有画布的宿主不渲染这个按钮**（`:osd-canvas-linked` 默认 `false`，如设备详情里那种
+      用法）：那种场景下它点下去什么都不会发生。此时**精确数值默认展开**，
       否则用户连改坐标的入口都没有。
     - ⛔ 与遮挡框选**双向互斥**：框选期间点它 → 取消本次框选并进编辑模式；
       `startMaskDraw()` 里也 `exitOsdEditMode()`。两个覆盖层都吃 `pointerdown`，同时开着说不清拖的是什么。
