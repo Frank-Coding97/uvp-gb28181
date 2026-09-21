@@ -4,6 +4,7 @@ import { Modal, Message } from "@arco-design/web-vue";
 import { Ban, Eye, KeyRound, Plus, RefreshCw, RotateCcw, ScrollText, Search, ShieldCheck, ShieldOff } from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
 import {
+  OPENAPI_CLIENT_DATA_SCOPE_OPTIONS,
   createOpenAPIClient,
   disableOpenAPIClient,
   enableOpenAPIClient,
@@ -18,6 +19,7 @@ import {
   updateOpenAPIClientScopes,
   type OpenAPIClientAudit,
   type OpenAPIClientCreateInput,
+  type OpenAPIClientDataScope,
   type OpenAPIClientListParams,
   type OpenAPIClientStatus,
   type OpenAPIClientView,
@@ -163,6 +165,16 @@ function conflictMessage(rowVersion: number, refreshed = true) {
 
 function departmentName(id: number) {
   return ownerDepartments.value.find(item => item.id === id)?.name || `部门 #${id}`;
+}
+
+// ⛔ 数据范围是**每个客户端自己的配置**（1=本部门 / 4=本部门及以下），不能像以前那样
+//    在列里硬编码"不含下级 / 共享设备" —— 那句话只对"本部门"成立，给"本部门及以下"
+//    的客户端贴上就是错的。列的生命力就用标签把范围喊出来。
+// ⚠️ 老数据可能没带这个字段（后端 migration 上线前建的客户端）→ 返回空串，由模板跳过，
+//    绝不回落成"本部门"（那等于凭空收紧/放宽可见范围，是安全相关的推断）。
+function dataScopeLabel(scope?: OpenAPIClientDataScope) {
+  if (scope === undefined || scope === null) return "";
+  return OPENAPI_CLIENT_DATA_SCOPE_OPTIONS.find(option => option.value === scope)?.label || `数据范围 #${scope}`;
 }
 
 function statusLabel(status: OpenAPIClientStatus) {
@@ -724,10 +736,12 @@ defineExpose({
                 <code class="openapi-client-table__ak">{{ record.ak }}</code>
               </template>
             </a-table-column>
-            <a-table-column title="归属部门（精确）" :width="190">
+            <a-table-column title="归属部门与数据范围" :width="210">
               <template #cell="{ record }">
                 <span>{{ departmentName(record.ownerDeptId) }}</span>
-                <small class="openapi-client-table__hint">不含下级 / 共享设备</small>
+                <a-tag v-if="dataScopeLabel(record.dataScope)" size="small" class="openapi-client-table__scope">{{
+                  dataScopeLabel(record.dataScope)
+                }}</a-tag>
               </template>
             </a-table-column>
             <a-table-column title="认证状态" :width="110">
@@ -890,11 +904,8 @@ defineExpose({
   overflow-wrap: anywhere;
 }
 
-.openapi-client-table__hint {
-  display: block;
-  margin-top: 3px;
-  font-size: 11px;
-  color: var(--color-text-3);
+.openapi-client-table__scope {
+  margin-left: 6px;
 }
 
 .openapi-client-table__actions {

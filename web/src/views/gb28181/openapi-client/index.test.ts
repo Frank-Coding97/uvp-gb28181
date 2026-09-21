@@ -24,26 +24,35 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userStore }));
-vi.mock("@/api/gb28181-openapi", () => ({
-  listOpenAPIClients: api.list,
-  getOpenAPIClientCapabilities: api.capabilities,
-  getOpenAPIClient: api.get,
-  createOpenAPIClient: api.create,
-  updateOpenAPIClientScopes: api.scopes,
-  rotateOpenAPIClientSecret: api.rotate,
-  enableOpenAPIClient: api.enable,
-  disableOpenAPIClient: api.disable,
-  revokeOpenAPIClient: api.revoke,
-  listOpenAPIClientAudits: api.audits,
-  getOpenAPIClientRevocationStatus: api.revocation,
-  isOpenAPISuccess: (response: { code?: string }) => response.code === "OK"
-}));
+// ⛔ 必须 spawn 真实模块的导出（`...actual`）：只列函数、不列常量，组件一 import
+//    `OPENAPI_CLIENT_DEFAULT_DATA_SCOPE` 就会在 setup 阶段炸（ vitest 报
+//    "No ... export is defined on the mock"），而且这种炸法会连坐整个文件的用例。
+//    用 importOriginal 兜底，以后 api 模块再加常量也不会再次踩到。
+vi.mock("@/api/gb28181-openapi", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/api/gb28181-openapi")>();
+  return {
+    ...actual,
+    listOpenAPIClients: api.list,
+    getOpenAPIClientCapabilities: api.capabilities,
+    getOpenAPIClient: api.get,
+    createOpenAPIClient: api.create,
+    updateOpenAPIClientScopes: api.scopes,
+    rotateOpenAPIClientSecret: api.rotate,
+    enableOpenAPIClient: api.enable,
+    disableOpenAPIClient: api.disable,
+    revokeOpenAPIClient: api.revoke,
+    listOpenAPIClientAudits: api.audits,
+    getOpenAPIClientRevocationStatus: api.revocation,
+    isOpenAPISuccess: (response: { code?: string }) => response.code === "OK"
+  };
+});
 
 const client = {
   id: 7,
   ak: "uvp_0123456789abcdef0123456789abcdef",
   name: "现场接入",
   ownerDeptId: 10,
+  dataScope: 3,
   responsibleUserId: 7,
   status: "active",
   secretVersion: 1,
@@ -211,6 +220,10 @@ describe("OpenAPI client page", () => {
     });
     await flushPromises();
     expect(wrapper.findAll("th").map(cell => cell.text())).toContain("归属部门与数据范围");
+    // ⛔ 防回归：数据范围必须在这列里**看得见**（每个客户端各自配置的，
+    //    不是全表统一的），否则操作员无从判断这个 AK 能碰到多少设备。
+    //    以前这里写死"不含下级 / 共享设备"，对 dataScope=4 的客户端是错的。
+    expect(wrapper.find("tbody").text()).toContain("本部门");
     expect(wrapper.find("tbody").text()).toContain(client.name);
     expect(wrapper.find("tbody").text()).toContain("详情");
   });
