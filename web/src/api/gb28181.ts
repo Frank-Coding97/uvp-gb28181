@@ -973,6 +973,78 @@ export const getDeviceSnapshotSession = (channelId: number, sessionId: string) =
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/snapshot-sessions/${encodeURIComponent(sessionId)}`)
   );
 
+// ===== 图像库（历史抓拍图） =====
+
+/** 抓拍来源。与后端 `SnapshotSourceXxx` 常量一一对应。 */
+export type SnapshotLibrarySource = "device" | "zlm" | "browser";
+
+/**
+ * 图像库列表行。字段与后端 `snapshotLibraryVO` **逐字对应**（少一个就是永远读不到）。
+ *
+ * ⛔ `channelId`/`deviceId` 是**平台主键**，而 `channelCode`/`deviceCode` 是**国标编码** ——
+ * 后端查询参数刻意只用编码（`deviceCode`），因为设备/通道列表接口里同名的 `deviceId`
+ * 一直是"20 位编码"，两处同名不同义最容易接错。
+ */
+export interface SnapshotLibraryItem {
+  id: number;
+  deviceId: number;
+  channelId: number;
+  /** 通道国标编码 */
+  channelCode: string;
+  channelName: string;
+  /** 设备 20 位国标编码 */
+  deviceCode: string;
+  deviceName: string;
+  /** 平台生成的抓拍会话 id；非会话抓拍（如平台抓帧）为空 */
+  sessionId?: string;
+  fileName: string;
+  /** 字节数 */
+  size: number;
+  md5: string;
+  /** 拍摄时刻（从文件名反解），筛选时间窗打的就是这一列 */
+  capturedAt: string;
+  source: SnapshotLibrarySource;
+  /**
+   * 取图地址（稳定读接口 `/api/gb28181/device-mgmt/snapshots/:id/content`）。
+   * ⛔ 该接口在鉴权组内，`<img>` 直用会 401，必须补 `?token=`（见 snapshotLibraryState.ts）。
+   */
+  url: string;
+  createdAt: string;
+}
+
+export interface SnapshotLibraryPage {
+  list: SnapshotLibraryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SnapshotLibraryQuery {
+  page?: number;
+  pageSize?: number;
+  /** 平台主键（通道表） */
+  channelId?: number;
+  /** 通道国标编码 */
+  channelCode?: string;
+  /** 设备 20 位国标编码（⚠️ 不是平台主键） */
+  deviceCode?: string;
+  sessionId?: string;
+  source?: SnapshotLibrarySource | "";
+  /** RFC3339，按 `capturedAt` 过滤 */
+  from?: string;
+  to?: string;
+}
+
+/**
+ * 图像库列表。只出元数据 + 取图地址，**不内联图片字节**
+ * （一个通道一年的图能上万张，列表内联会把响应打爆）。
+ *
+ * 参数归一（丢空值 / 时间格式化）在 `snapshotLibraryState.ts` 的 normalizeSnapshotQuery，
+ * 那里是纯函数、有单测；本函数只做请求。
+ */
+export const listSnapshotLibrary = (params: SnapshotLibraryQuery = {}) =>
+  http.request<BaseResult<SnapshotLibraryPage>>("get", baseUrlApi("gb28181/device-mgmt/snapshots"), { params });
+
 export const controlPtz = (channelId: number, data: Record<string, unknown>) =>
   http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz`), { data });
 
