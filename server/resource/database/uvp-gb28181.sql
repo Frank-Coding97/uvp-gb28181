@@ -9366,3 +9366,118 @@ JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api
 WHERE m.`permission`='gb28181:ptz:control' AND a.`path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND a.`method`='POST'
   AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND p.`v2`='POST' AND p.`v3`='*');
 -- device-config-family-permissions:end
+
+-- channel-snapshot-library:start（同步自 migrations/2026-09-20-channel-snapshot-library.sql）
+-- 抓拍图像库：一张图一行，三套抓拍的产出（device/zlm/browser）汇到同一张表。
+-- ⛔ 与 gb_channel.snapshot_url 的分工：那一列是"最近一张"的指针（覆盖式），本表是全部历史。
+-- ⛔ 唯一键 (channel_code, file_name)：设备文件名（41 位图像标识）前 20 位就是设备编码，
+--    单列唯一会误伤同名跨通道文件；设备重传同一张图靠它天然幂等。
+CREATE TABLE IF NOT EXISTS `gb_channel_snapshot` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL DEFAULT 0,
+  `channel_id` bigint unsigned NOT NULL DEFAULT 0,
+  `channel_code` varchar(20) NOT NULL,
+  `session_id` varchar(64) DEFAULT NULL,
+  `file_name` varchar(64) NOT NULL,
+  `rel_path` varchar(255) NOT NULL,
+  `size` bigint NOT NULL DEFAULT 0,
+  `md5` varchar(32) DEFAULT NULL,
+  `captured_at` datetime(3) NOT NULL,
+  `source` varchar(16) NOT NULL,
+  `created_by` bigint unsigned DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_channel_snapshot_file` (`channel_code`,`file_name`),
+  KEY `idx_channel_snapshot_channel_time` (`channel_id`,`captured_at`),
+  KEY `idx_channel_snapshot_session` (`session_id`),
+  KEY `idx_channel_snapshot_captured` (`captured_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+-- channel-snapshot-library:end
+
+-- channel-snapshot-library-permissions:start（同步自 migrations/2026-09-20-channel-snapshot-library.sql）
+-- 图像库稳定读接口（按库行 id 取图，凭证是 JWT）绑 gb28181:device:snapshot ——
+-- 与抓拍会话面板同一个权限码；换成更宽的 view 码会让只读账号也能看全部抓拍图。
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '读取抓拍图像','/api/gb28181/device-mgmt/snapshots/:id/content','GET','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/device-mgmt/snapshots/:id/content' AND `method`='GET' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:device:snapshot' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/snapshots/:id/content' AND a.`method`='GET' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:device:snapshot' AND a.`path`='/api/gb28181/device-mgmt/snapshots/:id/content' AND a.`method`='GET'
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/snapshots/:id/content' AND p.`v2`='GET' AND p.`v3`='*');
+-- ---- 图像库列表接口 + 一级菜单（同步自 migrations/2026-09-20-channel-snapshot-library.sql） ----
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '查询抓拍图像库','/api/gb28181/device-mgmt/snapshots','GET','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/device-mgmt/snapshots' AND `method`='GET' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:device:snapshot' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/snapshots' AND a.`method`='GET' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:device:snapshot' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/snapshots' AND a.`method`='GET' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/snapshots' AND p.`v2`='GET' AND p.`v3`='*');
+INSERT INTO `sys_menu`(`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT 0,'/gb28181/snapshot-library','snapshot-library','gb28181/snapshot-library/index','图像库',0,0,55,2,'','lucide:Images',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `path`='/gb28181/snapshot-library' AND `deleted_at` IS NULL);
+INSERT INTO `sys_role_menu`(`role_id`,`menu_id`)
+SELECT 1,m.`id` FROM `sys_menu` m
+WHERE m.`path`='/gb28181/snapshot-library' AND m.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=1 AND x.`menu_id`=m.`id`);
+INSERT INTO `sys_role_menu`(`role_id`,`menu_id`)
+SELECT DISTINCT rm.`role_id`,lib.`id`
+FROM `sys_role_menu` rm
+JOIN `sys_menu` btn ON btn.`id`=rm.`menu_id` AND btn.`deleted_at` IS NULL
+  AND btn.`permission`='gb28181:device:snapshot' AND btn.`type`=3
+CROSS JOIN `sys_menu` lib
+WHERE lib.`path`='/gb28181/snapshot-library' AND lib.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=lib.`id`);
+-- channel-snapshot-library-permissions:end
+
+-- storage-card-format-permissions:start（同步自 migrations/2026-09-20-storage-card-format-permission.sql）
+-- 存储卡格式化（GB/T 28181-2022 A.2.3.1.13）—— **破坏性**动作，独立权限码 gb28181:device:format_sd。
+--
+-- ⛔ 为什么是独立路由 /channel/:id/storage-cards/format、而不是把 format_sd 做成
+--    /channel/:id/device-control 的一个 action：那条路由整条绑 `gb28181:device:control`，
+--    做成 action 的话本权限码在 Casbin 层与普通设备控制完全同权 = 没有独立授权。
+-- ⛔ 三处关联（sys_role_menu / sys_menu_api / sys_casbin_rule）都带 `type=3`：
+--    同 permission 的目录行不是按钮，只按 permission 关联会凭空扩权。
+--
+-- ⛔ 这一块必须与迁移文件保持一致。runner 在「空版本表 + 基线探测表已存在」时会把全部迁移
+--    直接标记为已应用而**不执行**（见 app/gb28181/migration/runner.go），所以**快照里没有的物件
+--    在快照建出来的新库上永远不会出现**，增量迁移补不回来（表现是"服务起得来、接口恒 403"）。
+INSERT INTO `sys_api`(`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`created_by`)
+SELECT '格式化存储卡','/api/gb28181/device-mgmt/channel/:id/storage-cards/format','POST','按钮权限目录',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_api` WHERE `path`='/api/gb28181/device-mgmt/channel/:id/storage-cards/format' AND `method`='POST' AND `deleted_at` IS NULL);
+INSERT INTO `sys_menu`(`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT COALESCE((SELECT MIN(`id`) FROM `sys_menu` WHERE `name`='device-mgmt-list' AND `deleted_at` IS NULL),0),'','GbDeviceStorageCardFormat','','格式化存储卡',1,0,1,3,'gb28181:device:format_sd','',NOW(),NOW(),1
+WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `permission`='gb28181:device:format_sd' AND `deleted_at` IS NULL);
+INSERT INTO `sys_role_menu`(`role_id`,`menu_id`)
+SELECT 1,m.`id` FROM `sys_menu` m
+WHERE m.`permission`='gb28181:device:format_sd' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=1 AND x.`menu_id`=m.`id`);
+INSERT INTO `sys_menu_api`(`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`permission`='gb28181:device:format_sd' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/channel/:id/storage-cards/format' AND a.`method`='POST' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_menu_api` x WHERE x.`menu_id`=m.`id` AND x.`api_id`=a.`id`);
+INSERT INTO `sys_casbin_rule`(`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+SELECT DISTINCT 'p',CONCAT('role_',rm.`role_id`),a.`path`,a.`method`,'*','',''
+FROM `sys_role_menu` rm JOIN `sys_menu` m ON m.`id`=rm.`menu_id`
+JOIN `sys_menu_api` ma ON ma.`menu_id`=m.`id` JOIN `sys_api` a ON a.`id`=ma.`api_id`
+WHERE m.`permission`='gb28181:device:format_sd' AND m.`type`=3 AND m.`deleted_at` IS NULL
+  AND a.`path`='/api/gb28181/device-mgmt/channel/:id/storage-cards/format' AND a.`method`='POST' AND a.`deleted_at` IS NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_casbin_rule` p WHERE p.`ptype`='p' AND p.`v0`=CONCAT('role_',rm.`role_id`) AND p.`v1`='/api/gb28181/device-mgmt/channel/:id/storage-cards/format' AND p.`v2`='POST' AND p.`v3`='*');
+-- storage-card-format-permissions:end
