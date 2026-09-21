@@ -68,3 +68,19 @@ type GbDeviceStorageCard struct {
 }
 
 func (GbDeviceStorageCard) TableName() string { return "gb_device_storage_card" }
+
+// StorageCardFormatRoutePath 是存储卡格式化接口**在路由组内**的相对路径
+// （挂在 `/api/gb28181/device-mgmt` 组下，与同页的读接口 `/channel/:id/storage-cards` 同前缀）。
+//
+// ⛔ 为什么格式化**不复用** `/channel/:id/device-control` 的 action 通道：
+// 那条路由整条绑在 `gb28181:device:control` 上，走它的话"独立权限码"在 casbin 层
+// 与普通设备控制完全同权 —— 有 device:control 就能格式化，独立门禁形同虚设。
+// 破坏性动作必须有自己的路由 + 自己的 sys_api 行，权限才分得开（同 reboot 的形态）。
+//
+// ⛔ 与 [StorageCardFormatAPIPath] 拆成两个常量，理由同 SnapshotLibraryRoutePath：
+// 前者用相对路径（gin 组自动补前缀），后者必须是被鉴权中间件实际看到的全路径。
+// 两个都手写字面量时，错一个字符的表现是"接口通但恒 403"或"根本没注册"，且两边都不报错。
+const StorageCardFormatRoutePath = "/channel/:id/storage-cards/format"
+
+// StorageCardFormatAPIPath 是存储卡格式化接口的**全路径**（三处必须同名：迁移 / 路由 / 测试）。
+const StorageCardFormatAPIPath = "/api/gb28181/device-mgmt" + StorageCardFormatRoutePath

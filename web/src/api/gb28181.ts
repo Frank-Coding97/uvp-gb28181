@@ -693,6 +693,27 @@ export const getChannelStorageCards = (channelId: number, refresh = false) =>
   );
 
 /**
+ * 下发存储卡格式化（GB/T 28181-2022 A.2.3.1.13 存储卡格式化控制命令）。
+ *
+ * ⛔ 走**独立路由** `.../storage-cards/format`，不是 `device-control` 的一个 action：
+ *    device-control 整条绑 `gb28181:device:control`，做成它的 action 就在 casbin 层
+ *    与普通设备控制同码，独立权限码 `gb28181:device:format_sd` 会形同虚设。
+ * ⛔ `cardIndex = 0` 是标准的**合法取值**（「该值0时，对所有存储卡进行格式化」），
+ *    所以调用方必须显式传数值，服务端也用 `*int` 区分"没传"（400）与"给了 0"。
+ * ⛔ `confirmed: true` 是服务端的硬门禁，缺了会被拒（破坏性动作不能靠默认值放行）；
+ *    统一在本函数里补上，调用方不需要（也不应该）自己再传一遍。
+ * ⛔ **无应答命令**（9.3.1 d)）：「已下发」不等于「已完成」，设备不会回执。
+ *    要判断成没成，只能再调 `getChannelStorageCards(channelId, true)` 查一次
+ *    （Status=formatting + FormatProgress，或已回到 ok/unformatted）。
+ */
+export const formatStorageCard = (channelId: number, data: { cardIndex: number; idempotencyKey?: string }) =>
+  http.request<BaseResult<DeviceOperationResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/storage-cards/format`),
+    { data: { ...data, confirmed: true } }
+  );
+
+/**
  * 一条码流的最近一次回读事实（GB/T 28181-2022 A.2.6.9 ConfigDownload 应答）。
  *
  * ⛔ 五个取值列**原样是附录 G 的码值字符串**（如 videoFormat="2"、resolution="5"）。

@@ -52,8 +52,15 @@ type SDCardStatusExpectation struct {
 }
 
 type SDCardItem struct {
-	// ID 是「SD卡编号」，标准里 type="integer"。注意它从 1 开始编号
-	// （A.2.3.1.13 FormatSDCard 的 DiskNum 也是同一套编号，0 表示"所有卡"）。
+	// ID 是「SD卡编号」，标准里 type="integer"。注意它从 1 开始编号。
+	//
+	// ⛔ 这里原来写的是「A.2.3.1.13 FormatSDCard 的 DiskNum 也是同一套编号」——
+	//    **DiskNum 不是标准里的名字**：2022 全文 / 2022 附录 A / 2016 附录 A 三处均 0 命中。
+	//    A.2.3.1.13 的元素名就叫 `FormatSDCard`，且**元素值本身就是卡编号**
+	//    （`<element name="FormatSDCard">` + `<minInclusive value="0"/>`），
+	//    没有 DiskNum/HddID 这一层包装。编号语义（从 1 起、0 = 全部卡）来自
+	//    该元素的注释原文「SD 卡编号，从1开始编号。该值0时，对所有存储卡进行格式化」。
+	//    见 manscdp/device_advanced.go 的 BuildFormatSDCardControlWithProfile。
 	ID int
 	// HddName 元素名就叫 HddName（标准原文如此，虽然内容装的是 SD 卡名）。
 	HddName string

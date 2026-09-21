@@ -20,6 +20,17 @@ import (
 
 const maintenanceOperationPageSizeMax = 200
 
+// maintenanceOperationActions 是「设备维护记录」收录的 action 白名单。
+//
+// 从硬编码 `action = 'teleboot'` 放宽成集合，是因为维护记录的定义本来就是
+// 「操作员对设备下发的、会改变设备状态的动作」，而不是"重启"这一个动作。
+// 目前两项都是**破坏性/中断性**动作，所以它们共用 `gb28181:device:maintenance:view`
+// 这一个只读权限；将来若要收录非破坏性动作（例如配置下发），先想清楚是否该拆权限。
+//
+// ⛔ 新增成员时注意：`gb_ptz_operation.action` 是**落库的历史值**，
+// 名单里删掉某一项只会让它从列表里消失（数据还在），但名字写错会让它永远查不出来。
+var maintenanceOperationActions = []string{"teleboot", "format_sd"}
+
 var errMaintenanceActorNotFound = errors.New("操作者不存在")
 
 type deviceRebootRequest struct {
@@ -199,7 +210,7 @@ func (dc *DeviceMgmtController) ListMaintenanceOperations(c *gin.Context) {
 	deviceID, _ := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 64)
 	query := db.Clauses(dbresolver.Write).WithContext(c.Request.Context()).
 		Model(&gbmodels.GbPTZOperation{}).
-		Where("device_id = ? AND action = ?", deviceID, "teleboot")
+		Where("device_id = ? AND action IN ?", deviceID, maintenanceOperationActions)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		dc.FailAndAbort(c, "查询设备维护记录统计失败", err)

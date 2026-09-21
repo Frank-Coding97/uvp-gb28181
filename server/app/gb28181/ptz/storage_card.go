@@ -3,6 +3,7 @@ package ptz
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -39,6 +40,60 @@ func (s *Service) RefreshStorageCards(ctx context.Context, target Target, actorI
 		ActorDeptID:      actorDeptID,
 		Build: func(sn int) ([]byte, error) {
 			return manscdp.BuildSDCardStatusQueryWithProfile(profile, target.ChannelCode, sn)
+		},
+		Profile: profile,
+	})
+}
+
+// actionFormatStorageCard 是存储卡格式化操作的 action 名。
+//
+// 落库后它会作为 gb_ptz_operation.action 出现，并出现在设备维护记录里
+// （见 controllers.ListMaintenanceOperations 的 action 白名单），所以这是一个**对外可见的
+// 契约名**：改名等于让历史记录断档，别随手改。
+const actionFormatStorageCard = "format_sd"
+
+// FormatStorageCard 下发「存储卡格式化控制命令」（GB/T 28181-2022 A.2.3.1.13）。
+//
+// ⛔ 这是**破坏性动作**：卡上的录像会被清空。门禁分三层，本函数只管最后一层：
+//  1. 路由层 —— 独立路由 + 独立权限码（不是塞进 channel/:id/device-control 的 action，
+//     那样在 casbin 层与普通设备控制同码，等于没有独立授权）；
+//  2. 控制器层 —— `confirmed=true` 显式确认 + 权限复检（defense-in-depth）；
+//  3. 这里 —— 参数合法性（编号非负）。
+//
+// cardIndex 语义直接来自标准注释「SD 卡编号，从1开始编号。该值0时，对所有存储卡进行格式化」：
+// 0 是**合法值**且含义是"全部"，所以不能把 0 当成"没传"。调用方传指针语义由控制器负责
+// （请求体里用 *int 区分"没给"与"给了 0"）。
+//
+// ⛔ `MaxAttempts: 1`：与 query 族（3 次重发）刻意不同。重发对**查询**无害，
+// 对破坏性动作则可能把"已下发、仅应答丢失"重新执行一次。宁可让 operation 停在
+// `unknown`（运维能看到"已下发未确认"），也不替操作员再按一次按钮。
+func (s *Service) FormatStorageCard(ctx context.Context, target Target, cardIndex int, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	if cardIndex < 0 {
+		return gbmodels.GbPTZOperation{}, fmt.Errorf("存储卡编号不能为负数: %d", cardIndex)
+	}
+	profile := target.Profile
+	if profile.Version == "" {
+		profile = protocol.ProfileFor(protocol.Version2016)
+	}
+	// 目标编码与 SDCardStatus 查询同源（都发通道编码），否则"查询看到的卡"与
+	// "格式化动的卡"可能落在两个不同的 target_code 上，回读对账会永远对不上。
+	targetCode := strings.TrimSpace(target.ChannelCode)
+	if targetCode == "" {
+		return gbmodels.GbPTZOperation{}, fmt.Errorf("存储卡格式化缺少目标通道编码")
+	}
+	return s.Execute(ctx, target, Command{
+		CmdType:          manscdp.CmdDeviceControl,
+		Action:           actionFormatStorageCard,
+		IdempotencyKey:   idempotencyKey,
+		Payload:          map[string]interface{}{"action": actionFormatStorageCard, "cardIndex": cardIndex},
+		ResponseRequired: false, // 9.3.1 d)：无应答命令，见函数注释
+		MaxAttempts:      1,
+		ActorID:          actorID,
+		ActorDeptID:      actorDeptID,
+		TargetScope:      gbmodels.ControlTargetScopeChannel,
+		TargetCode:       targetCode,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildFormatSDCardControlWithProfile(profile, targetCode, sn, cardIndex)
 		},
 		Profile: profile,
 	})

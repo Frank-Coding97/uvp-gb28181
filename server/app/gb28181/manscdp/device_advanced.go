@@ -111,6 +111,12 @@ type advancedDeviceControl struct {
 	Info         *AlarmResetOptions `xml:"Info,omitempty"`
 	DragZoomIn   *DragZoomRegion    `xml:"DragZoomIn,omitempty"`
 	DragZoomOut  *DragZoomRegion    `xml:"DragZoomOut,omitempty"`
+	// FormatSDCard 是 A.2.3.1.13「存储卡格式化控制命令」的取值 —— **就是 SD 卡编号本身**
+	// （从 1 开始编号；取 0 表示对所有存储卡格式化）。标准里它是 DeviceControl 体内一个
+	// 与 SN/DeviceID 同级的 integer 元素，**没有 DiskNum 之类的包装元素**。
+	// ⛔⛔ 必须是指针：`omitempty` 对 int 零值会**整个省略该字段**，而 0 恰好是合法取值
+	//   （= 格式化全部卡），用值类型会把「格式化所有卡」静默发成一条不含该元素的命令。
+	FormatSDCard *int `xml:"FormatSDCard,omitempty"`
 }
 
 func BuildIFrameControl(deviceID string, sn int, charset XMLCharset) ([]byte, error) {
@@ -174,6 +180,53 @@ func BuildDragZoomControl(deviceID string, sn int, command DragZoomCommand, char
 		return nil, err
 	}
 	return BuildDragZoomControlWithProfile(profile, deviceID, sn, command)
+}
+
+// BuildFormatSDCardControl builds a storage-card format command.
+//
+// ⛔ 破坏性动作：调用方必须先拿到**显式确认**（同族先例是 teleboot 的 confirmed 门禁），
+// 本函数只负责参数合法性与报文正确，不做业务/权限门禁。
+func BuildFormatSDCardControl(deviceID string, sn int, cardIndex int, charset XMLCharset) ([]byte, error) {
+	profile, err := advancedProfileForCharset(charset)
+	if err != nil {
+		return nil, err
+	}
+	return BuildFormatSDCardControlWithProfile(profile, deviceID, sn, cardIndex)
+}
+
+// BuildFormatSDCardControlWithProfile builds the storage-card format command.
+//
+// 标准原文（GB/T 28181-2022 A.2.3.1.13「存储卡格式化控制命令」，标准页 77-78）：
+//
+//	<!-- 存储卡格式化命令（可选）-->
+//	<element name="FormatSDCard" minOccurs="0">
+//	  <simpleType>
+//	    <restriction base="integer">
+//	      <!-- SD 卡编号，从1开始编号。该值0时，对所有存储卡进行格式化-->
+//	      <minInclusive value="0"/>
+//	    </restriction>
+//	  </simpleType>
+//	</element>
+//
+// ⇒ 元素**值本身就是卡编号**，与 SN/DeviceID 同级直接拼在 DeviceControl 体内，
+// 形如 `<FormatSDCard>1</FormatSDCard>`。
+//
+// ⛔ 别改成 `<FormatSDCard><DiskNum>1</DiskNum></FormatSDCard>`：本仓曾有一处注释把
+// `DiskNum` 当成本命令的标准字段，但它在 2022 全文 / 2022 附录 A / 2016 附录 A
+// **三处均 0 命中**，是自造名（2026-09-20 核）。
+//
+// ⛔ 版本口径：本命令是 **2022 独有**（`FormatSDCard` 2022 附录 A 命中 1 次、2016 附录 A 0 命中），
+// 但这里**不按版本拒发** —— 与 SDCardStatus 查询同口径（那条同样是 2022 独有），
+// 设备是否真支持交给调用方的门禁/操作员判断，协议层只负责把报文拼对。
+//
+// 上界不校验：标准只给了 `minInclusive=0`（无 maxInclusive）。同族应答
+// A.2.6.16 的 `Item` 是 `maxOccurs="8"` ⇒ 一台设备的卡数上限是 8，正常路径下
+// 编号来自实际卡列表、不会越界；硬编码上界反而会挡住将来卡数更多的设备。
+func BuildFormatSDCardControlWithProfile(profile protocol.Profile, deviceID string, sn int, cardIndex int) ([]byte, error) {
+	if cardIndex < 0 {
+		return nil, fmt.Errorf("存储卡编号不能为负数: %d", cardIndex)
+	}
+	return marshalAdvancedControlWithProfile(profile, deviceID, sn, advancedDeviceControl{FormatSDCard: &cardIndex})
 }
 
 func marshalAdvancedControl(deviceID string, sn int, charset XMLCharset, fields advancedDeviceControl) ([]byte, error) {

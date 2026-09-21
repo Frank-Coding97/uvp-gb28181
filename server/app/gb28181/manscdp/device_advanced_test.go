@@ -69,6 +69,20 @@ func TestAdvancedControlBuilders(t *testing.T) {
 			},
 		},
 		{
+			name:  "format sd card",
+			build: func() ([]byte, error) { return BuildFormatSDCardControl("C", 10, 2, XMLCharsetGB2312) },
+			check: func(t *testing.T, control decodedAdvancedControl) {
+				if control.FormatSDCard == nil || *control.FormatSDCard != 2 {
+					t.Fatalf("FormatSDCard=%v, want 2", control.FormatSDCard)
+				}
+				// 格式化是独立命令：同一报文里不该捎带录像/布防/重启等其它控制字段，
+				// 否则设备可能按"最后一个命令"处理，行为不可预测。
+				if control.TeleBoot != "" || control.RecordCmd != "" || control.GuardCmd != "" || control.AlarmCmd != "" {
+					t.Fatalf("格式化报文不应捎带其它控制字段: %+v", control)
+				}
+			},
+		},
+		{
 			name: "drag zoom in",
 			build: func() ([]byte, error) {
 				return BuildDragZoomControl("C", 7, DragZoomCommand{Direction: DragZoomIn, Region: DragZoomRegion{
@@ -130,6 +144,52 @@ func TestAdvancedControlBuilders(t *testing.T) {
 			}
 			tt.check(t, control)
 		})
+	}
+}
+
+// ⛔⛔ 本次最重要的防回归锚点：卡编号 0 是**合法语义**，不是"空值"。
+//
+// 标准 A.2.3.1.13 原文：「SD 卡编号，从1开始编号。**该值0时，对所有存储卡进行格式化**」。
+// 若有人把 `advancedDeviceControl.FormatSDCard` 从 `*int` 改回 `int`，
+// `omitempty` 会把 0 **整个省略** ⇒ 报文里元素消失，设备收到一条不含卡编号的命令。
+// 而单测若只用卡号 2 去测，**永远发现不了**这个退化 —— 所以这一条必须专门钉 0。
+func TestBuildFormatSDCardControl_ZeroMeansAllCards(t *testing.T) {
+	body, err := BuildFormatSDCardControl("C", 11, 0, XMLCharsetGB2312)
+	if err != nil {
+		t.Fatalf("builder error = %v", err)
+	}
+	if !strings.Contains(string(body), "<FormatSDCard>0</FormatSDCard>") {
+		t.Fatalf("卡编号 0（= 格式化全部卡）必须原样出现在报文里，实际: %s", body)
+	}
+	var control decodedAdvancedControl
+	if err := newDecoder(body).Decode(&control); err != nil {
+		t.Fatalf("round-trip decode error = %v", err)
+	}
+	if control.FormatSDCard == nil || *control.FormatSDCard != 0 {
+		t.Fatalf("回解后卡编号应为 0，实际 %v", control.FormatSDCard)
+	}
+}
+
+// 报文形态锚点：`FormatSDCard` 是 DeviceControl 内与 SN/DeviceID **同级**的 integer 元素，
+// 没有 `DiskNum` 之类的包装 —— 本仓曾有一处注释把 `DiskNum` 当标准字段引用，
+// 而它在 2022 全文 / 2022 附录 A / 2016 附录 A 三处均 0 命中（2026-09-20 核）。
+func TestBuildFormatSDCardControl_IsDirectChildWithoutWrapper(t *testing.T) {
+	body, err := BuildFormatSDCardControl("C", 12, 1, XMLCharsetGB2312)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<FormatSDCard>1</FormatSDCard>") {
+		t.Fatalf("应为直接子元素形态，实际: %s", body)
+	}
+	if strings.Contains(string(body), "DiskNum") {
+		t.Fatalf("DiskNum 不是标准元素，报文里不许出现: %s", body)
+	}
+}
+
+func TestBuildFormatSDCardControl_RejectsNegativeCardIndex(t *testing.T) {
+	body, err := BuildFormatSDCardControl("C", 13, -1, XMLCharsetGB2312)
+	if err == nil || body != nil {
+		t.Fatalf("负卡号必须拒发, body=%q err=%v", body, err)
 	}
 }
 
@@ -262,6 +322,8 @@ type decodedAdvancedControl struct {
 	Info        *AlarmResetOptions `xml:"Info"`
 	DragZoomIn  *DragZoomRegion    `xml:"DragZoomIn"`
 	DragZoomOut *DragZoomRegion    `xml:"DragZoomOut"`
+	// 用指针回解，才能区分「元素缺席」（nil）与「元素值为 0」（合法：格式化全部卡）。
+	FormatSDCard *int `xml:"FormatSDCard"`
 }
 
 func (capabilities ControlCapabilities) advanced() map[string]ControlCapability {

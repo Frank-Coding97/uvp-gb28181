@@ -888,6 +888,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
 			dmgmt.GET("/channel/:id/device-status", deviceMgmtController.GetDeviceStatus)
 			dmgmt.GET("/channel/:id/storage-cards", deviceMgmtController.GetChannelStorageCards)
+			// 存储卡格式化（GB/T 28181-2022 A.2.3.1.13，破坏性：清空卡上录像）。
+			// ⛔ 它**必须**是独立路由，不能做成 `/device-control` 的一个 action：
+			// 那条路由整条绑 `gb28181:device:control`，塞进去的话"独立权限码
+			// gb28181:device:format_sd"在 casbin 层与普通设备控制同权，门禁形同虚设。
+			// 路径走 gbmodels.StorageCardFormatRoutePath（组内相对路径），与迁移里登记的
+			// sys_api 全路径（StorageCardFormatAPIPath）由同一个定义绑定，不会写歪。
+			dmgmt.POST(gbmodels.StorageCardFormatRoutePath, deviceMgmtController.FormatStorageCard)
 			// 视频参数属性(GB/T 28181-2022 A.2.1.13):读走 ConfigDownload,写走 DeviceConfig。
 			// ⛔ 两者同路径不同方法,权限也分档:读 gb28181:ptz:view、写 gb28181:ptz:control。
 			dmgmt.GET("/channel/:id/video-params", deviceMgmtController.GetChannelVideoParams)
