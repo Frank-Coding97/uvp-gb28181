@@ -101,6 +101,14 @@ type ResponsePolicy struct {
 	TeleBoot   ResponseSemantic
 	DragZoom   ResponseSemantic
 	PrecisePTZ ResponseSemantic
+	// TargetTrack 是 GB/T 28181-2022 A.2.3.1.14 目标跟踪。
+	// ⛔ 它是**无应答命令**，两处标准原文：① 9.3.1 d) 把"目标跟踪"与云台控制 / 远程启动 /
+	// 强制关键帧 / 拉框放大缩小 / PTZ 精准控制 / 存储卡格式化列在同一句 ——
+	// 「目标设备**不发送应答命令**」；② 表 1 序号 13「目标跟踪 / A.2.3.1.14 /（无）」。
+	// 设成 businessResponse 的后果不是"多等一会儿"，而是把一个成功当失败报：设备按标准
+	// 不回执 → operation 排到 transport deadline 才落 timeout → 前端把正常下发显示成
+	// 「结果未知」（同族先例 FormatSDCard 已在真机上反证过这一点）。
+	TargetTrack ResponseSemantic
 }
 
 // Profile contains all decisions that can change the wire representation for
@@ -120,13 +128,14 @@ type Profile struct {
 type Action string
 
 const (
-	ActionIFrame     Action = "iframe"
-	ActionRecord     Action = "record"
-	ActionGuard      Action = "guard"
-	ActionAlarm      Action = "alarm"
-	ActionTeleBoot   Action = "teleboot"
-	ActionDragZoom   Action = "drag_zoom"
-	ActionPrecisePTZ Action = "precise_ptz"
+	ActionIFrame      Action = "iframe"
+	ActionRecord      Action = "record"
+	ActionGuard       Action = "guard"
+	ActionAlarm       Action = "alarm"
+	ActionTeleBoot    Action = "teleboot"
+	ActionDragZoom    Action = "drag_zoom"
+	ActionPrecisePTZ  Action = "precise_ptz"
+	ActionTargetTrack Action = "target_track"
 
 	// KeyFrame and drag direction aliases make call sites read naturally while
 	// retaining one stable action value for response lookup.
@@ -144,13 +153,14 @@ var businessResponse = ResponseSemantic{
 
 func defaultResponsePolicy() ResponsePolicy {
 	return ResponsePolicy{
-		IFrame:     noBusinessResponse,
-		Record:     businessResponse,
-		Guard:      businessResponse,
-		Alarm:      businessResponse,
-		TeleBoot:   noBusinessResponse,
-		DragZoom:   noBusinessResponse,
-		PrecisePTZ: noBusinessResponse,
+		IFrame:      noBusinessResponse,
+		Record:      businessResponse,
+		Guard:       businessResponse,
+		Alarm:       businessResponse,
+		TeleBoot:    noBusinessResponse,
+		DragZoom:    noBusinessResponse,
+		PrecisePTZ:  noBusinessResponse,
+		TargetTrack: noBusinessResponse,
 	}
 }
 
@@ -220,6 +230,8 @@ func (p Profile) ResponseFor(action Action) ResponseSemantic {
 		return p.Responses.DragZoom
 	case ActionPrecisePTZ:
 		return p.Responses.PrecisePTZ
+	case ActionTargetTrack:
+		return p.Responses.TargetTrack
 	default:
 		return noBusinessResponse
 	}

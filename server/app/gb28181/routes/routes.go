@@ -895,6 +895,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			// 路径走 gbmodels.StorageCardFormatRoutePath（组内相对路径），与迁移里登记的
 			// sys_api 全路径（StorageCardFormatAPIPath）由同一个定义绑定，不会写歪。
 			dmgmt.POST(gbmodels.StorageCardFormatRoutePath, deviceMgmtController.FormatStorageCard)
+			// 目标跟踪（GB/T 28181-2022 A.2.3.1.14，**无应答命令**）。
+			// 读=平台最近一次下发的意图、写=下发一条新指令；同路径按方法分档
+			// （读 gb28181:ptz:view / 写 gb28181:ptz:control，照 video-params 先例）。
+			// ⛔ 读接口读的**不是设备状态**：标准里没有查询目标跟踪的命令，
+			// 返回体里的 deviceAcknowledged 恒 false，前端必须照此措辞。
+			// 路径走 gbmodels.TargetTrackRoutePath（组内相对路径），与迁移里登记的
+			// sys_api 全路径（TargetTrackAPIPath）由同一个定义绑定，不会写歪。
+			dmgmt.GET(gbmodels.TargetTrackRoutePath, deviceMgmtController.GetChannelTargetTrack)
+			dmgmt.POST(gbmodels.TargetTrackRoutePath, deviceMgmtController.SetChannelTargetTrack)
 			// 视频参数属性(GB/T 28181-2022 A.2.1.13):读走 ConfigDownload,写走 DeviceConfig。
 			// ⛔ 两者同路径不同方法,权限也分档:读 gb28181:ptz:view、写 gb28181:ptz:control。
 			dmgmt.GET("/channel/:id/video-params", deviceMgmtController.GetChannelVideoParams)

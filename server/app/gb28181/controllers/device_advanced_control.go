@@ -273,6 +273,16 @@ func buildAdvancedControl(profile protocol.Profile, targetCode string, sn int, r
 }
 
 func (dc *DeviceMgmtController) deviceControlSuccess(c *gin.Context, operation gbmodels.GbPTZOperation, action string, deduplicated bool) {
+	dc.Success(c, deviceControlPayload(operation, action, deduplicated))
+}
+
+// deviceControlPayload 是设备控制类接口的统一返回体。
+//
+// 抽出来是因为目标跟踪（device_target_track.go）要在同一份返回体上**再挂两个字段**
+// （落库后的意图快照 + deviceAcknowledged），而它同样走 operation 那套轮询契约。
+// ⛔ 别在两处各写一份字段映射：`responseRequired` 这类字段少一个的表现是
+// "前端以为要等应答、永远转圈"，两边都不报错。
+func deviceControlPayload(operation gbmodels.GbPTZOperation, action string, deduplicated bool) gin.H {
 	deadline := operation.DeadlineAt
 	if deadline == nil {
 		deadline = operation.TransportDeadlineAt
@@ -280,7 +290,7 @@ func (dc *DeviceMgmtController) deviceControlSuccess(c *gin.Context, operation g
 	if deadline == nil {
 		deadline = operation.QueueDeadlineAt
 	}
-	dc.Success(c, gin.H{
+	return gin.H{
 		"operationId":      operation.OperationID,
 		"action":           action,
 		"sn":               operation.SN,
@@ -291,5 +301,5 @@ func (dc *DeviceMgmtController) deviceControlSuccess(c *gin.Context, operation g
 		"targetCode":       operation.TargetCode,
 		"profileVersion":   operation.ProfileVersion,
 		"deduplicated":     deduplicated,
-	})
+	}
 }

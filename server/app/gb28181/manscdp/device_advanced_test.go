@@ -268,11 +268,12 @@ func TestParseControlCapabilitiesThreeState(t *testing.T) {
 	})
 
 	t.Run("explicit false is unsupported and true is supported", func(t *testing.T) {
-		raw := `{"iframe":true,"recording":false,"guard":true,"alarm_reset":false,"teleboot":true,"drag_zoom":false}`
+		raw := `{"iframe":true,"recording":false,"guard":true,"alarm_reset":false,"teleboot":true,"drag_zoom":false,"target_track":true}`
 		got := ParseControlCapabilities(&raw, 0)
 		want := map[string]CapabilityState{
 			"iFrame": CapabilitySupported, "record": CapabilityUnsupported, "guard": CapabilitySupported,
 			"alarmReset": CapabilityUnsupported, "teleBoot": CapabilitySupported, "dragZoom": CapabilityUnsupported,
+			"targetTrack": CapabilitySupported,
 		}
 		for name, capability := range got.advanced() {
 			if capability.State != want[name] || capability.Reason == "" {
@@ -290,7 +291,7 @@ func TestParseControlCapabilitiesThreeState(t *testing.T) {
 		if got.Record.State != CapabilitySupported {
 			t.Fatalf("Record=%+v, want supported", got.Record)
 		}
-		if got.IFrame.State != CapabilityUnknown || got.Guard.State != CapabilityUnknown || got.DragZoom.State != CapabilityUnknown {
+		if got.IFrame.State != CapabilityUnknown || got.Guard.State != CapabilityUnknown || got.DragZoom.State != CapabilityUnknown || got.TargetTrack.State != CapabilityUnknown {
 			t.Fatalf("advanced capabilities were inferred from PTZType: %+v", got)
 		}
 	})
@@ -324,11 +325,17 @@ type decodedAdvancedControl struct {
 	DragZoomOut *DragZoomRegion    `xml:"DragZoomOut"`
 	// 用指针回解，才能区分「元素缺席」（nil）与「元素值为 0」（合法：格式化全部卡）。
 	FormatSDCard *int `xml:"FormatSDCard"`
+	// A.2.3.1.14 目标跟踪三元素。TargetArea 必须能回解出**完整六个子元素**，
+	// 否则"消息发出去了但坐标丢了"这种退化在单测里看不出来。
+	TargetTrack string          `xml:"TargetTrack"`
+	DeviceID2   string          `xml:"DeviceID2"`
+	TargetArea  *DragZoomRegion `xml:"TargetArea"`
 }
 
 func (capabilities ControlCapabilities) advanced() map[string]ControlCapability {
 	return map[string]ControlCapability{
 		"iFrame": capabilities.IFrame, "record": capabilities.Record, "guard": capabilities.Guard,
 		"alarmReset": capabilities.AlarmReset, "teleBoot": capabilities.TeleBoot, "dragZoom": capabilities.DragZoom,
+		"targetTrack": capabilities.TargetTrack,
 	}
 }

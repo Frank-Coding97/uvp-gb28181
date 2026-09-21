@@ -143,7 +143,9 @@ func TestProfileResponseSemantics(t *testing.T) {
 			t.Fatalf("%s must require a device result", action)
 		}
 	}
-	for _, action := range []Action{ActionIFrame, ActionTeleBoot, ActionDragZoom, ActionPrecisePTZ} {
+	// TargetTrack 是无应答命令（9.3.1 d) 与表 1 序号 13 两处原文），必须在这一组里 ——
+	// 若被错写成 businessResponse，设备按标准不回执时平台会把一次成功报成「结果未知」。
+	for _, action := range []Action{ActionIFrame, ActionTeleBoot, ActionDragZoom, ActionPrecisePTZ, ActionTargetTrack} {
 		semantic := profile.ResponseFor(action)
 		if semantic.ResponseRequired || semantic.ResultRequired {
 			t.Fatalf("%s must not require a business response: %#v", action, semantic)

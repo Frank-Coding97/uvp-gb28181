@@ -96,6 +96,106 @@ type DragZoomCommand struct {
 	Region    DragZoomRegion    `json:"region"`
 }
 
+// TargetTrackMode 是 GB/T 28181-2022 A.2.3.1.14 `TargetTrack` 元素的取值域。
+// 标准注释原文：「目标跟踪命令（可选），"Auto"为自动跟踪、"Manual"为手动跟踪（指哪打哪），
+// 携带全景图片中框选的区域坐标信息」。
+type TargetTrackMode string
+
+const (
+	// TargetTrackAuto：设备按已配置参数自行跟踪，**无需平台下发坐标**。
+	TargetTrackAuto TargetTrackMode = "Auto"
+	// TargetTrackManual：指哪打哪 —— 平台把框选坐标发下去，球机按坐标转过去。
+	TargetTrackManual TargetTrackMode = "Manual"
+	// TargetTrackStop：停止跟踪。
+	TargetTrackStop TargetTrackMode = "Stop"
+)
+
+// TargetTrackArea 是 A.2.3.1.14 `TargetArea` 的子元素组（全景播放窗口尺寸 + 跟踪框）。
+//
+// ⛔ 这六个元素的名与义与 A.2.3.1.8/A.2.3.1.9 的 DragZoomIn/DragZoomOut **逐个相同**
+// （`Length`/`Width`/`MidPointX`/`MidPointY`/`LengthX`/`LengthY`），所以这里直接**别名复用**
+// [DragZoomRegion]：两份同构的 6 字段结构各自演化时，改一处忘一处会静默走偏。
+// ⚠️ 名同义同但**语义基准不同**：DragZoom 的 Length/Width 是"播放窗口"，TargetTrack 的
+// 是"**全景**播放窗口"（A.2.3.1.14 注释「全景图片大小、框选的区域坐标信息」）。
+type TargetTrackArea = DragZoomRegion
+
+// TargetTrackCommand 是一次目标跟踪下发的全部可选信息（A.2.3.1.14）。
+//
+// DeviceID2 是「全景相机中的全景通道ID」，可选；SN 之后的 DeviceID（由 [BuildTargetTrackControlWithProfile]
+// 的 deviceID 参数给出）才是**必选**的"全景相机的球机通道"（标准尾注原文：
+// 「SN后面的目标设备编码（必选）指全景相机的球机通道」）。
+// ⇒ 两者**不是同一个通道**，别把球机编码当成全景通道填进 DeviceID2。
+type TargetTrackCommand struct {
+	Mode      TargetTrackMode  `json:"mode"`
+	DeviceID2 string           `json:"deviceId2,omitempty"`
+	Area      *TargetTrackArea `json:"area,omitempty"`
+}
+
+// ParseTargetTrackMode 解析前端/调用方给出的跟踪模式。
+//
+// 大小写不敏感（HTTP 层习惯写小写），但**落到报文里的永远是标准枚举的原样拼写**
+// —— 设备的 XML 解析多半是大小写敏感的字符串比较，放宽输入不等于放宽输出。
+func ParseTargetTrackMode(raw string) (TargetTrackMode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "auto":
+		return TargetTrackAuto, nil
+	case "manual":
+		return TargetTrackManual, nil
+	case "stop":
+		return TargetTrackStop, nil
+	default:
+		return "", fmt.Errorf("目标跟踪模式 %q 不是 Auto/Manual/Stop", raw)
+	}
+}
+
+// ValidateTargetTrackCommand 在下发前校验命令。
+//
+// 三条口径，都直接来自标准原文：
+//  1. **Manual 必须带 TargetArea**：注释明写「全景图片大小、框选的区域坐标信息…**手动跟踪时需要**」。
+//     缺了就是"收到了跟踪指令但没有目标"——设备侧完全不可观测，比不发更糟。
+//  2. **Stop 不接受 TargetArea**：停跟踪再带一个跟踪框是自相矛盾的指令，属于调用方 bug，
+//     在报文层挡住而不是替设备猜意图。
+//  3. **Auto 允许可选携带 TargetArea**：标准正文说「自动或手动跟踪命令携带全景画面中框选的
+//     区域坐标信息」，同时又注释"自动跟踪无需平台下发坐标参数"——两种读法都在标准里，
+//     所以这里**只做结构校验不做拒绝**，发不发由调用方决定。
+//
+// ⛔ 与 [validateDragZoomRegion] 刻意**不共用**的检查：这里**不要求框完整落在窗口内**。
+// 拉框放大是平台自己算出来的区域，越界一定是我们算错了；而目标跟踪的框是操作员在画面上
+// 拖出来的，贴着画面边缘、甚至被 UI 裁剪掉半个框都是正常操作，用同一条"必须完整包含"
+// 的规则会把最靠边的目标挡在门外。设备侧本来就要做比例换算，钳位是它的事。
+func ValidateTargetTrackCommand(command TargetTrackCommand) error {
+	switch command.Mode {
+	case TargetTrackAuto:
+	case TargetTrackManual:
+		if command.Area == nil {
+			return fmt.Errorf("手动目标跟踪必须携带 TargetArea 框选坐标")
+		}
+	case TargetTrackStop:
+		if command.Area != nil {
+			return fmt.Errorf("停止目标跟踪不应携带 TargetArea 框选坐标")
+		}
+	default:
+		return fmt.Errorf("目标跟踪模式 %q 不是 Auto/Manual/Stop", command.Mode)
+	}
+	if command.Area == nil {
+		return nil
+	}
+	area := *command.Area
+	if area.Length <= 0 || area.Width <= 0 {
+		return fmt.Errorf("目标跟踪全景播放窗口尺寸必须为正数")
+	}
+	if area.LengthX <= 0 || area.LengthY <= 0 {
+		return fmt.Errorf("目标跟踪框尺寸必须为正数")
+	}
+	if area.MidPointX < 0 || area.MidPointX > area.Length {
+		return fmt.Errorf("目标跟踪框中心横轴坐标超出全景播放窗口")
+	}
+	if area.MidPointY < 0 || area.MidPointY > area.Width {
+		return fmt.Errorf("目标跟踪框中心纵轴坐标超出全景播放窗口")
+	}
+	return nil
+}
+
 type advancedDeviceControl struct {
 	XMLName      xml.Name           `xml:"Control"`
 	CmdType      string             `xml:"CmdType"`
@@ -117,6 +217,16 @@ type advancedDeviceControl struct {
 	// ⛔⛔ 必须是指针：`omitempty` 对 int 零值会**整个省略该字段**，而 0 恰好是合法取值
 	//   （= 格式化全部卡），用值类型会把「格式化所有卡」静默发成一条不含该元素的命令。
 	FormatSDCard *int `xml:"FormatSDCard,omitempty"`
+	// 以下三个元素是 A.2.3.1.14「目标跟踪控制命令」（标准页 77-78），也是 A.2.3.1
+	// 那条 `Control` 序列里**最后**的三个（排在 FormatSDCard 之后）——字段顺序即报文顺序，
+	// 别把它们插到中间去。
+	//
+	// TargetTrack 是 Auto|Manual|Stop 三选一；DeviceID2 是"全景相机中的全景通道ID"（可选）；
+	// TargetArea 是全景窗口尺寸 + 跟踪框（手动跟踪时需要）。
+	// ⛔ DeviceID2 与 SN 之后的 DeviceID **不是同一个编码**：后者必选，指"全景相机的球机通道"。
+	TargetTrack string          `xml:"TargetTrack,omitempty"`
+	DeviceID2   string          `xml:"DeviceID2,omitempty"`
+	TargetArea  *DragZoomRegion `xml:"TargetArea,omitempty"`
 }
 
 func BuildIFrameControl(deviceID string, sn int, charset XMLCharset) ([]byte, error) {
@@ -227,6 +337,61 @@ func BuildFormatSDCardControlWithProfile(profile protocol.Profile, deviceID stri
 		return nil, fmt.Errorf("存储卡编号不能为负数: %d", cardIndex)
 	}
 	return marshalAdvancedControlWithProfile(profile, deviceID, sn, advancedDeviceControl{FormatSDCard: &cardIndex})
+}
+
+// BuildTargetTrackControl 按目标跟踪命令构造一帧 DeviceControl（A.2.3.1.14）。
+func BuildTargetTrackControl(deviceID string, sn int, command TargetTrackCommand, charset XMLCharset) ([]byte, error) {
+	profile, err := advancedProfileForCharset(charset)
+	if err != nil {
+		return nil, err
+	}
+	return BuildTargetTrackControlWithProfile(profile, deviceID, sn, command)
+}
+
+// BuildTargetTrackControlWithProfile 构造「目标跟踪控制命令」（GB/T 28181-2022 A.2.3.1.14）。
+//
+// 标准原文（标准页 77-78）：
+//
+//	<!-- 全景摄像机球机画面中目标进行自动及手动跟踪控制命令。
+//	     手动跟踪：在平台端全景画面上进行框选时，平台会将目标框的具体坐标发送给设备，
+//	               设备中的球机根据该坐标执行跟踪动作。由于平台与设备画面比例大小不同，
+//	               需要进行比例关系转化。因此，平台应提供画面大小：播放窗口长度像素值和
+//	               播放窗口宽度像素值。
+//	     自动跟踪：平台把这个命令发送给设备，设备根据已配置参数执行跟踪操作，
+//	               无需平台下发坐标参数。 -->
+//	<element name="TargetTrack" minOccurs="0">
+//	  <simpleType><restriction base="string">
+//	    <enumeration value="Auto"/><enumeration value="Manual"/><enumeration value="Stop"/>
+//	  </restriction></simpleType>
+//	</element>
+//	<!-- DeviceID2 目标设备编码（可选），指全景相机中的全景通道ID -->
+//	<element name="DeviceID2" type="tg:deviceIDType" minOccurs="0"/>
+//	<!-- 全景图片大小、框选的区域坐标信息（目标框长宽及中心点坐标），可选，手动跟踪时需要 -->
+//	<element name="TargetArea" minOccurs="0">… Length/Width/MidPointX/MidPointY/LengthX/LengthY …</element>
+//	注：SN后面的目标设备编码（必选）指全景相机的球机通道。
+//
+// deviceID 参数 = **球机通道**，不是全景通道；全景通道走 command.DeviceID2。
+//
+// ⛔ 标准这里**没有**要求平台替设备做比例换算 —— 原文是"平台应提供画面大小"，
+// 换算由设备按平台给出的窗口尺寸自己完成。所以平台侧只要把"用户实际看到的播放窗口
+// 像素尺寸 + 该窗口坐标系里的框选坐标"如实发出去即可，别自作主张乘一个宽高比。
+//
+// ⚠️ 本命令是 2022 独有（`TargetTrack` 在 2016 附录 A 零命中），但这里**不按版本拒发**
+// —— 与 FormatSDCard / SDCardStatus 同口径：profile 只是"登记的说法"，是否真支持
+// 由调用方的门禁与操作员判断，协议层只负责把报文拼对。
+func BuildTargetTrackControlWithProfile(profile protocol.Profile, deviceID string, sn int, command TargetTrackCommand) ([]byte, error) {
+	if err := ValidateTargetTrackCommand(command); err != nil {
+		return nil, err
+	}
+	fields := advancedDeviceControl{TargetTrack: string(command.Mode)}
+	if deviceID2 := strings.TrimSpace(command.DeviceID2); deviceID2 != "" {
+		fields.DeviceID2 = deviceID2
+	}
+	if command.Area != nil {
+		area := *command.Area
+		fields.TargetArea = &area
+	}
+	return marshalAdvancedControlWithProfile(profile, deviceID, sn, fields)
 }
 
 func marshalAdvancedControl(deviceID string, sn int, charset XMLCharset, fields advancedDeviceControl) ([]byte, error) {
@@ -488,6 +653,10 @@ type ControlCapabilities struct {
 	AlarmReset ControlCapability `json:"alarmReset"`
 	TeleBoot   ControlCapability `json:"teleBoot"`
 	DragZoom   ControlCapability `json:"dragZoom"`
+	// TargetTrack 对应 GB/T 28181-2022 A.2.3.1.14。它需要"全景相机球机"这种双目结构，
+	// 单目通道上报支持也没意义 —— 所以**默认 unknown**，只认设备自己的显式声明
+	// （同 DragZoom：不因"PTZType 看起来像"就升格为 supported）。
+	TargetTrack ControlCapability `json:"targetTrack"`
 }
 
 // ParseControlCapabilities converts explicitly reported booleans into a
@@ -509,6 +678,7 @@ func ParseControlCapabilities(raw *string, ptzType int8) ControlCapabilities {
 	result.AlarmReset = parseReportedCapability(reported, missingReason, "alarm_reset", "alarmReset")
 	result.TeleBoot = parseReportedCapability(reported, missingReason, "teleboot", "teleBoot", "tele_boot")
 	result.DragZoom = parseReportedCapability(reported, missingReason, "drag_zoom", "dragZoom")
+	result.TargetTrack = parseReportedCapability(reported, missingReason, "target_track", "targetTrack")
 	return result
 }
 
