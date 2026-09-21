@@ -72,8 +72,13 @@ type PlaybackEndSink interface {
 	OnPlaybackFileToEnd(context.Context, string, string, []byte) error
 }
 
+// SnapshotSink 接收抓拍完成通知。**两种形态各一个方法**，别合并成一个"内部再猜":
+// 标准形态（A.2.5.7 `UploadSnapShotFinished`，一条报文带多个文件标识）与私有形态
+// （`Notify`+`SubCmd=SnapShot`，一图一条）是**两件不同的事**，混在一个入口里，
+// 入站门禁（`CmdType` 判定）与解析的对应关系就没人能一眼看出来了。
 type SnapshotSink interface {
 	OnSnapshotNotify(context.Context, string, []byte) error
+	OnUploadSnapShotFinished(context.Context, string, []byte) error
 }
 
 type BroadcastMessageProcessor interface {
@@ -326,6 +331,31 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 			return
 		}
+		// A.2.5.7 图像抓拍传输完成通知（**标准形态**）：`CmdType=UploadSnapShotFinished`，
+		// 一条报文带 `SessionID` + `SnapShotList[SnapShotFileID]`（真机上是一张一个并列的
+		// `<SnapShotList>`，不是"一个列表里放多个"）。
+		//
+		// ⛔⛔ 不能并进下面那条 `CmdNotify` 分支：那条的 CmdType 是 `Notify`（**订阅通知**的
+		// 通用 CmdType），还必须再靠 `SubCmd=SnapShot` 才能确认是抓拍；而这条是抓拍专属
+		// CmdType，用 `head.CmdType` 就能唯一判定。合并会让"两条互不相干的通知"看起来是一条，
+		// 而它们的解析器、容器（`SnapShotList` vs `SnapShotID`）完全不同。
+		//
+		// ⛔ 这里**必须回 200**：设备是在上报结果，不回它就重发；`head.DeviceID` 真机上一定有
+		// （2026-09-20 实测），所以能落在 `head.DeviceID != ""` 这个分支里。
+		if head.CmdType == manscdp.CmdUploadSnapShotFinished {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if sink := h.getSnapshotSink(); sink != nil {
+				if err := sink.OnUploadSnapShotFinished(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					logger.Warn("GB28181 抓拍传输完成通知处理失败",
+						zap.String("event", "gb28181.message.snapshot_finished_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+			return
+		}
+		// 私有形态的抓拍通知（`Notify`+`SubCmd=SnapShot`，"一图一条"）——**不是标准**，
+		// 保留只为模拟器（`uvp-gb28181-sim` 仍发这个形状）。标准形态见上面那条。
 		if head.CmdType == manscdp.CmdNotify && manscdp.IsSnapshotNotify(req.Body()) {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if sink := h.getSnapshotSink(); sink != nil {

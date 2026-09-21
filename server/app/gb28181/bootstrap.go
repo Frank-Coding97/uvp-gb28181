@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -773,10 +774,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		firmwareUpgradeService = newFirmwareUpgradeService
 		gbroutes.SetDeviceMgmtPTZRuntime(u, ptzService)
 		gbroutes.SetDeviceMgmtFirmwareUpgradeService(firmwareUpgradeService)
-		captureRoot := app.ConfigYml.GetString("httpserver.serverroot")
-		if captureRoot == "" {
-			captureRoot = "./resource/public"
-		}
+		captureRoot := deviceCaptureBaseDir()
 		deviceCaptureRegistry = devicecapture.NewRegistry(captureRoot)
 		gbroutes.SetDeviceMgmtCaptureRuntime(deviceCaptureRegistry)
 		srv.SetSnapshotSink(deviceCaptureRegistry)
@@ -1890,11 +1888,42 @@ func startPositionHistoryPruner() {
 	}()
 }
 
+// deviceCaptureBaseDir 解析**设备抓拍图片**的落盘基目录。
+//
+// 语义与 `snapshot.Service` 一致：图片实际落在 `<baseDir>/gb-device-snapshots/<sessionId>/<file>`
+// （`devicecapture.Registry.Upload` 里自己拼 `gb-device-snapshots` 这一段，
+// 所以这里返回的是**它的父目录**，别返回它本身，否则目录名会重复一层）。
+//
+// ⛔ 它**刻意不跟通道快照共用** `httpserver.serverroot`。那个目录被
+// `engine.Static(serverrootpath, serverroot)`（默认 `/public` → `./resource/public`）
+// **免鉴权**挂载：2026-09-20 实测 `curl /public/gb-channel-snapshot/…jpg` → 200 + 47255B 真图。
+// 设备抓拍图落在那里，等于把 `snapshotUploadURL` 下发的 token **整条旁路掉** ——
+// 图片路径 = 静态根 + 固定两段，任何能访问 IP 的人只要知道路径就能取图，不需要 token。
+//
+// ⇒ 固定用静态根目录的**兄弟目录**（默认 `./resource`）：既天然不在 `Static` 挂载树里，
+// 又能随 `serverroot` 一起被运维改到别的卷上，不必新增配置项。
+// 读取一律走 `GET /api/gb28181/device-snapshots/uploads/:token/:filename`（token 即凭证）。
+//
+// ⚠️ 暴露面澄清：gin 的 `Static` 关闭了目录列举（实测 `/public/` 与 `/public/gb-device-snapshots/`
+// 均 404），所以旧行为是"知道确切路径即可读"，**不是**"可遍历"。迁移仍是必要的收敛。
+func deviceCaptureBaseDir() string {
+	return deviceCaptureBaseDirFor(app.ConfigYml.GetString("httpserver.serverroot"))
+}
+
+// deviceCaptureBaseDirFor 是 [deviceCaptureBaseDir] 的纯函数部分（不读配置，便于单测钉住）。
+func deviceCaptureBaseDirFor(serverroot string) string {
+	if strings.TrimSpace(serverroot) == "" {
+		serverroot = "./resource/public"
+	}
+	return filepath.Dir(filepath.Clean(serverroot))
+}
+
 // buildSnapshotService 通道快照 service 装配。
 //
 // 依赖:
 //   - zlmRegistry:按 nodeID 查节点,构造 zlm.Client 走 getSnap
-//   - httpserver.serverroot / serverrootpath:落盘 & URL 前缀
+//   - httpserver.serverroot / serverrootpath:落盘 & URL 前缀（**设备抓拍不用这两个**，
+//     见 [deviceCaptureBaseDir]）
 //
 // 装配失败返 nil,调用侧 opt-out(主链路不受影响)。
 func buildSnapshotService() *snapshot.Service {

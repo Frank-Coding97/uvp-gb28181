@@ -16,6 +16,7 @@ import (
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
@@ -866,6 +867,17 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/channel/:id/download-sessions", deviceMgmtController.CreateDownloadSession)
 			dmgmt.POST("/channel/:id/snapshot-sessions", deviceMgmtController.CreateSnapshotSession)
 			dmgmt.GET("/channel/:id/snapshot-sessions/:sessionId", deviceMgmtController.GetSnapshotSession)
+			// 图像库稳定读接口:按 gb_channel_snapshot.id 取图,凭证是 JWT + gb28181:device:snapshot。
+			// ⛔ 路径走 gbmodels.SnapshotLibraryRoutePath(组内相对路径),与迁移里登记的
+			// sys_api 全路径(SnapshotLibraryAPIPath)由同一个定义绑定,不会写歪。
+			// 另有一条**免鉴权**的 `…/device-snapshots/uploads/:token/:filename`(见 RegisterContentRoutes),
+			// 那条的凭证是会话令牌、会随会话过期,只服务"刚下发那一批"的即时预览。两条都要留。
+			dmgmt.GET(gbmodels.SnapshotLibraryRoutePath, deviceMgmtController.SnapshotContent)
+			// 图像库**列表**接口:按通道/时间段/来源翻历史抓拍图(只出元数据 + 取图地址)。
+			// ⛔ 与上面那条读图接口是**两条不同层的路径**(`/snapshots` 与 `/snapshots/:id/content`),
+			// 不是一条 —— gin 允许两者共存(GET 同方法不同深度),但少注册一条的表现是
+			// "页面打得开、列表永远空"(404 被前端当成空数组),而不是报错。
+			dmgmt.GET(gbmodels.SnapshotListRoutePath, deviceMgmtController.ListSnapshots)
 			dmgmt.GET("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.GetPlaybackSession)
 			dmgmt.POST("/channel/:id/playback-sessions/:sessionId/actions", deviceMgmtController.ActionPlaybackSession)
 			dmgmt.DELETE("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.DeletePlaybackSession)
@@ -929,6 +941,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 // operation-log middleware. Capability verification is performed by the
 // controller on every request; JWT and query-logging middleware are omitted.
 func RegisterContentRoutes(engine *gin.Engine) {
+	// ⛔ 上传路由必须**同时**吃下三种形状，否则真机的报文连路由都进不去：
+	//   ① `POST …/uploads/<token>/`（尾斜杠）—— 海康实测就是这条，且路径到 token 就结束，
+	//      **没有文件名段**，文件名只在 multipart 部件头里（2026-09-20 真机抓包）；
+	//   ② `POST …/uploads/<token>`（无尾斜杠）；
+	//   ③ `PUT …/uploads/<token>/<filename>`（旧形态：裸 JPEG + 路径文件名，保留兼容）。
+	// ⛔ ①/② 不能用 `:token` 注册了指望 gin 的 `RedirectTrailingSlash` 去 307 兜：
+	//    307 要设备跟着重发，而设备不跟随 —— 实测表现是纯文本 `404 page not found`。
+	//    所以这里用 catch-all，把"尾斜杠 / 文件名"都作为同一个 token 参数交给控制器解析。
+	engine.POST("/api/gb28181/device-snapshots/uploads/*token", deviceMgmtController.UploadDeviceSnapshot)
 	engine.PUT("/api/gb28181/device-snapshots/uploads/:token/:filename", deviceMgmtController.UploadDeviceSnapshot)
 	engine.GET("/api/gb28181/device-snapshots/uploads/:token/:filename", deviceMgmtController.DeviceSnapshotContent)
 	engine.GET("/api/gb28181/cloud-recordings/downloads/:taskId/content", func(c *gin.Context) {

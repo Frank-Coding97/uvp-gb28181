@@ -3,6 +3,8 @@ package devicecapture
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -35,9 +37,16 @@ const (
 )
 
 type File struct {
-	Name       string    `json:"name"`
-	Path       string    `json:"-"`
-	Size       int64     `json:"size"`
+	Name string `json:"name"`
+	// Path 是**落盘绝对/相对路径**（给本进程读文件用），不进库、不出接口。
+	Path string `json:"-"`
+	// RelPath 是相对**抓拍图片基目录**的路径（`gb-device-snapshots/<sessionId>/<文件名>`），
+	// 落库用。⛔ 与 Path 分开是必要的：库里的路径必须能跟着 serverroot 一起搬卷，
+	// 存绝对路径的库一搬机器就全部指向不存在的文件。
+	RelPath string `json:"-"`
+	Size    int64  `json:"size"`
+	// MD5 是图片字节的摘要（小写 hex），用于"平台手上的图"与"设备说的图"做完整性对账。
+	MD5        string    `json:"md5"`
 	ReceivedAt time.Time `json:"receivedAt"`
 }
 
@@ -56,7 +65,13 @@ type Session struct {
 	Error         string    `json:"error"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
-	notified      map[string]struct{}
+	// notifiedIDs 是设备**已声明完成**的图像文件标识集合（去重），`NotifiedCount` 是它的基数。
+	//
+	// ⛔ 必须按**文件标识**而不是"一次通知"去重：通知识别走两种形态 ——
+	// A.2.5.7 标准形态**一条报文带多个标识**（真机是 N 个并列的 `<SnapShotList>`），
+	// 私有形态则是一图一条。若按"报文条数"计数，标准形态下 `NotifiedCount` 恒为 1，
+	// 而 `completeLocked` 要求 `NotifiedCount >= SnapNum` ⇒ 会话永远完不成。
+	notifiedIDs map[string]struct{}
 }
 
 type CreateRequest struct {
@@ -81,7 +96,7 @@ func (r *Registry) Create(request CreateRequest) Session {
 		ID: uuid.NewString(), UploadToken: uuid.NewString(), OwnerID: request.OwnerID,
 		ChannelID: request.ChannelID, ChannelCode: request.ChannelCode, DeviceCode: request.DeviceCode,
 		SnapNum: request.SnapNum, Interval: request.Interval, State: StateCreating,
-		CreatedAt: now, UpdatedAt: now, notified: make(map[string]struct{}),
+		CreatedAt: now, UpdatedAt: now, notifiedIDs: make(map[string]struct{}),
 	}
 	r.mu.Lock()
 	r.sessions[session.ID] = session
@@ -148,7 +163,16 @@ func (r *Registry) Upload(token, filename, contentType string, source io.Reader)
 	if err := os.WriteFile(path, payload, 0o640); err != nil {
 		return File{}, err
 	}
-	file := File{Name: filename, Path: path, Size: int64(len(payload)), ReceivedAt: time.Now()}
+	// RelPath 用正斜杠手工拼（不用 filepath.Join）：它是要**落库**的，而库可能被
+	// Windows 与 Linux 两种部署形态读同一份数据，带反斜杠的值换平台就失效。
+	// ⛔ 拼接是安全的（无需转义/清洗）：sessionID 是 uuid、filename 已过 filepath.Base，
+	// 两者都不可能包含路径分隔符。
+	relative := "gb-device-snapshots/" + sessionID + "/" + filename
+	digest := md5.Sum(payload)
+	file := File{
+		Name: filename, Path: path, RelPath: relative,
+		Size: int64(len(payload)), MD5: hex.EncodeToString(digest[:]), ReceivedAt: time.Now(),
+	}
 	r.mu.Lock()
 	session := r.sessions[sessionID]
 	if session == nil {
@@ -172,31 +196,108 @@ func (r *Registry) Upload(token, filename, contentType string, source io.Reader)
 	return file, nil
 }
 
+// OnUploadSnapShotFinished 处理 **A.2.5.7 标准形态**的抓拍传输完成通知（**一对多**）。
+//
+// ⛔ 这是"抓拍会话能否收尾"的唯一入口：`completeLocked` 要求 `NotifiedCount >= SnapNum`，
+// 而 `NotifiedCount` 只在这里（与私有形态那条）推进。2026-09-20 之前平台只认私有形态，
+// 而真机发的是标准形态 ⇒ 会话永远停在 `receiving`，前端（`SnapshotConfigPanel.vue`）
+// 轮询到的一直是"未完成"，而图片其实已经按 `UploadURL` 落盘了。
+func (r *Registry) OnUploadSnapShotFinished(_ context.Context, senderDeviceID string, body []byte) error {
+	finished, err := manscdp.ParseUploadSnapShotFinished(body)
+	if err != nil {
+		return err
+	}
+	return r.recordFinished(senderDeviceID, finished.DeviceID, finished.SessionID, finished.FileIDs)
+}
+
+// OnSnapshotNotify 处理**私有形态**（`Notify` + `SubCmd=SnapShot` + `SnapShotID`，"一图一条"）。
+//
+// ⭐ 为什么留着：模拟器（`uvp-gb28181-sim` 的 `SnapShotNotifyBuilder.kt`）当前发的仍是这个形状，
+// 它是本仓唯一的端到端联调对象。两条路都收 ⇒ 真机与模拟器各自都能推进完成计数。
+// 等 E-2 的模拟器侧也改成标准形态后，这一路连同 [manscdp.ParseSnapshotNotify] 可以删。
 func (r *Registry) OnSnapshotNotify(_ context.Context, senderDeviceID string, body []byte) error {
 	notify, err := manscdp.ParseSnapshotNotify(body)
 	if err != nil {
 		return err
 	}
+	return r.recordFinished(senderDeviceID, notify.DeviceID, notify.SessionID, []string{notify.SnapshotID})
+}
+
+// recordFinished 是两种完成通知形态的**共用记账**：定位会话 → 校验来源 → 按文件标识去重计数
+// → 推进状态机。
+//
+// ⛔ 两条路必须共用这一份。形态可以有两种，"哪些标识算完成"只能有一个答案；分开写就等于把
+// `NotifiedCount` 的语义拆成两套（各自去重、各自判归属），出问题时没人能回答"以哪条为准"。
+func (r *Registry) recordFinished(senderDeviceID, deviceID, sessionID string, fileIDs []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	session := r.sessions[notify.SessionID]
+	session := r.sessions[sessionID]
 	if session == nil {
 		return ErrNotFound
 	}
 	senderDeviceID = strings.TrimSpace(senderDeviceID)
 	if senderDeviceID != "" && senderDeviceID != session.DeviceCode && senderDeviceID != session.ChannelCode {
-		return fmt.Errorf("snapshot notify sender mismatch")
+		return fmt.Errorf("snapshot notify sender mismatch: sender=%q", senderDeviceID)
 	}
-	if notify.DeviceID != session.DeviceCode && notify.DeviceID != session.ChannelCode {
-		return fmt.Errorf("snapshot notify device mismatch")
+	// ⛔ 这里保持**严格**（要求报文里的 DeviceID 命中设备或通道编码），不因"设备可能漏写"
+	// 就放宽成 OR：真机与模拟器都带了 DeviceID，放宽只会静默削掉一层归属校验。
+	// 若将来真有设备漏写，错误信息里已经带了两个值，一眼能看出是"对方没写"而不是"会话找不到"。
+	if deviceID != session.DeviceCode && deviceID != session.ChannelCode {
+		return fmt.Errorf("snapshot notify device mismatch: sender=%q device=%q", senderDeviceID, deviceID)
 	}
-	if _, exists := session.notified[notify.SnapshotID]; !exists {
-		session.notified[notify.SnapshotID] = struct{}{}
+	for _, raw := range fileIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, exists := session.notifiedIDs[id]; exists {
+			continue
+		}
+		session.notifiedIDs[id] = struct{}{}
 		session.NotifiedCount++
 	}
 	session.UpdatedAt = time.Now()
 	r.completeLocked(session)
 	return nil
+}
+
+// FilePath 把**库里的 `rel_path`** 解析成本进程可读的文件路径，并确保它没逃出基目录。
+//
+// ⛔ 为什么解析规则放在这里而不是调用方：目录布局是 registry 自己定义的
+// （`<root>/gb-device-snapshots/<sessionId>/<file>`），只有它知道怎么还原。
+// 调用方自己拼路径 = 第二份布局知识，改布局时必然有一边漏改。
+//
+// ⛔ 前缀校验不是形式主义：`rel_path` 来自库，而库行可被人工改写、也可被回滚后的旧版本写入。
+// 没有这一层时 `../../../etc/passwd` 这类值会被 `filepath.Join` 正常"清理"成一条基目录之外
+// 的真实路径，于是读图接口变成一个任意文件读取口子。
+func (r *Registry) FilePath(relPath string) (string, error) {
+	base, err := filepath.Abs(r.root)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(base, filepath.FromSlash(strings.TrimSpace(relPath))))
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(target, base+string(os.PathSeparator)) {
+		return "", ErrNotFound
+	}
+	return target, nil
+}
+
+// SessionForToken 按**上传令牌**取会话快照（不校验 owner —— 调用方是收图侧，
+// 那时还没有登录态；令牌本身就是凭证）。
+//
+// ⭐ 用途：设备 POST 回来时，平台只知道令牌，要靠它把"这张图属于哪个设备/通道/会话"
+// 问出来才能落库。返回的是 [cloneSession] 的副本（并发安全），不含 `notifiedIDs`。
+func (r *Registry) SessionForToken(token string) (Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session := r.sessions[r.byToken[strings.TrimSpace(token)]]
+	if session == nil {
+		return Session{}, false
+	}
+	return cloneSession(session), true
 }
 
 func (r *Registry) Content(token, filename string) (File, error) {
@@ -240,6 +341,8 @@ func (r *Registry) pruneLocked() {
 func cloneSession(source *Session) Session {
 	copy := *source
 	copy.Files = append([]File(nil), source.Files...)
-	copy.notified = nil
+	// ⛔ 必须置空：`cloneSession` 的返回值会经 JSON 出去，而 `notifiedIDs` 是并发读写的 map
+	// （`recordFinished` 持写锁改它）。带上就等于把内部记账对象交给调用方裸读。
+	copy.notifiedIDs = nil
 	return copy
 }
