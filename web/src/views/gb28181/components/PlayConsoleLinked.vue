@@ -18,7 +18,8 @@ import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-consol
 import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
 import DeviceConfigDrawer from "../device-mgmt/DeviceConfigDrawer.vue";
-import { MAX_MASK_REGIONS, MIRROR_OPTIONS } from "../device-mgmt/deviceConfigGroups";
+import DeviceConfigOsdBlocks from "../device-mgmt/DeviceConfigOsdBlocks.vue";
+import { MAX_MASK_REGIONS, MIRROR_OPTIONS, type ConfigTextItem } from "../device-mgmt/deviceConfigGroups";
 import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
@@ -36,7 +37,7 @@ import {
   controlPtzCruise,
   createCruiseTrack,
   controlPtzPrecise,
-  createDeviceSnapshotSession,
+  controlPtzScan,
   callPtzPreset,
   createTalkSession,
   createPtzPreset,
@@ -45,10 +46,7 @@ import {
   fetchPTZDefaultSpeedConfig,
   getControlCapabilities,
   getCruiseTrack,
-  getDeviceStatus,
-  getChannelStorageCards,
   getChannelVideoParams,
-  getDeviceSnapshotSession,
   getHomePosition,
   getPtzOperation,
   getPtzPreciseStatus,
@@ -64,13 +62,7 @@ import {
   type ControlCapability,
   type CruiseTrackDetailResource,
   type CruiseTrackPointResource,
-  type DeviceAlarmFact,
-  type DeviceAlarmResolution,
   type DeviceControlCapabilities,
-  type DeviceStatusResult,
-  type DeviceSnapshotSession,
-  type DeviceFactState,
-  type DeviceReportedFacts,
   type HomePositionConfig,
   type HomePositionPatch,
   type HomePositionResult,
@@ -79,7 +71,6 @@ import {
   type ProbeSnapshot,
   type PTZOperation,
   type PTZResourceFreshness,
-  type StorageCard,
   type StreamMonitorSnapshot,
   type TalkCreateResult,
   type VideoParam,
@@ -103,7 +94,6 @@ import {
   Focus as FocusIcon,
   Frame,
   Gauge,
-  HardDrive,
   Hash,
   Home,
   Info,
@@ -111,6 +101,7 @@ import {
   Maximize2,
   Mic,
   Move3d,
+  MoveHorizontal,
   Navigation,
   Inbox,
   Pause,
@@ -119,7 +110,6 @@ import {
   Plus,
   RadioTower,
   RefreshCcw,
-  RotateCcw,
   RotateCw,
   Route,
   Scan,
@@ -310,7 +300,6 @@ const canCallPtzPreset = computed(() => hasPermission("gb28181:ptz:preset:call")
 const canDeletePtzPreset = computed(() => hasPermission("gb28181:ptz:preset:delete"));
 const canControlPtzCruise = computed(() => hasPermission("gb28181:ptz:cruise"));
 const canUpdatePtzHome = computed(() => hasPermission("gb28181:ptz:home"));
-const canSnapshot = computed(() => hasPermission("gb28181:device:snapshot"));
 const canControlDevice = computed(() => hasPermission("gb28181:device:control"));
 const canTalk = computed(() => hasPermission("gb28181:talk:control"));
 const canReadPtzSpeed = computed(() => hasPermission("gb28181:sip:config:view"));
@@ -324,27 +313,53 @@ const canPtzPanel = computed(
     canControlPtzCruise.value ||
     canUpdatePtzHome.value
 );
-const canAdvancedPanel = computed(() => canControlDevice.value || canSnapshot.value);
 
 /* "流信息"tab 已并入"视频探针":概览卡承担全部实时监视信息(媒体节点/流 ID/视频音频参数/
  * 数据速率/丢包/当前观看)。删掉独立 tab 让侧栏窄一档、层级也更清爽。
  *
  * "视频参数"2026-09-18 从"高级"里拆成独立 tab:它是 A.2.3.2 设备配置类
- * (读 A.2.4.7 ConfigDownload / 写 A.2.3.2.5 DeviceConfig),语义上是"设备侧配置",
- * 与"高级"那栏的关键帧/布防/重启不是一类。挤在同一栏里既让"高级"变成四张卡的杂货铺,
- * 也让这块配置没有独立入口。
- * ⛔ 可见性用 `canViewPtz`(gb28181:ptz:view),**不是** `canAdvancedPanel` ——
+ * (读 A.2.4.7 ConfigDownload / 写 A.2.3.2.5 DeviceConfig),语义上是"设备侧配置"。
+ * ⛔ 可见性用 `canViewPtz`(gb28181:ptz:view),**不是** device:control ——
  * 本卡每个加载函数(loadVideoParams / 回读轮询 / 下发)都以 `ptz:view` 为门禁,
- * 挂到 control/snapshot 上会出现"有读权限却看不见"或"看得见但读不出"的错配。 */
-type TabKey = "ptz" | "probe" | "advanced" | "videoparam" | "deviceconfig" | "record" | "alarm" | "device";
+ * 挂到 control 上会出现"有读权限却看不见"或"看得见但读不出"的错配。
+ *
+ * ⭐ "视频编码" tab 2026-09-20 **并回「画面设置」**,一级页签 5 → 4;同日再收掉"设备维护" ⇒ **3 个**。
+ *   判据:它和图像叠加、画面镜像、隐私遮挡改的是**同一台设备的同一路画面**,
+ *   却要占两个并列的顶级入口 —— 用户想"把画面调一下"得先猜是哪个页签。
+ *   合并后「画面设置」= 侧栏一组(`video-param`) + 底栏四格
+ *   (图像叠加 / 遮挡 / 镜像 / 参数对照)。
+ *   ⛔ 别再给它单开一级页签,也别退回"侧栏两组二选一"的切换形态(老板 2026-09-20 明确否掉)。
+ *   ⛔ 也别把参数对照挪回侧栏:两行(回读/实测)并排 + 一个判定标签才读得出"设备到底跟没跟",
+ *      窄侧栏里会折成四行。
+ *
+ * ⭐ "高级"tab 2026-09-20 **整体消失**,三拨内容各有归属(控制台不再保留任何一处):
+ *   ① 图像抓拍配置 → 设备管理页「设备详情」抽屉的「设备控制」页;
+ *   ② 设备录制 / 布防撤防 / 报警复位 → 同上(它们是**设备侧动作**,不是"这一路流"的动作,
+ *      关掉播放弹窗就没了,而设备详情是常驻入口);
+ *   ③ 请求关键帧 → 云台控制侧栏底部(画面级即时操作,与摇杆/3D 拖拽同族)。
+ *
+ * ⭐ "录像存储" / "报警控制" 两个**整页签**同日也搬去了同一个「设备详情」抽屉
+ *   (`record-plan` / `alarm-record` / `alarm-report` 三组走 DeviceConfigDrawer 的 config-only 通道)。
+ *   判据与①②同源:录像计划、报警录像、报警上报写的都是**设备侧的配置**,
+ *   与"这一路流现在播得怎么样"无关;控制台里它们只能靠 SideBar 里那一个共用面板承载,
+ *   关掉弹窗就没入口。控制台侧不再保留第二处(详见 device-mgmt/index.vue 的页签契约测试)。
+ *
+ * ⭐ 同日稍晚 "设备维护" 这最后一个整页签也搬走了(改叫「基本参数」,同样落在那张抽屉里)。
+ *   判据:**它从头到尾只有 `basic` 一组**(A.2.1.19 BasicParam:设备名称/注册有效期/心跳间隔/
+ *   最大心跳超时次数),是纯粹的**设备侧配置下发**,与画面无关 —— 留在这里,
+ *   "改个心跳间隔"要先打开某一路正在播的画面控制台,而设备详情抽屉本来就是设备维度的常驻入口。
+ *   ⛔ 别把 `device: ["basic"]` 加回来:控制台侧那套 SideBar 只有"画面设置"一个归属了。
+ *   ⛔ 也别以为它并进了「设备信息」页 —— 那一页显示注册状态/心跳间隔是**只读事实**,
+ *      与"把值下发到设备"不是同一件事。 */
+type TabKey = "ptz" | "probe" | "deviceconfig";
+
+/**
+ * operation 生命周期。⛔ 不要跟着「高级」页签一起删掉 —— 控制台里还有两个动作在用它：
+ * 请求关键帧（iframe）与 3D 拖框缩放（drag_zoom_in/out），它们走的是同一套 operation 收敛。
+ */
+type AdvancedOperationPhase = "idle" | "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
 const activeTab = ref<TabKey>("ptz");
 const sideCollapsed = ref(false);
-const videoConfigRef = ref<{
-  selectStream: (value: string) => void;
-  read: () => void;
-  reset: () => void;
-  apply: () => void;
-} | null>(null);
 /** 画面设置底栏卡片里的遮挡区槽位（由 DeviceConfigDrawer 暴露，标准固定 4 个）。 */
 interface PictureRegionSlot {
   seq: number;
@@ -391,6 +406,69 @@ interface DeviceConfigCardHandle {
   applyPictureGroup: () => Promise<void>;
   /** 点开关时的即时下发：只发 `PictureMask` 这一块，不捎带镜像草稿。 */
   applyPictureMaskOnly: () => Promise<void>;
+  // ── 图像叠加（OSD）：钉在 `osd` 组上，与画面组共用同一套读写口 ──
+  osdEditable: boolean;
+  /** 画布要画的锚点（时间戳 + 各条文字），含四态：已生效 / 待下发 / 未定位 / 已关闭。 */
+  osdAnchors: OsdAnchorSlot[];
+  osdDirtyCount: number;
+  osdDirtyFields: string[];
+  /** 还没在画面上定位的文字行数 —— 浮条据此把「下发」拦下来。 */
+  osdUnplacedCount: number;
+  osdFactsMissing: boolean;
+  /** OSD 组最近一次下发/拒发的原因（与 `pictureError` 同一个机制）。 */
+  osdError: string;
+  /** 侧栏点「在画面上定位」→ 画布把对应锚点闪一下（带递增 `seq`，连点两次也会触发）。 */
+  osdFocusToken: { kind: "time" | "item"; index: number; seq: number } | null;
+  setOsdTimePosition: (axis: "x" | "y", value: number) => void;
+  setOsdItemPosition: (index: number, x: number, y: number) => void;
+  readOsdGroup: () => void;
+  revertOsdGroup: () => void;
+  applyOsdGroup: () => Promise<void>;
+  // ── 底栏「图像叠加」整块面板专用（2026-09-20）──
+  /**
+   * 一整袋 props，直接 `v-bind` 给 `DeviceConfigOsdBlocks`（`layout="row"`）。
+   *
+   * ⛔ 宿主只渲染、不另存一份：值全部来自抽屉的 `familyValues.osd`，
+   *    写口就下面三个（`setOsdFlag` / `setOsdItems` / `setOsdTimePosition`）。
+   * ⛔ 袋里的 `editing` / `canvasLinked` 反映的是**抽屉自己的 props**；
+   *    播放控制台里这两个由画面侧持有，所以渲染时会显式覆盖（见底栏 `picture-osd-cell`）。
+   */
+  osdBlocks: {
+    timeEnable: boolean;
+    timeType: string;
+    timeX: string;
+    timeY: string;
+    textEnable: boolean;
+    items: ConfigTextItem[];
+    canvas: { width: number; height: number } | null;
+    disabled: boolean;
+    maxItems: number;
+    editing: boolean;
+    canvasLinked: boolean;
+  };
+  /** 开关 / 时间格式这类单值字段。 */
+  setOsdFlag: (fieldKey: string, value: string | boolean) => void;
+  /** 叠加文字整表（增删改都在宿主侧算好后整表回写）。 */
+  setOsdItems: (rows: ConfigTextItem[]) => void;
+  /** 点「在画面上定位」→ 让画布闪一下对应锚点。 */
+  focusOsdAnchor: (payload: { kind: "time" | "item"; index: number }) => void;
+  /** 浮条「下发」：画面 + OSD 的草稿**合并成一条报文**发出去。 */
+  applyPictureAndOsdGroups: () => Promise<void>;
+}
+
+/** 画布上的一枚 OSD 标记（与 `DeviceConfigDrawer` 暴露的形状对应）。 */
+interface OsdAnchorSlot {
+  key: string;
+  kind: "time" | "item";
+  /** 文字行在数组里的下标；时间戳恒为 `-1`。 */
+  index: number;
+  /** 画在锚点上的标签：时间戳是「时间戳」，文字是「1 北门」。 */
+  label: string;
+  x: number;
+  y: number;
+  unplaced: boolean;
+  draft: boolean;
+  off: boolean;
 }
 
 const deviceConfigRef = ref<DeviceConfigCardHandle | null>(null);
@@ -398,36 +476,44 @@ const deviceConfigRef = ref<DeviceConfigCardHandle | null>(null);
 /** 播放器句柄：画面真实解码尺寸是遮挡坐标的唯一参考系。 */
 const playWindowRef = ref<{ refreshVideoSize?: () => void } | null>(null);
 const configWorkspaceGroups: Partial<Record<TabKey, string[]>> = {
-  // 「画面处理」（镜像 + 隐私遮挡）已下沉到底栏卡片，侧栏只留图像叠加（OSD）——
-  // 配置组只剩一个，`dcg-nav` 的 `configGroups.length > 1` 自动隐藏，二级 tab 就此取消。
-  // ⛔ 别把 picture 从这里删掉就以为"不读了"：读取问的是 `CONFIG_GROUPS` 的全量并集，
-  //    卡片的数据照旧来自同一次读取。
-  deviceconfig: ["osd"],
-  record: ["record-plan", "alarm-record"],
-  alarm: ["alarm-report"],
-  device: ["basic"]
+  // ⭐ 2026-09-20 第二次收敛（老板：「不想用切换的方式，想让它们都在一个页面上全部展示出来」）：
+  //    侧栏**只挂 `video-param`**（视频编码），「图像叠加」整块搬到底栏第一格
+  //    （`picture-osd-cell`，渲染 `DeviceConfigOsdBlocks` 的 `layout="row"`，数据走
+  //    `DeviceConfigDrawer` 暴露的 `osdBlocks` 袋 + `setOsdFlag` / `setOsdItems`）。
+  //    ⇒ 这一页现在一次看全：视频编码（侧栏） / 图像叠加 · 遮挡 · 镜像 · 参数对照（底栏）。
+  // ⛔ 别把 `osd` 加回这个数组：加回来侧栏又长出 `dcg-nav` 切换，同一份
+  //    `familyValues.osd` 就有了两个编辑面（底栏那份是新的）。
+  // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍下沉在底栏卡片，不在这里：侧栏再挂一份，
+  //    同一份 `familyValues.picture` 就有两个编辑入口了。
+  // ⛔ record / alarm / basic 三组 2026-09-20 已随各自的整页签搬到设备详情抽屉，别在这里加回来 ——
+  //    加回来就等于控制台重新长出第二个配置入口，两边会各持一份通道上下文。
+  deviceconfig: ["video-param"]
 };
 const activeConfigGroups = computed(() => configWorkspaceGroups[activeTab.value] ?? []);
 const isConfigWorkspace = computed(() => activeConfigGroups.value.length > 0);
 const activeWorkspace = computed(() => tabs.find(tab => tab.key === activeTab.value));
 
+/**
+ * 「画面设置」的侧栏分组自 2026-09-20 起**只有一组**（`video-param`）：图像叠加整块搬到了底栏。
+ *
+ * ⇒ 宿主不再需要持有"当前第几组"，也就不再往抽屉传 `v-model:active-group-key`。
+ * ⛔ 那个口当初存在的唯一理由是**切离「图像叠加」组时退出 OSD 编辑模式**；现在整页同屏，
+ *    这条联动自动消失 —— 退出编辑模式只剩：按钮 / Esc / 换页签 / 换通道（见 `exitOsdEditMode` 的调用点）。
+ * ⛔ 别为了"以后可能要切组"把这个口留着：留着的代价是宿主与抽屉各持一份"当前组"，
+ *    而没有任何一处会读它（本仓已经因为"两份状态"返工过三次）。
+ */
+
 const tabs: Array<{ key: TabKey; label: string; icon: any; description: string }> = [
   { key: "ptz", label: "云台控制", icon: Compass, description: "GB28181-2022 全能力" },
-  { key: "deviceconfig", label: "画面设置", icon: Camera, description: "图像叠加 · 镜像 · 隐私遮挡" },
-  { key: "videoparam", label: "视频编码", icon: Video, description: "码流 · 分辨率 · 帧率" },
-  { key: "record", label: "录像存储", icon: HardDrive, description: "录像计划 · 报警录像" },
-  { key: "alarm", label: "报警控制", icon: ShieldCheck, description: "移动侦测 · 区域入侵上报" },
-  { key: "device", label: "设备维护", icon: Settings, description: "名称 · 注册 · 心跳" },
-  { key: "probe", label: "视频探针", icon: Activity, description: "实时监视 + 逐帧采样" },
-  { key: "advanced", label: "高级", icon: Settings, description: "关键帧 · 布防 · 重启" }
+  // ⛔ description 只写**用户能找到东西的词**，不写"A.2.3.2 设备配置类"这类条款号。
+  { key: "deviceconfig", label: "画面设置", icon: Camera, description: "视频编码 · 图像叠加 · 遮挡" },
+  { key: "probe", label: "视频探针", icon: Activity, description: "实时监视 + 逐帧采样" }
 ];
 const visibleTabs = computed(() =>
   tabs.filter(
     tab =>
       (tab.key === "ptz" && canPtzPanel.value) ||
       (tab.key === "probe" && (canMonitorPlayback.value || canDiagnosePlayback.value)) ||
-      (tab.key === "advanced" && canAdvancedPanel.value) ||
-      (tab.key === "videoparam" && canViewPtz.value) ||
       (Boolean(configWorkspaceGroups[tab.key]) && canViewPtz.value)
   )
 );
@@ -438,6 +524,14 @@ watch(
   },
   { immediate: true }
 );
+
+/* ─────────────────── 详情区 ───────────────────
+ * 详情条只有一个形态:一个侧栏 Tab 对应一块内容,切换侧栏就换一块。
+ *
+ * ⛔ 「设备状态」「存储卡状态」2026-09-20 起**只在设备管理页的「设备详情」抽屉里**
+ *    (页签:设备信息 / 设备状态 / 存储卡),控制台侧不再有这两个入口 ——
+ *    它们读的是通道级事实(/channel/:id/...),本来就属于"某个设备的详情",
+ *    不是播放控制台该承载的东西。别在这里把它们加回来,也不要再造一套详情区页签机制。 */
 
 /* ────────────────────────── 视频区状态 ────────────────────────── */
 
@@ -742,6 +836,35 @@ const cruiseSyncTitle = computed(() => {
   const reason = cruiseRefreshError.value || cruiseLoadError.value;
   return `${reason ? `${reason}。` : ""}从设备重新读取巡航轨迹清单,并逐条回读各自的点位链`;
 });
+
+// 自动扫描(PTZCmd 89H 开始/左边界/右边界,8AH 速度)
+//
+// ⭐ 扫描与巡航是两件不同的事,别做成「巡航的另一种形态」:
+//    巡航 = 一串**有序预置位** + 停留时间,循环走;扫描 = 只有**左右两个边界**,在两点之间来回。
+//    ⇒ 没有点位列表可回读,也不需要「从设备同步」:边界是设备上的一组状态,由操作员把云台
+//      转到目标位置后下发 `scan_set_left` / `scan_set_right` 写入,而标准里扫描**没有查询命令**,
+//      平台无从得知当前值。所以这张卡片是**纯下发**,不回读、不展示"设备上的扫描配置"。
+type ScanAction = "scan_start" | "scan_stop" | "scan_set_left" | "scan_set_right" | "scan_set_speed";
+const SCAN_GROUP_MIN = 0;
+const SCAN_GROUP_MAX = 255;
+/** 与巡航速度同一个量纲:8AH 的参数域是 12 位(01H-FFFH)。 */
+const SCAN_SPEED_MIN = 1;
+const SCAN_SPEED_MAX = 4095;
+const scanGroup = ref<number>(1);
+const scanSpeed = ref<number>(60);
+/** 与巡航一致:HTTP 成功只表示指令已发出,不能据此宣称设备正在扫描。 */
+const scanState = ref<"stopped" | "start-sent">("stopped");
+const scanBusy = ref(false);
+const scanError = ref("");
+const scanActiveGroup = ref<number | null>(null);
+const scanGroupInvalid = computed(
+  () => !Number.isInteger(scanGroup.value) || scanGroup.value < SCAN_GROUP_MIN || scanGroup.value > SCAN_GROUP_MAX
+);
+const scanSpeedInvalid = computed(
+  () => !Number.isInteger(scanSpeed.value) || scanSpeed.value < SCAN_SPEED_MIN || scanSpeed.value > SCAN_SPEED_MAX
+);
+const scanCanSend = computed(() => canControlPtz.value && Boolean(props.channel) && !scanBusy.value && !scanGroupInvalid.value);
+
 const CRUISE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 let cruiseReconcileTimer: number | null = null;
 let cruiseReconcileAttempt = 0;
@@ -1761,29 +1884,8 @@ async function pollHomePositionOperation(channelId: number, token: number, gener
   }
 }
 
-type RecordState = "on" | "off" | "unknown";
-type GuardState = "armed" | "disarmed" | "alarm" | "unknown";
-type AdvancedOperationPhase = "idle" | "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
-const recordState = ref<RecordState>("unknown");
-const guardState = ref<GuardState>("unknown");
-const alarmResolution = ref<DeviceAlarmResolution | null>(null);
-// 设备在应答里自报的事实（在线/自检/编码/设备时间/报警输入数量）。
-// 全为 null 表示这条应答没带这些项，界面要显示"未上报"而不是"关闭"。
-const deviceReport = ref<DeviceReportedFacts | null>(null);
-const alarmFacts = ref<DeviceAlarmFact[]>([]);
-const deviceStatusFreshness = ref<PTZResourceFreshness>("unknown");
-const deviceStatusError = ref("");
-const deviceStatusPending = ref(false);
-const deviceStatusOperationId = ref<string | null>(null);
-// 存储卡状态(A.2.4.14/A.2.6.16)。与 DeviceStatus 分开维护:两者是不同的协议命令、
-// 不同的查询节拍 —— 合并成一个 pending 会让"查卡"把"查录像状态"的按钮一起转圈。
-const storageCards = ref<StorageCard[]>([]);
-const storageCardsFreshness = ref<PTZResourceFreshness>("unknown");
-const storageCardsError = ref("");
-const storageCardsPending = ref(false);
-/** 是否成功读到过一份结果。用来区分"还没查过"与"设备确实没有卡"。 */
-const storageCardsLoaded = ref(false);
 /*
+
  * 视频参数属性(A.2.1.13 / A.2.4.7 / A.2.3.2.5)。
  *
  * ⛔ 与存储卡分开维护同一条理由(不同的协议命令、不同的节拍);但这里还多一层:
@@ -1796,6 +1898,19 @@ const videoParams = ref<VideoParam[]>([]);
 const videoParamsDraft = ref<VideoParamCodecItem[]>([]);
 const videoParamRegisteredVersion = ref("");
 const selectedVideoStream = ref(0);
+/**
+ * 码流选择的**受控出口**，喂给侧栏 `DeviceConfigDrawer` 的 `v-model:stream-profile`。
+ *
+ * ⛔ 真源只有 `selectedVideoStream`（number）这一个，这里只是把它翻成抽屉要的字符串 ——
+ *    两个 ref 各存一份就会出现"底栏对着子码流、侧栏在改主码流"，而两边都不报错：
+ *    对照卡上的数字和正在编辑的那条流根本不是同一条。
+ */
+const videoParamStreamProfile = computed({
+  get: () => String(selectedVideoStream.value),
+  set: value => {
+    selectedVideoStream.value = Number(value) || 0;
+  }
+});
 const advancedOperationPhase = ref<Record<string, AdvancedOperationPhase>>({});
 const advancedOperationIds = ref<Record<string, string | null>>({});
 const advancedOperationDeadline = ref<Record<string, string | null>>({});
@@ -1810,11 +1925,6 @@ const advancedStatusToken = ref(0);
 const advancedPending = ref(new Set<string>());
 const advancedOperationStatus = ref<Record<string, string>>({});
 const dragZoomMode = ref(false);
-const snapshotCount = ref(1);
-const snapshotInterval = ref(1);
-const snapshotPending = ref(false);
-const snapshotSession = ref<DeviceSnapshotSession | null>(null);
-let snapshotPollTimer: number | null = null;
 const dragZoomAction = ref<"drag_zoom_in" | "drag_zoom_out">("drag_zoom_in");
 const dragZoomStart = ref<{ x: number; y: number } | null>(null);
 const dragZoomCurrent = ref<{ x: number; y: number } | null>(null);
@@ -1827,192 +1937,6 @@ const dragZoomBoxStyle = computed(() => {
   const height = Math.abs(dragZoomCurrent.value.y - dragZoomStart.value.y);
   return { left: `${left * 100}%`, top: `${top * 100}%`, width: `${width * 100}%`, height: `${height * 100}%` };
 });
-
-function normalizeRecordState(value: DeviceFactState | boolean | number | null | undefined): RecordState {
-  if (value === true || value === 1) return "on";
-  if (value === false || value === 0) return "off";
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  if (["on", "1", "true", "record", "recording", "start", "started"].includes(normalized)) return "on";
-  if (["off", "0", "false", "stop", "stopped", "idle"].includes(normalized)) return "off";
-  return "unknown";
-}
-
-function normalizeGuardState(value: DeviceFactState | boolean | number | null | undefined): GuardState {
-  if (value === true || value === 1) return "armed";
-  if (value === false || value === 0) return "disarmed";
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "alarm") return "alarm";
-  if (["armed", "on", "1", "true", "guard", "set", "defended"].includes(normalized)) return "armed";
-  if (["disarmed", "off", "0", "false", "reset", "unset"].includes(normalized)) return "disarmed";
-  return "unknown";
-}
-
-function applyDeviceStatusResult(result: DeviceStatusResult, preserveUnknownFacts = false) {
-  const state = result.state || null;
-  const nextRecordState = normalizeRecordState(state?.recordState ?? result.recordState);
-  const nextGuardState = normalizeGuardState(result.alarmResolution?.state ?? state?.guardState ?? result.guardState);
-  if (!preserveUnknownFacts || nextRecordState !== "unknown") recordState.value = nextRecordState;
-  if (!preserveUnknownFacts || nextGuardState !== "unknown") guardState.value = nextGuardState;
-  alarmResolution.value = result.alarmResolution || null;
-  alarmFacts.value = Array.isArray(result.alarmFacts) ? result.alarmFacts : [];
-  deviceReport.value = result.deviceReport || null;
-  deviceStatusFreshness.value = result.freshness || state?.freshness || "unknown";
-  deviceStatusError.value = result.refreshError || "";
-  deviceStatusOperationId.value =
-    result.refreshOperationId || result.recordRefreshOperationId || result.alarmRefreshOperationId || null;
-}
-
-function clearDeviceStatusState() {
-  recordState.value = "unknown";
-  guardState.value = "unknown";
-  alarmResolution.value = null;
-  alarmFacts.value = [];
-  deviceReport.value = null;
-  deviceStatusFreshness.value = "unknown";
-  deviceStatusError.value = "";
-  deviceStatusPending.value = false;
-  deviceStatusOperationId.value = null;
-}
-
-function clearSnapshotPolling() {
-  if (snapshotPollTimer !== null) window.clearTimeout(snapshotPollTimer);
-  snapshotPollTimer = null;
-}
-
-function snapshotStatusText() {
-  const session = snapshotSession.value;
-  if (!session) return "配置后由设备上传 JPEG";
-  if (session.state === "completed") return `已完成 ${session.receivedCount}/${session.snapNum}`;
-  if (session.state === "failed") return session.error || "抓拍失败";
-  return `接收中 ${session.receivedCount}/${session.snapNum}`;
-}
-
-async function pollSnapshotSession(channelId: number, sessionId: string, token: number) {
-  if (!canSnapshot.value) return;
-  clearSnapshotPolling();
-  try {
-    const response = await getDeviceSnapshotSession(channelId, sessionId);
-    if (token !== sessionToken || props.channel?.id !== channelId || response.code !== 0 || !response.data) return;
-    snapshotSession.value = response.data;
-    if (response.data.state === "completed" || response.data.state === "failed") return;
-  } catch (error: any) {
-    if (token !== sessionToken) return;
-    if (snapshotSession.value) snapshotSession.value = { ...snapshotSession.value, error: error?.message || "抓拍状态读取失败" };
-  }
-  snapshotPollTimer = window.setTimeout(() => void pollSnapshotSession(channelId, sessionId, token), 800);
-}
-
-async function runDeviceSnapshot() {
-  const channelId = props.channel?.id;
-  if (!canSnapshot.value || !channelId || props.channel?.status !== 1 || snapshotPending.value) return;
-  snapshotPending.value = true;
-  snapshotSession.value = null;
-  const token = sessionToken;
-  try {
-    const response = await createDeviceSnapshotSession(channelId, {
-      snapNum: Number(snapshotCount.value),
-      interval: Number(snapshotInterval.value)
-    });
-    if (token !== sessionToken || response.code !== 0 || !response.data) return;
-    snapshotSession.value = response.data;
-    void pollSnapshotSession(channelId, response.data.sessionId, token);
-  } catch (error: any) {
-    Message.error(error?.message || "下发图像抓拍配置失败");
-  } finally {
-    if (token === sessionToken) snapshotPending.value = false;
-  }
-}
-
-function deviceStatusText() {
-  if (deviceStatusError.value) return "状态读取失败";
-  if (deviceStatusPending.value) return "正在查询设备状态";
-  if (deviceStatusFreshness.value === "fresh") return "设备状态已同步";
-  if (deviceStatusFreshness.value === "stale") return "设备状态已过期";
-  return "设备状态未知";
-}
-
-function recordStateText(state: RecordState) {
-  return state === "on" ? "设备录制中" : state === "off" ? "设备未录制" : "未知";
-}
-
-function guardStateText(state: GuardState) {
-  if (state === "alarm") return "ALARM 报警中";
-  return state === "armed" ? "已布防" : state === "disarmed" ? "已撤防" : "未知";
-}
-
-// 设备明确回了 Alarmstatus Num="0" 时，"报警输入：未知"就是错的 —— 设备说的是
-// "我没有报警输入"，这是已知事实。只有设备整段没提数量时才是真的未知。
-function alarmInputText() {
-  if (deviceReport.value?.alarmInputCount === 0) return "设备无报警输入";
-  return guardStateText(guardState.value);
-}
-
-function alarmInputClass() {
-  if (deviceReport.value?.alarmInputCount === 0) return "fact-none";
-  return `fact-${guardState.value}`;
-}
-
-function deviceOnlineText(state?: DeviceReportedFacts["online"]) {
-  if (state === "online") return "在线";
-  if (state === "offline") return "离线";
-  return "未上报";
-}
-
-function selfTestText(state?: DeviceReportedFacts["selfTest"]) {
-  if (state === "ok") return "自检正常";
-  if (state === "error") return "自检异常";
-  return "未上报";
-}
-
-function encodeStateText(state?: DeviceReportedFacts["encode"]) {
-  if (state === "on") return "编码中";
-  if (state === "off") return "编码已停";
-  return "未上报";
-}
-
-// clockSkewSeconds = 平台观测时刻 − 设备自报时刻。设备时间只到秒，±1 秒是量化误差，
-// 不当偏差报。
-function clockSkewText(seconds?: number | null) {
-  if (seconds === null || seconds === undefined) return "未上报";
-  const abs = Math.abs(seconds);
-  if (abs < 2) return "与平台一致";
-  const unit = abs < 60 ? `${abs} 秒` : abs < 3600 ? `${Math.round(abs / 60)} 分钟` : `${(abs / 3600).toFixed(1)} 小时`;
-  return seconds > 0 ? `设备慢 ${unit}` : `设备快 ${unit}`;
-}
-
-function reportedFactClass(value?: unknown) {
-  return value === null || value === undefined ? "fact-none" : "";
-}
-
-function alarmResolutionWarning() {
-  if (alarmResolution.value?.status === "ambiguous") {
-    const candidates = alarmResolution.value.candidates
-      .map(candidate => candidate.code)
-      .filter(Boolean)
-      .join("、");
-    return `报警目标不明确${candidates ? ` (${candidates})` : ""},布防、撤防和复位操作将由服务端拒绝`;
-  }
-  if (alarmResolution.value?.status === "unavailable") {
-    if (deviceReport.value?.alarmInputCount === 0) {
-      return "设备自报没有报警输入通道,布防、撤防和复位将按注册父设备编码发送,以设备应答为准";
-    }
-    return "未找到可用的 134 报警输入,布防、撤防和复位将按注册父设备编码发送,以设备应答为准";
-  }
-  return "";
-}
-
-function alarmResolutionTargetText() {
-  if (alarmResolution.value?.status !== "resolved" || !alarmResolution.value.targetCode) return "";
-  return `报警目标 ${alarmResolution.value.targetCode}`;
-}
-
-function alarmFactText(fact: DeviceAlarmFact) {
-  return `${fact.targetCode} ${guardStateText(normalizeGuardState(fact.guardState))}`;
-}
 
 /* ────────────────────────── 流信息 ────────────────────────── */
 
@@ -2325,17 +2249,17 @@ function resetSessionState() {
   cruiseDraftSubmitError.value = "";
   activeCruiseId.value = null;
   cruiseState.value = "stopped";
+  // 扫描是纯下发状态,换通道后旧的运行态必须清掉(否则会显示"上一路通道正在扫描")。
+  scanState.value = "stopped";
+  scanActiveGroup.value = null;
+  scanBusy.value = false;
+  scanError.value = "";
   cruiseFreshness.value = "unknown";
   cruiseRefreshPending.value = false;
   cruiseLoadError.value = "";
   cruiseRefreshError.value = "";
   cruiseMoreVisible.value = false;
   clearCruiseReconcilePolling();
-  clearDeviceStatusPolling();
-  clearDeviceStatusState();
-  clearSnapshotPolling();
-  snapshotPending.value = false;
-  snapshotSession.value = null;
   probeToken++;
   clearProbeTimers();
   probeState.value = "idle";
@@ -2350,10 +2274,7 @@ function resetSessionState() {
   resetHomePositionState();
   clearAdvancedPolling();
   advancedOperationStatus.value = {};
-  dragZoomMode.value = false;
-  dragZoomStart.value = null;
-  dragZoomCurrent.value = null;
-  dragZoomPointerId = null;
+  exitDragZoomMode();
 }
 
 function cleanupSessionLocally() {
@@ -2368,7 +2289,7 @@ function reconnect() {
 
 function handleMinimize() {
   releaseContinuousControls();
-  dragZoomMode.value = false;
+  exitDragZoomMode();
   assetManagerVisible.value = false;
   savePresetDialogVisible.value = false;
   saveCruiseDialogVisible.value = false;
@@ -2400,7 +2321,8 @@ function handleClose() {
  * 会让"关不掉"变成一个看不见的卡顿。用户想下发就从「留在控制台」回去点浮条。
  */
 function requestClose() {
-  const pending = pictureDirtyCount.value;
+  // ⛔ 合计（画面 + OSD）：只报画面组的数，用户点了确认才发现 OSD 的改动也一起丢了。
+  const pending = draftTotalCount.value;
   if (pending === 0) {
     handleClose();
     return;
@@ -2424,361 +2346,6 @@ function handlePlayerError(message: string) {
   clearTimer();
 }
 
-const DEVICE_STATUS_POLL_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
-const DEVICE_STATUS_DEFAULT_DEADLINE_MS = DEVICE_STATUS_POLL_DELAYS_MS.reduce((total, delay) => total + delay, 0);
-const DEVICE_STATUS_FACT_READ_INSURANCE_MS = 5000;
-const DEVICE_STATUS_TERMINAL_PHASES = new Set(["accepted", "rejected", "timeout", "unknown", "cancelled"]);
-interface DeviceStatusPollOperation {
-  operationId: string;
-  terminal: boolean;
-  deadlineAt: number;
-  error: string;
-}
-let deviceStatusPollTimer: number | null = null;
-let deviceStatusPollAttempt = 0;
-let deviceStatusPollGeneration = 0;
-let deviceStatusPollOperations = new Map<string, DeviceStatusPollOperation>();
-let deviceStatusOperationRequestTimers = new Map<string, number>();
-
-function clearDeviceStatusPolling(invalidate = true) {
-  if (deviceStatusPollTimer !== null) window.clearTimeout(deviceStatusPollTimer);
-  for (const timer of deviceStatusOperationRequestTimers.values()) window.clearTimeout(timer);
-  deviceStatusPollTimer = null;
-  deviceStatusPollAttempt = 0;
-  if (invalidate) deviceStatusPollGeneration += 1;
-  deviceStatusPollOperations.clear();
-  deviceStatusOperationRequestTimers.clear();
-  deviceStatusPending.value = false;
-}
-
-function deviceStatusRefreshOperationIds(result: DeviceStatusResult) {
-  const ids = [
-    result.refreshOperationIds?.record,
-    result.refreshOperationIds?.alarm,
-    result.recordRefreshOperationId,
-    result.alarmRefreshOperationId,
-    result.refreshOperationId
-  ];
-  return [...new Set(ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0))];
-}
-
-function deviceStatusOperationErrors() {
-  return [...deviceStatusPollOperations.values()]
-    .map(operation => operation.error)
-    .filter(Boolean)
-    .join("; ");
-}
-
-function getDeviceStatusOperationWithInsurance(channelId: number, tracked: DeviceStatusPollOperation) {
-  if (!canViewPtz.value) return Promise.reject(new Error("当前账号没有云台状态查看权限"));
-  const remainingMs = tracked.deadlineAt - Date.now();
-  if (remainingMs <= 0) return Promise.reject(new Error("设备状态查询超时,结果未知"));
-  const request = getPtzOperation(channelId, tracked.operationId);
-  return new Promise<Awaited<ReturnType<typeof getPtzOperation>>>((resolve, reject) => {
-    let settled = false;
-    const deadlineTimer = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
-        deviceStatusOperationRequestTimers.delete(tracked.operationId);
-      }
-      reject(new Error("设备状态查询超时,结果未知"));
-    }, remainingMs);
-    deviceStatusOperationRequestTimers.set(tracked.operationId, deadlineTimer);
-    request.then(
-      response => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(deadlineTimer);
-        if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
-          deviceStatusOperationRequestTimers.delete(tracked.operationId);
-        }
-        resolve(response);
-      },
-      error => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(deadlineTimer);
-        if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
-          deviceStatusOperationRequestTimers.delete(tracked.operationId);
-        }
-        reject(error);
-      }
-    );
-  });
-}
-
-function getDeviceStatusFactWithInsurance(channelId: number) {
-  if (!canViewPtz.value) return Promise.reject(new Error("当前账号没有云台状态查看权限"));
-  const request = getDeviceStatus(channelId, false);
-  return new Promise<Awaited<ReturnType<typeof getDeviceStatus>>>((resolve, reject) => {
-    let settled = false;
-    const deadlineTimer = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("设备状态最终补读超时,结果未知"));
-    }, DEVICE_STATUS_FACT_READ_INSURANCE_MS);
-    request.then(
-      response => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(deadlineTimer);
-        resolve(response);
-      },
-      error => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(deadlineTimer);
-        reject(error);
-      }
-    );
-  });
-}
-
-async function finishDeviceStatusRefresh(
-  channelId: number,
-  token: number,
-  contextKey: string,
-  generation: number,
-  preserveUnknownFacts: boolean
-) {
-  const operationError = deviceStatusOperationErrors();
-  if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-
-  // The operation deadline is authoritative for the pending UI state. The
-  // final fact read is best effort and must not keep the panel busy.
-  clearDeviceStatusPolling(false);
-  deviceStatusFreshness.value = "unknown";
-  deviceStatusError.value = operationError;
-  try {
-    const response = await getDeviceStatusFactWithInsurance(channelId);
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-    if (response.code !== 0 || !response.data) throw new Error(response.message || "读取设备状态失败");
-    applyDeviceStatusResult(response.data, preserveUnknownFacts);
-    const refreshError = deviceStatusError.value;
-    deviceStatusError.value = [refreshError, operationError].filter(Boolean).join("; ");
-  } catch (error: any) {
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-    deviceStatusError.value = [operationError, error?.message || "读取设备状态失败"].filter(Boolean).join("; ");
-  }
-}
-
-function scheduleDeviceStatusRefresh(
-  channelId: number,
-  token: number,
-  contextKey: string,
-  generation: number,
-  preserveUnknownFacts = false
-) {
-  const pendingOperations = [...deviceStatusPollOperations.values()].filter(operation => !operation.terminal);
-  if (pendingOperations.length === 0) {
-    void finishDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
-    return;
-  }
-  if (deviceStatusPollTimer !== null) window.clearTimeout(deviceStatusPollTimer);
-  const baseDelay = DEVICE_STATUS_POLL_DELAYS_MS[Math.min(deviceStatusPollAttempt, DEVICE_STATUS_POLL_DELAYS_MS.length - 1)];
-  const nearestDeadline = Math.min(...pendingOperations.map(operation => operation.deadlineAt));
-  const delay = Math.max(0, Math.min(baseDelay, nearestDeadline - Date.now()));
-  deviceStatusPollTimer = window.setTimeout(async () => {
-    deviceStatusPollTimer = null;
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-    const activeOperations = [...deviceStatusPollOperations.values()].filter(operation => !operation.terminal);
-    const results = await Promise.all(
-      activeOperations.map(async tracked => {
-        try {
-          const response = await getDeviceStatusOperationWithInsurance(channelId, tracked);
-          if (response.code !== 0 || !response.data || response.data.operationId !== tracked.operationId) {
-            throw new Error(response.message || "设备状态查询结果不匹配");
-          }
-          return { tracked, operation: response.data, error: null };
-        } catch (error: unknown) {
-          return { tracked, operation: null, error };
-        }
-      })
-    );
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-
-    const now = Date.now();
-    for (const result of results) {
-      const tracked = result.tracked;
-      if (result.operation) {
-        const operation = result.operation;
-        const serverDeadline = operation.deadlineAt ? Date.parse(operation.deadlineAt) : Number.NaN;
-        if (Number.isFinite(serverDeadline)) tracked.deadlineAt = serverDeadline;
-        tracked.terminal = DEVICE_STATUS_TERMINAL_PHASES.has(operation.status);
-        tracked.error =
-          tracked.terminal && operation.status !== "accepted"
-            ? operation.errorCode || operation.errorMessage || `设备状态查询${operation.status}`
-            : "";
-      } else {
-        tracked.error = result.error instanceof Error ? result.error.message : "设备状态查询暂时不可用";
-      }
-      if (!tracked.terminal && now >= tracked.deadlineAt) {
-        tracked.terminal = true;
-        tracked.error = tracked.error || "设备状态查询超时,结果未知";
-      }
-    }
-
-    deviceStatusPollAttempt += 1;
-    scheduleDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
-  }, delay);
-}
-
-async function loadDeviceStatus(
-  channelId = props.channel?.id,
-  token = sessionToken,
-  preserveUnknownFacts = false,
-  contextKey = channelContextKey()
-) {
-  if (!canViewPtz.value || !channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
-  clearDeviceStatusPolling();
-  const generation = deviceStatusPollGeneration;
-  deviceStatusPending.value = true;
-  deviceStatusError.value = "";
-  try {
-    const response = await getDeviceStatus(channelId, true);
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-    if (response.code !== 0 || !response.data) throw new Error(response.message || "查询设备状态失败");
-    applyDeviceStatusResult(response.data, preserveUnknownFacts);
-    const operationIds = deviceStatusRefreshOperationIds(response.data);
-    if (operationIds.length > 0) {
-      const fallbackDeadline = Date.now() + DEVICE_STATUS_DEFAULT_DEADLINE_MS;
-      deviceStatusPollOperations = new Map(
-        operationIds.map(operationId => [
-          operationId,
-          {
-            operationId,
-            terminal: false,
-            deadlineAt: fallbackDeadline,
-            error: ""
-          }
-        ])
-      );
-      deviceStatusPending.value = true;
-      deviceStatusPollAttempt = 0;
-      scheduleDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
-    } else {
-      deviceStatusPending.value = false;
-    }
-  } catch (error: any) {
-    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
-    deviceStatusPending.value = false;
-    deviceStatusError.value = error?.message || "查询设备状态失败";
-    deviceStatusFreshness.value = "unknown";
-    // Missing DeviceStatus support must remain unknown initially, but a read
-    // failure after an ACK must preserve the last confirmed fact.
-  }
-}
-
-/* ─────────────────── 存储卡状态(A.2.4.14 / A.2.6.16) ─────────────────── */
-
-function storageCardStateText(state: string) {
-  switch (state) {
-    case "ok":
-      return "正常";
-    case "formatting":
-      return "格式化中";
-    case "unformatted":
-      return "未格式化";
-    case "idle":
-      return "空闲";
-    case "error":
-      return "异常";
-    default:
-      return "未知";
-  }
-}
-
-function storageCardUsedPercent(card: StorageCard) {
-  if (!card.capacityMb || card.capacityMb <= 0) return 0;
-  const free = Math.max(0, Math.min(card.freeSpaceMb, card.capacityMb));
-  return Math.max(0, Math.min(100, Math.round(((card.capacityMb - free) / card.capacityMb) * 100)));
-}
-
-function formatStorageCapacity(mb: number | null | undefined) {
-  if (!mb || mb <= 0) return "0 MB";
-  if (mb >= 1024 * 1024) return `${(mb / 1024 / 1024).toFixed(1)} TB`;
-  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-  return `${mb} MB`;
-}
-
-function storageCardsEmptyText() {
-  if (storageCardsPending.value) return "正在查询存储卡…";
-  if (!storageCardsLoaded.value) return "尚未查询过存储卡状态";
-  // 空列表是**合法结果**：设备可以没装卡（标准的 SumNum=0 且不带列表）。
-  return "设备未安装存储卡";
-}
-
-const storageCardPollDelays = [300, 600, 1200, 2000, 3000, 5000];
-let storageCardPollTimer: number | null = null;
-let storageCardPollGeneration = 0;
-
-function clearStorageCardPolling() {
-  if (storageCardPollTimer !== null) window.clearTimeout(storageCardPollTimer);
-  storageCardPollTimer = null;
-  storageCardPollGeneration += 1;
-}
-
-/**
- * 读取/发起存储卡状态查询。
- *
- * refresh=true 时服务端只是**发起**一次 SDCardStatus 查询（SIP 应答是异步的），
- * 拿到的还是上一次的事实；所以必须再轮询 operation 到终态，然后重读一次列表。
- */
-async function loadStorageCards(channelId = props.channel?.id, token = sessionToken, refresh = false) {
-  const contextKey = channelContextKey();
-  if (!channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
-  clearStorageCardPolling();
-  const generation = storageCardPollGeneration;
-  // 不带 refresh 时是"静默重读"（轮询收尾/切通道），不点亮按钮转圈。
-  if (refresh) storageCardsPending.value = true;
-  storageCardsError.value = "";
-  try {
-    const response = await getChannelStorageCards(channelId, refresh);
-    if (generation !== storageCardPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
-    if (response.code !== 0 || !response.data) throw new Error(response.message || "查询存储卡状态失败");
-    storageCards.value = response.data.list || [];
-    storageCardsFreshness.value = response.data.freshness || "unknown";
-    storageCardsLoaded.value = true;
-    if (response.data.refreshError) storageCardsError.value = response.data.refreshError;
-    const operationId = response.data.refreshOperationId;
-    if (refresh && operationId) {
-      scheduleStorageCardPoll(channelId, token, operationId, 0, contextKey);
-      return; // pending 保持 true，等轮询收尾时再熄灭
-    }
-  } catch (error: any) {
-    if (generation !== storageCardPollGeneration || !isCurrentChannelContext(channelId, token, contextKey)) return;
-    storageCardsError.value = error?.message || "查询存储卡状态失败";
-  }
-  storageCardsPending.value = false;
-}
-
-function storageCardOperationSettled(status: string | undefined) {
-  return status === "accepted" || status === "rejected" || status === "timeout" || status === "unknown" || status === "cancelled";
-}
-
-function scheduleStorageCardPoll(channelId: number, token: number, operationId: string, attempt: number, contextKey: string) {
-  const delay = storageCardPollDelays[Math.min(attempt, storageCardPollDelays.length - 1)];
-  storageCardPollTimer = window.setTimeout(async () => {
-    storageCardPollTimer = null;
-    if (!isCurrentChannelContext(channelId, token, contextKey)) return;
-    let settled = false;
-    try {
-      const response = await getPtzOperation(channelId, operationId);
-      settled = storageCardOperationSettled(response.data?.status);
-    } catch {
-      // 读 operation 失败按"未终态"处理，继续退避重试；
-      // 次数用尽后无论如何收尾一次，不让按钮永远转圈。
-    }
-    if (!isCurrentChannelContext(channelId, token, contextKey)) return;
-    if (settled || attempt >= storageCardPollDelays.length - 1) {
-      await loadStorageCards(channelId, token, false);
-      return;
-    }
-    scheduleStorageCardPoll(channelId, token, operationId, attempt + 1, contextKey);
-  }, delay);
-}
-
 async function loadPanelData() {
   const channel = props.channel;
   if (!canViewPtz.value || !channel) return;
@@ -2795,7 +2362,6 @@ async function loadPanelData() {
     loadPresets(channel.id, token),
     loadCruises(channel.id, token, false),
     loadHomePosition(channel.id, token),
-    loadStorageCards(channel.id, token, false),
     // 只读平台里"上次回读得到的配置"(refresh=false,不发 SIP 报文)。
     // ⛔ 与存储卡同一条口径:缓存为空时面板停在 never_read(表单禁用,
     // 不让用户在空白上猜数字);有缓存才展示,并带 freshness 说明不是刚问的。
@@ -2931,12 +2497,9 @@ const videoParamCompareStream = computed(() => {
 });
 
 function selectVideoStream(value: string) {
+  // ⛔ 只改这一个真源：侧栏的「配置文件」下拉通过 `v-model:stream-profile` 跟着走
+  //    （见 `videoParamStreamProfile`），不要再自己转发一次。
   selectedVideoStream.value = Number(value) || 0;
-  videoConfigRef.value?.selectStream(value);
-}
-
-function videoParamCompareHeading(row: VideoParamCodecItem) {
-  return `对照(码流 ${row.streamNumber})`;
 }
 
 /**
@@ -2951,6 +2514,91 @@ function videoParamCompareReadRow(): VideoParam | undefined {
   if (streamNumber === undefined) return undefined;
   return videoParams.value.find(item => item.streamNumber === streamNumber);
 }
+
+/** `resolutionText` 那六个码值对应的像素尺寸（用来把"码值档位"与"实测像素"拉到同一把尺子上）。 */
+const VIDEO_RESOLUTION_TIERS: Record<string, { width: number; height: number }> = {
+  QCIF: { width: 176, height: 144 },
+  CIF: { width: 352, height: 288 },
+  "4CIF": { width: 704, height: 576 },
+  D1: { width: 720, height: 576 },
+  "720P": { width: 1280, height: 720 },
+  "1080P": { width: 1920, height: 1080 }
+};
+
+/** `1920×1080` / `1920x1080` → `{1920, 1080}`；取不到两个数就返回 null。 */
+function pixelsOf(text: string): { width: number; height: number } | null {
+  const nums = (String(text ?? "").match(/\d+/g) ?? []).map(Number).slice(0, 2);
+  return nums.length === 2 && nums[0] > 0 && nums[1] > 0 ? { width: nums[0], height: nums[1] } : null;
+}
+
+/** 编码格式归一：`H.264` / `H264` / `h264` 是同一个东西；中文（"未上报"）会被剥成空串 = 未知。 */
+function normalizeCodecToken(text: string): string {
+  return String(text ?? "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+}
+
+/**
+ * 「设备回读」与「画面实测」**逐项**是否对得上（2026-09-20 收成两行时补）。
+ *
+ * ⭐ 这是这张卡继续存在的理由：A-5 的验收问题就是"平台改了分辨率、设备回读也 OK，
+ *    **画面到底变没变**"。原来三行并列却不下结论，要用户拿眼睛比 `1080P` 和 `1920×1080`。
+ * ⛔ **不比码率**：实测那行的码率是 2 秒轮询的瞬时值，与设备里配的目标码率天然不等，
+ *    比它必然"永远不一致" —— 假警报比不下判断更坏。
+ * ⛔ 读不到回读（还没点「读取」）⇒ 三项全 `null`，界面写「未读取」，**不是**"不一致"。
+ * ⛔ 分辨率按**像素**比、容差 ±20px：设备侧是码值档位（`D1` = 720×576），ZLM 报的是
+ *    实际解码尺寸（704×576 也属同一档）—— 按码值硬比会天天误报。
+ */
+const videoParamDiffs = computed<{ codec: boolean | null; resolution: boolean | null; fps: boolean | null }>(() => {
+  const unknown = { codec: null, resolution: null, fps: null };
+  const read = videoParamCompareReadRow();
+  if (!read || !videoParamCompareStream.value) return unknown;
+
+  const readCodec = normalizeCodecToken(videoFormatText(read.videoFormat));
+  const measuredCodec = normalizeCodecToken(streamInfo.value.videoCodec);
+  const codec = readCodec && measuredCodec ? readCodec === measuredCodec : null;
+
+  const readLabel = resolutionText(read.resolution);
+  const readPixels = VIDEO_RESOLUTION_TIERS[readLabel] ?? pixelsOf(readLabel);
+  const measuredPixels = pixelsOf(streamInfo.value.resolution);
+  const resolution =
+    readPixels && measuredPixels
+      ? Math.abs(readPixels.width - measuredPixels.width) > 20 || Math.abs(readPixels.height - measuredPixels.height) > 20
+      : null;
+
+  const readFps = Number(read.frameRate) || 0;
+  const measuredFps = Number(streamInfo.value.videoFps) || 0;
+  const fps = readFps && measuredFps ? readFps !== measuredFps : null;
+
+  return { codec, resolution, fps };
+});
+
+/**
+ * 三项的汇总结论。⛔ 只在**比得出来的项**里下结论：比不出来的（`null`）不参与，
+ * 三项都比不出来时写「未读取」—— 把"不知道"说成"不一致"会让人白跑一趟。
+ */
+const videoParamVerdict = computed(() => {
+  const diffs = videoParamDiffs.value;
+  const comparable = [diffs.codec, diffs.resolution, diffs.fps].filter(value => value !== null) as boolean[];
+  if (!comparable.length) return { tone: "unknown", text: "未读取" };
+  return comparable.some(Boolean) ? { tone: "differ", text: "与画面不一致" } : { tone: "same", text: "与画面一致" };
+});
+
+/**
+ * 结论标签的悬浮说明：把**比了哪三项、为什么不比码率**写在旁边。
+ * ⭐ 一个"不一致"的结论必须能被质疑 —— 用户点开就知道平台到底比了什么。
+ */
+const videoParamVerdictTitle = computed(() => {
+  if (videoParamVerdict.value.tone === "unknown") return "还没读到设备参数 —— 点「读取」后才有对照";
+  const diffs = videoParamDiffs.value;
+  const parts: string[] = [];
+  if (diffs.codec === true) parts.push("编码格式");
+  if (diffs.resolution === true) parts.push("分辨率");
+  if (diffs.fps === true) parts.push("帧率");
+  return parts.length
+    ? `画面实际在播的${parts.join(" / ")}与设备回读对不上`
+    : "编码格式 / 分辨率 / 帧率三项与设备回读一致（码率是瞬时采样值，不参与比对）";
+});
 
 /**
  * 把一次回读应答落进面板。
@@ -3279,6 +2927,66 @@ async function stopCruise() {
     Message.error(error?.message || "停止巡航失败");
   }
 }
+/**
+ * 下发一条扫描指令(89H / 8AH)。
+ *
+ * ⛔ 「停止」没有专用指令码:字节 4-7 全零就是全族通用的停止帧,与巡航停止同一形态。
+ * ⛔ 边界设置是**就地写入当前云台位置**,平台拿不到设备的当前边界值 —— 所以这两个按钮
+ *    只做「把现在这个朝向记为左/右边界」,不做任何回显或确认。
+ */
+async function sendScanCommand(action: ScanAction) {
+  if (!canControlPtz.value || !props.channel || scanBusy.value) return;
+  if (scanGroupInvalid.value) {
+    Message.error(`扫描组号必须在 ${SCAN_GROUP_MIN}-${SCAN_GROUP_MAX} 之间`);
+    return;
+  }
+  if (action === "scan_set_speed" && scanSpeedInvalid.value) {
+    Message.error(`扫描速度必须在 ${SCAN_SPEED_MIN}-${SCAN_SPEED_MAX} 之间`);
+    return;
+  }
+  const group = scanGroup.value;
+  const value = action === "scan_set_speed" ? scanSpeed.value : undefined;
+  const channelId = props.channel.id;
+  const token = sessionToken;
+  scanBusy.value = true;
+  scanError.value = "";
+  try {
+    const payload: { action: ScanAction; id: number; value?: number } = { action, id: group };
+    if (typeof value === "number") payload.value = value;
+    const response = await controlPtzScan(channelId, payload);
+    if (token !== sessionToken || props.channel?.id !== channelId) return;
+    if (response.code !== 0) throw new Error(response.message || "扫描指令失败");
+    if (["rejected", "timeout", "cancelled"].includes(String(response.data?.status))) {
+      throw new Error(response.message || "扫描指令未被设备接受");
+    }
+    if (action === "scan_start") {
+      scanState.value = "start-sent";
+      scanActiveGroup.value = group;
+      Message.info(`扫描组 #${group} 启动指令已发送,请观察设备是否开始扫描`);
+    } else if (action === "scan_stop") {
+      scanState.value = "stopped";
+      scanActiveGroup.value = null;
+      Message.info(`扫描组 #${group} 停止指令已发送`);
+    } else if (action === "scan_set_left") {
+      Message.success(`已把当前朝向设为扫描组 #${group} 的左边界`);
+    } else if (action === "scan_set_right") {
+      Message.success(`已把当前朝向设为扫描组 #${group} 的右边界`);
+    } else {
+      Message.success(`扫描组 #${group} 速度已下发(${value})`);
+    }
+  } catch (error: any) {
+    if (token !== sessionToken) return;
+    scanError.value = error?.message || "扫描指令失败";
+    Message.error(scanError.value);
+  } finally {
+    if (token === sessionToken) scanBusy.value = false;
+  }
+}
+function toggleScan() {
+  if (!canControlPtz.value) return;
+  return sendScanCommand(scanState.value === "start-sent" ? "scan_stop" : "scan_start");
+}
+
 async function deleteCruise(id: number) {
   if (!canControlPtzCruise.value || !props.channel) return;
   const channelId = props.channel.id;
@@ -3500,16 +3208,16 @@ function setAdvancedPhase(action: string, phase: AdvancedOperationPhase, message
   if (message) advancedOperationStatus.value = { ...advancedOperationStatus.value, [action]: message };
 }
 
+/**
+ * 设备已确认这条动作。
+ *
+ * ⛔ 这里**只**写结果文案,不再写任何本地"事实"：原先它还会把 record/guard 状态改成
+ *    设备回传的值、并追一次 DeviceStatus 重读 —— 那两个动作 2026-09-20 已搬到
+ *    设备详情抽屉的「设备控制」页,"当前是录着还是布着"的事实也随它一起搬走
+ *    （抽屉那边自己读、自己写）。控制台剩下的 iframe / drag_zoom 没有可落的事实。
+ */
 function applyAdvancedAccepted(action: string) {
-  if (action === "record_start") recordState.value = "on";
-  if (action === "record_stop") recordState.value = "off";
-  if (action === "guard_set") guardState.value = "armed";
-  if (action === "guard_reset") guardState.value = "disarmed";
   setAdvancedPhase(action, "accepted", "设备已确认");
-  if (action === "record_start" || action === "record_stop" || action === "guard_set" || action === "guard_reset") {
-    // Re-read facts after an ACK; the ACK is not allowed to overwrite the other fact.
-    void loadDeviceStatus(props.channel?.id, sessionToken, true);
-  }
 }
 
 function advancedOperationError(action: string, status: AdvancedOperationPhase, operation: PTZOperation) {
@@ -3662,7 +3370,7 @@ async function pollAdvancedOperation(action: string, operationId: string, channe
     if (operation.status === "sent" && !advancedActionRequiresDeviceResult(action, operation.responseRequired)) {
       clearAdvancedOperationPoll(action);
       setAdvancedPending(action, false);
-      setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
+      setAdvancedPhase(action, "sent", "已下发（该命令无需设备回执）");
       return;
     }
     if (operation.status === "queued" || operation.status === "sent") {
@@ -3682,7 +3390,7 @@ async function pollAdvancedOperation(action: string, operationId: string, channe
     setAdvancedPending(action, false);
     if (operation.status === "accepted") {
       if (!advancedActionRequiresDeviceResult(action, operation.responseRequired)) {
-        setAdvancedPhase(action, "sent", "设备已收到发送请求,未返回执行结果");
+        setAdvancedPhase(action, "sent", "已下发（该命令无需设备回执）");
         return;
       }
       applyAdvancedAccepted(action);
@@ -3700,14 +3408,27 @@ async function pollAdvancedOperation(action: string, operationId: string, channe
   }
 }
 
-function advancedActionLabel(action: "record" | "guard") {
-  if (action === "record") return recordState.value === "on" ? "停止设备端录制" : "开始设备端录制";
-  return guardState.value === "armed" ? "撤防" : "布防";
-}
+/**
+ * 控制台里"要等设备结论"的动作名单 —— **现在是空的**。
+ *
+ * ⛔ 不要照抄 `record_start / guard_set / alarm_reset` 回来：那五个动作 2026-09-20 已搬到
+ *    设备详情抽屉的「设备控制」页，判定也在那边（`DeviceControlPanel.vue` 的 operation 轮询）。
+ *    控制台只剩 `iframe` / `drag_zoom_*`，它们是**送达即止**的 —— 附录 A 没有对应的查询命令，
+ *    设备执行结果平台本来就不可能知道。
+ *    ⛔ 别把"HTTP 200"写成"已生效"。
+ *    ⭐ 但状态词也**不许**说"设备执行结果未回传"（2026-09-20 改）：那是否定式，读起来像
+ *    "该收的没收到"，用户会以为下发失败、要重试 —— 而事实是这类命令协议里**根本没有应答**。
+ *    统一说"已下发（该命令无需设备回执）"，把"没有回传"从缺陷翻成协议事实。
+ */
+const ACTIONS_REQUIRING_DEVICE_RESULT: string[] = [];
 
+/**
+ * 这个动作需不需要等设备结论：服务端给了 `responseRequired` 就以它为准，没给时按动作名兜底
+ * （见上面那张名单，当前为空）。
+ */
 function advancedActionRequiresDeviceResult(action: string, responseRequired?: boolean) {
   if (typeof responseRequired === "boolean") return responseRequired;
-  return ["record_start", "record_stop", "guard_set", "guard_reset", "alarm_reset"].includes(action);
+  return ACTIONS_REQUIRING_DEVICE_RESULT.includes(action);
 }
 
 function dragZoomPlaybackRect(layer: HTMLElement) {
@@ -3726,14 +3447,35 @@ function pointInDragLayer(event: PointerEvent) {
   };
 }
 
+/**
+ * 退出拉框态（再点同向按钮 / Esc / 控制权被收回 / 会话结束 / 最小化 —— 共用这一处）。
+ *
+ * ⭐ 2026-09-20：**下完一次框选不再自动退出**。一次拉框常常不够 —— 操作员要先看清
+ *    放大结果、再决定往哪补一刀；旧行为逼着他每次回侧栏重按一遍按钮。
+ *    代价是"退出"变成**显式动作**，所以它必须处处可达、且只有一处实现：
+ *    谁也不许再把 `dragZoomMode` 单独置回 false（漏掉拖拽残留 —— 起点 / 指针 id ——
+ *    下一次进拉框态就会画出一个凭空出现的框）。
+ */
+function exitDragZoomMode() {
+  dragZoomMode.value = false;
+  dragZoomStart.value = null;
+  dragZoomCurrent.value = null;
+  dragZoomPointerId = null;
+}
+
 function toggleDragZoomMode(action: "drag_zoom_in" | "drag_zoom_out") {
   if (!canControlDevice.value) return;
   if (dragZoomMode.value && dragZoomAction.value === action) {
-    dragZoomMode.value = false;
-  } else {
-    dragZoomAction.value = action;
-    dragZoomMode.value = true;
+    exitDragZoomMode();
+    return;
   }
+  // ⛔ 画面上"拖一把"的模式现在有三个（拉框变焦 / 遮挡框选 / OSD 调位置）：同一个按下
+  //    动作在两层里各有一套解释，用户没法预期、平台也说不清画出来的是哪一个。
+  //    进拉框前把另两个关掉；反方向由 startMaskDraw / enterOsdEditMode 负责（见那两处）。
+  if (maskDrawMode.value) cancelMaskDraw();
+  if (osdEditMode.value) exitOsdEditMode();
+  dragZoomAction.value = action;
+  dragZoomMode.value = true;
   dragZoomStart.value = null;
   dragZoomCurrent.value = null;
   dragZoomPointerId = null;
@@ -3741,6 +3483,11 @@ function toggleDragZoomMode(action: "drag_zoom_in" | "drag_zoom_out") {
 
 function beginDragZoom(event: PointerEvent) {
   if (!dragZoomMode.value || event.button !== 0) return;
+  // ⭐ 拉框态现在**跨多次框选持续**，于是会撞上"上一次还在下发就拖第二次"：
+  //    `runAdvancedAction` 对同 action 的并发请求是**静默丢弃**的
+  //    （`if (isAdvancedPending(action)) return`），不在这里挡住的话，用户会画出一个
+  //    跟着消失、命令却没有的框。此时提示条已经在说"正在下发…"，所以拦得下来。
+  if (isAdvancedPending(dragZoomAction.value)) return;
   if (dragZoomPointerId !== null && dragZoomPointerId !== event.pointerId) return;
   const layer = event.currentTarget as HTMLElement;
   const point = pointInDragLayer(event);
@@ -3784,6 +3531,11 @@ async function finishDragZoom(event: PointerEvent) {
   const length = Math.max(1, Math.round(rect.width));
   const windowWidth = Math.max(1, Math.round(rect.height));
   const action = dragZoomAction.value;
+  // 兜底（正常由 `beginDragZoom` 挡住）：拖的途中上一次下发才刚变成 pending 时别静默丢命令。
+  if (isAdvancedPending(action)) {
+    Message.warning("上一次框选还在下发中,请稍候再拖");
+    return;
+  }
   await runAdvancedAction(action, {
     length,
     width: windowWidth,
@@ -3792,8 +3544,39 @@ async function finishDragZoom(event: PointerEvent) {
     lengthX: Math.max(1, Math.round(width * length)),
     lengthY: Math.max(1, Math.round(height * windowWidth))
   });
-  dragZoomMode.value = false;
+  // ⭐ 这里**刻意不退**出拉框态：连拉两刀是常态（先放大看结果、再决定往哪补）。
+  //    退出只走 `exitDragZoomMode` 那几条显式路径，别把这条加回来。
 }
+
+function onDragZoomKeydown(event: KeyboardEvent) {
+  if (dragZoomMode.value && consumeCanvasEscape(event)) exitDragZoomMode();
+}
+
+// Esc 只在拉框态期间接管：常驻监听会跟弹窗自己的 Esc 行为打架（与 OSD 编辑同一个理由）。
+//
+// ⛔⛔ 光挂一个监听**不够** —— 控制台自己就是个 `a-modal`（`esc-to-close`），Arco 另在
+//    `document.documentElement` 上挂了一份**全局** keydown。两边是**并行**监听，
+//    不是"谁冒泡到谁"：控制台是最上层弹窗时，那一下 Esc 会先把**控制台整个关掉**
+//    （`requestClose` 还会弹"改动未下发"确认），用户看到的现象就是"按 Esc 弹窗直接没了"。
+//    ⇒ 靠**两层**挡住（真机实测过，见 `consumeCanvasEscape` 的 KDoc）：
+//      ① 图层监听 `stopPropagation()` 把这一下 Esc 从事件流里拿掉（**主闸门**）；
+//      ② 模板上模式期间 `esc-to-close=false`（兜底，覆盖"图层没吃到"的边角情况）。
+//    只做 ② 会失效：我们退出模式后 `escToClose` 在**同一个事件派发内**就变回 `true`，
+//    Arco 随后才跑、读到 `true` ⇒ 照关。
+watch(dragZoomMode, (active, _previous, onCleanup) => {
+  if (!active) return;
+  // ⛔ 第三个参数 `true` = capture，别删：要在弹窗把自己关掉**之前**判"上面有没有弹窗"，
+  //    见 `consumeCanvasEscape`（晚了必然漏判，那一下 Esc 会连拉框态一起收掉）。
+  window.addEventListener("keydown", onDragZoomKeydown, true);
+  onCleanup(() => window.removeEventListener("keydown", onDragZoomKeydown, true));
+});
+
+// ⛔ 控制权没了（设备转了离线 / 换到没 `device:control` 的通道）就退出拉框态：出口按钮挂在
+//    `canControlDevice` 上、侧栏整块也随权限消失，留在拉框态就是**画面被一层吃事件的膜盖住、
+//    却找不到任何退出入口**。这与侧栏那两处"自己挡 canControlDevice"的注释是同一条约束。
+watch(canControlDevice, available => {
+  if (!available && dragZoomMode.value) exitDragZoomMode();
+});
 
 /* ─────────── 画面设置底栏卡片：遮挡框选 + 镜像 ─────────── */
 
@@ -3904,20 +3687,157 @@ const pictureUsedCount = computed(() => pictureRegions.value.filter(region => re
 /** 本次草稿改到了哪几个字段（`mask1`..`mask4` / `maskOn` / `mirror`）。 */
 const pictureDirtyFields = computed<string[]>(() => deviceConfigRef.value?.pictureDirtyFields ?? []);
 
+/* ─────────── 图像叠加（OSD）的画布锚点层 ───────────
+ *
+ * 形态取**锚点 + 内容标签**，不是"像真字的预览"。三条依据：
+ *
+ * 1. ⛔ 标准 `OSDCfgType`（A.2.1.12）9 个字段里**没有**字体、字号、颜色、对齐 ——
+ *    画一个看起来像真的字，等于承诺平台给不了的能力，用户下一条就会问"字号能不能调"。
+ * 2. ⛔ 设备**已经烧进码流**的时间戳就在播放器画面里。再叠一个假字 = 画面上
+ *    **两个时间戳**，是最难解释的一类假象。
+ * 3. ⭐ 锚点有一笔意外收益：设备那个真字就在眼前，用户可以**直接对着它拖锚点对齐**
+ *    —— 免费的精确校准，而"假字"方案做不到（假字会把真字盖住）。
+ */
+const osdEditable = computed(() => deviceConfigRef.value?.osdEditable === true);
+const osdAnchors = computed<OsdAnchorSlot[]>(() => deviceConfigRef.value?.osdAnchors ?? []);
+const osdDirtyCount = computed(() => deviceConfigRef.value?.osdDirtyCount ?? 0);
+const osdDirtyFields = computed<string[]>(() => deviceConfigRef.value?.osdDirtyFields ?? []);
+const osdUnplacedCount = computed(() => deviceConfigRef.value?.osdUnplacedCount ?? 0);
+const osdFactsMissing = computed(() => deviceConfigRef.value?.osdFactsMissing === true);
+const osdError = computed(() => deviceConfigRef.value?.osdError ?? "");
+const osdFocusToken = computed(() => deviceConfigRef.value?.osdFocusToken ?? null);
+
 /**
- * 浮条主文案：把"几项"翻成人话（`遮挡 2 处 · 镜像`）。
+ * OSD 锚点的**编辑模式**开关（默认关），由侧栏「时间戳」面板里的按钮驱动
+ * （抽屉的 `:osd-editing` 只读显示开关态、`@toggle-osd-edit` 只发意图，状态留在这里）。
+ *
+ * ⛔ 默认必须是关的：锚点层盖着的就是播放器 —— 如果随时可拖，用户想点一下画面
+ *    （暂停 / 全屏 / 起手拉框变焦）就可能顺手把某行字挪走。这类误操作**在画面上看不出来**
+ *    （真实效果由设备决定，平台不渲染真字），只会等到下发后设备上真的换了位置才被发现。
+ *    ⇒ 拖动是**显式动作**：先在侧栏点「调整位置」把自己放进编辑模式。
+ *
+ * ⛔⛔ 关掉时**连锚点都不画**（2026-09-20 老板第二次反馈："这个为啥还是默认显示呢，
+ *    不是说的点击调整位置之后才出现吗…… 现在这个 OSD 过于混乱"）。
+ *    第一版做的是"锚点照画、只降噪"，理由是"位置信息不该因为不可操作就消失" —— 这条
+ *    在**侧栏**里由 `X 289 · Y 256` 那行数字已经履行了，画面上再摊四五个带引线的标签
+ *    就是纯噪声，而且它盖住的正是要看的视频。⇒ 画面上的标记只服务于"正在摆位置"这件事。
+ */
+const osdEditMode = ref(false);
+
+/** 拖拽状态：`key` = 正在拖的锚点（空串 = 没在拖）；`pos` = 拖动中的实时**画布像素**。 */
+const osdDragKey = ref("");
+const osdDragPos = ref<{ x: number; y: number } | null>(null);
+let osdDragMoved = false;
+
+/** 锚点层本身：拖动换算要拿它的 `.play-window` 命中矩形做基准。 */
+const osdLayerRef = ref<HTMLElement | null>(null);
+
+/** 侧栏点「在画面上定位」→ 对应锚点闪一下，把视线引过去。 */
+const osdFocusKey = ref("");
+let osdFocusTimer: number | undefined;
+
+watch(osdFocusToken, token => {
+  if (!token) return;
+  osdFocusKey.value = token.kind === "time" ? "time" : `item-${token.index}`;
+  // ⭐ 侧栏那个「在画面上拖动」**本身就是显式意图**（用户已经点名要挪这一行），
+  //    所以顺手进入编辑模式 —— 否则会出现"点了按钮、锚点闪了一下、却拖不动"，
+  //    而用户刚刚才被告知"拖动即可改位置"。
+  enterOsdEditMode();
+  if (osdFocusTimer !== undefined) window.clearTimeout(osdFocusTimer);
+  osdFocusTimer = window.setTimeout(() => {
+    osdFocusKey.value = "";
+  }, 1400);
+});
+
+/**
+ * 坐标 → 画布内的百分比。
+ *
+ * ⛔ 超出画布的值要**夹住**：设备回读的坐标可能比它自己声明的画布还大，不夹的话
+ *    锚点会画到画面外面，表现出来就是"这行字不见了"（而配置其实是有的）。
+ */
+function canvasRatio(value: number, max: number): number {
+  if (!Number.isFinite(max) || max <= 0) return 0;
+  return Math.max(0, Math.min(1, (Number(value) || 0) / max)) * 100;
+}
+
+const osdOverlayAnchors = computed(() => {
+  // ⛔ 没读到设备事实时**一个锚点都不画**：`familyValues` 里躺着的是平台的空白模板
+  //    （`timeX = 10` 这类），画出来等于把平台初值摆成"设备此刻就是这样"。
+  if (osdFactsMissing.value) return [];
+  // ⛔ 与遮挡**同一把尺**（`maskCanvasSize`）：OSD 的 `Length/Width` 本来就是遮挡坐标的
+  //    基准，在这里另造第二个基准，同一屏上两个覆盖层就会各按各的尺画。
+  const size = maskCanvasSize.value;
+  if (!size) return [];
+  return osdAnchors.value.map(anchor => {
+    // 拖动中的那一个用实时值：`pointermove` 期间**不写草稿**（脏值统计会一路抖动），
+    // 但用户必须看到它跟着手指走。
+    const live = osdDragKey.value === anchor.key ? osdDragPos.value : null;
+    const x = live ? live.x : Number(anchor.x) || 0;
+    const y = live ? live.y : Number(anchor.y) || 0;
+    return {
+      ...anchor,
+      dragging: osdDragKey.value === anchor.key,
+      coords: `${Math.round(x)}, ${Math.round(y)}`,
+      style: {
+        left: `${canvasRatio(x, size.width)}%`,
+        top: `${canvasRatio(y, size.height)}%`
+      } as CSSProperties
+    };
+  });
+});
+
+/**
+ * 锚点的悬浮说明。
+ *
+ * ⛔ 那句"平台无法预览真实效果"必须在这里：标量只定义「位置 + 内容 + 开关」，
+ *    字体字号由设备决定 —— 说成"这就是效果"就是在承诺平台给不了的能力。
+ *
+ * ⭐ 不再按编辑模式分支：这一层**只在编辑模式存在**（`v-if="osdEditMode"`），
+ *    那句"点哪里哪里才能拖"的只读态文案连同它的载体一起没了。
+ *
+ * ⛔ 曾经这里挂过一段"首次引导"（`localStorage` 记一次、按钮闪三下）。按钮搬进侧栏
+ *    「时间戳」面板的「位置」行之后**删掉了**：它当时要救的是"按钮在画面角落、看不见
+ *    也就不存在"，而现在按钮就贴在它控制的那个坐标读数旁边，标签自己会说话。
+ *    再加一层闪烁只是又一处要解释、要换存储键、还会跟模式对不上的东西。
+ */
+function osdAnchorTitle(anchor: OsdAnchorSlot): string {
+  const head = anchor.kind === "time" ? "时间戳" : `文字：${anchor.label}`;
+  const state = anchor.unplaced ? "（还没定位）" : anchor.draft ? "（待下发）" : "";
+  return [
+    `${head}${state}`,
+    `拖动可改位置 —— 落点写的是设备画布坐标 (${anchor.x}, ${anchor.y})。`,
+    "标记只表示位置，字体与字号由设备自己决定，平台无法预览真实效果。"
+  ].join("\n");
+}
+
+/**
+ * 浮条主文案：把"几项"翻成人话（`时间戳位置 · 2 条文字 · 遮挡 1 处`）。
  *
  * ⛔ 别写「待下发 N 项」就完事：N=1 可能是总闸、也可能是第 3 区，用户看不出改的是什么，
  *    只能回侧栏逐个核对 —— 浮条的作用就没了。翻译一次，摆在用户正在看的地方。
+ * ⭐ OSD 与遮挡**共用这一条**：两条浮条会重演本仓已被点名的「同一屏两套同名按钮」。
+ *    OSD 排在前面（它更靠近画面上的字），遮挡在后。
  */
 const pictureDraftSummary = computed(() => {
   const parts: string[] = [];
+  // ── OSD ──
+  if (osdDirtyFields.value.includes("timeX") || osdDirtyFields.value.includes("timeY")) parts.push("时间戳位置");
+  if (osdDirtyFields.value.includes("timeType")) parts.push("时间格式");
+  if (osdDirtyFields.value.includes("timeEnable")) parts.push("时间戳开关");
+  if (osdDirtyFields.value.includes("textEnable")) parts.push("文字开关");
+  // 逐行数，不是"items 变了就报全部"：改第 2 行却报 3 条，用户会去核对不存在的问题。
+  const textChanges = osdAnchors.value.filter(anchor => anchor.kind === "item" && anchor.draft).length;
+  if (textChanges) parts.push(`${textChanges} 条文字`);
+  // ── 遮挡 / 镜像 ──
   const regions = pictureDirtyFields.value.filter(field => /^mask[1-4]$/.test(field)).length;
   if (regions) parts.push(`遮挡 ${regions} 处`);
   if (pictureDirtyFields.value.includes("maskOn")) parts.push(pictureMaskOn.value ? "启用遮挡" : "停用遮挡");
   if (pictureDirtyFields.value.includes("mirror")) parts.push("镜像");
   return parts.length ? parts.join(" · ") : "画面改动";
 });
+
+/** 浮条上的计数 = 画面组 + OSD 组的草稿项数（合一条浮条，就得报合计）。 */
+const draftTotalCount = computed(() => pictureDirtyCount.value + osdDirtyCount.value);
 
 /**
  * 遮挡坐标的参考系说明：把口径摆在卡片上，别让用户猜这些数是什么的单位。
@@ -4010,6 +3930,140 @@ function maskDrawPoint(event: PointerEvent) {
   };
 }
 
+/* ─────────── OSD 锚点拖拽 ─────────── */
+
+/**
+ * 画面上的一个指针位置 → **设备画布像素**。
+ *
+ * ⛔ 基准必须是设备画布：锚点画在 `left = x / Length` 上，落点当然要按同一个 `Length`
+ *    反算 —— 否则"拖到哪"和"存进去是多少"是两把尺，松手那一刻锚点会自己跳走。
+ */
+function osdPointToCanvas(event: PointerEvent): { x: number; y: number } | null {
+  const size = maskCanvasSize.value;
+  if (!size) return null;
+  const layer = osdLayerRef.value;
+  if (!layer) return null;
+  const rect = maskDrawRect(layer);
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+  const ratioX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const ratioY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  return { x: Math.round(ratioX * size.width), y: Math.round(ratioY * size.height) };
+}
+
+function beginOsdDrag(event: PointerEvent, anchor: OsdAnchorSlot) {
+  // ⛔ 三道闸门：① 必须先**显式进入编辑模式**（默认关，见 `osdEditMode`）；
+  //    ② 与遮挡框选**互斥**（两层都吃 `pointerdown`，同时开着会"一边画框一边把某行字挪走"）；
+  //    ③ 设备事实没读到就不许改（平台初值不是设备现状）。
+  if (!osdEditMode.value || maskDrawMode.value || !osdEditable.value) return;
+  if (event.button !== 0) return;
+  const el = event.currentTarget as HTMLElement;
+  osdDragKey.value = anchor.key;
+  osdDragPos.value = { x: Number(anchor.x) || 0, y: Number(anchor.y) || 0 };
+  osdDragMoved = false;
+  // 合成事件（测试）里 `setPointerCapture` 可能抛 `NotFoundError`：包住，
+  // 否则 handler 会中断在这里，而外面看起来只是"拖了没反应"。
+  try {
+    el.setPointerCapture?.(event.pointerId);
+  } catch {
+    /* 拿不到捕获也照常拖：指针离开锚点后 `pointerup` 可能丢，但落点已经算过了。 */
+  }
+  event.preventDefault();
+}
+
+/** 拖动中只更新**本地临时值**：`pointermove` 里写草稿会让脏值统计一路抖动。 */
+function updateOsdDrag(event: PointerEvent) {
+  if (!osdDragKey.value) return;
+  const point = osdPointToCanvas(event);
+  if (!point) return;
+  osdDragPos.value = point;
+  osdDragMoved = true;
+}
+
+function finishOsdDrag(event: PointerEvent) {
+  const key = osdDragKey.value;
+  if (!key) return;
+  updateOsdDrag(event);
+  const point = osdDragPos.value;
+  const moved = osdDragMoved;
+  osdDragKey.value = "";
+  osdDragPos.value = null;
+  osdDragMoved = false;
+  // 只是点了一下（没移动）不该改任何东西 —— 否则"点一下看看"会把某行字挪到脚下。
+  if (!moved || !point) return;
+  const anchor = osdAnchors.value.find(item => item.key === key);
+  if (!anchor) return;
+  if (anchor.kind === "time") {
+    deviceConfigRef.value?.setOsdTimePosition("x", point.x);
+    deviceConfigRef.value?.setOsdTimePosition("y", point.y);
+  } else {
+    // ⛔ 这一句同时写入坐标**和**「已定位」标记：拖动是"用户摆了位置"的唯一证据，
+    //    不标的话 `buildOSD` 会一直拒发这一行（而用户看起来明明已经摆好了）。
+    deviceConfigRef.value?.setOsdItemPosition(anchor.index, point.x, point.y);
+  }
+}
+
+function cancelOsdDrag() {
+  osdDragKey.value = "";
+  osdDragPos.value = null;
+  osdDragMoved = false;
+}
+
+/**
+ * 进入 / 退出 OSD 编辑模式（侧栏「时间戳」面板里的「调整位置 / 完成调整」按钮）。
+ *
+ * ⭐ 进编辑模式要**顺手把遮挡框选关掉**：两者都是"在画面上拖"，同时开着的结果是
+ *    同一个按下动作既可能画框、也可能挪字 —— 用户没法预期，平台也说不清是哪一种。
+ *    反方向由 `startMaskDraw` 负责（见那里）。
+ * ⭐ 2026-09-20 起 `dragZoomMode` 不再"用一次就退"，于是它也成了常驻的"画面上拖"模式，
+ *    同样在这里被关掉（三者的互斥闭环：本函数 / `startMaskDraw` / `toggleDragZoomMode`）。
+ *
+ * ⛔ 设备事实没读到（`osdEditable` 假）时**不许进**：这时 `familyValues` 里躺的是平台
+ *    空白模板（`timeX = 10` 这类），进去拖一把就等于把平台初值当成设备现状改了。
+ *    侧栏那个按钮此时本来是禁用的，这里再拦一道是因为抽屉只发"意图"，
+ *    真正落状态的是这里 —— 闸门不能只看按钮的 `disabled`。
+ */
+function enterOsdEditMode() {
+  if (!osdEditable.value) return;
+  if (maskDrawMode.value) cancelMaskDraw();
+  if (dragZoomMode.value) exitDragZoomMode();
+  osdEditMode.value = true;
+}
+
+function exitOsdEditMode() {
+  osdEditMode.value = false;
+  // 拖到一半退出（按钮 / Esc / 换页签）：拖拽状态也要收干净，
+  // 否则下次进编辑模式，锚点会带着上一次那个"拖到一半"的临时坐标。
+  cancelOsdDrag();
+}
+
+function toggleOsdEditMode() {
+  if (osdEditMode.value) exitOsdEditMode();
+  else enterOsdEditMode();
+}
+
+function onOsdEditKeydown(event: KeyboardEvent) {
+  if (consumeCanvasEscape(event)) exitOsdEditMode();
+}
+
+// Esc 只在编辑模式期间接管：常驻监听会跟弹窗自己的 Esc 行为打架。
+watch(osdEditMode, (active, _previous, onCleanup) => {
+  if (!active) return;
+  // ⛔ capture 见 `consumeCanvasEscape`：晚于弹窗处理就会漏判"上面有弹窗"。
+  window.addEventListener("keydown", onOsdEditKeydown, true);
+  onCleanup(() => window.removeEventListener("keydown", onOsdEditKeydown, true));
+});
+
+/**
+ * 图像叠加面板（`DeviceConfigOsdBlocks`）的 props 袋与写口，全部来自 `DeviceConfigDrawer`
+ * 的 `defineExpose`（2026-09-20 底栏化）。
+ *
+ * ⛔ **不要**在宿主侧另建一份 OSD 状态：底栏与抽屉共用同一份 `familyValues.osd`，
+ *    这里只是把值搬过去渲染、把动作原样转发回去。
+ * ⛔ props 袋是 computed（`deviceConfigRef` 挂上/换通道时它会变），所以要 `v-if` 判空 ——
+ *    直接 `v-bind="undefined"` 会让必填 prop 缺失、渲染出一块空面板。
+ */
+const osdBlocksBag = computed(() => deviceConfigRef.value?.osdBlocks);
+
 /** 点「新建」：占一个空槽位并进入框选。 */
 function startMaskDraw() {
   if (!pictureEditable.value) return;
@@ -4027,6 +4081,10 @@ function startMaskDraw() {
     Message.warning("没读到设备声明的图像坐标画布，本次按画面尺寸换算，遮挡落点可能偏");
   }
   maskDrawSeq.value = seq;
+  // ⛔ 与 OSD 编辑模式互斥（反方向见 `enterOsdEditMode`）：开始框选就把锚点锁回去，
+  //    否则同一个按下动作在两层里各有一套解释。拉框变焦同理（2026-09-20 它也会常驻了）。
+  exitOsdEditMode();
+  if (dragZoomMode.value) exitDragZoomMode();
   maskDrawMode.value = true;
   maskDrawStart.value = null;
   maskDrawCurrent.value = null;
@@ -4107,25 +4165,92 @@ function finishMaskDraw(event: PointerEvent) {
 }
 
 function onMaskDrawKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") cancelMaskDraw();
+  if (consumeCanvasEscape(event)) cancelMaskDraw();
 }
 
 watch(maskDrawMode, (active, _previous, onCleanup) => {
   if (!active) return;
-  window.addEventListener("keydown", onMaskDrawKeydown);
-  onCleanup(() => window.removeEventListener("keydown", onMaskDrawKeydown));
+  // ⛔ capture 见 `consumeCanvasEscape`：晚于弹窗处理就会漏判"上面有弹窗"。
+  window.addEventListener("keydown", onMaskDrawKeydown, true);
+  onCleanup(() => window.removeEventListener("keydown", onMaskDrawKeydown, true));
 });
+
+/* ─────────── Esc 的归属：三个"画面上拖"的模式 vs 弹窗 ─────────── */
+
+/**
+ * 是否有"在画面上拖一把"的模式正开着（拉框变焦 / 遮挡框选 / OSD 调位置）。
+ *
+ * 三者互斥（进任一个都会关掉另两个，见 `toggleDragZoomMode` / `enterOsdEditMode` /
+ * `startMaskDraw`）。唯一的用处是模板上 `<a-modal :esc-to-close>` 的条件：模式开着时
+ * 那一下 Esc 归图层（见 `consumeCanvasEscape`），控制台不许跟着关。
+ */
+const canvasModeArmed = computed(() => dragZoomMode.value || maskDrawMode.value || osdEditMode.value);
+
+/**
+ * 控制台自己开的弹窗（Esc 的第一语义 = 关掉最上面那个弹窗）。
+ *
+ * ⛔ 这几个 `a-modal` 都带 `esc-to-close`，而 Arco 只让**最上层**那个弹窗响应 Esc
+ *    （内部 `isLastDialog()`）。我们的图层监听挂在 `window` 上，拿不到这个判断 ——
+ *    不在这里挡一道，用户按 Esc 关弹窗时会把拉框态也顺手收掉：关完弹窗回来，
+ *    按钮已经变回「3D 放大」，刚才摆好的下一刀白拖。
+ * ⛔ 取值必须发生在**事件冒泡到我们之前**，所以三个图层监听都用 capture 注册（见 `consumeCanvasEscape`）。
+ * ⛔ 别改成"去 DOM 里找有没有别的弹窗"：单测环境把 `teleport` 裁掉了（弹窗内容原地渲染、
+ *    `.arco-modal-container` 一个都不在 `document` 里），那种写法在测试里恒为假 —— 等于没护栏。
+ *    （因此新增弹窗时要记得补进这个列表。）
+ */
+const consoleDialogOpen = computed(
+  () =>
+    homeSettingsDialogVisible.value ||
+    savePresetDialogVisible.value ||
+    saveCruiseDialogVisible.value ||
+    probeTimelineDialogVisible.value
+);
+
+/**
+ * 这一下 Esc 该不该由"画面上拖"的图层消费；该，就**当场把事件吃掉**再返回 true。
+ * （调用方负责确认自己那个模式还开着。）
+ *
+ * 判据两条：① 是 Esc；② 没有别的弹窗开着（有 ⇒ 那一下归它，见 `consoleDialogOpen`，
+ * 此时**绝不能**吃事件，否则那个弹窗就关不掉了）。
+ *
+ * ⛔⛔ **`stopPropagation()` 是这套修复的核心，不是保险丝**（2026-09-20 真实浏览器实测）：
+ *    只把模板上的 `esc-to-close` 在模式期间置假是**不够的**。我们在 `window` 的 capture 里
+ *    先退出模式 ⇒ `canvasModeArmed` 变假 ⇒ **在同一个事件派发过程中** `escToClose` 就变回了
+ *    `true`；Arco 挂在 `document.documentElement` 上的那份全局监听**随后才跑**，读到的已经是
+ *    `true`，于是照关不误。实测相位：
+ *      `win-capture` → `esc-to-close=false`、图层在；
+ *      `doc-capture` → 已经是 `true`、图层已退 ⇒ Arco 随后 `handleCancel`。
+ *    调用栈坐实：`requestClose → handleClose → update:visible → consoleStore.close()`，
+ *    用户看到的就是"按一下 Esc，播放控制台整个弹窗没了"。
+ *    ⇒ 图层既然"接管"了这一下 Esc，就得把它**从事件流里拿掉**；不能指望另一边自觉。
+ *
+ * ⛔ 三个图层监听都必须用 **capture** 注册：要抢在弹窗自己处理之前判"上面有没有弹窗"。
+ *    只在 `window` 上挂、又不 capture，就会晚于弹窗处理而漏判。
+ * ⛔ 别改成"去 DOM 里找有没有别的弹窗"：单测环境把 `teleport` 裁掉了（`.arco-modal-container`
+ *    一个都不在 `document` 里），那种写法在测试里恒为假 —— 等于没护栏。所以用 `consoleDialogOpen`
+ *    这个显式列表，**新增控制台内弹窗时要记得补进去**。
+ */
+function consumeCanvasEscape(event: KeyboardEvent): boolean {
+  if (event.key !== "Escape") return false;
+  if (consoleDialogOpen.value) return false;
+  event.stopPropagation();
+  return true;
+}
 
 // 换页签或换通道时退出框选：草稿还停在画面上而目标已经变了，很容易写错设备。
 watch([activeTab, () => props.channel?.id], ([, channelId], [, previousChannelId]) => {
   if (maskDrawMode.value) cancelMaskDraw();
+  // 编辑模式同理退出：换到别的页签后画面上的锚点已经不在了，
+  // 留着一个"看得见是开着、却无处可拖"的模式只会让人以为坏了。
+  if (osdEditMode.value) exitOsdEditMode();
   // ── 切通道：草稿会真丢 ──
   // 草稿存在 DeviceConfigDrawer 的 `familyValues` 里，换通道时它连同基准一起复位
   // （见 Drawer 的 `watch(props.channelId)`）—— 草稿属于那个通道，这是对的。
   // ⛔ 但拦不住：切通道的入口在设备列表（`consoleStore.open(...)`），不在本组件内，
   //    这里能拿到的只是"已经变了"。所以退一步：**如实告知**，别让改动静默消失。
   if (previousChannelId !== undefined && channelId !== previousChannelId) {
-    const pending = pictureDirtyCount.value;
+    // ⛔ 合计（画面 + OSD）：只报画面组的数，用户点了确认才发现 OSD 的改动也一起丢了。
+    const pending = draftTotalCount.value;
     if (pending > 0) {
       Message.warning(`已切换到其它通道，上一个通道 ${pending} 项未下发的画面改动已放弃`);
     }
@@ -4176,17 +4301,44 @@ async function togglePictureMaskOn(value: boolean) {
  * ⛔ 浮条只在「画面设置」页签露头。跨页签常驻会让云台/探针页面上凭空多一条
  *    "遮挡 2 处待下发"，用户会以为那是当前页的操作 —— 跨页签的提醒交给页签角标。
  * ⛔ 框选过程中不露头：那一层是全屏吃指针的，浮条会被它盖住，也会挡住拖拽起点。
+ * ⭐ 画面组与 OSD 组**共用这一条**：两条浮条会重演本仓已被点名的
+ *    「同一屏两套同名按钮」（`play-console-ux-architecture.md` B3）。
  */
 const pictureDraftBarVisible = computed(
-  () => activeTab.value === "deviceconfig" && pictureDirtyCount.value > 0 && !maskDrawMode.value
+  () => activeTab.value === "deviceconfig" && draftTotalCount.value > 0 && !maskDrawMode.value
 );
 
+/**
+ * 浮条上的「下发」为什么点不动。
+ *
+ * ⛔ 未定位的行**不许下发**：`0,0` 是合法坐标，`buildOSD` 从值上判不出"用户还没摆"，
+ *    判据只能是草稿里的定位标记。放行的话设备上会真的多出一行贴左上角的字，
+ *    而界面看起来一切正常 —— 这类"静默写坏设备"是本仓最贵的错。
+ * ⛔ 要按**参与下发的组**分别判可编辑性，不能用 `pictureEditable` 一刀切：
+ *    只改了 OSD、而画面组没读到事实时，`pictureEditable` 是 false，会误把按钮禁掉。
+ */
+const draftBlockedReason = computed(() => {
+  if (osdUnplacedCount.value > 0) {
+    return `有 ${osdUnplacedCount.value} 行文字还没在画面上定位 —— 拖动它的标记再下发`;
+  }
+  if (pictureDirtyCount.value > 0 && !pictureEditable.value) return "画面组需要先读到设备配置才能下发";
+  if (osdDirtyCount.value > 0 && !osdEditable.value) return "图像叠加需要先读到设备配置才能下发";
+  return "";
+});
+
+/** 浮条上要显示的下发/拒发原因：两组哪一组有话就显示哪一组。 */
+const draftError = computed(() => pictureError.value || osdError.value);
+
 async function applyPictureDraft() {
-  await applyPictureCard();
+  if (draftBlockedReason.value) return;
+  // ⭐ 两组草稿**合并成一条报文**发出去：协议上 `OSDConfig` 与 `PictureMask` 本来就是
+  //    `DeviceConfig` 里的兄弟元素，分两次发只是把"两个按钮"的问题挪到网络层。
+  await deviceConfigRef.value?.applyPictureAndOsdGroups();
 }
 
 function revertPictureDraft() {
-  revertPictureCard();
+  if (pictureDirtyCount.value > 0) revertPictureCard();
+  if (osdDirtyCount.value > 0) deviceConfigRef.value?.revertOsdGroup();
 }
 
 function choosePictureMirror(value: string) {
@@ -4200,11 +4352,6 @@ function readPictureCard() {
 
 function revertPictureCard() {
   deviceConfigRef.value?.revertPictureGroup();
-}
-
-async function applyPictureCard() {
-  if (!deviceConfigRef.value || !pictureEditable.value) return;
-  await deviceConfigRef.value.applyPictureGroup();
 }
 
 async function runAdvancedAction(action: string, region?: Record<string, number>) {
@@ -4237,8 +4384,8 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
         if (advancedActionRequiresDeviceResult(action, operation?.responseRequired)) {
           applyAdvancedAccepted(action);
         } else {
-          setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
-          Message.info("请求已发送,设备执行结果未回传");
+          setAdvancedPhase(action, "sent", "已下发（该命令无需设备回执）");
+          Message.info("已下发（该命令无需设备回执）");
         }
         return;
       }
@@ -4258,8 +4405,8 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
       }
       if (operationStatus === "sent" && !advancedActionRequiresDeviceResult(action, operation?.responseRequired)) {
         setAdvancedPending(action, false);
-        setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
-        Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "请求已发送,设备执行结果未回传");
+        setAdvancedPhase(action, "sent", "已下发（该命令无需设备回执）");
+        Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "已下发（该命令无需设备回执）");
         return;
       }
       if (operationId) {
@@ -4273,7 +4420,7 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
       } else {
         // Key-frame and DragZoom are SIP-delivery operations; no fake accepted state.
         setAdvancedPending(action, false);
-        Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "请求已发送,设备执行结果未回传");
+        Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "已下发（该命令无需设备回执）");
       }
     } catch (error: any) {
       if (!isCurrentChannelContext(channelId, token, contextKey) || statusToken !== advancedStatusToken.value) return;
@@ -4591,7 +4738,7 @@ watch(
   mode => {
     if (mode === "minimized") {
       releaseContinuousControls();
-      dragZoomMode.value = false;
+      exitDragZoomMode();
       void nextTick(keepMiniPlayerInViewport);
     } else {
       finishMiniPlayerDrag();
@@ -4610,8 +4757,10 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", keepMiniPlayerInViewport);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   finishMiniPlayerDrag();
+  // OSD 锚点层剩余的那个定时器：不清理的话，组件销毁后回调仍会写 ref（Vue 会警告、测试会串味）。
+  // ⛔ 以前这里是两个 —— 首次引导那个（`osdGuideTimer`）随引导一起删了，见 `osdAnchorTitle` 注释。
+  if (osdFocusTimer !== undefined) window.clearTimeout(osdFocusTimer);
   clearProbeTimers();
-  clearStorageCardPolling();
   clearTimer();
   clearMonitor();
   void stopTalk();
@@ -4629,7 +4778,7 @@ onBeforeUnmount(() => {
     :mask-closable="false"
     :align-center="!isMinimized"
     :closable="false"
-    :esc-to-close="!isMinimized"
+    :esc-to-close="!isMinimized && !canvasModeArmed"
     :modal-style="miniPlayerModalStyle"
     :body-style="miniPlayerBodyStyle"
     unmount-on-close
@@ -4742,9 +4891,15 @@ onBeforeUnmount(() => {
         <div class="video-frame">
           <!-- 真实播放器；无地址时仍保留稳定的加载/空/错误态布局 -->
           <div class="video-canvas">
+            <!-- 拉框变焦层（2026-09-20：一次框选下发完**不再退出**，可以连着拉）
+                 ⛔ 蓝罩只挂在 `.is-dragging`（真的按着拖）上：常驻的 12% 色罩会给刚下发的
+                    画面整体染色，而操作员下一步正是要看清"到底放大成了什么样"。
+                 ⭐ 于是"当前处于拉框态"的标识换成两个常驻物：这条提示条 + 按钮上的「取消 3D 放大」。
+                 两个都要留着 —— 少了提示条，用户会以为按钮点坏了（画面看着没变化）。 -->
             <div
               v-if="dragZoomMode"
               class="drag-zoom-layer"
+              :class="{ 'is-dragging': dragZoomStart !== null, 'is-busy': isAdvancedPending(dragZoomAction) }"
               data-testid="drag-zoom-layer"
               @pointerdown="beginDragZoom"
               @pointermove="updateDragZoom"
@@ -4752,7 +4907,12 @@ onBeforeUnmount(() => {
               @pointercancel="cancelDragZoom"
             >
               <span class="drag-zoom-box" :style="dragZoomBoxStyle"></span>
-              <span class="drag-zoom-hint">拖动选择 3D {{ dragZoomAction === "drag_zoom_out" ? "缩小" : "放大" }}区域</span>
+              <span class="drag-zoom-hint">
+                <template v-if="isAdvancedPending(dragZoomAction)">正在下发上一次框选…</template>
+                <template v-else
+                  >拖动选择 3D {{ dragZoomAction === "drag_zoom_out" ? "缩小" : "放大" }}区域 · 可连续框选,Esc 退出</template
+                >
+              </span>
             </div>
             <template v-if="phase === 'playing' || phase === 'paused'">
               <PlayWindow
@@ -4823,6 +4983,69 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
+            <!-- 图像叠加（OSD）的锚点层：**只在编辑模式存在**（2026-09-20 老板再反馈）。
+                 ⛔ 默认不画（`v-if="osdEditMode"`）：它不是"位置信息的载体"（那个由侧栏的
+                    `X 289 · Y 256` 承担），而是"正在摆位置"这件事的操作面。常驻的后果就是
+                    老板看到的那一幕 —— 四五个带引线的标签摊在视频上，把要看的画面盖住了。
+                 ⛔ 形态是**锚点 + 内容标签**，不是"像真字的预览" —— 标准 `OSDCfgType` 里
+                    没有字体/字号/颜色，画出来就是在承诺平台给不了的能力；而且设备**已经烧进
+                    码流**的时间戳就在这个画面里，再叠一个假字会出现**两个时间戳**。
+                 ⭐ 标签用引线偏到坐标点右上 8px（见样式），刻意**不压住**设备那个真字 ——
+                    用户可以对着真字拖锚点对齐，等于免费的精确校准。
+                 ⛔ 拖动是**显式动作**（`osdEditMode`）：锚点层盖着播放器，随时可拖的话
+                    "想点一下画面"就会顺手挪走某行字，而且画面上看不出来（平台不渲染真字）。 -->
+            <div
+              v-if="activeTab === 'deviceconfig' && osdEditMode"
+              ref="osdLayerRef"
+              class="osd-overlay-layer"
+              data-testid="osd-overlay-layer"
+            >
+              <span
+                v-for="anchor in osdOverlayAnchors"
+                :key="anchor.key"
+                class="osd-anchor"
+                :class="{
+                  'is-draft': anchor.draft,
+                  'is-unplaced': anchor.unplaced,
+                  'is-off': anchor.off,
+                  'is-dragging': anchor.dragging,
+                  'is-focus': osdFocusKey === anchor.key
+                }"
+                :data-anchor="anchor.key"
+                :data-kind="anchor.kind"
+                :data-draft="anchor.draft ? '1' : '0'"
+                :data-unplaced="anchor.unplaced ? '1' : '0'"
+                :data-off="anchor.off ? '1' : '0'"
+                :style="anchor.style"
+                :title="osdAnchorTitle(anchor)"
+                @pointerdown="beginOsdDrag($event, anchor)"
+                @pointermove="updateOsdDrag"
+                @pointerup="finishOsdDrag"
+                @pointercancel="cancelOsdDrag"
+              >
+                <span class="osd-anchor-lead"></span>
+                <span class="osd-anchor-dot"></span>
+                <span class="osd-anchor-tag">
+                  {{ anchor.label }}
+                  <!-- 状态写在标签上，不只靠颜色：色弱用户和"记不住哪个色是什么"的人
+                       一样分不出来，而这块标发不发得出去正是这里唯一要说的信息。 -->
+                  <em v-if="anchor.unplaced" class="is-unplaced">未定位</em>
+                  <em v-else-if="anchor.draft" class="is-draft">待下发</em>
+                  <em v-if="anchor.off" class="is-off">已关闭</em>
+                </span>
+                <span v-if="anchor.dragging" class="osd-anchor-coords" data-testid="osd-anchor-coords">
+                  {{ anchor.coords }}
+                </span>
+              </span>
+
+              <!-- 操作说明：这层只在编辑模式存在，所以它也就是"编辑模式的说明"。
+                   ⛔ 指向必须写清**按钮在侧栏**（2026-09-20 起按钮搬进「时间戳」面板）——
+                     这一版之前它在画面下方工具条，照旧文案会让用户低头找。 -->
+              <span class="osd-layer-hint" data-testid="osd-layer-hint">
+                拖动这些标记就能挪位置 · 点侧栏「完成调整」或按 Esc 退出
+              </span>
+            </div>
+
             <!-- 新建遮挡区：点卡片「新建」后在这一层上拖框 -->
             <div
               v-if="maskDrawMode"
@@ -4854,14 +5077,14 @@ onBeforeUnmount(() => {
             >
               <!-- 拒发/下发失败的原因必须在这里露面：浮条是用户按下「下发」的地方，
                                  ⛔ 把原因只写在侧栏 Drawer 里，用户看到的就是"点了没反应"。 -->
-              <p v-if="pictureError" class="picture-draft-error" data-testid="picture-draft-error">
-                {{ pictureError }}
+              <p v-if="draftError" class="picture-draft-error" data-testid="picture-draft-error">
+                {{ draftError }}
               </p>
               <div class="picture-draft-row">
                 <span class="picture-draft-text">
-                  <strong>{{ pictureDirtyCount }}</strong>
+                  <strong>{{ draftTotalCount }}</strong>
                   <span>项画面改动未下发</span>
-                  <em class="picture-draft-summary">{{ pictureDraftSummary }}</em>
+                  <em class="picture-draft-summary" data-testid="picture-draft-summary">{{ pictureDraftSummary }}</em>
                 </span>
                 <span class="picture-draft-actions">
                   <button
@@ -4877,8 +5100,8 @@ onBeforeUnmount(() => {
                     type="button"
                     class="picture-draft-submit"
                     data-testid="picture-draft-apply"
-                    :disabled="!pictureEditable"
-                    :title="pictureEditable ? `下发到设备：${pictureDraftSummary}` : '需要先读到设备配置才能下发'"
+                    :disabled="Boolean(draftBlockedReason)"
+                    :title="draftBlockedReason || `下发到设备：${pictureDraftSummary}`"
                     @click="applyPictureDraft"
                   >
                     <Send :size="12" /><span>下发</span>
@@ -4937,6 +5160,11 @@ onBeforeUnmount(() => {
                 {{ opt.label }}
               </button>
             </div>
+
+            <!-- ⛔ 这里**不再**挂 OSD 的「调整位置」按钮（2026-09-20 老板第三次调整）：
+                 它先在画面右上角（遮画面）→ 再搬到这条工具条（仍要视线来回跳）→
+                 现在归位到侧栏「时间戳」面板的「位置」行，见 `DeviceConfigOsdBlocks`。
+                 按钮改的就是那一行的坐标，跟坐标读数放在一起才是它本来的位置。 -->
           </div>
         </div>
 
@@ -5290,6 +5518,104 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </section>
+
+              <section class="linked-section linked-card" data-testid="scan-card">
+                <header class="linked-card-hd">
+                  <span class="section-title">
+                    <MoveHorizontal :size="13" />自动扫描
+                    <!-- 「启动已下发」与巡航同款 chip:HTTP 成功只表示指令发出去了,
+                         设备到底扫没扫只能看画面,所以这里说的是"已下发"而不是"扫描中"。 -->
+                    <button
+                      v-if="scanState === 'start-sent'"
+                      class="cruise-running-chip"
+                      data-testid="scan-running-chip"
+                      :title="`扫描组 #${scanActiveGroup} 启动指令已发送,点击停止`"
+                      @click="sendScanCommand('scan_stop')"
+                    >
+                      <span class="cruise-running-dot" />
+                      启动已下发
+                      <Square :size="10" />
+                    </button>
+                  </span>
+                </header>
+                <div class="scan-panel" data-testid="scan-panel">
+                  <div class="scan-row">
+                    <label class="scan-label" for="scan-group-input">组号</label>
+                    <input
+                      id="scan-group-input"
+                      v-model.number="scanGroup"
+                      class="scan-number"
+                      type="number"
+                      :min="SCAN_GROUP_MIN"
+                      :max="SCAN_GROUP_MAX"
+                      data-testid="scan-group-input"
+                      :title="`扫描组号 ${SCAN_GROUP_MIN}-${SCAN_GROUP_MAX}(89H 的字节5)`"
+                    />
+                    <button
+                      class="btn-primary sm scan-toggle"
+                      data-testid="scan-toggle"
+                      :disabled="!scanCanSend"
+                      :title="
+                        !canControlPtz
+                          ? '没有云台控制权限'
+                          : scanState === 'start-sent'
+                            ? '停止扫描(字节 4-7 全零的通用停止帧)'
+                            : '开始扫描(89H)'
+                      "
+                      @click="toggleScan"
+                    >
+                      <Play v-if="scanState === 'stopped'" :size="11" /><Square v-else :size="11" />
+                      <span>{{ scanState === "start-sent" ? "停止扫描" : "开始扫描" }}</span>
+                    </button>
+                  </div>
+                  <div class="scan-row">
+                    <button
+                      class="btn-ghost sm scan-bound-btn"
+                      data-testid="scan-set-left"
+                      :disabled="!scanCanSend"
+                      title="把云台「当前朝向」写入左边界(89H 字节6=01H)"
+                      @click="sendScanCommand('scan_set_left')"
+                    >
+                      设左边界
+                    </button>
+                    <button
+                      class="btn-ghost sm scan-bound-btn"
+                      data-testid="scan-set-right"
+                      :disabled="!scanCanSend"
+                      title="把云台「当前朝向」写入右边界(89H 字节6=02H)"
+                      @click="sendScanCommand('scan_set_right')"
+                    >
+                      设右边界
+                    </button>
+                  </div>
+                  <div class="scan-row">
+                    <label class="scan-label" for="scan-speed-input">速度</label>
+                    <input
+                      id="scan-speed-input"
+                      v-model.number="scanSpeed"
+                      class="scan-number"
+                      type="number"
+                      :min="SCAN_SPEED_MIN"
+                      :max="SCAN_SPEED_MAX"
+                      data-testid="scan-speed-input"
+                      :title="`扫描速度 ${SCAN_SPEED_MIN}-${SCAN_SPEED_MAX}(8AH,12 位)`"
+                    />
+                    <button
+                      class="btn-ghost sm"
+                      data-testid="scan-set-speed"
+                      :disabled="!scanCanSend || scanSpeedInvalid"
+                      title="下发扫描速度(8AH)"
+                      @click="sendScanCommand('scan_set_speed')"
+                    >
+                      下发
+                    </button>
+                  </div>
+                  <p v-if="scanError" class="scan-error" data-testid="scan-error">{{ scanError }}</p>
+                  <p v-else class="scan-hint" data-testid="scan-hint">
+                    扫描只在左右边界之间来回，与预置位无关；边界需先把云台转到目标位置再设置
+                  </p>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -5301,7 +5627,33 @@ onBeforeUnmount(() => {
             data-testid="linked-detail-picture"
           >
             <div class="linked-picture-layout">
-              <!-- ① 画面遮挡 -->
+              <!-- ① 图像叠加（2026-09-20 从侧栏整块搬来，老板：「不想用切换的方式，要一页全展示」）
+                   ⛔ 不套 `.linked-card` 外壳：里面那两块（时间戳 / 叠加文字）本来就有自己的框，
+                      再套一层就等于为了一个标题吃掉 24px —— 而这一格的预算只有 148px。
+                   ⛔ 值 / 写口全部来自 `deviceConfigRef`（`osdBlocks` 袋 + 三个写口），
+                      宿主**不另存一份** OSD 状态。
+                   ⛔ `:editing` 与 `:canvas-linked` 显式覆盖袋里的值：控制台里这两个由**画面侧**持有
+                      （`osdEditMode` / 有画布），抽屉那侧在控制台没接这两个 prop。
+                      漏了 `canvas-linked` ⇒「调整位置」按钮不渲染，而它正是这块面板的主操作。 -->
+              <section class="linked-section picture-osd-cell" data-testid="picture-osd-cell">
+                <DeviceConfigOsdBlocks
+                  v-if="osdBlocksBag"
+                  v-bind="osdBlocksBag"
+                  :editing="osdEditMode"
+                  :canvas-linked="true"
+                  layout="row"
+                  @update:time-enable="deviceConfigRef?.setOsdFlag('timeEnable', $event)"
+                  @update:time-type="deviceConfigRef?.setOsdFlag('timeType', $event)"
+                  @update:time-x="deviceConfigRef?.setOsdTimePosition('x', Number($event))"
+                  @update:time-y="deviceConfigRef?.setOsdTimePosition('y', Number($event))"
+                  @update:text-enable="deviceConfigRef?.setOsdFlag('textEnable', $event)"
+                  @update:items="deviceConfigRef?.setOsdItems($event)"
+                  @locate="deviceConfigRef?.focusOsdAnchor($event)"
+                  @toggle-edit="toggleOsdEditMode"
+                />
+              </section>
+
+              <!-- ② 画面遮挡 -->
               <section class="linked-section linked-card" data-testid="picture-mask-card">
                 <header class="linked-card-hd">
                   <span class="section-title">
@@ -5438,11 +5790,72 @@ onBeforeUnmount(() => {
                 </div>
               </section>
 
-              <!-- ③ 第三格空置（2026-09-19 起）：原「提交」卡片的下发入口已搬进画布浮条。
-                                 ⛔ 别为了"看着满"把这一格删成两列：底栏与云台/录像页签共用同一套
-                                   三列栅格（`grid-template-columns: repeat(3, ...)`），列数一变，
-                                   切页签时卡片就会横向跳位。用户明确"空出的卡位先空着"，
-                                   等画面遮挡这一版做完再谈往里放什么。 -->
+              <!-- ③ 参数对照（2026-09-20 入住）：原「视频编码」一级页签底部那一整块。
+                   ⭐ 它落在这里是**填空**：这一格从 2026-09-19 起就空着（原「提交」卡的下发入口
+                      搬去了画布浮条），而参数对照本来就该跟"正在编辑的编码参数"同屏。
+                   三行**不同源**，对应关系必须写在界面上，不能让人以为天然同源：
+                     · 下发 = 本次提交的期望值（草稿）
+                     · 回读 = 设备最近一次回读事实（不是草稿，否则一改就跟着变）
+                     · 实测 = 当前正在播的那一路的采样（探针 / ffprobe）
+                   ⭐ 这里就是 A-5 的验收闭环：平台改分辨率 → 拉流实测跟着变。
+                   ⛔ 留在底栏、别挪回侧栏：三行并排才读得出"设备到底跟没跟"，窄侧栏里会折成六行。
+                   ⛔ 卡上**不再放**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
+                      （`dcg-embedded-actions`），同一屏两套同名按钮是本仓点过名的坑。
+                      这里只留「码流」——它与侧栏「配置文件」下拉同一个真源（`selectedVideoStream`）。 -->
+              <section class="linked-section linked-card" data-testid="video-param-compare-card">
+                <header class="linked-card-hd">
+                  <span class="section-title"><Video :size="13" />参数对照</span>
+                  <span class="linked-card-actions">
+                    <em
+                      class="vpc-verdict"
+                      :class="`is-${videoParamVerdict.tone}`"
+                      data-testid="video-param-compare-verdict"
+                      :title="videoParamVerdictTitle"
+                      >{{ videoParamVerdict.text }}</em
+                    >
+                    <label class="linked-inline-select">
+                      <span>码流</span>
+                      <select
+                        data-testid="video-param-bottom-stream"
+                        :value="String(videoParamCompareStream?.streamNumber ?? 0)"
+                        @change="selectVideoStream(($event.target as HTMLSelectElement).value)"
+                      >
+                        <option v-for="row in videoParamsDraft" :key="row.streamNumber" :value="row.streamNumber">
+                          {{ row.streamNumber === 0 ? "主码流" : `子码流 ${row.streamNumber}` }}
+                        </option>
+                      </select>
+                    </label>
+                  </span>
+                </header>
+                <!-- ⭐ 2026-09-20 三行 → **两行**（老板：这张卡"缩小一下"）。
+                     ⛔ 删掉的是「下发」（= 侧栏表单里的草稿值，本来就看得见，且侧栏
+                        `dcg-params-foot` 写了「待下发 N 项」）；
+                        留下的是**只有这里**才比得出来的那一对：设备声明的 vs 画面在播的。 -->
+                <div v-if="videoParamCompareStream" class="vpc-grid" data-testid="video-param-compare">
+                  <div class="vpc-row" data-testid="video-param-compare-read">
+                    <span>设备回读</span>
+                    <strong
+                      >{{ videoFormatText(videoParamCompareReadRow()?.videoFormat) }} ·
+                      {{ resolutionText(videoParamCompareReadRow()?.resolution) }} ·
+                      {{ frameRateText(videoParamCompareReadRow()?.frameRate) }}</strong
+                    >
+                  </div>
+                  <div class="vpc-row" data-testid="video-param-compare-measured">
+                    <span>画面实测</span>
+                    <strong>
+                      <i :class="{ 'is-differ': videoParamDiffs.codec === true }">{{ streamInfo.videoCodec }}</i> ·
+                      <i :class="{ 'is-differ': videoParamDiffs.resolution === true }">{{ streamInfo.resolution }}</i> ·
+                      <i :class="{ 'is-differ': videoParamDiffs.fps === true }">{{
+                        streamInfo.videoFps ? `${streamInfo.videoFps} fps` : "—"
+                      }}</i>
+                      <em v-if="liveMetrics.bitrate" class="vpc-bitrate">{{ liveMetrics.bitrate }} kbps</em>
+                    </strong>
+                  </div>
+                </div>
+                <p v-else class="vpc-empty" data-testid="video-param-compare-empty">
+                  还没有回读值 —— 点左侧「画面遮挡」卡上的「读取」，拿到设备参数后这里显示两行对照。
+                </p>
+              </section>
             </div>
           </div>
 
@@ -5603,227 +6016,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div
-            v-if="canAdvancedPanel"
-            v-show="activeTab === 'advanced'"
-            class="linked-detail"
-            data-testid="linked-detail-advanced"
-          >
-            <div class="linked-advanced-layout">
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><Video :size="13" />媒体控制</span>
-                  <span class="section-meta" title="图像调节不属于 GB/T 28181 标准控制字段，本面板不提供未接入的伪控制滑杆。">
-                    <Info :size="11" />标准控制字段
-                  </span>
-                </header>
-                <div class="adv-actions">
-                  <button
-                    class="adv-btn"
-                    data-testid="advanced-iframe"
-                    :title="capabilityActionTitle('iFrame', '请求关键帧')"
-                    :disabled="isAdvancedPending('iframe')"
-                    @click="runAdvancedAction('iframe')"
-                  >
-                    <Video :size="14" />
-                    <div><strong>请求关键帧</strong><small>发送到设备,执行结果不回传</small></div>
-                  </button>
-                  <div class="adv-action-pair">
-                    <button
-                      class="adv-btn"
-                      data-testid="advanced-record"
-                      :title="capabilityActionTitle('record', advancedActionLabel('record'))"
-                      :disabled="isAdvancedPending(recordState === 'on' ? 'record_stop' : 'record_start')"
-                      @click="runAdvancedAction(recordState === 'on' ? 'record_stop' : 'record_start')"
-                    >
-                      <Circle :size="14" />
-                      <div>
-                        <strong>{{ advancedActionLabel("record") }}</strong
-                        ><small>{{
-                          advancedOperationStatus[recordState === "on" ? "record_stop" : "record_start"] || "以设备应答为准"
-                        }}</small>
-                      </div>
-                    </button>
-                    <button
-                      v-if="recordState === 'unknown'"
-                      class="adv-btn adv-btn-secondary"
-                      data-testid="advanced-record-stop"
-                      :title="capabilityActionTitle('record', '请求停止设备录制')"
-                      :disabled="isAdvancedPending('record_stop')"
-                      @click="runAdvancedAction('record_stop')"
-                    >
-                      <Square :size="14" />
-                      <div><strong>请求停止设备录制</strong><small>当前状态未知,按需显式选择</small></div>
-                    </button>
-                  </div>
-                </div>
-              </section>
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><ShieldCheck :size="13" />安防控制</span
-                  ><span class="section-meta">以设备应答为准</span>
-                </header>
-                <div class="adv-actions">
-                  <div class="adv-action-pair">
-                    <button
-                      class="adv-btn"
-                      data-testid="advanced-guard"
-                      :title="capabilityActionTitle('guard', advancedActionLabel('guard'))"
-                      :disabled="isAdvancedPending(guardState === 'armed' ? 'guard_reset' : 'guard_set')"
-                      @click="runAdvancedAction(guardState === 'armed' ? 'guard_reset' : 'guard_set')"
-                    >
-                      <ShieldCheck :size="14" />
-                      <div>
-                        <strong>{{ advancedActionLabel("guard") }}</strong
-                        ><small>{{
-                          advancedOperationStatus[guardState === "armed" ? "guard_reset" : "guard_set"] || "以设备应答为准"
-                        }}</small>
-                      </div>
-                    </button>
-                    <button
-                      v-if="guardState === 'unknown'"
-                      class="adv-btn adv-btn-secondary"
-                      data-testid="advanced-guard-reset"
-                      :title="capabilityActionTitle('guard', '请求撤防')"
-                      :disabled="isAdvancedPending('guard_reset')"
-                      @click="runAdvancedAction('guard_reset')"
-                    >
-                      <ShieldCheck :size="14" />
-                      <div><strong>请求撤防</strong><small>当前状态未知,按需显式选择</small></div>
-                    </button>
-                  </div>
-                  <button
-                    class="adv-btn"
-                    :title="capabilityActionTitle('alarmReset', '报警复位')"
-                    :disabled="isAdvancedPending('alarm_reset')"
-                    @click="runAdvancedAction('alarm_reset')"
-                  >
-                    <AlertTriangle :size="14" />
-                    <div><strong>报警复位</strong><small>等待设备业务应答</small></div>
-                  </button>
-                </div>
-              </section>
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><Move3d :size="13" />画面控制</span>
-                </header>
-                <div class="adv-actions">
-                  <button
-                    class="adv-btn"
-                    :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }"
-                    data-testid="advanced-drag-zoom"
-                    :title="capabilityActionTitle('dragZoom', '3D 放大')"
-                    :disabled="isAdvancedPending('drag_zoom_in')"
-                    @click="toggleDragZoomMode('drag_zoom_in')"
-                  >
-                    <Move3d :size="14" />
-                    <div>
-                      <strong>{{ dragZoomMode && dragZoomAction === "drag_zoom_in" ? "取消 3D 放大" : "3D 放大" }}</strong
-                      ><small>按显示窗口像素拖框</small>
-                    </div>
-                  </button>
-                  <button
-                    class="adv-btn"
-                    :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }"
-                    data-testid="advanced-drag-zoom-out"
-                    :title="capabilityActionTitle('dragZoom', '3D 缩小')"
-                    :disabled="isAdvancedPending('drag_zoom_out')"
-                    @click="toggleDragZoomMode('drag_zoom_out')"
-                  >
-                    <ZoomOut :size="14" />
-                    <div>
-                      <strong>{{ dragZoomMode && dragZoomAction === "drag_zoom_out" ? "取消 3D 缩小" : "3D 缩小" }}</strong
-                      ><small>按显示窗口像素拖框</small>
-                    </div>
-                  </button>
-                </div>
-              </section>
-            </div>
-          </div>
-
-          <div
-            v-if="canViewPtz"
-            v-show="activeTab === 'videoparam'"
-            class="linked-detail linked-detail-actions"
-            data-testid="linked-detail-videoparam"
-          >
-            <div class="linked-videoparam-layout">
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><Video :size="13" />参数对照</span>
-                  <div class="linked-card-actions">
-                    <label class="linked-inline-select">
-                      <span>码流</span>
-                      <select
-                        data-testid="video-param-bottom-stream"
-                        :value="String(videoParamCompareStream?.streamNumber ?? 0)"
-                        @change="selectVideoStream(($event.target as HTMLSelectElement).value)"
-                      >
-                        <option v-for="row in videoParamsDraft" :key="row.streamNumber" :value="row.streamNumber">
-                          {{ row.streamNumber === 0 ? "主码流" : `子码流 ${row.streamNumber}` }}
-                        </option>
-                      </select>
-                    </label>
-                    <button class="btn-ghost xs" data-testid="video-param-bottom-read" @click="videoConfigRef?.read()">
-                      <RefreshCcw :size="11" />读取
-                    </button>
-                    <button
-                      class="btn-ghost xs"
-                      data-testid="video-param-bottom-reset"
-                      :disabled="!videoParamsDraft.length"
-                      @click="videoConfigRef?.reset()"
-                    >
-                      <RotateCcw :size="11" />还原
-                    </button>
-                    <button
-                      class="btn-primary xs"
-                      data-testid="video-param-bottom-apply"
-                      :disabled="!videoParamsDraft.length"
-                      @click="videoConfigRef?.apply()"
-                    >
-                      <Send :size="11" />下发
-                    </button>
-                  </div>
-                </header>
-                <!-- 对照区:下发值 / 回读值 / 实测值。
-                                     ⛔ 三行**不同源**,对应关系必须写在界面上,不能让人以为天然同源:
-                                        · 下发 = 本次提交的期望值(草稿)
-                                        · 回读 = 设备最近一次回读事实(不是草稿,否则一改就跟着变)
-                                        · 实测 = 当前正在播的那一路的采样(探针/ffprobe)
-                                     ⭐ 这里就是 A-5 的验收闭环:平台改分辨率 → 拉流实测跟着变。
-                                     2026-09-18 从右侧「视频参数」卡搬来 —— 横向三行比侧栏窄卡里读得清。 -->
-                <div v-if="videoParamCompareStream" class="vpc-grid" data-testid="video-param-compare">
-                  <div class="vpc-hd">{{ videoParamCompareHeading(videoParamCompareStream) }}</div>
-                  <div class="vpc-row" data-testid="video-param-compare-apply">
-                    <span>下发</span>
-                    <strong
-                      >{{ videoFormatText(videoParamCompareStream.videoFormat) }} /
-                      {{ resolutionText(videoParamCompareStream.resolution) }} /
-                      {{ frameRateText(videoParamCompareStream.frameRate) }}</strong
-                    >
-                  </div>
-                  <div class="vpc-row" data-testid="video-param-compare-read">
-                    <span>回读</span>
-                    <strong
-                      >{{ videoFormatText(videoParamCompareReadRow()?.videoFormat) }} /
-                      {{ resolutionText(videoParamCompareReadRow()?.resolution) }} /
-                      {{ frameRateText(videoParamCompareReadRow()?.frameRate) }}</strong
-                    >
-                  </div>
-                  <div class="vpc-row" data-testid="video-param-compare-measured">
-                    <span>实测</span>
-                    <strong
-                      >{{ streamInfo.videoCodec }} / {{ streamInfo.resolution }} / {{ streamInfo.videoFps || "—" }} fps ·
-                      {{ liveMetrics.bitrate ? `${liveMetrics.bitrate} kbps` : "—" }}</strong
-                    >
-                  </div>
-                </div>
-                <p v-else class="vpc-empty" data-testid="video-param-compare-empty">
-                  还没有回读值 —— 先在右侧点「读取设备参数」，拿到设备事实后这里显示三行对照。
-                </p>
-              </section>
-            </div>
-          </div>
+          <!-- 「视频编码」页签的底栏块 2026-09-20 已并入上方「画面设置」底栏第三格（参数对照卡）。
+               ⛔ 别在这里恢复一份：同一屏两套「参数对照」就又要靠人猜哪份是准的。 -->
         </div>
       </section>
       <!-- 右侧功能栏 -->
@@ -5832,8 +6026,6 @@ onBeforeUnmount(() => {
         class="sidebar"
         :class="{
           'sidebar-probe': activeTab === 'probe',
-          'sidebar-advanced': activeTab === 'advanced',
-          'sidebar-videoparam': activeTab === 'videoparam',
           'sidebar-deviceconfig': isConfigWorkspace
         }"
       >
@@ -6054,6 +6246,66 @@ onBeforeUnmount(() => {
                 <button class="btn-ghost sm" @click="readPreciseStatus"><Navigation :size="13" />读取当前位置</button>
               </div>
             </div>
+
+            <!-- 3D 拖拽(2026-09-20 从「高级」详情区的「画面控制」卡搬来)
+                 ① 位置:3D 放大/缩小本质就是"框选区域做变倍+定位",放在镜头组(变倍/聚焦/
+                    光圈)这一族底下最自洽;详情区那 4 张卡都是"设备侧带编号/开关的能力",
+                    塞进去语义不齐。
+                 ② ⛔ 刻意放在 .ptz-speed / .ptz-precise **之外**:它是画面级手势,与
+                    "速度控制 / 精准定位"正交。塞进 .ptz-speed 里的话,一旦切到精准定位模式
+                    按钮就消失,而 dragZoomMode 还开着 —— 画面停在拖框态却找不到取消入口。
+                 ③ ⛔ 自己挡 canControlDevice:动作侧 toggleDragZoomMode 第一句就是
+                    `if (!canControlDevice.value) return`,而本面板的可见性门禁是
+                    canPtzPanel(一堆 ptz:* 权限)。不挡就会出现"有 ptz 权限、没 device:control"
+                    的账号看得见按钮却点不动 —— 死按钮比看不见更糟。(原「高级」里那张卡
+                    本来就没挡,本次一并修掉。) -->
+            <div v-if="canControlDevice" class="ptz-drag-zoom" data-testid="ptz-drag-zoom">
+              <span class="lens-label"><Move3d :size="12" />3D 拖拽</span>
+              <div class="drag-zoom-switch" aria-label="3D 拖拽方向">
+                <button
+                  :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }"
+                  data-testid="ptz-drag-zoom-in"
+                  :title="capabilityActionTitle('dragZoom', '3D 放大')"
+                  :disabled="isAdvancedPending('drag_zoom_in')"
+                  :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_in'"
+                  @click="toggleDragZoomMode('drag_zoom_in')"
+                >
+                  {{ dragZoomMode && dragZoomAction === "drag_zoom_in" ? "取消 3D 放大" : "3D 放大" }}
+                </button>
+                <button
+                  :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }"
+                  data-testid="ptz-drag-zoom-out"
+                  :title="capabilityActionTitle('dragZoom', '3D 缩小')"
+                  :disabled="isAdvancedPending('drag_zoom_out')"
+                  :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_out'"
+                  @click="toggleDragZoomMode('drag_zoom_out')"
+                >
+                  {{ dragZoomMode && dragZoomAction === "drag_zoom_out" ? "取消 3D 缩小" : "3D 缩小" }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 请求关键帧(2026-09-20 从「高级」详情区的「媒体控制」卡搬来)
+                 ① 位置:它是"点一下发一条、不回传"的画面级即时操作,与摇杆/变倍/3D 拖拽同族,
+                    留在侧栏;详情区那 4 张卡都是"带编号/开关的设备侧能力",塞进去语义不齐。
+                 ② ⛔ 与 3D 拖拽一样自己挡 canControlDevice:动作侧 runAdvancedAction 第一句
+                    就是 `if (!canControlDevice.value || !props.channel) return`,而本面板的
+                    可见性门禁是 canPtzPanel(一堆 ptz:* 权限)。不挡就会出现"有 ptz 权限、
+                    没 device:control"的账号看得见按钮却点不动 —— 死按钮比看不见更糟。
+                 ③ 文案沿用标准口径:IFameCmd 只有"送达"没有"执行结论"(附录 A 无回读手段),
+                    所以状态词只说"已发送",别写成"已生效"。 -->
+            <div v-if="canControlDevice" class="ptz-iframe" data-testid="ptz-iframe">
+              <span class="lens-label"><Video :size="12" />关键帧</span>
+              <button
+                data-testid="ptz-iframe-request"
+                :title="capabilityActionTitle('iFrame', '请求关键帧')"
+                :disabled="isAdvancedPending('iframe')"
+                @click="runAdvancedAction('iframe')"
+              >
+                <Loader2 v-if="isAdvancedPending('iframe')" :size="12" class="spin" /><Video v-else :size="12" />
+                <span>请求关键帧</span>
+              </button>
+            </div>
           </div>
           <!-- ═══════════ 视频探针 ═══════════ -->
           <div
@@ -6199,169 +6451,47 @@ onBeforeUnmount(() => {
               </div>
             </section>
           </div>
-          <!-- ═══════════ 高级 ═══════════ -->
-          <div v-if="canAdvancedPanel" v-show="activeTab === 'advanced'" class="panel" data-testid="linked-side-advanced">
-            <div class="advanced-fact-status" data-testid="advanced-fact-status" aria-live="polite">
-              <div class="section-hd first">
-                <span class="section-title"><Settings :size="13" />设备控制</span>
-                <span class="section-meta">DeviceStatus</span>
-              </div>
-              <div class="advanced-fact-heading">
-                <span>DeviceStatus 事实</span>
-                <span :class="{ pending: deviceStatusPending, error: !!deviceStatusError }">{{ deviceStatusText() }}</span>
-              </div>
-              <div class="advanced-fact-grid">
-                <span>录像</span><strong :class="`fact-${recordState}`">{{ recordStateText(recordState) }}</strong>
-                <span>报警输入</span><strong :class="alarmInputClass()">{{ alarmInputText() }}</strong> <span>编码</span
-                ><strong :class="reportedFactClass(deviceReport?.encode)">{{ encodeStateText(deviceReport?.encode) }}</strong>
-                <span>设备自检</span
-                ><strong :class="reportedFactClass(deviceReport?.selfTest)">{{ selfTestText(deviceReport?.selfTest) }}</strong>
-                <span>设备自报</span
-                ><strong :class="reportedFactClass(deviceReport?.online)">{{ deviceOnlineText(deviceReport?.online) }}</strong>
-                <span>时间偏差</span
-                ><strong :class="reportedFactClass(deviceReport?.clockSkewSeconds)">{{
-                  clockSkewText(deviceReport?.clockSkewSeconds)
-                }}</strong>
-              </div>
-              <p v-if="alarmResolutionTargetText()" class="advanced-alarm-target">{{ alarmResolutionTargetText() }}</p>
-              <p v-if="alarmResolutionWarning()" class="advanced-alarm-warning" data-testid="alarm-resolution-warning">
-                {{ alarmResolutionWarning() }}
-              </p>
-              <div v-if="alarmFacts.length > 0" class="advanced-alarm-facts" data-testid="alarm-facts">
-                <span v-for="fact in alarmFacts" :key="fact.targetCode" :class="`fact-${normalizeGuardState(fact.guardState)}`">{{
-                  alarmFactText(fact)
-                }}</span>
-              </div>
-              <p v-if="deviceStatusError" class="advanced-fact-error">{{ deviceStatusError }}</p>
-              <button
-                class="btn-ghost xs advanced-status-refresh uvp-refresh-btn"
-                :disabled="deviceStatusPending || props.channel?.status !== 1"
-                @click="loadDeviceStatus(props.channel?.id, sessionToken)"
-              >
-                <RefreshCcw :size="11" />刷新事实状态
-              </button>
-            </div>
-            <div class="storage-card-status" data-testid="storage-card-status" aria-live="polite">
-              <div class="storage-card-heading">
-                <span><HardDrive :size="13" />存储卡状态</span>
-                <em>GB/T 28181-2022</em>
-              </div>
-              <div v-if="storageCards.length" class="storage-card-list" data-testid="storage-card-list">
-                <div
-                  v-for="card in storageCards"
-                  :key="card.cardId"
-                  class="storage-card-item"
-                  :data-status="card.status"
-                  :data-testid="`storage-card-${card.cardId}`"
-                >
-                  <div class="storage-card-line">
-                    <span class="storage-card-name">{{ card.hddName || `SD 卡 ${card.cardId}` }}</span>
-                    <em class="storage-card-state" :class="`state-${card.status}`">{{ storageCardStateText(card.status) }}</em>
-                  </div>
-                  <div class="storage-card-bar" :title="`已用 ${storageCardUsedPercent(card)}%`">
-                    <i :style="{ width: `${storageCardUsedPercent(card)}%` }"></i>
-                  </div>
-                  <div class="storage-card-meta">
-                    <span>{{ formatStorageCapacity(card.freeSpaceMb) }} 可用 / {{ formatStorageCapacity(card.capacityMb) }}</span>
-                    <span v-if="card.formatProgress !== null && card.formatProgress !== undefined"
-                      >格式化 {{ card.formatProgress }}%</span
-                    >
-                  </div>
-                </div>
-              </div>
-              <p v-else class="storage-card-empty">{{ storageCardsEmptyText() }}</p>
-              <p v-if="storageCardsError" class="storage-card-error" data-testid="storage-card-error">{{ storageCardsError }}</p>
-              <button
-                class="btn-ghost xs storage-card-refresh uvp-refresh-btn"
-                data-testid="storage-card-refresh"
-                :disabled="storageCardsPending || props.channel?.status !== 1"
-                @click="loadStorageCards(props.channel?.id, sessionToken, true)"
-              >
-                <Loader2 v-if="storageCardsPending" :size="11" class="spin" /><RefreshCcw v-else :size="11" />查询存储卡
-              </button>
-            </div>
-            <div class="snapshot-config" data-testid="snapshot-config">
-              <div class="snapshot-config-heading">
-                <span><Camera :size="13" />图像抓拍配置</span><em>GB/T 28181-2022</em>
-              </div>
-              <div class="snapshot-config-fields">
-                <label
-                  >张数<input v-model.number="snapshotCount" data-testid="snapshot-count" type="number" min="1" max="10"
-                /></label>
-                <label
-                  >间隔（秒）<input
-                    v-model.number="snapshotInterval"
-                    data-testid="snapshot-interval"
-                    type="number"
-                    min="1"
-                    max="3600"
-                /></label>
-              </div>
-              <button
-                class="btn-primary snapshot-submit"
-                data-testid="snapshot-submit"
-                :disabled="snapshotPending || props.channel?.status !== 1"
-                @click="runDeviceSnapshot"
-              >
-                <Loader2 v-if="snapshotPending" :size="13" class="spin" /><Camera v-else :size="13" />下发抓拍配置
-              </button>
-              <p class="snapshot-status" aria-live="polite">{{ snapshotStatusText() }}</p>
-              <div v-if="snapshotSession?.files.length" class="snapshot-results">
-                <a
-                  v-for="file in snapshotSession.files"
-                  :key="file.name"
-                  :href="file.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img :src="file.url" :alt="file.name" /><span>{{ file.name }}</span>
-                </a>
-              </div>
-            </div>
-          </div>
           <!-- ═══════════ 视频参数 ═══════════
                          2026-09-18 从"高级"拆出:它是 A.2.3.2 设备配置类(读 A.2.4.7 / 写 A.2.3.2.5),
-                         与"高级"那栏的关键帧/布防/重启不是一类。可见性用 canViewPtz(见 TabKey 处的注释)。 -->
-          <div
-            v-if="canViewPtz"
-            v-show="activeTab === 'videoparam'"
-            class="panel linked-config-panel"
-            data-testid="linked-side-videoparam"
-          >
-            <!-- 视频参数标签就是设备配置工作区：分组、字段、读取、下发全部直接展开。 -->
-            <DeviceConfigDrawer
-              ref="videoConfigRef"
-              :visible="activeTab === 'videoparam'"
-              embedded
-              :group-keys="['video-param']"
-              :device-code="props.channel?.deviceId || ''"
-              :online="props.channel?.status === 1"
-              :effective-version="videoParamRegisteredVersion"
-              :channel-id="props.channel?.id ?? null"
-              :channel-name="props.channel?.alias?.trim() || props.channel?.name?.trim() || ''"
-              :can-read="canViewPtz"
-              :can-apply="props.channel?.status === 1"
-            />
-          </div>
+                         与云台预置位/巡航不是一类。可见性用 canViewPtz(见 TabKey 处的注释)。
+                        2026-09-20 原"高级"页签整体退役:请求关键帧并入云台控制侧栏,
+                        设备录制/布防撤防/报警复位与图像抓拍配置迁入设备详情抽屉;
+                        同日"录像存储/报警控制"两个整页签、"设备维护"整页签(→ 基本参数)
+                        也整体迁入同一抽屉。
+                        ⛔ 留在控制台的配置页**只剩「画面设置」**了,判据:它改的是**这一路流
+                            正在播的时候才有意义**的东西(编码/叠加/遮挡/镜像)。设备侧的配置
+                            (基本参数/录像/报警)与"这一路流现在播得怎么样"无关,一律归设备详情抽屉。
+                        `can-apply` 一律带 canControlPtz —— 写的是 /device-configs 与 /video-params,
+                        种子把它绑在 ptz:control 上,只判"通道在线"会给没有写权限的账号一个点不动的
+                        下发按钮(旧版就是这样)。 -->
           <div
             v-if="canViewPtz"
             v-show="isConfigWorkspace"
             class="panel sidebar-deviceconfig-panel"
             data-testid="linked-side-deviceconfig"
           >
+            <!-- 「画面设置」的侧栏 = **一个**抽屉、**只挂视频编码**这一组
+                 （图像叠加 2026-09-20 整块搬到底栏 `picture-osd-cell`，同一页全展示，不再切组）。
+                 ⛔ 不要退回"两个抽屉 + 两个一级页签"：那正是 2026-09-20 合并掉的东西。
+                 ⛔ 也不要传 `config-only` —— 它的语义是"排除 video-param 组"，与这里的意图相反。
+                 ⛔ `v-model:stream-profile` **必须绑**：底栏对照卡的码流下拉与这里「配置文件」
+                    必须是同一路（真源只有 `selectedVideoStream`）。
+                 ⛔ 不再绑 `v-model:active-group-key` / `:osd-editing` / `@toggle-osd-edit`：
+                    OSD 面板不在这条侧栏里了（底栏那份自己接），留着就是没人读的第二份状态。
+                    抽屉这两个 prop 仍保留给**内联渲染 OSD 的宿主**（如免登录的设备配置预览页）。 -->
             <DeviceConfigDrawer
               ref="deviceConfigRef"
               :visible="isConfigWorkspace"
               embedded
-              config-only
               :group-keys="activeConfigGroups"
+              v-model:stream-profile="videoParamStreamProfile"
               :device-code="props.channel?.deviceId || ''"
               :online="props.channel?.status === 1"
               :effective-version="videoParamRegisteredVersion"
               :channel-id="props.channel?.id ?? null"
               :channel-name="props.channel?.alias?.trim() || props.channel?.name?.trim() || ''"
               :can-read="canViewPtz"
-              :can-apply="props.channel?.status === 1"
+              :can-apply="canControlPtz && props.channel?.status === 1"
             />
           </div>
         </div>
@@ -7762,7 +7892,17 @@ onBeforeUnmount(() => {
   z-index: 6;
   touch-action: none;
   cursor: crosshair;
+}
+
+/* ⛔ 色罩只在**按着拖**时上：拉框态现在会常驻（下完一刀不退），常驻色罩会把刚下发的画面
+   整体染蓝，而操作员下一步就是判读放大结果 —— 那正是被这层色罩干扰的地方。 */
+.drag-zoom-layer.is-dragging {
   background: rgb(8 47 73 / 12%);
+}
+
+/* 上一次框选还在下发：此时 `beginDragZoom` 会拒收新的按下，游标必须跟着说"等一下"。 */
+.drag-zoom-layer.is-busy {
+  cursor: progress;
 }
 .drag-zoom-box {
   position: absolute;
@@ -8025,7 +8165,6 @@ onBeforeUnmount(() => {
   height: var(--linked-detail-height);
 }
 
-.linked-detail-actions .linked-videoparam-layout,
 .linked-detail-actions .linked-deviceconfig-actions {
   height: 100%;
 }
@@ -8108,10 +8247,7 @@ onBeforeUnmount(() => {
 }
 .linked-detail > .linked-ptz-layout,
 .linked-detail > .linked-probe-layout,
-.linked-detail > .linked-advanced-layout,
-.linked-detail > .linked-videoparam-layout,
-.linked-detail > .linked-image-layout,
-.linked-detail > .linked-advanced-empty {
+.linked-detail > .linked-image-layout {
   flex: 1 1 0;
   min-height: 0;
 }
@@ -8123,30 +8259,45 @@ onBeforeUnmount(() => {
   color: var(--uvp-text-tertiary);
 }
 
-/* 列数必须跟实际渲染的卡片数一致(预置位 / 巡航轨迹 / 看守位 = 3 张)。
- * 之前写的是 4 列,多出来的那一列空着,卡片只占满 3/4 宽度,右侧留一条空白。 */
+/* 列数必须跟实际渲染的卡片数一致(预置位 / 巡航轨迹 / 看守位 / 自动扫描 = 4 张)。
+ * 之前写的是 4 列而只有 3 张卡,多出来的那一列空着,卡片只占满 3/4 宽度,右侧留一条空白;
+ * 现在补上「自动扫描」第 4 张卡,列数才对得上。 */
 .linked-ptz-layout {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   align-items: stretch;
   height: 100%;
   min-height: 0;
 }
 
-/* ── 画面设置底栏卡片（遮挡 / 镜像 / 提交）──
- * 与云台底栏同一套三列栅格：切页签时卡片位置不跳。 */
+/* ── 画面设置底栏卡片（图像叠加 / 遮挡 / 镜像 / 参数对照）──
+ * ⭐ 2026-09-20 起**四格**：图像叠加整块从侧栏搬来（最宽），遮挡/镜像按老板要求缩窄，
+ *    参数对照压到只放两行。与云台底栏共用同一条高度基线（148px），切页签画布不重排。
+ * ⛔ 底栏可用宽只有约 940px（主体栅格是 `136px | 1fr | 360px`，不是弹窗全宽）——
+ *    按 4.65fr 分：图像叠加 ~372 / 遮挡 ~196 / 镜像 ~137 / 对照 ~205。
+ *    再往里塞第五张卡就会把某一格压到"坐标被省略号截断"的程度（本仓踩过）。 */
 .linked-picture-layout {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 1.05fr);
   gap: 10px;
   align-items: stretch;
   height: 100%;
   min-height: 0;
+}
+
+/* 图像叠加这一格不是"卡片"而是"两块面板的容器"（时间戳 + 叠加文字并排），
+ * 所以不复用 `.linked-card` 的实线框，只保证高度链完整。 */
+.picture-osd-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .linked-card-note {
@@ -8186,12 +8337,15 @@ onBeforeUnmount(() => {
   opacity: 0.5;
 }
 
-/* 遮挡区槽位：标准固定 4 个，2×2 摆开 */
+/* 遮挡区槽位：标准固定 4 个。2026-09-20 起改**单列、一行一个**（原来是 2×2）——
+ * 底栏把这一格的宽度收到约 195px（腾给图像叠加），2×2 时每格只剩 ~90px，
+ * 而槽位里那串坐标（`0,0,704,576`）是这张卡唯一的信息：`.mask-slot-coords` 会被省略号
+ * 截断 ⇒ 卡片等于白放。单列后每行约 180px，坐标读得全；4 行 × 约 24px 仍装得进 148px。 */
 .mask-slot-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
   min-height: 0;
   overflow-y: auto;
 }
@@ -8202,7 +8356,7 @@ onBeforeUnmount(() => {
   gap: 5px;
   align-items: center;
   min-width: 0;
-  padding: 5px 7px;
+  padding: 4px 6px;
   font-size: 10px;
   color: var(--uvp-text-tertiary);
   background: var(--uvp-list-toolbar-bg);
@@ -8284,11 +8438,15 @@ onBeforeUnmount(() => {
 
 .mirror-choice {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   justify-content: center;
   min-width: 0;
-  padding: 7px 6px;
+
+  /* ⭐ 2026-09-20：这一格收窄到约 137px（老板要求"宽度可以缩小一些"），
+   * 2×2 时每格只剩约 55px —— 图标 16 + 2 字标签 21 已经把格子占满，
+   * 空档与内边距必须一起收，否则标签被挤出格（`原图 / 左右 / 上下 / 中心`）。 */
+  padding: 6px 4px;
   font-size: 10.5px;
   color: var(--uvp-text-secondary);
   cursor: pointer;
@@ -8479,6 +8637,184 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #ffffff;
   background: var(--uvp-brand);
+}
+
+/* ─────────── 图像叠加（OSD）的锚点层（2026-09-20）───────────
+ *
+ * 形态选「锚点 + 内容标签」而不是"像真字的预览"：标准里没有字体/字号/颜色，
+ * 画得像真字就是在承诺平台给不了的能力；而且设备已烧进码流的那个时间戳就在画面里，
+ * 再叠一个假字会出现**两个时间戳**。
+ * ⭐ 标签刻意偏到坐标点**右上 8px**（引线连过去），不压住真字的第一个字 ——
+ *    这样用户能对着真字拖锚点对齐，等于免费的精确校准。
+ */
+.osd-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+
+  /* ⛔ 层本身不吃指针：它盖在整个画面上，吃掉点击会让原有操作（点画面、拖变焦）失灵。
+     只有圆点和标签两个小目标可点。
+     ⛔ 整层现在**只在编辑模式存在**（模板里的 `v-if="osdEditMode"`），所以不再需要
+     "非编辑态把子元素的 pointer-events 关掉"那组规则 —— 只读态的锚点已经不存在了。 */
+  pointer-events: none;
+}
+
+/* ⛔ 「调整位置」按钮**不在这个文件里**（2026-09-20 最终落点）：
+     画面右上角 → 画面下方工具条 → 侧栏「时间戳」面板的「位置」行。
+   它改的就是那一行的坐标，跟坐标读数放在一起才是它本来的位置，
+   见 `DeviceConfigOsdBlocks.vue` 的 `.osd-adjust`。 */
+
+.osd-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  color: var(--uvp-brand);
+
+  /* 坐标点本身：锚点"钉"在哪儿，一眼可见 */
+  .osd-anchor-dot {
+    position: absolute;
+    top: -5px;
+    left: -5px;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    pointer-events: auto;
+    cursor: grab;
+    background: var(--uvp-brand);
+    border: 1.5px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 60%, transparent);
+  }
+
+  /* 引线：把标签从坐标点斜引到右上，避免盖住设备真实 OSD 的第一个字 */
+  .osd-anchor-lead {
+    position: absolute;
+    top: -4px;
+    left: 4px;
+    width: 11px;
+    height: 1px;
+    background: currentcolor;
+    opacity: 0.6;
+    transform: rotate(-42deg);
+    transform-origin: left center;
+  }
+
+  .osd-anchor-tag {
+    position: absolute;
+    top: -23px;
+    left: 13px;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    padding: 2px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    pointer-events: auto;
+    cursor: grab;
+    background: var(--uvp-brand);
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 30%);
+
+    em {
+      font-style: normal;
+      font-weight: 500;
+      opacity: 0.9;
+    }
+  }
+
+  /* 拖动中的实时坐标：`pointermove` 期间不写草稿，但用户必须看到它跟着手指走 */
+  .osd-anchor-coords {
+    position: absolute;
+    top: 3px;
+    left: 13px;
+    padding: 1px 5px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: #ffffff;
+    white-space: nowrap;
+    pointer-events: none;
+    background: rgb(12 22 38 / 82%);
+    border-radius: 3px;
+  }
+
+  /* 待下发 / 未定位：虚线 + 琥珀。⛔ 状态同时写进标签文字，不只靠颜色 ——
+     色弱用户分不出色相差异，而"这一块发出去没有"正是这里唯一要说的信息。 */
+  &.is-draft,
+  &.is-unplaced {
+    color: #b26a00;
+
+    .osd-anchor-dot {
+      background: #fff3d6;
+      border-color: #e08b00;
+      border-style: dashed;
+      box-shadow: 0 0 0 1px rgb(224 139 0 / 50%);
+    }
+
+    .osd-anchor-tag {
+      color: #b26a00;
+      background: #fff3d6;
+      border: 1px dashed #e08b00;
+    }
+  }
+
+  /* ⛔ 所属开关已关闭 → **淡显**，不是隐藏：与遮挡侧"设备已停用但保留区域"同构，
+     隐藏会让用户以为配置丢了（而它下次启用会一起活过来）。 */
+  &.is-off {
+    opacity: 0.45;
+  }
+
+  &.is-dragging {
+    z-index: 6;
+
+    .osd-anchor-dot,
+    .osd-anchor-tag {
+      cursor: grabbing;
+    }
+  }
+
+  /* 侧栏点「在画面上定位」→ 闪一下，把视线引过去 */
+  &.is-focus .osd-anchor-tag {
+    animation: osd-anchor-pulse 1.4s ease-out 1;
+  }
+}
+
+/* ⛔ 「只读态锚点用中性玻璃」那组规则**已删**（2026-09-20）：那一版是"锚点常驻、只降噪"，
+   老板看下来仍然是"默认就显示 + OSD 太乱"。现在只读态**一个锚点都不画**，锚点只在
+   编辑模式存在 —— 编辑模式就是"正在摆位置"，此时品牌蓝是**对的**信号（可拖、是操作目标）。
+   留下一组永远匹配不到的选择器只会让下一个人以为还存在第二种锚点外观。 */
+
+/* 锚点层的操作说明（这层只在编辑模式存在，所以它也就是"编辑模式的说明"）。
+   ⛔ 放**左上角**：左下角会被下发浮条（底部居中、最长铺满整行）压住 ——
+      "刚拖完想确认怎么退出，说明却被盖住"是最不需要它出现的时刻。 */
+.osd-layer-hint {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #dbe6f5;
+  pointer-events: none;
+  background: rgb(12 22 38 / 72%);
+  border-radius: 6px;
+}
+
+@keyframes osd-anchor-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--uvp-brand) 55%, transparent);
+    transform: scale(1);
+  }
+
+  60% {
+    box-shadow: 0 0 0 8px rgb(22 93 255 / 0%);
+    transform: scale(1.18);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(22 93 255 / 0%);
+    transform: scale(1);
+  }
 }
 
 /* 新建遮挡区的框选层：与拖拽变焦同一套手势形态 */
@@ -9141,7 +9477,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
 }
 
-/* 高度吃满后内容可能反过来超出(比如高级面板 9 个按钮遇上矮屏),
+/* 高度吃满后内容可能反过来超出(比如云台面板一整列按钮遇上矮屏),
  * 给一个纵向滚动兜底,不要顶破面板。 */
 .sidebar .panels {
   box-sizing: border-box;
@@ -9154,8 +9490,6 @@ onBeforeUnmount(() => {
 /* 探针 tab 已经用两张独立 .probe-card 分块了,外层大卡片显得多余(卡里套卡)。
  * 用 activeTab 联动的 .sidebar-probe class 精确关掉,不动其他 tab 共用的样式。 */
 .sidebar-probe .panels,
-.sidebar-videoparam .panels,
-.sidebar-advanced .panels,
 .sidebar-deviceconfig .panels {
   padding: 0;
   background: transparent;
@@ -9166,12 +9500,7 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
 }
-.sidebar-advanced .panels {
-  padding: 0;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
+
 .sidebar-deviceconfig-panel :deep(.dcg-window--embedded) {
   min-height: 0;
 }
@@ -9661,6 +9990,82 @@ onBeforeUnmount(() => {
   border-color: var(--uvp-brand);
 }
 
+/* 3D 拖拽(2026-09-20 从「高级」搬来):外盒沿用 .lens-item 的形态,让它在侧栏里
+ * 和"变倍/聚焦/光圈"读成同一族;里面的分段按钮沿用 .lens-btns button 的尺寸语言。
+ * 分段而不是两个独立按钮:放大/缩小是互斥的二选一(点另一个会换方向而不是叠加),
+ * 分段控件把"只有一个生效"这件事直接画出来。 */
+.ptz-drag-zoom {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 8px;
+}
+.drag-zoom-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.drag-zoom-switch button {
+  height: 26px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+}
+.drag-zoom-switch button:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+.drag-zoom-switch button.active {
+  font-weight: 600;
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-color: var(--uvp-brand);
+}
+.drag-zoom-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+/* 请求关键帧:与 3D 拖拽同款"标签 + 动作"盒,但只有一个动作,故走两列(标签/按钮)排一行。 */
+.ptz-iframe {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 8px;
+}
+.ptz-iframe button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+}
+.ptz-iframe button:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+.ptz-iframe button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 /* 精准 PTZ */
 
 /* 面板盒填满高度后,内容若仍挤在顶部就会留出一块空腔。让当前模式的内容块
@@ -9668,9 +10073,12 @@ onBeforeUnmount(() => {
  * 而不是把某一块拉长 —— 方向盘按钮拉高会很怪。
  * 余量为负(内容比盒子高)时 space-between 退化为顶部对齐,由 .panels 滚动兜底。 */
 
-/* 云台面板是"模式切换 + 当前模式内容"两行:模式切换按内容高,内容块吃掉剩余高度。 */
+/* 云台面板是"模式切换 + 当前模式内容 + 3D 拖拽 + 关键帧"四行:模式切换、3D 拖拽与关键帧
+ * 都按内容高,当前模式内容吃掉剩余高度。
+ * 3D 拖拽与关键帧刻意都排在两个模式块**之外**(见各自注释):它们是画面级即时动作,
+ * 与速度/精准正交,切模式时不能跟着消失。 */
 [data-testid="linked-side-ptz"] {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: 100%;
   min-height: 0;
 }
@@ -10039,6 +10447,65 @@ onBeforeUnmount(() => {
   color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
   border-color: var(--uvp-danger);
+}
+
+/* ── 自动扫描卡片(89H 开始/边界,8AH 速度)──
+ *
+ * ⛔ 卡片是详情条的四等分之一 —— 加了第 4 张卡之后每张更窄了。所以每行都允许换行:
+ *    组号/速度输入框固定窄宽,按钮吃掉剩余空间;窄到放不下时整行 wrap,
+ *    绝不能让按钮被压成一条线(卡片是 overflow: hidden,压不下就**裁掉**而不是换行)。
+ * ⛔ 高度同样是硬预算:详情条 148px,三行控件 + 一行提示刚好卡在上限内,
+ *    再加一行就会被裁(见 .preset-empty 那条注释里的算法)。 */
+.scan-panel {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  height: 100%;
+  padding-top: 2px;
+}
+.scan-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.scan-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+.scan-number {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--uvp-text-primary);
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 4px;
+}
+.scan-number:focus {
+  outline: none;
+  border-color: var(--uvp-brand);
+}
+.scan-toggle {
+  margin-left: auto;
+}
+.scan-bound-btn {
+  flex: 1 1 auto;
+}
+.scan-hint,
+.scan-error {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--uvp-text-tertiary);
+}
+.scan-error {
+  color: var(--uvp-danger);
 }
 
 .home-settings-form {
@@ -10603,285 +11070,6 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* ═══════════ 高级面板 ═══════════ */
-.advanced-fact-status {
-  display: grid;
-  gap: 7px;
-  padding: 12px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.advanced-fact-heading {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--uvp-text-secondary);
-}
-.advanced-fact-heading > span:last-child {
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-}
-.advanced-fact-heading > span.pending {
-  color: var(--uvp-warning);
-}
-.advanced-fact-heading > span.error {
-  color: var(--uvp-danger);
-}
-.advanced-fact-grid {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr auto;
-  gap: 5px 8px;
-  align-items: center;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.advanced-fact-grid strong {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-}
-.advanced-fact-grid strong.fact-on,
-.advanced-fact-grid strong.fact-armed {
-  color: var(--uvp-brand-cyan);
-}
-.advanced-fact-grid strong.fact-alarm,
-.advanced-alarm-facts .fact-alarm {
-  color: var(--uvp-danger);
-}
-.advanced-fact-grid strong.fact-unknown {
-  color: var(--uvp-warning);
-}
-.advanced-alarm-target {
-  margin: 0;
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-}
-.advanced-alarm-warning {
-  padding: 6px 7px;
-  margin: 0;
-  font-size: 9px;
-  line-height: 1.45;
-  color: var(--uvp-warning);
-  background: color-mix(in srgb, var(--uvp-warning) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-warning) 25%, transparent);
-  border-radius: 5px;
-}
-.advanced-alarm-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  font-size: 9px;
-  color: var(--uvp-text-secondary);
-}
-.advanced-fact-error {
-  margin: 0;
-  font-size: 9px;
-  line-height: 1.4;
-  color: var(--uvp-danger);
-}
-.advanced-status-refresh {
-  justify-self: start;
-}
-
-/* 存储卡状态(A.2.4.14/A.2.6.16)：与"图像抓拍配置"同级的一张卡片。
-   用青色系而非品牌主色，避免和抓拍配置那张"要下发配置"的卡片在视觉上混为一类
-   —— 这张是**只读查询**。 */
-.storage-card-status {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 8px;
-  padding: 10px;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 20%, transparent);
-  border-radius: 7px;
-}
-.storage-card-heading {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-.storage-card-heading span {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-}
-.storage-card-heading em {
-  font-size: 9px;
-  font-style: normal;
-  color: var(--uvp-brand-cyan);
-}
-.storage-card-list {
-  display: grid;
-  gap: 7px;
-}
-.storage-card-item {
-  display: grid;
-  gap: 5px;
-}
-.storage-card-line {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-.storage-card-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10px;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-}
-.storage-card-state {
-  flex: none;
-  font-size: 9px;
-  font-style: normal;
-  color: var(--uvp-text-tertiary);
-}
-.storage-card-state.state-ok {
-  color: var(--uvp-brand-cyan);
-}
-.storage-card-state.state-formatting,
-.storage-card-state.state-idle {
-  color: var(--uvp-warning);
-}
-.storage-card-state.state-error {
-  color: var(--uvp-danger);
-}
-.storage-card-bar {
-  position: relative;
-  height: 5px;
-  overflow: hidden;
-  background: var(--uvp-border);
-  border-radius: 3px;
-}
-.storage-card-bar i {
-  display: block;
-  height: 100%;
-  background: var(--uvp-brand-cyan);
-  border-radius: 3px;
-}
-.storage-card-item[data-status="error"] .storage-card-bar i {
-  background: var(--uvp-danger);
-}
-.storage-card-item[data-status="formatting"] .storage-card-bar i {
-  background: var(--uvp-warning);
-}
-.storage-card-meta {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-}
-.storage-card-empty {
-  margin: 0;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.storage-card-error {
-  margin: 0;
-  font-size: 9px;
-  line-height: 1.4;
-  color: var(--uvp-danger);
-}
-.storage-card-refresh {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-self: start;
-}
-.snapshot-config {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 8px;
-  padding: 10px;
-  background: color-mix(in srgb, var(--uvp-brand) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, transparent);
-  border-radius: 7px;
-}
-.snapshot-config-heading {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-.snapshot-config-heading span {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-}
-.snapshot-config-heading em {
-  font-size: 9px;
-  font-style: normal;
-  color: var(--uvp-brand-cyan);
-}
-.snapshot-config-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
-}
-.snapshot-config-fields label {
-  display: grid;
-  gap: 4px;
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-}
-.snapshot-config-fields input {
-  width: 100%;
-  min-width: 0;
-  padding: 6px 7px;
-  color: var(--uvp-text-primary);
-  background: var(--uvp-bg);
-  border: 1px solid var(--uvp-border);
-  border-radius: 5px;
-}
-.snapshot-submit {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  cursor: pointer;
-  border: 0;
-  border-radius: 5px;
-}
-.snapshot-status {
-  margin: 0;
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-}
-.snapshot-results {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.snapshot-results a {
-  display: grid;
-  gap: 3px;
-  overflow: hidden;
-  font-size: 8px;
-  color: var(--uvp-text-secondary);
-  text-decoration: none;
-}
-.snapshot-results img {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
 /* ─── 视频参数属性(A.2.1.13/A.2.4.7/A.2.3.2.5) ───
    与存储卡/抓拍配置同族配色,单独一套类名:三张卡各自独立开关,
    复用同一个类名会让"只改这一张卡"变成"三张一起动"。 */
@@ -11035,19 +11223,12 @@ onBeforeUnmount(() => {
   color: var(--uvp-text-tertiary);
 }
 
-/* 「视频参数」详情条(2026-09-18 从侧栏卡搬到 linked-detail-videoparam)。
-   148px 定高下只放一张卡:横向三行对照。值字号比侧栏大一档 —— 大区本来就窄不了。 */
-.linked-videoparam-layout {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 10px;
-  min-height: 0;
-}
-.linked-videoparam-layout > .linked-section {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* 「参数对照」区(2026-09-20 从「视频编码」页签底栏搬进「画面设置」底栏第三格)。
+   148px 定高下只放一张卡:横向三行对照。
+   ⛔ 三行并排是这块的全部价值 —— 塞回侧栏窄卡会折成六行,读者就分不清
+      哪一行是设备事实、哪一行是自己刚改的草稿了。
+   ⛔ 卡片容器直接用 `.linked-section.linked-card`(它本身就是 flex column),
+      不要再套一层专用的 layout 壳。 */
 .vpc-grid {
   display: grid;
   flex: 1 1 0;
@@ -11065,13 +11246,14 @@ onBeforeUnmount(() => {
 }
 .vpc-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
   align-items: baseline;
 }
 .vpc-row span {
   font-size: 10px;
   color: var(--uvp-text-tertiary);
+  white-space: nowrap;
 }
 .vpc-row strong {
   min-width: 0;
@@ -11079,6 +11261,42 @@ onBeforeUnmount(() => {
   font-weight: 500;
   color: var(--uvp-text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* 逐项差异：只标「画面实测」那一侧 —— 设备回读是基准，画面是待验证的一方。
+ * ⛔ 不把两行都染色：两边都变色就没人分得清"谁跟谁不一样"。 */
+.vpc-row strong i {
+  font-style: normal;
+}
+.vpc-row strong i.is-differ {
+  color: var(--uvp-warning);
+}
+.vpc-bitrate {
+  margin-left: 4px;
+  font-style: normal;
+  color: var(--uvp-text-tertiary);
+}
+
+/* 结论标签（2026-09-20 补）：这张卡原来只摆数据、不下结论，用户得自己拿眼睛比
+ * `1080P` 和 `1920×1080`。判定规则见 `videoParamVerdict` 的注释（含为什么不比码率）。 */
+.vpc-verdict {
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-style: normal;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+.vpc-verdict.is-same {
+  color: var(--uvp-success);
+  background: var(--uvp-success-soft);
+}
+.vpc-verdict.is-differ {
+  color: var(--uvp-warning);
+  background: var(--uvp-warning-soft);
+}
+.vpc-verdict.is-unknown {
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-list-toolbar-bg);
 }
 .vpc-empty {
   padding: 10px 2px;
@@ -11118,123 +11336,7 @@ onBeforeUnmount(() => {
   font-size: 9px;
   color: var(--uvp-warning);
 }
-.adv-actions {
-  display: grid;
-  gap: 6px;
-}
-.linked-advanced-layout {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  min-height: 0;
-}
-.linked-advanced-layout .adv-actions {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-}
-.adv-action-pair {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-}
-.adv-action-pair > .adv-btn {
-  flex: 1 1 0;
-  min-width: 0;
-}
-.linked-advanced-layout .adv-btn {
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 7px;
-  min-height: 40px;
-  padding: 6px 8px;
-  background: var(--uvp-panel-bg);
-  border-color: var(--uvp-panel-border);
-  border-radius: 6px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
-  transition:
-    color 0.15s ease,
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
-}
-.linked-advanced-layout .adv-btn > svg {
-  color: var(--uvp-brand);
-}
-.linked-advanced-layout .adv-btn:hover:not(:disabled),
-.linked-advanced-layout .adv-btn.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
-}
-.linked-advanced-layout .adv-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-.linked-advanced-layout .adv-btn:active:not(:disabled) {
-  box-shadow: none;
-  transform: translateY(0);
-}
-.linked-advanced-layout .adv-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--uvp-brand) 42%, transparent);
-  outline-offset: 1px;
-}
-.linked-advanced-layout .adv-btn strong {
-  font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.linked-advanced-layout .adv-btn small {
-  font-size: 9px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.sidebar-advanced .snapshot-config {
-  padding: 12px;
-  background: var(--uvp-list-toolbar-bg);
-  border-color: var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.sidebar-advanced .snapshot-results {
-  max-height: 160px;
-  overflow-y: auto;
-}
-.adv-btn {
-  display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 10px;
-  align-items: center;
-  padding: 10px;
-  color: var(--uvp-text-secondary);
-  text-align: left;
-  cursor: pointer;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-  transition: all 0.15s ease;
-}
-.adv-btn:hover {
-  border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-}
-.adv-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-.adv-btn > div {
-  display: grid;
-  gap: 2px;
-}
-.adv-btn strong {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--uvp-text-primary);
-}
-.adv-btn small {
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
+
 .image-adjust {
   display: grid;
   gap: 6px;
@@ -11450,30 +11552,6 @@ onBeforeUnmount(() => {
   .linked-info-bar {
     grid-row: 4;
     grid-column: 1;
-  }
-  .linked-advanced-layout .adv-action-pair {
-    flex-direction: column;
-  }
-  [data-testid="linked-detail-advanced"] {
-    height: auto;
-    overflow: visible;
-  }
-  .linked-advanced-layout .linked-card {
-    height: auto;
-  }
-}
-
-@media (width <= 720px) {
-  .linked-advanced-layout {
-    grid-template-rows: none;
-    grid-template-columns: 1fr;
-  }
-  .linked-advanced-layout .adv-actions {
-    flex: 0 0 auto;
-    overflow: visible;
-  }
-  .linked-advanced-layout .adv-btn {
-    min-height: 40px;
   }
 }
 

@@ -18,6 +18,11 @@
   --uvp-main-padding: 24px;
   --uvp-panel-bg: #ffffff;
   --uvp-panel-border: #e8edf5;
+
+  /* 仪表类「底轨」色（进度条里代表"剩余/未占用"的那一段）。
+     ⛔ 必须两套主题都定义：底轨是**大面积**色块，亮色下 #e8edf5 够用，
+        暗色下同样的 token 会弱到看不见（实测 Δ亮度只有 2%），所以要单独给一个偏亮的灰蓝。 */
+  --uvp-meter-track: #e2e8f0;
   --uvp-panel-radius: 14px;
   --uvp-panel-shadow: 0 6px 18px rgb(15 23 42 / 4%);
   --uvp-list-panel-bg: #fbfdff;
@@ -80,6 +85,38 @@
   --uvp-sidebar-module-border: transparent;
   --uvp-sidebar-tree-line: rgb(148 163 184 / 36%);
   --uvp-sidebar-tree-dot: #7aa7e8;
+
+  /* ═══════════════════ 基础层（通用语义 token） ═══════════════════
+   * 上面是「具体层」（按组件/场景命名：--uvp-dialog-control-bg、--uvp-table-row-checked-bg…），
+   * 这里是「基础层」：不分场景的通用名字（默认边框、默认底色、主色、成功色…）。
+   * 组件里大量写成 var(--uvp-border) / var(--uvp-bg) / var(--uvp-primary) 这种通用名，
+   * 但真源里一个都没定义 —— 于是 12 个 token、77 处引用在计算值阶段失效：
+   *   · background 失效 ⇒ 回退 transparent ⇒ **整块背景隐形**（最坑，肉眼极难归因）
+   *   · border 失效     ⇒ 回退 currentColor ⇒ 线还在但跟文字同色，看起来「差不多」，没人报
+   *   · font-family 失效 ⇒ 该属性被丢弃 ⇒ 等宽字体不生效，退化成继承字体
+   * 基础层就是把这些名字补成**真值**：能对上具体层的用 var() 别名（单一真源、跟随主题），
+   * 具体层没有对应物的（success 家族 / 等宽字体 / subtle 边框 / 禁用文字）直接给字面值。
+   *
+   * ⛔⛔ 铁律：凡是**值里含 var() 的别名**，必须在下面 body[arco-theme="dark"] 里**再写一遍**。
+   *   :root 上的 var() 在**计算值阶段**就被替换成亮色字面量并往下继承；暗色只覆盖被引用的
+   *   那个 token，**不会**回头改别名 ⇒ 不重复声明的别名在暗色下会被钉死在亮色值（实测确认）。
+   *   --uvp-shell-bg / --uvp-sidebar-bg 之所以在暗色块里又出现一次，就是这个原因。
+   *   门禁：src/style/model/uvp-tokens.test.ts。
+   * ═══════════════════════════════════════════════════════════════ */
+  --uvp-primary: var(--uvp-brand);
+  --uvp-success: #059669;
+  --uvp-success-soft: #ecfdf5;
+  --uvp-border: var(--uvp-panel-border);
+  --uvp-border-subtle: #eef3f9;
+  --uvp-bg: var(--uvp-panel-bg);
+  --uvp-bg-secondary: var(--uvp-table-header-bg);
+  --uvp-bg-tertiary: var(--uvp-secondary-action-bg);
+  --uvp-page-bg: var(--uvp-shell-bg);
+  --uvp-surface-muted: var(--uvp-shell-muted);
+  --uvp-text-disabled: #a8b4c4;
+
+  /* 等宽字体栈：不出现在暗色块（字面量，无 var() 依赖，继承即可）。 */
+  --uvp-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 body[arco-theme="dark"] {
@@ -95,6 +132,7 @@ body[arco-theme="dark"] {
   --uvp-workspace-shadow: 16px 16px 38px -24px rgb(0 0 0 / 62%);
   --uvp-panel-bg: #162231;
   --uvp-panel-border: #263648;
+  --uvp-meter-track: #33475c;
   --uvp-panel-shadow: 0 10px 24px rgb(0 0 0 / 18%);
   --uvp-list-panel-bg: #121d2a;
   --uvp-list-panel-border: #25364a;
@@ -156,16 +194,30 @@ body[arco-theme="dark"] {
   --uvp-sidebar-module-border: transparent;
   --uvp-sidebar-tree-line: rgb(116 133 154 / 34%);
   --uvp-sidebar-tree-dot: #60a5fa;
+
+  /* 基础层 · 暗色。⛔ 含 var() 的别名必须在这里重复声明（原因见 :root 处的注释）。
+   * 纯字面量且两主题同值的（--uvp-font-mono）不必重复。 */
+  --uvp-primary: var(--uvp-brand);
+  --uvp-success: #34d399;
+  --uvp-success-soft: rgb(52 211 153 / 12%);
+  --uvp-border: var(--uvp-panel-border);
+  --uvp-border-subtle: #1e2b3b;
+  --uvp-bg: var(--uvp-panel-bg);
+  --uvp-bg-secondary: var(--uvp-table-header-bg);
+  --uvp-bg-tertiary: var(--uvp-secondary-action-bg);
+  --uvp-page-bg: var(--uvp-shell-bg);
+  --uvp-surface-muted: var(--uvp-shell-muted);
+  --uvp-text-disabled: #4f6274;
 }
 
-@media (max-width: 1280px) {
+@media (width <= 1280px) {
   :root {
     --uvp-main-padding: 20px;
     --uvp-header-padding-x: 20px;
   }
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   :root {
     --uvp-main-padding: 16px;
     --uvp-header-padding-x: 16px;

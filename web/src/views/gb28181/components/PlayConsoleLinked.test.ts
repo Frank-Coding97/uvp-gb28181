@@ -184,6 +184,8 @@ const api = vi.hoisted(() => {
     controlPtz: vi.fn(),
     controlPtzPrecise: vi.fn(),
     controlPtzExtended: vi.fn(),
+    // 自动扫描(89H / 8AH)走的就是 /ptz/extended 这条通道,只是前端包了一层语义。
+    controlPtzScan: vi.fn(),
     createPtzPreset: vi.fn(),
     callPtzPreset: vi.fn(),
     deletePtzPreset: vi.fn(),
@@ -349,12 +351,6 @@ function operationResponse(
   };
 }
 
-async function requestDeviceStatus(wrapper: VueWrapper) {
-  await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-  await wrapper.get(".advanced-status-refresh").trigger("click");
-  await flushPromises();
-}
-
 /** 视频参数回读应答。`reconcile` 是唯一权威结论(下发应答没有回显)。 */
 function videoParamsResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -400,6 +396,60 @@ async function openHomeSettings(wrapper: VueWrapper) {
 async function submitHomeSettings(wrapper: VueWrapper) {
   await wrapper.get("[data-testid='home-dialog-submit']").trigger("click");
   await flushPromises();
+}
+
+/**
+ * 拉框变焦的坐标基准桩。
+ *
+ * ⛔ `dragZoomPlaybackRect` 优先取**播放器那个 `.play-window`**、取不到才退回拖框层自己，
+ *    所以两块都要给：只桩拖框层的话，命令里的 `length/width` 会来自另一套数字。
+ */
+function stubDragZoomRects(wrapper: VueWrapper, width = 800, height = 450) {
+  const rect = { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) } as DOMRect;
+  const layer = wrapper.get("[data-testid='drag-zoom-layer']");
+  vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue(rect);
+  vi.spyOn(wrapper.get("[data-testid='play-window']").element, "getBoundingClientRect").mockReturnValue(rect);
+  return layer;
+}
+
+/** 在**云台侧栏**点开拉框，并备好坐标基准。`action` 用 `in` / `out`。 */
+async function enterDragZoomAtPtzTab(wrapper: VueWrapper, action: "in" | "out" = "in") {
+  await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+  await wrapper.get(`[data-testid='ptz-drag-zoom-${action}']`).trigger("click");
+  return stubDragZoomRects(wrapper);
+}
+
+/**
+ * 完成一次"按下 → 拖 → 松手"。
+ *
+ * `pointerId` 每刀都要换：同一个 id 再按下的语义是"同一次手势的第二个按下"，
+ * 而被测代码按 `pointerId` 认人（`dragZoomPointerId`）。
+ */
+async function dragZoomOnce(wrapper: VueWrapper, from: [number, number], to: [number, number], pointerId: number) {
+  const layer = wrapper.get("[data-testid='drag-zoom-layer']");
+  await layer.trigger("pointerdown", { clientX: from[0], clientY: from[1], pointerId, button: 0 });
+  await layer.trigger("pointermove", { clientX: to[0], clientY: to[1], pointerId });
+  await layer.trigger("pointerup", { clientX: to[0], clientY: to[1], pointerId });
+  await flushPromises();
+}
+
+/** 只数拉框变焦那两条命令：控制台挂载时可能还有别的 `controlDevice` 流量。 */
+function dragZoomCalls(withAction: "drag_zoom_in" | "drag_zoom_out" = "drag_zoom_in") {
+  // ⛔ 别把参数标注成元组(`[unknown, {...}]`)：`mock.calls` 是 `any[][]`，
+  //    元组参数对不上 `filter` 的重载(TS2769)。按下标取最稳。
+  return api.controlDevice.mock.calls.filter((call: any[]) => call[1]?.action === withAction);
+}
+
+/**
+ * 派发一次 Esc。
+ *
+ * ⛔ 必须从 `document.documentElement` 派发**并冒泡**：Arco 的 `esc-to-close` 就挂在
+ *    `document.documentElement` 的 keydown 上，只往 `window` 派发等于跳过了它 ——
+ *    而"按 Esc 把控制台整个关掉"恰恰是它干的（与我们的 `window` 监听是**并行**的两份，
+ *    不是谁冒泡到谁）。这样派发一次，两条路径都能被覆盖到。
+ */
+function pressEscape() {
+  document.documentElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 }
 
 describe("PlayConsoleLinked 双区联动", () => {
@@ -691,22 +741,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(wrapper.get("input[type='range'][max='10']").element).toHaveProperty("value", "6");
-    wrapper.unmount();
-  });
-
-  it("在高级控制中下发 2022 图像抓拍配置并展示设备上传结果", async () => {
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='snapshot-count']").setValue("2");
-    await wrapper.get("[data-testid='snapshot-interval']").setValue("3");
-    await wrapper.get("[data-testid='snapshot-submit']").trigger("click");
-    await flushPromises();
-
-    expect(api.createDeviceSnapshotSession).toHaveBeenCalledWith(channel.id, { snapNum: 2, interval: 3 });
-    expect(api.getDeviceSnapshotSession).toHaveBeenCalledWith(channel.id, "snap-1");
-    expect(wrapper.get(".snapshot-status").text()).toContain("已完成 2/2");
-    expect(wrapper.get(".snapshot-results img").attributes("src")).toContain("shot-1.jpg");
     wrapper.unmount();
   });
 
@@ -1475,7 +1509,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("「视频参数」tab 直接嵌入设备配置工作区，并随通道切换上下文", async () => {
+  it("「画面设置」侧栏直接嵌入设备配置工作区，并随通道切换上下文", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel }
@@ -1484,21 +1518,24 @@ describe("PlayConsoleLinked 双区联动", () => {
     await vi.advanceTimersByTimeAsync(1500);
     await flushPromises();
 
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
-    const workspace = wrapper.get("[data-testid='linked-side-videoparam'] .dcg-window--embedded");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    const workspace = wrapper.get("[data-testid='linked-side-deviceconfig'] .dcg-window--embedded");
     expect(workspace.attributes("aria-label")).toContain(channel.name);
-    expect(workspace.text()).toContain("视频参数属性");
-    expect(workspace.find("[data-testid='dcg-standard-badge']").text()).toContain("GB/T 28181-2022");
+    // 侧栏只剩「视频编码」一组 ⇒ 分组导航整体不渲染（`configGroups.length > 1` 才出），
+    // 组的标题那一行由 `dcg-params-head` 承担。图像叠加在底栏，见 `picture-osd-cell`。
+    expect(workspace.find(".dcg-nav").exists()).toBe(false);
+    expect(workspace.find("[data-testid='video-param-compare']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='play-console-open-device-config']").exists()).toBe(false);
 
     await wrapper.setProps({ channel: { ...channel, id: 999, channelId: "34020000001320000099", name: "园区西门" } });
     await flushPromises();
-    expect(wrapper.get("[data-testid='linked-side-videoparam'] .dcg-window--embedded").attributes("aria-label")).toContain(
+    expect(wrapper.get("[data-testid='linked-side-deviceconfig'] .dcg-window--embedded").attributes("aria-label")).toContain(
       "园区西门"
     );
   });
 
-  it("侧栏与详情条按 tab 分工，云台/探针/高级/视频参数各司其职", async () => {
+  it("侧栏与详情条按 tab 分工，云台/探针/视频参数各司其职", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel }
@@ -1533,40 +1570,52 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(probeDetail.text()).toContain("帧到达时间线");
     expect(probeDetail.findAll(".linked-probe-layout > .linked-section")).toHaveLength(3);
 
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    const advancedSide = wrapper.get("[data-testid='linked-side-advanced']");
-    const advancedDetail = wrapper.get("[data-testid='linked-detail-advanced']");
-    expect(advancedSide.text()).toContain("设备控制");
-    expect(advancedSide.text()).toContain("图像抓拍配置");
-    expect(advancedSide.text()).not.toContain("请求关键帧");
-    expect(advancedSide.text()).not.toContain("亮度");
-    expect(advancedDetail.text()).toContain("媒体控制");
-    expect(advancedDetail.text()).toContain("安防控制");
-    expect(advancedDetail.text()).toContain("画面控制");
-    expect(advancedDetail.findAll(".linked-advanced-layout > .linked-card")).toHaveLength(3);
-    expect(advancedDetail.text()).not.toContain("亮度");
-    expect(advancedDetail.text()).not.toContain("接口待接入");
-    expect(advancedDetail.text()).toContain("标准控制字段");
-    // ⛔ 视频参数已从"高级"拆成独立 tab（2026-09-18）。别让它被顺手加回"高级" ——
-    //    那样"高级"又变回四张卡的杂货铺，而且这块配置会失去独立入口。
-    expect(advancedSide.text()).not.toContain("视频参数属性");
+    // ⛔ 2026-09-20：「高级」页签**整体退役**，四拨内容各有归属，控制台里一处都不留。
+    //    别把它加回来，也别把其中任何一块挪回侧栏/详情条：
+    //      请求关键帧 → 云台控制侧栏（流侧、立即）  ·  设备录制 / 布撤防 / 报警复位 → 设备详情抽屉「设备控制」
+    //      图像抓拍配置 → 设备详情抽屉  ·  视频参数 → 早已是独立 tab
+    expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(false);
+    // 三拨搬走的内容，一个都不许在控制台的**渲染结果**里留下痕迹 ——
+    // 只删页签却把卡片留在别的页签下，是这个改动最容易出的错。
+    expect(wrapper.text()).not.toContain("开始设备端录制");
+    expect(wrapper.text()).not.toContain("报警复位");
+    expect(wrapper.text()).not.toContain("图像抓拍配置");
+    // 通道级事实（DeviceStatus / 存储卡）只在设备管理页的「设备详情」抽屉里，
+    // 控制台侧栏与详情区都不保留入口。
+    expect(wrapper.find("[data-testid='linked-detail-tabs']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='storage-card-status']").exists()).toBe(false);
 
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
-    const vpSide = wrapper.get("[data-testid='linked-side-videoparam']");
-    const vpDetail = wrapper.get("[data-testid='linked-detail-videoparam']");
-    // 侧栏留编辑表单与状态文案；三行对照下移到详情条（见"对照搬到详情条"用例）。
-    expect(vpSide.text()).toContain("视频参数属性");
+    // 「画面控制」卡（3D 放大/缩小）与请求关键帧的新家都在**云台控制侧栏** ——
+    // 前者是画面级手势，后者是流侧动作，都跟"设备侧录制/布防"不同族，
+    // 也不该只在别的页签下才找得到（那样切页签就会失去取消入口）。
+    const ptzSideForDragZoom = wrapper.get("[data-testid='linked-side-ptz']");
+    expect(ptzSideForDragZoom.text()).toContain("3D 拖拽");
+    expect(ptzSideForDragZoom.find("[data-testid='ptz-drag-zoom-in']").exists()).toBe(true);
+    expect(ptzSideForDragZoom.find("[data-testid='ptz-drag-zoom-out']").exists()).toBe(true);
+    expect(ptzSideForDragZoom.find("[data-testid='ptz-iframe-request']").exists()).toBe(true);
+    expect(ptzSideForDragZoom.text()).toContain("关键帧");
+
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    const vpSide = wrapper.get("[data-testid='linked-side-deviceconfig']");
+    const vpDetail = wrapper.get("[data-testid='linked-detail-picture']");
+    // 侧栏留编辑表单与状态文案（只有「视频编码」这一组）；图像叠加与两行对照都在底栏。
+    expect(vpSide.text()).toContain("视频编码");
+    expect(vpSide.text()).not.toContain("图像叠加");
     expect(vpSide.text()).not.toContain("设备控制");
     expect(vpSide.text()).not.toContain("图像抓拍配置");
-    // ⛔ 对照区必须**只在**详情条：留在编辑表单旁边会被误读成"我刚改的值"。
+    // ⛔ 对照区必须**只在**底栏：留在编辑表单旁边会被误读成"我刚改的值"。
     expect(vpSide.find("[data-testid='video-param-compare']").exists()).toBe(false);
     expect(vpDetail.text()).toContain("参数对照");
-    expect(vpDetail.findAll(".linked-videoparam-layout > .linked-section")).toHaveLength(1);
+    expect(vpDetail.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
+    // ⛔ 底栏是**四列**：图像叠加 / 遮挡 / 镜像 / 参数对照。少一格就会让切页签时卡片横向跳位；
+    //    图像叠加那一格是 2026-09-20 从侧栏搬来的（老板："不想用切换的方式，一页全展示"）。
+    expect(vpDetail.findAll(".linked-picture-layout > .linked-section")).toHaveLength(4);
+    expect(vpDetail.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
 
     wrapper.unmount();
   });
 
-  it("视频参数：三行对照渲染在播放器下方详情条，侧栏只留编辑表单", async () => {
+  it("视频参数：两行对照渲染在底栏，侧栏只留编辑表单", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
         list: [videoParamRow({ id: 1, streamNumber: 0, resolution: "6" })],
@@ -1576,19 +1625,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
-    const detail = wrapper.get("[data-testid='linked-detail-videoparam']");
+    const detail = wrapper.get("[data-testid='linked-detail-picture']");
     const compare = detail.get("[data-testid='video-param-compare']");
-    // 三行都在详情条里 —— 这是"改在哪、验在哪同屏"的落点。
-    expect(compare.text()).toContain("下发");
-    expect(compare.text()).toContain("回读");
-    expect(compare.text()).toContain("实测");
+    // 两行都在底栏里 —— 这是"设备说的 vs 画面在播的"同屏落点。
+    expect(compare.text()).toContain("设备回读");
+    expect(compare.text()).toContain("画面实测");
     // ⛔ 「回读」行取**设备事实**（码值 6 → 1080P），不是草稿值。
     expect(detail.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
 
-    // 侧栏留表单、不留对照；对照只在详情条。
-    const side = wrapper.get("[data-testid='linked-side-videoparam']");
+    // 侧栏留表单、不留对照；对照只在底栏。
+    const side = wrapper.get("[data-testid='linked-side-deviceconfig']");
     expect(side.find("[data-testid='video-param-compare']").exists()).toBe(false);
     expect(side.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     wrapper.unmount();
@@ -1717,14 +1765,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
     );
-    expect(source).toMatch(/\.sidebar-advanced\s+\.panels\s*\{[^}]*background:\s*transparent/s);
-    expect(source).toMatch(/\.linked-advanced-layout\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(
-      /\.linked-advanced-layout\s+\.adv-btn\s*\{[^}]*min-height:\s*40px[^}]*background:\s*var\(--uvp-panel-bg\)[^}]*border-color:\s*var\(--uvp-panel-border\)/s
-    );
-    expect(source).not.toMatch(
-      /\.linked-advanced-layout\s+\.adv-btn\s*\{[^}]*background:\s*transparent[^}]*border-color:\s*transparent/s
-    );
+    expect(source).toMatch(/\.sidebar-probe\s+\.panels\s*\{[^}]*background:\s*transparent/s);
+    // ⛔ 2026-09-20：「高级」页签退役，它的视觉契约（sidebar-advanced / linked-advanced-layout /
+    //    adv-btn 族）必须**整体消失**，不能只剩一堆没人用的死样式挂在文件末尾 ——
+    //    死 CSS 会被后来的人当成"还有这个面板"的证据，也会在改配色时被"顺手同步"。
+    expect(source).not.toContain("sidebar-advanced");
+    expect(source).not.toContain("linked-advanced-layout");
+    expect(source).not.toContain("linked-detail-advanced");
+    expect(source).not.toContain("adv-btn");
+    expect(source).not.toContain("adv-actions");
   });
 
   it("检测按钮与时长选择器按 7:3 分配宽度", () => {
@@ -2117,14 +2166,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up" }));
 
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    const record = wrapper.get("[data-testid='advanced-record']");
-    expect(record.attributes("disabled")).toBeUndefined();
-    expect(record.attributes("title")).toContain("设备上报不支持");
-    expect(record.attributes("title")).toContain("仍可尝试");
-    await record.trigger("click");
+    // 请求关键帧 2026-09-20 起在云台控制侧栏（默认页签），它是控制台里仅剩的"设备控制"类入口。
+    const iFrame = wrapper.get("[data-testid='ptz-iframe-request']");
+    expect(iFrame.attributes("disabled")).toBeUndefined();
+    expect(iFrame.attributes("title")).toContain("设备上报不支持");
+    expect(iFrame.attributes("title")).toContain("仍可尝试");
+    await iFrame.trigger("click");
     await flushPromises();
-    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "record_start" }));
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "iframe" }));
 
     expect(wrapper.get("[data-testid='talk-button']").attributes("disabled")).toBeUndefined();
     const [broadcastMode, talkMode] = wrapper.findAll(".talk-mode-switch button");
@@ -2182,208 +2231,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("设备与通道编码变化时即使数据库 ID 相同也丢弃迟到的 DeviceStatus", async () => {
-    let resolveOldStatus!: (value: any) => void;
-    api.getDeviceStatus
-      .mockReturnValueOnce(
-        new Promise(resolve => {
-          resolveOldStatus = resolve;
-        })
-      )
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" }
-      });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    const nextChannel = {
-      ...channel,
-      deviceId: "34020000001320000002",
-      channelId: "0411212999",
-      name: "园区南门"
-    };
-    await wrapper.setProps({ channel: nextChannel });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    expect(api.startPlay).toHaveBeenLastCalledWith(nextChannel.deviceId, nextChannel.channelId);
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-
-    resolveOldStatus({
-      code: 0,
-      message: "",
-      data: { state: { recordState: "on", guardState: "disarmed", freshness: "fresh" }, freshness: "fresh" }
-    });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
-    expect(facts).toContain("设备未录制");
-    expect(facts).toContain("已布防");
-    expect(facts).not.toContain("设备录制中");
-    wrapper.unmount();
-  });
-
-  // 设备在 DeviceStatus 应答里一直报着 Online / Status / Encode / DeviceTime，
-  // 以前解析器把它们全丢了，界面自然也无从显示。
-  it("渲染设备自报的在线、自检、编码与时间偏差", async () => {
-    api.getDeviceStatus.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: {
-        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
-        freshness: "fresh",
-        deviceReport: {
-          online: "online",
-          selfTest: "ok",
-          encode: "on",
-          deviceTime: "2026-09-19T20:03:58",
-          clockSkewSeconds: 1,
-          alarmInputCount: 0,
-          observedAt: "2026-09-19T20:03:59Z"
-        }
-      }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
-    expect(facts).toContain("在线");
-    expect(facts).toContain("自检正常");
-    expect(facts).toContain("编码中");
-    expect(facts).toContain("与平台一致");
-    wrapper.unmount();
-  });
-
-  // 设备回了 Alarmstatus Num="0"，它说的是"我没有报警输入" —— 这是已知事实，
-  // 不是"未知"。下方那条提示也要跟着改口径。
-  it("设备明确回了 0 个报警输入时显示「设备无报警输入」而不是「未知」", async () => {
-    api.getDeviceStatus.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: {
-        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
-        freshness: "fresh",
-        alarmResolution: {
-          status: "unavailable",
-          source: "",
-          targetCode: "",
-          state: "unknown",
-          freshness: "unknown",
-          candidates: []
-        },
-        deviceReport: { alarmInputCount: 0 }
-      }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
-    expect(facts).toContain("设备无报警输入");
-    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("设备自报没有报警输入通道");
-    wrapper.unmount();
-  });
-
-  // 对照：设备这次没报的项要显示「未上报」，既不能兜底成"关闭"，也不能沿用上一台的值。
-  it("设备没上报那些事实时显示「未上报」而不是「已停」", async () => {
-    api.getDeviceStatus.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: {
-        state: { recordState: "on", guardState: "unknown", freshness: "fresh" },
-        freshness: "fresh",
-        deviceReport: {
-          online: null,
-          selfTest: null,
-          encode: null,
-          deviceTime: null,
-          clockSkewSeconds: null,
-          alarmInputCount: null
-        }
-      }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
-    expect(facts).toContain("未上报");
-    expect(facts).not.toContain("编码已停");
-    expect(facts).not.toContain("自检异常");
-    expect(facts).not.toContain("设备无报警输入");
-    wrapper.unmount();
-  });
-
-  it("渲染存储卡状态并可发起查询", async () => {
-    api.getChannelStorageCards.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: {
-        list: [
-          {
-            id: 1,
-            deviceId: 1,
-            targetCode: "0411212755",
-            cardId: 1,
-            hddName: "SD Card 1",
-            status: "ok",
-            formatProgress: null,
-            capacityMb: 32768,
-            freeSpaceMb: 24576,
-            observedAt: "2026-09-17T10:00:00Z"
-          }
-        ],
-        freshness: "fresh",
-        refreshOperationId: null,
-        refreshError: null
-      }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    const card = wrapper.get("[data-testid='storage-card-status']");
-    expect(card.text()).toContain("存储卡状态");
-    expect(card.text()).toContain("SD Card 1");
-    expect(card.text()).toContain("正常");
-    // 容量单位在展示层换算：32768 MB → 32.0 GB，24576 MB → 24.0 GB。
-    expect(card.text()).toContain("24.0 GB 可用 / 32.0 GB");
-
-    api.getChannelStorageCards.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { list: [], freshness: "unknown", refreshOperationId: "sc-op-1", refreshError: null }
-    });
-    await wrapper.get("[data-testid='storage-card-refresh']").trigger("click");
-    await flushPromises();
-    // refresh=true 只是"发起查询"，真正的应答要靠轮询 operation。
-    expect(api.getChannelStorageCards).toHaveBeenLastCalledWith(channel.id, true);
-    wrapper.unmount();
-  });
-
-  it("设备无存储卡时展示空态而不是错误", async () => {
-    // 空列表是合法结果（标准 SumNum=0 且不带 SDCardStatusInfo），
-    // 不能和"查询失败"用同一套措辞 —— 否则现场会把正常设备当成故障。
-    api.getChannelStorageCards.mockResolvedValue({
-      code: 0,
-      message: "",
-      data: { list: [], freshness: "fresh", refreshOperationId: null, refreshError: null }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    const card = wrapper.get("[data-testid='storage-card-status']");
-    expect(card.text()).toContain("设备未安装存储卡");
-    expect(wrapper.find("[data-testid='storage-card-error']").exists()).toBe(false);
-    wrapper.unmount();
-  });
-
   it("嵌入式视频参数工作区渲染回读事实与目录码流声明", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
@@ -2398,7 +2245,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
     // 打开面板只读平台缓存，**不发 SIP 报文**（refresh=false）。
     expect(api.getChannelVideoParams).toHaveBeenCalledWith(channel.id, false);
@@ -2427,7 +2274,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
     const bitRate = wrapper.get("[data-testid='dcg-bit-rate-0'] input.cfg-slider-input").element as HTMLInputElement;
     expect(bitRate.disabled).toBe(false);
@@ -2467,7 +2314,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
     await wrapper.get("[data-testid='dcg-resolution-0']").setValue("5");
     await nextTick();
@@ -2522,7 +2369,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     await flushPromises();
 
     expect(wrapper.get("[data-testid='dcg-version-notice']").text()).toContain("平台按 2016 版处理");
@@ -2548,7 +2395,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     await flushPromises();
 
     const reconcile = wrapper.get("[data-testid='dcg-reconcile']");
@@ -2580,7 +2427,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel: { ...channel, status: 0 } } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
     expect((wrapper.get("[data-testid='dcg-read']").element as HTMLButtonElement).disabled).toBe(true);
     expect((wrapper.get("[data-testid='dcg-apply']").element as HTMLButtonElement).disabled).toBe(true);
@@ -2608,7 +2455,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       );
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
     // 先制造一格"脏草稿"，再切通道 —— 新通道的值不能被旧草稿遮住。
     await wrapper.get("[data-testid='dcg-resolution-0']").setValue("5");
@@ -2622,58 +2469,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.getChannelVideoParams).toHaveBeenLastCalledWith(2, false);
     expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("4");
     expect(wrapper.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
-    wrapper.unmount();
-  });
-
-  it("切换设备后丢弃旧 DeviceStatus operation 的迟到轮询结果", async () => {
-    vi.useFakeTimers();
-    let resolveOldOperation!: (value: any) => void;
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationId: "old-device-status-op"
-        }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" }
-      });
-    api.getPtzOperation.mockReturnValueOnce(
-      new Promise(resolve => {
-        resolveOldOperation = resolve;
-      })
-    );
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "old-device-status-op");
-
-    const nextChannel = {
-      ...channel,
-      deviceId: "34020000001320000003",
-      channelId: "0411212888",
-      name: "园区西门"
-    };
-    await wrapper.setProps({ channel: nextChannel });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-
-    resolveOldOperation(operationResponse("accepted", "old-device-status-op", null));
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
-    expect(facts).toContain("设备未录制");
-    expect(facts).toContain("已布防");
     wrapper.unmount();
   });
 
@@ -2696,199 +2491,32 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("设备录制和布防按本次已知状态切换开始与停止动作", async () => {
+  /**
+   * ⛔ 2026-09-20：设备录制 / 布撤防 / 报警复位 / 图像抓拍配置 已搬到设备管理页的「设备详情」抽屉。
+   *    它们的收敛规则（"200 不是成功"、deadline 缺失与超时、换通道作废在途应答）现在由
+   *    `device-mgmt/DeviceControlPanel.test.ts` 与 `device-mgmt/SnapshotConfigPanel.test.ts` 各自钉住 ——
+   *    别在这里补回来：控制台已经**没有**这些按钮了。
+   *    控制台里只剩 `iframe`（请求关键帧）这一个 DeviceControl 动作，而它是"送达即止"的。
+   */
+  it("请求关键帧是单向命令：sent 即止，不轮询也不说已生效", async () => {
+    vi.useFakeTimers();
+    api.controlDevice.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "iframe-op", status: "sent", responseRequired: false, deadlineAt: null }
+    });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
 
-    const recordButton = wrapper.get("[data-testid='advanced-record']");
-    await recordButton.trigger("click");
+    await wrapper.get("[data-testid='ptz-iframe-request']").trigger("click");
     await flushPromises();
-    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "record_start" }));
-    expect(recordButton.text()).toContain("停止设备端录制");
+    await vi.advanceTimersByTimeAsync(30000);
 
-    await recordButton.trigger("click");
-    await flushPromises();
-    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "record_stop" }));
-
-    const guardButton = wrapper.get("[data-testid='advanced-guard']");
-    await guardButton.trigger("click");
-    await flushPromises();
-    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "guard_set" }));
-    expect(guardButton.text()).toContain("撤防");
-    wrapper.unmount();
-  });
-
-  it("录像与布防的正反动作共享 pending 锁", async () => {
-    let resolveControl!: (value: { code: number; message: string; data: Record<string, unknown> }) => void;
-    api.controlDevice.mockReturnValueOnce(
-      new Promise(resolve => {
-        resolveControl = resolve;
-      })
-    );
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    await wrapper.get("[data-testid='advanced-record']").trigger("click");
-    await wrapper.get("[data-testid='advanced-record-stop']").trigger("click");
-    expect(api.controlDevice).toHaveBeenCalledTimes(1);
-    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
-    expect(wrapper.get("[data-testid='advanced-record-stop']").attributes("disabled")).toBeDefined();
-
-    resolveControl({ code: 0, message: "", data: { operationId: "record-op", status: "queued", responseRequired: true } });
-    await flushPromises();
-    wrapper.unmount();
-  });
-
-  it("录像 operation 等待设备应答时不锁住其他高级控制", async () => {
-    api.controlDevice
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { operationId: "record-op", status: "queued", responseRequired: true }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { operationId: "iframe-op", status: "sent", responseRequired: false }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { operationId: "guard-op", status: "queued", responseRequired: true }
-      });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    await wrapper.get("[data-testid='advanced-record']").trigger("click");
-    await flushPromises();
-    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
-    expect(wrapper.get("[data-testid='advanced-iframe']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
-
-    await wrapper.get("[data-testid='advanced-iframe']").trigger("click");
-    await wrapper.get("[data-testid='advanced-guard']").trigger("click");
-    await flushPromises();
     expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "iframe" }));
-    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "guard_set" }));
-    wrapper.unmount();
-  });
-
-  it("切换设备后高级控制 operation 的迟到应答不能改写新设备事实", async () => {
-    vi.useFakeTimers();
-    let resolveOldOperation!: (value: any) => void;
-    api.controlDevice.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { operationId: "old-record-op", status: "queued", responseRequired: true }
-    });
-    api.getPtzOperation.mockReturnValueOnce(
-      new Promise(resolve => {
-        resolveOldOperation = resolve;
-      })
-    );
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-record']").trigger("click");
-    await flushPromises();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "old-record-op");
-
-    await wrapper.setProps({
-      channel: {
-        ...channel,
-        deviceId: "34020000001320000004",
-        channelId: "0411212777",
-        name: "园区东门"
-      }
-    });
-    await flushPromises();
-
-    resolveOldOperation(operationResponse("accepted", "old-record-op", null));
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
-    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
-    wrapper.unmount();
-  });
-
-  it("单向高级命令 sent 后不轮询业务应答", async () => {
-    vi.useFakeTimers();
-    api.controlDevice.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { operationId: "iframe-op", status: "sent", responseRequired: false }
-    });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-iframe']").trigger("click");
-    await flushPromises();
-    await vi.advanceTimersByTimeAsync(5000);
+    // 附录 A 里没有关键帧的回读手段 ⇒ 平台本来就不可能知道执行结果，
+    // 所以既不轮询 operation，也不许编一个"已生效"的终态出来。
     expect(api.getPtzOperation).not.toHaveBeenCalled();
-    expect(wrapper.get("[data-testid='advanced-iframe']").attributes("disabled")).toBeUndefined();
-    wrapper.unmount();
-  });
-
-  it("高级 operation 缺少 deadline 时只补读一次并收敛为 unknown", async () => {
-    vi.useFakeTimers();
-    api.controlDevice.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { operationId: "record-no-deadline", status: "queued", responseRequired: true, deadlineAt: null }
-    });
-    api.getPtzOperation.mockResolvedValue(operationResponse("sent", "record-no-deadline", null));
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-record']").trigger("click");
-    await flushPromises();
-    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
-
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
-    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
-    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("补读一次后结果未知");
-
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
-    wrapper.unmount();
-  });
-
-  it("高级 operation 到 deadline 仍未终态时只做一次截止补读并收敛", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
-    const deadline = "2026-07-25T03:00:01.500Z";
-    api.controlDevice.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { operationId: "record-expired", status: "queued", responseRequired: true, deadlineAt: deadline }
-    });
-    api.getPtzOperation.mockResolvedValue(operationResponse("sent", "record-expired", deadline));
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-record']").trigger("click");
-    await flushPromises();
-
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(500);
-    await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
-    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("操作超过服务端截止时间");
-
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
+    expect(wrapper.get("[data-testid='ptz-iframe-request']").attributes("disabled")).toBeUndefined();
     wrapper.unmount();
   });
 
@@ -2907,8 +2535,9 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("3D 定位使用画面拖框换算后的真实坐标", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
+    // 2026-09-20 起入口在云台控制侧栏(不再是"高级"页签)
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
       x: 0,
@@ -2949,8 +2578,8 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("3D 缩小同样先拖框并携带实际画面坐标", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    await wrapper.get("[data-testid='advanced-drag-zoom-out']").trigger("click");
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-drag-zoom-out']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
       x: 0,
@@ -2977,20 +2606,310 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("DeviceStatus 缺失时保持 unknown,且 pointercancel 不下发拖框命令", async () => {
-    api.getDeviceStatus.mockResolvedValue({
-      code: 0,
-      message: "",
-      data: { state: { freshness: "fresh" }, freshness: "fresh" }
-    });
+  it("一次框选下发完仍留在拉框态:可以连着拉第二刀", async () => {
+    // ⛔ 旧行为(2026-09-20 前):`finishDragZoom` 末尾把 dragZoomMode 置回 false ——
+    //    操作员每拉一刀都得回侧栏重点一次按钮,而"先放大看结果、再决定往哪补一刀"
+    //    才是真实用法。现在退出是**显式**的(再点同向按钮 / Esc)。
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
-    expect(wrapper.get("[data-testid='advanced-record-stop']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='advanced-guard-reset']").attributes("disabled")).toBeUndefined();
+    await enterDragZoomAtPtzTab(wrapper);
+    await dragZoomOnce(wrapper, [200, 100], [600, 300], 11);
+    expect(dragZoomCalls()).toHaveLength(1);
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("取消 3D 放大");
 
-    await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
+    // 第二刀:同一层上直接再来一次,坐标按**当前画面**重新换算
+    // （from/to 与第一刀不同 ⇒ 命令里的 region 必须是新的那个框,不是复用上一次的）
+    await dragZoomOnce(wrapper, [100, 50], [300, 200], 12);
+    expect(dragZoomCalls()).toHaveLength(2);
+    expect(api.controlDevice).toHaveBeenLastCalledWith(
+      channel.id,
+      expect.objectContaining({
+        action: "drag_zoom_in",
+        region: { length: 800, width: 450, midPointX: 200, midPointY: 125, lengthX: 200, lengthY: 150 }
+      })
+    );
+    wrapper.unmount();
+  });
+
+  it("拉框态按 Esc 退出,再点按钮能干净地重新进入", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+
+    pressEscape();
+    await nextTick();
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("3D 放大");
+
+    // ⛔ 重进不能留下上一次的拖拽残留(起点 / 指针 id):留着的话下一次 pointerup 会拿旧起点
+    //    算出一个"凭空出现"的框。判据 = 拖框层在没按下时**不该有框**。
+    await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
+    expect(wrapper.get("[data-testid='drag-zoom-layer']").find(".drag-zoom-box").attributes("style")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("拉框态按 Esc 只收拉框态,绝不把控制台整个关掉", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+
+    pressEscape();
+    await flushPromises();
+
+    // ① 拉框态收掉了 —— 这是我们挂在 `window` 上的监听干的。
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("3D 放大");
+    // ② 控制台**不许**跟着关：Arco 另在 `document.documentElement` 上挂了一份全局监听
+    //    （`esc-to-close`），它跟我们是**并行**的两份，不是谁冒泡到谁。模式期间那个值必须为假，
+    //    否则用户按一下 Esc 就"弹窗直接没了"。
+    // ⛔ 这一条在本仓单测里**证明力有限**：Arco 是桩 ⇒ 它那条全局 Esc 路径压根不存在
+    //    （这也是它当初没能拦住真机缺陷的原因）。真正有判据的是紧接着那两条"事件流"用例。
+    expect(wrapper.emitted("update:visible")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("拉框态那一下 Esc 必须被图层吃掉,不能让 documentElement 上的监听再收到", async () => {
+    // ⛔⛔ 这条锁的是一个**只有真实浏览器才暴露**的缺陷（2026-09-20 实机抓到）：
+    //    上一版只在模板上把 `esc-to-close` 在模式期间置假，指望 Arco 那边"自觉不动"。
+    //    实际相位（探针实测）：`win-capture` 时 `esc-to-close=false`、图层还在；
+    //    我们退出模式后 `escToClose` 在**同一个事件派发内**就变回 `true`，
+    //    Arco 挂在 `documentElement` 上的监听**随后**才跑、读到的已经是 `true`
+    //    ⇒ 照关不误（调用栈 `requestClose → handleClose → update:visible → consoleStore.close()`），
+    //    用户看到的就是"按一下 Esc，播放控制台整个弹窗没了"。
+    //    ⇒ 判据只能落在**事件流**上：图层既然接管了，就必须把那一下从事件流里拿掉。
+    //    下面这个 `standIn` 就是 Arco 那条监听的替身（同相位：documentElement + 冒泡）。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+
+    const seenByStandIn: string[] = [];
+    const standIn = (event: KeyboardEvent) => seenByStandIn.push(event.key);
+    document.documentElement.addEventListener("keydown", standIn);
+    try {
+      pressEscape();
+      await flushPromises();
+    } finally {
+      document.documentElement.removeEventListener("keydown", standIn);
+    }
+
+    // 拉框态退出了 —— 这是我们自己的监听干的
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    // ……而且这一下**没有**继续传到 documentElement（否则 Arco 会顺手把控制台关掉）
+    expect(seenByStandIn).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it("弹窗开着时那一下 Esc 必须放行给弹窗,不能被图层私吞", async () => {
+    // 反方向钉住"别把 stopPropagation 写成无条件的"：上面有弹窗时那一下归弹窗，
+    // 图层若把它吃掉，用户的弹窗就**再也关不掉**了（Ctrl+W 之外没有别的出口）。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+
+    await wrapper.get("[data-testid='home-configure']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='home-settings-dialog']").exists()).toBe(true);
+
+    const seenByStandIn: string[] = [];
+    const standIn = (event: KeyboardEvent) => seenByStandIn.push(event.key);
+    document.documentElement.addEventListener("keydown", standIn);
+    try {
+      pressEscape();
+      await flushPromises();
+    } finally {
+      document.documentElement.removeEventListener("keydown", standIn);
+    }
+
+    expect(seenByStandIn).toEqual(["Escape"]); // 放行了
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true); // 拉框态原地保留
+    wrapper.unmount();
+  });
+
+  it("拉框态下弹窗开着时,那一下 Esc 归弹窗、不顺手收掉拉框态", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+
+    await wrapper.get("[data-testid='home-configure']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='home-settings-dialog']").exists()).toBe(true);
+
+    pressEscape();
+    await flushPromises();
+
+    // 拉框态**还在**：那一下 Esc 的第一语义是关掉最上面那个弹窗（它自己也有 `esc-to-close`），
+    // 不该顺手把拉框态收掉 —— 否则用户关完弹窗回来，按钮已经变回「3D 放大」，摆好的下一刀白拖。
+    // ⛔ 弹窗**关不关**不在这里断言：那是 Arco `isLastDialog()` 的事，而在 jsdom 里弹窗实例会跨用例
+    //    残留（卸载时 `visible` 仍为真、z-index 记账不退），它压根不可靠；本用例只钉我们自己的规则。
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("取消 3D 放大");
+    wrapper.unmount();
+  });
+
+  it("Esc 的归属闸门跟着「画面上拖」的模式走,不然那一下 Esc 会把控制台整个关掉", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    // ⛔ `a-modal` 在测试里是**桩**（`src/test/setup.ts` 统一替换），拿不到组件 props，
+    //    只能从属性上看这个开关 —— 同文件里 `mouse-enter-delay` / `content` 那几条也是这个看法。
+    const escToClose = () => wrapper.attributes("esc-to-close");
+
+    // 平时：窗口归 Arco，控制台照旧能按 Esc 关（别一竿子挡死）
+    expect(escToClose()).toBe("true");
+    // 拉框态：窗口归图层，`a-modal` 那一侧必须让位
+    await enterDragZoomAtPtzTab(wrapper);
+    expect(escToClose()).toBe("false");
+    // 退出后交还
+    pressEscape();
+    await flushPromises();
+    expect(escToClose()).toBe("true");
+    wrapper.unmount();
+  });
+
+  it("上一次框选还在下发中时拒收新的按下,并如实说在等", async () => {
+    // ⛔ `runAdvancedAction` 对同 action 的并发请求是**静默丢弃**的。拉框态现在跨多刀常驻,
+    //    不在这里挡住的话,用户会画出一个跟着消失、命令却没有的框 —— 比"画不出来"糟得多。
+    // ⛔ 初值给一个空函数而不是 `null`：赋值发生在 Promise 执行器里，TS 的流程分析
+    //    看不见"它其实会被赋上"，会把 `release` 收窄成 `null` ⇒ `release?.()` 报 TS2349。
+    let release: (value: unknown) => void = () => undefined;
+    api.controlDevice.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = resolve;
+        })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const layer = await enterDragZoomAtPtzTab(wrapper);
+    await dragZoomOnce(wrapper, [200, 100], [600, 300], 21);
+    expect(dragZoomCalls()).toHaveLength(1);
+    // 提示条换成"正在下发",否则用户看不到任何"为什么拖不动"的解释
+    expect(layer.text()).toContain("正在下发");
+    expect(layer.classes()).toContain("is-busy");
+
+    await layer.trigger("pointerdown", { clientX: 100, clientY: 50, pointerId: 22, button: 0 });
+    await layer.trigger("pointermove", { clientX: 300, clientY: 200, pointerId: 22 });
+    // 判据在画面上:按下之后**不该出现框**(出现即"画了框却不下发")
+    expect(layer.find(".drag-zoom-box").attributes("style")).toBeUndefined();
+    await layer.trigger("pointerup", { clientX: 300, clientY: 200, pointerId: 22 });
+    await flushPromises();
+    expect(dragZoomCalls()).toHaveLength(1);
+
+    release({ code: 0, message: "", data: { operationId: "dz-1", status: "accepted" } });
+    await flushPromises();
+    // 下发完了就恢复成可拖(否则"等下"会变成"卡死")
+    expect(layer.text()).toContain("可连续框选");
+    wrapper.unmount();
+  });
+
+  it("控制权被收回时退出拉框态:不留一层吃事件的膜却没有出口", async () => {
+    // ⛔ 出口按钮挂在 `canControlDevice` 上、侧栏整块也随权限消失。真机上等价于设备转离线、
+    //    或换到一个没有 device:control 的通道 —— 那时画面被膜盖住而没有任何退出入口。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterDragZoomAtPtzTab(wrapper);
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+
+    userState.account.permissions = ["gb28181:ptz:view"];
+    await nextTick();
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('拉框态的退出只有一处实现,且三个"画面上拖"的模式互为死锁', () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    // ⛔ 散落的「把 dragZoomMode 置回 false」早晚会漏掉拖拽残留(起点 / 指针 id),
+    //    表现为"下一次进拉框态画出个凭空出现的框"。所以只许 `exitDragZoomMode` 里写一次。
+    expect(source.match(/dragZoomMode\.value = false/g) ?? []).toHaveLength(1);
+    expect(source).toMatch(/function exitDragZoomMode\(\) \{\s*dragZoomMode\.value = false;/);
+    // 拉框 / 遮挡框选 / OSD 调位置 —— 同一个按下动作在两层里各有一套解释,三者必须互斥:
+    // 进任一个都关掉另两个。
+    // ⛔ 判据按**函数体**取,不按全文字符串计数:同一句话在别的流程里也会出现
+    //    (切页签的 watch、`toggleOsdEditMode`、Esc 处理器),数总数会把它们算进来。
+    const bodyOf = (name: string) => {
+      const m = source.match(new RegExp(`function ${name}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`));
+      if (!m) throw new Error(`没找到 ${name} 的函数体`);
+      return m[1];
+    };
+    const dragZoomToggle = bodyOf("toggleDragZoomMode");
+    expect(dragZoomToggle).toContain("if (maskDrawMode.value) cancelMaskDraw();");
+    expect(dragZoomToggle).toContain("if (osdEditMode.value) exitOsdEditMode();");
+    expect(bodyOf("enterOsdEditMode")).toContain("if (dragZoomMode.value) exitDragZoomMode();");
+    expect(bodyOf("startMaskDraw")).toContain("if (dragZoomMode.value) exitDragZoomMode();");
+  });
+
+  it("3D 拖拽放在两个云台模式之外,切到精准定位仍留在侧栏", async () => {
+    // ⛔ 防回归:3D 拖拽若被塞进 .ptz-speed 里,切到精准定位模式按钮就消失,
+    //    而 dragZoomMode 还开着 —— 画面停在拖框态,用户却找不到取消入口。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
+    expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("取消 3D 放大");
+
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
+    // 结构上也必须落在两个模式块**之外**:只断言 .exists() 挡不住 v-show ——
+    // 元素藏起来也还在 DOM 里。用 closest 钉住它不是 .ptz-speed / .ptz-precise 的后代。
+    const dragZoomBlock = wrapper.get("[data-testid='ptz-drag-zoom']").element as HTMLElement;
+    expect(dragZoomBlock.closest(".ptz-speed, .ptz-precise")).toBeNull();
+    // 精准定位模式下拖拽层与入口都还在,而且仍处于"可取消"态
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+    const cancelBtn = wrapper.get("[data-testid='ptz-drag-zoom-in']");
+    expect(cancelBtn.text()).toContain("取消 3D 放大");
+    await cancelBtn.trigger("click");
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("只有云台读权限、没有设备控制权限时不出现 3D 拖拽与关键帧入口", async () => {
+    // ⛔ 防回归:动作侧 toggleDragZoomMode / runAdvancedAction 第一句就是 `if (!canControlDevice) return`。
+    //    云台面板的可见性门禁 canPtzPanel 只看 ptz:* 权限,不挡就会出现
+    //    "看得见按钮却点不动"的死按钮 —— 比看不见更糟。
+    userState.account.permissions = ["gb28181:ptz:view"];
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    // 云台侧栏本身在(有 ptz:view),但 3D 拖拽块与请求关键帧都必须缺席
+    expect(wrapper.find("[data-testid='linked-side-ptz']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='ptz-drag-zoom']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='ptz-drag-zoom-in']").exists()).toBe(false);
+    // 关键帧 2026-09-20 搬进这个侧栏，同样自带 canControlDevice 门禁
+    expect(wrapper.find("[data-testid='ptz-iframe']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='ptz-iframe-request']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("控制台搬迁后的布局契约:高级页签不留死样式,云台面板四行含关键帧", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    // ⛔ 「高级」页签 2026-09-20 整体退役：连同它的布局契约（.linked-advanced-layout 的列数）
+    //    一起删干净。半截死样式会冒充"这个面板还在"，也会在改配色时被顺手同步。
+    expect(source).not.toContain("linked-advanced-layout");
+    expect(source).not.toContain("sidebar-advanced");
+    // 云台面板是"模式切换 + 模式内容 + 3D 拖拽 + 请求关键帧"四行；
+    // 后两块排在两个模式块之外，切模式时不能跟着消失
+    // （否则画面停在拖框态却没有取消入口，关键帧按钮也会跟着莫名的页签一起不见）。
+    expect(source).toMatch(
+      /\[data-testid="linked-side-ptz"\]\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s
+    );
+  });
+
+  it("DeviceStatus 与存储卡事实在控制台里读不到:抽屉才是它们的家", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    // ⛔ 2026-09-20：通道级事实（DeviceStatus 的录制/布防状态、存储卡）连同它们的轮询一起
+    //    搬去设备管理页的「设备详情」抽屉。控制台里一旦还留着读取入口，就会出现
+    //    "同一份事实两处各拉一次、两处各说一套"的老问题。
+    expect(source).not.toContain("getDeviceStatus");
+    expect(source).not.toContain("getChannelStorageCards");
+    expect(source).not.toContain("storage-card-status");
+  });
+
+  it("请求关键帧是立即动作:pointercancel 时不下发拖框命令", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    // 3D 拖拽的入口在云台控制侧栏(2026-09-20 从"高级"搬来)，默认页签就在这儿
+    await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
       x: 0,
@@ -3007,357 +2926,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     await layer.trigger("pointercancel", { clientX: 600, clientY: 300, pointerId: 4 });
     await flushPromises();
     expect(api.controlDevice).not.toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "drag_zoom_in" }));
-    wrapper.unmount();
-  });
-
-  it("录像与布防状态 unknown 时分别提供明确的正反动作", async () => {
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-
-    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
-    expect(wrapper.get("[data-testid='advanced-record-stop']").text()).toContain("请求停止设备录制");
-    expect(wrapper.get("[data-testid='advanced-guard']").text()).toContain("布防");
-    expect(wrapper.get("[data-testid='advanced-guard-reset']").text()).toContain("请求撤防");
-
-    await wrapper.get("[data-testid='advanced-record-stop']").trigger("click");
-    await flushPromises();
-    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "record_stop" }));
-
-    await wrapper.get("[data-testid='advanced-guard-reset']").trigger("click");
-    await flushPromises();
-    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "guard_reset" }));
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 按 operation 等待慢应答后再读取设备事实", async () => {
-    vi.useFakeTimers();
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationId: "device-status-op"
-        }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "on", guardState: "on", freshness: "fresh" },
-          freshness: "fresh"
-        }
-      });
-    api.getPtzOperation
-      .mockResolvedValueOnce(operationResponse("sent", "device-status-op", null))
-      .mockResolvedValueOnce(operationResponse("accepted", "device-status-op", null));
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(2000);
-    await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
-    expect(api.getPtzOperation).toHaveBeenLastCalledWith(channel.id, "device-status-op");
-    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("设备录制中");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("已布防");
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 等待录像与报警 operation 全部终态后只读取一次合并事实", async () => {
-    vi.useFakeTimers();
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationId: "record-status-op",
-          recordRefreshOperationId: "record-status-op",
-          alarmRefreshOperationId: "alarm-status-op",
-          refreshOperationIds: { record: "record-status-op", alarm: "alarm-status-op" }
-        }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "on", guardState: "alarm", freshness: "fresh" },
-          recordState: "on",
-          guardState: "alarm",
-          freshness: "fresh",
-          alarmResolution: {
-            status: "resolved",
-            source: "direct_parent",
-            targetCode: "A1",
-            state: "alarm",
-            freshness: "fresh",
-            candidates: [{ code: "A1", name: "门磁" }]
-          },
-          alarmFacts: [{ targetCode: "A1", guardState: "alarm", freshness: "fresh" }]
-        }
-      });
-    let alarmPolls = 0;
-    api.getPtzOperation.mockImplementation((_channelId: number, operationId: string) => {
-      if (operationId === "record-status-op") return Promise.resolve(operationResponse("accepted", operationId, null));
-      alarmPolls += 1;
-      return Promise.resolve(operationResponse(alarmPolls === 1 ? "sent" : "accepted", operationId, null));
-    });
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushPromises();
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "record-status-op");
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "alarm-status-op");
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(2000);
-    await flushPromises();
-    expect(api.getPtzOperation.mock.calls.filter(([, id]) => id === "record-status-op")).toHaveLength(1);
-    expect(api.getPtzOperation.mock.calls.filter(([, id]) => id === "alarm-status-op")).toHaveLength(2);
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
-
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    const factStatus = wrapper.get("[data-testid='advanced-fact-status']");
-    expect(factStatus.text()).toContain("设备录制中");
-    expect(factStatus.text()).toContain("ALARM 报警中");
-    expect(factStatus.text()).toContain("A1");
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 非终态 operation 到 deadline 后才读取合并事实", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
-    const alarmDeadline = "2026-07-25T03:00:01.500Z";
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationIds: { record: "record-deadline-op", alarm: "alarm-deadline-op" }
-        }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "on", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown"
-        }
-      });
-    api.getPtzOperation.mockImplementation((_channelId: number, operationId: string) => {
-      if (operationId === "record-deadline-op") return Promise.resolve(operationResponse("accepted", operationId, null));
-      return Promise.resolve(operationResponse("sent", operationId, alarmDeadline));
-    });
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(1000);
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(499);
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(1);
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus operation 查询卡住时在截止时间结束为未知并补读事实", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
-    let resolveHungOperation!: (value: ReturnType<typeof operationResponse>) => void;
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationId: "hung-device-status-op"
-        }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown"
-        }
-      });
-    api.getPtzOperation.mockImplementation(
-      () =>
-        new Promise<ReturnType<typeof operationResponse>>(resolve => {
-          resolveHungOperation = resolve;
-        })
-    );
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "hung-device-status-op");
-
-    await vi.advanceTimersByTimeAsync(14000);
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("状态读取失败");
-    resolveHungOperation(operationResponse("accepted", "hung-device-status-op", null));
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 最终补读卡住时不会在 operation 截止后一直保持查询中", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: {
-          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
-          freshness: "unknown",
-          refreshOperationId: "hung-final-read-op"
-        }
-      })
-      .mockImplementationOnce(() => new Promise(() => {}));
-    api.getPtzOperation.mockImplementation(() => new Promise(() => {}));
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    await vi.advanceTimersByTimeAsync(15000);
-    await flushPromises();
-    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
-
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).not.toContain("正在查询设备状态");
-    expect(wrapper.get(".advanced-status-refresh").attributes("disabled")).toBeUndefined();
-
-    await vi.advanceTimersByTimeAsync(5000);
-    await flushPromises();
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("状态读取失败");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("最终补读超时");
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 明示报警目标歧义与各报警事实且不封禁控制", async () => {
-    api.getDeviceStatus.mockResolvedValue({
-      code: 0,
-      message: "",
-      data: {
-        state: { recordState: "off", guardState: "unknown", freshness: "unknown" },
-        recordState: "off",
-        guardState: "unknown",
-        freshness: "unknown",
-        completeness: "partial",
-        alarmResolution: {
-          status: "ambiguous",
-          source: "direct_parent",
-          targetCode: "",
-          state: "unknown",
-          freshness: "unknown",
-          candidates: [
-            { code: "A1", name: "门磁 1" },
-            { code: "A2", name: "门磁 2" }
-          ]
-        },
-        alarmFacts: [
-          { targetCode: "A1", guardState: "on", freshness: "fresh" },
-          { targetCode: "A2", guardState: "alarm", freshness: "fresh" }
-        ]
-      }
-    });
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-
-    const warning = wrapper.get("[data-testid='alarm-resolution-warning']");
-    expect(warning.text()).toContain("报警目标不明确");
-    expect(warning.text()).toContain("A1");
-    expect(warning.text()).toContain("A2");
-    const facts = wrapper.get("[data-testid='alarm-facts']");
-    expect(facts.text()).toContain("A1 已布防");
-    expect(facts.text()).toContain("A2 ALARM 报警中");
-    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='advanced-guard-reset']").attributes("disabled")).toBeUndefined();
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 明示没有可用的 134 报警输入", async () => {
-    api.getDeviceStatus.mockResolvedValue({
-      code: 0,
-      message: "",
-      data: {
-        state: { recordState: "off", guardState: "unknown", freshness: "unknown" },
-        recordState: "off",
-        guardState: "unknown",
-        freshness: "unknown",
-        alarmResolution: {
-          status: "unavailable",
-          source: "",
-          targetCode: "",
-          state: "unknown",
-          freshness: "unknown",
-          candidates: []
-        },
-        alarmFacts: []
-      }
-    });
-
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("未找到可用的 134 报警输入");
-    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("按注册父设备编码发送");
-    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
-    wrapper.unmount();
-  });
-
-  it("DeviceStatus 合法响应缺字段时不保留旧事实", async () => {
-    api.getDeviceStatus
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { state: { recordState: "on", guardState: "on", freshness: "fresh" }, freshness: "fresh" }
-      })
-      .mockResolvedValueOnce({
-        code: 0,
-        message: "",
-        data: { state: { freshness: "fresh" }, freshness: "fresh" }
-      });
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-    await requestDeviceStatus(wrapper);
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("设备录制中");
-
-    await wrapper.get(".advanced-status-refresh").trigger("click");
-    await flushPromises();
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).not.toContain("设备录制中");
-    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
     wrapper.unmount();
   });
 
@@ -3467,6 +3035,97 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(dialog.text()).not.toContain("0 表示");
     // 上界换算成人能感知的说法,免得操作员对着 4095 猜那是多久
     expect(dialog.text()).toContain("最长约 68 分钟");
+    wrapper.unmount();
+  });
+
+  it("自动扫描卡片:开始/停止走 89H,运行态只说「已下发」", async () => {
+    api.controlPtzScan.mockReset();
+    api.controlPtzScan.mockResolvedValue({ code: 0, message: "", data: { operationId: "scan-op-1", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    // 第 4 张卡在云台详情区,默认组号 1
+    const card = wrapper.get("[data-testid='scan-card']");
+    // 原生 input 的 v-model 落在 DOM property 上,不是 attribute。
+    expect((card.get("[data-testid='scan-group-input']").element as HTMLInputElement).value).toBe("1");
+    expect(card.get("[data-testid='scan-toggle']").text()).toContain("开始扫描");
+
+    await card.get("[data-testid='scan-toggle']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).toHaveBeenCalledWith(channel.id, { action: "scan_start", id: 1 });
+
+    // HTTP 成功 ≠ 设备正在扫描:chip 说的是「启动已下发」
+    const chip = wrapper.get("[data-testid='scan-running-chip']");
+    expect(chip.text()).toContain("启动已下发");
+    expect(wrapper.get("[data-testid='scan-toggle']").text()).toContain("停止扫描");
+
+    // 停止没有专用指令码,复用全零停止帧 —— 前端发的是 scan_stop
+    await chip.trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).toHaveBeenLastCalledWith(channel.id, { action: "scan_stop", id: 1 });
+    expect(wrapper.find("[data-testid='scan-running-chip']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("扫描边界是「把当前朝向写进去」,速度只在 set_speed 时带 value", async () => {
+    api.controlPtzScan.mockReset();
+    api.controlPtzScan.mockResolvedValue({ code: 0, message: "", data: { operationId: "scan-op-2", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='scan-group-input']").setValue("3");
+    await wrapper.get("[data-testid='scan-set-left']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).toHaveBeenLastCalledWith(channel.id, { action: "scan_set_left", id: 3 });
+
+    await wrapper.get("[data-testid='scan-set-right']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).toHaveBeenLastCalledWith(channel.id, { action: "scan_set_right", id: 3 });
+
+    await wrapper.get("[data-testid='scan-speed-input']").setValue("120");
+    await wrapper.get("[data-testid='scan-set-speed']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).toHaveBeenLastCalledWith(channel.id, { action: "scan_set_speed", id: 3, value: 120 });
+    wrapper.unmount();
+  });
+
+  it("扫描组号/速度越界时不下发,并给出人能读懂的取值范围", async () => {
+    api.controlPtzScan.mockReset();
+    api.controlPtzScan.mockResolvedValue({ code: 0, message: "", data: { operationId: "scan-op-3", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    // 12 位参数域:与巡航速度同一个量纲(1-4095)
+    const speedInput = wrapper.get("[data-testid='scan-speed-input']");
+    expect(speedInput.attributes("min")).toBe("1");
+    expect(speedInput.attributes("max")).toBe("4095");
+    await speedInput.setValue("5000");
+    await wrapper.get("[data-testid='scan-set-speed']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).not.toHaveBeenCalled();
+
+    await wrapper.get("[data-testid='scan-group-input']").setValue("300");
+    await wrapper.get("[data-testid='scan-toggle']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("没有云台控制权限时扫描卡片可见但按钮全禁用", async () => {
+    api.controlPtzScan.mockReset();
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    // 保留 play:start(否则不点播、详情区整块不渲染) —— 只撤掉 ptz:control。
+    userState.account.permissions = ["gb28181:play:start", "gb28181:ptz:view"];
+    await nextTick();
+
+    const card = wrapper.get("[data-testid='scan-card']");
+    for (const id of ["scan-toggle", "scan-set-left", "scan-set-right", "scan-set-speed"]) {
+      expect(card.get(`[data-testid='${id}']`).attributes("disabled")).toBeDefined();
+    }
+    await card.get("[data-testid='scan-toggle']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzScan).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -5181,14 +4840,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find("[data-testid='linked-tab-probe']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='linked-tab-ptz']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(false);
-    // 「视频参数」tab 用 canViewPtz 门禁 —— 游客没有 ptz:view，整栏都不该挂载。
-    expect(wrapper.find("[data-testid='linked-tab-videoparam']").exists()).toBe(false);
+    // 「画面设置」tab 用 canViewPtz 门禁 —— 游客没有 ptz:view，整栏都不该挂载
+    // （它现在同时挂着视频编码与图像叠加两组，所以两组的读写口都要一起消失）。
+    expect(wrapper.find("[data-testid='linked-tab-deviceconfig']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-side-ptz']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='linked-side-advanced']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='linked-side-videoparam']").exists()).toBe(false);
+    // 「请求关键帧」2026-09-20 搬进云台侧栏，同样要 canControlDevice 门禁 ⇒ 游客也看不到
+    expect(wrapper.find("[data-testid='ptz-iframe-request']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-side-deviceconfig']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-detail-ptz']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='linked-detail-advanced']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='linked-detail-videoparam']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-detail-picture']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='probe-start']").exists()).toBe(false);
     expect(wrapper.find(".protocol-copy-btn").exists()).toBe(false);
     expect(api.getControlCapabilities).not.toHaveBeenCalled();
@@ -5520,54 +5180,85 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("左侧工作区保留三个既有模块，并按任务隔离配置分组", async () => {
+  it("左侧工作区保留既有模块，并按任务隔离配置分组", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
+    // 2026-09-20 起是 **3 个页签** —— 「高级」退役，「录像存储 / 报警控制」两个整页签搬去
+    // 设备管理页的「设备详情」抽屉，「视频编码」并回「画面设置」（5 → 4），
+    // 最后「设备维护」也搬去那张抽屉（改叫「基本参数」，4 → 3）。
+    // ⛔ 别让「视频编码」再变回一级页签：它和图像叠加改的是同一台设备的同一路画面，
+    //    分成两个并列顶级入口只会让"把画面调一下"变成要先猜进哪个。
     expect(wrapper.find("[data-testid='linked-tab-ptz']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='linked-tab-probe']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='linked-tab-videoparam']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-tab-deviceconfig']").exists()).toBe(true);
-    expect(wrapper.get("nav[aria-label='播放工作区']").findAll("button")).toHaveLength(8);
-    expect(wrapper.get("[data-testid='linked-tab-videoparam']").text()).toContain("视频编码");
-
-    await wrapper.get("[data-testid='linked-tab-videoparam']").trigger("click");
-    expect(wrapper.get("[data-testid='linked-detail-videoparam']").classes()).toContain("linked-detail-actions");
-    expect(wrapper.find("[data-testid='video-param-bottom-read']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='video-param-bottom-apply']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-videoparam']").exists()).toBe(false);
+    // ⛔ 这三个页签连着它们的组清单一起搬走了；只删页签却把组留在 configWorkspaceGroups 里，
+    //    会留下一批"没有入口的配置组"（读取照样发出去，界面上永远看不到）。
+    expect(wrapper.find("[data-testid='linked-tab-record']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-tab-alarm']").exists()).toBe(false);
+    // ⛔ 「设备维护」同理：它的内容（`basic` 组 = A.2.1.19 BasicParam）现在**只在**
+    //    设备详情抽屉的「基本参数」页里，控制台侧不再保留第二个入口。
+    expect(wrapper.find("[data-testid='linked-tab-device']").exists()).toBe(false);
+    expect(wrapper.get("nav[aria-label='播放工作区']").findAll("button")).toHaveLength(3);
+    expect(wrapper.get("[data-testid='linked-tab-deviceconfig']").text()).toContain("画面设置");
 
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
-    const sidePanel = wrapper.get("[data-testid='linked-side-deviceconfig']");
-    expect(sidePanel.text()).toContain("图像叠加 OSD");
-    // 画面设置不再有二级 tab：镜像 + 隐私遮挡下沉到底栏卡片后，侧栏只剩「图像叠加」一组，
-    // `dcg-nav` 的 `configGroups.length > 1` 就此为假 —— 导航整体消失，而不是留一个只有一项的导航。
-    expect(sidePanel.find(".dcg-nav").exists()).toBe(false);
-    expect(sidePanel.find("[data-testid='dcg-nav-osd']").exists()).toBe(false);
-    expect(sidePanel.find("[data-testid='dcg-nav-picture']").exists()).toBe(false);
-    // 原「画面处理」的全部内容现在由底栏卡片承载
     const pictureBar = wrapper.get("[data-testid='linked-detail-picture']");
+    expect(pictureBar.classes()).toContain("linked-detail-actions");
+    // 底栏**四格**（2026-09-20 起）：图像叠加 / 遮挡 / 镜像 / 参数对照。
+    // 老板原话「不想采用视频编码、图像叠加这种切换的方式，想让它们都在一个页面上全部展示出来」
+    // ⇒ 「图像叠加」整块从侧栏搬到第一格，编辑画面参数与看编码参数终于同屏。
+    expect(pictureBar.find("[data-testid='picture-osd-cell']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mask-card']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mirror-card']").exists()).toBe(true);
+    expect(pictureBar.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
+    // ⛔ 对照卡上**不再有**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
+    //    （`dcg-embedded-actions`），同一屏两套同名按钮是本仓点过名的坑。
+    expect(wrapper.find("[data-testid='video-param-bottom-read']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='video-param-bottom-apply']").exists()).toBe(false);
     // 2026-09-19 流程重做：下发入口从底栏第三张卡搬进画布浮条。反向钉住"提交卡不再回来" ——
     // 这个 testid 一复现，就说明有人把卡片又加回来了，浮条与卡片会变成两个入口。
     expect(pictureBar.find("[data-testid='picture-apply-card']").exists()).toBe(false);
-    // 视频参数属性走另一条通道，不混进本 tab 的组清单
+
+    // 侧栏 = 只挂「视频编码」一组 ⇒ `dcg-nav` 整体不渲染（一组没有可切的东西）。
+    // ⛔ 图像叠加已整块搬到下面底栏，这里**不该**再有第二份：同一份 `familyValues.osd`
+    //    两个编辑面，改哪边都只看得见一半。
+    const sidePanel = wrapper.get("[data-testid='linked-side-deviceconfig']");
+    expect(sidePanel.find(".dcg-nav").exists()).toBe(false);
     expect(sidePanel.find("[data-testid='dcg-nav-video-param']").exists()).toBe(false);
-    expect(sidePanel.text()).not.toContain("SVAC");
+    expect(sidePanel.find("[data-testid='dcg-nav-osd']").exists()).toBe(false);
+    expect(sidePanel.find("[data-testid='dcg-osd-blocks']").exists()).toBe(false);
+    // 侧栏里留下的是视频编码本体（组标题 + 对账条，`dcg-reconcile` 只在 video-param 出）。
+    expect(sidePanel.find("[data-testid='dcg-group-title']").text()).toBe("视频编码");
+    expect(sidePanel.find("[data-testid='dcg-reconcile']").exists()).toBe(true);
+    // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍不建在侧栏：它只有底栏卡片这一个编辑入口，
+    //    侧栏再挂一份就是同一份 `familyValues.picture` 的两个入口。
+    expect(sidePanel.find("[data-testid='dcg-nav-picture']").exists()).toBe(false);
+    // ⛔ record-plan / alarm-record / alarm-report 三组的入口**只在**设备详情抽屉里。
+    //    页签删了但组还留在 configWorkspaceGroups 里的话，这两串组名会以"永远看不到的
+    //    配置组"形式复活（读取照发、界面无入口），所以这里按渲染文本钉一次。
+    expect(sidePanel.text()).not.toContain("录像计划");
+    expect(sidePanel.text()).not.toContain("报警上报");
     expect(sidePanel.find("[data-testid='dcg-nav-basic']").exists()).toBe(false);
-    for (const [tab, group] of [
-      ["record", "record-plan"],
-      ["alarm", "alarm-report"],
-      ["device", "basic"]
-    ]) {
-      await wrapper.get(`[data-testid='linked-tab-${tab}']`).trigger("click");
-      await flushPromises();
-      expect(wrapper.get("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-group-title']").text()).toBe(
-        { "record-plan": "录像计划", "alarm-report": "报警上报", basic: "基本参数" }[group]
-      );
-      expect(wrapper.find("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-nav-video-param']").exists()).toBe(false);
-    }
+
+    // 换页签会退出 OSD 编辑模式（状态由画面侧持有）；切回也不该自己冒出来。
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
+
+    // ⛔ 控制台侧**没有第二个配置页**了：唯一还在的配置页就是「画面设置」，它只挂
+    //    `video-param` 一组；`basic` / `record-plan` / `alarm-*` 三族全部只在设备详情抽屉里。
+    //    这条按"渲染出来的组标题"钉死 —— 组留在 configWorkspaceGroups 里而页签没了的话，
+    //    读取照发、界面上永远看不到，是本仓点过名的坑。
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-group-title']").text()).toBe("视频编码");
     wrapper.unmount();
   });
 });
@@ -5632,6 +5323,36 @@ describe("PlayConsoleLinked 画面设置底栏卡片", () => {
     const card = wrapper.get("[data-testid='picture-mirror-card']");
     expect(card.get("[data-testid='picture-mirror-0']").classes()).toContain("active");
     expect(card.get("[data-testid='picture-mirror-1']").classes()).not.toContain("active");
+    wrapper.unmount();
+  });
+
+  it("对照卡的码流与侧栏「配置文件」是同一路，不是两份状态", async () => {
+    // ⛔ 两个下拉各持一份状态，就会出现"底栏对着子码流、侧栏在改主码流"，而两边都不报错 ——
+    //    用户照着对照卡上的数字去改，改的却根本不是那条流。
+    //    真源只有 `selectedVideoStream` 一个，侧栏按它只渲染对应那一行。
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        list: [
+          videoParamRow({ id: 1, streamNumber: 0 }),
+          videoParamRow({ id: 2, streamNumber: 1, resolution: "4", videoBitRate: "2048" })
+        ],
+        freshness: "fresh",
+        streamNumberList: "0/1",
+        reconcile: { state: "read_ok" }
+      })
+    );
+    const wrapper = await openPictureTab();
+
+    // 默认主码流：侧栏只渲染主码流那一行。
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(false);
+
+    // 底栏切到子码流 → 侧栏跟着切。
+    await wrapper.get("[data-testid='video-param-bottom-stream']").setValue("1");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(false);
+    expect((wrapper.get("[data-testid='video-param-bottom-stream']").element as HTMLSelectElement).value).toBe("1");
     wrapper.unmount();
   });
 
@@ -5973,6 +5694,412 @@ describe("PlayConsoleLinked 画面设置底栏卡片", () => {
     expect(String(warning.mock.calls[0]![0])).toContain("已放弃");
 
     warning.mockRestore();
+    wrapper.unmount();
+  });
+});
+
+/**
+ * 图像叠加（OSD）的画布锚点层。
+ *
+ * ⛔ 形态是**锚点 + 内容标签**，不是"像真字的预览"：标准 `OSDCfgType`（A.2.1.12）里没有
+ *    字体、字号、颜色，画出来就是在承诺平台给不了的能力；而设备已烧进码流的时间戳就在
+ *    这个画面里，再叠一个假字会出现**两个时间戳**。
+ * ⛔ 坐标基准与遮挡**同一把尺**（`OSDConfig.Length/Width`），不是画面解码尺寸。
+ */
+describe("PlayConsoleLinked 图像叠加（OSD）画布锚点层", () => {
+  beforeEach(() => {
+    userState.account = reactive({ permissions: ["*:*:*"] });
+    api.getChannelDeviceConfigs.mockReset();
+    api.getChannelDeviceConfigs.mockResolvedValue(osdDeviceConfigResponse());
+    api.applyChannelDeviceConfigs.mockReset();
+    api.applyChannelDeviceConfigs.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { action: "apply-device-config", reconcilePending: false }
+    });
+    api.startPlay.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  /**
+   * OSD 组的设备回读应答。
+   *
+   * ⛔ `payload` 是**那一块本身**（`OSDConfig` 这一行），不是包在 `osdConfig` 键下的容器。
+   * 画布取真机实测过的那把尺：`Length=704 / Width=576`。
+   */
+  function osdDeviceConfigResponse(
+    overrides: { items?: Array<Record<string, unknown>>; timeEnable?: number; textEnable?: number } = {}
+  ) {
+    return {
+      code: 0,
+      message: "",
+      data: {
+        list: [
+          {
+            configType: "OSDConfig",
+            observedAt: "2026-09-20T04:00:00Z",
+            sourceOperationId: "1500",
+            payload: {
+              length: 704,
+              width: 576,
+              timeX: 44,
+              timeY: 58,
+              timeEnable: overrides.timeEnable ?? 1,
+              timeType: 1,
+              textEnable: overrides.textEnable ?? 1,
+              items: overrides.items ?? [
+                { text: "北门", x: 176, y: 288 },
+                { text: "3 号车间", x: 352, y: 432 }
+              ]
+            }
+          },
+          // 画面组也给上事实：浮条的「下发」是**画面 + OSD 一次发多块**，
+          // 少了这两块就测不出"合并"这件事（没事实的组会被跳过，那是另一条正确的闸门）。
+          {
+            configType: "FrameMirror",
+            observedAt: "2026-09-20T04:00:00Z",
+            sourceOperationId: "1500",
+            payload: { value: 0 }
+          },
+          {
+            configType: "PictureMask",
+            observedAt: "2026-09-20T04:00:00Z",
+            sourceOperationId: "1500",
+            payload: { on: 0, regions: [] }
+          }
+        ],
+        absentTypes: [],
+        registeredVersion: "2022",
+        freshness: "fresh",
+        observedAt: "2026-09-20T04:00:00Z",
+        reconcile: {
+          state: "read_ok",
+          operationId: "1500",
+          status: "accepted",
+          responseHasData: true,
+          derivedFromApply: false
+        },
+        refreshOperationId: null,
+        refreshError: null
+      }
+    };
+  }
+
+  /**
+   * 挂载控制台并切到「画面设置」页签 —— OSD 面板就在这一页的**底栏第一格**。
+   *
+   * ⛔ 2026-09-20 第二阶段（老板：「不想用切换的方式，要一页全展示」）之后，
+   *    「图像叠加」不再挂在侧栏的分组导航后面：侧栏只剩「视频编码」一组，
+   *    `dcg-nav` 整体不渲染。所以这里**只切页签**，不再点任何分组。
+   */
+  async function openOsdTab() {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    await flushPromises();
+    return wrapper;
+  }
+
+  /**
+   * 取锚点样式里的 `left` 百分比。
+   *
+   * ⛔ 不直接比字符串：`44 / 704 * 100` 算出来是 `6.25` 这类无限小数，
+   *    写成字面量断言等于把浮点表示钉进用例，改一次就必须重新抄一遍。
+   */
+  function leftPercent(style: string | undefined): number {
+    return Number(/left:\s*([\d.]+)%/.exec(style ?? "")?.[1] ?? Number.NaN);
+  }
+
+  /** 给锚点层一个**真实矩形**：jsdom 的 `getBoundingClientRect` 恒为 0，不 mock 就变成恒真断言。 */
+  function stubLayerRect(el: Element) {
+    (el as HTMLElement).getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 200,
+        height: 100,
+        right: 200,
+        bottom: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      }) as DOMRect;
+  }
+
+  /**
+   * 进「调整位置」编辑模式 —— 按钮在**侧栏「时间戳」面板**里（2026-09-20 最终落点）。
+   *
+   * ⛔ 这个 `get` 本身就是一条断言：按钮不在画面上、也不在画面下方的工具条里，
+   *    它跟它控制的那个坐标读数（`osd-time-pos`）在同一个卡片里。
+   */
+  async function enterOsdEdit(wrapper: ReturnType<typeof mount>) {
+    await wrapper.get("[data-testid='osd-edit-toggle']").trigger("click");
+    await flushPromises();
+  }
+
+  /**
+   * 2026-09-20 第二阶段：OSD 面板搬到**底栏第一格**，侧栏只剩「视频编码」一组。
+   *
+   * ⛔ 这条用例替代了原来的「侧栏切到视频编码组会退出编辑模式」—— 分组切换本身没了，
+   *    也就不存在"切组"这条退出路径；退出只剩 按钮 / Esc / 换页签 / 换通道。
+   * ⛔ 关键是**只有一份**：侧栏再留一份就是同一份 `familyValues.osd` 的两个编辑面
+   *    （本仓因为"两份状态"返工过三次）。
+   */
+  it("OSD 面板只在底栏有一份，侧栏不再有第二份；换页签会退出编辑模式", async () => {
+    const wrapper = await openOsdTab();
+
+    const side = wrapper.get("[data-testid='linked-side-deviceconfig']");
+    expect(side.find(".dcg-nav").exists()).toBe(false);
+    expect(side.find("[data-testid='dcg-osd-blocks']").exists()).toBe(false);
+
+    expect(wrapper.findAll("[data-testid='osd-block-time']")).toHaveLength(1);
+    expect(wrapper.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
+
+    await enterOsdEdit(wrapper);
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(true);
+
+    // 换页签退出（四条退出路径之一：按钮 / Esc / 换页签 / 换通道）。
+    // ⛔ 目标页签从 `device`（「设备维护」）改成 `ptz`：那一页 2026-09-20 已退役，
+    //    整个控制台只剩 3 个页签。
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+
+    // 切回来也不自己冒出来 —— 重新进编辑模式是用户的显式动作。
+    await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").text()).toContain("调整位置");
+    wrapper.unmount();
+  });
+
+  it("默认画面上**一个标记都没有**；点「调整位置」才出现，位置按设备画布归一化（不是解码尺寸）", async () => {
+    const wrapper = await openOsdTab();
+
+    // ⛔ 老板 2026-09-20 第二次反馈："这个为啥还是默认显示呢，不是说的点击调整位置之后才出现吗"
+    //    —— 上一版做的是"锚点常驻 + 只读态降噪"，结果就是四五个带引线的标签摊在视频上。
+    //    现在只读态**整层不渲染**：位置信息由侧栏那行 `X 289 · Y 256` 承担。
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-anchor='time']").exists()).toBe(false);
+
+    const toggle = wrapper.get("[data-testid='osd-edit-toggle']");
+    expect(toggle.text()).toContain("调整位置");
+    expect(toggle.attributes("data-active")).toBe("0");
+    // ⛔ 按钮**不许长在画面上**（老板 2026-09-20："会遮挡画面"），也不在画面下方的工具条里 ——
+    //    它就在它控制的那个坐标读数旁边（「时间戳」卡片的「位置」行）。
+    expect(wrapper.get("[data-testid='osd-block-time']").find("[data-testid='osd-edit-toggle']").exists()).toBe(true);
+    expect(wrapper.find(".switcher-osd").exists()).toBe(false);
+
+    await enterOsdEdit(wrapper);
+    const layer = wrapper.get("[data-testid='osd-overlay-layer']");
+    // 1 个时间戳 + 2 行文字
+    expect(layer.findAll(".osd-anchor")).toHaveLength(3);
+
+    // 44 / 704 = 6.25%；58 / 576 ≈ 10.07%
+    expect(leftPercent(layer.get("[data-anchor='time']").attributes("style"))).toBeCloseTo(6.25, 2);
+    // 176 / 704 = 25%；288 / 576 = 50%
+    const first = layer.get("[data-anchor='item-0']");
+    expect(leftPercent(first.attributes("style"))).toBeCloseTo(25, 2);
+    // 编号与侧栏列表同源：锚点标签就是「1 北门」
+    expect(first.get(".osd-anchor-tag").text()).toContain("1 北门");
+
+    // ⛔ 拿解码尺寸（测试环境的 1280×720）当基准的话，这两个百分比会完全不一样 ——
+    //    那正是遮挡侧踩过的"我画的框挡住了别的地方"。
+    expect(layer.get("[data-anchor='time']").attributes("style")).not.toContain(`${(44 / 1280) * 100}`);
+
+    // 这层只在编辑模式存在，所以那条说明也就是"编辑模式的说明"，且必须指向**侧栏**的按钮
+    //（2026-09-20 之前它在画面下方工具条，照旧文案会让用户低头找）。
+    expect(layer.get("[data-testid='osd-layer-hint']").text()).toContain("侧栏");
+    wrapper.unmount();
+  });
+
+  it("开关关闭的锚点**淡显**而不是消失（配置还在，只是画面不显示）", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(osdDeviceConfigResponse({ textEnable: 0 }));
+    const wrapper = await openOsdTab();
+    await enterOsdEdit(wrapper);
+    const item = wrapper.get("[data-anchor='item-0']");
+    // ⛔ 关闭不等于"没画出来"：`get` 能取到就说明它还在（隐藏会让用户以为配置丢了，
+    //    而它下次启用会一起活过来）。
+    expect(item.attributes("data-off")).toBe("1");
+    expect(item.classes()).toContain("is-off");
+    // 时间戳那一枚不受文字开关影响
+    expect(wrapper.get("[data-anchor='time']").attributes("data-off")).toBe("0");
+    wrapper.unmount();
+  });
+
+  it("新增文字行进入「未定位」态，浮条**把下发拦下来**并说明去哪儿摆位置", async () => {
+    const wrapper = await openOsdTab();
+    await enterOsdEdit(wrapper);
+    await wrapper.get("[data-testid='osd-add']").trigger("click");
+    await flushPromises();
+
+    const anchor = wrapper.get("[data-anchor='item-2']");
+    expect(anchor.attributes("data-unplaced")).toBe("1");
+    expect(anchor.get(".osd-anchor-tag").text()).toContain("未定位");
+
+    // ⛔ 拦下发的判据是**草稿里的定位标记**，不是坐标值：`0,0` 是合法坐标
+    //    （设备的左上角就是有人会用的位置），靠数值反推必然把"还没摆"当成"摆了左上角"，
+    //    设备上就真的多出一行贴左上角的字，而界面看起来一切正常。
+    const apply = wrapper.get("[data-testid='picture-draft-apply']");
+    expect(apply.attributes("disabled")).toBeDefined();
+    expect(apply.attributes("title")).toContain("还没在画面上定位");
+
+    // 字符计数**就地**显示：原实现要等 `buildOSD` 拒发才说一句「第 N 条超过 32 个字符」，
+    // 用户还得自己回去找是哪一条。
+    const input = wrapper.get("[data-testid='osd-text-2']");
+    (input.element as HTMLInputElement).value = "国".repeat(33);
+    await input.trigger("change");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='osd-charcount-2']").text()).toBe("33/32");
+    wrapper.unmount();
+  });
+
+  it("拖拽锚点：拖动中不写草稿，松手才落到设备画布坐标并标成已定位", async () => {
+    const wrapper = await openOsdTab();
+    await enterOsdEdit(wrapper);
+    const layer = wrapper.get("[data-testid='osd-overlay-layer']");
+    stubLayerRect(layer.element);
+
+    const anchor = wrapper.get("[data-anchor='item-0']");
+    await anchor.trigger("pointerdown", { clientX: 10, clientY: 20, button: 0, pointerId: 1 });
+    await anchor.trigger("pointermove", { clientX: 110, clientY: 80, pointerId: 1 });
+    // ⛔ 拖动中**不写草稿**：`pointermove` 里落草稿会让脏值统计一路抖动。
+    expect(wrapper.find("[data-testid='picture-draft-bar']").exists()).toBe(false);
+
+    await anchor.trigger("pointerup", { clientX: 110, clientY: 80, pointerId: 1 });
+    await flushPromises();
+
+    // (110 / 200) × 704 = 387.2 → 387；(80 / 100) × 576 = 460.8 → 461
+    expect(leftPercent(wrapper.get("[data-anchor='item-0']").attributes("style"))).toBeCloseTo((387 / 704) * 100, 1);
+    expect(wrapper.get("[data-testid='picture-draft-summary']").text()).toContain("1 条文字");
+    wrapper.unmount();
+  });
+
+  it("没进编辑模式时画面是干净的：没有层、没有标记、也不会有半截拖拽残留", async () => {
+    const wrapper = await openOsdTab();
+
+    // 画面里既没有锚点层，也没有任何 OSD 相关的说明文字 —— 屏幕上的每一寸都在放视频。
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='osd-layer-hint']").exists()).toBe(false);
+    expect(wrapper.find(".osd-anchor").exists()).toBe(false);
+    // 侧栏的坐标读数照旧给出位置信息 —— "画面上不画"不等于"位置不可知"。
+    expect(wrapper.get("[data-testid='osd-time-pos']").text()).toBe("X 44 · Y 58");
+    expect(wrapper.find("[data-testid='picture-draft-bar']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("「完成调整」与 Esc 都能退出编辑模式，退出后整层锚点消失", async () => {
+    const wrapper = await openOsdTab();
+
+    await enterOsdEdit(wrapper);
+    expect(wrapper.get("[data-testid='osd-overlay-layer']").findAll(".osd-anchor")).toHaveLength(3);
+    // 按钮在侧栏里，文案跟着模式走
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").text()).toContain("完成调整");
+
+    // ① 再点一次退出 → 层整个没了（不是"留着但不吃指针"）
+    await wrapper.get("[data-testid='osd-edit-toggle']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").text()).toContain("调整位置");
+
+    // ② 进编辑模式后按 Esc 退出（拖到一半的临时坐标也要收干净，见 `exitOsdEditMode`）
+    await enterOsdEdit(wrapper);
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(true);
+    pressEscape();
+    await flushPromises();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("进编辑模式会**顺手退出遮挡框选**（两层都吃 pointerdown，同时开着说不清拖的是什么）", async () => {
+    const wrapper = await openOsdTab();
+    await wrapper.get("[data-testid='picture-mask-add-btn']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='mask-draw-layer']").exists()).toBe(true);
+
+    // 按钮在侧栏、不在框选层下面，所以它是可点的 —— 点它就是"改做另一件事"，
+    // 框选（还没落框的那半截）随之取消，这是两层互斥的另一半（反方向见 `startMaskDraw`）。
+    await enterOsdEdit(wrapper);
+    expect(wrapper.find("[data-testid='mask-draw-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("侧栏每行的「定位」直接进编辑模式并把那枚锚点拉到眼前（用户已经点名要挪这一行）", async () => {
+    const wrapper = await openOsdTab();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+
+    // ⛔ 否则会出现"点了按钮、锚点闪了一下、却拖不动" —— 而用户刚刚才被告知"拖动即可改位置"。
+    await wrapper.get("[data-testid='osd-locate-0']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(true);
+    // 高亮落在那一行上，而不是时间戳
+    expect(wrapper.get("[data-anchor='item-0']").classes()).toContain("is-focus");
+    expect(wrapper.get("[data-anchor='time']").classes()).not.toContain("is-focus");
+    wrapper.unmount();
+  });
+
+  it("浮条把画面组与 OSD 的草稿**合并成一句话**，一次报文发全部块", async () => {
+    const wrapper = await openOsdTab();
+    // 改一个 OSD 字段（时间格式：回读是 "1"，改成 "0" —— 下拉框不是三条单选）
+    await wrapper.get("[data-testid='osd-fmt-select']").setValue("0");
+    await flushPromises();
+
+    const bar = wrapper.get("[data-testid='picture-draft-bar']");
+    expect(bar.get("[data-testid='picture-draft-summary']").text()).toContain("时间格式");
+
+    await bar.get("[data-testid='picture-draft-apply']").trigger("click");
+    await flushPromises();
+
+    // ⭐ 协议上 `OSDConfig` 与 `PictureMask` 本来就是 `DeviceConfig` 里的兄弟元素，
+    //    合并成一条报文 —— 两条浮条会重演「同一屏两套同名按钮」。
+    const [, blocks] = api.applyChannelDeviceConfigs.mock.calls.at(-1)!;
+    const keys = Object.keys(blocks as object).sort();
+    expect(keys).toContain("osdConfig");
+    expect(keys).toContain("pictureMask");
+    wrapper.unmount();
+  });
+
+  it("没读到 OSD 设备事实时**一个锚点都不画**（平台初值不许伪装成设备现状）", async () => {
+    // 只回画面组，不回 OSDConfig ⇒ `familyValues.osd` 里躺的是平台空白模板（timeX=10 这类）。
+    api.getChannelDeviceConfigs.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        list: [{ configType: "FrameMirror", observedAt: "2026-09-20T04:00:00Z", payload: { value: 0 } }],
+        absentTypes: ["OSDConfig"],
+        registeredVersion: "2022",
+        freshness: "fresh",
+        observedAt: "2026-09-20T04:00:00Z",
+        reconcile: { state: "type_absent", operationId: "1501", status: "accepted", responseHasData: true },
+        refreshOperationId: null,
+        refreshError: null
+      }
+    });
+    const wrapper = await openOsdTab();
+    expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
+    // 侧栏的只读基准块如实说「未读到」，而不是把模板里的 1920×1080 摆出来
+    expect(wrapper.get("[data-testid='osd-canvas-value']").text()).toBe("—");
+    expect(wrapper.get("[data-testid='osd-canvas-tag']").text()).toBe("未读到");
+    // ⛔ 「调整位置」此时**禁用**：`familyValues.osd` 里躺的是平台空白模板（timeX=10 这类），
+    //    放进去拖一把就等于把平台初值当成设备现状了。按钮禁用 + `enterOsdEditMode` 里再拦一道。
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
 });
