@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import type {
-  OpenAPIClientDataScope,
-  OpenAPIClientCreateInput,
-  OpenAPIClientView,
-  OpenAPIManagedDepartment,
-  OpenAPIClientAudit,
-  OpenAPIRevocationStatus,
-  OpenAPIScopeView,
+import {
   OPENAPI_CLIENT_DATA_SCOPE_OPTIONS,
-  OPENAPI_CLIENT_DEFAULT_DATA_SCOPE
+  OPENAPI_CLIENT_DEFAULT_DATA_SCOPE,
+  type OpenAPIClientDataScope,
+  type OpenAPIClientCreateInput,
+  type OpenAPIClientView,
+  type OpenAPIManagedDepartment,
+  type OpenAPIClientAudit,
+  type OpenAPIRevocationStatus,
+  type OpenAPIScopeView
 } from "@/api/gb28181-openapi";
 
 const props = defineProps<{
@@ -90,6 +90,10 @@ const scopeLabels: Record<string, string> = {
 
 function scopeLabel(scope: string) {
   return scopeLabels[scope] || scope;
+}
+
+function dataScopeLabel(scope: OpenAPIClientDataScope) {
+  return OPENAPI_CLIENT_DATA_SCOPE_OPTIONS.find(option => option.value === scope)?.label || `数据范围 #${scope}`;
 }
 
 function resetForm() {
