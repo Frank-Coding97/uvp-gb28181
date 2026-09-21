@@ -6,14 +6,11 @@ import { createSvgIconsPlugin } from "vite-plugin-svg-icons";
 import AutoImport from "unplugin-auto-import/vite";
 import { ArcoResolver } from "unplugin-vue-components/resolvers";
 import Components from "unplugin-vue-components/vite";
-import { viteMockServe } from "vite-plugin-mock";
 // import eslintPlugin from "vite-plugin-eslint";
 /**
  * 创建 vite 插件
- * @param viteEnv
  */
-export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOption[])[] => {
-  const env = viteEnv;
+export const createVitePlugins = (): (PluginOption | PluginOption[])[] => {
   return [
     vue(),
     // esLint 报错信息显示在浏览器界面上
@@ -49,10 +46,12 @@ export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOptio
       // 自动导入的目录-自定义全局函数
       dirs: ["src/globals"],
       // arco组件的按需加载
-      resolvers: [ArcoResolver({
-        // 禁用默认样式导入，使用我们自定义的主题
-        importStyle: false
-      })],
+      resolvers: [
+        ArcoResolver({
+          // 禁用默认样式导入，使用我们自定义的主题
+          importStyle: false
+        })
+      ],
       // 解决eslint报错问题
       eslintrc: {
         // 这里先设置成true然后npm run dev 运行之后会生成 .eslintrc-auto-import.json 文件之后，在改为false
@@ -80,18 +79,6 @@ export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOptio
       extensions: ["vue"],
       // 配置文件生成位置
       dts: "src/components.d.ts"
-    }),
-    viteMockServe({
-      mockPath: "./src/mock/", // 目录位置
-      logger: true, //  是否在控制台显示请求日志
-      supportTs: true, // 是否读取ts文件模块
-      localEnabled: env.VITE_APP_OPEN_MOCK === "true", // 设置是否启用本地mock文件
-      prodEnabled: env.VITE_APP_OPEN_MOCK === "true", // 设置打包是否启用mock功能
-      // 这样可以控制关闭mock的时候不让mock打包到最终代码内
-      injectCode: `
-          import { setupProdMockServer } from '../src/mock/index';
-          setupProdMockServer();
-        `
     })
   ];
 };

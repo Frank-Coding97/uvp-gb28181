@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
         "/public": { target: apiProxyTarget, changeOrigin: true }
       }
     },
-    plugins: [...createVitePlugins(env)],
+    plugins: [...createVitePlugins()],
     resolve: {
       alias: {
         "@assets": path.join(__dirname, "src/assets"),

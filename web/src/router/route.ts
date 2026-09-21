@@ -1,17 +1,6 @@
 import { HOME_PATH } from "@/config/index";
 //import Layout from "@/layout/index.vue";
 
-const recordQueryDemoRoutes =
-  import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true"
-    ? [
-        {
-          path: "/device-record-query-demo",
-          name: "device-record-query-demo",
-          component: () => import(/* @vite-ignore */ "/src/views/gb28181/device-record-playback/index.vue"),
-          meta: { title: "设备录像回放预览", hide: true }
-        }
-      ]
-    : [];
 /**
  * 路由path路径与文件夹名称相同，找文件可以浏览器地址快速查找，方便定位文件
  *
@@ -66,35 +55,7 @@ export const staticRoutes = [
         }
       }
     ]
-  },
-  {
-    path: "/play-console-demo",
-    name: "play-console-demo",
-    component: () => import(/* webpackChunkName: "play-console-demo" */ "@/views/gb28181/PlayConsoleDemo.vue"),
-    meta: {
-      title: "播放控制台原型演示",
-      hide: true
-    }
-  },
-  {
-    path: "/play-console-linked-demo",
-    name: "play-console-linked-demo",
-    component: () => import(/* webpackChunkName: "play-console-linked-demo" */ "@/views/gb28181/WorkbenchPreview.vue"),
-    meta: {
-      title: "播放控制台联动原型",
-      hide: true
-    }
-  },
-  {
-    path: "/device-config-demo",
-    name: "device-config-demo",
-    component: () => import(/* webpackChunkName: "device-config-demo" */ "@/views/gb28181/DeviceConfigDemo.vue"),
-    meta: {
-      title: "设备配置中心原型",
-      hide: true
-    }
-  },
-  ...recordQueryDemoRoutes
+  }
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中
    *
