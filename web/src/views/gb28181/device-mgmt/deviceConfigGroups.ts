@@ -28,13 +28,23 @@
  * 先按静态形态把字段口径定型、再决定接不接后端，比"先接个半成品"安全。
  */
 
-export type ConfigFieldKind = "select" | "slider" | "switch" | "text" | "coords" | "texts" | "schedules" | "mirror";
+export type ConfigFieldKind = "select" | "slider" | "switch" | "text" | "coords" | "texts" | "schedules" | "mirror" | "point";
 
 export interface ConfigSelectOption {
   value: string;
   label: string;
   /** 窄空间（如图标按钮）用的短标签；缺省时用 `label`。 */
   shortLabel?: string;
+  /**
+   * 这个选项的**样例模板串**（`YYYY-MM-DD HH:mm:ss` 这类）。
+   *
+   * ⛔ 只给"结果能就地渲染成实例"的选项用。OSD 的时间格式在协议里是一个模式编号
+   *    （`TimeType` = 0 / 1），界面上把 `0` 摆给用户等于让他背编号表；把模板渲染成
+   *    **当前时刻的实例**，他看到的才是他会在画面上看到的那串字。
+   * ⛔ 没有模板的选项（字体 / 字号 / 颜色）**不许**编一个出来 —— 那些设备不保证，
+   *    画出来就是在承诺平台给不了的能力。
+   */
+  sample?: string;
 }
 
 interface ConfigFieldBase {
@@ -86,6 +96,25 @@ export interface ConfigCoordsField extends ConfigFieldBase {
 }
 
 /**
+ * 一个**点**（两个整数轴：X / Y），例如 OSD 时间戳的位置。
+ *
+ * ⛔ 协议上 `TimeX` / `TimeY` 是两个独立元素，但用户心里是**一个位置**：
+ *    拆成两条滑杆必然出现"挪了 X 忘了挪 Y"，两个数各占一行也读不出"这是个点"。
+ *    渲染侧必须把它们合成一行（见 `DeviceConfigOsdBlocks.vue` 的「位置」行）。
+ *
+ * ⛔ `pairKey` 是**表单键**，不是协议键 —— 这一对在 `deviceConfigPayload.ts` 的
+ *    `buildOSD` 里才翻译成两个协议元素。
+ * ⛔ **通用字段循环渲染不了这个 kind**：一行字段只绑一个 key，而一个点是两个 key。
+ *    所以它只能由 OSD 的对象块（`DeviceConfigOsdBlocks.vue`）渲染成一行「位置」。
+ *    别把 `point` 用在别的组上 —— 那样会掉进通用循环的兜底分支，渲染成一个孤零零的文本框。
+ */
+export interface ConfigPointField extends ConfigFieldBase {
+  kind: "point";
+  axes: string[];
+  pairKey: string;
+}
+
+/**
  * 方向选择控件（目前只用于画面镜像）。
  *
  * ⛔ 镜像天然是图形（左右 / 上下 / 旋转 180°），下拉框把方向压成字符串，
@@ -118,7 +147,8 @@ export type ConfigField =
   | ConfigCoordsField
   | ConfigTextsField
   | ConfigSchedulesField
-  | ConfigMirrorField;
+  | ConfigMirrorField
+  | ConfigPointField;
 
 export type ConfigGroupState = "ready" | "static";
 
@@ -127,6 +157,17 @@ export interface ConfigTextItem {
   text: string;
   x: number;
   y: number;
+  /**
+   * 这一行**在画面上摆过位置没有** —— 纯前端草稿标记，不下发。
+   *
+   * ⛔ 判据必须是这个显式字段，**不能拿 `x`/`y` 反推**：`0,0` 是合法坐标
+   *    （设备的左上角就是有人会用的位置），从数值上分不出"用户摆了左上角"和
+   *    "新增一行还没摆"。用数值反推的后果是：新增行被当成已定位、按 0,0 发出去，
+   *    设备上就真的多了一行贴在左上角的字，而界面上看起来一切正常。
+   *
+   * 缺席（`undefined`）按**已定位**处理：回读播种、以及旧草稿都没有这个键。
+   */
+  placed?: boolean;
 }
 
 /**
@@ -154,6 +195,15 @@ export type FieldValue = string | number | boolean | number[] | ConfigTextItem[]
 export interface ConfigGroup {
   key: string;
   label: string;
+  /**
+   * 分组导航（`dcg-nav`）里用的**短名**，缺省时用 `label`。
+   *
+   * ⛔ 只在**嵌入侧栏**的二级导航那一行生效：那一行在 430px 侧栏里两组等分、每格约 105px，
+   *    「视频参数属性」这种标准全名会被省略号截成「视频参数…」，等于没写。
+   * ⛔ 标准名**不丢**：非嵌入形态照旧显示 `label` + `std`，导航项的 `title` 也挂着全名。
+   *    两个名字同时存在是有意的 —— 界面上说的是用户的话，出处仍可追到标准条款。
+   */
+  navLabel?: string;
   /** 标准条款出处，渲染在参数区标题右侧。 */
   std: string;
   state: ConfigGroupState;
@@ -181,11 +231,19 @@ export interface ConfigGroup {
   fields: ConfigField[];
 }
 
-/** OSD 时间格式（`TimeType`）。空串 = **不下发该元素**（设备自己决定格式）。 */
+/**
+ * OSD 时间格式（`TimeType`）。空串 = **不下发该元素**（设备自己决定格式）。
+ *
+ * ⛔ 空串那条的文案是「跟设备走」，不是「不指定（不下发该元素）」：后者是协议黑话，
+ *    用户读到的只是一个否定句，看不出"那画面上到底会显示成什么样"。
+ *    语义一字未改 —— 报文里仍然是"整个 `timeType` 键不出现"（见 `buildOSD`）。
+ * ⛔ 前两条的 `label` 保留模式串（对账/无障碍要用），界面上渲染的是 `sample`
+ *    展开成**当前时刻**的实例。
+ */
 export const OSD_TIME_TYPE_OPTIONS: ConfigSelectOption[] = [
-  { value: "", label: "不指定（不下发该元素）" },
-  { value: "0", label: "YYYY-MM-DD HH:MM:SS" },
-  { value: "1", label: "YYYY年MM月DD日HH:MM:SS" }
+  { value: "", label: "跟设备走（不发格式）" },
+  { value: "0", label: "YYYY-MM-DD HH:MM:SS", sample: "YYYY-MM-DD HH:mm:ss" },
+  { value: "1", label: "YYYY年MM月DD日HH:MM:SS", sample: "YYYY年MM月DD日HH:mm:ss" }
 ];
 
 /**
@@ -232,6 +290,8 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
   {
     key: "video-param",
     label: "视频参数属性",
+    // 用户嘴里这一组就叫「视频编码」（原来它自己是一个一级页签），导航里用他的词。
+    navLabel: "视频编码",
     std: "A.2.3.2.5",
     since: "2022",
     state: "ready",
@@ -242,11 +302,14 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
   {
     key: "osd",
     label: "图像叠加 OSD",
+    navLabel: "图像叠加",
     std: "A.2.1.12",
     since: "2022",
     state: "ready",
+    // ⛔ 「拖动就能改位置」后面必须跟一句"要先点按钮"（2026-09-20）：锚点默认**不画**，
+    //    只说"拖动"会让用户对着一个空的画面找标记。
     summary:
-      "设备烧进视频流的叠加层（不是播放器里的界面叠层）。坐标是绝对像素、原点在左上角；Length/Width 是配置窗口的水平/垂直像素数。",
+      "设备烧进视频流的叠加层（不是播放器里的界面叠层）。点「时间戳」面板里的「调整位置」后，画面上会出现标记，拖动即可改位置；标记只表示「位置 + 内容」，字体字号由设备自己决定、平台无法预览。",
     configTypes: ["OSDConfig"],
     fields: [
       { kind: "switch", key: "timeEnable", label: "时间显示" },
@@ -255,28 +318,15 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
         key: "timeType",
         label: "时间格式",
         options: OSD_TIME_TYPE_OPTIONS,
-        hint: "不指定则不发送该元素"
+        hint: "跟设备走 = 不发送格式字段，由设备用它自己的默认格式"
       },
-      {
-        kind: "slider",
-        key: "length",
-        label: "窗口长度",
-        min: 1,
-        max: 3840,
-        unit: "像素",
-        hint: "配置窗口长度（视频水平像素数），必须为正"
-      },
-      {
-        kind: "slider",
-        key: "width",
-        label: "窗口宽度",
-        min: 1,
-        max: 2160,
-        unit: "像素",
-        hint: "配置窗口宽度（视频垂直像素数），必须为正"
-      },
-      { kind: "slider", key: "timeX", label: "时间 X", min: 0, max: 3840, unit: "像素" },
-      { kind: "slider", key: "timeY", label: "时间 Y", min: 0, max: 2160, unit: "像素" },
+      // ⛔ `length` / `width` **曾经**是这里的两条滑杆，2026-09-20 删掉：
+      //    真机实测（海康 IPC，2026-09-19）设备**拒收**平台改写 —— 写 2560×1440
+      //    照样回 200 OK，回读仍是 704×576。它们真正的身份不是"OSD 的配置项"，
+      //    而是**遮挡坐标的基准**（`DeviceConfigDrawer` 的 `pictureCanvasSize` 读的就是它们）。
+      //    留着滑杆 = 一个点了没用的伪控件，而"改了 → 200 → 回读没变"是本仓最贵的归因成本之一。
+      //    ⇒ 改成只读事实块（「坐标画布」），值照旧从回读播种进 `familyValues`，下发照旧要用。
+      { kind: "point", key: "timeX", pairKey: "timeY", label: "时间位置", axes: POINT_AXES },
       { kind: "switch", key: "textEnable", label: "文字显示" },
       {
         kind: "texts",

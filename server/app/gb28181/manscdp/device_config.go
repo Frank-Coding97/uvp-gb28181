@@ -3,6 +3,7 @@ package manscdp
 import (
 	"encoding/xml"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,10 @@ type DeviceConfigBlocks struct {
 	FrameMirror      *FrameMirrorBlock      `json:"frameMirror,omitempty"`
 	AlarmReport      *AlarmReportBlock      `json:"alarmReport,omitempty"`
 	OSDConfig        *OSDConfigBlock        `json:"osdConfig,omitempty"`
+	// ⛔ 键名是 `snapShot`（应答元素名 A.2.6.9），而**标准 ConfigType 名是 `SnapShotConfig`**
+	// （A.2.4.7 查询侧 / A.2.3.2.12 下发侧）。本族里**只有这一个类型两端名字不同**，
+	// 抄成 `snapShotConfig` 会让库里的 payload_json 与前端词汇表对不上（静默空表单）。
+	SnapShot *SnapShotBlock `json:"snapShot,omitempty"`
 }
 
 // ConfigTypeOrder 是配置类型在报文里的**固定出现顺序**：与 [DeviceConfigBlocks] 的字段
@@ -57,6 +62,11 @@ type DeviceConfigBlocks struct {
 // 日志比对会被当成"报文不一样"。
 //
 // 注：`VideoParamAttribute`（A.2.1.13）走 video_param.go 的独立通道，不在此列。
+//
+// ⛔ `SnapShotConfig` 是**这一列里唯一"类型名 ≠ 元素名"**的条目：查询用的 ConfigType 值
+// 与下发元素是 `SnapShotConfig`（A.2.3.2.12），应答元素却是 `SnapShot`（A.2.6.9）。
+// 名单里写 `SnapShot` 会被设备当成未知类型（拒发），应答侧按 `SnapShotConfig` 找元素
+// 则恒为 `type_absent` —— 两个方向都不报错，只是永远读不到。
 var ConfigTypeOrder = []string{
 	ConfigTypeBasicParam,
 	ConfigTypeVideoParamOpt,
@@ -66,6 +76,32 @@ var ConfigTypeOrder = []string{
 	ConfigTypeFrameMirror,
 	ConfigTypeAlarmReport,
 	ConfigTypeOSDConfig,
+	ConfigTypeSnapShotConfig,
+}
+
+// ReadOnlyDeviceConfigTypeReason 报告一个配置类型为什么**只读**（不能出现在 DeviceConfig
+// 下发报文里）；可以下发时返回 ("", false)。
+//
+// ⛔ 这张表存在的唯一理由是堵住一类**静默丢配置**：`VideoParamOpt` 在
+// [DeviceConfigBlocks] 里有字段、`PresentConfigTypes()` 也会把它算进去，但 A.2.3.2
+// 的下发清单里**根本没有这个元素**（它只在 A.2.4.7 的查询清单里）。若构建侧只是
+// 不生成它的 XML，平台就会发出一条"声称要配 VideoParamOpt、报文里却一个块都没有"的
+// DeviceConfig —— 设备回 OK、平台记 accepted，配置从头到尾没传出去，两侧日志都正常。
+//
+// 判据取自标准原文（抄结论、不抄二手解读）：`VideoParamOpt`（A.2.1.20）报的是
+// "摄像机**支持**哪些档位"，2016/2022 两版的 A.2.3.2 元素清单里都没有它。
+//
+// ⛔ 区分两类"不发"：本表是**协议事实**（发了就是非法报文）；
+// `SnapShotConfig` 协议上可下发（A.2.3.2.12），只是**本平台的通用通道**不发它
+// —— 那条策略在 `ptz.ApplyDeviceConfig`，别混进来。
+//
+// ⛔ 另注：`SVACEncodeConfig` / `SVACDecodeConfig` 不在本表也**不在** [ConfigTypeOrder]，
+// 因为平台还没有这两个类型的解析器（设备实测回空应答，暂无实际损失）。
+func ReadOnlyDeviceConfigTypeReason(configType string) (string, bool) {
+	if strings.TrimSpace(configType) == ConfigTypeVideoParamOpt {
+		return "VideoParamOpt 是设备能力上报（A.2.1.20 只读；两版 A.2.3.2 下发清单里都没有这个元素）", true
+	}
+	return "", false
 }
 
 // IsEmpty 报告一个块都没有。构建侧据此拒发（空报文没有语义），解析侧据此判"设备什么都没回"。
@@ -110,6 +146,8 @@ func (b DeviceConfigBlocks) Block(configType string) (any, bool) {
 		return b.AlarmReport, b.AlarmReport != nil
 	case ConfigTypeOSDConfig:
 		return b.OSDConfig, b.OSDConfig != nil
+	case ConfigTypeSnapShotConfig:
+		return b.SnapShot, b.SnapShot != nil
 	default:
 		return nil, false
 	}
@@ -145,6 +183,10 @@ type deviceConfigBlocksWire struct {
 	FrameMirror      *frameMirrorWire      `xml:"FrameMirror,omitempty"`
 	AlarmReport      *alarmReportWire      `xml:"AlarmReport,omitempty"`
 	OSDConfig        *osdConfigWire        `xml:"OSDConfig,omitempty"`
+	// ⛔ XML 元素名是 `SnapShotConfig`（A.2.3.2.12 下发侧），**与应答侧的 `SnapShot` 不同**
+	// （A.2.6.9）。两边写的元素名一旦互换，设备侧表现为"收不到这项配置"，而平台侧
+	// 毫无异常 —— 见 [snapShotWire] 的说明。
+	SnapShot *snapShotWire `xml:"SnapShotConfig,omitempty"`
 }
 
 // BuildDeviceConfigBlocksWithProfile 序列化 A.2.3.2 的配置下发命令。
@@ -175,6 +217,7 @@ func BuildDeviceConfigBlocksWithProfile(profile protocol.Profile, deviceID strin
 		FrameMirror:      blocks.FrameMirror.wire(),
 		AlarmReport:      blocks.AlarmReport.wire(),
 		OSDConfig:        blocks.OSDConfig.wire(),
+		SnapShot:         blocks.SnapShot.wire(),
 	}
 	return MarshalProfiledXML(profile, wire)
 }
@@ -184,6 +227,13 @@ func BuildDeviceConfigBlocksWithProfile(profile protocol.Profile, deviceID strin
 // 与解析侧的分工：这里"严格发"、解析侧"宽松收"。规则出处一律是各 `A.2.1.x` 的
 // 必选性与取值表，不自行加严也不放宽。
 func ValidateDeviceConfigBlocks(blocks DeviceConfigBlocks) error {
+	// ⛔ 先过"只读类型"这一关，再逐块校验取值域：只读类型的错误文案比"某字段越界"更有指向性
+	// （用户以为自己配上了，实际是这类根本不能下发）。见 [ReadOnlyDeviceConfigTypeReason]。
+	for _, configType := range blocks.PresentConfigTypes() {
+		if reason, readOnly := ReadOnlyDeviceConfigTypeReason(configType); readOnly {
+			return fmt.Errorf("配置类型 %s 不能下发：%s", configType, reason)
+		}
+	}
 	if blocks.BasicParam != nil {
 		if err := blocks.BasicParam.validate(); err != nil {
 			return err
@@ -219,6 +269,11 @@ func ValidateDeviceConfigBlocks(blocks DeviceConfigBlocks) error {
 			return err
 		}
 	}
+	if blocks.SnapShot != nil {
+		if err := blocks.SnapShot.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -243,6 +298,9 @@ type deviceConfigBlocksResponseWire struct {
 	FrameMirror      *frameMirrorWire       `xml:"FrameMirror"`
 	AlarmReport      *alarmReportWire       `xml:"AlarmReport"`
 	OSDConfig        *osdConfigWire         `xml:"OSDConfig"`
+	// ⛔ 应答侧的元素名是 `SnapShot`，下发侧才是 `SnapShotConfig`（A.2.6.9 / A.2.3.2.12）。
+	// 与 [deviceConfigBlocksWire] 的同名字段刻意写成不同的 tag —— 这不是笔误。
+	SnapShot *snapShotWire `xml:"SnapShot"`
 }
 
 // selectRecordPlanBlock 从应答里的多个 `<VideoRecordPlan>` 块中选一块。
@@ -331,6 +389,7 @@ func ParseDeviceConfigReadResponse(body []byte) (*DeviceConfigReadResult, error)
 		FrameMirror:      wire.FrameMirror.toBlock(),
 		AlarmReport:      wire.AlarmReport.toBlock(),
 		OSDConfig:        wire.OSDConfig.toBlock(),
+		SnapShot:         wire.SnapShot.toBlock(),
 	}
 	return result, nil
 }
@@ -1173,6 +1232,137 @@ func (b *VideoRecordPlanBlock) validate() error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ============================ SnapShotConfig / SnapShot（A.2.1.24） ============================
+
+// SnapShot 的取值边界（A.2.1.24 `snapShotCfgType`，逐项抄自原文）。
+const (
+	MinSnapShotCount    = 1  // SnapNum 下界（原文 minInclusive 1）
+	MaxSnapShotCount    = 10 // SnapNum 上界（原文 maxInclusive 10）
+	MinSnapShotInterval = 1  // Interval 下界（原文 minInclusive 1）
+	// Interval 标准里**没有**上界。这里是平台自己的护栏，取值对齐抓拍会话接口的
+	// 1~3600 秒（`snapshotCreateBody`），免得同一条配置在两条入口上判出不同结论。
+	MaxSnapShotInterval     = 3600
+	MinSnapShotSessionIDLen = 32  // SessionID 长度下界（原文 32 字节）
+	MaxSnapShotSessionIDLen = 128 // SessionID 长度上界（原文 128 字节）
+)
+
+// SnapShotBlock 是 `snapShotCfgType`（A.2.1.24）—— 图像抓拍配置。
+//
+// ⛔⛔ **这是本配置族里唯一"类型名 ≠ 元素名"的条目**，两个方向的名字还不一样：
+//
+//	| 场合 | 名字 | 出处 |
+//	|---|---|---|
+//	| 查询报文 `<ConfigType>` 的取值 | `SnapShotConfig` | A.2.4.7（明文列举） |
+//	| 下发报文的元素 | `<SnapShotConfig>` | A.2.3.2.12 |
+//	| 应答报文的元素 | `<SnapShot>` | A.2.6.9 |
+//
+// ⛔ A.2.6.9 里那个 `tg:snapshotCfgType` 与 A.2.1.24 的 `snapShotCfgType` 是**同一个类型**
+// （标准里第二个 S 少了一个大写字母，纯排版），别当成两个类型各写一份结构。
+// 海康真机实测（`37010301021320000002`，2026-09-20）回的正是 `<SnapShot>`，是合规形态。
+//
+// 四项一律用指针：设备实测会回 `<UploadURL></UploadURL>`（元素在场、内容为空），
+// 与"设备压根没带这一项"是两件事 —— 值类型会把两者一起压成 `""`。
+type SnapShotBlock struct {
+	// SnapNum 连拍张数。标准必选，1~10；手动抓拍时取 1。
+	SnapNum *int `json:"snapNum,omitempty"`
+	// Interval 单张抓拍间隔（秒）。标准 minOccurs="0"（缺席 = 设备不指定）。
+	Interval *int `json:"interval,omitempty"`
+	// UploadURL 抓拍图像的上传路径。标准必选。
+	UploadURL *string `json:"uploadUrl,omitempty"`
+	// SessionID 会话 ID（平台生成，用于把上传的图像关联回本次请求）。标准必选，32~128 字节。
+	SessionID *string `json:"sessionId,omitempty"`
+}
+
+// snapShotWire 是抓拍配置的线格式。
+//
+// ⛔⛔ **刻意不给 `XMLName`**（本文件其它 `*Wire` 几乎都有）。`encoding/xml` 里
+// `XMLName` 的优先级**高于**父结构字段上的 tag：一旦这里写上 `xml:"SnapShot"`，
+// 下发方向也会输出 `<SnapShot>`，把 A.2.3.2.12 要求的 `<SnapShotConfig>` 顶掉。
+// 元素名一律由**父结构的字段 tag** 决定 —— 下发用 `SnapShotConfig`、应答用 `SnapShot`，
+// 同一个结构、两个名字，这正是它两个方向共用的原因。
+type snapShotWire struct {
+	SnapNum   *int    `xml:"SnapNum,omitempty"`
+	Interval  *int    `xml:"Interval,omitempty"`
+	UploadURL *string `xml:"UploadURL,omitempty"`
+	SessionID *string `xml:"SessionID,omitempty"`
+}
+
+func (b *SnapShotBlock) wire() *snapShotWire {
+	if b == nil {
+		return nil
+	}
+	return &snapShotWire{
+		SnapNum: b.SnapNum, Interval: b.Interval,
+		UploadURL: b.UploadURL, SessionID: b.SessionID,
+	}
+}
+
+func (w *snapShotWire) toBlock() *SnapShotBlock {
+	if w == nil {
+		return nil
+	}
+	return &SnapShotBlock{
+		SnapNum: w.SnapNum, Interval: w.Interval,
+		UploadURL: trimOptional(w.UploadURL), SessionID: trimOptional(w.SessionID),
+	}
+}
+
+// validate 校验平台**将要下发**的抓拍配置（对应 [BuildDeviceConfigBlocksWithProfile]）。
+//
+// ⛔ 三项必选一个都不能松（`SnapNum` / `UploadURL` / `SessionID`）：它们正是设备
+// "要不要抓、往哪传、算哪一次"的全部依据，缺一项设备只能自己编一个默认值，
+// 而平台这边不会有任何反馈（写入应答 A.2.6.8 只有 `Result`，没有回显）。
+func (b *SnapShotBlock) validate() error {
+	if b == nil {
+		return nil
+	}
+	if b.SnapNum == nil {
+		return fmt.Errorf("SnapShotConfig.SnapNum 必选（A.2.1.24）")
+	}
+	if *b.SnapNum < MinSnapShotCount || *b.SnapNum > MaxSnapShotCount {
+		return fmt.Errorf("SnapShotConfig.SnapNum 越界: %d（要求 %d~%d）",
+			*b.SnapNum, MinSnapShotCount, MaxSnapShotCount)
+	}
+	if b.Interval != nil && (*b.Interval < MinSnapShotInterval || *b.Interval > MaxSnapShotInterval) {
+		return fmt.Errorf("SnapShotConfig.Interval 越界: %d（要求 %d~%d）",
+			*b.Interval, MinSnapShotInterval, MaxSnapShotInterval)
+	}
+	if b.UploadURL == nil {
+		return fmt.Errorf("SnapShotConfig.UploadURL 必选（A.2.1.24）")
+	}
+	if err := validateSnapshotUploadURL(*b.UploadURL); err != nil {
+		return fmt.Errorf("SnapShotConfig.UploadURL 不合法: %w", err)
+	}
+	if b.SessionID == nil {
+		return fmt.Errorf("SnapShotConfig.SessionID 必选（A.2.1.24）")
+	}
+	length := len(*b.SessionID)
+	if length < MinSnapShotSessionIDLen || length > MaxSnapShotSessionIDLen {
+		return fmt.Errorf("SnapShotConfig.SessionID 长度越界: %d 字节（要求 %d~%d）",
+			length, MinSnapShotSessionIDLen, MaxSnapShotSessionIDLen)
+	}
+	return nil
+}
+
+// validateSnapshotUploadURL 校验抓拍图像的上传地址。
+//
+// ⛔ 只认 `http` / `https` 且必须有主机：设备是按这个串去 POST 图像的，
+// 一个 `file://` 或相对路径在设备侧只表现为"抓拍成功但收不到图"，
+// 而平台这边没有任何异常 —— 归因成本极高。
+func validateSnapshotUploadURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("必须是 http/https 地址，当前是 %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("缺少主机名")
 	}
 	return nil
 }

@@ -1,10 +1,19 @@
 <script setup lang="ts">
 /**
- * DeviceConfigTextItems - OSD 自由文本行编辑器（`OSDConfig/Item`，标准上限 8 条）
+ * DeviceConfigTextItems - 变长文本行编辑器（`texts` kind 的**通用**渲染实现）
  *
  * 三列：文字 / X / Y。为什么不是"一个 textarea 加两个滑杆"：
  * 协议里每条 `Item` 各自带 X/Y（最多 8 条可以分散在画面不同位置），
  * 拍成"一段文本 + 一组坐标"就表达不了这件事。
+ *
+ * ## 现在谁在用它（2026-09-20 之后）
+ *
+ * **没有分组在用。** OSD 组已经改走对象块形态（`DeviceConfigOsdBlocks.vue`）：
+ * 位置改成"在画面上拖动 + 数值折叠"，X/Y 手输框不再是主要操作方式。
+ *
+ * ⛔ 但**别删**：它是 `ConfigTextsField`（`texts` kind）的正式渲染实现。
+ *    删了会让那个 kind 变成"有类型声明、没有渲染分支"。将来别组需要变长文本列表时，
+ *    直接复用这里即可 —— 通用循环里的 `v-else-if="field.kind === 'texts'"` 分支还在指着它。
  *
  * ⛔ 新增行**不预填坐标**（默认 0,0）：预填一个看起来合理的坐标会让人以为
  *    "平台帮我对齐了"，而实际值是随手编的。坐标是使用者的决定。
@@ -125,7 +134,7 @@ function counterText(): string {
         <Plus :size="11" />添加一条
       </button>
       <span class="dct-count" data-testid="dct-count">{{ counterText() }}</span>
-      <span class="dct-axis-hint"><Info :size="10" />坐标为像素，原点在播放窗口左上角</span>
+      <span class="dct-axis-hint"><Info :size="10" />坐标为像素，基准是设备声明的坐标画布（不是画面解码尺寸）</span>
     </div>
   </div>
 </template>

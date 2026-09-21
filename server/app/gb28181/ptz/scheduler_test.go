@@ -449,6 +449,77 @@ func TestBuildScheduledPTZBodyDeviceConfigSplitsByAction(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ⛔⛔ 回归锚点（2026-09-20 海康真机定位）：**抓拍会话的报文从未真正发出过**。
+//
+// `snapshot_config` 这个 action 当时只作为一个字面量写在 `controllers/device_snapshot.go` 里，
+// `ptz` 包完全不认识它 —— 于是重建落到 A-5 分支，平台实际发给设备的是
+// `<VideoParamAttribute Num="0">`（一块配置都没有）。设备照回 `<Result>OK</Result>`、
+// operation 记 accepted、回读还判 read_ok，**唯一的症状是"设备没上传图片"**。
+//
+// trace 取证（`gb_sip_trace_message`，设备 37010301021320000002）：
+//
+//	SN=10179 / 10181 / 10183 三条 outbound MESSAGE 的正文**全部**是
+//	<Control><CmdType>DeviceConfig</CmdType><SN>…</SN><DeviceID>…</DeviceID>
+//	<VideoParamAttribute Num="0"></VideoParamAttribute></Control>
+//	而对应 operation 的 action 都是 `snapshot_config`。
+//
+// ⭐ 用例刻意写成**性质**（"payload 里装了 blocks 就不许重建成 A-5"）而不是"再补一条 action"：
+// 判据走的是 payload 这个**数据事实**，所以将来任何新增的配置族 action 都自动被覆盖 ——
+// action 白名单会漏，数据事实不会。第三个 action 名是故意不存在的，用来代表"未来的新 action"。
+func TestBuildScheduledPTZBodyBlocksPayloadNeverRebuildsAsVideoParamAttribute(t *testing.T) {
+	payload := `{"configTypes":["SnapShotConfig"],"blocks":{"snapShot":{` +
+		`"snapNum":3,"interval":3,` +
+		`"uploadUrl":"http://192.168.10.120:8280/api/gb28181/device-snapshots/uploads/tok/",` +
+		`"sessionId":"` + strings.Repeat("s", 32) + `"}}}`
+	for _, action := range []string{
+		ActionApplyDeviceConfig,
+		ActionSnapshotConfig,
+		"some_future_config_family_action",
+	} {
+		t.Run(action, func(t *testing.T) {
+			operation := gbmodels.GbPTZOperation{
+				DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+				CmdType: manscdp.CmdDeviceConfig, Action: action,
+				ProfileVersion: string(protocol.Version2022), SN: 10183,
+				PayloadJSON: payload,
+			}
+			body, err := buildScheduledPTZBody(operation)
+			require.NoError(t, err, "带 blocks 的配置族报文必须能重建")
+			text := string(body)
+			require.NotContains(t, text, "VideoParamAttribute",
+				"带 blocks 的配置族下发被重建成 A-5 报文 ⇒ 一块配置都发不出去: %s", text)
+			// ⛔ 下发侧元素名是 `SnapShotConfig`（A.2.3.2.12），应答侧才是 `SnapShot`（A.2.6.9）。
+			require.Contains(t, text, "<SnapShotConfig>", text)
+			require.Contains(t, text, "<SnapNum>3</SnapNum>", text)
+			require.Contains(t, text, "<Interval>3</Interval>", text)
+			require.Contains(t, text, "<SessionID>", text)
+			require.Contains(t, text, "<UploadURL>", text)
+		})
+	}
+}
+
+// 抓拍会话的 action 必须被登记为"配置族 action"。
+//
+// ⛔ 这条防的是**名单漏项**这个更隐蔽的一半：`deviceConfigBlockActions` 只影响
+// "payload 里没有 blocks 时报不报错"。如果新 action 忘了登记，带 blocks 的正常路径
+// 仍然对（上面那条性质用例保证），但 payload 一旦缺 blocks 就会**静默回落成 A-5 报文**
+// —— 又变回"设备回 OK、平台记 accepted、配置没传出去"。
+func TestSnapshotConfigActionIsDeclaredAsBlockFamily(t *testing.T) {
+	require.NotEmpty(t, ActionSnapshotConfig)
+	_, declared := deviceConfigBlockActions[ActionSnapshotConfig]
+	require.True(t, declared, "抓拍会话 action 必须登记进 deviceConfigBlockActions")
+
+	// 缺 blocks 时必须报错，不许回落成 A-5 报文。
+	_, blockFamily, err := deviceConfigOperationForm(ActionSnapshotConfig, `{"configTypes":["SnapShotConfig"]}`)
+	require.True(t, blockFamily)
+	require.Error(t, err)
+
+	// 反过来：A-5 那条路（payload 装 `items`）不许被误判成配置族。
+	_, blockFamily, err = deviceConfigOperationForm(actionApplyVideoParams, `{"items":[]}`)
+	require.NoError(t, err)
+	require.False(t, blockFamily, "A-5 视频参数不能被当成配置族")
+}
+
 func TestBuildScheduledPTZBodyUsesPersistedProfileCharset(t *testing.T) {
 	operation := gbmodels.GbPTZOperation{
 		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",

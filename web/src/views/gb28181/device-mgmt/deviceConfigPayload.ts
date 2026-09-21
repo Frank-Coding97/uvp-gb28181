@@ -101,16 +101,36 @@ function looseRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-function textItems(value: FieldValue | undefined): { text: string; x: number; y: number }[] {
+/**
+ * 表单里的文本行 → 收窄后的中间形状（**带**草稿标记）。
+ *
+ * ⛔ 这里刻意保留 `placed`，虽然它不是协议字段：`buildOSD` 要靠它判定
+ *    「这一行用户到底摆过没有」（见 [ConfigTextItem.placed] 的注释）。
+ *    翻译成协议元素是**下一步**的事（`toOsdItems`），别在这一步就把信息丢掉 ——
+ *    丢了就只能拿 `x`/`y` 反推，而 `0,0` 是合法坐标，反推必然误判。
+ */
+function textItems(value: FieldValue | undefined): { text: string; x: number; y: number; placed: boolean }[] {
   if (!Array.isArray(value)) return [];
   return value.map(item => {
     const record = looseRecord(item);
     return {
       text: String(record.text ?? ""),
       x: Number(record.x) || 0,
-      y: Number(record.y) || 0
+      y: Number(record.y) || 0,
+      // 缺席按**已定位**：回读播种出来的行、以及没有这个键的老草稿，都是摆过的。
+      placed: record.placed === undefined ? true : record.placed === true
     };
   });
+}
+
+/**
+ * 收窄后的文本行 → 协议元素。
+ *
+ * ⛔ **只带协议认得的三个键**：`placed` 是纯前端草稿标记，不进报文。
+ *    与"计数不独立存"（`SumNum` 现算）同源 —— 报文里出现的东西必须都是标准里的东西。
+ */
+function toOsdItems(rows: { text: string; x: number; y: number }[]): { text: string; x: number; y: number }[] {
+  return rows.map(row => ({ text: row.text, x: row.x, y: row.y }));
 }
 
 function scheduleDays(value: FieldValue | undefined): { weekDayNum: number; segments: { start: string; stop: string }[] }[] {
@@ -198,7 +218,12 @@ export function readDeviceConfigPayload(configType: string, payload: Record<stri
           return {
             text: String(record.text ?? ""),
             x: Number(record.x) || 0,
-            y: Number(record.y) || 0
+            y: Number(record.y) || 0,
+            // ⛔ 回读回来的行**一律是已定位**的：设备上就摆在那儿。
+            //    不显式播种的话，草稿里这些行是 `undefined`、基准里也是 `undefined`，
+            //    看着一致 —— 但一旦用户拖动其中一行，脏值对比就会把"整行"算成新值，
+            //    而那些 `undefined` 的行在画布上会落进"未定位"分支，画成琥珀虚线。
+            placed: true
           };
         })
       };
@@ -306,10 +331,24 @@ export function buildDeviceConfigBlocks(groupKey: string, values: FormValues): B
 }
 
 function buildOSD(values: FormValues): BuildResult {
-  const length = requiredInt(values.length, 1, 3840);
-  if (length === undefined) return { blocks: {}, error: "OSD 窗口长度必须是 1~3840 的整数" };
-  const width = requiredInt(values.width, 1, 2160);
-  if (width === undefined) return { blocks: {}, error: "OSD 窗口宽度必须是 1~2160 的整数" };
+  // ⛔ `length` / `width` 在界面上**已经不是可编辑控件**了（2026-09-20 从两条滑杆改成
+  //    只读的「坐标画布」事实块）：设备拒收平台改写，平台只能读它、照它算。
+  //    ⇒ 这两个值到不了"用户填错"这条路，只可能"设备没声明"。
+  //    所以拒发文案不能再写「OSD 窗口长度必须是 1~3840 的整数」—— 界面上已经没有
+  //    这个控件了，用户会看到一条**指向不存在控件的错误**，唯一的动作只能是猜。
+  const length = Number(values.length);
+  const width = Number(values.width);
+  if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(width) || width <= 0) {
+    return {
+      blocks: {},
+      error: "设备未声明坐标画布（Length/Width），无法下发本组配置；请点「读取」重新向设备查询"
+    };
+  }
+  // 设备回了一份不合法的画布（违约报文）。这与"没声明"是两件事，不能共用一句话。
+  if (length > 3840 || width > 2160) {
+    return { blocks: {}, error: `设备声明的坐标画布超出可用范围（${length}×${width}），无法下发本组配置` };
+  }
+
   const timeX = requiredInt(values.timeX, 0, 8192);
   if (timeX === undefined) return { blocks: {}, error: "OSD 时间 X 坐标必须是 0~8192 的整数" };
   const timeY = requiredInt(values.timeY, 0, 8192);
@@ -319,7 +358,7 @@ function buildOSD(values: FormValues): BuildResult {
   let timeType: number | undefined;
   if (rawTimeType !== "") {
     const parsed = requiredInt(values.timeType, 0, 1);
-    if (parsed === undefined) return { blocks: {}, error: "OSD 时间格式只能是 0 / 1，或选择「不指定」" };
+    if (parsed === undefined) return { blocks: {}, error: "OSD 时间格式只能是 0 / 1，或选择「跟设备走」" };
     timeType = parsed;
   }
 
@@ -329,6 +368,12 @@ function buildOSD(values: FormValues): BuildResult {
   }
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index]!;
+    // ⛔ **未定位的行不许下发**。`0,0` 是合法坐标（见 [ConfigTextItem.placed]），
+    //    从值上判不出"用户还没摆"，所以判据必须来自草稿里的定位标记。
+    //    放行的话，设备上会真的多出一行贴在左上角的字，而界面看起来一切正常。
+    if (!item.placed) {
+      return { blocks: {}, error: `第 ${index + 1} 条叠加文字还没在画面上定位 —— 拖动它的标记再下发` };
+    }
     // 按**字符**数判（不是字节）：标准写的是"长度 0~32"，中文一个字占 3 字节，
     // 按字节判会让 11 个汉字就被拒。
     if ([...item.text].length > MAX_OSD_TEXT_LENGTH) {
@@ -351,7 +396,7 @@ function buildOSD(values: FormValues): BuildResult {
         // 写成 `timeType: 0` 会被对端当成"就要 YYYY-MM-DD HH:MM:SS"。
         ...(timeType === undefined ? {} : { timeType }),
         textEnable: switchValue(values.textEnable),
-        items
+        items: toOsdItems(items)
       }
     },
     error: ""

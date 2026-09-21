@@ -53,12 +53,14 @@ import {
   videoParamEmptyText,
   type VideoParamCodecItem
 } from "../videoParamCodec";
+import DeviceConfigOsdBlocks from "./DeviceConfigOsdBlocks.vue";
 import DeviceConfigSlider from "./DeviceConfigSlider.vue";
 import DeviceConfigTextItems from "./DeviceConfigTextItems.vue";
 import DeviceConfigWeekPlan from "./DeviceConfigWeekPlan.vue";
 import {
   CONFIG_GROUPS,
   MAX_MASK_REGIONS,
+  MAX_OSD_TEXT_ITEMS,
   MAX_OSD_TEXT_LENGTH,
   configGroupDefaults,
   findConfigGroup,
@@ -96,6 +98,40 @@ const props = withDefaults(
     groupKeys?: string[];
     /** 嵌入工作台时，把复杂编辑器挂到宿主底部的目标节点。 */
     detailTarget?: string | HTMLElement | null;
+    /**
+     * OSD 是否正处在「调整位置」编辑模式（**只读**，用来渲染按钮的开 / 关态）。
+     *
+     * ⛔ 状态**必须由画面侧持有**，不能落在抽屉里：编辑模式控制的是**画布上那层锚点**
+     *    的生死，抽屉里存一份就只能单向通知，画面自己的退出路径（Esc / 换页签 / 换通道）
+     *    会把两份状态搞岔。所以这里**不写 `v-model`**，只发一个"我要切一下"的意图
+     *    （`toggle-osd-edit`），真正的切换走画面侧的 `toggleOsdEditMode()` ——
+     *    那里还要顺手关掉遮挡框选、取消拖到一半的临时坐标。
+     */
+    osdEditing?: boolean;
+    /**
+     * 抽屉外面有没有一块可拖画的 OSD 画布。
+     *
+     * ⛔ 默认 `false`：`DeviceConfigDemo` 那个免登录预览页也挂这个抽屉，但它没有画面 ——
+     *    那种场景下渲染「调整位置」就是个点了没反应的按钮。
+     */
+    osdCanvasLinked?: boolean;
+    /**
+     * 当前选中的码流（`0` 主码流 / `1` 子码流…）。传入即为**受控**。
+     *
+     * ⛔ 播放控制台底栏那格「参数对照」和侧栏的「配置文件」下拉指的是**同一路**：
+     *    两个下拉各持一份状态，就会出现"底栏对着子码流、侧栏显示主码流"，
+     *    而两边都不报错。所以真源交给宿主，用 `v-model:stream-profile` 双向绑定。
+     * ⛔ 不传（设备详情抽屉那种用法）时回落内部状态，行为与以前完全一致。
+     */
+    streamProfile?: string;
+    /**
+     * 当前选中的分组 key（见 `CONFIG_GROUPS`）。传入即为**受控**，理由同 `streamProfile`。
+     *
+     * ⭐ 宿主需要知道"现在停在哪一组"是为了做**跨组联动**：画面侧只允许在「图像叠加」
+     *    组上留一个 OSD 编辑模式，切到「视频编码」之后那层锚点已经无处可拖，
+     *    必须跟着退出去（`v-model:active-group-key`）。
+     */
+    activeGroupKey?: string;
   }>(),
   {
     embedded: false,
@@ -108,11 +144,19 @@ const props = withDefaults(
     canRead: true,
     canApply: true,
     configOnly: false,
-    detailTarget: null
+    detailTarget: null,
+    osdEditing: false,
+    osdCanvasLinked: false
   }
 );
 
-const emit = defineEmits<{ "update:visible": [value: boolean] }>();
+const emit = defineEmits<{
+  "update:visible": [value: boolean];
+  /** 请求切换 OSD 编辑模式（进 / 出由宿主决定，见 `osdEditing` 的注释）。 */
+  toggleOsdEdit: [];
+  "update:streamProfile": [value: string];
+  "update:activeGroupKey": [value: string];
+}>();
 
 /**
  * 把 catch 到的东西翻成给操作员看的一句话。
@@ -166,7 +210,26 @@ const configGroups = computed(() =>
     group => (!props.configOnly || group.key !== "video-param") && (!props.groupKeys || props.groupKeys.includes(group.key))
   )
 );
-const activeGroupKey = ref<string>(props.configOnly ? "osd" : "video-param");
+/**
+ * 当前分组。宿主传了 `activeGroupKey` 时以宿主为真源（见该 prop 的注释）。
+ *
+ * ⛔ getter 里做一次**合法性兜底**：宿主那份状态可能指向本实例没挂的组
+ *    （设备详情抽屉只挂 record / alarm 两组，宿主却在看别的组）。
+ *    直接返回非法 key 会让 `dcg-nav` 一个高亮都没有，看着像"导航坏了"。
+ * ⛔ 用 `||` 而不是 `??`：空串是"没传"，不是"要选空组"。
+ */
+const internalActiveGroupKey = ref<string>(props.configOnly ? "osd" : "video-param");
+const activeGroupKey = computed<string>({
+  get: () => {
+    const candidate = props.activeGroupKey || internalActiveGroupKey.value;
+    if (configGroups.value.some(group => group.key === candidate)) return candidate;
+    return configGroups.value[0]?.key ?? candidate;
+  },
+  set: value => {
+    internalActiveGroupKey.value = value;
+    emit("update:activeGroupKey", value);
+  }
+});
 watch(
   configGroups,
   groups => {
@@ -175,6 +238,21 @@ watch(
   { immediate: true }
 );
 const activeGroup = computed<ConfigGroup>(() => findConfigGroup(activeGroupKey.value) ?? (CONFIG_GROUPS[0] as ConfigGroup));
+
+/**
+ * 参数区标题（`dcg-group-title`）。
+ *
+ * ⛔ 嵌入形态且只剩一组时用 `navLabel`，理由是**没有别的地方显示它了**：分组导航
+ *    `dcg-nav` 只在 `configGroups.length > 1` 时渲染，2026-09-20 图像叠加搬去底栏后
+ *    控制台侧栏只剩 `video-param` 一组 ⇒ 导航整块消失，`navLabel`（老板嘴里的「视频编码」）
+ *    也跟着从界面上消失，只剩协议学名「视频参数属性」。
+ * ⛔ 非嵌入形态、或多组时照旧 `label` —— 标准名一个字不改；两种情况下 `title` 都挂着标准全名。
+ */
+const activeGroupTitle = computed(() =>
+  props.embedded && configGroups.value.length <= 1
+    ? (activeGroup.value.navLabel ?? activeGroup.value.label)
+    : activeGroup.value.label
+);
 
 /**
  * 渲染用的扁平字段形状：把联合类型拍平，模板里就不必做类型窄化。
@@ -405,7 +483,20 @@ const videoObservedAt = ref("");
 const videoLoading = ref(false);
 const videoApplying = ref(false);
 const videoError = ref("");
-const streamProfile = ref("0");
+/**
+ * 当前码流。宿主传了 `streamProfile` 时以宿主为真源（见该 prop 的注释）。
+ *
+ * ⛔ 用 `||` 而不是 `??`：`selectValue` 在取值异常时会给出空串，
+ *    空串是"没传"，不是"要看 0 号以外的某一路"。
+ */
+const internalStreamProfile = ref("0");
+const streamProfile = computed<string>({
+  get: () => props.streamProfile || internalStreamProfile.value,
+  set: value => {
+    internalStreamProfile.value = value;
+    emit("update:streamProfile", value);
+  }
+});
 const ptzStep = ref(5);
 
 let pollTimer: number | undefined;
@@ -965,32 +1056,62 @@ function clearFamilyPoll() {
  *    钉死在 `picture` 组上，而侧栏此刻可能停在别的组 —— 用 activeGroup 会把卡片
  *    的下发打到用户没在看的那一组。
  */
-async function applyGroupConfig(groupKey: string) {
+async function applyGroupConfigs(groupKeys: string[]) {
   if (!props.channelId) return;
-  const built = buildDeviceConfigBlocks(groupKey, familyValues[groupKey] ?? {});
-  // ⛔ 本地先拦一道（协议层同样会拦）：平台自己发出的越界值会被对端静默当 0 处理，
-  //    那种错在回读对账里只表现为"设备没照做"，归因成本极高。
-  if (built.error) {
-    familyError.value = built.error;
-    familyErrorGroup.value = groupKey;
-    return;
+  // ⛔ 没有设备事实的组直接跳过：那组的表单里躺的是 `CONFIG_GROUP_DEFAULTS` 的空白模板
+  //    （`1920×1080` 这类），发出去等于把平台初值当设备值写进设备。
+  const keys = groupKeys.filter(key => !groupFactsMissing(key));
+  const blocks: Record<string, unknown> = {};
+  for (const key of keys) {
+    const built = buildDeviceConfigBlocks(key, familyValues[key] ?? {});
+    // ⛔ 本地先拦一道（协议层同样会拦）：平台自己发出的越界值会被对端静默当 0 处理，
+    //    那种错在回读对账里只表现为"设备没照做"，归因成本极高。
+    if (built.error) {
+      familyError.value = built.error;
+      familyErrorGroup.value = key;
+      return;
+    }
+    Object.assign(blocks, built.blocks);
+    // 走浮条「下发」时也要给同样的提示：`buildPicture` 现在放行"启用 + 无区域"，
+    // 少了这句，那条路径会静默发出一个画面上看不见的遮挡（2026-09-19 现场问的就是这个）。
+    if (key === PICTURE_GROUP_KEY) pictureMaskNotice.value = pictureMaskApplyNotice(built);
   }
+  if (!Object.keys(blocks).length) return;
+
   familyApplying.value = true;
   familyError.value = "";
-  familyErrorGroup.value = groupKey;
-  // 走浮条「下发」时也要给同样的提示：`buildPicture` 现在放行"启用 + 无区域"，
-  // 少了这句，那条路径会静默发出一个画面上看不见的遮挡（2026-09-19 现场问的就是这个）。
-  if (groupKey === PICTURE_GROUP_KEY) pictureMaskNotice.value = pictureMaskApplyNotice(built);
+  familyErrorGroup.value = keys[0] ?? "";
   try {
-    const response = await applyChannelDeviceConfigs(props.channelId, built.blocks, `device-config-${Date.now()}`);
+    const response = await applyChannelDeviceConfigs(props.channelId, blocks, `device-config-${Date.now()}`);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "下发失败");
     if (response.data.reconcilePending) scheduleFamilyPoll();
   } catch (error) {
     familyError.value = readErrorMessage(error, "下发失败");
-    familyErrorGroup.value = groupKey;
+    familyErrorGroup.value = keys[0] ?? "";
   } finally {
     familyApplying.value = false;
   }
+}
+
+/**
+ * 下发**一个或多个分组**的草稿。
+ *
+ * ⛔ 分组 key 显式传入而不是内部直接读 `activeGroup`：播放控制台底部的画面卡片与下发浮条
+ *    钉死在 `picture` / `osd` 上，而侧栏此刻可能停在别的组 —— 用 activeGroup 会把
+ *    卡片的下发打到用户没在看的那一组。
+ *
+ * ⭐ 多组一次下发是**协议本来允许的形态**：`DeviceConfig` 一条报文里 `OSDConfig` 与
+ *    `PictureMask` 就是兄弟元素（A.2.3.2），`buildDeviceConfigBlocks` 只产出块、不关心
+ *    这次发几组。合并成一条报文，比让画布上出现两条同名浮条安全得多
+ *    —— 后者会重演本仓已被点名的「同一屏两套同名按钮」。
+ */
+async function applyGroupConfig(groupKey: string) {
+  await applyGroupConfigs([groupKey]);
+}
+
+/** 浮条「下发」：把画面组与 OSD 组的草稿**一次**发出去。 */
+async function applyPictureAndOsdGroups() {
+  await applyGroupConfigs([PICTURE_GROUP_KEY, OSD_GROUP_KEY]);
 }
 
 /** 下发侧栏当前分组（`applyGroupConfig` 的薄包装）。 */
@@ -1048,6 +1169,169 @@ function groupAbsentTypes(groupKey: string): string[] {
 
 const pictureFactsMissing = computed(() => groupFactsMissing(PICTURE_GROUP_KEY));
 const pictureAbsentTypes = computed(() => groupAbsentTypes(PICTURE_GROUP_KEY));
+
+/* ─────────────────────── OSD 组（A.2.1.12）：画布锚点 ─────────────────────── */
+
+/**
+ * 画布上的一枚标记。
+ *
+ * ⛔ 形态是**锚点 + 内容标签**，不是"像真字的预览"：标准 `OSDCfgType` 里没有字体、
+ *    字号、颜色 —— 画出来就是在承诺平台给不了的能力；而且设备**已经烧进码流**的时间戳
+ *    就在播放器画面里，再叠一个假字会出现**两个时间戳**（见 `DeviceConfigOsdBlocks` 头注）。
+ *    ⭐ 锚点还有一笔意外收益：用户可以**直接对着画面上那个真字拖锚点对齐**，免费的精确校准。
+ */
+interface OsdAnchor {
+  /** 稳定标识：`time` 或 `item-0`… —— 当 `v-for` 的 key 用，别用坐标（拖动时坐标在变）。 */
+  key: string;
+  kind: "time" | "item";
+  /** 文字行在数组里的下标；时间戳恒为 `-1`（它没有数组下标）。 */
+  index: number;
+  /** 画在锚点上的编号：时间戳是「时间戳」，文字是 1..8 —— **与侧栏列表编号同源**。 */
+  label: string;
+  x: number;
+  y: number;
+  /** 新增还没在画面上摆过（`0,0` 是合法坐标，只能靠 `placed` 判，见 `ConfigTextItem.placed`）。 */
+  unplaced: boolean;
+  /** 本次草稿动过它 ⇒ 还没下发到设备。 */
+  draft: boolean;
+  /** 所属开关已关闭 ⇒ 画面上不显示（**淡显**，不是隐藏：配置还在）。 */
+  off: boolean;
+}
+
+/** OSD 组是否可编辑 —— 与画面组同一套闸门，只是按 osd 组算。 */
+const osdEditable = computed(
+  () =>
+    !familyLoading.value &&
+    !familyApplying.value &&
+    props.canApply &&
+    findConfigGroup(OSD_GROUP_KEY)?.state === "ready" &&
+    !groupFactsMissing(OSD_GROUP_KEY)
+);
+
+const osdFactsMissing = computed(() => groupFactsMissing(OSD_GROUP_KEY));
+
+const osdDirtyFields = computed(() => changedFieldKeys(familyValues[OSD_GROUP_KEY] ?? {}, familyBaseline[OSD_GROUP_KEY] ?? {}));
+const osdDirtyCount = computed(() => osdDirtyFields.value.length);
+
+/** OSD 组最近一次下发错误（与 `pictureError` 同一个机制、同一份 `familyError` 槽）。 */
+const osdError = computed(() => (familyErrorGroup.value === OSD_GROUP_KEY ? familyError.value : ""));
+
+/** 时间戳位置这一槽是否被改过。⛔ 逐轴比，别用 `osdDirtyCount > 0`——改格式也会让计数 >0。 */
+const osdTimeDraft = computed(
+  () =>
+    String(textValue(OSD_GROUP_KEY, "timeX")) !== String(baselineSv(OSD_GROUP_KEY, "timeX")) ||
+    String(textValue(OSD_GROUP_KEY, "timeY")) !== String(baselineSv(OSD_GROUP_KEY, "timeY"))
+);
+
+/**
+ * 某一行文字是否被改过（逐行比，不是"整组 items 变了就全算改过"）。
+ *
+ * ⛔ 粒度必须是**行**：`changedFieldKeys` 只给到 `items` 这一级，用它的话用户改第 2 行、
+ *    画布上所有行都会挂上「待下发」—— 那份"哪些还没下发"的提示就废了。
+ */
+function osdItemDraft(row: ConfigTextItem, index: number): boolean {
+  const baselineRows = (familyBaseline[OSD_GROUP_KEY]?.items as ConfigTextItem[] | undefined) ?? [];
+  const base = baselineRows[index];
+  // 新增的行（基准里没有这一条）一律算待下发。
+  if (!base) return true;
+  return (
+    String(row.text) !== String(base.text) ||
+    Number(row.x) !== Number(base.x) ||
+    Number(row.y) !== Number(base.y) ||
+    // 新增未定位 → 定位 也算改过（设备上还没有这个位置）。
+    (row.placed === false) !== (base.placed === false)
+  );
+}
+
+const osdAnchors = computed<OsdAnchor[]>(() => {
+  const anchors: OsdAnchor[] = [
+    {
+      key: "time",
+      kind: "time",
+      index: -1,
+      label: "时间戳",
+      x: Number(textValue(OSD_GROUP_KEY, "timeX")) || 0,
+      y: Number(textValue(OSD_GROUP_KEY, "timeY")) || 0,
+      unplaced: false,
+      draft: osdTimeDraft.value,
+      off: !boolValue(OSD_GROUP_KEY, "timeEnable")
+    }
+  ];
+  for (const [position, row] of textItemsValue(OSD_GROUP_KEY, "items").entries()) {
+    anchors.push({
+      key: `item-${position}`,
+      kind: "item",
+      index: position,
+      label: `${position + 1} ${row.text.trim() || "未命名"}`,
+      x: Number(row.x) || 0,
+      y: Number(row.y) || 0,
+      unplaced: row.placed === false,
+      draft: osdItemDraft(row, position),
+      off: !boolValue(OSD_GROUP_KEY, "textEnable")
+    });
+  }
+  return anchors;
+});
+
+/** 未定位的行数 —— 浮条据此把「下发」拦下来（`buildOSD` 那一层同样会拦）。 */
+const osdUnplacedCount = computed(() => osdAnchors.value.filter(anchor => anchor.unplaced).length);
+
+/**
+ * 侧栏点「在画面上定位」→ 请画布把对应锚点闪一下。
+ *
+ * ⛔ 带着递增 `seq` 而不是只有 `{kind,index}`：连续点同一行两次，值不变的话
+ *    watch 不会触发、第二次就"点了没反应"。计数是给 watch 用的，不是给界面用的。
+ */
+const osdFocusToken = ref<{ kind: "time" | "item"; index: number; seq: number } | null>(null);
+let osdFocusSeq = 0;
+
+function focusOsdAnchor(payload: { kind: "time" | "item"; index: number }) {
+  osdFocusSeq += 1;
+  osdFocusToken.value = { ...payload, seq: osdFocusSeq };
+}
+
+/**
+ * 画布拖动落点 → 草稿。
+ *
+ * ⛔ 坐标的合法区间在 `buildOSD` 那一层收口（0~8192），这里只做"不给人负数"的兜底 ——
+ *    在这里夹到画布尺寸会把"设备画布比坐标范围小"这件事悄悄改写掉。
+ */
+function setOsdTimePosition(axis: "x" | "y", value: number) {
+  if (!osdEditable.value) return;
+  const safe = Math.max(0, Math.min(8192, Math.round(Number(value) || 0)));
+  setSv(OSD_GROUP_KEY, axis === "x" ? "timeX" : "timeY", String(safe));
+}
+
+/**
+ * 画布拖动某一行文字 → 草稿，并把它标成**已定位**。
+ *
+ * ⛔ `placed: true` 是这一步的一半工作：拖动是"用户摆了位置"的唯一证据，
+ *    不标的话 `buildOSD` 会一直拒发这一行（而用户看起来明明已经摆好了）。
+ */
+function setOsdItemPosition(index: number, x: number, y: number) {
+  if (!osdEditable.value) return;
+  const safeX = Math.max(0, Math.min(8192, Math.round(Number(x) || 0)));
+  const safeY = Math.max(0, Math.min(8192, Math.round(Number(y) || 0)));
+  const rows = textItemsValue(OSD_GROUP_KEY, "items").map((row, position) =>
+    position === index ? { ...row, x: safeX, y: safeY, placed: true } : { ...row }
+  );
+  setTextItems(OSD_GROUP_KEY, "items", rows);
+}
+
+function readOsdGroup() {
+  // 与 `readPictureGroup` 同一条路：一次读取拉回本族的全部配置类型，
+  // 所以没有"只读 OSD 一组"的接口，也别为此新开一条（那会让两组的对账基准分叉）。
+  void loadDeviceConfigs(true);
+}
+
+function revertOsdGroup() {
+  resetGroup(OSD_GROUP_KEY);
+  if (familyErrorGroup.value === OSD_GROUP_KEY) familyError.value = "";
+}
+
+async function applyOsdGroup() {
+  await applyGroupConfig(OSD_GROUP_KEY);
+}
 
 /**
  * 设备**声明的图像坐标画布**（`width`=OSD 的 `Length`，`height`=OSD 的 `Width`）。
@@ -1430,6 +1714,47 @@ function selectStream(value: string) {
   streamProfile.value = value;
 }
 
+/**
+ * 图像叠加面板的 **props 袋**（2026-09-20，给播放控制台底栏用）。
+ *
+ * ⭐ 场景：底栏把「图像叠加」整块摆到画面下方（老板要求"一个页面全展示"），
+ *    而侧栏那一刻停在 `video-param`、不再切到 `osd` 组 ⇒ 面板不能靠"当前分组"驱动，
+ *    改为把这一组的值整袋交给宿主渲染。
+ *
+ * ⛔ 宿主**不要**自己从 `familyValues` 拼这些值、也不要另存一份：下面三个写口是唯一入口，
+ *    底栏与抽屉共用同一份 `familyValues[osd]`（两份状态必然分叉，本仓已踩过三次）。
+ * ⛔ `canvas` / `pictureCanvasSize` 是**设备声明的图像坐标画布**，不是画面解码尺寸 ——
+ *    真机实测口径见 [pictureCanvasSize] 的注释。
+ */
+const osdBlocks = computed(() => ({
+  timeEnable: boolValue(OSD_GROUP_KEY, "timeEnable"),
+  timeType: textValue(OSD_GROUP_KEY, "timeType"),
+  timeX: textValue(OSD_GROUP_KEY, "timeX"),
+  timeY: textValue(OSD_GROUP_KEY, "timeY"),
+  textEnable: boolValue(OSD_GROUP_KEY, "textEnable"),
+  items: textItemsValue(OSD_GROUP_KEY, "items"),
+  canvas: pictureCanvasSize.value,
+  // ⛔ 用 `!osdEditable` 而**不是** `familyFieldsDisabled`：后者读的是 `activeGroup`
+  //    （抽屉当前分组），而底栏这块现在常驻渲染、抽屉却停在 `video-param` ——
+  //    `activeGroupFactsMissing` 在 `activeIsVideo` 时直接返回 false，于是「设备没回
+  //    OSDConfig」时底栏控件反而是可编辑的，等于把平台空白模板（timeX=10 这类）
+  //    当成设备现状让人盲写。`osdEditable` 才是按 osd 组自身算的那一套闸门。
+  disabled: !osdEditable.value,
+  maxItems: MAX_OSD_TEXT_ITEMS,
+  editing: props.osdEditing,
+  canvasLinked: props.osdCanvasLinked
+}));
+
+/** 开关 / 时间格式这类单值字段（底栏 `v-bind` 之后再接一个写口就够）。 */
+function setOsdFlag(fieldKey: string, value: FieldValue) {
+  setSv(OSD_GROUP_KEY, fieldKey, value);
+}
+
+/** 叠加文字整表（增 / 删 / 改文字都在宿主侧算好后整表回写，与内联渲染同一条路）。 */
+function setOsdItems(rows: ConfigTextItem[]) {
+  setTextItems(OSD_GROUP_KEY, "items", rows);
+}
+
 defineExpose({
   selectGroup,
   selectStream,
@@ -1474,7 +1799,32 @@ defineExpose({
   readPictureGroup,
   applyPictureGroup,
   /** 点开关时的即时下发：只发 `PictureMask` 这一块。 */
-  applyPictureMaskOnly
+  applyPictureMaskOnly,
+  // ── 播放控制台画布上的 OSD 锚点层专用：钉在 osd 组上，与画面组同一套读写口 ──
+  osdEditable,
+  /** 画布要画的锚点（时间戳 + 各条文字），含四态：已生效 / 待下发 / 未定位 / 已关闭。 */
+  osdAnchors,
+  osdDirtyCount,
+  osdDirtyFields,
+  osdUnplacedCount,
+  osdFactsMissing,
+  osdError,
+  /** 侧栏点「在画面上定位」→ 画布把对应锚点闪一下（带递增 seq，连点两次也会触发）。 */
+  osdFocusToken,
+  setOsdTimePosition,
+  setOsdItemPosition,
+  readOsdGroup,
+  revertOsdGroup,
+  applyOsdGroup,
+  // ── 底栏「图像叠加」整块面板用（2026-09-20）：props 袋 + 三个写口 ──
+  /** 直接 `v-bind` 到 `DeviceConfigOsdBlocks` 上；改值走下面三个写口。 */
+  osdBlocks,
+  setOsdFlag,
+  setOsdItems,
+  /** 底栏点「在画面上定位」→ 画布闪一下对应锚点（与侧栏同一个口）。 */
+  focusOsdAnchor,
+  /** 浮条「下发」：画面 + OSD 的草稿**合并成一条报文**发出去。 */
+  applyPictureAndOsdGroups
 });
 
 onBeforeUnmount(() => {
@@ -1602,11 +1952,12 @@ onBeforeUnmount(() => {
             :class="{ 'is-active': group.key === activeGroupKey }"
             :data-testid="`dcg-nav-${group.key}`"
             :data-state="group.state"
+            :title="group.navLabel ? group.label : undefined"
             @click="activeGroupKey = group.key"
           >
             <ChevronRight :size="10" class="dcg-nav-caret" />
             <span class="dcg-nav-text">
-              <span class="dcg-nav-label">{{ group.label }}</span>
+              <span class="dcg-nav-label">{{ group.navLabel ?? group.label }}</span>
               <span v-if="!embedded" class="dcg-nav-sub">{{ group.std }}</span>
             </span>
             <i
@@ -1621,7 +1972,12 @@ onBeforeUnmount(() => {
         <section class="dcg-params">
           <header class="dcg-params-head">
             <div v-if="!embedded || configGroups.length <= 1" class="dcg-params-title-wrap">
-              <span class="dcg-params-title" data-testid="dcg-group-title">{{ activeGroup.label }}</span>
+              <span
+                class="dcg-params-title"
+                data-testid="dcg-group-title"
+                :title="activeGroupTitle === activeGroup.label ? undefined : activeGroup.label"
+                >{{ activeGroupTitle }}</span
+              >
               <span v-if="!embedded && activeGroup.since === '2022'" class="dcg-standard-badge" data-testid="dcg-standard-badge"
                 >GB/T 28181-2022</span
               >
@@ -1714,63 +2070,71 @@ onBeforeUnmount(() => {
 
                 <div class="dcg-field-group" data-testid="dcg-field-group" data-group="encoding">
                   <div class="dcg-field-group-head"><strong>编码</strong><span>VideoFormat · Resolution</span></div>
-                  <div class="dcg-row">
-                    <span class="dcg-row-label">编码格式</span>
-                    <div class="dcg-row-control">
-                      <a-select
-                        :model-value="row.videoFormat"
-                        class="dcg-select"
-                        size="small"
-                        :disabled="videoFieldsDisabled"
-                        :data-testid="`dcg-format-${row.streamNumber}`"
-                        @change="row.videoFormat = selectValue($event)"
+                  <!-- ⭐ 2026-09-20：编码格式与分辨率**同一行**。这两项本来就是同一件事的两半
+                       （拉流放不放得出来），拆两行只是白占一行 30px —— 老板原话「把空间节省出来」。
+                       ⛔ 一行里仍**各自带来源徽标**：对账粒度是"每个格子来自设备还是缺省"，
+                          挤掉徽标等于把对账能力换成省出来的那点宽度。
+                       ⛔ 自定义分辨率走 `flex-wrap` 折到第二行（见 `.dcg-pair-cell` 样式），
+                          不在 90px 里跟下拉框抢位置。 -->
+                  <div class="dcg-row is-pair" data-testid="dcg-row-encoding">
+                    <div class="dcg-pair-cell">
+                      <span class="dcg-row-label">编码格式</span>
+                      <div class="dcg-row-control">
+                        <a-select
+                          :model-value="row.videoFormat"
+                          class="dcg-select"
+                          size="small"
+                          :disabled="videoFieldsDisabled"
+                          :data-testid="`dcg-format-${row.streamNumber}`"
+                          @change="row.videoFormat = selectValue($event)"
+                        >
+                          <a-option v-for="option in VIDEO_FORMAT_OPTIONS" :key="option.value" :value="option.value">
+                            {{ option.label }}
+                          </a-option>
+                        </a-select>
+                      </div>
+                      <span
+                        class="dcg-row-hint"
+                        :data-source="cellBadge(row, 'videoFormat')"
+                        :title="badgeTitle(cellBadge(row, 'videoFormat'))"
+                        >{{ cellBadge(row, "videoFormat") }}</span
                       >
-                        <a-option v-for="option in VIDEO_FORMAT_OPTIONS" :key="option.value" :value="option.value">
-                          {{ option.label }}
-                        </a-option>
-                      </a-select>
                     </div>
-                    <span
-                      class="dcg-row-hint"
-                      :data-source="cellBadge(row, 'videoFormat')"
-                      :title="badgeTitle(cellBadge(row, 'videoFormat'))"
-                      >{{ cellBadge(row, "videoFormat") }}</span
-                    >
-                  </div>
 
-                  <div class="dcg-row">
-                    <span class="dcg-row-label">分辨率</span>
-                    <div class="dcg-row-control">
-                      <a-select
-                        :model-value="resolutionSelectValue(row)"
-                        class="dcg-select"
-                        size="small"
-                        :disabled="videoFieldsDisabled"
-                        :data-testid="`dcg-resolution-${row.streamNumber}`"
-                        @change="onResolutionSelect(row, $event)"
+                    <div class="dcg-pair-cell">
+                      <span class="dcg-row-label">分辨率</span>
+                      <div class="dcg-row-control">
+                        <a-select
+                          :model-value="resolutionSelectValue(row)"
+                          class="dcg-select"
+                          size="small"
+                          :disabled="videoFieldsDisabled"
+                          :data-testid="`dcg-resolution-${row.streamNumber}`"
+                          @change="onResolutionSelect(row, $event)"
+                        >
+                          <a-option v-for="option in RESOLUTION_OPTIONS" :key="option.value" :value="option.value">
+                            {{ option.label }}
+                          </a-option>
+                          <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
+                        </a-select>
+                        <input
+                          v-if="!isValidResolutionCode(row.resolution)"
+                          class="dcg-input is-narrow"
+                          :value="row.resolution"
+                          :disabled="videoFieldsDisabled"
+                          placeholder="1920x1080"
+                          aria-label="自定义分辨率"
+                          :data-testid="`dcg-resolution-custom-${row.streamNumber}`"
+                          @change="row.resolution = ($event.target as HTMLInputElement).value"
+                        />
+                      </div>
+                      <span
+                        class="dcg-row-hint"
+                        :data-source="cellBadge(row, 'resolution')"
+                        :title="badgeTitle(cellBadge(row, 'resolution'))"
+                        >{{ cellBadge(row, "resolution") }}</span
                       >
-                        <a-option v-for="option in RESOLUTION_OPTIONS" :key="option.value" :value="option.value">
-                          {{ option.label }}
-                        </a-option>
-                        <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
-                      </a-select>
-                      <input
-                        v-if="!isValidResolutionCode(row.resolution)"
-                        class="dcg-input is-narrow"
-                        :value="row.resolution"
-                        :disabled="videoFieldsDisabled"
-                        placeholder="1920x1080"
-                        aria-label="自定义分辨率"
-                        :data-testid="`dcg-resolution-custom-${row.streamNumber}`"
-                        @change="row.resolution = ($event.target as HTMLInputElement).value"
-                      />
                     </div>
-                    <span
-                      class="dcg-row-hint"
-                      :data-source="cellBadge(row, 'resolution')"
-                      :title="badgeTitle(cellBadge(row, 'resolution'))"
-                      >{{ cellBadge(row, "resolution") }}</span
-                    >
                   </div>
                 </div>
 
@@ -1884,117 +2248,146 @@ onBeforeUnmount(() => {
                 <span>面板显示的是最近一次回读到的设备生效值；改任一项后可下发。</span>
               </div>
 
-              <div v-for="field in primaryFields" :key="field.key" class="dcg-row" :data-testid="`dcg-field-${field.key}`">
-                <span class="dcg-row-label">{{ field.label }}</span>
-                <!-- ⛔ 没有设备事实时不给控件：空白模板上的数字会被当成设备值，改一下还能下发 -->
-                <div v-if="activeGroupFactsMissing" class="dcg-row-control">
-                  <span class="dcg-row-unknown" :data-testid="`dcg-field-unknown-${field.key}`">—</span>
-                </div>
-                <div v-else class="dcg-row-control">
-                  <a-select
-                    v-if="field.kind === 'select'"
-                    class="dcg-select"
-                    :model-value="textValue(activeGroup.key, field.key)"
-                    size="small"
-                    :disabled="familyFieldsDisabled"
-                    :aria-label="field.label"
-                    @change="setSv(activeGroup.key, field.key, selectValue($event))"
-                  >
-                    <a-option v-for="option in field.options" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </a-option>
-                  </a-select>
-
-                  <div v-else-if="field.kind === 'mirror'" class="dcg-mirror" :data-testid="`dcg-mirror-${field.key}`">
-                    <!-- ⛔ 图标不能替代文字：对账比的是值，不是画面对不对 -->
-                    <button
-                      v-for="option in field.options"
-                      :key="option.value"
-                      type="button"
-                      class="dcg-mirror-btn"
-                      :class="{ 'is-active': textValue(activeGroup.key, field.key) === option.value }"
-                      :disabled="familyFieldsDisabled"
-                      :aria-pressed="textValue(activeGroup.key, field.key) === option.value"
-                      :title="`${option.label}（值 ${option.value}）`"
-                      :data-testid="`dcg-mirror-${field.key}-${option.value}`"
-                      @click="setSv(activeGroup.key, field.key, option.value)"
-                    >
-                      <component :is="mirrorIcon(option.value)" :size="16" />
-                      <span>{{ option.shortLabel ?? option.label }}</span>
-                    </button>
-                  </div>
-
-                  <DeviceConfigSlider
-                    v-else-if="field.kind === 'slider'"
-                    :model-value="numberValue(activeGroup.key, field.key, field.min)"
-                    :min="field.min"
-                    :max="field.max"
-                    :step="field.step"
-                    :unit="field.unit"
-                    :label="field.label"
-                    :disabled="familyFieldsDisabled"
-                    @update:model-value="setSv(activeGroup.key, field.key, $event)"
-                  />
-
-                  <button
-                    v-else-if="field.kind === 'switch'"
-                    type="button"
-                    class="dcg-switch"
-                    :class="{ 'is-on': boolValue(activeGroup.key, field.key) }"
-                    :disabled="familyFieldsDisabled"
-                    :aria-label="field.label"
-                    @click="setSv(activeGroup.key, field.key, !boolValue(activeGroup.key, field.key))"
-                  >
-                    <i />
-                  </button>
-
-                  <div v-else-if="field.kind === 'coords'" class="dcg-coords">
-                    <label v-for="(axis, index) in field.axes" :key="axis">
-                      <span>{{ axis }}</span>
-                      <input
-                        class="dcg-input is-coord"
-                        type="text"
-                        inputmode="numeric"
-                        :disabled="familyFieldsDisabled"
-                        :aria-label="`${field.label} ${axis}`"
-                        :value="coordsValue(activeGroup.key, field.key)[index]"
-                        @change="setCoordValue(activeGroup.key, field.key, index, ($event.target as HTMLInputElement).value)"
-                      />
-                    </label>
-                  </div>
-
-                  <DeviceConfigTextItems
-                    v-else-if="field.kind === 'texts'"
-                    :model-value="textItemsValue(activeGroup.key, field.key)"
-                    :max-items="field.maxItems"
-                    :max-length="MAX_OSD_TEXT_LENGTH"
-                    :disabled="familyFieldsDisabled"
-                    @update:model-value="setTextItems(activeGroup.key, field.key, $event)"
-                  />
-
-                  <DeviceConfigWeekPlan
-                    v-else-if="field.kind === 'schedules'"
-                    :model-value="schedulesValue(activeGroup.key, field.key)"
-                    :disabled="familyFieldsDisabled"
-                    @update:model-value="setSchedules(activeGroup.key, field.key, $event)"
-                  />
-
-                  <input
-                    v-else
-                    class="dcg-input"
-                    type="text"
-                    :disabled="familyFieldsDisabled"
-                    :value="textValue(activeGroup.key, field.key)"
-                    :placeholder="field.placeholder"
-                    :maxlength="field.maxlength"
-                    :aria-label="field.label"
-                    @change="setSv(activeGroup.key, field.key, ($event.target as HTMLInputElement).value)"
-                  />
-                </div>
-                <span v-if="fieldHint(field, activeGroup.key) && !embedded" class="dcg-row-hint">{{
-                  fieldHint(field, activeGroup.key)
-                }}</span>
+              <!-- ═══ OSD：对象块形态（时间戳 / 叠加文字 / 只读坐标画布）═══
+                   这一组不是"平铺的参数表"，而是"画面上摆的两样东西"。通用字段行渲染不出
+                   对象块形态 —— 硬塞就得把位置拆回两个滑杆，而那正是要抹平的落差。 -->
+              <div v-if="activeGroup.key === OSD_GROUP_KEY" class="dcg-osd-blocks" data-testid="dcg-osd-blocks">
+                <DeviceConfigOsdBlocks
+                  :time-enable="boolValue(OSD_GROUP_KEY, 'timeEnable')"
+                  :time-type="textValue(OSD_GROUP_KEY, 'timeType')"
+                  :time-x="textValue(OSD_GROUP_KEY, 'timeX')"
+                  :time-y="textValue(OSD_GROUP_KEY, 'timeY')"
+                  :text-enable="boolValue(OSD_GROUP_KEY, 'textEnable')"
+                  :items="textItemsValue(OSD_GROUP_KEY, 'items')"
+                  :canvas="pictureCanvasSize"
+                  :disabled="familyFieldsDisabled"
+                  :max-items="MAX_OSD_TEXT_ITEMS"
+                  :editing="osdEditing"
+                  :canvas-linked="osdCanvasLinked"
+                  @update:time-enable="setSv(OSD_GROUP_KEY, 'timeEnable', $event)"
+                  @update:time-type="setSv(OSD_GROUP_KEY, 'timeType', $event)"
+                  @update:time-x="setOsdTimePosition('x', Number($event))"
+                  @update:time-y="setOsdTimePosition('y', Number($event))"
+                  @update:text-enable="setSv(OSD_GROUP_KEY, 'textEnable', $event)"
+                  @update:items="setTextItems(OSD_GROUP_KEY, 'items', $event)"
+                  @locate="focusOsdAnchor"
+                  @toggle-edit="emit('toggleOsdEdit')"
+                />
               </div>
+
+              <template v-else>
+                <div v-for="field in primaryFields" :key="field.key" class="dcg-row" :data-testid="`dcg-field-${field.key}`">
+                  <span class="dcg-row-label">{{ field.label }}</span>
+                  <!-- ⛔ 没有设备事实时不给控件：空白模板上的数字会被当成设备值，改一下还能下发 -->
+                  <div v-if="activeGroupFactsMissing" class="dcg-row-control">
+                    <span class="dcg-row-unknown" :data-testid="`dcg-field-unknown-${field.key}`">—</span>
+                  </div>
+                  <div v-else class="dcg-row-control">
+                    <a-select
+                      v-if="field.kind === 'select'"
+                      class="dcg-select"
+                      :model-value="textValue(activeGroup.key, field.key)"
+                      size="small"
+                      :disabled="familyFieldsDisabled"
+                      :aria-label="field.label"
+                      @change="setSv(activeGroup.key, field.key, selectValue($event))"
+                    >
+                      <a-option v-for="option in field.options" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </a-option>
+                    </a-select>
+
+                    <div v-else-if="field.kind === 'mirror'" class="dcg-mirror" :data-testid="`dcg-mirror-${field.key}`">
+                      <!-- ⛔ 图标不能替代文字：对账比的是值，不是画面对不对 -->
+                      <button
+                        v-for="option in field.options"
+                        :key="option.value"
+                        type="button"
+                        class="dcg-mirror-btn"
+                        :class="{ 'is-active': textValue(activeGroup.key, field.key) === option.value }"
+                        :disabled="familyFieldsDisabled"
+                        :aria-pressed="textValue(activeGroup.key, field.key) === option.value"
+                        :title="`${option.label}（值 ${option.value}）`"
+                        :data-testid="`dcg-mirror-${field.key}-${option.value}`"
+                        @click="setSv(activeGroup.key, field.key, option.value)"
+                      >
+                        <component :is="mirrorIcon(option.value)" :size="16" />
+                        <span>{{ option.shortLabel ?? option.label }}</span>
+                      </button>
+                    </div>
+
+                    <DeviceConfigSlider
+                      v-else-if="field.kind === 'slider'"
+                      :model-value="numberValue(activeGroup.key, field.key, field.min)"
+                      :min="field.min"
+                      :max="field.max"
+                      :step="field.step"
+                      :unit="field.unit"
+                      :label="field.label"
+                      :disabled="familyFieldsDisabled"
+                      @update:model-value="setSv(activeGroup.key, field.key, $event)"
+                    />
+
+                    <button
+                      v-else-if="field.kind === 'switch'"
+                      type="button"
+                      class="dcg-switch"
+                      :class="{ 'is-on': boolValue(activeGroup.key, field.key) }"
+                      :disabled="familyFieldsDisabled"
+                      :aria-label="field.label"
+                      @click="setSv(activeGroup.key, field.key, !boolValue(activeGroup.key, field.key))"
+                    >
+                      <i />
+                    </button>
+
+                    <div v-else-if="field.kind === 'coords'" class="dcg-coords">
+                      <label v-for="(axis, index) in field.axes" :key="axis">
+                        <span>{{ axis }}</span>
+                        <input
+                          class="dcg-input is-coord"
+                          type="text"
+                          inputmode="numeric"
+                          :disabled="familyFieldsDisabled"
+                          :aria-label="`${field.label} ${axis}`"
+                          :value="coordsValue(activeGroup.key, field.key)[index]"
+                          @change="setCoordValue(activeGroup.key, field.key, index, ($event.target as HTMLInputElement).value)"
+                        />
+                      </label>
+                    </div>
+
+                    <DeviceConfigTextItems
+                      v-else-if="field.kind === 'texts'"
+                      :model-value="textItemsValue(activeGroup.key, field.key)"
+                      :max-items="field.maxItems"
+                      :max-length="MAX_OSD_TEXT_LENGTH"
+                      :disabled="familyFieldsDisabled"
+                      @update:model-value="setTextItems(activeGroup.key, field.key, $event)"
+                    />
+
+                    <DeviceConfigWeekPlan
+                      v-else-if="field.kind === 'schedules'"
+                      :model-value="schedulesValue(activeGroup.key, field.key)"
+                      :disabled="familyFieldsDisabled"
+                      @update:model-value="setSchedules(activeGroup.key, field.key, $event)"
+                    />
+
+                    <input
+                      v-else
+                      class="dcg-input"
+                      type="text"
+                      :disabled="familyFieldsDisabled"
+                      :value="textValue(activeGroup.key, field.key)"
+                      :placeholder="field.placeholder"
+                      :maxlength="field.maxlength"
+                      :aria-label="field.label"
+                      @change="setSv(activeGroup.key, field.key, ($event.target as HTMLInputElement).value)"
+                    />
+                  </div>
+                  <span v-if="fieldHint(field, activeGroup.key) && !embedded" class="dcg-row-hint">{{
+                    fieldHint(field, activeGroup.key)
+                  }}</span>
+                </div>
+              </template>
             </template>
           </div>
 
@@ -2294,9 +2687,20 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* ⛔ 嵌入形态的分组导航**横排 + 按组数等分**，不要写死列数。
+  原来是 `grid-template-columns: repeat(4, minmax(0, 1fr))`：只有 2 个组时
+  第 3、4 列永远空着，看上去像"导航坏了半排"。宿主传几组是它自己的事
+  （播放控制台侧栏 1 组、设备详情抽屉 2~3 组），所以用 flex 让子项自己分。
+  ⛔⛔ `flex-direction: row` **必须显式写**：基类 `.dcg-nav` 是 `flex-direction: column`
+    （全窗口形态的竖排导航），`display: flex` 会把那个方向一起继承过来 ——
+    `display: grid` 时代它被隐式盖掉，换成 flex 后不写就变成**竖排导航**
+    （实测：2 个组各 592px 宽、上下摞着，整条导航高 47px）。这是"改一个属性、坏另一个"
+    的典型，只有真在浏览器里量过才看得见。
+  ⛔ 子项保留 `min-width: 0`（见 .dcg-nav-item）：组多了靠收缩 + 省略号收场，
+    不许把导航撑出横向滚动。 */
 .dcg-window--embedded .dcg-nav {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-direction: row;
   gap: 2px;
   min-width: 0;
   padding: 6px 8px;
@@ -2304,6 +2708,10 @@ onBeforeUnmount(() => {
   background: var(--uvp-dialog-control-bg, #f8fbff);
   border-right: 0;
   border-bottom: 1px solid var(--uvp-dialog-border, #e6edf7);
+}
+
+.dcg-window--embedded .dcg-nav > .dcg-nav-item {
+  flex: 1 1 0;
 }
 
 .dcg-window--embedded .dcg-params-head {
@@ -2387,6 +2795,39 @@ onBeforeUnmount(() => {
 .dcg-window--embedded .dcg-row {
   grid-template-columns: minmax(88px, 96px) minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+/* 成对字段行（编码格式 + 分辨率同一行，2026-09-20）。
+ * ⛔ 选择器必须带 `.is-pair` 写成两条（含嵌入态那条）—— 上面 `.dcg-window--embedded .dcg-row`
+ *    是两列栅格，光写 `.dcg-row.is-pair` 在嵌入态会被它按顺序盖掉，表现为"还是两行"。
+ * 每格 3 列 = 标签 / 控件 / 来源徽标：约 168px 里留给下拉框约 90px，
+ * 「1920×1080」在 10–11px 字号下放得下。 */
+.dcg-row.is-pair,
+.dcg-window--embedded .dcg-row.is-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.dcg-pair-cell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+}
+.dcg-window--embedded .dcg-row.is-pair .dcg-row-label {
+  text-align: left;
+}
+.dcg-window--embedded .dcg-row.is-pair .dcg-row-hint {
+  max-width: 26px;
+}
+
+/* 自定义分辨率折到第二行：不在 90px 的格子里跟下拉框抢位置（选了「自定义…」才会出现）。 */
+.dcg-pair-cell .dcg-row-control {
+  flex-wrap: wrap;
+}
+.dcg-pair-cell .dcg-row-control > .dcg-input {
+  flex: 1 1 100%;
+  min-width: 0;
 }
 
 .dcg-window--embedded .dcg-row-label {

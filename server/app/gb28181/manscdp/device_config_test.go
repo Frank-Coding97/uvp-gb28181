@@ -1,9 +1,12 @@
 package manscdp
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
@@ -561,6 +564,7 @@ func TestDeviceConfigBlocks_BlockMappingIsSingleSourced(t *testing.T) {
 		FrameMirror:      &FrameMirrorBlock{},
 		AlarmReport:      &AlarmReportBlock{},
 		OSDConfig:        &OSDConfigBlock{TimeType: &timeType},
+		SnapShot:         &SnapShotBlock{},
 	}
 
 	if got := strings.Join(full.PresentConfigTypes(), ","); got != strings.Join(ConfigTypeOrder, ",") {
@@ -577,17 +581,97 @@ func TestDeviceConfigBlocks_BlockMappingIsSingleSourced(t *testing.T) {
 		}
 	}
 
-	// 只有 8 组（VideoParamAttribute 走 video_param.go 的独立通道）。
-	if len(ConfigTypeOrder) != 8 {
-		t.Fatalf("ConfigTypeOrder 应有 8 项，实际 %d 项: %v", len(ConfigTypeOrder), ConfigTypeOrder)
+	// 只有 9 组（VideoParamAttribute 走 video_param.go 的独立通道）。
+	// ⛔ 这个数字是**刻意的硬编码**：新增一个 ConfigType 时必须同时改这里 ——
+	// 它是"有人往契约表里塞了东西"的唯一提示（改完还要回答下一条用例的问题）。
+	if len(ConfigTypeOrder) != 9 {
+		t.Fatalf("ConfigTypeOrder 应有 9 项，实际 %d 项: %v", len(ConfigTypeOrder), ConfigTypeOrder)
 	}
 
 	// ⛔ 未知类型必须判缺席。`VideoParamAttribute` 是**有意的**未知项：
 	// 它有自己的通道，通用容器不该悄悄把它也认下来（那会变成两条通道都写它）。
-	for _, unknown := range []string{"VideoParamAttribute", "SnapShotConfig", "", "  "} {
+	for _, unknown := range []string{"VideoParamAttribute", "SVACEncodeConfig", "", "  "} {
 		if block, present := full.Block(unknown); present || block != nil {
 			t.Fatalf("Block(%q) 不该认下不属于通用容器的类型: %+v", unknown, block)
 		}
+	}
+}
+
+// TestDeviceConfigWriteCoverage 钉住「ConfigTypeOrder 里每一项都必须有明确归属」。
+//
+// ⛔ 为什么值得一条用例（这是本轮修复里最贵的一条结论）：`DeviceConfigBlocks` 里有字段、
+// `PresentConfigTypes()` 就会把它算进去，但**构建器不一定真的产出它的 XML 元素**。
+// 两者一旦不一致，平台会发出一条"声称要配 X、报文里却一个块都没有"的 DeviceConfig ——
+// 设备回 OK、平台记 accepted，配置从头到尾没传出去，而两侧日志都正常。
+//
+// 所以每个类型只有两种合法归属，必须**显式二选一**：
+//  1. 构建器真的产出 `<Type>` 元素；
+//  2. 落在一张写明原因的"不下发"清单里（[ReadOnlyDeviceConfigTypeReason]）。
+//
+// 新增配置类型时这条用例会红 —— 那是设计要求，不是障碍：它逼你先回答"这个类型到底能不能下发"。
+func TestDeviceConfigWriteCoverage(t *testing.T) {
+	for _, configType := range ConfigTypeOrder {
+		t.Run(configType, func(t *testing.T) {
+			blocks, err := minimalDeviceConfigBlocks(configType)
+			if err != nil {
+				t.Fatalf("缺少 %s 的最小可用夹具: %v（新增类型时必须补一份）", configType, err)
+			}
+			body, buildErr := BuildDeviceConfigBlocksWithProfile(
+				protocol.ProfileFor(protocol.Version2022), testDeviceID, 11, blocks)
+
+			if reason, readOnly := ReadOnlyDeviceConfigTypeReason(configType); readOnly {
+				// 归属 2：只读类型必须在**发送前**被拒，且理由里要点出类型名。
+				if buildErr == nil {
+					t.Fatalf("只读类型 %s 竟然构建成功（%s）—— 报文里没有它的元素，等于静默丢配置",
+						configType, reason)
+				}
+				if !strings.Contains(buildErr.Error(), configType) {
+					t.Fatalf("拒绝 %s 的错误文案没点出类型名，排查时对不上: %v", configType, buildErr)
+				}
+				return
+			}
+
+			// 归属 1：必须真的产出元素，且元素名就是标准类型名。
+			require.NoError(t, buildErr, "%s 应该有可下发的形态", configType)
+			require.Contains(t, string(body), "<"+configType+">",
+				"构建器没有产出 <%s> 元素 —— 它会静默丢配置", configType)
+		})
+	}
+}
+
+// minimalDeviceConfigBlocks 为每个在 [ConfigTypeOrder] 里的类型给一份**恰好合法**的夹具。
+//
+// ⛔ 只读类型也要给一份（`VideoParamOpt`）：用例要先能构造出"用户硬要下发它"的容器，
+// 才能验证构建侧真的拒了 —— 夹具缺失会让用例死在"夹具还没写"，而不是产品行为上。
+func minimalDeviceConfigBlocks(configType string) (DeviceConfigBlocks, error) {
+	sessionID := strings.Repeat("s", MinSnapShotSessionIDLen)
+	snapNum, interval := 1, 1
+	uploadURL := "http://127.0.0.1/api/gb28181/device-snapshots/uploads/token/"
+	name := "channel"
+	expiration := 3600
+	switch configType {
+	case ConfigTypeBasicParam:
+		return DeviceConfigBlocks{BasicParam: &BasicParamBlock{Name: &name, Expiration: &expiration}}, nil
+	case ConfigTypeVideoParamOpt:
+		return DeviceConfigBlocks{VideoParamOpt: &VideoParamOptBlock{DownloadSpeed: "1/2", Resolution: "5/6"}}, nil
+	case ConfigTypeVideoRecordPlan:
+		return DeviceConfigBlocks{VideoRecordPlan: &VideoRecordPlanBlock{}}, nil
+	case ConfigTypeVideoAlarmRecord:
+		return DeviceConfigBlocks{VideoAlarmRecord: &VideoAlarmRecordBlock{}}, nil
+	case ConfigTypePictureMask:
+		return DeviceConfigBlocks{PictureMask: &PictureMaskBlock{On: PictureMaskOff}}, nil
+	case ConfigTypeFrameMirror:
+		return DeviceConfigBlocks{FrameMirror: &FrameMirrorBlock{Value: FrameMirrorOff}}, nil
+	case ConfigTypeAlarmReport:
+		return DeviceConfigBlocks{AlarmReport: &AlarmReportBlock{}}, nil
+	case ConfigTypeOSDConfig:
+		return DeviceConfigBlocks{OSDConfig: &OSDConfigBlock{Length: 1920, Width: 1080}}, nil
+	case ConfigTypeSnapShotConfig:
+		return DeviceConfigBlocks{SnapShot: &SnapShotBlock{
+			SnapNum: &snapNum, Interval: &interval, UploadURL: &uploadURL, SessionID: &sessionID,
+		}}, nil
+	default:
+		return DeviceConfigBlocks{}, fmt.Errorf("未知配置类型 %q", configType)
 	}
 }
 

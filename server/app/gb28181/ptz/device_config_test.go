@@ -426,13 +426,77 @@ func TestDiffDeviceConfigBlocksIgnoresBlankMaskRegions(t *testing.T) {
 	require.Equal(t, "PictureMask.regions", retained[0].Path)
 }
 
+// TestDiffDeviceConfigBlocksFoldsOSDPositionsToRowGrid 纵向落位被设备折算到行网格
+// **不是**「值未生效」—— 这是 2026-09-20 的真机现场（海康 DS-2DC2C040MY-DE）：
+//
+//	操作员把时间戳拖到 (18, 51)，界面立刻说
+//	「设备已接受命令，但值未生效：回读值与下发值不一致: OSDConfig.timeY=51(实际 48)」，
+//	而时间戳在画面上的**位置明明变了** —— 这就是操作员说的"其实已经生效了"。
+//
+// 真机控制变量扫描的结论（tmp/osd_grid_probe.py + tmp/osd_item_probe.py）：
+// **纵向只能落在行高 16 的整数倍上（向下取整），横向是逐像素的**。
+// 折算幅度不足一行（<16 像素），所以肉眼看到的就是"移过去了"。
+//
+// ⛔ 本用例的后半段是反向守卫：别为了消掉这条假差异，把"真没照做"一起放过。
+func TestDiffDeviceConfigBlocksFoldsOSDPositionsToRowGrid(t *testing.T) {
+	osd := func(timeX, timeY int, items ...manscdp.OSDTextItem) manscdp.DeviceConfigBlocks {
+		return manscdp.DeviceConfigBlocks{OSDConfig: &manscdp.OSDConfigBlock{
+			Length: 704, Width: 576, TimeX: timeX, TimeY: timeY,
+			TimeEnable: manscdp.AlarmReportOn, TextEnable: manscdp.AlarmReportOff,
+			Items: items,
+		}}
+	}
+
+	// ① 现场那条：拖到 (18, 51)、设备落 (18, 48) ⇒ 已经生效，不该报。
+	require.Empty(t, diffDeviceConfigBlocks(osd(18, 51), osd(18, 48)),
+		"纵向折算到行网格是设备的落位精度，不是「值未生效」")
+
+	// ② 网格上的 16 的倍数原样落位（真机上 33→32、100→96、255→240 全都只差取整余数）。
+	require.Empty(t, diffDeviceConfigBlocks(osd(18, 100), osd(18, 96)),
+		"100 折成 96 == 设备实际落位，一致")
+
+	// ③ 文本行走同一条网格（真机实测 Text Y 37→32、100→96，X 25/33 原样回读）。
+	require.Empty(t, diffDeviceConfigBlocks(
+		osd(18, 32, manscdp.OSDTextItem{Text: "UVP", X: 25, Y: 37}),
+		osd(18, 32, manscdp.OSDTextItem{Text: "UVP", X: 25, Y: 32}),
+	), "文本行的 y 与 TimeY 是同一套行网格")
+
+	// ④ ⛔ 反向守卫 A：落在网格上的纵向差异是真差异 —— 32 对上 33 必须报。
+	require.Len(t, diffDeviceConfigBlocks(osd(18, 32), osd(18, 33)), 1,
+		"折算只吸收「不足一行」的取整，设备真把位置放错一整行必须报出来")
+
+	// ⑤ ⛔ 反向守卫 B：横向**不吸附** —— 25 对上 26 必须报
+	// （真机上 TimeX 18/289/317 与文本行 X 25/33 全部原样回读，含两个奇数）。
+	horizontal := diffDeviceConfigBlocks(osd(25, 48), osd(26, 48))
+	require.Len(t, horizontal, 1, "横向是逐像素的，任何差异都是真差异")
+	require.Equal(t, "OSDConfig.timeX", horizontal[0].Path)
+
+	// ⑥ ⛔ 反向守卫 C：纵向**真**没照做 —— 51 对上 200 必须报，
+	// 且报出来的是折算后的值（读者才知道差在哪一行）。
+	far := diffDeviceConfigBlocks(osd(18, 51), osd(18, 200))
+	require.Len(t, far, 1)
+	require.Equal(t, "48", far[0].Wanted, "报出的应是设备能落到的那个值")
+	require.Equal(t, "200", far[0].Actual)
+
+	// ⑦ ⛔ 反向守卫 D：设备回一个**不在网格上**的值 ⇒ 必须报。
+	// 回读侧刻意不折：两边都折的话 `49` 会被折成 48 吞掉，那是把假差异换成假绿。
+	offGrid := diffDeviceConfigBlocks(osd(18, 51), osd(18, 49))
+	require.Len(t, offGrid, 1, "回读值不在行网格上说明设备没按预期落位")
+	require.Equal(t, "48", offGrid[0].Wanted)
+	require.Equal(t, "49", offGrid[0].Actual)
+}
+
 // TestDiffDeviceConfigBlocksReportsNestedPathAndValues 差异必须指到具体字段，
 // 否则面板只能说"不一致"而不能说"哪一格不一致"。
 func TestDiffDeviceConfigBlocksReportsNestedPathAndValues(t *testing.T) {
 	wanted := manscdp.DeviceConfigBlocks{
 		AlarmReport: &manscdp.AlarmReportBlock{MotionDetection: manscdp.AlarmReportOn, FieldDetection: manscdp.AlarmReportOff},
+		// ⛔ 这里的 Y 取 16 的倍数（= 行网格上的值）：本用例要验证的是"路径带下标、
+		// 值能读出来"，不是纵向折算 —— 拿 34 这种网格外的值会被 [foldOSDPositionsToRowGrid]
+		// 折成 32，把两个语义混在一条断言里。折算本身由
+		// TestDiffDeviceConfigBlocksFoldsOSDPositionsToRowGrid 单独覆盖。
 		OSDConfig: &manscdp.OSDConfigBlock{Length: 1920, Width: 1080,
-			Items: []manscdp.OSDTextItem{{Text: "东门", X: 10, Y: 34}}},
+			Items: []manscdp.OSDTextItem{{Text: "东门", X: 10, Y: 32}}},
 	}
 	observed := manscdp.DeviceConfigBlocks{
 		// 设备没执行动检，且 OSD 的第一个文本项 Y 与下发不同。
@@ -451,7 +515,7 @@ func TestDiffDeviceConfigBlocksReportsNestedPathAndValues(t *testing.T) {
 	require.Contains(t, paths, "AlarmReport.motionDetection")
 	require.Equal(t, "1→0", paths["AlarmReport.motionDetection"])
 	require.Contains(t, paths, "OSDConfig.items[0].y", "数组元素必须带下标，否则多元素的配置指不清是哪一项")
-	require.Equal(t, "34→40", paths["OSDConfig.items[0].y"])
+	require.Equal(t, "32→40", paths["OSDConfig.items[0].y"])
 
 	text := formatDeviceConfigDiff(diffs)
 	require.Contains(t, text, "AlarmReport.motionDetection=1(实际 0)")
@@ -578,12 +642,57 @@ func TestNormalizeDeviceConfigTypesOrdersDedupesAndRejects(t *testing.T) {
 
 	_, err = normalizeDeviceConfigTypes([]string{"VideoParamAttribute"})
 	require.Error(t, err, "VideoParamAttribute 有自己的通道，通用通道不许认它")
-	_, err = normalizeDeviceConfigTypes([]string{"SnapShotConfig"})
-	require.Error(t, err, "标准里不存在的类型必须拒发")
 	_, err = normalizeDeviceConfigTypes(nil)
 	require.Error(t, err, "空类型列表没有语义，必须拒发")
 	_, err = normalizeDeviceConfigTypes([]string{"  "})
 	require.Error(t, err)
+	_, err = normalizeDeviceConfigTypes([]string{"SVACEncodeConfig"})
+	require.Error(t, err, "平台还没落地 SVAC 配置族，读请求不许认它")
+}
+
+// TestNormalizeDeviceConfigTypesAcceptsSnapShotConfig 钉住抓拍配置**能读**。
+//
+// ⛔ 这条用例的来历（2026-09-20）：`SnapShotConfig` 早就有常量、但**零消费者**，
+// 于是读请求里带它会被"未知的配置类型"拒发 —— 抓拍配置"配了之后无法回读当前值"
+// 正是从这一行开始的。查询侧的合法取值出自 A.2.4.7 的明文列举（图像抓拍配置：SnapShotConfig）。
+func TestNormalizeDeviceConfigTypesAcceptsSnapShotConfig(t *testing.T) {
+	got, err := normalizeDeviceConfigTypes([]string{manscdp.ConfigTypeSnapShotConfig})
+	require.NoError(t, err)
+	require.Equal(t, []string{manscdp.ConfigTypeSnapShotConfig}, got)
+
+	// ⛔ 排在最末：它与 A.2.3.2.12（下发）和 A.2.6.9（应答）里抓拍元素的位置一致，
+	// 而 ConfigTypeOrder 是对外契约（构建顺序 / PresentConfigTypes / 差异列表三处同源）。
+	require.Equal(t, manscdp.ConfigTypeSnapShotConfig, manscdp.ConfigTypeOrder[len(manscdp.ConfigTypeOrder)-1])
+}
+
+// TestValidateDeviceConfigChannelTypesRejectsSnapshotThroughGenericAPI 钉住
+// 「抓拍配置不能从通用下发接口进来」。
+//
+// ⛔ 这条是**平台策略**、不是协议结论：A.2.3.2.12 允许下发 `<SnapShotConfig>`，
+// 但它的 `UploadURL` 是**设备往哪里 POST 图像**的地址。通用接口若收客户端给的值，
+// 等于允许任何持"设备配置下发"权限的账号把摄像头画面推到他自己的服务器上。
+// 抓拍配置只走抓拍会话（SessionID 与带令牌的上传地址由平台生成）。
+//
+// ⛔ 反向锚点：**其它类型必须照常放行**，否则这条守卫会把整个配置族的下发一起锁死。
+func TestValidateDeviceConfigChannelTypesRejectsSnapshotThroughGenericAPI(t *testing.T) {
+	err := validateDeviceConfigChannelTypes([]string{manscdp.ConfigTypeSnapShotConfig})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), manscdp.ConfigTypeSnapShotConfig)
+	require.Contains(t, err.Error(), "抓拍会话", "错误文案必须告诉调用方正确的入口")
+
+	// 混在一组里也必须整条拒绝，不能"只丢掉那一块"。
+	require.Error(t, validateDeviceConfigChannelTypes([]string{
+		manscdp.ConfigTypeOSDConfig, manscdp.ConfigTypeSnapShotConfig,
+	}))
+
+	for _, allowed := range []string{
+		manscdp.ConfigTypeBasicParam, manscdp.ConfigTypeVideoRecordPlan,
+		manscdp.ConfigTypeVideoAlarmRecord, manscdp.ConfigTypePictureMask,
+		manscdp.ConfigTypeFrameMirror, manscdp.ConfigTypeAlarmReport, manscdp.ConfigTypeOSDConfig,
+	} {
+		require.NoError(t, validateDeviceConfigChannelTypes([]string{allowed}),
+			"%s 是本通道的正常下发类型，不该被守卫挡住", allowed)
+	}
 }
 
 // ---- 两条读链路的分派（「两道门禁」的位置） ----
@@ -689,4 +798,53 @@ func TestOnPTZMessageRoutesDeviceConfigAckByAction(t *testing.T) {
 	require.NoError(t, db.Where("operation_id = ?", *reloaded.ReconcileOperationID).Limit(1).Find(&child).Error)
 	require.Equal(t, actionRefreshDeviceConfigs, child.Action,
 		"对账子 operation 必须走配置家族的回读 action，否则它会被分派到 A-5 那条链路")
+}
+
+// ⛔⛔ 回归锚点（2026-09-20 海康真机）：**抓拍会话（action=`snapshot_config`）的写入 ack
+// 必须走配置族那一支**。这是"抓拍整条链路静默失效"的第二个断面。
+//
+// 走错支路**不报任何错**，后果比报错严重得多：A-5 那条支路派生出的回读去查
+// `VideoParamAttribute`，而父 payload 里装的是 `SnapShotConfig` ——
+// [diffDeviceConfigBlocks] 只比"双方都在场"的块，两边一个都对不上 ⇒ 差异 0 条 ⇒ 判 read_ok。
+// 面板显示"抓拍配置已生效"，实际设备那边一块配置都没配。
+func TestOnPTZMessageRoutesSnapshotConfigAckToBlockFamily(t *testing.T) {
+	service, db := newDeviceConfigTestService(t)
+
+	snapNum, interval := 3, 3
+	uploadURL := "http://192.168.10.120:8280/api/gb28181/device-snapshots/uploads/tok/"
+	sessionID := strings.Repeat("s", 32)
+	blocks := manscdp.DeviceConfigBlocks{SnapShot: &manscdp.SnapShotBlock{
+		SnapNum: &snapNum, Interval: &interval, UploadURL: &uploadURL, SessionID: &sessionID,
+	}}
+	operation := createDeviceConfigOperation(t, db, struct {
+		OperationID string
+		Action      string
+		CmdType     string
+		DeviceID    uint
+		TargetCode  string
+		Trigger     *string
+		PayloadJSON string
+	}{OperationID: "route-snapshot-ack", Action: ActionSnapshotConfig,
+		CmdType: manscdp.CmdDeviceConfig, DeviceID: 1, TargetCode: "C1",
+		PayloadJSON: deviceConfigPayloadFor(t, blocks)})
+
+	ack := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n" +
+		"<Response><CmdType>DeviceConfig</CmdType><SN>5</SN><DeviceID>C1</DeviceID><Result>OK</Result></Response>")
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "call-snap", "1", ack))
+
+	var reloaded gbmodels.GbPTZOperation
+	require.NoError(t, db.Where("id = ?", operation.ID).Limit(1).Find(&reloaded).Error)
+	require.Equal(t, gbmodels.PTZOperationAccepted, reloaded.Status)
+	require.NotNil(t, reloaded.ReconcileOperationID, "抓拍配置的写入 ack 必须排上回读对账")
+
+	var child gbmodels.GbPTZOperation
+	require.NoError(t, db.Where("operation_id = ?", *reloaded.ReconcileOperationID).Limit(1).Find(&child).Error)
+	require.Equal(t, actionRefreshDeviceConfigs, child.Action)
+
+	var payload struct {
+		ConfigTypes []string `json:"configTypes"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(child.PayloadJSON), &payload))
+	require.Equal(t, []string{manscdp.ConfigTypeSnapShotConfig}, payload.ConfigTypes,
+		"对账必须回读 SnapShotConfig；回读 VideoParamAttribute 等于没对账（差异恒为 0 条）")
 }

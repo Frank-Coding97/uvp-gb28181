@@ -770,25 +770,22 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		return manscdp.BuildConfigDownloadQueryWithProfile(profile, targetCode, operation.SN, payload.ConfigTypes)
 	case manscdp.CmdDeviceConfig:
 		// ⛔ `VideoParamAttribute`（A-5）与配置族共用 `CmdType=DeviceConfig`，所以这里
-		// **必须按 Action 分流**，只看 CmdType 会把两者混成一件事。
+		// **必须分流**，只看 CmdType 会把两者混成一件事。
 		//
 		// 只看 CmdType 的历史后果（2026-09-19 真机验证发现，已提交的回归）：配置族的
 		// 下发全部被重建成 A-5 的报文 `<VideoParamAttribute Num="0">`（payload 里没有
 		// `items`，Items 为 nil），**一块配置都发不出去**；设备照回 `Result=OK`，平台回读
 		// 只表现为 `mismatch` —— 症状酷似"设备没照做"，归因成本极高。
-		if operation.Action == actionApplyDeviceConfig {
-			var payload struct {
-				Blocks manscdp.DeviceConfigBlocks `json:"blocks"`
-			}
-			if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
-				return nil, err
-			}
-			// 重建必须能复现"构建"：payload 里没有配置块就说明这条 operation 不是配置族
-			// 下发的形态，**报错而不是发一个空块** —— 发空块会让故障变成"设备没照做"。
-			if payload.Blocks.IsEmpty() {
-				return nil, errors.New("设备配置下发无法重建:operation payload 缺少 blocks")
-			}
-			return manscdp.BuildDeviceConfigBlocksWithProfile(profile, targetCode, operation.SN, payload.Blocks)
+		//
+		// ⛔ 分流判据走 [deviceConfigOperationForm]（按 payload 的 `blocks` 判），
+		// **不要退回 "action 白名单"**：白名单漏过一个 action 的代价就是上面这段历史
+		// 重演一遍 —— 2026-09-20 抓拍会话（action=`snapshot_config`）正是这样整条静默失效。
+		blocks, blockFamily, err := deviceConfigOperationForm(operation.Action, operation.PayloadJSON)
+		if err != nil {
+			return nil, err
+		}
+		if blockFamily {
+			return manscdp.BuildDeviceConfigBlocksWithProfile(profile, targetCode, operation.SN, blocks)
 		}
 		var payload struct {
 			Items []manscdp.VideoParamItem `json:"items"`
@@ -819,12 +816,15 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		if operation.Action == "precise" {
 			return buildPrecise()
 		}
-		if operation.Action == "record_start" || operation.Action == "record_stop" || operation.Action == "guard_set" || operation.Action == "guard_reset" || operation.Action == "alarm_reset" || operation.Action == "teleboot" || operation.Action == "iframe" || operation.Action == "drag_zoom_in" || operation.Action == "drag_zoom_out" {
+		if operation.Action == "record_start" || operation.Action == "record_stop" || operation.Action == "guard_set" || operation.Action == "guard_reset" || operation.Action == "alarm_reset" || operation.Action == "teleboot" || operation.Action == "iframe" || operation.Action == "drag_zoom_in" || operation.Action == "drag_zoom_out" || operation.Action == actionFormatStorageCard {
 			var payload struct {
 				Action      string                 `json:"action"`
 				AlarmMethod string                 `json:"alarmMethod"`
 				AlarmType   string                 `json:"alarmType"`
 				Region      manscdp.DragZoomRegion `json:"region"`
+				// CardIndex 是存储卡格式化（A.2.3.1.13）的卡编号；0 表示"全部卡"，
+				// 所以这里同样**不能用零值判断"没给"**，得由 Action 先分流。
+				CardIndex int `json:"cardIndex"`
 			}
 			if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
 				return nil, err
@@ -851,6 +851,11 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 					direction = manscdp.DragZoomOut
 				}
 				return manscdp.BuildDragZoomControlWithProfile(profile, targetCode, operation.SN, manscdp.DragZoomCommand{Direction: direction, Region: payload.Region})
+			case actionFormatStorageCard:
+				// 重发时按落库的 cardIndex 原样重建：这是"同一张卡"，不是"当时那张卡的序号"。
+				// 卡列表在此期间变化时，也许编号已指向另一张卡 —— 但那属于"重发本身就不该发生"
+				// 的范畴（本 action 的 MaxAttempts=1，正常路径下这里根本走不到）。
+				return manscdp.BuildFormatSDCardControlWithProfile(profile, targetCode, operation.SN, payload.CardIndex)
 			}
 		}
 		if operation.Action != "home_position" {

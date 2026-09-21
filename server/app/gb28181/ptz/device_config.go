@@ -3,6 +3,7 @@ package ptz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -44,6 +45,11 @@ const (
 	// ⛔ `error_message` 是要落库的短文本，不是日志；一条 OSD 配置逐格展开能到几十行，
 	// 不设上限会让这一列变成"看不完的墙"，反而盖住其他 operation 的信息。
 	deviceConfigDiffLimit = 8
+
+	// osdPositionRowPixels 是 OSD 叠加**纵向**的落位网格（像素）—— 设备只把文字
+	// 落在它的整数倍上，不在网格上的请求值会被**向下取整**（理由见
+	// [foldOSDPositionsToRowGrid] 里的真机取证表）。横向是逐像素的，不吸附。
+	osdPositionRowPixels = 16
 )
 
 // deviceConfigApplyPayload 是下发 operation 的 payload。
@@ -109,6 +115,9 @@ func (s *Service) ApplyDeviceConfig(ctx context.Context, target Target, blocks m
 	if len(setTypes) == 0 {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("至少需要一组配置")
 	}
+	if err := validateDeviceConfigChannelTypes(setTypes); err != nil {
+		return gbmodels.GbPTZOperation{}, err
+	}
 	if err := manscdp.ValidateDeviceConfigBlocks(blocks); err != nil {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("设备配置不合法: %w", err)
 	}
@@ -173,6 +182,34 @@ func isKnownDeviceConfigType(configType string) bool {
 		}
 	}
 	return false
+}
+
+// deviceConfigChannelWriteExclusions 是**本下发通道不发**的配置类型及原因。
+//
+// ⛔ 与 `manscdp.ReadOnlyDeviceConfigTypeReason` **分层不同，别合并成一张表**：
+//   - 那个是**协议事实**（A.2.3.2 的 schema 里根本没有那个元素，发了就是非法报文）；
+//   - 这里是**平台策略**（协议允许，但本通道拿不到下发它所必需的上下文）。
+//
+// 目前只有一项：`SnapShotConfig`（A.2.3.2.12）的 `SessionID` 与 `UploadURL` 必须由平台生成
+// —— `UploadURL` 是**设备主动往哪里 POST 图像**的地址。通用接口若收客户端给的值，
+// 等于允许任何持"设备配置下发"权限的账号把摄像头画面推到他自己的服务器上。
+// 抓拍配置只走 `/channel/:id/snapshot-sessions`（由抓拍会话生成 SessionID 与带令牌的上传地址）。
+var deviceConfigChannelWriteExclusions = map[string]string{
+	manscdp.ConfigTypeSnapShotConfig: "抓拍配置须由抓拍会话下发（SessionID 与上传地址由平台生成），通用接口不收客户端指定的上传地址",
+}
+
+// validateDeviceConfigChannelTypes 拒绝本通道不负责下发的配置类型。
+//
+// ⛔ 必须在**发送前**拒，不能靠"构建侧只是不生成它的 XML"来表达：那样平台会发出一条
+// "声称要配 X、报文里却一个块都没有"的 DeviceConfig，设备回 OK、平台记 accepted，
+// 配置从头到尾没传出去，而两侧日志都正常（这正是本仓最贵的一类故障）。
+func validateDeviceConfigChannelTypes(configTypes []string) error {
+	for _, configType := range configTypes {
+		if reason, excluded := deviceConfigChannelWriteExclusions[strings.TrimSpace(configType)]; excluded {
+			return fmt.Errorf("配置类型 %s 不能通过本通道下发：%s", configType, reason)
+		}
+	}
+	return nil
 }
 
 // ============================ 应答：读（A.2.6.9） ============================
@@ -525,6 +562,12 @@ func diffDeviceConfigBlocks(wanted, actual manscdp.DeviceConfigBlocks) []deviceC
 				haveTree = dropPictureMaskRegions(haveTree)
 			}
 		}
+		if configType == manscdp.ConfigTypeOSDConfig {
+			// ⛔ 只折**下发侧**，回读侧原样保留：设备能落到的值才是可比对象，
+			// 而"回读值不在网格上"本身就说明设备没按预期落位，必须报出来。
+			// 理由与真机证据见 [foldOSDPositionsToRowGrid]。
+			wantTree = foldOSDPositionsToRowGrid(wantTree)
+		}
 		walkDeviceConfigDiff(configType, configType, wantTree, haveTree, &diffs)
 	}
 	return diffs
@@ -630,6 +673,94 @@ func dropPictureMaskRegions(tree any) any {
 		trimmed[key] = child
 	}
 	return trimmed
+}
+
+// foldOSDPositionsToRowGrid 把 `OSDConfig` 的**纵向**落位折到设备能落到的行网格上。
+//
+// ⛔⛔ 为什么"坐标被改了 3 个像素"**不是**「值未生效」（2026-09-20 真机现场）：
+//
+// 操作员在播放控制台把时间戳拖到 `(18, 51)`，界面立刻提示
+// 「设备已接受命令，但值未生效：回读值与下发值不一致: OSDConfig.timeY=51(实际 48)」——
+// 而时间戳在画面上的**位置明明变了**（这就是操作员说的"其实已经生效了"）。
+//
+// 真机控制变量扫描（海康 DS-2DC2C040MY-DE / 声明画布 704x576 / 2026-09-20，
+// 逐值下发 + 主动回读）：
+//
+//	下发 TimeY    8   12   17   20   25   33   100   158   255
+//	回读 TimeY    0    0   16   16   16   32    96   144   240   ← 全部 = 下发值 → 向下取整到 16
+//	下发 TimeX   18  289  317 / 文本行 X 25  33                ← 原样回读（含两个奇数）
+//	文本行 Y     37 → 32， 100 → 96                           ← 与 TimeY 同一条网格
+//
+// 即：**纵向只能落在行高 16 的整数倍上（向下取整），横向是逐像素的**。
+// 这不是"没照做"，是设备把平台的请求值折算到它实际能落的那一行 —— 折算幅度
+// 最多 15 像素（不足一行），肉眼上就是"位置变了"。
+//
+// 判据取「**下发值**向下取整到网格」而不是"两边都取整"或"给个容差"：
+//
+//   - 折的是**下发侧**：比较对象变成"设备能做到的那个值"，语义正确；
+//   - 回读侧**不折**：设备若回一个不在网格上的值（另一族设备 / 真没照做），
+//     照旧会被报出来 —— 若两边都折，`51 → 48` 对上设备回的 `49`（48）会被吞成假绿；
+//   - 不用"差值 < 16 就当吸附"这种容差：那等于把"设备把 Y 落在任意近邻"都算成功，
+//     `51` 对上 `50` 也放过，而设备真落 50 说明它没按行网格走，是另一种异常。
+//
+// ⛔ 反向别搞错：**X 照旧逐格比**（`25` 对上 `26` 必须报），纵向差异超出一次折算
+// （如 `51` 对上 `200`）也必须报 —— 反向锚点见 `device_config_test.go`。
+func foldOSDPositionsToRowGrid(tree any) any {
+	object, ok := tree.(map[string]any)
+	if !ok {
+		return tree
+	}
+	folded := make(map[string]any, len(object))
+	for key, child := range object {
+		folded[key] = child
+	}
+	changed := false
+	if y, ok := configScalarInt(object["timeY"]); ok {
+		if snapped := y - y%osdPositionRowPixels; snapped != y {
+			folded["timeY"] = strconv.Itoa(snapped)
+			changed = true
+		}
+	}
+	if items, ok := object["items"].([]any); ok {
+		// 文本行**整组**替换：逐条折过之后才知道这组有没有变化，
+		// 没变化时保持原 slice，免得给调用方一个"处处不同但值相等"的树。
+		foldedItems := make([]any, len(items))
+		itemsChanged := false
+		for index, item := range items {
+			foldedItem, itemChanged := foldOSDTextItemRow(item)
+			foldedItems[index] = foldedItem
+			itemsChanged = itemsChanged || itemChanged
+		}
+		if itemsChanged {
+			folded["items"] = foldedItems
+			changed = true
+		}
+	}
+	if !changed {
+		return tree
+	}
+	return folded
+}
+
+// foldOSDTextItemRow 折一条文本行的 `y`；`x` 与 `text` 原样保留（真机实证横向不吸附）。
+func foldOSDTextItemRow(item any) (any, bool) {
+	object, ok := item.(map[string]any)
+	if !ok {
+		return item, false
+	}
+	y, ok := configScalarInt(object["y"])
+	if !ok {
+		return item, false
+	}
+	if snapped := y - y%osdPositionRowPixels; snapped != y {
+		folded := make(map[string]any, len(object))
+		for key, child := range object {
+			folded[key] = child
+		}
+		folded["y"] = strconv.Itoa(snapped)
+		return folded, true
+	}
+	return item, false
 }
 
 // walkDeviceConfigDiff 递归展开两个 JSON 树并在叶子处记差异。
@@ -862,8 +993,64 @@ func DeriveDeviceConfigReconcileState(latest *gbmodels.GbPTZOperation) DeviceCon
 	return DeriveVideoParamReconcileState(latest)
 }
 
+// ActionSnapshotConfig 是**抓拍会话**下发 `SnapShotConfig`（A.2.3.2.12）用的 action。
+//
+// ⛔ 它与 [ActionApplyDeviceConfig] 走的是**同一条配置族下发机制**（`CmdType=DeviceConfig`
+// + payload 里装 `blocks`），只是不走通用 UI 通道（`SnapShotConfig` 在该通道被
+// [deviceConfigChannelWriteExclusions] 拒收：`SessionID` 与 `UploadURL` 必须由平台生成）。
+//
+// ⛔⛔ 这个常量存在本身就是为了堵一处**静默发错报文**：在此之前该 action 只是一个写在
+// `controllers` 里的字面量 `"snapshot_config"`，`ptz` 包完全不认识它 —— 于是所有
+// "按 action 分流"的地方（报文重建 / 应答分派）都把它当成 A-5 视频参数，
+// 实际发给设备的是 `<VideoParamAttribute Num="0">`（一块配置都没有），设备照回
+// `Result=OK`、operation 记 accepted、回读还判 read_ok。**抓拍指令从未发出过**，
+// 症状只有"设备没上传图片"。2026-09-20 海康真机复现（SN 10179/10181/10183）。
+const ActionSnapshotConfig = "snapshot_config"
+
 // ActionRefreshDeviceConfigs / ActionApplyDeviceConfig 供控制器按 action 查"最近一次回读"。
 const (
 	ActionRefreshDeviceConfigs = actionRefreshDeviceConfigs
 	ActionApplyDeviceConfig    = actionApplyDeviceConfig
 )
+
+// ==================== 配置族 operation 的形态判定（唯一真源） ====================
+
+// deviceConfigBlockActions 是**用 payload 的 `blocks` 装要下发的配置块**的 action 名单。
+//
+// ⛔ 这张名单的用途**只有一处**：payload 里没有 `blocks` 时，判断这属于"数据坏了"还是
+// "本来就不该有块"。**不能用它来决定走哪条重建/分派路径**（见 [deviceConfigOperationForm]）
+// —— 名单是会漏的，`snapshot_config` 就漏了整整一轮。
+var deviceConfigBlockActions = map[string]struct{}{
+	actionApplyDeviceConfig: {},
+	ActionSnapshotConfig:    {},
+}
+
+// deviceConfigOperationForm 判定一条 `CmdType=DeviceConfig` 的 operation 属于哪一族形态。
+//
+// 返回值 `isBlockFamily` 为真表示"它按配置族处理"（重建发 `blocks`、应答走
+// [Service.applyDeviceConfigAckResponse]）；为假表示它是 A-5 视频参数那条路。
+//
+// ⛔⛔ **判据刻意取"payload 里到底装了什么"这个数据事实，而不是 action 白名单**：
+// 白名单每新增一个 action 都会漏，而漏的后果极不对称 —— 配置族报文被重建成
+// `<VideoParamAttribute Num="0">`，设备照回 `Result=OK`，两侧日志全绿，
+// 只有"设备没照做"这一个模糊症状（这正是抓拍整条链路静默失效的原因）。
+// 按 payload 判之后，**新增 action 只要用 `blocks` 装 payload 就自动走对**。
+//
+// 反过来，名单仍然管一件事：action 声明自己属于配置族、payload 里却没有 `blocks`，
+// 说明 payload 被写坏了 —— 这时**报错而不是回落成 A-5**，否则故障又会伪装成"设备没照做"。
+func deviceConfigOperationForm(action, payloadJSON string) (manscdp.DeviceConfigBlocks, bool, error) {
+	var payload deviceConfigApplyPayload
+	if strings.TrimSpace(payloadJSON) != "" {
+		if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+			return manscdp.DeviceConfigBlocks{}, false, err
+		}
+	}
+	if !payload.Blocks.IsEmpty() {
+		return payload.Blocks, true, nil
+	}
+	if _, declared := deviceConfigBlockActions[strings.TrimSpace(action)]; declared {
+		return manscdp.DeviceConfigBlocks{}, true,
+			errors.New("设备配置下发无法重建:operation payload 缺少 blocks")
+	}
+	return manscdp.DeviceConfigBlocks{}, false, nil
+}

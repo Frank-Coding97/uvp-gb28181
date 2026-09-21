@@ -29,6 +29,18 @@ function noticeFor(groupKey: string, values: FormValues): string {
 
 describe("deviceConfigPayload 表单键 ↔ 协议块翻译", () => {
   describe("OSDConfig", () => {
+    /** OSD 组的公共表单底座（有设备事实时的正常值）。 */
+    const osdBase: FormValues = {
+      timeEnable: true,
+      timeType: "",
+      length: "1920",
+      width: "1080",
+      timeX: "10",
+      timeY: "20",
+      textEnable: true,
+      items: []
+    };
+
     it("timeType 选「不指定」时**整个键不出现**（不是发 0）", () => {
       const blocks = blocksFor("osd", {
         timeEnable: true,
@@ -85,19 +97,37 @@ describe("deviceConfigPayload 表单键 ↔ 协议块翻译", () => {
       expect(error).toContain("8");
     });
 
-    it("窗口尺寸必须为正", () => {
-      expect(
-        errorFor("osd", {
-          timeEnable: true,
-          timeType: "",
-          length: "0",
-          width: "1080",
-          timeX: "0",
-          timeY: "0",
-          textEnable: true,
-          items: []
-        })
-      ).toContain("窗口长度");
+    it("设备未声明坐标画布时拒发，且文案**不指向一个已经不存在的控件**", () => {
+      const error = errorFor("osd", { ...osdBase, length: "0", width: "0" });
+      // ⛔ 2026-09-20 起「窗口长度 / 窗口宽度」不再是可编辑滑杆（设备拒收平台改写，
+      //    平台只能读它、照它算）。旧文案「OSD 窗口长度必须是 1~3840 的整数」会指着一个
+      //    界面上根本没有的控件，用户唯一的动作只能是猜。
+      expect(error).toContain("设备未声明坐标画布");
+      expect(error).toContain("读取");
+      expect(error).not.toContain("窗口长度");
+    });
+
+    it("设备回了越界的画布尺寸：与「没声明」分开报，不共用一句话", () => {
+      // 违约报文（设备自己声明了一个超出 1~3840 / 1~2160 的画布）与"没读到"是两件事。
+      const error = errorFor("osd", { ...osdBase, length: "5000", width: "576" });
+      expect(error).toContain("超出可用范围");
+      expect(error).toContain("5000");
+    });
+
+    it("新增**未定位**的文字行不许下发；定位后放行，且报文里不带 placed", () => {
+      // ⛔ 判据必须是草稿里的定位标记，不能拿 `x`/`y` 反推：`0,0` 是合法坐标
+      //    （设备的左上角就是有人会用的位置）。用数值反推会把"还没摆"当成"摆了左上角"，
+      //    设备上就真的多出一行贴左上角的字，而界面看起来一切正常。
+      expect(errorFor("osd", { ...osdBase, items: [{ text: "北门", x: 0, y: 0, placed: false }] })).toContain("还没在画面上定位");
+
+      const blocks = blocksFor("osd", { ...osdBase, items: [{ text: "北门", x: 0, y: 0, placed: true }] });
+      const osd = blocks.osdConfig as Record<string, unknown>;
+      // `placed` 是纯前端草稿标记，**不进报文** —— 报文里出现的东西必须都是标准里的东西。
+      expect(osd.items).toEqual([{ text: "北门", x: 0, y: 0 }]);
+    });
+
+    it("timeType 填了非法值时，提示词里出现的是「跟设备走」而不是协议黑话", () => {
+      expect(errorFor("osd", { ...osdBase, timeType: "9" })).toContain("跟设备走");
     });
   });
 
@@ -343,7 +373,9 @@ describe("deviceConfigPayload 表单键 ↔ 协议块翻译", () => {
       expect(values.textEnable).toBe(false);
       // timeType 缺席 ⇒ 空串 ⇒ 下次下发不发送该元素（不能补成 "0"）
       expect(values.timeType).toBe("");
-      expect(values.items).toEqual([{ text: "厂区东门", x: 5, y: 6 }]);
+      // ⛔ 回读回来的行一律播种成**已定位**（设备上就摆在那儿）。不播种的话这些行会落进
+      //    「未定位」分支、在画布上被画成琥珀虚线，而它们其实是设备上的既成事实。
+      expect(values.items).toEqual([{ text: "厂区东门", x: 5, y: 6, placed: true }]);
     });
 
     it("遮挡区按 Seq 归位，不是按数组下标", () => {

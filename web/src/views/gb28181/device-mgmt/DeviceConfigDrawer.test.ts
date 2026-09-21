@@ -145,6 +145,10 @@ function mountDrawer(props: Record<string, unknown> = {}) {
       online: true,
       effectiveVersion: "2022",
       channelId: 3539,
+      // 默认按「播放控制台里那份」挂：那边外面有画布，OSD 面板才长成完整形态。
+      // ⛔ 不写这条的话测的是 `DeviceConfigDemo`（免登录预览页）的形态 ——
+      //    没有画布 ⇒ 没有「调整位置」、精确数值默认展开。两种形态各有一条用例钉着。
+      osdCanvasLinked: true,
       ...props
     }
   });
@@ -177,6 +181,75 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
   it("visible=false 时不渲染窗口", () => {
     const wrapper = mountDrawer({ visible: false });
     expect(wrapper.find(".dcg-window").exists()).toBe(false);
+  });
+
+  it("嵌入侧栏时分组导航用短名，标准全名留在 title 上", async () => {
+    const wrapper = mountDrawer({ embedded: true, groupKeys: ["video-param", "osd"] });
+    await flushPromises();
+
+    const videoNav = wrapper.get("[data-testid='dcg-nav-video-param']");
+    // ⛔ 430px 侧栏里两组等分、每格约 105px：「视频参数属性」会被省略号截成「视频参数…」，
+    //    等于没写。所以导航这一行用 `navLabel`；
+    //    ⛔ 但标准名**一个字都没改** —— 它挂在 title 上，非嵌入形态照旧显示 `label` + `std`。
+    expect(videoNav.find(".dcg-nav-label").text()).toBe("视频编码");
+    expect(videoNav.attributes("title")).toBe("视频参数属性");
+    expect(wrapper.get("[data-testid='dcg-nav-osd']").find(".dcg-nav-label").text()).toBe("图像叠加");
+    expect(wrapper.get("[data-testid='dcg-nav-osd']").attributes("title")).toBe("图像叠加 OSD");
+  });
+
+  it("分组可由宿主受控：外部改值界面跟着走，内部点击只发意图", async () => {
+    const wrapper = mountDrawer({
+      embedded: true,
+      groupKeys: ["video-param", "osd"],
+      activeGroupKey: "video-param"
+    });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
+
+    // 宿主改分组 → 界面跟着走，不需要再点导航。
+    await wrapper.setProps({ activeGroupKey: "osd" });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='dcg-osd-blocks']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(false);
+
+    // 点导航 → 只发意图，不自己落状态（受控组件的本分）。宿主 PlayConsoleLinked 就是靠这个
+    // 信号决定"切离图像叠加就退出 OSD 编辑模式"的。
+    await wrapper.get("[data-testid='dcg-nav-video-param']").trigger("click");
+    expect(wrapper.emitted("update:activeGroupKey")?.at(-1)).toEqual(["video-param"]);
+    // ⛔ 没收到宿主回写之前界面**不动** —— 这正是"真源在宿主"的可观测证据。
+    //    抽屉自己偷偷切过去的话，宿主那份状态就与界面脱钩了。
+    expect(wrapper.find("[data-testid='dcg-osd-blocks']").exists()).toBe(true);
+  });
+
+  it("宿主给的非法分组 key 回落第一组，不让导航一个高亮都没有", async () => {
+    // 设备详情抽屉只挂 record / alarm，而宿主那份状态可能停在别的组。
+    // ⛔ 直接把非法 key 交给渲染，`dcg-nav` 会一个 `is-active` 都不带 —— 看着像"导航坏了"。
+    const wrapper = mountDrawer({ embedded: true, groupKeys: ["video-param", "osd"], activeGroupKey: "record-plan" });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='dcg-nav-video-param']").classes()).toContain("is-active");
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
+  });
+
+  it("码流可由宿主受控：底栏选子码流，侧栏显示的行跟着切", async () => {
+    // ⛔ 底栏「参数对照」的码流与侧栏「配置文件」下拉必须是**同一路**：
+    //    各持一份状态就会出现"对照卡说子码流、侧栏在改主码流"，而两边都不报错。
+    api.getChannelVideoParams.mockResolvedValue(
+      readOk([videoParamRow({ id: 1, streamNumber: 0 }), videoParamRow({ id: 2, streamNumber: 1, resolution: "4" })])
+    );
+    const wrapper = mountDrawer({ embedded: true, groupKeys: ["video-param", "osd"], streamProfile: "0" });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(false);
+
+    await wrapper.setProps({ streamProfile: "1" });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(false);
+
+    // 侧栏自己改码流 → 同样只发意图，由宿主回写（回写后两条路仍指向同一路）。
+    await wrapper.get("[aria-label='配置文件']").setValue("0");
+    await flushPromises();
+    expect(wrapper.emitted("update:streamProfile")?.at(-1)).toEqual(["0"]);
   });
 
   it("打开时按通道读一次平台缓存事实，且不带 refresh", async () => {
@@ -333,19 +406,79 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
 
     // ⛔ 控件必须**可编辑**：让人以为能下发是上一版的失败模式，反过来
     //    "接上了后端却还禁用"同样骗人 —— 用户会以为功能没做。
-    expect(wrapper.find("[data-testid='dcg-field-timeEnable'] .dcg-switch").attributes("disabled")).toBeUndefined();
-    expect(wrapper.find("[data-testid='dcg-field-timeType'] select").attributes("disabled")).toBeUndefined();
+    expect(wrapper.find("[data-testid='osd-time-switch']").attributes("disabled")).toBeUndefined();
+    const fmt = wrapper.get("[data-testid='osd-fmt-select']");
+    expect(fmt.attributes("disabled")).toBeUndefined();
 
-    // 回读值按协议键折进表单：timeType=1 → 选中「YYYY年MM月DD日…」
-    expect((wrapper.find("[data-testid='dcg-field-timeType'] select").element as HTMLSelectElement).value).toBe("1");
-    expect((wrapper.find("[data-testid='dcg-field-length'] input.cfg-slider-input").element as HTMLInputElement).value).toBe(
-      "1920"
-    );
+    // 回读值按协议键折进表单：timeType=1 → 下拉框选中第二项
+    expect((fmt.element as HTMLSelectElement).value).toBe("1");
+    // ⛔ 三选一**不再摊成三条竖排单选**（老板 2026-09-20：占掉半块面板的高度）。
+    //    判据 = 选中项身上没有 `input[type=radio]` 了，只剩一个 `<select>`。
+    expect(fmt.find("input").exists()).toBe(false);
+    expect(fmt.findAll("option")).toHaveLength(3);
+    // 格式选项的文案**不是模式串**：渲染的是当前时刻的实例（用户看的才是他会在画面上看到的东西）
+    expect(fmt.get("[data-testid='osd-fmt-0']").text()).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(fmt.get("[data-testid='osd-fmt-1']").text()).toMatch(/^\d{4}年\d{2}月\d{2}日\d{2}:\d{2}:\d{2}$/);
+    expect(fmt.get("[data-testid='osd-fmt-follow']").text()).toContain("跟设备走");
+    // ⛔ 「窗口长度 / 窗口宽度」2026-09-20 起**不再是可编辑滑杆**：真机实测设备拒收平台改写
+    //    （写 2560×1440 也回 200 OK、回读仍是 704×576），它们真正的身份是遮挡坐标的基准。
+    //    现在只作为**只读事实**出现，值照旧取自回读。
+    expect(wrapper.find("[data-testid='dcg-field-length']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='dcg-field-timeX']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='osd-canvas-value']").text()).toBe("1920 × 1080");
+    expect(wrapper.find("[data-testid='osd-canvas-tag']").text()).toBe("只读");
     // 开关按 0/1 折成布尔
-    expect(wrapper.find("[data-testid='dcg-field-timeEnable'] .dcg-switch").classes()).toContain("is-on");
-    expect(wrapper.find("[data-testid='dcg-field-textEnable'] .dcg-switch").classes()).not.toContain("is-on");
-    // OSD 自由文本行
-    expect((wrapper.find("[data-testid='dct-text-0']").element as HTMLInputElement).value).toBe("厂区东门");
+    expect(wrapper.find("[data-testid='osd-time-switch']").classes()).toContain("is-on");
+    expect(wrapper.find("[data-testid='osd-text-switch']").classes()).not.toContain("is-on");
+    // OSD 自由文本行（编号与画布锚点同源）
+    expect((wrapper.find("[data-testid='osd-text-0']").element as HTMLInputElement).value).toBe("厂区东门");
+    // 位置从两条滑杆改「在画面上拖 + 数值折叠」：默认收起，摘要里直接给出坐标
+    expect(wrapper.find("[data-testid='osd-pos-exact']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='osd-time-pos']").text()).toBe("X 10 · Y 20");
+  });
+
+  it("没有可拖的画布时不渲染「调整位置」（预览页没有画面，那会是个点了没用的按钮）", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(deviceConfigOk([osdEntry()]));
+    // `osd-canvas-linked` 关掉，正是 `DeviceConfigDemo` 那个免登录预览页的情形。
+    const wrapper = mountDrawer({ osdCanvasLinked: false });
+    await flushPromises();
+    await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='osd-edit-toggle']").exists()).toBe(false);
+    // 也没有"去定位"（同样要画布）——
+    expect(wrapper.find("[data-testid='osd-locate-0']").exists()).toBe(false);
+    // ⛔ 没有画布时**没有"在画面上拖"这条路**，精确数值必须默认展开，
+    //    否则用户连改坐标的入口都没有。
+    expect(wrapper.find("[data-testid='osd-pos-exact']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='osd-pos-toggle']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='osd-time-x']").exists()).toBe(true);
+  });
+
+  it("有画布时「调整位置」按钮在**时间戳面板里**，点它只发意图、不自己落状态", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(deviceConfigOk([osdEntry()]));
+    const wrapper = mountDrawer({ osdCanvasLinked: true });
+    await flushPromises();
+    await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");
+    await flushPromises();
+
+    // ⛔ 按钮长在「时间戳」卡片内部，跟它控制的那个坐标读数同一行（老板 2026-09-20 指定）。
+    const card = wrapper.get("[data-testid='osd-block-time']");
+    const toggle = card.get("[data-testid='osd-edit-toggle']");
+    expect(toggle.text()).toContain("调整位置");
+    expect(toggle.attributes("data-active")).toBe("0");
+
+    await toggle.trigger("click");
+    await flushPromises();
+    // 状态在宿主（画面侧）手里：这里只把意图放出来，按钮外观不自己翻 ——
+    // 否则"抽屉以为开着、画面以为关着"，一边有锚点一边没有。
+    expect(wrapper.emitted("toggleOsdEdit")).toHaveLength(1);
+    expect(toggle.attributes("data-active")).toBe("0");
+
+    // 宿主把状态传回来之后，按钮才显示成「完成调整」
+    await wrapper.setProps({ osdEditing: true });
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").text()).toContain("完成调整");
+    expect(wrapper.get("[data-testid='osd-edit-toggle']").attributes("data-active")).toBe("1");
   });
 
   it("改一格后下发：POST 出去的是**协议块**（键名 = 标准元素名小驼峰）", async () => {
@@ -364,7 +497,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     // 刚回读完不应算"已改"：基准就是回读值
     expect(wrapper.find("[data-testid='dcg-apply']").attributes("disabled")).toBeDefined();
 
-    await wrapper.find("[data-testid='dcg-field-textEnable'] .dcg-switch").trigger("click");
+    await wrapper.find("[data-testid='osd-text-switch']").trigger("click");
     await flushPromises();
     expect(wrapper.find("[data-testid='dcg-apply']").attributes("disabled")).toBeUndefined();
 
@@ -722,7 +855,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     // ① 先在 OSD 组撞一次真实的传输失败。
     await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");
     await flushPromises();
-    await wrapper.find("[data-testid='dcg-field-textEnable'] .dcg-switch").trigger("click");
+    await wrapper.find("[data-testid='osd-text-switch']").trigger("click");
     await flushPromises();
     await wrapper.find("[data-testid='dcg-apply']").trigger("click");
     await flushPromises();
@@ -755,7 +888,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     // 刚回读完 ⇒ 没有未下发改动，也就没有抽屉开关
     expect(wrapper.find("[data-testid='dcg-pending-toggle']").exists()).toBe(false);
 
-    await wrapper.find("[data-testid='dcg-field-timeEnable'] .dcg-switch").trigger("click");
+    await wrapper.find("[data-testid='osd-time-switch']").trigger("click");
     await flushPromises();
 
     const toggle = wrapper.find("[data-testid='dcg-pending-toggle']");
@@ -778,7 +911,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
 
     // 撤销回到设备值：计数归零、控件也回到原状
     expect(wrapper.find("[data-testid='dcg-pending-toggle']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='dcg-field-timeEnable'] .dcg-switch").classes()).toContain("is-on");
+    expect(wrapper.find("[data-testid='osd-time-switch']").classes()).toContain("is-on");
   });
 
   it("差异抽屉的行数与计数同源（不会说 2 项只列 1 行）", async () => {
@@ -789,8 +922,8 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");
     await flushPromises();
 
-    await wrapper.find("[data-testid='dcg-field-timeEnable'] .dcg-switch").trigger("click");
-    await wrapper.find("[data-testid='dcg-field-textEnable'] .dcg-switch").trigger("click");
+    await wrapper.find("[data-testid='osd-time-switch']").trigger("click");
+    await wrapper.find("[data-testid='osd-text-switch']").trigger("click");
     await flushPromises();
 
     const toggle = wrapper.find("[data-testid='dcg-pending-toggle']");

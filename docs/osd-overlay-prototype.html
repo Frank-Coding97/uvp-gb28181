@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>图像叠加 OSD 操作方式 · 可点击原型</title>
+<style>
+  :root {
+    --bg: #f4f7fc;
+    --panel: #ffffff;
+    --panel-soft: #f8fbff;
+    --border: #dbe4f0;
+    --border-strong: #c3d2e6;
+    --text: #1f2b3d;
+    --text-2: #5b6b83;
+    --text-3: #8b9ab1;
+    --brand: #2563eb;
+    --brand-soft: #eef4ff;
+    --amber: #b45309;
+    --amber-soft: #fff8ec;
+    --amber-line: #e0a03a;
+    --green: #15803d;
+    --green-soft: #f0fdf4;
+    --red: #c02b2b;
+    --red-soft: #fff3f3;
+    --radius: 8px;
+    --shadow: 0 1px 2px rgba(24, 45, 80, .06), 0 6px 18px rgba(24, 45, 80, .06);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 22px 20px 40px;
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  h1 { margin: 0 0 2px; font-size: 17px; letter-spacing: -.2px; }
+  .sub { margin: 0; color: var(--text-2); font-size: 12px; }
+
+  .topbar {
+    display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+    max-width: 1260px; margin: 0 auto 16px;
+  }
+  .topbar .grow { flex: 1 1 320px; }
+
+  .seg { display: inline-flex; padding: 3px; background: #e7eef9; border-radius: 9px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12.5px; color: var(--text-2);
+    padding: 6px 14px; border-radius: 7px; transition: .14s;
+  }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+
+  .stage { display: flex; gap: 16px; align-items: flex-start; max-width: 1260px; margin: 0 auto; flex-wrap: wrap; }
+  .canvas-col { flex: 1 1 620px; min-width: 0; }
+  .panel-col { flex: 0 0 384px; width: 384px; }
+
+  /* ── 控制台窗口 ───────────────────────────── */
+  .console {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .console-hd {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; border-bottom: 1px solid var(--border);
+    background: linear-gradient(#fdfefe, #f7fafe);
+  }
+  .console-hd .title { font-weight: 600; font-size: 12.5px; }
+  .console-hd .code { color: var(--text-3); font-size: 11.5px; }
+  .chip {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; color: var(--green); background: var(--green-soft);
+    border: 1px solid #cbead6; border-radius: 999px; padding: 2px 9px;
+  }
+  .chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: block; }
+
+  .video {
+    position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
+    background: #26313f; user-select: none;
+  }
+  .video svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* 设备烧进码流的字（真值） */
+  .burned { position: absolute; inset: 0; pointer-events: none; }
+  .burned span {
+    position: absolute; transform: translateY(-1px);
+    font: 600 12.5px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
+    padding: 1px 4px; background: rgba(0, 0, 0, .28); border-radius: 2px;
+    white-space: pre;
+  }
+
+  /* 遮挡（示例，来自画面处理组，非本设计范围） */
+  .mask-demo {
+    position: absolute; background: #0d1117; border: 1px solid #0d1117;
+    left: 62%; top: 58%; width: 30%; height: 34%;
+  }
+
+  /* OSD 锚点层 */
+  .osd-layer { position: absolute; inset: 0; pointer-events: none; }
+  /* ⛔ 锚点默认**只读**：点开右上角「调整位置」才可拖（2026-09-20 决定）。
+     锚点层盖着的就是播放器 —— 随时可拖的话，用户"想点一下画面"（暂停 / 全屏 / 起手拉框）
+     就会顺手把某行字挪走；而平台不渲染真字（效果由设备决定），这类误操作在画面上完全看不出来。 */
+  .anchor { position: absolute; cursor: default; pointer-events: none; }
+  .osd-layer.editing .anchor { cursor: grab; pointer-events: auto; }
+  .osd-layer.editing .anchor:active { cursor: grabbing; }
+
+  /* 编辑模式开关。⭐ 挂在**画面下方**的工具条里（生产界面 = `.protocol-switcher` 里的
+     `.switcher-osd`）。⛔ 不许放回画面里：它是**常驻**按钮，钉在画面上等于永久占掉一块画面
+     （老板 2026-09-20 反馈"会遮挡画面"）。 */
+  .osd-edit-toggle {
+    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+    color: #dbe6f5; background: rgba(12, 22, 38, .74);
+    border: 1px solid rgba(255, 255, 255, .24); border-radius: 6px;
+  }
+  .osd-edit-toggle:hover { color: #fff; background: rgba(12, 22, 38, .9); }
+  .osd-edit-toggle.active { color: #fff; background: var(--brand); border-color: var(--brand); }
+  /* 工具条右侧的说明（该元素就是 `#canvasHint`，文案跟着模式走） */
+  .video-foot .osd-tool { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+  .osd-tool-note { font-size: 11px; color: var(--text-2); }
+
+  /* 编辑模式的操作说明：**只在编辑模式出现在画面里**（只读态一个字都不进画面 ——
+     "画面别被占"正是本版要治的）。⛔ 放左上角：左下角会被下发浮条压住。 */
+  .osd-hint {
+    position: absolute; left: 10px; top: 10px; padding: 4px 8px;
+    font-size: 11px; color: #fff; background: rgba(12, 22, 38, .72);
+    border-radius: 6px; pointer-events: none;
+  }
+  .anchor .pin {
+    position: absolute; left: -5px; top: -5px; width: 10px; height: 10px;
+    border-radius: 50%; border: 2px solid #fff; background: var(--brand);
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, .55), 0 1px 4px rgba(0, 0, 0, .4);
+  }
+  .anchor .lead {
+    position: absolute; left: 0; top: -6px; width: 1px; height: 6px;
+    background: currentColor; opacity: .8;
+  }
+  /* 标签一律摆在坐标点**正上方** —— 设备烧的字从坐标点向右下延伸，
+     放右上会压住字的尾巴。上方永远没有字。 */
+  .anchor .tag {
+    position: absolute; left: -2px; top: -21px; white-space: nowrap;
+    font-size: 11px; font-weight: 600; line-height: 1; padding: 4px 7px;
+    border-radius: 5px; color: #fff; background: var(--brand);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, .35);
+  }
+  .anchor .tag em { font-style: normal; font-weight: 500; opacity: .82; }
+
+  .anchor[data-state="draft"] { color: var(--amber-line); }
+  .anchor[data-state="draft"] .pin { background: var(--amber-line); box-shadow: 0 0 0 1px rgba(224, 160, 58, .6), 0 1px 4px rgba(0, 0, 0, .4); }
+  .anchor[data-state="draft"] .tag { background: var(--amber-line); }
+  .anchor[data-state="draft"] .hit {
+    position: absolute; left: -7px; top: -7px; width: 44px; height: 22px;
+    border: 1px dashed var(--amber-line); border-radius: 4px;
+  }
+  .anchor[data-state="off"] { opacity: .45; }
+  .anchor[data-state="off"] .pin { background: #94a3b8; box-shadow: 0 0 0 1px rgba(148, 163, 184, .6); }
+  .anchor[data-state="off"] .tag { background: #7c8da3; }
+  .anchor[data-state="unplaced"] { color: var(--amber-line); }
+  .anchor[data-state="unplaced"] .pin { background: var(--amber-line); }
+  .anchor[data-state="unplaced"] .tag { background: var(--amber-line); }
+
+  /* ⛔ 「只读态锚点用中性玻璃」那组规则**已删**（2026-09-20 第二版）：
+     老板看下来仍然是"默认就显示 + OSD 太乱"。现在只读态**一个锚点都不画**
+     （`renderOsd` 里 `!editMode` 直接返回空串），锚点只在编辑模式存在 ——
+     编辑模式就是"正在摆位置"，此时品牌蓝是**对的**信号（可拖、是操作目标）。 */
+
+  .anchor.pulse .pin { animation: pulse 1s ease-out 3; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(224, 160, 58, .75); }
+    100% { box-shadow: 0 0 0 16px rgba(224, 160, 58, 0); }
+  }
+  .anchor .coords {
+    position: absolute; left: -2px; top: -39px; white-space: nowrap;
+    font: 600 10.5px/1 ui-monospace, Menlo, monospace;
+    padding: 3px 5px; border-radius: 4px; color: #fff; background: rgba(15, 23, 42, .82);
+  }
+
+  /* 画布底部浮条 */
+  .draftbar {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    min-width: 300px; max-width: calc(100% - 28px);
+    background: rgba(255, 255, 255, .97); border: 1px solid var(--border-strong);
+    border-radius: 10px; box-shadow: 0 8px 26px rgba(12, 30, 60, .28);
+    padding: 9px 11px; display: flex; flex-direction: column; gap: 7px;
+  }
+  .draftbar .err {
+    margin: 0; font-size: 11.5px; color: var(--red); background: var(--red-soft);
+    border: 1px solid #f2cccc; border-radius: 6px; padding: 5px 7px;
+  }
+  .draftbar .row { display: flex; align-items: center; gap: 10px; }
+  .draftbar .txt { font-size: 12px; color: var(--text-2); }
+  .draftbar .txt b { color: var(--text); font-size: 13px; }
+  .draftbar .txt em {
+    font-style: normal; display: inline-block; margin-left: 6px;
+    color: var(--amber); background: var(--amber-soft);
+    border: 1px solid #f0dcbb; border-radius: 999px; padding: 1px 8px; font-size: 11px;
+  }
+  .draftbar .acts { margin-left: auto; display: flex; gap: 6px; }
+
+  .legend {
+    position: absolute; right: 10px; top: 10px; max-width: 236px;
+    font-size: 10.5px; line-height: 1.5; color: #dbe6f5;
+    background: rgba(12, 22, 38, .6); border-radius: 6px; padding: 6px 9px;
+    backdrop-filter: blur(2px); pointer-events: none;
+  }
+  .legend b { color: #fff; }
+
+  .video-foot {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-top: 1px solid var(--border); background: var(--panel-soft);
+    font-size: 11.5px; color: var(--text-2);
+  }
+  /* 工具条右侧那组（`.osd-tool`）自己带 `margin-left: auto`，旧的 `.sp` 占位已不需要 */
+
+  /* ── 面板 ─────────────────────────────────── */
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .panel-hd {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); background: #fbfdff;
+  }
+  .panel-hd .title { font-weight: 600; font-size: 12.5px; }
+  .panel-hd .badge {
+    margin-left: auto; font-size: 10.5px; color: var(--brand);
+    background: var(--brand-soft); border: 1px solid #c9dcff; border-radius: 4px; padding: 1px 6px;
+  }
+  .status {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    font-size: 11.5px; color: var(--text-2); background: var(--green-soft);
+  }
+  .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .status.busy { background: var(--panel-soft); }
+  .status.busy i { background: var(--text-3); }
+  .status button {
+    margin-left: auto; appearance: none; border: 1px solid var(--border);
+    background: #fff; border-radius: 5px; font: inherit; font-size: 11px;
+    color: var(--text-2); padding: 2px 8px; cursor: pointer;
+  }
+
+  .block { padding: 11px 12px; border-bottom: 1px solid var(--border); }
+  .block-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .block-hd .name { font-weight: 600; font-size: 12.5px; }
+  .block-hd .hint { color: var(--text-3); font-size: 11px; }
+  .block-hd .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .block.off .body { opacity: .5; }
+
+  .sw {
+    appearance: none; border: 1px solid var(--border-strong); background: #eef2f8;
+    width: 34px; height: 19px; border-radius: 999px; position: relative; cursor: pointer; transition: .16s;
+  }
+  .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: .16s;
+  }
+  .sw[aria-checked="true"] { background: var(--brand); border-color: var(--brand); }
+  .sw[aria-checked="true"]::after { transform: translateX(15px); }
+
+  /* 时间格式是"三选一"的枚举 → **下拉框**（老板 2026-09-20：三条竖排单选占掉半块面板）。
+     样例仍是**当前时刻的实例**（`refreshSamples` 每秒只改文本节点），收起状态也看得见选的是什么。 */
+  .sel { position: relative; display: block; flex: 1; min-width: 0; }
+  .sel select {
+    appearance: none; width: 100%; height: 26px; padding: 0 24px 0 8px;
+    font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: -.2px;
+    color: var(--text); background: #fff;
+    border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer;
+  }
+  .sel select:focus { outline: none; border-color: var(--brand); }
+  .sel::after {
+    content: ""; position: absolute; right: 9px; top: 50%; width: 6px; height: 6px;
+    border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3);
+    transform: translateY(-70%) rotate(45deg); pointer-events: none;
+  }
+
+  .rowline {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2);
+    padding: 5px 0 1px;
+  }
+  .rowline .k { color: var(--text-3); font-size: 11.5px; min-width: 26px; }
+  .rowline .v { color: var(--text); font: 600 11.5px/1 ui-monospace, Menlo, monospace; }
+  .rowline .tip { margin-left: auto; font-size: 11px; color: var(--text-3); }
+  .rowline button.ghost {
+    appearance: none; border: 1px solid var(--border); background: #fff;
+    border-radius: 5px; font: inherit; font-size: 11px; color: var(--text-2);
+    padding: 2px 8px; cursor: pointer;
+  }
+
+  /* 「调整位置 / 完成调整」：⛔ 在**时间戳面板里**，不在画面上也不在画面下方的工具条里
+     （老板 2026-09-20 三次调整的最终落点）。它改的就是这一行的坐标，跟坐标读数同一行。 */
+  .rowline button.adjust {
+    appearance: none; display: inline-flex; align-items: center; gap: 3px;
+    border: 1px solid var(--border-strong); background: #fff; border-radius: 5px;
+    font: 600 11px/1 inherit; color: var(--text-2); padding: 3px 8px; cursor: pointer;
+  }
+  .rowline button.adjust:hover { color: var(--brand); border-color: var(--brand); }
+  .rowline button.adjust.on {
+    color: #fff; background: var(--brand); border-color: var(--brand);
+  }
+  .rowline button.ghost:hover { color: var(--brand); border-color: var(--brand); }
+
+  .coords-edit { display: flex; gap: 6px; margin: 7px 0 0 34px; flex-wrap: wrap; }
+  .coords-edit label { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-3); }
+  .coords-edit input {
+    width: 62px; height: 24px; padding: 0 6px; text-align: right;
+    font: 600 11.5px/1 ui-monospace, Menlo, monospace; color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px; background: #fff;
+  }
+
+  .tlist { display: flex; flex-direction: column; gap: 5px; }
+  .trow { display: flex; align-items: center; gap: 6px; }
+  .trow .idx {
+    flex: 0 0 19px; height: 19px; border-radius: 50%; background: var(--brand-soft);
+    color: var(--brand); font-size: 10.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .trow.unplaced .idx { background: var(--amber-soft); color: var(--amber); }
+  .trow input[type="text"] {
+    flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 8px; font: inherit; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 5px; background: #fff; color: var(--text);
+  }
+  .trow .count { flex: 0 0 auto; font: 600 10.5px/1 ui-monospace, Menlo, monospace; color: var(--text-3); }
+  .trow .count.over { color: var(--red); }
+  .trow .locate {
+    appearance: none; flex: 0 0 auto; border: 1px solid var(--border); background: #fff;
+    border-radius: 5px; font: inherit; font-size: 10.5px; color: var(--text-2);
+    padding: 4px 7px; cursor: pointer; white-space: nowrap;
+  }
+  .trow .locate.warn { color: var(--amber); border-color: #f0dcbb; background: var(--amber-soft); }
+  .trow .del {
+    appearance: none; flex: 0 0 22px; height: 22px; border: 1px solid var(--border);
+    background: #fff; border-radius: 5px; color: var(--text-3); cursor: pointer; line-height: 1;
+  }
+  .trow .del:hover { color: var(--red); border-color: #f2cccc; }
+  .tfoot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .btn {
+    appearance: none; display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--border); background: #fff; border-radius: 6px;
+    font: inherit; font-size: 11.5px; color: var(--text-2); padding: 5px 10px; cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { color: var(--brand); border-color: var(--brand); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { background: #1d4fd8; color: #fff; }
+
+  .fact { background: var(--panel-soft); }
+  .fact .kv { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+  .fact .kv .k { color: var(--text-3); }
+  .fact .kv .v { font: 700 12.5px/1 ui-monospace, Menlo, monospace; color: var(--text); }
+  .fact .kv .ro {
+    margin-left: auto; font-size: 10.5px; color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; background: #fff;
+  }
+  .fact .why { margin: 7px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.55; }
+
+  .panel-ft { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+  .panel-ft .meta { font-size: 11px; color: var(--text-3); }
+  .panel-ft .acts { margin-left: auto; display: flex; gap: 6px; }
+
+  /* ── 现状形态 ─────────────────────────────── */
+  .oldrow { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 9px; align-items: center; padding: 5px 0; }
+  .oldrow > .lbl { font-size: 11.5px; color: var(--text-2); }
+  .oldrow.warnrow { background: var(--amber-soft); border: 1px solid #f0dcbb; border-radius: 6px; padding: 5px 7px; margin: 3px 0; }
+  .oldrow.warnrow > .lbl { color: var(--amber); font-weight: 600; }
+  .slider { display: flex; align-items: center; gap: 6px; }
+  .slider .trk { position: relative; flex: 1 1 auto; height: 4px; border-radius: 2px; background: #e5ecf6; }
+  .slider .trk i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--brand); }
+  .slider .trk b {
+    position: absolute; top: 50%; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
+    border-radius: 50%; background: #fff; border: 2px solid var(--brand); box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+  }
+  .slider .num {
+    flex: 0 0 74px; height: 24px; padding: 0 6px; text-align: right;
+    font: 600 11.5px/1 ui-monospace, Menlo, monospace; color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px; background: #fff;
+  }
+  .slider .unit { flex: 0 0 auto; font-size: 10.5px; color: var(--text-3); }
+  select.oldsel {
+    width: 100%; height: 26px; font: inherit; font-size: 12px; color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px; background: #fff; padding: 0 6px;
+  }
+  .oldtexts { display: grid; grid-template-columns: minmax(0, 1fr) 62px 62px 22px; gap: 5px; align-items: center; }
+  .oldtexts > input {
+    width: 100%; min-width: 0; height: 24px; padding: 0 6px; font: inherit; font-size: 11.5px;
+    border: 1px solid var(--border); border-radius: 5px; background: #fff; color: var(--text);
+  }
+  .oldtexts .ax { font-size: 10px; color: var(--text-3); display: flex; align-items: center; gap: 3px; min-width: 0; }
+  .oldtexts .ax input {
+    width: 100%; min-width: 0; height: 24px; padding: 0 4px;
+    border: 1px solid var(--border); border-radius: 5px; background: #fff; color: var(--text);
+  }
+  .oldtexts .ax input.is-c { text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .oldtexts .del {
+    width: 100%; height: 22px; border: 1px solid var(--border); background: #fff;
+    border-radius: 5px; color: var(--text-3); cursor: pointer; font-size: 11px; line-height: 1;
+  }
+  .oldnote { font-size: 10.5px; color: var(--text-3); margin: 6px 0 0; }
+  .callout {
+    margin: 10px 12px 12px; padding: 8px 10px; border-radius: 7px; font-size: 11.5px; line-height: 1.6;
+    background: var(--amber-soft); border: 1px solid #f0dcbb; color: var(--amber);
+  }
+  .callout b { color: var(--amber); }
+  .callout.blue { background: var(--brand-soft); border-color: #c9dcff; color: #1e3f8f; }
+  .callout.blue b { color: #1e3f8f; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: rgba(23, 34, 52, .94); color: #fff; font-size: 12px;
+    padding: 8px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+    opacity: 0; pointer-events: none; transition: .2s; z-index: 50;
+  }
+  .toast.show { opacity: 1; }
+
+  .spin {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid #cbd8ea; border-top-color: var(--brand); animation: sp .7s linear infinite;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+
+  .hidden { display: none !important; }
+
+  @media (max-width: 1080px) {
+    .panel-col { flex: 1 1 100%; width: auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="grow">
+    <h1>图像叠加 OSD · 操作方式重设计</h1>
+    <p class="sub">播放控制台 › 画面设置 › 图像叠加。左：画面（操作面）　右：属性栏（管理面）。切到「现状」看改动前长什么样。</p>
+  </div>
+  <div class="seg" role="group" aria-label="形态切换">
+    <button id="segOld" aria-pressed="false" type="button">现状</button>
+    <button id="segNew" aria-pressed="true" type="button">新设计</button>
+  </div>
+</div>
+
+<div class="stage">
+  <!-- ══════════ 画面 ══════════ -->
+  <div class="canvas-col">
+    <div class="console">
+      <div class="console-hd">
+        <span class="title">北门摄像机</span>
+        <span class="code">34020000001320000001 › 通道 3748</span>
+        <span class="chip"><i></i>已同步 · 回读于 11:49</span>
+      </div>
+
+      <div class="video" id="video">
+        <svg viewBox="0 0 720 405" preserveAspectRatio="none" aria-hidden="true">
+          <rect width="720" height="405" fill="#39485a"/>
+          <rect y="150" width="720" height="255" fill="#4a5a6c"/>
+          <rect y="262" width="720" height="12" fill="#7c8ea3"/>
+          <rect y="274" width="720" height="131" fill="#586878"/>
+          <path d="M0 405 L720 405 L720 320 L360 262 L0 320 Z" fill="#65768a"/>
+          <!-- 门柱 + 横梁 -->
+          <rect x="120" y="96" width="26" height="170" fill="#93a4b8"/>
+          <rect x="470" y="96" width="26" height="170" fill="#93a4b8"/>
+          <rect x="112" y="82" width="392" height="18" fill="#a2b2c6"/>
+          <rect x="300" y="82" width="18" height="42" fill="#8b9cb0"/>
+          <!-- 网栏 -->
+          <g stroke="#8fa2b6" stroke-width="2" opacity=".65">
+            <path d="M0 320 L0 96 M40 320 L40 96 M80 320 L80 96 M160 320 L160 96 M240 320 L240 96"/>
+            <path d="M0 120 L250 120 M0 168 L250 168 M0 216 L250 216 M0 264 L250 264"/>
+          </g>
+          <g stroke="#8fa2b6" stroke-width="2" opacity=".5">
+            <path d="M600 320 L600 96 M660 320 L660 96 M720 320 L720 96"/>
+            <path d="M560 130 L720 130 M560 180 L720 180 M560 230 L720 230"/>
+          </g>
+          <!-- 地面标线 -->
+          <path d="M318 300 L402 300 M330 330 L390 330" stroke="#c9d4e2" stroke-width="3" opacity=".38"/>
+          <!-- 箱子 -->
+          <rect x="72" y="240" width="46" height="34" fill="#7a8ea4"/>
+          <rect x="598" y="248" width="40" height="28" fill="#7a8ea4"/>
+        </svg>
+
+        <div class="legend" id="legend">
+          <b>标记只在「调整位置」时出现</b><br />
+          默认不画 —— 屏幕上的每一寸都在放视频。
+        </div>
+
+        <!-- 设备烧进码流的字 = 事实 -->
+        <div class="burned" id="burned"></div>
+
+        <!-- 遮挡示例（画面处理组，非本设计范围） -->
+        <div class="mask-demo" id="maskDemo"></div>
+
+        <!-- OSD 锚点层 = 草稿 -->
+        <div class="osd-layer" id="osdLayer"></div>
+
+        <!-- 浮条 -->
+        <div class="draftbar hidden" id="draftbar">
+          <p class="err hidden" id="draftErr"></p>
+          <div class="row">
+            <span class="txt"><b id="dirtyN">0</b> 项画面改动未下发<em id="draftSummary"></em></span>
+            <span class="acts">
+              <button class="btn" type="button" id="btnRevert">还原</button>
+              <button class="btn primary" type="button" id="btnApply">下发</button>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 画面下方工具条：⛔ 这里**不再挂** OSD 的「调整位置」按钮（老板 2026-09-20）。
+           它先在画面右上角（遮画面）→ 再搬到这条工具条（视线仍要来回跳）→
+           最终归位到右侧「时间戳」面板的「位置」行 —— 它改的就是那一行的坐标。
+           现在这里只留一句状态说明，告诉用户标记为什么不在画面上。 -->
+      <div class="video-foot">
+        <span>播放协议 <b>FLV</b></span>
+        <span>704×576 声明画布</span>
+        <span class="osd-tool" id="osdTool">
+          <span class="osd-tool-note" id="canvasHint">标记已收起（点侧栏「调整位置」显示）</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 面板 ══════════ -->
+  <div class="panel-col">
+    <div class="panel">
+      <div class="panel-hd">
+        <span class="title">画面设置 · 图像叠加</span>
+        <span class="badge">GB/T 28181-2022</span>
+      </div>
+
+      <div class="status" id="statusBar">
+        <i></i><span id="statusText">已同步 · 回读于 11:49</span>
+        <button type="button" id="btnRead">读取</button>
+      </div>
+
+      <!-- ░░ 新设计 ░░ -->
+      <div id="panelNew">
+        <!-- 对象块①：时间戳 -->
+        <section class="block" id="blkTime">
+          <div class="block-hd">
+            <span class="name">时间戳</span>
+            <span class="hint">画面上的时间</span>
+            <span class="right">
+              <span class="hint" id="timeOffNote"></span>
+              <button class="sw" type="button" role="switch" aria-checked="true" data-testid="time-switch" id="swTime"></button>
+            </span>
+          </div>
+          <div class="body">
+            <div class="rowline" style="padding-top: 2px">
+              <span class="k">格式</span>
+              <span class="sel">
+                <select id="fmtSelect" aria-label="时间格式">
+                  <option value="0" data-sample>2026-09-20 11:49:18</option>
+                  <option value="1" data-sample>2026年09月20日11:49:18</option>
+                  <option value="">跟设备走（不发格式）</option>
+                </select>
+              </span>
+            </div>
+
+            <div class="rowline">
+              <span class="k">位置</span>
+              <button class="adjust" type="button" id="osdEditToggle">调整位置</button>
+              <span class="v" id="timePosText">20, 470</span>
+              <button class="ghost" type="button" id="btnNumToggle">精确数值 ▾</button>
+            </div>
+            <div class="coords-edit hidden" id="timeNums">
+              <label>X <input type="text" inputmode="numeric" id="numTimeX" /></label>
+              <label>Y <input type="text" inputmode="numeric" id="numTimeY" /></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 对象块②：叠加文字 -->
+        <section class="block" id="blkText">
+          <div class="block-hd">
+            <span class="name">叠加文字</span>
+            <span class="hint" id="textCount">2 / 8</span>
+            <span class="right"><button class="sw" type="button" role="switch" aria-checked="true" id="swText"></button></span>
+          </div>
+          <div class="body">
+            <div class="tlist" id="tlist"></div>
+            <div class="tfoot">
+              <button class="btn" type="button" id="btnAddText">+ 在画面上加一行字</button>
+              <span class="meta" style="font-size: 10.5px; color: var(--text-3)">每条 ≤ 32 个字符</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 只读事实：坐标基准 -->
+        <section class="block fact">
+          <div class="kv">
+            <span class="k">设备声明的坐标画布</span>
+            <span class="v">704 × 576</span>
+            <span class="ro">只读</span>
+          </div>
+          <p class="why">
+            取自设备回读的 <code>OSDConfig.Length / Width</code>。它同时是**遮挡区坐标的基准**；
+            真机实测设备拒收平台改写（写 2560×1440 会被忽略）—— 所以这里是事实展示，不是可填字段。
+          </p>
+        </section>
+
+        <div class="panel-ft">
+          <span class="meta" id="footMeta">本组 6 项 · OSDConfig · 无未下发的改动</span>
+          <span class="acts">
+            <button class="btn" type="button" id="btnReset2">还原</button>
+            <button class="btn" type="button" id="btnRead2">读取</button>
+            <button class="btn primary" type="button" id="btnApply2" disabled>下发</button>
+          </span>
+        </div>
+      </div>
+
+      <!-- ░░ 现状 ░░ -->
+      <div id="panelOld" class="hidden">
+        <div class="block">
+          <div class="oldrow"><span class="lbl">时间显示</span><button class="sw" type="button" role="switch" aria-checked="true"></button></div>
+          <div class="oldrow">
+            <span class="lbl">时间格式</span>
+            <select class="oldsel"><option>不指定（不下发该元素）</option><option selected>YYYY年MM月DD日HH:MM:SS</option><option>YYYY-MM-DD HH:MM:SS</option></select>
+          </div>
+          <div class="oldrow warnrow">
+            <span class="lbl">窗口长度</span>
+            <span class="slider"><i class="trk"><i style="width:50%"></i><b style="left:50%"></b></i><input class="num" value="1920" /><span class="unit">像素</span></span>
+          </div>
+          <div class="oldrow warnrow">
+            <span class="lbl">窗口宽度</span>
+            <span class="slider"><i class="trk"><i style="width:50%"></i><b style="left:50%"></b></i><input class="num" value="1080" /><span class="unit">像素</span></span>
+          </div>
+          <div class="oldrow"><span class="lbl">时间 X</span><span class="slider"><i class="trk"><i style="width:1%"></i><b style="left:1%"></b></i><input class="num" value="20" /><span class="unit">像素</span></span></div>
+          <div class="oldrow"><span class="lbl">时间 Y</span><span class="slider"><i class="trk"><i style="width:82%"></i><b style="left:82%"></b></i><input class="num" value="470" /><span class="unit">像素</span></span></div>
+          <div class="oldrow"><span class="lbl">文字显示</span><button class="sw" type="button" role="switch" aria-checked="true"></button></div>
+          <div class="oldrow" style="align-items: flex-start">
+            <span class="lbl">叠加文字</span>
+            <div>
+              <div class="oldtexts"><input value="北门" /><label class="ax">X<input class="is-c" value="40" /></label><label class="ax">Y<input class="is-c" value="110" /></label><button class="del">✕</button></div>
+              <div class="oldtexts" style="margin-top:5px"><input value="3 号车间" /><label class="ax">X<input class="is-c" value="40" /></label><label class="ax">Y<input class="is-c" value="180" /></label><button class="del">✕</button></div>
+              <div class="oldnote">＋ 添加一条　2 / 8</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout">
+          <b>现状的三个问题</b><br />
+          ① <b>位置只能盲输</b>：把「想放右上角」换算成 <code>1740, 60</code>，画面上一个标记都没有；<br />
+          ② <b>「窗口长度 / 窗口宽度」点了没用</b>：设备拒收改写（回读仍是 704×576），而它们其实是遮挡坐标的基准；<br />
+          ③ <b>「不指定（不下发该元素）」是协议黑话</b>，且一个时间戳被拆到字段表的四处。
+        </div>
+
+        <div class="callout blue">
+          画布上：<b>没有任何 OSD 标记</b>。改完只在下面显示「N 项未下发」——
+          而改动到底把字挪到哪儿了，只能靠想象。
+        </div>
+
+        <div class="panel-ft">
+          <span class="meta">本组 8 项 · OSDConfig · 无未下发的改动</span>
+          <span class="acts">
+            <button class="btn" type="button">还原</button>
+            <button class="btn" type="button">读取</button>
+            <button class="btn primary" type="button">下发</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ─────────── 状态 ─────────── */
+  var counter = 3;
+
+  function deviceState() {
+    return {
+      timeEnable: true,
+      timeType: "1",
+      timeX: 20,
+      timeY: 470,
+      textEnable: true,
+      items: [
+        { id: 1, text: "北门", x: 40, y: 110 },
+        { id: 2, text: "3 号车间", x: 40, y: 180 }
+      ]
+    };
+  }
+
+  var applied = deviceState();
+  var draft = deviceState();
+  var unplaced = {};        // id -> true：新增但从未在画面上定位
+  // 标记默认**一个都不画**；点右侧「时间戳」面板里的「调整位置」才进编辑模式。
+  var editMode = false;
+  var busy = false;
+  var readAt = "11:49";
+  var mode = "new";
+  var showNums = false;
+
+  var CANVAS_W = 704;
+  var CANVAS_H = 576;
+  var MAX_ITEMS = 8;
+  var MAX_CHARS = 32;
+
+  /* ─────────── 工具 ─────────── */
+  function $(id) { return document.getElementById(id); }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function sampleFor(type, d) {
+    d = d || new Date();
+    var Y = d.getFullYear(), M = pad(d.getMonth() + 1), D = pad(d.getDate());
+    var h = pad(d.getHours()), m = pad(d.getMinutes()), s = pad(d.getSeconds());
+    if (type === "0") return Y + "-" + M + "-" + D + " " + h + ":" + m + ":" + s;
+    if (type === "1") return Y + "年" + M + "月" + D + "日" + h + ":" + m + ":" + s;
+    return "";
+  }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2600);
+  }
+
+  function clone(s) {
+    return {
+      timeEnable: s.timeEnable,
+      timeType: s.timeType,
+      timeX: s.timeX,
+      timeY: s.timeY,
+      textEnable: s.textEnable,
+      items: s.items.map(function (it) { return { id: it.id, text: it.text, x: it.x, y: it.y }; })
+    };
+  }
+
+  function pct(v, max) { return (Math.max(0, Math.min(max, v)) / max) * 100; }
+
+  /* ─────────── 差异统计 ─────────── */
+  function diff() {
+    var labels = [];
+    var count = 0;
+    if (draft.timeType !== applied.timeType) { labels.push("时间格式"); count++; }
+    if (draft.timeEnable !== applied.timeEnable) { labels.push(draft.timeEnable ? "开启时间" : "关闭时间"); count++; }
+    if (draft.timeX !== applied.timeX || draft.timeY !== applied.timeY) { labels.push("时间戳位置"); count++; }
+    if (draft.textEnable !== applied.textEnable) { labels.push(draft.textEnable ? "开启文字" : "关闭文字"); count++; }
+
+    var n = Math.max(draft.items.length, applied.items.length);
+    var itemChanged = 0;
+    for (var i = 0; i < n; i++) {
+      var a = applied.items[i], b = draft.items[i];
+      if (!a || !b) { itemChanged++; continue; }
+      if (a.text !== b.text || a.x !== b.x || a.y !== b.y) itemChanged++;
+    }
+    if (itemChanged) { labels.push(itemChanged + " 条文字"); count += itemChanged; }
+    return { labels: labels, count: count, itemChanged: itemChanged };
+  }
+
+  function unplacedList() {
+    return draft.items.filter(function (it) { return unplaced[it.id]; });
+  }
+
+  /* ─────────── 渲染：画布 ─────────── */
+  function renderBurned() {
+    var host = $("burned");
+    var html = "";
+    var s = applied;
+    if (s.timeEnable) {
+      var txt = sampleFor(s.timeType);
+      if (txt) {
+        html += '<span style="left:' + pct(s.timeX, CANVAS_W) + '%;top:' + pct(s.timeY, CANVAS_H) + '%">' + txt + "</span>";
+      }
+    }
+    if (s.textEnable) {
+      s.items.forEach(function (it) {
+        var t = String(it.text || "").trim();
+        if (!t) return;
+        html += '<span style="left:' + pct(it.x, CANVAS_W) + '%;top:' + pct(it.y, CANVAS_H) + '%">' + escapeHtml(t) + "</span>";
+      });
+    }
+    host.innerHTML = html;
+  }
+
+  function renderAnchors() {
+    var host = $("osdLayer");
+    // ⛔ 只读态**一个标记都不画**（老板 2026-09-20："这个为啥还是默认显示呢……
+    //    现在这个 OSD 过于混乱"）。上一版是"锚点常驻 + 只读态降噪"，画面里仍然摊着
+    //    四五个带引线的标签，而屏幕上的每一寸都在放视频。
+    //    位置信息由右侧那行 `X · Y` 承担，"画面上不画"不等于"位置不可知"。
+    if (mode === "old" || !editMode) {
+      host.classList.remove("editing");
+      host.innerHTML = "";
+      syncOsdTool();
+      return;
+    }
+    var html = "";
+    var d = draft;
+    var dTimeX = d.timeX !== applied.timeX || d.timeY !== applied.timeY;
+
+    // 时间戳锚点
+    var tState = !d.timeEnable ? "off" : (dTimeX ? "draft" : "live");
+    html += anchorHtml({
+      key: "time",
+      x: d.timeX, y: d.timeY,
+      state: tState,
+      label: "时间戳" + (d.timeEnable ? "" : " · 已关闭"),
+      coords: d.timeX + ", " + d.timeY
+    });
+
+    // 文字锚点（关闭文字显示时也画，只淡显 —— 隐藏会让人以为配置丢了）
+    (function () {
+      d.items.forEach(function (it, i) {
+        var st;
+        if (unplaced[it.id]) st = "unplaced";
+        else if (!d.textEnable) st = "off";
+        else {
+          var a = applied.items[i];
+          st = (!a || a.text !== it.text || a.x !== it.x || a.y !== it.y) ? "draft" : "live";
+        }
+        var t = String(it.text || "").trim() || ("第 " + (i + 1) + " 条");
+        html += anchorHtml({
+          key: "item-" + it.id,
+          itemId: it.id,
+          x: it.x, y: it.y,
+          state: st,
+          label: (i + 1) + " " + escapeHtml(t) + (!d.textEnable ? " · 已关闭" : ""),
+          coords: it.x + ", " + it.y,
+          pulse: it.pulse ? " pulse" : ""
+        });
+      });
+    })();
+    host.innerHTML = html;
+    // 走到这里就一定在编辑模式，所以这行说明也是"编辑模式的说明"。
+    // ⛔ 指向必须写清**在侧栏时间戳面板里** —— 按钮已经不在画面上、也不在下方工具条里了。
+    host.insertAdjacentHTML(
+      "beforeend",
+      '<span class="osd-hint">拖动这些标记就能挪位置 · 点侧栏「完成调整」或按 Esc 退出</span>'
+    );
+    host.classList.add("editing");
+    syncOsdTool();
+    bindDrag(host);
+  }
+
+  /** 「时间戳」面板里的开关外观 + 画面下方那句状态说明。 */
+  function syncOsdTool() {
+    var b = $("osdEditToggle");
+    b.classList.toggle("on", editMode);
+    b.textContent = editMode ? "✓ 完成调整" : "调整位置";
+    $("canvasHint").textContent =
+      mode !== "new"
+        ? "画布上没有任何 OSD 标记 —— 位置只能靠数字想象"
+        : (editMode ? "正在调整：拖动画面上的标记" : "标记已收起（点侧栏「调整位置」显示）");
+  }
+
+  function anchorHtml(o) {
+    var cls = "anchor" + (o.pulse || "");
+    var style = "left:" + pct(o.x, CANVAS_W) + "%;top:" + pct(o.y, CANVAS_H) + "%";
+    var badge = o.state === "draft" ? " · 待下发" : (o.state === "unplaced" ? " · 未定位" : "");
+    return (
+      '<span class="' + cls + '" data-state="' + o.state + '" data-key="' + o.key + '"' +
+      (o.itemId ? ' data-item="' + o.itemId + '"' : "") +
+      ' style="' + style + '">' +
+      '<span class="hit hidden"></span>' +
+      '<span class="pin"></span><span class="lead"></span>' +
+      '<span class="tag">' + o.label + "<em>" + badge + "</em></span>" +
+      '<span class="coords hidden">' + o.coords + "</span>" +
+      "</span>"
+    );
+  }
+
+  function bindDrag(host) {
+    Array.prototype.forEach.call(host.querySelectorAll(".anchor"), function (el) {
+      var drag = null;
+      el.addEventListener("pointerdown", function (e) {
+        // ⛔ 默认只读：没点「调整位置」之前，锚点根本不吃指针，拖不动任何东西
+        if (busy || !editMode) return;
+        e.preventDefault();
+        // 捕获失败不致命（合成事件、旧浏览器）—— 拖拽本身照旧走
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+        drag = { el: el, rect: $("video").getBoundingClientRect() };
+        el.querySelector(".coords").classList.remove("hidden");
+        el.querySelector(".hit").classList.remove("hidden");
+      });
+      el.addEventListener("pointermove", function (e) {
+        if (!drag || drag.el !== el) return;
+        var r = drag.rect;
+        var nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        var ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+        var px = Math.round(nx * CANVAS_W), py = Math.round(ny * CANVAS_H);
+        el.style.left = (nx * 100) + "%";
+        el.style.top = (ny * 100) + "%";
+        el.querySelector(".coords").textContent = px + ", " + py;
+        el.dataset.px = px; el.dataset.py = py;
+        // 拖动中只改视觉，不写草稿（避免脏值统计在拖动过程中抖动）
+        el.dataset.state = "draft";
+      });
+      el.addEventListener("pointerup", function (e) {
+        if (!drag || drag.el !== el) return;
+        try { el.releasePointerCapture(e.pointerId); } catch (err) { /* noop */ }
+        var px = Number(el.dataset.px), py = Number(el.dataset.py);
+        drag = null;
+        if (Number.isFinite(px) && Number.isFinite(py)) commitAnchor(el.dataset.key, px, py, el.dataset.item);
+      });
+      el.addEventListener("pointercancel", function () { drag = null; });
+    });
+  }
+
+  function commitAnchor(key, x, y, itemId) {
+    if (key === "time") {
+      draft.timeX = x;
+      draft.timeY = y;
+    } else {
+      var id = Number(itemId);
+      var it = draft.items.filter(function (o) { return o.id === id; })[0];
+      if (it) { it.x = x; it.y = y; delete it.pulse; }
+      delete unplaced[id];
+    }
+    renderAll();
+  }
+
+  /* ─────────── 渲染：面板 ─────────── */
+  function renderFmt() {
+    var now = new Date();
+    var el = $("fmtSelect");
+    el.value = draft.timeType;
+    // 只改那几个 option 的文本节点（`refreshSamples` 每秒也走同一条路）——
+    // ⛔ 别整个重渲染面板：用户正在输入的框会掉光标。
+    Array.prototype.forEach.call(el.options, function (opt) {
+      var txt = sampleFor(opt.value, now);
+      if (txt) opt.textContent = txt;
+    });
+  }
+
+  function renderTlist() {
+    var host = $("tlist");
+    var html = "";
+    draft.items.forEach(function (it, i) {
+      var chars = Array.from(String(it.text || "")).length;
+      var over = chars > MAX_CHARS;
+      var up = !!unplaced[it.id];
+      html +=
+        '<div class="trow' + (up ? " unplaced" : "") + '" data-id="' + it.id + '">' +
+        '<span class="idx">' + (i + 1) + "</span>" +
+        '<input type="text" value="' + escapeAttr(it.text) + '" placeholder="第 ' + (i + 1) + ' 条文字" data-act="text" />' +
+        '<span class="count' + (over ? " over" : "") + '">' + chars + "/" + MAX_CHARS + "</span>" +
+        '<button class="locate' + (up ? " warn" : "") + '" type="button" data-act="locate">' +
+        (up ? "去定位" : "在画面上定位") + "</button>" +
+        '<button class="del" type="button" data-act="del" title="删除">✕</button>' +
+        "</div>";
+    });
+    host.innerHTML = html || '<p style="font-size:11.5px;color:var(--text-3);margin:0">还没有叠加文字</p>';
+    $("textCount").textContent = draft.items.length + " / " + MAX_ITEMS;
+  }
+
+  function renderSwitches() {
+    $("swTime").setAttribute("aria-checked", String(draft.timeEnable));
+    $("swText").setAttribute("aria-checked", String(draft.textEnable));
+    $("blkTime").classList.toggle("off", !draft.timeEnable);
+    $("blkText").classList.toggle("off", !draft.textEnable);
+    $("timeOffNote").textContent = draft.timeEnable ? "" : "已关闭，画面不显示";
+  }
+
+  function renderFoot() {
+    var d = diff();
+    $("timePosText").textContent = draft.timeX + ", " + draft.timeY;
+    var meta = "本组 6 项 · OSDConfig · " + (d.count ? d.count + " 项未下发" : "无未下发的改动");
+    $("footMeta").textContent = meta;
+    $("footMeta").style.color = d.count ? "var(--amber)" : "";
+
+    $("dirtyN").textContent = d.count;
+    $("draftSummary").textContent = d.labels.join(" · ");
+
+    var showBar = d.count > 0 && mode === "new";
+    $("draftbar").classList.toggle("hidden", !showBar);
+
+    var ups = unplacedList();
+    var errEl = $("draftErr");
+    if (ups.length) {
+      errEl.classList.remove("hidden");
+      errEl.textContent =
+        "还有 " + ups.length + " 条文字没有定位（" +
+        ups.map(function (it) { return it.text || "未命名"; }).join("、") +
+        "）—— 拖动画面上的「未定位」锚点摆好位置才能下发。";
+    } else if (overChars().length) {
+      errEl.classList.remove("hidden");
+      errEl.textContent = "有 " + overChars().length + " 条文字超过 " + MAX_CHARS + " 个字符，请先改短。";
+    } else {
+      errEl.classList.add("hidden");
+    }
+
+    var blocked = ups.length > 0 || overChars().length > 0;
+    [$("btnApply"), $("btnApply2")].forEach(function (b) {
+      if (!b) return;
+      b.disabled = !d.count || blocked || busy;
+      b.textContent = busy ? "下发中…" : "下发";
+    });
+    $("btnRevert").disabled = !d.count || busy;
+    $("btnReset2").disabled = !d.count || busy;
+  }
+
+  function overChars() {
+    return draft.items.filter(function (it) { return Array.from(String(it.text || "")).length > MAX_CHARS; });
+  }
+
+  function renderStatus() {
+    var el = $("statusBar");
+    el.classList.toggle("busy", busy);
+    if (busy) { $("statusText").textContent = "正在与设备通信…"; }
+    else { $("statusText").textContent = "已同步 · 回读于 " + readAt; }
+  }
+
+  function renderAll() {
+    renderBurned();
+    renderAnchors();
+    renderFmt();
+    renderTlist();
+    renderSwitches();
+    renderFoot();
+    renderStatus();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function escapeAttr(s) { return escapeHtml(s).replace(/'/g, "&#39;"); }
+
+  /* ─────────── 事件 ─────────── */
+  $("fmtSelect").addEventListener("change", function () {
+    if (busy) return;
+    draft.timeType = this.value;
+    renderAll();
+  });
+
+  $("swTime").addEventListener("click", function () {
+    if (busy) return;
+    draft.timeEnable = !draft.timeEnable;
+    renderAll();
+  });
+  $("swText").addEventListener("click", function () {
+    if (busy) return;
+    draft.textEnable = !draft.textEnable;
+    renderAll();
+  });
+
+  $("btnNumToggle").addEventListener("click", function () {
+    showNums = !showNums;
+    $("timeNums").classList.toggle("hidden", !showNums);
+    this.textContent = showNums ? "精确数值 ▴" : "精确数值 ▾";
+    $("numTimeX").value = draft.timeX;
+    $("numTimeY").value = draft.timeY;
+  });
+
+  ["numTimeX", "numTimeY"].forEach(function (id) {
+    $(id).addEventListener("change", function () {
+      var v = parseInt(this.value, 10);
+      if (!Number.isFinite(v) || v < 0) { this.value = id === "numTimeX" ? draft.timeX : draft.timeY; return; }
+      if (id === "numTimeX") draft.timeX = Math.min(v, CANVAS_W); else draft.timeY = Math.min(v, CANVAS_H);
+      renderAll();
+      $("numTimeX").value = draft.timeX;
+      $("numTimeY").value = draft.timeY;
+    });
+  });
+
+  $("tlist").addEventListener("click", function (e) {
+    var row = e.target.closest(".trow");
+    if (!row) return;
+    var id = Number(row.dataset.id);
+    var act = e.target.dataset ? e.target.dataset.act : null;
+    if (act === "del") {
+      draft.items = draft.items.filter(function (it) { return it.id !== id; });
+      delete unplaced[id];
+      renderAll();
+      return;
+    }
+    if (act === "locate") {
+      var it = draft.items.filter(function (o) { return o.id === id; })[0];
+      if (!it) return;
+      it.pulse = true;
+      renderAll();
+      toast("把画面上闪动的「未定位」锚点拖到想要的位置");
+      setTimeout(function () { delete it.pulse; }, 3200);
+      return;
+    }
+  });
+
+  $("tlist").addEventListener("change", function (e) {
+    if (e.target.dataset.act !== "text") return;
+    var row = e.target.closest(".trow");
+    var id = Number(row.dataset.id);
+    var it = draft.items.filter(function (o) { return o.id === id; })[0];
+    if (it) it.text = e.target.value;
+    renderAll();
+  });
+
+  $("btnAddText").addEventListener("click", function () {
+    if (busy) return;
+    if (draft.items.length >= MAX_ITEMS) { toast("标准上限 " + MAX_ITEMS + " 条"); return; }
+    var id = counter++;
+    draft.items.push({ id: id, text: "", x: 0, y: 0 });
+    unplaced[id] = true;   // ⛔ 不预填坐标：预填会让人以为"平台帮我对齐了"
+    renderAll();
+    var inp = $("tlist").querySelector('.trow[data-id="' + id + '"] input');
+    if (inp) inp.focus();
+  });
+
+  function revert() {
+    if (busy) return;
+    draft = clone(applied);
+    unplaced = {};
+    renderAll();
+    toast("已还原到设备当前值");
+  }
+
+  function apply() {
+    if (busy) return;
+    if (!diff().count) return;
+    busy = true;
+    renderFoot(); renderStatus();
+    setTimeout(function () {
+      applied = clone(draft);
+      unplaced = {};
+      busy = false;
+      readAt = sampleFor("0").slice(11, 16);
+      renderAll();
+      toast("已下发 · Result=OK 不是终态，正在回读对账…");
+      setTimeout(function () { renderAll(); toast("回读一致 · 已同步"); }, 1400);
+    }, 900);
+  }
+
+  function read() {
+    if (busy) return;
+    busy = true;
+    renderStatus();
+    setTimeout(function () {
+      busy = false;
+      readAt = sampleFor("0").slice(11, 16);
+      renderAll();
+      toast("已读取设备值（本次无变化）");
+    }, 700);
+  }
+
+  $("btnApply").addEventListener("click", apply);
+  $("btnApply2").addEventListener("click", apply);
+  $("btnRevert").addEventListener("click", revert);
+  $("btnReset2").addEventListener("click", revert);
+  $("btnRead").addEventListener("click", read);
+  $("btnRead2").addEventListener("click", read);
+
+  /* ─────────── 形态切换 ─────────── */
+  function setMode(next) {
+    mode = next;
+    var isNew = next === "new";
+    // 换形态就把编辑模式收回默认只读：留着"开着编辑模式但画面上没有锚点"只会让人以为坏了。
+    editMode = false;
+    $("segOld").setAttribute("aria-pressed", String(!isNew));
+    $("segNew").setAttribute("aria-pressed", String(isNew));
+    $("panelNew").classList.toggle("hidden", !isNew);
+    $("panelOld").classList.toggle("hidden", isNew);
+    $("legend").classList.toggle("hidden", !isNew);
+    // 切到「现状」形态时退出编辑模式（那片画面里根本没有锚点）；
+    // 新设计形态下那句说明交给 `syncOsdTool()`，这里不重复写文案。
+    editMode = false;
+    $("osdTool").classList.toggle("hidden", !isNew);
+    $("draftbar").classList.toggle("hidden", !(isNew && diff().count > 0));
+    renderAll();
+  }
+  $("segOld").addEventListener("click", function () { setMode("old"); });
+  $("segNew").addEventListener("click", function () { setMode("new"); });
+
+  /* ─────────── 编辑模式（锚点默认只读） ─────────── */
+  $("osdEditToggle").addEventListener("click", function () {
+    editMode = !editMode;
+    renderAll();
+  });
+  /* Esc 退出编辑模式（与实现里的 `exitOsdEditMode` 同一行为） */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || !editMode) return;
+    editMode = false;
+    renderAll();
+  });
+
+  /* ─────────── 每秒刷新样例时间 ─────────── */
+  setInterval(function () {
+    if (mode !== "new" || busy) return;
+    renderFmt();
+  }, 1000);
+
+  setMode("new");
+})();
+</script>
+</body>
+</html>

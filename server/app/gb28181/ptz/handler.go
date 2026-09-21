@@ -104,10 +104,20 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		}
 		return s.applyConfigDownloadResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdDeviceConfig:
-		// 配置写入应答（A.2.6.8）。两条支路都**不会**把 operation 收在 accepted 就结束：
-		// 它们会在同一个事务里追加一条 ConfigDownload 对账子 operation，
+		// 配置写入应答（A.2.6.8）。配置族那条支路**不会**把 operation 收在 accepted 就结束：
+		// 它会在同一个事务里追加一条 ConfigDownload 对账子 operation，
 		// 因为写入应答没有回显，Result=OK 说明不了值有没有生效。
-		if operation.Action == actionApplyDeviceConfig {
+		//
+		// ⛔ 分流判据与 scheduler 的报文重建**必须同源**（[deviceConfigOperationForm]），
+		// 且同样不能退回 action 白名单：漏一个 action 会让这条应答按 A-5 处理，
+		// 于是派生出的对账去回读 `VideoParamAttribute`，而父 payload 里装的是别的块 ——
+		// 对账"双方都在场"的块一个都对不上，差异恒为 0 条 ⇒ **判 read_ok，等于没对账**。
+		// （2026-09-20：抓拍会话 action=`snapshot_config` 同时踩中重建与分派两处。）
+		_, blockFamily, formErr := deviceConfigOperationForm(operation.Action, operation.PayloadJSON)
+		if formErr != nil {
+			return formErr
+		}
+		if blockFamily {
 			return s.applyDeviceConfigAckResponse(ctx, operation, callID, cseq, body)
 		}
 		return s.applyDeviceConfigResponse(ctx, operation, callID, cseq, body)
