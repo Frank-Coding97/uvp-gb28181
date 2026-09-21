@@ -25,6 +25,9 @@ type ptzExtendedRequest struct {
 	Action         string `json:"action"`
 	ID             int    `json:"id"`
 	Speed          int    `json:"speed"`
+	// Value 是 0x86/0x87/0x8A 这类「12 位参数」指令的载荷(巡航速度/停留时间、扫描速度),
+	// 取值域 1-4095。方向与速度类指令不用它 —— 那些走 0-255 的 Speed。
+	Value          int    `json:"value"`
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
@@ -43,7 +46,8 @@ func parseExtendedAction(value string) (manscdp.PTZExtendedAction, error) {
 	case string(manscdp.PTZActionSetPreset), string(manscdp.PTZActionCallPreset), string(manscdp.PTZActionDeletePreset),
 		string(manscdp.PTZActionCruiseStart), string(manscdp.PTZActionCruiseStop), string(manscdp.PTZActionCruisePause),
 		string(manscdp.PTZActionCruiseResume), string(manscdp.PTZActionCruiseDelete),
-		string(manscdp.PTZActionScanStart), string(manscdp.PTZActionScanStop):
+		string(manscdp.PTZActionScanStart), string(manscdp.PTZActionScanStop),
+		string(manscdp.PTZActionScanSetLeft), string(manscdp.PTZActionScanSetRight), string(manscdp.PTZActionScanSetSpeed):
 		return manscdp.PTZExtendedAction(value), nil
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 扩展动作: %q", value)
@@ -209,8 +213,21 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	if id == 0 {
 		id, _ = strconv.Atoi(c.Param("presetId"))
 	}
-	if id <= 0 {
+	// 扫描的「组号」是 00H-FFH,0 号是合法组;预置位/巡航的编号 0 则是哨兵(未配置/整条删除),
+	// 两类动作的取值域不同,别用同一条 `id > 0` 校验。
+	isScanAction := action == manscdp.PTZActionScanStart || action == manscdp.PTZActionScanStop ||
+		action == manscdp.PTZActionScanSetLeft || action == manscdp.PTZActionScanSetRight || action == manscdp.PTZActionScanSetSpeed
+	if isScanAction {
+		if id < 0 || id > 255 {
+			dc.FailAndAbort(c, "扫描组号必须在 0-255 之间", nil)
+			return
+		}
+	} else if id <= 0 {
 		dc.FailAndAbort(c, "PTZ 编号必须为正数", nil)
+		return
+	}
+	if action == manscdp.PTZActionScanSetSpeed && (request.Value <= 0 || request.Value > 4095) {
+		dc.FailAndAbort(c, "扫描速度必须在 1-4095 之间", nil)
 		return
 	}
 	var channel gbmodels.GbChannel
@@ -248,9 +265,10 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
 		Profile: target.Profile,
-		Payload: map[string]interface{}{"action": action, "id": id, "speed": request.Speed},
+		Payload: map[string]interface{}{"action": action, "id": id, "speed": request.Speed, "value": request.Value},
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: action, ID: id, Speed: request.Speed})
+			return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn,
+				manscdp.PTZExtendedCommand{Action: action, ID: id, Speed: request.Speed, Value16: request.Value})
 		},
 	})
 	if executeErr != nil {

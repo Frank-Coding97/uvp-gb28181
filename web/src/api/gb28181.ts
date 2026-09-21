@@ -1079,6 +1079,21 @@ export const controlPtzExtended = (channelId: number, data: Record<string, unkno
     data
   });
 
+/**
+ * 自动扫描(PTZCmd 89H / 8AH)。走的是 `/ptz/extended` 这条已登记权限的通道,
+ * 没有新增路由 —— 新增路由要补 sys_api / sys_menu_api 的三方言迁移。
+ *
+ * ⛔ 扫描与巡航不是一回事:巡航按一串预置位顺序走,扫描只有**左右两个边界**,
+ *    所以没有点位列表可回读 —— 边界靠把云台转到目标位置后再下发 `scan_set_left/right`。
+ *    `value` 只在 `scan_set_speed` 时带,取值域 1-4095(12 位,与巡航速度同量纲)。
+ */
+export type PtzScanAction = "scan_start" | "scan_stop" | "scan_set_left" | "scan_set_right" | "scan_set_speed";
+
+export const controlPtzScan = (channelId: number, data: { action: PtzScanAction; id: number; value?: number }) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/extended`), {
+    data
+  });
+
 export const createPtzPreset = (channelId: number, data: { presetId: number; name: string; idempotencyKey?: string }) =>
   http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets`), {
     data

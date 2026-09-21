@@ -84,6 +84,9 @@ const (
 	PTZActionCruiseDeletePath PTZExtendedAction = "cruise_delete_path"
 	PTZActionScanStart        PTZExtendedAction = "scan_start"
 	PTZActionScanStop         PTZExtendedAction = "scan_stop"
+	PTZActionScanSetLeft      PTZExtendedAction = "scan_set_left"
+	PTZActionScanSetRight     PTZExtendedAction = "scan_set_right"
+	PTZActionScanSetSpeed     PTZExtendedAction = "scan_set_speed"
 )
 
 type PTZExtendedCommand struct {
@@ -341,9 +344,28 @@ func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID stri
 	case PTZActionCruiseDelete, PTZActionCruiseDeletePath:
 		instruction = 0x85
 		parameter1 = byte(command.ID)
+	// ⛔ 89H 一个指令码管三件事,子动作在**数据2(字节6)**,不在指令码里:
+	//    00H 开始扫描 / 01H 设左边界 / 02H 设右边界。别照着「一个动作一个码」去猜。
 	case PTZActionScanStart:
 		instruction = 0x89
 		parameter1 = byte(command.ID)
+		parameter2 = 0x00
+	case PTZActionScanSetLeft:
+		instruction = 0x89
+		parameter1 = byte(command.ID)
+		parameter2 = 0x01
+	case PTZActionScanSetRight:
+		instruction = 0x89
+		parameter1 = byte(command.ID)
+		parameter2 = 0x02
+	case PTZActionScanSetSpeed:
+		if command.Value16 <= 0 || command.Value16 > 4095 {
+			return nil, fmt.Errorf("扫描速度必须在 1-4095 之间")
+		}
+		instruction = 0x8A
+		parameter1 = byte(command.ID)
+		parameter2 = byte(command.Value16 & 0xFF)
+		parameter3 = byte((command.Value16>>8)&0x0F) << 4
 	case PTZActionScanStop:
 		// As with cruise stop, stop scanning uses the standard stop command.
 	default:

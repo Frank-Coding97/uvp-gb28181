@@ -164,17 +164,23 @@ func TestBuildExtendedPTZControl_UsesStandardInstructionAndParameterLayout(t *te
 		name   string
 		action PTZExtendedAction
 		id     int
+		value  int
 		want   string
 	}{
-		{"set preset", PTZActionSetPreset, 3, "A50F018100030039"},
-		{"call preset", PTZActionCallPreset, 3, "A50F01820003003A"},
-		{"start cruise", PTZActionCruiseStart, 4, "A50F018804000041"},
-		{"delete cruise path", PTZActionCruiseDeletePath, 2, "A50F01850200003C"},
-		{"start scan", PTZActionScanStart, 5, "A50F018905000043"},
+		{"set preset", PTZActionSetPreset, 3, 0, "A50F018100030039"},
+		{"call preset", PTZActionCallPreset, 3, 0, "A50F01820003003A"},
+		{"start cruise", PTZActionCruiseStart, 4, 0, "A50F018804000041"},
+		{"delete cruise path", PTZActionCruiseDeletePath, 2, 0, "A50F01850200003C"},
+		{"start scan", PTZActionScanStart, 5, 0, "A50F018905000043"},
+		// 89H 的三个子动作都在**字节6**:00H 开始 / 01H 左边界 / 02H 右边界。
+		{"set scan left bound", PTZActionScanSetLeft, 5, 0, "A50F018905010044"},
+		{"set scan right bound", PTZActionScanSetRight, 5, 0, "A50F018905020045"},
+		// 8AH 的速度是 12 位:低 8 位进字节6,高 4 位进字节7 的高半字节。
+		{"set scan speed", PTZActionScanSetSpeed, 5, 1000, "A50F018A05E8305C"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, err := BuildExtendedPTZControl("C", 9, PTZExtendedCommand{Action: tt.action, ID: tt.id, Speed: 8})
+			body, err := BuildExtendedPTZControl("C", 9, PTZExtendedCommand{Action: tt.action, ID: tt.id, Speed: 8, Value16: tt.value})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -265,6 +265,75 @@ func TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions(t *testing.T) {
 	}
 }
 
+func TestDeviceMgmt_ControlPTZExtendedScanActions(t *testing.T) {
+	controller, _, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/extended", controller.ControlPTZExtended)
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"start", `{"action":"scan_start","id":1}`, "A50F01890100003F"},
+		// 89H 一个码管三件事,子动作在字节6(00 开始 / 01 左边界 / 02 右边界)。
+		{"left bound", `{"action":"scan_set_left","id":1}`, "A50F018901010040"},
+		{"right bound", `{"action":"scan_set_right","id":1}`, "A50F018901020041"},
+		// 8AH 的速度是 12 位:低 8 位进字节6,高 4 位进字节7 高半字节。
+		{"speed", `{"action":"scan_set_speed","id":1,"value":120}`, "A50F018A017800B8"},
+		{"stop", `{"action":"scan_stop","id":1}`, "A50F0100000000B5"},
+		// 扫描组号 0 是合法组(00H-FFH),与预置位/巡航的「0 = 哨兵」不同。
+		{"group zero", `{"action":"scan_start","id":0}`, "A50F01890000003E"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender.mu.Lock()
+			before := len(sender.bodies)
+			sender.mu.Unlock()
+			request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/extended",
+				strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "operationId")
+			sender.mu.Lock()
+			bodies := append([]string(nil), sender.bodies[before:]...)
+			sender.mu.Unlock()
+			found := false
+			for _, b := range bodies {
+				if strings.Contains(b, tt.want) {
+					found = true
+					break
+				}
+			}
+			require.True(t, found, "want %q in sent bodies, got %v", tt.want, bodies)
+		})
+	}
+}
+
+func TestDeviceMgmt_ControlPTZExtendedRejectsScanSpeedOutOfRange(t *testing.T) {
+	controller, _, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/extended", controller.ControlPTZExtended)
+
+	for _, body := range []string{`{"action":"scan_set_speed","id":1}`, `{"action":"scan_set_speed","id":1,"value":4096}`} {
+		sender.mu.Lock()
+		before := len(sender.bodies)
+		sender.mu.Unlock()
+		request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/extended", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Contains(t, response.Body.String(), `"code":1`, body)
+		sender.mu.Lock()
+		require.Len(t, sender.bodies, before, "非法的扫描速度不应下发 SIP")
+		sender.mu.Unlock()
+	}
+}
+
 func TestDeviceMgmt_ControlPTZCruiseRejectsNonStandardPauseAndResume(t *testing.T) {
 	controller, _, channel, sender := newPTZResourceController(t)
 	router := gin.New()
