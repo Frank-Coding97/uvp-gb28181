@@ -2257,19 +2257,27 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.get("[data-testid='dcg-reconcile']").text()).toContain("回读成功");
 
     // 「按几段码流渲染」的出处是目录 <Info> 的 StreamNumberList，不是"我们看到几行"。
-    expect(wrapper.get(".dcg-statusbar").text()).toContain("码流声明 0 / 1");
+    // ⛔ 但那行只写在**抽屉底部 statusbar** 里，而 statusbar 是 `v-if="!embedded"` ——
+    //    控制台这里是**嵌入形态**，根本不渲染 statusbar。嵌入形态能验证的是参数区汇总条：
+    //    本组项数 × 当前配置文件下可见的码流数。
+    expect(wrapper.get("[data-testid='dcg-params-foot']").text()).toContain("本组 5 项 × 1 路码流");
 
     // ⛔ 控件绑定标准码值，人读串只存在于 option 文案。
-    expect((wrapper.get("[data-testid='dcg-format-0']").element as HTMLSelectElement).value).toBe("2");
-    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("6");
+    //    ⛔⛔ 取 `modelvalue` attribute 而不是 `element.value`：测试环境里 `a-select` 的 stub
+    //       渲染成裸 `<select><slot /></select>`，**不透传 model-value**，鸭子的
+    //       `option` 也不带 value ⇒ `.value` 永远落在第一项，会把"控件没绑到回读值"
+    //       这种**假象**当成组件缺陷。attribute 才是组件真实接到的东西。
+    expect(wrapper.get("[data-testid='dcg-format-0']").attributes("model-value")).toBe("2");
+    expect(wrapper.get("[data-testid='dcg-resolution-0']").attributes("model-value")).toBe("6");
 
     // 配置文件切到子码流后，VBR 码率明确标为“不发”。
     await wrapper.get("[aria-label='配置文件']").setValue("1");
     await nextTick();
     expect(wrapper.get("[data-testid='dcg-stream-1'] [data-source='不发']").text()).toBe("不发");
 
-    // 对照区的「回读」行取设备事实：改草稿不该动它（下方 mismatch 用例另有锁定）。
-    expect(wrapper.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
+    // 对照区的「回读」行取**当前选中那一路码流**的设备事实：切到子码流后跟着变成它的 720P；
+    // 关键是草稿没动过它（下方 mismatch 用例另有锁定）。
+    expect(wrapper.get("[data-testid='video-param-compare-read']").text()).toContain("720P");
     wrapper.unmount();
   });
 
@@ -2347,11 +2355,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     const reconcile = wrapper.get("[data-testid='dcg-reconcile']");
-    expect(reconcile.text()).toContain("设备未返回该配置类型");
+    // ⛔ type_absent 在**嵌入形态**是短文案（侧栏一行放不下完整句，“可判为不支持
+    //    VideoParamAttribute”那半句只在抽屉形态出现）⇒ 别把完整句钉在这里。
+    expect(reconcile.text()).toContain("设备未返回该配置");
     // ⛔ type_absent 是"一种结论"而不是失败：设备回了 OK 却没带该元素
     // （2016 设备与未实现该类型的厂商都是这个形态）→ 黄色提示，不是红色报错。
     expect(reconcile.classes()).toContain("is-warn");
-    expect(reconcile.text()).toContain("VideoParamAttribute");
+    expect(reconcile.classes()).not.toContain("is-error");
     // 列表空着的时候也不能说成"尚未读取" —— 那会把能力问题说成操作问题。
     expect(wrapper.get("[data-testid='dcg-empty'] p").text()).toBe("设备未返回该配置类型的参数");
     wrapper.unmount();
@@ -2377,7 +2387,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='dcg-version-notice']").text()).toContain("平台按 2016 版处理");
+    // ⛔ 版本提示那条**只在抽屉形态渲染**（`v-if="versionNotice && !embedded"`）：
+    //    控制台这里是嵌入形态，宿主没留这条额外提示的空间。所以这里能兜住的是契约的
+    //    「不改可用性」那一半；「措辞」那一半由 DeviceConfigDrawer.test.ts 的非嵌入用例兜。
+    expect(wrapper.find("[data-testid='dcg-version-notice']").exists()).toBe(false);
     // ⛔ "设备不支持"不是"用户不许试"的理由：读取按钮仍可用。
     expect((wrapper.get("[data-testid='dcg-read']").element as HTMLButtonElement).disabled).toBe(false);
     wrapper.unmount();
@@ -2421,7 +2434,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 还原回设备事实，脏值计数归零。
     await wrapper.get("[data-testid='dcg-reset']").trigger("click");
     await nextTick();
-    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("6");
+    expect(wrapper.get("[data-testid='dcg-resolution-0']").attributes("model-value")).toBe("6");
     expect(wrapper.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
@@ -2472,7 +2485,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(api.getChannelVideoParams).toHaveBeenLastCalledWith(2, false);
-    expect((wrapper.get("[data-testid='dcg-resolution-0']").element as HTMLSelectElement).value).toBe("4");
+    expect(wrapper.get("[data-testid='dcg-resolution-0']").attributes("model-value")).toBe("4");
     expect(wrapper.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
