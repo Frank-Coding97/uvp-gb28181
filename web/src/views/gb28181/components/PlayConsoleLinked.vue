@@ -45,6 +45,7 @@ import {
   deleteTalkSession,
   fetchPTZDefaultSpeedConfig,
   getControlCapabilities,
+  getChannelTargetTrack,
   getCruiseTrack,
   getChannelVideoParams,
   getHomePosition,
@@ -58,6 +59,7 @@ import {
   getStreamProbeOperation,
   startPlay,
   stopPlay,
+  setChannelTargetTrack,
   updateHomePosition,
   type ControlCapability,
   type CruiseTrackDetailResource,
@@ -73,10 +75,14 @@ import {
   type PTZResourceFreshness,
   type StreamMonitorSnapshot,
   type TalkCreateResult,
+  type TargetTrackArea,
+  type TargetTrackIntent,
+  type TargetTrackMode,
   type VideoParam,
   type VideoParamResult
 } from "@/api/gb28181";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
+import { buildTargetTrackArea } from "../targetTrackBox";
 import { frameRateText, resolutionText, videoFormatText, type VideoParamCodecItem } from "../videoParamCodec";
 import {
   Activity,
@@ -113,6 +119,7 @@ import {
   RotateCw,
   Route,
   Scan,
+  ScanEye,
   Search,
   Settings,
   ShieldCheck,
@@ -491,7 +498,6 @@ const configWorkspaceGroups: Partial<Record<TabKey, string[]>> = {
 };
 const activeConfigGroups = computed(() => configWorkspaceGroups[activeTab.value] ?? []);
 const isConfigWorkspace = computed(() => activeConfigGroups.value.length > 0);
-const activeWorkspace = computed(() => tabs.find(tab => tab.key === activeTab.value));
 
 /**
  * 「画面设置」的侧栏分组自 2026-09-20 起**只有一组**（`video-param`）：图像叠加整块搬到了底栏。
@@ -2275,6 +2281,13 @@ function resetSessionState() {
   clearAdvancedPolling();
   advancedOperationStatus.value = {};
   exitDragZoomMode();
+  // 目标跟踪的意图是**按通道**存的：换通道后旧意图必须清掉，
+  // 否则「平台最近一次下发」那行会显示上一路通道的跟踪模式（而它已经不在眼前了）。
+  exitTargetTrackMode();
+  targetTrackIntent.value = null;
+  targetTrackLoaded.value = false;
+  targetTrackError.value = "";
+  targetTrackStatus.value = "";
 }
 
 function cleanupSessionLocally() {
@@ -2365,7 +2378,10 @@ async function loadPanelData() {
     // 只读平台里"上次回读得到的配置"(refresh=false,不发 SIP 报文)。
     // ⛔ 与存储卡同一条口径:缓存为空时面板停在 never_read(表单禁用,
     // 不让用户在空白上猜数字);有缓存才展示,并带 freshness 说明不是刚问的。
-    loadVideoParams(channel.id, token, false)
+    loadVideoParams(channel.id, token, false),
+    // 目标跟踪：同样只读平台自己记的"已下发意图"。标准里没有"查设备在跟踪什么"
+    // 这条命令，所以这个读接口不可能去问设备 —— 它读的永远是平台写过的那一行。
+    loadTargetTrack(channel.id, token)
   ]);
 }
 
@@ -3469,9 +3485,13 @@ function toggleDragZoomMode(action: "drag_zoom_in" | "drag_zoom_out") {
     exitDragZoomMode();
     return;
   }
-  // ⛔ 画面上"拖一把"的模式现在有三个（拉框变焦 / 遮挡框选 / OSD 调位置）：同一个按下
-  //    动作在两层里各有一套解释，用户没法预期、平台也说不清画出来的是哪一个。
-  //    进拉框前把另两个关掉；反方向由 startMaskDraw / enterOsdEditMode 负责（见那两处）。
+  // ⛔ 画面上"拖一把"的模式现在有**四个**（拉框变焦 / 遮挡框选 / OSD 调位置 / 目标跟踪框选）：
+  //    同一个按下动作在两层里各有一套解释，用户没法预期、平台也说不清画出来的是哪一个。
+  //    进拉框前把另三个关掉；反方向由 startMaskDraw / enterOsdEditMode / toggleTargetTrackMode
+  //    各自负责（见那三处）—— 四处一起构成闭环，加第五个模式时四处都要改。
+  if (maskDrawMode.value) cancelMaskDraw();
+  if (osdEditMode.value) exitOsdEditMode();
+  if (targetTrackMode.value) exitTargetTrackMode();
   if (maskDrawMode.value) cancelMaskDraw();
   if (osdEditMode.value) exitOsdEditMode();
   dragZoomAction.value = action;
@@ -3576,7 +3596,230 @@ watch(dragZoomMode, (active, _previous, onCleanup) => {
 //    却找不到任何退出入口**。这与侧栏那两处"自己挡 canControlDevice"的注释是同一条约束。
 watch(canControlDevice, available => {
   if (!available && dragZoomMode.value) exitDragZoomMode();
+  if (!available && targetTrackMode.value) exitTargetTrackMode();
 });
+
+/* ─────────── 目标跟踪（GB/T 28181-2022 A.2.3.1.14） ─────────── */
+
+/**
+ * 目标跟踪的三件事，都**只有在这块画面上**做得成，所以它长在控制台而不是设备详情抽屉里：
+ *
+ *   1. 手动跟踪要求平台给出「播放窗口长度/宽度像素值」（A.2.3.1.14 注释原文），
+ *      而"播放窗口"就是这里的 `.play-window` 渲染出来的那块矩形；
+ *   2. 框是操作员**在画面上圈目标**圈出来的，换一个页面就没有同一块画面可比对；
+ *   3. 控件的可用性依赖 `canControlDevice` 与实时画面是否起播，与侧栏 PTZ 同族。
+ *
+ * ## ⛔⛔ 措辞纪律：这是本能力最容易写错的地方
+ *
+ * 目标跟踪在 9.3.1 d) 里被明列为**无应答命令**，表 1 序号 13 的"应答"一栏写作「（无）」；
+ * 而且 2022 全文里**没有**任何"目标跟踪状态查询/上报"的命令（对比：存储卡格式化至少
+ * 还能事后再查一次 SDCardStatus 做对账）。两个后果必须写进界面：
+ *
+ *   - `status=sent` **就是终态**，别去轮询 operation 等它变成 accepted —— 它不会变，
+ *     用户会一直等一个永远不来的回执（同族的 `ACTIONS_REQUIRING_DEVICE_RESULT` 名单为空，
+ *     但那套机制管不到本路由，本路由压根不经过 `runAdvancedAction`）。
+ *   - 屏幕上的文字只能是「已下发（设备未回执）」，**不许**写「正在跟踪 XX」——
+ *     平台根本无从得知设备在跟踪什么，写出来就是在承诺一个查不到的事实。
+ */
+const targetTrackMode = ref(false);
+const targetTrackStart = ref<{ x: number; y: number } | null>(null);
+const targetTrackCurrent = ref<{ x: number; y: number } | null>(null);
+let targetTrackPointerId: number | null = null;
+const targetTrackPending = ref(false);
+/** 平台**最近一次下发**的意图（不是"设备现在在跟踪什么"，见上面的措辞纪律）。 */
+const targetTrackIntent = ref<TargetTrackIntent | null>(null);
+const targetTrackLoaded = ref(false);
+const targetTrackError = ref("");
+/** 最近一次下发的结论文案，单独一行显示（成功/失败都说清是"下发"而不是"生效"）。 */
+const targetTrackStatus = ref("");
+
+const targetTrackBoxStyle = computed(() => {
+  if (!targetTrackStart.value || !targetTrackCurrent.value) return {};
+  const left = Math.min(targetTrackStart.value.x, targetTrackCurrent.value.x);
+  const top = Math.min(targetTrackStart.value.y, targetTrackCurrent.value.y);
+  const width = Math.abs(targetTrackCurrent.value.x - targetTrackStart.value.x);
+  const height = Math.abs(targetTrackCurrent.value.y - targetTrackStart.value.y);
+  return { left: `${left * 100}%`, top: `${top * 100}%`, width: `${width * 100}%`, height: `${height * 100}%` };
+});
+
+/**
+ * 退出「框选目标」态。
+ *
+ * ⭐ 与拉框变焦不同，这里**下完一次就退出**：跟踪是"选定一个目标"，不是"连续调整"。
+ *    留着态会让用户以为还要再框第二刀，而第二条手动跟踪指令会直接覆盖第一条的框。
+ */
+function exitTargetTrackMode() {
+  targetTrackMode.value = false;
+  targetTrackStart.value = null;
+  targetTrackCurrent.value = null;
+  targetTrackPointerId = null;
+}
+
+/**
+ * 进入 / 退出框选态。
+ *
+ * ⛔ 必须与另三个"画面上拖"的模式互斥（拉框变焦 / 遮挡框选 / OSD 调位置）：
+ *    同一个按下动作在两层里各有一套解释，用户没法预期、平台也说不清画出来的是哪一个。
+ *    反方向由那三处各自负责关掉本模式（`toggleDragZoomMode` / `startMaskDraw` /
+ *    `enterOsdEditMode`）—— 四处一起构成闭环，加第五个模式时四处都要改。
+ */
+function toggleTargetTrackMode() {
+  if (!canControlDevice.value) return;
+  if (targetTrackMode.value) {
+    exitTargetTrackMode();
+    return;
+  }
+  exitDragZoomMode();
+  exitOsdEditMode();
+  cancelMaskDraw();
+  targetTrackMode.value = true;
+  targetTrackStart.value = null;
+  targetTrackCurrent.value = null;
+  targetTrackPointerId = null;
+}
+
+function beginTargetTrackDraw(event: PointerEvent) {
+  if (!targetTrackMode.value || event.button !== 0) return;
+  if (targetTrackPending.value) return;
+  if (targetTrackPointerId !== null && targetTrackPointerId !== event.pointerId) return;
+  const layer = event.currentTarget as HTMLElement;
+  const point = pointInDragLayer(event);
+  targetTrackPointerId = event.pointerId;
+  targetTrackStart.value = point;
+  targetTrackCurrent.value = point;
+  layer.setPointerCapture?.(event.pointerId);
+}
+
+function updateTargetTrackDraw(event: PointerEvent) {
+  if (!targetTrackStart.value || targetTrackPointerId !== event.pointerId) return;
+  targetTrackCurrent.value = pointInDragLayer(event);
+}
+
+function cancelTargetTrackDraw(event?: PointerEvent) {
+  if (event && targetTrackPointerId !== null && targetTrackPointerId !== event.pointerId) return;
+  targetTrackStart.value = null;
+  targetTrackCurrent.value = null;
+  targetTrackPointerId = null;
+}
+
+/**
+ * 画完 → 换算 → 下发 `Manual`。
+ *
+ * ⛔ 换算全程走 `buildTargetTrackArea`（纯函数，配了单测），不在模板/事件里就地算：
+ *    目标是**无应答命令**，落点算错在设备侧完全不可观测 —— 平台看到的是"已下发"，
+ *    而画面上什么也没跟踪上，连"错了"这个信号都不存在。
+ */
+async function finishTargetTrackDraw(event: PointerEvent) {
+  if (!canControlDevice.value || !targetTrackStart.value || targetTrackPointerId !== event.pointerId) return;
+  updateTargetTrackDraw(event);
+  const layer = event.currentTarget as HTMLElement;
+  const rect = dragZoomPlaybackRect(layer);
+  const start = targetTrackStart.value;
+  const current = targetTrackCurrent.value || start;
+  // ⛔ 先收干净拖拽状态再下发（与拉框变焦同一条）：留在半路状态上的话，
+  //    下发失败后用户看到的是一个"停在那儿的框"，会以为它已经发出去了。
+  targetTrackStart.value = null;
+  targetTrackCurrent.value = null;
+  targetTrackPointerId = null;
+
+  const built = buildTargetTrackArea({
+    start,
+    end: current,
+    // ⛔ 基准是**画面渲染矩形**（= 标准的"播放窗口像素值"），不是视频原始分辨率。
+    renderedWidth: rect.width,
+    renderedHeight: rect.height
+  });
+  if (!built.ok) {
+    Message.warning(built.reason);
+    return;
+  }
+  // 选定目标即退出框选态：跟踪是"选一个目标"，不是"连续调整"（见 exitTargetTrackMode）。
+  exitTargetTrackMode();
+  await submitTargetTrack("Manual", built.area);
+}
+
+async function submitTargetTrack(mode: TargetTrackMode, area?: TargetTrackArea) {
+  const channel = props.channel;
+  if (!canControlDevice.value || !channel) return;
+  if (targetTrackPending.value) return;
+  const token = sessionToken;
+  const channelId = channel.id;
+  targetTrackPending.value = true;
+  targetTrackError.value = "";
+  targetTrackStatus.value = "";
+  try {
+    const response = await setChannelTargetTrack(channelId, {
+      mode,
+      ...(area ? { area } : {}),
+      idempotencyKey: `${channelId}-target-track-${mode}-${Date.now()}`
+    });
+    if (token !== sessionToken || props.channel?.id !== channelId) return;
+    if (response.code !== 0) throw new Error(response.message || "下发目标跟踪失败");
+    // 同一个响应里带回落库后的意图：不必再打一次读接口，也就没有"下发成功但界面还挂着上一条"的中间态。
+    if (response.data?.intent !== undefined) {
+      targetTrackIntent.value = response.data.intent ?? null;
+      targetTrackLoaded.value = true;
+    }
+    // ⛔ 不轮询：`status=sent` 就是这条命令的终态（无应答）。文案也只说到"已下发"。
+    targetTrackStatus.value = `${targetTrackModeText(mode)}${
+      area ? `（框 ${area.lengthX}×${area.lengthY} @ ${area.midPointX},${area.midPointY}）` : ""
+    }已下发，设备未回执（该命令无应答，平台无法得知设备实际状态）`;
+    Message.info("已下发（该命令无需设备回执）");
+  } catch (submitError: any) {
+    if (token !== sessionToken) return;
+    targetTrackError.value = submitError?.message || "下发目标跟踪失败";
+  } finally {
+    if (token === sessionToken) targetTrackPending.value = false;
+  }
+}
+
+/** 读平台**已下发**的意图。纯本地读，不产生 SIP 报文，所以不走 pending 态。 */
+async function loadTargetTrack(channelId = props.channel?.id, token = sessionToken) {
+  if (!canViewPtz.value || !channelId) return;
+  try {
+    const response = await getChannelTargetTrack(channelId);
+    if (token !== sessionToken || props.channel?.id !== channelId) return;
+    if (response.code !== 0 || !response.data) {
+      targetTrackError.value = response.message || "读取目标跟踪指令失败";
+      return;
+    }
+    targetTrackError.value = "";
+    targetTrackLoaded.value = true;
+    targetTrackIntent.value = response.data.intent ?? null;
+  } catch {
+    if (token !== sessionToken) return;
+    targetTrackError.value = "读取目标跟踪指令失败";
+  }
+}
+
+function targetTrackModeText(mode: TargetTrackMode) {
+  if (mode === "Auto") return "自动跟踪";
+  if (mode === "Manual") return "手动跟踪";
+  return "停止跟踪";
+}
+
+/**
+ * 界面上那句"平台最近一次下发的是什么"。
+ *
+ * ⛔ 主语永远是**平台**（"平台已下发…"），不是设备。写成"设备正在…"就是在替设备说话，
+ *    而这条命令既没有应答也没有查询手段 —— 那句话永远无法被证伪，也永远无法被发现是错的。
+ */
+const targetTrackIntentText = computed(() => {
+  if (targetTrackError.value) return "读取失败";
+  if (!targetTrackLoaded.value) return "尚未读取平台已下发的指令";
+  const intent = targetTrackIntent.value;
+  if (!intent) return "平台还没有向这台设备下发过目标跟踪";
+  const text = `平台最近一次下发：${targetTrackModeText(intent.mode as TargetTrackMode)}`;
+  const box = targetTrackBoxText(intent);
+  return box ? `${text}（${box}）` : text;
+});
+
+/** 意图里的框选坐标文本；`Auto`/`Stop` 下六项整体缺席（不是 0），所以返回空串。 */
+function targetTrackBoxText(intent: TargetTrackIntent) {
+  const { areaLengthX, areaLengthY, areaMidPointX, areaMidPointY } = intent;
+  if (areaLengthX == null || areaLengthY == null) return "";
+  return `框 ${areaLengthX}×${areaLengthY} @ ${areaMidPointX ?? 0},${areaMidPointY ?? 0}`;
+}
 
 /* ─────────── 画面设置底栏卡片：遮挡框选 + 镜像 ─────────── */
 
@@ -4015,7 +4258,8 @@ function cancelOsdDrag() {
  *    同一个按下动作既可能画框、也可能挪字 —— 用户没法预期，平台也说不清是哪一种。
  *    反方向由 `startMaskDraw` 负责（见那里）。
  * ⭐ 2026-09-20 起 `dragZoomMode` 不再"用一次就退"，于是它也成了常驻的"画面上拖"模式，
- *    同样在这里被关掉（三者的互斥闭环：本函数 / `startMaskDraw` / `toggleDragZoomMode`）。
+ *    同样在这里被关掉（四者的互斥闭环：本函数 / `startMaskDraw` / `toggleDragZoomMode` /
+ *    `toggleTargetTrackMode`）。
  *
  * ⛔ 设备事实没读到（`osdEditable` 假）时**不许进**：这时 `familyValues` 里躺的是平台
  *    空白模板（`timeX = 10` 这类），进去拖一把就等于把平台初值当成设备现状改了。
@@ -4026,6 +4270,7 @@ function enterOsdEditMode() {
   if (!osdEditable.value) return;
   if (maskDrawMode.value) cancelMaskDraw();
   if (dragZoomMode.value) exitDragZoomMode();
+  if (targetTrackMode.value) exitTargetTrackMode();
   osdEditMode.value = true;
 }
 
@@ -4082,9 +4327,11 @@ function startMaskDraw() {
   }
   maskDrawSeq.value = seq;
   // ⛔ 与 OSD 编辑模式互斥（反方向见 `enterOsdEditMode`）：开始框选就把锚点锁回去，
-  //    否则同一个按下动作在两层里各有一套解释。拉框变焦同理（2026-09-20 它也会常驻了）。
+  //    否则同一个按下动作在两层里各有一套解释。拉框变焦同理（2026-09-20 它也会常驻了）；
+  //    目标跟踪框选同理（2026-09-21 加的第四个"画面上拖"模式）。
   exitOsdEditMode();
   if (dragZoomMode.value) exitDragZoomMode();
+  if (targetTrackMode.value) exitTargetTrackMode();
   maskDrawMode.value = true;
   maskDrawStart.value = null;
   maskDrawCurrent.value = null;
@@ -4175,16 +4422,28 @@ watch(maskDrawMode, (active, _previous, onCleanup) => {
   onCleanup(() => window.removeEventListener("keydown", onMaskDrawKeydown, true));
 });
 
-/* ─────────── Esc 的归属：三个"画面上拖"的模式 vs 弹窗 ─────────── */
+function onTargetTrackKeydown(event: KeyboardEvent) {
+  if (consumeCanvasEscape(event)) exitTargetTrackMode();
+}
+
+// Esc 只在框选态期间接管：常驻监听会跟弹窗自己的 Esc 行为打架（与拉框变焦/OSD 同一个理由）。
+watch(targetTrackMode, (active, _previous, onCleanup) => {
+  if (!active) return;
+  // ⛔ capture 见 `consumeCanvasEscape`：晚于弹窗处理就会漏判"上面有弹窗"。
+  window.addEventListener("keydown", onTargetTrackKeydown, true);
+  onCleanup(() => window.removeEventListener("keydown", onTargetTrackKeydown, true));
+});
+
+/* ─────────── Esc 的归属：四个"画面上拖"的模式 vs 弹窗 ─────────── */
 
 /**
- * 是否有"在画面上拖一把"的模式正开着（拉框变焦 / 遮挡框选 / OSD 调位置）。
+ * 是否有"在画面上拖一把"的模式正开着（拉框变焦 / 遮挡框选 / OSD 调位置 / 目标跟踪框选）。
  *
- * 三者互斥（进任一个都会关掉另两个，见 `toggleDragZoomMode` / `enterOsdEditMode` /
- * `startMaskDraw`）。唯一的用处是模板上 `<a-modal :esc-to-close>` 的条件：模式开着时
- * 那一下 Esc 归图层（见 `consumeCanvasEscape`），控制台不许跟着关。
+ * 四者互斥（进任一个都会关掉另三个，见 `toggleDragZoomMode` / `enterOsdEditMode` /
+ * `startMaskDraw` / `toggleTargetTrackMode`）。唯一的用处是模板上 `<a-modal :esc-to-close>`
+ * 的条件：模式开着时那一下 Esc 归图层（见 `consumeCanvasEscape`），控制台不许跟着关。
  */
-const canvasModeArmed = computed(() => dragZoomMode.value || maskDrawMode.value || osdEditMode.value);
+const canvasModeArmed = computed(() => dragZoomMode.value || maskDrawMode.value || osdEditMode.value || targetTrackMode.value);
 
 /**
  * 控制台自己开的弹窗（Esc 的第一语义 = 关掉最上面那个弹窗）。
@@ -4857,34 +5116,10 @@ onBeforeUnmount(() => {
     </template>
 
     <div class="console-body" :class="{ 'is-minimized': isMinimized }" data-testid="play-console-body">
-      <nav v-if="visibleTabs.length" class="workbench-nav" aria-label="播放工作区">
-        <button
-          v-for="tab in visibleTabs"
-          :key="tab.key"
-          type="button"
-          :class="{ active: activeTab === tab.key }"
-          :aria-current="activeTab === tab.key ? 'page' : undefined"
-          :data-testid="`linked-tab-${tab.key}`"
-          :title="tab.description"
-          @click="
-            activeTab = tab.key;
-            sideCollapsed = false;
-          "
-        >
-          <component :is="tab.icon" :size="16" /><span>{{ tab.label }}</span>
-          <!-- 未下发的画面改动：浮条只在「画面设置」页露头，离开后就没了入口
-                         （草稿还在，只是看不见了）。这枚角标补上那段盲区 —— 零打扰，
-                         但用户切到任何页签都带着它回来。
-                         ⛔ 只在该页签**不是当前页**时显示：人在画面设置页时浮条已经把这事
-                            说清楚了，角标再亮一次是重复提醒。 -->
-          <em
-            v-if="tab.key === 'deviceconfig' && activeTab !== 'deviceconfig' && pictureDirtyCount > 0"
-            class="tab-draft-dot"
-            data-testid="linked-tab-draft-dot"
-            :title="`${pictureDraftSummary} 未下发`"
-          ></em>
-        </button>
-      </nav>
+      <!-- 一级页签 2026-09-21 已回到右侧属性栏顶部（老板：「把播放控制台的三个菜单放回以前的位置」）——
+           原来那列 136px 的左侧竖排导航随 `.workbench-nav` 一起退役，宽度还给画面。
+           ⛔ 别再往这里插导航：`.video-frame` / `.linked-info-bar` / `.sidebar` 的 `grid-column`
+              索引全都按「两列」写死了，多一列要同步改四处（漏一处整块错位）。 -->
       <!-- 主区(视频 + 控制条 + 会话链路) -->
       <section class="stage" :class="{ 'stage-wide': sideCollapsed }">
         <!-- 视频画面 -->
@@ -4912,6 +5147,29 @@ onBeforeUnmount(() => {
                 <template v-else
                   >拖动选择 3D {{ dragZoomAction === "drag_zoom_out" ? "缩小" : "放大" }}区域 · 可连续框选,Esc 退出</template
                 >
+              </span>
+            </div>
+
+            <!-- 目标跟踪框选层（GB/T 28181-2022 A.2.3.1.14）
+                 ⛔ 与拉框变焦**刻意不同**的一点：这里下完一次就退出（见 exitTargetTrackMode）——
+                    跟踪是"选定一个目标"，不是"连续调整"；留着态会让用户以为还要再框第二刀，
+                    而第二条手动跟踪指令会直接覆盖第一条的框。
+                 ⛔ 提示条里的两个词都写死了：动作是「下发」不是「生效」，受益方是**平台**要不要跟踪。
+                    设备会不会真的去跟，标准没有给平台任何查询手段。 -->
+            <div
+              v-if="targetTrackMode"
+              class="target-track-layer"
+              :class="{ 'is-dragging': targetTrackStart !== null, 'is-busy': targetTrackPending }"
+              data-testid="target-track-layer"
+              @pointerdown="beginTargetTrackDraw"
+              @pointermove="updateTargetTrackDraw"
+              @pointerup="finishTargetTrackDraw"
+              @pointercancel="cancelTargetTrackDraw"
+            >
+              <span class="target-track-box" :style="targetTrackBoxStyle"></span>
+              <span class="target-track-hint">
+                <template v-if="targetTrackPending">正在下发…</template>
+                <template v-else>在画面上框住要跟踪的目标 · Esc 退出</template>
               </span>
             </div>
             <template v-if="phase === 'playing' || phase === 'paused'">
@@ -6029,10 +6287,38 @@ onBeforeUnmount(() => {
           'sidebar-deviceconfig': isConfigWorkspace
         }"
       >
-        <div class="workspace-heading">
-          <component :is="activeWorkspace?.icon" :size="15" />
-          <strong>{{ activeWorkspace?.label }}</strong>
-        </div>
+        <!-- 一级页签：横向均分整行宽（`grid-auto-flow: column` + `minmax(0, 1fr)`），
+             加减页签只改 `tabs` 数组、不用回来调 CSS。
+             ⚠️ 这个位置只放得下 3 个页签（每个 ~112px）；再多就得换回竖排/滚动。
+             原来那行「当前页名」标题（`workspace-heading`）随页签一起删了 ——
+             高亮的页签本身就是"现在在哪一页"，再写一遍是重复。 -->
+        <nav v-if="visibleTabs.length" class="tabs" aria-label="播放工作区">
+          <button
+            v-for="tab in visibleTabs"
+            :key="tab.key"
+            type="button"
+            class="tab"
+            :class="{ active: activeTab === tab.key }"
+            :aria-current="activeTab === tab.key ? 'page' : undefined"
+            :data-testid="`linked-tab-${tab.key}`"
+            :title="tab.description"
+            @click="activeTab = tab.key"
+          >
+            <component :is="tab.icon" :size="14" />
+            <span>{{ tab.label }}</span>
+            <!-- 未下发的画面改动：浮条只在「画面设置」页露头，离开后就没了入口
+                 （草稿还在，只是看不见了）。这枚角标补上那段盲区 —— 零打扰，
+                 但用户切到任何页签都带着它回来。
+                 ⛔ 只在该页签**不是当前页**时显示：人在画面设置页时浮条已经把这事
+                    说清楚了，角标再亮一次是重复提醒。 -->
+            <em
+              v-if="tab.key === 'deviceconfig' && activeTab !== 'deviceconfig' && pictureDirtyCount > 0"
+              class="tab-draft-dot"
+              data-testid="linked-tab-draft-dot"
+              :title="`${pictureDraftSummary} 未下发`"
+            ></em>
+          </button>
+        </nav>
 
         <!-- Tab 面板容器 -->
         <div class="panels">
@@ -6305,6 +6591,66 @@ onBeforeUnmount(() => {
                 <Loader2 v-if="isAdvancedPending('iframe')" :size="12" class="spin" /><Video v-else :size="12" />
                 <span>请求关键帧</span>
               </button>
+            </div>
+
+            <!-- 目标跟踪（GB/T 28181-2022 A.2.3.1.14）
+                 ① 位置:与 3D 拖拽/关键帧同族 —— 都是"对着这块画面发一条即时命令",
+                    而手动跟踪的框只能在这块画面上圈出来(见 targetTrackMode 的 KDoc)。
+                 ② ⛔ 自己挡 canControlDevice:动作侧 toggleTargetTrackMode / submitTargetTrack
+                    第一句就是 `if (!canControlDevice.value) return`,而本面板的可见性门禁是
+                    canPtzPanel。不挡就会出现"有 ptz 权限、没 device:control"的账号看得见按钮
+                    却点不动 —— 死按钮比看不见更糟。
+                 ③ ⛔⛔ 状态词只能是「已下发」:目标跟踪是**无应答命令**(9.3.1 d) + 表 1 序号 13),
+                    且 2022 全文没有"查设备在跟踪什么"的命令 ⇒ 平台查不到、也不该假装查得到。
+                    下面这行文字的主语永远是"平台",不是"设备"。 -->
+            <div v-if="canControlDevice" class="ptz-target-track" data-testid="ptz-target-track">
+              <span class="lens-label"><ScanEye :size="12" />目标跟踪<span class="tag-2022">2022</span></span>
+              <div class="target-track-switch" aria-label="目标跟踪方式">
+                <button
+                  data-testid="ptz-target-track-auto"
+                  :title="capabilityActionTitle('targetTrack', '自动跟踪')"
+                  :disabled="targetTrackPending"
+                  @click="submitTargetTrack('Auto')"
+                >
+                  <Loader2 v-if="targetTrackPending" :size="12" class="spin" /><ScanEye v-else :size="12" />
+                  <span>自动跟踪</span>
+                </button>
+                <button
+                  :class="{ active: targetTrackMode }"
+                  data-testid="ptz-target-track-manual"
+                  :title="capabilityActionTitle('targetTrack', '手动框选目标')"
+                  :disabled="targetTrackPending"
+                  :aria-pressed="targetTrackMode"
+                  @click="toggleTargetTrackMode"
+                >
+                  <Square v-if="targetTrackMode" :size="12" /><ScanEye v-else :size="12" />
+                  <span>{{ targetTrackMode ? "取消框选" : "框选跟踪" }}</span>
+                </button>
+                <button
+                  data-testid="ptz-target-track-stop"
+                  :title="capabilityActionTitle('targetTrack', '停止跟踪')"
+                  :disabled="targetTrackPending"
+                  @click="submitTargetTrack('Stop')"
+                >
+                  <CircleSlash :size="12" />
+                  <span>停止跟踪</span>
+                </button>
+              </div>
+              <!-- ⛔ 这三行文字合起来才是完整口径,少一行都会被读成"设备在做某事":
+                    「平台最近一次下发…」(全知的一侧) + 「已下发,设备未回执」(没有回执) +
+                    「平台无法得知设备实际状态」(所以别问平台设备现在在跟踪什么)。 -->
+              <p class="target-track-state" data-testid="target-track-intent">
+                {{ targetTrackIntentText }}
+              </p>
+              <p v-if="targetTrackStatus" class="target-track-status" data-testid="target-track-status">
+                {{ targetTrackStatus }}
+              </p>
+              <p v-else class="target-track-tip" data-testid="target-track-tip">
+                「自动跟踪」「停止跟踪」一键下发；「框选跟踪」要在画面上框住目标（坐标按画面实际渲染尺寸换算）。
+              </p>
+              <p v-if="targetTrackError" class="target-track-error" data-testid="target-track-error">
+                {{ targetTrackError }}
+              </p>
             </div>
           </div>
           <!-- ═══════════ 视频探针 ═══════════ -->
@@ -7196,10 +7542,14 @@ onBeforeUnmount(() => {
   border-left: 1px solid color-mix(in srgb, currentcolor 24%, transparent);
 }
 
+/* 两列 = 画面 + 右侧属性栏。2026-09-21 前这里是 `136px minmax(0, 1fr) 360px`，
+ * 第一列是左侧竖排的一级页签；页签回到属性栏顶部后该列退役，宽度还给画面。
+ * ⛔ 列数是"唯一真源"：改列数要同步 `.video-frame` / `.stage-wide .video-frame` /
+ *    `.linked-info-bar` / `.sidebar` 以及 ≤1080px 分支的 `grid-column`，共 5 处。 */
 .console-body {
   position: relative;
   display: grid;
-  grid-template-columns: 136px minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 14px;
   min-height: 0;
   isolation: isolate;
@@ -7223,7 +7573,6 @@ onBeforeUnmount(() => {
   aspect-ratio: 16 / 9;
 }
 .console-body.is-minimized .protocol-switcher,
-.console-body.is-minimized .workbench-nav,
 .console-body.is-minimized .linked-info-bar,
 .console-body.is-minimized .sidebar,
 .console-body.is-minimized .asset-manager-layer {
@@ -7777,13 +8126,13 @@ onBeforeUnmount(() => {
   display: contents;
 }
 .stage.stage-wide .video-frame {
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
 }
 
 .video-frame {
   position: relative;
   grid-row: 1;
-  grid-column: 2;
+  grid-column: 1;
   align-self: start;
   overflow: hidden;
   background: #060b14;
@@ -7919,6 +8268,46 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
   font-size: 10px;
   color: var(--uvp-brand-cyan);
+  background: rgb(2 6 23 / 72%);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 4px;
+  transform: translateX(-50%);
+}
+
+/* 目标跟踪框选层：与拉框变焦同构，但**配色刻意不同**（琥珀而非青）。
+ * ⛔ 它俩虽然都是"在画面上拖"，语义完全不同：拉框变焦改的是**镜头**（可逆、立即看得见效果），
+ *    目标跟踪是**让设备去跟一个目标**（无回执、画面上不会有任何反馈）。
+ *    同一个颜色会让人以为刚才那一刀也是变焦 —— 而跟踪下完之后画面是**不会有变化**的。
+ * ⛔ 色罩同样只挂在 .is-dragging 上：跟踪下完**不会**在画面上留下任何东西，
+ *    常驻色罩会被读成"框还在"，而其实平台只是发了一条指令。 */
+.target-track-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  touch-action: none;
+  cursor: crosshair;
+}
+.target-track-layer.is-dragging {
+  background: rgb(120 53 15 / 14%);
+}
+.target-track-layer.is-busy {
+  cursor: progress;
+}
+.target-track-box {
+  position: absolute;
+  box-sizing: border-box;
+  display: block;
+  background: rgb(251 191 36 / 12%);
+  border: 1px dashed var(--uvp-warning);
+  box-shadow: 0 0 0 1px rgb(251 191 36 / 20%);
+}
+.target-track-hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--uvp-warning);
   background: rgb(2 6 23 / 72%);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 4px;
@@ -8140,7 +8529,7 @@ onBeforeUnmount(() => {
   --linked-detail-height: 148px;
 
   grid-row: 2;
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
   gap: 0;
   padding: 0;
   overflow: hidden;
@@ -8276,9 +8665,10 @@ onBeforeUnmount(() => {
 /* ── 画面设置底栏卡片（图像叠加 / 遮挡 / 镜像 / 参数对照）──
  * ⭐ 2026-09-20 起**四格**：图像叠加整块从侧栏搬来（最宽），遮挡/镜像按老板要求缩窄，
  *    参数对照压到只放两行。与云台底栏共用同一条高度基线（148px），切页签画布不重排。
- * ⛔ 底栏可用宽只有约 940px（主体栅格是 `136px | 1fr | 360px`，不是弹窗全宽）——
- *    按 4.65fr 分：图像叠加 ~372 / 遮挡 ~196 / 镜像 ~137 / 对照 ~205。
- *    再往里塞第五张卡就会把某一格压到"坐标被省略号截断"的程度（本仓踩过）。 */
+ * ⛔ 底栏可用宽**已变成弹窗内容全宽**（2026-09-21 页签回到属性栏顶部、左侧 136px 那列退役；
+ *    此前口径是「约 940px，栅格 `136px | 1fr | 360px`，不是弹窗全宽」，比现在窄 136px+）。
+ *    按 4.65fr 分四格。⚠️ 宽度变大只让每格更宽松，但**别因此塞第五张卡** ——
+ *    窄屏（≤1080px 单列）时底栏仍会回到全宽下的紧凑形态，照样会把坐标压到省略号截断。 */
 .linked-picture-layout {
   box-sizing: border-box;
   display: grid;
@@ -9415,7 +9805,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   grid-row: 1;
-  grid-column: 3;
+  grid-column: 2;
   gap: 10px;
   align-content: stretch;
   min-height: 0;
@@ -9444,6 +9834,7 @@ onBeforeUnmount(() => {
   border-radius: 10px;
 }
 .tab {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   gap: 3px;
@@ -10066,6 +10457,77 @@ onBeforeUnmount(() => {
   opacity: 0.42;
 }
 
+/* 目标跟踪（A.2.3.1.14）:三段"动作"而不是"方向" —— 但它们同样是三选一里的"当前态"
+ * （框选进行中时「框选跟踪」是唯一亮着的那个),所以沿用分段控件的视觉。
+ * ⛔ 三个按钮都是**独立动作**而不是切换开关:「自动跟踪」每点一次都是一条新指令,
+ *    不要把「自动」画成某种"已开启"的常驻开关 —— 无应答命令没有"当前态"可言。 */
+.ptz-target-track {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 8px;
+}
+.target-track-switch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+.target-track-switch button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+}
+.target-track-switch button:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+.target-track-switch button.active {
+  font-weight: 600;
+  color: var(--uvp-warning);
+  background: color-mix(in srgb, var(--uvp-warning) 14%, transparent);
+  border-color: var(--uvp-warning);
+}
+.target-track-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+/* 状态三行:意图 / 下发结果 / 说明。⛔ 字号与颜色都往"事实"靠,不要做成告警条 ——
+ * 无回执是**协议事实**而不是异常,把它画成警告色会让用户以为出错了。 */
+.target-track-state,
+.target-track-status,
+.target-track-tip,
+.target-track-error {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.target-track-state {
+  color: var(--uvp-text-secondary);
+}
+.target-track-status {
+  font-weight: 600;
+  color: var(--uvp-warning);
+}
+.target-track-tip {
+  color: var(--uvp-text-tertiary);
+}
+.target-track-error {
+  color: var(--uvp-danger);
+}
+
 /* 精准 PTZ */
 
 /* 面板盒填满高度后,内容若仍挤在顶部就会留出一块空腔。让当前模式的内容块
@@ -10073,12 +10535,14 @@ onBeforeUnmount(() => {
  * 而不是把某一块拉长 —— 方向盘按钮拉高会很怪。
  * 余量为负(内容比盒子高)时 space-between 退化为顶部对齐,由 .panels 滚动兜底。 */
 
-/* 云台面板是"模式切换 + 当前模式内容 + 3D 拖拽 + 关键帧"四行:模式切换、3D 拖拽与关键帧
- * 都按内容高,当前模式内容吃掉剩余高度。
- * 3D 拖拽与关键帧刻意都排在两个模式块**之外**(见各自注释):它们是画面级即时动作,
- * 与速度/精准正交,切模式时不能跟着消失。 */
+/* 云台面板是"模式切换 + 当前模式内容 + 3D 拖拽 + 关键帧 + 目标跟踪"五行:模式切换、3D 拖拽、
+ * 关键帧与目标跟踪都按内容高,当前模式内容吃掉剩余高度。
+ * 3D 拖拽/关键帧/目标跟踪刻意都排在两个模式块**之外**(见各自注释):它们是画面级即时动作,
+ * 与速度/精准正交,切模式时不能跟着消失。
+ * ⛔ 加一行画面级动作块时**这里也要跟着加一个 `auto`**:漏了的话多余的块会被塞进
+ *    `minmax(0, 1fr)` 那一行(与当前模式内容挤在一起),表现为"方向盘被压扁"。 */
 [data-testid="linked-side-ptz"] {
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   height: 100%;
   min-height: 0;
 }
@@ -11423,54 +11887,20 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-.workbench-nav {
-  display: flex;
-  flex-direction: column;
-  grid-row: 1 / 3;
-  grid-column: 1;
-  gap: 6px;
-  padding: 6px 10px 6px 0;
-  border-right: 1px solid var(--uvp-panel-border);
-}
-.workbench-nav button {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-height: 42px;
-  padding: 10px 12px;
-  font-size: 13px;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-}
-.workbench-nav button:hover,
-.workbench-nav button.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-}
-.workbench-nav button.active {
-  box-shadow: inset 3px 0 var(--uvp-brand);
-}
+/* 一级页签的版式就是上面那份 `.tabs` / `.tab`（属性栏顶部横排均分）。
+ * ⛔ 2026-09-20～09-21 一度存在过一套 `.workbench-nav`（左列竖排、独立占一列 136px），
+ *    已整体删除：留着它等于给"页签在哪一列"第二个答案，后来人改列数必然漏掉一处。 */
 
 /* 「画面设置」页签上的未下发角标：浮条只在那一页出现，离开后草稿就"看不见入口"了 ——
  * 这枚点把"还有改动没下发"钉在页签上，用户切到任何页都带着它，且不打断任何操作。 */
 .tab-draft-dot {
-  flex: none;
+  position: absolute;
+  top: 6px;
+  right: 8px;
   width: 6px;
   height: 6px;
-  margin-left: auto;
   background: var(--uvp-warning, #b66b12);
   border-radius: 50%;
-}
-.workspace-heading {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-height: 30px;
-  color: var(--uvp-text-primary);
 }
 .config-detail-bar .config-detail {
   height: auto;
@@ -11529,28 +11959,22 @@ onBeforeUnmount(() => {
   .console-body {
     grid-template-columns: 1fr;
   }
-  .workbench-nav {
-    flex-direction: row;
-    grid-row: 1;
-    grid-column: 1;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--uvp-panel-border);
-  }
+
+  /* 单列堆叠顺序：画面 → 属性栏（页签在它顶部）→ 底栏 */
   .stage.stage-wide .video-frame {
     grid-column: 1;
   }
   .video-frame {
-    grid-row: 2;
+    grid-row: 1;
     grid-column: 1;
   }
   .sidebar {
-    grid-row: 3;
+    grid-row: 2;
     grid-column: 1;
     max-height: none;
   }
   .linked-info-bar {
-    grid-row: 4;
+    grid-row: 3;
     grid-column: 1;
   }
 }

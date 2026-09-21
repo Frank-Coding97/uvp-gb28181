@@ -194,6 +194,23 @@ const api = vi.hoisted(() => {
     controlDevice: vi.fn(),
     createDeviceSnapshotSession: vi.fn(),
     getDeviceSnapshotSession: vi.fn(),
+    // 目标跟踪(A.2.3.1.14)。默认回"平台还没下发过"(intent=null) —— 这是合法状态，
+    // 不是错误；需要"下发过"的用例自己 mockResolvedValueOnce 覆盖。
+    // ⛔ `deviceAcknowledged` / `responseRequired` 恒 false（无应答命令），
+    //    mock 里也必须照这个给，否则用例会去验证一个真实环境里不存在的字段。
+    getChannelTargetTrack: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        intent: null,
+        deviceAcknowledged: false,
+        responseRequired: false,
+        windowHint: "",
+        capability: { state: "unknown", reason: "设备未上报该能力" },
+        targetCode: "0411212755"
+      }
+    }),
+    setChannelTargetTrack: vi.fn(),
     createTalkSession: vi.fn(),
     getTalkSession: vi.fn(),
     deleteTalkSession: vi.fn(),
@@ -441,6 +458,80 @@ function dragZoomCalls(withAction: "drag_zoom_in" | "drag_zoom_out" = "drag_zoom
 }
 
 /**
+ * 目标跟踪读接口的应答（GB/T 28181-2022 A.2.3.1.14）。
+ *
+ * ⛔ `deviceAcknowledged` / `responseRequired` **恒 false**：它是无应答命令
+ *    （9.3.1 d) + 表 1 序号 13）。桩里也必须照这个给 —— 给 true 的话用例会去验证
+ *    一个真实环境里永远不存在的字段。
+ */
+function targetTrackResponse(intent: Record<string, unknown> | null = null) {
+  return {
+    code: 0,
+    message: "",
+    data: {
+      intent,
+      deviceAcknowledged: false,
+      responseRequired: false,
+      windowHint: "area 六项必须同一坐标系：length/width 是画面实际渲染的像素尺寸",
+      capability: { state: "unknown", reason: "设备未上报该能力" },
+      targetCode: channel.channelId
+    }
+  };
+}
+
+/** 一条"平台已下发手动跟踪"的意图（六项框选坐标都在）。 */
+function targetTrackIntent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    deviceId: 1,
+    channelId: channel.id,
+    targetCode: channel.channelId,
+    mode: "Manual",
+    deviceId2: "",
+    areaLength: 800,
+    areaWidth: 450,
+    areaMidPointX: 400,
+    areaMidPointY: 200,
+    areaLengthX: 200,
+    areaLengthY: 150,
+    sourceOperationSeq: 3,
+    sourceSn: 9,
+    sourceOperationId: "op-tt-1",
+    commandedBy: 1,
+    commandedByDeptId: 1,
+    commandedAt: "2026-09-21T02:00:00Z",
+    createdAt: "2026-09-21T02:00:00Z",
+    updatedAt: "2026-09-21T02:00:00Z",
+    ...overrides
+  };
+}
+
+/** 框选坐标基准桩（与拉框变焦同一套：优先取播放器那个 `.play-window`）。 */
+function stubTargetTrackRects(wrapper: VueWrapper, width = 800, height = 450) {
+  const rect = { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) } as DOMRect;
+  const layer = wrapper.get("[data-testid='target-track-layer']");
+  vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue(rect);
+  vi.spyOn(wrapper.get("[data-testid='play-window']").element, "getBoundingClientRect").mockReturnValue(rect);
+  return layer;
+}
+
+/** 在**云台侧栏**点开「框选跟踪」，并备好坐标基准。 */
+async function enterTargetTrackDraw(wrapper: VueWrapper) {
+  await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+  await wrapper.get("[data-testid='ptz-target-track-manual']").trigger("click");
+  return stubTargetTrackRects(wrapper);
+}
+
+/** 完成一次"按下 → 拖 → 松手"。`pointerId` 每刀都要换（被测代码按它认人）。 */
+async function targetTrackDragOnce(wrapper: VueWrapper, from: [number, number], to: [number, number], pointerId: number) {
+  const layer = wrapper.get("[data-testid='target-track-layer']");
+  await layer.trigger("pointerdown", { clientX: from[0], clientY: from[1], pointerId, button: 0 });
+  await layer.trigger("pointermove", { clientX: to[0], clientY: to[1], pointerId });
+  await layer.trigger("pointerup", { clientX: to[0], clientY: to[1], pointerId });
+  await flushPromises();
+}
+
+/**
  * 派发一次 Esc。
  *
  * ⛔ 必须从 `document.documentElement` 派发**并冒泡**：Arco 的 `esc-to-close` 就挂在
@@ -466,6 +557,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 6 } });
     api.getCruiseTrack.mockReset();
     api.getCruiseTrack.mockResolvedValue({ code: 0, message: "", data: { track: {}, freshness: "fresh" } });
+    // 目标跟踪：默认"平台还没下发过"。⛔ 一定要在 beforeEach 里重置 ——
+    // 它是面板打开时自动读的，残留上一条用例的下发结果会让断言看起来"通过了"却什么也没验证。
+    api.getChannelTargetTrack.mockReset();
+    api.getChannelTargetTrack.mockResolvedValue(targetTrackResponse());
+    api.setChannelTargetTrack.mockReset();
     api.getChannelDeviceConfigs.mockReset();
     api.getChannelDeviceConfigs.mockResolvedValue(pictureDeviceConfigResponse());
     api.applyChannelDeviceConfigs.mockReset();
@@ -1736,14 +1832,29 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("左侧导航独立占列，详情跨视频与右侧面板", () => {
+  it("一级页签在右侧属性栏顶部均分，详情跨视频与右侧面板", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
 
-    expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*2\s*\/\s*-1/s);
+    expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
     expect(source).toContain("--linked-detail-height: 148px");
     expect(source).toContain(':width="playbackModalWidth"');
     expect(source).toContain(': "min(1520px, calc(100vw - 32px))"');
-    expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*136px\s+minmax\(0,\s*1fr\)\s+360px/s);
+    // 两列 = 画面 + 属性栏。2026-09-21 一级页签回到属性栏顶部后，
+    // 原来给左侧竖排导航的 `136px` 那一列退役（宽度还给画面）。
+    expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+360px/s);
+    // ⭐ 页签归属用「顺序」判据：`aria-label="播放工作区"` 必须落在 `class="sidebar"` 之后。
+    // ⛔ 别退化成"存在性"断言 —— 页签被搬回 `console-body` 当独立一列时它照样"存在"，
+    //    而那正是列索引集体错位的形态（`.video-frame` / `.linked-info-bar` / `.sidebar` 全要 -1）。
+    const sidebarAt = source.indexOf('class="sidebar"');
+    const tabsAt = source.indexOf('aria-label="播放工作区"');
+    expect(sidebarAt).toBeGreaterThan(-1);
+    expect(tabsAt).toBeGreaterThan(sidebarAt);
+    // ⛔ 左侧竖排那套样式（`.workbench-nav`）与「当前页名」标题（`.workspace-heading`）
+    //    必须连**规则**一起消失：留着就是"页签在哪一列"的第二个答案。
+    expect(source).not.toMatch(/\.workbench-nav\s*[,{]/);
+    expect(source).not.toMatch(/\.workspace-heading\s*[,{]/);
+    // 属性栏吃满第 2 列（不留一条空列）
+    expect(source).toMatch(/\.sidebar\s*\{[^}]*grid-column:\s*2;/s);
     // 流信息 tab 已并入探针 tab,原来的 sidebar-stream / linked-detail-stream / linked-stream-metrics
     // 全都退出历史舞台
     expect(source).not.toContain("sidebar-stream");
@@ -6119,6 +6230,226 @@ describe("PlayConsoleLinked 图像叠加（OSD）画布锚点层", () => {
     // ⛔ 「调整位置」此时**禁用**：`familyValues.osd` 里躺的是平台空白模板（timeX=10 这类），
     //    放进去拖一把就等于把平台初值当成设备现状了。按钮禁用 + `enterOsdEditMode` 里再拦一道。
     expect(wrapper.get("[data-testid='osd-edit-toggle']").attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
+});
+
+describe("PlayConsoleLinked 目标跟踪（GB/T 28181-2022 A.2.3.1.14）", () => {
+  /**
+   * ⛔ 本 describe 是**独立**的（不是上面任一 describe 的子块），所以它必须自己把
+   *    `getChannelTargetTrack` 重置回"平台还没下发过"。漏了的话，上一条用例里
+   *    `mockResolvedValue` 设下的意图会漏进下一条 —— 用例照样绿，但它验证的是
+   *    "界面能显示上一条用例的状态"，而不是它自己声称的东西。
+   */
+  beforeEach(() => {
+    userState.account = reactive({ permissions: ["*:*:*"] });
+    api.getChannelTargetTrack.mockReset();
+    api.getChannelTargetTrack.mockResolvedValue(targetTrackResponse());
+    api.setChannelTargetTrack.mockReset();
+    api.startPlay.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("状态行说的是「平台最近一次下发」，绝不是「设备正在跟踪」", async () => {
+    // ⛔⛔ 本组最重要的一条口径。目标跟踪是**无应答命令**（9.3.1 d) + 表 1 序号 13 =「（无）」），
+    //    而且 2022 全文没有"查设备在跟踪什么"的命令 ⇒ 平台**永远无法**知道设备的实际状态。
+    //    界面上一旦出现"设备正在跟踪"，那句话既无法被证伪、也永远发现不了是错的。
+    api.getChannelTargetTrack.mockResolvedValue(targetTrackResponse(targetTrackIntent()));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+
+    const text = wrapper.get("[data-testid='target-track-intent']").text();
+    expect(text).toContain("平台最近一次下发：手动跟踪");
+    expect(text).toContain("框 200×150 @ 400,200");
+    expect(text).not.toContain("设备正在");
+    expect(text).not.toContain("正在跟踪");
+    wrapper.unmount();
+  });
+
+  it("从没下发过时如实说「还没有下发过」，而不是显示一条编出来的默认状态", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+
+    expect(wrapper.get("[data-testid='target-track-intent']").text()).toContain("还没有向这台设备下发过目标跟踪");
+    wrapper.unmount();
+  });
+
+  it("自动跟踪一键下发：只带 mode=Auto，**不带 area**（不带框才是自动跟踪）", async () => {
+    api.setChannelTargetTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        operationId: "op-tt-auto",
+        action: "target_track",
+        status: "sent",
+        responseRequired: false,
+        deduplicated: false,
+        intent: targetTrackIntent({ mode: "Auto", areaLengthX: null, areaLengthY: null })
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-target-track-auto']").trigger("click");
+    await flushPromises();
+
+    expect(api.setChannelTargetTrack).toHaveBeenCalledTimes(1);
+    const [channelId, payload] = api.setChannelTargetTrack.mock.calls[0];
+    expect(channelId).toBe(channel.id);
+    expect(payload.mode).toBe("Auto");
+    // ⛔ 补一个空 area 会被服务端拒（"手动跟踪才需要框"，而 Auto 带了框含义就变了）。
+    expect("area" in payload).toBe(false);
+
+    // ⛔ 状态词只能是「已下发 + 设备未回执」：无应答命令没有"成功/生效"这个概念，
+    //    而 sent 已经是它的**终态**（不去轮询 operation，也不说"已完成"）。
+    const status = wrapper.get("[data-testid='target-track-status']").text();
+    expect(status).toContain("已下发");
+    expect(status).toContain("设备未回执");
+    expect(status).not.toContain("已完成");
+    expect(status).not.toContain("正在跟踪");
+    wrapper.unmount();
+  });
+
+  it("停止跟踪走 mode=Stop，且绝不带 area（带框的停止是自相矛盾的指令）", async () => {
+    api.setChannelTargetTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { operationId: "op-tt-stop", action: "target_track", status: "sent", responseRequired: false }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-target-track-stop']").trigger("click");
+    await flushPromises();
+
+    const [, payload] = api.setChannelTargetTrack.mock.calls[0];
+    expect(payload.mode).toBe("Stop");
+    expect("area" in payload).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("框选跟踪按**画面渲染尺寸**换算 TargetArea，下发完立刻退出框选态", async () => {
+    api.setChannelTargetTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { operationId: "op-tt-manual", action: "target_track", status: "sent", responseRequired: false }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterTargetTrackDraw(wrapper);
+    await targetTrackDragOnce(wrapper, [200, 100], [600, 300], 21);
+
+    expect(api.setChannelTargetTrack).toHaveBeenCalledWith(
+      channel.id,
+      expect.objectContaining({
+        mode: "Manual",
+        // ⛔ length/width 是"播放窗口像素值"（标准原文），= 画面渲染出来的 800×450，
+        //    不是视频原始分辨率、也不是播放器元素外框。设备按它做比例换算。
+        area: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
+      })
+    );
+    // ⭐ 与拉框变焦**刻意不同**：跟踪是"选定一个目标"，下完一次就退出。
+    //    留着态会让用户以为还要再框第二刀，而第二条手动跟踪会直接覆盖第一条的框。
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("框太小时不下发，并留在框选态让用户重画", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterTargetTrackDraw(wrapper);
+    // 4px × 4px：一次误触（点一下没怎么拖）落在这一段。
+    await targetTrackDragOnce(wrapper, [200, 100], [204, 104], 22);
+
+    expect(api.setChannelTargetTrack).not.toHaveBeenCalled();
+    // 留在框选态 —— 否则用户得回侧栏再点一次按钮才能重画。
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("框选态与 3D 拖拽互斥：进一个就关掉另一个（两个方向都钉住）", async () => {
+    // ⛔ 判据是"同一个按下动作只能有一种解释"。四个"画面上拖"的模式（拉框变焦 / 遮挡框选 /
+    //    OSD 调位置 / 目标跟踪框选）任两个同时开着，画出来的东西就说不清是哪一个。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterTargetTrackDraw(wrapper);
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='ptz-target-track-manual']").trigger("click");
+    expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("框选态那一下 Esc 只收框选态，且被图层吃掉（不让控制台跟着关）", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await enterTargetTrackDraw(wrapper);
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(true);
+
+    const seenByStandIn: string[] = [];
+    const standIn = (event: KeyboardEvent) => seenByStandIn.push(event.key);
+    document.documentElement.addEventListener("keydown", standIn);
+    try {
+      pressEscape();
+      await flushPromises();
+    } finally {
+      document.documentElement.removeEventListener("keydown", standIn);
+    }
+
+    expect(wrapper.find("[data-testid='target-track-layer']").exists()).toBe(false);
+    // Arco 挂在 documentElement 上的那份监听（`esc-to-close`）不许收到这一下。
+    expect(seenByStandIn).toEqual([]);
+    expect(wrapper.get("[data-testid='ptz-target-track-manual']").text()).toContain("框选跟踪");
+    wrapper.unmount();
+  });
+
+  it("下发失败落在错误行上，且不留下「已下发」的假状态", async () => {
+    api.setChannelTargetTrack.mockRejectedValue(new Error("Network Error"));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-target-track-auto']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='target-track-error']").text()).toContain("Network Error");
+    // ⛔ 状态行必须缺席：失败之后还挂着一句"已下发"，用户会以为命令出去了。
+    expect(wrapper.find("[data-testid='target-track-status']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("面板自己挡 canControlDevice：只有 ptz 权限的账号看不到目标跟踪入口", async () => {
+    // ⛔ 动作侧第一句就是 `if (!canControlDevice.value) return`，不在这儿挡就是"死按钮"。
+    userState.account = reactive({ permissions: ["gb28181:ptz:view", "gb28181:ptz:control"] });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+
+    expect(wrapper.find("[data-testid='ptz-target-track']").exists()).toBe(false);
+    // 反向对照：云台侧的拉框变焦此时也在（它由 canControlDevice 挡），说明整块门禁一致。
+    expect(wrapper.find("[data-testid='ptz-drag-zoom']").exists()).toBe(false);
     wrapper.unmount();
   });
 });

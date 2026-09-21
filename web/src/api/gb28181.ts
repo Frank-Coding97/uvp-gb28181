@@ -538,6 +538,12 @@ export interface DeviceControlCapabilities {
   alarmReset: ControlCapability;
   teleBoot: ControlCapability;
   dragZoom: ControlCapability;
+  /**
+   * A.2.3.1.14 目标跟踪。
+   * ⛔ 默认 `unknown` 是**正确结果**而不是"还没读"：它需要"全景相机球机"这种双目结构，
+   *    单目通道上报支持也没意义，所以后端只认设备自己的显式声明。
+   */
+  targetTrack?: ControlCapability;
   broadcast?: ControlCapability;
   talk?: ControlCapability;
 }
@@ -954,6 +960,132 @@ export interface DeviceOperationResult {
 
 export const controlDevice = (channelId: number, data: Record<string, unknown>) =>
   http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-control`), {
+    data
+  });
+
+/** A.2.3.1.14 `TargetTrack` 的取值域，原样是标准枚举（大写）。 */
+export type TargetTrackMode = "Auto" | "Manual" | "Stop";
+
+/**
+ * A.2.3.1.14 `TargetArea` 的六个子元素。
+ *
+ * ⛔ 单位是**像素**，且六项必须同一坐标系。标准原文（A.2.3.1.14 注释）：
+ *    「由于平台与设备画面比例大小不同，需要进行比例关系转化。因此，平台应提供画面大小：
+ *     **播放窗口**长度像素值和播放窗口宽度像素值。」
+ *    ⇒ `length`/`width` 传的是**视频画面在页面上实际渲染的像素尺寸**，
+ *      其余四项是相对该画面左上角的框选坐标。设备负责把它换算成自己的画幅。
+ * ⛔ 这与遮挡（`PictureMask`）的基准**刻意不同**：那边是"设备声明的图像尺寸、
+ *    与页面渲染无关"；这边是"页面渲染的播放窗口尺寸"。两套基准别互相套用。
+ */
+export interface TargetTrackArea {
+  /** 播放窗口长度像素值（= 画面渲染宽度）。 */
+  length: number;
+  /** 播放窗口宽度像素值（= 画面渲染高度）。 */
+  width: number;
+  midPointX: number;
+  midPointY: number;
+  lengthX: number;
+  lengthY: number;
+}
+
+/**
+ * 平台最近一次下发的目标跟踪指令。
+ *
+ * ⛔⛔ 这是**平台的意图**，不是"设备现在在跟踪什么"。理由见
+ *    `TargetTrackReadModel.deviceAcknowledged`。
+ */
+export interface TargetTrackIntent {
+  id: number;
+  deviceId: number;
+  channelId: number;
+  /** 报文里 SN 之后的 DeviceID —— 标准尾注「指全景相机的球机通道」。 */
+  targetCode: string;
+  mode: TargetTrackMode;
+  /** 报文里的 `DeviceID2`（全景相机中的全景通道 ID），没指定时为空串。 */
+  deviceId2: string;
+  /** 六项框选坐标：`Auto`/`Stop` 下**整体缺席**（null），不是 0。 */
+  areaLength?: number | null;
+  areaWidth?: number | null;
+  areaMidPointX?: number | null;
+  areaMidPointY?: number | null;
+  areaLengthX?: number | null;
+  areaLengthY?: number | null;
+  sourceOperationSeq: number;
+  sourceSn: number;
+  sourceOperationId?: string | null;
+  commandedBy: number;
+  commandedByDeptId: number;
+  commandedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TargetTrackReadModel {
+  /** nil = 这台设备还没被下发过目标跟踪。 */
+  intent: TargetTrackIntent | null;
+  /**
+   * ⛔ 恒 `false`，而且**不是**"暂时还没收到应答"。
+   *
+   * 目标跟踪在 GB/T 28181-2022 里是无应答命令（9.3.1 d) + 表 1 序号 13 =「（无）」），
+   * 而且 2022 全文**没有**任何"目标跟踪状态查询/上报"的命令
+   * ⇒ 设备永远不会回执，平台也永远无法知道设备实际在跟踪什么。
+   * 界面必须照这个字段措辞（「已下发，设备未回执」），不许写「正在跟踪」，
+   * 也不许轮询等一个不会来的回执。
+   */
+  deviceAcknowledged: boolean;
+  /** 恒 `false`（无应答命令），前端据此决定措辞与是否需要轮询。 */
+  responseRequired: boolean;
+  /** 服务端给的坐标口径说明，直接展示即可（见 TargetTrackArea 的注释）。 */
+  windowHint: string;
+  /** 设备自报的能力，默认 unknown（不因 PTZType 像就升格）。 */
+  capability: ControlCapability;
+  targetCode: string;
+}
+
+/**
+ * 读平台最近一次下发的目标跟踪指令（GB/T 28181-2022 A.2.3.1.14）。
+ *
+ * ⛔ 纯本地读：**不产生任何 SIP 报文**。因为标准里根本没有"查设备在跟踪什么"
+ *    这条命令 —— 能查的只有平台自己发过什么。
+ */
+export const getChannelTargetTrack = (channelId: number) =>
+  http.request<BaseResult<TargetTrackReadModel>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/target-track`),
+    undefined,
+    silentRequestConfig
+  );
+
+export interface TargetTrackCommand {
+  mode: TargetTrackMode;
+  /** 全景通道 ID，可选；不传表示沿用设备默认（报文里不带 `DeviceID2`）。 */
+  deviceId2?: string;
+  /** `Manual` 必填；`Stop` 不许带（带了两侧都会被拒）。 */
+  area?: TargetTrackArea;
+  idempotencyKey?: string;
+}
+
+export interface TargetTrackSubmitResult extends DeviceOperationResult {
+  /** 下发后落库的意图，同一个响应里回给前端，省掉一次读接口（也就没有中间态）。 */
+  intent?: TargetTrackIntent | null;
+  /** 恒 false，理由见 TargetTrackReadModel。 */
+  deviceAcknowledged?: boolean;
+  windowHint?: string;
+}
+
+/**
+ * 下发目标跟踪（GB/T 28181-2022 A.2.3.1.14）。
+ *
+ * ⛔ 走**独立路由** `.../target-track`，不是 `device-control` 的一个 action：
+ *    device-control 整条绑 `gb28181:device:control`，而本能力需要自己的读接口
+ *    与返回体（含意图快照）。权限照 video-params 先例：读 ptz:view / 写 ptz:control。
+ * ⛔ **无应答命令**：「已下发」不等于「设备在做」。设备不会回执，平台也无从查证，
+ *    所以调用方拿到的 `status=sent` 就是终态，别去轮询 operation 等终态变更。
+ * ⛔ `Manual` 必须带 `area`（缺了会被 400 拒），`Stop` **不许**带 `area`。
+ *    坐标用 `targetTrackBox.ts` 的纯函数从框选结果算出来，别在手写处各算一套。
+ */
+export const setChannelTargetTrack = (channelId: number, data: TargetTrackCommand) =>
+  http.request<BaseResult<TargetTrackSubmitResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/target-track`), {
     data
   });
 
