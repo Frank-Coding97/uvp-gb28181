@@ -48,7 +48,16 @@
               <template #icon><RotateCcw :size="15" /></template>
               重置
             </a-button>
-            <a-button v-if="canClear" data-testid="alarm-clear-all" class="alarm-clear-all-btn" type="primary" status="warning" :loading="clearDeleting" :disabled="clearDeleting" @click="requestClearAll">
+            <a-button
+              v-if="canClear"
+              data-testid="alarm-clear-all"
+              class="alarm-clear-all-btn"
+              type="primary"
+              status="warning"
+              :loading="clearDeleting"
+              :disabled="clearDeleting"
+              @click="requestClearAll"
+            >
               <template #icon><Eraser :size="15" /></template>
               一键清理
             </a-button>
@@ -56,9 +65,17 @@
         </s-layout-search>
 
         <div v-if="canDelete && selectedRowKeys.length" class="alarm-batch-bar">
-          <span class="alarm-batch-bar__info">已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span>
+          <span class="alarm-batch-bar__info"
+            >已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span
+          >
           <div class="alarm-batch-bar__ops">
-            <a-button data-testid="batch-delete" status="danger" :loading="batchDeleting" :disabled="batchDeleting" @click="requestBatchDelete">
+            <a-button
+              data-testid="batch-delete"
+              status="danger"
+              :loading="batchDeleting"
+              :disabled="batchDeleting"
+              @click="requestBatchDelete"
+            >
               <template #icon><Trash2 :size="14" /></template>
               批量删除
             </a-button>
@@ -85,92 +102,94 @@
             @page-change="handlePageChange"
             @page-size-change="handlePageSizeChange"
           >
-          <template #columns>
-            <a-table-column title="平台接收时间" :width="176">
-              <template #cell="{ record }">{{ formatDateTime(record.receivedAt) }}</template>
-            </a-table-column>
-            <a-table-column title="设备告警时间" :width="176">
-              <template #cell="{ record }">{{ formatDateTime(record.alarmTime) }}</template>
-            </a-table-column>
-            <a-table-column title="设备" :width="188">
-              <template #cell="{ record }">
-                <div class="alarm-entity-cell">
-                  <span>{{ displayAlarmEntityName(record.device) }}</span>
-                  <small>{{ record.device.code }}</small>
-                </div>
-              </template>
-            </a-table-column>
-            <a-table-column title="来源" :width="188">
-              <template #cell="{ record }">
-                <div class="alarm-entity-cell">
-                  <span>{{ displayAlarmEntityName(record.channel, record.sourceCode || "未知来源") }}</span>
-                  <small>{{ record.sourceCode || "—" }}</small>
-                </div>
-              </template>
-            </a-table-column>
-            <a-table-column title="级别" :width="112">
-              <template #cell="{ record }"><a-tag :color="alarmPriorityTagColor(record.priority)">{{ enumText(record.priority) }}</a-tag></template>
-            </a-table-column>
-            <a-table-column title="方法" :width="132">
-              <template #cell="{ record }">{{ enumText(record.method) }}</template>
-            </a-table-column>
-            <a-table-column title="类型" :width="190">
-              <template #cell="{ record }">{{ enumText(record.alarmType) }}</template>
-            </a-table-column>
-            <a-table-column title="告警描述" :width="260" :ellipsis="true" :tooltip="true">
-              <template #cell="{ record }">{{ record.description || "—" }}</template>
-            </a-table-column>
-            <a-table-column title="操作" :width="172" align="center" :fixed="isMobile ? '' : 'right'">
-              <template #cell="{ record }">
-                <div class="uvp-table-actions">
-                  <a-link
-                    class="uvp-table-action uvp-table-action--detail"
-                    role="button"
-                    tabindex="0"
-                    @click="openDetail(record.id)"
-                    @keydown.enter.prevent="openDetail(record.id)"
-                    @keydown.space.prevent="openDetail(record.id)"
-                  >
-                    <template #icon><Eye :size="13" /></template>
-                    <span>详情</span>
-                  </a-link>
-                  <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
+            <template #columns>
+              <a-table-column title="平台接收时间" :width="176">
+                <template #cell="{ record }">{{ formatDateTime(record.receivedAt) }}</template>
+              </a-table-column>
+              <a-table-column title="设备告警时间" :width="176">
+                <template #cell="{ record }">{{ formatDateTime(record.alarmTime) }}</template>
+              </a-table-column>
+              <a-table-column title="设备" :width="188">
+                <template #cell="{ record }">
+                  <div class="alarm-entity-cell">
+                    <span>{{ displayAlarmEntityName(record.device) }}</span>
+                    <small>{{ record.device.code }}</small>
+                  </div>
+                </template>
+              </a-table-column>
+              <a-table-column title="来源" :width="188">
+                <template #cell="{ record }">
+                  <div class="alarm-entity-cell">
+                    <span>{{ displayAlarmEntityName(record.channel, record.sourceCode || "未知来源") }}</span>
+                    <small>{{ record.sourceCode || "—" }}</small>
+                  </div>
+                </template>
+              </a-table-column>
+              <a-table-column title="级别" :width="112">
+                <template #cell="{ record }"
+                  ><a-tag :color="alarmPriorityTagColor(record.priority)">{{ enumText(record.priority) }}</a-tag></template
+                >
+              </a-table-column>
+              <a-table-column title="方法" :width="132">
+                <template #cell="{ record }">{{ enumText(record.method) }}</template>
+              </a-table-column>
+              <a-table-column title="类型" :width="190">
+                <template #cell="{ record }">{{ enumText(record.alarmType) }}</template>
+              </a-table-column>
+              <a-table-column title="告警描述" :width="260" :ellipsis="true" :tooltip="true">
+                <template #cell="{ record }">{{ record.description || "—" }}</template>
+              </a-table-column>
+              <a-table-column title="操作" :width="172" align="center" :fixed="isMobile ? '' : 'right'">
+                <template #cell="{ record }">
+                  <div class="uvp-table-actions">
                     <a-link
-                      class="uvp-table-action uvp-table-action--delete"
-                      :data-testid="`single-delete-${record.id}`"
-                      :loading="deletingIds.has(record.id)"
-                      :disabled="deletingIds.has(record.id)"
+                      class="uvp-table-action uvp-table-action--detail"
                       role="button"
                       tabindex="0"
-                      :aria-label="`物理删除告警 ${record.id}`"
-                      @click="requestSingleDelete(record)"
-                      @keydown.enter.prevent="requestSingleDelete(record)"
-                      @keydown.space.prevent="requestSingleDelete(record)"
+                      @click="openDetail(record.id)"
+                      @keydown.enter.prevent="openDetail(record.id)"
+                      @keydown.space.prevent="openDetail(record.id)"
                     >
-                      <template #icon><Trash2 :size="13" /></template>
-                      <span>删除</span>
+                      <template #icon><Eye :size="13" /></template>
+                      <span>详情</span>
                     </a-link>
-                  </a-tooltip>
-                </div>
-              </template>
-            </a-table-column>
-          </template>
-          <template #empty>
-            <a-empty description="当前筛选条件下暂无告警" />
-          </template>
+                    <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
+                      <a-link
+                        class="uvp-table-action uvp-table-action--delete"
+                        :data-testid="`single-delete-${record.id}`"
+                        :loading="deletingIds.has(record.id)"
+                        :disabled="deletingIds.has(record.id)"
+                        role="button"
+                        tabindex="0"
+                        :aria-label="`物理删除告警 ${record.id}`"
+                        @click="requestSingleDelete(record)"
+                        @keydown.enter.prevent="requestSingleDelete(record)"
+                        @keydown.space.prevent="requestSingleDelete(record)"
+                      >
+                        <template #icon><Trash2 :size="13" /></template>
+                        <span>删除</span>
+                      </a-link>
+                    </a-tooltip>
+                  </div>
+                </template>
+              </a-table-column>
+            </template>
+            <template #empty>
+              <a-empty description="当前筛选条件下暂无告警" />
+            </template>
           </a-table>
         </div>
       </template>
     </div>
-  </div>
 
-  <AlarmDetailDrawer
-    v-model:visible="detailVisible"
-    :alarm-id="detailAlarmId"
-    :can-delete="canDelete"
-    :deleting="detailAlarmId ? deletingIds.has(detailAlarmId) : false"
-    @delete="requestSingleDelete"
-  />
+    <AlarmDetailDrawer
+      v-model:visible="detailVisible"
+      :alarm-id="detailAlarmId"
+      :can-delete="canDelete"
+      :deleting="detailAlarmId ? deletingIds.has(detailAlarmId) : false"
+      @delete="requestSingleDelete"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -191,7 +210,15 @@ import {
   normalizeAlarmQuery,
   pageAfterAlarmDeletion
 } from "./alarmState";
-import { batchDeleteAlarms, clearAllAlarms, deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
+import {
+  batchDeleteAlarms,
+  clearAllAlarms,
+  deleteAlarm,
+  listAlarms,
+  type AlarmEnumValue,
+  type AlarmListItem,
+  type AlarmQuery
+} from "./api";
 
 const { isMobile } = useDevicesSize();
 const proxy = useGlobalProperties();
@@ -216,9 +243,7 @@ const deletingIds = ref(new Set<string>());
 const selectedRowKeys = ref<string[]>([]);
 const batchDeleting = ref(false);
 const clearDeleting = ref(false);
-const rowSelection = computed(() =>
-  canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined
-);
+const rowSelection = computed(() => (canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined));
 const pagination = reactive({
   current: 1,
   pageSize: 10,
@@ -456,24 +481,24 @@ onMounted(() => {
 .alarm-management-page {
   box-sizing: border-box;
   width: 100%;
-  height: 100%;
-  max-width: 100vw;
   min-width: 0;
+  max-width: 100vw;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
-  contain: inline-size;
   color: var(--uvp-text-primary);
+  contain: inline-size;
 }
 
 .alarm-management-shell {
   box-sizing: border-box;
   display: flex;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  min-width: 0;
-  min-height: 0;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -541,9 +566,9 @@ onMounted(() => {
 .alarm-batch-bar {
   display: flex;
   flex: 0 0 auto;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
   min-height: 46px;
   padding: 0 14px;
   margin-bottom: 12px;
@@ -559,18 +584,18 @@ onMounted(() => {
 
 .alarm-batch-bar__ops {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
 
 .alarm-table-wrap {
   flex: 1;
-  max-width: 100%;
   min-width: 0;
+  max-width: 100%;
   min-height: 0;
   overflow: hidden;
-  contain: inline-size;
   border-radius: 6px;
+  contain: inline-size;
 }
 
 .alarm-table-wrap :deep(.uvp-data-table) {
@@ -594,11 +619,11 @@ onMounted(() => {
 
 .alarm-entity-cell small {
   margin-top: 2px;
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
+  color: var(--uvp-text-tertiary);
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   :deep(.uvp-table-actions .arco-btn),
   :deep(.uvp-table-action) {
     min-height: 44px;

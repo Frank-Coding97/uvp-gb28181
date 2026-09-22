@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse } from "vue/compiler-sfc";
 
 import { SNAPSHOT_LIBRARY_PAGE_SIZE_OPTIONS, SNAPSHOT_LIBRARY_PATH } from "./snapshotLibraryState";
 
@@ -49,6 +50,21 @@ describe("image library page shell", () => {
   it("reuses the shared page shell instead of inventing a new one", () => {
     expect(pageSource).toContain('class="snow-fill-inner uvp-page-shell-flat snapshot-library-shell"');
     expect(pageSource).toContain("<s-layout-search>");
+  });
+
+  it("keeps a single template root so the layout transition can animate the page", () => {
+    // 布局用 `<Transition :name="transitionPage">` 包住路由页
+    // (layout/components/Main/index.vue → components/s-main-transition/index.vue)，
+    // 而 Vue 只给「单元素根」挂过渡钩子：根是 Fragment（多根）/文本/注释时，
+    // 每趟渲染都打 `Component inside <Transition> renders non-element root node ...`，
+    // 页面的淡入淡出静默失效。本页曾把 `<a-image-preview>` 与根 div 并排写 ⇒ 双根。
+    // ⛔ 文本断言（toContain）钉不住这个，只有模板 AST 的顶层子节点个数能钉。
+    const { descriptor } = parse(pageSource, { filename: "index.vue" });
+    const roots = (descriptor.template?.ast?.children ?? []).filter(node => {
+      if (node.type === 3) return false; // 注释不算根
+      return !(node.type === 2 && !node.content.trim()); // 纯空白文本不算根
+    });
+    expect(roots.map(node => ("tag" in node ? node.tag : `type:${node.type}`))).toHaveLength(1);
   });
 });
 

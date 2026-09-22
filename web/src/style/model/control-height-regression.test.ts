@@ -52,19 +52,17 @@ describe("control height regression", () => {
 
   it("restores the original sizes of custom controls", () => {
     const playback = readSource("src/views/gb28181/device-record-playback/index.vue");
-    expect(playback).toMatch(/\.query-field input, \.query-field select\s*\{[^}]*height:\s*32px;/s);
+    // ⛔ 并列选择器会被 prettier 拆成两行（`.query-field input,\n.query-field select {`），
+    //    选择器内部必须容许换行，否则格式化一次就红一次。
+    expect(playback).toMatch(/\.query-field input,\s*\.query-field select\s*\{[^}]*height:\s*32px;/s);
     expect(playback).toMatch(/\.range-separator\s*\{[^}]*height:\s*32px;[^}]*line-height:\s*32px;/s);
     expect(playback).toMatch(/\.query-submit\s*\{[^}]*height:\s*32px;/s);
-    expect(readSource("src/views/gb28181/device-mgmt/index.vue")).not.toMatch(
-      /\.create-device-btn\s*\{[^}]*height:\s*44px;/s
-    );
+    expect(readSource("src/views/gb28181/device-mgmt/index.vue")).not.toMatch(/\.create-device-btn\s*\{[^}]*height:\s*44px;/s);
     expect(readSource("src/views/gb28181/zlm/NodeDetail.vue")).not.toMatch(/\.back-btn\s*\{[^}]*height:\s*44px;/s);
     expect(readSource("src/views/gb28181/zlm/NodeForm.vue")).not.toMatch(
       /:global\(\.zlm-node-form \.arco-input-wrapper\)[\s\S]*?\{[^}]*min-height:\s*44px;/s
     );
-    expect(readSource("src/views/gb28181/zlm/SchedulerLog.vue")).not.toMatch(
-      /\.log-count\s*\{[^}]*height:\s*44px;/s
-    );
+    expect(readSource("src/views/gb28181/zlm/SchedulerLog.vue")).not.toMatch(/\.log-count\s*\{[^}]*height:\s*44px;/s);
     expect(readSource("src/views/system/online-user/index.vue")).not.toMatch(
       /\.online-user-filter :deep\(\.arco-input-wrapper\),\s*\.online-user-filter :deep\(\.arco-select-view\)\s*\{[^}]*\b(?:min-)?height:\s*44px;/s
     );

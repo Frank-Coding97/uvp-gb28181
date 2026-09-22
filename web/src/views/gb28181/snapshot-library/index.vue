@@ -132,9 +132,9 @@
         </footer>
       </template>
     </div>
-  </div>
 
-  <a-image-preview v-if="previewSrc" v-model:visible="previewVisible" :src="previewSrc" />
+    <a-image-preview v-if="previewSrc" v-model:visible="previewVisible" :src="previewSrc" />
+  </div>
 </template>
 
 <script setup lang="ts">
