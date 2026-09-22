@@ -437,6 +437,21 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		zlmRestartCoordinator = restartCoordinator
 		nodeSvc.SetRestartCoordinator(restartCoordinator)
 		nodeSvc.SetLogger(app.ZapLog)
+		// 节点退役：删掉一个 media node 之后，对端 ZLM 不会知道，它会继续回调平台
+		// （现场实测 8640 行/天）。这里把"撤销对端 hook"所需的凭据留在独立表里，
+		// 并装上协调器：删行后异步解约，残留回调时按退避自愈（见 zlm/service/retired_node.go）。
+		retiredIndex := node.NewRetirementIndex(gbzlmrepo.NewMetaNodeRetiredRepo(app.DB()))
+		loadCtx, loadCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := retiredIndex.LoadAll(loadCtx); err != nil {
+			// 装不上不影响启动：后果只是"重启后认不出已退休的 uuid"，退回 node_unknown + 折叠。
+			app.ZapLog.Warn("装载已退休媒体节点凭据失败",
+				zap.String("event", "zlm.node.retire_index_load_failed"), zap.Error(err))
+		}
+		loadCancel()
+		retiredCoordinator := gbzlmsvc.NewRetiredNodeCoordinator(retiredIndex, adapter)
+		retiredCoordinator.SetLogger(app.ZapLog)
+		nodeSvc.SetRetiredNodeCoordinator(retiredCoordinator)
+		gbroutes.SetHookRetiredObserver(retiredCoordinator)
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))

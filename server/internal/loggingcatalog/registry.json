@@ -236,6 +236,10 @@
       "node_id",
       "source_ip"
     ],
+    "gb28181.hook.auth.rejected_summary": [
+      "node_id",
+      "source_ip"
+    ],
     "gb28181.hook.auto_on_demand.accepted": [
       "channel_id",
       "device_id",
@@ -923,6 +927,19 @@
     "zlm.node.offline": [
       "node_id"
     ],
+    "zlm.node.hook_revoked": [
+      "node_id"
+    ],
+    "zlm.node.hook_revoke_failed": [
+      "node_id"
+    ],
+    "zlm.node.retire_credentials_failed": [
+      "node_id"
+    ],
+    "zlm.node.retire_index_load_failed": [],
+    "zlm.node.retire_state_persist_failed": [
+      "node_id"
+    ],
     "zlm.node.purged_unreachable": [
       "node_id"
     ],
@@ -988,6 +1005,7 @@
     "app",
     "attempt_id",
     "attempt_ids",
+    "attempts",
     "batches",
     "before_count",
     "body_bytes",
@@ -1057,6 +1075,8 @@
     "name",
     "name_updated",
     "new_menu_names",
+    "next_retry_in",
+    "node_host",
     "node_id",
     "node_uuid",
     "nodes",
@@ -1101,6 +1121,7 @@
     "response_call_id",
     "response_cseq",
     "result",
+    "retire_trigger",
     "retired_projections",
     "retry_count",
     "role",
@@ -1130,6 +1151,7 @@
     "status",
     "stream_id",
     "subscription_id",
+    "suppressed_count",
     "table_name",
     "template_name",
     "template_path",
@@ -1139,6 +1161,7 @@
     "total_count",
     "track_id",
     "transport",
+    "unprovision_state",
     "updated_field_count",
     "upload_id",
     "url",
@@ -1146,6 +1169,7 @@
     "username",
     "uuid",
     "warning_code",
+    "window_seconds",
     "x_gb_ver"
   ]
 }

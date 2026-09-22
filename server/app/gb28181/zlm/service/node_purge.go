@@ -65,6 +65,9 @@ func (s *NodeService) PurgeUnreachable(ctx context.Context, id int64) (NodePurge
 	if err := s.registry.Delete(ctx, id); err != nil {
 		return NodePurgeResult{}, err
 	}
+	// 这条路径上节点当下**够不着**，所以解约多半会失败 —— 但凭据恰恰在这里最值钱：
+	// 对端一旦恢复回调，热路径就能用这份凭据把残留关掉（见 retired_node.go）。
+	s.retireDeletedNode(ctx, cur, retireReasonPurgeUnreachable)
 	if s.logger != nil {
 		s.logger.Named("purge").Warn("强制移除不可达的 ZLM 节点",
 			zap.String("event", "zlm.node.purged_unreachable"),

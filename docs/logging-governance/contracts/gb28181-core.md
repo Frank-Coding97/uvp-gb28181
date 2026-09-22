@@ -208,7 +208,8 @@ ZLM 是**主动打过来**的（HTTP hook），没有 SIP 信封、没有 HTTP r
 | `gb28181.hook.flow.ignored` | DEBUG | 同上 |
 | `gb28181.hook.auto_on_demand.denied` | DEBUG | 同上 |
 | `gb28181.hook.auto_on_demand.accepted` | INFO | `device_id` `channel_id`（`reason="accepted"` 已删） |
-| `gb28181.hook.auth.rejected` | WARN | **`node_id`** **`source_ip`** `hook_event` `reason_code` |
+| `gb28181.hook.auth.rejected` | WARN | **`node_id`** **`source_ip`** `hook_event` `reason_code`（同一来源 30 分钟窗口内**只打首次**，见下） |
+| `gb28181.hook.auth.rejected_summary` | WARN | **`node_id`** **`source_ip`** `hook_event` `reason_code` `suppressed_count` `window_seconds` |
 | `gb28181.hook.auth.node_mismatch` | WARN | **`node_id`** **`payload_node_id`** `hook_event` |
 | `gb28181.hook.server_started` | INFO | **`media_server_id`** **`node_id`** |
 | `gb28181.hook.server_started_node_unresolved` | WARN | `reason_code` + `media_server_id`（**可缺席**） |
@@ -225,6 +226,35 @@ ZLM 是**主动打过来**的（HTTP hook），没有 SIP 信封、没有 HTTP r
 
 **`stopCleanupPending` 的 `failureMessage` 改 `reasonCode`**：原来传的是中文句子
 （`"流注销清理失败"`）—— 人类可读的"是哪条路径"已由事件名回答，句子只会让字段无法聚合。
+
+**`rejected_summary` 是新事件（2026-09-21）**：hook 的 `node` 参数是**对方自报**的，
+平台删掉一个节点之后对端不会知道，于是继续按自己的周期回调。现场原型：220 上一个已从平台移除的
+ZLM 实例（`eeyelog-zlm`）仍留着指向平台的 hook 配置，`on_server_keepalive` 每 10s 一条 ——
+**每天 8640 行同一条事实**，而 `HookAuthenticator` 原有的令牌桶（8/s、burst 16）只防秒级风暴，
+对 0.1/s 的慢性重复完全无效。
+
+处置是**折叠**不是降级，也不是关掉：同一「`reason_code` + 自称 `node_id` + `source_ip` + `hook_event`」
+在 30 分钟窗口内只留一条明细（`auth.rejected`，等级**仍是 WARN** —— `levels.md` 把它归在
+"身份认证失败、需要人去核对凭据"那一类，这个判断没变），窗口到期补一条
+`auth.rejected_summary`，用 `suppressed_count` 交代被压掉的条数。10s 心跳因此从 180 条/窗口
+降到 1 条/窗口，而"有个来源在持续被拒"这件事仍然看得见。
+
+⚠️ 同源的 `logging.Repeater`（T11）**没被复用**：它的身份维度是 `NodeID int64` + `JobID`
+（平台自己的实体）、恢复靠 `Recovered(key)`，而这边的"谁"是对方自报的字符串 + 对端地址，
+且未知节点没有"恢复"信号。形状相近不等于同一个东西 —— 但字段名（`suppressed_count`）
+刻意与它保持一致，免得同一个概念长出两种叫法。
+
+**`reason_code=node_retired` 是 2026-09-21 新分出来的一类（L4 对端解约）**：认证 miss 时
+先问一次"这个 uuid 是不是平台**自己删过**的节点"（退休凭据表 `meta_node_retired`）。命中就是
+`node_retired`，没命中才是 `node_unknown`。两者必须分开：
+
+- `node_retired` —— 平台**认识**它，是自己删掉的，凭据还在 ⇒ 对端残留本该被撤掉，平台会去撤；
+- `node_unknown` —— 平台根本不认识它 ⇒ 伪造 / 串台 / 别人家平台配错了地址。
+
+混成一种，"我们删过、还没撤干净"和"陌生人一直在敲门"在日志里就长得一模一样。
+两类都进折叠白名单，等级都是 WARN（`levels.md` 的判断没变：这是"要人去核凭据"的事）。
+
+撤约动作本身的事件在 `zlm.md` §3.7（`zlm.node.hook_revoked` / `zlm.node.hook_revoke_failed`）。
 
 ### 3.5 `device` / `channel` 删除（`controllers/device_delete.go`）
 

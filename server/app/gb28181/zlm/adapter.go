@@ -72,6 +72,14 @@ func (a *ServiceAdapter) RestartServer(ctx context.Context, n *node.Node, graceM
 	return NewClientForNode(n).RestartServer(ctx, graceMS)
 }
 
+// UnprovisionHooks 实现 service.HookUnprovisioner
+//
+// 与 ApplyConfigForNode 对称：一个是"把平台写进对端的 hook 配上"，一个是"把它撤掉"。
+// 调用方传进来的通常是**退休凭据还原出来的临时 Node**（见 node.RetiredCredential.Node）。
+func (a *ServiceAdapter) UnprovisionHooks(ctx context.Context, n *node.Node) error {
+	return NewClientForNode(n).UnprovisionHooks(ctx)
+}
+
 // GetThreadsLoad 实现 heartbeat.ThreadLoadFetcher(2026-06-28 Stats 字段 mismatch 修)
 func (a *ServiceAdapter) GetThreadsLoad(ctx context.Context, n *node.Node) (float64, error) {
 	return NewClientForNode(n).GetThreadsLoad(ctx)

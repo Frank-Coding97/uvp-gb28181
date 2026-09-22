@@ -160,3 +160,149 @@ func TestHookAuthenticatorDoesNotLogCapability(t *testing.T) {
 }
 
 func boolPtr(value bool) *bool { return &value }
+
+// hookRetiredObserver 是 HookRetiredObserver 的测试替身：只认识"退休过"的那一个 uuid。
+type hookRetiredObserver struct {
+	retired map[string]bool
+	seen    []string
+}
+
+func (o *hookRetiredObserver) ObserveRetiredHook(uuid, sourceIP string) bool {
+	o.seen = append(o.seen, uuid+"@"+sourceIP)
+	return o.retired[uuid]
+}
+
+// 认证 miss 的两种事实必须分开记：
+//   - node_retired：平台**自己删过**它，凭据还在 ⇒ 对端残留本该被撤掉；
+//   - node_unknown：平台根本不认识它 ⇒ 只可能是伪造 / 串台 / 别人家配错了地址。
+//
+// 混成一种，"我们删过还没撤干净"与"陌生人一直在敲门"在日志里就长得一模一样。
+func TestHookAuthenticatorDistinguishesRetiredNodeFromUnknownSender(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+
+	auth := handler.NewHookAuthenticator()
+	auth.SetResolver(hookAuthResolver{nodes: map[string]*node.Node{}})
+	retired := &hookRetiredObserver{retired: map[string]bool{"retired-node": true}}
+	auth.SetRetiredObserver(retired)
+
+	engine := gin.New()
+	engine.POST("/hook", auth.Middleware(playauth.HookOnServerKeepalive, handler.HookRejectNotification), func(c *gin.Context) {
+		t.Fatal("handler must not run")
+	})
+	for _, uuid := range []string{"retired-node", "stranger-node"} {
+		request := httptest.NewRequest(http.MethodPost, "/hook?node="+uuid+"&cap=stale", nil)
+		request.RemoteAddr = "192.168.10.220:45678"
+		engine.ServeHTTP(httptest.NewRecorder(), request)
+	}
+
+	reasons := map[string]string{}
+	for _, entry := range observed.All() {
+		if entry.ContextMap()["event"] != "gb28181.hook.auth.rejected" {
+			continue
+		}
+		reasons[entry.ContextMap()["node_id"].(string)] = entry.ContextMap()["reason_code"].(string)
+	}
+	require.Equal(t, "node_retired", reasons["retired-node"])
+	require.Equal(t, "node_unknown", reasons["stranger-node"])
+	// 观察器两类都要问（未知节点也可能是"退休表还没装载"的那一个），
+	// 并且必须带上真实的 source_ip —— 认证失败时那是唯一的可信来源标识。
+	require.Equal(t, []string{"retired-node@192.168.10.220", "stranger-node@192.168.10.220"}, retired.seen)
+}
+
+// 未装配观察器时退回老行为：只记 node_unknown，不 panic。
+func TestHookAuthenticatorFallsBackWhenRetiredObserverAbsent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+
+	auth := handler.NewHookAuthenticator()
+	auth.SetResolver(hookAuthResolver{nodes: map[string]*node.Node{}})
+	engine := gin.New()
+	engine.POST("/hook", auth.Middleware(playauth.HookOnServerKeepalive, handler.HookRejectNotification), func(c *gin.Context) {})
+	request := httptest.NewRequest(http.MethodPost, "/hook?node=some-node&cap=stale", nil)
+	request.RemoteAddr = "192.168.10.220:45678"
+	engine.ServeHTTP(httptest.NewRecorder(), request)
+
+	for _, entry := range observed.All() {
+		if entry.ContextMap()["event"] != "gb28181.hook.auth.rejected" {
+			continue
+		}
+		require.Equal(t, "node_unknown", entry.ContextMap()["reason_code"])
+	}
+}
+
+// 现场回归锚点（2026-09-21）：一个已从平台移除、却仍在回调的 ZLM 实例会让同一条
+// 拒绝以心跳节奏（实测 10s）反复出现。180 次心跳只应留下 **1 条明细**，
+// 而不是 180 条 —— 但那条明细的定位字段一个都不能少（谁自称是谁、从哪来、为什么被拒）。
+func TestHookAuthenticatorFoldsRepeatedRejectionsFromOneSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+
+	auth := handler.NewHookAuthenticator()
+	auth.SetResolver(hookAuthResolver{nodes: map[string]*node.Node{}})
+	engine := gin.New()
+	engine.POST("/hook", auth.Middleware(playauth.HookOnServerKeepalive, handler.HookRejectNotification), func(c *gin.Context) {
+		t.Fatal("handler must not run")
+	})
+
+	for beat := 0; beat < 180; beat++ {
+		request := httptest.NewRequest(http.MethodPost, "/hook?node=ghost-node&cap=stale", nil)
+		request.RemoteAddr = "192.168.10.220:45678"
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code)
+	}
+
+	rejected, summaries := 0, 0
+	for _, entry := range observed.All() {
+		switch entry.ContextMap()["event"] {
+		case "gb28181.hook.auth.rejected":
+			rejected++
+			require.Equal(t, "ghost-node", entry.ContextMap()["node_id"])
+			require.Equal(t, "192.168.10.220", entry.ContextMap()["source_ip"])
+			require.Equal(t, "node_unknown", entry.ContextMap()["reason_code"])
+		case "gb28181.hook.auth.rejected_summary":
+			summaries++
+		}
+	}
+	require.Equal(t, 1, rejected, "同源重复拒绝必须折叠成一条明细")
+	require.Equal(t, 0, summaries, "窗口未到期不应出现汇总")
+}
+
+// 折叠的反面：`auth_runtime_unavailable` 是**平台自己坏了**，不能跟着变安静。
+func TestHookAuthenticatorKeepsLoggingItsOwnRuntimeFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+
+	auth := handler.NewHookAuthenticator() // 未配置 resolver
+	engine := gin.New()
+	engine.POST("/hook", auth.Middleware(playauth.HookOnServerKeepalive, handler.HookRejectNotification), func(c *gin.Context) {})
+
+	for attempt := 0; attempt < 5; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/hook?node=node-a&cap=anything", nil)
+		request.RemoteAddr = "192.168.10.220:45678"
+		engine.ServeHTTP(httptest.NewRecorder(), request)
+	}
+
+	rejected := 0
+	for _, entry := range observed.All() {
+		if entry.ContextMap()["event"] != "gb28181.hook.auth.rejected" {
+			continue
+		}
+		rejected++
+		require.Equal(t, "auth_runtime_unavailable", entry.ContextMap()["reason_code"])
+	}
+	require.Equal(t, 5, rejected, "平台自身故障必须每一次都留痕")
+}

@@ -176,6 +176,27 @@ logger 名）；② 封条机制"改文件即失效"是有意为之；③ 运行
 | `zlm.node.restore_failed` | WARN | 节点配置恢复失败 | `node_id` + `error` |
 | `zlm.node.restored` | INFO | 节点配置恢复完成 | `node_id` |
 
+### 3.7 媒体节点退役：撤销对端 Hook（`zlm/service/retired_node.go`）
+
+> 背景：`Registry.Delete` 是**硬删**且**不通知对端**，被删的 ZLM 会继续按自己的周期回调
+> （现场实测 8640 行/天）。这一节记的是"平台主动去把它关掉"这条路上的事件。
+
+| event | 等级 | 触发条件 | 定位字段 |
+|---|---|---|---|
+| `zlm.node.hook_revoked` | INFO | 已撤销对端 Managed Hook（对端不再回调本平台） | `node_id` + `node_host` + `attempts` + `retire_trigger` |
+| `zlm.node.hook_revoke_failed` | WARN | 撤不掉（不可达 / 凭据已改），已按退避重排 | `node_id` + `node_host` + `attempts` + `next_retry_in` + `retire_trigger` |
+| `zlm.node.retire_credentials_failed` | WARN | 保留撤销凭据失败（**不阻断删除**） | `node_id` + `node_uuid` |
+| `zlm.node.retire_state_persist_failed` | WARN | 解约状态落库失败（内存已更新） | `node_id` + `attempts` + `unprovision_state` |
+| `zlm.node.retire_index_load_failed` | WARN | 启动装载退休凭据失败（退回折叠兜底） | 组件级（§四） |
+
+**为什么"撤不掉"必须是 WARN 而不是 INFO**：它表示"对端还在回调、平台还关不掉它"，
+即 L1 折叠之外仍有一份**需要人处理的失配记录**（`unprovision_state=unreachable`）。
+把它记成 INFO 等于把残骸藏进日志稀疏处。
+
+**`retire_trigger` 取两个值**：`node_retired`（删除时的那一次尝试）、
+`retired_callback@<source_ip>`（此后每次收到残留回调触发的重试）。它回答的是
+"这次为什么现在试"，与"试了几次"（`attempts`）是两个维度。
+
 ### 3.6 启动期装配与降级（`bootstrap.go` / `bootstrap_zlm_management.go`）
 
 | event | 等级 | 触发条件 | 定位字段 |

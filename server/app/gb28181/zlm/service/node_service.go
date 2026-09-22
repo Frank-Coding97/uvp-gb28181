@@ -173,8 +173,12 @@ type NodeService struct {
 	// 用它摘掉 gb_device.zlm_node_id 之类的引用,避免留下指向已删节点的悬空值。
 	cleanerMu        sync.RWMutex
 	referenceCleaner NodeReferenceCleaner
-	logger           *zap.Logger
-	restart          *RestartCoordinator
+	// retired 处理"删掉一个节点之后，对端还在回调"这件事：留凭据 + 异步撤销对端 hook
+	// + 收到残留回调时退避自愈（见 retired_node.go）。未装配时退回"只删不撤"的老行为。
+	retiredMu sync.RWMutex
+	retired   *RetiredNodeCoordinator
+	logger    *zap.Logger
+	restart   *RestartCoordinator
 }
 
 // NewNodeService 构造
@@ -500,6 +504,11 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 		if rollbackErr := s.registry.Delete(ctx, added.ID); rollbackErr != nil {
 			return nil, fmt.Errorf("%w: 创建失败且本地回滚失败: %v", ErrRollbackUncertain, redactNodeError(rollbackErr, added))
 		}
+		// 回滚已经把行删掉了 —— 与"删节点"是同一类收尾，走同一条路：
+		// 收敛失败可能发生在回读那一步，也就是 hook **已经写进对端**了。不清掉的话，
+		// 对端会拿着一个平台已经不认识的 uuid 一直回调 —— 正是幽灵节点的缩影。
+		// （回滚失败时行还在，不能 Retire —— 节点仍然是注册表里的实体。）
+		s.retireDeletedNode(ctx, added, retireReasonFailedCreate)
 		return nil, fmt.Errorf("写 ZLM 配置失败,已回滚: %w", redactNodeError(err, added))
 	}
 
@@ -915,7 +924,11 @@ func (s *NodeService) Delete(ctx context.Context, id int64) error {
 	if cur.Stats.SessionCount > 0 || cur.Stats.MediaSourceCount > 0 {
 		return fmt.Errorf("%w: 节点仍有 %d 个会话 / %d 个媒体源", ErrNodeImpactConflict, cur.Stats.SessionCount, cur.Stats.MediaSourceCount)
 	}
-	return s.registry.Delete(ctx, id)
+	if err := s.registry.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.retireDeletedNode(ctx, cur, retireReasonOperatorDelete)
+	return nil
 }
 
 // SetMaintenance is kept for old clients and now means Disable.

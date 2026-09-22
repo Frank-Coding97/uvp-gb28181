@@ -448,6 +448,12 @@ func SetHookAuthResolver(resolver gbhandler.HookAuthNodeResolver) {
 	hookAuthenticator.SetResolver(resolver)
 }
 
+// SetHookRetiredObserver 注入"已退休节点"观察器：让认证 miss 时能分辨
+// 「平台不认识它」与「平台自己删过它、只是还没撤干净」（见 handler.HookRetiredObserver）。
+func SetHookRetiredObserver(observer gbhandler.HookRetiredObserver) {
+	hookAuthenticator.SetRetiredObserver(observer)
+}
+
 type autoOnDemandNodeRegistry interface {
 	gbhandler.AutoOnDemandNodeResolver
 	Get(int64) (*node.Node, bool)

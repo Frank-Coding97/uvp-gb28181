@@ -287,7 +287,11 @@ func (s *NodeService) ExecuteNodeAction(ctx context.Context, id int64, action No
 		if impactHasResources(preflight.Impact) || cur.Stats.SessionCount > 0 || cur.Stats.MediaSourceCount > 0 {
 			return result, ErrNodeImpactConflict
 		}
-		return result, s.registry.Delete(ctx, id)
+		if err := s.registry.Delete(ctx, id); err != nil {
+			return result, err
+		}
+		s.retireDeletedNode(ctx, cur, retireReasonOperatorDelete)
+		return result, nil
 	case NodeImpactActionMaintenance:
 		cur.AdminState = "disabled"
 		return result, s.registry.Update(ctx, *cur)
