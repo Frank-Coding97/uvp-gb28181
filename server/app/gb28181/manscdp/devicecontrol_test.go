@@ -177,6 +177,10 @@ func TestBuildExtendedPTZControl_UsesStandardInstructionAndParameterLayout(t *te
 		{"set scan right bound", PTZActionScanSetRight, 5, 0, "A50F018905020045"},
 		// 8AH 的速度是 12 位:低 8 位进字节6,高 4 位进字节7 的高半字节。
 		{"set scan speed", PTZActionScanSetSpeed, 5, 1000, "A50F018A05E8305C"},
+		// 辅助开关(A.3.7 表 A.11):编号在**数据1(字节5)**,字节6 不参与 ——
+		// 开/关由指令码本身表达(`8CH` / `8DH`)。⛔ 与上一族 89H 的子动作位置不同。
+		{"wiper on", PTZActionAuxOn, PTZAuxiliaryIDWiper, 0, "A50F018C01000042"},
+		{"wiper off", PTZActionAuxOff, PTZAuxiliaryIDWiper, 0, "A50F018D01000043"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -201,6 +205,42 @@ func TestBuildExtendedPTZControl_RejectsNonStandardCruiseActions(t *testing.T) {
 	for _, action := range []PTZExtendedAction{PTZActionCruisePause, PTZActionCruiseResume} {
 		if _, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: action, ID: 1}); err == nil {
 			t.Fatalf("action %s should be rejected instead of sending a guessed instruction", action)
+		}
+	}
+}
+
+// 辅助开关的编号域是 00H~FFH,但 0 不是合法开关(标准注只给了 1 = 雨刷),
+// 越界必须在编码层就拒掉,不能让它悄悄编出一条开关号为 0 的帧。
+func TestBuildExtendedPTZControl_AuxSwitchRejectsOutOfRangeNumber(t *testing.T) {
+	for _, id := range []int{0, -1, 256} {
+		for _, action := range []PTZExtendedAction{PTZActionAuxOn, PTZActionAuxOff} {
+			if _, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: action, ID: id}); err == nil {
+				t.Fatalf("action %s 编号 %d 应被拒绝", action, id)
+			}
+		}
+	}
+}
+
+// ⛔ 回归锚点:辅助开关是 `8CH` / `8DH`,**不是** `89H` / `8AH`(那是扫描)。
+// 这两族曾被并成一行写过一次 —— 后果是平台点「开始扫描」,设备去开了雨刷;
+// SIP 收发全正常、设备回 200 OK,只有画面纹丝不动。
+func TestBuildExtendedPTZControl_AuxSwitchIsNotScanFamily(t *testing.T) {
+	body, err := BuildExtendedPTZControl("C", 9, PTZExtendedCommand{Action: PTZActionAuxOn, ID: PTZAuxiliaryIDWiper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var control struct {
+		PTZCmd string `xml:"PTZCmd"`
+	}
+	if err := newDecoder(body).Decode(&control); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(control.PTZCmd, "A50F018C") {
+		t.Fatalf("雨刷开启必须是 8CH 指令码, got %s", control.PTZCmd)
+	}
+	for _, scanPrefix := range []string{"A50F0189", "A50F018A"} {
+		if strings.HasPrefix(control.PTZCmd, scanPrefix) {
+			t.Fatalf("雨刷帧落进了扫描族(%s): %s", scanPrefix, control.PTZCmd)
 		}
 	}
 }

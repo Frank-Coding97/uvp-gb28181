@@ -928,6 +928,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.DELETE("/channel/:id/ptz/presets/:presetId", deviceMgmtController.DeletePTZPreset)
 			dmgmt.POST("/channel/:id/ptz/cruise", deviceMgmtController.ControlPTZCruise)
 			dmgmt.POST("/channel/:id/ptz/cruise/tracks", deviceMgmtController.CreateCruiseTrack)
+			// 雨刷(GB/T 28181 A.3.7 表 A.11:`8CH` 开 / `8DH` 关,字节5 = 辅助开关编号)。
+			// ⛔ 独立路由,**不是** `/ptz/extended` 的一个 action:标准在这一节只命名了
+			//    「取值为'1'表示雨刷控制」,把"只允许编号 1"钉在路由+控制器上;
+			//    `/ptz/extended` 继续拒绝通用 `aux_on`/`aux_off`,那条约束有测试锁着。
+			// 权限跟随 gb28181:ptz:control(雨刷与变倍/聚焦/光圈同属镜头/云台立即动作),
+			// 不另开权限码 —— 新码不会被既有权角色自动授予,会造成"按钮点了没反应"。
+			dmgmt.POST("/channel/:id/ptz/wiper", deviceMgmtController.ControlPTZWiper)
 			dmgmt.GET("/channel/:id/ptz/home-position", deviceMgmtController.GetPTZHomePosition)
 			dmgmt.PATCH("/channel/:id/ptz/home-position", deviceMgmtController.UpdatePTZHomePosition)
 			dmgmt.GET("/channel/:id/ptz/presets", deviceMgmtController.ListPTZPresets)

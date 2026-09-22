@@ -40,6 +40,45 @@ type cruiseResourceRequest struct {
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
+// wiperControlRequest:雨刷开关(GB/T 28181 A.3.7 表 A.11)。
+//
+// ⛔ 请求体里**故意没有 auxiliaryId**。标准在这一节只钉了一个编号语义
+// ("取值为'1'表示雨刷控制"),编号由后端固定成 manscdp.PTZAuxiliaryIDWiper;
+// 放开一个 `auxiliaryId` 字段等于把编号 2~5 那些标准未定义的语义邀请进 API 面。
+type wiperControlRequest struct {
+	Action         string `json:"action"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+// decodeWiperControlRequest 严格解码雨刷请求体(忽略未知字段的反面)。
+//
+// ⛔ **不能用 `c.ShouldBindJSON`**:gin 的默认 JSON 绑定不做 DisallowUnknownFields,
+// 于是 `{"action":"on","auxiliaryId":3}` 会被"成功"解析成"打开编号 1 的雨刷"——
+// 调用方以为自己点的是 3 号开关,设备却去刮水。这种"静默改语义"比报错难查得多。
+// 手法与同文件 [decodeHomePositionResourceRequest] 一致(读全量 → 校验 UTF-8 →
+// 拒未知字段 → 拒第二个 JSON 值)。
+func decodeWiperControlRequest(c *gin.Context, request *wiperControlRequest) error {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if !utf8.Valid(body) {
+		return errors.New("请求体不是有效 UTF-8")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(request); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("请求体包含多个 JSON 值")
+		}
+		return err
+	}
+	return nil
+}
+
 // cruiseTrackCreateRequest:一次 POST 建立整条巡航路径。
 // 后端按序下发:0x85 清空(若 ReplaceExisting)→ N × 0x84 加站 → 0x86 速度 → 0x87 停留。
 type cruiseTrackCreateRequest struct {
@@ -382,6 +421,41 @@ func (dc *DeviceMgmtController) ControlPTZCruise(c *gin.Context) {
 		return
 	}
 	dc.executePTZExtendedResource(c, action, *request.TrackID, "", request.IdempotencyKey)
+}
+
+// ControlPTZWiper 下发 GB/T 28181 A.3.7(表 A.11)的雨刷开 / 关。
+//
+// 报文只有两个变量:指令码(`0x8C` 开 / `0x8D` 关)与编号(固定
+// [manscdp.PTZAuxiliaryIDWiper] = 1 —— 标准在这一节唯一命名的编号)。
+//
+// ⛔ 状态措辞:标准在附录 A.3 里**没有**回读辅助开关状态的手段
+// (2022 全文"辅助开关"只出现在 A.3.7;A.2.4 查询闭集 1~14、A.2.6 应答闭集 1~16
+// 里都没有它),所以平台只可能知道"指令已下发",永远不知道雨刷此刻在不在刮。
+// 响应里的 status 是 operation 状态,前端不得把它读成"正在刮水"。
+//
+// ⛔ 与 `/ptz/extended` 的关系:那条路由**继续拒绝** `aux_on`/`aux_off`
+// (见 parseExtendedAction 的白名单与 TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions)。
+// 雨刷走独立路由,这样"只允许编号 1"这条约束落在控制器里,而不是靠调用方自觉。
+func (dc *DeviceMgmtController) ControlPTZWiper(c *gin.Context) {
+	var request wiperControlRequest
+	if err := decodeWiperControlRequest(c, &request); err != nil {
+		dc.FailAndAbort(c, "雨刷控制参数不合法", err)
+		return
+	}
+	var protocolAction manscdp.PTZExtendedAction
+	var operationAction string
+	switch strings.ToLower(strings.TrimSpace(request.Action)) {
+	case "on":
+		protocolAction = manscdp.PTZActionAuxOn
+		operationAction = "wiper_on"
+	case "off":
+		protocolAction = manscdp.PTZActionAuxOff
+		operationAction = "wiper_off"
+	default:
+		dc.FailAndAbort(c, "雨刷动作不合法(仅支持 on / off)", nil)
+		return
+	}
+	dc.executePTZExtendedResourceAs(c, protocolAction, operationAction, manscdp.PTZAuxiliaryIDWiper, "", request.IdempotencyKey)
 }
 
 // CreateCruiseTrack 按顺序下发 GB/T 28181 附录 A.3 巡航配置指令建立一条巡航路径。

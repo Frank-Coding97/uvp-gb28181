@@ -1251,6 +1251,23 @@ export const controlPtzCruise = (
     data
   });
 
+/**
+ * 雨刷开关（GB/T 28181 **A.3.7 表 A.11**：`8CH` 开 / `8DH` 关，字节5 = 辅助开关编号）。
+ *
+ * ⛔ 请求体里**没有 auxiliaryId**：标准在这一节只命名了编号 1 = 雨刷
+ * （原注：「字节5为辅助开关编号，取值为"1"表示雨刷控制。」），编号由后端固定成
+ * `manscdp.PTZAuxiliaryIDWiper`，前端不要自己拼一个编号上去 —— 那等于把标准未定义的
+ * 编号 2~5 语义带进协议面。
+ *
+ * ⛔ 返回值只能读成「指令已下发」：附录 A **没有回读辅助开关状态的手段**
+ * （2022 全文"辅助开关"只出现在 A.3.7；A.2.4 查询闭集 1~14、A.2.6 应答闭集 1~16 都没有它），
+ * 所以界面上不许出现"正在刮水"这类措辞。
+ */
+export const controlPtzWiper = (channelId: number, data: { action: "on" | "off"; idempotencyKey?: string }) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/wiper`), {
+    data
+  });
+
 export interface CruiseTrackCreateResult {
   channelId: string;
   trackId: number;

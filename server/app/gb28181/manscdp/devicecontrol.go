@@ -87,7 +87,19 @@ const (
 	PTZActionScanSetLeft      PTZExtendedAction = "scan_set_left"
 	PTZActionScanSetRight     PTZExtendedAction = "scan_set_right"
 	PTZActionScanSetSpeed     PTZExtendedAction = "scan_set_speed"
+
+	// 辅助开关 (GB/T 28181 A.3.7 / 表 A.11):`8CH` 开 / `8DH` 关,编号在数据1(字节5)。
+	//
+	// ⛔ 这一节标准只钉了一个语义:"注:字节5为辅助开关编号,取值为'1'表示雨刷控制。"
+	// 编号 2~5 在标准里没有定义(厂商自有语义),所以平台**只**暴露编号 1 = 雨刷,
+	// 不提供任意编号入口 —— 见 PTZAuxiliaryIDWiper。
+	PTZActionAuxOn  PTZExtendedAction = "aux_on"
+	PTZActionAuxOff PTZExtendedAction = "aux_off"
 )
+
+// PTZAuxiliaryIDWiper is the only auxiliary switch number the standard names
+// (GB/T 28181 A.3.7 表 A.11 注:取值为"1"表示雨刷控制).
+const PTZAuxiliaryIDWiper = 1
 
 type PTZExtendedCommand struct {
 	Action  PTZExtendedAction
@@ -368,6 +380,19 @@ func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID stri
 		parameter3 = byte((command.Value16>>8)&0x0F) << 4
 	case PTZActionScanStop:
 		// As with cruise stop, stop scanning uses the standard stop command.
+	// 辅助开关(A.3.7 表 A.11):编号在**数据1(字节5)**,没有子动作字节 ——
+	// 开/关完全由指令码表达(`8CH` / `8DH`)。⛔ 别照扫描那样往数据2写子动作:
+	// 上一族(0x89)一个码管三件事、子动作在字节6,这一族不是。
+	case PTZActionAuxOn, PTZActionAuxOff:
+		if command.ID <= 0 || command.ID > 255 {
+			return nil, fmt.Errorf("辅助开关编号必须在 1-255 之间")
+		}
+		if command.Action == PTZActionAuxOn {
+			instruction = 0x8C
+		} else {
+			instruction = 0x8D
+		}
+		parameter1 = byte(command.ID)
 	default:
 		return nil, fmt.Errorf("不支持的 PTZ 扩展动作: %q", command.Action)
 	}

@@ -265,6 +265,89 @@ func TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions(t *testing.T) {
 	}
 }
 
+// 雨刷(GB/T 28181 A.3.7 表 A.11):独立路由,编号固定 1。
+//
+// ⛔ 与上面「extended 拒绝 aux_on/aux_off」是一对,不是矛盾:
+//    通用辅助动作(调用方自带编号)一律拒;标准命名的那一个(编号 1 = 雨刷)必须有可用入口 ——
+//    只拒不放等于设备能力面是空的。
+func TestDeviceMgmt_ControlPTZWiperSendsStandardAuxFrame(t *testing.T) {
+	controller, db, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
+
+	tests := []struct {
+		name   string
+		action string
+		want   string
+	}{
+		{"on", "on", "A50F018C01000042"},
+		{"off", "off", "A50F018D01000043"},
+		// 大小写与空白由后端吃掉,前端不必自己规范化。
+		{"normalises case", " ON ", "A50F018C01000042"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender.mu.Lock()
+			before := len(sender.bodies)
+			sender.mu.Unlock()
+			request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/wiper",
+				strings.NewReader(`{"action":"`+tt.action+`"}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "operationId")
+			sender.mu.Lock()
+			bodies := append([]string(nil), sender.bodies[before:]...)
+			sender.mu.Unlock()
+			found := false
+			for _, b := range bodies {
+				if strings.Contains(b, tt.want) {
+					found = true
+					break
+				}
+			}
+			require.True(t, found, "want %q in sent bodies, got %v", tt.want, bodies)
+		})
+	}
+
+	// 操作记录里必须留下 wiper_on / wiper_off —— 前端那句「已下发」就是靠它,
+	// 而不是靠"设备回读了状态"(标准在 A.3 里没有回读辅助开关的命令)。
+	var actions []string
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Pluck("action", &actions).Error)
+	require.Contains(t, actions, "wiper_on")
+	require.Contains(t, actions, "wiper_off")
+}
+
+func TestDeviceMgmt_ControlPTZWiperRejectsUnknownAction(t *testing.T) {
+	controller, _, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
+
+	for _, body := range []string{
+		`{"action":"toggle"}`,
+		// ⛔ 请求体里没有 auxiliaryId —— 下面这个多余字段必须被当成非法请求,
+		//    而不是"顺便支持一下任意编号":标准只命名了编号 1。
+		`{"action":"on","auxiliaryId":3}`,
+		`{}`,
+	} {
+		sender.mu.Lock()
+		before := len(sender.bodies)
+		sender.mu.Unlock()
+		request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/wiper",
+			strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Contains(t, response.Body.String(), `"code":1`, body)
+		sender.mu.Lock()
+		require.Len(t, sender.bodies, before, body)
+		sender.mu.Unlock()
+	}
+}
+
 func TestDeviceMgmt_ControlPTZExtendedScanActions(t *testing.T) {
 	controller, _, channel, sender := newPTZResourceController(t)
 	router := gin.New()
