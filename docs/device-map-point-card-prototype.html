@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设备地图 · 点位卡片 · 可点击原型</title>
+<style>
+  :root {
+    --bg: #f4f7fc;
+    --panel: #ffffff;
+    --panel-soft: #f8fbff;
+    --border: #dbe4f0;
+    --border-strong: #c3d2e6;
+    --text: #1f2b3d;
+    --text-2: #5b6b83;
+    --text-3: #8b9ab1;
+    --brand: #2563eb;
+    --brand-soft: #eef4ff;
+    --amber: #b45309;
+    --amber-soft: #fff8ec;
+    --amber-line: #e0a03a;
+    --green: #15803d;
+    --green-soft: #f0fdf4;
+    --red: #c02b2b;
+    --red-soft: #fff3f3;
+    --cyan: #0e7490;
+    --radius: 8px;
+    --shadow: 0 1px 2px rgba(24, 45, 80, .06), 0 6px 18px rgba(24, 45, 80, .06);
+    --shadow-lg: 0 4px 10px rgba(24, 45, 80, .10), 0 18px 42px rgba(24, 45, 80, .16);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; padding: 22px 20px 40px;
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--text); background: var(--bg);
+  }
+
+  h1 { margin: 0 0 2px; font-size: 17px; letter-spacing: -.2px; }
+  .sub { margin: 0; color: var(--text-2); font-size: 12px; }
+
+  .topbar {
+    display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+    max-width: 1260px; margin: 0 auto 14px;
+  }
+  .topbar .grow { flex: 1 1 320px; }
+
+  .seg { display: inline-flex; padding: 3px; background: #e7eef9; border-radius: 9px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12.5px; color: var(--text-2);
+    padding: 6px 14px; border-radius: 7px; transition: .14s;
+  }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+
+  .stage { display: flex; gap: 14px; align-items: flex-start; max-width: 1260px; margin: 0 auto; flex-wrap: wrap; }
+  .canvas-col { flex: 1 1 640px; min-width: 0; }
+
+  /* ── 地图外壳 ───────────────────────────────── */
+  .mapwrap {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .maptoolbar {
+    display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    background: linear-gradient(#fdfefe, #f7fafe);
+    color: var(--text-3); font-size: 12px;
+  }
+  .maptoolbar .btn-ghost {
+    appearance: none; font: inherit; font-size: 12px; cursor: pointer;
+    color: var(--text-2); background: var(--panel);
+    border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 10px;
+  }
+  .maptoolbar .btn-ghost:hover { color: var(--brand); border-color: var(--brand); }
+  .slider { width: 120px; height: 3px; border-radius: 2px; background: #dbe4f0; position: relative; }
+  .slider i { position: absolute; left: 0; top: 0; bottom: 0; width: 78%; background: var(--brand); border-radius: 2px; }
+  .slider b {
+    position: absolute; left: 78%; top: 50%; width: 11px; height: 11px; margin: -6px 0 0 -6px;
+    background: #fff; border: 2px solid var(--brand); border-radius: 50%;
+  }
+
+  .map { position: relative; height: 620px; overflow: hidden; background: #eef3f9; }
+  .map > svg.basemap { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .map > svg.traj { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* 点位标记点（生产界面 22px 水滴 pin + 6px 中心点） */
+  .pin {
+    position: absolute; width: 22px; height: 22px; padding: 0; margin: 0;
+    appearance: none; cursor: pointer; z-index: 4;
+    background: var(--cyan); border: 3px solid rgba(255,255,255,.92);
+    border-radius: 50% 50% 50% 0; box-shadow: 0 2px 8px rgba(12,22,38,.35);
+    transform: rotate(-45deg); transition: transform .16s, box-shadow .16s;
+  }
+  .pin::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; background: #fff; border-radius: 50%;
+  }
+  .pin:hover { transform: rotate(-45deg) scale(1.14); }
+  .pin.selected { box-shadow: 0 0 0 4px rgba(37,99,235,.28), 0 2px 8px rgba(12,22,38,.4); transform: rotate(-45deg) scale(1.1); }
+  .pin.offline { background: #94a3b8; }
+  .pin-label {
+    position: absolute; z-index: 3; transform: translate(-50%, -100%);
+    font-size: 11px; color: var(--text-2); background: rgba(255,255,255,.9);
+    border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+    opacity: 0; transition: opacity .16s; pointer-events: none;
+  }
+  /* ⛔ 点位标签**只在 hover 时**出现，`selected` 不常显它 ——
+     卡片已经在说这个点是什么了，常显会与起终点标签打架（这一版原型踩过）。
+     选中态的表达靠 pulse 环 + 卡片，不靠文字。 */
+  .pin:hover ~ .pin-label { opacity: 1; }
+
+  /* ── 点位卡片（新设计） ─────────────────────── */
+  .card {
+    position: absolute; z-index: 8; width: 320px;
+    background: var(--panel); border: 1px solid var(--border-strong);
+    border-radius: 10px; box-shadow: var(--shadow-lg);
+    display: none; overflow: hidden;
+  }
+  .card.open { display: block; animation: pop .14s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  /* 指向下方点位的小尖角 */
+  .card::after {
+    content: ""; position: absolute; left: var(--arrow-x, 50%); bottom: -7px;
+    width: 12px; height: 12px; margin-left: -6px; background: var(--panel);
+    border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong);
+    transform: rotate(45deg);
+  }
+
+  .card-hd {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 10px 10px 8px; border-bottom: 1px solid var(--border);
+    background: linear-gradient(#ffffff, #fbfdff);
+  }
+  .card-hd .dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--green); flex: none; }
+  .card-hd .dot.off { background: #94a3b8; }
+  .card-hd .nm { font-weight: 600; font-size: 13px; }
+  .card-hd .cid { color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .card-hd .x {
+    margin-left: auto; appearance: none; border: 0; background: transparent; cursor: pointer;
+    color: var(--text-3); font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 5px;
+  }
+  .card-hd .x:hover { color: var(--text); background: #eef2f8; }
+
+  .card-facts { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .fact { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+  .fact + .fact { margin-top: 4px; }
+  .fact .k { color: var(--text-3); flex: 0 0 34px; }
+  .fact .v { color: var(--text); font-variant-numeric: tabular-nums; }
+  .fact .src {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+    color: var(--cyan); background: #ecfdff; border: 1px solid #bde9f2; border-radius: 999px; padding: 0 7px;
+  }
+  .fact .via { color: var(--text-3); font-size: 11.5px; }
+  .fact .copy {
+    margin-left: auto; appearance: none; border: 0; background: transparent; cursor: pointer;
+    color: var(--text-3); font-size: 11.5px; padding: 1px 5px; border-radius: 4px;
+  }
+  .fact .copy:hover { color: var(--brand); background: var(--brand-soft); }
+  .fact.warn { color: var(--amber); }
+  .fact.warn .k, .fact.warn .v { color: var(--amber); }
+  .fact .est { color: var(--amber); }
+
+  .card-acts { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 6px; padding: 9px 10px 10px; }
+  .act {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    appearance: none; font: inherit; font-size: 12px; cursor: pointer;
+    padding: 6px 4px; border-radius: 7px;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text-2);
+  }
+  .act:hover { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
+  .act.primary { color: #fff; background: var(--brand); border-color: var(--brand); }
+  .act.primary:hover { background: #1d4ed8; }
+  .act[disabled] { cursor: not-allowed; color: var(--text-3); background: var(--panel-soft); border-color: var(--border); }
+  .act[disabled]:hover { color: var(--text-3); background: var(--panel-soft); border-color: var(--border); }
+  .act.manage { color: var(--text-3); background: var(--panel-soft); }
+  .act.sep { grid-column: 1 / -1; height: 0; padding: 0; border: 0; margin: 0; }
+
+  /* ── 轨迹段（卡片第二段） ───────────────────── */
+  .card-traj { display: none; border-top: 1px solid var(--border); }
+  .card-traj.open { display: block; }
+  .traj-hd { display: flex; align-items: center; gap: 6px; padding: 8px 10px 6px; }
+  .traj-hd .t { font-weight: 600; font-size: 12.5px; }
+  .ranges { margin-left: auto; display: inline-flex; padding: 2px; background: #eef2f8; border-radius: 7px; }
+  .ranges button {
+    appearance: none; border: 0; background: transparent; cursor: pointer; font: inherit;
+    font-size: 11px; color: var(--text-2); padding: 3px 8px; border-radius: 5px;
+  }
+  .ranges button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+
+  .traj-stat { padding: 0 10px 8px; font-size: 11.5px; color: var(--text-2); }
+  .traj-stat code { font-variant-numeric: tabular-nums; color: var(--text); }
+  .traj-stat .est { color: var(--amber); }
+
+  .scrub { padding: 0 10px 8px; }
+  .scrub-row { display: flex; align-items: center; gap: 8px; }
+  .scrub button.play {
+    appearance: none; cursor: pointer; width: 26px; height: 26px; flex: none;
+    border: 1px solid var(--border-strong); background: var(--panel); border-radius: 7px;
+    color: var(--text-2); font-size: 11px; line-height: 1;
+  }
+  .scrub button.play:hover { color: var(--brand); border-color: var(--brand); }
+  .scrub .track { flex: 1 1 auto; height: 4px; border-radius: 2px; background: #e5ebf4; position: relative; }
+  .scrub .track .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--brand); border-radius: 2px; }
+  .scrub .track .knob {
+    position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    background: #fff; border: 2px solid var(--brand); border-radius: 50%; cursor: pointer;
+  }
+  .scrub .clock { font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
+  .scrub .rate {
+    appearance: none; font: inherit; font-size: 11px; cursor: pointer;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text-2);
+    border-radius: 5px; padding: 2px 4px;
+  }
+
+  .traj-list { max-height: 104px; overflow-y: auto; border-top: 1px solid var(--border); }
+  .traj-list .row {
+    display: grid; grid-template-columns: 62px 1fr 78px; gap: 6px; align-items: baseline;
+    padding: 5px 10px; font-size: 11.5px; font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid #f1f5fb; cursor: pointer;
+  }
+  .traj-list .row:hover { background: var(--panel-soft); }
+  .traj-list .row.cur { background: var(--brand-soft); box-shadow: inset 2px 0 0 var(--brand); }
+  .traj-list .row .t { color: var(--text-2); }
+  .traj-list .row .c { color: var(--text); }
+  .traj-list .row .g { text-align: right; color: var(--text-3); }
+  .traj-list .row.gap .g { color: var(--amber); }
+
+  /* 比例尺：⛔ 轨迹必须等比例画（实测南北 113 m / 东西 56 m ⇒ 真实形状是**竖长条**）。
+     横向拉伸能让线看着"好看"，但会让人以为设备横向移动了上百米 —— 那是伪造。 */
+  .scalebar {
+    position: absolute; z-index: 3; display: none; align-items: center; gap: 6px;
+    color: var(--text-2); font-size: 10.5px; pointer-events: none;
+  }
+  .scalebar .bar {
+    height: 7px; border-left: 1.5px solid var(--text-2);
+    border-right: 1.5px solid var(--text-2); border-bottom: 1.5px solid var(--text-2);
+  }
+
+  /* ── 播放小窗（新设计） ─────────────────────── */
+  .mini {
+    position: absolute; z-index: 9; right: 14px; bottom: 14px; width: 268px;
+    background: #0f172b; border-radius: 10px; box-shadow: var(--shadow-lg);
+    display: none; overflow: hidden;
+  }
+  .mini.open { display: block; animation: pop .16s ease-out; }
+  .mini-hd {
+    display: flex; align-items: center; gap: 7px; padding: 6px 8px;
+    color: #dbe7ff; font-size: 11.5px; cursor: grab; user-select: none;
+    background: #16233d; border-bottom: 1px solid #24344f;
+  }
+  .mini-hd:active { cursor: grabbing; }
+  .mini-hd .ic { width: 15px; height: 15px; flex: none; color: #60c8e8; }
+  .mini-hd .nm { font-weight: 600; }
+  .mini-hd .acts { margin-left: auto; display: flex; gap: 2px; }
+  .mini-hd .acts button {
+    appearance: none; border: 0; background: transparent; color: #9fb3d1; cursor: pointer;
+    font: inherit; font-size: 12px; line-height: 1; padding: 3px 5px; border-radius: 4px;
+  }
+  .mini-hd .acts button:hover { color: #fff; background: #24344f; }
+  .mini-video {
+    position: relative; aspect-ratio: 16 / 9; background:
+      radial-gradient(120% 90% at 62% 32%, #2a3d5c 0%, #16233d 62%, #0f172b 100%);
+  }
+  .mini-video .ov {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: #6f86a8; font-size: 11px; letter-spacing: .5px;
+  }
+  .mini-video .stamp {
+    position: absolute; left: 7px; bottom: 6px; color: #cfe1ff; font-size: 10.5px;
+    font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0,0,0,.8);
+  }
+  .mini-video .bar {
+    position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+    background-image: linear-gradient(transparent 96%, rgba(255,255,255,.05) 96%);
+    background-size: 100% 8px;
+  }
+
+  /* ── 现状：640px 通道详情抽屉（如实复刻） ───── */
+  .drawer {
+    flex: 0 0 344px; width: 344px; display: none;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px 0 0 12px; box-shadow: var(--shadow); overflow: hidden;
+    border-right: 0;
+  }
+  .drawer.open { display: block; }
+  .drawer-hd {
+    display: flex; align-items: center; gap: 8px; padding: 11px 14px;
+    border-bottom: 1px solid var(--border); background: linear-gradient(#fdfefe, #f7fafe);
+  }
+  .drawer-hd .t { font-weight: 600; font-size: 13px; }
+  .drawer-hd .x {
+    margin-left: auto; appearance: none; border: 0; background: transparent; cursor: pointer;
+    color: var(--text-3); font-size: 15px; padding: 2px 5px; border-radius: 5px;
+  }
+  .drawer-hd .x:hover { color: var(--text); background: #eef2f8; }
+  .drawer-body { padding: 13px 14px 18px; }
+  .drawer-headline { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  .drawer-headline .ico {
+    width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+    background: var(--brand-soft); color: var(--brand); border-radius: 8px;
+  }
+  .drawer-headline h3 { margin: 0; font-size: 14px; }
+  .drawer-headline p { margin: 0; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .status-pill {
+    margin-left: auto; font-size: 11px; color: var(--green); background: var(--green-soft);
+    border: 1px solid #cbead6; border-radius: 999px; padding: 1px 9px;
+  }
+  .kv-grid {
+    display: grid; grid-template-columns: 76px 1fr; gap: 7px 10px;
+    padding: 11px 12px; background: var(--panel-soft);
+    border: 1px solid var(--border); border-radius: 9px;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .kv-grid .k { color: var(--text-3); }
+  .kv-grid .v { color: var(--text); }
+  .drawer-sec { margin: 16px 0 7px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+  .drawer-timeline { display: flex; gap: 2px; height: 18px; }
+  .drawer-timeline i { flex: 1 1 0; border-radius: 2px; background: #e3eaf4; }
+  .drawer-timeline i.on { background: #9dc0f4; }
+  .drawer-axes { display: flex; justify-content: space-between; margin-top: 4px; color: var(--text-3); font-size: 11px; }
+  .drawer-acts { display: flex; gap: 8px; margin-top: 16px; }
+  .dbtn {
+    appearance: none; font: inherit; font-size: 12px; cursor: pointer; flex: 1 1 auto;
+    padding: 6px 10px; border-radius: 7px;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text-2);
+  }
+  .dbtn:hover { color: var(--brand); border-color: var(--brand); }
+  .dbtn.primary { color: #fff; background: var(--brand); border-color: var(--brand); flex: 0 0 auto; }
+  .dbtn.primary:hover { background: #1d4ed8; }
+  .no-play {
+    margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+    background: var(--red-soft); border: 1px solid #f0c9c9; color: var(--red); font-size: 11.5px;
+  }
+
+  /* ── 注记与图例 ─────────────────────────────── */
+  .note {
+    max-width: 1260px; margin: 16px auto 0; padding: 14px 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); color: var(--text-2); font-size: 12px;
+  }
+  .note h2 { margin: 0 0 8px; font-size: 13px; color: var(--text); }
+  .note table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .note th, .note td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #eef2f8; vertical-align: top; }
+  .note th { color: var(--text-3); font-weight: 500; }
+  .note code { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .note .warn { color: var(--amber); }
+  .note .ok { color: var(--green); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+  .note li { margin: 3px 0; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(8px);
+    background: #1f2b3d; color: #fff; font-size: 12px; padding: 7px 14px; border-radius: 8px;
+    opacity: 0; transition: .18s; pointer-events: none; z-index: 40;
+  }
+  .toast.on { opacity: 1; transform: translateX(-50%); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="grow">
+    <h1>设备地图 · 点位卡片（交互原型）</h1>
+    <p class="sub">设备管理 › 地图视图。点地图上的点位之后发生什么 —— 左：地图（点位卡就地出现）　切到「现状」看改动前的样子。</p>
+  </div>
+  <div class="seg" role="group" aria-label="形态切换">
+    <button id="segOld" aria-pressed="false" type="button">现状</button>
+    <button id="segNew" aria-pressed="true" type="button">新设计</button>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="canvas-col">
+    <div class="mapwrap">
+      <div class="maptoolbar">
+        <span>缩放 16</span>
+        <span class="slider"><i></i><b></b></span>
+        <button class="btn-ghost" type="button" onclick="toast('已定位到点位')">定位点位</button>
+        <button class="btn-ghost" type="button" onclick="toast('地图已刷新')">刷新地图</button>
+      </div>
+      <div class="map" id="map">
+        <!-- 底图示意（浅色） -->
+        <svg class="basemap" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <rect width="900" height="520" fill="#eef3f9"/>
+          <path d="M0 372 L180 356 L360 366 L560 344 L740 352 L900 338 L900 520 L0 520 Z" fill="#e3edf7"/>
+          <rect x="60" y="58" width="196" height="112" rx="6" fill="#e6eef7"/>
+          <rect x="286" y="44" width="168" height="126" rx="6" fill="#e9f0f8"/>
+          <rect x="486" y="66" width="214" height="104" rx="6" fill="#e6eef7"/>
+          <rect x="734" y="52" width="140" height="118" rx="6" fill="#e9f0f8"/>
+          <rect x="92" y="206" width="150" height="96" rx="6" fill="#e9f0f8"/>
+          <rect x="276" y="198" width="186" height="104" rx="6" fill="#e6eef7"/>
+          <rect x="498" y="214" width="180" height="88" rx="6" fill="#e9f0f8"/>
+          <rect x="712" y="200" width="162" height="102" rx="6" fill="#e6eef7"/>
+          <g stroke="#d3e0ee" stroke-width="13" fill="none" stroke-linecap="round">
+            <path d="M0 190 L900 172"/>
+            <path d="M0 330 L900 316"/>
+            <path d="M262 0 L270 520"/>
+            <path d="M700 0 L712 520"/>
+          </g>
+          <g stroke="#ffffff" stroke-width="2" fill="none" stroke-dasharray="10 12">
+            <path d="M0 190 L900 172"/>
+            <path d="M0 330 L900 316"/>
+          </g>
+          <g stroke="#cbdcec" stroke-width="3.5" fill="none" stroke-linecap="round">
+            <path d="M120 372 L196 430 L286 452"/>
+            <path d="M470 230 L548 268 L604 322"/>
+            <path d="M760 128 L806 176 L838 246"/>
+          </g>
+          <!-- ⛔ 这个注记刻意放左下角：卡片锚在点位上方，若放在左上/右上会被卡片压住。
+               真实界面里这个位置是 maplibre 的 attribution（底图服务条款要求可见），
+               压住它是**合规问题**不只是观感问题 —— 见设计文档 §6.1。 -->
+          <text x="24" y="470" fill="#9db0c6" font-size="12" font-family="system-ui, sans-serif">开源地图底图（示意）</text>
+        </svg>
+
+        <!-- 轨迹折线（新设计，JS 注入） -->
+        <svg class="traj" id="traj" viewBox="0 0 900 520" aria-hidden="true"></svg>
+
+        <!-- 点位标记点：位置由 JS 按采样点算（它就是轨迹的终点 = 现在的位置） -->
+        <button class="pin selected" id="pin1" type="button" title="前端球机 · 34020000001320000001"></button>
+        <span class="pin-label" id="pin1lb">前端球机 · 在线</span>
+
+        <!-- 比例尺（轨迹等比例画，必须给尺度参照） -->
+        <div class="scalebar" id="scalebar"><span class="bar" id="scalebarBar"></span><span id="scalebarText">50 m</span></div>
+
+        <!-- 起点标签（轨迹打开后显示；终点不另标 —— 点位本身就是"现在的位置"） -->
+        <span class="pin-label" id="tStart" style="display:none">起点 06:46</span>
+
+        <!-- ░░ 新设计：点位卡片 ░░ -->
+        <div class="card open" id="card" style="left:24px;top:18px;">
+          <div class="card-hd">
+            <span class="dot"></span>
+            <div>
+              <div class="nm">前端球机</div>
+              <div class="cid">34020000001320000001 · 通道 3539 · 设备 5147</div>
+            </div>
+            <button class="x" id="cardClose" type="button" title="关闭">✕</button>
+          </div>
+
+          <div class="card-facts">
+            <div class="fact">
+              <span class="k">位置</span>
+              <span class="v" id="factPos">36.662311, 116.995036</span>
+              <button class="copy" id="btnCopy" type="button">复制</button>
+            </div>
+            <div class="fact">
+              <span class="k">来源</span>
+              <span class="src">◉ 移动位置上报</span>
+              <span class="via">1 分钟前</span>
+            </div>
+          </div>
+
+          <div class="card-acts">
+            <button class="act primary" id="btnPlay" type="button">▶ 播放</button>
+            <button class="act" id="btnTraj" type="button">⟲ 轨迹</button>
+            <button class="act" id="btnSnap" type="button">◎ 抓拍</button>
+            <button class="act manage" id="btnEdit" type="button">✎ 编辑</button>
+            <button class="act manage" id="btnPtz" type="button">云台</button>
+            <button class="act manage" id="btnMore" type="button">⋯ 更多</button>
+          </div>
+
+          <!-- 轨迹段（点「轨迹」后就地展开） -->
+          <div class="card-traj" id="trajPanel">
+            <div class="traj-hd">
+              <span class="t">⟲ 移动轨迹</span>
+              <div class="ranges" role="group" aria-label="时间范围">
+                <button data-range="today" type="button">今天</button>
+                <button data-range="24h" aria-pressed="true" type="button">24 小时</button>
+                <button data-range="all" type="button">保留期内</button>
+              </div>
+            </div>
+            <div class="traj-stat" id="trajStat"></div>
+
+            <div class="scrub">
+              <div class="scrub-row">
+                <button class="play" id="btnStepBack" type="button" title="上一点">◀</button>
+                <button class="play" id="btnReplay" type="button" title="回放">▶</button>
+                <button class="play" id="btnStepFwd" type="button" title="下一点">▶</button>
+                <span class="track" id="track"><span class="fill" id="trackFill"></span><span class="knob" id="knob" style="left:0"></span></span>
+                <span class="clock" id="clock">16:41:08</span>
+                <select class="rate" id="rate" aria-label="回放倍速">
+                  <option value="600">1×</option>
+                  <option value="150" selected>4×</option>
+                  <option value="40">16×</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="traj-list" id="trajList"></div>
+          </div>
+        </div>
+
+        <!-- ░░ 新设计：播放小窗 ░░ -->
+        <div class="mini" id="mini">
+          <div class="mini-hd" id="miniHd">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>
+              <path d="M8.5 8.5l-2-2M15.5 8.5l2-2M8.5 15.5l-2 2M15.5 15.5l2 2"/>
+            </svg>
+            <span class="nm">前端球机</span>
+            <span class="acts">
+              <button id="miniRestore" type="button" title="展开控制台">⤢</button>
+              <button id="miniClose" type="button" title="关闭">✕</button>
+            </span>
+          </div>
+          <div class="mini-video">
+            <div class="bar"></div>
+            <div class="ov">实时画面（示意）</div>
+            <div class="stamp" id="miniStamp">2026-09-21 16:44:07</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ 现状：通道详情抽屉（如实复刻生产界面） ░░ -->
+  <aside class="drawer" id="drawer">
+    <div class="drawer-hd">
+      <span class="t">通道详情</span>
+      <button class="x" id="drawerClose" type="button">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-headline">
+        <span class="ico">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/>
+          </svg>
+        </span>
+        <div>
+          <h3>前端球机</h3>
+          <p>34020000001320000001</p>
+        </div>
+        <span class="status-pill">在线</span>
+      </div>
+      <div class="kv-grid">
+        <span class="k">所属设备</span><span class="v">5147</span>
+        <span class="k">厂商型号</span><span class="v">海康威视 DS-2DC4420IW</span>
+        <span class="k">摄像头类型</span><span class="v">球机</span>
+        <span class="k">父级通道</span><span class="v">无</span>
+        <span class="k">坐标</span><span class="v">36.662311, 116.995036</span>
+        <span class="k">当前流</span><span class="v">未播放</span>
+      </div>
+      <div class="drawer-sec">录像可用性（近 24 小时 · 30 分钟一格）</div>
+      <div class="drawer-timeline">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i class="on"></i><i class="on"></i><i></i><i></i><i class="on"></i><i class="on"></i>
+      </div>
+      <div class="drawer-axes"><span>00:00</span><span>12:00</span><span>24:00</span></div>
+      <div class="drawer-acts">
+        <button class="dbtn primary" type="button" onclick="toast('打开通道编辑弹窗')">编辑</button>
+        <button class="dbtn" type="button" onclick="toast('已复制通道编号')">复制编号</button>
+      </div>
+      <div class="no-play">
+        ⛔ 抽屉里<b>没有播放</b>，也没有轨迹查询 —— 想播这一路得先关掉抽屉、切回列表视图、找到那一行。
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="note" id="note">
+  <h2 id="noteTitle">新设计：三条规则</h2>
+  <div id="noteNew">
+    <table>
+      <tr><th style="width:96px">规则</th><th>怎么落</th></tr>
+      <tr>
+        <td>① 点 = 就地</td>
+        <td>点一下，卡片<b>锚在这个点上</b>。地图不被盖住 —— 用户点它是为了"边看地图边判断"。</td>
+      </tr>
+      <tr>
+        <td>② 动作分两组</td>
+        <td><b>看</b>（播放 / 轨迹 / 抓拍）留在地图；<b>管</b>（云台 / 编辑 / 更多）<b>直达目标</b>，
+            不再经过一个"装所有东西"的抽屉。判据 = 这个动作的结果<b>还需不需要看地图</b>。</td>
+      </tr>
+      <tr>
+        <td>③ 播放不抢地图</td>
+        <td>播放走控制台<b>已有的小窗形态</b>（<code>playback-console.ts</code> 的 <code>minimized</code>），
+            不用全屏 modal。小窗可拖、可展开。</td>
+      </tr>
+      <tr>
+        <td>④ 抽屉已退役<br><span style="color:var(--text-3)">(2026-09-21 拍板)</span></td>
+        <td>地图这条路径<b>不再进抽屉</b>（切的是 <code>index.vue:994</code> <b>一行</b>，组件不删 ——
+            列表视图的「详情」还在用）。<b>代价</b>：地图上查不了通道档案，兜底走「更多 → 在列表中打开」。
+            ⛔ 不把档案塞进卡片 —— 卡片上限约 300px，展开轨迹已 455px。</td>
+      </tr>
+      <tr>
+        <td>⑤ 位置历史未开启时</td>
+        <td>「轨迹」<b>既不隐藏也不置灰</b>，点了给明确说明：
+            <code>平台未开启位置历史记录（SIP 服务配置 → 位置历史）</code>。
+            ⛔ 隐藏/置灰会让用户以为<b>是本通道坏了</b>。</td>
+      </tr>
+    </table>
+    <p style="margin:10px 0 0">
+      <span class="warn">⚠️ 轨迹相关的三条诚实边界</span>（全部来自 220 开发库 145 条真实采样的实测）：
+    </p>
+    <ul>
+      <li><b>不做速度着色 / 方向箭头 / 高度剖面</b> —— 设备上报的 <code>speed</code>、<code>direction</code>、
+          <code>altitude</code> <b>145/145 全是 0</b>。做了就是伪数据。均速改由平台按"位移 ÷ 间隔"估算，
+          并且文案必须带<b>「估算」</b>。</li>
+      <li><b>不做等距时间轴、不做按真实时长的回放动画</b> —— 采样间隔实测 <b>0 秒 ~ 18.3 小时</b>（均值 22 分）。
+          按真实时间回放会在空档里卡住不动。改用<b>按采样序数等步长</b>，时间轴标真实时刻。</li>
+      <li><b>断档要看得见</b> —— 超过 30 分钟的相邻点标<span class="warn">琥珀</span>、"这段时间数据不在"
+          本身是运维要看见的事实（折线在断档处不连）。</li>
+    </ul>
+    <p style="margin:10px 0 0">
+      <span class="ok">✅ 坐标确实在动</span>：实测经度跨度 55.94 m、纬度跨度 113.44 m（≈126 m 对角线），
+      所以轨迹线画得出来。但<b>形态是"两个位置之间来回抖动 + 少量远点"</b>，与 GNSS 静止漂移一致 ——
+      原型里的折线如实画的就是这个形态，不是一条漂亮的巡逻动线。
+    </p>
+  </div>
+  <div id="noteOld" style="display:none">
+    <table>
+      <tr><th style="width:96px">问题</th><th>证据</th></tr>
+      <tr><td>动作密度反了</td><td>列表行给 6 个动作（播放/录像/停止/详情/编辑/删除，<code>index.vue:2600-2645</code>），
+          地图点位只给 1 个（<code>index.vue:998</code> → <code>openChannel</code>）。</td></tr>
+      <tr><td>点一下 = 打开档案</td><td>打开的是通道详情抽屉，里面只有「编辑」「复制编号」，
+          <b>没有播放</b>（<code>index.vue:3267/3270</code>）。</td></tr>
+      <tr><td>地图被盖住</td><td>抽屉固定 640px（<code>index.vue:3186</code>），地图右侧被压掉 640px；
+          而地图正是用户此刻用来判断的东西。此处原型按比例缩示为 344px。</td></tr>
+      <tr><td>地图上没有播放</td><td>播放入口只有列表行（<code>index.vue:2607</code>）和卡片视图（<code>index.vue:3102</code>），
+          地图工具条只有缩放/定位/刷新（<code>index.vue:3165</code>）。</td></tr>
+      <tr><td>轨迹点了会 404</td><td><code>gb_mobile_position_history</code> 在写（<code>subscribe/position.go:146</code>），
+          但<b>没有任何查询接口</b> —— 全仓只有服务配置的开关（<code>routes.go:705-706</code>）。</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ── 真实采样（取自 220 开发库 gb_mobile_position_history，通道 3539）────────────
+  // 坐标与时刻全部是实测值；gap 为相邻两点实际间隔。
+  // ⚠️ 为可读性只取 10 条（真实为 145 条）。形态刻意保留：多数点在 1 m 内抖动，
+  //    少量点远离，且存在跨夜断档 —— 这是实测分布，不是画出来的漂亮动线。
+  // ⛔ 间隔必须是**结构化数值**（gapMin），不能拿显示文案去 parseInt ——
+  //    文案里"37 秒"和"9 分"的数字都小，parse 出来却不可比，会把 37 秒判成断档。
+  //    （这条是原型自测时真踩到的：断档行数一度是 3 而不是 2。）
+  var SAMPLES = [
+    { t: "16:41:08", lat: 36.662337, lng: 116.995028, gapMin: 2,     gapText: "2 分" },
+    { t: "16:39:07", lat: 36.662351, lng: 116.995127, gapMin: 1,     gapText: "1 分" },
+    { t: "16:38:24", lat: 36.662318, lng: 116.995138, gapMin: 9,     gapText: "9 分" },
+    { t: "16:29:01", lat: 36.662351, lng: 116.995127, gapMin: 0.6,   gapText: "37 秒" },
+    { t: "16:28:24", lat: 36.662318, lng: 116.995138, gapMin: 1,     gapText: "1 分" },
+    { t: "16:27:00", lat: 36.662351, lng: 116.995127, gapMin: 1,     gapText: "1 分" },
+    { t: "16:25:44", lat: 36.662318, lng: 116.995138, gapMin: 9,     gapText: "9 分" },
+    { t: "16:16:53", lat: 36.662351, lng: 116.995127, gapMin: 368,   gapText: "6 时 8 分" },
+    { t: "10:08:41", lat: 36.661523, lng: 116.994741, gapMin: 202,   gapText: "3 时 22 分" },
+    { t: "06:46:02", lat: 36.662545, lng: 116.995245, gapMin: null,  gapText: "—" }
+  ];
+  var GAP_WARN_MIN = 30;   // 超过 30 分钟视为断档
+  function isGapAt(i) { return SAMPLES[i].gapMin !== null && SAMPLES[i].gapMin > GAP_WARN_MIN; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var mode = "new";
+  var trajOn = false;
+  var cur = 0;
+  var timer = null;
+
+  // ── 经纬度 → 地图像素 ───────────────────────────────────────────────
+  // ⭐ 等比例：实测南北跨度 113.44 m、东西 55.94 m（修正 cos 纬度）⇒ 真实形状是**竖长条**。
+  //    横向拉伸能画出一条"好看的动线"，但那会让人以为设备横向移动了上百米 = 伪造数据。
+  var LNG_MIN = 116.994741, LNG_MAX = 116.995245;
+  var LAT_MIN = 36.661523, LAT_MAX = 36.662545;
+  var SPAN_M_LAT = 113.44;
+  var BOX = { x: 380, y: 150, w: 76, h: 192 };   // 初始值，layout() 会按容器尺寸重算
+  function toXY(lng, lat) {
+    var x = BOX.x + (lng - LNG_MIN) / (LNG_MAX - LNG_MIN) * BOX.w;
+    var y = BOX.y + (LAT_MAX - lat) / (LAT_MAX - LAT_MIN) * BOX.h;
+    return { x: x, y: y };
+  }
+
+  // 容器尺寸决定一切。
+  // ⛔ 别给轨迹 SVG 用 `preserveAspectRatio="slice"` —— 那样折线在 viewBox 坐标系里、
+  //    点位在 CSS 像素坐标系里，两套坐标对不上，线会画偏（底图是抽象示意，用 slice 无所谓）。
+  // 做法：把 viewBox 设成容器实际像素，1:1 对应。
+  function layout() {
+    var map = $("map"), W = map.clientWidth, H = map.clientHeight;
+    $("traj").setAttribute("viewBox", "0 0 " + W + " " + H);
+    var h = Math.round(H * 0.31);
+    var w = Math.round(h * (0.000504 * Math.cos(36.66 * Math.PI / 180)) / 0.001022);
+    BOX = { x: Math.round(W * 0.36), y: Math.round(H * 0.24), w: w, h: h };
+
+    // 点位 = 轨迹终点（现在的位置）
+    var p = toXY(SAMPLES[0].lng, SAMPLES[0].lat);
+    $("pin1").style.left = (p.x - 11) + "px";
+    $("pin1").style.top = (p.y - 22) + "px";
+    $("pin1lb").style.left = (p.x + 12) + "px";
+    $("pin1lb").style.top = (p.y - 28) + "px";
+
+    // 卡片小尖角指向点位方向（clamp 进卡片宽度内）
+    var card = $("card");
+    var cardLeft = parseFloat(card.style.left) || 0;
+    var arrowX = Math.min(Math.max(p.x - cardLeft, 26), 320 - 26);
+    card.style.setProperty("--arrow-x", arrowX + "px");
+
+    // 比例尺（等比例画的，必须给尺度参照）
+    var pxPerM = h / SPAN_M_LAT;
+    $("scalebarBar").style.width = Math.round(pxPerM * 50) + "px";
+    $("scalebar").style.left = BOX.x + "px";
+    $("scalebar").style.top = (BOX.y + BOX.h + 12) + "px";
+  }
+
+  function toast(msg) {
+    var el = $("toast");
+    el.textContent = msg;
+    el.classList.add("on");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.classList.remove("on"); }, 1700);
+  }
+
+  // ── 形态切换 ────────────────────────────────────────────────────────
+  function setMode(next) {
+    mode = next;
+    $("segOld").setAttribute("aria-pressed", String(next === "old"));
+    $("segNew").setAttribute("aria-pressed", String(next === "new"));
+    var isOld = next === "old";
+
+    // 现状：抽屉打开（点过点位之后）；新设计：抽屉关，卡片在
+    $("drawer").classList.toggle("open", isOld);
+    $("card").classList.toggle("open", !isOld && cardOpen);
+    $("mini").classList.toggle("open", !isOld && miniOpen);
+    $("noteNew").style.display = isOld ? "none" : "block";
+    $("noteOld").style.display = isOld ? "block" : "none";
+    $("noteTitle").textContent = isOld ? "现状：点一下会发生什么" : "新设计：三条规则";
+    if (isOld) { trajOff(); }
+  }
+
+  var cardOpen = true;
+  var miniOpen = false;
+
+  // ── 卡片开关 ────────────────────────────────────────────────────────
+  function openCard() {
+    cardOpen = true;
+    if (mode === "new") $("card").classList.add("open");
+    $("pin1").classList.add("selected");
+  }
+  function closeCard() {
+    cardOpen = false;
+    trajOff();
+    $("card").classList.remove("open");
+    $("pin1").classList.remove("selected");
+  }
+
+  // ── 轨迹 ────────────────────────────────────────────────────────────
+  function trajOff() {
+    trajOn = false;
+    stopReplay();
+    $("trajPanel").classList.remove("open");
+    $("traj").innerHTML = "";
+    $("tStart").style.display = "none";
+    $("scalebar").style.display = "none";
+  }
+
+  function trajOn2() {
+    trajOn = true;
+    $("trajPanel").classList.add("open");
+    layout();
+    applyRangeStat("24h");
+    renderList();
+    drawTraj();
+    seek(0);
+    $("scalebar").style.display = "flex";
+  }
+
+  // 统计行的三条口径：① 跨度 = 包围盒对角线，**不是里程**（断档处会严重低估）
+  //                ② 均速必须带「估算」（设备上报的 speed 恒 0，这是平台算的）
+  function applyRangeStat(range) {
+    if (range === "today") {
+      $("trajStat").innerHTML = "42 个采样点 · 跨度 4 m<br>平均间隔 22 分 · " +
+        '<span class="est">⚠️ 均速 0.01 km/h（平台估算）</span>';
+    } else if (range === "all") {
+      $("trajStat").innerHTML = "145 个采样点 · 跨度 126 m<br>平均间隔 22 分 · " +
+        '<span class="est">⚠️ 保留期上限 7 天（读平台配置）</span>';
+    } else {
+      $("trajStat").innerHTML = "145 个采样点 · 跨度 126 m<br>平均间隔 22 分 · " +
+        '<span class="est">⚠️ 均速 0.3 km/h（平台估算）</span>';
+    }
+  }
+
+  function renderList() {
+    var html = "";
+    for (var i = 0; i < SAMPLES.length; i++) {
+      var s = SAMPLES[i];
+      var isGap = isGapAt(i);
+      html += '<div class="row' + (isGap ? " gap" : "") + '" data-i="' + i + '">' +
+                '<span class="t">' + s.t + "</span>" +
+                '<span class="c">' + s.lat.toFixed(6) + ", " + s.lng.toFixed(6) + "</span>" +
+                '<span class="g">' + (s.gapMin === null ? "—" : "间隔 " + s.gapText) + "</span>" +
+              "</div>";
+    }
+    $("trajList").innerHTML = html;
+    Array.prototype.forEach.call($("trajList").querySelectorAll(".row"), function (row) {
+      row.addEventListener("click", function () { seek(Number(row.getAttribute("data-i"))); });
+    });
+  }
+
+  function drawTraj() {
+    var svg = $("traj");
+    var parts = [];
+    for (var i = SAMPLES.length - 1; i > 0; i--) {
+      var a = SAMPLES[i], b = SAMPLES[i - 1];
+      var pa = toXY(a.lng, a.lat), pb = toXY(b.lng, b.lat);
+      // ⚠️ 断档段**不连**：拆成独立线段，让"数据不在"看得见
+      var isGap = isGapAt(i);
+      parts.push(
+        '<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '"' +
+        ' stroke="' + (isGap ? "#e0a03a" : "#2563eb") + '"' +
+        ' stroke-width="' + (isGap ? 1.6 : 2.2) + '"' +
+        ' stroke-linecap="round"' +
+        (isGap ? ' stroke-dasharray="5 5" opacity=".85"' : ' opacity=".9"') + "/>"
+      );
+    }
+    for (var j = 0; j < SAMPLES.length; j++) {
+      var q = toXY(SAMPLES[j].lng, SAMPLES[j].lat);
+      parts.push('<circle cx="' + q.x + '" cy="' + q.y + '" r="3.4" fill="#fff" stroke="#2563eb" stroke-width="1.8"/>');
+    }
+    var s0 = toXY(SAMPLES[SAMPLES.length - 1].lng, SAMPLES[SAMPLES.length - 1].lat);
+    var pNow = toXY(SAMPLES[0].lng, SAMPLES[0].lat);
+    parts.push('<circle id="curDot" cx="' + pNow.x + '" cy="' + pNow.y + '" r="6" fill="#2563eb" stroke="#fff" stroke-width="2.5"/>');
+    svg.innerHTML = parts.join("");
+
+    // 起点标签放起点**上方**（终点不另标标签 —— 点位本身就是"现在的位置"，
+    // 时刻由回放条的 clock 承担；三个标签挤在一起谁也读不清）。
+    $("tStart").style.display = "block";
+    $("tStart").style.left = s0.x + "px";
+    $("tStart").style.top = (s0.y - 7) + "px";
+    $("tStart").textContent = "起点 06:46";
+  }
+
+  // 回放：**按采样序数等步长**（⛔ 不按真实时长 —— 断档 18 小时会卡住）
+  function seek(i) {
+    cur = Math.max(0, Math.min(SAMPLES.length - 1, i));
+    var s = SAMPLES[cur];
+    var n = SAMPLES.length - 1;
+    var pct = n === 0 ? 100 : (cur / n) * 100;
+    $("trackFill").style.width = pct + "%";
+    $("knob").style.left = pct + "%";
+    $("clock").textContent = s.t;
+    var dot = document.getElementById("curDot");
+    if (dot) {
+      var q = toXY(s.lng, s.lat);
+      dot.setAttribute("cx", q.x);
+      dot.setAttribute("cy", q.y);
+    }
+    Array.prototype.forEach.call($("trajList").querySelectorAll(".row"), function (row) {
+      row.classList.toggle("cur", Number(row.getAttribute("data-i")) === cur);
+    });
+    var curRow = $("trajList").querySelector(".row.cur");
+    if (curRow) {
+      var box = $("trajList");
+      if (curRow.offsetTop < box.scrollTop || curRow.offsetTop > box.scrollTop + box.clientHeight - 20) {
+        box.scrollTop = curRow.offsetTop - box.clientHeight / 2;
+      }
+    }
+  }
+
+  function stopReplay() {
+    if (timer) { clearInterval(timer); timer = null; }
+    $("btnReplay").textContent = "▶";
+  }
+  function toggleReplay() {
+    if (timer) { stopReplay(); return; }
+    $("btnReplay").textContent = "❚❚";
+    var step = Number($("rate").value);
+    timer = setInterval(function () {
+      if (cur >= SAMPLES.length - 1) { stopReplay(); return; }
+      seek(cur + 1);
+    }, step);
+  }
+
+  // ── 播放小窗（复用控制台 minimized 形态；可拖）───────────────────────
+  function openMini() {
+    miniOpen = true;
+    $("mini").classList.add("open");
+    // 小窗与卡片避让：卡片在中上部，小窗默认右下角（CSS 已定），此处只提示
+    toast("已点播（小窗形态，地图未被遮挡）");
+  }
+  function closeMini() { miniOpen = false; $("mini").classList.remove("open"); }
+
+  (function dragMini() {
+    var hd = $("miniHd"), mini = $("mini");
+    var dragging = false, dx = 0, dy = 0;
+    hd.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      var r = mini.getBoundingClientRect();
+      dx = e.clientX - r.left; dy = e.clientY - r.top;
+      // ⛔ 合成 pointerId 会让 setPointerCapture 抛 NotFoundError ⇒ handler 当场中断（假过）
+      try { hd.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+    });
+    hd.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var host = $("map").getBoundingClientRect();
+      var left = Math.min(Math.max(e.clientX - dx - host.left, 0), host.width - mini.offsetWidth);
+      var top = Math.min(Math.max(e.clientY - dy - host.top, 0), host.height - mini.offsetHeight);
+      mini.style.left = left + "px";
+      mini.style.top = top + "px";
+      mini.style.right = "auto";
+      mini.style.bottom = "auto";
+    });
+    function up(e) {
+      if (!dragging) return;
+      dragging = false;
+      try { hd.releasePointerCapture(e.pointerId); } catch (err) { /* noop */ }
+    }
+    hd.addEventListener("pointerup", up);
+    hd.addEventListener("pointercancel", up);
+  })();
+
+  // ── 事件接线 ────────────────────────────────────────────────────────
+  $("segOld").addEventListener("click", function () { setMode("old"); });
+  $("segNew").addEventListener("click", function () { setMode("new"); });
+
+  $("pin1").addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (mode === "old") { $("drawer").classList.add("open"); toast("现状：点一下 → 打开 640px 通道详情抽屉"); return; }
+    openCard();
+    toast("点位卡片已定位到这一点");
+  });
+
+  $("cardClose").addEventListener("click", function (e) { e.stopPropagation(); closeCard(); });
+  $("drawerClose").addEventListener("click", function () { $("drawer").classList.remove("open"); });
+
+  $("btnPlay").addEventListener("click", function () { openMini(); });
+  $("btnTraj").addEventListener("click", function () {
+    if (trajOn) { trajOff(); toast("已收起轨迹"); return; }
+    trajOn2();
+    toast("轨迹已画在地图上 · 断档处为琥珀虚线");
+  });
+  $("btnSnap").addEventListener("click", function () { toast("抓拍已下发（结果落回本卡片）"); });
+  // ⛔ Q1 定稿「抽屉完全退役」⇒ 卡片上没有「详情」了，改成「编辑」直达页内弹窗。
+  //    抽屉只剩「现状」侧作对照组 —— 地图这条路径不再进入它（设计文档 §6.8）。
+  $("btnEdit").addEventListener("click", function () { toast("编辑 → 页内弹窗（不再经抽屉）"); });
+  // 云台直达控制台的「云台控制」页：要看清画面结果 ⇒ 允许全屏（与播放的小窗相反，§6.3）
+  $("btnPtz").addEventListener("click", function () { toast("云台 → 直达播放控制台「云台控制」页（要看清画面，允许全屏）"); });
+  $("btnMore").addEventListener("click", function () { toast("更多：录像查询 / 复制编号 / 删除 / 在列表中打开"); });
+  $("btnCopy").addEventListener("click", function () {
+    // 复制顺序 = 经度在前（与地图粘贴习惯一致）；显示顺序 = 纬度在前（与列表一致）
+    toast("已复制 116.995036,36.662311（经度在前）");
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll(".ranges button"), function (b) {
+    b.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll(".ranges button"), function (o) {
+        o.setAttribute("aria-pressed", "false");
+      });
+      b.setAttribute("aria-pressed", "true");
+      applyRangeStat(b.getAttribute("data-range"));
+    });
+  });
+
+  $("btnReplay").addEventListener("click", toggleReplay);
+  $("btnStepBack").addEventListener("click", function () { stopReplay(); seek(cur - 1); });
+  $("btnStepFwd").addEventListener("click", function () { stopReplay(); seek(cur + 1); });
+  $("knob").addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var track = $("track");
+    function move(ev) {
+      var r = track.getBoundingClientRect();
+      var pct = Math.min(Math.max((ev.clientX - r.left) / r.width, 0), 1);
+      stopReplay();
+      seek(Math.round(pct * (SAMPLES.length - 1)));
+    }
+    function up() {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+
+  $("miniClose").addEventListener("click", closeMini);
+  $("miniRestore").addEventListener("click", function () {
+    // ⛔ 生产界面里 open() 会把 displayMode 重置成 expanded ⇒ 地图立刻被盖住。
+    //    小窗的「展开」才是显式动作。
+    toast("展开为控制台（地图让位，这是用户的显式动作）");
+  });
+
+  // 点地图空白关卡片；Esc 吃掉这一下（本页抽屉/控制台都在 documentElement 上挂了 Esc）
+  $("map").addEventListener("click", function (e) {
+    if (mode !== "new") return;
+    if (e.target.closest(".card") || e.target.closest(".mini") || e.target.closest(".pin")) return;
+    if (cardOpen) { closeCard(); toast("点空白处 → 卡片收起"); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (cardOpen && trajOn) { trajOff(); e.stopPropagation(); return; }
+    if (cardOpen) { closeCard(); e.stopPropagation(); }
+  }, true);
+
+  // 小窗时间戳走动（真实时刻）
+  setInterval(function () {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    $("miniStamp").textContent = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }, 1000);
+
+  // 初始：新设计 + 卡片已开（对应"用户刚点了那个点"）
+  layout();
+  window.addEventListener("resize", function () {
+    layout();
+    if (trajOn) drawTraj();
+  });
+  setMode("new");
+})();
+</script>
+</body>
+</html>
