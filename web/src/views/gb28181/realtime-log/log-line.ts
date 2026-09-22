@@ -1,5 +1,5 @@
 /**
- * 实时日志控制台的「一行日志」呈现规则。
+ * 运行日志（菜单 /system/realtime-log）的「一行日志」呈现规则。
  *
  * 与后端 console 编码器（server/app/utils/logging/console_encoder.go）保持同样的取舍：
  * 标识类字段稳定排在前面，人眼扫读时位置固定；进程常量不显示；机器字段沉到最后并降低对比度。
@@ -31,31 +31,54 @@ export interface LogLineInput {
  * 两边的相对顺序必须一致，否则「页面看到的」和「文件里 grep 到的」会排版漂移。
  */
 export const FIELD_ORDER = [
-  "device_id", "deviceId",
-  "channel_id", "channelId",
+  "device_id",
+  "deviceId",
+  "channel_id",
+  "channelId",
   "platform_id",
-  "node_id", "nodeId",
-  "stream_id", "streamId",
-  "call_id", "callId",
-  "request_id", "requestId",
-  "client_request_id", "clientRequestId",
-  "execution_id", "executionId",
-  "operation_id", "operationId",
-  "correlation_id", "correlationId",
+  "node_id",
+  "nodeId",
+  "stream_id",
+  "streamId",
+  "call_id",
+  "callId",
+  "request_id",
+  "requestId",
+  "client_request_id",
+  "clientRequestId",
+  "execution_id",
+  "executionId",
+  "operation_id",
+  "operationId",
+  "correlation_id",
+  "correlationId",
   "sn",
   "event",
   "stage",
   "outcome",
-  "reason_code", "reasonCode",
-  "error", "error_class", "errorCode",
-  "duration_ms", "durationMs",
+  "reason_code",
+  "reasonCode",
+  "error",
+  "error_class",
+  "errorCode",
+  "duration_ms",
+  "durationMs",
   "transport"
 ];
 
 /** 机器字段：只影响「是否渲染得更淡」，不改变顺序。 */
 export const MACHINE_FIELDS = new Set([
-  "event", "stage", "outcome", "reason_code", "reasonCode", "error_class", "errorCode",
-  "transport", "cseq", "complete", "is_first"
+  "event",
+  "stage",
+  "outcome",
+  "reason_code",
+  "reasonCode",
+  "error_class",
+  "errorCode",
+  "transport",
+  "cseq",
+  "complete",
+  "is_first"
 ]);
 
 /** 进程常量：整条日志流里每行都一样，显示出来只是噪声。 */

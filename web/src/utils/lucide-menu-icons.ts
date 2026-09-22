@@ -19,6 +19,7 @@ import {
   GitBranch,
   History,
   House,
+  Images,
   KeyRound,
   LayoutDashboard,
   LayoutGrid,
@@ -35,6 +36,7 @@ import {
   Shield,
   SlidersHorizontal,
   Tags,
+  Terminal,
   UserCog,
   UserRound,
   Users,
@@ -66,6 +68,7 @@ export const lucideMenuIcons: Record<string, Component> = {
   GitBranch,
   History,
   House,
+  Images,
   KeyRound,
   LayoutDashboard,
   LayoutGrid,
@@ -82,6 +85,7 @@ export const lucideMenuIcons: Record<string, Component> = {
   Shield,
   SlidersHorizontal,
   Tags,
+  Terminal,
   UserCog,
   UserRound,
   Users,
@@ -103,5 +107,8 @@ export const getLucideIconName = (value?: string) => {
 export const getLucideIconComponent = (value?: string) => {
   const iconName = getLucideIconName(value);
   if (!iconName) return undefined;
-  return lucideMenuIcons[iconName] || lucideMenuIcons[Object.keys(lucideMenuIcons).find((name) => name.toLowerCase() === iconName.toLowerCase()) || ""];
+  return (
+    lucideMenuIcons[iconName] ||
+    lucideMenuIcons[Object.keys(lucideMenuIcons).find(name => name.toLowerCase() === iconName.toLowerCase()) || ""]
+  );
 };

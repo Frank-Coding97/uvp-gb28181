@@ -32,6 +32,16 @@ describe("lucide menu icons", () => {
     expect(getLucideIconComponent("lucide:UsersRound")).toBeDefined();
   });
 
+  it("resolves the snapshot library icon stored in the database", () => {
+    expect(getLucideIconName("lucide:Images")).toBe("Images");
+    expect(getLucideIconComponent("lucide:Images")).toBeDefined();
+  });
+
+  it("resolves the runtime log menu icon stored in the database", () => {
+    expect(getLucideIconName("lucide:Terminal")).toBe("Terminal");
+    expect(getLucideIconComponent("lucide:Terminal")).toBeDefined();
+  });
+
   it("resolves icon names returned in lowercase by legacy menu data", () => {
     expect(getLucideIconComponent("lucide:servercog")).toBeDefined();
     expect(getLucideIconComponent("lucide:gitbranch")).toBeDefined();

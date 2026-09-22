@@ -75,7 +75,7 @@ export async function openRealtimeLogStream(
     },
     signal
   });
-  if (!response.ok || !response.body) throw new Error(`实时日志连接失败(${response.status})`);
+  if (!response.ok || !response.body) throw new Error(`运行日志连接失败(${response.status})`);
   const reader = response.body.getReader();
   signal.addEventListener("abort", () => reader.cancel().catch(() => undefined), { once: true });
   const decoder = new TextDecoder();
