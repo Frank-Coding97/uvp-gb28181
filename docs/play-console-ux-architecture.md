@@ -147,7 +147,7 @@ sibling: docs/picture-settings-design.md
 | **B8** | 画面类配置处置不一致 | 遮挡 + 镜像在底栏卡，OSD 仍在右栏表单（§7.1 第 7 步 ☐ 未开始） | P1 |
 | **B9** | 状态语言十几套 | 见 2.1-D | P1 |
 | **B10** | 草稿保护只在关窗一处 | `requestClose` L2362–2377 有拦截；切页签 / 切任务无拦截；无 `beforeunload`（全文件 0 命中） | P2 |
-| **B11** | 死入口 / 死分支 | 资源管理抽屉无触发（`void openAssetManager` L3300）；`sideCollapsed` 仅被赋 `false`（L346/L4705） | P2 |
+| **B11** | 死入口 / 死分支 | 已处理：删除无真实入口的资源管理抽屉及其状态，清理 `sideCollapsed` / `stage-wide` 死分支 | 已完成 |
 
 ---
 
@@ -310,7 +310,7 @@ sibling: docs/picture-settings-design.md
 | **7** | 预置位 / 巡航 / 看守位三个弹窗改就地编辑 | B7 | 中高 | 三个组件，各自独立可分批 |
 | **8** | OSD 上画布 + `picture` 组归位属性栏 | B8 B1 | 高 | 复用已有画布基础设施（§7.1 第 7 步） |
 | **9** | 草稿保护扩展到所有销毁路径 | B10 | 低 | 复用 `requestClose` 的 Modal |
-| **10** | 死入口处置（资源抽屉接线或删除；`sideCollapsed` 清理） | B11 | 极低 | 二选一 |
+| **10** | 死入口处置（删除资源抽屉；清理 `sideCollapsed` / `stage-wide`） | B11 | 极低 | 已完成 |
 
 **第 1~3 项可以立刻做，且互不依赖。** 第 8 项是收益最大但成本最高的一项，也是唯一需要重做画布-表单关系的。
 
@@ -504,8 +504,7 @@ Q1 / Q2（工作坞形态、遮挡与镜像归位到 `picture` 组）仍未拍�
 | ≤1080px 堆叠 | 页签第 1 行，画布 / 属性栏 / 底栏 = 2 / 3 / 4 | 画布 / 属性栏（页签在它顶部）/ 底栏 = 1 / 2 / 3 |
 
 ⛔ **列数是唯一真源**：`.console-body` 的 `grid-template-columns` 一变，`.video-frame` /
-`.stage-wide .video-frame` / `.linked-info-bar` / `.sidebar` **四处** `grid-column` 加 ≤1080px 分支
-必须同步（源码里已留指针注释）。
+`.linked-info-bar` / `.sidebar` 的 `grid-column` 与窄屏分支必须同步（源码里已留指针注释）。
 
 ⛔ **别把 `.workbench-nav` / `.workspace-heading` 的样式捡回来** —— 它们是"页签究竟属于哪一列"
 的第二个答案。防回归用例同时钉两条：源码里不存在这两条**规则**（注意断言写成"规则"而不是
@@ -538,3 +537,25 @@ Q1 / Q2（工作坞形态、遮挡与镜像归位到 `picture` 组）仍未拍�
 ⚠️ **本步使 §2.1 表格里「左侧页签轨」一行的描述过时**（那行描述的是 09-20 重构后的形态，
 保留作为该次诊断的历史快照，不必回头改）。
 
+---
+
+### 9.5 第五步：播放弹窗按职责拆分并统一详情坞（2026-09-21）
+
+本步完成播放弹窗的组件化收口，宿主 `PlayConsoleLinked.vue` 保留会话、权限、接口和状态机；视图职责下沉到
+`play-console/` 目录：
+
+- `PlayConsoleTitleBar`：标题、窗口控制和小窗拖动事件桥接。
+- `PlayConsoleProtocolBar`：播放协议切换、地址展示和复制操作。
+- `PlayConsolePtzSidebar`：摇杆、对讲、精准定位、画面级即时动作和目标跟踪入口。
+- `PlayConsoleProbeSidebar`：流概览、实时指标和探针操作。
+- `PlayConsoleDialogs`：探针时间线、看守位、预置位和巡航配置弹窗。
+- `PlayConsoleDetailWorkspace` 及三类详情面板：云台、画面设置、视频探针共享
+  `--play-console-detail-height: 220px`；窄屏只滚动内容，不改变工作区高度。
+
+原本没有真实触发入口的资源管理抽屉已删除，预置位和巡航统一由实际卡片及 popover 承载。宿主当前约 7.2k 行，
+不再保留 `asset-manager`、`sideCollapsed` 或 `stage-wide` 绑定。桌面端右侧栏锁定到「16:9 画面 + 协议条」
+的高度并在内部滚动，底部详情继续横跨主体全宽并紧贴播放器下方，避免右侧操作项把它推到画面下方很远；
+窄屏仍按画面 → 侧栏 → 详情的单列顺序排列。
+
+验证：播放控制台专项测试 198/198，全量测试 249 个文件、1841 条用例通过；目标 ESLint、Stylelint 与
+`git diff --check` 通过。`vue-tsc` 仍只剩 `vite.config.ts` 的仓库既有两项错误；浏览器验收需在登录态和可用桌面环境下由老板完成。

@@ -10,17 +10,33 @@
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch, type CSSProperties } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { copyTextToClipboard } from "@/utils/app";
 import { formatToken, getAccessToken } from "@/utils/auth";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
 import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
+import PlayConsoleTabs from "./play-console/PlayConsoleTabs.vue";
+import PlayConsoleDetailWorkspace from "./play-console/PlayConsoleDetailWorkspace.vue";
+import PlayConsolePtzPanel from "./play-console/PlayConsolePtzPanel.vue";
+import PlayConsolePicturePanel from "./play-console/PlayConsolePicturePanel.vue";
+import PlayConsoleProbePanel from "./play-console/PlayConsoleProbePanel.vue";
+import PlayConsoleProbeSidebar from "./play-console/PlayConsoleProbeSidebar.vue";
+import PlayConsoleProtocolBar from "./play-console/PlayConsoleProtocolBar.vue";
+import PlayConsoleTitleBar from "./play-console/PlayConsoleTitleBar.vue";
+import PlayConsolePtzSidebar from "./play-console/PlayConsolePtzSidebar.vue";
+import PlayConsoleDialogs from "./play-console/PlayConsoleDialogs.vue";
+import PictureVideoCompareCard from "./play-console/PictureVideoCompareCard.vue";
+import PictureOsdCard from "./play-console/PictureOsdCard.vue";
+import PictureMirrorCard from "./play-console/PictureMirrorCard.vue";
+import PictureMaskCard from "./play-console/PictureMaskCard.vue";
+import PtzScanCard from "./play-console/PtzScanCard.vue";
+import PtzHomeCard from "./play-console/PtzHomeCard.vue";
+import PtzPresetCard from "./play-console/PtzPresetCard.vue";
+import PtzCruiseCard from "./play-console/PtzCruiseCard.vue";
 import DeviceConfigDrawer from "../device-mgmt/DeviceConfigDrawer.vue";
-import DeviceConfigOsdBlocks from "../device-mgmt/DeviceConfigOsdBlocks.vue";
 import { MAX_MASK_REGIONS, MIRROR_OPTIONS, type ConfigTextItem } from "../device-mgmt/deviceConfigGroups";
-import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import {
@@ -38,6 +54,7 @@ import {
   createCruiseTrack,
   controlPtzPrecise,
   controlPtzScan,
+  controlPtzWiper,
   callPtzPreset,
   createTalkSession,
   createPtzPreset,
@@ -57,6 +74,7 @@ import {
   listPtzPresets,
   createStreamProbe,
   getStreamProbeOperation,
+  reportPlaybackClientEvent,
   startPlay,
   stopPlay,
   setChannelTargetTrack,
@@ -70,6 +88,7 @@ import {
   type HomePositionResult,
   type HomePositionSupport,
   type PlayResult,
+  type PlaybackClientFact,
   type ProbeSnapshot,
   type PTZOperation,
   type PTZResourceFreshness,
@@ -83,57 +102,23 @@ import {
 } from "@/api/gb28181";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 import { buildTargetTrackArea } from "../targetTrackBox";
+import { PLAY_CONSOLE_CONTEXT } from "./play-console/playConsoleContext";
 import { frameRateText, resolutionText, videoFormatText, type VideoParamCodecItem } from "../videoParamCodec";
 import {
   Activity,
   AlertTriangle,
   Camera,
-  CheckCircle2,
-  ChevronDown,
-  Circle,
-  CircleSlash,
   Compass,
-  Copy,
-  Crosshair,
   FlipHorizontal,
   FlipVertical,
-  Focus as FocusIcon,
   Frame,
-  Gauge,
-  Hash,
-  Home,
-  Info,
   Loader2,
-  Maximize2,
-  Mic,
-  Move3d,
-  MoveHorizontal,
-  Navigation,
-  Inbox,
   Pause,
-  Play,
-  PictureInPicture2,
-  Plus,
-  RadioTower,
   RefreshCcw,
   RotateCw,
-  Route,
-  Scan,
-  ScanEye,
-  Search,
-  Settings,
-  ShieldCheck,
-  Signal,
-  Square,
-  Target,
-  Trash2,
   Send,
-  Video,
-  X,
-  ZoomIn,
-  ZoomOut
+  Video
 } from "@lucide/vue";
-
 /* ────────────────────────── Props / Emits ────────────────────────── */
 
 interface PlaybackChannel {
@@ -212,7 +197,9 @@ function defaultMiniPlayerPosition() {
 const miniPlayerPosition = ref(defaultMiniPlayerPosition());
 let miniPlayerDrag: { startX: number; startY: number; originX: number; originY: number } | null = null;
 const playbackModalWidth = computed(() =>
-  isMinimized.value ? `${miniPlayerDimensions().width}px` : "min(1520px, calc(100vw - 32px))"
+  isMinimized.value
+    ? `${miniPlayerDimensions().width}px`
+    : "min(1520px, calc(100vw - 32px), calc((100dvh - 380px) * 16 / 9 + 410px))"
 );
 const miniPlayerModalStyle = computed<CSSProperties | undefined>(() =>
   isMinimized.value
@@ -282,6 +269,20 @@ let sessionToken = 0;
 // 关闭弹窗只做本地清理;记录阈值,阻止迟到的点播响应补发 stopPlay。
 let localCleanupThroughToken = 0;
 
+const clientFeedbackSessionKey = computed(() => {
+  const result = playResult.value;
+  return result?.lifecycleId && result.clientFeedbackToken ? `${result.lifecycleId}:${result.clientFeedbackToken}` : "";
+});
+
+function reportClientPlaybackFact(fact: PlaybackClientFact) {
+  const result = playResult.value;
+  const sessionKey = clientFeedbackSessionKey.value;
+  if (!result?.lifecycleId || !result.clientFeedbackToken || !sessionKey) return;
+  const lifecycleId = result.lifecycleId;
+  const token = result.clientFeedbackToken;
+  void reportPlaybackClientEvent(lifecycleId, token, fact).catch(() => undefined);
+}
+
 function channelContextKey(channel: PlaybackChannel | null = props.channel) {
   if (!channel) return "";
   return `${channel.id}:${channel.deviceId}:${channel.channelId}`;
@@ -336,8 +337,7 @@ const canPtzPanel = computed(
  *   合并后「画面设置」= 侧栏一组(`video-param`) + 底栏四格
  *   (图像叠加 / 遮挡 / 镜像 / 参数对照)。
  *   ⛔ 别再给它单开一级页签,也别退回"侧栏两组二选一"的切换形态(老板 2026-09-20 明确否掉)。
- *   ⛔ 也别把参数对照挪回侧栏:两行(回读/实测)并排 + 一个判定标签才读得出"设备到底跟没跟",
- *      窄侧栏里会折成四行。
+ *   参数对照与视频编码同属当前码流事实,在侧栏下方紧邻展示;底栏只承载画面操作卡片。
  *
  * ⭐ "高级"tab 2026-09-20 **整体消失**,三拨内容各有归属(控制台不再保留任何一处):
  *   ① 图像抓拍配置 → 设备管理页「设备详情」抽屉的「设备控制」页;
@@ -366,7 +366,6 @@ type TabKey = "ptz" | "probe" | "deviceconfig";
  */
 type AdvancedOperationPhase = "idle" | "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
 const activeTab = ref<TabKey>("ptz");
-const sideCollapsed = ref(false);
 /** 画面设置底栏卡片里的遮挡区槽位（由 DeviceConfigDrawer 暴露，标准固定 4 个）。 */
 interface PictureRegionSlot {
   seq: number;
@@ -487,7 +486,7 @@ const configWorkspaceGroups: Partial<Record<TabKey, string[]>> = {
   //    侧栏**只挂 `video-param`**（视频编码），「图像叠加」整块搬到底栏第一格
   //    （`picture-osd-cell`，渲染 `DeviceConfigOsdBlocks` 的 `layout="row"`，数据走
   //    `DeviceConfigDrawer` 暴露的 `osdBlocks` 袋 + `setOsdFlag` / `setOsdItems`）。
-  //    ⇒ 这一页现在一次看全：视频编码（侧栏） / 图像叠加 · 遮挡 · 镜像 · 参数对照（底栏）。
+  //    ⇒ 这一页现在一次看全：视频编码与参数对照（侧栏上下排列） / 图像叠加 · 遮挡 · 镜像（底栏）。
   // ⛔ 别把 `osd` 加回这个数组：加回来侧栏又长出 `dcg-nav` 切换，同一份
   //    `familyValues.osd` 就有了两个编辑面（底栏那份是新的）。
   // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍下沉在底栏卡片，不在这里：侧栏再挂一份，
@@ -723,6 +722,12 @@ const isAudioCapable = computed(() => props.channel?.status === 1 && canTalk.val
 const talkAvailable = computed(() => props.channel?.status === 1 && canTalk.value);
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
+function setPtzMode(mode: "speed" | "precise") {
+  if (mode === ptzMode.value) return;
+  if (mode === "speed" && targetTrackMode.value) exitTargetTrackMode();
+  if (mode === "precise" && dragZoomMode.value) exitDragZoomMode();
+  ptzMode.value = mode;
+}
 const moveSpeed = ref(DEFAULT_PTZ_SPEED_LEVEL);
 // 自动聚焦 / 自动光圈已摘除:那是厂商私有概念,GB/T 28181 的 FI 指令族(表 A.6)里
 // 只有"光圈放大/缩小"和"聚焦近/远"四个动作 + 本族停止,没有任何自动档位。留一个点了
@@ -870,6 +875,30 @@ const scanSpeedInvalid = computed(
   () => !Number.isInteger(scanSpeed.value) || scanSpeed.value < SCAN_SPEED_MIN || scanSpeed.value > SCAN_SPEED_MAX
 );
 const scanCanSend = computed(() => canControlPtz.value && Boolean(props.channel) && !scanBusy.value && !scanGroupInvalid.value);
+
+// 雨刷(GB/T 28181 **A.3.7 表 A.11**:`8CH` 开 / `8DH` 关,字节5 = 辅助开关编号)
+//
+// ⭐ 为什么它算"带编号的设备侧能力"而不是摇杆/关键帧那类画面级即时动作:
+//    报文里有一个**编号**字节(数据1),而标准在这一节只钉了一个语义 ——
+//    「注:字节5为辅助开关编号,取值为"1"表示雨刷控制。」
+//    ⇒ 平台侧把编号固定成 1(后端 manscdp.PTZAuxiliaryIDWiper)。
+//    ⛔ 编号 2~5(红外灯/加热/除雾/制冷)在标准里查无此名:A.3 控制指令是闭集
+//    `A.3.1`~`A.3.7`(2016/2022 一致,两节措辞逐字相同),2022 全文
+//    `加热 / 除湿 / 制冷 / 除雾 / 通风 / 空调` 命中 0。所以这里**不做**"更多辅助开关"的
+//    入口,后端也不收 `auxiliaryId` —— 免得把厂商私有语义请进 API 面。
+//
+// ⛔ 状态词只能到「已下发」:辅助开关在附录 A 里**没有任何回读手段**
+//    (2022 全文"辅助开关"只出现在 A.3.7;A.2.4 查询闭集 1~14、A.2.6 应答闭集 1~16
+//    里都没有它)。与扫描卡同理:HTTP 成功只表示指令发出去了,雨刷此刻在不在刮得看画面。
+type WiperAction = "on" | "off";
+/** 标准唯一命名的编号(A.3.7 表 A.11 注):1 = 雨刷。 */
+const WIPER_AUXILIARY_ID = 1;
+const wiperState = ref<"off" | "on-sent">("off");
+const wiperBusy = ref(false);
+const wiperError = ref("");
+/** 与扫描同一条门禁:云台控制权限 + 有通道 + 不在发送中。 */
+const wiperCanSend = computed(() => canControlPtz.value && Boolean(props.channel) && !wiperBusy.value);
+const wiperChipTitle = `雨刷开启指令已发送(辅助开关编号 ${WIPER_AUXILIARY_ID})。标准没有回读辅助开关状态的命令,请观察画面确认是否在刮`;
 
 const CRUISE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 let cruiseReconcileTimer: number | null = null;
@@ -1179,11 +1208,6 @@ function cruiseTrackDetailText(track: CruiseTrack): string {
   return `预置位 ${chain} · ${dwellText} · ${speedText}`;
 }
 
-function cruiseTrackMeta(track: CruiseTrack): string {
-  const detail = cruiseTrackDetailText(track);
-  return track.pending ? `${detail} · 已下发,未验证` : detail;
-}
-
 // 建立巡航 modal:trackId 使用国标 0-255，stops 按顺序引用已有预置位。
 type CruiseDraftStop = { key: string; presetId: number };
 type CruiseDraft = {
@@ -1353,21 +1377,6 @@ async function handleSaveCruiseBeforeOk(done: (closable?: boolean) => void) {
     if (cruiseDraft.value === draft) draft.submitting = false;
   }
 }
-
-type AssetManagerTab = "preset" | "cruise";
-const assetManagerVisible = ref(false);
-const assetManagerTab = ref<AssetManagerTab>("preset");
-const assetSearch = ref("");
-const filteredPresets = computed(() => {
-  const keyword = assetSearch.value.trim().toLowerCase();
-  if (!keyword) return presets.value;
-  return presets.value.filter(item => item.name.toLowerCase().includes(keyword) || String(item.id).includes(keyword));
-});
-const filteredCruiseTracks = computed(() => {
-  const keyword = assetSearch.value.trim().toLowerCase();
-  if (!keyword) return cruiseTracks.value;
-  return cruiseTracks.value.filter(item => item.name.toLowerCase().includes(keyword) || String(item.id).includes(keyword));
-});
 
 // 看守位(2022 HomePositionQuery):设备确认值与用户草稿必须独立。
 type HomePositionPhase = "unknown" | "loading" | "pending" | "accepted" | "enabled" | "disabled" | "error";
@@ -1991,7 +2000,7 @@ const probeDurations = [
   { value: 3000, label: "3 秒" },
   { value: 10000, label: "10 秒" },
   { value: 60000, label: "60 秒" }
-] as const;
+];
 const probeState = ref<ProbeState>("idle");
 const probeDurationMs = ref(probeDurations[0].value);
 const probeRemainingMs = ref(3000);
@@ -2244,8 +2253,6 @@ function resetSessionState() {
   phase.value = "idle";
   startedAt.value = null;
   errorMessage.value = "";
-  assetManagerVisible.value = false;
-  assetSearch.value = "";
   presetDraft.value = null;
   savePresetDialogVisible.value = false;
   activePresetId.value = null;
@@ -2260,6 +2267,10 @@ function resetSessionState() {
   scanActiveGroup.value = null;
   scanBusy.value = false;
   scanError.value = "";
+  // 雨刷同样是纯下发状态:换通道后不能把上一路通道的"已下发"带过去。
+  wiperState.value = "off";
+  wiperBusy.value = false;
+  wiperError.value = "";
   cruiseFreshness.value = "unknown";
   cruiseRefreshPending.value = false;
   cruiseLoadError.value = "";
@@ -2303,7 +2314,6 @@ function reconnect() {
 function handleMinimize() {
   releaseContinuousControls();
   exitDragZoomMode();
-  assetManagerVisible.value = false;
   savePresetDialogVisible.value = false;
   saveCruiseDialogVisible.value = false;
   keepMiniPlayerInViewport();
@@ -2998,9 +3008,40 @@ async function sendScanCommand(action: ScanAction) {
     if (token === sessionToken) scanBusy.value = false;
   }
 }
-function toggleScan() {
+/**
+ * 下发雨刷开 / 关(A.3.7 表 A.11:`8CH` / `8DH`,编号固定 [WIPER_AUXILIARY_ID])。
+ *
+ * ⛔ 报文里唯一的变量就是编号,而标准只给编号 1 定了语义 ⇒ 请求体只有 `action`,
+ *    编号不许由前端拼 —— 否则 2~5 那些私有语义就顺着这个口子回来了。
+ * ⛔ 与扫描/巡航同一套判定:HTTP 成功 + operation 状态不是 rejected/timeout/cancelled
+ *    才置"已下发";设备拒绝了就必须把运行态留在关,并让原因显示在卡片里。
+ */
+async function sendWiperCommand(action: WiperAction) {
+  if (!canControlPtz.value || !props.channel || wiperBusy.value) return;
+  const channelId = props.channel.id;
+  const token = sessionToken;
+  wiperBusy.value = true;
+  wiperError.value = "";
+  try {
+    const response = await controlPtzWiper(channelId, { action });
+    if (token !== sessionToken || props.channel?.id !== channelId) return;
+    if (response.code !== 0) throw new Error(response.message || "雨刷指令失败");
+    if (["rejected", "timeout", "cancelled"].includes(String(response.data?.status))) {
+      throw new Error(response.message || "雨刷指令未被设备接受");
+    }
+    wiperState.value = action === "on" ? "on-sent" : "off";
+    Message.info(action === "on" ? "雨刷开启指令已发送,请观察画面确认是否在刮(标准无回读开关状态的命令)" : "雨刷关闭指令已发送");
+  } catch (error: any) {
+    if (token !== sessionToken) return;
+    wiperError.value = error?.message || "雨刷指令失败";
+    Message.error(wiperError.value);
+  } finally {
+    if (token === sessionToken) wiperBusy.value = false;
+  }
+}
+function toggleWiper() {
   if (!canControlPtz.value) return;
-  return sendScanCommand(scanState.value === "start-sent" ? "scan_stop" : "scan_start");
+  return sendWiperCommand(wiperState.value === "on-sent" ? "off" : "on");
 }
 
 async function deleteCruise(id: number) {
@@ -3030,24 +3071,6 @@ async function deleteCruise(id: number) {
       }
     }
   });
-}
-
-// 抽屉打开入口暂时被 tile grid + 更多 popover 替代,函数保留供未来管理面板复用
-function openAssetManager(tab: AssetManagerTab) {
-  assetManagerTab.value = tab;
-  assetSearch.value = "";
-  assetManagerVisible.value = true;
-}
-void openAssetManager;
-
-function switchAssetManagerTab(tab: AssetManagerTab) {
-  assetManagerTab.value = tab;
-  assetSearch.value = "";
-}
-
-function closeAssetManager() {
-  assetManagerVisible.value = false;
-  assetSearch.value = "";
 }
 
 function openHomeSettingsDialog() {
@@ -5025,6 +5048,98 @@ onBeforeUnmount(() => {
   void stopTalk();
   cleanupSessionLocally();
 });
+
+provide(PLAY_CONSOLE_CONTEXT, {
+  canPtzPanel,
+  activeTab,
+  ptzMode,
+  setPtzMode,
+  joystickDragging,
+  joystickHandleStyle,
+  startJoystick,
+  moveJoystick,
+  endJoystick,
+  handleJoystickKeydown,
+  handleJoystickKeyup,
+  talkMode,
+  talkState,
+  talkAvailable,
+  capabilityActionTitle,
+  isAudioCapable,
+  toggleTalk,
+  talkLevel,
+  talkButtonText,
+  moveSpeed,
+  sendPtz,
+  precisePan,
+  preciseTilt,
+  preciseZoom,
+  sendPrecise,
+  readPreciseStatus,
+  canControlDevice,
+  wiperCanSend,
+  wiperState,
+  wiperError,
+  wiperChipTitle,
+  toggleWiper,
+  dragZoomMode,
+  dragZoomAction,
+  isAdvancedPending,
+  toggleDragZoomMode,
+  runAdvancedAction,
+  targetTrackPending,
+  submitTargetTrack,
+  targetTrackMode,
+  toggleTargetTrackMode,
+  targetTrackIntentText,
+  targetTrackStatus,
+  targetTrackError,
+  cruiseTracks,
+  openSavePresetDialog,
+  presets,
+  activePresetId,
+  callPreset,
+  deletePreset,
+  activeCruiseId,
+  cruiseState,
+  toggleCruise,
+  cruiseTileTitle,
+  cruiseSyncLabel,
+  stopCruise,
+  openSaveCruiseDialog,
+  RESOURCE_TOOLTIP_ENTER_DELAY_MS,
+  canDiagnosePlayback,
+  probeTimelineDialogVisible,
+  probeResult,
+  homeSettingsDialogVisible,
+  closeHomeSettingsDialog,
+  homeSettingsSubmitting,
+  homeDraft,
+  homeSettingsTouched,
+  homePositionCanSave,
+  submitHomeSettings,
+  homeSettingsActionLabel,
+  canSavePtzPreset,
+  savePresetDialogVisible,
+  presetDraft,
+  presetNameError,
+  handleSavePresetBeforeOk,
+  closeSavePresetDialog,
+  presetNameTouched,
+  canControlPtzCruise,
+  saveCruiseDialogVisible,
+  cruiseDraft,
+  cruiseDraftTouched,
+  canCloseSaveCruiseDialog,
+  handleSaveCruiseBeforeOk,
+  closeSaveCruiseDialog,
+  cruiseDraftError,
+  cruiseDraftSubmitError,
+  cruiseStopsListEl,
+  moveCruiseStop,
+  removeCruiseStop,
+  addCruiseStop
+});
 </script>
 
 <template>
@@ -5045,83 +5160,29 @@ onBeforeUnmount(() => {
     @cancel="requestClose"
   >
     <template #title>
-      <div
-        class="console-title"
-        :class="{ 'is-minimized': isMinimized }"
-        data-testid="play-console-drag-handle"
-        @pointerdown="beginMiniPlayerDrag"
-      >
-        <span class="title-icon"><RadioTower :size="18" /></span>
-        <div class="title-text">
-          <strong>{{ isMinimized ? title : "播放控制台" }}</strong>
-          <span v-if="!isMinimized">{{ title }} · {{ channel?.channelId || "未选择通道" }}</span>
-        </div>
-        <span v-if="!isMinimized" class="session-badge" :class="sessionStatusClass">
-          <span class="dot"></span>{{ sessionStatusText }}
-          <em v-if="phase === 'playing'" class="session-elapsed mono">{{ elapsedText }}</em>
-        </span>
-        <div class="console-window-actions">
-          <template v-if="!isMinimized">
-            <button
-              type="button"
-              class="console-window-action is-minimize"
-              data-testid="play-console-minimize"
-              title="切换为小窗播放"
-              aria-label="切换为小窗播放"
-              @pointerdown.stop
-              @click.stop="handleMinimize"
-            >
-              <PictureInPicture2 :size="15" aria-hidden="true" />
-              <span>小窗</span>
-            </button>
-            <button
-              type="button"
-              class="console-window-action is-close"
-              data-testid="play-console-close"
-              title="关闭并停止播放"
-              aria-label="关闭并停止播放"
-              @pointerdown.stop
-              @click.stop="requestClose"
-            >
-              <X :size="15" aria-hidden="true" />
-              <span>关闭</span>
-            </button>
-          </template>
-          <template v-else>
-            <button
-              type="button"
-              class="console-window-action is-compact"
-              data-testid="play-console-restore"
-              title="恢复播放控制台"
-              aria-label="恢复播放控制台"
-              @pointerdown.stop
-              @click.stop="handleRestore"
-            >
-              <Maximize2 :size="15" />
-            </button>
-            <button
-              type="button"
-              class="console-window-action is-close is-compact"
-              data-testid="play-console-close-mini"
-              title="关闭并停止播放"
-              aria-label="关闭并停止播放"
-              @pointerdown.stop
-              @click.stop="requestClose"
-            >
-              <X :size="15" />
-            </button>
-          </template>
-        </div>
-      </div>
+      <PlayConsoleTitleBar
+        :is-minimized="isMinimized"
+        :title="title"
+        :channel-id="channel?.channelId"
+        :phase="phase"
+        :session-status-class="sessionStatusClass"
+        :session-status-text="sessionStatusText"
+        :elapsed-text="elapsedText"
+        @drag="beginMiniPlayerDrag"
+        @minimize="handleMinimize"
+        @restore="handleRestore"
+        @close="requestClose"
+      />
     </template>
 
     <div class="console-body" :class="{ 'is-minimized': isMinimized }" data-testid="play-console-body">
       <!-- 一级页签 2026-09-21 已回到右侧属性栏顶部（老板：「把播放控制台的三个菜单放回以前的位置」）——
            原来那列 136px 的左侧竖排导航随 `.workbench-nav` 一起退役，宽度还给画面。
            ⛔ 别再往这里插导航：`.video-frame` / `.linked-info-bar` / `.sidebar` 的 `grid-column`
-              索引全都按「两列」写死了，多一列要同步改四处（漏一处整块错位）。 -->
+              索引全都按「两列」写死了，多一列要同步改四处（漏一处整块错位）。
+           ⭐ 桌面端详情坞归属于左侧视频列，避免右侧云台内容把它推到画面下方很远；窄屏再恢复三段单列顺序。 -->
       <!-- 主区(视频 + 控制条 + 会话链路) -->
-      <section class="stage" :class="{ 'stage-wide': sideCollapsed }">
+      <section class="stage">
         <!-- 视频画面 -->
         <div class="video-frame">
           <!-- 真实播放器；无地址时仍保留稳定的加载/空/错误态布局 -->
@@ -5174,11 +5235,14 @@ onBeforeUnmount(() => {
             </div>
             <template v-if="phase === 'playing' || phase === 'paused'">
               <PlayWindow
+                :key="clientFeedbackSessionKey || playResult?.streamId || 'player'"
                 ref="playWindowRef"
                 :url="currentProtocolUrl"
                 :zlm-webrtc="currentProtocolUsesZlmWebRtc"
                 :has-audio="channel?.audioEnabled === true"
                 @error="handlePlayerError"
+                @first-frame="reportClientPlaybackFact"
+                @player-error="reportClientPlaybackFact"
                 @videosize="onPlayerVideoSize"
               />
               <div v-if="phase === 'paused'" class="paused-mask"><Pause :size="42" /><span>已暂停</span></div>
@@ -5369,523 +5433,100 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- 多协议切换器(底部) -->
-          <div class="protocol-switcher">
-            <div class="switcher-left">
-              <span class="kicker">播放协议</span>
-              <a-select
-                :model-value="protocol"
-                :style="{ width: '160px' }"
-                :placeholder="currentProtocolOption?.label || '无可播放地址'"
-                size="small"
-                :trigger-props="{ autoFitPopupWidth: false }"
-                @change="switchProtocol"
-              >
-                <a-option
-                  v-for="opt in availableProtocolOptions"
-                  :key="opt.value"
-                  :value="opt.value"
-                  :label="opt.label"
-                  :disabled="!opt.browserPlayable"
-                >
-                  <div class="protocol-option">
-                    <strong>{{ opt.label }}:</strong>
-                    <span class="protocol-url" :title="protocolUrls[opt.value] || ''">{{ protocolUrls[opt.value] }}</span>
-                    <button
-                      v-if="canSharePlayback"
-                      type="button"
-                      class="protocol-copy-btn"
-                      :title="`复制 ${opt.label} 地址`"
-                      :aria-label="`复制 ${opt.label} 地址`"
-                      @mousedown.stop.prevent
-                      @click.stop="copyProtocolUrl(opt.value)"
-                    >
-                      <Copy :size="13" />
-                    </button>
-                  </div>
-                </a-option>
-              </a-select>
-            </div>
-            <div class="switcher-right">
-              <button
-                v-for="opt in shortcutProtocolOptions"
-                :key="opt.value"
-                class="proto-btn"
-                :class="{ active: protocol === opt.value }"
-                :disabled="!protocolUrls[opt.value]"
-                @click="switchProtocol(opt.value)"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-
-            <!-- ⛔ 这里**不再**挂 OSD 的「调整位置」按钮（2026-09-20 老板第三次调整）：
-                 它先在画面右上角（遮画面）→ 再搬到这条工具条（仍要视线来回跳）→
-                 现在归位到侧栏「时间戳」面板的「位置」行，见 `DeviceConfigOsdBlocks`。
-                 按钮改的就是那一行的坐标，跟坐标读数放在一起才是它本来的位置。 -->
-          </div>
+          <PlayConsoleProtocolBar
+            :protocol="protocol"
+            :protocol-urls="protocolUrls"
+            :available-options="availableProtocolOptions"
+            :shortcut-options="shortcutProtocolOptions"
+            :placeholder="currentProtocolOption?.label || '无可播放地址'"
+            :can-share-playback="canSharePlayback"
+            @switch-protocol="switchProtocol($event as StreamProtocol)"
+            @copy-protocol="copyProtocolUrl($event as StreamProtocol)"
+          />
         </div>
 
         <!-- 双区联动详情:所有 Tab 共用下方详情区，保持结构与高度稳定 -->
-        <div
-          v-if="phase === 'playing' || isConfigWorkspace"
-          class="stream-info-bar linked-info-bar"
-          :class="{ 'config-detail-bar': isConfigWorkspace }"
-        >
-          <div v-if="canPtzPanel" v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
-            <div class="linked-ptz-layout">
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"
-                    ><Hash :size="13" />预置位<em v-if="presets.length" class="preset-count">{{ presets.length }}</em></span
-                  >
-                  <span class="linked-card-actions">
-                    <button
-                      class="resource-sync-btn"
-                      data-testid="preset-sync-btn"
-                      :class="{ syncing: presetSyncing }"
-                      :disabled="presetSyncing"
-                      :title="presetSyncTitle"
-                      @click="syncPresets"
-                    >
-                      <Loader2 v-if="presetSyncing" :size="11" class="resource-sync-spin" />
-                      <RefreshCcw v-else :size="11" />
-                      <span>{{ presetSyncLabel }}</span>
-                    </button>
-                    <button class="preset-save-btn" data-testid="preset-save-btn" @click="openSavePresetDialog">
-                      <Plus :size="12" /><span>添加</span>
-                    </button>
-                  </span>
-                </header>
-                <div v-if="presets.length === 0" class="preset-empty" data-testid="preset-empty">
-                  <Inbox :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">暂无预置位</p>
-                  <p class="preset-empty-hint">设备上已有的可用「同步」读回</p>
-                </div>
-                <div v-else class="preset-grid">
-                  <div v-for="p in visiblePresets" :key="p.id" class="preset-tile" :class="{ active: activePresetId === p.id }">
-                    <a-tooltip
-                      :content="`#${p.id} ${p.name}`"
-                      position="top"
-                      :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                      :data-testid="`preset-tile-tooltip-${p.id}`"
-                    >
-                      <button class="preset-tile-hit preset-item" @click="callPreset(p.id)">
-                        <span class="preset-idx">#{{ p.id }}</span>
-                        <span class="preset-name">{{ p.name }}</span>
-                      </button>
-                    </a-tooltip>
-                    <button class="preset-tile-del" :title="`删除 #${p.id}`" @click.stop="deletePreset(p.id)">
-                      <X :size="11" />
-                    </button>
-                  </div>
-                  <a-popover
-                    v-if="hasMorePresets"
-                    v-model:popup-visible="presetMoreVisible"
-                    trigger="click"
-                    position="bottom"
-                    :content-style="{ padding: 0 }"
-                    class="preset-more-popover-trigger"
-                  >
-                    <button class="preset-tile-more" data-testid="preset-more-btn">
-                      <span>更多 · {{ presets.length }}</span>
-                      <ChevronDown :size="11" />
-                    </button>
-                    <template #content>
-                      <div class="preset-popover" data-testid="preset-popover">
-                        <header class="preset-popover-hd">
-                          <span
-                            ><Hash :size="12" />全部预置位<em class="preset-count">{{ presets.length }}</em></span
-                          >
-                        </header>
-                        <div class="preset-popover-list">
-                          <div
-                            v-for="p in presets"
-                            :key="p.id"
-                            class="preset-popover-row"
-                            :class="{ active: activePresetId === p.id }"
-                            data-testid="preset-popover-row"
-                          >
-                            <span class="preset-popover-idx">#{{ p.id }}</span>
-                            <a-tooltip
-                              :content="`#${p.id} ${p.name}`"
-                              position="top"
-                              :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                              :data-testid="`preset-popover-tooltip-${p.id}`"
-                            >
-                              <span class="preset-popover-name">{{ p.name }}</span>
-                            </a-tooltip>
-                            <div class="preset-popover-actions">
-                              <button class="preset-popover-call" title="调用此预置位" @click="callPreset(p.id)">
-                                <Navigation :size="11" />
-                              </button>
-                              <button class="preset-popover-del" title="删除此预置位" @click="deletePreset(p.id)">
-                                <Trash2 :size="11" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </template>
-                  </a-popover>
-                </div>
-              </section>
+        <PlayConsoleDetailWorkspace v-if="phase === 'playing' || isConfigWorkspace" :is-config-workspace="isConfigWorkspace">
+          <PlayConsolePtzPanel :visible="canPtzPanel" :active="activeTab === 'ptz'">
+            <PtzPresetCard
+              v-model:more-visible="presetMoreVisible"
+              :presets="presets"
+              :visible-presets="visiblePresets"
+              :has-more="hasMorePresets"
+              :active-id="activePresetId"
+              :syncing="presetSyncing"
+              :sync-label="presetSyncLabel"
+              :sync-title="presetSyncTitle"
+              :tooltip-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+              @sync="syncPresets"
+              @add="openSavePresetDialog"
+              @call="callPreset"
+              @delete="deletePreset"
+            />
 
-              <section class="linked-section linked-card">
-                <header class="linked-card-hd">
-                  <span class="section-title">
-                    <Route :size="13" />巡航轨迹<em v-if="cruiseTracks.length" class="preset-count">{{ cruiseTracks.length }}</em>
-                    <button
-                      v-if="activeCruiseId !== null && cruiseState !== 'stopped'"
-                      class="cruise-running-chip"
-                      data-testid="cruise-running-chip"
-                      :title="`巡航 #${activeCruiseId} 启动指令已发送,点击停止`"
-                      @click="stopCruise"
-                    >
-                      <span class="cruise-running-dot" :class="cruiseState" />
-                      启动已下发
-                      <Square :size="10" />
-                    </button>
-                  </span>
-                  <span class="linked-card-actions">
-                    <!-- 「同步」从标题里的一行小字改成了动作区的按钮。
-                                             它原来是个 <small>,既不可点、又挤在标题中间,
-                                             而它写的偏偏是「缓存数据已过期」这种**要求你
-                                             去做点什么**的话 —— 提示了问题却不给入口。
-                                             现在与预置位卡片的药丸同一位置、同一套文案。 -->
-                    <button
-                      class="resource-sync-btn"
-                      data-testid="cruise-sync-btn"
-                      :class="{ syncing: cruiseSyncing }"
-                      :disabled="cruiseSyncing"
-                      :title="cruiseSyncTitle"
-                      @click="syncCruises"
-                    >
-                      <Loader2 v-if="cruiseSyncing" :size="11" class="resource-sync-spin" />
-                      <RefreshCcw v-else :size="11" />
-                      <span>{{ cruiseSyncLabel }}</span>
-                    </button>
-                    <button
-                      class="preset-save-btn"
-                      data-testid="cruise-add-btn"
-                      :disabled="presets.length === 0"
-                      :title="presets.length === 0 ? '需要先添加预置位才能新建巡航轨迹' : '新建巡航轨迹(按顺序串联多个预置位)'"
-                      @click="openSaveCruiseDialog"
-                    >
-                      <Plus :size="12" /><span>添加</span>
-                    </button>
-                  </span>
-                </header>
-                <div v-if="cruiseLoadError" class="preset-empty" data-testid="cruise-load-error">
-                  <AlertTriangle :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">{{ cruiseLoadError }}</p>
-                  <p class="preset-empty-hint">点「同步」重试</p>
-                </div>
-                <div v-else-if="cruiseTracks.length === 0" class="preset-empty" data-testid="cruise-empty">
-                  <Inbox :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">暂无巡航轨迹</p>
-                  <p class="preset-empty-hint">设备上已有的可用「同步」读回</p>
-                </div>
-                <div v-else class="preset-grid">
-                  <a-tooltip
-                    v-for="c in visibleCruiseTracks"
-                    :key="c.id"
-                    :content="cruiseTileTitle(c)"
-                    position="top"
-                    :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                    :data-testid="`cruise-tile-tooltip-${c.id}`"
-                  >
-                    <div
-                      class="preset-tile cruise-tile"
-                      :class="{
-                        active: activeCruiseId === c.id && cruiseState !== 'stopped',
-                        disabled: !c.enabled && !c.pending,
-                        pending: c.pending
-                      }"
-                      :data-testid="`cruise-tile-${c.id}`"
-                    >
-                      <button
-                        class="preset-tile-hit cruise-item"
-                        :disabled="!c.enabled && !c.pending"
-                        @click="toggleCruise(c.id)"
-                      >
-                        <Square v-if="cruiseTileState(c) === 'stop'" :size="10" class="cruise-tile-icon" />
-                        <Play v-else :size="10" class="cruise-tile-icon" />
-                        <span class="preset-name">{{ c.name }}</span>
-                        <span v-if="c.pending" class="cruise-status-badge">未验证</span>
-                      </button>
-                      <button class="preset-tile-del" :title="`删除巡航 #${c.id}`" @click.stop="deleteCruise(c.id)">
-                        <X :size="11" />
-                      </button>
-                    </div>
-                  </a-tooltip>
-                  <a-popover
-                    v-if="hasMoreCruises"
-                    v-model:popup-visible="cruiseMoreVisible"
-                    trigger="click"
-                    position="bottom"
-                    :content-style="{ padding: 0 }"
-                    class="preset-more-popover-trigger"
-                  >
-                    <button class="preset-tile-more" data-testid="cruise-more-btn">
-                      <span>更多 · {{ cruiseTracks.length }}</span>
-                      <ChevronDown :size="11" />
-                    </button>
-                    <template #content>
-                      <div class="preset-popover" data-testid="cruise-popover">
-                        <header class="preset-popover-hd">
-                          <span
-                            ><Route :size="12" />全部巡航轨迹<em class="preset-count">{{ cruiseTracks.length }}</em></span
-                          >
-                        </header>
-                        <div class="preset-popover-list">
-                          <a-tooltip
-                            v-for="c in cruiseTracks"
-                            :key="c.id"
-                            :content="cruiseTileTitle(c)"
-                            position="top"
-                            :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                            :data-testid="`cruise-popover-tooltip-${c.id}`"
-                          >
-                            <div
-                              class="preset-popover-row"
-                              :class="{ active: activeCruiseId === c.id && cruiseState !== 'stopped' }"
-                              data-testid="cruise-popover-row"
-                            >
-                              <span class="preset-popover-idx">#{{ c.id }}</span>
-                              <span class="preset-popover-name">{{ c.name }}</span>
-                              <div class="preset-popover-actions">
-                                <button
-                                  class="preset-popover-call"
-                                  :disabled="!c.enabled && !c.pending"
-                                  @click="toggleCruise(c.id)"
-                                >
-                                  <Square v-if="cruiseTileState(c) === 'stop'" :size="11" />
-                                  <Play v-else :size="11" />
-                                </button>
-                                <button class="preset-popover-del" title="删除此巡航轨迹" @click="deleteCruise(c.id)">
-                                  <Trash2 :size="11" />
-                                </button>
-                              </div>
-                            </div>
-                          </a-tooltip>
-                        </div>
-                      </div>
-                    </template>
-                  </a-popover>
-                </div>
-              </section>
+            <PtzCruiseCard
+              v-model:more-visible="cruiseMoreVisible"
+              :tracks="cruiseTracks"
+              :visible-tracks="visibleCruiseTracks"
+              :has-more="hasMoreCruises"
+              :active-id="activeCruiseId"
+              :state="cruiseState"
+              :syncing="cruiseSyncing"
+              :sync-label="cruiseSyncLabel"
+              :sync-title="cruiseSyncTitle"
+              :load-error="cruiseLoadError"
+              :can-add="presets.length > 0"
+              :tooltip-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+              :tile-title="cruiseTileTitle"
+              :tile-state="cruiseTileState"
+              @sync="syncCruises"
+              @add="openSaveCruiseDialog"
+              @stop="stopCruise"
+              @toggle="toggleCruise"
+              @delete="deleteCruise"
+            />
 
-              <section class="linked-section linked-card" data-testid="home-card">
-                <div class="section-hd first">
-                  <span class="section-title"
-                    ><Home :size="13" />看守位<span class="tag-2022" title="GB/T 28181-2022 扩展能力">2022</span></span
-                  >
-                  <div class="home-header-actions">
-                    <span
-                      class="home-diagnostics"
-                      :title="homeDiagnosticsTitle"
-                      aria-label="看守位能力诊断"
-                      data-testid="home-diagnostics"
-                    >
-                      <Info :size="12" />
-                    </span>
-                  </div>
-                </div>
-                <div
-                  class="home-config"
-                  :class="`state-${homePresentation.tone}`"
-                  data-testid="home-status"
-                  aria-live="polite"
-                  :aria-busy="homeIsBusy"
-                >
-                  <div class="home-state-row">
-                    <span class="home-state-icon" data-testid="home-state-icon" :data-icon="homePresentation.state">
-                      <Loader2
-                        v-if="homePresentation.state === 'loading' || homePresentation.state === 'pending'"
-                        :size="15"
-                        class="spin"
-                      />
-                      <CircleSlash v-else-if="homePresentation.state === 'unsupported'" :size="15" />
-                      <CheckCircle2 v-else-if="homePresentation.state === 'enabled'" :size="15" />
-                      <AlertTriangle
-                        v-else-if="homePresentation.state === 'error' || homePresentation.state === 'offline'"
-                        :size="15"
-                      />
-                      <Circle v-else-if="homePresentation.state === 'disabled'" :size="15" />
-                      <Info v-else :size="15" />
-                    </span>
-                    <div class="home-state-copy">
-                      <strong data-testid="home-phase">{{ homePresentation.label }}</strong>
-                      <span v-if="homePresentation.description">{{ homePresentation.description }}</span>
-                      <span v-if="homeLastConfirmedText" data-testid="home-confirmed-values">{{ homeLastConfirmedText }}</span>
-                      <span v-else-if="homeConfirmedValuesText" data-testid="home-confirmed-values">{{
-                        homeConfirmedValuesText
-                      }}</span>
-                      <span v-if="homeConfirmedAtText && !homeLastConfirmedText" class="home-confirmed-at">{{
-                        homeConfirmedAtText
-                      }}</span>
-                    </div>
-                  </div>
-                  <p v-if="homeConfirmedOutsideEditableRange" class="home-warning" data-testid="home-range-warning">
-                    设备返回的归位配置不完整，修改后才能再次启用。
-                  </p>
-                  <p v-if="homeNoticeText" class="home-error" data-testid="home-notice">{{ homeNoticeText }}</p>
-                  <p
-                    v-if="presets.length === 0 && homeControlSupport.status !== 'unsupported'"
-                    class="home-hint"
-                    data-testid="home-preset-required"
-                  >
-                    请先添加预置位，再配置看守位。
-                  </p>
-                  <div class="home-card-actions">
-                    <button
-                      v-if="
-                        homePresentation.showConfigure &&
-                        (homePresentation.state === 'enabled' ||
-                          homePresentation.state === 'disabled' ||
-                          homePresentation.state === 'unconfigured' ||
-                          (homePresentation.state === 'error' && homeConfirmed))
-                      "
-                      class="btn-primary sm"
-                      data-testid="home-configure"
-                      :disabled="!homeCanConfigure"
-                      :title="presets.length === 0 ? '请先添加预置位' : undefined"
-                      @click="openHomeSettingsDialog"
-                    >
-                      <Settings :size="12" />{{ homeConfirmed?.enabled ? "修改设置" : "配置并启用" }}
-                    </button>
-                    <button
-                      v-if="homeConfirmed?.enabled"
-                      class="btn-ghost sm home-close-btn"
-                      data-testid="home-close"
-                      :disabled="!homeCanClose"
-                      @click="closeHomePosition"
-                    >
-                      <CircleSlash :size="12" />关闭
-                    </button>
-                    <button
-                      v-if="homePresentation.showQuery"
-                      class="btn-ghost sm uvp-refresh-btn"
-                      data-testid="home-refresh"
-                      :disabled="!homeCanRefresh"
-                      @click="refreshHomePosition"
-                    >
-                      <RefreshCcw :size="12" />{{ homePresentation.queryLabel }}
-                    </button>
-                  </div>
-                </div>
-              </section>
+            <PtzHomeCard
+              :presentation="homePresentation"
+              :diagnostics-title="homeDiagnosticsTitle"
+              :busy="homeIsBusy"
+              :last-confirmed-text="homeLastConfirmedText"
+              :confirmed-values-text="homeConfirmedValuesText"
+              :confirmed-at-text="homeConfirmedAtText"
+              :outside-range="homeConfirmedOutsideEditableRange"
+              :notice-text="homeNoticeText"
+              :has-presets="presets.length > 0"
+              :support-status="homeControlSupport.status"
+              :confirmed="homeConfirmed"
+              :can-configure="homeCanConfigure"
+              :can-close="homeCanClose"
+              :can-refresh="homeCanRefresh"
+              @configure="openHomeSettingsDialog"
+              @close="closeHomePosition"
+              @refresh="refreshHomePosition"
+            />
 
-              <section class="linked-section linked-card" data-testid="scan-card">
-                <header class="linked-card-hd">
-                  <span class="section-title">
-                    <MoveHorizontal :size="13" />自动扫描
-                    <!-- 「启动已下发」与巡航同款 chip:HTTP 成功只表示指令发出去了,
-                         设备到底扫没扫只能看画面,所以这里说的是"已下发"而不是"扫描中"。 -->
-                    <button
-                      v-if="scanState === 'start-sent'"
-                      class="cruise-running-chip"
-                      data-testid="scan-running-chip"
-                      :title="`扫描组 #${scanActiveGroup} 启动指令已发送,点击停止`"
-                      @click="sendScanCommand('scan_stop')"
-                    >
-                      <span class="cruise-running-dot" />
-                      启动已下发
-                      <Square :size="10" />
-                    </button>
-                  </span>
-                </header>
-                <div class="scan-panel" data-testid="scan-panel">
-                  <div class="scan-row">
-                    <label class="scan-label" for="scan-group-input">组号</label>
-                    <input
-                      id="scan-group-input"
-                      v-model.number="scanGroup"
-                      class="scan-number"
-                      type="number"
-                      :min="SCAN_GROUP_MIN"
-                      :max="SCAN_GROUP_MAX"
-                      data-testid="scan-group-input"
-                      :title="`扫描组号 ${SCAN_GROUP_MIN}-${SCAN_GROUP_MAX}(89H 的字节5)`"
-                    />
-                    <button
-                      class="btn-primary sm scan-toggle"
-                      data-testid="scan-toggle"
-                      :disabled="!scanCanSend"
-                      :title="
-                        !canControlPtz
-                          ? '没有云台控制权限'
-                          : scanState === 'start-sent'
-                            ? '停止扫描(字节 4-7 全零的通用停止帧)'
-                            : '开始扫描(89H)'
-                      "
-                      @click="toggleScan"
-                    >
-                      <Play v-if="scanState === 'stopped'" :size="11" /><Square v-else :size="11" />
-                      <span>{{ scanState === "start-sent" ? "停止扫描" : "开始扫描" }}</span>
-                    </button>
-                  </div>
-                  <div class="scan-row">
-                    <button
-                      class="btn-ghost sm scan-bound-btn"
-                      data-testid="scan-set-left"
-                      :disabled="!scanCanSend"
-                      title="把云台「当前朝向」写入左边界(89H 字节6=01H)"
-                      @click="sendScanCommand('scan_set_left')"
-                    >
-                      设左边界
-                    </button>
-                    <button
-                      class="btn-ghost sm scan-bound-btn"
-                      data-testid="scan-set-right"
-                      :disabled="!scanCanSend"
-                      title="把云台「当前朝向」写入右边界(89H 字节6=02H)"
-                      @click="sendScanCommand('scan_set_right')"
-                    >
-                      设右边界
-                    </button>
-                  </div>
-                  <div class="scan-row">
-                    <label class="scan-label" for="scan-speed-input">速度</label>
-                    <input
-                      id="scan-speed-input"
-                      v-model.number="scanSpeed"
-                      class="scan-number"
-                      type="number"
-                      :min="SCAN_SPEED_MIN"
-                      :max="SCAN_SPEED_MAX"
-                      data-testid="scan-speed-input"
-                      :title="`扫描速度 ${SCAN_SPEED_MIN}-${SCAN_SPEED_MAX}(8AH,12 位)`"
-                    />
-                    <button
-                      class="btn-ghost sm"
-                      data-testid="scan-set-speed"
-                      :disabled="!scanCanSend || scanSpeedInvalid"
-                      title="下发扫描速度(8AH)"
-                      @click="sendScanCommand('scan_set_speed')"
-                    >
-                      下发
-                    </button>
-                  </div>
-                  <p v-if="scanError" class="scan-error" data-testid="scan-error">{{ scanError }}</p>
-                  <p v-else class="scan-hint" data-testid="scan-hint">
-                    扫描只在左右边界之间来回，与预置位无关；边界需先把云台转到目标位置再设置
-                  </p>
-                </div>
-              </section>
-            </div>
-          </div>
+            <PtzScanCard
+              :group="scanGroup"
+              :speed="scanSpeed"
+              :group-min="SCAN_GROUP_MIN"
+              :group-max="SCAN_GROUP_MAX"
+              :speed-min="SCAN_SPEED_MIN"
+              :speed-max="SCAN_SPEED_MAX"
+              :state="scanState"
+              :active-group="scanActiveGroup"
+              :can-send="scanCanSend"
+              :speed-invalid="scanSpeedInvalid"
+              :error="scanError"
+              @update:group="scanGroup = $event"
+              @update:speed="scanSpeed = $event"
+              @command="sendScanCommand($event as ScanAction)"
+            />
+          </PlayConsolePtzPanel>
 
           <!-- 画面设置：功能拆成并列卡片铺在底栏（原「图像叠加/画面处理」两个二级 tab 取消） -->
-          <div
-            v-if="canViewPtz"
-            v-show="activeTab === 'deviceconfig'"
-            class="linked-detail linked-detail-actions"
-            data-testid="linked-detail-picture"
-          >
-            <div class="linked-picture-layout">
-              <!-- ① 图像叠加（2026-09-20 从侧栏整块搬来，老板：「不想用切换的方式，要一页全展示」）
+          <PlayConsolePicturePanel :visible="canViewPtz" :active="activeTab === 'deviceconfig'">
+            <!-- ① 图像叠加（2026-09-20 从侧栏整块搬来，老板：「不想用切换的方式，要一页全展示」）
                    ⛔ 不套 `.linked-card` 外壳：里面那两块（时间戳 / 叠加文字）本来就有自己的框，
                       再套一层就等于为了一个标题吃掉 24px —— 而这一格的预算只有 148px。
                    ⛔ 值 / 写口全部来自 `deviceConfigRef`（`osdBlocks` 袋 + 三个写口），
@@ -5893,394 +5534,75 @@ onBeforeUnmount(() => {
                    ⛔ `:editing` 与 `:canvas-linked` 显式覆盖袋里的值：控制台里这两个由**画面侧**持有
                       （`osdEditMode` / 有画布），抽屉那侧在控制台没接这两个 prop。
                       漏了 `canvas-linked` ⇒「调整位置」按钮不渲染，而它正是这块面板的主操作。 -->
-              <section class="linked-section picture-osd-cell" data-testid="picture-osd-cell">
-                <DeviceConfigOsdBlocks
-                  v-if="osdBlocksBag"
-                  v-bind="osdBlocksBag"
-                  :editing="osdEditMode"
-                  :canvas-linked="true"
-                  layout="row"
-                  @update:time-enable="deviceConfigRef?.setOsdFlag('timeEnable', $event)"
-                  @update:time-type="deviceConfigRef?.setOsdFlag('timeType', $event)"
-                  @update:time-x="deviceConfigRef?.setOsdTimePosition('x', Number($event))"
-                  @update:time-y="deviceConfigRef?.setOsdTimePosition('y', Number($event))"
-                  @update:text-enable="deviceConfigRef?.setOsdFlag('textEnable', $event)"
-                  @update:items="deviceConfigRef?.setOsdItems($event)"
-                  @locate="deviceConfigRef?.focusOsdAnchor($event)"
-                  @toggle-edit="toggleOsdEditMode"
-                />
-              </section>
+            <PictureOsdCard
+              v-if="osdBlocksBag"
+              :bag="osdBlocksBag"
+              :editing="osdEditMode"
+              @update:time-enable="deviceConfigRef?.setOsdFlag('timeEnable', $event)"
+              @update:time-type="deviceConfigRef?.setOsdFlag('timeType', $event)"
+              @update:time-x="deviceConfigRef?.setOsdTimePosition('x', Number($event))"
+              @update:time-y="deviceConfigRef?.setOsdTimePosition('y', Number($event))"
+              @update:text-enable="deviceConfigRef?.setOsdFlag('textEnable', $event)"
+              @update:items="deviceConfigRef?.setOsdItems($event)"
+              @locate="deviceConfigRef?.focusOsdAnchor($event)"
+              @toggle-edit="toggleOsdEditMode"
+            />
 
-              <!-- ② 画面遮挡 -->
-              <section class="linked-section linked-card" data-testid="picture-mask-card">
-                <header class="linked-card-hd">
-                  <span class="section-title">
-                    <Scan :size="13" />画面遮挡
-                    <em v-if="pictureUsedCount && !pictureRetainedMode" class="preset-count">{{ pictureUsedCount }}</em>
-                  </span>
-                  <span class="linked-card-actions">
-                    <button
-                      class="mask-switch"
-                      :class="{ on: pictureMaskOn, pending: pictureMaskPending }"
-                      :disabled="!pictureEditable"
-                      data-testid="picture-mask-switch"
-                      :title="pictureMaskSwitchTitle"
-                      @click="togglePictureMaskOn(!pictureMaskOn)"
-                    >
-                      {{ pictureMaskSwitchText }}
-                    </button>
-                    <button
-                      class="resource-sync-btn"
-                      data-testid="picture-read-btn"
-                      title="重新向设备查询画面配置"
-                      @click="readPictureCard"
-                    >
-                      <RefreshCcw :size="11" /><span>读取</span>
-                    </button>
-                    <button
-                      class="preset-save-btn"
-                      data-testid="picture-mask-add-btn"
-                      :disabled="!pictureEditable || !pictureCanAddRegion"
-                      :title="
-                        !pictureEditable
-                          ? '需要先读到设备配置才能编辑'
-                          : pictureCanAddRegion
-                            ? '在播放画面上框选新的遮挡区'
-                            : `遮挡区最多 ${MAX_MASK_REGIONS} 个`
-                      "
-                      @click="startMaskDraw"
-                    >
-                      <Plus :size="12" /><span>新建</span>
-                    </button>
-                  </span>
-                </header>
+            <PictureMaskCard
+              :used-count="pictureUsedCount"
+              :retained-mode="pictureRetainedMode"
+              :mask-on="pictureMaskOn"
+              :mask-pending="pictureMaskPending"
+              :editable="pictureEditable"
+              :switch-title="pictureMaskSwitchTitle"
+              :switch-text="pictureMaskSwitchText"
+              :can-add-region="pictureCanAddRegion"
+              :max-regions="MAX_MASK_REGIONS"
+              :error="pictureError"
+              :notice="pictureMaskNotice"
+              :facts-missing="pictureFactsMissing"
+              :absent-types="pictureAbsentTypes"
+              :retained-region-count="pictureRetainedRegionCount"
+              :regions="pictureRegions"
+              :canvas-size="maskCanvasSize"
+              :canvas-from-device="maskCanvasFromDevice"
+              :coordinate-text="pictureCoordinateText"
+              :coords-text="regionCoordsText"
+              @toggle="togglePictureMaskOn"
+              @read="readPictureCard"
+              @add="startMaskDraw"
+              @remove="removeMaskRegion"
+            />
 
-                <p v-if="pictureError" class="picture-card-error" data-testid="picture-card-error">
-                  {{ pictureError }}
-                </p>
+            <!-- ② 画面镜像 -->
+            <PictureMirrorCard
+              :editable="pictureEditable"
+              :mirror="pictureMirror"
+              :options="MIRROR_OPTIONS"
+              :icon="mirrorChoiceIcon"
+              @select="choosePictureMirror"
+            />
+          </PlayConsolePicturePanel>
 
-                <!-- 提示（不是错误）：请求发出去了、设备也接受了，
-                                     但结果不是"启用了就有遮挡"——就地说明，别让用户再猜一次。 -->
-                <p v-else-if="pictureMaskNotice" class="picture-card-notice" data-testid="picture-mask-notice">
-                  {{ pictureMaskNotice }}
-                </p>
-
-                <div v-if="pictureFactsMissing" class="preset-empty" data-testid="picture-mask-unread">
-                  <Inbox :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">
-                    {{ pictureAbsentTypes.length ? "设备未返回遮挡配置" : "尚未读取设备遮挡配置" }}
-                  </p>
-                  <p class="preset-empty-hint">
-                    {{ pictureAbsentTypes.length ? "该设备没有这个配置类型（2016 版无遮挡）" : "点「读取」先看设备当前挡在哪儿" }}
-                  </p>
-                </div>
-                <!-- 设备已停用、但区域还残留着：不能摆成"当前遮挡"（用户会以为没清掉），
-                                     也不能当它们不存在（下次启用会一起活过来）。给一个说明态。 -->
-                <div v-else-if="pictureRetainedMode" class="preset-empty" data-testid="picture-mask-retained">
-                  <CircleSlash :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">遮挡已停用</p>
-                  <p class="preset-empty-hint">
-                    设备仍保留 {{ pictureRetainedRegionCount }} 个区域 —— 上次「停用」没能把它们清掉（国标里 `On`
-                    与区域列表是独立节点，设备有权保留）；再点「启用」会让它们重新生效。
-                  </p>
-                </div>
-                <div v-else-if="pictureUsedCount === 0" class="preset-empty" data-testid="picture-mask-blank">
-                  <Inbox :size="24" class="preset-empty-glyph" />
-                  <p class="preset-empty-line">未设置遮挡区</p>
-                  <p class="preset-empty-hint">点「新建」，然后在画面上拖出要遮挡的范围</p>
-                </div>
-                <div v-else class="mask-slot-grid">
-                  <div
-                    v-for="region in pictureRegions"
-                    :key="region.seq"
-                    class="mask-slot"
-                    :class="{ used: region.used }"
-                    :data-testid="`picture-mask-slot-${region.seq}`"
-                  >
-                    <span class="mask-slot-idx">#{{ region.seq }}</span>
-                    <span v-if="region.used" class="mask-slot-coords">{{ regionCoordsText(region.coords) }}</span>
-                    <span v-else class="mask-slot-blank">空位</span>
-                    <button
-                      v-if="region.used"
-                      class="mask-slot-del"
-                      :title="`删除遮挡区 ${region.seq}`"
-                      :data-testid="`picture-mask-del-${region.seq}`"
-                      @click="removeMaskRegion(region.seq)"
-                    >
-                      <X :size="11" />
-                    </button>
-                  </div>
-                </div>
-                <!-- 坐标基准：槽位里那串数字到底是"什么尺子上的数"。 -->
-                <p
-                  v-if="maskCanvasSize"
-                  class="mask-canvas-note"
-                  :class="{ 'is-unverified': !maskCanvasFromDevice }"
-                  data-testid="picture-mask-base"
-                >
-                  {{ pictureCoordinateText }}
-                </p>
-              </section>
-
-              <!-- ② 画面镜像 -->
-              <section class="linked-section linked-card" data-testid="picture-mirror-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><FlipHorizontal :size="13" />画面镜像</span>
-                  <span class="linked-card-actions">
-                    <span v-if="!pictureEditable" class="linked-card-note">不可编辑</span>
-                  </span>
-                </header>
-                <div class="mirror-choice-grid">
-                  <button
-                    v-for="option in MIRROR_OPTIONS"
-                    :key="option.value"
-                    type="button"
-                    class="mirror-choice"
-                    :class="{ active: pictureMirror === option.value }"
-                    :disabled="!pictureEditable"
-                    :data-testid="`picture-mirror-${option.value}`"
-                    :title="`${option.label}（值 ${option.value}）`"
-                    @click="choosePictureMirror(option.value)"
-                  >
-                    <component :is="mirrorChoiceIcon(option.value)" :size="16" />
-                    <span>{{ option.shortLabel || option.label }}</span>
-                  </button>
-                </div>
-              </section>
-
-              <!-- ③ 参数对照（2026-09-20 入住）：原「视频编码」一级页签底部那一整块。
-                   ⭐ 它落在这里是**填空**：这一格从 2026-09-19 起就空着（原「提交」卡的下发入口
-                      搬去了画布浮条），而参数对照本来就该跟"正在编辑的编码参数"同屏。
-                   三行**不同源**，对应关系必须写在界面上，不能让人以为天然同源：
-                     · 下发 = 本次提交的期望值（草稿）
-                     · 回读 = 设备最近一次回读事实（不是草稿，否则一改就跟着变）
-                     · 实测 = 当前正在播的那一路的采样（探针 / ffprobe）
-                   ⭐ 这里就是 A-5 的验收闭环：平台改分辨率 → 拉流实测跟着变。
-                   ⛔ 留在底栏、别挪回侧栏：三行并排才读得出"设备到底跟没跟"，窄侧栏里会折成六行。
-                   ⛔ 卡上**不再放**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
-                      （`dcg-embedded-actions`），同一屏两套同名按钮是本仓点过名的坑。
-                      这里只留「码流」——它与侧栏「配置文件」下拉同一个真源（`selectedVideoStream`）。 -->
-              <section class="linked-section linked-card" data-testid="video-param-compare-card">
-                <header class="linked-card-hd">
-                  <span class="section-title"><Video :size="13" />参数对照</span>
-                  <span class="linked-card-actions">
-                    <em
-                      class="vpc-verdict"
-                      :class="`is-${videoParamVerdict.tone}`"
-                      data-testid="video-param-compare-verdict"
-                      :title="videoParamVerdictTitle"
-                      >{{ videoParamVerdict.text }}</em
-                    >
-                    <label class="linked-inline-select">
-                      <span>码流</span>
-                      <select
-                        data-testid="video-param-bottom-stream"
-                        :value="String(videoParamCompareStream?.streamNumber ?? 0)"
-                        @change="selectVideoStream(($event.target as HTMLSelectElement).value)"
-                      >
-                        <option v-for="row in videoParamsDraft" :key="row.streamNumber" :value="row.streamNumber">
-                          {{ row.streamNumber === 0 ? "主码流" : `子码流 ${row.streamNumber}` }}
-                        </option>
-                      </select>
-                    </label>
-                  </span>
-                </header>
-                <!-- ⭐ 2026-09-20 三行 → **两行**（老板：这张卡"缩小一下"）。
-                     ⛔ 删掉的是「下发」（= 侧栏表单里的草稿值，本来就看得见，且侧栏
-                        `dcg-params-foot` 写了「待下发 N 项」）；
-                        留下的是**只有这里**才比得出来的那一对：设备声明的 vs 画面在播的。 -->
-                <div v-if="videoParamCompareStream" class="vpc-grid" data-testid="video-param-compare">
-                  <div class="vpc-row" data-testid="video-param-compare-read">
-                    <span>设备回读</span>
-                    <strong
-                      >{{ videoFormatText(videoParamCompareReadRow()?.videoFormat) }} ·
-                      {{ resolutionText(videoParamCompareReadRow()?.resolution) }} ·
-                      {{ frameRateText(videoParamCompareReadRow()?.frameRate) }}</strong
-                    >
-                  </div>
-                  <div class="vpc-row" data-testid="video-param-compare-measured">
-                    <span>画面实测</span>
-                    <strong>
-                      <i :class="{ 'is-differ': videoParamDiffs.codec === true }">{{ streamInfo.videoCodec }}</i> ·
-                      <i :class="{ 'is-differ': videoParamDiffs.resolution === true }">{{ streamInfo.resolution }}</i> ·
-                      <i :class="{ 'is-differ': videoParamDiffs.fps === true }">{{
-                        streamInfo.videoFps ? `${streamInfo.videoFps} fps` : "—"
-                      }}</i>
-                      <em v-if="liveMetrics.bitrate" class="vpc-bitrate">{{ liveMetrics.bitrate }} kbps</em>
-                    </strong>
-                  </div>
-                </div>
-                <p v-else class="vpc-empty" data-testid="video-param-compare-empty">
-                  还没有回读值 —— 点左侧「画面遮挡」卡上的「读取」，拿到设备参数后这里显示两行对照。
-                </p>
-              </section>
-            </div>
-          </div>
-
-          <div
-            v-if="canMonitorPlayback || canDiagnosePlayback"
-            v-show="activeTab === 'probe'"
-            class="linked-detail"
-            data-testid="linked-detail-probe"
+          <PlayConsoleProbePanel
+            :visible="canMonitorPlayback || canDiagnosePlayback"
+            :active="activeTab === 'probe'"
+            :probe-result="probeResult"
+            :probe-overview="probeOverview"
+            :probe-state="probeState"
+            :frame-overview-meta="frameOverviewMeta"
+            :frame-overview-aria-label="frameOverviewAriaLabel"
+            :probe-bucket-height="probeBucketHeight"
+            @open-timeline="openProbeTimelineDialog"
           >
-            <div class="linked-probe-layout">
-              <!-- 轨道明细:视频音频合成一张卡。
-                                 音频原来的「采样率」「声道」是从 monitorSnapshot 借来的、不是探针数据,
-                                 现在流信息块的音频栏已经在显示,这里删掉;codec 同理(流信息已有编码)。
-                                 去重后音频只剩 2 项,再单独占半个详情条就太空了,所以合并。 -->
-              <section class="linked-section probe-detail-card">
-                <div class="section-hd first">
-                  <span class="section-title"><Video :size="13" />轨道明细</span>
-                  <span class="section-meta">{{
-                    probeResult ? `${[probeResult.video, probeResult.audio].filter(Boolean).length} 条轨道` : "待采样"
-                  }}</span>
-                </div>
-                <div class="probe-track-merged">
-                  <div class="probe-track-row video">
-                    <span class="probe-track-kind"><Video :size="12" />视频</span>
-                    <div class="probe-track-cells">
-                      <div>
-                        <span>精确 FPS</span
-                        ><strong>{{ probeResult?.video?.fps == null ? "—" : probeResult.video.fps.toFixed(1) }}</strong>
-                      </div>
-                      <div>
-                        <span>采样帧</span><strong>{{ probeResult?.video?.frameCount ?? "—" }}</strong>
-                      </div>
-                      <div>
-                        <span>关键帧</span><strong>{{ probeResult?.video?.keyFrameCount ?? "—" }}</strong>
-                      </div>
-                      <div>
-                        <span>GOP</span
-                        ><strong>{{ probeResult?.video?.gop == null ? "—" : `${probeResult.video.gop.toFixed(1)} 帧` }}</strong>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="probe-track-row audio">
-                    <span class="probe-track-kind"><Activity :size="12" />音频</span>
-                    <div class="probe-track-cells">
-                      <div>
-                        <span>采样帧</span><strong>{{ probeResult?.audio?.frameCount ?? "—" }}</strong>
-                      </div>
-                      <div>
-                        <span>帧间隔</span
-                        ><strong>{{
-                          probeResult?.audio?.averageIntervalMs == null
-                            ? "—"
-                            : `${probeResult.audio.averageIntervalMs.toFixed(1)} ms`
-                        }}</strong>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
+          </PlayConsoleProbePanel>
 
-              <!-- 时间戳监控:从侧栏移到这里。它是采样结果而不是操作器,
-                                 按"侧栏放操作、详情条放结果"的分工本来就该在下面。 -->
-              <section class="linked-section probe-detail-card">
-                <div class="section-hd first">
-                  <span class="section-title"><Gauge :size="13" />时间戳监控</span>
-                  <span class="section-meta" :class="{ good: probeResult?.health.status === 'ok' }">
-                    {{ probeResult ? (probeResult.health.status === "ok" ? "平稳" : "需关注") : "待检测" }}
-                  </span>
-                </div>
-                <div class="probe-health-grid">
-                  <div>
-                    <span>视频 DTS 间隔</span
-                    ><strong>{{
-                      probeResult?.timestamps.videoDtsIntervalMeanMs == null
-                        ? "—"
-                        : `${probeResult.timestamps.videoDtsIntervalMeanMs.toFixed(1)} ms`
-                    }}</strong
-                    ><em>均值</em>
-                  </div>
-                  <div>
-                    <span>帧到达抖动</span
-                    ><strong>{{
-                      probeResult?.timestamps.arrivalJitterMs == null
-                        ? "—"
-                        : `${probeResult.timestamps.arrivalJitterMs.toFixed(1)} ms`
-                    }}</strong
-                    ><em>标准差</em>
-                  </div>
-                  <div>
-                    <span>PTS-DTS</span
-                    ><strong>{{
-                      probeResult?.timestamps.ptsDtsMaxMs == null ? "—" : `${probeResult.timestamps.ptsDtsMaxMs.toFixed(1)} ms`
-                    }}</strong
-                    ><em>最大值</em>
-                  </div>
-                  <div>
-                    <span>音视频交织</span
-                    ><strong>{{
-                      probeResult?.timestamps.avArrivalSkewMaxMs == null
-                        ? "—"
-                        : `${probeResult.timestamps.avArrivalSkewMaxMs.toFixed(1)} ms`
-                    }}</strong
-                    ><em>最大偏差</em>
-                  </div>
-                </div>
-              </section>
-
-              <!-- 概览层:按时间分桶看全量帧的到达密度与断档位置。
-                                 逐帧散点在弹窗里看 —— 侧栏这一栏约 250px 宽,放不下也不该放。 -->
-              <section class="linked-section probe-detail-card">
-                <div class="section-hd first">
-                  <span class="section-title"><Signal :size="13" />帧到达时间线</span>
-                  <span class="section-meta" :class="{ good: probeOverview && probeOverview.stallCount === 0 }">{{
-                    frameOverviewMeta
-                  }}</span>
-                </div>
-                <button
-                  type="button"
-                  class="frame-overview"
-                  :class="{ muted: !probeOverview }"
-                  :disabled="!probeOverview"
-                  data-testid="probe-timeline-open"
-                  :aria-label="frameOverviewAriaLabel"
-                  @click="openProbeTimelineDialog"
-                >
-                  <template v-if="probeOverview">
-                    <div class="frame-overview-bars">
-                      <span
-                        v-for="(bucket, index) in probeOverview.buckets"
-                        :key="index"
-                        class="frame-overview-bar"
-                        :class="{ stalled: bucket.stalled, empty: bucket.count === 0 }"
-                        :style="{ height: `${probeBucketHeight(bucket)}%` }"
-                      ></span>
-                    </div>
-                    <div class="frame-overview-foot">
-                      <span
-                        >{{ probeOverview.totalFrames }} 帧<template v-if="probeOverview.truncated">
-                          · 明细含末尾 {{ probeOverview.sampledFrames }} 帧</template
-                        ></span
-                      >
-                      <span class="frame-overview-cta">查看逐帧详情<Maximize2 :size="11" /></span>
-                    </div>
-                  </template>
-                  <!-- 空态与采样中态:柱状区中央的引导层。 -->
-                  <div v-else class="frame-overview-empty">
-                    <template v-if="probeState === 'sampling'">
-                      <Loader2 :size="18" class="spin" />
-                      <span>正在采集帧到达数据</span>
-                    </template>
-                    <template v-else>
-                      <Activity :size="18" />
-                      <span>启动检测后展示全量帧到达概览</span>
-                    </template>
-                  </div>
-                </button>
-              </section>
-            </div>
-          </div>
-
-          <!-- 「视频编码」页签的底栏块 2026-09-20 已并入上方「画面设置」底栏第三格（参数对照卡）。
-               ⛔ 别在这里恢复一份：同一屏两套「参数对照」就又要靠人猜哪份是准的。 -->
-        </div>
+          <!-- 参数对照已与视频编码一起挂在右侧侧栏；底部只保留四个画面视觉卡片。 -->
+        </PlayConsoleDetailWorkspace>
       </section>
       <!-- 右侧功能栏 -->
       <aside
-        v-if="!sideCollapsed && visibleTabs.length"
+        v-if="visibleTabs.length"
         class="sidebar"
         :class="{
           'sidebar-probe': activeTab === 'probe',
@@ -6292,511 +5614,44 @@ onBeforeUnmount(() => {
              ⚠️ 这个位置只放得下 3 个页签（每个 ~112px）；再多就得换回竖排/滚动。
              原来那行「当前页名」标题（`workspace-heading`）随页签一起删了 ——
              高亮的页签本身就是"现在在哪一页"，再写一遍是重复。 -->
-        <nav v-if="visibleTabs.length" class="tabs" aria-label="播放工作区">
-          <button
-            v-for="tab in visibleTabs"
-            :key="tab.key"
-            type="button"
-            class="tab"
-            :class="{ active: activeTab === tab.key }"
-            :aria-current="activeTab === tab.key ? 'page' : undefined"
-            :data-testid="`linked-tab-${tab.key}`"
-            :title="tab.description"
-            @click="activeTab = tab.key"
-          >
-            <component :is="tab.icon" :size="14" />
-            <span>{{ tab.label }}</span>
-            <!-- 未下发的画面改动：浮条只在「画面设置」页露头，离开后就没了入口
-                 （草稿还在，只是看不见了）。这枚角标补上那段盲区 —— 零打扰，
-                 但用户切到任何页签都带着它回来。
-                 ⛔ 只在该页签**不是当前页**时显示：人在画面设置页时浮条已经把这事
-                    说清楚了，角标再亮一次是重复提醒。 -->
-            <em
-              v-if="tab.key === 'deviceconfig' && activeTab !== 'deviceconfig' && pictureDirtyCount > 0"
-              class="tab-draft-dot"
-              data-testid="linked-tab-draft-dot"
-              :title="`${pictureDraftSummary} 未下发`"
-            ></em>
-          </button>
-        </nav>
+        <PlayConsoleTabs
+          :tabs="visibleTabs"
+          :active-tab="activeTab"
+          :picture-dirty-count="pictureDirtyCount"
+          :picture-draft-summary="pictureDraftSummary"
+          @update:active-tab="activeTab = $event as TabKey"
+        />
 
         <!-- Tab 面板容器 -->
         <div class="panels">
           <!-- ═══════════ 云台控制 ═══════════ -->
-          <div v-if="canPtzPanel" v-show="activeTab === 'ptz'" class="panel" data-testid="linked-side-ptz">
-            <!-- 模式切换:速度控制 / 精准控制(2022) -->
-            <div class="mode-switch">
-              <button :class="{ active: ptzMode === 'speed' }" @click="ptzMode = 'speed'"><Compass :size="13" />速度控制</button>
-              <button data-testid="ptz-mode-precise" :class="{ active: ptzMode === 'precise' }" @click="ptzMode = 'precise'">
-                <Crosshair :size="13" />精准定位<span class="tag-2022">2022</span>
-              </button>
-            </div>
+          <PlayConsolePtzSidebar />
 
-            <!-- 速度模式:拖拽摇杆 + 变倍 + 速度 -->
-            <div v-show="ptzMode === 'speed'" class="ptz-speed">
-              <div
-                class="joystick-stage"
-                :class="{ active: joystickDragging }"
-                role="group"
-                tabindex="0"
-                aria-label="云台方向摇杆"
-                @pointerdown.prevent="startJoystick"
-                @pointermove.prevent="moveJoystick"
-                @pointerup.prevent="endJoystick"
-                @pointercancel.prevent="endJoystick"
-                @keydown="handleJoystickKeydown"
-                @keyup="handleJoystickKeyup"
-              >
-                <div class="joystick-base"></div>
-                <div class="joystick-dots" aria-hidden="true">
-                  <span class="joystick-dot dot-top"></span>
-                  <span class="joystick-dot dot-top-right"></span>
-                  <span class="joystick-dot dot-right"></span>
-                  <span class="joystick-dot dot-bottom-right"></span>
-                  <span class="joystick-dot dot-bottom"></span>
-                  <span class="joystick-dot dot-bottom-left"></span>
-                  <span class="joystick-dot dot-left"></span>
-                  <span class="joystick-dot dot-top-left"></span>
-                </div>
-                <span class="joystick-label top">上</span>
-                <span class="joystick-label diagonal top-right">右上</span>
-                <span class="joystick-label right">右</span>
-                <span class="joystick-label diagonal bottom-right">右下</span>
-                <span class="joystick-label bottom">下</span>
-                <span class="joystick-label diagonal bottom-left">左下</span>
-                <span class="joystick-label left">左</span>
-                <span class="joystick-label diagonal top-left">左上</span>
-                <div class="joystick-handle" :style="joystickHandleStyle" aria-hidden="true">
-                  <span></span>
-                </div>
-              </div>
-
-              <div class="talk-mode-switch" aria-label="对讲模式">
-                <button
-                  :class="{ active: talkMode === 'broadcast' }"
-                  :disabled="talkState !== 'idle' || !talkAvailable"
-                  :title="capabilityActionTitle('broadcast', '广播')"
-                  @click="talkMode = 'broadcast'"
-                >
-                  广播
-                </button>
-                <button
-                  :class="{ active: talkMode === 'talk' }"
-                  :disabled="talkState !== 'idle' || !talkAvailable"
-                  :title="capabilityActionTitle('talk', 'Talk')"
-                  @click="talkMode = 'talk'"
-                >
-                  Talk
-                </button>
-              </div>
-              <button
-                class="talk-button"
-                data-testid="talk-button"
-                :class="{ active: talkState !== 'idle' }"
-                :disabled="!isAudioCapable"
-                :title="capabilityActionTitle(talkMode, talkMode === 'broadcast' ? '广播对讲' : '双向对讲')"
-                :aria-pressed="talkState === 'talking'"
-                @click="toggleTalk"
-              >
-                <Mic :size="14" />
-                <span
-                  v-if="talkState === 'talking'"
-                  class="talk-wave"
-                  data-testid="talk-wave"
-                  :style="{ '--talk-level': String(talkLevel) }"
-                  aria-hidden="true"
-                >
-                  <i v-for="bar in 4" :key="bar" :style="{ animationDelay: `${(bar - 1) * -0.17}s` }"></i>
-                </span>
-                <span>{{ talkButtonText }}</span>
-              </button>
-
-              <div class="speed-row">
-                <label>
-                  <span><Gauge :size="12" />移动速度</span>
-                  <input v-model.number="moveSpeed" type="range" min="1" max="10" />
-                  <em>{{ moveSpeed }}</em>
-                </label>
-              </div>
-
-              <div class="lens-grid">
-                <div class="lens-item">
-                  <span class="lens-label"><ZoomIn :size="12" />变倍</span>
-                  <div class="lens-btns">
-                    <button
-                      title="放大"
-                      @pointerdown.prevent="sendPtz('放大')"
-                      @pointerup.prevent="sendPtz('停止')"
-                      @pointerleave="sendPtz('停止')"
-                      @pointercancel="sendPtz('停止')"
-                    >
-                      <ZoomIn :size="14" />
-                    </button>
-                    <button
-                      title="缩小"
-                      @pointerdown.prevent="sendPtz('缩小')"
-                      @pointerup.prevent="sendPtz('停止')"
-                      @pointerleave="sendPtz('停止')"
-                      @pointercancel="sendPtz('停止')"
-                    >
-                      <ZoomOut :size="14" />
-                    </button>
-                  </div>
-                </div>
-                <div class="lens-item">
-                  <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
-                  <div class="lens-btns">
-                    <button
-                      title="远焦(按住连续)"
-                      @pointerdown.prevent="sendPtz('远焦')"
-                      @pointerup.prevent="sendPtz('镜头停止')"
-                      @pointerleave="sendPtz('镜头停止')"
-                      @pointercancel="sendPtz('镜头停止')"
-                    >
-                      远
-                    </button>
-                    <button
-                      title="近焦(按住连续)"
-                      @pointerdown.prevent="sendPtz('近焦')"
-                      @pointerup.prevent="sendPtz('镜头停止')"
-                      @pointerleave="sendPtz('镜头停止')"
-                      @pointercancel="sendPtz('镜头停止')"
-                    >
-                      近
-                    </button>
-                  </div>
-                </div>
-                <div class="lens-item">
-                  <span class="lens-label"><Circle :size="12" />光圈</span>
-                  <div class="lens-btns">
-                    <button
-                      title="开大(按住连续)"
-                      @pointerdown.prevent="sendPtz('光圈+')"
-                      @pointerup.prevent="sendPtz('镜头停止')"
-                      @pointerleave="sendPtz('镜头停止')"
-                      @pointercancel="sendPtz('镜头停止')"
-                    >
-                      +
-                    </button>
-                    <button
-                      title="缩小(按住连续)"
-                      @pointerdown.prevent="sendPtz('光圈-')"
-                      @pointerup.prevent="sendPtz('镜头停止')"
-                      @pointerleave="sendPtz('镜头停止')"
-                      @pointercancel="sendPtz('镜头停止')"
-                    >
-                      −
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 精准控制模式(2022 新增):Pan/Tilt/Zoom 绝对定位 -->
-            <div v-show="ptzMode === 'precise'" class="ptz-precise">
-              <div class="precise-hint">
-                <Info :size="12" />
-                <span>基于 <strong>PTZPreciseCtrl</strong>(2022),精准角度定位。需设备支持精准 PTZ 协议。</span>
-              </div>
-              <div class="axis-row">
-                <label>
-                  <span>Pan 水平角(°)</span>
-                  <div class="axis-ctrl">
-                    <input v-model.number="precisePan" type="range" min="0" max="360" step="0.1" />
-                    <input v-model.number="precisePan" type="number" min="0" max="360" step="0.1" class="axis-num" />
-                  </div>
-                </label>
-              </div>
-              <div class="axis-row">
-                <label>
-                  <span>Tilt 俯仰角(°)</span>
-                  <div class="axis-ctrl">
-                    <input v-model.number="preciseTilt" type="range" min="-90" max="90" step="0.1" />
-                    <input v-model.number="preciseTilt" type="number" min="-90" max="90" step="0.1" class="axis-num" />
-                  </div>
-                </label>
-              </div>
-              <div class="axis-row">
-                <label>
-                  <span>Zoom 变倍(x)</span>
-                  <div class="axis-ctrl">
-                    <input v-model.number="preciseZoom" type="range" min="1" max="32" step="0.1" />
-                    <input v-model.number="preciseZoom" type="number" min="1" max="32" step="0.1" class="axis-num" />
-                  </div>
-                </label>
-              </div>
-              <div class="precise-actions">
-                <button class="btn-primary sm" data-testid="ptz-precise-apply" @click="sendPrecise">
-                  <Target :size="13" />应用定位
-                </button>
-                <button class="btn-ghost sm" @click="readPreciseStatus"><Navigation :size="13" />读取当前位置</button>
-              </div>
-            </div>
-
-            <!-- 3D 拖拽(2026-09-20 从「高级」详情区的「画面控制」卡搬来)
-                 ① 位置:3D 放大/缩小本质就是"框选区域做变倍+定位",放在镜头组(变倍/聚焦/
-                    光圈)这一族底下最自洽;详情区那 4 张卡都是"设备侧带编号/开关的能力",
-                    塞进去语义不齐。
-                 ② ⛔ 刻意放在 .ptz-speed / .ptz-precise **之外**:它是画面级手势,与
-                    "速度控制 / 精准定位"正交。塞进 .ptz-speed 里的话,一旦切到精准定位模式
-                    按钮就消失,而 dragZoomMode 还开着 —— 画面停在拖框态却找不到取消入口。
-                 ③ ⛔ 自己挡 canControlDevice:动作侧 toggleDragZoomMode 第一句就是
-                    `if (!canControlDevice.value) return`,而本面板的可见性门禁是
-                    canPtzPanel(一堆 ptz:* 权限)。不挡就会出现"有 ptz 权限、没 device:control"
-                    的账号看得见按钮却点不动 —— 死按钮比看不见更糟。(原「高级」里那张卡
-                    本来就没挡,本次一并修掉。) -->
-            <div v-if="canControlDevice" class="ptz-drag-zoom" data-testid="ptz-drag-zoom">
-              <span class="lens-label"><Move3d :size="12" />3D 拖拽</span>
-              <div class="drag-zoom-switch" aria-label="3D 拖拽方向">
-                <button
-                  :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }"
-                  data-testid="ptz-drag-zoom-in"
-                  :title="capabilityActionTitle('dragZoom', '3D 放大')"
-                  :disabled="isAdvancedPending('drag_zoom_in')"
-                  :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_in'"
-                  @click="toggleDragZoomMode('drag_zoom_in')"
-                >
-                  {{ dragZoomMode && dragZoomAction === "drag_zoom_in" ? "取消 3D 放大" : "3D 放大" }}
-                </button>
-                <button
-                  :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }"
-                  data-testid="ptz-drag-zoom-out"
-                  :title="capabilityActionTitle('dragZoom', '3D 缩小')"
-                  :disabled="isAdvancedPending('drag_zoom_out')"
-                  :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_out'"
-                  @click="toggleDragZoomMode('drag_zoom_out')"
-                >
-                  {{ dragZoomMode && dragZoomAction === "drag_zoom_out" ? "取消 3D 缩小" : "3D 缩小" }}
-                </button>
-              </div>
-            </div>
-
-            <!-- 请求关键帧(2026-09-20 从「高级」详情区的「媒体控制」卡搬来)
-                 ① 位置:它是"点一下发一条、不回传"的画面级即时操作,与摇杆/变倍/3D 拖拽同族,
-                    留在侧栏;详情区那 4 张卡都是"带编号/开关的设备侧能力",塞进去语义不齐。
-                 ② ⛔ 与 3D 拖拽一样自己挡 canControlDevice:动作侧 runAdvancedAction 第一句
-                    就是 `if (!canControlDevice.value || !props.channel) return`,而本面板的
-                    可见性门禁是 canPtzPanel(一堆 ptz:* 权限)。不挡就会出现"有 ptz 权限、
-                    没 device:control"的账号看得见按钮却点不动 —— 死按钮比看不见更糟。
-                 ③ 文案沿用标准口径:IFameCmd 只有"送达"没有"执行结论"(附录 A 无回读手段),
-                    所以状态词只说"已发送",别写成"已生效"。 -->
-            <div v-if="canControlDevice" class="ptz-iframe" data-testid="ptz-iframe">
-              <span class="lens-label"><Video :size="12" />关键帧</span>
-              <button
-                data-testid="ptz-iframe-request"
-                :title="capabilityActionTitle('iFrame', '请求关键帧')"
-                :disabled="isAdvancedPending('iframe')"
-                @click="runAdvancedAction('iframe')"
-              >
-                <Loader2 v-if="isAdvancedPending('iframe')" :size="12" class="spin" /><Video v-else :size="12" />
-                <span>请求关键帧</span>
-              </button>
-            </div>
-
-            <!-- 目标跟踪（GB/T 28181-2022 A.2.3.1.14）
-                 ① 位置:与 3D 拖拽/关键帧同族 —— 都是"对着这块画面发一条即时命令",
-                    而手动跟踪的框只能在这块画面上圈出来(见 targetTrackMode 的 KDoc)。
-                 ② ⛔ 自己挡 canControlDevice:动作侧 toggleTargetTrackMode / submitTargetTrack
-                    第一句就是 `if (!canControlDevice.value) return`,而本面板的可见性门禁是
-                    canPtzPanel。不挡就会出现"有 ptz 权限、没 device:control"的账号看得见按钮
-                    却点不动 —— 死按钮比看不见更糟。
-                 ③ ⛔⛔ 状态词只能是「已下发」:目标跟踪是**无应答命令**(9.3.1 d) + 表 1 序号 13),
-                    且 2022 全文没有"查设备在跟踪什么"的命令 ⇒ 平台查不到、也不该假装查得到。
-                    下面这行文字的主语永远是"平台",不是"设备"。 -->
-            <div v-if="canControlDevice" class="ptz-target-track" data-testid="ptz-target-track">
-              <span class="lens-label"><ScanEye :size="12" />目标跟踪<span class="tag-2022">2022</span></span>
-              <div class="target-track-switch" aria-label="目标跟踪方式">
-                <button
-                  data-testid="ptz-target-track-auto"
-                  :title="capabilityActionTitle('targetTrack', '自动跟踪')"
-                  :disabled="targetTrackPending"
-                  @click="submitTargetTrack('Auto')"
-                >
-                  <Loader2 v-if="targetTrackPending" :size="12" class="spin" /><ScanEye v-else :size="12" />
-                  <span>自动跟踪</span>
-                </button>
-                <button
-                  :class="{ active: targetTrackMode }"
-                  data-testid="ptz-target-track-manual"
-                  :title="capabilityActionTitle('targetTrack', '手动框选目标')"
-                  :disabled="targetTrackPending"
-                  :aria-pressed="targetTrackMode"
-                  @click="toggleTargetTrackMode"
-                >
-                  <Square v-if="targetTrackMode" :size="12" /><ScanEye v-else :size="12" />
-                  <span>{{ targetTrackMode ? "取消框选" : "框选跟踪" }}</span>
-                </button>
-                <button
-                  data-testid="ptz-target-track-stop"
-                  :title="capabilityActionTitle('targetTrack', '停止跟踪')"
-                  :disabled="targetTrackPending"
-                  @click="submitTargetTrack('Stop')"
-                >
-                  <CircleSlash :size="12" />
-                  <span>停止跟踪</span>
-                </button>
-              </div>
-              <!-- ⛔ 这三行文字合起来才是完整口径,少一行都会被读成"设备在做某事":
-                    「平台最近一次下发…」(全知的一侧) + 「已下发,设备未回执」(没有回执) +
-                    「平台无法得知设备实际状态」(所以别问平台设备现在在跟踪什么)。 -->
-              <p class="target-track-state" data-testid="target-track-intent">
-                {{ targetTrackIntentText }}
-              </p>
-              <p v-if="targetTrackStatus" class="target-track-status" data-testid="target-track-status">
-                {{ targetTrackStatus }}
-              </p>
-              <p v-else class="target-track-tip" data-testid="target-track-tip">
-                「自动跟踪」「停止跟踪」一键下发；「框选跟踪」要在画面上框住目标（坐标按画面实际渲染尺寸换算）。
-              </p>
-              <p v-if="targetTrackError" class="target-track-error" data-testid="target-track-error">
-                {{ targetTrackError }}
-              </p>
-            </div>
-          </div>
-          <!-- ═══════════ 视频探针 ═══════════ -->
-          <div
+          <PlayConsoleProbeSidebar
             v-if="canMonitorPlayback || canDiagnosePlayback"
             v-show="activeTab === 'probe'"
-            class="panel probe-panel"
-            data-testid="linked-side-probe"
-          >
-            <!-- 流信息:2 秒轮询的实时指标。和探针放同一个面板 —— 两者回答的是同一个问题
-                             ("这路流健康吗"),区别只在一个持续刷新、一个手动采样。所以两块的标题上
-                             都写明刷新语义,免得把十分钟前那次采样的数字当成当下的值。 -->
-            <section class="stream-brief probe-card" data-testid="stream-brief">
-              <div class="section-hd first">
-                <span class="section-title"><Signal :size="13" />概览</span>
-                <span class="section-meta">2 秒刷新 · {{ monitorCollectedAtText }}</span>
-              </div>
-              <div class="stream-brief-overview">
-                <div>
-                  <span>当前观看</span>
-                  <strong>{{ readerCount }}</strong>
-                  <small>累计 {{ totalReaderCount }}</small>
-                </div>
-                <div>
-                  <span>数据速率</span>
-                  <strong>{{ monitorBytesSpeedText }}</strong>
-                  <small>累计 {{ monitorTotalBytesText }}</small>
-                </div>
-                <div>
-                  <span>媒体节点</span>
-                  <strong :title="streamInfo.nodeName">{{ streamInfo.nodeName }}</strong>
-                  <small :title="streamInfo.nodeHost">{{ streamInfo.nodeHost }}</small>
-                </div>
-                <div>
-                  <span>流 ID</span>
-                  <strong :title="streamInfo.streamId || '—'">{{ streamInfo.streamId || "—" }}</strong>
-                  <small :title="`SSRC ${streamInfo.ssrc || '—'} · APP ${playResult?.app || '—'}`">
-                    SSRC {{ streamInfo.ssrc || "—" }} · APP {{ playResult?.app || "—" }}
-                  </small>
-                </div>
-              </div>
-
-              <div class="stream-brief-split">
-                <section class="stream-brief-kind video">
-                  <header><Video :size="12" />视频</header>
-                  <div class="stream-brief-rows">
-                    <div>
-                      <span>编码</span><strong>{{ streamInfo.videoCodec }}</strong>
-                    </div>
-                    <div>
-                      <span>分辨率</span><strong>{{ streamInfo.resolution }}</strong>
-                    </div>
-                    <div>
-                      <span>帧率</span><strong>{{ streamInfo.videoFps || "—" }}</strong>
-                    </div>
-                    <div>
-                      <span>丢包</span>
-                      <strong :class="{ warn: (liveMetrics.videoLoss ?? 0) > 0.005, err: (liveMetrics.videoLoss ?? 0) > 0.02 }">{{
-                        formatLoss(liveMetrics.videoLoss)
-                      }}</strong>
-                    </div>
-                  </div>
-                </section>
-                <section class="stream-brief-kind audio">
-                  <header><Activity :size="12" />音频</header>
-                  <div class="stream-brief-rows">
-                    <div>
-                      <span>编码</span><strong>{{ streamInfo.audioCodec }}</strong>
-                    </div>
-                    <div>
-                      <span>采样率</span
-                      ><strong>{{ streamInfo.audioSampleRate ? `${streamInfo.audioSampleRate} Hz` : "—" }}</strong>
-                    </div>
-                    <div>
-                      <span>声道</span><strong>{{ monitorAudioTrack?.channels || "—" }}</strong>
-                    </div>
-                    <div>
-                      <span>丢包</span>
-                      <strong :class="{ warn: (liveMetrics.audioLoss ?? 0) > 0.005, err: (liveMetrics.audioLoss ?? 0) > 0.02 }">{{
-                        formatLoss(liveMetrics.audioLoss)
-                      }}</strong>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </section>
-
-            <section class="probe-card" data-testid="probe-check">
-              <div class="section-hd first">
-                <span class="section-title"><Activity :size="13" />逐帧健康检测</span>
-                <span class="probe-status" :class="probeState"> <span class="dot"></span>{{ probeStatusText }} </span>
-              </div>
-
-              <div v-if="canDiagnosePlayback" class="probe-action-row">
-                <button
-                  class="probe-action"
-                  data-testid="probe-start"
-                  :disabled="phase !== 'playing' || probeState === 'sampling'"
-                  @click="startProbe"
-                >
-                  <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
-                  <Play v-else :size="14" />
-                  <span>{{ probeButtonText }}</span>
-                </button>
-                <a-select
-                  v-model="probeDurationMs"
-                  class="probe-duration"
-                  data-testid="probe-duration"
-                  aria-label="采样时长"
-                  :disabled="probeState === 'sampling'"
-                >
-                  <a-option v-for="duration in probeDurations" :key="duration.value" :value="duration.value">{{
-                    duration.label
-                  }}</a-option>
-                </a-select>
-              </div>
-
-              <div class="probe-summary" :class="{ muted: probeState !== 'complete' }">
-                <div>
-                  <span>采样时长</span>
-                  <strong>{{ probeResult ? (probeResult.summary.sampleDurationMs / 1000).toFixed(2) : "—" }}<em>s</em></strong>
-                </div>
-                <div>
-                  <span>采集帧数</span>
-                  <strong>{{ probeResult?.summary.frameCount ?? "—" }}<em>帧</em></strong>
-                </div>
-                <div>
-                  <span>采样流量</span>
-                  <strong>{{ probeResult ? Math.round(probeResult.summary.totalBytes / 1024) : "—" }}<em>KB</em></strong>
-                </div>
-              </div>
-
-              <!-- 结论条压成单行:采样完成时它是唯一新增内容,原来两行 + padding 约 45px,
-                                 完成态一到就把整个侧栏撑破画面高度。副信息(完成时间/具体问题)挪到 title。 -->
-              <div
-                v-if="probeState === 'complete'"
-                class="probe-verdict"
-                :class="{ warning: probeResult?.health.status === 'warning', error: probeResult?.health.status === 'error' }"
-                :title="`完成于 ${probeFinishedAt} · ${probeResult?.health.issues?.[0]?.message || '未发现异常帧间隔'}`"
-              >
-                <CheckCircle2 v-if="probeResult?.health.status === 'ok'" :size="14" />
-                <AlertTriangle v-else :size="14" />
-                <strong>{{ probeResult?.health.status === "ok" ? "流健康，帧序与时间戳连续" : "检测发现需要关注的问题" }}</strong>
-              </div>
-            </section>
-          </div>
+            :phase="phase"
+            :stream-info="streamInfo"
+            :play-result="playResult"
+            :reader-count="readerCount"
+            :total-reader-count="totalReaderCount"
+            :monitor-bytes-speed-text="monitorBytesSpeedText"
+            :monitor-total-bytes-text="monitorTotalBytesText"
+            :monitor-collected-at-text="monitorCollectedAtText"
+            :monitor-audio-track="monitorAudioTrack"
+            :live-metrics="liveMetrics"
+            :probe-state="probeState"
+            :probe-status-text="probeStatusText"
+            :can-diagnose-playback="canDiagnosePlayback"
+            :probe-button-text="probeButtonText"
+            :probe-duration-ms="probeDurationMs"
+            :probe-durations="probeDurations"
+            :probe-result="probeResult"
+            :probe-finished-at="probeFinishedAt"
+            :format-loss="formatLoss"
+            @start-probe="startProbe"
+            @update:probe-duration="probeDurationMs = $event"
+          />
           <!-- ═══════════ 视频参数 ═══════════
                          2026-09-18 从"高级"拆出:它是 A.2.3.2 设备配置类(读 A.2.4.7 / 写 A.2.3.2.5),
                          与云台预置位/巡航不是一类。可见性用 canViewPtz(见 TabKey 处的注释)。
@@ -6839,484 +5694,29 @@ onBeforeUnmount(() => {
               :can-read="canViewPtz"
               :can-apply="canControlPtz && props.channel?.status === 1"
             />
+            <div class="sidebar-video-compare" data-testid="linked-side-video-compare">
+              <!-- 参数对照与视频编码上下相邻，设备回读与当前实测始终在同一视线内。 -->
+              <PictureVideoCompareCard
+                class="sidebar-video-compare-card"
+                :verdict="videoParamVerdict"
+                :verdict-title="videoParamVerdictTitle"
+                :selected-stream="videoParamCompareStream"
+                :streams="videoParamsDraft"
+                :read-row="videoParamCompareReadRow()"
+                :diffs="videoParamDiffs"
+                :stream-info="streamInfo"
+                :bitrate="liveMetrics.bitrate"
+                :video-format-text="videoFormatText"
+                :resolution-text="resolutionText"
+                :frame-rate-text="frameRateText"
+                @select-stream="selectVideoStream"
+              />
+            </div>
           </div>
         </div>
       </aside>
 
-      <Transition name="asset-drawer">
-        <div v-if="canPtzPanel && assetManagerVisible" class="asset-manager-layer" data-testid="asset-manager">
-          <button class="asset-manager-mask" aria-label="关闭资源管理" @click="closeAssetManager"></button>
-          <aside class="asset-manager-drawer" role="dialog" aria-modal="true" aria-label="云台资源管理">
-            <header class="asset-manager-header">
-              <div>
-                <span>云台资源管理</span>
-                <strong>{{ assetManagerTab === "preset" ? "预置位管理" : "巡航轨迹管理" }}</strong>
-              </div>
-              <button data-testid="asset-manager-close" title="关闭" @click="closeAssetManager"><X :size="16" /></button>
-            </header>
-
-            <div class="asset-manager-tabs">
-              <button
-                data-testid="asset-manager-tab-preset"
-                :class="{ active: assetManagerTab === 'preset' }"
-                @click="switchAssetManagerTab('preset')"
-              >
-                <Hash :size="13" /><span>预置位</span><em>{{ presets.length }}</em>
-              </button>
-              <button
-                data-testid="asset-manager-tab-cruise"
-                :class="{ active: assetManagerTab === 'cruise' }"
-                @click="switchAssetManagerTab('cruise')"
-              >
-                <Route :size="13" /><span>巡航轨迹</span><em>{{ cruiseTracks.length }}</em>
-              </button>
-            </div>
-
-            <label class="asset-manager-search">
-              <Search :size="14" />
-              <input
-                v-model="assetSearch"
-                type="search"
-                :placeholder="assetManagerTab === 'preset' ? '搜索预置位名称或编号' : '搜索巡航名称或编号'"
-              />
-            </label>
-
-            <div v-if="assetManagerTab === 'preset'" class="asset-manager-inline-actions">
-              <button class="asset-manager-add" data-testid="asset-manager-add-preset" @click="openSavePresetDialog">
-                <Plus :size="12" /><span>添加预置位</span>
-              </button>
-            </div>
-
-            <div class="asset-manager-list">
-              <template v-if="assetManagerTab === 'preset'">
-                <div
-                  v-for="p in filteredPresets"
-                  :key="p.id"
-                  class="asset-manager-row"
-                  :class="{ active: activePresetId === p.id }"
-                  data-testid="asset-manager-row"
-                >
-                  <span class="asset-manager-index">#{{ p.id }}</span>
-                  <a-tooltip
-                    :content="`#${p.id} ${p.name}`"
-                    position="top"
-                    :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                    :data-testid="`preset-manager-tooltip-${p.id}`"
-                  >
-                    <div class="asset-manager-info">
-                      <strong>{{ p.name }}</strong>
-                      <small>{{ p.setAt || "尚未记录更新时间" }}</small>
-                    </div>
-                  </a-tooltip>
-                  <div class="asset-manager-actions">
-                    <button class="btn-ghost xs" @click="callPreset(p.id)"><Navigation :size="11" />调用</button>
-                    <button class="asset-manager-delete" title="删除预置位" @click="deletePreset(p.id)">
-                      <Trash2 :size="12" />
-                    </button>
-                  </div>
-                </div>
-                <div
-                  v-if="filteredPresets.length === 0"
-                  class="asset-manager-empty preset-empty-large"
-                  data-testid="asset-manager-preset-empty"
-                >
-                  <Inbox :size="28" class="preset-empty-glyph" />
-                  <p class="preset-empty-line-primary">{{ assetSearch ? "没有匹配的预置位" : "暂无预置位" }}</p>
-                </div>
-              </template>
-
-              <template v-else>
-                <a-tooltip
-                  v-for="c in filteredCruiseTracks"
-                  :key="c.id"
-                  :content="cruiseTileTitle(c)"
-                  position="top"
-                  :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
-                  :data-testid="`cruise-manager-tooltip-${c.id}`"
-                >
-                  <div
-                    class="asset-manager-row"
-                    :class="{ active: activeCruiseId === c.id, disabled: !c.enabled && !c.pending, pending: c.pending }"
-                    data-testid="asset-manager-row"
-                  >
-                    <span class="asset-manager-index">#{{ c.id }}</span>
-                    <div class="asset-manager-info">
-                      <strong>{{ c.name }}</strong>
-                      <small>{{ cruiseTrackMeta(c) }} · {{ c.pending ? "可试运行" : c.enabled ? "可调用" : "已禁用" }}</small>
-                    </div>
-                    <button class="btn-ghost xs" :disabled="!c.enabled && !c.pending" @click="toggleCruise(c.id)">
-                      <Square v-if="activeCruiseId === c.id && cruiseState === 'start-sent'" :size="11" />
-                      <Play v-else :size="11" />
-                      {{ activeCruiseId === c.id && cruiseState === "start-sent" ? "停止" : c.pending ? "试运行" : "启动" }}
-                    </button>
-                  </div>
-                </a-tooltip>
-                <div v-if="filteredCruiseTracks.length === 0" class="asset-manager-empty">没有匹配的巡航轨迹</div>
-              </template>
-            </div>
-
-            <footer class="asset-manager-footer">
-              <span>{{
-                assetManagerTab === "preset"
-                  ? `${filteredPresets.length} 个预置位`
-                  : `${filteredCruiseTracks.length} 条巡航轨迹 · ${cruiseSyncLabel}`
-              }}</span>
-              <button
-                v-if="assetManagerTab === 'cruise' && activeCruiseId !== null && cruiseState !== 'stopped'"
-                class="btn-ghost xs"
-                @click="stopCruise"
-              >
-                <Square :size="11" />停止全部
-              </button>
-            </footer>
-          </aside>
-        </div>
-      </Transition>
-
-      <!-- 帧到达时间线详情:侧栏概览条点击后打开。
-                 逐帧散点需要的横向空间比概览条大得多,所以单独给弹窗。 -->
-      <ProbeTimelineDialog v-if="canDiagnosePlayback" v-model:visible="probeTimelineDialogVisible" :snapshot="probeResult" />
-
-      <a-modal
-        v-if="homeSettingsDialogVisible"
-        v-model:visible="homeSettingsDialogVisible"
-        title="设置看守位"
-        modal-class="uvp-system-dialog home-settings-modal"
-        :width="430"
-        :footer="false"
-        :mask-closable="!homeSettingsSubmitting"
-        :closable="!homeSettingsSubmitting"
-        :esc-to-close="!homeSettingsSubmitting"
-        unmount-on-close
-        @cancel="closeHomeSettingsDialog"
-        @close="closeHomeSettingsDialog"
-      >
-        <div class="home-settings-form" data-testid="home-settings-dialog">
-          <div class="home-settings-field">
-            <label for="home-position-preset">归位预置位 <span>*</span></label>
-            <select
-              id="home-position-preset"
-              v-model.number="homeDraft.presetId"
-              data-testid="home-preset"
-              :disabled="homeSettingsSubmitting"
-              @change="homeSettingsTouched = true"
-            >
-              <option :value="null">请选择预置位</option>
-              <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
-            </select>
-          </div>
-          <div class="home-settings-field">
-            <label for="home-position-reset-time">无云台操作后 <span>*</span></label>
-            <div class="home-settings-time">
-              <input
-                id="home-position-reset-time"
-                v-model.number="homeDraft.resetTime"
-                data-testid="home-reset-time"
-                type="number"
-                min="10"
-                max="3600"
-                :disabled="homeSettingsSubmitting"
-                @input="homeSettingsTouched = true"
-              />
-              <span>秒自动归位</span>
-            </div>
-          </div>
-          <p class="home-settings-description">连续无云台操作达到指定时间后，设备将自动返回所选预置位。</p>
-          <p v-if="homeSettingsTouched && !homePositionCanSave" class="home-settings-error" data-testid="home-validation">
-            请选择一个已存在的预置位，等待时间必须是 10 至 3600 秒整数。
-          </p>
-          <div class="home-settings-actions">
-            <button class="btn-ghost sm" :disabled="homeSettingsSubmitting" @click="closeHomeSettingsDialog">取消</button>
-            <button
-              class="btn-primary sm"
-              data-testid="home-dialog-submit"
-              :disabled="homeSettingsSubmitting || !homePositionCanSave"
-              @click="submitHomeSettings"
-            >
-              <Loader2 v-if="homeSettingsSubmitting" :size="13" class="spin" />
-              <ShieldCheck v-else :size="13" />
-              {{ homeSettingsActionLabel }}
-            </button>
-          </div>
-        </div>
-      </a-modal>
-
-      <a-modal
-        v-if="canSavePtzPreset && savePresetDialogVisible"
-        v-model:visible="savePresetDialogVisible"
-        title="保存预置位"
-        ok-text="保存"
-        cancel-text="取消"
-        modal-class="uvp-system-dialog preset-save-modal"
-        :width="380"
-        :mask-closable="false"
-        :ok-loading="presetDraft?.submitting || false"
-        :on-before-ok="handleSavePresetBeforeOk"
-        unmount-on-close
-        @cancel="closeSavePresetDialog"
-        @close="closeSavePresetDialog"
-      >
-        <div v-if="presetDraft" class="preset-save-form" data-testid="preset-save-dialog">
-          <div class="preset-save-row">
-            <label class="preset-save-label">编号</label>
-            <span class="preset-save-index">#{{ presetDraft.id }}</span>
-          </div>
-          <div class="preset-save-row">
-            <label class="preset-save-label">名称</label>
-            <div class="preset-save-field">
-              <a-input
-                v-model="presetDraft.name"
-                allow-clear
-                :max-length="16"
-                :placeholder="`预置位 ${presetDraft.id}`"
-                :disabled="presetDraft.submitting"
-                :error="!!presetNameError"
-                data-testid="preset-save-name-input"
-                @blur="presetNameTouched = true"
-                @press-enter="presetNameTouched = true"
-              >
-                <template #suffix>
-                  <span
-                    class="preset-save-count"
-                    :class="{ ok: presetDraft.name.trim().length > 0 && presetDraft.name.trim().length <= 16 }"
-                  >
-                    {{ presetDraft.name.length }}/16
-                  </span>
-                </template>
-              </a-input>
-              <p v-if="presetNameError" class="preset-save-error">{{ presetNameError }}</p>
-              <p v-else class="preset-save-hint">留空将使用默认名「预置位 {{ presetDraft.id }}」</p>
-            </div>
-          </div>
-        </div>
-      </a-modal>
-
-      <a-modal
-        v-if="canControlPtzCruise && saveCruiseDialogVisible"
-        v-model:visible="saveCruiseDialogVisible"
-        title="新建巡航轨迹"
-        ok-text="创建并下发"
-        cancel-text="取消"
-        modal-class="uvp-system-dialog cruise-save-modal"
-        :width="480"
-        :mask-closable="false"
-        :closable="!cruiseDraft?.submitting"
-        :esc-to-close="!cruiseDraft?.submitting"
-        :cancel-button-props="{ disabled: cruiseDraft?.submitting || false }"
-        :ok-loading="cruiseDraft?.submitting || false"
-        :on-before-ok="handleSaveCruiseBeforeOk"
-        :on-before-cancel="canCloseSaveCruiseDialog"
-        unmount-on-close
-        @cancel="closeSaveCruiseDialog"
-        @close="closeSaveCruiseDialog"
-      >
-        <div v-if="cruiseDraft" class="cruise-save-form" data-testid="cruise-save-dialog">
-          <div class="cruise-save-notice">
-            <Info :size="14" />
-            <span
-              >设备会按下面列出的顺序依次走到每个预置位、各停一会儿,然后循环执行。配置会直接写进设备;部分老设备不回传确认,下发后可用「试运行」核对。</span
-            >
-          </div>
-          <div class="cruise-save-row">
-            <label class="cruise-save-label">名称</label>
-            <div class="cruise-save-field">
-              <a-input
-                v-model="cruiseDraft.name"
-                allow-clear
-                :max-length="32"
-                :placeholder="`巡航 ${cruiseDraft.trackId}`"
-                :disabled="cruiseDraft.submitting"
-                data-testid="cruise-save-name-input"
-                @blur="cruiseDraftTouched = true"
-              >
-                <template #suffix>
-                  <span
-                    class="preset-save-count"
-                    :class="{ ok: cruiseDraft.name.trim().length > 0 && cruiseDraft.name.trim().length <= 32 }"
-                  >
-                    {{ cruiseDraft.name.length }}/32
-                  </span>
-                </template>
-              </a-input>
-              <p class="preset-save-hint">名称仅在本平台显示,不会同步到设备。</p>
-            </div>
-          </div>
-          <div class="cruise-save-row">
-            <label class="cruise-save-label">巡航点</label>
-            <div class="cruise-save-field">
-              <div ref="cruiseStopsListEl" class="cruise-stops-list" data-testid="cruise-stops-list">
-                <div
-                  v-for="(stop, index) in cruiseDraft.stops"
-                  :key="stop.key"
-                  class="cruise-stop-row"
-                  data-testid="cruise-stop-row"
-                >
-                  <span class="cruise-stop-idx">{{ index + 1 }}</span>
-                  <a-select
-                    v-model="stop.presetId"
-                    :style="{ flex: '1 1 auto', minWidth: '0' }"
-                    :disabled="cruiseDraft.submitting"
-                    data-testid="cruise-stop-select"
-                    placeholder="选择预置位"
-                  >
-                    <a-option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</a-option>
-                  </a-select>
-                  <button
-                    class="cruise-stop-move"
-                    :disabled="cruiseDraft.submitting || index === 0"
-                    title="上移"
-                    aria-label="上移巡航点"
-                    @click="moveCruiseStop(index, -1)"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    class="cruise-stop-move"
-                    :disabled="cruiseDraft.submitting || index === cruiseDraft.stops.length - 1"
-                    title="下移"
-                    aria-label="下移巡航点"
-                    @click="moveCruiseStop(index, 1)"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    class="cruise-stop-del"
-                    :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1"
-                    title="删除该巡航点"
-                    aria-label="删除巡航点"
-                    @click="removeCruiseStop(index)"
-                  >
-                    <X :size="11" />
-                  </button>
-                </div>
-              </div>
-              <button
-                class="cruise-stop-add"
-                data-testid="cruise-stop-add-btn"
-                :disabled="cruiseDraft.submitting || cruiseDraft.stops.length >= 32"
-                @click="addCruiseStop"
-              >
-                <Plus v-if="cruiseDraft.stops.length < 32" :size="14" />
-                <span>{{ cruiseDraft.stops.length >= 32 ? "已达到 32 站上限" : "添加巡航点" }}</span>
-                <small v-if="cruiseDraft.stops.length < 32" class="cruise-stop-add-count"
-                  >还可添加 {{ 32 - cruiseDraft.stops.length }} 个</small
-                >
-              </button>
-              <p class="preset-save-hint">
-                已选 {{ cruiseDraft.stops.length }} 个巡航点。列表从上到下就是设备实际走的顺序,可用 ↑ ↓ 调整。
-              </p>
-            </div>
-          </div>
-          <div class="cruise-save-row">
-            <label class="cruise-save-label">巡航速度</label>
-            <div class="cruise-save-field">
-              <div class="cruise-param-line">
-                <a-input-number
-                  v-model="cruiseDraft.speed"
-                  :min="1"
-                  :max="4095"
-                  :step="1"
-                  :style="{ width: '112px' }"
-                  :disabled="cruiseDraft.submitting || !cruiseDraft.sendSpeed"
-                  data-testid="cruise-save-speed"
-                  @blur="cruiseDraftTouched = true"
-                />
-                <span class="cruise-param-mode">
-                  <a-switch
-                    v-model="cruiseDraft.sendSpeed"
-                    size="small"
-                    :disabled="cruiseDraft.submitting"
-                    aria-label="是否下发巡航速度设置"
-                    data-testid="cruise-send-speed"
-                  />
-                  <span>{{ cruiseDraft.sendSpeed ? "下发设置" : "不下发" }}</span>
-                </span>
-              </div>
-              <p class="preset-save-hint">
-                {{
-                  cruiseDraft.sendSpeed
-                    ? "取值范围 1-4095,整条轨迹共用一个值(协议按组下发,不支持逐点设置)。快慢由设备自己解释,没有统一物理单位,不同厂家同一个数的实际转速可能不同。"
-                    : "本次不下发速度设置,设备保持当前设置。"
-                }}
-              </p>
-            </div>
-          </div>
-          <div class="cruise-save-row">
-            <label class="cruise-save-label">每站停留</label>
-            <div class="cruise-save-field">
-              <div class="cruise-param-line">
-                <a-input-number
-                  v-model="cruiseDraft.dwellSec"
-                  :min="1"
-                  :max="4095"
-                  :step="1"
-                  :style="{ width: '112px' }"
-                  :disabled="cruiseDraft.submitting || !cruiseDraft.sendDwell"
-                  data-testid="cruise-save-dwell"
-                  @blur="cruiseDraftTouched = true"
-                />
-                <span class="cruise-save-unit">秒</span>
-                <span class="cruise-param-mode">
-                  <a-switch
-                    v-model="cruiseDraft.sendDwell"
-                    size="small"
-                    :disabled="cruiseDraft.submitting"
-                    aria-label="是否下发巡航停留时间设置"
-                    data-testid="cruise-send-dwell"
-                  />
-                  <span>{{ cruiseDraft.sendDwell ? "下发设置" : "不下发" }}</span>
-                </span>
-              </div>
-              <p class="preset-save-hint">
-                {{
-                  cruiseDraft.sendDwell
-                    ? "单位是秒,范围 1-4095(最长约 68 分钟)。每个预置位停多久由这一个值决定 —— 整条轨迹共用,不支持逐点设置。"
-                    : "本次不下发停留时间设置,设备保持当前设置。"
-                }}
-              </p>
-            </div>
-          </div>
-          <details class="cruise-save-advanced">
-            <summary><Settings :size="13" />高级设置</summary>
-            <div class="cruise-save-advanced-body">
-              <div class="cruise-save-row">
-                <label class="cruise-save-label">编号</label>
-                <div class="cruise-save-field">
-                  <a-input-number
-                    v-model="cruiseDraft.trackId"
-                    :min="0"
-                    :max="255"
-                    :step="1"
-                    :style="{ width: '96px' }"
-                    :disabled="cruiseDraft.submitting"
-                    data-testid="cruise-save-track-id"
-                    @blur="cruiseDraftTouched = true"
-                  />
-                  <p class="preset-save-hint">轨迹编号由平台自动分配,通常无需修改。</p>
-                </div>
-              </div>
-              <div class="cruise-save-row">
-                <label class="cruise-save-label">覆盖</label>
-                <div class="cruise-save-field">
-                  <label class="cruise-save-replace">
-                    <input
-                      v-model="cruiseDraft.replaceExisting"
-                      type="checkbox"
-                      :disabled="cruiseDraft.submitting"
-                      data-testid="cruise-save-replace"
-                    />
-                    <span>覆盖同编号轨迹</span>
-                  </label>
-                  <p class="preset-save-hint">启用后会先清空设备中的同编号轨迹,此操作不可撤销。</p>
-                </div>
-              </div>
-            </div>
-          </details>
-          <p v-if="cruiseDraftError || cruiseDraftSubmitError" class="preset-save-error" data-testid="cruise-save-error">
-            {{ cruiseDraftError || cruiseDraftSubmitError }}
-          </p>
-        </div>
-      </a-modal>
+      <PlayConsoleDialogs />
     </div>
   </a-modal>
 </template>
@@ -7349,209 +5749,19 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-.console-title {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-}
-.console-title.is-minimized {
-  cursor: grab;
-  user-select: none;
-}
-.console-title.is-minimized:active {
-  cursor: grabbing;
-}
-.title-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-radius: 9px;
-}
-.title-text {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.title-text strong {
-  font-size: 14px;
-  color: var(--uvp-text-primary);
-}
-.title-text span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-
-.console-window-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 6px;
-  align-items: center;
-  margin-left: 4px;
-}
-.console-title.is-minimized .console-window-actions {
-  margin-left: auto;
-}
-.console-window-action {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: center;
-  min-width: 58px;
-  height: 30px;
-  padding: 0 9px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
-}
-.console-window-action svg {
-  flex: 0 0 auto;
-}
-.console-window-action.is-minimize {
-  color: var(--uvp-brand);
-  background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
-}
-.console-window-action.is-minimize:hover {
-  color: var(--uvp-brand-strong);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
-}
-.console-window-action.is-config {
-  color: var(--uvp-brand-strong, var(--uvp-brand));
-  background: color-mix(in srgb, var(--uvp-brand) 5%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
-}
-.console-window-action.is-config:hover {
-  color: var(--uvp-brand-strong);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
-}
-.console-window-action.is-close {
-  color: color-mix(in srgb, var(--uvp-danger) 76%, var(--uvp-text-secondary));
-  background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-danger) 18%, var(--uvp-panel-border));
-}
-.console-window-action.is-close:hover {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-danger) 12%, transparent);
-}
-.console-window-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--uvp-brand) 48%, transparent);
-  outline-offset: 2px;
-}
-.console-window-action:active {
-  transform: translateY(1px);
-}
-.console-window-action.is-compact {
-  gap: 0;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  padding: 0;
-}
-
-.session-badge {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 10px;
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 999px;
-}
-.session-badge .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--uvp-text-tertiary);
-  border-radius: 50%;
-}
-.session-badge.active {
-  color: var(--uvp-brand-cyan);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
-  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 30%, transparent);
-}
-.session-badge.active .dot {
-  background: var(--uvp-brand-cyan);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand-cyan) 20%, transparent);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-.session-badge.loading {
-  color: var(--uvp-warning);
-  background: var(--uvp-warning-soft);
-  border-color: var(--uvp-warning-border);
-}
-.session-badge.loading .dot {
-  background: var(--uvp-warning);
-}
-.session-badge.error {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-}
-.session-badge.error .dot {
-  background: var(--uvp-danger);
-}
-.session-badge.paused {
-  color: #a78bfa;
-  background: rgb(167 139 250 / 12%);
-  border-color: rgb(167 139 250 / 28%);
-}
-.session-badge.warn {
-  color: var(--uvp-warning);
-  background: var(--uvp-warning-soft);
-  border-color: var(--uvp-warning-border);
-}
-.session-badge.warn .dot {
-  background: var(--uvp-warning);
-}
-.session-elapsed {
-  padding-left: 8px;
-  margin-left: 2px;
-  font-size: 10.5px;
-  font-style: normal;
-  font-weight: 600;
-  color: color-mix(in srgb, currentcolor 70%, transparent);
-  border-left: 1px solid color-mix(in srgb, currentcolor 24%, transparent);
-}
-
 /* 两列 = 画面 + 右侧属性栏。2026-09-21 前这里是 `136px minmax(0, 1fr) 360px`，
  * 第一列是左侧竖排的一级页签；页签回到属性栏顶部后该列退役，宽度还给画面。
- * ⛔ 列数是"唯一真源"：改列数要同步 `.video-frame` / `.stage-wide .video-frame` /
- *    `.linked-info-bar` / `.sidebar` 以及 ≤1080px 分支的 `grid-column`，共 5 处。 */
+ * ⛔ 列数是"唯一真源"：改列数要同步 `.video-frame` / `.linked-info-bar` /
+ *    `.sidebar` 以及 ≤1080px 分支的 `grid-column`。 */
 .console-body {
+  --play-console-protocol-height: 52px;
+
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 14px;
   min-height: 0;
+  container-type: inline-size;
   isolation: isolate;
 }
 .console-body.is-minimized {
@@ -7572,561 +5782,14 @@ onBeforeUnmount(() => {
   width: 100%;
   aspect-ratio: 16 / 9;
 }
-.console-body.is-minimized .protocol-switcher,
+.console-body.is-minimized :deep(.protocol-switcher),
 .console-body.is-minimized .linked-info-bar,
-.console-body.is-minimized .sidebar,
-.console-body.is-minimized .asset-manager-layer {
+.console-body.is-minimized .sidebar {
   display: none;
 }
 
-.asset-manager-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  justify-content: flex-end;
-  overflow: hidden;
-  border-radius: 12px;
-}
-.asset-manager-mask {
-  position: absolute;
-  inset: 0;
-  padding: 0;
-  cursor: pointer;
-  background: rgb(15 23 42 / 34%);
-  border: 0;
-}
-.asset-manager-drawer {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-  width: min(430px, 100%);
-  min-width: 0;
-  height: 100%;
-  background: var(--uvp-panel-bg);
-  border-left: 1px solid var(--uvp-panel-border);
-  box-shadow: -18px 0 38px -24px rgb(15 23 42 / 52%);
-}
-.asset-manager-header {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--uvp-panel-border);
-}
-.asset-manager-header > div {
-  display: grid;
-  gap: 2px;
-}
-.asset-manager-header span {
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.asset-manager-header strong {
-  font-size: 14px;
-  color: var(--uvp-text-primary);
-}
-.asset-manager-header > button {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 7px;
-}
-.asset-manager-header > button:hover {
-  color: var(--uvp-text-primary);
-  background: var(--uvp-list-toolbar-bg);
-}
-.asset-manager-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  padding: 4px;
-  margin: 12px 16px 0;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.asset-manager-tabs button {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 6px;
-  align-items: center;
-  padding: 7px 9px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-}
-.asset-manager-tabs button.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-}
-.asset-manager-tabs em {
-  min-width: 20px;
-  padding: 1px 5px;
-  font-size: 9px;
-  font-style: normal;
-  color: inherit;
-  text-align: center;
-  background: color-mix(in srgb, currentcolor 8%, transparent);
-  border-radius: 4px;
-}
-.asset-manager-search {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
-  align-items: center;
-  height: 34px;
-  padding: 0 10px;
-  margin: 10px 16px 0;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 7px;
-}
-.asset-manager-search:focus-within {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-.asset-manager-search input,
-.asset-manager-create input {
-  min-width: 0;
-  font-size: 11px;
-  color: var(--uvp-text-primary);
-  outline: none;
-  background: transparent;
-  border: 0;
-}
-.asset-manager-search input::placeholder {
-  color: var(--uvp-text-tertiary);
-}
-
-/* 抽屉内「保存当前位置」按钮,弹弹窗提交 */
-.asset-manager-inline-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin: 10px 16px 0;
-}
-.asset-manager-add {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 5px 12px;
-  font-size: 11px;
-  color: #ffffff;
-  cursor: pointer;
-  background: var(--uvp-brand);
-  border: 0;
-  border-radius: 6px;
-  transition: background 0.12s ease;
-}
-.asset-manager-add:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--uvp-brand) 90%, #000000);
-}
-.asset-manager-add:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* 保存预置位对话框 */
-.preset-save-form {
-  display: grid;
-  gap: 14px;
-  padding: 4px 2px 0;
-}
-.preset-save-row {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-.preset-save-label {
-  padding-top: 6px;
-  font-size: 12px;
-  color: var(--uvp-text-secondary);
-}
-.preset-save-index {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-radius: 5px;
-}
-.preset-save-field {
-  display: grid;
-  gap: 4px;
-}
-.preset-save-count {
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-}
-.preset-save-count.ok {
-  font-weight: 600;
-  color: #059669;
-}
-.preset-save-hint {
-  margin: 0;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-}
-.preset-save-error {
-  margin: 0;
-  font-size: 11px;
-  color: var(--uvp-danger);
-}
-
-/* 新建巡航轨迹对话框 */
-.cruise-save-form {
-  display: grid;
-  gap: 14px;
-  max-height: calc(100dvh - 180px);
-  padding: 4px 6px 2px 2px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-}
-.cruise-save-notice {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 9px 10px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--uvp-text-secondary);
-  background: var(--uvp-warning-soft);
-  border: 1px solid var(--uvp-warning-border);
-  border-radius: 6px;
-}
-.cruise-save-notice > svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--uvp-warning);
-}
-.cruise-save-row {
-  display: grid;
-  grid-template-columns: 66px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-.cruise-save-label {
-  padding-top: 6px;
-  font-size: 12px;
-  color: var(--uvp-text-secondary);
-}
-.cruise-save-field {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.cruise-param-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  min-height: 32px;
-}
-.cruise-param-mode {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  margin-left: auto;
-  font-size: 11.5px;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-}
-.cruise-save-field > .preset-save-hint {
-  line-height: 1.45;
-}
-.cruise-save-unit {
-  font-size: 11.5px;
-  color: var(--uvp-text-secondary);
-}
-.cruise-save-replace {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 11.5px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-}
-.cruise-save-replace input {
-  accent-color: var(--uvp-brand-cyan);
-}
-.cruise-stops-list {
-  display: grid;
-  gap: 5px;
-  max-height: clamp(168px, 30vh, 260px);
-  padding-right: 3px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-}
-.cruise-stop-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 6px;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 3%, var(--uvp-panel-bg));
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 16%, var(--uvp-panel-border));
-  border-radius: 6px;
-}
-.cruise-stop-idx {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--uvp-brand-cyan);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
-  border-radius: 50%;
-}
-.cruise-stop-move,
-.cruise-stop-del {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  transition:
-    color 0.12s ease,
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.cruise-stop-move:hover:not(:disabled) {
-  color: var(--uvp-brand-cyan);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
-}
-.cruise-stop-del:hover:not(:disabled) {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-}
-.cruise-stop-move:disabled,
-.cruise-stop-del:disabled {
-  cursor: not-allowed;
-  opacity: 0.35;
-}
-.cruise-stop-add {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 12px;
-  margin-top: 3px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--uvp-brand);
-  cursor: pointer;
-  background: var(--uvp-brand-soft);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 44%, var(--uvp-panel-border));
-  border-radius: 6px;
-  transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    color 0.18s ease;
-}
-.cruise-stop-add:hover:not(:disabled) {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-.cruise-stop-add:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--uvp-brand) 52%, transparent);
-  outline-offset: 2px;
-}
-.cruise-stop-add:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-.cruise-stop-add-count {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 400;
-  color: currentColor;
-  opacity: 0.72;
-}
-.cruise-save-advanced {
-  padding-top: 8px;
-  border-top: 1px solid var(--uvp-panel-border);
-}
-.cruise-save-advanced > summary {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-}
-.cruise-save-advanced > summary::marker {
-  display: none;
-}
-.cruise-save-advanced-body {
-  display: grid;
-  gap: 12px;
-  padding-top: 12px;
-}
-
-@media (width <= 560px) {
-  .cruise-save-form {
-    max-height: calc(100dvh - 210px);
-  }
-  .cruise-save-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 5px;
-  }
-  .cruise-save-label {
-    padding-top: 0;
-  }
-}
-.asset-manager-list {
-  min-height: 0;
-  padding: 0 16px;
-  margin-top: 10px;
-  overflow-y: auto;
-  scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
-  scrollbar-width: thin;
-}
-.asset-manager-row {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  min-height: 48px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--uvp-panel-border);
-}
-.asset-manager-row.active {
-  background: color-mix(in srgb, var(--uvp-brand) 5%, transparent);
-}
-.asset-manager-row.disabled {
-  opacity: 0.56;
-}
-.asset-manager-index {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.asset-manager-info {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.asset-manager-info strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11.5px;
-  font-weight: 550;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.asset-manager-info small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-.asset-manager-actions {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.asset-manager-delete {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-}
-.asset-manager-delete:hover {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-}
-.asset-manager-empty {
-  padding: 40px 12px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  text-align: center;
-}
-.asset-manager-empty.preset-empty-large {
-  padding: 44px 16px 28px;
-}
-.preset-empty-glyph {
-  display: block;
-  margin: 0 auto 6px;
-  color: var(--uvp-text-tertiary);
-  opacity: 0.55;
-}
-.preset-empty-line-primary {
-  margin: 0;
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
-}
-.asset-manager-footer {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 42px;
-  padding: 8px 16px;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border-top: 1px solid var(--uvp-panel-border);
-}
-.asset-drawer-enter-active,
-.asset-drawer-leave-active {
-  transition: opacity 0.18s ease;
-}
-.asset-drawer-enter-active .asset-manager-drawer,
-.asset-drawer-leave-active .asset-manager-drawer {
-  transition: transform 0.18s ease;
-}
-.asset-drawer-enter-from,
-.asset-drawer-leave-to {
-  opacity: 0;
-}
-.asset-drawer-enter-from .asset-manager-drawer,
-.asset-drawer-leave-to .asset-manager-drawer {
-  transform: translateX(100%);
-}
-
-/* 主区(视频):stage 仅保留语义,子项直接参与外层网格 */
 .stage {
   display: contents;
-}
-.stage.stage-wide .video-frame {
-  grid-column: 1 / -1;
 }
 
 .video-frame {
@@ -8140,6 +5803,7 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   box-shadow: 0 12px 32px -18px rgb(0 0 0 / 60%);
 }
+
 .video-canvas {
   position: relative;
   display: grid;
@@ -8399,61 +6063,6 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-/* 多协议切换器 */
-
-/* 底部两角要自己写,不能只靠父级 .video-frame 的 border-radius + overflow: hidden:
- * 本元素带 backdrop-filter,会自建 backdrop root,它绘制的背景在 Chromium/WebKit 下
- * 会逃出祖先的圆角裁剪 —— 表现就是画面顶部是圆角、这条栏底部却是直角。
- * 13px = 父级 14px 圆角减去 1px 边框,和外框严丝合缝。 */
-.protocol-switcher {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 14px;
-  background: rgb(15 23 42 / 92%);
-  border-top: 1px solid rgb(255 255 255 / 8%);
-  border-bottom-right-radius: 13px;
-  border-bottom-left-radius: 13px;
-  backdrop-filter: blur(12px);
-}
-.switcher-left {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-.switcher-left .kicker {
-  font-size: 11px;
-  color: rgb(203 213 225 / 72%);
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-.switcher-right {
-  display: flex;
-  gap: 6px;
-}
-.proto-btn {
-  padding: 5px 12px;
-  font-size: 11px;
-  font-weight: 500;
-  color: rgb(219 234 254 / 68%);
-  cursor: pointer;
-  background: rgb(255 255 255 / 4%);
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 6px;
-  transition: all 0.15s ease;
-}
-.proto-btn:hover {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
-}
-.proto-btn.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 42%, transparent);
-}
-
 /* 流信息(协议切换器内) */
 .stream-info {
   display: flex;
@@ -8463,53 +6072,6 @@ onBeforeUnmount(() => {
   margin-left: auto;
   font-size: 11px;
   border-left: 1px solid rgb(255 255 255 / 8%);
-}
-
-.protocol-option {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) 28px;
-  gap: 8px;
-  align-items: center;
-  width: min(600px, calc(100vw - 80px));
-  padding: 2px 0;
-}
-.protocol-option strong {
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
-}
-.protocol-url {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-}
-.protocol-copy-btn {
-  position: relative;
-  z-index: 1;
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-.protocol-copy-btn:hover {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
 }
 
 /* 播放器下方的运行信息面板 */
@@ -8525,60 +6087,8 @@ onBeforeUnmount(() => {
 }
 
 /* 双区联动版:随 Tab 切换的全宽等高详情 —— 干掉外层白面板,4 张卡片直接躺在 tab 里 */
-.linked-info-bar {
-  --linked-detail-height: 148px;
 
-  grid-row: 2;
-  grid-column: 1 / -1;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-.linked-detail {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  height: var(--linked-detail-height);
-  padding: 0;
-  overflow: hidden;
-}
-
-/* 视频参数与设备配置的底部是第二操作区，不是只读详情栏。 */
-.linked-detail-actions {
-  /* 与云台、视频探针共用同一条底部工作区基线，避免切换页签时布局跳高。 */
-  height: var(--linked-detail-height);
-}
-
-.linked-detail-actions .linked-deviceconfig-actions {
-  height: 100%;
-}
-
-.linked-detail-actions .linked-card {
-  min-height: 0;
-}
-
-.linked-inline-select {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-
-.linked-inline-select select {
-  height: 24px;
-  padding: 0 5px;
-  font-size: 10px;
-  color: var(--uvp-text-secondary);
-  background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 4px;
-}
+/* 详情工作区的跨列、固定高度和滚动边界由 PlayConsoleDetailWorkspace 统一提供。 */
 
 .linked-deviceconfig-actions {
   display: grid;
@@ -8634,232 +6144,29 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   color: var(--uvp-text-tertiary);
 }
-.linked-detail > .linked-ptz-layout,
-.linked-detail > .linked-probe-layout,
-.linked-detail > .linked-image-layout {
-  flex: 1 1 0;
-  min-height: 0;
-}
-.linked-detail-hint {
-  padding: 0;
-  margin: 0 0 8px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: var(--uvp-text-tertiary);
-}
-
-/* 列数必须跟实际渲染的卡片数一致(预置位 / 巡航轨迹 / 看守位 / 自动扫描 = 4 张)。
- * 之前写的是 4 列而只有 3 张卡,多出来的那一列空着,卡片只占满 3/4 宽度,右侧留一条空白;
- * 现在补上「自动扫描」第 4 张卡,列数才对得上。 */
-.linked-ptz-layout {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  align-items: stretch;
-  height: 100%;
-  min-height: 0;
-}
-
-/* ── 画面设置底栏卡片（图像叠加 / 遮挡 / 镜像 / 参数对照）──
- * ⭐ 2026-09-20 起**四格**：图像叠加整块从侧栏搬来（最宽），遮挡/镜像按老板要求缩窄，
- *    参数对照压到只放两行。与云台底栏共用同一条高度基线（148px），切页签画布不重排。
- * ⛔ 底栏可用宽**已变成弹窗内容全宽**（2026-09-21 页签回到属性栏顶部、左侧 136px 那列退役；
- *    此前口径是「约 940px，栅格 `136px | 1fr | 360px`，不是弹窗全宽」，比现在窄 136px+）。
- *    按 4.65fr 分四格。⚠️ 宽度变大只让每格更宽松，但**别因此塞第五张卡** ——
- *    窄屏（≤1080px 单列）时底栏仍会回到全宽下的紧凑形态，照样会把坐标压到省略号截断。 */
-.linked-picture-layout {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 1.05fr);
-  gap: 10px;
-  align-items: stretch;
-  height: 100%;
-  min-height: 0;
-}
 
 /* 图像叠加这一格不是"卡片"而是"两块面板的容器"（时间戳 + 叠加文字并排），
  * 所以不复用 `.linked-card` 的实线框，只保证高度链完整。 */
-.picture-osd-cell {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.linked-card-note {
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
 
 /* 「启用遮挡」总闸：标准里 `On` 与区域列表是两块数据，总闸为 0 时画了也不生效。 */
-.mask-switch {
-  height: 20px;
-  padding: 0 7px;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-}
-
-.mask-switch.on {
-  color: #059669;
-  background: rgb(5 150 105 / 12%);
-  border-color: rgb(5 150 105 / 40%);
-}
 
 /* 草稿与设备事实不一致 ⇒ 这次改动还没下发。用琥珀色盖掉 `.on` 的绿：
    绿色在这里会被读成"设备上就是这个状态"，而实际上一个字节都还没发出去。
    ⛔ 必须写在 `.mask-switch.on` **之后**（同优先级，靠顺序覆盖）。 */
-.mask-switch.pending {
-  color: var(--uvp-warning, #b66b12);
-  background: color-mix(in srgb, var(--uvp-warning, #b66b12) 14%, transparent);
-  border-color: color-mix(in srgb, var(--uvp-warning, #b66b12) 46%, var(--uvp-panel-border));
-}
-
-.mask-switch:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
 
 /* 遮挡区槽位：标准固定 4 个。2026-09-20 起改**单列、一行一个**（原来是 2×2）——
  * 底栏把这一格的宽度收到约 195px（腾给图像叠加），2×2 时每格只剩 ~90px，
  * 而槽位里那串坐标（`0,0,704,576`）是这张卡唯一的信息：`.mask-slot-coords` 会被省略号
  * 截断 ⇒ 卡片等于白放。单列后每行约 180px，坐标读得全；4 行 × 约 24px 仍装得进 148px。 */
-.mask-slot-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-auto-rows: minmax(0, 1fr);
-  gap: 4px;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.mask-slot {
-  position: relative;
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  min-width: 0;
-  padding: 4px 6px;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px dashed var(--uvp-panel-border);
-  border-radius: 6px;
-}
-
-.mask-slot.used {
-  color: var(--uvp-text-secondary);
-  background: color-mix(in srgb, var(--uvp-brand) 6%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-panel-border));
-  border-style: solid;
-}
-
-.mask-slot-idx {
-  flex: none;
-  font-weight: 600;
-  color: var(--uvp-brand);
-}
-
-.mask-slot-coords {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.mask-slot-blank {
-  flex: 1 1 auto;
-  color: var(--uvp-text-tertiary);
-}
-
-.mask-slot-del {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-}
-
-.mask-slot-del:hover {
-  color: #d03050;
-  background: rgb(208 48 80 / 12%);
-}
 
 /* 遮挡坐标的基准（设备声明的图像尺寸）。
  * ⛔ 这是"画上去会不会准"的唯一凭据，必须常驻在卡片上：放在 title 悬浮提示里，
  *    用户是在"发现落点不对"之后才会去找它，已经晚了。 */
-.mask-canvas-note {
-  margin: 6px 0 0;
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--uvp-text-tertiary);
-}
 
 /* 基准没拿到设备声明时（退回画面尺寸）：琥珀色 —— 与"将启用/将停用"同一套语义，
  * 都表示"这一步存在偏差、且平台已知"。 */
-.mask-canvas-note.is-unverified {
-  color: #fbbf24;
-}
 
 /* 镜像方向：图标 + 文字副标题，四个并列 */
-.mirror-choice-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  align-content: start;
-  min-height: 0;
-}
-
-.mirror-choice {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-
-  /* ⭐ 2026-09-20：这一格收窄到约 137px（老板要求"宽度可以缩小一些"），
-   * 2×2 时每格只剩约 55px —— 图标 16 + 2 字标签 21 已经把格子占满，
-   * 空档与内边距必须一起收，否则标签被挤出格（`原图 / 左右 / 上下 / 中心`）。 */
-  padding: 6px 4px;
-  font-size: 10.5px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 6px;
-}
-
-.mirror-choice:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border));
-}
-
-.mirror-choice.active {
-  color: var(--uvp-brand);
-  background: color-mix(in srgb, var(--uvp-brand) 10%, var(--uvp-panel-bg));
-  border-color: var(--uvp-brand);
-}
-
-.mirror-choice:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
 
 /* ── 下发浮条（取代原底栏「提交」卡片，2026-09-19）──
  * 贴在画面底部**居中**：用户刚在画面上拖完框，视线还在画面里，下发入口就该落在视线
@@ -8903,27 +6210,9 @@ onBeforeUnmount(() => {
 
 /* 卡片内的同一句话：浮条会随草稿消失，卡片是它的常驻位置。
    底色用 color-mix 兑出来而不是 `--uvp-danger-soft` —— 那个是给浅色侧栏用的，铺在画面上太亮。 */
-.picture-card-error {
-  padding: 6px 8px;
-  margin: 0 0 8px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--uvp-danger, #d14343);
-  background: color-mix(in srgb, var(--uvp-danger, #d14343) 14%, transparent);
-  border-radius: 6px;
-}
 
 /* 与上行成对：错误是"没发出去"，提示是"发出去了但结果和你想的不一样"。
    ⛔ 不能沿用错误色 —— 那会让用户以为失败了，而这次设备确实收到了。 */
-.picture-card-notice {
-  padding: 6px 8px;
-  margin: 0 0 8px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--uvp-warning, #b66b12);
-  background: color-mix(in srgb, var(--uvp-warning, #b66b12) 14%, transparent);
-  border-radius: 6px;
-}
 
 .picture-draft-text {
   display: inline-flex;
@@ -9238,127 +6527,10 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   transform: translateX(-50%);
 }
-.linked-section {
-  min-width: 0;
-  padding: 0;
-}
-.linked-section .section-hd.compact {
-  margin-top: 12px;
-}
 
 /* 3 张 PTZ 卡片统一容器:实线淡蓝框 + 微蓝底,header 定高 + 主体 flex-1 填充,主体 overflow: hidden 保护 */
-.linked-card {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  height: 100%;
-  min-height: 0;
-  padding: 8px 10px 10px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--uvp-brand) 3%, var(--uvp-panel-bg));
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
-  border-radius: 8px;
-}
-.linked-card > .linked-card-hd,
-.linked-card > .section-hd {
-  flex: 0 0 auto;
-  margin: 0;
-}
-.linked-card > .section-hd.first {
-  margin-top: 0;
-}
-.linked-section .preset-grid {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: min-content;
-  gap: 5px;
-  align-content: start;
-  min-height: 0;
-  overflow: hidden;
-}
-.linked-section .preset-add {
-  grid-column: 1 / -1;
-}
-.preset-go {
-  display: inline-grid;
-  place-items: center;
-  color: var(--uvp-text-tertiary);
-}
 
 /* 紧凑胶囊 tile:名字省略 + 右侧红色 X 删除 */
-.preset-tile {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: stretch;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-  transition: border-color 0.12s ease;
-}
-.preset-tile:hover:not(.disabled) {
-  border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-}
-.preset-tile.active {
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border));
-}
-.preset-tile.disabled {
-  opacity: 0.5;
-}
-.preset-tile .preset-tile-hit,
-.preset-tile > .preset-tile-hit.preset-item,
-.preset-tile > .preset-tile-hit.cruise-item {
-  display: inline-flex;
-  flex: 1 1 auto;
-  grid-template-columns: unset;
-  gap: 4px;
-  align-items: center;
-  min-width: 0;
-  max-width: none;
-  padding: 3px 6px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: var(--uvp-text-primary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  transition: none;
-}
-.preset-tile > .preset-tile-hit.preset-item:hover:not(:disabled),
-.preset-tile > .preset-tile-hit.cruise-item:hover:not(:disabled) {
-  background: transparent;
-  border-color: transparent;
-}
-.preset-tile > .preset-tile-hit.preset-item:disabled,
-.preset-tile > .preset-tile-hit.cruise-item:disabled {
-  cursor: not-allowed;
-  opacity: 1;
-}
-.preset-tile.active .preset-tile-hit {
-  color: var(--uvp-brand);
-}
-.preset-tile .preset-idx {
-  flex-shrink: 0;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.preset-tile.active .preset-idx {
-  color: var(--uvp-brand);
-}
-.preset-tile .preset-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .preset-tile-del {
   display: inline-grid;
   place-items: center;
@@ -9383,133 +6555,6 @@ onBeforeUnmount(() => {
 }
 
 /* 「更多」chip:作为 preset-grid 的最后一个 cell,只在预置位溢出(> 9)时出现 */
-.preset-more-popover-trigger {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-width: 0;
-}
-.preset-tile-more {
-  box-sizing: border-box;
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 3px 6px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: var(--uvp-brand);
-  cursor: pointer;
-  background: var(--uvp-brand-soft);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
-  border-radius: 5px;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.preset-tile-more:hover {
-  border-color: var(--uvp-brand);
-}
-.preset-popover {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 240px;
-  max-width: 320px;
-}
-.preset-popover-hd {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-  background: var(--uvp-list-toolbar-bg);
-  border-bottom: 1px solid var(--uvp-panel-border);
-}
-.preset-popover-hd > span {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-}
-.preset-popover-list {
-  max-height: 280px;
-  overflow-y: auto;
-  scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
-  scrollbar-width: thin;
-}
-.preset-popover-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--uvp-panel-border);
-  transition: background 0.12s ease;
-}
-.preset-popover-row:last-child {
-  border-bottom: 0;
-}
-.preset-popover-row:hover {
-  background: color-mix(in srgb, var(--uvp-brand) 4%, transparent);
-}
-.preset-popover-row.active {
-  background: color-mix(in srgb, var(--uvp-brand) 8%, transparent);
-}
-.preset-popover-idx {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
-}
-.preset-popover-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11.5px;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.preset-popover-actions {
-  display: inline-flex;
-  gap: 4px;
-}
-.preset-popover-call,
-.preset-popover-del {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  transition:
-    color 0.12s ease,
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.preset-popover-call {
-  color: var(--uvp-brand);
-}
-.preset-popover-call:hover:not(:disabled) {
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 30%, transparent);
-}
-.preset-popover-del {
-  color: color-mix(in srgb, var(--uvp-danger) 65%, var(--uvp-text-tertiary));
-}
-.preset-popover-del:hover:not(:disabled) {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-}
-.preset-popover-call:disabled,
-.preset-popover-del:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
 
 /* 预置位/巡航卡片头部行(标题 + 动作),复用 .linked-card 提供的实线蓝框容器。
  *
@@ -9518,74 +6563,13 @@ onBeforeUnmount(() => {
  * overflow: hidden,溢出的部分会直接消失,按钮点都点不到。
  * 头部本身是 flex: 0 0 auto,换行只会吃掉卡片主体的高度(主体本来就 overflow:hidden),
  * 不会把卡片撑破。 */
-.linked-card-hd {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  row-gap: 4px;
-  align-items: center;
-  justify-content: space-between;
-}
-.linked-card-hd .section-title {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  min-width: 0;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-}
 
 /* 动作区整体不参与收缩:宁可让标题在极窄卡片上换行,也不能把按钮压成一条线。 */
-.linked-card-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 6px;
-  align-items: center;
-}
-.preset-count {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  margin-left: 4px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-radius: 999px;
-}
-.preset-save-btn {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 3px 9px;
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--uvp-brand);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-  border-radius: 5px;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.preset-save-btn:hover:not(:disabled) {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
 
 /* 「设备配置」入口:同款描边小按钮,压在动作区最右。 */
 .device-config-open-btn {
   font-weight: 500;
   white-space: nowrap;
-}
-.preset-save-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 /* 「从设备同步」药丸:预置位与巡航两张卡片共用同一个形态,位置也相同(动作区最左)。
@@ -9594,44 +6578,9 @@ onBeforeUnmount(() => {
  *    1/3,头部还要并排放「添加」。原来那句「数据过期,点击同步」9 个字会让整个
  *    动作区越界,而卡片是 overflow: hidden —— 结果不是换行,是「添加」按钮被裁掉。
  *    "点我"这层意思交给按钮形态和 tooltip,不占字宽。 */
-.resource-sync-btn {
-  display: inline-flex;
-  gap: 3px;
-  align-items: center;
-  padding: 2px 6px;
-  font-size: 9.5px;
-  font-weight: 500;
-  line-height: 1.6;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-  transition:
-    color 0.12s ease,
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.resource-sync-btn:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-}
-.resource-sync-btn:disabled {
-  cursor: progress;
-}
 
 /* 同步中:药丸本身点亮,和「什么都不做」区分开。转圈用 Loader2 + 旋转,
    不用 CSS 动画换图标 —— 换图标会在旋转中闪。 */
-.resource-sync-btn.syncing {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-panel-border));
-}
-.resource-sync-spin {
-  animation: resource-sync-rotate 0.9s linear infinite;
-}
 
 @keyframes resource-sync-rotate {
   from {
@@ -9641,28 +6590,9 @@ onBeforeUnmount(() => {
     transform: rotate(360deg);
   }
 }
-.preset-empty {
-  display: grid;
-  gap: 2px;
-  place-items: center;
-
-  /* ⛔ 上下的 padding 是**卡片高度预算**的一部分:详情条总高 148px,三张卡片等分,
-        空态能用的余量只有个位数像素。这里每加一行文字都必须重算,否则最后一行会被
-        卡片自己的 overflow: hidden 裁掉(表现在"设备上已有的可用「同步」读回"这行
-        只露上半截)。 */
-  padding: 18px 12px 14px;
-}
 
 /* 空态的第二行:交代"平台没记录 ≠ 设备上没有"。原来的「暂无预置位」只说了前半句,
    操作员看到设备明明有预置位、界面却说没有,会直接判定平台坏了。 */
-.preset-empty-hint {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--uvp-text-tertiary);
-  text-align: center;
-  opacity: 0.85;
-}
 .resource-summary-action {
   display: flex;
   gap: 6px;
@@ -9677,67 +6607,14 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
   border-radius: 6px;
 }
-.preset-grid > .resource-summary-action {
-  grid-column: 1 / -1;
-}
 .resource-summary-action:hover {
   border-color: var(--uvp-brand);
-}
-.linked-detail .home-config {
-  gap: 5px;
-  padding-top: 2px;
-}
-
-/* stretch 而不是 center:两栏撑满详情条高度,跟 .linked-ptz-layout 保持一致。
- * 用 center 的话,删掉提示行让出来的高度只会变成上下留白,内容一点没多。 */
-
-/* 三栏:轨道明细 / 时间戳监控 / 帧到达时间线。
- * 不等分 —— 时间线是横向柱状图,32 根柱子三等分只剩约 285px(每根不到 9px),
- * 帧间隔异常会看不出来。给它 1.4fr(约 357px,每根约 11px)。 */
-.linked-probe-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
-  gap: 12px;
-  align-items: stretch;
-  min-height: 0;
-}
-
-/* 每栏各自纵向撑满,内部再把余量交给主体(轨道 / 指标网格 / 柱状图) */
-.linked-probe-layout > .linked-section {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.linked-probe-layout > .linked-section > .section-hd {
-  flex: 0 0 auto;
-}
-.linked-probe-layout > .linked-section > .probe-track-merged,
-.linked-probe-layout > .linked-section > .probe-health-grid,
-.linked-probe-layout > .linked-section > .frame-overview {
-  flex: 1 1 0;
-  min-height: 0;
 }
 
 /* 底部三块套上跟侧栏 .probe-card 同款卡片外壳(浅底 + 描边 + 圆角)。
  * 加了外壳后,内部原来那层 .probe-track-merged / .probe-health-grid / .frame-overview 的
  * 独立底色和边框会跟卡片形成"套框",逐一去掉,只留骨架。
  * 相邻两卡之间的分隔线也一并去掉 —— 卡片本身的间距和边框已经足够表达"这是三块"。 */
-.probe-detail-card {
-  padding: 8px 12px 10px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-}
-.probe-detail-card > .section-hd.first {
-  margin-top: 0;
-}
-.probe-detail-card > .probe-track-merged,
-.probe-detail-card > .probe-health-grid,
-.probe-detail-card > .frame-overview {
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
 
 /* 轨道明细里的"视频/音频"分割线原来是靠 border-top,套进卡片后保留就好,
  * 因为它是"两条轨道之间的分隔"而不是"跟卡片外的分隔"。 */
@@ -9745,52 +6622,7 @@ onBeforeUnmount(() => {
 /* 概览条的柱高不再写死:交给 .frame-overview 的 1fr 行按剩余空间分配,
  * 下限见 .frame-overview-bars 的 min-height,避免详情条被压缩时糊成一条线。 */
 @media (width <= 720px) {
-  .linked-detail-hint {
-    margin-bottom: 6px;
-  }
-  .linked-detail {
-    height: auto;
-    overflow: visible;
-  }
-
   /* 窄屏堆成单列。三栏的探针详情条在 720px 下横向排不开,柱状图会糊掉。 */
-  .linked-ptz-layout,
-  .linked-probe-layout {
-    grid-template-columns: 1fr;
-  }
-  .linked-detail > .linked-ptz-layout {
-    flex: 0 0 auto;
-    grid-template-rows: none;
-    height: auto;
-  }
-  .linked-section {
-    padding: 12px 0;
-  }
-  .linked-section:first-child {
-    padding-top: 0;
-  }
-  .linked-section:last-child {
-    padding-bottom: 0;
-  }
-  .linked-section + .linked-section {
-    border-top: 1px solid var(--uvp-panel-border);
-    border-left: 0;
-  }
-  .linked-ptz-layout > .linked-card,
-  .linked-ptz-layout > .linked-card + .linked-card {
-    height: auto;
-    padding: 8px 10px 10px;
-    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
-  }
-  .asset-manager-layer {
-    position: fixed;
-    inset: 12px;
-    border: 1px solid var(--uvp-panel-border);
-  }
-  .asset-manager-drawer {
-    width: 100%;
-    border-left: 0;
-  }
 }
 
 /* ═══════════ 右侧栏 ═══════════ */
@@ -9821,45 +6653,6 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 
-/* Tab 切换。auto-fit + minmax(0, 1fr) 会按 tabs 数组实际条数平分整行宽度,
- * 不用再跟 v-for 长度绑死。以后要加/减 tab 只改数组、不用回头调 CSS。 */
-.tabs {
-  display: grid;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
-  gap: 4px;
-  padding: 4px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-}
-.tab {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 4px;
-  font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  transition: all 0.15s ease;
-}
-.tab:hover {
-  color: var(--uvp-text-secondary);
-  background: color-mix(in srgb, var(--uvp-brand) 6%, transparent);
-}
-.tab.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
-}
-
 /* Panel 容器 */
 .panels {
   padding: 14px;
@@ -9888,13 +6681,48 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 .sidebar-deviceconfig-panel {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 10px;
+  align-content: start;
   height: 100%;
   min-height: 0;
 }
 
 .sidebar-deviceconfig-panel :deep(.dcg-window--embedded) {
+  height: auto;
   min-height: 0;
 }
+
+.sidebar-video-compare {
+  min-height: 0;
+}
+
+.sidebar-video-compare-card {
+  height: auto;
+  min-height: 0;
+}
+
+.sidebar-video-compare-card :deep(.vpc-grid) {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* 双栏桌面布局中,右侧操作内容远高于左侧视频是正常的;不能让它的 min-content 高度
+ * 反过来把第一行撑长,否则视频与底部详情之间会出现一整块无意义的空白。侧栏固定到
+ * 左侧「16:9 画面 + 协议条」的实际高度,自身内容在 .panels 内滚动。100cqw 取
+ * console-body 的真实宽度,因此弹窗宽度变化时不需要再维护一组 viewport 魔数。 */
+@media (width > 1080px) {
+  .console-body:not(.is-minimized) .sidebar {
+    height: calc((100cqw - 376px) * 9 / 16 + var(--play-console-protocol-height) + 2px);
+  }
+  .console-body:not(.is-minimized) :deep(.protocol-switcher) {
+    box-sizing: border-box;
+    min-height: var(--play-console-protocol-height);
+  }
+}
+
 .panel {
   display: grid;
   gap: 10px;
@@ -9943,617 +6771,6 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-/* ═══════════ 云台面板 ═══════════ */
-.mode-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.mode-switch button {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 8px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  transition: all 0.15s ease;
-}
-.mode-switch button.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 26%, transparent);
-}
-.tag-2022 {
-  padding: 1px 4px;
-  font-size: 8.5px;
-  font-weight: 700;
-  color: var(--uvp-brand-cyan);
-  letter-spacing: 0.05em;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 30%, transparent);
-  border-radius: 3px;
-}
-
-/* 拖拽摇杆 */
-.joystick-stage {
-  position: relative;
-  width: min(176px, 100%);
-  aspect-ratio: 1;
-  margin: 10px auto 6px;
-  touch-action: none;
-  cursor: grab;
-  user-select: none;
-  border-radius: 50%;
-}
-.joystick-stage.active {
-  cursor: grabbing;
-}
-.joystick-stage:focus-visible {
-  outline: 2px solid var(--uvp-brand);
-  outline-offset: 3px;
-}
-.joystick-base {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at 36% 28%,
-    color-mix(in srgb, white 18%, var(--uvp-brand-soft)) 0%,
-    var(--uvp-brand-soft) 46%,
-    color-mix(in srgb, var(--uvp-text-primary) 12%, var(--uvp-list-toolbar-bg)) 100%
-  );
-  border: 2px solid color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border));
-  border-radius: 50%;
-  box-shadow:
-    inset 0 3px 4px color-mix(in srgb, white 14%, transparent),
-    inset 0 -8px 14px color-mix(in srgb, var(--uvp-text-primary) 14%, transparent),
-    0 8px 18px color-mix(in srgb, var(--uvp-brand) 15%, transparent),
-    0 2px 4px color-mix(in srgb, var(--uvp-text-primary) 15%, transparent);
-}
-.joystick-base::before {
-  position: absolute;
-  inset: 25px;
-  content: "";
-  background: radial-gradient(
-    circle at 44% 38%,
-    color-mix(in srgb, var(--uvp-brand-soft) 30%, var(--uvp-list-toolbar-bg)) 0%,
-    var(--uvp-list-toolbar-bg) 62%,
-    color-mix(in srgb, var(--uvp-text-primary) 8%, var(--uvp-list-toolbar-bg)) 100%
-  );
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 18%, var(--uvp-panel-border));
-  border-radius: 50%;
-  box-shadow:
-    inset 0 5px 10px color-mix(in srgb, var(--uvp-text-primary) 11%, transparent),
-    inset 0 -2px 4px color-mix(in srgb, white 8%, transparent),
-    0 1px 0 color-mix(in srgb, white 10%, transparent);
-}
-.joystick-base::after {
-  position: absolute;
-  inset: 31px;
-  content: "";
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-panel-border));
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-text-primary) 4%, transparent);
-}
-.joystick-dots {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.joystick-dot {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  background: radial-gradient(
-    circle at 34% 28%,
-    color-mix(in srgb, white 42%, var(--uvp-text-tertiary)) 0 18%,
-    var(--uvp-text-tertiary) 58%,
-    color-mix(in srgb, var(--uvp-text-primary) 35%, var(--uvp-text-tertiary)) 100%
-  );
-  border: 1px solid color-mix(in srgb, var(--uvp-text-primary) 12%, transparent);
-  border-radius: 50%;
-  box-shadow:
-    inset 0 1px 1px color-mix(in srgb, white 26%, transparent),
-    0 1px 2px color-mix(in srgb, var(--uvp-text-primary) 24%, transparent);
-}
-.joystick-dot.dot-top {
-  top: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.joystick-dot.dot-top-right {
-  top: 38px;
-  right: 38px;
-}
-.joystick-dot.dot-right {
-  top: 50%;
-  right: 22px;
-  transform: translateY(-50%);
-}
-.joystick-dot.dot-bottom-right {
-  right: 38px;
-  bottom: 38px;
-}
-.joystick-dot.dot-bottom {
-  bottom: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.joystick-dot.dot-bottom-left {
-  bottom: 38px;
-  left: 38px;
-}
-.joystick-dot.dot-left {
-  top: 50%;
-  left: 22px;
-  transform: translateY(-50%);
-}
-.joystick-dot.dot-top-left {
-  top: 38px;
-  left: 38px;
-}
-.joystick-label {
-  position: absolute;
-  z-index: 3;
-  font-size: 9px;
-  line-height: 1;
-  color: var(--uvp-text-tertiary);
-  pointer-events: none;
-}
-.joystick-label.top {
-  top: 9px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.joystick-label.top-right {
-  top: 8px;
-  right: 8px;
-}
-.joystick-label.right {
-  top: 50%;
-  right: 9px;
-  transform: translateY(-50%);
-}
-.joystick-label.bottom-right {
-  right: 8px;
-  bottom: 8px;
-}
-.joystick-label.bottom {
-  bottom: 9px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.joystick-label.bottom-left {
-  bottom: 8px;
-  left: 8px;
-}
-.joystick-label.left {
-  top: 50%;
-  left: 9px;
-  transform: translateY(-50%);
-}
-.joystick-label.top-left {
-  top: 8px;
-  left: 8px;
-}
-.joystick-handle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  pointer-events: none;
-  background: radial-gradient(
-    circle at 34% 26%,
-    color-mix(in srgb, white 88%, var(--uvp-brand)) 0 6%,
-    color-mix(in srgb, white 30%, var(--uvp-brand)) 20%,
-    var(--uvp-brand) 56%,
-    var(--uvp-brand-strong) 100%
-  );
-  border: 5px solid color-mix(in srgb, white 58%, var(--uvp-brand));
-  border-radius: 50%;
-  box-shadow:
-    inset 4px 4px 8px color-mix(in srgb, white 34%, transparent),
-    inset -6px -8px 11px color-mix(in srgb, black 24%, transparent),
-    0 9px 16px color-mix(in srgb, var(--uvp-brand) 34%, transparent),
-    0 3px 4px color-mix(in srgb, black 28%, transparent),
-    0 0 0 4px var(--uvp-brand-soft),
-    0 0 0 5px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
-  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.joystick-stage.active .joystick-handle {
-  box-shadow:
-    inset 3px 3px 7px color-mix(in srgb, white 28%, transparent),
-    inset -5px -6px 9px color-mix(in srgb, black 28%, transparent),
-    0 5px 10px color-mix(in srgb, var(--uvp-brand) 28%, transparent),
-    0 2px 3px color-mix(in srgb, black 24%, transparent),
-    0 0 0 4px var(--uvp-brand-soft),
-    0 0 0 5px color-mix(in srgb, var(--uvp-brand) 38%, transparent);
-  transition: none;
-}
-.joystick-handle span {
-  position: absolute;
-  top: 9px;
-  left: 11px;
-  width: 17px;
-  height: 9px;
-  background: linear-gradient(145deg, color-mix(in srgb, white 74%, transparent), transparent);
-  border-radius: 50%;
-  opacity: 0.82;
-  filter: blur(0.2px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .joystick-handle {
-    transition: none;
-  }
-  .ptz-direction-stack {
-    opacity: 0.82;
-    animation: none;
-  }
-}
-
-.talk-mode-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: 100%;
-  max-width: 200px;
-  padding: 2px;
-  margin: 6px auto 0;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 7px;
-}
-.talk-mode-switch button {
-  height: 22px;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-}
-.talk-mode-switch button.active {
-  font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-}
-.talk-mode-switch button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-.talk-button {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  max-width: 200px;
-  height: 34px;
-  margin: 8px auto 2px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--uvp-brand);
-  touch-action: none;
-  cursor: pointer;
-  user-select: none;
-  background: var(--uvp-brand-soft);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border));
-  border-radius: 8px;
-  transition: all 0.15s ease;
-}
-.talk-button:hover:not(:disabled) {
-  border-color: var(--uvp-brand);
-}
-.talk-button.active {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-danger) 10%, transparent);
-}
-.talk-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-/* 「正在说话」的波形：4 根 bar 相位错开各自起伏，整体幅度再由采集电平（--talk-level，0..1）缩放。
- * 静态动画保证「一直在动」，电平缩放保证「动得和声音有关」。拿不到 AudioContext 时电平恒为 0，
- * 波形仍以 0.4 倍显示，不会变成空按钮。 */
-.talk-wave {
-  display: inline-flex;
-  flex: none;
-  gap: 2px;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 13px;
-  transform: scaleY(calc(0.4 + var(--talk-level, 0) * 0.6));
-  transform-origin: center;
-  transition: transform 0.08s linear;
-}
-.talk-wave i {
-  width: 2px;
-  height: 100%;
-  background: currentColor;
-  border-radius: 1px;
-  animation: talk-wave-pulse 0.9s ease-in-out infinite;
-}
-
-@keyframes talk-wave-pulse {
-  0%,
-  100% {
-    transform: scaleY(0.32);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .talk-wave i {
-    transform: scaleY(0.8);
-    animation: none;
-  }
-}
-
-.speed-row {
-  padding: 6px 2px;
-}
-.speed-row label {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-}
-.speed-row label > span {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-.speed-row input[type="range"] {
-  accent-color: var(--uvp-brand);
-}
-.speed-row em {
-  font-family: ui-monospace, Menlo, monospace;
-  font-style: normal;
-  font-weight: 600;
-  color: var(--uvp-brand);
-}
-
-/* 镜头(变倍/聚焦/光圈) */
-.lens-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-top: 6px;
-}
-.lens-grid.disabled {
-  pointer-events: none;
-  opacity: 0.42;
-}
-.lens-item {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.lens-label {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
-}
-.lens-btns {
-  display: flex;
-  gap: 4px;
-}
-.lens-btns button {
-  flex: 1;
-  height: 26px;
-  padding: 0;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.lens-btns button:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-
-/* 3D 拖拽(2026-09-20 从「高级」搬来):外盒沿用 .lens-item 的形态,让它在侧栏里
- * 和"变倍/聚焦/光圈"读成同一族;里面的分段按钮沿用 .lens-btns button 的尺寸语言。
- * 分段而不是两个独立按钮:放大/缩小是互斥的二选一(点另一个会换方向而不是叠加),
- * 分段控件把"只有一个生效"这件事直接画出来。 */
-.ptz-drag-zoom {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.drag-zoom-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-}
-.drag-zoom-switch button {
-  height: 26px;
-  padding: 0;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.drag-zoom-switch button:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-.drag-zoom-switch button.active {
-  font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
-}
-.drag-zoom-switch button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-/* 请求关键帧:与 3D 拖拽同款"标签 + 动作"盒,但只有一个动作,故走两列(标签/按钮)排一行。 */
-.ptz-iframe {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 8px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.ptz-iframe button {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: center;
-  height: 26px;
-  padding: 0 8px;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.ptz-iframe button:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-.ptz-iframe button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-/* 目标跟踪（A.2.3.1.14）:三段"动作"而不是"方向" —— 但它们同样是三选一里的"当前态"
- * （框选进行中时「框选跟踪」是唯一亮着的那个),所以沿用分段控件的视觉。
- * ⛔ 三个按钮都是**独立动作**而不是切换开关:「自动跟踪」每点一次都是一条新指令,
- *    不要把「自动」画成某种"已开启"的常驻开关 —— 无应答命令没有"当前态"可言。 */
-.ptz-target-track {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.target-track-switch {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-}
-.target-track-switch button {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  height: 26px;
-  padding: 0 4px;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.target-track-switch button:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-}
-.target-track-switch button.active {
-  font-weight: 600;
-  color: var(--uvp-warning);
-  background: color-mix(in srgb, var(--uvp-warning) 14%, transparent);
-  border-color: var(--uvp-warning);
-}
-.target-track-switch button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-/* 状态三行:意图 / 下发结果 / 说明。⛔ 字号与颜色都往"事实"靠,不要做成告警条 ——
- * 无回执是**协议事实**而不是异常,把它画成警告色会让用户以为出错了。 */
-.target-track-state,
-.target-track-status,
-.target-track-tip,
-.target-track-error {
-  margin: 0;
-  font-size: 10.5px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.target-track-state {
-  color: var(--uvp-text-secondary);
-}
-.target-track-status {
-  font-weight: 600;
-  color: var(--uvp-warning);
-}
-.target-track-tip {
-  color: var(--uvp-text-tertiary);
-}
-.target-track-error {
-  color: var(--uvp-danger);
-}
-
-/* 精准 PTZ */
-
-/* 面板盒填满高度后,内容若仍挤在顶部就会留出一块空腔。让当前模式的内容块
- * 占满面板并把纵向余量平均匀到各组之间(方向盘、对讲、速度、镜头),
- * 而不是把某一块拉长 —— 方向盘按钮拉高会很怪。
- * 余量为负(内容比盒子高)时 space-between 退化为顶部对齐,由 .panels 滚动兜底。 */
-
-/* 云台面板是"模式切换 + 当前模式内容 + 3D 拖拽 + 关键帧 + 目标跟踪"五行:模式切换、3D 拖拽、
- * 关键帧与目标跟踪都按内容高,当前模式内容吃掉剩余高度。
- * 3D 拖拽/关键帧/目标跟踪刻意都排在两个模式块**之外**(见各自注释):它们是画面级即时动作,
- * 与速度/精准正交,切模式时不能跟着消失。
- * ⛔ 加一行画面级动作块时**这里也要跟着加一个 `auto`**:漏了的话多余的块会被塞进
- *    `minmax(0, 1fr)` 那一行(与当前模式内容挤在一起),表现为"方向盘被压扁"。 */
-[data-testid="linked-side-ptz"] {
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
-  height: 100%;
-  min-height: 0;
-}
-.ptz-speed,
-.ptz-precise {
-  display: grid;
-  gap: 10px;
-  align-content: space-between;
-  min-height: 0;
-}
-
 /* 探针 tab 两张卡:概览拿余量,检测按内容自然高。
  * 概览内容多(2×2 指标 + 视频/音频块),检测卡内容少(按钮 + 摘要 + 结论),
  * 让检测卡按 auto 收敛,不再被 1fr 拉平 —— 那样会让检测卡显得空、同时把整个侧栏顶高。 */
@@ -10578,209 +6795,14 @@ onBeforeUnmount(() => {
 [data-testid="probe-check"] .probe-summary > div {
   align-content: center;
 }
-.precise-hint {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  padding: 8px 10px;
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: var(--uvp-text-tertiary);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, transparent);
-  border-radius: 8px;
-}
-.precise-hint strong {
-  font-weight: 600;
-  color: var(--uvp-brand-cyan);
-}
-.axis-row label {
-  display: grid;
-  gap: 4px;
-}
-.axis-row label > span {
-  font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
-}
-.axis-ctrl {
-  display: grid;
-  grid-template-columns: 1fr 60px;
-  gap: 6px;
-  align-items: center;
-}
-.axis-ctrl input[type="range"] {
-  accent-color: var(--uvp-brand);
-}
-.axis-num {
-  height: 26px;
-  padding: 0 6px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  text-align: right;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.precise-actions {
-  display: flex;
-  gap: 6px;
-}
-.precise-actions button {
-  flex: 1;
-}
 
 /* 预置位 */
-.preset-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
-}
-.preset-item {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 6px;
-  align-items: center;
-  padding: 8px 10px;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  text-align: left;
-  cursor: pointer;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 7px;
-  transition: all 0.15s ease;
-}
-.preset-item:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-}
-.preset-item.active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border));
-}
-.preset-item:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-.preset-idx {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.preset-item.active .preset-idx {
-  color: var(--uvp-brand);
-}
-.preset-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.preset-del {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  color: var(--uvp-text-tertiary);
-  border-radius: 4px;
-  transition: all 0.15s ease;
-}
-.preset-del:hover {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-}
-.preset-add {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-column: 1 / -1;
-  gap: 6px;
-  padding-top: 6px;
-  margin-top: 2px;
-  border-top: 1px dashed var(--uvp-panel-border);
-}
-.preset-add input {
-  height: 28px;
-  padding: 0 8px;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 6px;
-}
-.preset-add input:focus {
-  outline: none;
-  border-color: var(--uvp-brand);
-}
 
 /* 巡航 */
 
 /* 巡航 tile:复用 .preset-tile 尺寸/结构,active 用 brand-cyan 与预置位区分 */
-.preset-tile.cruise-tile.active {
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 45%, var(--uvp-panel-border));
-}
-.preset-tile.cruise-tile.active .preset-tile-hit {
-  color: var(--uvp-brand-cyan);
-}
-.preset-tile.cruise-tile.active .cruise-tile-icon {
-  color: var(--uvp-brand-cyan);
-}
-.preset-tile.cruise-tile:hover:not(.disabled) {
-  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 40%, var(--uvp-panel-border));
-}
-.preset-tile.cruise-tile.pending {
-  background: var(--uvp-warning-soft);
-  border-color: var(--uvp-warning-border);
-}
-.cruise-tile-icon {
-  flex-shrink: 0;
-  color: var(--uvp-text-tertiary);
-}
-.cruise-status-badge {
-  flex: 0 0 auto;
-  padding: 0 4px;
-  font-size: 8.5px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--uvp-warning);
-  background: var(--uvp-warning-soft);
-  border: 1px solid var(--uvp-warning-border);
-  border-radius: 3px;
-}
 
 /* 卡片头运行中标签:brand-cyan chip + 呼吸点,点击停止全部巡航 */
-.cruise-running-chip {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 1px 7px 1px 6px;
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--uvp-brand-cyan);
-  cursor: pointer;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 32%, transparent);
-  border-radius: 999px;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.cruise-running-chip:hover {
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent);
-  border-color: var(--uvp-brand-cyan);
-}
-.cruise-running-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--uvp-brand-cyan);
-  border-radius: 50%;
-}
-.cruise-running-dot.start-sent {
-  animation: cruise-pulse 1.4s ease-in-out infinite;
-}
 
 @keyframes cruise-pulse {
   0%,
@@ -10795,123 +6817,9 @@ onBeforeUnmount(() => {
 }
 
 /* 看守位 */
-.home-header-actions {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-.home-diagnostics {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  color: var(--uvp-text-tertiary);
-  cursor: help;
-}
-.home-config {
-  display: grid;
-  gap: 7px;
-  padding-top: 4px;
-  container-type: inline-size;
-}
-.home-state-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  min-width: 0;
-}
-.home-state-icon {
-  display: inline-grid;
-  flex: 0 0 26px;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border-radius: 6px;
-}
-.home-state-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-  line-height: 1.4;
-}
-.home-state-copy strong {
-  font-size: 11px;
-  color: var(--uvp-text-primary);
-}
-.home-state-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-.home-state-copy [data-testid="home-confirmed-values"] {
-  color: var(--uvp-text-secondary);
-  white-space: normal;
-}
-.home-confirmed-at {
-  font-size: 9px !important;
-}
-.home-config.state-success .home-state-icon {
-  color: var(--uvp-brand-cyan);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
-}
-.home-config.state-danger .home-state-icon {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-}
-.home-config.state-loading .home-state-icon {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-}
 
 /* `.home-hint` 与警告/错误同一排版,只是语气不同:提示是「还缺前置条件」,
  * 不是「你填错了」,所以用次级文字色而不是红/黄,免得跟真正的校验失败混在一起。 */
-.home-warning,
-.home-error,
-.home-hint {
-  margin: 0;
-  font-size: 9.5px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.home-warning {
-  color: var(--uvp-warning);
-}
-.home-error {
-  color: var(--uvp-danger);
-}
-.home-hint {
-  color: var(--uvp-text-tertiary);
-}
-.home-card-actions {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  margin-top: auto;
-}
-.home-card-actions button {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  white-space: nowrap;
-}
-.home-card-actions .uvp-refresh-btn {
-  margin-left: auto;
-}
-.home-close-btn {
-  color: var(--uvp-danger);
-  border-color: var(--uvp-danger-border);
-}
-.home-close-btn:hover:not(:disabled) {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger);
-}
 
 /* ── 自动扫描卡片(89H 开始/边界,8AH 速度)──
  *
@@ -10920,611 +6828,14 @@ onBeforeUnmount(() => {
  *    绝不能让按钮被压成一条线(卡片是 overflow: hidden,压不下就**裁掉**而不是换行)。
  * ⛔ 高度同样是硬预算:详情条 148px,三行控件 + 一行提示刚好卡在上限内,
  *    再加一行就会被裁(见 .preset-empty 那条注释里的算法)。 */
-.scan-panel {
-  display: grid;
-  gap: 5px;
-  align-content: start;
-  height: 100%;
-  padding-top: 2px;
-}
-.scan-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-items: center;
-}
-.scan-label {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.scan-number {
-  box-sizing: border-box;
-  flex: 0 0 auto;
-  width: 52px;
-  height: 20px;
-  padding: 0 5px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--uvp-text-primary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 4px;
-}
-.scan-number:focus {
-  outline: none;
-  border-color: var(--uvp-brand);
-}
-.scan-toggle {
-  margin-left: auto;
-}
-.scan-bound-btn {
-  flex: 1 1 auto;
-}
-.scan-hint,
-.scan-error {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--uvp-text-tertiary);
-}
-.scan-error {
-  color: var(--uvp-danger);
-}
 
-.home-settings-form {
-  display: grid;
-  gap: 18px;
-  padding-top: 4px;
-}
-.home-settings-field {
-  display: grid;
-  gap: 7px;
-}
-.home-settings-field > label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-}
-.home-settings-field > label > span {
-  color: var(--uvp-danger);
-}
-.home-settings-field select,
-.home-settings-field input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 36px;
-  padding: 0 10px;
-  font-size: 12px;
-  color: var(--uvp-text-primary);
-  outline: none;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 6px;
-}
-.home-settings-field select:focus,
-.home-settings-field input:focus {
-  border-color: var(--uvp-brand);
-}
-.home-settings-time {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-}
-.home-settings-time > span {
-  font-size: 12px;
-  color: var(--uvp-text-secondary);
-}
-.home-settings-description,
-.home-settings-error {
-  margin: -4px 0 0;
-  font-size: 11px;
-  line-height: 1.6;
-}
-.home-settings-description {
-  color: var(--uvp-text-tertiary);
-}
-.home-settings-error {
-  color: var(--uvp-danger);
-}
-.home-settings-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding-top: 2px;
-}
-.home-settings-actions button {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: center;
-  min-width: 86px;
-}
-
-/* ═══════════ 探针面板 ═══════════ */
-.probe-panel {
-  gap: 12px;
-}
-.probe-header {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-/* 探针面板里的独立卡片:概览 / 逐帧健康检测。
- * 各自有底色和边框,两卡之间靠 .probe-panel 的 gap(12px) 拉开距离。
- * 底色用 list-toolbar-bg(比 panel-bg 略深),这样即使外层 .panels 是白底,
- * 两张卡的边界仍然一眼可辨,不至于糊成一片。 */
-.probe-card {
-  display: grid;
-  gap: 7px;
-  padding: 9px 11px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-}
-
-/* 概览卡:标题 / 概览指标 auto,视频/音频分栏拿余量 —— 但只是外壳拉伸,
- * 内部行距保持紧凑。之前用 flex:1 1 auto 让 stream-brief-rows 吸收余量,
- * 结果把编码/分辨率/帧率/丢包之间的间距顶得太大。改成外壳等高、内容顶到上方。
- *
- * 概览卡自身已经用 .stream-brief 的 gap 排版了,不必再叠一层内边距 gap。 */
-.probe-card.stream-brief {
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 7px;
-  min-height: 0;
-}
-
-/* 卡内的 section-hd.first 不再需要 margin-top:0 的特殊值,顶部内边距已经交给 .probe-card 处理 */
-.probe-card .section-hd.first {
-  margin-top: 0;
-}
-
-/* ═══════════ 流信息(探针面板顶部) ═══════════ */
-.stream-brief {
-  display: grid;
-  gap: 7px;
-}
-.stream-brief-overview {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.stream-brief-overview > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 7px 9px;
-}
-
-/* 2×2 网格的十字分隔线:偶数列(2n)加左线,第 3 格起(n+3)加顶线。
- * 这样布局与格子数解耦 —— 以后要加"码率"「延迟」等,自动流入下一行也照样有线。 */
-.stream-brief-overview > div:nth-child(2n) {
-  border-left: 1px solid var(--uvp-panel-border);
-}
-.stream-brief-overview > div:nth-child(n + 3) {
-  border-top: 1px solid var(--uvp-panel-border);
-}
-.stream-brief-overview span {
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.stream-brief-overview strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 14px;
-  font-weight: 650;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.stream-brief-overview small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-
-/* 音频在左、视频在右。左侧色条沿用探针轨道卡的配色(视频=品牌蓝、音频=青),
- * 同一种媒体在面板里始终是同一个颜色,不用读标题也能对上。 */
-.stream-brief-split {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  align-items: stretch;
-  min-height: 0;
-}
-.stream-brief-kind {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  padding: 7px 9px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.stream-brief-kind.audio {
-  border-left: 2px solid var(--uvp-brand-cyan);
-}
-.stream-brief-kind.video {
-  border-left: 2px solid var(--uvp-brand);
-}
-.stream-brief-kind header {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  margin-bottom: 5px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-}
-.stream-brief-rows {
-  display: grid;
-  gap: 3px;
-}
-.stream-brief-rows > div {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  justify-content: space-between;
-  min-width: 0;
-}
-.stream-brief-rows span {
-  flex-shrink: 0;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.stream-brief-rows strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.stream-brief-rows strong.warn {
-  color: var(--uvp-warning);
-}
-.stream-brief-rows strong.err {
-  color: var(--uvp-danger);
-}
-.probe-status {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 5px;
-  align-items: center;
-  padding: 3px 7px;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 999px;
-}
-.probe-status .dot {
-  width: 5px;
-  height: 5px;
-  background: currentcolor;
-  border-radius: 50%;
-}
-.probe-status.sampling {
-  color: var(--uvp-warning);
-  border-color: var(--uvp-warning-border);
-}
-.probe-status.sampling .dot {
-  animation: pulse 1s ease-in-out infinite;
-}
-.probe-status.complete {
-  color: var(--uvp-brand-cyan);
-  border-color: color-mix(in srgb, var(--uvp-brand-cyan) 30%, var(--uvp-panel-border));
-}
-
-/* 主操作按钮 : 采样时长选择器 = 7 : 3。
- * ⚠️ 下拉框必须走 :deep() —— a-select 的根节点是 Arco 内部渲染的 <span>,
- * 拿不到本组件的 scoped 属性(实测 hasScopeAttr=false),写成 .probe-duration
- * 能编译通过却永远匹配不到它,那时它只剩 Arco 自带的 width:100%,
- * 会把按钮挤成竖排窄条(只剩 padding 撑出的 24px)。
- * 两侧都显式 min-width:0 —— flex item 默认 min-width:auto 会被内容顶住。 */
-.probe-action-row {
-  display: flex;
-  gap: 6px;
-  align-items: stretch;
-}
-.probe-action {
-  display: inline-flex;
-  flex: 7 1 0;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  width: auto;
-  min-width: 0;
-  min-height: 30px;
-  padding: 0 12px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #ffffff;
-  cursor: pointer;
-  background: var(--uvp-brand);
-  border: 0;
-  border-radius: 7px;
-  transition: all 0.15s ease;
-}
-.probe-action:hover:not(:disabled) {
-  background: var(--uvp-brand-strong);
-}
-.probe-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-/* 这里只管布局:边框/底色/圆角/字号统一由 styles/arco-overrides.scss 的
- * .arco-select-view 提供,避免两处规则打架 */
-:deep(.probe-duration) {
-  flex: 3 1 0;
-  min-width: 0;
-}
-.probe-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.probe-summary > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-}
-.probe-summary > div + div {
-  border-left: 1px solid var(--uvp-panel-border);
-}
-.probe-summary span,
-.probe-health-grid span {
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.probe-summary strong {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.probe-summary em {
-  margin-left: 2px;
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 400;
-  color: var(--uvp-text-tertiary);
-}
-.probe-summary.muted {
-  opacity: 0.56;
-}
-
-/* 结论条单行紧凑:高度从两行 45px 降到单行约 26px,完成态不再撑破侧栏。
- * 副信息(完成时间/具体问题)通过 title 承载,鼠标悬停可查。 */
-.probe-verdict {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 5px 10px;
-  color: var(--uvp-brand-cyan);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, var(--uvp-panel-border));
-  border-radius: 8px;
-}
-.probe-verdict > svg {
-  flex-shrink: 0;
-}
-.probe-verdict strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.section-meta.good {
-  color: var(--uvp-brand-cyan);
-}
-.sidebar .probe-panel {
-  gap: 8px;
-}
-
-/* 检测卡三格摘要:紧凑内边距,让概览卡有更多空间放 2×2 指标。
- * 采样数字降一档(13px),避开跟概览"当前观看"「数据速率」14px 的主视觉。 */
-.sidebar .probe-summary > div {
-  padding: 5px 8px;
-}
-.sidebar .probe-summary strong {
-  font-size: 13px;
-}
-.sidebar .probe-verdict {
-  padding: 7px 10px;
-}
-
-/* 轨道明细(视频 + 音频合并卡)。左侧类型条沿用全局配色约定:视频=品牌蓝、音频=青,
- * 跟流信息块的两栏一致,同一种媒体在整个面板里始终是同一个颜色。
- *
- * 两行改为等分并 stretch,单元格垂直居中:轨道明细内容天生比"时间戳监控/时间线"少
- * (视频 4 + 音频 2 = 6 单元格),按内容 auto 会在卡片下方堆一大片空白。
- * 让两行拉伸吃满卡高度,视频/音频块内部单元格垂直居中,空白变成两行之间的自然呼吸。 */
-.probe-track-merged {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 6px;
-  min-height: 0;
-}
-.probe-track-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-content: center;
-  align-items: center;
-  min-height: 0;
-}
-.probe-track-row + .probe-track-row {
-  padding-top: 6px;
-  border-top: 1px solid var(--uvp-panel-border);
-}
-.probe-track-kind {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 4px;
-  align-items: center;
-  padding-left: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-  border-left: 2px solid var(--uvp-panel-border);
-}
-.probe-track-row.video .probe-track-kind {
-  border-left-color: var(--uvp-brand);
-}
-.probe-track-row.audio .probe-track-kind {
-  border-left-color: var(--uvp-brand-cyan);
-}
-.probe-track-cells {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 10px;
-  min-width: 0;
-}
-.probe-track-cells > div {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  justify-content: space-between;
-  min-width: 0;
-}
-.probe-track-cells span {
-  flex-shrink: 0;
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.probe-track-cells strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--uvp-text-primary);
-  white-space: nowrap;
-}
-.probe-health-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.probe-health-grid > div {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 6px;
-  align-items: baseline;
-  padding: 8px 9px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 7px;
-}
-.probe-health-grid strong {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--uvp-text-primary);
-}
-.probe-health-grid em {
-  grid-column: 1 / -1;
-  font-size: 9px;
-  font-style: normal;
-  color: var(--uvp-text-tertiary);
-}
-
-/* 帧到达概览条:按时间分桶的密度条,点击进弹窗看逐帧。
- * 桶数固定(见 probeOverview.ts 的 PROBE_OVERVIEW_BUCKETS),所以帧再多也不会溢出 ——
- * 旧版逐帧一根柱子,60 秒采样下 min-width 会把整栏撑到九千多像素。
- * 空桶只留一条底线:空白本身就是「这段时间没有帧到达」。 */
-.frame-overview {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 6px;
-  width: 100%;
-  padding: 4px 6px;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  transition: background 0.14s ease;
-}
-.frame-overview:hover:not(:disabled) {
-  background: var(--uvp-brand-soft);
-}
-.frame-overview:disabled {
-  cursor: default;
-}
-.frame-overview.muted {
-  opacity: 0.46;
-}
-.frame-overview-bars {
-  display: flex;
-  gap: 1px;
-  align-items: flex-end;
-  min-height: 46px;
-  padding-bottom: 1px;
-  border-bottom: 1px solid var(--uvp-panel-border);
-}
-.frame-overview-bar {
-  flex: 1 1 0;
-  min-width: 0;
-  background: color-mix(in srgb, var(--uvp-brand) 62%, transparent);
-  border-radius: 1px 1px 0 0;
-  transition: height 0.2s ease;
-}
-.frame-overview-bar.empty {
-  background: var(--uvp-panel-border);
-}
-.frame-overview-bar.stalled {
-  background: var(--uvp-warning);
-}
-.frame-overview-foot {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.frame-overview-cta {
-  display: inline-flex;
-  gap: 3px;
-  align-items: center;
-  color: var(--uvp-brand);
-}
-.frame-overview:hover:not(:disabled) .frame-overview-cta {
-  text-decoration: underline;
-}
+/* ── 雨刷卡片(A.3.7 表 A.11)──
+ * 复用扫描卡的栅格/行/提示样式,只改按钮的对齐:这张卡**只有这一个动作**,
+ * 让它吃掉整行宽度而不是像扫描卡的「下发」那样靠右 ——
+ * 单按钮右对齐会被读成"附属操作",而它其实是这张卡唯一的主操作。 */
 
 /* 空态引导:柱状区中央的图标 + 一句说明。muted 状态下父级会整体淡化,
  * 引导条自身不用再降透明度;font-size 跟其他 meta 一档保持层级一致。 */
-.frame-overview-empty {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 46px;
-  font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
-}
-.frame-overview-empty > svg {
-  color: var(--uvp-text-tertiary);
-}
 
 /* ═══════════ 录制面板 ═══════════ */
 .empty {
@@ -11687,88 +6998,16 @@ onBeforeUnmount(() => {
   color: var(--uvp-text-tertiary);
 }
 
-/* 「参数对照」区(2026-09-20 从「视频编码」页签底栏搬进「画面设置」底栏第三格)。
-   148px 定高下只放一张卡:横向三行对照。
-   ⛔ 三行并排是这块的全部价值 —— 塞回侧栏窄卡会折成六行,读者就分不清
-      哪一行是设备事实、哪一行是自己刚改的草稿了。
+/* 「参数对照」区：与视频编码抽屉在右侧上下排列。
+   三行数据仍保持同一张卡内的横向结构，避免设备事实与画面实测被拆散。
    ⛔ 卡片容器直接用 `.linked-section.linked-card`(它本身就是 flex column),
       不要再套一层专用的 layout 壳。 */
-.vpc-grid {
-  display: grid;
-  flex: 1 1 0;
-  gap: 5px;
-  align-content: start;
-  min-height: 0;
-  padding: 8px 10px;
-  overflow-y: auto;
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 5%, transparent);
-  border-radius: 6px;
-}
-.vpc-hd {
-  font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-}
-.vpc-row {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 6px;
-  align-items: baseline;
-}
-.vpc-row span {
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-.vpc-row strong {
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--uvp-text-secondary);
-  overflow-wrap: anywhere;
-}
 
 /* 逐项差异：只标「画面实测」那一侧 —— 设备回读是基准，画面是待验证的一方。
  * ⛔ 不把两行都染色：两边都变色就没人分得清"谁跟谁不一样"。 */
-.vpc-row strong i {
-  font-style: normal;
-}
-.vpc-row strong i.is-differ {
-  color: var(--uvp-warning);
-}
-.vpc-bitrate {
-  margin-left: 4px;
-  font-style: normal;
-  color: var(--uvp-text-tertiary);
-}
 
 /* 结论标签（2026-09-20 补）：这张卡原来只摆数据、不下结论，用户得自己拿眼睛比
  * `1080P` 和 `1920×1080`。判定规则见 `videoParamVerdict` 的注释（含为什么不比码率）。 */
-.vpc-verdict {
-  padding: 1px 5px;
-  font-size: 9.5px;
-  font-style: normal;
-  white-space: nowrap;
-  border-radius: 4px;
-}
-.vpc-verdict.is-same {
-  color: var(--uvp-success);
-  background: var(--uvp-success-soft);
-}
-.vpc-verdict.is-differ {
-  color: var(--uvp-warning);
-  background: var(--uvp-warning-soft);
-}
-.vpc-verdict.is-unknown {
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-}
-.vpc-empty {
-  padding: 10px 2px;
-  margin: 0;
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: var(--uvp-text-tertiary);
-}
 .video-param-error {
   margin: 0;
   font-size: 9px;
@@ -11887,24 +7126,8 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-/* 一级页签的版式就是上面那份 `.tabs` / `.tab`（属性栏顶部横排均分）。
- * ⛔ 2026-09-20～09-21 一度存在过一套 `.workbench-nav`（左列竖排、独立占一列 136px），
- *    已整体删除：留着它等于给"页签在哪一列"第二个答案，后来人改列数必然漏掉一处。 */
-
-/* 「画面设置」页签上的未下发角标：浮条只在那一页出现，离开后草稿就"看不见入口"了 ——
- * 这枚点把"还有改动没下发"钉在页签上，用户切到任何页都带着它，且不打断任何操作。 */
-.tab-draft-dot {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  width: 6px;
-  height: 6px;
-  background: var(--uvp-warning, #b66b12);
-  border-radius: 50%;
-}
 .config-detail-bar .config-detail {
-  height: auto;
-  max-height: 310px;
+  min-height: 0;
   overflow-y: auto;
 }
 .config-detail .linked-card {
@@ -11961,9 +7184,6 @@ onBeforeUnmount(() => {
   }
 
   /* 单列堆叠顺序：画面 → 属性栏（页签在它顶部）→ 底栏 */
-  .stage.stage-wide .video-frame {
-    grid-column: 1;
-  }
   .video-frame {
     grid-row: 1;
     grid-column: 1;
@@ -11980,23 +7200,8 @@ onBeforeUnmount(() => {
 }
 
 @media (width <= 640px) {
-  .console-title {
-    flex-wrap: wrap;
-  }
-  .console-title:not(.is-minimized) .console-window-action {
-    width: 30px;
-    min-width: 30px;
-    padding: 0;
-  }
-  .console-title:not(.is-minimized) .console-window-action span {
-    display: none;
-  }
-
   /* 窄屏保持等分行为,不再硬编码列数(3 个 tab 也可能变);grid-auto-columns 会按 tabs 数量平分。 */
   .lens-grid {
-    grid-template-columns: 1fr;
-  }
-  .linked-section .preset-grid {
     grid-template-columns: 1fr;
   }
 }

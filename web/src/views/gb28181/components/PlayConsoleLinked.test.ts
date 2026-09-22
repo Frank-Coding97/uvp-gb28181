@@ -57,6 +57,7 @@ const api = vi.hoisted(() => {
       }
     }),
     authorizeFixedPlayback: vi.fn(),
+    reportPlaybackClientEvent: vi.fn().mockResolvedValue({ code: 0, message: "", data: { accepted: true } }),
     stopPlay: vi.fn().mockResolvedValue({ code: 0, message: "", data: null }),
     getStreamMonitor: vi.fn().mockResolvedValue({
       code: 0,
@@ -186,6 +187,8 @@ const api = vi.hoisted(() => {
     controlPtzExtended: vi.fn(),
     // 自动扫描(89H / 8AH)走的就是 /ptz/extended 这条通道,只是前端包了一层语义。
     controlPtzScan: vi.fn(),
+    // 雨刷(A.3.7 表 A.11)有自己的一条路由:后端固定编号 1,前端只发 on/off。
+    controlPtzWiper: vi.fn(),
     createPtzPreset: vi.fn(),
     callPtzPreset: vi.fn(),
     deletePtzPreset: vi.fn(),
@@ -227,8 +230,9 @@ vi.mock("@/api/gb28181", () => api);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 vi.mock("./PlayWindow.vue", () => ({
   default: {
+    name: "PlayWindowStub",
     props: ["url", "zlmWebrtc", "hasAudio"],
-    emits: ["error", "videosize"],
+    emits: ["error", "videosize", "first-frame", "player-error"],
     template:
       "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' :data-has-audio='String(Boolean(hasAudio))' @click=\"$emit('error', '拉流超时')\" />",
     // 真实播放器每秒报一次画面解码尺寸；stub 也报一次，否则遮挡框选没有坐标基准。
@@ -432,6 +436,7 @@ function stubDragZoomRects(wrapper: VueWrapper, width = 800, height = 450) {
 /** 在**云台侧栏**点开拉框，并备好坐标基准。`action` 用 `in` / `out`。 */
 async function enterDragZoomAtPtzTab(wrapper: VueWrapper, action: "in" | "out" = "in") {
   await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+  await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
   await wrapper.get(`[data-testid='ptz-drag-zoom-${action}']`).trigger("click");
   return stubDragZoomRects(wrapper);
 }
@@ -518,6 +523,7 @@ function stubTargetTrackRects(wrapper: VueWrapper, width = 800, height = 450) {
 /** 在**云台侧栏**点开「框选跟踪」，并备好坐标基准。 */
 async function enterTargetTrackDraw(wrapper: VueWrapper) {
   await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+  await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
   await wrapper.get("[data-testid='ptz-target-track-manual']").trigger("click");
   return stubTargetTrackRects(wrapper);
 }
@@ -547,6 +553,8 @@ describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
     userState.account = reactive({ permissions: ["*:*:*"] });
     api.authorizeFixedPlayback.mockReset();
+    api.reportPlaybackClientEvent.mockReset();
+    api.reportPlaybackClientEvent.mockResolvedValue({ code: 0, message: "", data: { accepted: true } });
     api.getHomePosition.mockReset();
     api.getPtzOperation.mockReset();
     api.getDeviceStatus.mockReset();
@@ -778,6 +786,41 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find(".arco-modal-close-btn").exists()).toBe(false);
     await wrapper.get("[data-testid='play-console-close']").trigger("click");
     expect(wrapper.emitted("update:visible")?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it("上报当前播放会话的客户端事实且失败不影响播放", async () => {
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        lifecycleId: "life-1",
+        clientFeedbackToken: "feedback-1",
+        clientFeedbackExpiresAt: 1800000600,
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        wsflvUrl: "ws://zlm/rtp/stream-1.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    api.reportPlaybackClientEvent.mockRejectedValueOnce(new Error("network unavailable"));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    wrapper.findComponent({ name: "PlayWindowStub" }).vm.$emit("first-frame", {
+      event: "first_frame",
+      clientElapsedMs: 321
+    });
+    await flushPromises();
+
+    expect(api.reportPlaybackClientEvent).toHaveBeenCalledWith("life-1", "feedback-1", {
+      event: "first_frame",
+      clientElapsedMs: 321
+    });
+    expect(wrapper.find(".placeholder.error").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -1060,7 +1103,10 @@ describe("PlayConsoleLinked 双区联动", () => {
         "ws://zlm/rtp/stream-copy-fallback.live.flv"
       );
 
-      const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+      const source = readFileSync(
+        resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleProtocolBar.vue"),
+        "utf8"
+      );
       expect(source).toMatch(
         /\.protocol-url\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s
       );
@@ -1620,7 +1666,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 侧栏只剩「视频编码」一组 ⇒ 分组导航整体不渲染（`configGroups.length > 1` 才出），
     // 组的标题那一行由 `dcg-params-head` 承担。图像叠加在底栏，见 `picture-osd-cell`。
     expect(workspace.find(".dcg-nav").exists()).toBe(false);
-    expect(workspace.find("[data-testid='video-param-compare']").exists()).toBe(false);
+    expect(
+      wrapper.get("[data-testid='linked-side-video-compare']").find("[data-testid='video-param-compare-card']").exists()
+    ).toBe(true);
+    expect(wrapper.get("[data-testid='linked-detail-picture']").find("[data-testid='video-param-compare-card']").exists()).toBe(
+      false
+    );
     expect(wrapper.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='play-console-open-device-config']").exists()).toBe(false);
 
@@ -1684,34 +1735,35 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 「画面控制」卡（3D 放大/缩小）与请求关键帧的新家都在**云台控制侧栏** ——
     // 前者是画面级手势，后者是流侧动作，都跟"设备侧录制/布防"不同族，
     // 也不该只在别的页签下才找得到（那样切页签就会失去取消入口）。
+    await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
     const ptzSideForDragZoom = wrapper.get("[data-testid='linked-side-ptz']");
     expect(ptzSideForDragZoom.text()).toContain("3D 拖拽");
     expect(ptzSideForDragZoom.find("[data-testid='ptz-drag-zoom-in']").exists()).toBe(true);
     expect(ptzSideForDragZoom.find("[data-testid='ptz-drag-zoom-out']").exists()).toBe(true);
-    expect(ptzSideForDragZoom.find("[data-testid='ptz-iframe-request']").exists()).toBe(true);
+    expect(ptzSideForDragZoom.find(".ptz-precise").attributes("style")).toContain("display: none");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
+    expect(ptzSideForDragZoom.find("[data-testid='ptz-iframe-request']").isVisible()).toBe(true);
     expect(ptzSideForDragZoom.text()).toContain("关键帧");
 
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     const vpSide = wrapper.get("[data-testid='linked-side-deviceconfig']");
     const vpDetail = wrapper.get("[data-testid='linked-detail-picture']");
-    // 侧栏留编辑表单与状态文案（只有「视频编码」这一组）；图像叠加与两行对照都在底栏。
+    // 侧栏留编辑表单与状态文案（只有「视频编码」这一组），参数对照紧跟在其下方。
     expect(vpSide.text()).toContain("视频编码");
     expect(vpSide.text()).not.toContain("图像叠加");
     expect(vpSide.text()).not.toContain("设备控制");
     expect(vpSide.text()).not.toContain("图像抓拍配置");
-    // ⛔ 对照区必须**只在**底栏：留在编辑表单旁边会被误读成"我刚改的值"。
-    expect(vpSide.find("[data-testid='video-param-compare']").exists()).toBe(false);
-    expect(vpDetail.text()).toContain("参数对照");
-    expect(vpDetail.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
-    // ⛔ 底栏是**四列**：图像叠加 / 遮挡 / 镜像 / 参数对照。少一格就会让切页签时卡片横向跳位；
-    //    图像叠加那一格是 2026-09-20 从侧栏搬来的（老板："不想用切换的方式，一页全展示"）。
-    expect(vpDetail.findAll(".linked-picture-layout > .linked-section")).toHaveLength(4);
+    expect(vpSide.find("[data-testid='linked-side-video-compare']").exists()).toBe(true);
+    expect(vpSide.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
+    expect(vpDetail.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
+    // 底栏由图像叠加、遮挡、镜像三个组件组成；图像叠加占两列，内部两块与另外两张卡等分。
+    expect(vpDetail.findAll(".linked-picture-layout > .linked-section")).toHaveLength(3);
     expect(vpDetail.get("[data-testid='picture-osd-cell']").find("[data-testid='osd-block-time']").exists()).toBe(true);
 
     wrapper.unmount();
   });
 
-  it("视频参数：两行对照渲染在底栏，侧栏只留编辑表单", async () => {
+  it("视频参数：两行对照紧跟视频编码渲染，底栏只保留画面卡片", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
         list: [videoParamRow({ id: 1, streamNumber: 0, resolution: "6" })],
@@ -1723,17 +1775,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
 
-    const detail = wrapper.get("[data-testid='linked-detail-picture']");
-    const compare = detail.get("[data-testid='video-param-compare']");
-    // 两行都在底栏里 —— 这是"设备说的 vs 画面在播的"同屏落点。
+    const side = wrapper.get("[data-testid='linked-side-deviceconfig']");
+    const compare = side.get("[data-testid='video-param-compare']");
+    // 两行都在视频编码下方 —— 这是"设备说的 vs 画面在播的"同屏落点。
     expect(compare.text()).toContain("设备回读");
     expect(compare.text()).toContain("画面实测");
     // ⛔ 「回读」行取**设备事实**（码值 6 → 1080P），不是草稿值。
-    expect(detail.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
+    expect(side.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
 
-    // 侧栏留表单、不留对照；对照只在底栏。
-    const side = wrapper.get("[data-testid='linked-side-deviceconfig']");
-    expect(side.find("[data-testid='video-param-compare']").exists()).toBe(false);
+    // 底栏不再重复参数对照，避免视频编码下方和底栏各出现一份。
+    const detail = wrapper.get("[data-testid='linked-detail-picture']");
+    expect(detail.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
     expect(side.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     wrapper.unmount();
   });
@@ -1832,13 +1884,34 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("一级页签在右侧属性栏顶部均分，详情跨视频与右侧面板", () => {
+  it("一级页签由独立组件承载，详情坞横跨主体底部", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const probePanelSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleProbePanel.vue"),
+      "utf8"
+    );
+    const tabsSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleTabs.vue"),
+      "utf8"
+    );
+    const ptzPanelSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsolePtzPanel.vue"),
+      "utf8"
+    );
+    const detailStyles = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/detail-cards.scss"),
+      "utf8"
+    );
+    const dialogsSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleDialogs.vue"),
+      "utf8"
+    );
 
-    expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
-    expect(source).toContain("--linked-detail-height: 148px");
+    expect(source).toContain("<PlayConsoleTabs");
+    expect(source).not.toContain('aria-label="播放工作区"');
+    expect(tabsSource).toContain('aria-label="播放工作区"');
     expect(source).toContain(':width="playbackModalWidth"');
-    expect(source).toContain(': "min(1520px, calc(100vw - 32px))"');
+    expect(source).toContain(': "min(1520px, calc(100vw - 32px), calc((100dvh - 380px) * 16 / 9 + 410px))"');
     // 两列 = 画面 + 属性栏。2026-09-21 一级页签回到属性栏顶部后，
     // 原来给左侧竖排导航的 `136px` 那一列退役（宽度还给画面）。
     expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+360px/s);
@@ -1846,7 +1919,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // ⛔ 别退化成"存在性"断言 —— 页签被搬回 `console-body` 当独立一列时它照样"存在"，
     //    而那正是列索引集体错位的形态（`.video-frame` / `.linked-info-bar` / `.sidebar` 全要 -1）。
     const sidebarAt = source.indexOf('class="sidebar"');
-    const tabsAt = source.indexOf('aria-label="播放工作区"');
+    const tabsAt = source.indexOf("<PlayConsoleTabs");
     expect(sidebarAt).toBeGreaterThan(-1);
     expect(tabsAt).toBeGreaterThan(sidebarAt);
     // ⛔ 左侧竖排那套样式（`.workbench-nav`）与「当前页名」标题（`.workspace-heading`）
@@ -1861,22 +1934,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).not.toContain('data-testid="linked-detail-stream"');
     expect(source).not.toContain(".linked-stream-metrics");
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
-    expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
-    // 所有页签共用同一条底部工作区基线；参数对照/设备配置不能再单独把区域撑到 220px。
-    expect(source).not.toMatch(/\.linked-detail-actions\s*\{[^}]*height:\s*220px/s);
-    expect(source).toMatch(/\.linked-detail-actions\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
-    expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
-    expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
-    expect(source).toMatch(
+    expect(detailStyles).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
+    expect(detailStyles).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
+    expect(ptzPanelSource).toMatch(
       // ⛔ 媒体查询两种写法都要接受：stylelint 的 media-feature-range-notation 会把
       //    `(max-width: 720px)` 自动 fix 成 `(width <= 720px)`（提交钩子会跑 --fix），
       //    只认一种写法的话，样式没改、只是被格式化过也会红。
-      /@media \((?:max-width:\s*720px|width <= 720px)\)[\s\S]*?\.linked-detail\s*>\s*\.linked-ptz-layout\s*\{[^}]*flex:\s*0 0 auto;[^}]*grid-template-rows:\s*none;[^}]*height:\s*auto/s
+      /@media \((?:max-width:\s*960px|width <= 960px)\)[\s\S]*?\.linked-ptz-layout\s*\{[^}]*grid-template-rows:\s*none;[^}]*grid-template-columns:\s*1fr;[^}]*height:\s*auto/s
     );
-    expect(source).toMatch(/\.home-card-actions\s*\{[^}]*display:\s*flex/s);
-    expect(source).toMatch(/\.home-settings-form\s*\{[^}]*display:\s*grid/s);
+    expect(detailStyles).toMatch(/\.home-card-actions\s*\{[^}]*display:\s*flex/s);
+    expect(dialogsSource).toMatch(/\.home-settings-form\s*\{[^}]*display:\s*grid/s);
     // 探针详情条三栏不等分:时间线是横向柱状图,等分会把 32 根柱子挤到每根不足 9px
-    expect(source).toMatch(
+    expect(probePanelSource).toMatch(
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
     );
     // ⛔ `[^{]*` 而不是 `\s*`：这条规则可能与 `.sidebar-deviceconfig .panels` **并列成一条**
@@ -1892,8 +1961,120 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).not.toContain("adv-actions");
   });
 
-  it("检测按钮与时长选择器按 7:3 分配宽度", () => {
+  it("三个详情页共享固定工作区高度，窄屏只滚动内容不改变弹窗高度", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const workspaceSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleDetailWorkspace.vue"),
+      "utf8"
+    );
+
+    expect(source).toContain("<PlayConsoleDetailWorkspace");
+    expect(source).toContain("container-type: inline-size;");
+    expect(source).toMatch(
+      /\.console-body:not\(\.is-minimized\) \.sidebar\s*\{[^}]*height:\s*calc\(\(100cqw - 376px\) \* 9 \/ 16 \+ var\(--play-console-protocol-height\) \+ 2px\)/s
+    );
+    expect(source).toMatch(/\.stage\s*\{[^}]*display:\s*contents/s);
+    expect(workspaceSource).toContain("--play-console-detail-height: 180px");
+    expect(workspaceSource).toContain('class="linked-info-bar"');
+    expect(workspaceSource).not.toContain('class="stream-info-bar linked-info-bar"');
+    expect(workspaceSource).toMatch(
+      /\.linked-info-bar\s*\{[^}]*box-sizing:\s*border-box;[^}]*display:\s*grid;[^}]*height:\s*var\(--play-console-detail-height\)/s
+    );
+    expect(workspaceSource).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
+    expect(workspaceSource).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--play-console-detail-height\)/s);
+    expect(workspaceSource).toMatch(/\.linked-detail\s*\{[^}]*overflow:\s*auto/s);
+    expect(workspaceSource).not.toMatch(/@media[\s\S]*?\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*auto/s);
+    expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console/detail-cards.scss"), "utf8")).toMatch(
+      /@media \((?:max-width:\s*720px|width <= 720px)\)[\s\S]*?\.linked-card,\s*\.picture-osd-cell,\s*\.linked-probe-layout > \.linked-section\.probe-detail-card\s*\{[^}]*box-sizing:\s*border-box;[^}]*min-height:\s*180px/s
+    );
+    expect(source).not.toContain("--linked-detail-height:");
+    expect(source).not.toMatch(/\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*auto/s);
+  });
+
+  it("详情区按云台、画面、探针三个职责组件挂载", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+
+    expect(source).toContain("<PlayConsolePtzPanel");
+    expect(source).toContain("<PlayConsolePicturePanel");
+    expect(source).toContain("<PlayConsoleProbePanel");
+    expect(source).not.toContain('class="linked-section probe-detail-card"');
+    expect(source).not.toContain('data-testid="probe-timeline-open"');
+    expect(source).not.toMatch(/class=\"linked-detail linked-detail-ptz\"/);
+    expect(source).not.toMatch(/class=\"linked-detail linked-detail-actions\"/);
+    expect(source).not.toMatch(/class=\"linked-detail\"\s*data-testid=\"linked-detail-probe\"/);
+  });
+
+  it("预置位和巡航完整模板归属各自卡片，父组件只负责挂载与回调", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const presetCard = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PtzPresetCard.vue"),
+      "utf8"
+    );
+    const cruiseCard = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PtzCruiseCard.vue"),
+      "utf8"
+    );
+
+    expect(source).toContain("<PtzPresetCard");
+    expect(source).toContain("<PtzCruiseCard");
+    expect(source).not.toContain('data-testid="preset-popover"');
+    expect(source).not.toContain('data-testid="cruise-popover"');
+    expect(presetCard).toContain('data-testid="preset-popover"');
+    expect(cruiseCard).toContain('data-testid="cruise-popover"');
+  });
+
+  it("拆分后的三个面板自带布局样式，不依赖父组件 scoped CSS", () => {
+    const base = resolve(process.cwd(), "src/views/gb28181/components/play-console");
+    const ptz = readFileSync(resolve(base, "PlayConsolePtzPanel.vue"), "utf8");
+    const picture = readFileSync(resolve(base, "PlayConsolePicturePanel.vue"), "utf8");
+    const probe = readFileSync(resolve(base, "PlayConsoleProbePanel.vue"), "utf8");
+
+    expect(ptz).toMatch(/\.linked-detail-ptz\s*\{[^}]*height:\s*var\(--play-console-detail-height/s);
+    expect(ptz).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(picture).toMatch(/\.linked-picture-layout\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/s);
+    expect(picture).toMatch(/\.linked-picture-layout\s*>\s*\.picture-osd-cell\s*\{[^}]*grid-column:\s*span 2/s);
+    expect(probe).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr)");
+  });
+
+  it("视频编码侧栏与参数对照上下分区，底部画面卡片不再预留对照列", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    expect(source).toMatch(
+      /\.sidebar-deviceconfig-panel\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto auto;[^}]*align-content:\s*start/s
+    );
+    expect(source).toMatch(/\.sidebar-deviceconfig-panel :deep\(\.dcg-window--embedded\)\s*\{[^}]*height:\s*auto/s);
+    expect(source).toMatch(
+      /\.sidebar-video-compare-card :deep\(\.vpc-grid\)\s*\{[^}]*flex:\s*0 0 auto;[^}]*overflow:\s*visible/s
+    );
+    expect(source).toContain('data-testid="linked-side-video-compare"');
+  });
+
+  it("详情卡样式归属子模块，父组件不再持有已拆组件的专属样式", () => {
+    const base = resolve(process.cwd(), "src/views/gb28181/components/play-console");
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const workspace = readFileSync(resolve(base, "PlayConsoleDetailWorkspace.vue"), "utf8");
+    const detailStyles = readFileSync(resolve(base, "detail-cards.scss"), "utf8");
+
+    expect(workspace).toContain('<style lang="scss" src="./detail-cards.scss"></style>');
+    for (const selector of [
+      ".linked-card",
+      ".preset-popover",
+      ".home-config",
+      ".scan-panel",
+      ".probe-detail-card",
+      ".mask-slot-grid",
+      ".mirror-choice-grid",
+      ".vpc-grid"
+    ]) {
+      expect(detailStyles).toContain(`${selector} {`);
+      expect(source).not.toMatch(new RegExp(`^\\s*\\${selector.replaceAll(".", "\\.")}\\s*\\{`, "m"));
+    }
+  });
+
+  it("检测按钮与时长选择器按 7:3 分配宽度", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleProbeSidebar.vue"),
+      "utf8"
+    );
 
     expect(source).toMatch(/\.probe-action\s*\{[^}]*flex:\s*7 1 0/s);
     // flex item 默认 min-width:auto 会被内容顶住,两侧都必须显式清零
@@ -2283,6 +2464,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up" }));
 
     // 请求关键帧 2026-09-20 起在云台控制侧栏（默认页签），它是控制台里仅剩的"设备控制"类入口。
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
     const iFrame = wrapper.get("[data-testid='ptz-iframe-request']");
     expect(iFrame.attributes("disabled")).toBeUndefined();
     expect(iFrame.attributes("title")).toContain("设备上报不支持");
@@ -2380,6 +2562,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     //       这种**假象**当成组件缺陷。attribute 才是组件真实接到的东西。
     expect(wrapper.get("[data-testid='dcg-format-0']").attributes("model-value")).toBe("2");
     expect(wrapper.get("[data-testid='dcg-resolution-0']").attributes("model-value")).toBe("6");
+    expect(wrapper.get("[data-testid='dcg-row-encoding-format']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='dcg-row-encoding-resolution']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='dcg-stream-0']").findAll("[data-source='设备']")).toHaveLength(0);
+    expect(wrapper.get("[data-testid='dcg-params-foot']").text()).not.toContain("设备");
 
     // 配置文件切到子码流后，VBR 码率明确标为“不发”。
     await wrapper.get("[aria-label='配置文件']").setValue("1");
@@ -2637,6 +2823,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
     await wrapper.get("[data-testid='ptz-iframe-request']").trigger("click");
     await flushPromises();
     await vi.advanceTimersByTimeAsync(30000);
@@ -2664,8 +2851,9 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("3D 定位使用画面拖框换算后的真实坐标", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    // 2026-09-20 起入口在云台控制侧栏(不再是"高级"页签)
+    // 2026-09-20 起入口在云台控制侧栏的连续控制模式
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
     await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
@@ -2708,6 +2896,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
     await wrapper.get("[data-testid='ptz-drag-zoom-out']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
@@ -2968,26 +3157,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(bodyOf("startMaskDraw")).toContain("if (dragZoomMode.value) exitDragZoomMode();");
   });
 
-  it("3D 拖拽放在两个云台模式之外,切到精准定位仍留在侧栏", async () => {
-    // ⛔ 防回归:3D 拖拽若被塞进 .ptz-speed 里,切到精准定位模式按钮就消失,
-    //    而 dragZoomMode 还开着 —— 画面停在拖框态,用户却找不到取消入口。
+  it("3D 拖拽只在连续控制模式展示", async () => {
+    // ⛔ 3D 放大/缩小是画面级连续操作，与摇杆、镜头控制同属连续控制。
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
     await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
     expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("取消 3D 放大");
 
-    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
-    // 结构上也必须落在两个模式块**之外**:只断言 .exists() 挡不住 v-show ——
-    // 元素藏起来也还在 DOM 里。用 closest 钉住它不是 .ptz-speed / .ptz-precise 的后代。
     const dragZoomBlock = wrapper.get("[data-testid='ptz-drag-zoom']").element as HTMLElement;
-    expect(dragZoomBlock.closest(".ptz-speed, .ptz-precise")).toBeNull();
-    // 精准定位模式下拖拽层与入口都还在,而且仍处于"可取消"态
+    expect(dragZoomBlock.closest(".ptz-speed")).not.toBeNull();
     expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
-    const cancelBtn = wrapper.get("[data-testid='ptz-drag-zoom-in']");
-    expect(cancelBtn.text()).toContain("取消 3D 放大");
-    await cancelBtn.trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
+    expect(wrapper.find(".ptz-speed").attributes("style")).toContain("display: none");
     expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='ptz-iframe-request']").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -3009,18 +3194,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("控制台搬迁后的布局契约:高级页签不留死样式,云台面板四行含关键帧", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+  it("控制台搬迁后的布局契约:高级页签不留死样式,云台面板两行分配模式内容", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsolePtzSidebar.vue"),
+      "utf8"
+    );
     // ⛔ 「高级」页签 2026-09-20 整体退役：连同它的布局契约（.linked-advanced-layout 的列数）
     //    一起删干净。半截死样式会冒充"这个面板还在"，也会在改配色时被顺手同步。
     expect(source).not.toContain("linked-advanced-layout");
     expect(source).not.toContain("sidebar-advanced");
-    // 云台面板是"模式切换 + 模式内容 + 3D 拖拽 + 请求关键帧"四行；
-    // 后两块排在两个模式块之外，切模式时不能跟着消失
-    // （否则画面停在拖框态却没有取消入口，关键帧按钮也会跟着莫名的页签一起不见）。
-    expect(source).toMatch(
-      /\[data-testid="linked-side-ptz"\]\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s
-    );
+    // 云台面板是"模式切换 + 当前模式内容"两行；3D 归入连续控制，
+    // 关键帧和目标跟踪归入高级控制，不再与外层 grid 行争用空间。
+    expect(source).toMatch(/\[data-testid="linked-side-ptz"\]\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)/s);
   });
 
   it("DeviceStatus 与存储卡事实在控制台里读不到:抽屉才是它们的家", () => {
@@ -3037,7 +3222,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
-    // 3D 拖拽的入口在云台控制侧栏(2026-09-20 从"高级"搬来)，默认页签就在这儿
+    // 3D 拖拽的入口在云台控制侧栏的连续控制模式
+    await wrapper.get("[data-testid='ptz-mode-speed']").trigger("click");
     await wrapper.get("[data-testid='ptz-drag-zoom-in']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
@@ -3258,6 +3444,91 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("雨刷卡片:只发 on/off(编号由后端钉成 1),运行态只说「已下发」", async () => {
+    api.controlPtzWiper.mockReset();
+    api.controlPtzWiper.mockResolvedValue({ code: 0, message: "", data: { operationId: "wiper-op-1", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const card = wrapper.get("[data-testid='wiper-card']");
+    expect(card.element.closest(".ptz-speed")).not.toBeNull();
+    const auxGrid = card.element.closest(".ptz-aux-grid");
+    expect(auxGrid).not.toBeNull();
+    expect(wrapper.get("[data-testid='ptz-drag-zoom']").element.closest(".ptz-aux-grid")).toBe(auxGrid);
+    expect(card.get("[data-testid='wiper-toggle']").text()).toContain("开启雨刷");
+    // ⛔ 卡片里**没有**编号输入框:编号 1 是标准唯一命名的编号(A.3.7 表 A.11 注),
+    //    由后端固定,不放给调用方填 —— 否则等于邀请 2~5 那些标准未定义的私有语义。
+    expect(card.find("input").exists()).toBe(false);
+    // 口径必须写清"标准只命名了编号 1"+"没有回读命令",否则会被读成平台能查到开关状态
+    expect(card.get("[data-testid='wiper-hint']").text()).toContain("编号 1");
+    expect(card.get("[data-testid='wiper-hint']").text()).toContain("没有查询命令");
+
+    await card.get("[data-testid='wiper-toggle']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzWiper).toHaveBeenCalledWith(channel.id, { action: "on" });
+
+    // HTTP 成功 ≠ 雨刷在刮:chip 说的是「已下发」,且不许出现"正在刮"这类词
+    const chip = wrapper.get("[data-testid='wiper-running-chip']");
+    expect(chip.text()).toContain("已下发");
+    expect(chip.text()).not.toContain("刮");
+    expect(wrapper.get("[data-testid='wiper-toggle']").text()).toContain("关闭雨刷");
+
+    await chip.trigger("click");
+    await flushPromises();
+    expect(api.controlPtzWiper).toHaveBeenLastCalledWith(channel.id, { action: "off" });
+    expect(wrapper.find("[data-testid='wiper-running-chip']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='wiper-toggle']").text()).toContain("开启雨刷");
+    wrapper.unmount();
+  });
+
+  it("雨刷:设备未接受时不置运行态,把原因留在卡片里", async () => {
+    api.controlPtzWiper.mockReset();
+    api.controlPtzWiper.mockResolvedValue({ code: 0, message: "", data: { operationId: "wiper-op-2", status: "rejected" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='wiper-toggle']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='wiper-running-chip']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='wiper-error']").text()).toBeTruthy();
+    expect(wrapper.get("[data-testid='wiper-toggle']").text()).toContain("开启雨刷");
+    wrapper.unmount();
+  });
+
+  it("没有云台控制权限时雨刷卡片可见但按钮禁用", async () => {
+    api.controlPtzWiper.mockReset();
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    // 与扫描同一条门禁:保留 play:start,只撤掉 ptz:control。
+    userState.account.permissions = ["gb28181:play:start", "gb28181:ptz:view"];
+    await nextTick();
+
+    const toggle = wrapper.get("[data-testid='wiper-toggle']");
+    expect(toggle.attributes("disabled")).toBeDefined();
+    await toggle.trigger("click");
+    await flushPromises();
+    expect(api.controlPtzWiper).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("云台详情区列数必须等于卡片数(现在是 4:预置位/巡航/看守位/扫描)", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const layout = wrapper.get(".linked-ptz-layout");
+    expect(layout.findAll(":scope > .linked-section.linked-card")).toHaveLength(4);
+    // 卡片数是渲染事实,栅格列数是 CSS 事实 —— 两者不一致时(曾经 4 列 3 卡)
+    // 会有一列空着或最后一张被挤到第二行,而详情条高度是硬预算 148px、卡片
+    // overflow: hidden ⇒ 第二行被裁掉。jsdom 算不出栅格,只能扫源码钉住这个数字。
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsolePtzPanel.vue"),
+      "utf8"
+    );
+    const rule = source.slice(source.indexOf(".linked-ptz-layout {"));
+    expect(rule.slice(0, rule.indexOf("}"))).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
+    wrapper.unmount();
+  });
+
   it("巡航点最多 32 个且列表内部滚动,添加入口保持醒目", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -3272,7 +3543,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(addStop.attributes("disabled")).toBeDefined();
     expect(addStop.text()).toContain("已达到 32 站上限");
 
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleDialogs.vue"),
+      "utf8"
+    );
     expect(source).toMatch(/\.cruise-stops-list\s*\{[^}]*max-height:\s*clamp\(168px,\s*30vh,\s*260px\)[^}]*overflow-y:\s*auto/s);
     expect(source).toMatch(/\.cruise-stop-add\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
     expect(source).toMatch(
@@ -3644,20 +3918,23 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(warning).toHaveBeenCalledWith(expect.objectContaining({ title: "试运行未验证轨迹" }));
     expect(api.controlPtzCruise).toHaveBeenCalledWith(channel.id, { action: "start", trackId: 7 });
 
-    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "cruise") => void };
-    vm.openAssetManager("cruise");
-    await wrapper.vm.$nextTick();
-    const assetText = wrapper.get("[data-testid='asset-manager']").text();
-    expect(assetText).toContain("预置位 3");
     // 单位必须写出来:`0x86`/`0x87` 的参数是 12 位裸整数,单写一个 5 没人知道是秒还是档位
-    expect(assetText).toContain("每点停留 5 秒");
-    expect(assetText).toContain("速度 8");
-    expect(assetText).toContain("未验证");
-    expect(wrapper.get("[data-testid='cruise-manager-tooltip-7']").attributes("mouse-enter-delay")).toBe("80");
+    expect(pendingTooltip.attributes("content")).toContain("每点停留 5 秒");
+    expect(pendingTooltip.attributes("content")).toContain("速度 8");
+    expect(pendingTile.text()).toContain("未验证");
 
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    const presetCardSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PtzPresetCard.vue"),
+      "utf8"
+    );
+    const cruiseCardSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PtzCruiseCard.vue"),
+      "utf8"
+    );
     expect(source).toContain("const RESOURCE_TOOLTIP_ENTER_DELAY_MS = 80;");
-    expect(source.match(/:mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"/g)).toHaveLength(6);
+    expect(presetCardSource.match(/:mouse-enter-delay="tooltipDelay"/g)).toHaveLength(2);
+    expect(cruiseCardSource.match(/:mouse-enter-delay="tooltipDelay"/g)).toHaveLength(2);
     wrapper.unmount();
     warning.mockRestore();
 
@@ -3736,14 +4013,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
-    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "cruise") => void };
-    vm.openAssetManager("cruise");
-    await wrapper.vm.$nextTick();
-    const text = wrapper.get("[data-testid='asset-manager']").text();
-    expect(text).toContain("预置位 3→1→5");
-    expect(text).toContain("每点停留 30 秒");
-    expect(text).toContain("速度 128");
-    expect(text).not.toContain("速度未上报");
+    const tooltip = wrapper.get("[data-testid='cruise-tile-tooltip-4']");
+    expect(tooltip.attributes("content")).toContain("预置位 3→1→5");
+    expect(tooltip.attributes("content")).toContain("每点停留 30 秒");
+    expect(tooltip.attributes("content")).toContain("速度 128");
+    expect(tooltip.attributes("content")).not.toContain("速度未上报");
     wrapper.unmount();
   });
 
@@ -3761,10 +4035,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "cruise") => void };
-    vm.openAssetManager("cruise");
-    await wrapper.vm.$nextTick();
-    expect(wrapper.get("[data-testid='asset-manager']").text()).toContain("预置位 1→2→3→4→5→6 等 9 个");
+    expect(wrapper.get("[data-testid='cruise-tile-tooltip-2']").attributes("content")).toContain("预置位 1→2→3→4→5→6 等 9 个");
     wrapper.unmount();
   });
 
@@ -3806,14 +4077,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(popoverTooltip.get(".preset-popover-name").attributes("title")).toBeUndefined();
     expect(wrapper.get(".preset-popover-call").attributes("title")).toBe("调用此预置位");
     expect(wrapper.get(".preset-popover-del").attributes("title")).toBe("删除此预置位");
-
-    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "preset") => void };
-    vm.openAssetManager("preset");
-    await wrapper.vm.$nextTick();
-    const managerTooltip = wrapper.get("[data-testid='preset-manager-tooltip-1']");
-    expect(managerTooltip.attributes("mouse-enter-delay")).toBe("80");
-    expect(managerTooltip.attributes("content")).toContain("#1 预置位 1");
-    expect(wrapper.get(".asset-manager-delete").attributes("title")).toBe("删除预置位");
 
     wrapper.unmount();
   });
@@ -5337,14 +5600,14 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     const pictureBar = wrapper.get("[data-testid='linked-detail-picture']");
     expect(pictureBar.classes()).toContain("linked-detail-actions");
-    // 底栏**四格**（2026-09-20 起）：图像叠加 / 遮挡 / 镜像 / 参数对照。
-    // 老板原话「不想采用视频编码、图像叠加这种切换的方式，想让它们都在一个页面上全部展示出来」
-    // ⇒ 「图像叠加」整块从侧栏搬到第一格，编辑画面参数与看编码参数终于同屏。
+    // 底栏**四个视觉卡片**：时间戳 / 叠加文字 / 遮挡 / 镜像。
+    // 图像叠加组件占两列，内部两块与另外两张卡共同瓜分整行空间。
     expect(pictureBar.find("[data-testid='picture-osd-cell']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mask-card']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mirror-card']").exists()).toBe(true);
-    expect(pictureBar.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
-    // ⛔ 对照卡上**不再有**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
+    expect(pictureBar.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
+    expect(pictureBar.findAll(".linked-picture-layout > .linked-section")).toHaveLength(3);
+    // ⛔ 参数对照卡上**不再有**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
     //    （`dcg-embedded-actions`），同一屏两套同名按钮是本仓点过名的坑。
     expect(wrapper.find("[data-testid='video-param-bottom-read']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='video-param-bottom-apply']").exists()).toBe(false);
@@ -6308,6 +6571,7 @@ describe("PlayConsoleLinked 目标跟踪（GB/T 28181-2022 A.2.3.1.14）", () =>
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
     await wrapper.get("[data-testid='ptz-target-track-auto']").trigger("click");
     await flushPromises();
 
@@ -6337,6 +6601,7 @@ describe("PlayConsoleLinked 目标跟踪（GB/T 28181-2022 A.2.3.1.14）", () =>
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
     await wrapper.get("[data-testid='ptz-target-track-stop']").trigger("click");
     await flushPromises();
 
@@ -6431,6 +6696,7 @@ describe("PlayConsoleLinked 目标跟踪（GB/T 28181-2022 A.2.3.1.14）", () =>
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
     await wrapper.get("[data-testid='ptz-target-track-auto']").trigger("click");
     await flushPromises();
 
