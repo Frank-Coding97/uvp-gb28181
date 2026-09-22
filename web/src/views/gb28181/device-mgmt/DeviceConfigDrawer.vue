@@ -2020,7 +2020,7 @@ onBeforeUnmount(() => {
                 <Send :size="12" />下发
               </button>
             </div>
-            <label v-if="activeIsVideo" class="dcg-params-profile">
+            <div v-if="activeIsVideo" class="dcg-params-profile">
               <span>配置文件</span>
               <a-select
                 :model-value="streamProfile"
@@ -2034,7 +2034,7 @@ onBeforeUnmount(() => {
                 <a-option value="1">子码流 1</a-option>
                 <a-option value="2">子码流 2</a-option>
               </a-select>
-            </label>
+            </div>
           </header>
 
           <p v-if="!embedded" class="dcg-params-summary">
@@ -2070,71 +2070,66 @@ onBeforeUnmount(() => {
 
                 <div class="dcg-field-group" data-testid="dcg-field-group" data-group="encoding">
                   <div class="dcg-field-group-head"><strong>编码</strong><span>VideoFormat · Resolution</span></div>
-                  <!-- ⭐ 2026-09-20：编码格式与分辨率**同一行**。这两项本来就是同一件事的两半
-                       （拉流放不放得出来），拆两行只是白占一行 30px —— 老板原话「把空间节省出来」。
-                       ⛔ 一行里仍**各自带来源徽标**：对账粒度是"每个格子来自设备还是缺省"，
-                          挤掉徽标等于把对账能力换成省出来的那点宽度。
-                       ⛔ 自定义分辨率走 `flex-wrap` 折到第二行（见 `.dcg-pair-cell` 样式），
-                          不在 90px 里跟下拉框抢位置。 -->
-                  <div class="dcg-row is-pair" data-testid="dcg-row-encoding">
-                    <div class="dcg-pair-cell">
-                      <span class="dcg-row-label">编码格式</span>
-                      <div class="dcg-row-control">
-                        <a-select
-                          :model-value="row.videoFormat"
-                          class="dcg-select"
-                          size="small"
-                          :disabled="videoFieldsDisabled"
-                          :data-testid="`dcg-format-${row.streamNumber}`"
-                          @change="row.videoFormat = selectValue($event)"
-                        >
-                          <a-option v-for="option in VIDEO_FORMAT_OPTIONS" :key="option.value" :value="option.value">
-                            {{ option.label }}
-                          </a-option>
-                        </a-select>
-                      </div>
-                      <span
-                        class="dcg-row-hint"
-                        :data-source="cellBadge(row, 'videoFormat')"
-                        :title="badgeTitle(cellBadge(row, 'videoFormat'))"
-                        >{{ cellBadge(row, "videoFormat") }}</span
+                  <!-- 编码格式与分辨率上下排列，给嵌入侧栏的下拉框完整宽度。 -->
+                  <div class="dcg-row" data-testid="dcg-row-encoding-format">
+                    <span class="dcg-row-label">编码格式</span>
+                    <div class="dcg-row-control">
+                      <a-select
+                        :model-value="row.videoFormat"
+                        class="dcg-select"
+                        size="small"
+                        :disabled="videoFieldsDisabled"
+                        :data-testid="`dcg-format-${row.streamNumber}`"
+                        @change="row.videoFormat = selectValue($event)"
                       >
+                        <a-option v-for="option in VIDEO_FORMAT_OPTIONS" :key="option.value" :value="option.value">
+                          {{ option.label }}
+                        </a-option>
+                      </a-select>
                     </div>
+                    <span
+                      v-if="!embedded || cellBadge(row, 'videoFormat') !== '设备'"
+                      class="dcg-row-hint"
+                      :data-source="cellBadge(row, 'videoFormat')"
+                      :title="badgeTitle(cellBadge(row, 'videoFormat'))"
+                      >{{ cellBadge(row, "videoFormat") }}</span
+                    >
+                  </div>
 
-                    <div class="dcg-pair-cell">
-                      <span class="dcg-row-label">分辨率</span>
-                      <div class="dcg-row-control">
-                        <a-select
-                          :model-value="resolutionSelectValue(row)"
-                          class="dcg-select"
-                          size="small"
-                          :disabled="videoFieldsDisabled"
-                          :data-testid="`dcg-resolution-${row.streamNumber}`"
-                          @change="onResolutionSelect(row, $event)"
-                        >
-                          <a-option v-for="option in RESOLUTION_OPTIONS" :key="option.value" :value="option.value">
-                            {{ option.label }}
-                          </a-option>
-                          <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
-                        </a-select>
-                        <input
-                          v-if="!isValidResolutionCode(row.resolution)"
-                          class="dcg-input is-narrow"
-                          :value="row.resolution"
-                          :disabled="videoFieldsDisabled"
-                          placeholder="1920x1080"
-                          aria-label="自定义分辨率"
-                          :data-testid="`dcg-resolution-custom-${row.streamNumber}`"
-                          @change="row.resolution = ($event.target as HTMLInputElement).value"
-                        />
-                      </div>
-                      <span
-                        class="dcg-row-hint"
-                        :data-source="cellBadge(row, 'resolution')"
-                        :title="badgeTitle(cellBadge(row, 'resolution'))"
-                        >{{ cellBadge(row, "resolution") }}</span
+                  <div class="dcg-row" data-testid="dcg-row-encoding-resolution">
+                    <span class="dcg-row-label">分辨率</span>
+                    <div class="dcg-row-control">
+                      <a-select
+                        :model-value="resolutionSelectValue(row)"
+                        class="dcg-select"
+                        size="small"
+                        :disabled="videoFieldsDisabled"
+                        :data-testid="`dcg-resolution-${row.streamNumber}`"
+                        @change="onResolutionSelect(row, $event)"
                       >
+                        <a-option v-for="option in RESOLUTION_OPTIONS" :key="option.value" :value="option.value">
+                          {{ option.label }}
+                        </a-option>
+                        <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
+                      </a-select>
+                      <input
+                        v-if="!isValidResolutionCode(row.resolution)"
+                        class="dcg-input is-narrow"
+                        :value="row.resolution"
+                        :disabled="videoFieldsDisabled"
+                        placeholder="1920x1080"
+                        aria-label="自定义分辨率"
+                        :data-testid="`dcg-resolution-custom-${row.streamNumber}`"
+                        @change="row.resolution = ($event.target as HTMLInputElement).value"
+                      />
                     </div>
+                    <span
+                      v-if="!embedded || cellBadge(row, 'resolution') !== '设备'"
+                      class="dcg-row-hint"
+                      :data-source="cellBadge(row, 'resolution')"
+                      :title="badgeTitle(cellBadge(row, 'resolution'))"
+                      >{{ cellBadge(row, "resolution") }}</span
+                    >
                   </div>
                 </div>
 
@@ -2154,6 +2149,7 @@ onBeforeUnmount(() => {
                       />
                     </div>
                     <span
+                      v-if="!embedded || cellBadge(row, 'frameRate') !== '设备'"
                       class="dcg-row-hint"
                       :data-source="cellBadge(row, 'frameRate')"
                       :title="badgeTitle(cellBadge(row, 'frameRate'))"
@@ -2182,6 +2178,7 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
                     <span
+                      v-if="!embedded || cellBadge(row, 'bitRateType') !== '设备'"
                       class="dcg-row-hint"
                       :data-source="cellBadge(row, 'bitRateType')"
                       :title="badgeTitle(cellBadge(row, 'bitRateType'))"
@@ -2204,9 +2201,13 @@ onBeforeUnmount(() => {
                         @update:model-value="row.videoBitRate = $event"
                       />
                     </div>
-                    <span class="dcg-row-hint" :data-source="bitRateBadge(row)" :title="badgeTitle(bitRateBadge(row))">{{
-                      bitRateBadge(row)
-                    }}</span>
+                    <span
+                      v-if="!embedded || bitRateBadge(row) !== '设备'"
+                      class="dcg-row-hint"
+                      :data-source="bitRateBadge(row)"
+                      :title="badgeTitle(bitRateBadge(row))"
+                      >{{ bitRateBadge(row) }}</span
+                    >
                   </div>
                   <p class="dcg-field-group-note">CBR 时必填，单位 kb/s；VBR 时不发送 VideoBitRate。</p>
                 </div>
@@ -2479,7 +2480,7 @@ onBeforeUnmount(() => {
             <template v-if="activeIsVideo">
               <span>本组 5 项 × {{ visibleVideoRows.length }} 路码流</span>
               <span class="dcg-foot-sep">·</span>
-              <span>设备上报 {{ deviceCellCount }} 项</span>
+              <span>{{ embedded ? "已回读" : "设备上报" }} {{ deviceCellCount }} 项</span>
               <span class="dcg-foot-sep">·</span>
               <span :class="{ 'is-dirty': videoDirtyCount > 0 }">待下发 {{ videoDirtyCount }} 项</span>
             </template>
@@ -2795,39 +2796,6 @@ onBeforeUnmount(() => {
 .dcg-window--embedded .dcg-row {
   grid-template-columns: minmax(88px, 96px) minmax(0, 1fr) auto;
   gap: 8px;
-}
-
-/* 成对字段行（编码格式 + 分辨率同一行，2026-09-20）。
- * ⛔ 选择器必须带 `.is-pair` 写成两条（含嵌入态那条）—— 上面 `.dcg-window--embedded .dcg-row`
- *    是两列栅格，光写 `.dcg-row.is-pair` 在嵌入态会被它按顺序盖掉，表现为"还是两行"。
- * 每格 3 列 = 标签 / 控件 / 来源徽标：约 168px 里留给下拉框约 90px，
- * 「1920×1080」在 10–11px 字号下放得下。 */
-.dcg-row.is-pair,
-.dcg-window--embedded .dcg-row.is-pair {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.dcg-pair-cell {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 5px;
-  align-items: center;
-  min-width: 0;
-}
-.dcg-window--embedded .dcg-row.is-pair .dcg-row-label {
-  text-align: left;
-}
-.dcg-window--embedded .dcg-row.is-pair .dcg-row-hint {
-  max-width: 26px;
-}
-
-/* 自定义分辨率折到第二行：不在 90px 的格子里跟下拉框抢位置（选了「自定义…」才会出现）。 */
-.dcg-pair-cell .dcg-row-control {
-  flex-wrap: wrap;
-}
-.dcg-pair-cell .dcg-row-control > .dcg-input {
-  flex: 1 1 100%;
-  min-width: 0;
 }
 
 .dcg-window--embedded .dcg-row-label {

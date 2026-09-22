@@ -240,6 +240,9 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(false);
+    // 配置文件只是标题 + 下拉框的布局容器，不能用 label 包裹整个行宽，
+    // 否则点击下拉框右侧空白也会触发原生 label 激活内部 select。
+    expect(wrapper.get(".dcg-params-profile").element.tagName).toBe("DIV");
 
     await wrapper.setProps({ streamProfile: "1" });
     await flushPromises();
