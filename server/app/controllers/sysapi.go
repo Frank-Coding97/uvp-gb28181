@@ -72,6 +72,20 @@ func (sc *SysApiController) List(c *gin.Context) {
 	})
 }
 
+// Groups API分组字典
+// @Summary API分组字典
+// @Description 获取受控的API分组清单（前端下拉数据源）。清单定义在 models.sysApiGroups，
+// @Description 与「前端页面级菜单」对齐；新增/编辑接口只接受清单内的值。
+// @Tags API管理
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "成功返回分组名列表"
+// @Router /sysApi/groups [get]
+// @Security ApiKeyAuth
+func (sc *SysApiController) Groups(c *gin.Context) {
+	sc.Success(c, models.SysApiGroupNames())
+}
+
 // GetByID 根据ID获取API信息
 // @Summary 根据ID获取API信息
 // @Description 根据API ID获取API详细信息
@@ -127,6 +141,11 @@ func (sc *SysApiController) Add(c *gin.Context) {
 		sc.FailAndAbort(c, err.Error(), err)
 	}
 
+	// 分组必须是受控清单内的值（清单见 models.sysApiGroups，接口见 GET /sysApi/groups）
+	if !models.IsValidSysApiGroup(req.ApiGroup) {
+		sc.FailAndAbort(c, "API分组不在受控清单内："+req.ApiGroup, nil)
+	}
+
 	// 检查API路径和方法是否已存在
 	existApi := models.NewSysApi()
 	err := existApi.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
@@ -170,6 +189,11 @@ func (sc *SysApiController) Update(c *gin.Context) {
 	var req models.SysApiUpdateRequest
 	if err := req.Validate(c); err != nil {
 		sc.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 分组必须是受控清单内的值（清单见 models.sysApiGroups，接口见 GET /sysApi/groups）
+	if !models.IsValidSysApiGroup(req.ApiGroup) {
+		sc.FailAndAbort(c, "API分组不在受控清单内："+req.ApiGroup, nil)
 	}
 
 	// 检查API是否存在

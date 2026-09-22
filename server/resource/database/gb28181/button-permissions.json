@@ -612,11 +612,15 @@
         {
           "method": "POST",
           "path": "/api/gb28181/device-mgmt/channel/:id/ptz/extended"
+        },
+        {
+          "method": "POST",
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/wiper"
         }
       ],
-      "source": "web/src/views/gb28181/multi-screen-playback/BasicPtzPanel.vue:55-80,154-190; web/src/views/gb28181/components/PlayConsoleLinked.vue:2053-2066,2172-2182; web/src/api/gb28181.ts:603-614; server/app/gb28181/routes/routes.go:858-864",
+      "source": "web/src/views/gb28181/multi-screen-playback/BasicPtzPanel.vue:55-80,154-190; web/src/views/gb28181/components/PlayConsoleLinked.vue:2053-2066,2172-2182; web/src/api/gb28181.ts:603-614; server/app/gb28181/routes/routes.go:858-864; 雨刷见 server/app/gb28181/controllers/device_ptz_resources.go ControlPTZWiper",
       "existingPermission": null,
-      "notes": "建议码，当前没有对应前端/菜单权限；BasicPtzPanel 与 PlayConsoleLinked 都没有权限 prop/hasPermission，游客禁止云台控制。停止当前 PTZ 动作仍调用同一控制 API，不能按 UI 取消排除。",
+      "notes": "建议码，当前没有对应前端/菜单权限；BasicPtzPanel 与 PlayConsoleLinked 都没有权限 prop/hasPermission，游客禁止云台控制。停止当前 PTZ 动作仍调用同一控制 API，不能按 UI 取消排除。雨刷（GB/T 28181 A.3.7 表 A.11，0x8C 开 / 0x8D 关，编号固定 1）挂在本码下而不是另开 gb28181:ptz:wiper：辅助开关与变倍/聚焦/光圈同属镜头侧立即动作，且新权限码不会被既有权角色自动授予，会变成点了没反应的死按钮。",
       "module": "device"
     },
     {
@@ -3126,11 +3130,13 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/gb28181/alarms/:id"
+          "path": "/api/gb28181/alarms/:id",
+          "title": "物理删除单条告警"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/alarms/batch-delete"
+          "path": "/api/gb28181/alarms/batch-delete",
+          "title": "批量物理删除告警"
         }
       ],
       "source": [
@@ -3151,11 +3157,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/cascade/platforms/:id/enable"
+          "path": "/api/gb28181/cascade/platforms/:id/enable",
+          "title": "启用级联平台"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/cascade/platforms/:id/enabled"
+          "path": "/api/gb28181/cascade/platforms/:id/enabled",
+          "title": "更新级联启用状态"
         }
       ],
       "source": [
@@ -3173,19 +3181,23 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/cascade/platforms"
+          "path": "/api/gb28181/cascade/platforms",
+          "title": "创建级联平台"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/cascade/platforms/:id"
+          "path": "/api/gb28181/cascade/platforms/:id",
+          "title": "删除级联平台"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/cascade/platforms/:id"
+          "path": "/api/gb28181/cascade/platforms/:id",
+          "title": "查看级联平台"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/cascade/platforms/:id"
+          "path": "/api/gb28181/cascade/platforms/:id",
+          "title": "修改级联平台"
         }
       ],
       "source": [
@@ -3227,11 +3239,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/cascade/platforms/:id/shares"
+          "path": "/api/gb28181/cascade/platforms/:id/shares",
+          "title": "查看级联共享"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/cascade/platforms/:id/shares"
+          "path": "/api/gb28181/cascade/platforms/:id/shares",
+          "title": "更新级联共享"
         }
       ],
       "source": [
@@ -3249,15 +3263,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/cascade/platforms"
+          "path": "/api/gb28181/cascade/platforms",
+          "title": "查看级联平台列表"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/cascade/platforms/:id"
+          "path": "/api/gb28181/cascade/platforms/:id",
+          "title": "查看级联平台"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/cascade/platforms/:id/shares"
+          "path": "/api/gb28181/cascade/platforms/:id/shares",
+          "title": "查看级联共享"
         }
       ],
       "source": [
@@ -3272,23 +3289,28 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/channel-favorite-groups"
+          "path": "/api/gb28181/channel-favorite-groups",
+          "title": "查询通道收藏组"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/channel-favorite-groups"
+          "path": "/api/gb28181/channel-favorite-groups",
+          "title": "新建通道收藏组"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/channel-favorite-groups/:id"
+          "path": "/api/gb28181/channel-favorite-groups/:id",
+          "title": "删除通道收藏组"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/channel-favorite-groups/:id/channels"
+          "path": "/api/gb28181/channel-favorite-groups/:id/channels",
+          "title": "移除通道收藏"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/channel-favorite-groups/:id/channels"
+          "path": "/api/gb28181/channel-favorite-groups/:id/channels",
+          "title": "追加通道收藏"
         }
       ],
       "source": [
@@ -3306,11 +3328,13 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/gb28181/device-mgmt/channel/:id"
+          "path": "/api/gb28181/device-mgmt/channel/:id",
+          "title": "删除单个通道"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/batch-delete"
+          "path": "/api/gb28181/device-mgmt/channel/batch-delete",
+          "title": "批量删除通道"
         }
       ],
       "source": [
@@ -3378,27 +3402,33 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/custom-groups"
+          "path": "/api/gb28181/device-mgmt/custom-groups",
+          "title": "创建自定义分组"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/device-mgmt/custom-groups/:id"
+          "path": "/api/gb28181/device-mgmt/custom-groups/:id",
+          "title": "删除自定义分组"
         },
         {
           "method": "PATCH",
-          "path": "/api/gb28181/device-mgmt/custom-groups/:id"
+          "path": "/api/gb28181/device-mgmt/custom-groups/:id",
+          "title": "修改自定义分组"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/custom-groups/:id/devices"
+          "path": "/api/gb28181/device-mgmt/custom-groups/:id/devices",
+          "title": "添加分组设备"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/custom-groups/:id/devices/remove"
+          "path": "/api/gb28181/device-mgmt/custom-groups/:id/devices/remove",
+          "title": "移除分组设备"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/custom-groups/:id/move"
+          "path": "/api/gb28181/device-mgmt/custom-groups/:id/move",
+          "title": "移动自定义分组"
         }
       ],
       "source": [
@@ -3439,19 +3469,23 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions"
+          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions",
+          "title": "创建回放会话"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId",
+          "title": "停止回放会话"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId",
+          "title": "读取回放会话"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId/actions"
+          "path": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId/actions",
+          "title": "控制回放（暂停/续播/倍速）"
         }
       ],
       "source": [
@@ -3469,11 +3503,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/record-query"
+          "path": "/api/gb28181/device-mgmt/channel/:id/record-query",
+          "title": "查询设备录像"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/record-query/options"
+          "path": "/api/gb28181/device-mgmt/channel/:id/record-query/options",
+          "title": "查询录像查询条件"
         }
       ],
       "source": [
@@ -3508,15 +3544,18 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/assignments"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/assignments",
+          "title": "调整设备归属"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/assignments/departments"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/assignments/departments",
+          "title": "整部门调整设备归属"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/devices/resolve"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/devices/resolve",
+          "title": "解析工作台设备"
         }
       ],
       "source": [
@@ -3572,11 +3611,13 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/gb28181/device-mgmt/device/:id"
+          "path": "/api/gb28181/device-mgmt/device/:id",
+          "title": "删除单个设备"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/device/batch-delete"
+          "path": "/api/gb28181/device-mgmt/device/batch-delete",
+          "title": "批量删除设备"
         }
       ],
       "source": [
@@ -3610,11 +3651,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/device/:id/firmware-upgrades"
+          "path": "/api/gb28181/device-mgmt/device/:id/firmware-upgrades",
+          "title": "查看设备升级"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/device/:id/maintenance-operations"
+          "path": "/api/gb28181/device-mgmt/device/:id/maintenance-operations",
+          "title": "查询设备维护操作"
         }
       ],
       "source": [
@@ -3651,15 +3694,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/grant-targets"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/grant-targets",
+          "title": "查询共享目标"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/grants/apply"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/grants/apply",
+          "title": "应用设备共享授权"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/permission-workbench/grants/query"
+          "path": "/api/gb28181/device-mgmt/permission-workbench/grants/query",
+          "title": "查询设备共享授权"
         }
       ],
       "source": [
@@ -3678,11 +3724,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/snapshot-sessions"
+          "path": "/api/gb28181/device-mgmt/channel/:id/snapshot-sessions",
+          "title": "创建抓拍会话"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/snapshot-sessions/:sessionId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/snapshot-sessions/:sessionId",
+          "title": "读取抓拍会话"
         }
       ],
       "source": [
@@ -3699,15 +3747,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions"
+          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions",
+          "title": "查询设备订阅"
         },
         {
           "method": "PATCH",
-          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions/:kind"
+          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions/:kind",
+          "title": "更新设备订阅"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions/:kind/renew"
+          "path": "/api/gb28181/device-mgmt/device/:id/subscriptions/:kind/renew",
+          "title": "续订设备订阅"
         }
       ],
       "source": [
@@ -3743,55 +3794,68 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/catalog/tree"
+          "path": "/api/gb28181/device-mgmt/catalog/tree",
+          "title": "查询目录树"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/catalog/tree/:id"
+          "path": "/api/gb28181/device-mgmt/catalog/tree/:id",
+          "title": "读取目录节点详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/catalog/tree/:id/children"
+          "path": "/api/gb28181/device-mgmt/catalog/tree/:id/children",
+          "title": "读取目录子节点"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id"
+          "path": "/api/gb28181/device-mgmt/channel/:id",
+          "title": "读取通道详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/mounts"
+          "path": "/api/gb28181/device-mgmt/channel/:id/mounts",
+          "title": "读取通道挂载点"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/timeline"
+          "path": "/api/gb28181/device-mgmt/channel/:id/timeline",
+          "title": "查询通道时间轴"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channels"
+          "path": "/api/gb28181/device-mgmt/channels",
+          "title": "查询通道列表"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/device/:id"
+          "path": "/api/gb28181/device-mgmt/device/:id",
+          "title": "读取设备详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/device/:id/status-events"
+          "path": "/api/gb28181/device-mgmt/device/:id/status-events",
+          "title": "查询设备状态事件"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/devices"
+          "path": "/api/gb28181/device-mgmt/devices",
+          "title": "查询设备列表"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/directory/tree"
+          "path": "/api/gb28181/device-mgmt/directory/tree",
+          "title": "查询组织目录树"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/map/clusters"
+          "path": "/api/gb28181/device-mgmt/map/clusters",
+          "title": "查询地图聚合点"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/map/markers"
+          "path": "/api/gb28181/device-mgmt/map/markers",
+          "title": "查询地图标记点"
         }
       ],
       "source": [
@@ -3838,23 +3902,28 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/home/drilldown/play"
+          "path": "/api/gb28181/home/drilldown/play",
+          "title": "下钻播放指标"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/home/drilldown/sip"
+          "path": "/api/gb28181/home/drilldown/sip",
+          "title": "下钻 SIP 指标"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/home/drilldown/traffic"
+          "path": "/api/gb28181/home/drilldown/traffic",
+          "title": "下钻流量指标"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/home/layout"
+          "path": "/api/gb28181/home/layout",
+          "title": "读取仪表盘布局"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/home/summary"
+          "path": "/api/gb28181/home/summary",
+          "title": "读取首页汇总"
         }
       ],
       "source": [
@@ -3869,11 +3938,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/stream-probes/:streamId"
+          "path": "/api/gb28181/stream-probes/:streamId",
+          "title": "发起视频探针检测"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/stream-probes/operations/:operationId"
+          "path": "/api/gb28181/stream-probes/operations/:operationId",
+          "title": "查询探针检测结果"
         }
       ],
       "source": [
@@ -3906,11 +3977,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/play/:deviceId/:channelId"
+          "path": "/api/gb28181/play/:deviceId/:channelId",
+          "title": "发起实时点播"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/play/:deviceId/:channelId/authorization"
+          "path": "/api/gb28181/play/:deviceId/:channelId/authorization",
+          "title": "申请固定播放地址授权"
         }
       ],
       "source": [
@@ -3954,27 +4027,33 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/playback-schemes"
+          "path": "/api/gb28181/playback-schemes",
+          "title": "查询播放方案"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/playback-schemes"
+          "path": "/api/gb28181/playback-schemes",
+          "title": "创建播放方案"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/playback-schemes/:id"
+          "path": "/api/gb28181/playback-schemes/:id",
+          "title": "删除播放方案"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/playback-schemes/:id"
+          "path": "/api/gb28181/playback-schemes/:id",
+          "title": "查看播放方案"
         },
         {
           "method": "PATCH",
-          "path": "/api/gb28181/playback-schemes/:id"
+          "path": "/api/gb28181/playback-schemes/:id",
+          "title": "重命名播放方案"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/playback-schemes/:id/layout"
+          "path": "/api/gb28181/playback-schemes/:id/layout",
+          "title": "覆盖播放方案"
         }
       ],
       "source": [
@@ -3995,15 +4074,18 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz",
+          "title": "云台基础控制"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/extended"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/extended",
+          "title": "云台扩展控制"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/precise"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/precise",
+          "title": "云台精准控制"
         }
       ],
       "source": [
@@ -4021,11 +4103,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise",
+          "title": "下发巡航指令"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise/tracks"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise/tracks",
+          "title": "保存巡航轨迹"
         }
       ],
       "source": [
@@ -4110,35 +4194,43 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/control-capabilities"
+          "path": "/api/gb28181/device-mgmt/channel/:id/control-capabilities",
+          "title": "读取设备控制能力"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/device-status"
+          "path": "/api/gb28181/device-mgmt/channel/:id/device-status",
+          "title": "读取通道运行状态"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks",
+          "title": "查询巡航轨迹列表"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks/:trackId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks/:trackId",
+          "title": "读取巡航轨迹详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/home-position"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/home-position",
+          "title": "查询看守位"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId",
+          "title": "查询云台操作结果"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/precise-status"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/precise-status",
+          "title": "查询精准控制状态"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/presets"
+          "path": "/api/gb28181/device-mgmt/channel/:id/ptz/presets",
+          "title": "查询预置位列表"
         }
       ],
       "source": [
@@ -4156,19 +4248,23 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/recording-plans/:id/assignment-options/channels"
+          "path": "/api/gb28181/recording-plans/:id/assignment-options/channels",
+          "title": "搜索分配通道"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/recording-plans/:id/assignment-options/devices"
+          "path": "/api/gb28181/recording-plans/:id/assignment-options/devices",
+          "title": "搜索分配设备"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/recording-plans/:id/assignments"
+          "path": "/api/gb28181/recording-plans/:id/assignments",
+          "title": "提交录像计划分配"
         },
         {
           "method": "PATCH",
-          "path": "/api/gb28181/recording-plans/channels/:channelId/recording-mode"
+          "path": "/api/gb28181/recording-plans/channels/:channelId/recording-mode",
+          "title": "切换通道录像模式"
         }
       ],
       "source": [
@@ -4186,23 +4282,28 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/recording-plans"
+          "path": "/api/gb28181/recording-plans",
+          "title": "新建录像计划"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/recording-plans/:id"
+          "path": "/api/gb28181/recording-plans/:id",
+          "title": "删除录像计划"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/recording-plans/:id"
+          "path": "/api/gb28181/recording-plans/:id",
+          "title": "查看录像计划"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/recording-plans/:id"
+          "path": "/api/gb28181/recording-plans/:id",
+          "title": "编辑录像计划"
         },
         {
           "method": "PATCH",
-          "path": "/api/gb28181/recording-plans/:id/status"
+          "path": "/api/gb28181/recording-plans/:id/status",
+          "title": "启停录像计划"
         }
       ],
       "source": [
@@ -4226,19 +4327,23 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/start"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/start",
+          "title": "开始录制"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/start/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/start/preflight",
+          "title": "开始录制预检"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/stop"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/stop",
+          "title": "停止录制"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/stop/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/stop/preflight",
+          "title": "停止录制预检"
         }
       ],
       "source": [
@@ -4259,11 +4364,13 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/gb28181/cloud-recordings/files/:id"
+          "path": "/api/gb28181/cloud-recordings/files/:id",
+          "title": "删除单个云端录像"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/cloud-recordings/files/batch-delete"
+          "path": "/api/gb28181/cloud-recordings/files/batch-delete",
+          "title": "批量删除云端录像"
         }
       ],
       "source": [
@@ -4284,15 +4391,18 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/gb28181/cloud-recordings/downloads/:taskId"
+          "path": "/api/gb28181/cloud-recordings/downloads/:taskId",
+          "title": "取消云端录像下载"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/cloud-recordings/downloads/:taskId"
+          "path": "/api/gb28181/cloud-recordings/downloads/:taskId",
+          "title": "查询云端录像下载"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/cloud-recordings/files/:id/downloads"
+          "path": "/api/gb28181/cloud-recordings/files/:id/downloads",
+          "title": "创建云端录像下载"
         }
       ],
       "source": [
@@ -4310,11 +4420,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/force-stop"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/force-stop",
+          "title": "强制停止录制"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/force-stop/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/force-stop/preflight",
+          "title": "强制停止录制预检"
         }
       ],
       "source": [
@@ -4332,11 +4444,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/cloud-recordings/reconciliations"
+          "path": "/api/gb28181/cloud-recordings/reconciliations",
+          "title": "查询录像对账状态"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/cloud-recordings/reconciliations"
+          "path": "/api/gb28181/cloud-recordings/reconciliations",
+          "title": "触发录像对账"
         }
       ],
       "source": [
@@ -4459,79 +4573,98 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/default-channel-audio"
+          "path": "/api/gb28181/sip/service-config/default-channel-audio",
+          "title": "修改全局通道音频配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/default-channel-stream-transport"
+          "path": "/api/gb28181/sip/service-config/default-channel-stream-transport",
+          "title": "设置默认码流传输方式"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/default-playback-protocol"
+          "path": "/api/gb28181/sip/service-config/default-playback-protocol",
+          "title": "修改默认播放协议"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/fixed-address-playback"
+          "path": "/api/gb28181/sip/service-config/fixed-address-playback",
+          "title": "修改固定地址播放配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/global-subscriptions"
+          "path": "/api/gb28181/sip/service-config/global-subscriptions",
+          "title": "修改全局订阅项目"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify"
+          "path": "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify",
+          "title": "修改忽略通道离线异常通知配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/online-on-heartbeat"
+          "path": "/api/gb28181/sip/service-config/online-on-heartbeat",
+          "title": "修改收到心跳恢复设备上线配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/play-auth"
+          "path": "/api/gb28181/sip/service-config/play-auth",
+          "title": "修改播放鉴权配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/playback-settings"
+          "path": "/api/gb28181/sip/service-config/playback-settings",
+          "title": "修改回放参数"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/position-history"
+          "path": "/api/gb28181/sip/service-config/position-history",
+          "title": "修改移动位置历史轨迹配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/preallocation-mode"
+          "path": "/api/gb28181/sip/service-config/preallocation-mode",
+          "title": "修改预分配模式"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/ptz-default-speed"
+          "path": "/api/gb28181/sip/service-config/ptz-default-speed",
+          "title": "修改云台默认速度配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/save-alarm-messages"
+          "path": "/api/gb28181/sip/service-config/save-alarm-messages",
+          "title": "修改报警消息存储配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/sdp-extension"
+          "path": "/api/gb28181/sip/service-config/sdp-extension",
+          "title": "设置 SDP 扩展参数"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/sip-command-timeout"
+          "path": "/api/gb28181/sip/service-config/sip-command-timeout",
+          "title": "修改 SIP 命令超时时间"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/sip-log"
+          "path": "/api/gb28181/sip/service-config/sip-log",
+          "title": "修改 SIP 日志配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/service-config/sync-channels-on-online"
+          "path": "/api/gb28181/sip/service-config/sync-channels-on-online",
+          "title": "修改设备上线同步通道配置"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/sip/setup/config"
+          "path": "/api/gb28181/sip/setup/config",
+          "title": "保存 SIP 配置"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/sip/setup/skip"
+          "path": "/api/gb28181/sip/setup/skip",
+          "title": "暂缓 SIP 配置"
         }
       ],
       "source": [
@@ -4561,75 +4694,93 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/platform"
+          "path": "/api/gb28181/sip/platform",
+          "title": "读取 SIP 平台信息"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/sip/qr/token"
+          "path": "/api/gb28181/sip/qr/token",
+          "title": "生成设备接入二维码"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/default-channel-audio"
+          "path": "/api/gb28181/sip/service-config/default-channel-audio",
+          "title": "读取全局通道音频配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/default-playback-protocol"
+          "path": "/api/gb28181/sip/service-config/default-playback-protocol",
+          "title": "读取默认播放协议"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/fixed-address-playback"
+          "path": "/api/gb28181/sip/service-config/fixed-address-playback",
+          "title": "读取固定地址播放配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/global-subscriptions"
+          "path": "/api/gb28181/sip/service-config/global-subscriptions",
+          "title": "读取全局订阅项目"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify"
+          "path": "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify",
+          "title": "读取忽略通道离线异常通知配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/online-on-heartbeat"
+          "path": "/api/gb28181/sip/service-config/online-on-heartbeat",
+          "title": "读取收到心跳恢复设备上线配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/play-auth"
+          "path": "/api/gb28181/sip/service-config/play-auth",
+          "title": "读取播放鉴权配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/preallocation-mode"
+          "path": "/api/gb28181/sip/service-config/preallocation-mode",
+          "title": "读取预分配模式"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/ptz-default-speed"
+          "path": "/api/gb28181/sip/service-config/ptz-default-speed",
+          "title": "读取云台默认速度配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/save-alarm-messages"
+          "path": "/api/gb28181/sip/service-config/save-alarm-messages",
+          "title": "读取报警消息存储配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/sip-command-timeout"
+          "path": "/api/gb28181/sip/service-config/sip-command-timeout",
+          "title": "读取 SIP 命令超时时间"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/sip-log"
+          "path": "/api/gb28181/sip/service-config/sip-log",
+          "title": "读取 SIP 日志配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/sync-channels-on-online"
+          "path": "/api/gb28181/sip/service-config/sync-channels-on-online",
+          "title": "读取设备上线同步通道配置"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/setup/network-interfaces"
+          "path": "/api/gb28181/sip/setup/network-interfaces",
+          "title": "读取本机网络接口"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/setup/status"
+          "path": "/api/gb28181/sip/setup/status",
+          "title": "读取 SIP 配置状态"
         },
         {
           "method": "GET",
-          "path": "/api/sysDictItem/getByDictCode/:dictCode"
+          "path": "/api/sysDictItem/getByDictCode/:dictCode",
+          "title": "根据字典编码获取字典项列表"
         }
       ],
       "source": [
@@ -4650,7 +4801,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/sip/qr/token"
+          "path": "/api/gb28181/sip/qr/token",
+          "title": "生成设备接入二维码"
         }
       ],
       "source": [
@@ -4678,11 +4830,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/sip-traces/messages/:id"
+          "path": "/api/gb28181/sip-traces/messages/:id",
+          "title": "SIP Trace 报文详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip-traces/sessions/:callId/messages"
+          "path": "/api/gb28181/sip-traces/sessions/:callId/messages",
+          "title": "SIP Trace 会话报文"
         }
       ],
       "source": [
@@ -4700,15 +4854,18 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions"
+          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions",
+          "title": "创建对讲会话"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId",
+          "title": "停止对讲会话"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId"
+          "path": "/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId",
+          "title": "读取对讲会话"
         }
       ],
       "source": [
@@ -4725,27 +4882,33 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/coverage"
+          "path": "/api/gb28181/device-traffic/coverage",
+          "title": "查询统计覆盖率"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/realtime"
+          "path": "/api/gb28181/device-traffic/realtime",
+          "title": "查询实时流量"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/sessions"
+          "path": "/api/gb28181/device-traffic/sessions",
+          "title": "查询流量会话"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/summary"
+          "path": "/api/gb28181/device-traffic/summary",
+          "title": "查询流量汇总"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/trend"
+          "path": "/api/gb28181/device-traffic/trend",
+          "title": "查询流量趋势"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/device-traffic/viewers"
+          "path": "/api/gb28181/device-traffic/viewers",
+          "title": "查询当前观看"
         }
       ],
       "source": [
@@ -4775,11 +4938,13 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/gb28181/zlm/nodes/:id/config"
+          "path": "/api/gb28181/zlm/nodes/:id/config",
+          "title": "更新媒体服务配置"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/config/test-connection"
+          "path": "/api/gb28181/zlm/nodes/:id/config/test-connection",
+          "title": "测试媒体节点连接"
         }
       ],
       "source": [
@@ -4805,15 +4970,18 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources"
+          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources",
+          "title": "新增 FFmpeg 源"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key"
+          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key",
+          "title": "删除 FFmpeg 源"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key/preflight",
+          "title": "FFmpeg 源预检"
         }
       ],
       "source": [
@@ -4834,7 +5002,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/kick"
+          "path": "/api/gb28181/zlm/nodes/:id/kick",
+          "title": "踢除节点上的全部会话"
         }
       ],
       "source": [
@@ -4858,39 +5027,48 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes"
+          "path": "/api/gb28181/zlm/nodes",
+          "title": "新增媒体节点"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/zlm/nodes/:id"
+          "path": "/api/gb28181/zlm/nodes/:id",
+          "title": "删除媒体节点"
         },
         {
           "method": "PUT",
-          "path": "/api/gb28181/zlm/nodes/:id"
+          "path": "/api/gb28181/zlm/nodes/:id",
+          "title": "更新媒体节点"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/disable"
+          "path": "/api/gb28181/zlm/nodes/:id/disable",
+          "title": "停用媒体节点"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/enable"
+          "path": "/api/gb28181/zlm/nodes/:id/enable",
+          "title": "启用媒体节点"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/activate"
+          "path": "/api/gb28181/zlm/nodes/:id/activate",
+          "title": "激活媒体节点"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/config/test-connection"
+          "path": "/api/gb28181/zlm/nodes/:id/config/test-connection",
+          "title": "测试媒体节点连接"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/maintenance"
+          "path": "/api/gb28181/zlm/nodes/:id/maintenance",
+          "title": "媒体节点维护"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/probe"
+          "path": "/api/gb28181/zlm/nodes/probe",
+          "title": "探测媒体节点"
         }
       ],
       "source": [
@@ -4934,7 +5112,8 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/nodes/:id"
+          "path": "/api/gb28181/zlm/nodes/:id",
+          "title": "查看媒体节点详情"
         }
       ],
       "source": [
@@ -4952,27 +5131,33 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull",
+          "title": "新增拉流代理"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull/:key"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull/:key",
+          "title": "删除拉流代理"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull/:key/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/pull/:key/preflight",
+          "title": "拉流代理预检"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/push"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/push",
+          "title": "新增推流代理"
         },
         {
           "method": "DELETE",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/push/:key"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/push/:key",
+          "title": "删除推流代理"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/proxies/push/:key/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/proxies/push/:key/preflight",
+          "title": "推流代理预检"
         }
       ],
       "source": [
@@ -4993,11 +5178,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/nodes/:id/restart"
+          "path": "/api/gb28181/zlm/nodes/:id/restart",
+          "title": "查询媒体服务重启状态"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/restart"
+          "path": "/api/gb28181/zlm/nodes/:id/restart",
+          "title": "重启媒体服务"
         }
       ],
       "source": [
@@ -5023,7 +5210,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/force-close"
+          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/force-close",
+          "title": "强制关闭 RTP 服务"
         }
       ],
       "source": [
@@ -5045,15 +5233,18 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers"
+          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers",
+          "title": "新增 RTP 服务"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/close"
+          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/close",
+          "title": "关闭 RTP 服务"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/close/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/rtp-servers/close/preflight",
+          "title": "关闭 RTP 服务预检"
         }
       ],
       "source": [
@@ -5074,7 +5265,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/gb28181/zlm/scheduler"
+          "path": "/api/gb28181/zlm/scheduler",
+          "title": "更新媒体调度策略"
         }
       ],
       "source": [
@@ -5095,7 +5287,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/sessions/kick"
+          "path": "/api/gb28181/zlm/nodes/:id/sessions/kick",
+          "title": "踢除指定播放会话"
         }
       ],
       "source": [
@@ -5117,19 +5310,23 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/close"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/close",
+          "title": "关闭媒体流"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/close/batch"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/close/batch",
+          "title": "批量关闭媒体流"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight",
+          "title": "批量关闭媒体流预检"
         },
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/close/preflight"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/close/preflight",
+          "title": "关闭媒体流预检"
         }
       ],
       "source": [
@@ -5150,7 +5347,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/force-close"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/force-close",
+          "title": "强制关闭媒体流"
         }
       ],
       "source": [
@@ -5171,11 +5369,13 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/playback-grant"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/playback-grant",
+          "title": "发放播放授权"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/snapshot"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/snapshot",
+          "title": "截取媒体流快照"
         }
       ],
       "source": [
@@ -5196,11 +5396,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/detail"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/detail",
+          "title": "查看媒体流详情"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/nodes/:id/streams/viewers"
+          "path": "/api/gb28181/zlm/nodes/:id/streams/viewers",
+          "title": "查询媒体流观看者"
         }
       ],
       "source": [
@@ -5217,7 +5419,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/plugins/example/add"
+          "path": "/api/plugins/example/add",
+          "title": "新增插件示例"
         }
       ],
       "source": [
@@ -5233,7 +5436,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/plugins/example/delete"
+          "path": "/api/plugins/example/delete",
+          "title": "删除插件示例"
         }
       ],
       "source": [
@@ -5249,11 +5453,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/plugins/example/:id"
+          "path": "/api/plugins/example/:id",
+          "title": "查询单条数据"
         },
         {
           "method": "PUT",
-          "path": "/api/plugins/example/edit"
+          "path": "/api/plugins/example/edit",
+          "title": "修改"
         }
       ],
       "source": [
@@ -5269,7 +5475,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/users/add"
+          "path": "/api/users/add",
+          "title": "新增用户"
         }
       ],
       "source": [
@@ -5284,7 +5491,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/users/delete"
+          "path": "/api/users/delete",
+          "title": "删除用户"
         }
       ],
       "source": [
@@ -5300,7 +5508,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/users/edit"
+          "path": "/api/users/edit",
+          "title": "更新用户信息"
         }
       ],
       "source": [
@@ -5316,23 +5525,28 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysAffix/chunk/cancel"
+          "path": "/api/sysAffix/chunk/cancel",
+          "title": "分片上传取消上传"
         },
         {
           "method": "POST",
-          "path": "/api/sysAffix/chunk/init"
+          "path": "/api/sysAffix/chunk/init",
+          "title": "分片上传初始化"
         },
         {
           "method": "POST",
-          "path": "/api/sysAffix/chunk/merge"
+          "path": "/api/sysAffix/chunk/merge",
+          "title": "分片上传合并分片"
         },
         {
           "method": "POST",
-          "path": "/api/sysAffix/chunk/upload"
+          "path": "/api/sysAffix/chunk/upload",
+          "title": "分片上传上传分片"
         },
         {
           "method": "POST",
-          "path": "/api/sysAffix/upload"
+          "path": "/api/sysAffix/upload",
+          "title": "上传文件"
         }
       ],
       "source": [
@@ -5349,7 +5563,8 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysAffix/download/:id"
+          "path": "/api/sysAffix/download/:id",
+          "title": "下载文件"
         }
       ],
       "source": [
@@ -5381,7 +5596,8 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysAffix/download/:id"
+          "path": "/api/sysAffix/download/:id",
+          "title": "下载文件"
         }
       ],
       "source": [
@@ -5413,7 +5629,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysAffix/upload"
+          "path": "/api/sysAffix/upload",
+          "title": "上传文件"
         }
       ],
       "source": [
@@ -5431,7 +5648,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysApi/add"
+          "path": "/api/sysApi/add",
+          "title": "新增API"
         }
       ],
       "source": [
@@ -5447,7 +5665,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysApi/delete"
+          "path": "/api/sysApi/delete",
+          "title": "删除API"
         }
       ],
       "source": [
@@ -5463,11 +5682,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysApi/:id"
+          "path": "/api/sysApi/:id",
+          "title": "根据ID获取API信息"
         },
         {
           "method": "PUT",
-          "path": "/api/sysApi/edit"
+          "path": "/api/sysApi/edit",
+          "title": "更新API"
         }
       ],
       "source": [
@@ -5483,11 +5704,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/codegen/tables"
+          "path": "/api/codegen/tables",
+          "title": "获取指定数据库中的表集合"
         },
         {
           "method": "POST",
-          "path": "/api/sysGen/batchInsert"
+          "path": "/api/sysGen/batchInsert",
+          "title": " 批量创建代码生成配置"
         }
       ],
       "source": [
@@ -5503,7 +5726,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysGen/:id"
+          "path": "/api/sysGen/:id",
+          "title": "删除代码生成配置和字段信息"
         }
       ],
       "source": [
@@ -5583,11 +5807,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysGen/:id"
+          "path": "/api/sysGen/:id",
+          "title": "获取代码生成配置详情"
         },
         {
           "method": "PUT",
-          "path": "/api/sysGen/update"
+          "path": "/api/sysGen/update",
+          "title": "更新代码生成配置和字段信息"
         }
       ],
       "source": [
@@ -5620,7 +5846,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysDict/add"
+          "path": "/api/sysDict/add",
+          "title": "新增字典"
         }
       ],
       "source": [
@@ -5636,7 +5863,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysDict/delete"
+          "path": "/api/sysDict/delete",
+          "title": "删除字典"
         }
       ],
       "source": [
@@ -5652,7 +5880,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/sysDict/edit"
+          "path": "/api/sysDict/edit",
+          "title": "更新字典"
         }
       ],
       "source": [
@@ -5781,7 +6010,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysOperationLog/delete"
+          "path": "/api/sysOperationLog/delete",
+          "title": "日志删除"
         }
       ],
       "source": [
@@ -5797,7 +6027,8 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysOperationLog/export"
+          "path": "/api/sysOperationLog/export",
+          "title": "日志导出"
         }
       ],
       "source": [
@@ -5877,7 +6108,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysMenu/add"
+          "path": "/api/sysMenu/add",
+          "title": "新增菜单"
         }
       ],
       "source": [
@@ -5894,11 +6126,13 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysMenu/batchDelete"
+          "path": "/api/sysMenu/batchDelete",
+          "title": "批量删除"
         },
         {
           "method": "DELETE",
-          "path": "/api/sysMenu/delete"
+          "path": "/api/sysMenu/delete",
+          "title": "删除菜单"
         }
       ],
       "source": [
@@ -5915,7 +6149,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/sysMenu/edit"
+          "path": "/api/sysMenu/edit",
+          "title": "更新菜单"
         }
       ],
       "source": [
@@ -5931,7 +6166,8 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysMenu/export"
+          "path": "/api/sysMenu/export",
+          "title": "导出菜单"
         }
       ],
       "source": [
@@ -5961,15 +6197,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysApi/list"
+          "path": "/api/sysApi/list",
+          "title": "API列表"
         },
         {
           "method": "GET",
-          "path": "/api/sysMenu/apis/:id"
+          "path": "/api/sysMenu/apis/:id",
+          "title": "根据菜单ID获取API的ID集合"
         },
         {
           "method": "POST",
-          "path": "/api/sysMenu/setApis"
+          "path": "/api/sysMenu/setApis",
+          "title": "设置菜单API权限"
         }
       ],
       "source": [
@@ -6098,7 +6337,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysRole/add"
+          "path": "/api/sysRole/add",
+          "title": "新增角色"
         }
       ],
       "source": [
@@ -6115,15 +6355,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysMenu/getMenuList"
+          "path": "/api/sysMenu/getMenuList",
+          "title": "获取完整菜单列表"
         },
         {
           "method": "POST",
-          "path": "/api/sysRole/addRoleMenu"
+          "path": "/api/sysRole/addRoleMenu",
+          "title": "添加角色的菜单权限"
         },
         {
           "method": "GET",
-          "path": "/api/sysRole/getUserPermission/:roleId"
+          "path": "/api/sysRole/getUserPermission/:roleId",
+          "title": "根据角色ID获取角色菜单权限"
         }
       ],
       "source": [
@@ -6139,11 +6382,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysDepartment/getDivision"
+          "path": "/api/sysDepartment/getDivision",
+          "title": "获取部门列表"
         },
         {
           "method": "PUT",
-          "path": "/api/sysRole/dataScope"
+          "path": "/api/sysRole/dataScope",
+          "title": "设置数据权限"
         }
       ],
       "source": [
@@ -6160,7 +6405,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysRole/delete"
+          "path": "/api/sysRole/delete",
+          "title": "删除角色"
         }
       ],
       "source": [
@@ -6176,7 +6422,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/sysRole/edit"
+          "path": "/api/sysRole/edit",
+          "title": "更新角色"
         }
       ],
       "source": [
@@ -6192,7 +6439,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysJobResults/delete"
+          "path": "/api/sysJobResults/delete",
+          "title": "定时任务日志删除"
         }
       ],
       "source": [
@@ -6224,7 +6472,8 @@
       "apis": [
         {
           "method": "POST",
-          "path": "/api/sysJobs/add"
+          "path": "/api/sysJobs/add",
+          "title": "定时任务新增"
         }
       ],
       "source": [
@@ -6240,7 +6489,8 @@
       "apis": [
         {
           "method": "DELETE",
-          "path": "/api/sysJobs/delete"
+          "path": "/api/sysJobs/delete",
+          "title": "定时任务删除"
         }
       ],
       "source": [
@@ -6256,15 +6506,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/sysJobs/:id"
+          "path": "/api/sysJobs/:id",
+          "title": "定时任务获取数据"
         },
         {
           "method": "PUT",
-          "path": "/api/sysJobs/edit"
+          "path": "/api/sysJobs/edit",
+          "title": "定时任务编辑"
         },
         {
           "method": "PUT",
-          "path": "/api/sysJobs/setStatus"
+          "path": "/api/sysJobs/setStatus",
+          "title": "定时任务设置任务状态"
         }
       ],
       "source": [
@@ -6296,7 +6549,8 @@
       "apis": [
         {
           "method": "PUT",
-          "path": "/api/sysJobs/setStatus"
+          "path": "/api/sysJobs/setStatus",
+          "title": "定时任务设置任务状态"
         }
       ],
       "source": [
@@ -6372,6 +6626,104 @@
       ],
       "notes": "播放器本地截图为独立前端动作，不触发设备抓拍命令；无后端API。",
       "module": "main"
+    }
+  ],
+  "orphanApiTitles": [
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes",
+      "title": "查看媒体节点列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/config",
+      "title": "查看媒体服务配置",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/ffmpeg-sources",
+      "title": "查看 FFmpeg 源列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/proxies/pull",
+      "title": "查看拉流代理列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/proxies/pull/:key",
+      "title": "查看拉流代理详情",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/proxies/push",
+      "title": "查看推流代理列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/proxies/push/:key",
+      "title": "查看推流代理详情",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/recordings/runtime/status",
+      "title": "查询录制运行状态",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/rtp-servers",
+      "title": "查看 RTP 服务列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/runtime",
+      "title": "查询媒体节点运行状态",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/sessions/network",
+      "title": "查询会话网络信息",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/sessions/viewers",
+      "title": "查看节点会话观看者",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/nodes/:id/streams",
+      "title": "查看媒体节点流列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/scheduler",
+      "title": "查看媒体调度策略",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/scheduler/logs",
+      "title": "查询媒体调度日志",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
+    },
+    {
+      "method": "GET",
+      "path": "/api/gb28181/zlm/streams",
+      "title": "查看媒体流列表",
+      "note": "无归属按钮的纯查询接口 —— 由 2026-08-30-media-management 迁移插入，带着 CONCAT('媒体管理 ',method,' ',path) 拼出的机械占位名。它们不被任何按钮的 apis[] 覆盖（加进去会改变 button 的授权语义），所以放在这里单独声明接口名。scripts/button-catalog.py 不读本键，只有接口标题归一化迁移读它。"
     }
   ]
 }

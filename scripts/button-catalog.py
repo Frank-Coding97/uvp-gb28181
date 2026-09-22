@@ -5,13 +5,23 @@ This only generates repository files; it never connects to a database.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from api_groups import API_GROUP_OVERRIDES, GROUP_BY_PAGE, group_for_api, group_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATABASE = ROOT / "server/resource/database"
 VERSION = "2026-09-05-button-permission-catalog"
 START = "-- button-permission-catalog:start"
 END = "-- button-permission-catalog:end"
+
+# 分组映射见 scripts/api_groups.py。
+# ⛔ 这里过去写死过一个兜底分组 `按钮权限目录`，结果每加一批按钮就长一批进去，
+#    开发库里漂到 87 行、跨度 36 个页面，把「接口管理」的分组维度彻底搞坏。
+#    现在按按钮所属页面落模块，未映射的页面直接报错，不再兜底。
+
 
 
 def generate(catalog, dialect):
@@ -29,14 +39,27 @@ def generate(catalog, dialect):
                    + ",".join([parent(page["parentPath"]), q(page["path"]), q(page["name"]), q(page["component"]), q(page["title"]), "1", "1", "100", "2", q(""), q(""), "CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", "1"])
                    + " WHERE " + parent(page["parentPath"]) + " IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path=" + q(page["path"]) + " AND deleted_at IS NULL);")
     apis = {}
+    titles = {}
     for button in catalog["buttons"]:
         for api in button["apis"]:
-            apis.setdefault((api["method"], api["path"]), []).append(button)
+            key = (api["method"], api["path"])
+            apis.setdefault(key, []).append(button)
+            if api.get("title"):
+                titles.setdefault(key, set()).add(api["title"])
     for (method, path), owners in sorted(apis.items()):
-        title = owners[0]["title"]
+        # 接口级 title（apis[].title）优先；缺失才回落归属按钮名。
+        # ⛔ 列语义说明：sys_api.title 的库注释是「权限名称」，但接口管理页把它当
+        #    「API标题」展示 —— 回落按钮名时，一个按钮挂 N 个接口会让 N 行同名
+        #    （历史上「查看仪表盘」5 行、全库 70 行）。所以凡「1 按钮挂多接口」的
+        #    接口都必须在 json 里显式命名，由 scripts/button-catalog.test.py 强制。
+        explicit = titles.get((method, path), set())
+        if len(explicit) > 1:
+            raise SystemExit("接口 %s %s 被赋了多个不同的接口名 %s；请在 json 里统一"
+                             % (method, path, sorted(explicit)))
+        title = explicit.pop() if explicit else owners[0]["title"]
         available = " OR ".join(parent(path) + " IS NOT NULL" for path in sorted({b["parentPath"] for b in owners}))
         out.append("INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT "
-                   + ",".join([q(title), q(path), q(method), q("按钮权限目录"), "CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", "1"])
+                   + ",".join([q(title), q(path), q(method), q(group_for_api(method, path, owners)), "CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP", "1"])
                    + " WHERE (" + available + ") AND NOT EXISTS (SELECT 1 FROM sys_api WHERE path=" + q(path) + " AND method=" + q(method) + " AND deleted_at IS NULL);")
     for button in catalog["buttons"]:
         permission = q(button["permission"])

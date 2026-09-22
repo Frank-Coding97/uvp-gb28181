@@ -24,15 +24,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/users/profile"
+          "path": "/api/users/profile",
+          "title": "获取当前用户信息"
         },
         {
           "method": "GET",
-          "path": "/api/sysMenu/getRouters"
+          "path": "/api/sysMenu/getRouters",
+          "title": "获取用户权限菜单"
         },
         {
           "method": "POST",
-          "path": "/api/users/logout"
+          "path": "/api/users/logout",
+          "title": "用户登出"
         }
       ]
     },
@@ -41,11 +44,13 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/dashboard/snapshot"
+          "path": "/api/gb28181/sip/dashboard/snapshot",
+          "title": "读取 SIP 仪表盘快照"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/zlm/overview"
+          "path": "/api/gb28181/zlm/overview",
+          "title": "查看媒体服务总览"
         }
       ]
     },
@@ -54,15 +59,18 @@
       "apis": [
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/default-playback-protocol"
+          "path": "/api/gb28181/sip/service-config/default-playback-protocol",
+          "title": "读取默认播放协议"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/playback-settings"
+          "path": "/api/gb28181/sip/service-config/playback-settings",
+          "title": "读取回放参数"
         },
         {
           "method": "GET",
-          "path": "/api/gb28181/sip/service-config/fixed-address-playback"
+          "path": "/api/gb28181/sip/service-config/fixed-address-playback",
+          "title": "读取固定地址播放配置"
         }
       ]
     }

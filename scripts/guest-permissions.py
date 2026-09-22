@@ -1,12 +1,37 @@
 """Generate default guest grants; no database connection. Run with --check to detect drift."""
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from api_groups import group_for_api  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / 'server/resource/database'
 VERSION = '2026-09-05-guest-readonly-permissions'
 START, END = '-- guest-readonly:start', '-- guest-readonly:end'
+
+# ⛔ 这里过去写死两个兜底分组：`按钮权限目录`（探针接口）和 `游客权限依赖`（游客依赖的读接口）。
+#    它们不是业务模块，只是"这批接口是迁移加的"的记号，混进模块分组后
+#    「接口管理」的分组维度就没法按模块对账了。现在一律按接口自身归属取分组
+#    （映射见 scripts/api_groups.py），推导不出来的直接报错。
+#
+# ⛔ 同理，下面过去还写死过两个接口**标题**：`查看与观看依赖`（bindings 的读接口）
+#    与 `视频探针诊断`（探针接口）。sys_api.title 的列语义虽是「权限名称」，
+#    但接口管理页把它当「API标题」展示 —— 一个按钮挂 N 个接口时 N 行同名，
+#    页面根本没法区分。现在一律要求目录里显式声明接口名，缺失直接报错。
+#    见 docs/api-group-normalization.md 的「API 标题语义错位」一节。
+PROBE_API_TITLE = '发起视频探针检测'  # ⚠️ 必须与 button-permissions.json 里同接口的 title 一致，
+#                                       否则两个生成器谁先落库谁赢 ⇒ 跨库口径漂移。
+
+
+def api_title(api):
+    """取目录里显式声明的接口名；缺失即报错（不再兜底）。"""
+    if not api.get('title'):
+        raise SystemExit('guest-permissions.json 的接口 %s %s 缺少 title；请在 apis[] 里显式命名'
+                         % (api['method'], api['path']))
+    return api['title']
 
 
 def generate(c, dialect):
@@ -23,7 +48,7 @@ def generate(c, dialect):
     old, new = '/api/gb28181/play/:deviceId/probe', '/api/gb28181/stream-probes/:streamId'
     # Existing deployments may already contain either API path. Merge links without changing menu IDs.
     out += [
-        'INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '+','.join([q('视频探针诊断'),q(new),q('POST'),q('按钮权限目录'),'CURRENT_TIMESTAMP','CURRENT_TIMESTAMP','1'])+' WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path='+q(new)+" AND method='POST' AND deleted_at IS NULL)",
+        'INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '+','.join([q(PROBE_API_TITLE),q(new),q('POST'),q(group_for_api('POST',new)),'CURRENT_TIMESTAMP','CURRENT_TIMESTAMP','1'])+' WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path='+q(new)+" AND method='POST' AND deleted_at IS NULL)",
         'INSERT INTO sys_menu_api(menu_id,api_id) SELECT DISTINCT ma.menu_id,n.id FROM sys_menu_api ma JOIN sys_api o ON o.id=ma.api_id CROSS JOIN sys_api n WHERE o.path='+q(old)+" AND o.method='POST' AND n.path="+q(new)+" AND n.method='POST' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=ma.menu_id AND x.api_id=n.id)",
         'DELETE FROM sys_menu_api WHERE api_id IN(SELECT id FROM sys_api WHERE path='+q(old)+" AND method='POST')",
         'UPDATE sys_api SET deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE path='+q(old)+" AND method='POST' AND deleted_at IS NULL",
@@ -36,7 +61,7 @@ def generate(c, dialect):
     for binding in c['bindings']:
         menu = ('m.path='+q(binding['menuPath'])+' AND m.type=2') if 'menuPath' in binding else ('m.permission='+q(binding['permission'])+' AND m.type=3')
         for a in binding['apis']:
-            out.append('INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '+','.join([q('查看与观看依赖'),q(a['path']),q(a['method']),q('游客权限依赖'),'CURRENT_TIMESTAMP','CURRENT_TIMESTAMP','1'])+' WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path='+q(a['path'])+' AND method='+q(a['method'])+' AND deleted_at IS NULL)')
+            out.append('INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT '+','.join([q(api_title(a)),q(a['path']),q(a['method']),q(group_for_api(a['method'],a['path'])),'CURRENT_TIMESTAMP','CURRENT_TIMESTAMP','1'])+' WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path='+q(a['path'])+' AND method='+q(a['method'])+' AND deleted_at IS NULL)')
             out.append('INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE '+menu+' AND m.deleted_at IS NULL AND a.path='+q(a['path'])+' AND a.method='+q(a['method'])+' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id)')
     out += [
         'INSERT INTO sys_role(name,sort,status,description,parent_id,data_scope,checked_depts,created_at,updated_at,created_by) SELECT '+','.join([q(c['roleName']),'100','1',q(c['description']),'0','4',q(''),'CURRENT_TIMESTAMP','CURRENT_TIMESTAMP','1'])+' WHERE NOT EXISTS(SELECT 1 FROM sys_role WHERE name='+q(c['roleName'])+' AND deleted_at IS NULL)',

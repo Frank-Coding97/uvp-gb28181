@@ -305,6 +305,8 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 			{
 				// API列表
 				sysApi.GET("/list", sysApiControllers.List)
+				// API分组字典（前端下拉数据源）
+				sysApi.GET("/groups", sysApiControllers.Groups)
 				// 根据ID获取API信息
 				sysApi.GET("/:id", sysApiControllers.GetByID)
 				// 新增API

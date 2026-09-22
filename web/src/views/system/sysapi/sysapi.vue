@@ -8,7 +8,9 @@
           <a-select v-model="form.method" placeholder="请选择请求方法" allow-clear style="width: 136px">
             <a-option v-for="item in methodOptions" :key="item.value" :value="item.value">{{ item.name }}</a-option>
           </a-select>
-          <a-input v-model="form.apiGroup" placeholder="请输入API分组" style="width: 176px" allow-clear @press-enter="onSearch" />
+          <a-select v-model="form.apiGroup" placeholder="请选择API分组" allow-clear allow-search style="width: 176px">
+            <a-option v-for="item in groupOptions" :key="item" :value="item">{{ item }}</a-option>
+          </a-select>
         </template>
         <template #actions>
           <a-button type="primary" @click="onSearch">
@@ -99,8 +101,10 @@
               <a-option v-for="item in methodOptions" :key="item.value" :value="item.value">{{ item.name }}</a-option>
             </a-select>
           </a-form-item>
-          <a-form-item field="apiGroup" label="API分组" validate-trigger="blur">
-            <a-input v-model="addFrom.apiGroup" placeholder="请输入API分组" allow-clear />
+          <a-form-item field="apiGroup" label="API分组" validate-trigger="change">
+            <a-select v-model="addFrom.apiGroup" placeholder="请选择API分组" allow-clear allow-search>
+              <a-option v-for="item in groupOptions" :key="item" :value="item">{{ item }}</a-option>
+            </a-select>
           </a-form-item>
         </a-form>
       </div>
@@ -112,6 +116,7 @@
 import {
   getSysApiListAPI,
   getSysApiByIdAPI,
+  getSysApiGroupsAPI,
   addSysApiAPI,
   updateSysApiAPI,
   deleteSysApiAPI,
@@ -155,6 +160,20 @@ const methodOptions = ref([
   { name: "DELETE", value: "DELETE" },
   { name: "PATCH", value: "PATCH" }
 ]);
+
+// API分组选项（受控清单，来自后端 models.sysApiGroups）
+const groupOptions = ref<string[]>([]);
+
+// 拉取分组清单
+const loadGroupOptions = async () => {
+  try {
+    const { data } = await getSysApiGroupsAPI();
+    groupOptions.value = data || [];
+  } catch (error) {
+    console.error("获取API分组清单失败", error);
+    Message.error("获取API分组清单失败");
+  }
+};
 
 // 获取请求方法对应的颜色
 const getMethodColor = (method: string) => {
@@ -245,7 +264,7 @@ const rules = {
   title: [{ required: true, message: "请输入API标题" }],
   path: [{ required: true, message: "请输入API路径" }],
   method: [{ required: true, message: "请选择请求方法" }],
-  apiGroup: [{ required: true, message: "请输入API分组" }]
+  apiGroup: [{ required: true, message: "请选择API分组" }]
 };
 
 // 表单数据
@@ -340,6 +359,7 @@ const onDelete = async (row: SysApiItem) => {
 
 // 初始化
 onMounted(() => {
+  loadGroupOptions();
   getSysApiList();
 });
 </script>

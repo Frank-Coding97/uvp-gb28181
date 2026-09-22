@@ -1,0 +1,52 @@
+-- 回退「API 分组重定口径」。
+-- ⛔ 只回到上一版 30 组口径，无法还原更早的 39 个自由文本分组。
+-- api-group-reroute-down:start
+UPDATE `sys_api` SET `api_group`='国标服务配置' WHERE `path`='/api/sysDictItem/getByDictCode/:dictCode' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='定时任务' WHERE `path`='/api/sysJobResults/list' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='设备管理' WHERE `path`='/api/gb28181/play/:deviceId/:channelId/authorization' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='设备管理' WHERE `path`='/api/gb28181/play/:deviceId/:channelId' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId' AND `method`='DELETE';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId' AND `method`='DELETE';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId' AND `method`='DELETE';
+UPDATE `sys_api` SET `api_group`='设备管理' WHERE `path`='/api/gb28181/play/:streamId' AND `method`='DELETE';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/control-capabilities' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-status' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/cruise-tracks/:trackId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/home-position' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/precise-status' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/presets' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/snapshot-sessions/:sessionId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/play/:streamId/monitor' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/home-position' AND `method`='PATCH';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-control' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/download-sessions' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/playback-sessions' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId/actions' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/cruise' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/cruise/tracks' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/extended' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/precise' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/presets' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/snapshot-sessions' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/talk-sessions' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/stream-probes/:streamId' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='设备管理' WHERE `path`='/api/gb28181/sip/service-config/playback-settings' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/stream-probes/operations/:operationId' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/video-params' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/video-params' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/storage-cards' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/device-configs' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/target-track' AND `method`='GET';
+UPDATE `sys_api` SET `api_group`='多屏播放' WHERE `path`='/api/gb28181/device-mgmt/channel/:id/target-track' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='GB28181 国标级联' WHERE `path`='/api/gb28181/cascade/platforms/:id/channels/share' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='GB28181 国标级联' WHERE `path`='/api/gb28181/cascade/platforms/:id/channels/unshare' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='GB28181 国标级联' WHERE `path`='/api/gb28181/cascade/platforms/:id/reconnect' AND `method`='POST';
+UPDATE `sys_api` SET `api_group`='GB28181 SIP 配置' WHERE `path`='/api/gb28181/sip/service-config/default-channel-stream-transport' AND `method`='GET';
+-- api-group-reroute-down:end

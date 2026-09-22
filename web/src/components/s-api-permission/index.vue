@@ -33,13 +33,9 @@
             <a-option value="DELETE">DELETE</a-option>
             <a-option value="PATCH">PATCH</a-option>
           </a-select>
-          <a-input
-            v-model="searchForm.apiGroup"
-            placeholder="API分组"
-            allow-clear
-            style="width: 150px"
-            @press-enter="handleSearch"
-          />
+          <a-select v-model="searchForm.apiGroup" placeholder="API分组" allow-clear allow-search style="width: 150px">
+            <a-option v-for="item in groupOptions" :key="item" :value="item">{{ item }}</a-option>
+          </a-select>
         </template>
         <template #actions>
           <a-button type="primary" @click="handleSearch">
@@ -103,7 +99,14 @@
 </template>
 
 <script setup lang="ts">
-import { getSysApiListAPI, getMenuApisAPI, setMenuApisAPI, type SysApiItem, type SysApiListParams } from "@/api/sysapi";
+import {
+  getSysApiListAPI,
+  getSysApiGroupsAPI,
+  getMenuApisAPI,
+  setMenuApisAPI,
+  type SysApiItem,
+  type SysApiListParams
+} from "@/api/sysapi";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { formatTime } from "@/globals";
 const { isMobile } = useDevicesSize();
@@ -173,6 +176,18 @@ const searchForm = ref<SysApiListParams>({
   pageSize: 10,
   order: "id DESC"
 });
+
+// API分组选项（受控清单，来自后端 models.sysApiGroups）
+const groupOptions = ref<string[]>([]);
+
+const loadGroupOptions = async () => {
+  try {
+    const { data } = await getSysApiGroupsAPI();
+    groupOptions.value = data || [];
+  } catch (error) {
+    console.error("获取API分组清单失败:", error);
+  }
+};
 
 // 分页配置
 const pagination = ref({
@@ -393,6 +408,7 @@ watch(
       pagination.value.current = 1;
 
       // 加载数据
+      loadGroupOptions();
       loadMenuApis();
       loadApiList();
     }

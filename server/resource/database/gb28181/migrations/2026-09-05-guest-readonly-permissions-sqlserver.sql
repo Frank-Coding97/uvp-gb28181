@@ -6,7 +6,7 @@ INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,
 
 INSERT INTO sys_menu(parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) SELECT m.id,N'',N'Permission_gb28181_play_snapshot',N'',N'播放器本地图像截图',1,0,100,3,N'gb28181:play:snapshot',N'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu m WHERE m.path=N'/gb28181/multi-screen-playback' AND m.type=2 AND m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu x WHERE x.permission=N'gb28181:play:snapshot' AND x.deleted_at IS NULL);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'视频探针诊断',N'/api/gb28181/stream-probes/:streamId',N'POST',N'按钮权限目录',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/stream-probes/:streamId' AND method='POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'发起视频探针检测',N'/api/gb28181/stream-probes/:streamId',N'POST',N'流媒体管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/stream-probes/:streamId' AND method='POST' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT DISTINCT ma.menu_id,n.id FROM sys_menu_api ma JOIN sys_api o ON o.id=ma.api_id CROSS JOIN sys_api n WHERE o.path=N'/api/gb28181/play/:deviceId/probe' AND o.method='POST' AND n.path=N'/api/gb28181/stream-probes/:streamId' AND n.method='POST' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=ma.menu_id AND x.api_id=n.id);
 
@@ -22,35 +22,35 @@ INSERT INTO sys_role_menu(role_id,menu_id) SELECT DISTINCT r.role_id,d.id FROM s
 
 DELETE FROM sys_menu_api WHERE menu_id IN(SELECT id FROM sys_menu WHERE permission=N'gb28181:recording:view') AND api_id IN(SELECT id FROM sys_api WHERE (path=N'/api/gb28181/cloud-recordings/files/:id/downloads' AND method='POST') OR (path=N'/api/gb28181/cloud-recordings/downloads/:taskId' AND method IN('GET','DELETE')));
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/users/profile',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/users/profile' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'获取当前用户信息',N'/api/users/profile',N'GET',N'个人中心',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/users/profile' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.path=N'/home' AND m.type=2 AND m.deleted_at IS NULL AND a.path=N'/api/users/profile' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/sysMenu/getRouters',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/sysMenu/getRouters' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'获取用户权限菜单',N'/api/sysMenu/getRouters',N'GET',N'菜单管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/sysMenu/getRouters' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.path=N'/home' AND m.type=2 AND m.deleted_at IS NULL AND a.path=N'/api/sysMenu/getRouters' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/users/logout',N'POST',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/users/logout' AND method=N'POST' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'用户登出',N'/api/users/logout',N'POST',N'认证管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/users/logout' AND method=N'POST' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.path=N'/home' AND m.type=2 AND m.deleted_at IS NULL AND a.path=N'/api/users/logout' AND a.method=N'POST' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/gb28181/sip/dashboard/snapshot',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/dashboard/snapshot' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'读取 SIP 仪表盘快照',N'/api/gb28181/sip/dashboard/snapshot',N'GET',N'仪表盘',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/dashboard/snapshot' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:home:view' AND m.type=3 AND m.deleted_at IS NULL AND a.path=N'/api/gb28181/sip/dashboard/snapshot' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/gb28181/zlm/overview',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/zlm/overview' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看媒体服务总览',N'/api/gb28181/zlm/overview',N'GET',N'流媒体管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/zlm/overview' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:home:view' AND m.type=3 AND m.deleted_at IS NULL AND a.path=N'/api/gb28181/zlm/overview' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/gb28181/sip/service-config/default-playback-protocol',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/default-playback-protocol' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'读取默认播放协议',N'/api/gb28181/sip/service-config/default-playback-protocol',N'GET',N'国标服务配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/default-playback-protocol' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:play:start' AND m.type=3 AND m.deleted_at IS NULL AND a.path=N'/api/gb28181/sip/service-config/default-playback-protocol' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/gb28181/sip/service-config/playback-settings',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/playback-settings' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'读取回放参数',N'/api/gb28181/sip/service-config/playback-settings',N'GET',N'国标服务配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/playback-settings' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:play:start' AND m.type=3 AND m.deleted_at IS NULL AND a.path=N'/api/gb28181/sip/service-config/playback-settings' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
-INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'查看与观看依赖',N'/api/gb28181/sip/service-config/fixed-address-playback',N'GET',N'游客权限依赖',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/fixed-address-playback' AND method=N'GET' AND deleted_at IS NULL);
+INSERT INTO sys_api(title,path,method,api_group,created_at,updated_at,created_by) SELECT N'读取固定地址播放配置',N'/api/gb28181/sip/service-config/fixed-address-playback',N'GET',N'国标服务配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 WHERE NOT EXISTS(SELECT 1 FROM sys_api WHERE path=N'/api/gb28181/sip/service-config/fixed-address-playback' AND method=N'GET' AND deleted_at IS NULL);
 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:play:start' AND m.type=3 AND m.deleted_at IS NULL AND a.path=N'/api/gb28181/sip/service-config/fixed-address-playback' AND a.method=N'GET' AND a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 
