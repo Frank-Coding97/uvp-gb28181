@@ -40,7 +40,8 @@ describe("realtime console log page contract", () => {
 
   it("binds each reconnect loop to its own abort controller", () => {
     expect(source).toContain("const connection = new AbortController()");
-    expect(source).toContain("openRealtimeLogStream({ since: lastSequence || undefined }");
+    // ⛔ 别钉整行：prettier 会把超长的实参列表拆成多行。
+    expect(source).toMatch(/openRealtimeLogStream\(\s*\{\s*since:\s*lastSequence \|\| undefined\s*\}/);
     expect(source).toContain("connection.signal");
   });
 

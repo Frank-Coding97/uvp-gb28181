@@ -2562,8 +2562,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     //       这种**假象**当成组件缺陷。attribute 才是组件真实接到的东西。
     expect(wrapper.get("[data-testid='dcg-format-0']").attributes("model-value")).toBe("2");
     expect(wrapper.get("[data-testid='dcg-resolution-0']").attributes("model-value")).toBe("6");
-    expect(wrapper.get("[data-testid='dcg-row-encoding-format']").exists()).toBe(true);
-    expect(wrapper.get("[data-testid='dcg-row-encoding-resolution']").exists()).toBe(true);
+    // ⛔ 用 find 而不是 get：get() 找不到会直接抛，返回类型里根本没有 exists（恒真），
+    //    想断言「这行在不在」必须走 find().exists()。
+    expect(wrapper.find("[data-testid='dcg-row-encoding-format']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-row-encoding-resolution']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='dcg-stream-0']").findAll("[data-source='设备']")).toHaveLength(0);
     expect(wrapper.get("[data-testid='dcg-params-foot']").text()).not.toContain("设备");
 

@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
+import { hasRuleBlock } from "@/test/source-assert";
+
 const api = vi.hoisted(() => ({
   listSchedulerLogs: vi.fn(),
   listZLMNodes: vi.fn()
@@ -147,7 +149,8 @@ describe("SchedulerLogPanel", () => {
     expect(source).not.toContain("chartState.sampleCount");
     expect(source).toContain("errorPresentation.label");
     expect(source).toContain('class="time-filter"');
-    expect(source).toContain("@media (max-width: 1200px)");
+    // stylelint 的 media-feature-range-notation 会把 max-width 写成范围式（width <= 1200px）。
+    expect(source).toMatch(/@media\s*\(\s*(?:width\s*<=\s*1200px|max-width:\s*1200px)\s*\)/);
     expect(source).toContain("visibleLogs");
     expect(source).toContain("a-pagination");
     expect(source).toContain("s-layout-search");
@@ -203,13 +206,30 @@ describe("SchedulerLogPanel", () => {
       'const tableScroll = computed(() => ({ x: 1148, ...(visibleLogs.value.length ? { y: "100%" } : {}) }));'
     );
     expect(source).toContain(':scroll="tableScroll"');
-    expect(source).toMatch(
-      /\.scheduler-log-panel\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s
-    );
-    expect(source).toMatch(
-      /\.log-table-panel\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;[^}]*flex:\s*1;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s
-    );
-    expect(source).toMatch(/\.scheduler-log-table\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1;[^}]*overflow:\s*hidden;/s);
+    // ⛔ 别钉声明顺序：stylelint-config-recess-order 会重排，格式化一次红一次。
+    expect(
+      hasRuleBlock(
+        source,
+        ".scheduler-log-panel",
+        "display: flex",
+        "height: 100%",
+        "min-height: 0",
+        "flex-direction: column",
+        "overflow: hidden"
+      )
+    ).toBe(true);
+    expect(
+      hasRuleBlock(
+        source,
+        ".log-table-panel",
+        "display: flex",
+        "min-height: 0",
+        "flex: 1",
+        "flex-direction: column",
+        "overflow: hidden"
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(source, ".scheduler-log-table", "min-height: 0", "flex: 1", "overflow: hidden")).toBe(true);
   });
 
   it("redacts credentials and internal URLs before rendering a backend error", () => {

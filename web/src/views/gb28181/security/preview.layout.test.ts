@@ -2,11 +2,19 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { hasMarkup } from "@/test/source-assert";
+
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/security/preview.vue"), "utf8");
 
 describe("security preview system integration", () => {
   it("uses the UVP workspace shell and theme tokens", () => {
-    expect(source).toContain(":class=\"['snow-page', 'security-preview', { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }]\"");
+    // ⛔ 别钉整行：prettier 会把超长的属性拆成多行。只钉 token 与顺序。
+    expect(
+      hasMarkup(
+        source,
+        ":class=\"['snow-page', 'security-preview', { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }]\""
+      )
+    ).toBe(true);
     expect(source).toContain('class="snow-inner uvp-page-shell-flat security-shell"');
     expect(source).toContain("var(--uvp-panel-bg)");
     expect(source).toContain("var(--uvp-brand)");
@@ -22,7 +30,7 @@ describe("security preview system integration", () => {
 
   it("opens the rule form in the shared system dialog", () => {
     expect(source).toContain(':model="ruleFormModel"');
-    expect(source).toContain('<a-modal v-model:visible="ruleDrawerVisible"');
+    expect(hasMarkup(source, '<a-modal v-model:visible="ruleDrawerVisible"')).toBe(true);
     expect(source).toContain('modal-class="uvp-system-dialog security-rule-dialog"');
     expect(source).not.toContain('<a-drawer v-model:visible="ruleDrawerVisible"');
   });
@@ -41,7 +49,8 @@ describe("security preview system integration", () => {
     expect(source.match(/class="workspace-panel/g)).toHaveLength(4);
     expect(source).toMatch(/\.workspace-panel\s*{[^}]*padding:\s*0;/s);
     expect(source).toContain("activeTab === 'policy'");
-    expect(source).toContain("activeTab === 'allowlist' ? '添加白名单' : '添加黑名单'");
+    // 模板插值里的引号会被 prettier 统一成双引号，所以引号两侧都接受。
+    expect(source).toMatch(/activeTab === ['"]allowlist['"] \? ['"]添加白名单['"] : ['"]添加黑名单['"]/);
   });
 
   it("explains the selected mode with concrete security outcomes", () => {
@@ -62,9 +71,16 @@ describe("security preview system integration", () => {
     expect(source).toContain("仍校验 REGISTER，仅关闭自动封 IP");
     expect(source).toContain("无效 REGISTER 仍会拒绝并记录，观察模式只关闭自动封 IP");
     expect(source).toContain("REGISTER 始终校验格式、鉴权和设备身份；无效请求拒绝，修正后可重新注册");
-    expect(source).toContain("所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册。");
-    expect(source).toContain("<a-tag color=\"blue\">可修正重试</a-tag>");
-    expect(source).not.toContain("保护/严格模式下，密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册；观察模式只记录。");
+    expect(
+      hasMarkup(
+        source,
+        "所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册。"
+      )
+    ).toBe(true);
+    expect(source).toContain('<a-tag color="blue">可修正重试</a-tag>');
+    expect(source).not.toContain(
+      "保护/严格模式下，密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册；观察模式只记录。"
+    );
     expect(source).not.toContain("观察模式只记录");
     expect(source).not.toContain("{{ selectedMode === 'observe' ? '仅记录' : '可重试' }}");
     expect(source).toContain("发现非法 ID 枚举只代表高危并拒绝，不直接永久封 IP");
@@ -76,7 +92,9 @@ describe("security preview system integration", () => {
 
   it("does not render explanatory note cards below the defense chain", () => {
     expect(source).not.toContain("命中自动封禁策略的来源将永久封禁，需人工解封。");
-    expect(source).not.toContain('<div class="panel-note"><ShieldCheck :size="16" /><span>{{ sourceVerificationNote }}</span></div>');
+    expect(source).not.toContain(
+      '<div class="panel-note"><ShieldCheck :size="16" /><span>{{ sourceVerificationNote }}</span></div>'
+    );
   });
 
   it("does not render an explanatory note above the security event table", () => {
@@ -108,9 +126,11 @@ describe("security preview system integration", () => {
   });
 
   it("places protection policy immediately after the overview", () => {
-    const overviewIndex = source.indexOf('<a-tab-pane key="overview">');
-    const policyIndex = source.indexOf('<a-tab-pane key="policy">');
-    const eventsIndex = source.indexOf('<a-tab-pane key="events">');
+    // prettier 会把闭合 `>` 悬挂到下一行（`<a-tab-pane key="x"\n  >`），所以按正则找。
+    const tabIndex = (key: string) => source.search(new RegExp(`<a-tab-pane key="${key}"\\s*>`));
+    const overviewIndex = tabIndex("overview");
+    const policyIndex = tabIndex("policy");
+    const eventsIndex = tabIndex("events");
 
     expect(overviewIndex).toBeGreaterThan(-1);
     expect(policyIndex).toBeGreaterThan(overviewIndex);
@@ -118,8 +138,10 @@ describe("security preview system integration", () => {
   });
 
   it("separates automatic firewall bans from manual blacklist rules", () => {
-    expect(source).toContain('<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>');
-    expect(source).toContain('activeTab === \'bans\'');
+    expect(hasMarkup(source, '<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>')).toBe(
+      true
+    );
+    expect(source).toContain("activeTab === 'bans'");
     expect(source).toContain("进入原因");
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
     expect(source).toContain("转为手动黑名单");
@@ -127,9 +149,9 @@ describe("security preview system integration", () => {
   });
 
   it("uses security events for the trend and provides explicit empty states", () => {
-    expect(source).toContain('import { buildSecurityTrend');
+    expect(source).toContain("import { buildSecurityTrend");
     expect(source).toContain("安全事件接口");
-    expect(source).not.toContain('const trendData = [');
+    expect(source).not.toContain("const trendData = [");
     expect(source).toContain("暂无趋势数据");
     expect(source).toContain("暂无高频来源");
   });
@@ -151,7 +173,7 @@ describe("security preview system integration", () => {
 
   it("matches the shared system toolbar sizing for refresh and rule actions", () => {
     expect(source).toContain('class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据"');
-    expect(source).toContain('<a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary"');
+    expect(hasMarkup(source, '<a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary"')).toBe(true);
     expect(source).not.toContain("security-create-action");
   });
 
@@ -179,7 +201,9 @@ describe("security preview system integration", () => {
     expect(source).toContain('class="security-list-filter security-list-filter--status"');
     expect(source).not.toMatch(/<a-(?:input|select)[^>]*style="width:/);
     expect(source).toMatch(/\.security-list-filter\s*{[^}]*flex:\s*0 1 176px;[^}]*width:\s*176px;/s);
-    expect(source).toMatch(/\.security-list-filter :deep\(\.arco-input-wrapper\),\s*\.security-list-filter :deep\(\.arco-select-view\)\s*{[^}]*width:\s*100%;/s);
+    expect(source).toMatch(
+      /\.security-list-filter :deep\(\.arco-input-wrapper\),\s*\.security-list-filter :deep\(\.arco-select-view\)\s*{[^}]*width:\s*100%;/s
+    );
   });
 
   it("uses the existing Arco table pagination style for all security lists", () => {
@@ -187,10 +211,10 @@ describe("security preview system integration", () => {
     expect(source).toContain(':pagination="eventPagination"');
     expect(source).toContain(':pagination="banPagination"');
     expect(source).toContain(':pagination="rulePagination"');
-    expect(source).toContain('showTotal: true');
-    expect(source).toContain('showJumper: true');
-    expect(source).toContain('showPageSize: true');
-    expect(source).toContain('pageSizeOptions: tablePageSizeOptions');
+    expect(source).toContain("showTotal: true");
+    expect(source).toContain("showJumper: true");
+    expect(source).toContain("showPageSize: true");
+    expect(source).toContain("pageSizeOptions: tablePageSizeOptions");
     expect(source).toContain('@page-change="handleEventPageChange"');
     expect(source).toContain('@page-change="handleBanPageChange"');
     expect(source).toContain('@page-change="handleRulePageChange"');
@@ -209,7 +233,9 @@ describe("security preview system integration", () => {
     expect(source).toContain("const tablePageSizeOptions = [10, 20, 50, 100]");
     expect(source).toContain('class="security-table uvp-data-table"');
     expect(source).toContain('class="security-table uvp-data-table ban-table"');
-    expect(source).toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-table-cell\)\s*{[^}]*font-size:\s*14px;[^}]*line-height:\s*22px;/s);
+    expect(source).toMatch(
+      /\.security-preview :deep\(\.uvp-data-table \.arco-table-cell\)\s*{[^}]*font-size:\s*14px;[^}]*line-height:\s*22px;/s
+    );
     expect(source).toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-pagination-item\)/);
   });
 
@@ -236,15 +262,15 @@ describe("security preview system integration", () => {
 
   it("renders operational data from security APIs instead of fixed demo values", () => {
     expect(source).toContain("getSecurityAgentHealth()");
-    expect(source).toContain("listSecurityAccessRules(\"blacklist\", { page:");
+    expect(source).toContain('listSecurityAccessRules("blacklist", { page:');
     expect(source).toContain("updateSecurityAccessRule(rule.id");
     expect(source).toContain("expiryToIso(ruleExpiry.value)");
     expect(source).toContain("自动封禁有效期");
     expect(source).toContain("automaticBanTTLLabel");
     expect(source).toContain("refreshCountdown.value = 10");
-    expect(source).not.toContain('<strong>86</strong>');
+    expect(source).not.toContain("<strong>86</strong>");
     expect(source).not.toContain('<span class="attention-count">2</span>');
-    expect(source).not.toContain('<a-tag>10 分钟</a-tag><ChevronRight');
+    expect(source).not.toContain("<a-tag>10 分钟</a-tag><ChevronRight");
   });
 
   it("sends the rule expiry through the real toggle payload path", () => {

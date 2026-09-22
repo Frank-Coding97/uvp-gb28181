@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { createStreamFilters, overviewAsRuntime, sameNodeTargets } from "./monitoring/monitoringState";
 
+import { hasRuleBlock } from "@/test/source-assert";
+
 const root = resolve(process.cwd(), "src/views/gb28181/zlm");
 
 describe("media monitoring workbench", () => {
@@ -58,20 +60,31 @@ describe("media monitoring workbench", () => {
     expect(page.match(/<MediaScopeBar/g)).toHaveLength(2);
     expect(page.match(/compact/g)).toHaveLength(2);
     expect(streamPanel).toMatch(/<template #fields>\s*<slot name="scope" \/>/s);
-    expect(sessionPanel.match(/<template #fields><slot name="scope" \/>/g)).toHaveLength(2);
+    // prettier 会把闭合 `>` 悬挂到下一行（`<template #fields\n  >`），所以留 \s*。
+    expect(sessionPanel.match(/<template #fields\s*>\s*<slot name="scope" \/>/g)).toHaveLength(2);
   });
 
   it("keeps the recording status select at the system filter width", () => {
     const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
-    expect(panel).toContain('style="width: 132px; min-width: 132px; max-width: 132px; flex: 0 0 132px"');
-    expect(panel).toMatch(/\.filter-recording\s*\{[^}]*width:\s*132px;[^}]*flex:\s*0 0 132px;/s);
+    // ⛔ 别钉声明顺序：stylelint-config-recess-order 连内联 style 属性都会重排。
+    const inlineStyles = [...panel.matchAll(/style="([^"]*)"/g)].map(match => match[1]);
+    expect(
+      inlineStyles.some(value =>
+        ["width: 132px", "min-width: 132px", "max-width: 132px", "flex: 0 0 132px"].every(item => value.includes(item))
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(panel, ".filter-recording", "width: 132px", "flex: 0 0 132px")).toBe(true);
     expect(panel).not.toMatch(/@media\s*\(max-width:\s*900px\)[^{]*\{[^}]*\.filter-recording[^}]*width:\s*100%/s);
   });
 
   it("uses the shared search-control colors for the recording select", () => {
     const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
-    expect(panel).toMatch(/\.stream-search\s+:deep\(\.arco-select-view\)\s*\{[^}]*background:\s*var\(--uvp-search-control-bg\)\s*!important;/s);
-    expect(panel).toMatch(/\.stream-search\s+:deep\(\.arco-select-view-focus\)\s*\{[^}]*box-shadow:\s*var\(--uvp-search-control-focus-shadow\)\s*!important;/s);
+    expect(panel).toMatch(
+      /\.stream-search\s+:deep\(\.arco-select-view\)\s*\{[^}]*background:\s*var\(--uvp-search-control-bg\)\s*!important;/s
+    );
+    expect(panel).toMatch(
+      /\.stream-search\s+:deep\(\.arco-select-view-focus\)\s*\{[^}]*box-shadow:\s*var\(--uvp-search-control-focus-shadow\)\s*!important;/s
+    );
   });
 
   it("passes active scope and node context into every panel without letting panels own route view state", () => {
@@ -100,10 +113,12 @@ describe("media monitoring workbench", () => {
   it("keeps stream filters and ownership actions scoped to backend evidence", () => {
     expect(createStreamFilters({ recordingMp4: "true", app: " live " })).toMatchObject({ recording: "mp4", app: " live " });
     expect(sameNodeTargets([{ nodeId: 1, media: { schema: "rtsp", vhost: "v", app: "a", stream: "s" } }])).toBe(true);
-    expect(sameNodeTargets([
-      { nodeId: 1, media: { schema: "rtsp", vhost: "v", app: "a", stream: "s" } },
-      { nodeId: 2, media: { schema: "rtsp", vhost: "v", app: "a", stream: "s2" } }
-    ])).toBe(false);
+    expect(
+      sameNodeTargets([
+        { nodeId: 1, media: { schema: "rtsp", vhost: "v", app: "a", stream: "s" } },
+        { nodeId: 2, media: { schema: "rtsp", vhost: "v", app: "a", stream: "s2" } }
+      ])
+    ).toBe(false);
   });
 
   it("keeps aggregate unknown samples unknown instead of fabricating zeroes", () => {

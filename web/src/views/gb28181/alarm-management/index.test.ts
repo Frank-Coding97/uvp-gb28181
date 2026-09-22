@@ -4,7 +4,14 @@ import { resolve } from "node:path";
 import { reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn(), batchDeleteAlarms: vi.fn(), clearAllAlarms: vi.fn() }));
+import { hasRuleBlock } from "@/test/source-assert";
+
+const alarmApi = vi.hoisted(() => ({
+  listAlarms: vi.fn(),
+  deleteAlarm: vi.fn(),
+  batchDeleteAlarms: vi.fn(),
+  clearAllAlarms: vi.fn()
+}));
 const deviceApi = vi.hoisted(() => ({ listDevices: vi.fn() }));
 const accountState = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
 const account = reactive(accountState);
@@ -145,10 +152,22 @@ describe("AlarmManagement", () => {
   it("keeps vertical scrolling inside the Arco table body", () => {
     expect(pageSource).toContain('<div class="snow-fill alarm-management-page">');
     expect(pageSource).toContain('<div class="snow-fill-inner uvp-page-shell-flat alarm-management-shell">');
-    expect(pageSource).toMatch(/\.alarm-management-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
-    expect(pageSource).toMatch(/\.alarm-management-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
-    expect(pageSource).toMatch(/\.alarm-table-wrap\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
-    expect(pageSource).toMatch(/\.alarm-table-wrap :deep\(\.uvp-data-table\)\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
+    // ⛔ 别钉声明顺序：stylelint-config-recess-order 会重排，格式化一次红一次。
+    // 改成「同一个规则块里有没有这几条声明」。
+    expect(hasRuleBlock(pageSource, ".alarm-management-page", "height: 100%", "min-height: 0", "overflow: hidden")).toBe(true);
+    expect(
+      hasRuleBlock(
+        pageSource,
+        ".alarm-management-shell",
+        "display: flex",
+        "height: 100%",
+        "min-height: 0",
+        "flex-direction: column",
+        "overflow: hidden"
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(pageSource, ".alarm-table-wrap", "flex: 1", "min-height: 0", "overflow: hidden")).toBe(true);
+    expect(hasRuleBlock(pageSource, ".alarm-table-wrap :deep(.uvp-data-table)", "height: 100%", "min-height: 0")).toBe(true);
     expect(pageSource).toContain('alarms.value.length ? { y: "100%" } : {}');
   });
 
@@ -157,9 +176,7 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='device-filter']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='source-code']").exists()).toBe(false);
-    expect(wrapper.get("[data-testid='keyword']").attributes("data-placeholder")).toBe(
-      "设备 / 通道名称或国标编码 / 告警描述"
-    );
+    expect(wrapper.get("[data-testid='keyword']").attributes("data-placeholder")).toBe("设备 / 通道名称或国标编码 / 告警描述");
     expect(deviceApi.listDevices).not.toHaveBeenCalled();
   });
 
@@ -375,5 +392,4 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 });
   });
-
 });
