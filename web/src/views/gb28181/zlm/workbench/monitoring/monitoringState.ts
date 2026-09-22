@@ -1,11 +1,5 @@
 import type { MediaScope } from "@/store/modules/media-workbench";
-import type {
-  ZLMNodeRuntime,
-  ZLMOverview,
-  ZLMOwnershipTarget,
-  ZLMStreamQuery,
-  ZLMStreamViewer
-} from "@/api/gb28181-zlm-runtime";
+import type { ZLMNodeRuntime, ZLMOverview, ZLMOwnershipTarget, ZLMStreamQuery, ZLMStreamViewer } from "@/api/gb28181-zlm-runtime";
 
 export interface MonitoringQuery {
   schema?: string;
@@ -75,7 +69,7 @@ export function createNetworkFilters(query: Record<string, unknown> = {}): Monit
     peerIp: queryText(query.peerIp),
     localPort: queryText(query.localPort),
     page: 1,
-    pageSize: 20
+    pageSize: 10
   };
 }
 
@@ -104,7 +98,7 @@ export function scopeRange(scope: MediaScope, nodeId: number | null): string {
 
 export function selectedTargetNode(targets: readonly ZLMOwnershipTarget[]): number | null {
   const nodeId = targets[0]?.nodeId;
-  return targets.length > 0 && targets.every(target => target.nodeId === nodeId) ? nodeId ?? null : null;
+  return targets.length > 0 && targets.every(target => target.nodeId === nodeId) ? (nodeId ?? null) : null;
 }
 
 export function sameNodeTargets(targets: readonly ZLMOwnershipTarget[]): boolean {
@@ -142,11 +136,13 @@ export function overviewAsRuntime(overview: ZLMOverview): ZLMNodeRuntime {
       netThreadLoad: overview.metrics.netThreadLoadAvg,
       workThreadLoad: overview.metrics.workThreadLoadAvg,
       objectStatistics: overview.metrics.objectStatistics,
-      eventThreadLoads: overview.nodes.flatMap(node => (node.metrics.eventThreadLoads ?? []).map(thread => ({
-        ...thread,
-        nodeId: node.nodeId,
-        name: `${node.name} · ${thread.name}`
-      })))
+      eventThreadLoads: overview.nodes.flatMap(node =>
+        (node.metrics.eventThreadLoads ?? []).map(thread => ({
+          ...thread,
+          nodeId: node.nodeId,
+          name: `${node.name} · ${thread.name}`
+        }))
+      )
     },
     metricsComplete,
     mediaFreshness: allNodesMediaSampled ? "fresh" : mediaKnown ? "stale" : "unavailable",

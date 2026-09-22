@@ -22,15 +22,20 @@ export const SNAPSHOT_LIBRARY_PATH = "/gb28181/snapshot-library";
 
 const ALL_PERMISSION = "*:*:*";
 
-/** 与后端默认值一致（`parsePositiveInt(c.DefaultQuery("pageSize", "40"), 40)`）。 */
-export const SNAPSHOT_LIBRARY_PAGE_SIZE = 40;
+/**
+ * 前端默认每页条数，与全平台其它列表页统一为 10。
+ *
+ * ⚠️ 后端自身默认是 40（`parsePositiveInt(c.DefaultQuery("pageSize", "40"), 40)`），
+ * 只有在前端不传 `pageSize` 时才生效；本页始终显式传参，所以两者可以不同。
+ */
+export const SNAPSHOT_LIBRARY_PAGE_SIZE = 10;
 
 /**
  * 每页条数选项。
  * ⛔ 不能超过 200：后端把 pageSize 硬性截到 200，给 500 会变成「显示 500/页、实际只有 200 条」，
  * 而分页器算出的页数也跟着错（总数 1000 时以为 2 页，其实 5 页）。
  */
-export const SNAPSHOT_LIBRARY_PAGE_SIZE_OPTIONS = [20, 40, 80, 120, 200];
+export const SNAPSHOT_LIBRARY_PAGE_SIZE_OPTIONS = [10, 20, 40, 80, 120, 200];
 
 const SOURCE_LABELS: Record<SnapshotLibrarySource, string> = {
   // 「设备抓拍」= 设备收到 SnapshotConfig 后自己拍、自己 POST 回来（A.2.5.7）

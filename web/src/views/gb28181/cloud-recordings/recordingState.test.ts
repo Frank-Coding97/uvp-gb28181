@@ -13,7 +13,7 @@ describe("cloud recording query state", () => {
   it("defaults to an unbounded date range and page one", () => {
     expect(defaultRecordingQuery()).toEqual({
       page: 1,
-      pageSize: 20
+      pageSize: 10
     });
   });
 
@@ -59,7 +59,11 @@ describe("cloud recording playback and polling", () => {
     vi.useFakeTimers();
     let resolve!: (value: number) => void;
     const values: number[] = [];
-    const poller = createPollingController(() => new Promise<number>(done => (resolve = done)), value => values.push(value), 1000);
+    const poller = createPollingController(
+      () => new Promise<number>(done => (resolve = done)),
+      value => values.push(value),
+      1000
+    );
     poller.start();
     poller.stop();
     resolve(7);

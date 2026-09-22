@@ -1,7 +1,4 @@
-import type {
-  ZLMMediaIdentity,
-  ZLMNetworkSessionQuery
-} from "@/api/gb28181-zlm-runtime";
+import type { ZLMMediaIdentity, ZLMNetworkSessionQuery } from "@/api/gb28181-zlm-runtime";
 
 export interface NetworkSessionFilter {
   peerIp: string;
@@ -25,7 +22,7 @@ function positiveInteger(value: unknown) {
 export function buildNetworkSessionQuery(values: NetworkSessionFilter): ZLMNetworkSessionQuery {
   const query: ZLMNetworkSessionQuery = {
     page: positiveInteger(values.page) ?? 1,
-    pageSize: Math.min(100, positiveInteger(values.pageSize) ?? 20)
+    pageSize: Math.min(100, positiveInteger(values.pageSize) ?? 10)
   };
   const peerIp = values.peerIp.trim();
   const localPort = positiveInteger(values.localPort);

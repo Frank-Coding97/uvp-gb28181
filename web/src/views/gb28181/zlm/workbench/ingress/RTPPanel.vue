@@ -27,27 +27,32 @@ import { ingressCapabilityFromError } from "../../proxyManagementState";
 import { rtpCloseDecision } from "../../rtpServicesState";
 import { boundedPageRows } from "../boundedData";
 
-const props = withDefaults(defineProps<{
-  active?: boolean;
-  scope?: MediaScope;
-  nodes?: readonly MediaNodeCatalogNode[];
-  refreshKey?: number;
-}>(), {
-  active: true,
-  scope: "all",
-  nodes: () => [],
-  refreshKey: 0
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    scope?: MediaScope;
+    nodes?: readonly MediaNodeCatalogNode[];
+    refreshKey?: number;
+  }>(),
+  {
+    active: true,
+    scope: "all",
+    nodes: () => [],
+    refreshKey: 0
+  }
+);
 
 const userStore = useUserStoreHook();
-const nodeId = computed<number | null>(() => props.scope === "all" ? null : props.scope);
+const nodeId = computed<number | null>(() => (props.scope === "all" ? null : props.scope));
 const canPoll = computed(() => props.active && props.scope !== "all");
 const scopeBlocked = computed(() => props.scope === "all");
-const selectedNodeName = computed(() => props.nodes.find(node => node.id === nodeId.value)?.name ?? `节点 #${nodeId.value ?? "—"}`);
+const selectedNodeName = computed(
+  () => props.nodes.find(node => node.id === nodeId.value)?.name ?? `节点 #${nodeId.value ?? "—"}`
+);
 const pageData = ref<ZLMRTPServerPage | null>(null);
 const observedCapability = ref<ZLMCapabilityState>("unknown");
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(10);
 const loading = ref(false);
 const loadError = ref<unknown>(null);
 const formVisible = ref(false);
@@ -61,27 +66,35 @@ const closeError = ref<unknown>(null);
 const closing = ref(false);
 
 const rows = computed(() => pageData.value?.list ?? []);
-const tablePagination = computed(() => pageData.value ? ({
-  current: pageData.value.page,
-  pageSize: pageData.value.pageSize,
-  total: pageData.value.total,
-  showTotal: true,
-  showJumper: true,
-  showPageSize: true,
-  pageSizeOptions: [10, 20, 50, 100]
-}) : false);
+const tablePagination = computed(() =>
+  pageData.value
+    ? {
+        current: pageData.value.page,
+        pageSize: pageData.value.pageSize,
+        total: pageData.value.total,
+        showTotal: true,
+        showJumper: true,
+        showPageSize: true,
+        pageSizeOptions: [10, 20, 50, 100]
+      }
+    : false
+);
 const capability = computed<ZLMCapabilityState>(() => pageData.value?.capability ?? observedCapability.value);
-const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const hasPermission = (permission: string) =>
+  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:rtp:manage"));
 const canForce = computed(() => hasPermission("gb28181:zlm:rtp:force-close"));
 const paused = computed(() => formVisible.value || closeVisible.value);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const initialCloseDecision = computed(() => closeTarget.value
-  ? rtpCloseDecision(closeTarget.value, capability.value, closeForce.value ? canForce.value : canManage.value, closeForce.value)
-  : null);
+const initialCloseDecision = computed(() =>
+  closeTarget.value
+    ? rtpCloseDecision(closeTarget.value, capability.value, closeForce.value ? canForce.value : canManage.value, closeForce.value)
+    : null
+);
 const preflightCloseAllowed = computed(() => {
   const snapshot = closePreview.value?.snapshot;
-  if (nodeId.value === null || closeTarget.value?.nodeId !== nodeId.value || !snapshot?.presenceKnown || !snapshot.present) return false;
+  if (nodeId.value === null || closeTarget.value?.nodeId !== nodeId.value || !snapshot?.presenceKnown || !snapshot.present)
+    return false;
   return closeForce.value ? canForce.value : snapshot.status === "managed" && canManage.value;
 });
 const closeReason = computed(() => {
@@ -94,9 +107,12 @@ const closeReason = computed(() => {
   if (snapshot.status !== "managed") return "业务持有或归属未知，普通关闭已保护。";
   return "后端确认该 RTP 服务由管理台创建，可执行普通关闭。";
 });
-const closeImpacts = computed(() => closePreview.value?.snapshot.impacts?.map(impact =>
-  impact.reason || impact.owner || [impact.resourceType, impact.resourceKey].filter(Boolean).join(" / ")
-).filter(Boolean) as string[] ?? []);
+const closeImpacts = computed(
+  () =>
+    (closePreview.value?.snapshot.impacts
+      ?.map(impact => impact.reason || impact.owner || [impact.resourceType, impact.resourceKey].filter(Boolean).join(" / "))
+      .filter(Boolean) as string[]) ?? []
+);
 
 const { refresh } = useZLMRuntimePolling<ZLMRTPServerPage>({
   nodeId,
@@ -131,9 +147,12 @@ watch([nodeId, () => props.active], ([nextNodeId, nextActive]) => {
   loading.value = Boolean(nextNodeId && nextActive);
 });
 
-watch(() => props.refreshKey, (next, previous) => {
-  if (next !== previous && canPoll.value) refresh();
-});
+watch(
+  () => props.refreshKey,
+  (next, previous) => {
+    if (next !== previous && canPoll.value) refresh();
+  }
+);
 
 function warnNodeScope() {
   Message.warning("请先选择具体媒体节点；全部节点范围不支持节点级接入操作。");
@@ -221,40 +240,132 @@ async function confirmClose(payload: { reason: string }) {
   }
 }
 
-function tcpModeText(value: number) { return value === 1 ? "TCP 被动" : value === 2 ? "TCP 主动" : "UDP"; }
-function trackText(value: number) { return value === 1 ? "仅音频" : value === 2 ? "仅视频" : "自动"; }
-function changePage(next: number) { page.value = next; if (canPoll.value) refresh(); }
-function changePageSize(next: number) { pageSize.value = next; page.value = 1; if (canPoll.value) refresh(); }
+function tcpModeText(value: number) {
+  return value === 1 ? "TCP 被动" : value === 2 ? "TCP 主动" : "UDP";
+}
+function trackText(value: number) {
+  return value === 1 ? "仅音频" : value === 2 ? "仅视频" : "自动";
+}
+function changePage(next: number) {
+  page.value = next;
+  if (canPoll.value) refresh();
+}
+function changePageSize(next: number) {
+  pageSize.value = next;
+  page.value = 1;
+  if (canPoll.value) refresh();
+}
 </script>
 
 <template>
   <section class="ingress-panel" aria-label="RTP 服务管理">
     <header class="panel-toolbar">
       <div class="toolbar-actions">
-        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
-        <a-button class="uvp-page-action-btn uvp-create-btn" type="primary" :disabled="!props.active || !canManage || capability !== 'supported' || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建服务</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"
+          ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
+        >
+        <a-button
+          class="uvp-page-action-btn uvp-create-btn"
+          type="primary"
+          :disabled="!props.active || !canManage || capability !== 'supported' || scopeBlocked"
+          @click="openCreate"
+          ><template #icon><Plus :size="15" /></template>创建服务</a-button
+        >
       </div>
     </header>
-    <div v-if="scopeBlocked" class="scope-warning" role="status"><strong>全部节点范围</strong><span>RTP 服务列表和写操作需要先选择一个具体节点。</span></div>
+    <div v-if="scopeBlocked" class="scope-warning" role="status">
+      <strong>全部节点范围</strong><span>RTP 服务列表和写操作需要先选择一个具体节点。</span>
+    </div>
     <section class="data-panel">
-      <div v-if="loadError && !pageData" class="state-box state-box--error" role="alert"><ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong><a-button @click="refresh">重新加载</a-button></div>
-      <div v-else-if="scopeBlocked" class="state-box" role="status"><strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点 RTP 查询。</span></div>
+      <div v-if="loadError && !pageData" class="state-box state-box--error" role="alert">
+        <ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong
+        ><a-button @click="refresh">重新加载</a-button>
+      </div>
+      <div v-else-if="scopeBlocked" class="state-box" role="status">
+        <strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点 RTP 查询。</span>
+      </div>
       <template v-else>
-      <div v-if="pageData?.truncated" class="result-notice">结果已被后端有界截断。</div>
-      <a-table :data="rows" :loading="loading" :pagination="tablePagination" row-key="key" class="uvp-data-table" :scroll="{ x: 1120 }" @page-change="changePage" @page-size-change="changePageSize">
-        <template #columns>
-          <a-table-column title="媒体身份" :width="250"><template #cell="{ record }"><strong>{{ record.app }}/{{ record.stream }}</strong><div class="subtle">{{ record.vhost }} · {{ record.key }}</div></template></a-table-column>
-          <a-table-column title="实际端口" :width="130"><template #cell="{ record }"><strong class="port">{{ record.port }}</strong><div class="subtle">{{ record.released ? '已释放' : '监听中' }}</div></template></a-table-column>
-          <a-table-column title="传输" :width="150"><template #cell="{ record }">{{ tcpModeText(record.tcpMode) }}<div class="subtle">{{ trackText(record.onlyTrack) }}</div></template></a-table-column>
-          <a-table-column title="SSRC" :width="170"><template #cell="{ record }"><code>{{ record.ssrc || '—' }}</code></template></a-table-column>
-          <a-table-column title="Ownership" :width="170"><template #cell="{ record }"><a-tag :color="record.managed ? 'blue' : 'orange'">{{ record.managed ? '管理台创建' : '业务/未知' }}</a-tag><div class="subtle">{{ record.managed ? `用户 #${record.createdBy || '—'}` : '普通关闭不可用' }}</div></template></a-table-column>
-          <a-table-column title="操作" fixed="right" :width="190"><template #cell="{ record }"><a-space><a-button size="small" status="danger" :disabled="!props.active || !canManage || capability !== 'supported' || !record.managed || record.released || scopeBlocked" @click="openClose(record, false)">关闭</a-button><a-button v-if="canForce" size="small" status="danger" type="outline" :disabled="!props.active || capability !== 'supported' || record.released || scopeBlocked" @click="openClose(record, true)">强制</a-button></a-space></template></a-table-column>
-        </template>
-      </a-table>
+        <div v-if="pageData?.truncated" class="result-notice">结果已被后端有界截断。</div>
+        <a-table
+          :data="rows"
+          :loading="loading"
+          :pagination="tablePagination"
+          row-key="key"
+          class="uvp-data-table"
+          :scroll="{ x: 1120 }"
+          @page-change="changePage"
+          @page-size-change="changePageSize"
+        >
+          <template #columns>
+            <a-table-column title="媒体身份" :width="250"
+              ><template #cell="{ record }"
+                ><strong>{{ record.app }}/{{ record.stream }}</strong>
+                <div class="subtle">{{ record.vhost }} · {{ record.key }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="实际端口" :width="130"
+              ><template #cell="{ record }"
+                ><strong class="port">{{ record.port }}</strong>
+                <div class="subtle">{{ record.released ? "已释放" : "监听中" }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="传输" :width="150"
+              ><template #cell="{ record }"
+                >{{ tcpModeText(record.tcpMode) }}
+                <div class="subtle">{{ trackText(record.onlyTrack) }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="SSRC" :width="170"
+              ><template #cell="{ record }"
+                ><code>{{ record.ssrc || "—" }}</code></template
+              ></a-table-column
+            >
+            <a-table-column title="Ownership" :width="170"
+              ><template #cell="{ record }"
+                ><a-tag :color="record.managed ? 'blue' : 'orange'">{{ record.managed ? "管理台创建" : "业务/未知" }}</a-tag>
+                <div class="subtle">{{ record.managed ? `用户 #${record.createdBy || "—"}` : "普通关闭不可用" }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="操作" fixed="right" :width="190"
+              ><template #cell="{ record }"
+                ><a-space
+                  ><a-button
+                    size="small"
+                    status="danger"
+                    :disabled="
+                      !props.active ||
+                      !canManage ||
+                      capability !== 'supported' ||
+                      !record.managed ||
+                      record.released ||
+                      scopeBlocked
+                    "
+                    @click="openClose(record, false)"
+                    >关闭</a-button
+                  ><a-button
+                    v-if="canForce"
+                    size="small"
+                    status="danger"
+                    type="outline"
+                    :disabled="!props.active || capability !== 'supported' || record.released || scopeBlocked"
+                    @click="openClose(record, true)"
+                    >强制</a-button
+                  ></a-space
+                ></template
+              ></a-table-column
+            >
+          </template>
+        </a-table>
       </template>
     </section>
 
-    <RTPServerForm v-model:visible="formVisible" :capability="capability" :permitted="props.active && canManage && !scopeBlocked" :loading="saving" @submit="createServer" />
+    <RTPServerForm
+      v-model:visible="formVisible"
+      :capability="capability"
+      :permitted="props.active && canManage && !scopeBlocked"
+      :loading="saving"
+      @submit="createServer"
+    />
     <ZLMDangerActionDialog
       v-if="props.active && closeTarget && closePreview && preflightCloseAllowed"
       v-model:visible="closeVisible"
@@ -273,15 +384,101 @@ function changePageSize(next: number) { pageSize.value = next; page.value = 1; i
     />
     <a-modal v-else :visible="closeVisible" :footer="false" :width="540" unmount-on-close @cancel="closeDialog">
       <template #title>RTP 关闭预检</template>
-      <div class="state-box" :class="{ 'state-box--error': closeError }"><a-spin v-if="closeLoading" /><strong>{{ closeLoading ? '正在读取后端真实状态与业务持有…' : closeReason }}</strong><a-button v-if="!closeLoading" @click="closeDialog">关闭</a-button></div>
+      <div class="state-box" :class="{ 'state-box--error': closeError }">
+        <a-spin v-if="closeLoading" /><strong>{{ closeLoading ? "正在读取后端真实状态与业务持有…" : closeReason }}</strong
+        ><a-button v-if="!closeLoading" @click="closeDialog">关闭</a-button>
+      </div>
     </a-modal>
   </section>
 </template>
 
 <style scoped>
-.ingress-panel { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding-bottom: 12px; color: var(--zlm-text-2); }.panel-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
-.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }.toolbar-actions :deep(.arco-btn) { box-sizing: border-box; min-width: 88px; height: 40px; padding-inline: 14px; border-radius: 10px; font-weight: 600; }
-.scope-warning { display: flex; align-items: center; gap: 9px; padding: 10px 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border: 1px solid var(--zlm-warn-500); border-radius: var(--zlm-radius-md); }
-.data-panel { padding: 14px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.subtle { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.port { color: var(--zlm-brand-600); font-family: var(--zlm-font-mono); font-size: 16px; } code { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.result-notice { padding: 8px 10px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border-radius: 8px; }.state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
-@media (max-width: 760px) { .scope-warning { align-items: flex-start; flex-direction: column; } }
+.ingress-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-bottom: 12px;
+  color: var(--zlm-text-2);
+}
+.panel-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.toolbar-actions :deep(.arco-btn) {
+  box-sizing: border-box;
+  min-width: 88px;
+  height: 40px;
+  padding-inline: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+.scope-warning {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border: 1px solid var(--zlm-warn-500);
+  border-radius: var(--zlm-radius-md);
+}
+.data-panel {
+  padding: 14px;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: var(--uvp-panel-radius);
+  box-shadow: var(--uvp-panel-shadow);
+}
+.subtle {
+  margin-top: 4px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+.port {
+  font-family: var(--zlm-font-mono);
+  font-size: 16px;
+  color: var(--zlm-brand-600);
+}
+code {
+  font-family: var(--zlm-font-mono);
+  color: var(--zlm-text-1);
+}
+.result-notice {
+  padding: 8px 10px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border-radius: 8px;
+}
+.state-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: var(--zlm-text-3);
+  text-align: center;
+}
+.state-box--error {
+  color: var(--zlm-danger-600);
+}
+
+@media (width <= 760px) {
+  .scope-warning {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 </style>

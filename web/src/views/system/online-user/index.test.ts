@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("@/api/online-user", async importOriginal => ({
-  ...await importOriginal<typeof import("@/api/online-user")>(),
+  ...(await importOriginal<typeof import("@/api/online-user")>()),
   getOnlineUsersAPI: api.getOnlineUsersAPI
 }));
 vi.mock("@/api/department", () => ({ getDivisionAPI: api.getDivisionAPI }));
@@ -40,7 +40,9 @@ function response(list = [session("current")], currentSid = "current") {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -57,7 +59,11 @@ function mountPage() {
         "a-option": { template: "<option><slot /></option>" },
         "a-button": { template: "<button><slot name='icon'/><slot /></button>" },
         "a-tooltip": { template: "<span><slot /></span>" },
-        "a-table": { name: "ATable", props: ["data", "loading", "pagination"], template: "<div data-testid='online-table'><slot name='columns'/><slot name='empty'/></div>" },
+        "a-table": {
+          name: "ATable",
+          props: ["data", "loading", "pagination"],
+          template: "<div data-testid='online-table'><slot name='columns'/><slot name='empty'/></div>"
+        },
         "a-table-column": { template: "<div />" },
         "a-empty": { props: ["description"], template: "<span>{{ description }}</span>" },
         OnlineUserAction: { template: "<span />" },
@@ -86,7 +92,7 @@ describe("online user page", () => {
   it("loads initially and keeps filters stable across search, reset and pagination", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 20 });
+    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 10 });
 
     const vm = wrapper.vm as any;
     vm.form.username = "alice";
@@ -95,13 +101,22 @@ describe("online user page", () => {
     vm.form.status = "idle";
     await vm.search();
     expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({
-      pageNum: 1, pageSize: 20, username: "alice", departmentId: 7, clientIp: "10.0.0.9", status: "idle"
+      pageNum: 1,
+      pageSize: 10,
+      username: "alice",
+      departmentId: 7,
+      clientIp: "10.0.0.9",
+      status: "idle"
     });
 
     await vm.handlePageChange(3);
-    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 3, pageSize: 20, username: "alice" }));
+    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageNum: 3, pageSize: 10, username: "alice" })
+    );
     await vm.handlePageSizeChange(50);
-    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(expect.objectContaining({ pageNum: 1, pageSize: 50, username: "alice" }));
+    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageNum: 1, pageSize: 50, username: "alice" })
+    );
 
     await vm.reset();
     expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 50 });
@@ -109,7 +124,10 @@ describe("online user page", () => {
 
   it("keeps the newest response when an older request finishes last", async () => {
     const older = deferred<any>();
-    api.getOnlineUsersAPI.mockReset().mockReturnValueOnce(older.promise).mockImplementationOnce(() => response([session("new", "newest")]));
+    api.getOnlineUsersAPI
+      .mockReset()
+      .mockReturnValueOnce(older.promise)
+      .mockImplementationOnce(() => response([session("new", "newest")]));
     const wrapper = mountPage();
     await (wrapper.vm as any).search();
     await flushPromises();

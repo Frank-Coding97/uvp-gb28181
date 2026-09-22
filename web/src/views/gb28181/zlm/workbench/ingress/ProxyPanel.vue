@@ -38,25 +38,28 @@ import { boundedPageRows } from "../boundedData";
 
 type PollPayload = { kind: ProxyTab; data: ZLMProxyPage };
 
-const props = withDefaults(defineProps<{
-  active?: boolean;
-  scope?: MediaScope;
-  nodes?: readonly MediaNodeCatalogNode[];
-  kind?: ProxyTab;
-  showTabs?: boolean;
-  refreshKey?: number;
-}>(), {
-  active: true,
-  scope: "all",
-  nodes: () => [],
-  kind: "pull",
-  showTabs: false,
-  refreshKey: 0
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    scope?: MediaScope;
+    nodes?: readonly MediaNodeCatalogNode[];
+    kind?: ProxyTab;
+    showTabs?: boolean;
+    refreshKey?: number;
+  }>(),
+  {
+    active: true,
+    scope: "all",
+    nodes: () => [],
+    kind: "pull",
+    showTabs: false,
+    refreshKey: 0
+  }
+);
 
 const userStore = useUserStoreHook();
 const activeTab = ref<ProxyTab>(props.kind);
-const pages = reactive({ pull: { page: 1, pageSize: 20 }, push: { page: 1, pageSize: 20 } });
+const pages = reactive({ pull: { page: 1, pageSize: 10 }, push: { page: 1, pageSize: 10 } });
 const data = reactive<{ pull: ZLMProxyPage | null; push: ZLMProxyPage | null }>({ pull: null, push: null });
 const observedCapability = reactive<Record<ProxyTab, ZLMCapabilityState>>({ pull: "unknown", push: "unknown" });
 const loading = ref(false);
@@ -70,32 +73,42 @@ const deleteLoading = ref(false);
 const deleteError = ref<unknown>(null);
 const deleting = ref(false);
 
-const nodeId = computed<number | null>(() => props.scope === "all" ? null : props.scope);
+const nodeId = computed<number | null>(() => (props.scope === "all" ? null : props.scope));
 const canPoll = computed(() => props.active && props.scope !== "all");
-const currentKind = computed<ProxyTab>(() => props.showTabs ? activeTab.value : props.kind);
+const currentKind = computed<ProxyTab>(() => (props.showTabs ? activeTab.value : props.kind));
 const currentData = computed(() => data[currentKind.value]);
 const rows = computed(() => currentData.value?.list ?? []);
-const tablePagination = computed(() => currentData.value ? ({
-  current: currentData.value.page,
-  pageSize: currentData.value.pageSize,
-  total: currentData.value.total,
-  showTotal: true,
-  showJumper: true,
-  showPageSize: true,
-  pageSizeOptions: [10, 20, 50, 100]
-}) : false);
+const tablePagination = computed(() =>
+  currentData.value
+    ? {
+        current: currentData.value.page,
+        pageSize: currentData.value.pageSize,
+        total: currentData.value.total,
+        showTotal: true,
+        showJumper: true,
+        showPageSize: true,
+        pageSizeOptions: [10, 20, 50, 100]
+      }
+    : false
+);
 const capability = computed<ZLMCapabilityState>(() => currentData.value?.capability ?? observedCapability[currentKind.value]);
 const capabilityView = computed(() => proxyCapabilityPresentation(capability.value));
 const scopeBlocked = computed(() => props.scope === "all");
-const selectedNodeName = computed(() => props.nodes.find(node => node.id === nodeId.value)?.name ?? `节点 #${nodeId.value ?? "—"}`);
-const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const selectedNodeName = computed(
+  () => props.nodes.find(node => node.id === nodeId.value)?.name ?? `节点 #${nodeId.value ?? "—"}`
+);
+const hasPermission = (permission: string) =>
+  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:proxy:manage"));
 const paused = computed(() => formVisible.value || deleteVisible.value);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const deletionDecision = computed(() => deletePreview.value ? proxyDeleteDecision(deletePreview.value) : null);
-const deleteImpacts = computed(() => deletePreview.value?.impacts?.map(impact =>
-  impact.reason || impact.owner || [impact.resourceType, impact.resourceKey].filter(Boolean).join(" / ")
-).filter(Boolean) as string[] ?? []);
+const deletionDecision = computed(() => (deletePreview.value ? proxyDeleteDecision(deletePreview.value) : null));
+const deleteImpacts = computed(
+  () =>
+    (deletePreview.value?.impacts
+      ?.map(impact => impact.reason || impact.owner || [impact.resourceType, impact.resourceKey].filter(Boolean).join(" / "))
+      .filter(Boolean) as string[]) ?? []
+);
 
 const { refresh } = useZLMRuntimePolling<PollPayload>({
   nodeId,
@@ -107,9 +120,10 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     loading.value = true;
     const kind = currentKind.value;
     const paging = pages[kind];
-    const response = kind === "pull"
-      ? await listZLMPullProxies(currentNodeId, paging, signal)
-      : await listZLMPushProxies(currentNodeId, paging, signal);
+    const response =
+      kind === "pull"
+        ? await listZLMPullProxies(currentNodeId, paging, signal)
+        : await listZLMPushProxies(currentNodeId, paging, signal);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "代理列表加载失败");
     return { kind, data: response.data };
   },
@@ -144,9 +158,12 @@ watch([nodeId, () => props.active], ([nextNodeId, nextActive]) => {
   loading.value = Boolean(nextNodeId && nextActive);
 });
 
-watch(() => props.refreshKey, (next, previous) => {
-  if (next !== previous && canPoll.value) refresh();
-});
+watch(
+  () => props.refreshKey,
+  (next, previous) => {
+    if (next !== previous && canPoll.value) refresh();
+  }
+);
 
 function warnNodeScope() {
   Message.warning("请先选择具体媒体节点；全部节点范围不支持节点级接入操作。");
@@ -163,9 +180,10 @@ async function createProxy(request: ZLMPullProxyCreateRequest | ZLMPushProxyCrea
   const currentNodeId = nodeId.value;
   saving.value = true;
   try {
-    const response = currentKind.value === "pull"
-      ? await createZLMPullProxy(currentNodeId, request as ZLMPullProxyCreateRequest)
-      : await createZLMPushProxy(currentNodeId, request as ZLMPushProxyCreateRequest);
+    const response =
+      currentKind.value === "pull"
+        ? await createZLMPullProxy(currentNodeId, request as ZLMPullProxyCreateRequest)
+        : await createZLMPushProxy(currentNodeId, request as ZLMPushProxyCreateRequest);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "代理创建失败");
     formVisible.value = false;
     Message.success(`代理 ${response.data.key} 已由后端确认创建`);
@@ -191,9 +209,10 @@ async function openDelete(target: ZLMProxy) {
   deleteLoading.value = true;
   try {
     const request = deleteRequest(target, target.provenanceFingerprint);
-    const response = target.kind === "pull_proxy"
-      ? await preflightDeleteZLMPullProxy(nodeId.value, target.key, request)
-      : await preflightDeleteZLMPushProxy(nodeId.value, target.key, request);
+    const response =
+      target.kind === "pull_proxy"
+        ? await preflightDeleteZLMPullProxy(nodeId.value, target.key, request)
+        : await preflightDeleteZLMPushProxy(nodeId.value, target.key, request);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "代理删除预检失败");
     deletePreview.value = response.data;
   } catch (error) {
@@ -215,13 +234,21 @@ async function confirmDelete(payload: { fingerprint: string }) {
   if (!props.active || props.scope === "all" || nodeId.value === null) return warnNodeScope();
   const target = deleteTarget.value;
   const preview = deletePreview.value;
-  if (!target || target.nodeId !== nodeId.value || !preview || !deletionDecision.value?.allowed || payload.fingerprint !== preview.fingerprint) return;
+  if (
+    !target ||
+    target.nodeId !== nodeId.value ||
+    !preview ||
+    !deletionDecision.value?.allowed ||
+    payload.fingerprint !== preview.fingerprint
+  )
+    return;
   deleting.value = true;
   try {
     const request = deleteRequest(target, preview.fingerprint);
-    const response = target.kind === "pull_proxy"
-      ? await deleteZLMPullProxy(nodeId.value, target.key, request)
-      : await deleteZLMPushProxy(nodeId.value, target.key, request);
+    const response =
+      target.kind === "pull_proxy"
+        ? await deleteZLMPullProxy(nodeId.value, target.key, request)
+        : await deleteZLMPushProxy(nodeId.value, target.key, request);
     if (response.code !== 0 || !response.data || (!response.data.removed && !response.data.alreadyAbsent)) {
       throw new Error(response.message || "后端未确认代理已删除");
     }
@@ -251,8 +278,16 @@ function changePageSize(pageSize: number) {
   <section class="ingress-panel" aria-label="代理接入管理">
     <header class="panel-toolbar">
       <div class="toolbar-actions">
-        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
-        <a-button class="uvp-page-action-btn uvp-create-btn" type="primary" :disabled="!props.active || !canManage || !capabilityView.actionable || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建代理</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"
+          ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
+        >
+        <a-button
+          class="uvp-page-action-btn uvp-create-btn"
+          type="primary"
+          :disabled="!props.active || !canManage || !capabilityView.actionable || scopeBlocked"
+          @click="openCreate"
+          ><template #icon><Plus :size="15" /></template>创建代理</a-button
+        >
       </div>
     </header>
 
@@ -260,30 +295,107 @@ function changePageSize(pageSize: number) {
       <strong>全部节点范围</strong><span>代理列表和所有节点级写操作都需要先选择一个具体节点。</span>
     </div>
     <a-tabs v-if="showTabs" v-model:active-key="activeTab" class="proxy-tabs">
-      <a-tab-pane key="pull" title="拉流代理"><template #title><span class="tab-title"><ArrowDownToLine :size="15" />拉流代理</span></template></a-tab-pane>
-      <a-tab-pane key="push" title="推流代理"><template #title><span class="tab-title"><ArrowUpFromLine :size="15" />推流代理</span></template></a-tab-pane>
+      <a-tab-pane key="pull" title="拉流代理"
+        ><template #title
+          ><span class="tab-title"><ArrowDownToLine :size="15" />拉流代理</span></template
+        ></a-tab-pane
+      >
+      <a-tab-pane key="push" title="推流代理"
+        ><template #title
+          ><span class="tab-title"><ArrowUpFromLine :size="15" />推流代理</span></template
+        ></a-tab-pane
+      >
     </a-tabs>
 
     <section class="data-panel">
-      <div v-if="loadError && !currentData" class="state-box state-box--error" role="alert"><ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong><a-button @click="refresh">重新加载</a-button></div>
-      <div v-else-if="scopeBlocked" class="state-box" role="status"><strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点代理查询。</span></div>
+      <div v-if="loadError && !currentData" class="state-box state-box--error" role="alert">
+        <ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong
+        ><a-button @click="refresh">重新加载</a-button>
+      </div>
+      <div v-else-if="scopeBlocked" class="state-box" role="status">
+        <strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点代理查询。</span>
+      </div>
       <template v-else>
-      <div v-if="currentData?.truncated" class="result-notice">节点返回内容已截断，请缩小范围。</div>
-      <a-table :data="rows" :loading="loading" :pagination="tablePagination" row-key="key" class="uvp-data-table" :scroll="{ x: 1180 }" @page-change="changePage" @page-size-change="changePageSize">
-        <template #columns>
-          <a-table-column title="媒体身份" :width="250"><template #cell="{ record }"><strong>{{ record.media.app }}/{{ record.media.stream }}</strong><div class="subtle">{{ record.media.schema }} · {{ record.media.vhost }}</div></template></a-table-column>
-          <a-table-column title="地址摘要" :width="250"><template #cell="{ record }"><code>{{ proxyAddressText(record.source || record.target) }}</code><div class="subtle">{{ (record.source || record.target)?.hasUserInfo || (record.source || record.target)?.hasSensitiveQuery ? '认证信息已隐藏' : '不返回路径与查询参数' }}</div></template></a-table-column>
-          <a-table-column title="真实状态" :width="150"><template #cell="{ record }"><a-tag :color="record.online ? 'green' : 'red'">{{ record.online ? '在线' : '失败/离线' }}</a-tag><div class="subtle">{{ record.statusText || `code ${record.status}` }}</div></template></a-table-column>
-          <a-table-column title="运行信息" :width="170"><template #cell="{ record }"><div>{{ formatZLMDuration(record.liveSecs) }}</div><div class="subtle">{{ formatZLMByteRate(record.bytesSpeed) }} · {{ record.totalReaderCount }} 读者</div></template></a-table-column>
-          <a-table-column title="重试" :width="130"><template #cell="{ record }">拉 {{ record.rePullCount }} / 推 {{ record.rePublishCount }}</template></a-table-column>
-          <a-table-column title="来源" :width="120"><template #cell="{ record }"><a-tag :color="record.managed ? 'blue' : 'orange'">{{ record.managed ? '管理台' : '业务/未知' }}</a-tag></template></a-table-column>
-          <a-table-column title="操作" fixed="right" :width="120"><template #cell="{ record }"><a-button size="small" status="danger" :disabled="!props.active || !canManage || capability !== 'supported' || !record.managed || scopeBlocked" @click="openDelete(record)">删除</a-button></template></a-table-column>
-        </template>
-      </a-table>
+        <div v-if="currentData?.truncated" class="result-notice">节点返回内容已截断，请缩小范围。</div>
+        <a-table
+          :data="rows"
+          :loading="loading"
+          :pagination="tablePagination"
+          row-key="key"
+          class="uvp-data-table"
+          :scroll="{ x: 1180 }"
+          @page-change="changePage"
+          @page-size-change="changePageSize"
+        >
+          <template #columns>
+            <a-table-column title="媒体身份" :width="250"
+              ><template #cell="{ record }"
+                ><strong>{{ record.media.app }}/{{ record.media.stream }}</strong>
+                <div class="subtle">{{ record.media.schema }} · {{ record.media.vhost }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="地址摘要" :width="250"
+              ><template #cell="{ record }"
+                ><code>{{ proxyAddressText(record.source || record.target) }}</code>
+                <div class="subtle">
+                  {{
+                    (record.source || record.target)?.hasUserInfo || (record.source || record.target)?.hasSensitiveQuery
+                      ? "认证信息已隐藏"
+                      : "不返回路径与查询参数"
+                  }}
+                </div></template
+              ></a-table-column
+            >
+            <a-table-column title="真实状态" :width="150"
+              ><template #cell="{ record }"
+                ><a-tag :color="record.online ? 'green' : 'red'">{{ record.online ? "在线" : "失败/离线" }}</a-tag>
+                <div class="subtle">{{ record.statusText || `code ${record.status}` }}</div></template
+              ></a-table-column
+            >
+            <a-table-column title="运行信息" :width="170"
+              ><template #cell="{ record }"
+                ><div>{{ formatZLMDuration(record.liveSecs) }}</div>
+                <div class="subtle">
+                  {{ formatZLMByteRate(record.bytesSpeed) }} · {{ record.totalReaderCount }} 读者
+                </div></template
+              ></a-table-column
+            >
+            <a-table-column title="重试" :width="130"
+              ><template #cell="{ record }"
+                >拉 {{ record.rePullCount }} / 推 {{ record.rePublishCount }}</template
+              ></a-table-column
+            >
+            <a-table-column title="来源" :width="120"
+              ><template #cell="{ record }"
+                ><a-tag :color="record.managed ? 'blue' : 'orange'">{{
+                  record.managed ? "管理台" : "业务/未知"
+                }}</a-tag></template
+              ></a-table-column
+            >
+            <a-table-column title="操作" fixed="right" :width="120"
+              ><template #cell="{ record }"
+                ><a-button
+                  size="small"
+                  status="danger"
+                  :disabled="!props.active || !canManage || capability !== 'supported' || !record.managed || scopeBlocked"
+                  @click="openDelete(record)"
+                  >删除</a-button
+                ></template
+              ></a-table-column
+            >
+          </template>
+        </a-table>
       </template>
     </section>
 
-    <ProxyForm v-model:visible="formVisible" :kind="currentKind" :capability="capability" :permitted="props.active && canManage && !scopeBlocked" :loading="saving" @submit="createProxy" />
+    <ProxyForm
+      v-model:visible="formVisible"
+      :kind="currentKind"
+      :capability="capability"
+      :permitted="props.active && canManage && !scopeBlocked"
+      :loading="saving"
+      @submit="createProxy"
+    />
     <ZLMDangerActionDialog
       v-if="props.active && deletePreview && deletionDecision?.allowed && deleteTarget && !scopeBlocked"
       v-model:visible="deleteVisible"
@@ -303,18 +415,106 @@ function changePageSize(pageSize: number) {
     <a-modal v-else :visible="deleteVisible" :footer="false" :width="540" unmount-on-close @cancel="closeDelete">
       <template #title>代理删除预检</template>
       <div v-if="deleteLoading" class="preflight-state"><a-spin /><span>正在读取后端真实状态与归属…</span></div>
-      <div v-else class="preflight-state" :class="{ 'state-box--error': deleteError }"><strong>{{ deleteError ? zlmErrorPresentation(deleteError).label : deletionDecision?.reason }}</strong><a-button @click="closeDelete">关闭</a-button></div>
+      <div v-else class="preflight-state" :class="{ 'state-box--error': deleteError }">
+        <strong>{{ deleteError ? zlmErrorPresentation(deleteError).label : deletionDecision?.reason }}</strong
+        ><a-button @click="closeDelete">关闭</a-button>
+      </div>
     </a-modal>
   </section>
 </template>
 
 <style scoped>
-.ingress-panel { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding-bottom: 12px; color: var(--zlm-text-2); }
-.panel-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
-.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-.toolbar-actions :deep(.arco-btn) { box-sizing: border-box; min-width: 88px; height: 40px; padding-inline: 14px; border-radius: 10px; font-weight: 600; }
-.scope-warning { display: flex; align-items: center; gap: 9px; padding: 10px 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border: 1px solid var(--zlm-warn-500); border-radius: var(--zlm-radius-md); }
-.proxy-tabs { margin-top: -2px; }.tab-title { display: inline-flex; align-items: center; gap: 6px; }.data-panel { padding: 14px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.subtle { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); } code { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); overflow-wrap: anywhere; }
-.result-notice { padding: 8px 10px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border-radius: 8px; }.state-box, .preflight-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
-@media (max-width: 760px) { .scope-warning { align-items: flex-start; flex-direction: column; } }
+.ingress-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-bottom: 12px;
+  color: var(--zlm-text-2);
+}
+.panel-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.toolbar-actions :deep(.arco-btn) {
+  box-sizing: border-box;
+  min-width: 88px;
+  height: 40px;
+  padding-inline: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+.scope-warning {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border: 1px solid var(--zlm-warn-500);
+  border-radius: var(--zlm-radius-md);
+}
+.proxy-tabs {
+  margin-top: -2px;
+}
+.tab-title {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.data-panel {
+  padding: 14px;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: var(--uvp-panel-radius);
+  box-shadow: var(--uvp-panel-shadow);
+}
+.subtle {
+  margin-top: 4px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+code {
+  font-family: var(--zlm-font-mono);
+  color: var(--zlm-text-1);
+  overflow-wrap: anywhere;
+}
+.result-notice {
+  padding: 8px 10px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border-radius: 8px;
+}
+.state-box,
+.preflight-state {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: var(--zlm-text-3);
+  text-align: center;
+}
+.state-box--error {
+  color: var(--zlm-danger-600);
+}
+
+@media (width <= 760px) {
+  .scope-warning {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 </style>

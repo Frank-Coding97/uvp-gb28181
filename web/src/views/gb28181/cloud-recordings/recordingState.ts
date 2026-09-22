@@ -17,7 +17,7 @@ const availabilityPresentations: Record<RecordingAvailability, AvailabilityPrese
 export function defaultRecordingQuery(): RecordingFileQuery {
   return {
     page: 1,
-    pageSize: 20
+    pageSize: 10
   };
 }
 

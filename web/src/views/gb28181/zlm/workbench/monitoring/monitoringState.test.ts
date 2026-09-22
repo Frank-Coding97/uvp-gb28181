@@ -21,7 +21,12 @@ describe("monitoring panel state", () => {
       recording: "hls"
     });
     expect(createViewerFilters({ schema: "rtsp", stream: "camera" })).toMatchObject({ schema: "rtsp", stream: "camera" });
-    expect(createNetworkFilters({ peerIp: "192.0.2.1", localPort: 18080 })).toMatchObject({ peerIp: "192.0.2.1", localPort: "18080", page: 1, pageSize: 20 });
+    expect(createNetworkFilters({ peerIp: "192.0.2.1", localPort: 18080 })).toMatchObject({
+      peerIp: "192.0.2.1",
+      localPort: "18080",
+      page: 1,
+      pageSize: 10
+    });
   });
 
   it("builds backend stream filters while keeping pagination and recording semantics", () => {
@@ -42,10 +47,12 @@ describe("monitoring panel state", () => {
     expect(scopeRange("all", null)).toBe("all");
     expect(scopeRange(7, 7)).toBe("node:7");
     expect(sameNodeTargets([])).toBe(false);
-    expect(sameNodeTargets([
-      { nodeId: 1, media: { schema: "rtsp", vhost: "v", app: "a", stream: "one" } },
-      { nodeId: 2, media: { schema: "rtsp", vhost: "v", app: "a", stream: "two" } }
-    ])).toBe(false);
+    expect(
+      sameNodeTargets([
+        { nodeId: 1, media: { schema: "rtsp", vhost: "v", app: "a", stream: "one" } },
+        { nodeId: 2, media: { schema: "rtsp", vhost: "v", app: "a", stream: "two" } }
+      ])
+    ).toBe(false);
   });
 
   it("keeps aggregate partial results auditable and unknown when no node was sampled", () => {

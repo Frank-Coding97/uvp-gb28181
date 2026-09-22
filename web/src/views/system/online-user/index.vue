@@ -27,7 +27,7 @@ const form = reactive({
 });
 const pagination = reactive({
   current: 1,
-  pageSize: 20,
+  pageSize: 10,
   total: 0,
   showTotal: true,
   showJumper: true,
@@ -138,7 +138,9 @@ function stopRefresh() {
 function startRefresh() {
   stopRefresh();
   if (document.visibilityState !== "visible") return;
-  refreshTimer = setInterval(() => { void load(true); }, 30_000);
+  refreshTimer = setInterval(() => {
+    void load(true);
+  }, 30_000);
 }
 
 function handleVisibilityChange() {
@@ -171,11 +173,15 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
     <div class="snow-inner uvp-page-shell-flat online-user-page__inner">
       <s-layout-search>
         <template #fields>
-          <div class="online-user-filter"><a-input v-model="form.username" placeholder="用户名" allow-clear @press-enter="search" /></div>
+          <div class="online-user-filter">
+            <a-input v-model="form.username" placeholder="用户名" allow-clear @press-enter="search" />
+          </div>
           <div class="online-user-filter">
             <a-tree-select v-model="form.departmentId" :data="departmentOptions" placeholder="部门" allow-clear allow-search />
           </div>
-          <div class="online-user-filter"><a-input v-model="form.clientIp" placeholder="IP 地址" allow-clear @press-enter="search" /></div>
+          <div class="online-user-filter">
+            <a-input v-model="form.clientIp" placeholder="IP 地址" allow-clear @press-enter="search" />
+          </div>
           <div class="online-user-filter online-user-filter--status">
             <a-select v-model="form.status" placeholder="状态" allow-clear>
               <a-option value="active">活跃</a-option>
@@ -223,25 +229,40 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
         <template #columns>
           <a-table-column title="用户" :width="160">
             <template #cell="{ record }">
-              <div class="online-user-primary"><strong>{{ record.username }}</strong><span class="online-user-secondary">{{ record.nickName || '-' }}</span></div>
+              <div class="online-user-primary">
+                <strong>{{ record.username }}</strong
+                ><span class="online-user-secondary">{{ record.nickName || "-" }}</span>
+              </div>
             </template>
           </a-table-column>
           <a-table-column title="部门" data-index="departmentName" :width="150" :ellipsis="true" :tooltip="true" />
           <a-table-column title="IP / 地点" :width="180">
             <template #cell="{ record }">
-              <div class="online-user-primary"><span class="online-user-primary-text">{{ record.clientIp }}</span><span class="online-user-secondary">{{ record.loginLocation || '-' }}</span></div>
+              <div class="online-user-primary">
+                <span class="online-user-primary-text">{{ record.clientIp }}</span
+                ><span class="online-user-secondary">{{ record.loginLocation || "-" }}</span>
+              </div>
             </template>
           </a-table-column>
           <a-table-column title="终端" :width="180">
             <template #cell="{ record }">
-              <div class="online-user-primary"><span class="online-user-primary-text">{{ record.browser || '未知浏览器' }}</span><span class="online-user-secondary">{{ record.os || '未知系统' }}</span></div>
+              <div class="online-user-primary">
+                <span class="online-user-primary-text">{{ record.browser || "未知浏览器" }}</span
+                ><span class="online-user-secondary">{{ record.os || "未知系统" }}</span>
+              </div>
             </template>
           </a-table-column>
-          <a-table-column title="登录时间" :width="180"><template #cell="{ record }">{{ formatTime(record.loginAt) }}</template></a-table-column>
-          <a-table-column title="最后活跃" :width="180"><template #cell="{ record }">{{ formatTime(record.lastActiveAt) }}</template></a-table-column>
+          <a-table-column title="登录时间" :width="180"
+            ><template #cell="{ record }">{{ formatTime(record.loginAt) }}</template></a-table-column
+          >
+          <a-table-column title="最后活跃" :width="180"
+            ><template #cell="{ record }">{{ formatTime(record.lastActiveAt) }}</template></a-table-column
+          >
           <a-table-column title="状态" :width="100" align="center">
             <template #cell="{ record }">
-              <span class="online-user-status" :class="`online-user-status--${record.status}`"><i />{{ record.status === 'active' ? '活跃' : '空闲' }}</span>
+              <span class="online-user-status" :class="`online-user-status--${record.status}`"
+                ><i />{{ record.status === "active" ? "活跃" : "空闲" }}</span
+              >
             </template>
           </a-table-column>
           <a-table-column v-if="canForce" title="操作" :width="144" align="center" fixed="right">
@@ -334,10 +355,10 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-error {
   display: flex;
-  min-height: 280px;
+  gap: 12px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  min-height: 280px;
   color: rgb(var(--danger-6));
   text-align: center;
 }
@@ -353,9 +374,9 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-primary {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
   line-height: 18px;
 }
 
@@ -366,40 +387,44 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 }
 
 .online-user-primary-text {
-  color: var(--uvp-text-primary);
   font-size: 13px;
+  color: var(--uvp-text-primary);
 }
 
 .online-user-primary strong {
-  color: var(--uvp-text-primary);
   font-size: 14px;
   font-weight: 650;
   line-height: 20px;
+  color: var(--uvp-text-primary);
 }
 
 .online-user-secondary {
-  color: var(--uvp-text-secondary);
   font-size: 13px;
   line-height: 18px;
+  color: var(--uvp-text-secondary);
 }
 
 .online-user-status {
   display: inline-flex;
-  align-items: center;
   gap: 6px;
+  align-items: center;
   white-space: nowrap;
 }
 
 .online-user-status i {
+  flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
   background: currentColor;
+  border-radius: 50%;
 }
 
-.online-user-status--active { color: rgb(var(--success-6)); }
-.online-user-status--idle { color: var(--uvp-text-secondary); }
+.online-user-status--active {
+  color: rgb(var(--success-6));
+}
+.online-user-status--idle {
+  color: var(--uvp-text-secondary);
+}
 
 .online-user-page :deep(.arco-btn:focus-visible),
 .online-user-page :deep(.arco-input-wrapper:focus-within),
@@ -408,7 +433,7 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   outline-offset: 2px;
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .online-user-filter,
   .online-user-filter--status {
     flex-basis: min(100%, 280px);
@@ -421,9 +446,9 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   .online-user-page *,
   .online-user-page *::before,
   .online-user-page *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 </style>

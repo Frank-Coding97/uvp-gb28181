@@ -45,7 +45,14 @@ import {
   type SecuritySnapshot
 } from "@/api/gb28181-security";
 import { buildSecurityTrend, type SecurityTrendPeriod } from "./securityTrend";
-import { formatAutomaticBanTTL, formatRemaining, formatSecurityAction, formatSecurityReason, formatShortWindowInviteRule, isHighRiskSecurityReason } from "./securityFormatting";
+import {
+  formatAutomaticBanTTL,
+  formatRemaining,
+  formatSecurityAction,
+  formatSecurityReason,
+  formatShortWindowInviteRule,
+  isHighRiskSecurityReason
+} from "./securityFormatting";
 import { buildAccessRuleTogglePayload } from "./securityRules";
 
 type TabKey = "overview" | "events" | "bans" | "blacklist" | "allowlist" | "policy";
@@ -128,16 +135,16 @@ const ruleTypeFilter = ref("全部类型");
 const ruleStatusFilter = ref("全部状态");
 const tablePageSizeOptions = [10, 20, 50, 100];
 const eventPage = ref(1);
-const eventPageSize = ref(20);
+const eventPageSize = ref(10);
 const eventTotal = ref(0);
 const banPage = ref(1);
-const banPageSize = ref(20);
+const banPageSize = ref(10);
 const banTotal = ref(0);
 const blackRulePage = ref(1);
-const blackRulePageSize = ref(20);
+const blackRulePageSize = ref(10);
 const blackRuleTotal = ref(0);
 const allowRulePage = ref(1);
-const allowRulePageSize = ref(20);
+const allowRulePageSize = ref(10);
 const allowRuleTotal = ref(0);
 const registerValidationNote = "REGISTER 始终校验格式、鉴权和设备身份；无效请求拒绝，修正后可重新注册";
 const protectionModes: ProtectionModeOption[] = [
@@ -207,7 +214,8 @@ const filteredEvents = computed(() =>
   events.value.filter(item => {
     const severityMatches = eventSeverity.value === "全部风险" || item.severity === eventSeverity.value;
     const keyword = eventSearch.value.trim().toLowerCase();
-    const keywordMatches = !keyword || [item.source, item.method, item.userAgent, item.rule].some(value => value.toLowerCase().includes(keyword));
+    const keywordMatches =
+      !keyword || [item.source, item.method, item.userAgent, item.rule].some(value => value.toLowerCase().includes(keyword));
     return severityMatches && keywordMatches;
   })
 );
@@ -216,8 +224,11 @@ const currentRules = computed(() => (activeTab.value === "allowlist" ? allowRule
 const filteredAutoBans = computed(() => {
   const keyword = banSearch.value.trim().toLowerCase();
   return autoBans.value.filter(item => {
-    const keywordMatches = !keyword || [item.source, item.location, item.reason, item.evidence, item.mode, item.method]
-      .some(value => value.toLowerCase().includes(keyword));
+    const keywordMatches =
+      !keyword ||
+      [item.source, item.location, item.reason, item.evidence, item.mode, item.method].some(value =>
+        value.toLowerCase().includes(keyword)
+      );
     const stateMatches = banFirewallState.value === "全部状态" || item.firewallState === banFirewallState.value;
     return keywordMatches && stateMatches;
   });
@@ -225,36 +236,88 @@ const filteredAutoBans = computed(() => {
 const filteredCurrentRules = computed(() => {
   const keyword = ruleSearch.value.trim().toLowerCase();
   return currentRules.value.filter(item => {
-    const keywordMatches = !keyword || [item.value, item.note, item.scope, item.type]
-      .some(value => value.toLowerCase().includes(keyword));
+    const keywordMatches =
+      !keyword || [item.value, item.note, item.scope, item.type].some(value => value.toLowerCase().includes(keyword));
     const typeMatches = ruleTypeFilter.value === "全部类型" || item.type === ruleTypeFilter.value;
     const statusMatches = ruleStatusFilter.value === "全部状态" || item.enabled === (ruleStatusFilter.value === "已启用");
     return keywordMatches && typeMatches && statusMatches;
   });
 });
-const currentRulePage = computed(() => activeTab.value === "allowlist" ? allowRulePage.value : blackRulePage.value);
-const currentRulePageSize = computed(() => activeTab.value === "allowlist" ? allowRulePageSize.value : blackRulePageSize.value);
-const currentRuleTotal = computed(() => activeTab.value === "allowlist" ? allowRuleTotal.value : blackRuleTotal.value);
-const eventPagination = computed(() => ({ total: eventTotal.value, current: eventPage.value, pageSize: eventPageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
-const banPagination = computed(() => ({ total: banTotal.value, current: banPage.value, pageSize: banPageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
-const rulePagination = computed(() => ({ total: currentRuleTotal.value, current: currentRulePage.value, pageSize: currentRulePageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
+const currentRulePage = computed(() => (activeTab.value === "allowlist" ? allowRulePage.value : blackRulePage.value));
+const currentRulePageSize = computed(() => (activeTab.value === "allowlist" ? allowRulePageSize.value : blackRulePageSize.value));
+const currentRuleTotal = computed(() => (activeTab.value === "allowlist" ? allowRuleTotal.value : blackRuleTotal.value));
+const eventPagination = computed(() => ({
+  total: eventTotal.value,
+  current: eventPage.value,
+  pageSize: eventPageSize.value,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: tablePageSizeOptions
+}));
+const banPagination = computed(() => ({
+  total: banTotal.value,
+  current: banPage.value,
+  pageSize: banPageSize.value,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: tablePageSizeOptions
+}));
+const rulePagination = computed(() => ({
+  total: currentRuleTotal.value,
+  current: currentRulePage.value,
+  pageSize: currentRulePageSize.value,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: tablePageSizeOptions
+}));
 const selectedModeConfig = computed(() => protectionModes.find(item => item.key === selectedMode.value) ?? protectionModes[1]);
 const trendData = computed(() => buildSecurityTrend(securityEvents.value, period.value));
-const recognizedCount = computed(() => securityEvents.value.reduce((total, item) => total + Math.max(0, Number(item.count) || 0), 0));
-const blockedCount = computed(() => securityEvents.value.reduce((total, item) => total + (["drop", "ban"].includes(item.action) ? Math.max(0, Number(item.count) || 0) : 0), 0));
-const overviewEvents = computed(() => (securitySnapshot.value?.events || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)).map((item, index) => mapEvent(item, index)));
-const overviewBans = computed(() => (securitySnapshot.value?.bans || []).filter(item => item.status === "active" || item.status === "agent_failed").map((item, index) => mapBan(item, index)));
+const recognizedCount = computed(() =>
+  securityEvents.value.reduce((total, item) => total + Math.max(0, Number(item.count) || 0), 0)
+);
+const blockedCount = computed(() =>
+  securityEvents.value.reduce(
+    (total, item) => total + (["drop", "ban"].includes(item.action) ? Math.max(0, Number(item.count) || 0) : 0),
+    0
+  )
+);
+const overviewEvents = computed(() =>
+  (securitySnapshot.value?.events || [])
+    .slice()
+    .sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt))
+    .map((item, index) => mapEvent(item, index))
+);
+const overviewBans = computed(() =>
+  (securitySnapshot.value?.bans || [])
+    .filter(item => item.status === "active" || item.status === "agent_failed")
+    .map((item, index) => mapBan(item, index))
+);
 const attentionCount = computed(() => banTotal.value + (allowRuleTotal.value > 0 ? 1 : 0));
 const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ? 1 : 0));
-const policyWindowLabel = computed(() => securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中");
-const shortWindowInviteRuleLabel = computed(() => formatShortWindowInviteRule(securityPolicy.value?.window, securityPolicy.value?.banScore));
+const policyWindowLabel = computed(() => (securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中"));
+const shortWindowInviteRuleLabel = computed(() =>
+  formatShortWindowInviteRule(securityPolicy.value?.window, securityPolicy.value?.banScore)
+);
 const lowFrequencyInviteRuleLabel = "10 分钟累计 10 次未授权 INVITE";
-const sourceVerificationNote = "发现非法 ID 枚举只代表高危并拒绝，不直接永久封 IP；自动永久 IP 封禁需来源可验证（真实 TCP 或平台回程验证），并排除有成功认证记录的共享出口。单向 UDP 未验证来源只拒绝并记录，INVITE 自动 IP 封禁同样适用。";
-const automaticBanTTLLabel = computed(() => formatAutomaticBanTTL(securityPolicy.value?.banTTLs || [], securityPolicy.value?.permanentAutoBan === true, securityPolicy.value?.banScore));
+const sourceVerificationNote =
+  "发现非法 ID 枚举只代表高危并拒绝，不直接永久封 IP；自动永久 IP 封禁需来源可验证（真实 TCP 或平台回程验证），并排除有成功认证记录的共享出口。单向 UDP 未验证来源只拒绝并记录，INVITE 自动 IP 封禁同样适用。";
+const automaticBanTTLLabel = computed(() =>
+  formatAutomaticBanTTL(
+    securityPolicy.value?.banTTLs || [],
+    securityPolicy.value?.permanentAutoBan === true,
+    securityPolicy.value?.banScore
+  )
+);
 const liveStatus = computed(() => {
   if (dataUnavailable.value) return { label: "数据不可用", color: "red" as const };
   if (selectedMode.value === "observe") return { label: "观察（不自动封 IP）", color: "orange" as const };
-  return { label: securityAgent.value.connected ? "防护运行中" : "应用层防护运行中", color: securityAgent.value.connected ? "green" as const : "orange" as const };
+  return {
+    label: securityAgent.value.connected ? "防护运行中" : "应用层防护运行中",
+    color: securityAgent.value.connected ? ("green" as const) : ("orange" as const)
+  };
 });
 const agentStatus = computed(() => {
   if (securityAgent.value.connected) {
@@ -267,7 +330,9 @@ const agentStatus = computed(() => {
   }
   return {
     title: "主机防火墙未连接",
-    detail: securityAgent.value.lastError ? `${securityAgent.value.lastError} · 应用层拦截仍生效` : "尚未收到 Agent 心跳 · 应用层拦截仍生效",
+    detail: securityAgent.value.lastError
+      ? `${securityAgent.value.lastError} · 应用层拦截仍生效`
+      : "尚未收到 Agent 心跳 · 应用层拦截仍生效",
     label: "降级",
     color: "orange"
   };
@@ -306,11 +371,26 @@ function buildTrendChartSpec() {
     line: { style: { lineWidth: 2 } },
     area: { visible: true, style: { fillOpacity: 0.06 } },
     axes: [
-      { orient: "left", grid: { visible: true, style: { stroke: border, lineDash: [3, 4] } }, label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { visible: false }, tick: { visible: false } },
-      { orient: "bottom", label: { style: { fill: tertiary, fontSize: 11 } }, domainLine: { style: { stroke: border } }, tick: { visible: false } }
+      {
+        orient: "left",
+        grid: { visible: true, style: { stroke: border, lineDash: [3, 4] } },
+        label: { style: { fill: tertiary, fontSize: 11 } },
+        domainLine: { visible: false },
+        tick: { visible: false }
+      },
+      {
+        orient: "bottom",
+        label: { style: { fill: tertiary, fontSize: 11 } },
+        domainLine: { style: { stroke: border } },
+        tick: { visible: false }
+      }
     ],
     legends: { visible: false },
-    tooltip: { mark: { content: [{ key: (datum: { series: string }) => datum.series, value: (datum: { value: number }) => `${datum.value} 次` }] } },
+    tooltip: {
+      mark: {
+        content: [{ key: (datum: { series: string }) => datum.series, value: (datum: { value: number }) => `${datum.value} 次` }]
+      }
+    },
     animationAppear: { duration: 360, easing: "cubicOut" },
     animationUpdate: { duration: 220, easing: "cubicOut" }
   } as any;
@@ -343,15 +423,31 @@ function openRuleDrawer(kind: RuleKind) {
 }
 
 function uiRuleType(type: SecurityAccessRule["matchType"]): AccessRule["type"] {
-  return type === "user_agent" ? "User-Agent" : type.toUpperCase() as AccessRule["type"];
+  return type === "user_agent" ? "User-Agent" : (type.toUpperCase() as AccessRule["type"]);
 }
 
 function mapRule(rule: SecurityAccessRule): AccessRule {
-  return { id: rule.id, listType: rule.listType, matchType: rule.matchType, type: uiRuleType(rule.matchType), value: rule.matchValue, note: rule.note, scope: rule.scope, expires: rule.expiresAt ? new Date(rule.expiresAt).toLocaleString() : "永久", expiresAt: rule.expiresAt, enabled: rule.status === "enabled" };
+  return {
+    id: rule.id,
+    listType: rule.listType,
+    matchType: rule.matchType,
+    type: uiRuleType(rule.matchType),
+    value: rule.matchValue,
+    note: rule.note,
+    scope: rule.scope,
+    expires: rule.expiresAt ? new Date(rule.expiresAt).toLocaleString() : "永久",
+    expiresAt: rule.expiresAt,
+    enabled: rule.status === "enabled"
+  };
 }
 
 function expiryToIso(expiry: string) {
-  const durations: Record<string, number> = { "10 分钟": 10 * 60_000, "1 小时": 60 * 60_000, "1 天": 24 * 60 * 60_000, "7 天": 7 * 24 * 60 * 60_000 };
+  const durations: Record<string, number> = {
+    "10 分钟": 10 * 60_000,
+    "1 小时": 60 * 60_000,
+    "1 天": 24 * 60 * 60_000,
+    "7 天": 7 * 24 * 60 * 60_000
+  };
   const duration = durations[expiry];
   return duration ? new Date(Date.now() + duration).toISOString() : undefined;
 }
@@ -359,14 +455,38 @@ function expiryToIso(expiry: string) {
 function mapEvent(event: SecurityEventAggregate, index: number, offset = 0): SecurityEvent {
   const highRisk = event.action === "ban" || isHighRiskSecurityReason(event.reason);
   const location = event.riskScope === "device" ? `设备 ${event.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location, method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: formatSecurityReason(event.reason), action: formatSecurityAction(event.action), count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
+  return {
+    id: offset + index + 1,
+    severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危",
+    source: event.sourceIp,
+    location,
+    method: event.method || "未知",
+    userAgent: event.userAgent || "未上报",
+    rule: formatSecurityReason(event.reason),
+    action: formatSecurityAction(event.action),
+    count: event.count,
+    time: new Date(event.lastSeenAt).toLocaleString()
+  };
 }
 
 function mapBan(ban: FirewallBan, index: number, offset = 0): AutoBanRecord {
   const decision = ban.decision;
   const applied = ban.agentState === "applied";
   const location = decision.riskScope === "device" ? `设备 ${decision.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location, method: decision.triggerMethod || "未知", reason: formatSecurityReason(decision.reason), evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: formatRemaining(decision.createdAt, decision.ttl, Date.now(), decision.permanent === true), blocked: ban.blockedCountAfterBan || 0 };
+  return {
+    id: offset + index + 1,
+    decisionId: decision.decisionId,
+    source: decision.sourceIp,
+    location,
+    method: decision.triggerMethod || "未知",
+    reason: formatSecurityReason(decision.reason),
+    evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`,
+    mode: decision.policyMode === "strict" ? "严格" : "保护",
+    firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步",
+    createdAt: new Date(decision.createdAt).toLocaleTimeString(),
+    expires: formatRemaining(decision.createdAt, decision.ttl, Date.now(), decision.permanent === true),
+    blocked: ban.blockedCountAfterBan || 0
+  };
 }
 
 async function refreshPreview(showMessage = false, forceLists = false) {
@@ -381,10 +501,16 @@ async function refreshPreview(showMessage = false, forceLists = false) {
     const [snapshot, eventResult, banResult, policy, black, allow, agentHealth] = await Promise.all([
       getSecuritySnapshot(),
       shouldRefreshEvents ? listSecurityEvents({ page: eventPage.value, pageSize: eventPageSize.value }) : Promise.resolve(null),
-      shouldRefreshBans ? listSecurityBans({ page: banPage.value, pageSize: banPageSize.value, activeOnly: true }) : Promise.resolve(null),
+      shouldRefreshBans
+        ? listSecurityBans({ page: banPage.value, pageSize: banPageSize.value, activeOnly: true })
+        : Promise.resolve(null),
       getSecurityPolicy(),
-      shouldRefreshBlackRules ? listSecurityAccessRules("blacklist", { page: blackRulePage.value, pageSize: blackRulePageSize.value }) : Promise.resolve(null),
-      shouldRefreshAllowRules ? listSecurityAccessRules("allowlist", { page: allowRulePage.value, pageSize: allowRulePageSize.value }) : Promise.resolve(null),
+      shouldRefreshBlackRules
+        ? listSecurityAccessRules("blacklist", { page: blackRulePage.value, pageSize: blackRulePageSize.value })
+        : Promise.resolve(null),
+      shouldRefreshAllowRules
+        ? listSecurityAccessRules("allowlist", { page: allowRulePage.value, pageSize: allowRulePageSize.value })
+        : Promise.resolve(null),
       getSecurityAgentHealth()
     ]);
     const successful = [snapshot, eventResult, banResult, policy, black, allow].filter(result => result?.code === 0).length;
@@ -403,17 +529,32 @@ async function refreshPreview(showMessage = false, forceLists = false) {
       securityAgent.value = agentHealth.data;
     }
     if (eventResult?.code === 0) {
-      const items = (eventResult.data?.items || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt));
+      const items = (eventResult.data?.items || [])
+        .slice()
+        .sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt));
       eventTotal.value = eventResult.data?.total || 0;
       events.value = items.map((item, index) => mapEvent(item, index, (eventPage.value - 1) * eventPageSize.value));
     }
     if (banResult?.code === 0) {
       banTotal.value = banResult.data?.total || 0;
-      autoBans.value = (banResult.data?.items || []).map((item, index) => mapBan(item, index, (banPage.value - 1) * banPageSize.value));
+      autoBans.value = (banResult.data?.items || []).map((item, index) =>
+        mapBan(item, index, (banPage.value - 1) * banPageSize.value)
+      );
     }
-    if (policy.code === 0 && policy.data) { securityPolicy.value = policy.data; selectedMode.value = policy.data.mode; maxUdpThreshold.value = policy.data.maxUdpPerWindow; banThreshold.value = policy.data.banScore; }
-    if (black?.code === 0) { blackRuleTotal.value = black.data?.total || 0; blackRules.value = (black.data?.items || []).map(mapRule); }
-    if (allow?.code === 0) { allowRuleTotal.value = allow.data?.total || 0; allowRules.value = (allow.data?.items || []).map(mapRule); }
+    if (policy.code === 0 && policy.data) {
+      securityPolicy.value = policy.data;
+      selectedMode.value = policy.data.mode;
+      maxUdpThreshold.value = policy.data.maxUdpPerWindow;
+      banThreshold.value = policy.data.banScore;
+    }
+    if (black?.code === 0) {
+      blackRuleTotal.value = black.data?.total || 0;
+      blackRules.value = (black.data?.items || []).map(mapRule);
+    }
+    if (allow?.code === 0) {
+      allowRuleTotal.value = allow.data?.total || 0;
+      allowRules.value = (allow.data?.items || []).map(mapRule);
+    }
     if (showMessage) Message.success("安全数据已刷新");
   } catch (error: any) {
     Message.warning(error?.message || "安全数据暂时不可用");
@@ -422,21 +563,50 @@ async function refreshPreview(showMessage = false, forceLists = false) {
   }
 }
 
-function handleEventPageChange(page: number) { eventPage.value = page; void refreshPreview(false, true); }
-function handleEventPageSizeChange(pageSize: number) { eventPageSize.value = pageSize; eventPage.value = 1; void refreshPreview(false, true); }
-function handleBanPageChange(page: number) { banPage.value = page; void refreshPreview(false, true); }
-function handleBanPageSizeChange(pageSize: number) { banPageSize.value = pageSize; banPage.value = 1; void refreshPreview(false, true); }
-function resetEventSearch() { eventSeverity.value = "全部风险"; eventSearch.value = ""; }
-function resetBanSearch() { banSearch.value = ""; banFirewallState.value = "全部状态"; }
-function resetRuleSearch() { ruleSearch.value = ""; ruleTypeFilter.value = "全部类型"; ruleStatusFilter.value = "全部状态"; }
+function handleEventPageChange(page: number) {
+  eventPage.value = page;
+  void refreshPreview(false, true);
+}
+function handleEventPageSizeChange(pageSize: number) {
+  eventPageSize.value = pageSize;
+  eventPage.value = 1;
+  void refreshPreview(false, true);
+}
+function handleBanPageChange(page: number) {
+  banPage.value = page;
+  void refreshPreview(false, true);
+}
+function handleBanPageSizeChange(pageSize: number) {
+  banPageSize.value = pageSize;
+  banPage.value = 1;
+  void refreshPreview(false, true);
+}
+function resetEventSearch() {
+  eventSeverity.value = "全部风险";
+  eventSearch.value = "";
+}
+function resetBanSearch() {
+  banSearch.value = "";
+  banFirewallState.value = "全部状态";
+}
+function resetRuleSearch() {
+  ruleSearch.value = "";
+  ruleTypeFilter.value = "全部类型";
+  ruleStatusFilter.value = "全部状态";
+}
 function handleRulePageChange(page: number) {
   if (activeTab.value === "allowlist") allowRulePage.value = page;
   else blackRulePage.value = page;
   void refreshPreview(false, true);
 }
 function handleRulePageSizeChange(pageSize: number) {
-  if (activeTab.value === "allowlist") { allowRulePageSize.value = pageSize; allowRulePage.value = 1; }
-  else { blackRulePageSize.value = pageSize; blackRulePage.value = 1; }
+  if (activeTab.value === "allowlist") {
+    allowRulePageSize.value = pageSize;
+    allowRulePage.value = 1;
+  } else {
+    blackRulePageSize.value = pageSize;
+    blackRulePage.value = 1;
+  }
   void refreshPreview(false, true);
 }
 
@@ -465,9 +635,20 @@ async function saveRule() {
     Message.warning("请输入匹配内容");
     return;
   }
-  const type = ruleType.value === "User-Agent" ? "user_agent" : ruleType.value.toLowerCase() as "ip" | "cidr";
-  const result = await createSecurityAccessRule({ listType: editingRuleKind.value === "blacklist" ? "blacklist" : "allowlist", matchType: type, matchValue: ruleValue.value.trim(), scope: ruleType.value === "User-Agent" ? "public" : "all_sip", status: "enabled", expiresAt: expiryToIso(ruleExpiry.value), note: ruleNote.value.trim() || "手动添加" });
-  if (result.code !== 0) { Message.error(result.message || "规则保存失败"); return; }
+  const type = ruleType.value === "User-Agent" ? "user_agent" : (ruleType.value.toLowerCase() as "ip" | "cidr");
+  const result = await createSecurityAccessRule({
+    listType: editingRuleKind.value === "blacklist" ? "blacklist" : "allowlist",
+    matchType: type,
+    matchValue: ruleValue.value.trim(),
+    scope: ruleType.value === "User-Agent" ? "public" : "all_sip",
+    status: "enabled",
+    expiresAt: expiryToIso(ruleExpiry.value),
+    note: ruleNote.value.trim() || "手动添加"
+  });
+  if (result.code !== 0) {
+    Message.error(result.message || "规则保存失败");
+    return;
+  }
   ruleDrawerVisible.value = false;
   await refreshPreview(false, true);
   Message.success("规则已保存");
@@ -491,7 +672,10 @@ function toggleRuleFromEvent(rule: AccessRule, value: unknown) {
 
 async function removeRule(_kind: RuleKind, id: number) {
   const result = await deleteSecurityAccessRule(id);
-  if (result.code !== 0) { Message.error(result.message || "规则删除失败"); return; }
+  if (result.code !== 0) {
+    Message.error(result.message || "规则删除失败");
+    return;
+  }
   await refreshPreview(false, true);
   Message.success("规则已移除");
 }
@@ -503,13 +687,24 @@ function showBanEvents(item: AutoBanRecord) {
 
 async function unbanPreview(item: AutoBanRecord) {
   const result = await unbanSecurity(item.decisionId);
-  if (result.code !== 0) { Message.error(result.message || "解除封禁失败"); return; }
+  if (result.code !== 0) {
+    Message.error(result.message || "解除封禁失败");
+    return;
+  }
   await refreshPreview(false, true);
   Message.success(`${item.source} 已解除自动封禁`);
 }
 
 async function promoteToBlacklist(item: AutoBanRecord) {
-  if (!blackRules.value.some(rule => rule.type === "IP" && rule.value === item.source)) await createSecurityAccessRule({ listType: "blacklist", matchType: "ip", matchValue: item.source, scope: "all_sip", status: "enabled", note: item.reason });
+  if (!blackRules.value.some(rule => rule.type === "IP" && rule.value === item.source))
+    await createSecurityAccessRule({
+      listType: "blacklist",
+      matchType: "ip",
+      matchValue: item.source,
+      scope: "all_sip",
+      status: "enabled",
+      note: item.reason
+    });
   await refreshPreview(false, true);
   activeTab.value = "blacklist";
   Message.success(`${item.source} 已转为手动黑名单`);
@@ -521,7 +716,10 @@ async function savePolicyPreview() {
   securityPolicy.value.banScore = Math.max(1, banThreshold.value);
   securityPolicy.value.maxUdpPerWindow = Math.max(1, maxUdpThreshold.value);
   const result = await updateSecurityPolicy(securityPolicy.value);
-  if (result.code !== 0) { Message.error(result.message || "防护策略保存失败"); return; }
+  if (result.code !== 0) {
+    Message.error(result.message || "防护策略保存失败");
+    return;
+  }
   await refreshPreview(false, true);
   Message.success("防护策略已保存");
 }
@@ -555,25 +753,57 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main :class="['snow-page', 'security-preview', { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }]">
+  <main
+    :class="[
+      'snow-page',
+      'security-preview',
+      { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }
+    ]"
+  >
     <div class="snow-inner uvp-page-shell-flat security-shell">
       <div class="security-nav">
         <a-tabs v-model:active-key="activeTab" class="security-tabs" type="line">
-          <a-tab-pane key="overview"><template #title><ShieldCheck :size="14" />安全总览</template></a-tab-pane>
-          <a-tab-pane key="policy"><template #title><SlidersHorizontal :size="14" />防护策略</template></a-tab-pane>
-          <a-tab-pane key="events"><template #title><TriangleAlert :size="14" />风险事件</template></a-tab-pane>
-          <a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>
-          <a-tab-pane key="blacklist"><template #title><ShieldOff :size="14" />黑名单</template></a-tab-pane>
-          <a-tab-pane key="allowlist"><template #title><UserRoundCheck :size="14" />白名单</template></a-tab-pane>
+          <a-tab-pane key="overview"
+            ><template #title><ShieldCheck :size="14" />安全总览</template></a-tab-pane
+          >
+          <a-tab-pane key="policy"
+            ><template #title><SlidersHorizontal :size="14" />防护策略</template></a-tab-pane
+          >
+          <a-tab-pane key="events"
+            ><template #title><TriangleAlert :size="14" />风险事件</template></a-tab-pane
+          >
+          <a-tab-pane key="bans"
+            ><template #title><Ban :size="14" />自动封禁</template></a-tab-pane
+          >
+          <a-tab-pane key="blacklist"
+            ><template #title><ShieldOff :size="14" />黑名单</template></a-tab-pane
+          >
+          <a-tab-pane key="allowlist"
+            ><template #title><UserRoundCheck :size="14" />白名单</template></a-tab-pane
+          >
         </a-tabs>
         <div class="tab-actions">
-          <span :class="['security-live-status', `security-live-status--${liveStatus.color}`]"><span class="live-dot" />{{ liveStatus.label }}</span>
+          <span :class="['security-live-status', `security-live-status--${liveStatus.color}`]"
+            ><span class="live-dot" />{{ liveStatus.label }}</span
+          >
           <a-tooltip content="刷新安全数据">
-            <a-button class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
+            <a-button class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"
+              ><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button
+            >
           </a-tooltip>
-          <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"><template #icon><Check :size="16" /></template>保存策略</a-button>
-          <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button>
-          <a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openRuleDrawer(activeTab === 'allowlist' ? 'allowlist' : 'blacklist')"><template #icon><Plus :size="16" /></template>{{ activeTab === 'allowlist' ? '添加白名单' : '添加黑名单' }}</a-button>
+          <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"
+            ><template #icon><Check :size="16" /></template>保存策略</a-button
+          >
+          <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"
+            ><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button
+          >
+          <a-button
+            v-else
+            class="uvp-page-action-btn uvp-create-btn"
+            type="primary"
+            @click="openRuleDrawer(activeTab === 'allowlist' ? 'allowlist' : 'blacklist')"
+            ><template #icon><Plus :size="16" /></template>{{ activeTab === "allowlist" ? "添加白名单" : "添加黑名单" }}</a-button
+          >
         </div>
       </div>
 
@@ -581,63 +811,165 @@ onBeforeUnmount(() => {
         <section class="posture-panel uvp-system-panel" aria-label="当前防护状态">
           <div class="posture-main">
             <span class="shield-orbit" aria-hidden="true"><ShieldCheck :size="30" /></span>
-            <div><span class="section-label">当前安全态势</span><h2>{{ selectedModeConfig.title }}模式已启用</h2><p>{{ selectedModeConfig.summary }}主机防火墙状态以 Agent 实际回报为准，云厂商边界防护尚未接入。</p></div>
+            <div>
+              <span class="section-label">当前安全态势</span>
+              <h2>{{ selectedModeConfig.title }}模式已启用</h2>
+              <p>{{ selectedModeConfig.summary }}主机防火墙状态以 Agent 实际回报为准，云厂商边界防护尚未接入。</p>
+            </div>
           </div>
           <button class="advice-block" type="button" @click="activeTab = 'policy'">
             <span><TriangleAlert :size="18" /></span>
-            <span><strong>{{ attentionCount ? `还有 ${attentionCount} 项待处理` : "当前没有待处理项" }}</strong><small>{{ attentionCount ? "查看自动封禁和访问名单，确认是否需要长期处理。" : "自动封禁和访问名单当前没有需要复核的项目。" }}</small></span>
+            <span
+              ><strong>{{ attentionCount ? `还有 ${attentionCount} 项待处理` : "当前没有待处理项" }}</strong
+              ><small>{{
+                attentionCount ? "查看自动封禁和访问名单，确认是否需要长期处理。" : "自动封禁和访问名单当前没有需要复核的项目。"
+              }}</small></span
+            >
             <ChevronRight :size="18" />
           </button>
         </section>
 
         <section class="metric-grid" aria-label="安全指标">
-          <article><span>已识别安全事件</span><strong>{{ recognizedCount }}</strong><small class="warning"><Activity :size="13" />来自安全事件接口聚合</small></article>
-          <article><span>应用层已拦截</span><strong>{{ blockedCount }}</strong><small class="success"><ShieldCheck :size="13" />拒绝与封禁动作累计</small></article>
-          <article><span>生效中自动封禁</span><strong>{{ banTotal }}</strong><small><Ban :size="13" />主机防火墙已生效 {{ overviewBans.filter(item => item.firewallState === '已生效').length }}</small></article>
-            <article><span>主机防火墙</span><strong class="status-value">{{ securityAgent.connected ? '在线' : '降级' }}</strong><small :class="securityAgent.connected ? 'success' : 'warning'"><BrickWall :size="13" />{{ securityAgent.appliedRules }} 条动态规则</small></article>
+          <article>
+            <span>已识别安全事件</span><strong>{{ recognizedCount }}</strong
+            ><small class="warning"><Activity :size="13" />来自安全事件接口聚合</small>
+          </article>
+          <article>
+            <span>应用层已拦截</span><strong>{{ blockedCount }}</strong
+            ><small class="success"><ShieldCheck :size="13" />拒绝与封禁动作累计</small>
+          </article>
+          <article>
+            <span>生效中自动封禁</span><strong>{{ banTotal }}</strong
+            ><small
+              ><Ban :size="13" />主机防火墙已生效 {{ overviewBans.filter(item => item.firewallState === "已生效").length }}</small
+            >
+          </article>
+          <article>
+            <span>主机防火墙</span><strong class="status-value">{{ securityAgent.connected ? "在线" : "降级" }}</strong
+            ><small :class="securityAgent.connected ? 'success' : 'warning'"
+              ><BrickWall :size="13" />{{ securityAgent.appliedRules }} 条动态规则</small
+            >
+          </article>
         </section>
 
         <section class="overview-grid">
           <article class="uvp-system-panel chart-panel">
             <div class="panel-heading">
-              <div><span class="section-label">攻击趋势</span><h3>识别与封禁</h3></div>
+              <div>
+                <span class="section-label">攻击趋势</span>
+                <h3>识别与封禁</h3>
+              </div>
               <div class="period-switch" aria-label="趋势周期">
-                <button v-for="item in trendPeriods" :key="item" type="button" :class="{ active: period === item }" @click="period = item">{{ item }}</button>
+                <button
+                  v-for="item in trendPeriods"
+                  :key="item"
+                  type="button"
+                  :class="{ active: period === item }"
+                  @click="period = item"
+                >
+                  {{ item }}
+                </button>
               </div>
             </div>
-            <div class="chart-legend"><span><i class="detected" />识别</span><span><i class="blocked" />封禁</span><b>安全事件接口</b></div>
+            <div class="chart-legend">
+              <span><i class="detected" />识别</span><span><i class="blocked" />封禁</span><b>安全事件接口</b>
+            </div>
             <div v-if="trendData.hasData" ref="chartElement" class="trend-chart" aria-label="攻击识别与封禁趋势图" />
-            <div v-else class="empty-state chart-empty" role="status"><span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无趋势数据</strong><small>当前时间范围内还没有安全事件，接口收到数据后会自动更新。</small></div>
+            <div v-else class="empty-state chart-empty" role="status">
+              <span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无趋势数据</strong
+              ><small>当前时间范围内还没有安全事件，接口收到数据后会自动更新。</small>
+            </div>
           </article>
 
           <article class="uvp-system-panel defense-panel">
-            <div class="panel-heading"><div><span class="section-label">三层防护</span><h3>防护链路</h3></div><a-tag color="blue">{{ enabledDefenseLayers }} / 3 已启用</a-tag></div>
+            <div class="panel-heading">
+              <div>
+                <span class="section-label">三层防护</span>
+                <h3>防护链路</h3>
+              </div>
+              <a-tag color="blue">{{ enabledDefenseLayers }} / 3 已启用</a-tag>
+            </div>
             <div class="defense-chain">
-              <div class="defense-item pending"><span><CloudCog :size="19" /></span><div><strong>云边界防护</strong><small>待接入云厂商 API</small></div><a-tag color="orange">规划中</a-tag></div>
+              <div class="defense-item pending">
+                <span><CloudCog :size="19" /></span>
+                <div><strong>云边界防护</strong><small>待接入云厂商 API</small></div>
+                <a-tag color="orange">规划中</a-tag>
+              </div>
               <i class="chain-line" />
-              <div class="defense-item" :class="{ active: securityAgent.connected }"><span><BrickWall :size="19" /></span><div><strong>主机防火墙</strong><small>uvp-firewall-agent · nftables</small></div><a-tag :color="securityAgent.connected ? 'green' : 'orange'"><Check :size="12" />{{ securityAgent.connected ? '在线' : '降级' }}</a-tag></div>
+              <div class="defense-item" :class="{ active: securityAgent.connected }">
+                <span><BrickWall :size="19" /></span>
+                <div><strong>主机防火墙</strong><small>uvp-firewall-agent · nftables</small></div>
+                <a-tag :color="securityAgent.connected ? 'green' : 'orange'"
+                  ><Check :size="12" />{{ securityAgent.connected ? "在线" : "降级" }}</a-tag
+                >
+              </div>
               <i class="chain-line active" />
-              <div class="defense-item active"><span><Fingerprint :size="19" /></span><div><strong>应用协议防护</strong><small>限速 · 鉴权 · 风险评分</small></div><a-tag color="green"><Check :size="12" />保护</a-tag></div>
+              <div class="defense-item active">
+                <span><Fingerprint :size="19" /></span>
+                <div><strong>应用协议防护</strong><small>限速 · 鉴权 · 风险评分</small></div>
+                <a-tag color="green"><Check :size="12" />保护</a-tag>
+              </div>
             </div>
           </article>
         </section>
 
         <section class="overview-grid lower-grid">
           <article class="uvp-system-panel signal-panel">
-            <div class="panel-heading"><div><span class="section-label">实时信号</span><h3>最近高频来源</h3></div><button class="live-toggle" type="button" :aria-pressed="live" @click="live = !live"><Pause v-if="live" :size="14" /><Play v-else :size="14" />{{ live ? '自动刷新' : '已暂停' }}</button></div>
-            <div v-if="!overviewEvents.length" class="empty-state signal-empty" role="status"><span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无高频来源</strong><small>安全事件接口暂未发现重复风险来源，收到数据后会在这里显示。</small></div>
-            <button v-for="event in overviewEvents.slice(0, 3)" v-else :key="event.id" class="signal-row" type="button" @click="activeTab = 'events'">
+            <div class="panel-heading">
+              <div>
+                <span class="section-label">实时信号</span>
+                <h3>最近高频来源</h3>
+              </div>
+              <button class="live-toggle" type="button" :aria-pressed="live" @click="live = !live">
+                <Pause v-if="live" :size="14" /><Play v-else :size="14" />{{ live ? "自动刷新" : "已暂停" }}
+              </button>
+            </div>
+            <div v-if="!overviewEvents.length" class="empty-state signal-empty" role="status">
+              <span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无高频来源</strong
+              ><small>安全事件接口暂未发现重复风险来源，收到数据后会在这里显示。</small>
+            </div>
+            <button
+              v-for="event in overviewEvents.slice(0, 3)"
+              v-else
+              :key="event.id"
+              class="signal-row"
+              type="button"
+              @click="activeTab = 'events'"
+            >
               <span :class="['risk-dot', event.severity === '高危' ? 'danger' : 'warning']" />
-              <span><strong>{{ event.source }}</strong><small>{{ event.method }} · {{ event.rule }}</small></span>
+              <span
+                ><strong>{{ event.source }}</strong
+                ><small>{{ event.method }} · {{ event.rule }}</small></span
+              >
               <b>{{ event.count }} 次</b><ChevronRight :size="16" />
             </button>
           </article>
 
           <article class="uvp-system-panel attention-panel">
-            <div class="panel-heading"><div><span class="section-label">待处理</span><h3>安全建议</h3></div><span class="attention-count">{{ attentionCount }}</span></div>
-            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ banTotal }} 条自动封禁待复核</strong><small>新自动封禁永久生效，请核对来源后决定是否人工解封。</small></span><ChevronRight :size="16" /></button>
-            <button v-if="allowRuleTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRuleTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
-            <div v-if="!attentionCount" class="empty-state attention-empty" role="status"><span class="empty-state-icon"><CheckCircle2 :size="22" /></span><strong>当前没有待处理项</strong><small>安全事件、自动封禁和访问名单会在接口刷新后更新。</small></div>
+            <div class="panel-heading">
+              <div>
+                <span class="section-label">待处理</span>
+                <h3>安全建议</h3>
+              </div>
+              <span class="attention-count">{{ attentionCount }}</span>
+            </div>
+            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'">
+              <span class="attention-icon danger"><Ban :size="18" /></span
+              ><span
+                ><strong>{{ banTotal }} 条自动封禁待复核</strong
+                ><small>新自动封禁永久生效，请核对来源后决定是否人工解封。</small></span
+              ><ChevronRight :size="16" />
+            </button>
+            <button v-if="allowRuleTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'">
+              <span class="attention-icon warning"><UserRoundCheck :size="18" /></span
+              ><span
+                ><strong>{{ allowRuleTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span
+              ><ChevronRight :size="16" />
+            </button>
+            <div v-if="!attentionCount" class="empty-state attention-empty" role="status">
+              <span class="empty-state-icon"><CheckCircle2 :size="22" /></span><strong>当前没有待处理项</strong
+              ><small>安全事件、自动封禁和访问名单会在接口刷新后更新。</small>
+            </div>
           </article>
         </section>
       </template>
@@ -645,15 +977,47 @@ onBeforeUnmount(() => {
       <section v-else-if="activeTab === 'events'" class="workspace-panel">
         <s-layout-search class="security-list-search event-search-panel">
           <template #fields>
-            <div class="security-list-filter security-list-filter--keyword"><a-input v-model="eventSearch" allow-clear placeholder="筛选本页 IP、方法或 User-Agent" aria-label="筛选本页风险事件"><template #prefix><Search :size="15" /></template></a-input></div>
-            <div class="security-list-filter security-list-filter--status"><a-select v-model="eventSeverity" aria-label="风险等级"><a-option>全部风险</a-option><a-option>高危</a-option><a-option>中危</a-option><a-option>低危</a-option></a-select></div>
+            <div class="security-list-filter security-list-filter--keyword">
+              <a-input
+                v-model="eventSearch"
+                allow-clear
+                placeholder="筛选本页 IP、方法或 User-Agent"
+                aria-label="筛选本页风险事件"
+                ><template #prefix><Search :size="15" /></template
+              ></a-input>
+            </div>
+            <div class="security-list-filter security-list-filter--status">
+              <a-select v-model="eventSeverity" aria-label="风险等级"
+                ><a-option>全部风险</a-option><a-option>高危</a-option><a-option>中危</a-option
+                ><a-option>低危</a-option></a-select
+              >
+            </div>
           </template>
           <template #actions><a-button @click="resetEventSearch">重置</a-button></template>
         </s-layout-search>
-        <a-table class="security-table uvp-data-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050, y: '100%' }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
+        <a-table
+          class="security-table uvp-data-table"
+          :data="filteredEvents"
+          row-key="id"
+          :pagination="eventPagination"
+          :scroll="{ x: 1050, y: '100%' }"
+          @page-change="handleEventPageChange"
+          @page-size-change="handleEventPageSizeChange"
+        >
           <template #columns>
-            <a-table-column title="风险" :width="90"><template #cell="{ record }"><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"><i />{{ record.severity }}</span></template></a-table-column>
-            <a-table-column title="来源" :width="170"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
+            <a-table-column title="风险" :width="90"
+              ><template #cell="{ record }"
+                ><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"
+                  ><i />{{ record.severity }}</span
+                ></template
+              ></a-table-column
+            >
+            <a-table-column title="来源" :width="170"
+              ><template #cell="{ record }"
+                ><strong class="mono">{{ record.source }}</strong
+                ><small class="cell-subline">{{ record.location }}</small></template
+              ></a-table-column
+            >
             <a-table-column title="方法" data-index="method" :width="100" />
             <a-table-column title="User-Agent" data-index="userAgent" :width="190" ellipsis tooltip />
             <a-table-column title="识别规则" data-index="rule" :width="200" />
@@ -667,20 +1031,83 @@ onBeforeUnmount(() => {
       <section v-else-if="activeTab === 'bans'" class="workspace-panel">
         <s-layout-search class="security-list-search ban-search-panel">
           <template #fields>
-            <div class="security-list-filter security-list-filter--keyword"><a-input v-model="banSearch" allow-clear placeholder="筛选本页来源、原因或策略" aria-label="筛选本页自动封禁"><template #prefix><Search :size="15" /></template></a-input></div>
-            <div class="security-list-filter security-list-filter--status"><a-select v-model="banFirewallState" aria-label="主机防火墙状态"><a-option>全部状态</a-option><a-option>已生效</a-option><a-option>待同步</a-option><a-option>同步失败</a-option></a-select></div>
+            <div class="security-list-filter security-list-filter--keyword">
+              <a-input v-model="banSearch" allow-clear placeholder="筛选本页来源、原因或策略" aria-label="筛选本页自动封禁"
+                ><template #prefix><Search :size="15" /></template
+              ></a-input>
+            </div>
+            <div class="security-list-filter security-list-filter--status">
+              <a-select v-model="banFirewallState" aria-label="主机防火墙状态"
+                ><a-option>全部状态</a-option><a-option>已生效</a-option><a-option>待同步</a-option
+                ><a-option>同步失败</a-option></a-select
+              >
+            </div>
           </template>
           <template #actions><a-button @click="resetBanSearch">重置</a-button></template>
         </s-layout-search>
-        <a-table class="security-table uvp-data-table ban-table" :data="filteredAutoBans" row-key="id" :pagination="banPagination" :scroll="{ x: 1060, y: '100%' }" @page-change="handleBanPageChange" @page-size-change="handleBanPageSizeChange">
+        <a-table
+          class="security-table uvp-data-table ban-table"
+          :data="filteredAutoBans"
+          row-key="id"
+          :pagination="banPagination"
+          :scroll="{ x: 1060, y: '100%' }"
+          @page-change="handleBanPageChange"
+          @page-size-change="handleBanPageSizeChange"
+        >
           <template #columns>
-            <a-table-column title="来源" :width="160"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
-            <a-table-column title="进入原因" :width="280"><template #cell="{ record }"><strong class="ban-reason">{{ record.reason }}</strong><small class="cell-subline">{{ record.evidence }}</small></template></a-table-column>
-            <a-table-column title="触发策略" :width="110"><template #cell="{ record }"><a-tag :color="record.mode === '严格' ? 'red' : 'blue'">{{ record.mode }}模式</a-tag><small class="cell-subline">{{ record.method }}</small></template></a-table-column>
-            <a-table-column title="防护位置" :width="170"><template #cell="{ record }"><span class="enforcement-tags"><a-tag color="green">应用层已拦截</a-tag><a-tag :color="record.firewallState === '已生效' ? 'green' : record.firewallState === '待同步' ? 'orange' : 'red'">主机防火墙{{ record.firewallState }}</a-tag></span></template></a-table-column>
-            <a-table-column title="封禁时间" :width="110"><template #cell="{ record }"><span>{{ record.createdAt }}</span><small class="cell-subline">{{ record.expires }}</small></template></a-table-column>
-            <a-table-column title="封禁后拦截" :width="100"><template #cell="{ record }"><strong>{{ record.blocked }} 次</strong></template></a-table-column>
-            <a-table-column title="操作" :width="130"><template #cell="{ record }"><span class="ban-actions"><a-tooltip content="查看关联风险事件"><a-button size="small" aria-label="查看关联风险事件" @click="showBanEvents(record)"><template #icon><Search :size="14" /></template></a-button></a-tooltip><a-tooltip content="转为手动黑名单"><a-button size="small" aria-label="转为手动黑名单" @click="promoteToBlacklist(record)"><template #icon><Ban :size="14" /></template></a-button></a-tooltip><a-tooltip content="解除自动封禁"><a-button size="small" status="danger" aria-label="解除自动封禁" @click="unbanPreview(record)"><template #icon><ShieldOff :size="14" /></template></a-button></a-tooltip></span></template></a-table-column>
+            <a-table-column title="来源" :width="160"
+              ><template #cell="{ record }"
+                ><strong class="mono">{{ record.source }}</strong
+                ><small class="cell-subline">{{ record.location }}</small></template
+              ></a-table-column
+            >
+            <a-table-column title="进入原因" :width="280"
+              ><template #cell="{ record }"
+                ><strong class="ban-reason">{{ record.reason }}</strong
+                ><small class="cell-subline">{{ record.evidence }}</small></template
+              ></a-table-column
+            >
+            <a-table-column title="触发策略" :width="110"
+              ><template #cell="{ record }"
+                ><a-tag :color="record.mode === '严格' ? 'red' : 'blue'">{{ record.mode }}模式</a-tag
+                ><small class="cell-subline">{{ record.method }}</small></template
+              ></a-table-column
+            >
+            <a-table-column title="防护位置" :width="170"
+              ><template #cell="{ record }"
+                ><span class="enforcement-tags"
+                  ><a-tag color="green">应用层已拦截</a-tag
+                  ><a-tag
+                    :color="record.firewallState === '已生效' ? 'green' : record.firewallState === '待同步' ? 'orange' : 'red'"
+                    >主机防火墙{{ record.firewallState }}</a-tag
+                  ></span
+                ></template
+              ></a-table-column
+            >
+            <a-table-column title="封禁时间" :width="110"
+              ><template #cell="{ record }"
+                ><span>{{ record.createdAt }}</span
+                ><small class="cell-subline">{{ record.expires }}</small></template
+              ></a-table-column
+            >
+            <a-table-column title="封禁后拦截" :width="100"
+              ><template #cell="{ record }"
+                ><strong>{{ record.blocked }} 次</strong></template
+              ></a-table-column
+            >
+            <a-table-column title="操作" :width="130"
+              ><template #cell="{ record }"
+                ><span class="ban-actions"
+                  ><a-tooltip content="查看关联风险事件"
+                    ><a-button size="small" aria-label="查看关联风险事件" @click="showBanEvents(record)"
+                      ><template #icon><Search :size="14" /></template></a-button></a-tooltip
+                  ><a-tooltip content="转为手动黑名单"
+                    ><a-button size="small" aria-label="转为手动黑名单" @click="promoteToBlacklist(record)"
+                      ><template #icon><Ban :size="14" /></template></a-button></a-tooltip
+                  ><a-tooltip content="解除自动封禁"
+                    ><a-button size="small" status="danger" aria-label="解除自动封禁" @click="unbanPreview(record)"
+                      ><template #icon><ShieldOff :size="14" /></template></a-button></a-tooltip></span></template
+            ></a-table-column>
           </template>
         </a-table>
       </section>
@@ -688,75 +1115,251 @@ onBeforeUnmount(() => {
       <section v-else-if="activeTab === 'blacklist' || activeTab === 'allowlist'" class="workspace-panel">
         <s-layout-search class="security-list-search rule-search-panel">
           <template #fields>
-            <div class="security-list-filter security-list-filter--keyword"><a-input v-model="ruleSearch" allow-clear placeholder="筛选本页匹配内容或备注" :aria-label="`筛选本页${activeTab === 'blacklist' ? '黑名单' : '白名单'}`"><template #prefix><Search :size="15" /></template></a-input></div>
-            <div class="security-list-filter"><a-select v-model="ruleTypeFilter" aria-label="规则类型"><a-option>全部类型</a-option><a-option>IP</a-option><a-option>CIDR</a-option><a-option>User-Agent</a-option></a-select></div>
-            <div class="security-list-filter security-list-filter--status"><a-select v-model="ruleStatusFilter" aria-label="规则状态"><a-option>全部状态</a-option><a-option>已启用</a-option><a-option>已停用</a-option></a-select></div>
+            <div class="security-list-filter security-list-filter--keyword">
+              <a-input
+                v-model="ruleSearch"
+                allow-clear
+                placeholder="筛选本页匹配内容或备注"
+                :aria-label="`筛选本页${activeTab === 'blacklist' ? '黑名单' : '白名单'}`"
+                ><template #prefix><Search :size="15" /></template
+              ></a-input>
+            </div>
+            <div class="security-list-filter">
+              <a-select v-model="ruleTypeFilter" aria-label="规则类型"
+                ><a-option>全部类型</a-option><a-option>IP</a-option><a-option>CIDR</a-option
+                ><a-option>User-Agent</a-option></a-select
+              >
+            </div>
+            <div class="security-list-filter security-list-filter--status">
+              <a-select v-model="ruleStatusFilter" aria-label="规则状态"
+                ><a-option>全部状态</a-option><a-option>已启用</a-option><a-option>已停用</a-option></a-select
+              >
+            </div>
           </template>
           <template #actions><a-button @click="resetRuleSearch">重置</a-button></template>
         </s-layout-search>
-        <a-table class="security-table uvp-data-table" :data="filteredCurrentRules" row-key="id" :pagination="rulePagination" :scroll="{ x: 900, y: '100%' }" @page-change="handleRulePageChange" @page-size-change="handleRulePageSizeChange">
+        <a-table
+          class="security-table uvp-data-table"
+          :data="filteredCurrentRules"
+          row-key="id"
+          :pagination="rulePagination"
+          :scroll="{ x: 900, y: '100%' }"
+          @page-change="handleRulePageChange"
+          @page-size-change="handleRulePageSizeChange"
+        >
           <template #columns>
             <a-table-column title="类型" data-index="type" :width="120" />
-            <a-table-column title="匹配内容" :width="210"><template #cell="{ record }"><span class="mono">{{ record.value }}</span></template></a-table-column>
+            <a-table-column title="匹配内容" :width="210"
+              ><template #cell="{ record }"
+                ><span class="mono">{{ record.value }}</span></template
+              ></a-table-column
+            >
             <a-table-column title="备注" data-index="note" :width="210" />
             <a-table-column title="范围" data-index="scope" :width="160" />
             <a-table-column title="有效期" data-index="expires" :width="140" />
-            <a-table-column title="状态" :width="100"><template #cell="{ record }"><a-switch :model-value="record.enabled" size="small" @change="toggleRuleFromEvent(record, $event)" /></template></a-table-column>
-            <a-table-column title="操作" :width="80" fixed="right"><template #cell="{ record }"><a-tooltip content="删除规则"><a-button type="text" status="danger" aria-label="删除规则" @click="removeRule(activeTab, record.id)"><template #icon><Trash2 :size="16" /></template></a-button></a-tooltip></template></a-table-column>
+            <a-table-column title="状态" :width="100"
+              ><template #cell="{ record }"
+                ><a-switch :model-value="record.enabled" size="small" @change="toggleRuleFromEvent(record, $event)" /></template
+            ></a-table-column>
+            <a-table-column title="操作" :width="80" fixed="right"
+              ><template #cell="{ record }"
+                ><a-tooltip content="删除规则"
+                  ><a-button type="text" status="danger" aria-label="删除规则" @click="removeRule(activeTab, record.id)"
+                    ><template #icon><Trash2 :size="16" /></template></a-button></a-tooltip></template
+            ></a-table-column>
           </template>
         </a-table>
       </section>
 
       <section v-else class="workspace-panel policy-workspace">
         <div class="mode-selector" role="radiogroup" aria-label="防护模式">
-          <button v-for="mode in protectionModes" :key="mode.key" type="button" :class="['mode-option', `mode-${mode.key}`, { active: selectedMode === mode.key }]" :aria-checked="selectedMode === mode.key" role="radio" @click="selectedMode = mode.key">
+          <button
+            v-for="mode in protectionModes"
+            :key="mode.key"
+            type="button"
+            :class="['mode-option', `mode-${mode.key}`, { active: selectedMode === mode.key }]"
+            :aria-checked="selectedMode === mode.key"
+            role="radio"
+            @click="selectedMode = mode.key"
+          >
             <span class="mode-icon"><component :is="mode.icon" :size="20" /></span>
-            <span class="mode-copy"><span class="mode-heading"><strong>{{ mode.title }}</strong><em>{{ mode.badge }}</em></span><small>{{ mode.desc }}</small></span>
+            <span class="mode-copy"
+              ><span class="mode-heading"
+                ><strong>{{ mode.title }}</strong
+                ><em>{{ mode.badge }}</em></span
+              ><small>{{ mode.desc }}</small></span
+            >
             <CheckCircle2 v-if="selectedMode === mode.key" class="mode-check" :size="18" />
           </button>
         </div>
         <section :class="['mode-explainer', `mode-${selectedModeConfig.key}`]" aria-live="polite">
           <div class="mode-explainer-heading">
             <span><component :is="selectedModeConfig.icon" :size="22" /></span>
-            <div><small>{{ selectedModeConfig.title }}模式启用后</small><h3>{{ selectedModeConfig.headline }}</h3><p>{{ selectedModeConfig.summary }}</p></div>
+            <div>
+              <small>{{ selectedModeConfig.title }}模式启用后</small>
+              <h3>{{ selectedModeConfig.headline }}</h3>
+              <p>{{ selectedModeConfig.summary }}</p>
+            </div>
           </div>
           <div class="mode-result-grid">
-            <article><span>入口与速率</span><strong>{{ selectedModeConfig.entryResult }}</strong></article>
-            <article><span>协议鉴权</span><strong>{{ selectedModeConfig.protocolResult }}</strong></article>
-            <article><span>风险升级</span><strong>{{ selectedModeConfig.banResult }}</strong></article>
+            <article>
+              <span>入口与速率</span><strong>{{ selectedModeConfig.entryResult }}</strong>
+            </article>
+            <article>
+              <span>协议鉴权</span><strong>{{ selectedModeConfig.protocolResult }}</strong>
+            </article>
+            <article>
+              <span>风险升级</span><strong>{{ selectedModeConfig.banResult }}</strong>
+            </article>
           </div>
         </section>
         <div class="policy-grid">
           <div class="policy-section">
-            <div class="policy-title"><span><Activity :size="18" /></span><div><h3>自动防护规则</h3><p>控制异常来源何时被识别并升级处理。</p></div></div>
-            <div class="setting-row"><span><strong>重复攻击自动封禁</strong><small>{{ selectedMode === 'observe' ? '观察模式仅记录' : '保护/严格模式先拒绝；自动永久 IP 封禁仍需来源验证门禁' }}；短期 {{ shortWindowInviteRuleLabel }}；固定低频 {{ lowFrequencyInviteRuleLabel }}。</small></span><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{ selectedMode === 'observe' ? '观察模式不执行' : automaticBanTTLLabel }}</a-tag></div>
-            <div class="setting-row"><span><strong>注册失败处理</strong><small>所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册。</small></span><a-tag color="blue">可修正重试</a-tag></div>
-            <div class="setting-row"><span><strong>扫描器特征识别</strong><small>User-Agent 仅作为辅助信号，不作为可信身份；非法 ID 枚举单独计为高危，不直接等同于永久封 IP。</small></span><a-tag color="green">协议事件接口</a-tag></div>
-            <div class="setting-row"><span><strong>入口速率阈值</strong><small>当前策略窗口内允许的 UDP 包数量 · {{ policyWindowLabel }}</small></span><div class="threshold-control"><a-input-number v-model="maxUdpThreshold" :min="1" :max="100000" /><span>包/窗口</span></div></div>
-            <div class="setting-row"><span><strong>风险累计封禁阈值</strong><small>INVITE、REGISTER、MESSAGE 等风险按评分累计；达到阈值后仍需通过来源验证门禁，才加入主机防火墙</small></span><div class="threshold-control"><a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span></div></div>
-            <div class="setting-row"><span><strong>来源验证门禁</strong><small>{{ sourceVerificationNote }}</small></span><a-tag color="blue">自动校验</a-tag></div>
+            <div class="policy-title">
+              <span><Activity :size="18" /></span>
+              <div>
+                <h3>自动防护规则</h3>
+                <p>控制异常来源何时被识别并升级处理。</p>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>重复攻击自动封禁</strong
+                ><small
+                  >{{
+                    selectedMode === "observe" ? "观察模式仅记录" : "保护/严格模式先拒绝；自动永久 IP 封禁仍需来源验证门禁"
+                  }}；短期 {{ shortWindowInviteRuleLabel }}；固定低频 {{ lowFrequencyInviteRuleLabel }}。</small
+                ></span
+              ><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{
+                selectedMode === "observe" ? "观察模式不执行" : automaticBanTTLLabel
+              }}</a-tag>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>注册失败处理</strong
+                ><small
+                  >所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID
+                  会拒绝并提示检查配置，修正后可重新注册。</small
+                ></span
+              ><a-tag color="blue">可修正重试</a-tag>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>扫描器特征识别</strong
+                ><small>User-Agent 仅作为辅助信号，不作为可信身份；非法 ID 枚举单独计为高危，不直接等同于永久封 IP。</small></span
+              ><a-tag color="green">协议事件接口</a-tag>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>入口速率阈值</strong><small>当前策略窗口内允许的 UDP 包数量 · {{ policyWindowLabel }}</small></span
+              >
+              <div class="threshold-control">
+                <a-input-number v-model="maxUdpThreshold" :min="1" :max="100000" /><span>包/窗口</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>风险累计封禁阈值</strong
+                ><small>INVITE、REGISTER、MESSAGE 等风险按评分累计；达到阈值后仍需通过来源验证门禁，才加入主机防火墙</small></span
+              >
+              <div class="threshold-control">
+                <a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>来源验证门禁</strong><small>{{ sourceVerificationNote }}</small></span
+              ><a-tag color="blue">自动校验</a-tag>
+            </div>
           </div>
           <div class="policy-section">
-            <div class="policy-title"><span><BrickWall :size="18" /></span><div><h3>主机防火墙</h3><p>阻止已确认的攻击流量继续进入服务进程。</p></div></div>
-            <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，只有来源通过验证门禁且不是成功认证共享出口，才在操作系统网络入口永久封禁来源 IP</small></span><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{ securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
-            <div class="agent-status"><span :class="['agent-icon', { warning: !securityAgent.connected }]" ><CheckCircle2 v-if="securityAgent.connected" :size="22" /><TriangleAlert v-else :size="22" /></span><span><strong>{{ agentStatus.title }}</strong><small>{{ agentStatus.detail }}</small></span><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag></div>
-            <div class="ttl-row"><span><strong>自动封禁有效期</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。</small></span><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag></div>
-            <div class="cloud-roadmap"><CloudCog :size="18" /><span><strong>云厂商防火墙联动</strong><small>当前系统未接入云厂商 API，暂不宣称已生效。</small></span><a-tag color="orange">未接入</a-tag></div>
+            <div class="policy-title">
+              <span><BrickWall :size="18" /></span>
+              <div>
+                <h3>主机防火墙</h3>
+                <p>阻止已确认的攻击流量继续进入服务进程。</p>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span
+                ><strong>联动主机防火墙</strong
+                ><small
+                  >应用层确认攻击后，只有来源通过验证门禁且不是成功认证共享出口，才在操作系统网络入口永久封禁来源 IP</small
+                ></span
+              ><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{
+                securityAgent.connected ? "Agent 已连接" : "Agent 未连接"
+              }}</a-tag>
+            </div>
+            <div class="agent-status">
+              <span :class="['agent-icon', { warning: !securityAgent.connected }]"
+                ><CheckCircle2 v-if="securityAgent.connected" :size="22" /><TriangleAlert v-else :size="22" /></span
+              ><span
+                ><strong>{{ agentStatus.title }}</strong
+                ><small>{{ agentStatus.detail }}</small></span
+              ><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag>
+            </div>
+            <div class="ttl-row">
+              <span
+                ><strong>自动封禁有效期</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。</small></span
+              ><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag>
+            </div>
+            <div class="cloud-roadmap">
+              <CloudCog :size="18" /><span
+                ><strong>云厂商防火墙联动</strong><small>当前系统未接入云厂商 API，暂不宣称已生效。</small></span
+              ><a-tag color="orange">未接入</a-tag>
+            </div>
           </div>
         </div>
       </section>
     </div>
 
-    <a-modal v-model:visible="ruleDrawerVisible" modal-class="uvp-system-dialog security-rule-dialog" :title="editingRuleKind === 'blacklist' ? '新增黑名单规则' : '新增白名单规则'" :width="560" :footer="false" unmount-on-close>
-              <div class="drawer-intro"><span :class="editingRuleKind"><Ban v-if="editingRuleKind === 'blacklist'" :size="20" /><UserRoundCheck v-else :size="20" /></span><div><strong>{{ editingRuleKind === 'blacklist' ? '拒绝风险来源' : '放行可信来源' }}</strong><p>规则会写入安全策略并在应用层即时生效；User-Agent 规则不会写入主机防火墙。</p></div></div>
+    <a-modal
+      v-model:visible="ruleDrawerVisible"
+      modal-class="uvp-system-dialog security-rule-dialog"
+      :title="editingRuleKind === 'blacklist' ? '新增黑名单规则' : '新增白名单规则'"
+      :width="560"
+      :footer="false"
+      unmount-on-close
+    >
+      <div class="drawer-intro">
+        <span :class="editingRuleKind"
+          ><Ban v-if="editingRuleKind === 'blacklist'" :size="20" /><UserRoundCheck v-else :size="20"
+        /></span>
+        <div>
+          <strong>{{ editingRuleKind === "blacklist" ? "拒绝风险来源" : "放行可信来源" }}</strong>
+          <p>规则会写入安全策略并在应用层即时生效；User-Agent 规则不会写入主机防火墙。</p>
+        </div>
+      </div>
       <a-form :model="ruleFormModel" layout="vertical" class="rule-form">
-        <a-form-item label="规则类型"><a-radio-group v-model="ruleType" type="button"><a-radio value="IP">IP</a-radio><a-radio value="CIDR">CIDR</a-radio><a-radio value="User-Agent">User-Agent</a-radio></a-radio-group></a-form-item>
-        <a-form-item label="匹配内容" required><a-input v-model="ruleValue" :placeholder="ruleType === 'IP' ? '例如 203.0.113.12' : ruleType === 'CIDR' ? '例如 203.0.113.0/24' : '例如 friendly-scanner*'" /></a-form-item>
-        <a-form-item label="备注"><a-textarea v-model="ruleNote" placeholder="说明规则用途，方便后续复核" :max-length="80" show-word-limit /></a-form-item>
-        <a-form-item label="有效期"><a-select v-model="ruleExpiry"><a-option>10 分钟</a-option><a-option>1 小时</a-option><a-option>1 天</a-option><a-option>7 天</a-option><a-option>永久</a-option></a-select></a-form-item>
+        <a-form-item label="规则类型"
+          ><a-radio-group v-model="ruleType" type="button"
+            ><a-radio value="IP">IP</a-radio><a-radio value="CIDR">CIDR</a-radio
+            ><a-radio value="User-Agent">User-Agent</a-radio></a-radio-group
+          ></a-form-item
+        >
+        <a-form-item label="匹配内容" required
+          ><a-input
+            v-model="ruleValue"
+            :placeholder="
+              ruleType === 'IP' ? '例如 203.0.113.12' : ruleType === 'CIDR' ? '例如 203.0.113.0/24' : '例如 friendly-scanner*'
+            "
+        /></a-form-item>
+        <a-form-item label="备注"
+          ><a-textarea v-model="ruleNote" placeholder="说明规则用途，方便后续复核" :max-length="80" show-word-limit
+        /></a-form-item>
+        <a-form-item label="有效期"
+          ><a-select v-model="ruleExpiry"
+            ><a-option>10 分钟</a-option><a-option>1 小时</a-option><a-option>1 天</a-option><a-option>7 天</a-option
+            ><a-option>永久</a-option></a-select
+          ></a-form-item
+        >
       </a-form>
-      <a-alert v-if="editingRuleKind === 'allowlist'" type="warning">白名单只降低来源风险分，不会绕过 SIP 格式、鉴权和设备身份校验。</a-alert>
-      <div class="drawer-actions"><a-button @click="ruleDrawerVisible = false">取消</a-button><a-button type="primary" @click="saveRule">保存规则</a-button></div>
+      <a-alert v-if="editingRuleKind === 'allowlist'" type="warning"
+        >白名单只降低来源风险分，不会绕过 SIP 格式、鉴权和设备身份校验。</a-alert
+      >
+      <div class="drawer-actions">
+        <a-button @click="ruleDrawerVisible = false">取消</a-button><a-button type="primary" @click="saveRule">保存规则</a-button>
+      </div>
     </a-modal>
   </main>
 </template>
@@ -770,8 +1373,8 @@ onBeforeUnmount(() => {
 
 .security-shell {
   width: 100%;
-  max-width: 100%;
   min-width: 0;
+  max-width: 100%;
 }
 
 .security-preview--workspace {
@@ -780,9 +1383,9 @@ onBeforeUnmount(() => {
 
 .security-preview--workspace .security-shell {
   display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
-  flex-direction: column;
 }
 
 .security-nav,
@@ -809,9 +1412,9 @@ onBeforeUnmount(() => {
 }
 
 .security-nav {
-  align-items: flex-end;
   flex: 0 0 auto;
   gap: 20px;
+  align-items: flex-end;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--uvp-panel-border);
 }
@@ -819,8 +1422,8 @@ onBeforeUnmount(() => {
 .tab-actions {
   flex: 0 0 auto;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
   padding-bottom: 8px;
 }
 .live-dot {
@@ -828,24 +1431,30 @@ onBeforeUnmount(() => {
   width: 7px;
   height: 7px;
   margin-right: 6px;
-  border-radius: 50%;
   background: var(--uvp-brand-cyan);
+  border-radius: 50%;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--uvp-brand-cyan) 14%, transparent);
 }
 
 .security-live-status {
   display: inline-flex;
+  gap: 6px;
   align-items: center;
   min-height: 32px;
-  gap: 6px;
   padding: 0 4px;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.security-live-status--green { color: var(--uvp-success); }
-.security-live-status--orange { color: var(--uvp-warning); }
-.security-live-status--red { color: var(--uvp-danger); }
+.security-live-status--green {
+  color: var(--uvp-success);
+}
+.security-live-status--orange {
+  color: var(--uvp-warning);
+}
+.security-live-status--red {
+  color: var(--uvp-danger);
+}
 
 .security-tabs {
   flex: 1;
@@ -863,8 +1472,8 @@ onBeforeUnmount(() => {
 
 :deep(.security-tabs .arco-tabs-tab) {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
 
 :deep(.security-tabs .arco-tabs-tab svg) {
@@ -873,9 +1482,9 @@ onBeforeUnmount(() => {
 
 .uvp-system-panel,
 .metric-grid article {
+  background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: var(--uvp-panel-radius);
-  background: var(--uvp-panel-bg);
   box-shadow: var(--uvp-panel-shadow);
 }
 
@@ -896,12 +1505,12 @@ onBeforeUnmount(() => {
   position: relative;
   display: grid;
   flex: 0 0 54px;
+  place-items: center;
   width: 54px;
   height: 54px;
   color: var(--uvp-brand);
-  border-radius: 50%;
   background: var(--uvp-brand-soft);
-  place-items: center;
+  border-radius: 50%;
 }
 
 .shield-orbit::after {
@@ -910,13 +1519,13 @@ onBeforeUnmount(() => {
   content: "";
   border: 1px solid color-mix(in srgb, var(--uvp-brand) 28%, transparent);
   border-radius: 50%;
-  animation: shieldPulse 2.2s ease-out infinite;
+  animation: shield-pulse 2.2s ease-out infinite;
 }
 
 .section-label {
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
   font-weight: 650;
+  color: var(--uvp-text-tertiary);
 }
 
 .posture-main h2 {
@@ -926,21 +1535,21 @@ onBeforeUnmount(() => {
 
 .posture-main p {
   margin: 0;
-  color: var(--uvp-text-secondary);
   font-size: 13px;
   line-height: 1.5;
+  color: var(--uvp-text-secondary);
 }
 
 .advice-block {
-  width: 100%;
   gap: 12px;
+  width: 100%;
   padding: 16px 20px;
-  border: 0;
-  border-left: 1px solid var(--uvp-warning-border);
   color: inherit;
-  background: var(--uvp-warning-soft);
   text-align: left;
   cursor: pointer;
+  background: var(--uvp-warning-soft);
+  border: 0;
+  border-left: 1px solid var(--uvp-warning-border);
   transition: background-color 0.2s ease;
 }
 
@@ -951,25 +1560,25 @@ onBeforeUnmount(() => {
 .advice-block > span:first-child {
   display: grid;
   flex: 0 0 34px;
+  place-items: center;
   width: 34px;
   height: 34px;
   color: var(--uvp-warning);
-  border-radius: 8px;
   background: color-mix(in srgb, var(--uvp-warning) 12%, transparent);
-  place-items: center;
+  border-radius: 8px;
 }
 
 .advice-block > span:nth-child(2) {
   display: flex;
   flex: 1;
-  min-width: 0;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .advice-block small {
-  color: var(--uvp-text-secondary);
   line-height: 1.45;
+  color: var(--uvp-text-secondary);
 }
 
 .metric-grid {
@@ -985,8 +1594,8 @@ onBeforeUnmount(() => {
 }
 
 .metric-grid article > span {
-  color: var(--uvp-text-tertiary);
   font-size: 12px;
+  color: var(--uvp-text-tertiary);
 }
 
 .metric-grid strong {
@@ -998,8 +1607,8 @@ onBeforeUnmount(() => {
 
 .metric-grid small {
   display: flex;
-  align-items: center;
   gap: 5px;
+  align-items: center;
   color: var(--uvp-text-secondary);
 }
 
@@ -1028,9 +1637,9 @@ onBeforeUnmount(() => {
 }
 
 .panel-heading {
-  min-height: 40px;
-  justify-content: space-between;
   gap: 16px;
+  justify-content: space-between;
+  min-height: 40px;
 }
 
 .panel-heading h3 {
@@ -1042,18 +1651,18 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, 42px);
   padding: 3px;
+  background: var(--uvp-table-header-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 7px;
-  background: var(--uvp-table-header-bg);
 }
 
 .period-switch button {
   height: 27px;
+  color: var(--uvp-text-tertiary);
+  cursor: pointer;
+  background: transparent;
   border: 0;
   border-radius: 5px;
-  color: var(--uvp-text-tertiary);
-  background: transparent;
-  cursor: pointer;
 }
 
 .period-switch button.active {
@@ -1065,8 +1674,8 @@ onBeforeUnmount(() => {
 .chart-legend {
   gap: 16px;
   margin-top: 12px;
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
+  color: var(--uvp-text-tertiary);
 }
 
 .chart-legend span {
@@ -1098,35 +1707,35 @@ onBeforeUnmount(() => {
 
 .empty-state {
   display: grid;
+  gap: 8px;
+  place-items: center;
+  align-content: center;
   min-height: 180px;
   padding: 24px 18px;
   color: var(--uvp-text-secondary);
   text-align: center;
-  place-items: center;
-  align-content: center;
-  gap: 8px;
 }
 
 .empty-state-icon {
   display: grid;
+  place-items: center;
   width: 42px;
   height: 42px;
   color: var(--uvp-text-tertiary);
+  background: var(--uvp-list-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 50%;
-  background: var(--uvp-list-panel-bg);
-  place-items: center;
 }
 
 .empty-state strong {
-  color: var(--uvp-text-primary);
   font-size: 13px;
+  color: var(--uvp-text-primary);
 }
 
 .empty-state small {
   max-width: 310px;
-  color: var(--uvp-text-tertiary);
   line-height: 1.55;
+  color: var(--uvp-text-tertiary);
 }
 
 .chart-empty {
@@ -1142,21 +1751,21 @@ onBeforeUnmount(() => {
 }
 
 .defense-item {
-  min-height: 58px;
   gap: 11px;
+  min-height: 58px;
   padding: 10px 12px;
+  background: var(--uvp-list-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 8px;
-  background: var(--uvp-list-panel-bg);
 }
 
 .defense-item > span:first-child {
   display: grid;
   flex: 0 0 34px;
+  place-items: center;
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  place-items: center;
 }
 
 .defense-item.pending > span:first-child {
@@ -1172,15 +1781,15 @@ onBeforeUnmount(() => {
 .defense-item > div {
   display: flex;
   flex: 1;
-  min-width: 0;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .defense-item small,
 .signal-row small {
-  color: var(--uvp-text-tertiary);
   line-height: 1.45;
+  color: var(--uvp-text-tertiary);
 }
 
 .chain-line {
@@ -1202,24 +1811,24 @@ onBeforeUnmount(() => {
 .live-toggle {
   gap: 6px;
   padding: 6px 9px;
+  color: var(--uvp-brand-cyan);
+  cursor: pointer;
+  background: var(--uvp-list-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 7px;
-  color: var(--uvp-brand-cyan);
-  background: var(--uvp-list-panel-bg);
-  cursor: pointer;
 }
 
 .signal-row {
+  gap: 10px;
   width: 100%;
   min-height: 58px;
-  gap: 10px;
   padding: 10px 4px;
-  border: 0;
-  border-bottom: 1px solid var(--uvp-panel-border);
   color: inherit;
-  background: transparent;
   text-align: left;
   cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--uvp-panel-border);
 }
 
 .signal-row:last-child {
@@ -1248,44 +1857,44 @@ onBeforeUnmount(() => {
 .signal-row > span:nth-child(2) {
   display: flex;
   flex: 1;
-  min-width: 0;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .signal-row b {
-  color: var(--uvp-text-secondary);
   font-size: 12px;
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
 
 .attention-row {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) 18px;
+  gap: 12px;
+  align-items: center;
   width: 100%;
   min-height: 76px;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
   padding: 12px;
-  border: 1px solid var(--uvp-list-panel-border);
-  border-radius: 8px;
+  margin-top: 10px;
   color: inherit;
-  background: var(--uvp-list-panel-bg);
   text-align: left;
   cursor: pointer;
+  background: var(--uvp-list-panel-bg);
+  border: 1px solid var(--uvp-list-panel-border);
+  border-radius: 8px;
 }
 
 .attention-row:hover {
-  border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
   background: var(--uvp-table-row-hover-bg);
+  border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
 }
 
 .attention-row > span:nth-child(2) {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .attention-row strong {
@@ -1294,8 +1903,8 @@ onBeforeUnmount(() => {
 }
 
 .attention-row small {
-  color: var(--uvp-text-tertiary);
   line-height: 1.5;
+  color: var(--uvp-text-tertiary);
 }
 
 .attention-row > svg {
@@ -1305,22 +1914,22 @@ onBeforeUnmount(() => {
 
 .attention-count {
   display: grid;
+  place-items: center;
   min-width: 26px;
   height: 26px;
   color: var(--uvp-warning);
-  border-radius: 50%;
   background: var(--uvp-warning-soft);
-  place-items: center;
+  border-radius: 50%;
 }
 
 .attention-icon,
 .agent-icon {
   display: grid;
   flex: 0 0 36px;
+  place-items: center;
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  place-items: center;
 }
 
 .attention-icon.danger {
@@ -1381,7 +1990,10 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.drawer-actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
+.drawer-actions :deep(.arco-btn) {
+  box-sizing: border-box;
+  border-radius: 10px;
+}
 
 .security-table {
   flex: 1;
@@ -1421,7 +2033,7 @@ onBeforeUnmount(() => {
 }
 
 .mono {
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: SFMono-Regular, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1433,8 +2045,8 @@ onBeforeUnmount(() => {
 
 .severity {
   display: inline-flex;
-  align-items: center;
   gap: 6px;
+  align-items: center;
   padding: 4px 7px;
   border-radius: 6px;
 }
@@ -1480,9 +2092,9 @@ onBeforeUnmount(() => {
 .enforcement-tags,
 .ban-actions {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
 }
 
 .mode-selector {
@@ -1495,17 +2107,19 @@ onBeforeUnmount(() => {
 .mode-selector button {
   position: relative;
   display: flex;
-  min-height: 76px;
-  align-items: center;
   gap: 12px;
+  align-items: center;
+  min-height: 76px;
   padding: 13px 14px;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 9px;
   color: inherit;
-  background: var(--uvp-list-panel-bg);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  background: var(--uvp-list-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 9px;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .mode-selector button:hover {
@@ -1513,27 +2127,27 @@ onBeforeUnmount(() => {
 }
 
 .mode-selector button.active {
-  border-color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
+  border-color: var(--uvp-brand);
 }
 
 .mode-icon {
   display: grid;
   flex: 0 0 40px;
+  place-items: center;
   width: 40px;
   height: 40px;
   color: var(--uvp-text-secondary);
-  border-radius: 8px;
   background: var(--uvp-panel-bg);
-  place-items: center;
+  border-radius: 8px;
 }
 
 .mode-copy {
   display: flex;
-  min-width: 0;
   flex: 1;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
 }
 
 .mode-selector button.active .mode-icon,
@@ -1543,8 +2157,8 @@ onBeforeUnmount(() => {
 
 .mode-heading {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
 
 .mode-heading strong {
@@ -1553,12 +2167,12 @@ onBeforeUnmount(() => {
 
 .mode-heading em {
   padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--uvp-text-secondary);
-  background: var(--uvp-table-header-bg);
   font-size: 10px;
   font-style: normal;
   font-weight: 500;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-table-header-bg);
+  border-radius: 4px;
 }
 
 .mode-selector button.active .mode-heading em {
@@ -1568,8 +2182,8 @@ onBeforeUnmount(() => {
 
 .mode-copy small {
   min-width: 0;
-  color: var(--uvp-text-tertiary);
   line-height: 1.45;
+  color: var(--uvp-text-tertiary);
 }
 
 .mode-check {
@@ -1579,27 +2193,27 @@ onBeforeUnmount(() => {
 .mode-explainer {
   margin-bottom: 14px;
   overflow: hidden;
+  background: color-mix(in srgb, var(--uvp-brand) 4%, var(--uvp-list-panel-bg));
   border: 1px solid color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--uvp-brand) 4%, var(--uvp-list-panel-bg));
 }
 
 .mode-explainer-heading {
   display: flex;
-  align-items: flex-start;
   gap: 12px;
+  align-items: flex-start;
   padding: 15px 16px 14px;
 }
 
 .mode-explainer-heading > span {
   display: grid;
   flex: 0 0 40px;
+  place-items: center;
   width: 40px;
   height: 40px;
   color: var(--uvp-brand-strong);
-  border-radius: 8px;
   background: var(--uvp-brand-soft);
-  place-items: center;
+  border-radius: 8px;
 }
 
 .mode-explainer-heading > div {
@@ -1607,8 +2221,8 @@ onBeforeUnmount(() => {
 }
 
 .mode-explainer-heading small {
-  color: var(--uvp-brand-strong);
   font-weight: 600;
+  color: var(--uvp-brand-strong);
 }
 
 .mode-explainer-heading h3,
@@ -1623,16 +2237,16 @@ onBeforeUnmount(() => {
 
 .mode-explainer-heading p {
   margin-top: 5px;
-  color: var(--uvp-text-secondary);
   font-size: 12px;
   line-height: 1.55;
+  color: var(--uvp-text-secondary);
 }
 
 .mode-result-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--uvp-panel-border);
   background: var(--uvp-list-panel-bg);
+  border-top: 1px solid var(--uvp-panel-border);
 }
 
 .mode-result-grid article {
@@ -1652,19 +2266,19 @@ onBeforeUnmount(() => {
 
 .mode-result-grid span {
   margin-bottom: 5px;
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
+  color: var(--uvp-text-tertiary);
 }
 
 .mode-result-grid strong {
-  color: var(--uvp-text-primary);
   font-size: 12px;
   line-height: 1.5;
+  color: var(--uvp-text-primary);
 }
 
 .mode-explainer.mode-observe {
-  border-color: var(--uvp-warning-border);
   background: var(--uvp-warning-soft);
+  border-color: var(--uvp-warning-border);
 }
 
 .mode-explainer.mode-observe .mode-explainer-heading > span,
@@ -1673,8 +2287,8 @@ onBeforeUnmount(() => {
 }
 
 .mode-explainer.mode-strict {
-  border-color: color-mix(in srgb, var(--uvp-danger) 24%, var(--uvp-panel-border));
   background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-list-panel-bg));
+  border-color: color-mix(in srgb, var(--uvp-danger) 24%, var(--uvp-panel-border));
 }
 
 .mode-explainer.mode-strict .mode-explainer-heading > span,
@@ -1690,27 +2304,27 @@ onBeforeUnmount(() => {
 
 .policy-section {
   overflow: hidden;
+  background: var(--uvp-list-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 9px;
-  background: var(--uvp-list-panel-bg);
 }
 
 .policy-title {
   gap: 11px;
   min-height: 70px;
   padding: 13px 16px;
-  border-bottom: 1px solid var(--uvp-panel-border);
   background: var(--uvp-table-header-bg);
+  border-bottom: 1px solid var(--uvp-panel-border);
 }
 
 .policy-title > span {
   display: grid;
+  place-items: center;
   width: 36px;
   height: 36px;
   color: var(--uvp-brand);
-  border-radius: 8px;
   background: var(--uvp-brand-soft);
-  place-items: center;
+  border-radius: 8px;
 }
 
 .policy-title h3,
@@ -1724,14 +2338,14 @@ onBeforeUnmount(() => {
 
 .policy-title p {
   margin-top: 4px;
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
+  color: var(--uvp-text-tertiary);
 }
 
 .setting-row,
 .ttl-row {
-  min-height: 68px;
   gap: 14px;
+  min-height: 68px;
   padding: 11px 16px;
   border-bottom: 1px solid var(--uvp-panel-border);
 }
@@ -1742,24 +2356,24 @@ onBeforeUnmount(() => {
 .cloud-roadmap > span:nth-child(2) {
   display: flex;
   flex: 1;
-  min-width: 0;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .setting-row small,
 .ttl-row small,
 .agent-status small,
 .cloud-roadmap small {
-  color: var(--uvp-text-tertiary);
   line-height: 1.45;
+  color: var(--uvp-text-tertiary);
 }
 
 .threshold-control {
   display: flex;
   flex: 0 0 auto;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
 }
@@ -1770,8 +2384,8 @@ onBeforeUnmount(() => {
 
 .agent-status,
 .cloud-roadmap {
-  min-height: 72px;
   gap: 11px;
+  min-height: 72px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--uvp-panel-border);
 }
@@ -1787,8 +2401,8 @@ onBeforeUnmount(() => {
 }
 
 .ttl-row {
-  align-items: flex-start;
   flex-direction: column;
+  align-items: flex-start;
 }
 
 .ttl-row > div {
@@ -1798,8 +2412,8 @@ onBeforeUnmount(() => {
 
 .cloud-roadmap {
   color: var(--uvp-warning);
-  border-bottom: 0;
   background: var(--uvp-warning-soft);
+  border-bottom: 0;
 }
 
 .cloud-roadmap strong {
@@ -1808,20 +2422,20 @@ onBeforeUnmount(() => {
 
 .drawer-intro {
   gap: 11px;
-  margin-bottom: 18px;
   padding: 12px;
+  margin-bottom: 18px;
+  background: var(--uvp-list-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 9px;
-  background: var(--uvp-list-panel-bg);
 }
 
 .drawer-intro > span {
   display: grid;
   flex: 0 0 40px;
+  place-items: center;
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  place-items: center;
 }
 
 .drawer-intro > span.blacklist {
@@ -1836,39 +2450,73 @@ onBeforeUnmount(() => {
 
 .drawer-intro p {
   margin: 4px 0 0;
-  color: var(--uvp-text-tertiary);
   line-height: 1.5;
+  color: var(--uvp-text-tertiary);
 }
 
 .drawer-actions {
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
   margin-top: 18px;
 }
 
-@keyframes shieldPulse {
-  from { opacity: 0.72; transform: scale(0.88); }
-  to { opacity: 0; transform: scale(1.16); }
+@keyframes shield-pulse {
+  from {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.16);
+  }
 }
 
-@media (max-width: 1180px) {
-  .posture-panel { grid-template-columns: 1fr; }
-  .advice-block { border-top: 1px solid var(--uvp-warning-border); border-left: 0; }
-  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (width <= 1180px) {
+  .posture-panel {
+    grid-template-columns: 1fr;
+  }
+  .advice-block {
+    border-top: 1px solid var(--uvp-warning-border);
+    border-left: 0;
+  }
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .overview-grid,
-  .lower-grid { grid-template-columns: 1fr; }
+  .lower-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
-@media (max-width: 820px) {
-  .security-preview { padding: 16px; }
-  .security-nav { align-items: stretch; flex-direction: column-reverse; gap: 0; }
-  .tab-actions { width: 100%; justify-content: flex-end; padding-bottom: 6px; }
-  .posture-panel { grid-template-columns: 1fr; }
+@media (width <= 820px) {
+  .security-preview {
+    padding: 16px;
+  }
+  .security-nav {
+    flex-direction: column-reverse;
+    gap: 0;
+    align-items: stretch;
+  }
+  .tab-actions {
+    justify-content: flex-end;
+    width: 100%;
+    padding-bottom: 6px;
+  }
+  .posture-panel {
+    grid-template-columns: 1fr;
+  }
   .mode-selector,
   .policy-grid,
-  .mode-result-grid { grid-template-columns: 1fr; }
-  .mode-result-grid article { border-right: 0; border-bottom: 1px solid var(--uvp-panel-border); }
-  .mode-result-grid article:last-child { border-bottom: 0; }
+  .mode-result-grid {
+    grid-template-columns: 1fr;
+  }
+  .mode-result-grid article {
+    border-right: 0;
+    border-bottom: 1px solid var(--uvp-panel-border);
+  }
+  .mode-result-grid article:last-child {
+    border-bottom: 0;
+  }
   .security-list-filter,
   .security-list-filter--keyword,
   .security-list-filter--status {
@@ -1877,34 +2525,68 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 520px) {
-  .security-preview { padding: 12px; }
-  .tab-actions :deep(.arco-tag) { display: none; }
-  .tab-actions :deep(.arco-btn) { flex: 1; }
-  :deep(.security-tabs .arco-tabs-nav-tab-list) { gap: 0; }
-  :deep(.security-tabs .arco-tabs-tab) { padding-right: 10px; padding-left: 10px; }
-  .metric-grid { grid-template-columns: 1fr; }
-  .posture-main { align-items: flex-start; padding: 17px; }
-  .shield-orbit { flex-basis: 46px; width: 46px; height: 46px; }
+@media (width <= 520px) {
+  .security-preview {
+    padding: 12px;
+  }
+  .tab-actions :deep(.arco-tag) {
+    display: none;
+  }
+  .tab-actions :deep(.arco-btn) {
+    flex: 1;
+  }
+  :deep(.security-tabs .arco-tabs-nav-tab-list) {
+    gap: 0;
+  }
+  :deep(.security-tabs .arco-tabs-tab) {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+  .posture-main {
+    align-items: flex-start;
+    padding: 17px;
+  }
+  .shield-orbit {
+    flex-basis: 46px;
+    width: 46px;
+    height: 46px;
+  }
   .chart-panel,
   .defense-panel,
   .signal-panel,
-  .attention-panel { padding: 14px; }
-  .period-switch { grid-template-columns: repeat(3, 36px); }
-  .chart-legend b { display: none; }
-  .trend-chart { height: 220px; }
-  .drawer-actions :deep(.arco-btn) { flex: 1; }
-  .setting-row { align-items: flex-start; }
-  .threshold-control { align-self: flex-end; }
+  .attention-panel {
+    padding: 14px;
+  }
+  .period-switch {
+    grid-template-columns: repeat(3, 36px);
+  }
+  .chart-legend b {
+    display: none;
+  }
+  .trend-chart {
+    height: 220px;
+  }
+  .drawer-actions :deep(.arco-btn) {
+    flex: 1;
+  }
+  .setting-row {
+    align-items: flex-start;
+  }
+  .threshold-control {
+    align-self: flex-end;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
+    transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
 }
 </style>

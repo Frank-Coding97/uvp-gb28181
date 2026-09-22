@@ -23,8 +23,16 @@ vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userStore }));
 vi.mock("@/globals", () => ({ formatTime: (value: string) => value, throttle: (fn: (...args: any[]) => any) => fn }));
 
 const log = (id = 1) => ({
-  id, userId: 7, username: "alice", result: "failure", failureReason: "unknown_reason",
-  ip: "10.0.0.1", location: "内网", browser: "Chrome", os: "macOS", createdAt: "2026-08-18T07:00:00Z"
+  id,
+  userId: 7,
+  username: "alice",
+  result: "failure",
+  failureReason: "unknown_reason",
+  ip: "10.0.0.1",
+  location: "内网",
+  browser: "Chrome",
+  os: "macOS",
+  createdAt: "2026-08-18T07:00:00Z"
 });
 
 function mountPage() {
@@ -59,7 +67,9 @@ function mountPage() {
 describe("login log page", () => {
   beforeEach(() => {
     api.getLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { list: [log()], total: 1 } });
-    api.getLoginLogDetailAPI.mockReset().mockResolvedValue({ code: 0, data: { ...log(), failureReason: "password_incorrect", userAgent: "Mozilla/5.0" } });
+    api.getLoginLogDetailAPI
+      .mockReset()
+      .mockResolvedValue({ code: 0, data: { ...log(), failureReason: "password_incorrect", userAgent: "Mozilla/5.0" } });
     api.deleteLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { deletedCount: 1 } });
     api.clearLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { deletedCount: 1 } });
     api.unlockLoginLogAccountAPI.mockReset().mockResolvedValue({ code: 0, data: null });
@@ -69,7 +79,7 @@ describe("login log page", () => {
   it("loads, filters, resets, and falls back for unknown failure reasons", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    expect(api.getLoginLogsAPI).toHaveBeenCalledWith({ pageNum: 1, pageSize: 20 });
+    expect(api.getLoginLogsAPI).toHaveBeenCalledWith({ pageNum: 1, pageSize: 10 });
     expect((wrapper.vm as any).failureLabel("unknown_reason")).toBe("其他失败");
 
     const vm = wrapper.vm as any;
@@ -80,11 +90,17 @@ describe("login log page", () => {
     vm.dateRange = ["2026-08-18 00:00:00", "2026-08-18 23:59:59"];
     await vm.search();
     expect(api.getLoginLogsAPI).toHaveBeenLastCalledWith({
-      pageNum: 1, pageSize: 20, username: "alice", result: "failure", failureReason: "password_incorrect", ip: "10.0.0.1",
-      startTime: "2026-08-18 00:00:00", endTime: "2026-08-18 23:59:59"
+      pageNum: 1,
+      pageSize: 10,
+      username: "alice",
+      result: "failure",
+      failureReason: "password_incorrect",
+      ip: "10.0.0.1",
+      startTime: "2026-08-18 00:00:00",
+      endTime: "2026-08-18 23:59:59"
     });
     await vm.reset();
-    expect(api.getLoginLogsAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 20 });
+    expect(api.getLoginLogsAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 10 });
   });
 
   it("loads detail separately and exposes a readable user-agent", async () => {
