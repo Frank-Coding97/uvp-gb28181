@@ -205,7 +205,11 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
 	if !settings.Enabled {
-		return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit"})
+		result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID})
+		if err == nil && result != nil {
+			s.recordLifecycle(ctx, Request{DeviceID: deviceID, ChannelID: channelID, LifecycleID: req.LifecycleID}, LifecycleEvent{Stage: StageAuthorization, EventName: EventPlayURLIssued, FactState: FactConfirmed, Source: SourcePlayService, StreamID: result.StreamID})
+		}
+		return result, err
 	}
 	issuer, ok := s.tokenIssuer.(preparedTokenIssuer)
 	if !ok || issuer == nil {
@@ -223,7 +227,7 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 	if err != nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
-	result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit"})
+	result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID})
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +235,10 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 		// The generation may already serve another authorized caller even
 		// when this request created it. Caller denial is not media ownership;
 		// transfer cleanup and actual start failure compensation remain separate.
+		s.recordLifecycle(ctx, Request{DeviceID: deviceID, ChannelID: channelID, LifecycleID: req.LifecycleID}, LifecycleEvent{Stage: StageAuthorization, EventName: EventAuthorizationFailed, FactState: FactFailed, Source: SourcePlayService, ReasonCode: ReasonAuthorizationFailed, ReasonMessage: err.Error()})
 		return nil, err
 	}
+	s.recordLifecycle(ctx, Request{DeviceID: deviceID, ChannelID: channelID, LifecycleID: req.LifecycleID}, LifecycleEvent{Stage: StageAuthorization, EventName: EventPlayURLIssued, FactState: FactConfirmed, Source: SourcePlayService, StreamID: result.StreamID})
 	return result, nil
 }
 

@@ -106,6 +106,9 @@ export const deleteChannelFavoriteGroup = (groupId: number) =>
 // ===== 点播 =====
 
 export interface PlayResult {
+  lifecycleId?: string;
+  clientFeedbackToken?: string;
+  clientFeedbackExpiresAt?: number;
   streamId: string;
   ssrc: string;
   app: string;
@@ -148,6 +151,65 @@ export interface PlayResult {
 
 export type PlayApiResult = BaseResult<PlayResult>;
 
+export interface PlaybackClientFact {
+  event: "first_frame" | "player_error";
+  code?: "player_error" | "player_timeout";
+  clientElapsedMs: number;
+}
+
+export interface PlayLifecycleSummary {
+  lifecycleId: string;
+  deviceCode: string;
+  channelCode: string;
+  nodeId: number;
+  reused: boolean;
+  streamId: string;
+  ssrc: string;
+  currentStage: string;
+  mediaState: string;
+  clientState: string;
+  lifecycleState: string;
+  failureStage?: string;
+  reasonCode?: string;
+  reasonMessage?: string;
+  startedAt: string;
+  lastEventAt?: string;
+  finishedAt?: string;
+}
+
+export interface PlayLifecycleEvent {
+  sequence: number;
+  eventAt: string;
+  elapsedMs: number;
+  stage: string;
+  eventName: string;
+  factState: string;
+  source: string;
+  streamId?: string;
+  nodeId?: number;
+  ssrc?: string;
+  reused: boolean;
+  callId?: string;
+  cseq?: string;
+  reasonCode?: string;
+  reasonMessage?: string;
+}
+
+export interface PlayLifecycleQuery {
+  page?: number;
+  pageSize?: number;
+  from?: string;
+  to?: string;
+  deviceCode?: string;
+  channelCode?: string;
+  streamId?: string;
+  nodeId?: number;
+  lifecycleState?: string;
+  mediaState?: string;
+  clientState?: string;
+  failureStage?: string;
+}
+
 // ===== API =====
 
 /** 设备列表(分页) */
@@ -187,6 +249,27 @@ export interface StopPlayResult {
 /** 停播 */
 export const stopPlay = (streamId: string) =>
   http.request<BaseResult<StopPlayResult>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
+
+export const reportPlaybackClientEvent = (lifecycleId: string, token: string, data: PlaybackClientFact) =>
+  http.request<BaseResult<{ accepted: boolean }>>(
+    "post",
+    baseUrlApi(`gb28181/play/lifecycles/${lifecycleId}/client-events`),
+    { data, headers: { "X-Playback-Feedback-Token": token } },
+    silentRequestConfig
+  );
+
+export const listPlayLifecycles = (params: PlayLifecycleQuery = {}) =>
+  http.request<BaseResult<{ list: PlayLifecycleSummary[]; total: number; page: number; pageSize: number }>>(
+    "get",
+    baseUrlApi("gb28181/play/lifecycles"),
+    { params }
+  );
+
+export const getPlayLifecycle = (lifecycleId: string) =>
+  http.request<BaseResult<{ lifecycle: PlayLifecycleSummary; events: PlayLifecycleEvent[] }>>(
+    "get",
+    baseUrlApi(`gb28181/play/lifecycles/${lifecycleId}`)
+  );
 
 // ===== 国标级联 =====
 

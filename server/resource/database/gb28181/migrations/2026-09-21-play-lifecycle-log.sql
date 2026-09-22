@@ -1,0 +1,56 @@
+-- Playback lifecycle summary and immutable event facts (MySQL 5.7+).
+SET @attempt_exists := (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='gb_play_attempt');
+SET @lifecycle_columns_exist := (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='gb_play_attempt' AND column_name='lifecycle_state');
+SET @sql := IF(@attempt_exists=1 AND @lifecycle_columns_exist=0,
+  'ALTER TABLE `gb_play_attempt`
+    ADD COLUMN `stream_id` varchar(128) NOT NULL DEFAULT '''',
+    ADD COLUMN `ssrc` varchar(32) NOT NULL DEFAULT '''',
+    ADD COLUMN `call_id` varchar(128) NOT NULL DEFAULT '''',
+    ADD COLUMN `cseq` varchar(32) NOT NULL DEFAULT '''',
+    ADD COLUMN `current_stage` varchar(32) NOT NULL DEFAULT ''unknown'',
+    ADD COLUMN `media_state` varchar(32) NOT NULL DEFAULT ''unknown'',
+    ADD COLUMN `client_state` varchar(32) NOT NULL DEFAULT ''unknown'',
+    ADD COLUMN `lifecycle_state` varchar(32) NOT NULL DEFAULT ''in_progress'',
+    ADD COLUMN `reason_code` varchar(64) NOT NULL DEFAULT '''',
+    ADD COLUMN `reason_message` varchar(256) NOT NULL DEFAULT '''',
+    ADD COLUMN `client_first_frame_at` datetime(3) NULL,
+    ADD COLUMN `client_error_at` datetime(3) NULL,
+    ADD COLUMN `client_error_code` varchar(64) NOT NULL DEFAULT '''',
+    ADD COLUMN `last_event_at` datetime(3) NULL,
+    ADD INDEX `idx_play_attempt_lifecycle_started` (`lifecycle_state`,`started_at`),
+    ADD INDEX `idx_play_attempt_stream_node` (`stream_id`,`node_id`)',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS `gb_play_lifecycle_event` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` varchar(64) NOT NULL,
+  `lifecycle_id` varchar(64) NOT NULL,
+  `sequence` bigint NOT NULL,
+  `event_at` datetime(3) NOT NULL,
+  `elapsed_ms` bigint NOT NULL DEFAULT 0,
+  `stage` varchar(32) NOT NULL,
+  `event_name` varchar(64) NOT NULL,
+  `fact_state` varchar(32) NOT NULL,
+  `source` varchar(32) NOT NULL,
+  `device_code` varchar(20) NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `stream_id` varchar(128) NOT NULL DEFAULT '',
+  `node_id` bigint NOT NULL DEFAULT 0,
+  `ssrc` varchar(32) NOT NULL DEFAULT '',
+  `reused` tinyint(1) NOT NULL DEFAULT 0,
+  `call_id` varchar(128) NOT NULL DEFAULT '',
+  `cseq` varchar(32) NOT NULL DEFAULT '',
+  `reason_code` varchar(64) NOT NULL DEFAULT '',
+  `reason_message` varchar(256) NOT NULL DEFAULT '',
+  `metadata_json` json NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_play_lifecycle_event_id` (`event_id`),
+  UNIQUE KEY `uk_play_lifecycle_sequence` (`lifecycle_id`,`sequence`),
+  KEY `idx_play_lifecycle_event_lifecycle_sequence` (`lifecycle_id`,`sequence`),
+  KEY `idx_play_lifecycle_event_at` (`event_at`),
+  KEY `idx_play_lifecycle_event_device_at` (`device_code`,`event_at`),
+  KEY `idx_play_lifecycle_event_stream_node` (`stream_id`,`node_id`),
+  KEY `idx_play_lifecycle_event_stage` (`stage`,`fact_state`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

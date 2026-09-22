@@ -6,6 +6,7 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  controlPtzWiper,
   createDeviceSnapshotSession,
   createStreamProbe,
   fetchPTZDefaultSpeedConfig,
@@ -33,6 +34,7 @@ import {
   getStreamProbeOperation,
   listCruiseTracks,
   listPtzPresets,
+  reportPlaybackClientEvent,
   startPlay,
   updateHomePosition,
   updatePositionHistoryConfig,
@@ -64,10 +66,22 @@ describe("国标服务配置 API", () => {
   it("点播请求可关闭公共错误消息", async () => {
     await startPlay("device-1", "channel-1", { silent: true });
 
+    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/play/device-1/channel-1", undefined, { showErrorMessage: false });
+  });
+
+  it("客户端播放事实使用独立反馈凭据并静默失败", async () => {
+    await reportPlaybackClientEvent("life-1", "feedback-token", {
+      event: "first_frame",
+      clientElapsedMs: 321
+    });
+
     expect(request).toHaveBeenCalledWith(
       "post",
-      "/api/gb28181/play/device-1/channel-1",
-      undefined,
+      "/api/gb28181/play/lifecycles/life-1/client-events",
+      {
+        data: { event: "first_frame", clientElapsedMs: 321 },
+        headers: { "X-Playback-Feedback-Token": "feedback-token" }
+      },
       { showErrorMessage: false }
     );
   });
@@ -83,12 +97,10 @@ describe("国标服务配置 API", () => {
     );
 
     await getStreamProbeOperation("probe-op-1");
-    expect(request).toHaveBeenLastCalledWith(
-      "get",
-      "/api/gb28181/stream-probes/operations/probe-op-1",
-      undefined,
-      { showErrorMessage: false, timeout: 10000 }
-    );
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/stream-probes/operations/probe-op-1", undefined, {
+      showErrorMessage: false,
+      timeout: 10000
+    });
   });
 
   it("读取移动位置历史轨迹开关", async () => {
@@ -98,11 +110,9 @@ describe("国标服务配置 API", () => {
 
   it("同时提交轨迹开关和保留天数", async () => {
     await updatePositionHistoryConfig({ enabled: false, retentionDays: 30 });
-    expect(request).toHaveBeenCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/position-history",
-      { data: { enabled: false, retentionDays: 30 } }
-    );
+    expect(request).toHaveBeenCalledWith("put", "/api/gb28181/sip/service-config/position-history", {
+      data: { enabled: false, retentionDays: 30 }
+    });
   });
 
   it("读取并更新扩展 SDP 兼容模式", async () => {
@@ -110,11 +120,7 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sdp-extension");
 
     await updateSDPExtensionConfig(true);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/sdp-extension",
-      { data: { enabled: true } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sdp-extension", { data: { enabled: true } });
   });
 
   it("读取并更新云台默认速度档位", async () => {
@@ -122,26 +128,32 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/ptz-default-speed");
 
     await updatePTZDefaultSpeedConfig(10);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/ptz-default-speed",
-      { data: { level: 10 } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/ptz-default-speed", { data: { level: 10 } });
   });
 
   it("创建并读取设备图像抓拍任务", async () => {
     await createDeviceSnapshotSession(31, { snapNum: 2, interval: 3 });
-    expect(request).toHaveBeenLastCalledWith(
-      "post",
-      "/api/gb28181/device-mgmt/channel/31/snapshot-sessions",
-      { data: { snapNum: 2, interval: 3 }, headers: { "Idempotency-Key": expect.stringMatching(/^snapshot-31-/) } }
-    );
+    expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/device-mgmt/channel/31/snapshot-sessions", {
+      data: { snapNum: 2, interval: 3 },
+      headers: { "Idempotency-Key": expect.stringMatching(/^snapshot-31-/) }
+    });
 
     await getDeviceSnapshotSession(31, "snap/1");
-    expect(request).toHaveBeenLastCalledWith(
-      "get",
-      "/api/gb28181/device-mgmt/channel/31/snapshot-sessions/snap%2F1"
-    );
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/device-mgmt/channel/31/snapshot-sessions/snap%2F1");
+  });
+
+  it("雨刷走独立路由,只发 on/off(编号 1 由后端钉死)", async () => {
+    await controlPtzWiper(12, { action: "on" });
+    // ⛔ 路径里没有编号,请求体里也没有 auxiliaryId:标准在 A.3.7 只命名了编号 1 = 雨刷,
+    //    编号由后端固定 —— 放开这个入参等于把编号 2~5 那些标准未定义的语义请进 API 面。
+    expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/device-mgmt/channel/12/ptz/wiper", {
+      data: { action: "on" }
+    });
+
+    await controlPtzWiper(12, { action: "off" });
+    expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/device-mgmt/channel/12/ptz/wiper", {
+      data: { action: "off" }
+    });
   });
 
   it("读取并更新新通道默认流传输模式", async () => {
@@ -149,11 +161,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-stream-transport");
 
     await updateDefaultChannelStreamTransportConfig("TCP-Active");
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/default-channel-stream-transport",
-      { data: { transport: "TCP-Active" } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-channel-stream-transport", {
+      data: { transport: "TCP-Active" }
+    });
   });
 
   it("读取并更新默认播放协议", async () => {
@@ -161,11 +171,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-playback-protocol");
 
     await updateDefaultPlaybackProtocolConfig("webrtc");
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/default-playback-protocol",
-      { data: { protocol: "webrtc" } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-playback-protocol", {
+      data: { protocol: "webrtc" }
+    });
   });
 
   it("使用聚合 API 读取并更新全局播放策略", async () => {
@@ -174,27 +182,16 @@ describe("国标服务配置 API", () => {
 
     const config = { playTimeoutMs: 15000, onDemandLive: false, cloudRecordingEnabled: true };
     await updatePlaybackSettingsConfig(config);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/playback-settings",
-      { data: config }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/playback-settings", { data: config });
   });
 
   it("读取并完整更新固定播放地址与自动点播配置", async () => {
     await fetchFixedAddressPlaybackConfig();
-    expect(request).toHaveBeenLastCalledWith(
-      "get",
-      "/api/gb28181/sip/service-config/fixed-address-playback"
-    );
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/fixed-address-playback");
 
     const config = { fixedAddressEnabled: true, autoOnDemandEnabled: false };
     await updateFixedAddressPlaybackConfig(config);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/fixed-address-playback",
-      { data: config }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/fixed-address-playback", { data: config });
   });
 
   it("读取并更新全局订阅项目", async () => {
@@ -202,11 +199,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/global-subscriptions");
 
     await updateGlobalSubscriptionConfig(["catalog", "alarm"]);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/global-subscriptions",
-      { data: { items: ["catalog", "alarm"] } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/global-subscriptions", {
+      data: { items: ["catalog", "alarm"] }
+    });
   });
 
   it("读取并更新全局通道音频默认值", async () => {
@@ -214,11 +209,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-audio");
 
     await updateDefaultChannelAudioConfig(false);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/default-channel-audio",
-      { data: { enabled: false } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-channel-audio", {
+      data: { enabled: false }
+    });
   });
 
   it("读取并更新设备上线同步通道配置", async () => {
@@ -226,11 +219,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sync-channels-on-online");
 
     await updateSyncChannelsOnOnlineConfig(false);
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/sync-channels-on-online",
-      { data: { enabled: false } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sync-channels-on-online", {
+      data: { enabled: false }
+    });
   });
 
   it("读取并更新收到心跳恢复设备上线配置", async () => {
@@ -288,11 +279,9 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-log");
 
     await updateSIPLogConfig({ enabled: true, retentionDays: 30 });
-    expect(request).toHaveBeenLastCalledWith(
-      "put",
-      "/api/gb28181/sip/service-config/sip-log",
-      { data: { enabled: true, retentionDays: 30 } }
-    );
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sip-log", {
+      data: { enabled: true, retentionDays: 30 }
+    });
   });
 });
 
@@ -323,44 +312,29 @@ describe("gb28181 home position API", () => {
   });
 
   it("keeps preset zero and sends idempotency only in the header", async () => {
-    await updateHomePosition(
-      12,
-      { enabled: true, resetTime: 10, presetId: 0 },
-      "control-key"
-    );
+    await updateHomePosition(12, { enabled: true, resetTime: 10, presetId: 0 }, "control-key");
 
-    expect(request).toHaveBeenCalledWith(
-      "patch",
-      "/api/gb28181/device-mgmt/channel/12/ptz/home-position",
-      {
-        data: { enabled: true, resetTime: 10, presetId: 0 },
-        headers: { "Idempotency-Key": "control-key" }
-      }
-    );
+    expect(request).toHaveBeenCalledWith("patch", "/api/gb28181/device-mgmt/channel/12/ptz/home-position", {
+      data: { enabled: true, resetTime: 10, presetId: 0 },
+      headers: { "Idempotency-Key": "control-key" }
+    });
   });
 
   it("normalizes a disable request to enabled only", async () => {
     await updateHomePosition(12, { enabled: false }, "disable-key");
 
-    expect(request).toHaveBeenCalledWith(
-      "patch",
-      "/api/gb28181/device-mgmt/channel/12/ptz/home-position",
-      {
-        data: { enabled: false },
-        headers: { "Idempotency-Key": "disable-key" }
-      }
-    );
+    expect(request).toHaveBeenCalledWith("patch", "/api/gb28181/device-mgmt/channel/12/ptz/home-position", {
+      data: { enabled: false },
+      headers: { "Idempotency-Key": "disable-key" }
+    });
   });
 
   it("loads the exact operation for the channel", async () => {
     await getPtzOperation(12, "home-op-1");
 
-    expect(request).toHaveBeenCalledWith(
-      "get",
-      "/api/gb28181/device-mgmt/channel/12/ptz/operations/home-op-1",
-      undefined,
-      { showErrorMessage: false }
-    );
+    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/device-mgmt/channel/12/ptz/operations/home-op-1", undefined, {
+      showErrorMessage: false
+    });
   });
 
   it("exposes a discriminated update payload", () => {
@@ -411,20 +385,12 @@ describe("gb28181 device status API", () => {
     await listPtzPresets(12);
     await listCruiseTracks(12, true);
 
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      "get",
-      "/api/gb28181/play/stream-1/monitor",
-      undefined,
-      { showErrorMessage: false }
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      "get",
-      "/api/gb28181/device-mgmt/channel/12/control-capabilities",
-      undefined,
-      { showErrorMessage: false }
-    );
+    expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/play/stream-1/monitor", undefined, {
+      showErrorMessage: false
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/device-mgmt/channel/12/control-capabilities", undefined, {
+      showErrorMessage: false
+    });
     expect(request).toHaveBeenNthCalledWith(
       3,
       "get",

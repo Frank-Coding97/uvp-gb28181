@@ -94,12 +94,13 @@ type controlPlaneShutdownSnapshot struct {
 	schedulerLogDone   <-chan struct{}
 	schedulerLog       *gbzlmsched.LogService
 
-	metricsCleanupStop   context.CancelFunc
-	metricsCleanupDone   <-chan struct{}
-	metricsPersistCancel context.CancelFunc
-	metricsPersistDone   <-chan struct{}
-	dashboardCancel      context.CancelFunc
-	dashboardDone        <-chan struct{}
+	metricsCleanupStop    context.CancelFunc
+	metricsCleanupDone    <-chan struct{}
+	metricsPersistCancel  context.CancelFunc
+	metricsPersistDone    <-chan struct{}
+	dashboardCancel       context.CancelFunc
+	dashboardDone         <-chan struct{}
+	playLifecycleRecorder interface{ Shutdown(context.Context) error }
 
 	managementCore *zlmManagementCoreRuntime
 }
@@ -174,7 +175,8 @@ func captureControlPlaneShutdownSnapshot() controlPlaneShutdownSnapshot {
 		schedulerLog: zlmSchedulerLog, metricsCleanupStop: metricsCleanupCancel,
 		metricsCleanupDone: metricsCleanupDone, metricsPersistCancel: metricsPersistCancel,
 		metricsPersistDone: metricsPersistDone, dashboardCancel: dashboardRetentionCancel,
-		dashboardDone: dashboardRetentionDone, managementCore: zlmManagementCore,
+		dashboardDone: dashboardRetentionDone, playLifecycleRecorder: playLifecycleRecorder,
+		managementCore: zlmManagementCore,
 	}
 }
 
@@ -644,6 +646,9 @@ func stopControlPlaneSnapshot(ctx context.Context, c controlPlaneShutdownSnapsho
 		c.dashboardCancel()
 	}
 	stopErr = errors.Join(stopErr, shutdownComponentError("dashboard.retention", waitShutdownDone(ctx, c.dashboardDone)))
+	if c.playLifecycleRecorder != nil {
+		stopErr = errors.Join(stopErr, shutdownComponentError("play.lifecycle_recorder", c.playLifecycleRecorder.Shutdown(ctx)))
+	}
 	return stopErr
 }
 
@@ -680,6 +685,7 @@ func clearControlPlaneGlobals() {
 	metricsCleanupStop, metricsCleanupDone = nil, nil
 	metricsPersistCancel, metricsPersistDone = nil, nil
 	dashboardRetentionCancel, dashboardRetentionDone = nil, nil
+	playLifecycleStore, playLifecycleRecorder = nil, nil
 	if zlmManagementCore != nil {
 		zlmManagementCore = nil
 	}

@@ -31,7 +31,15 @@ const emit = defineEmits<{
   (e: "smoothness", snapshot: SmoothnessSnapshot): void;
   /** 画面真实解码尺寸变化（首帧、或设备换了分辨率）。null = 还没拿到。 */
   (e: "videosize", size: VideoSize | null): void;
+  (e: "firstFrame", event: PlaybackClientFact): void;
+  (e: "playerError", event: PlaybackClientFact): void;
 }>();
+
+interface PlaybackClientFact {
+  event: "first_frame" | "player_error";
+  code?: "player_error" | "player_timeout";
+  clientElapsedMs: number;
+}
 
 /** 画面真实解码尺寸（像素）。 */
 interface VideoSize {
@@ -58,6 +66,10 @@ const canScreenshot = computed(() => {
  */
 const videoSize = ref<VideoSize | null>(null);
 let sizeTimer: number | undefined;
+let playbackSession = 0;
+let playbackStartedAt = 0;
+let firstFrameReported = false;
+let playerErrorReported = false;
 
 /** 轮询间隔。取 1s：分辨率是低频变化量，但首帧后要尽快拿到。 */
 const VIDEO_SIZE_POLL_MS = 1000;
@@ -70,6 +82,7 @@ const VIDEO_SIZE_POLL_MS = 1000;
  *    事件订阅写法看起来完全合理，实际只在第一帧收到一次 —— 所以这里自己按时读。
  */
 function readVideoSize() {
+  const session = playbackSession;
   let raw: { width?: unknown; height?: unknown } | null = null;
   try {
     raw = player.value?.getVideoInfo?.() ?? null;
@@ -81,6 +94,13 @@ function readVideoSize() {
   const next: VideoSize | null =
     Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : null;
   const prev = videoSize.value;
+  if (next && !firstFrameReported && session === playbackSession) {
+    firstFrameReported = true;
+    emit("firstFrame", {
+      event: "first_frame",
+      clientElapsedMs: Math.max(0, Math.round(performance.now() - playbackStartedAt))
+    });
+  }
   if (next?.width === prev?.width && next?.height === prev?.height) return;
   videoSize.value = next;
   emit("videosize", next);
@@ -112,6 +132,16 @@ function destroy() {
     }
     player.value = null;
   }
+}
+
+function reportPlayerError(code: "player_error" | "player_timeout") {
+  if (playerErrorReported || !props.url) return;
+  playerErrorReported = true;
+  emit("playerError", {
+    event: "player_error",
+    code,
+    clientElapsedMs: Math.max(0, Math.round(performance.now() - playbackStartedAt))
+  });
 }
 
 async function play(u: string) {
@@ -176,10 +206,12 @@ async function play(u: string) {
     p.on("error", (err: any) => {
       errorMsg.value = `EasyPlayer 错误: ${typeof err === "string" ? err : JSON.stringify(err)}`;
       emit("error", errorMsg.value);
+      reportPlayerError("player_error");
     });
     p.on("timeout", () => {
       errorMsg.value = "拉流超时";
       emit("error", errorMsg.value);
+      reportPlayerError("player_timeout");
     });
     p.on("timeUpdate", (timestamp: unknown) => {
       if (typeof timestamp === "number" && Number.isFinite(timestamp)) emit("timeupdate", timestamp);
@@ -206,7 +238,13 @@ async function play(u: string) {
 
 watch(
   () => props.url,
-  u => play(u),
+  u => {
+    playbackSession += 1;
+    playbackStartedAt = performance.now();
+    firstFrameReported = false;
+    playerErrorReported = false;
+    void play(u);
+  },
   { immediate: true }
 );
 watch(canScreenshot, () => {

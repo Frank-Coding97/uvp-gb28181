@@ -29,11 +29,13 @@ const (
 	tokenAudience            = "gb28181-play"
 	playKeyContext           = "uvp-gb28181/play-authorization/v2"
 	playV4KeyContext         = "uvp-gb28181/play-authorization/v4"
+	clientFeedbackKeyContext = "uvp-gb28181/client-feedback/v1"
 	ipKeyContext             = "uvp-gb28181/play-ip-binding/v1"
 	callbackCapabilityDomain = "uvp-gb28181/on-stream-not-found-callback/v1"
 	hookCapabilityDomain     = "uvp-gb28181/zlm-hook-callback/v2"
 	maxClockSkew             = 30 * time.Second
 	minimumRootKeyBytes      = 32
+	DefaultClientFeedbackTTL = 10 * time.Minute
 )
 
 type HookEvent string
@@ -89,6 +91,7 @@ var (
 	ErrTokenIPMismatch              = fmt.Errorf("%w: client ip mismatch", ErrTokenInvalid)
 	ErrTokenRevoked                 = fmt.Errorf("%w: revoked by authorization bump", ErrTokenInvalid)
 	ErrCapabilityInvalid            = errors.New("invalid callback capability")
+	ErrClientFeedbackUnavailable    = errors.New("client feedback unavailable")
 	ErrURLInvalid                   = errors.New("invalid playback URL")
 )
 
@@ -141,6 +144,33 @@ type Grant struct {
 	AuthorizationGeneration string
 }
 
+type ClientFeedbackBinding struct {
+	UserID        uint
+	DeviceID      string
+	ChannelID     string
+	LifecycleID   string
+	AllowedEvents []string
+}
+
+type ClientFeedbackClaims struct {
+	Version       int      `json:"v"`
+	Audience      string   `json:"aud"`
+	KeyID         string   `json:"kid"`
+	UserID        uint     `json:"uid"`
+	DeviceID      string   `json:"did"`
+	ChannelID     string   `json:"cid"`
+	LifecycleID   string   `json:"lid"`
+	AllowedEvents []string `json:"events"`
+	IssuedAt      int64    `json:"iat"`
+	ExpiresAt     int64    `json:"exp"`
+	Nonce         string   `json:"nonce"`
+}
+
+type ClientFeedbackGrant struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
 type DirectIssuer interface {
 	IssueDirect(Binding) (Grant, error)
 }
@@ -152,10 +182,11 @@ type Verifier interface {
 type Option func(*Signer) error
 
 type derivedKey struct {
-	sign    []byte
-	v4      []byte
-	ip      []byte
-	openapi []byte
+	sign     []byte
+	v4       []byte
+	ip       []byte
+	openapi  []byte
+	feedback []byte
 }
 
 type Signer struct {
@@ -229,7 +260,83 @@ func buildKey(material KeyMaterial) (string, derivedKey, error) {
 	if err != nil {
 		return "", derivedKey{}, err
 	}
-	return id, derivedKey{sign: signKey, v4: v4Key, ip: ipKey, openapi: openAPIKey}, nil
+	feedbackKey, err := deriveKey(material.Secret, clientFeedbackKeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
+	return id, derivedKey{sign: signKey, v4: v4Key, ip: ipKey, openapi: openAPIKey, feedback: feedbackKey}, nil
+}
+
+func (s *Signer) IssueClientFeedback(binding ClientFeedbackBinding) (ClientFeedbackGrant, error) {
+	if s == nil || s.now == nil || s.random == nil || binding.UserID == 0 || binding.DeviceID == "" ||
+		binding.ChannelID == "" || binding.LifecycleID == "" || len(binding.AllowedEvents) == 0 {
+		return ClientFeedbackGrant{}, ErrClientFeedbackUnavailable
+	}
+	key, ok := s.keys[s.activeID]
+	if !ok || len(key.feedback) == 0 {
+		return ClientFeedbackGrant{}, ErrClientFeedbackUnavailable
+	}
+	nonce := make([]byte, 16)
+	if _, err := io.ReadFull(s.random, nonce); err != nil {
+		return ClientFeedbackGrant{}, ErrClientFeedbackUnavailable
+	}
+	now := s.now().UTC()
+	claims := ClientFeedbackClaims{
+		Version: 1, Audience: "gb28181-client-feedback", KeyID: s.activeID,
+		UserID: binding.UserID, DeviceID: binding.DeviceID, ChannelID: binding.ChannelID,
+		LifecycleID: binding.LifecycleID, AllowedEvents: binding.AllowedEvents,
+		IssuedAt: now.Unix(), ExpiresAt: now.Add(DefaultClientFeedbackTTL).Unix(),
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce),
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return ClientFeedbackGrant{}, ErrClientFeedbackUnavailable
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	return ClientFeedbackGrant{
+		Token:     encoded + "." + base64.RawURLEncoding.EncodeToString(signature(key.feedback, []byte(encoded))),
+		ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+	}, nil
+}
+
+func (s *Signer) VerifyClientFeedback(token string, userID uint, lifecycleID, event string) (ClientFeedbackClaims, error) {
+	fail := func() (ClientFeedbackClaims, error) { return ClientFeedbackClaims{}, ErrClientFeedbackUnavailable }
+	if s == nil || s.now == nil || userID == 0 || lifecycleID == "" || event == "" {
+		return fail()
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fail()
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return fail()
+	}
+	var claims ClientFeedbackClaims
+	if json.Unmarshal(payload, &claims) != nil {
+		return fail()
+	}
+	key, ok := s.keys[claims.KeyID]
+	provided, signatureErr := base64.RawURLEncoding.DecodeString(parts[1])
+	if !ok || signatureErr != nil || !hmac.Equal(provided, signature(key.feedback, []byte(parts[0]))) {
+		return fail()
+	}
+	if claims.Version != 1 || claims.Audience != "gb28181-client-feedback" || claims.UserID != userID ||
+		claims.LifecycleID != lifecycleID || claims.DeviceID == "" || claims.ChannelID == "" || claims.Nonce == "" ||
+		claims.IssuedAt <= 0 || claims.ExpiresAt <= claims.IssuedAt || !s.now().UTC().Before(time.Unix(claims.ExpiresAt, 0)) ||
+		!containsFeedbackEvent(claims.AllowedEvents, event) {
+		return fail()
+	}
+	return claims, nil
+}
+
+func containsFeedbackEvent(events []string, event string) bool {
+	for _, allowed := range events {
+		if allowed == event {
+			return true
+		}
+	}
+	return false
 }
 
 func WithTTL(ttl time.Duration) Option {

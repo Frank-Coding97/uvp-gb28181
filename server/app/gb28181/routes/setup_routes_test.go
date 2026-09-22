@@ -53,6 +53,9 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"GET /api/gb28181/sip/service-config/sip-log",
 		"PUT /api/gb28181/sip/service-config/sip-log",
 		"POST /api/gb28181/play/:deviceId/:channelId/authorization",
+		"GET /api/gb28181/play/lifecycles",
+		"GET /api/gb28181/play/lifecycles/:lifecycleId",
+		"POST /api/gb28181/play/lifecycles/:lifecycleId/client-events",
 	} {
 		require.True(t, got[route], route)
 	}
@@ -71,6 +74,8 @@ func TestRegisterRoutes_IncludesPTZResourceEndpoints(t *testing.T) {
 		"POST /api/gb28181/device-mgmt/channel/:id/ptz/cruise",
 		"GET /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
 		"PATCH /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
+		// 雨刷(GB/T 28181 A.3.7 表 A.11)走**独立路由**,编号固定 1。
+		"POST /api/gb28181/device-mgmt/channel/:id/ptz/wiper",
 	} {
 		require.True(t, got[route], route)
 	}

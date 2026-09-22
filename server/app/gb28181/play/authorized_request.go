@@ -8,4 +8,5 @@ type AuthorizedRequest struct {
 	ChannelID   string
 	ClientIP    string
 	DeviceEpoch int64
+	LifecycleID string
 }

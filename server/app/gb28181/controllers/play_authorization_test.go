@@ -22,6 +22,17 @@ type fixedAuthorizationControllerService struct {
 	authorize func(play.AuthorizedRequest) error
 }
 
+type lifecycleBeginStore struct {
+	id       string
+	beginErr error
+	calls    atomic.Int32
+}
+
+func (store *lifecycleBeginStore) Begin(context.Context, uint, string, string) (string, error) {
+	store.calls.Add(1)
+	return store.id, store.beginErr
+}
+
 func (*fixedAuthorizationControllerService) Start(context.Context, string, string) (*play.Result, error) {
 	return nil, nil
 }
@@ -145,4 +156,27 @@ func TestPlayControllerStartAuditsDynamicAuthorization(t *testing.T) {
 	require.Equal(t, "issued", audit["result"])
 	require.EqualValues(t, 7, audit["nodeId"])
 	require.Equal(t, "corr-dynamic", audit["correlationId"])
+}
+
+func TestPlayControllerStartPropagatesLifecycleID(t *testing.T) {
+	db := newScopedDeviceDB(t)
+	seedDeptScopedUser(t, db, 100, 10)
+	seedScopedDeviceRows(t, db)
+	service := &fixedAuthorizationControllerService{}
+	store := &lifecycleBeginStore{id: "lifecycle-1"}
+	controller := gbcontrollers.NewPlayController(service, gbcontrollers.WithPlayLifecycleBeginner(store))
+	router := gin.New()
+	router.Use(gin.Recovery(), withClaims(100))
+	router.POST("/api/gb28181/play/:deviceId/:channelId", controller.Start)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost,
+		"/api/gb28181/play/34020000002000000010/37011200001310000010", nil)
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.EqualValues(t, 1, store.calls.Load())
+	require.Equal(t, "lifecycle-1", service.request.LifecycleID)
+	data := unmarshal(t, response)["data"].(map[string]any)
+	require.Equal(t, "lifecycle-1", data["lifecycleId"])
 }

@@ -59,6 +59,10 @@ var hookAuthenticator = gbhandler.NewHookAuthenticator()
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
 var playAttemptStore gbcontrollers.PlayAttemptStore
+var playLifecycleBeginner gbcontrollers.PlayLifecycleBeginner
+var playClientFeedbackSigner gbcontrollers.ClientFeedbackSigner
+var playClientFeedbackStore gbcontrollers.ClientFeedbackStore
+var playLifecycleQueryStore gbcontrollers.PlayLifecycleQueryStore
 var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
 var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
 var talkController atomic.Pointer[gbcontrollers.TalkController]
@@ -258,6 +262,22 @@ func SetPlayAttemptStore(store gbcontrollers.PlayAttemptStore) {
 	rebuildPlayController()
 }
 
+func SetPlayLifecycleBeginner(store gbcontrollers.PlayLifecycleBeginner) {
+	playLifecycleBeginner = store
+	rebuildPlayController()
+}
+
+func SetPlayClientFeedbackRuntime(signer gbcontrollers.ClientFeedbackSigner, store gbcontrollers.ClientFeedbackStore) {
+	playClientFeedbackSigner = signer
+	playClientFeedbackStore = store
+	rebuildPlayController()
+}
+
+func SetPlayLifecycleQueryStore(store gbcontrollers.PlayLifecycleQueryStore) {
+	playLifecycleQueryStore = store
+	rebuildPlayController()
+}
+
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	hookController.SetPlayAuthorizer(authorizer)
 	gbcontrollers.SetPlayAuthRuntimeReady(authorizer != nil)
@@ -313,12 +333,21 @@ func SetTalkService(service *talk.Service, resolver gbhandler.NodeUUIDResolver) 
 }
 
 func rebuildPlayController() {
-	options := make([]gbcontrollers.PlayControllerOption, 0, 2)
+	options := make([]gbcontrollers.PlayControllerOption, 0, 5)
 	if recordingService != nil {
 		options = append(options, gbcontrollers.WithPlaybackRecordingStarter(recordingService))
 	}
 	if playAttemptStore != nil {
 		options = append(options, gbcontrollers.WithPlayAttemptStore(playAttemptStore))
+	}
+	if playLifecycleBeginner != nil {
+		options = append(options, gbcontrollers.WithPlayLifecycleBeginner(playLifecycleBeginner))
+	}
+	if playClientFeedbackSigner != nil && playClientFeedbackStore != nil {
+		options = append(options, gbcontrollers.WithClientFeedbackRuntime(playClientFeedbackSigner, playClientFeedbackStore))
+	}
+	if playLifecycleQueryStore != nil {
+		options = append(options, gbcontrollers.WithPlayLifecycleQueryStore(playLifecycleQueryStore))
 	}
 	playController = gbcontrollers.NewPlayController(playService, options...)
 }
@@ -442,6 +471,10 @@ func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.Stre
 	hookController.SetMultiNode(resolver, binder)
 	registry, _ := resolver.(autoOnDemandNodeRegistry)
 	configureAutoOnDemandRegistry(registry)
+}
+
+func SetHookLifecycleRecorder(recorder gbplay.StreamLifecycleRecorder) {
+	hookController.SetLifecycleRecorder(recorder)
 }
 
 func SetHookAuthResolver(resolver gbhandler.HookAuthNodeResolver) {
@@ -688,6 +721,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
 		play := gb.Group("/play")
 		{
+			play.GET("/lifecycles", func(c *gin.Context) { playController.LifecycleList(c) })
+			play.GET("/lifecycles/:lifecycleId", func(c *gin.Context) { playController.LifecycleDetail(c) })
+			play.POST("/lifecycles/:lifecycleId/client-events", func(c *gin.Context) { playController.ClientEvent(c) })
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
 			play.POST("/:deviceId/:channelId/authorization", func(c *gin.Context) { playController.Authorize(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })

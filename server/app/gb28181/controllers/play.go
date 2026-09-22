@@ -2,23 +2,29 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // PlayController 国标点播 REST
@@ -27,9 +33,13 @@ import (
 //	DELETE /api/gb28181/play/:streamId              停播
 type PlayController struct {
 	controllers.Common
-	svc              PlayService
-	recordingStarter PlaybackRecordingStarter
-	attemptStore     PlayAttemptStore
+	svc               PlayService
+	recordingStarter  PlaybackRecordingStarter
+	attemptStore      PlayAttemptStore
+	lifecycleBeginner PlayLifecycleBeginner
+	feedbackSigner    ClientFeedbackSigner
+	feedbackStore     ClientFeedbackStore
+	lifecycleQuery    PlayLifecycleQueryStore
 }
 
 type PlayService interface {
@@ -55,6 +65,24 @@ type PlayAttemptStore interface {
 	Finish(context.Context, string, string, string, int64, bool) error
 }
 
+type PlayLifecycleBeginner interface {
+	Begin(context.Context, uint, string, string) (string, error)
+}
+
+type ClientFeedbackSigner interface {
+	IssueClientFeedback(playauth.ClientFeedbackBinding) (playauth.ClientFeedbackGrant, error)
+	VerifyClientFeedback(string, uint, string, string) (playauth.ClientFeedbackClaims, error)
+}
+
+type ClientFeedbackStore interface {
+	AppendClientEvent(context.Context, string, uint, string, string, play.LifecycleEvent) error
+}
+
+type PlayLifecycleQueryStore interface {
+	List(context.Context, gbdashboard.PlayLifecycleQuery, gbdashboard.QueryScope) (gbdashboard.PlayLifecyclePage, error)
+	Detail(context.Context, string, gbdashboard.QueryScope) (gbdashboard.PlayLifecycleDetail, error)
+}
+
 type PlayControllerOption func(*PlayController)
 
 func WithPlaybackRecordingStarter(starter PlaybackRecordingStarter) PlayControllerOption {
@@ -63,6 +91,21 @@ func WithPlaybackRecordingStarter(starter PlaybackRecordingStarter) PlayControll
 
 func WithPlayAttemptStore(store PlayAttemptStore) PlayControllerOption {
 	return func(controller *PlayController) { controller.attemptStore = store }
+}
+
+func WithPlayLifecycleBeginner(store PlayLifecycleBeginner) PlayControllerOption {
+	return func(controller *PlayController) { controller.lifecycleBeginner = store }
+}
+
+func WithClientFeedbackRuntime(signer ClientFeedbackSigner, store ClientFeedbackStore) PlayControllerOption {
+	return func(controller *PlayController) {
+		controller.feedbackSigner = signer
+		controller.feedbackStore = store
+	}
+}
+
+func WithPlayLifecycleQueryStore(store PlayLifecycleQueryStore) PlayControllerOption {
+	return func(controller *PlayController) { controller.lifecycleQuery = store }
 }
 
 // NewPlayController 装配点播控制器(svc 由 bootstrap 注入)
@@ -99,7 +142,14 @@ func (pc *PlayController) Start(c *gin.Context) {
 	attemptOutcome := "failure"
 	attemptFailureStage := "play_service"
 	var attemptResult *play.Result
-	if pc.attemptStore != nil {
+	if pc.lifecycleBeginner != nil {
+		var lifecycleErr error
+		attemptID, lifecycleErr = pc.lifecycleBeginner.Begin(c.Request.Context(), pc.GetCurrentUserID(c), deviceID, channelID)
+		if lifecycleErr != nil {
+			app.Log(c.Request.Context()).Warn("记录点播 lifecycle 开始失败", zap.String("event", "play.lifecycle_begin_failed"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), logging.Error(lifecycleErr))
+		}
+		playRequest.LifecycleID = attemptID
+	} else if pc.attemptStore != nil {
 		var attemptErr error
 		attemptID, attemptErr = pc.attemptStore.Begin(c.Request.Context(), pc.GetCurrentUserID(c), deviceID, channelID)
 		if attemptErr != nil {
@@ -107,7 +157,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 		}
 	}
 	defer func() {
-		if pc.attemptStore == nil || attemptID == "" {
+		if pc.lifecycleBeginner != nil || pc.attemptStore == nil || attemptID == "" {
 			return
 		}
 		nodeID, reused := int64(0), false
@@ -142,6 +192,22 @@ func (pc *PlayController) Start(c *gin.Context) {
 	attemptResult = res
 	attemptOutcome = "success"
 	attemptFailureStage = ""
+	if res != nil && res.LifecycleID == "" {
+		res.LifecycleID = playRequest.LifecycleID
+	}
+	if res != nil && res.LifecycleID != "" && pc.feedbackSigner != nil && pc.feedbackStore != nil {
+		grant, feedbackErr := pc.feedbackSigner.IssueClientFeedback(playauth.ClientFeedbackBinding{
+			UserID: pc.GetCurrentUserID(c), DeviceID: deviceID, ChannelID: channelID, LifecycleID: res.LifecycleID,
+			AllowedEvents: []string{play.EventFirstFrame, play.EventPlayerError},
+		})
+		if feedbackErr != nil {
+			app.Log(c.Request.Context()).Warn("签发播放客户端反馈凭据失败",
+				zap.String("event", "play.client_feedback_issue_failed"), zap.String("lifecycle_id", res.LifecycleID))
+		} else {
+			res.ClientFeedbackToken = grant.Token
+			res.ClientFeedbackExpiresAt = grant.ExpiresAt.Unix()
+		}
+	}
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	if pc.recordingStarter != nil && res != nil && res.StreamID != "" {
 		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil {
@@ -150,6 +216,154 @@ func (pc *PlayController) Start(c *gin.Context) {
 	}
 	finishPlaybackAuthorizationAudit(audit, res)
 	pc.Success(c, res)
+}
+
+type clientFeedbackRequest struct {
+	Event           string `json:"event"`
+	Code            string `json:"code,omitempty"`
+	ClientElapsedMS int64  `json:"clientElapsedMs"`
+}
+
+func (pc *PlayController) ClientEvent(c *gin.Context) {
+	lifecycleID := c.Param("lifecycleId")
+	if pc.feedbackSigner == nil || pc.feedbackStore == nil || lifecycleID == "" {
+		pc.clientFeedbackUnavailable(c)
+		return
+	}
+	decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	var request clientFeedbackRequest
+	if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		request.ClientElapsedMS < 0 || request.ClientElapsedMS > int64((24*time.Hour)/time.Millisecond) ||
+		!validClientFeedback(request.Event, request.Code) {
+		pc.clientFeedbackUnavailable(c)
+		return
+	}
+	userID := pc.GetCurrentUserID(c)
+	claims, err := pc.feedbackSigner.VerifyClientFeedback(
+		c.GetHeader("X-Playback-Feedback-Token"), userID, lifecycleID, request.Event,
+	)
+	if err != nil || !pc.feedbackChannelVisible(c, claims.DeviceID, claims.ChannelID) {
+		pc.clientFeedbackUnavailable(c)
+		return
+	}
+	event := play.LifecycleEvent{
+		Stage: play.StageClient, EventName: request.Event, Source: play.SourceClient,
+		FactState: play.FactConfirmed,
+	}
+	if request.ClientElapsedMS > 0 {
+		metadata, marshalErr := json.Marshal(map[string]int64{"clientElapsedMs": request.ClientElapsedMS})
+		if marshalErr != nil {
+			pc.clientFeedbackUnavailable(c)
+			return
+		}
+		event.MetadataJSON = metadata
+	}
+	if request.Event == play.EventPlayerError {
+		event.FactState = play.FactFailed
+		event.ReasonCode = request.Code
+	}
+	if err := pc.feedbackStore.AppendClientEvent(c.Request.Context(), lifecycleID, userID, claims.DeviceID, claims.ChannelID, event); err != nil {
+		pc.clientFeedbackUnavailable(c)
+		return
+	}
+	pc.Success(c, gin.H{"accepted": true})
+}
+
+func validClientFeedback(event, code string) bool {
+	switch event {
+	case play.EventFirstFrame:
+		return code == ""
+	case play.EventPlayerError:
+		return code == play.ReasonPlayerError || code == play.ReasonPlayerTimeout
+	default:
+		return false
+	}
+}
+
+func (pc *PlayController) feedbackChannelVisible(c *gin.Context, deviceID, channelID string) bool {
+	db := app.DB()
+	if db == nil {
+		return false
+	}
+	lookup := db.WithContext(c.Request.Context())
+	var count int64
+	err := lookup.Table("gb_channel").
+		Joins("JOIN gb_device feedback_root ON feedback_root.device_id = gb_channel.device_id AND feedback_root.deleted_at IS NULL").
+		Scopes(datascope.VisibilityScopeWithDB(c, lookup, "gb_channel.owner_dept_id", "gb_channel.device_id")).
+		Where("gb_channel.device_id = ? AND gb_channel.channel_id = ? AND gb_channel.deleted_at IS NULL", deviceID, channelID).
+		Count(&count).Error
+	return err == nil && count == 1
+}
+
+func (pc *PlayController) clientFeedbackUnavailable(c *gin.Context) {
+	pc.FailAndAbort(c, "客户端反馈不可用", playauth.ErrClientFeedbackUnavailable)
+}
+
+func (pc *PlayController) LifecycleList(c *gin.Context) {
+	if pc.lifecycleQuery == nil {
+		pc.FailAndAbort(c, "播放日志服务不可用", nil)
+		return
+	}
+	query, err := parsePlayLifecycleQuery(c)
+	if err != nil {
+		pc.FailAndAbort(c, "播放日志查询参数不合法", err)
+		return
+	}
+	page, err := pc.lifecycleQuery.List(c.Request.Context(), query, pc.lifecycleVisibilityScope(c))
+	if err != nil {
+		pc.FailAndAbort(c, "查询播放日志失败", err)
+		return
+	}
+	pc.Success(c, page)
+}
+
+func (pc *PlayController) LifecycleDetail(c *gin.Context) {
+	if pc.lifecycleQuery == nil {
+		pc.FailAndAbort(c, "播放日志服务不可用", nil)
+		return
+	}
+	detail, err := pc.lifecycleQuery.Detail(c.Request.Context(), c.Param("lifecycleId"), pc.lifecycleVisibilityScope(c))
+	if err != nil {
+		if errors.Is(err, gbdashboard.ErrPlayLifecycleNotFound) {
+			pc.FailAndAbort(c, "播放日志不存在", nil)
+			return
+		}
+		pc.FailAndAbort(c, "查询播放日志失败", err)
+		return
+	}
+	pc.Success(c, detail)
+}
+
+func (pc *PlayController) lifecycleVisibilityScope(c *gin.Context) gbdashboard.QueryScope {
+	return datascope.VisibilityScope(c, "gb_device.owner_dept_id", "gb_device.device_id")
+}
+
+func parsePlayLifecycleQuery(c *gin.Context) (gbdashboard.PlayLifecycleQuery, error) {
+	query := gbdashboard.PlayLifecycleQuery{
+		Page:       parsePositiveInt(c.DefaultQuery("page", "1"), 1),
+		PageSize:   parsePositiveInt(c.DefaultQuery("pageSize", "10"), 10),
+		DeviceCode: c.Query("deviceCode"), ChannelCode: c.Query("channelCode"), StreamID: c.Query("streamId"),
+		LifecycleState: c.Query("lifecycleState"), MediaState: c.Query("mediaState"),
+		ClientState: c.Query("clientState"), FailureStage: c.Query("failureStage"),
+	}
+	if raw := c.Query("nodeId"); raw != "" {
+		nodeID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || nodeID <= 0 {
+			return query, errors.New("invalid nodeId")
+		}
+		query.NodeID = nodeID
+	}
+	for raw, target := range map[string]**time.Time{"from": &query.From, "to": &query.To} {
+		if value := c.Query(raw); value != "" {
+			parsed, err := time.Parse(time.RFC3339, value)
+			if err != nil {
+				return query, errors.New("invalid " + raw)
+			}
+			*target = &parsed
+		}
+	}
+	return query, nil
 }
 
 // Authorize returns a fresh short-lived fixed playback URL without starting

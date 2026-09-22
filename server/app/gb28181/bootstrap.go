@@ -279,6 +279,8 @@ var metricsAgg *metrics.Aggregator
 var metricsRecorder metrics.Recorder
 var metricsPersistCancel context.CancelFunc
 var dashboardRetentionCancel context.CancelFunc
+var playLifecycleStore *gbdashboard.PlayLifecycleStore
+var playLifecycleRecorder *play.AsyncLifecycleRecorder
 
 // metricsCleanupStop 控制 TTL 清理 goroutine 退出
 var metricsCleanupStop chan struct{}
@@ -402,6 +404,19 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	}
 	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
 		gbroutes.SetPlayAttemptStore(gbdashboard.NewPlayAttemptStore(db))
+		if db.Migrator().HasTable(&gbmodels.GbPlayLifecycleEvent{}) {
+			playLifecycleStore = gbdashboard.NewPlayLifecycleStore(db)
+			playLifecycleRecorder = play.NewAsyncLifecycleRecorder(playLifecycleStore, 256)
+			gbroutes.SetPlayLifecycleBeginner(playLifecycleStore)
+			gbroutes.SetPlayLifecycleQueryStore(playLifecycleStore)
+			gbroutes.SetHookLifecycleRecorder(playLifecycleRecorder)
+		} else {
+			playLifecycleStore = nil
+			playLifecycleRecorder = nil
+			gbroutes.SetPlayLifecycleBeginner(nil)
+			gbroutes.SetPlayLifecycleQueryStore(nil)
+			gbroutes.SetHookLifecycleRecorder(nil)
+		}
 		dashboardRetentionCancel, dashboardRetentionDone = startDashboardRetentionRuntimeTracked(db, 24*time.Hour, func(result gbdashboard.RetentionResult, err error) {
 			if err != nil {
 				app.ZapLog.Warn("清理仪表盘历史事实失败", zap.String("event", "gb28181.cleanup.dashboard_facts_failed"), zap.Error(err))
@@ -413,6 +428,11 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		})
 	} else {
 		gbroutes.SetPlayAttemptStore(nil)
+		gbroutes.SetPlayLifecycleBeginner(nil)
+		gbroutes.SetPlayLifecycleQueryStore(nil)
+		gbroutes.SetHookLifecycleRecorder(nil)
+		playLifecycleStore = nil
+		playLifecycleRecorder = nil
 	}
 	setupTraceController(cfg, nil)
 	setupZLMRegistry(cfg)
@@ -437,6 +457,7 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		zlmRestartCoordinator = restartCoordinator
 		nodeSvc.SetRestartCoordinator(restartCoordinator)
 		nodeSvc.SetLogger(app.ZapLog)
+
 		// 节点退役：删掉一个 media node 之后，对端 ZLM 不会知道，它会继续回调平台
 		// （现场实测 8640 行/天）。这里把"撤销对端 hook"所需的凭据留在独立表里，
 		// 并装上协调器：删行后异步解约，残留回调时按退避自愈（见 zlm/service/retired_node.go）。
@@ -452,6 +473,7 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		retiredCoordinator.SetLogger(app.ZapLog)
 		nodeSvc.SetRetiredNodeCoordinator(retiredCoordinator)
 		gbroutes.SetHookRetiredObserver(retiredCoordinator)
+
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
@@ -862,6 +884,11 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else {
 		gbroutes.SetPlayAuthorizer(nil)
 	}
+	if playSigner != nil && playLifecycleStore != nil {
+		gbroutes.SetPlayClientFeedbackRuntime(playSigner, playLifecycleStore)
+	} else {
+		gbroutes.SetPlayClientFeedbackRuntime(nil, nil)
+	}
 	var openAPICandidate *openAPIMediaRootCandidate
 	var openAPIValidator play.QualifiedNodeValidator
 	if playAuthSettings.RequiredByOpenAPI {
@@ -884,6 +911,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 				play.WithDeviceOperationBarrier(deviceOperations),
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
+			}
+			if playLifecycleRecorder != nil {
+				opts = append(opts, play.WithLifecycleRecorder(playLifecycleRecorder), play.WithStreamLifecycleRecorder(playLifecycleRecorder))
 			}
 			if openAPIValidator != nil {
 				opts = append(opts, play.WithQualifiedNodeValidator(openAPIValidator))
@@ -929,6 +959,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 				zap.Int("recovery_failed", recoveryStats.Failed))
 		} else {
 			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv)), play.WithDeviceOperationBarrier(deviceOperations)}
+			if playLifecycleRecorder != nil {
+				opts = append(opts, play.WithLifecycleRecorder(playLifecycleRecorder), play.WithStreamLifecycleRecorder(playLifecycleRecorder))
+			}
 			if playAuthorization != nil {
 				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}

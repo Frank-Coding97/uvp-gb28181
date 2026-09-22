@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -99,6 +101,20 @@ func (m *mockFlowCollector) CollectFlow(_ context.Context, report handler.FlowRe
 
 type mockFlowNodeResolver struct {
 	node *node.Node
+}
+
+type mockHookLifecycleRecorder struct {
+	mu      sync.Mutex
+	streams []string
+	events  []play.LifecycleEvent
+}
+
+func (recorder *mockHookLifecycleRecorder) RecordByStream(_ context.Context, streamID string, _ int64, event play.LifecycleEvent) bool {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	recorder.streams = append(recorder.streams, streamID)
+	recorder.events = append(recorder.events, event)
+	return true
 }
 
 func (m mockFlowNodeResolver) GetByUUID(uuid string) (*node.Node, bool) {
@@ -471,6 +487,32 @@ func TestHookOnStreamChangedRegistPublishes(t *testing.T) {
 	case <-ch:
 	case <-time.After(200 * time.Millisecond):
 		t.Error("regist=true 应触发 notifier.Publish")
+	}
+}
+
+func TestHookLifecycleRecorderReceivesStreamAndFlowFacts(t *testing.T) {
+	recorder := &mockHookLifecycleRecorder{}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetLifecycleRecorder(recorder)
+	e := newHookEngine(t, h)
+
+	postJSON(t, e, "/index/hook/on_stream_changed", gin.H{
+		"app": "rtp", "stream": "stream-life", "regist": true,
+	})
+	postJSON(t, e, "/index/hook/on_flow_report", gin.H{
+		"app": "rtp", "stream": "stream-life", "totalBytes": 1024,
+	})
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if len(recorder.events) != 2 {
+		t.Fatalf("lifecycle event count=%d, want 2", len(recorder.events))
+	}
+	if recorder.events[0].EventName != play.EventHookStreamRegistered || recorder.events[1].EventName != play.EventHookFlowReported {
+		t.Fatalf("unexpected lifecycle events: %+v", recorder.events)
+	}
+	if recorder.events[0].EventID != "" || recorder.events[1].EventID != "" {
+		t.Fatal("hook event id must be assigned only after a lifecycle is matched")
 	}
 }
 

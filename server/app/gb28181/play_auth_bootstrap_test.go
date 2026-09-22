@@ -48,6 +48,18 @@ func TestBuildPlaySignerAllowsDisabledCompatibilityAndValidRotation(t *testing.T
 	require.NotNil(t, signer)
 }
 
+func TestBuildPlaySignerSupportsClientFeedbackWhenURLAuthDisabled(t *testing.T) {
+	signer, err := buildPlaySigner(
+		gbconfig.PlayAuthSettings{Enabled: false},
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"",
+		"jwt",
+		"zlm",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, signer)
+}
+
 func TestBuildPlaySignerUsesConfiguredTTL(t *testing.T) {
 	signer, err := buildPlaySigner(
 		gbconfig.PlayAuthSettings{Enabled: true, TTLSeconds: 300},

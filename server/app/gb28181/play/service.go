@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,6 +86,9 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
+	LifecycleID                string       `json:"lifecycleId,omitempty"`
+	ClientFeedbackToken        string       `json:"clientFeedbackToken,omitempty"`
+	ClientFeedbackExpiresAt    int64        `json:"clientFeedbackExpiresAt,omitempty"`
 	StreamID                   string       `json:"streamId"` // ZLM stream id(也是会话主键)
 	SSRC                       string       `json:"ssrc"`     // 媒体流 SSRC
 	App                        string       `json:"app"`      // ZLM app(固定 rtp)
@@ -183,6 +187,8 @@ type Service struct {
 	nodeClient               func(*node.Node) ZLM
 	qualifiedValidator       QualifiedNodeValidator
 	diagnosticSink           diagnosis.DiagnosticSink
+	lifecycleRecorder        LifecycleRecorder
+	streamLifecycleRecorder  StreamLifecycleRecorder
 	liveReady                func(LiveSession)
 	recordingMu              sync.RWMutex
 	recording                PlaybackRecordingLifecycle
@@ -239,6 +245,35 @@ func WithDiagnosticSink(sink diagnosis.DiagnosticSink) Option {
 			service.diagnosticSink = sink
 		}
 	}
+}
+
+func WithLifecycleRecorder(recorder LifecycleRecorder) Option {
+	return func(service *Service) { service.lifecycleRecorder = recorder }
+}
+
+func WithStreamLifecycleRecorder(recorder StreamLifecycleRecorder) Option {
+	return func(service *Service) { service.streamLifecycleRecorder = recorder }
+}
+
+func (s *Service) recordLifecycle(ctx context.Context, req Request, event LifecycleEvent) {
+	if s.lifecycleRecorder == nil || req.LifecycleID == "" {
+		return
+	}
+	if event.EventID == "" {
+		event.EventID = fmt.Sprintf("%s:%s:%d", req.LifecycleID, event.EventName, time.Now().UnixNano())
+	}
+	event.DeviceCode, event.ChannelCode = req.DeviceID, req.ChannelID
+	s.lifecycleRecorder.Record(ctx, req.LifecycleID, event)
+}
+
+func (s *Service) recordStreamLifecycle(ctx context.Context, streamID string, nodeID int64, event LifecycleEvent) {
+	if s.streamLifecycleRecorder == nil || streamID == "" {
+		return
+	}
+	if event.EventID == "" {
+		event.EventID = fmt.Sprintf("%s:%s:%d", streamID, event.EventName, time.Now().UnixNano())
+	}
+	s.streamLifecycleRecorder.RecordByStream(ctx, streamID, nodeID, event)
 }
 
 // WithLiveReadyObserver reports a successfully established live generation.
@@ -560,6 +595,8 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	result, err := s.startDirectTransaction(ctx, req)
 	fields := []zap.Field{zap.String("device_id", req.DeviceID), zap.String("channel_id", req.ChannelID), zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds()))}
 	if err != nil {
+		stage, eventName, reason := classifyLifecycleFailure(err)
+		s.recordLifecycle(ctx, req, LifecycleEvent{Stage: stage, EventName: eventName, FactState: FactFailed, Source: SourcePlayService, ReasonCode: reason, ReasonMessage: err.Error()})
 		logger.Warn("点播事务失败", append(fields, zap.String("event", "gb28181.play.failed"), zap.String("stage", "terminal"), zap.String("outcome", "failed"), zap.String("reason_code", playFailureReason(err)))...)
 		return result, err
 	}
@@ -603,6 +640,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if ch == nil {
 		return nil, ErrChannelNotFound
 	}
+	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageValidation, EventName: EventValidationSucceeded, FactState: FactConfirmed, Source: SourcePlayService})
 	// DEBUG 而非 INFO:校验通过紧跟在 requested 之后,只表示"请求参数合法",
 	// 运维看到它无动作可做(C04 判据②)。校验失败走 failed 事件,信息不会丢。
 	app.Log(playCtx).Named("play").Debug("点播设备与通道校验通过", zap.String("event", "gb28181.play.validation_succeeded"), zap.String("stage", "validation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID))
@@ -658,6 +696,9 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 				zap.String("device_id", deviceID),
 				zap.String("channel_id", channelID),
 				zap.String("stream_id", ch.StreamID))
+			s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageRTP, EventName: EventRTPNotApplicable, FactState: FactNotApplicable, Source: SourcePlayService, StreamID: reused.StreamID, Reused: true})
+			s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageInvite, EventName: EventInviteNotApplicable, FactState: FactNotApplicable, Source: SourcePlayService, StreamID: reused.StreamID, Reused: true})
+			s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageMedia, EventName: EventReuseMediaReady, FactState: FactConfirmed, Source: SourcePlayService, StreamID: reused.StreamID, NodeID: resultNodeID(reused), SSRC: reused.SSRC, Reused: true})
 			return reused, nil
 		}
 		// 复用失败(流确实不在),清理残留后走完整 INVITE 流程
@@ -784,6 +825,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		rtpFallback = s.cfg.ZLM.RTPPort
 	}
 	app.Log(playCtx).Named("play").Info("点播媒体节点已确定", zap.String("event", "gb28181.play.node_selected"), zap.String("stage", "node_selection"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID))
+	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageNode, EventName: EventNodeSelected, FactState: FactConfirmed, Source: SourcePlayService, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc})
 
 	// Build and authorize the playback result before opening RTP or sending an
 	// INVITE. A fixed stream must never leave a live upstream session behind
@@ -822,6 +864,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		recvPort = rtpFallback
 	}
 	app.Log(playCtx).Named("play").Info("点播 RTP 接收资源已分配", zap.String("event", "gb28181.play.rtp_allocated"), zap.String("stage", "rtp_allocation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID))
+	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageRTP, EventName: EventRTPAllocated, FactState: FactConfirmed, Source: SourcePlayService, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc})
 
 	// 6. 构造 SDP + 发 INVITE(任何失败要回滚 RTP 端口 + Unbind)
 	body := sdp.BuildPlaySDP(sdp.PlayParams{
@@ -848,6 +891,9 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
 	outcome, inviteErr := s.inviter.InviteTracked(inviteCtx, s.sessions, sess, body)
+	if outcome.RequestSent {
+		s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageInvite, EventName: EventInviteSent, FactState: FactConfirmed, Source: SourceSIP, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc, CallID: outcome.CallID, CSeq: outcome.CSeq})
+	}
 	if inviteErr != nil {
 		if errors.Is(inviteErr, uac.ErrStaleInviteGeneration) {
 			// 本代次的 INVITE 晚于更新代次完成:InviteTracked 已回收本代次的
@@ -882,6 +928,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, cause, errors.Is(playCtx.Err(), context.DeadlineExceeded), &releaseSSRC)
 	}
 	app.Log(playCtx).Named("play").Info("设备已接受点播 INVITE", zap.String("event", "gb28181.play.invite_accepted"), zap.String("stage", "sip_invite"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID), zap.String("correlation_id", sess.RequestID), zap.String("call_id", outcome.CallID), zap.String("cseq", outcome.CSeq))
+	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageInvite, EventName: EventInviteAccepted, FactState: FactConfirmed, Source: SourceSIP, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc, CallID: outcome.CallID, CSeq: outcome.CSeq})
 
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
 	// target node must still own the stream and report the media online.
@@ -918,6 +965,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, cause, true, &releaseSSRC)
 	}
 	app.Log(playCtx).Named("play").Info("点播媒体流已就绪", zap.String("event", "gb28181.play.media_ready"), zap.String("stage", "media_ready"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID), zap.String("correlation_id", sess.RequestID), zap.String("call_id", outcome.CallID), zap.String("cseq", outcome.CSeq))
+	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageMedia, EventName: EventMediaReady, FactState: FactConfirmed, Source: SourcePlayService, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc, CallID: outcome.CallID, CSeq: outcome.CSeq})
 	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc); err != nil {
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
 	}
@@ -951,6 +999,37 @@ func playFailureReason(err error) string {
 	default:
 		return "play_failed"
 	}
+}
+
+func classifyLifecycleFailure(err error) (LifecycleStage, string, string) {
+	switch {
+	case errors.Is(err, ErrDeviceNotFound):
+		return StageValidation, EventValidationFailed, ReasonDeviceNotFound
+	case errors.Is(err, ErrDeviceOffline):
+		return StageValidation, EventValidationFailed, ReasonDeviceOffline
+	case errors.Is(err, ErrChannelNotFound):
+		return StageValidation, EventValidationFailed, ReasonChannelNotFound
+	case errors.Is(err, ErrStreamNotReady), errors.Is(err, ErrPlayTimeout):
+		return StageMedia, EventMediaTimeout, ReasonMediaTimeout
+	case strings.Contains(err.Error(), "INVITE"):
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "超时") {
+			return StageInvite, EventInviteTimeout, ReasonInviteTimeout
+		}
+		return StageInvite, EventInviteRejected, ReasonInviteRejected
+	case strings.Contains(err.Error(), "RTP"), strings.Contains(err.Error(), "收流端口"):
+		return StageRTP, EventRTPAllocationFailed, ReasonRTPAllocationFailed
+	case strings.Contains(err.Error(), "节点"):
+		return StageNode, EventNodeSelectionFailed, ReasonNodeUnavailable
+	default:
+		return StageValidation, EventValidationFailed, "play_failed"
+	}
+}
+
+func resultNodeID(result *Result) int64 {
+	if result != nil && result.Node != nil {
+		return result.Node.ID
+	}
+	return 0
 }
 
 func (s *Service) fireSnapshot(ctx context.Context, result *Result, req Request) {
@@ -1093,15 +1172,29 @@ func (s *Service) Stop(ctx context.Context, streamID, deviceID, channelID string
 	startedAt := time.Now()
 	logger := app.Log(ctx).Named("play")
 	deviceID, channelID = s.stopLogIdentity(streamID, deviceID, channelID)
+	nodeID := s.currentNodeID(streamID)
+	s.recordStreamLifecycle(ctx, streamID, nodeID, LifecycleEvent{
+		Stage: StageStop, EventName: EventStopRequested, FactState: FactConfirmed, Source: SourcePlayService,
+		DeviceCode: deviceID, ChannelCode: channelID, StreamID: streamID, NodeID: nodeID,
+	})
 	logger.Info("停播事务开始", append(stopLogFields(streamID, deviceID, channelID),
 		zap.String("event", "gb28181.play.stop_requested"), zap.String("stage", "stop_request"), zap.String("outcome", "started"))...)
 	defer func() {
 		fields := append(stopLogFields(streamID, deviceID, channelID),
 			zap.Float64("duration_ms", float64(time.Since(startedAt).Milliseconds())))
 		if err != nil {
+			s.recordStreamLifecycle(ctx, streamID, nodeID, LifecycleEvent{
+				Stage: StageCleanup, EventName: EventCleanupPartialFailure, FactState: FactFailed, Source: SourcePlayService,
+				DeviceCode: deviceID, ChannelCode: channelID, StreamID: streamID, NodeID: nodeID,
+				ReasonCode: ReasonCleanupPartialFailed,
+			})
 			logger.Warn("停播清理失败", append(fields, zap.String("event", "gb28181.play.stop_failed"), zap.String("stage", "cleanup"), zap.String("outcome", "failed"), zap.String("reason_code", "cleanup_failed"))...)
 			return
 		}
+		s.recordStreamLifecycle(ctx, streamID, nodeID, LifecycleEvent{
+			Stage: StageCleanup, EventName: EventCleanupCompleted, FactState: FactConfirmed, Source: SourcePlayService,
+			DeviceCode: deviceID, ChannelCode: channelID, StreamID: streamID, NodeID: nodeID,
+		})
 		logger.Info("停播清理完成", append(fields, zap.String("event", "gb28181.play.stop_completed"), zap.String("stage", "cleanup"), zap.String("outcome", "succeeded"))...)
 	}()
 	c := s.coordinator()

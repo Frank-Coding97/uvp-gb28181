@@ -11,16 +11,20 @@ import (
 )
 
 const DashboardHistoryRetention = 30 * 24 * time.Hour
+const PlayLifecycleEventRetention = 7 * 24 * time.Hour
+const PlayLifecycleStaleAfter = 24 * time.Hour
 
 type RetentionResult struct {
-	SIPMinutes   int64
-	SIPFlushes   int64
-	SIPGaps      int64
-	PlayAttempts int64
+	SIPMinutes          int64
+	SIPFlushes          int64
+	SIPGaps             int64
+	PlayAttempts        int64
+	PlayLifecycleEvents int64
+	PlayLifecyclesStale int64
 }
 
 func (result RetentionResult) Total() int64 {
-	return result.SIPMinutes + result.SIPFlushes + result.SIPGaps + result.PlayAttempts
+	return result.SIPMinutes + result.SIPFlushes + result.SIPGaps + result.PlayAttempts + result.PlayLifecycleEvents
 }
 
 type DashboardRetention struct {
@@ -50,6 +54,17 @@ func (service *DashboardRetention) Prune(ctx context.Context) (RetentionResult, 
 	cutoff := service.clock().Add(-service.retention)
 	result := RetentionResult{}
 	var err error
+	if service.db.Migrator().HasTable(&gbmodels.GbPlayLifecycleEvent{}) {
+		lifecycleStore := NewPlayLifecycleStore(service.db)
+		lifecycleStore.SetClock(service.clock)
+		if result.PlayLifecyclesStale, err = lifecycleStore.MarkStale(ctx, service.clock().Add(-PlayLifecycleStaleAfter)); err != nil {
+			return result, err
+		}
+		lifecycleCutoff := service.clock().Add(-PlayLifecycleEventRetention)
+		if result.PlayLifecycleEvents, err = service.deleteBatches(ctx, &gbmodels.GbPlayLifecycleEvent{}, "event_at < ?", lifecycleCutoff); err != nil {
+			return result, err
+		}
+	}
 	if result.SIPMinutes, err = service.deleteBatches(ctx, &gbmodels.GbSipMetricMinute{}, "bucket_start < ?", cutoff); err != nil {
 		return result, err
 	}
@@ -59,7 +74,9 @@ func (service *DashboardRetention) Prune(ctx context.Context) (RetentionResult, 
 	if result.SIPGaps, err = service.deleteBatches(ctx, &gbmodels.GbSipMetricGap{}, "ended_at < ?", cutoff); err != nil {
 		return result, err
 	}
-	result.PlayAttempts, err = service.deleteBatches(ctx, &gbmodels.GbPlayAttempt{}, "outcome IN ? AND finished_at IS NOT NULL AND finished_at < ?", []string{PlayOutcomeSuccess, PlayOutcomeFailure}, cutoff)
+	result.PlayAttempts, err = service.deleteBatches(ctx, &gbmodels.GbPlayAttempt{},
+		"(lifecycle_state IN ? OR outcome IN ?) AND finished_at IS NOT NULL AND finished_at < ?",
+		[]string{"completed", "failed", "stale_in_progress"}, []string{PlayOutcomeSuccess, PlayOutcomeFailure}, cutoff)
 	return result, err
 }
 

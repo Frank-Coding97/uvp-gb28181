@@ -201,6 +201,7 @@ type HookController struct {
 	recordResolver  NodeUUIDResolver
 	observer        StreamObserver
 	playbackMedia   PlaybackMediaSink
+	lifecycle       play.StreamLifecycleRecorder
 	flowMu          sync.RWMutex
 	flowResolver    FlowReportNodeResolver
 	flowCollector   FlowCollector
@@ -282,6 +283,10 @@ func (h *HookController) SetStreamObserver(observer StreamObserver) {
 
 func (h *HookController) SetPlaybackMediaSink(sink PlaybackMediaSink) {
 	h.playbackMedia = sink
+}
+
+func (h *HookController) SetLifecycleRecorder(recorder play.StreamLifecycleRecorder) {
+	h.lifecycle = recorder
 }
 
 func (h *HookController) SetFlowRuntime(resolver FlowReportNodeResolver, collector FlowCollector) {
@@ -395,6 +400,18 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		zap.String("schema", body.Schema),
 		zap.String("media_server_id", body.MediaServerID),
 		zap.Bool("regist", body.Regist))
+	if body.App == "rtp" && body.Stream != "" {
+		eventName := play.EventHookStreamUnregistered
+		stage := play.StageCleanup
+		if body.Regist {
+			eventName = play.EventHookStreamRegistered
+			stage = play.StageMedia
+		}
+		h.recordLifecycleFact(c, body.Stream, body.MediaServerID, play.LifecycleEvent{
+			Stage: stage, EventName: eventName, FactState: play.FactConfirmed,
+			Source: play.SourceZLMHook, StreamID: body.Stream,
+		})
+	}
 
 	// 流就绪 → 通知正在 WaitReady 的点播 service
 	if body.Regist && h.notifier != nil && body.Stream != "" {
@@ -472,6 +489,12 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 	hookLog(c).Info("ZLM Hook on_stream_none_reader",
 		zap.String("event", "gb28181.hook.stream.none_reader"),
 		zap.String("app", body.App), zap.String("stream_id", body.Stream))
+	if body.App == "rtp" && body.Stream != "" {
+		h.recordLifecycleFact(c, body.Stream, "", play.LifecycleEvent{
+			Stage: play.StageStop, EventName: play.EventHookNoneReader, FactState: play.FactInProgress,
+			Source: play.SourceZLMHook, StreamID: body.Stream,
+		})
+	}
 
 	closeStream := true
 	policyFailed := false
@@ -582,6 +605,13 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 		zap.String("event", "gb28181.hook.rtp_timeout"),
 		zap.String("stream_id", body.StreamID), zap.String("ssrc", string(body.SSRC)),
 		zap.String("media_server_id", body.MediaServerID))
+	if body.App == "rtp" && body.StreamID != "" {
+		h.recordLifecycleFact(c, body.StreamID, body.MediaServerID, play.LifecycleEvent{
+			Stage: play.StageMedia, EventName: play.EventHookRTPTimeout, FactState: play.FactFailed,
+			Source: play.SourceZLMHook, StreamID: body.StreamID, SSRC: string(body.SSRC),
+			ReasonCode: play.ReasonMediaTimeout,
+		})
+	}
 
 	_, _, fixedErr := play.ParseFixedStreamID(body.StreamID)
 	isFixedLive := body.App == "rtp" && fixedErr == nil
@@ -753,6 +783,12 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		h.ignoreFlowReport(c, body.Stream, "payload_node_mismatch")
 		return
 	}
+	if body.App == "rtp" && body.Stream != "" {
+		h.recordLifecycleFact(c, body.Stream, body.MediaServerID, play.LifecycleEvent{
+			Stage: play.StageMedia, EventName: play.EventHookFlowReported, FactState: play.FactConfirmed,
+			Source: play.SourceZLMHook, StreamID: body.Stream,
+		})
+	}
 	h.observeOpenAPIFlow(c, body)
 	resolver, collector := h.flowDependencies()
 	if resolver == nil || collector == nil {
@@ -779,6 +815,20 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 			logging.Error(err))
 	}
 	hookOK(c)
+}
+
+func (h *HookController) recordLifecycleFact(c *gin.Context, streamID, mediaServerID string, event play.LifecycleEvent) {
+	if h.lifecycle == nil || streamID == "" {
+		return
+	}
+	nodeID := int64(0)
+	if identity, ok := AuthenticatedHookNode(c); ok {
+		nodeID = identity.ID
+	} else if h.resolver != nil && mediaServerID != "" {
+		nodeID, _ = h.resolver.IDForUUID(mediaServerID)
+	}
+	event.NodeID = nodeID
+	h.lifecycle.RecordByStream(c.Request.Context(), streamID, nodeID, event)
 }
 
 type onStreamNotFoundBody struct {
