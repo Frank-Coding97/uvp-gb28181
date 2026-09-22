@@ -78,18 +78,45 @@ func applyMapDirectoryFilter(c *gin.Context, db *gorm.DB, q *gorm.DB) (*gorm.DB,
 }
 
 type markerVO struct {
-	ID                uint       `json:"id"`
-	ChannelID         string     `json:"channelId"`
-	Name              string     `json:"name"`
-	Latitude          float64    `json:"latitude"`
-	Longitude         float64    `json:"longitude"`
-	Status            int8       `json:"status"`
+	ID        uint    `json:"id"`
+	ChannelID string  `json:"channelId"`
+	Name      string  `json:"name"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Status    int8    `json:"status"`
+	// PositionSource 这对坐标是谁写的(catalog/mobile/manual)，与通道列表同一口径。
+	PositionSource string `json:"positionSource"`
+	// PositionUpdatedAt 设备最近一次**位置上报**的时刻(取自位置表)，不是坐标的写入时刻。
+	//
+	// ⛔ 与 `ChannelVO.positionUpdatedAt`(= gb_channel.position_updated_at，坐标最后一次被谁改的时间)
+	//	**同名不同义**，别互换：人工录入的坐标压根没有上报时间；目录声明的坐标也不更新这里。
+	//	本字段只服务 `PositionStale` 这一个判据，展示给用户看的是 gb_channel 那一列。
 	PositionUpdatedAt *time.Time `json:"positionUpdatedAt,omitempty"`
 	PositionStale     bool       `json:"positionStale"`
 }
 
-const mapCoordinateJoin = "LEFT JOIN gb_mobile_position_latest AS position_latest ON position_latest.channel_id = gb_channel.id"
+// clusterSingle 是聚合里"落单的那一个通道"的身份，**刻意不是 markerVO 的替代品**。
+//
+// 为什么不直接嵌 markerVO:markerVO 带着 PositionUpdatedAt/PositionStale（位置新鲜度），
+// 而聚合查询根本不查位置表。若这里嵌 markerVO，同一个通道会从 markers 接口和 clusters
+// 接口拿到**两份新鲜度**，两边一旦不同就是本仓最忌讳的"同一字段多个说法"。
+// 所以这里只放"在地图上画一个标记点"真正需要的东西,坐标由所在 cluster 的质心提供
+// （Count==1 时质心就是它自己）。
+type clusterSingle struct {
+	ID        uint   `json:"id"`
+	ChannelID string `json:"channelId"`
+	Name      string `json:"name"`
+	Status    int8   `json:"status"`
+}
 
+// latestPositionByChannel 取各通道最新的**移动位置**记录，只用于标注"位置是否新鲜"。
+//
+// ⛔ 别再拿它给坐标兜底（本函数历史上配合 COALESCE 干过这件事，2026-09-21 已撤）。
+//
+//	`gb_channel.longitude/latitude` 现在由三条通路共同回写（目录声明 / 位置订阅 /
+//	人工录入），它就是坐标的**唯一展示落点**；再从位置表取一次值会让地图与列表分叉 ——
+//	典型场景：设备报过位置后管理员人工改了坐标，位置表里那条旧值会把人工值盖掉。
+//	位置表在本文件里只回答「设备上次报位置是什么时候」这一个问题。
 func latestPositionByChannel(c *gin.Context, db *gorm.DB, ids []uint) map[uint]gbmodels.GbMobilePositionLatest {
 	if len(ids) == 0 {
 		return nil
@@ -125,9 +152,8 @@ func (mc *MapController) Markers(c *gin.Context) {
 		limit = 500
 	}
 
-	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
-		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
-		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).
+		Where("gb_channel.latitude != 0 AND gb_channel.longitude != 0")
 	q = applyMapFilters(c, db, q)
 	q, err := applyMapDirectoryFilter(c, db, q)
 	if err != nil {
@@ -135,10 +161,10 @@ func (mc *MapController) Markers(c *gin.Context) {
 		return
 	}
 	if maxLat > minLat {
-		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
+		q = q.Where("gb_channel.latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
 	if maxLng > minLng {
-		q = q.Where("COALESCE(position_latest.longitude, gb_channel.longitude) BETWEEN ? AND ?", minLng, maxLng)
+		q = q.Where("gb_channel.longitude BETWEEN ? AND ?", minLng, maxLng)
 	}
 
 	var list []gbmodels.GbChannel
@@ -156,12 +182,13 @@ func (mc *MapController) Markers(c *gin.Context) {
 	out := make([]markerVO, 0, len(list))
 	for _, ch := range list {
 		marker := markerVO{
-			ID:        ch.ID,
-			ChannelID: ch.ChannelID,
-			Name:      ch.Name,
-			Latitude:  ch.Latitude,
-			Longitude: ch.Longitude,
-			Status:    ch.Status,
+			ID:             ch.ID,
+			ChannelID:      ch.ChannelID,
+			Name:           ch.Name,
+			Latitude:       ch.Latitude,
+			Longitude:      ch.Longitude,
+			Status:         ch.Status,
+			PositionSource: ch.PositionSource,
 		}
 		if position, ok := positions[ch.ID]; ok {
 			marker.PositionUpdatedAt = &position.ReceivedAt
@@ -199,9 +226,8 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
-	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
-		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
-		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).
+		Where("gb_channel.latitude != 0 AND gb_channel.longitude != 0")
 	q = applyMapFilters(c, db, q)
 	q, err := applyMapDirectoryFilter(c, db, q)
 	if err != nil {
@@ -209,10 +235,10 @@ func (mc *MapController) Clusters(c *gin.Context) {
 		return
 	}
 	if maxLat > minLat {
-		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
+		q = q.Where("gb_channel.latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
 	if maxLng > minLng {
-		q = q.Where("COALESCE(position_latest.longitude, gb_channel.longitude) BETWEEN ? AND ?", minLng, maxLng)
+		q = q.Where("gb_channel.longitude BETWEEN ? AND ?", minLng, maxLng)
 	}
 
 	var list []gbmodels.GbChannel
@@ -227,22 +253,60 @@ func (mc *MapController) Clusters(c *gin.Context) {
 		Count       int     `json:"count"`
 		OnlineCount int     `json:"onlineCount"`
 		OnlineRate  float64 `json:"onlineRate"`
+		// 簇的包围盒。点击聚合要"刚好框住这一簇"再放大:只回质心的话,
+		// 放大后散在质心四周的点会跑出视野 —— 用户看到的是"点了,然后点没了"。
+		// Count==1 时四个值与质心相同。
+		MinLat float64 `json:"minLat"`
+		MaxLat float64 `json:"maxLat"`
+		MinLng float64 `json:"minLng"`
+		MaxLng float64 `json:"maxLng"`
+		// Single 只在 Count==1 时非空。
+		//
+		// 为什么要回身份:前端在低于标记点阈值的层级画的是聚合气泡,而"落单的通道"
+		// 天然就是一个 Count==1 的分组。不回身份,前端只能把它画成一个写着"1"的气泡 ——
+		// 用户看到"明明只有一路通道,却显示成聚合"。行业惯例是 count==1 不聚合:
+		// 直接画成通道标记点。后端把身份给出来,前端才有得选。
+		Single *clusterSingle `json:"single,omitempty"`
 	}
 	grid := map[[2]int]*cluster{}
 	for _, ch := range list {
 		key := [2]int{int(ch.Latitude / gridSize), int(ch.Longitude / gridSize)}
 		cl := grid[key]
 		if cl == nil {
-			cl = &cluster{CenterLat: ch.Latitude, CenterLng: ch.Longitude}
+			cl = &cluster{
+				CenterLat: ch.Latitude, CenterLng: ch.Longitude,
+				MinLat: ch.Latitude, MaxLat: ch.Latitude,
+				MinLng: ch.Longitude, MaxLng: ch.Longitude,
+			}
 			grid[key] = cl
 		} else {
 			// 累积平均
 			cl.CenterLat = (cl.CenterLat*float64(cl.Count) + ch.Latitude) / float64(cl.Count+1)
 			cl.CenterLng = (cl.CenterLng*float64(cl.Count) + ch.Longitude) / float64(cl.Count+1)
+			if ch.Latitude < cl.MinLat {
+				cl.MinLat = ch.Latitude
+			}
+			if ch.Latitude > cl.MaxLat {
+				cl.MaxLat = ch.Latitude
+			}
+			if ch.Longitude < cl.MinLng {
+				cl.MinLng = ch.Longitude
+			}
+			if ch.Longitude > cl.MaxLng {
+				cl.MaxLng = ch.Longitude
+			}
 		}
 		cl.Count++
 		if ch.Status == gbmodels.ChannelStatusOnline {
 			cl.OnlineCount++
+		}
+		// 落单时带上身份;同一格子进来第二个通道就不再落单,把身份摘掉。
+		if cl.Count == 1 {
+			cl.Single = &clusterSingle{
+				ID: ch.ID, ChannelID: ch.ChannelID, Name: ch.Name, Status: ch.Status,
+			}
+		} else {
+			cl.Single = nil
 		}
 	}
 
@@ -264,8 +328,8 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin)
-	q = applyMapFilters(c, db, q).Where("(COALESCE(position_latest.latitude, gb_channel.latitude) = 0 OR COALESCE(position_latest.longitude, gb_channel.longitude) = 0)")
+	q := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id"))
+	q = applyMapFilters(c, db, q).Where("(gb_channel.latitude = 0 OR gb_channel.longitude = 0)")
 	q, err := applyMapDirectoryFilter(c, db, q)
 	if err != nil {
 		mc.Fail(c, "目录筛选参数错误", err, 400)

@@ -630,6 +630,14 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 		PTZType      *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道
 		AudioEnabled *bool   `json:"audioEnabled"`
 		OnDemandLive *bool   `json:"onDemandLive"` // 无人观看时是否自动关闭
+		// Longitude / Latitude 人工录入的通道位置坐标（三通路里的"人工"这一路）。
+		//
+		// ⛔ 必须**成对**提供：单给一个在语义上不构成坐标，静默接受会让库里出现
+		//    "经度是新值、纬度还是旧的"这种谁也解释不了的半对状态。
+		// ⛔ 两者同为 0 = 清除坐标（0 在本仓全链路表示"无坐标"，见 models 的
+		//    ChannelPositionSource 常量组）；只给其一为 0 则判非法。
+		Longitude *float64 `json:"longitude"`
+		Latitude  *float64 `json:"latitude"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -656,6 +664,38 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 	}
 	if body.OnDemandLive != nil {
 		updates["on_demand_live"] = *body.OnDemandLive
+	}
+	// ---- 人工录入通道坐标（三通路里的 manual）----
+	// ⛔ 与 Catalog / MobilePosition 写的是**同一对列**，靠 position_source 区分归属；
+	//    人工值的优先关系是"高于目录声明、低于实时位置"（见 models 常量组）。
+	if body.Longitude != nil || body.Latitude != nil {
+		if body.Longitude == nil || body.Latitude == nil {
+			dc.FailAndAbort(c, "经度与纬度必须同时提供", nil)
+			return
+		}
+		lng, lat := *body.Longitude, *body.Latitude
+		switch {
+		case lng == 0 && lat == 0:
+			// 显式清除：与"从来没配过"落成同一个状态（0 坐标 + 空来源）。
+			updates["longitude"] = 0
+			updates["latitude"] = 0
+			updates["position_source"] = ""
+			updates["position_updated_at"] = nil
+		case lng == 0 || lat == 0:
+			dc.FailAndAbort(c, "经度与纬度都不能为 0（0 表示未设置坐标；如需清除请将两者都填 0）", nil)
+			return
+		case lng < -180 || lng > 180:
+			dc.FailAndAbort(c, "经度非法,应在 -180 ~ 180 之间", nil)
+			return
+		case lat < -90 || lat > 90:
+			dc.FailAndAbort(c, "纬度非法,应在 -90 ~ 90 之间", nil)
+			return
+		default:
+			updates["longitude"] = lng
+			updates["latitude"] = lat
+			updates["position_source"] = gbmodels.ChannelPositionSourceManual
+			updates["position_updated_at"] = time.Now()
+		}
 	}
 	if len(updates) == 0 {
 		dc.FailAndAbort(c, "没有可更新的字段", nil)

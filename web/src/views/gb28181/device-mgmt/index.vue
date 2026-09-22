@@ -101,6 +101,7 @@ import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { catalogShapeFromAttributes, catalogShapeText, channelAttributeEntries } from "./channelAttributeText";
+import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
 import {
   createDirectoryState,
   customGroupBatchActions,
@@ -229,6 +230,28 @@ const selectedRowKeys = ref<number[]>([]);
 const mapZoom = ref(10);
 const mapMinZoom = 5;
 const mapMaxZoom = 22;
+// 单独画通道标记点的最小 zoom；低于它改用聚合气泡（两者互斥，见 renderMapOverlays）。
+const mapMarkerMinZoom = 14;
+// 点击聚合后**至少**要放大到的层级。必须严格高于 mapMarkerMinZoom。
+//
+// ⛔ 别按"当前 zoom + 2"算:从 zoom 10 出发只到 12，仍在气泡层 ——
+//    用户点一下跟没点一样(历史现象:"点了这个数字之后标记点就没了")。
+// 下限抬到标记点层，保证一次点击必定展开成通道标记点。
+const mapClusterExpandMinZoom = mapMarkerMinZoom + 1;
+// 单点（或所有点重合）时 fitBounds 会把缩放一路顶到 mapMaxZoom(22)，直接落到街景级。
+// 给个"街区级"上限，同时必须高于 mapMarkerMinZoom，否则 fit 完反而看不到标记点。
+const mapSinglePointFitZoom = 16;
+// 聚合气泡按数量分级(尺寸 + 字号)。行业通行做法是分 3~4 档:
+// 固定尺寸下 "1" 和 "1000" 视觉重量一样,而且四位数会撑破圆形。
+function clusterBubbleTier(count: number) {
+  if (count <= 9) return { size: 34, font: 12 };
+  if (count <= 99) return { size: 40, font: 13 };
+  if (count <= 999) return { size: 48, font: 14 };
+  return { size: 56, font: 14 };
+}
+function clusterBubbleLabel(count: number) {
+  return count > 999 ? "999+" : String(count);
+}
 const mapContainer = ref<HTMLElement | null>(null);
 const mapReady = ref(false);
 const mapFirstRender = ref(false);
@@ -430,17 +453,26 @@ const zlmNodeOptions = computed(() => {
 let originalProtocolOverride: ProtocolOverride = "auto";
 let originalZLMNodeID = 0;
 const editChannelVisible = ref(false);
-const editChannelForm = ref({
-  channelId: "",
-  deviceId: "",
-  alias: "",
-  name: "",
-  manufacturer: "",
-  model: "",
-  ptzType: 0,
-  streamTransport: "UDP",
-  onDemandLive: true
-});
+// 坐标来源: '' 无 / 'catalog' 目录 / 'mobile' 实时上报 / 'manual' 人工录入
+const editChannelPositionSource = ref("");
+// 坐标输入用 string 承载: 空串 = 本次不修改坐标, 数字 = 设置, 两者都填 0 = 清除。
+// 用 a-input-number 的话空值表达能力弱, 这里自己控格式。
+const editChannelLongitude = ref("");
+const editChannelLatitude = ref("");
+function emptyEditChannelForm() {
+  return {
+    channelId: "",
+    deviceId: "",
+    alias: "",
+    name: "",
+    manufacturer: "",
+    model: "",
+    ptzType: 0,
+    streamTransport: "UDP",
+    onDemandLive: true
+  };
+}
+const editChannelForm = ref(emptyEditChannelForm());
 const editingChannel = ref(false);
 const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
@@ -899,28 +931,62 @@ function destroyMap() {
   mapError.value = "";
 }
 
+/**
+ * 点击聚合：把这一簇放大到"里面的通道都画成标记点"。
+ *
+ * 两步走，缺一不可：
+ *   ① 先用簇的包围盒问相机"刚好框住它需要多大缩放" —— 只飞到质心的话，
+ *      散在质心四周的点会跑出视野，看起来就是"点了然后点没了"；
+ *   ② 再把结果抬到 `mapClusterExpandMinZoom` 以上 —— 只按"当前 zoom + 固定档位"算，
+ *      从低层级出发会停在气泡层，用户点一下跟没点一样（历史现象：
+ *      "点击这个数字之后标记点就没了"）。
+ * ⚠️ 已知取舍：点散布过广时"框住它"的缩放低于标记点层，抬上去会让边缘的点出视野。
+ *    这一档不引入蜘蛛网展开（spiderfy），够用为止。
+ */
+function expandCluster(cluster: MapCluster) {
+  if (!mapInstance) return;
+  const bounds = new LngLatBounds([cluster.minLng, cluster.minLat], [cluster.maxLng, cluster.maxLat]);
+  const framed = mapInstance.cameraForBounds(bounds, { padding: 80 })?.zoom;
+  // 包围盒退化（所有点重合）时 cameraForBounds 会顶到 maxZoom，拿不到就按 maxZoom 算
+  const target = typeof framed === "number" && Number.isFinite(framed) ? framed : mapMaxZoom;
+  mapInstance.flyTo({
+    center: [cluster.centerLng, cluster.centerLat],
+    zoom: Math.min(mapMaxZoom, Math.max(target, mapClusterExpandMinZoom)),
+    essential: true
+  });
+}
+
 function createClusterElement(cluster: MapCluster) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = "map-cluster-marker";
-  element.textContent = String(cluster.count);
-  element.title = `${cluster.count} 路通道 · 在线 ${cluster.onlineCount}`;
+  // 数量分级：尺寸/字号随量级变化，>=1000 用 "999+"，否则四位数会撑破圆形。
+  const tier = clusterBubbleTier(cluster.count);
+  element.textContent = clusterBubbleLabel(cluster.count);
+  element.style.setProperty("--cluster-size", `${tier.size}px`);
+  element.style.setProperty("--cluster-font-size", `${tier.font}px`);
   element.style.setProperty("--cluster-rate", `${Math.round(cluster.onlineRate * 100)}%`);
-  element.addEventListener("click", () => {
-    mapInstance?.flyTo({
-      center: [cluster.centerLng, cluster.centerLat],
-      zoom: Math.min(16, Math.max(mapInstance.getZoom() + 2, 12)),
-      essential: true
-    });
-  });
+  element.title = `${cluster.count} 路通道 · 在线 ${cluster.onlineCount}`;
+  element.setAttribute("aria-label", element.title);
+  element.addEventListener("click", () => expandCluster(cluster));
   return element;
 }
 
-function createMarkerElement(marker: MapMarker) {
+/**
+ * 在地图上画一个标记点所需的最小信息。
+ *
+ * 刻意用 `Pick` 而不是整个 `MapMarker`：marker 列表接口还带着来源/新鲜度（详情面板要用），
+ * 而聚合接口里"落单的那一个通道"只给身份和状态。让标记点渲染只依赖这个最小集合，
+ * 两条来源才能复用同一段代码，不必为聚合再造一个形状。
+ */
+type MarkerPoint = Pick<MapMarker, "id" | "channelId" | "name" | "status">;
+
+function createMarkerElement(marker: MarkerPoint) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = `map-channel-marker${marker.status === 1 ? " online" : ""}`;
   element.title = `${displayName(marker)} · ${marker.channelId}`;
+  element.setAttribute("aria-label", element.title);
   element.innerHTML = '<span class="map-channel-pip"></span>';
   element.addEventListener("click", () => openChannel(marker));
   return element;
@@ -929,9 +995,25 @@ function createMarkerElement(marker: MapMarker) {
 function renderMapOverlays() {
   if (!mapInstance || !mapReady.value) return;
   removeMapMarkers();
-  clusters.value
-    .filter(cluster => cluster.count > 1)
-    .forEach(cluster => {
+  // 两种呈现**互斥**：低于阈值用聚合气泡，达到阈值换成单个通道标记点。
+  // ⛔ 不要让它们同时画 —— 历史上聚合气泡是无条件渲染、标记点按 zoom 渲染，
+  //    于是 zoom≥阈值 时同一批通道会同时出现"气泡 N"和 N 个标记点，重叠在同一位置。
+  if (mapZoom.value < mapMarkerMinZoom) {
+    clusters.value.forEach(cluster => {
+      // ⭐ 落单的通道**不是聚合**：count==1 直接画成通道标记点。
+      // 行业惯例（Leaflet.markercluster / Supercluster / 高德 都是这么做的）：
+      // 只有 >=2 才聚合。让唯一的那路通道顶着一个写着 "1" 的气泡，
+      // 用户会以为平台在聚合一个根本不该聚合的东西，而且点它只会放大 ——
+      // 看起来就像"点了这个数字之后标记点没了"。
+      if (cluster.count === 1 && cluster.single) {
+        mapMarkers.set(
+          cluster.single.id,
+          new MapLibreMarker({ element: createMarkerElement(cluster.single), anchor: "center" })
+            .setLngLat([cluster.centerLng, cluster.centerLat])
+            .addTo(mapInstance!)
+        );
+        return;
+      }
       const key = `${cluster.centerLat}:${cluster.centerLng}:${cluster.count}`;
       mapClusters.set(
         key,
@@ -940,23 +1022,28 @@ function renderMapOverlays() {
           .addTo(mapInstance!)
       );
     });
-  if (mapZoom.value >= 14) {
-    markers.value.forEach(marker => {
-      mapMarkers.set(
-        marker.id,
-        new MapLibreMarker({ element: createMarkerElement(marker), anchor: "center" })
-          .setLngLat([marker.longitude, marker.latitude])
-          .addTo(mapInstance!)
-      );
-    });
+    return;
   }
+  markers.value.forEach(marker => {
+    mapMarkers.set(
+      marker.id,
+      new MapLibreMarker({ element: createMarkerElement(marker), anchor: "center" })
+        .setLngLat([marker.longitude, marker.latitude])
+        .addTo(mapInstance!)
+    );
+  });
 }
 
 function fitMapToData() {
   if (!mapInstance || !markers.value.length) return;
   const bounds = new LngLatBounds();
   markers.value.forEach(marker => bounds.extend([marker.longitude, marker.latitude]));
-  mapInstance.fitBounds(bounds, { padding: 60, maxZoom: mapMaxZoom, duration: 500 });
+  // 单点视野是退化矩形，fitBounds 会顶到 maxZoom；钳到 mapSinglePointFitZoom 更适合看单个点位
+  mapInstance.fitBounds(bounds, {
+    padding: 60,
+    maxZoom: markers.value.length === 1 ? mapSinglePointFitZoom : mapMaxZoom,
+    duration: 500
+  });
 }
 
 function ensureMap() {
@@ -1076,9 +1163,17 @@ async function loadMapData() {
   // 避免慢响应把过期的点位/数量覆盖到当前视图
   const seq = ++mapDataSeq;
   mapLoading.value = true;
+  // 首次(或切回地图)这一轮**不按当前视野过滤**。
+  //
+  // ⛔ 自动定位的目的就是把视野移到数据上，若首轮就按视野过滤，那么"数据全在视野外"
+  //    时返回的列表是空的 ⇒ 下面的 fitBounds 永远不会触发 ⇒ 视野不动 ⇒ 数据永远进不了
+  //    视野。这是个死锁，表现就是"地图上什么都看不到"。初始视野固定在北京 zoom10，
+  //    只要所有带坐标的通道都不在这个框里就必然踩中。
+  // 只在首轮放开；拿到数据 fit 之后会触发 moveend → 下一轮自然恢复按视野查询。
+  const autoFitPending = mapAutoFitPending;
   try {
     const query = {
-      ...mapBoundsParams(),
+      ...(autoFitPending ? {} : mapBoundsParams()),
       q: keyword.value.trim() || undefined,
       ...directoryQuery(directoryState.value),
       status: statusFilter.value
@@ -1092,9 +1187,10 @@ async function loadMapData() {
     if (clusterRes.code === 0) clusters.value = clusterRes.data?.clusters || [];
     total.value = markerRes.data?.total || 0;
     renderMapOverlays();
-    if (mapAutoFitPending && markers.value.length) {
+    if (autoFitPending) {
+      // 有没有数据都要落地这个标记:真没数据时若还留着,每轮都会退化成一次全量查询
       mapAutoFitPending = false;
-      fitMapToData();
+      if (markers.value.length) fitMapToData();
     }
   } catch (error: any) {
     if (seq !== mapDataSeq) return;
@@ -1126,7 +1222,9 @@ async function refreshStats() {
   }
 }
 
-async function openChannel(record: ChannelVO | MapMarker) {
+// 形参只要 id:列表行(ChannelVO)、地图标记点(MapMarker)、聚合里落单的通道(MarkerPoint)
+// 三种来源都会调它,而这里确实只用得到 id。
+async function openChannel(record: { id: number }) {
   if (!canViewDevices.value) return;
   drawerTarget.value = { type: "channel", id: record.id };
   drawerVisible.value = true;
@@ -1723,6 +1821,12 @@ function openEditChannelModal(record: ChannelVO) {
     streamTransport: record.streamTransport || "UDP",
     onDemandLive: record.onDemandLive !== false
   };
+  // 已有坐标时预填, 让"当前是什么"和"要改成什么"在同一处看得见。
+  // 来源是 mobile 时也预填 —— 人工填过就等于接管, 由用户决定要不要覆盖实时值。
+  const hasCoord = !!(record.longitude || record.latitude);
+  editChannelLongitude.value = hasCoord ? String(record.longitude) : "";
+  editChannelLatitude.value = hasCoord ? String(record.latitude) : "";
+  editChannelPositionSource.value = record.positionSource || "";
   editingChannelId.value = record.id;
   editChannelVisible.value = true;
 }
@@ -1730,29 +1834,33 @@ function openEditChannelModal(record: ChannelVO) {
 function cancelEditChannel() {
   editChannelVisible.value = false;
   editingChannelId.value = 0;
-  editChannelForm.value = {
-    channelId: "",
-    deviceId: "",
-    alias: "",
-    name: "",
-    manufacturer: "",
-    model: "",
-    ptzType: 0,
-    streamTransport: "UDP",
-    onDemandLive: true
-  };
+  editChannelForm.value = emptyEditChannelForm();
+  editChannelLongitude.value = "";
+  editChannelLatitude.value = "";
+  editChannelPositionSource.value = "";
+}
+
+// 人工坐标入参归一: '' 成对空 = 不动; 成对数字 = 设置; 单给 0 = 非法。
+function resolveCoordPayload() {
+  return resolveChannelCoordPayload(editChannelLongitude.value, editChannelLatitude.value);
 }
 
 async function handleEditChannel() {
   if (!canEditChannel.value) return;
   if (!editingChannelId.value) return;
+  const coord = resolveCoordPayload();
+  if ("error" in coord) {
+    Message.error(coord.error);
+    return;
+  }
   editingChannel.value = true;
   try {
     const [ptzRes, transportRes] = await Promise.all([
       updateChannel(editingChannelId.value, {
         alias: editChannelForm.value.alias,
         ptzType: editChannelForm.value.ptzType,
-        onDemandLive: editChannelForm.value.onDemandLive
+        onDemandLive: editChannelForm.value.onDemandLive,
+        ...coord.payload
       }),
       canEditTransport.value
         ? updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
@@ -1762,12 +1870,14 @@ async function handleEditChannel() {
       Message.error(ptzRes.code !== 0 ? ptzRes.message || "摄像头类型更新失败" : transportRes.message || "流传输模式更新失败");
       return;
     }
+    const coordPatch = coordPatchAfterSave(coord.payload);
     const item = channels.value.find(channel => channel.id === editingChannelId.value);
     if (item) {
       item.alias = editChannelForm.value.alias;
       item.ptzType = editChannelForm.value.ptzType;
       if (canEditTransport.value) item.streamTransport = editChannelForm.value.streamTransport;
       item.onDemandLive = editChannelForm.value.onDemandLive;
+      if (coordPatch) Object.assign(item, coordPatch);
     }
     if (channelDetail.value?.id === editingChannelId.value) {
       channelDetail.value = {
@@ -1775,7 +1885,8 @@ async function handleEditChannel() {
         alias: editChannelForm.value.alias,
         ptzType: editChannelForm.value.ptzType,
         ...(canEditTransport.value ? { streamTransport: editChannelForm.value.streamTransport } : {}),
-        onDemandLive: editChannelForm.value.onDemandLive
+        onDemandLive: editChannelForm.value.onDemandLive,
+        ...(coordPatch ?? {})
       };
     }
     Message.success("通道信息已更新");
@@ -2466,10 +2577,13 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
-              <a-table-column title="位置信息" :width="180">
+              <a-table-column title="位置信息" :width="200">
                 <template #cell="{ record }">
                   <a-tooltip :content="locationText(record)" position="top">
-                    <span class="relative text-ellipsis">{{ locationText(record) }}</span>
+                    <span class="coord-cell">
+                      <span class="relative text-ellipsis">{{ locationText(record) }}</span>
+                      <span v-if="positionSourceText(record)" class="coord-source">{{ positionSourceText(record) }}</span>
+                    </span>
                   </a-tooltip>
                 </template>
               </a-table-column>
@@ -3089,8 +3203,15 @@ onUnmounted(() => {
             ><strong>{{ vendorText(channelDetail) }}</strong> <span>摄像头类型</span
             ><strong>{{ cameraTypeText(channelDetail.ptzType) }}</strong> <span>父级通道</span
             ><strong>{{ channelDetail.parentId || "无" }}</strong> <span>坐标</span
-            ><strong>{{ locationText(channelDetail) }}</strong> <span>流传输模式</span
-            ><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
+            ><strong
+              >{{ locationText(channelDetail)
+              }}<em v-if="positionSourceText(channelDetail)" class="coord-source">{{
+                positionSourceText(channelDetail)
+              }}</em></strong
+            >
+            <span>坐标更新时间</span
+            ><strong>{{ channelDetail.positionUpdatedAt ? dateTime(channelDetail.positionUpdatedAt) : "无" }}</strong>
+            <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
             <span>按需直播</span>
             <template v-if="canEditChannel">
               <a-switch
@@ -3806,6 +3927,19 @@ onUnmounted(() => {
           <a-select v-model="editChannelForm.ptzType">
             <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="Number(opt.value)">{{ opt.name }}</a-option>
           </a-select>
+        </a-form-item>
+        <a-form-item label="通道坐标">
+          <div class="coord-inputs">
+            <a-input v-model="editChannelLongitude" placeholder="经度，如 116.99505" allow-clear />
+            <a-input v-model="editChannelLatitude" placeholder="纬度，如 36.66237" allow-clear />
+          </div>
+          <template #extra>
+            <span class="form-hint">
+              留空表示本次不修改坐标；两者都填 0 可清除。当前来源：{{
+                positionSourceText({ positionSource: editChannelPositionSource }) || "无坐标"
+              }}
+            </span>
+          </template>
         </a-form-item>
         <a-form-item label="流传输模式">
           <template v-if="canEditTransport">
@@ -5306,44 +5440,89 @@ onUnmounted(() => {
   color: var(--uvp-danger);
   text-align: center;
 }
-.map-cluster-marker,
-.map-channel-marker {
+
+/* ── 地图覆盖物（聚合气泡 / 通道标记点）──────────────────────────────
+ * ⛔ 这两个 class 必须走 :deep()。
+ * 元素是 **JS 动态 createElement、再由 MapLibre 插入 `.map-container` 内部** 的，
+ * 而 scoped 样式靠 `data-v-*` 属性匹配 —— 动态创建的元素拿不到这个属性，
+ * 裸选择器**一条都不生效**。失效的表现不是"样式差一点"，而是整个退回浏览器
+ * 默认 button：白底黑字的方块（历史上地图上那个 "1" 就是它）。
+ * ⚠️ 别把这两条搬回裸选择器，`index.runtime.test.ts` 有一条守卫盯着。
+ */
+:deep(.map-cluster-marker),
+:deep(.map-channel-marker) {
+  box-sizing: border-box;
   display: grid;
   place-items: center;
+  padding: 0;
   font: inherit;
   cursor: pointer;
   border: 0;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
 }
-.map-cluster-marker {
-  width: 40px;
-  height: 40px;
-  font-size: 12px;
+
+/* 聚合气泡：圆形 + 白描边 + 柔和投影；尺寸/字号由数量分级（JS 给 --cluster-size）。
+ * 底色按在线率在"品牌色 → 品牌青"之间混色，一眼看出这簇里在线占比。
+ * ⚠️ 只写一个百分比：`color-mix` 里两个百分比会被归一化，
+ *    原来写成 `cyan 60%, brand 60%` 等价于各 50%，在线率差异被压平了。 */
+:deep(.map-cluster-marker) {
+  width: var(--cluster-size, 40px);
+  height: var(--cluster-size, 40px);
+  font-size: var(--cluster-font-size, 13px);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   color: #ffffff;
-  background: radial-gradient(
-    circle at center,
-    color-mix(in srgb, var(--uvp-brand-cyan) var(--cluster-rate), var(--uvp-brand) var(--cluster-rate)),
-    var(--uvp-brand)
-  );
-  border: 3px solid color-mix(in srgb, #ffffff 75%, transparent);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+  background: color-mix(in srgb, var(--uvp-brand-cyan) var(--cluster-rate), var(--uvp-brand));
+  border: 2px solid rgb(255 255 255 / 92%);
   border-radius: 50%;
-  box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 28%),
+    0 4px 14px rgb(0 0 0 / 22%);
 }
-.map-channel-marker {
-  width: 18px;
-  height: 18px;
+
+:deep(.map-cluster-marker:hover) {
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 32%),
+    0 8px 22px rgb(0 0 0 / 28%);
+  transform: scale(1.08);
+}
+
+:deep(.map-cluster-marker:focus-visible),
+:deep(.map-channel-marker:focus-visible) {
+  outline: 2px solid var(--uvp-brand-cyan);
+  outline-offset: 2px;
+}
+
+/* 通道标记点：水滴 pin（左下角尖端即坐标点）+ 中心白点。
+ * 在线用品牌青、离线用灰；白描边保证浅色底图上也看得清。 */
+:deep(.map-channel-marker) {
+  width: 22px;
+  height: 22px;
   background: var(--uvp-text-tertiary);
-  border: 3px solid rgb(255 255 255 / 85%);
+  border: 3px solid rgb(255 255 255 / 92%);
   border-radius: 50% 50% 50% 0;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 30%),
+    0 3px 10px rgb(0 0 0 / 26%);
   transform: rotate(-45deg);
 }
-.map-channel-marker.online {
+
+/* ⚠️ hover 里必须带上 rotate，否则鼠标一放上去 pin 就"转正"了 */
+:deep(.map-channel-marker:hover) {
+  transform: rotate(-45deg) scale(1.15);
+}
+
+:deep(.map-channel-marker.online) {
   background: var(--uvp-brand-cyan);
 }
-.map-channel-pip {
-  width: 4px;
-  height: 4px;
+
+:deep(.map-channel-pip) {
+  width: 6px;
+  height: 6px;
   background: #ffffff;
   border-radius: 50%;
 }
@@ -6086,6 +6265,31 @@ onUnmounted(() => {
 }
 .form-hint-error {
   color: var(--uvp-danger);
+}
+
+/* 通道坐标三路来源的标注（目录 / 实时 / 人工），列表与详情卡共用 */
+.coord-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.coord-cell {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.coord-source {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 16px;
+  color: var(--uvp-brand-cyan);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 28%, transparent);
+  border-radius: 4px;
 }
 
 @keyframes spin {

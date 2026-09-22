@@ -232,19 +232,84 @@ func TestMapMarkers_UsesViewportAndChannelFilters(t *testing.T) {
 	assert.Equal(t, "37011200001310000001", list[0].(map[string]any)["channelId"])
 }
 
-func TestMapMarkers_PrefersLatestPositionAndReportsStaleness(t *testing.T) {
+// 地图坐标**只读 gb_channel**，位置表只用来回答"实时位置多久没更新了"。
+//
+// ⛔ 这里曾经断言"marker 优先取 gb_mobile_position_latest"（配合 SQL 里的
+// `COALESCE(position_latest.*, gb_channel.*)`）。回写落地后那条口径成了 bug：
+// 设备报过位置 → 位置表有值 → 管理员人工改坐标只改 gb_channel → 地图仍显示位置表的旧值，
+// 而列表/详情显示新值，同一个页面两套坐标。撤掉了 COALESCE，本用例随之改判。
+func TestMapMarkers_UsesChannelCoordinateAndReportsStaleness(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	// 位置表里塞一条**与通道坐标不同**的旧记录 —— 它只能影响 positionStale，
+	// 不该影响 latitude/longitude。
 	old := time.Now().Add(-91 * time.Second)
-	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{DeviceID: deviceID, SourceCode: "37011200001310000001", ChannelID: &channelID, EventTime: old, ReceivedAt: old, Latitude: 35.1, Longitude: 118.2}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{
+		DeviceID: deviceID, SourceCode: "37011200001310000001", ChannelID: &channelID,
+		EventTime: old, ReceivedAt: old, Latitude: 35.1, Longitude: 118.2,
+	}).Error)
+
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/map/markers", nil)
-	r.ServeHTTP(w, req)
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/markers", nil))
+	require.Equal(t, http.StatusOK, w.Code)
 	data := unmarshal(t, w)["data"].(map[string]any)
 	marker := data["list"].([]any)[0].(map[string]any)
-	assert.Equal(t, 35.1, marker["latitude"])
-	assert.Equal(t, 118.2, marker["longitude"])
-	assert.Equal(t, true, marker["positionStale"])
+
+	// seed 里通道坐标是 36.685 / 117.05
+	assert.Equal(t, 36.685, marker["latitude"], "坐标应取 gb_channel，不是位置表")
+	assert.Equal(t, 117.05, marker["longitude"], "坐标应取 gb_channel，不是位置表")
+	assert.Equal(t, true, marker["positionStale"], "位置表的陈旧度照旧要报出来")
+}
+
+// 人工录入的坐标不被位置表旧值覆盖 —— 这是撤掉 COALESCE 的直接理由，写成锚点。
+func TestMapMarkers_ManualCoordinateWinsOverStalePositionRow(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{
+		DeviceID: deviceID, SourceCode: "37011200001310000001", ChannelID: &channelID,
+		EventTime: time.Now(), ReceivedAt: time.Now(), Latitude: 35.1, Longitude: 118.2,
+	}).Error)
+	// 管理员随后人工改了安装位置
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", channelID).Updates(map[string]any{
+		"longitude": 120.5, "latitude": 30.5, "position_source": gbmodels.ChannelPositionSourceManual,
+	}).Error)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/markers", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	marker := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)[0].(map[string]any)
+
+	assert.Equal(t, 30.5, marker["latitude"])
+	assert.Equal(t, 120.5, marker["longitude"])
+	assert.Equal(t, gbmodels.ChannelPositionSourceManual, marker["positionSource"])
+}
+
+// 无坐标通道计数以 gb_channel 为准：设备报过实时位置但被人工清空坐标后，
+// 该通道应重新计入"无坐标"，不能因为位置表还有旧行就说它有坐标。
+func TestMapNoCoordCount_FollowsChannelCoordinate(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{
+		DeviceID: deviceID, SourceCode: "37011200001310000001", ChannelID: &channelID,
+		EventTime: time.Now(), ReceivedAt: time.Now(), Latitude: 35.1, Longitude: 118.2,
+	}).Error)
+
+	assert.EqualValues(t, 1, noCoordCount(t, r), "另一个通道本来就没坐标")
+
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", channelID).Updates(map[string]any{
+		"longitude": 0, "latitude": 0, "position_source": "",
+	}).Error)
+	assert.EqualValues(t, 2, noCoordCount(t, r), "清空后两个通道都应算无坐标")
+}
+
+func noCoordCount(t *testing.T, r *gin.Engine) int64 {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/no-coord-count", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	count, ok := unmarshal(t, w)["data"].(map[string]any)["count"].(float64)
+	require.True(t, ok, "无坐标计数响应结构变了")
+	return int64(count)
 }
 
 // ---------- B2 devicemgmt ----------
@@ -597,4 +662,73 @@ func TestMap_Clusters(t *testing.T) {
 	resp := unmarshal(t, w)
 	data := resp["data"].(map[string]any)
 	assert.NotNil(t, data["clusters"])
+}
+
+// fetchMapClusters 拉一次聚合结果并摊平成便于断言的形式。
+func fetchMapClusters(t *testing.T, handler http.Handler, query string) []map[string]any {
+	t.Helper()
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/clusters?"+query, nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	raw := unmarshal(t, w)["data"].(map[string]any)["clusters"].([]any)
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, item.(map[string]any))
+	}
+	return out
+}
+
+// count==1 的簇必须带上那一路通道的身份 + 包围盒。前端两件事都依赖它：
+//   - 没有身份，前端只能把"落单的通道"画成一个写着 "1" 的聚合气泡 ——
+//     用户看到的是"明明只有一路通道，却显示成聚合"；
+//   - 没有包围盒，点击聚合只能飞到质心，散在质心四周的点会跑出视野。
+//
+// 行业惯例（Leaflet.markercluster / Supercluster / 高德）：count==1 不聚合，直接画标记点。
+func TestMap_Clusters_SingleChannelCarriesIdentityAndBounds(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, chOnlineID, _ := seedDevicesAndChannels(t, db)
+	_ = db
+
+	clusters := fetchMapClusters(t, r, "zoom=10")
+	require.Len(t, clusters, 1, "seed 里只有一路通道带坐标，应聚成一个 count=1 的簇")
+	c := clusters[0]
+	assert.EqualValues(t, 1, c["count"])
+
+	single, ok := c["single"].(map[string]any)
+	require.True(t, ok, "count==1 必须带 single，否则前端只能画成写着 1 的气泡")
+	assert.EqualValues(t, chOnlineID, single["id"])
+	assert.Equal(t, "37011200001310000001", single["channelId"])
+	assert.Equal(t, "通道 在线", single["name"])
+	assert.EqualValues(t, gbmodels.ChannelStatusOnline, single["status"])
+
+	// 包围盒在 count==1 时收敛成一个点，与质心同值
+	assert.Equal(t, 36.685, c["minLat"])
+	assert.Equal(t, 36.685, c["maxLat"])
+	assert.Equal(t, 117.05, c["minLng"])
+	assert.Equal(t, 117.05, c["maxLng"])
+}
+
+// 同一格里进来第二个通道，它就不再是"落单"，single 必须消失。
+//
+// ⛔ 这条是防回归的关键：前端拿到 single 会把该簇当成"落单通道"画成单个标记点，
+// 若 count>1 还带着 single，前端就会把两条通道画成一个点。
+func TestMap_Clusters_DropsSingleWhenAnotherChannelSharesTheGrid(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, _, chOfflineID := seedDevicesAndChannels(t, db)
+	// zoom=10 的网格是 0.625 度：36.685/117.05 与 36.60/117.00 的格子下标都是 (58, 187)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", chOfflineID).
+		Updates(map[string]any{"latitude": 36.60, "longitude": 117.00}).Error)
+
+	clusters := fetchMapClusters(t, r, "zoom=10")
+	require.Len(t, clusters, 1, "两路通道落进同一格，应聚成一个簇")
+	c := clusters[0]
+	assert.EqualValues(t, 2, c["count"])
+	_, hasSingle := c["single"]
+	assert.False(t, hasSingle, "count>1 的簇不该带 single —— 它会骗前端把聚合画成单点")
+
+	// 包围盒要真的张开，这是"点击聚合后刚好框住这一簇"的依据
+	assert.Equal(t, 36.60, c["minLat"])
+	assert.Equal(t, 36.685, c["maxLat"])
+	assert.Equal(t, 117.00, c["minLng"])
+	assert.Equal(t, 117.05, c["maxLng"])
 }

@@ -13,6 +13,22 @@ const (
 	ChannelStatusOnline  int8 = 1
 )
 
+// 通道坐标来源(gb_channel.position_source)。
+//
+// 同一对 longitude/latitude 列有**三条写入通路**,来源列回答的是"这个坐标是谁写的":
+//   - [ChannelPositionSourceCatalog]:设备在 Catalog 应答的 Item 层声明安装位置(A.2.1.9);
+//   - [ChannelPositionSourceMobile] :设备 MobilePosition 上报的实时位置(§9.5.1 / A.2.5.6);
+//   - [ChannelPositionSourceManual] :人工在通道编辑里录入(仅平台侧有,协议上不存在)。
+//
+// ⛔ 语义边界:三者的**优先关系是写入策略,不是本列**。
+// 实时位置恒覆盖;人工值不被目录刷新覆盖(见 catalog/upsert.go 的覆盖守卫);
+// 目录只在"当前没有人工作答"时写入。空串 = 该通道从未有过坐标。
+const (
+	ChannelPositionSourceCatalog = "catalog"
+	ChannelPositionSourceMobile  = "mobile"
+	ChannelPositionSourceManual  = "manual"
+)
+
 // GbChannel 国标通道(设备下的视频通道,Catalog 填充)
 type GbChannel struct {
 	ID           uint   `gorm:"primarykey" json:"id"`
@@ -47,10 +63,14 @@ type GbChannel struct {
 	// 之前 B-2 那批判定它属"点播取流能力"而只解析不落库，本轮面板需要它，故补落。
 	StreamNumberList string `gorm:"column:stream_number_list;size:32;default:'';comment:支持的码流编号 2022独有,可多值 / 分隔,如 0/1 或 0/1/2" json:"streamNumberList"`
 	// IPAddress / Port 来自 Catalog Item 层(不是 <Info>),为设备声明的通道取流地址
-	IPAddress               string     `gorm:"column:ip_address;size:64;default:'';comment:设备声明的通道 IP(Catalog Item 层)" json:"ipAddress"`
-	Port                    int        `gorm:"column:port;default:0;comment:设备声明的通道端口(Catalog Item 层)" json:"port"`
-	Longitude               float64    `gorm:"column:longitude;comment:经度" json:"longitude"`
-	Latitude                float64    `gorm:"column:latitude;comment:纬度" json:"latitude"`
+	IPAddress string  `gorm:"column:ip_address;size:64;default:'';comment:设备声明的通道 IP(Catalog Item 层)" json:"ipAddress"`
+	Port      int     `gorm:"column:port;default:0;comment:设备声明的通道端口(Catalog Item 层)" json:"port"`
+	Longitude float64 `gorm:"column:longitude;comment:经度" json:"longitude"`
+	Latitude  float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
+	// PositionSource 见文件头的常量组:回答"这对坐标是谁写的"。
+	// ⛔ 它不是"设备能力上报",而是平台自己的**写入归属** —— 前端据此说明坐标的可信来源。
+	PositionSource          string     `gorm:"column:position_source;size:16;not null;default:'';comment:通道坐标来源 catalog/mobile/manual,空=无坐标" json:"positionSource"`
+	PositionUpdatedAt       *time.Time `gorm:"column:position_updated_at;comment:通道坐标最近更新时间" json:"positionUpdatedAt"`
 	Status                  int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
 	StreamID                string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
 	CurrentSSRC             string     `gorm:"column:current_ssrc;size:10;not null;default:'';comment:当前实时媒体会话SSRC" json:"currentSsrc"`
@@ -81,6 +101,10 @@ func (GbChannel) TableName() string { return "gb_channel" }
 type GbChannelList []*GbChannel
 
 // UpsertChannel 按 device_id+channel_id 唯一键 upsert
+//
+// ⛔ 遗留路径:生产调用方已全部迁走(Catalog 走 catalog/upsert.go,那里有坐标覆盖守卫),
+// 本函数只剩测试与注释引用。坐标两列**原样透传**而不在这里做 0 值守卫 ——
+// 覆盖策略属写入方,见 [ChannelPositionSource*] 常量组的说明。
 func UpsertChannel(c context.Context, ch *GbChannel) error {
 	var existing GbChannel
 	result := app.DB().WithContext(c).
@@ -112,13 +136,14 @@ func UpsertChannel(c context.Context, ch *GbChannel) error {
 		"capture_position_type":      ch.CapturePositionType,
 		"stream_number_list":         ch.StreamNumberList,
 
-		"ip_address":    ch.IPAddress,
-		"port":          ch.Port,
-		"longitude":     ch.Longitude,
-		"latitude":      ch.Latitude,
-		"status":        ch.Status,
-		"capabilities":  ch.Capabilities,
-		"owner_dept_id": ch.OwnerDeptID,
+		"ip_address":      ch.IPAddress,
+		"port":            ch.Port,
+		"longitude":       ch.Longitude,
+		"latitude":        ch.Latitude,
+		"position_source": ch.PositionSource,
+		"status":          ch.Status,
+		"capabilities":    ch.Capabilities,
+		"owner_dept_id":   ch.OwnerDeptID,
 	}
 	return app.DB().WithContext(c).Model(&GbChannel{}).Where("id = ?", existing.ID).Updates(updates).Error
 }

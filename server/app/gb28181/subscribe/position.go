@@ -88,7 +88,8 @@ func (p *PositionProcessor) Process(ctx context.Context, device *gbmodels.GbDevi
 	return nil
 }
 
-// saveOne 落地单条位置：坐标守卫 → 采集时间 → 通道归属 → latest（+ history）写入。
+// saveOne 落地单条位置：坐标守卫 → 采集时间 → 通道归属 → latest（+ history）写入
+// → 回写通道坐标。
 func (p *PositionProcessor) saveOne(ctx context.Context, device *gbmodels.GbDevice, position manscdp.MobilePositionItem) error {
 	if position.Longitude == 0 || position.Latitude == 0 {
 		return fmt.Errorf("位置坐标不能为 0")
@@ -116,9 +117,32 @@ func (p *PositionProcessor) saveOne(ctx context.Context, device *gbmodels.GbDevi
 			DoUpdates: clause.AssignmentColumns([]string{"channel_id", "event_time", "received_at", "longitude", "latitude", "speed", "direction", "altitude", "updated_at"}),
 		}).Create(&latest).Error
 	}
-	if p.historyEnabled == nil || !p.historyEnabled() {
-		return upsertLatest(p.db.WithContext(ctx))
+	// writeBackChannel 把这次定位同步写进 gb_channel 的坐标两列。
+	//
+	// 为什么必须回写：通道列表 `ListChannels` / 通道详情 / 收藏都是**直查 gb_channel**，
+	// 不看位置表；地图那三处查询才 LEFT JOIN gb_mobile_position_latest 做 COALESCE。
+	// 只写位置表的结果是同一个页面里"地图有新点位、列表写无坐标"——两份数据源分叉。
+	// 回写让 gb_channel 成为三通路（目录声明/实时位置/人工录入）的**唯一展示落点**。
+	//
+	// ⛔ 只在该位置能挂到通道时回写：挂不上（通道尚未进目录、DeviceID 不是通道编码）
+	//    就只落位置表，绝不凭空造通道。
+	// ⛔ 刻意不做"0 不覆盖"守卫 —— 0 坐标在函数开头就已被拒，
+	//    能走到这里的都是真实定位；实时位置对人工/目录值恒覆盖（这是本能力的语义）。
+	// ⛔ source 固定 mobile：位置表与通道列必须同时更新，不能只动一半。
+	writeBackChannel := func(tx *gorm.DB) error {
+		if channelID == nil {
+			return nil
+		}
+		return tx.Model(&gbmodels.GbChannel{}).
+			Where("id = ?", *channelID).
+			Updates(map[string]any{
+				"longitude":           position.Longitude,
+				"latitude":            position.Latitude,
+				"position_source":     gbmodels.ChannelPositionSourceMobile,
+				"position_updated_at": receivedAt,
+			}).Error
 	}
+	historyEnabled := p.historyEnabled != nil && p.historyEnabled()
 	history := gbmodels.GbMobilePositionHistory{
 		DeviceID: device.ID, SourceCode: position.DeviceID, ChannelID: channelID,
 		EventTime: eventTime, ReceivedAt: receivedAt, Longitude: position.Longitude, Latitude: position.Latitude,
@@ -127,6 +151,12 @@ func (p *PositionProcessor) saveOne(ctx context.Context, device *gbmodels.GbDevi
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := upsertLatest(tx); err != nil {
 			return err
+		}
+		if err := writeBackChannel(tx); err != nil {
+			return err
+		}
+		if !historyEnabled {
+			return nil
 		}
 		return tx.Create(&history).Error
 	})

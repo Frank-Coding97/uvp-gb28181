@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -100,6 +101,19 @@ func upsertDevice(
 	return node, &dev, nil
 }
 
+// hasUsableCoordinate 判"设备本次到底报没报坐标"。
+//
+// ⛔ 0 一律当"未上报"，不是"坐标恰好在 0"：
+//   - 标准里 <Longitude>/<Latitude> 是 minOccurs=0 的可选元素，设备缺省时 Go 解成 0；
+//   - 前端 locationText() 也把 0 渲染成"无坐标"；
+//   - 中国境内不存在经纬度任一分量为 0 的合法点位。
+//
+// 这条判据是本次修复的核心：原实现无条件把 item 的 0 值写进库，
+// 于是一次不带坐标的目录刷新就会把设备上轮报过的坐标清零。
+func hasUsableCoordinate(item CatalogItem) bool {
+	return item.Longitude != 0 || item.Latitude != 0
+}
+
 // upsertChannel 通道节点:gb_channel upsert + catalog_node 建 + gb_channel_mount 主挂载
 //
 // 通道节点的关键在于建立"通道在哪个目录下"的多挂载关系(plan §3.5),
@@ -138,6 +152,15 @@ func upsertChannel(
 		if playbackDefaults.CloudRecordingEnabled {
 			recordingState = gbmodels.CloudRecordingStateWaiting
 		}
+		// 坐标三通路里的"目录"这一路：新建通道时若设备声明了坐标，同时记下来源与时间。
+		// 没声明就留空串 + NULL —— 与 longitude/latitude 为 0 互为充要。
+		positionSource := ""
+		var positionAt *time.Time
+		if hasUsableCoordinate(item) {
+			positionSource = gbmodels.ChannelPositionSourceCatalog
+			now := time.Now()
+			positionAt = &now
+		}
 		ch = gbmodels.GbChannel{
 			ChannelID:       item.DeviceID,
 			DeviceID:        sourceDeviceID,
@@ -163,6 +186,8 @@ func upsertChannel(
 			Port:                  item.Port,
 			Longitude:             item.Longitude,
 			Latitude:              item.Latitude,
+			PositionSource:        positionSource,
+			PositionUpdatedAt:     positionAt,
 			Status:                status,
 			OnDemandLive:          playbackDefaults.OnDemandLive,
 			AudioEnabled:          defaultAudioEnabled,
@@ -195,9 +220,20 @@ func upsertChannel(
 			"owner":        item.Owner,
 			"civil_code":   resolvedCivilCode,
 			"parent_id":    item.ParentID,
-			"longitude":    item.Longitude,
-			"latitude":     item.Latitude,
 			"status":       status,
+		}
+		// ⛔⛔ 坐标是三通路共用的落点，**不能无条件写** —— 原实现把 item.Longitude/Latitude
+		// 直接放进 updates，造成两个丢数据点：
+		//   ① 本轮目录没带 <Longitude>/<Latitude>（标准里是 minOccurs=0 的可选元素）
+		//      → 解成 0 → 把设备上一轮报过的坐标清零；
+		//   ② 人工录入 / 实时位置上写的坐标，被一次例行目录刷新静默抹掉。
+		// 因此这里加两道门禁，与紧邻的 ptz_type/room_type 那批"0 = 未上报，不覆盖"同源。
+		if hasUsableCoordinate(item) && ch.PositionSource != gbmodels.ChannelPositionSourceManual &&
+			ch.PositionSource != gbmodels.ChannelPositionSourceMobile {
+			updates["longitude"] = item.Longitude
+			updates["latitude"] = item.Latitude
+			updates["position_source"] = gbmodels.ChannelPositionSourceCatalog
+			updates["position_updated_at"] = time.Now()
 		}
 		// ⛔ 通道属性只在设备**本次确实上报了**才覆盖:0 / "" 一律按"未上报"处理。
 		// 无条件写会把上一次的已知属性清零 —— 设备这一轮没发 <Info>、或只带 Status 的

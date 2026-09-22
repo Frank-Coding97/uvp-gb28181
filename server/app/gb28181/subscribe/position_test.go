@@ -166,3 +166,79 @@ func TestPositionProcessor_Empty2022ListIsNoOp(t *testing.T) {
 	require.NoError(t, db.Model(&gbmodels.GbMobilePositionLatest{}).Count(&count).Error)
 	require.EqualValues(t, 0, count)
 }
+
+// 位置上报必须**同时**回写 gb_channel 的坐标两列。
+//
+// 为什么这是一条硬要求而不是锦上添花：通道列表 ListChannels / 通道详情 / 收藏都是直查
+// gb_channel，只有地图那三处查询才 LEFT JOIN gb_mobile_position_latest 做 COALESCE。
+// 不回写的结果是同一个页面里"地图有新点位、列表写无坐标"—— 两份数据源分叉。
+func TestPositionProcessor_WritesBackChannelCoordinate(t *testing.T) {
+	db, device := newPositionTestDB(t)
+	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Name: "通道"}
+	require.NoError(t, db.Create(channel).Error)
+
+	receivedAt := time.Date(2026, 9, 17, 22, 30, 0, 0, time.Local)
+	p := NewPositionProcessor(db, func() time.Time { return receivedAt }, func() bool { return false })
+
+	// ⛔ 2016 扁平形态的根 <DeviceID> 是**位置来源通道**（2022 才把它下沉到 Item/DeviceID，
+	// 根上换成目标设备），所以这里必须是通道编码 C —— 写设备编码 D 会挂不上通道。
+	body := []byte(`<Notify><CmdType>MobilePosition</CmdType><SN>11</SN><DeviceID>C</DeviceID><Time>2026-09-17T22:29:00</Time><Longitude>116.99505</Longitude><Latitude>36.66237</Latitude></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: body}))
+
+	var fresh gbmodels.GbChannel
+	require.NoError(t, db.First(&fresh, channel.ID).Error)
+	require.InDelta(t, 116.99505, fresh.Longitude, 1e-6)
+	require.InDelta(t, 36.66237, fresh.Latitude, 1e-6)
+	require.Equal(t, gbmodels.ChannelPositionSourceMobile, fresh.PositionSource)
+	require.NotNil(t, fresh.PositionUpdatedAt)
+	require.WithinDuration(t, receivedAt, *fresh.PositionUpdatedAt, time.Second)
+
+	// history 关闭时同样要回写 —— 回写与"要不要留历史"是两码事。
+	second := []byte(`<Notify><CmdType>MobilePosition</CmdType><SN>12</SN><DeviceID>C</DeviceID><Time>2026-09-17T22:31:00</Time><Longitude>116.99666</Longitude><Latitude>36.66333</Latitude></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: second}))
+	require.NoError(t, db.First(&fresh, channel.ID).Error)
+	require.InDelta(t, 116.99666, fresh.Longitude, 1e-6)
+}
+
+// 实时位置对人工录入的坐标**恒覆盖**（这是三条通路的优先关系里唯一一处强覆盖）。
+func TestPositionProcessor_WriteBackOverwritesManualPosition(t *testing.T) {
+	db, device := newPositionTestDB(t)
+	channel := &gbmodels.GbChannel{
+		DeviceID: "D", ChannelID: "C",
+		Longitude: 121.47, Latitude: 31.23,
+		PositionSource: gbmodels.ChannelPositionSourceManual,
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	p := NewPositionProcessor(db, time.Now, func() bool { return false })
+	body := []byte(`<Notify><CmdType>MobilePosition</CmdType><SN>13</SN><DeviceID>C</DeviceID><Time>2026-09-17T22:29:00</Time><Longitude>116.99505</Longitude><Latitude>36.66237</Latitude></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: body}))
+
+	var fresh gbmodels.GbChannel
+	require.NoError(t, db.First(&fresh, channel.ID).Error)
+	require.InDelta(t, 116.99505, fresh.Longitude, 1e-6)
+	require.Equal(t, gbmodels.ChannelPositionSourceMobile, fresh.PositionSource)
+}
+
+// 位置挂不到通道（通道还没进目录 / 上报的位置来源不是某个通道）时：
+// 只落位置表，**不新建通道、不改任何通道**，也不报错。
+func TestPositionProcessor_WriteBackSkippedWhenChannelUnknown(t *testing.T) {
+	db, device := newPositionTestDB(t)
+	seed := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "OTHER"}
+	require.NoError(t, db.Create(seed).Error)
+	p := NewPositionProcessor(db, time.Now, func() bool { return false })
+
+	body := []byte(`<Notify><CmdType>MobilePosition</CmdType><SN>14</SN><DeviceID>NOT-A-CHANNEL</DeviceID><Time>2026-09-17T22:29:00</Time><Longitude>116.99505</Longitude><Latitude>36.66237</Latitude></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: body}))
+
+	var fresh gbmodels.GbChannel
+	require.NoError(t, db.First(&fresh, seed.ID).Error)
+	require.Zero(t, fresh.Longitude, "挂不上通道时不得顺手改到别的通道")
+	require.Empty(t, fresh.PositionSource)
+	var channels int64
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&channels).Error)
+	require.EqualValues(t, 1, channels, "挂不上通道时绝不能凭空造一条")
+	var latestCount int64
+	require.NoError(t, db.Model(&gbmodels.GbMobilePositionLatest{}).Count(&latestCount).Error)
+	require.EqualValues(t, 1, latestCount, "位置表照常落库")
+}
