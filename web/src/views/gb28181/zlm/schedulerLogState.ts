@@ -9,6 +9,11 @@ export interface SchedulerLogFilterState {
   limit: number;
 }
 
+export function schedulerLogResultFromQuery(value: unknown): SchedulerLogFilterState["result"] {
+  const normalized = Array.isArray(value) ? value[0] : value;
+  return normalized === "success" || normalized === "failure" ? normalized : undefined;
+}
+
 function toRFC3339(value: string | number | Date) {
   const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new Error("时间格式无效");

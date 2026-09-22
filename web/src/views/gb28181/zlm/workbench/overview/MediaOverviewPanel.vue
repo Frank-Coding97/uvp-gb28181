@@ -5,7 +5,12 @@ import { Activity, AlertTriangle, ArrowRight, Radio, Server, Users } from "lucid
 
 import { getZLMOverview, type ZLMNodeRuntime, type ZLMOverview, type ZLMRuntimeMedia } from "@/api/gb28181-zlm-runtime";
 import StatCard from "../../components/StatCard.vue";
-import { formatZLMByteRate, formatZLMProtocol, zlmErrorPresentation, zlmFreshnessPresentation } from "../../components/zlmFormatters";
+import {
+  formatZLMByteRate,
+  formatZLMProtocol,
+  zlmErrorPresentation,
+  zlmFreshnessPresentation
+} from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import MediaVChart from "../components/MediaVChart.vue";
 import {
@@ -17,13 +22,16 @@ import {
 import { nodeOverviewLocation, overviewHealthSummary, streamOverviewLocation } from "../../clusterOverviewState";
 import { buildOverviewKpis, overviewKpiValueText } from "./overviewState";
 
-const props = withDefaults(defineProps<{
-  active?: boolean;
-  autoRefresh?: boolean;
-}>(), {
-  active: true,
-  autoRefresh: true
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    autoRefresh?: boolean;
+  }>(),
+  {
+    active: true,
+    autoRefresh: true
+  }
+);
 
 const router = useRouter();
 const overview = ref<ZLMOverview | null>(null);
@@ -65,7 +73,7 @@ const { refresh } = useZLMRuntimePolling<ZLMOverview>({
 
 defineExpose({ refresh });
 
-const health = computed(() => overview.value ? overviewHealthSummary(overview.value) : null);
+const health = computed(() => (overview.value ? overviewHealthSummary(overview.value) : null));
 const chartState = computed(() => buildOverviewChartState(overview.value));
 const kpis = computed(() => buildOverviewKpis(overview.value));
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
@@ -75,11 +83,16 @@ const mediaSampleKnown = computed(() => (overview.value?.mediaSampledNodeIds.len
 const chartStatus = computed(() => chartState.value.status);
 const chartStatusText = computed(() => {
   switch (chartStatus.value) {
-    case "empty": return "尚未配置媒体节点";
-    case "unavailable": return "当前没有可用节点运行态";
-    case "unknown": return "当前尚未完成有效采样";
-    case "partial": return "当前仅有部分节点完成采样";
-    default: return "";
+    case "empty":
+      return "尚未配置媒体节点";
+    case "unavailable":
+      return "当前没有可用节点运行态";
+    case "unknown":
+      return "当前尚未完成有效采样";
+    case "partial":
+      return "当前仅有部分节点完成采样";
+    default:
+      return "";
   }
 });
 const overallStatus = computed(() => {
@@ -171,15 +184,33 @@ function bytesText(value: number | null) {
       </div>
     </header>
 
-    <div v-if="health?.kind === 'partial'" class="status-banner status-banner--warning" role="status" :aria-label="health.accessibleLabel">
+    <div
+      v-if="health?.kind === 'partial'"
+      class="status-banner status-banner--warning"
+      role="status"
+      :aria-label="health.accessibleLabel"
+    >
       <AlertTriangle :size="17" aria-hidden="true" />
-      <span><strong>部分节点不可用</strong>：成功 {{ health.successfulCount }} 个，失败 {{ health.failedCount }} 个；当前仍展示已采集数据。</span>
+      <span
+        ><strong>部分节点不可用</strong>：成功 {{ health.successfulCount }} 个，失败
+        {{ health.failedCount }} 个；当前仍展示已采集数据。</span
+      >
     </div>
-    <div v-else-if="health?.kind === 'unavailable'" class="status-banner status-banner--danger" role="alert" :aria-label="health.accessibleLabel">
+    <div
+      v-else-if="health?.kind === 'unavailable'"
+      class="status-banner status-banner--danger"
+      role="alert"
+      :aria-label="health.accessibleLabel"
+    >
       <AlertTriangle :size="17" aria-hidden="true" />
       <span><strong>集群运行态暂不可用</strong>：请检查节点连接和权限。</span>
     </div>
-    <div v-else-if="health?.kind === 'inactive'" class="status-banner status-banner--warning" role="status" :aria-label="health.accessibleLabel">
+    <div
+      v-else-if="health?.kind === 'inactive'"
+      class="status-banner status-banner--warning"
+      role="status"
+      :aria-label="health.accessibleLabel"
+    >
       <AlertTriangle :size="17" aria-hidden="true" />
       <span><strong>没有活跃采样节点</strong>：运行指标以破折号和状态文字展示，不按 0 处理。</span>
     </div>
@@ -274,7 +305,8 @@ function bytesText(value: number | null) {
               class="distribution-link"
               @click="gotoMonitoring(item.category)"
             >
-              <span>{{ formatZLMProtocol(item.category) }}</span><strong>{{ item.count }}</strong>
+              <span>{{ formatZLMProtocol(item.category) }}</span
+              ><strong>{{ item.count }}</strong>
             </button>
             <span v-if="!chartState.protocolDistribution.length" class="distribution-links__empty">未知，尚无媒体采样</span>
           </div>
@@ -287,7 +319,9 @@ function bytesText(value: number | null) {
             <h3 id="overview-nodes-title">节点健康</h3>
             <p>点击节点进入 canonical 节点详情；采集失败原因保留在当前快照中。</p>
           </div>
-          <button type="button" class="text-button" @click="router.push('/media/nodes')">全部节点 <ArrowRight :size="14" /></button>
+          <button type="button" class="text-button" @click="router.push('/media/nodes')">
+            全部节点 <ArrowRight :size="14" />
+          </button>
         </div>
         <div class="node-grid">
           <button
@@ -305,9 +339,18 @@ function bytesText(value: number | null) {
             </div>
             <div class="node-card__meta">#{{ node.nodeId }} · {{ node.freshness }} · {{ node.asOf || "暂无采样" }}</div>
             <dl class="node-card__metrics">
-              <div><dt>流</dt><dd>{{ node.mediaFreshness === 'unavailable' || node.streams === undefined ? '—' : node.streams.length }}</dd></div>
-              <div><dt>会话</dt><dd>{{ node.metricsComplete ? node.metrics.networkSessionCount : '—' }}</dd></div>
-              <div><dt>Net</dt><dd>{{ node.metricsComplete ? `${Math.round(node.metrics.netThreadLoad * 100)}%` : '—' }}</dd></div>
+              <div>
+                <dt>流</dt>
+                <dd>{{ node.mediaFreshness === "unavailable" || node.streams === undefined ? "—" : node.streams.length }}</dd>
+              </div>
+              <div>
+                <dt>会话</dt>
+                <dd>{{ node.metricsComplete ? node.metrics.networkSessionCount : "—" }}</dd>
+              </div>
+              <div>
+                <dt>Net</dt>
+                <dd>{{ node.metricsComplete ? `${Math.round(node.metrics.netThreadLoad * 100)}%` : "—" }}</dd>
+              </div>
             </dl>
             <p v-if="node.error" class="node-card__error">{{ node.error.message }}</p>
           </button>
@@ -328,22 +371,39 @@ function bytesText(value: number | null) {
             <template #columns>
               <a-table-column title="媒体身份">
                 <template #cell="{ record }">
-                  <button type="button" class="stream-link" :aria-label="`查看流 ${record.media.app}/${record.media.stream}`" @click="gotoStream(record)">
+                  <button
+                    type="button"
+                    class="stream-link"
+                    :aria-label="`查看流 ${record.media.app}/${record.media.stream}`"
+                    @click="gotoStream(record)"
+                  >
                     <Radio :size="14" aria-hidden="true" />
                     <span>{{ record.media.app }}/{{ record.media.stream }}</span>
                   </button>
                   <div class="stream-sub">{{ record.media.vhost }}</div>
                 </template>
               </a-table-column>
-              <a-table-column title="节点" :width="100"><template #cell="{ record }">#{{ record.nodeId }}</template></a-table-column>
-              <a-table-column title="协议" :width="110"><template #cell="{ record }">{{ formatZLMProtocol(record.media.schema) }}</template></a-table-column>
-              <a-table-column title="读者" :width="100"><template #cell="{ record }"><Users :size="13" /> {{ record.readerCount }}</template></a-table-column>
-              <a-table-column title="速率" :width="130"><template #cell="{ record }"><Activity :size="13" /> {{ bytesText(record.bytesSpeed) }}</template></a-table-column>
+              <a-table-column title="节点" :width="100"
+                ><template #cell="{ record }">#{{ record.nodeId }}</template></a-table-column
+              >
+              <a-table-column title="协议" :width="110"
+                ><template #cell="{ record }">{{ formatZLMProtocol(record.media.schema) }}</template></a-table-column
+              >
+              <a-table-column title="读者" :width="100"
+                ><template #cell="{ record }"><Users :size="13" /> {{ record.readerCount }}</template></a-table-column
+              >
+              <a-table-column title="速率" :width="130"
+                ><template #cell="{ record }"
+                  ><Activity :size="13" /> {{ bytesText(record.bytesSpeed) }}</template
+                ></a-table-column
+              >
             </template>
           </a-table>
         </div>
         <div v-else-if="mediaSampleKnown" class="stream-empty">当前采样范围内没有在线媒体流。</div>
-        <div v-else class="stream-empty stream-empty--unknown" role="status">媒体流采样未知，不能判断为 0；请刷新或检查节点状态。</div>
+        <div v-else class="stream-empty stream-empty--unknown" role="status">
+          媒体流采样未知，不能判断为 0；请刷新或检查节点状态。
+        </div>
       </section>
 
       <section class="overview-shortcuts" aria-label="媒体运维快捷入口">
@@ -354,7 +414,7 @@ function bytesText(value: number | null) {
         </button>
         <button type="button" class="shortcut-card" @click="gotoSchedulingFailures">
           <span class="shortcut-card__icon shortcut-card__icon--warning"><AlertTriangle :size="17" aria-hidden="true" /></span>
-          <span><strong>调度异常</strong><small>按失败结果筛查调度日志</small></span>
+          <span><strong>调度未命中</strong><small>按未命中状态筛查调度日志</small></span>
           <ArrowRight :size="15" aria-hidden="true" />
         </button>
       </section>
@@ -363,75 +423,463 @@ function bytesText(value: number | null) {
 </template>
 
 <style scoped>
-.media-overview-panel { min-width: 0; padding: 2px 0 24px; color: var(--zlm-text-2); }
-.panel-intro, .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.panel-intro { margin-bottom: 14px; padding: 16px 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--zlm-brand-500) 6%, transparent), transparent 54%), var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); }
-.panel-eyebrow { color: var(--zlm-brand-600); font-family: var(--zlm-font-mono); font-size: 10px; font-weight: var(--zlm-fw-semibold); letter-spacing: .13em; }
-.panel-intro h2 { margin: 4px 0 0; color: var(--zlm-text-1); font-size: 18px; }
-.panel-intro p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); line-height: 1.6; }
-.panel-intro code { padding: 1px 4px; color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-radius: 4px; font-family: var(--zlm-font-mono); font-size: 10px; }
-.panel-intro__meta { display: flex; flex: none; align-items: center; gap: 10px; }
-.freshness { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); white-space: nowrap; }
-.freshness--warning { color: var(--zlm-warn-600); }
-.freshness--danger { color: var(--zlm-danger-600); }
-.panel-refresh, .text-button, .primary-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; color: var(--zlm-brand-600); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); cursor: pointer; }
-.panel-refresh:hover, .text-button:hover { border-color: var(--zlm-brand-500); background: var(--zlm-brand-50); }
-.panel-refresh:disabled { cursor: wait; opacity: .65; }
-.text-button { min-height: 28px; padding: 0 6px; border-color: transparent; background: transparent; white-space: nowrap; }
-.primary-button { color: var(--zlm-card); background: var(--zlm-brand-600); border-color: var(--zlm-brand-600); }
-.panel-refresh:focus-visible, .text-button:focus-visible, .primary-button:focus-visible, .node-card:focus-visible, .stream-link:focus-visible, .distribution-link:focus-visible, .shortcut-card:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
-.status-banner { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 13px; border: 1px solid; border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); line-height: 1.5; }
-.status-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }
-.status-banner--danger { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
-.overview-state { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }
-.overview-state strong { color: var(--zlm-text-1); }
-.overview-state--error { color: var(--zlm-danger-600); }
-.overview-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.overview-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.overview-section { margin-top: 14px; padding: 14px; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
-.section-heading { margin-bottom: 12px; }
-.section-heading h3 { margin: 0; color: var(--zlm-text-1); font-size: 15px; }
-.section-heading p { margin: 4px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); line-height: 1.5; }
-.distribution-layout { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 12px; align-items: stretch; }
-.distribution-links { min-width: 0; padding: 12px; background: var(--zlm-fill-1); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }
-.distribution-links__heading { margin-bottom: 8px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
-.distribution-link { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 7px; color: var(--zlm-text-2); text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-sm); cursor: pointer; }
-.distribution-link:hover { color: var(--zlm-brand-600); background: var(--zlm-brand-50); }
-.distribution-link strong { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }
-.distribution-links__empty { display: block; color: var(--zlm-text-4); font-size: 11px; line-height: 1.5; }
-.node-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.node-card { appearance: none; width: 100%; min-width: 0; padding: 12px; color: inherit; text-align: left; background: var(--zlm-fill-1); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); cursor: pointer; transition: border-color .18s ease, transform .18s ease; }
-.node-card:hover { transform: translateY(-1px); border-color: var(--zlm-brand-500); }
-.node-card__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.node-card__name { display: inline-flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }
-.node-card__state { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--zlm-success-600); font-size: var(--zlm-fs-caption); }
-.node-card__state i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.node-card[data-tone="warning"] .node-card__state { color: var(--zlm-warn-600); }
-.node-card[data-tone="danger"] .node-card__state { color: var(--zlm-danger-600); }
-.node-card__meta { margin-top: 5px; overflow: hidden; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.node-card__metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 0; }
-.node-card__metrics div { min-width: 0; }
-.node-card__metrics dt { color: var(--zlm-text-4); font-size: 10px; }
-.node-card__metrics dd { margin: 3px 0 0; color: var(--zlm-text-1); font-family: var(--zlm-font-mono); font-size: 13px; font-weight: var(--zlm-fw-semibold); }
-.node-card__error { margin: 9px 0 0 !important; color: var(--zlm-danger-600) !important; overflow-wrap: anywhere; }
-.stream-table { overflow: hidden; border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }
-.stream-link { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 0; color: var(--zlm-brand-600); background: transparent; border: 0; cursor: pointer; }
-.stream-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stream-sub { margin-top: 2px; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 10px; }
-.stream-empty { padding: 30px 12px; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
-.stream-empty--unknown { color: var(--zlm-warn-600); }
-.overview-shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-.shortcut-card { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 12px 14px; color: var(--zlm-text-2); text-align: left; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); cursor: pointer; }
-.shortcut-card:hover { border-color: var(--zlm-brand-500); }
-.shortcut-card > span:nth-child(2) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
-.shortcut-card strong { color: var(--zlm-text-1); font-size: 13px; }
-.shortcut-card small { color: var(--zlm-text-3); font-size: 11px; }
-.shortcut-card__icon { display: grid; width: 30px; height: 30px; flex: none; place-items: center; color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-radius: var(--zlm-radius-md); }
-.shortcut-card__icon--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); }
-.is-spinning { animation: media-overview-spin .8s linear infinite; }
-@keyframes media-overview-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .media-overview-panel *, .media-overview-panel *::before, .media-overview-panel *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
-@media (max-width: 1260px) { .overview-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 960px) { .overview-chart-grid, .distribution-layout { grid-template-columns: 1fr; } .node-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .panel-intro, .section-heading { flex-direction: column; } .panel-intro__meta { width: 100%; align-items: flex-start; justify-content: space-between; } .overview-kpis, .node-grid, .overview-shortcuts { grid-template-columns: 1fr; } }
+.media-overview-panel {
+  min-width: 0;
+  padding: 2px 0 24px;
+  color: var(--zlm-text-2);
+}
+.panel-intro,
+.section-heading {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.panel-intro {
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--zlm-brand-500) 6%, transparent), transparent 54%), var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+}
+.panel-eyebrow {
+  font-family: var(--zlm-font-mono);
+  font-size: 10px;
+  font-weight: var(--zlm-fw-semibold);
+  color: var(--zlm-brand-600);
+  letter-spacing: 0.13em;
+}
+.panel-intro h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  color: var(--zlm-text-1);
+}
+.panel-intro p {
+  margin: 5px 0 0;
+  font-size: var(--zlm-fs-caption);
+  line-height: 1.6;
+  color: var(--zlm-text-3);
+}
+.panel-intro code {
+  padding: 1px 4px;
+  font-family: var(--zlm-font-mono);
+  font-size: 10px;
+  color: var(--zlm-brand-600);
+  background: var(--zlm-brand-50);
+  border-radius: 4px;
+}
+.panel-intro__meta {
+  display: flex;
+  flex: none;
+  gap: 10px;
+  align-items: center;
+}
+.freshness {
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+  white-space: nowrap;
+}
+.freshness--warning {
+  color: var(--zlm-warn-600);
+}
+.freshness--danger {
+  color: var(--zlm-danger-600);
+}
+.panel-refresh,
+.text-button,
+.primary-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--zlm-brand-600);
+  cursor: pointer;
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-md);
+}
+.panel-refresh:hover,
+.text-button:hover {
+  background: var(--zlm-brand-50);
+  border-color: var(--zlm-brand-500);
+}
+.panel-refresh:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.text-button {
+  min-height: 28px;
+  padding: 0 6px;
+  white-space: nowrap;
+  background: transparent;
+  border-color: transparent;
+}
+.primary-button {
+  color: var(--zlm-card);
+  background: var(--zlm-brand-600);
+  border-color: var(--zlm-brand-600);
+}
+.panel-refresh:focus-visible,
+.text-button:focus-visible,
+.primary-button:focus-visible,
+.node-card:focus-visible,
+.stream-link:focus-visible,
+.distribution-link:focus-visible,
+.shortcut-card:focus-visible {
+  outline: 2px solid var(--zlm-brand-500);
+  outline-offset: 2px;
+}
+.status-banner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 13px;
+  margin-bottom: 14px;
+  font-size: var(--zlm-fs-caption);
+  line-height: 1.5;
+  border: 1px solid;
+  border-radius: var(--zlm-radius-md);
+}
+.status-banner--warning {
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border-color: var(--zlm-warn-500);
+}
+.status-banner--danger {
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border-color: var(--zlm-danger-500);
+}
+.overview-state {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: var(--zlm-text-3);
+  text-align: center;
+  background: var(--zlm-card);
+  border: 1px dashed var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+}
+.overview-state strong {
+  color: var(--zlm-text-1);
+}
+.overview-state--error {
+  color: var(--zlm-danger-600);
+}
+.overview-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.overview-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.overview-section {
+  padding: 14px;
+  margin-top: 14px;
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+  box-shadow: var(--uvp-panel-shadow);
+}
+.section-heading {
+  margin-bottom: 12px;
+}
+.section-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--zlm-text-1);
+}
+.section-heading p {
+  margin: 4px 0 0;
+  font-size: var(--zlm-fs-caption);
+  line-height: 1.5;
+  color: var(--zlm-text-3);
+}
+.distribution-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 12px;
+  align-items: stretch;
+}
+.distribution-links {
+  min-width: 0;
+  padding: 12px;
+  background: var(--zlm-fill-1);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-md);
+}
+.distribution-links__heading {
+  margin-bottom: 8px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+.distribution-link {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 7px;
+  color: var(--zlm-text-2);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--zlm-radius-sm);
+}
+.distribution-link:hover {
+  color: var(--zlm-brand-600);
+  background: var(--zlm-brand-50);
+}
+.distribution-link strong {
+  font-family: var(--zlm-font-mono);
+  color: var(--zlm-text-1);
+}
+.distribution-links__empty {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--zlm-text-4);
+}
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.node-card {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  color: inherit;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  background: var(--zlm-fill-1);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-md);
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+.node-card:hover {
+  border-color: var(--zlm-brand-500);
+  transform: translateY(-1px);
+}
+.node-card__header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.node-card__name {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--zlm-fw-semibold);
+  color: var(--zlm-text-1);
+  white-space: nowrap;
+}
+.node-card__state {
+  display: inline-flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-success-600);
+}
+.node-card__state i {
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+  border-radius: 50%;
+}
+.node-card[data-tone="warning"] .node-card__state {
+  color: var(--zlm-warn-600);
+}
+.node-card[data-tone="danger"] .node-card__state {
+  color: var(--zlm-danger-600);
+}
+.node-card__meta {
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--zlm-font-mono);
+  font-size: 10px;
+  color: var(--zlm-text-4);
+  white-space: nowrap;
+}
+.node-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.node-card__metrics div {
+  min-width: 0;
+}
+.node-card__metrics dt {
+  font-size: 10px;
+  color: var(--zlm-text-4);
+}
+.node-card__metrics dd {
+  margin: 3px 0 0;
+  font-family: var(--zlm-font-mono);
+  font-size: 13px;
+  font-weight: var(--zlm-fw-semibold);
+  color: var(--zlm-text-1);
+}
+.node-card__error {
+  margin: 9px 0 0 !important;
+  color: var(--zlm-danger-600) !important;
+  overflow-wrap: anywhere;
+}
+.stream-table {
+  overflow: hidden;
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-md);
+}
+.stream-link {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  padding: 0;
+  color: var(--zlm-brand-600);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+.stream-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stream-sub {
+  margin-top: 2px;
+  font-family: var(--zlm-font-mono);
+  font-size: 10px;
+  color: var(--zlm-text-4);
+}
+.stream-empty {
+  padding: 30px 12px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+  text-align: center;
+}
+.stream-empty--unknown {
+  color: var(--zlm-warn-600);
+}
+.overview-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.shortcut-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px 14px;
+  color: var(--zlm-text-2);
+  text-align: left;
+  cursor: pointer;
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+}
+.shortcut-card:hover {
+  border-color: var(--zlm-brand-500);
+}
+.shortcut-card > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.shortcut-card strong {
+  font-size: 13px;
+  color: var(--zlm-text-1);
+}
+.shortcut-card small {
+  font-size: 11px;
+  color: var(--zlm-text-3);
+}
+.shortcut-card__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--zlm-brand-600);
+  background: var(--zlm-brand-50);
+  border-radius: var(--zlm-radius-md);
+}
+.shortcut-card__icon--warning {
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+}
+.is-spinning {
+  animation: media-overview-spin 0.8s linear infinite;
+}
+
+@keyframes media-overview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-overview-panel *,
+  .media-overview-panel *::before,
+  .media-overview-panel *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@media (width <= 1260px) {
+  .overview-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 960px) {
+  .overview-chart-grid,
+  .distribution-layout {
+    grid-template-columns: 1fr;
+  }
+  .node-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 640px) {
+  .panel-intro,
+  .section-heading {
+    flex-direction: column;
+  }
+  .panel-intro__meta {
+    align-items: flex-start;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .overview-kpis,
+  .node-grid,
+  .overview-shortcuts {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -24,31 +24,33 @@ import MediaOverviewPanel from "./MediaOverviewPanel.vue";
 
 function snapshot() {
   return {
-    nodes: [{
-      nodeId: 2,
-      name: "边缘节点 2",
-      state: "active",
-      status: "fresh",
-      freshness: "fresh",
-      asOf: "2026-08-30T10:00:00Z",
-      heartbeatFreshness: "fresh",
-      metrics: {
-        mediaSourceCount: 1,
-        multiMediaSourceMuxerCount: 1,
-        tcpServerCount: 1,
-        tcpSessionCount: 2,
-        udpServerCount: 0,
-        udpSessionCount: 0,
-        tcpClientCount: 0,
-        socketCount: 3,
-        networkSessionCount: 2,
-        netThreadLoad: 0.2,
-        workThreadLoad: 0.1
-      },
-      metricsComplete: true,
-      mediaFreshness: "fresh",
-      streams: []
-    }],
+    nodes: [
+      {
+        nodeId: 2,
+        name: "边缘节点 2",
+        state: "active",
+        status: "fresh",
+        freshness: "fresh",
+        asOf: "2026-08-30T10:00:00Z",
+        heartbeatFreshness: "fresh",
+        metrics: {
+          mediaSourceCount: 1,
+          multiMediaSourceMuxerCount: 1,
+          tcpServerCount: 1,
+          tcpSessionCount: 2,
+          udpServerCount: 0,
+          udpSessionCount: 0,
+          tcpClientCount: 0,
+          socketCount: 3,
+          networkSessionCount: 2,
+          netThreadLoad: 0.2,
+          workThreadLoad: 0.1
+        },
+        metricsComplete: true,
+        mediaFreshness: "fresh",
+        streams: []
+      }
+    ],
     streams: [],
     metrics: {
       sampledNodeCount: 1,
@@ -119,19 +121,28 @@ describe("MediaOverviewPanel", () => {
   });
 
   it("uses one overview request, shared chart adapters, and canonical drill-down locations", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/overview/MediaOverviewPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/overview/MediaOverviewPanel.vue"),
+      "utf8"
+    );
     expect(source).toContain("getZLMOverview");
     expect(source).toContain("useZLMRuntimePolling");
     expect(source).toContain("MediaVChart");
     expect(source).toContain("buildOverviewChartState");
     expect(source).toContain("nodeOverviewLocation");
     expect(source).toContain("streamOverviewLocation");
+    expect(source).toContain("调度未命中");
+    expect(source).toContain("按未命中状态筛查调度日志");
+    expect(source).not.toContain("按失败结果筛查调度日志");
     expect(source).not.toContain("/gb28181/zlm/streams");
     expect(source).not.toContain("/gb28181/zlm/nodes/");
   });
 
   it("renders six KPI categories and explicit unknown/partial labels", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/overview/MediaOverviewPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/overview/MediaOverviewPanel.vue"),
+      "utf8"
+    );
     const stateSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/overview/overviewState.ts"), "utf8");
     for (const label of ["媒体节点", "在线媒体流", "网络会话", "观看者", "吞吐", "录制中"]) {
       expect(stateSource).toContain(label);

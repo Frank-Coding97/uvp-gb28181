@@ -7,10 +7,13 @@ describe("SchedulingManagement", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/SchedulingManagement.vue"), "utf8");
     expect(source).toContain("SchedulerLogPanel");
     expect(source).toMatch(/#logs=\"\{\s*active\s*\}\"/);
-    expect(source).toContain(":active=\"active\"");
+    expect(source).toContain(':active="active"');
     expect(source).toContain("MediaWorkspaceShell");
     expect(source).toContain(':show-scope="false"');
     expect(source).toContain('@update:scope="workspace.setScope"');
+    expect(source).toContain("useRoute");
+    expect(source).toContain("initialLogResult");
+    expect(source).toContain(':initial-result="initialLogResult"');
     expect(source).not.toContain("SchedulerStrategyPanel");
     expect(source).not.toContain('key: "strategy"');
   });

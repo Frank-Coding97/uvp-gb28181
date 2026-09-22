@@ -46,7 +46,7 @@ function formatFilter(filter: SchedulerLogFilter, sampleCount: number, limit: nu
   if (filter.nodeId) parts.push(`节点 #${filter.nodeId}`);
   const algorithm = filter.algorithm || filter.policy;
   if (algorithm) parts.push(`策略 ${algorithmLabels[algorithm] || algorithm}`);
-  if (filter.result) parts.push(`结果 ${filter.result === "success" ? "成功" : "失败"}`);
+  if (filter.result) parts.push(`调度状态 ${filter.result === "success" ? "已命中" : "未命中"}`);
   if (filter.streamId) parts.push(`流 ${filter.streamId}`);
   parts.push(`当前 ${sampleCount} 条样本`);
   if (limit !== null) parts.push(`上限 ${limit}`);
@@ -62,19 +62,24 @@ function increment(map: Map<string, SchedulerChartDistribution>, category: strin
 
 function sorted(values: Map<string, SchedulerChartDistribution>): SchedulerChartDistribution[] {
   return [...values.values()].sort((left, right) => {
-    const resultOrder = (category: string) => category === "成功" ? 0 : category === "失败" ? 1 : 2;
-    return right.count - left.count || resultOrder(left.category) - resultOrder(right.category) || left.category.localeCompare(right.category);
+    const resultOrder = (category: string) => (category === "已命中" ? 0 : category === "未命中" ? 1 : 2);
+    return (
+      right.count - left.count ||
+      resultOrder(left.category) - resultOrder(right.category) ||
+      left.category.localeCompare(right.category)
+    );
   });
 }
 
 function resultCategory(log: SchedulerLogEntry): string {
-  return typeof log.errorMessage === "string" && log.errorMessage.trim() === "" ? "成功" : "失败";
+  return typeof log.errorMessage === "string" && log.errorMessage.trim() === "" ? "已命中" : "未命中";
 }
 
-function nodeCategory(log: SchedulerLogEntry): { category: string; nodeId?: number } {
+function nodeCategory(log: SchedulerLogEntry): { category: string; nodeId: number } | null {
   const nodeId = Number.isSafeInteger(log.nodeID) && log.nodeID > 0 ? log.nodeID : undefined;
   const name = typeof log.nodeName === "string" ? log.nodeName.trim() : "";
-  return { category: name || (nodeId === undefined ? "未知节点" : `节点 #${nodeId}`), nodeId };
+  if (nodeId === undefined) return null;
+  return { category: name || `节点 #${nodeId}`, nodeId };
 }
 
 export function buildSchedulerChartState(
@@ -98,7 +103,7 @@ export function buildSchedulerChartState(
       resultDistribution: [],
       nodeDistribution: [],
       summary: "调度日志暂不可用",
-      warning: "后端没有返回当前筛选样本，不能将其视为 0 条成功或失败",
+      warning: "后端没有返回当前筛选样本，不能将其视为 0 条已命中或未命中",
       asOf: null
     };
   }
@@ -137,7 +142,7 @@ export function buildSchedulerChartState(
   for (const log of sampledLogs) {
     increment(results, resultCategory(log));
     const node = nodeCategory(log);
-    increment(nodes, node.category, node.nodeId);
+    if (node) increment(nodes, node.category, node.nodeId);
     if (typeof log.happenedAt === "string" && log.happenedAt && (!latest || log.happenedAt > latest)) latest = log.happenedAt;
   }
   const resultDistribution = sorted(results);
@@ -166,7 +171,10 @@ function distributionSpec(id: string, values: SchedulerChartDistribution[], yTit
     background: "transparent",
     data: [{ id, values: data }],
     series: [{ type: "bar", data: { id }, xField: "category", yField: "count", barMaxWidth: 28 }],
-    axes: [{ orient: "left", title: { text: yTitle } }, { orient: "bottom", label: { autoRotate: false, autoHide: true } }],
+    axes: [
+      { orient: "left", title: { text: yTitle } },
+      { orient: "bottom", label: { autoRotate: false, autoHide: true } }
+    ],
     tooltip: { activeType: "dimension" },
     padding: { left: 8, right: 12, top: 8, bottom: 8 }
   };
