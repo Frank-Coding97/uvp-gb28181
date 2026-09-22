@@ -5,16 +5,17 @@ package resource
 import (
 	"context"
 	"errors"
+	"sort"
 	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
 
 var (
-	ErrResourceNotFound    = errors.New("resource not found")
-	ErrInvalidListOptions  = errors.New("invalid resource list options")
+	ErrResourceNotFound       = errors.New("resource not found")
+	ErrInvalidListOptions     = errors.New("invalid resource list options")
 	ErrInvalidDepartmentScope = errors.New("invalid department data scope")
-	ErrResourceUnavailable = errors.New("resource database unavailable")
+	ErrResourceUnavailable    = errors.New("resource database unavailable")
 )
 
 // The values intentionally match the role data-scope contract used by the
@@ -22,7 +23,7 @@ var (
 // descendants. OpenAPI clients do not support the role-level "all" or
 // "custom" modes.
 const (
-	DataScopeDepartment           int8 = 3
+	DataScopeDepartment            int8 = 3
 	DataScopeDepartmentAndChildren int8 = 4
 )
 
@@ -133,14 +134,19 @@ type channelRow struct {
 }
 
 func (s *Service) ListDevices(ctx context.Context, ownerDeptID uint, options DeviceListOptions) (DevicePage, error) {
+	return s.ListDevicesInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, options)
+}
+
+func (s *Service) ListDevicesInScope(ctx context.Context, scope DepartmentScope, options DeviceListOptions) (DevicePage, error) {
 	options, err := normalizeDeviceOptions(options)
 	if err != nil {
 		return DevicePage{}, err
 	}
-	if err := s.checkOwnerDepartment(ctx, ownerDeptID); err != nil {
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
 		return DevicePage{}, err
 	}
-	query, err := s.deviceQuery(ctx, ownerDeptID, options)
+	query, err := s.deviceQuery(ctx, departmentIDs, options)
 	if err != nil {
 		return DevicePage{}, err
 	}
@@ -164,13 +170,18 @@ func (s *Service) ListDevices(ctx context.Context, ownerDeptID uint, options Dev
 }
 
 func (s *Service) GetDevice(ctx context.Context, ownerDeptID uint, deviceID string) (Device, error) {
-	if err := s.checkOwnerDepartment(ctx, ownerDeptID); err != nil {
-		return Device{}, err
-	}
+	return s.GetDeviceInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, deviceID)
+}
+
+func (s *Service) GetDeviceInScope(ctx context.Context, scope DepartmentScope, deviceID string) (Device, error) {
 	if !validGBCode(deviceID) {
 		return Device{}, ErrResourceNotFound
 	}
-	query, err := s.deviceQuery(ctx, ownerDeptID, DeviceListOptions{})
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		return Device{}, err
+	}
+	query, err := s.deviceQuery(ctx, departmentIDs, DeviceListOptions{})
 	if err != nil {
 		return Device{}, err
 	}
@@ -187,7 +198,11 @@ func (s *Service) GetDevice(ctx context.Context, ownerDeptID uint, deviceID stri
 }
 
 func (s *Service) GetDeviceStatus(ctx context.Context, ownerDeptID uint, deviceID string) (DeviceStatus, error) {
-	device, err := s.GetDevice(ctx, ownerDeptID, deviceID)
+	return s.GetDeviceStatusInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, deviceID)
+}
+
+func (s *Service) GetDeviceStatusInScope(ctx context.Context, scope DepartmentScope, deviceID string) (DeviceStatus, error) {
+	device, err := s.GetDeviceInScope(ctx, scope, deviceID)
 	if err != nil {
 		return DeviceStatus{}, err
 	}
@@ -195,20 +210,25 @@ func (s *Service) GetDeviceStatus(ctx context.Context, ownerDeptID uint, deviceI
 }
 
 func (s *Service) ListChannels(ctx context.Context, ownerDeptID uint, deviceID string, options ChannelListOptions) (ChannelPage, error) {
+	return s.ListChannelsInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, deviceID, options)
+}
+
+func (s *Service) ListChannelsInScope(ctx context.Context, scope DepartmentScope, deviceID string, options ChannelListOptions) (ChannelPage, error) {
 	options, err := normalizeChannelOptions(options)
 	if err != nil {
-		return ChannelPage{}, err
-	}
-	if err := s.checkOwnerDepartment(ctx, ownerDeptID); err != nil {
 		return ChannelPage{}, err
 	}
 	if !validGBCode(deviceID) {
 		return ChannelPage{}, ErrResourceNotFound
 	}
-	if _, err := s.GetDevice(ctx, ownerDeptID, deviceID); err != nil {
+	if _, err := s.GetDeviceInScope(ctx, scope, deviceID); err != nil {
 		return ChannelPage{}, err
 	}
-	query, err := s.channelQuery(ctx, ownerDeptID, deviceID, options)
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		return ChannelPage{}, err
+	}
+	query, err := s.channelQuery(ctx, departmentIDs, deviceID, options)
 	if err != nil {
 		return ChannelPage{}, err
 	}
@@ -232,13 +252,18 @@ func (s *Service) ListChannels(ctx context.Context, ownerDeptID uint, deviceID s
 }
 
 func (s *Service) GetChannel(ctx context.Context, ownerDeptID uint, deviceID, channelID string) (Channel, error) {
-	if err := s.checkOwnerDepartment(ctx, ownerDeptID); err != nil {
-		return Channel{}, err
-	}
+	return s.GetChannelInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, deviceID, channelID)
+}
+
+func (s *Service) GetChannelInScope(ctx context.Context, scope DepartmentScope, deviceID, channelID string) (Channel, error) {
 	if !validGBCode(deviceID) || !validGBCode(channelID) {
 		return Channel{}, ErrResourceNotFound
 	}
-	query, err := s.channelQuery(ctx, ownerDeptID, deviceID, ChannelListOptions{})
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		return Channel{}, err
+	}
+	query, err := s.channelQuery(ctx, departmentIDs, deviceID, ChannelListOptions{})
 	if err != nil {
 		return Channel{}, err
 	}
@@ -255,41 +280,73 @@ func (s *Service) GetChannel(ctx context.Context, ownerDeptID uint, deviceID, ch
 }
 
 func (s *Service) GetChannelStatus(ctx context.Context, ownerDeptID uint, deviceID, channelID string) (ChannelStatus, error) {
-	channel, err := s.GetChannel(ctx, ownerDeptID, deviceID, channelID)
+	return s.GetChannelStatusInScope(ctx, DepartmentScope{OwnerDeptID: ownerDeptID, DataScope: DataScopeDepartment}, deviceID, channelID)
+}
+
+func (s *Service) GetChannelStatusInScope(ctx context.Context, scope DepartmentScope, deviceID, channelID string) (ChannelStatus, error) {
+	channel, err := s.GetChannelInScope(ctx, scope, deviceID, channelID)
 	if err != nil {
 		return ChannelStatus{}, err
 	}
 	return ChannelStatus{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, Status: channel.Status}, nil
 }
 
-func (s *Service) checkOwnerDepartment(ctx context.Context, ownerDeptID uint) error {
-	if s == nil || s.db == nil {
-		return ErrResourceUnavailable
+func ResolveDepartmentIDs(ctx context.Context, db *gorm.DB, scope DepartmentScope) ([]uint, error) {
+	if err := scope.validate(); err != nil {
+		return nil, err
 	}
-	if ownerDeptID == 0 {
-		return ErrResourceNotFound
+	if db == nil {
+		return nil, ErrResourceUnavailable
 	}
-	var ids []uint
-	result := s.db.WithContext(ctx).Table("sys_department").
-		Select("id").
-		Where("id = ? AND status = ? AND deleted_at IS NULL", ownerDeptID, 1).
-		Find(&ids)
-	if result.Error != nil {
-		return result.Error
+	var departments []struct {
+		ID       uint
+		ParentID *uint
+		Status   *int8
 	}
-	if len(ids) != 1 {
-		return ErrResourceNotFound
+	if err := db.WithContext(ctx).Table("sys_department").Select("id, parent_id, status").Where("deleted_at IS NULL").Find(&departments).Error; err != nil {
+		return nil, err
 	}
-	return nil
+	children := make(map[uint][]uint, len(departments))
+	active := make(map[uint]bool, len(departments))
+	for _, department := range departments {
+		active[department.ID] = department.Status != nil && *department.Status == 1
+		if department.ParentID != nil && *department.ParentID != 0 {
+			children[*department.ParentID] = append(children[*department.ParentID], department.ID)
+		}
+	}
+	if !active[scope.OwnerDeptID] {
+		return nil, ErrResourceNotFound
+	}
+	ids := []uint{scope.OwnerDeptID}
+	seen := map[uint]struct{}{scope.OwnerDeptID: {}}
+	if scope.DataScope == DataScopeDepartmentAndChildren {
+		for index := 0; index < len(ids); index++ {
+			for _, childID := range children[ids[index]] {
+				if !active[childID] {
+					continue
+				}
+				if _, ok := seen[childID]; ok {
+					continue
+				}
+				seen[childID] = struct{}{}
+				ids = append(ids, childID)
+			}
+		}
+	}
+	sort.Slice(ids[1:], func(i, j int) bool { return ids[1+i] < ids[1+j] })
+	return ids, nil
 }
 
-func (s *Service) deviceQuery(ctx context.Context, ownerDeptID uint, options DeviceListOptions) (*gorm.DB, error) {
+func (s *Service) deviceQuery(ctx context.Context, departmentIDs []uint, options DeviceListOptions) (*gorm.DB, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrResourceUnavailable
 	}
+	if len(departmentIDs) == 0 {
+		return nil, ErrResourceNotFound
+	}
 	query := s.db.WithContext(ctx).Table("gb_device AS d").
 		Joins("JOIN sys_department AS dept ON dept.id = d.owner_dept_id AND dept.status = ? AND dept.deleted_at IS NULL", 1).
-		Where("d.owner_dept_id = ? AND d.owner_dept_id <> 0 AND d.deleted_at IS NULL", ownerDeptID).
+		Where("d.owner_dept_id IN ? AND d.owner_dept_id <> 0 AND d.deleted_at IS NULL", departmentIDs).
 		Where("NOT EXISTS (SELECT 1 FROM gb_device AS d2 WHERE d2.device_id = d.device_id AND d2.deleted_at IS NULL AND d2.id <> d.id)")
 	if options.Keyword != "" {
 		keyword := "%" + options.Keyword + "%"
@@ -298,14 +355,17 @@ func (s *Service) deviceQuery(ctx context.Context, ownerDeptID uint, options Dev
 	return applyStatusFilter(query, "d.status", options.Status), nil
 }
 
-func (s *Service) channelQuery(ctx context.Context, ownerDeptID uint, deviceID string, options ChannelListOptions) (*gorm.DB, error) {
+func (s *Service) channelQuery(ctx context.Context, departmentIDs []uint, deviceID string, options ChannelListOptions) (*gorm.DB, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrResourceUnavailable
+	}
+	if len(departmentIDs) == 0 {
+		return nil, ErrResourceNotFound
 	}
 	query := s.db.WithContext(ctx).Table("gb_channel AS c").
 		Joins("JOIN gb_device AS d ON d.device_id = c.device_id AND d.deleted_at IS NULL").
 		Joins("JOIN sys_department AS dept ON dept.id = d.owner_dept_id AND dept.status = ? AND dept.deleted_at IS NULL", 1).
-		Where("d.device_id = ? AND d.owner_dept_id = ? AND d.owner_dept_id <> 0", deviceID, ownerDeptID).
+		Where("d.device_id = ? AND d.owner_dept_id IN ? AND d.owner_dept_id <> 0", deviceID, departmentIDs).
 		Where("c.owner_dept_id = d.owner_dept_id AND c.deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM gb_device AS d2 WHERE d2.device_id = d.device_id AND d2.deleted_at IS NULL AND d2.id <> d.id)").
 		Where("NOT EXISTS (SELECT 1 FROM gb_channel AS c2 WHERE c2.device_id = c.device_id AND c2.channel_id = c.channel_id AND c2.deleted_at IS NULL AND c2.id <> c.id)")

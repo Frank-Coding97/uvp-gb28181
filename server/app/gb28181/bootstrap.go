@@ -56,6 +56,7 @@ import (
 	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	openapiptz "uvplatform.cn/uvp-gb28181/app/openapi/ptz"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
@@ -810,6 +811,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		ptzScheduler = newPTZScheduler
 		firmwareUpgradeService = newFirmwareUpgradeService
 		gbroutes.SetDeviceMgmtPTZRuntime(u, ptzService)
+		if err := openAPIPTZRoot.Replace(openapiptz.NewDispatcher(deviceDB, ptzService)); err != nil {
+			return fmt.Errorf("发布 OpenAPI PTZ 运行时失败: %w", err)
+		}
 		gbroutes.SetDeviceMgmtFirmwareUpgradeService(firmwareUpgradeService)
 		captureRoot := deviceCaptureBaseDir()
 		deviceCaptureRegistry = devicecapture.NewRegistry(captureRoot)
@@ -1187,6 +1191,7 @@ func stopRecordQueryRuntime() {
 }
 
 func stopPTZRuntime() error {
+	openAPIPTZRoot.Clear()
 	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
 	if sipServer != nil {
 		if setter, ok := sipServer.(interface {

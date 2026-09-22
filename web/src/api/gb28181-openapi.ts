@@ -63,6 +63,22 @@ export interface OpenAPIScopeView {
   updatedAt: string;
 }
 
+export interface OpenAPICapability {
+  scope: string;
+  name: string;
+  method: string;
+  externalPath: string;
+  resourceType: string;
+  risk: string;
+  idempotencyRequired: boolean;
+}
+
+export interface OpenAPICapabilityGroup {
+  code: string;
+  name: string;
+  capabilities: OpenAPICapability[];
+}
+
 export interface OpenAPIClientPage {
   items: OpenAPIClientView[];
   page: number;
@@ -145,6 +161,9 @@ export const listOpenAPIClients = (params: OpenAPIClientListParams) =>
 
 export const getOpenAPIClientCapabilities = () =>
   http.request<OpenAPIResponse<string[]>>("get", baseUrlApi(`${path}/capabilities`));
+
+export const getOpenAPIClientCapabilityCatalog = () =>
+  http.request<OpenAPIResponse<{ groups: OpenAPICapabilityGroup[] }>>("get", baseUrlApi(`${path}/capabilities/catalog`));
 
 export const getOpenAPIClient = (id: number) =>
   http.request<OpenAPIResponse<OpenAPIClientDetail>>("get", baseUrlApi(`${path}/${id}`));

@@ -47,6 +47,7 @@ type HeaderValues struct {
 	ContentType     []string
 	ContentEncoding []string
 	MethodOverride  []string
+	IdempotencyKey  []string
 }
 
 // Headers contains the validated single-value authentication headers.

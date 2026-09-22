@@ -32,15 +32,7 @@ var (
 	ErrOwnerDeptImmutable       = errors.New("OpenAPI client owner department is immutable")
 )
 
-var supportedScopes = map[string]struct{}{
-	"device:list":     {},
-	"device:detail":   {},
-	"device:status":   {},
-	"channel:list":    {},
-	"channel:detail":  {},
-	"channel:status":  {},
-	"play:live:apply": {},
-}
+var supportedScopes = capabilityScopeMap()
 
 // ClientView is the management-safe representation of a client. It contains
 // no encrypted verification material and never contains a plaintext SK.

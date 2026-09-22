@@ -16,19 +16,19 @@ import (
 )
 
 const (
-	resourceOwnerDept = uint(10)
-	resourceDevice    = "34020000002000000010"
-	resourceChild     = "34020000002000000011"
-	resourceOther     = "34020000002000000020"
-	resourceShared    = "34020000002000000030"
-	resourceNoOwner   = "34020000002000000000"
-	resourceInvalid   = "34020000002000000040"
-	resourceDeleted   = "34020000002000000050"
-	resourceChannel   = "37011200001310000010"
+	resourceOwnerDept    = uint(10)
+	resourceDevice       = "34020000002000000010"
+	resourceChild        = "34020000002000000011"
+	resourceOther        = "34020000002000000020"
+	resourceShared       = "34020000002000000030"
+	resourceNoOwner      = "34020000002000000000"
+	resourceInvalid      = "34020000002000000040"
+	resourceDeleted      = "34020000002000000050"
+	resourceChannel      = "37011200001310000010"
 	resourceChildChannel = "37011200001310000011"
-	resourceWrongRoot = "37011200001310000011"
-	resourceBadOwner  = "37011200001310000012"
-	resourceDuplicate = "37011200001310000013"
+	resourceWrongRoot    = "37011200001310000011"
+	resourceBadOwner     = "37011200001310000012"
+	resourceDuplicate    = "37011200001310000013"
 )
 
 func newResourceTestDB(t *testing.T) *gorm.DB {
@@ -125,6 +125,30 @@ func TestOpenAPIResourceDepartmentScopeIncludesActiveDescendants(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidDepartmentScope)
 	_, err = svc.GetDeviceInScope(ctx, DepartmentScope{OwnerDeptID: 40, DataScope: DataScopeDepartmentAndChildren}, resourceInvalid)
 	assert.ErrorIs(t, err, ErrResourceNotFound)
+}
+
+func TestResolveDepartmentIDsStopsAtInactiveNodesAndBreaksCycles(t *testing.T) {
+	db := newResourceTestDB(t)
+	active := int8(1)
+	inactive := int8(0)
+	parent := resourceOwnerDept
+	departments := []appmodels.SysDepartment{
+		{BaseModel: appmodels.BaseModel{ID: 70}, ParentID: &parent, Name: "cycle", Status: &active},
+		{BaseModel: appmodels.BaseModel{ID: 71}, ParentID: &parent, Name: "inactive-parent", Status: &inactive},
+	}
+	// The owner points to the cycle node and the cycle node points back to
+	// itself. The inactive branch has an active descendant that must remain
+	// hidden because traversal does not cross inactive nodes.
+	inactiveParent := uint(71)
+	departments = append(departments, appmodels.SysDepartment{BaseModel: appmodels.BaseModel{ID: 72}, ParentID: &inactiveParent, Name: "hidden-descendant", Status: &active})
+	for i := range departments {
+		require.NoError(t, db.Create(&departments[i]).Error)
+	}
+	require.NoError(t, db.Model(&appmodels.SysDepartment{}).Where("id = ?", resourceOwnerDept).Update("parent_id", 70).Error)
+
+	ids, err := ResolveDepartmentIDs(context.Background(), db, DepartmentScope{OwnerDeptID: resourceOwnerDept, DataScope: DataScopeDepartmentAndChildren})
+	require.NoError(t, err)
+	assert.Equal(t, []uint{resourceOwnerDept, 11, 70}, ids)
 }
 
 func TestOpenAPIResourceMetadataUsesExactOwnerAndValidDepartment(t *testing.T) {

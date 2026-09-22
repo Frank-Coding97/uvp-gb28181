@@ -12,6 +12,7 @@ enableAutoUnmount(afterEach);
 const api = vi.hoisted(() => ({
   list: vi.fn(),
   capabilities: vi.fn(),
+  catalog: vi.fn(),
   get: vi.fn(),
   create: vi.fn(),
   scopes: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("@/api/gb28181-openapi", async importOriginal => {
     ...actual,
     listOpenAPIClients: api.list,
     getOpenAPIClientCapabilities: api.capabilities,
+    getOpenAPIClientCapabilityCatalog: api.catalog,
     getOpenAPIClient: api.get,
     createOpenAPIClient: api.create,
     updateOpenAPIClientScopes: api.scopes,
@@ -188,9 +190,30 @@ describe("OpenAPI client page", () => {
     api.list
       .mockReset()
       .mockResolvedValue(
-        ok({ items: [client], page: 1, pageSize: 20, total: 1, ownerDepartments: [{ id: 10, name: "平台运维部" }] })
+        ok({ items: [client], page: 1, pageSize: 10, total: 1, ownerDepartments: [{ id: 10, name: "平台运维部" }] })
       );
     api.capabilities.mockReset().mockResolvedValue(ok(["device:list", "play:live:apply"]));
+    api.catalog.mockReset().mockResolvedValue(
+      ok({
+        groups: [
+          {
+            code: "device-management",
+            name: "设备管理",
+            capabilities: [
+              {
+                scope: "device:list",
+                name: "设备列表",
+                method: "GET",
+                externalPath: "/openapi/v1/devices",
+                resourceType: "device",
+                risk: "read",
+                idempotencyRequired: false
+              }
+            ]
+          }
+        ]
+      })
+    );
     api.get.mockReset().mockResolvedValue(ok({ client, scopes: [] }));
     api.create.mockReset().mockResolvedValue(ok({ client, secretKey: "one-time-secret" }));
     api.scopes.mockReset().mockResolvedValue(ok(client));
@@ -205,7 +228,7 @@ describe("OpenAPI client page", () => {
   it("loads the scoped ownerDepartments metadata and capabilities from the real APIs", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    expect(api.list).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+    expect(api.list).toHaveBeenCalledWith({ page: 1, pageSize: 10 });
     expect(api.capabilities).toHaveBeenCalledOnce();
     expect((wrapper.vm as any).ownerDepartments).toEqual([{ id: 10, name: "平台运维部" }]);
     expect((wrapper.vm as any).clients).toEqual([client]);

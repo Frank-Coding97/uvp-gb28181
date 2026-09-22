@@ -179,6 +179,11 @@ var publicContractRoutes = []contractRoute{
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}", scope: "channel:detail"},
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", scope: "channel:status"},
 	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations", scope: "play:live:apply"},
+	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:list"},
+	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:save"},
+	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", scope: "ptz:preset:call"},
+	{method: "delete", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}", scope: "ptz:preset:delete"},
+	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}", scope: "ptz:operation:read"},
 }
 
 var requiredSignatureHeaders = []string{
@@ -253,7 +258,11 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Equal(t, 8192, doc.RequestLimits.QueryBytes)
 	require.Contains(t, strings.ToLower(doc.RequestLimits.BodyHash), "original request bytes")
 	require.Contains(t, strings.ToLower(doc.RequestLimits.DuplicateJSONMembers), "reject")
-	require.Len(t, doc.Paths, len(publicContractRoutes))
+	contractPaths := make(map[string]struct{}, len(publicContractRoutes))
+	for _, route := range publicContractRoutes {
+		contractPaths[route.path] = struct{}{}
+	}
+	require.Len(t, doc.Paths, len(contractPaths))
 	require.Contains(t, doc.Components.SecuritySchemes, "uvpHmac")
 	require.Equal(t, contractSecurity{Type: "apiKey", In: "header", Name: "X-UVP-Signature"}, doc.Components.SecuritySchemes["uvpHmac"])
 	errorSchema := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/ErrorResponse"})
@@ -264,7 +273,6 @@ func TestOpenAPIContract(t *testing.T) {
 	for _, route := range publicContractRoutes {
 		operations, ok := doc.Paths[route.path]
 		require.Truef(t, ok, "missing contract path %s", route.path)
-		require.Len(t, operations, 1, "path %s must publish exactly one method", route.path)
 		op, ok := operations[route.method]
 		require.Truef(t, ok, "missing contract operation %s %s", route.method, route.path)
 		require.NotEmpty(t, op.OperationID)
@@ -330,7 +338,18 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, "^[0-9a-f]{64}$", schema.Pattern)
 		}
 	}
-	if route.method == "post" {
+	if route.scope == "ptz:preset:save" || route.scope == "ptz:preset:call" || route.scope == "ptz:preset:delete" {
+		parameter, ok := parameters["Idempotency-Key"]
+		require.True(t, ok, "PTZ control operation must require Idempotency-Key")
+		require.Equal(t, "header", parameter.In)
+		require.True(t, parameter.Required)
+		schema := resolveSchema(t, doc, parameter.Schema)
+		require.Equal(t, "string", schema.Type)
+		require.Equal(t, 1, *schema.MinLength)
+		require.Equal(t, 128, *schema.MaxLength)
+	}
+	requestBodyRequired := route.method == "post" || route.scope == "ptz:preset:delete"
+	if requestBodyRequired {
 		require.Equal(t, "application/json", operation.ContentType)
 		require.NotNil(t, operation.RequestBody)
 		require.True(t, operation.RequestBody.Required)
@@ -338,8 +357,17 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Contains(t, operation.RequestBody.Content, "application/json")
 		bodySchema := resolveSchema(t, doc, operation.RequestBody.Content["application/json"].Schema)
 		require.Equal(t, "object", bodySchema.Type)
-		require.Equal(t, []string{"protocol"}, bodySchema.Required)
-		require.Equal(t, []string{"https-flv", "wss-flv"}, bodySchema.Properties["protocol"].Enum)
+		if route.scope == "play:live:apply" {
+			require.Equal(t, []string{"protocol"}, bodySchema.Required)
+			require.Equal(t, []string{"https-flv", "wss-flv"}, bodySchema.Properties["protocol"].Enum)
+		} else if route.scope == "ptz:preset:save" {
+			require.Equal(t, []string{"presetId"}, bodySchema.Required)
+			require.Equal(t, "integer", bodySchema.Properties["presetId"].Type)
+			require.Equal(t, 1, *bodySchema.Properties["presetId"].Minimum)
+			require.Equal(t, 255, *bodySchema.Properties["presetId"].Maximum)
+		} else {
+			require.Empty(t, bodySchema.Required)
+		}
 		require.NotNil(t, bodySchema.AdditionalProperties)
 		require.False(t, *bodySchema.AdditionalProperties)
 	} else {
@@ -392,12 +420,26 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, "^[0-9]{20}$", resolveSchema(t, doc, parameter.Schema).Pattern)
 		}
 	}
+	for _, name := range []string{"presetId", "operationId"} {
+		if parameter, ok := parameters[name]; ok {
+			require.Equal(t, "path", parameter.In)
+			require.True(t, parameter.Required)
+		}
+	}
 
 	require.NotEmpty(t, operation.Security)
 	require.Contains(t, operation.Security[0], "uvpHmac")
-	require.NotContains(t, operation.Responses, "409", "metadata/media public contract must not classify replay as 409")
+	if ptzControlScope(route.scope) {
+		require.Contains(t, operation.Responses, "409")
+	} else {
+		require.NotContains(t, operation.Responses, "409", "metadata/media public contract must not classify replay as 409")
+	}
 	require.Contains(t, operation.Responses["401"].Description, "REQUEST_REPLAYED")
-	for _, status := range []string{"200", "400", "401", "403", "404", "405", "429", "503"} {
+	statuses := []string{"200", "400", "401", "403", "404", "405", "429", "503"}
+	if ptzControlScope(route.scope) {
+		statuses = append(statuses, "409")
+	}
+	for _, status := range statuses {
 		response, ok := operation.Responses[status]
 		require.Truef(t, ok, "%s %s missing response %s", route.method, route.path, status)
 		cacheControl, ok := response.Headers["Cache-Control"]
@@ -432,12 +474,20 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.NotNil(t, operation.Responses["200"].Enabled)
 		require.False(t, *operation.Responses["200"].Enabled)
 	}
-	for _, status := range []string{"400", "401", "403", "404", "429", "503"} {
+	errorStatuses := []string{"400", "401", "403", "404", "429", "503"}
+	if ptzControlScope(route.scope) {
+		errorStatuses = append(errorStatuses, "409")
+	}
+	for _, status := range errorStatuses {
 		require.Equal(t, "#/components/schemas/ErrorResponse", operation.Responses[status].Content["application/json"].Schema.Ref)
 		schema := resolveResponseSchema(t, doc, operation.Responses[status])
 		require.Equal(t, "object", schema.Type)
 		require.Equal(t, []string{"code", "message", "requestId", "data"}, schema.Required)
 	}
+}
+
+func ptzControlScope(scope string) bool {
+	return scope == "ptz:preset:save" || scope == "ptz:preset:call" || scope == "ptz:preset:delete"
 }
 
 func resolveResponseSchema(t *testing.T, doc openAPIContract, response contractResponse) contractSchema {
@@ -542,7 +592,7 @@ func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || (selector.Sel.Name != "GET" && selector.Sel.Name != "POST") {
+		if !ok || (selector.Sel.Name != "GET" && selector.Sel.Name != "POST" && selector.Sel.Name != "DELETE") {
 			return true
 		}
 		receiver, ok := selector.X.(*ast.Ident)
@@ -581,10 +631,10 @@ func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
 		return true
 	})
 
-	require.Len(t, registrations, len(doc.Paths), "real public registrar route count drifted from the contract")
+	require.Len(t, registrations, len(publicContractRoutes), "real public registrar route count drifted from the contract")
 	seen := make(map[string]struct{}, len(registrations))
 	for _, registration := range registrations {
-		path := strings.NewReplacer(":deviceId", "{deviceId}", ":channelId", "{channelId}").Replace(registration.path)
+		path := strings.NewReplacer(":deviceId", "{deviceId}", ":channelId", "{channelId}", ":presetId", "{presetId}", ":operationId", "{operationId}").Replace(registration.path)
 		key := registration.method + " " + path
 		_, duplicate := seen[key]
 		require.Falsef(t, duplicate, "duplicate real public route %s", key)
@@ -606,6 +656,8 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 		operation := doc.Paths[route.path][route.method]
 		path := strings.ReplaceAll(route.path, "{deviceId}", "34020000001320000001")
 		path = strings.ReplaceAll(path, "{channelId}", "34020000001320000002")
+		path = strings.ReplaceAll(path, "{presetId}", "3")
+		path = strings.ReplaceAll(path, "{operationId}", "op-test")
 		request := httptest.NewRequest(strings.ToUpper(route.method), path, nil)
 		response := httptest.NewRecorder()
 		root.ServeHTTP(response, request)

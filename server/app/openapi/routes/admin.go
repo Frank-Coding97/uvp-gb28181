@@ -13,6 +13,7 @@ func RegisterAdminRoutes(protectedAPI *gin.RouterGroup, controller *controllers.
 	group.GET("", controller.Handler("list"))
 	group.POST("", controller.Handler("create"))
 	group.GET("/capabilities", controller.Handler("capabilities"))
+	group.GET("/capabilities/catalog", controller.Handler("capabilities-catalog"))
 	group.GET("/:id", controller.Handler("detail"))
 	group.PUT("/:id/scopes", controller.Handler("scopes"))
 	group.POST("/:id/rotate-secret", controller.Handler("rotate"))

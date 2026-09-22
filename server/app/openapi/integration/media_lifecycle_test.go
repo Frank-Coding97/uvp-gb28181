@@ -459,7 +459,7 @@ func openMediaLifecycleDB(t *testing.T) *gorm.DB {
 		runtime_epoch INTEGER NOT NULL DEFAULT 0, runtime_protocol_version INTEGER NOT NULL DEFAULT 0,
 		runtime_confirmed_revision INTEGER NOT NULL DEFAULT 0, runtime_confirmed_at DATETIME NULL,
 		runtime_identity_status TEXT NOT NULL DEFAULT 'unknown')`).Error)
-	require.NoError(t, db.Exec(`CREATE TABLE sys_department (id INTEGER PRIMARY KEY, status INTEGER NOT NULL, deleted_at DATETIME NULL)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE sys_department (id INTEGER PRIMARY KEY, parent_id INTEGER, status INTEGER NOT NULL, deleted_at DATETIME NULL)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE gb_channel (
 		id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL, device_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '',
 		manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', status INTEGER, ptz_type INTEGER NOT NULL DEFAULT 0,

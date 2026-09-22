@@ -64,7 +64,7 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	if app.ConfigYml.GetBool("openapi.enabled") || app.ConfigYml.GetBool("openapi.play_enabled") {
 		startupContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var err error
-		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml, gb28181.OpenAPIMediaRuntime())
+		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml, gb28181.OpenAPIMediaRuntime(), gb28181.OpenAPIPTZRuntime())
 		cancel()
 		if err != nil {
 			panic("OpenAPI initialization failed; ingress remains closed")

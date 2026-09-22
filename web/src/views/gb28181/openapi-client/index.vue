@@ -10,6 +10,7 @@ import {
   enableOpenAPIClient,
   getOpenAPIClient,
   getOpenAPIClientCapabilities,
+  getOpenAPIClientCapabilityCatalog,
   getOpenAPIClientRevocationStatus,
   isOpenAPISuccess,
   listOpenAPIClientAudits,
@@ -23,6 +24,7 @@ import {
   type OpenAPIClientListParams,
   type OpenAPIClientStatus,
   type OpenAPIClientView,
+  type OpenAPICapabilityGroup,
   type OpenAPIManagedDepartment,
   type OpenAPIRevocationStatus,
   type OpenAPIScopeView
@@ -46,13 +48,14 @@ const canAudit = computed(() => hasPermission("gb28181:openapi:client:audit"));
 const clients = ref<OpenAPIClientView[]>([]);
 const ownerDepartments = ref<OpenAPIManagedDepartment[]>([]);
 const capabilities = ref<string[]>([]);
+const capabilityGroups = ref<OpenAPICapabilityGroup[]>([]);
 const loading = ref(false);
 const capabilitiesLoading = ref(false);
 const capabilitiesReady = ref(false);
 const error = ref("");
 const capabilitiesError = ref("");
 const form = reactive({ ownerDeptId: undefined as number | undefined });
-const pagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true, showJumper: true, showPageSize: true });
+const pagination = reactive({ current: 1, pageSize: 10, total: 0, showTotal: true, showJumper: true, showPageSize: true });
 const tableScroll = computed(() => ({ x: "100%", minWidth: 1120 }));
 
 const drawerVisible = ref(false);
@@ -192,16 +195,20 @@ async function loadCapabilities() {
   capabilitiesReady.value = false;
   capabilitiesError.value = "";
   try {
-    const result = await getOpenAPIClientCapabilities();
+    const [result, catalogResult] = await Promise.all([getOpenAPIClientCapabilities(), getOpenAPIClientCapabilityCatalog()]);
     if (!isCurrentPage(page)) return;
     const failure = responseError(result, "能力目录加载失败");
     if (failure) throw failure;
+    const catalogFailure = responseError(catalogResult, "能力分组目录加载失败");
+    if (catalogFailure) throw catalogFailure;
     capabilities.value = Array.isArray(result.data) ? result.data : [];
+    capabilityGroups.value = catalogResult.data && Array.isArray(catalogResult.data.groups) ? catalogResult.data.groups : [];
     capabilitiesReady.value = true;
   } catch (cause: unknown) {
     if (!isCurrentPage(page)) return;
     if (handleAccessDenied(cause)) return;
     capabilities.value = [];
+    capabilityGroups.value = [];
     capabilitiesReady.value = false;
     capabilitiesError.value = errorMessage(cause, "能力目录加载失败");
   } finally {
@@ -634,6 +641,7 @@ defineExpose({
   clients,
   ownerDepartments,
   capabilities,
+  capabilityGroups,
   capabilitiesReady,
   form,
   pagination,
@@ -823,6 +831,7 @@ defineExpose({
       :client="currentClient"
       :scopes="currentScopes"
       :capabilities="capabilities"
+      :capability-groups="capabilityGroups"
       :capabilities-ready="capabilitiesReady"
       :detail-ready="detailReady"
       :detail-client-id="detailClientId"

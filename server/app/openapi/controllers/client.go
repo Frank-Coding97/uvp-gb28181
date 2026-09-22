@@ -89,6 +89,15 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 			writeOpenAPISuccess(c, client.SupportedScopes())
 			return
 		}
+		if action == "capabilities-catalog" {
+			catalog, err := client.CapabilityCatalog(c.Request.Context(), a.db)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, gin.H{"groups": catalog})
+			return
+		}
 		if action == "create" {
 			var input struct {
 				Name              string `json:"name"`

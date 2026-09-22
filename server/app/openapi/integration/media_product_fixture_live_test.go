@@ -124,7 +124,7 @@ func prepareProductMediaResources(t *testing.T, f *activeRevocationFixture) {
 	require.NoError(t, f.db.AutoMigrate(&models.Nonce{}))
 	for _, sql := range []string{
 		"ALTER TABLE meta_node ADD COLUMN state TEXT NOT NULL DEFAULT 'active'",
-		"CREATE TABLE sys_department (id INTEGER PRIMARY KEY, status INTEGER, deleted_at DATETIME NULL)",
+		"CREATE TABLE sys_department (id INTEGER PRIMARY KEY, parent_id INTEGER, status INTEGER, deleted_at DATETIME NULL)",
 		"INSERT INTO sys_department (id,status) VALUES (10,1)",
 		`CREATE TABLE gb_device (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL UNIQUE,
 		name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '', manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',

@@ -403,6 +403,172 @@ paths:
         '405': *methodNotAllowedResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets:
+    get:
+      operationId: listPTZPresets
+      summary: List PTZ presets for one owned channel
+      x-uvp-scope: ptz:preset:list
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: PTZ preset list
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZPresetListResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    post:
+      operationId: savePTZPreset
+      summary: Save a PTZ preset on one owned channel
+      x-uvp-scope: ptz:preset:save
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency: header
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PTZPresetRequest'}}}
+      responses:
+        '200':
+          description: PTZ preset operation accepted
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': &conflictResponse
+          description: Idempotency key conflicts with a different PTZ command
+          headers: *noStoreHeader
+          content: *errorContent
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call:
+    post:
+      operationId: callPTZPreset
+      summary: Call a PTZ preset on one owned channel
+      x-uvp-scope: ptz:preset:call
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency: header
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/PresetId'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmptyJSONRequest'}}}
+      responses:
+        '200':
+          description: PTZ preset operation accepted
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}:
+    delete:
+      operationId: deletePTZPreset
+      summary: Delete a PTZ preset on one owned channel
+      x-uvp-scope: ptz:preset:delete
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency: header
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/PresetId'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmptyJSONRequest'}}}
+      responses:
+        '200':
+          description: PTZ preset operation accepted
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}:
+    get:
+      operationId: getPTZOperation
+      summary: Get one PTZ operation for the same owned channel
+      x-uvp-scope: ptz:operation:read
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: PTZ operation
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
 components:
   securitySchemes:
     uvpHmac:
@@ -465,6 +631,30 @@ components:
       schema:
         type: string
         pattern: '^[0-9]{20}$'
+    PresetId:
+      name: presetId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{1,3}$'
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Stable printable key used to make one PTZ command idempotent.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
     Page:
       name: page
       in: query
@@ -666,3 +856,58 @@ components:
             protocol: {type: string, enum: [https-flv, wss-flv]}
             url: {type: string, format: uri}
             expiresAt: {type: string, format: date-time}
+    PTZPresetRequest:
+      type: object
+      additionalProperties: false
+      required: [presetId]
+      properties:
+        presetId: {type: integer, format: int32, minimum: 1, maximum: 255}
+        name: {type: string, maxLength: 255}
+    EmptyJSONRequest:
+      type: object
+      additionalProperties: false
+    PTZPreset:
+      type: object
+      additionalProperties: false
+      required: [presetId, name, status]
+      properties:
+        presetId: {type: integer, format: int32, minimum: 1, maximum: 255}
+        name: {type: string}
+        status: {type: string, enum: [active, deleted, unknown]}
+        lastOperationId: {type: string}
+    PTZPresetList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PTZPreset'}}
+    PTZOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, status, action, sn]
+      properties:
+        operationId: {type: string}
+        status: {type: string}
+        action: {type: string}
+        sn: {type: integer, format: int32}
+        sipStatus: {type: integer, format: int32}
+        deviceResult: {type: string}
+        deviceError: {type: string}
+    PTZPresetListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/PTZPresetList'}
+    PTZOperationResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/PTZOperation'}

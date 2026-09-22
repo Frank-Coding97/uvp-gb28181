@@ -20,6 +20,7 @@ func TestOpenAPIAdminExplicitProtectedRoutes(t *testing.T) {
 		"GET /api/gb28181/openapi-clients":                       true,
 		"POST /api/gb28181/openapi-clients":                      true,
 		"GET /api/gb28181/openapi-clients/capabilities":          true,
+		"GET /api/gb28181/openapi-clients/capabilities/catalog":  true,
 		"GET /api/gb28181/openapi-clients/:id":                   true,
 		"PUT /api/gb28181/openapi-clients/:id/scopes":            true,
 		"POST /api/gb28181/openapi-clients/:id/rotate-secret":    true,

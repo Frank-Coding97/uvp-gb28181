@@ -23,7 +23,7 @@ import (
 func gatewayFixture(t *testing.T) (*Gateway, *gorm.DB, string) {
 	t.Helper()
 	db := admissionDB(t)
-	require.NoError(t, db.Exec("CREATE TABLE sys_department (id INTEGER PRIMARY KEY,status INTEGER,deleted_at DATETIME)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE sys_department (id INTEGER PRIMARY KEY,parent_id INTEGER,status INTEGER,deleted_at DATETIME)").Error)
 	require.NoError(t, db.Exec("INSERT INTO sys_department(id,status) VALUES(10,1)").Error)
 	keys, err := client.NewSecretManager(bytes.Repeat([]byte{1}, 32), "test")
 	require.NoError(t, err)

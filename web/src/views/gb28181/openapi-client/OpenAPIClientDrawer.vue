@@ -18,6 +18,19 @@ const props = defineProps<{
   client: OpenAPIClientView | null;
   scopes: OpenAPIScopeView[];
   capabilities: string[];
+  capabilityGroups?: {
+    code: string;
+    name: string;
+    capabilities: {
+      scope: string;
+      name: string;
+      method: string;
+      externalPath: string;
+      resourceType: string;
+      risk: string;
+      idempotencyRequired: boolean;
+    }[];
+  }[];
   capabilitiesReady: boolean;
   detailReady: boolean;
   detailClientId: number | null;
@@ -231,9 +244,19 @@ defineExpose({ form, selectedScopes, resetForm, submit, canSubmit });
         :disabled="!props.canGrant || !canSubmit || props.submitting"
         class="openapi-client-drawer__scopes"
       >
-        <a-checkbox v-for="scope in props.capabilities" :key="scope" :value="scope"
-          >{{ scopeLabel(scope) }}（{{ scope }}）</a-checkbox
-        >
+        <template v-if="props.capabilityGroups?.length">
+          <div v-for="group in props.capabilityGroups" :key="group.code" class="openapi-client-drawer__capability-group">
+            <div class="openapi-client-drawer__capability-group-title">{{ group.name }}</div>
+            <a-checkbox v-for="capability in group.capabilities" :key="capability.scope" :value="capability.scope">
+              {{ capability.name }}（{{ capability.scope }}）
+            </a-checkbox>
+          </div>
+        </template>
+        <template v-else>
+          <a-checkbox v-for="scope in props.capabilities" :key="scope" :value="scope"
+            >{{ scopeLabel(scope) }}（{{ scope }}）</a-checkbox
+          >
+        </template>
       </a-checkbox-group>
       <a-empty v-if="!props.capabilitiesReady" description="能力目录暂不可用" />
       <a-empty v-else-if="!props.capabilities.length" description="当前暂无可授权能力" />

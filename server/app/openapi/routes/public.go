@@ -37,6 +37,11 @@ func InstallPublicBoundary(root *gin.Engine, gateway *auth.Gateway, trustedProxi
 	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId", gateway.Handler("channel:detail"))
 	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/status", gateway.Handler("channel:status"))
 	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/live-authorizations", gateway.Handler("play:live:apply"))
+	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets", gateway.Handler("ptz:preset:list"))
+	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets", gateway.Handler("ptz:preset:save"))
+	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId/call", gateway.Handler("ptz:preset:call"))
+	private.DELETE("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId", gateway.Handler("ptz:preset:delete"))
+	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/operations/:operationId", gateway.Handler("ptz:operation:read"))
 	root.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if path == "/openapi" || strings.HasPrefix(path, "/openapi/") {

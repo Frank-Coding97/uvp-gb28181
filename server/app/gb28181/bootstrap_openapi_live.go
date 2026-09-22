@@ -9,16 +9,20 @@ import (
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+	openapiptz "uvplatform.cn/uvp-gb28181/app/openapi/ptz"
 )
 
 // This facade is process-lifetime. Reload changes its admitted generation only
 // after the previous generation's actual OpenAPI calls have returned.
 var openAPILivePlayer = openapimedia.NewLivePlayerRuntime()
 var openAPIMediaRoot = openapimedia.NewRuntimeRoot()
+var openAPIPTZRoot = openapiptz.NewRuntimeRoot()
 
 func OpenAPILivePlayer() *openapimedia.LivePlayerRuntime { return openAPILivePlayer }
 
 func OpenAPIMediaRuntime() *openapimedia.RuntimeRoot { return openAPIMediaRoot }
+
+func OpenAPIPTZRuntime() *openapiptz.RuntimeRoot { return openAPIPTZRoot }
 
 type openAPIMediaRootCandidate struct {
 	provider   *openapimedia.NodeQualificationProvider

@@ -41,12 +41,13 @@ type Gateway struct {
 	read      func(context.Context, *gorm.DB, metadataInput) (any, error)
 	complete  func(context.Context, string, string, time.Duration) error
 	rejected  *audit.RejectedCollector
+	ptz       PTZDispatcher
 }
 type gatewayRequest struct {
-	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, requestID, source string
-	headers                                                                                HeaderValues
-	contentType                                                                            string
-	body                                                                                   []byte
+	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, presetID, operationID, idempotencyKey, requestID, source string
+	headers                                                                                                                       HeaderValues
+	contentType                                                                                                                   string
+	body                                                                                                                          []byte
 }
 type gatewayResponse struct {
 	status           int
@@ -112,6 +113,10 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
+		if isPTZRequestScope(scope) {
+			g.handlePTZ(c, requestID, scope, respond)
+			return
+		}
 		if !g.tls.IsHTTPS(c.Request) {
 			respond(gatewayError(requestID, 401, "AUTHENTICATION_FAILED"))
 			return
@@ -122,7 +127,7 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		}
 		r := c.Request
 		q := gatewayRequest{method: r.Method, path: r.URL.Path, rawURI: r.RequestURI, rawQuery: r.URL.RawQuery, pattern: c.FullPath(), scope: scope, deviceID: c.Param("deviceId"), channelID: c.Param("channelId"), requestID: requestID, source: c.ClientIP()}
-		q.headers = HeaderValues{SignVersion: append([]string(nil), r.Header.Values("X-UVP-Sign-Version")...), AccessKey: append([]string(nil), r.Header.Values("X-UVP-Access-Key")...), Timestamp: append([]string(nil), r.Header.Values("X-UVP-Timestamp")...), Nonce: append([]string(nil), r.Header.Values("X-UVP-Nonce")...), Signature: append([]string(nil), r.Header.Values("X-UVP-Signature")...), ContentType: append([]string(nil), r.Header.Values("Content-Type")...), ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...)}
+		q.headers = HeaderValues{SignVersion: append([]string(nil), r.Header.Values("X-UVP-Sign-Version")...), AccessKey: append([]string(nil), r.Header.Values("X-UVP-Access-Key")...), Timestamp: append([]string(nil), r.Header.Values("X-UVP-Timestamp")...), Nonce: append([]string(nil), r.Header.Values("X-UVP-Nonce")...), Signature: append([]string(nil), r.Header.Values("X-UVP-Signature")...), ContentType: append([]string(nil), r.Header.Values("Content-Type")...), ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...), IdempotencyKey: append([]string(nil), r.Header.Values("Idempotency-Key")...)}
 		for _, name := range []string{"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"} {
 			q.headers.MethodOverride = append(q.headers.MethodOverride, r.Header.Values(name)...)
 		}
@@ -167,7 +172,7 @@ func gatewayError(id string, status int, code string) gatewayResponse {
 	return encodeGateway(id, status, code, nil)
 }
 func encodeGateway(id string, status int, code string, data any) gatewayResponse {
-	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "RESOURCE_NOT_FOUND": "resource not found", "RATE_LIMITED": "rate limited", "QUOTA_EXCEEDED": "quota exceeded", "SERVICE_UNAVAILABLE": "service unavailable"}
+	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "RESOURCE_NOT_FOUND": "resource not found", "CONFLICT": "conflict", "RATE_LIMITED": "rate limited", "QUOTA_EXCEEDED": "quota exceeded", "SERVICE_UNAVAILABLE": "service unavailable"}
 	body, err := json.Marshal(struct {
 		Code      string `json:"code"`
 		Message   string `json:"message"`
@@ -233,7 +238,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 	if err != nil {
 		return invalid(503, "SERVICE_UNAVAILABLE")
 	}
-	metadata, err := parseMetadata(q, view.OwnerDeptID)
+	metadata, err := parseMetadata(q, view.OwnerDeptID, view.DataScope)
 	if err != nil {
 		return invalid(400, "INVALID_REQUEST")
 	}

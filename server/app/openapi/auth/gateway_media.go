@@ -84,6 +84,14 @@ func WithMediaDispatcher(dispatcher MediaDispatcher) GatewayOption {
 	}
 }
 
+func WithPTZDispatcher(dispatcher PTZDispatcher) GatewayOption {
+	return func(gateway *Gateway) {
+		if gateway != nil {
+			gateway.ptz = dispatcher
+		}
+	}
+}
+
 func (g *Gateway) handleMedia(c *gin.Context, requestID string, respond func(gatewayResponse)) {
 	r := c.Request
 	failEarly := func(response gatewayResponse) {
@@ -254,6 +262,7 @@ func captureGatewayHeaders(r *http.Request) HeaderValues {
 		ContentType:     append([]string(nil), r.Header.Values("Content-Type")...),
 		ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...),
 		MethodOverride:  append(append(append([]string(nil), r.Header.Values("X-HTTP-Method-Override")...), r.Header.Values("X-HTTP-Method")...), r.Header.Values("X-Method-Override")...),
+		IdempotencyKey:  append([]string(nil), r.Header.Values("Idempotency-Key")...),
 	}
 }
 
@@ -376,7 +385,7 @@ func (g *Gateway) processMedia(hardContext context.Context, q gatewayRequest) (o
 	if err != nil {
 		return invalid(http.StatusBadRequest, "INVALID_REQUEST")
 	}
-	metadata := metadataInput{owner: view.OwnerDeptID, scope: mediaScope, deviceID: target.DeviceID, channelID: target.ChannelID}
+	metadata := metadataInput{owner: view.OwnerDeptID, dataScope: view.DataScope, scope: mediaScope, deviceID: target.DeviceID, channelID: target.ChannelID}
 	if err = checkMetadata(ctx, g.db, metadata); err != nil {
 		return metadataFailure(q.requestID, err)
 	}

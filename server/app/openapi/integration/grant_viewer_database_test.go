@@ -398,7 +398,7 @@ func nativeGrantViewerTimestampType(dialect string) string {
 }
 
 func nativeGrantViewerDepartmentDDL(dialect string) string {
-	return fmt.Sprintf("CREATE TABLE sys_department (id BIGINT NOT NULL PRIMARY KEY, status SMALLINT NOT NULL, deleted_at %s NULL)", nativeGrantViewerTimestampType(dialect))
+	return fmt.Sprintf("CREATE TABLE sys_department (id BIGINT NOT NULL PRIMARY KEY, parent_id BIGINT NULL, status SMALLINT NOT NULL, deleted_at %s NULL)", nativeGrantViewerTimestampType(dialect))
 }
 
 func nativeGrantViewerChannelDDL(dialect string) string {

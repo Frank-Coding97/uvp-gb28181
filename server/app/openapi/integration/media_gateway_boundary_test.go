@@ -112,7 +112,7 @@ func newBoundaryMediaFixture(t *testing.T, dispatcher *boundaryMediaDispatcher, 
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}, &models.PlayGrant{}, &models.Viewer{}))
-	require.NoError(t, db.Exec("CREATE TABLE sys_department (id INTEGER PRIMARY KEY, status INTEGER, deleted_at DATETIME NULL)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE sys_department (id INTEGER PRIMARY KEY, parent_id INTEGER, status INTEGER, deleted_at DATETIME NULL)").Error)
 	require.NoError(t, db.Exec("INSERT INTO sys_department(id,status) VALUES(10,1)").Error)
 	require.NoError(t, db.Exec(`CREATE TABLE gb_device (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

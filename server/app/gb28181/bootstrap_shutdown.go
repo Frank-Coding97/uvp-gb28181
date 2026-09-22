@@ -501,6 +501,7 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	if r.ptzScheduler != nil {
 		r.ptzScheduler.Stop()
 	}
+	OpenAPIPTZRuntime().Clear()
 	if r.ptzService != nil {
 		r.ptzService.Retire()
 	}

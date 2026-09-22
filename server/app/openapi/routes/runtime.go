@@ -27,7 +27,7 @@ type RuntimeSettings interface {
 // RestoreMediaSecurity still runs unconditionally at the application root.
 // Enabled gateway startup
 // cannot silently fall back after recovery/configuration/dependency failure.
-func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings, media auth.MediaDispatcher) (*auth.Gateway, *controllers.ClientAdminController, error) {
+func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings, media auth.MediaDispatcher, ptz ...auth.PTZDispatcher) (*auth.Gateway, *controllers.ClientAdminController, error) {
 	if settings == nil {
 		return nil, nil, auth.ErrUnavailable
 	}
@@ -68,9 +68,12 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	options := make([]auth.GatewayOption, 0, 1)
+	options := make([]auth.GatewayOption, 0, 2)
 	if playEnabled {
 		options = append(options, auth.WithMediaDispatcher(media))
+	}
+	if len(ptz) > 0 && ptz[0] != nil {
+		options = append(options, auth.WithPTZDispatcher(ptz[0]))
 	}
 	gate, err := auth.NewGateway(ctx, db, keys, auth.GatewayConfig{Audience: settings.GetString("openapi.audience"), TLSProxies: settings.GetStringSlice("openapi.tls_terminator_proxies"), Timeout: time.Duration(timeout) * time.Second, AuditReserve: time.Second, MaxInFlight: 64}, options...)
 	if err != nil {

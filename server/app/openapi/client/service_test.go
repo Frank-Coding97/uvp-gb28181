@@ -189,7 +189,7 @@ func TestOpenAPIClientCreatePassesDataScopeToOptionalManagementBoundary(t *testi
 	dsn := fmt.Sprintf("file:openapi_client_scope_boundary_%d?mode=memory&cache=shared", testDatabaseID.Add(1))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Audit{}))
+	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Audit{}, &appmodels.SysOperationLog{}))
 	masterKey := bytes.Repeat([]byte{0xA5}, 32)
 	secrets, err := NewSecretManager(masterKey, "test-key-1")
 	require.NoError(t, err)

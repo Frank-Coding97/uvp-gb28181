@@ -14,6 +14,7 @@ import (
 // query map, personnel principal, or arbitrary owner parameter is accepted.
 type metadataInput struct {
 	owner                                       uint
+	dataScope                                   int8
 	scope, deviceID, channelID, keyword, status string
 	page, size                                  int
 }
@@ -30,8 +31,12 @@ func (m metadataInput) resourceID() string {
 	}
 	return m.deviceID
 }
-func parseMetadata(q gatewayRequest, owner uint) (metadataInput, error) {
-	m := metadataInput{owner: owner, scope: q.scope, deviceID: q.deviceID, channelID: q.channelID, page: 1, size: 20}
+func parseMetadata(q gatewayRequest, owner uint, dataScopes ...int8) (metadataInput, error) {
+	dataScope := resource.DataScopeDepartment
+	if len(dataScopes) == 1 {
+		dataScope = dataScopes[0]
+	}
+	m := metadataInput{owner: owner, dataScope: dataScope, scope: q.scope, deviceID: q.deviceID, channelID: q.channelID, page: 1, size: 20}
 	values, err := url.ParseQuery(q.rawQuery)
 	if err != nil {
 		return m, err
@@ -78,39 +83,37 @@ func checkMetadata(ctx context.Context, db *gorm.DB, m metadataInput) error {
 	if m.owner == 0 {
 		return resource.ErrResourceNotFound
 	}
-	var ids []uint
-	if err := db.WithContext(ctx).Table("sys_department").Select("id").Where("id = ? AND status = ? AND deleted_at IS NULL", m.owner, 1).Find(&ids).Error; err != nil {
+	scope := resource.DepartmentScope{OwnerDeptID: m.owner, DataScope: m.dataScope}
+	if _, err := resource.ResolveDepartmentIDs(ctx, db, scope); err != nil {
 		return err
-	}
-	if len(ids) != 1 {
-		return resource.ErrResourceNotFound
 	}
 	svc := resource.New(db)
 	if m.channelID != "" {
-		_, err := svc.GetChannel(ctx, m.owner, m.deviceID, m.channelID)
+		_, err := svc.GetChannelInScope(ctx, scope, m.deviceID, m.channelID)
 		return err
 	}
 	if m.deviceID != "" {
-		_, err := svc.GetDevice(ctx, m.owner, m.deviceID)
+		_, err := svc.GetDeviceInScope(ctx, scope, m.deviceID)
 		return err
 	}
 	return nil
 }
 func readMetadata(ctx context.Context, db *gorm.DB, m metadataInput) (any, error) {
 	svc := resource.New(db)
+	scope := resource.DepartmentScope{OwnerDeptID: m.owner, DataScope: m.dataScope}
 	switch m.scope {
 	case "device:list":
-		return svc.ListDevices(ctx, m.owner, resource.DeviceListOptions{Page: m.page, PageSize: m.size, Keyword: m.keyword, Status: m.status})
+		return svc.ListDevicesInScope(ctx, scope, resource.DeviceListOptions{Page: m.page, PageSize: m.size, Keyword: m.keyword, Status: m.status})
 	case "device:detail":
-		return svc.GetDevice(ctx, m.owner, m.deviceID)
+		return svc.GetDeviceInScope(ctx, scope, m.deviceID)
 	case "device:status":
-		return svc.GetDeviceStatus(ctx, m.owner, m.deviceID)
+		return svc.GetDeviceStatusInScope(ctx, scope, m.deviceID)
 	case "channel:list":
-		return svc.ListChannels(ctx, m.owner, m.deviceID, resource.ChannelListOptions{Page: m.page, PageSize: m.size, Keyword: m.keyword, Status: m.status})
+		return svc.ListChannelsInScope(ctx, scope, m.deviceID, resource.ChannelListOptions{Page: m.page, PageSize: m.size, Keyword: m.keyword, Status: m.status})
 	case "channel:detail":
-		return svc.GetChannel(ctx, m.owner, m.deviceID, m.channelID)
+		return svc.GetChannelInScope(ctx, scope, m.deviceID, m.channelID)
 	case "channel:status":
-		return svc.GetChannelStatus(ctx, m.owner, m.deviceID, m.channelID)
+		return svc.GetChannelStatusInScope(ctx, scope, m.deviceID, m.channelID)
 	default:
 		return nil, ErrDenied
 	}
