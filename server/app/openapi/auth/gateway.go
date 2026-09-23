@@ -12,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
 	"uvplatform.cn/uvp-gb28181/app/openapi/audit"
+	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.cn/uvp-gb28181/app/openapi/client"
 	"uvplatform.cn/uvp-gb28181/app/openapi/limit"
 	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
@@ -42,6 +44,7 @@ type Gateway struct {
 	complete  func(context.Context, string, string, time.Duration) error
 	rejected  *audit.RejectedCollector
 	ptz       PTZDispatcher
+	catalog   *catalogruntime.CatalogRuntime
 }
 type gatewayRequest struct {
 	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, presetID, operationID, idempotencyKey, requestID, source string
@@ -83,6 +86,17 @@ func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, co
 	g.run = g.process
 	g.rejected = audit.NewRejectedCollector()
 	return g, nil
+}
+
+// WithCatalogRuntime installs the immutable, startup-hydrated capability
+// release. A nil or empty runtime preserves the pre-catalog compatibility
+// path; an active release is always authoritative for dispatch.
+func WithCatalogRuntime(runtime *catalogruntime.CatalogRuntime) GatewayOption {
+	return func(gateway *Gateway) {
+		if gateway != nil {
+			gateway.catalog = runtime
+		}
+	}
 }
 
 func (g *Gateway) Handler(scope string) gin.HandlerFunc {
@@ -238,6 +252,13 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 	if err != nil {
 		return invalid(503, "SERVICE_UNAVAILABLE")
 	}
+	published, err := client.ScopePublished(ctx, g.db, q.scope)
+	if err != nil {
+		return invalid(503, "SERVICE_UNAVAILABLE")
+	}
+	if !published {
+		return invalid(403, "CAPABILITY_DENIED")
+	}
 	metadata, err := parseMetadata(q, view.OwnerDeptID, view.DataScope)
 	if err != nil {
 		return invalid(400, "INVALID_REQUEST")
@@ -271,16 +292,20 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 	var response gatewayResponse
 	code := "SERVICE_UNAVAILABLE"
 	if ctx.Err() == nil {
-		data, readErr := g.read(ctx, g.db, metadata)
-		if readErr == nil && ctx.Err() == nil {
-			response = encodeGateway(q.requestID, 200, "OK", data)
-			if response.status == 200 {
-				code = "OK"
-			}
+		if !g.catalogRuntimeReady(ctx) {
+			response = invalid(503, "SERVICE_UNAVAILABLE")
 		} else {
-			response = metadataFailure(q.requestID, readErr)
-			if response.status == 404 {
-				code = "RESOURCE_NOT_FOUND"
+			data, readErr := g.readMetadata(ctx, metadata)
+			if readErr == nil && ctx.Err() == nil {
+				response = encodeGateway(q.requestID, 200, "OK", data)
+				if response.status == 200 {
+					code = "OK"
+				}
+			} else {
+				response = metadataFailure(q.requestID, readErr)
+				if response.status == 404 {
+					code = "RESOURCE_NOT_FOUND"
+				}
 			}
 		}
 	}
@@ -291,6 +316,42 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 		return invalid(503, "SERVICE_UNAVAILABLE")
 	}
 	return response
+}
+
+func (g *Gateway) readMetadata(ctx context.Context, metadata metadataInput) (any, error) {
+	if g != nil && g.catalog != nil && g.catalog.Active() != nil {
+		return g.catalog.Dispatch(ctx, metadata.scope, catalogruntime.Invocation{
+			Method: metadataMethod(metadata.scope),
+			Path:   metadataPath(metadata),
+			Value: adapters.Request{
+				ResourceScope: resource.DepartmentScope{OwnerDeptID: metadata.owner, DataScope: metadata.dataScope},
+				DeviceID:      metadata.deviceID,
+				ChannelID:     metadata.channelID,
+				List: adapters.ListOptions{
+					Page: metadata.page, PageSize: metadata.size,
+					Keyword: metadata.keyword, Status: metadata.status,
+				},
+			},
+		})
+	}
+	if g == nil || g.read == nil {
+		return nil, resource.ErrResourceUnavailable
+	}
+	return g.read(ctx, g.db, metadata)
+}
+
+func metadataMethod(scope string) string {
+	switch scope {
+	case "device:list", "device:detail", "device:status", "channel:list", "channel:detail", "channel:status":
+		return "GET"
+	default:
+		return ""
+	}
+}
+
+func metadataPath(metadata metadataInput) string {
+	pattern := metadataPattern(metadata.scope)
+	return strings.NewReplacer(":deviceId", metadata.deviceID, ":channelId", metadata.channelID).Replace(pattern)
 }
 
 // RejectedSummary is a bounded process-local diagnostic view, not a public

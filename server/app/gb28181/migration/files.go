@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const baselineMergePointFile = "2026-09-22-baseline-merge-point.sql"
+
 // FilterUpFiles 从文件名列表中筛出当前方言的 up 迁移文件,字典序排列。
 // 命名约定:默认方言(MySQL)无后缀,PostgreSQL 为 -postgresql.sql,
 // SQL Server 为 -sqlserver.sql;down 文件为 <up>-down.sql。
@@ -22,6 +24,12 @@ func FilterUpFiles(names []string, d Dialect) []string {
 func isUpFile(name string, d Dialect) bool {
 	if !strings.HasSuffix(name, ".sql") {
 		return false
+	}
+	// The merge-point is an intentionally empty, dialect-neutral marker. It
+	// must be visible to every supported dialect so an empty version table is
+	// baselined consistently instead of silently skipping PostgreSQL/SQL Server.
+	if name == baselineMergePointFile {
+		return true
 	}
 	switch d {
 	case DialectPostgres:

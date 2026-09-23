@@ -58,6 +58,9 @@ func newDispatcherFixture(t *testing.T, sender ptz.TrackedSender) (*gorm.DB, *Di
 func TestDispatcherListsOnlyScopedPresets(t *testing.T) {
 	db, dispatcher := newDispatcherFixture(t, nil)
 	require.NoError(t, db.Create(&gbmodels.GbPTZPreset{DeviceID: 1, ChannelID: 2, PresetID: 3, Name: "入口", Status: gbmodels.PTZPresetActive}).Error)
+	// A stale row with the same internal channel id but a different device must
+	// never leak into the requested device's preset list.
+	require.NoError(t, db.Create(&gbmodels.GbPTZPreset{DeviceID: 999, ChannelID: 2, PresetID: 4, Name: "其他设备", Status: gbmodels.PTZPresetActive}).Error)
 	data, err := dispatcher.Handle(context.Background(), auth.PTZRequest{Scope: auth.PTZPresetListScope, OwnerDeptID: 10, DataScope: resource.DataScopeDepartment, DeviceID: ptzTestDevice, ChannelID: ptzTestChannel})
 	require.NoError(t, err)
 	result, ok := data.(map[string]any)

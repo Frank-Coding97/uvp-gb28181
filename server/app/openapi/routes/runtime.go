@@ -45,6 +45,10 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err := checkRuntimeSchema(ctx, db); err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
+	catalogRuntime, err := InitializeCatalogRuntime(ctx, db)
+	if err != nil {
+		return nil, nil, auth.ErrUnavailable
+	}
 	timeout := settings.GetInt("openapi.request_timeout_seconds")
 	if timeout == 0 {
 		timeout = 5
@@ -75,6 +79,7 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if len(ptz) > 0 && ptz[0] != nil {
 		options = append(options, auth.WithPTZDispatcher(ptz[0]))
 	}
+	options = append(options, auth.WithCatalogRuntime(catalogRuntime))
 	gate, err := auth.NewGateway(ctx, db, keys, auth.GatewayConfig{Audience: settings.GetString("openapi.audience"), TLSProxies: settings.GetStringSlice("openapi.tls_terminator_proxies"), Timeout: time.Duration(timeout) * time.Second, AuditReserve: time.Second, MaxInFlight: 64}, options...)
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable

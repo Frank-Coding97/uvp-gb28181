@@ -18,8 +18,12 @@ func (g *Gateway) handlePTZ(c *gin.Context, requestID, scope string, respond fun
 		c.Header("Connection", "close")
 		respond(response)
 	}
-	if !g.ptzReady() || g.tls == nil || !g.tls.IsHTTPS(c.Request) {
+	if !g.ptzReady() {
 		failEarly(gatewayError(requestID, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE"))
+		return
+	}
+	if g.tls == nil || !g.tls.IsHTTPS(c.Request) {
+		failEarly(gatewayError(requestID, http.StatusUnauthorized, "AUTHENTICATION_FAILED"))
 		return
 	}
 	r := c.Request
@@ -142,6 +146,13 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 	if err != nil {
 		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
 	}
+	published, err := client.ScopePublished(ctx, g.db, q.scope)
+	if err != nil {
+		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
+	}
+	if !published {
+		return invalid(http.StatusForbidden, "CAPABILITY_DENIED")
+	}
 	metadata, err := ptzMetadata(q, view.OwnerDeptID, view.DataScope)
 	if err != nil {
 		return ptzMetadataFailure(q.requestID, err)
@@ -171,6 +182,12 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 		}
 	}
 	admitted = true
+	if !g.catalogRuntimeReady(ctx) {
+		if err := g.complete(hardContext, q.requestID, "SERVICE_UNAVAILABLE", time.Since(start)); err != nil {
+			return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
+		}
+		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
+	}
 	request := PTZRequest{Scope: q.scope, ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, PresetID: q.presetID, OperationID: q.operationID, IdempotencyKey: q.idempotencyKey, Body: append([]byte(nil), q.body...)}
 	data, dispatchErr := g.ptz.Handle(ctx, request)
 	response := gatewayError(q.requestID, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")

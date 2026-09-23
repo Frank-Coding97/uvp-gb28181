@@ -290,7 +290,7 @@ func (s *Service) ListScopes(ctx context.Context, clientID int64) ([]ScopeView, 
 }
 
 func (s *Service) GetScope(ctx context.Context, clientID int64, scope string) (ScopeView, error) {
-	if clientID <= 0 || !isSupportedScope(scope) {
+	if clientID <= 0 || !validScopeName(scope) {
 		return ScopeView{}, ErrInvalidArgument
 	}
 	var row models.ClientScope
@@ -490,11 +490,16 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 	if actorID == 0 {
 		return ClientView{}, ErrAuthorizationUnavailable
 	}
-	if id <= 0 || expectedRowVersion <= 0 || !isSupportedScope(scope) {
-		if !isSupportedScope(scope) {
-			return ClientView{}, ErrUnknownScope
-		}
+	if id <= 0 || expectedRowVersion <= 0 || !validScopeName(scope) {
 		return ClientView{}, ErrInvalidArgument
+	}
+	supported, scopeErr := s.supportedScopes(ctx)
+	if scopeErr != nil {
+		return ClientView{}, scopeErr
+	}
+	_, scopeSupported := supported[scope]
+	if !scopeSupported {
+		return ClientView{}, ErrUnknownScope
 	}
 	now := s.currentTime()
 	var view ClientView
@@ -618,6 +623,21 @@ func (s *Service) authorizeClient(ctx context.Context, actorID uint, action stri
 	return s.managementBoundary.AuthorizeClient(normalizeContext(ctx), actorID, action, ownerDeptID)
 }
 
+func (s *Service) supportedScopes(ctx context.Context) (map[string]struct{}, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrDependencyUnavailable
+	}
+	scopes, err := SupportedScopesFromDB(normalizeContext(ctx), s.db)
+	if err != nil {
+		return nil, ErrDependencyUnavailable
+	}
+	result := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		result[scope] = struct{}{}
+	}
+	return result, nil
+}
+
 func (s *Service) recordAudit(tx *gorm.DB, row *models.Client, reason string, actorID uint, now time.Time) error {
 	if tx == nil || row == nil || actorID == 0 {
 		return ErrDependencyUnavailable
@@ -697,9 +717,26 @@ func validStatus(status string) bool {
 	}
 }
 
-func isSupportedScope(scope string) bool {
-	_, ok := supportedScopes[scope]
-	return ok
+func validScopeName(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" || len(scope) > 64 {
+		return false
+	}
+	if scope != strings.ToLower(scope) {
+		return false
+	}
+	for _, part := range strings.Split(scope, ":") {
+		if part == "" || len(part) > 64 {
+			return false
+		}
+		for index, r := range part {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || (index > 0 && (r == '.' || r == '_' || r == '-')) {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func toClientView(row models.Client) ClientView {

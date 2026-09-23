@@ -34,6 +34,21 @@ type migrationSource interface {
 // 空版本表时用它的存在性区分"快照库(基线化)"与"老基线库(拒绝)"
 const baselineProbeTable = "gb_sip_trace_session_diagnosis"
 
+// baselineRequiredTables are the minimum schema fingerprint for a release
+// baseline that may safely skip all embedded incremental migrations. The
+// OpenAPI projection tables are included because older baselines contained
+// the legacy probe table but not the capability catalog; probing only the
+// legacy table would silently mark the catalog migration as applied.
+var baselineRequiredTables = []string{
+	baselineProbeTable,
+	"sys_openapi_capability_group",
+	"sys_openapi_capability",
+	"sys_openapi_operation",
+	"sys_openapi_release",
+	"sys_openapi_release_item",
+	"sys_openapi_runtime_state",
+}
+
 // schemaProbe 探测表是否存在
 type schemaProbe func(tableName string) (bool, error)
 
@@ -157,14 +172,16 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		//   1. 快照库/已最新:探测表存在 → 基线化(全部标记已应用)
 		//   2. 老基线库:探测表缺失 → 无法确定哪些迁移已应用,
 		//      明确拒绝而不是"迁移成功但缺表"的假成功
-		exists, err := probe(baselineProbeTable)
-		if err != nil {
-			return fmt.Errorf("基线探测失败: %w", err)
+		for _, table := range baselineRequiredTables {
+			exists, err := probe(table)
+			if err != nil {
+				return fmt.Errorf("基线探测失败(%s): %w", table, err)
+			}
+			if !exists {
+				return fmt.Errorf("检测到空迁移版本表且缺少 %s 表:无法确定存量库的迁移基线,请人工建立基线后重试", table)
+			}
 		}
-		if exists {
-			return store.MarkApplied(names)
-		}
-		return fmt.Errorf("检测到空迁移版本表且缺少 %s 表:无法确定存量库的迁移基线,请人工建立基线后重试", baselineProbeTable)
+		return store.MarkApplied(names)
 	}
 
 	for _, name := range names {

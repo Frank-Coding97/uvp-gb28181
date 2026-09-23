@@ -1,5 +1,4 @@
 import { defineConfig, loadEnv } from "vite";
-import fs from "node:fs";
 import path from "path";
 import { resolve } from "path";
 import { include } from "./build/optimize";
@@ -25,7 +24,6 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       open: false,
       port: 5177,
-      https: false,
       proxy: {
         "/api": { target: apiProxyTarget, changeOrigin: true, xfwd: true },
         "/public": { target: apiProxyTarget, changeOrigin: true }

@@ -38,6 +38,14 @@ func TestFilterUpFilesExcludesNonSQL(t *testing.T) {
 	require.Equal(t, []string{"2026-07-20-a.sql", "2026-07-20-b.sql"}, got)
 }
 
+func TestFilterUpFilesIncludesBaselineMergePointForEveryDialect(t *testing.T) {
+	for _, dialect := range []Dialect{DialectMySQL, DialectPostgres, DialectSQLServer} {
+		t.Run(string(dialect), func(t *testing.T) {
+			require.Equal(t, []string{baselineMergePointFile}, FilterUpFiles([]string{baselineMergePointFile}, dialect))
+		})
+	}
+}
+
 func TestDownFileName(t *testing.T) {
 	require.Equal(t, "2026-07-20-a-down.sql", DownFileName("2026-07-20-a.sql"))
 	require.Equal(t, "2026-07-20-a-postgresql-down.sql", DownFileName("2026-07-20-a-postgresql.sql"))
@@ -47,5 +55,10 @@ func TestDownFileName(t *testing.T) {
 func TestEmbeddedMigrationsComplete(t *testing.T) {
 	entries, err := migrationsfs.FS.ReadDir("migrations")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(entries), 40, "embed 的迁移文件数异常,疑似 embed 指令失效")
+	require.NotEmpty(t, entries, "embed 的迁移目录为空")
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	require.Contains(t, names, baselineMergePointFile, "baseline-only runner 必须嵌入合并点标记")
 }

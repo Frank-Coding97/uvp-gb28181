@@ -28,6 +28,9 @@ func TestMigrationFileContract(t *testing.T) {
 		if len(name) < len(contractThreshold) || !strings.HasSuffix(name, ".sql") {
 			continue
 		}
+		if name == baselineMergePointFile {
+			continue
+		}
 		date := name[:len(contractThreshold)]
 		if date >= contractThreshold {
 			newFiles = append(newFiles, name)
@@ -455,15 +458,43 @@ func TestRealtimeLogMenuIconIsRegisteredInFrontendWhitelist(t *testing.T) {
 	}
 }
 
+// ⭐ 断言对象已从「迁移块」换成「种子行」。
+//
+// 旧写法找的是基线里逐字内嵌的 `-- realtime-log-menu-icon:start` 块，并断言块里
+// 有 `set icon='lucide:terminal'`。基线改成「从开发库 dump」之后不再内嵌迁移正文
+// ——新装基线里这条菜单是一行**种子数据**（INSERT ... VALUES），图标与权限码写在
+// 同一个元组里。契约（新装环境该菜单必须有图标）没变，换的是它的载体。
+//
+// 判据锚在**权限码**而不是 path：该菜单 path 被 2026-09-15 迁移改过，按
+// /gb28181/realtime-log 定位会静默命中 0 行 —— 与 TestRealtimeLogMenuTitleRename
+// 同一条教训。
 func TestRealtimeLogMenuIconFreshBaselinesCarryIcon(t *testing.T) {
+	const permission = "gb28181:log:view"
 	for _, name := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
 		t.Run(name, func(t *testing.T) {
 			body, err := os.ReadFile(filepath.Join("..", "..", "..", "resource", "database", name))
 			require.NoError(t, err)
-			normalized := normalizeSQL(string(body))
-			iconBlock := strings.Index(normalized, "realtime-log-menu-icon:start")
-			require.GreaterOrEqual(t, iconBlock, 0, "全量基线必须包含补图标块,否则新装环境该菜单仍无图标")
-			require.Contains(t, normalized[iconBlock:], "set icon='lucide:terminal'")
+			menu := menuSeedTuple(t, normalizeSQL(string(body)), permission)
+			require.Contains(t, menu, "lucide:terminal",
+				"实时日志菜单的种子行必须带 lucide:Terminal 图标,否则新装环境该菜单无图标")
 		})
 	}
+}
+
+// menuSeedTuple 从归一化后的基线文本里取出 permission 为该值的那条菜单种子元组。
+//
+// 归一化把种子压成 `insert into sys_menu (...) values (140491, ...), (140492, ...)`，
+// 所以按 `), (` 切开，每个片段就是一条菜单。跨表也不会误命中：权限码只出现在
+// sys_menu.permission 这一列（sys_menu_api / sys_casbin_rule 存的是 id 与接口路径）。
+func menuSeedTuple(t *testing.T, normalized, permission string) string {
+	t.Helper()
+	needle := "'" + permission + "'"
+	for _, tuple := range strings.Split(normalized, "), (") {
+		if strings.Contains(tuple, needle) {
+			return tuple
+		}
+	}
+	require.FailNowf(t, "基线里找不到该菜单",
+		"新装基线必须含 permission=%s 的菜单种子行", permission)
+	return ""
 }

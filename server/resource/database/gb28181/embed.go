@@ -1,8 +1,8 @@
-// Package migrationsfs 将增量迁移 SQL 打包进二进制,
-// 部署时 backend 启动即自动执行未应用的迁移(见 app/gb28181/migration 包)。
+// Package migrationsfs 历史迁移已清理，保留空 embed.FS 以维持代码兼容性。
+// 新环境使用三方言全量初始化脚本 (uvp-gb28181.sql / postgresql_converted.sql / sqlserver_converted.sql)。
 package migrationsfs
 
 import "embed"
 
-//go:embed migrations/*.sql
+//go:embed embed.go
 var FS embed.FS

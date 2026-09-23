@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -153,6 +154,47 @@ func TestOpenAPIClientCreateGeneratesIndependentCredentials(t *testing.T) {
 		require.NotContains(t, log.RequestData, firstSecret)
 		require.NotContains(t, log.RequestData, secondSecret)
 	}
+}
+
+func TestOpenAPIClientScopeMutationUsesPublishedCatalogAndKeepsOrphansReadable(t *testing.T) {
+	service, db := newClientTestService(t, &recordingRevocationStore{})
+	now := time.Unix(1790000000, 0).UTC()
+	require.NoError(t, db.AutoMigrate(&models.Release{}, &models.ReleaseItem{}, &models.RuntimeState{}))
+	item := models.ReleaseItem{GroupCode: "device-management", GroupName: "设备管理", CapabilityCode: "device.list", CapabilityName: "设备列表", Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/devices", AdapterKey: "resource.device.list.v1", AdapterContractVersion: "v1", ResourceType: "device", RiskLevel: "read", IdempotencyMode: "none", RequestSchema: "{}", ResponseSchema: "{}", CreatedAt: now}
+	item.SnapshotJSON = testReleaseItemSnapshotJSON(item)
+	release := models.Release{Version: 1, Status: models.ReleaseStatusPublished, SnapshotHash: testReleaseItemsHash([]models.ReleaseItem{item}), ItemCount: 1, PublishedAt: &now, CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, db.Create(&release).Error)
+	item.ReleaseID = release.ID
+	require.NoError(t, db.Create(&item).Error)
+	require.NoError(t, db.Create(&models.RuntimeState{ID: 1, ActiveRelease: &release.ID, ActiveVersion: 1, SnapshotHash: release.SnapshotHash, Status: models.RuntimeCatalogReady, RuntimeEpoch: 1, UpdatedAt: now}).Error)
+	view, _, err := service.Create(context.Background(), CreateRequest{Name: "catalog-scoped", OwnerDeptID: 10, CreatedBy: 7})
+	require.NoError(t, err)
+	updated, err := service.SetScope(context.Background(), view.ID, "device:list", true, view.RowVersion, 7)
+	require.NoError(t, err)
+	require.Equal(t, view.RowVersion+1, updated.RowVersion)
+	_, err = service.SetScope(context.Background(), view.ID, "channel:list", true, updated.RowVersion, 7)
+	require.ErrorIs(t, err, ErrUnknownScope)
+
+	// Historical grants remain queryable for audit/reconciliation, but cannot be
+	// created or re-enabled once the published release removed the scope.
+	require.NoError(t, db.Create(&models.ClientScope{ClientID: view.ID, Scope: "ptz:preset:list", Enabled: false, ScopeEpoch: 1, UpdatedBy: 7, UpdatedAt: now}).Error)
+	orphan, err := service.GetScope(context.Background(), view.ID, "ptz:preset:list")
+	require.NoError(t, err)
+	require.Equal(t, "ptz:preset:list", orphan.Scope)
+}
+
+func TestOpenAPIClientSetScopeDistinguishesInvalidAndUnknownScope(t *testing.T) {
+	service, _ := newClientTestService(t, &recordingRevocationStore{})
+	view, _ := createTestClient(t, service)
+	var err error
+
+	for _, scope := range []string{"", "bad scope", ":device:list", "device::list", "device/list", "Device:list", strings.Repeat("a", 65), strings.Repeat("a", 129)} {
+		_, err = service.SetScope(context.Background(), view.ID, scope, true, view.RowVersion, 7)
+		require.ErrorIs(t, err, ErrInvalidArgument, "scope %q", scope)
+	}
+
+	_, err = service.SetScope(context.Background(), view.ID, "unknown:scope", true, view.RowVersion, 7)
+	require.ErrorIs(t, err, ErrUnknownScope)
 }
 
 func TestOpenAPIClientCreateDefaultsAndPersistsDepartmentDataScope(t *testing.T) {

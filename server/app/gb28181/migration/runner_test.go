@@ -115,6 +115,20 @@ func TestRunFirstStartRejectsMissingBaselineTable(t *testing.T) {
 	require.Empty(t, store.marks)
 }
 
+func TestRunFirstStartRejectsLegacySnapshotWithoutCatalogProjection(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	src.files["a.sql"] = "SQL FOR a"
+	probe := func(table string) (bool, error) {
+		return table != "sys_openapi_runtime_state", nil
+	}
+
+	err := run(store, lock, src, exec, probe)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "sys_openapi_runtime_state")
+	require.Empty(t, exec.executed)
+	require.Empty(t, store.marks)
+}
+
 // ---- 3.2 增量执行 ----
 
 func TestRunIncrementalAppliesPendingOnly(t *testing.T) {

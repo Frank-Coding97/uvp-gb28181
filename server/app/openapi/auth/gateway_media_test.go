@@ -270,6 +270,20 @@ func TestOpenAPIMediaNotReadyDoesNotReadOrAdmit(t *testing.T) {
 	require.Zero(t, nonceCount)
 }
 
+func TestOpenAPIMediaRejectsEnabledUnpublishedScopeWithCapabilityDenied(t *testing.T) {
+	dispatcher := &mediaDispatcherStub{ticket: "ticket"}
+	dispatcher.ready.Store(true)
+	gate, db, secret := mediaGatewayFixture(t, dispatcher)
+	seedActiveCapabilityRelease(t, db, "device:list")
+
+	response := sendMediaRequest(t, gate, secret, []byte(`{"protocol":"https-flv"}`), strings.Repeat("e", 32))
+
+	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"code":"CAPABILITY_DENIED"`)
+	require.Zero(t, dispatcher.prepareCall.Load())
+	require.Zero(t, dispatcher.applyCall.Load())
+}
+
 func TestOpenAPIMediaReadDeadlineUnsupportedDoesNotRead(t *testing.T) {
 	dispatcher := &mediaDispatcherStub{ticket: "ticket"}
 	dispatcher.ready.Store(true)

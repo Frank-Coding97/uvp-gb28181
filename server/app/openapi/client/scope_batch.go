@@ -23,21 +23,33 @@ func (s *Service) SetScopes(ctx context.Context, id int64, scopes []string, vers
 	if actor == 0 {
 		return ClientView{}, ErrAuthorizationUnavailable
 	}
-	if id <= 0 || version <= 0 || len(scopes) > len(supportedScopes) {
+	if id <= 0 || version <= 0 {
 		return ClientView{}, ErrInvalidArgument
 	}
 	wanted := make(map[string]bool, len(scopes))
 	for _, scope := range scopes {
-		if !isSupportedScope(scope) {
-			return ClientView{}, ErrUnknownScope
+		if !validScopeName(scope) {
+			return ClientView{}, ErrInvalidArgument
 		}
 		if wanted[scope] {
 			return ClientView{}, ErrInvalidArgument
 		}
 		wanted[scope] = true
 	}
+	supported, err := s.supportedScopes(ctx)
+	if err != nil {
+		return ClientView{}, err
+	}
+	if len(scopes) > len(supported) {
+		return ClientView{}, ErrInvalidArgument
+	}
+	for scope := range wanted {
+		if _, ok := supported[scope]; !ok {
+			return ClientView{}, ErrUnknownScope
+		}
+	}
 	var view ClientView
-	err := s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
 		nested := *s
 		nested.db = tx
 		row, err := loadClient(tx, normalizeContext(ctx), id)
@@ -64,8 +76,8 @@ func (s *Service) SetScopes(ctx context.Context, id int64, scopes []string, vers
 		for _, scope := range existing {
 			current[scope.Scope] = scope.Enabled
 		}
-		keys := make([]string, 0, len(supportedScopes))
-		for scope := range supportedScopes {
+		keys := make([]string, 0, len(supported))
+		for scope := range supported {
 			keys = append(keys, scope)
 		}
 		sort.Strings(keys)

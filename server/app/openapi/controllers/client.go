@@ -86,7 +86,12 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 			return
 		}
 		if action == "capabilities" {
-			writeOpenAPISuccess(c, client.SupportedScopes())
+			scopes, err := client.SupportedScopesFromDB(c.Request.Context(), a.db)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, scopes)
 			return
 		}
 		if action == "capabilities-catalog" {

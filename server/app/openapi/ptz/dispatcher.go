@@ -122,12 +122,12 @@ func (d *Dispatcher) resolveTarget(ctx context.Context, request auth.PTZRequest)
 }
 
 func (d *Dispatcher) listPresets(ctx context.Context, request auth.PTZRequest) (any, error) {
-	_, channel, err := d.resolveTarget(ctx, request)
+	target, channel, err := d.resolveTarget(ctx, request)
 	if err != nil {
 		return nil, mapTargetError(err)
 	}
 	var rows []gbmodels.GbPTZPreset
-	if err := d.db.WithContext(ctx).Where("channel_id = ? AND status <> ?", channel.ID, gbmodels.PTZPresetDeleted).Order("preset_id ASC").Find(&rows).Error; err != nil {
+	if err := d.db.WithContext(ctx).Where("device_id = ? AND channel_id = ? AND status <> ?", target.DeviceID, channel.ID, gbmodels.PTZPresetDeleted).Order("preset_id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	items := make([]presetView, 0, len(rows))
