@@ -1,0 +1,6 @@
+{"id": 1, "name": "性别", "code": "gender", "status": 1, "description": "这是一个性别字典", "created_at": {"$ts": "2024-07-01 10:00:00.000000"}, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 2, "name": "状态", "code": "status", "status": 1, "description": "状态字段可以用这个", "created_at": {"$ts": "2024-07-01 10:00:00.000000"}, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 3, "name": "岗位", "code": "post", "status": 1, "description": "岗位字段", "created_at": {"$ts": "2024-07-01 10:00:00.000000"}, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 4, "name": "任务状态", "code": "taskStatus", "status": 1, "description": "任务状态字段可以用它", "created_at": {"$ts": "2024-07-01 10:00:00.000000"}, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 5, "name": "摄像头类型", "code": "ptz_type", "status": 1, "description": "GB28181 国标摄像头云台类型(PTZType),2022 值域 1-7", "created_at": {"$ts": "2026-07-18 18:31:33.000000"}, "updated_at": {"$ts": "2026-09-18 08:27:05.000000"}, "deleted_at": null, "created_by": 1}
+{"id": 6, "name": "GB28181 默认播放协议", "code": "gb28181_playback_protocol", "status": 1, "description": "国标播放入口支持的默认协议选项", "created_at": {"$ts": "2026-08-10 18:56:34.000000"}, "updated_at": {"$ts": "2026-08-10 19:00:25.000000"}, "deleted_at": null, "created_by": 1}
