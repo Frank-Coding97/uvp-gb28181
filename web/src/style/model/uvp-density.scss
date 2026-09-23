@@ -1,0 +1,228 @@
+/**
+ * UVP 高密度业务态全局覆盖
+ *
+ * 目的:把 Arco 默认偏松散的字号/行高/padding/radius 收紧,
+ * 适配视频监控这类"一屏要看几十条数据"的业务场景。
+ *
+ * 影响范围:全站所有 Arco 组件。如有局部页面想恢复宽松,
+ * 在该组件内 scoped style 里单独覆盖即可。
+ */
+
+/* === 1. 基础排版收紧 === */
+body {
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === 2. Arco Button 收紧 === */
+.arco-btn {
+  font-size: 13px;
+
+  &.arco-btn-size-mini {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+  &.arco-btn-size-small {
+    height: 28px;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+  &.arco-btn-size-medium {
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 6px;
+  }
+  &.arco-btn-size-large {
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 6px;
+  }
+}
+
+/* === 3. Arco Input / Select 收紧 === */
+.arco-input-wrapper,
+.arco-textarea-wrapper,
+.arco-select-view {
+  border-radius: 6px;
+
+  &.arco-input-size-medium,
+  &.arco-textarea-size-medium,
+  &.arco-select-view-size-medium {
+    line-height: 30px;
+    font-size: 13px;
+  }
+  &.arco-input-size-small,
+  &.arco-textarea-size-small,
+  &.arco-select-view-size-small {
+    line-height: 26px;
+    font-size: 12px;
+  }
+}
+
+/* === 4. Arco Table 收紧 — 视频监控核心场景 === */
+.arco-table {
+  font-size: 13px;
+}
+
+.arco-table-th,
+.arco-table-td {
+  // 默认 Arco 表头/单元格上下 padding 12px,收到 8px
+  &.arco-table-cell {
+    padding: 8px 12px;
+  }
+}
+
+/* Arco Table 各档 size 收紧 */
+.arco-table-size-medium .arco-table-td,
+.arco-table-size-medium .arco-table-th {
+  padding: 8px 12px;
+}
+.arco-table-size-small .arco-table-td,
+.arco-table-size-small .arco-table-th {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.arco-table-size-mini .arco-table-td,
+.arco-table-size-mini .arco-table-th {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.arco-table-th {
+  background: #fafafa;
+  font-weight: 500;
+  color: #666;
+}
+
+/* === 5. Arco Card 收紧 === */
+.arco-card {
+  border-radius: 8px;
+
+  .arco-card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    min-height: 44px;
+  }
+  .arco-card-header-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .arco-card-body {
+    padding: 16px;
+  }
+
+  &.arco-card-size-small {
+    .arco-card-header { padding: 10px 12px; min-height: 36px; }
+    .arco-card-body { padding: 12px; }
+  }
+}
+
+/* === 6. Arco Form 收紧 === */
+.arco-form-item {
+  margin-bottom: 16px;
+
+  .arco-form-item-label {
+    font-size: 13px;
+    color: #666;
+  }
+}
+
+/* === 7. Arco Tag / Badge 收紧 === */
+.arco-tag {
+  font-size: 12px;
+  height: 22px;
+  line-height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+}
+
+/* === 8. Arco Pagination 收紧 === */
+.arco-pagination {
+  font-size: 13px;
+
+  .arco-pagination-item {
+    min-width: 30px;
+    height: 30px;
+    line-height: 30px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .arco-pagination-jumper-input {
+    height: 30px;
+  }
+  .arco-pagination-size-option {
+    height: 30px;
+    line-height: 30px;
+  }
+}
+
+/* === 9. Arco Modal / Drawer 标题收紧 === */
+.arco-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.arco-modal-header {
+  padding: 14px 20px;
+  min-height: 48px;
+}
+.arco-modal-body {
+  padding: 16px 20px;
+}
+.arco-modal-footer {
+  padding: 12px 20px;
+}
+.arco-drawer-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* === 10. Arco Tabs 收紧 === */
+.arco-tabs-header-title {
+  font-size: 13px;
+  padding: 8px 16px;
+}
+
+/* === 11. Arco Tooltip / Dropdown 圆角 === */
+.arco-tooltip-content,
+.arco-dropdown {
+  border-radius: 6px;
+  font-size: 12px;
+}
+.arco-dropdown-option {
+  font-size: 13px;
+  padding: 6px 12px;
+  min-height: 32px;
+  line-height: 20px;
+}
+
+/* === 12. Arco Tree 收紧 === */
+.arco-tree-node {
+  padding: 2px 0;
+
+  .arco-tree-node-title {
+    font-size: 13px;
+    line-height: 22px;
+    padding: 2px 8px;
+  }
+}
+
+/* === 13. 全局滚动条收窄(各浏览器) === */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.35);
+  }
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

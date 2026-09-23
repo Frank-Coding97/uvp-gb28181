@@ -158,9 +158,8 @@ const selectedMenu = computed(() => {
     padding: 0;
   }
 
-  // 消除icon的自带margin-right值，并且设置icon的padding值以保留icon空隙
+  // 消除icon的自带margin-right值，高度由菜单项flex居中控制
   .arco-menu-icon {
-    padding: 10px 0;
     margin-right: 0;
   }
 

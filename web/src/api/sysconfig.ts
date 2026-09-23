@@ -28,8 +28,6 @@ export interface CaptchaConfig {
     length: number;
 }
 
-
-
 // 配置响应数据
 export interface ConfigResponseData {
     system: SystemConfig;
@@ -58,6 +56,4 @@ export const getConfigAPI = () => {
 export const updateConfigAPI = (data: ConfigRequestData) => {
     return http.request<BaseResult>("put", baseUrlApi("config/update"), { data });
 };
-
-
 

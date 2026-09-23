@@ -2,13 +2,6 @@
     <div>
         <div class="login_form_box">
             <a-form :rules="rules" :model="form" layout="vertical" @submit="onSubmit">
-                <a-form-item field="tenantCode" :hide-asterisk="true">
-                    <a-input v-model="form.tenantCode" allow-clear placeholder="租户编码（不填则为账号默认租户）">
-                        <template #prefix>
-                            <icon-home />
-                        </template>
-                    </a-input>
-                </a-form-item>
                 <a-form-item field="username" :hide-asterisk="true">
                     <a-input v-model="form.username" allow-clear placeholder="请输入账号">
                         <template #prefix>
@@ -23,12 +16,12 @@
                         </template>
                     </a-input-password>
                 </a-form-item>
-                <a-form-item field="verifyCode" :hide-asterisk="true">
+                <a-form-item v-if="isCaptchaEnabled" field="captchaValue" :hide-asterisk="true">
                     <div class="verifyCode">
-                        <a-input style="width: 160px" v-model="form.captchaValue" allow-clear placeholder="请输入验证码" />
+                        <a-input class="verifyCodeInput" v-model="form.captchaValue" allow-clear placeholder="请输入验证码" />
                         <!-- <s-verify-code :content-height="30" :font-size-max="30" :content-width="110"
                             @verify-code-change="verifyCodeChange" /> -->
-                        <img :src="captchaImgUrl" class="verifyCodeImg" 
+                        <img :src="captchaImgUrl" class="verifyCodeImg"
                             @click="refreshCaptcha" />
                     </div>
                 </a-form-item>
@@ -51,7 +44,7 @@
 import { useRouter } from "vue-router";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useUserStoreHook } from "@/store/modules/user";
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { getVerifyImgString } from "@/api/user";
 import { useSystemStore } from "@/store/modules/system";
 import { useSysConfigStore } from "@/store/modules/sys-config";
@@ -59,10 +52,9 @@ import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
 // 获取系统配置
 const sysConfigStore = useSysConfigStore();
-const { systemConfig } = storeToRefs(sysConfigStore);
+const { systemConfig, captchaConfig } = storeToRefs(sysConfigStore);
 // 定义表单数据类型
 interface LoginForm {
-    tenantCode: string;
     username: string;
     password: string;
     captchaValue: string | null;
@@ -76,7 +68,6 @@ const router = useRouter();
 // 响应式数据
 const loginLoading = ref(false);
 const form = ref<LoginForm>({
-    tenantCode: "",
     username: "",
     password: "",
     captchaValue: null,
@@ -84,26 +75,35 @@ const form = ref<LoginForm>({
 });
 
 
+const isCaptchaEnabled = computed(() => captchaConfig.value.open);
+
 // 表单验证规则
-const rules = ref({
-    username: [
-        {
-            required: true,
-            message: "请输入账号"
-        }
-    ],
-    password: [
-        {
-            required: true,
-            message: "请输入密码"
-        }
-    ],
-    captchaValue: [
-        {
-            required: true,
-            message: "请输入验证码"
-        }
-    ]
+const rules = computed(() => {
+    const baseRules: Record<string, Array<{ required: boolean; message: string }>> = {
+        username: [
+            {
+                required: true,
+                message: "请输入账号"
+            }
+        ],
+        password: [
+            {
+                required: true,
+                message: "请输入密码"
+            }
+        ]
+    };
+
+    if (isCaptchaEnabled.value) {
+        baseRules.captchaValue = [
+            {
+                required: true,
+                message: "请输入验证码"
+            }
+        ];
+    }
+
+    return baseRules;
 });
 
 // 提交表单
@@ -119,7 +119,14 @@ const onLogin = async () => {
         loginLoading.value = true;
 
         // 执行登录
-        await useUserStoreHook().loginByUsername(form.value);
+        const loginData = {
+            username: form.value.username,
+            password: form.value.password,
+            captchaId: isCaptchaEnabled.value ? form.value.captchaId : "",
+            captchaValue: isCaptchaEnabled.value ? form.value.captchaValue : null
+        };
+
+        await useUserStoreHook().loginByUsername(loginData);
 
         // 加载用户信息
         await useUserStoreHook().getUserInfo();
@@ -149,6 +156,12 @@ const onLogin = async () => {
 // 验证码
 const captchaImgUrl = ref("");
 const refreshCaptcha = () => {
+    if (!isCaptchaEnabled.value) {
+        form.value.captchaId = "";
+        form.value.captchaValue = null;
+        captchaImgUrl.value = "";
+        return;
+    }
     getVerifyImgString().then(res => {
         form.value.captchaId = res.data.captchaId;
         captchaImgUrl.value = res.data.image;
@@ -171,6 +184,9 @@ watch(systemConfig, (newConfig) => {
 
 // 组件挂载时的初始化
 onMounted(async () => {
+    await sysConfigStore.getConfig().catch((error: unknown) => {
+        console.warn("获取系统配置失败，将使用已缓存配置:", error);
+    });
     refreshCaptcha();
 });
 </script>
@@ -179,11 +195,79 @@ onMounted(async () => {
 .login_form_box {
     margin-top: 28px;
 
+    :deep(.arco-form-item) {
+        margin-bottom: 20px;
+    }
+
+    :deep(.arco-form-item:last-child) {
+        margin-bottom: 0;
+    }
+
+    :deep(.arco-input-wrapper) {
+        height: 46px;
+        padding: 0 14px;
+        border: 1px solid #dbe6f4;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, .9),
+            0 1px 2px rgba(15, 23, 42, .04);
+        transition:
+            border-color .18s ease,
+            background .18s ease,
+            box-shadow .18s ease,
+            transform .18s ease;
+    }
+
+    :deep(.arco-input-wrapper:hover) {
+        border-color: #b8cce7;
+        background: #f7fbff;
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, .95),
+            0 4px 12px rgba(24, 144, 255, .08);
+    }
+
+    :deep(.arco-input-wrapper.arco-input-focus) {
+        border-color: #1890ff;
+        background: #fff;
+        box-shadow:
+            0 0 0 3px rgba(24, 144, 255, .12),
+            0 8px 22px rgba(24, 144, 255, .12);
+        transform: translateY(-1px);
+    }
+
+    :deep(.arco-input),
+    :deep(.arco-input-password) {
+        font-size: 14px;
+        color: #1f2d3d;
+    }
+
+    :deep(.arco-input::placeholder) {
+        color: #9aa8ba;
+    }
+
+    :deep(.arco-input-prefix),
+    :deep(.arco-input-suffix),
+    :deep(.arco-input-clear-btn),
+    :deep(.arco-input-password-visibility-btn) {
+        color: #7d8da1;
+    }
+
+    :deep(.arco-input-wrapper.arco-input-focus .arco-input-prefix),
+    :deep(.arco-input-wrapper:hover .arco-input-prefix) {
+        color: #1890ff;
+    }
+
     .verifyCode {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 10px;
         width: 100%;
+    }
+
+    .verifyCodeInput {
+        flex: 1;
+        min-width: 0;
     }
 
     .remember {
@@ -208,8 +292,22 @@ onMounted(async () => {
 
 .verifyCodeImg {
     cursor: pointer;
-    height: 32px;
-    width: 150px;
-    margin-left: 10px;
+    height: 46px;
+    width: 142px;
+    flex: 0 0 142px;
+    border: 1px solid #dbe6f4;
+    border-radius: 12px;
+    background: #f8fbff;
+    object-fit: cover;
+    transition:
+        border-color .18s ease,
+        box-shadow .18s ease,
+        transform .18s ease;
+}
+
+.verifyCodeImg:hover {
+    border-color: #1890ff;
+    box-shadow: 0 6px 18px rgba(24, 144, 255, .14);
+    transform: translateY(-1px);
 }
 </style>

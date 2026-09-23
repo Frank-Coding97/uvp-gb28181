@@ -1,5 +1,6 @@
 import { HOME_PATH } from "@/config/index";
 //import Layout from "@/layout/index.vue";
+
 /**
  * 路由path路径与文件夹名称相同，找文件可以浏览器地址快速查找，方便定位文件
  *
@@ -43,7 +44,17 @@ export const staticRoutes = [
     name: "layout",
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
-    children: []
+    children: [
+      {
+        path: "/media/:pathMatch(.*)*",
+        name: "media-access-fallback",
+        component: () => import(/* webpackChunkName: "media-workbench" */ "@/views/gb28181/zlm/workbench/MediaEntry.vue"),
+        meta: {
+          title: "流媒体管理",
+          hide: true
+        }
+      }
+    ]
   }
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中

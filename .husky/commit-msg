@@ -1,0 +1,13 @@
+# 提交信息规范闸门：校验 commit message 是否符合 conventional commits
+# （`type(scope): subject`，type 白名单见 web/commitlint.config.cjs）。
+#
+# husky 执行钩子时 cwd 是仓库根，而 commitlint 的配置与二进制都在 web/ 下，
+# 所以切进 web/ 再跑。注意 $1 是 git 传来的消息文件路径（相对仓库根），
+# 切目录之前必须先转成绝对路径，否则 commitlint 会报找不到文件。
+root="$(git rev-parse --show-toplevel)"
+msg="$1"
+case "$msg" in
+  /*) ;;
+  *) msg="$root/$msg" ;;
+esac
+cd web && ./node_modules/.bin/commitlint --config commitlint.config.cjs --edit "$msg"

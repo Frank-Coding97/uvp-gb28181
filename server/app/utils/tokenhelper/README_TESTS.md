@@ -58,7 +58,7 @@
 === RUN   TestRotateRefreshToken_InvalidToken
 --- PASS: TestRotateRefreshToken_InvalidToken (0.00s)
 PASS
-ok      gin-fast/app/utils/tokenhelper  3.510s
+ok      uvplatform.cn/uvp-gb28181/app/utils/tokenhelper  3.510s
 ```
 
 **测试覆盖率**: 100% (覆盖了正常、异常、错误输入等所有场景)

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UVP-GB28181 代码规范性深度评估 · 2026-09-18</title>
+<style>
+  :root{
+    --ink:#14181f; --ink-2:#3d4655; --ink-3:#6b7688; --line:#e3e7ee; --line-2:#eff2f7;
+    --bg:#ffffff; --bg-soft:#f7f9fc; --brand:#1e5eff; --brand-soft:#eef3ff;
+    --ok:#0b8a4b; --ok-soft:#e8f7ee; --warn:#b7791f; --warn-soft:#fdf6e6;
+    --bad:#c5362f; --bad-soft:#fdedec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:44px 36px 80px}
+  code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+  code{background:var(--bg-soft);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#243044}
+  a{color:var(--brand);text-decoration:none}
+
+  header.head{border-bottom:3px solid var(--ink);padding-bottom:20px;margin-bottom:8px}
+  h1{font-size:30px;line-height:1.25;margin:0 0 10px;letter-spacing:-.3px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--ink-3);font-size:13px}
+  .meta b{color:var(--ink-2);font-weight:600}
+
+  h2{font-size:20px;margin:44px 0 6px;padding-left:12px;border-left:4px solid var(--brand)}
+  h2 .num{color:var(--ink-3);font-weight:500;margin-right:8px}
+  h3{font-size:16px;margin:26px 0 8px;color:var(--ink)}
+  h4{font-size:14px;margin:18px 0 6px;color:var(--ink-2)}
+  p{margin:8px 0}
+  .lead{color:var(--ink-2)}
+
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--bg-soft);font-weight:600;color:var(--ink-2);font-size:12.5px;
+     letter-spacing:.03em;border-bottom:1px solid var(--line)}
+  tbody tr:hover{background:#fafbfe}
+  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  .grade{display:inline-block;min-width:34px;text-align:center;padding:2px 8px;border-radius:5px;
+    font-weight:700;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}
+  .g-a{background:var(--ok-soft);color:var(--ok);border:1px solid #bfe4cd}
+  .g-b{background:var(--brand-soft);color:#164fd6;border:1px solid #c8d9ff}
+  .g-c{background:var(--warn-soft);color:var(--warn);border:1px solid #f0dfae}
+  .g-d{background:var(--bad-soft);color:var(--bad);border:1px solid #f3c9c6}
+
+  .card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0;background:var(--bg)}
+  .card.crit{border-left:4px solid var(--bad);background:#fffdfd}
+  .card.good{border-left:4px solid var(--ok);background:#fbfffc}
+  .card-t{font-weight:700;font-size:15px;margin:0 0 6px}
+  .card.crit .card-t{color:var(--bad)}
+  .card.good .card-t{color:var(--ok)}
+
+  .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin:18px 0}
+  .kpi div{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:var(--bg-soft)}
+  .kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+  .kpi .k{font-size:12px;color:var(--ink-3);margin-top:2px}
+  .kpi .v.bad{color:var(--bad)} .kpi .v.ok{color:var(--ok)}
+
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  .ev{color:var(--ink-3);font-size:12.8px}
+  .bad-txt{color:var(--bad);font-weight:600}
+  .ok-txt{color:var(--ok);font-weight:600}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:4px;margin-right:6px;
+    border:1px solid var(--line);background:var(--bg-soft);color:var(--ink-3);font-family:ui-monospace,Menlo,monospace}
+  .tag.p0{background:var(--bad-soft);color:var(--bad);border-color:#f3c9c6;font-weight:700}
+  .tag.p1{background:var(--warn-soft);color:var(--warn);border-color:#f0dfae;font-weight:700}
+  .tag.p2{background:var(--brand-soft);color:#164fd6;border-color:#c8d9ff;font-weight:700}
+  hr{border:0;border-top:1px solid var(--line);margin:36px 0}
+  .foot{color:var(--ink-3);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}
+  @media (max-width:820px){.two{grid-template-columns:1fr}.wrap{padding:28px 18px 60px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <h1>UVP-GB28181 代码规范性深度评估</h1>
+  <div class="meta">
+    <span><b>评估基线</b> <code>develop @ f076ca60</code>（+ 工作区 601 项未提交改动）</span>
+    <span><b>日期</b> 2026-09-18</span>
+    <span><b>规模</b> Go 1782 文件 / 34.3 万行 · 前端 643 文件扫检</span>
+    <span><b>方法</b> 工具链实测 + 静态统计，非主观印象</span>
+  </div>
+</header>
+
+<p class="lead" style="margin-top:18px">
+  结论先说：<b>代码本身的规范性明显高于它的质量门禁水平。</b>代码层（格式化、编译、类型检查、测试密度、迁移契约）都在良好到优秀区间；
+  真正的问题集中在「<b>约束写了但没执行</b>」——CI 被手动关停、提交钩子从来没接上、自研日志门禁已经红了却没人拦。所有结论都可用下面给出的命令复现。
+</p>
+
+<h2><span class="num">01</span>总评分卡</h2>
+
+<table>
+  <thead><tr><th style="width:190px">维度</th><th style="width:56px">评级</th><th>依据（均可复现）</th></tr></thead>
+  <tbody>
+    <tr><td>后端编译与格式</td><td><span class="grade g-c">C</span></td><td><code>go build ./...</code> 退出码 0、抽查 <code>go vet</code> 干净；<b>但 <code>gofmt -l</code> 实测 37 个文件不合规</b>（原报告写「零不合规」是错的，见文末勘误）</td></tr>
+    <tr><td>后端错误处理</td><td><span class="grade g-a">A-</span></td><td><code>%w</code> 包装 460 处、<code>errors.Is</code> 641 处、<code>errors.As</code> 60 处；反向：334 处 <code>_ =</code> 显式丢弃</td></tr>
+    <tr><td>后端测试</td><td><span class="grade g-a">A-</span></td><td>936 个 <code>*_test.go</code>；核心包无空缺；测试用内存 SQLite，外部依赖一律 env 门控 + Skip，CI 可跑</td></tr>
+    <tr><td>后端分层架构</td><td><span class="grade g-c">C+</span></td><td>分层存在且方向单向；但 controller 直连 gorm（13 文件），service 直接吃 <code>*gin.Context</code>（7 文件 25 处）</td></tr>
+    <tr><td>日志规范</td><td><span class="grade g-c">B / 执行 F</span></td><td>自研契约门禁 + 字段字典 + 事件 registry，设计超一般水平；<b>但门禁当前为红</b>（HEAD 15 条 / 工作区 54 条）</td></tr>
+    <tr><td>数据库迁移</td><td><span class="grade g-a">A</span></td><td>570 个 <code>.sql</code>（MySQL 214 / PG 178 / SQL Server 178，含 down 216）；阈值后强制三方言语 + down；快照缺表时 runner 硬失败而非假成功</td></tr>
+    <tr><td>前端类型与构建</td><td><span class="grade g-a">A-</span></td><td><code>vue-tsc --noEmit</code> 全项目退出码 0（<code>strict:true</code> 真开着）；<code>any</code> 使用 459 + <code>as any</code> 123 处削弱了严格度</td></tr>
+    <tr><td>前端 API 层</td><td><span class="grade g-a">A</span></td><td>统一 axios 封装（token 刷新队列 / 响应拆包 / 错误提示）；<code>views/</code> 内直连 axios <b>0 处</b>，52 个文件走封装</td></tr>
+    <tr><td>前端 Lint</td><td><span class="grade g-b">B</span></td><td>643 文件扫出仅 8 error / 25 warning —— 干净；但规则集偏松（<code>no-explicit-any</code> off、无 <code>no-console</code>、未启用类型感知规则）</td></tr>
+    <tr><td>提交门禁（husky）</td><td><span class="grade g-a">A</span></td><td><b class="ok-txt">✅ 已修（3b569e6f）</b>：<code>.husky/pre-commit</code> 落仓库根、<code>prepare</code> 改为 <code>cd .. &amp;&amp; husky</code>、<code>lint-staged</code> 坏命令已修、<code>.gitignore</code> 忽略规则已删；实测能自动格式化、能拦下 eslint error。⚠️ <code>commit-msg</code> 钩子仍未接（<code>commitlint</code> 配置与依赖都在，但无人调用）</td></tr>
+    <tr><td>前端组件规模</td><td><span class="grade g-d">D</span></td><td>11 个 <code>.vue</code> 超 800 行，最大 <code>PlayConsoleLinked.vue</code> <b>7512 行</b></td></tr>
+    <tr><td>样式体系</td><td><span class="grade g-c">C</span></td><td>双样式根（<code>src/style/</code> + <code>src/styles/</code>）；硬编码色值 1030 处 / 350 种；页面内 <code>.arco-*</code> 覆盖 336 处绕开全局约定</td></tr>
+    <tr><td>CI / 质量门禁</td><td><span class="grade g-d">F</span></td><td>GitHub Actions 该工作流状态 <code>disabled_manually</code>；最后一次运行 <b>2026-08-10</b>；且就地启用也会因日志门禁变红</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="num">02</span>五个必须先知道的事实</h2>
+
+<div class="card crit">
+  <p class="card-t">① CI 根本就没在跑 —— 不是"红了"，是"关着"</p>
+  <p>GitHub Actions 对该工作流返回的注册状态是 <code>disabled_manually</code>，最后一次运行时间戳是 <b>2026-08-10</b>。
+  也就是说仓库里 <code>.github/workflows/ci-deploy-test.yml</code>（2026-09-14 才改成现在的"只构建 + 只测后端"版本）<b>从未真正执行过一次</b>。</p>
+  <p class="ev">证据：<code>curl -s https://api.github.com/repos/Frank-Coding97/uvp-gb28181/actions/workflows</code> → <code>"path": ".github/workflows/ci-deploy-test.yml", "state": "disabled_manually"</code>；<code>.../actions/runs</code> 最新一条 <code>created_at: 2026-08-10T12:58:54Z</code>。</p>
+</div>
+
+<div class="card crit">
+  <p class="card-t">② 就算把 CI 打开，后端也会立刻红 —— 自研日志门禁已失守</p>
+  <p>仓库自建了一套日志契约门禁（<code>internal/loggingcontract</code> + <code>internal/loggingcatalog</code>），并且它是 <b>普通 go test</b>，会被 CI 的 <code>go test ./...</code> 命中。实测在<b>干净的 HEAD</b> 上就是失败。</p>
+  <p><span class="tag">HEAD</span> 门禁 15 条：<code>field_not_in_dictionary</code> ×7、<code>unregistered_event</code> ×4、<code>missing_event</code> ×2、<code>dynamic_message</code> ×1、<code>field_name_not_snake_case</code> ×1<br>
+     <span class="tag">工作区</span>（含 601 项未提交改动）门禁 54 条：contract 36 + catalog 18 —— <b>新代码让情况恶化了 3.6 倍</b></p>
+  <p class="ev">复现：<code>cd server &amp;&amp; go test ./internal/loggingcontract/ ./internal/loggingcatalog/</code>（约 25s）。典型违规：<code>app/gb28181/handler/register.go:304</code> 使用了未注册字段 <code>x_gb_ver</code> / <code>warning_code</code>，并抛了未登记事件 <code>gb28181.register.version_header_abnormal</code>；<code>app/gb28181/device/link_watch.go:126</code> 的日志消息不是编译期常量。</p>
+</div>
+
+<div class="card crit">
+  <p class="card-t">③ 前端提交门禁是"写了配置但没接电"</p>
+  <p><b class="ok-txt">✅ 已修（3b569e6f）</b> —— 并查明了原先装不上的<b>真正原因</b>：husky 9 的安装逻辑要求执行时 cwd 下有 <code>.git</code>，而前端工程在 <code>web/</code> 子目录，所以 <code>prepare: "husky"</code> 每次 <code>npm install</code> 都静默失败（只打印 <code>.git can't be found</code>，退出码仍是 0）。<code>.gitignore</code> 的忽略只是第二层原因。修法：<code>.husky/</code> 放仓库根、<code>prepare</code> 改 <code>cd .. &amp;&amp; husky</code>、钩子内 <code>cd web</code> 后再跑 <code>lint-staged</code>（husky 注入的 <code>node_modules/.bin</code> 是相对仓库根的，够不到 web/）。</p>
+  <p class="ev">以下为修复前的原始记录：</p>
+  <p>项目配了 commitlint、lint-staged、prettier、stylelint —— 但 <code>package.json</code> 里的 <code>"prepare": "husky"</code> 从来没生效过：仓库里没有 <code>web/.husky/</code>，<code>git config core.hooksPath</code> 为空，而 <code>web/.gitignore</code> 最后一段主动把 <code>.husky/</code> 忽略了。</p>
+  <p>更直接的证据：<code>web/lint-staged.config.cjs</code> 第 3 行的命令写着 <code>prettier --write--parser json</code> —— <b>少一个空格，命令是坏的</b>，一旦真接上钩子会立刻报错。</p>
+  <p class="ev">复现：<code>git config core.hooksPath</code>（空）、<code>ls web/.husky</code>（不存在）、<code>grep husky web/.gitignore</code> → <code>.husky/</code>。</p>
+</div>
+
+<div class="card crit">
+  <p class="card-t">④ 前端 230 个测试文件从未进过流水线，且现有 1 个用例是红的</p>
+  <p><code>web/package.json</code> 有 <code>test:unit: vitest</code>，但 CI 里没有任何一步跑它（只有 <code>build:prod</code>）。本地全量跑：<b>230 个文件、1536 个用例、1535 通过、1 失败</b>。</p>
+  <p>该失败属"<b>测试断言源码内容，源码改了但测试没跟着改</b>"的漂移：<br>
+     · <code>src/views/gb28181/zlm/SchedulerStrategy.test.ts</code> 断言 <code>SchedulerStrategyPanel.vue</code> 含 <code>effectiveFrom</code>，实测该文件里出现 <b>0 次</b>。</p>
+  <p class="ev">该文件在 <code>git status</code> 里是干净的 —— 失败是<b>已提交状态</b>，不是未提交改动造成的。<b class="ok-txt">✅ 已于 2026-09-18 修复（7987483b）</b>：该视图在 833798e9「调度策略视图下线」中有意移除，同目录 <code>SchedulerStrategyPanel.test.ts</code> 当时已同步为 <code>not.toContain</code>，只有这条旧位置守卫漏改 —— 两条断言互斥，必有一条红。</p>
+</div>
+
+<div class="card crit">
+  <p class="card-t">⑤ 三个 develop 各不相同，违反仓库自己写死的双远程规则</p>
+  <p><code>CLAUDE.md</code> 明确要求"推送时必须同时推送到两个远程仓库"。实测：</p>
+  <table style="margin-top:8px">
+    <thead><tr><th>位置</th><th>commit</th><th>关系</th></tr></thead>
+    <tbody>
+      <tr><td>本地 develop</td><td class="mono">f076ca60</td><td>基准</td></tr>
+      <tr><td>GitHub (origin)</td><td class="mono">159394bf</td><td>落后本地 <b>8 个提交</b></td></tr>
+      <tr><td>Gitee</td><td class="mono">efb196dd</td><td>落后本地 8 个提交，但<b>另有 1 个本地没有的提交</b>（已分叉）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2><span class="num">03</span>后端规范详评</h2>
+
+<h3>做得扎实的部分</h3>
+<ul>
+  <li><s><b>格式化零债务</b>：<code>gofmt -l</code> 在 <code>server/</code>（排除 third_party）返回 0 个文件。</s> <b style="color:var(--bad)">❌ 勘误：该结论错误</b>，实测 37 个文件不合规（原因见文末勘误）。</li>
+  <li><b>错误链完整</b>：460 处 <code>fmt.Errorf("%w")</code> + 641 处 <code>errors.Is</code> + 60 处 <code>errors.As</code>，说明有明确的哨兵错误与包装习惯，不是到处字符串比对。<code>strings.Contains(err.Error())</code> 全仓仅 3 个文件。1092 处 <code>errors.New</code> 多为包级哨兵常量。</li>
+  <li><b>测试不依赖外部服务</b>：175 个测试文件用纯 Go 的内存 SQLite；需要真 MySQL 的用例全部用环境变量门控并 <code>t.Skip</code>。这一点很关键 —— 它让 CI 上的 <code>go test ./...</code> 真的有意义。</li>
+  <li><b>测试规模罕见</b>：936 个 <code>*_test.go</code>（含 third_party），核心包 handler 42 / zlm 80 / security 25 / ptz 20 均有覆盖；无测试的包仅 10 个且都是小工具包。核心包不存在"零测试"。</li>
+  <li><b>无循环依赖</b>：service 不反向 import controllers，依赖方向是单向的。</li>
+</ul>
+
+<h3>需要改的部分</h3>
+<table>
+  <thead><tr><th style="width:150px">问题</th><th>证据</th><th style="width:250px">影响</th></tr></thead>
+  <tbody>
+    <tr><td>controller 直连 gorm</td><td>13 个 controller import <code>gorm.io/gorm</code>，如 <code>app/controllers/user.go:15,49</code>（<code>revokeUserSessionsTx(tx *gorm.DB,...)</code>）</td><td>事务边界散落在 HTTP 层，换存储/加拦截困难</td></tr>
+    <tr><td>service 吃 <code>*gin.Context</code></td><td>7 个文件 25 处，如 <code>app/service/userservice.go:20</code>、<code>sysroleservice.go:23,87</code></td><td>业务逻辑被 HTTP 框架绑死，无法脱离 gin 复用/测试</td></tr>
+    <tr><td><code>internal/</code> 形同虚设</td><td>业务代码 1607 个 .go 全在 <code>app/</code>；<code>internal/</code> 仅 47 个文件且只放日志门禁/权限辅助</td><td>Go 的 <code>internal/</code> 封装保护没用起来</td></tr>
+    <tr><td>巨型函数/文件</td><td><code>app/routes/routes.go:43 InitRoutes</code> <b>416 行</b>；<code>app/gb28181/bootstrap.go</code> <b>1990 行</b>；<code>play/service.go:574 startDirectTransaction</code> 365 行；<code>app/service/codegenservice.go</code> 1653 行</td><td>回归风险高，改一处要读整文件</td></tr>
+    <tr><td>导出符号注释缺失</td><td>抽查比例：<code>app/gb28181/security</code> 仅 8%、<code>ptz</code> 41%、<code>app/service</code> 68%</td><td>godoc 不可用，新人靠猜</td></tr>
+    <tr><td>错误被静默丢弃</td><td>334 处 <code>_ =</code>（多为 <code>Write</code>/<code>Close</code> 清理路径，可接受）；但含真问题：<code>app/controllers/auth.go:289</code> 登出撤销 token 失败被静默吞掉</td><td>个案可能造成"看起来退出成功实则没撤"</td></tr>
+    <tr><td>fork 依赖无校验</td><td><code>server/go.mod:5</code> <code>replace github.com/emiago/sipgo =&gt; ./third_party/sipgo</code>；无 checksum、<code>go mod verify</code> 覆盖不到</td><td>补丁漂移无自动发现（已有 <code>UVP_PATCH.md</code> + 字节级测试作为人工缓解）</td></tr>
+  </tbody>
+</table>
+
+<h3>日志规范：设计 A，执行 F</h3>
+<p>这套东西的<b>设计水平超出普通业务项目</b>：有事件名 registry（<code>internal/loggingcatalog/registry.json</code>）、有字段名词典（强制 lower_snake_case、禁止未登记字段）、有"迁移区间"强制的静态 event 字段、有编译期常量消息要求。业务侧也确实是结构化日志（<code>zap.String</code> 754 处，无 printf 拼接）。</p>
+<p>问题只有一个但很致命：<b>门禁红了没人管</b>，因为跑它的 CI 关着，而本地全量测试约 20 分钟、日常不会跑。<b>一个不执行的规范等于没有规范</b> —— 而且工作区已经比 HEAD 多出 39 条违规，说明它正在被系统性地绕过。</p>
+
+<h2><span class="num">04</span>前端规范详评</h2>
+
+<h3>做得扎实的部分</h3>
+<ul>
+  <li><b>类型检查真的过了</b>：<code>vue-tsc --noEmit</code> 全项目退出码 0，且 <code>tsconfig.json</code> 里 <code>strict</code> / <code>noUnusedLocals</code> / <code>noUnusedParameters</code> 都是 <code>true</code>。这是很多 Vue 项目做不到的。</li>
+  <li><b>Lint 洁癖度不错</b>：643 个文件扫出 8 个 error、25 个 warning、只有 4 个文件有错；<code>eslint-disable</code> 注释全项目仅 2 处（且在生成文件里）——说明团队不是靠压制注释过关。</li>
+  <li><b>HTTP 层收口彻底</b>：<code>src/utils/http/index.ts</code> 统一处理 token 刷新队列、响应拆包、错误提示；52 个文件引用它，<code>views/</code> 内直连 axios <b>0 处</b>，store 里也没有私自请求。</li>
+  <li><b>API 与 store 分层清楚</b>：<code>api/</code> 30 个模块、<code>store/modules/</code> 10 个、<code>hooks/</code> 7 个，10 个 store 全部用 <code>defineStore</code> 规范写法。</li>
+  <li><b>测试密度高</b>：230 个 <code>.test.ts</code>、1536 个用例、5643 个 <code>expect</code>、0 个无断言文件、0 个 snapshot 惰性测试。</li>
+</ul>
+
+<h3>需要改的部分</h3>
+<table>
+  <thead><tr><th style="width:150px">问题</th><th>证据</th><th style="width:250px">影响</th></tr></thead>
+  <tbody>
+    <tr><td>巨型组件失控</td><td>11 个 <code>.vue</code> &gt; 800 行：<code>PlayConsoleLinked.vue</code> <b>7512 行</b>、<code>device-mgmt/index.vue</code> 5031、<code>security/preview.vue</code> 1910、<code>DeviceConfigDrawer.vue</code> 1862、<code>PlayConsole.vue</code> 1801、<code>ServiceConfig.vue</code> 1530</td><td>最难改、最容易出回归的地方；<code>PlayConsoleLinked</code> 内部约 208 个函数、55 个 ref</td></tr>
+    <tr><td><code>any</code> 削弱严格模式</td><td><code>: any</code> 459 处、<code>as any</code> 123 处，且 <code>eslint.config.js:34</code> 把 <code>no-explicit-any</code> 设为 <code>off</code></td><td><code>strict:true</code> 被局部架空，类型错误被推迟到运行时</td></tr>
+    <tr><td>Lint 规则集偏松</td><td>只用 <code>tseslint.configs.recommended</code>（<b>未启用</b> <code>recommended-type-checked</code>，即无类型感知规则）；无 <code>no-console</code>，源码有 31 处 <code>console.log</code></td><td>漏掉一整类"类型正确但用法错误"的问题</td></tr>
+    <tr><td>样式双轨</td><td><code>src/style/</code>（model + var，<code>uvp-ui-language.scss</code> 2200 行）与 <code>src/styles/</code>（<code>arco-overrides.scss</code> 628 行）并存</td><td>改全局样式时不知道改哪个，容易出现"只改了一半"</td></tr>
+    <tr><td>页面绕开全局样式约定</td><td><code>views/</code> 下 <code>.arco-*</code> 覆盖 336 处（如 <code>security/preview.vue:1384,1411,1415</code>）</td><td>直接违反 <code>CLAUDE.md</code>「不要为个别页面新增全局覆盖」的约定</td></tr>
+    <tr><td>硬编码色值</td><td>1030 处、350 种唯一色值（TOP：<code>DeviceConfigDrawer.vue</code> 92、<code>device-mgmt/index.vue</code> 63）</td><td>换肤/暗色主题几乎不可能，与 design token 体系冲突</td></tr>
+    <tr><td>隐式依赖</td><td><code>unplugin-auto-import</code> 生效，<b>28 个文件</b>用了 <code>ref</code>/<code>computed</code> 却没有 <code>import</code>（如 <code>components/s-recorder-pcm/index.vue</code>）</td><td>脱离构建配置后代码不可读、不可移植，IDE 之外难以静态分析</td></tr>
+    <tr><td>重复工具实现</td><td>throttle 三处、debounce 两处（<code>globals/index.ts</code> / <code>utils/app.ts</code> / <code>directives/modules/global/*</code>）</td><td>行为不一致时排查成本高</td></tr>
+    <tr><td>测试保真度偏低</td><td><code>src/test/setup.ts</code> 把所有 <code>a-*</code>（button/input/modal/select…）替换为极简 stub</td><td>测的是逻辑，不是真实渲染；UI 集成问题测不出来</td></tr>
+    <tr><td>依赖版本漂移</td><td><code>vue-i18n: 10.0.0-alpha.3</code>、<code>vue-virtual-scroller: 2.0.0-beta.8</code>（精确锁死 alpha/beta）</td><td>无法安全升级，长期留在预发布版本</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="num">05</span>数据与交付规范</h2>
+
+<p><b>这一块是整个仓库范性最强的部分。</b></p>
+<div class="card good">
+  <p class="card-t">多方言迁移有"契约"，不是靠自觉</p>
+  <ul>
+    <li>570 个迁移文件：MySQL 214 / PostgreSQL 178 / SQL Server 178，其中 down 脚本 216 个。</li>
+    <li><code>migration_contract_test.go:19</code> 定义 <code>contractThreshold = "2026-08-14"</code> —— 该日期之后新增的迁移<b>强制</b>三方言 + down 齐全，走 <code>go test</code> 自动卡口。</li>
+    <li>命名规范统一：<code>YYYY-MM-DD-&lt;feature&gt;[-postgresql|-sqlserver][-down].sql</code>。</li>
+    <li>runner 在遇到"空版本表 + 探测表存在"时会<b>硬失败拒绝</b>（<code>runner.go:126-136</code>），而不是标记成功却一条不执行 —— 这是踩过坑之后加的正确设计。</li>
+    <li>三份全量快照（MySQL 1.2MB / PG 794KB / SQL Server 865KB）与增量并存，另有 <code>initialization_contract_test.go</code> 兜底。</li>
+  </ul>
+</div>
+
+<h3>交付链路</h3>
+<ul>
+  <li><b>版本一致性有脚本 + 测试双保险</b>：<code>VERSION</code>、<code>server/version.json</code>、<code>web/version.json</code>、<code>web/package.json</code> 目前一致（<b>1.1.0</b>），由 <code>scripts/version.mjs check</code> 与 <code>release-version-contract.test.mjs</code> 校验。</li>
+  <li><b>部署脚本有哈希闭环</b>：<code>deploy/test/deploy-uvp.sh:56,72-73</code> 强制 SHA256 比对。</li>
+  <li class="bad-txt">但编译入口重复三处：<code>server/scripts/build-to-linux.sh</code>、CI 里的 <code>go build</code>、<code>deploy/test/build-release.sh</code>，且产物名不一致（<code>dist/uvp-gb28181-linux</code> vs <code>bin/uvp-gb28181-linux-amd64</code>）。</li>
+</ul>
+
+<h3>文档</h3>
+<ul>
+  <li>在范围内抽查的两份进度类文档（<code>docs/gb28181-2022-gap-inventory.md</code>、<code>docs/voice-talk-external-api-assessment.md</code>）与代码实际对得上，没有明显过期。</li>
+  <li class="bad-txt">但 <code>server/README.md</code> 与 <code>web/README.md</code> 仍是上游模板（Gfast / GinFast）原文，和根 <code>README.md</code> 讲的技术栈、项目定位自相矛盾。</li>
+  <li class="bad-txt">仓库里唯一的编码规范文档 <code>CLAUDE.md</code> <b>被 git 忽略</b>（根 <code>.gitignore:23</code>、<code>web/.gitignore</code> 均有 <code>CLAUDE.md</code>）—— 规范躺在本地，协作者拿不到。</li>
+  <li class="bad-txt">无 <code>CONTRIBUTING</code>、无 <code>Makefile</code>、无 <code>.golangci.yml</code>。后端 lint 配置完全缺席。</li>
+</ul>
+
+<h2><span class="num">06</span>质量门禁实况（最该修的一环）</h2>
+
+<p>把"仓库里写了什么约束"和"实际执行了什么"分开看，差距非常明显：</p>
+
+<table>
+  <thead><tr><th style="width:210px">约束</th><th style="width:96px">配置存在</th><th style="width:110px">实际执行</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>Go 测试</td><td class="ok-txt">✓</td><td class="bad-txt">✗ 未执行</td><td>CI 里有，但流水线被禁用</td></tr>
+    <tr><td>日志契约门禁</td><td class="ok-txt">✓</td><td class="bad-txt">✗ 且已红</td><td>HEAD 15 条违规</td></tr>
+    <tr><td>Go 编译</td><td class="ok-txt">✓</td><td class="bad-txt">✗ 未执行</td><td>本地 <code>go build ./...</code> 可过</td></tr>
+    <tr><td>Go lint / vet</td><td class="bad-txt">✗ 无配置</td><td class="bad-txt">✗</td><td>无 <code>.golangci.yml</code>、CI 无 vet</td></tr>
+    <tr><td>Go race 检测</td><td class="bad-txt">✗</td><td class="bad-txt">✗</td><td>CI 与本地都没有 <code>-race</code>；项目大量并发/goroutine</td></tr>
+    <tr><td>覆盖率高门槛</td><td class="bad-txt">✗</td><td class="bad-txt">✗</td><td>无 coverage 采集与门槛</td></tr>
+    <tr><td>前端类型检查</td><td class="ok-txt">✓</td><td class="bad-txt">✗ 未执行</td><td>挂在 <code>build:prod</code> 里，CI 不跑就不生效</td></tr>
+    <tr><td>前端单测</td><td class="ok-txt">✓</td><td class="bad-txt">✗</td><td>230 个文件、1 个已红（另一条为并发 flaky），CI 里 <b>完全没有</b> vitest 步骤</td></tr>
+    <tr><td>前端 ESLint</td><td class="ok-txt">✓</td><td class="bad-txt">✗</td><td>CI 里无 eslint 步骤</td></tr>
+    <tr><td>提交钩子</td><td class="ok-txt">✓ 配置齐</td><td class="ok-txt">✓ 已接线</td><td>husky 已接通（3b569e6f），lint-staged 命令已修</td></tr>
+    <tr><td>迁移契约</td><td class="ok-txt">✓</td><td class="bad-txt">✗ 未执行</td><td>随 <code>go test</code> 一起被跳过</td></tr>
+    <tr><td>依赖漏洞扫描</td><td class="bad-txt">✗</td><td class="bad-txt">✗</td><td>无 govulncheck / audit / dependabot</td></tr>
+    <tr><td>产物归档</td><td class="bad-txt">✗</td><td class="bad-txt">✗</td><td>CI 无 <code>upload-artifact</code></td></tr>
+  </tbody>
+</table>
+
+<p class="lead"><b>一句话：仓库里 13 条约束，只有 0 条在自动执行。</b>这不是"规范写得不好"的问题，而是"规范没人执行"的问题 —— 修这一环的投入产出比远高于逐条改代码。</p>
+
+<h2><span class="num">07</span>修复清单（按投入产出比排序）</h2>
+
+<h4><span class="tag p0">P0</span> 本周做，成本最低、收益最大</h4>
+<ol>
+  <li><b class="ok-txt">✅ 已决断：弃用 CI</b>（2026-09-18）。构建机只有 4G 跑不动流水线，门禁改由本地承担 —— <code>scripts/quality-gate.sh</code> + husky 钩子两层。</li>
+  <li><b class="ok-txt">✅ 已完成（edcb9ec4）</b>日志门禁违规清零。实测 HEAD 上是 <b>54 条</b>（远多于原估的 15 条：codex/aksk-openapi 合并后函数改名、例外登记表未同步而链式放大），现为 <b>0 条</b>。</li>
+  <li><b class="ok-txt">✅ 已完成（3b569e6f）</b>把 husky 接上：<code>.husky/pre-commit</code> 落仓库根、<code>prepare</code> 改 <code>cd .. &amp;&amp; husky</code>、删掉 <code>web/.gitignore</code> 的忽略规则、修 <code>lint-staged.config.cjs:3</code> 的拼写。</li>
+  <li><b class="ok-txt">✅ 已完成（b4973eaa）</b>三端 develop 对齐。本地实际领先 <b>240</b> 个提交；Gitee 那个「本地没有的提交」是网页端加的 <code>add LICENSE.</code>。用 merge（非 rebase —— 避免重写 240 个 hash 牵动 main 与备份分支）纳入后双推，三处 SHA 已一致。</li>
+</ol>
+
+<h4><span class="tag p1">P1</span> 两周内，把门禁补全</h4>
+<ol>
+  <li><b class="ok-txt">✅ 已完成（fe843033）</b>原「CI 增加四个步骤」随 CI 弃用改为<b>本地门禁脚本</b> <code>scripts/quality-gate.sh</code>：默认快速档跑 gofmt / go vet / golangci-lint / ESLint / Vitest，<code>--full</code> 追加 vue-tsc 与全量 go test。</li>
+  <li><b class="ok-txt">✅ 已完成（7987483b）</b>修掉前端常红用例 <code>SchedulerStrategy.test.ts</code>：该视图已在 833798e9 中有意下线，守卫改为 <code>not.toContain</code> 与新位置的同名测试对齐。<code>device-record-playback/index.test.ts</code> 复核为<b>并发 flaky</b>（单跑复跑两次均绿），不属常红。</li>
+  <li><b class="ok-txt">✅ 已完成（fe843033）</b>已加 <code>server/.golangci.yml</code>（standard 集）。⚠️ 实测存量 <b>660 条</b>（errcheck 394 / staticcheck 208 / unused 34 / ineffassign 17 / govet 7）；默认配置的 <code>max-issues-per-linter: 50</code> 会把真实数量<b>截断成 153 条</b>，极易误判成「没多少问题」。故门禁里 golangci 默认走 <code>--new</code>（只查本次改动），全量用 <code>--all-lint</code>；存量清零后即可纳入默认门禁。</li>
+  <li>把 <code>CLAUDE.md</code> 从 <code>.gitignore</code> 移出（或改名为 <code>CONTRIBUTING.md</code> 入库），让规范可协作。</li>
+  <li><b>新增（2026-09-18）</b>清掉 ESLint 存量 <b>8 个 error</b>：全部是 <code>vue/custom-event-name-casing</code>（自定义事件名用了 kebab-case），分布在 multi-screen-playback / sip-log-v2 等文件。这 8 条让门禁的 ESLint 一步长期为红。</li>
+  <li><b>新增（2026-09-18）</b>修掉 <code>device-record-playback/index.test.ts</code> 的并发隔离问题：单跑 26 例全绿，但<b>全量并发下连续两次跑均复现 1 例失败</b> —— 比「偶发 flaky」更稳定，更像测试间共享状态。</li>
+</ol>
+
+<h4><span class="tag p2">P2</span> 一个季度内，治结构债</h4>
+<ol>
+  <li><b>拆 <code>PlayConsoleLinked.vue</code></b>（7512 行）。建议先按"播放会话 / 控制栏 / 云台 / 录制"四块抽 composable，再逐步抽子组件；这是全仓最大的单点风险。</li>
+  <li>给 <code>eslint.config.js</code> 打开 <code>no-explicit-any</code>（先设 warn、存量加白名单），并把 <code>tseslint.configs.recommended</code> 升级到 <code>recommended-type-checked</code>。</li>
+  <li>收敛 <code>any</code>：优先处理 <code>: any</code> 最密集的 <code>utils/common-tools.ts</code>、<code>device-mgmt/index.vue</code>、<code>sip/ServiceConfig.vue</code>。</li>
+  <li>样式收口：合并 <code>src/style/</code> 与 <code>src/styles/</code>；把 1030 处硬编码色值逐步替换为已有 token（<code>--zlm-*</code> / <code>--uvp-*</code>），优先动 TOP 3 文件。</li>
+  <li>后端分层止血：新代码禁止 controller 直接持有 <code>gorm.DB</code>、禁止 service 接 <code>*gin.Context</code>；把 <code>InitRoutes</code>（416 行）与 <code>bootstrap.go</code>（1990 行）按域拆文件。</li>
+  <li>把 <code>third_party/sipgo</code> 的 fork 换成带 checksum 的 vendor 化形式（或打 tag 后走 <code>replace</code> 指向远端），避免静默漂移。</li>
+</ol>
+
+<h2><span class="num">08</span>附注：周边发现（不属于上面结论）</h2>
+
+<p>以下是排查中顺带看到的，<b>与"代码规范性"不是同一层</b>，单独列出供你判断，不参与上面的评级：</p>
+<ul>
+  <li><b>worktree 注册表有 180+ 条</b>（<code>UVP-GB28181-worktrees/</code> 下 aksk-* / logging-t* / windows-* 等大量分支目录，以及 <code>.codex-worktrees/</code>）。这是工作方式带来的工程卫生问题，会让 <code>git worktree list</code>、IDE 索引、磁盘占用都变钝。</li>
+  <li><b>工作区压着 601 项已暂存改动</b>（openapi / aksk / ptz-epoch 等方向）。本次所有"工作区"数字都基于这个状态，如果这批改动未落库，上面的"工作区门禁 54 条"只反映暂存区，不代表远程状态。</li>
+  <li><code>Swagger</code> 生成物 <code>server/docs/swagger/docs.go</code>（mtime 2026-09-14）已落后于源码（<code>controllers/play.go</code> 2026-09-18），且 CI 无重生成校验步骤。</li>
+  <li>内部 API 无版本化（<code>/api/gb28181/...</code>），对外契约才有 <code>/openapi/v1/...</code>。当前可接受，将来对外扩接口时要想清楚。</li>
+</ul>
+
+<div class="foot">
+  <h3 style="color:var(--bad)">勘误（2026-09-18 复核实测）</h3>
+<div style="background:var(--bad-soft);border:1px solid var(--bad);border-radius:8px;padding:14px 16px;line-height:1.9">
+  <p><b>本报告「后端编译与格式」一行（原评 A）与「格式化零债务」这一条是错的</b>，现更正为：</p>
+  <ul style="margin:6px 0 0 18px">
+    <li>实测命令：<code>/opt/homebrew/Cellar/go/1.25.6/bin/gofmt -l</code>（遍历 server/、排除 third_party）→ <b>37 个文件不合规</b>，差异全是缩进层级或 import 排序。</li>
+    <li>出错原因：当时执行的是裸 <code>gofmt</code>，而它<b>不在 PATH</b>（<code>which gofmt</code> 为空，退出码 127）。命令报 <code>command not found</code> 之后被我自己加的 <code>2&gt;/dev/null</code> 吞掉，<code>wc -l</code> 把「零行输出」误读成「零个不合规」，产出了一个假结论。</li>
+    <li>验证归属：<code>git show HEAD:server/app/gb28181/ptz/service.go | gofmt -l</code> 同样报不合规 → 属<b>存量问题</b>，不是某次改动引入。</li>
+  </ul>
+  <p><b>另，「前端单测」一处计数已更正</b>：原文「1534 通过 / 2 失败」实测应为 <b>1535 通过 / 1 失败</b>；<code>device-record-playback/index.test.ts</code> 经复核是<b>并发 flaky</b>（单跑复跑两次均绿，仅全量并发下偶红），不是常红项 —— 原文把它计入「已红」是误判。</p>
+  <p><b>另，「提交门禁」一条的归因已补正</b>：原文把「husky 没接上」归因于 <code>.gitignore</code> 忽略了 <code>.husky/</code>，实测这只是第二层——<b>根因是 husky 9 要求执行时 cwd 下有 <code>.git</code></b>，而工程在 <code>web/</code> 子目录，<code>prepare: "husky"</code> 因此从未生效（静默失败，退出码 0，极易被忽略）。</p>
+  <p style="margin-top:8px">其余结论（日志门禁违规数、前端类型检查、ESLint、CI 状态、三个 develop 分叉等）已复核，不受影响。</p>
+</div>
+
+<p><b>复现说明</b>：本报告所有数字均由本次会话在基线 <code>develop@f076ca60</code> 上实测得出。核心复现命令：</p>
+  <p class="mono" style="background:var(--bg-soft);border:1px solid var(--line);border-radius:8px;padding:12px 14px;line-height:2">
+    cd server &amp;&amp; $(go env GOROOT)/bin/gofmt -l . ; go build ./... &amp;&amp; go test ./internal/loggingcontract/ ./internal/loggingcatalog/<br>
+    cd web &amp;&amp; ./node_modules/.bin/vue-tsc --noEmit &amp;&amp; ./node_modules/.bin/vitest run &amp;&amp; ./node_modules/.bin/eslint src -f json<br>
+    curl -s https://api.github.com/repos/Frank-Coding97/uvp-gb28181/actions/workflows
+  </p>
+  <p>报告生成于 2026-09-18 · 文件位置 <code>docs/code-standards-audit-2026-09-18.html</code>（未跟踪，可随时删除）</p>
+</div>
+
+</div>
+</body>
+</html>

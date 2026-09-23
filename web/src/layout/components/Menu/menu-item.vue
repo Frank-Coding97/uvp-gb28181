@@ -7,7 +7,7 @@
       <template #title>{{ $t(`menu.${item.meta.title}`) }}</template>
       <MenuItem :route-tree="item.children || []" />
     </a-sub-menu>
-    <a-menu-item v-else-if="aMenuShow(item)" :key="item?.path">
+    <a-menu-item v-else-if="aMenuShow(item)" :key="item.path">
       <template #icon v-if="item.meta.svgIcon || item.meta.icon">
         <MenuItemIcon :svg-icon="item.meta.svgIcon" :icon="item.meta.icon" />
       </template>
@@ -20,18 +20,16 @@
 import MenuItem from "@/layout/components/Menu/menu-item.vue";
 import MenuItemIcon from "@/layout/components/Menu/menu-item-icon.vue";
 import { useMenuMethod } from "@/hooks/useMenuMethod";
+
 defineOptions({ name: "MenuItem", inheritAttrs: false });
 
 interface Props {
   routeTree: Menu.MenuOptions[];
 }
-// props的数据类型
-// type类型参考：https://cn.vuejs.org/guide/typescript/composition-api.html#typing-component-props
+
 const props = withDefaults(defineProps<Props>(), {
   routeTree: () => []
 });
 
 const { menuShow, aMenuShow } = useMenuMethod();
 </script>
-
-<style lang="scss" scoped></style>

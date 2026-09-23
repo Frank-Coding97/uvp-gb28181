@@ -1,0 +1,1 @@
+{"id": 1, "username": "admin", "password": "$2a$10$TnFc1plPXF9hu9uDPNcdc.wStdbMZDfwGqnaFAbUmVQKfXzXD1Rsa", "email": "", "status": 1, "dept_id": 1, "phone": "", "sex": "", "nick_name": "系统管理员", "avatar": "", "description": "初始系统管理员", "created_at": {"$ts": "2025-08-18 14:55:05.000000"}, "updated_at": {"$ts": "2026-08-16 10:56:02.000000"}, "deleted_at": null, "created_by": 0}

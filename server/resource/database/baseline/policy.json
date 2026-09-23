@@ -1,0 +1,244 @@
+{
+  "_comment": [
+    "发布基线收录策略。基线 = 一套全新环境需要的「表结构 + 种子数据」，",
+    "由 capture_schema.py 从开发库抽取成 schema.ir.json，再由 generate_sql.py 产出各方言脚本。",
+    "本文件是唯一的口径来源：include 集合由「实库全部表 - excluded_tables」推导，",
+    "excluded_tables 每一条都必须写明理由，新增排除项要同步 initialization_contract_test.go 的断言。"
+  ],
+  "database": {
+    "host_key": "gormv2.mysql.read",
+    "config_file": "server/config/config.yml"
+  },
+  "_excluded_tables_comment": [
+    "本次（2026-09-22）重核：归档版把 6 张 sys_openapi_* / gb_openapi_* 当『未并入 develop 的在途功能』排除，",
+    "该前提已失效（codex/aksk-openapi 已并入 develop，菜单 140498 与 12 条 openapi-clients 接口都在库里）⇒ 全部改收录；",
+    "gb_device_operation_intent 同理（playauth 包在用）⇒ 改收录。",
+    "下面 16 张是本轮真正不能进交付的：3 张插件示例表 + 3 张迁移测试/运行态表 + 10 张运维备份表。",
+    "⚠️ 这张映射会参与 capture 的 included = 实库 - excluded 推导，所以**不要**往这里塞注释键（会虚增 excluded 计数）。"
+  ],
+  "excluded_tables": {
+    "gb_migration_dummy": "服务端迁移测试残留（2099-01-01-dummy.sql）",
+    "gb_migration_smoke": "服务端迁移测试残留",
+    "gb_schema_migrations": "运行态版本表，由迁移执行器自建，不得进基线",
+    "demo_students": "插件示例演示表，发布契约明确禁止（initialization_contract_test.go）",
+    "demo_teacher": "插件示例演示表，发布契约明确禁止（initialization_contract_test.go）",
+    "example": "插件示例演示表，发布契约明确禁止（initialization_contract_test.go）",
+    "gb_catalog_node_purged_backup_20260921": "uvp-soft-delete-purge 的物理清删备份表（带 *_purged_backup 命名），是运维过程产物",
+    "gb_device_purged_backup_20260921": "同上",
+    "gb_recording_plan_purged_backup_20260921": "同上",
+    "sys_menu_purged_backup_20260921": "同上",
+    "sys_api_purged_backup_20260921": "同上",
+    "sys_api_apigroup_backup_20260921": "接口分组归一化前的整表备份（apigroup 那轮），运维过程产物",
+    "sys_api_apigroup_backup_reroute_20260921": "同上（二次重路由）",
+    "sys_api_apigroup_backup_reroute2_20260921": "同上（三次重路由）",
+    "sys_api_title_backup_20260921": "接口标题归一化的整表备份，运维过程产物",
+    "sys_api_title_backup2_20260921": "同上（第二轮）"
+  },
+  "seed_tables": {
+    "_comment": "只有这些表带数据；其余表一律只建结构。soft_delete=true 表示该表有 deleted_at 列时按 deleted_at IS NULL 过滤（基线不带软删行）；没有该列则原样全取。",
+    "sys_menu": {
+      "soft_delete": true
+    },
+    "sys_api": {
+      "soft_delete": true
+    },
+    "sys_menu_api": {
+      "soft_delete": true
+    },
+    "sys_casbin_rule": {
+      "soft_delete": true
+    },
+    "sys_role": {
+      "soft_delete": true
+    },
+    "sys_role_menu": {
+      "soft_delete": true
+    },
+    "sys_user_role": {
+      "soft_delete": true
+    },
+    "sys_users": {
+      "soft_delete": true
+    },
+    "sys_dict": {
+      "soft_delete": true
+    },
+    "sys_dict_item": {
+      "soft_delete": true
+    },
+    "sys_department": {
+      "soft_delete": true
+    },
+    "sys_civil_code": {
+      "soft_delete": true
+    },
+    "gb_sip_security_policy": {
+      "soft_delete": true
+    }
+  },
+  "forbidden_literals": [
+    "demo_students",
+    "demo_teacher",
+    "/public/uploads/",
+    "18800000006",
+    "13800000001",
+    "headquarters@company.com"
+  ],
+  "_seed_filters_comment": [
+    "种子的逐行清洗规则。判据与表一致：只有 develop「拥有」的才进基线。",
+    "为什么需要它：开发库里混着环境数据（演示账号、测试部门、悬空角色规则），",
+    "而旧快照是靠人工手改 SQL 清洗的 —— 那些知识既没落盘也无法复核。",
+    "这里把它显式化：每条规则都能被读、被执行、被契约测试校验。",
+    "set 用于抹掉个人信息与占位字段（隐私考虑，且这些值本来就不是产品数据）。"
+  ],
+  "seed_filters": {
+    "sys_users": {
+      "drop_where": [
+        {"column": "username", "in": ["demo"], "why": "演示账号，非产品数据"}
+      ],
+      "set": {
+        "email": "",
+        "phone": "",
+        "avatar": "",
+        "sex": "",
+        "nick_name": "系统管理员",
+        "description": "初始系统管理员"
+      }
+    },
+    "sys_department": {
+      "drop_where": [
+        {"column": "name", "in": ["测试001", "测试002"], "why": "测试部门"}
+      ],
+      "set": {"leader": "", "phone": "", "email": "", "describe": ""}
+    },
+    "sys_role": {
+      "drop_where": [
+        {"column": "name", "in": ["演示"], "why": "无迁移创建、无代码依赖，属环境数据"}
+      ]
+    },
+    "sys_role_menu": {
+      "drop_where": [{"column": "role_id", "in": [2], "why": "演示角色已移除"}]
+    },
+    "sys_user_role": {
+      "drop_where": [{"column": "user_id", "in": [4], "why": "演示账号已移除"}]
+    },
+    "sys_casbin_rule": {
+      "drop_where": [
+        {
+          "column": "v0",
+          "in": ["role_2", "role_4", "user_4", "role_10"],
+          "why": "指向已不存在的角色/账号（演示角色 2、演示账号 4、历史角色 10）"
+        }
+      ]
+    }
+  },
+  "_referential_cleanup_comment": [
+    "清理悬空引用：关联表（菜单-接口绑定、角色-菜单绑定）只有 id，删掉被排除的行之后",
+    "会留下指向不存在 id 的孤儿行。这里按「引用目标是否还存在」统一清一遍，",
+    "避免逐表手写 id 白名单（id 会随环境漂移）。"
+  ],
+  "referential_cleanup": [
+    {"table": "sys_menu_api", "column": "menu_id", "references": "sys_menu", "references_column": "id"},
+    {"table": "sys_menu_api", "column": "api_id", "references": "sys_api", "references_column": "id"},
+    {"table": "sys_role_menu", "column": "menu_id", "references": "sys_menu", "references_column": "id"},
+    {"table": "sys_role_menu", "column": "role_id", "references": "sys_role", "references_column": "id"},
+    {"table": "sys_user_role", "column": "user_id", "references": "sys_users", "references_column": "id"},
+    {"table": "sys_user_role", "column": "role_id", "references": "sys_role", "references_column": "id"}
+  ],
+  "_tinyint1_comment": [
+    "MySQL 的 tinyint(1) 有歧义：GORM 用它表示 Go 的 bool，但也常被当成小枚举写。",
+    "capture 会读 MIN/MAX 判定：取值超出 0/1 的按小枚举处理（映射为 SMALLINT），",
+    "否则按布尔处理。这里列出的列强制按小枚举处理，用于『当前数据恰好只有 0/1、",
+    "但语义不是布尔』的情况。若某列数据超出了 0/1 却没列在这里，capture 会告警。"
+  ],
+  "tinyint1_enum_columns": [
+    "sys_menu.type"
+  ],
+  "_boolean_source_comment": [
+    "⚠️ 布尔判定不能只看取值域。开发库是『跑过迁移的存量库』，它的数据只反映",
+    "『当前恰好出现了哪些值』，不反映这个列在代码里的语义类型。",
+    "踩过的坑：sys_users.status / sys_dict.status 在开发库里恰好只有 1，被取值域判成布尔；",
+    "但 Go 模型是 *int8，语义是 1=正常 / 2=停用 的小枚举。若基线把它建成 BOOLEAN，",
+    "应用一写 status=2 就报类型错；SQLite 的 CHECK(status IN (0,1)) 还会直接拒绝。",
+    "判据：以 Go 模型字段类型为准 —— bool / *bool 才是布尔，int8 / *int8 / int 一律是整数。",
+    "下面两条清单是逐列比对模型后得到的结论，新增列必须有代码依据。"
+  ],
+  "not_boolean_columns": [
+    "sys_users.status",
+    "sys_dict.status",
+    "sys_dict_item.status",
+    "sys_department.status",
+    "gb_device.status",
+    "gb_channel.status",
+    "sys_menu.is_full",
+    "sys_menu.hide",
+    "sys_menu.disable",
+    "sys_menu.keep_alive",
+    "sys_menu.affix",
+    "sys_menu.iframe",
+    "sys_menu.is_link"
+  ],
+  "_drop_columns_comment": [
+    "开发库是存量库，会沉淀下模型已不再声明的遗留列；这些列不该进新装基线。",
+    "收录条件很窄：**有代码契约明文要求新基线不得出现该列**才收，避免把",
+    "『模型只覆盖子集的表』误伤成『库里有 = 该删』。",
+    "gb_ptz_state 的四个 home_* 列：PTZ 归位已迁到 gb_ptz_home_position 表，",
+    "gb_ptz_ddl_test.go:207 断言『新全量 schema 不得声明 home_enabled/home_pan/home_tilt/home_zoom』，",
+    "gb_ptz_test.go:88 断言『新基线不得暴露遗留列』。"
+  ],
+  "drop_columns": {
+    "gb_ptz_state": {
+      "columns": [
+        "home_enabled",
+        "home_pan",
+        "home_tilt",
+        "home_zoom"
+      ],
+      "why": "PTZ 归位已迁至 gb_ptz_home_position；模型不再声明，代码契约禁止新基线出现"
+    }
+  },
+  "_check_overrides_comment": [
+    "CHECK 约束的逐方言例外写法，按约束名索引（约束名在本库内唯一）。",
+    "为什么需要它：MySQL 的 CHECK 原文用了两类别的方言没有的东西 ——",
+    "regexp_like() 和 length()（MySQL 的 length 是**字节**数）。",
+    "generate_sql.py 能自动处理大部分（PG: regexp_like → ~、length → octet_length），",
+    "但 SQL Server 没有正则函数，且 DATALENGTH 对 NVARCHAR 是 2 字节/字符，",
+    "自动转换会静默改变约束强度 —— 所以这 4 条显式写出来，让口径可复核。",
+    "⚠️ 这里给的是**完整 CHECK 子句**（含最外层括号），生成器原样使用，不再二次转换。",
+    "⚠️ 字符类匹配一律带 COLLATE Latin1_General_BIN2：SQL Server 默认排序规则大小写不敏感，",
+    "   不加就会让 '[0-9a-f]' 连大写 A-F 一起放行（MySQL 的 regexp_like 带 'c' 是大小写敏感的）。"
+  ],
+  "check_overrides": {
+    "ck_device_intent_identity": {
+      "sqlserver": "([contract_version] = 1 AND [device_pk] > 0 AND [device_epoch] > 0 AND [target_pk] > 0 AND [operation_id] COLLATE Latin1_General_BIN2 LIKE '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' AND [device_code] COLLATE Latin1_General_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND [target_code] COLLATE Latin1_General_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND ([target_scope] = 'channel' OR ([target_scope] = 'device' AND [target_pk] = [device_pk] AND [target_code] = [device_code])) AND [kind] IN ('live', 'playback', 'download', 'talk', 'ptz'))",
+      "why": "MySQL 用 regexp_like(x,'^[0-9a-f]{32}$','c')；T-SQL 无正则，展开成 32 次 [0-9a-f] 的 LIKE 模式（'c' = 大小写敏感，靠 BIN2 排序规则还原）"
+    },
+    "ck_openapi_generation_identity": {
+      "sqlserver": "(LEN([generation_id]) = 32 AND [generation_id] COLLATE Latin1_General_BIN2 NOT LIKE '%[^0-9a-f]%' AND [generation_id] <> '00000000000000000000000000000000' AND LEN([domain_id]) = 32 AND [domain_id] COLLATE Latin1_General_BIN2 NOT LIKE '%[^0-9a-f]%' AND [domain_id] <> '00000000000000000000000000000000')",
+      "why": "MySQL 的 length() 对 hex 字符串等长于字符数，用 LEN（字符数）而非 DATALENGTH（NVARCHAR 下是 2 倍字节）才对得上"
+    },
+    "ck_device_intent_rtp_size": {
+      "sqlserver": "([rtp_steps_json] IS NULL OR DATALENGTH([rtp_steps_json]) BETWEEN 2 AND 65536)",
+      "why": "MySQL 的 length() 是字节数，上限 32768 字节；json 列在 SQL Server 落成 NVARCHAR(MAX)，DATALENGTH 返回 UTF-16 字节数，按同字节量换算上限为 65536、下限为 2（与旧基线写法一致）"
+    },
+    "ck_device_intent_sip_size": {
+      "sqlserver": "([sip_steps_json] IS NULL OR DATALENGTH([sip_steps_json]) BETWEEN 2 AND 65536)",
+      "why": "同 ck_device_intent_rtp_size"
+    }
+  },
+  "dialects": [
+    "mysql",
+    "postgresql",
+    "sqlserver"
+  ],
+  "_dialects_comment": [
+    "交付集是 MySQL / PostgreSQL / SQL Server 三份，文件名沿用仓里既有的",
+    "uvp-gb28181.sql / postgresql_converted.sql / sqlserver_converted.sql（就地重写）。",
+    "⚠️ 2026-09-15 归档分支曾把 sqlserver 摘除（当时判断该库淘汰），2026-09-22 按用户要求恢复：",
+    "生成器补了 SQLServerProfile（IDENTITY / SET IDENTITY_INSERT / N 前缀字面量 /",
+    "前缀索引降级为摘列 + NOTE 注释）。**SQL Server 仍然没有实机**，导入验收只有",
+    "MySQL 与 PostgreSQL 两侧，SQL Server 的最低保障是 initialization_contract_test.go",
+    "的列级跨方言一致断言 —— 别把它当成『跑过验收』。",
+    "sqlite Profile 保留在生成器里但不在 OUTPUTS：develop 线没有 SQLite 运行时底座，产物无处落。"
+  ]
+}

@@ -4,12 +4,8 @@
     <div class="selected-tags-wrapper">
       <a-space v-if="selectedDepartments.length > 0" wrap :size="8">
         <a-tooltip v-for="dept in selectedDepartments" :key="dept.id" :content="dept?.name || ''">
-          <a-tag
-            closable
-            :color="multiple ? 'arcoblue' : 'green'"
-            @close="handleRemoveDepartment(dept.id)"
-          >
-            {{ truncateText(dept?.name || '', maxLabelLength) }}
+          <a-tag closable :color="multiple ? 'arcoblue' : 'green'" @close="handleRemoveDepartment(dept.id)">
+            {{ truncateText(dept?.name || "", maxLabelLength) }}
           </a-tag>
         </a-tooltip>
       </a-space>
@@ -24,12 +20,7 @@
         </template>
         <span>选择部门</span>
       </a-button>
-      <a-button
-        v-if="selectedDepartments.length > 0"
-        size="small"
-        :disabled="disabled"
-        @click="handleClear"
-      >
+      <a-button v-if="selectedDepartments.length > 0" size="small" :disabled="disabled" @click="handleClear">
         <template #icon>
           <icon-delete />
         </template>
@@ -39,6 +30,7 @@
 
     <!-- 部门选择弹窗 -->
     <a-modal
+      modal-class="uvp-system-dialog"
       v-model:visible="modalVisible"
       title="选择部门"
       :width="700"
@@ -47,18 +39,27 @@
       @cancel="handleModalCancel"
     >
       <!-- 搜索区域 -->
-      <div class="search-area">
-        <a-input
-          v-model="searchKeyword"
-          placeholder="请输入部门名称搜索"
-          allow-clear
-          @input="handleSearch"
-        >
-          <template #prefix>
-            <icon-search />
-          </template>
-        </a-input>
-      </div>
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchKeyword"
+            placeholder="请输入部门名称"
+            style="width: 240px"
+            allow-clear
+            @press-enter="handleSearch"
+          />
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleSearchReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
       <!-- 部门树形列表 -->
       <div class="tree-area">
@@ -75,18 +76,9 @@
         >
           <template #title="record">
             <div class="tree-node-content" v-if="record">
-              <span class="node-name">{{ record?.name || '' }}</span>
-              <a-tag
-                v-if="record.status === 1"
-                bordered
-                size="small"
-                color="arcoblue"
-              >
-                启用
-              </a-tag>
-              <a-tag v-else bordered size="small" color="red">
-                禁用
-              </a-tag>
+              <span class="node-name">{{ record?.name || "" }}</span>
+              <a-tag v-if="record.status === 1" bordered size="small" color="arcoblue"> 启用 </a-tag>
+              <a-tag v-else bordered size="small" color="red"> 禁用 </a-tag>
             </div>
           </template>
         </a-tree>
@@ -104,9 +96,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
-import { getDivisionAPI, getDivisionByIdAPI } from '@/api/department';
-import type { DivisionItem } from '@/api/department';
+import { ref, computed, watch } from "vue";
+import { getDivisionAPI, getDivisionByIdAPI } from "@/api/department";
+import type { DivisionItem } from "@/api/department";
 
 // 部门信息接口（用于已选部门）
 interface DepartmentInfo {
@@ -130,14 +122,14 @@ interface Props {
 
 // Emits 定义
 interface Emits {
-  (e: 'update:modelValue', value: number | string | undefined): void;
+  (e: "update:modelValue", value: number | string | undefined): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
   multiple: false,
   disabled: false,
-  placeholder: '请选择部门',
+  placeholder: "请选择部门",
   maxLabelLength: 10
 });
 
@@ -147,7 +139,7 @@ const emit = defineEmits<Emits>();
 const modalVisible = ref(false);
 
 // 搜索关键字
-const searchKeyword = ref('');
+const searchKeyword = ref("");
 
 // 加载状态
 const loading = ref(false);
@@ -184,7 +176,7 @@ const filterTree = (tree: DivisionItem[], keyword: string): DivisionItem[] => {
   for (const node of tree) {
     const matchName = node.name.toLowerCase().includes(keyword.toLowerCase());
     const filteredChildren = node.children ? filterTree(node.children, keyword) : [];
-    
+
     if (matchName || filteredChildren.length > 0) {
       result.push({
         ...node,
@@ -200,15 +192,15 @@ const truncateText = (text: string, maxLength: number): string => {
   if (!text || text.length <= maxLength) {
     return text;
   }
-  return text.substring(0, maxLength) + '...';
+  return text.substring(0, maxLength) + "...";
 };
 
 // 监听 modelValue 变化，同步更新 selectedDepartments
 watch(
   () => props.modelValue,
-  (newValue) => {
+  newValue => {
     // 处理 undefined 或 null 或空值的情况
-    if (newValue === undefined || newValue === null || newValue === '') {
+    if (newValue === undefined || newValue === null || newValue === "") {
       selectedDepartments.value = [];
       return;
     }
@@ -216,9 +208,9 @@ watch(
     if (props.multiple) {
       // 多选模式：从逗号分隔的字符串解析部门ID
       const ids = String(newValue)
-        .split(',')
-        .map((id) => parseInt(id.trim()))
-        .filter((id) => !isNaN(id));
+        .split(",")
+        .map(id => parseInt(id.trim()))
+        .filter(id => !isNaN(id));
       syncSelectedDepartments(ids);
     } else {
       // 单选模式：直接使用数值
@@ -238,15 +230,15 @@ const syncSelectedDepartments = async (deptIds: number[]) => {
 
   try {
     // 获取部门详情信息
-    const promises = deptIds.map((id) => getDepartmentInfo(id));
+    const promises = deptIds.map(id => getDepartmentInfo(id));
     const results = await Promise.allSettled(promises);
     const departments: DepartmentInfo[] = results
-      .filter((r) => r.status === 'fulfilled' && r.value)
-      .map((r) => (r as PromiseFulfilledResult<DepartmentInfo>).value);
+      .filter(r => r.status === "fulfilled" && r.value)
+      .map(r => (r as PromiseFulfilledResult<DepartmentInfo>).value);
     // 过滤掉可能存在的 undefined 或无效数据
-    selectedDepartments.value = departments.filter((d) => d && d.id && d.name);
+    selectedDepartments.value = departments.filter(d => d && d.id && d.name);
   } catch (error) {
-    console.error('获取部门信息失败:', error);
+    console.error("获取部门信息失败:", error);
     selectedDepartments.value = [];
   }
 };
@@ -269,20 +261,20 @@ const getDepartmentInfo = async (deptId: number): Promise<DepartmentInfo | null>
 const openModal = async () => {
   modalVisible.value = true;
   // 初始化临时选中ID集合
-  if (props.modelValue === undefined || props.modelValue === null || props.modelValue === '') {
+  if (props.modelValue === undefined || props.modelValue === null || props.modelValue === "") {
     tempSelectedIds.value = new Set();
   } else if (props.multiple) {
     const ids = String(props.modelValue)
-      .split(',')
-      .map((id) => parseInt(id.trim()))
-      .filter((id) => !isNaN(id));
+      .split(",")
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id));
     tempSelectedIds.value = new Set(ids);
   } else {
     const id = Number(props.modelValue);
     tempSelectedIds.value = id > 0 ? new Set([id]) : new Set();
   }
   // 重置搜索
-  searchKeyword.value = '';
+  searchKeyword.value = "";
   // 加载部门树
   await loadDepartmentTree();
 };
@@ -294,7 +286,7 @@ const loadDepartmentTree = async () => {
     const { data } = await getDivisionAPI();
     departmentTree.value = data.list;
   } catch (error) {
-    console.error('加载部门树失败:', error);
+    console.error("加载部门树失败:", error);
   } finally {
     loading.value = false;
   }
@@ -305,10 +297,15 @@ const handleSearch = () => {
   // 搜索通过 computed 自动处理
 };
 
+const handleSearchReset = () => {
+  searchKeyword.value = "";
+  handleSearch();
+};
+
 // 树形多选处理
 const handleTreeCheck = (_checkedKeys: any, { checkedNodes }: { checkedNodes: any[] }) => {
   if (props.multiple) {
-    const ids = checkedNodes.map((node) => node.id);
+    const ids = checkedNodes.map(node => node.id);
     tempSelectedIds.value = new Set(ids);
   }
 };
@@ -325,14 +322,14 @@ const handleRemoveDepartment = (deptId: number) => {
   if (props.disabled) return;
 
   if (props.multiple) {
-    const currentValue = props.modelValue ?? '';
+    const currentValue = props.modelValue ?? "";
     const ids = String(currentValue)
-      .split(',')
-      .map((id) => parseInt(id.trim()))
-      .filter((id) => !isNaN(id) && id !== deptId);
-    emit('update:modelValue', ids.join(','));
+      .split(",")
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id) && id !== deptId);
+    emit("update:modelValue", ids.join(","));
   } else {
-    emit('update:modelValue', 0);
+    emit("update:modelValue", 0);
   }
 };
 
@@ -341,9 +338,9 @@ const handleClear = () => {
   if (props.disabled) return;
 
   if (props.multiple) {
-    emit('update:modelValue', '');
+    emit("update:modelValue", "");
   } else {
-    emit('update:modelValue', 0);
+    emit("update:modelValue", 0);
   }
 };
 
@@ -356,13 +353,13 @@ const handleModalCancel = () => {
 const handleModalConfirm = () => {
   if (props.multiple) {
     // 多选模式：输出逗号分隔的字符串，空时返回空字符串
-    const ids = Array.from(tempSelectedIds.value).join(',');
-    emit('update:modelValue', ids || '');
+    const ids = Array.from(tempSelectedIds.value).join(",");
+    emit("update:modelValue", ids || "");
   } else {
     // 单选模式：输出数值，空时返回 0
     const ids = Array.from(tempSelectedIds.value);
     const id = ids.length > 0 ? ids[0] : 0;
-    emit('update:modelValue', id);
+    emit("update:modelValue", id);
   }
   modalVisible.value = false;
 };
@@ -398,11 +395,6 @@ const handleModalConfirm = () => {
     display: flex;
     gap: 8px;
   }
-}
-
-// 弹窗样式
-.search-area {
-  margin-bottom: 16px;
 }
 
 .tree-area {

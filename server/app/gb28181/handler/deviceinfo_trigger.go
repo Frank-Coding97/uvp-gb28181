@@ -1,0 +1,79 @@
+package handler
+
+import (
+	"context"
+	"sync/atomic"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+
+	"go.uber.org/zap"
+)
+
+// DeviceInfoTrigger 注册成功后触发 DeviceInfo 查询的能力
+// 跟 CatalogTrigger 独立并行:Catalog 拉通道,DeviceInfo 拉设备本体元数据(name/manufacturer/model/firmware)
+// transport 需匹配设备注册时的传输协议(UDP/TCP),空值兜底 UDP
+type DeviceInfoTrigger interface {
+	Trigger(ctx context.Context, deviceID, dest, transport string)
+}
+
+// DeviceInfoAsyncOwner admits the post-200 query and lets the SIP owner close
+// admission and wait for accepted sends during shutdown.
+type DeviceInfoAsyncOwner interface {
+	Go(func()) bool
+}
+
+// uacDeviceInfoTrigger 默认实现:用 UAC 发 MESSAGE(承载 DeviceInfo Query XML)
+type uacDeviceInfoTrigger struct {
+	uac   *uac.UAC
+	sn    atomic.Int64
+	owner DeviceInfoAsyncOwner
+}
+
+// NewUACDeviceInfoTrigger 包装 UAC 为 DeviceInfoTrigger
+func NewUACDeviceInfoTrigger(u *uac.UAC, owners ...DeviceInfoAsyncOwner) DeviceInfoTrigger {
+	var owner DeviceInfoAsyncOwner
+	if len(owners) > 0 {
+		owner = owners[0]
+	}
+	return &uacDeviceInfoTrigger{uac: u, owner: owner}
+}
+
+// Trigger 异步向设备发 DeviceInfo 查询(失败仅记日志,不阻塞注册响应)
+func (t *uacDeviceInfoTrigger) Trigger(ctx context.Context, deviceID, dest, transport string) {
+	if t.uac == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scope := context.WithoutCancel(ctx)
+	work := func() {
+		logger := app.Log(scope).Named("gb28181.deviceinfo")
+		sn := int(t.sn.Add(1))
+		body, err := manscdp.BuildDeviceInfoQuery(deviceID, sn)
+		if err != nil {
+			logger.Warn("DeviceInfo 查询 XML 构造失败",
+				zap.String("event", "gb28181.deviceinfo.query_build_failed"),
+				zap.String("device_id", deviceID), logging.Error(err))
+			return
+		}
+		if err := t.uac.SendMessage(context.Background(), deviceID, dest, transport, body); err != nil {
+			logger.Warn("DeviceInfo 查询发送失败",
+				zap.String("event", "gb28181.deviceinfo.query_send_failed"),
+				zap.String("device_id", deviceID), zap.String("destination", dest),
+				zap.String("transport", transport), logging.Error(err))
+			return
+		}
+		logger.Info("DeviceInfo 查询已发出",
+			zap.String("event", "gb28181.deviceinfo.query_sent"),
+			zap.String("device_id", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
+	}
+	if t.owner != nil {
+		_ = t.owner.Go(work)
+		return
+	}
+	go work()
+}

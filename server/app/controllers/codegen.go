@@ -36,7 +36,7 @@ func NewCodeGenController() *CodeGenController {
 // @Security ApiKeyAuth
 func (cgc *CodeGenController) GetDatabases(ctx *gin.Context) {
 	// 使用service层获取数据库列表
-	databases, err := cgc.service.GetDatabases("")
+	databases, err := cgc.service.WithContext(ctx.Request.Context()).GetDatabases("")
 	if err != nil {
 		cgc.FailAndAbort(ctx, "获取数据库列表失败", err)
 	}
@@ -61,7 +61,7 @@ func (cgc *CodeGenController) GetDatabases(ctx *gin.Context) {
 func (cgc *CodeGenController) GetTables(ctx *gin.Context) {
 	database := ctx.Query("database")
 	// 使用service层获取表列表
-	tables, err := cgc.service.GetTables("", database)
+	tables, err := cgc.service.WithContext(ctx.Request.Context()).GetTables("", database)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "获取表列表失败", err)
 	}
@@ -93,7 +93,7 @@ func (cgc *CodeGenController) GetTableColumns(ctx *gin.Context) {
 	}
 
 	// 使用service层获取字段信息
-	columns, err := cgc.service.GetTableColumns(database, table)
+	columns, err := cgc.service.WithContext(ctx.Request.Context()).GetTableColumns(database, table)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "获取字段信息失败", err)
 	}
@@ -128,7 +128,7 @@ func (cgc *CodeGenController) GenerateCode(ctx *gin.Context) {
 
 	// 使用service层获取代码生成配置详情
 	sysGen := models.NewSysGen()
-	err := sysGen.Find(ctx, func(db *gorm.DB) *gorm.DB {
+	err := sysGen.Find(ctx.Request.Context(), func(db *gorm.DB) *gorm.DB {
 		return db.Where("id = ?", uint(genID)).Preload("SysGenFields").Preload("RelationTreeGen").Preload("RelationTreeGen.SysGenFields")
 	})
 	if err != nil {
@@ -167,13 +167,13 @@ func (cgc *CodeGenController) GenerateCode(ctx *gin.Context) {
 	}
 
 	// 生成后端代码
-	err = cgc.service.GenerateBackendCodeFiles(ctx, sysGen)
+	err = cgc.service.WithContext(ctx.Request.Context()).GenerateBackendCodeFiles(ctx.Request.Context(), sysGen)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "生成后端代码失败", err)
 	}
 
 	// 生成前端代码
-	err = cgc.service.GenerateFrontendCodeFiles(sysGen)
+	err = cgc.service.WithContext(ctx.Request.Context()).GenerateFrontendCodeFiles(sysGen)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "生成前端代码失败", err)
 	}
@@ -206,7 +206,7 @@ func (cgc *CodeGenController) PreviewCode(ctx *gin.Context) {
 	}
 
 	// 使用service层生成预览代码
-	result, err := cgc.service.PreviewCode(ctx, id)
+	result, err := cgc.service.WithContext(ctx.Request.Context()).PreviewCode(ctx.Request.Context(), id)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "生成预览代码失败", err)
 	}
@@ -242,7 +242,7 @@ func (cgc *CodeGenController) InsertMenuAndApiData(ctx *gin.Context) {
 
 	// 使用service层获取代码生成配置详情
 	sysGen := models.NewSysGen()
-	err := sysGen.Find(ctx, func(db *gorm.DB) *gorm.DB {
+	err := sysGen.Find(ctx.Request.Context(), func(db *gorm.DB) *gorm.DB {
 		return db.Where("id = ?", uint(genID)).Preload("SysGenFields")
 	})
 	if err != nil {
@@ -262,7 +262,7 @@ func (cgc *CodeGenController) InsertMenuAndApiData(ctx *gin.Context) {
 	}
 
 	// 调用service层的InsertMenuAndApiData方法
-	err = cgc.service.InsertMenuAndApiData(ctx, menuApiCtx, sysGen.IsTree == 1)
+	err = cgc.service.WithContext(ctx.Request.Context()).InsertMenuAndApiData(ctx.Request.Context(), menuApiCtx, sysGen.IsTree == 1)
 	if err != nil {
 		cgc.FailAndAbort(ctx, "插入菜单和API数据失败", err)
 	}

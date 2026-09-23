@@ -3,7 +3,6 @@ package uploadhelper
 import (
 	"crypto/tls"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

@@ -2,9 +2,9 @@ package tokenhelper
 
 import (
 	"context"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"testing"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -39,6 +39,15 @@ func (m *MockCacheInterf) Del(ctx context.Context, keys ...string) error {
 		delete(m.storage, key)
 	}
 	return nil
+}
+
+func (m *MockCacheInterf) GetDel(ctx context.Context, key string) (string, error) {
+	value, exists := m.storage[key]
+	if !exists {
+		return "", app.ErrKeyNotFound
+	}
+	delete(m.storage, key)
+	return value, nil
 }
 
 func (m *MockCacheInterf) Exists(ctx context.Context, keys ...string) (int64, error) {
@@ -94,7 +103,7 @@ func TestRotateRefreshToken(t *testing.T) {
 	userID := uint(1)
 
 	// 生成初始refresh token
-	originalRefreshToken, err := tokenService.GenerateRefreshToken(userID, 1, "test_tenant")
+	originalRefreshToken, err := tokenService.GenerateRefreshToken(userID)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, originalRefreshToken)
 
@@ -142,7 +151,7 @@ func TestRotateRefreshToken_ExpiredToken(t *testing.T) {
 	userID := uint(1)
 
 	// 生成一个很快过期的refresh token
-	shortExpiryToken, err := tokenService.GenerateRefreshToken(userID, 1, "test_tenant")
+	shortExpiryToken, err := tokenService.GenerateRefreshToken(userID)
 	assert.NoError(t, err)
 
 	// 等待token过期
@@ -169,4 +178,34 @@ func TestRotateRefreshToken_InvalidToken(t *testing.T) {
 	_, err := tokenService.RotateRefreshToken("invalid_token")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid")
+}
+
+func TestTokenDoesNotIncludeTenantClaims(t *testing.T) {
+	mockCache := NewMockCacheInterf()
+	tokenService := &TokenService{
+		Ctx:            context.Background(),
+		RedisHelper:    mockCache,
+		JWTSecret:      "test_secret",
+		TokenExpire:    3600,
+		RefreshExpire:  86400,
+		CacheKeyPrefix: "test:",
+	}
+
+	accessToken, err := tokenService.GenerateToken(&app.ClaimsUser{
+		UserID:   1,
+		Username: "admin",
+	})
+	assert.NoError(t, err)
+
+	accessClaims, err := tokenService.ParseToken(accessToken)
+	assert.NoError(t, err)
+	assert.Equal(t, uint(1), accessClaims.UserID)
+	assert.Equal(t, "admin", accessClaims.Username)
+
+	refreshToken, err := tokenService.GenerateRefreshToken(1)
+	assert.NoError(t, err)
+
+	refreshClaims, err := tokenService.ParseRefreshToken(refreshToken)
+	assert.NoError(t, err)
+	assert.Equal(t, uint(1), refreshClaims.UserID)
 }

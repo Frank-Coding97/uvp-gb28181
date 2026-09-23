@@ -1,0 +1,22 @@
+[Unit]
+Description=UVP Gitee WebHook receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uvp-deploy
+Group=uvp-deploy
+EnvironmentFile=/etc/uvp-gitee-webhook.env
+ExecStart=/usr/local/libexec/uvp-gitee-webhook
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/uvp-gitee-deployer
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,763 @@
+package controllers
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"gorm.io/gorm/clause"
+	"gorm.io/plugin/dbresolver"
+
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+)
+
+type presetResourceRequest struct {
+	PresetID       int    `json:"presetId"`
+	Name           string `json:"name"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type cruiseResourceRequest struct {
+	Action         string `json:"action" binding:"required"`
+	TrackID        *int   `json:"trackId"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+// wiperControlRequest:雨刷开关(GB/T 28181 A.3.7 表 A.11)。
+//
+// ⛔ 请求体里**故意没有 auxiliaryId**。标准在这一节只钉了一个编号语义
+// ("取值为'1'表示雨刷控制"),编号由后端固定成 manscdp.PTZAuxiliaryIDWiper;
+// 放开一个 `auxiliaryId` 字段等于把编号 2~5 那些标准未定义的语义邀请进 API 面。
+type wiperControlRequest struct {
+	Action         string `json:"action"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+// decodeWiperControlRequest 严格解码雨刷请求体(忽略未知字段的反面)。
+//
+// ⛔ **不能用 `c.ShouldBindJSON`**:gin 的默认 JSON 绑定不做 DisallowUnknownFields,
+// 于是 `{"action":"on","auxiliaryId":3}` 会被"成功"解析成"打开编号 1 的雨刷"——
+// 调用方以为自己点的是 3 号开关,设备却去刮水。这种"静默改语义"比报错难查得多。
+// 手法与同文件 [decodeHomePositionResourceRequest] 一致(读全量 → 校验 UTF-8 →
+// 拒未知字段 → 拒第二个 JSON 值)。
+func decodeWiperControlRequest(c *gin.Context, request *wiperControlRequest) error {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if !utf8.Valid(body) {
+		return errors.New("请求体不是有效 UTF-8")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(request); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("请求体包含多个 JSON 值")
+		}
+		return err
+	}
+	return nil
+}
+
+// cruiseTrackCreateRequest:一次 POST 建立整条巡航路径。
+// 后端按序下发:0x85 清空(若 ReplaceExisting)→ N × 0x84 加站 → 0x86 速度 → 0x87 停留。
+type cruiseTrackCreateRequest struct {
+	TrackID         *int                   `json:"trackId"`
+	Name            string                 `json:"name"`
+	Speed           int                    `json:"speed"`    // 0-4095,0 表示不下发速度指令(沿用设备默认)
+	DwellSec        int                    `json:"dwellSec"` // 0-4095 秒,0 表示不下发停留指令
+	Stops           []cruiseTrackStopInput `json:"stops" binding:"required,min=1"`
+	ReplaceExisting bool                   `json:"replaceExisting"` // 先 0x85(P2=0) 清空再加,避免与设备现有点位混叠
+	IdempotencyKey  string                 `json:"idempotencyKey"`
+}
+
+type cruiseTrackStopInput struct {
+	PresetID int `json:"presetId" binding:"required"`
+}
+
+type homePositionResourceRequest struct {
+	Enabled        *bool   `json:"enabled"`
+	ResetTime      *int    `json:"resetTime"`
+	PresetID       *int    `json:"presetId"`
+	IdempotencyKey *string `json:"idempotencyKey"`
+}
+
+type homePositionHTTPFailure struct {
+	status  int
+	code    ptz.ErrorCode
+	message string
+	err     error
+}
+
+func homePositionFailure(status int, code ptz.ErrorCode, message string, err error) *homePositionHTTPFailure {
+	return &homePositionHTTPFailure{status: status, code: code, message: message, err: err}
+}
+
+func decodeHomePositionResourceRequest(c *gin.Context) (homePositionResourceRequest, *homePositionHTTPFailure) {
+	var request homePositionResourceRequest
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if !utf8.Valid(body) {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", errors.New("请求体不是有效 UTF-8"))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("请求体包含多个 JSON 值")
+		}
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if request.Enabled == nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "enabled 必须显式提供", nil)
+	}
+	if *request.Enabled {
+		if request.ResetTime == nil || *request.ResetTime < 10 || *request.ResetTime > 3600 {
+			return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "启用看守位时 resetTime 必须在 10-3600 之间", nil)
+		}
+		if request.PresetID == nil || *request.PresetID < 0 || *request.PresetID > 255 {
+			return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "启用看守位时 presetId 必须在 0-255 之间", nil)
+		}
+	}
+	return request, nil
+}
+
+func homePositionIdempotencyKey(request homePositionResourceRequest, headerValue string) (string, *homePositionHTTPFailure) {
+	headerValue = strings.TrimSpace(headerValue)
+	bodyValue := ""
+	if request.IdempotencyKey != nil {
+		bodyValue = strings.TrimSpace(*request.IdempotencyKey)
+	}
+	if headerValue != "" && bodyValue != "" && headerValue != bodyValue {
+		return "", homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "Header 与请求体的幂等键不一致", nil)
+	}
+	if headerValue != "" {
+		return headerValue, nil
+	}
+	return bodyValue, nil
+}
+
+func writeHomePositionFailure(c *gin.Context, failure *homePositionHTTPFailure) {
+	if failure == nil {
+		return
+	}
+	if failure.err != nil {
+		app.Log(c.Request.Context()).Warn("PTZ home position failed", zap.String("event", "ptz.home_position.write_failed"), zap.String("error_code", string(failure.code)), logging.Error(failure.err))
+	}
+	data := gin.H{"errorCode": string(failure.code)}
+	if app.Response != nil {
+		app.Response.Fail(c, failure.message, failure.status, 1, data)
+		return
+	}
+	response.SetBusinessResult(c, 1, false)
+	c.AbortWithStatusJSON(failure.status, gin.H{"code": 1, "message": failure.message, "data": data})
+}
+
+func (dc *DeviceMgmtController) loadHomePositionChannel(c *gin.Context) (*gbmodels.GbChannel, *homePositionHTTPFailure) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return nil, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "通道不存在或无权限", err)
+	}
+	db := dc.db()
+	if db == nil {
+		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "数据库未就绪", nil)
+	}
+	var channel gbmodels.GbChannel
+	result := db.WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	if result.Error != nil {
+		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询通道失败", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "通道不存在或无权限", nil)
+	}
+	return &channel, nil
+}
+
+func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *gbmodels.GbChannel) (ptz.Target, *homePositionHTTPFailure) {
+	var device gbmodels.GbDevice
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(visibleScope(c)).
+		Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	if result.Error != nil {
+		return ptz.Target{}, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询所属设备失败", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ptz.Target{}, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "所属设备不存在或无权限", nil)
+	}
+	target := ptz.Target{
+		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
+		IP: device.IP, Port: device.Port, Transport: device.Transport,
+		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+		Profile: profileForDevice(&device),
+	}
+	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
+		captured, err := capturePTZAuthorization(c, dc.db(), target)
+		if err != nil {
+			return ptz.Target{}, homePositionFailure(http.StatusConflict, ptz.ErrorCodeHomePositionUnavailable, "设备权限已失效或正在转移", err)
+		}
+		target = captured
+	}
+	return target, nil
+}
+
+func (dc *DeviceMgmtController) loadHomePositionActor(c *gin.Context) (uint, uint, *homePositionHTTPFailure) {
+	actorID := dc.GetCurrentUserID(c)
+	if actorID == 0 {
+		return 0, 0, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "无法识别看守位操作者", nil)
+	}
+	var user basemodels.User
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Select("id", "dept_id").Where("id = ?", actorID).Limit(1).Find(&user)
+	if result.Error != nil || result.RowsAffected != 1 {
+		return 0, 0, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "读取看守位操作者部门失败", result.Error)
+	}
+	return actorID, user.DeptID, nil
+}
+
+func homePositionOperationFailure(err error) *homePositionHTTPFailure {
+	var operationError *ptz.OperationError
+	if errors.As(err, &operationError) {
+		switch operationError.Code {
+		case ptz.ErrorCodeHomePositionInvalidArgument:
+			return homePositionFailure(http.StatusUnprocessableEntity, operationError.Code, operationError.Message, err)
+		case ptz.ErrorCodeHomePositionDeviceOffline:
+			return homePositionFailure(http.StatusConflict, operationError.Code, operationError.Message, err)
+		case ptz.ErrorCodeHomePositionIdempotencyConflict:
+			return homePositionFailure(http.StatusConflict, operationError.Code, operationError.Message, err)
+		case ptz.ErrorCodeHomePositionUnavailable:
+			return homePositionFailure(http.StatusServiceUnavailable, operationError.Code, operationError.Message, err)
+		}
+	}
+	return homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "看守位服务处理失败", err)
+}
+
+func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.GbChannel) (ptz.Target, bool) {
+	if channel == nil {
+		return ptz.Target{}, false
+	}
+	var device gbmodels.GbDevice
+	result := dc.db().WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	if result.Error != nil || result.RowsAffected == 0 {
+		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
+		return ptz.Target{}, false
+	}
+	target := ptz.Target{
+		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
+		IP: device.IP, Port: device.Port, Transport: device.Transport,
+		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+		Profile: profileForDevice(&device),
+	}
+	if !dc.authorizePTZTarget(c, &target) {
+		return ptz.Target{}, false
+	}
+	return target, true
+}
+
+func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, action manscdp.PTZExtendedAction, id int, name, idempotencyKey string) {
+	dc.executePTZExtendedResourceAs(c, action, string(action), id, name, idempotencyKey)
+}
+
+func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, protocolAction manscdp.PTZExtendedAction, operationAction string, id int, name, idempotencyKey string) {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		response.SetBusinessResult(c, 503, false)
+		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
+		return
+	}
+	channel, ok := dc.ptzChannel(c)
+	if !ok {
+		return
+	}
+	target, ok := dc.loadPTZTarget(c, channel)
+	if !ok {
+		return
+	}
+	allowZero := protocolAction == manscdp.PTZActionCruiseStart || protocolAction == manscdp.PTZActionCruiseStop || protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath
+	if id < 0 || id > 255 || (!allowZero && id == 0) {
+		if allowZero {
+			dc.FailAndAbort(c, "巡航组号必须在 0-255 之间", nil)
+		} else {
+			dc.FailAndAbort(c, "PTZ 编号必须在 1-255 之间", nil)
+		}
+		return
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = c.GetHeader("Idempotency-Key")
+	}
+	payload := map[string]interface{}{"action": operationAction, "id": id}
+	if operationAction != string(protocolAction) {
+		payload["protocolAction"] = protocolAction
+	}
+	if name != "" {
+		payload["name"] = name
+	}
+	lock := dc.deviceControlLock(channel.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	op, err := service.Execute(c.Request.Context(), target, ptz.Command{
+		CmdType: manscdp.CmdDeviceControl, Action: operationAction, IdempotencyKey: idempotencyKey,
+		Profile: target.Profile, Payload: payload,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: protocolAction, ID: id})
+		},
+	})
+	if err != nil {
+		dc.FailAndAbort(c, "下发 PTZ 资源控制失败", err)
+		return
+	}
+	// 预置位设/删属于国标里"设备权威"的资源变更:主流程乐观入库让 UI 立即响应后,
+	// 后台异步下发一次 PresetQuery,把设备真实状态同步过来。persistQueryCache 会 UPSERT
+	// gb_ptz_preset 并按 SumNum 对账——设备端实际没存住或已删除的会被自动纠正。
+	if protocolAction == manscdp.PTZActionSetPreset || protocolAction == manscdp.PTZActionDeletePreset {
+		dc.reconcilePresetsAsync(c.Request.Context(), target)
+	}
+	if protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath {
+		if db := dc.db(); db != nil {
+			if err := db.WithContext(c.Request.Context()).Where("channel_id = ? AND track_id = ?", channel.ID, id).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
+				app.Log(c.Request.Context()).Warn("删除巡航本地缓存失败", zap.String("event", "ptz.cruise_cache.delete_failed"),
+					zap.Uint("channel_id", channel.ID),
+					zap.Int("track_id", id),
+					logging.Error(err))
+			}
+		}
+		dc.reconcileCruiseAsync(c.Request.Context(), target, id, false)
+	}
+	dc.Success(c, gin.H{
+		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": operationAction,
+		"id": id, "sn": op.SN, "status": op.Status,
+	})
+}
+
+// reconcilePresetsAsync 用独立 context 后台下发 PresetQuery,不阻塞主响应。
+// 独立 idempotency_key 保证多次调用能各自建 operation 记录,不会跟主操作冲突。
+func (dc *DeviceMgmtController) reconcilePresetsAsync(parent context.Context, target ptz.Target) {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		return
+	}
+	scope := context.WithoutCancel(parent)
+	app.BackgroundWork.Go(func() {
+		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
+		defer cancel()
+		if _, err := service.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
+			app.Log(ctx).Named("ptz").Warn("预置位对账查询下发失败", zap.String("event", "ptz.preset_reconcile_failed"),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
+				logging.Error(err))
+		}
+	})
+}
+
+func (dc *DeviceMgmtController) CreatePTZPreset(c *gin.Context) {
+	var request presetResourceRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.PresetID <= 0 {
+		dc.FailAndAbort(c, "预置位参数不合法", err)
+		return
+	}
+	dc.executePTZExtendedResource(c, manscdp.PTZActionSetPreset, request.PresetID, request.Name, request.IdempotencyKey)
+}
+
+func (dc *DeviceMgmtController) CallPTZPreset(c *gin.Context) {
+	presetID, err := strconv.Atoi(c.Param("presetId"))
+	if err != nil || presetID <= 0 {
+		dc.FailAndAbort(c, "预置位编号不合法", err)
+		return
+	}
+	dc.executePTZExtendedResource(c, manscdp.PTZActionCallPreset, presetID, "", "")
+}
+
+func (dc *DeviceMgmtController) DeletePTZPreset(c *gin.Context) {
+	presetID, err := strconv.Atoi(c.Param("presetId"))
+	if err != nil || presetID <= 0 {
+		dc.FailAndAbort(c, "预置位编号不合法", err)
+		return
+	}
+	dc.executePTZExtendedResource(c, manscdp.PTZActionDeletePreset, presetID, "", "")
+}
+
+func (dc *DeviceMgmtController) ControlPTZCruise(c *gin.Context) {
+	var request cruiseResourceRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		dc.FailAndAbort(c, "巡航参数不合法", err)
+		return
+	}
+	if request.TrackID == nil {
+		dc.FailAndAbort(c, "巡航组号不能为空", nil)
+		return
+	}
+	var action manscdp.PTZExtendedAction
+	switch strings.ToLower(strings.TrimSpace(request.Action)) {
+	case "start":
+		action = manscdp.PTZActionCruiseStart
+	case "stop":
+		action = manscdp.PTZActionCruiseStop
+	case "delete":
+		action = manscdp.PTZActionCruiseDeletePath
+	default:
+		dc.FailAndAbort(c, "巡航动作不合法", nil)
+		return
+	}
+	dc.executePTZExtendedResource(c, action, *request.TrackID, "", request.IdempotencyKey)
+}
+
+// ControlPTZWiper 下发 GB/T 28181 A.3.7(表 A.11)的雨刷开 / 关。
+//
+// 报文只有两个变量:指令码(`0x8C` 开 / `0x8D` 关)与编号(固定
+// [manscdp.PTZAuxiliaryIDWiper] = 1 —— 标准在这一节唯一命名的编号)。
+//
+// ⛔ 状态措辞:标准在附录 A.3 里**没有**回读辅助开关状态的手段
+// (2022 全文"辅助开关"只出现在 A.3.7;A.2.4 查询闭集 1~14、A.2.6 应答闭集 1~16
+// 里都没有它),所以平台只可能知道"指令已下发",永远不知道雨刷此刻在不在刮。
+// 响应里的 status 是 operation 状态,前端不得把它读成"正在刮水"。
+//
+// ⛔ 与 `/ptz/extended` 的关系:那条路由**继续拒绝** `aux_on`/`aux_off`
+// (见 parseExtendedAction 的白名单与 TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions)。
+// 雨刷走独立路由,这样"只允许编号 1"这条约束落在控制器里,而不是靠调用方自觉。
+func (dc *DeviceMgmtController) ControlPTZWiper(c *gin.Context) {
+	var request wiperControlRequest
+	if err := decodeWiperControlRequest(c, &request); err != nil {
+		dc.FailAndAbort(c, "雨刷控制参数不合法", err)
+		return
+	}
+	var protocolAction manscdp.PTZExtendedAction
+	var operationAction string
+	switch strings.ToLower(strings.TrimSpace(request.Action)) {
+	case "on":
+		protocolAction = manscdp.PTZActionAuxOn
+		operationAction = "wiper_on"
+	case "off":
+		protocolAction = manscdp.PTZActionAuxOff
+		operationAction = "wiper_off"
+	default:
+		dc.FailAndAbort(c, "雨刷动作不合法(仅支持 on / off)", nil)
+		return
+	}
+	dc.executePTZExtendedResourceAs(c, protocolAction, operationAction, manscdp.PTZAuxiliaryIDWiper, "", request.IdempotencyKey)
+}
+
+// CreateCruiseTrack 按顺序下发 GB/T 28181 附录 A.3 巡航配置指令建立一条巡航路径。
+// 每条子指令都走 ptzService.Execute,写各自的 gb_ptz_operation 记录 —— 中间失败时
+// 返回已成功的 stop 数,不做设备端回滚(0x85 删除整轨的设备行为需由后续对账确认)。
+// 完成后异步 CruiseTrackListQuery 拉取真实状态回填 gb_ptz_cruise_track.detail_json。
+func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		response.SetBusinessResult(c, 503, false)
+		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
+		return
+	}
+	var request cruiseTrackCreateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		dc.FailAndAbort(c, "巡航轨迹参数不合法", err)
+		return
+	}
+	if request.TrackID == nil || *request.TrackID < 0 || *request.TrackID > 255 {
+		dc.FailAndAbort(c, "巡航组号必须在 0-255 之间", nil)
+		return
+	}
+	trackID := *request.TrackID
+	if len(request.Stops) == 0 || len(request.Stops) > 32 {
+		dc.FailAndAbort(c, "巡航站点数量必须在 1-32 之间", nil)
+		return
+	}
+	for i, stop := range request.Stops {
+		if stop.PresetID <= 0 || stop.PresetID > 255 {
+			dc.FailAndAbort(c, "巡航站点 "+strconv.Itoa(i+1)+" 的预置位编号不合法", nil)
+			return
+		}
+	}
+	if request.Speed < 0 || request.Speed > 4095 {
+		dc.FailAndAbort(c, "巡航速度必须在 0-4095 之间", nil)
+		return
+	}
+	if request.DwellSec < 0 || request.DwellSec > 4095 {
+		dc.FailAndAbort(c, "巡航停留时间必须在 0-4095 秒之间", nil)
+		return
+	}
+	channel, ok := dc.ptzChannel(c)
+	if !ok {
+		return
+	}
+	target, ok := dc.loadPTZTarget(c, channel)
+	if !ok {
+		return
+	}
+	// 一条巡航由多条 DeviceControl 组成;锁住整批，避免同一通道的另一批命令插入中间。
+	batchLock := dc.deviceControlLock(channel.ID)
+	batchLock.Lock()
+	defer batchLock.Unlock()
+	baseKey := strings.TrimSpace(request.IdempotencyKey)
+	if baseKey == "" {
+		baseKey = c.GetHeader("Idempotency-Key")
+	}
+	if baseKey == "" {
+		baseKey = "cruise-create-" + uuid.NewString()
+	}
+
+	dispatch := func(step string, seq int, action manscdp.PTZExtendedAction, cmd manscdp.PTZExtendedCommand) (gbmodels.GbPTZOperation, error) {
+		return service.Execute(c.Request.Context(), target, ptz.Command{
+			CmdType:        manscdp.CmdDeviceControl,
+			Action:         string(action),
+			IdempotencyKey: baseKey + "-" + step + "-" + strconv.Itoa(seq),
+			Profile:        target.Profile,
+			Payload:        map[string]interface{}{"action": action, "trackId": cmd.ID, "presetId": cmd.SubID, "value16": cmd.Value16, "step": step, "seq": seq},
+			Build: func(sn int) ([]byte, error) {
+				cmd.Action = action
+				return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, cmd)
+			},
+		})
+	}
+
+	steps := make([]gin.H, 0, len(request.Stops)+3)
+	completedStops := 0
+
+	if request.ReplaceExisting {
+		op, err := dispatch("clear", 0, manscdp.PTZActionCruiseDeletePath, manscdp.PTZExtendedCommand{ID: trackID})
+		steps = append(steps, gin.H{"step": "clear", "operationId": op.OperationID, "sn": op.SN, "status": op.Status})
+		if err != nil {
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
+			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "clear_failed", err.Error(), false)
+			return
+		}
+	}
+
+	for i, stop := range request.Stops {
+		op, err := dispatch("add_stop", i+1, manscdp.PTZActionCruiseAddStop, manscdp.PTZExtendedCommand{ID: trackID, SubID: stop.PresetID})
+		steps = append(steps, gin.H{"step": "add_stop", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "presetId": stop.PresetID, "index": i + 1})
+		if err != nil {
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
+			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "add_stop_failed", err.Error(), false)
+			return
+		}
+		completedStops = i + 1
+	}
+
+	if request.Speed > 0 {
+		op, err := dispatch("set_speed", 0, manscdp.PTZActionCruiseSetSpeed, manscdp.PTZExtendedCommand{ID: trackID, Value16: request.Speed})
+		steps = append(steps, gin.H{"step": "set_speed", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "speed": request.Speed})
+		if err != nil {
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
+			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "set_speed_failed", err.Error(), false)
+			return
+		}
+	}
+	if request.DwellSec > 0 {
+		op, err := dispatch("set_dwell", 0, manscdp.PTZActionCruiseSetDwell, manscdp.PTZExtendedCommand{ID: trackID, Value16: request.DwellSec})
+		steps = append(steps, gin.H{"step": "set_dwell", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "dwellSec": request.DwellSec})
+		if err != nil {
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
+			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "set_dwell_failed", err.Error(), false)
+			return
+		}
+	}
+
+	// 只有全部控制指令都成功发送后才写入待对账记录,避免中途失败留下幽灵轨迹。
+	if err := dc.upsertOptimisticCruise(c, target, request); err != nil {
+		app.Log(c.Request.Context()).Warn("巡航待对账记录写入失败", zap.String("event", "ptz.cruise_reconcile_record.write_failed"),
+			zap.Uint("channel_id", target.ChannelID),
+			zap.Int("track_id", trackID),
+			logging.Error(err))
+	}
+	// 异步对账,主流程立即返回 —— HTTP 成功只表示控制指令已发送
+	dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
+	dc.respondCruiseCreate(c, channel, request, steps, completedStops, "sent", "", false)
+}
+
+// upsertOptimisticCruise 在整批字节流指令发送成功后写入待对账记录,让前端能立即看到新条目。
+// 使用 (channel_id, track_id) 冲突覆盖:如果用户 replaceExisting 或者同编号重建,原记录被更新。
+// updated_at 用当前时间,让 loadCruises 排序时该记录浮到前面。
+func (dc *DeviceMgmtController) upsertOptimisticCruise(c *gin.Context, target ptz.Target, request cruiseTrackCreateRequest) error {
+	if dc.db == nil {
+		return nil
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" {
+		name = "巡航 " + strconv.Itoa(*request.TrackID)
+	}
+	// detail_json 保留客户端提交的 stops/speed/dwell,便于对账未回前 UI 展示细节
+	detail, _ := json.Marshal(map[string]interface{}{
+		"trackId":  *request.TrackID,
+		"name":     name,
+		"stops":    request.Stops,
+		"speed":    request.Speed,
+		"dwellSec": request.DwellSec,
+		"source":   "reconcile-pending",
+	})
+	// ⛔ 平台**不写 `enabled`**,也不在冲突时更新它 —— `nil` 的语义是「设备未上报」。
+	//
+	// 这里原来是 `enabled := false` + `Enabled: &enabled`,理由写得也对(「设备详情回包前
+	// 不能标 enabled」),但它把平台自己编的 false 当成了设备状态,而**没有任何东西能把它
+	// 翻回来**:`<Enabled>` 在 A.2.6.13/A.2.6.14 的元素表里根本没有(本仓当扩展字段用),
+	// 真机与模拟器都不回,`upsertCruiseTrack` 于是永远走「保留库里原值」那条分支 ——
+	// 库里那"原值"恰恰就是这个 false。前端 `enabled: item.enabled !== false && !pending`
+	// 一见 false 就把 tile 焊死,操作员再也点不动自己刚建好的轨迹。
+	//
+	// 所以「设备确认前」这件事只能由 `source: "reconcile-pending"`(前端据此显示「未验证」
+	// 并允许试运行)**表达**,不能用 `enabled=false` 表达:后者在 wire 上和「设备明确报告
+	// 已停用」是同一个值,而设备永远不会替我们撤销它。
+	track := gbmodels.GbPTZCruiseTrack{
+		DeviceID: target.DeviceID, ChannelID: target.ChannelID, TrackID: *request.TrackID,
+		Name: name, DetailJSON: string(detail),
+		RawSummary: "reconcile-pending", UpdatedAt: time.Now(),
+	}
+	return dc.db().WithContext(c.Request.Context()).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "track_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "detail_json", "raw_summary", "updated_at"}),
+	}).Create(&track).Error
+}
+
+// reconcileCruiseAsync 用独立 context 后台下发列表查询,创建/失败批次再查询对应轨迹详情。
+// 删除只查列表;创建与部分失败同时查详情,用设备真实点位覆盖客户端提交的待对账数据。
+//
+// ⛔ **版本门禁只挡这里,不挡操作员点出来的那次查询。**
+//
+// 对账是平台**自己决定要发**的:操作员点的是"建立巡航"(控制层 PTZCmd,2016 就有),
+// 并没有要求回读。而 `CruiseTrackListQuery`/`CruiseTrackQuery` 是 2022 新增命令,
+// 2016 设备没有定义行为 —— 发给它只会烧掉一个 SN 和三次重试预算再超时。
+// 所以登记为 2016 的设备直接跳过,日志留痕。
+//
+// 为什么这样不会把"发现路径"焊死:前端的「同步」按钮走的是手动刷新
+// (`refreshPTZ` → `?refresh=true`),那条路径**刻意不加门禁**(同看守位的口径,
+// 见 protocol.SupportsHomePositionQuery 的注释)——真的 2022 设备被误登记成 2016 时,
+// 操作员点一下同步就能把它查出来并留下历史证据。
+func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, target ptz.Target, trackID int, includeDetail bool) {
+	if !target.Profile.SupportsCruiseTrackQuery() {
+		app.Log(parent).Named("ptz").Info("巡航对账跳过:设备协议档案不支持 2022 巡航轨迹查询",
+			zap.String("event", "ptz.cruise_reconcile_skipped"),
+			zap.Uint("channel_id", target.ChannelID),
+			zap.String("channel_code", target.ChannelCode),
+			zap.String("protocol_version", string(target.Profile.Version)))
+		return
+	}
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		return
+	}
+	scope := context.WithoutCancel(parent)
+	app.BackgroundWork.Go(func() {
+		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
+		defer cancel()
+		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrackList, 0, "reconcile-cruise-"+uuid.NewString()); err != nil {
+			app.Log(ctx).Named("ptz").Warn("巡航轨迹对账查询下发失败", zap.String("event", "ptz.cruise_reconcile_failed"),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
+				logging.Error(err))
+		}
+		if !includeDetail {
+			return
+		}
+		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrack, trackID, "reconcile-cruise-detail-"+uuid.NewString()); err != nil {
+			app.Log(ctx).Named("ptz").Warn("巡航轨迹详情对账查询下发失败", zap.String("event", "ptz.cruise_detail_reconcile_failed"),
+				zap.Uint("channel_id", target.ChannelID),
+				zap.String("channel_code", target.ChannelCode),
+				zap.Int("track_id", trackID),
+				logging.Error(err))
+		}
+	})
+}
+
+func (dc *DeviceMgmtController) respondCruiseCreate(c *gin.Context, channel *gbmodels.GbChannel, request cruiseTrackCreateRequest, steps []gin.H, completed int, status, errMsg string, reconciled bool) {
+	body := gin.H{
+		"channelId":          channel.ChannelID,
+		"trackId":            *request.TrackID,
+		"totalStops":         len(request.Stops),
+		"completedStops":     completed,
+		"status":             status,
+		"reconciled":         reconciled,
+		"reconcileScheduled": true,
+		"steps":              steps,
+	}
+	if errMsg != "" {
+		body["error"] = errMsg
+		response.SetBusinessResult(c, 4200, false)
+		c.JSON(200, gin.H{"code": 4200, "message": "巡航建立部分失败", "data": body})
+		return
+	}
+	dc.Success(c, body)
+}
+
+func (dc *DeviceMgmtController) UpdatePTZHomePosition(c *gin.Context) {
+	request, failure := decodeHomePositionResourceRequest(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	idempotencyKey, failure := homePositionIdempotencyKey(request, c.GetHeader("Idempotency-Key"))
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	channel, failure := dc.loadHomePositionChannel(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	target, failure := dc.loadHomePositionTarget(c, channel)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	actorID, actorDeptID, failure := dc.loadHomePositionActor(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		writeHomePositionFailure(c, homePositionFailure(http.StatusServiceUnavailable, ptz.ErrorCodeHomePositionUnavailable, "PTZ Service 未就绪", nil))
+		return
+	}
+
+	enabled := *request.Enabled
+	payload := map[string]interface{}{"enabled": enabled}
+	var resetTime, presetID *int
+	if enabled {
+		resetTime, presetID = request.ResetTime, request.PresetID
+		payload["resetTime"] = *resetTime
+		payload["presetId"] = *presetID
+	}
+	op, err := service.Execute(c.Request.Context(), target, ptz.Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "home_position", IdempotencyKey: idempotencyKey,
+		Payload: payload, ResponseRequired: true, MaxAttempts: 1,
+		ActorID: actorID, ActorDeptID: actorDeptID,
+		// Carry the profile onto the operation so the scheduler's rebuild path
+		// uses the same charset/declaration as this first send instead of
+		// falling back to the 2016 compatibility profile.
+		Profile: target.Profile,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildHomePositionControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.HomePositionControl{
+				Enabled: enabled, ResetTime: resetTime, PresetIndex: presetID,
+			})
+		},
+	})
+	if err != nil {
+		writeHomePositionFailure(c, homePositionOperationFailure(err))
+		return
+	}
+	dc.Success(c, gin.H{
+		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": "home_position", "sn": op.SN, "status": op.Status,
+	})
+}

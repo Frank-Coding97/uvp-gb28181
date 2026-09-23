@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · Logo System v1</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --primary: #1890FF;
+  --primary-dark: #096DD9;
+  --primary-light: #69C0FF;
+  --text: #333;
+  --text-secondary: #666;
+  --text-hint: #999;
+  --border: #E8E8E8;
+  --bg: #F0F2F5;
+  --white: #FFFFFF;
+  --ink: #0A1424;
+}
+html, body { min-height: 100%; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  padding: 40px 32px 80px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+
+.head { padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .18em;
+  color: var(--text-hint);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+h1 { font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+.lede {
+  margin-top: 12px;
+  max-width: 70ch;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.lede code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  background: rgba(0,0,0,.05);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+h2.section {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-hint);
+  margin: 40px 0 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* === Specimen card === */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.card.dark { background: var(--ink); }
+.card.gray { background: #fafafa; }
+.card-stage {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+}
+.card-meta {
+  border-top: 1px solid var(--border);
+  padding: 12px 18px;
+  background: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.card.dark .card-meta { background: #0d1929; border-top-color: rgba(255,255,255,.08); color: rgba(255,255,255,.6); }
+.card-meta .name { color: var(--text); font-weight: 500; font-family: "JetBrains Mono", monospace; }
+.card.dark .card-meta .name { color: rgba(255,255,255,.85); }
+.card-meta .size { color: var(--text-hint); font-family: "JetBrains Mono", monospace; }
+
+/* === Size scaling specimens === */
+.size-row {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px 32px;
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.size-row.dark { background: var(--ink); }
+.size-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.size-item .label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--text-hint);
+  letter-spacing: .08em;
+}
+.size-row.dark .size-item .label { color: rgba(255,255,255,.5); }
+
+/* === Real-world simulation: brand bar === */
+.sim-section { display: flex; flex-direction: column; gap: 20px; }
+.sim-bar {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sim-bar-top {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--white);
+}
+.sim-bar-top.dark { background: var(--ink); border-bottom-color: rgba(255,255,255,.08); }
+.sim-bar-top img { height: 28px; }
+.sim-bar-top .nav {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.sim-bar-top.dark .nav { color: rgba(255,255,255,.6); }
+.sim-bar-meta {
+  padding: 10px 24px;
+  background: #fafafa;
+  font-size: 12px;
+  color: var(--text-hint);
+  font-family: "JetBrains Mono", monospace;
+  border-top: 1px solid var(--border);
+}
+
+/* === Sidebar simulation === */
+.sim-sidebar {
+  width: 220px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sim-sidebar-head {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sim-sidebar-head img { height: 28px; }
+.sim-sidebar-nav { padding: 8px 0; }
+.sim-sidebar-nav .item {
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sim-sidebar-nav .item.active {
+  color: var(--primary);
+  background: rgba(24,144,255,.06);
+  border-left: 3px solid var(--primary);
+  padding-left: 17px;
+  font-weight: 500;
+}
+.sim-sidebar-nav .item .dot { width: 14px; height: 14px; background: currentColor; opacity: .35; border-radius: 3px; }
+
+/* === Favicon strip — browser tab simulation === */
+.tab-strip {
+  background: linear-gradient(180deg, #e4e6eb 0%, #d1d4d9 100%);
+  border-radius: 8px 8px 0 0;
+  padding: 8px 8px 0;
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  background: var(--white);
+  border-radius: 6px 6px 0 0;
+  padding: 8px 12px 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tab.inactive { background: #c8ccd2; color: var(--text-hint); }
+.tab img { width: 16px; height: 16px; }
+.tab .x { margin-left: auto; opacity: .5; font-size: 14px; line-height: 1; }
+.tab-window {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-top: none;
+  padding: 16px 20px;
+  font-size: 12px;
+  color: var(--text-hint);
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* === Color tokens === */
+.tokens {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.token {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.token-swatch { height: 72px; }
+.token-meta { padding: 10px 14px; font-size: 12px; }
+.token-meta .name { font-weight: 600; color: var(--text); }
+.token-meta .hex { font-family: "JetBrains Mono", monospace; color: var(--text-hint); margin-top: 2px; font-size: 11px; }
+.token-meta .role { font-size: 11px; color: var(--text-hint); margin-top: 4px; }
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="eyebrow">Logo System · v1 · Hand-coded SVG</div>
+    <h1>UVP Logo · 精修版</h1>
+    <p class="lede">
+      基于 V4(U 内信号弧) + V6(干净字形) + V5(spec 副线)合成,纯手写 SVG 矢量。
+      四种形态:<code>full lockup</code> · <code>wordmark compact</code> · <code>square mark</code> · <code>favicon</code>。
+      签名细节:U 字开口处的<strong>三道信号弧 + 中心点</strong>,跟登录页 03c 拓扑同一套几何语言。
+    </p>
+  </div>
+
+  <!-- 1. 四种形态 -->
+  <h2 class="section">01 · Four Forms</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-full.svg" alt="UVP Full" style="height: 80px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-full.svg</span>
+        <span class="size">320×80 · 登录页 / 首屏</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-wordmark.svg" alt="UVP Wordmark" style="height: 56px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-wordmark.svg</span>
+        <span class="size">165×64 · 顶部 brand-bar</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-mark.svg" alt="UVP Mark" style="height: 80px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-mark.svg</span>
+        <span class="size">64×64 · 移动端 / 卡片角落</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-favicon.svg" alt="UVP Favicon" style="height: 80px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-favicon.svg</span>
+        <span class="size">32×32 · 浏览器 tab</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 深底反白测试 -->
+  <h2 class="section">02 · On Dark Background</h2>
+  <p class="lede" style="margin: 0 0 12px;">登录页 03c 用深蓝底,验证 logo 在深底是否压得住。</p>
+  <div class="grid">
+    <div class="card dark">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-mark.svg" alt="" style="height: 96px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-mark.svg / dark</span>
+        <span class="size">不变,自带蓝底</span>
+      </div>
+    </div>
+
+    <div class="card dark">
+      <div class="card-stage">
+        <img src="../src/assets/logo/uvp-favicon.svg" alt="" style="height: 64px"/>
+      </div>
+      <div class="card-meta">
+        <span class="name">uvp-favicon.svg / dark</span>
+        <span class="size">同上</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 缩放可读性 -->
+  <h2 class="section">03 · Scaling — Down to 16px</h2>
+  <p class="lede" style="margin: 0 0 12px;">favicon 缩到 16px 是否还能识别。</p>
+  <div class="size-row">
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 16px; height: 16px"/>
+      <span class="label">16</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 24px; height: 24px"/>
+      <span class="label">24</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 32px; height: 32px"/>
+      <span class="label">32</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 48px; height: 48px"/>
+      <span class="label">48</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 64px; height: 64px"/>
+      <span class="label">64</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-favicon.svg" style="width: 96px; height: 96px"/>
+      <span class="label">96</span>
+    </div>
+  </div>
+
+  <div class="size-row" style="margin-top: 12px">
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-mark.svg" style="width: 32px; height: 32px"/>
+      <span class="label">mark · 32</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-mark.svg" style="width: 48px; height: 48px"/>
+      <span class="label">48</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-mark.svg" style="width: 64px; height: 64px"/>
+      <span class="label">64</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-mark.svg" style="width: 96px; height: 96px"/>
+      <span class="label">96</span>
+    </div>
+    <div class="size-item">
+      <img src="../src/assets/logo/uvp-mark.svg" style="width: 128px; height: 128px"/>
+      <span class="label">128</span>
+    </div>
+  </div>
+
+  <!-- 4. 真实场景:浏览器 tab -->
+  <h2 class="section">04 · In Context — Browser Tab</h2>
+  <div style="max-width: 720px">
+    <div class="tab-strip">
+      <div class="tab">
+        <img src="../src/assets/logo/uvp-favicon.svg" alt=""/>
+        <span>UVP 控制台</span>
+        <span class="x">×</span>
+      </div>
+      <div class="tab inactive">
+        <span style="width: 16px; height: 16px; background: #aaa; border-radius: 3px; display: inline-block"></span>
+        <span>其他网站</span>
+        <span class="x">×</span>
+      </div>
+    </div>
+    <div class="tab-window">
+      ▸ https://uvp.example.com/dashboard
+    </div>
+  </div>
+
+  <!-- 5. 真实场景:登录页 brand-bar -->
+  <h2 class="section">05 · In Context — Login Page Top Bar</h2>
+  <div class="sim-section">
+    <div class="sim-bar">
+      <div class="sim-bar-top">
+        <img src="../src/assets/logo/uvp-full.svg" alt="UVP"/>
+        <div class="nav"><span>登录</span><span>帮助</span></div>
+      </div>
+      <div class="sim-bar-meta">登录页 · 浅色顶栏 · uvp-full.svg @ height: 28px</div>
+    </div>
+
+    <div class="sim-bar">
+      <div class="sim-bar-top dark">
+        <img src="../src/assets/logo/uvp-mark.svg" alt="UVP" style="height: 36px"/>
+        <span style="color: rgba(255,255,255,.85); font-weight: 600; margin-left: -4px">UVP 统一视频接入平台</span>
+        <div class="nav"><span>v2.3.0</span></div>
+      </div>
+      <div class="sim-bar-meta">登录页 · 深色顶栏(03c hero) · uvp-mark.svg @ 36px + 文字</div>
+    </div>
+  </div>
+
+  <!-- 6. 真实场景:主控台侧边栏 -->
+  <h2 class="section">06 · In Context — Console Sidebar</h2>
+  <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap">
+    <div class="sim-sidebar">
+      <div class="sim-sidebar-head">
+        <img src="../src/assets/logo/uvp-wordmark.svg" alt="UVP"/>
+      </div>
+      <div class="sim-sidebar-nav">
+        <div class="item active"><span class="dot"></span>首页概览</div>
+        <div class="item"><span class="dot"></span>设备管理</div>
+        <div class="item"><span class="dot"></span>通道管理</div>
+        <div class="item"><span class="dot"></span>视频调阅</div>
+        <div class="item"><span class="dot"></span>日志中心</div>
+      </div>
+    </div>
+
+    <div class="sim-sidebar" style="width: 64px">
+      <div class="sim-sidebar-head" style="padding: 0; justify-content: center">
+        <img src="../src/assets/logo/uvp-mark.svg" alt="UVP" style="height: 32px"/>
+      </div>
+      <div class="sim-sidebar-nav">
+        <div class="item active" style="padding: 10px 0; justify-content: center"><span class="dot"></span></div>
+        <div class="item" style="padding: 10px 0; justify-content: center"><span class="dot"></span></div>
+        <div class="item" style="padding: 10px 0; justify-content: center"><span class="dot"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. 色板 -->
+  <h2 class="section">07 · Brand Tokens</h2>
+  <div class="tokens">
+    <div class="token">
+      <div class="token-swatch" style="background: #1890FF"></div>
+      <div class="token-meta">
+        <div class="name">Primary</div>
+        <div class="hex">#1890FF</div>
+        <div class="role">主色 · UVP 字标 · 按钮</div>
+      </div>
+    </div>
+    <div class="token">
+      <div class="token-swatch" style="background: #096DD9"></div>
+      <div class="token-meta">
+        <div class="name">Primary Dark</div>
+        <div class="hex">#096DD9</div>
+        <div class="role">GB 徽章底 · 副标号 · hover 态</div>
+      </div>
+    </div>
+    <div class="token">
+      <div class="token-swatch" style="background: #69C0FF"></div>
+      <div class="token-meta">
+        <div class="name">Primary Light</div>
+        <div class="hex">#69C0FF</div>
+        <div class="role">U 内信号弧 · 装饰</div>
+      </div>
+    </div>
+    <div class="token">
+      <div class="token-swatch" style="background: #6B7280"></div>
+      <div class="token-meta">
+        <div class="name">Spec Gray</div>
+        <div class="hex">#6B7280</div>
+        <div class="role">spec 副标 · 辅助文字</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

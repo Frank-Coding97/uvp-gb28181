@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>前端按钮 → 菜单管理库 对账审计（2026-09-18）</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1c2024; --ink-2:#4b5563; --ink-3:#6b7280;
+    --line:#e5e7eb; --brand:#1d4ed8; --ok:#0f766e; --warn:#b45309; --bad:#b91c1c;
+    --ok-bg:#ecfdf5; --warn-bg:#fffbeb; --bad-bg:#fef2f2; --code-bg:#f3f4f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65;font-size:14px}
+  .wrap{max-width:1100px;margin:0 auto;padding:36px 24px 72px}
+  h1{font-size:24px;margin:0 0 6px;letter-spacing:.2px}
+  .sub{color:var(--ink-3);font-size:13px;margin-bottom:26px}
+  .sub code{background:var(--code-bg);padding:1px 5px;border-radius:4px}
+  h2{font-size:16px;margin:34px 0 12px;padding-left:10px;border-left:3px solid var(--brand)}
+  p{margin:8px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:14px 0}
+  .verdict{display:flex;gap:14px;align-items:flex-start;background:var(--ok-bg);border:1px solid #a7f3d0;border-radius:10px;padding:18px 20px;margin:18px 0}
+  .verdict .tag{flex:none;font-size:22px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .kpi b{display:block;font-size:22px;line-height:1.2}
+  .kpi span{font-size:12px;color:var(--ink-3)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden;font-size:13px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f2f5;font-weight:600;color:var(--ink-2);font-size:12.5px}
+  tr:last-child td{border-bottom:none}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;background:var(--code-bg);padding:1px 5px;border-radius:4px;word-break:break-all}
+  pre{background:#111827;color:#e5e7eb;border-radius:9px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.6}
+  pre code{background:none;color:inherit;padding:0}
+  .badge{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid}
+  .b-ok{color:var(--ok);border-color:#a7f3d0;background:var(--ok-bg)}
+  .b-warn{color:var(--warn);border-color:#fde68a;background:var(--warn-bg)}
+  .b-bad{color:var(--bad);border-color:#fecaca;background:var(--bad-bg)}
+  .note{color:var(--ink-3);font-size:12.5px;margin-top:6px}
+  ol,ul{margin:8px 0 8px 22px;padding:0}
+  li{margin:5px 0}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>前端按钮 → 菜单管理库 对账审计</h1>
+  <div class="sub">
+    仓库 <code>UVP-GB28181</code> · 分支 <code>develop</code> @ <code>fe843033</code><br />
+    时间 2026-09-18 · 业务库 <code>192.168.10.220 / uvp_gb28181</code>（MySQL）<br />
+    对账三方：<b>前端源码</b> ↔ <b>sys_menu 实库</b> ↔ <b>按钮权限目录</b> <code>server/resource/database/gb28181/button-permissions.json</code>
+  </div>
+
+  <div class="verdict">
+    <div class="tag">✅</div>
+    <div>
+      <b>核心问题（前端该进菜单的按钮有没有进库）：全部进了，缺口 0。</b><br />
+      前端 153 处权限判定、135 个权限码（全部为字符串字面量，无动态拼接），逐个都能在
+      <code>sys_menu</code> 找到对应行。<br />
+      但扫描顺带查出 <b>库内 3 个孤儿按钮</b>、<b>目录 2 处陈旧登记</b>、<b>生成物 3 条漂移</b>，
+      以及仓库自带的按钮目录门禁<b>当前是红的</b>。
+    </div>
+  </div>
+
+  <h2>一、口径与总量</h2>
+  <div class="grid">
+    <div class="kpi"><b>153</b><span>前端权限判定位点</span></div>
+    <div class="kpi"><b>135</b><span>前端引用权限码</span></div>
+    <div class="kpi"><b>154</b><span>库内 type=3 按钮行</span></div>
+    <div class="kpi"><b>149</b><span>目录登记的按钮</span></div>
+    <div class="kpi"><b>0</b><span>前端→库 缺口</span></div>
+    <div class="kpi"><b>3</b><span>库内孤儿按钮</span></div>
+  </div>
+
+  <table>
+    <tr><th>对象</th><th>数量</th><th>说明</th></tr>
+    <tr><td><code>sys_menu</code> 活跃行</td><td>197</td><td>type=1 目录 5 · type=2 页面 38 · type=3 按钮 154</td></tr>
+    <tr><td><code>sys_api</code> 活跃行</td><td>396</td><td>—</td></tr>
+    <tr><td><code>sys_menu_api</code> 绑定</td><td>417</td><td>151 个按钮至少绑 1 个 API</td></tr>
+    <tr><td>库内权限码合计</td><td>160</td><td>154 按钮 + 6 页面级</td></tr>
+    <tr><td>目录 <code>buttons</code> / <code>pagePermissions</code></td><td>149 / 5</td><td>另 <code>actions</code> 174（扫描全量）、<code>excludedActions</code> 2（有意排除）</td></tr>
+  </table>
+  <p class="note">
+    <code>excludedActions</code> 两条（操作日志详情、插件详情）是弹窗复用列表页查看权限，属有意不登记，不是漏项。
+  </p>
+
+  <h2>二、前端 → 库（用户问题的正面回答）</h2>
+  <div class="card">
+    <p><span class="badge b-ok">0 缺口</span> 没有任何一个前端在用的权限码在库里缺失 —— 不存在"按钮永远不显示"的权限断链。</p>
+    <p><b>反向：</b>库里有 <b>25 个权限码前端当前未引用</b>。其中大部分是<b>页面级权限</b>（如
+      <code>gb28181:alarm:view</code>、<code>system:login-log:list</code>、<code>gb28181:security:*</code>），
+      由 <code>sys_menu.permission</code> + 路由控制可见性，本来就不该出现在页面按钮的 <code>v-hasPerm</code> 里；
+      另有目录里已注明「前端接线后续」的若干码（如 <code>gb28181:home:view</code>、<code>gb28181:sip:trace:view</code>）。
+      不构成缺陷，但可视为<b>待接线清单</b>。</p>
+  </div>
+
+  <h2>三、库内结构问题（会在菜单管理页面上真实表现）</h2>
+
+  <table>
+    <tr><th>#</th><th>问题</th><th>证据</th><th>影响</th></tr>
+    <tr>
+      <td>1</td>
+      <td><span class="badge b-bad">高</span> 3 个孤儿按钮<br />
+        <code>system:param:add / :edit / :delete</code><br />
+        id 140480 / 140481 / 140482</td>
+      <td><code>parent_id=140436</code>，而 140436 行已被物理删除，库里不存在<br />
+        应用日志实时告警：<code>menu tree orphan detected node_id=1404xx parent_id=140436</code>（今天 17:29、17:31 各一次）</td>
+      <td>这 3 个按钮挂在已消失的 <code>/system/sysparam</code> 下，<b>菜单管理树里渲染不出来</b>，也无法在界面上重新归属</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><span class="badge b-warn">中</span> 1 个按钮挂错父<br />
+        <code>gb28181:zlm:scheduler:manage</code>（140413）</td>
+      <td>库内父 = <code>/media/nodes</code>；目录写 <code>/media/scheduling</code></td>
+      <td>属<b>目录陈旧</b>：<code>2026-09-17-scheduler-permission-parent.sql</code> 有意把「调度策略」并入节点管理，目录没同步；运行时无害，但文档与实库不一致</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><span class="badge b-warn">中</span> 目录仍登记已退役权限<br />
+        <code>gb28181:cascade:reconnect</code></td>
+      <td>库内该行已于 2026-09-11 被 <code>2026-09-11-cascade-reconnect-retire.sql</code> 软删；关联 API <code>POST /api/gb28181/cascade/platforms/:id/reconnect</code> 也已下线；前端 grep 无引用</td>
+      <td>目录里这条按钮 + 1 条 API 是<b>指向已不存在端点的孤儿登记</b>。风险点：目录迁移的判据是
+        <code>WHERE NOT EXISTS (... deleted_at IS NULL)</code>，软删行不算"存在" ⇒ <b>任何环境重放该迁移会把已退役权限复活</b>（现有环境已记录 applied 不会再跑，但新环境手工重放会中招）</td>
+    </tr>
+  </table>
+
+  <h2>四、目录与生成物漂移（影响新装环境）</h2>
+  <div class="card">
+    <p><span class="badge b-bad">门禁红</span> <code>python3 scripts/button-catalog.py --check</code> 失败，报 6 个文件漂移：</p>
+    <table>
+      <tr><th>漂移文件</th></tr>
+      <tr><td><code>migrations/2026-09-05-button-permission-catalog.sql</code> / <code>-postgresql</code> / <code>-sqlserver</code></td></tr>
+      <tr><td><code>uvp-gb28181.sql</code> / <code>postgresql_converted.sql</code> / <code>sqlserver_converted.sql</code>（三方言全量快照）</td></tr>
+    </table>
+    <p><b>漂移内容只有 3 条 API 绑定</b>（JSON 里已写，SQL 未重新生成）：</p>
+    <table>
+      <tr><th>API</th><th>归属按钮</th><th>220 实库状态</th></tr>
+      <tr><td><code>POST /api/gb28181/zlm/nodes/:id/enable</code></td><td><code>gb28181:zlm:node:manage</code></td><td>api id 583，已绑定 ✅</td></tr>
+      <tr><td><code>POST /api/gb28181/zlm/nodes/:id/disable</code></td><td><code>gb28181:zlm:node:manage</code></td><td>api id 584，已绑定 ✅</td></tr>
+      <tr><td><code>GET /api/gb28181/stream-probes/operations/:operationId</code></td><td><code>gb28181:play:diagnose</code></td><td>api id 579，已绑定 ✅</td></tr>
+    </table>
+    <p class="note">三条在 220 开发库由其它迁移补齐，<b>现有环境不受影响</b>；缺的是三方言快照，新装库要靠后续迁移兜住。</p>
+  </div>
+
+  <div class="card">
+    <p><span class="badge b-bad">6/6 用例红</span> <code>python3 scripts/button-catalog.test.py</code> 全部失败：</p>
+    <table>
+      <tr><th>用例</th><th>失败点</th></tr>
+      <tr><td>目录唯一码 + 源证据</td><td>源文件 <code>web/src/views/gb28181/device-mgmt/DeviceMaintenanceDialog.vue:190-219</code> 已不存在（现拆为 <code>DeviceMaintenanceMenu.vue</code> 等）</td></tr>
+      <tr><td>前端字面量必须已登记</td><td>6 个 openapi 码未登记（见下）</td></tr>
+      <tr><td>迁移幂等 + 保留既有授权</td><td>3 个方言均报 <code>gb28181:play:diagnose</code> 缺 API 链接（即上文漂移）</td></tr>
+    </table>
+    <p><b>6 个 openapi 权限码</b>——<span class="badge b-warn">注意：是"没进目录"，不是"没进库"</span></p>
+    <table>
+      <tr><th>权限码</th><th>库内 id</th><th>状态</th></tr>
+      <tr><td><code>gb28181:openapi:client:read</code></td><td>140492</td><td>✅ 在库</td></tr>
+      <tr><td><code>gb28181:openapi:client:create</code></td><td>140493</td><td>✅ 在库</td></tr>
+      <tr><td><code>gb28181:openapi:client:grant</code></td><td>140494</td><td>✅ 在库</td></tr>
+      <tr><td><code>gb28181:openapi:client:rotate</code></td><td>140495</td><td>✅ 在库</td></tr>
+      <tr><td><code>gb28181:openapi:client:status</code></td><td>140496</td><td>✅ 在库</td></tr>
+      <tr><td><code>gb28181:openapi:client:audit</code></td><td>140497</td><td>✅ 在库</td></tr>
+    </table>
+    <p class="note">由 <code>2026-09-05-openapi-aksk-permissions.sql</code> 建行、父节点 <code>/gb28181/openapi-client</code>（id 140498）、前端
+      <code>web/src/views/gb28181/openapi-client/index.vue</code> 在用 —— 但 <code>button-permissions.json</code> 从未收录。
+      这就是门禁变红的直接原因，也是唯一一处"前端按钮没进目录"。</p>
+  </div>
+
+  <h2>五、顺带核对（均有结论，无问题）</h2>
+  <table>
+    <tr><th>检查项</th><th>结论</th></tr>
+    <tr><td>按钮 → API 绑定</td><td>151 个按钮绑定了至少 1 个有效 API；<b>3 个刻意不绑</b>：<code>gb28181:play:share</code>、<code>gb28181:play:snapshot</code>、<code>gb28181:sip:trace:export</code>（纯前端动作，目录已注明"不伪造关联"）</td></tr>
+    <tr><td>动态拼接权限码</td><td>无。153 处判定全部是字符串字面量，静态扫描可信</td></tr>
+    <tr><td>角色授权分布</td><td>系统管理员 151 · 演示 50 · 游客 6</td></tr>
+    <tr><td>目录声明的 API 是否都已存在</td><td>仅 1 条缺失：<code>POST /api/gb28181/cascade/platforms/:id/reconnect</code>（即已退役的重连，同第三节第 3 条）</td></tr>
+  </table>
+
+  <h2>六、修复清单</h2>
+  <ol>
+    <li><b>补回 <code>/system/sysparam</code> 停用目录</b>（目录 <code>dormantPages</code> 的原意：hide=1 / disable=1），或把 3 个 <code>system:param:*</code> 按钮改挂到存在的 <code>/system/sysconfig</code> —— 消除 orphan 告警与不可见按钮。</li>
+    <li><b>目录 JSON 补 6 个 openapi 按钮</b>（含 <code>parentPath=/gb28181/openapi-client</code> 与 API 清单），并删掉 <code>gb28181:cascade:reconnect</code> 这条已退役登记。</li>
+    <li><b>把 <code>gb28181:zlm:scheduler:manage</code> 的 <code>parentPath</code> 改为 <code>/media/nodes</code></b>，与 09-17 迁移的合并决策对齐。</li>
+    <li><b>更新失效的源证据</b>：<code>DeviceMaintenanceDialog.vue</code> → 现 <code>DeviceMaintenanceMenu.vue</code> 等实际文件行号。</li>
+    <li>以上改完执行 <code>python3 scripts/button-catalog.py</code> 重新生成三方言 + 三快照，再 <code>--check</code> 与 <code>button-catalog.test.py</code> 应转绿。</li>
+  </ol>
+
+  <h2>七、复现命令</h2>
+  <pre><code>cd ~/code/uvp/UVP-GB28181
+
+# 1) 目录 ↔ 生成物一致性（当前红）
+python3 scripts/button-catalog.py --check
+
+# 2) 目录内建校验（当前 6/6 红）
+python3 scripts/button-catalog.test.py -v
+
+# 3) 前端字面量 ↔ 目录
+grep -rn -E "hasPermission\(|hasPerm\(|v-hasPerm" web/src --include=*.vue --include=*.ts | grep -v '\.test\.'
+
+# 4) 前端 ↔ 实库（220 / uvp_gb28181）
+mysql -h192.168.10.220 -uroot -p'Tudou@123' uvp_gb28181 -e \
+  "SELECT permission,title,parent_id FROM sys_menu WHERE type=3 AND deleted_at IS NULL ORDER BY permission;"
+
+# 5) 库内孤儿（当前 3 条 system:param:*）
+SELECT m.id,m.permission,m.parent_id FROM sys_menu m
+LEFT JOIN sys_menu p ON p.id=m.parent_id AND p.deleted_at IS NULL
+WHERE m.type=3 AND m.deleted_at IS NULL AND p.id IS NULL;</code></pre>
+
+</div>
+</body>
+</html>

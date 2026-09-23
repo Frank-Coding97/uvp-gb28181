@@ -1,0 +1,2045 @@
+import { http } from "@/utils/http";
+import { baseUrlApi } from "./utils";
+import { BaseResult } from "./types";
+import { getAccessToken } from "@/utils/auth";
+import type { ChannelVO } from "@/views/gb28181/device-mgmt/api";
+
+const silentRequestConfig = { showErrorMessage: false };
+
+// ===== 设备 =====
+
+export interface GbDevice {
+  id: number;
+  deviceId: string;
+  name: string;
+  transport: string;
+  manufacturer: string;
+  model: string;
+  firmware: string;
+  ip: string;
+  port: number;
+  status: number; // 0 离线 1 在线
+  online: boolean; // 从事实派生
+  keepaliveTime: string | null;
+  registerTime: string | null;
+  reportedVersion?: string | null;
+  reportedVersionAt?: string | null;
+  protocolOverride?: "auto" | "2016" | "2022" | string;
+  effectiveVersion?: "2016" | "2022" | string;
+  effectiveVersionSource?: "register" | "override" | "history" | "default" | string;
+  effectiveVersionAt?: string | null;
+}
+
+export interface GbChannel {
+  id: number;
+  deviceId: string;
+  channelId: string;
+  name: string;
+  manufacturer: string;
+  model: string;
+  parentId: string;
+  status: number;
+  streamId: string;
+  /** 通道音频开关（点播是否接收音频），播放器据此决定是否出声并显示音频控件 */
+  audioEnabled?: boolean;
+  /** 通道最新快照 URL(相对路径 /public/gb-channel-snapshot/...);无为空字符串或 null */
+  snapshotUrl?: string | null;
+  /** 通道最新快照抓拍时间(ISO 8601);无为 null */
+  snapshotAt?: string | null;
+}
+
+export type DeviceListResult = BaseResult<{
+  list: GbDevice[];
+  total: number;
+  page: number;
+  pageSize: number;
+}>;
+
+export type ChannelListResult = BaseResult<{
+  list: GbChannel[];
+  total: number;
+}>;
+
+// ===== 通道收藏 =====
+
+export interface ChannelFavoriteInput {
+  deviceCode: string;
+  channelCode: string;
+}
+export interface ChannelFavoriteItem {
+  id: number;
+  deviceCode: string;
+  channelCode: string;
+  deviceName: string;
+  channelName: string;
+  channel?: ChannelVO;
+}
+export interface ChannelFavoriteGroup {
+  id: number;
+  name: string;
+  items: ChannelFavoriteItem[];
+  availableCount: number;
+  unavailableCount: number;
+}
+export interface ChannelFavoriteAppendResult {
+  requestedCount: number;
+  addedCount: number;
+  skippedCount: number;
+}
+
+const channelFavoriteGroupsPath = "gb28181/channel-favorite-groups";
+export const listChannelFavoriteGroups = () =>
+  http.request<BaseResult<{ list: ChannelFavoriteGroup[] }>>("get", baseUrlApi(channelFavoriteGroupsPath));
+export const createChannelFavoriteGroup = (name: string, channels: ChannelFavoriteInput[]) =>
+  http.request<BaseResult<ChannelFavoriteGroup>>("post", baseUrlApi(channelFavoriteGroupsPath), { data: { name, channels } });
+export const appendChannelFavoriteGroup = (groupId: number, channels: ChannelFavoriteInput[]) =>
+  http.request<BaseResult<ChannelFavoriteAppendResult>>("post", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}/channels`), {
+    data: { channels }
+  });
+export const removeChannelFavoriteItem = (groupId: number, channel: ChannelFavoriteInput) =>
+  http.request<BaseResult<{ removed: boolean }>>("delete", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}/channels`), {
+    data: channel
+  });
+export const deleteChannelFavoriteGroup = (groupId: number) =>
+  http.request<BaseResult<{ deleted: boolean }>>("delete", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}`));
+
+// ===== 点播 =====
+
+export interface PlayResult {
+  lifecycleId?: string;
+  clientFeedbackToken?: string;
+  clientFeedbackExpiresAt?: number;
+  streamId: string;
+  ssrc: string;
+  app: string;
+  reused?: boolean;
+  status?: string;
+  node?: { id: number; name: string; host: string };
+  urls?: {
+    wsFlv?: string | null;
+    httpFlv?: string | null;
+    wssFlv?: string | null;
+    httpsFlv?: string | null;
+    wsFmp4?: string | null;
+    httpFmp4?: string | null;
+    wssFmp4?: string | null;
+    httpsFmp4?: string | null;
+    hls?: string | null;
+    httpsHls?: string | null;
+    wsTs?: string | null;
+    httpTs?: string | null;
+    wssTs?: string | null;
+    httpsTs?: string | null;
+    webrtc?: string | null;
+    webrtcs?: string | null;
+    rtmp?: string | null;
+    rtmps?: string | null;
+    rtsp?: string | null;
+    rtsps?: string | null;
+  };
+  urlWarnings?: string[];
+  defaultProtocol?: PlaybackProtocol;
+  protocol?: PlaybackProtocol;
+  url?: string;
+  zlmWebrtc?: boolean;
+  wsflvUrl: string;
+  httpFlvUrl: string;
+  hlsUrl: string;
+  expireAt: number;
+  authorizationExpiresAt?: number;
+}
+
+export type PlayApiResult = BaseResult<PlayResult>;
+
+export interface PlaybackClientFact {
+  event: "first_frame" | "player_error";
+  code?: "player_error" | "player_timeout";
+  clientElapsedMs: number;
+}
+
+export interface PlayLifecycleSummary {
+  lifecycleId: string;
+  deviceCode: string;
+  channelCode: string;
+  nodeId: number;
+  reused: boolean;
+  streamId: string;
+  ssrc: string;
+  currentStage: string;
+  mediaState: string;
+  clientState: string;
+  lifecycleState: string;
+  failureStage?: string;
+  reasonCode?: string;
+  reasonMessage?: string;
+  startedAt: string;
+  lastEventAt?: string;
+  finishedAt?: string;
+}
+
+export interface PlayLifecycleEvent {
+  sequence: number;
+  eventAt: string;
+  elapsedMs: number;
+  stage: string;
+  eventName: string;
+  factState: string;
+  source: string;
+  streamId?: string;
+  nodeId?: number;
+  ssrc?: string;
+  reused: boolean;
+  callId?: string;
+  cseq?: string;
+  reasonCode?: string;
+  reasonMessage?: string;
+}
+
+export interface PlayLifecycleQuery {
+  page?: number;
+  pageSize?: number;
+  from?: string;
+  to?: string;
+  deviceCode?: string;
+  channelCode?: string;
+  streamId?: string;
+  nodeId?: number;
+  lifecycleState?: string;
+  mediaState?: string;
+  clientState?: string;
+  failureStage?: string;
+}
+
+// ===== API =====
+
+/** 设备列表(分页) */
+export const listDevices = (params: { page?: number; pageSize?: number } = {}) =>
+  http.request<DeviceListResult>("get", baseUrlApi("gb28181/device/list"), { params });
+
+/** 某设备的通道列表 */
+export const listChannels = (deviceId: string) =>
+  http.request<ChannelListResult>("get", baseUrlApi(`gb28181/device/${deviceId}/channels`));
+
+/** 发起点播 */
+export const startPlay = (deviceId: string, channelId: string, options: { silent?: boolean } = {}) => {
+  const url = baseUrlApi(`gb28181/play/${deviceId}/${channelId}`);
+  return options.silent
+    ? http.request<PlayApiResult>("post", url, undefined, silentRequestConfig)
+    : http.request<PlayApiResult>("post", url);
+};
+
+/** 为固定播放地址刷新短期访问凭据。 */
+export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>
+  http.request<PlayApiResult>(
+    "post",
+    baseUrlApi(`gb28181/play/${deviceId}/${channelId}/authorization`),
+    undefined,
+    silentRequestConfig
+  );
+
+/**
+ * 停播响应
+ * - released=true:录像收尾后完成通道级停流,前端刷新列表清"直播中"徽章
+ */
+export interface StopPlayResult {
+  released: boolean;
+  streamId: string;
+}
+
+/** 停播 */
+export const stopPlay = (streamId: string) =>
+  http.request<BaseResult<StopPlayResult>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
+
+export const reportPlaybackClientEvent = (lifecycleId: string, token: string, data: PlaybackClientFact) =>
+  http.request<BaseResult<{ accepted: boolean }>>(
+    "post",
+    baseUrlApi(`gb28181/play/lifecycles/${lifecycleId}/client-events`),
+    { data, headers: { "X-Playback-Feedback-Token": token } },
+    silentRequestConfig
+  );
+
+export const listPlayLifecycles = (params: PlayLifecycleQuery = {}) =>
+  http.request<BaseResult<{ list: PlayLifecycleSummary[]; total: number; page: number; pageSize: number }>>(
+    "get",
+    baseUrlApi("gb28181/play/lifecycles"),
+    { params }
+  );
+
+export const getPlayLifecycle = (lifecycleId: string) =>
+  http.request<BaseResult<{ lifecycle: PlayLifecycleSummary; events: PlayLifecycleEvent[] }>>(
+    "get",
+    baseUrlApi(`gb28181/play/lifecycles/${lifecycleId}`)
+  );
+
+// ===== 国标级联 =====
+
+export type CascadeProfileOverride = "auto" | "2016" | "2022" | string;
+export type CascadeRegistrationState = "unregistered" | "registered" | "expired" | string;
+export type CascadeHeartbeatState = "unknown" | "healthy" | "stale" | string;
+export type CascadeOverallState = "online" | "offline" | string;
+
+export interface CascadePlatform {
+  id: number;
+  name: string;
+  upstreamServerId: string;
+  upstreamDomain: string;
+  host: string;
+  port: number;
+  localDeviceId: string;
+  localDomain: string;
+  localSipIp: string;
+  localSipPort: number;
+  mediaAdvertiseIp?: string;
+  authUsername?: string;
+  credentialNeedsReset?: boolean;
+  hasPassword: boolean;
+  profileOverride: CascadeProfileOverride;
+  effectiveVersion: string;
+  effectiveVersionFrom: string;
+  charsetOverride?: string;
+  registerExpires: number;
+  keepaliveInterval: number;
+  transport: "UDP" | "TCP" | string;
+  catalogBatchSize: number;
+  publishPlatform: boolean;
+  publishCivil: boolean;
+  publishGroup: boolean;
+  maxStreams: number;
+  ptzEnabled: boolean;
+  enabled: boolean;
+  configRevision: number;
+  projectionRevision: number;
+  registration: CascadeRegistrationState;
+  heartbeat: CascadeHeartbeatState;
+  overall: CascadeOverallState;
+  registerAt?: string | null;
+  registerExpiresAt?: string | null;
+  heartbeatAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  lastErrorAt?: string | null;
+}
+
+export type CascadePlatformInput = Omit<
+  CascadePlatform,
+  | "id"
+  | "credentialNeedsReset"
+  | "hasPassword"
+  | "effectiveVersion"
+  | "effectiveVersionFrom"
+  | "configRevision"
+  | "projectionRevision"
+  | "registration"
+  | "heartbeat"
+  | "overall"
+  | "registerAt"
+  | "registerExpiresAt"
+  | "heartbeatAt"
+  | "lastErrorCode"
+  | "lastErrorMessage"
+  | "lastErrorAt"
+> & { password?: string; retryPolicy?: string };
+
+export interface CascadeDeviceProjection {
+  id?: number;
+  platformId?: number;
+  sourceDeviceId: number;
+  publishedDeviceId: string;
+  name: string;
+  active?: boolean;
+}
+
+export interface CascadeChannelProjection {
+  id?: number;
+  platformId?: number;
+  deviceProjectionId?: number;
+  sourceDeviceId: number;
+  sourceChannelId: number;
+  publishedChannelId: string;
+  name: string;
+  parentOverride: string;
+  ptzAllowed: boolean;
+  active?: boolean;
+}
+
+export interface CascadeShares {
+  platformId: number;
+  revision: number;
+  devices: CascadeDeviceProjection[];
+  channels: CascadeChannelProjection[];
+}
+
+export interface CascadeListData {
+  list: CascadePlatform[];
+}
+
+export const listCascadePlatforms = () => http.request<CascadeListData>("get", baseUrlApi("gb28181/cascade/platforms"));
+
+export const getCascadePlatform = (id: number) =>
+  http.request<CascadePlatform>("get", baseUrlApi(`gb28181/cascade/platforms/${id}`));
+
+export const createCascadePlatform = (data: CascadePlatformInput) =>
+  http.request<CascadePlatform>("post", baseUrlApi("gb28181/cascade/platforms"), { data });
+
+export const updateCascadePlatform = (id: number, data: CascadePlatformInput, expectedRevision: number) =>
+  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}`), {
+    data: { ...data, expectedRevision }
+  });
+
+export const deleteCascadePlatform = (id: number) =>
+  http.request<{ ok: boolean }>("delete", baseUrlApi(`gb28181/cascade/platforms/${id}`));
+
+export const setCascadePlatformEnabled = (id: number, enabled: boolean, expectedRevision: number) =>
+  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/enabled`), {
+    data: { enabled, expectedRevision }
+  });
+
+export const pushCascadeCatalog = (id: number) =>
+  http.request<{ ok: boolean; platformId: number; items: number; batches: number }>(
+    "post",
+    baseUrlApi(`gb28181/cascade/platforms/${id}/push-catalog`)
+  );
+
+export const getCascadeShares = (id: number) =>
+  http.request<CascadeShares>("get", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`));
+
+export const replaceCascadeShares = (
+  id: number,
+  data: {
+    scope: "all" | "devices" | "channels";
+    devices: CascadeDeviceProjection[];
+    channels: CascadeChannelProjection[];
+    expectedProjectionRevision: number;
+  }
+) => http.request<CascadeShares>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`), { data });
+
+// ===== 多屏播放方案 =====
+
+export type PlaybackSchemeLayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
+
+export interface PlaybackSchemeSlotInput {
+  slotIndex: number;
+  deviceCode: string;
+  channelCode: string;
+}
+
+export interface PlaybackSchemeSummary {
+  id: number;
+  name: string;
+  layoutSize: PlaybackSchemeLayoutSize;
+  slotCount: number;
+  updatedAt: string;
+}
+
+export type PlaybackSchemeAvailability = "available" | "offline" | "missing" | "forbidden";
+
+export interface PlaybackSchemeSlot extends PlaybackSchemeSlotInput {
+  id: number;
+  deviceName: string;
+  channelName: string;
+  availability: PlaybackSchemeAvailability;
+  channelRecordId: number | null;
+  channelStatus: number | null;
+  audioEnabled: boolean;
+}
+
+export interface PlaybackSchemeDetail extends PlaybackSchemeSummary {
+  slots: PlaybackSchemeSlot[];
+}
+
+export interface PlaybackSchemeListData {
+  list: PlaybackSchemeSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PlaybackSchemePayload {
+  name: string;
+  layoutSize: PlaybackSchemeLayoutSize;
+  slots: PlaybackSchemeSlotInput[];
+}
+
+export const listPlaybackSchemes = (params: { page?: number; pageSize?: number; q?: string } = {}) =>
+  http.request<BaseResult<PlaybackSchemeListData>>("get", baseUrlApi("gb28181/playback-schemes"), { params });
+
+export const getPlaybackScheme = (id: number) =>
+  http.request<BaseResult<PlaybackSchemeDetail>>("get", baseUrlApi(`gb28181/playback-schemes/${id}`));
+
+export const createPlaybackScheme = (data: PlaybackSchemePayload) =>
+  http.request<BaseResult<PlaybackSchemeSummary>>("post", baseUrlApi("gb28181/playback-schemes"), { data });
+
+export const renamePlaybackScheme = (id: number, name: string) =>
+  http.request<BaseResult<{ id: number; name: string }>>("patch", baseUrlApi(`gb28181/playback-schemes/${id}`), {
+    data: { name }
+  });
+
+export const replacePlaybackSchemeLayout = (id: number, data: Omit<PlaybackSchemePayload, "name">) =>
+  http.request<BaseResult<PlaybackSchemeSummary>>("put", baseUrlApi(`gb28181/playback-schemes/${id}/layout`), { data });
+
+export const deletePlaybackScheme = (id: number) =>
+  http.request<BaseResult<{ id: number }>>("delete", baseUrlApi(`gb28181/playback-schemes/${id}`));
+
+export interface StreamMonitorTrack {
+  kind: "video" | "audio" | "unknown";
+  codec: string;
+  ready: boolean;
+  frames: number;
+  duration: number;
+  loss: number | null;
+  width: number;
+  height: number;
+  fps: number;
+  keyFrames: number;
+  gopSize: number;
+  gopIntervalMs: number;
+  sampleRate: number;
+  channels: number;
+  sampleBit: number;
+}
+
+export interface StreamMonitorSnapshot {
+  streamId: string;
+  collectedAt: string;
+  status: "online" | string;
+  node: { id: number; name: string; host: string };
+  quality: { bitrateKbps: number };
+  network: {
+    bytesSpeed: number;
+    totalBytes: number;
+    readerCount: number;
+    totalReaderCount: number;
+    aliveSecond: number;
+  };
+  tracks: StreamMonitorTrack[];
+  recording: { mp4: boolean; hls: boolean };
+}
+
+export const getStreamMonitor = (streamId: string) =>
+  http.request<BaseResult<StreamMonitorSnapshot>>(
+    "get",
+    baseUrlApi(`gb28181/play/${streamId}/monitor`),
+    undefined,
+    silentRequestConfig
+  );
+
+export interface ProbeSnapshot {
+  nodeId: number;
+  nodeName: string;
+  completedAt: string;
+  summary: {
+    sampleDurationMs: number;
+    frameCount: number;
+    totalBytes: number;
+    averageBitrateKbps: number;
+  };
+  video: {
+    codec: string;
+    frameCount: number;
+    keyFrameCount: number;
+    fps: number | null;
+    gop: number | null;
+    averageIntervalMs: number | null;
+  } | null;
+  audio: {
+    codec: string;
+    frameCount: number;
+    keyFrameCount: number;
+    fps: number | null;
+    gop: number | null;
+    averageIntervalMs: number | null;
+  } | null;
+  timestamps: {
+    videoDtsIntervalMeanMs: number | null;
+    arrivalJitterMs: number | null;
+    ptsDtsMaxMs: number | null;
+    avArrivalSkewMaxMs: number | null;
+  };
+  timeline: Array<{
+    sequence: number;
+    trackType: string;
+    codec: string;
+    keyFrame: boolean;
+    configFrame: boolean;
+    relativeTimeMs: number;
+    frameSize: number;
+  }>;
+  /** 为真表示 timeline 只保留了末尾一段，完整条数见 summary.frameCount。 */
+  timelineTruncated?: boolean;
+  health: {
+    status: "ok" | "warning" | "error" | string;
+    issues: Array<{ code: string; message: string; thresholdMs?: number; observedMs?: number }>;
+    thresholds: { largeArrivalGapMs: number; keyFrameWindowMs: number };
+  };
+}
+
+export type StreamProbeTaskStatus = "queued" | "sampling" | "completed" | "failed";
+
+export interface StreamProbeTask {
+  operationId: string;
+  streamId: string;
+  durationMs: number;
+  status: StreamProbeTaskStatus;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  deadlineAt: string;
+  snapshot?: ProbeSnapshot;
+  error?: string;
+}
+
+const streamProbeRequestConfig = { ...silentRequestConfig, timeout: 10000 };
+
+export const createStreamProbe = (streamId: string, durationMs = 3000) =>
+  http.request<BaseResult<StreamProbeTask>>(
+    "post",
+    baseUrlApi(`gb28181/stream-probes/${streamId}`),
+    { data: { durationMs } },
+    streamProbeRequestConfig
+  );
+
+export const getStreamProbeOperation = (operationId: string) =>
+  http.request<BaseResult<StreamProbeTask>>(
+    "get",
+    baseUrlApi(`gb28181/stream-probes/operations/${operationId}`),
+    undefined,
+    streamProbeRequestConfig
+  );
+
+export interface ControlCapability {
+  state: "supported" | "unsupported" | "unknown" | string;
+  reason: string;
+}
+
+export interface DeviceControlCapabilities {
+  basicPtz: ControlCapability;
+  iFrame: ControlCapability;
+  record: ControlCapability;
+  guard: ControlCapability;
+  alarmReset: ControlCapability;
+  teleBoot: ControlCapability;
+  dragZoom: ControlCapability;
+  /**
+   * A.2.3.1.14 目标跟踪。
+   * ⛔ 默认 `unknown` 是**正确结果**而不是"还没读"：它需要"全景相机球机"这种双目结构，
+   *    单目通道上报支持也没意义，所以后端只认设备自己的显式声明。
+   */
+  targetTrack?: ControlCapability;
+  broadcast?: ControlCapability;
+  talk?: ControlCapability;
+}
+
+export const getControlCapabilities = (channelId: number) =>
+  http.request<BaseResult<DeviceControlCapabilities>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/control-capabilities`),
+    undefined,
+    silentRequestConfig
+  );
+
+export type DeviceFactState = "on" | "off" | "armed" | "disarmed" | "alarm" | "unknown" | string;
+export type DeviceStatusFreshness = "fresh" | "stale" | "unknown" | string;
+export type AlarmTargetResolutionStatus = "resolved" | "ambiguous" | "unavailable" | string;
+
+export interface DeviceControlState {
+  recordState?: DeviceFactState;
+  guardState?: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  observedAt?: string | null;
+  source?: string;
+  sourceSn?: number;
+  sourceOperationId?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+export interface DeviceStatusFact {
+  state: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+export interface DeviceAlarmResolution {
+  status: AlarmTargetResolutionStatus;
+  source?: string;
+  targetCode?: string | null;
+  state: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  candidates: Array<{ code: string; name?: string }>;
+}
+
+export interface DeviceAlarmFact {
+  targetCode: string;
+  guardState: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  observedAt?: string | null;
+}
+
+export interface DeviceStatusRefreshOperationIds {
+  record?: string | null;
+  alarm?: string | null;
+}
+
+/**
+ * 设备在 DeviceStatus 应答里自报的事实。
+ *
+ * 每一项都可能是 null —— 那是"设备这次没上报这一项"，与 false / 0 不是一回事：
+ * alarmInputCount 为 0 是设备明确声明自己没有报警输入，null 才是"设备没提"。
+ * 展示时不要兜底成关闭。
+ */
+export interface DeviceReportedFacts {
+  online?: "online" | "offline" | string | null;
+  selfTest?: "ok" | "error" | string | null;
+  encode?: "on" | "off" | string | null;
+  deviceTime?: string | null;
+  /** 平台观测时刻 − 设备自报时刻（秒）。设备时间只精确到秒，±1 秒属正常量化误差。 */
+  clockSkewSeconds?: number | null;
+  /** 设备声明的报警输入数量；0 表示设备明确说自己没有报警输入。 */
+  alarmInputCount?: number | null;
+  observedAt?: string | null;
+}
+
+export interface DeviceStatusResult {
+  state?: DeviceControlState | null;
+  recordState?: DeviceFactState;
+  guardState?: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  completeness?: "complete" | "partial" | string;
+  record?: DeviceStatusFact | null;
+  alarmResolution?: DeviceAlarmResolution | null;
+  alarmFacts?: DeviceAlarmFact[];
+  deviceReport?: DeviceReportedFacts | null;
+  refreshOperationId?: string | null;
+  recordRefreshOperationId?: string | null;
+  alarmRefreshOperationId?: string | null;
+  refreshOperationIds?: DeviceStatusRefreshOperationIds | null;
+  refreshError?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+/** DeviceStatus refresh is asynchronous on the SIP side; refresh=true only starts it. */
+export const getDeviceStatus = (channelId: number, refresh = false) =>
+  http.request<BaseResult<DeviceStatusResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-status`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+/** A.2.6.16 的 Status 取值域（小写，与线上报文一致）。 */
+export type StorageCardState = "ok" | "formatting" | "unformatted" | "idle" | "error" | "unknown" | string;
+
+/**
+ * 一张存储卡的最近一次查询事实（GB/T 28181-2022 A.2.6.16 SDCardStatusInfo/Item）。
+ *
+ * 注意 Capacity/FreeSpace 单位都是 **MB**（标准原文「存储容量，单位：MB」），
+ * 服务端不做单位换算，换算交给展示层。
+ */
+export interface StorageCard {
+  id: number;
+  deviceId: number;
+  /** 本次查询用的目标编码：按设备查还是按通道查，决定这份卡列表属于哪条路径。 */
+  targetCode: string;
+  /** 标准里的 SD卡编号，从 1 开始。 */
+  cardId: number;
+  hddName: string;
+  status: StorageCardState;
+  /** 可选字段：只在 status=formatting 时有意义，0-100。null 表示设备没给。 */
+  formatProgress?: number | null;
+  capacityMb: number;
+  freeSpaceMb: number;
+  observedAt: string;
+  sourceSn?: number;
+}
+
+export interface StorageCardResult {
+  list: StorageCard[];
+  freshness: PTZResourceFreshness;
+  targetCode?: string;
+  observedAt?: string;
+  /** refresh=true 时服务端发起的 SIP 查询，前端据此轮询 operation 直到终态。 */
+  refreshOperationId?: string | null;
+  refreshError?: string | null;
+}
+
+/**
+ * 存储卡状态查询（GB/T 28181-2022 A.2.4.14 / A.2.6.16）。
+ *
+ * 与 device-status 同构：不带 refresh 只读平台缓存的事实；refresh=true 会先发起一次
+ * SDCardStatus 查询（SIP 应答异步），再用 refreshOperationId 去轮询。
+ * 空列表是合法结果（设备没装卡），不是错误。
+ */
+export const getChannelStorageCards = (channelId: number, refresh = false) =>
+  http.request<BaseResult<StorageCardResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/storage-cards`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+/**
+ * 下发存储卡格式化（GB/T 28181-2022 A.2.3.1.13 存储卡格式化控制命令）。
+ *
+ * ⛔ 走**独立路由** `.../storage-cards/format`，不是 `device-control` 的一个 action：
+ *    device-control 整条绑 `gb28181:device:control`，做成它的 action 就在 casbin 层
+ *    与普通设备控制同码，独立权限码 `gb28181:device:format_sd` 会形同虚设。
+ * ⛔ `cardIndex = 0` 是标准的**合法取值**（「该值0时，对所有存储卡进行格式化」），
+ *    所以调用方必须显式传数值，服务端也用 `*int` 区分"没传"（400）与"给了 0"。
+ * ⛔ `confirmed: true` 是服务端的硬门禁，缺了会被拒（破坏性动作不能靠默认值放行）；
+ *    统一在本函数里补上，调用方不需要（也不应该）自己再传一遍。
+ * ⛔ **无应答命令**（9.3.1 d)）：「已下发」不等于「已完成」，设备不会回执。
+ *    要判断成没成，只能再调 `getChannelStorageCards(channelId, true)` 查一次
+ *    （Status=formatting + FormatProgress，或已回到 ok/unformatted）。
+ */
+export const formatStorageCard = (channelId: number, data: { cardIndex: number; idempotencyKey?: string }) =>
+  http.request<BaseResult<DeviceOperationResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/storage-cards/format`),
+    { data: { ...data, confirmed: true } }
+  );
+
+/**
+ * 一条码流的最近一次回读事实（GB/T 28181-2022 A.2.6.9 ConfigDownload 应答）。
+ *
+ * ⛔ 五个取值列**原样是附录 G 的码值字符串**（如 videoFormat="2"、resolution="5"）。
+ * 后端不做码值→人读串的转换，展示层也不要就地转 —— 一律走 `videoParamCodec.ts`
+ * 那组纯函数，否则对账时比的是两套表示。
+ */
+export interface VideoParam {
+  id: number;
+  deviceId: number;
+  /** 本次回读用的目标编码：按设备查还是按通道查，决定这份配置属于哪条路径。 */
+  targetCode: string;
+  /** 标准里的一路码流编号：0=主码流，1=子码流 1 … */
+  streamNumber: number;
+  videoFormat: string;
+  resolution: string;
+  frameRate: string;
+  bitRateType: string;
+  /**
+   * 单位 kb/s（附录 G）。**条件必选**：仅 CBR(1) 时才有值。
+   * null = 设备这一帧没给这个元素（VBR 下本就该缺席），与"设备给了个 0"是两件事。
+   */
+  videoBitRate?: string | null;
+  observedAt: string;
+  sourceSn?: number;
+}
+
+/** 面板四态（+ 两个过渡态）。判据由后端单点推导，前端只负责选文案。 */
+export type VideoParamReconcileStateName = "never_read" | "pending" | "read_ok" | "type_absent" | "mismatch" | "failed";
+
+/**
+ * 「最近一次回读」的结论。⛔ 这是本面板与存储卡面板最大的不同：
+ * 写入的 ack（`Result=OK`）不构成终态（A.2.6.8 没有任何回显），
+ * 只有回读才说得清"设备认不认这个配置类型、值到底生效没有"。
+ */
+export interface VideoParamReconcile {
+  state: VideoParamReconcileStateName;
+  operationId?: string;
+  status?: string;
+  /** false = 设备回了 OK 但**没带** VideoParamAttribute 元素（= 不支持该类型）。 */
+  responseHasData?: boolean;
+  errorCode?: string;
+  /** 对账不一致时的逐格差异文本。 */
+  errorMessage?: string;
+  /** 设备侧原话（type_absent 的判定理由走这里）。 */
+  deviceError?: string;
+  completedAt?: string | null;
+  /** 该回读是否由一次下发派生（手动读取触发的回读不参与 mismatch 判定）。 */
+  derivedFromApply?: boolean;
+}
+
+export interface VideoParamResult {
+  list: VideoParam[];
+  freshness: PTZResourceFreshness;
+  targetCode?: string;
+  observedAt?: string;
+  /**
+   * 目录 `<Info>` 里的 StreamNumberList（2022 独有），决定面板按几段码流渲染。
+   * 空串 = 设备本次未上报目录属性，前端应退化成"按已回读到的行渲染"。
+   */
+  streamNumberList?: string;
+  /**
+   * 设备当前生效的协议版本（`gb_device.effective_version`）。
+   * ⛔ 只用来选提示措辞，**不参与任何门禁判断**：登记成 2022 的也可能没实现，
+   * 登记成 2016 的也可能提前实现 —— 唯一可靠判据是回读结果本身。
+   */
+  registeredVersion?: string;
+  reconcile: VideoParamReconcile;
+  /** refresh=true 时服务端发起的 SIP 读取，前端据此轮询 operation 直到终态。 */
+  refreshOperationId?: string | null;
+  refreshError?: string | null;
+}
+
+/** 下发的入参形状。⛔ streamNumber 必填：0 号是合法主码流，不能用"缺省"表达。 */
+export interface ApplyVideoParamItem {
+  streamNumber: number;
+  videoFormat: string;
+  resolution: string;
+  frameRate: string;
+  bitRateType: string;
+  /** 仅 CBR 必填；VBR 时留空（空串会被后端归一成"不发这个元素"）。 */
+  videoBitRate?: string | null;
+}
+
+export interface ApplyVideoParamsResult {
+  operationId?: string;
+  channelId?: string;
+  action: string;
+  sn?: number;
+  status?: PTZOperationStatus | string;
+  streamCount?: number;
+  /**
+   * ⛔ true 表示"命令已下发、结论未定"：ack 之后平台会自动回读对账，
+   * 界面必须轮询 GET 的 `reconcile` 收敛，不能把这次 200 当成功终态。
+   */
+  reconcilePending?: boolean;
+}
+
+/**
+ * 读取通道的视频参数（GB/T 28181-2022 A.2.4.7 ConfigDownload）。
+ *
+ * 与 storage-cards 同构：不带 refresh 只读平台缓存的事实；refresh=true 会先发起一次
+ * 读取（SIP 应答异步），再用 refreshOperationId 去轮询，收尾后重读一次。
+ * 空列表**不是**错误：可能是"还没读过"或"设备不认识这个配置类型"，看 `reconcile.state`。
+ */
+export const getChannelVideoParams = (channelId: number, refresh = false) =>
+  http.request<BaseResult<VideoParamResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/video-params`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+/**
+ * 下发通道的视频参数（GB/T 28181-2022 A.2.3.2.5 DeviceConfig）。
+ *
+ * ⛔ 写入**有副作用**（会真的改设备配置）：调用前必须先在本地校验取值
+ * （`videoParamCodec.ts` 的校验函数），否则服务端会拒发。
+ */
+export const applyChannelVideoParams = (channelId: number, items: ApplyVideoParamItem[], idempotencyKey?: string) =>
+  http.request<BaseResult<ApplyVideoParamsResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/video-params`), {
+    data: { items },
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+  });
+
+/* ───────────── 配置家族（A.2.4.7 查询 / A.2.3.2.5 下发）───────────── */
+
+/**
+ * 一条配置快照。
+ *
+ * ⛔ `payload` 的键名 = **标准元素名的小驼峰**（`timeEnable` / `left` / `weekDayNum`…），
+ * 与后端 `manscdp` 结构上的 json tag 逐字对应。这同一套键名同时是三处的词汇表：
+ * 本接口、库里的 `gb_device_config.payload_json`、对账差异里的字段路径。
+ *
+ * ⛔ 所以**不要**把 `deviceConfigGroups.ts` 里的表单字段 id 当成 payload 键 ——
+ * 那条映射是展示层的事（4 个 mask 对应一个 RegionList/Item 数组，不是一对一），
+ * 由 `deviceConfigPayload.ts` 负责翻译，别在这里再造一套。
+ */
+export interface DeviceConfigEntry {
+  configType: string;
+  payload: Record<string, unknown>;
+  observedAt: string;
+  sourceOperationId?: string | null;
+}
+
+export interface DeviceConfigResult {
+  list: DeviceConfigEntry[];
+  /**
+   * **本次问过的类型里**没有数据的那几个。
+   * ⛔ 不是"所有没数据的类型"：没问过的类型当然没数据，列出来就是报假问题。
+   */
+  absentTypes?: string[];
+  /** 本次实际问过的类型（缺省 = 全部 8 组）。 */
+  requestedTypes?: string[];
+  /** 本次读取用的目标编码（设备查 or 通道查）。 */
+  targetCode?: string;
+  /** 设备登记的协议版本；⛔ 只用于选提示措辞，不参与任何门禁。 */
+  registeredVersion?: string;
+  freshness?: PTZResourceFreshness;
+  observedAt?: string;
+  reconcile: VideoParamReconcile;
+  refreshOperationId?: string | null;
+  refreshError?: string | null;
+}
+
+export interface ApplyDeviceConfigsResult {
+  operationId?: string;
+  channelId?: string;
+  action: string;
+  sn?: number;
+  status?: PTZOperationStatus | string;
+  /** 本次真的会发的类型集合（后端按标准顺序去重后的结果）。 */
+  configTypes?: string[];
+  /**
+   * ⛔ true 表示"命令已下发、结论未定"：写入应答（A.2.6.8）只有 Result、**没有回显**，
+   * 所以真正的结论由紧随其后的自动回读给出。界面必须轮询 GET 的 `reconcile` 收敛，
+   * 不能把这次 200 当成功终态。
+   */
+  reconcilePending?: boolean;
+}
+
+/**
+ * 读取通道的设备配置家族（GB/T 28181-2022 A.2.4.7 ConfigDownload）。
+ *
+ * 与 video-params / storage-cards 同构：不带 refresh 只读平台缓存的事实；
+ * refresh=true 会先发起一次 SIP 读取（应答异步），拿 refreshOperationId 轮询，
+ * 收尾后重读一次。空列表不是错误 —— 可能是"还没读过"，也可能是"设备不认识这个配置类型"，
+ * 两者靠 `reconcile.state` 与 `absentTypes` 区分。
+ */
+export const getChannelDeviceConfigs = (channelId: number, options: { refresh?: boolean; configTypes?: string[] } = {}) => {
+  const params: Record<string, unknown> = {};
+  if (options.refresh) params.refresh = true;
+  // ⛔ 只有调用方明确收窄时才带 configTypes：缺省由后端补成全部 8 组。
+  // 前端传空数组会让后端判成"未知/空"，而它本该是"全都要"。
+  if (options.configTypes?.length) params.configTypes = options.configTypes.join(",");
+  return http.request<BaseResult<DeviceConfigResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-configs`),
+    { params: Object.keys(params).length ? params : undefined },
+    silentRequestConfig
+  );
+};
+
+/**
+ * 下发通道的设备配置（GB/T 28181-2022 A.2.3.2.5 DeviceConfig）。
+ *
+ * `blocks` 就是协议层的容器结构本身（键名见 `DeviceConfigEntry.payload` 的说明）。
+ * ⛔ 写入有副作用（会真的改设备里的 OSD / 遮挡 / 录像计划）：调用前必须先在本地
+ * 按 `deviceConfigPayload.ts` 的规则校验，否则服务端会**拒发**（不是静默夹取）。
+ */
+export const applyChannelDeviceConfigs = (channelId: number, blocks: Record<string, unknown>, idempotencyKey?: string) =>
+  http.request<BaseResult<ApplyDeviceConfigsResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-configs`),
+    {
+      data: { blocks },
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    }
+  );
+
+export interface DeviceOperationResult {
+  operationId?: string;
+  channelId?: string;
+  action: string;
+  id?: number;
+  sn?: number;
+  status?: PTZOperationStatus | string;
+  responseRequired?: boolean;
+  deadlineAt?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  deviceResult?: string | null;
+  completedAt?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+  deduplicated?: boolean;
+  profileVersion?: "2016" | "2022" | string;
+}
+
+export const controlDevice = (channelId: number, data: Record<string, unknown>) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-control`), {
+    data
+  });
+
+/** A.2.3.1.14 `TargetTrack` 的取值域，原样是标准枚举（大写）。 */
+export type TargetTrackMode = "Auto" | "Manual" | "Stop";
+
+/**
+ * A.2.3.1.14 `TargetArea` 的六个子元素。
+ *
+ * ⛔ 单位是**像素**，且六项必须同一坐标系。标准原文（A.2.3.1.14 注释）：
+ *    「由于平台与设备画面比例大小不同，需要进行比例关系转化。因此，平台应提供画面大小：
+ *     **播放窗口**长度像素值和播放窗口宽度像素值。」
+ *    ⇒ `length`/`width` 传的是**视频画面在页面上实际渲染的像素尺寸**，
+ *      其余四项是相对该画面左上角的框选坐标。设备负责把它换算成自己的画幅。
+ * ⛔ 这与遮挡（`PictureMask`）的基准**刻意不同**：那边是"设备声明的图像尺寸、
+ *    与页面渲染无关"；这边是"页面渲染的播放窗口尺寸"。两套基准别互相套用。
+ */
+export interface TargetTrackArea {
+  /** 播放窗口长度像素值（= 画面渲染宽度）。 */
+  length: number;
+  /** 播放窗口宽度像素值（= 画面渲染高度）。 */
+  width: number;
+  midPointX: number;
+  midPointY: number;
+  lengthX: number;
+  lengthY: number;
+}
+
+/**
+ * 平台最近一次下发的目标跟踪指令。
+ *
+ * ⛔⛔ 这是**平台的意图**，不是"设备现在在跟踪什么"。理由见
+ *    `TargetTrackReadModel.deviceAcknowledged`。
+ */
+export interface TargetTrackIntent {
+  id: number;
+  deviceId: number;
+  channelId: number;
+  /** 报文里 SN 之后的 DeviceID —— 标准尾注「指全景相机的球机通道」。 */
+  targetCode: string;
+  mode: TargetTrackMode;
+  /** 报文里的 `DeviceID2`（全景相机中的全景通道 ID），没指定时为空串。 */
+  deviceId2: string;
+  /** 六项框选坐标：`Auto`/`Stop` 下**整体缺席**（null），不是 0。 */
+  areaLength?: number | null;
+  areaWidth?: number | null;
+  areaMidPointX?: number | null;
+  areaMidPointY?: number | null;
+  areaLengthX?: number | null;
+  areaLengthY?: number | null;
+  sourceOperationSeq: number;
+  sourceSn: number;
+  sourceOperationId?: string | null;
+  commandedBy: number;
+  commandedByDeptId: number;
+  commandedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TargetTrackReadModel {
+  /** nil = 这台设备还没被下发过目标跟踪。 */
+  intent: TargetTrackIntent | null;
+  /**
+   * ⛔ 恒 `false`，而且**不是**"暂时还没收到应答"。
+   *
+   * 目标跟踪在 GB/T 28181-2022 里是无应答命令（9.3.1 d) + 表 1 序号 13 =「（无）」），
+   * 而且 2022 全文**没有**任何"目标跟踪状态查询/上报"的命令
+   * ⇒ 设备永远不会回执，平台也永远无法知道设备实际在跟踪什么。
+   * 界面必须照这个字段措辞（「已下发，设备未回执」），不许写「正在跟踪」，
+   * 也不许轮询等一个不会来的回执。
+   */
+  deviceAcknowledged: boolean;
+  /** 恒 `false`（无应答命令），前端据此决定措辞与是否需要轮询。 */
+  responseRequired: boolean;
+  /** 服务端给的坐标口径说明，直接展示即可（见 TargetTrackArea 的注释）。 */
+  windowHint: string;
+  /** 设备自报的能力，默认 unknown（不因 PTZType 像就升格）。 */
+  capability: ControlCapability;
+  targetCode: string;
+}
+
+/**
+ * 读平台最近一次下发的目标跟踪指令（GB/T 28181-2022 A.2.3.1.14）。
+ *
+ * ⛔ 纯本地读：**不产生任何 SIP 报文**。因为标准里根本没有"查设备在跟踪什么"
+ *    这条命令 —— 能查的只有平台自己发过什么。
+ */
+export const getChannelTargetTrack = (channelId: number) =>
+  http.request<BaseResult<TargetTrackReadModel>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/target-track`),
+    undefined,
+    silentRequestConfig
+  );
+
+export interface TargetTrackCommand {
+  mode: TargetTrackMode;
+  /** 全景通道 ID，可选；不传表示沿用设备默认（报文里不带 `DeviceID2`）。 */
+  deviceId2?: string;
+  /** `Manual` 必填；`Stop` 不许带（带了两侧都会被拒）。 */
+  area?: TargetTrackArea;
+  idempotencyKey?: string;
+}
+
+export interface TargetTrackSubmitResult extends DeviceOperationResult {
+  /** 下发后落库的意图，同一个响应里回给前端，省掉一次读接口（也就没有中间态）。 */
+  intent?: TargetTrackIntent | null;
+  /** 恒 false，理由见 TargetTrackReadModel。 */
+  deviceAcknowledged?: boolean;
+  windowHint?: string;
+}
+
+/**
+ * 下发目标跟踪（GB/T 28181-2022 A.2.3.1.14）。
+ *
+ * ⛔ 走**独立路由** `.../target-track`，不是 `device-control` 的一个 action：
+ *    device-control 整条绑 `gb28181:device:control`，而本能力需要自己的读接口
+ *    与返回体（含意图快照）。权限照 video-params 先例：读 ptz:view / 写 ptz:control。
+ * ⛔ **无应答命令**：「已下发」不等于「设备在做」。设备不会回执，平台也无从查证，
+ *    所以调用方拿到的 `status=sent` 就是终态，别去轮询 operation 等终态变更。
+ * ⛔ `Manual` 必须带 `area`（缺了会被 400 拒），`Stop` **不许**带 `area`。
+ *    坐标用 `targetTrackBox.ts` 的纯函数从框选结果算出来，别在手写处各算一套。
+ */
+export const setChannelTargetTrack = (channelId: number, data: TargetTrackCommand) =>
+  http.request<BaseResult<TargetTrackSubmitResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/target-track`), {
+    data
+  });
+
+export type DeviceSnapshotState = "creating" | "waiting" | "receiving" | "completed" | "failed";
+
+export interface DeviceSnapshotFile {
+  name: string;
+  size: number;
+  receivedAt: string;
+  url: string;
+}
+
+export interface DeviceSnapshotSession {
+  sessionId: string;
+  operationId?: string;
+  channelId: string;
+  channelCode: string;
+  deviceCode: string;
+  snapNum: number;
+  interval: number;
+  state: DeviceSnapshotState;
+  receivedCount: number;
+  notifiedCount: number;
+  files: DeviceSnapshotFile[];
+  error?: string;
+}
+
+export const createDeviceSnapshotSession = (channelId: number, data: { snapNum: number; interval: number }) =>
+  http.request<BaseResult<DeviceSnapshotSession>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/snapshot-sessions`),
+    { data, headers: { "Idempotency-Key": `snapshot-${channelId}-${Date.now()}` } }
+  );
+
+export const getDeviceSnapshotSession = (channelId: number, sessionId: string) =>
+  http.request<BaseResult<DeviceSnapshotSession>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/snapshot-sessions/${encodeURIComponent(sessionId)}`)
+  );
+
+// ===== 图像库（历史抓拍图） =====
+
+/** 抓拍来源。与后端 `SnapshotSourceXxx` 常量一一对应。 */
+export type SnapshotLibrarySource = "device" | "zlm" | "browser";
+
+/**
+ * 图像库列表行。字段与后端 `snapshotLibraryVO` **逐字对应**（少一个就是永远读不到）。
+ *
+ * ⛔ `channelId`/`deviceId` 是**平台主键**，而 `channelCode`/`deviceCode` 是**国标编码** ——
+ * 后端查询参数刻意只用编码（`deviceCode`），因为设备/通道列表接口里同名的 `deviceId`
+ * 一直是"20 位编码"，两处同名不同义最容易接错。
+ */
+export interface SnapshotLibraryItem {
+  id: number;
+  deviceId: number;
+  channelId: number;
+  /** 通道国标编码 */
+  channelCode: string;
+  channelName: string;
+  /** 设备 20 位国标编码 */
+  deviceCode: string;
+  deviceName: string;
+  /** 平台生成的抓拍会话 id；非会话抓拍（如平台抓帧）为空 */
+  sessionId?: string;
+  fileName: string;
+  /** 字节数 */
+  size: number;
+  md5: string;
+  /** 拍摄时刻（从文件名反解），筛选时间窗打的就是这一列 */
+  capturedAt: string;
+  source: SnapshotLibrarySource;
+  /**
+   * 取图地址（稳定读接口 `/api/gb28181/device-mgmt/snapshots/:id/content`）。
+   * ⛔ 该接口在鉴权组内，`<img>` 直用会 401，必须补 `?token=`（见 snapshotLibraryState.ts）。
+   */
+  url: string;
+  createdAt: string;
+}
+
+export interface SnapshotLibraryPage {
+  list: SnapshotLibraryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SnapshotLibraryQuery {
+  page?: number;
+  pageSize?: number;
+  /** 平台主键（通道表） */
+  channelId?: number;
+  /** 通道国标编码 */
+  channelCode?: string;
+  /** 设备 20 位国标编码（⚠️ 不是平台主键） */
+  deviceCode?: string;
+  sessionId?: string;
+  source?: SnapshotLibrarySource | "";
+  /** RFC3339，按 `capturedAt` 过滤 */
+  from?: string;
+  to?: string;
+}
+
+/**
+ * 图像库列表。只出元数据 + 取图地址，**不内联图片字节**
+ * （一个通道一年的图能上万张，列表内联会把响应打爆）。
+ *
+ * 参数归一（丢空值 / 时间格式化）在 `snapshotLibraryState.ts` 的 normalizeSnapshotQuery，
+ * 那里是纯函数、有单测；本函数只做请求。
+ */
+export const listSnapshotLibrary = (params: SnapshotLibraryQuery = {}) =>
+  http.request<BaseResult<SnapshotLibraryPage>>("get", baseUrlApi("gb28181/device-mgmt/snapshots"), { params });
+
+export const controlPtz = (channelId: number, data: Record<string, unknown>) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz`), { data });
+
+export const controlPtzPrecise = (channelId: number, data: Record<string, unknown>) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/precise`), {
+    data
+  });
+
+export const controlPtzExtended = (channelId: number, data: Record<string, unknown>) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/extended`), {
+    data
+  });
+
+/**
+ * 自动扫描(PTZCmd 89H / 8AH)。走的是 `/ptz/extended` 这条已登记权限的通道,
+ * 没有新增路由 —— 新增路由要补 sys_api / sys_menu_api 的三方言迁移。
+ *
+ * ⛔ 扫描与巡航不是一回事:巡航按一串预置位顺序走,扫描只有**左右两个边界**,
+ *    所以没有点位列表可回读 —— 边界靠把云台转到目标位置后再下发 `scan_set_left/right`。
+ *    `value` 只在 `scan_set_speed` 时带,取值域 1-4095(12 位,与巡航速度同量纲)。
+ */
+export type PtzScanAction = "scan_start" | "scan_stop" | "scan_set_left" | "scan_set_right" | "scan_set_speed";
+
+export const controlPtzScan = (channelId: number, data: { action: PtzScanAction; id: number; value?: number }) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/extended`), {
+    data
+  });
+
+export const createPtzPreset = (channelId: number, data: { presetId: number; name: string; idempotencyKey?: string }) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets`), {
+    data
+  });
+
+export const callPtzPreset = (channelId: number, presetId: number) =>
+  http.request<BaseResult<DeviceOperationResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets/${presetId}/call`)
+  );
+
+export const deletePtzPreset = (channelId: number, presetId: number) =>
+  http.request<BaseResult<DeviceOperationResult>>(
+    "delete",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets/${presetId}`)
+  );
+
+export const controlPtzCruise = (
+  channelId: number,
+  data: { action: "start" | "stop" | "delete"; trackId: number; idempotencyKey?: string }
+) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise`), {
+    data
+  });
+
+/**
+ * 雨刷开关（GB/T 28181 **A.3.7 表 A.11**：`8CH` 开 / `8DH` 关，字节5 = 辅助开关编号）。
+ *
+ * ⛔ 请求体里**没有 auxiliaryId**：标准在这一节只命名了编号 1 = 雨刷
+ * （原注：「字节5为辅助开关编号，取值为"1"表示雨刷控制。」），编号由后端固定成
+ * `manscdp.PTZAuxiliaryIDWiper`，前端不要自己拼一个编号上去 —— 那等于把标准未定义的
+ * 编号 2~5 语义带进协议面。
+ *
+ * ⛔ 返回值只能读成「指令已下发」：附录 A **没有回读辅助开关状态的手段**
+ * （2022 全文"辅助开关"只出现在 A.3.7；A.2.4 查询闭集 1~14、A.2.6 应答闭集 1~16 都没有它），
+ * 所以界面上不许出现"正在刮水"这类措辞。
+ */
+export const controlPtzWiper = (channelId: number, data: { action: "on" | "off"; idempotencyKey?: string }) =>
+  http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/wiper`), {
+    data
+  });
+
+export interface CruiseTrackCreateResult {
+  channelId: string;
+  trackId: number;
+  totalStops: number;
+  completedStops: number;
+  status: string;
+  steps: Array<Record<string, unknown>>;
+  reconciled?: boolean;
+  reconcileScheduled?: boolean;
+  error?: string;
+}
+
+export type PTZResourceFreshness = "fresh" | "stale" | "unknown" | string;
+
+export interface CruiseTrackPointResource {
+  presetIndex?: number;
+  presetId?: number;
+  stayTime?: number;
+  dwellSec?: number;
+  /** 点位巡航速度。⛔ 取值域是 **1..4095(12 位)**,与创建/控制侧同一个量纲。
+   *
+   * 这里原来写的是「查询端 1..15」,于是前端把设备如实回显的 128 判成非法值丢掉,
+   * 界面上退化成「设备速度未知」,看着像设备没回话。1..15 这个数在标准里找不到依据:
+   * 控制层 `0x86`/`0x87` 的参数明确是 01H–FFFH,平台的 `BuildExtendedPTZControlWithProfile`
+   * 与应答解析 `ParseCruiseTrackResponse` 都按 1..4095 处理,前后端三处必须同域。 */
+  speed?: number | null;
+}
+
+/** 显式查询 DTO。跟创建/控制是同一个量纲,不是另一套值域。 */
+export type CruiseTrackQueryPoint = CruiseTrackPointResource;
+
+/** 创建/控制入参,12 位值(1..4095);传 0 表示本次不下发该项。 */
+export interface CruiseTrackControlInput {
+  trackId: number;
+  name?: string;
+  speed?: number;
+  dwellSec?: number;
+  stops: Array<{ presetId: number }>;
+  replaceExisting?: boolean;
+  idempotencyKey?: string;
+}
+
+export interface CruiseTrackDetailResource {
+  trackId?: number;
+  name?: string;
+  sumNum?: number;
+  cruisePoints?: CruiseTrackPointResource[];
+  stops?: CruiseTrackPointResource[];
+  /** 组级速度,同样是 12 位值(1..4095),与创建/控制侧一致。 */
+  speed?: number | null;
+  dwellSec?: number | null;
+  source?: string;
+}
+
+/** 设备资源回读(`?refresh=true`)的统一返回形状 —— 预置位与巡航共用。
+ *
+ *  ⛔ 这两个字段只在刷新时出现,而且是**异步**语义:`refreshOperationId` 是"这次查询"
+ *  的操作号,设备应答落地之前 `list` 里还是查询前的旧数据;`refreshError` 是"查询根本
+ *  没发出去"的原因(设备离线、PTZ Service 未就绪等)。
+ *
+ *  所以前端**不能**看到 HTTP 200 就当同步完成 —— 必须拿 operationId 去轮询 PTZ 操作
+ *  到终止态再重读,否则设备稍慢一点界面就什么都不变(见 PlayConsoleLinked 的
+ *  `waitPTZOperationSettled`)。 */
+export interface PTZResourceListResult<T> {
+  list: T[];
+  freshness: PTZResourceFreshness;
+  refreshOperationId?: string;
+  refreshError?: string;
+}
+
+export interface CruiseTrackResource {
+  id?: number;
+  trackId: number;
+  name?: string;
+  enabled?: boolean | null;
+  detail?: string | CruiseTrackDetailResource | null;
+  updatedAt?: string;
+}
+
+export type CruiseTrackListResult = PTZResourceListResult<CruiseTrackResource>;
+
+export const createCruiseTrack = (channelId: number, data: CruiseTrackControlInput) =>
+  http.request<BaseResult<CruiseTrackCreateResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise/tracks`),
+    { data }
+  );
+
+export const listPtzPresets = (channelId: number, refresh = false) =>
+  http.request<BaseResult<PTZResourceListResult<Record<string, unknown>>>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+export const listCruiseTracks = (channelId: number, refresh = false) =>
+  http.request<BaseResult<CruiseTrackListResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+export interface CruiseTrackDetailResult {
+  track: CruiseTrackResource;
+  freshness: PTZResourceFreshness;
+  refreshOperationId?: string;
+  refreshError?: string;
+}
+
+/** 单条巡航轨迹回读(`CruiseTrackQuery` / A.2.6.14)。
+ *
+ * 列表查询(`CruiseTrackListQuery`)的设备应答里**只有编号和名字** —— 标准
+ * A.2.6.13 的元素表就是 `<Number/>` + `<Name/>`,没有点位集合。所以「设备上这
+ * 条轨迹走哪几个预置位」只能靠这一条命令逐条问。设备侧发现的轨迹(平台从没下发
+ * 过)因此必须走这里才能从「点位待查询」变成真实的点位链。
+ *
+ * `refresh=true` 时才真的下发查询;设备应答是异步的,返回的是**查询前**的缓存行
+ * 加上 `refreshOperationId`,调用方要拿这个 id 去轮询 PTZ 操作,落地后重读列表。 */
+export const getCruiseTrack = (channelId: number, trackId: number, refresh = false) =>
+  http.request<BaseResult<CruiseTrackDetailResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks/${trackId}`),
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
+  );
+
+export type HomePositionSource = "device_query" | "control_ack" | "legacy_profile";
+export type HomePositionVerification = "verified" | "unverified";
+export type HomePositionFreshness = "fresh" | "stale" | "unknown";
+export type HomePositionSupportStatus = "supported" | "unsupported" | "unknown";
+export type PTZOperationStatus = "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
+
+export interface HomePositionConfig {
+  enabled: boolean;
+  resetTime: number | null;
+  presetId: number | null;
+  confirmedAt: string;
+  source: HomePositionSource;
+  verification: HomePositionVerification;
+}
+
+export interface HomePositionSupport {
+  status: HomePositionSupportStatus;
+  reason: string;
+}
+
+export interface HomePositionControl {
+  status: "idle" | "pending" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
+  operationId: string | null;
+  action: string | null;
+  errorCode: string | null;
+  deadlineAt: string | null;
+}
+
+export interface HomePositionRefresh {
+  status: "idle" | "pending" | "succeeded" | "succeeded_no_data" | "timeout" | "failed";
+  operationId: string | null;
+  errorCode: string | null;
+  deadlineAt: string | null;
+}
+
+export interface HomePositionResult {
+  homePosition: HomePositionConfig | null;
+  controlSupport: HomePositionSupport;
+  querySupport: HomePositionSupport;
+  freshness: HomePositionFreshness;
+  control: HomePositionControl;
+  refresh: HomePositionRefresh;
+}
+
+export interface PTZOperation {
+  operationId: string;
+  status: PTZOperationStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  responseRequired?: boolean;
+  deviceResult?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+  deduplicated?: boolean;
+  completedAt: string | null;
+  deadlineAt: string | null;
+}
+
+export type HomePositionPatch = { enabled: false } | { enabled: true; resetTime: number; presetId: number };
+
+export interface HomePositionUpdateResult {
+  operationId: string;
+  sn: number;
+  channelId: string;
+  action: "home_position";
+  status: PTZOperationStatus;
+}
+
+export const getHomePosition = (channelId: number, refresh = false, idempotencyKey?: string) =>
+  http.request<BaseResult<HomePositionResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/home-position`),
+    {
+      params: refresh ? { refresh: true } : undefined,
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    },
+    silentRequestConfig
+  );
+
+export const updateHomePosition = (channelId: number, data: HomePositionPatch, idempotencyKey?: string) =>
+  http.request<BaseResult<HomePositionUpdateResult>>(
+    "patch",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/home-position`),
+    {
+      data,
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    }
+  );
+
+export const getPtzOperation = (channelId: number, operationId: string) =>
+  http.request<BaseResult<PTZOperation>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/operations/${operationId}`),
+    undefined,
+    silentRequestConfig
+  );
+
+export const getPtzPreciseStatus = (channelId: number, refresh = false) =>
+  http.request<BaseResult<{ state: Record<string, unknown> | null; freshness: string }>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/precise-status`),
+    { params: refresh ? { refresh: true } : undefined }
+  );
+
+/** 上行入口描述。地址由平台按请求实际到达的 host 拼装,不含媒体节点信息。 */
+export interface TalkUplinkDescriptor {
+  protocol: string;
+  url: string;
+  contentType: string;
+  /** 跨网段所需的 STUN/TURN。为空表示节点未开 RTC,此时仅同网段可用。 */
+  iceServers?: { urls: string[] }[];
+}
+
+export interface TalkCreateResult {
+  sessionId: string;
+  mode: "broadcast" | "talk";
+  state: string;
+  expiresAt: string;
+  uplink: TalkUplinkDescriptor;
+}
+
+export interface TalkSessionView {
+  sessionId: string;
+  mode: "broadcast" | "talk";
+  state: string;
+  phase?: string;
+  expiresAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+}
+
+export const createTalkSession = (channelId: number, mode: "broadcast" | "talk") =>
+  http.request<BaseResult<TalkCreateResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/talk-sessions`), {
+    data: { mode }
+  });
+
+export const getTalkSession = (channelId: number, sessionId: string) =>
+  http.request<BaseResult<TalkSessionView>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/talk-sessions/${sessionId}`)
+  );
+
+export const deleteTalkSession = (channelId: number, sessionId: string) =>
+  http.request<BaseResult<{ sessionId: string; state: string }>>(
+    "delete",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/talk-sessions/${sessionId}`)
+  );
+
+/** 更新设备信息 */
+export const updateDevice = (
+  deviceId: string,
+  data: { name?: string; manufacturer?: string; model?: string; firmware?: string }
+) => http.request<BaseResult<{ deviceId: string }>>("patch", baseUrlApi(`gb28181/device/${deviceId}`), { data });
+
+// ===== SIP 平台接入信息 =====
+
+export interface SipPlatformInfo {
+  version: string;
+  enabled: boolean;
+  serverId: string;
+  domain: string;
+  sipIp: string;
+  sipIps: string[];
+  sipPort: number;
+  transport: string[];
+  passwordMasked: string;
+  registerUri: string;
+  listenIp: string;
+  advertiseIp: string;
+  deploymentMode?: SipDeploymentMode;
+  configStatus: "configured" | "unconfigured";
+  runtime: SipRuntimeStatus;
+  restartRequired: boolean;
+}
+
+export const fetchSipPlatformInfo = () => http.request<BaseResult<SipPlatformInfo>>("get", baseUrlApi("gb28181/sip/platform"));
+
+// ===== 国标服务配置 =====
+
+export interface PositionHistoryConfig {
+  enabled: boolean;
+  retentionDays: number;
+}
+
+export const fetchPositionHistoryConfig = () =>
+  http.request<BaseResult<PositionHistoryConfig>>("get", baseUrlApi("gb28181/sip/service-config/position-history"));
+
+export const updatePositionHistoryConfig = (config: PositionHistoryConfig) =>
+  http.request<BaseResult<PositionHistoryConfig>>("put", baseUrlApi("gb28181/sip/service-config/position-history"), {
+    data: config
+  });
+
+export interface SDPExtensionConfig {
+  enabled: boolean;
+}
+
+export const fetchSDPExtensionConfig = () =>
+  http.request<BaseResult<SDPExtensionConfig>>("get", baseUrlApi("gb28181/sip/service-config/sdp-extension"));
+
+export const updateSDPExtensionConfig = (enabled: boolean) =>
+  http.request<BaseResult<SDPExtensionConfig>>("put", baseUrlApi("gb28181/sip/service-config/sdp-extension"), {
+    data: { enabled }
+  });
+
+export interface SyncChannelsOnOnlineConfig {
+  enabled: boolean;
+}
+
+export const fetchSyncChannelsOnOnlineConfig = () =>
+  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("get", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"));
+
+export const updateSyncChannelsOnOnlineConfig = (enabled: boolean) =>
+  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("put", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"), {
+    data: { enabled }
+  });
+
+export interface OnlineOnHeartbeatConfig {
+  enabled: boolean;
+}
+
+export const fetchOnlineOnHeartbeatConfig = () =>
+  http.request<BaseResult<OnlineOnHeartbeatConfig>>("get", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"));
+
+export const updateOnlineOnHeartbeatConfig = (enabled: boolean) =>
+  http.request<BaseResult<OnlineOnHeartbeatConfig>>("put", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"), {
+    data: { enabled }
+  });
+
+export interface SaveAlarmMessagesConfig {
+  enabled: boolean;
+}
+
+export const fetchSaveAlarmMessagesConfig = () =>
+  http.request<BaseResult<SaveAlarmMessagesConfig>>("get", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"));
+
+export const updateSaveAlarmMessagesConfig = (enabled: boolean) =>
+  http.request<BaseResult<SaveAlarmMessagesConfig>>("put", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"), {
+    data: { enabled }
+  });
+
+export interface SIPCommandTimeoutConfig {
+  timeoutSec: number;
+}
+
+export const fetchSIPCommandTimeoutConfig = () =>
+  http.request<BaseResult<SIPCommandTimeoutConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"));
+
+export const updateSIPCommandTimeoutConfig = (timeoutSec: number) =>
+  http.request<BaseResult<SIPCommandTimeoutConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"), {
+    data: { timeoutSec }
+  });
+
+export interface PreallocationModeConfig {
+  enabled: boolean;
+}
+
+export const fetchPreallocationModeConfig = () =>
+  http.request<BaseResult<PreallocationModeConfig>>("get", baseUrlApi("gb28181/sip/service-config/preallocation-mode"));
+
+export const updatePreallocationModeConfig = (enabled: boolean) =>
+  http.request<BaseResult<PreallocationModeConfig>>("put", baseUrlApi("gb28181/sip/service-config/preallocation-mode"), {
+    data: { enabled }
+  });
+
+export interface IgnoreChannelOfflineStatusNotifyConfig {
+  enabled: boolean;
+}
+
+export const fetchIgnoreChannelOfflineStatusNotifyConfig = () =>
+  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify")
+  );
+
+export const updateIgnoreChannelOfflineStatusNotifyConfig = (enabled: boolean) =>
+  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify"),
+    {
+      data: { enabled }
+    }
+  );
+
+export interface PTZDefaultSpeedConfig {
+  level: number;
+}
+
+export const fetchPTZDefaultSpeedConfig = () =>
+  http.request<BaseResult<PTZDefaultSpeedConfig>>("get", baseUrlApi("gb28181/sip/service-config/ptz-default-speed"));
+
+export const updatePTZDefaultSpeedConfig = (level: number) =>
+  http.request<BaseResult<PTZDefaultSpeedConfig>>("put", baseUrlApi("gb28181/sip/service-config/ptz-default-speed"), {
+    data: { level }
+  });
+
+export type ChannelStreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";
+export type PlaybackProtocol = "ws-flv" | "http-flv" | "hls" | "webrtc";
+
+export interface DefaultChannelStreamTransportConfig {
+  transport: ChannelStreamTransport;
+}
+
+export const fetchDefaultChannelStreamTransportConfig = () =>
+  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport")
+  );
+
+export const updateDefaultChannelStreamTransportConfig = (transport: ChannelStreamTransport) =>
+  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport"),
+    { data: { transport } }
+  );
+
+export interface DefaultPlaybackProtocolConfig {
+  protocol: PlaybackProtocol;
+}
+
+export const fetchDefaultPlaybackProtocolConfig = () =>
+  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/default-playback-protocol")
+  );
+
+export const updateDefaultPlaybackProtocolConfig = (protocol: PlaybackProtocol) =>
+  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/default-playback-protocol"),
+    { data: { protocol } }
+  );
+
+export interface PlaybackSettingsConfig {
+  playTimeoutMs: number;
+  onDemandLive: boolean;
+  cloudRecordingEnabled: boolean;
+}
+
+export const fetchPlaybackSettingsConfig = () =>
+  http.request<BaseResult<PlaybackSettingsConfig>>("get", baseUrlApi("gb28181/sip/service-config/playback-settings"));
+
+export const updatePlaybackSettingsConfig = (config: PlaybackSettingsConfig) =>
+  http.request<BaseResult<PlaybackSettingsConfig>>("put", baseUrlApi("gb28181/sip/service-config/playback-settings"), {
+    data: config
+  });
+
+export interface FixedAddressPlaybackConfig {
+  fixedAddressEnabled: boolean;
+  autoOnDemandEnabled: boolean;
+}
+
+export const fetchFixedAddressPlaybackConfig = () =>
+  http.request<BaseResult<FixedAddressPlaybackConfig>>("get", baseUrlApi("gb28181/sip/service-config/fixed-address-playback"));
+
+export const updateFixedAddressPlaybackConfig = (config: FixedAddressPlaybackConfig) =>
+  http.request<BaseResult<FixedAddressPlaybackConfig>>("put", baseUrlApi("gb28181/sip/service-config/fixed-address-playback"), {
+    data: config
+  });
+
+export interface PlayAuthConfig {
+  authEnabled: boolean;
+  authBindClientIP: boolean;
+  authTTLSeconds: number;
+  /** Read-only persistent OpenAPI media authorization requirement. */
+  authRequiredByOpenAPI?: boolean;
+  authConfigConflict?: boolean;
+}
+
+export const fetchPlayAuthConfig = () =>
+  http.request<BaseResult<PlayAuthConfig>>("get", baseUrlApi("gb28181/sip/service-config/play-auth"));
+
+export const updatePlayAuthConfig = (config: PlayAuthConfig) =>
+  http.request<BaseResult<PlayAuthConfig>>("put", baseUrlApi("gb28181/sip/service-config/play-auth"), { data: config });
+
+export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
+
+export interface GlobalSubscriptionConfig {
+  items: GlobalSubscriptionItem[];
+}
+
+export const fetchGlobalSubscriptionConfig = () =>
+  http.request<BaseResult<GlobalSubscriptionConfig>>("get", baseUrlApi("gb28181/sip/service-config/global-subscriptions"));
+
+export const updateGlobalSubscriptionConfig = (items: GlobalSubscriptionItem[]) =>
+  http.request<BaseResult<GlobalSubscriptionConfig>>("put", baseUrlApi("gb28181/sip/service-config/global-subscriptions"), {
+    data: { items }
+  });
+
+export interface DefaultChannelAudioConfig {
+  enabled: boolean;
+}
+
+export const fetchDefaultChannelAudioConfig = () =>
+  http.request<BaseResult<DefaultChannelAudioConfig>>("get", baseUrlApi("gb28181/sip/service-config/default-channel-audio"));
+
+export const updateDefaultChannelAudioConfig = (enabled: boolean) =>
+  http.request<BaseResult<DefaultChannelAudioConfig>>("put", baseUrlApi("gb28181/sip/service-config/default-channel-audio"), {
+    data: { enabled }
+  });
+
+export interface SIPLogConfig {
+  enabled: boolean;
+  retentionDays?: number;
+  applied: boolean;
+  applyError?: string;
+}
+
+export const fetchSIPLogConfig = () =>
+  http.request<BaseResult<SIPLogConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-log"));
+
+export const updateSIPLogConfig = (config: { enabled: boolean; retentionDays: number }) =>
+  http.request<BaseResult<SIPLogConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-log"), {
+    data: config
+  });
+
+export type SipDeploymentMode = "lan" | "public";
+// 2026-07-20 后端简化:runtime state 仍是六态,restart_required 语义已废弃(保留兼容枚举,新代码不产生).
+export type SipRuntimeState = "disabled" | "unconfigured" | "starting" | "running" | "failed" | "restart_required";
+
+export interface SipRuntimeStatus {
+  state: SipRuntimeState;
+  errorSummary?: string;
+  updatedAt: string;
+  startedAt?: string;
+}
+
+export interface SipConfigSummary {
+  deploymentMode: SipDeploymentMode;
+  listenIp: string;
+  advertiseIp: string;
+  advertiseIpInferred: boolean;
+  port: number;
+  domain: string;
+  serverId: string;
+  // 明文密码.已认证 + 有 SIP 配置权限的调用方才能拿到 —— 用户抄给设备用.
+  password: string;
+  hasPassword: boolean;
+}
+
+// SipSetupStatus 是 /api/gb28181/sip/setup/status 的响应.
+// 2026-07-20 起字段精简 —— 只保留 configStatus + config + runtime,不再有 onboardingStatus 四态.
+// 前端 gating 只看 runtime.state === "unconfigured".
+export interface SipSetupStatus {
+  configStatus: "configured" | "unconfigured";
+  config?: SipConfigSummary;
+  runtime: SipRuntimeStatus;
+}
+
+export interface SipNetworkAddress {
+  ip: string;
+  interfaceName?: string;
+  cidr: string;
+  loopback: boolean;
+  virtual: boolean;
+  recommended: boolean;
+  more: boolean;
+  listenOnly: boolean;
+}
+
+export interface SipNetworkInterfaces {
+  items: SipNetworkAddress[];
+  scanStatus: "ok" | "failed";
+  warning?: string;
+}
+
+export interface SaveSipConfigPayload {
+  deploymentMode: SipDeploymentMode;
+  listenIp: string;
+  advertiseIp: string;
+  advertiseIpInferred: boolean;
+  port: number;
+  domain: string;
+  serverId: string;
+  password?: string;
+}
+
+export const fetchSipSetupStatus = () => http.request<BaseResult<SipSetupStatus>>("get", baseUrlApi("gb28181/sip/setup/status"));
+
+export const fetchSipNetworkInterfaces = () =>
+  http.request<BaseResult<SipNetworkInterfaces>>("get", baseUrlApi("gb28181/sip/setup/network-interfaces"));
+
+// 保存后端会立即热启动 SIP,响应体带 reloadedOk 表示是否成功,失败时 reloadError 是原因字符串.
+export const saveSipSetupConfig = (data: SaveSipConfigPayload) =>
+  http.request<BaseResult<{ config: SipConfigSummary; reloadedOk: boolean; reloadError: string; runtime: SipRuntimeStatus }>>(
+    "put",
+    baseUrlApi("gb28181/sip/setup/config"),
+    { data }
+  );
+
+// 2026-07-20 后端不再持久化 skip 状态,仅返回 acknowledged 用于审计. 暂缓由前端 sessionStorage 记住.
+export const skipSipSetup = () =>
+  http.request<BaseResult<{ acknowledged: boolean }>>("post", baseUrlApi("gb28181/sip/setup/skip"));
+
+// ===== 扫码回填 SIP 接入信息 =====
+
+export interface SipQrToken {
+  token: string;
+  // 相对秒数而非绝对时间戳:前端以响应到达时刻起算倒计时,免受客户端时钟偏移影响.
+  expiresInSeconds: number;
+}
+
+/** 生成一次性接入 token(权限点 gb28181:sip:config:view) */
+export const generateSipQrToken = () => http.request<BaseResult<SipQrToken>>("post", baseUrlApi("gb28181/sip/qr/token"));
+
+// ===== SIP 信令看板 =====
+
+export const HEALTH_EMPTY = -1; // 后端 sentinel,前端识别后渲染 "--"
+
+export interface TransactionStat {
+  kind: string; // REGISTER / KEEPALIVE / CATALOG / INVITE / RECORD / ALARM / PTZ / BYE
+  labelZh: string;
+  labelEn: string;
+  todayCount: number;
+  successRate: number; // 0-1
+  trendPct: number;
+  alert: boolean;
+}
+
+export interface PulseSample {
+  t: number; // unix 秒
+  msgPerSec: number;
+  failPct: number; // 千分位 (0-1000)
+  known?: boolean; // false 表示该时间桶统计覆盖未知，不能当作 0
+}
+
+export interface AbnormalWindow {
+  startT: number;
+  endT: number;
+}
+
+export interface PulseData {
+  windowMinutes: number;
+  samples: PulseSample[];
+  abnormalWindows: AbnormalWindow[];
+}
+
+export interface DashboardSnapshot {
+  health: number; // -1 表示空数据
+  todayTotal: number;
+  todayAbnormal: number;
+  pending: number;
+  transactions: TransactionStat[];
+  pulse: PulseData;
+  partial?: boolean;
+  asOf: number;
+}
+
+export type SnapshotResult = BaseResult<DashboardSnapshot>;
+
+/** SIP 看板快照(REST 首屏) */
+export const fetchSipDashboardSnapshot = (params: { window?: string; precision?: string } = {}) =>
+  http.request<SnapshotResult>("get", baseUrlApi("gb28181/sip/dashboard/snapshot"), { params });
+
+/** SIP 看板 SSE 流地址(EventSource 用)
+ *
+ * - URL 走 `/api/...` 相对路径让 vite proxy / nginx 同源代理,避开 CORS + EventSource 无法带 Authorization 头的限制
+ * - 通过 `?token=xxx` 查询参数兜底鉴权(后端 `common.GetAccessToken` 已支持此通道)
+ */
+export const sipDashboardStreamUrl = (window = "60m", precision = "1m"): string => {
+  const t = getAccessToken();
+  const tokenPart = t?.accessToken ? `&token=${encodeURIComponent(t.accessToken)}` : "";
+  return `/api/gb28181/sip/dashboard/stream?window=${window}&precision=${precision}${tokenPart}`;
+};

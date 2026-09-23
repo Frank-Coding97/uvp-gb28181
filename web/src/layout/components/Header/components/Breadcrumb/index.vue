@@ -38,7 +38,8 @@ const breadcrumb = computed(() => {
   // 返回路径信息
   let list = findPathOfParentNode(routeTree.value, "name", route.name);
   if (!list) return [];
-  if (!routeTree.value[0].children) list.unshift(routeTree.value[0]);
+  const homeRoute = routeTree.value.find((item: any) => item.path === HOME_PATH);
+  if (homeRoute && homeRoute.name !== route.name && list[0]?.name !== homeRoute.name) list.unshift(homeRoute);
   return list;
 });
 

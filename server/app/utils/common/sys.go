@@ -1,10 +1,10 @@
 package common
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"regexp"
 	"strings"
 	"unicode"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // convertPathToWildcard 将路径中的参数（如 :roleId）转换为通配符 *

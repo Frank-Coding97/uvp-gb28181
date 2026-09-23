@@ -1,0 +1,503 @@
+package handler
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/emiago/sipgo/sip"
+
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+
+	"go.uber.org/zap"
+)
+
+// MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
+type MessageHandler struct {
+	recorder           metrics.Recorder // 可选:埋点 SIP 事务
+	catalogTrigger     CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
+	subscriptionWaker  SubscriptionWaker
+	alarmProcessor     AlarmMessageProcessor
+	ptzProcessor       PTZMessageProcessor
+	upgradeMu          sync.RWMutex
+	upgradeProcessor   UpgradeMessageProcessor
+	recordInfoMu       sync.RWMutex
+	recordInfoSink     RecordInfoSink
+	snapshotMu         sync.RWMutex
+	snapshotSink       SnapshotSink
+	playbackEndMu      sync.RWMutex
+	playbackEndSink    PlaybackEndSink
+	broadcastMu        sync.RWMutex
+	broadcastProcessor BroadcastMessageProcessor
+}
+
+type AlarmMessageProcessor interface {
+	OnAlarmMessage(context.Context, string, string, string, []byte) error
+}
+
+type PTZMessageProcessor interface {
+	OnPTZMessage(context.Context, string, string, string, []byte) error
+}
+
+// UpgradeMessageProcessor gets first routing priority for DeviceControl
+// responses and DeviceUpgradeResult notifications. The bool tells the
+// handler whether a DeviceControl SN belonged to an upgrade operation and
+// therefore must not be handed to PTZ.
+type UpgradeMessageProcessor interface {
+	OnUpgradeMessage(context.Context, string, string, string, []byte) (bool, error)
+}
+
+// UpgradeResultMessageProcessor is an optional stronger boundary for the
+// final DeviceUpgradeResult notification. The response status is selected by
+// the durable processor: 200 after persistence, 400 for a protocol error, or
+// 503 when the platform could not persist the result.
+type UpgradeResultMessageProcessor interface {
+	OnUpgradeResultMessage(context.Context, string, string, string, []byte) (bool, int, error)
+}
+
+// RecordInfoSink receives the original payload after the SIP transaction has
+// already been acknowledged. Implementations must keep their own work bounded.
+type RecordInfoSink interface {
+	OnRecordInfoMessage(context.Context, string, []byte) error
+}
+
+type PlaybackEndSink interface {
+	OnPlaybackFileToEnd(context.Context, string, string, []byte) error
+}
+
+// SnapshotSink 接收抓拍完成通知。**两种形态各一个方法**，别合并成一个"内部再猜":
+// 标准形态（A.2.5.7 `UploadSnapShotFinished`，一条报文带多个文件标识）与私有形态
+// （`Notify`+`SubCmd=SnapShot`，一图一条）是**两件不同的事**，混在一个入口里，
+// 入站门禁（`CmdType` 判定）与解析的对应关系就没人能一眼看出来了。
+type SnapshotSink interface {
+	OnSnapshotNotify(context.Context, string, []byte) error
+	OnUploadSnapShotFinished(context.Context, string, []byte) error
+}
+
+type BroadcastMessageProcessor interface {
+	OnBroadcastMessage(context.Context, string, []byte) error
+}
+
+// NewMessageHandler 创建消息处理器
+func NewMessageHandler(cfg gbconfig.Config) *MessageHandler {
+	return &MessageHandler{}
+}
+
+// SetRecorder 注入指标 Recorder(可选)
+func (h *MessageHandler) SetRecorder(r metrics.Recorder) {
+	h.recorder = r
+}
+
+// SetCatalogTrigger 注入设备重新上线后的 Catalog 触发器。
+func (h *MessageHandler) SetCatalogTrigger(t CatalogTrigger) {
+	h.catalogTrigger = t
+}
+
+// SetSubscriptionWaker 注入设备恢复在线后的订阅唤醒器。
+func (h *MessageHandler) SetSubscriptionWaker(w SubscriptionWaker) {
+	h.subscriptionWaker = w
+}
+
+func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
+	h.alarmProcessor = processor
+}
+
+func (h *MessageHandler) SetPTZProcessor(processor PTZMessageProcessor) {
+	h.ptzProcessor = processor
+}
+
+// SetUpgradeProcessor installs the upgrade response router. It is safe to
+// swap during SIP runtime reloads and is intentionally named after the
+// processor role used by the integration boundary.
+func (h *MessageHandler) SetUpgradeProcessor(processor UpgradeMessageProcessor) {
+	h.upgradeMu.Lock()
+	h.upgradeProcessor = processor
+	h.upgradeMu.Unlock()
+}
+
+// SetUpgradeMessageProcessor is the descriptive alias used by SIP bootstrap.
+func (h *MessageHandler) SetUpgradeMessageProcessor(processor UpgradeMessageProcessor) {
+	h.SetUpgradeProcessor(processor)
+}
+
+func (h *MessageHandler) getUpgradeProcessor() UpgradeMessageProcessor {
+	h.upgradeMu.RLock()
+	defer h.upgradeMu.RUnlock()
+	return h.upgradeProcessor
+}
+
+func (h *MessageHandler) SetBroadcastProcessor(processor BroadcastMessageProcessor) {
+	h.broadcastMu.Lock()
+	h.broadcastProcessor = processor
+	h.broadcastMu.Unlock()
+}
+
+func (h *MessageHandler) getBroadcastProcessor() BroadcastMessageProcessor {
+	h.broadcastMu.RLock()
+	defer h.broadcastMu.RUnlock()
+	return h.broadcastProcessor
+}
+
+func (h *MessageHandler) SetRecordInfoSink(sink RecordInfoSink) {
+	h.recordInfoMu.Lock()
+	h.recordInfoSink = sink
+	h.recordInfoMu.Unlock()
+}
+
+func (h *MessageHandler) getRecordInfoSink() RecordInfoSink {
+	h.recordInfoMu.RLock()
+	defer h.recordInfoMu.RUnlock()
+	return h.recordInfoSink
+}
+
+func (h *MessageHandler) SetSnapshotSink(sink SnapshotSink) {
+	h.snapshotMu.Lock()
+	h.snapshotSink = sink
+	h.snapshotMu.Unlock()
+}
+
+func (h *MessageHandler) getSnapshotSink() SnapshotSink {
+	h.snapshotMu.RLock()
+	defer h.snapshotMu.RUnlock()
+	return h.snapshotSink
+}
+
+func (h *MessageHandler) SetPlaybackEndSink(sink PlaybackEndSink) {
+	h.playbackEndMu.Lock()
+	h.playbackEndSink = sink
+	h.playbackEndMu.Unlock()
+}
+
+func (h *MessageHandler) getPlaybackEndSink() PlaybackEndSink {
+	h.playbackEndMu.RLock()
+	defer h.playbackEndMu.RUnlock()
+	return h.playbackEndSink
+}
+
+func isPlaybackFileToEnd(body []byte) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(body)), ""))
+	return strings.Contains(normalized, "filetoend") ||
+		strings.Contains(normalized, "file-end") ||
+		strings.Contains(normalized, "file_end")
+}
+
+// txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
+func txKindFromCmd(cmd string) metrics.TxKind {
+	switch cmd {
+	case manscdp.CmdKeepalive:
+		return metrics.TxKeepalive
+	case manscdp.CmdCatalog:
+		return metrics.TxCatalog
+	case manscdp.CmdRecordInfo:
+		return metrics.TxRecord
+	case manscdp.CmdDeviceControl:
+		return metrics.TxPTZ
+	case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdSDCardStatus, manscdp.CmdConfigDownload, manscdp.CmdDeviceConfig:
+		// 设备配置族(ConfigDownload 读 / DeviceConfig 写)归 TxPTZ:
+		// TxKind 是固定 8 类的枚举(AllTxKinds 有测试锁死长度),而配置同属
+		// "平台主动发起、等设备应答"的那一类事务,与 SDCardStatus 的既有归法一致。
+		return metrics.TxPTZ
+	case "Alarm":
+		return metrics.TxAlarm
+	}
+	return metrics.TxUnknown
+}
+
+// Handle 处理 MESSAGE 请求
+func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
+	callID, cseq := sipPairKey(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.message")
+	// 解析 MANSCDP body(兼容 GB2312/GB18030 编码)
+	head, err := manscdp.ParseHead(req.Body())
+	if err != nil {
+		// A malformed final upgrade notification must be retried/fixed by the
+		// device and therefore gets 400. Other legacy malformed MESSAGE bodies
+		// retain the historical 200 response to avoid a retry storm.
+		normalizedBody := strings.ToLower(strings.Join(strings.Fields(string(req.Body())), ""))
+		status := 200
+		reason := "OK"
+		if strings.Contains(normalizedBody, "<cmdtype>deviceupgraderesult</cmdtype>") {
+			status = http.StatusBadRequest
+			reason = http.StatusText(status)
+		}
+		// INFO 而非 WARN：设备发来的 MESSAGE 解析不了，**这是对方的问题**——本平台既改不了
+		// 对方固件、也没有本地对象可修。按判据②，"看到它要做什么"答不出动作：这条报文被
+		// 丢弃，系统对外行为与"没收到"等价。⚠️ 边界：这只是"格式不合法"，不是"身份没通过"
+		// —— 认证/信任类拒绝（register.digest_failed / hook.auth.rejected）仍留 WARN。
+		logger.Info("GB28181 MESSAGE 解析失败,忽略",
+			zap.String("event", "gb28181.message.parse_failed"),
+			zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
+		_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
+		return
+	}
+
+	kind := txKindFromCmd(head.CmdType)
+	responseSent := false
+	// 已知 Kind 的入向事件:Begin + End 一起打(瞬时事务,server 端立刻应答)
+	// Catalog Response 也走入向计数,即便 UAC 端没埋点也至少有一条
+	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+		h.recorder.Begin(metrics.Transaction{
+			Kind:      kind,
+			Direction: metrics.DirIn,
+			CallID:    callID,
+			CSeq:      cseq,
+			DeviceID:  head.DeviceID,
+			StartedAt: time.Now(),
+		})
+	}
+	if head.CmdType == manscdp.CmdDeviceControl || head.CmdType == manscdp.CmdDeviceUpgradeResult {
+		processor := h.getUpgradeProcessor()
+		if head.CmdType == manscdp.CmdDeviceUpgradeResult && processor == nil {
+			// During a SIP runtime detach the final result must be retried by
+			// the device; a generic 200 would acknowledge and lose it.
+			_ = tx.Respond(sip.NewResponseFromRequest(req, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), nil))
+			responseSent = true
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, http.StatusServiceUnavailable, false)
+			}
+			return
+		}
+		if processor != nil {
+			if head.CmdType == manscdp.CmdDeviceUpgradeResult {
+				if resultProcessor, ok := processor.(UpgradeResultMessageProcessor); ok {
+					// A final result is acknowledged only after its durable
+					// state transition has succeeded. The processor maps syntax
+					// errors to 400 and persistence failures to 503.
+					consumed, status, processErr := resultProcessor.OnUpgradeResultMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body())
+					if status < 100 {
+						status = http.StatusOK
+					}
+					reason := http.StatusText(status)
+					if reason == "" {
+						reason = "OK"
+					}
+					_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
+					responseSent = true
+					if processErr != nil {
+						logger.Warn("GB28181 设备升级最终结果处理失败",
+							zap.String("event", "gb28181.message.upgrade_result_failed"),
+							zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+							zap.Int("sip_status", status), logging.Error(processErr))
+					}
+					if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+						h.recorder.End(callID, cseq, status, processErr == nil)
+					}
+					// DeviceUpgradeResult has no PTZ fallback. An unmatched
+					// result is still fully handled by the generic SIP 200.
+					_ = consumed
+					return
+				}
+			}
+			// Ordinary DeviceControl keeps the fast transport ACK before
+			// durable work; this also remains the compatibility path for a
+			// processor that has not implemented the stronger final-result
+			// boundary.
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			responseSent = true
+			consumed, processErr := processor.OnUpgradeMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body())
+			if consumed || processErr != nil {
+				if processErr != nil {
+					logger.Warn("GB28181 设备升级响应处理失败",
+						zap.String("event", "gb28181.message.upgrade_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(processErr))
+				}
+				if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+					h.recorder.End(callID, cseq, 200, processErr == nil)
+				}
+				return
+			}
+		}
+	}
+
+	if head.DeviceID != "" {
+		if head.CmdType == manscdp.CmdBroadcast {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if processor := h.getBroadcastProcessor(); processor != nil {
+				if err := processor.OnBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					logger.Warn("GB28181 Broadcast Response 处理失败",
+						zap.String("event", "gb28181.message.broadcast_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+			return
+		}
+		// A.2.5.7 图像抓拍传输完成通知（**标准形态**）：`CmdType=UploadSnapShotFinished`，
+		// 一条报文带 `SessionID` + `SnapShotList[SnapShotFileID]`（真机上是一张一个并列的
+		// `<SnapShotList>`，不是"一个列表里放多个"）。
+		//
+		// ⛔⛔ 不能并进下面那条 `CmdNotify` 分支：那条的 CmdType 是 `Notify`（**订阅通知**的
+		// 通用 CmdType），还必须再靠 `SubCmd=SnapShot` 才能确认是抓拍；而这条是抓拍专属
+		// CmdType，用 `head.CmdType` 就能唯一判定。合并会让"两条互不相干的通知"看起来是一条，
+		// 而它们的解析器、容器（`SnapShotList` vs `SnapShotID`）完全不同。
+		//
+		// ⛔ 这里**必须回 200**：设备是在上报结果，不回它就重发；`head.DeviceID` 真机上一定有
+		// （2026-09-20 实测），所以能落在 `head.DeviceID != ""` 这个分支里。
+		if head.CmdType == manscdp.CmdUploadSnapShotFinished {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if sink := h.getSnapshotSink(); sink != nil {
+				if err := sink.OnUploadSnapShotFinished(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					logger.Warn("GB28181 抓拍传输完成通知处理失败",
+						zap.String("event", "gb28181.message.snapshot_finished_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+			return
+		}
+		// 私有形态的抓拍通知（`Notify`+`SubCmd=SnapShot`，"一图一条"）——**不是标准**，
+		// 保留只为模拟器（`uvp-gb28181-sim` 仍发这个形状）。标准形态见上面那条。
+		if head.CmdType == manscdp.CmdNotify && manscdp.IsSnapshotNotify(req.Body()) {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if sink := h.getSnapshotSink(); sink != nil {
+				if err := sink.OnSnapshotNotify(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					logger.Warn("GB28181 SnapShot Notify 处理失败",
+						zap.String("event", "gb28181.message.snapshot_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+			return
+		}
+		if isPlaybackFileToEnd(req.Body()) {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, 200, true)
+			}
+			if sink := h.getPlaybackEndSink(); sink != nil {
+				if err := sink.OnPlaybackFileToEnd(ctx, callID, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					logger.Warn("GB28181 回放自然结束处理失败",
+						zap.String("event", "gb28181.message.playback_end_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+			return
+		}
+		if head.CmdType == manscdp.CmdRecordInfo {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, 200, true)
+			}
+			sink := h.getRecordInfoSink()
+			if sink == nil {
+				logger.Warn("GB28181 RecordInfo sink 未装配,忽略响应",
+					zap.String("event", "gb28181.message.record_info_sink_unavailable"),
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq))
+				return
+			}
+			if err := sink.OnRecordInfoMessage(ctx, ptzDeviceCode(req, ""), req.Body()); err != nil {
+				logger.Warn("GB28181 RecordInfo 响应处理失败",
+					zap.String("event", "gb28181.message.record_info_failed"),
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
+			}
+			return
+		}
+		switch head.CmdType {
+		case manscdp.CmdKeepalive:
+			restored, err := device.Keepalive(ctx, head.DeviceID)
+			if err != nil {
+				logger.Warn("GB28181 心跳处理失败",
+					zap.String("event", "gb28181.message.keepalive_failed"),
+					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
+			} else if restored {
+				logger.Info("GB28181 设备心跳恢复在线", zap.String("event", "gb28181.message.keepalive_restored"), zap.String("stage", "device_status"), zap.String("outcome", "succeeded"), zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+				if h.subscriptionWaker != nil {
+					if err := h.subscriptionWaker.WakeDeviceByCode(ctx, head.DeviceID); err != nil {
+						logger.Warn("GB28181 设备恢复订阅失败",
+							zap.String("event", "gb28181.message.subscription_wake_failed"),
+							zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+							logging.Error(err))
+					}
+				}
+				if h.catalogTrigger != nil && req.Source() != "" && gbconfig.SyncChannelsOnOnline() {
+					// 离线时通道已统一置 OFF。设备恢复只证明 SIP 可达,
+					// 通道必须等待新的 Catalog ON/OFF 后再恢复。
+					h.catalogTrigger.Trigger(ctx, head.DeviceID, req.Source(), req.Transport())
+				}
+			}
+		case manscdp.CmdCatalog:
+			// Catalog 应答(设备→平台),解析通道入库
+			HandleCatalogResponse(ctx, req.Body(), head.DeviceID, callID, cseq)
+		case manscdp.CmdDeviceInfo:
+			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
+			HandleDeviceInfoResponse(ctx, req.Body(), head.DeviceID, callID, cseq)
+		case manscdp.CmdDeviceControl:
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
+					// C01.4：与下面那支（查询类命令）**原先共用** `gb28181.message.ptz_failed`
+					// 一个名字，但两支是不同报文、不同消息 —— 按 event 名聚合时"PTZ 控制失败"
+					// 会被查询失败稀释。理由同 C03 的 `event_level_divergence`：一个名字装一件事。
+					// 别按"消息里已经写了 operation 字段"把它们合回去：字段只有知道它存在的人才用得上。
+					logger.Warn("GB28181 PTZ DeviceControl 应答处理失败",
+						zap.String("event", "gb28181.message.ptz_control_failed"),
+						zap.String("operation", "device_control"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
+				}
+			}
+		case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdSDCardStatus:
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
+					logger.Warn("GB28181 PTZ 查询应答处理失败",
+						zap.String("event", "gb28181.message.ptz_query_failed"),
+						zap.String("operation", "status_query"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
+				}
+			}
+		case manscdp.CmdConfigDownload, manscdp.CmdDeviceConfig:
+			// 设备配置族。⛔ 与上面那支**分开**:按本仓 C01.4 的既有判据,
+			// 一个 event 名只装一件事 —— 配置失败混进 "ptz_query_failed" 会被
+			// PTZ 查询失败稀释,而这两类报文与处置都不同(配置写入还挂着一条
+			// "下发 → 自动回读 → 对账"的链路)。
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
+					logger.Warn("GB28181 设备配置应答处理失败",
+						zap.String("event", "gb28181.message.device_config_failed"),
+						zap.String("operation", "device_config"), zap.String("device_id", head.DeviceID),
+						zap.String("call_id", callID), zap.String("cseq", cseq), logging.Error(err))
+				}
+			}
+		case manscdp.CmdAlarm:
+			if h.alarmProcessor != nil {
+				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+					logger.Warn("GB28181 MESSAGE 报警处理失败",
+						zap.String("event", "gb28181.message.alarm_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(err))
+				}
+			}
+		}
+	}
+	// 其它 CmdType 本期不处理,统一回 200
+	if !responseSent {
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	}
+
+	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+		h.recorder.End(callID, cseq, 200, true)
+	}
+}
+
+func ptzDeviceCode(req *sip.Request, fallback string) string {
+	if req != nil {
+		if from := req.From(); from != nil && from.Address.User != "" {
+			return from.Address.User
+		}
+	}
+	return fallback
+}
