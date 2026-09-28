@@ -1,7 +1,7 @@
 -- UVP-GB28181 MySQL 8.0 release initialization script
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 4b51c3bf58c2068fce6bf05c5e666c4f9cfd2f56ef534f1047929550159960f1
+-- Schema fingerprint: b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.

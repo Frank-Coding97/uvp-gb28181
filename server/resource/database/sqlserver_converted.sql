@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 4b51c3bf58c2068fce6bf05c5e666c4f9cfd2f56ef534f1047929550159960f1
+-- Schema fingerprint: b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -2672,7 +2672,7 @@ IF OBJECT_ID(N'sys_openapi_security_state', N'U') IS NULL
 BEGIN
   CREATE TABLE [sys_openapi_security_state] (
     [id] BIGINT NOT NULL,
-    [must_auth_locked] TINYINT NOT NULL DEFAULT 0,
+    [must_auth_locked] BIT NOT NULL DEFAULT 0,
     [locked_at] DATETIME2(6),
     [lock_version] BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY ([id]),

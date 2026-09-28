@@ -172,7 +172,7 @@ def column_value_range(cur, table: str, column: str) -> tuple:
 
 
 def resolve_tinyint1(cur, table: str, columns: list[dict], forced_enums: set,
-                     forced_integers: set, warnings: list) -> None:
+                     forced_integers: set, forced_booleans: set, warnings: list) -> None:
     """Decide whether each ``tinyint(1)`` column is a boolean or a small enum.
 
     ``tinyint(1)`` is ambiguous in MySQL: GORM emits it for Go ``bool``, but it
@@ -188,11 +188,20 @@ def resolve_tinyint1(cur, table: str, columns: list[dict], forced_enums: set,
     column-by-column from the Go model field types -- see policy.json.
     """
     for col in columns:
-        if col["type"] != "tinyint(1)":
-            continue
         qualified = f"{table}.{col['name']}"
         forced_enum = qualified in forced_enums
         forced_int = qualified in forced_integers
+        forced_bool = qualified in forced_booleans
+        if forced_bool:
+            if forced_enum or forced_int:
+                raise SystemExit(f"{qualified}: boolean_columns 与整数覆盖规则冲突")
+            if col["type"].split("(", 1)[0] != "tinyint":
+                raise SystemExit(f"{qualified}: boolean_columns 只允许覆盖 MySQL tinyint，实际为 {col['type']}")
+            col["boolean"] = True
+            col["boolean_reason"] = "policy:boolean_columns（模型字段为 bool 类型）"
+            continue
+        if col["type"] != "tinyint(1)":
+            continue
         low, high = column_value_range(cur, table, col["name"])
         in_bool_domain = (low is None or low in (0, 1)) and (high is None or high in (0, 1))
         if not in_bool_domain and not forced_enum:
@@ -423,6 +432,7 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
     seed_tables = policy["seed_tables"]
     forced_enums = set(policy.get("tinyint1_enum_columns", []))
     forced_integers = set(policy.get("not_boolean_columns", []))
+    forced_booleans = set(policy.get("boolean_columns", []))
     drop_columns = policy.get("drop_columns", {})
 
     live = fetch_tables(cur)
@@ -446,7 +456,7 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
                     f"请同步清理 policy.json 的 drop_columns"
                 )
             columns = [c for c in columns if c["name"] not in dropped]
-        resolve_tinyint1(cur, name, columns, forced_enums, forced_integers, warnings)
+        resolve_tinyint1(cur, name, columns, forced_enums, forced_integers, forced_booleans, warnings)
         indexes = fetch_indexes(cur, name)
         if spec:
             kept = {c["name"] for c in columns}

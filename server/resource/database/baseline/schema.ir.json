@@ -6,7 +6,7 @@
     "live_table_count": 110,
     "included_table_count": 109,
     "excluded_table_count": 16,
-    "schema_fingerprint": "4b51c3bf58c2068fce6bf05c5e666c4f9cfd2f56ef534f1047929550159960f1",
+    "schema_fingerprint": "b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -19795,7 +19795,9 @@
           "default": "0",
           "extra": "",
           "comment": "",
-          "collation": null
+          "collation": null,
+          "boolean": true,
+          "boolean_reason": "policy:boolean_columns（模型字段为 bool 类型）"
         },
         {
           "name": "locked_at",

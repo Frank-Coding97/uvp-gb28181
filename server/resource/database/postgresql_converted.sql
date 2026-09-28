@@ -1,7 +1,7 @@
 -- UVP-GB28181 PostgreSQL release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 4b51c3bf58c2068fce6bf05c5e666c4f9cfd2f56ef534f1047929550159960f1
+-- Schema fingerprint: b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -2466,12 +2466,12 @@ CREATE TABLE "sys_openapi_process_generation" (
 DROP TABLE IF EXISTS "sys_openapi_security_state";
 CREATE TABLE "sys_openapi_security_state" (
   "id" BIGINT NOT NULL,
-  "must_auth_locked" SMALLINT NOT NULL DEFAULT 0,
+  "must_auth_locked" BOOLEAN NOT NULL DEFAULT false,
   "locked_at" TIMESTAMP(6),
   "lock_version" BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY ("id"),
   CONSTRAINT "ck_openapi_security_singleton" CHECK (("id" = 1)),
-  CONSTRAINT "ck_openapi_security_state" CHECK (((("must_auth_locked" = 0) and ("lock_version" = 0) and ("locked_at" is null)) or (("must_auth_locked" = 1) and ("lock_version" > 0) and ("locked_at" is not null))))
+  CONSTRAINT "ck_openapi_security_state" CHECK ((("must_auth_locked" = false AND "lock_version" = 0 AND "locked_at" IS NULL) OR ("must_auth_locked" = true AND "lock_version" > 0 AND "locked_at" IS NOT NULL)))
 );
 
 DROP TABLE IF EXISTS "sys_operation_logs";

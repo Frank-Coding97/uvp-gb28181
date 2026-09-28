@@ -563,6 +563,12 @@ func TestReleaseFilesDropOnlyTablesTheyRecreate(t *testing.T) {
 func TestLiveMigrationDirectoryRetainsUpgradeHistory(t *testing.T) {
 	dir := filepath.Join("gb28181", "migrations")
 	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		// 增量迁移已在 2026-09-22 退役：migrations/ 整体清理，三方言全量脚本成为唯一真源，
+		// gb28181/ 下只剩 embed.go（空 embed.FS）。此时期望「目录不存在」。
+		// 若日后重新引入迁移目录，下面的断言会自动恢复生效，不必改回来。
+		t.Skipf("增量迁移目录已退役（%s 不存在），跳过升级历史保留断言", dir)
+	}
 	require.NoError(t, err)
 
 	var sqlFiles, markerFiles []string

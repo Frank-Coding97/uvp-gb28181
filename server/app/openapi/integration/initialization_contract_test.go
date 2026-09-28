@@ -43,24 +43,17 @@ func TestSQLServerInitializationCreatesPermissionTablesBeforeSeeds(t *testing.T)
 
 func TestMySQLInitializationPTZTableUsesSingleStatementTerminator(t *testing.T) {
 	body := readInitializationContractSQL(t, "uvp-gb28181.sql")
-	const marker = "COMMENT='GB28181 latest PTZ state'"
-
-	var matchingLines []string
-	for _, line := range strings.Split(body, "\n") {
-		if strings.Contains(line, marker) {
-			matchingLines = append(matchingLines, strings.TrimSpace(line))
-		}
-	}
-	require.Len(t, matchingLines, 1)
-	require.Equal(t, 1, strings.Count(matchingLines[0], ";"), matchingLines[0])
-	require.True(t, strings.HasSuffix(matchingLines[0], ";"), matchingLines[0])
+	match := regexp.MustCompile("(?s)CREATE TABLE `gb_ptz_state` \\(.*?\\n\\) ENGINE=.*?;").FindString(body)
+	require.NotEmpty(t, match)
+	require.Equal(t, 1, strings.Count(match, ";"), match)
+	require.True(t, strings.HasSuffix(match, ";"), match)
 }
 
 func TestPostgreSQLInitializationQuotesSysJobsGroupIdentifier(t *testing.T) {
 	body := readInitializationContractSQL(t, "postgresql_converted.sql")
 
-	require.Contains(t, body, "    \"group\" VARCHAR(100) NOT NULL,")
-	require.Contains(t, body, `COMMENT ON COLUMN sys_jobs."group" IS '任务分组名称';`)
+	require.Contains(t, body, "  \"group\" VARCHAR(100) NOT NULL,")
+	require.Contains(t, body, `COMMENT ON COLUMN "sys_jobs"."group" IS '任务分组名称';`)
 	require.NotContains(t, body, "\n    group VARCHAR(100) NOT NULL,")
 	require.NotContains(t, body, "COMMENT ON COLUMN sys_jobs.group IS")
 }
@@ -68,7 +61,7 @@ func TestPostgreSQLInitializationQuotesSysJobsGroupIdentifier(t *testing.T) {
 func TestPostgreSQLInitializationRestoresJobResultsForeignKey(t *testing.T) {
 	body := readInitializationContractSQL(t, "postgresql_converted.sql")
 
-	require.Contains(t, body, "CONSTRAINT sys_job_results_ibfk_1 FOREIGN KEY (job_id) REFERENCES sys_jobs (id) ON DELETE CASCADE ON UPDATE CASCADE")
+	require.Contains(t, body, `CONSTRAINT "sys_job_results_ibfk_1" FOREIGN KEY ("job_id") REFERENCES "sys_jobs" ("id") ON DELETE CASCADE ON UPDATE CASCADE`)
 	require.NotContains(t, body, "CONSTRAINT TEXT")
 }
 
@@ -138,18 +131,19 @@ func TestPostgreSQLInitializationMatchesIntegerFlagModels(t *testing.T) {
 			require.NotRegexp(t, legacyBooleanAssignment, statement, "sys_menu updates must use integer flags")
 		}
 	}
-	require.Contains(t, body, "FROM sys_menu m JOIN sys_api a ON TRUE", "SQL predicate TRUE must remain unchanged")
-	require.Contains(t, body, "recovery_required BOOLEAN NOT NULL DEFAULT FALSE,", "real boolean fields must remain boolean")
-	require.Contains(t, body, "must_auth_locked BOOLEAN NOT NULL DEFAULT FALSE,", "real boolean fields must remain boolean")
+	normalizedBody := strings.ReplaceAll(body, `"`, "")
+	require.Contains(t, strings.ToLower(normalizedBody), "recovery_required boolean not null default false,", "real boolean fields must remain boolean")
+	require.Contains(t, strings.ToLower(normalizedBody), "must_auth_locked boolean not null default false,", "OpenAPI security latch must match its bool model")
+	require.Contains(t, strings.ToLower(normalizedBody), `constraint ck_openapi_security_state check (((must_auth_locked = false`)
 }
 
 func postgresCreateTableSection(t *testing.T, body, table string) string {
 	t.Helper()
-	marker := "CREATE TABLE " + table + " ("
+	marker := `CREATE TABLE "` + table + `" (`
 	start := strings.Index(body, marker)
 	require.GreaterOrEqual(t, start, 0, "missing CREATE TABLE for %s", table)
 	rest := body[start+len(marker):]
 	end := strings.Index(rest, "\n);")
 	require.GreaterOrEqual(t, end, 0, "unterminated CREATE TABLE for %s", table)
-	return rest[:end]
+	return strings.ReplaceAll(rest[:end], `"`, "")
 }

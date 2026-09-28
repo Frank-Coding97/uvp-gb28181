@@ -154,6 +154,13 @@
   "tinyint1_enum_columns": [
     "sys_menu.type"
   ],
+  "_boolean_columns_comment": [
+    "MySQL 8 可能隐藏 tinyint(1) 的显示宽度，导致 information_schema 只返回 tinyint。",
+    "这时不能靠类型文本或当前 0/1 取值推断 Go bool；下面按模型字段显式钉住。"
+  ],
+  "boolean_columns": [
+    "sys_openapi_security_state.must_auth_locked"
+  ],
   "_boolean_source_comment": [
     "⚠️ 布尔判定不能只看取值域。开发库是『跑过迁移的存量库』，它的数据只反映",
     "『当前恰好出现了哪些值』，不反映这个列在代码里的语义类型。",
@@ -209,6 +216,10 @@
     "   不加就会让 '[0-9a-f]' 连大写 A-F 一起放行（MySQL 的 regexp_like 带 'c' 是大小写敏感的）。"
   ],
   "check_overrides": {
+    "ck_openapi_security_state": {
+      "postgresql": "((`must_auth_locked` = false AND `lock_version` = 0 AND `locked_at` IS NULL) OR (`must_auth_locked` = true AND `lock_version` > 0 AND `locked_at` IS NOT NULL))",
+      "why": "Go 模型是 bool；PostgreSQL BOOLEAN 不能与 MySQL 原始 CHECK 中的整数 0/1 比较"
+    },
     "ck_device_intent_identity": {
       "sqlserver": "([contract_version] = 1 AND [device_pk] > 0 AND [device_epoch] > 0 AND [target_pk] > 0 AND [operation_id] COLLATE Latin1_General_BIN2 LIKE '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' AND [device_code] COLLATE Latin1_General_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND [target_code] COLLATE Latin1_General_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND ([target_scope] = 'channel' OR ([target_scope] = 'device' AND [target_pk] = [device_pk] AND [target_code] = [device_code])) AND [kind] IN ('live', 'playback', 'download', 'talk', 'ptz'))",
       "why": "MySQL 用 regexp_like(x,'^[0-9a-f]{32}$','c')；T-SQL 无正则，展开成 32 次 [0-9a-f] 的 LIKE 模式（'c' = 大小写敏感，靠 BIN2 排序规则还原）"
