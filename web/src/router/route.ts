@@ -46,6 +46,15 @@ export const staticRoutes = [
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
     children: [
       {
+        path: "/gb28181/openapi-client/:id",
+        name: "gb28181-openapi-client-detail",
+        component: () => import(/* webpackChunkName: "openapi-client-detail" */ "@/views/gb28181/openapi-client/detail.vue"),
+        meta: {
+          title: "OpenAPI 客户端详情",
+          hide: true
+        }
+      },
+      {
         path: "/media/:pathMatch(.*)*",
         name: "media-access-fallback",
         component: () => import(/* webpackChunkName: "media-workbench" */ "@/views/gb28181/zlm/workbench/MediaEntry.vue"),

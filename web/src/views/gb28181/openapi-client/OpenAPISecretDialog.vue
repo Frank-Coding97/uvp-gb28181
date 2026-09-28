@@ -8,7 +8,7 @@ const props = defineProps<{
   operation: "create" | "rotate";
 }>();
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; configure: [] }>();
 
 async function copy(value: string, label: string) {
   if (!value || !navigator.clipboard) return;
@@ -32,8 +32,7 @@ function close() {
     :mask-closable="false"
     :esc-to-close="false"
     :closable="false"
-    ok-text="我已安全保存"
-    :on-before-ok="() => { close(); return true; }"
+    :footer="false"
     @cancel="close"
   >
     <a-alert type="warning" class="openapi-secret-dialog__warning">
@@ -50,6 +49,10 @@ function close() {
       <code>{{ secretKey }}</code>
       <a-button type="text" size="small" aria-label="复制 SK" @click="copy(secretKey, 'SK')">复制</a-button>
     </div>
+    <div class="openapi-secret-dialog__actions">
+      <a-button @click="close">我已安全保存</a-button>
+      <a-button v-if="operation === 'create'" type="primary" @click="emit('configure')">继续配置能力</a-button>
+    </div>
   </a-modal>
 </template>
 
@@ -60,8 +63,8 @@ function close() {
 
 .openapi-secret-dialog__field {
   display: flex;
-  align-items: flex-start;
   gap: 10px;
+  align-items: flex-start;
   padding: 12px 0;
   border-bottom: 1px solid var(--color-border-2);
 }
@@ -72,8 +75,8 @@ function close() {
 
 .openapi-secret-dialog__label {
   flex: 0 0 32px;
-  color: var(--color-text-2);
   font-weight: 600;
+  color: var(--color-text-2);
 }
 
 .openapi-secret-dialog__field code {
@@ -86,5 +89,12 @@ function close() {
 
 .openapi-secret-dialog__field--secret code {
   color: rgb(var(--warning-6));
+}
+
+.openapi-secret-dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 </style>
