@@ -44,9 +44,12 @@ describe("OpenAPI client detail information architecture", () => {
   });
 
   it("renders call records as a paged data table without an outer card", () => {
+    expect(detailSource).toContain('<s-layout-search class="openapi-detail__logs-filter-bar">');
     expect(detailSource).toContain(':pagination="auditPagination"');
     expect(detailSource).toContain('@page-change="handleAuditPageChange"');
     expect(detailSource).toContain('@page-size-change="handleAuditPageSizeChange"');
+    expect(detailSource).not.toContain("<h2>调用记录</h2>");
+    expect(detailSource).not.toContain('class="openapi-detail__logs-toolbar"');
     expect(detailSource).not.toContain('class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录"');
   });
 

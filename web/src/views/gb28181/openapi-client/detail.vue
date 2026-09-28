@@ -597,9 +597,8 @@ function dataScopeLabel() {
 
             <a-tab-pane key="logs" title="调用记录">
               <template v-if="canAudit">
-                <div class="openapi-detail__logs-toolbar">
-                  <h2>调用记录</h2>
-                  <div class="openapi-detail__logs-actions">
+                <s-layout-search class="openapi-detail__logs-filter-bar">
+                  <template #fields>
                     <a-select
                       v-model="auditFilter"
                       class="openapi-detail__logs-filter"
@@ -610,11 +609,13 @@ function dataScopeLabel() {
                       <a-option value="success">成功</a-option>
                       <a-option value="failure">失败</a-option>
                     </a-select>
+                  </template>
+                  <template #actions>
                     <a-button :loading="auditLoading" @click="loadAudits"
                       ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
                     >
-                  </div>
-                </div>
+                  </template>
+                </s-layout-search>
                 <a-alert v-if="auditError" type="error" class="openapi-detail__alert" role="alert">{{ auditError }}</a-alert>
                 <a-table
                   class="uvp-data-table"
@@ -732,8 +733,7 @@ function dataScopeLabel() {
   overflow-wrap: anywhere;
 }
 .openapi-detail__overview-actions,
-.openapi-detail__security-actions,
-.openapi-detail__logs-actions {
+.openapi-detail__security-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -741,18 +741,6 @@ function dataScopeLabel() {
 }
 .openapi-detail__overview-actions {
   margin-top: 20px;
-}
-.openapi-detail__logs-toolbar {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.openapi-detail__logs-toolbar h2 {
-  margin: 0;
-  font-size: 16px;
-  color: var(--color-text-1);
 }
 .openapi-detail__error {
   margin-left: 10px;
@@ -771,12 +759,7 @@ function dataScopeLabel() {
     flex-direction: column;
     align-items: flex-start;
   }
-  .openapi-detail__logs-toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .openapi-detail__security-actions,
-  .openapi-detail__logs-actions {
+  .openapi-detail__security-actions {
     justify-content: flex-start;
   }
 }
