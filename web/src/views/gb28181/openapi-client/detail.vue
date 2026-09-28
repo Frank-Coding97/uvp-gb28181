@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
 import { Message, Modal } from "@arco-design/web-vue";
 import { ArrowLeft, KeyRound, RefreshCw, RotateCcw, ShieldOff } from "lucide-vue-next";
@@ -18,6 +18,7 @@ import {
   rotateOpenAPIClientSecret,
   updateOpenAPIClientScopes,
   type OpenAPIClientAudit,
+  type OpenAPIClientAuditListParams,
   type OpenAPIClientView,
   type OpenAPICapabilityGroup,
   type OpenAPIRevocationStatus,
@@ -28,6 +29,7 @@ import OpenAPISecretDialog from "./OpenAPISecretDialog.vue";
 
 type DetailTab = "overview" | "capabilities" | "security" | "logs";
 type StatusAction = "enable" | "disable" | "revoke";
+type AuditResultFilter = "all" | "success" | "failure";
 
 const tabs: { name: DetailTab; label: string }[] = [
   { name: "overview", label: "概览" },
@@ -66,22 +68,19 @@ const revocationError = ref("");
 const audits = ref<OpenAPIClientAudit[]>([]);
 const auditLoading = ref(false);
 const auditLoaded = ref(false);
+const auditPagination = reactive({ current: 1, pageSize: 10, total: 0, showTotal: true, showJumper: true, showPageSize: true });
 const revocation = ref<OpenAPIRevocationStatus | null>(null);
 const revocationLoading = ref(false);
 const dirty = ref(false);
 const workbench = ref<InstanceType<typeof OpenAPICapabilityWorkbench> | null>(null);
 const secret = ref<{ accessKey: string; secretKey: string; operation: "rotate" } | null>(null);
-const auditFilter = ref("all");
+const auditFilter = ref<AuditResultFilter>("all");
 let generation = 0;
 let allowLeave = false;
 
 const enabledScopes = computed(() => scopes.value.filter(scope => scope.enabled).map(scope => scope.scope));
 const grantedCount = computed(() => enabledScopes.value.filter(scope => availableScopes.value.includes(scope)).length);
 const editable = computed(() => canGrant.value && detailReady.value && catalogReady.value && client.value?.status === "active");
-const filteredAudits = computed(() =>
-  audits.value.filter(item => auditFilter.value === "all" || item.result === auditFilter.value)
-);
-
 function errorMessage(cause: unknown, fallback: string) {
   if (cause && typeof cause === "object" && "response" in cause) {
     const message = (cause as { response?: { data?: { message?: string } } }).response?.data?.message;
@@ -102,6 +101,9 @@ function clearSensitiveState() {
   groups.value = [];
   availableScopes.value = [];
   audits.value = [];
+  auditPagination.current = 1;
+  auditPagination.total = 0;
+  auditLoaded.value = false;
   revocation.value = null;
   secret.value = null;
   detailReady.value = false;
@@ -228,10 +230,18 @@ async function loadAudits() {
   auditLoading.value = true;
   auditError.value = "";
   try {
-    const result = await listOpenAPIClientAudits(id);
+    const params: OpenAPIClientAuditListParams = {
+      page: auditPagination.current,
+      pageSize: auditPagination.pageSize,
+      ...(auditFilter.value === "all" ? {} : { result: auditFilter.value })
+    };
+    const result = await listOpenAPIClientAudits(id, params);
     if (token !== generation || client.value?.id !== id) return;
     if (!isOpenAPISuccess(result)) throw new Error(result.message || "调用记录加载失败");
     audits.value = result.data?.items || [];
+    auditPagination.current = result.data?.page || auditPagination.current;
+    auditPagination.pageSize = result.data?.pageSize || auditPagination.pageSize;
+    auditPagination.total = result.data?.total || 0;
     auditLoaded.value = true;
   } catch (cause) {
     if (token !== generation) return;
@@ -239,6 +249,25 @@ async function loadAudits() {
   } finally {
     if (token === generation) auditLoading.value = false;
   }
+}
+
+function handleAuditPageChange(page: number) {
+  auditPagination.current = page;
+  void loadAudits();
+}
+
+function handleAuditPageSizeChange(pageSize: number) {
+  auditPagination.pageSize = pageSize;
+  auditPagination.current = 1;
+  void loadAudits();
+}
+
+function handleAuditFilterChange(value: string | number) {
+  const filter = String(value);
+  if (filter !== "all" && filter !== "success" && filter !== "failure") return;
+  auditFilter.value = filter;
+  auditPagination.current = 1;
+  void loadAudits();
 }
 
 async function refreshRevocation() {
@@ -403,6 +432,7 @@ watch(
     if (!audit) {
       audits.value = [];
       auditLoaded.value = false;
+      auditPagination.total = 0;
     }
   }
 );
@@ -566,10 +596,16 @@ function dataScopeLabel() {
             </a-tab-pane>
 
             <a-tab-pane key="logs" title="调用记录">
-              <a-card v-if="canAudit" class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录">
-                <template #extra>
+              <template v-if="canAudit">
+                <div class="openapi-detail__logs-toolbar">
+                  <h2>调用记录</h2>
                   <div class="openapi-detail__logs-actions">
-                    <a-select v-model="auditFilter" class="openapi-detail__logs-filter" aria-label="调用结果筛选">
+                    <a-select
+                      v-model="auditFilter"
+                      class="openapi-detail__logs-filter"
+                      aria-label="调用结果筛选"
+                      @change="handleAuditFilterChange"
+                    >
                       <a-option value="all">全部结果</a-option>
                       <a-option value="success">成功</a-option>
                       <a-option value="failure">失败</a-option>
@@ -578,15 +614,17 @@ function dataScopeLabel() {
                       ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
                     >
                   </div>
-                </template>
+                </div>
                 <a-alert v-if="auditError" type="error" class="openapi-detail__alert" role="alert">{{ auditError }}</a-alert>
                 <a-table
                   class="uvp-data-table"
-                  :data="filteredAudits"
+                  :data="audits"
                   :loading="auditLoading"
-                  :pagination="false"
+                  :pagination="auditPagination"
                   row-key="requestId"
                   :scroll="{ x: '100%', minWidth: 980 }"
+                  @page-change="handleAuditPageChange"
+                  @page-size-change="handleAuditPageSizeChange"
                 >
                   <template #empty><a-empty :description="auditLoaded ? '暂无调用记录' : '尚未加载调用记录'" /></template>
                   <template #columns>
@@ -616,10 +654,8 @@ function dataScopeLabel() {
                     <a-table-column title="请求 ID" data-index="requestId" :width="210" />
                   </template>
                 </a-table>
-              </a-card>
-              <a-card v-else class="uvp-system-panel openapi-detail__panel" :bordered="false">
-                <a-empty description="没有调用记录查看权限" />
-              </a-card>
+              </template>
+              <a-empty v-else description="没有调用记录查看权限" />
             </a-tab-pane>
           </a-tabs>
         </template>
@@ -706,6 +742,18 @@ function dataScopeLabel() {
 .openapi-detail__overview-actions {
   margin-top: 20px;
 }
+.openapi-detail__logs-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.openapi-detail__logs-toolbar h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--color-text-1);
+}
 .openapi-detail__error {
   margin-left: 10px;
   color: rgb(var(--danger-6));
@@ -720,6 +768,10 @@ function dataScopeLabel() {
     gap: 8px;
   }
   .openapi-detail__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .openapi-detail__logs-toolbar {
     flex-direction: column;
     align-items: flex-start;
   }

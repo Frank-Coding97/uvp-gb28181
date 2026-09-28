@@ -132,8 +132,17 @@ export interface OpenAPIClientAudit {
   createdAt: string;
 }
 
+export interface OpenAPIClientAuditListParams {
+  page: number;
+  pageSize: number;
+  result?: "success" | "failure";
+}
+
 export interface OpenAPIClientAuditPage {
   items: OpenAPIClientAudit[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 export type OpenAPIRevocationState = "pending" | "closed" | "unknown" | string;
@@ -188,8 +197,8 @@ export const enableOpenAPIClient = (id: number, rowVersion: number) => statusMut
 export const disableOpenAPIClient = (id: number, rowVersion: number) => statusMutation("disable", id, rowVersion);
 export const revokeOpenAPIClient = (id: number, rowVersion: number) => statusMutation("revoke", id, rowVersion);
 
-export const listOpenAPIClientAudits = (id: number) =>
-  http.request<OpenAPIResponse<OpenAPIClientAuditPage>>("get", baseUrlApi(`${path}/${id}/audits`));
+export const listOpenAPIClientAudits = (id: number, params: OpenAPIClientAuditListParams) =>
+  http.request<OpenAPIResponse<OpenAPIClientAuditPage>>("get", baseUrlApi(`${path}/${id}/audits`), { params });
 
 export const getOpenAPIClientRevocationStatus = (id: number) =>
   http.request<OpenAPIResponse<OpenAPIRevocationStatus>>("get", baseUrlApi(`${path}/${id}/revocation-status`));

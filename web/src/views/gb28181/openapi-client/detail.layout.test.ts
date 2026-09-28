@@ -43,6 +43,13 @@ describe("OpenAPI client detail information architecture", () => {
     expect(workbenchSource).toContain("仅看已授权");
   });
 
+  it("renders call records as a paged data table without an outer card", () => {
+    expect(detailSource).toContain(':pagination="auditPagination"');
+    expect(detailSource).toContain('@page-change="handleAuditPageChange"');
+    expect(detailSource).toContain('@page-size-change="handleAuditPageSizeChange"');
+    expect(detailSource).not.toContain('class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录"');
+  });
+
   it("bounds long desktop capability catalogs while keeping narrow layouts naturally scrollable", () => {
     expect(workbenchSource).toMatch(/\.capability-workbench__body\s*{[^}]*height: clamp\(/s);
     expect(workbenchSource).toMatch(/\.capability-workbench__list\s*{[^}]*overflow: auto/s);

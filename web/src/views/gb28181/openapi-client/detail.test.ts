@@ -135,7 +135,7 @@ describe("OpenAPI client detail workspace", () => {
     api.capabilities.mockReset().mockResolvedValue(ok(["device:list"]));
     api.catalog.mockReset().mockResolvedValue(ok({ groups }));
     api.scopes.mockReset().mockResolvedValue(ok({ ...client, rowVersion: 4 }));
-    api.audits.mockReset().mockResolvedValue(ok({ items: [] }));
+    api.audits.mockReset().mockResolvedValue(ok({ items: [], page: 1, pageSize: 10, total: 0 }));
     api.revocation.mockReset().mockResolvedValue(ok({ status: "closed", pending: 0, closed: 1 }));
     api.rotate.mockReset();
     api.enable.mockReset();
@@ -183,8 +183,26 @@ describe("OpenAPI client detail workspace", () => {
     (wrapper.vm as any).switchTab("logs");
     await flushPromises();
 
-    expect(api.audits).toHaveBeenCalledWith(7);
+    expect(api.audits).toHaveBeenCalledWith(7, { page: 1, pageSize: 10 });
     expect(routerState.replace).toHaveBeenCalledWith({ query: { tab: "logs" } });
+  });
+
+  it("reloads call records when paging or changing the result filter", async () => {
+    api.audits.mockResolvedValue(ok({ items: [], page: 1, pageSize: 10, total: 21 }));
+    const wrapper = mountDetail();
+    await flushPromises();
+
+    (wrapper.vm as any).switchTab("logs");
+    await flushPromises();
+    expect((wrapper.vm as any).auditPagination.total).toBe(21);
+
+    (wrapper.vm as any).handleAuditPageChange(2);
+    await flushPromises();
+    expect(api.audits).toHaveBeenLastCalledWith(7, { page: 2, pageSize: 10 });
+
+    (wrapper.vm as any).handleAuditFilterChange("failure");
+    await flushPromises();
+    expect(api.audits).toHaveBeenLastCalledWith(7, { page: 1, pageSize: 10, result: "failure" });
   });
 
   it("clears client and audit data when read permission is lost", async () => {

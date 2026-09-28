@@ -63,8 +63,10 @@ describe("OpenAPI client management API contract", () => {
   });
 
   it("loads audit and revocation progress through their dedicated endpoints", async () => {
-    await listOpenAPIClientAudits(7);
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients/7/audits");
+    await listOpenAPIClientAudits(7, { page: 2, pageSize: 20, result: "failure" });
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients/7/audits", {
+      params: { page: 2, pageSize: 20, result: "failure" }
+    });
 
     await getOpenAPIClientRevocationStatus(7);
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients/7/revocation-status");

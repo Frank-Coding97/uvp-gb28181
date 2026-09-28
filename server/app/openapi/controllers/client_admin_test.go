@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -200,6 +201,42 @@ func TestOpenAPIAdminHTTPDepartmentFilter(t *testing.T) {
 			require.Equal(t, tc.total, body.Data.Total)
 			require.NotContains(t, out.Body.String(), "hidden")
 		}
+	}
+}
+
+func TestOpenAPIAdminHTTPAuditPaginationAndResultFilter(t *testing.T) {
+	db, ctrl, _ := newAdminHTTP(t)
+	row := models.Client{ID: 101, AK: "audit-client", Name: "A", OwnerDeptID: 10, Status: models.StatusActive,
+		SecretCiphertext: []byte{1}, SecretIV: []byte{1}, SecretKeyID: "test", CreatedBy: 7, UpdatedBy: 7}
+	require.NoError(t, db.Create(&row).Error)
+	clientID := row.ID
+	createdAt := time.Date(2026, time.September, 28, 8, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&[]models.Audit{
+		{RequestID: "audit-1", ClientID: &clientID, Result: "success", CreatedAt: createdAt},
+		{RequestID: "audit-2", ClientID: &clientID, Result: "failure", CreatedAt: createdAt.Add(time.Minute)},
+		{RequestID: "audit-3", ClientID: &clientID, Result: "success", CreatedAt: createdAt.Add(2 * time.Minute)},
+	}).Error)
+
+	out, _ := adminRequest(t, ctrl, 7, "audits", "GET", fmt.Sprintf("/api/gb28181/openapi-clients/%d/audits?page=2&pageSize=1&result=success", clientID), "")
+	require.Equal(t, 200, out.Code, out.Body.String())
+	var body struct {
+		Data struct {
+			Items    []adminAuditView `json:"items"`
+			Page     int              `json:"page"`
+			PageSize int              `json:"pageSize"`
+			Total    int64            `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Body.Bytes(), &body))
+	require.Equal(t, 2, body.Data.Page)
+	require.Equal(t, 1, body.Data.PageSize)
+	require.EqualValues(t, 2, body.Data.Total)
+	require.Len(t, body.Data.Items, 1)
+	require.Equal(t, "audit-1", body.Data.Items[0].RequestID)
+
+	for _, query := range []string{"?result=unknown", "?page=0", "?pageSize=101", "?result=success&result=failure", "?keyword=x"} {
+		invalid, _ := adminRequest(t, ctrl, 7, "audits", "GET", fmt.Sprintf("/api/gb28181/openapi-clients/%d/audits%s", clientID, query), "")
+		require.Equal(t, 400, invalid.Code, invalid.Body.String())
 	}
 }
 

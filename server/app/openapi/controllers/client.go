@@ -85,7 +85,7 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 			a.list(c, access)
 			return
 		}
-		if c.Request.URL.RawQuery != "" {
+		if action != "audits" && c.Request.URL.RawQuery != "" {
 			adminError(c, client.ErrInvalidArgument)
 			return
 		}
@@ -318,15 +318,45 @@ type adminAuditView struct {
 }
 
 func (a *ClientAdminController) audits(c *gin.Context, id int64) {
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	for key, items := range values {
+		if (key != "page" && key != "pageSize" && key != "result") || len(items) != 1 {
+			adminError(c, client.ErrInvalidArgument)
+			return
+		}
+	}
+	page, pageSize, err := parsePageValues(values)
+	if err != nil || page-1 > int(^uint(0)>>1)/pageSize {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	resultFilter := values.Get("result")
+	if resultFilter != "" && resultFilter != "success" && resultFilter != "failure" {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
 	items := []adminAuditView{}
-	err := a.db.WithContext(c.Request.Context()).Model(&models.Audit{}).
-		Select("request_id,scope,resource_type,resource_id,result,reason_class,source,latency_ms,created_at").
-		Where("client_id = ?", id).Order("created_at DESC, id DESC").Limit(100).Find(&items).Error
+	query := a.db.WithContext(c.Request.Context()).Model(&models.Audit{}).
+		Where("client_id = ?", id)
+	if resultFilter != "" {
+		query = query.Where("result = ?", resultFilter)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		adminError(c, err)
+		return
+	}
+	err = query.Select("request_id,scope,resource_type,resource_id,result,reason_class,source,latency_ms,created_at").
+		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
 	if err != nil {
 		adminError(c, err)
 		return
 	}
-	writeOpenAPISuccess(c, gin.H{"items": items})
+	writeOpenAPISuccess(c, gin.H{"items": items, "page": page, "pageSize": pageSize, "total": total})
 }
 
 func decodeAdminBody(c *gin.Context, out any, allowed ...string) error {
