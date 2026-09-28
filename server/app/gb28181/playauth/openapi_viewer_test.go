@@ -56,6 +56,51 @@ func TestOpenAPIViewerFirstBindAndSameConnectionRemainsIdempotentAfterTokenTTL(t
 	require.Equal(t, int64(1), count)
 }
 
+func TestOpenAPIViewerBindsDescendantAndRejectsDepartmentChanges(t *testing.T) {
+	tests := []struct {
+		name       string
+		invalidate func(*testing.T, *openAPIGrantFixture)
+		wantDenied bool
+	}{
+		{name: "active descendant"},
+		{name: "disabled descendant", wantDenied: true, invalidate: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testChildDeptID).Update("status", 0).Error)
+		}},
+		{name: "deleted descendant", wantDenied: true, invalidate: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testChildDeptID).Update("deleted_at", fixture.now).Error)
+		}},
+		{name: "moved descendant", wantDenied: true, invalidate: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testChildDeptID).Update("parent_id", 0).Error)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newOpenAPIGrantFixture(t)
+			defer fixture.close(t)
+			seedOpenAPIDescendantResource(t, fixture.db, true)
+			require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).
+				Update("data_scope", models.DataScopeDepartmentAndChildren).Error)
+			issued, err := issueOpenAPIGrantForTarget(t, fixture, testChildDeviceID, testChildChannelID)
+			require.NoError(t, err)
+			if tt.invalidate != nil {
+				tt.invalidate(t, fixture)
+			}
+			service, err := NewOpenAPIGrantService(fixture.db, fixture.signer, fixture.authority, func() time.Time { return fixture.now })
+			require.NoError(t, err)
+			request := openAPIViewerRequest("descendant-viewer")
+			request.Stream = testChildDeviceID + "_" + testChildChannelID
+			viewer, err := service.BindViewer(context.Background(), issued.Token, request)
+			if tt.wantDenied {
+				require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+				require.Zero(t, viewer.ID)
+				return
+			}
+			require.NoError(t, err)
+			require.NotZero(t, viewer.ID)
+		})
+	}
+}
+
 func TestOpenAPIViewerBoundSameMicrosecondDoesNotIssueDuplicateUpdate(t *testing.T) {
 	fixture := newOpenAPIGrantFixture(t)
 	defer fixture.close(t)

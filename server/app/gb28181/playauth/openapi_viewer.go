@@ -70,7 +70,7 @@ func (s *OpenAPIGrantService) BindViewer(ctx context.Context, token string, requ
 		if err != nil {
 			return err
 		}
-		if client.Status != models.StatusActive || client.AuthEpoch != claims.ClientEpoch || client.OwnerDeptID == 0 {
+		if client.Status != models.StatusActive || client.AuthEpoch != claims.ClientEpoch || client.OwnerDeptID == 0 || !models.ValidDataScope(client.DataScope) {
 			return ErrOpenAPIViewerDenied
 		}
 		scope, err := lockOpenAPIScope(tx.WithContext(ctx), client.ID, claims.Scope)
@@ -94,7 +94,11 @@ func (s *OpenAPIGrantService) BindViewer(ctx context.Context, token string, requ
 		if err := validateViewerGrant(grant, claims, now); err != nil {
 			return err
 		}
-		if _, err := resource.New(tx.WithContext(ctx)).GetChannel(ctx, client.OwnerDeptID, claims.DeviceID, claims.ChannelID); err != nil {
+		departmentScope := resource.DepartmentScope{
+			OwnerDeptID: client.OwnerDeptID,
+			DataScope:   models.NormalizeDataScope(client.DataScope),
+		}
+		if _, err := resource.New(tx.WithContext(ctx)).GetChannelInScope(ctx, departmentScope, claims.DeviceID, claims.ChannelID); err != nil {
 			if errors.Is(err, resource.ErrResourceNotFound) {
 				return ErrOpenAPIViewerDenied
 			}

@@ -20,12 +20,15 @@ import (
 )
 
 const (
-	testClientID  int64 = 7
-	testDeptID          = 17
-	testDeviceID        = "34020000001320000001"
-	testChannelID       = "34020000001310000001"
-	testNodeUUID        = "node-openapi-a"
-	testBootNonce       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testClientID       int64 = 7
+	testDeptID               = 17
+	testChildDeptID          = 18
+	testDeviceID             = "34020000001320000001"
+	testChannelID            = "34020000001310000001"
+	testChildDeviceID        = "34020000001320000002"
+	testChildChannelID       = "34020000001310000002"
+	testNodeUUID             = "node-openapi-a"
+	testBootNonce            = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 )
 
 func TestOpenAPIGrantIssuePersistsV3BindingAndRejectsUnqualifiedNode(t *testing.T) {
@@ -179,6 +182,81 @@ func TestOpenAPIGrantIssueRequiresCurrentOwnerAndDepartment(t *testing.T) {
 	require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
 }
 
+func TestOpenAPIGrantIssueHonorsClientDepartmentScope(t *testing.T) {
+	t.Run("department-and-children admits an active descendant", func(t *testing.T) {
+		fixture := newOpenAPIGrantFixture(t)
+		defer fixture.close(t)
+		seedOpenAPIDescendantResource(t, fixture.db, true)
+		require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).
+			Update("data_scope", models.DataScopeDepartmentAndChildren).Error)
+
+		_, err := issueOpenAPIGrantForTarget(t, fixture, testChildDeviceID, testChildChannelID)
+		require.NoError(t, err)
+	})
+
+	t.Run("department-only rejects a descendant", func(t *testing.T) {
+		fixture := newOpenAPIGrantFixture(t)
+		defer fixture.close(t)
+		seedOpenAPIDescendantResource(t, fixture.db, true)
+
+		_, err := issueOpenAPIGrantForTarget(t, fixture, testChildDeviceID, testChildChannelID)
+		require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
+	})
+
+	t.Run("inactive descendant remains outside the scope", func(t *testing.T) {
+		fixture := newOpenAPIGrantFixture(t)
+		defer fixture.close(t)
+		seedOpenAPIDescendantResource(t, fixture.db, false)
+		require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).
+			Update("data_scope", models.DataScopeDepartmentAndChildren).Error)
+
+		_, err := issueOpenAPIGrantForTarget(t, fixture, testChildDeviceID, testChildChannelID)
+		require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
+	})
+
+	for _, tc := range []struct {
+		name   string
+		change func(*testing.T, *openAPIGrantFixture)
+	}{
+		{name: "deleted descendant", change: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testChildDeptID).Update("deleted_at", fixture.now).Error)
+		}},
+		{name: "outside department", change: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testChildDeptID).Update("parent_id", 0).Error)
+		}},
+		{name: "device channel owner mismatch", change: func(t *testing.T, fixture *openAPIGrantFixture) {
+			require.NoError(t, fixture.db.Table("gb_channel").Where("channel_id = ?", testChildChannelID).Update("owner_dept_id", testDeptID).Error)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newOpenAPIGrantFixture(t)
+			defer fixture.close(t)
+			seedOpenAPIDescendantResource(t, fixture.db, true)
+			require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).
+				Update("data_scope", models.DataScopeDepartmentAndChildren).Error)
+			tc.change(t, fixture)
+			_, err := issueOpenAPIGrantForTarget(t, fixture, testChildDeviceID, testChildChannelID)
+			require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
+		})
+	}
+
+	t.Run("invalid persisted data scope fails closed", func(t *testing.T) {
+		fixture := newOpenAPIGrantFixture(t)
+		defer fixture.close(t)
+		require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).Update("data_scope", 2).Error)
+		_, err := issueOpenAPIGrantForTarget(t, fixture, testDeviceID, testChannelID)
+		require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
+	})
+
+	t.Run("legacy zero scope still means current department", func(t *testing.T) {
+		fixture := newOpenAPIGrantFixture(t)
+		defer fixture.close(t)
+		require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).Update("data_scope", 0).Error)
+		_, err := issueOpenAPIGrantForTarget(t, fixture, testDeviceID, testChannelID)
+		require.NoError(t, err)
+	})
+}
+
 func TestOpenAPIGrantIssueFailsClosedWhenResourceSQLDependencyIsMissing(t *testing.T) {
 	fixture := newOpenAPIGrantFixture(t)
 	defer fixture.close(t)
@@ -224,7 +302,8 @@ type openAPIGrantFixture struct {
 
 type departmentRow struct {
 	ID        uint `gorm:"column:id;primaryKey"`
-	Status    int  `gorm:"column:status"`
+	ParentID  *uint
+	Status    int `gorm:"column:status"`
 	DeletedAt *time.Time
 }
 
@@ -246,7 +325,7 @@ func newOpenAPIGrantFixture(t *testing.T) *openAPIGrantFixture {
 	require.NoError(t, db.Exec("INSERT INTO gb_device (id, device_id, owner_dept_id, access_epoch, cleanup_completed_epoch, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)", 11, testDeviceID, testDeptID, 4, 4).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel (id, device_id, channel_id, owner_dept_id, deleted_at) VALUES (?, ?, ?, ?, NULL)", 12, testDeviceID, testChannelID, testDeptID).Error)
 	require.NoError(t, db.Exec("INSERT INTO meta_node (id, revision, media_server_uuid, current_boot_nonce, runtime_epoch, runtime_protocol_version, runtime_confirmed_revision, runtime_confirmed_at, runtime_identity_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 3, 9, testNodeUUID, testBootNonce, 1, 1, 9, now, "active").Error)
-	require.NoError(t, db.Create(&models.Client{ID: testClientID, AK: "uvp_test_client", Name: "test", OwnerDeptID: testDeptID, Status: models.StatusActive, SecretCiphertext: []byte("ciphertext"), SecretIV: []byte("0123456789ab"), SecretKeyID: "fixture", SecretVersion: 1, AuthEpoch: 2, ViewerQuota: 10, RateLimit: 10, Burst: 20, RowVersion: 1, CreatedAt: now, UpdatedAt: now}).Error)
+	require.NoError(t, db.Create(&models.Client{ID: testClientID, AK: "uvp_test_client", Name: "test", OwnerDeptID: testDeptID, DataScope: models.DataScopeDepartment, Status: models.StatusActive, SecretCiphertext: []byte("ciphertext"), SecretIV: []byte("0123456789ab"), SecretKeyID: "fixture", SecretVersion: 1, AuthEpoch: 2, ViewerQuota: 10, RateLimit: 10, Burst: 20, RowVersion: 1, CreatedAt: now, UpdatedAt: now}).Error)
 	require.NoError(t, db.Create(&models.ClientScope{ClientID: testClientID, Scope: limit.PlayLiveApplyScope, Enabled: true, ScopeEpoch: 3, UpdatedAt: now}).Error)
 	fixture := &openAPIGrantFixture{db: db, sqlDB: sqlDB, now: now}
 	signer, err := NewSigner([]byte(strings.Repeat("s", 32)), WithNow(func() time.Time { return fixture.now }))
@@ -307,13 +386,41 @@ func (f *openAPIGrantFixture) setNodeUnknown(t *testing.T) {
 func createOpenAPIResourceFixtureTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	for _, statement := range []string{
-		`CREATE TABLE sys_department (id INTEGER PRIMARY KEY, status INTEGER NOT NULL, deleted_at DATETIME NULL)`,
+		`CREATE TABLE sys_department (id INTEGER PRIMARY KEY, parent_id INTEGER NULL, status INTEGER NOT NULL, deleted_at DATETIME NULL)`,
 		`CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id VARCHAR(20) NOT NULL, owner_dept_id INTEGER NOT NULL, name VARCHAR(100) NOT NULL DEFAULT '', alias VARCHAR(100) NOT NULL DEFAULT '', manufacturer VARCHAR(100) NOT NULL DEFAULT '', model VARCHAR(100) NOT NULL DEFAULT '', status INTEGER NULL, access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER DEFAULT 1, deleted_at DATETIME NULL)`,
 		`CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id VARCHAR(20) NOT NULL, channel_id VARCHAR(20) NOT NULL, owner_dept_id INTEGER NOT NULL, name VARCHAR(100) NOT NULL DEFAULT '', alias VARCHAR(100) NOT NULL DEFAULT '', manufacturer VARCHAR(100) NOT NULL DEFAULT '', model VARCHAR(100) NOT NULL DEFAULT '', status INTEGER NULL, ptz_type INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME NULL)`,
 		`CREATE TABLE meta_node (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, media_server_uuid VARCHAR(64) NOT NULL, current_boot_nonce VARCHAR(32), runtime_epoch INTEGER NOT NULL, runtime_protocol_version INTEGER NOT NULL, runtime_confirmed_revision INTEGER NOT NULL, runtime_confirmed_at DATETIME NULL, runtime_identity_status VARCHAR(16) NOT NULL)`,
 	} {
 		require.NoError(t, db.Exec(statement).Error)
 	}
+}
+
+func seedOpenAPIDescendantResource(t *testing.T, db *gorm.DB, active bool) {
+	t.Helper()
+	status := 0
+	if active {
+		status = 1
+	}
+	parentID := uint(testDeptID)
+	require.NoError(t, db.Create(&departmentRow{ID: testChildDeptID, ParentID: &parentID, Status: status}).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device (id, device_id, owner_dept_id, access_epoch, cleanup_completed_epoch, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)", 21, testChildDeviceID, testChildDeptID, 4, 4).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_channel (id, device_id, channel_id, owner_dept_id, deleted_at) VALUES (?, ?, ?, ?, NULL)", 22, testChildDeviceID, testChildChannelID, testChildDeptID).Error)
+}
+
+func issueOpenAPIGrantForTarget(t *testing.T, fixture *openAPIGrantFixture, deviceID, channelID string) (Grant, error) {
+	t.Helper()
+	quota := limit.NewQuota(fixture.db, func() time.Time { return fixture.now })
+	reservation, err := quota.ReservePending(context.Background(), limit.ReservationRequest{
+		ClientID: testClientID, Scope: limit.PlayLiveApplyScope, DeviceID: deviceID, ChannelID: channelID,
+	})
+	require.NoError(t, err)
+	service, err := NewOpenAPIGrantService(fixture.db, fixture.signer, fixture.authority, func() time.Time { return fixture.now })
+	require.NoError(t, err)
+	return service.Issue(context.Background(), OpenAPIGrantIssueRequest{
+		GrantID: reservation.GrantID, DeviceID: deviceID, ChannelID: channelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: deviceID + "_" + channelID,
+		MediaGeneration: 9, Protocol: "https-flv",
+	})
 }
 
 func requireGrantState(t *testing.T, db *gorm.DB, grantID string, state models.GrantState) models.PlayGrant {

@@ -114,7 +114,7 @@ func (s *OpenAPIGrantService) Issue(ctx context.Context, request OpenAPIGrantIss
 		if err != nil {
 			return err
 		}
-		if client.Status != models.StatusActive || client.AuthEpoch <= 0 || client.OwnerDeptID == 0 {
+		if client.Status != models.StatusActive || client.AuthEpoch <= 0 || client.OwnerDeptID == 0 || !models.ValidDataScope(client.DataScope) {
 			return ErrOpenAPIGrantDenied
 		}
 		scope, err := lockOpenAPIScope(tx.WithContext(ctx), client.ID, openAPIPlayScope)
@@ -135,7 +135,11 @@ func (s *OpenAPIGrantService) Issue(ctx context.Context, request OpenAPIGrantIss
 		if err := validatePendingGrant(grant, client, scope, request, *hint.DeviceID, deviceEpoch, now); err != nil {
 			return err
 		}
-		if _, err := resource.New(tx.WithContext(ctx)).GetChannel(ctx, client.OwnerDeptID, *grant.DeviceID, *grant.ChannelID); err != nil {
+		departmentScope := resource.DepartmentScope{
+			OwnerDeptID: client.OwnerDeptID,
+			DataScope:   models.NormalizeDataScope(client.DataScope),
+		}
+		if _, err := resource.New(tx.WithContext(ctx)).GetChannelInScope(ctx, departmentScope, *grant.DeviceID, *grant.ChannelID); err != nil {
 			if errors.Is(err, resource.ErrResourceNotFound) {
 				return ErrOpenAPIGrantDenied
 			}
