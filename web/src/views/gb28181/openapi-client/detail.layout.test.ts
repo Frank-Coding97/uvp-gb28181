@@ -48,6 +48,7 @@ describe("OpenAPI client detail information architecture", () => {
     expect(detailSource).toContain(':pagination="auditPagination"');
     expect(detailSource).toContain('@page-change="handleAuditPageChange"');
     expect(detailSource).toContain('@page-size-change="handleAuditPageSizeChange"');
+    expect(detailSource).toContain('<time :datetime="record.createdAt">{{ formatTime(record.createdAt) }}</time>');
     expect(detailSource).not.toContain("<h2>调用记录</h2>");
     expect(detailSource).not.toContain('class="openapi-detail__logs-toolbar"');
     expect(detailSource).not.toContain('class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录"');

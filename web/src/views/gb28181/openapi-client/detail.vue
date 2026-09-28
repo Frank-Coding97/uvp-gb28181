@@ -458,6 +458,16 @@ function statusLabel(status: OpenAPIClientView["status"]) {
 function dataScopeLabel() {
   return OPENAPI_CLIENT_DATA_SCOPE_OPTIONS.find(option => option.value === client.value?.dataScope)?.label || "-";
 }
+
+function formatTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes()
+  )}:${pad(date.getSeconds())}`;
+}
 </script>
 
 <template>
@@ -629,7 +639,11 @@ function dataScopeLabel() {
                 >
                   <template #empty><a-empty :description="auditLoaded ? '暂无调用记录' : '尚未加载调用记录'" /></template>
                   <template #columns>
-                    <a-table-column title="时间" data-index="createdAt" :width="190" />
+                    <a-table-column title="时间" :width="190"
+                      ><template #cell="{ record }"
+                        ><time :datetime="record.createdAt">{{ formatTime(record.createdAt) }}</time></template
+                      ></a-table-column
+                    >
                     <a-table-column title="能力 / 操作" :width="220"
                       ><template #cell="{ record }"
                         ><strong>{{ scopeLabel(record.scope) || "管理操作" }}</strong>
