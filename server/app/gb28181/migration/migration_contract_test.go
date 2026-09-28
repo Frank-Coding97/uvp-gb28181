@@ -1,6 +1,8 @@
 package migration
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,15 +22,17 @@ const contractThreshold = "2026-08-14"
 // -postgresql.sql / -sqlserver.sql / -down.sql 必须齐全。
 func TestMigrationFileContract(t *testing.T) {
 	entries, err := migrationsfs.FS.ReadDir("migrations")
+	// 历史迁移已归档清理,embed 中可能整体没有 migrations 目录 —— 那是预期状态,
+	// 不是契约违规(详见 runner.go 的 embedSource.UpFiles)。
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skip("历史迁移已归档清理,embed 中暂无 migrations 目录,契约断言空转")
+	}
 	require.NoError(t, err)
 
 	var newFiles []string
 	for _, e := range entries {
 		name := e.Name()
 		if len(name) < len(contractThreshold) || !strings.HasSuffix(name, ".sql") {
-			continue
-		}
-		if name == baselineMergePointFile {
 			continue
 		}
 		date := name[:len(contractThreshold)]

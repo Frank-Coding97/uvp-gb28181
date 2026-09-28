@@ -23,7 +23,14 @@ import (
 func ptzNativeBaselineStatements(body string) []string {
 	var selected []string
 	body = strings.Split(body, "-- ptz-device-intent:begin")[0]
-	pattern := regexp.MustCompile(`(?is)^CREATE\s+(?:TABLE\s+|(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+)(gb_ptz_operation(?:_attempt)?)\s*\(`)
+	if strings.Contains(body, "IF OBJECT_ID(N'gb_ptz_operation'") {
+		create := regexp.MustCompile(`(?ims)^IF OBJECT_ID\(N'gb_ptz_operation(?:_attempt)?', N'U'\) IS NULL\s*BEGIN\s*CREATE TABLE.*?^END;`)
+		selected = append(selected, create.FindAllString(body, -1)...)
+		index := regexp.MustCompile(`(?im)^IF NOT EXISTS \(SELECT 1 FROM sys\.indexes WHERE object_id=OBJECT_ID\(N'gb_ptz_operation(?:_attempt)?'\).*?\n\s*CREATE INDEX .*?;`)
+		selected = append(selected, index.FindAllString(body, -1)...)
+		return selected
+	}
+	pattern := regexp.MustCompile(`(?is)^CREATE\s+(?:TABLE\s+|(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+)["']?(gb_ptz_operation(?:_attempt)?)["']?\s*\(`)
 	profileUpgrade := regexp.MustCompile(`(?is)^(?:ALTER TABLE gb_ptz_operation\s+ADD COLUMN profile_version\b|IF COL_LENGTH\(N'gb_ptz_operation', N'(?:profile_version|profile_charset|target_scope|target_code|scope_key)'\))`)
 	for _, statement := range nativeSchemaStatements(body) {
 		plain := strings.NewReplacer("`", "", "[", "", "]", "").Replace(strings.TrimSpace(statement))
@@ -42,7 +49,7 @@ func TestPTZNativeBaselineSelection(t *testing.T) {
 		statements := ptzNativeBaselineStatements(string(body))
 		var tables int
 		for _, statement := range statements {
-			if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE") {
+			if strings.Contains(statement, "CREATE TABLE") {
 				tables++
 			}
 			require.NotContains(t, strings.ToUpper(statement), "DROP TABLE")

@@ -13,11 +13,70 @@ import (
 	"gorm.io/gorm"
 
 	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/bootstrap"
 	catalogstore "uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
 	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
 func TestCapabilityCatalogReusesSysAPITitlesAndGroups(t *testing.T) {
+	db := newStaticRegistryDB(t)
+
+	catalog, err := CapabilityCatalog(context.Background(), db)
+	require.NoError(t, err)
+	require.Len(t, catalog, 3)
+	require.Equal(t, "device-control", catalog[0].Code)
+	require.Equal(t, "设备控制", catalog[0].Name)
+	// 通道状态被归入设备控制:库里的 sys_api.api_group 就是这么分的(id 473,与
+	// control-capabilities / device-configs 同组),而本读取器对任何分组不一致
+	// 都 fail closed。
+	require.Equal(t, []string{"channel:status", "ptz:operation:read", "ptz:preset:call", "ptz:preset:delete", "ptz:preset:list", "ptz:preset:save"}, capabilityScopes(catalog[0]))
+	require.Equal(t, "标题 channel:status", catalog[0].Capabilities[0].Name)
+	require.Equal(t, "device-management", catalog[1].Code)
+	require.Equal(t, "设备管理", catalog[1].Name)
+	require.Equal(t, []string{"channel:detail", "channel:list", "device:detail", "device:list", "device:status"}, capabilityScopes(catalog[1]))
+	require.Equal(t, "标题 channel:detail", catalog[1].Capabilities[0].Name)
+	require.Equal(t, "/openapi/v1/devices/{deviceId}/channels/{channelId}", catalog[1].Capabilities[0].ExternalPath)
+	require.Equal(t, "playback", catalog[2].Code)
+	require.Equal(t, []string{"play:live:apply"}, capabilityScopes(catalog[2]))
+}
+
+// Publishing a release must not change what the platform says it can do. The
+// release reader and the legacy static registry are two implementations of the
+// same 12-scope surface, so a freshly published release has to read back
+// group-for-group and field-for-field identical to the sys_api-only path.
+// Anything else means the same deployment describes a different contract
+// depending on whether the catalog tables are migrated.
+func TestPublishedReleaseMatchesTheLegacyRegistrySurface(t *testing.T) {
+	legacy := newStaticRegistryDB(t)
+	released := newStaticRegistryDB(t)
+	require.NoError(t, released.AutoMigrate(
+		&openapimodels.CapabilityGroup{}, &openapimodels.Capability{}, &openapimodels.Operation{},
+		&openapimodels.Release{}, &openapimodels.ReleaseItem{}, &openapimodels.RuntimeState{},
+		&openapimodels.ClientScope{},
+	))
+
+	outcome, err := bootstrap.PublishCurrentCatalog(context.Background(), released, bootstrap.SystemActorID, nil)
+	require.NoError(t, err)
+	require.Equal(t, bootstrap.PublishActionPublished, outcome.Action)
+	require.Equal(t, len(capabilityDefinitions), outcome.ItemCount)
+
+	fromLegacy, err := CapabilityCatalog(context.Background(), legacy)
+	require.NoError(t, err)
+	fromRelease, err := CapabilityCatalog(context.Background(), released)
+	require.NoError(t, err)
+	require.Equal(t, fromLegacy, fromRelease)
+
+	scopes, err := SupportedScopesFromDB(context.Background(), released)
+	require.NoError(t, err)
+	require.Equal(t, SupportedScopes(), scopes)
+	require.Len(t, scopes, len(capabilityDefinitions))
+}
+
+// newStaticRegistryDB builds the legacy-compatible installation: sys_api rows
+// exactly as 接口管理 has them, and no catalog tables at all, so the static
+// registry is the only reader available.
+func newStaticRegistryDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&appmodels.SysApi{}))
@@ -32,19 +91,15 @@ func TestCapabilityCatalogReusesSysAPITitlesAndGroups(t *testing.T) {
 		})
 	}
 	require.NoError(t, db.Create(&rows).Error)
+	return db
+}
 
-	catalog, err := CapabilityCatalog(context.Background(), db)
-	require.NoError(t, err)
-	require.Len(t, catalog, 3)
-	require.Equal(t, "device-control", catalog[0].Code)
-	require.Equal(t, "设备控制", catalog[0].Name)
-	require.Equal(t, "ptz:operation:read", catalog[0].Capabilities[0].Scope)
-	require.Equal(t, "device-management", catalog[1].Code)
-	require.Equal(t, "设备管理", catalog[1].Name)
-	require.Equal(t, "channel:detail", catalog[1].Capabilities[0].Scope)
-	require.Equal(t, "标题 channel:detail", catalog[1].Capabilities[0].Name)
-	require.Equal(t, "/openapi/v1/devices/{deviceId}/channels/{channelId}", catalog[1].Capabilities[0].ExternalPath)
-	require.Equal(t, "playback", catalog[2].Code)
+func capabilityScopes(group CapabilityGroup) []string {
+	scopes := make([]string, 0, len(group.Capabilities))
+	for _, capability := range group.Capabilities {
+		scopes = append(scopes, capability.Scope)
+	}
+	return scopes
 }
 
 func TestCapabilityCatalogFailsClosedWhenInternalAssetDrifts(t *testing.T) {

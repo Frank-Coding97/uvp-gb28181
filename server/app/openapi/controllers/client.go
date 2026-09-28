@@ -10,16 +10,20 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	"uvplatform.cn/uvp-gb28181/app/openapi/client"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 type RevocationView struct {
@@ -374,6 +378,13 @@ func decodeAdminBody(c *gin.Context, out any, allowed ...string) error {
 func adminDenied(c *gin.Context) {
 	writeOpenAPIError(c, http.StatusForbidden, "CAPABILITY_DENIED", "capability denied")
 }
+
+// adminError maps a management failure to the external contract. Every 5xx
+// branch funnels through adminServerError: a capability-catalog failure has no
+// HTTP shape of its own, so without that log an unpublished catalog, a registry
+// drift and a dependency outage all look identical to the operator
+// ("service unavailable") and the cause can only be found by attaching a probe
+// to the running process.
 func adminError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, client.ErrNotFound), errors.Is(err, client.ErrManagementBoundaryDenied):
@@ -382,7 +393,27 @@ func adminError(c *gin.Context, err error) {
 		writeOpenAPIError(c, 400, "INVALID_REQUEST", "invalid request")
 	case errors.Is(err, client.ErrConflict), errors.Is(err, client.ErrRevoked), errors.Is(err, client.ErrClientDisabled):
 		writeOpenAPIError(c, 409, "CONFLICT", "conflict")
+	case errors.Is(err, client.ErrCapabilityRuntimeUnavailable):
+		adminServerError(c, err, "capability_catalog_unavailable", "capability catalog unavailable")
+	case errors.Is(err, client.ErrCapabilityDrift):
+		adminServerError(c, err, "capability_catalog_drift", "capability catalog drift detected")
+	case errors.Is(err, client.ErrRevocationUnavailable):
+		adminServerError(c, err, "capability_revocation_unavailable", "capability revocation unavailable")
 	default:
-		writeOpenAPIError(c, 503, "SERVICE_UNAVAILABLE", "service unavailable")
+		adminServerError(c, err, "service_unavailable", "service unavailable")
 	}
+}
+
+// adminServerError reports an internal failure without changing the externally
+// visible 503 shape. `reason` carries the machine-readable cause so an operator
+// can grep the exact class of failure; the message itself deliberately stays
+// outside the log because the sanitize core only keeps error class/type.
+func adminServerError(c *gin.Context, err error, reason, message string) {
+	app.Log(c.Request.Context()).Error("OpenAPI 管理请求失败(服务端)",
+		zap.String("event", "http.operation_failed"),
+		zap.String("route", c.FullPath()), zap.String("method", c.Request.Method),
+		zap.String("source_ip", c.ClientIP()),
+		zap.String("reason", reason),
+		logging.Error(err))
+	writeOpenAPIError(c, http.StatusServiceUnavailable, strings.ToUpper(reason), message)
 }

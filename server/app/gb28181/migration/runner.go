@@ -1,7 +1,9 @@
 package migration
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"gorm.io/gorm"
@@ -62,9 +64,20 @@ type embedSource struct {
 	dialect Dialect
 }
 
+// UpFiles 返回当前方言待执行的增量迁移文件名。
+//
+// ⭐ 历史迁移已归档清理(2026-09-23 起 resource/database/gb28181 下不再有
+// migrations 目录,embed 里自然也没有),新环境一律由三方言全量初始化脚本建库。
+// 因此「目录不存在」是**预期状态**而不是故障:必须当成「没有增量迁移」返回,
+// 否则启动链路会在 phase=migration 直接退出 —— 现象是后端起不来,而报错被
+// 收敛成 *fmt.wrapError 不带原文,只能看到 `class=unknown type=*fmt.wrapError`。
+// 其它读目录错误(权限等)仍然向上返回。
 func (s *embedSource) UpFiles() ([]string, error) {
 	entries, err := migrationsfs.FS.ReadDir("migrations")
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	names := make([]string, 0, len(entries))

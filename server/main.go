@@ -17,6 +17,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	openapiroutes "uvplatform.cn/uvp-gb28181/app/openapi/routes"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
@@ -93,7 +94,8 @@ func runApplication() (err error) {
 	// 迁移入口同样等待配置回调退出，然后由 main 关闭根日志。
 	migrateUp := migrateUpRequested(os.Args[1:])
 	downFile := parseArgs(os.Args[1:])
-	if migrateUp || downFile != "" {
+	publishCatalog := publishCatalogRequested(os.Args[1:])
+	if migrateUp || downFile != "" || publishCatalog {
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -101,6 +103,9 @@ func runApplication() (err error) {
 		}()
 		if migrateUp {
 			return runMigrateUp()
+		}
+		if publishCatalog {
+			return runPublishCatalog()
 		}
 		return runMigrateDown(downFile)
 	}
@@ -224,6 +229,15 @@ func migrateUpRequested(args []string) bool {
 	return false
 }
 
+func publishCatalogRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-publish-catalog" {
+			return true
+		}
+	}
+	return false
+}
+
 type databaseIdentity struct {
 	DatabaseName    string `gorm:"column:database_name"`
 	DatabaseVersion string `gorm:"column:database_version"`
@@ -267,6 +281,43 @@ func runMigrateUp() error {
 		zap.String("event", "migration.completed"),
 		zap.Int("before_count", len(before)), zap.Int("after_count", len(after)),
 		newlyApplied)
+	return nil
+}
+
+// runPublishCatalog 是「显式发布 OpenAPI 能力目录」的一次性入口:播种代码自带的
+// 目录行,然后把当前可编辑目录按现状发布成一版 release。它给运维一个不用重启服务
+// 就能修复 catalog 的落点 —— 既包括「表已迁移但从未发布过 release」,也包括「已发布
+// 的 release 里少了本进程能提供的 scope」。它会打印结果,因为「补了几版、active 是
+// 哪一版、还有哪些核心 scope 缺失」是这次调用的全部意义。
+//
+// 与启动链路的区别:启动只做加法(宁可少发一版也不砍掉已发布的 scope),这里按现
+// 状发布,所以运维可以借此下掉一个 scope。两者都在「发布面没变」时不产生新版本。
+func runPublishCatalog() error {
+	db, _, err := primaryDB()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	outcome, err := openapiroutes.PublishCatalog(ctx, db)
+	if err != nil {
+		app.Log(context.Background()).Named("openapi").Error("能力目录发布失败",
+			zap.String("event", "startup.failed"),
+			zap.String("phase", "openapi_catalog_publish"),
+			logging.Error(err))
+		return fmt.Errorf("能力目录发布失败: %w", err)
+	}
+	// 复用 migration.completed:这是一次「数据维护步骤完成」,与 -migrate-up 同类,
+	// 而事件名是冻结基线里的注册项。消息文本把两者区分开。
+	app.Log(context.Background()).Named("openapi").Info("能力目录发布完成",
+		zap.String("event", "migration.completed"),
+		zap.String("action", outcome.Action),
+		zap.Int64("effective_version", outcome.Version),
+		zap.Int("item_count", outcome.ItemCount),
+		zap.Int("count", outcome.Seeded.OperationsCreated))
+	if len(outcome.CoreScopesMissing) > 0 {
+		return fmt.Errorf("能力目录仍缺少核心 scope: %v", outcome.CoreScopesMissing)
+	}
 	return nil
 }
 

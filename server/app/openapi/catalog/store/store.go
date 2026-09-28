@@ -1060,7 +1060,15 @@ func (r *Repository) loadTombstones(ctx context.Context, db *gorm.DB, release op
 			return nil, classifyQueryError((openapimodels.Release{}).TableName(), result.Error)
 		}
 		var parentItems []openapimodels.ReleaseItem
-		result = db.WithContext(ctx).Where("release_id = ?", parent.ID).Find(&parentItems)
+		// Order is part of correctness here, not cosmetics. These rows are
+		// handed to validateReleaseSnapshot, which recomputes a hash over the
+		// items in slice order; without an explicit ORDER BY SQLite may return a
+		// table or index scan in any order, and the hash of an intact parent
+		// release then fails to match. It reproduces as soon as a second release
+		// is published after any row update has changed the query plan: disabling
+		// one operation and republishing was enough to report a healthy parent
+		// release as corrupted.
+		result = db.WithContext(ctx).Where("release_id = ?", parent.ID).Order("id").Find(&parentItems)
 		if result.Error != nil {
 			return nil, classifyQueryError((openapimodels.ReleaseItem{}).TableName(), result.Error)
 		}

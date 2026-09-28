@@ -129,7 +129,7 @@ func adminRequest(t *testing.T, ctrl *ClientAdminController, actor uint, action,
 	u, err := url.Parse(path)
 	require.NoError(t, err)
 	pattern := u.Path
-	if action != "list" && action != "create" && action != "capabilities" {
+	if action != "list" && action != "create" && action != "capabilities" && action != "capabilities-catalog" {
 		pattern = "/api/gb28181/openapi-clients/:id"
 		if action != "detail" {
 			suffix := action
@@ -246,6 +246,42 @@ func TestOpenAPIAdminHTTPCreateSecretAndScopedReads(t *testing.T) {
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("admin_mask_not_found", func(query *gorm.DB) { query.Statement.RaiseErrorOnNotFound = false }))
 	denied, _ := adminRequest(t, ctrl, 7, "list", "GET", "/api/gb28181/openapi-clients", "")
 	require.Equal(t, 403, denied.Code)
+}
+
+// 能力目录失败必须带上自己的语义码。此前这两种成因都落进 default 分支,页面只看到
+// 一句 service unavailable,「从未发布过 release」和「注册表与库漂移」只能靠往
+// 运行中的进程挂探针才分得清。
+func TestOpenAPIAdminHTTPReportsUnpublishedCapabilityCatalog(t *testing.T) {
+	db, ctrl, _ := newAdminHTTP(t)
+	require.NoError(t, db.AutoMigrate(&models.CapabilityGroup{}, &models.Capability{}, &models.Operation{},
+		&models.Release{}, &models.ReleaseItem{}, &models.RuntimeState{}))
+
+	out, _ := adminRequest(t, ctrl, 7, "capabilities-catalog", "GET", "/api/gb28181/openapi-clients/capabilities/catalog", "")
+	require.Equal(t, 503, out.Code, out.Body.String())
+	require.Equal(t, "CAPABILITY_CATALOG_UNAVAILABLE", adminErrorCode(t, out.Body.Bytes()))
+}
+
+// schema 整体缺失时静态注册表仍然可用(与启动链路口径一致),但 catalog 读取需要
+// sys_api 资产,缺了就是漂移 —— 这条同样是 503,但成因不同,码也必须不同。
+func TestOpenAPIAdminHTTPReportsCapabilityCatalogDriftOnLegacySchema(t *testing.T) {
+	_, ctrl, _ := newAdminHTTP(t)
+
+	scopes, _ := adminRequest(t, ctrl, 7, "capabilities", "GET", "/api/gb28181/openapi-clients/capabilities", "")
+	require.Equal(t, 200, scopes.Code, scopes.Body.String())
+
+	catalog, _ := adminRequest(t, ctrl, 7, "capabilities-catalog", "GET", "/api/gb28181/openapi-clients/capabilities/catalog", "")
+	require.Equal(t, 503, catalog.Code, catalog.Body.String())
+	require.Equal(t, "CAPABILITY_CATALOG_DRIFT", adminErrorCode(t, catalog.Body.Bytes()))
+}
+
+func adminErrorCode(t *testing.T, body []byte) string {
+	t.Helper()
+	var response struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(body, &response))
+	require.NotEqual(t, "SERVICE_UNAVAILABLE", response.Code, "能力目录失败不该再退化成匿名 503")
+	return response.Code
 }
 
 func TestOpenAPIAdminHTTPRejectsUnsupportedClientDataScope(t *testing.T) {

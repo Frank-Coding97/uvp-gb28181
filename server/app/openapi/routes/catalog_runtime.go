@@ -5,14 +5,18 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	appmodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
+	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/bootstrap"
 	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
 	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 var catalogRuntimeSchemaModels = []any{
@@ -35,14 +39,10 @@ func InitializeCatalogRuntime(ctx context.Context, db *gorm.DB) (*catalogruntime
 	if db == nil {
 		return nil, store.ErrCatalogRepositoryUnavailable
 	}
-	registry := catalogruntime.NewAdapterRegistry()
-	reader := resource.New(db)
-	for _, registration := range adapters.NewDeviceChannelAdapterRegistrations(reader) {
-		if err := registry.Register(registration); err != nil {
-			return nil, err
-		}
+	runtime, err := newCatalogRuntime(db)
+	if err != nil {
+		return nil, err
 	}
-	runtime := catalogruntime.NewCatalogRuntime(registry, catalogSysAPIResolver{db: db})
 	ctx = normalizeCatalogRuntimeContext(ctx)
 	installed, err := catalogRuntimeSchemaInstalled(db)
 	if err != nil {
@@ -58,6 +58,35 @@ func InitializeCatalogRuntime(ctx context.Context, db *gorm.DB) (*catalogruntime
 		}
 		return nil, fmt.Errorf("%w: active release cannot be hydrated while catalog schema is incomplete", store.ErrCatalogTableMissing)
 	}
+	// A migrated catalog that was never published is a dead end for every read
+	// path (capability catalog, grantable scopes, gateway readiness). Publish
+	// the initial release before hydrating so the installation becomes
+	// self-consistent; an installation whose release already covers the
+	// code-owned surface is untouched.
+	outcome, err := bootstrap.EnsurePublishedCatalog(ctx, db, bootstrap.SystemActorID, runtime)
+	if err != nil {
+		// The caller collapses this into auth.ErrUnavailable, so the catalog
+		// reason has to be recorded here or it is lost. `reason` is a code:
+		// the sanitize core keeps error class/type only.
+		app.Log(ctx).Error("OpenAPI 能力目录首次发布失败",
+			zap.String("event", "startup.failed"),
+			zap.String("phase", "openapi_catalog_publish"),
+			zap.String("reason", catalogPublishFailureReason(err)),
+			logging.Error(err))
+		return nil, err
+	}
+	// A gap that the additive repair refused to close is not fatal — the
+	// release is unchanged, so continuing exposes exactly the contract that was
+	// already published — but it is not silent either: without this line the
+	// operator only sees a capability that grants fine and then answers 403.
+	if len(outcome.CoreScopesMissing) > 0 {
+		app.Log(ctx).Error("OpenAPI 能力目录缺少本该由本进程提供的 scope",
+			zap.String("event", "startup.failed"),
+			zap.String("phase", "openapi_catalog_publish"),
+			zap.String("reason", "catalog_core_scope_missing"),
+			zap.Int("count", len(outcome.CoreScopesMissing)),
+			zap.Strings("items", outcome.CoreScopesMissing))
+	}
 	err = store.NewRepository(db).Hydrate(ctx, runtime)
 	if errors.Is(err, store.ErrNoActiveRelease) {
 		return runtime, nil
@@ -66,6 +95,70 @@ func InitializeCatalogRuntime(ctx context.Context, db *gorm.DB) (*catalogruntime
 		return nil, err
 	}
 	return runtime, nil
+}
+
+// PublishCatalog publishes the current editable catalog as an operator action.
+// It is the entry point behind `-publish-catalog`, so a deployment can repair
+// or deliberately change its capability surface without restarting the
+// service. Unlike the startup path it may shrink the surface; a catalog whose
+// publishable surface is unchanged is still left alone.
+func PublishCatalog(ctx context.Context, db *gorm.DB) (bootstrap.PublishOutcome, error) {
+	if db == nil {
+		return bootstrap.PublishOutcome{}, store.ErrCatalogRepositoryUnavailable
+	}
+	installed, err := catalogRuntimeSchemaInstalled(db)
+	if err != nil {
+		return bootstrap.PublishOutcome{}, err
+	}
+	if !installed {
+		return bootstrap.PublishOutcome{}, fmt.Errorf("%w: run -migrate-up before publishing the capability catalog", store.ErrCatalogTableMissing)
+	}
+	runtime, err := newCatalogRuntime(db)
+	if err != nil {
+		return bootstrap.PublishOutcome{}, err
+	}
+	return bootstrap.PublishCurrentCatalog(normalizeCatalogRuntimeContext(ctx), db, bootstrap.SystemActorID, runtime)
+}
+
+// catalogPublishFailureReason names the failure class without printing the
+// error text. The log keeps class/type only, so a code here is the difference
+// between "publish failed" and "publish failed because the schema is half
+// migrated".
+func catalogPublishFailureReason(err error) string {
+	switch {
+	case errors.Is(err, store.ErrCatalogTableMissing):
+		return "catalog_schema_incomplete"
+	case errors.Is(err, bootstrap.ErrBootstrapConflict):
+		return "catalog_seed_conflict"
+	case errors.Is(err, bootstrap.ErrBootstrapDraftEmpty):
+		return "catalog_draft_empty"
+	case errors.Is(err, catalogruntime.ErrDraftInvalid):
+		return "catalog_draft_invalid"
+	default:
+		return "catalog_publish_failed"
+	}
+}
+
+// newCatalogRuntime builds the process-local runtime around the code-owned
+// adapter registry. The registry is the only source of executable behaviour:
+// catalog rows may select a registered key, they can never install one.
+//
+// Both planes have to be registered or publication would fail. The
+// device/channel adapters carry the read surface; the delegated-plane
+// declarations carry play:live:apply and the ptz:* scopes, which the gateway
+// dispatches through MediaDispatcher/PTZDispatcher rather than through
+// CatalogRuntime.Dispatch.
+func newCatalogRuntime(db *gorm.DB) (*catalogruntime.CatalogRuntime, error) {
+	registry := catalogruntime.NewAdapterRegistry()
+	reader := resource.New(db)
+	registrations := adapters.NewDeviceChannelAdapterRegistrations(reader)
+	registrations = append(registrations, adapters.NewDelegatedPlaneRegistrations()...)
+	for _, registration := range registrations {
+		if err := registry.Register(registration); err != nil {
+			return nil, err
+		}
+	}
+	return catalogruntime.NewCatalogRuntime(registry, catalogSysAPIResolver{db: db}), nil
 }
 
 func catalogRuntimeSchemaInstalled(db *gorm.DB) (bool, error) {

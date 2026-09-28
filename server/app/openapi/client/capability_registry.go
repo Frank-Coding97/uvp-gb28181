@@ -57,7 +57,13 @@ var capabilityDefinitions = []capabilityDefinition{
 	{scope: "device:status", internalPath: "/api/gb28181/device-mgmt/device/:id/status-events", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/status", resourceType: "device", risk: "read", groupCode: "device-management"},
 	{scope: "channel:list", internalPath: "/api/gb28181/device-mgmt/channels", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels", resourceType: "channel", risk: "read", groupCode: "device-management"},
 	{scope: "channel:detail", internalPath: "/api/gb28181/device-mgmt/channel/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}", resourceType: "channel", risk: "read", groupCode: "device-management"},
-	{scope: "channel:status", internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", resourceType: "channel", risk: "read", groupCode: "device-management"},
+	// channel:status belongs to the channel control surface, not to the plain
+	// device/channel read surface: sys_api already files
+	// /api/gb28181/device-mgmt/channel/:id/device-status under 「设备控制」
+	// (id 473, next to control-capabilities and device-configs). The static
+	// reader below fails closed on any group mismatch, so this expectation has
+	// to track 接口管理's own grouping instead of a hand-written one.
+	{scope: "channel:status", internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", resourceType: "channel", risk: "read", groupCode: "device-control"},
 	{scope: "play:live:apply", internalPath: "/api/gb28181/play/:deviceId/:channelId/authorization", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations", resourceType: "channel", risk: "media", groupCode: "playback"},
 	{scope: "ptz:preset:list", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "read", groupCode: "device-control"},
 	{scope: "ptz:preset:save", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},

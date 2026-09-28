@@ -1,12 +1,25 @@
-// Package bootstrap contains idempotent seed operations for the editable
-// OpenAPI capability catalog. It only creates source rows; publishing a
-// release remains an explicit catalog-management action.
+// Package bootstrap owns the code-owned half of the OpenAPI capability
+// catalog lifecycle: it creates the editable source rows for the whole
+// external scope surface (this file) and, for an installation whose active
+// release does not cover that surface yet, the publication that closes the gap
+// (publish.go).
+//
+// The surface is exactly the 12 scopes the legacy registry in
+// app/openapi/client exposes. Six are dispatched by the catalog runtime, six by
+// the dedicated media/PTZ gateway planes; both kinds have to be published all
+// the same, because client.ScopePublished reads the release and nothing else.
+//
+// Publishing stays deliberate: startup only repairs additively and never drops
+// a published scope, and `-publish-catalog` is the explicit operator override.
+// An installation whose release already covers the surface is never re-seeded
+// or re-versioned.
 package bootstrap
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -25,8 +38,8 @@ var (
 	ErrBootstrapUnavailable = errors.New("OpenAPI catalog bootstrap database unavailable")
 )
 
-// BootstrapResult reports rows created by EnsureCoreReadCatalog. Existing
-// rows are deliberately not counted and are never updated by this function.
+// BootstrapResult reports rows created by EnsureCoreCatalog. Existing rows are
+// deliberately not counted and are never updated by this function.
 type BootstrapResult struct {
 	GroupsCreated       int
 	CapabilitiesCreated int
@@ -39,16 +52,24 @@ type groupDefinition struct {
 	sort int
 }
 
+// readDefinition describes one code-owned catalog row triple (group,
+// capability, operation). risk and idempotencyMode are part of the published
+// contract: the capability catalog reader derives IdempotencyRequired from
+// idempotencyMode, and the legacy static registry in app/openapi/client must
+// agree with it value for value or the two readers describe different
+// surfaces.
 type readDefinition struct {
-	groupCode    string
-	code         string
-	scope        string
-	name         string
-	internalPath string
-	method       string
-	externalPath string
-	adapterKey   string
-	resourceType string
+	groupCode       string
+	code            string
+	scope           string
+	name            string
+	internalPath    string
+	method          string
+	externalPath    string
+	adapterKey      string
+	resourceType    string
+	risk            string
+	idempotencyMode string
 }
 
 var coreGroups = []groupDefinition{
@@ -57,9 +78,10 @@ var coreGroups = []groupDefinition{
 	{code: "device-control", name: "设备控制", sort: 30},
 }
 
-// The first bootstrap only seeds the stable device/channel read surface. The
-// remaining groups are present so later playback and control capabilities can
-// be added through the catalog management flow without changing group IDs.
+// coreReadDefinitions is the device/channel read surface. It is dispatched by
+// the catalog runtime: every adapter key here is registered by
+// adapters.NewDeviceChannelAdapterRegistrations and reached through
+// CatalogRuntime.Dispatch.
 var coreReadDefinitions = []readDefinition{
 	{
 		groupCode: "device-management", code: "device.list", scope: "device:list", name: "设备列表",
@@ -86,19 +108,98 @@ var coreReadDefinitions = []readDefinition{
 		internalPath: "/api/gb28181/device-mgmt/channel/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}",
 		adapterKey: adapters.ChannelDetailAdapterKey, resourceType: "channel",
 	},
+	// channel.status is seeded into device-control, matching both
+	// sys_api.api_group for this route (「设备控制」) and the legacy registry in
+	// app/openapi/client. A published release must not regroup a capability
+	// differently from the compatibility path it replaces.
 	{
-		groupCode: "device-management", code: "channel.status", scope: "channel:status", name: "通道状态",
+		groupCode: "device-control", code: "channel.status", scope: "channel:status", name: "通道状态",
 		internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status",
 		adapterKey: adapters.ChannelStatusAdapterKey, resourceType: "channel",
 	},
 }
 
-// EnsureCoreReadCatalog creates the initial editable catalog rows. It is
-// safe to call during every startup: rows are matched by their stable code,
-// scope, and route, and existing rows are left untouched. A matching sys_api
-// row is copied as metadata only; sys_api is never used as the external scope
-// or as the publication trigger.
-func EnsureCoreReadCatalog(ctx context.Context, db *gorm.DB, actorID int64) (BootstrapResult, error) {
+// coreDelegatedDefinitions is the play/PTZ surface. It is *not* dispatched by
+// the catalog runtime: handleMedia and handlePTZ consume these scopes before
+// the metadata dispatcher, and their executable behaviour is
+// MediaDispatcher/PTZDispatcher. It is seeded anyway because the active release
+// is what client.ScopePublished consults — a scope missing from the release can
+// never be granted, whatever its dispatch plane is.
+//
+// risk and idempotencyMode mirror the legacy registry in app/openapi/client
+// exactly (play = media, ptz reads = read, ptz writes = control; the three
+// preset writes require an Idempotency-Key). A published release that disagrees
+// with the compatibility path would make the same platform describe two
+// different contracts depending on whether the catalog tables are migrated.
+var coreDelegatedDefinitions = []readDefinition{
+	{
+		groupCode: "playback", code: "play.live.apply", scope: "play:live:apply", name: "实时点播授权",
+		internalPath: "/api/gb28181/play/:deviceId/:channelId/authorization", method: "POST",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations",
+		adapterKey:   adapters.MediaLiveApplyAdapterKey, resourceType: "channel", risk: "media",
+	},
+	{
+		groupCode: "device-control", code: "ptz.preset.list", scope: "ptz:preset:list", name: "预置位列表",
+		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "GET",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets",
+		adapterKey:   adapters.PTZPresetListAdapterKey, resourceType: "channel", risk: "read",
+	},
+	{
+		groupCode: "device-control", code: "ptz.preset.save", scope: "ptz:preset:save", name: "保存预置位",
+		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "POST",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets",
+		adapterKey:   adapters.PTZPresetSaveAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
+	},
+	{
+		groupCode: "device-control", code: "ptz.preset.call", scope: "ptz:preset:call", name: "调用预置位",
+		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call", method: "POST",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call",
+		adapterKey:   adapters.PTZPresetCallAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
+	},
+	{
+		groupCode: "device-control", code: "ptz.preset.delete", scope: "ptz:preset:delete", name: "删除预置位",
+		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId", method: "DELETE",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}",
+		adapterKey:   adapters.PTZPresetDeleteAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
+	},
+	{
+		groupCode: "device-control", code: "ptz.operation.read", scope: "ptz:operation:read", name: "云台操作结果",
+		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId", method: "GET",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}",
+		adapterKey:   adapters.PTZOperationReadAdapterKey, resourceType: "channel", risk: "read",
+	},
+}
+
+// coreCatalogDefinitions is the complete code-owned catalog surface, which is
+// also the complete external scope surface. It is the single list that
+// publication, the "is this release still complete" check and the tests all
+// agree on.
+func coreCatalogDefinitions() []readDefinition {
+	definitions := make([]readDefinition, 0, len(coreReadDefinitions)+len(coreDelegatedDefinitions))
+	definitions = append(definitions, coreReadDefinitions...)
+	definitions = append(definitions, coreDelegatedDefinitions...)
+	return definitions
+}
+
+// CoreCatalogScopes returns every scope this binary is able to serve, sorted so
+// callers can compare it with a scope list read back from the database. Callers
+// use it to detect an active release that predates part of the surface.
+func CoreCatalogScopes() []string {
+	definitions := coreCatalogDefinitions()
+	scopes := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		scopes = append(scopes, definition.scope)
+	}
+	sort.Strings(scopes)
+	return scopes
+}
+
+// EnsureCoreCatalog creates the initial editable catalog rows. It is safe to
+// call during every startup: rows are matched by their stable code, scope, and
+// route, and existing rows are left untouched. A matching sys_api row is copied
+// as metadata only; sys_api is never used as the external scope or as the
+// publication trigger.
+func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (BootstrapResult, error) {
 	var result BootstrapResult
 	if db == nil {
 		return result, ErrBootstrapUnavailable
@@ -122,7 +223,7 @@ func EnsureCoreReadCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Boo
 			}
 		}
 
-		for _, definition := range coreReadDefinitions {
+		for _, definition := range coreCatalogDefinitions() {
 			group, ok := groups[definition.groupCode]
 			if !ok || group.ID == 0 {
 				return fmt.Errorf("%w: group %q is missing", ErrBootstrapConflict, definition.groupCode)
@@ -198,7 +299,7 @@ func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.Capa
 	}
 	capability = openapimodels.Capability{
 		GroupID: group.ID, Code: definition.code, Scope: definition.scope, Name: name,
-		ResourceType: definition.resourceType, RiskLevel: "read", Status: openapimodels.CatalogStatusDraft,
+		ResourceType: definition.resourceType, RiskLevel: definitionRisk(definition), Status: openapimodels.CatalogStatusDraft,
 		SysAPIID: sysAPIID(sysAPI), SysAPIPath: definition.internalPath, SysAPIMethod: definition.method,
 		RowVersion: 1, CreatedBy: createdBy, UpdatedBy: createdBy,
 	}
@@ -238,8 +339,8 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 	operation = openapimodels.Operation{
 		CapabilityID: capability.ID, Code: definition.code, Name: capability.Name,
 		Method: definition.method, ExternalPath: definition.externalPath,
-		AdapterKey: definition.adapterKey, AdapterContractVersion: adapters.ResourceAdapterContractVersion,
-		ResourceType: definition.resourceType, RiskLevel: "read", IdempotencyMode: "none",
+		AdapterKey: definition.adapterKey, AdapterContractVersion: adapterContractVersion(definition),
+		ResourceType: definition.resourceType, RiskLevel: definitionRisk(definition), IdempotencyMode: definitionIdempotencyMode(definition),
 		RequestSchema: "{}", ResponseSchema: "{}", SysAPIID: sysAPIID(sysAPI),
 		SysAPIPath: definition.internalPath, SysAPIMethod: definition.method,
 		Status: openapimodels.CatalogStatusDraft, CreatedBy: createdBy, UpdatedBy: createdBy,
@@ -248,6 +349,36 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 		return false, err
 	}
 	return true, nil
+}
+
+// definitionRisk defaults to "read", which is what an unset column resolves to
+// as well. A definition that omits it therefore cannot introduce a value the
+// legacy static registry would reject.
+func definitionRisk(definition readDefinition) string {
+	if risk := strings.TrimSpace(definition.risk); risk != "" {
+		return risk
+	}
+	return "read"
+}
+
+// definitionIdempotencyMode defaults to "none" for the same reason: it is the
+// column default, so an omitted mode is never a silent contract change.
+func definitionIdempotencyMode(definition readDefinition) string {
+	if mode := strings.TrimSpace(definition.idempotencyMode); mode != "" {
+		return mode
+	}
+	return "none"
+}
+
+// adapterContractVersion keeps the two planes' contract versions separate in
+// the source while storing what catalog.store normalizes an unset column to.
+// The delegated keys carry their own version constant precisely so a future
+// bump of either plane is a visible diff in the release item.
+func adapterContractVersion(definition readDefinition) string {
+	if strings.HasPrefix(definition.adapterKey, "delegated.") {
+		return adapters.DelegatedPlaneContractVersion
+	}
+	return adapters.ResourceAdapterContractVersion
 }
 
 func findSysAPI(ctx context.Context, tx *gorm.DB, path, method string) (*appmodels.SysApi, error) {
