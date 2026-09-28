@@ -1719,6 +1719,10 @@ body[arco-theme="dark"] .uvp-system-form {
   margin-bottom: 18px;
 }
 
+.uvp-system-tabs .arco-tabs-nav::before {
+  display: none;
+}
+
 .uvp-system-tabs .arco-tabs-nav-tab {
   display: inline-flex;
   gap: 4px;
