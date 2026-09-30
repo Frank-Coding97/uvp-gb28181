@@ -4,31 +4,70 @@ defineProps<{ canSend: boolean; state: "off" | "on-sent"; error: string; title: 
 const emit = defineEmits<{ (e: "toggle"): void }>();
 </script>
 <template>
-  <section class="linked-section linked-card" data-testid="wiper-card">
-    <header class="linked-card-hd">
-      <span class="section-title"><Waves :size="13" />雨刷</span
-      ><span v-if="state === 'on-sent'" class="linked-card-actions"
-        ><button class="status-chip active" data-testid="wiper-running-chip" @click="emit('toggle')">已下发</button></span
-      >
-    </header>
-    <div class="scan-panel" data-testid="wiper-panel">
-      <div class="scan-row">
-        <button
-          class="btn-primary sm scan-toggle"
-          data-testid="wiper-toggle"
-          :disabled="!canSend"
-          :title="title"
-          @click="emit('toggle')"
-        >
-          <Play v-if="state === 'off'" :size="11" /><Square v-else :size="11" /><span>{{
-            state === "on-sent" ? "关闭雨刷" : "开启雨刷"
-          }}</span>
-        </button>
-      </div>
-      <p v-if="error" class="scan-error" data-testid="wiper-error">{{ error }}</p>
-      <p v-else class="scan-hint" data-testid="wiper-hint">
-        标准只命名了编号 1 = 雨刷；辅助开关没有查询命令，这里只能确认指令已下发
-      </p>
-    </div>
+  <section class="wiper-compact" data-testid="wiper-card">
+    <span class="wiper-label"><Waves :size="12" />雨刷</span>
+    <button
+      class="wiper-toggle"
+      :class="{ active: state === 'on-sent' }"
+      data-testid="wiper-toggle"
+      :disabled="!canSend"
+      :title="title"
+      @click="emit('toggle')"
+    >
+      <Play v-if="state === 'off'" :size="11" /><Square v-else :size="11" /><span>{{
+        state === "on-sent" ? "关闭雨刷" : "开启雨刷"
+      }}</span>
+    </button>
+    <p v-if="error" class="wiper-error" data-testid="wiper-error">{{ error }}</p>
   </section>
 </template>
+
+<style scoped>
+.wiper-compact {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.wiper-label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--uvp-text-tertiary);
+}
+.wiper-toggle {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+.wiper-toggle:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+.wiper-toggle.active {
+  font-weight: 600;
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-color: var(--uvp-brand);
+}
+.wiper-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.wiper-error {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--uvp-danger);
+}
+</style>

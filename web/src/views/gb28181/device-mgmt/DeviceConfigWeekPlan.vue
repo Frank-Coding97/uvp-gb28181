@@ -119,26 +119,24 @@ function summary(): string {
       <div class="dcw-segments">
         <span v-if="!day.segments.length" class="dcw-none">无录像计划（该天整条不下发）</span>
         <div v-for="(segment, index) in day.segments" :key="index" class="dcw-segment">
-          <input
+          <a-input
             class="dcw-time"
-            type="text"
-            :value="segment.start"
+            :model-value="segment.start"
             :disabled="disabled"
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段开始`"
             :data-testid="`dcw-start-${day.weekDayNum}-${index}`"
-            @change="setSegment(day.weekDayNum, index, 'start', ($event.target as HTMLInputElement).value)"
+            @change="setSegment(day.weekDayNum, index, 'start', $event)"
           />
           <span class="dcw-dash">→</span>
-          <input
+          <a-input
             class="dcw-time"
-            type="text"
-            :value="segment.stop"
+            :model-value="segment.stop"
             :disabled="disabled"
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段结束`"
             :data-testid="`dcw-stop-${day.weekDayNum}-${index}`"
-            @change="setSegment(day.weekDayNum, index, 'stop', ($event.target as HTMLInputElement).value)"
+            @change="setSegment(day.weekDayNum, index, 'stop', $event)"
           />
           <button
             type="button"
@@ -257,17 +255,21 @@ function summary(): string {
 .dcw-time {
   width: 70px;
   height: 22px;
-  padding: 0 5px;
   font-size: 12px;
   color: var(--uvp-text-primary);
-  text-align: center;
   background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
   border-radius: 4px;
 
-  &:focus {
-    outline: none;
+  &:focus-within {
     border-color: var(--uvp-brand);
+  }
+
+  :deep(.arco-input) {
+    padding: 0 5px;
+    font-size: 12px;
+    color: var(--uvp-text-primary);
+    text-align: center;
   }
 }
 

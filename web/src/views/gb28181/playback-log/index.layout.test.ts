@@ -9,10 +9,36 @@ const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/playback-l
 describe("playback log layout", () => {
   it("keeps vertical scrolling inside the table region", () => {
     expect(source).toContain('class="snow-fill playback-log-page"');
-    expect(source).toContain('class="playback-log-table"');
+    expect(source).toContain('class="uvp-data-table playback-log-table"');
     expect(source).toMatch(/\{\s*x:\s*1320,\s*y:\s*["']100%["']\s*\}/);
     // ⛔ 别钉声明顺序：stylelint-config-recess-order 会重排，格式化一次红一次。
     expect(hasRuleBlock(source, ".playback-log-page", "overflow: hidden")).toBe(true);
     expect(hasRuleBlock(source, ".playback-log-table", "flex: 1", "min-height: 0", "overflow: hidden")).toBe(true);
+  });
+
+  it("uses the shared table panel and action contracts", () => {
+    expect(source).toContain('class="uvp-table-action uvp-table-action--detail"');
+    expect(
+      hasRuleBlock(
+        source,
+        ".playback-log-table :deep(.arco-table-container)",
+        "border: 0",
+        "border-radius: 0",
+        "box-shadow: none"
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(source, ".playback-log-pagination", "font-size: var(--zlm-fs-caption)", "color: var(--zlm-text-3)")).toBe(
+      true
+    );
+  });
+
+  it("renders lifecycle drawer enums through the shared Chinese dictionaries", () => {
+    expect(source).toContain("dictionaryLabel(PLAYBACK_LIFECYCLE_STATE_DICT_CODE, detail.lifecycle.lifecycleState)");
+    expect(source).toContain("dictionaryLabel(PLAYBACK_STAGE_DICT_CODE, detail.lifecycle.currentStage)");
+    expect(source).toContain("dictionaryLabel(PLAYBACK_STAGE_DICT_CODE, detail.lifecycle.failureStage)");
+    expect(source).toContain("dictionaryLabel(PLAYBACK_EVENT_DICT_CODE, event.eventName)");
+    expect(source).toContain("dictionaryLabel(PLAYBACK_EVENT_SOURCE_DICT_CODE, event.source)");
+    expect(source).not.toContain("{{ event.eventName }}");
+    expect(source).not.toContain("{{ event.source }}");
   });
 });

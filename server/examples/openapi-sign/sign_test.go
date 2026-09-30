@@ -25,16 +25,17 @@ type fixture struct {
 }
 
 type vector struct {
-	Name        string `json:"name"`
-	Method      string `json:"method"`
-	Path        string `json:"path"`
-	RawQuery    string `json:"rawQuery"`
-	ContentType string `json:"contentType"`
-	Body        string `json:"body"`
-	BodySHA256  string `json:"bodySHA256"`
-	Bytes       int    `json:"canonicalBytes"`
-	Canonical   string `json:"canonical"`
-	Signature   string `json:"signature"`
+	Name           string `json:"name"`
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	RawQuery       string `json:"rawQuery"`
+	ContentType    string `json:"contentType"`
+	Body           string `json:"body"`
+	BodySHA256     string `json:"bodySHA256"`
+	IdempotencyKey string `json:"idempotencyKey"`
+	Bytes          int    `json:"canonicalBytes"`
+	Canonical      string `json:"canonical"`
+	Signature      string `json:"signature"`
 }
 
 func loadFixture(t *testing.T) fixture {
@@ -58,7 +59,21 @@ func requestFor(f fixture, v vector) Request {
 	return Request{
 		Method: v.Method, Path: v.Path, RawQuery: v.RawQuery, ContentType: v.ContentType,
 		Body: []byte(v.Body), AccessKey: f.AccessKey, Timestamp: f.Timestamp,
-		Nonce: f.Nonce, Audience: f.Audience,
+		Nonce: f.Nonce, IdempotencyKey: v.IdempotencyKey, Audience: f.Audience,
+	}
+}
+
+func TestOpenAPISignExampleCoversIdempotencyKey(t *testing.T) {
+	f := loadFixture(t)
+	input := requestFor(f, f.Vectors[1])
+	input.IdempotencyKey = "preset-call-001"
+	signature, err := Sign(input, f.SecretKey)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	input.IdempotencyKey = "preset-call-002"
+	if err := Verify(input, f.SecretKey, signature); err == nil {
+		t.Fatal("idempotency key mutation preserved signature")
 	}
 }
 
@@ -166,7 +181,7 @@ func TestOpenAPISignExampleHeaderRulesAndCase(t *testing.T) {
 	emptyValue := get
 	emptyValue.RawQuery = "empty=&a=1"
 	emptyCanonical, err := CanonicalString(emptyValue)
-	if err != nil || !strings.HasSuffix(emptyCanonical, "\na=1&empty=\n\n"+f.Vectors[0].BodySHA256+"\n"+f.Audience) {
+	if err != nil || !strings.HasSuffix(emptyCanonical, "\na=1&empty=\n\n"+f.Vectors[0].BodySHA256+"\n\n"+f.Audience) {
 		t.Fatalf("empty query value was not preserved: %v", err)
 	}
 	if _, err := ParseHeaders("GET", HeaderValues{

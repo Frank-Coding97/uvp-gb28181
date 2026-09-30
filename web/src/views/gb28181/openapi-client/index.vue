@@ -2,7 +2,19 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { Modal, Message } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
-import { Eye, KeyRound, MoreHorizontal, Plus, RefreshCw, RotateCcw, ScrollText, Search, ShieldCheck } from "lucide-vue-next";
+import {
+  Ban,
+  CircleCheck,
+  Eye,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+  ScrollText
+} from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
 import {
   OPENAPI_CLIENT_DATA_SCOPE_OPTIONS,
@@ -21,6 +33,7 @@ import {
   type OpenAPIManagedDepartment
 } from "@/api/gb28181-openapi";
 import OpenAPIClientCreateDialog from "./OpenAPIClientCreateDialog.vue";
+import OpenAPIClientOverviewDialog from "./OpenAPIClientOverviewDialog.vue";
 import OpenAPISecretDialog from "./OpenAPISecretDialog.vue";
 
 type StatusAction = "enable" | "disable" | "revoke";
@@ -32,17 +45,40 @@ const hasPermission = (permission: string) => permissions.value.includes("*:*:*"
 const canRead = computed(() => hasPermission("gb28181:openapi:client:read"));
 const canCreate = computed(() => hasPermission("gb28181:openapi:client:create"));
 const canGrant = computed(() => hasPermission("gb28181:openapi:client:grant"));
+const canAudit = computed(() => hasPermission("gb28181:openapi:client:audit"));
 const canRotate = computed(() => hasPermission("gb28181:openapi:client:rotate"));
 const canStatus = computed(() => hasPermission("gb28181:openapi:client:status"));
-const canAudit = computed(() => hasPermission("gb28181:openapi:client:audit"));
 
 const clients = ref<OpenAPIClientView[]>([]);
 const ownerDepartments = ref<OpenAPIManagedDepartment[]>([]);
+const departmentTree = computed(() => {
+  const nodes = ownerDepartments.value.map(item => ({ ...item, children: [] as OpenAPIManagedDepartment[] }));
+  const byId = new Map(nodes.map(item => [item.id, item]));
+  const roots: OpenAPIManagedDepartment[] = [];
+  for (const node of nodes) {
+    const parent = node.parentId ? byId.get(node.parentId) : undefined;
+    if (parent) parent.children?.push(node);
+    else roots.push(node);
+  }
+  return roots;
+});
 const loading = ref(false);
 const error = ref("");
-const form = reactive({ ownerDeptId: undefined as number | undefined });
-const pagination = reactive({ current: 1, pageSize: 10, total: 0, showTotal: true, showJumper: true, showPageSize: true });
-const tableScroll = computed(() => ({ x: "100%", minWidth: 1120 }));
+const form = reactive({
+  ownerDeptId: undefined as number | undefined,
+  name: "",
+  status: undefined as OpenAPIClientStatus | undefined
+});
+const pagination = reactive({
+  current: 1,
+  pageSize: 10,
+  total: 0,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
+});
+const tableScroll = computed(() => ({ x: "100%", minWidth: 1500 }));
 
 const createVisible = ref(false);
 const createLoading = ref(false);
@@ -51,6 +87,8 @@ const createError = ref("");
 const secretPayload = ref<{ clientId: number; accessKey: string; secretKey: string } | null>(null);
 const secretOperation = ref<"create" | "rotate">("create");
 const secretVisible = computed(() => secretPayload.value !== null);
+const overviewClient = ref<OpenAPIClientView | null>(null);
+const overviewVisible = computed(() => overviewClient.value !== null);
 
 let requestVersion = 0;
 let lifecycleGeneration = 0;
@@ -73,6 +111,8 @@ function isCurrentPage(page: number) {
 function buildParams(): OpenAPIClientListParams {
   const params: OpenAPIClientListParams = { page: pagination.current, pageSize: pagination.pageSize };
   if (form.ownerDeptId) params.ownerDeptId = form.ownerDeptId;
+  if (form.name.trim()) params.name = form.name.trim();
+  if (form.status) params.status = form.status;
   return params;
 }
 
@@ -175,6 +215,8 @@ async function search() {
 
 async function reset() {
   form.ownerDeptId = undefined;
+  form.name = "";
+  form.status = undefined;
   pagination.current = 1;
   await load();
 }
@@ -205,6 +247,18 @@ function openCreate() {
 function openWorkspace(record: OpenAPIClientView, tab: "overview" | "capabilities" | "security" | "logs" = "overview") {
   if (!canRead.value) return;
   void router.push({ path: `/gb28181/openapi-client/${record.id}`, query: { tab } });
+}
+
+function openOverview(record: OpenAPIClientView) {
+  if (!canRead.value) return;
+  overviewClient.value = {
+    ...record,
+    ownerDeptName: record.ownerDeptName || departmentName(record.ownerDeptId)
+  };
+}
+
+function closeOverview() {
+  overviewClient.value = null;
 }
 
 function clearCreateState() {
@@ -327,7 +381,7 @@ function requestStatus(action: StatusAction, record: OpenAPIClientView) {
     content: isRevoke
       ? "撤销不可恢复，认证会立即失败；观看连接清退需以服务端进度确认，不会自动误伤其他客户端。"
       : action === "disable"
-        ? "停用会立即阻止新请求；观看连接不会被前端虚报为已清退，请在详情中查看服务端进度。"
+        ? "停用会立即阻止新请求；观看连接清退由服务端异步处理。"
         : "启用不会恢复旧的播放授权，请确认客户端仍属于有效部门。",
     okText: isRevoke ? "确认撤销" : action === "disable" ? "确认停用" : "确认启用",
     cancelText: "取消",
@@ -357,6 +411,8 @@ watch(
   () => {
     clearAccessState();
     form.ownerDeptId = undefined;
+    form.name = "";
+    form.status = undefined;
     pagination.current = 1;
     if (mounted && canRead.value) void load();
   },
@@ -386,6 +442,9 @@ defineExpose({
   createError,
   createVisible,
   secretPayload,
+  overviewClient,
+  openOverview,
+  closeOverview,
   load,
   search,
   reset,
@@ -409,11 +468,24 @@ defineExpose({
       <template v-if="canRead">
         <s-layout-search>
           <template #fields>
-            <div class="openapi-client-filter">
-              <a-select v-model="form.ownerDeptId" placeholder="归属部门" allow-clear allow-search>
-                <a-option v-for="department in ownerDepartments" :key="department.id" :value="department.id">{{
-                  department.name
-                }}</a-option>
+            <div class="openapi-client-filter openapi-client-filter--department">
+              <a-tree-select
+                v-model="form.ownerDeptId"
+                :data="departmentTree"
+                :field-names="{ key: 'id', title: 'name', children: 'children' }"
+                placeholder="归属部门"
+                allow-clear
+                allow-search
+              />
+            </div>
+            <div class="openapi-client-filter openapi-client-filter--name">
+              <a-input v-model="form.name" allow-clear placeholder="客户端名称" />
+            </div>
+            <div class="openapi-client-filter openapi-client-filter--status">
+              <a-select v-model="form.status" placeholder="客户端状态" allow-clear>
+                <a-option value="active">启用</a-option>
+                <a-option value="disabled">停用</a-option>
+                <a-option value="revoked">已撤销</a-option>
               </a-select>
             </div>
           </template>
@@ -441,10 +513,6 @@ defineExpose({
           <span>{{ error }}</span>
           <a-button size="small" @click="load">重试</a-button>
         </div>
-        <div v-if="!error" class="openapi-client-page__boundary-note">
-          每个客户端按归属部门和数据范围访问设备；认证状态与观看连接清退状态分别确认。
-        </div>
-
         <a-table
           v-if="!error"
           class="uvp-data-table openapi-client-table"
@@ -459,13 +527,13 @@ defineExpose({
         >
           <template #empty><a-empty description="暂无 OpenAPI 客户端" /></template>
           <template #columns>
-            <a-table-column title="客户端" :width="220">
+            <a-table-column title="客户端" :width="240">
               <template #cell="{ record }">
                 <div class="openapi-client-table__name">{{ record.name }}</div>
                 <code class="openapi-client-table__ak">{{ record.ak }}</code>
               </template>
             </a-table-column>
-            <a-table-column title="归属部门与数据范围" :width="210">
+            <a-table-column title="归属部门与数据范围" :width="230">
               <template #cell="{ record }">
                 <span>{{ departmentName(record.ownerDeptId) }}</span>
                 <a-tag v-if="dataScopeLabel(record.dataScope)" size="small" class="openapi-client-table__scope">{{
@@ -473,15 +541,48 @@ defineExpose({
                 }}</a-tag>
               </template>
             </a-table-column>
-            <a-table-column title="认证状态" :width="110">
+            <a-table-column title="负责人" :width="230">
+              <template #cell="{ record }">
+                <div class="openapi-client-table__responsible">
+                  <div class="openapi-client-table__responsible-org">{{ record.responsibleOrgName || "-" }}</div>
+                  <div
+                    v-if="record.responsibleName || record.responsibleContact"
+                    class="openapi-client-table__responsible-contact"
+                  >
+                    <span>{{ record.responsibleName || "未填写姓名" }}</span>
+                    <span v-if="record.responsibleContact"> · {{ record.responsibleContact }}</span>
+                  </div>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="调用 / 观看限制" :width="190">
+              <template #cell="{ record }">
+                <div class="openapi-client-table__limits">
+                  <div>{{ record.rateLimit }} / 秒 · 突发 {{ record.burst }}</div>
+                  <div class="openapi-client-table__viewer-quota">观看 {{ record.viewerQuota }} 路并发</div>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="认证状态" :width="120">
               <template #cell="{ record }"
                 ><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template
               >
             </a-table-column>
-            <a-table-column title="密钥版本" data-index="secretVersion" :width="100" />
-            <a-table-column title="操作" :width="410" fixed="right">
+            <a-table-column title="密钥版本" data-index="secretVersion" :width="110" />
+            <a-table-column title="操作" :width="290" align="center" fixed="right">
               <template #cell="{ record }">
                 <div class="openapi-client-table__actions">
+                  <a-tooltip v-if="canRead" content="查看概览" position="top">
+                    <a-button
+                      type="text"
+                      class="uvp-table-action openapi-client-table__overview"
+                      aria-label="查看概览"
+                      @click="openOverview(record)"
+                    >
+                      <template #icon><Eye :size="15" /></template>
+                      概览
+                    </a-button>
+                  </a-tooltip>
                   <a-button
                     v-if="canGrant"
                     type="text"
@@ -489,29 +590,41 @@ defineExpose({
                     @click="openWorkspace(record, 'capabilities')"
                     ><template #icon><ShieldCheck :size="15" /></template>配置能力</a-button
                   >
-                  <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openWorkspace(record, 'overview')"
-                    ><template #icon><Eye :size="15" /></template>详情</a-button
-                  >
-                  <a-button v-if="canAudit" type="text" class="uvp-table-action" @click="openWorkspace(record, 'logs')"
+                  <a-button
+                    v-if="canRead && canAudit"
+                    type="text"
+                    class="uvp-table-action openapi-client-table__audit"
+                    @click="openWorkspace(record, 'logs')"
                     ><template #icon><ScrollText :size="15" /></template>调用记录</a-button
                   >
-                  <a-dropdown v-if="(canRotate || canStatus) && record.status !== 'revoked'" trigger="click">
-                    <a-button type="text" class="uvp-table-action" aria-label="更多客户端操作">
-                      <template #icon><MoreHorizontal :size="16" /></template>更多
-                    </a-button>
-                    <template #content>
-                      <a-doption v-if="canRotate" @click="requestRotate(record)"><KeyRound :size="14" />轮换 SK</a-doption>
-                      <a-doption v-if="canStatus && record.status === 'active'" @click="requestStatus('disable', record)"
-                        >停用</a-doption
-                      >
-                      <a-doption v-if="canStatus && record.status === 'disabled'" @click="requestStatus('enable', record)"
-                        >启用</a-doption
-                      >
-                      <a-doption v-if="canStatus" class="openapi-client-table__danger" @click="requestStatus('revoke', record)"
-                        >撤销</a-doption
-                      >
-                    </template>
-                  </a-dropdown>
+                  <a-button
+                    v-if="canRotate && record.status !== 'revoked'"
+                    type="text"
+                    class="uvp-table-action openapi-client-table__rotate"
+                    @click="requestRotate(record)"
+                    ><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button
+                  >
+                  <a-button
+                    v-if="canStatus && record.status === 'active'"
+                    type="text"
+                    class="uvp-table-action openapi-client-table__disable"
+                    @click="requestStatus('disable', record)"
+                    ><template #icon><ShieldOff :size="15" /></template>停用</a-button
+                  >
+                  <a-button
+                    v-if="canStatus && record.status === 'disabled'"
+                    type="text"
+                    class="uvp-table-action openapi-client-table__enable"
+                    @click="requestStatus('enable', record)"
+                    ><template #icon><CircleCheck :size="15" /></template>启用</a-button
+                  >
+                  <a-button
+                    v-if="canStatus && record.status !== 'revoked'"
+                    type="text"
+                    class="uvp-table-action openapi-client-table__danger"
+                    @click="requestStatus('revoke', record)"
+                    ><template #icon><Ban :size="15" /></template>撤销</a-button
+                  >
                 </div>
               </template>
             </a-table-column>
@@ -537,6 +650,7 @@ defineExpose({
       @close="closeSecret"
       @configure="configureCreatedClient"
     />
+    <OpenAPIClientOverviewDialog :visible="overviewVisible" :client="overviewClient" @close="closeOverview" />
   </div>
 </template>
 
@@ -546,12 +660,59 @@ defineExpose({
 }
 
 .openapi-client-filter {
+  width: 180px;
+}
+
+.openapi-client-filter--department {
   width: 220px;
 }
 
+.openapi-client-filter--name {
+  width: 180px;
+}
+
+.openapi-client-filter--status {
+  width: 150px;
+}
+
+.openapi-client-filter :deep(.arco-select-view),
+.openapi-client-filter :deep(.arco-tree-select-view) {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.openapi-client-filter :deep(.arco-select-view.arco-select-view-focus),
+.openapi-client-filter :deep(.arco-select-view:focus-within),
+.openapi-client-filter :deep(.arco-tree-select-view.arco-select-view-focus),
+.openapi-client-filter :deep(.arco-tree-select-view:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.openapi-client-filter :deep(.arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+
+.openapi-client-filter :deep(.arco-input-wrapper) {
+  width: 100%;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.openapi-client-filter :deep(.arco-input-wrapper:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
 .openapi-client-page__error,
-.openapi-client-page__notice,
-.openapi-client-page__boundary-note {
+.openapi-client-page__notice {
   display: flex;
   gap: 12px;
   align-items: center;
@@ -572,11 +733,6 @@ defineExpose({
   background: rgb(var(--warning-1));
 }
 
-.openapi-client-page__boundary-note {
-  color: var(--color-text-3);
-  background: var(--color-fill-1);
-}
-
 .openapi-client-table__name {
   font-weight: 600;
   color: var(--color-text-1);
@@ -594,27 +750,94 @@ defineExpose({
   margin-left: 6px;
 }
 
+.openapi-client-table__responsible,
+.openapi-client-table__limits {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.openapi-client-table__responsible-org {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--color-text-1);
+  white-space: nowrap;
+}
+
+.openapi-client-table__responsible-contact,
+.openapi-client-table__viewer-quota {
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--color-text-3);
+  white-space: nowrap;
+}
+
+.openapi-client-table__limits {
+  font-size: 13px;
+  color: var(--color-text-2);
+}
+
 .openapi-client-table__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 4px;
+  justify-content: center;
 }
 
 .openapi-client-table :deep(.arco-btn) {
   min-height: 34px;
 }
 
+.openapi-client-table__overview {
+  color: #2563eb !important;
+}
+
+.openapi-client-table__overview:hover {
+  color: #1d4ed8 !important;
+  background: rgb(37 99 235 / 8%) !important;
+}
+
+.openapi-client-table__rotate {
+  color: #6b4f9b !important;
+}
+
+.openapi-client-table__rotate:hover {
+  color: #5a3f89 !important;
+  background: rgb(107 79 155 / 8%) !important;
+}
+
+.openapi-client-table__disable {
+  color: var(--uvp-warning) !important;
+}
+
+.openapi-client-table__disable:hover {
+  color: var(--uvp-warning) !important;
+  background: var(--uvp-warning-soft) !important;
+}
+
+.openapi-client-table__enable {
+  color: var(--uvp-success) !important;
+}
+
+.openapi-client-table__enable:hover {
+  color: var(--uvp-success) !important;
+  background: var(--uvp-success-soft) !important;
+}
+
 .openapi-client-table__danger {
-  color: rgb(var(--danger-6));
+  color: var(--uvp-danger) !important;
+}
+
+.openapi-client-table__danger:hover {
+  color: var(--uvp-danger) !important;
+  background: var(--uvp-danger-soft) !important;
 }
 
 @media (width <= 768px) {
   .openapi-client-filter {
     width: 100%;
-  }
-
-  .openapi-client-page__boundary-note {
-    align-items: flex-start;
   }
 }
 </style>

@@ -13,7 +13,6 @@
 {"id": 8177, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/zlm/nodes/:id/recordings/runtime/status", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 8178, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/sip/service-config/default-playback-protocol", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 8179, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/sip/service-config/fixed-address-playback", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
-{"id": 8180, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/play/:deviceId/:channelId/authorization", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8181, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/play/:deviceId/:channelId", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8182, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/sip/service-config/playback-settings", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 8183, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
@@ -340,7 +339,6 @@
 {"id": 8566, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/openapi-clients/:id/revoke", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8567, "ptype": "p", "v0": "role_1", "v1": "/api/sysJobs/edit", "v2": "PUT", "v3": "*", "v4": "", "v5": ""}
 {"id": 8568, "ptype": "p", "v0": "role_1", "v1": "/api/sysDictItem/getByDictCode/:dictCode", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
-{"id": 8569, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/play/:deviceId/:channelId/authorization", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8570, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/zlm/nodes/:id/kick", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8571, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/zlm/nodes/:id/recordings/runtime/start/preflight", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 8572, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/catalog/tree/:id/children", "v2": "GET", "v3": "*", "v4": "", "v5": ""}

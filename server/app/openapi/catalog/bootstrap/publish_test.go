@@ -24,7 +24,7 @@ func TestEnsurePublishedCatalogPublishesOnceAndNeverReSeeds(t *testing.T) {
 	require.Equal(t, len(CoreCatalogScopes()), first.ItemCount)
 	require.Equal(t, len(CoreCatalogScopes()), first.Seeded.OperationsCreated)
 	require.Equal(t, len(CoreCatalogScopes()), first.Seeded.CapabilitiesCreated)
-	require.Equal(t, 3, first.Seeded.GroupsCreated)
+	require.Equal(t, 2, first.Seeded.GroupsCreated)
 	require.Empty(t, first.CoreScopesMissing)
 
 	var state openapimodels.RuntimeState
@@ -55,6 +55,17 @@ func TestEnsurePublishedCatalogPublishesOnceAndNeverReSeeds(t *testing.T) {
 	require.EqualValues(t, 1, state.RuntimeEpoch, "第二次调用不该推进 runtime epoch")
 }
 
+func TestCoreCatalogGroupDriftIgnoresRemovedPlaybackSnapshot(t *testing.T) {
+	db := newPublishTestDB(t)
+	_, err := EnsureCoreCatalog(context.Background(), db, SystemActorID)
+	require.NoError(t, err)
+	drift, err := coreCatalogGroupDrift(context.Background(), db, &catalogstore.ReleaseSnapshot{
+		Items: []openapimodels.ReleaseItem{{Scope: "play:live:apply", GroupCode: "playback"}},
+	})
+	require.NoError(t, err)
+	require.False(t, drift)
+}
+
 func TestEnsurePublishedCatalogPublishesTheWholeCoreSurface(t *testing.T) {
 	db := newPublishTestDB(t)
 	_, err := EnsurePublishedCatalog(context.Background(), db, SystemActorID, nil)
@@ -66,10 +77,8 @@ func TestEnsurePublishedCatalogPublishesTheWholeCoreSurface(t *testing.T) {
 	for _, scope := range CoreCatalogScopes() {
 		require.Contains(t, published, scope)
 	}
-	// The delegated plane scopes have to be in the release even though no
-	// catalog adapter dispatches them: client.ScopePublished reads the release,
-	// so a missing entry makes play/PTZ permanently ungrantable.
-	require.Contains(t, published, "play:live:apply")
+	// PTZ scopes have to be in the release even though no catalog adapter
+	// dispatches them: client.ScopePublished reads the release.
 	require.Contains(t, published, "ptz:preset:call")
 }
 

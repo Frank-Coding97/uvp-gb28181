@@ -136,6 +136,7 @@ func TestOpenAPIAdminRootRealHTTPBoundary(t *testing.T) {
 
 	list := fixture.do(t, fixture.adminToken, http.MethodGet, "/api/gb28181/openapi-clients?ownerDeptId=10", "")
 	require.Equal(t, http.StatusOK, list.status)
+	require.Contains(t, string(list.body), `"ownerDeptName":"现场部门"`)
 	var listBody struct {
 		Data struct {
 			Total            int `json:"total"`
@@ -154,6 +155,7 @@ func TestOpenAPIAdminRootRealHTTPBoundary(t *testing.T) {
 	clientPath := "/api/gb28181/openapi-clients/" + strconv.FormatInt(createBody.Data.Client.ID, 10)
 	detail := fixture.do(t, fixture.adminToken, http.MethodGet, clientPath, "")
 	require.Equal(t, http.StatusOK, detail.status)
+	require.Contains(t, string(detail.body), `"ownerDeptName":"现场部门"`)
 	require.False(t, strings.Contains(string(detail.body), `"secretKey"`))
 	require.False(t, strings.Contains(string(detail.body), initialSecret))
 
@@ -183,17 +185,13 @@ func TestOpenAPIAdminRootRealHTTPBoundary(t *testing.T) {
 
 	for i, action := range []string{"disable", "revoke"} {
 		response := fixture.do(t, fixture.adminToken, http.MethodPost, clientPath+"/"+action, `{"rowVersion":`+strconv.Itoa(3+i)+`}`)
-		require.Equal(t, http.StatusAccepted, response.status)
+		require.Equal(t, http.StatusOK, response.status)
 		require.Equal(t, "no-store", response.headers.Get("Cache-Control"))
-		require.Contains(t, string(response.body), `"revocationStatus":"pending"`)
 	}
 	var stored openapimodels.Client
 	require.NoError(t, fixture.db.First(&stored, createBody.Data.Client.ID).Error)
 	require.Equal(t, openapimodels.StatusRevoked, stored.Status)
 	require.Equal(t, int64(5), stored.RowVersion)
-	progress := fixture.do(t, fixture.adminToken, http.MethodGet, clientPath+"/revocation-status", "")
-	require.Equal(t, http.StatusOK, progress.status)
-	require.Contains(t, string(progress.body), `"status":"unknown"`, "zero tracked grants cannot prove media cleanup")
 
 	noPermission := fixture.do(t, fixture.noPermToken, http.MethodGet, "/api/gb28181/openapi-clients", "")
 	require.Equal(t, http.StatusForbidden, noPermission.status)
@@ -312,7 +310,6 @@ func openAPIAdminHTTPRoutes() []openAPIAdminHTTPRoute {
 		{path: base + "/:id/disable", method: http.MethodPost},
 		{path: base + "/:id/revoke", method: http.MethodPost},
 		{path: base + "/:id/audits", method: http.MethodGet},
-		{path: base + "/:id/revocation-status", method: http.MethodGet},
 	}
 }
 
@@ -343,7 +340,6 @@ func seedOpenAPIAdminHTTPSchema(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&openapimodels.SecurityState{},
 		&openapimodels.Client{}, &openapimodels.ClientScope{}, &openapimodels.Nonce{}, &openapimodels.Audit{},
-		&openapimodels.PlayGrant{}, &openapimodels.Viewer{},
 		&appmodels.SysDepartment{}, &appmodels.User{}, &appmodels.SysRole{}, &appmodels.SysUserRole{}, &appmodels.SysUserSession{}, &appmodels.SysOperationLog{},
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{},
 	)

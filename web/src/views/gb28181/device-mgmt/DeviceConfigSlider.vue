@@ -16,7 +16,8 @@
 import { computed } from "vue";
 import { Minus, Plus } from "@lucide/vue";
 
-const props = withDefaults(defineProps<{
+const props = withDefaults(
+  defineProps<{
     modelValue?: string | number | null;
     min?: number;
     max?: number;
@@ -26,7 +27,8 @@ const props = withDefaults(defineProps<{
     placeholder?: string;
     /** 供无障碍与测试定位；不影响渲染。 */
     label?: string;
-}>(), {
+  }>(),
+  {
     modelValue: "",
     min: 0,
     max: 100,
@@ -35,208 +37,212 @@ const props = withDefaults(defineProps<{
     disabled: false,
     placeholder: "",
     label: ""
-});
+  }
+);
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 function clamp(value: number): number {
-    return Math.min(props.max, Math.max(props.min, value));
+  return Math.min(props.max, Math.max(props.min, value));
 }
 
 /** 空值/非法值一律回落到下界，保证滑块位置不因脏数据乱跳。 */
 const numericValue = computed(() => {
-    const parsed = Number(String(props.modelValue ?? "").trim());
-    return Number.isFinite(parsed) ? clamp(parsed) : props.min;
+  const parsed = Number(String(props.modelValue ?? "").trim());
+  return Number.isFinite(parsed) ? clamp(parsed) : props.min;
 });
 
 const canDec = computed(() => !props.disabled && numericValue.value > props.min);
 const canInc = computed(() => !props.disabled && numericValue.value < props.max);
 
 function nudge(direction: -1 | 1) {
-    if (props.disabled) return;
-    emit("update:modelValue", String(clamp(numericValue.value + direction * props.step)));
+  if (props.disabled) return;
+  emit("update:modelValue", String(clamp(numericValue.value + direction * props.step)));
 }
 
-function onTrackInput(event: Event) {
-    emit("update:modelValue", (event.target as HTMLInputElement).value);
+function onTrackInput(value: number) {
+  emit("update:modelValue", String(value));
 }
 
-function onInputCommit(event: Event) {
-    const el = event.target as HTMLInputElement;
-    const raw = el.value.trim();
-    if (!raw) {
-        el.value = "";
-        emit("update:modelValue", "");
-        return;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-        el.value = String(props.modelValue ?? "");
-        return;
-    }
-    const next = String(clamp(parsed));
-    el.value = next;
-    if (next !== String(props.modelValue ?? "")) emit("update:modelValue", next);
+function onInputCommit(valueOrEvent: string | Event) {
+  const raw = (typeof valueOrEvent === "string" ? valueOrEvent : (valueOrEvent.target as HTMLInputElement).value).trim();
+  if (!raw) {
+    emit("update:modelValue", "");
+    return;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return;
+  const next = String(clamp(parsed));
+  if (next !== String(props.modelValue ?? "")) emit("update:modelValue", next);
 }
 </script>
 
 <template>
-    <div class="cfg-slider" :class="{ 'is-disabled': disabled }">
-        <button
-            type="button"
-            class="cfg-slider-step"
-            :disabled="!canDec"
-            :aria-label="label ? `减小${label}` : '减小'"
-            @click="nudge(-1)"
-        >
-            <Minus :size="11" />
-        </button>
-        <input
-            class="cfg-slider-track"
-            type="range"
-            :min="min"
-            :max="max"
-            :step="step"
-            :value="numericValue"
-            :disabled="disabled"
-            :aria-label="label || placeholder || '数值调节'"
-            @input="onTrackInput"
-        />
-        <button
-            type="button"
-            class="cfg-slider-step"
-            :disabled="!canInc"
-            :aria-label="label ? `增大${label}` : '增大'"
-            @click="nudge(1)"
-        >
-            <Plus :size="11" />
-        </button>
-        <span class="cfg-slider-value">
-            <input
-                class="cfg-slider-input"
-                type="text"
-                inputmode="numeric"
-                :value="modelValue ?? ''"
-                :disabled="disabled"
-                :placeholder="placeholder"
-                :aria-label="label || undefined"
-                @change="onInputCommit"
-                @keyup.enter="onInputCommit"
-            />
-            <em v-if="unit">{{ unit }}</em>
-        </span>
-    </div>
+  <div class="cfg-slider" :class="{ 'is-disabled': disabled }">
+    <button
+      type="button"
+      class="cfg-slider-step"
+      :disabled="!canDec"
+      :aria-label="label ? `减小${label}` : '减小'"
+      @click="nudge(-1)"
+    >
+      <Minus :size="11" />
+    </button>
+    <a-slider
+      class="cfg-slider-track"
+      :min="min"
+      :max="max"
+      :step="step"
+      :model-value="numericValue"
+      :disabled="disabled"
+      :aria-label="label || placeholder || '数值调节'"
+      :show-tooltip="false"
+      @update:model-value="onTrackInput"
+    />
+    <button
+      type="button"
+      class="cfg-slider-step"
+      :disabled="!canInc"
+      :aria-label="label ? `增大${label}` : '增大'"
+      @click="nudge(1)"
+    >
+      <Plus :size="11" />
+    </button>
+    <span class="cfg-slider-value">
+      <a-input
+        class="cfg-slider-input"
+        inputmode="numeric"
+        :model-value="modelValue ?? ''"
+        :disabled="disabled"
+        :placeholder="placeholder"
+        :aria-label="label || undefined"
+        @change="onInputCommit"
+        @press-enter="onInputCommit"
+      />
+      <em v-if="unit">{{ unit }}</em>
+    </span>
+  </div>
 </template>
 
 <style scoped lang="scss">
 .cfg-slider {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    max-width: 400px;
-    min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 400px;
 
-    &.is-disabled {
-        opacity: 0.55;
-    }
+  &.is-disabled {
+    opacity: 0.55;
+  }
 }
 
 .cfg-slider-step {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-dialog-control-bg, #f8fbff);
-    border: 1px solid var(--uvp-panel-border, #dbe4f0);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-dialog-control-bg, #f8fbff);
+  border: 1px solid var(--uvp-panel-border, #dbe4f0);
+  border-radius: 4px;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 
-    &:hover:not(:disabled) {
-        color: var(--uvp-brand);
-        border-color: var(--uvp-brand);
-    }
+  &:hover:not(:disabled) {
+    color: var(--uvp-brand);
+    border-color: var(--uvp-brand);
+  }
 
-    &:disabled {
-        color: var(--uvp-text-tertiary);
-        cursor: not-allowed;
-        opacity: 0.45;
-    }
+  &:disabled {
+    color: var(--uvp-text-tertiary);
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
 }
 
 .cfg-slider-track {
-    flex: 1 1 auto;
-    min-width: 56px;
-    height: 4px;
-    margin: 0;
-    background: var(--uvp-panel-border, #dfe7f3);
-    border-radius: 2px;
-    box-shadow: inset 0 1px 2px rgb(15 23 42 / 12%);
-    appearance: none;
-    cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 56px;
+  margin: 0 8px;
+}
 
-    &:disabled {
-        cursor: not-allowed;
-    }
+.cfg-slider-track :deep(.arco-slider-track) {
+  height: 14px;
+  background: transparent;
+}
 
-    &::-webkit-slider-thumb {
-        width: 13px;
-        height: 13px;
-        background: #fff;
-        border: 1.5px solid var(--uvp-brand);
-        border-radius: 50%;
-        box-shadow: 0 1px 3px rgb(15 23 42 / 22%);
-        appearance: none;
-        cursor: pointer;
-    }
+.cfg-slider-track :deep(.arco-slider-track::before) {
+  height: 3px;
+  background: var(--uvp-panel-border, #dfe7f3);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 12%);
+}
 
-    &::-moz-range-thumb {
-        width: 11px;
-        height: 11px;
-        background: #fff;
-        border: 1.5px solid var(--uvp-brand);
-        border-radius: 50%;
-        cursor: pointer;
-    }
+.cfg-slider-track :deep(.arco-slider-bar) {
+  height: 3px;
+  background: transparent;
+}
+
+.cfg-slider-track :deep(.arco-slider-btn) {
+  width: 14px;
+  height: 14px;
+}
+
+.cfg-slider-track :deep(.arco-slider-btn::after) {
+  width: 14px;
+  height: 14px;
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border: 2px solid var(--uvp-brand);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 22%);
+}
+
+.cfg-slider-track :deep(.arco-slider-btn:hover::after),
+.cfg-slider-track :deep(.arco-slider-btn-active::after) {
+  box-shadow: 0 1px 4px rgb(15 23 42 / 28%);
 }
 
 .cfg-slider-value {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  align-items: center;
 
-    em {
-        color: var(--uvp-text-tertiary);
-        font-size: 11px;
-        font-style: normal;
-    }
+  em {
+    font-size: 11px;
+    font-style: normal;
+    color: var(--uvp-text-tertiary);
+  }
 }
 
 .cfg-slider-input {
-    width: 58px;
-    height: 20px;
-    padding: 0 5px;
-    color: var(--uvp-text-primary);
-    font-size: 12px;
-    text-align: right;
-    background: var(--uvp-dialog-control-bg, #fff);
-    border: 1px solid var(--uvp-panel-border, #dbe4f0);
-    border-radius: 4px;
+  width: 58px;
+  height: 20px;
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border: 1px solid var(--uvp-panel-border, #dbe4f0);
+  border-radius: 4px;
+}
 
-    &:focus {
-        border-color: var(--uvp-brand);
-        outline: none;
-    }
+.cfg-slider-input :deep(.arco-input-wrapper) {
+  padding: 0 5px;
+}
 
-    &:disabled {
-        cursor: not-allowed;
-    }
+.cfg-slider-input :deep(.arco-input) {
+  min-width: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--uvp-text-primary);
+  text-align: right;
+}
+
+.cfg-slider-input:focus-within {
+  border-color: var(--uvp-brand);
 }
 </style>

@@ -45,9 +45,11 @@
               <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
             </template>
           </a-table-column>
-          <a-table-column title="描述" data-index="description" :ellipsis="true" :width="150" :tooltip="true"></a-table-column>
-          <a-table-column title="创建时间" data-index="createTime" :width="180"></a-table-column>
-          <a-table-column title="操作" :width="220" align="center" :fixed="isMobile ? '' : 'right'">
+          <a-table-column title="描述" data-index="description" :ellipsis="true" :tooltip="true"></a-table-column>
+          <a-table-column title="创建时间" data-index="createdAt" :width="180">
+            <template #cell="{ record }">{{ record.createdAt ? formatTime(record.createdAt) : "" }}</template>
+          </a-table-column>
+          <a-table-column title="操作" :width="210" align="center" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
                 <a-link
@@ -149,7 +151,7 @@
                 <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
               </template>
             </a-table-column>
-            <a-table-column title="操作" align="center" :width="160" :fixed="isMobile ? '' : 'right'">
+            <a-table-column title="操作" align="center" :width="140" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions">
                   <a-link
@@ -205,6 +207,7 @@
 
 <script setup lang="ts">
 import { deepClone } from "@/utils";
+import { formatTime } from "@/globals";
 import {
   getDictListAPI,
   addDictAPI,
@@ -363,6 +366,8 @@ const pagination = ref({
   total: total,
   showPageSize: true,
   showTotal: true,
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100],
   onChange: (page: number) => {
     currentPage.value = page;
     getDict();
@@ -579,5 +584,14 @@ getDict();
 /* 字典详情弹窗内新增按钮区间距 */
 :deep(.arco-modal .arco-row) {
   margin-bottom: 12px;
+}
+
+/* 操作列收窄：描述列改弹性后操作列恒为 210；同时压紧三个动作的间距与内边距。 */
+.uvp-data-table :deep(.uvp-table-actions) {
+  gap: 2px;
+}
+
+.uvp-data-table :deep(.uvp-table-action) {
+  padding: 0 4px;
 }
 </style>

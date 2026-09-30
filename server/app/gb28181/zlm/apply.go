@@ -20,27 +20,39 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	if c.node == nil {
 		return fmt.Errorf("ZLM 节点未绑定")
 	}
+	current, err := c.GetServerConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("读取 ZLM 现有配置失败: %w", err)
+	}
+	initialized := current["general.mediaServerId"] == c.node.MediaServerUUID && c.node.MediaServerUUID != ""
 	base, err := media.EffectiveHookBaseURL()
 	if err != nil {
 		return fmt.Errorf("ZLM Hook 回调基址不可用: %w", err)
 	}
 	params := map[string]string{
-		"hook.enable": "1",
-		// 心跳周期(秒)
-		"hook.alive_interval":     "30.0",
 		"protocol.mp4_max_second": "3600",
 		// 运行时策略
 		"general.streamNoneReaderDelayMS": strconv.Itoa(media.StreamNoneReaderTimeout * 1000),
-		"general.maxStreamWaitMS":         strconv.Itoa(AutoOnDemandStreamWaitMS),
 		"general.flowThreshold":           "0",
+	}
+	if !initialized {
+		params["hook.enable"] = "1"
 	}
 	params["general.mediaServerId"] = c.node.MediaServerUUID
 	for _, event := range playauth.ManagedHookEvents() {
+		key := "hook." + string(event)
+		// ZLM persists setServerConfig to config.ini. Preserve user-owned URLs
+		// (including empty URLs); only refresh callbacks bearing platform identity.
+		if initialized {
+			if !ManagedHookTargetsNode(current[key], c.node.MediaServerUUID) {
+				continue
+			}
+		}
 		hookURL, buildErr := buildManagedHookURL(base, c.node.APISecret, c.node.MediaServerUUID, event)
 		if buildErr != nil {
 			return buildErr
 		}
-		params["hook."+string(event)] = hookURL
+		params[key] = hookURL
 	}
 	if err := c.SetServerConfig(ctx, params); err != nil {
 		return err
@@ -49,9 +61,15 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	if err != nil {
 		return fmt.Errorf("回读 ZLM 配置失败: %w", err)
 	}
-	readbackKeys := []string{"hook.enable", "general.flowThreshold", "general.maxStreamWaitMS", "general.mediaServerId"}
+	readbackKeys := []string{"general.flowThreshold", "general.mediaServerId"}
+	if !initialized {
+		readbackKeys = append(readbackKeys, "hook.enable")
+	}
 	for _, event := range playauth.ManagedHookEvents() {
-		readbackKeys = append(readbackKeys, "hook."+string(event))
+		key := "hook." + string(event)
+		if _, applied := params[key]; applied {
+			readbackKeys = append(readbackKeys, key)
+		}
 	}
 	for _, key := range readbackKeys {
 		if applied[key] != params[key] {

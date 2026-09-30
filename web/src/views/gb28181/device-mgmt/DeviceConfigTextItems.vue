@@ -77,39 +77,36 @@ function counterText(): string {
   <div class="dct" :class="{ 'is-disabled': disabled }">
     <div v-if="!rows().length" class="dct-empty">未配置叠加文字</div>
     <div v-for="(row, index) in rows()" :key="index" class="dct-row" :data-testid="`dct-row-${index}`">
-      <input
+      <a-input
         class="dct-input"
-        type="text"
-        :value="row.text"
+        :model-value="row.text"
         :maxlength="maxLength"
         :disabled="disabled"
         :placeholder="`第 ${index + 1} 条文字`"
         :aria-label="`第 ${index + 1} 条叠加文字`"
         :data-testid="`dct-text-${index}`"
-        @change="setText(index, ($event.target as HTMLInputElement).value)"
+        @change="setText(index, $event)"
       />
       <label class="dct-coord">
         <span>X</span>
-        <input
+        <a-input
           class="dct-input is-coord"
-          type="text"
+          :model-value="row.x"
           inputmode="numeric"
-          :value="row.x"
           :disabled="disabled"
           :aria-label="`第 ${index + 1} 条文字 X`"
-          @change="setCoord(index, 'x', ($event.target as HTMLInputElement).value)"
+          @change="setCoord(index, 'x', $event)"
         />
       </label>
       <label class="dct-coord">
         <span>Y</span>
-        <input
+        <a-input
           class="dct-input is-coord"
-          type="text"
+          :model-value="row.y"
           inputmode="numeric"
-          :value="row.y"
           :disabled="disabled"
           :aria-label="`第 ${index + 1} 条文字 Y`"
-          @change="setCoord(index, 'y', ($event.target as HTMLInputElement).value)"
+          @change="setCoord(index, 'y', $event)"
         />
       </label>
       <button
@@ -167,20 +164,26 @@ function counterText(): string {
 .dct-input {
   width: 100%;
   height: 24px;
-  padding: 0 7px;
   font-size: 12px;
   color: var(--uvp-text-primary);
   background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
   border-radius: 4px;
 
-  &:focus {
-    outline: none;
+  &:focus-within {
     border-color: var(--uvp-brand);
   }
 
   &.is-coord {
-    text-align: right;
+    :deep(.arco-input) {
+      text-align: right;
+    }
+  }
+
+  :deep(.arco-input) {
+    padding: 0 7px;
+    font-size: 12px;
+    color: var(--uvp-text-primary);
   }
 }
 

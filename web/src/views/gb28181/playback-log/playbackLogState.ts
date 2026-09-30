@@ -3,6 +3,30 @@ import type { PlayLifecycleQuery } from "@/api/gb28181";
 export const PLAYBACK_LOG_PAGE_SIZE = 10;
 export const PLAYBACK_LOG_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
+export const PLAYBACK_MEDIA_STATE_DICT_CODE = "playback_media_state";
+export const PLAYBACK_CLIENT_STATE_DICT_CODE = "playback_client_state";
+export const PLAYBACK_STAGE_DICT_CODE = "playback_stage";
+export const PLAYBACK_LIFECYCLE_STATE_DICT_CODE = "playback_lifecycle_state";
+export const PLAYBACK_FACT_STATE_DICT_CODE = "playback_fact_state";
+export const PLAYBACK_EVENT_SOURCE_DICT_CODE = "playback_event_source";
+export const PLAYBACK_EVENT_DICT_CODE = "playback_event";
+
+export interface PlaybackDictionaryItem {
+  name?: string | null;
+  value?: string | null;
+  status?: number;
+}
+
+export function playbackDictionaryOptions(items: readonly PlaybackDictionaryItem[]) {
+  return items
+    .filter(item => item.status !== 0 && item.name && item.value)
+    .map(item => ({ label: item.name as string, value: item.value as string }));
+}
+
+export function playbackDictionaryLabel(items: readonly PlaybackDictionaryItem[], value: string) {
+  return playbackDictionaryOptions(items).find(option => option.value === value)?.label ?? value;
+}
+
 export interface PlaybackLogFilters {
   deviceCode?: string;
   channelCode?: string;
@@ -32,32 +56,22 @@ export function createPlaybackLogQuery(filters: PlaybackLogFilters, page: number
   };
 }
 
-export function factStateLabel(state: string) {
-  return (
-    {
-      confirmed: "已证实",
-      failed: "失败",
-      in_progress: "进行中",
-      unknown: "未知",
-      not_applicable: "不适用"
-    }[state] ??
-    state ??
-    "未知"
-  );
+export type PlaybackStateTone = "success" | "warning" | "danger" | "info" | "neutral";
+
+export function playbackStateTone(state: string): PlaybackStateTone {
+  if (["ready", "first_frame", "confirmed", "completed"].includes(state)) return "success";
+  if (["failed", "player_error"].includes(state)) return "danger";
+  if (["in_progress"].includes(state)) return "info";
+  if (["stale_in_progress"].includes(state)) return "warning";
+  return "neutral";
 }
 
-export function mediaStateLabel(state: string) {
-  return { ready: "媒体已就绪", failed: "媒体失败", stopped: "媒体已停止", unknown: "媒体未知" }[state] ?? state;
-}
-
-export function clientStateLabel(state: string) {
-  return { first_frame: "已见首帧", failed: "客户端失败", unknown: "客户端未知" }[state] ?? state;
-}
-
-export function stateColor(state: string) {
-  if (["ready", "first_frame", "confirmed", "completed"].includes(state)) return "green";
-  if (["failed", "player_error"].includes(state)) return "red";
-  if (["in_progress"].includes(state)) return "blue";
-  if (["stale_in_progress"].includes(state)) return "orange";
-  return "gray";
+export function playbackStateColor(state: string) {
+  return {
+    success: "var(--zlm-success-500)",
+    warning: "var(--zlm-warn-500)",
+    danger: "var(--zlm-danger-500)",
+    info: "var(--zlm-brand-500)",
+    neutral: "var(--zlm-text-4)"
+  }[playbackStateTone(state)];
 }

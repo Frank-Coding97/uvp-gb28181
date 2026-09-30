@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
+
+type maintenancePlayDispatcher struct {
+	err    error
+	called atomic.Int64
+}
+
+func (*maintenancePlayDispatcher) Ready() bool { return true }
+func (*maintenancePlayDispatcher) Start(context.Context, PlayRequest) (any, error) {
+	return nil, nil
+}
+func (d *maintenancePlayDispatcher) ReconcileViewers(context.Context) error {
+	d.called.Add(1)
+	return d.err
+}
 
 func TestOpenAPIMaintenanceRetentionAndClockFreeze(t *testing.T) {
 	gate, db, secret := gatewayFixture(t)
@@ -67,4 +82,17 @@ func TestOpenAPIMaintenanceLoopStopsAndReportsFailure(t *testing.T) {
 	// Disabled startup does not allocate an immortal maintenance goroutine.
 	var disabled *Gateway
 	disabled.RunMaintenance(context.Background(), nil)
+}
+
+func TestOpenAPIMaintenanceReconcilesPlayViewers(t *testing.T) {
+	gate, _, _ := gatewayFixture(t)
+	play := &maintenancePlayDispatcher{}
+	gate.play = play
+
+	require.NoError(t, gate.maintain(context.Background()))
+	require.EqualValues(t, 1, play.called.Load())
+
+	play.err = errors.New("runtime snapshot unavailable")
+	require.Error(t, gate.maintain(context.Background()))
+	require.EqualValues(t, 2, play.called.Load())
 }

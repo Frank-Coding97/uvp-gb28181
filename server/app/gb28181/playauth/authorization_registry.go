@@ -111,6 +111,8 @@ type authorizationBinding struct {
 	stream          string
 	mediaServerID   string
 	mediaGeneration uint64
+	openAPIClientID int64
+	openAPIGrantID  string
 }
 
 type authorizationRecord struct {
@@ -450,6 +452,7 @@ func resourceBinding(binding Binding) authorizationBinding {
 		deviceID: binding.DeviceID, channelID: binding.ChannelID, deviceEpoch: binding.DeviceEpoch, version: version, app: binding.App,
 		stream: binding.Stream, mediaServerID: binding.MediaServerID,
 		mediaGeneration: binding.MediaGeneration,
+		openAPIClientID: binding.OpenAPIClientID, openAPIGrantID: binding.OpenAPIGrantID,
 	}
 }
 
@@ -462,7 +465,8 @@ func (r authorizationRecord) matchesClaims(claims Claims) bool {
 	return r.nonce == claims.Nonce && r.issuedAt.Unix() == claims.IssuedAt && r.expiresAt.Unix() == claims.ExpiresAt &&
 		r.binding.version == claims.Version && r.binding.deviceID == claims.DeviceID && r.binding.channelID == claims.ChannelID && r.binding.deviceEpoch == claims.DeviceEpoch && r.binding.app == claims.App &&
 		r.binding.stream == claims.Stream && r.binding.mediaServerID == claims.MediaServerID &&
-		r.binding.mediaGeneration == claims.MediaGeneration
+		r.binding.mediaGeneration == claims.MediaGeneration && r.binding.openAPIClientID == claims.OpenAPIClientID &&
+		r.binding.openAPIGrantID == claims.OpenAPIGrantID
 }
 
 // AuthorizationService combines stateless HMAC validation for live media with

@@ -31,7 +31,8 @@ const pagination = reactive({
   total: 0,
   showTotal: true,
   showJumper: true,
-  showPageSize: true
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 const canForce = computed(() => {
@@ -344,13 +345,6 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   color: var(--uvp-brand-strong) !important;
   background: var(--uvp-secondary-action-hover-bg) !important;
   border-color: var(--uvp-brand) !important;
-}
-
-.online-user-page :deep(.arco-pagination-item),
-.online-user-page :deep(.arco-pagination-jumper-input),
-.online-user-page :deep(.arco-pagination-options .arco-select-view) {
-  min-width: 32px;
-  min-height: 32px;
 }
 
 .online-user-error {

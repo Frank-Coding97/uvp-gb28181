@@ -623,13 +623,18 @@
   flex: 0 0 auto;
   width: 52px;
   height: 20px;
-  padding: 0 5px;
   font-family: ui-monospace, Menlo, monospace;
   font-size: 10.5px;
   color: var(--uvp-text-primary);
   background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
+  border-color: var(--uvp-panel-border);
   border-radius: 4px;
+}
+
+.scan-number .arco-input {
+  padding: 0 5px;
+  font: inherit;
+  color: inherit;
 }
 
 .scan-toggle {
@@ -813,14 +818,34 @@
   color: var(--uvp-text-tertiary);
 }
 
-.linked-inline-select select {
-  height: 24px;
-  padding: 0 5px;
+.linked-inline-select .arco-select {
+  width: 92px;
   font-size: 10px;
+}
+
+.linked-inline-select .arco-select-view {
+  min-height: 24px;
+  padding: 0 5px;
   color: var(--uvp-text-secondary);
   background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
+  border-color: var(--uvp-panel-border);
   border-radius: 4px;
+}
+
+.linked-inline-select .arco-select-view-value {
+  font-size: 10px;
+}
+
+.video-param-compare-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.vpc-status {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px 0;
 }
 
 .vpc-grid {

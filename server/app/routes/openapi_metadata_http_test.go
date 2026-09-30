@@ -58,7 +58,6 @@ func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = raw.Close() })
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}, &basemodels.SysDepartment{}, &basemodels.SysOperationLog{}, &gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
-	require.NoError(t, db.AutoMigrate(&models.PlayGrant{}, &models.Viewer{}))
 	active := int8(1)
 	require.NoError(t, db.Create(&[]basemodels.SysDepartment{{BaseModel: basemodels.BaseModel{ID: 10}, Status: &active}, {BaseModel: basemodels.BaseModel{ID: 20}, Status: &active}}).Error)
 	const device = "34020000002000000010"
@@ -126,7 +125,7 @@ func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 	status, body = call("GET", "/openapi/v1/devices", true)
 	require.Equal(t, 403, status, body)
 	status, body = call("POST", "/openapi/v1/devices/"+device+"/channels/"+channel+"/live-authorizations", false)
-	require.Equal(t, 503, status, body)
+	require.Equal(t, 404, status, body)
 	var n int64
 	require.NoError(t, db.Model(&models.Nonce{}).Count(&n).Error)
 	require.EqualValues(t, 6, n)

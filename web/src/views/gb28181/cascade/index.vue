@@ -1,9 +1,7 @@
 <template>
   <div class="snow-page cascade-page">
     <div class="snow-inner uvp-page-shell-flat cascade-shell">
-      <a-alert v-if="!canView" type="warning" class="cascade-alert">
-        无权查看国标级联，请联系管理员分配查看权限。
-      </a-alert>
+      <a-alert v-if="!canView" type="warning" class="cascade-alert"> 无权查看国标级联，请联系管理员分配查看权限。 </a-alert>
 
       <template v-else>
         <section class="cascade-summary" aria-label="级联平台摘要">
@@ -53,7 +51,12 @@
           </template>
           <template #actions>
             <div class="cascade-search-actions">
-              <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`" @click="refresh">
+              <a-button
+                class="uvp-page-action-btn uvp-refresh-btn"
+                :loading="loading"
+                :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"
+                @click="refresh"
+              >
                 <template #icon><RefreshCw :size="15" /></template>
                 刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
               </a-button>
@@ -86,12 +89,18 @@
             </a-table-column>
             <a-table-column title="上级地址" :width="190">
               <template #cell="{ record }">
-                <div class="entity-cell"><span>{{ record.host }}:{{ record.port }}</span><small>{{ record.transport }}</small></div>
+                <div class="entity-cell">
+                  <span>{{ record.host }}:{{ record.port }}</span
+                  ><small>{{ record.transport }}</small>
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="本平台身份" :width="218">
               <template #cell="{ record }">
-                <div class="entity-cell"><code>{{ record.localDeviceId }}</code><small>{{ record.localSipIp }}:{{ record.localSipPort }}</small></div>
+                <div class="entity-cell">
+                  <code>{{ record.localDeviceId }}</code
+                  ><small>{{ record.localSipIp }}:{{ record.localSipPort }}</small>
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="共享通道" :width="190">
@@ -127,7 +136,10 @@
             </a-table-column>
             <a-table-column title="协议" :width="112">
               <template #cell="{ record }">
-                <div class="entity-cell"><span>GB/T {{ record.effectiveVersion || '2016' }}</span><small>{{ profileLabel(record.profileOverride) }}</small></div>
+                <div class="entity-cell">
+                  <span>GB/T {{ record.effectiveVersion || "2016" }}</span
+                  ><small>{{ profileLabel(record.profileOverride) }}</small>
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="最近注册" :width="180">
@@ -145,12 +157,25 @@
             <a-table-column title="操作" :width="290" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions cascade-actions">
-                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><Settings2 :size="14" />编辑</a-link>
-                  <a-link v-if="canShare" class="uvp-table-action uvp-table-action--assign" @click="openShare(record)"><Share2 :size="14" />共享</a-link>
+                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"
+                    ><Settings2 :size="14" />编辑</a-link
+                  >
+                  <a-link v-if="canShare" class="uvp-table-action uvp-table-action--assign" @click="openShare(record)"
+                    ><Share2 :size="14" />共享</a-link
+                  >
                   <a-tooltip content="把当前共享给该上级的设备/通道目录主动报送一遍">
-                    <a-link v-if="canShare" class="uvp-table-action uvp-table-action--sync" :disabled="!record.enabled" :loading="actionId === record.id" @click="pushCatalog(record)"><Send :size="14" />推送</a-link>
+                    <a-link
+                      v-if="canShare"
+                      class="uvp-table-action uvp-table-action--sync"
+                      :disabled="!record.enabled"
+                      :loading="actionId === record.id"
+                      @click="pushCatalog(record)"
+                      ><Send :size="14" />推送</a-link
+                    >
                   </a-tooltip>
-                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="confirmDelete(record)"><Trash2 :size="14" />删除</a-link>
+                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="confirmDelete(record)"
+                    ><Trash2 :size="14" />删除</a-link
+                  >
                 </div>
               </template>
             </a-table-column>
@@ -172,17 +197,36 @@
       <template #title>{{ editing ? "编辑上级平台" : "新增上级平台" }}</template>
       <a-form :model="form" layout="vertical" class="cascade-form">
         <section class="form-section">
-          <header><Building2 :size="17" /><h3>上级平台</h3></header>
+          <header>
+            <Building2 :size="17" />
+            <h3>上级平台</h3>
+          </header>
           <div class="form-grid">
             <a-form-item label="平台名称" required :validate-status="fieldErrors.name ? 'error' : ''" :help="fieldErrors.name">
               <a-input v-model="form.name" maxlength="128" allow-clear @blur="touched.name = true" />
             </a-form-item>
-            <a-form-item label="上级平台 ID" required :validate-status="fieldErrors.upstreamServerId ? 'error' : ''" :help="fieldErrors.upstreamServerId">
-              <a-input v-model="form.upstreamServerId" maxlength="20" allow-clear @input="updateUpstreamDomain" @blur="touched.upstreamServerId = true">
+            <a-form-item
+              label="上级平台 ID"
+              required
+              :validate-status="fieldErrors.upstreamServerId ? 'error' : ''"
+              :help="fieldErrors.upstreamServerId"
+            >
+              <a-input
+                v-model="form.upstreamServerId"
+                maxlength="20"
+                allow-clear
+                @input="updateUpstreamDomain"
+                @blur="touched.upstreamServerId = true"
+              >
                 <template #suffix><s-counter-suffix :value="form.upstreamServerId.length" :total="20" /></template>
               </a-input>
             </a-form-item>
-            <a-form-item label="上级域" required :validate-status="fieldErrors.upstreamDomain ? 'error' : ''" :help="fieldErrors.upstreamDomain">
+            <a-form-item
+              label="上级域"
+              required
+              :validate-status="fieldErrors.upstreamDomain ? 'error' : ''"
+              :help="fieldErrors.upstreamDomain"
+            >
               <a-input v-model="form.upstreamDomain" allow-clear @blur="touched.upstreamDomain = true" />
             </a-form-item>
             <a-form-item label="上级地址" required :validate-status="fieldErrors.host ? 'error' : ''" :help="fieldErrors.host">
@@ -201,18 +245,43 @@
         </section>
 
         <section class="form-section">
-          <header><Fingerprint :size="17" /><h3>本平台身份</h3></header>
+          <header>
+            <Fingerprint :size="17" />
+            <h3>本平台身份</h3>
+          </header>
           <div class="form-grid">
-            <a-form-item label="本平台设备 ID" required :validate-status="fieldErrors.localDeviceId ? 'error' : ''" :help="fieldErrors.localDeviceId">
+            <a-form-item
+              label="本平台设备 ID"
+              required
+              :validate-status="fieldErrors.localDeviceId ? 'error' : ''"
+              :help="fieldErrors.localDeviceId"
+            >
               <a-input v-model="form.localDeviceId" maxlength="20" allow-clear @blur="touched.localDeviceId = true">
                 <template #suffix><s-counter-suffix :value="form.localDeviceId.length" :total="20" /></template>
               </a-input>
             </a-form-item>
-            <a-form-item label="本平台域" required :validate-status="fieldErrors.localDomain ? 'error' : ''" :help="fieldErrors.localDomain">
+            <a-form-item
+              label="本平台域"
+              required
+              :validate-status="fieldErrors.localDomain ? 'error' : ''"
+              :help="fieldErrors.localDomain"
+            >
               <a-input v-model="form.localDomain" allow-clear @blur="touched.localDomain = true" />
             </a-form-item>
-            <a-form-item label="本地 SIP 地址" required :validate-status="fieldErrors.localSipIp ? 'error' : ''" :help="fieldErrors.localSipIp">
-              <a-select v-model="form.localSipIp" :loading="networkLoading" allow-search allow-create placeholder="选择本机网卡或输入宣告地址" @blur="touched.localSipIp = true">
+            <a-form-item
+              label="本地 SIP 地址"
+              required
+              :validate-status="fieldErrors.localSipIp ? 'error' : ''"
+              :help="fieldErrors.localSipIp"
+            >
+              <a-select
+                v-model="form.localSipIp"
+                :loading="networkLoading"
+                allow-search
+                allow-create
+                placeholder="选择本机网卡或输入宣告地址"
+                @blur="touched.localSipIp = true"
+              >
                 <a-option v-for="item in localSipAddresses" :key="item.ip" :value="item.ip" :label="item.ip">
                   {{ item.ip }} <span v-if="item.interfaceName">（{{ item.interfaceName }}）</span>
                   <a-tag v-if="item.recommended" size="small" color="green">推荐</a-tag>
@@ -223,26 +292,55 @@
             <a-form-item label="本地 SIP 端口" required>
               <s-number-field ref="localSipPortField" v-model="form.localSipPort" :min="1" :max="65535" required />
             </a-form-item>
-            <a-form-item label="媒体宣告地址" :validate-status="fieldErrors.mediaAdvertiseIp ? 'error' : ''" :help="fieldErrors.mediaAdvertiseIp">
+            <a-form-item
+              label="媒体宣告地址"
+              :validate-status="fieldErrors.mediaAdvertiseIp ? 'error' : ''"
+              :help="fieldErrors.mediaAdvertiseIp"
+            >
               <a-input v-model="form.mediaAdvertiseIp" allow-clear @blur="touched.mediaAdvertiseIp = true" />
             </a-form-item>
             <a-form-item label="认证用户名"><a-input v-model="form.authUsername" allow-clear /></a-form-item>
             <a-form-item label="认证密码">
-              <a-alert v-if="editing?.credentialNeedsReset" type="warning">原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert>
-              <s-password-field v-model="form.password" :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'" />
+              <a-alert v-if="editing?.credentialNeedsReset" type="warning"
+                >原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert
+              >
+              <s-password-field
+                v-model="form.password"
+                :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'"
+              />
             </a-form-item>
           </div>
         </section>
 
         <section class="form-section">
-          <header><SlidersHorizontal :size="17" /><h3>注册与能力</h3></header>
+          <header>
+            <SlidersHorizontal :size="17" />
+            <h3>注册与能力</h3>
+          </header>
           <div class="form-grid">
-            <a-form-item label="协议版本"><a-select v-model="form.profileOverride"><a-option value="auto">自动协商</a-option><a-option value="2016">固定 2016</a-option><a-option value="2022">固定 2022</a-option></a-select></a-form-item>
-            <a-form-item label="字符集覆盖"><a-select v-model="form.charsetOverride" allow-clear><a-option value="GB2312">GB2312</a-option><a-option value="UTF-8">UTF-8</a-option></a-select></a-form-item>
-            <a-form-item label="注册有效期（秒）"><s-number-field ref="registerExpiresField" v-model="form.registerExpires" :min="60" :max="86400" required /></a-form-item>
-            <a-form-item label="心跳间隔（秒）"><s-number-field ref="keepaliveIntervalField" v-model="form.keepaliveInterval" :min="5" :max="3600" required /></a-form-item>
-            <a-form-item label="目录批量大小"><s-number-field ref="catalogBatchSizeField" v-model="form.catalogBatchSize" :min="1" :max="1000" required /></a-form-item>
-            <a-form-item label="最大并发流"><s-number-field ref="maxStreamsField" v-model="form.maxStreams" :min="1" :max="10000" required /></a-form-item>
+            <a-form-item label="协议版本"
+              ><a-select v-model="form.profileOverride"
+                ><a-option value="auto">自动协商</a-option><a-option value="2016">固定 2016</a-option
+                ><a-option value="2022">固定 2022</a-option></a-select
+              ></a-form-item
+            >
+            <a-form-item label="字符集覆盖"
+              ><a-select v-model="form.charsetOverride" allow-clear
+                ><a-option value="GB2312">GB2312</a-option><a-option value="UTF-8">UTF-8</a-option></a-select
+              ></a-form-item
+            >
+            <a-form-item label="注册有效期（秒）"
+              ><s-number-field ref="registerExpiresField" v-model="form.registerExpires" :min="60" :max="86400" required
+            /></a-form-item>
+            <a-form-item label="心跳间隔（秒）"
+              ><s-number-field ref="keepaliveIntervalField" v-model="form.keepaliveInterval" :min="5" :max="3600" required
+            /></a-form-item>
+            <a-form-item label="目录批量大小"
+              ><s-number-field ref="catalogBatchSizeField" v-model="form.catalogBatchSize" :min="1" :max="1000" required
+            /></a-form-item>
+            <a-form-item label="最大并发流"
+              ><s-number-field ref="maxStreamsField" v-model="form.maxStreams" :min="1" :max="10000" required
+            /></a-form-item>
           </div>
           <div class="switch-grid">
             <label><span>发布平台目录</span><a-switch v-model="form.publishPlatform" /></label>
@@ -269,14 +367,31 @@
       unmount-on-close
     >
       <a-spin :loading="sharedDevicesLoading" style="width: 100%">
-        <a-alert v-if="sharedDevicesError" type="error">{{ sharedDevicesError }} <a-link @click="openSharedDevices(sharedDevicesPlatform!)">重试</a-link></a-alert>
-        <a-table v-else :data="sharedChannelRows" row-key="sourceChannelId" :pagination="{ pageSize: 10 }" :bordered="false">
+        <a-alert v-if="sharedDevicesError" type="error"
+          >{{ sharedDevicesError }} <a-link @click="openSharedDevices(sharedDevicesPlatform!)">重试</a-link></a-alert
+        >
+        <a-table
+          v-else
+          class="uvp-data-table"
+          :data="sharedChannelRows"
+          row-key="sourceChannelId"
+          :pagination="{
+            pageSize: 10,
+            showTotal: true,
+            showPageSize: true,
+            showJumper: true,
+            pageSizeOptions: [10, 20, 50, 100]
+          }"
+          :bordered="false"
+        >
           <template #columns>
             <a-table-column title="通道名称" :width="180">
               <template #cell="{ record }">{{ record.name || record.publishedChannelId }}</template>
             </a-table-column>
             <a-table-column title="共享通道编号" :width="200">
-              <template #cell="{ record }"><code>{{ record.publishedChannelId }}</code></template>
+              <template #cell="{ record }"
+                ><code>{{ record.publishedChannelId }}</code></template
+              >
             </a-table-column>
             <a-table-column title="所属设备">
               <template #cell="{ record }">{{ record.deviceName || "-" }}</template>
@@ -289,7 +404,8 @@
                     :disabled="sharedDevicesRemovingId !== null"
                     :loading="sharedDevicesRemovingId === record.sourceChannelId"
                     @click="removeSharedChannel(record)"
-                  >移除</a-link>
+                    >移除</a-link
+                  >
                 </a-tooltip>
               </template>
             </a-table-column>
@@ -309,7 +425,9 @@
       unmount-on-close
     >
       <template #title>
-        <div class="share-dialog-title"><Share2 :size="17" /><span>共享通道</span><small>{{ sharingPlatform?.name }}</small></div>
+        <div class="share-dialog-title">
+          <Share2 :size="17" /><span>共享通道</span><small>{{ sharingPlatform?.name }}</small>
+        </div>
       </template>
       <a-spin :loading="shareLoading" class="share-workspace">
         <div class="share-toolbar">
@@ -323,7 +441,7 @@
         </div>
         <a-table
           :selected-keys="selectedChannelIds"
-          class="share-channel-table share-table"
+          class="uvp-data-table share-channel-table share-table"
           row-key="id"
           :data="channelRows"
           :loading="channelLoading"
@@ -337,21 +455,32 @@
         >
           <template #columns>
             <a-table-column title="通道名称" :width="210">
-              <template #cell="{ record }"><strong class="share-channel-name">{{ record.name || record.channelId }}</strong></template>
+              <template #cell="{ record }"
+                ><strong class="share-channel-name">{{ record.name || record.channelId }}</strong></template
+              >
             </a-table-column>
             <a-table-column title="通道国标编号" :width="210">
-              <template #cell="{ record }"><code class="share-channel-code">{{ record.channelId }}</code></template>
+              <template #cell="{ record }"
+                ><code class="share-channel-code">{{ record.channelId }}</code></template
+              >
             </a-table-column>
             <a-table-column title="所属设备" :width="250">
               <template #cell="{ record }">
-                <div class="entity-cell"><span>{{ deviceNameByCode(record.deviceId) }}</span><code>{{ record.deviceId }}</code></div>
+                <div class="entity-cell">
+                  <span>{{ deviceNameByCode(record.deviceId) }}</span
+                  ><code>{{ record.deviceId }}</code>
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="厂商" :width="110">
               <template #cell="{ record }">{{ record.manufacturer || "-" }}</template>
             </a-table-column>
             <a-table-column title="状态" :width="90" align="center">
-              <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
+              <template #cell="{ record }"
+                ><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{
+                  record.status === 1 ? "在线" : "离线"
+                }}</a-tag></template
+              >
             </a-table-column>
             <a-table-column title="允许云台" :width="100" align="center">
               <template #cell="{ record }">
@@ -385,7 +514,21 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import dayjs from "dayjs";
-import { Building2, CircleCheck, Fingerprint, ListVideo, Plus, RadioTower, RefreshCw, Send, Settings2, Share2, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-vue-next";
+import {
+  Building2,
+  CircleCheck,
+  Fingerprint,
+  ListVideo,
+  Plus,
+  RadioTower,
+  RefreshCw,
+  Send,
+  Settings2,
+  Share2,
+  SlidersHorizontal,
+  Trash2,
+  TriangleAlert
+} from "lucide-vue-next";
 import {
   createCascadePlatform,
   deleteCascadePlatform,
@@ -418,7 +561,18 @@ import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
 import SNumberField from "@/components/s-number-field/index.vue";
 import SPasswordField from "@/components/s-password-field/index.vue";
-import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, channelSourceLabel, defaultCascadePlatform, pendingSourceChannelIds, resolveChannelPTZAllowed, validGbId, validateCascadePlatform } from "./cascadeState";
+import {
+  cascadeCycleLabel,
+  cascadeFormFieldErrors,
+  cascadeLocalIdentityDefaults,
+  cascadePresentation,
+  channelSourceLabel,
+  defaultCascadePlatform,
+  pendingSourceChannelIds,
+  resolveChannelPTZAllowed,
+  validGbId,
+  validateCascadePlatform
+} from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
 
@@ -427,7 +581,8 @@ type ShareDevice = GbDevice & Partial<DeviceVO>;
 
 const userStore = useUserStoreHook();
 const { isMobile } = useDevicesSize();
-const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const hasPermission = (permission: string) =>
+  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:cascade:view"));
 const canManage = computed(() => hasPermission("gb28181:cascade:manage"));
 const canEnable = computed(() => hasPermission("gb28181:cascade:enable"));
@@ -452,7 +607,14 @@ const registerExpiresField = ref<NumberFieldInstance | null>(null);
 const keepaliveIntervalField = ref<NumberFieldInstance | null>(null);
 const catalogBatchSizeField = ref<NumberFieldInstance | null>(null);
 const maxStreamsField = ref<NumberFieldInstance | null>(null);
-const numberFields = computed(() => [portField, localSipPortField, registerExpiresField, keepaliveIntervalField, catalogBatchSizeField, maxStreamsField]);
+const numberFields = computed(() => [
+  portField,
+  localSipPortField,
+  registerExpiresField,
+  keepaliveIntervalField,
+  catalogBatchSizeField,
+  maxStreamsField
+]);
 const localSipConfig = ref<SipConfigSummary | null>(null);
 const localSipAddresses = ref<SipNetworkAddress[]>([]);
 const networkLoading = ref(false);
@@ -480,8 +642,16 @@ const summary = computed(() => ({
 const filteredPlatforms = computed(() => {
   const q = keyword.value.trim().toLowerCase();
   return platforms.value.filter(item => {
-    const statusMatch = statusFilter.value === "all" || (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
-    const keywordMatch = !q || [item.name, item.upstreamServerId, item.host, item.localDeviceId].some(value => String(value || "").toLowerCase().includes(q));
+    const statusMatch =
+      statusFilter.value === "all" ||
+      (statusFilter.value === "disabled" ? !item.enabled : item.enabled && item.overall === statusFilter.value);
+    const keywordMatch =
+      !q ||
+      [item.name, item.upstreamServerId, item.host, item.localDeviceId].some(value =>
+        String(value || "")
+          .toLowerCase()
+          .includes(q)
+      );
     return statusMatch && keywordMatch;
   });
 });
@@ -514,11 +684,15 @@ async function openSharedDevices(platform: CascadePlatform) {
   try {
     const snapshot = await loadSharedSnapshot(platform.id);
     if (sharedDevicesPlatform.value?.id !== platform.id) return;
-    const deviceNames = new Map(snapshot.devices.filter(item => item.active !== false).map(device => [device.sourceDeviceId, device.name]));
-    sharedChannelRows.value = snapshot.channels.filter(item => item.active !== false).map(channel => ({
-      ...channel,
-      deviceName: deviceNames.get(channel.sourceDeviceId) || ""
-    }));
+    const deviceNames = new Map(
+      snapshot.devices.filter(item => item.active !== false).map(device => [device.sourceDeviceId, device.name])
+    );
+    sharedChannelRows.value = snapshot.channels
+      .filter(item => item.active !== false)
+      .map(channel => ({
+        ...channel,
+        deviceName: deviceNames.get(channel.sourceDeviceId) || ""
+      }));
   } catch {
     if (sharedDevicesPlatform.value?.id === platform.id) sharedDevicesError.value = "已共享设备读取失败，请重试。";
   } finally {
@@ -540,7 +714,9 @@ function removeSharedChannel(row: CascadeChannelProjection & { deviceName: strin
         const snapshot = sharedSnapshots.get(platform.id);
         const devices = snapshot?.devices || [];
         const projectionIdBySource = new Map(devices.map(item => [item.sourceDeviceId, item.id]));
-        const remaining = (snapshot?.channels || []).filter(item => item.active !== false && item.sourceChannelId !== row.sourceChannelId);
+        const remaining = (snapshot?.channels || []).filter(
+          item => item.active !== false && item.sourceChannelId !== row.sourceChannelId
+        );
         const keepSourceIds = new Set(
           remaining
             .map(item => item.sourceDeviceId || projectionIdBySource.get(item.deviceProjectionId ?? 0))
@@ -560,7 +736,7 @@ function removeSharedChannel(row: CascadeChannelProjection & { deviceName: strin
         const message = String(error?.message || "");
         sharedDevicesError.value = message.includes("revision conflict")
           ? "共享已被其他操作更新，请关闭弹窗后重新打开再移除。"
-          : (error?.message || "移除共享通道失败，请稍后重试。");
+          : error?.message || "移除共享通道失败，请稍后重试。";
       } finally {
         sharedDevicesRemovingId.value = null;
       }
@@ -597,9 +773,10 @@ async function loadLocalSipConfig() {
         const networkResponse = await fetchSipNetworkInterfaces();
         if (networkResponse.code === 0) {
           const addresses = networkResponse.data?.items || [];
-          advertiseIp = addresses.find(item => item.recommended && !item.loopback && !item.listenOnly)?.ip
-            || addresses.find(item => !item.loopback && !item.listenOnly)?.ip
-            || "";
+          advertiseIp =
+            addresses.find(item => item.recommended && !item.loopback && !item.listenOnly)?.ip ||
+            addresses.find(item => !item.loopback && !item.listenOnly)?.ip ||
+            "";
         }
       }
       localSipConfig.value = { ...config, advertiseIp };
@@ -672,7 +849,9 @@ async function savePlatform() {
     Message.warning(numberFieldError);
     return;
   }
-  const fieldError = Object.values(cascadeFormFieldErrors(form, Object.fromEntries(Object.keys(touched).map(key => [key, true])))).find(Boolean);
+  const fieldError = Object.values(
+    cascadeFormFieldErrors(form, Object.fromEntries(Object.keys(touched).map(key => [key, true])))
+  ).find(Boolean);
   if (fieldError) {
     Object.keys(fieldErrors.value).forEach(key => (touched[key] = true));
     Message.warning(fieldError);
@@ -750,7 +929,15 @@ const selectedChannelIds = ref<number[]>([]);
 const channelPTZPermissions = reactive(new Map<number, boolean>());
 const channelKeyword = ref("");
 const channelPage = reactive({ page: 1, pageSize: 10, total: 0 });
-const channelPagination = computed(() => ({ current: channelPage.page, pageSize: channelPage.pageSize, total: channelPage.total, showTotal: true, showPageSize: true, pageSizeOptions: [10, 20, 50] }));
+const channelPagination = computed(() => ({
+  current: channelPage.page,
+  pageSize: channelPage.pageSize,
+  total: channelPage.total,
+  showTotal: true,
+  showPageSize: true,
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100]
+}));
 const channelSourceDeviceIds = computed(() => {
   const sourceDeviceIds = new Map<number, number>();
   const projectionDevices = new Map((shares.value?.devices || []).map(device => [device.id, device.sourceDeviceId]));
@@ -803,7 +990,11 @@ async function loadShareDevices() {
 async function loadShareChannels(page = 1) {
   channelLoading.value = true;
   try {
-    const response: any = await listChannelPage({ page, pageSize: channelPage.pageSize, q: channelKeyword.value.trim() || undefined });
+    const response: any = await listChannelPage({
+      page,
+      pageSize: channelPage.pageSize,
+      q: channelKeyword.value.trim() || undefined
+    });
     const payload = unwrapPage<{ list?: ChannelVO[]; total?: number }>(response) || {};
     channelRows.value = (payload.list || []).map(channel => ({
       ...channel,
@@ -907,7 +1098,9 @@ async function openShare(platform: CascadePlatform) {
   try {
     const projectionResponse: any = await getCascadeShares(platform.id);
     shares.value = projectionResponse?.data || projectionResponse;
-    selectedChannelIds.value = (shares.value?.channels || []).filter(item => item.active !== false).map(item => item.sourceChannelId);
+    selectedChannelIds.value = (shares.value?.channels || [])
+      .filter(item => item.active !== false)
+      .map(item => item.sourceChannelId);
     (shares.value?.channels || []).forEach(item => channelPTZPermissions.set(item.sourceChannelId, item.ptzAllowed));
     await Promise.all([loadShareDevices(), loadShareChannels(1)]);
   } catch {
@@ -940,7 +1133,11 @@ async function saveShares() {
     const deviceProjection: CascadeDeviceProjection[] = [...requiredDeviceIds].map(id => {
       const source = deviceDirectory.get(id);
       const existing = existingDevices.get(id);
-      return { sourceDeviceId: id, publishedDeviceId: existing?.publishedDeviceId || source?.deviceId || "", name: existing?.name || source?.name || source?.deviceId || "" };
+      return {
+        sourceDeviceId: id,
+        publishedDeviceId: existing?.publishedDeviceId || source?.deviceId || "",
+        name: existing?.name || source?.name || source?.deviceId || ""
+      };
     });
     const channelProjection: CascadeChannelProjection[] = selectedChannelIds.value.map(id => {
       const source = loadedChannelMap.get(id);
@@ -952,7 +1149,10 @@ async function saveShares() {
         publishedChannelId,
         name: existing?.name || source?.name || source?.channelId || "",
         parentOverride: existing?.parentOverride || "",
-        ptzAllowed: resolveChannelPTZAllowed(channelPTZPermissions.get(id) ?? existing?.ptzAllowed, Boolean(sharingPlatform.value?.ptzEnabled))
+        ptzAllowed: resolveChannelPTZAllowed(
+          channelPTZPermissions.get(id) ?? existing?.ptzAllowed,
+          Boolean(sharingPlatform.value?.ptzEnabled)
+        )
       };
     });
     if (channelProjection.some(item => !item.sourceDeviceId)) {
@@ -960,10 +1160,18 @@ async function saveShares() {
       // 报错要指名道姓，别让用户对着"部分通道"猜。
       const labels = channelProjection
         .filter(item => !item.sourceDeviceId)
-        .map(item => channelSourceLabel(loadedChannelMap.get(item.sourceChannelId) || existingChannels.get(item.sourceChannelId), item.sourceChannelId));
+        .map(item =>
+          channelSourceLabel(
+            loadedChannelMap.get(item.sourceChannelId) || existingChannels.get(item.sourceChannelId),
+            item.sourceChannelId
+          )
+        );
       throw new Error(`通道 ${labels.join("、")} 无法关联所属设备，请确认对应设备仍在设备列表中。`);
     }
-    if (deviceProjection.some(item => !validGbId(item.publishedDeviceId)) || channelProjection.some(item => !validGbId(item.publishedChannelId))) {
+    if (
+      deviceProjection.some(item => !validGbId(item.publishedDeviceId)) ||
+      channelProjection.some(item => !validGbId(item.publishedChannelId))
+    ) {
       throw new Error("共享资源存在非 20 位国标编码，请先修正设备或通道编码。");
     }
     // 乐观锁:必须回带打开弹窗时加载的投影修订号,否则从第二次保存起必然 409。
@@ -981,20 +1189,26 @@ async function saveShares() {
     const message = String(error?.message || "");
     shareError.value = message.includes("revision conflict")
       ? "共享已被其他操作更新，请关闭弹窗后重新打开再保存。"
-      : (error?.message || "共享保存失败，服务端未应用本次选择。");
+      : error?.message || "共享保存失败，服务端未应用本次选择。";
   } finally {
     shareSaving.value = false;
   }
 }
 
-function profileLabel(value: string) { return value === "auto" ? "自动协商" : `固定 ${value}`; }
-function formatRelative(value?: string | null) { return value ? dayjs(value).format("YYYY-MM-DD HH:mm:ss") : "暂无记录"; }
+function profileLabel(value: string) {
+  return value === "auto" ? "自动协商" : `固定 ${value}`;
+}
+function formatRelative(value?: string | null) {
+  return value ? dayjs(value).format("YYYY-MM-DD HH:mm:ss") : "暂无记录";
+}
 
 const AUTO_REFRESH_INTERVAL_SECONDS = 10;
 const autoRefreshCountdown = ref(AUTO_REFRESH_INTERVAL_SECONDS);
 let refreshCountdownTimer: number | null = null;
 
-function resetAutoRefreshCountdown() { autoRefreshCountdown.value = AUTO_REFRESH_INTERVAL_SECONDS; }
+function resetAutoRefreshCountdown() {
+  autoRefreshCountdown.value = AUTO_REFRESH_INTERVAL_SECONDS;
+}
 
 function startAutoRefresh() {
   if (refreshCountdownTimer !== null) return;
@@ -1028,27 +1242,99 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.cascade-page { min-height: 100%; }
-.cascade-shell { display: flex; min-height: 100%; flex-direction: column; gap: 14px; }
-.cascade-search-actions, .cascade-actions { display: flex; align-items: center; gap: 8px; }
-.cascade-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; }
-.cascade-summary-card { display: flex; min-width: 0; min-height: 78px; align-items: center; gap: 12px; padding: 14px 16px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
-.cascade-summary-card__icon { display: inline-flex; width: 40px; height: 40px; flex: 0 0 40px; align-items: center; justify-content: center; border-radius: 10px; }
-.cascade-summary-card__icon.is-brand { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
-.cascade-summary-card__icon.is-enabled { color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); }
-.cascade-summary-card__icon.is-online { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent); }
-.cascade-summary-card__icon.is-attention { color: var(--uvp-warning); background: var(--uvp-warning-soft); }
-.cascade-summary-card__content { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.cascade-summary-card__content strong { color: var(--uvp-text-primary); font-size: 24px; font-weight: 600; line-height: 1; }
-.cascade-summary-card__content strong.is-online { color: var(--uvp-brand-cyan); }
-.cascade-summary-card__content strong.is-attention { color: var(--uvp-warning); }
-.cascade-summary-card__content span { color: var(--uvp-text-tertiary); font-size: 12px; }
-.cascade-search-panel { margin-bottom: 0; }
-.cascade-search { flex: 0 0 280px; width: 280px; }
-.cascade-status-filter { flex: 0 0 148px; width: 148px; }
+.cascade-page {
+  min-height: 100%;
+}
+.cascade-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+.cascade-search-actions,
+.cascade-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cascade-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 12px;
+}
+.cascade-summary-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  min-height: 78px;
+  padding: 14px 16px;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: var(--uvp-panel-radius);
+  box-shadow: var(--uvp-panel-shadow);
+}
+.cascade-summary-card__icon {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.cascade-summary-card__icon.is-brand {
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+}
+.cascade-summary-card__icon.is-enabled {
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+}
+.cascade-summary-card__icon.is-online {
+  color: var(--uvp-brand-cyan);
+  background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+}
+.cascade-summary-card__icon.is-attention {
+  color: var(--uvp-warning);
+  background: var(--uvp-warning-soft);
+}
+.cascade-summary-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.cascade-summary-card__content strong {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--uvp-text-primary);
+}
+.cascade-summary-card__content strong.is-online {
+  color: var(--uvp-brand-cyan);
+}
+.cascade-summary-card__content strong.is-attention {
+  color: var(--uvp-warning);
+}
+.cascade-summary-card__content span {
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+}
+.cascade-search-panel {
+  margin-bottom: 0;
+}
+.cascade-search {
+  flex: 0 0 280px;
+  width: 280px;
+}
+.cascade-status-filter {
+  flex: 0 0 148px;
+  width: 148px;
+}
 .cascade-status-filter :deep(.arco-select) {
-  width: 100%;
   box-sizing: border-box;
+  width: 100%;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -1061,55 +1347,230 @@ onUnmounted(() => {
 .cascade-status-filter.is-all :deep(.arco-select-view-value) {
   color: var(--uvp-text-tertiary) !important;
 }
-.cascade-table { min-height: 260px; }
-.entity-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
-.entity-cell strong, .entity-cell span { overflow: hidden; color: var(--color-text-1); text-overflow: ellipsis; white-space: nowrap; }
-.entity-cell code, .entity-cell small { overflow: hidden; color: var(--color-text-3); font-size: 12px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
-.cascade-actions :deep(.arco-link) { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
-.refresh-countdown { color: var(--uvp-text-tertiary, var(--color-text-3)); font-variant-numeric: tabular-nums; }
-.shared-channels-link { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; color: rgb(var(--link-6)); }
-.shared-channels-link span { overflow: hidden; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-overflow: ellipsis; white-space: nowrap; }
-.cascade-table :deep(.shared-channels-link:hover span) { color: rgb(var(--link-6)); text-decoration-thickness: 2px; }
-.cascade-alert { flex: 0 0 auto; }
-.cascade-form { display: flex; flex-direction: column; gap: 14px; }
-.form-section { padding: 0 0 14px; border-bottom: 1px solid var(--color-border-2); }
-.form-section > header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--color-text-2); }
-.form-section h3 { margin: 0; color: var(--color-text-1); font-size: 15px; letter-spacing: 0; }
-.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
-.form-grid :deep(.arco-input-number), .form-grid :deep(.arco-select) { width: 100%; }
-.switch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
-.switch-grid label { display: flex; min-height: 36px; align-items: center; justify-content: space-between; padding: 0 10px; background: var(--color-fill-1); }
-.dialog-actions { display: flex; width: 100%; align-items: center; justify-content: flex-end; gap: 8px; }
-.share-workspace { display: block; }
-.share-dialog-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
-.share-dialog-title > span { color: var(--color-text-1); font-weight: 500; }
-.share-dialog-title small { overflow: hidden; margin-left: 4px; color: var(--color-text-3); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.share-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.share-resource-search { width: 280px; margin-left: auto; }
-.share-table { min-height: 454px; }
-.share-table :deep(.arco-table-th) { background: var(--color-fill-1); }
-.share-table :deep(.arco-table-cell) { white-space: nowrap; }
-.share-channel-name { display: block; overflow: hidden; color: var(--color-text-1); font-weight: 500; text-overflow: ellipsis; }
-.share-channel-code { color: var(--color-text-2); font-size: 12px; letter-spacing: 0; }
-.share-dialog-footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 14px; color: var(--color-text-3); font-size: 13px; }
-.share-dialog-footer > span { min-width: 0; }
-.share-dialog-footer .dialog-actions { width: auto; flex: 0 0 auto; }
-
-@media (max-width: 900px) {
-  .cascade-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .share-toolbar { align-items: stretch; flex-wrap: wrap; }
-  .share-resource-search { width: min(100%, 300px); margin-left: auto; }
+.cascade-table {
+  min-height: 260px;
+}
+.entity-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.entity-cell strong,
+.entity-cell span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-1);
+  white-space: nowrap;
+}
+.entity-cell code,
+.entity-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--color-text-3);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.cascade-actions :deep(.arco-link) {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 13px;
+}
+.refresh-countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-text-tertiary, var(--color-text-3));
+}
+.shared-channels-link {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  max-width: 100%;
+  color: rgb(var(--link-6));
+}
+.shared-channels-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.cascade-table :deep(.shared-channels-link:hover span) {
+  color: rgb(var(--link-6));
+  text-decoration-thickness: 2px;
+}
+.cascade-alert {
+  flex: 0 0 auto;
+}
+.cascade-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-section {
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--color-border-2);
+}
+.form-section > header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--color-text-2);
+}
+.form-section h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-text-1);
+  letter-spacing: 0;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+.form-grid :deep(.arco-input-number),
+.form-grid :deep(.arco-select) {
+  width: 100%;
+}
+.switch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+.switch-grid label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 10px;
+  background: var(--color-fill-1);
+}
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+}
+.share-workspace {
+  display: block;
+}
+.share-dialog-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.share-dialog-title > span {
+  font-weight: 500;
+  color: var(--color-text-1);
+}
+.share-dialog-title small {
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-3);
+  white-space: nowrap;
+}
+.share-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.share-resource-search {
+  width: 280px;
+  margin-left: auto;
+}
+.share-table {
+  min-height: 454px;
+}
+.share-table :deep(.arco-table-th) {
+  background: var(--color-fill-1);
+}
+.share-table :deep(.arco-table-cell) {
+  white-space: nowrap;
+}
+.share-channel-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--color-text-1);
+}
+.share-channel-code {
+  font-size: 12px;
+  color: var(--color-text-2);
+  letter-spacing: 0;
+}
+.share-dialog-footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text-3);
+}
+.share-dialog-footer > span {
+  min-width: 0;
+}
+.share-dialog-footer .dialog-actions {
+  flex: 0 0 auto;
+  width: auto;
 }
 
-@media (max-width: 560px) {
-  .cascade-search-actions { width: 100%; align-items: stretch; }
-  .cascade-search-actions :deep(.arco-btn) { flex: 1; }
-  .cascade-search, .cascade-status-filter { width: 100%; flex-basis: 100%; }
-  .form-grid, .switch-grid { grid-template-columns: 1fr; }
-  .cascade-summary-card { min-height: 70px; padding: 12px; }
-  .share-resource-search { width: 100%; margin-left: 0; }
-  .share-dialog-footer { align-items: stretch; flex-direction: column; }
-  .share-dialog-footer .dialog-actions { width: 100%; }
+@media (width <= 900px) {
+  .cascade-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .share-toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .share-resource-search {
+    width: min(100%, 300px);
+    margin-left: auto;
+  }
+}
+
+@media (width <= 560px) {
+  .cascade-search-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+  .cascade-search-actions :deep(.arco-btn) {
+    flex: 1;
+  }
+  .cascade-search,
+  .cascade-status-filter {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .form-grid,
+  .switch-grid {
+    grid-template-columns: 1fr;
+  }
+  .cascade-summary-card {
+    min-height: 70px;
+    padding: 12px;
+  }
+  .share-resource-search {
+    width: 100%;
+    margin-left: 0;
+  }
+  .share-dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .share-dialog-footer .dialog-actions {
+    width: 100%;
+  }
 }
 </style>
 
@@ -1132,7 +1593,7 @@ onUnmounted(() => {
   overscroll-behavior: contain;
 }
 
-@media (max-width: 560px) {
+@media (width <= 560px) {
   .cascade-platform-dialog .arco-modal-header {
     padding-inline: 16px !important;
   }

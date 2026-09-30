@@ -178,7 +178,7 @@ func validRejectedRequestID(value string) bool {
 
 func normalizeRejectedScope(scope string) string {
 	switch scope {
-	case "device:list", "device:detail", "device:status", "channel:list", "channel:detail", "channel:status", "play:live:apply":
+	case "device:list", "device:detail", "device:status", "channel:list", "channel:detail", "channel:status":
 		return scope
 	default:
 		return ""

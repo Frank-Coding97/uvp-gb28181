@@ -52,13 +52,13 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/play-auth",
 		"GET /api/gb28181/sip/service-config/sip-log",
 		"PUT /api/gb28181/sip/service-config/sip-log",
-		"POST /api/gb28181/play/:deviceId/:channelId/authorization",
 		"GET /api/gb28181/play/lifecycles",
 		"GET /api/gb28181/play/lifecycles/:lifecycleId",
 		"POST /api/gb28181/play/lifecycles/:lifecycleId/client-events",
 	} {
 		require.True(t, got[route], route)
 	}
+	require.False(t, got["POST /api/gb28181/play/:deviceId/:channelId/authorization"], "固定播放地址授权不再作为独立内部接口暴露")
 }
 
 func TestRegisterRoutes_IncludesPTZResourceEndpoints(t *testing.T) {

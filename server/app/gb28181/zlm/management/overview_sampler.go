@@ -444,7 +444,7 @@ func nodeRuntimeTrendHistoryCacheKey(nodeID int64) string {
 func runtimeTrendSample(runtime NodeRuntimeView, now time.Time) RuntimeTrendSample {
 	sample := RuntimeTrendSample{SampledAt: now.UnixMilli()}
 	if runtime.MediaFreshness == RuntimeFreshnessFresh {
-		streamCount := int64(len(runtime.Streams))
+		streamCount := logicalStreamCount(runtime.Streams)
 		viewerCount := int64(0)
 		viewersAvailable := true
 		throughput := uint64(0)

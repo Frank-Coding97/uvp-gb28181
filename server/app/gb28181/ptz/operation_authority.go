@@ -1,17 +1,16 @@
 package ptz
 
 import (
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
 func requiresPTZIntent(op gbmodels.GbPTZOperation) bool {
-	return op.DeviceEpoch != nil || op.DeviceIntentID != nil || gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI
+	return op.DeviceEpoch != nil || op.DeviceIntentID != nil
 }
 
 func targetRequiresPTZIntent(target Target) bool {
-	return target.DeviceEpoch != 0 || gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI
+	return target.DeviceEpoch != 0
 }
 
 func operationMatchesTarget(op gbmodels.GbPTZOperation, target Target) bool {

@@ -386,7 +386,7 @@ func (s *OverviewService) GetOverview(ctx context.Context) (OverviewResult, erro
 	sort.Slice(result.FailedNodeIDs, func(i, j int) bool { return result.FailedNodeIDs[i] < result.FailedNodeIDs[j] })
 	sort.Slice(result.Errors, func(i, j int) bool { return result.Errors[i].NodeID < result.Errors[j].NodeID })
 	sortRuntimeMedia(result.Streams)
-	result.Metrics.StreamCount = int64(len(result.Streams))
+	result.Metrics.StreamCount = logicalStreamCount(result.Streams)
 	return result, nil
 }
 

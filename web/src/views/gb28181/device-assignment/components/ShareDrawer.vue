@@ -37,7 +37,7 @@ const loading = ref(false);
 const submitting = ref(false);
 const searchKeyword = ref("");
 const targetPage = ref(1);
-const targetPageSize = 10;
+const targetPageSize = ref(10);
 const targetTotal = ref(0);
 const targetOptions = ref<GrantTargetOption[]>([]);
 const grantsByKey = ref(new Map<string, { count: number; invalidCount: number; names: string[] }>());
@@ -153,7 +153,7 @@ const loadTargets = async () => {
       type: targetType.value,
       q: searchKeyword.value.trim() || undefined,
       page: targetPage.value,
-      pageSize: targetPageSize
+      pageSize: targetPageSize.value
     });
     targetOptions.value = data?.list ?? [];
     targetTotal.value = data?.total ?? 0;
@@ -284,14 +284,24 @@ watch(
       </div>
       <a-pagination
         v-if="mode === 'add' && targetTotal > targetPageSize"
+        class="uvp-pagination-bar"
         :total="targetTotal"
         :current="targetPage"
         :page-size="targetPageSize"
-        size="small"
+        :page-size-options="[10, 20, 50, 100]"
         show-total
+        show-page-size
+        show-jumper
         @change="
           (page: number) => {
             targetPage = page;
+            void loadTargets();
+          }
+        "
+        @page-size-change="
+          (size: number) => {
+            targetPageSize = size;
+            targetPage = 1;
             void loadTargets();
           }
         "

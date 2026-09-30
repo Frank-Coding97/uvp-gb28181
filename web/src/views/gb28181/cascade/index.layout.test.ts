@@ -25,14 +25,16 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain("fetchSipNetworkInterfaces");
     expect(source).toContain("item.recommended");
     expect(source).toContain("cascadeLocalIdentityDefaults");
-    expect(source).toContain("Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined))");
+    expect(source).toContain(
+      "Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined))"
+    );
   });
 
   it("does not repeat the route title and description above the workspace", () => {
     expect(source).not.toContain("<h2>国标级联</h2>");
     expect(source).not.toContain("管理 UVP 作为下级平台向上级平台的注册、资源共享和运行状态。");
     expect(source).not.toContain('<header class="cascade-header">');
-    expect(source).toContain('<template #actions>');
+    expect(source).toContain("<template #actions>");
     expect(source).toContain('class="cascade-search-actions"');
   });
 
@@ -48,13 +50,14 @@ describe("cascade platform editor layout", () => {
     expect(editor).toContain('modal-class="uvp-system-dialog cascade-platform-dialog"');
     expect(editor).toContain('width="min(820px, calc(100vw - 24px))"');
     expect(editor).toContain(':mask-closable="!saving"');
-    expect(editor).toContain('<template #footer>');
+    expect(editor).toContain("<template #footer>");
     expect(editor).not.toContain("<a-drawer");
 
     const sharing = source.slice(shareStart);
     expect(sharing).toContain('modal-class="uvp-system-dialog cascade-share-dialog"');
     expect(sharing).toContain('width="min(1080px, calc(100vw - 24px))"');
-    expect(sharing).toContain('class="share-channel-table share-table"');
+    // 2026-09-29 分页统一：共享通道表也要挂 uvp-data-table，否则退回 Arco 原生分页样式。
+    expect(sharing).toContain('class="uvp-data-table share-channel-table share-table"');
     expect(sharing).toContain('@update:selected-keys="handleChannelSelectionChange"');
     expect(sharing).toContain('placeholder="通道名称 / 国标编号"');
     // 设备模式已移除:弹窗只允许直接勾选具体通道。
@@ -77,7 +80,9 @@ describe("cascade platform editor layout", () => {
 
   it("exposes register/deregister as an inline enable switch instead of a dropdown option", () => {
     expect(source).toContain('<a-table-column title="启用"');
-    expect(source).toMatch(/<a-switch[\s\S]*?:model-value="record\.enabled"[\s\S]*?@change="\(value: boolean \| string \| number\) => toggleEnabled\(record, Boolean\(value\)\)"/);
+    expect(source).toMatch(
+      /<a-switch[\s\S]*?:model-value="record\.enabled"[\s\S]*?@change="\(value: boolean \| string \| number\) => toggleEnabled\(record, Boolean\(value\)\)"/
+    );
     expect(source).toContain("async function toggleEnabled(platform: CascadePlatform, next: boolean)");
     expect(source).not.toContain("<a-doption");
     expect(source).not.toContain("toggleEnabled(record)");
@@ -92,7 +97,9 @@ describe("cascade platform editor layout", () => {
 
   it("renders the shared-channel summary as an obvious link and the viewer as a system dialog with removal", () => {
     expect(source).toMatch(/<a-link class="shared-channels-link"[^>]*>\s*<ListVideo :size="14" \/>/s);
-    expect(source).toMatch(/<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?modal-class="uvp-system-dialog shared-devices-dialog"/);
+    expect(source).toMatch(
+      /<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?modal-class="uvp-system-dialog shared-devices-dialog"/
+    );
     expect(source).not.toMatch(/<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?:footer="false"/);
     expect(source).toContain('title="操作"');
     expect(source).toContain("function removeSharedChannel(");
@@ -124,7 +131,9 @@ describe("cascade platform editor layout", () => {
     expect(editor).not.toContain("<a-input-number");
     expect(editor.match(/<s-number-field/g)?.length).toBeGreaterThanOrEqual(6);
     // 硬规则 3:20 位国标编码带位数指示。
-    expect(editor.match(/<s-counter-suffix :value="(form\.upstreamServerId|form\.localDeviceId)\.length" :total="20" \/>/g)?.length).toBe(2);
+    expect(
+      editor.match(/<s-counter-suffix :value="(form\.upstreamServerId|form\.localDeviceId)\.length" :total="20" \/>/g)?.length
+    ).toBe(2);
     // 硬规则 5:密码字段带强度指示。
     expect(editor).toContain("<s-password-field");
     expect(editor).not.toContain("<a-input-password");

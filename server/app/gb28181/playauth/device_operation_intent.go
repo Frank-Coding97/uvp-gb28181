@@ -224,6 +224,37 @@ func (s *DeviceOperationIntentStore) ListUnsettled(ctx context.Context, pk int64
 	return rows, nil
 }
 
+// HasUnsettledBefore reports whether any durable intent older than beforeEpoch
+// is still unsettled for the one non-deleted device with this code.
+//
+// Unlike a paged sweep this reads the head of the ordered unsettled set, so a
+// false result covers the whole set rather than one page of it: the set can
+// only shrink (a new intent is always current-epoch, and beforeEpoch is the
+// current access epoch), so an empty head read is exact rather than a guess.
+// Malformed devices, malformed epochs and unavailable storage fail closed
+// instead of reporting an empty set.
+func (s *DeviceOperationIntentStore) HasUnsettledBefore(ctx context.Context, deviceCode string, beforeEpoch int64) (bool, error) {
+	if !s.available(ctx) || !validGBID(deviceCode) || beforeEpoch <= 0 {
+		return false, ErrDeviceIntentInvalid
+	}
+	devices, err := queryDeviceCleanupRows(s.db, ctx, deviceCode, false)
+	if err != nil || len(devices) != 1 {
+		return false, ErrDeviceIntentUnavailable
+	}
+	state, err := validateDeviceCleanupRow(devices[0])
+	if err != nil {
+		return false, ErrDeviceIntentUnavailable
+	}
+	if beforeEpoch > state.AccessEpoch || beforeEpoch <= state.CleanupCompletedEpoch {
+		return false, ErrDeviceIntentRevoked
+	}
+	rows, err := s.ListUnsettled(ctx, devices[0].ID, deviceCode, beforeEpoch, "", 1)
+	if err != nil {
+		return false, err
+	}
+	return len(rows) != 0, nil
+}
+
 func authorizeIntentDevice(tx *gorm.DB, ctx context.Context, id DeviceOperationIntentIdentity) error {
 	// Same device lock order as assignment: device first, intent second. No
 	// external I/O while locked; fresh SQL remains the authority after restart.

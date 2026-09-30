@@ -43,13 +43,14 @@
               <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
             </template>
           </a-table-column>
-          <a-table-column title="描述" data-index="description" :ellipsis="true" :tooltip="true" :width="150"></a-table-column>
+          <!-- 弹性列：不声明 width，由它吸收表格富余宽度，避免其余列（尤其操作列）被按比例拉宽 -->
+          <a-table-column title="描述" data-index="description" :ellipsis="true" :tooltip="true"></a-table-column>
           <a-table-column title="创建时间" data-index="createdAt" :width="180">
             <template #cell="{ record }">
               {{ record.createdAt ? formatTime(record.createdAt) : "" }}
             </template>
           </a-table-column>
-          <a-table-column title="操作" :width="300" align="center" :fixed="isMobile ? '' : 'right'">
+          <a-table-column title="操作" :width="336" align="center" cell-class="uvp-role-op-cell" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
                 <a-link
@@ -57,6 +58,7 @@
                   v-hasPerm="['system:role:addRoleMenu']"
                   @click="onPrivileges(record)"
                 >
+                  <template #icon><icon-safe /></template>
                   分配权限
                 </a-link>
                 <a-link
@@ -64,6 +66,7 @@
                   @click="onDataScope(record)"
                   v-hasPerm="['system:role:dataScope']"
                 >
+                  <template #icon><icon-storage /></template>
                   数据权限
                 </a-link>
                 <a-link
@@ -588,6 +591,22 @@ getMenuList();
   line-height: 22px;
 }
 
+/* 操作列：5 个动作（含图标）→ 收窄单元格留白与动作间距，避免操作列占宽过大 */
+.role-page :deep(.uvp-role-op-cell .arco-table-cell) {
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.role-page :deep(.uvp-table-actions) {
+  gap: 2px;
+}
+
+.role-page :deep(.uvp-table-action) {
+  gap: 3px;
+  padding: 0 3px;
+  font-size: 12px;
+}
+
 /* 分配权限抽屉：控制开关卡片紧凑 */
 :deep(.arco-drawer-body .arco-card) {
   margin-bottom: 12px;
@@ -600,8 +619,8 @@ getMenuList();
 /* 权限树节点密度 */
 :deep(.arco-drawer-body .arco-tree-node) {
   height: 30px;
-  line-height: 30px;
   font-size: 13px;
+  line-height: 30px;
 }
 
 :deep(.arco-drawer-body .arco-tree-node-title) {
@@ -611,8 +630,8 @@ getMenuList();
 /* 数据权限 Modal：内嵌树区密度 */
 :deep(.arco-modal .arco-tree-node) {
   height: 28px;
-  line-height: 28px;
   font-size: 13px;
+  line-height: 28px;
 }
 
 :deep(.arco-modal .arco-tree-node-title) {

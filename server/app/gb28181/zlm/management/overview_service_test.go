@@ -60,6 +60,25 @@ func TestOverviewIncludesAllNodeStatesAndReadsOnlyActiveNodes(t *testing.T) {
 	require.Zero(t, tracker.count("statistic", 3))
 }
 
+func TestOverviewCountsProtocolVariantsAsOneLogicalStream(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	registry := overviewRegistryFake{nodes: []*node.Node{overviewNode(1, node.StateActive, now)}}
+	runtime := &overviewRuntimeFake{statistics: map[int64]zlm.Statistic{1: {MediaSource: 5}}}
+	media := &overviewMediaFake{media: map[int64][]zlm.MediaInfo{1: {
+		{Online: true, Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "camera-1"},
+		{Online: true, Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: "camera-1"},
+		{Online: true, Schema: "hls", VHost: "__defaultVhost__", App: "rtp", Stream: "camera-1"},
+		{Online: true, Schema: "ts", VHost: "__defaultVhost__", App: "rtp", Stream: "camera-1"},
+		{Online: true, Schema: "fmp4", VHost: "__defaultVhost__", App: "rtp", Stream: "camera-1"},
+	}}}
+	service := NewOverviewService(OverviewDependencies{Registry: registry, Runtime: runtime, Media: media}, WithOverviewClock(func() time.Time { return now }))
+
+	result, err := service.GetOverview(context.Background())
+	require.NoError(t, err)
+	require.Len(t, result.Streams, 5, "协议明细必须完整保留")
+	require.EqualValues(t, 1, result.Metrics.StreamCount)
+}
+
 func TestOverviewPreservesObjectStatisticsAndEventThreadDetails(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 30, 0, time.UTC)
 	registry := overviewRegistryFake{nodes: []*node.Node{overviewNode(1, node.StateActive, now)}}

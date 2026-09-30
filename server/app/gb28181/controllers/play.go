@@ -52,10 +52,6 @@ type AuthorizedPlayService interface {
 	StartAuthorized(context.Context, play.AuthorizedRequest) (*play.Result, error)
 }
 
-type FixedPlaybackAuthorizationService interface {
-	AuthorizeFixedPlayback(context.Context, play.AuthorizedRequest) (*play.Result, error)
-}
-
 type PlaybackRecordingStarter interface {
 	BeginPlayback(context.Context, string) error
 }
@@ -364,42 +360,6 @@ func parsePlayLifecycleQuery(c *gin.Context) (gbdashboard.PlayLifecycleQuery, er
 		}
 	}
 	return query, nil
-}
-
-// Authorize returns a fresh short-lived fixed playback URL without starting
-// the device. Login and Casbin run before this protected controller; channel
-// visibility is checked before the playback service can select a node.
-func (pc *PlayController) Authorize(c *gin.Context) {
-	deviceID := c.Param("deviceId")
-	channelID := c.Param("channelId")
-	audit := playbackAuthorizationAudit(c, "fixed_play_authorization_issue", deviceID, channelID)
-	service, ok := pc.svc.(FixedPlaybackAuthorizationService)
-	if pc.svc == nil || !ok {
-		audit["result"] = "unavailable"
-		pc.FailAndAbort(c, "固定播放地址预授权不可用", nil)
-		return
-	}
-	if deviceID == "" || channelID == "" {
-		audit["result"] = "invalid_argument"
-		pc.FailAndAbort(c, "deviceId/channelId 不能为空", nil)
-		return
-	}
-	playRequest, visible := pc.authorizedChannel(c, deviceID, channelID)
-	if !visible {
-		audit["result"] = "denied"
-		return
-	}
-	result, err := service.AuthorizeFixedPlayback(
-		c.Request.Context(), playRequest,
-	)
-	if err != nil {
-		audit["result"] = playAuthorizationAuditResult(err)
-		pc.FailAndAbort(c, "固定播放地址预授权失败", err)
-		return
-	}
-	play.ApplyPlaybackSelection(result, result.DefaultProtocol, isSecurePlaybackRequest(c.Request))
-	finishPlaybackAuthorizationAudit(audit, result)
-	pc.Success(c, result)
 }
 
 func playbackAuthorizationAudit(c *gin.Context, action, deviceID, channelID string) map[string]any {

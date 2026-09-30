@@ -129,9 +129,9 @@ func TestConfigServiceT13_ExposesAuthoritativeModes(t *testing.T) {
 			modes[item.Key] = item.Mode
 		}
 	}
-	require.Equal(t, service.ConfigModePlatformManaged, modes["hook.enable"])
+	require.Equal(t, service.ConfigModeHotReload, modes["hook.enable"])
 	require.Equal(t, service.ConfigModeHotReload, modes["hook.timeoutSec"])
-	require.Equal(t, service.ConfigModeRestartRequiredUnsupported, modes["http.port"])
+	require.Equal(t, service.ConfigModeRestartRequired, modes["http.port"])
 	require.Equal(t, service.ConfigModeReadOnly, modes["api.version"])
 }
 
@@ -142,15 +142,15 @@ func TestConfigServiceT13_ValidationOrderAndNoPartialSet(t *testing.T) {
 	id := reg.List()[0].ID
 
 	_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{
-		"hook.timeoutSec": "12", "http.port": "8080",
+		"hook.timeoutSec": "12", "http.port": "not-a-port",
 	}})
-	require.ErrorIs(t, err, service.ErrRestartRequiredUnsupported)
-	require.Empty(t, client.sets, "mixed hot/restart batch must not partially Set")
+	require.ErrorIs(t, err, service.ErrInvalidConfigValue)
+	require.Empty(t, client.sets, "invalid port batch must not partially Set")
 
 	_, err = svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{"api.version": "tamper"}})
 	require.ErrorIs(t, err, service.ErrReadOnlyConfig)
 
-	_, err = svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{"hook.enable": "1"}})
+	_, err = svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{"api.secret": "tamper"}})
 	require.ErrorIs(t, err, service.ErrManagedConfigKey)
 }
 

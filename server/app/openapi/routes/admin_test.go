@@ -17,18 +17,17 @@ func TestOpenAPIAdminExplicitProtectedRoutes(t *testing.T) {
 	group.Use(func(c *gin.Context) { c.Header("X-Protected-Group", "yes"); c.Next() })
 	RegisterAdminRoutes(group, controllers.NewClientAdminController(nil, nil, nil, nil))
 	expected := map[string]bool{
-		"GET /api/gb28181/openapi-clients":                       true,
-		"POST /api/gb28181/openapi-clients":                      true,
-		"GET /api/gb28181/openapi-clients/capabilities":          true,
-		"GET /api/gb28181/openapi-clients/capabilities/catalog":  true,
-		"GET /api/gb28181/openapi-clients/:id":                   true,
-		"PUT /api/gb28181/openapi-clients/:id/scopes":            true,
-		"POST /api/gb28181/openapi-clients/:id/rotate-secret":    true,
-		"POST /api/gb28181/openapi-clients/:id/enable":           true,
-		"POST /api/gb28181/openapi-clients/:id/disable":          true,
-		"POST /api/gb28181/openapi-clients/:id/revoke":           true,
-		"GET /api/gb28181/openapi-clients/:id/audits":            true,
-		"GET /api/gb28181/openapi-clients/:id/revocation-status": true,
+		"GET /api/gb28181/openapi-clients":                      true,
+		"POST /api/gb28181/openapi-clients":                     true,
+		"GET /api/gb28181/openapi-clients/capabilities":         true,
+		"GET /api/gb28181/openapi-clients/capabilities/catalog": true,
+		"GET /api/gb28181/openapi-clients/:id":                  true,
+		"PUT /api/gb28181/openapi-clients/:id/scopes":           true,
+		"POST /api/gb28181/openapi-clients/:id/rotate-secret":   true,
+		"POST /api/gb28181/openapi-clients/:id/enable":          true,
+		"POST /api/gb28181/openapi-clients/:id/disable":         true,
+		"POST /api/gb28181/openapi-clients/:id/revoke":          true,
+		"GET /api/gb28181/openapi-clients/:id/audits":           true,
 	}
 	require.Len(t, router.Routes(), len(expected))
 	for _, route := range router.Routes() {

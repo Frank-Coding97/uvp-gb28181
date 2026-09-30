@@ -175,6 +175,7 @@ func TestPlayLifecycleStoreAppendClientEventIsIdempotentAndKeepsMediaFact(t *tes
 	require.Equal(t, string(play.ClientStateFailed), attempt.ClientState)
 	require.Equal(t, string(play.LifecycleStateInProgress), attempt.LifecycleState)
 	require.Equal(t, PlayOutcomeSuccess, attempt.Outcome)
+	require.Equal(t, play.ReasonPlayerTimeout, attempt.ReasonCode)
 	var firstFrameCount int64
 	require.NoError(t, db.Model(&gbmodels.GbPlayLifecycleEvent{}).
 		Where("lifecycle_id = ? AND event_name = ?", id, play.EventFirstFrame).Count(&firstFrameCount).Error)

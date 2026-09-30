@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
 )
 
@@ -110,6 +111,8 @@ type Binding struct {
 	MediaGeneration uint64
 	BindClientIP    bool
 	ClientIP        string
+	OpenAPIClientID int64
+	OpenAPIGrantID  string
 }
 
 type Claims struct {
@@ -129,6 +132,8 @@ type Claims struct {
 	Nonce                   string `json:"nonce"`
 	AuthorizationGeneration string `json:"agen"`
 	ClientIPDigest          string `json:"iph,omitempty"`
+	OpenAPIClientID         int64  `json:"ocid,omitempty"`
+	OpenAPIGrantID          string `json:"ogid,omitempty"`
 }
 
 type Prepared struct {
@@ -185,7 +190,6 @@ type derivedKey struct {
 	sign     []byte
 	v4       []byte
 	ip       []byte
-	openapi  []byte
 	feedback []byte
 }
 
@@ -256,15 +260,11 @@ func buildKey(material KeyMaterial) (string, derivedKey, error) {
 	if err != nil {
 		return "", derivedKey{}, err
 	}
-	openAPIKey, err := deriveKey(material.Secret, openAPIPlayKeyContext)
-	if err != nil {
-		return "", derivedKey{}, err
-	}
 	feedbackKey, err := deriveKey(material.Secret, clientFeedbackKeyContext)
 	if err != nil {
 		return "", derivedKey{}, err
 	}
-	return id, derivedKey{sign: signKey, v4: v4Key, ip: ipKey, openapi: openAPIKey, feedback: feedbackKey}, nil
+	return id, derivedKey{sign: signKey, v4: v4Key, ip: ipKey, feedback: feedbackKey}, nil
 }
 
 func (s *Signer) IssueClientFeedback(binding ClientFeedbackBinding) (ClientFeedbackGrant, error) {
@@ -409,6 +409,7 @@ func (s *Signer) Bind(prepared Prepared, binding Binding) (Grant, error) {
 		App: binding.App, Stream: binding.Stream, MediaServerID: binding.MediaServerID, MediaGeneration: binding.MediaGeneration,
 		IssuedAt: prepared.IssuedAt.Unix(), ExpiresAt: prepared.ExpiresAt.Unix(), Nonce: prepared.Nonce,
 		AuthorizationGeneration: prepared.AuthorizationGeneration,
+		OpenAPIClientID:         binding.OpenAPIClientID, OpenAPIGrantID: binding.OpenAPIGrantID,
 	}
 	if binding.BindClientIP {
 		digest, err := clientIPDigest(key.ip, binding.ClientIP)
@@ -659,6 +660,15 @@ func deriveKey(root []byte, context string) ([]byte, error) {
 func validResourceBinding(binding Binding) bool {
 	if binding.DeviceEpoch < 0 {
 		return false
+	}
+	if (binding.OpenAPIClientID == 0) != (binding.OpenAPIGrantID == "") || binding.OpenAPIClientID < 0 {
+		return false
+	}
+	if binding.OpenAPIClientID > 0 {
+		grantID, err := uuid.Parse(binding.OpenAPIGrantID)
+		if err != nil || grantID == uuid.Nil || grantID.String() != binding.OpenAPIGrantID {
+			return false
+		}
 	}
 	if !validGBID(binding.DeviceID) || !validGBID(binding.ChannelID) || strings.TrimSpace(binding.App) == "" ||
 		strings.TrimSpace(binding.Stream) == "" || strings.TrimSpace(binding.MediaServerID) == "" {

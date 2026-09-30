@@ -12,8 +12,6 @@ const api = vi.hoisted(() => ({
   catalog: vi.fn(),
   scopes: vi.fn(),
   audits: vi.fn(),
-  revocation: vi.fn(),
-  rotate: vi.fn(),
   enable: vi.fn(),
   disable: vi.fn(),
   revoke: vi.fn()
@@ -35,8 +33,6 @@ vi.mock("@/api/gb28181-openapi", async importOriginal => {
     getOpenAPIClientCapabilityCatalog: api.catalog,
     updateOpenAPIClientScopes: api.scopes,
     listOpenAPIClientAudits: api.audits,
-    getOpenAPIClientRevocationStatus: api.revocation,
-    rotateOpenAPIClientSecret: api.rotate,
     enableOpenAPIClient: api.enable,
     disableOpenAPIClient: api.disable,
     revokeOpenAPIClient: api.revoke,
@@ -49,8 +45,11 @@ const client = {
   ak: "uvp_0123456789abcdef0123456789abcdef",
   name: "现场接入",
   ownerDeptId: 10,
+  ownerDeptName: "现场部门",
   dataScope: 3,
-  responsibleUserId: 7,
+  responsibleOrgName: "某某科技有限公司",
+  responsibleName: "张三",
+  responsibleContact: "13800000000",
   status: "active",
   secretVersion: 1,
   authEpoch: 1,
@@ -136,8 +135,6 @@ describe("OpenAPI client detail workspace", () => {
     api.catalog.mockReset().mockResolvedValue(ok({ groups }));
     api.scopes.mockReset().mockResolvedValue(ok({ ...client, rowVersion: 4 }));
     api.audits.mockReset().mockResolvedValue(ok({ items: [], page: 1, pageSize: 10, total: 0 }));
-    api.revocation.mockReset().mockResolvedValue(ok({ status: "closed", pending: 0, closed: 1 }));
-    api.rotate.mockReset();
     api.enable.mockReset();
     api.disable.mockReset();
     api.revoke.mockReset();
@@ -152,6 +149,7 @@ describe("OpenAPI client detail workspace", () => {
     expect(api.catalog).toHaveBeenCalledOnce();
     expect((wrapper.vm as any).catalogReady).toBe(true);
     expect((wrapper.vm as any).editable).toBe(true);
+    expect(wrapper.text()).toContain("本部门");
   });
 
   it("keeps non-authorization detail available when the capability catalog request fails", async () => {

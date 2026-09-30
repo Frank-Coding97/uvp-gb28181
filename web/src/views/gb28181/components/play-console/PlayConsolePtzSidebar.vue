@@ -166,7 +166,7 @@ const {
       <div class="speed-row">
         <label>
           <span><Gauge :size="12" />移动速度</span>
-          <input v-model.number="moveSpeed" type="range" min="1" max="10" />
+          <a-slider v-model="moveSpeed" :min="1" :max="10" :step="1" :show-tooltip="false" aria-label="云台移动速度" />
           <em>{{ moveSpeed }}</em>
         </label>
       </div>
@@ -292,8 +292,16 @@ const {
         <label>
           <span>Pan 水平角(°)</span>
           <div class="axis-ctrl">
-            <input v-model.number="precisePan" type="range" min="0" max="360" step="0.1" />
-            <input v-model.number="precisePan" type="number" min="0" max="360" step="0.1" class="axis-num" />
+            <a-slider v-model="precisePan" :min="0" :max="360" :step="0.1" :show-tooltip="false" aria-label="Pan 水平角" />
+            <a-input
+              v-model.number="precisePan"
+              type="number"
+              min="0"
+              max="360"
+              step="0.1"
+              class="axis-num"
+              aria-label="Pan 水平角"
+            />
           </div>
         </label>
       </div>
@@ -301,8 +309,16 @@ const {
         <label>
           <span>Tilt 俯仰角(°)</span>
           <div class="axis-ctrl">
-            <input v-model.number="preciseTilt" type="range" min="-90" max="90" step="0.1" />
-            <input v-model.number="preciseTilt" type="number" min="-90" max="90" step="0.1" class="axis-num" />
+            <a-slider v-model="preciseTilt" :min="-90" :max="90" :step="0.1" :show-tooltip="false" aria-label="Tilt 俯仰角" />
+            <a-input
+              v-model.number="preciseTilt"
+              type="number"
+              min="-90"
+              max="90"
+              step="0.1"
+              class="axis-num"
+              aria-label="Tilt 俯仰角"
+            />
           </div>
         </label>
       </div>
@@ -310,8 +326,16 @@ const {
         <label>
           <span>Zoom 变倍(x)</span>
           <div class="axis-ctrl">
-            <input v-model.number="preciseZoom" type="range" min="1" max="32" step="0.1" />
-            <input v-model.number="preciseZoom" type="number" min="1" max="32" step="0.1" class="axis-num" />
+            <a-slider v-model="preciseZoom" :min="1" :max="32" :step="0.1" :show-tooltip="false" aria-label="Zoom 变倍" />
+            <a-input
+              v-model.number="preciseZoom"
+              type="number"
+              min="1"
+              max="32"
+              step="0.1"
+              class="axis-num"
+              aria-label="Zoom 变倍"
+            />
           </div>
         </label>
       </div>
@@ -775,8 +799,14 @@ const {
   gap: 4px;
   align-items: center;
 }
-.speed-row input[type="range"] {
-  accent-color: var(--uvp-brand);
+.speed-row :deep(.arco-slider) {
+  margin: 0 8px;
+}
+.speed-row :deep(.arco-slider-btn) {
+  border-color: var(--uvp-brand);
+}
+.axis-ctrl :deep(.arco-slider) {
+  margin: 0 8px;
 }
 .speed-row em {
   font-family: ui-monospace, Menlo, monospace;
@@ -790,13 +820,13 @@ const {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .ptz-aux-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -842,25 +872,27 @@ const {
   border-color: var(--uvp-brand);
 }
 
-/* 3D 拖拽(2026-09-20 从「高级」搬来):外盒沿用 .lens-item 的形态,让它在侧栏里
- * 和"变倍/聚焦/光圈"读成同一族;里面的分段按钮沿用 .lens-btns button 的尺寸语言。
- * 分段而不是两个独立按钮:放大/缩小是互斥的二选一(点另一个会换方向而不是叠加),
- * 分段控件把"只有一个生效"这件事直接画出来。 */
+/* 3D 拖拽(2026-09-20 从「高级」搬来 / 2026-09-23 压缩高度去边框):
+ * 去掉外层边框和背景,让它和雨刷直接摆在页面上,减少视觉重量。
+ * 按钮高度从 26px 降到 22px,减少垂直占用。 */
 .ptz-drag-zoom {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 6px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .ptz-wiper-side {
-  gap: 5px;
+  gap: 3px;
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .drag-zoom-switch {
   display: grid;
@@ -870,7 +902,7 @@ const {
 .drag-zoom-switch button {
   height: 26px;
   padding: 0;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--uvp-text-secondary);
   cursor: pointer;
   background: transparent;
@@ -1006,7 +1038,7 @@ const {
 .ptz-speed,
 .ptz-precise {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   align-content: start;
   min-height: 0;
 }
@@ -1052,19 +1084,18 @@ const {
   gap: 6px;
   align-items: center;
 }
-.axis-ctrl input[type="range"] {
-  accent-color: var(--uvp-brand);
-}
 .axis-num {
+  width: 60px;
+}
+.axis-ctrl :deep(.axis-num) {
   height: 26px;
+}
+.axis-ctrl :deep(.axis-num input) {
   padding: 0 6px;
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   color: var(--uvp-text-secondary);
   text-align: right;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
 }
 .precise-actions {
   display: flex;

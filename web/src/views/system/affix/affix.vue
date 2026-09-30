@@ -337,7 +337,8 @@ const pagination = ref({
   total: 0,
   showPageSize: true,
   showTotal: true,
-  showJumper: true
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 const getAffixList = async () => {
@@ -452,16 +453,6 @@ onMounted(() => {
 .affix-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
   border-radius: 10px;
-}
-
-.affix-page :deep(.uvp-data-table .arco-pagination-item),
-.affix-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
-.affix-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
-  box-sizing: border-box;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: 8px;
 }
 
 .container {

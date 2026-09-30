@@ -24,7 +24,12 @@ const form = reactive({
   name: "",
   ownerDeptId: undefined as number | undefined,
   dataScope: OPENAPI_CLIENT_DEFAULT_DATA_SCOPE as OpenAPIClientDataScope,
-  responsibleUserId: ""
+  rateLimit: 10,
+  burst: 20,
+  viewerQuota: 10,
+  responsibleOrgName: "",
+  responsibleName: "",
+  responsibleContact: ""
 });
 const touched = reactive({ name: false, ownerDeptId: false });
 const dataScopeHint = computed(
@@ -46,7 +51,12 @@ function resetForm() {
   form.name = "";
   form.ownerDeptId = undefined;
   form.dataScope = OPENAPI_CLIENT_DEFAULT_DATA_SCOPE;
-  form.responsibleUserId = "";
+  form.rateLimit = 10;
+  form.burst = 20;
+  form.viewerQuota = 10;
+  form.responsibleOrgName = "";
+  form.responsibleName = "";
+  form.responsibleContact = "";
   touched.name = false;
   touched.ownerDeptId = false;
 }
@@ -66,7 +76,12 @@ function submit() {
     name: form.name.trim(),
     ownerDeptId: form.ownerDeptId,
     dataScope: form.dataScope,
-    ...(Number(form.responsibleUserId) > 0 ? { responsibleUserId: Number(form.responsibleUserId) } : {})
+    rateLimit: form.rateLimit,
+    burst: form.burst,
+    viewerQuota: form.viewerQuota,
+    ...(form.responsibleOrgName.trim() ? { responsibleOrgName: form.responsibleOrgName.trim() } : {}),
+    ...(form.responsibleName.trim() ? { responsibleName: form.responsibleName.trim() } : {}),
+    ...(form.responsibleContact.trim() ? { responsibleContact: form.responsibleContact.trim() } : {})
   });
 }
 
@@ -122,8 +137,35 @@ defineExpose({ form, resetForm, submit });
         </a-select>
         <div class="openapi-client-create-dialog__scope-hint">{{ dataScopeHint }}</div>
       </a-form-item>
-      <a-form-item label="负责人用户 ID">
-        <a-input v-model="form.responsibleUserId" inputmode="numeric" allow-clear placeholder="可选，填写用户 ID" />
+      <div class="openapi-client-create-dialog__section-title">访问限制</div>
+      <div class="openapi-client-create-dialog__limits-grid">
+        <a-form-item label="调用速度">
+          <div class="openapi-client-create-dialog__input-unit">
+            <a-input-number v-model="form.rateLimit" :min="1" :max="10000" :precision="0" hide-button />
+            <span class="openapi-client-create-dialog__unit">次 / 秒</span>
+          </div>
+        </a-form-item>
+        <a-form-item label="突发容量">
+          <div class="openapi-client-create-dialog__input-unit">
+            <a-input-number v-model="form.burst" :min="1" :max="10000" :precision="0" hide-button />
+            <span class="openapi-client-create-dialog__unit">次</span>
+          </div>
+        </a-form-item>
+        <a-form-item label="观看配额">
+          <div class="openapi-client-create-dialog__input-unit">
+            <a-input-number v-model="form.viewerQuota" :min="1" :max="10000" :precision="0" hide-button />
+            <span class="openapi-client-create-dialog__unit">路并发</span>
+          </div>
+        </a-form-item>
+      </div>
+      <a-form-item label="组织 / 公司名称">
+        <a-input v-model="form.responsibleOrgName" allow-clear maxlength="200" placeholder="可选，例如：某某科技有限公司" />
+      </a-form-item>
+      <a-form-item label="负责人姓名">
+        <a-input v-model="form.responsibleName" allow-clear maxlength="100" placeholder="可选，填写对接负责人姓名" />
+      </a-form-item>
+      <a-form-item label="负责人联系方式">
+        <a-input v-model="form.responsibleContact" allow-clear maxlength="100" placeholder="可选，填写手机号、座机或邮箱" />
       </a-form-item>
     </a-form>
     <a-alert type="info">客户端按上方数据范围访问设备，不包含共享可见设备；创建成功后能力默认为空。</a-alert>
@@ -136,5 +178,44 @@ defineExpose({ form, resetForm, submit });
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-3);
+}
+
+.openapi-client-create-dialog__section-title {
+  margin: 4px 0 12px;
+  font-weight: 600;
+  color: var(--color-text-1);
+}
+
+.openapi-client-create-dialog__limits-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.openapi-client-create-dialog__unit {
+  flex: 0 0 42px;
+  width: 42px;
+  font-size: 12px;
+  color: var(--color-text-3);
+  white-space: nowrap;
+}
+
+.openapi-client-create-dialog__input-unit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.openapi-client-create-dialog__input-unit :deep(.arco-input-number) {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+@media (width <= 600px) {
+  .openapi-client-create-dialog__limits-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

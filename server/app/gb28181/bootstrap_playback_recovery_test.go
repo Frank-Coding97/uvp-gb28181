@@ -149,10 +149,6 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	require.Contains(t, start, "deviceDB := app.DB()")
 	require.Contains(t, start, "playauth.NewDeviceSecurityStore(deviceDB)")
 	require.Contains(t, start[register:publish], "playauth.NewDeviceCleanupStore(deviceDB), deviceIntents, deviceOperations")
-	configure := strings.Index(start, "configurePlaybackRTPCleanup(")
-	require.GreaterOrEqual(t, configure, 0)
-	require.Less(t, configure, register)
-	require.Contains(t, start[configure:register], "srv.UAC(), deviceDB, deviceIntents, deviceOperations")
 	require.Equal(t, 1, strings.Count(start, "authorizedRootIntentStore(deviceDB, authority)"))
 	require.Less(t, strings.Index(start, "authorizedRootIntentStore(deviceDB, authority)"), strings.Index(start, "startSIPRuntime("))
 	shutdownData, err := os.ReadFile("bootstrap_shutdown.go")
@@ -163,7 +159,5 @@ func TestSIPRootRecoverySharesBarrierBeforeFacadePublication(t *testing.T) {
 	snapshot := shutdownSource[stopBegin:]
 	detach := strings.Index(snapshot, "gbroutes.SetDeviceTransferBarrier(nil)")
 	require.GreaterOrEqual(t, detach, 0)
-	require.Less(t, detach, strings.Index(snapshot, "openAPILivePlayer.Retire(ctx)"))
-	require.Less(t, strings.Index(snapshot, "openAPILivePlayer.Retire(ctx)"), strings.Index(snapshot, "r.playback.Close(ctx)"))
 	require.Less(t, strings.Index(snapshot, "r.playback.Close(ctx)"), strings.Index(snapshot, "r.server.Shutdown(ctx)"))
 }

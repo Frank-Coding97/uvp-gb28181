@@ -57,8 +57,8 @@ func TestOpenAPITransportContractRequiresFixedLengthJSONPOST(t *testing.T) {
 	var document openAPITransportContractDocument
 	require.NoError(t, yaml.Unmarshal(body, &document))
 	require.Equal(t, "HTTP/1.1", document.Transport.HTTPVersion)
-	require.True(t, document.Transport.POST.Body.ContentLength.Required)
-	require.Equal(t, 1, document.Transport.POST.Body.ContentLength.Minimum)
+	require.False(t, document.Transport.POST.Body.ContentLength.Required)
+	require.Equal(t, 0, document.Transport.POST.Body.ContentLength.Minimum)
 	require.Equal(t, 65536, document.Transport.POST.Body.ContentLength.Maximum)
 	require.Equal(t, "exact body byte length", document.Transport.POST.Body.ContentLength.Value)
 	require.False(t, document.Transport.POST.Body.ContentLength.Signed)

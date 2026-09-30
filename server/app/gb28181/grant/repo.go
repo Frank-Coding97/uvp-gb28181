@@ -37,25 +37,28 @@ func (r *Repo) Create(ctx context.Context, grant *gbmodels.GbDeviceGrant) (bool,
 		return false, ErrDeviceNotFound
 	}
 
-	var existing gbmodels.GbDeviceGrant
-	err := db.Unscoped().
+	// ⛔ 同 addGrant：不可用 First + ErrRecordNotFound 判存在性，MaskNotDataError
+	// (app/utils/gormhelper/client.go) 会把 not-found 掩成 nil，零值结构体会被
+	// 下面 "已生效即跳过" 接住，导致首次创建静默不写库。改用 Find 按长度判定。
+	var existing []gbmodels.GbDeviceGrant
+	if err := db.Unscoped().
 		Where("device_id = ? AND target_type = ? AND target_id = ?", grant.DeviceID, grant.TargetType, grant.TargetID).
-		First(&existing).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return true, db.Create(grant).Error
-	case err != nil:
+		Order("id ASC").Limit(1).
+		Find(&existing).Error; err != nil {
 		return false, err
 	}
+	if len(existing) == 0 {
+		return true, db.Create(grant).Error
+	}
 
-	if !existing.DeletedAt.Valid {
+	if !existing[0].DeletedAt.Valid {
 		// 有效记录已存在 → 跳过(不覆盖原操作人)
 		return false, nil
 	}
 
 	// 软删记录 → 恢复并刷新操作人
 	return true, db.Unscoped().Model(&gbmodels.GbDeviceGrant{}).
-		Where("id = ?", existing.ID).
+		Where("id = ?", existing[0].ID).
 		Updates(map[string]interface{}{"deleted_at": nil, "created_by": grant.CreatedBy}).Error
 }
 

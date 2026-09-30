@@ -193,6 +193,8 @@ const pagination = ref({
   total: total,
   showPageSize: true,
   showTotal: true,
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100],
   onChange: (page: number) => {
     currentPage.value = page;
     getSysGenList();
@@ -422,15 +424,5 @@ onMounted(() => {
 .codegen-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
   border-radius: 10px;
-}
-
-.codegen-page :deep(.uvp-data-table .arco-pagination-item),
-.codegen-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
-.codegen-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
-  box-sizing: border-box;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: 8px;
 }
 </style>

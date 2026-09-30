@@ -10,14 +10,6 @@ export default defineConfig(({ mode }) => {
   const env: any = loadEnv(mode, root);
   const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
 
-  const certDir = path.resolve(__dirname, "certs");
-  const certKeyPath = path.join(certDir, "dev-key.pem");
-  const certCrtPath = path.join(certDir, "dev.pem");
-  const devHttps =
-    fs.existsSync(certKeyPath) && fs.existsSync(certCrtPath)
-      ? { key: fs.readFileSync(certKeyPath), cert: fs.readFileSync(certCrtPath) }
-      : undefined;
-
   return {
     base: "/",
     server: {

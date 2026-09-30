@@ -38,6 +38,12 @@ const props = defineProps<{
   /** 设备/通道展示名，只用于确认弹窗里指明"动的是哪台"。 */
   deviceLabel?: string;
   channelsLoading?: boolean;
+  /**
+   * 宿主是否**已经自己渲染**了通道选择器（默认 `true` = 本面板自己渲染）。
+   * ⛔ 2026-09-24 三段重构起，「操作」段四个面板 + 「配置」段由宿主**统一**渲染一个 ——
+   *    原先每块各渲染一份，多通道设备实测 DOM 里 `.fact-channel-picker` 有 7 份。
+   */
+  showPicker?: boolean;
 }>();
 
 const emit = defineEmits<{ (event: "update:channelId", value: number | null): void }>();
@@ -402,6 +408,7 @@ function formatCapacity(mb: number | null | undefined) {
 <template>
   <div class="storage-panel">
     <FactChannelPicker
+      v-if="props.showPicker !== false"
       :options="props.channelOptions"
       :model-value="props.channelId"
       :loading="props.channelsLoading"

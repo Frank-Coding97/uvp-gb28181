@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -104,6 +105,8 @@ func nodeTrendRuntime(nodeID int64, upstream, downstream uint64, streams, viewer
 	runtime.Metrics.ObjectStatistics = RuntimeObjectStatistics{MediaSource: uint64(streams), Socket: uint64(sessions)}
 	runtime.Streams = make([]RuntimeMedia, streams)
 	for index := range runtime.Streams {
+		runtime.Streams[index].NodeID = nodeID
+		runtime.Streams[index].Media = MediaIdentity{Vhost: "__defaultVhost__", App: "rtp", Stream: fmt.Sprintf("stream-%d", index)}
 		runtime.Streams[index].BytesSpeed = throughput / uint64(streams)
 		runtime.Streams[index].ReaderCount = viewers / streams
 	}
@@ -227,6 +230,22 @@ func TestOverviewSamplerPersistsNodeMediaRateHistoryInRedis(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, node11.MediaRateSamples, restoredNode.MediaRateSamples)
 	require.Equal(t, node11.TrendSamples, restoredNode.TrendSamples)
+}
+
+func TestRuntimeTrendCountsProtocolVariantsAsOneLogicalStream(t *testing.T) {
+	runtime := NodeRuntimeView{
+		NodeID:         11,
+		MediaFreshness: RuntimeFreshnessFresh,
+		Streams: []RuntimeMedia{
+			{NodeID: 11, Media: MediaIdentity{Schema: "rtsp", Vhost: "__defaultVhost__", App: "rtp", Stream: "camera-1"}},
+			{NodeID: 11, Media: MediaIdentity{Schema: "rtmp", Vhost: "__defaultVhost__", App: "rtp", Stream: "camera-1"}},
+			{NodeID: 11, Media: MediaIdentity{Schema: "hls", Vhost: "__defaultVhost__", App: "rtp", Stream: "camera-1"}},
+		},
+	}
+
+	sample := runtimeTrendSample(runtime, time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC))
+	require.NotNil(t, sample.StreamCount)
+	require.EqualValues(t, 1, *sample.StreamCount)
 }
 
 func TestOverviewSamplerRestoresAndIsolatesNodeMediaRateHistory(t *testing.T) {

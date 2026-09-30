@@ -228,15 +228,6 @@ export const startPlay = (deviceId: string, channelId: string, options: { silent
     : http.request<PlayApiResult>("post", url);
 };
 
-/** 为固定播放地址刷新短期访问凭据。 */
-export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>
-  http.request<PlayApiResult>(
-    "post",
-    baseUrlApi(`gb28181/play/${deviceId}/${channelId}/authorization`),
-    undefined,
-    silentRequestConfig
-  );
-
 /**
  * 停播响应
  * - released=true:录像收尾后完成通道级停流,前端刷新列表清"直播中"徽章
@@ -1844,8 +1835,6 @@ export interface PlayAuthConfig {
   authBindClientIP: boolean;
   authTTLSeconds: number;
   /** Read-only persistent OpenAPI media authorization requirement. */
-  authRequiredByOpenAPI?: boolean;
-  authConfigConflict?: boolean;
 }
 
 export const fetchPlayAuthConfig = () =>

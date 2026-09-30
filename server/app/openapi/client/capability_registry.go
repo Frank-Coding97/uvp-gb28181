@@ -49,6 +49,7 @@ type capabilityDefinition struct {
 	risk         string
 	idempotent   bool
 	groupCode    string
+	sysAPIGroup  string
 }
 
 var capabilityDefinitions = []capabilityDefinition{
@@ -57,6 +58,7 @@ var capabilityDefinitions = []capabilityDefinition{
 	{scope: "device:status", internalPath: "/api/gb28181/device-mgmt/device/:id/status-events", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/status", resourceType: "device", risk: "read", groupCode: "device-management"},
 	{scope: "channel:list", internalPath: "/api/gb28181/device-mgmt/channels", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels", resourceType: "channel", risk: "read", groupCode: "device-management"},
 	{scope: "channel:detail", internalPath: "/api/gb28181/device-mgmt/channel/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}", resourceType: "channel", risk: "read", groupCode: "device-management"},
+	{scope: "play:live", internalPath: "/api/gb28181/play/:deviceId/:channelId", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live", resourceType: "channel", risk: "control", groupCode: "device-control", sysAPIGroup: "设备管理"},
 	// channel:status belongs to the channel control surface, not to the plain
 	// device/channel read surface: sys_api already files
 	// /api/gb28181/device-mgmt/channel/:id/device-status under 「设备控制」
@@ -64,7 +66,6 @@ var capabilityDefinitions = []capabilityDefinition{
 	// reader below fails closed on any group mismatch, so this expectation has
 	// to track 接口管理's own grouping instead of a hand-written one.
 	{scope: "channel:status", internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", resourceType: "channel", risk: "read", groupCode: "device-control"},
-	{scope: "play:live:apply", internalPath: "/api/gb28181/play/:deviceId/:channelId/authorization", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations", resourceType: "channel", risk: "media", groupCode: "playback"},
 	{scope: "ptz:preset:list", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "read", groupCode: "device-control"},
 	{scope: "ptz:preset:save", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},
 	{scope: "ptz:preset:call", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},
@@ -74,9 +75,21 @@ var capabilityDefinitions = []capabilityDefinition{
 
 var capabilityGroupNames = map[string]string{
 	"device-management": "设备管理",
-	"playback":          "多屏播放",
 	"device-control":    "设备控制",
 }
+
+var capabilityGroupOrder = map[string]int{
+	"device-management": 10,
+	"device-control":    20,
+}
+
+var capabilityScopeOrder = func() map[string]int {
+	result := make(map[string]int, len(capabilityDefinitions))
+	for index, definition := range capabilityDefinitions {
+		result[definition.scope] = index
+	}
+	return result
+}()
 
 func capabilityScopeMap() map[string]struct{} {
 	scopes := make(map[string]struct{}, len(capabilityDefinitions))
@@ -156,14 +169,18 @@ func staticCapabilityCatalog(ctx context.Context, db *gorm.DB) ([]CapabilityGrou
 			return nil, ErrCapabilityDrift
 		}
 		row := rows[0]
-		if strings.TrimSpace(row.Title) == "" || row.ApiGroup != capabilityGroupNames[definition.groupCode] {
+		expectedSysAPIGroup := definition.sysAPIGroup
+		if expectedSysAPIGroup == "" {
+			expectedSysAPIGroup = capabilityGroupNames[definition.groupCode]
+		}
+		if strings.TrimSpace(row.Title) == "" || row.ApiGroup != expectedSysAPIGroup {
 			return nil, ErrCapabilityDrift
 		}
 		group := groups[definition.groupCode]
 		if group == nil {
-			group = &CapabilityGroup{Code: definition.groupCode, Name: row.ApiGroup, Capabilities: make([]Capability, 0)}
+			group = &CapabilityGroup{Code: definition.groupCode, Name: capabilityGroupNames[definition.groupCode], Capabilities: make([]Capability, 0)}
 			groups[definition.groupCode] = group
-		} else if group.Name != row.ApiGroup {
+		} else if group.Name != capabilityGroupNames[definition.groupCode] {
 			return nil, ErrCapabilityDrift
 		}
 		group.Capabilities = append(group.Capabilities, Capability{
@@ -174,10 +191,10 @@ func staticCapabilityCatalog(ctx context.Context, db *gorm.DB) ([]CapabilityGrou
 	}
 	result := make([]CapabilityGroup, 0, len(groups))
 	for _, group := range groups {
-		sort.Slice(group.Capabilities, func(i, j int) bool { return group.Capabilities[i].Scope < group.Capabilities[j].Scope })
+		sortCapabilities(group.Capabilities, nil)
 		result = append(result, *group)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Code < result[j].Code })
+	sortCapabilityGroups(result)
 	return result, nil
 }
 
@@ -218,6 +235,7 @@ func capabilityCatalogFromSnapshot(snapshot *catalogstore.ReleaseSnapshot) ([]Ca
 		return nil, ErrCapabilityDrift
 	}
 	groups := make(map[string]*CapabilityGroup)
+	sortValues := make(map[string]int, len(snapshot.Items))
 	for _, row := range snapshot.Items {
 		groupCode := strings.TrimSpace(row.GroupCode)
 		if groupCode == "" || strings.TrimSpace(row.Scope) == "" {
@@ -235,14 +253,46 @@ func capabilityCatalogFromSnapshot(snapshot *catalogstore.ReleaseSnapshot) ([]Ca
 			ExternalPath: row.ExternalPath, ResourceType: row.ResourceType, Risk: row.RiskLevel,
 			IdempotencyRequired: row.IdempotencyMode != "none",
 		})
+		sortValues[row.Scope] = row.Sort
 	}
 	resultGroups := make([]CapabilityGroup, 0, len(groups))
 	for _, group := range groups {
-		sort.Slice(group.Capabilities, func(i, j int) bool { return group.Capabilities[i].Scope < group.Capabilities[j].Scope })
+		sortCapabilities(group.Capabilities, sortValues)
 		resultGroups = append(resultGroups, *group)
 	}
-	sort.Slice(resultGroups, func(i, j int) bool { return resultGroups[i].Code < resultGroups[j].Code })
+	sortCapabilityGroups(resultGroups)
 	return resultGroups, nil
+}
+
+func sortCapabilityGroups(groups []CapabilityGroup) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		left, leftKnown := capabilityGroupOrder[groups[i].Code]
+		right, rightKnown := capabilityGroupOrder[groups[j].Code]
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown && left != right {
+			return left < right
+		}
+		return groups[i].Code < groups[j].Code
+	})
+}
+
+func sortCapabilities(capabilities []Capability, sortValues map[string]int) {
+	sort.SliceStable(capabilities, func(i, j int) bool {
+		left, leftKnown := capabilityScopeOrder[capabilities[i].Scope]
+		right, rightKnown := capabilityScopeOrder[capabilities[j].Scope]
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown && left != right {
+			return left < right
+		}
+		if sortValues != nil && sortValues[capabilities[i].Scope] != sortValues[capabilities[j].Scope] {
+			return sortValues[capabilities[i].Scope] < sortValues[capabilities[j].Scope]
+		}
+		return capabilities[i].Scope < capabilities[j].Scope
+	})
 }
 
 func normalizeCatalogContext(ctx context.Context) context.Context {

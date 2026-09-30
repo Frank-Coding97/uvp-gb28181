@@ -3,26 +3,24 @@ import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { RotateCw, ServerCog, ShieldAlert } from "lucide-vue-next";
 
-import {
-  getZLMNodeRestartStatus,
-  restartZLMNode,
-  type ZLMRestartOperation,
-  type ZLMRestartStatus
-} from "@/api/gb28181-zlm";
+import { getZLMNodeRestartStatus, restartZLMNode, type ZLMRestartOperation, type ZLMRestartStatus } from "@/api/gb28181-zlm";
 import { useUserStoreHook } from "@/store/modules/user";
 import NodeConfigPanel from "../../components/NodeConfigPanel.vue";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
 
-const props = withDefaults(defineProps<{
-  nodeId: number;
-  nodeName?: string;
-  active?: boolean;
-  editable?: boolean;
-}>(), {
-  nodeName: "媒体节点",
-  active: true,
-  editable: true
-});
+const props = withDefaults(
+  defineProps<{
+    nodeId: number;
+    nodeName?: string;
+    active?: boolean;
+    editable?: boolean;
+  }>(),
+  {
+    nodeName: "媒体节点",
+    active: true,
+    editable: true
+  }
+);
 
 const emit = defineEmits<{
   dirtyChange: [dirty: boolean];
@@ -40,22 +38,39 @@ let configTimer: ReturnType<typeof setInterval> | null = null;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let restartGeneration = 0;
 
-const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*")
-  || userStore.account.permissions.includes(permission);
+const hasPermission = (permission: string) =>
+  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canRestart = computed(() => hasPermission("gb28181:zlm:restart"));
 const restartView = computed(() => restartStatusPresentation(restartOperation.value?.status ?? null));
 
 function restartStatusPresentation(status: ZLMRestartStatus | null) {
   const presentations: Record<ZLMRestartStatus, { label: string; description: string; tone: string; terminal: boolean }> = {
-    unknown: { label: "操作状态未知", description: "服务进程可能已重启或操作记录已丢失，不能据此判断节点已恢复。", tone: "danger", terminal: true },
+    unknown: {
+      label: "操作状态未知",
+      description: "服务进程可能已重启或操作记录已丢失，不能据此判断节点已恢复。",
+      tone: "danger",
+      terminal: true
+    },
     accepted: { label: "已受理", description: "后端已受理，不代表节点已经恢复。", tone: "warning", terminal: false },
-    waiting_offline: { label: "等待节点离线", description: "等待心跳 watcher 确认旧进程离线。", tone: "warning", terminal: false },
+    waiting_offline: {
+      label: "等待节点离线",
+      description: "等待心跳 watcher 确认旧进程离线。",
+      tone: "warning",
+      terminal: false
+    },
     waiting_heartbeat: { label: "等待心跳恢复", description: "旧进程已离线，等待新进程心跳。", tone: "warning", terminal: false },
-    converging: { label: "配置收敛中", description: "心跳已恢复，正在下发并回读平台管理配置。", tone: "warning", terminal: false },
+    converging: {
+      label: "配置收敛中",
+      description: "心跳已恢复，正在下发并回读平台管理配置。",
+      tone: "warning",
+      terminal: false
+    },
     ready: { label: "已恢复", description: "节点心跳和配置收敛均已确认。", tone: "success", terminal: true },
     failed: { label: "恢复失败", description: "重启、心跳恢复或配置收敛失败，请查看错误并重试。", tone: "danger", terminal: true }
   };
-  return status ? presentations[status] : { label: "未执行重启", description: "重启会中断该节点所有媒体会话。", tone: "neutral", terminal: true };
+  return status
+    ? presentations[status]
+    : { label: "未执行重启", description: "重启会中断该节点所有媒体会话。", tone: "neutral", terminal: true };
 }
 
 function refreshConfig() {
@@ -126,7 +141,8 @@ async function performRestart() {
   restartError.value = "";
   try {
     const response = await restartZLMNode(nodeId);
-    if (response.code !== 0 || !response.data?.accepted || !response.data.operationId) throw new Error(response.message || "重启未被后端受理");
+    if (response.code !== 0 || !response.data?.accepted || !response.data.operationId)
+      throw new Error(response.message || "重启未被后端受理");
     restartOperation.value = {
       operationId: response.data.operationId,
       nodeId,
@@ -145,7 +161,15 @@ async function performRestart() {
 
 function resumeRestartPolling() {
   const operation = restartOperation.value;
-  if (!operation || !active.value || restartPolling.value || operation.status === "ready" || operation.status === "failed" || operation.status === "unknown") return;
+  if (
+    !operation ||
+    !active.value ||
+    restartPolling.value ||
+    operation.status === "ready" ||
+    operation.status === "failed" ||
+    operation.status === "unknown"
+  )
+    return;
   stopRestartPolling();
   const generation = restartGeneration;
   restartError.value = "";
@@ -192,22 +216,137 @@ onBeforeUnmount(() => {
   <section class="node-config-view" aria-label="节点服务配置">
     <header class="config-heading">
       <slot name="heading">
-        <div><h2>服务配置</h2><p>只允许热更新项进入提交；保存结果必须经过 ZLMediaKit 实际值回读。Secret 不会回显。</p></div>
+        <div>
+          <h2>服务配置</h2>
+          <p>
+            热更新项保存后立即生效，重启后生效项保存后需重启媒体节点；保存结果必须经过 ZLMediaKit 实际值回读。Secret 不会回显。
+          </p>
+        </div>
       </slot>
-      <a-button v-if="canRestart" status="danger" :loading="restartPolling" :disabled="!active || configDirty || restartPolling" @click="requestRestart"><template #icon><RotateCw :size="15" /></template>重启当前节点</a-button>
+      <a-button
+        v-if="canRestart"
+        status="danger"
+        :loading="restartPolling"
+        :disabled="!active || configDirty || restartPolling"
+        @click="requestRestart"
+        ><template #icon><RotateCw :size="15" /></template>重启当前节点</a-button
+      >
     </header>
     <a-alert v-if="pollingNotice" type="warning" class="config-page-alert">{{ pollingNotice }}</a-alert>
     <section v-if="restartOperation || restartError" :class="['restart-state', `restart-state--${restartView.tone}`]">
       <div class="restart-state__icon"><ServerCog :size="20" /></div>
-      <div><strong>{{ restartView.label }}</strong><p>{{ restartError || restartView.description }}</p><code v-if="restartOperation">operation {{ restartOperation.operationId }} · {{ restartOperation.status }}</code></div>
-      <a-spin v-if="restartPolling" /><a-button v-else-if="restartError && restartOperation && !restartView.terminal" @click="resumeRestartPolling">继续查询</a-button>
+      <div>
+        <strong>{{ restartView.label }}</strong>
+        <p>{{ restartError || restartView.description }}</p>
+        <code v-if="restartOperation">operation {{ restartOperation.operationId }} · {{ restartOperation.status }}</code>
+      </div>
+      <a-spin v-if="restartPolling" /><a-button
+        v-else-if="restartError && restartOperation && !restartView.terminal"
+        @click="resumeRestartPolling"
+        >继续查询</a-button
+      >
     </section>
-    <a-alert v-if="!editable" type="info" class="config-page-alert"><ShieldAlert :size="15" />当前账号可查看配置，但没有热更新权限。</a-alert>
-    <NodeConfigPanel ref="configPanel" :node-id="nodeId" :editable="editable" @dirty-change="value => { configDirty = value; emit('dirtyChange', value); }" @polling-skipped="pollingNotice = '存在未保存草稿时，自动轮询与节点切换都会暂停。'" />
+    <a-alert v-if="!editable" type="info" class="config-page-alert"
+      ><ShieldAlert :size="15" />当前账号可查看配置，但没有热更新权限。</a-alert
+    >
+    <NodeConfigPanel
+      ref="configPanel"
+      :node-id="nodeId"
+      :editable="editable"
+      @dirty-change="
+        value => {
+          configDirty = value;
+          emit('dirtyChange', value);
+        }
+      "
+      @polling-skipped="pollingNotice = '存在未保存草稿时，自动轮询与节点切换都会暂停。'"
+    />
   </section>
 </template>
 
 <style scoped>
-.node-config-view { min-width: 0; color: var(--zlm-text-2); }.config-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }.config-heading h2 { margin: 0; color: var(--zlm-text-1); font-size: 17px; }.config-heading p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.config-page-alert { margin-bottom: 12px; }.restart-state { display: flex; align-items: center; gap: 12px; margin: 14px 0; padding: 13px 15px; background: var(--zlm-fill-1); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); }.restart-state__icon { display: grid; width: 38px; height: 38px; flex: none; color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-radius: var(--zlm-radius-md); place-items: center; }.restart-state > div:nth-child(2) { min-width: 0; flex: 1; }.restart-state strong { color: var(--zlm-text-1); }.restart-state p { margin: 3px 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.restart-state code { color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 11px; }.restart-state--warning { border-color: var(--zlm-warn-500); }.restart-state--success { border-color: var(--zlm-success-500); }.restart-state--danger { border-color: var(--zlm-danger-500); }
-@media (max-width: 760px) { .config-heading { flex-direction: column; } }
+.node-config-view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--zlm-text-2);
+}
+.config-heading {
+  display: flex;
+  flex: none;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.config-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--zlm-text-1);
+}
+.config-heading p {
+  margin: 5px 0 0;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+.config-page-alert {
+  flex: none;
+  margin-bottom: 12px;
+}
+.restart-state {
+  display: flex;
+  flex: none;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 15px;
+  margin: 14px 0;
+  background: var(--zlm-fill-1);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+}
+.restart-state__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--zlm-brand-600);
+  background: var(--zlm-brand-50);
+  border-radius: var(--zlm-radius-md);
+}
+.restart-state > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.restart-state strong {
+  color: var(--zlm-text-1);
+}
+.restart-state p {
+  margin: 3px 0;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+.restart-state code {
+  font-family: var(--zlm-font-mono);
+  font-size: 11px;
+  color: var(--zlm-text-4);
+}
+.restart-state--warning {
+  border-color: var(--zlm-warn-500);
+}
+.restart-state--success {
+  border-color: var(--zlm-success-500);
+}
+.restart-state--danger {
+  border-color: var(--zlm-danger-500);
+}
+
+@media (width <= 760px) {
+  .config-heading {
+    flex-direction: column;
+  }
+}
 </style>

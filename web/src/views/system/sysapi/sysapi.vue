@@ -212,7 +212,8 @@ const pagination = reactive({
   total: 0,
   showTotal: true,
   showJumper: true,
-  showPageSize: true
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 // 页码变化
@@ -395,17 +396,5 @@ onMounted(() => {
 .sysapi-page :deep(.uvp-data-table .arco-table-cell) {
   font-size: 14px;
   line-height: 22px;
-}
-
-.sysapi-page :deep(.uvp-data-table .arco-pagination-item),
-.sysapi-page :deep(.uvp-data-table .arco-pagination-jumper-input),
-.sysapi-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view) {
-  box-sizing: border-box;
-  height: 32px;
-  min-height: 32px;
-}
-
-.sysapi-page :deep(.uvp-data-table .arco-pagination-item) {
-  min-width: 32px;
 }
 </style>

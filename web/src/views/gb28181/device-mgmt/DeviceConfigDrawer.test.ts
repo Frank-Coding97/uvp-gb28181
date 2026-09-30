@@ -230,9 +230,8 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
   });
 
-  it("码流可由宿主受控：底栏选子码流，侧栏显示的行跟着切", async () => {
-    // ⛔ 底栏「参数对照」的码流与侧栏「配置文件」下拉必须是**同一路**：
-    //    各持一份状态就会出现"对照卡说子码流、侧栏在改主码流"，而两边都不报错。
+  it("码流可由宿主受控：嵌入编码卡在编码格式上方选择码流", async () => {
+    // ⛔ 嵌入编码卡受控于宿主的码流状态，与参数对照卡共用同一选择结果。
     api.getChannelVideoParams.mockResolvedValue(
       readOk([videoParamRow({ id: 1, streamNumber: 0 }), videoParamRow({ id: 2, streamNumber: 1, resolution: "4" })])
     );
@@ -240,19 +239,18 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(false);
-    // 配置文件只是标题 + 下拉框的布局容器，不能用 label 包裹整个行宽，
-    // 否则点击下拉框右侧空白也会触发原生 label 激活内部 select。
-    expect(wrapper.get(".dcg-params-profile").element.tagName).toBe("DIV");
+    const streamSelector = wrapper.get("[data-testid='dcg-stream-profile-embedded']");
+    expect((streamSelector.element as HTMLSelectElement).value).toBe("0");
+    expect(
+      streamSelector.element.compareDocumentPosition(wrapper.get("[data-testid='dcg-row-encoding-format']").element) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
 
     await wrapper.setProps({ streamProfile: "1" });
     await flushPromises();
     expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(false);
-
-    // 侧栏自己改码流 → 同样只发意图，由宿主回写（回写后两条路仍指向同一路）。
-    await wrapper.get("[aria-label='配置文件']").setValue("0");
-    await flushPromises();
-    expect(wrapper.emitted("update:streamProfile")?.at(-1)).toEqual(["0"]);
+    expect((wrapper.get("[data-testid='dcg-stream-profile-embedded']").element as HTMLSelectElement).value).toBe("1");
   });
 
   it("打开时按通道读一次平台缓存事实，且不带 refresh", async () => {
@@ -262,7 +260,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     expect(api.getChannelVideoParams).toHaveBeenCalledWith(3539, false);
   });
 
-  it("打开时把配置家族**一次问全**（六组的 ConfigType 并集）", async () => {
+  it("打开时一次读取全部配置家族的平台缓存，但不向设备发起 refresh", async () => {
     mountDrawer();
     await flushPromises();
 
@@ -270,8 +268,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     const [channelId, options] = api.getChannelDeviceConfigs.mock.calls[0]!;
     expect(channelId).toBe(3539);
     expect(options.refresh).toBe(false);
-    // ⛔ 一次问全而不是"读哪组问哪组"：A.2.4.7 本来就允许一次查多个类型；
-    //    拆开会让"切分组"这个纯界面动作产生 SIP 报文。
+    // 首次打开只读取平台缓存，拿全量类型便于切组时直接展示已有事实；refresh=false 不产生 SIP。
     const expected = Array.from(new Set(CONFIG_GROUPS.flatMap(group => group.configTypes)));
     expect(options.configTypes).toEqual(expected);
     // 视频参数属性走独立通道，不该混进家族的查询清单
@@ -287,6 +284,37 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     await flushPromises();
 
     expect(api.getChannelVideoParams).toHaveBeenCalledWith(3539, true);
+  });
+
+  it("非视频组点「读取」时只查询当前组的配置类型", async () => {
+    const wrapper = mountDrawer();
+    await flushPromises();
+    api.getChannelDeviceConfigs.mockClear();
+
+    await wrapper.find("[data-testid='dcg-nav-osd']").trigger("click");
+    await wrapper.find("[data-testid='dcg-read']").trigger("click");
+    await flushPromises();
+
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, {
+      refresh: true,
+      configTypes: ["OSDConfig"]
+    });
+  });
+
+  it("画面卡片点「读取」时只查询镜像和遮挡配置", async () => {
+    const wrapper = mountDrawer();
+    await flushPromises();
+    api.getChannelDeviceConfigs.mockClear();
+
+    (wrapper.vm as unknown as { readPictureGroup: () => void }).readPictureGroup();
+    await flushPromises();
+
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, {
+      refresh: true,
+      configTypes: ["FrameMirror", "PictureMask"]
+    });
   });
 
   it("回读值渲染成码流行，并按码值回填控件", async () => {
@@ -313,18 +341,47 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     expect(wrapper.find(".dcg-params-summary").exists()).toBe(false);
     expect(wrapper.find(".dcg-params-std").exists()).toBe(false);
     expect(wrapper.find(".dcg-params-state").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='dcg-embedded-actions'] [data-testid='dcg-read']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='dcg-embedded-actions'] [data-testid='dcg-apply']").exists()).toBe(true);
+    expect(wrapper.findAll("[data-testid='dcg-group-title']")).toHaveLength(0);
+    expect(wrapper.findAll(".dcg-video-title")).toHaveLength(1);
+    expect(wrapper.get(".dcg-video-title").find("svg").exists()).toBe(true);
+    expect(wrapper.find(".dcg-params-head").classes()).toContain("is-video-embedded");
 
     const stream = wrapper.find("[data-testid='dcg-stream-0']");
-    expect(stream.findAll("[data-testid='dcg-field-group']").map(group => group.attributes("data-group"))).toEqual([
-      "encoding",
-      "picture",
-      "bitrate"
+    const actions = stream.get("[data-testid='dcg-video-actions']");
+    expect(actions.findAll("[data-testid^='dcg-']").map(button => button.attributes("data-testid"))).toEqual([
+      "dcg-reset",
+      "dcg-read",
+      "dcg-apply"
     ]);
-    expect(stream.find("[data-group='encoding']").text()).toContain("编码");
-    expect(stream.find("[data-group='picture']").text()).toContain("画面");
-    expect(stream.find("[data-group='bitrate']").text()).toContain("CBR 时必填");
+    expect(stream.find(".dcg-reconcile-inline").text()).toContain("回读成功");
+    expect(stream.findAll(".dcg-compact-label").map(label => label.text())).toEqual([
+      "码流",
+      "编码格式",
+      "分辨率",
+      "帧率",
+      "码率类型",
+      "码率"
+    ]);
+    expect(stream.find("[data-testid='dcg-bit-rate-type-0-1']").exists()).toBe(true);
+    expect(stream.find("[data-testid='dcg-bit-rate-0']").exists()).toBe(true);
+  });
+
+  it("嵌入模式没有回读码流时仍在编码卡片内保留读取入口", async () => {
+    api.getChannelVideoParams.mockResolvedValue(readOk([]));
+    const wrapper = mountDrawer({ embedded: true });
+    await flushPromises();
+
+    const card = wrapper.get("[data-testid='dcg-empty-card']");
+    expect(card.get(".dcg-video-title").find("svg").exists()).toBe(true);
+    const actions = card.get("[data-testid='dcg-video-actions']");
+    expect(actions.findAll("[data-testid^='dcg-']").map(button => button.attributes("data-testid"))).toEqual([
+      "dcg-reset",
+      "dcg-read",
+      "dcg-apply"
+    ]);
+    expect(card.find(".dcg-video-header [aria-label='配置文件']").exists()).toBe(false);
+    expect(card.find(".dcg-reconcile-inline").exists()).toBe(true);
+    expect(card.find("[data-testid='dcg-empty']").exists()).toBe(true);
   });
 
   it("嵌入配置把复杂字段和唯一操作条挂到底部目标", async () => {

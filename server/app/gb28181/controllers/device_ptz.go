@@ -8,7 +8,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -22,9 +21,9 @@ type ptzRequest struct {
 }
 
 type ptzExtendedRequest struct {
-	Action         string `json:"action"`
-	ID             int    `json:"id"`
-	Speed          int    `json:"speed"`
+	Action string `json:"action"`
+	ID     int    `json:"id"`
+	Speed  int    `json:"speed"`
 	// Value 是 0x86/0x87/0x8A 这类「12 位参数」指令的载荷(巡航速度/停留时间、扫描速度),
 	// 取值域 1-4095。方向与速度类指令不用它 —— 那些走 0-255 的 Speed。
 	Value          int    `json:"value"`
@@ -161,10 +160,6 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			"operationId": op.OperationID, "deviceId": device.DeviceID, "channelId": channel.ChannelID,
 			"action": action, "speed": request.Speed, "sn": op.SN, "status": op.Status,
 		}})
-		return
-	}
-	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
-		dc.FailAndAbort(c, "PTZ 授权服务未就绪", nil)
 		return
 	}
 	body, err := manscdp.BuildPTZControlWithProfile(profileForDevice(&device), channel.ChannelID, sn, manscdp.PTZCommand{Action: action, Speed: request.Speed})

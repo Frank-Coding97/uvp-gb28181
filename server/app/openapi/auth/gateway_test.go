@@ -3,7 +3,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -47,7 +46,6 @@ func gatewayCall(t *testing.T, gate *Gateway, secret, nonce string, mutate func(
 	signature, err := Sign(input, secret)
 	require.NoError(t, err)
 	r := httptest.NewRequest("GET", input.Path, nil)
-	r.TLS = &tls.ConnectionState{HandshakeComplete: true}
 	for key, value := range map[string]string{"X-UVP-Sign-Version": "1", "X-UVP-Access-Key": input.AccessKey, "X-UVP-Timestamp": now, "X-UVP-Nonce": nonce, "X-UVP-Signature": signature} {
 		r.Header.Set(key, value)
 	}
@@ -83,8 +81,25 @@ func TestOpenAPIGatewayDeadlineNeverWritesLateResult(t *testing.T) {
 	require.Equal(t, body, out.Body.String())
 }
 
+func TestOpenAPIGatewayAllowsHTTPTransport(t *testing.T) {
+	gate, _, secret := gatewayFixture(t)
+	var called atomic.Bool
+	gate.run = func(context.Context, gatewayRequest) gatewayResponse {
+		called.Store(true)
+		return gatewayResponse{status: 200, body: []byte(`{"code":"OK"}`)}
+	}
+
+	out := gatewayCall(t, gate, secret, strings.Repeat("e", 32), func(r *http.Request) {
+		r.TLS = nil
+		r.Header.Del("X-Forwarded-Proto")
+	})
+
+	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+	require.True(t, called.Load())
+}
+
 func TestOpenAPIGatewayRejectsBeforeBusinessOrNonce(t *testing.T) {
-	for _, kind := range []string{"signature", "jwt-only", "duplicate-header", "expired", "no-scope", "inactive-dept", "untrusted-proxy", "audit-start-failure", "client-store-failure"} {
+	for _, kind := range []string{"signature", "jwt-only", "duplicate-header", "expired", "no-scope", "inactive-dept", "audit-start-failure", "client-store-failure"} {
 		t.Run(kind, func(t *testing.T) {
 			gate, db, secret := gatewayFixture(t)
 			var calls atomic.Int32
@@ -115,10 +130,6 @@ func TestOpenAPIGatewayRejectsBeforeBusinessOrNonce(t *testing.T) {
 					r.Header.Set("Authorization", "Bearer test-jwt-not-machine-authority")
 				case "duplicate-header":
 					r.Header.Add("X-UVP-Nonce", strings.Repeat("c", 32))
-				case "untrusted-proxy":
-					r.TLS = nil
-					r.RemoteAddr = "198.51.100.4:123"
-					r.Header.Set("X-Forwarded-Proto", "https")
 				case "expired":
 					r.Header.Set("X-UVP-Timestamp", fmt.Sprint(time.Now().Add(-301*time.Second).Unix()))
 					sig, err := Sign(SignatureInput{Method: r.Method, Path: r.URL.Path, AccessKey: r.Header.Get("X-UVP-Access-Key"), Timestamp: r.Header.Get("X-UVP-Timestamp"), Nonce: r.Header.Get("X-UVP-Nonce"), Audience: "test-audience"}, secret)

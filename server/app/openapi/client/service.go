@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -26,7 +27,6 @@ var (
 	ErrRevoked                  = errors.New("OpenAPI client is revoked")
 	ErrClientDisabled           = errors.New("OpenAPI client is disabled")
 	ErrAuthenticationFailed     = errors.New("OpenAPI client authentication failed")
-	ErrRevocationUnavailable    = errors.New("OpenAPI revocation dependency unavailable")
 	ErrAuthorizationUnavailable = errors.New("OpenAPI management authorization unavailable")
 	ErrUnknownScope             = errors.New("unknown OpenAPI scope")
 	ErrOwnerDeptImmutable       = errors.New("OpenAPI client owner department is immutable")
@@ -34,26 +34,39 @@ var (
 
 var supportedScopes = capabilityScopeMap()
 
+const (
+	defaultRateLimit   = 10
+	defaultBurst       = 20
+	defaultViewerQuota = 10
+	maxRateLimit       = 10000
+	maxBurst           = 10000
+	maxViewerQuota     = 10000
+)
+
 // ClientView is the management-safe representation of a client. It contains
 // no encrypted verification material and never contains a plaintext SK.
 type ClientView struct {
-	ID                int64     `json:"id"`
-	AK                string    `json:"ak"`
-	Name              string    `json:"name"`
-	OwnerDeptID       uint      `json:"ownerDeptId"`
-	DataScope         int8      `json:"dataScope"`
-	ResponsibleUserID uint      `json:"responsibleUserId"`
-	Status            string    `json:"status"`
-	SecretVersion     int64     `json:"secretVersion"`
-	AuthEpoch         int64     `json:"authEpoch"`
-	RateLimit         int       `json:"rateLimit"`
-	Burst             int       `json:"burst"`
-	ViewerQuota       int       `json:"viewerQuota"`
-	RowVersion        int64     `json:"rowVersion"`
-	CreatedBy         uint      `json:"createdBy"`
-	UpdatedBy         uint      `json:"updatedBy"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                 int64     `json:"id"`
+	AK                 string    `json:"ak"`
+	Name               string    `json:"name"`
+	OwnerDeptID        uint      `json:"ownerDeptId"`
+	OwnerDeptName      string    `json:"ownerDeptName,omitempty"`
+	DataScope          int8      `json:"dataScope"`
+	ResponsibleUserID  uint      `json:"responsibleUserId"`
+	ResponsibleOrgName string    `json:"responsibleOrgName"`
+	ResponsibleName    string    `json:"responsibleName"`
+	ResponsibleContact string    `json:"responsibleContact"`
+	Status             string    `json:"status"`
+	SecretVersion      int64     `json:"secretVersion"`
+	AuthEpoch          int64     `json:"authEpoch"`
+	RateLimit          int       `json:"rateLimit"`
+	Burst              int       `json:"burst"`
+	ViewerQuota        int       `json:"viewerQuota"`
+	RowVersion         int64     `json:"rowVersion"`
+	CreatedBy          uint      `json:"createdBy"`
+	UpdatedBy          uint      `json:"updatedBy"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type ScopeView struct {
@@ -66,11 +79,17 @@ type ScopeView struct {
 }
 
 type CreateRequest struct {
-	Name              string
-	OwnerDeptID       uint
-	DataScope         int8
-	ResponsibleUserID uint
-	CreatedBy         uint
+	Name               string
+	OwnerDeptID        uint
+	DataScope          int8
+	RateLimit          int
+	Burst              int
+	ViewerQuota        int
+	ResponsibleUserID  uint
+	ResponsibleOrgName string
+	ResponsibleName    string
+	ResponsibleContact string
+	CreatedBy          uint
 }
 
 type VerificationMaterial struct {
@@ -79,23 +98,6 @@ type VerificationMaterial struct {
 	SecretVersion int64  `json:"secretVersion"`
 	AuthEpoch     int64  `json:"authEpoch"`
 	SecretKey     string `json:"-"`
-}
-
-// RevocationIntent is the durable handoff from client lifecycle state to the
-// T12 media revocation implementation. T03 never pretends to kick media.
-type RevocationIntent struct {
-	ClientID    int64
-	ClientEpoch int64
-	Scope       string
-	ScopeEpoch  int64
-	Reason      string
-	CreatedAt   time.Time
-}
-
-// RevocationIntentStore must write its marker using the transaction supplied
-// by Service. A nil store is deliberately fail-closed for revoking changes.
-type RevocationIntentStore interface {
-	RecordRevocationIntent(ctx context.Context, tx *gorm.DB, intent RevocationIntent) error
 }
 
 // ManagementBoundary is supplied by T04. It must resolve a current trusted
@@ -120,7 +122,6 @@ type Service struct {
 	db                 *gorm.DB
 	secretManager      *SecretManager
 	now                func() time.Time
-	revocationStore    RevocationIntentStore
 	managementBoundary ManagementBoundary
 }
 
@@ -130,10 +131,6 @@ func WithClock(now func() time.Time) ServiceOption {
 			service.now = now
 		}
 	}
-}
-
-func WithRevocationIntentStore(store RevocationIntentStore) ServiceOption {
-	return func(service *Service) { service.revocationStore = store }
 }
 
 func WithManagementBoundary(boundary ManagementBoundary) ServiceOption {
@@ -158,7 +155,22 @@ func NewService(db *gorm.DB, secretManager *SecretManager, options ...ServiceOpt
 }
 
 func (s *Service) Create(ctx context.Context, request CreateRequest) (ClientView, string, error) {
-	if strings.TrimSpace(request.Name) == "" || request.OwnerDeptID == 0 {
+	if request.RateLimit == 0 {
+		request.RateLimit = defaultRateLimit
+	}
+	if request.Burst == 0 {
+		request.Burst = defaultBurst
+	}
+	if request.ViewerQuota == 0 {
+		request.ViewerQuota = defaultViewerQuota
+	}
+	if strings.TrimSpace(request.Name) == "" || request.OwnerDeptID == 0 ||
+		request.RateLimit < 1 || request.RateLimit > maxRateLimit ||
+		request.Burst < 1 || request.Burst > maxBurst ||
+		request.ViewerQuota < 1 || request.ViewerQuota > maxViewerQuota ||
+		utf8.RuneCountInString(strings.TrimSpace(request.ResponsibleOrgName)) > 200 ||
+		utf8.RuneCountInString(strings.TrimSpace(request.ResponsibleName)) > 100 ||
+		utf8.RuneCountInString(strings.TrimSpace(request.ResponsibleContact)) > 100 {
 		return ClientView{}, "", ErrInvalidArgument
 	}
 	request.DataScope = models.NormalizeDataScope(request.DataScope)
@@ -196,25 +208,28 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (ClientView
 	var view ClientView
 	err = s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
 		row := &models.Client{
-			AK:                ak,
-			Name:              request.Name,
-			OwnerDeptID:       request.OwnerDeptID,
-			DataScope:         request.DataScope,
-			ResponsibleUserID: request.ResponsibleUserID,
-			Status:            models.StatusActive,
-			SecretCiphertext:  initialCiphertext,
-			SecretIV:          initialIV,
-			SecretKeyID:       s.secretManager.KeyID(),
-			SecretVersion:     secretVersion,
-			AuthEpoch:         secretVersion,
-			RateLimit:         10,
-			Burst:             20,
-			ViewerQuota:       10,
-			RowVersion:        secretVersion,
-			CreatedBy:         request.CreatedBy,
-			UpdatedBy:         request.CreatedBy,
-			CreatedAt:         now,
-			UpdatedAt:         now,
+			AK:                 ak,
+			Name:               request.Name,
+			OwnerDeptID:        request.OwnerDeptID,
+			DataScope:          request.DataScope,
+			ResponsibleUserID:  request.ResponsibleUserID,
+			ResponsibleOrgName: strings.TrimSpace(request.ResponsibleOrgName),
+			ResponsibleName:    strings.TrimSpace(request.ResponsibleName),
+			ResponsibleContact: strings.TrimSpace(request.ResponsibleContact),
+			Status:             models.StatusActive,
+			SecretCiphertext:   initialCiphertext,
+			SecretIV:           initialIV,
+			SecretKeyID:        s.secretManager.KeyID(),
+			SecretVersion:      secretVersion,
+			AuthEpoch:          secretVersion,
+			RateLimit:          request.RateLimit,
+			Burst:              request.Burst,
+			ViewerQuota:        request.ViewerQuota,
+			RowVersion:         secretVersion,
+			CreatedBy:          request.CreatedBy,
+			UpdatedBy:          request.CreatedBy,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}
 		if err := tx.Create(row).Error; err != nil {
 			return err
@@ -439,10 +454,6 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status string, expect
 			view = toClientView(row)
 			return nil
 		}
-		requiresIntent := status == models.StatusDisabled || status == models.StatusRevoked
-		if requiresIntent && s.revocationStore == nil {
-			return ErrRevocationUnavailable
-		}
 		newEpoch := row.AuthEpoch + 1
 		newRowVersion := row.RowVersion + 1
 		result := tx.Model(&models.Client{}).Where("id = ? AND row_version = ?", row.ID, expectedRowVersion).Updates(map[string]any{
@@ -463,17 +474,6 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status string, expect
 		row.RowVersion = newRowVersion
 		row.UpdatedBy = actorID
 		row.UpdatedAt = now
-		if requiresIntent {
-			if err := s.revocationStore.RecordRevocationIntent(normalizeContext(ctx), tx, RevocationIntent{
-				ClientID:    row.ID,
-				ClientEpoch: row.AuthEpoch,
-				ScopeEpoch:  0,
-				Reason:      "client." + status,
-				CreatedAt:   now,
-			}); err != nil {
-				return err
-			}
-		}
 		if err := s.recordAudit(tx, &row, "client."+status, actorID, now); err != nil {
 			return err
 		}
@@ -533,9 +533,6 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 			view = toClientView(row)
 			return nil
 		}
-		if !enabled && s.revocationStore == nil {
-			return ErrRevocationUnavailable
-		}
 		newScopeEpoch := int64(1)
 		if scopeErr == nil {
 			newScopeEpoch = scopeRow.ScopeEpoch + 1
@@ -581,18 +578,6 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 				UpdatedAt:  now,
 			}
 			if err := tx.Create(&scopeRow).Error; err != nil {
-				return err
-			}
-		}
-		if !enabled {
-			if err := s.revocationStore.RecordRevocationIntent(normalizeContext(ctx), tx, RevocationIntent{
-				ClientID:    row.ID,
-				ClientEpoch: row.AuthEpoch,
-				Scope:       scope,
-				ScopeEpoch:  newScopeEpoch,
-				Reason:      "scope.revoke",
-				CreatedAt:   now,
-			}); err != nil {
 				return err
 			}
 		}
@@ -741,23 +726,26 @@ func validScopeName(scope string) bool {
 
 func toClientView(row models.Client) ClientView {
 	return ClientView{
-		ID:                row.ID,
-		AK:                row.AK,
-		Name:              row.Name,
-		OwnerDeptID:       row.OwnerDeptID,
-		DataScope:         models.NormalizeDataScope(row.DataScope),
-		ResponsibleUserID: row.ResponsibleUserID,
-		Status:            row.Status,
-		SecretVersion:     row.SecretVersion,
-		AuthEpoch:         row.AuthEpoch,
-		RateLimit:         row.RateLimit,
-		Burst:             row.Burst,
-		ViewerQuota:       row.ViewerQuota,
-		RowVersion:        row.RowVersion,
-		CreatedBy:         row.CreatedBy,
-		UpdatedBy:         row.UpdatedBy,
-		CreatedAt:         row.CreatedAt,
-		UpdatedAt:         row.UpdatedAt,
+		ID:                 row.ID,
+		AK:                 row.AK,
+		Name:               row.Name,
+		OwnerDeptID:        row.OwnerDeptID,
+		DataScope:          models.NormalizeDataScope(row.DataScope),
+		ResponsibleUserID:  row.ResponsibleUserID,
+		ResponsibleOrgName: row.ResponsibleOrgName,
+		ResponsibleName:    row.ResponsibleName,
+		ResponsibleContact: row.ResponsibleContact,
+		Status:             row.Status,
+		SecretVersion:      row.SecretVersion,
+		AuthEpoch:          row.AuthEpoch,
+		RateLimit:          row.RateLimit,
+		Burst:              row.Burst,
+		ViewerQuota:        row.ViewerQuota,
+		RowVersion:         row.RowVersion,
+		CreatedBy:          row.CreatedBy,
+		UpdatedBy:          row.UpdatedBy,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
 	}
 }
 

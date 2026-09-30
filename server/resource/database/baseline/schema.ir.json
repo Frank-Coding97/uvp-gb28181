@@ -18472,6 +18472,33 @@
           "collation": null
         },
         {
+          "name": "responsible_org_name",
+          "type": "varchar(200)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "responsible_name",
+          "type": "varchar(100)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "responsible_contact",
+          "type": "varchar(100)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
           "name": "status",
           "type": "varchar(16)",
           "nullable": false,

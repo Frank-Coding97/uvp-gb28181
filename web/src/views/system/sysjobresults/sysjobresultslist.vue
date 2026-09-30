@@ -111,7 +111,7 @@ const paginationConfig = computed(() => ({
   showTotal: true,
   showJumper: true,
   showPageSize: true,
-  pageSizeOptions: [10, 20, 30, 50]
+  pageSizeOptions: [10, 20, 50, 100]
 }));
 
 // 获取数据列表
@@ -219,16 +219,6 @@ onMounted(async () => {
 .sysjobresults-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
   border-radius: 10px;
-}
-
-.sysjobresults-page :deep(.uvp-data-table .arco-pagination-item),
-.sysjobresults-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
-.sysjobresults-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
-  box-sizing: border-box;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: 8px;
 }
 
 :deep(.arco-table-cell) {

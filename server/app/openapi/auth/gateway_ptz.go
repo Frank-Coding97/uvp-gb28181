@@ -22,10 +22,6 @@ func (g *Gateway) handlePTZ(c *gin.Context, requestID, scope string, respond fun
 		failEarly(gatewayError(requestID, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE"))
 		return
 	}
-	if g.tls == nil || !g.tls.IsHTTPS(c.Request) {
-		failEarly(gatewayError(requestID, http.StatusUnauthorized, "AUTHENTICATION_FAILED"))
-		return
-	}
 	r := c.Request
 	if r == nil || r.URL == nil {
 		failEarly(gatewayError(requestID, http.StatusBadRequest, "INVALID_REQUEST"))
@@ -118,7 +114,7 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 	if err != nil {
 		return invalid(http.StatusBadRequest, "INVALID_REQUEST")
 	}
-	input := SignatureInput{Method: q.method, Path: q.path, RawQuery: q.rawQuery, ContentType: headers.ContentType, Body: q.body, AccessKey: headers.AccessKey, Timestamp: headers.Timestamp, Nonce: headers.Nonce, Audience: g.config.Audience}
+	input := SignatureInput{Method: q.method, Path: q.path, RawQuery: q.rawQuery, ContentType: headers.ContentType, Body: q.body, AccessKey: headers.AccessKey, Timestamp: headers.Timestamp, Nonce: headers.Nonce, IdempotencyKey: headers.IdempotencyKey, Audience: g.config.Audience}
 	material, err := g.clients.LoadVerificationMaterial(ctx, headers.AccessKey)
 	if errors.Is(err, client.ErrDependencyUnavailable) {
 		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")

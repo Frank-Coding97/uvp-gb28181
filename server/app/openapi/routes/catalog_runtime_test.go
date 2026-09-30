@@ -38,9 +38,9 @@ func TestInitializeCatalogRuntimePublishesInitialReleaseOnMigratedCatalog(t *tes
 	_, ready := runtime.ReadyIdentity()
 	require.True(t, ready, "自举发布必须绑上持久化 identity,否则网关最后一道门仍会 fail closed")
 
-	// The release has to carry the delegated plane scopes too. They are not
+	// The release has to carry the PTZ delegated scopes too. They are not
 	// dispatched through CatalogRuntime.Dispatch, but client.ScopePublished
-	// reads this release: a missing entry makes play/PTZ ungrantable forever.
+	// reads this release.
 	require.Equal(t, bootstrap.CoreCatalogScopes(), activeReleaseScopes(t, db))
 
 	// 每次重启都会走这段。第二次只能读,不能再发一版。
@@ -93,9 +93,8 @@ func TestInitializeCatalogRuntimeHydratesPublishedRelease(t *testing.T) {
 	require.Equal(t, int64(1), releases, "已经完整的 release 不该被启动链路再发一版")
 }
 
-// An installation that published before this binary learned about the delegated
-// scopes is repaired additively on the next startup, so play/PTZ become
-// grantable without an operator having to know about -publish-catalog.
+// An installation that published before this binary learned about the PTZ
+// delegated scopes is repaired additively on the next startup.
 func TestInitializeCatalogRuntimeRepairsPartialRelease(t *testing.T) {
 	db := newCatalogRuntimeTestDB(t)
 	require.NoError(t, db.AutoMigrate(catalogRuntimeTables(t, true)...))
@@ -112,9 +111,9 @@ func TestInitializeCatalogRuntimeRepairsPartialRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, runtime.Active())
 	require.Equal(t, bootstrap.CoreCatalogScopes(), activeReleaseScopes(t, db))
-	operation, err := runtime.Resolve("POST", "/openapi/v1/devices/34020000002000000001/channels/34020000001320000001/live-authorizations")
-	require.NoError(t, err, "补齐后的 release 必须含 play:live:apply")
-	require.Equal(t, "play:live:apply", operation.Scope)
+	operation, err := runtime.Resolve("GET", "/openapi/v1/devices/34020000002000000001/channels/34020000001320000001/ptz/presets")
+	require.NoError(t, err, "补齐后的 release 必须含 PTZ delegated scope")
+	require.Equal(t, "ptz:preset:list", operation.Scope)
 }
 
 func TestInitializeCatalogRuntimeFailsClosedWhenActiveReleaseIsInvalid(t *testing.T) {

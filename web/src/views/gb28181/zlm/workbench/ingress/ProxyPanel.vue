@@ -78,19 +78,6 @@ const canPoll = computed(() => props.active && props.scope !== "all");
 const currentKind = computed<ProxyTab>(() => (props.showTabs ? activeTab.value : props.kind));
 const currentData = computed(() => data[currentKind.value]);
 const rows = computed(() => currentData.value?.list ?? []);
-const tablePagination = computed(() =>
-  currentData.value
-    ? {
-        current: currentData.value.page,
-        pageSize: currentData.value.pageSize,
-        total: currentData.value.total,
-        showTotal: true,
-        showJumper: true,
-        showPageSize: true,
-        pageSizeOptions: [10, 20, 50, 100]
-      }
-    : false
-);
 const capability = computed<ZLMCapabilityState>(() => currentData.value?.capability ?? observedCapability[currentKind.value]);
 const capabilityView = computed(() => proxyCapabilityPresentation(capability.value));
 const scopeBlocked = computed(() => props.scope === "all");
@@ -317,16 +304,7 @@ function changePageSize(pageSize: number) {
       </div>
       <template v-else>
         <div v-if="currentData?.truncated" class="result-notice">节点返回内容已截断，请缩小范围。</div>
-        <a-table
-          :data="rows"
-          :loading="loading"
-          :pagination="tablePagination"
-          row-key="key"
-          class="uvp-data-table"
-          :scroll="{ x: 1180 }"
-          @page-change="changePage"
-          @page-size-change="changePageSize"
-        >
+        <a-table :data="rows" :loading="loading" :pagination="false" row-key="key" class="uvp-data-table" :scroll="{ x: 1180 }">
           <template #columns>
             <a-table-column title="媒体身份" :width="250"
               ><template #cell="{ record }"
@@ -387,6 +365,19 @@ function changePageSize(pageSize: number) {
         </a-table>
       </template>
     </section>
+    <div v-if="!loadError && !scopeBlocked && currentData" class="ingress-pagination uvp-pagination-bar">
+      <a-pagination
+        :current="currentData.page"
+        :page-size="currentData.pageSize"
+        :total="currentData.total"
+        :page-size-options="[10, 20, 50, 100]"
+        show-total
+        show-page-size
+        show-jumper
+        @change="changePage"
+        @page-size-change="changePageSize"
+      />
+    </div>
 
     <ProxyForm
       v-model:visible="formVisible"
@@ -478,6 +469,14 @@ function changePageSize(pageSize: number) {
   border: 1px solid var(--uvp-panel-border);
   border-radius: var(--uvp-panel-radius);
   box-shadow: var(--uvp-panel-shadow);
+}
+.ingress-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 .subtle {
   margin-top: 4px;

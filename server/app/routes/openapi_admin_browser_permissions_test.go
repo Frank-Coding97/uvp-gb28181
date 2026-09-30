@@ -80,6 +80,9 @@ func TestOpenAPIAdminBrowserPermissionMatrix(t *testing.T) {
 				}
 			}
 			for _, route := range openAPIAdminHTTPRoutes() {
+				if route.path == "/api/gb28181/openapi-clients/:id/revocation-status" {
+					continue
+				}
 				if browserRoutePermission(route) != missing {
 					continue
 				}

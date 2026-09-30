@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type signatureFixture struct {
@@ -133,6 +135,7 @@ func TestOpenAPISignatureMutationsFail(t *testing.T) {
 		{name: "access-key", mutate: func(input *SignatureInput) { input.AccessKey = "uvp_0102030405060708090a0b0c0d0e0f10" }},
 		{name: "timestamp", mutate: func(input *SignatureInput) { input.Timestamp = "1790000001" }},
 		{name: "nonce", mutate: func(input *SignatureInput) { input.Nonce = "100102030405060708090a0b0c0d0e0f" }},
+		{name: "idempotency-key", mutate: func(input *SignatureInput) { input.IdempotencyKey = "another-command" }},
 		{name: "audience", mutate: func(input *SignatureInput) { input.Audience = "another-audience" }},
 	}
 	for _, mutation := range mutations {
@@ -147,6 +150,17 @@ func TestOpenAPISignatureMutationsFail(t *testing.T) {
 	if err := Verify(base, fixture.SecretKey, strings.Repeat("0", 64)); err == nil {
 		t.Fatal("verification unexpectedly succeeded for a different signature")
 	}
+}
+
+func TestOpenAPISignatureCoversIdempotencyKey(t *testing.T) {
+	fixture := loadSignatureFixture(t)
+	input := fixtureInput(fixture, fixture.Vectors[1])
+	input.IdempotencyKey = "preset-save-001"
+	signature, err := Sign(input, fixture.SecretKey)
+	require.NoError(t, err)
+
+	input.IdempotencyKey = "preset-save-002"
+	require.Error(t, Verify(input, fixture.SecretKey, signature))
 }
 
 func TestOpenAPISignatureRawBodyAndJSONDuplicates(t *testing.T) {
@@ -310,11 +324,21 @@ func TestOpenAPISignatureTransportRules(t *testing.T) {
 	if _, err := CanonicalString(post); err == nil {
 		t.Fatal("unsupported POST content type was accepted")
 	}
+	emptyPost := fixtureInput(fixture, fixture.Vectors[1])
+	emptyPost.Body = nil
+	emptyPost.ContentType = ""
+	if _, err := CanonicalString(emptyPost); err != nil {
+		t.Fatalf("empty POST without content type rejected: %v", err)
+	}
 
 	validPostHeaders := validHeaderValues(fixture, fixture.Vectors[1])
 	validPostHeaders.ContentType = []string{"application/json"}
 	if _, err := ParseHeaders("POST", validPostHeaders); err != nil {
 		t.Fatalf("valid POST headers rejected: %v", err)
+	}
+	validEmptyPostHeaders := validHeaderValues(fixture, fixture.Vectors[1])
+	if _, err := ParseHeaders("POST", validEmptyPostHeaders); err != nil {
+		t.Fatalf("empty POST headers without content type rejected: %v", err)
 	}
 	for _, testCase := range []struct {
 		name   string

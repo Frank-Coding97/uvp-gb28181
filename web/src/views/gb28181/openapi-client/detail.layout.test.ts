@@ -3,25 +3,39 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const detailSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/openapi-client/detail.vue"), "utf8");
+const listSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/openapi-client/index.vue"), "utf8");
 const workbenchSource = readFileSync(
   resolve(process.cwd(), "src/views/gb28181/openapi-client/OpenAPICapabilityWorkbench.vue"),
   "utf8"
 );
 
 describe("OpenAPI client detail information architecture", () => {
-  it("separates overview, capability, credential security and call records", () => {
-    expect(detailSource).toContain('name: "overview"');
+  it("keeps capability authorization as the only detail tab", () => {
+    expect(detailSource).not.toContain('name: "overview"');
     expect(detailSource).toContain('name: "capabilities"');
-    expect(detailSource).toContain('name: "security"');
-    expect(detailSource).toContain('name: "logs"');
-    expect(detailSource).toContain("调用记录");
+    expect(detailSource).not.toContain('name: "logs"');
+    expect(detailSource).not.toContain('key="overview"');
+    expect(listSource).toContain("调用记录");
+    expect(listSource).toContain("openOverview(record)");
+    expect(listSource).toContain("OpenAPIClientOverviewDialog");
+    expect(listSource).toContain("openWorkspace(record, 'logs')");
+  });
+
+  it("keeps credential and lifecycle actions on the client list", () => {
+    expect(detailSource).not.toContain('key="security"');
+    expect(detailSource).not.toContain("凭证与安全");
+    expect(detailSource).not.toContain("轮换 SK");
+    expect(detailSource).not.toContain("观看连接清退");
+    expect(listSource).toContain("requestRotate(record)");
+    expect(listSource).toContain("requestStatus('disable', record)");
+    expect(listSource).toContain("requestStatus('enable', record)");
+    expect(listSource).toContain("requestStatus('revoke', record)");
   });
 
   it("uses the shared system UI components instead of a custom page language", () => {
     expect(detailSource).toContain('class="uvp-system-panel openapi-detail__summary"');
-    expect(detailSource).toContain('class="uvp-system-tabs openapi-detail__tabs"');
-    expect(detailSource).toContain('class="uvp-system-description"');
-    expect(detailSource).not.toContain('<nav class="openapi-detail__tabs"');
+    expect(detailSource).not.toContain('class="uvp-system-tabs openapi-detail__tabs"');
+    expect(detailSource).not.toContain("<a-tabs");
 
     expect(workbenchSource).toContain("<s-layout-search");
     expect(workbenchSource).toContain("<a-menu");
@@ -34,6 +48,13 @@ describe("OpenAPI client detail information architecture", () => {
     expect(detailSource).toContain('class="openapi-detail__summary-back"');
     expect(detailSource).toContain('class="openapi-detail__summary-content"');
     expect(detailSource).not.toContain('<div class="openapi-detail__back">');
+  });
+
+  it("keeps overview out of the detail workspace", () => {
+    expect(detailSource).not.toContain("查看能力授权");
+    expect(detailSource).not.toContain("查看调用记录");
+    expect(detailSource).not.toContain("openapi-detail__overview-actions");
+    expect(detailSource).not.toContain("openapi-detail__overview");
   });
 
   it("keeps audit and revocation concerns out of the capability workbench", () => {
@@ -54,9 +75,17 @@ describe("OpenAPI client detail information architecture", () => {
     expect(detailSource).not.toContain('class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录"');
   });
 
-  it("bounds long desktop capability catalogs while keeping narrow layouts naturally scrollable", () => {
-    expect(workbenchSource).toMatch(/\.capability-workbench__body\s*{[^}]*height: clamp\(/s);
-    expect(workbenchSource).toMatch(/\.capability-workbench__list\s*{[^}]*overflow: auto/s);
-    expect(workbenchSource).toMatch(/@media \(width <= 1180px\)[\s\S]*\.capability-workbench__body\s*{[^}]*height: auto/s);
+  it("keeps outer capability panels stable and delegates vertical scrolling to the capability table", () => {
+    expect(workbenchSource).toMatch(/\.capability-workbench__body\s*{[^}]*height: clamp\(480px/s);
+    expect(workbenchSource).toMatch(/\.capability-workbench__list\s*{[^}]*overflow: hidden/s);
+    expect(workbenchSource).toContain(':scroll="{ x: 900, y: 440 }"');
+    expect(workbenchSource).toMatch(
+      /@media \(width <= 1180px\)[\s\S]*\.capability-workbench__body\s*{[^}]*height: clamp\(480px/s
+    );
+    expect(workbenchSource).toContain("grid-template-rows: minmax(0, 1fr) 180px");
+    expect(workbenchSource).toContain(".capability-workbench__change-scroll");
+    expect(workbenchSource).toMatch(/\.capability-workbench__changes :deep\(\.arco-card-body\)\s*{[^}]*box-sizing: border-box/s);
+    expect(workbenchSource).toMatch(/\.capability-workbench__actions\s*{[^}]*flex: 0 0 auto/s);
+    expect(workbenchSource).toMatch(/@media \(width <= 760px\)[\s\S]*\.capability-workbench__body\s*{[^}]*height: auto/s);
   });
 });

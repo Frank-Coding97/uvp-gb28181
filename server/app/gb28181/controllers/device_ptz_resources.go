@@ -214,13 +214,6 @@ func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile: profileForDevice(&device),
 	}
-	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
-		captured, err := capturePTZAuthorization(c, dc.db(), target)
-		if err != nil {
-			return ptz.Target{}, homePositionFailure(http.StatusConflict, ptz.ErrorCodeHomePositionUnavailable, "设备权限已失效或正在转移", err)
-		}
-		target = captured
-	}
 	return target, nil
 }
 

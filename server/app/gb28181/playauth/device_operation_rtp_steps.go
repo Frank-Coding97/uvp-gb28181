@@ -180,8 +180,8 @@ func validRTPStepIdentity(i DeviceRTPResourceIdentity) bool {
 	part := func(s string, limit int) bool {
 		return s != "" && len(s) <= limit && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") == ""
 	}
-	return validIntentID(i.StepID) && i.NodePK > 0 && i.NodeRevision > 0 && validOpenAPINodeUUID(i.NodeUUID) &&
-		validOpenAPIBootNonce(i.BootNonce) && len(resource) == 47 && resource[0] == 'd' && resource[14] == '-' &&
+	return validIntentID(i.StepID) && i.NodePK > 0 && i.NodeRevision > 0 && validNodeUUID(i.NodeUUID) &&
+		validBootNonce(i.BootNonce) && len(resource) == 47 && resource[0] == 'd' && resource[14] == '-' &&
 		strings.Trim(resource[1:14], "0123456789") == "" && validIntentID(resource[15:]) &&
 		i.VHost == "__defaultVhost__" && part(i.App, 64) && part(i.Stream, 256) &&
 		i.Port >= 0 && i.Port <= 65534 && i.TCPMode >= 0 && i.TCPMode <= 1 && i.OnlyTrack >= 0 && i.OnlyTrack <= 2 &&

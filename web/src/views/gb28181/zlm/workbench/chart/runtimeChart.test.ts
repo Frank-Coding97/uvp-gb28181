@@ -29,34 +29,38 @@ function runtime(nodeId = 2, asOf = "2026-08-30T10:00:00Z", overrides: Record<st
     },
     metricsComplete: true,
     mediaFreshness: "fresh",
-    streams: [{
-      nodeId,
-      media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "camera" },
-      online: true,
-      aliveSecond: 5,
-      bytesSpeed: 1024,
-      readerCount: 2,
-      totalReaderCount: 2,
-      originType: 1,
-      recordingMp4: true,
-      recordingHls: false,
-      trackCount: 1
-    }],
+    streams: [
+      {
+        nodeId,
+        media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "camera" },
+        online: true,
+        aliveSecond: 5,
+        bytesSpeed: 1024,
+        readerCount: 2,
+        totalReaderCount: 2,
+        originType: 1,
+        recordingMp4: true,
+        recordingHls: false,
+        trackCount: 1
+      }
+    ],
     ...overrides
   } as any;
 }
 
 describe("media runtime chart adapters", () => {
   it("does not turn unavailable media or metrics into zero", () => {
-    const sample = runtimeSnapshot(runtime(2, "2026-08-30T10:00:00Z", {
-      metricsComplete: false,
-      mediaFreshness: "unavailable",
-      streams: undefined,
-      metrics: {
-        ...runtime().metrics,
-        mediaTrafficAvailable: false
-      }
-    }));
+    const sample = runtimeSnapshot(
+      runtime(2, "2026-08-30T10:00:00Z", {
+        metricsComplete: false,
+        mediaFreshness: "unavailable",
+        streams: undefined,
+        metrics: {
+          ...runtime().metrics,
+          mediaTrafficAvailable: false
+        }
+      })
+    );
 
     expect(sample.streamCount).toBeNull();
     expect(sample.viewerCount).toBeNull();
@@ -68,17 +72,32 @@ describe("media runtime chart adapters", () => {
     expect(sample.recordingCount).toBeNull();
   });
 
+  it("counts protocol variants of one media identity as one online stream", () => {
+    const base = runtime().streams[0];
+    const sample = runtimeSnapshot(
+      runtime(2, "2026-08-30T10:00:00Z", {
+        streams: ["rtsp", "rtmp", "hls", "ts", "fmp4"].map(schema => ({
+          ...base,
+          media: { ...base.media, schema }
+        }))
+      })
+    );
+
+    expect(sample.streamCount).toBe(1);
+  });
 
   it("reads directional media rates without inventing zero for unavailable traffic", () => {
     const available = runtimeSnapshot(runtime());
-    const unavailable = runtimeSnapshot(runtime(2, "2026-08-30T10:00:05.000Z", {
-      metrics: {
-        ...runtime().metrics,
-        upstreamBytesPerSecond: 0,
-        downstreamBytesPerSecond: 0,
-        mediaTrafficAvailable: false
-      }
-    }));
+    const unavailable = runtimeSnapshot(
+      runtime(2, "2026-08-30T10:00:05.000Z", {
+        metrics: {
+          ...runtime().metrics,
+          upstreamBytesPerSecond: 0,
+          downstreamBytesPerSecond: 0,
+          mediaTrafficAvailable: false
+        }
+      })
+    );
 
     expect(available).toMatchObject({ upstream: 2048, downstream: 4096 });
     expect(unavailable).toMatchObject({ upstream: null, downstream: null });
@@ -106,5 +125,4 @@ describe("media runtime chart adapters", () => {
 
     expect(runtimeTrendSamples(response)).toEqual([response.trendSamples[0]]);
   });
-
 });

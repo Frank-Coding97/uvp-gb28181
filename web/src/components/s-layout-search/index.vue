@@ -77,23 +77,23 @@ defineOptions({ name: "SLayoutSearch" });
 }
 
 :deep(.arco-input-wrapper),
-:deep(.arco-select-view-single),
+:deep(.arco-select-view),
 :deep(.arco-picker) {
   min-height: 40px;
-  background: var(--uvp-search-control-bg);
-  border-color: transparent;
-  border-radius: 10px;
-  box-shadow: var(--uvp-search-control-shadow);
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
 }
 
 :deep(.arco-input-wrapper:hover),
-:deep(.arco-select-view-single:hover),
+:deep(.arco-select-view:hover),
 :deep(.arco-picker:hover),
 :deep(.arco-input-wrapper.arco-input-focus),
 :deep(.arco-select-view-focus),
 :deep(.arco-picker-focused) {
-  border-color: transparent;
-  box-shadow: var(--uvp-search-control-focus-shadow);
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
 }
 
 :deep(.arco-btn) {
@@ -148,15 +148,15 @@ defineOptions({ name: "SLayoutSearch" });
   box-shadow: 0 12px 20px -15px rgb(15 111 79 / 64%);
 }
 
-@media (max-width: 1280px) {
+@media (width <= 1280px) {
   .uvp-search-panel__extra {
     grid-column: 1 / -1;
-    padding-top: 2px;
     justify-content: flex-start;
+    padding-top: 2px;
   }
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .uvp-search-panel__surface {
     grid-template-columns: minmax(0, 1fr);
     padding: 12px;

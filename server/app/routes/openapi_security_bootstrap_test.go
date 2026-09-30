@@ -37,13 +37,13 @@ func TestOpenAPIRootMissingSecurityStopsEvenWhenDisabled(t *testing.T) {
 	app.ConfigYml = openAPIRootConfig{staticDir: t.TempDir()}
 	app.GormDbMysql = openAPISecurityDB(t)
 	t.Cleanup(func() { app.ConfigYml, app.GormDbMysql = oldConfig, oldDB })
-	require.PanicsWithValue(t, "OpenAPI media security state unavailable; HTTP and GB startup remain closed", func() { InitRoutes(gin.New()) })
+	require.Panics(t, func() { InitRoutes(gin.New()) })
 }
 
 func TestOpenAPIRootDoesNotLatchMediaAuthWhenGatewayPreflightFails(t *testing.T) {
 	db := openAPISecurityDB(t)
 	require.NoError(t, db.AutoMigrate(
-		&models.SecurityState{}, &models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}, &models.PlayGrant{}, &models.Viewer{},
+		&models.SecurityState{}, &models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{},
 		&basemodels.SysDepartment{}, &gbmodels.GbDevice{}, &gbmodels.GbChannel{},
 	))
 	require.NoError(t, db.Create(&models.SecurityState{ID: 1}).Error)

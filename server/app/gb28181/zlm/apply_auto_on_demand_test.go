@@ -73,11 +73,12 @@ func TestApplyConfigForNodeConfiguresAndVerifiesAutoOnDemandHook(t *testing.T) {
 		require.True(t, playauth.VerifyHookCapability("zlm-secret", "node-a", event, parsed.Query().Get("cap")), event)
 	}
 	require.Equal(t, "0", applied.Get("general.flowThreshold"))
-	require.Equal(t, "30000", applied.Get("general.maxStreamWaitMS"))
+	require.Empty(t, applied.Get("general.maxStreamWaitMS"), "可由服务配置页面管理")
+	require.NotContains(t, applied, "hook.alive_interval", "心跳周期由服务配置页面管理")
 	require.Equal(t, "node-a", applied.Get("general.mediaServerId"))
 }
 
-func TestApplyConfigForNodeFailsWhenAutoOnDemandConfigDoesNotConverge(t *testing.T) {
+func TestApplyConfigForNodeDoesNotManageStreamWaitConfig(t *testing.T) {
 	var applied url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch strings.TrimPrefix(r.URL.Path, "/index/api/") {
@@ -91,7 +92,10 @@ func TestApplyConfigForNodeFailsWhenAutoOnDemandConfigDoesNotConverge(t *testing
 				"hook.on_flow_report":      applied.Get("hook.on_flow_report"),
 				"general.flowThreshold":    applied.Get("general.flowThreshold"),
 				"general.mediaServerId":    applied.Get("general.mediaServerId"),
-				"general.maxStreamWaitMS":  "15000",
+			}
+			for _, event := range playauth.ManagedHookEvents() {
+				key := "hook." + string(event)
+				config[key] = applied.Get(key)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"code": 0, "data": []map[string]string{config},
@@ -104,7 +108,7 @@ func TestApplyConfigForNodeFailsWhenAutoOnDemandConfigDoesNotConverge(t *testing
 
 	client := newTestApplyClient(t, server.URL, "zlm-secret", "node-a")
 	err := client.ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280})
-	require.ErrorContains(t, err, "general.maxStreamWaitMS")
+	require.NoError(t, err)
 }
 
 func TestApplyConfigForNodeFailsWhenHookRemainsDisabled(t *testing.T) {
@@ -145,4 +149,82 @@ func newTestApplyClient(t *testing.T, rawURL, secret, mediaServerID string) *Cli
 	return NewClientForNode(&node.Node{
 		Host: parts[0], APIPort: port, APISecret: secret, MediaServerUUID: mediaServerID,
 	})
+}
+
+func TestApplyConfigForNodePreservesCustomHooksOnRepeatedApply(t *testing.T) {
+	config := map[string]string{"general.mediaServerId": "node-a", "hook.enable": "0", "hook.alive_interval": "45.5"}
+	for _, event := range playauth.ManagedHookEvents() {
+		config["hook."+string(event)] = "https://custom.example/" + string(event) + "?tenant=demo"
+	}
+	config["hook.on_play"] = ""
+	var applied url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/setServerConfig") {
+			applied = r.URL.Query()
+			for key := range applied {
+				if key != "secret" {
+					config[key] = applied.Get(key)
+				}
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "data": []map[string]string{config}})
+	}))
+	defer server.Close()
+	for i := 0; i < 2; i++ {
+		client := newTestApplyClient(t, server.URL, "zlm-secret", "node-a")
+		require.NoError(t, client.ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280}))
+		require.NotContains(t, applied, "hook.enable")
+		require.NotContains(t, applied, "hook.alive_interval")
+		require.Equal(t, "45.5", config["hook.alive_interval"])
+		for _, event := range playauth.ManagedHookEvents() {
+			require.NotContains(t, applied, "hook."+string(event))
+		}
+		require.Equal(t, "0", config["hook.enable"])
+		require.Equal(t, "", config["hook.on_play"])
+		require.Equal(t, "https://custom.example/on_flow_report?tenant=demo", config["hook.on_flow_report"])
+	}
+}
+
+func TestApplyConfigForNodeReadFailureDoesNotOverwriteHooks(t *testing.T) {
+	sets := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/setServerConfig") {
+			sets++
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	err := newTestApplyClient(t, server.URL, "zlm-secret", "node-a").ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280})
+	require.Error(t, err)
+	require.Zero(t, sets)
+}
+
+func TestApplyConfigForNodeRefreshesPlatformHookButPreservesDisabledSwitch(t *testing.T) {
+	config := map[string]string{
+		"general.mediaServerId": "node-a", "hook.enable": "0",
+		"hook.on_play":        "http://old-platform/index/hook/on_play?node=node-a&cap=old-signature",
+		"hook.on_flow_report": "https://custom.example/flow",
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/setServerConfig") {
+			for key, values := range r.URL.Query() {
+				if key != "secret" {
+					config[key] = values[0]
+				}
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "data": []map[string]string{config}})
+	}))
+	defer server.Close()
+	require.NoError(t, newTestApplyClient(t, server.URL, "zlm-secret", "node-a").ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "new-platform", HookPort: 8280}))
+	parsed, err := url.Parse(config["hook.on_play"])
+	require.NoError(t, err)
+	require.Equal(t, "new-platform:8280", parsed.Host)
+	require.True(t, playauth.VerifyHookCapability("zlm-secret", "node-a", playauth.HookOnPlay, parsed.Query().Get("cap")))
+	require.Equal(t, "0", config["hook.enable"])
+	require.Equal(t, "https://custom.example/flow", config["hook.on_flow_report"])
 }

@@ -1,5 +1,7 @@
 import type { ZLMOverview, ZLMRuntimeMedia } from "@/api/gb28181-zlm-runtime";
 
+import { logicalMediaCount } from "../mediaIdentity";
+
 export type OverviewKpiKey = "nodes" | "streams" | "sessions" | "viewers" | "throughput" | "recordings";
 export type OverviewKpiState = "ready" | "partial" | "unknown";
 
@@ -52,12 +54,49 @@ export function buildOverviewKpis(overview: ZLMOverview | null | undefined): Ove
   const mediaState = sampleState(mediaSampled, partial);
 
   return [
-    { key: "nodes", label: "媒体节点", value: overview ? nodes.length : null, state: overview ? "ready" : "unknown", note: overview ? `${nodes.length} 个已纳入当前视图` : "未知，集群采样尚未返回" },
-    { key: "streams", label: "在线媒体流", value: mediaSampled ? (overview?.metrics.streamCount ?? streams.length) : null, state: mediaState, note: sampleNote(mediaState) },
-    { key: "sessions", label: "网络会话", value: metricsSampled ? (overview?.metrics.networkSessionCount ?? null) : null, state: runtimeState, note: sampleNote(runtimeState) },
-    { key: "viewers", label: "观看者", value: mediaSampled ? sumStreams(streams, stream => stream.readerCount) : null, state: mediaState, note: sampleNote(mediaState) },
-    { key: "throughput", label: "吞吐", value: mediaSampled ? sumStreams(streams, stream => stream.bytesSpeed) : null, state: mediaState, note: sampleNote(mediaState), unit: "B/s" },
-    { key: "recordings", label: "录制中", value: mediaSampled ? sumStreams(streams, stream => stream.recordingMp4 || stream.recordingHls ? 1 : 0) : null, state: mediaState, note: sampleNote(mediaState) }
+    {
+      key: "nodes",
+      label: "媒体节点",
+      value: overview ? nodes.length : null,
+      state: overview ? "ready" : "unknown",
+      note: overview ? `${nodes.length} 个已纳入当前视图` : "未知，集群采样尚未返回"
+    },
+    {
+      key: "streams",
+      label: "在线媒体流",
+      value: mediaSampled ? logicalMediaCount(streams) : null,
+      state: mediaState,
+      note: sampleNote(mediaState)
+    },
+    {
+      key: "sessions",
+      label: "网络会话",
+      value: metricsSampled ? (overview?.metrics.networkSessionCount ?? null) : null,
+      state: runtimeState,
+      note: sampleNote(runtimeState)
+    },
+    {
+      key: "viewers",
+      label: "观看者",
+      value: mediaSampled ? sumStreams(streams, stream => stream.readerCount) : null,
+      state: mediaState,
+      note: sampleNote(mediaState)
+    },
+    {
+      key: "throughput",
+      label: "吞吐",
+      value: mediaSampled ? sumStreams(streams, stream => stream.bytesSpeed) : null,
+      state: mediaState,
+      note: sampleNote(mediaState),
+      unit: "B/s"
+    },
+    {
+      key: "recordings",
+      label: "录制中",
+      value: mediaSampled ? sumStreams(streams, stream => (stream.recordingMp4 || stream.recordingHls ? 1 : 0)) : null,
+      state: mediaState,
+      note: sampleNote(mediaState)
+    }
   ];
 }
 

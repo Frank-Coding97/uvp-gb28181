@@ -53,8 +53,7 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
-	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+	openapiplay "uvplatform.cn/uvp-gb28181/app/openapi/play"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	openapiptz "uvplatform.cn/uvp-gb28181/app/openapi/ptz"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
@@ -852,9 +851,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		cfg.ZLM.Secret,
 	)
 	var playAuthorization *playauth.AuthorizationService
-	if err := configurePlaybackRTPCleanup(srv.UAC(), deviceDB, deviceIntents, deviceOperations); err != nil {
-		return fmt.Errorf("装配持久RTP清理失败: %w", err)
-	}
 	// The same UAC owns this worker through ShutdownPlaybackIntents. Do not
 	// create a second runner/stop owner or cancel it when assembly returns.
 	if _, err := srv.UAC().StartPlaybackRecovery(context.Background(),
@@ -893,15 +889,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else {
 		gbroutes.SetPlayClientFeedbackRuntime(nil, nil)
 	}
-	var openAPICandidate *openAPIMediaRootCandidate
-	var openAPIValidator play.QualifiedNodeValidator
-	if playAuthSettings.RequiredByOpenAPI {
-		openAPICandidate, openAPIValidator, err = prepareOpenAPIMediaRoot(deviceDB, playSigner)
-		if err != nil {
-			return fmt.Errorf("装配 OpenAPI 媒体授权根失败: %w", err)
-		}
-	}
-
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
@@ -918,9 +905,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 			}
 			if playLifecycleRecorder != nil {
 				opts = append(opts, play.WithLifecycleRecorder(playLifecycleRecorder), play.WithStreamLifecycleRecorder(playLifecycleRecorder))
-			}
-			if openAPIValidator != nil {
-				opts = append(opts, play.WithQualifiedNodeValidator(openAPIValidator))
 			}
 			if trafficResolver != nil {
 				opts = append(opts, play.WithLiveReadyObserver(func(session play.LiveSession) {
@@ -977,6 +961,17 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+	if playSvc != nil {
+		openAPIDispatcher := openapiplay.NewDispatcher(deviceDB, playSvc, &openAPIViewerRuntimeSnapshotter{registry: zlmRegistry})
+		if err := openAPIPlayRoot.Replace(openAPIDispatcher); err != nil {
+			return fmt.Errorf("发布 OpenAPI 实时播放运行时失败: %w", err)
+		}
+		identityResolver := &openAPIHookRuntimeIdentityResolver{registry: zlmRegistry}
+		gbroutes.SetOpenAPIViewerLifecycle(openAPIDispatcher, openAPIDispatcher, identityResolver)
+	} else {
+		openAPIPlayRoot.Clear()
+		gbroutes.SetOpenAPIViewerLifecycle(nil, nil, nil)
+	}
 	if err := setupCascadeVideoRuntime(srv); err != nil {
 		return fmt.Errorf("装配级联点播失败: %w", err)
 	}
@@ -1005,13 +1000,11 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	} else if playSvc != nil {
 		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
 	}
-	if playSvc != nil && zlmRegistry != nil && zlmScheduler != nil {
-		if err := openAPILivePlayer.Publish(playSvc); err != nil {
-			return fmt.Errorf("OpenAPI 播放运行时上一代尚未退出: %w", err)
-		}
-		if err := publishOpenAPIMediaRoot(openAPICandidate); err != nil {
-			return fmt.Errorf("发布 OpenAPI 媒体授权根失败: %w", err)
-		}
+	// 设备清理水位对账: 归属迁移会抬高 access_epoch 让媒体闸门 fail-closed,
+	// 这里是唯一把它追平的地方 —— 不装配则被转移的设备永久无法点播.
+	if err := startDeviceCleanupReconciler(playSvc,
+		playauth.NewDeviceCleanupStore(deviceDB), deviceIntents); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1090,9 +1083,6 @@ func stopSIPDependencies(ctx context.Context) error {
 	// Revoke transfer admission before stopping the barrier's runtime. A new
 	// facade is published only after its recovery worker has been registered.
 	gbroutes.SetDeviceTransferBarrier(nil)
-	if err := openAPILivePlayer.Retire(ctx); err != nil {
-		return fmt.Errorf("OpenAPI 播放申请尚未排空，保留依赖等待重试: %w", err)
-	}
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	runtime := captureSIPShutdownSnapshot()
@@ -1135,20 +1125,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		return
 	}
 	var opener gbplayback.RTPOpener
-	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
-		bindings, err := LoadStartupOpenAPIControlBindingsOnce()
-		if err != nil || bindings == nil || intents == nil {
-			SetPlaybackService(nil, nil)
-			playbackRegistry, playbackMetrics = nil, nil
-			app.ZapLog.Warn("强制鉴权回放缺少持久操作或启动信任，拒绝装配", zap.String("event", "gb28181.lifecycle.playback_trust_missing"), zap.Error(err))
-			return
-		}
-		resolver := openapimedia.NewTrustedRevocationFactory(zlmRegistry, bindings, openapiconfig.NewNodeRuntimeStore(app.DB(), time.Now))
-		opener = gbplayback.NewZLMIntentRTPOpener(zlmRegistry, zlmLocationMap, resolver)
-	} else {
-		intents = nil
-		opener = gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
-	}
+	opener = gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
 	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
 		IdleTimeout: cfg.Playback.IdleTimeout(),
 		MaxSession:  cfg.Playback.MaxSession(),
@@ -1162,7 +1139,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		uac.NewPlaybackAdapter(inviter),
 		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
 		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics, DeviceOperations: deviceOperations, Intents: intents,
-			RequireIntents: func() bool { return gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI }},
+			RequireIntents: func() bool { return false }},
 	)
 	if trafficResolver != nil {
 		service.SetMediaReadyObserver(func(session gbplayback.Session) {

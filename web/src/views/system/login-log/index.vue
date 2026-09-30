@@ -37,7 +37,15 @@ const dateRange = ref<string[]>([]);
 const logs = ref<LoginLogItem[]>([]);
 const loading = ref(false);
 const error = ref("");
-const pagination = reactive({ current: 1, pageSize: 10, total: 0, showTotal: true, showJumper: true, showPageSize: true });
+const pagination = reactive({
+  current: 1,
+  pageSize: 10,
+  total: 0,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
+});
 const detailVisible = ref(false);
 const detailLoading = ref(false);
 const detailError = ref("");
@@ -503,13 +511,6 @@ defineExpose({
 .login-log-page :deep(.uvp-data-table .arco-table-cell) {
   font-size: 14px;
   line-height: 22px;
-}
-.login-log-page :deep(.arco-pagination-item),
-.login-log-page :deep(.arco-pagination-jumper-input),
-.login-log-page :deep(.arco-pagination-options .arco-select-view) {
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
 }
 .login-log-error {
   display: flex;

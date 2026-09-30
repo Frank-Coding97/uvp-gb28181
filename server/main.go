@@ -15,7 +15,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
 	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
 	openapiroutes "uvplatform.cn/uvp-gb28181/app/openapi/routes"
 	"uvplatform.cn/uvp-gb28181/app/routes"
@@ -139,33 +138,10 @@ func runApplication() (err error) {
 	openAPI := routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
-	// Prime process-lifetime trust before SIP recovery starts; both consumers
-	// reuse this exact snapshot, including a sticky startup failure.
-	controlBindings, controlBindingsErr := gb28181.LoadStartupOpenAPIControlBindingsOnce()
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start(authority)
 	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
-	var stopRevocation func()
-	revocationErr := controlBindingsErr
-	if revocationErr == nil {
-		stopRevocation, revocationErr = openapimedia.StartRevocationWithBindings(maintenanceContext, app.DB(), gb28181.ZLMRegistry(),
-			controlBindings, func(result openapimedia.RevocationTickResult, err error) {
-				if err != nil {
-					app.ZapLog.Error("OpenAPI revocation maintenance unavailable", zap.String("event", "startup.openapi_revocation_maintenance_failed"), zap.Error(err))
-				} else if result.Alarms > 0 {
-					app.ZapLog.Error("OpenAPI revocation remains pending past deadline", zap.String("event", "startup.openapi_revocation_pending_overdue"), zap.Int("alarms", result.Alarms), zap.Int("pending", result.Pending))
-				}
-			})
-	}
-	if revocationErr != nil {
-		// Keep metadata/admin available; missing trust never means legacy control.
-		if errors.Is(revocationErr, openapimedia.ErrRevocationNotConfigured) {
-			app.ZapLog.Warn("OpenAPI revocation control is not configured; pending cleanup is not running", zap.String("event", "startup.openapi_revocation_unconfigured"))
-		} else {
-			app.ZapLog.Error("OpenAPI revocation startup unavailable; pending cleanup is not running", zap.String("event", "startup.openapi_revocation_startup_failed"), zap.Error(revocationErr))
-		}
-	}
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)
@@ -177,9 +153,6 @@ func runApplication() (err error) {
 	var stopOnce sync.Once
 	stopOpenAPI := func(ctx context.Context) error {
 		cancelMaintenance()
-		if stopRevocation != nil {
-			stopRevocation()
-		}
 		select {
 		case <-maintenanceDone:
 			return nil

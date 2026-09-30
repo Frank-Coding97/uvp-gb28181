@@ -397,6 +397,8 @@ func updateAttemptSnapshot(tx *gorm.DB, attempt *gbmodels.GbPlayAttempt, snapsho
 	if event.EventName == play.EventPlayerError {
 		updates["client_error_at"] = event.EventAt
 		updates["client_error_code"] = event.ReasonCode
+		updates["reason_code"] = event.ReasonCode
+		updates["reason_message"] = event.ReasonMessage
 	}
 	if attempt.LifecycleState == string(play.LifecycleStateInProgress) && snapshot.LifecycleState != play.LifecycleStateInProgress {
 		updates["finished_at"] = event.EventAt

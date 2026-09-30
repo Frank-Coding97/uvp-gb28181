@@ -276,7 +276,20 @@ export function readDeviceConfigPayload(configType: string, payload: Record<stri
         recordTime: block.recordTime === undefined || block.recordTime === null ? "" : String(block.recordTime),
         preRecordTime: block.preRecordTime === undefined || block.preRecordTime === null ? "" : String(block.preRecordTime)
       };
-    case "basicParam":
+    /**
+     * ⛔ `switch` 的分支键是**标准 ConfigType 名**（PascalCase，与 `group.configTypes`
+     *    同源），**不是**下发侧的 JSON 块键。
+     *
+     *    本族里这一处最容易写错：BasicParam 的块键恰好是同一串字符的首字母小写
+     *    （`blocks.basicParam`），看着像同一个，实则是两套词汇表。写成 `"basicParam"`
+     *    的后果是这条 case **永不命中** → 静默落 `default` 返回空表单：设备回复正常、
+     *    后端也已落库，但「基本参数」整组输入框全空；调用方还会因为拿到了 entry 而
+     *    认为"已有设备事实"（字段不解禁、不给"尚未读取"的提示）。2026-09-29 真机栽过。
+     *
+     *    防回归锚点在 `deviceConfigPayload.test.ts` 的「回读覆盖锚点」：
+     *    遍历 `CONFIG_GROUPS` × `fields`，任一字段填不出来即红。
+     */
+    case "BasicParam":
       return {
         name: block.name === undefined || block.name === null ? "" : String(block.name),
         expiration: block.expiration === undefined || block.expiration === null ? "" : String(block.expiration),

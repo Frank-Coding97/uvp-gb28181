@@ -37,11 +37,25 @@ const pageSources = [
 describe("control height regression", () => {
   it("keeps control sizing owned by the shared components", () => {
     const searchPanel = readSource("src/components/s-layout-search/index.vue");
-    const density = readSource("src/style/model/uvp-density.scss");
 
     expect(searchPanel).toMatch(/:deep\(\.arco-input-wrapper\)[\s\S]*?min-height:\s*40px;/);
     expect(searchPanel).toMatch(/:deep\(\.arco-btn\)[\s\S]*?height:\s*40px;/);
-    expect(density).toMatch(/&\.arco-btn-size-medium\s*\{[^}]*height:\s*32px;/s);
+    // ⛔ `src/style/model/uvp-density.scss` 已于 2026-09-29 删除：它从未被任何入口引入
+    //    （main.ts → style.css → style/index.scss → style/model/index.scss 里没有它），
+    //    且其分页段是 30px/4px 圆角的旧口径，与分页统一标准 32px/8px 冲突。
+    //    分页尺寸现由 uvp-ui-language.scss 的 `.uvp-data-table / .uvp-pagination-bar` 统一负责，
+    //    防回归见 src/style/model/pagination-unification.test.ts。
+  });
+
+  it("keeps search control colors owned by s-layout-search", () => {
+    const searchPanel = readSource("src/components/s-layout-search/index.vue");
+
+    expect(searchPanel).toMatch(
+      /:deep\(\.arco-input-wrapper\),\s*:deep\(\.arco-select-view\),\s*:deep\(\.arco-picker\)\s*\{[^}]*background:\s*var\(--uvp-search-control-bg\)\s*!important;[^}]*border:\s*1px solid var\(--uvp-search-secondary-btn-border\)\s*!important;[^}]*box-shadow:\s*var\(--uvp-search-control-shadow\)\s*!important;/s
+    );
+    expect(searchPanel).toMatch(
+      /:deep\(\.arco-select-view:hover\)[\s\S]*?:deep\(\.arco-select-view-focus\)[\s\S]*?\{[^}]*border-color:\s*var\(--uvp-brand\)\s*!important;[^}]*box-shadow:\s*var\(--uvp-search-control-focus-shadow\)\s*!important;/s
+    );
   });
 
   it("does not force list-page controls to 44px", () => {

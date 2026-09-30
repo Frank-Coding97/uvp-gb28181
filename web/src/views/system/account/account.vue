@@ -469,7 +469,8 @@ const pagination = ref({
   total: 0,
   showPageSize: true,
   showTotal: true,
-  showJumper: true
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 // 获取用户列表
@@ -660,9 +661,7 @@ onMounted(() => {
     color: var(--uvp-text-tertiary);
     opacity: 1;
   }
-}
 
-.account-search-panel {
   :deep(.arco-btn) {
     box-sizing: border-box;
     border-radius: 10px;
@@ -687,27 +686,16 @@ onMounted(() => {
   }
 }
 
-.uvp-data-table {
-  :deep(.arco-pagination-item),
-  :deep(.arco-pagination-options .arco-select-view-single),
-  :deep(.arco-pagination-jumper-input) {
-    box-sizing: border-box;
-    min-width: 32px;
-    height: 32px;
-    min-height: 32px;
-  }
-}
-
 .container {
   display: flex;
   min-height: 0;
 
   .left-box {
     display: flex;
+    flex-shrink: 0; // 防止被压缩
     flex-direction: column;
     width: 100%;
     height: 100%;
-    flex-shrink: 0; // 防止被压缩
 
     .tree-box {
       flex: 1;

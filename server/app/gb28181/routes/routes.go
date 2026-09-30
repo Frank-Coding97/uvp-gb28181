@@ -288,13 +288,10 @@ func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	}
 }
 
-func SetOpenAPIMediaAuthorization(
-	verifier gbhandler.OpenAPIPlayTokenVerifier,
-	binder gbhandler.OpenAPIViewerBinder,
-	observer gbhandler.OpenAPIFlowObserver,
-) {
-	hookController.SetOpenAPIPlayAuthorization(verifier, binder)
+func SetOpenAPIViewerLifecycle(binder gbhandler.OpenAPIViewerBinder, observer gbhandler.OpenAPIFlowObserver, identityResolver gbhandler.OpenAPIRuntimeIdentityResolver) {
+	hookController.SetOpenAPIViewerBinder(binder)
 	hookController.SetOpenAPIFlowObserver(observer)
+	hookController.SetOpenAPIRuntimeIdentityResolver(identityResolver)
 }
 
 func SetStreamMonitorService(service *streammonitor.Service) {
@@ -725,7 +722,6 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			play.GET("/lifecycles/:lifecycleId", func(c *gin.Context) { playController.LifecycleDetail(c) })
 			play.POST("/lifecycles/:lifecycleId/client-events", func(c *gin.Context) { playController.ClientEvent(c) })
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
-			play.POST("/:deviceId/:channelId/authorization", func(c *gin.Context) { playController.Authorize(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
 			play.GET("/:streamId/monitor", func(c *gin.Context) { streamMonitorController.Get(c) })
 		}

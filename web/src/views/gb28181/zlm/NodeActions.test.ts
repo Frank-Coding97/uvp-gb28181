@@ -40,9 +40,11 @@ describe("node impact actions", () => {
   });
 
   it("shows backend conflict impacts when the error envelope supplies them", () => {
-    expect(nodeImpactItemsFromError({
-      response: { data: { data: { impact: { streams: 4, recordings: 1, sessions: 6, truncated: false } } } }
-    })).toEqual(["活动流 4 路", "录制任务 1 个", "网络会话 6 个"]);
+    expect(
+      nodeImpactItemsFromError({
+        response: { data: { data: { impact: { streams: 4, recordings: 1, sessions: 6, truncated: false } } } }
+      })
+    ).toEqual(["活动流 4 路", "录制任务 1 个", "网络会话 6 个"]);
   });
 
   it("wires node list actions through the shared danger dialog instead of native confirmation", () => {
@@ -58,6 +60,6 @@ describe("node impact actions", () => {
     expect(list).toContain("gb28181:zlm:node:manage");
     const detailPanel = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/nodes/NodeDetail.vue"), "utf8");
     expect(list).not.toContain("gb28181:zlm:node:kick");
-    expect(detailPanel).toContain("gb28181:zlm:node:kick");
+    expect(detailPanel).not.toContain("gb28181:zlm:node:kick");
   });
 });

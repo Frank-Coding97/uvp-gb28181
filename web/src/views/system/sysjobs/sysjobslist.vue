@@ -93,7 +93,13 @@
                 {{ record["createdAt"] ? formatTime(record["createdAt"]) : "" }}
               </template>
             </a-table-column>
-            <a-table-column title="操作" :width="250" :fixed="isMobile ? '' : 'right'">
+            <a-table-column
+              title="操作"
+              :width="224"
+              align="center"
+              cell-class="sysjobs-ops-cell"
+              :fixed="isMobile ? '' : 'right'"
+            >
               <template #cell="{ record }">
                 <div class="uvp-table-actions">
                   <a-link
@@ -101,19 +107,25 @@
                     @click="handleExecuteNow(record)"
                     v-hasPerm="['system:sysjobs:executeNow']"
                   >
-                    执行一次
+                    <template #icon><icon-play-arrow /></template>
+                    <span>执行</span>
                   </a-link>
-                  <a-link class="uvp-table-action uvp-table-action--logs" @click="handleViewLogs(record)"> 日志 </a-link>
+                  <a-link class="uvp-table-action uvp-table-action--logs" @click="handleViewLogs(record)">
+                    <template #icon><icon-file /></template>
+                    <span>日志</span>
+                  </a-link>
                   <a-link
                     class="uvp-table-action uvp-table-action--edit"
                     @click="handleEdit(record)"
                     v-hasPerm="['system:sysjobs:edit']"
                   >
-                    编辑
+                    <template #icon><icon-edit /></template>
+                    <span>编辑</span>
                   </a-link>
                   <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
                     <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobs:delete']">
-                      删除
+                      <template #icon><icon-delete /></template>
+                      <span>删除</span>
                     </a-link>
                   </a-popconfirm>
                 </div>
@@ -168,7 +180,7 @@
             <a-input v-model="editingData.cronExpression" placeholder="请输入Cron表达式" />
             <template #extra>
               <div style="margin-top: 8px">
-                <div style="font-weight: 500; margin-bottom: 4px">常用示例：</div>
+                <div style="margin-bottom: 4px; font-weight: 500">常用示例：</div>
                 <a-space direction="vertical" size="small" :style="{ width: '100%' }">
                   <a-space>
                     <a-tag color="arcoblue" @click="editingData.cronExpression = '*/5 * * * * ?'">*/5 * * * * ?</a-tag>
@@ -327,7 +339,7 @@ const paginationConfig = computed(() => ({
   showTotal: true,
   showJumper: true,
   showPageSize: true,
-  pageSizeOptions: [10, 20, 30, 50]
+  pageSizeOptions: [10, 20, 50, 100]
 }));
 
 // 获取数据列表
@@ -580,16 +592,6 @@ onMounted(async () => {
   border-radius: 10px;
 }
 
-.sysjobs-page :deep(.uvp-data-table .arco-pagination-item),
-.sysjobs-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
-.sysjobs-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
-  box-sizing: border-box;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-radius: 8px;
-}
-
 :deep(.arco-table-cell) {
   .arco-space {
     gap: 2px;
@@ -597,9 +599,9 @@ onMounted(async () => {
 }
 
 :deep(.arco-btn-outline.arco-btn-size-small) {
-  border-color: var(--color-primary-light-3);
   color: rgb(var(--primary-6));
   background: transparent;
+  border-color: var(--color-primary-light-3);
 
   &:hover {
     background: var(--color-primary-light-1);
@@ -621,6 +623,19 @@ onMounted(async () => {
       background: var(--color-danger-light-1);
     }
   }
+}
+
+/* 操作列紧凑排布：⛔ cell-class 落在 <td> 上，内边距必须写 `.cls .arco-table-cell`（td 自身 padding 为 0）。
+   实测：内容自然宽 208（4×49 + gap 4×3），声明 224 − 单元格 4+4 = 216 ⇒ 余 8px 不断行。 */
+.sysjobs-page :deep(.sysjobs-ops-cell .arco-table-cell) {
+  padding-right: 4px;
+  padding-left: 4px;
+}
+
+.sysjobs-page :deep(.sysjobs-ops-cell .uvp-table-action) {
+  padding-right: 3px;
+  padding-left: 3px;
+  white-space: nowrap;
 }
 
 :deep(.arco-tag) {

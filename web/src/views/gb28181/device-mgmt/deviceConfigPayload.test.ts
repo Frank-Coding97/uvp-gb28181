@@ -425,9 +425,79 @@ describe("deviceConfigPayload 表单键 ↔ 协议块翻译", () => {
       const values = readDeviceConfigPayload("VideoAlarmRecord", { recordEnable: 1, streamNumber: 0 });
       expect(values.recordTime).toBe("");
       expect(values.preRecordTime).toBe("");
-      const basic = readDeviceConfigPayload("basicParam", { name: "X" });
+      // ⛔ 传的是**标准 ConfigType 名** `BasicParam`（PascalCase），不是下发侧的
+      //    JSON 块键 `basicParam` —— 见下面「回读覆盖锚点」那条契约。
+      const basic = readDeviceConfigPayload("BasicParam", { name: "X" });
       expect(basic.expiration).toBe("");
       expect(basic.heartBeatCount).toBe("");
+    });
+
+    /**
+     * 真机取证（2026-09-29，大华 `37010301021320000018` / 通道 `37010301021320000006`）。
+     *
+     * 设备回的原文（`gb_sip_trace_message` 解密，SN=10562）：
+     * `<?xml …?><Response><CmdType>ConfigDownload</CmdType><SN>10562</SN>
+     *  <DeviceID>37010301021320000006</DeviceID><Result>OK</Result><BasicParam>
+     *  <Name>dahua_204</Name><DeviceID>37010301021320000018</DeviceID>…</BasicParam></Response>`
+     * 后端落库 `gb_device_config(id=21).payload_json` 就是下面这份 payload。
+     *
+     * ⛔ 这条用例的意义是把这个**真实 payload 的形状**钉住：设备名字是字符串、
+     *    Expiration/HeartBeat* 是数字 ⇒ 表单里必须是**字符串**（滑杆同型），
+     *    否则"刚回读完"就会被脏值统计算成"已改"、下发按钮自己就亮了。
+     */
+    it("大华真机 BasicParam 报文能填满四项（设备名字符串 + 三个数字转字符串）", () => {
+      const values = readDeviceConfigPayload("BasicParam", {
+        name: "dahua_204",
+        expiration: 3600,
+        heartBeatInterval: 60,
+        heartBeatCount: 3,
+        positionCapability: 0
+      });
+      expect(values).toEqual({
+        name: "dahua_204",
+        expiration: "3600",
+        heartBeatInterval: "60",
+        heartBeatCount: "3"
+      });
+    });
+  });
+
+  /**
+   * 回读覆盖锚点：**分组声明的每个表单字段，都必须能被读取映射填出来**。
+   *
+   * ⛔ 为什么必须有这条：`readDeviceConfigPayload` 是 `switch (configType)` 分发，
+   *    落到 `default` 时**静默返回 `{}`** —— 没有编译错、没有运行时报错、没有日志。
+   *    而调用方（`DeviceConfigDrawer.applyFamilyEntries`）只要从接口拿到这一条 entry，
+   *    就认定"本组已有设备事实"（`filled = true`、字段不禁用）。于是界面上表现为
+   *    **设备回复正常、后端也已落库，但这一组的输入框全是空的**，用户只会说
+   *    「平台没解析出来」——真因却在大小写上（`case "basicParam"` vs 传进来的
+   *    `"BasicParam"`）。2026-09-29 真机就是栽在这条上。
+   *
+   * ⛔ 断言的是"这个分支存在"（键在不在），不是"值对不对"（值由上面的用例管）。
+   *    键名对齐的契约另有一条：`configTypes` 必须等于后端 `ConfigTypeOrder` 里的值。
+   */
+  describe("回读覆盖锚点（分组字段 ↔ 读取映射）", () => {
+    it("每个分组声明的字段都能被 readDeviceConfigPayload 填出来（漏一个就是空白表单）", () => {
+      for (const group of CONFIG_GROUPS) {
+        if (!group.configTypes.length) continue;
+        const filled: Record<string, unknown> = {};
+        for (const configType of group.configTypes) {
+          Object.assign(filled, readDeviceConfigPayload(configType, {}));
+        }
+        const declared = group.fields.flatMap(field => [
+          field.key,
+          ...("pairKey" in field && typeof field.pairKey === "string" ? [field.pairKey] : [])
+        ]);
+        for (const key of declared) {
+          expect(
+            Object.prototype.hasOwnProperty.call(filled, key),
+            `分组「${group.key}」（configType: ${group.configTypes.join(" / ")}）声明了字段 "${key}"，` +
+              `但 readDeviceConfigPayload 填不出来 ⇒ 界面永远是空输入框，` +
+              `且因为拿到了 entry 还会认为"已有设备事实"（字段不禁用）。` +
+              `多半是某个 case 的 ConfigType 名写错了大小写或干脆没写。`
+          ).toBe(true);
+        }
+      }
     });
   });
 

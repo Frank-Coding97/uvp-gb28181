@@ -37,26 +37,32 @@ func ValidDataScope(dataScope int8) bool {
 // Client is not an HTTP response DTO. Verification material is additionally
 // hidden from JSON so accidental diagnostic serialization cannot reveal it.
 type Client struct {
-	ID                int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	AK                string    `gorm:"column:ak;size:36;not null;uniqueIndex:uk_openapi_ak" json:"ak"`
-	Name              string    `gorm:"size:100;not null" json:"name"`
-	OwnerDeptID       uint      `gorm:"column:owner_dept_id;not null;index:idx_openapi_client_dept" json:"ownerDeptId"`
-	DataScope         int8      `gorm:"column:data_scope;not null;default:3" json:"dataScope"`
-	ResponsibleUserID uint      `gorm:"column:responsible_user_id;not null;default:0" json:"responsibleUserId"`
-	Status            string    `gorm:"size:16;not null;default:disabled" json:"status"`
-	SecretCiphertext  []byte    `gorm:"column:secret_ciphertext;not null" json:"-"`
-	SecretIV          []byte    `gorm:"column:secret_iv;not null" json:"-"`
-	SecretKeyID       string    `gorm:"column:secret_key_id;size:64;not null" json:"-"`
-	SecretVersion     int64     `gorm:"column:secret_version;not null;default:1" json:"-"`
-	AuthEpoch         int64     `gorm:"column:auth_epoch;not null;default:1" json:"-"`
-	RateLimit         int       `gorm:"column:rate_limit;not null;default:10" json:"rateLimit"`
-	Burst             int       `gorm:"not null;default:20" json:"burst"`
-	ViewerQuota       int       `gorm:"column:viewer_quota;not null;default:10" json:"viewerQuota"`
-	RowVersion        int64     `gorm:"column:row_version;not null;default:1" json:"rowVersion"`
-	CreatedBy         uint      `gorm:"not null" json:"createdBy"`
-	UpdatedBy         uint      `gorm:"not null" json:"updatedBy"`
-	CreatedAt         time.Time `gorm:"not null" json:"createdAt"`
-	UpdatedAt         time.Time `gorm:"not null" json:"updatedAt"`
+	ID          int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	AK          string `gorm:"column:ak;size:36;not null;uniqueIndex:uk_openapi_ak" json:"ak"`
+	Name        string `gorm:"size:100;not null" json:"name"`
+	OwnerDeptID uint   `gorm:"column:owner_dept_id;not null;index:idx_openapi_client_dept" json:"ownerDeptId"`
+	DataScope   int8   `gorm:"column:data_scope;not null;default:3" json:"dataScope"`
+	// ResponsibleUserID is retained for compatibility with rows created before
+	// external contact fields were introduced. New clients should use the
+	// organization/name/contact fields below.
+	ResponsibleUserID  uint      `gorm:"column:responsible_user_id;not null;default:0" json:"responsibleUserId,omitempty"`
+	ResponsibleOrgName string    `gorm:"column:responsible_org_name;size:200;not null;default:''" json:"responsibleOrgName"`
+	ResponsibleName    string    `gorm:"column:responsible_name;size:100;not null;default:''" json:"responsibleName"`
+	ResponsibleContact string    `gorm:"column:responsible_contact;size:100;not null;default:''" json:"responsibleContact"`
+	Status             string    `gorm:"size:16;not null;default:disabled" json:"status"`
+	SecretCiphertext   []byte    `gorm:"column:secret_ciphertext;not null" json:"-"`
+	SecretIV           []byte    `gorm:"column:secret_iv;not null" json:"-"`
+	SecretKeyID        string    `gorm:"column:secret_key_id;size:64;not null" json:"-"`
+	SecretVersion      int64     `gorm:"column:secret_version;not null;default:1" json:"-"`
+	AuthEpoch          int64     `gorm:"column:auth_epoch;not null;default:1" json:"-"`
+	RateLimit          int       `gorm:"column:rate_limit;not null;default:10" json:"rateLimit"`
+	Burst              int       `gorm:"not null;default:20" json:"burst"`
+	ViewerQuota        int       `gorm:"column:viewer_quota;not null;default:10" json:"viewerQuota"`
+	RowVersion         int64     `gorm:"column:row_version;not null;default:1" json:"rowVersion"`
+	CreatedBy          uint      `gorm:"not null" json:"createdBy"`
+	UpdatedBy          uint      `gorm:"not null" json:"updatedBy"`
+	CreatedAt          time.Time `gorm:"not null" json:"createdAt"`
+	UpdatedAt          time.Time `gorm:"not null" json:"updatedAt"`
 }
 
 func (Client) TableName() string { return "sys_openapi_client" }

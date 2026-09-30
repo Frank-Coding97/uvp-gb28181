@@ -1,6 +1,8 @@
 import type { ZLMNodeRuntime } from "@/api/gb28181-zlm-runtime";
 import type { MediaRateSample } from "@/views/gb28181/components/mediaRateChart";
 
+import { logicalMediaCount } from "../mediaIdentity";
+
 export interface RuntimeChartSample {
   nodeId: number;
   asOf: string;
@@ -38,27 +40,36 @@ function metricsKnown(runtime: ZLMNodeRuntime): boolean {
 export function runtimeSnapshot(runtime: ZLMNodeRuntime): RuntimeChartSample {
   const hasMedia = mediaKnown(runtime);
   const hasMetrics = metricsKnown(runtime);
-  const streams = hasMedia ? runtime.streams ?? [] : [];
+  const streams = hasMedia ? (runtime.streams ?? []) : [];
   const hasMediaTraffic = runtime.metrics.mediaTrafficAvailable === true;
   return {
     nodeId: runtime.nodeId,
     asOf: runtime.asOf,
-    streamCount: hasMedia ? streams.length : null,
-    viewerCount: hasMedia ? streams.reduce<number | null>((sum, stream) => {
-      const readers = nonNegativeOrNull(stream.readerCount);
-      return sum === null || readers === null ? null : sum + readers;
-    }, 0) : null,
-    throughput: hasMedia ? streams.reduce<number | null>((sum, stream) => {
-      const speed = nonNegativeOrNull(stream.bytesSpeed);
-      return sum === null || speed === null ? null : sum + speed;
-    }, 0) : null,
+    streamCount: hasMedia ? logicalMediaCount(streams) : null,
+    viewerCount: hasMedia
+      ? streams.reduce<number | null>((sum, stream) => {
+          const readers = nonNegativeOrNull(stream.readerCount);
+          return sum === null || readers === null ? null : sum + readers;
+        }, 0)
+      : null,
+    throughput: hasMedia
+      ? streams.reduce<number | null>((sum, stream) => {
+          const speed = nonNegativeOrNull(stream.bytesSpeed);
+          return sum === null || speed === null ? null : sum + speed;
+        }, 0)
+      : null,
     upstream: hasMediaTraffic ? nonNegativeOrNull(runtime.metrics.upstreamBytesPerSecond) : null,
     downstream: hasMediaTraffic ? nonNegativeOrNull(runtime.metrics.downstreamBytesPerSecond) : null,
     sessionCount: hasMetrics ? nonNegativeOrNull(runtime.metrics.networkSessionCount) : null,
     netThreadLoad: hasMetrics ? numberOrNull(runtime.metrics.netThreadLoad) : null,
     workThreadLoad: hasMetrics ? numberOrNull(runtime.metrics.workThreadLoad) : null,
     fdCount: hasMetrics ? nonNegativeOrNull(runtime.metrics.socketCount) : null,
-    recordingCount: hasMedia ? streams.reduce<number | null>((count, stream) => count === null ? null : count + (stream.recordingMp4 || stream.recordingHls ? 1 : 0), 0) : null,
+    recordingCount: hasMedia
+      ? streams.reduce<number | null>(
+          (count, stream) => (count === null ? null : count + (stream.recordingMp4 || stream.recordingHls ? 1 : 0)),
+          0
+        )
+      : null,
     mediaKnown: hasMedia,
     metricsKnown: hasMetrics
   };

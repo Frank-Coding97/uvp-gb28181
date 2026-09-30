@@ -35,15 +35,19 @@ const emit = defineEmits<{
     <div class="scan-panel" data-testid="scan-panel">
       <div class="scan-row">
         <label class="scan-label" for="scan-group-input">组号</label
-        ><input
+        ><a-input
           id="scan-group-input"
-          :value="group"
+          :model-value="group"
           class="scan-number"
           type="number"
+          inputmode="numeric"
           :min="groupMin"
           :max="groupMax"
+          step="1"
+          size="small"
           data-testid="scan-group-input"
-          @input="emit('update:group', Number(($event.target as HTMLInputElement).value))"
+          aria-label="扫描组号"
+          @input="emit('update:group', Number($event ?? 0))"
         /><button
           class="btn-primary sm scan-toggle"
           data-testid="scan-toggle"
@@ -74,15 +78,19 @@ const emit = defineEmits<{
       </div>
       <div class="scan-row">
         <label class="scan-label" for="scan-speed-input">速度</label
-        ><input
+        ><a-input
           id="scan-speed-input"
-          :value="speed"
+          :model-value="speed"
           class="scan-number"
           type="number"
+          inputmode="numeric"
           :min="speedMin"
           :max="speedMax"
+          step="1"
+          size="small"
           data-testid="scan-speed-input"
-          @input="emit('update:speed', Number(($event.target as HTMLInputElement).value))"
+          aria-label="扫描速度"
+          @input="emit('update:speed', Number($event ?? 0))"
         /><button
           class="btn-ghost sm"
           data-testid="scan-set-speed"

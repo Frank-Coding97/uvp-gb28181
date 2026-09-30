@@ -47,7 +47,9 @@ const client = {
   name: "现场接入",
   ownerDeptId: 10,
   dataScope: 3,
-  responsibleUserId: 7,
+  responsibleOrgName: "某某科技有限公司",
+  responsibleName: "张三",
+  responsibleContact: "13800000000",
   status: "active",
   secretVersion: 1,
   authEpoch: 1,
@@ -68,7 +70,9 @@ function ok<T>(data: T) {
 const pageStubs = {
   "s-layout-search": { template: "<section><slot name='fields'/><slot name='actions'/><slot name='extra'/></section>" },
   "a-input": { template: "<input />" },
+  "a-input-number": { template: "<input type='number' />" },
   "a-select": { template: "<select><slot /></select>" },
+  "a-tree-select": { template: "<div data-testid='department-tree-select' />" },
   "a-option": { template: "<option><slot /></option>" },
   "a-button": { template: "<button :disabled='disabled'><slot name='icon'/><slot /></button>", props: ["disabled"] },
   "a-table": { template: "<div data-testid='client-table'><slot name='columns'/><slot name='empty'/></div>" },
@@ -86,6 +90,10 @@ const pageStubs = {
   "a-checkbox-group": { template: "<div><slot /></div>" },
   "a-checkbox": { template: "<label><slot /></label>", props: ["value"] },
   OpenAPISecretDialog: { template: "<div />", props: ["visible"] },
+  OpenAPIClientOverviewDialog: {
+    template: "<div v-if='visible' data-testid='overview-dialog'>{{ client?.name }} {{ client?.ownerDeptName }}</div>",
+    props: ["visible", "client"]
+  },
   Search: true,
   RotateCcw: true,
   RefreshCw: true,
@@ -149,6 +157,20 @@ describe("OpenAPI client page", () => {
     expect(api.list).toHaveBeenCalledWith({ page: 1, pageSize: 10 });
     expect((wrapper.vm as any).ownerDepartments).toEqual([{ id: 10, name: "平台运维部" }]);
     expect((wrapper.vm as any).clients).toEqual([client]);
+    expect((wrapper.vm as any).departmentTree).toEqual([{ id: 10, name: "平台运维部", children: [] }]);
+  });
+
+  it("sends department tree, name and status filters to the list API", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const vm = wrapper.vm as any;
+    vm.form.ownerDeptId = 10;
+    vm.form.name = "现场";
+    vm.form.status = "active";
+    await vm.search();
+
+    expect(api.list).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, ownerDeptId: 10, name: "现场", status: "active" });
   });
 
   it("renders real Arco table columns, client rows and row actions", async () => {
@@ -165,9 +187,58 @@ describe("OpenAPI client page", () => {
     //    以前这里写死"不含下级 / 共享设备"，对 dataScope=4 的客户端是错的。
     expect(wrapper.find("tbody").text()).toContain("本部门");
     expect(wrapper.find("tbody").text()).toContain(client.name);
-    expect(wrapper.find("tbody").text()).toContain("详情");
+    expect(wrapper.find("tbody").text()).toContain(client.responsibleOrgName);
+    expect(wrapper.find("tbody").text()).toContain(client.responsibleName);
+    expect(wrapper.find("tbody").text()).toContain(client.responsibleContact);
+    expect(wrapper.find("tbody").text()).toContain("10 / 秒 · 突发 20");
+    expect(wrapper.find("tbody").text()).toContain("观看 10 路并发");
+    expect(wrapper.find("tbody").text()).toContain("概览");
     expect(wrapper.find("tbody").text()).toContain("配置能力");
+    expect(wrapper.find("tbody").text()).not.toContain("详情");
     expect(wrapper.find("tbody").text()).toContain("调用记录");
+    expect(wrapper.find("tbody").text()).not.toContain("更多");
+    expect(wrapper.find("tbody").text()).toContain("轮换 SK");
+    expect(wrapper.find("tbody").text()).toContain("停用");
+    expect(wrapper.find("tbody").text()).toContain("撤销");
+    expect(wrapper.find(".openapi-client-table__danger").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("每个客户端按归属部门和数据范围访问设备");
+  });
+
+  it("opens the client overview in a dialog from the row action", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='overview-dialog']").exists()).toBe(false);
+    (wrapper.vm as any).openOverview(client);
+    await nextTick();
+    expect((wrapper.vm as any).overviewClient).toEqual({ ...client, ownerDeptName: "平台运维部" });
+    expect(wrapper.find("[data-testid='overview-dialog']").text()).toContain(client.name);
+    expect(wrapper.find("[data-testid='overview-dialog']").text()).toContain("平台运维部");
+
+    (wrapper.vm as any).closeOverview();
+    await nextTick();
+    expect(wrapper.find("[data-testid='overview-dialog']").exists()).toBe(false);
+  });
+
+  it("keeps the compact action column and semantic action colors", async () => {
+    const source = await import("./index.vue?raw");
+    expect(source.default).toContain('<a-table-column title="客户端" :width="240">');
+    expect(source.default).toContain('<a-table-column title="归属部门与数据范围" :width="230">');
+    expect(source.default).toContain('<a-table-column title="负责人" :width="230">');
+    expect(source.default).toContain('<a-table-column title="调用 / 观看限制" :width="190">');
+    expect(source.default).toContain('<a-table-column title="认证状态" :width="120">');
+    expect(source.default).toContain('<a-table-column title="密钥版本" data-index="secretVersion" :width="110" />');
+    expect(source.default).toContain('<a-table-column title="操作" :width="290" align="center" fixed="right">');
+    expect(source.default).toContain("justify-content: center");
+    expect(source.default).toContain('<Ban :size="15" />');
+    expect(source.default).toContain('<Eye :size="15" />');
+    expect(source.default).toContain("概览");
+    expect(source.default).toContain("openapi-client-table__overview");
+    expect(source.default).toContain("openapi-client-table__audit");
+    expect(source.default).toContain('<ScrollText :size="15" />');
+    expect(source.default).toContain("openapi-client-table__rotate");
+    expect(source.default).toContain("openapi-client-table__enable");
+    expect(source.default).toContain("openapi-client-table__disable");
   });
 
   it("opens each management task in the dedicated client workspace", async () => {
@@ -195,7 +266,13 @@ describe("OpenAPI client page", () => {
   it("keeps one-time secrets in transient page state only and clears them on close", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    await (wrapper.vm as any).performCreate({ name: "新客户端", ownerDeptId: 10, responsibleUserId: 7 });
+    await (wrapper.vm as any).performCreate({
+      name: "新客户端",
+      ownerDeptId: 10,
+      responsibleOrgName: "某某科技有限公司",
+      responsibleName: "张三",
+      responsibleContact: "13800000000"
+    });
     expect((wrapper.vm as any).secretPayload).toEqual({
       clientId: client.id,
       accessKey: client.ak,
@@ -250,7 +327,9 @@ describe("OpenAPI client page", () => {
     vm.form.dataScope = 4;
     await vm.submit();
 
-    expect(wrapper.emitted("create")?.[0]).toEqual([{ name: "下级部门接入", ownerDeptId: 10, dataScope: 4 }]);
+    expect(wrapper.emitted("create")?.[0]).toEqual([
+      { name: "下级部门接入", ownerDeptId: 10, dataScope: 4, rateLimit: 10, burst: 20, viewerQuota: 10 }
+    ]);
     expect(wrapper.text()).toContain("本部门及以下");
   });
 

@@ -2,76 +2,115 @@ package gb28181
 
 import (
 	"context"
-	"os"
-	"strings"
+	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	openapimedia "uvplatform.cn/uvp-gb28181/app/openapi/media"
+
+	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	openapiplay "uvplatform.cn/uvp-gb28181/app/openapi/play"
 )
 
-type heldOpenAPIPlayer struct{ started, release chan struct{} }
-
-func (p *heldOpenAPIPlayer) EnsureLive(context.Context, play.Request) (*play.Result, error) {
-	close(p.started)
-	<-p.release
-	return &play.Result{StreamID: "late-old-generation"}, nil
+type openAPIViewerNodeResolverStub struct {
+	node *node.Node
 }
 
-func TestOpenAPIMediaRootProductionAssemblyOrder(t *testing.T) {
-	data, err := os.ReadFile("bootstrap.go")
-	require.NoError(t, err)
-	source := string(data)
-	begin := strings.Index(source, "func startSIPDependenciesWithFactory(")
-	end := strings.Index(source, "func buildPlaySigner(")
-	require.Greater(t, end, begin)
-	assembly := source[begin:end]
-
-	prepare := strings.Index(assembly, "prepareOpenAPIMediaRoot(")
-	validate := strings.Index(assembly, "play.WithQualifiedNodeValidator(openAPIValidator)")
-	player := strings.Index(assembly, "openAPILivePlayer.Publish(playSvc)")
-	publish := strings.Index(assembly, "publishOpenAPIMediaRoot(openAPICandidate)")
-	require.GreaterOrEqual(t, prepare, 0)
-	require.Greater(t, validate, prepare)
-	require.Greater(t, player, validate)
-	require.Greater(t, publish, player)
-
-	rootData, err := os.ReadFile("bootstrap_openapi_live.go")
-	require.NoError(t, err)
-	rootSource := string(rootData)
-	hooks := strings.Index(rootSource, "gbroutes.SetOpenAPIMediaAuthorization(openAPIMediaRoot, openAPIMediaRoot, openAPIMediaRoot)")
-	rootPublish := strings.Index(rootSource, "openAPIMediaRoot.Publish(")
-	require.GreaterOrEqual(t, hooks, 0)
-	require.Greater(t, rootPublish, hooks, "install the fail-closed root at Hooks before making Gateway ready")
+func (s openAPIViewerNodeResolverStub) GetByUUID(string) (*node.Node, bool) {
+	return s.node, s.node != nil
 }
 
-func TestOpenAPILiveRetirementPreventsDependencyTeardown(t *testing.T) {
-	previousRuntime, previousService := openAPILivePlayer, playSvc
-	openAPILivePlayer = openapimedia.NewLivePlayerRuntime()
-	playSvc = &play.Service{}
-	sentinel := playSvc
-	p := &heldOpenAPIPlayer{started: make(chan struct{}), release: make(chan struct{})}
-	defer func() {
-		select {
-		case <-p.release:
-		default:
-			close(p.release)
-		}
-		_ = openAPILivePlayer.Retire(context.Background())
-		openAPILivePlayer, playSvc = previousRuntime, previousService
-	}()
-	require.NoError(t, openAPILivePlayer.Publish(p))
-	done := make(chan error, 1)
-	go func() { _, err := OpenAPILivePlayer().EnsureLive(context.Background(), play.Request{}); done <- err }()
-	<-p.started
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	require.Error(t, stopSIPDependencies(ctx))
-	require.Same(t, sentinel, playSvc, "timeout must retain actual old dependencies")
-	require.Error(t, openAPILivePlayer.Publish(p))
-	close(p.release)
-	require.Error(t, <-done, "late success from a retired service is not a valid application result")
-	require.NoError(t, openAPILivePlayer.Retire(context.Background()))
+type openAPIViewerRuntimeClientStub struct {
+	snapshot       gbzlm.RuntimePlayers
+	err            error
+	target         gbzlm.StreamTarget
+	standard       []gbzlm.MediaPlayer
+	standardErr    error
+	standardCalled bool
+}
+
+func (s *openAPIViewerRuntimeClientStub) GetMediaPlayerList(_ context.Context, schema, vhost, app, stream string) ([]gbzlm.MediaPlayer, error) {
+	s.standardCalled = true
+	s.target = gbzlm.StreamTarget{Schema: schema, VHost: vhost, App: app, Stream: stream}
+	return s.standard, s.standardErr
+}
+
+func (s *openAPIViewerRuntimeClientStub) GetRuntimeMediaPlayers(_ context.Context, target gbzlm.StreamTarget) (gbzlm.RuntimePlayers, error) {
+	s.target = target
+	return s.snapshot, s.err
+}
+
+func TestOpenAPIViewerRuntimeSnapshotterMapsExactNodeAndPlayers(t *testing.T) {
+	client := &openAPIViewerRuntimeClientStub{snapshot: gbzlm.RuntimePlayers{
+		BootNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Players:   []gbzlm.MediaPlayer{{Identifier: "viewer-a"}, {Identifier: "viewer-b"}},
+	}}
+	snapshotter := &openAPIViewerRuntimeSnapshotter{
+		registry:  openAPIViewerNodeResolverStub{node: &node.Node{ID: 1, MediaServerUUID: "node-a"}},
+		newClient: func(*node.Node) openAPIViewerRuntimeClient { return client },
+	}
+	target := openapiplay.ViewerRuntimeTarget{NodeUUID: "node-a", Schema: "http", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a"}
+
+	snapshot, err := snapshotter.SnapshotViewerRuntime(context.Background(), target)
+	require.NoError(t, err)
+	require.Equal(t, target.Schema, client.target.Schema)
+	require.Equal(t, target.VHost, client.target.VHost)
+	require.Equal(t, target.App, client.target.App)
+	require.Equal(t, target.Stream, client.target.Stream)
+	require.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", snapshot.BootNonce)
+	require.Contains(t, snapshot.Identifiers, "viewer-a")
+	require.Contains(t, snapshot.Identifiers, "viewer-b")
+}
+
+func TestOpenAPIViewerRuntimeSnapshotterFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resolver openAPIViewerNodeResolver
+		client   *openAPIViewerRuntimeClientStub
+		nodeUUID string
+	}{
+		{name: "missing node", resolver: openAPIViewerNodeResolverStub{}, nodeUUID: "node-a"},
+		{name: "mismatched node", resolver: openAPIViewerNodeResolverStub{node: &node.Node{ID: 1, MediaServerUUID: "node-b"}}, nodeUUID: "node-a"},
+		{name: "runtime failure", resolver: openAPIViewerNodeResolverStub{node: &node.Node{ID: 1, MediaServerUUID: "node-a"}}, client: &openAPIViewerRuntimeClientStub{err: errors.New("unavailable"), standardErr: errors.New("unavailable")}, nodeUUID: "node-a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshotter := &openAPIViewerRuntimeSnapshotter{registry: tc.resolver}
+			if tc.client != nil {
+				snapshotter.newClient = func(*node.Node) openAPIViewerRuntimeClient { return tc.client }
+			}
+			_, err := snapshotter.SnapshotViewerRuntime(context.Background(), openapiplay.ViewerRuntimeTarget{
+				NodeUUID: tc.nodeUUID, Schema: "http", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a",
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestOpenAPIViewerRuntimeSnapshotterFallsBackToExactStandardTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		players     []gbzlm.MediaPlayer
+		standardErr error
+	}{
+		{name: "existing target", players: []gbzlm.MediaPlayer{{Identifier: "viewer-a"}}},
+		{name: "missing target", standardErr: gbzlm.ErrMediaNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &openAPIViewerRuntimeClientStub{err: gbzlm.ErrRuntimeControlUnavailable, standard: tc.players, standardErr: tc.standardErr}
+			snapshotter := &openAPIViewerRuntimeSnapshotter{
+				registry:  openAPIViewerNodeResolverStub{node: &node.Node{ID: 1, MediaServerUUID: "node-a"}},
+				newClient: func(*node.Node) openAPIViewerRuntimeClient { return client },
+			}
+			snapshot, err := snapshotter.SnapshotViewerRuntime(context.Background(), openapiplay.ViewerRuntimeTarget{NodeUUID: "node-a", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a"})
+			require.NoError(t, err)
+			require.True(t, client.standardCalled)
+			require.True(t, snapshot.TargetAuthoritative)
+			require.Empty(t, snapshot.BootNonce)
+			if len(tc.players) > 0 {
+				require.Contains(t, snapshot.Identifiers, "viewer-a")
+			} else {
+				require.Empty(t, snapshot.Identifiers)
+			}
+		})
+	}
 }

@@ -102,3 +102,44 @@ func TestServiceApplyRejectsInactiveOrOutOfScopeAddTarget(t *testing.T) {
 	require.Equal(t, ApplySummary{Requested: 1, Failed: 1}, result.Summary)
 	require.Contains(t, result.Results[0].Message, "目标")
 }
+
+// 设备主键不存在时，add 分支必须判"不在可操作范围内"，且**一条授权都不能落库**。
+//
+// 回归背景：生产全局回调 MaskNotDataError(app/utils/gormhelper/hook.go) 把
+// Statement.RaiseErrorOnNotFound 恒置 false，设备查询的 First 查不到只返回
+// nil error + 零值设备。若只信 err 不看主键，就会把"设备不存在"当成"设备可见"
+// 继续走，最终写出 device_id 指向不存在设备的孤儿授权（零值设备的 DeletedAt
+// 同样会让 addGrant 误判，两处必须一起守）。
+func TestServiceApplyRejectsMissingDeviceWithoutWritingGrant(t *testing.T) {
+	service, _, targets := seedGrantApplyFixture(t)
+	// revisionFor(nil) = 空授权的 SHA256，即真机上"该设备还没有任何共享"的版本号
+	emptyRevision := revisionFor(nil)
+	result, err := service.Apply(context.Background(), ApplyRequest{
+		Items:   []ApplyDevice{{DeviceID: 999999, ExpectedRevision: emptyRevision}},
+		Mode:    ApplyModeAdd,
+		Targets: targets[:1],
+	}, datascope.OwnerDeptAccess{FullAccess: true})
+	require.NoError(t, err)
+	require.Equal(t, ApplySummary{Requested: 1, Failed: 1}, result.Summary)
+	require.Contains(t, result.Results[0].Message, "范围")
+
+	var count int64
+	require.NoError(t, service.db.Model(&gbmodels.GbDeviceGrant{}).Count(&count).Error)
+	require.EqualValues(t, 0, count, "设备不存在时不得写入共享授权")
+}
+
+// 无任何行（含软删）时 add 必须真插入一行 —— 直接复刻"首次共享"在真机上的失败。
+func TestServiceApplyAddInsertsWhenNoRowExists(t *testing.T) {
+	service, devices, targets := seedGrantApplyFixture(t)
+	items := []ApplyDevice{{DeviceID: devices[0].ID, ExpectedRevision: revisionFor(nil)}}
+
+	result, err := service.Apply(context.Background(), ApplyRequest{Items: items, Mode: ApplyModeAdd, Targets: targets[:1]}, datascope.OwnerDeptAccess{FullAccess: true})
+	require.NoError(t, err)
+	require.Equal(t, ApplySummary{Requested: 1, Changed: 1, Added: 1}, result.Summary)
+	require.Equal(t, applyStatusChanged, result.Results[0].Status)
+
+	var rows []gbmodels.GbDeviceGrant
+	require.NoError(t, service.db.Where("device_id = ?", devices[0].ID).Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, gbmodels.GrantTargetTypeDept, rows[0].TargetType)
+}

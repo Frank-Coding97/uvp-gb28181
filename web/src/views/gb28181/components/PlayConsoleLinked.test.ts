@@ -3,7 +3,7 @@ import { Message, Modal } from "@arco-design/web-vue";
 import Cookies from "js-cookie";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineComponent, nextTick, reactive } from "vue";
+import { defineComponent, h, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccessTokenKey } from "@/utils/auth";
@@ -11,6 +11,25 @@ import { AccessTokenKey } from "@/utils/auth";
 // VChart 会拉起 lottie-web 这类浏览器专属依赖,jsdom 下拿不到 canvas 上下文就会整包
 // 加载失败。本文件只覆盖概览条与弹窗的开关行为,图表细节由 ProbeTimelineDialog 自己负责。
 const vchartStub = vi.hoisted(() => ({ created: 0, rendered: 0, updated: 0, resized: 0, released: 0 }));
+
+const StreamSelectStub = defineComponent({
+  inheritAttrs: false,
+  props: { modelValue: { type: [String, Number], default: "" } },
+  emits: ["change"],
+  setup(props, { attrs, emit, slots }) {
+    return () =>
+      h(
+        "select",
+        {
+          ...attrs,
+          "model-value": String(props.modelValue),
+          value: String(props.modelValue),
+          onChange: event => emit("change", (event.target as HTMLSelectElement).value)
+        },
+        slots.default?.()
+      );
+  }
+});
 
 vi.mock("@visactor/vchart", () => ({
   default: class {
@@ -56,7 +75,6 @@ const api = vi.hoisted(() => {
         expireAt: 0
       }
     }),
-    authorizeFixedPlayback: vi.fn(),
     reportPlaybackClientEvent: vi.fn().mockResolvedValue({ code: 0, message: "", data: { accepted: true } }),
     stopPlay: vi.fn().mockResolvedValue({ code: 0, message: "", data: null }),
     getStreamMonitor: vi.fn().mockResolvedValue({
@@ -552,7 +570,6 @@ function pressEscape() {
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
     userState.account = reactive({ permissions: ["*:*:*"] });
-    api.authorizeFixedPlayback.mockReset();
     api.reportPlaybackClientEvent.mockReset();
     api.reportPlaybackClientEvent.mockResolvedValue({ code: 0, message: "", data: { accepted: true } });
     api.getHomePosition.mockReset();
@@ -1119,7 +1136,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     }
   });
 
-  it("复制固定流的带 token 协议地址前预授权，并复制同协议的新地址", async () => {
+  it("复制固定流的带 token 协议地址前复用播放接口，并复制同协议的新地址", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     const fixedStreamID = `${channel.deviceId}_${channel.channelId}`;
@@ -1137,7 +1154,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         expireAt: 0
       }
     });
-    api.authorizeFixedPlayback.mockResolvedValueOnce({
+    api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
       data: {
@@ -1159,7 +1176,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
-    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(api.startPlay).toHaveBeenLastCalledWith(channel.deviceId, channel.channelId, { silent: true });
     expect(writeText).toHaveBeenCalledWith("ws://zlm/rtp/fixed.live.flv?play_token=fresh");
     wrapper.unmount();
   });
@@ -1184,7 +1201,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         expireAt: 0
       }
     });
-    api.authorizeFixedPlayback.mockResolvedValueOnce({ code: 500, message: "authorization rejected", data: null });
+    api.startPlay.mockResolvedValueOnce({ code: 500, message: "playback rejected", data: null });
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -1192,9 +1209,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
-    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(api.startPlay).toHaveBeenLastCalledWith(channel.deviceId, channel.channelId, { silent: true });
     expect(writeText).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    expect(error).toHaveBeenCalledWith("播放地址刷新失败，请重试");
     wrapper.unmount();
     error.mockRestore();
   });
@@ -1219,7 +1236,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         expireAt: 0
       }
     });
-    api.authorizeFixedPlayback.mockRejectedValueOnce(new Error("network unavailable"));
+    api.startPlay.mockRejectedValueOnce(new Error("network unavailable"));
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -1227,9 +1244,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
-    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(api.startPlay).toHaveBeenLastCalledWith(channel.deviceId, channel.channelId, { silent: true });
     expect(writeText).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    expect(error).toHaveBeenCalledWith("播放地址刷新失败，请重试");
     wrapper.unmount();
     error.mockRestore();
   });
@@ -1253,7 +1270,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         expireAt: 0
       }
     });
-    api.authorizeFixedPlayback.mockResolvedValueOnce({
+    api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
       data: {
@@ -1275,7 +1292,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(writeText).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    expect(error).toHaveBeenCalledWith("播放地址刷新失败，请重试");
     wrapper.unmount();
     error.mockRestore();
   });
@@ -1285,7 +1302,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     ["固定流无 token", `${channel.deviceId}_${channel.channelId}`, "ws://zlm/rtp/fixed.live.flv"],
     ["固定流仅有同名参数", `${channel.deviceId}_${channel.channelId}`, "ws://zlm/rtp/fixed.live.flv?not_play_token=present"],
     ["非当前固定流", "other-device_other-channel", "ws://zlm/rtp/other.live.flv?play_token=present"]
-  ])("%s 复制地址时不请求预授权", async (_label, streamId, url) => {
+  ])("%s 复制地址时不请求播放刷新", async (_label, streamId, url) => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     api.startPlay.mockResolvedValueOnce({
@@ -1309,7 +1326,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await option!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
 
-    expect(api.authorizeFixedPlayback).not.toHaveBeenCalled();
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith(url);
     wrapper.unmount();
   });
@@ -1666,9 +1683,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 侧栏只剩「视频编码」一组 ⇒ 分组导航整体不渲染（`configGroups.length > 1` 才出），
     // 组的标题那一行由 `dcg-params-head` 承担。图像叠加在底栏，见 `picture-osd-cell`。
     expect(workspace.find(".dcg-nav").exists()).toBe(false);
-    expect(
-      wrapper.get("[data-testid='linked-side-video-compare']").find("[data-testid='video-param-compare-card']").exists()
-    ).toBe(true);
+    expect(workspace.find("[data-testid='dcg-video-compare-slot'] [data-testid='video-param-compare-card']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='linked-detail-picture']").find("[data-testid='video-param-compare-card']").exists()).toBe(
       false
     );
@@ -1748,12 +1763,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     const vpSide = wrapper.get("[data-testid='linked-side-deviceconfig']");
     const vpDetail = wrapper.get("[data-testid='linked-detail-picture']");
-    // 侧栏留编辑表单与状态文案（只有「视频编码」这一组），参数对照紧跟在其下方。
+    // 侧栏只有一张视频编码卡，参数对照已经合并到这张卡内部。
     expect(vpSide.text()).toContain("视频编码");
     expect(vpSide.text()).not.toContain("图像叠加");
     expect(vpSide.text()).not.toContain("设备控制");
     expect(vpSide.text()).not.toContain("图像抓拍配置");
-    expect(vpSide.find("[data-testid='linked-side-video-compare']").exists()).toBe(true);
     expect(vpSide.find("[data-testid='video-param-compare-card']").exists()).toBe(true);
     expect(vpDetail.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
     // 底栏由图像叠加、遮挡、镜像三个组件组成；图像叠加占两列，内部两块与另外两张卡等分。
@@ -1763,7 +1777,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("视频参数：两行对照紧跟视频编码渲染，底栏只保留画面卡片", async () => {
+  it("视频参数：两行对照合并在视频编码卡内，底栏只保留画面卡片", async () => {
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
         list: [videoParamRow({ id: 1, streamNumber: 0, resolution: "6" })],
@@ -1782,8 +1796,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(compare.text()).toContain("画面实测");
     // ⛔ 「回读」行取**设备事实**（码值 6 → 1080P），不是草稿值。
     expect(side.get("[data-testid='video-param-compare-read']").text()).toContain("1080P");
+    expect(side.find("[data-testid='video-param-compare-card'] .linked-card-hd").exists()).toBe(false);
+    expect(side.get("[data-testid='video-param-compare-card']").text()).not.toContain("参数对照");
+    expect(side.get("[data-testid='dcg-stream-0']").find("[data-testid='dcg-video-compare-slot']").exists()).toBe(true);
+    expect(side.find(".dcg-params > [data-testid='dcg-video-compare-slot']").exists()).toBe(false);
 
-    // 底栏不再重复参数对照，避免视频编码下方和底栏各出现一份。
+    // 底栏不再重复参数对照。
     const detail = wrapper.get("[data-testid='linked-detail-picture']");
     expect(detail.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
     expect(side.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
@@ -1816,6 +1834,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(kinds[1].text()).toContain("采样率");
     expect(kinds[1].text()).toContain("声道");
     expect(kinds[1].text()).toContain("丢包");
+
+    const probeSidebar = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleProbeSidebar.vue"),
+      "utf8"
+    );
+    expect(probeSidebar).toMatch(/\.probe-card\.stream-brief\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto/s);
+    expect(probeSidebar).toMatch(/\.stream-brief-overview\s*\{[^}]*grid-auto-rows:\s*minmax\(0, 1fr\)/s);
 
     // 未检测时不再显示"尚未执行深度检测"那块占位
     expect(wrapper.text()).not.toContain("尚未执行深度检测");
@@ -2028,24 +2053,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     const ptz = readFileSync(resolve(base, "PlayConsolePtzPanel.vue"), "utf8");
     const picture = readFileSync(resolve(base, "PlayConsolePicturePanel.vue"), "utf8");
     const probe = readFileSync(resolve(base, "PlayConsoleProbePanel.vue"), "utf8");
+    const osd = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/DeviceConfigOsdBlocks.vue"), "utf8");
 
     expect(ptz).toMatch(/\.linked-detail-ptz\s*\{[^}]*height:\s*var\(--play-console-detail-height/s);
     expect(ptz).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(picture).toMatch(/\.linked-picture-layout\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/s);
     expect(picture).toMatch(/\.linked-picture-layout\s*>\s*\.picture-osd-cell\s*\{[^}]*grid-column:\s*span 2/s);
+    expect(osd).toMatch(/\.osd-blocks\.is-row\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s);
+    expect(osd).toMatch(/\.osd-blocks\.is-row > \.osd-card\s*\{[^}]*height:\s*auto;[^}]*align-self:\s*stretch;/s);
     expect(probe).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr)");
   });
 
-  it("视频编码侧栏与参数对照上下分区，底部画面卡片不再预留对照列", () => {
+  it("视频编码卡内部承载参数对照，底部画面卡片不再预留对照列", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
-    expect(source).toMatch(
-      /\.sidebar-deviceconfig-panel\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto auto;[^}]*align-content:\s*start/s
-    );
+    expect(source).not.toContain('data-testid="linked-side-video-compare"');
     expect(source).toMatch(/\.sidebar-deviceconfig-panel :deep\(\.dcg-window--embedded\)\s*\{[^}]*height:\s*auto/s);
-    expect(source).toMatch(
-      /\.sidebar-video-compare-card :deep\(\.vpc-grid\)\s*\{[^}]*flex:\s*0 0 auto;[^}]*overflow:\s*visible/s
-    );
-    expect(source).toContain('data-testid="linked-side-video-compare"');
+    expect(source).toContain("#video-compare");
   });
 
   it("详情卡样式归属子模块，父组件不再持有已拆组件的专属样式", () => {
@@ -2553,7 +2576,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // ⛔ 但那行只写在**抽屉底部 statusbar** 里，而 statusbar 是 `v-if="!embedded"` ——
     //    控制台这里是**嵌入形态**，根本不渲染 statusbar。嵌入形态能验证的是参数区汇总条：
     //    本组项数 × 当前配置文件下可见的码流数。
-    expect(wrapper.get("[data-testid='dcg-params-foot']").text()).toContain("本组 5 项 × 1 路码流");
+    expect(wrapper.find("[data-testid='dcg-params-foot']").exists()).toBe(false);
 
     // ⛔ 控件绑定标准码值，人读串只存在于 option 文案。
     //    ⛔⛔ 取 `modelvalue` attribute 而不是 `element.value`：测试环境里 `a-select` 的 stub
@@ -2567,10 +2590,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find("[data-testid='dcg-row-encoding-format']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-row-encoding-resolution']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='dcg-stream-0']").findAll("[data-source='设备']")).toHaveLength(0);
-    expect(wrapper.get("[data-testid='dcg-params-foot']").text()).not.toContain("设备");
+    expect(wrapper.find("[data-testid='dcg-params-foot']").exists()).toBe(false);
 
-    // 配置文件切到子码流后，VBR 码率明确标为“不发”。
-    await wrapper.get("[aria-label='配置文件']").setValue("1");
+    // 参数对照卡切到子码流后，VBR 码率明确标为“不发”。
+    await wrapper.get("[data-testid='dcg-stream-profile-embedded']").setValue("1");
     await nextTick();
     expect(wrapper.get("[data-testid='dcg-stream-1'] [data-source='不发']").text()).toBe("不发");
 
@@ -3461,24 +3484,23 @@ describe("PlayConsoleLinked 双区联动", () => {
     // ⛔ 卡片里**没有**编号输入框:编号 1 是标准唯一命名的编号(A.3.7 表 A.11 注),
     //    由后端固定,不放给调用方填 —— 否则等于邀请 2~5 那些标准未定义的私有语义。
     expect(card.find("input").exists()).toBe(false);
-    // 口径必须写清"标准只命名了编号 1"+"没有回读命令",否则会被读成平台能查到开关状态
-    expect(card.get("[data-testid='wiper-hint']").text()).toContain("编号 1");
-    expect(card.get("[data-testid='wiper-hint']").text()).toContain("没有查询命令");
+    // 紧凑卡片通过按钮 title 保留“编号 1 + 无回读”的准确口径，不再占一整行提示文案。
+    expect(card.get("[data-testid='wiper-toggle']").attributes("title")).toContain("编号 1");
+    expect(card.get("[data-testid='wiper-toggle']").attributes("title")).toContain("没有回读");
 
     await card.get("[data-testid='wiper-toggle']").trigger("click");
     await flushPromises();
     expect(api.controlPtzWiper).toHaveBeenCalledWith(channel.id, { action: "on" });
 
-    // HTTP 成功 ≠ 雨刷在刮:chip 说的是「已下发」,且不许出现"正在刮"这类词
-    const chip = wrapper.get("[data-testid='wiper-running-chip']");
-    expect(chip.text()).toContain("已下发");
-    expect(chip.text()).not.toContain("刮");
-    expect(wrapper.get("[data-testid='wiper-toggle']").text()).toContain("关闭雨刷");
+    // HTTP 成功 ≠ 雨刷在刮：紧凑按钮只提供“关闭”动作，title 明确只是指令已发送。
+    const toggle = wrapper.get("[data-testid='wiper-toggle']");
+    expect(toggle.text()).toContain("关闭雨刷");
+    expect(toggle.attributes("title")).toContain("指令已发送");
+    expect(toggle.attributes("title")).not.toContain("正在刮");
 
-    await chip.trigger("click");
+    await toggle.trigger("click");
     await flushPromises();
     expect(api.controlPtzWiper).toHaveBeenLastCalledWith(channel.id, { action: "off" });
-    expect(wrapper.find("[data-testid='wiper-running-chip']").exists()).toBe(false);
     expect(wrapper.get("[data-testid='wiper-toggle']").text()).toContain("开启雨刷");
     wrapper.unmount();
   });
@@ -5607,6 +5629,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(pictureBar.find("[data-testid='picture-osd-cell']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mask-card']").exists()).toBe(true);
     expect(pictureBar.find("[data-testid='picture-mirror-card']").exists()).toBe(true);
+    expect(pictureBar.find("[data-testid='osd-block-time']").classes()).toContain("linked-card");
+    expect(pictureBar.find("[data-testid='osd-block-text']").classes()).toContain("linked-card");
+    expect(pictureBar.find("[data-testid='osd-block-time'] .osd-card-head").classes()).toContain("linked-card-hd");
+    expect(pictureBar.find("[data-testid='osd-block-time'] .osd-card-title svg").exists()).toBe(true);
+    expect(pictureBar.find("[data-testid='osd-block-text'] .osd-card-title svg").exists()).toBe(true);
+    expect(pictureBar.find("[data-testid='picture-osd-cell'] [data-testid='osd-canvas']").exists()).toBe(false);
     expect(pictureBar.find("[data-testid='video-param-compare-card']").exists()).toBe(false);
     expect(pictureBar.findAll(".linked-picture-layout > .linked-section")).toHaveLength(3);
     // ⛔ 参数对照卡上**不再有**读取 / 还原 / 下发三颗按钮：侧栏抽屉的参数头已经有同一排
@@ -5625,8 +5653,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(sidePanel.find("[data-testid='dcg-nav-video-param']").exists()).toBe(false);
     expect(sidePanel.find("[data-testid='dcg-nav-osd']").exists()).toBe(false);
     expect(sidePanel.find("[data-testid='dcg-osd-blocks']").exists()).toBe(false);
-    // 侧栏里留下的是视频编码本体（组标题 + 对账条，`dcg-reconcile` 只在 video-param 出）。
-    expect(sidePanel.find("[data-testid='dcg-group-title']").text()).toBe("视频编码");
+    // 嵌入式视频组标题由卡片内栏承载；外层分组标题栏不再重复显示。
+    expect(sidePanel.find("[data-testid='dcg-group-title']").exists()).toBe(false);
+    expect(sidePanel.findAll(".dcg-video-title")).toHaveLength(1);
+    expect(sidePanel.find(".dcg-video-title").text()).toBe("视频编码");
+    expect(sidePanel.findAll("[data-testid='dcg-reset']")).toHaveLength(1);
+    expect(sidePanel.findAll("[data-testid='dcg-read']")).toHaveLength(1);
+    expect(sidePanel.findAll("[data-testid='dcg-apply']")).toHaveLength(1);
     expect(sidePanel.find("[data-testid='dcg-reconcile']").exists()).toBe(true);
     // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍不建在侧栏：它只有底栏卡片这一个编辑入口，
     //    侧栏再挂一份就是同一份 `familyValues.picture` 的两个入口。
@@ -5653,7 +5686,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     await flushPromises();
-    expect(wrapper.get("[data-testid='linked-side-deviceconfig'] [data-testid='dcg-group-title']").text()).toBe("视频编码");
+    expect(wrapper.get("[data-testid='linked-side-deviceconfig'] .dcg-video-title").text()).toBe("视频编码");
     wrapper.unmount();
   });
 });
@@ -5698,7 +5731,10 @@ describe("PlayConsoleLinked 画面设置底栏卡片", () => {
 
   /** 挂载控制台并切到「画面设置」页签（该 tab 现在是 OSD 侧栏 + 三张底栏卡片）。 */
   async function openPictureTab() {
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel },
+      global: { stubs: { "a-select": StreamSelectStub } }
+    });
     await flushPromises();
     await wrapper.get("[data-testid='linked-tab-deviceconfig']").trigger("click");
     await flushPromises();
@@ -5721,10 +5757,8 @@ describe("PlayConsoleLinked 画面设置底栏卡片", () => {
     wrapper.unmount();
   });
 
-  it("对照卡的码流与侧栏「配置文件」是同一路，不是两份状态", async () => {
-    // ⛔ 两个下拉各持一份状态，就会出现"底栏对着子码流、侧栏在改主码流"，而两边都不报错 ——
-    //    用户照着对照卡上的数字去改，改的却根本不是那条流。
-    //    真源只有 `selectedVideoStream` 一个，侧栏按它只渲染对应那一行。
+  it("视频编码卡的码流下拉唯一控制当前编辑和参数对照的那一路", async () => {
+    // ⛔ 选择器放在编码格式上方，但仍由 selectedVideoStream 统一驱动对照内容。
     api.getChannelVideoParams.mockResolvedValue(
       videoParamsResponse({
         list: [
@@ -5738,16 +5772,67 @@ describe("PlayConsoleLinked 画面设置底栏卡片", () => {
     );
     const wrapper = await openPictureTab();
 
+    expect(wrapper.find("[data-testid='video-param-bottom-stream']").exists()).toBe(false);
+    const selector = wrapper.get("[data-testid='dcg-stream-profile-embedded']");
+    expect((selector.element as HTMLSelectElement).value).toBe("0");
+
     // 默认主码流：侧栏只渲染主码流那一行。
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(false);
 
-    // 底栏切到子码流 → 侧栏跟着切。
-    await wrapper.get("[data-testid='video-param-bottom-stream']").setValue("1");
+    // 编码卡切到子码流 → 参数对照与编辑行同步切换。
+    await selector.setValue("1");
     await flushPromises();
     expect(wrapper.find("[data-testid='dcg-stream-1']").exists()).toBe(true);
     expect(wrapper.find("[data-testid='dcg-stream-0']").exists()).toBe(false);
-    expect((wrapper.get("[data-testid='video-param-bottom-stream']").element as HTMLSelectElement).value).toBe("1");
+    expect((wrapper.get("[data-testid='dcg-stream-profile-embedded']").element as HTMLSelectElement).value).toBe("1");
+    wrapper.unmount();
+  });
+
+  it("参数对照把 H.265 与 H265 视为同一编码格式", async () => {
+    api.getChannelVideoParams.mockResolvedValue(
+      videoParamsResponse({
+        list: [videoParamRow({ videoFormat: "5", resolution: "2560x1440", frameRate: "15" })],
+        freshness: "fresh",
+        reconcile: { state: "read_ok" }
+      })
+    );
+    api.getStreamMonitor.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        collectedAt: "2026-09-23T03:33:12Z",
+        status: "online",
+        node: { id: 1, name: "ZLM", host: "127.0.0.1" },
+        quality: { bitrateKbps: 2196.2 },
+        network: { bytesSpeed: 274525, totalBytes: 1024, readerCount: 1, totalReaderCount: 1, aliveSecond: 10 },
+        tracks: [
+          {
+            kind: "video",
+            codec: "H265",
+            ready: true,
+            frames: 100,
+            duration: 4,
+            loss: null,
+            width: 2560,
+            height: 1440,
+            fps: 15,
+            keyFrames: 4,
+            gopSize: 25,
+            gopIntervalMs: 1000,
+            sampleRate: 0,
+            channels: 0,
+            sampleBit: 0
+          }
+        ],
+        recording: { mp4: false, hls: false }
+      }
+    });
+
+    const wrapper = await openPictureTab();
+    expect(wrapper.get("[data-testid='video-param-compare-verdict']").text()).toBe("与画面一致");
+    expect(wrapper.find("[data-testid='video-param-compare-measured'] .is-differ").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -6489,9 +6574,8 @@ describe("PlayConsoleLinked 图像叠加（OSD）画布锚点层", () => {
     });
     const wrapper = await openOsdTab();
     expect(wrapper.find("[data-testid='osd-overlay-layer']").exists()).toBe(false);
-    // 侧栏的只读基准块如实说「未读到」，而不是把模板里的 1920×1080 摆出来
-    expect(wrapper.get("[data-testid='osd-canvas-value']").text()).toBe("—");
-    expect(wrapper.get("[data-testid='osd-canvas-tag']").text()).toBe("未读到");
+    // 紧凑底栏不重复渲染只读画布行；没有设备事实时同样不能凭空展示尺寸。
+    expect(wrapper.find("[data-testid='osd-canvas-value']").exists()).toBe(false);
     // ⛔ 「调整位置」此时**禁用**：`familyValues.osd` 里躺的是平台空白模板（timeX=10 这类），
     //    放进去拖一把就等于把平台初值当成设备现状了。按钮禁用 + `enterOsdEditMode` 里再拦一道。
     expect(wrapper.get("[data-testid='osd-edit-toggle']").attributes("disabled")).toBeDefined();

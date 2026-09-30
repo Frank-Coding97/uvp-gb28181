@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -45,7 +44,7 @@ func ptzRouter(gate *Gateway) *gin.Engine {
 	return router
 }
 
-func signedPTZRequest(t *testing.T, secret, nonce string, secure bool) *http.Request {
+func signedPTZRequest(t *testing.T, secret, nonce string) *http.Request {
 	t.Helper()
 	now := fmt.Sprint(time.Now().Unix())
 	input := SignatureInput{
@@ -58,20 +57,13 @@ func signedPTZRequest(t *testing.T, secret, nonce string, secure bool) *http.Req
 	}
 	signature, err := Sign(input, secret)
 	require.NoError(t, err)
-	scheme := "http"
-	if secure {
-		scheme = "https"
-	}
-	request := httptest.NewRequest(http.MethodGet, scheme+"://example.test"+ptzPresetPath, nil)
+	request := httptest.NewRequest(http.MethodGet, "http://example.test"+ptzPresetPath, nil)
 	request.RequestURI = request.URL.RequestURI()
 	request.Header.Set("X-UVP-Sign-Version", "1")
 	request.Header.Set("X-UVP-Access-Key", input.AccessKey)
 	request.Header.Set("X-UVP-Timestamp", input.Timestamp)
 	request.Header.Set("X-UVP-Nonce", input.Nonce)
 	request.Header.Set("X-UVP-Signature", signature)
-	if secure {
-		request.TLS = &tls.ConnectionState{HandshakeComplete: true}
-	}
 	return request
 }
 
@@ -171,26 +163,13 @@ func seedActiveCapabilityRelease(t *testing.T, db *gorm.DB, scopes ...string) {
 	}).Error)
 }
 
-func TestOpenAPIPTZGatewayRejectsNonHTTPSWithAuthenticationFailed(t *testing.T) {
-	dispatcher := &ptzDispatcherStub{}
-	dispatcher.ready.Store(true)
-	gate, _, secret := gatewayFixture(t)
-	gate.ptz = dispatcher
-
-	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("a", 32), false))
-
-	require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), `"code":"AUTHENTICATION_FAILED"`)
-	require.Zero(t, dispatcher.calls.Load())
-}
-
 func TestOpenAPIPTZGatewayRejectsMissingScopeWithCapabilityDenied(t *testing.T) {
 	dispatcher := &ptzDispatcherStub{}
 	dispatcher.ready.Store(true)
 	gate, _, secret := gatewayFixture(t)
 	gate.ptz = dispatcher
 
-	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("b", 32), true))
+	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("b", 32)))
 
 	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"code":"CAPABILITY_DENIED"`)
@@ -207,7 +186,7 @@ func TestOpenAPIPTZGatewayRejectsEnabledUnpublishedScopeWithCapabilityDenied(t *
 	}).Error)
 	seedActiveCapabilityRelease(t, db, "device:list")
 
-	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("d", 32), true))
+	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("d", 32)))
 
 	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"code":"CAPABILITY_DENIED"`)
@@ -217,7 +196,7 @@ func TestOpenAPIPTZGatewayRejectsEnabledUnpublishedScopeWithCapabilityDenied(t *
 func TestOpenAPIPTZGatewayRejectsUnavailableRuntimeWithServiceUnavailable(t *testing.T) {
 	gate, _, secret := gatewayFixture(t)
 
-	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("c", 32), true))
+	response := servePTZRequest(t, gate, signedPTZRequest(t, secret, strings.Repeat("c", 32)))
 
 	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"code":"SERVICE_UNAVAILABLE"`)

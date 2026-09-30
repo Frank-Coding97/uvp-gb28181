@@ -87,14 +87,14 @@ func (s *DeviceOperationIntentStore) RetirePTZAttempt(ctx context.Context, expec
 			return ErrDeviceIntentConflict
 		}
 		var parent DeviceOperationIntent
-		if err := lockedOpenAPIModel(tx, &parent, parent.TableName()).First(&parent, "operation_id=?", id.OperationID).Error; err != nil {
+		if err := lockedModel(tx, &parent, parent.TableName()).First(&parent, "operation_id=?", id.OperationID).Error; err != nil {
 			return err
 		}
 		if !validIntentRow(parent) || parent.DeviceOperationIntentIdentity != id || parent.State != IntentDispatched {
 			return ErrDeviceIntentConflict
 		}
 		var op gbmodels.GbPTZOperation
-		if err := lockedOpenAPIModel(tx, &op, op.TableName()).First(&op, expected.OperationID).Error; err != nil {
+		if err := lockedModel(tx, &op, op.TableName()).First(&op, expected.OperationID).Error; err != nil {
 			return err
 		}
 		if !samePTZCommand(op, hint) || op.DeviceIntentID == nil || *op.DeviceIntentID != id.OperationID || op.DeviceEpoch == nil || *op.DeviceEpoch != id.DeviceEpoch ||
@@ -102,7 +102,7 @@ func (s *DeviceOperationIntentStore) RetirePTZAttempt(ctx context.Context, expec
 			return ErrDeviceIntentConflict
 		}
 		var actual gbmodels.GbPTZOperationAttempt
-		if err := lockedOpenAPIModel(tx, &actual, actual.TableName()).First(&actual, expected.ID).Error; err != nil {
+		if err := lockedModel(tx, &actual, actual.TableName()).First(&actual, expected.ID).Error; err != nil {
 			return err
 		}
 		if actual.OperationID != expected.OperationID || actual.AttemptNo != expected.AttemptNo || actual.SN != expected.SN ||

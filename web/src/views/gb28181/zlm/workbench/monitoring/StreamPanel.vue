@@ -413,101 +413,102 @@ defineExpose({ refresh });
       <ShieldAlert :size="34" /><strong>{{ errorPresentation.label }}</strong
       ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
     </div>
-    <section v-else class="stream-table-panel">
-      <a-table
-        v-model:selected-keys="selectedKeys"
-        :data="rows"
-        :loading="loading"
-        row-key="rowKey"
-        :row-selection="canClose ? { type: 'checkbox', showCheckedAll: true } : undefined"
-        :pagination="false"
-        class="uvp-data-table"
-      >
-        <template #columns>
-          <a-table-column title="媒体身份" :width="310"
-            ><template #cell="{ record }"
-              ><button
-                type="button"
-                class="identity-link"
-                :aria-label="`查看流 ${record.media.app}/${record.media.stream} 详情`"
-                @click="openDetail(record)"
-              >
-                <Radio :size="14" /><span
-                  ><strong>{{ record.media.app }}/{{ record.media.stream }}</strong
-                  ><small>{{ record.media.schema }} · {{ record.media.vhost }}</small></span
-                >
-              </button></template
-            ></a-table-column
-          >
-          <a-table-column title="来源" :width="130"
-            ><template #cell="{ record }"
-              ><span>{{ record.originTypeName || `类型 ${record.originType}` }}</span
-              ><small class="subline">#{{ record.nodeId }}</small></template
-            ></a-table-column
-          >
-          <a-table-column title="观看 / 累计" :width="120"
-            ><template #cell="{ record }"
-              ><span class="numeric"
-                ><Users :size="13" /> {{ record.readerCount }} / {{ record.totalReaderCount }}</span
-              ></template
-            ></a-table-column
-          >
-          <a-table-column title="吞吐" :width="120"
-            ><template #cell="{ record }"
-              ><span class="numeric">{{ formatZLMByteRate(record.bytesSpeed) }}</span></template
-            ></a-table-column
-          >
-          <a-table-column title="在线时长" :width="130"
-            ><template #cell="{ record }">{{ formatZLMDuration(record.aliveSecond) }}</template></a-table-column
-          >
-          <a-table-column title="录制" :width="105"
-            ><template #cell="{ record }"
-              ><span v-if="record.recordingMp4 || record.recordingHls" class="recording">{{
-                [record.recordingMp4 && "MP4", record.recordingHls && "HLS"].filter(Boolean).join(" + ")
-              }}</span
-              ><span v-else class="muted">未录制</span></template
-            ></a-table-column
-          >
-          <a-table-column title="归属" :width="110"
-            ><template #cell="{ record }"
-              ><span :class="`ownership ownership--${record.ownership.status}`">{{ ownershipText(record) }}</span></template
-            ></a-table-column
-          >
-          <a-table-column title="操作" :width="330" fixed="right"
-            ><template #cell="{ record }"
-              ><div class="row-actions">
-                <a-button size="small" @click="openDetail(record)">详情</a-button
-                ><a-button v-if="canPreview" size="small" @click="openPreview(record)"><Eye :size="13" />预览</a-button
-                ><a-button v-if="canPreview" size="small" @click="openSnapshot(record)"><Camera :size="13" />截图</a-button
-                ><a-button v-if="canClose" size="small" status="danger" @click="openClose(record, false)">关闭</a-button
-                ><a-button v-if="canForceClose" size="small" status="danger" type="primary" @click="openClose(record, true)"
-                  >强制</a-button
-                >
-              </div></template
-            ></a-table-column
-          >
-        </template>
-        <template #empty
-          ><div class="stream-empty" role="status">
-            <Radio :size="38" /><strong>没有符合当前筛选的媒体流</strong
-            ><span>筛选条件与分页由后端执行，不会加载全量流到浏览器。</span>
-          </div></template
+    <template v-else>
+      <section class="stream-table-panel">
+        <a-table
+          v-model:selected-keys="selectedKeys"
+          :data="rows"
+          :loading="loading"
+          row-key="rowKey"
+          :row-selection="canClose ? { type: 'checkbox', showCheckedAll: true } : undefined"
+          :pagination="false"
+          class="uvp-data-table"
         >
-      </a-table>
-      <div class="stream-pagination">
+          <template #columns>
+            <a-table-column title="媒体身份" :width="310"
+              ><template #cell="{ record }"
+                ><button
+                  type="button"
+                  class="identity-link"
+                  :aria-label="`查看流 ${record.media.app}/${record.media.stream} 详情`"
+                  @click="openDetail(record)"
+                >
+                  <Radio :size="14" /><span
+                    ><strong>{{ record.media.app }}/{{ record.media.stream }}</strong
+                    ><small>{{ record.media.schema }} · {{ record.media.vhost }}</small></span
+                  >
+                </button></template
+              ></a-table-column
+            >
+            <a-table-column title="来源" :width="130"
+              ><template #cell="{ record }"
+                ><span>{{ record.originTypeName || `类型 ${record.originType}` }}</span
+                ><small class="subline">#{{ record.nodeId }}</small></template
+              ></a-table-column
+            >
+            <a-table-column title="观看 / 累计" :width="120"
+              ><template #cell="{ record }"
+                ><span class="numeric"
+                  ><Users :size="13" /> {{ record.readerCount }} / {{ record.totalReaderCount }}</span
+                ></template
+              ></a-table-column
+            >
+            <a-table-column title="吞吐" :width="120"
+              ><template #cell="{ record }"
+                ><span class="numeric">{{ formatZLMByteRate(record.bytesSpeed) }}</span></template
+              ></a-table-column
+            >
+            <a-table-column title="在线时长" :width="130"
+              ><template #cell="{ record }">{{ formatZLMDuration(record.aliveSecond) }}</template></a-table-column
+            >
+            <a-table-column title="录制" :width="105"
+              ><template #cell="{ record }"
+                ><span v-if="record.recordingMp4 || record.recordingHls" class="recording">{{
+                  [record.recordingMp4 && "MP4", record.recordingHls && "HLS"].filter(Boolean).join(" + ")
+                }}</span
+                ><span v-else class="muted">未录制</span></template
+              ></a-table-column
+            >
+            <a-table-column title="归属" :width="110"
+              ><template #cell="{ record }"
+                ><span :class="`ownership ownership--${record.ownership.status}`">{{ ownershipText(record) }}</span></template
+              ></a-table-column
+            >
+            <a-table-column title="操作" :width="330" fixed="right"
+              ><template #cell="{ record }"
+                ><div class="row-actions">
+                  <a-button size="small" @click="openDetail(record)">详情</a-button
+                  ><a-button v-if="canPreview" size="small" @click="openPreview(record)"><Eye :size="13" />预览</a-button
+                  ><a-button v-if="canPreview" size="small" @click="openSnapshot(record)"><Camera :size="13" />截图</a-button
+                  ><a-button v-if="canClose" size="small" status="danger" @click="openClose(record, false)">关闭</a-button
+                  ><a-button v-if="canForceClose" size="small" status="danger" type="primary" @click="openClose(record, true)"
+                    >强制</a-button
+                  >
+                </div></template
+              ></a-table-column
+            >
+          </template>
+          <template #empty
+            ><div class="stream-empty" role="status">
+              <Radio :size="38" /><strong>没有符合当前筛选的媒体流</strong
+              ><span>筛选条件与分页由后端执行，不会加载全量流到浏览器。</span>
+            </div></template
+          >
+        </a-table>
+      </section>
+      <div class="stream-pagination uvp-pagination-bar">
         <span>共 {{ pageData?.total ?? 0 }} 路<span v-if="pageData?.truncated">（结果已由后端截断）</span></span
         ><a-pagination
           :current="page"
           :page-size="pageSize"
           :total="pageData?.total ?? 0"
-          show-total
           show-page-size
           :page-size-options="[10, 20, 50, 100]"
           @change="changePage"
           @page-size-change="changePageSize"
         />
       </div>
-    </section>
+    </template>
 
     <a-drawer v-model:visible="detailVisible" :width="760" :footer="false" unmount-on-close @cancel="cancelDetail">
       <template #title>媒体流详情与观看者</template>
@@ -816,10 +817,9 @@ defineExpose({ refresh });
   gap: 16px;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  margin-top: 12px;
   font-size: var(--zlm-fs-caption);
   color: var(--zlm-text-3);
-  border-top: 1px solid var(--zlm-border);
 }
 .drawer-state {
   display: flex;

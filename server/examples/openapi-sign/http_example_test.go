@@ -295,16 +295,19 @@ func TestOpenAPIHTTPExampleGETRetryBoundStopsAfterTwoFailures(t *testing.T) {
 	}
 }
 
-func TestOpenAPIHTTPExampleRejectsPlainHTTP(t *testing.T) {
+func TestOpenAPIHTTPExampleAllowsPlainHTTP(t *testing.T) {
 	fixture := loadFixture(t)
 	count := 0
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count++
-		return nil, errors.New("transport must not be called")
-	})}
-	result, err := Get(context.Background(), client, "http://example.invalid", "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
-	if err == nil || result.Attempts != 1 || count != 0 {
-		t.Fatalf("plain HTTP result = %#v, err=%v, transport calls=%d, want rejection before transport", result, err, count)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	result, err := Get(context.Background(), server.Client(), server.URL, "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err != nil || result.StatusCode != http.StatusOK || result.Attempts != 1 || count != 1 {
+		t.Fatalf("plain HTTP result = %#v, err=%v, transport calls=%d, want one successful request", result, err, count)
 	}
 }
 

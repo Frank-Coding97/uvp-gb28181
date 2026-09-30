@@ -14,21 +14,16 @@ import (
 // this package, and auth/readMetadata hands the typed Request to
 // CatalogRuntime.Dispatch. The device/channel read surface works this way.
 //
-// Plane B — a dedicated gateway path. play:live:apply and the ptz:* scopes are
-// handled by handleMedia/handlePTZ before the metadata dispatcher is ever
-// reached, because their contract is not a single-shot read: media needs
-// Prepare -> admission/quota reservation -> Apply, and PTZ owns durable
-// operation state. Their executable behaviour therefore lives in
-// MediaDispatcher / PTZDispatcher, which are wired into the gateway as gateway
-// options — not in the adapter registry.
+// Plane B — a dedicated gateway path. The ptz:* scopes are handled by
+// handlePTZ before the metadata dispatcher is ever reached because PTZ owns
+// durable operation state. Its executable behaviour therefore lives in
+// PTZDispatcher, which is wired into the gateway as a gateway option.
 //
 // Both planes gate on client.ScopePublished, which reads the immutable active
-// release. That makes the release the authority for the *whole* 12-scope
-// surface, so plane B scopes have to be publishable too. The declarations
-// below are what makes that possible.
+// release. The declarations below are what makes the PTZ operations publishable.
 const (
-	DelegatedMediaPlane = "media"
-	DelegatedPTZPlane   = "ptz"
+	DelegatedPTZPlane  = "ptz"
+	DelegatedPlayPlane = "play"
 )
 
 // Adapter keys for the plane B declarations. Like every other key in this
@@ -36,12 +31,12 @@ const (
 // never install one. They are per-scope rather than per-plane so a release
 // item still says which operation it belongs to.
 const (
-	MediaLiveApplyAdapterKey   = "delegated.media.live-apply.v1"
 	PTZPresetListAdapterKey    = "delegated.ptz.preset-list.v1"
 	PTZPresetSaveAdapterKey    = "delegated.ptz.preset-save.v1"
 	PTZPresetCallAdapterKey    = "delegated.ptz.preset-call.v1"
 	PTZPresetDeleteAdapterKey  = "delegated.ptz.preset-delete.v1"
 	PTZOperationReadAdapterKey = "delegated.ptz.operation-read.v1"
+	PlayLiveAdapterKey         = "delegated.play.live.v1"
 )
 
 // DelegatedPlaneContractVersion is separate from ResourceAdapterContractVersion
@@ -85,7 +80,6 @@ func (adapter *delegatedPlaneAdapter) Execute(_ context.Context, invocation cata
 }
 
 // NewDelegatedPlaneRegistrations returns the plane B declarations. They are
-// registered unconditionally, including when openapi.play_enabled is false or
 // no PTZ dispatcher is installed: the published scope set is a code-owned
 // contract and must not depend on which plane happens to be wired in the
 // process that performs the publication. A request for a scope whose plane is
@@ -94,7 +88,7 @@ func (adapter *delegatedPlaneAdapter) Execute(_ context.Context, invocation cata
 // available") rather than a misleading 403 capability denial.
 func NewDelegatedPlaneRegistrations() []catalogruntime.AdapterRegistration {
 	adapters := []*delegatedPlaneAdapter{
-		{key: MediaLiveApplyAdapterKey, plane: DelegatedMediaPlane},
+		{key: PlayLiveAdapterKey, plane: DelegatedPlayPlane},
 		{key: PTZPresetListAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetSaveAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetCallAdapterKey, plane: DelegatedPTZPlane},

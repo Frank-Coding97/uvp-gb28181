@@ -67,6 +67,10 @@ func (zc *ZLMConfigController) Update(c *gin.Context) {
 			zc.FailAndAbort(c, "节点不存在", err)
 			return
 		}
+		if errors.Is(err, service.ErrInvalidConfigValue) {
+			zc.FailAndAbort(c, err.Error(), err)
+			return
+		}
 		zc.FailAndAbort(c, "下发配置失败", err)
 		return
 	}

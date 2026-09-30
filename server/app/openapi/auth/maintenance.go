@@ -44,6 +44,11 @@ func (g *Gateway) maintain(ctx context.Context) error {
 	if _, err := g.admission.Cleanup(ctx); err != nil {
 		return err
 	}
+	if maintainer, ok := g.play.(PlayViewerMaintainer); ok {
+		if err := maintainer.ReconcileViewers(ctx); err != nil {
+			return err
+		}
+	}
 	_, err := audit.New(g.db, g.admission.now).Cleanup(ctx)
 	return err
 }

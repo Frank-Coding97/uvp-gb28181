@@ -178,7 +178,7 @@ var publicContractRoutes = []contractRoute{
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels", scope: "channel:list"},
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}", scope: "channel:detail"},
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", scope: "channel:status"},
-	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations", scope: "play:live:apply"},
+	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live", scope: "play:live"},
 	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:list"},
 	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:save"},
 	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", scope: "ptz:preset:call"},
@@ -230,6 +230,7 @@ func TestOpenAPIContract(t *testing.T) {
 		"<CanonicalQuery, possibly empty>",
 		"<ContentType: application/json or empty>",
 		"<BodySHA256, lowercase hexadecimal>",
+		"<Idempotency-Key, or empty>",
 		"<ServiceAudience, deployment-fixed OpenAPI audience>",
 	}, doc.SignatureContract.Canonical.Lines)
 	require.Contains(t, strings.ToLower(doc.SignatureContract.Canonical.HMACKey), "base64url")
@@ -348,7 +349,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Equal(t, 1, *schema.MinLength)
 		require.Equal(t, 128, *schema.MaxLength)
 	}
-	requestBodyRequired := route.method == "post" || route.scope == "ptz:preset:delete"
+	requestBodyRequired := (route.method == "post" && route.scope != "play:live") || route.scope == "ptz:preset:delete"
 	if requestBodyRequired {
 		require.Equal(t, "application/json", operation.ContentType)
 		require.NotNil(t, operation.RequestBody)
@@ -357,10 +358,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Contains(t, operation.RequestBody.Content, "application/json")
 		bodySchema := resolveSchema(t, doc, operation.RequestBody.Content["application/json"].Schema)
 		require.Equal(t, "object", bodySchema.Type)
-		if route.scope == "play:live:apply" {
-			require.Equal(t, []string{"protocol"}, bodySchema.Required)
-			require.Equal(t, []string{"https-flv", "wss-flv"}, bodySchema.Properties["protocol"].Enum)
-		} else if route.scope == "ptz:preset:save" {
+		if route.scope == "ptz:preset:save" {
 			require.Equal(t, []string{"presetId"}, bodySchema.Required)
 			require.Equal(t, "integer", bodySchema.Properties["presetId"].Type)
 			require.Equal(t, 1, *bodySchema.Properties["presetId"].Minimum)
@@ -429,14 +427,14 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 
 	require.NotEmpty(t, operation.Security)
 	require.Contains(t, operation.Security[0], "uvpHmac")
-	if ptzControlScope(route.scope) {
+	if conflictScope(route.scope) {
 		require.Contains(t, operation.Responses, "409")
 	} else {
 		require.NotContains(t, operation.Responses, "409", "metadata/media public contract must not classify replay as 409")
 	}
 	require.Contains(t, operation.Responses["401"].Description, "REQUEST_REPLAYED")
 	statuses := []string{"200", "400", "401", "403", "404", "405", "429", "503"}
-	if ptzControlScope(route.scope) {
+	if conflictScope(route.scope) {
 		statuses = append(statuses, "409")
 	}
 	for _, status := range statuses {
@@ -463,19 +461,8 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	require.Equal(t, "object", successSchema.Type)
 	require.Equal(t, []string{"OK"}, successSchema.Properties["code"].Enum)
 	require.Equal(t, []string{"success"}, successSchema.Properties["message"].Enum)
-	if route.scope == "play:live:apply" {
-		require.NotNil(t, operation.Enabled)
-		require.False(t, *operation.Enabled)
-		require.NotNil(t, operation.CurrentStatus)
-		require.Equal(t, 503, *operation.CurrentStatus)
-		require.NotNil(t, operation.TTLSeconds)
-		require.Equal(t, 120, *operation.TTLSeconds)
-		require.Contains(t, strings.ToLower(operation.Responses["200"].Description), "disabled")
-		require.NotNil(t, operation.Responses["200"].Enabled)
-		require.False(t, *operation.Responses["200"].Enabled)
-	}
 	errorStatuses := []string{"400", "401", "403", "404", "429", "503"}
-	if ptzControlScope(route.scope) {
+	if conflictScope(route.scope) {
 		errorStatuses = append(errorStatuses, "409")
 	}
 	for _, status := range errorStatuses {
@@ -488,6 +475,10 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 
 func ptzControlScope(scope string) bool {
 	return scope == "ptz:preset:save" || scope == "ptz:preset:call" || scope == "ptz:preset:delete"
+}
+
+func conflictScope(scope string) bool {
+	return scope == "play:live" || ptzControlScope(scope)
 }
 
 func resolveResponseSchema(t *testing.T, doc openAPIContract, response contractResponse) contractSchema {
@@ -617,12 +608,24 @@ func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
 		if !ok || gateway.Name != "gateway" || len(handler.Args) != 1 {
 			return true
 		}
-		scopeLiteral, ok := handler.Args[0].(*ast.BasicLit)
-		if !ok || scopeLiteral.Kind != token.STRING {
+		var scope string
+		switch scopeExpr := handler.Args[0].(type) {
+		case *ast.BasicLit:
+			if scopeExpr.Kind != token.STRING {
+				return true
+			}
+			var err error
+			scope, err = strconv.Unquote(scopeExpr.Value)
+			require.NoError(t, err)
+		case *ast.SelectorExpr:
+			packageName, ok := scopeExpr.X.(*ast.Ident)
+			if !ok || packageName.Name != "auth" || scopeExpr.Sel.Name != "PlayLiveScope" {
+				return true
+			}
+			scope = "play:live"
+		default:
 			return true
 		}
-		scope, err := strconv.Unquote(scopeLiteral.Value)
-		require.NoError(t, err)
 		registrations = append(registrations, publicRouteRegistration{
 			method: strings.ToLower(selector.Sel.Name),
 			path:   path,
@@ -653,7 +656,6 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 	root := gin.New()
 	require.NoError(t, routes.InstallPublicBoundary(root, nil, nil))
 	for _, route := range publicContractRoutes {
-		operation := doc.Paths[route.path][route.method]
 		path := strings.ReplaceAll(route.path, "{deviceId}", "34020000001320000001")
 		path = strings.ReplaceAll(path, "{channelId}", "34020000001320000002")
 		path = strings.ReplaceAll(path, "{presetId}", "3")
@@ -669,10 +671,6 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 		}
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
 		require.Equal(t, "SERVICE_UNAVAILABLE", envelope.Code)
-		if route.scope == "play:live:apply" {
-			require.NotNil(t, operation.Enabled)
-			require.False(t, *operation.Enabled)
-		}
 	}
 	wireServer := httptest.NewServer(root)
 	defer wireServer.Close()

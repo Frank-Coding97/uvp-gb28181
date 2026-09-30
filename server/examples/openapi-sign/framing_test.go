@@ -40,7 +40,7 @@ func TestSignedRequestUsesExactContentLengthWithoutChunkedEncoding(t *testing.T)
 	}
 	canonical, err := CanonicalString(input)
 	require.NoError(t, err)
-	require.Len(t, strings.Split(canonical, "\n"), 10)
+	require.Len(t, strings.Split(canonical, "\n"), 11)
 	require.NotContains(t, canonical, "Content-Length")
 	require.NoError(t, Verify(input, fixture.SecretKey, request.Header.Get("X-UVP-Signature")))
 }

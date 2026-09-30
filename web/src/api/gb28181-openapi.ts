@@ -39,8 +39,12 @@ export interface OpenAPIClientView {
   ak: string;
   name: string;
   ownerDeptId: number;
+  ownerDeptName?: string;
   dataScope: OpenAPIClientDataScope;
-  responsibleUserId: number;
+  responsibleUserId?: number;
+  responsibleOrgName: string;
+  responsibleName: string;
+  responsibleContact: string;
   status: OpenAPIClientStatus;
   secretVersion: number;
   authEpoch: number;
@@ -91,6 +95,8 @@ export interface OpenAPIClientListParams {
   page: number;
   pageSize: number;
   ownerDeptId?: number;
+  name?: string;
+  status?: OpenAPIClientStatus;
 }
 
 export interface OpenAPIClientDetail {
@@ -102,7 +108,12 @@ export interface OpenAPIClientCreateInput {
   name: string;
   ownerDeptId: number;
   dataScope?: OpenAPIClientDataScope;
-  responsibleUserId?: number;
+  rateLimit?: number;
+  burst?: number;
+  viewerQuota?: number;
+  responsibleOrgName?: string;
+  responsibleName?: string;
+  responsibleContact?: string;
 }
 
 export interface OpenAPIClientSecretResult {
@@ -112,7 +123,6 @@ export interface OpenAPIClientSecretResult {
 
 export interface OpenAPIClientStatusResult {
   client: OpenAPIClientView;
-  revocationStatus?: "pending";
 }
 
 export interface OpenAPIClientScopesInput {
@@ -145,22 +155,13 @@ export interface OpenAPIClientAuditPage {
   total: number;
 }
 
-export type OpenAPIRevocationState = "pending" | "closed" | "unknown" | string;
-
-export interface OpenAPIRevocationStatus {
-  status: OpenAPIRevocationState;
-  pending: number;
-  closed: number;
-}
-
 export const OPENAPI_CLIENT_SCOPES = [
   "device:list",
   "device:detail",
   "device:status",
   "channel:list",
   "channel:detail",
-  "channel:status",
-  "play:live:apply"
+  "channel:status"
 ] as const;
 
 const path = "gb28181/openapi-clients";
@@ -199,9 +200,6 @@ export const revokeOpenAPIClient = (id: number, rowVersion: number) => statusMut
 
 export const listOpenAPIClientAudits = (id: number, params: OpenAPIClientAuditListParams) =>
   http.request<OpenAPIResponse<OpenAPIClientAuditPage>>("get", baseUrlApi(`${path}/${id}/audits`), { params });
-
-export const getOpenAPIClientRevocationStatus = (id: number) =>
-  http.request<OpenAPIResponse<OpenAPIRevocationStatus>>("get", baseUrlApi(`${path}/${id}/revocation-status`));
 
 export function isOpenAPISuccess<T>(
   response: OpenAPIResponse<T> | null | undefined

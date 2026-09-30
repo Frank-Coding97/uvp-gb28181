@@ -229,7 +229,7 @@ func exampleRequestURL(baseURL, path, rawQuery string) (string, error) {
 		return "", errInvalidInput
 	}
 	base, err := url.Parse(baseURL)
-	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.Opaque != "" {
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.Opaque != "" {
 		return "", errInvalidInput
 	}
 	if base.Path != "" && base.Path != "/" || base.RawPath != "" {

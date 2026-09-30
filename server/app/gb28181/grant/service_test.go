@@ -17,6 +17,7 @@ func newGrantServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	installNotDataMask(db)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{},
 		&gbmodels.GbDeviceGrant{},

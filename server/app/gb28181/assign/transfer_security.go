@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"reflect"
 	"strings"
 	"time"
 
@@ -32,15 +31,7 @@ type TransferReceipt struct {
 	LegacyRevokedBefore time.Time `json:"-"`
 }
 
-// DeviceTransferRecorder is the durable OpenAPI side of one assignment
-// transaction. Implementations must use the supplied transaction and must not
-// perform network I/O.
-type DeviceTransferRecorder interface {
-	RecordDeviceTransfer(context.Context, *gorm.DB, string, int64) error
-}
-
-// ServiceOption customizes only deterministic transfer dependencies. The
-// default service always installs the production OpenAPI recorder.
+// ServiceOption customizes deterministic transfer dependencies.
 type ServiceOption func(*Service)
 
 func WithTransferClock(clock func() time.Time) ServiceOption {
@@ -51,34 +42,11 @@ func WithTransferClock(clock func() time.Time) ServiceOption {
 	}
 }
 
-func WithTransferRecorder(recorder DeviceTransferRecorder) ServiceOption {
-	return func(service *Service) {
-		if recorder == nil || isNilTransferRecorder(recorder) {
-			return
-		}
-		service.transferRecorder = recorder
-	}
-}
-
-func isNilTransferRecorder(recorder DeviceTransferRecorder) bool {
-	value := reflect.ValueOf(recorder)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
-}
-
 func normalizeAssignmentError(err error) error {
 	if errors.Is(err, ErrAssignmentSecurityUnavailable) {
 		return ErrAssignmentSecurityUnavailable
 	}
 	return err
-}
-
-func newDefaultTransferRecorder(db *gorm.DB, clock func() time.Time) DeviceTransferRecorder {
-	return playauth.NewOpenAPIRevocationStore(db, clock)
 }
 
 type assignmentDevice struct {
@@ -158,7 +126,7 @@ func (s *Service) transferLocked(ctx context.Context, tx *gorm.DB, device assign
 	}
 	device.AccessEpoch = accessEpoch
 	device.LegacyRevokedBefore = legacyRevokedBefore
-	if s.clock == nil || s.transferRecorder == nil || device.AccessEpoch == math.MaxInt64 {
+	if s.clock == nil || device.AccessEpoch == math.MaxInt64 {
 		return nil, ErrAssignmentSecurityUnavailable
 	}
 	now := s.clock().UTC()
@@ -187,9 +155,6 @@ func (s *Service) transferLocked(ctx context.Context, tx *gorm.DB, device assign
 		return nil, ErrAssignmentSecurityUnavailable
 	}
 	if err := cascadeAssignment(tx, device, targetDeptID); err != nil {
-		return nil, err
-	}
-	if err := s.transferRecorder.RecordDeviceTransfer(ctx, tx, device.DeviceCode, newEpoch); err != nil {
 		return nil, err
 	}
 	return &TransferReceipt{

@@ -95,20 +95,15 @@ func ManagedHookRevocation(current map[string]string, mediaServerUUID string) ma
 
 // ManagedHookTargetsNode 判断一条 hook URL 是否指向指定节点。
 //
-// 判据是 URL 的 `node` 查询参数 —— 那是 ApplyConfigForNode（`buildManagedHookURL`）
-// 必然写进去的节点标识。解析失败时退化为"整串里是否出现该 uuid"，
-// 宁可漏判（不动别人的配置）也不误判。
+// 平台回调同时带当前节点的 node 标识和 cap 凭据。
+// 自定义 URL 仅包含 UUID 或解析失败时不能视为平台所有。
 func ManagedHookTargetsNode(rawURL, mediaServerUUID string) bool {
 	if rawURL == "" || mediaServerUUID == "" {
 		return false
 	}
 	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return strings.Contains(rawURL, mediaServerUUID)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return false
 	}
-	if parsed.Query().Get("node") == mediaServerUUID {
-		return true
-	}
-	// 参数结构变了（例如被中间层重写过）时仍保留一次保守匹配。
-	return strings.Contains(rawURL, mediaServerUUID)
+	return parsed.Query().Get("node") == mediaServerUUID && parsed.Query().Get("cap") != ""
 }

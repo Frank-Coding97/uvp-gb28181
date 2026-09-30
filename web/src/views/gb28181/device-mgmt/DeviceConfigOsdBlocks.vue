@@ -39,15 +39,9 @@
  * 3. ⛔ **开关关掉时字段灰显但不隐藏**：标准里 `TimeEnable=0` 时 `TimeX/TimeY/TimeType`
  *    照样在报文里（`buildOSD` 一律带全）。配置是"还在、只是不显示"，隐藏会让用户以为配置丢了。
  */
-import { ChevronDown as ChevronDownIcon, CheckCircle2, Crosshair, Plus, Trash2 } from "@lucide/vue";
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import {
-  MAX_OSD_TEXT_LENGTH,
-  OSD_TIME_TYPE_OPTIONS,
-  POINT_AXES,
-  type ConfigSelectOption,
-  type ConfigTextItem
-} from "./deviceConfigGroups";
+import { ChevronDown as ChevronDownIcon, CheckCircle2, Clock3, Crosshair, Plus, Trash2, Type } from "@lucide/vue";
+import { nextTick, onBeforeUnmount, ref } from "vue";
+import { MAX_OSD_TEXT_LENGTH, OSD_TIME_TYPE_OPTIONS, POINT_AXES, type ConfigTextItem } from "./deviceConfigGroups";
 
 const props = withDefaults(
   defineProps<{
@@ -77,7 +71,7 @@ const props = withDefaults(
      *
      * ⭐ 底栏把这一整块摆在**画面下方**（老板要求"一个页面全展示"），那里是"矮而宽"的容器：
      *    竖排会把「叠加文字」挤到 148px 的高度之外。行版式把「时间戳」「叠加文字」并排，
-     *    画布事实压成整行的一条 —— 同一块内容，两种排法。
+     *    画布坐标基准由遮挡卡呈现，OSD 卡只保留时间戳与叠加文字配置。
      * ⛔ 别把行版式做成"另一套面板"：只换栅格，控件、写口、文案一个字都不换。
      */
     layout?: "stack" | "row";
@@ -117,43 +111,21 @@ function sampleFromTemplate(template: string, at: Date): string {
     .replace("ss", pad2(at.getSeconds()));
 }
 
-function sampleText(template: string): string {
-  return sampleFromTemplate(template, new Date());
-}
-
-/** 下拉项的文案：能渲染成实例的用实例，其余用声明里的原话。 */
-function optionText(option: ConfigSelectOption): string {
-  return option.sample ? sampleText(option.sample) : option.label;
-}
-
 /**
- * 秒级刷新**只动这几个 option 的文本节点**，不碰组件状态。
- *
- * ⛔ 别改成 `const now = ref(new Date())` + `setInterval(() => now.value = new Date())`：
- *    那会让整个块（含每行文字的输入框）每秒走一次重渲染，用户正在输入时会掉光标。
- *    这里要的是"这一秒的秒数变了"，不是"面板要重画"。
- * ⛔ 也不用 v-for 里的数组模板引用：那玩意儿在列表长度变化时不会自动收缩，
- *    而且真正的目标只是"找到这几个节点改文本"。
+ * 下拉打开时更新选项里的时间样例；关闭时不刷新，避免每秒重绘整个表单。
  */
-const rootEl = ref<HTMLElement | null>(null);
+const sampleAt = ref(new Date());
 let sampleTimer: number | undefined;
 
-function refreshSamples() {
-  const host = rootEl.value;
-  if (!host) return;
-  const at = new Date();
-  // ⛔ 用 `Array.from` 而不是直接 for...of：本仓的 tsconfig 没开 `DOM.Iterable`，
-  //    `NodeListOf` 上没有 `Symbol.iterator`（`vue-tsc` 会直接报 TS2488）。
-  for (const el of Array.from(host.querySelectorAll<HTMLElement>(".osd-fmt-sample"))) {
-    const template = el.dataset.sample;
-    if (template) el.textContent = sampleFromTemplate(template, at);
-  }
+function setTimeSelectVisible(visible: boolean) {
+  if (sampleTimer !== undefined) window.clearInterval(sampleTimer);
+  sampleTimer = undefined;
+  if (!visible) return;
+  sampleAt.value = new Date();
+  sampleTimer = window.setInterval(() => {
+    sampleAt.value = new Date();
+  }, 1000);
 }
-
-onMounted(() => {
-  refreshSamples();
-  sampleTimer = window.setInterval(refreshSamples, 1000);
-});
 
 onBeforeUnmount(() => {
   if (sampleTimer !== undefined) window.clearInterval(sampleTimer);
@@ -207,7 +179,8 @@ async function addRow() {
   commitRows([...rows(), { text: "", x: 0, y: 0, placed: false }]);
   // 焦点落到新行的输入框：点了「加一行字」却要用户再找一下输入框，是白丢一步。
   await nextTick();
-  const input = document.querySelector<HTMLInputElement>(`[data-testid="osd-text-${index}"]`);
+  const control = document.querySelector<HTMLElement>(`[data-testid="osd-text-${index}"]`);
+  const input = control instanceof HTMLInputElement ? control : control?.querySelector<HTMLInputElement>("input");
   input?.focus();
 }
 
@@ -236,11 +209,11 @@ function fmtKey(value: string): string {
 </script>
 
 <template>
-  <div ref="rootEl" class="osd-blocks" :class="{ 'is-disabled': disabled, 'is-row': layout === 'row' }">
+  <div class="osd-blocks" :class="{ 'is-disabled': disabled, 'is-row': layout === 'row' }">
     <!-- ═══════════ 对象块一：时间戳 ═══════════ -->
-    <section class="osd-card" data-testid="osd-block-time">
-      <header class="osd-card-head">
-        <span class="osd-card-title">时间戳</span>
+    <section class="osd-card" :class="{ 'linked-card': layout === 'row' }" data-testid="osd-block-time">
+      <header class="osd-card-head" :class="{ 'linked-card-hd': layout === 'row' }">
+        <span class="osd-card-title" :class="{ 'section-title': layout === 'row' }"><Clock3 :size="13" />时间戳</span>
         <!-- ⛔ 关闭 ≠ 配置丢了：字段灰显保留，状态写在标题这一行。 -->
         <span v-if="!timeEnable" class="osd-card-off" data-testid="osd-time-off">已关闭</span>
         <button
@@ -262,27 +235,25 @@ function fmtKey(value: string): string {
         <div class="osd-row" data-testid="osd-time-format">
           <span class="osd-row-label">格式</span>
           <div class="osd-row-control">
-            <span class="osd-select">
-              <select
-                :value="timeType"
-                :disabled="disabled"
-                aria-label="时间格式"
-                data-testid="osd-fmt-select"
-                @change="emit('update:timeType', ($event.target as HTMLSelectElement).value)"
+            <a-select
+              :model-value="timeType"
+              class="osd-select"
+              size="small"
+              :disabled="disabled"
+              aria-label="时间格式"
+              data-testid="osd-fmt-select"
+              @popup-visible-change="setTimeSelectVisible"
+              @change="emit('update:timeType', String($event ?? ''))"
+            >
+              <a-option
+                v-for="option in OSD_TIME_TYPE_OPTIONS"
+                :key="option.value"
+                :value="option.value"
+                :data-testid="`osd-fmt-${fmtKey(option.value)}`"
               >
-                <option
-                  v-for="option in OSD_TIME_TYPE_OPTIONS"
-                  :key="option.value"
-                  :value="option.value"
-                  :class="{ 'osd-fmt-sample': !!option.sample }"
-                  :data-sample="option.sample || undefined"
-                  :data-testid="`osd-fmt-${fmtKey(option.value)}`"
-                >
-                  {{ optionText(option) }}
-                </option>
-              </select>
-              <ChevronDownIcon class="osd-select-caret" :size="12" />
-            </span>
+                {{ option.sample ? sampleFromTemplate(option.sample, sampleAt) : option.label }}
+              </a-option>
+            </a-select>
           </div>
         </div>
 
@@ -330,15 +301,14 @@ function fmtKey(value: string): string {
         <div v-if="posExpanded || !canvasLinked" class="osd-exact" data-testid="osd-pos-exact">
           <label v-for="(axis, index) in POINT_AXES" :key="axis" class="osd-exact-axis">
             <span>{{ axis }}</span>
-            <input
+            <a-input
               class="osd-input is-num"
-              type="text"
+              :model-value="posValue(index === 0 ? 'x' : 'y')"
               inputmode="numeric"
               :disabled="disabled"
-              :value="posValue(index === 0 ? 'x' : 'y')"
               :aria-label="`时间戳 ${axis}`"
               :data-testid="`osd-time-${index === 0 ? 'x' : 'y'}`"
-              @change="commitAxis(index === 0 ? 'x' : 'y', ($event.target as HTMLInputElement).value)"
+              @change="commitAxis(index === 0 ? 'x' : 'y', $event)"
             />
           </label>
         </div>
@@ -346,9 +316,9 @@ function fmtKey(value: string): string {
     </section>
 
     <!-- ═══════════ 对象块二：叠加文字 ═══════════ -->
-    <section class="osd-card" data-testid="osd-block-text">
-      <header class="osd-card-head">
-        <span class="osd-card-title">叠加文字</span>
+    <section class="osd-card" :class="{ 'linked-card': layout === 'row' }" data-testid="osd-block-text">
+      <header class="osd-card-head" :class="{ 'linked-card-hd': layout === 'row' }">
+        <span class="osd-card-title" :class="{ 'section-title': layout === 'row' }"><Type :size="13" />叠加文字</span>
         <span class="osd-card-count" data-testid="osd-text-count">{{ rows().length }}/{{ maxItems }}</span>
         <span v-if="!textEnable" class="osd-card-off" data-testid="osd-text-off">已关闭</span>
         <button
@@ -371,16 +341,15 @@ function fmtKey(value: string): string {
         <div v-for="(row, index) in rows()" :key="index" class="osd-text-row" :data-testid="`osd-text-row-${index}`">
           <!-- 编号与画布锚点同源：画面上那个圆点里的数字就是这个 -->
           <span class="osd-index" :class="{ 'is-unplaced': isUnplaced(row) }">{{ index + 1 }}</span>
-          <input
+          <a-input
             class="osd-input"
-            type="text"
-            :value="row.text"
+            :model-value="row.text"
             :maxlength="maxLength"
             :disabled="disabled"
             :placeholder="`第 ${index + 1} 条文字`"
             :aria-label="`第 ${index + 1} 条叠加文字`"
             :data-testid="`osd-text-${index}`"
-            @change="setText(index, ($event.target as HTMLInputElement).value)"
+            @change="setText(index, $event)"
           />
           <!-- 字符计数就地显示：原实现要等 `buildOSD` 拒发才说「第 N 条超 32 个字符」，用户得回去找 -->
           <span class="osd-charcount" :data-testid="`osd-charcount-${index}`"> {{ charCount(row.text) }}/{{ maxLength }} </span>
@@ -423,9 +392,9 @@ function fmtKey(value: string): string {
 
     <!-- ═══════════ 只读事实：坐标画布 ═══════════
                      这两条原先是可编辑滑杆，实测设备**拒收**平台改写（写 2560×1440 也回 200 OK、
-                     回读仍是 704×576），留着就是一个点了没用的控件。它们真正的身份是
-                     **遮挡坐标的基准 + 下发这一组的必需值**，所以只能读它、照它算。 -->
-    <div class="osd-row osd-canvas" :class="{ 'is-missing': !canvas }" data-testid="osd-canvas">
+                     回读仍是 704×576），留着就是一个点了没用的控件。侧栏配置里保留这条只读事实；
+                     播放控制台由遮挡卡显示同一坐标基准。 -->
+    <div v-if="layout !== 'row'" class="osd-row osd-canvas" :class="{ 'is-missing': !canvas }" data-testid="osd-canvas">
       <span class="osd-row-label">画布</span>
       <div class="osd-row-control">
         <span v-if="canvas" class="osd-canvas-value" data-testid="osd-canvas-value">
@@ -462,13 +431,15 @@ export default { name: "DeviceConfigOsdBlocks" };
       （同本仓「嵌入形态宿主必须给定高」那条契约）。 */
 .osd-blocks.is-row {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 6px 8px;
   height: 100%;
   min-height: 0;
 }
 .osd-blocks.is-row > .osd-card {
+  align-self: stretch;
+  height: auto;
   min-height: 0;
 }
 .osd-blocks.is-row > .osd-card > .osd-card-body {
@@ -476,14 +447,8 @@ export default { name: "DeviceConfigOsdBlocks" };
   min-height: 0;
   overflow-y: auto;
 }
-.osd-blocks.is-row > .osd-canvas {
-  grid-column: 1 / -1;
-}
 .osd-blocks.is-row .osd-card {
-  gap: 3px;
-}
-.osd-blocks.is-row .osd-card-body {
-  gap: 3px;
+  gap: 8px;
 }
 
 /* 窄列里把标签列收到 2 个字（格式 / 位置 / 画布）—— 省下的宽度全给下拉框。 */
@@ -494,16 +459,13 @@ export default { name: "DeviceConfigOsdBlocks" };
   gap: 4px;
 }
 
-/* 画布没读到时的长句提示留给宽度够的地方（侧栏）：
-   底栏里旁边那格「画面遮挡」就写着同一份基准，这里只剩「未读到」标签。 */
-.osd-blocks.is-row .osd-canvas-hint {
-  display: none;
-}
-
 .osd-card {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+.osd-blocks:not(.is-row) .osd-card {
   padding: 7px 8px 8px;
   background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
@@ -517,9 +479,16 @@ export default { name: "DeviceConfigOsdBlocks" };
 }
 
 .osd-card-title {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
   font-size: 12px;
   font-weight: 600;
   color: var(--uvp-text-primary);
+}
+
+.osd-blocks.is-row .osd-card-title {
+  font-size: 11.5px;
 }
 
 .osd-card-count {
@@ -573,6 +542,14 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 }
 
+:global(body[arco-theme="dark"]) .osd-switch.is-on {
+  background: #2563eb;
+}
+
+:global(body[arco-theme="dark"]) .osd-switch.is-on i {
+  background: #ffffff;
+}
+
 .osd-card-body {
   display: flex;
   flex-direction: column;
@@ -609,45 +586,25 @@ export default { name: "DeviceConfigOsdBlocks" };
   min-width: 0;
 }
 
-/* ─── 下拉框（原生 select + 自绘箭头） ─── */
+/* ─── 时间格式 Arco 下拉 ─── */
 
 .osd-select {
-  position: relative;
-  display: block;
   flex: 1;
+  width: 100%;
   min-width: 0;
-
-  select {
-    width: 100%;
-    height: 24px;
-    padding: 0 22px 0 7px;
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 11.5px;
-    color: var(--uvp-text-primary);
-    appearance: none;
-    cursor: pointer;
-    background: var(--uvp-dialog-control-bg, #ffffff);
-    border: 1px solid var(--uvp-panel-border, #dbe4f0);
-    border-radius: 4px;
-
-    &:focus {
-      outline: none;
-      border-color: var(--uvp-brand);
-    }
-
-    &:disabled {
-      cursor: not-allowed;
-    }
-  }
 }
 
-.osd-select-caret {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  color: var(--uvp-text-tertiary);
-  pointer-events: none;
-  transform: translateY(-50%);
+.osd-select :deep(.arco-select-view-single) {
+  height: 24px;
+  font-size: 11.5px;
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border-color: var(--uvp-panel-border, #dbe4f0);
+  border-radius: 4px;
+}
+
+.osd-select :deep(.arco-select-view-single:focus-within) {
+  border-color: var(--uvp-brand);
 }
 
 /* ─── 位置行 ─── */
@@ -740,22 +697,29 @@ export default { name: "DeviceConfigOsdBlocks" };
   width: 100%;
   min-width: 0;
   height: 22px;
-  padding: 0 7px;
   font-size: 12px;
   color: var(--uvp-text-primary);
   background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
   border-radius: 4px;
+}
 
-  &:focus {
-    outline: none;
-    border-color: var(--uvp-brand);
-  }
+.osd-input :deep(.arco-input) {
+  padding: 0 7px;
+  font-size: 12px;
+  color: var(--uvp-text-primary);
+}
 
-  &.is-num {
-    width: 62px;
-    text-align: right;
-  }
+.osd-input:focus-within {
+  border-color: var(--uvp-brand);
+}
+
+.osd-input.is-num {
+  width: 62px;
+}
+
+.osd-input.is-num :deep(.arco-input) {
+  text-align: right;
 }
 
 /* ─── 叠加文字列表 ─── */

@@ -23,3 +23,65 @@
 {"id": 58, "name": "遥控半球", "value": "5", "status": 1, "dict_id": 5}
 {"id": 59, "name": "多目设备的全景/拼接通道", "value": "6", "status": 1, "dict_id": 5}
 {"id": 60, "name": "多目设备的分割通道", "value": "7", "status": 1, "dict_id": 5}
+{"id": 61, "name": "媒体已就绪", "value": "ready", "status": 1, "dict_id": 7}
+{"id": 62, "name": "媒体失败", "value": "failed", "status": 1, "dict_id": 7}
+{"id": 63, "name": "媒体已停止", "value": "stopped", "status": 1, "dict_id": 7}
+{"id": 64, "name": "媒体未知", "value": "unknown", "status": 1, "dict_id": 7}
+{"id": 65, "name": "已见首帧", "value": "first_frame", "status": 1, "dict_id": 8}
+{"id": 66, "name": "客户端失败", "value": "failed", "status": 1, "dict_id": 8}
+{"id": 67, "name": "客户端未知", "value": "unknown", "status": 1, "dict_id": 8}
+{"id": 68, "name": "未知", "value": "unknown", "status": 1, "dict_id": 9}
+{"id": 69, "name": "请求接入", "value": "request", "status": 1, "dict_id": 9}
+{"id": 70, "name": "参数校验", "value": "validation", "status": 1, "dict_id": 9}
+{"id": 71, "name": "节点选择", "value": "node", "status": 1, "dict_id": 9}
+{"id": 72, "name": "RTP 分配", "value": "rtp", "status": 1, "dict_id": 9}
+{"id": 73, "name": "INVITE 信令", "value": "invite", "status": 1, "dict_id": 9}
+{"id": 74, "name": "媒体就绪", "value": "media", "status": 1, "dict_id": 9}
+{"id": 75, "name": "播放授权", "value": "authorization", "status": 1, "dict_id": 9}
+{"id": 76, "name": "客户端播放", "value": "client", "status": 1, "dict_id": 9}
+{"id": 77, "name": "停止播放", "value": "stop", "status": 1, "dict_id": 9}
+{"id": 78, "name": "资源清理", "value": "cleanup", "status": 1, "dict_id": 9}
+{"id": 79, "name": "进行中", "value": "in_progress", "status": 1, "dict_id": 10}
+{"id": 80, "name": "已完成", "value": "completed", "status": 1, "dict_id": 10}
+{"id": 81, "name": "已失败", "value": "failed", "status": 1, "dict_id": 10}
+{"id": 82, "name": "超时未结束", "value": "stale_in_progress", "status": 1, "dict_id": 10}
+{"id": 83, "name": "未知", "value": "unknown", "status": 1, "dict_id": 11}
+{"id": 84, "name": "进行中", "value": "in_progress", "status": 1, "dict_id": 11}
+{"id": 85, "name": "已证实", "value": "confirmed", "status": 1, "dict_id": 11}
+{"id": 86, "name": "失败", "value": "failed", "status": 1, "dict_id": 11}
+{"id": 87, "name": "不适用", "value": "not_applicable", "status": 1, "dict_id": 11}
+{"id": 88, "name": "HTTP 请求", "value": "http", "status": 1, "dict_id": 12}
+{"id": 89, "name": "播放服务", "value": "play_service", "status": 1, "dict_id": 12}
+{"id": 90, "name": "SIP 信令", "value": "sip", "status": 1, "dict_id": 12}
+{"id": 91, "name": "ZLM 回调", "value": "zlm_hook", "status": 1, "dict_id": 12}
+{"id": 92, "name": "浏览器客户端", "value": "client", "status": 1, "dict_id": 12}
+{"id": 93, "name": "生命周期保留任务", "value": "retention", "status": 1, "dict_id": 12}
+{"id": 94, "name": "收到播放请求", "value": "request_received", "status": 1, "dict_id": 13}
+{"id": 95, "name": "参数校验通过", "value": "validation_succeeded", "status": 1, "dict_id": 13}
+{"id": 96, "name": "参数校验失败", "value": "validation_failed", "status": 1, "dict_id": 13}
+{"id": 97, "name": "已选择节点", "value": "node_selected", "status": 1, "dict_id": 13}
+{"id": 98, "name": "节点选择失败", "value": "node_selection_failed", "status": 1, "dict_id": 13}
+{"id": 99, "name": "已分配 RTP", "value": "rtp_allocated", "status": 1, "dict_id": 13}
+{"id": 100, "name": "RTP 分配失败", "value": "rtp_allocation_failed", "status": 1, "dict_id": 13}
+{"id": 101, "name": "无需分配 RTP", "value": "rtp_not_applicable", "status": 1, "dict_id": 13}
+{"id": 102, "name": "已发送 INVITE", "value": "invite_sent", "status": 1, "dict_id": 13}
+{"id": 103, "name": "INVITE 已接受", "value": "invite_accepted", "status": 1, "dict_id": 13}
+{"id": 104, "name": "INVITE 被拒绝", "value": "invite_rejected", "status": 1, "dict_id": 13}
+{"id": 105, "name": "INVITE 超时", "value": "invite_timeout", "status": 1, "dict_id": 13}
+{"id": 106, "name": "无需发送 INVITE", "value": "invite_not_applicable", "status": 1, "dict_id": 13}
+{"id": 107, "name": "媒体流已就绪", "value": "media_ready", "status": 1, "dict_id": 13}
+{"id": 108, "name": "复用已有媒体流", "value": "reuse_media_ready", "status": 1, "dict_id": 13}
+{"id": 109, "name": "媒体流超时", "value": "media_timeout", "status": 1, "dict_id": 13}
+{"id": 110, "name": "已下发播放地址", "value": "play_url_issued", "status": 1, "dict_id": 13}
+{"id": 111, "name": "播放授权失败", "value": "authorization_failed", "status": 1, "dict_id": 13}
+{"id": 112, "name": "客户端已见首帧", "value": "first_frame", "status": 1, "dict_id": 13}
+{"id": 113, "name": "客户端播放器错误", "value": "player_error", "status": 1, "dict_id": 13}
+{"id": 114, "name": "已请求停止播放", "value": "stop_requested", "status": 1, "dict_id": 13}
+{"id": 115, "name": "资源清理完成", "value": "cleanup_completed", "status": 1, "dict_id": 13}
+{"id": 116, "name": "资源清理部分失败", "value": "cleanup_partial_failure", "status": 1, "dict_id": 13}
+{"id": 117, "name": "播放生命周期超时", "value": "stale_in_progress", "status": 1, "dict_id": 13}
+{"id": 118, "name": "ZLM 流已注册", "value": "hook_stream_registered", "status": 1, "dict_id": 13}
+{"id": 119, "name": "ZLM 流已注销", "value": "hook_stream_unregistered", "status": 1, "dict_id": 13}
+{"id": 120, "name": "ZLM 已上报流量", "value": "hook_flow_reported", "status": 1, "dict_id": 13}
+{"id": 121, "name": "ZLM 无阅读者", "value": "hook_none_reader", "status": 1, "dict_id": 13}
+{"id": 122, "name": "ZLM RTP 超时", "value": "hook_rtp_timeout", "status": 1, "dict_id": 13}

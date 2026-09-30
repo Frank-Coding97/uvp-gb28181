@@ -204,7 +204,8 @@ func (s *Service) terminateAuthorizationGeneration(generation uint64) {
 func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*Result, error) {
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
-	if !settings.Enabled {
+	openAPIRequest := req.OpenAPIClientID > 0 && req.OpenAPIGrantID != ""
+	if !settings.Enabled && !openAPIRequest {
 		result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID})
 		if err == nil && result != nil {
 			s.recordLifecycle(ctx, Request{DeviceID: deviceID, ChannelID: channelID, LifecycleID: req.LifecycleID}, LifecycleEvent{Stage: StageAuthorization, EventName: EventPlayURLIssued, FactState: FactConfirmed, Source: SourcePlayService, StreamID: result.StreamID})
@@ -265,6 +266,8 @@ func (s *Service) authorizePreparedResult(
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = clientIP
 	binding.DeviceEpoch = req.DeviceEpoch
+	binding.OpenAPIClientID = req.OpenAPIClientID
+	binding.OpenAPIGrantID = req.OpenAPIGrantID
 	grant, err := issuer.BindContext(ctx, prepared, binding)
 	if err != nil {
 		return ErrPlayAuthorizationUnavailable

@@ -160,6 +160,24 @@ type PlayAuthorizer interface {
 	VerifyContext(context.Context, string, playauth.Binding) (playauth.Claims, error)
 }
 
+// OpenAPIViewerBinder binds an already verified unified OpenAPI token to the
+// real ZLM player identity. It is deliberately narrower than the public API.
+type OpenAPIViewerBinder interface {
+	BindViewer(context.Context, playauth.Claims, playauth.OpenAPIViewerBinding) error
+}
+
+type OpenAPIFlowObserver interface {
+	CloseViewer(context.Context, playauth.OpenAPIFlowReport) error
+}
+
+// OpenAPIRuntimeIdentityResolver reads the current ZLM process identity from
+// a trusted control-plane connection. ZLM's standard on_play/on_flow_report
+// payloads do not include bootNonce, so HookController must not require that
+// client-controlled field to be present.
+type OpenAPIRuntimeIdentityResolver interface {
+	ResolveOpenAPIRuntimeIdentity(context.Context, string) (string, error)
+}
+
 type PlaybackMediaContextResolver interface {
 	ResolvePlaybackMediaContext(app, stream, mediaServerID string) (playauth.Binding, error)
 }
@@ -188,34 +206,33 @@ var ErrPreviewRuntimeIncomplete = errors.New("management preview runtime must pr
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier        *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper         PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	policy          NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
-	leaseChecker    SourceLeaseChecker   // 级联 source lease,可为 nil
-	collector       KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver        NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
-	binder          StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
-	restartMu       sync.RWMutex
-	restartNotifier RestartStartedNotifier
-	recordMP4       RecordMP4Indexer
-	recordResolver  NodeUUIDResolver
-	observer        StreamObserver
-	playbackMedia   PlaybackMediaSink
-	lifecycle       play.StreamLifecycleRecorder
-	flowMu          sync.RWMutex
-	flowResolver    FlowReportNodeResolver
-	flowCollector   FlowCollector
-	talkResolver    NodeUUIDResolver
-	talkAuthorizer  TalkPublishAuthorizer
-	talkObserver    TalkStreamObserver
-	talkMu          sync.RWMutex
-	playAuthorizer  PlayAuthorizer
-	playResolver    PlaybackMediaContextResolver
-	playAuthMu      sync.RWMutex
-
-	openAPIPlayVerifier OpenAPIPlayTokenVerifier
-	openAPIPlayBinder   OpenAPIViewerBinder
-	openAPIFlowObserver OpenAPIFlowObserver
+	notifier                       *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper                        PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy                         NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	leaseChecker                   SourceLeaseChecker   // 级联 source lease,可为 nil
+	collector                      KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver                       NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder                         StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	restartMu                      sync.RWMutex
+	restartNotifier                RestartStartedNotifier
+	recordMP4                      RecordMP4Indexer
+	recordResolver                 NodeUUIDResolver
+	observer                       StreamObserver
+	playbackMedia                  PlaybackMediaSink
+	lifecycle                      play.StreamLifecycleRecorder
+	flowMu                         sync.RWMutex
+	flowResolver                   FlowReportNodeResolver
+	flowCollector                  FlowCollector
+	talkResolver                   NodeUUIDResolver
+	talkAuthorizer                 TalkPublishAuthorizer
+	talkObserver                   TalkStreamObserver
+	talkMu                         sync.RWMutex
+	playAuthorizer                 PlayAuthorizer
+	playResolver                   PlaybackMediaContextResolver
+	openAPIViewerBinder            OpenAPIViewerBinder
+	openAPIFlowObserver            OpenAPIFlowObserver
+	openAPIRuntimeIdentityResolver OpenAPIRuntimeIdentityResolver
+	playAuthMu                     sync.RWMutex
 
 	previewClassifier management.PreviewClassifier
 	previewVerifier   management.PreviewTokenVerifier
@@ -314,6 +331,24 @@ func (h *HookController) SetPlaybackMediaContextResolver(resolver PlaybackMediaC
 	h.playAuthMu.Lock()
 	defer h.playAuthMu.Unlock()
 	h.playResolver = resolver
+}
+
+func (h *HookController) SetOpenAPIViewerBinder(binder OpenAPIViewerBinder) {
+	h.playAuthMu.Lock()
+	defer h.playAuthMu.Unlock()
+	h.openAPIViewerBinder = binder
+}
+
+func (h *HookController) SetOpenAPIFlowObserver(observer OpenAPIFlowObserver) {
+	h.playAuthMu.Lock()
+	defer h.playAuthMu.Unlock()
+	h.openAPIFlowObserver = observer
+}
+
+func (h *HookController) SetOpenAPIRuntimeIdentityResolver(resolver OpenAPIRuntimeIdentityResolver) {
+	h.playAuthMu.Lock()
+	defer h.playAuthMu.Unlock()
+	h.openAPIRuntimeIdentityResolver = resolver
 }
 
 // SetPreviewRuntime enables the explicit management preview boundary. Both
@@ -783,13 +818,13 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		h.ignoreFlowReport(c, body.Stream, "payload_node_mismatch")
 		return
 	}
+	h.observeOpenAPIFlow(c, body)
 	if body.App == "rtp" && body.Stream != "" {
 		h.recordLifecycleFact(c, body.Stream, body.MediaServerID, play.LifecycleEvent{
 			Stage: play.StageMedia, EventName: play.EventHookFlowReported, FactState: play.FactConfirmed,
 			Source: play.SourceZLMHook, StreamID: body.Stream,
 		})
 	}
-	h.observeOpenAPIFlow(c, body)
 	resolver, collector := h.flowDependencies()
 	if resolver == nil || collector == nil {
 		hookOK(c)
@@ -943,13 +978,10 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		h.denyPlayback(c, body.Stream, "wrong_resource", "hook payload node mismatch")
 		return
 	}
-	if h.handleOpenAPIPlay(c, body) {
-		return
-	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
 		class, playToken, mediaToken, ok := classifyPreviewHookParams(classifier, c.Request.Context(), body)
 		if !ok {
-			h.denyPlayback(c, body.Stream, "tampered", "invalid playback authorization")
+			h.denyPlayback(c, body.Stream, "preview_classification_failed", "invalid playback authorization")
 			return
 		}
 		switch class {
@@ -997,7 +1029,13 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		return
 	}
 	settings := gbconfig.CurrentPlayAuthSettings()
-	if !settings.Enabled {
+	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+	if err != nil {
+		h.denyPlayback(c, body.Stream, "tampered", "invalid playback authorization")
+		return
+	}
+	playToken, hasPlayToken := singleValue(params, playauth.QueryParameter)
+	if !settings.Enabled && !hasPlayToken {
 		hookOK(c)
 		return
 	}
@@ -1014,11 +1052,6 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		h.denyPlayback(c, body.Stream, "unavailable", "playback authorization unavailable")
 		return
 	}
-	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
-	if err != nil {
-		h.denyPlayback(c, body.Stream, "tampered", "invalid playback authorization")
-		return
-	}
 	binding, err := resolver.ResolvePlaybackMediaContext(body.App, body.Stream, body.MediaServerID)
 	if errors.Is(err, play.ErrPlaybackMediaNotCurrent) {
 		coldResolver, ok := resolver.(ColdPlaybackMediaContextResolver)
@@ -1031,13 +1064,12 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		}
 	}
 	if err != nil {
-		h.denyPlayback(c, body.Stream, "wrong_resource", "playback authorization denied")
+		h.denyPlayback(c, body.Stream, "media_context_invalid", "playback authorization denied")
 		return
 	}
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = body.IP
-	playToken, ok := singleValue(params, playauth.QueryParameter)
-	if !ok {
+	if !hasPlayToken {
 		h.denyPlayback(c, body.Stream, "missing", "invalid playback authorization")
 		return
 	}
@@ -1053,6 +1085,33 @@ func (h *HookController) OnPlay(c *gin.Context) {
 			return
 		}
 	}
+	if claims.OpenAPIClientID > 0 {
+		h.playAuthMu.RLock()
+		binder := h.openAPIViewerBinder
+		identityResolver := h.openAPIRuntimeIdentityResolver
+		h.playAuthMu.RUnlock()
+		protocol, ok := openAPIHookProtocol(body.Protocol, body.Schema)
+		if !ok || binder == nil || body.ID == "" || claims.MediaServerID != body.MediaServerID || claims.MediaGeneration == 0 {
+			h.denyPlayback(c, body.Stream, "openapi_binding_invalid", "playback authorization denied")
+			return
+		}
+		bootNonce, ok := h.resolveOpenAPIBootNonce(c.Request.Context(), identityResolver, body.MediaServerID, body.BootNonce)
+		if !ok {
+			h.denyPlayback(c, body.Stream, "openapi_runtime_identity_unavailable", "playback authorization denied")
+			return
+		}
+		bindCtx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+		bindErr := binder.BindViewer(bindCtx, claims, playauth.OpenAPIViewerBinding{
+			NodeUUID: body.MediaServerID, BootNonce: bootNonce, Identifier: body.ID,
+			Protocol: protocol, Schema: body.Schema, VHost: body.VHost, App: body.App,
+			Stream: body.Stream, MediaGeneration: claims.MediaGeneration,
+		})
+		cancel()
+		if bindErr != nil {
+			h.denyPlayback(c, body.Stream, "openapi_viewer_binding_failed", "playback authorization denied")
+			return
+		}
+	}
 	hookLog(c).Info("播放鉴权 Hook 已放行",
 		zap.String("event", "gb28181.hook.play.authorized"),
 		zap.String("result", "verified"),
@@ -1060,6 +1119,68 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		zap.String("media_server_id", body.MediaServerID),
 		zap.String("correlation_id", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	hookOK(c)
+}
+
+func openAPIHookProtocol(protocol, schema string) (string, bool) {
+	if protocol == "" {
+		protocol = schema
+	}
+	switch protocol {
+	case "http":
+		return "http-flv", true
+	case "https":
+		return "https-flv", true
+	case "ws":
+		return "ws-flv", true
+	case "wss":
+		return "wss-flv", true
+	default:
+		return "", false
+	}
+}
+
+func (h *HookController) observeOpenAPIFlow(c *gin.Context, body onFlowReportBody) {
+	if !body.Player || body.ID == "" || body.MediaServerID == "" {
+		return
+	}
+	protocol, ok := openAPIHookProtocol(body.Protocol, body.Schema)
+	if !ok {
+		return
+	}
+	h.playAuthMu.RLock()
+	observer := h.openAPIFlowObserver
+	identityResolver := h.openAPIRuntimeIdentityResolver
+	identity, authenticated := AuthenticatedHookNode(c)
+	h.playAuthMu.RUnlock()
+	if observer == nil || !authenticated || identity.MediaServerUUID != body.MediaServerID {
+		return
+	}
+	bootNonce, ok := h.resolveOpenAPIBootNonce(c.Request.Context(), identityResolver, body.MediaServerID, body.BootNonce)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+	err := observer.CloseViewer(ctx, playauth.OpenAPIFlowReport{
+		NodeUUID: body.MediaServerID, BootNonce: bootNonce, Identifier: body.ID,
+		Protocol: protocol, Schema: body.Schema, VHost: body.VHost, App: body.App, Stream: body.Stream, Player: true,
+	})
+	cancel()
+	if err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("OpenAPI viewer close failed", zap.String("event", "gb28181.hook.openapi_viewer.close_failed"))
+	}
+}
+
+func (h *HookController) resolveOpenAPIBootNonce(ctx context.Context, resolver OpenAPIRuntimeIdentityResolver, mediaServerID, supplied string) (string, bool) {
+	if resolver == nil {
+		return supplied, supplied != ""
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	bootNonce, err := resolver.ResolveOpenAPIRuntimeIdentity(resolveCtx, mediaServerID)
+	if err != nil || bootNonce == "" {
+		return "", false
+	}
+	return bootNonce, true
 }
 
 func (h *HookController) previewDependencies() (management.PreviewClassifier, management.PreviewTokenVerifier) {
@@ -1351,6 +1472,12 @@ func (h *HookController) OnServerStarted(c *gin.Context) {
 	h.restartMu.RUnlock()
 	if notifier != nil {
 		notifier.OnNodeStarted(nodeID)
+	}
+	h.playAuthMu.RLock()
+	identityResolver, _ := h.openAPIRuntimeIdentityResolver.(interface{ OnNodeStarted(int64) })
+	h.playAuthMu.RUnlock()
+	if identityResolver != nil {
+		identityResolver.OnNodeStarted(nodeID)
 	}
 	hookOK(c)
 }

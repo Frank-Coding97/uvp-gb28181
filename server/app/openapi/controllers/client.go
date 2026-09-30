@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,22 +25,14 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
-type RevocationView struct {
-	Status  string `json:"status"`
-	Pending int64  `json:"pending"`
-	Closed  int64  `json:"closed"`
-}
-type RevocationStatusReader func(context.Context, int64) (RevocationView, error)
-
 type ClientAdminController struct {
 	db          *gorm.DB
 	service     *client.Service
 	permissions client.ManagementPermissionAuthorizer
-	revocation  RevocationStatusReader
 }
 
-func NewClientAdminController(db *gorm.DB, service *client.Service, permissions client.ManagementPermissionAuthorizer, revocation RevocationStatusReader) *ClientAdminController {
-	return &ClientAdminController{db: db, service: service, permissions: permissions, revocation: revocation}
+func NewClientAdminController(db *gorm.DB, service *client.Service, permissions client.ManagementPermissionAuthorizer, _ ...any) *ClientAdminController {
+	return &ClientAdminController{db: db, service: service, permissions: permissions}
 }
 
 // Handler is mounted only by the explicit protected admin registrar. Claims are
@@ -109,12 +100,20 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 		}
 		if action == "create" {
 			var input struct {
-				Name              string `json:"name"`
-				OwnerDeptID       uint   `json:"ownerDeptId"`
-				DataScope         int8   `json:"dataScope"`
-				ResponsibleUserID uint   `json:"responsibleUserId"`
+				Name               string `json:"name"`
+				OwnerDeptID        uint   `json:"ownerDeptId"`
+				DataScope          int8   `json:"dataScope"`
+				RateLimit          int    `json:"rateLimit"`
+				Burst              int    `json:"burst"`
+				ViewerQuota        int    `json:"viewerQuota"`
+				ResponsibleUserID  uint   `json:"responsibleUserId"`
+				ResponsibleOrgName string `json:"responsibleOrgName"`
+				ResponsibleName    string `json:"responsibleName"`
+				ResponsibleContact string `json:"responsibleContact"`
 			}
-			if err := decodeAdminBody(c, &input, "name", "ownerDeptId", "dataScope", "responsibleUserId"); err != nil || utf8.RuneCountInString(input.Name) > 100 {
+			if err := decodeAdminBody(c, &input, "name", "ownerDeptId", "dataScope", "rateLimit", "burst", "viewerQuota", "responsibleUserId", "responsibleOrgName", "responsibleName", "responsibleContact"); err != nil ||
+				utf8.RuneCountInString(input.Name) > 100 || utf8.RuneCountInString(input.ResponsibleOrgName) > 200 ||
+				utf8.RuneCountInString(input.ResponsibleName) > 100 || utf8.RuneCountInString(input.ResponsibleContact) > 100 {
 				adminError(c, client.ErrInvalidArgument)
 				return
 			}
@@ -122,7 +121,10 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 				adminError(c, client.ErrNotFound)
 				return
 			}
-			view, secret, err := a.service.Create(c.Request.Context(), client.CreateRequest{Name: input.Name, OwnerDeptID: input.OwnerDeptID, DataScope: input.DataScope, ResponsibleUserID: input.ResponsibleUserID, CreatedBy: actor})
+			view, secret, err := a.service.Create(c.Request.Context(), client.CreateRequest{
+				Name: input.Name, OwnerDeptID: input.OwnerDeptID, DataScope: input.DataScope, RateLimit: input.RateLimit, Burst: input.Burst, ViewerQuota: input.ViewerQuota, ResponsibleUserID: input.ResponsibleUserID,
+				ResponsibleOrgName: input.ResponsibleOrgName, ResponsibleName: input.ResponsibleName, ResponsibleContact: input.ResponsibleContact, CreatedBy: actor,
+			})
 			if err != nil {
 				adminError(c, err)
 				return
@@ -152,20 +154,18 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 				adminError(c, err)
 				return
 			}
+			var ownerDepartment struct {
+				Name string
+			}
+			if err := a.db.WithContext(c.Request.Context()).Table("sys_department").Select("name").Where("id = ?", view.OwnerDeptID).Take(&ownerDepartment).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				adminError(c, err)
+				return
+			} else if ownerDepartment.Name != "" {
+				view.OwnerDeptName = ownerDepartment.Name
+			}
 			writeOpenAPISuccess(c, gin.H{"client": view, "scopes": scopes})
 		case "audits":
 			a.audits(c, id)
-		case "revocation-status":
-			if a.revocation == nil {
-				adminError(c, client.ErrRevocationUnavailable)
-				return
-			}
-			status, err := a.revocation(c.Request.Context(), id)
-			if err != nil {
-				adminError(c, err)
-				return
-			}
-			writeOpenAPISuccess(c, status)
 		case "scopes":
 			var input struct {
 				RowVersion int64    `json:"rowVersion"`
@@ -204,11 +204,7 @@ func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
 				adminError(c, err)
 				return
 			}
-			if action != "enable" {
-				c.JSON(http.StatusAccepted, openAPIResponse{Code: "OK", Message: "accepted", RequestID: requestID(c), Data: gin.H{"client": updated, "revocationStatus": "pending"}})
-			} else {
-				writeOpenAPISuccess(c, gin.H{"client": updated})
-			}
+			writeOpenAPISuccess(c, gin.H{"client": updated})
 		default:
 			adminDenied(c)
 		}
@@ -230,7 +226,7 @@ func adminOwns(access datascope.OwnerDeptAccess, id uint) bool {
 	return false
 }
 
-const adminClientColumns = "id,ak,name,owner_dept_id,data_scope,responsible_user_id,status,secret_version,auth_epoch,rate_limit,burst,viewer_quota,row_version,created_by,updated_by,created_at,updated_at"
+const adminClientColumns = "id,ak,name,owner_dept_id,data_scope,responsible_user_id,responsible_org_name,responsible_name,responsible_contact,status,secret_version,auth_epoch,rate_limit,burst,viewer_quota,row_version,created_by,updated_by,created_at,updated_at"
 
 func (a *ClientAdminController) scopedClients(c *gin.Context, access datascope.OwnerDeptAccess) *gorm.DB {
 	query := a.db.WithContext(c.Request.Context()).Model(&models.Client{}).Select(adminClientColumns)
@@ -253,7 +249,7 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 		return
 	}
 	for key, items := range values {
-		if (key != "page" && key != "pageSize" && key != "ownerDeptId") || len(items) != 1 {
+		if (key != "page" && key != "pageSize" && key != "ownerDeptId" && key != "name" && key != "status") || len(items) != 1 {
 			adminError(c, client.ErrInvalidArgument)
 			return
 		}
@@ -265,6 +261,16 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 			adminError(c, client.ErrInvalidArgument)
 			return
 		}
+	}
+	name := strings.TrimSpace(values.Get("name"))
+	if len(name) > 100 {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	status := values.Get("status")
+	if status != "" && status != models.StatusActive && status != models.StatusDisabled && status != models.StatusRevoked {
+		adminError(c, client.ErrInvalidArgument)
+		return
 	}
 	page, size, err := parsePageValues(values)
 	if err != nil || page-1 > int(^uint(0)>>1)/size {
@@ -282,6 +288,12 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 			if ownerID != 0 {
 				q = q.Where("owner_dept_id = ?", ownerID)
 			}
+			if name != "" {
+				q = q.Where("name LIKE ?", "%"+name+"%")
+			}
+			if status != "" {
+				q = q.Where("status = ?", status)
+			}
 			return q
 		}
 		if err := query().Select("count(*)").Count(&total).Error; err != nil {
@@ -289,6 +301,31 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 		}
 		if err := query().Order("id ASC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
 			return err
+		}
+		if len(items) > 0 {
+			departmentNames := map[uint]string{}
+			var rows []struct {
+				ID   uint   `gorm:"column:id"`
+				Name string `gorm:"column:name"`
+			}
+			departmentIDs := make([]uint, 0, len(items))
+			seen := make(map[uint]struct{}, len(items))
+			for _, item := range items {
+				if _, ok := seen[item.OwnerDeptID]; ok {
+					continue
+				}
+				seen[item.OwnerDeptID] = struct{}{}
+				departmentIDs = append(departmentIDs, item.OwnerDeptID)
+			}
+			if err := tx.Table("sys_department").Select("id, name").Where("id IN ? AND status = ? AND deleted_at IS NULL", departmentIDs, 1).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				departmentNames[row.ID] = row.Name
+			}
+			for index := range items {
+				items[index].OwnerDeptName = departmentNames[items[index].OwnerDeptID]
+			}
 		}
 		// Options are scoped server-side, independent from the current client
 		// page/filter. Never expose the general unscoped department tree here.
@@ -427,8 +464,6 @@ func adminError(c *gin.Context, err error) {
 		adminServerError(c, err, "capability_catalog_unavailable", "capability catalog unavailable")
 	case errors.Is(err, client.ErrCapabilityDrift):
 		adminServerError(c, err, "capability_catalog_drift", "capability catalog drift detected")
-	case errors.Is(err, client.ErrRevocationUnavailable):
-		adminServerError(c, err, "capability_revocation_unavailable", "capability revocation unavailable")
 	default:
 		adminServerError(c, err, "service_unavailable", "service unavailable")
 	}

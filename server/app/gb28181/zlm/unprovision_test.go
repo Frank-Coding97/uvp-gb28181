@@ -85,10 +85,12 @@ func TestManagedHookTargetsNode(t *testing.T) {
 	const uuid = "abc-123"
 	require.True(t, ManagedHookTargetsNode("http://p/hook/on_publish?node=abc-123&cap=x", uuid))
 	require.False(t, ManagedHookTargetsNode("http://p/hook/on_publish?node=other&cap=x", uuid))
+	require.False(t, ManagedHookTargetsNode("https://custom.example/path/abc-123?tenant=demo", uuid))
+	require.False(t, ManagedHookTargetsNode("https://custom.example/path?node=abc-123", uuid))
 	require.False(t, ManagedHookTargetsNode("", uuid))
 	require.False(t, ManagedHookTargetsNode("http://p/hook/on_publish?node=abc-123", ""))
-	// 解析失败时退化为整串包含判断：宁可漏判（不动别人的配置），不误判。
-	require.True(t, ManagedHookTargetsNode("::::not a url::::abc-123", uuid))
+	// 解析失败时不能靠字符串包含关系删除自定义 URL。
+	require.False(t, ManagedHookTargetsNode("::::not a url::::abc-123", uuid))
 	require.False(t, ManagedHookTargetsNode("::::not a url::::", uuid))
 }
 

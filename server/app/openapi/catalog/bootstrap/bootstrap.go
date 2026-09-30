@@ -5,12 +5,13 @@
 // (publish.go).
 //
 // The surface is exactly the 12 scopes the legacy registry in
-// app/openapi/client exposes. Six are dispatched by the catalog runtime, six by
-// the dedicated media/PTZ gateway planes; both kinds have to be published all
+// app/openapi/client exposes. Six are dispatched by the catalog runtime, five by
+// the dedicated PTZ gateway plane; both kinds have to be published all
 // the same, because client.ScopePublished reads the release and nothing else.
 //
-// Publishing stays deliberate: startup only repairs additively and never drops
-// a published scope, and `-publish-catalog` is the explicit operator override.
+// Publishing stays deliberate: startup repairs additively, with the sole
+// pre-release exception of explicitly retired scopes, and `-publish-catalog`
+// remains the explicit operator override for all other contract changes.
 // An installation whose release already covers the surface is never re-seeded
 // or re-versioned.
 package bootstrap
@@ -74,8 +75,7 @@ type readDefinition struct {
 
 var coreGroups = []groupDefinition{
 	{code: "device-management", name: "设备管理", sort: 10},
-	{code: "playback", name: "多屏播放", sort: 20},
-	{code: "device-control", name: "设备控制", sort: 30},
+	{code: "device-control", name: "设备控制", sort: 20},
 }
 
 // coreReadDefinitions is the device/channel read surface. It is dispatched by
@@ -119,24 +119,24 @@ var coreReadDefinitions = []readDefinition{
 	},
 }
 
-// coreDelegatedDefinitions is the play/PTZ surface. It is *not* dispatched by
-// the catalog runtime: handleMedia and handlePTZ consume these scopes before
-// the metadata dispatcher, and their executable behaviour is
-// MediaDispatcher/PTZDispatcher. It is seeded anyway because the active release
+// coreDelegatedDefinitions is the PTZ surface. It is *not* dispatched by
+// the catalog runtime: handlePTZ consumes these scopes before the metadata
+// dispatcher, and its executable behaviour is PTZDispatcher. It is seeded
+// anyway because the active release
 // is what client.ScopePublished consults — a scope missing from the release can
 // never be granted, whatever its dispatch plane is.
 //
 // risk and idempotencyMode mirror the legacy registry in app/openapi/client
-// exactly (play = media, ptz reads = read, ptz writes = control; the three
-// preset writes require an Idempotency-Key). A published release that disagrees
+// exactly (ptz reads = read, ptz writes = control; the three preset writes
+// require an Idempotency-Key). A published release that disagrees
 // with the compatibility path would make the same platform describe two
 // different contracts depending on whether the catalog tables are migrated.
 var coreDelegatedDefinitions = []readDefinition{
 	{
-		groupCode: "playback", code: "play.live.apply", scope: "play:live:apply", name: "实时点播授权",
-		internalPath: "/api/gb28181/play/:deviceId/:channelId/authorization", method: "POST",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations",
-		adapterKey:   adapters.MediaLiveApplyAdapterKey, resourceType: "channel", risk: "media",
+		groupCode: "device-control", code: "play.live", scope: "play:live", name: "发起实时点播",
+		internalPath: "/api/gb28181/play/:deviceId/:channelId", method: "POST",
+		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live",
+		adapterKey:   adapters.PlayLiveAdapterKey, resourceType: "channel", risk: "control",
 	},
 	{
 		groupCode: "device-control", code: "ptz.preset.list", scope: "ptz:preset:list", name: "预置位列表",
@@ -222,6 +222,12 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 				result.GroupsCreated++
 			}
 		}
+		if err := retireRemovedPlaybackCapability(ctx, tx, createdBy); err != nil {
+			return err
+		}
+		if err := disableRetiredPlaybackGroup(ctx, tx, createdBy); err != nil {
+			return err
+		}
 
 		for _, definition := range coreCatalogDefinitions() {
 			group, ok := groups[definition.groupCode]
@@ -254,6 +260,57 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 		return BootstrapResult{}, err
 	}
 	return result, nil
+}
+
+// disableRetiredPlaybackGroup retires the former playback category when it is
+// empty. No playback capability is seeded or migrated anymore.
+func disableRetiredPlaybackGroup(ctx context.Context, tx *gorm.DB, updatedBy uint) error {
+	var group openapimodels.CapabilityGroup
+	query := tx.WithContext(ctx).Where("code = ? AND deleted_at IS NULL", "playback").First(&group)
+	if errors.Is(query.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if query.Error != nil {
+		return query.Error
+	}
+	var count int64
+	if err := tx.WithContext(ctx).Model(&openapimodels.Capability{}).
+		Where("group_id = ? AND deleted_at IS NULL AND status <> ?", group.ID, openapimodels.CatalogStatusDisabled).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 || group.Status == openapimodels.CatalogStatusDisabled {
+		return nil
+	}
+	return tx.WithContext(ctx).Model(&group).Updates(map[string]any{
+		"status":     openapimodels.CatalogStatusDisabled,
+		"updated_by": updatedBy,
+	}).Error
+}
+
+// retireRemovedPlaybackCapability keeps old catalog identities/audit rows
+// queryable while making the removed external operation unavailable to new
+// releases and grants.
+func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy uint) error {
+	var capability openapimodels.Capability
+	query := tx.WithContext(ctx).
+		Where("scope IN ? AND deleted_at IS NULL", []string{"play:live:apply", "__retired_play_live_apply__"}).
+		Order("id ASC").First(&capability)
+	if errors.Is(query.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if query.Error != nil {
+		return query.Error
+	}
+	if capability.Status != openapimodels.CatalogStatusDisabled {
+		if err := tx.WithContext(ctx).Model(&capability).Updates(map[string]any{
+			"status": openapimodels.CatalogStatusDisabled, "updated_by": updatedBy,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return tx.WithContext(ctx).Model(&openapimodels.Operation{}).
+		Where("capability_id = ? AND deleted_at IS NULL", capability.ID).
+		Updates(map[string]any{"status": openapimodels.CatalogStatusDisabled, "updated_by": updatedBy}).Error
 }
 
 func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, createdBy uint) (openapimodels.CapabilityGroup, bool, error) {

@@ -17,3 +17,19 @@ type SecurityState struct {
 }
 
 func (SecurityState) TableName() string { return "sys_openapi_security_state" }
+
+// MediaNodeSecurity is the narrow runtime-identity projection for meta_node.
+// It is intentionally kept beside the security state because runtime probes
+// update only these columns and must never Save a complete media-node row.
+type MediaNodeSecurity struct {
+	ID                       int64      `gorm:"column:id;primaryKey"`
+	CurrentBootNonce         *string    `gorm:"column:current_boot_nonce;type:char(32)"`
+	RetiredBootHistory       *string    `gorm:"column:retired_boot_history;type:text"`
+	RuntimeEpoch             int64      `gorm:"column:runtime_epoch;not null;default:0"`
+	RuntimeProtocolVersion   int64      `gorm:"column:runtime_protocol_version;not null;default:0"`
+	RuntimeConfirmedRevision int64      `gorm:"column:runtime_confirmed_revision;not null;default:0"`
+	RuntimeConfirmedAt       *time.Time `gorm:"column:runtime_confirmed_at"`
+	RuntimeIdentityStatus    string     `gorm:"column:runtime_identity_status;size:16;not null;default:unknown"`
+}
+
+func (MediaNodeSecurity) TableName() string { return "meta_node" }

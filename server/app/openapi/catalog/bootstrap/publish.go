@@ -37,6 +37,16 @@ const (
 	OperatorReleaseName = "人工发布"
 )
 
+// retiredCoreScopes are contracts removed before the platform's first
+// external release. They may be removed from an active snapshot automatically
+// because there is no compatibility promise to preserve yet.
+var retiredCoreScopes = map[string]struct{}{
+	// The former pre-release playback-authorization contract was never exposed
+	// to external consumers. Replace it automatically with play:live when an
+	// installation still has the old active release.
+	"play:live:apply": {},
+}
+
 // Publish actions reported by EnsurePublishedCatalog / PublishCurrentCatalog.
 const (
 	// PublishActionExisting: an active release was already published and the
@@ -90,7 +100,9 @@ type PublishOutcome struct {
 // published scope, the release is left untouched and the gap is reported
 // through CoreScopesMissing instead. Dropping a published scope stays a
 // deliberate operator action, which is what -publish-catalog
-// (PublishCurrentCatalog) is for.
+// (PublishCurrentCatalog) is for. The removed pre-release playback capability
+// is retired from the editable catalog by EnsureCoreCatalog; no replacement
+// external playback contract is published.
 //
 // Publication goes through store.Publisher, which validates the draft against
 // the process adapter registry before any write. A release can therefore only
@@ -203,7 +215,12 @@ func reconcilePublishedCatalog(ctx context.Context, db *gorm.DB, actorID int64, 
 		ItemCount: len(active.Items),
 	}
 	missing := missingCoreScopes(active)
-	if len(missing) == 0 {
+	retired := activeRetiredCoreScopes(active)
+	groupDrift, err := coreCatalogGroupDrift(ctx, db, active)
+	if err != nil {
+		return PublishOutcome{}, err
+	}
+	if len(missing) == 0 && len(retired) == 0 && !groupDrift {
 		return existing, nil
 	}
 	existing.CoreScopesMissing = missing
@@ -213,12 +230,12 @@ func reconcilePublishedCatalog(ctx context.Context, db *gorm.DB, actorID int64, 
 		return PublishOutcome{}, err
 	}
 	existing.Seeded = seeded
-	// A repair that would drop a published scope is not a repair. Leave the
-	// release exactly as it is and keep reporting the gap.
-	if !draftCoversScopes(draft, publishedScopes(active)) {
+	// A repair that would drop any non-retired published scope is not a repair.
+	// Leave the release exactly as it is and keep reporting the gap.
+	if !draftCoversScopes(draft, publishedScopesExcludingRetired(active)) {
 		return existing, nil
 	}
-	if draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) {
+	if len(retired) == 0 && draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) && !groupDrift {
 		// The rows exist but produce the same surface — a disabled or
 		// soft-deleted core row is kept out of the draft by catalogRows.
 		// Report rather than publish a release that would not close the gap.
@@ -236,6 +253,39 @@ func reconcilePublishedCatalog(ctx context.Context, db *gorm.DB, actorID int64, 
 		ItemCount:   len(snapshot.Items),
 		RevisedFrom: active.Release.Version,
 	}, nil
+}
+
+// coreCatalogGroupDrift detects a metadata-only publication change that the
+// runtime draft intentionally does not carry: a code-owned capability moved
+// between categories. The scope set is unchanged, but the admin capability
+// catalog must still publish the new grouping for readers of the immutable
+// release snapshot.
+func coreCatalogGroupDrift(ctx context.Context, db *gorm.DB, active *catalogstore.ReleaseSnapshot) (bool, error) {
+	if db == nil || active == nil {
+		return false, nil
+	}
+	type capabilityGroupRow struct {
+		Scope     string `gorm:"column:scope"`
+		GroupCode string `gorm:"column:group_code"`
+	}
+	var rows []capabilityGroupRow
+	query := db.WithContext(normalizeContext(ctx)).Table("sys_openapi_capability AS c").
+		Select("c.scope, g.code AS group_code").
+		Joins("JOIN sys_openapi_capability_group AS g ON g.id = c.group_id AND g.deleted_at IS NULL").
+		Where("c.deleted_at IS NULL AND c.scope IN ?", CoreCatalogScopes()).Find(&rows)
+	if query.Error != nil {
+		return false, query.Error
+	}
+	current := make(map[string]string, len(rows))
+	for _, row := range rows {
+		current[strings.TrimSpace(row.Scope)] = strings.TrimSpace(row.GroupCode)
+	}
+	for _, item := range active.Items {
+		if expected, ok := current[strings.TrimSpace(item.Scope)]; ok && expected != strings.TrimSpace(item.GroupCode) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func publishRepository(db *gorm.DB, actorID int64) (*catalogstore.Repository, error) {
@@ -294,6 +344,35 @@ func publishedScopes(active *catalogstore.ReleaseSnapshot) []string {
 	}
 	sort.Strings(scopes)
 	return scopes
+}
+
+func publishedScopesExcludingRetired(active *catalogstore.ReleaseSnapshot) []string {
+	scopes := publishedScopes(active)
+	filtered := scopes[:0]
+	for _, scope := range scopes {
+		if _, ok := retiredCoreScopes[scope]; !ok {
+			filtered = append(filtered, scope)
+		}
+	}
+	return filtered
+}
+
+func activeRetiredCoreScopes(active *catalogstore.ReleaseSnapshot) []string {
+	if active == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, item := range active.Items {
+		if _, ok := retiredCoreScopes[strings.TrimSpace(item.Scope)]; ok {
+			seen[strings.TrimSpace(item.Scope)] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for scope := range seen {
+		result = append(result, scope)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func publishedScopeSet(active *catalogstore.ReleaseSnapshot) map[string]struct{} {

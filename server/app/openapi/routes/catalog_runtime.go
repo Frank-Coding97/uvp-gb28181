@@ -145,9 +145,8 @@ func catalogPublishFailureReason(err error) string {
 //
 // Both planes have to be registered or publication would fail. The
 // device/channel adapters carry the read surface; the delegated-plane
-// declarations carry play:live:apply and the ptz:* scopes, which the gateway
-// dispatches through MediaDispatcher/PTZDispatcher rather than through
-// CatalogRuntime.Dispatch.
+// declarations carry the ptz:* scopes, which the gateway dispatches through
+// PTZDispatcher rather than through CatalogRuntime.Dispatch.
 func newCatalogRuntime(db *gorm.DB) (*catalogruntime.CatalogRuntime, error) {
 	registry := catalogruntime.NewAdapterRegistry()
 	reader := resource.New(db)

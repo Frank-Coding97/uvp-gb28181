@@ -22,7 +22,6 @@ import (
 
 type GatewayConfig struct {
 	Audience              string
-	TLSProxies            []string
 	Timeout, AuditReserve time.Duration
 	MaxInFlight           int
 }
@@ -35,15 +34,13 @@ type Gateway struct {
 	clients   *client.Service
 	admission *Admission
 	limiter   *limit.Manager
-	quota     *limit.Quota
-	tls       *TLSBoundary
 	slots     chan struct{}
-	media     MediaDispatcher
 	run       func(context.Context, gatewayRequest) gatewayResponse
 	read      func(context.Context, *gorm.DB, metadataInput) (any, error)
 	complete  func(context.Context, string, string, time.Duration) error
 	rejected  *audit.RejectedCollector
 	ptz       PTZDispatcher
+	play      PlayDispatcher
 	catalog   *catalogruntime.CatalogRuntime
 }
 type gatewayRequest struct {
@@ -65,10 +62,6 @@ func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, co
 	if db == nil || keys == nil || validateLineField(config.Audience) != nil || config.Timeout <= 0 || config.AuditReserve <= 0 || config.AuditReserve >= config.Timeout || config.MaxInFlight <= 0 {
 		return nil, ErrUnavailable
 	}
-	transport, err := NewTLSBoundary(config.TLSProxies)
-	if err != nil {
-		return nil, err
-	}
 	service, err := client.NewService(db, keys)
 	if err != nil {
 		return nil, ErrUnavailable
@@ -77,7 +70,7 @@ func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, co
 	if err = store.RecoverInterrupted(ctx); err != nil {
 		return nil, ErrUnavailable
 	}
-	g := &Gateway{config: config, db: db, clients: service, admission: NewAdmission(db, time.Now), limiter: limit.New(time.Now), quota: limit.NewQuota(db, time.Now), tls: transport, slots: make(chan struct{}, config.MaxInFlight), complete: store.Complete, read: readMetadata}
+	g := &Gateway{config: config, db: db, clients: service, admission: NewAdmission(db, time.Now), limiter: limit.New(time.Now), slots: make(chan struct{}, config.MaxInFlight), complete: store.Complete, read: readMetadata}
 	for _, option := range options {
 		if option != nil {
 			option(g)
@@ -115,24 +108,12 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		}
 		requestID := hex.EncodeToString(id[:])
 		c.Set("requestId", requestID)
-		if scope == mediaScope {
-			if g == nil {
-				respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
-				return
-			}
-			g.handleMedia(c, requestID, respond)
-			return
-		}
 		if g == nil {
 			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
 		if isPTZRequestScope(scope) {
 			g.handlePTZ(c, requestID, scope, respond)
-			return
-		}
-		if !g.tls.IsHTTPS(c.Request) {
-			respond(gatewayError(requestID, 401, "AUTHENTICATION_FAILED"))
 			return
 		}
 		if c.Request.ContentLength != 0 || len(c.Request.TransferEncoding) != 0 || c.Request.URL.RawPath != "" {
@@ -200,9 +181,6 @@ func encodeGateway(id string, status int, code string, data any) gatewayResponse
 }
 
 func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output gatewayResponse) {
-	if q.scope == mediaScope {
-		return g.processMedia(hardContext, q)
-	}
 	var verifiedClientID int64
 	admitted := false
 	defer func() { output.verifiedClientID = verifiedClientID; output.admitted = admitted }()
@@ -221,7 +199,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 	if err != nil {
 		return invalid(400, "INVALID_REQUEST")
 	}
-	input := SignatureInput{Method: q.method, Path: q.path, RawQuery: q.rawQuery, AccessKey: headers.AccessKey, Timestamp: headers.Timestamp, Nonce: headers.Nonce, Audience: g.config.Audience}
+	input := SignatureInput{Method: q.method, Path: q.path, RawQuery: q.rawQuery, ContentType: headers.ContentType, Body: q.body, AccessKey: headers.AccessKey, Timestamp: headers.Timestamp, Nonce: headers.Nonce, IdempotencyKey: headers.IdempotencyKey, Audience: g.config.Audience}
 	if _, err = CanonicalString(input); err != nil {
 		return invalid(400, "INVALID_REQUEST")
 	}
@@ -295,17 +273,29 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 		if !g.catalogRuntimeReady(ctx) {
 			response = invalid(503, "SERVICE_UNAVAILABLE")
 		} else {
-			data, readErr := g.readMetadata(ctx, metadata)
+			var data any
+			var readErr error
+			if q.scope == PlayLiveScope {
+				if !g.playReady() {
+					readErr = ErrPlayUnavailable
+				} else {
+					data, readErr = g.play.Start(ctx, PlayRequest{ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, ClientIP: q.source})
+				}
+			} else {
+				data, readErr = g.readMetadata(ctx, metadata)
+			}
 			if readErr == nil && ctx.Err() == nil {
 				response = encodeGateway(q.requestID, 200, "OK", data)
 				if response.status == 200 {
 					code = "OK"
 				}
 			} else {
-				response = metadataFailure(q.requestID, readErr)
-				if response.status == 404 {
-					code = "RESOURCE_NOT_FOUND"
+				if q.scope == PlayLiveScope {
+					response = playFailure(q.requestID, readErr)
+				} else {
+					response = metadataFailure(q.requestID, readErr)
 				}
+				code = responseAuditCode(response, code)
 			}
 		}
 	}
@@ -316,6 +306,13 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 		return invalid(503, "SERVICE_UNAVAILABLE")
 	}
 	return response
+}
+
+func responseAuditCode(response gatewayResponse, fallback string) string {
+	if response.code != "" {
+		return response.code
+	}
+	return fallback
 }
 
 func (g *Gateway) readMetadata(ctx context.Context, metadata metadataInput) (any, error) {
@@ -344,6 +341,8 @@ func metadataMethod(scope string) string {
 	switch scope {
 	case "device:list", "device:detail", "device:status", "channel:list", "channel:detail", "channel:status":
 		return "GET"
+	case PlayLiveScope:
+		return "POST"
 	default:
 		return ""
 	}
@@ -388,13 +387,15 @@ func metadataPattern(scope string) string {
 		return "/openapi/v1/devices/:deviceId/channels/:channelId"
 	case "channel:status":
 		return "/openapi/v1/devices/:deviceId/channels/:channelId/status"
+	case PlayLiveScope:
+		return playPattern(scope)
 	default:
 		return ""
 	}
 }
 func metadataRouteMatches(q gatewayRequest) bool {
 	pattern := metadataPattern(q.scope)
-	if pattern == "" || q.pattern != pattern || q.method != "GET" || validatePath(q.path) != nil {
+	if pattern == "" || q.pattern != pattern || q.method != metadataMethod(q.scope) || validatePath(q.path) != nil {
 		return false
 	}
 	path := strings.ReplaceAll(strings.ReplaceAll(pattern, ":deviceId", q.deviceID), ":channelId", q.channelID)

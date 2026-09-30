@@ -23,21 +23,19 @@ func TestCapabilityCatalogReusesSysAPITitlesAndGroups(t *testing.T) {
 
 	catalog, err := CapabilityCatalog(context.Background(), db)
 	require.NoError(t, err)
-	require.Len(t, catalog, 3)
-	require.Equal(t, "device-control", catalog[0].Code)
-	require.Equal(t, "设备控制", catalog[0].Name)
+	require.Len(t, catalog, 2)
+	require.Equal(t, "device-management", catalog[0].Code)
+	require.Equal(t, "设备管理", catalog[0].Name)
+	require.Equal(t, []string{"device:list", "device:detail", "device:status", "channel:list", "channel:detail"}, capabilityScopes(catalog[0]))
+	require.Equal(t, "标题 device:list", catalog[0].Capabilities[0].Name)
+	require.Equal(t, "device-control", catalog[1].Code)
+	require.Equal(t, "设备控制", catalog[1].Name)
 	// 通道状态被归入设备控制:库里的 sys_api.api_group 就是这么分的(id 473,与
 	// control-capabilities / device-configs 同组),而本读取器对任何分组不一致
 	// 都 fail closed。
-	require.Equal(t, []string{"channel:status", "ptz:operation:read", "ptz:preset:call", "ptz:preset:delete", "ptz:preset:list", "ptz:preset:save"}, capabilityScopes(catalog[0]))
-	require.Equal(t, "标题 channel:status", catalog[0].Capabilities[0].Name)
-	require.Equal(t, "device-management", catalog[1].Code)
-	require.Equal(t, "设备管理", catalog[1].Name)
-	require.Equal(t, []string{"channel:detail", "channel:list", "device:detail", "device:list", "device:status"}, capabilityScopes(catalog[1]))
-	require.Equal(t, "标题 channel:detail", catalog[1].Capabilities[0].Name)
-	require.Equal(t, "/openapi/v1/devices/{deviceId}/channels/{channelId}", catalog[1].Capabilities[0].ExternalPath)
-	require.Equal(t, "playback", catalog[2].Code)
-	require.Equal(t, []string{"play:live:apply"}, capabilityScopes(catalog[2]))
+	require.Equal(t, []string{"play:live", "channel:status", "ptz:preset:list", "ptz:preset:save", "ptz:preset:call", "ptz:preset:delete", "ptz:operation:read"}, capabilityScopes(catalog[1]))
+	require.Equal(t, "标题 play:live", catalog[1].Capabilities[0].Name)
+	require.NotContains(t, capabilityScopes(catalog[1]), "play:live:apply")
 }
 
 // Publishing a release must not change what the platform says it can do. The
@@ -87,11 +85,18 @@ func newStaticRegistryDB(t *testing.T) *gorm.DB {
 			Title:     "标题 " + definition.scope,
 			Path:      definition.internalPath,
 			Method:    definition.method,
-			ApiGroup:  capabilityGroupNames[definition.groupCode],
+			ApiGroup:  expectedSysAPIGroup(definition),
 		})
 	}
 	require.NoError(t, db.Create(&rows).Error)
 	return db
+}
+
+func expectedSysAPIGroup(definition capabilityDefinition) string {
+	if definition.sysAPIGroup != "" {
+		return definition.sysAPIGroup
+	}
+	return capabilityGroupNames[definition.groupCode]
 }
 
 func capabilityScopes(group CapabilityGroup) []string {
@@ -136,7 +141,7 @@ func TestCapabilityCatalogUsesActiveReleaseSnapshotWhenAvailable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, catalog, 1)
 	require.Equal(t, "设备管理", catalog[0].Name)
-	require.Equal(t, []string{"channel:list", "device:list"}, []string{catalog[0].Capabilities[0].Scope, catalog[0].Capabilities[1].Scope})
+	require.Equal(t, []string{"device:list", "channel:list"}, []string{catalog[0].Capabilities[0].Scope, catalog[0].Capabilities[1].Scope})
 
 	scopes, err := SupportedScopesFromDB(context.Background(), db)
 	require.NoError(t, err)

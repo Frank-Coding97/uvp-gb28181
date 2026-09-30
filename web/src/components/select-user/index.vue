@@ -100,12 +100,12 @@
       </div>
 
       <!-- 分页区域 -->
-      <div class="pagination-area">
+      <div class="pagination-area uvp-pagination-bar">
         <a-pagination
           v-model:current="pagination.current"
           v-model:page-size="pagination.pageSize"
           :total="pagination.total"
-          :page-size-options="['10', '20', '50', '100']"
+          :page-size-options="[10, 20, 50, 100]"
           show-total
           show-jumper
           show-page-size
@@ -416,13 +416,13 @@ const handleModalConfirm = () => {
   gap: 8px;
 
   .selected-tags-wrapper {
-    min-height: 32px;
-    padding: 4px 8px;
-    border: 1px solid var(--color-border-2);
-    border-radius: 4px;
-    background-color: var(--color-bg-2);
     display: flex;
     align-items: center;
+    min-height: 32px;
+    padding: 4px 8px;
+    background-color: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: 4px;
     transition: all 0.2s;
 
     &:hover {
@@ -430,8 +430,8 @@ const handleModalConfirm = () => {
     }
 
     .placeholder-text {
-      color: var(--color-text-3);
       font-size: 14px;
+      color: var(--color-text-3);
     }
   }
 
@@ -447,8 +447,8 @@ const handleModalConfirm = () => {
   :deep(.arco-table) {
     // 已选行高亮样式
     .selected-row {
-      background-color: var(--color-primary-light-1);
       cursor: pointer;
+      background-color: var(--color-primary-light-1);
 
       &:hover {
         background-color: var(--color-primary-light-2);

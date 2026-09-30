@@ -241,7 +241,7 @@ func TestDeviceChannelAdaptersCloseTheActualScopedResourceReadLoop(t *testing.T)
 	access := resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: resource.DataScopeDepartmentAndChildren}
 
 	data, err := listAdapter.Execute(context.Background(), catalogruntime.Invocation{
-		Scope: DeviceListScope, Method: "GET", Value: Request{ResourceScope: access},
+		Scope: DeviceListScope, Method: "GET", Params: map[string]string{"deviceId": adapterDeviceID}, Value: Request{ResourceScope: access},
 	})
 	require.NoError(t, err)
 	page, ok := data.(resource.DevicePage)
@@ -253,7 +253,7 @@ func TestDeviceChannelAdaptersCloseTheActualScopedResourceReadLoop(t *testing.T)
 
 	channelAdapter := resourceAdapterFor(t, service, ChannelDetailAdapterKey)
 	data, err = channelAdapter.Execute(context.Background(), catalogruntime.Invocation{
-		Scope: ChannelDetailScope, Method: "GET", Value: Request{ResourceScope: access, DeviceID: adapterDeviceID, ChannelID: adapterChannelID},
+		Scope: ChannelDetailScope, Method: "GET", Params: map[string]string{"deviceId": adapterDeviceID, "channelId": adapterChannelID}, Value: Request{ResourceScope: access, DeviceID: adapterDeviceID, ChannelID: adapterChannelID},
 	})
 	require.NoError(t, err)
 	channel, ok := data.(resource.Channel)

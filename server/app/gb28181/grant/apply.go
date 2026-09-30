@@ -124,6 +124,13 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 			}
 			return err
 		}
+		// ⛔ 设备不存在时**必须**按主键显式判空：应用全局注册了 gormhelper.MaskNotDataError
+		// (app/utils/gormhelper/client.go)，把 Statement.RaiseErrorOnNotFound 恒置 false，
+		// First 查不到只返回 nil error + 零值结构体。只信 err 会把"设备不存在"当成
+		// "设备可见"继续往下走，最终写出 device_id 指向不存在设备的孤儿共享授权。
+		if device.ID == 0 {
+			return errApplyNotVisible
+		}
 		item.DeviceCode = device.DeviceID
 		item.Name = device.Name
 
@@ -248,20 +255,33 @@ func validateAddTargets(tx *gorm.DB, targets []ApplyTarget, access datascope.Own
 	return nil
 }
 
+// addGrant 新增一条共享授权(幂等)：无行→插入；曾被软删→恢复；已生效→跳过。
+//
+// ⛔ 这里**不能**用 `First(&existing)` + `errors.Is(err, gorm.ErrRecordNotFound)` 判"是否存在"：
+// 应用在 app/utils/gormhelper/client.go 里全局注册了 MaskNotDataError，把
+// Statement.RaiseErrorOnNotFound 恒置为 false，于是查不到时 First 返回 nil error + 零值结构体。
+// 结果 not-found 分支永不进入、`err != nil` 分支也永不进入，直接落到下面的
+// "已生效即跳过" —— 而零值结构体的 DeletedAt.Valid 恰好是 false，被误读成
+// "已有一条生效授权"，于是**首次共享被静默判成"无需变更"，一条也不写库**
+// （软删行存在时反而能走通恢复，所以现象看起来"时而正常")。
+// 自建 gorm 的单测没装该回调，因此一直绿灯，只有真机复现。
+// 改为 Find 到切片按长度判定，彻底不依赖 RaiseErrorOnNotFound 语义。
 func addGrant(tx *gorm.DB, deviceID uint, target ApplyTarget, createdBy uint) (bool, error) {
-	var existing gbmodels.GbDeviceGrant
-	err := tx.Unscoped().Where("device_id = ? AND target_type = ? AND target_id = ?", deviceID, target.Type, target.ID).First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	var existing []gbmodels.GbDeviceGrant
+	if err := tx.Unscoped().
+		Where("device_id = ? AND target_type = ? AND target_id = ?", deviceID, target.Type, target.ID).
+		Order("id ASC").Limit(1).
+		Find(&existing).Error; err != nil {
+		return false, err
+	}
+	if len(existing) == 0 {
 		current := gbmodels.GbDeviceGrant{DeviceID: deviceID, TargetType: target.Type, TargetID: target.ID, CreatedBy: createdBy}
 		return true, tx.Create(&current).Error
 	}
-	if err != nil {
-		return false, err
-	}
-	if !existing.DeletedAt.Valid {
+	if !existing[0].DeletedAt.Valid {
 		return false, nil
 	}
-	err = tx.Unscoped().Model(&gbmodels.GbDeviceGrant{}).Where("id = ?", existing.ID).
+	err := tx.Unscoped().Model(&gbmodels.GbDeviceGrant{}).Where("id = ?", existing[0].ID).
 		Updates(map[string]any{"deleted_at": nil, "created_by": createdBy}).Error
 	return true, err
 }

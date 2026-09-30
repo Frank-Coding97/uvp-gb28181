@@ -122,12 +122,6 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 			t.Fatal("core table missing")
 		}
 	}
-	for _, table := range []string{"gb_openapi_play_grant", "gb_openapi_viewer"} {
-		if !db.Migrator().HasTable(table) {
-			t.Fatal("media table missing")
-		}
-	}
-	checkNativeMediaSchema(t, db)
 	now := time.Now().UTC()
 	c := models.Client{AK: "uvp_000102030405060708090a0b0c0d0e0f", Name: "isolated", OwnerDeptID: 10, Status: models.StatusActive, SecretCiphertext: []byte("test-only-ciphertext"), SecretIV: []byte("test-only-iv"), SecretKeyID: "test", CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(&c).Error; err != nil {
@@ -261,15 +255,12 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	}
 	run(lockStem + ".sql")
 	checkNativeNodeRuntime(t, db)
-	// Quota and Hook authorization now require the cleanup barrier. Exercise
-	// its real idempotent migration before those consumers, rather than using
-	// an obsolete pre-barrier fixture schema or weakening the product guard.
+	// Device cleanup remains an internal media safety boundary. The retired
+	// external grant/viewer persistence contract is intentionally not part of
+	// the current OpenAPI surface.
 	barrierStem := filepath.Join(dir, "2026-09-06-device-cleanup-barrier"+suffix)
 	run(barrierStem + ".sql")
 	run(barrierStem + ".sql")
-	checkNativeQuota(t, db)
-	checkNativeGrantViewer(t, db)
-	checkNativeRevocation(t, db)
 	checkNativeMustAuthLatch(t, db)
 	run(lockStem + ".sql") // upgrades must never reset the latch
 	state, err := openapiconfig.NewMustAuthStore(db, time.Now).Load(ctx)
@@ -281,7 +272,7 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 			t.Fatal("down allowed after the security commitment was latched")
 		}
 	}
-	t.Logf("%s schema up/up, media constraints, 100-way nonce, guarded down/up passed; full initialization/HTTP/media runtime not covered", dialect)
+	t.Logf("%s schema up/up, 100-way nonce, guarded down/up passed; full initialization/HTTP/media runtime not covered", dialect)
 }
 
 // Match the production runner's line-terminated statements, so semicolons

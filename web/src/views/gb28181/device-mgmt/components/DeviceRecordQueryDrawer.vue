@@ -209,6 +209,11 @@ function handlePageChange(value: number) {
   page.value = value;
 }
 
+function handlePageSizeChange(value: number) {
+  pageSize.value = value;
+  page.value = 1;
+}
+
 function clearErrors() {
   for (const key of Object.keys(errors) as Array<keyof RecordQueryValidationErrors>) delete errors[key];
 }
@@ -440,10 +445,14 @@ function fileSizeText(value: number | null) {
             :current="page"
             :page-size="pageSize"
             :total="sortedItems.length"
+            :page-size-options="[10, 20, 50, 100]"
             show-total
+            show-page-size
+            show-jumper
             data-testid="result-pagination"
-            class="result-pagination"
+            class="result-pagination uvp-pagination-bar"
             @change="handlePageChange"
+            @page-size-change="handlePageSizeChange"
           />
         </section>
       </div>

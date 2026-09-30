@@ -11,7 +11,6 @@ import {
   enableOpenAPIClient,
   getOpenAPIClient,
   getOpenAPIClientCapabilities,
-  getOpenAPIClientRevocationStatus,
   listOpenAPIClientAudits,
   listOpenAPIClients,
   revokeOpenAPIClient,
@@ -23,10 +22,10 @@ describe("OpenAPI client management API contract", () => {
   beforeEach(() => request.mockReset().mockResolvedValue({ code: "OK", data: null }));
 
   it("uses the real paged management list and carries scoped department options", async () => {
-    await listOpenAPIClients({ page: 2, pageSize: 20, ownerDeptId: 12 });
+    await listOpenAPIClients({ page: 2, pageSize: 20, ownerDeptId: 12, name: "现场", status: "active" });
 
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients", {
-      params: { page: 2, pageSize: 20, ownerDeptId: 12 }
+      params: { page: 2, pageSize: 20, ownerDeptId: 12, name: "现场", status: "active" }
     });
   });
 
@@ -39,9 +38,29 @@ describe("OpenAPI client management API contract", () => {
   });
 
   it("keeps create and secret rotation payloads one-shot and server-shaped", async () => {
-    await createOpenAPIClient({ name: "现场接入", ownerDeptId: 10, responsibleUserId: 7, dataScope: 4 });
+    await createOpenAPIClient({
+      name: "现场接入",
+      ownerDeptId: 10,
+      rateLimit: 30,
+      burst: 60,
+      viewerQuota: 25,
+      responsibleOrgName: "某某科技有限公司",
+      responsibleName: "张三",
+      responsibleContact: "13800000000",
+      dataScope: 4
+    });
     expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/openapi-clients", {
-      data: { name: "现场接入", ownerDeptId: 10, responsibleUserId: 7, dataScope: 4 }
+      data: {
+        name: "现场接入",
+        ownerDeptId: 10,
+        rateLimit: 30,
+        burst: 60,
+        viewerQuota: 25,
+        responsibleOrgName: "某某科技有限公司",
+        responsibleName: "张三",
+        responsibleContact: "13800000000",
+        dataScope: 4
+      }
     });
 
     await rotateOpenAPIClientSecret(7, 3);
@@ -67,8 +86,5 @@ describe("OpenAPI client management API contract", () => {
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients/7/audits", {
       params: { page: 2, pageSize: 20, result: "failure" }
     });
-
-    await getOpenAPIClientRevocationStatus(7);
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/openapi-clients/7/revocation-status");
   });
 });

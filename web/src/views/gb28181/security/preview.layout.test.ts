@@ -236,7 +236,10 @@ describe("security preview system integration", () => {
     expect(source).toMatch(
       /\.security-preview :deep\(\.uvp-data-table \.arco-table-cell\)\s*{[^}]*font-size:\s*14px;[^}]*line-height:\s*22px;/s
     );
-    expect(source).toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-pagination-item\)/);
+    // ⛔ 2026-09-29 分页统一：页面内**不得**再重复声明分页尺寸，
+    //    32px/8px 口径统一收在 uvp-ui-language.scss 的
+    //    `.uvp-data-table / .uvp-pagination-bar` 标准块里。
+    expect(source).not.toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-pagination-item\)/);
   });
 
   it("keeps security tables free of an outer frame", () => {

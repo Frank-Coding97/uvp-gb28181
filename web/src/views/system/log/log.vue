@@ -207,7 +207,8 @@ const pagination = reactive({
   total: 0,
   showTotal: true,
   showJumper: true,
-  showPageSize: true
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 // 详情弹窗
@@ -257,9 +258,9 @@ const reset = () => {
     username: "",
     module: "",
     operation: "",
-      status: "",
-      ip: "",
-      path: ""
+    status: "",
+    ip: "",
+    path: ""
   };
   dateRange.value = [];
   pagination.current = 1;
@@ -384,21 +385,13 @@ onMounted(() => {
   line-height: 22px;
 }
 
-.log-page :deep(.arco-pagination-item),
-.log-page :deep(.arco-pagination-jumper-input),
-.log-page :deep(.arco-pagination-options .arco-select-view) {
-  min-width: 32px;
-  min-height: 32px;
-  height: 32px;
-}
-
 .log-detail-block {
   padding: 10px 12px;
   margin: 0;
   overflow: auto;
   color: var(--uvp-text-secondary);
+  overflow-wrap: break-word;
   white-space: pre-wrap;
-  word-break: break-word;
   background: #f8fbff;
   border: 1px solid #e6edf7;
   border-radius: 10px;

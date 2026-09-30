@@ -193,7 +193,10 @@ describe("SchedulerLogPanel", () => {
     expect(source).toMatch(
       /\.log-table-panel\s*\{[^}]*background:\s*var\(--uvp-panel-bg\);[^}]*border:\s*1px solid var\(--uvp-panel-border\);[^}]*border-radius:\s*var\(--uvp-panel-radius\);[^}]*box-shadow:\s*var\(--uvp-panel-shadow\);/s
     );
-    expect(source).toMatch(/\.log-pagination\s*\{[^}]*border-top:\s*1px solid var\(--zlm-border\);/s);
+    // 分页条脱离表格卡片：自身不再画分隔线，改用间距与卡片拉开
+    expect(source).toMatch(/\.log-pagination\s*\{[^}]*margin-top:\s*12px;/s);
+    expect(source).not.toMatch(/\.log-pagination\s*\{[^}]*border-top:/s);
+    expect(source).toContain('class="log-pagination uvp-pagination-bar"');
     expect(source).not.toContain(".log-filters");
   });
 

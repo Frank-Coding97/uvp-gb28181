@@ -21,5 +21,4 @@ func RegisterAdminRoutes(protectedAPI *gin.RouterGroup, controller *controllers.
 	group.POST("/:id/disable", controller.Handler("disable"))
 	group.POST("/:id/revoke", controller.Handler("revoke"))
 	group.GET("/:id/audits", controller.Handler("audits"))
-	group.GET("/:id/revocation-status", controller.Handler("revocation-status"))
 }

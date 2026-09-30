@@ -14,9 +14,9 @@
       "contentType": "",
       "body": "",
       "bodySHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "canonicalBytes": 276,
-      "canonical": "UVP-HMAC-SHA256/1\nuvp_000102030405060708090a0b0c0d0e0f\n1790000000\n000102030405060708090a0b0c0d0e0f\nGET\n/openapi/v1/devices\nkeyword=%E6%91%84%E5%83%8F%E6%9C%BA%20A&page=1&pageSize=20\n\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nuvp-openapi-test-audience-v1",
-      "signature": "8d42ce59f40e9bcc43d682d2fb157b8fcd99be984999292799c69aacb1dc9b2b"
+      "canonicalBytes": 277,
+      "canonical": "UVP-HMAC-SHA256/1\nuvp_000102030405060708090a0b0c0d0e0f\n1790000000\n000102030405060708090a0b0c0d0e0f\nGET\n/openapi/v1/devices\nkeyword=%E6%91%84%E5%83%8F%E6%9C%BA%20A&page=1&pageSize=20\n\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\nuvp-openapi-test-audience-v1",
+      "signature": "3567a676c76e506cbad445cc51fe7d5cc19c9eb4e35277e7585d956bbc26bbfa"
     },
     {
       "name": "post-live-authorization",
@@ -26,9 +26,9 @@
       "contentType": "application/json",
       "body": "{\"protocol\":\"https-flv\"}",
       "bodySHA256": "be848f939e833d2b890d68fe32c79e530894d4dafe5b85ff03b8c0283e39bcf4",
-      "canonicalBytes": 306,
-      "canonical": "UVP-HMAC-SHA256/1\nuvp_000102030405060708090a0b0c0d0e0f\n1790000000\n000102030405060708090a0b0c0d0e0f\nPOST\n/openapi/v1/devices/34020000001320000001/channels/34020000001320000002/live-authorizations\n\napplication/json\nbe848f939e833d2b890d68fe32c79e530894d4dafe5b85ff03b8c0283e39bcf4\nuvp-openapi-test-audience-v1",
-      "signature": "b043767f2f2271deb33da60df03809977ab16b00c10db4c441bd998165217a86"
+      "canonicalBytes": 307,
+      "canonical": "UVP-HMAC-SHA256/1\nuvp_000102030405060708090a0b0c0d0e0f\n1790000000\n000102030405060708090a0b0c0d0e0f\nPOST\n/openapi/v1/devices/34020000001320000001/channels/34020000001320000002/live-authorizations\n\napplication/json\nbe848f939e833d2b890d68fe32c79e530894d4dafe5b85ff03b8c0283e39bcf4\n\nuvp-openapi-test-audience-v1",
+      "signature": "f40645f4ade49343c11d9e323fc0ffc990e7737a3c01d88a6bffd8c6188f7be5"
     }
   ]
 }

@@ -96,7 +96,7 @@ func (adapter *resourceReadAdapter) Execute(ctx context.Context, invocation cata
 	if invocation.Method != "" && strings.ToUpper(invocation.Method) != "GET" {
 		return nil, ErrInvalidRequest
 	}
-	if len(invocation.Body) != 0 || len(invocation.Params) != 0 || len(invocation.Query) != 0 {
+	if len(invocation.Body) != 0 || len(invocation.Query) != 0 {
 		return nil, ErrInvalidRequest
 	}
 	request, ok := invocation.Value.(Request)

@@ -28,7 +28,8 @@ func TestOpenAPIPublicBoundaryRejectsWithoutRedirectOrGlobalMiddleware(t *testin
 		{"OPTIONS", "/openapi/v1/devices", 405},
 		{"PATCH", "/openapi/v1/devices", 405},
 		{"CUSTOM", "/openapi/v1/devices", 405},
-		{"POST", "/openapi/v1/devices/34020000002000000010/channels/34020000001320000010/live-authorizations", 503},
+		{"POST", "/openapi/v1/devices/34020000002000000010/channels/34020000001320000010/live", 503},
+		{"POST", "/openapi/v1/devices/34020000002000000010/channels/34020000001320000010/live-authorizations", 404},
 	} {
 		out := httptest.NewRecorder()
 		root.ServeHTTP(out, httptest.NewRequest(tc.method, tc.path, nil))

@@ -71,11 +71,10 @@ type AssignResult struct {
 
 // Service 设备归属分配(单事务,逐台)。
 type Service struct {
-	db               *gorm.DB
-	validate         DeptValidator
-	clock            func() time.Time
-	transferRecorder DeviceTransferRecorder
-	transferBarrier  DeviceTransferBarrier
+	db              *gorm.DB
+	validate        DeptValidator
+	clock           func() time.Time
+	transferBarrier DeviceTransferBarrier
 }
 
 func NewService(db *gorm.DB, validate DeptValidator, options ...ServiceOption) *Service {
@@ -84,9 +83,6 @@ func NewService(db *gorm.DB, validate DeptValidator, options ...ServiceOption) *
 		if option != nil {
 			option(service)
 		}
-	}
-	if service.transferRecorder == nil {
-		service.transferRecorder = newDefaultTransferRecorder(db, service.clock)
 	}
 	return service
 }

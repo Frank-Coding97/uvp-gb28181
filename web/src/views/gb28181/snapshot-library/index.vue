@@ -114,8 +114,7 @@
           </div>
         </div>
 
-        <footer class="library-footer">
-          <span class="library-count">共 {{ pagination.total }} 张</span>
+        <footer class="library-footer uvp-pagination-bar">
           <a-pagination
             data-testid="library-pagination"
             :current="pagination.page"
@@ -403,12 +402,8 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding-top: 2px;
-}
-.library-count {
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
 }
 
 @media (width <= 900px) {

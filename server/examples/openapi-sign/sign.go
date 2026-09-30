@@ -32,15 +32,16 @@ var errInvalidInput = errors.New("invalid OpenAPI signing input")
 // Request contains exactly the fields covered by the v1 canonical string.
 // Body is hashed byte-for-byte and is never decoded and re-serialized.
 type Request struct {
-	Method      string
-	Path        string
-	RawQuery    string
-	ContentType string
-	Body        []byte
-	AccessKey   string
-	Timestamp   string
-	Nonce       string
-	Audience    string
+	Method         string
+	Path           string
+	RawQuery       string
+	ContentType    string
+	Body           []byte
+	AccessKey      string
+	Timestamp      string
+	Nonce          string
+	IdempotencyKey string
+	Audience       string
 }
 
 // HeaderValues keeps all observed values so duplicate and comma-combined
@@ -66,11 +67,14 @@ type Headers struct {
 	ContentType string
 }
 
-// CanonicalString returns the ten-line v1 string, separated by LF and without
+// CanonicalString returns the eleven-line v1 string, separated by LF and without
 // a final LF.
 func CanonicalString(input Request) (string, error) {
 	method, err := normalizeMethod(input.Method)
 	if err != nil || validateAccessKey(input.AccessKey) != nil || validateTimestamp(input.Timestamp) != nil || validateNonce(input.Nonce) != nil || validateLineField(input.Audience) != nil {
+		return "", errInvalidInput
+	}
+	if validateIdempotencyKey(input.IdempotencyKey) != nil {
 		return "", errInvalidInput
 	}
 	if validatePath(input.Path) != nil || len(input.Body) > maxBodyBytes {
@@ -109,8 +113,24 @@ func CanonicalString(input Request) (string, error) {
 		query,
 		contentType,
 		hex.EncodeToString(bodyHash[:]),
+		input.IdempotencyKey,
 		input.Audience,
 	}, "\n"), nil
+}
+
+func validateIdempotencyKey(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 128 || validateLineField(value) != nil {
+		return errInvalidInput
+	}
+	for _, r := range value {
+		if r < 0x21 || r > 0x7e {
+			return errInvalidInput
+		}
+	}
+	return nil
 }
 
 // Sign computes lowercase hexadecimal HMAC-SHA256 using the decoded 32-byte

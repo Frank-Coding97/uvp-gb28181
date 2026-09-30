@@ -48,7 +48,7 @@ const emit = defineEmits<{
   "update:visible": [value: boolean];
 }>();
 
-const PAGE_SIZE = 10;
+const pageSize = ref(10);
 const rebootState = reactive<RebootState>({ list: [], total: 0, page: 1, loading: false, error: "", loaded: false });
 const upgradeState = reactive<UpgradeState>({ list: [], total: 0, page: 1, loading: false, error: "", loaded: false });
 const activeType = ref<RecordType>(props.initialType);
@@ -285,7 +285,7 @@ async function loadPage(type: RecordType, page: number, token = contextVersion, 
   state.error = "";
   try {
     if (type === "reboot") {
-      const result = await listMaintenanceOperations(deviceId, { page, pageSize: PAGE_SIZE });
+      const result = await listMaintenanceOperations(deviceId, { page, pageSize: pageSize.value });
       if (!isCurrent(type, token, version, deviceId)) return;
       if (result.code !== 0) throw new Error(result.message || "重启记录加载失败");
       rebootState.list = result.data?.list || [];
@@ -293,7 +293,7 @@ async function loadPage(type: RecordType, page: number, token = contextVersion, 
       rebootState.page = result.data?.page || page;
       rebootState.loaded = true;
     } else {
-      const result = await listFirmwareUpgrades(deviceId, { page, pageSize: PAGE_SIZE });
+      const result = await listFirmwareUpgrades(deviceId, { page, pageSize: pageSize.value });
       if (!isCurrent(type, token, version, deviceId)) return;
       if (result.code !== 0) throw new Error(result.message || "升级记录加载失败");
       upgradeState.list = result.data?.list || [];
@@ -340,6 +340,11 @@ function retryCurrent() {
 function changePage(page: number) {
   selectedRecord.value = null;
   if (props.device?.id != null) void loadPage(activeType.value, page);
+}
+
+function changePageSize(size: number) {
+  pageSize.value = size;
+  changePage(1);
 }
 
 function showDetails(type: RecordType, item: RecordItem) {
@@ -577,14 +582,18 @@ onBeforeUnmount(() => invalidateRequests());
                 <span class="record-summary" :title="summaryText(activeType, item)">{{ summaryText(activeType, item) }}</span>
               </button>
             </div>
-            <footer v-if="activeState.total > 0" class="records-pagination">
+            <footer v-if="activeState.total > 0" class="records-pagination uvp-pagination-bar">
               <a-pagination
                 :current="activeState.page"
-                :page-size="PAGE_SIZE"
+                :page-size="pageSize"
                 :total="activeState.total"
                 :loading="activeState.loading"
+                :page-size-options="[10, 20, 50, 100]"
+                show-total
+                show-page-size
                 show-jumper
                 @change="changePage"
+                @page-size-change="changePageSize"
               />
             </footer>
           </section>

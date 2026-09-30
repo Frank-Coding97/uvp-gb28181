@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 )
@@ -112,22 +113,110 @@ func TestConfigService_GetGrouped(t *testing.T) {
 	require.Empty(t, apiSecret.Value)
 }
 
+func TestConfigService_GetGroupedMarksEveryBooleanWithSharedStatusDictionary(t *testing.T) {
+	cli := &mockZLMClient{getReturn: map[string]string{}}
+	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	svc := service.NewConfigService(reg, cli)
+
+	grouped, err := svc.GetGrouped(context.Background(), reg.List()[0].ID)
+	require.NoError(t, err)
+	byKey := map[string]service.ConfigItem{}
+	for _, group := range grouped {
+		for _, item := range group.Items {
+			byKey[item.Key] = item
+		}
+	}
+	booleanKeys := []string{
+		"hook.enable",
+		"protocol.enable_rtsp", "protocol.enable_rtmp", "protocol.enable_hls", "protocol.enable_ts",
+		"protocol.enable_fmp4", "protocol.enable_mp4", "protocol.enable_audio", "protocol.add_mute_audio",
+		"general.publishToHls", "general.publishToMP4", "general.resetWhenRePlay",
+		"rtp_proxy.checkSource", "api.apiDebug", "general.check_nvr_status",
+	}
+	for _, key := range booleanKeys {
+		require.Equal(t, "status", byKey[key].DictCode, key)
+	}
+	for _, key := range []string{"http.port", "hook.timeoutSec", "general.mergeWriteMS", "rtp_proxy.h264_pt", "record.fileSecond"} {
+		require.Empty(t, byKey[key].DictCode, key)
+	}
+	require.Equal(t, "是否开启 MP4 录制", byKey["protocol.enable_mp4"].Comment)
+}
+
 func TestConfigService_Update_SplitsHotAndRestart(t *testing.T) {
 	cli := &mockZLMClient{getReturn: map[string]string{}}
 	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
 	svc := service.NewConfigService(reg, cli)
 	id := reg.List()[0].ID
 
-	_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
+	resp, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
 		Changes: map[string]string{
 			"hook.timeoutSec": "12",
 			"http.port":       "8080",
 		},
 	})
-	// 修复后契约:含需重启项时整体拒绝(平台未实现 desired-state 持久化,
-	// 接受这类配置会谎报成功),热改项也不下发
-	require.ErrorIs(t, err, service.ErrRestartRequiredUnsupported)
-	require.Empty(t, cli.lastSetParams)
+	require.NoError(t, err)
+	require.Equal(t, []string{"hook.timeoutSec"}, resp.Applied)
+	require.Equal(t, []string{"http.port"}, resp.RequiresRestart)
+	require.Equal(t, "8080", cli.lastSetParams["http.port"])
+	require.Equal(t, "8080", cli.getReturn["http.port"])
+}
+
+func TestConfigService_NetworkPortsAreRestartRequiredAndPersisted(t *testing.T) {
+	ports := map[string]string{
+		"http.port": "18080", "http.sslport": "0", "rtmp.port": "0", "rtmp.sslport": "0",
+		"rtsp.port": "0", "rtsp.sslport": "0", "rtp_proxy.port_range": "30000-35000", "shell.port": "0",
+	}
+	cli := &mockZLMClient{getReturn: map[string]string{}}
+	reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+	svc := service.NewConfigService(reg, cli)
+	id := reg.List()[0].ID
+	groups, err := svc.GetGrouped(context.Background(), id)
+	require.NoError(t, err)
+	for _, group := range groups {
+		if group.Name != "网络端口" {
+			continue
+		}
+		require.Len(t, group.Items, len(ports))
+		for _, item := range group.Items {
+			require.Equal(t, service.ConfigModeRestartRequired, item.Mode, item.Key)
+			require.True(t, item.RestartRequired, item.Key)
+			require.False(t, item.HotReloadable, item.Key)
+		}
+	}
+	resp, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: ports})
+	require.NoError(t, err)
+	require.Empty(t, resp.Applied)
+	require.Len(t, resp.RequiresRestart, len(ports))
+	require.Equal(t, ports, cli.lastSetParams)
+	for key, value := range ports {
+		require.Equal(t, value, cli.getReturn[key])
+	}
+}
+
+func TestConfigService_InvalidNetworkPortBatchNeverSets(t *testing.T) {
+	invalid := map[string][]string{
+		"http.port":            {"", "0", "-1", "65536", "1.5", " 80", "1e3", "abc"},
+		"http.sslport":         {"-1", "65536"},
+		"rtmp.port":            {"-1", "65536"},
+		"rtmp.sslport":         {"-1", "65536"},
+		"rtsp.port":            {"-1", "65536"},
+		"rtsp.sslport":         {"-1", "65536"},
+		"shell.port":           {"-1", "65536"},
+		"rtp_proxy.port_range": {"", "0-10", "500-499", "1-65536", "1,2", "1 - 2", "abc-def"},
+	}
+	for key, values := range invalid {
+		for _, value := range values {
+			t.Run(key+"="+value, func(t *testing.T) {
+				cli := &mockZLMClient{}
+				reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+				_, err := service.NewConfigService(reg, cli).Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{
+					key: value, "hook.timeoutSec": "12",
+				}})
+				require.ErrorIs(t, err, service.ErrInvalidConfigValue)
+				require.Nil(t, cli.lastSetParams)
+			})
+		}
+	}
 }
 
 func TestConfigService_Update_AllHot_NoRestart(t *testing.T) {
@@ -143,6 +232,107 @@ func TestConfigService_Update_AllHot_NoRestart(t *testing.T) {
 	require.Empty(t, resp.RequiresRestart)
 }
 
+func TestConfigService_CustomHooksAreEditableAndRoundTrip(t *testing.T) {
+	cli := &mockZLMClient{getReturn: map[string]string{}}
+	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	svc := service.NewConfigService(reg, cli)
+	changes := map[string]string{"hook.enable": "0"}
+	for _, event := range playauth.ManagedHookEvents() {
+		changes["hook."+string(event)] = "https://example.com/" + string(event) + "?node=uuid-a&authMode=jwt"
+	}
+	changes["hook.on_flow_report"] = ""
+	resp, err := svc.Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: changes})
+	require.NoError(t, err)
+	require.Len(t, resp.Applied, len(changes))
+	groups, err := svc.GetGrouped(context.Background(), reg.List()[0].ID)
+	require.NoError(t, err)
+	for _, group := range groups {
+		for _, item := range group.Items {
+			if expected, ok := changes[item.Key]; ok {
+				require.Equal(t, service.ConfigModeHotReload, item.Mode)
+				require.Equal(t, expected, item.Value)
+			}
+		}
+	}
+}
+
+func TestConfigService_InvalidHookBatchNeverSets(t *testing.T) {
+	for _, value := range []string{"ftp://example.com/hook", "javascript:alert(1)", "/relative", "https://", "https://user:pass@example.com/hook", "https://example.com/hook#fragment", " https://example.com/hook", "https://example.com:bad/hook", "https://example.com/hook?x=%zz"} {
+		t.Run(value, func(t *testing.T) {
+			cli := &mockZLMClient{}
+			reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+			_, err := service.NewConfigService(reg, cli).Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{"hook.enable": "1", "hook.on_play": value}})
+			require.Error(t, err)
+			require.Nil(t, cli.lastSetParams)
+			require.NotContains(t, err.Error(), value)
+		})
+	}
+	cli := &mockZLMClient{}
+	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	_, err := service.NewConfigService(reg, cli).Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{"hook.enable": "2"}})
+	require.Error(t, err)
+	require.Nil(t, cli.lastSetParams)
+	_, err = service.NewConfigService(reg, cli).Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{"hook.on_play": "https://custom.example/play?node=" + reg.List()[0].MediaServerUUID + "&cap=forged"}})
+	require.ErrorIs(t, err, service.ErrInvalidConfigValue)
+	require.Nil(t, cli.lastSetParams)
+}
+
+func TestConfigService_HookParametersRemainVisible(t *testing.T) {
+	cli := &mockZLMClient{getReturn: map[string]string{"hook.enable": "1", "hook.timeoutSec": "10", "hook.alive_interval": "30.0"}}
+	reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+	groups, err := service.NewConfigService(reg, cli).GetGrouped(context.Background(), reg.List()[0].ID)
+	require.NoError(t, err)
+	for _, group := range groups {
+		for _, item := range group.Items {
+			if value, ok := cli.getReturn[item.Key]; ok {
+				require.Equal(t, value, item.Value)
+			}
+		}
+	}
+}
+
+func TestConfigService_HeartbeatIntervalCanBeSavedForRestart(t *testing.T) {
+	for _, value := range []string{"15", "45.5"} {
+		t.Run(value, func(t *testing.T) {
+			cli := &mockZLMClient{getReturn: map[string]string{}}
+			reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+			svc := service.NewConfigService(reg, cli)
+			resp, err := svc.Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{
+				"hook.alive_interval": value, "hook.timeoutSec": "12",
+			}})
+			require.NoError(t, err)
+			require.Equal(t, []string{"hook.alive_interval"}, resp.RequiresRestart)
+			require.Equal(t, []string{"hook.timeoutSec"}, resp.Applied)
+			groups, err := svc.GetGrouped(context.Background(), reg.List()[0].ID)
+			require.NoError(t, err)
+			for _, group := range groups {
+				for _, item := range group.Items {
+					if item.Key == "hook.alive_interval" {
+						require.Equal(t, service.ConfigMode("restart_required"), item.Mode)
+						require.False(t, item.HotReloadable)
+						require.True(t, item.RestartRequired)
+						require.Equal(t, value, item.Value)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestConfigService_InvalidHeartbeatIntervalNeverSets(t *testing.T) {
+	for _, value := range []string{"", "0", "-1", "NaN", "Inf", "1e100", "1e-100", "abc", " 30 "} {
+		t.Run(value, func(t *testing.T) {
+			cli := &mockZLMClient{}
+			reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
+			_, err := service.NewConfigService(reg, cli).Update(context.Background(), reg.List()[0].ID, service.UpdateConfigReq{Changes: map[string]string{
+				"hook.alive_interval": value, "hook.timeoutSec": "12",
+			}})
+			require.ErrorIs(t, err, service.ErrInvalidConfigValue)
+			require.Nil(t, cli.lastSetParams)
+		})
+	}
+}
+
 func TestConfigService_UpdateRejectsPlatformManagedAutoOnDemandKeys(t *testing.T) {
 	cli := &mockZLMClient{}
 	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
@@ -150,7 +340,7 @@ func TestConfigService_UpdateRejectsPlatformManagedAutoOnDemandKeys(t *testing.T
 	id := reg.List()[0].ID
 
 	for _, key := range []string{
-		"api.secret", "hook.enable", "hook.on_stream_not_found", "hook.on_flow_report", "general.flowThreshold", "general.mediaServerId", "general.maxStreamWaitMS",
+		"api.secret", "general.flowThreshold", "general.mediaServerId",
 	} {
 		_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{key: "tampered"}})
 		require.ErrorIs(t, err, service.ErrManagedConfigKey, key)

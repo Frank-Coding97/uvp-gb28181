@@ -11,10 +11,8 @@ import (
 
 	"gorm.io/gorm"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	runtimeptz "uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
@@ -110,13 +108,6 @@ func (d *Dispatcher) resolveTarget(ctx context.Context, request auth.PTZRequest)
 		DeviceOnline:  device.Status == gbmodels.DeviceStatusOnline,
 		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile:       profile,
-	}
-	if gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
-		state, err := playauth.NewDeviceSecurityStore(d.db).Load(ctx, device.DeviceID)
-		if err != nil || state.CleanupCompletedEpoch != state.AccessEpoch {
-			return runtimeptz.Target{}, gbmodels.GbChannel{}, auth.ErrPTZUnavailable
-		}
-		target.DeviceEpoch = state.AccessEpoch
 	}
 	return target, channel, nil
 }

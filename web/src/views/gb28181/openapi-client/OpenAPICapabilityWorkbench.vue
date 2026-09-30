@@ -30,7 +30,6 @@ const capabilityDescriptions: Record<string, string> = {
   "channel:list": "查询指定设备下的数据通道。",
   "channel:detail": "读取指定通道的基础信息。",
   "channel:status": "读取指定通道的设备状态。",
-  "play:live:apply": "为指定通道申请实时播放授权。",
   "ptz:preset:list": "读取指定通道已经配置的预置位。",
   "ptz:preset:save": "新增或更新指定通道的预置位。",
   "ptz:preset:call": "让指定通道转到已有预置位。",
@@ -286,20 +285,22 @@ defineExpose({
         <template #extra>
           <span class="capability-workbench__current">已授权 {{ selectedScopes.length }} / {{ allCapabilities.length }} 项</span>
         </template>
-        <div class="capability-change capability-change--added">
-          <strong>新增 {{ addedScopes.length }} 项</strong>
-          <span v-for="scope in addedScopes" :key="scope">+ {{ scope }}</span>
-          <small v-if="!addedScopes.length">无新增能力</small>
+        <div class="capability-workbench__change-scroll">
+          <div class="capability-change capability-change--added">
+            <strong>新增 {{ addedScopes.length }} 项</strong>
+            <span v-for="scope in addedScopes" :key="scope">+ {{ scope }}</span>
+            <small v-if="!addedScopes.length">无新增能力</small>
+          </div>
+          <div class="capability-change capability-change--removed">
+            <strong>移除 {{ removedScopes.length }} 项</strong>
+            <span v-for="scope in removedScopes" :key="scope">- {{ scope }}</span>
+            <small v-if="!removedScopes.length">无移除能力</small>
+          </div>
+          <a-alert v-if="highRiskChanges.length" type="warning">
+            包含 {{ highRiskChanges.length }} 项媒体或控制能力变更，请确认接入方影响。
+          </a-alert>
+          <a-alert v-if="!editable" type="info">当前客户端状态或账号权限不允许修改能力。</a-alert>
         </div>
-        <div class="capability-change capability-change--removed">
-          <strong>移除 {{ removedScopes.length }} 项</strong>
-          <span v-for="scope in removedScopes" :key="scope">- {{ scope }}</span>
-          <small v-if="!removedScopes.length">无移除能力</small>
-        </div>
-        <a-alert v-if="highRiskChanges.length" type="warning">
-          包含 {{ highRiskChanges.length }} 项媒体或控制能力变更，请确认接入方影响。
-        </a-alert>
-        <a-alert v-if="!editable" type="info">当前客户端状态或账号权限不允许修改能力。</a-alert>
         <div class="capability-workbench__actions">
           <a-button :disabled="!dirty || saving" @click="resetDraft">撤销修改</a-button>
           <a-button type="primary" :loading="saving" :disabled="!editable || !dirty || saving" @click="save">保存授权</a-button>
@@ -321,7 +322,7 @@ defineExpose({
   display: grid;
   grid-template-columns: 200px minmax(460px, 1fr) 280px;
   gap: 12px;
-  height: clamp(560px, calc(100vh - 330px), 720px);
+  height: clamp(480px, calc(100vh - 360px), 760px);
   min-height: 0;
   overflow: hidden;
 }
@@ -368,7 +369,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 14px;
@@ -435,10 +436,21 @@ defineExpose({
 }
 
 .capability-workbench__changes :deep(.arco-card-body) {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   height: calc(100% - 55px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.capability-workbench__change-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding-bottom: 8px;
   overflow-y: auto;
 }
 
@@ -474,15 +486,21 @@ defineExpose({
 
 .capability-workbench__actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
-  margin-top: auto;
+  justify-content: flex-end;
+  padding-top: 12px;
+  margin-top: 8px;
+  background: var(--uvp-panel-bg);
+  border-top: 1px solid var(--color-border-2);
 }
 
 @media (width <= 1180px) {
   .capability-workbench__body {
+    grid-template-rows: minmax(0, 1fr) 180px;
     grid-template-columns: 170px minmax(420px, 1fr);
-    height: auto;
-    min-height: 560px;
+    height: clamp(480px, calc(100vh - 360px), 760px);
+    min-height: 0;
   }
 
   .capability-workbench__changes {
@@ -492,7 +510,9 @@ defineExpose({
 
 @media (width <= 760px) {
   .capability-workbench__body {
+    grid-template-rows: auto auto;
     grid-template-columns: 1fr;
+    height: auto;
     min-height: 0;
   }
 

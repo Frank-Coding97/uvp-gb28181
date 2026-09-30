@@ -47,7 +47,6 @@ import {
   type AudioLevelMeter
 } from "./talkPublisher";
 import {
-  authorizeFixedPlayback,
   controlDevice,
   controlPtz,
   controlPtzCruise,
@@ -337,7 +336,7 @@ const canPtzPanel = computed(
  *   合并后「画面设置」= 侧栏一组(`video-param`) + 底栏四格
  *   (图像叠加 / 遮挡 / 镜像 / 参数对照)。
  *   ⛔ 别再给它单开一级页签,也别退回"侧栏两组二选一"的切换形态(老板 2026-09-20 明确否掉)。
- *   参数对照与视频编码同属当前码流事实,在侧栏下方紧邻展示;底栏只承载画面操作卡片。
+ *   参数对照与视频编码同属当前码流事实,合并在同一张编码卡内;底栏只承载画面操作卡片。
  *
  * ⭐ "高级"tab 2026-09-20 **整体消失**,三拨内容各有归属(控制台不再保留任何一处):
  *   ① 图像抓拍配置 → 设备管理页「设备详情」抽屉的「设备控制」页;
@@ -486,7 +485,7 @@ const configWorkspaceGroups: Partial<Record<TabKey, string[]>> = {
   //    侧栏**只挂 `video-param`**（视频编码），「图像叠加」整块搬到底栏第一格
   //    （`picture-osd-cell`，渲染 `DeviceConfigOsdBlocks` 的 `layout="row"`，数据走
   //    `DeviceConfigDrawer` 暴露的 `osdBlocks` 袋 + `setOsdFlag` / `setOsdItems`）。
-  //    ⇒ 这一页现在一次看全：视频编码与参数对照（侧栏上下排列） / 图像叠加 · 遮挡 · 镜像（底栏）。
+  //    ⇒ 这一页现在一次看全：视频编码（含参数对照）/ 图像叠加 · 遮挡 · 镜像（底栏）。
   // ⛔ 别把 `osd` 加回这个数组：加回来侧栏又长出 `dcg-nav` 切换，同一份
   //    `familyValues.osd` 就有了两个编辑面（底栏那份是新的）。
   // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍下沉在底栏卡片，不在这里：侧栏再挂一份，
@@ -1914,11 +1913,10 @@ const videoParamsDraft = ref<VideoParamCodecItem[]>([]);
 const videoParamRegisteredVersion = ref("");
 const selectedVideoStream = ref(0);
 /**
- * 码流选择的**受控出口**，喂给侧栏 `DeviceConfigDrawer` 的 `v-model:stream-profile`。
+ * 码流选择的**受控出口**，喂给视频编码卡 `DeviceConfigDrawer` 的 `v-model:stream-profile`。
  *
  * ⛔ 真源只有 `selectedVideoStream`（number）这一个，这里只是把它翻成抽屉要的字符串 ——
- *    两个 ref 各存一份就会出现"底栏对着子码流、侧栏在改主码流"，而两边都不报错：
- *    对照卡上的数字和正在编辑的那条流根本不是同一条。
+ *    两个 ref 各存一份就会出现"编码卡选了子码流、对照仍看主码流"，而两边都不报错。
  */
 const videoParamStreamProfile = computed({
   get: () => String(selectedVideoStream.value),
@@ -2522,12 +2520,6 @@ const videoParamCompareStream = computed(() => {
   return rows.find(row => row.streamNumber === selectedVideoStream.value) ?? rows.find(row => row.streamNumber === 0) ?? rows[0];
 });
 
-function selectVideoStream(value: string) {
-  // ⛔ 只改这一个真源：侧栏的「配置文件」下拉通过 `v-model:stream-profile` 跟着走
-  //    （见 `videoParamStreamProfile`），不要再自己转发一次。
-  selectedVideoStream.value = Number(value) || 0;
-}
-
 /**
  * 对照区里的「回读」一行取**设备最近一次回读**的值(不是草稿值)。
  *
@@ -2582,7 +2574,7 @@ const videoParamDiffs = computed<{ codec: boolean | null; resolution: boolean | 
 
   const readCodec = normalizeCodecToken(videoFormatText(read.videoFormat));
   const measuredCodec = normalizeCodecToken(streamInfo.value.videoCodec);
-  const codec = readCodec && measuredCodec ? readCodec === measuredCodec : null;
+  const codec = readCodec && measuredCodec ? readCodec !== measuredCodec : null;
 
   const readLabel = resolutionText(read.resolution);
   const readPixels = VIDEO_RESOLUTION_TIERS[readLabel] ?? pixelsOf(readLabel);
@@ -4974,15 +4966,16 @@ async function copyProtocolUrl(proto: StreamProtocol) {
   const fixedStreamID = channel ? `${channel.deviceId}_${channel.channelId}` : "";
   if (channel && result?.streamId === fixedStreamID && hasPlaybackToken(url)) {
     try {
-      const response = await authorizeFixedPlayback(channel.deviceId, channel.channelId);
+      // 统一复用播放接口：已有固定流时只复用媒体并刷新凭据，没有流时按正常播放流程启动。
+      const response = await startPlay(channel.deviceId, channel.channelId, { silent: true });
       const authorizedURL = response.code === 0 && response.data ? protocolUrlsFor(response.data)[proto] : null;
       if (!authorizedURL) {
-        Message.error("播放地址授权失败，请重试");
+        Message.error("播放地址刷新失败，请重试");
         return;
       }
       url = authorizedURL;
     } catch {
-      Message.error("播放地址授权失败，请重试");
+      Message.error("播放地址刷新失败，请重试");
       return;
     }
   }
@@ -5675,8 +5668,8 @@ provide(PLAY_CONSOLE_CONTEXT, {
                  （图像叠加 2026-09-20 整块搬到底栏 `picture-osd-cell`，同一页全展示，不再切组）。
                  ⛔ 不要退回"两个抽屉 + 两个一级页签"：那正是 2026-09-20 合并掉的东西。
                  ⛔ 也不要传 `config-only` —— 它的语义是"排除 video-param 组"，与这里的意图相反。
-                 ⛔ `v-model:stream-profile` **必须绑**：底栏对照卡的码流下拉与这里「配置文件」
-                    必须是同一路（真源只有 `selectedVideoStream`）。
+                 ⛔ `v-model:stream-profile` **必须绑**：编码卡内的码流下拉驱动编辑与对照，
+                    必须始终指向同一路（真源只有 `selectedVideoStream`）。
                  ⛔ 不再绑 `v-model:active-group-key` / `:osd-editing` / `@toggle-osd-edit`：
                     OSD 面板不在这条侧栏里了（底栏那份自己接），留着就是没人读的第二份状态。
                     抽屉这两个 prop 仍保留给**内联渲染 OSD 的宿主**（如免登录的设备配置预览页）。 -->
@@ -5693,25 +5686,23 @@ provide(PLAY_CONSOLE_CONTEXT, {
               :channel-name="props.channel?.alias?.trim() || props.channel?.name?.trim() || ''"
               :can-read="canViewPtz"
               :can-apply="canControlPtz && props.channel?.status === 1"
-            />
-            <div class="sidebar-video-compare" data-testid="linked-side-video-compare">
-              <!-- 参数对照与视频编码上下相邻，设备回读与当前实测始终在同一视线内。 -->
-              <PictureVideoCompareCard
-                class="sidebar-video-compare-card"
-                :verdict="videoParamVerdict"
-                :verdict-title="videoParamVerdictTitle"
-                :selected-stream="videoParamCompareStream"
-                :streams="videoParamsDraft"
-                :read-row="videoParamCompareReadRow()"
-                :diffs="videoParamDiffs"
-                :stream-info="streamInfo"
-                :bitrate="liveMetrics.bitrate"
-                :video-format-text="videoFormatText"
-                :resolution-text="resolutionText"
-                :frame-rate-text="frameRateText"
-                @select-stream="selectVideoStream"
-              />
-            </div>
+            >
+              <template #video-compare>
+                <PictureVideoCompareCard
+                  class="video-param-compare-inline"
+                  :verdict="videoParamVerdict"
+                  :verdict-title="videoParamVerdictTitle"
+                  :selected-stream="videoParamCompareStream"
+                  :read-row="videoParamCompareReadRow()"
+                  :diffs="videoParamDiffs"
+                  :stream-info="streamInfo"
+                  :bitrate="liveMetrics.bitrate"
+                  :video-format-text="videoFormatText"
+                  :resolution-text="resolutionText"
+                  :frame-rate-text="frameRateText"
+                />
+              </template>
+            </DeviceConfigDrawer>
           </div>
         </div>
       </aside>
@@ -6681,10 +6672,6 @@ provide(PLAY_CONSOLE_CONTEXT, {
   box-shadow: none;
 }
 .sidebar-deviceconfig-panel {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 10px;
-  align-content: start;
   height: 100%;
   min-height: 0;
 }
@@ -6692,21 +6679,6 @@ provide(PLAY_CONSOLE_CONTEXT, {
 .sidebar-deviceconfig-panel :deep(.dcg-window--embedded) {
   height: auto;
   min-height: 0;
-}
-
-.sidebar-video-compare {
-  min-height: 0;
-}
-
-.sidebar-video-compare-card {
-  height: auto;
-  min-height: 0;
-}
-
-.sidebar-video-compare-card :deep(.vpc-grid) {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: visible;
 }
 
 /* 双栏桌面布局中,右侧操作内容远高于左侧视频是正常的;不能让它的 min-content 高度
@@ -6998,7 +6970,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
   color: var(--uvp-text-tertiary);
 }
 
-/* 「参数对照」区：与视频编码抽屉在右侧上下排列。
+/* 「参数对照」区：作为视频编码卡内部的只读对照内容。
    三行数据仍保持同一张卡内的横向结构，避免设备事实与画面实测被拆散。
    ⛔ 卡片容器直接用 `.linked-section.linked-card`(它本身就是 flex column),
       不要再套一层专用的 layout 壳。 */

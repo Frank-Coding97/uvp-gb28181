@@ -1,6 +1,6 @@
 <template>
-  <div class="snow-page menu-page">
-    <div class="snow-inner uvp-page-shell-flat">
+  <div class="snow-fill menu-page">
+    <div class="snow-fill-inner uvp-page-shell-flat menu-page__inner">
       <s-layout-search>
         <template #fields>
           <a-input
@@ -44,134 +44,137 @@
         </template>
       </s-layout-search>
       <!-- 修改表格数据源为displayMenuList -->
-      <a-table
-        class="uvp-data-table"
-        ref="tableRef"
-        :data="displayMenuList"
-        :loading="loading"
-        row-key="id"
-        column-resizable
-        :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-        v-model:selectedKeys="selectedKeys"
-        :bordered="false"
-        show-empty-tree
-        :pagination="false"
-        size="medium"
-        :scroll="tableScroll"
-      >
-        <template #columns>
-          <a-table-column title="菜单名称" :width="180" tooltip ellipsis>
-            <template #cell="{ record }">
-              <span>{{ $t(`menu.${record.title}`) }}</span>
-            </template>
-          </a-table-column>
-          <a-table-column title="类型" align="center" :width="70">
-            <template #cell="{ record }">
-              <a-tag v-if="record.type == 1" bordered size="small" color="purple">目录</a-tag>
-              <a-tag v-else-if="record.type == 2" bordered size="small" color="green">菜单</a-tag>
-              <a-tag v-else bordered size="small" color="gray">按钮</a-tag>
-            </template>
-          </a-table-column>
-          <!-- <a-table-column title="图标" align="center" :width="50">
-            <template #cell="{ record }">
-              <MenuItemIcon :svg-icon="record.svgIcon" :icon="record.icon" />
-            </template>
-          </a-table-column> -->
-          <a-table-column title="路由路径" data-index="path" :width="150" tooltip ellipsis></a-table-column>
-          <a-table-column title="路由名称" data-index="name" :width="100" tooltip ellipsis></a-table-column>
-          <a-table-column title="组件路径" :width="150" tooltip ellipsis>
-            <template #cell="{ record }">
-              {{ record.redirect ? record.redirect : record.component }}
-            </template>
-          </a-table-column>
-          <a-table-column title="权限标识" tooltip :width="150" ellipsis>
-            <template #cell="{ record }">
-              {{ record.permission }}
-            </template>
-          </a-table-column>
-          <a-table-column title="排序" align="center" :width="80">
-            <template #cell="{ record }">
-              {{ record.sort }}
-            </template>
-          </a-table-column>
-          <a-table-column title="是否隐藏" align="center" :width="100">
-            <template #cell="{ record }">
-              <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.hide">是</a-tag>
-                <a-tag bordered size="small" color="red" v-else>否</a-tag>
-              </a-space>
-            </template>
-          </a-table-column>
-          <a-table-column title="是否禁用" align="center" :width="100">
-            <template #cell="{ record }">
-              <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.disable">是</a-tag>
-                <a-tag bordered size="small" color="red" v-else>否</a-tag>
-              </a-space>
-            </template>
-          </a-table-column>
-          <a-table-column title="是否缓存" align="center" :width="100">
-            <template #cell="{ record }">
-              <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.keepAlive">是</a-tag>
-                <a-tag bordered size="small" color="red" v-else>否</a-tag>
-              </a-space>
-            </template>
-          </a-table-column>
-          <a-table-column title="是否外链" align="center" :width="100">
-            <template #cell="{ record }">
-              <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.link">是</a-tag>
-                <a-tag bordered size="small" color="red" v-else>否</a-tag>
-              </a-space>
-            </template>
-          </a-table-column>
-          <a-table-column title="是否全屏" align="center" :width="100">
-            <template #cell="{ record }">
-              <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.isFull">是</a-tag>
-                <a-tag bordered size="small" color="red" v-else>否</a-tag>
-              </a-space>
-            </template>
-          </a-table-column>
-          <a-table-column title="操作" align="center" :width="300" :fixed="isMobile ? '' : 'right'">
-            <template #cell="{ record }">
-              <div class="uvp-table-actions">
-                <a-link
-                  class="uvp-table-action uvp-table-action--assign"
-                  @click="onAssignApi(record)"
-                  v-hasPerm="['system:menu:setMenuApis']"
-                >
-                  <span>API权限</span>
-                </a-link>
-                <a-link
-                  class="uvp-table-action uvp-table-action--add"
-                  v-if="record.type != 3"
-                  @click="onCurrentAdd(record)"
-                  v-hasPerm="['system:menu:add']"
-                >
-                  <template #icon><icon-plus /></template>
-                  <span>新增</span>
-                </a-link>
-                <a-link
-                  class="uvp-table-action uvp-table-action--edit"
-                  @click="onUpdate(record)"
-                  v-hasPerm="['system:menu:edit']"
-                >
-                  <template #icon><icon-edit /></template>
-                  <span>修改</span>
-                </a-link>
-                <a-popconfirm type="warning" content="确定删除该项吗?" @ok="onDelete(record)">
-                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:menu:delete']">
-                    <template #icon><icon-delete /></template>
-                    <span>删除</span>
+      <div class="menu-table-wrap">
+        <a-table
+          class="uvp-data-table"
+          ref="tableRef"
+          :data="displayMenuList"
+          :loading="loading"
+          row-key="id"
+          column-resizable
+          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
+          v-model:selectedKeys="selectedKeys"
+          :bordered="false"
+          show-empty-tree
+          :pagination="false"
+          size="medium"
+          :scroll="tableScroll"
+        >
+          <template #columns>
+            <a-table-column title="菜单名称" :width="180" tooltip ellipsis>
+              <template #cell="{ record }">
+                <span>{{ $t(`menu.${record.title}`) }}</span>
+              </template>
+            </a-table-column>
+            <a-table-column title="类型" align="center" :width="70">
+              <template #cell="{ record }">
+                <a-tag v-if="record.type == 1" bordered size="small" color="purple">目录</a-tag>
+                <a-tag v-else-if="record.type == 2" bordered size="small" color="green">菜单</a-tag>
+                <a-tag v-else bordered size="small" color="gray">按钮</a-tag>
+              </template>
+            </a-table-column>
+            <!-- <a-table-column title="图标" align="center" :width="50">
+              <template #cell="{ record }">
+                <MenuItemIcon :svg-icon="record.svgIcon" :icon="record.icon" />
+              </template>
+            </a-table-column> -->
+            <a-table-column title="路由路径" data-index="path" :width="150" tooltip ellipsis></a-table-column>
+            <a-table-column title="路由名称" data-index="name" :width="100" tooltip ellipsis></a-table-column>
+            <a-table-column title="组件路径" :width="150" tooltip ellipsis>
+              <template #cell="{ record }">
+                {{ record.redirect ? record.redirect : record.component }}
+              </template>
+            </a-table-column>
+            <a-table-column title="权限标识" tooltip :width="150" ellipsis>
+              <template #cell="{ record }">
+                {{ record.permission }}
+              </template>
+            </a-table-column>
+            <a-table-column title="排序" align="center" :width="80">
+              <template #cell="{ record }">
+                {{ record.sort }}
+              </template>
+            </a-table-column>
+            <a-table-column title="是否隐藏" align="center" :width="100">
+              <template #cell="{ record }">
+                <a-space>
+                  <a-tag bordered size="small" color="arcoblue" v-if="record.hide">是</a-tag>
+                  <a-tag bordered size="small" color="red" v-else>否</a-tag>
+                </a-space>
+              </template>
+            </a-table-column>
+            <a-table-column title="是否禁用" align="center" :width="100">
+              <template #cell="{ record }">
+                <a-space>
+                  <a-tag bordered size="small" color="arcoblue" v-if="record.disable">是</a-tag>
+                  <a-tag bordered size="small" color="red" v-else>否</a-tag>
+                </a-space>
+              </template>
+            </a-table-column>
+            <a-table-column title="是否缓存" align="center" :width="100">
+              <template #cell="{ record }">
+                <a-space>
+                  <a-tag bordered size="small" color="arcoblue" v-if="record.keepAlive">是</a-tag>
+                  <a-tag bordered size="small" color="red" v-else>否</a-tag>
+                </a-space>
+              </template>
+            </a-table-column>
+            <a-table-column title="是否外链" align="center" :width="100">
+              <template #cell="{ record }">
+                <a-space>
+                  <a-tag bordered size="small" color="arcoblue" v-if="record.link">是</a-tag>
+                  <a-tag bordered size="small" color="red" v-else>否</a-tag>
+                </a-space>
+              </template>
+            </a-table-column>
+            <a-table-column title="是否全屏" align="center" :width="100">
+              <template #cell="{ record }">
+                <a-space>
+                  <a-tag bordered size="small" color="arcoblue" v-if="record.isFull">是</a-tag>
+                  <a-tag bordered size="small" color="red" v-else>否</a-tag>
+                </a-space>
+              </template>
+            </a-table-column>
+            <a-table-column title="操作" align="center" :width="300" :fixed="isMobile ? '' : 'right'">
+              <template #cell="{ record }">
+                <div class="uvp-table-actions">
+                  <a-link
+                    class="uvp-table-action uvp-table-action--assign"
+                    @click="onAssignApi(record)"
+                    v-hasPerm="['system:menu:setMenuApis']"
+                  >
+                    <template #icon><icon-safe /></template>
+                    <span>API权限</span>
                   </a-link>
-                </a-popconfirm>
-              </div>
-            </template>
-          </a-table-column>
-        </template>
-      </a-table>
+                  <a-link
+                    class="uvp-table-action uvp-table-action--add"
+                    v-if="record.type != 3"
+                    @click="onCurrentAdd(record)"
+                    v-hasPerm="['system:menu:add']"
+                  >
+                    <template #icon><icon-plus /></template>
+                    <span>新增</span>
+                  </a-link>
+                  <a-link
+                    class="uvp-table-action uvp-table-action--edit"
+                    @click="onUpdate(record)"
+                    v-hasPerm="['system:menu:edit']"
+                  >
+                    <template #icon><icon-edit /></template>
+                    <span>修改</span>
+                  </a-link>
+                  <a-popconfirm type="warning" content="确定删除该项吗?" @ok="onDelete(record)">
+                    <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:menu:delete']">
+                      <template #icon><icon-delete /></template>
+                      <span>删除</span>
+                    </a-link>
+                  </a-popconfirm>
+                </div>
+              </template>
+            </a-table-column>
+          </template>
+        </a-table>
+      </div>
     </div>
 
     <a-modal
@@ -791,6 +794,49 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+/* ── 填充壳 + 表格独占滚动区：垂直滚动条落在表体上 ── */
+.menu-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  contain: inline-size;
+}
+
+.menu-page__inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.menu-page__inner > :deep(.uvp-search-panel) {
+  flex: 0 0 auto;
+}
+
+.menu-table-wrap {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  contain: inline-size;
+}
+
+.menu-table-wrap :deep(.uvp-data-table) {
+  height: 100%;
+  min-height: 0;
+}
+
 .menu-page :deep(.uvp-search-panel__fields .arco-input-wrapper),
 .menu-page :deep(.uvp-search-panel__fields .arco-select-view) {
   box-sizing: border-box;
@@ -833,8 +879,8 @@ onMounted(() => {
   width: 1px;
   height: 12px;
   margin-right: 8px;
-  content: "";
   vertical-align: middle;
+  content: "";
   background: rgb(148 163 184 / 28%);
 }
 
@@ -845,9 +891,9 @@ onMounted(() => {
 
   p {
     margin-bottom: 20px;
-    color: var(--uvp-text-secondary);
     font-size: 13px;
     line-height: 1.7;
+    color: var(--uvp-text-secondary);
   }
 
   .import-mode-buttons {

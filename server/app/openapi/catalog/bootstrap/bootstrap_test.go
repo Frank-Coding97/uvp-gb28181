@@ -18,18 +18,22 @@ func TestEnsureCoreCatalogIsIdempotentAndKeepsSysAPIAsMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&appmodels.SysApi{}, &openapimodels.CapabilityGroup{}, &openapimodels.Capability{}, &openapimodels.Operation{}))
 	require.NoError(t, db.Create(&appmodels.SysApi{BaseModel: appmodels.BaseModel{ID: 42}, Title: "设备列表", Path: "/api/gb28181/device-mgmt/devices", Method: "GET", ApiGroup: "设备管理"}).Error)
+	require.NoError(t, db.Create(&openapimodels.CapabilityGroup{Code: "playback", Name: "多屏播放", Sort: 20, Status: openapimodels.CatalogStatusDraft, RowVersion: 1}).Error)
 
 	first, err := EnsureCoreCatalog(context.Background(), db, 7)
 	require.NoError(t, err)
 	require.Equal(t, len(CoreCatalogScopes()), first.OperationsCreated)
 	require.Equal(t, len(CoreCatalogScopes()), first.CapabilitiesCreated)
-	require.Equal(t, 3, first.GroupsCreated)
+	require.Equal(t, 2, first.GroupsCreated)
 	second, err := EnsureCoreCatalog(context.Background(), db, 8)
 	require.NoError(t, err)
 	require.Zero(t, second.OperationsCreated)
 	var groups int64
 	require.NoError(t, db.Model(&openapimodels.CapabilityGroup{}).Count(&groups).Error)
 	require.Equal(t, int64(3), groups)
+	var retired openapimodels.CapabilityGroup
+	require.NoError(t, db.Where("code = ?", "playback").First(&retired).Error)
+	require.Equal(t, openapimodels.CatalogStatusDisabled, retired.Status)
 	var capability openapimodels.Capability
 	require.NoError(t, db.Where("scope = ?", "device:list").First(&capability).Error)
 	require.NotNil(t, capability.SysAPIID)
@@ -41,6 +45,28 @@ func TestEnsureCoreCatalogIsIdempotentAndKeepsSysAPIAsMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.First(&capability, capability.ID).Error)
 	require.Equal(t, "custom", capability.Description)
+}
+
+func TestEnsureCoreCatalogRetiresRemovedPlaybackCapability(t *testing.T) {
+	db := newPublishTestDB(t)
+	legacy := openapimodels.CapabilityGroup{Code: "playback", Name: "多屏播放", Sort: 20, Status: openapimodels.CatalogStatusDraft, RowVersion: 1}
+	require.NoError(t, db.Create(&legacy).Error)
+	capability := openapimodels.Capability{
+		GroupID: legacy.ID, Code: "play.live.apply", Scope: "play:live:apply", Name: "实时点播授权",
+		ResourceType: "channel", RiskLevel: "media", Status: openapimodels.CatalogStatusDraft, RowVersion: 1,
+	}
+	require.NoError(t, db.Create(&capability).Error)
+
+	_, err := EnsureCoreCatalog(context.Background(), db, SystemActorID)
+	require.NoError(t, err)
+	require.NoError(t, db.First(&capability, capability.ID).Error)
+	var target openapimodels.CapabilityGroup
+	require.NoError(t, db.Where("code = ?", "device-management").First(&target).Error)
+	require.Equal(t, legacy.ID, capability.GroupID)
+	require.Equal(t, openapimodels.CatalogStatusDisabled, capability.Status)
+	var retired openapimodels.CapabilityGroup
+	require.NoError(t, db.Where("code = ?", "playback").First(&retired).Error)
+	require.Equal(t, openapimodels.CatalogStatusDisabled, retired.Status)
 }
 
 // The seeded rows are the published contract. If they disagree with the legacy
@@ -58,13 +84,13 @@ func TestEnsureCoreCatalogSeedsTheWholeCodeOwnedSurface(t *testing.T) {
 		idempotency string
 		adapterKey  string
 	}{
+		"play:live":          {risk: "control", idempotency: "none", adapterKey: adapters.PlayLiveAdapterKey},
 		"device:list":        {risk: "read", idempotency: "none", adapterKey: adapters.DeviceListAdapterKey},
 		"device:detail":      {risk: "read", idempotency: "none", adapterKey: adapters.DeviceDetailAdapterKey},
 		"device:status":      {risk: "read", idempotency: "none", adapterKey: adapters.DeviceStatusAdapterKey},
 		"channel:list":       {risk: "read", idempotency: "none", adapterKey: adapters.ChannelListAdapterKey},
 		"channel:detail":     {risk: "read", idempotency: "none", adapterKey: adapters.ChannelDetailAdapterKey},
 		"channel:status":     {risk: "read", idempotency: "none", adapterKey: adapters.ChannelStatusAdapterKey},
-		"play:live:apply":    {risk: "media", idempotency: "none", adapterKey: adapters.MediaLiveApplyAdapterKey},
 		"ptz:preset:list":    {risk: "read", idempotency: "none", adapterKey: adapters.PTZPresetListAdapterKey},
 		"ptz:preset:save":    {risk: "control", idempotency: "required", adapterKey: adapters.PTZPresetSaveAdapterKey},
 		"ptz:preset:call":    {risk: "control", idempotency: "required", adapterKey: adapters.PTZPresetCallAdapterKey},

@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
@@ -55,14 +54,5 @@ func capturePTZAuthorization(c *gin.Context, db *gorm.DB, hint ptz.Target) (ptz.
 }
 
 func (dc *DeviceMgmtController) authorizePTZTarget(c *gin.Context, target *ptz.Target) bool {
-	if !gbconfig.CurrentPlayAuthSettings().RequiredByOpenAPI {
-		return true
-	}
-	captured, err := capturePTZAuthorization(c, dc.db(), *target)
-	if err != nil {
-		dc.FailAndAbort(c, "设备权限已失效或正在转移", err)
-		return false
-	}
-	*target = captured
 	return true
 }

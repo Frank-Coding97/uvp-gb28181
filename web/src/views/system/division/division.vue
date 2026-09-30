@@ -50,11 +50,17 @@
               </a-space>
             </template>
           </a-table-column>
-          <a-table-column title="描述" data-index="describe" :ellipsis="true" :tooltip="true" :width="150"></a-table-column>
+          <a-table-column title="描述" data-index="describe" :ellipsis="true" :tooltip="true"></a-table-column>
           <a-table-column title="创建时间" data-index="createdAt" :ellipsis="true" :tooltip="true" :width="180">
             <template #cell="{ record }">{{ record.createdAt ? formatTime(record.createdAt) : "" }}</template>
           </a-table-column>
-          <a-table-column title="操作" align="center" :fixed="isMobile ? '' : 'right'" :width="200">
+          <a-table-column
+            title="操作"
+            align="center"
+            cell-class="division-ops-cell"
+            :fixed="isMobile ? '' : 'right'"
+            :width="200"
+          >
             <template #cell="{ record }">
               <div class="uvp-table-actions">
                 <a-link
@@ -459,5 +465,28 @@ onMounted(() => {
 
 :deep(.arco-table-indent) {
   flex-shrink: 0;
+}
+
+/* 操作列 200px：cellClass 落在 <td> 上，真正的单元格内边距在它内层的
+   <span class="arco-table-cell">（arco 默认 9px 16px）。必须打到这一层，
+   否则列内可用宽会少 32px，三个操作被 flex 压扁。 */
+:deep(.division-ops-cell > .arco-table-cell) {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+:deep(.division-ops-cell .uvp-table-actions) {
+  gap: 4px;
+}
+
+:deep(.division-ops-cell .uvp-table-action) {
+  gap: 3px;
+  padding-right: 4px;
+  padding-left: 4px;
+  font-size: 13px;
+}
+
+:deep(.division-ops-cell .uvp-table-action .arco-icon) {
+  font-size: 13px;
 }
 </style>

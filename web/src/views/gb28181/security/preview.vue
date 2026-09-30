@@ -2008,18 +2008,6 @@ onBeforeUnmount(() => {
   line-height: 22px;
 }
 
-.security-preview :deep(.uvp-data-table .arco-pagination-item),
-.security-preview :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
-.security-preview :deep(.uvp-data-table .arco-pagination-jumper-input) {
-  box-sizing: border-box;
-  height: 32px;
-  min-height: 32px;
-}
-
-.security-preview :deep(.uvp-data-table .arco-pagination-item) {
-  min-width: 32px;
-}
-
 :deep(.security-table .arco-table-th) {
   background: var(--uvp-table-header-bg);
 }

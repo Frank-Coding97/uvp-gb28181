@@ -125,7 +125,9 @@ const pagination = ref({
   pageSize: 10,
   total: 0,
   showPageSize: true,
-  showTotal: true
+  showTotal: true,
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 // 图片预览
@@ -265,20 +267,20 @@ watch(
 }
 
 .footer-actions {
-  margin-top: 16px;
   padding-top: 16px;
   padding-bottom: 16px;
-  border-top: 1px solid var(--uvp-panel-border);
+  margin-top: 16px;
   text-align: right;
+  border-top: 1px solid var(--uvp-panel-border);
 }
 
 .image-preview {
   width: 80px;
   height: 60px;
-  cursor: pointer;
-  border-radius: 6px;
   overflow: hidden;
+  cursor: pointer;
   border: 1px solid var(--uvp-panel-border);
+  border-radius: 6px;
   transition: all 0.2s;
 }
 

@@ -196,7 +196,8 @@ const pagination = ref({
   total: 0,
   showPageSize: true,
   showTotal: true,
-  pageSizeOptions: ["10", "20", "50", "100"]
+  showJumper: true,
+  pageSizeOptions: [10, 20, 50, 100]
 });
 
 // 全选状态

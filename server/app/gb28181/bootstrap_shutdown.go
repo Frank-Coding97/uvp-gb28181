@@ -10,6 +10,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecleanup"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
@@ -62,6 +63,8 @@ type sipShutdownSnapshot struct {
 	subscriptionScheduler *subscribe.Scheduler
 	offlineScanner        *device.OfflineScanner
 	playReconciler        *reconciler.Reconciler
+
+	deviceCleanupReconciler *devicecleanup.Reconciler
 
 	positionPruneCancel context.CancelFunc
 	positionPruneDone   <-chan struct{}
@@ -150,7 +153,9 @@ func captureSIPShutdownSnapshot() sipShutdownSnapshot {
 		ptzService:  ptzService, ptzScheduler: ptzScheduler, firmware: firmwareUpgradeService,
 		subscriptionScheduler: subscriptionScheduler,
 		offlineScanner:        offlineScanner, playReconciler: playReconciler,
-		positionPruneCancel: positionHistoryPruneCancel, positionPruneDone: positionHistoryPruneDone,
+
+		deviceCleanupReconciler: deviceCleanupReconciler,
+		positionPruneCancel:     positionHistoryPruneCancel, positionPruneDone: positionHistoryPruneDone,
 		streamProbeCancel:   streamProbeWorkerCancel,
 		recordingReconciler: recordingReconciler, recordingCatalogScheduler: recordingCatalogScheduler,
 		recordingCatalogService: recordingCatalogService, talkService: talkSvc,
@@ -459,12 +464,8 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Stop new transfers and OpenAPI play admissions before any generation
-	// dependency they can call is detached.
+	// Stop new transfers before detaching generation dependencies.
 	gbroutes.SetDeviceTransferBarrier(nil)
-	if err := openAPILivePlayer.Retire(ctx); err != nil {
-		return shutdownComponentError("openapi.live_player", err)
-	}
 	var stopErr error
 	clearZLMManagementController()
 	if r.playback != nil {
@@ -502,6 +503,8 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 		r.ptzScheduler.Stop()
 	}
 	OpenAPIPTZRuntime().Clear()
+	OpenAPIPlayRuntime().Clear()
+	gbroutes.SetOpenAPIViewerLifecycle(nil, nil, nil)
 	if r.ptzService != nil {
 		r.ptzService.Retire()
 	}
@@ -541,6 +544,11 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	}
 	if r.playReconciler != nil {
 		r.playReconciler.Stop()
+	}
+	// Join the cleanup watermark owner before the playback service it drains is
+	// detached, so a pass cannot drive a half-shut store.
+	if r.deviceCleanupReconciler != nil {
+		stopErr = errors.Join(stopErr, shutdownComponentError("device_cleanup_reconciler", r.deviceCleanupReconciler.Stop(ctx)))
 	}
 	gbroutes.SetPlayService(nil)
 	gbroutes.SetPlayAuthorizer(nil)
@@ -664,6 +672,7 @@ func clearSIPShutdownGlobals() {
 	ptzService, ptzScheduler, firmwareUpgradeService = nil, nil, nil
 	subscriptionService, subscriptionScheduler = nil, nil
 	offlineScanner, playReconciler = nil, nil
+	deviceCleanupReconciler = nil
 	playSvc, playAuthMetrics = nil, nil
 	positionHistoryPruneCancel, positionHistoryPruneDone = nil, nil
 	streamProbeWorkerCancel = nil

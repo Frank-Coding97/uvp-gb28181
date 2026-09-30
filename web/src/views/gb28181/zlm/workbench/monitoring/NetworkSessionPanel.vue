@@ -244,24 +244,26 @@ defineExpose({ refresh });
         <ShieldAlert :size="36" /><strong>{{ errorPresentation.label }}</strong
         ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
       </div>
-      <section v-else class="session-table-panel">
-        <a-table :data="networkData?.list || []" :loading="loading" row-key="id" :pagination="false" class="uvp-data-table"
-          ><template #columns
-            ><a-table-column title="会话 ID" data-index="id" :width="220" /><a-table-column title="远端"
-              ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
-            ><a-table-column title="本地"
-              ><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column
-            ><a-table-column title="类型" data-index="type" /><a-table-column
-              title="类型 ID"
-              data-index="typeId"
-            /><a-table-column title="可执行操作" :width="150"
-              ><template #cell><span class="muted">仅观测</span></template></a-table-column
-            ></template
-          ><template #empty
-            ><div class="session-empty"><Network :size="38" /><strong>没有符合筛选的网络会话</strong></div></template
-          ></a-table
-        >
-        <div class="session-pagination">
+      <template v-else>
+        <section class="session-table-panel">
+          <a-table :data="networkData?.list || []" :loading="loading" row-key="id" :pagination="false" class="uvp-data-table"
+            ><template #columns
+              ><a-table-column title="会话 ID" data-index="id" :width="220" /><a-table-column title="远端"
+                ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
+              ><a-table-column title="本地"
+                ><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column
+              ><a-table-column title="类型" data-index="type" /><a-table-column
+                title="类型 ID"
+                data-index="typeId"
+              /><a-table-column title="可执行操作" :width="150"
+                ><template #cell><span class="muted">仅观测</span></template></a-table-column
+              ></template
+            ><template #empty
+              ><div class="session-empty"><Network :size="38" /><strong>没有符合筛选的网络会话</strong></div></template
+            ></a-table
+          >
+        </section>
+        <div class="session-pagination uvp-pagination-bar">
           <span>共 {{ networkData?.total ?? 0 }} 个网络会话<span v-if="networkData?.truncated">（后端已截断）</span></span
           ><a-pagination
             :current="networkFilter.page"
@@ -273,7 +275,7 @@ defineExpose({ refresh });
             @page-size-change="changeNetworkPageSize"
           />
         </div>
-      </section>
+      </template>
     </template>
 
     <template v-else>
@@ -327,25 +329,36 @@ defineExpose({ refresh });
       <div v-else-if="loadError && !viewerData" class="monitoring-state monitoring-state--error" role="alert">
         <ShieldAlert :size="36" /><strong>{{ errorPresentation.label }}</strong>
       </div>
-      <section v-else class="session-table-panel">
-        <a-table :data="viewerData?.list || []" :loading="loading" row-key="identifier" :pagination="false" class="uvp-data-table"
-          ><template #columns
-            ><a-table-column title="观看标识" data-index="identifier" :width="240" /><a-table-column title="远端"
-              ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
-            ><a-table-column title="本地"
-              ><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column
-            ><a-table-column title="类型" data-index="typeId" /><a-table-column title="操作" :width="150"
-              ><template #cell="{ record }"
-                ><a-button v-if="canKickViewer(record, hasKickPermission)" size="small" status="danger" @click="openKick(record)"
-                  >踢除</a-button
-                ><span v-else class="muted">{{ record.kickable ? "无权限" : "不可踢除" }}</span></template
-              ></a-table-column
-            ></template
-          ><template #empty
-            ><div class="session-empty"><Users :size="38" /><strong>该媒体流当前没有观看者</strong></div></template
-          ></a-table
-        >
-        <div class="session-pagination">
+      <template v-else>
+        <section class="session-table-panel">
+          <a-table
+            :data="viewerData?.list || []"
+            :loading="loading"
+            row-key="identifier"
+            :pagination="false"
+            class="uvp-data-table"
+            ><template #columns
+              ><a-table-column title="观看标识" data-index="identifier" :width="240" /><a-table-column title="远端"
+                ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
+              ><a-table-column title="本地"
+                ><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column
+              ><a-table-column title="类型" data-index="typeId" /><a-table-column title="操作" :width="150"
+                ><template #cell="{ record }"
+                  ><a-button
+                    v-if="canKickViewer(record, hasKickPermission)"
+                    size="small"
+                    status="danger"
+                    @click="openKick(record)"
+                    >踢除</a-button
+                  ><span v-else class="muted">{{ record.kickable ? "无权限" : "不可踢除" }}</span></template
+                ></a-table-column
+              ></template
+            ><template #empty
+              ><div class="session-empty"><Users :size="38" /><strong>该媒体流当前没有观看者</strong></div></template
+            ></a-table
+          >
+        </section>
+        <div class="session-pagination uvp-pagination-bar">
           <span>共 {{ viewerData?.total ?? 0 }} 个观看者<span v-if="viewerData?.truncated">（后端已截断）</span></span
           ><a-pagination
             :current="viewerPage"
@@ -357,7 +370,7 @@ defineExpose({ refresh });
             @page-size-change="changeViewerPageSize"
           />
         </div>
-      </section>
+      </template>
     </template>
 
     <ZLMSessionKickDialog v-model:visible="kickVisible" :node-name="scopeLabel" :viewer="kickViewer" @done="kickDone" />
@@ -453,10 +466,9 @@ defineExpose({ refresh });
   gap: 16px;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  margin-top: 12px;
   font-size: var(--zlm-fs-caption);
   color: var(--zlm-text-3);
-  border-top: 1px solid var(--zlm-border);
 }
 .muted {
   color: var(--zlm-text-4);

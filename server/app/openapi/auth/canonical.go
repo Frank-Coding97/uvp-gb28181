@@ -24,15 +24,16 @@ var errInvalidInput = errors.New("invalid signature input")
 // canonical signature. Body is hashed exactly as received; it is never
 // decoded and re-serialized for signing.
 type SignatureInput struct {
-	Method      string
-	Path        string
-	RawQuery    string
-	ContentType string
-	Body        []byte
-	AccessKey   string
-	Timestamp   string
-	Nonce       string
-	Audience    string
+	Method         string
+	Path           string
+	RawQuery       string
+	ContentType    string
+	Body           []byte
+	AccessKey      string
+	Timestamp      string
+	Nonce          string
+	IdempotencyKey string
+	Audience       string
 }
 
 // HeaderValues represents all values observed for the v1 authentication and
@@ -52,15 +53,16 @@ type HeaderValues struct {
 
 // Headers contains the validated single-value authentication headers.
 type Headers struct {
-	SignVersion string
-	AccessKey   string
-	Timestamp   string
-	Nonce       string
-	Signature   string
-	ContentType string
+	SignVersion    string
+	AccessKey      string
+	Timestamp      string
+	Nonce          string
+	Signature      string
+	ContentType    string
+	IdempotencyKey string
 }
 
-// CanonicalString returns the ten-line v1 canonical string with UTF-8 LF
+// CanonicalString returns the eleven-line v1 canonical string with UTF-8 LF
 // separators and no final LF.
 func CanonicalString(input SignatureInput) (string, error) {
 	method, err := normalizeMethod(input.Method)
@@ -77,6 +79,9 @@ func CanonicalString(input SignatureInput) (string, error) {
 		return "", errInvalidInput
 	}
 	if err := validateLineField(input.Audience); err != nil {
+		return "", errInvalidInput
+	}
+	if err := validateIdempotencyKey(input.IdempotencyKey); err != nil {
 		return "", errInvalidInput
 	}
 	if err := validatePath(input.Path); err != nil {
@@ -97,7 +102,10 @@ func CanonicalString(input SignatureInput) (string, error) {
 			return "", errInvalidInput
 		}
 	case "POST":
-		if contentType != "application/json" {
+		if len(input.Body) == 0 && contentType != "" && contentType != "application/json" {
+			return "", errInvalidInput
+		}
+		if len(input.Body) > 0 && contentType != "application/json" {
 			return "", errInvalidInput
 		}
 	default:
@@ -122,6 +130,7 @@ func CanonicalString(input SignatureInput) (string, error) {
 		canonicalQuery,
 		contentType,
 		hex.EncodeToString(bodyHash[:]),
+		input.IdempotencyKey,
 		input.Audience,
 	}, "\n"), nil
 }
@@ -156,17 +165,29 @@ func ParseHeaders(method string, values HeaderValues) (Headers, error) {
 	if len(values.ContentEncoding) != 0 || len(values.MethodOverride) != 0 {
 		return Headers{}, errInvalidInput
 	}
+	idempotencyKey := ""
+	if len(values.IdempotencyKey) > 1 {
+		return Headers{}, errInvalidInput
+	}
+	if len(values.IdempotencyKey) == 1 {
+		if err := validateIdempotencyKey(values.IdempotencyKey[0]); err != nil {
+			return Headers{}, errInvalidInput
+		}
+		idempotencyKey = values.IdempotencyKey[0]
+	}
 	if normalizedMethod == "GET" {
 		if len(values.ContentType) != 0 {
 			return Headers{}, errInvalidInput
 		}
 	} else {
-		if len(values.ContentType) != 1 {
+		if len(values.ContentType) > 1 {
 			return Headers{}, errInvalidInput
 		}
-		contentType, err := oneHeader(values.ContentType)
-		if err != nil || contentType != "application/json" {
-			return Headers{}, errInvalidInput
+		if len(values.ContentType) == 1 {
+			contentType, err := oneHeader(values.ContentType)
+			if err != nil || contentType != "application/json" {
+				return Headers{}, errInvalidInput
+			}
 		}
 	}
 	contentType := ""
@@ -174,13 +195,29 @@ func ParseHeaders(method string, values HeaderValues) (Headers, error) {
 		contentType = values.ContentType[0]
 	}
 	return Headers{
-		SignVersion: signVersion,
-		AccessKey:   accessKey,
-		Timestamp:   timestamp,
-		Nonce:       nonce,
-		Signature:   signature,
-		ContentType: contentType,
+		SignVersion:    signVersion,
+		AccessKey:      accessKey,
+		Timestamp:      timestamp,
+		Nonce:          nonce,
+		Signature:      signature,
+		ContentType:    contentType,
+		IdempotencyKey: idempotencyKey,
 	}, nil
+}
+
+func validateIdempotencyKey(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 128 || validateLineField(value) != nil {
+		return errInvalidInput
+	}
+	for _, r := range value {
+		if r < 0x21 || r > 0x7e {
+			return errInvalidInput
+		}
+	}
+	return nil
 }
 
 func oneHeader(values []string) (string, error) {

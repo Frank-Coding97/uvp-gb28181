@@ -31,6 +31,7 @@ import {
   RotateCcw,
   RotateCw,
   Send,
+  Video,
   Wifi,
   WifiOff,
   X
@@ -118,9 +119,8 @@ const props = withDefaults(
     /**
      * 当前选中的码流（`0` 主码流 / `1` 子码流…）。传入即为**受控**。
      *
-     * ⛔ 播放控制台底栏那格「参数对照」和侧栏的「配置文件」下拉指的是**同一路**：
-     *    两个下拉各持一份状态，就会出现"底栏对着子码流、侧栏显示主码流"，
-     *    而两边都不报错。所以真源交给宿主，用 `v-model:stream-profile` 双向绑定。
+     * ⛔ 播放控制台编码卡里的码流下拉驱动本组件正在编辑的码流：
+     *    真源交给宿主，用 `v-model:stream-profile` 双向绑定；参数对照卡不再重复渲染选择器。
      * ⛔ 不传（设备详情抽屉那种用法）时回落内部状态，行为与以前完全一致。
      */
     streamProfile?: string;
@@ -866,13 +866,7 @@ async function applyVideoParams() {
 
 /* ─────────────────────── 配置家族（通用通道，真实读写）─────────────────────── */
 
-/**
- * 一次读取要问的配置类型 = 各分组声明的 ConfigType 并集（去重）。
- *
- * ⛔ 一次问全而不是"读哪组问哪组"：A.2.4.7 本来就允许一次查询多个类型，
- *    拆成按组问会让"切分组"这个纯界面动作产生 SIP 报文，也会让 6 组之间
- *    的对账时刻各不相同（面板上同一屏显示的两个值来自不同时刻）。
- */
+/** 首次打开只读平台缓存时使用的完整类型集合；用户主动读取时会收窄到当前分组。 */
 const FAMILY_CONFIG_TYPES = Array.from(new Set(CONFIG_GROUPS.flatMap(group => group.configTypes)));
 
 const familyEntries = ref<DeviceConfigEntry[]>([]);
@@ -996,30 +990,37 @@ const familyFieldsDisabled = computed(
   () => familyLoading.value || familyApplying.value || !props.canApply || !activeIsReady.value || activeGroupFactsMissing.value
 );
 
-async function loadDeviceConfigs(refresh: boolean) {
+async function loadDeviceConfigs(refresh: boolean, configTypes: string[] = FAMILY_CONFIG_TYPES) {
   if (!props.channelId) {
     familyError.value = "未选择通道，无法读取设备配置。";
     return;
   }
+  const requestedTypes = Array.from(new Set(configTypes));
+  if (!requestedTypes.length) return;
   familyLoading.value = true;
   familyError.value = "";
   try {
     const response = await getChannelDeviceConfigs(props.channelId, {
       refresh,
-      configTypes: FAMILY_CONFIG_TYPES
+      configTypes: requestedTypes
     });
     if (response.code !== 0 || !response.data) throw new Error(response.message || "读取设备配置失败");
     const data = response.data;
-    familyEntries.value = data.list ?? [];
-    familyAbsent.value = data.absentTypes ?? [];
+    const requested = new Set(requestedTypes);
+    const entries = (data.list ?? []).filter(entry => requested.has(entry.configType));
+    familyEntries.value = [...familyEntries.value.filter(entry => !requested.has(entry.configType)), ...entries];
+    familyAbsent.value = [
+      ...familyAbsent.value.filter(configType => !requested.has(configType)),
+      ...(data.absentTypes ?? []).filter(configType => requested.has(configType))
+    ];
     familyReconcile.value = data.reconcile ?? null;
     familyFreshness.value = String(data.freshness ?? "");
     familyRegisteredVersion.value = data.registeredVersion ?? "";
     // ⛔ 用回读到的最大值兜底而不是 local now：面板显示"回读于"就必须是
     //    设备那次应答的时刻，用前端时钟会显示成"刚刚"，看起来像刚读到。
     familyObservedAt.value = data.observedAt ?? "";
-    applyFamilyEntries(familyEntries.value);
-    if (data.refreshOperationId) scheduleFamilyPoll();
+    applyFamilyEntries(entries);
+    if (data.refreshOperationId) scheduleFamilyPoll(requestedTypes);
   } catch (error) {
     familyError.value = readErrorMessage(error, "读取设备配置失败");
   } finally {
@@ -1028,13 +1029,14 @@ async function loadDeviceConfigs(refresh: boolean) {
 }
 
 /** 下发后平台会自动回读对账，必须轮询到 reconcile 终态 —— 写入 ack 不是终态。 */
-function scheduleFamilyPoll() {
+function scheduleFamilyPoll(configTypes: string[] = FAMILY_CONFIG_TYPES) {
   clearFamilyPoll();
   familyPollCount = 0;
+  const requestedTypes = Array.from(new Set(configTypes));
   const tick = async () => {
     if (!props.visible || !props.channelId) return;
     familyPollCount += 1;
-    await loadDeviceConfigs(false);
+    await loadDeviceConfigs(false, requestedTypes);
     const state = familyReconcile.value?.state;
     const settled = state === "read_ok" || state === "type_absent" || state === "mismatch" || state === "failed";
     if (!settled && familyPollCount < 10) familyPollTimer = window.setTimeout(tick, 1500);
@@ -1084,7 +1086,12 @@ async function applyGroupConfigs(groupKeys: string[]) {
   try {
     const response = await applyChannelDeviceConfigs(props.channelId, blocks, `device-config-${Date.now()}`);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "下发失败");
-    if (response.data.reconcilePending) scheduleFamilyPoll();
+    if (response.data.reconcilePending) {
+      const appliedTypes = response.data.configTypes?.length
+        ? response.data.configTypes
+        : Array.from(new Set(keys.flatMap(key => findConfigGroup(key)?.configTypes ?? [])));
+      scheduleFamilyPoll(appliedTypes);
+    }
   } catch (error) {
     familyError.value = readErrorMessage(error, "下发失败");
     familyErrorGroup.value = keys[0] ?? "";
@@ -1128,7 +1135,7 @@ function resetActiveGroup() {
 
 function readActiveGroup() {
   if (activeIsVideo.value) void loadVideoParams(true);
-  else void loadDeviceConfigs(true);
+  else void loadDeviceConfigs(true, activeGroup.value.configTypes);
 }
 
 function applyActiveGroup() {
@@ -1319,9 +1326,7 @@ function setOsdItemPosition(index: number, x: number, y: number) {
 }
 
 function readOsdGroup() {
-  // 与 `readPictureGroup` 同一条路：一次读取拉回本族的全部配置类型，
-  // 所以没有"只读 OSD 一组"的接口，也别为此新开一条（那会让两组的对账基准分叉）。
-  void loadDeviceConfigs(true);
+  void loadDeviceConfigs(true, findConfigGroup(OSD_GROUP_KEY)?.configTypes ?? []);
 }
 
 function revertOsdGroup() {
@@ -1550,7 +1555,7 @@ function clearPictureError() {
 }
 
 function readPictureGroup() {
-  void loadDeviceConfigs(true);
+  void loadDeviceConfigs(true, findConfigGroup(PICTURE_GROUP_KEY)?.configTypes ?? []);
 }
 
 async function applyPictureGroup() {
@@ -1636,7 +1641,8 @@ async function applyPictureMaskOnly() {
     const response = await applyChannelDeviceConfigs(props.channelId, { pictureMask: mask }, `device-config-mask-${Date.now()}`);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "下发失败");
     commitPictureMaskDraft();
-    if (response.data.reconcilePending) scheduleFamilyPoll();
+    if (response.data.reconcilePending)
+      scheduleFamilyPoll(response.data.configTypes?.length ? response.data.configTypes : ["PictureMask"]);
   } catch (error) {
     familyError.value = readErrorMessage(error, "下发失败");
     familyErrorGroup.value = PICTURE_GROUP_KEY;
@@ -1970,8 +1976,8 @@ onBeforeUnmount(() => {
         </nav>
 
         <section class="dcg-params">
-          <header class="dcg-params-head">
-            <div v-if="!embedded || configGroups.length <= 1" class="dcg-params-title-wrap">
+          <header class="dcg-params-head" :class="{ 'is-video-embedded': embedded && activeIsVideo }">
+            <div v-if="!embedded || (configGroups.length <= 1 && !activeIsVideo)" class="dcg-params-title-wrap">
               <span
                 class="dcg-params-title"
                 data-testid="dcg-group-title"
@@ -1987,7 +1993,7 @@ onBeforeUnmount(() => {
               {{ activeGroup.state === "ready" ? "已接入" : "未接入" }}
             </span>
             <div
-              v-if="embedded && !detailTarget && activeIsReady"
+              v-if="embedded && !detailTarget && activeIsReady && !activeIsVideo"
               class="dcg-embedded-actions"
               data-testid="dcg-embedded-actions"
             >
@@ -2020,7 +2026,7 @@ onBeforeUnmount(() => {
                 <Send :size="12" />下发
               </button>
             </div>
-            <div v-if="activeIsVideo" class="dcg-params-profile">
+            <div v-if="activeIsVideo && !embedded" class="dcg-params-profile">
               <span>配置文件</span>
               <a-select
                 :model-value="streamProfile"
@@ -2044,14 +2050,66 @@ onBeforeUnmount(() => {
 
           <div class="dcg-params-body" :class="{ 'is-static': activeGroup.state === 'static' }">
             <template v-if="activeGroup.key === 'video-param'">
-              <div class="dcg-reconcile" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
+              <!-- 非嵌入模式：保留原有对账状态 -->
+              <div v-if="!embedded" class="dcg-reconcile" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
                 <span class="dcg-reconcile-dot" />
                 <span>{{ reconcileText }}</span>
               </div>
               <p v-if="versionNotice && !embedded" class="dcg-notice" data-testid="dcg-version-notice">{{ versionNotice }}</p>
               <p v-if="videoError" class="dcg-error" data-testid="dcg-error">{{ videoError }}</p>
 
-              <div v-if="!visibleVideoRows.length" class="dcg-empty" data-testid="dcg-empty">
+              <div
+                v-if="!visibleVideoRows.length && embedded"
+                class="dcg-stream is-compact dcg-empty-card"
+                data-testid="dcg-empty-card"
+              >
+                <div class="dcg-video-header">
+                  <span class="dcg-video-title"><Video :size="13" aria-hidden="true" />视频编码</span>
+                  <div class="dcg-video-actions" data-testid="dcg-video-actions">
+                    <button
+                      type="button"
+                      class="dcg-btn"
+                      data-testid="dcg-reset"
+                      title="还原为最近回读值"
+                      :disabled="activeApplying || !activeDirtyCount"
+                      @click="resetActiveGroup"
+                    >
+                      <RotateCcw :size="12" />还原
+                    </button>
+                    <button
+                      type="button"
+                      class="dcg-btn"
+                      data-testid="dcg-read"
+                      :disabled="activeLoading || !canRead || !online"
+                      @click="readActiveGroup"
+                    >
+                      <RefreshCcw :size="12" />读取
+                    </button>
+                    <button
+                      type="button"
+                      class="dcg-btn is-primary"
+                      data-testid="dcg-apply"
+                      :disabled="activeApplying || !activeDirtyCount || !canApply"
+                      @click="applyActiveGroup"
+                    >
+                      <Send :size="12" />下发
+                    </button>
+                  </div>
+                </div>
+                <div class="dcg-reconcile dcg-reconcile-inline" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
+                  <span class="dcg-reconcile-dot" />
+                  <span>{{ reconcileText }}</span>
+                </div>
+                <div class="dcg-empty" data-testid="dcg-empty">
+                  <p>{{ emptyText }}</p>
+                  <em>点击「读取」获取当前编码参数</em>
+                </div>
+                <div class="dcg-video-compare-slot" data-testid="dcg-video-compare-slot">
+                  <slot name="video-compare" />
+                </div>
+              </div>
+
+              <div v-else-if="!visibleVideoRows.length" class="dcg-empty" data-testid="dcg-empty">
                 <p>{{ emptyText }}</p>
                 <em>点击「读取」获取当前编码参数</em>
               </div>
@@ -2060,15 +2118,59 @@ onBeforeUnmount(() => {
                 v-for="row in visibleVideoRows"
                 :key="row.streamNumber"
                 class="dcg-stream"
+                :class="{ 'is-compact': embedded }"
                 :data-testid="`dcg-stream-${row.streamNumber}`"
               >
-                <div class="dcg-stream-hd">
+                <template v-if="embedded">
+                  <div class="dcg-video-header">
+                    <span class="dcg-video-title"><Video :size="13" aria-hidden="true" />视频编码</span>
+                    <div class="dcg-video-actions" data-testid="dcg-video-actions">
+                      <button
+                        type="button"
+                        class="dcg-btn"
+                        data-testid="dcg-reset"
+                        title="还原为最近回读值"
+                        :disabled="activeApplying || !activeDirtyCount"
+                        @click="resetActiveGroup"
+                      >
+                        <RotateCcw :size="12" />还原
+                      </button>
+                      <button
+                        type="button"
+                        class="dcg-btn"
+                        data-testid="dcg-read"
+                        :disabled="activeLoading || !canRead || !online"
+                        @click="readActiveGroup"
+                      >
+                        <RefreshCcw :size="12" />读取
+                      </button>
+                      <button
+                        type="button"
+                        class="dcg-btn is-primary"
+                        data-testid="dcg-apply"
+                        :disabled="activeApplying || !activeDirtyCount || !canApply"
+                        @click="applyActiveGroup"
+                      >
+                        <Send :size="12" />下发
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="dcg-reconcile dcg-reconcile-inline" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
+                    <span class="dcg-reconcile-dot" />
+                    <span>{{ reconcileText }}</span>
+                  </div>
+                </template>
+
+                <!-- 嵌入模式：去掉码流标题，只在选中时显示 -->
+                <div v-if="!embedded" class="dcg-stream-hd">
                   <span>码流 {{ row.streamNumber }}</span>
                   <em>{{ streamNumberText(row.streamNumber) }}</em>
                   <i v-if="rowChanged(row)" class="dcg-stream-dirty">已改</i>
                 </div>
 
-                <div class="dcg-field-group" data-testid="dcg-field-group" data-group="encoding">
+                <!-- 嵌入模式：去掉分组标题，所有字段紧凑排列 -->
+                <div v-if="!embedded" class="dcg-field-group" data-testid="dcg-field-group" data-group="encoding">
                   <div class="dcg-field-group-head"><strong>编码</strong><span>VideoFormat · Resolution</span></div>
                   <!-- 编码格式与分辨率上下排列，给嵌入侧栏的下拉框完整宽度。 -->
                   <div class="dcg-row" data-testid="dcg-row-encoding-format">
@@ -2112,15 +2214,15 @@ onBeforeUnmount(() => {
                         </a-option>
                         <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
                       </a-select>
-                      <input
+                      <a-input
                         v-if="!isValidResolutionCode(row.resolution)"
                         class="dcg-input is-narrow"
-                        :value="row.resolution"
+                        :model-value="row.resolution"
                         :disabled="videoFieldsDisabled"
                         placeholder="1920x1080"
                         aria-label="自定义分辨率"
                         :data-testid="`dcg-resolution-custom-${row.streamNumber}`"
-                        @change="row.resolution = ($event.target as HTMLInputElement).value"
+                        @change="row.resolution = $event"
                       />
                     </div>
                     <span
@@ -2133,7 +2235,70 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="dcg-field-group" data-testid="dcg-field-group" data-group="picture">
+                <!-- 嵌入模式紧凑布局：无分组标题，字段直接排列 -->
+                <template v-if="embedded">
+                  <div
+                    v-if="row.streamNumber === visibleVideoRows[0]?.streamNumber"
+                    class="dcg-compact-row"
+                    data-testid="dcg-row-stream-profile"
+                  >
+                    <span class="dcg-compact-label">码流</span>
+                    <a-select
+                      :model-value="String(row.streamNumber)"
+                      class="dcg-select"
+                      size="small"
+                      :disabled="videoLoading || videoApplying"
+                      aria-label="配置文件"
+                      data-testid="dcg-stream-profile-embedded"
+                      @change="streamProfile = selectValue($event)"
+                    >
+                      <a-option
+                        v-for="optionRow in videoDraft"
+                        :key="optionRow.streamNumber"
+                        :value="String(optionRow.streamNumber)"
+                      >
+                        {{ streamNumberText(optionRow.streamNumber) }}
+                      </a-option>
+                    </a-select>
+                  </div>
+
+                  <i v-if="rowChanged(row)" class="dcg-stream-dirty dcg-stream-dirty--compact">已改</i>
+
+                  <div class="dcg-compact-row" data-testid="dcg-row-encoding-format">
+                    <span class="dcg-compact-label">编码格式</span>
+                    <a-select
+                      :model-value="row.videoFormat"
+                      class="dcg-select"
+                      size="small"
+                      :disabled="videoFieldsDisabled"
+                      :data-testid="`dcg-format-${row.streamNumber}`"
+                      @change="row.videoFormat = selectValue($event)"
+                    >
+                      <a-option v-for="option in VIDEO_FORMAT_OPTIONS" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </a-option>
+                    </a-select>
+                  </div>
+
+                  <div class="dcg-compact-row" data-testid="dcg-row-encoding-resolution">
+                    <span class="dcg-compact-label">分辨率</span>
+                    <a-select
+                      :model-value="resolutionSelectValue(row)"
+                      class="dcg-select"
+                      size="small"
+                      :disabled="videoFieldsDisabled"
+                      :data-testid="`dcg-resolution-${row.streamNumber}`"
+                      @change="onResolutionSelect(row, $event)"
+                    >
+                      <a-option v-for="option in RESOLUTION_OPTIONS" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </a-option>
+                      <a-option :value="CUSTOM_RESOLUTION">自定义…</a-option>
+                    </a-select>
+                  </div>
+                </template>
+
+                <div v-if="!embedded" class="dcg-field-group" data-testid="dcg-field-group" data-group="picture">
                   <div class="dcg-field-group-head"><strong>画面</strong><span>FrameRate · 0–99 fps</span></div>
                   <div class="dcg-row">
                     <span class="dcg-row-label">帧率</span>
@@ -2158,7 +2323,21 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="dcg-field-group" data-testid="dcg-field-group" data-group="bitrate">
+                <!-- 嵌入模式紧凑布局：帧率 -->
+                <div v-if="embedded" class="dcg-compact-row dcg-compact-slider">
+                  <span class="dcg-compact-label">帧率</span>
+                  <DeviceConfigSlider
+                    :model-value="row.frameRate"
+                    :min="0"
+                    :max="99"
+                    label="帧率"
+                    :disabled="videoFieldsDisabled"
+                    :data-testid="`dcg-frame-rate-${row.streamNumber}`"
+                    @update:model-value="row.frameRate = $event"
+                  />
+                </div>
+
+                <div v-if="!embedded" class="dcg-field-group" data-testid="dcg-field-group" data-group="bitrate">
                   <div class="dcg-field-group-head"><strong>码率</strong><span>BitRateType · VideoBitRate</span></div>
                   <div class="dcg-row">
                     <span class="dcg-row-label">码率类型</span>
@@ -2210,6 +2389,55 @@ onBeforeUnmount(() => {
                     >
                   </div>
                   <p class="dcg-field-group-note">CBR 时必填，单位 kb/s；VBR 时不发送 VideoBitRate。</p>
+                </div>
+
+                <!-- 嵌入模式紧凑布局：码率类型 -->
+                <div v-if="embedded" class="dcg-compact-row">
+                  <span class="dcg-compact-label">码率类型</span>
+                  <div class="dcg-segment" role="group" aria-label="码率类型">
+                    <button
+                      v-for="option in BIT_RATE_TYPE_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      :class="{ 'is-on': row.bitRateType === option.value }"
+                      :disabled="videoFieldsDisabled"
+                      :data-testid="`dcg-bit-rate-type-${row.streamNumber}-${option.value}`"
+                      @click="row.bitRateType = option.value"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 嵌入模式紧凑布局：码率值 -->
+                <div v-if="embedded" class="dcg-compact-row dcg-compact-slider">
+                  <span class="dcg-compact-label">码率</span>
+                  <DeviceConfigSlider
+                    :model-value="row.videoBitRate ?? ''"
+                    :min="0"
+                    :max="100000"
+                    :step="100"
+                    unit="kb/s"
+                    label="码率"
+                    :disabled="videoFieldsDisabled || videoBitRateDisabled(row)"
+                    :data-testid="`dcg-bit-rate-${row.streamNumber}`"
+                    @update:model-value="row.videoBitRate = $event"
+                  />
+                  <span
+                    v-if="videoBitRateDisabled(row)"
+                    class="dcg-row-hint"
+                    data-source="不发"
+                    title="VBR 模式不发送 VideoBitRate"
+                    >不发</span
+                  >
+                </div>
+
+                <div
+                  v-if="embedded && row.streamNumber === visibleVideoRows[0]?.streamNumber"
+                  class="dcg-video-compare-slot"
+                  data-testid="dcg-video-compare-slot"
+                >
+                  <slot name="video-compare" />
                 </div>
               </div>
             </template>
@@ -2344,14 +2572,13 @@ onBeforeUnmount(() => {
                     <div v-else-if="field.kind === 'coords'" class="dcg-coords">
                       <label v-for="(axis, index) in field.axes" :key="axis">
                         <span>{{ axis }}</span>
-                        <input
+                        <a-input
                           class="dcg-input is-coord"
-                          type="text"
+                          :model-value="coordsValue(activeGroup.key, field.key)[index]"
                           inputmode="numeric"
                           :disabled="familyFieldsDisabled"
                           :aria-label="`${field.label} ${axis}`"
-                          :value="coordsValue(activeGroup.key, field.key)[index]"
-                          @change="setCoordValue(activeGroup.key, field.key, index, ($event.target as HTMLInputElement).value)"
+                          @change="setCoordValue(activeGroup.key, field.key, index, $event)"
                         />
                       </label>
                     </div>
@@ -2372,16 +2599,15 @@ onBeforeUnmount(() => {
                       @update:model-value="setSchedules(activeGroup.key, field.key, $event)"
                     />
 
-                    <input
+                    <a-input
                       v-else
                       class="dcg-input"
-                      type="text"
                       :disabled="familyFieldsDisabled"
-                      :value="textValue(activeGroup.key, field.key)"
+                      :model-value="textValue(activeGroup.key, field.key)"
                       :placeholder="field.placeholder"
                       :maxlength="field.maxlength"
                       :aria-label="field.label"
-                      @change="setSv(activeGroup.key, field.key, ($event.target as HTMLInputElement).value)"
+                      @change="setSv(activeGroup.key, field.key, $event)"
                     />
                   </div>
                   <span v-if="fieldHint(field, activeGroup.key) && !embedded" class="dcg-row-hint">{{
@@ -2442,14 +2668,13 @@ onBeforeUnmount(() => {
                     <div v-if="field.kind === 'coords'" class="dcg-coords">
                       <label v-for="(axis, index) in field.axes" :key="axis">
                         <span>{{ axis }}</span>
-                        <input
+                        <a-input
                           class="dcg-input is-coord"
-                          type="text"
+                          :model-value="coordsValue(activeGroup.key, field.key)[index]"
                           inputmode="numeric"
                           :disabled="familyFieldsDisabled"
                           :aria-label="`${field.label} ${axis}`"
-                          :value="coordsValue(activeGroup.key, field.key)[index]"
-                          @change="setCoordValue(activeGroup.key, field.key, index, ($event.target as HTMLInputElement).value)"
+                          @change="setCoordValue(activeGroup.key, field.key, index, $event)"
                         />
                       </label>
                     </div>
@@ -2476,7 +2701,7 @@ onBeforeUnmount(() => {
             </section>
           </Teleport>
 
-          <p class="dcg-params-foot" data-testid="dcg-params-foot">
+          <p v-if="!embedded" class="dcg-params-foot" data-testid="dcg-params-foot">
             <template v-if="activeIsVideo">
               <span>本组 5 项 × {{ visibleVideoRows.length }} 路码流</span>
               <span class="dcg-foot-sep">·</span>
@@ -2721,6 +2946,10 @@ onBeforeUnmount(() => {
   min-height: 42px;
   padding: 7px 10px;
   border-top: 1px solid var(--uvp-dialog-border, #e6edf7);
+}
+
+.dcg-window--embedded .dcg-params-head.is-video-embedded {
+  display: none;
 }
 
 .dcg-window--embedded .dcg-params-body {
@@ -3363,6 +3592,18 @@ onBeforeUnmount(() => {
   color: var(--uvp-warning, #b66b12);
 }
 
+.dcg-video-compare-slot {
+  padding-bottom: 10px;
+  margin: 10px 0 0;
+  border-top: 1px solid var(--uvp-panel-border, #dbe4f0);
+}
+
+.dcg-video-compare-slot :deep(.video-param-compare-card) {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* 「N 项未下发」是抽屉开关，不是纯文本 —— 去掉按钮默认外观但要保住命中区。 */
 .dcg-foot-dirty {
   display: inline-flex;
@@ -3565,6 +3806,94 @@ onBeforeUnmount(() => {
   border-radius: 6px;
 }
 
+/* 嵌入模式紧凑布局：去掉边框和外边距 */
+.dcg-stream.is-compact {
+  min-height: 515px;
+  padding: 0;
+  margin-bottom: 0;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
+}
+
+/* 嵌入模式：视频卡片标题栏 */
+.dcg-video-header {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--uvp-panel-border, #dbe4f0);
+}
+
+.dcg-video-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dcg-video-title {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+  white-space: nowrap;
+}
+
+.dcg-video-header .dcg-btn {
+  flex: none;
+  gap: 3px;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.dcg-video-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* 嵌入模式：对账状态样式调整 */
+.dcg-reconcile-inline {
+  padding: 3px 8px;
+  margin: 10px;
+  font-size: 10px;
+}
+
+/* 嵌入模式视频卡片头部 */
+.dcg-video-card-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--uvp-panel-border, #dbe4f0);
+}
+
+.dcg-video-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}
+
+.dcg-video-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dcg-params-profile-inline {
+  padding: 0;
+  margin: 0;
+}
+
 .dcg-stream-hd {
   display: flex;
   gap: 6px;
@@ -3743,8 +4072,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
   border-radius: 4px;
 
-  &:focus {
-    outline: none;
+  &:focus,
+  &:focus-within {
     border-color: var(--uvp-brand);
   }
 
@@ -3796,7 +4125,12 @@ onBeforeUnmount(() => {
 .dcg-input {
   flex: 1 1 auto;
   max-width: 240px;
-  padding: 0 6px;
+
+  :deep(.arco-input) {
+    padding: 0 6px;
+    font-size: 12px;
+    color: var(--uvp-text-primary);
+  }
 
   &.is-narrow {
     flex: none;
@@ -3829,6 +4163,16 @@ onBeforeUnmount(() => {
       background: var(--uvp-brand, #2563eb);
     }
   }
+}
+
+:global(body[arco-theme="dark"]) .dcg-segment button.is-on {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+:global(body[arco-theme="dark"]) .dcg-segment button:not(.is-on) {
+  color: #a8b8cc;
+  background: #142131;
 }
 
 .dcg-switch {
@@ -3888,6 +4232,9 @@ onBeforeUnmount(() => {
 .dcg-input.is-coord {
   flex: none;
   width: 52px;
+}
+
+.dcg-input.is-coord :deep(.arco-input) {
   text-align: right;
 }
 
@@ -3942,5 +4289,45 @@ onBeforeUnmount(() => {
   &.is-static {
     background: #cbd5e1;
   }
+}
+
+/* ── 嵌入模式紧凑布局（2026-09-23）── */
+.dcg-compact-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+}
+
+.dcg-compact-row + .dcg-compact-row {
+  border-top: 1px solid var(--uvp-panel-border, #dbe4f0);
+}
+
+.dcg-compact-row:last-child {
+  padding-bottom: 10px;
+}
+
+.dcg-compact-label {
+  font-size: 10.5px;
+  color: var(--uvp-text-tertiary);
+}
+
+.dcg-compact-row .dcg-select {
+  width: 100%;
+  max-width: none;
+}
+
+.dcg-compact-slider {
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
+.dcg-compact-row .dcg-segment {
+  justify-content: stretch;
+  width: 100%;
+}
+
+.dcg-compact-row .dcg-segment button {
+  flex: 1;
 }
 </style>

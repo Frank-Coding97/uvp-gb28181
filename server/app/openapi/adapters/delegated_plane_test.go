@@ -14,7 +14,7 @@ func TestDelegatedPlaneRegistrationsCoverTheWholeDelegatedSurface(t *testing.T) 
 
 	registry := catalogruntime.NewAdapterRegistry()
 	expected := map[string]string{
-		MediaLiveApplyAdapterKey:   DelegatedMediaPlane,
+		PlayLiveAdapterKey:         DelegatedPlayPlane,
 		PTZPresetListAdapterKey:    DelegatedPTZPlane,
 		PTZPresetSaveAdapterKey:    DelegatedPTZPlane,
 		PTZPresetCallAdapterKey:    DelegatedPTZPlane,
@@ -25,8 +25,9 @@ func TestDelegatedPlaneRegistrationsCoverTheWholeDelegatedSurface(t *testing.T) 
 	for _, registration := range registrations {
 		require.NoError(t, registry.Register(registration))
 		require.Equal(t, DelegatedPlaneContractVersion, registration.ContractVersion)
-		_, ok := expected[registration.Key]
+		plane, ok := expected[registration.Key]
 		require.True(t, ok, "意外的 adapter key %s", registration.Key)
+		require.Equal(t, plane, registration.Adapter.(*delegatedPlaneAdapter).plane)
 	}
 	// The delegated keys must not collide with the resource read surface that
 	// shares this registry.
@@ -44,13 +45,7 @@ func TestDelegatedPlaneAdapterFailsClosedWhenItReachesTheCatalogDispatcher(t *te
 		require.NoError(t, registry.Register(registration))
 	}
 
-	adapter, err := registry.Resolve(MediaLiveApplyAdapterKey, DelegatedPlaneContractVersion)
-	require.NoError(t, err)
-	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{Scope: "play:live:apply", Method: "POST"})
-	require.ErrorIs(t, err, ErrDelegatedPlane)
-	require.Contains(t, err.Error(), "media:play:live:apply")
-
-	adapter, err = registry.Resolve(PTZPresetCallAdapterKey, DelegatedPlaneContractVersion)
+	adapter, err := registry.Resolve(PTZPresetCallAdapterKey, DelegatedPlaneContractVersion)
 	require.NoError(t, err)
 	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{Scope: "ptz:preset:call", Method: "POST"})
 	require.ErrorIs(t, err, ErrDelegatedPlane)
@@ -58,8 +53,7 @@ func TestDelegatedPlaneAdapterFailsClosedWhenItReachesTheCatalogDispatcher(t *te
 }
 
 // The registry is the gate publication runs through: a draft that names a
-// delegated scope is only publishable because this adapter exists. Without it
-// the whole play/PTZ surface would be silently dropped from every release.
+// delegated PTZ scope is only publishable because this adapter exists.
 func TestDelegatedPlaneAdapterMakesTheScopesPublishable(t *testing.T) {
 	registry := catalogruntime.NewAdapterRegistry()
 	for _, registration := range NewDelegatedPlaneRegistrations() {
@@ -67,13 +61,6 @@ func TestDelegatedPlaneAdapterMakesTheScopesPublishable(t *testing.T) {
 	}
 	catalog := catalogruntime.NewCatalogRuntime(registry, nil)
 	_, report, err := catalog.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{
-		{
-			Scope: "play:live:apply", Name: "实时点播授权", Method: "POST",
-			ExternalPath:    "/openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations",
-			AdapterKey:      MediaLiveApplyAdapterKey,
-			ContractVersion: DelegatedPlaneContractVersion,
-			Risk:            "media",
-		},
 		{
 			Scope: "ptz:preset:call", Name: "调用预置位", Method: "POST",
 			ExternalPath:    "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call",

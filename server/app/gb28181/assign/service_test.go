@@ -12,7 +12,6 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
 func newTestAssignService(db *gorm.DB, validator DeptValidator, options ...ServiceOption) *Service {
@@ -29,7 +28,6 @@ func newAssignTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbAlarmResource{}, &gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{},
 		&gbmodels.GbCustomGroupDevice{}, &basemodels.SysDepartment{},
-		&openapimodels.PlayGrant{}, &openapimodels.Viewer{},
 		&playauth.DeviceOperationIntent{},
 	))
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)

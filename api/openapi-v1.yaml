@@ -44,6 +44,7 @@ x-uvp-signature-contract:
       - '<CanonicalQuery, possibly empty>'
       - '<ContentType: application/json or empty>'
       - '<BodySHA256, lowercase hexadecimal>'
+      - '<Idempotency-Key, or empty>'
       - '<ServiceAudience, deployment-fixed OpenAPI audience>'
     hmacKey: Decode the base64url-without-padding SK to 32 bytes before HMAC; never use the displayed SK text bytes.
     audience:
@@ -62,11 +63,15 @@ x-uvp-retry-policy:
   POST: Do not automatically retry after a timeout; callers must decide whether to retry.
 x-uvp-transport-contract:
   httpVersion: HTTP/1.1
+  tls:
+    required: false
+    description: Transport security is deployment-controlled; the OpenAPI application layer does not reject HTTP.
   post:
     body:
       contentLength:
-        required: true
-        minimum: 1
+        required: false
+        description: Playback start uses an empty body; JSON commands remain required.
+        minimum: 0
         maximum: 65536
         value: exact body byte length
         signed: false
@@ -353,19 +358,14 @@ paths:
         '405': *methodNotAllowedResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
-  /openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations:
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/live:
     post:
-      operationId: createLiveAuthorization
-      summary: Reserved live authorization operation
-      description: >-
-        Disabled until the approved media protocol capability gate is enabled.
-        The 200 response is a reserved contract only; this server currently
-        returns 503 and never claims a playable protocol.
-      x-uvp-scope: play:live:apply
-      x-uvp-enabled: false
-      x-uvp-current-status: 503
-      x-uvp-expires-ttl-seconds: 120
-      x-uvp-content-type: application/json
+      operationId: startLivePlayback
+      summary: Start or reuse live playback for one owned channel
+      description: The platform reuses an existing live stream when available. This operation has no request body; fixed playback-address behavior remains governed by GB28181 service configuration.
+      x-uvp-scope: play:live
+      x-uvp-enabled: true
+      x-uvp-body: empty
       security:
         - uvpHmac: []
       parameters:
@@ -376,16 +376,9 @@ paths:
         - $ref: '#/components/parameters/Signature'
         - $ref: '#/components/parameters/DeviceId'
         - $ref: '#/components/parameters/ChannelId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LiveAuthorizationRequest'
       responses:
         '200':
-          description: Disabled reserved response; media authorization is not enabled.
-          x-uvp-enabled: false
+          description: Live playback result
           headers:
             Cache-Control:
               required: true
@@ -395,12 +388,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LiveAuthorizationResponse'
+                $ref: '#/components/schemas/LivePlaybackResponse'
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
+        '409':
+          description: Device or channel cannot accept playback
+          headers: *noStoreHeader
+          content: *errorContent
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets:
@@ -831,15 +828,7 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/ChannelStatus'}
-    LiveAuthorizationRequest:
-      type: object
-      additionalProperties: false
-      required: [protocol]
-      properties:
-        protocol:
-          type: string
-          enum: [https-flv, wss-flv]
-    LiveAuthorizationResponse:
+    LivePlaybackResponse:
       type: object
       additionalProperties: false
       required: [code, message, requestId, data]
@@ -849,13 +838,13 @@ components:
         requestId: {type: string}
         data:
           type: object
-          additionalProperties: false
-          required: [authorizationId, protocol, url, expiresAt]
+          additionalProperties: true
+          required: [streamId, status, reused, urls]
           properties:
-            authorizationId: {type: string}
-            protocol: {type: string, enum: [https-flv, wss-flv]}
-            url: {type: string, format: uri}
-            expiresAt: {type: string, format: date-time}
+            streamId: {type: string}
+            status: {type: string}
+            reused: {type: boolean}
+            urls: {type: object, additionalProperties: true}
     PTZPresetRequest:
       type: object
       additionalProperties: false

@@ -92,14 +92,7 @@ describe("media overview KPI state", () => {
   it("derives node, stream, session, viewer, throughput and recording KPIs from one real snapshot", () => {
     const kpis = buildOverviewKpis(snapshot());
 
-    expect(kpis.map(kpi => kpi.key)).toEqual([
-      "nodes",
-      "streams",
-      "sessions",
-      "viewers",
-      "throughput",
-      "recordings"
-    ]);
+    expect(kpis.map(kpi => kpi.key)).toEqual(["nodes", "streams", "sessions", "viewers", "throughput", "recordings"]);
     expect(kpis.find(kpi => kpi.key === "nodes")).toMatchObject({ value: 1, state: "ready" });
     expect(kpis.find(kpi => kpi.key === "streams")).toMatchObject({ value: 1, state: "ready" });
     expect(kpis.find(kpi => kpi.key === "viewers")).toMatchObject({ value: 3, state: "ready" });
@@ -107,26 +100,49 @@ describe("media overview KPI state", () => {
     expect(kpis.find(kpi => kpi.key === "recordings")).toMatchObject({ value: 1, state: "ready" });
   });
 
-  it("keeps runtime-derived KPIs unknown when no corresponding sample exists", () => {
-    const state = buildOverviewKpis(snapshot({
-      metricsSampledNodeIds: [],
-      mediaSampledNodeIds: [],
-      successfulNodeIds: [],
-      failedNodeIds: [2],
-      partial: true
+  it("deduplicates protocol variants instead of trusting a protocol-level aggregate", () => {
+    const base = snapshot();
+    const variants = ["rtsp", "rtmp", "hls"].map(schema => ({
+      ...base.streams[0],
+      media: { ...base.streams[0].media, schema }
     }));
+    const kpis = buildOverviewKpis(
+      snapshot({
+        streams: variants,
+        metrics: { ...base.metrics, streamCount: variants.length }
+      })
+    );
+
+    expect(kpis.find(kpi => kpi.key === "streams")).toMatchObject({ value: 1, state: "ready" });
+  });
+
+  it("keeps runtime-derived KPIs unknown when no corresponding sample exists", () => {
+    const state = buildOverviewKpis(
+      snapshot({
+        metricsSampledNodeIds: [],
+        mediaSampledNodeIds: [],
+        successfulNodeIds: [],
+        failedNodeIds: [2],
+        partial: true
+      })
+    );
 
     expect(state.find(kpi => kpi.key === "nodes")).toMatchObject({ value: 1, state: "ready" });
     for (const key of ["streams", "sessions", "viewers", "throughput", "recordings"] as const) {
-      expect(state.find(kpi => kpi.key === key), key).toMatchObject({ value: null, state: "unknown" });
+      expect(
+        state.find(kpi => kpi.key === key),
+        key
+      ).toMatchObject({ value: null, state: "unknown" });
     }
   });
 
   it("labels partial samples without treating the returned subset as complete", () => {
-    const state = buildOverviewKpis(snapshot({
-      partial: true,
-      failedNodeIds: [3]
-    }));
+    const state = buildOverviewKpis(
+      snapshot({
+        partial: true,
+        failedNodeIds: [3]
+      })
+    );
 
     expect(state.find(kpi => kpi.key === "streams")).toMatchObject({ value: 1, state: "partial" });
     expect(state.find(kpi => kpi.key === "throughput")?.note).toContain("部分采样");

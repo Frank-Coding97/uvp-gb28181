@@ -379,19 +379,19 @@ defineExpose({ refresh });
           </div></template
         >
       </a-table>
-      <div v-if="sampleAvailable && logs.length" class="log-pagination">
-        <span>共 {{ logs.length }} 条调度日志</span
-        ><a-pagination
-          :current="page"
-          :page-size="pageSize"
-          :total="logs.length"
-          show-page-size
-          :page-size-options="[10, 20, 50]"
-          @change="changePage"
-          @page-size-change="changePageSize"
-        />
-      </div>
     </section>
+    <div v-if="active && sampleAvailable && logs.length" class="log-pagination uvp-pagination-bar">
+      <span>共 {{ logs.length }} 条调度日志</span
+      ><a-pagination
+        :current="page"
+        :page-size="pageSize"
+        :total="logs.length"
+        show-page-size
+        :page-size-options="[10, 20, 50, 100]"
+        @change="changePage"
+        @page-size-change="changePageSize"
+      />
+    </div>
   </section>
 </template>
 
@@ -548,10 +548,9 @@ defineExpose({ refresh });
   gap: 16px;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  margin-top: 12px;
   font-size: var(--zlm-fs-caption);
   color: var(--zlm-text-3);
-  border-top: 1px solid var(--zlm-border);
 }
 button:focus-visible,
 input:focus-visible,

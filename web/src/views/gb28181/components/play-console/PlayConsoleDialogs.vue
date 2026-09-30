@@ -65,28 +65,34 @@ const {
     <div class="home-settings-form" data-testid="home-settings-dialog">
       <div class="home-settings-field">
         <label for="home-position-preset">归位预置位 <span>*</span></label>
-        <select
+        <a-select
           id="home-position-preset"
-          v-model.number="homeDraft.presetId"
+          v-model="homeDraft.presetId"
+          class="home-preset-select"
+          size="small"
           data-testid="home-preset"
+          aria-label="归位预置位"
           :disabled="homeSettingsSubmitting"
           @change="homeSettingsTouched = true"
         >
-          <option :value="null">请选择预置位</option>
-          <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
-        </select>
+          <a-option :value="null">请选择预置位</a-option>
+          <a-option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</a-option>
+        </a-select>
       </div>
       <div class="home-settings-field">
         <label for="home-position-reset-time">无云台操作后 <span>*</span></label>
         <div class="home-settings-time">
-          <input
+          <a-input
             id="home-position-reset-time"
             v-model.number="homeDraft.resetTime"
             data-testid="home-reset-time"
             type="number"
+            inputmode="numeric"
             min="10"
             max="3600"
+            step="1"
             :disabled="homeSettingsSubmitting"
+            aria-label="无云台操作后自动归位时间"
             @input="homeSettingsTouched = true"
           />
           <span>秒自动归位</span>
@@ -364,15 +370,13 @@ const {
           <div class="cruise-save-row">
             <label class="cruise-save-label">覆盖</label>
             <div class="cruise-save-field">
-              <label class="cruise-save-replace">
-                <input
-                  v-model="cruiseDraft.replaceExisting"
-                  type="checkbox"
-                  :disabled="cruiseDraft.submitting"
-                  data-testid="cruise-save-replace"
-                />
-                <span>覆盖同编号轨迹</span>
-              </label>
+              <a-checkbox
+                v-model="cruiseDraft.replaceExisting"
+                class="cruise-save-replace"
+                :disabled="cruiseDraft.submitting"
+                data-testid="cruise-save-replace"
+                >覆盖同编号轨迹</a-checkbox
+              >
               <p class="preset-save-hint">启用后会先清空设备中的同编号轨迹,此操作不可撤销。</p>
             </div>
           </div>
@@ -511,8 +515,8 @@ const {
   color: var(--uvp-text-secondary);
   cursor: pointer;
 }
-.cruise-save-replace input {
-  accent-color: var(--uvp-brand-cyan);
+.cruise-save-replace :deep(.arco-checkbox-icon) {
+  border-color: var(--uvp-brand-cyan);
 }
 .cruise-stops-list {
   display: grid;
@@ -671,22 +675,24 @@ const {
 .home-settings-field > label > span {
   color: var(--uvp-danger);
 }
-.home-settings-field select,
-.home-settings-field input {
+.home-settings-field :deep(.arco-select-view-single),
+.home-settings-field :deep(.arco-input-wrapper) {
   box-sizing: border-box;
   width: 100%;
   height: 36px;
-  padding: 0 10px;
   font-size: 12px;
   color: var(--uvp-text-primary);
-  outline: none;
   background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 6px;
 }
-.home-settings-field select:focus,
-.home-settings-field input:focus {
+.home-settings-field :deep(.arco-select-view-single:focus-within),
+.home-settings-field :deep(.arco-input-wrapper:focus-within) {
   border-color: var(--uvp-brand);
+}
+.home-settings-field :deep(.arco-select-view-single),
+.home-settings-field :deep(.arco-input) {
+  padding: 0 10px;
 }
 .home-settings-time {
   display: grid;

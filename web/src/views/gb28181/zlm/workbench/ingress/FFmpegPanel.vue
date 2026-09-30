@@ -63,19 +63,6 @@ const deleteError = ref<unknown>(null);
 const deleting = ref(false);
 
 const rows = computed(() => pageData.value?.list ?? []);
-const tablePagination = computed(() =>
-  pageData.value
-    ? {
-        current: pageData.value.page,
-        pageSize: pageData.value.pageSize,
-        total: pageData.value.total,
-        showTotal: true,
-        showJumper: true,
-        showPageSize: true,
-        pageSizeOptions: [10, 20, 50, 100]
-      }
-    : false
-);
 const capability = computed<ZLMCapabilityState>(() => pageData.value?.capability ?? observedCapability.value);
 const templates = computed(() => pageData.value?.templates ?? []);
 const hasPermission = (permission: string) =>
@@ -271,16 +258,7 @@ function changePageSize(next: number) {
       </div>
       <template v-else>
         <div v-if="pageData?.truncated" class="result-notice">结果已被后端有界截断。</div>
-        <a-table
-          :data="rows"
-          :loading="loading"
-          :pagination="tablePagination"
-          row-key="key"
-          class="uvp-data-table"
-          :scroll="{ x: 1060 }"
-          @page-change="changePage"
-          @page-size-change="changePageSize"
-        >
+        <a-table :data="rows" :loading="loading" :pagination="false" row-key="key" class="uvp-data-table" :scroll="{ x: 1060 }">
           <template #columns>
             <a-table-column title="源标识" :width="220"
               ><template #cell="{ record }"
@@ -321,6 +299,19 @@ function changePageSize(next: number) {
         </a-table>
       </template>
     </section>
+    <div v-if="!loadError && !scopeBlocked && pageData" class="ingress-pagination uvp-pagination-bar">
+      <a-pagination
+        :current="pageData.page"
+        :page-size="pageData.pageSize"
+        :total="pageData.total"
+        :page-size-options="[10, 20, 50, 100]"
+        show-total
+        show-page-size
+        show-jumper
+        @change="changePage"
+        @page-size-change="changePageSize"
+      />
+    </div>
 
     <FFmpegSourceForm
       v-model:visible="formVisible"
@@ -404,6 +395,14 @@ function changePageSize(next: number) {
   border: 1px solid var(--uvp-panel-border);
   border-radius: var(--uvp-panel-radius);
   box-shadow: var(--uvp-panel-shadow);
+}
+.ingress-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 .subtle {
   margin-top: 4px;
