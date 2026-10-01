@@ -18,7 +18,16 @@ const props = withDefaults(
     disabled?: boolean;
     allowClear?: boolean;
   }>(),
-  { modelValue: null, min: 1, max: Number.MAX_SAFE_INTEGER, integer: true, required: false, placeholder: "", disabled: false, allowClear: true }
+  {
+    modelValue: null,
+    min: 1,
+    max: Number.MAX_SAFE_INTEGER,
+    integer: true,
+    required: false,
+    placeholder: "",
+    disabled: false,
+    allowClear: true
+  }
 );
 
 const emit = defineEmits<{ (e: "update:modelValue", value: number | null): void; (e: "blur"): void }>();
@@ -36,11 +45,17 @@ watch(
 
 const inRange = (parsed: number) => parsed >= props.min && parsed <= props.max;
 
-const error = computed(() => validateNumberText(text.value, { required: props.required, integer: props.integer, min: props.min, max: props.max }));
+const error = computed(() =>
+  validateNumberText(text.value, { required: props.required, integer: props.integer, min: props.min, max: props.max })
+);
 const shownError = computed(() => (touched.value ? error.value : ""));
 
 function handleInput(value: string) {
   text.value = value;
+  if (!value.trim()) {
+    emit("update:modelValue", null);
+    return;
+  }
   const parsed = parseNumberText(value, props.integer);
   if (parsed !== null && inRange(parsed)) emit("update:modelValue", parsed);
 }
@@ -59,7 +74,15 @@ defineExpose({ error });
 </script>
 
 <template>
-  <div class="s-number-field" :class="{ 'is-error': shownError }">
+  <div
+    class="s-number-field"
+    :class="{ 'is-error': shownError }"
+    :modelvalue="text"
+    :min="min"
+    :max="max"
+    :disabled="disabled || undefined"
+    :required="required || undefined"
+  >
     <a-input
       :model-value="text"
       :placeholder="placeholder"
@@ -89,8 +112,8 @@ defineExpose({ error });
 
 .s-number-field__error {
   margin-top: 4px;
-  color: #d14343;
   font-size: 12px;
   line-height: 18px;
+  color: #d14343;
 }
 </style>

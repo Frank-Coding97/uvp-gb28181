@@ -15,7 +15,7 @@
   },
   {
     "file": "app/utils/logging/repeat.go",
-    "sha256": "24ee0034e408bf769728b512b089d93e90be15d08a9118a3cd317d5fccc7fb09",
+    "sha256": "10c2e79cc440e107043bdbc834b40ca22c5271979b7582a5627e42cd056cc1b0",
     "reason": "Reviewed T11 owned repeater: bounded stored event label or fixed summary/recovery events; only primitive fields are emitted.",
     "calls": [
       {
@@ -204,7 +204,7 @@
   },
   {
     "file": "app/utils/gormhelper/log.go",
-    "sha256": "ebb8f2d565a5faa19bac6b1e7e9c1361932f62caff8c498e03688a36fa0ebb9d",
+    "sha256": "c0aca2070335be9605ee5edacf5ee4431e18bd99f16602b24130510cfa839448",
     "reason": "Reviewed adapter: GORM logger.Interface bridge. The Info/Warn/Error callbacks emit a placeholder db.diagnostic line and were re-graded to DEBUG by C03 (GORM passes a message we deliberately drop via text_omitted, so the line carries no event semantics); Trace still guards through Check/Write so the level travels as data (db.query / db.query_failed / db.slow_query).",
     "calls": [
       {
@@ -219,6 +219,20 @@
         "receiver": "*logger",
         "method": "Write",
         "kind": "unresolved_logger",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "app/utils/schedulerhelper/logger.go",
+    "sha256": "f9d200b1f1ad23d95bdb48faf2bf0b7a5beb0d668f1b943caf46201470ae0f79",
+    "reason": "Reviewed standalone FileJobLogger rotation diagnostic: rotation errors are written to the logger's configured file output and do not enter application startup logging.",
+    "calls": [
+      {
+        "function": "startDailyRotateCheck",
+        "receiver": "*FileJobLogger",
+        "method": "Printf",
+        "kind": "stdlib_log",
         "count": 1
       }
     ]

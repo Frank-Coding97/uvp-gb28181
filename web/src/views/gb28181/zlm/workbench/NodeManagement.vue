@@ -10,14 +10,26 @@ const views = [{ key: "list", label: "节点列表", description: "生命周期�
 
 <template>
   <MediaWorkspaceShell
-    :title="workspace.definition.title" description="管理媒体节点生命周期、连接信息、容量边界和服务配置。"
-    :views="views" :active-view="workspace.activeView.value" scope="all" :nodes="workspace.nodes.value"
-    :status="workspace.status.value" :status-text="workspace.statusText.value" :last-success-at="workspace.lastSuccessAt.value"
-    :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
-    :show-scope="false" :allow-all="false" :requires-node="true"
+    :title="workspace.definition.title"
+    description="管理媒体节点生命周期、连接信息、容量边界和服务配置。"
+    :views="views"
+    :active-view="workspace.activeView.value"
+    scope="all"
+    :nodes="workspace.nodes.value"
+    :status="workspace.status.value"
+    :status-text="workspace.statusText.value"
+    :last-success-at="workspace.lastSuccessAt.value"
+    :auto-refresh="workspace.autoRefresh.value"
+    :scope-loading="workspace.scopeLoading.value"
+    :show-scope="false"
+    :allow-all="false"
+    :requires-node="true"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
-    @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
-    @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="workspace.refreshScope" @refresh-scope="workspace.refreshScope"
+    @update:active-view="workspace.setActiveView"
+    @update:scope="workspace.setScope"
+    @update:auto-refresh="workspace.autoRefresh.value = $event"
+    @refresh="workspace.refreshScope"
+    @refresh-scope="workspace.refreshScope"
   >
     <template #list>
       <div class="node-management-content">
@@ -38,8 +50,8 @@ const views = [{ key: "list", label: "节点列表", description: "生命周期�
 <style scoped>
 .node-management-content {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 </style>

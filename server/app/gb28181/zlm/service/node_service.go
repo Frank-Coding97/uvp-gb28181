@@ -820,7 +820,7 @@ func (s *NodeService) restoreNodeSnapshot(ctx context.Context, old *node.Node, r
 	if old == nil {
 		return node.ErrNotFound
 	}
-	for attempt := 0; attempt < 8; attempt++ {
+	{
 		latest, ok := s.registry.Get(old.ID)
 		if !ok {
 			return node.ErrNotFound
@@ -859,7 +859,6 @@ func (s *NodeService) restoreNodeSnapshot(ctx context.Context, old *node.Node, r
 		}
 		return nil
 	}
-	return node.ErrRevisionConflict
 }
 
 // rollbackNodeLocked restores the persisted candidate and makes a best effort
@@ -978,21 +977,6 @@ func (s *NodeService) Enable(ctx context.Context, id int64) error {
 // heartbeat or turn an unreachable node healthy.
 func (s *NodeService) Activate(ctx context.Context, id int64) error {
 	return s.Enable(ctx, id)
-}
-
-func (s *NodeService) setState(ctx context.Context, id int64, state node.State) error {
-	lock := s.nodeLock(id)
-	lock.Lock()
-	defer lock.Unlock()
-	cur, ok := s.registry.Get(id)
-	if !ok {
-		return ErrNodeNotFound
-	}
-	cur.State = state
-	if state == node.StateMaintenance {
-		cur.AdminState = "disabled"
-	}
-	return s.registry.Update(ctx, *cur)
 }
 
 // KickAllSessions 驱逐节点全部会话,返回被踢的会话数

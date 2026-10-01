@@ -7,7 +7,7 @@ const northGate = {
   channelId: "channel-1",
   deviceId: "device-1",
   name: "北门",
-  status: 1,
+  status: 1
 };
 
 const southGate = {
@@ -15,7 +15,7 @@ const southGate = {
   channelId: "channel-2",
   deviceId: "device-2",
   name: "南门",
-  status: 1,
+  status: 1
 };
 
 describe("global playback console store", () => {

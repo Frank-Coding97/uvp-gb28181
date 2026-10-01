@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -414,7 +413,7 @@ func acceptanceRequest(t *testing.T, client *http.Client, base, method, path, to
 		t.Errorf("HTTP %s %s failed: %v", method, path, err)
 		return acceptanceResponse{}
 	}
-	defer result.Body.Close()
+	defer func() { _ = result.Body.Close() }()
 	response := acceptanceResponse{Status: result.StatusCode, ID: result.Header.Get("X-Request-ID")}
 	if response.ID == "" || response.ID == "acceptance-client-correlation" {
 		t.Errorf("server request ID missing or reused client ID: %s", response.ID)
@@ -471,5 +470,5 @@ func waitAcceptance(t *testing.T, timeout time.Duration, ready func() bool, labe
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal(fmt.Sprintf("timed out waiting for %s", label))
+	t.Fatalf("timed out waiting for %s", label)
 }

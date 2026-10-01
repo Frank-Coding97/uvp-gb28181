@@ -22,11 +22,15 @@ func TestOpenAPIRuntimeSnapshotsAreFreshAndBound(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "getMediaPlayerList") {
 			require.Equal(t, "a&b", r.URL.Query().Get("stream"))
 			require.Len(t, r.URL.Query(), 4)
-			fmt.Fprintf(w, `{"code":0,"bootNonce":%q,"data":[{"identifier":"12-9","typeid":"HttpSession"}]}`, boot)
+			if _, err := fmt.Fprintf(w, `{"code":0,"bootNonce":%q,"data":[{"identifier":"12-9","typeid":"HttpSession"}]}`, boot); err != nil {
+				panic(err)
+			}
 		} else {
 			require.Equal(t, "/index/api/getAllSession", r.URL.Path)
 			require.Empty(t, r.URL.RawQuery)
-			fmt.Fprintf(w, `{"code":0,"bootNonce":%q,"data":[{"id":"12-9","identifier":"12-9","type":"tcp"}]}`, boot)
+			if _, err := fmt.Fprintf(w, `{"code":0,"bootNonce":%q,"data":[{"id":"12-9","identifier":"12-9","type":"tcp"}]}`, boot); err != nil {
+				panic(err)
+			}
 		}
 	})
 	defer server.Close()

@@ -45,7 +45,14 @@ export function isHighRiskSecurityReason(reason: string) {
 }
 
 export function formatShortWindowInviteRule(window?: number, banScore?: number) {
-  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0 || typeof banScore !== "number" || !Number.isFinite(banScore) || banScore <= 0) {
+  if (
+    typeof window !== "number" ||
+    !Number.isFinite(window) ||
+    window <= 0 ||
+    typeof banScore !== "number" ||
+    !Number.isFinite(banScore) ||
+    banScore <= 0
+  ) {
     return "短期 INVITE 规则读取中";
   }
   return `${window} 秒内 ${Math.ceil(banScore / inviteRateScore)} 次未授权 INVITE`;
@@ -70,7 +77,10 @@ export function formatRemaining(createdAt: string, ttl: number, now = Date.now()
 export function formatAutomaticBanTTL(steps: BanTTLStep[], permanentAutoBan = false, banScore?: number) {
   const hasPermanentStep = permanentAutoBan && steps.some(step => step.score === banScore && step.ttl === 0);
   if (hasPermanentStep) return "永久封禁（需人工解封）";
-  const finite = steps.map(step => step.ttl).filter(ttl => Number.isFinite(ttl) && ttl > 0).sort((left, right) => left - right);
+  const finite = steps
+    .map(step => step.ttl)
+    .filter(ttl => Number.isFinite(ttl) && ttl > 0)
+    .sort((left, right) => left - right);
   if (!finite.length) return "策略读取中";
   if (finite.length === 1) return durationLabel(finite[0]);
   return `${durationLabel(finite[0])}起，最高 ${durationLabel(finite[finite.length - 1])}`;

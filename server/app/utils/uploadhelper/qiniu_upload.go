@@ -3,6 +3,7 @@ package uploadhelper
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -199,7 +200,7 @@ func (s *QiniuUploadService) GenerateFileName(originalFileName string) string {
 }
 
 // uploadFile 上传文件到七牛云
-func (s *QiniuUploadService) uploadFile(file *multipart.FileHeader, key string) (string, error) {
+func (s *QiniuUploadService) uploadFile(file *multipart.FileHeader, key string) (url string, err error) {
 	// 创建表单上传的对象
 	formUploader := storage.NewFormUploader(s.cfg)
 	ret := storage.PutRet{}
@@ -215,7 +216,7 @@ func (s *QiniuUploadService) uploadFile(file *multipart.FileHeader, key string) 
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %v", err)
 	}
-	defer src.Close()
+	defer func() { err = errors.Join(err, src.Close()) }()
 
 	// 上传文件
 	putPolicy := storage.PutPolicy{
@@ -262,7 +263,7 @@ func getZone(zoneName string) *storage.Zone {
 }
 
 // DownloadAndSaveRemoteImage 下载并保存远程图片到七牛云
-func (s *QiniuUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.UploadResponse, error) {
+func (s *QiniuUploadService) DownloadAndSaveRemoteImage(imageUrl string) (response *app.UploadResponse, err error) {
 	// 创建HTTP客户端，设置超时和跳过SSL验证（某些情况下需要）
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -276,7 +277,7 @@ func (s *QiniuUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.U
 	if err != nil {
 		return nil, fmt.Errorf("下载图片失败: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 
 	// 检查响应状态码
 	if resp.StatusCode != http.StatusOK {
@@ -322,7 +323,7 @@ func (s *QiniuUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.U
 	}
 
 	// 构建响应
-	response := &app.UploadResponse{
+	response = &app.UploadResponse{
 		Url:      s.GetFileUrl(fileName),
 		FileName: fileName,
 		Size:     resp.ContentLength,

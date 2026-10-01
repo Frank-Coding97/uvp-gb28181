@@ -3,7 +3,6 @@ package directory
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -205,12 +204,4 @@ func isUniqueError(err error) bool {
 
 func errorWithCount(base *DomainError, key string, count int) error {
 	return &DomainError{Code: base.Code, Message: base.Message, Details: map[string]int{key: count}}
-}
-
-func domainErrorCode(err error) string {
-	var domain *DomainError
-	if errors.As(err, &domain) {
-		return domain.Code
-	}
-	return fmt.Sprint(err)
 }

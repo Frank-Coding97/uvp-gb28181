@@ -27,7 +27,7 @@ vi.mock("@visactor/vchart", () => ({
     on() {
       return undefined;
     }
-  },
+  }
 }));
 
 import ProbeTimelineDialog from "./ProbeTimelineDialog.vue";
@@ -38,7 +38,7 @@ const ModalStub = defineComponent({
   name: "ProbeTimelineModalStub",
   inheritAttrs: false,
   props: { visible: Boolean },
-  template: `<div v-if="visible"><slot name="title" /><slot /></div>`,
+  template: `<div v-if="visible"><slot name="title" /><slot /></div>`
 });
 
 /** 快照只填弹窗实际读到的字段:timeline、summary.sampleDurationMs、timestamps、health。 */
@@ -47,11 +47,35 @@ function buildSnapshot(): ProbeSnapshot {
     summary: { sampleDurationMs: 3000, frameCount: 246, totalBytes: 0, averageBitrateKbps: 0 },
     timeline: [
       { sequence: 0, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 0, frameSize: 20480 },
-      { sequence: 1, trackType: "video", codec: "H264", keyFrame: false, configFrame: false, relativeTimeMs: 40, frameSize: 3072 },
+      {
+        sequence: 1,
+        trackType: "video",
+        codec: "H264",
+        keyFrame: false,
+        configFrame: false,
+        relativeTimeMs: 40,
+        frameSize: 3072
+      },
       { sequence: 2, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 60, frameSize: 200 },
       // 40ms 与 1200ms 之间断了 1160ms,超过后端阈值 500ms。
-      { sequence: 3, trackType: "video", codec: "H264", keyFrame: true, configFrame: false, relativeTimeMs: 1200, frameSize: 21504 },
-      { sequence: 4, trackType: "audio", codec: "PCMA", keyFrame: false, configFrame: false, relativeTimeMs: 1220, frameSize: 200 },
+      {
+        sequence: 3,
+        trackType: "video",
+        codec: "H264",
+        keyFrame: true,
+        configFrame: false,
+        relativeTimeMs: 1200,
+        frameSize: 21504
+      },
+      {
+        sequence: 4,
+        trackType: "audio",
+        codec: "PCMA",
+        keyFrame: false,
+        configFrame: false,
+        relativeTimeMs: 1220,
+        frameSize: 200
+      }
     ],
     timelineTruncated: false,
     timestamps: { videoDtsIntervalMeanMs: 40, arrivalJitterMs: 6, ptsDtsMaxMs: 0, avArrivalSkewMaxMs: 0 },
@@ -60,10 +84,10 @@ function buildSnapshot(): ProbeSnapshot {
       status: "warning",
       issues: [
         { code: "large_arrival_gap", message: "帧到达出现连续大间隔", thresholdMs: 500, observedMs: 1160 },
-        { code: "missing_keyframe", message: "三秒视频采样窗口内没有关键帧", thresholdMs: 3000, observedMs: 3000 },
+        { code: "missing_keyframe", message: "三秒视频采样窗口内没有关键帧", thresholdMs: 3000, observedMs: 3000 }
       ],
-      thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 },
-    },
+      thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 }
+    }
   } as unknown as ProbeSnapshot;
 }
 
@@ -71,7 +95,7 @@ function buildSnapshot(): ProbeSnapshot {
 function healthySnapshot(): ProbeSnapshot {
   return {
     ...buildSnapshot(),
-    health: { status: "ok", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } },
+    health: { status: "ok", issues: [], thresholds: { largeArrivalGapMs: 500, keyFrameWindowMs: 3000 } }
   } as unknown as ProbeSnapshot;
 }
 
@@ -84,7 +108,7 @@ async function mountDialog(
 ): Promise<VueWrapper<InstanceType<typeof ProbeTimelineDialog>>> {
   const wrapper = mount(ProbeTimelineDialog, {
     props: { visible: false, snapshot },
-    global: { stubs: { "a-modal": ModalStub } },
+    global: { stubs: { "a-modal": ModalStub } }
   });
   await wrapper.setProps({ visible: true });
   await nextTick();
@@ -243,7 +267,7 @@ describe("ProbeTimelineDialog", () => {
     fire(760, 208);
     expect(vchartStub.resized).toEqual([
       [928, 208],
-      [760, 208],
+      [760, 208]
     ]);
   });
 
@@ -256,9 +280,7 @@ describe("ProbeTimelineDialog", () => {
       const start = dialogSource.indexOf(rule);
       expect(start, `样式里找不到 ${rule}`).toBeGreaterThan(-1);
       const body = dialogSource.slice(start, dialogSource.indexOf("}", start));
-      expect(body, `${rule} 必须显式写 grid-template-columns: minmax(0, 1fr)`).toContain(
-        "grid-template-columns: minmax(0, 1fr)"
-      );
+      expect(body, `${rule} 必须显式写 grid-template-columns: minmax(0, 1fr)`).toContain("grid-template-columns: minmax(0, 1fr)");
     }
 
     const canvasStart = dialogSource.indexOf(".ptl-canvas {");

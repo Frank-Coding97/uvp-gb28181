@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  buildRTPCreateRequest,
-  rtpCloseDecision
-} from "./rtpServicesState";
+import { buildRTPCreateRequest, rtpCloseDecision } from "./rtpServicesState";
 
 const base = {
   vhost: "__defaultVhost__",
@@ -36,9 +33,18 @@ describe("RTP service state", () => {
   });
 
   it("allows ordinary close only for managed resources on a supported node", () => {
-    expect(rtpCloseDecision({ managed: true, released: false }, "supported", true, false)).toMatchObject({ allowed: true, mode: "normal" });
-    expect(rtpCloseDecision({ managed: false, released: false }, "supported", true, false)).toMatchObject({ allowed: false, mode: "blocked" });
-    expect(rtpCloseDecision({ managed: false, released: false }, "supported", true, true)).toMatchObject({ allowed: true, mode: "force" });
+    expect(rtpCloseDecision({ managed: true, released: false }, "supported", true, false)).toMatchObject({
+      allowed: true,
+      mode: "normal"
+    });
+    expect(rtpCloseDecision({ managed: false, released: false }, "supported", true, false)).toMatchObject({
+      allowed: false,
+      mode: "blocked"
+    });
+    expect(rtpCloseDecision({ managed: false, released: false }, "supported", true, true)).toMatchObject({
+      allowed: true,
+      mode: "force"
+    });
     expect(rtpCloseDecision({ managed: true, released: false }, "unknown", true, true)).toMatchObject({ allowed: false });
   });
 

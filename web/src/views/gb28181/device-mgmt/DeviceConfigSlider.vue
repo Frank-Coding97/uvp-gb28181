@@ -111,6 +111,7 @@ function onInputCommit(valueOrEvent: string | Event) {
     <span class="cfg-slider-value">
       <a-input
         class="cfg-slider-input"
+        allow-clear
         inputmode="numeric"
         :model-value="modelValue ?? ''"
         :disabled="disabled"

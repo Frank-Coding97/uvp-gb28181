@@ -302,7 +302,7 @@ func (proxy *JPEGProxy) Fetch(ctx context.Context, mediaNode *node.Node, identit
 		}
 		return SnapshotResult{}, ErrSnapshotUpstream
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	contentTypes := response.Header.Values("Content-Type")
 	if response.StatusCode != http.StatusOK || len(contentTypes) != 1 || strings.TrimSpace(contentTypes[0]) != "image/jpeg" {
 		return SnapshotResult{}, ErrSnapshotInvalidResponse

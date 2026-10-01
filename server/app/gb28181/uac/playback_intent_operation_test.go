@@ -366,18 +366,20 @@ func TestPlaybackIntentOperationActualTCPCommitBeforeACK(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.Addr().String(), "TCP"
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	op, err := u.beginPlaybackIntentOperation(ctx, store, barrier, id, 2, strings.Repeat("b", 32), in)
 	require.NoError(t, err)
-	defer op.CloseLocal(context.Background())
+	defer func() {
+		_ = op.CloseLocal(context.Background()) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	require.NoError(t, peer.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second)))
 	connection, err := peer.Accept()
 	require.NoError(t, err)
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	buffer := make([]byte, 8192)
 	require.NoError(t, connection.SetReadDeadline(time.Now().Add(30*time.Millisecond)))
 	_, err = connection.Read(buffer)
@@ -433,14 +435,16 @@ func TestPlaybackIntentOperationActualUDPCommitBeforeACK(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.LocalAddr().String(), "UDP"
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	operation, err := u.beginPlaybackIntentOperation(ctx, store, barrier, id, 2, strings.Repeat("b", 32), in)
 	require.NoError(t, err)
-	defer operation.CloseLocal(context.Background())
+	defer func() {
+		_ = operation.CloseLocal(context.Background()) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	require.NoError(t, operation.Start(ctx))
 	buffer := make([]byte, 8192)
 	require.NoError(t, peer.SetReadDeadline(time.Now().Add(time.Second)))

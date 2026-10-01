@@ -138,7 +138,8 @@ func (pmc *PluginsManagerController) ImportPlugin(c *gin.Context) {
 	if err != nil {
 		pmc.FailAndAbort(c, "打开上传文件失败", err, 500)
 	}
-	defer src.Close()
+	// 上传文件已经读完后，关闭失败无法再改变本次响应；显式忽略清理错误以保留原响应。
+	defer func() { _ = src.Close() }()
 
 	// 调用服务层导入插件
 	existingItems, err := pmc.service.WithContext(c.Request.Context()).ImportPluginFromReader(c, src, req)

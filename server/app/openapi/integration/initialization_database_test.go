@@ -120,7 +120,7 @@ func stripInitializationSQLCommentsAndLiterals(body string) string {
 			}
 		case body[i] == '/' && i+1 < len(body) && body[i+1] == '*':
 			i += 2
-			for i+1 < len(body) && !(body[i] == '*' && body[i+1] == '/') {
+			for i+1 < len(body) && (body[i] != '*' || body[i+1] != '/') {
 				if body[i] == '\n' {
 					out.WriteByte('\n')
 				}
@@ -337,7 +337,7 @@ func listInitializationTables(ctx context.Context, conn *sql.Conn, dialect strin
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var tables []string
 	for rows.Next() {
 		var name string

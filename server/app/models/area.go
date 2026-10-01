@@ -44,7 +44,7 @@ func GetAreaListInstance(contexts ...context.Context) AreaModelList {
 				logging.Error(err))
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		if err := json.NewDecoder(file).Decode(&instance); err != nil {
 			app.Log(ctx).Warn("area data load failed",

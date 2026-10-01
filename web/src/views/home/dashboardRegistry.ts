@@ -173,16 +173,40 @@ export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
   widgets: DASHBOARD_WIDGET_REGISTRY.map(definition => cloneWidget(definition.layout))
 };
 
-function migrateLegacyWidget(item: DashboardWidgetLayout, definition: DashboardWidgetDefinition, schemaVersion: number): DashboardWidgetLayout {
-  const defaults = schemaVersion === 7 ? SCHEMA_7_WIDGET_DEFAULTS : schemaVersion === 6 ? SCHEMA_6_WIDGET_DEFAULTS : schemaVersion === 5 ? SCHEMA_5_WIDGET_DEFAULTS : schemaVersion === 4 ? SCHEMA_4_WIDGET_DEFAULTS : schemaVersion === 3 ? SCHEMA_3_WIDGET_DEFAULTS : schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
+function migrateLegacyWidget(
+  item: DashboardWidgetLayout,
+  definition: DashboardWidgetDefinition,
+  schemaVersion: number
+): DashboardWidgetLayout {
+  const defaults =
+    schemaVersion === 7
+      ? SCHEMA_7_WIDGET_DEFAULTS
+      : schemaVersion === 6
+        ? SCHEMA_6_WIDGET_DEFAULTS
+        : schemaVersion === 5
+          ? SCHEMA_5_WIDGET_DEFAULTS
+          : schemaVersion === 4
+            ? SCHEMA_4_WIDGET_DEFAULTS
+            : schemaVersion === 3
+              ? SCHEMA_3_WIDGET_DEFAULTS
+              : schemaVersion === 2
+                ? SCHEMA_2_WIDGET_DEFAULTS
+                : LEGACY_WIDGET_DEFAULTS;
   const sourceColumns = schemaVersion >= 2 ? 20 : 12;
   const legacy = defaults[item.id];
-  if (legacy && item.x === legacy.x && item.y === legacy.y && item.w === legacy.w && item.h === legacy.h && item.visible === legacy.visible) {
+  if (
+    legacy &&
+    item.x === legacy.x &&
+    item.y === legacy.y &&
+    item.w === legacy.w &&
+    item.h === legacy.h &&
+    item.visible === legacy.visible
+  ) {
     return cloneWidget(definition.layout);
   }
-  const width = Math.min(definition.maxW, Math.max(definition.minW, Math.round(item.w * 20 / sourceColumns)));
+  const width = Math.min(definition.maxW, Math.max(definition.minW, Math.round((item.w * 20) / sourceColumns)));
   const height = Math.min(definition.maxH, Math.max(definition.minH, item.h));
-  const x = Math.min(20 - width, Math.round(item.x * 20 / sourceColumns));
+  const x = Math.min(20 - width, Math.round((item.x * 20) / sourceColumns));
   return { ...item, x, w: width, h: height, settings: {} };
 }
 
@@ -200,9 +224,10 @@ export function normalizeDashboardLayout(input: { schemaVersion: number; widgets
     const definition = registry.get(rawItem.id as DashboardWidgetId);
     if (!definition) throw new Error(`未知仪表盘组件: ${String(rawItem.id)}`);
     if (seen.has(definition.layout.id)) throw new Error(`仪表盘组件重复: ${definition.layout.id}`);
-    const item = input.schemaVersion < DASHBOARD_SCHEMA_VERSION
-      ? migrateLegacyWidget(rawItem as DashboardWidgetLayout, definition, input.schemaVersion)
-      : rawItem;
+    const item =
+      input.schemaVersion < DASHBOARD_SCHEMA_VERSION
+        ? migrateLegacyWidget(rawItem as DashboardWidgetLayout, definition, input.schemaVersion)
+        : rawItem;
     if (
       ![item.x, item.y, item.w, item.h].every(Number.isInteger) ||
       item.x! < 0 ||

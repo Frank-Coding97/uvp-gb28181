@@ -2,7 +2,6 @@ package ptz
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,15 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
-
-type cancellingTrackedSender struct{ cancel context.CancelFunc }
-
-func (s cancellingTrackedSender) SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
-	s.cancel()
-	return uac.TrackedMessageResult{}, errors.New("deadline")
-}
 
 func newPTZQueryTestService(t *testing.T, sender TrackedSender) (*Service, *gorm.DB) {
 	t.Helper()

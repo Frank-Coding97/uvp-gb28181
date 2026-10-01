@@ -263,13 +263,13 @@ func (w *streamWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return w.
 func TestLoggingHTTPStreaming(t *testing.T) {
 	g, b := loggingRouter(t)
 	left, right := net.Pipe()
-	defer left.Close()
-	defer right.Close()
+	defer func() { _ = left.Close() }()
+	defer func() { _ = right.Close() }()
 	rw := bufio.NewReadWriter(bufio.NewReader(left), bufio.NewWriter(left))
 	w := &streamWriter{header: http.Header{}, conn: left, reader: rw}
 	g.GET("/stream", func(c *gin.Context) {
 		before := c.Writer
-		c.Writer.WriteString("chunk")
+		_, _ = c.Writer.WriteString("chunk")
 		c.Writer.Flush()
 		if !w.flushed || w.body.String() != "chunk" {
 			t.Error("stream was buffered")
@@ -327,7 +327,7 @@ func TestLoggingHTTPDebugRoutes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer rt.Close()
+				defer func() { _ = rt.Close() }()
 				app.ZapLog = rt.Root
 				g := GetEngine()
 				g.GET("/check", func(c *gin.Context) { c.Status(204) })

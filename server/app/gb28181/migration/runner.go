@@ -107,7 +107,7 @@ func (e *dbExecutor) ExecSQL(sqlText string) error {
 	db := e.db.Session(&gorm.Session{NewDB: true, PrepareStmt: false})
 	if prepared, ok := db.Statement.ConnPool.(*gorm.PreparedStmtDB); ok {
 		db.Statement.ConnPool = prepared.ConnPool
-		db.Config.ConnPool = prepared.ConnPool
+		db.ConnPool = prepared.ConnPool
 	}
 	// Session variables and PREPARE handles belong to a physical connection.
 	// Pin the entire file; separate pool calls may silently switch sessions.
@@ -157,14 +157,18 @@ func Up(db *gorm.DB, d Dialect) error {
 }
 
 // run 是 Up 的纯依赖版本,便于 fake 注入测试。
-func run(store versionStore, lock locker, src migrationSource, exec migrationExecutor, probe schemaProbe) error {
+func run(store versionStore, lock locker, src migrationSource, exec migrationExecutor, probe schemaProbe) (runErr error) {
 	if err := store.EnsureTable(); err != nil {
 		return fmt.Errorf("建版本表失败: %w", err)
 	}
 	if err := lock.Acquire(); err != nil {
 		return fmt.Errorf("获取迁移锁失败: %w", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if releaseErr := lock.Release(); releaseErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("释放迁移锁失败: %w", releaseErr))
+		}
+	}()
 
 	applied, err := store.ListApplied()
 	if err != nil {

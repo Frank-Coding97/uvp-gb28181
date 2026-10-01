@@ -53,7 +53,12 @@ function reset() {
   clearErrors();
 }
 
-watch(() => props.visible, visible => { if (visible) reset(); });
+watch(
+  () => props.visible,
+  visible => {
+    if (visible) reset();
+  }
+);
 
 function validate() {
   const result = buildRTPCreateRequest(form);
@@ -74,7 +79,15 @@ function close() {
 </script>
 
 <template>
-  <a-modal :visible="visible" modal-class="uvp-system-dialog" :width="720" :footer="false" :mask-closable="false" unmount-on-close @cancel="close">
+  <a-modal
+    :visible="visible"
+    modal-class="uvp-system-dialog"
+    :width="720"
+    :footer="false"
+    :mask-closable="false"
+    unmount-on-close
+    @cancel="close"
+  >
     <template #title>创建 RTP 服务</template>
     <a-alert v-if="disabledReason" type="warning">{{ disabledReason }}</a-alert>
     <a-form :model="form" layout="vertical" class="rtp-form" @submit-success="submit">
@@ -88,22 +101,46 @@ function close() {
         <a-form-item label="Stream" required :validate-status="errors.stream ? 'error' : undefined" :help="errors.stream">
           <a-input v-model="form.stream" allow-clear placeholder="receiver-01" @blur="validate" />
         </a-form-item>
-        <a-form-item label="监听端口" :validate-status="errors.port ? 'error' : undefined" :help="errors.port || '留空或 0 由 ZLM 自动分配。'">
+        <a-form-item
+          label="监听端口"
+          :validate-status="errors.port ? 'error' : undefined"
+          :help="errors.port || '留空或 0 由 ZLM 自动分配。'"
+        >
           <a-input v-model="form.port" allow-clear inputmode="numeric" placeholder="自动分配" @blur="validate" />
         </a-form-item>
-        <a-form-item label="TCP 模式" :validate-status="errors.tcpMode ? 'error' : undefined" :help="errors.tcpMode || '0 UDP，1 TCP 被动，2 TCP 主动。'">
+        <a-form-item
+          label="TCP 模式"
+          :validate-status="errors.tcpMode ? 'error' : undefined"
+          :help="errors.tcpMode || '0 UDP，1 TCP 被动，2 TCP 主动。'"
+        >
           <a-input v-model="form.tcpMode" allow-clear inputmode="numeric" @blur="validate" />
         </a-form-item>
-        <a-form-item label="轨道模式" :validate-status="errors.onlyTrack ? 'error' : undefined" :help="errors.onlyTrack || '0 自动，1 仅音频，2 仅视频。'">
+        <a-form-item
+          label="轨道模式"
+          :validate-status="errors.onlyTrack ? 'error' : undefined"
+          :help="errors.onlyTrack || '0 自动，1 仅音频，2 仅视频。'"
+        >
           <a-input v-model="form.onlyTrack" allow-clear inputmode="numeric" @blur="validate" />
         </a-form-item>
-        <a-form-item label="SSRC" :validate-status="errors.ssrc ? 'error' : undefined" :help="errors.ssrc || '可选，最多 32 位十进制数字。'">
+        <a-form-item
+          label="SSRC"
+          :validate-status="errors.ssrc ? 'error' : undefined"
+          :help="errors.ssrc || '可选，最多 32 位十进制数字。'"
+        >
           <a-input v-model="form.ssrc" allow-clear inputmode="numeric" @blur="validate" />
         </a-form-item>
-        <a-form-item label="本地 IP" :validate-status="errors.localIp ? 'error' : undefined" :help="errors.localIp || '可选，留空由节点决定。'">
+        <a-form-item
+          label="本地 IP"
+          :validate-status="errors.localIp ? 'error' : undefined"
+          :help="errors.localIp || '可选，留空由节点决定。'"
+        >
           <a-input v-model="form.localIp" allow-clear placeholder="0.0.0.0" @blur="validate" />
         </a-form-item>
-        <a-form-item label="端口复用" :validate-status="errors.reuse ? 'error' : undefined" :help="errors.reuse || '开启时必须填写明确端口。'">
+        <a-form-item
+          label="端口复用"
+          :validate-status="errors.reuse ? 'error' : undefined"
+          :help="errors.reuse || '开启时必须填写明确端口。'"
+        >
           <a-switch v-model="form.reuse" @change="validate" />
         </a-form-item>
       </div>
@@ -116,8 +153,23 @@ function close() {
 </template>
 
 <style scoped>
-.rtp-form { margin-top: 16px; }
-.rtp-form__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.rtp-form__actions { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 760px) { .rtp-form__grid { grid-template-columns: 1fr; } }
+.rtp-form {
+  margin-top: 16px;
+}
+.rtp-form__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.rtp-form__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (width <= 760px) {
+  .rtp-form__grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -55,9 +55,9 @@ func BuildPlaySDP(p PlayParams) string {
 	}
 	var b strings.Builder
 	b.WriteString("v=0\r\n")
-	b.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", p.ServerID, p.RecvIP))
+	fmt.Fprintf(&b, "o=%s 0 0 IN IP4 %s\r\n", p.ServerID, p.RecvIP)
 	b.WriteString("s=Play\r\n")
-	b.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", p.RecvIP))
+	fmt.Fprintf(&b, "c=IN IP4 %s\r\n", p.RecvIP)
 	b.WriteString("t=0 0\r\n")
 	writeVideoMediaDescription(&b, p.RecvPort, proto, p.Extended)
 	if p.TCPMode {
@@ -65,13 +65,13 @@ func BuildPlaySDP(p PlayParams) string {
 		b.WriteString("a=connection:new\r\n")
 	}
 	// y= 行:国标扩展,声明 SSRC(10位)
-	b.WriteString(fmt.Sprintf("y=%s\r\n", p.SSRC))
+	fmt.Fprintf(&b, "y=%s\r\n", p.SSRC)
 	return b.String()
 }
 
 func writeVideoMediaDescription(b *strings.Builder, port int, transport string, extended bool) {
 	if extended {
-		b.WriteString(fmt.Sprintf("m=video %d %s 96 126 125 99 34 98 97\r\n", port, transport))
+		fmt.Fprintf(b, "m=video %d %s 96 126 125 99 34 98 97\r\n", port, transport)
 		b.WriteString("a=recvonly\r\n")
 		b.WriteString("a=rtpmap:96 PS/90000\r\n")
 		b.WriteString("a=fmtp:126 profile-level-id=42e01e\r\n")
@@ -84,7 +84,7 @@ func writeVideoMediaDescription(b *strings.Builder, port int, transport string, 
 		return
 	}
 
-	b.WriteString(fmt.Sprintf("m=video %d %s 96 97 98 99\r\n", port, transport))
+	fmt.Fprintf(b, "m=video %d %s 96 97 98 99\r\n", port, transport)
 	b.WriteString("a=recvonly\r\n")
 	b.WriteString("a=rtpmap:96 PS/90000\r\n")
 	b.WriteString("a=rtpmap:97 MPEG4/90000\r\n")

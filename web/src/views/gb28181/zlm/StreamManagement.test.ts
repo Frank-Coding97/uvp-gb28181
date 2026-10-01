@@ -21,12 +21,7 @@ vi.mock("@/api/gb28181-zlm-runtime", () => ({
   forceCloseZLMStream: closeMocks.forceClose
 }));
 
-import {
-  buildStreamQuery,
-  streamCloseDecision,
-  streamIdentityKey,
-  streamRouteFilter
-} from "./streamManagementState";
+import { buildStreamQuery, streamCloseDecision, streamIdentityKey, streamRouteFilter } from "./streamManagementState";
 import ZLMStreamCloseDialog from "./ZLMStreamCloseDialog.vue";
 
 const media = { schema: "rtsp", vhost: "__defaultVhost__", app: "live/main", stream: "cam 01" };
@@ -95,9 +90,23 @@ describe("stream management state", () => {
       props: ["visible", "nodeId", "targetKey", "fingerprint"],
       emits: ["confirm"],
       setup(props, { emit }) {
-        return () => props.visible
-          ? h("button", { class: "confirm-danger", onClick: () => emit("confirm", { nodeId: props.nodeId, targetKey: props.targetKey, fingerprint: props.fingerprint, reason: "" }) }, "confirm")
-          : null;
+        return () =>
+          props.visible
+            ? h(
+                "button",
+                {
+                  class: "confirm-danger",
+                  onClick: () =>
+                    emit("confirm", {
+                      nodeId: props.nodeId,
+                      targetKey: props.targetKey,
+                      fingerprint: props.fingerprint,
+                      reason: ""
+                    })
+                },
+                "confirm"
+              )
+            : null;
       }
     });
     const wrapper = mount(ZLMStreamCloseDialog, {
@@ -123,9 +132,23 @@ describe("stream management state", () => {
       props: ["visible", "nodeId", "targetKey", "fingerprint"],
       emits: ["confirm"],
       setup(props, { emit }) {
-        return () => props.visible
-          ? h("button", { class: "confirm-force", onClick: () => emit("confirm", { nodeId: props.nodeId, targetKey: props.targetKey, fingerprint: props.fingerprint, reason: "incident-42" }) }, "force")
-          : null;
+        return () =>
+          props.visible
+            ? h(
+                "button",
+                {
+                  class: "confirm-force",
+                  onClick: () =>
+                    emit("confirm", {
+                      nodeId: props.nodeId,
+                      targetKey: props.targetKey,
+                      fingerprint: props.fingerprint,
+                      reason: "incident-42"
+                    })
+                },
+                "force"
+              )
+            : null;
       }
     });
     const wrapper = mount(ZLMStreamCloseDialog, {

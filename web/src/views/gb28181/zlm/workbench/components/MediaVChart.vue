@@ -5,30 +5,33 @@ import type { MediaChartSpec } from "../chart/overviewChart";
 
 export type MediaChartStatus = "ready" | "empty" | "unknown" | "unavailable" | "partial";
 
-const props = withDefaults(defineProps<{
-  title: string;
-  spec?: MediaChartSpec | null;
-  status?: MediaChartStatus;
-  statusText?: string;
-  summary?: string;
-  warning?: string | null;
-  asOf?: string | null;
-  sampledLabel?: string;
-  legendLabel?: string;
-  showSummary?: boolean;
-  active?: boolean;
-}>(), {
-  spec: null,
-  status: "ready",
-  statusText: "当前暂无图表数据",
-  summary: "暂无可读的图表摘要",
-  warning: null,
-  asOf: null,
-  sampledLabel: "",
-  legendLabel: "",
-  showSummary: true,
-  active: true
-});
+const props = withDefaults(
+  defineProps<{
+    title: string;
+    spec?: MediaChartSpec | null;
+    status?: MediaChartStatus;
+    statusText?: string;
+    summary?: string;
+    warning?: string | null;
+    asOf?: string | null;
+    sampledLabel?: string;
+    legendLabel?: string;
+    showSummary?: boolean;
+    active?: boolean;
+  }>(),
+  {
+    spec: null,
+    status: "ready",
+    statusText: "当前暂无图表数据",
+    summary: "暂无可读的图表摘要",
+    warning: null,
+    asOf: null,
+    sampledLabel: "",
+    legendLabel: "",
+    showSummary: true,
+    active: true
+  }
+);
 
 const chartHost = ref<HTMLElement | null>(null);
 const themeRevision = ref(0);
@@ -45,7 +48,9 @@ const effectiveStatus = computed<MediaChartStatus>(() => {
   return props.status;
 });
 
-const canRender = computed(() => props.active && !!props.spec && (effectiveStatus.value === "ready" || effectiveStatus.value === "partial"));
+const canRender = computed(
+  () => props.active && !!props.spec && (effectiveStatus.value === "ready" || effectiveStatus.value === "partial")
+);
 const stateText = computed(() => {
   if (effectiveStatus.value === "empty") return props.statusText || "当前筛选没有数据";
   if (effectiveStatus.value === "unknown") return props.statusText || "当前数据状态未知";
@@ -63,17 +68,25 @@ const resolvedSpec = computed(() => {
   const rootStyles = getComputedStyle(document.documentElement);
   function resolve(value: unknown): unknown {
     if (typeof value === "string") {
-      return value.replace(/var\((--[\w-]+)\)/g, (original, name: string) => styles.getPropertyValue(name).trim() || rootStyles.getPropertyValue(name).trim() || original);
+      return value.replace(
+        /var\((--[\w-]+)\)/g,
+        (original, name: string) => styles.getPropertyValue(name).trim() || rootStyles.getPropertyValue(name).trim() || original
+      );
     }
     if (Array.isArray(value)) return value.map(resolve);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
+    if (value && typeof value === "object")
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
     return value;
   }
   return resolve(props.spec) as MediaChartSpec;
 });
 
 function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 }
 
 function normalizedSpec(spec: MediaChartSpec): MediaChartSpec {
@@ -158,15 +171,13 @@ function syncChart() {
   observeResize();
 }
 
-watch(
-  () => [props.spec, props.status, props.active, themeRevision.value],
-  syncChart,
-  { deep: true, flush: "post" }
-);
+watch(() => [props.spec, props.status, props.active, themeRevision.value], syncChart, { deep: true, flush: "post" });
 
 onMounted(() => {
   if (typeof MutationObserver !== "undefined") {
-    themeObserver = new MutationObserver(() => { themeRevision.value += 1; });
+    themeObserver = new MutationObserver(() => {
+      themeRevision.value += 1;
+    });
     const options = { attributes: true, attributeFilter: ["class", "style", "arco-theme", "data-theme"] };
     themeObserver.observe(document.body, options);
     themeObserver.observe(document.documentElement, options);
@@ -198,34 +209,153 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div v-if="canRender" ref="chartHost" class="media-vchart__canvas" role="img" tabindex="0" :aria-label="chartAriaLabel" :aria-describedby="summaryId" />
+    <div
+      v-if="canRender"
+      ref="chartHost"
+      class="media-vchart__canvas"
+      role="img"
+      tabindex="0"
+      :aria-label="chartAriaLabel"
+      :aria-describedby="summaryId"
+    />
     <div v-else class="media-vchart__state" role="status" :aria-label="`${title}：${stateText}`">
-      <span class="media-vchart__state-icon" aria-hidden="true">{{ effectiveStatus === 'empty' ? '∅' : effectiveStatus === 'unavailable' ? '!' : '—' }}</span>
+      <span class="media-vchart__state-icon" aria-hidden="true">{{
+        effectiveStatus === "empty" ? "∅" : effectiveStatus === "unavailable" ? "!" : "—"
+      }}</span>
       <strong>{{ stateText }}</strong>
     </div>
-    <p :id="summaryId" class="media-vchart__summary" :class="{ 'media-vchart__summary--sr-only': !showSummary }">{{ summary || stateText }}</p>
+    <p :id="summaryId" class="media-vchart__summary" :class="{ 'media-vchart__summary--sr-only': !showSummary }">
+      {{ summary || stateText }}
+    </p>
     <p v-if="warning" class="media-vchart__warning" role="status">{{ warning }}</p>
   </section>
 </template>
 
 <style scoped>
-.media-vchart { min-width: 0; padding: 14px 16px 12px; color: var(--zlm-text-2, var(--color-text-2)); background: var(--uvp-panel-bg, var(--color-bg-2)); border: 1px solid var(--uvp-panel-border, var(--color-border-2)); border-radius: var(--uvp-panel-radius, 10px); box-shadow: var(--uvp-panel-shadow, 0 2px 8px rgb(0 0 0 / 4%)); }
-.media-vchart__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.media-vchart h3 { margin: 0; color: var(--zlm-text-1, var(--color-text-1)); font-size: 14px; font-weight: 600; }
-.media-vchart__meta { margin: 3px 0 0; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; line-height: 1.35; }
-.media-vchart__header-aside { display: flex; flex: none; align-items: center; gap: 8px; }
-.media-vchart__legend { display: inline-flex; align-items: center; gap: 6px; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; white-space: nowrap; }
-.media-vchart__legend i { width: 8px; height: 8px; background: var(--zlm-brand-500, rgb(var(--primary-6))); border-radius: 50%; }
-.media-vchart__badge { flex: none; padding: 2px 7px; color: var(--zlm-warn-600, rgb(var(--warning-6))); background: var(--zlm-warn-50, rgb(var(--warning-1))); border-radius: 999px; font-size: 12px; }
-.media-vchart__canvas { width: 100%; min-height: 220px; }
-.media-vchart__canvas:focus-visible { outline: 2px solid var(--zlm-brand-500, rgb(var(--primary-6))); outline-offset: 2px; }
-.media-vchart__state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--zlm-text-3, var(--color-text-3)); text-align: center; }
-.media-vchart__state strong { color: var(--zlm-text-2, var(--color-text-2)); font-size: 13px; font-weight: 500; }
-.media-vchart__state-icon { display: grid; width: 30px; height: 30px; place-items: center; color: var(--zlm-text-4, var(--color-text-4)); border: 1px solid var(--uvp-panel-border, var(--color-border-2)); border-radius: 50%; font-size: 17px; }
-.media-vchart[data-status="unavailable"] .media-vchart__state-icon { color: var(--zlm-danger-600, rgb(var(--danger-6))); border-color: var(--zlm-danger-500, rgb(var(--danger-5))); }
-.media-vchart[data-status="partial"] .media-vchart__summary { color: var(--zlm-warn-600, rgb(var(--warning-6))); }
-.media-vchart__summary { min-height: 18px; margin: 7px 0 0; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; line-height: 1.4; }
-.media-vchart__summary--sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.media-vchart__warning { margin: 3px 0 0; color: var(--zlm-warn-600, rgb(var(--warning-6))); font-size: 12px; line-height: 1.4; }
-@media (prefers-reduced-motion: reduce) { .media-vchart__canvas { scroll-behavior: auto; } }
+.media-vchart {
+  min-width: 0;
+  padding: 14px 16px 12px;
+  color: var(--zlm-text-2, var(--color-text-2));
+  background: var(--uvp-panel-bg, var(--color-bg-2));
+  border: 1px solid var(--uvp-panel-border, var(--color-border-2));
+  border-radius: var(--uvp-panel-radius, 10px);
+  box-shadow: var(--uvp-panel-shadow, 0 2px 8px rgb(0 0 0 / 4%));
+}
+.media-vchart__header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.media-vchart h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--zlm-text-1, var(--color-text-1));
+}
+.media-vchart__meta {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--zlm-text-3, var(--color-text-2));
+}
+.media-vchart__header-aside {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+}
+.media-vchart__legend {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--zlm-text-3, var(--color-text-2));
+  white-space: nowrap;
+}
+.media-vchart__legend i {
+  width: 8px;
+  height: 8px;
+  background: var(--zlm-brand-500, rgb(var(--primary-6)));
+  border-radius: 50%;
+}
+.media-vchart__badge {
+  flex: none;
+  padding: 2px 7px;
+  font-size: 12px;
+  color: var(--zlm-warn-600, rgb(var(--warning-6)));
+  background: var(--zlm-warn-50, rgb(var(--warning-1)));
+  border-radius: 999px;
+}
+.media-vchart__canvas {
+  width: 100%;
+  min-height: 220px;
+}
+.media-vchart__canvas:focus-visible {
+  outline: 2px solid var(--zlm-brand-500, rgb(var(--primary-6)));
+  outline-offset: 2px;
+}
+.media-vchart__state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  color: var(--zlm-text-3, var(--color-text-3));
+  text-align: center;
+}
+.media-vchart__state strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--zlm-text-2, var(--color-text-2));
+}
+.media-vchart__state-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  color: var(--zlm-text-4, var(--color-text-4));
+  border: 1px solid var(--uvp-panel-border, var(--color-border-2));
+  border-radius: 50%;
+}
+.media-vchart[data-status="unavailable"] .media-vchart__state-icon {
+  color: var(--zlm-danger-600, rgb(var(--danger-6)));
+  border-color: var(--zlm-danger-500, rgb(var(--danger-5)));
+}
+.media-vchart[data-status="partial"] .media-vchart__summary {
+  color: var(--zlm-warn-600, rgb(var(--warning-6)));
+}
+.media-vchart__summary {
+  min-height: 18px;
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--zlm-text-3, var(--color-text-2));
+}
+.media-vchart__summary--sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+}
+.media-vchart__warning {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--zlm-warn-600, rgb(var(--warning-6)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-vchart__canvas {
+    scroll-behavior: auto;
+  }
+}
 </style>

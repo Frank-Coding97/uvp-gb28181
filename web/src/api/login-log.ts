@@ -48,14 +48,12 @@ export type LoginLogMutationResult = BaseResult<{ deletedCount?: number }>;
 export const getLoginLogsAPI = (params: LoginLogListParams) =>
   http.request<LoginLogListResult>("get", baseUrlApi("sysLoginLog/list"), { params });
 
-export const getLoginLogDetailAPI = (id: number) =>
-  http.request<LoginLogDetailResult>("get", baseUrlApi(`sysLoginLog/${id}`));
+export const getLoginLogDetailAPI = (id: number) => http.request<LoginLogDetailResult>("get", baseUrlApi(`sysLoginLog/${id}`));
 
 export const deleteLoginLogsAPI = (ids: number[]) =>
   http.request<LoginLogMutationResult>("delete", baseUrlApi("sysLoginLog/delete"), { data: { ids } });
 
-export const clearLoginLogsAPI = () =>
-  http.request<LoginLogMutationResult>("post", baseUrlApi("sysLoginLog/clear"));
+export const clearLoginLogsAPI = () => http.request<LoginLogMutationResult>("post", baseUrlApi("sysLoginLog/clear"));
 
 export const unlockLoginLogAccountAPI = (id: number) =>
   http.request<BaseResult<null>>("post", baseUrlApi("sysLoginLog/unlock"), { data: { id } });

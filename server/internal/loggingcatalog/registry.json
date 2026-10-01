@@ -24,6 +24,9 @@
     "auth.login_audit.persist_failed": [
       "username"
     ],
+    "auth.login_failure_count_cache_failed": [],
+    "auth.login_failure_count_delete_failed": [],
+    "auth.login_lock_cache_failed": [],
     "auth.member.config_changed": [],
     "auth.member.token_invalid": [],
     "auth.member.token_missing": [],
@@ -81,7 +84,7 @@
       "platform_id"
     ],
     "cascade.credential_key_unavailable": [],
-    "cascade.shutdown_incomplete": [],
+    "cascade.source_release_failed": [],
     "cascade.video.ack_invalid": [
       "call_id",
       "platform_id"
@@ -120,6 +123,7 @@
     "codegen.file_skipped": [
       "file_path"
     ],
+    "codegen.rows_close_failed": [],
     "codegen.template_execute_failed": [
       "template_name"
     ],
@@ -257,7 +261,6 @@
       "source_ip",
       "stream_id"
     ],
-    "gb28181.hook.flow.observer_failed": [],
     "gb28181.hook.keepalive.collector_unavailable": [
       "source_ip"
     ],
@@ -268,6 +271,7 @@
     "gb28181.hook.keepalive.read_failed": [
       "source_ip"
     ],
+    "gb28181.hook.openapi_viewer.close_failed": [],
     "gb28181.hook.play.authorized": [
       "correlation_id",
       "media_server_id",
@@ -333,17 +337,18 @@
       "stream_id"
     ],
     "gb28181.lifecycle.civilcode_assembled": [],
+    "gb28181.lifecycle.device_cleanup_reconcile_failed": [],
+    "gb28181.lifecycle.device_cleanup_reconciled": [],
+    "gb28181.lifecycle.device_cleanup_reconciler_skipped": [],
+    "gb28181.lifecycle.device_cleanup_reconciler_started": [],
     "gb28181.lifecycle.heartbeat_watcher_started": [],
     "gb28181.lifecycle.offline_scanner_started": [],
     "gb28181.lifecycle.play_reconciler_started": [],
     "gb28181.lifecycle.play_service_assembled": [],
     "gb28181.lifecycle.playback_recovery_incomplete": [],
-    "gb28181.lifecycle.playback_trust_missing": [],
     "gb28181.lifecycle.recording_catalog_assembled": [],
     "gb28181.lifecycle.recording_reconciler_started": [],
     "gb28181.lifecycle.recording_signer_assembled": [],
-    "gb28181.lifecycle.rtp_cleanup_registry_missing": [],
-    "gb28181.lifecycle.rtp_cleanup_trust_missing": [],
     "gb28181.lifecycle.thread_load_poller_started": [],
     "gb28181.lifecycle.traffic_hook_assembled": [],
     "gb28181.lifecycle.zlm_scheduler_assembled": [],
@@ -391,6 +396,10 @@
       "device_id"
     ],
     "gb28181.message.snapshot_failed": [
+      "call_id",
+      "device_id"
+    ],
+    "gb28181.message.snapshot_finished_failed": [
       "call_id",
       "device_id"
     ],
@@ -600,6 +609,7 @@
       "channel_id",
       "device_id"
     ],
+    "gb28181.snapshot.library_record_failed": [],
     "gb28181.snapshot.panic": [
       "channel_id",
       "device_id"
@@ -610,9 +620,11 @@
     "gb28181.talk.remote_bye_cleanup_failed": [
       "call_id"
     ],
+    "gb28181.talk.runtime_stop_failed": [],
     "gb28181.talk.startup_cleanup_failed": [],
-    "gb28181.talk.uplink_forward_failed": [],
     "gb28181.talk.uplink_prepare_failed": [],
+    "gb28181.trace.query_failure_log_write_failed": [],
+    "gb28181.trace.stream_ready_write_failed": [],
     "gb28181.traffic.repository_assemble_failed": [],
     "gb28181.traffic.session_cleanup_failed": [],
     "gb28181.traffic.viewer_kicked": [
@@ -674,6 +686,11 @@
       "channel_id",
       "device_id"
     ],
+    "play.client_feedback_issue_failed": [],
+    "play.lifecycle_begin_failed": [
+      "channel_id",
+      "device_id"
+    ],
     "play.reconcile.cleanup_failed": [
       "channel_id",
       "device_id",
@@ -714,11 +731,14 @@
     "play.recording_start_failed": [
       "stream_id"
     ],
+    "plugin.data_rows_close_failed": [],
     "plugin.example.routes_registered": [],
+    "plugin.export_zip_close_failed": [],
     "plugin.routes.initialized": [],
     "plugin.routes.none": [],
     "plugin.routes.ready": [],
     "plugin.routes.skipped_nil": [],
+    "plugin.rows_close_failed": [],
     "ptz.cruise_cache.delete_failed": [
       "channel_id"
     ],
@@ -736,6 +756,10 @@
     "ptz.cruise_reconcile_skipped": [
       "channel_code",
       "channel_id"
+    ],
+    "ptz.device_config.read_settled": [
+      "device_code",
+      "operation_id"
     ],
     "ptz.home_position.write_failed": [],
     "ptz.preset_cache_failed": [
@@ -775,7 +799,6 @@
     "recording.catalog.reconcile_failed": [
       "node_id"
     ],
-    "recording.catalog_shutdown_incomplete": [],
     "recording.reconcile.channel_failed": [
       "channel_id"
     ],
@@ -837,10 +860,6 @@
     "sip.shutdown_incomplete": [],
     "startup.failed": [],
     "startup.openapi_maintenance_failed": [],
-    "startup.openapi_revocation_maintenance_failed": [],
-    "startup.openapi_revocation_pending_overdue": [],
-    "startup.openapi_revocation_startup_failed": [],
-    "startup.openapi_revocation_unconfigured": [],
     "streammonitor.media_read_failed": [
       "endpoint",
       "node_id",
@@ -860,6 +879,13 @@
     ],
     "subscribe.position.partial_persist": [
       "device_id"
+    ],
+    "sysaffix.chunk_merge_cleanup_failed": [
+      "upload_id"
+    ],
+    "sysaffix.chunk_merge_final_cleanup_failed": [],
+    "sysaffix.chunk_merge_records_cleanup_failed": [
+      "upload_id"
     ],
     "sysaffix.chunk_upload_cancel_failed": [
       "upload_id"
@@ -924,20 +950,13 @@
       "endpoint",
       "node_id"
     ],
-    "zlm.node.offline": [
+    "zlm.node.hook_revoke_failed": [
       "node_id"
     ],
     "zlm.node.hook_revoked": [
       "node_id"
     ],
-    "zlm.node.hook_revoke_failed": [
-      "node_id"
-    ],
-    "zlm.node.retire_credentials_failed": [
-      "node_id"
-    ],
-    "zlm.node.retire_index_load_failed": [],
-    "zlm.node.retire_state_persist_failed": [
+    "zlm.node.offline": [
       "node_id"
     ],
     "zlm.node.purged_unreachable": [
@@ -947,6 +966,13 @@
       "node_id"
     ],
     "zlm.node.restored": [
+      "node_id"
+    ],
+    "zlm.node.retire_credentials_failed": [
+      "node_id"
+    ],
+    "zlm.node.retire_index_load_failed": [],
+    "zlm.node.retire_state_persist_failed": [
       "node_id"
     ],
     "zlm.probe.activation_failed": [
@@ -999,7 +1025,6 @@
     "address",
     "advertise_ip",
     "after_count",
-    "alarms",
     "algorithm",
     "api_port",
     "app",
@@ -1019,6 +1044,7 @@
     "cmd_type",
     "code",
     "complete",
+    "completed",
     "config_write",
     "configured",
     "configured_host",
@@ -1036,6 +1062,7 @@
     "device_code",
     "device_id",
     "dialect",
+    "dialog_id",
     "dropped",
     "dropped_count",
     "duration",
@@ -1047,14 +1074,18 @@
     "env",
     "error_code",
     "event",
+    "examined",
     "executor",
     "expected_server_id",
+    "expected_types",
     "expires",
     "fail",
     "failed",
+    "file",
     "file_path",
     "firmware_updated",
     "from",
+    "has_data",
     "heartbeat_gap",
     "hook_event",
     "interval",
@@ -1065,6 +1096,7 @@
     "job_id",
     "job_name",
     "key_source",
+    "lifecycle_id",
     "listen_ip",
     "manufacturer_updated",
     "matched_prefix",
@@ -1107,12 +1139,14 @@
     "reason_code",
     "reason_present",
     "received_count",
+    "received_types",
     "recovery_cleaned",
     "recovery_failed",
     "recovery_restored",
     "recovery_scanned",
     "recovery_skipped",
     "regist",
+    "rel_path",
     "remote_addr",
     "removed",
     "reported_uuid",
@@ -1120,6 +1154,7 @@
     "resource_count",
     "response_call_id",
     "response_cseq",
+    "responses",
     "result",
     "retire_trigger",
     "retired_projections",

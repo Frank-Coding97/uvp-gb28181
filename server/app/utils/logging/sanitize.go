@@ -159,7 +159,7 @@ func validSQLState(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !(r >= '0' && r <= '9' || r >= 'A' && r <= 'Z') {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'Z') {
 			return false
 		}
 	}

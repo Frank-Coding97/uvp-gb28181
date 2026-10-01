@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,17 @@ import (
 )
 
 type routePlayAuthority struct{}
+
+type routePlaybackMediaResolver struct {
+	binding playauth.Binding
+}
+
+func (r routePlaybackMediaResolver) ResolvePlaybackMediaContext(appName, streamID, mediaServerID string) (playauth.Binding, error) {
+	if r.binding.App != appName || r.binding.Stream != streamID || r.binding.MediaServerID != mediaServerID {
+		return playauth.Binding{}, errors.New("playback media context mismatch")
+	}
+	return r.binding, nil
+}
 
 func (routePlayAuthority) Load(ctx context.Context, _ string) (playauth.DeviceSecurityState, error) {
 	if err := ctx.Err(); err != nil {
@@ -54,6 +66,10 @@ func TestSetPlayAuthorizerWiresOnPlayHook(t *testing.T) {
 	deviceID := "37010301021320000014"
 	channelID := "37010301021320000001"
 	streamID := deviceID + "_" + channelID
+	hookController.SetPlaybackMediaContextResolver(routePlaybackMediaResolver{binding: playauth.Binding{
+		DeviceID: deviceID, ChannelID: channelID, App: "rtp", Stream: streamID, MediaServerID: "node-a", DeviceEpoch: 1,
+	}})
+	t.Cleanup(func() { hookController.SetPlaybackMediaContextResolver(nil) })
 	grant, err := authorization.IssueDirect(playauth.Binding{
 		DeviceID: deviceID, ChannelID: channelID, App: "rtp",
 		Stream: streamID, MediaServerID: "node-a", DeviceEpoch: 1,

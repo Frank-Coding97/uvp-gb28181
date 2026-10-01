@@ -26,12 +26,18 @@ export function nodeOnlineState(node: Pick<ZLMNode, "state"> & Partial<Pick<ZLMN
   return node.health ?? node.state;
 }
 
-export function nodeHealth(node: Pick<ZLMNode, "state"> & Partial<Pick<ZLMNode, "health" | "recoveryRequired" | "nearCapacity" | "autoOnDemandReady" | "enabled">>): NodeHealth {
+export function nodeHealth(
+  node: Pick<ZLMNode, "state"> &
+    Partial<Pick<ZLMNode, "health" | "recoveryRequired" | "nearCapacity" | "autoOnDemandReady" | "enabled">>
+): NodeHealth {
   if (node.recoveryRequired || nodeOnlineState(node) === "offline") return "critical";
   return node.nearCapacity || node.autoOnDemandReady === false ? "warning" : "healthy";
 }
 
-export function nodeHealthReason(node: Pick<ZLMNode, "state"> & Partial<Pick<ZLMNode, "health" | "recoveryRequired" | "recoveryReason" | "nearCapacity" | "autoOnDemandReady" | "enabled">>) {
+export function nodeHealthReason(
+  node: Pick<ZLMNode, "state"> &
+    Partial<Pick<ZLMNode, "health" | "recoveryRequired" | "recoveryReason" | "nearCapacity" | "autoOnDemandReady" | "enabled">>
+) {
   if (node.recoveryRequired) return node.recoveryReason || "配置恢复未完成";
   if (nodeOnlineState(node) === "offline") return "节点离线";
   if (node.autoOnDemandReady === false) return "自动按需配置尚未收敛";

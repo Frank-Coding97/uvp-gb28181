@@ -41,10 +41,18 @@ vi.mock("@visactor/vchart", () => ({
     }
 
     getComponents() {
-      return [{ hideCrosshair: () => { chart.crosshairActive = false; } }];
+      return [
+        {
+          hideCrosshair: () => {
+            chart.crosshairActive = false;
+          }
+        }
+      ];
     }
 
-    hideTooltip() { return true; }
+    hideTooltip() {
+      return true;
+    }
 
     release() {
       chart.released += 1;
@@ -64,9 +72,13 @@ class ResizeObserverStub {
     ResizeObserverStub.latest = this;
   }
 
-  observe() { return undefined; }
+  observe() {
+    return undefined;
+  }
 
-  disconnect() { this.disconnected = true; }
+  disconnect() {
+    this.disconnected = true;
+  }
 
   emit(width = 640, height = 300) {
     this.callback([{ contentRect: { width, height } } as ResizeObserverEntry], this as unknown as ResizeObserver);
@@ -74,7 +86,16 @@ class ResizeObserverStub {
 }
 
 function matchMedia(matches = false) {
-  return { matches, media: "(prefers-reduced-motion: reduce)", onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn() };
+  return {
+    matches,
+    media: "(prefers-reduced-motion: reduce)",
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn()
+  };
 }
 
 describe("MediaVChart", () => {
@@ -160,7 +181,11 @@ describe("MediaVChart", () => {
       animationExit: { duration: 300 }
     };
     const wrapper = mount(MediaVChart, { props: { title: "趋势", spec: rollingSpec } });
-    expect(chart.specs[0]).toMatchObject({ animationAppear: { duration: 300 }, animationUpdate: { duration: 450 }, animationExit: { duration: 300 } });
+    expect(chart.specs[0]).toMatchObject({
+      animationAppear: { duration: 300 },
+      animationUpdate: { duration: 450 },
+      animationExit: { duration: 300 }
+    });
     wrapper.unmount();
 
     chart.specs.length = 0;

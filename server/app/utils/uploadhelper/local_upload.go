@@ -2,6 +2,7 @@ package uploadhelper
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -193,20 +194,20 @@ func (s *LocalUploadService) ValidateFile(file *multipart.FileHeader) (bool, err
 }
 
 // SaveFile 保存文件到本地
-func (s *LocalUploadService) SaveFile(file *multipart.FileHeader, filePath string) error {
+func (s *LocalUploadService) SaveFile(file *multipart.FileHeader, filePath string) (err error) {
 	// 打开上传的文件
 	src, err := file.Open()
 	if err != nil {
 		return fmt.Errorf("打开文件失败: %v", err)
 	}
-	defer src.Close()
+	defer func() { err = errors.Join(err, src.Close()) }()
 
 	// 创建目标文件
 	dst, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("创建文件失败: %v", err)
 	}
-	defer dst.Close()
+	defer func() { err = errors.Join(err, dst.Close()) }()
 
 	// 复制文件内容
 	if _, err = io.Copy(dst, src); err != nil {
@@ -247,7 +248,7 @@ func (s *LocalUploadService) getFilePathFromUrl(relativePath string) string {
 }
 
 // DownloadAndSaveRemoteImage 下载并保存远程图片
-func (s *LocalUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.UploadResponse, error) {
+func (s *LocalUploadService) DownloadAndSaveRemoteImage(imageUrl string) (response *app.UploadResponse, err error) {
 	// 创建HTTP客户端，设置超时和跳过SSL验证（某些情况下需要）
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -261,7 +262,7 @@ func (s *LocalUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.U
 	if err != nil {
 		return nil, fmt.Errorf("下载图片失败: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 
 	// 检查响应状态码
 	if resp.StatusCode != http.StatusOK {
@@ -305,7 +306,7 @@ func (s *LocalUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.U
 	if err != nil {
 		return nil, fmt.Errorf("创建文件失败: %v", err)
 	}
-	defer out.Close()
+	defer func() { err = errors.Join(err, out.Close()) }()
 
 	// 复制下载的内容到文件
 	written, err := io.Copy(out, resp.Body)
@@ -323,7 +324,7 @@ func (s *LocalUploadService) DownloadAndSaveRemoteImage(imageUrl string) (*app.U
 	}
 
 	// 构建响应
-	response := &app.UploadResponse{
+	response = &app.UploadResponse{
 		Url:      s.GetFileUrl(fmt.Sprintf("%s/%s", dateFolder, fileName)),
 		FileName: fileName,
 		Size:     fileSize,

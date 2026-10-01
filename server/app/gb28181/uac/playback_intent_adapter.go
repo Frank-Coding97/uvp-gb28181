@@ -118,9 +118,10 @@ func (c *playbackIntentChild) Close(ctx context.Context) (gbplayback.IntentClose
 		if step.Identity != o.invite {
 			continue
 		}
-		if step.State == playauth.SIPStepPrepared {
+		switch step.State {
+		case playauth.SIPStepPrepared:
 			valid = !started
-		} else if step.State == playauth.SIPStepMayHaveDispatched {
+		case playauth.SIPStepMayHaveDispatched:
 			valid = step.BranchInventoryFault == playauth.SIPBranchObserverIncomplete
 			// Observation loss stays unknown even after a known branch's BYE.
 			c.remotePending = true

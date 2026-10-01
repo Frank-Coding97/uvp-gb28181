@@ -82,7 +82,11 @@ func TestPlaybackIntentMultiBranchHandoffHasNoBarrierGap(t *testing.T) {
 		}
 		<-release
 	}))
-	defer f.db.Callback().Update().Remove("fixture:branch-B-prepare")
+	defer func() {
+		if err := f.db.Callback().Update().Remove("fixture:branch-B-prepare"); err != nil {
+			t.Errorf("callback cleanup failed: %v", err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	finished := make(chan error, 1)

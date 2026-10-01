@@ -118,7 +118,7 @@ func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
 	sipServer = &fakeSIPRuntimeServer{events: &events}
 	ptzScheduler = &fakePTZSchedulerLifecycle{events: &events}
 	ptzService = nil
-	stopSIPDependencies(context.Background())
+	require.NoError(t, stopSIPDependencies(context.Background()))
 
 	require.Equal(t, []string{"record.sink.clear", "scheduler.stop", "sip.shutdown"}, events)
 	require.Nil(t, ptzScheduler)
@@ -172,7 +172,7 @@ func TestRecordQueryReloadClosesRegistryBeforeSinkAndSIP(t *testing.T) {
 	require.NoError(t, err)
 	recordQueryService = service
 	sipServer = &fakeSIPRuntimeServer{events: &events, activeAtRecordSinkClear: &activeAtSinkClear}
-	stopSIPDependencies(context.Background())
+	require.NoError(t, stopSIPDependencies(context.Background()))
 
 	require.Equal(t, 0, activeAtSinkClear)
 	require.Equal(t, []string{"record.sink.clear", "sip.shutdown"}, events)
@@ -218,7 +218,7 @@ func TestReloadClosesPlaybackBeforeRecordQueryAndSIP(t *testing.T) {
 	recordQueryService = query
 	sipServer = &fakeSIPRuntimeServer{events: &events}
 
-	stopSIPDependencies(context.Background())
+	require.NoError(t, stopSIPDependencies(context.Background()))
 
 	require.Equal(t, []string{"playback.teardown", "playback.rtp.close", "playback.unbind", "record.sink.clear", "sip.shutdown"}, events)
 	require.Nil(t, playbackService)

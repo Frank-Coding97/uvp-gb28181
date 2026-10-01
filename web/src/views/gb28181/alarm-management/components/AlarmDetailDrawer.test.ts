@@ -32,7 +32,8 @@ const detail = (id = "9007199254740993", description = "移动目标") => ({
 const stubs = {
   "a-drawer": {
     props: ["visible", "escToClose"],
-    template: "<aside v-if='visible' data-testid='alarm-detail-drawer' :data-esc-to-close='escToClose'><slot name='title' /><slot /></aside>"
+    template:
+      "<aside v-if='visible' data-testid='alarm-detail-drawer' :data-esc-to-close='escToClose'><slot name='title' /><slot /></aside>"
   },
   "a-spin": { props: ["loading"], template: "<div :data-loading='loading'><slot /></div>" },
   "a-descriptions": { template: "<dl><slot /></dl>" },

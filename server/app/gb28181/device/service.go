@@ -154,10 +154,6 @@ func resolveRegisterProfile(existing *gbmodels.GbDevice, reported string) resolv
 	}
 }
 
-func defaultOwnerDeptID(ctx context.Context) (uint, error) {
-	return defaultOwnerDeptIDWithDB(ctx, app.DB())
-}
-
 // DefaultOwnerDeptIDWithDB 导出包装:读取并校验配置的默认归属部门 ID。
 func DefaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
 	return defaultOwnerDeptIDWithDB(ctx, db)

@@ -356,30 +356,6 @@ func parseMediaPageQuery(c *gin.Context) (management.MediaIdentity, management.P
 	return media, page, nil
 }
 
-func parseOptionalIntQuery(c *gin.Context, key string) (*int, error) {
-	raw, present, err := querySingle(c, key)
-	if err != nil || !present {
-		return nil, err
-	}
-	value, parseErr := strconv.Atoi(raw)
-	if parseErr != nil {
-		return nil, management.NewValidationError(map[string]string{key: "must be an integer"})
-	}
-	return &value, nil
-}
-
-func parseOptionalBoolQuery(c *gin.Context, key string) (*bool, error) {
-	raw, present, err := querySingle(c, key)
-	if err != nil || !present {
-		return nil, err
-	}
-	value, parseErr := strconv.ParseBool(raw)
-	if parseErr != nil {
-		return nil, management.NewValidationError(map[string]string{key: "must be true or false"})
-	}
-	return &value, nil
-}
-
 func markManagementAudit(c *gin.Context, action string, nodeID int64, target *management.OwnershipTarget, fingerprint, reason, result string) {
 	metadata := make(map[string]any, 6)
 	if strings.TrimSpace(action) != "" {

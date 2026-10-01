@@ -38,31 +38,29 @@ export type ColumnsResponse = BaseResult<{
   columns: ColumnInfo[];
 }>;
 
-
-
 /** 文件树节点 */
 export interface FileTreeNode {
   name: string;
   path: string;
-  type: 'file' | 'directory';
+  type: "file" | "directory";
   children?: FileTreeNode[];
 }
 
 export type PreviewCodeResponse = BaseResult<{
   tree: FileTreeNode[];
   code: {
-      "model": string,
-      "modelparam": string,
-      "controller": string,
-      "service": string,
-      "routes": string,
-      "init": string,
-      "frontendApi": string,
-      "frontendStore": string,
-      "frontendHooks": string,
-      "frontendView": string
+    model: string;
+    modelparam: string;
+    controller: string;
+    service: string;
+    routes: string;
+    init: string;
+    frontendApi: string;
+    frontendStore: string;
+    frontendHooks: string;
+    frontendView: string;
   };
-}>
+}>;
 /**
  * 获取数据库列表
  * @returns 数据库列表
@@ -100,13 +98,14 @@ export const getTableColumns = (database: string, table: string) => {
  * @returns 生成的代码
  */
 export const generateCode = (genId: number) => {
-  return http.request<BaseResult<{
-    code: string;
-  }>>("post", baseUrlApi("codegen/generate"), {
+  return http.request<
+    BaseResult<{
+      code: string;
+    }>
+  >("post", baseUrlApi("codegen/generate"), {
     data: { genId }
   });
 };
-
 
 /**
  * 预览
@@ -117,16 +116,17 @@ export const previewCode = (genId: number) => {
   });
 };
 
-
 /**
  * 生成菜单
  * @param genId 生成任务ID
  * @returns 生成的代码
  */
 export const insertmenuandapi = (genId: number) => {
-  return http.request<BaseResult<{
-    code: string;
-  }>>("post", baseUrlApi("codegen/insertmenuandapi"), {
+  return http.request<
+    BaseResult<{
+      code: string;
+    }>
+  >("post", baseUrlApi("codegen/insertmenuandapi"), {
     data: { genId }
   });
 };

@@ -15,7 +15,7 @@ func TestOpenAPIAuditOutcomesAndRetention(t *testing.T) {
 	require.NoError(t, err)
 	raw, _ := db.DB()
 	raw.SetMaxOpenConns(1)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	require.NoError(t, db.AutoMigrate(&models.Audit{}))
 	now := time.Unix(1790000000, 0)
 	store := New(db, func() time.Time { return now })

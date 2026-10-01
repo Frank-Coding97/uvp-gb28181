@@ -62,7 +62,7 @@ func TestRecordingFileCatalogFieldsKeepUnknownMetadataNullableAndInternalPathsPr
 			t.Errorf("GbRecordingFile missing nullable metadata field %s", name)
 			continue
 		}
-		if field.Type.Kind() != reflect.Ptr {
+		if field.Type.Kind() != reflect.Pointer {
 			t.Errorf("GbRecordingFile.%s must be nullable, got %s", name, field.Type)
 		}
 	}

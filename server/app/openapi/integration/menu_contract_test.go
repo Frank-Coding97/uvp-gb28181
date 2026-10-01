@@ -148,7 +148,7 @@ func readBaselineJSONL[T any](t *testing.T, name string) []T {
 	path := filepath.Join("../../../resource/database/baseline/seeds", name)
 	file, err := os.Open(path)
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	rows := make([]T, 0)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

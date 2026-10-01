@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/api/online-user", async importOriginal => ({
-  ...await importOriginal<typeof import("@/api/online-user")>(),
+  ...(await importOriginal<typeof import("@/api/online-user")>()),
   forceLogoutOnlineSessionAPI: mocks.forceLogout
 }));
 vi.mock("@arco-design/web-vue", () => ({
@@ -41,7 +41,10 @@ function mountAction(props: Record<string, unknown> = {}) {
     props: { session: record, currentSid: "current-session", canForce: true, ...props },
     global: {
       stubs: {
-        "a-button": { props: ["disabled", "loading"], template: "<button :disabled='disabled' :data-loading='loading'><slot name='icon'/><slot /></button>" },
+        "a-button": {
+          props: ["disabled", "loading"],
+          template: "<button :disabled='disabled' :data-loading='loading'><slot name='icon'/><slot /></button>"
+        },
         "a-tooltip": { props: ["content"], template: "<span :title='content'><slot /></span>" },
         LogOut: true
       }
@@ -73,7 +76,11 @@ describe("OnlineUserAction", () => {
 
   it("shows row loading and removes the session after a successful force logout", async () => {
     let resolve!: (value: unknown) => void;
-    mocks.forceLogout.mockReturnValue(new Promise(done => { resolve = done; }));
+    mocks.forceLogout.mockReturnValue(
+      new Promise(done => {
+        resolve = done;
+      })
+    );
     const wrapper = mountAction();
     await wrapper.get("button").trigger("click");
     const onOk = mocks.confirm.mock.calls[0][0].onOk;

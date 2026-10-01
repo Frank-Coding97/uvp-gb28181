@@ -146,20 +146,20 @@ export const formatTime = (
 ): string => {
   // 确保插件已加载
   if (!dayjs.utc || !dayjs.tz) {
-    console.warn('dayjs utc/timezone plugins not loaded');
+    console.warn("dayjs utc/timezone plugins not loaded");
     return dayjs(time).format(format);
   }
-  
+
   try {
     let date;
-    
+
     // 处理空值情况
     if (!time) {
       return dayjs().format(format);
     }
-    
+
     // 根据源时区解析
-    if (sourceTimezone === 'UTC') {
+    if (sourceTimezone === "UTC") {
       date = dayjs.utc(time);
     } else if (sourceTimezone) {
       date = dayjs.tz(time, sourceTimezone);
@@ -167,14 +167,14 @@ export const formatTime = (
       // 不指定源时区，直接解析
       date = dayjs(time);
     }
-    
+
     if (!date.isValid()) {
-      console.warn('Invalid date:', time);
-      return 'Invalid Date';
+      console.warn("Invalid date:", time);
+      return "Invalid Date";
     }
-    
+
     // 只有当源时区不是本地时区时才转换
-    if (sourceTimezone && sourceTimezone !== 'UTC') {
+    if (sourceTimezone && sourceTimezone !== "UTC") {
       try {
         const localTimezone = dayjs.tz.guess();
         if (localTimezone && localTimezone !== sourceTimezone) {
@@ -182,9 +182,9 @@ export const formatTime = (
         }
       } catch (e) {
         // 时区猜测失败，保持原时间
-        console.warn('Failed to guess timezone:', e);
+        console.warn("Failed to guess timezone:", e);
       }
-    } else if (sourceTimezone === 'UTC') {
+    } else if (sourceTimezone === "UTC") {
       // UTC 时间转换为本地时间
       try {
         const localTimezone = dayjs.tz.guess();
@@ -195,20 +195,20 @@ export const formatTime = (
           date = date.local();
         }
       } catch (e) {
-        console.warn('Failed to convert UTC to local time:', e);
+        console.warn("Failed to convert UTC to local time:", e);
         date = date.local();
       }
     }
-    
+
     return date.format(format);
   } catch (error) {
-    console.error('Format time failed:', error);
+    console.error("Format time failed:", error);
     // 提供安全的降级方案
     try {
-      return dayjs(time).isValid() ? dayjs(time).format(format) : 'Invalid Date';
+      return dayjs(time).isValid() ? dayjs(time).format(format) : "Invalid Date";
     } catch (e) {
-        console.warn('Fallback format time failed:', e);
-        return 'Invalid Date';
+      console.warn("Fallback format time failed:", e);
+      return "Invalid Date";
     }
   }
 };

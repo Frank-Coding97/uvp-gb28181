@@ -117,7 +117,7 @@ func TestLoggingSinkFailureWindow(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	for i := 0; i < 100; i++ {
 		r.Root.Info("event")
 	}

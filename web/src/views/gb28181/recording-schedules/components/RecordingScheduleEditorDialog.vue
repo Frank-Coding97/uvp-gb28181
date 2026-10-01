@@ -15,7 +15,10 @@
     <template #title>
       <div class="schedule-editor-title">
         <span><CalendarClock :size="18" /></span>
-        <div><strong>{{ mode === "create" ? "新建录像计划" : "编辑录像计划" }}</strong><small>以半小时为最小粒度配置每周录像时段</small></div>
+        <div>
+          <strong>{{ mode === "create" ? "新建录像计划" : "编辑录像计划" }}</strong
+          ><small>以半小时为最小粒度配置每周录像时段</small>
+        </div>
       </div>
     </template>
 
@@ -26,7 +29,9 @@
             <a-input v-model="form.name" allow-clear placeholder="例如：工作日全天" :max-length="40" show-word-limit />
           </a-form-item>
           <a-form-item label="计划状态">
-            <div class="enabled-field"><a-switch v-model="form.enabled" /><span>{{ form.enabled ? "已启用" : "已停用" }}</span></div>
+            <div class="enabled-field">
+              <a-switch v-model="form.enabled" /><span>{{ form.enabled ? "已启用" : "已停用" }}</span>
+            </div>
           </a-form-item>
           <a-form-item label="计划说明">
             <a-input v-model="form.description" allow-clear placeholder="说明适用区域或业务场景" :max-length="120" />
@@ -43,7 +48,15 @@
           <div class="slot-editor-meta">
             <span><i />蓝色表示录像</span>
             <strong>已选择 {{ selectedSlotCount }} 格 · {{ selectedHours }} 小时</strong>
-            <a-button class="clear-all-button" size="small" type="primary" status="danger" :disabled="selectedSlotCount === 0" @click="clearAllDays">一键清空</a-button>
+            <a-button
+              class="clear-all-button"
+              size="small"
+              type="primary"
+              status="danger"
+              :disabled="selectedSlotCount === 0"
+              @click="clearAllDays"
+              >一键清空</a-button
+            >
           </div>
         </div>
 
@@ -52,14 +65,18 @@
         <div class="selected-period-summary">
           <div class="selected-period-summary-title">
             <Clock3 :size="15" />
-            <div><strong>已选时间区间</strong><small>{{ selectedPeriodGroups.length }} 天 · {{ selectedPeriodCount }} 段</small></div>
+            <div>
+              <strong>已选时间区间</strong><small>{{ selectedPeriodGroups.length }} 天 · {{ selectedPeriodCount }} 段</small>
+            </div>
           </div>
           <div v-if="selectedPeriodGroups.length === 0" class="selected-period-empty">暂未选择录像时段</div>
           <div v-else class="selected-period-groups">
             <div v-for="group in selectedPeriodGroups" :key="group.name" class="selected-period-group">
               <strong>{{ group.name }}</strong>
               <div>
-                <span v-for="period in group.periods" :key="`${period.start}-${period.end}`" class="selected-period-chip">{{ period.start }}–{{ period.end }}</span>
+                <span v-for="period in group.periods" :key="`${period.start}-${period.end}`" class="selected-period-chip"
+                  >{{ period.start }}–{{ period.end }}</span
+                >
               </div>
             </div>
           </div>
@@ -72,7 +89,9 @@
     <template #footer>
       <a-space>
         <a-button @click="close">取消</a-button>
-        <a-button type="primary" @click="save"><template #icon><Save :size="15" /></template>保存计划</a-button>
+        <a-button type="primary" @click="save"
+          ><template #icon><Save :size="15" /></template>保存计划</a-button
+        >
       </a-space>
     </template>
   </a-modal>
@@ -114,10 +133,12 @@ const form = reactive<RecordingSchedule>(emptyPlan());
 const weekSlots = reactive<boolean[][]>(dayNames.map(() => Array.from({ length: SLOTS_PER_DAY }, () => false)));
 
 const selectedSlotCount = computed(() => weekSlots.reduce((total, day) => total + day.filter(Boolean).length, 0));
-const selectedHours = computed(() => Number((selectedSlotCount.value * SLOT_MINUTES / 60).toFixed(1)));
-const selectedPeriodGroups = computed(() => dayNames
-  .map((name, dayIndex) => ({ name, periods: slotsToPeriods(weekSlots[dayIndex]) }))
-  .filter(group => group.periods.length > 0));
+const selectedHours = computed(() => Number(((selectedSlotCount.value * SLOT_MINUTES) / 60).toFixed(1)));
+const selectedPeriodGroups = computed(() =>
+  dayNames
+    .map((name, dayIndex) => ({ name, periods: slotsToPeriods(weekSlots[dayIndex]) }))
+    .filter(group => group.periods.length > 0)
+);
 const selectedPeriodCount = computed(() => selectedPeriodGroups.value.reduce((total, group) => total + group.periods.length, 0));
 
 function syncEditor() {
@@ -205,7 +226,6 @@ function slotToTime(slot: number) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-
 function cycleLabel(days: ScheduleDay[]) {
   const enabled = days.filter(day => day.enabled).map(day => day.name);
   if (enabled.length === 7) return "每天";
@@ -223,43 +243,205 @@ function timeSummary(days: ScheduleDay[]) {
   return first ? periodLabel(first) : "—";
 }
 
-watch(() => [props.visible, props.mode, props.plan] as const, ([visible]) => { if (visible) syncEditor(); }, { immediate: true, deep: true });
+watch(
+  () => [props.visible, props.mode, props.plan] as const,
+  ([visible]) => {
+    if (visible) syncEditor();
+  },
+  { immediate: true, deep: true }
+);
 </script>
 
 <style scoped lang="scss">
-.schedule-editor-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.schedule-editor-title > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); border-radius: 8px; place-items: center; }
-.schedule-editor-title > div { display: flex; min-width: 0; flex-direction: column; }
-.schedule-editor-title strong { font-size: 15px; }
-.schedule-editor-title small { color: var(--uvp-text-tertiary); font-size: 12px; }
-.schedule-editor-content { color: var(--uvp-text-primary); }
-.basic-form-grid { display: grid; grid-template-columns: minmax(260px, 1fr) 150px minmax(300px, 1.35fr); gap: 14px; }
-.schedule-editor-form :deep(.arco-form-item) { margin-bottom: 12px; }
-.schedule-editor-form :deep(.arco-input-wrapper) { min-height: 38px; border-radius: 8px; }
-.enabled-field { display: flex; min-height: 38px; align-items: center; gap: 8px; color: var(--uvp-text-secondary); }
-.slot-editor-section { padding-top: 14px; border-top: 1px solid var(--uvp-border-subtle); }
-.slot-editor-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.slot-editor-heading h3 { margin: 0; font-size: 14px; }
-.slot-editor-heading p { margin: 4px 0 0; color: var(--uvp-text-tertiary); font-size: 12px; }
-.slot-editor-meta { display: flex; align-items: center; gap: 14px; color: var(--uvp-text-secondary); font-size: 12px; white-space: nowrap; }
-.slot-editor-meta span { display: inline-flex; align-items: center; gap: 5px; }
-.slot-editor-meta i { width: 12px; height: 12px; background: var(--uvp-brand); border-radius: 3px; }
-.slot-editor-meta strong { color: var(--uvp-brand-strong); }
-.selected-period-summary { display: grid; height: 148px; box-sizing: border-box; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; margin-top: 12px; overflow: hidden; padding: 12px 14px; background: var(--uvp-table-header-bg); border: 1px solid var(--color-border-2); border-radius: 8px; }
-.selected-period-summary-title { display: flex; align-items: flex-start; gap: 7px; color: var(--uvp-text-primary); font-size: 12px; line-height: 24px; }
-.selected-period-summary-title > div { display: flex; flex-direction: column; line-height: 18px; }
-.selected-period-summary-title small { margin-top: 2px; color: var(--uvp-text-tertiary); font-size: 11px; font-weight: 400; }
-.selected-period-empty { color: var(--uvp-text-tertiary); font-size: 12px; line-height: 24px; }
-.selected-period-groups { display: flex; min-width: 0; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; }
-.selected-period-group { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 8px; }
-.selected-period-group > strong { color: var(--uvp-text-secondary); font-size: 12px; line-height: 24px; }
-.selected-period-group > div { display: flex; flex-wrap: wrap; gap: 6px; }
-.selected-period-chip { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); border: 1px solid color-mix(in srgb, var(--uvp-brand) 28%, transparent); border-radius: 6px; font-size: 11px; font-variant-numeric: tabular-nums; }
-.slot-scale-hint { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--uvp-text-tertiary); font-size: 12px; }
-@media (max-width: 820px) {
-  .basic-form-grid { grid-template-columns: 1fr; gap: 0; }
-  .slot-editor-heading { align-items: flex-start; flex-direction: column; }
-  .slot-editor-meta { flex-wrap: wrap; white-space: normal; }
-  .selected-period-summary { grid-template-columns: 1fr; }
+.schedule-editor-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.schedule-editor-title > span {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+  border-radius: 8px;
+}
+.schedule-editor-title > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.schedule-editor-title strong {
+  font-size: 15px;
+}
+.schedule-editor-title small {
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+}
+.schedule-editor-content {
+  color: var(--uvp-text-primary);
+}
+.basic-form-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 150px minmax(300px, 1.35fr);
+  gap: 14px;
+}
+.schedule-editor-form :deep(.arco-form-item) {
+  margin-bottom: 12px;
+}
+.schedule-editor-form :deep(.arco-input-wrapper) {
+  min-height: 38px;
+  border-radius: 8px;
+}
+.enabled-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  color: var(--uvp-text-secondary);
+}
+.slot-editor-section {
+  padding-top: 14px;
+  border-top: 1px solid var(--uvp-border-subtle);
+}
+.slot-editor-heading {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.slot-editor-heading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.slot-editor-heading p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+}
+.slot-editor-meta {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+  white-space: nowrap;
+}
+.slot-editor-meta span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.slot-editor-meta i {
+  width: 12px;
+  height: 12px;
+  background: var(--uvp-brand);
+  border-radius: 3px;
+}
+.slot-editor-meta strong {
+  color: var(--uvp-brand-strong);
+}
+.selected-period-summary {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  height: 148px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  overflow: hidden;
+  background: var(--uvp-table-header-bg);
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+}
+.selected-period-summary-title {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 24px;
+  color: var(--uvp-text-primary);
+}
+.selected-period-summary-title > div {
+  display: flex;
+  flex-direction: column;
+  line-height: 18px;
+}
+.selected-period-summary-title small {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--uvp-text-tertiary);
+}
+.selected-period-empty {
+  font-size: 12px;
+  line-height: 24px;
+  color: var(--uvp-text-tertiary);
+}
+.selected-period-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+.selected-period-group {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.selected-period-group > strong {
+  font-size: 12px;
+  line-height: 24px;
+  color: var(--uvp-text-secondary);
+}
+.selected-period-group > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.selected-period-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--uvp-brand) 28%, transparent);
+  border-radius: 6px;
+}
+.slot-scale-hint {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+}
+
+@media (width <= 820px) {
+  .basic-form-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .slot-editor-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .slot-editor-meta {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+  .selected-period-summary {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

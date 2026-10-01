@@ -19,9 +19,3 @@ func sipPairKey(req *sip.Request) (string, string) {
 	}
 	return callID, cseq
 }
-
-// sipPairKeyFromBody Catalog Response 类场景 — Request 本身就是 MESSAGE,
-// 也用 (CallID, CSeq) 作为 metrics 配对 key
-func sipPairKeyFromMessage(req *sip.Request) (string, string) {
-	return sipPairKey(req)
-}

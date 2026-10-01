@@ -295,6 +295,7 @@ const {
             <a-slider v-model="precisePan" :min="0" :max="360" :step="0.1" :show-tooltip="false" aria-label="Pan 水平角" />
             <a-input
               v-model.number="precisePan"
+              allow-clear
               type="number"
               min="0"
               max="360"
@@ -312,6 +313,7 @@ const {
             <a-slider v-model="preciseTilt" :min="-90" :max="90" :step="0.1" :show-tooltip="false" aria-label="Tilt 俯仰角" />
             <a-input
               v-model.number="preciseTilt"
+              allow-clear
               type="number"
               min="-90"
               max="90"
@@ -329,6 +331,7 @@ const {
             <a-slider v-model="preciseZoom" :min="1" :max="32" :step="0.1" :show-tooltip="false" aria-label="Zoom 变倍" />
             <a-input
               v-model.number="preciseZoom"
+              allow-clear
               type="number"
               min="1"
               max="32"

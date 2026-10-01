@@ -155,7 +155,7 @@ describe("runtime monitor components", () => {
   it("does not override the metric icon centering display", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/components/TrafficTrend.vue"), "utf8");
     expect(source).not.toContain(".metric-card span, .metric-card small");
-    expect(source).toContain(".metric-card > div > span, .metric-card small");
+    expect(source.replace(/\s+/g, " ")).toContain(".metric-card > div > span, .metric-card small");
   });
 
   it("switches to real hourly buckets and opens the paged ledger from a bar", async () => {

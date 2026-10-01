@@ -376,10 +376,10 @@ func activeRetiredCoreScopes(active *catalogstore.ReleaseSnapshot) []string {
 }
 
 func publishedScopeSet(active *catalogstore.ReleaseSnapshot) map[string]struct{} {
-	published := make(map[string]struct{}, len(active.Items))
 	if active == nil {
-		return published
+		return make(map[string]struct{})
 	}
+	published := make(map[string]struct{}, len(active.Items))
 	for _, item := range active.Items {
 		if scope := strings.TrimSpace(item.Scope); scope != "" {
 			published[scope] = struct{}{}

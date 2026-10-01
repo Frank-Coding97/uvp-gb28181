@@ -1,8 +1,4 @@
-import type {
-  ZLMCapabilityState,
-  ZLMFFmpegSourceCreateRequest,
-  ZLMFFmpegURLView
-} from "@/api/gb28181-zlm-ingress";
+import type { ZLMCapabilityState, ZLMFFmpegSourceCreateRequest, ZLMFFmpegURLView } from "@/api/gb28181-zlm-ingress";
 
 export interface FFmpegSourceFormState {
   templateKey: string;

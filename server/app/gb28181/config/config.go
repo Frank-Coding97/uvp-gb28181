@@ -653,7 +653,7 @@ func (c MediaConfig) EffectiveHookBaseURL() (*url.URL, error) {
 		raw = "http://" + net.JoinHostPort(host, strconv.Itoa(c.HookPort)) + "/index/hook"
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed == nil || parsed.IsAbs() == false || parsed.Host == "" || parsed.Opaque != "" {
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
 		return nil, errors.New("ZLM Hook 回调基址无效")
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)

@@ -2,7 +2,6 @@ package security
 
 import (
 	"errors"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -330,11 +329,4 @@ func (s *Scorer) TrustedEndpoint(deviceID string) (Endpoint, bool) {
 		return Endpoint{}, false
 	}
 	return e, ok
-}
-
-func endpointIP(address string) string {
-	if host, _, err := net.SplitHostPort(address); err == nil {
-		return host
-	}
-	return address
 }

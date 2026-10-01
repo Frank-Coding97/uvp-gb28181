@@ -62,17 +62,17 @@ const strength = computed(() => (props.evaluate ?? evaluatePasswordStrength)(pro
 
 .s-password-strength {
   display: flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
   margin-top: 6px;
 }
 
 .s-password-strength__bars {
   display: grid;
   flex: 1;
-  max-width: 200px;
   grid-template-columns: repeat(3, 1fr);
   gap: 4px;
+  max-width: 200px;
 }
 
 .s-password-strength__bars span {
@@ -95,9 +95,9 @@ const strength = computed(() => (props.evaluate ?? evaluatePasswordStrength)(pro
 }
 
 .s-password-strength__label {
-  color: var(--color-text-2, #4e5969);
   font-size: 12px;
   font-weight: 600;
+  color: var(--color-text-2, #4e5969);
 }
 
 .s-password-strength--l1 .s-password-strength__label {

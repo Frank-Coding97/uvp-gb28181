@@ -83,9 +83,9 @@ func TestDeviceSIPInventoryCommitUnknownReturnsNoMaterial(t *testing.T) {
 func TestDeviceSIPInventoryByteLimitRetainsFaultAndOldFacts(t *testing.T) {
 	_, store, id := sipCleanupFixture(t)
 	ctx := context.Background()
-	out, err := store.PrepareSIPBranchCleanup(ctx, id, 5, sipCleanupIdentity(1))
+	_, err := store.PrepareSIPBranchCleanup(ctx, id, 5, sipCleanupIdentity(1))
 	require.NoError(t, err)
-	out, err = store.ObserveSIPCleanupQuiesced(ctx, id, 6, sipCleanupIdentity(1).AttemptID)
+	out, err := store.ObserveSIPCleanupQuiesced(ctx, id, 6, sipCleanupIdentity(1).AttemptID)
 	require.NoError(t, err)
 	selected := out.Steps[0].KnownBranch
 	for n := 1; n < maxSIPObservedBranches; n++ {
@@ -136,12 +136,13 @@ func TestDeviceSIPInventorySelectedINFOSequenceDoesNotLeakToExtra(t *testing.T) 
 	_, store, id := sipINFOFixture(t)
 	ctx := context.Background()
 	i := sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"})
-	out, err := store.PrepareSIPINFO(ctx, id, 6, i)
+	_, err := store.PrepareSIPINFO(ctx, id, 6, i)
 	require.NoError(t, err)
-	out, err = store.ObserveSIPINFOQuiesced(ctx, id, 7, i.InfoID)
+	_, err = store.ObserveSIPINFOQuiesced(ctx, id, 7, i.InfoID)
 	require.NoError(t, err)
-	out, err = store.ObserveSIPAdditionalBranch(ctx, id, 8, sipExtraBranch(1))
+	_, err = store.ObserveSIPAdditionalBranch(ctx, id, 8, sipExtraBranch(1))
 	require.NoError(t, err)
+	var out DeviceSIPInviteSteps
 	out, err = store.PrepareSIPBranchCleanup(ctx, id, 9, sipExtraCleanup(1))
 	require.NoError(t, err)
 	require.Equal(t, i.Request.Request.CSeq, out.Steps[0].AdditionalBranches[0].CleanupAttempts[0].Identity.BYE.Request.CSeq)

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -109,7 +110,7 @@ func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.Chunk
 }
 
 // SaveChunk 保存单个分片（文件I/O + 数据库记录）
-func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUploadRequest, userID uint) error {
+func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUploadRequest, userID uint) (retErr error) {
 	// 验证单个分片大小
 	if err := s.ValidateChunkSize(req.File.Size); err != nil {
 		return err
@@ -131,13 +132,21 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 	if err != nil {
 		return fmt.Errorf("打开分片文件失败: %v", err)
 	}
-	defer src.Close()
+	defer func() {
+		if closeErr := src.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("关闭分片源文件失败: %v", closeErr)
+		}
+	}()
 
 	dst, err := os.Create(chunkPath)
 	if err != nil {
 		return fmt.Errorf("创建分片文件失败: %v", err)
 	}
-	defer dst.Close()
+	defer func() {
+		if closeErr := dst.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("关闭分片目标文件失败: %v", closeErr)
+		}
+	}()
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("保存分片文件失败: %v", err)
@@ -181,7 +190,7 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 }
 
 // MergeChunks 合并分片（文件合并 + 大小校验 + 附件记录 + 清理）
-func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMergeRequest, userID uint) (*models.SysAffix, error) {
+func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMergeRequest, userID uint) (affix *models.SysAffix, retErr error) {
 	// 验证分片上传的文件类型
 	if err := s.ValidateChunkFile(req.FileName, req.FileSize); err != nil {
 		return nil, err
@@ -219,13 +228,24 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 
 	// 最终文件路径
 	finalPath := filepath.Join(destDir, newFileName)
+	removeFinal := func() {
+		if removeErr := os.Remove(finalPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			app.Log(ctx).Warn("清理合并失败的最终文件失败", zap.String("event", "sysaffix.chunk_merge_final_cleanup_failed"),
+				zap.String("path", finalPath), logging.Error(removeErr))
+		}
+	}
 
 	// 合并分片文件
 	finalFile, err := os.Create(finalPath)
 	if err != nil {
 		return nil, fmt.Errorf("创建最终文件失败: %v", err)
 	}
-	defer finalFile.Close()
+	defer func() {
+		if closeErr := finalFile.Close(); closeErr != nil && retErr == nil {
+			affix = nil
+			retErr = fmt.Errorf("关闭最终文件失败: %v", closeErr)
+		}
+	}()
 
 	tmpDir := filepath.Join(localPath, "tmp", req.UploadId)
 	var totalSize int64 = 0
@@ -234,22 +254,26 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 		chunkFilePath := filepath.Join(tmpDir, fmt.Sprintf("chunk_%d", chunk.ChunkIndex))
 		chunkFile, err := os.Open(chunkFilePath)
 		if err != nil {
-			os.Remove(finalPath)
+			removeFinal()
 			return nil, fmt.Errorf("打开分片 %d 失败: %v", chunk.ChunkIndex, err)
 		}
 
-		written, err := io.Copy(finalFile, chunkFile)
-		chunkFile.Close()
-		if err != nil {
-			os.Remove(finalPath)
-			return nil, fmt.Errorf("合并分片 %d 失败: %v", chunk.ChunkIndex, err)
+		written, copyErr := io.Copy(finalFile, chunkFile)
+		closeErr := chunkFile.Close()
+		if copyErr != nil {
+			removeFinal()
+			return nil, fmt.Errorf("合并分片 %d 失败: %v", chunk.ChunkIndex, copyErr)
+		}
+		if closeErr != nil {
+			removeFinal()
+			return nil, fmt.Errorf("关闭分片 %d 失败: %v", chunk.ChunkIndex, closeErr)
 		}
 		totalSize += written
 	}
 
 	// 验证合并后文件总大小与声明大小是否一致
 	if req.FileSize > 0 && totalSize != req.FileSize {
-		os.Remove(finalPath)
+		removeFinal()
 		return nil, fmt.Errorf("文件大小不一致，声明 %d 字节，实际 %d 字节", req.FileSize, totalSize)
 	}
 
@@ -261,7 +285,7 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 	}
 
 	// 创建附件记录
-	affix := models.NewSysAffix()
+	affix = models.NewSysAffix()
 	affix.Name = req.FileName
 	affix.Path = finalPath
 	affix.Url = fileUrl
@@ -272,17 +296,25 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 	affix.CreatedBy = userID
 
 	if err := affix.Create(ctx); err != nil {
-		os.Remove(finalPath)
+		removeFinal()
 		return nil, fmt.Errorf("保存文件记录失败: %v", err)
 	}
 
 	// 更新分片记录状态为已合并
-	models.UpdateChunkStatus(ctx, req.UploadId, 1)
+	if err := models.UpdateChunkStatus(ctx, req.UploadId, 1); err != nil {
+		return affix, fmt.Errorf("更新分片状态失败: %v", err)
+	}
 
 	// 异步清理临时分片文件
 	go func() {
-		os.RemoveAll(tmpDir)
-		models.DeleteChunksByUploadId(ctx, req.UploadId)
+		if err := os.RemoveAll(tmpDir); err != nil {
+			app.Log(ctx).Warn("清理临时分片目录失败", zap.String("event", "sysaffix.chunk_merge_cleanup_failed"),
+				zap.String("upload_id", req.UploadId), logging.Error(err))
+		}
+		if err := models.DeleteChunksByUploadId(ctx, req.UploadId); err != nil {
+			app.Log(ctx).Warn("删除已合并分片记录失败", zap.String("event", "sysaffix.chunk_merge_records_cleanup_failed"),
+				zap.String("upload_id", req.UploadId), logging.Error(err))
+		}
 	}()
 
 	return affix, nil
@@ -296,17 +328,23 @@ func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string
 
 	// 删除临时分片目录
 	tmpDir := filepath.Join(localPath, "tmp", uploadId)
+	var resultErr error
 	if err := os.RemoveAll(tmpDir); err != nil {
+		resultErr = errors.Join(resultErr, err)
 		app.Log(ctx).Warn("清理临时分片目录失败", zap.String("event", "sysaffix.chunk_upload_cancel_failed"),
 			zap.String("upload_id", uploadId),
 			logging.Error(err))
 	}
 
 	// 更新分片记录状态为已取消
-	models.UpdateChunkStatus(ctx, uploadId, 2)
+	if err := models.UpdateChunkStatus(ctx, uploadId, 2); err != nil {
+		resultErr = errors.Join(resultErr, err)
+	}
 
 	// 删除分片记录
-	models.DeleteChunksByUploadId(ctx, uploadId)
+	if err := models.DeleteChunksByUploadId(ctx, uploadId); err != nil {
+		resultErr = errors.Join(resultErr, err)
+	}
 
-	return nil
+	return resultErr
 }

@@ -17,7 +17,7 @@ const views = [
   { key: "sessions", label: "网络会话", description: "网络连接与资源归属" },
   { key: "viewers", label: "媒体观看者", description: "媒体流观看连接" }
 ];
-const nodeId = computed(() => typeof workspace.scope.value === "number" ? workspace.scope.value : null);
+const nodeId = computed(() => (typeof workspace.scope.value === "number" ? workspace.scope.value : null));
 
 function refreshActivePanel() {
   if (workspace.activeView.value === "streams") streamPanel.value?.refresh();
@@ -28,34 +28,60 @@ function refreshAll() {
   void workspace.refreshScope();
   refreshActivePanel();
 }
-
 </script>
 
 <template>
   <MediaWorkspaceShell
-    :title="workspace.definition.title" description="按节点范围巡检在线媒体与网络会话，定位异常并安全处置。"
-    :views="views.filter(view => workspace.allowedViews.value.includes(view.key))" :active-view="workspace.activeView.value"
-    :scope="workspace.scope.value" :nodes="workspace.nodes.value" :status="workspace.status.value"
-    :status-text="workspace.statusText.value" :last-success-at="workspace.lastSuccessAt.value"
-    :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
+    :title="workspace.definition.title"
+    description="按节点范围巡检在线媒体与网络会话，定位异常并安全处置。"
+    :views="views.filter(view => workspace.allowedViews.value.includes(view.key))"
+    :active-view="workspace.activeView.value"
+    :scope="workspace.scope.value"
+    :nodes="workspace.nodes.value"
+    :status="workspace.status.value"
+    :status-text="workspace.statusText.value"
+    :last-success-at="workspace.lastSuccessAt.value"
+    :auto-refresh="workspace.autoRefresh.value"
+    :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
-    :allow-all="false" :requires-node="true" :show-scope="false"
-    @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
-    @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="refreshAll" @refresh-scope="workspace.refreshScope"
+    :allow-all="false"
+    :requires-node="true"
+    :show-scope="false"
+    @update:active-view="workspace.setActiveView"
+    @update:scope="workspace.setScope"
+    @update:auto-refresh="workspace.autoRefresh.value = $event"
+    @refresh="refreshAll"
+    @refresh-scope="workspace.refreshScope"
   >
     <template #content>
       <section v-show="workspace.activeView.value === 'streams'" class="media-monitoring-view" data-panel-view="streams">
-        <StreamPanel ref="streamPanel" :active="workspace.activeView.value === 'streams'" :scope="workspace.scope.value" :node-id="nodeId" :initial-query="route.query">
+        <StreamPanel
+          ref="streamPanel"
+          :active="workspace.activeView.value === 'streams'"
+          :scope="workspace.scope.value"
+          :node-id="nodeId"
+          :initial-query="route.query"
+        >
           <template #scope>
             <MediaScopeBar
-              compact :model-value="workspace.scope.value" :nodes="workspace.nodes.value" :allow-all="false" :requires-node="true"
-              :loading="workspace.scopeLoading.value" :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''" :show-refresh="false"
+              compact
+              :model-value="workspace.scope.value"
+              :nodes="workspace.nodes.value"
+              :allow-all="false"
+              :requires-node="true"
+              :loading="workspace.scopeLoading.value"
+              :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''"
+              :show-refresh="false"
               @update:model-value="workspace.setScope"
             />
           </template>
         </StreamPanel>
       </section>
-      <section v-show="['sessions', 'viewers'].includes(workspace.activeView.value)" class="media-monitoring-view" :data-panel-view="workspace.activeView.value">
+      <section
+        v-show="['sessions', 'viewers'].includes(workspace.activeView.value)"
+        class="media-monitoring-view"
+        :data-panel-view="workspace.activeView.value"
+      >
         <NetworkSessionPanel
           ref="sessionPanel"
           :active="['sessions', 'viewers'].includes(workspace.activeView.value)"
@@ -66,8 +92,14 @@ function refreshAll() {
         >
           <template #scope>
             <MediaScopeBar
-              compact :model-value="workspace.scope.value" :nodes="workspace.nodes.value" :allow-all="false" :requires-node="true"
-              :loading="workspace.scopeLoading.value" :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''" :show-refresh="false"
+              compact
+              :model-value="workspace.scope.value"
+              :nodes="workspace.nodes.value"
+              :allow-all="false"
+              :requires-node="true"
+              :loading="workspace.scopeLoading.value"
+              :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''"
+              :show-refresh="false"
               @update:model-value="workspace.setScope"
             />
           </template>
@@ -78,5 +110,9 @@ function refreshAll() {
 </template>
 
 <style scoped>
-.media-monitoring-view { box-sizing: border-box; width: 100%; min-height: 100%; }
+.media-monitoring-view {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+}
 </style>

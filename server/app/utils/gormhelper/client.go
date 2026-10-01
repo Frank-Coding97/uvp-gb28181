@@ -84,7 +84,9 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 		}
 	}
 
-	installLogContext(gormDb)
+	if err := installLogContext(gormDb); err != nil {
+		return nil, err
+	}
 
 	// 查询没有数据，屏蔽 gorm v2 包中会爆出的错误
 	// https://github.com/go-gorm/gorm/issues/3789  此 issue 所反映的问题就是我们本次解决掉的

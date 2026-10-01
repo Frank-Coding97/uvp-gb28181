@@ -8,6 +8,7 @@ import (
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
+	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -64,7 +65,7 @@ func TestServerDualStackListen(t *testing.T) {
 	if err != nil {
 		t.Errorf("UDP 15060 拨号失败: %v", err)
 	} else {
-		udpConn.Close()
+		require.NoError(t, udpConn.Close())
 	}
 
 	// TCP:15060 可建连
@@ -72,7 +73,7 @@ func TestServerDualStackListen(t *testing.T) {
 	if err != nil {
 		t.Errorf("TCP 15060 建连失败(TCP 监听未起): %v", err)
 	} else {
-		tcpConn.Close()
+		require.NoError(t, tcpConn.Close())
 	}
 }
 
@@ -101,10 +102,10 @@ func TestServerReceiveRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient 失败: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:34020000002000000001@127.0.0.1:15060", &recipient)
+	require.NoError(t, sip.ParseUri("sip:34020000002000000001@127.0.0.1:15060", &recipient))
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.AppendHeader(sip.NewHeader("Contact", "<sip:34020000001320000001@127.0.0.1>"))
 	req.SetTransport("UDP")
@@ -154,7 +155,7 @@ func TestServerGracefulShutdown(t *testing.T) {
 	// 关闭后 TCP 应拒绝连接
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:15060", 500*time.Millisecond)
 	if err == nil {
-		conn.Close()
+		require.NoError(t, conn.Close())
 		t.Errorf("Shutdown 后 TCP 15060 仍可连接(端口未释放)")
 	}
 }

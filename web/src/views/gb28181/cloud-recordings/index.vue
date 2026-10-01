@@ -12,5 +12,11 @@ import RecordingWorkspacePanel from "./RecordingWorkspacePanel.vue";
 
 <style scoped>
 .cloud-recordings-route,
-.cloud-recordings-route__inner { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.cloud-recordings-route__inner {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
 </style>

@@ -26,6 +26,6 @@ describe("MiniTrend", () => {
   });
 
   it("keeps the chart beside the KPI value and clear of the description", () => {
-    expect(source).toContain("bottom:44px");
+    expect(source).toMatch(/\.mini-trend\s*\{[^}]*bottom:\s*44px;/s);
   });
 });

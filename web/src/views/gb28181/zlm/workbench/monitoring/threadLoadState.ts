@@ -51,9 +51,7 @@ export function eventThreadLoadCSSPercent(load: number): string {
   return `${normalizedLoad(load)}%`;
 }
 
-export function eventThreadLoadDistribution(
-  loads: readonly ZLMThreadLoad[]
-): EventThreadLoadDistributionBucket[] {
+export function eventThreadLoadDistribution(loads: readonly ZLMThreadLoad[]): EventThreadLoadDistributionBucket[] {
   const total = loads.length;
   const count = (tone: EventThreadTone) => loads.filter(thread => eventThreadTone(thread.load) === tone).length;
   const buckets: Array<Omit<EventThreadLoadDistributionBucket, "ratio">> = [
@@ -63,14 +61,11 @@ export function eventThreadLoadDistribution(
   ];
   return buckets.map(bucket => ({
     ...bucket,
-    ratio: total === 0 ? 0 : Math.round(bucket.count * 100 / total)
+    ratio: total === 0 ? 0 : Math.round((bucket.count * 100) / total)
   }));
 }
 
-export function busiestEventThreads(
-  loads: readonly ZLMThreadLoad[],
-  limit = 5
-): ZLMThreadLoad[] {
+export function busiestEventThreads(loads: readonly ZLMThreadLoad[], limit = 5): ZLMThreadLoad[] {
   return [...loads]
     .sort((left, right) => normalizedLoad(right.load) - normalizedLoad(left.load))
     .slice(0, Math.max(0, Math.floor(limit)));

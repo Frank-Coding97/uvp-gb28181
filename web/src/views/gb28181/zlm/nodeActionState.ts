@@ -22,11 +22,13 @@ export function nodeActionCopy(action: NodeDangerAction, nodeName: string) {
 
 export function isNodeImpactPreflight(value: unknown, nodeId: number, action: NodeImpactAction): value is ZLMNodeImpactPreflight {
   const candidate = value as Partial<ZLMNodeImpactPreflight> | null;
-  return candidate?.nodeId === nodeId
-    && candidate.action === action
-    && typeof candidate.fingerprint === "string"
-    && candidate.fingerprint.trim().length > 0
-    && typeof candidate.impact === "object";
+  return (
+    candidate?.nodeId === nodeId &&
+    candidate.action === action &&
+    typeof candidate.fingerprint === "string" &&
+    candidate.fingerprint.trim().length > 0 &&
+    typeof candidate.impact === "object"
+  );
 }
 
 export function nodeImpactItems(preflight: NodeImpactPreflightLike) {

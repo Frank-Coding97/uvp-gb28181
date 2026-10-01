@@ -331,7 +331,7 @@ func (h *RTPRecoveryWork) closeCall(ctx context.Context, action string, call fun
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	c := w.recovery.CurrentCall
 	c.LocalQuiescedAt = &now
-	if callErr == nil && validRTPCloseResult(result, action == rtpCleanupIngress) && !(result == "rtp_ingress_drained" && w.identity.TCPMode != 0) {
+	if callErr == nil && validRTPCloseResult(result, action == rtpCleanupIngress) && (result != "rtp_ingress_drained" || w.identity.TCPMode == 0) {
 		c.Outcome = rtpCallObserved
 		c.Result = result
 		c.ResultObservedAt = &now

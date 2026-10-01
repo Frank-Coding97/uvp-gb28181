@@ -10,48 +10,48 @@
 
 /* simple 容器 */
 .arco-modal-simple {
-  border-radius: 14px !important;
+  padding: 20px 24px !important;
   background: var(--uvp-dialog-bg) !important;
+  border-radius: 14px !important;
   box-shadow:
     0 14px 36px -14px rgb(15 23 42 / 22%),
     0 4px 10px -4px rgb(15 23 42 / 10%),
     inset 0 1px 2px rgb(15 23 42 / 4%) !important;
-  padding: 20px 24px 20px !important;
 }
 
 /* simple 内容区 */
 .arco-modal-simple .arco-modal-body {
   padding: 0 0 16px !important;
-  background: transparent !important;
-  color: var(--uvp-text-secondary);
   font-size: 14px;
   line-height: 22px;
+  color: var(--uvp-text-secondary);
   letter-spacing: 0.1px;
+  background: transparent !important;
 }
 
 /* simple title */
 .arco-modal-simple .arco-modal-title {
   padding-bottom: 12px;
   margin-bottom: 16px;
-  border-bottom: 1px solid rgb(15 23 42 / 6%);
-  color: var(--uvp-text-primary);
   font-size: 16px;
   font-weight: 680;
   line-height: 24px;
+  color: var(--uvp-text-primary);
   letter-spacing: 0;
+  border-bottom: 1px solid rgb(15 23 42 / 6%);
 }
 
 /* simple 图标 */
 .arco-modal-simple .arco-modal-icon {
-  width: 32px;
-  height: 32px;
-  font-size: 16px;
-  margin-top: 0;
-  margin-right: 12px;
-  flex-shrink: 0;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-top: 0;
+  margin-right: 12px;
+  font-size: 16px;
   border-radius: 50%;
 }
 .arco-modal-simple .arco-modal-icon-info {
@@ -87,15 +87,15 @@
   min-width: 88px;
   min-height: 36px;
   padding: 0 16px;
-  border-radius: 8px !important;
   font-size: 13px;
   font-weight: 600;
+  border-radius: 8px !important;
   transition: all 0.2s ease;
 }
 
 /* 主按钮 */
 .arco-modal-simple .arco-modal-footer .arco-btn-primary {
-  color: #fff;
+  color: #ffffff;
   background: var(--uvp-brand) !important;
   border: 0 !important;
   box-shadow: 0 2px 4px -2px rgb(37 99 235 / 28%);
@@ -111,7 +111,7 @@
   box-shadow: 0 2px 4px -2px rgb(209 67 67 / 28%);
 }
 .arco-modal-simple .arco-modal-footer .arco-btn-primary[status="danger"]:hover {
-  background: color-mix(in srgb, var(--uvp-danger) 90%, #000) !important;
+  background: color-mix(in srgb, var(--uvp-danger) 90%, #000000) !important;
   box-shadow: 0 4px 8px -2px rgb(209 67 67 / 36%);
 }
 

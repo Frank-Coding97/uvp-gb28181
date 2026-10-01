@@ -345,16 +345,15 @@
             </a-switch>
           </a-form-item>
           <a-form-item field="sort" label="排序" validate-trigger="blur">
-            <a-input-number
+            <s-number-field
+              ref="sortField"
               v-model="addFrom.sort"
-              :step="1"
-              :precision="0"
               :min="0"
               :max="9999"
               :style="{ width: '120px' }"
               placeholder="请输入"
-              mode="button"
               class="input-demo"
+              required
             />
           </a-form-item>
         </a-form>
@@ -379,6 +378,7 @@ import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { deepClone, getPascalCase } from "@/utils";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { Modal } from "@arco-design/web-vue";
+import SNumberField from "@/components/s-number-field/index.vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -511,6 +511,8 @@ const addFrom = ref<any>({
 
 const title = ref("");
 const formRef = ref();
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const sortField = ref<NumberFieldInstance | null>(null);
 
 // 新增菜单
 const onAdd = () => {
@@ -519,6 +521,11 @@ const onAdd = () => {
   open.value = true;
 };
 const handleOk = async () => {
+  const numberFieldError = sortField.value?.error;
+  if (numberFieldError) {
+    arcoMessage("error", numberFieldError);
+    return false;
+  }
   let state = await formRef.value.validate();
   if (state) return false;
   //console.log("addFrom.value", addFrom.value);

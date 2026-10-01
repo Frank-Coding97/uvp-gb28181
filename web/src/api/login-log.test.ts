@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/utils/http", () => ({ http: { request } }));
 
-import { clearLoginLogsAPI, deleteLoginLogsAPI, getLoginLogDetailAPI, getLoginLogsAPI, unlockLoginLogAccountAPI } from "./login-log";
+import {
+  clearLoginLogsAPI,
+  deleteLoginLogsAPI,
+  getLoginLogDetailAPI,
+  getLoginLogsAPI,
+  unlockLoginLogAccountAPI
+} from "./login-log";
 import { baseUrlApi } from "./utils";
 
 describe("login log API", () => {

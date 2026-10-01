@@ -396,7 +396,7 @@ describe("PlaybackSourceTree", () => {
     expect(source).toMatch(/\.favorite-remove\s*\{[^}]*width:\s*20px;[^}]*margin-right:\s*0;/s);
     expect(source).toContain("<a-popconfirm");
     expect(source).not.toContain("window.confirm");
-    expect(source).toContain('<a-select id="favorite-group-select"');
+    expect(source.replace(/\s+/g, " ")).toContain('<a-select id="favorite-group-select"');
     expect(source).not.toContain('<select id="favorite-group-select"');
   });
 

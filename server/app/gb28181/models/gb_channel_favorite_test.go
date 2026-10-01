@@ -20,11 +20,12 @@ func TestChannelFavoriteModelsConstraints(t *testing.T) {
 	require.NoError(t, db.Create(&item).Error)
 	require.Error(t, db.Create(&GbChannelFavoriteItem{GroupID: group.ID, DeviceCode: "D1", ChannelCode: "C1"}).Error)
 	for _, index := range []string{"uk_gb_channel_favorite_group_owner_name", "idx_gb_channel_favorite_group_owner", "uk_gb_channel_favorite_item_code", "idx_gb_channel_favorite_item_group"} {
-		if index == "idx_gb_channel_favorite_group_owner" {
+		switch index {
+		case "idx_gb_channel_favorite_group_owner":
 			require.True(t, db.Migrator().HasIndex(&GbChannelFavoriteGroup{}, index))
-		} else if index == "uk_gb_channel_favorite_group_owner_name" {
+		case "uk_gb_channel_favorite_group_owner_name":
 			require.True(t, db.Migrator().HasIndex(&GbChannelFavoriteGroup{}, index))
-		} else {
+		default:
 			require.True(t, db.Migrator().HasIndex(&GbChannelFavoriteItem{}, index))
 		}
 	}

@@ -299,7 +299,8 @@ func snapshotDigest(snapshot Snapshot) string {
 		snapshot.MetadataDigest, snapshot.ExpiresAt.UTC().Format(time.RFC3339Nano), recordDigest(snapshot.Record),
 	}
 	for _, field := range fields {
-		fmt.Fprintf(hash, "%d:%s\x00", len(field), field)
+		// hash.Hash.Write 的实现约定总是返回 nil；这里仅写入摘要材料。
+		_, _ = fmt.Fprintf(hash, "%d:%s\x00", len(field), field)
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }

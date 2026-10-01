@@ -55,7 +55,7 @@ func (c *faultConn) PrepareContext(ctx context.Context, query string) (driver.St
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return c.Conn.Prepare(query)
+	return c.Prepare(query)
 }
 func (c *faultConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	if e, ok := c.Conn.(driver.ExecerContext); ok {

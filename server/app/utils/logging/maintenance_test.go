@@ -34,7 +34,7 @@ func TestLoggingRepeatSharedMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	deadline := time.Now().Add(time.Second)
 	for sink.maintained.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)

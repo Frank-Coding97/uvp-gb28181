@@ -40,7 +40,9 @@ func TestPTZRecoveryOriginalProcess(t *testing.T) {
 	// expiry. Only genuine process retirement can authorize reconciliation.
 	_, err = store.ClaimPTZAttempt(context.Background(), id, op.ID, 0, time.Now().Add(time.Hour))
 	require.NoError(t, err)
-	fmt.Fprintln(os.Stdout, "PTZ_READY")
+	if _, err := fmt.Fprintln(os.Stdout, "PTZ_READY"); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 

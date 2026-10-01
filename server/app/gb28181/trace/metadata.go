@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/emiago/sipgo/sip"
@@ -71,7 +70,7 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 			metadata.DeviceID = to.Address.User
 		}
 	default:
-		metadata.ParseError = fmt.Sprintf("unsupported SIP message type")
+		metadata.ParseError = "unsupported SIP message type"
 	}
 	business := classifySIPBusiness(raw)
 	metadata.BusinessCode = business.Code

@@ -40,7 +40,7 @@ func (tx *authorityCommitFaultTx) Commit() error {
 			return err
 		}
 	} else {
-		_ = tx.Tx.Rollback()
+		_ = tx.Rollback()
 	}
 	return errors.New("fixture commit acknowledgement lost")
 }
@@ -98,10 +98,10 @@ func TestProcessAuthoritySealDuringSQLRollsBackFence(t *testing.T) {
 				authority.Seal()
 			case "during-update":
 				require.NoError(t, db.Callback().Update().After("gorm:update").Register("authority-test:seal", func(*gorm.DB) { authority.Seal() }))
-				defer db.Callback().Update().Remove("authority-test:seal")
+				defer func() { _ = db.Callback().Update().Remove("authority-test:seal") }()
 			case "during-history":
 				require.NoError(t, db.Callback().Query().After("gorm:query").Register("authority-test:seal", func(*gorm.DB) { authority.Seal() }))
-				defer db.Callback().Query().Remove("authority-test:seal")
+				defer func() { _ = db.Callback().Query().Remove("authority-test:seal") }()
 			}
 			require.ErrorIs(t, db.Transaction(authority.CheckTx), ErrProcessAuthorityUnavailable)
 			var row models.ProcessAuthority

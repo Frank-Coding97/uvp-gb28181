@@ -61,7 +61,7 @@ func (l *dbLocker) Acquire() error {
 		if err != nil {
 			return err
 		}
-		defer row.Close()
+		defer func() { _ = row.Close() }()
 		if !row.Next() {
 			return fmt.Errorf("sp_getapplock 无返回码")
 		}

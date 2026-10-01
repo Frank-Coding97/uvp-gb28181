@@ -471,11 +471,9 @@ export const preflightCloseZLMStreams = (targets: ZLMOwnershipTarget[]) =>
   );
 
 export const closeZLMStreams = (preflight: ZLMOwnershipBatchPreflight) =>
-  http.request<BaseResult<{ results: ZLMStreamCloseResult[]; closed: number; alreadyAbsent: number; partial: boolean; uncertain: boolean }>>(
-    "post",
-    baseUrlApi(`gb28181/zlm/nodes/${preflight.targets[0]?.nodeId ?? 0}/streams/close/batch`),
-    { data: preflight }
-  );
+  http.request<
+    BaseResult<{ results: ZLMStreamCloseResult[]; closed: number; alreadyAbsent: number; partial: boolean; uncertain: boolean }>
+  >("post", baseUrlApi(`gb28181/zlm/nodes/${preflight.targets[0]?.nodeId ?? 0}/streams/close/batch`), { data: preflight });
 
 export interface ZLMNetworkSessionQuery extends ZLMPageQuery {
   localPort?: number;
@@ -497,11 +495,17 @@ export const listZLMMediaViewers = (nodeId: number, media: ZLMMediaIdentity, pag
   );
 
 export const kickZLMSession = (nodeId: number, media: ZLMMediaIdentity, identifier: string) =>
-  http.request<BaseResult<{ nodeId: number; media: ZLMMediaIdentity; identifier: string; kicked: boolean; alreadyDisconnected: boolean; uncertain: boolean; retryable: boolean }>>(
-    "post",
-    baseUrlApi(`gb28181/zlm/nodes/${nodeId}/sessions/kick`),
-    { data: { nodeId, media, identifier } }
-  );
+  http.request<
+    BaseResult<{
+      nodeId: number;
+      media: ZLMMediaIdentity;
+      identifier: string;
+      kicked: boolean;
+      alreadyDisconnected: boolean;
+      uncertain: boolean;
+      retryable: boolean;
+    }>
+  >("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/sessions/kick`), { data: { nodeId, media, identifier } });
 
 export const getZLMRecordingStatus = (nodeId: number, media: ZLMMediaIdentity, type: ZLMRecorderType, signal?: AbortSignal) =>
   http.request<BaseResult<ZLMRecordingResult>>(
@@ -515,20 +519,34 @@ function recordingBody(nodeId: number, request: Omit<ZLMRecordingRequest, "targe
   return { target: target(nodeId, media), ...rest };
 }
 
-export const preflightStartZLMRecording = (nodeId: number, request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }) =>
-  http.request<BaseResult<ZLMRecordingPreflight>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/start/preflight`), {
-    data: recordingBody(nodeId, request)
-  });
+export const preflightStartZLMRecording = (
+  nodeId: number,
+  request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }
+) =>
+  http.request<BaseResult<ZLMRecordingPreflight>>(
+    "post",
+    baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/start/preflight`),
+    {
+      data: recordingBody(nodeId, request)
+    }
+  );
 
 export const startZLMRecording = (nodeId: number, request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }) =>
   http.request<BaseResult<ZLMRecordingResult>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/start`), {
     data: recordingBody(nodeId, request)
   });
 
-export const preflightStopZLMRecording = (nodeId: number, request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }) =>
-  http.request<BaseResult<ZLMRecordingPreflight>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/stop/preflight`), {
-    data: recordingBody(nodeId, request)
-  });
+export const preflightStopZLMRecording = (
+  nodeId: number,
+  request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }
+) =>
+  http.request<BaseResult<ZLMRecordingPreflight>>(
+    "post",
+    baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/stop/preflight`),
+    {
+      data: recordingBody(nodeId, request)
+    }
+  );
 
 export const stopZLMRecording = (nodeId: number, request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity }) =>
   http.request<BaseResult<ZLMRecordingResult>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/stop`), {
@@ -538,15 +556,17 @@ export const stopZLMRecording = (nodeId: number, request: Omit<ZLMRecordingReque
 export const forceStopZLMRecording = (
   nodeId: number,
   request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity; reason: string }
-) => http.request<BaseResult<ZLMRecordingResult>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/force-stop`), {
-  data: recordingBody(nodeId, request)
-});
+) =>
+  http.request<BaseResult<ZLMRecordingResult>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/force-stop`), {
+    data: recordingBody(nodeId, request)
+  });
 
 export const preflightForceStopZLMRecording = (
   nodeId: number,
   request: Omit<ZLMRecordingRequest, "target"> & { media: ZLMMediaIdentity; reason: string }
-) => http.request<BaseResult<ZLMRecordingPreflight>>(
-  "post",
-  baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/force-stop/preflight`),
-  { data: recordingBody(nodeId, request) }
-);
+) =>
+  http.request<BaseResult<ZLMRecordingPreflight>>(
+    "post",
+    baseUrlApi(`gb28181/zlm/nodes/${nodeId}/recordings/runtime/force-stop/preflight`),
+    { data: recordingBody(nodeId, request) }
+  );

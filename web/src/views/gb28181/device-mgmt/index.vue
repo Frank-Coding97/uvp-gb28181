@@ -3876,10 +3876,10 @@ onUnmounted(() => {
     >
       <a-form ref="editDeviceFormRef" :model="editDeviceForm" layout="vertical">
         <a-form-item label="设备国标 ID">
-          <a-input :model-value="editDeviceForm.deviceId" disabled class="code-main mono" />
+          <a-input :model-value="editDeviceForm.deviceId" disabled allow-clear class="code-main mono" />
         </a-form-item>
         <a-form-item label="设备上报名称">
-          <a-input :model-value="editDeviceForm.name" disabled placeholder="设备未上报" />
+          <a-input :model-value="editDeviceForm.name" disabled allow-clear placeholder="设备未上报" />
           <template #extra>
             <span class="form-hint">来自设备 DeviceInfo 应答,不可编辑</span>
           </template>
@@ -3938,13 +3938,13 @@ onUnmounted(() => {
     >
       <a-form :model="editChannelForm" layout="vertical">
         <a-form-item label="通道编号">
-          <a-input :model-value="editChannelForm.channelId" disabled class="code-main mono" />
+          <a-input :model-value="editChannelForm.channelId" disabled allow-clear class="code-main mono" />
         </a-form-item>
         <a-form-item label="所属设备">
-          <a-input :model-value="editChannelForm.deviceId" disabled class="code-main mono" />
+          <a-input :model-value="editChannelForm.deviceId" disabled allow-clear class="code-main mono" />
         </a-form-item>
         <a-form-item label="通道名称">
-          <a-input :model-value="editChannelForm.name" disabled placeholder="设备上报名称" />
+          <a-input :model-value="editChannelForm.name" disabled allow-clear placeholder="设备上报名称" />
           <template #extra><span class="form-hint">来自设备 Catalog 应答,不可编辑</span></template>
         </a-form-item>
         <a-form-item label="通道别名">
@@ -3952,7 +3952,7 @@ onUnmounted(() => {
           <template #extra><span class="form-hint">优先展示,不会被设备 Catalog 上报覆盖</span></template>
         </a-form-item>
         <a-form-item label="厂商 / 型号">
-          <a-input :model-value="vendorText(editChannelForm)" disabled />
+          <a-input :model-value="vendorText(editChannelForm)" disabled allow-clear />
           <template #extra><span class="form-hint">来自设备 Catalog 应答,不可编辑</span></template>
         </a-form-item>
         <a-form-item label="摄像头类型">

@@ -43,7 +43,7 @@ func TestLocalAuthorityLockPersistsDomainAndSerializesOwners(t *testing.T) {
 	require.ErrorIs(t, err, ErrLocalAuthorityUnavailable)
 	next, err := AcquireLocalLock(dir)
 	require.NoError(t, err)
-	defer next.Close()
+	defer func() { _ = next.Close() }()
 	nextDomain, err := next.DomainID()
 	require.NoError(t, err)
 	require.Equal(t, domain, nextDomain)
@@ -58,7 +58,7 @@ func TestLocalAuthorityProcessHelper(t *testing.T) {
 	require.NoError(t, err)
 	domain, err := owner.DomainID()
 	require.NoError(t, err)
-	fmt.Fprintln(os.Stdout, domain)
+	_, _ = fmt.Fprintln(os.Stdout, domain)
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	require.NoError(t, owner.Close())
 }
@@ -71,7 +71,7 @@ func TestLocalAuthorityLockRequiresActualProcessExit(t *testing.T) {
 	cmd.Env = append(os.Environ(), "UVP_LOCAL_AUTHORITY_CHILD="+dir)
 	input, err := cmd.StdinPipe()
 	require.NoError(t, err)
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, err := cmd.StdoutPipe()
 	require.NoError(t, err)
 	cmd.Stderr = os.Stderr
@@ -95,7 +95,7 @@ func TestLocalAuthorityLockRequiresActualProcessExit(t *testing.T) {
 	require.Error(t, err, "the old owner was killed, not gracefully closed")
 	owner, err = AcquireLocalLock(dir)
 	require.NoError(t, err)
-	defer owner.Close()
+	defer func() { _ = owner.Close() }()
 	next, err := owner.DomainID()
 	require.NoError(t, err)
 	require.Equal(t, strings.TrimSpace(domain), next)
@@ -150,7 +150,7 @@ func TestLocalAuthorityDetectsReplacementAndStaysPoisoned(t *testing.T) {
 			dir := privateStateDir(t)
 			owner, err := AcquireLocalLock(dir)
 			require.NoError(t, err)
-			defer owner.Close()
+			defer func() { _ = owner.Close() }()
 			path := filepath.Join(dir, "api-authority.lock")
 			original, err := readLocalDomain(owner.state.file)
 			require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestLocalAuthorityDetectsReplacementAndStaysPoisoned(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, original, 0600))
 				replacement, err := AcquireLocalLock(dir)
 				if replacement != nil {
-					defer replacement.Close()
+					defer func() { _ = replacement.Close() }()
 				}
 				require.ErrorIs(t, err, ErrLocalAuthorityUnavailable, "copying domain bytes to a new file cannot inherit authority")
 			case "directory":
@@ -210,7 +210,7 @@ func TestLocalAuthorityCopiedRecordCannotInheritClosedOwner(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, original, 0600))
 	replacement, err := AcquireLocalLock(dir)
 	if replacement != nil {
-		defer replacement.Close()
+		defer func() { _ = replacement.Close() }()
 	}
 	require.ErrorIs(t, err, ErrLocalAuthorityUnavailable)
 }

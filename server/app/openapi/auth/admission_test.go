@@ -249,6 +249,6 @@ func TestOpenAPINonceDatabaseReopen(t *testing.T) {
 	db = open()
 	raw, err = db.DB()
 	require.NoError(t, err)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	require.ErrorIs(t, NewAdmission(db, func() time.Time { return now }).Admit(context.Background(), admissionRequest(now), allowed), ErrReplay)
 }

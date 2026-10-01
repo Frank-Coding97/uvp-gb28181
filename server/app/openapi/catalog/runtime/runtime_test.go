@@ -195,12 +195,12 @@ func TestRuntimeTreatsNilContextAsBackgroundContext(t *testing.T) {
 		return SysAPIAsset{}, nil
 	}))
 
-	_, report, err := runtime.Publish(nil, Draft{Operations: []Operation{{
+	_, report, err := runtime.Publish(nil, Draft{Operations: []Operation{{ //nolint:staticcheck // this test verifies nil context compatibility.
 		Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/devices", AdapterKey: "device.list", ContractVersion: "v1", SysAPIPath: "/api/gb28181/device-mgmt/devices", SysAPIMethod: "GET",
 	}}})
 	require.NoError(t, err)
 	require.True(t, report.Valid())
-	value, err := runtime.Dispatch(nil, "device:list", Invocation{})
+	value, err := runtime.Dispatch(nil, "device:list", Invocation{}) //nolint:staticcheck // this test verifies nil context compatibility.
 	require.NoError(t, err)
 	require.Equal(t, "context-ok", value)
 }

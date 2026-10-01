@@ -54,7 +54,7 @@ func TestRepositoryBuildDraftMapsCatalogAndRetainsClientOrphans(t *testing.T) {
 func TestRepositoryTreatsNilContextAsBackgroundContext(t *testing.T) {
 	db := openCatalogStoreDB(t, true)
 	seedCatalogStore(t, db, "v1")
-	draft, err := NewRepository(db).BuildDraft(nil)
+	draft, err := NewRepository(db).BuildDraft(nil) //nolint:staticcheck // this test verifies nil context compatibility.
 	require.NoError(t, err)
 	require.Len(t, draft.Operations, 1)
 }

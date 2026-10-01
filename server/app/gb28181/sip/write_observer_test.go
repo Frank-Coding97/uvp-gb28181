@@ -35,7 +35,7 @@ func TestTransportWriteObserverMatchesUDPRequestBytes(t *testing.T) {
 		t.Run(method.String(), func(t *testing.T) {
 			receiver, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			require.NoError(t, err)
-			defer receiver.Close()
+			defer func() { _ = receiver.Close() }()
 
 			writes := make(chan observedWrite, 1)
 			ua, err := sipgo.NewUA(
@@ -47,7 +47,7 @@ func TestTransportWriteObserverMatchesUDPRequestBytes(t *testing.T) {
 				),
 			)
 			require.NoError(t, err)
-			defer ua.Close()
+			defer func() { _ = ua.Close() }()
 
 			client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
 			require.NoError(t, err)
@@ -85,7 +85,7 @@ func requireSamePort(t *testing.T, expected, actual net.Addr) {
 func TestTransportWriteObserverMatchesTCPRequestBytes(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	received := make(chan []byte, 1)
 	acceptErr := make(chan error, 1)
@@ -95,7 +95,7 @@ func TestTransportWriteObserverMatchesTCPRequestBytes(t *testing.T) {
 			acceptErr <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		data, err := readSIPFrame(conn)
 		if err != nil {
 			acceptErr <- err
@@ -111,7 +111,7 @@ func TestTransportWriteObserverMatchesTCPRequestBytes(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	defer ua.Close()
+	defer func() { _ = ua.Close() }()
 	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
 	require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func TestTransportWriteObserverMatchesServerResponseBytes(t *testing.T) {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			serverConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			require.NoError(t, err)
-			defer serverConn.Close()
+			defer func() { _ = serverConn.Close() }()
 
 			writes := make(chan observedWrite, 1)
 			ua, err := sipgo.NewUA(sipgo.WithUserAgentTransportLayerOptions(
@@ -147,7 +147,7 @@ func TestTransportWriteObserverMatchesServerResponseBytes(t *testing.T) {
 				}),
 			))
 			require.NoError(t, err)
-			defer ua.Close()
+			defer func() { _ = ua.Close() }()
 			server, err := sipgo.NewServer(ua)
 			require.NoError(t, err)
 			server.OnRegister(func(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -162,7 +162,7 @@ func TestTransportWriteObserverMatchesServerResponseBytes(t *testing.T) {
 
 			clientConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			require.NoError(t, err)
-			defer clientConn.Close()
+			defer func() { _ = clientConn.Close() }()
 			require.NoError(t, clientConn.SetDeadline(time.Now().Add(2*time.Second)))
 
 			raw := rawRegister(serverConn.LocalAddr().String(), clientConn.LocalAddr().String(), "UDP", status)
@@ -184,7 +184,7 @@ func TestTransportWriteObserverMatchesTCPServerResponseBytes(t *testing.T) {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			listener, err := net.Listen("tcp4", "127.0.0.1:0")
 			require.NoError(t, err)
-			defer listener.Close()
+			defer func() { _ = listener.Close() }()
 
 			writes := make(chan observedWrite, 1)
 			ua, err := sipgo.NewUA(sipgo.WithUserAgentTransportLayerOptions(
@@ -193,7 +193,7 @@ func TestTransportWriteObserverMatchesTCPServerResponseBytes(t *testing.T) {
 				}),
 			))
 			require.NoError(t, err)
-			defer ua.Close()
+			defer func() { _ = ua.Close() }()
 			server, err := sipgo.NewServer(ua)
 			require.NoError(t, err)
 			server.OnRegister(func(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -208,7 +208,7 @@ func TestTransportWriteObserverMatchesTCPServerResponseBytes(t *testing.T) {
 
 			clientConn, err := net.DialTimeout("tcp4", listener.Addr().String(), 2*time.Second)
 			require.NoError(t, err)
-			defer clientConn.Close()
+			defer func() { _ = clientConn.Close() }()
 			raw := rawRegister(listener.Addr().String(), clientConn.LocalAddr().String(), "TCP", status)
 			_, err = clientConn.Write(raw)
 			require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestTransportWriteObserverMatchesTCPServerResponseBytes(t *testing.T) {
 func TestTransportWriteObserverPanicDoesNotAffectSend(t *testing.T) {
 	receiver, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer receiver.Close()
+	defer func() { _ = receiver.Close() }()
 
 	ua, err := sipgo.NewUA(sipgo.WithUserAgentTransportLayerOptions(
 		siplib.WithTransportLayerWriteObserver(func(siplib.TransportWriteProps, []byte) {
@@ -235,7 +235,7 @@ func TestTransportWriteObserverPanicDoesNotAffectSend(t *testing.T) {
 		}),
 	))
 	require.NoError(t, err)
-	defer ua.Close()
+	defer func() { _ = ua.Close() }()
 	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
 	require.NoError(t, err)
 

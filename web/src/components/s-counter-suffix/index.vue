@@ -11,15 +11,15 @@ defineProps<{ value: number; total: number }>();
 <style scoped>
 .s-counter-suffix {
   padding: 0 4px;
-  color: var(--color-text-3, #86909c);
+  font-family: SFMono-Regular, Consolas, Menlo, monospace;
   font-size: 12px;
-  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  color: var(--color-text-3, #86909c);
   letter-spacing: 0.5px;
   transition: color 160ms ease;
 }
 
 .s-counter-suffix.is-complete {
-  color: #059669;
   font-weight: 600;
+  color: #059669;
 }
 </style>

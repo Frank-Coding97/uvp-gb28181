@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
 const userId = ref(0);
 </script>
@@ -41,9 +41,9 @@ const userId = ref(0);
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
-const userIds = ref('');
+const userIds = ref("");
 </script>
 ```
 
@@ -78,18 +78,18 @@ const userIds = ref('');
 
 ### Props
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| modelValue | `number \| string \| undefined` | - | **必填**。绑定值，单选时为数值，多选时为逗号分隔的字符串，支持 `undefined` |
-| multiple | `boolean` | `false` | 是否多选模式 |
-| disabled | `boolean` | `false` | 是否禁用 |
-| placeholder | `string` | `'请选择用户'` | 占位符文本 |
-| maxLabelLength | `number` | `10` | 标签文本最大长度，超出显示省略号 |
+| 属性           | 类型                            | 默认值         | 说明                                                                       |
+| -------------- | ------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| modelValue     | `number \| string \| undefined` | -              | **必填**。绑定值，单选时为数值，多选时为逗号分隔的字符串，支持 `undefined` |
+| multiple       | `boolean`                       | `false`        | 是否多选模式                                                               |
+| disabled       | `boolean`                       | `false`        | 是否禁用                                                                   |
+| placeholder    | `string`                        | `'请选择用户'` | 占位符文本                                                                 |
+| maxLabelLength | `number`                        | `10`           | 标签文本最大长度，超出显示省略号                                           |
 
 ### Events
 
-| 事件名 | 说明 | 参数类型 |
-|--------|------|----------|
+| 事件名            | 说明             | 参数类型                        |
+| ----------------- | ---------------- | ------------------------------- |
 | update:modelValue | 绑定值变化时触发 | `number \| string \| undefined` |
 
 ## 数据格式说明
@@ -110,10 +110,10 @@ const userId: number | undefined = undefined;
 
 ```typescript
 // 绑定值类型（逗号分隔的字符串）
-const userIds: string | undefined = '123,456,789';
+const userIds: string | undefined = "123,456,789";
 
 // 未选中时
-const userIds: string | undefined = '';
+const userIds: string | undefined = "";
 // 或者
 const userIds: string | undefined = undefined;
 ```
@@ -128,31 +128,23 @@ const userIds: string | undefined = undefined;
     </a-form-item>
 
     <a-form-item label="团队成员（多选）">
-      <select-user 
-        v-model="form.memberIds" 
-        :multiple="true" 
-        placeholder="请选择团队成员"
-      />
+      <select-user v-model="form.memberIds" :multiple="true" placeholder="请选择团队成员" />
     </a-form-item>
 
     <a-form-item label="审批人（禁用）">
-      <select-user 
-        v-model="form.approverId" 
-        :disabled="true" 
-        placeholder="不可选择"
-      />
+      <select-user v-model="form.approverId" :disabled="true" placeholder="不可选择" />
     </a-form-item>
   </a-form>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { reactive } from "vue";
 
 const form = reactive({
-  managerId: 0,           // 单选，初始未选中
-  memberIds: '',          // 多选，初始未选中
-  approverId: 123,        // 单选，已选中用户 123
-  optionalId: undefined   // 单选，使用 undefined 表示未选中
+  managerId: 0, // 单选，初始未选中
+  memberIds: "", // 多选，初始未选中
+  approverId: 123, // 单选，已选中用户 123
+  optionalId: undefined // 单选，使用 undefined 表示未选中
 });
 </script>
 ```

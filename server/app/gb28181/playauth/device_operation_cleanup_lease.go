@@ -13,6 +13,9 @@ import (
 // Load and idempotent Prepare observations never reconstruct a ticket.
 type SIPCleanupWorkTicket struct{ work *sipCleanupWork }
 
+// MarshalJSON makes the process-local ticket's intentionally opaque wire shape explicit.
+func (SIPCleanupWorkTicket) MarshalJSON() ([]byte, error) { return []byte("{}"), nil }
+
 type sipCleanupWork struct {
 	authority *sql.DB
 	process   deviceIntentAuthority

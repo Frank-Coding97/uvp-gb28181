@@ -31,11 +31,21 @@ export function buildDashboardTrendSpec(metric: DashboardDrilldownMetric, histor
   const isTraffic = metric === "media-traffic-today";
   if (metric === "sip-rpm" || metric === "sip-today") {
     for (const point of (history as SIPHistory).points) {
-      values.push({ bucket: point.bucketStart, bucketLabel: formatBucketLabel(point.bucketStart, history), series: metric === "sip-rpm" ? "RPM" : "请求数", value: metric === "sip-rpm" ? point.rpm : point.requests });
+      values.push({
+        bucket: point.bucketStart,
+        bucketLabel: formatBucketLabel(point.bucketStart, history),
+        series: metric === "sip-rpm" ? "RPM" : "请求数",
+        value: metric === "sip-rpm" ? point.rpm : point.requests
+      });
     }
   } else if (metric === "play-success-24h") {
     for (const point of (history as PlayHistory).points) {
-      values.push({ bucket: point.bucketStart, bucketLabel: formatBucketLabel(point.bucketStart, history), series: "成功率", value: point.rate == null ? null : point.rate * 100 });
+      values.push({
+        bucket: point.bucketStart,
+        bucketLabel: formatBucketLabel(point.bucketStart, history),
+        series: "成功率",
+        value: point.rate == null ? null : point.rate * 100
+      });
     }
   } else {
     for (const point of (history as TrafficHistory).points) {
@@ -58,15 +68,26 @@ export function buildDashboardTrendSpec(metric: DashboardDrilldownMetric, histor
     axes: [
       { orient: "bottom", type: "band", label: { autoRotate: false, autoHide: true } },
       {
-        orient: "left", type: "linear", nice: true,
+        orient: "left",
+        type: "linear",
+        nice: true,
         ...(isTraffic ? { title: { text: "流量" }, label: { formatMethod: formatTrafficBytes } } : {})
       }
     ],
     legends: { visible: isTraffic, orient: "top", position: "end" },
-    tooltip: isTraffic ? {
-      activeType: "dimension",
-      dimension: { content: [{ key: (datum: DashboardTrendValue) => datum.series, value: (datum: DashboardTrendValue) => formatTrafficBytes(Number(datum.value)) }] }
-    } : { mark: { title: { visible: true } } },
+    tooltip: isTraffic
+      ? {
+          activeType: "dimension",
+          dimension: {
+            content: [
+              {
+                key: (datum: DashboardTrendValue) => datum.series,
+                value: (datum: DashboardTrendValue) => formatTrafficBytes(Number(datum.value))
+              }
+            ]
+          }
+        }
+      : { mark: { title: { visible: true } } },
     padding: { left: 12, right: 16, top: 12, bottom: 24 }
   } as MediaChartSpec;
 }

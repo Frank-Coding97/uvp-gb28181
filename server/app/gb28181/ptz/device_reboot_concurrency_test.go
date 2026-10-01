@@ -62,7 +62,7 @@ func TestDeviceRebootDatabaseFailureNeverSends(t *testing.T) {
 	service, db, device := newDeviceRebootService(t, sender, time.Now)
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("reboot_test_fail_create", func(tx *gorm.DB) {
 		if tx.Statement.Table == (gbmodels.GbPTZOperation{}).TableName() {
-			tx.AddError(errors.New("operation storage unavailable"))
+			_ = tx.AddError(errors.New("operation storage unavailable")) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	_, err := service.ExecuteDeviceReboot(context.Background(), deviceRebootTarget(device, protocol.ProfileFor(protocol.Version2022)), "db-failure", 1, 1)

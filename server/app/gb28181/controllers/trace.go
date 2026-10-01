@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
@@ -21,6 +22,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 var sipMethodPattern = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,31}$`)
@@ -231,7 +233,10 @@ func (tc *TraceController) Stream(c *gin.Context) {
 	defer tc.stream.Hub().Unsubscribe(sub.ID)
 
 	// 立刻发一次 ready 事件,让前端知道订阅已建立
-	fmt.Fprintf(c.Writer, "event: ready\ndata: {\"subscriptionId\":\"%s\"}\n\n", sub.ID)
+	if _, err := fmt.Fprintf(c.Writer, "event: ready\ndata: {\"subscriptionId\":\"%s\"}\n\n", sub.ID); err != nil {
+		app.Log(ctx).Warn("SIP trace ready 事件发送失败", zap.String("event", "gb28181.trace.stream_ready_write_failed"), logging.Error(err))
+		return
+	}
 	c.Writer.Flush()
 
 	ping := time.NewTicker(15 * time.Second)
@@ -415,8 +420,10 @@ func (tc *TraceController) queryFailure(c *gin.Context, err error) {
 		health = tc.query.Health()
 	}
 	// 具体错误打到 gin 日志方便排查(nginx / 中间件不 buffer 它)
-	fmt.Fprintf(gin.DefaultErrorWriter, "[sip-trace] query failure: %v (health=%s lastError=%s)\n",
-		err, health.State, health.LastError)
+	if _, writeErr := fmt.Fprintf(gin.DefaultErrorWriter, "[sip-trace] query failure: %v (health=%s lastError=%s)\n",
+		err, health.State, health.LastError); writeErr != nil {
+		app.Log(c.Request.Context()).Warn("SIP trace 查询错误日志写入失败", zap.String("event", "gb28181.trace.query_failure_log_write_failed"), logging.Error(writeErr))
+	}
 	// 其他错误(schema/权限/查询失败等)如实回 500 + err 消息,前端能看到根因
 	// unavailable 类错误也走这里但降级到 503 + 结构化提示
 	msg := "SIP 日志存储查询失败"

@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cloud-recordings/components/RecordingRuntimeControl.vue"), "utf8");
+const source = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/cloud-recordings/components/RecordingRuntimeControl.vue"),
+  "utf8"
+);
 
 describe("recording runtime control", () => {
   it("uses only typed UVP recording APIs and the complete media identity", () => {
@@ -21,8 +24,8 @@ describe("recording runtime control", () => {
   });
 
   it("separates normal control from force stop permission and confirmation", () => {
-    expect(source).toContain('gb28181:recording:control');
-    expect(source).toContain('gb28181:recording:force-stop');
+    expect(source).toContain("gb28181:recording:control");
+    expect(source).toContain("gb28181:recording:force-stop");
     expect(source).toContain("ZLMDangerActionDialog");
     expect(source).toContain("普通停止仅释放当前账号创建的手工录制，不会关闭录像计划或持续录像");
     expect(source).toContain("强制停止必须单独授权、填写理由并重新确认影响指纹");

@@ -289,7 +289,7 @@ func NewModuleWithDiagnosis(cfg gbconfig.TraceConfig, store Store, payloadCipher
 	go module.runWriter(ctx)
 	go module.runRetryWriter(ctx)
 	if prunable, ok := store.(PrunableStore); ok {
-		var scheduledPruner PrunableStore = prunable
+		var scheduledPruner = prunable
 		if diagnosisService != nil {
 			scheduledPruner = combinedPrunableStore{trace: prunable, diagnosis: diagnosisService}
 		}

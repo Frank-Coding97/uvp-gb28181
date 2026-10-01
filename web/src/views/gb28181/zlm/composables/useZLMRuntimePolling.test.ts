@@ -161,8 +161,11 @@ describe("ZLM runtime polling", () => {
   it("reports a synchronous loader failure and keeps the polling chain alive", async () => {
     vi.useFakeTimers();
     const failure = new Error("synchronous load failure");
-    const load = vi.fn()
-      .mockImplementationOnce(() => { throw failure; })
+    const load = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw failure;
+      })
       .mockResolvedValue(7);
     const publish = vi.fn();
     const onError = vi.fn();

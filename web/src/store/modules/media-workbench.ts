@@ -12,8 +12,7 @@ export interface MediaScopePolicy {
   requiresNode?: boolean;
 }
 
-export type MediaNodeCatalogNode = Pick<ZLMNode, "id" | "name" | "state"> &
-  Partial<Omit<ZLMNode, "id" | "name" | "state">>;
+export type MediaNodeCatalogNode = Pick<ZLMNode, "id" | "name" | "state"> & Partial<Omit<ZLMNode, "id" | "name" | "state">>;
 
 export type ZLMNodeCatalogLoader = () => Promise<readonly MediaNodeCatalogNode[]>;
 
@@ -68,10 +67,7 @@ export function normalizeMediaScope(value: unknown): MediaScope | null {
   return positiveNodeID(value);
 }
 
-export function resolveDefaultZLMNodeId(
-  nodes: readonly MediaNodeCatalogNode[],
-  ...candidates: unknown[]
-): number | null {
+export function resolveDefaultZLMNodeId(nodes: readonly MediaNodeCatalogNode[], ...candidates: unknown[]): number | null {
   for (const candidate of candidates) {
     const nodeId = positiveNodeID(candidate);
     if (nodeId !== null && nodes.some(node => node.id === nodeId)) return nodeId;
@@ -102,11 +98,13 @@ export function resolveMediaView(
   allowedViews: readonly string[],
   defaultView: string
 ): string | null {
-  return normalizedView(queryView, allowedViews)
-    ?? readStoredMediaView(workspace, allowedViews)
-    ?? normalizedView(defaultView, allowedViews)
-    ?? allowedViews[0]
-    ?? null;
+  return (
+    normalizedView(queryView, allowedViews) ??
+    readStoredMediaView(workspace, allowedViews) ??
+    normalizedView(defaultView, allowedViews) ??
+    allowedViews[0] ??
+    null
+  );
 }
 
 function writeStoredMediaView(workspace: string, view: string, allowedViews: readonly string[]) {
@@ -197,10 +195,12 @@ export function createZLMNodeCatalog(options: ZLMNodeCatalogOptions = {}): ZLMNo
       });
 
     inFlight = { epoch: requestEpoch, promise };
-    void promise.finally(() => {
-      if (inFlight?.promise === promise) inFlight = null;
-      if (requestEpoch === epoch) loading.value = false;
-    }).catch(() => undefined);
+    void promise
+      .finally(() => {
+        if (inFlight?.promise === promise) inFlight = null;
+        if (requestEpoch === epoch) loading.value = false;
+      })
+      .catch(() => undefined);
     return promise;
   }
 
@@ -226,7 +226,7 @@ export const useMediaWorkbenchStore = defineStore("media-workbench", () => {
   const scope = ref<MediaScope>("all");
   const views = ref<Record<string, string>>({});
 
-  const nodeScope = computed(() => scope.value === "all" ? null : scope.value);
+  const nodeScope = computed(() => (scope.value === "all" ? null : scope.value));
 
   function setScope(value: unknown, policy: MediaScopePolicy = {}) {
     if (!canUseMediaScope(value, policy)) return false;

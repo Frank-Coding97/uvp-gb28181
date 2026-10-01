@@ -101,7 +101,9 @@ describe("MediaWorkspaceShell", () => {
     expect(source).toMatch(/height:\s*100%/);
     expect(source).toMatch(/min-height:\s*0/);
     expect(source).toMatch(/overflow:\s*auto/);
-    expect(source).toContain("padding: calc(var(--uvp-main-padding) + 4px) calc(var(--uvp-main-padding) + 8px) var(--uvp-workspace-gap)");
+    expect(source).toContain(
+      "padding: calc(var(--uvp-main-padding) + 4px) calc(var(--uvp-main-padding) + 8px) var(--uvp-workspace-gap)"
+    );
     expect(source).toMatch(/container-type:\s*inline-size/);
     expect(source).toMatch(/@container\s+media-workspace-content\s*\(max-width:\s*720px\)/);
     expect(source).not.toContain("media-workspace-shell__sidebar");

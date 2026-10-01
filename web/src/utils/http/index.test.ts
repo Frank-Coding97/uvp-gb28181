@@ -64,9 +64,7 @@ describe("HTTP error messages", () => {
   it("suppresses the global message for an explicitly silent request", async () => {
     axiosRequest.mockRejectedValueOnce({ response: { data: { message: "后台加载失败" } } });
 
-    await expect(
-      http.request("get", "/background-failure", undefined, { showErrorMessage: false })
-    ).rejects.toBeTruthy();
+    await expect(http.request("get", "/background-failure", undefined, { showErrorMessage: false })).rejects.toBeTruthy();
 
     expect(messageError).not.toHaveBeenCalled();
   });
@@ -85,10 +83,12 @@ describe("HTTP error messages", () => {
   it("clears authentication and redirects when a heartbeat receives 401", async () => {
     expect(interceptorHandlers.responseRejected).toBeTypeOf("function");
 
-    await expect(interceptorHandlers.responseRejected!({
-      response: { status: 401 },
-      config: { url: "/api/users/session/heartbeat" }
-    })).rejects.toBeTruthy();
+    await expect(
+      interceptorHandlers.responseRejected!({
+        response: { status: 401 },
+        config: { url: "/api/users/session/heartbeat" }
+      })
+    ).rejects.toBeTruthy();
 
     expect(logout).toHaveBeenCalledTimes(1);
     expect(push).toHaveBeenCalledWith({ path: "/login", query: { redirect: "/online" } });

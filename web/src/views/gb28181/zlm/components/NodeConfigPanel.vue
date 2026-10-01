@@ -318,6 +318,7 @@ defineExpose({ refresh, discardDrafts });
                   <div v-else-if="isConfigEditable(record)" class="config-input">
                     <a-input
                       :model-value="dirty[record.key] ?? record.value"
+                      allow-clear
                       :disabled="!editable"
                       :class="{ dirty: dirty[record.key] !== undefined }"
                       @input="(value: string) => onChange(record, value)"

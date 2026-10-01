@@ -4,26 +4,29 @@ import { RefreshCw } from "lucide-vue-next";
 import { useZLMContextStore, type ZLMContextNode } from "@/store/modules/zlm-context";
 import NodeStateBadge from "./NodeStateBadge.vue";
 
-const props = withDefaults(defineProps<{
-  nodes: ZLMContextNode[];
-  queryNodeId?: unknown;
-  loading?: boolean;
-  disabled?: boolean;
-  title?: string;
-  allowAll?: boolean;
-  defaultAll?: boolean;
-  fallbackFirst?: boolean;
-  minimal?: boolean;
-}>(), {
-  queryNodeId: undefined,
-  loading: false,
-  disabled: false,
-  title: "当前媒体节点",
-  allowAll: false,
-  defaultAll: false,
-  fallbackFirst: false,
-  minimal: false
-});
+const props = withDefaults(
+  defineProps<{
+    nodes: ZLMContextNode[];
+    queryNodeId?: unknown;
+    loading?: boolean;
+    disabled?: boolean;
+    title?: string;
+    allowAll?: boolean;
+    defaultAll?: boolean;
+    fallbackFirst?: boolean;
+    minimal?: boolean;
+  }>(),
+  {
+    queryNodeId: undefined,
+    loading: false,
+    disabled: false,
+    title: "当前媒体节点",
+    allowAll: false,
+    defaultAll: false,
+    fallbackFirst: false,
+    minimal: false
+  }
+);
 
 const emit = defineEmits<{
   change: [nodeId: number | null];
@@ -130,8 +133,8 @@ function select(value: string | number | undefined) {
 <style scoped>
 .zlm-node-context {
   display: flex;
-  align-items: center;
   gap: var(--zlm-space-3);
+  align-items: center;
   min-height: 56px;
   padding: var(--zlm-space-3) var(--zlm-space-4);
   color: var(--zlm-text-2);
@@ -141,8 +144,8 @@ function select(value: string | number | undefined) {
 }
 
 .zlm-node-context[data-minimal="true"] {
-  min-height: auto;
   justify-content: flex-end;
+  min-height: auto;
   padding: 0;
   background: transparent;
   border: 0;
@@ -176,16 +179,16 @@ function select(value: string | number | undefined) {
 
 .zlm-node-context__identity {
   display: flex;
-  align-items: center;
   gap: var(--zlm-space-2);
+  align-items: center;
   min-width: 0;
 }
 
 .zlm-node-context__label {
   flex: none;
-  color: var(--zlm-text-3);
   font-size: var(--zlm-fs-caption);
   font-weight: var(--zlm-fw-medium);
+  color: var(--zlm-text-3);
 }
 
 .zlm-node-context__select {
@@ -194,24 +197,24 @@ function select(value: string | number | undefined) {
 
 .zlm-node-context__option-name {
   margin-right: 6px;
-  color: var(--zlm-text-1);
   font-weight: var(--zlm-fw-medium);
+  color: var(--zlm-text-1);
 }
 
 .zlm-node-context__option-id {
   margin-right: 8px;
-  color: var(--zlm-text-4);
   font-family: var(--zlm-font-mono);
   font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-4);
 }
 
 .zlm-node-context__status {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
-  color: var(--zlm-text-3);
-  font-size: var(--zlm-fs-caption);
   text-overflow: ellipsis;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
   white-space: nowrap;
 }
 
@@ -227,15 +230,15 @@ function select(value: string | number | undefined) {
   flex: none;
 }
 
-@media (max-width: 760px) {
+@media (width <= 760px) {
   .zlm-node-context {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
 
   .zlm-node-context[data-minimal="true"] {
-    align-items: center;
     flex-direction: row;
+    align-items: center;
   }
 
   .zlm-node-context__select {

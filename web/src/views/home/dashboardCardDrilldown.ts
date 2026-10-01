@@ -11,11 +11,7 @@ export function isDashboardDrilldownWidget(id: DashboardWidgetId) {
   return isHistoryDrilldownWidget(id) || id === "media-runtime";
 }
 
-export function openHistoryDrilldown(
-  id: DashboardWidgetId,
-  editing: boolean,
-  open: (metric: DashboardDrilldownMetric) => void
-) {
+export function openHistoryDrilldown(id: DashboardWidgetId, editing: boolean, open: (metric: DashboardDrilldownMetric) => void) {
   if (!editing && isHistoryDrilldownWidget(id)) open(id);
 }
 

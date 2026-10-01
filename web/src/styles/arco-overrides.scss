@@ -15,7 +15,7 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 14%, transparent) !important;
   }
 
-  &:not(.arco-switch-checked):not([disabled]) .arco-switch-text {
+  &:not(.arco-switch-checked, [disabled]) .arco-switch-text {
     color: var(--uvp-text-secondary) !important;
   }
 
@@ -40,7 +40,7 @@ body[arco-theme="dark"] .arco-switch.arco-switch-checked:not([disabled]):hover {
 }
 
 body[arco-theme="dark"] .arco-switch.arco-switch-checked .arco-switch-handle {
-  background-color: #fff !important;
+  background-color: #ffffff !important;
   box-shadow: none !important;
 }
 
@@ -50,9 +50,9 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 
 // ========== Select 下拉框 ==========
 .arco-select-view {
-  border-radius: 8px !important;
-  border: 1px solid var(--uvp-panel-border) !important;
   background: var(--uvp-dialog-control-bg) !important;
+  border: 1px solid var(--uvp-panel-border) !important;
+  border-radius: 8px !important;
 
   &:hover {
     border-color: var(--uvp-brand) !important;
@@ -76,9 +76,9 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 
 // 下拉面板
 .arco-select-dropdown {
-  border-radius: 10px !important;
-  border: 1px solid var(--uvp-popconfirm-border) !important;
   background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 10px !important;
   box-shadow: var(--uvp-popconfirm-shadow) !important;
 }
 
@@ -87,12 +87,12 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 }
 
 .arco-select-option {
+  margin: 2px 0 !important;
   font-size: 12px !important;
   font-weight: 500 !important;
   color: var(--uvp-text-secondary) !important;
   background: var(--uvp-popconfirm-bg) !important;
   border-radius: 6px !important;
-  margin: 2px 0 !important;
 
   &.arco-select-option-active,
   &:not(.arco-select-option-disabled):hover {
@@ -101,9 +101,9 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   }
 
   &.arco-select-option-selected {
+    font-weight: 600 !important;
     color: var(--uvp-brand) !important;
     background: var(--uvp-brand-soft) !important;
-    font-weight: 600 !important;
   }
 }
 
@@ -188,7 +188,13 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
     background: var(--uvp-brand) !important;
   }
 
-  .arco-picker-cell-in-view:not(.arco-picker-cell-selected, .arco-picker-cell-range-start, .arco-picker-cell-range-end, .arco-picker-cell-disabled) .arco-picker-date-value:hover,
+  .arco-picker-cell-in-view:not(
+      .arco-picker-cell-selected,
+      .arco-picker-cell-range-start,
+      .arco-picker-cell-range-end,
+      .arco-picker-cell-disabled
+    )
+    .arco-picker-date-value:hover,
   .arco-picker-header-label:hover,
   .arco-timepicker-cell:not(.arco-timepicker-cell-selected, .arco-timepicker-cell-disabled):hover .arco-timepicker-cell-inner {
     color: var(--uvp-brand) !important;
@@ -243,8 +249,8 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   min-width: 88px;
   height: 40px;
   padding-inline: 14px;
-  border-radius: 10px;
   font-weight: 600;
+  border-radius: 10px;
 }
 
 .uvp-create-btn {
@@ -253,8 +259,8 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   border-color: #16845f !important;
   box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%) !important;
 
-  &:hover:not([disabled]):not(.arco-btn-disabled),
-  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+  &:hover:not([disabled], .arco-btn-disabled),
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
     color: #ffffff !important;
     background: #0f6f4f !important;
     border-color: #0f6f4f !important;
@@ -268,19 +274,19 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   border-color: var(--uvp-refresh-btn-border) !important;
   box-shadow: none !important;
 
-  &:hover:not([disabled]):not(.arco-btn-disabled),
-  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+  &:hover:not([disabled], .arco-btn-disabled),
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
     color: var(--uvp-refresh-btn-text) !important;
     background: var(--uvp-refresh-btn-hover-bg) !important;
     border-color: var(--uvp-refresh-btn-border) !important;
   }
 
-  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
     outline: 2px solid color-mix(in srgb, var(--uvp-refresh-btn-text) 34%, transparent);
     outline-offset: 2px;
   }
 
-  &:active:not([disabled]):not(.arco-btn-disabled) {
+  &:active:not([disabled], .arco-btn-disabled) {
     color: var(--uvp-refresh-btn-text) !important;
     background: var(--uvp-refresh-btn-active-bg) !important;
     border-color: var(--uvp-refresh-btn-border) !important;
@@ -311,318 +317,331 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 
 // 搜索框(cmdk)
 .cmdk {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1 1 210px;
-    width: min(360px, 100%);
-    min-width: 210px;
-    max-width: 360px;
-    height: 40px;
-    padding: 0 12px;
-    color: var(--uvp-text-tertiary);
-    background: var(--uvp-search-control-bg);
-    border: 1px solid var(--uvp-search-secondary-btn-border);
-    border-radius: 10px;
+  display: flex;
+  flex: 1 1 210px;
+  gap: 8px;
+  align-items: center;
+  width: min(360px, 100%);
+  min-width: 210px;
+  max-width: 360px;
+  height: 40px;
+  padding: 0 12px;
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-search-control-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  border-radius: 10px;
 
-    &:focus-within {
-        border-color: color-mix(in srgb, var(--uvp-brand) 40%, transparent);
-        box-shadow: var(--uvp-search-control-focus-shadow);
-    }
+  &:focus-within {
+    border-color: color-mix(in srgb, var(--uvp-brand) 40%, transparent);
+    box-shadow: var(--uvp-search-control-focus-shadow);
+  }
 
-    input {
-        flex: 1;
-        min-width: 0;
-        color: var(--uvp-text-primary);
-        background: transparent;
-        border: 0;
-        outline: none;
-    }
+  input {
+    flex: 1;
+    min-width: 0;
+    color: var(--uvp-text-primary);
+    outline: none;
+    background: transparent;
+    border: 0;
+  }
 
-    .kbd {
-        margin-left: auto;
-        display: inline-flex;
-        gap: 2px;
-        font-size: 11px;
-    }
+  .kbd {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: auto;
+    font-size: 11px;
+  }
 
-    kbd {
-        padding: 1px 5px;
-        border: 1px solid var(--uvp-panel-border);
-        border-radius: 4px;
-    }
+  kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 4px;
+  }
 }
 
 .cmdk-clear {
-    width: 22px;
-    height: 22px;
-    display: inline-grid;
-    flex: 0 0 auto;
-    place-items: center;
-    color: var(--uvp-text-tertiary);
-    background: transparent;
-    border: 0;
-    border-radius: 5px;
-    cursor: pointer;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--uvp-text-tertiary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
 
-    &:hover {
-        color: var(--uvp-text-primary);
-        background: var(--uvp-brand-soft);
-    }
+  &:hover {
+    color: var(--uvp-text-primary);
+    background: var(--uvp-brand-soft);
+  }
 }
 
 // 分段切换(segmented)
 .segmented {
-    display: inline-flex;
-    gap: 2px;
-    flex: 0 0 auto;
-    padding: 3px;
-    background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 10px;
-    box-shadow: var(--uvp-search-secondary-btn-shadow);
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
+  box-shadow: var(--uvp-search-secondary-btn-shadow);
 
-    button {
-        min-width: 52px;
-        height: 30px;
-        padding: 0 12px;
-        color: var(--uvp-text-secondary);
-        background: transparent;
-        border: 0;
-        border-radius: 8px;
-        font-size: 12px;
-        line-height: 30px;
-        white-space: nowrap;
-        cursor: pointer;
-        transition: color 0.2s ease, background 0.2s ease;
+  button {
+    min-width: 52px;
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+    line-height: 30px;
+    color: var(--uvp-text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    transition:
+      color 0.2s ease,
+      background 0.2s ease;
 
-        &.active {
-            color: var(--uvp-brand);
-            background: var(--uvp-brand-soft);
-            font-weight: 620;
-        }
+    &.active {
+      font-weight: 620;
+      color: var(--uvp-brand);
+      background: var(--uvp-brand-soft);
     }
+  }
 }
 
 // 按钮(btn-primary / btn-ghost)
 .btn-primary,
 .btn-ghost {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 10px;
-    white-space: nowrap;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+  border-radius: 10px;
 
-    &:focus-visible {
-        outline: 2px solid var(--uvp-brand);
-        outline-offset: 2px;
-    }
+  &:focus-visible {
+    outline: 2px solid var(--uvp-brand);
+    outline-offset: 2px;
+  }
 }
 
 .btn-primary {
-    color: #fff;
-    background: var(--uvp-brand);
-    border: 0;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  background: var(--uvp-brand);
+  border: 0;
+  transition: opacity 0.15s ease;
 
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
 }
 
 body[arco-theme="dark"] button.btn-primary {
-    color: #fff;
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    box-shadow: 0 10px 22px -12px rgb(37 99 235 / 78%), inset 0 1px 0 rgb(255 255 255 / 18%);
-    transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow:
+    0 10px 22px -12px rgb(37 99 235 / 78%),
+    inset 0 1px 0 rgb(255 255 255 / 18%);
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
 }
 
 body[arco-theme="dark"] button.btn-primary:not(:disabled):hover {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-    box-shadow: 0 12px 24px -12px rgb(37 99 235 / 88%), inset 0 1px 0 rgb(255 255 255 / 16%);
-    transform: translateY(-1px);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow:
+    0 12px 24px -12px rgb(37 99 235 / 88%),
+    inset 0 1px 0 rgb(255 255 255 / 16%);
+  transform: translateY(-1px);
 }
 
 body[arco-theme="dark"] button.btn-primary:not(:disabled):active {
-    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
-    box-shadow: 0 5px 12px -8px rgb(37 99 235 / 72%);
-    transform: translateY(0);
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  box-shadow: 0 5px 12px -8px rgb(37 99 235 / 72%);
+  transform: translateY(0);
 }
 
 body[arco-theme="dark"] button.btn-primary:disabled {
-    color: var(--uvp-text-tertiary);
-    background: var(--uvp-panel-border);
-    box-shadow: none;
-    opacity: 1;
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-panel-border);
+  box-shadow: none;
+  opacity: 1;
 }
 
 .btn-ghost {
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-search-secondary-btn-bg);
-    border: 1px solid var(--uvp-search-secondary-btn-border);
-    cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-search-secondary-btn-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
 
-    &:hover {
-        color: var(--uvp-brand);
-        background: var(--uvp-brand-soft);
-        border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
-    }
+  &:hover {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+  }
 
-    &:active {
-        transform: scale(0.96);
-        background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
-    }
+  &:active {
+    background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
+    transform: scale(0.96);
+  }
 }
 
 // 工具栏下拉
 .toolbar-select {
-    flex: 0 0 auto;
+  flex: 0 0 auto;
 }
 
 .status-select {
-    min-width: 126px;
+  min-width: 126px;
 }
 
 // 左树右表容器(账号管理/设备分配页共用)
 .container.uvp-split-list-page {
-    .left-box {
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-        height: 100%;
-        flex-shrink: 0;
+  .left-box {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
 
-        .tree-box {
-            flex: 1;
-            overflow: auto;
-        }
+    .tree-box {
+      flex: 1;
+      overflow: auto;
     }
+  }
 
-    .right-box {
-        flex: 1;
-        min-width: 0;
-    }
+  .right-box {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 // 工具栏布局(workspace-toolbar-row / toolbar-actions)
 .workspace-toolbar-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    width: 100%;
-    min-width: 0;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
 }
 
 .toolbar-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex: 1 1 auto;
-    flex-wrap: wrap;
-    gap: 10px;
-    min-width: 0;
-    margin-left: auto;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  margin-left: auto;
 }
 
 // ========== Transfer(穿梭框,设备分配页首次引入) ==========
 // 注意:Arco transfer 的真实 class 为 .arco-transfer-view-*(不是 transfer-list)
 .arco-transfer {
-    width: 100%;
+  width: 100%;
 
-    .arco-transfer-view {
-        border: 1px solid var(--uvp-panel-border);
-        border-radius: 10px;
-        background: var(--uvp-dialog-bg);
-        overflow: hidden;
+  .arco-transfer-view {
+    overflow: hidden;
+    background: var(--uvp-dialog-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
+  }
+
+  .arco-transfer-view-header {
+    height: 42px;
+    padding-inline: 12px;
+    background: var(--uvp-dialog-bg);
+    border-bottom: 1px solid var(--uvp-panel-border);
+  }
+
+  .arco-transfer-view-header-title,
+  .arco-transfer-view-header-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--uvp-text-primary);
+  }
+
+  .arco-transfer-view-search {
+    padding: 9px 10px 2px;
+    background: transparent;
+
+    .arco-input-inner-wrapper {
+      background: var(--uvp-dialog-control-bg);
+      border: 1px solid var(--uvp-panel-border);
+      border-radius: 8px;
     }
+  }
 
-    .arco-transfer-view-header {
-        height: 42px;
-        padding-inline: 12px;
-        background: var(--uvp-dialog-bg);
-        border-bottom: 1px solid var(--uvp-panel-border);
+  .arco-transfer-view-body {
+    background: var(--uvp-dialog-bg);
+  }
+
+  .arco-transfer-view-list {
+    padding: 6px;
+  }
+
+  .arco-transfer-list-item {
+    min-height: 34px;
+    padding-inline: 8px;
+    font-size: 13px;
+    color: var(--uvp-text-primary);
+    border-radius: 7px;
+
+    &:hover {
+      background: var(--uvp-brand-soft);
     }
+  }
 
-    .arco-transfer-view-header-title,
-    .arco-transfer-view-header-count {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--uvp-text-primary);
+  .arco-transfer-list-item-checkbox .arco-checkbox {
+    align-items: center;
+  }
+
+  .arco-transfer-operations {
+    gap: 8px;
+    padding-inline: 8px;
+
+    .arco-btn {
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      padding: 0;
+      color: var(--uvp-text-secondary);
+      background: var(--uvp-dialog-bg);
+      border: 1px solid var(--uvp-search-secondary-btn-border);
+      border-radius: 8px;
+
+      &:hover {
+        color: var(--uvp-brand);
+        background: var(--uvp-brand-soft);
+        border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+      }
     }
+  }
 
-    .arco-transfer-view-search {
-        padding: 9px 10px 2px;
-        background: transparent;
+  .arco-transfer-view-empty {
+    display: grid;
+    place-items: center;
+    min-height: 142px;
+    padding: 20px 12px;
 
-        .arco-input-inner-wrapper {
-            border: 1px solid var(--uvp-panel-border);
-            border-radius: 8px;
-            background: var(--uvp-dialog-control-bg);
-        }
+    .arco-empty-description {
+      font-size: 12px;
+      color: var(--uvp-text-tertiary);
     }
-
-    .arco-transfer-view-body {
-        background: var(--uvp-dialog-bg);
-    }
-
-    .arco-transfer-view-list {
-        padding: 6px;
-    }
-
-    .arco-transfer-list-item {
-        min-height: 34px;
-        padding-inline: 8px;
-        font-size: 13px;
-        color: var(--uvp-text-primary);
-        border-radius: 7px;
-
-        &:hover {
-            background: var(--uvp-brand-soft);
-        }
-    }
-
-    .arco-transfer-list-item-checkbox .arco-checkbox {
-        align-items: center;
-    }
-
-    .arco-transfer-operations {
-        gap: 8px;
-        padding-inline: 8px;
-
-        .arco-btn {
-            width: 32px;
-            min-width: 32px;
-            height: 32px;
-            padding: 0;
-            color: var(--uvp-text-secondary);
-            background: var(--uvp-dialog-bg);
-            border: 1px solid var(--uvp-search-secondary-btn-border);
-            border-radius: 8px;
-
-            &:hover {
-                color: var(--uvp-brand);
-                background: var(--uvp-brand-soft);
-                border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
-            }
-        }
-    }
-
-    .arco-transfer-view-empty {
-        display: grid;
-        min-height: 142px;
-        padding: 20px 12px;
-        place-items: center;
-
-        .arco-empty-description {
-            color: var(--uvp-text-tertiary);
-            font-size: 12px;
-        }
-    }
+  }
 }

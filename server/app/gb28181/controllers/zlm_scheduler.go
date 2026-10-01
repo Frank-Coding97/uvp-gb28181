@@ -210,11 +210,11 @@ func parseSchedulerLogFilter(c *gin.Context) (scheduler.SchedulerLogFilter, erro
 		filter.NodeID = &nodeID
 	}
 	algorithm, algorithmPresent := singleNonEmptyQuery(values, "algorithm")
-	if algorithmPresent == false && hasQueryKey(values, "algorithm") {
+	if !algorithmPresent && hasQueryKey(values, "algorithm") {
 		return scheduler.SchedulerLogFilter{}, fmt.Errorf("%w: algorithm must not be empty", ErrInvalidSchedulerLogFilter)
 	}
 	policy, policyPresent := singleNonEmptyQuery(values, "policy")
-	if policyPresent == false && hasQueryKey(values, "policy") {
+	if !policyPresent && hasQueryKey(values, "policy") {
 		return scheduler.SchedulerLogFilter{}, fmt.Errorf("%w: policy must not be empty", ErrInvalidSchedulerLogFilter)
 	}
 	if algorithm != "" && policy != "" && algorithm != policy {

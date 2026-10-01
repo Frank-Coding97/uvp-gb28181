@@ -28,7 +28,7 @@ describe("NodeListPanel", () => {
   });
 
   it("refreshes from the parent scope and retains the last successful rows on errors", () => {
-    expect(source).toContain("emit(\"refresh\")");
+    expect(source).toContain('emit("refresh")');
     expect(source).toContain("上一次节点列表");
     expect(source).toContain("impact");
     expect(source).toContain("fingerprint");
@@ -38,11 +38,11 @@ describe("NodeListPanel", () => {
     expect(source).toContain("const AUTO_REFRESH_SECONDS = 10");
     expect(source).toContain("const refreshCountdown = ref(AUTO_REFRESH_SECONDS)");
     expect(source).toContain("refreshTimer = setInterval(tickRefreshCountdown, 1_000)");
-    expect(source).toContain("function handleManualRefresh()")
-    expect(source).toContain("scheduleRefresh();")
-    expect(source).toContain("const refreshButtonLabel = computed")
-    expect(source).toContain("刷新（${refreshCountdown.value}s）")
-    expect(source).toContain("{{ refreshButtonLabel }}")
+    expect(source).toContain("function handleManualRefresh()");
+    expect(source).toContain("scheduleRefresh();");
+    expect(source).toContain("const refreshButtonLabel = computed");
+    expect(source).toContain("刷新（${refreshCountdown.value}s）");
+    expect(source).toContain("{{ refreshButtonLabel }}");
   });
 
   it("does not repeat cluster summary cards above the node table", () => {

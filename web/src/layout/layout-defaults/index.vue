@@ -31,9 +31,9 @@ const { isPc } = useDevicesSize();
 <style lang="scss" scoped>
 .layout {
   box-sizing: border-box;
+  column-gap: var(--uvp-workspace-gap);
   height: 100vh;
   padding: var(--uvp-workspace-gap);
-  column-gap: var(--uvp-workspace-gap);
   background: var(--uvp-navigation-bg);
 }
 
@@ -50,17 +50,17 @@ const { isPc } = useDevicesSize();
   box-shadow: var(--uvp-workspace-shadow);
 }
 
-@media (max-width: 1024px) {
+@media (width <= 1024px) {
   .layout {
     padding: 0;
   }
 
   .layout-right {
     height: 100vh;
-    border-radius: 0;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
+    border-radius: 0;
   }
 }
 </style>

@@ -46,11 +46,11 @@ func TestTraceRuntimeReceivesTCPConnectionClose(t *testing.T) {
 		return runtime
 	}))
 	require.NoError(t, err)
-	defer server.Shutdown(context.Background())
+	defer func() { require.NoError(t, server.Shutdown(context.Background())) }()
 
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	go func() { _ = server.srv.ServeTCP(listener) }()
 
 	conn, err := net.DialTimeout("tcp4", listener.Addr().String(), time.Second)

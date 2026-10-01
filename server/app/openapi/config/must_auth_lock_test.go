@@ -207,7 +207,7 @@ func TestMustAuthStoreLatchConcurrentInstancesHaveOneVersion(t *testing.T) {
 	checkDB := openMustAuthFileDB(t, path)
 	checkConn, err := checkDB.DB()
 	require.NoError(t, err)
-	defer checkConn.Close()
+	defer func() { _ = checkConn.Close() }()
 	var row models.SecurityState
 	result := checkDB.Where("id = ?", 1).Find(&row)
 	require.NoError(t, result.Error)
@@ -246,9 +246,9 @@ func TestMustAuthStoreNilAndCanceledInputsFailClosed(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.SecurityState{}))
 	require.NoError(t, db.Create(&models.SecurityState{ID: 1}).Error)
 	store := NewMustAuthStore(db, nil)
-	_, err = store.Load(nil)
+	_, err = store.Load(nil) //nolint:staticcheck // this test verifies nil context fail closed.
 	require.ErrorIs(t, err, ErrUnavailable)
-	_, err = store.Latch(nil)
+	_, err = store.Latch(nil) //nolint:staticcheck // this test verifies nil context fail closed.
 	require.ErrorIs(t, err, ErrUnavailable)
 
 	ctx, cancel := context.WithCancel(context.Background())

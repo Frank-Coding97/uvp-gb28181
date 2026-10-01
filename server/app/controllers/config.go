@@ -69,7 +69,7 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 	result["captcha"] = captchaConfig                                // 将验证码配置放入结果集
 
 	// 返回成功响应
-	con.Common.Success(ctx, result)
+	con.Success(ctx, result)
 }
 
 // UpdateConfig 更新配置信息
@@ -87,7 +87,7 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 func (con ConfigController) UpdateConfig(ctx *gin.Context) {
 	var req models.ConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		con.Common.FailAndAbort(ctx, "参数绑定失败", err)
+		con.FailAndAbort(ctx, "参数绑定失败", err)
 	}
 
 	// 更新System配置
@@ -113,9 +113,9 @@ func (con ConfigController) UpdateConfig(ctx *gin.Context) {
 
 	// 保存配置到文件
 	if err := app.ConfigYml.SaveConfig(); err != nil {
-		con.Common.FailAndAbort(ctx, "保存配置文件失败", err)
+		con.FailAndAbort(ctx, "保存配置文件失败", err)
 	}
 
 	// 返回成功响应
-	con.Common.SuccessWithMessage(ctx, "配置更新成功")
+	con.SuccessWithMessage(ctx, "配置更新成功")
 }

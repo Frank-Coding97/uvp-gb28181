@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
@@ -36,7 +37,7 @@ func TestSSE_FirstSnapshotImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Errorf("Content-Type=%q, want text/event-stream", resp.Header.Get("Content-Type"))
@@ -78,7 +79,7 @@ func TestSSE_ClientDisconnect(t *testing.T) {
 	buf := make([]byte, 1024)
 	_, _ = resp.Body.Read(buf)
 	cancel()
-	resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 
 	// 再发一次,确认服务器没卡死
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
@@ -88,7 +89,7 @@ func TestSSE_ClientDisconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second connect: %v", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != 200 {
 		t.Errorf("second status=%d, want 200", resp2.StatusCode)
 	}
@@ -107,7 +108,7 @@ func TestSSE_NilProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	buf := make([]byte, 4096)
 	n, _ := resp.Body.Read(buf)

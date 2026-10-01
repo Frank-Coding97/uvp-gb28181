@@ -4,7 +4,12 @@ const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
-import { getHomeDashboardLayout, getHomeDashboardSummary, resetHomeDashboardLayout, saveHomeDashboardLayout } from "./home-dashboard";
+import {
+  getHomeDashboardLayout,
+  getHomeDashboardSummary,
+  resetHomeDashboardLayout,
+  saveHomeDashboardLayout
+} from "./home-dashboard";
 import { DEFAULT_DASHBOARD_LAYOUT } from "@/views/home/dashboardRegistry";
 
 describe("home dashboard API", () => {

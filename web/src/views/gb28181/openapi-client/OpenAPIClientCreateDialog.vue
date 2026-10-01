@@ -31,7 +31,9 @@ const form = reactive({
   responsibleName: "",
   responsibleContact: ""
 });
-const touched = reactive({ name: false, ownerDeptId: false });
+const touched = reactive({ name: false, ownerDeptId: false, rateLimit: false, burst: false, viewerQuota: false });
+const limitError = (value: number, label: string) =>
+  Number.isInteger(value) && value >= 1 && value <= 10000 ? "" : `${label}需为 1-10000 之间的整数`;
 const dataScopeHint = computed(
   () => OPENAPI_CLIENT_DATA_SCOPE_OPTIONS.find(option => option.value === form.dataScope)?.description || ""
 );
@@ -59,6 +61,9 @@ function resetForm() {
   form.responsibleContact = "";
   touched.name = false;
   touched.ownerDeptId = false;
+  touched.rateLimit = false;
+  touched.burst = false;
+  touched.viewerQuota = false;
 }
 
 watch(
@@ -71,7 +76,18 @@ watch(
 function submit() {
   touched.name = true;
   touched.ownerDeptId = true;
-  if (!form.name.trim() || !form.ownerDeptId || props.submitting) return;
+  touched.rateLimit = true;
+  touched.burst = true;
+  touched.viewerQuota = true;
+  if (
+    !form.name.trim() ||
+    !form.ownerDeptId ||
+    limitError(form.rateLimit, "调用速度") ||
+    limitError(form.burst, "突发容量") ||
+    limitError(form.viewerQuota, "观看配额") ||
+    props.submitting
+  )
+    return;
   emit("create", {
     name: form.name.trim(),
     ownerDeptId: form.ownerDeptId,
@@ -139,21 +155,45 @@ defineExpose({ form, resetForm, submit });
       </a-form-item>
       <div class="openapi-client-create-dialog__section-title">访问限制</div>
       <div class="openapi-client-create-dialog__limits-grid">
-        <a-form-item label="调用速度">
+        <a-form-item
+          label="调用速度"
+          :validate-status="touched.rateLimit && limitError(form.rateLimit, '调用速度') ? 'error' : undefined"
+          :help="touched.rateLimit ? limitError(form.rateLimit, '调用速度') : undefined"
+        >
           <div class="openapi-client-create-dialog__input-unit">
-            <a-input-number v-model="form.rateLimit" :min="1" :max="10000" :precision="0" hide-button />
+            <a-input
+              v-model.number="form.rateLimit"
+              type="number"
+              inputmode="numeric"
+              allow-clear
+              @blur="touched.rateLimit = true"
+            />
             <span class="openapi-client-create-dialog__unit">次 / 秒</span>
           </div>
         </a-form-item>
-        <a-form-item label="突发容量">
+        <a-form-item
+          label="突发容量"
+          :validate-status="touched.burst && limitError(form.burst, '突发容量') ? 'error' : undefined"
+          :help="touched.burst ? limitError(form.burst, '突发容量') : undefined"
+        >
           <div class="openapi-client-create-dialog__input-unit">
-            <a-input-number v-model="form.burst" :min="1" :max="10000" :precision="0" hide-button />
+            <a-input v-model.number="form.burst" type="number" inputmode="numeric" allow-clear @blur="touched.burst = true" />
             <span class="openapi-client-create-dialog__unit">次</span>
           </div>
         </a-form-item>
-        <a-form-item label="观看配额">
+        <a-form-item
+          label="观看配额"
+          :validate-status="touched.viewerQuota && limitError(form.viewerQuota, '观看配额') ? 'error' : undefined"
+          :help="touched.viewerQuota ? limitError(form.viewerQuota, '观看配额') : undefined"
+        >
           <div class="openapi-client-create-dialog__input-unit">
-            <a-input-number v-model="form.viewerQuota" :min="1" :max="10000" :precision="0" hide-button />
+            <a-input
+              v-model.number="form.viewerQuota"
+              type="number"
+              inputmode="numeric"
+              allow-clear
+              @blur="touched.viewerQuota = true"
+            />
             <span class="openapi-client-create-dialog__unit">路并发</span>
           </div>
         </a-form-item>

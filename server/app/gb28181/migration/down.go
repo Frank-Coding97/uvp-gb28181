@@ -97,7 +97,7 @@ func isOpenAPITestDatabase(name string) bool {
 	}
 	for i := 0; i < len(name); i++ {
 		b := name[i]
-		if !(b >= 'a' && b <= 'z') && !(b >= '0' && b <= '9') && b != '_' {
+		if (b < 'a' || b > 'z') && (b < '0' || b > '9') && b != '_' {
 			return false
 		}
 	}

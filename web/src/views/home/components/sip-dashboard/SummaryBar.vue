@@ -11,10 +11,7 @@
         <div class="summary-bar__caption">今日事务</div>
       </div>
       <div class="summary-bar__stat">
-        <div
-          class="summary-bar__value"
-          :class="{ 'summary-bar__value--warn': health !== HEALTH_EMPTY && todayAbnormal > 0 }"
-        >
+        <div class="summary-bar__value" :class="{ 'summary-bar__value--warn': health !== HEALTH_EMPTY && todayAbnormal > 0 }">
           {{ summaryValue(todayAbnormal) }}
         </div>
         <div class="summary-bar__caption">异常事务</div>

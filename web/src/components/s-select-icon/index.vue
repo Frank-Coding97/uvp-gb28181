@@ -1,6 +1,6 @@
 <template>
   <div>
-    <a-input ref="inputRef" :style="{ width: '100%' }" placeholder="请选择图标" v-model="modelValue" @focus="onFocus">
+    <a-input ref="inputRef" :style="{ width: '100%' }" placeholder="请选择图标" allow-clear v-model="modelValue" @focus="onFocus">
       <template #suffix v-if="modelValue">
         <s-svg-icon v-if="type == 'svg'" :name="modelValue" :size="size" />
         <component

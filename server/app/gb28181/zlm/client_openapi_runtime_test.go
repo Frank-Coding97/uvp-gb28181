@@ -85,7 +85,9 @@ func TestOpenAPIRuntimeControlNeverFollowsRedirectOrRetries(t *testing.T) {
 	var leaked atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Add(1) }))
 	defer target.Close()
-	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) })
+	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	})
 	defer server.Close()
 	_, err := c.GetRuntimeIdentity(context.Background())
 	require.ErrorIs(t, err, ErrRuntimeControlUnavailable)

@@ -17,7 +17,7 @@ type ListRequest struct {
 
 // Validate 验证请求参数
 func (r *ListRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // Handle 获取查询条件
@@ -42,7 +42,7 @@ type CreateRequest struct {
 
 // Validate 验证请求参数
 func (r *CreateRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // UpdateRequest 更新示例请求参数
@@ -55,7 +55,7 @@ type UpdateRequest struct {
 
 // Validate 验证请求参数
 func (r *UpdateRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // DeleteRequest 删除示例请求参数
@@ -66,7 +66,7 @@ type DeleteRequest struct {
 
 // Validate 验证请求参数
 func (r *DeleteRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // GetByIDRequest 根据ID获取示例请求参数
@@ -77,5 +77,5 @@ type GetByIDRequest struct {
 
 // Validate 验证请求参数
 func (r *GetByIDRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }

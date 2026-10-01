@@ -268,8 +268,9 @@ func TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions(t *testing.T) {
 // 雨刷(GB/T 28181 A.3.7 表 A.11):独立路由,编号固定 1。
 //
 // ⛔ 与上面「extended 拒绝 aux_on/aux_off」是一对,不是矛盾:
-//    通用辅助动作(调用方自带编号)一律拒;标准命名的那一个(编号 1 = 雨刷)必须有可用入口 ——
-//    只拒不放等于设备能力面是空的。
+//
+//	通用辅助动作(调用方自带编号)一律拒;标准命名的那一个(编号 1 = 雨刷)必须有可用入口 ——
+//	只拒不放等于设备能力面是空的。
 func TestDeviceMgmt_ControlPTZWiperSendsStandardAuxFrame(t *testing.T) {
 	controller, db, channel, sender := newPTZResourceController(t)
 	router := gin.New()

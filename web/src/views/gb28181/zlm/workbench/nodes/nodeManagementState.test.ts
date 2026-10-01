@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  filterNodeRecords,
-  nodeHealth
-} from "./nodeManagementState";
+import { filterNodeRecords, nodeHealth } from "./nodeManagementState";
 
 const nodes = [
   {

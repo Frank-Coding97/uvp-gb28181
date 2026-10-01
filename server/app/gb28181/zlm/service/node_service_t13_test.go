@@ -172,10 +172,11 @@ func (r *commitBarrierRepo) Update(_ context.Context, n node.Node) error {
 	count := r.updateCount
 	r.rows[n.ID] = n
 	r.mu.Unlock()
-	if count == 1 {
+	switch count {
+	case 1:
 		close(r.firstCommitted)
 		<-r.firstRelease
-	} else if count == 2 {
+	case 2:
 		close(r.secondEntered)
 	}
 	return nil
@@ -193,10 +194,11 @@ func (r *commitBarrierRepo) UpdateCAS(_ context.Context, n node.Node, expectedRe
 	n.Revision = expectedRevision + 1
 	r.rows[n.ID] = n
 	r.mu.Unlock()
-	if count == 1 {
+	switch count {
+	case 1:
 		close(r.firstCommitted)
 		<-r.firstRelease
-	} else if count == 2 {
+	case 2:
 		close(r.secondEntered)
 	}
 	return true, nil

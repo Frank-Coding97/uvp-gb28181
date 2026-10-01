@@ -41,7 +41,9 @@ describe("MediaOverview canonical workbench", () => {
     );
     expect(source).toMatch(/\.runtime-summary-kpis\s*\{[^}]*margin-top:\s*0/);
     expect(source).toMatch(/\.runtime-summary-grid\s*\{[^}]*margin-top:\s*8px/);
-    expect(source).toMatch(/\.runtime-thread-panel--full\s*\{[^}]*margin-top:\s*8px[^}]*padding-bottom:\s*10px/);
+    const threadRule = source.match(/\.runtime-thread-panel--full\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(threadRule).toMatch(/margin-top:\s*8px/);
+    expect(threadRule).toMatch(/padding-bottom:\s*10px/);
   });
 
   it("keeps cached rate and object panels from feeding an activation height back into the grid", () => {
@@ -52,7 +54,9 @@ describe("MediaOverview canonical workbench", () => {
     expect(source).toMatch(/\.runtime-summary-grid\s*\{[^}]*align-items:\s*start/);
     expect(source).toMatch(/\.runtime-rate-panel\s*\{[^}]*min-height:\s*220px/);
     expect(source).toMatch(/\.runtime-rate-panel\s*\{[^}]*align-self:\s*stretch/);
-    expect(source).toMatch(/\.runtime-rate-panel :deep\(\.media-rate-area\)\s*\{[^}]*min-height:\s*160px[^}]*flex:\s*1/);
+    const mediaRateRule = source.match(/\.runtime-rate-panel :deep\(\.media-rate-area\)\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(mediaRateRule).toMatch(/min-height:\s*160px/);
+    expect(mediaRateRule).toMatch(/flex:\s*1/);
   });
 
   it("shows current upstream and downstream rates in the rate panel without the redundant description", () => {

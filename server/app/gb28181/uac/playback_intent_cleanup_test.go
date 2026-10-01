@@ -192,9 +192,10 @@ func TestPlaybackIntentCleanupHandoffSQLGapsKeepBarrier(t *testing.T) {
 					return
 				}
 				target := int32(2)
-				if stage == "register-lease" {
+				switch stage {
+				case "register-lease":
 					target = 4
-				} else if stage == "dispatch-ack" {
+				case "dispatch-ack":
 					target = 3
 				}
 				if count.Add(1) == target {
@@ -204,10 +205,18 @@ func TestPlaybackIntentCleanupHandoffSQLGapsKeepBarrier(t *testing.T) {
 			}
 			if stage == "register-lease" {
 				require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register("fixture:cleanup-gap", block))
-				defer f.db.Callback().Query().Remove("fixture:cleanup-gap")
+				defer func() {
+					if err := f.db.Callback().Query().Remove("fixture:cleanup-gap"); err != nil {
+						t.Errorf("callback cleanup failed: %v", err)
+					}
+				}()
 			} else {
 				require.NoError(t, f.db.Callback().Update().Before("gorm:update").Register("fixture:cleanup-gap", block))
-				defer f.db.Callback().Update().Remove("fixture:cleanup-gap")
+				defer func() {
+					if err := f.db.Callback().Update().Remove("fixture:cleanup-gap"); err != nil {
+						t.Errorf("callback cleanup failed: %v", err)
+					}
+				}()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -255,18 +264,20 @@ func TestPlaybackIntentCleanupActualTCP(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.Addr().String(), "TCP"
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	op, err := u.beginPlaybackIntentOperation(ctx, store, barrier, id, 2, strings.Repeat("b", 32), in)
 	require.NoError(t, err)
-	defer op.CloseLocal(context.Background())
+	defer func() {
+		_ = op.CloseLocal(context.Background()) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	require.NoError(t, peer.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second)))
 	conn, err := peer.Accept()
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	parser := sip.NewParser().NewSIPStream()
 	defer parser.Close()
 	var pending []sip.Message

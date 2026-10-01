@@ -51,7 +51,7 @@
 
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="systemName" label="系统名称">
-                    <a-input v-model="configData.system.systemName" placeholder="请输入系统名称" />
+                    <a-input v-model="configData.system.systemName" allow-clear placeholder="请输入系统名称" />
                     <template #extra>
                       <div>显示在浏览器标题栏和登录界面的系统名称</div>
                     </template>
@@ -60,7 +60,7 @@
 
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="systemCopyright" label="版权信息">
-                    <a-input v-model="configData.system.systemCopyright" placeholder="请输入版权信息" />
+                    <a-input v-model="configData.system.systemCopyright" allow-clear placeholder="请输入版权信息" />
                     <template #extra>
                       <div>显示在页面底部的版权声明文本</div>
                     </template>
@@ -68,7 +68,7 @@
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="systemRecordNo" label="备案号">
-                    <a-input v-model="configData.system.systemRecordNo" placeholder="请输入备案号" />
+                    <a-input v-model="configData.system.systemRecordNo" allow-clear placeholder="请输入备案号" />
                     <template #extra>
                       <div>工信部 ICP 备案编号 如：粤ICP备12345678号</div>
                     </template>
@@ -78,7 +78,7 @@
               <a-row>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="defaultusername" label="默认用户名">
-                    <a-input v-model="configData.system.defaultusername" placeholder="请输入默认用户名" />
+                    <a-input v-model="configData.system.defaultusername" allow-clear placeholder="请输入默认用户名" />
                     <template #extra>
                       <div>系统默认登录用户名</div>
                     </template>
@@ -87,7 +87,7 @@
 
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="defaultpassword" label="默认密码">
-                    <a-input-password v-model="configData.system.defaultpassword" placeholder="请输入默认密码" />
+                    <a-input-password v-model="configData.system.defaultpassword" allow-clear placeholder="请输入默认密码" />
                     <template #extra>
                       <div>系统默认登录密码</div>
                     </template>
@@ -116,7 +116,14 @@
               <a-row :gutter="24">
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="length" label="验证码长度">
-                    <a-input-number v-model="configData.captcha.length" :min="4" :max="8" placeholder="请输入验证码长度" />
+                    <s-number-field
+                      ref="captchaLengthField"
+                      v-model="configData.captcha.length"
+                      :min="4"
+                      :max="8"
+                      required
+                      placeholder="请输入验证码长度"
+                    />
                     <template #extra>
                       <div>验证码字符长度，默认4位</div>
                     </template>
@@ -133,10 +140,12 @@
               <a-row :gutter="24">
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="loginLockThreshold" label="登录失败锁定阈值(次)">
-                    <a-input-number
+                    <s-number-field
+                      ref="loginLockThresholdField"
                       v-model="configData.safe.loginLockThreshold"
                       :min="0"
                       :max="10"
+                      required
                       placeholder="请输入登录失败次数"
                     />
                     <template #extra>
@@ -146,7 +155,14 @@
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="loginLockExpire" label="登录失败次数缓存时间(秒)">
-                    <a-input-number v-model="configData.safe.loginLockExpire" :min="1" :max="1440" placeholder="请输入缓存时间" />
+                    <s-number-field
+                      ref="loginLockExpireField"
+                      v-model="configData.safe.loginLockExpire"
+                      :min="1"
+                      :max="1440"
+                      required
+                      placeholder="请输入缓存时间"
+                    />
                     <template #extra>
                       <div>指定时间内登录失败次数缓存时间，单位秒</div>
                     </template>
@@ -154,10 +170,12 @@
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="loginLockDuration" label="账号锁定时长(秒)">
-                    <a-input-number
+                    <s-number-field
+                      ref="loginLockDurationField"
                       v-model="configData.safe.loginLockDuration"
                       :min="1"
                       :max="1440"
+                      required
                       placeholder="请输入锁定时长"
                     />
                     <template #extra>
@@ -167,10 +185,12 @@
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="minPasswordLength" label="密码最小长度">
-                    <a-input-number
+                    <s-number-field
+                      ref="minPasswordLengthField"
                       v-model="configData.safe.minPasswordLength"
                       :min="6"
                       :max="32"
+                      required
                       placeholder="请输入密码最小长度"
                     />
                     <template #extra>
@@ -203,6 +223,7 @@ import { ref, onMounted, computed } from "vue";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import ImageUpload from "@/components/upload/image-upload.vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import SNumberField from "@/components/s-number-field/index.vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -229,6 +250,19 @@ const configData = ref({
   captcha: sysConfigStore.captchaConfig,
   safe: sysConfigStore.safeConfig
 });
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const captchaLengthField = ref<NumberFieldInstance | null>(null);
+const loginLockThresholdField = ref<NumberFieldInstance | null>(null);
+const loginLockExpireField = ref<NumberFieldInstance | null>(null);
+const loginLockDurationField = ref<NumberFieldInstance | null>(null);
+const minPasswordLengthField = ref<NumberFieldInstance | null>(null);
+const numberFields = computed(() => [
+  captchaLengthField,
+  loginLockThresholdField,
+  loginLockExpireField,
+  loginLockDurationField,
+  minPasswordLengthField
+]);
 
 // 获取配置信息
 const getConfig = async () => {
@@ -248,6 +282,11 @@ const getConfig = async () => {
 
 // 保存配置
 const onSave = async () => {
+  const numberFieldError = numberFields.value.map(field => field.value?.error || "").find(Boolean);
+  if (numberFieldError) {
+    arcoMessage("error", numberFieldError);
+    return;
+  }
   try {
     await sysConfigStore.updateConfig(configData.value);
     arcoMessage("success", "保存成功");
@@ -282,14 +321,14 @@ onMounted(() => {
 }
 
 .sysconfig-page :deep(.uvp-system-form .arco-form-item-label) {
-  color: var(--uvp-text-primary);
   font-weight: 500;
+  color: var(--uvp-text-primary);
 }
 
 .sysconfig-page :deep(.uvp-system-form .arco-form-item-extra) {
-  color: var(--uvp-text-secondary);
   font-size: 13px;
   line-height: 20px;
+  color: var(--uvp-text-secondary);
 }
 
 .sysconfig-page :deep(.sysconfig-tabs__actions .arco-btn) {
@@ -300,8 +339,8 @@ onMounted(() => {
 .sysconfig-tabs {
   :deep(.arco-tabs-nav) {
     display: flex;
-    align-items: flex-start;
     gap: 12px;
+    align-items: flex-start;
   }
 
   :deep(.arco-tabs-nav-tab) {

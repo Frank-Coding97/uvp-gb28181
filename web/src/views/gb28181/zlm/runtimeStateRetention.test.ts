@@ -10,10 +10,7 @@ const panelCases = [
   ["workbench/ingress/RTPPanel.vue", "watch([nodeId, () => props.active]"]
 ] as const;
 
-const directMonitoringShells = [
-  "StreamManagement.vue",
-  "SessionManagement.vue"
-];
+const directMonitoringShells = ["StreamManagement.vue", "SessionManagement.vue"];
 
 function readZLMSource(file: string) {
   return readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm", file), "utf8");
@@ -41,15 +38,15 @@ describe("ZLM runtime page state retention", () => {
     const source = readZLMSource(file);
 
     expect(source).toContain("ZLMNodeContextBar");
-    expect(source).toContain(":query-node-id=\"route.query.nodeId\"");
+    expect(source).toContain(':query-node-id="route.query.nodeId"');
     expect(source).not.toContain("router.replace");
   });
 
   it("only updates the overview query from an explicit node selection", () => {
     const source = readZLMSource("ClusterOverview.vue");
 
-    expect(source).toContain(":query-node-id=\"route.query.nodeId\"");
-    expect(source).toContain("@change=\"updateScope\"");
+    expect(source).toContain(':query-node-id="route.query.nodeId"');
+    expect(source).toContain('@change="updateScope"');
     expect(source).not.toContain("watch(selectedNodeId");
   });
 

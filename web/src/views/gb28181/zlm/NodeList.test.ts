@@ -7,7 +7,7 @@ const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeLi
 describe("legacy node list route", () => {
   it("is a thin shell over the canonical governance panel", () => {
     expect(source).toContain("NodeListPanel");
-    expect(source).toContain(":canonical=\"false\"");
+    expect(source).toContain(':canonical="false"');
     expect(source).not.toContain("listZLMNodes");
   });
 });

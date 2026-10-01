@@ -44,6 +44,7 @@ import {
   type PlaybackSettingsConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import SNumberField from "@/components/s-number-field/index.vue";
 import { PLAYBACK_PROTOCOL_DICT_CODE, playbackProtocolOptionsFromDictionary } from "../playbackProtocol";
 import { createStaticServiceConfigDraft, normalizePlayAuthConfig } from "./serviceConfigState";
 
@@ -74,6 +75,8 @@ const fixedAddressPlaybackReady = ref(false);
 const playAuthLoading = ref(true);
 const playAuthSaving = ref(false);
 const playAuthReady = ref(false);
+const playAuthRequiredByOpenAPI = ref(false);
+const playAuthConfigConflict = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -133,6 +136,20 @@ const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const savedSIPLogRetentionDays = ref(7);
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const positionHistoryRetentionField = ref<NumberFieldInstance | null>(null);
+const sipLogRetentionField = ref<NumberFieldInstance | null>(null);
+const sipTimeoutField = ref<NumberFieldInstance | null>(null);
+const playAuthTTLField = ref<NumberFieldInstance | null>(null);
+const playTimeoutField = ref<NumberFieldInstance | null>(null);
+const numberFields = computed(() => [
+  positionHistoryRetentionField,
+  sipLogRetentionField,
+  sipTimeoutField,
+  playAuthTTLField,
+  playTimeoutField
+]);
+const numberFieldsValid = computed(() => numberFields.value.every(field => !field.value?.error));
 const positionHistoryChanged = computed(
   () =>
     draft.saveMobilePositionHistory !== savedPositionHistoryEnabled.value ||
@@ -362,6 +379,8 @@ function restoreFixedAddressPlaybackDraft() {
 }
 
 function applyPlayAuthConfig(config: PlayAuthConfig) {
+  playAuthRequiredByOpenAPI.value = config.authRequiredByOpenAPI === true;
+  playAuthConfigConflict.value = config.authConfigConflict === true;
   const normalized = normalizePlayAuthConfig(config);
   draft.playback.authEnabled = normalized.authEnabled;
   draft.playback.authBindClientIP = normalized.authBindClientIP;
@@ -598,6 +617,7 @@ watch(
 );
 
 function handlePlayAuthEnabledChange(enabled: boolean) {
+  if (!enabled && playAuthRequiredByOpenAPI.value) return;
   const normalized = normalizePlayAuthConfig({
     authEnabled: enabled,
     authBindClientIP: draft.playback.authBindClientIP,
@@ -610,6 +630,11 @@ function handlePlayAuthEnabledChange(enabled: boolean) {
 
 async function saveConfig() {
   if (!configReady.value) return;
+  const numberFieldError = numberFields.value.map(field => field.value?.error || "").find(Boolean);
+  if (numberFieldError) {
+    Message.warning(numberFieldError);
+    return;
+  }
   if (!sipLogRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value) return;
   if (!hasChanges.value) {
     return;
@@ -850,7 +875,13 @@ onMounted(() =>
             type="primary"
             :loading="configSaving"
             :disabled="
-              configSaving || !configReady || !hasChanges || !sipLogRetentionValid || !playTimeoutValid || !playAuthTTLValid
+              configSaving ||
+              !configReady ||
+              !hasChanges ||
+              !numberFieldsValid ||
+              !sipLogRetentionValid ||
+              !playTimeoutValid ||
+              !playAuthTTLValid
             "
             @click="saveConfig"
           >
@@ -885,11 +916,13 @@ onMounted(() =>
                   label="位置历史保留天数（天）"
                   tooltip="历史轨迹按接收时间自动清理，默认保留 7 天。"
                 >
-                  <a-input-number
+                  <s-number-field
+                    ref="positionHistoryRetentionField"
                     v-model="draft.positionHistoryRetentionDays"
                     class="service-config-number-input"
                     :min="1"
                     :max="365"
+                    required
                     :disabled="
                       positionHistoryLoading || positionHistorySaving || !positionHistoryReady || !draft.saveMobilePositionHistory
                     "
@@ -1014,13 +1047,13 @@ onMounted(() =>
                   tooltip="SIP 日志按接收时间自动清理，默认保留 7 天。"
                   :validate-status="sipLogRetentionValid ? undefined : 'error'"
                 >
-                  <a-input-number
+                  <s-number-field
+                    ref="sipLogRetentionField"
                     v-model="draft.sipLogRetentionDays"
                     class="service-config-number-input"
                     :min="1"
                     :max="365"
-                    :step="1"
-                    :precision="0"
+                    required
                     :disabled="sipLogLoading || sipLogSaving || !sipLogReady"
                   />
                   <template v-if="!sipLogRetentionValid" #extra>
@@ -1086,11 +1119,13 @@ onMounted(() =>
                   label="SIP 命令超时时间（秒）"
                   tooltip="控制平台向设备发送 MESSAGE、SUBSCRIBE、直播、回放和对讲 INVITE 时等待响应的默认时长，默认 10 秒。"
                 >
-                  <a-input-number
+                  <s-number-field
+                    ref="sipTimeoutField"
                     v-model="draft.sipTimeoutSec"
                     class="service-config-number-input"
                     :min="1"
                     :max="300"
+                    required
                     :disabled="sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
                   />
                 </a-form-item>
@@ -1196,9 +1231,13 @@ onMounted(() =>
                   <a-switch
                     :model-value="draft.playback.authEnabled"
                     :loading="playAuthLoading || playAuthSaving"
-                    :disabled="playAuthLoading || playAuthSaving || !playAuthReady"
+                    :disabled="playAuthLoading || playAuthSaving || !playAuthReady || playAuthRequiredByOpenAPI"
                     @update:model-value="handlePlayAuthEnabledChange"
                   />
+                  <template v-if="playAuthRequiredByOpenAPI" #extra>
+                    <span>OpenAPI 播放隔离要求持续鉴权，停用 OpenAPI 不会解除此保护；历史裸播放地址不再放行。</span>
+                    <span v-if="playAuthConfigConflict">配置文件请求关闭鉴权，当前仍强制开启；请核对配置文件。</span>
+                  </template>
                 </a-form-item>
               </a-col>
               <a-col :span="isMobile ? 24 : 12">
@@ -1221,13 +1260,13 @@ onMounted(() =>
                   tooltip="仅影响新签发的播放凭证；已签发凭证保持原到期时间。默认 120 秒。"
                   :validate-status="playAuthTTLValid ? undefined : 'error'"
                 >
-                  <a-input-number
+                  <s-number-field
+                    ref="playAuthTTLField"
                     v-model="draft.playback.authTTLSeconds"
                     class="service-config-number-input"
                     :min="60"
                     :max="3600"
-                    :step="1"
-                    :precision="0"
+                    required
                     :disabled="playAuthLoading || playAuthSaving || !playAuthReady"
                   />
                   <template v-if="!playAuthTTLValid" #extra>
@@ -1242,11 +1281,13 @@ onMounted(() =>
                   tooltip="控制实时点播从发送 INVITE 到媒体流就绪的总等待时间。"
                   :validate-status="playTimeoutValid ? undefined : 'error'"
                 >
-                  <a-input-number
+                  <s-number-field
+                    ref="playTimeoutField"
                     v-model="draft.playback.playTimeoutMs"
                     class="service-config-number-input"
                     :min="1000"
                     :max="300000"
+                    required
                     :disabled="playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
                   />
                 </a-form-item>

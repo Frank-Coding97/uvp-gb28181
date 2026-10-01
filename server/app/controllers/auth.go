@@ -13,9 +13,11 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -136,12 +138,16 @@ func (ac *AuthController) Login(c *gin.Context) {
 			failCount++
 
 			// 更新失败次数，设置过期时间
-			app.Cache.Set(lockContext, failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second)
+			if cacheErr := app.Cache.Set(lockContext, failCountKey, strconv.Itoa(failCount), time.Duration(loginLockExpire)*time.Second); cacheErr != nil {
+				app.Log(lockContext).Warn("记录登录失败次数失败", zap.String("event", "auth.login_failure_count_cache_failed"), logging.Error(cacheErr))
+			}
 
 			// 检查是否达到锁定阈值
 			if failCount >= loginLockThreshold {
 				// 锁定账户
-				app.Cache.Set(lockContext, lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				if cacheErr := app.Cache.Set(lockContext, lockKey, "1", time.Duration(loginLockDuration)*time.Second); cacheErr != nil {
+					app.Log(lockContext).Warn("写入登录锁定状态失败", zap.String("event", "auth.login_lock_cache_failed"), logging.Error(cacheErr))
+				}
 				ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 				ac.FailAndAbort(c, "密码错误次数过多，账户已被锁定", nil)
 				return
@@ -156,7 +162,9 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 		// 密码正确，清除失败次数
 		failCountKey := "login_fail_count:" + req.Username
-		app.Cache.Del(lockContext, failCountKey)
+		if cacheErr := app.Cache.Del(lockContext, failCountKey); cacheErr != nil {
+			app.Log(lockContext).Warn("清除登录失败次数失败", zap.String("event", "auth.login_failure_count_delete_failed"), logging.Error(cacheErr))
+		}
 	} else {
 		// 未启用登录锁定功能，使用原有逻辑
 		// 验证密码
@@ -304,10 +312,6 @@ func (ac *AuthController) Logout(c *gin.Context) {
 
 func loginMetadata(c *gin.Context) service.LoginMetadata {
 	return service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
-}
-
-func loginLocation(rawIP string) string {
-	return service.LoginMetadataFrom(rawIP, "").LoginLocation
 }
 
 // GetVerifyImgString 获取验证码图片字符串

@@ -31,8 +31,8 @@ const { routeTree } = storeToRefs(routerStore);
 }
 .layout_side {
   flex: 1;
-  overflow: hidden;
   padding-top: 18px;
+  overflow: hidden;
   .scrollbar {
     height: 100%;
   }

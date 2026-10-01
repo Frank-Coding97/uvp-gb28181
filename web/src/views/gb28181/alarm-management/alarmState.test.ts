@@ -75,7 +75,6 @@ describe("alarm deletion state", () => {
     expect(pageAfterAlarmDeletion(2, 20, 50, 1)).toBe(2);
     expect(pageAfterAlarmDeletion(1, 20, 1, 1)).toBe(1);
   });
-
 });
 
 describe("alarm display fallback", () => {

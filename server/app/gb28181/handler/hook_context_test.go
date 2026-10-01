@@ -86,11 +86,9 @@ func (a *hookDeviceAuthority) AuthorizeEpoch(ctx context.Context, _ string, epoc
 		if started != nil {
 			a.startOnce.Do(func() { close(started) })
 		}
-		select {
-		case <-ctx.Done():
-			a.canceled.Store(true)
-			return ctx.Err()
-		}
+		<-ctx.Done()
+		a.canceled.Store(true)
+		return ctx.Err()
 	}
 	if epoch != state.AccessEpoch {
 		return playauth.ErrTokenRevoked

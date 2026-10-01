@@ -102,7 +102,8 @@ func (c *Client) callWithClient(ctx context.Context, httpClient *http.Client, ap
 	}
 	// defer 必须先挂:超限/读取错误等所有路径都必须关闭响应体,否则连接
 	// 被持续占用直到超时
-	defer resp.Body.Close()
+	// 控制面响应体关闭错误无法改变本次 API 结果；显式忽略清理错误。
+	defer func() { _ = resp.Body.Close() }()
 	// 控制响应硬上限:被攻陷或误配置的节点可在超时窗口内持续发送数据,
 	// 无界 io.ReadAll 会让并发请求耗尽后端内存
 	const maxControlResponseBytes = 8 << 20
@@ -876,7 +877,7 @@ func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expi
 	if err != nil {
 		return nil, fmt.Errorf("ZLM getSnap 请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

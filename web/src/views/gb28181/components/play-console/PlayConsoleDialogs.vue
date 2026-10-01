@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { inject } from "vue";
+import { inject, ref } from "vue";
 import { Info, Loader2, Plus, Settings, ShieldCheck, X } from "lucide-vue-next";
+import SNumberField from "@/components/s-number-field/index.vue";
 import ProbeTimelineDialog from "../ProbeTimelineDialog.vue";
 import { PLAY_CONSOLE_CONTEXT } from "./playConsoleContext";
 
 const context = inject(PLAY_CONSOLE_CONTEXT) as Record<string, any> | undefined;
 if (!context) throw new Error("PlayConsoleDialogs must be rendered inside PlayConsoleLinked");
+
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const cruiseSpeedField = ref<NumberFieldInstance | null>(null);
+const cruiseDwellField = ref<NumberFieldInstance | null>(null);
+const cruiseTrackIdField = ref<NumberFieldInstance | null>(null);
 
 const {
   presets,
@@ -41,6 +47,19 @@ const {
   removeCruiseStop,
   addCruiseStop
 } = context;
+
+async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
+  const numberFieldError = [cruiseSpeedField.value?.error, cruiseDwellField.value?.error, cruiseTrackIdField.value?.error].find(
+    Boolean
+  );
+  if (numberFieldError) {
+    cruiseDraftTouched.value = true;
+    cruiseDraftSubmitError.value = numberFieldError;
+    done(false);
+    return;
+  }
+  await handleSaveCruiseBeforeOk(done);
+}
 </script>
 
 <template>
@@ -86,6 +105,7 @@ const {
             id="home-position-reset-time"
             v-model.number="homeDraft.resetTime"
             data-testid="home-reset-time"
+            allow-clear
             type="number"
             inputmode="numeric"
             min="10"
@@ -181,7 +201,7 @@ const {
     :esc-to-close="!cruiseDraft?.submitting"
     :cancel-button-props="{ disabled: cruiseDraft?.submitting || false }"
     :ok-loading="cruiseDraft?.submitting || false"
-    :on-before-ok="handleSaveCruiseBeforeOk"
+    :on-before-ok="handleCruiseSaveBeforeOk"
     :on-before-cancel="canCloseSaveCruiseDialog"
     unmount-on-close
     @cancel="closeSaveCruiseDialog"
@@ -283,14 +303,15 @@ const {
         <label class="cruise-save-label">巡航速度</label>
         <div class="cruise-save-field">
           <div class="cruise-param-line">
-            <a-input-number
+            <s-number-field
+              ref="cruiseSpeedField"
               v-model="cruiseDraft.speed"
               :min="1"
               :max="4095"
-              :step="1"
               :style="{ width: '112px' }"
               :disabled="cruiseDraft.submitting || !cruiseDraft.sendSpeed"
               data-testid="cruise-save-speed"
+              required
               @blur="cruiseDraftTouched = true"
             />
             <span class="cruise-param-mode">
@@ -317,14 +338,15 @@ const {
         <label class="cruise-save-label">每站停留</label>
         <div class="cruise-save-field">
           <div class="cruise-param-line">
-            <a-input-number
+            <s-number-field
+              ref="cruiseDwellField"
               v-model="cruiseDraft.dwellSec"
               :min="1"
               :max="4095"
-              :step="1"
               :style="{ width: '112px' }"
               :disabled="cruiseDraft.submitting || !cruiseDraft.sendDwell"
               data-testid="cruise-save-dwell"
+              required
               @blur="cruiseDraftTouched = true"
             />
             <span class="cruise-save-unit">秒</span>
@@ -354,14 +376,15 @@ const {
           <div class="cruise-save-row">
             <label class="cruise-save-label">编号</label>
             <div class="cruise-save-field">
-              <a-input-number
+              <s-number-field
+                ref="cruiseTrackIdField"
                 v-model="cruiseDraft.trackId"
                 :min="0"
                 :max="255"
-                :step="1"
                 :style="{ width: '96px' }"
                 :disabled="cruiseDraft.submitting"
                 data-testid="cruise-save-track-id"
+                required
                 @blur="cruiseDraftTouched = true"
               />
               <p class="preset-save-hint">轨迹编号由平台自动分配,通常无需修改。</p>

@@ -13,7 +13,8 @@ export function createMediaRateChartSpec(samples: readonly MediaRateSample[]): M
   const latest = samples.at(-1)?.sampledAt ?? null;
   const windowStart = latest === null ? null : latest - MEDIA_RATE_WINDOW_MS;
   const values = windowStart === null ? [] : samples.filter(sample => sample.sampledAt >= windowStart);
-  const numericRates = values.flatMap(sample => [sample.upstream, sample.downstream])
+  const numericRates = values
+    .flatMap(sample => [sample.upstream, sample.downstream])
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
   const axisMax = Math.max(1, ...numericRates);
   const timeDomain = windowStart === null || latest === null ? {} : { min: windowStart, max: latest };
@@ -33,7 +34,11 @@ export function createMediaRateChartSpec(samples: readonly MediaRateSample[]): M
         min: 0,
         max: axisMax,
         nice: false,
-        label: { formatMethod: (value: number) => formatRate(value), autoHide: true, style: { fill: "var(--uvp-text-tertiary)" } },
+        label: {
+          formatMethod: (value: number) => formatRate(value),
+          autoHide: true,
+          style: { fill: "var(--uvp-text-tertiary)" }
+        },
         grid: { visible: true, style: { stroke: "var(--uvp-panel-border)" } },
         domainLine: { visible: false },
         tick: { visible: false, tickCount: 3 }
@@ -52,14 +57,22 @@ export function createMediaRateChartSpec(samples: readonly MediaRateSample[]): M
     ],
     legends: { visible: false },
     tooltip: { activeType: "dimension", confine: true },
-    crosshair: { xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } } },
+    crosshair: {
+      xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } }
+    },
     padding: { left: 8, right: 12, top: 8, bottom: 8 },
     animationAppear: { duration: 220 },
     animationUpdate: { duration: 220, easing: "linear" }
   };
 }
 
-function createRateSeries(field: "upstream" | "downstream", label: string, color: string, fillOpacity: number, latest: number | null) {
+function createRateSeries(
+  field: "upstream" | "downstream",
+  label: string,
+  color: string,
+  fillOpacity: number,
+  latest: number | null
+) {
   return {
     type: "area",
     data: { id: DATA_ID },
@@ -88,7 +101,7 @@ function createRateSeries(field: "upstream" | "downstream", label: string, color
     point: {
       visible: true,
       style: {
-        size: (datum: ChartDatum) => datum.sampledAt === latest ? 6 : 0,
+        size: (datum: ChartDatum) => (datum.sampledAt === latest ? 6 : 0),
         fill: color,
         stroke: "var(--uvp-panel-bg)",
         lineWidth: 1

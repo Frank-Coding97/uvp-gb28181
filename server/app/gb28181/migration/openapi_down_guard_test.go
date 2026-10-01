@@ -427,10 +427,6 @@ func (s *openAPIDownGuardDBState) securityProbeSnapshot() (bool, bool) {
 	return s.securitySafeQuerySeen, s.securityBoolArgIsFalse
 }
 
-func (s *openAPIDownGuardDBState) query(query string) ([][]driver.Value, error) {
-	return s.queryContext(context.Background(), query, nil)
-}
-
 func (s *openAPIDownGuardDBState) queryContext(ctx context.Context, query string, args []driver.NamedValue) ([][]driver.Value, error) {
 	normalized := normalizeOpenAPIDownGuardSQL(query)
 	s.mu.Lock()

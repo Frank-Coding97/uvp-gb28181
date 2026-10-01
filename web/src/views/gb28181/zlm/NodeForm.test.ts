@@ -91,7 +91,9 @@ describe("ZLM node form state", () => {
 
   it("finishes loading and closes the modal before refreshing the node list", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
-    expect(source).toMatch(/finally \{[\s\S]*loading\.value = false;[\s\S]*if \(saved\) \{[\s\S]*close\(\);[\s\S]*emit\("saved"\)/);
+    expect(source).toMatch(
+      /finally \{[\s\S]*loading\.value = false;[\s\S]*if \(saved\) \{[\s\S]*close\(\);[\s\S]*emit\("saved"\)/
+    );
     expect(source).not.toMatch(/emit\("saved"\);\s*emit\("update:visible", false\)/);
   });
 
@@ -112,8 +114,8 @@ describe("ZLM node form state", () => {
 
   it("allows the API Secret to be revealed with the password eye button", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
-    expect(source).toContain(":invisible-button=\"true\"");
-    expect(source).not.toContain(":invisible-button=\"false\"");
+    expect(source).toContain(':invisible-button="true"');
+    expect(source).not.toContain(':invisible-button="false"');
   });
 
   it("guides creation through required connection fields and a real ZLM preview", () => {
@@ -124,7 +126,7 @@ describe("ZLM node form state", () => {
     expect(source).toContain("probeZLMNode");
     expect(source).toContain("连接并读取");
     expect(source).toContain("确认添加");
-    expect(source).toContain('<a-form-item v-if="editing" label="节点名"');
+    expect(source).toMatch(/<a-form-item\s+v-if="editing"\s+label="节点名"/);
     expect(source).toContain("editing ? '管理地址（API Host）' : 'IP 地址'");
     expect(source).not.toContain('<a-descriptions-item label="节点名称">');
   });
@@ -146,7 +148,8 @@ describe("ZLM node form state", () => {
       "ONVIF PORT",
       "RTP 端口范围",
       "协议状态"
-    ]) expect(source).toContain(`label="${label}"`);
+    ])
+      expect(source).toContain(`label="${label}"`);
     expect(source).toContain("已填写（不回显）");
     expect(source).toContain('class="probe-details" :column="2"');
   });

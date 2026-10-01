@@ -58,7 +58,7 @@ func TestOpenAPIDatabasePermissions(t *testing.T) {
 	}
 	raw, err := db.DB()
 	require.NoError(t, err)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	db = db.WithContext(ctx)

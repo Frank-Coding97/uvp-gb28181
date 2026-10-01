@@ -676,7 +676,7 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 	defer wireServer.Close()
 	headResponse, err := wireServer.Client().Head(wireServer.URL + "/openapi/v1/devices")
 	require.NoError(t, err)
-	defer headResponse.Body.Close()
+	defer func() { _ = headResponse.Body.Close() }()
 	require.Equal(t, 405, headResponse.StatusCode)
 	require.Equal(t, "no-store", headResponse.Header.Get("Cache-Control"))
 	headBody, err := io.ReadAll(headResponse.Body)

@@ -310,15 +310,7 @@ func BuildVideoParamAttributeConfigWithProfile(profile protocol.Profile, deviceI
 	if len(items) > 0 {
 		block.Items = make([]videoParamItemXML, 0, len(items))
 		for _, item := range items {
-			block.Items = append(block.Items, videoParamItemXML{
-				StreamNumber: item.StreamNumber,
-				VideoFormat:  item.VideoFormat,
-				Resolution:   item.Resolution,
-				FrameRate:    item.FrameRate,
-				BitRateType:  item.BitRateType,
-				// VBR 时必须缺席（Validate 已保证此处为 nil）。
-				VideoBitRate: item.VideoBitRate,
-			})
+			block.Items = append(block.Items, videoParamItemXML(item))
 		}
 	}
 	return MarshalProfiledXML(profile, deviceConfigXML{

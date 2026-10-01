@@ -20,7 +20,7 @@ import (
 func TestLoggingShutdownBoundBeforeReady(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer occupied.Close()
+	defer func() { _ = occupied.Close() }()
 	core, logs := observer.New(zap.DebugLevel)
 	cleaned := 0
 	err = serveUntilCanceled(context.Background(), &http.Server{Addr: occupied.Addr().String()}, zap.New(core), func(context.Context) error { cleaned++; return nil })
@@ -59,7 +59,7 @@ func TestLoggingShutdownKeepsDependenciesUntilHTTPCompletes(t *testing.T) {
 		r, e := http.Get("http://" + addr)
 		if e == nil {
 			_, e = io.Copy(io.Discard, r.Body)
-			r.Body.Close()
+			_ = r.Body.Close()
 		}
 		response <- e
 	}()

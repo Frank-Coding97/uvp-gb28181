@@ -62,7 +62,7 @@ func TestPlaybackShutdownCancelsSnapshotMismatchSelfCleanup(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Transport, in.Destination = "UDP", peer.LocalAddr().String()
 	entered, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -76,7 +76,7 @@ func TestPlaybackShutdownCancelsSnapshotMismatchSelfCleanup(t *testing.T) {
 			close(cancelled)
 		case <-release:
 		}
-		tx.AddError(errors.New("fixture self-cleanup query interrupted"))
+		_ = tx.AddError(errors.New("fixture self-cleanup query interrupted")) // AddError mutates tx; the returned *DB is intentionally unused.
 	}))
 	finished := make(chan error, 1)
 	joined := make(chan struct{})
@@ -142,7 +142,7 @@ func blockPlaybackInitialization(t *testing.T, db *gorm.DB, fail bool) (<-chan s
 		close(entered)
 		<-released
 		if fail {
-			tx.AddError(errors.New("fixture initialization failed"))
+			_ = tx.AddError(errors.New("fixture initialization failed")) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	t.Cleanup(func() { _ = db.Callback().Query().Remove("fixture:initialization") })
@@ -215,7 +215,7 @@ func TestPlaybackOriginalCloseDuringInitialization(t *testing.T) {
 			barrier := newAuthorizedBarrierTest(t, db)
 			peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 			require.NoError(t, err)
-			defer peer.Close()
+			defer func() { _ = peer.Close() }()
 			in := validPlaybackInvite()
 			in.Transport, in.Destination = "UDP", peer.LocalAddr().String()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

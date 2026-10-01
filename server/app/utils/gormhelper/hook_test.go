@@ -29,7 +29,7 @@ func TestCreateBeforeHookBatches(t *testing.T) {
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:create", CreateBeforeHook))
 	claims := &app.Claims{}
 	claims.UserID = 42
-	ctx := context.WithValue(context.Background(), consts.BindContextKeyName, claims)
+	ctx := context.WithValue(context.Background(), consts.BindContextKey, claims)
 	rows := make([]createHookRow, 5)
 	require.NoError(t, db.WithContext(ctx).CreateInBatches(&rows, 2).Error)
 	require.Zero(t, logs.Len(), "GORM batch slices must not trigger pointer warnings")

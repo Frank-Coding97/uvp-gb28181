@@ -1,7 +1,4 @@
-import type {
-  ZLMCapabilityState,
-  ZLMRTPServerCreateRequest
-} from "@/api/gb28181-zlm-ingress";
+import type { ZLMCapabilityState, ZLMRTPServerCreateRequest } from "@/api/gb28181-zlm-ingress";
 
 export interface RTPServerFormState {
   vhost: string;
@@ -20,9 +17,7 @@ function integer(raw: string, min: number, max: number, blank?: number) {
   if (!text && blank !== undefined) return { value: blank };
   if (!/^\d+$/.test(text)) return { error: `请输入 ${min} 到 ${max} 的整数` };
   const value = Number(text);
-  return Number.isSafeInteger(value) && value >= min && value <= max
-    ? { value }
-    : { error: `请输入 ${min} 到 ${max} 的整数` };
+  return Number.isSafeInteger(value) && value >= min && value <= max ? { value } : { error: `请输入 ${min} 到 ${max} 的整数` };
 }
 
 function validIPv4(raw: string) {
@@ -34,7 +29,7 @@ function validIPv6(raw: string) {
   if (!/^[0-9a-f:.]+$/i.test(raw) || raw.includes(":::")) return false;
   const compressed = raw.split("::");
   if (compressed.length > 2) return false;
-  const tokens = compressed.flatMap(part => part ? part.split(":") : []);
+  const tokens = compressed.flatMap(part => (part ? part.split(":") : []));
   let groups = 0;
   for (const [index, token] of tokens.entries()) {
     if (token.includes(".")) {
@@ -90,7 +85,8 @@ export function rtpCloseDecision(
   hasManagePermission: boolean,
   forceRequested: boolean
 ) {
-  if (capability !== "supported") return { allowed: false, mode: "blocked" as const, reason: "节点能力未明确支持，关闭操作已禁用。" };
+  if (capability !== "supported")
+    return { allowed: false, mode: "blocked" as const, reason: "节点能力未明确支持，关闭操作已禁用。" };
   if (server.released) return { allowed: false, mode: "absent" as const, reason: "RTP 服务已释放。" };
   if (!hasManagePermission) return { allowed: false, mode: "blocked" as const, reason: "缺少 RTP 管理权限。" };
   if (forceRequested) return { allowed: true, mode: "force" as const, reason: "将通过独立强制关闭接口执行。" };

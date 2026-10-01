@@ -12,9 +12,7 @@ const { routeList } = storeToRefs(routeStore);
 const denied = ref(false);
 
 onMounted(() => {
-  const destination = resolveFirstMediaWorkspace(
-    routeList.value.map((route: Menu.MenuOptions) => route.path)
-  );
+  const destination = resolveFirstMediaWorkspace(routeList.value.map((route: Menu.MenuOptions) => route.path));
   if (destination) {
     void router.replace(destination);
     return;
@@ -40,18 +38,18 @@ onMounted(() => {
 <style scoped>
 .media-entry {
   display: grid;
+  place-items: center;
   min-height: 100%;
   padding: var(--zlm-space-6, 24px);
-  place-items: center;
   color: var(--zlm-text-2, var(--color-text-2));
   background: var(--zlm-page-bg, var(--color-fill-1));
 }
 
 .media-entry__state {
   display: grid;
-  max-width: 520px;
-  justify-items: center;
   gap: 10px;
+  justify-items: center;
+  max-width: 520px;
   padding: 30px;
   text-align: center;
   background: var(--zlm-card, var(--color-bg-2));
@@ -65,10 +63,10 @@ onMounted(() => {
 }
 
 .media-entry__code {
-  color: var(--zlm-warn-600, rgb(var(--warning-6)));
   font-family: var(--zlm-font-mono, monospace);
   font-size: 28px;
   font-weight: 700;
+  color: var(--zlm-warn-600, rgb(var(--warning-6)));
 }
 
 .media-entry__pulse {

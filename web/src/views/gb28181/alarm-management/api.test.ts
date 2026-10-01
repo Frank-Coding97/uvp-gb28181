@@ -39,5 +39,4 @@ describe("alarm management API", () => {
     await clearAllAlarms();
     expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/alarms/clear-all");
   });
-
 });

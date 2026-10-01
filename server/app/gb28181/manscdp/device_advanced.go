@@ -394,14 +394,6 @@ func BuildTargetTrackControlWithProfile(profile protocol.Profile, deviceID strin
 	return marshalAdvancedControlWithProfile(profile, deviceID, sn, fields)
 }
 
-func marshalAdvancedControl(deviceID string, sn int, charset XMLCharset, fields advancedDeviceControl) ([]byte, error) {
-	profile, err := advancedProfileForCharset(charset)
-	if err != nil {
-		return nil, err
-	}
-	return marshalAdvancedControlWithProfile(profile, deviceID, sn, fields)
-}
-
 // BuildIFrameControlWithProfile builds the force-key-frame command using the
 // profile's field spelling: deployed 2016 devices commonly require the
 // historical IFameCmd typo, while 2022 uses IFrameCmd.

@@ -17,7 +17,7 @@ import (
 func TestUnixFirewallClientBanStatusUnbanAndReconcile(t *testing.T) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("uvp-agent-%d.sock", os.Getpid()))
 	_ = os.Remove(socket)
-	defer os.Remove(socket)
+	defer func() { _ = os.Remove(socket) }()
 	stop := make(chan struct{})
 	agent := firewall.New(firewall.NewMemoryBackend(), security.RealClock(), nil)
 	errCh := make(chan error, 1)

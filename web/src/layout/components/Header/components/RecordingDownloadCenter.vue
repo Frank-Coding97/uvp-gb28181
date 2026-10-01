@@ -8,20 +8,20 @@
   </a-doption>
   <a-badge v-else-if="canDownload" :count="store.activeCount" :max-count="9" dot>
     <a-tooltip content="下载任务">
-      <a-button
-        type="text"
-        size="mini"
-        class="icon_btn"
-        aria-label="下载任务"
-        :aria-expanded="visible"
-        @click="visible = true"
-      >
+      <a-button type="text" size="mini" class="icon_btn" aria-label="下载任务" :aria-expanded="visible" @click="visible = true">
         <template #icon><Download :size="18" /></template>
       </a-button>
     </a-tooltip>
   </a-badge>
 
-  <a-drawer v-if="canDownload" v-model:visible="visible" width="min(440px, 100vw)" :footer="false" unmount-on-close class="recording-download-drawer">
+  <a-drawer
+    v-if="canDownload"
+    v-model:visible="visible"
+    width="min(440px, 100vw)"
+    :footer="false"
+    unmount-on-close
+    class="recording-download-drawer"
+  >
     <template #title>下载任务</template>
     <div class="recording-download-toolbar">
       <span>{{ store.activeCount ? `${store.activeCount} 个进行中` : "暂无进行中的下载" }}</span>
@@ -38,10 +38,14 @@
         </div>
         <div class="recording-download-item__actions">
           <a-tooltip v-if="canRetry(task.status)" :content="task.status === 'ready' ? '重新触发浏览器下载' : '从零重新下载'">
-            <a-button type="text" size="mini" aria-label="重新下载" @click="retry(task.taskId)"><template #icon><RefreshCw :size="16" /></template></a-button>
+            <a-button type="text" size="mini" aria-label="重新下载" @click="retry(task.taskId)"
+              ><template #icon><RefreshCw :size="16" /></template
+            ></a-button>
           </a-tooltip>
           <a-tooltip v-if="canCancel(task.status)" content="取消下载">
-            <a-button type="text" size="mini" status="danger" aria-label="取消下载" @click="cancel(task.taskId)"><template #icon><X :size="16" /></template></a-button>
+            <a-button type="text" size="mini" status="danger" aria-label="取消下载" @click="cancel(task.taskId)"
+              ><template #icon><X :size="16" /></template
+            ></a-button>
           </a-tooltip>
         </div>
       </section>
@@ -60,7 +64,9 @@ const visible = ref(false);
 const props = defineProps<{ menu?: boolean }>();
 const store = useRecordingDownloadStore();
 const permissions = computed(() => useUserStoreHook().account.permissions);
-const canDownload = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:recording:download"));
+const canDownload = computed(
+  () => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:recording:download")
+);
 const activeStatuses = new Set<RecordingDownloadItem["status"]>(["queued", "ready", "streaming"]);
 const terminalStatuses = new Set<RecordingDownloadItem["status"]>(["completed", "failed", "cancelled", "expired"]);
 
@@ -90,18 +96,32 @@ function etaSeconds(task: RecordingDownloadItem) {
 
 function progressLabel(task: RecordingDownloadItem) {
   if (!task.totalBytes && task.status === "ready") return "等待浏览器开始下载";
-  const label = task.totalBytes ? `${progress(task)}% · ${formatBytes(task.bytesSent)} / ${formatBytes(task.totalBytes)}` : formatBytes(task.bytesSent);
+  const label = task.totalBytes
+    ? `${progress(task)}% · ${formatBytes(task.bytesSent)} / ${formatBytes(task.totalBytes)}`
+    : formatBytes(task.bytesSent);
   const speed = task.speedBytesPerSecond && task.speedBytesPerSecond > 0 ? ` · ${formatBytes(task.speedBytesPerSecond)}/s` : "";
   const eta = etaSeconds(task);
   return `${label}${speed}${eta === undefined ? "" : ` · 剩余${formatDuration(eta)}`}`;
 }
 
 function statusText(status: RecordingDownloadItem["status"]) {
-  return { queued: "排队中", ready: "等待浏览器开始", streaming: "下载中", completed: "已完成", failed: "下载失败", cancelled: "已取消", expired: "已过期" }[status];
+  return {
+    queued: "排队中",
+    ready: "等待浏览器开始",
+    streaming: "下载中",
+    completed: "已完成",
+    failed: "下载失败",
+    cancelled: "已取消",
+    expired: "已过期"
+  }[status];
 }
 
-function canCancel(status: RecordingDownloadItem["status"]) { return activeStatuses.has(status); }
-function canRetry(status: RecordingDownloadItem["status"]) { return status === "ready" || terminalStatuses.has(status); }
+function canCancel(status: RecordingDownloadItem["status"]) {
+  return activeStatuses.has(status);
+}
+function canRetry(status: RecordingDownloadItem["status"]) {
+  return status === "ready" || terminalStatuses.has(status);
+}
 async function cancel(taskId: string) {
   if (!canDownload.value) return;
   await Promise.resolve(recordingDownloadCoordinator.cancel(taskId)).catch(() => undefined);
@@ -117,14 +137,68 @@ function clearTerminal() {
 </script>
 
 <style scoped lang="scss">
-.recording-download-toolbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; color: var(--uvp-text-secondary); font-size: 12px; border-bottom: 1px solid var(--uvp-border); }
-.uvp-user-menu-label { flex: 1; }
-.uvp-user-menu-count { min-width: 18px; height: 18px; padding: 0 5px; color: #fff; background: var(--uvp-brand); border-radius: 9px; font-size: 11px; line-height: 18px; text-align: center; }
-.recording-download-list { display: flex; flex-direction: column; }
-.recording-download-item { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--uvp-border); }
-.recording-download-item__main { display: grid; flex: 1; min-width: 0; gap: 4px; }
-.recording-download-item__main strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.recording-download-item__main span, .recording-download-item__main small { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-size: 12px; }
-.recording-download-item__actions { display: flex; flex: 0 0 auto; }
-@media (max-width: 768px) { .recording-download-item__actions :deep(.arco-btn) { width: 44px; min-height: 44px; } }
+.recording-download-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+  border-bottom: 1px solid var(--uvp-border);
+}
+.uvp-user-menu-label {
+  flex: 1;
+}
+.uvp-user-menu-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #ffffff;
+  text-align: center;
+  background: var(--uvp-brand);
+  border-radius: 9px;
+}
+.recording-download-list {
+  display: flex;
+  flex-direction: column;
+}
+.recording-download-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--uvp-border);
+}
+.recording-download-item__main {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+.recording-download-item__main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.recording-download-item__main span,
+.recording-download-item__main small {
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+  overflow-wrap: anywhere;
+}
+.recording-download-item__actions {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+@media (width <= 768px) {
+  .recording-download-item__actions :deep(.arco-btn) {
+    width: 44px;
+    min-height: 44px;
+  }
+}
 </style>

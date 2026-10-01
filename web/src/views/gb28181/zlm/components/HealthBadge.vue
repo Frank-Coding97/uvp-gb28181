@@ -17,69 +17,68 @@ import { computed } from "vue";
 export type HealthLevel = "healthy" | "warning" | "critical" | "unknown" | string;
 
 const props = defineProps<{
-    health?: HealthLevel | null;
-    reason?: string;
+  health?: HealthLevel | null;
+  reason?: string;
 }>();
 
 const cfg = computed(() => {
-    switch (props.health) {
-        case "healthy":
-            return {
-                bg: "var(--zlm-success-50)",
-                color: "var(--zlm-success-600)",
-                border: "var(--zlm-success-500)",
-                text: "健康"
-            };
-        case "warning":
-            return {
-                bg: "var(--zlm-warn-50)",
-                color: "var(--zlm-warn-600)",
-                border: "var(--zlm-warn-500)",
-                text: "告警"
-            };
-        case "critical":
-            return {
-                bg: "var(--zlm-danger-50)",
-                color: "var(--zlm-danger-600)",
-                border: "var(--zlm-danger-500)",
-                text: "严重"
-            };
-        default:
-            return null;
-    }
+  switch (props.health) {
+    case "healthy":
+      return {
+        bg: "var(--zlm-success-50)",
+        color: "var(--zlm-success-600)",
+        border: "var(--zlm-success-500)",
+        text: "健康"
+      };
+    case "warning":
+      return {
+        bg: "var(--zlm-warn-50)",
+        color: "var(--zlm-warn-600)",
+        border: "var(--zlm-warn-500)",
+        text: "告警"
+      };
+    case "critical":
+      return {
+        bg: "var(--zlm-danger-50)",
+        color: "var(--zlm-danger-600)",
+        border: "var(--zlm-danger-500)",
+        text: "严重"
+      };
+    default:
+      return null;
+  }
 });
 </script>
 
 <template>
-    <span v-if="cfg" class="health-badge" :style="{ background: cfg.bg, color: cfg.color, borderColor: cfg.border }">
-        <span class="text">{{ cfg.text }}</span>
-        <span v-if="reason" class="reason">· {{ reason }}</span>
-    </span>
-    <span v-else class="health-empty">—</span>
+  <span v-if="cfg" class="health-badge" :style="{ background: cfg.bg, color: cfg.color, borderColor: cfg.border }">
+    <span class="text">{{ cfg.text }}</span>
+    <span v-if="reason" class="reason">· {{ reason }}</span>
+  </span>
+  <span v-else class="health-empty">—</span>
 </template>
 
 <style scoped>
-
 .health-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--zlm-space-1);
-    padding: 2px 8px;
-    border-radius: var(--zlm-radius-full);
-    border: 1px solid transparent;
-    font-size: var(--zlm-fs-caption);
-    font-weight: var(--zlm-fw-medium);
-    line-height: 1.4;
-    white-space: nowrap;
+  display: inline-flex;
+  gap: var(--zlm-space-1);
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--zlm-fs-caption);
+  font-weight: var(--zlm-fw-medium);
+  line-height: 1.4;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: var(--zlm-radius-full);
 }
 
 .health-badge .reason {
-    color: inherit;
-    opacity: 0.85;
+  color: inherit;
+  opacity: 0.85;
 }
 
 .health-empty {
-    color: var(--zlm-text-4);
-    font-size: var(--zlm-fs-body);
+  font-size: var(--zlm-fs-body);
+  color: var(--zlm-text-4);
 }
 </style>

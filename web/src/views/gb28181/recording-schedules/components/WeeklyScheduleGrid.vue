@@ -8,7 +8,10 @@
       </div>
 
       <div v-for="(dayName, dayIndex) in dayNames" :key="dayName" class="week-grid-row" role="row">
-        <div class="day-cell"><strong>{{ dayName }}</strong><small>{{ daySlotSummary(dayIndex) }}</small></div>
+        <div class="day-cell">
+          <strong>{{ dayName }}</strong
+          ><small>{{ daySlotSummary(dayIndex) }}</small>
+        </div>
         <div class="slot-cells">
           <template v-for="slotIndex in slotIndexes" :key="slotIndex">
             <button
@@ -21,7 +24,12 @@
               @mousedown.prevent="startPaint(dayIndex, slotIndex)"
               @mouseenter="paintSlot(dayIndex, slotIndex)"
             />
-            <span v-else class="time-slot readonly" :class="{ active: slotActive(dayIndex, slotIndex) }" :title="`${dayName} ${slotTitle(slotIndex)}`" />
+            <span
+              v-else
+              class="time-slot readonly"
+              :class="{ active: slotActive(dayIndex, slotIndex) }"
+              :title="`${dayName} ${slotTitle(slotIndex)}`"
+            />
           </template>
         </div>
         <div v-if="editable" class="day-actions">
@@ -48,7 +56,9 @@ const painting = ref(false);
 const paintValue = ref(true);
 
 function normalizedSlots() {
-  return dayNames.map((_, dayIndex) => Array.from({ length: SLOTS_PER_DAY }, (_, slotIndex) => Boolean(props.slots[dayIndex]?.[slotIndex])));
+  return dayNames.map((_, dayIndex) =>
+    Array.from({ length: SLOTS_PER_DAY }, (_, slotIndex) => Boolean(props.slots[dayIndex]?.[slotIndex]))
+  );
 }
 
 function slotActive(dayIndex: number, slotIndex: number) {
@@ -66,12 +76,16 @@ function startPaint(dayIndex: number, slotIndex: number) {
   if (!props.editable) return;
   painting.value = true;
   paintValue.value = !slotActive(dayIndex, slotIndex);
-  updateSlots(nextSlots => { nextSlots[dayIndex][slotIndex] = paintValue.value; });
+  updateSlots(nextSlots => {
+    nextSlots[dayIndex][slotIndex] = paintValue.value;
+  });
 }
 
 function paintSlot(dayIndex: number, slotIndex: number) {
   if (!props.editable || !painting.value) return;
-  updateSlots(nextSlots => { nextSlots[dayIndex][slotIndex] = paintValue.value; });
+  updateSlots(nextSlots => {
+    nextSlots[dayIndex][slotIndex] = paintValue.value;
+  });
 }
 
 function stopPaint() {
@@ -79,11 +93,15 @@ function stopPaint() {
 }
 
 function fillDay(dayIndex: number) {
-  updateSlots(nextSlots => { nextSlots[dayIndex].fill(true); });
+  updateSlots(nextSlots => {
+    nextSlots[dayIndex].fill(true);
+  });
 }
 
 function clearDay(dayIndex: number) {
-  updateSlots(nextSlots => { nextSlots[dayIndex].fill(false); });
+  updateSlots(nextSlots => {
+    nextSlots[dayIndex].fill(false);
+  });
 }
 
 function slotToTime(slot: number) {
@@ -99,7 +117,7 @@ function slotTitle(slotIndex: number) {
 
 function daySlotSummary(dayIndex: number) {
   const count = props.slots[dayIndex]?.filter(Boolean).length || 0;
-  return count ? `${count * SLOT_MINUTES / 60} 小时` : "未设置";
+  return count ? `${(count * SLOT_MINUTES) / 60} 小时` : "未设置";
 }
 
 onMounted(() => window.addEventListener("mouseup", stopPaint));
@@ -107,31 +125,137 @@ onBeforeUnmount(() => window.removeEventListener("mouseup", stopPaint));
 </script>
 
 <style scoped lang="scss">
-.week-grid-scroll { max-width: 100%; overflow-x: auto; padding-bottom: 4px; }
-.week-slot-grid { min-width: 946px; overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--color-border-3); border-radius: 10px; user-select: none; }
-.week-slot-grid.editable { min-width: 1026px; }
+.week-grid-scroll {
+  max-width: 100%;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+.week-slot-grid {
+  min-width: 946px;
+  overflow: hidden;
+  user-select: none;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--color-border-3);
+  border-radius: 10px;
+}
+.week-slot-grid.editable {
+  min-width: 1026px;
+}
 .week-grid-header,
-.week-grid-row { display: grid; grid-template-columns: 82px repeat(24, minmax(36px, 1fr)); }
+.week-grid-row {
+  display: grid;
+  grid-template-columns: 82px repeat(24, minmax(36px, 1fr));
+}
 .week-slot-grid.editable .week-grid-header,
-.week-slot-grid.editable .week-grid-row { grid-template-columns: 82px repeat(24, minmax(36px, 1fr)) 80px; }
-.week-grid-header { min-height: 34px; color: var(--uvp-text-secondary); background: var(--uvp-table-header-bg); border-bottom: 1px solid var(--color-border-3); }
+.week-slot-grid.editable .week-grid-row {
+  grid-template-columns: 82px repeat(24, minmax(36px, 1fr)) 80px;
+}
+.week-grid-header {
+  min-height: 34px;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-table-header-bg);
+  border-bottom: 1px solid var(--color-border-3);
+}
 .week-grid-corner,
 .hour-cell,
-.week-grid-actions-title { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 620; }
-.week-grid-corner { position: sticky; left: 0; z-index: 4; background: var(--uvp-table-header-bg); border-right: 1px solid var(--color-border-3); }
-.hour-cell { border-right: 1px solid var(--color-border-3); font-variant-numeric: tabular-nums; }
-.week-grid-actions-title { position: sticky; right: 0; z-index: 4; background: var(--uvp-table-header-bg); border-left: 1px solid var(--color-border-3); box-shadow: -6px 0 8px -8px rgb(15 23 42 / 45%); }
-.week-grid-row { min-height: 44px; border-bottom: 1px solid var(--color-border-3); }
-.week-grid-row:last-child { border-bottom: 0; }
-.day-cell { position: sticky; left: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--uvp-panel-bg); border-right: 1px solid var(--color-border-3); box-shadow: 6px 0 8px -8px rgb(15 23 42 / 45%); }
-.day-cell strong { font-size: 12px; }
-.day-cell small { margin-top: 2px; color: var(--uvp-text-tertiary); font-size: 10px; }
-.slot-cells { display: grid; grid-column: span 24; grid-template-columns: repeat(48, minmax(18px, 1fr)); }
-.time-slot { display: block; width: 100%; height: 44px; box-sizing: border-box; padding: 0; background: var(--uvp-table-row-bg); border: 0; border-right: 1px solid var(--color-border-3); }
-button.time-slot { cursor: crosshair; }
-button.time-slot:hover { background: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-table-row-bg)); }
-.time-slot.readonly { cursor: default; }
-.time-slot.active { background: linear-gradient(180deg, color-mix(in srgb, var(--uvp-brand) 88%, white), var(--uvp-brand)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%); }
-.day-actions { position: sticky; right: 0; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 5px; background: var(--uvp-panel-bg); border-left: 1px solid var(--color-border-3); box-shadow: -6px 0 8px -8px rgb(15 23 42 / 45%); }
-.day-actions :deep(.arco-btn-size-mini) { min-width: 34px; padding: 0 5px; border-radius: 6px; font-size: 11px; }
+.week-grid-actions-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 620;
+}
+.week-grid-corner {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--uvp-table-header-bg);
+  border-right: 1px solid var(--color-border-3);
+}
+.hour-cell {
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--color-border-3);
+}
+.week-grid-actions-title {
+  position: sticky;
+  right: 0;
+  z-index: 4;
+  background: var(--uvp-table-header-bg);
+  border-left: 1px solid var(--color-border-3);
+  box-shadow: -6px 0 8px -8px rgb(15 23 42 / 45%);
+}
+.week-grid-row {
+  min-height: 44px;
+  border-bottom: 1px solid var(--color-border-3);
+}
+.week-grid-row:last-child {
+  border-bottom: 0;
+}
+.day-cell {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--uvp-panel-bg);
+  border-right: 1px solid var(--color-border-3);
+  box-shadow: 6px 0 8px -8px rgb(15 23 42 / 45%);
+}
+.day-cell strong {
+  font-size: 12px;
+}
+.day-cell small {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+.slot-cells {
+  display: grid;
+  grid-template-columns: repeat(48, minmax(18px, 1fr));
+  grid-column: span 24;
+}
+.time-slot {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  background: var(--uvp-table-row-bg);
+  border: 0;
+  border-right: 1px solid var(--color-border-3);
+}
+button.time-slot {
+  cursor: crosshair;
+}
+button.time-slot:hover {
+  background: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-table-row-bg));
+}
+.time-slot.readonly {
+  cursor: default;
+}
+.time-slot.active {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--uvp-brand) 88%, white), var(--uvp-brand));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+.day-actions {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  background: var(--uvp-panel-bg);
+  border-left: 1px solid var(--color-border-3);
+  box-shadow: -6px 0 8px -8px rgb(15 23 42 / 45%);
+}
+.day-actions :deep(.arco-btn-size-mini) {
+  min-width: 34px;
+  padding: 0 5px;
+  font-size: 11px;
+  border-radius: 6px;
+}
 </style>

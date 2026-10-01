@@ -37,7 +37,9 @@ func TestOnPlayManagementPreviewClassificationAndTokenBoundaries(t *testing.T) {
 		}
 	})
 	h := handler.NewHookController(stream.NewNotifier())
-	h.SetPreviewRuntime(classifier, signer)
+	if err := h.SetPreviewRuntime(classifier, signer); err != nil {
+		t.Fatal(err)
+	}
 	e := gin.New()
 	e.POST("/index/hook/on_play", h.OnPlay)
 

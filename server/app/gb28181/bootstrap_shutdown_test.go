@@ -104,7 +104,7 @@ func TestStartSIPDependenciesRetainsFailedRollback(t *testing.T) {
 			if stage == "assembly" {
 				ua, err := sipgo.NewUA()
 				require.NoError(t, err)
-				defer ua.Close()
+				defer func() { _ = ua.Close() }()
 				server.uac, err = uac.New(ua, "34020000002000000001", "3402000000", "127.0.0.1", 5061, false)
 				require.NoError(t, err)
 			}
@@ -187,7 +187,6 @@ func (s *bootstrapQuiescingServer) Shutdown(ctx context.Context) error {
 
 func resetBootstrapShutdownState() {
 	activeShutdownRun = nil
-	lastShutdownGeneration = nil
 	stopping = false
 	clearSIPShutdownGlobals()
 	clearControlPlaneGlobals()

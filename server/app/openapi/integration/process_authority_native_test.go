@@ -44,7 +44,7 @@ func TestOpenAPIProcessAuthorityNative(t *testing.T) {
 	}
 	base, err := db.DB()
 	require.NoError(t, err)
-	defer base.Close()
+	defer func() { _ = base.Close() }()
 	base.SetMaxOpenConns(8)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -75,7 +75,7 @@ func TestOpenAPIProcessAuthorityNative(t *testing.T) {
 	require.NoError(t, os.Chmod(stateDir, 0700))
 	lock, err := processauthority.AcquireLocalLock(stateDir)
 	require.NoError(t, err, "test TMPDIR must be a supported persistent local filesystem")
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	domain, err := lock.DomainID()
 	require.NoError(t, err)
 	old := models.ProcessGeneration{GenerationID: strings.Repeat("d", 32), DomainID: domain, StartedAt: time.Now().UTC().Add(-time.Hour)}

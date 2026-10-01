@@ -178,7 +178,7 @@ func (o *playbackIntentOperation) shutdownLocal(ctx context.Context) error {
 		return err
 	}
 	loaded, err = o.persistOriginalFacts(ctx)
-	if err != nil && !(err == ErrPlaybackCleanupUnknown && loaded.Intent.DeviceOperationIntentIdentity == o.id && playbackHasMultipleBranches(loaded, o.invite)) {
+	if err != nil && (err != ErrPlaybackCleanupUnknown || loaded.Intent.DeviceOperationIntentIdentity != o.id || !playbackHasMultipleBranches(loaded, o.invite)) {
 		return err
 	}
 	if err := o.finishINFO(ctx); err != nil {

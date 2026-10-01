@@ -68,7 +68,7 @@ func TestPlaybackPreflightIsNotLeaseOrDurableOperation(t *testing.T) {
 	db, barrier, req := playbackEpochFixture(t)
 	h := &heldPlaybackStage{}
 	s := NewService(NewRegistry(RegistryConfig{}), h, h, h, h, ServiceConfig{DeviceOperations: barrier})
-	defer s.Close(context.Background())
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 	created, err := s.Create(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, req.Authorization, created.Session.Authorization)

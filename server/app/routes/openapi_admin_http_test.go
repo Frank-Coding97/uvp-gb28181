@@ -330,7 +330,7 @@ func (f *openAPIAdminHTTPFixture) do(t *testing.T, token, method, path, body str
 	}
 	response, err := f.client.Do(req)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	require.NoError(t, err)
 	return openAPIAdminHTTPResponse{status: response.StatusCode, headers: response.Header.Clone(), body: data}

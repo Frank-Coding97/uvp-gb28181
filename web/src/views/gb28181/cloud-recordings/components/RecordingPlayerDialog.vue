@@ -121,20 +121,76 @@ watch(
 </script>
 
 <style scoped>
-.recording-player-title { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.recording-player-title > span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--uvp-primary); background: color-mix(in srgb, var(--uvp-primary) 10%, transparent); border-radius: 6px; }
-.recording-player-title > div { display: flex; flex-direction: column; min-width: 0; }
+.recording-player-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.recording-player-title > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--uvp-primary);
+  background: color-mix(in srgb, var(--uvp-primary) 10%, transparent);
+  border-radius: 6px;
+}
+.recording-player-title > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .recording-player-title strong,
-.recording-player-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recording-player-title small { color: var(--uvp-text-tertiary); font-size: 11px; }
-.recording-player-body { min-width: 0; }
-.recording-player-stage { display: grid; width: 100%; aspect-ratio: 16 / 9; place-items: center; overflow: hidden; background: #090b0f; }
-.recording-player-stage video { display: block; width: 100%; height: 100%; object-fit: contain; }
-.recording-player-placeholder { display: flex; flex-direction: column; gap: 10px; align-items: center; color: #a8b0bd; }
-.recording-player-error { margin-top: 12px; }
-.recording-player-error > div { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
-@media (max-width: 640px) {
-  .recording-player-stage { aspect-ratio: 4 / 3; }
-  .recording-player-error :deep(.arco-btn) { min-height: 44px; }
+.recording-player-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-player-title small {
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
+.recording-player-body {
+  min-width: 0;
+}
+.recording-player-stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #090b0f;
+}
+.recording-player-stage video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.recording-player-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  color: #a8b0bd;
+}
+.recording-player-error {
+  margin-top: 12px;
+}
+.recording-player-error > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (width <= 640px) {
+  .recording-player-stage {
+    aspect-ratio: 4 / 3;
+  }
+  .recording-player-error :deep(.arco-btn) {
+    min-height: 44px;
+  }
 }
 </style>

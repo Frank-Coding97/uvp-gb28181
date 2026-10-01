@@ -90,8 +90,14 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
         const taskId = `local-${next.fileId}-${Date.now()}`;
         items.delete(`queued-${next.fileId}`);
         items.set(taskId, {
-          taskId, fileId: next.fileId, fileName: next.fileName, status: "failed", bytesSent: 0,
-          createdAt: new Date().toISOString(), expiresAt: "", errorCode: "create_failed"
+          taskId,
+          fileId: next.fileId,
+          fileName: next.fileName,
+          status: "failed",
+          bytesSent: 0,
+          createdAt: new Date().toISOString(),
+          expiresAt: "",
+          errorCode: "create_failed"
         });
         publish();
       } finally {
@@ -103,17 +109,25 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
   }
 
   async function enqueue(request: DownloadRequest) {
-    if (creatingFileIds.has(request.fileId)
-      || [...items.values()].some(item => item.fileId === request.fileId && !terminalStatuses.has(item.status))
-      || pending.some(item => item.fileId === request.fileId)) return;
+    if (
+      creatingFileIds.has(request.fileId) ||
+      [...items.values()].some(item => item.fileId === request.fileId && !terminalStatuses.has(item.status)) ||
+      pending.some(item => item.fileId === request.fileId)
+    )
+      return;
     pending.push(request);
     await drain();
     if (pending.some(item => item.fileId === request.fileId)) {
       const queuedTaskId = `queued-${request.fileId}`;
       if (!items.has(queuedTaskId)) {
         items.set(queuedTaskId, {
-          taskId: queuedTaskId, fileId: request.fileId, fileName: request.fileName, status: "queued", bytesSent: 0,
-          createdAt: new Date().toISOString(), expiresAt: ""
+          taskId: queuedTaskId,
+          fileId: request.fileId,
+          fileName: request.fileName,
+          status: "queued",
+          bytesSent: 0,
+          createdAt: new Date().toISOString(),
+          expiresAt: ""
         });
         publish();
       }
@@ -174,9 +188,7 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
       if (item.status !== "queued") continue;
       items.set(taskId, { ...item, status: "cancelled" });
     }
-    const cancellations = [...items.values()]
-      .filter(item => activeTaskIds.has(item.taskId))
-      .map(item => cancel(item.taskId));
+    const cancellations = [...items.values()].filter(item => activeTaskIds.has(item.taskId)).map(item => cancel(item.taskId));
     await Promise.allSettled([...cancellations, ...creatingOperations]);
     activeTaskIds.clear();
     contentUrls.clear();
@@ -226,10 +238,12 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
 function isSameOriginContentPath(contentUrl: string, taskId: string) {
   try {
     const url = new URL(contentUrl, window.location.origin);
-    return url.origin === window.location.origin
-      && !url.search
-      && !url.hash
-      && url.pathname === `/api/gb28181/cloud-recordings/downloads/${encodeURIComponent(taskId)}/content`;
+    return (
+      url.origin === window.location.origin &&
+      !url.search &&
+      !url.hash &&
+      url.pathname === `/api/gb28181/cloud-recordings/downloads/${encodeURIComponent(taskId)}/content`
+    );
   } catch {
     return false;
   }

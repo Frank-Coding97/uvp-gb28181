@@ -45,9 +45,6 @@ export const forceLogoutOnlineSessionAPI = (sid: string) =>
   });
 
 export const sessionHeartbeatAPI = () =>
-  http.request<BaseResult<{ online: boolean }>>(
-    "post",
-    baseUrlApi("users/session/heartbeat"),
-    undefined,
-    { showErrorMessage: false }
-  );
+  http.request<BaseResult<{ online: boolean }>>("post", baseUrlApi("users/session/heartbeat"), undefined, {
+    showErrorMessage: false
+  });

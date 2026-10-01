@@ -8,11 +8,7 @@ const sessionMocks = vi.hoisted(() => ({ kick: vi.fn() }));
 
 vi.mock("@/api/gb28181-zlm-runtime", () => ({ kickZLMSession: sessionMocks.kick }));
 
-import {
-  buildNetworkSessionQuery,
-  buildViewerTarget,
-  canKickViewer
-} from "./sessionManagementState";
+import { buildNetworkSessionQuery, buildViewerTarget, canKickViewer } from "./sessionManagementState";
 import ZLMSessionKickDialog from "./ZLMSessionKickDialog.vue";
 
 describe("session management state", () => {
@@ -41,7 +37,10 @@ describe("session management state", () => {
   });
 
   it("uses independent typed server queries and lifecycle-aware polling", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/NetworkSessionPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/NetworkSessionPanel.vue"),
+      "utf8"
+    );
     const kickSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ZLMSessionKickDialog.vue"), "utf8");
     expect(source).toContain("listZLMNetworkSessions");
     expect(source).toContain("listZLMMediaViewers");
@@ -71,9 +70,14 @@ describe("session management state", () => {
       props: ["visible", "nodeId", "targetKey"],
       emits: ["confirm"],
       setup(props, { emit }) {
-        return () => props.visible
-          ? h("button", { class: "confirm-kick", onClick: () => emit("confirm", { nodeId: props.nodeId, targetKey: props.targetKey }) }, "kick")
-          : null;
+        return () =>
+          props.visible
+            ? h(
+                "button",
+                { class: "confirm-kick", onClick: () => emit("confirm", { nodeId: props.nodeId, targetKey: props.targetKey }) },
+                "kick"
+              )
+            : null;
       }
     });
     const wrapper = mount(ZLMSessionKickDialog, {

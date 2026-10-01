@@ -16,8 +16,16 @@ const stubs = {
   "a-doption": { emits: ["click"], template: "<button class='menu-option' @click='$emit(`click`)'><slot /></button>" },
   "a-badge": { template: "<span><slot /></span>" },
   "a-tooltip": { template: "<span><slot /></span>" },
-  "a-button": { emits: ["click"], template: "<button :aria-expanded='$attrs[`aria-expanded`]' :aria-label='$attrs[`aria-label`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
-  "a-drawer": { props: ["visible"], emits: ["update:visible"], template: "<aside v-if='visible'><slot name='title' /><slot /></aside>" },
+  "a-button": {
+    emits: ["click"],
+    template:
+      "<button :aria-expanded='$attrs[`aria-expanded`]' :aria-label='$attrs[`aria-label`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>"
+  },
+  "a-drawer": {
+    props: ["visible"],
+    emits: ["update:visible"],
+    template: "<aside v-if='visible'><slot name='title' /><slot /></aside>"
+  },
   "a-empty": { props: ["description"], template: "<span>{{ description }}</span>" },
   "a-progress": { template: "<span />" }
 };
@@ -54,8 +62,25 @@ describe("RecordingDownloadCenter", () => {
 
   it("rechecks download permission before mutating a task after access is revoked", async () => {
     const store = useRecordingDownloadStore();
-    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
-    store.upsert({ taskId: "two", fileId: "file-2", fileName: "two.mp4", status: "failed", bytesSent: 0, createdAt: "now", expiresAt: "later" });
+    store.upsert({
+      taskId: "one",
+      fileId: "file-1",
+      fileName: "one.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      totalBytes: 100,
+      createdAt: "now",
+      expiresAt: "later"
+    });
+    store.upsert({
+      taskId: "two",
+      fileId: "file-2",
+      fileName: "two.mp4",
+      status: "failed",
+      bytesSent: 0,
+      createdAt: "now",
+      expiresAt: "later"
+    });
     const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
     await wrapper.get("button[aria-label='下载任务']").trigger("click");
     const cancelButton = wrapper.get("button[aria-label='取消下载']");
@@ -71,8 +96,25 @@ describe("RecordingDownloadCenter", () => {
 
   it("shows in-memory task progress and delegates cancel/retry without exposing URLs", async () => {
     const store = useRecordingDownloadStore();
-    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
-    store.upsert({ taskId: "two", fileId: "file-2", fileName: "two.mp4", status: "failed", bytesSent: 0, createdAt: "now", expiresAt: "later" });
+    store.upsert({
+      taskId: "one",
+      fileId: "file-1",
+      fileName: "one.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      totalBytes: 100,
+      createdAt: "now",
+      expiresAt: "later"
+    });
+    store.upsert({
+      taskId: "two",
+      fileId: "file-2",
+      fileName: "two.mp4",
+      status: "failed",
+      bytesSent: 0,
+      createdAt: "now",
+      expiresAt: "later"
+    });
     const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
     const trigger = wrapper.get("button[aria-label='下载任务']");
     expect(trigger.attributes("aria-expanded")).toBe("false");
@@ -88,9 +130,37 @@ describe("RecordingDownloadCenter", () => {
 
   it("shows known speed and ETA without inventing an ETA when they are unavailable", async () => {
     const store = useRecordingDownloadStore();
-    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, speedBytesPerSecond: 25, createdAt: "now", expiresAt: "later" });
-    store.upsert({ taskId: "two", fileId: "file-2", fileName: "two.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
-    store.upsert({ taskId: "three", fileId: "file-3", fileName: "three.mp4", status: "streaming", bytesSent: 50, speedBytesPerSecond: 25, createdAt: "now", expiresAt: "later" });
+    store.upsert({
+      taskId: "one",
+      fileId: "file-1",
+      fileName: "one.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      totalBytes: 100,
+      speedBytesPerSecond: 25,
+      createdAt: "now",
+      expiresAt: "later"
+    });
+    store.upsert({
+      taskId: "two",
+      fileId: "file-2",
+      fileName: "two.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      totalBytes: 100,
+      createdAt: "now",
+      expiresAt: "later"
+    });
+    store.upsert({
+      taskId: "three",
+      fileId: "file-3",
+      fileName: "three.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      speedBytesPerSecond: 25,
+      createdAt: "now",
+      expiresAt: "later"
+    });
     const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
     await wrapper.get("button[aria-label='下载任务']").trigger("click");
     const items = wrapper.findAll(".recording-download-item");
@@ -102,7 +172,16 @@ describe("RecordingDownloadCenter", () => {
 
   it("renders as an account-menu action without exposing the header button", async () => {
     const store = useRecordingDownloadStore();
-    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
+    store.upsert({
+      taskId: "one",
+      fileId: "file-1",
+      fileName: "one.mp4",
+      status: "streaming",
+      bytesSent: 50,
+      totalBytes: 100,
+      createdAt: "now",
+      expiresAt: "later"
+    });
     const wrapper = mount(RecordingDownloadCenter, { props: { menu: true }, global: { stubs } });
 
     expect(wrapper.find("button[aria-label='下载任务']").exists()).toBe(false);

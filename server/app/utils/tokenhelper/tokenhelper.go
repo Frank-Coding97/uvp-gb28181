@@ -278,7 +278,7 @@ func (s *TokenService) RotateRefreshToken(oldRefreshToken string) (string, error
 
 	// 2. 计算剩余有效时间
 	now := time.Now()
-	remainingDuration := claims.ExpiresAt.Time.Sub(now)
+	remainingDuration := claims.ExpiresAt.Sub(now)
 	if remainingDuration <= 0 {
 		return "", errors.New("refresh token has expired")
 	}

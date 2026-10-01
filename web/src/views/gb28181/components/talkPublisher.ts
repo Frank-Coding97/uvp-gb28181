@@ -9,9 +9,7 @@ export function preferPCMA8000(
   transceiver: RTCRtpTransceiver,
   codecs: AudioCodecCapability[] = RTCRtpSender.getCapabilities?.("audio")?.codecs || []
 ) {
-  const pcma = codecs.filter(codec =>
-    codec.mimeType.toLowerCase() === "audio/pcma" && codec.clockRate === 8000
-  );
+  const pcma = codecs.filter(codec => codec.mimeType.toLowerCase() === "audio/pcma" && codec.clockRate === 8000);
   if (!pcma.length) throw new Error("当前浏览器不支持 PCMA/8000 音频编码");
   if (typeof transceiver.setCodecPreferences !== "function") {
     throw new Error("当前浏览器无法锁定 PCMA/8000 音频编码");
@@ -41,10 +39,7 @@ export interface AudioLevelMeter {
  * ⛔ 电平按 dB 映射（-60dB→0，0dB→1），不是线性 RMS —— 线性映射下正常说话只在 0.05 附近，
  * 波形几乎不动。
  */
-export function createAudioLevelMeter(
-  stream: MediaStream,
-  onLevel: (level: number) => void
-): AudioLevelMeter | null {
+export function createAudioLevelMeter(stream: MediaStream, onLevel: (level: number) => void): AudioLevelMeter | null {
   const Ctor: typeof AudioContext | undefined = (window as any).AudioContext || (window as any).webkitAudioContext;
   if (!Ctor) return null;
   let context: AudioContext;
@@ -106,10 +101,7 @@ export function createAudioLevelMeter(
  *
  * @returns 是否真的收齐（`false` = 按已有候选发布，调用方应提示降级）
  */
-export async function waitForIceGatheringComplete(
-  connection: RTCPeerConnection,
-  timeoutMs = 2000
-): Promise<boolean> {
+export async function waitForIceGatheringComplete(connection: RTCPeerConnection, timeoutMs = 2000): Promise<boolean> {
   if (connection.iceGatheringState === "complete") return true;
   return new Promise<boolean>(resolve => {
     const cleanup = () => {

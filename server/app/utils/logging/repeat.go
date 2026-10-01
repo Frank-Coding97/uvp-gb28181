@@ -95,7 +95,7 @@ func (r *Repeater) Fail(key RepeatKey, err error) {
 	}
 	if len(r.states) >= repeatLimit {
 		var oldest repeatKey
-		var sequence uint64 = ^uint64(0)
+		var sequence = ^uint64(0)
 		for k, s := range r.states {
 			if s.sequence < sequence {
 				oldest = k
@@ -197,11 +197,12 @@ func (r *Repeater) emit(key repeatKey, state repeatState, reason string) {
 		fields = append(fields, zap.String("job_id", job))
 	}
 	logger := r.logger.Named(repeatLabel(key.component[:]))
-	if reason == "recovered" {
+	switch reason {
+	case "recovered":
 		logger.Info("Background operation recovered", fields...)
-	} else if reason == "first" {
+	case "first":
 		logger.Warn("Background operation failed", fields...)
-	} else {
+	default:
 		logger.Warn("Repeated background failure summarized", fields...)
 	}
 }

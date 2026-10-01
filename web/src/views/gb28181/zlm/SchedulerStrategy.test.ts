@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 
 describe("scheduler strategy effective boundary", () => {
   it("states that a switch only affects newly allocated invites", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"),
+      "utf8"
+    );
     const legacyShell = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerStrategy.vue"), "utf8");
     expect(source).toContain("只影响新点播");
     // effectiveFrom 的「生效范围」区块在 833798e9「调度策略视图下线」中被有意移除，

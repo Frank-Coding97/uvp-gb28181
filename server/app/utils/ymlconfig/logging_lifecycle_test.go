@@ -158,7 +158,7 @@ func waitForFileWrite(t *testing.T, path, content string) {
 	t.Helper()
 	watcher, err := fsnotify.NewWatcher()
 	require.NoError(t, err)
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 	require.NoError(t, watcher.Add(filepath.Dir(path)))
 	writeConfig(t, path, content)
 	deadline := time.After(5 * time.Second)

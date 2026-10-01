@@ -24,7 +24,7 @@ func GetCurrentUserIDFromContext(ctx interface{}) uint {
 	// 如果ctx不是gin.Context，尝试从context的value中获取
 	// 注意：这需要在调用GORM操作时通过WithValue将Claims注入到context中
 	if gc, ok := ctx.(interface{ Value(interface{}) interface{} }); ok {
-		if claims := gc.Value(consts.BindContextKeyName); claims != nil {
+		if claims := gc.Value(consts.BindContextKey); claims != nil {
 			if c, ok := claims.(*app.Claims); ok {
 				return c.UserID
 			}

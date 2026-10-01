@@ -224,7 +224,9 @@ func validateQueryResponse(operation gbmodels.GbPTZOperation, cmdType string, bo
 
 func headSN(head manscdp.MessageHead) int {
 	var sn int
-	fmt.Sscanf(head.SN, "%d", &sn)
+	if _, err := fmt.Sscanf(head.SN, "%d", &sn); err != nil {
+		return 0
+	}
 	return sn
 }
 

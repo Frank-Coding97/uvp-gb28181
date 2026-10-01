@@ -169,7 +169,7 @@ func TestStopSIPDependenciesStopsCascadeBeforeSharedSIP(t *testing.T) {
 
 	cascadeRuntimeManager = &cascadeRuntimeLifecycleFake{events: &events}
 	sipServer = &fakeSIPRuntimeServer{events: &events}
-	stopSIPDependencies(context.Background())
+	require.NoError(t, stopSIPDependencies(context.Background()))
 
 	require.Equal(t, []string{"record.sink.clear", "cascade.shutdown", "sip.shutdown"}, events)
 	require.Nil(t, cascadeRuntimeManager)
@@ -187,7 +187,7 @@ func TestCascadeRuntimeShutdownFailureDoesNotSkipSharedSIPShutdown(t *testing.T)
 		return errors.New("upstream timeout")
 	})
 	sipServer = &fakeSIPRuntimeServer{events: &events}
-	stopSIPDependencies(context.Background())
+	require.ErrorContains(t, stopSIPDependencies(context.Background()), "cascade: upstream timeout")
 
 	require.Equal(t, []string{"record.sink.clear", "cascade.shutdown", "sip.shutdown"}, events)
 }

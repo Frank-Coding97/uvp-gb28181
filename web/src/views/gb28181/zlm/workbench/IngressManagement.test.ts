@@ -11,8 +11,8 @@ describe("ingress workbench composition", () => {
     expect(source).toContain("ProxyPanel");
     expect(source).toContain("FFmpegPanel");
     expect(source).toContain("RTPPanel");
-    expect(source).toContain(":active=\"active\"");
-    expect(source).toContain(":scope=\"workspace.scope.value\"");
+    expect(source).toContain(':active="active"');
+    expect(source).toContain(':scope="workspace.scope.value"');
   });
 
   it("keeps the old pages as compatibility shells", () => {

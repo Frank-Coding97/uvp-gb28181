@@ -80,8 +80,7 @@ const watermarkConfig = computed(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 
 // 修改左侧滚动条宽度-主要针对main窗口内的滚动条

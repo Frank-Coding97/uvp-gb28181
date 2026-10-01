@@ -24,7 +24,7 @@ describe("default header workspace layout", () => {
     expect(themeConfig).toContain("const isTabs = ref<boolean>(true);");
     expect(themeConfig).toContain("const isBreadcrumb = ref<boolean>(false);");
     expect(systemSettings).not.toContain("system.breadcrumb");
-    expect(systemSettings).not.toContain("v-model=\"isBreadcrumb\"");
+    expect(systemSettings).not.toContain('v-model="isBreadcrumb"');
   });
 
   it("keeps workspace tabs centered in the header slot", () => {
@@ -39,6 +39,6 @@ describe("default header workspace layout", () => {
   it("gives the sidebar collapse control an accessible stateful name", () => {
     const collapseButton = readSource("src/layout/components/Header/components/button-collapsed/index.vue");
 
-    expect(collapseButton).toContain(':aria-label="collapsed ? \'展开侧栏\' : \'收起侧栏\'"');
+    expect(collapseButton).toContain(":aria-label=\"collapsed ? '展开侧栏' : '收起侧栏'\"");
   });
 });

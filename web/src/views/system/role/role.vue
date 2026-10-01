@@ -39,8 +39,9 @@
           <a-table-column title="排序" data-index="sort" :width="100" align="center"></a-table-column>
           <a-table-column title="状态" :width="100" align="center">
             <template #cell="{ record }">
-              <a-tag bordered size="small" color="arcoblue" v-if="record.status === 1">启用</a-tag>
-              <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
+              <a-tag bordered size="small" :color="record.status === 1 ? 'arcoblue' : 'red'">
+                {{ statusLabel(record.status) }}
+              </a-tag>
             </template>
           </a-table-column>
           <!-- 弹性列：不声明 width，由它吸收表格富余宽度，避免其余列（尤其操作列）被按比例拉宽 -->
@@ -135,16 +136,15 @@
             </a-switch>
           </a-form-item>
           <a-form-item field="sort" label="排序" validate-trigger="blur">
-            <a-input-number
+            <s-number-field
+              ref="sortField"
               v-model="addFrom.sort"
-              :step="1"
-              :precision="0"
               :min="0"
               :max="9999"
               :style="{ width: '150px' }"
               placeholder="请输入"
-              mode="button"
               class="input-demo"
+              required
             />
           </a-form-item>
           <a-form-item field="description" label="描述" validate-trigger="blur">
@@ -227,6 +227,8 @@ import { formatTime } from "@/globals";
 import DataScope from "@/views/system/role/components/datascope.vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStatusLabel } from "@/hooks/useDictOptions";
+import SNumberField from "@/components/s-number-field/index.vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -244,6 +246,8 @@ const layoutMode = computed(() => {
 const dataScopeDialogWidth = computed(() => (isMobile.value ? "95%" : 560));
 const proxy = useGlobalProperties();
 const openState = ref(dictFilter("status"));
+// 表格状态列文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 const form = ref({
   name: "",
   status: null
@@ -328,6 +332,8 @@ const addFrom = ref<any>({
 const formType = ref(0); // 0新增 1修改
 const title = ref("");
 const formRef = ref();
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const sortField = ref<NumberFieldInstance | null>(null);
 const onAdd = () => {
   formType.value = 0;
   title.value = "新增角色";
@@ -345,6 +351,11 @@ const onAddChild = (record: RoleItem) => {
 
 // 添加角色
 const handleOk = async () => {
+  const numberFieldError = sortField.value?.error;
+  if (numberFieldError) {
+    arcoMessage("error", numberFieldError);
+    return false;
+  }
   let state = await formRef.value.validate();
   if (state) return false; // 校验不通过
 

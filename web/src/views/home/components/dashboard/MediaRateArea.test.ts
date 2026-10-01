@@ -25,11 +25,13 @@ interface MediaChartSpecLike {
 }
 
 const sampledAt = (time: string) => Date.parse(`2026-09-05T${time}+08:00`);
-const mountChart = (samples: Array<{ upstream: number | null; downstream: number | null; sampledAt: number }>) => mount(MediaRateArea, {
-  props: { samples },
-  global: { stubs: { MediaVChart: mediaVChartStub } }
-});
-const getSpec = (wrapper: ReturnType<typeof mount>): MediaChartSpecLike => wrapper.getComponent(mediaVChartStub).props("spec") as MediaChartSpecLike;
+const mountChart = (samples: Array<{ upstream: number | null; downstream: number | null; sampledAt: number }>) =>
+  mount(MediaRateArea, {
+    props: { samples },
+    global: { stubs: { MediaVChart: mediaVChartStub } }
+  });
+const getSpec = (wrapper: ReturnType<typeof mount>): MediaChartSpecLike =>
+  wrapper.getComponent(mediaVChartStub).props("spec") as MediaChartSpecLike;
 
 describe("MediaRateArea", () => {
   it("plots upstream and downstream together as smooth five-minute area series", () => {
@@ -86,7 +88,12 @@ describe("MediaRateArea", () => {
       },
       point: { visible: true }
     });
-    expect(axes[0]).toMatchObject({ orient: "left", min: 0, label: { style: { fill: "var(--uvp-text-tertiary)" } }, grid: { style: { stroke: "var(--uvp-panel-border)" } } });
+    expect(axes[0]).toMatchObject({
+      orient: "left",
+      min: 0,
+      label: { style: { fill: "var(--uvp-text-tertiary)" } },
+      grid: { style: { stroke: "var(--uvp-panel-border)" } }
+    });
     expect(axes[1]).toMatchObject({
       orient: "bottom",
       type: "time",
@@ -97,9 +104,9 @@ describe("MediaRateArea", () => {
     expect(axes[1].layers[0]).toMatchObject({ tickCount: 3, timeFormat: "%H:%M", timeFormatMode: "local" });
     expect(spec.crosshair).toMatchObject({ xField: { visible: true } });
     expect(source).not.toContain("<svg");
-    expect(source).toContain("height:calc(100% - 74px)");
-    expect(source).toContain("min-height:150px");
-    expect(source).toContain("overflow:hidden");
+    expect(source).toMatch(/\.media-rate-area\s*\{[^}]*height:\s*calc\(100%\s*-\s*74px\);/s);
+    expect(source).toMatch(/\.media-rate-area\s*\{[^}]*min-height:\s*150px;/s);
+    expect(source).toMatch(/\.media-rate-area\s*\{[^}]*overflow:\s*hidden;/s);
     expect(source).not.toContain('color: "transparent"');
   });
 

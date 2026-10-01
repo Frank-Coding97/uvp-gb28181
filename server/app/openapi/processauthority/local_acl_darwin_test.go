@@ -16,7 +16,7 @@ func TestLocalAuthorityRejectsDarwinExtendedACL(t *testing.T) {
 			dir := privateStateDir(t)
 			owner, err := AcquireLocalLock(dir)
 			require.NoError(t, err)
-			defer owner.Close()
+			defer func() { _ = owner.Close() }()
 			path, grant := dir, "user:nobody allow add_file,delete_child"
 			if target == "file" {
 				path, grant = filepath.Join(dir, lockName), "user:nobody allow write,append"
@@ -36,7 +36,7 @@ func TestLocalAuthorityRejectsDarwinExtendedACL(t *testing.T) {
 			require.NoError(t, owner.Close())
 			replacement, err := AcquireLocalLock(dir)
 			if replacement != nil {
-				defer replacement.Close()
+				defer func() { _ = replacement.Close() }()
 			}
 			require.ErrorIs(t, err, ErrLocalAuthorityUnavailable)
 			out, err = exec.Command("/bin/chmod", "-N", path).CombinedOutput()

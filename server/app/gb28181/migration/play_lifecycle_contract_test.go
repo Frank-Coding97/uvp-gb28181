@@ -71,20 +71,20 @@ func TestPlayLifecyclePermissionMigrationThreeDialectContract(t *testing.T) {
 			"/gb28181/playback-log", "gb28181/playback-log/index", "gb28181:play-log:view",
 			"/api/gb28181/play/lifecycles", "/api/gb28181/play/lifecycles/:lifecycleid",
 			"/api/gb28181/play/lifecycles/:lifecycleid/client-events", "sys_menu_api", "sys_casbin_rule", "not exists",
+		} {
+			require.Contains(t, normalized, token, suffix)
+		}
+		if suffix == ".sql" {
+			for _, token := range []string{
+				"convert(p.v0 using utf8mb4) collate utf8mb4_unicode_ci",
+				"convert(p.v1 using utf8mb4) collate utf8mb4_unicode_ci",
+				"convert(p.v2 using utf8mb4) collate utf8mb4_unicode_ci",
+				"convert(p.v3 using utf8mb4) collate utf8mb4_unicode_ci",
 			} {
-				require.Contains(t, normalized, token, suffix)
-			}
-			if suffix == ".sql" {
-				for _, token := range []string{
-					"convert(p.v0 using utf8mb4) collate utf8mb4_unicode_ci",
-					"convert(p.v1 using utf8mb4) collate utf8mb4_unicode_ci",
-					"convert(p.v2 using utf8mb4) collate utf8mb4_unicode_ci",
-					"convert(p.v3 using utf8mb4) collate utf8mb4_unicode_ci",
-				} {
-					require.Contains(t, normalized, token, "mysql permission migration must normalize casbin comparisons: %s", token)
-				}
+				require.Contains(t, normalized, token, "mysql permission migration must normalize casbin comparisons: %s", token)
 			}
 		}
+	}
 	for _, suffix := range []string{"-down.sql", "-postgresql-down.sql", "-sqlserver-down.sql"} {
 		body, err := migrationsfs.FS.ReadFile("migrations/" + base + suffix)
 		require.NoError(t, err)

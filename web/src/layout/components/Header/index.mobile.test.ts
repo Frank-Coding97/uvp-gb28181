@@ -7,11 +7,18 @@ const isMobile = ref(false);
 const theme = reactive({ isTabs: ref(true) });
 vi.mock("@/hooks/useDevicesSize", () => ({ useDevicesSize: () => ({ isMobile }) }));
 vi.mock("@/store/modules/theme-config", () => ({ useThemeConfig: () => theme }));
-vi.mock("@/layout/components/Header/components/header-left/index.vue", () => ({ default: { template: "<button>菜单</button>" } }));
-vi.mock("@/layout/components/Header/components/header-right/index.vue", () => ({ default: { template: "<button>账号</button>" } }));
+vi.mock("@/layout/components/Header/components/header-left/index.vue", () => ({
+  default: { template: "<button>菜单</button>" }
+}));
+vi.mock("@/layout/components/Header/components/header-right/index.vue", () => ({
+  default: { template: "<button>账号</button>" }
+}));
 vi.mock("@/layout/components/Tabs/index.vue", () => ({ default: { template: "<nav>标签栏</nav>" } }));
 
-beforeEach(() => { isMobile.value = false; theme.isTabs = true; });
+beforeEach(() => {
+  isMobile.value = false;
+  theme.isTabs = true;
+});
 
 describe("mobile header", () => {
   it("hides tabs on mobile and restores them without changing the user's preference", async () => {

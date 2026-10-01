@@ -45,7 +45,7 @@ type localLockState struct {
 // AcquireLocalLock requires a pre-provisioned private directory on a supported
 // local persistent filesystem. It never replaces/unlinks an existing lock file
 // or repairs invalid state. Directory provisioning and DB binding belong to root.
-func AcquireLocalLock(path string) (*LocalLock, error) {
+func AcquireLocalLock(path string) (lock *LocalLock, acquireErr error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, ErrLocalAuthorityUnavailable
 	}
@@ -61,7 +61,10 @@ func AcquireLocalLock(path string) (*LocalLock, error) {
 	retained := false
 	defer func() {
 		if !retained {
-			s.close()
+			if closeErr := s.close(); closeErr != nil {
+				acquireErr = errors.Join(acquireErr, closeErr)
+				lock = nil
+			}
 		}
 	}()
 	if !secureLocalFile(dir, true) {

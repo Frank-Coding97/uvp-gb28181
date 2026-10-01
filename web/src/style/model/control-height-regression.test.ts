@@ -41,7 +41,7 @@ describe("control height regression", () => {
     expect(searchPanel).toMatch(/:deep\(\.arco-input-wrapper\)[\s\S]*?min-height:\s*40px;/);
     expect(searchPanel).toMatch(/:deep\(\.arco-btn\)[\s\S]*?height:\s*40px;/);
     // ⛔ `src/style/model/uvp-density.scss` 已于 2026-09-29 删除：它从未被任何入口引入
-    //    （main.ts → style.css → style/index.scss → style/model/index.scss 里没有它），
+    //    （main.ts → style/index.scss → style/model/index.scss 里没有它），
     //    且其分页段是 30px/4px 圆角的旧口径，与分页统一标准 32px/8px 冲突。
     //    分页尺寸现由 uvp-ui-language.scss 的 `.uvp-data-table / .uvp-pagination-bar` 统一负责，
     //    防回归见 src/style/model/pagination-unification.test.ts。

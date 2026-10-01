@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"strconv"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
@@ -244,6 +245,10 @@ func (sdc *SysDictController) Update(c *gin.Context) {
 	// 检查字典编码是否已被其他字典使用
 	existDict := models.NewSysDict()
 	err = app.DBContext(c.Request.Context()).Where("code = ? AND id != ?", req.Code, req.ID).First(existDict).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		sdc.FailAndAbort(c, "查询字典失败", err)
+		return
+	}
 	if !existDict.IsEmpty() {
 		sdc.FailAndAbort(c, "字典编码已被其他字典使用", nil)
 	}

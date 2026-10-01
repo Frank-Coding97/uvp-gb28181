@@ -71,9 +71,9 @@ function confirmForceLogout() {
 <style scoped>
 .online-user-action {
   display: inline-flex;
-  min-width: 0;
   flex-direction: column;
   align-items: center;
+  min-width: 0;
 }
 
 .online-user-action :deep(.arco-btn) {
@@ -88,17 +88,17 @@ function confirmForceLogout() {
 
 .online-user-action__error {
   max-width: 128px;
-  color: rgb(var(--danger-6));
   font-size: 12px;
   line-height: 1.4;
+  color: rgb(var(--danger-6));
   overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .online-user-action,
   .online-user-action * {
-    animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 </style>

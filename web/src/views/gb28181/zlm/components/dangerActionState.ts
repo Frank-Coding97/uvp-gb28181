@@ -29,8 +29,10 @@ export function createDangerActionSnapshot(input: DangerActionSnapshotInput): Da
 }
 
 export function dangerActionSnapshotMatches(snapshot: DangerActionSnapshot, current: DangerActionCurrentIdentity) {
-  return snapshot.contextVersion === current.contextVersion
-    && snapshot.nodeId === current.nodeId
-    && snapshot.targetKey === current.targetKey
-    && (snapshot.fingerprint ?? "") === (current.fingerprint ?? "");
+  return (
+    snapshot.contextVersion === current.contextVersion &&
+    snapshot.nodeId === current.nodeId &&
+    snapshot.targetKey === current.targetKey &&
+    (snapshot.fingerprint ?? "") === (current.fingerprint ?? "")
+  );
 }

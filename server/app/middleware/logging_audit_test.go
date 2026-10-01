@@ -62,14 +62,14 @@ func TestLoggingAuditContext(t *testing.T) {
 		}
 		callbackCtx = tx.Statement.Context
 		callbackOnce.Do(func() { close(callbackDone) })
-		tx.AddError(errors.New("test audit database failure"))
+		_ = tx.AddError(errors.New("test audit database failure")) // AddError mutates tx; the returned *DB is intentionally unused.
 	}))
 
 	claims := &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 42, Username: "operator"}}
 	parent, cancel := context.WithCancel(context.Background())
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		requestContext := context.WithValue(c.Request.Context(), consts.BindContextKeyName, claims)
+		requestContext := context.WithValue(c.Request.Context(), consts.BindContextKey, claims)
 		requestContext = logging.WithContext(requestContext, logging.WithIdentity(root, zap.String("request_id", "audit-rid")))
 		c.Set(consts.BindContextKeyName, claims)
 		c.Request = c.Request.WithContext(requestContext)
@@ -92,7 +92,7 @@ func TestLoggingAuditContext(t *testing.T) {
 	}
 	require.NotNil(t, callbackCtx)
 	require.NoError(t, callbackCtx.Err(), "audit must outlive request cancellation")
-	detachedClaims, ok := callbackCtx.Value(consts.BindContextKeyName).(*app.Claims)
+	detachedClaims, ok := callbackCtx.Value(consts.BindContextKey).(*app.Claims)
 	require.True(t, ok)
 	require.NotSame(t, claims, detachedClaims, "audit context must copy immutable Claims")
 	require.Equal(t, claims.UserID, detachedClaims.UserID)
@@ -115,7 +115,7 @@ func TestLoggingAuditContextPersistsAfterCancel(t *testing.T) {
 	conn, err := db.DB()
 	require.NoError(t, err)
 	conn.SetMaxOpenConns(1)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	require.NoError(t, db.AutoMigrate(&models.SysOperationLog{}))
 	oldDB, oldConfig, oldLog := app.GormDbMysql, app.ConfigYml, app.ZapLog
 	defer func() { app.GormDbMysql, app.ConfigYml, app.ZapLog = oldDB, oldConfig, oldLog }()
@@ -124,7 +124,7 @@ func TestLoggingAuditContextPersistsAfterCancel(t *testing.T) {
 	app.GormDbMysql, app.ConfigYml, app.ZapLog = db, loggingAuditConfig{}, root
 	require.NoError(t, db.Callback().Create().After("gorm:create").Register("test:stored_audit_scope", func(tx *gorm.DB) {
 		record := tx.Statement.Dest.(*models.SysOperationLog)
-		claims := tx.Statement.Context.Value(consts.BindContextKeyName).(*app.Claims)
+		claims := tx.Statement.Context.Value(consts.BindContextKey).(*app.Claims)
 		if claims.UserID != record.UserID {
 			t.Error("audit Claims crossed requests")
 		}

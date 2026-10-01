@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	"gorm.io/gorm"
+	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 )
 
 func checkNativeMustAuthLatch(t *testing.T, db *gorm.DB) {

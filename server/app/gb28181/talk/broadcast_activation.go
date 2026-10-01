@@ -275,7 +275,7 @@ func (s *Service) OnBroadcastAck(ctx context.Context, callID string) error {
 		return err
 	}
 	if !changed {
-		return errors.New("Broadcast ACK 状态已变化")
+		return errors.New("broadcast ACK 状态已变化")
 	}
 	phase := models.TalkSignalPhaseActive
 	_, err = s.repo.UpdateBroadcastFacts(ctx, session.SessionID, BroadcastFactsPatch{SignalPhase: &phase})
@@ -288,12 +288,4 @@ func (s *Service) OnBroadcastBye(ctx context.Context, callID string) error {
 		return err
 	}
 	return s.Cleanup(ctx, session.SessionID, models.TalkSessionEnded, "device sent Broadcast BYE")
-}
-
-func statusFromError(err error, fallback int) int {
-	var sipErr interface{ SIPStatus() int }
-	if errors.As(err, &sipErr) {
-		return sipErr.SIPStatus()
-	}
-	return fallback
 }

@@ -29,10 +29,7 @@
         :today-total="snapshot?.todayTotal ?? 0"
         :today-abnormal="snapshot?.todayAbnormal ?? 0"
       />
-      <PulseChart
-        :samples="snapshot?.pulse?.samples ?? []"
-        :abnormal-windows="snapshot?.pulse?.abnormalWindows ?? []"
-      />
+      <PulseChart :samples="snapshot?.pulse?.samples ?? []" :abnormal-windows="snapshot?.pulse?.abnormalWindows ?? []" />
       <TransactionGrid :transactions="snapshot?.transactions ?? []" />
     </template>
   </div>
@@ -41,12 +38,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Activity, RefreshCw, ShieldAlert } from "lucide-vue-next";
-import {
-  fetchSipDashboardSnapshot,
-  sipDashboardStreamUrl,
-  HEALTH_EMPTY,
-  type DashboardSnapshot
-} from "@/api/gb28181";
+import { fetchSipDashboardSnapshot, sipDashboardStreamUrl, HEALTH_EMPTY, type DashboardSnapshot } from "@/api/gb28181";
 import { classifyDashboardError, type DashboardLoadState } from "../../dashboardState";
 import SummaryBar from "./SummaryBar.vue";
 import TransactionGrid from "./TransactionGrid.vue";

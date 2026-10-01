@@ -195,7 +195,7 @@ func queryDeviceCleanupRows(db *gorm.DB, ctx context.Context, deviceID string, l
 		return nil, ErrDeviceCleanupUnavailable
 	}
 	query := db.WithContext(ctx)
-	if db.Dialector.Name() == "sqlserver" && lock {
+	if db.Name() == "sqlserver" && lock {
 		query = query.Table("gb_device WITH (UPDLOCK, HOLDLOCK)")
 	} else {
 		query = query.Table("gb_device")

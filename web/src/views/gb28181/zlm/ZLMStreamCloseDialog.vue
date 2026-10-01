@@ -16,16 +16,19 @@ import ZLMDangerActionDialog from "./components/ZLMDangerActionDialog.vue";
 import { zlmErrorPresentation } from "./components/zlmFormatters";
 import { streamCloseDecision, streamIdentityKey, type StreamCloseDecision } from "./streamManagementState";
 
-const props = withDefaults(defineProps<{
-  visible: boolean;
-  nodeName: string;
-  targets: ZLMOwnershipTarget[];
-  force?: boolean;
-  canForce?: boolean;
-}>(), {
-  force: false,
-  canForce: false
-});
+const props = withDefaults(
+  defineProps<{
+    visible: boolean;
+    nodeName: string;
+    targets: ZLMOwnershipTarget[];
+    force?: boolean;
+    canForce?: boolean;
+  }>(),
+  {
+    force: false,
+    canForce: false
+  }
+);
 
 const emit = defineEmits<{
   "update:visible": [visible: boolean];
@@ -49,11 +52,13 @@ const targetLabel = computed(() => {
   if (props.targets.length > 1) return `${props.targets.length} 路媒体流`;
   return `${first.media.schema}://${first.media.vhost}/${first.media.app}/${first.media.stream}`;
 });
-const confirmPhrase = computed(() => props.force
-  ? `强制关闭 ${firstTarget.value?.media.stream ?? "媒体流"}`
-  : props.targets.length > 1
-    ? `关闭 ${props.targets.length} 路流`
-    : `关闭 ${firstTarget.value?.media.stream ?? "媒体流"}`);
+const confirmPhrase = computed(() =>
+  props.force
+    ? `强制关闭 ${firstTarget.value?.media.stream ?? "媒体流"}`
+    : props.targets.length > 1
+      ? `关闭 ${props.targets.length} 路流`
+      : `关闭 ${firstTarget.value?.media.stream ?? "媒体流"}`
+);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const canConfirm = computed(() => Boolean(firstTarget.value && fingerprint.value && decision.value?.allowed && !loadError.value));
 
@@ -64,8 +69,10 @@ function isOwnershipSnapshot(snapshot: ZLMStreamOwnership | ZLMOwnershipSnapshot
 function ownershipLines(snapshot: ZLMStreamOwnership | ZLMOwnershipSnapshot, prefix = "") {
   const lines = [`${prefix}后端归属：${snapshot.status}`];
   if (isOwnershipSnapshot(snapshot)) {
-    for (const owner of snapshot.owners ?? []) lines.push(`${prefix}${owner.type}${owner.owner ? ` · ${owner.owner}` : ""}（${owner.confidence}）`);
-    for (const impact of snapshot.impacts ?? []) lines.push(`${prefix}${impact.resourceType || "业务资源"}${impact.resourceKey ? ` · ${impact.resourceKey}` : ""}`);
+    for (const owner of snapshot.owners ?? [])
+      lines.push(`${prefix}${owner.type}${owner.owner ? ` · ${owner.owner}` : ""}（${owner.confidence}）`);
+    for (const impact of snapshot.impacts ?? [])
+      lines.push(`${prefix}${impact.resourceType || "业务资源"}${impact.resourceKey ? ` · ${impact.resourceKey}` : ""}`);
   } else {
     for (const source of snapshot.sources ?? []) lines.push(`${prefix}${source.type}（${source.confidence}）`);
     for (const impact of snapshot.impacts ?? []) lines.push(`${prefix}${impact.type} × ${impact.count}`);
@@ -82,7 +89,9 @@ function batchDecision(preflight: ZLMOwnershipBatchPreflight): StreamCloseDecisi
   if (props.force) {
     return { allowed: false, mode: "blocked", reason: "后端没有批量强制关闭契约，请逐路预检并强制关闭。" };
   }
-  const protectedCount = preflight.snapshots.filter(snapshot => snapshot.status !== "managed" && snapshot.status !== "absent").length;
+  const protectedCount = preflight.snapshots.filter(
+    snapshot => snapshot.status !== "managed" && snapshot.status !== "absent"
+  ).length;
   if (protectedCount > 0) {
     return {
       allowed: false,
@@ -138,7 +147,12 @@ function close() {
 
 async function confirm(payload: { nodeId: number; targetKey: string; fingerprint: string; reason: string }) {
   const target = firstTarget.value;
-  if (!target || payload.nodeId !== target.nodeId || payload.targetKey !== targetKey.value || payload.fingerprint !== fingerprint.value) {
+  if (
+    !target ||
+    payload.nodeId !== target.nodeId ||
+    payload.targetKey !== targetKey.value ||
+    payload.fingerprint !== fingerprint.value
+  ) {
     loadError.value = new Error("确认快照已变化，请关闭后重新预检");
     return;
   }
@@ -171,7 +185,11 @@ async function confirm(payload: { nodeId: number; targetKey: string; fingerprint
     close();
   } catch (error) {
     loadError.value = error;
-    decision.value = { allowed: false, mode: "blocked", reason: "执行结果未确认；请关闭窗口并重新预检，页面不会沿用旧 fingerprint。" };
+    decision.value = {
+      allowed: false,
+      mode: "blocked",
+      reason: "执行结果未确认；请关闭窗口并重新预检，页面不会沿用旧 fingerprint。"
+    };
   } finally {
     busy.value = false;
   }
@@ -213,19 +231,84 @@ async function confirm(payload: { nodeId: number; targetKey: string; fingerprint
       <div :class="['preflight-message', { 'preflight-message--error': loadError }]" :role="loadError ? 'alert' : 'status'">
         {{ loadError ? errorPresentation.label : decision?.reason || "没有可执行的目标。" }}
       </div>
-      <dl><div><dt>节点</dt><dd>{{ nodeName }}（#{{ firstTarget?.nodeId || '—' }}）</dd></div><div><dt>目标</dt><dd>{{ targetLabel }}</dd></div></dl>
-      <ul v-if="impactLines.length"><li v-for="line in impactLines" :key="line">{{ line }}</li></ul>
-      <div class="preflight-actions"><a-button @click="close">关闭</a-button><a-button v-if="loadError && errorPresentation.retryable" type="primary" @click="loadPreflight">重新预检</a-button></div>
+      <dl>
+        <div>
+          <dt>节点</dt>
+          <dd>{{ nodeName }}（#{{ firstTarget?.nodeId || "—" }}）</dd>
+        </div>
+        <div>
+          <dt>目标</dt>
+          <dd>{{ targetLabel }}</dd>
+        </div>
+      </dl>
+      <ul v-if="impactLines.length">
+        <li v-for="line in impactLines" :key="line">{{ line }}</li>
+      </ul>
+      <div class="preflight-actions">
+        <a-button @click="close">关闭</a-button
+        ><a-button v-if="loadError && errorPresentation.retryable" type="primary" @click="loadPreflight">重新预检</a-button>
+      </div>
     </div>
   </a-modal>
 </template>
 
 <style scoped>
-.preflight-state { display: flex; min-height: 180px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); }
-.preflight-body { display: flex; flex-direction: column; gap: 14px; color: var(--zlm-text-2); }
-.preflight-message { padding: 10px 12px; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border: 1px solid var(--zlm-warn-500); border-radius: var(--zlm-radius-md); line-height: 1.6; }
-.preflight-message--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
-dl { display: grid; gap: 8px; margin: 0; } dl div { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; } dt { color: var(--zlm-text-3); } dd { margin: 0; overflow-wrap: anywhere; color: var(--zlm-text-1); }
-ul { max-height: 180px; margin: 0; padding-left: 20px; overflow: auto; line-height: 1.7; }
-.preflight-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.preflight-state {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: var(--zlm-text-3);
+}
+.preflight-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--zlm-text-2);
+}
+.preflight-message {
+  padding: 10px 12px;
+  line-height: 1.6;
+  color: var(--zlm-warn-600);
+  background: var(--zlm-warn-50);
+  border: 1px solid var(--zlm-warn-500);
+  border-radius: var(--zlm-radius-md);
+}
+.preflight-message--error {
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border-color: var(--zlm-danger-500);
+}
+dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+dl div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+}
+dt {
+  color: var(--zlm-text-3);
+}
+dd {
+  margin: 0;
+  color: var(--zlm-text-1);
+  overflow-wrap: anywhere;
+}
+ul {
+  max-height: 180px;
+  padding-left: 20px;
+  margin: 0;
+  overflow: auto;
+  line-height: 1.7;
+}
+.preflight-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
 </style>

@@ -94,7 +94,7 @@ func resolveRouteLocalIP(destination string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("解析 SIP 目的地址路由失败: %w", err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	host, _, err := net.SplitHostPort(connection.LocalAddr().String())
 	if err != nil {
 		return "", fmt.Errorf("解析 SIP 本地路由地址失败: %w", err)
@@ -210,7 +210,9 @@ func detectMessageKind(body []byte) metrics.TxKind {
 
 func (u *UAC) deviceURI(deviceID string) sip.Uri {
 	uri := sip.Uri{}
-	sip.ParseUri(fmt.Sprintf("sip:%s@%s", deviceID, u.domain), &uri)
+	if err := sip.ParseUri(fmt.Sprintf("sip:%s@%s", deviceID, u.domain), &uri); err != nil {
+		return sip.Uri{}
+	}
 	return uri
 }
 

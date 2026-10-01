@@ -33,7 +33,7 @@ func benchmarkLogging(b *testing.B, target, impl string, complex bool) {
 	}
 	cfg.Outputs = []string{"stdout"}
 	cfg.StdoutFormat = "json"
-	var sink zapcore.WriteSyncer = zapcore.AddSync(io.Discard)
+	var sink = zapcore.AddSync(io.Discard)
 	if target == "File" {
 		writer, err := openFileWriter(writerOptions{path: filepath.Join(b.TempDir(), "runtime.log"), maxBytes: 5 << 20, maxBackups: 7, maxAge: 15 * 24 * time.Hour})
 		if err != nil {

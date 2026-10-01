@@ -74,7 +74,8 @@ func (p *ContentProxy) Stream(ctx context.Context, writer http.ResponseWriter, d
 	if response == nil || response.Body == nil {
 		return ErrContentUpstream
 	}
-	defer response.Body.Close()
+	// 响应体只承担本次转发的读取，关闭错误无法改变已开始的响应；显式忽略清理错误。
+	defer func() { _ = response.Body.Close() }()
 
 	if err := validateContentStatus(response.StatusCode, request.Range != ""); err != nil {
 		return err

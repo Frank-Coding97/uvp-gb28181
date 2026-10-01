@@ -14,7 +14,9 @@ const api = vi.hoisted(() => ({
   stopActiveRecording: vi.fn()
 }));
 const enqueueDownload = vi.hoisted(() => vi.fn());
-const account = vi.hoisted(() => ({ permissions: ["gb28181:recording:view", "gb28181:recording:reconcile", "gb28181:recording:download"] as string[] }));
+const account = vi.hoisted(() => ({
+  permissions: ["gb28181:recording:view", "gb28181:recording:reconcile", "gb28181:recording:download"] as string[]
+}));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const modalWarning = vi.hoisted(() => vi.fn());
 
@@ -61,15 +63,30 @@ const file = (availability = "available", metadataState = "complete") => ({
 const tableStub = {
   props: ["data", "pagination", "selectedKeys", "rowSelection"],
   emits: ["update:selectedKeys"],
-  provide() { return { recordingTable: this }; },
-  template: "<div data-testid='recording-table' :data-count='data.length' :data-total='pagination.total'><button v-if='data.length && rowSelection' data-testid='select-first-recording' @click='$emit(`update:selectedKeys`, [data[0].id])'>选择</button><slot name='columns' /><slot v-if='!data.length' name='empty' /></div>"
+  provide() {
+    return { recordingTable: this };
+  },
+  template:
+    "<div data-testid='recording-table' :data-count='data.length' :data-total='pagination.total'><button v-if='data.length && rowSelection' data-testid='select-first-recording' @click='$emit(`update:selectedKeys`, [data[0].id])'>选择</button><slot name='columns' /><slot v-if='!data.length' name='empty' /></div>"
 };
 const stubs = {
   "s-layout-search": { template: "<section><slot name='fields' /><slot name='actions' /></section>" },
   "a-table": tableStub,
-  "a-table-column": { props: ["title"], inject: ["recordingTable"], template: "<span>{{ title }}<template v-for='record in recordingTable.data'><slot name='cell' :record='record' /></template></span>" },
-  "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' :data-type='$attrs.type' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
-  "a-link": { emits: ["click"], template: "<a :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></a>" },
+  "a-table-column": {
+    props: ["title"],
+    inject: ["recordingTable"],
+    template:
+      "<span>{{ title }}<template v-for='record in recordingTable.data'><slot name='cell' :record='record' /></template></span>"
+  },
+  "a-button": {
+    emits: ["click"],
+    template:
+      "<button :data-testid='$attrs[`data-testid`]' :data-type='$attrs.type' @click='$emit(`click`)'><slot name='icon' /><slot /></button>"
+  },
+  "a-link": {
+    emits: ["click"],
+    template: "<a :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></a>"
+  },
   "a-tag": { template: "<span><slot /></span>" },
   "a-alert": { template: "<div><slot /></div>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
@@ -101,12 +118,20 @@ describe("cloud recording layout", () => {
     expect(shellSource).toContain('class="snow-fill cloud-recordings-route"');
     expect(source).toContain('class="cloud-recordings-page"');
     expect(source).toContain('class="cloud-recordings-shell"');
-    expect(source).toMatch(/\.cloud-recordings-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
-    expect(source).toMatch(/\.cloud-recordings-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
-    expect(source).toMatch(/\.recording-files-view,\s*\.active-recordings-view\s*{[^}]*display:\s*flex;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;/s);
-    expect(source).toMatch(/\.cloud-recordings-table-wrap\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
-    expect(source).toContain('x: 1694');
-    expect(source).toContain("...(files.value.length ? { y: \"100%\" } : {})");
+    expect(source).toMatch(
+      /\.cloud-recordings-page\s*\{(?=[^}]*height:\s*100%;)(?=[^}]*min-height:\s*0;)(?=[^}]*overflow:\s*hidden;)[^}]*\}/s
+    );
+    expect(source).toMatch(
+      /\.cloud-recordings-shell\s*\{(?=[^}]*display:\s*flex;)(?=[^}]*height:\s*100%;)(?=[^}]*min-height:\s*0;)(?=[^}]*flex-direction:\s*column;)(?=[^}]*overflow:\s*hidden;)[^}]*\}/s
+    );
+    expect(source).toMatch(
+      /\.recording-files-view,\s*\.active-recordings-view\s*\{(?=[^}]*display:\s*flex;)(?=[^}]*min-height:\s*0;)(?=[^}]*flex-direction:\s*column;)[^}]*\}/s
+    );
+    expect(source).toMatch(
+      /\.cloud-recordings-table-wrap\s*\{(?=[^}]*flex:\s*1;)(?=[^}]*min-height:\s*0;)(?=[^}]*overflow:\s*hidden;)[^}]*\}/s
+    );
+    expect(source).toContain("x: 1694");
+    expect(source).toContain('...(files.value.length ? { y: "100%" } : {})');
   });
 });
 
@@ -120,11 +145,33 @@ describe("CloudRecordings", () => {
     Object.values(api).forEach(mock => mock.mockReset());
     api.listRecordingFiles.mockResolvedValue(pageResult());
     api.listRecordingOptions.mockResolvedValue({ code: 0, message: "", data: { channels: [], devices: [], nodes: [] } });
-    api.listActiveRecordings.mockResolvedValue({ code: 0, message: "", data: { list: [{ id: "77", channelId: "12", channelCode: "c", channelName: "东门", deviceId: "d", node: { id: "8", name: "节点 A" }, state: "recording", startedAt: "2026-08-10T12:00:00Z", updatedAt: "2026-08-10T12:01:00Z" }] } });
+    api.listActiveRecordings.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        list: [
+          {
+            id: "77",
+            channelId: "12",
+            channelCode: "c",
+            channelName: "东门",
+            deviceId: "d",
+            node: { id: "8", name: "节点 A" },
+            state: "recording",
+            startedAt: "2026-08-10T12:00:00Z",
+            updatedAt: "2026-08-10T12:01:00Z"
+          }
+        ]
+      }
+    });
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [] } });
     api.triggerReconciliation.mockResolvedValue({ code: 0, message: "", data: { acceptedNodeIds: [8] } });
     api.deleteRecordingFile.mockResolvedValue({ code: 0, message: "", data: { id: "9007199254740993", deleted: true } });
-    api.batchDeleteRecordingFiles.mockResolvedValue({ code: 0, message: "", data: { deletedCount: 1, failedCount: 0, results: [{ id: "9007199254740993", deleted: true }] } });
+    api.batchDeleteRecordingFiles.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { deletedCount: 1, failedCount: 0, results: [{ id: "9007199254740993", deleted: true }] }
+    });
     api.stopActiveRecording.mockResolvedValue({ code: 0, message: "", data: { id: "77", channelId: "12", stopped: true } });
     enqueueDownload.mockReset();
     messages.success.mockReset();
@@ -188,7 +235,9 @@ describe("CloudRecordings", () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(source).toMatch(/title="录像时间"[^>]*>[\s\S]*?title="时长"[^>]*>[\s\S]*?title="设备"[^>]*>[\s\S]*?title="通道"[^>]*>/);
+    expect(source).toMatch(
+      /title="录像时间"[^>]*>[\s\S]*?title="时长"[^>]*>[\s\S]*?title="设备"[^>]*>[\s\S]*?title="通道"[^>]*>/
+    );
     const timeCell = wrapper.get("[data-testid='recording-time-9007199254740993']");
     expect(timeCell.text()).toContain(new Date("2026-08-10T12:00:00Z").toLocaleString("zh-CN", { hour12: false }));
     expect(timeCell.text()).toContain(new Date("2026-08-10T12:10:00Z").toLocaleString("zh-CN", { hour12: false }));
@@ -265,18 +314,23 @@ describe("CloudRecordings", () => {
 
     expect(wrapper.get("[data-testid='recording-reconcile']").classes()).toContain("recording-reconcile-button");
     expect(wrapper.get("[data-testid='recording-reconcile']").attributes("data-type")).not.toBe("primary");
-    expect(source).toMatch(/\.recording-reconcile-button\s*{[^}]*color-mix\(in srgb, #7c3aed 82%, var\(--uvp-text-primary\)\);[^}]*background:[^;]*#7c3aed 9%/s);
+    expect(source).toMatch(
+      /\.recording-reconcile-button\s*{[^}]*color-mix\(in srgb, #7c3aed 82%, var\(--uvp-text-primary\)\);[^}]*background:[^;]*#7c3aed 9%/s
+    );
     expect(wrapper.get("[data-testid='reconciliation-summary']").text()).toContain("节点目录已对账");
     expect(wrapper.find("[data-testid='reconciliation-success-icon']").exists()).toBe(true);
   });
 
-  it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])("hides access actions for %s", async availability => {
-    api.listRecordingFiles.mockResolvedValue(pageResult([file(availability)]));
-    const wrapper = mount(CloudRecordings, { global: { stubs } });
-    await flushPromises();
-    expect(wrapper.find("[data-testid='play-9007199254740993']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
-  });
+  it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])(
+    "hides access actions for %s",
+    async availability => {
+      api.listRecordingFiles.mockResolvedValue(pageResult([file(availability)]));
+      const wrapper = mount(CloudRecordings, { global: { stubs } });
+      await flushPromises();
+      expect(wrapper.find("[data-testid='play-9007199254740993']").exists()).toBe(false);
+      expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
+    }
+  );
 
   it("does not request reconciliation status for view-only users on mount or refresh", async () => {
     account.permissions = ["gb28181:recording:view"];

@@ -151,10 +151,10 @@
             </a-select>
           </a-form-item>
           <a-form-item field="name" label="任务名称">
-            <a-input v-model="editingData.name" placeholder="请输入任务名称" />
+            <a-input v-model="editingData.name" allow-clear placeholder="请输入任务名称" />
           </a-form-item>
           <a-form-item field="description" label="任务描述">
-            <a-textarea v-model="editingData.description" placeholder="请输入任务描述" />
+            <a-textarea v-model="editingData.description" allow-clear placeholder="请输入任务描述" />
           </a-form-item>
           <a-form-item field="executorName" label="执行器名称">
             <a-select v-model="editingData.executorName" placeholder="请选择执行器名称">
@@ -177,7 +177,7 @@
             </a-radio-group>
           </a-form-item>
           <a-form-item field="cronExpression" label="Cron表达式">
-            <a-input v-model="editingData.cronExpression" placeholder="请输入Cron表达式" />
+            <a-input v-model="editingData.cronExpression" allow-clear placeholder="请输入Cron表达式" />
             <template #extra>
               <div style="margin-top: 8px">
                 <div style="margin-bottom: 4px; font-weight: 500">常用示例：</div>
@@ -220,7 +220,7 @@
             </template>
           </a-form-item>
           <a-form-item field="parameters" label="任务参数">
-            <a-textarea v-model="editingData.parameters" placeholder="请输入任务参数" />
+            <a-textarea v-model="editingData.parameters" allow-clear placeholder="请输入任务参数" />
             <template #extra> JSON格式, 例如: {"param1": "value1", "param2": "value2"} </template>
           </a-form-item>
           <a-form-item field="blockingPolicy" label="阻塞策略">

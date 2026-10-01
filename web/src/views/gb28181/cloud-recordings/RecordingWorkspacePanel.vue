@@ -7,7 +7,13 @@
 
       <template v-else>
         <div class="cloud-recordings-toolbar">
-          <div v-if="mode !== 'files'" class="segmented recording-view-switch" role="group" aria-label="录像视图" data-testid="recording-view-switch">
+          <div
+            v-if="mode !== 'files'"
+            class="segmented recording-view-switch"
+            role="group"
+            aria-label="录像视图"
+            data-testid="recording-view-switch"
+          >
             <button
               v-if="mode === 'all'"
               type="button"
@@ -81,225 +87,250 @@
         </div>
 
         <template v-if="activeView === 'files'">
-            <div v-if="activeView === 'files'" class="recording-files-view">
-              <s-layout-search>
-                <template #fields>
-                  <a-range-picker
-                    class="recording-date-range"
-                    v-model="form.range"
-                    show-time
-                    allow-clear
-                    format="YYYY-MM-DD HH:mm"
-                    value-format="YYYY-MM-DDTHH:mm:ssZ"
-                  />
-                  <a-select v-model="form.nodeId" placeholder="存储节点" allow-clear style="width: 160px">
-                    <a-option v-for="node in options.nodes" :key="node.id" :value="node.id">
-                      {{ node.name || `节点 ${node.id}` }}
-                    </a-option>
-                  </a-select>
-                  <a-select v-model="form.availability" placeholder="可用状态" allow-clear style="width: 150px">
-                    <a-option v-for="item in availabilityOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
-                  </a-select>
-                  <a-select v-model="form.metadataState" placeholder="信息状态" allow-clear style="width: 130px">
-                    <a-option value="complete">信息完整</a-option>
-                    <a-option value="partial">待完善</a-option>
-                  </a-select>
-                  <a-input
-                    v-model="form.keyword"
-                    data-testid="recording-keyword"
-                    placeholder="文件名 / 设备名称或编号 / 通道名称或编号"
-                    allow-clear
-                    style="width: 320px"
-                    @press-enter="queryFiles"
-                  />
-                </template>
-                <template #actions>
-                  <a-button type="primary" data-testid="recording-query" @click="queryFiles">
-                    <template #icon><Search :size="15" /></template>
-                    查询
-                  </a-button>
-                  <a-button data-testid="recording-reset" @click="resetFilters">
-                    <template #icon><RotateCcw :size="15" /></template>
-                    重置
-                  </a-button>
-                </template>
-              </s-layout-search>
+          <div v-if="activeView === 'files'" class="recording-files-view">
+            <s-layout-search>
+              <template #fields>
+                <a-range-picker
+                  class="recording-date-range"
+                  v-model="form.range"
+                  show-time
+                  allow-clear
+                  format="YYYY-MM-DD HH:mm"
+                  value-format="YYYY-MM-DDTHH:mm:ssZ"
+                />
+                <a-select v-model="form.nodeId" placeholder="存储节点" allow-clear style="width: 160px">
+                  <a-option v-for="node in options.nodes" :key="node.id" :value="node.id">
+                    {{ node.name || `节点 ${node.id}` }}
+                  </a-option>
+                </a-select>
+                <a-select v-model="form.availability" placeholder="可用状态" allow-clear style="width: 150px">
+                  <a-option v-for="item in availabilityOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
+                </a-select>
+                <a-select v-model="form.metadataState" placeholder="信息状态" allow-clear style="width: 130px">
+                  <a-option value="complete">信息完整</a-option>
+                  <a-option value="partial">待完善</a-option>
+                </a-select>
+                <a-input
+                  v-model="form.keyword"
+                  data-testid="recording-keyword"
+                  placeholder="文件名 / 设备名称或编号 / 通道名称或编号"
+                  allow-clear
+                  style="width: 320px"
+                  @press-enter="queryFiles"
+                />
+              </template>
+              <template #actions>
+                <a-button type="primary" data-testid="recording-query" @click="queryFiles">
+                  <template #icon><Search :size="15" /></template>
+                  查询
+                </a-button>
+                <a-button data-testid="recording-reset" @click="resetFilters">
+                  <template #icon><RotateCcw :size="15" /></template>
+                  重置
+                </a-button>
+              </template>
+            </s-layout-search>
 
-              <div v-if="canDelete && selectedRowKeys.length" class="recording-batch-bar">
-                <span>已选 <strong>{{ selectedRowKeys.length }}</strong> 个录像文件</span>
-                <div class="recording-batch-bar__actions">
-                  <a-button data-testid="recording-batch-delete" status="danger" :loading="batchDeleting" :disabled="batchDeleting" @click="requestBatchDelete">
-                    <template #icon><Trash2 :size="14" /></template>
-                    批量删除
-                  </a-button>
-                  <a-button :disabled="batchDeleting" @click="selectedRowKeys = []">取消选择</a-button>
-                </div>
-              </div>
-
-              <a-alert v-if="errorMessage && !loading" type="error" class="cloud-recordings-state">
-                {{ errorMessage }}
-              </a-alert>
-
-              <div v-else class="cloud-recordings-table-wrap">
-                <a-table
-                  class="uvp-data-table"
-                  data-testid="recording-table"
-                  row-key="id"
-                  :data="files"
-                  v-model:selected-keys="selectedRowKeys"
-                  :row-selection="rowSelection"
-                  :bordered="false"
-                  :loading="loading"
-                  :pagination="pagination"
-                  :scroll="fileTableScroll"
-                  @page-change="handlePageChange"
-                  @page-size-change="handlePageSizeChange"
+            <div v-if="canDelete && selectedRowKeys.length" class="recording-batch-bar">
+              <span
+                >已选 <strong>{{ selectedRowKeys.length }}</strong> 个录像文件</span
+              >
+              <div class="recording-batch-bar__actions">
+                <a-button
+                  data-testid="recording-batch-delete"
+                  status="danger"
+                  :loading="batchDeleting"
+                  :disabled="batchDeleting"
+                  @click="requestBatchDelete"
                 >
-                  <template #columns>
-                    <a-table-column title="录像时间" :width="210">
-                      <template #cell="{ record }">
-                        <div :data-testid="`recording-time-${record.id}`" class="recording-time-cell mono">
-                          <span><small>开始</small>{{ formatDateTime(record.startTime) }}</span>
-                          <span><small>结束</small>{{ formatDateTime(recordingEndTime(record)) }}</span>
-                        </div>
-                      </template>
-                    </a-table-column>
-                    <a-table-column title="时长" :width="110">
-                      <template #cell="{ record }">{{ formatDuration(record.timeLen) }}</template>
-                    </a-table-column>
-                    <a-table-column title="设备" :width="190">
-                      <template #cell="{ record }">
-                        <div class="recording-entity-cell"><span>{{ record.deviceName || record.deviceId || "--" }}</span><small>{{ record.deviceId || "--" }}</small></div>
-                      </template>
-                    </a-table-column>
-                    <a-table-column title="通道" :width="200">
-                      <template #cell="{ record }">
-                        <div class="recording-entity-cell"><span>{{ record.channelName || record.channelCode || "--" }}</span><small>{{ record.channelCode || "--" }}</small></div>
-                      </template>
-                    </a-table-column>
-                    <a-table-column title="文件" :width="220" :ellipsis="true" :tooltip="true">
-                      <template #cell="{ record }">{{ record.fileName || "--" }}</template>
-                    </a-table-column>
-                    <a-table-column title="大小" :width="110">
-                      <template #cell="{ record }">{{ formatFileSize(record.fileSize) }}</template>
-                    </a-table-column>
-                    <a-table-column title="节点" :width="150">
-                      <template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template>
-                    </a-table-column>
-                    <a-table-column title="信息" :width="106">
-                      <template #cell="{ record }">
-                        <a-tag :color="record.metadataState === 'complete' ? 'blue' : 'orange'">
-                          {{ record.metadataState === "complete" ? "完整" : "待完善" }}
-                        </a-tag>
-                      </template>
-                    </a-table-column>
-                    <a-table-column title="状态" :width="118">
-                      <template #cell="{ record }">
-                        <a-tag :color="availabilityPresentation(record.availability).color">
-                          {{ availabilityPresentation(record.availability).label }}
-                        </a-tag>
-                      </template>
-                    </a-table-column>
-                    <a-table-column
-                      title="操作"
-                      data-testid="recording-actions-column"
-                      :width="280"
-                      align="center"
-                      fixed="right"
-                    >
-                      <template #cell="{ record }">
-                        <div class="uvp-table-actions cloud-recording-actions">
-                          <a-link
-                            :data-testid="`detail-${record.id}`"
-                            class="uvp-table-action uvp-table-action--detail"
-                            @click="openDetail(record.id)"
-                          >
-                            <template #icon><Eye :data-testid="`detail-icon-${record.id}`" :size="13" /></template>
-                            <span>详情</span>
-                          </a-link>
-                          <template v-if="availabilityPresentation(record.availability).canAccess">
-                            <a-link
-                              :data-testid="`play-${record.id}`"
-                              class="uvp-table-action uvp-table-action--preview"
-                              @click="play(record)"
-                            >
-                              <template #icon><Play :data-testid="`play-icon-${record.id}`" :size="13" /></template>
-                              <span>播放</span>
-                            </a-link>
-                            <a-link
-                              v-if="canDownload"
-                              :data-testid="`download-${record.id}`"
-                              class="uvp-table-action uvp-table-action--download"
-                              @click="download(record)"
-                            >
-                              <template #icon><Download :data-testid="`download-icon-${record.id}`" :size="13" /></template>
-                              <span>下载</span>
-                            </a-link>
-                          </template>
-                          <a-link
-                            v-if="canDelete"
-                            :data-testid="`delete-${record.id}`"
-                            class="uvp-table-action uvp-table-action--delete"
-                            :loading="deletingIds.has(record.id)"
-                            :disabled="deletingIds.has(record.id)"
-                            @click="requestDelete(record)"
-                          >
-                            <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
-                            <span>删除</span>
-                          </a-link>
-                        </div>
-                      </template>
-                    </a-table-column>
-                  </template>
-                  <template #empty><a-empty description="当前筛选条件下暂无云端录像" /></template>
-                </a-table>
+                  <template #icon><Trash2 :size="14" /></template>
+                  批量删除
+                </a-button>
+                <a-button :disabled="batchDeleting" @click="selectedRowKeys = []">取消选择</a-button>
               </div>
             </div>
+
+            <a-alert v-if="errorMessage && !loading" type="error" class="cloud-recordings-state">
+              {{ errorMessage }}
+            </a-alert>
+
+            <div v-else class="cloud-recordings-table-wrap">
+              <a-table
+                class="uvp-data-table"
+                data-testid="recording-table"
+                row-key="id"
+                :data="files"
+                v-model:selected-keys="selectedRowKeys"
+                :row-selection="rowSelection"
+                :bordered="false"
+                :loading="loading"
+                :pagination="pagination"
+                :scroll="fileTableScroll"
+                @page-change="handlePageChange"
+                @page-size-change="handlePageSizeChange"
+              >
+                <template #columns>
+                  <a-table-column title="录像时间" :width="210">
+                    <template #cell="{ record }">
+                      <div :data-testid="`recording-time-${record.id}`" class="recording-time-cell mono">
+                        <span><small>开始</small>{{ formatDateTime(record.startTime) }}</span>
+                        <span><small>结束</small>{{ formatDateTime(recordingEndTime(record)) }}</span>
+                      </div>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="时长" :width="110">
+                    <template #cell="{ record }">{{ formatDuration(record.timeLen) }}</template>
+                  </a-table-column>
+                  <a-table-column title="设备" :width="190">
+                    <template #cell="{ record }">
+                      <div class="recording-entity-cell">
+                        <span>{{ record.deviceName || record.deviceId || "--" }}</span
+                        ><small>{{ record.deviceId || "--" }}</small>
+                      </div>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="通道" :width="200">
+                    <template #cell="{ record }">
+                      <div class="recording-entity-cell">
+                        <span>{{ record.channelName || record.channelCode || "--" }}</span
+                        ><small>{{ record.channelCode || "--" }}</small>
+                      </div>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="文件" :width="220" :ellipsis="true" :tooltip="true">
+                    <template #cell="{ record }">{{ record.fileName || "--" }}</template>
+                  </a-table-column>
+                  <a-table-column title="大小" :width="110">
+                    <template #cell="{ record }">{{ formatFileSize(record.fileSize) }}</template>
+                  </a-table-column>
+                  <a-table-column title="节点" :width="150">
+                    <template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template>
+                  </a-table-column>
+                  <a-table-column title="信息" :width="106">
+                    <template #cell="{ record }">
+                      <a-tag :color="record.metadataState === 'complete' ? 'blue' : 'orange'">
+                        {{ record.metadataState === "complete" ? "完整" : "待完善" }}
+                      </a-tag>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="状态" :width="118">
+                    <template #cell="{ record }">
+                      <a-tag :color="availabilityPresentation(record.availability).color">
+                        {{ availabilityPresentation(record.availability).label }}
+                      </a-tag>
+                    </template>
+                  </a-table-column>
+                  <a-table-column title="操作" data-testid="recording-actions-column" :width="280" align="center" fixed="right">
+                    <template #cell="{ record }">
+                      <div class="uvp-table-actions cloud-recording-actions">
+                        <a-link
+                          :data-testid="`detail-${record.id}`"
+                          class="uvp-table-action uvp-table-action--detail"
+                          @click="openDetail(record.id)"
+                        >
+                          <template #icon><Eye :data-testid="`detail-icon-${record.id}`" :size="13" /></template>
+                          <span>详情</span>
+                        </a-link>
+                        <template v-if="availabilityPresentation(record.availability).canAccess">
+                          <a-link
+                            :data-testid="`play-${record.id}`"
+                            class="uvp-table-action uvp-table-action--preview"
+                            @click="play(record)"
+                          >
+                            <template #icon><Play :data-testid="`play-icon-${record.id}`" :size="13" /></template>
+                            <span>播放</span>
+                          </a-link>
+                          <a-link
+                            v-if="canDownload"
+                            :data-testid="`download-${record.id}`"
+                            class="uvp-table-action uvp-table-action--download"
+                            @click="download(record)"
+                          >
+                            <template #icon><Download :data-testid="`download-icon-${record.id}`" :size="13" /></template>
+                            <span>下载</span>
+                          </a-link>
+                        </template>
+                        <a-link
+                          v-if="canDelete"
+                          :data-testid="`delete-${record.id}`"
+                          class="uvp-table-action uvp-table-action--delete"
+                          :loading="deletingIds.has(record.id)"
+                          :disabled="deletingIds.has(record.id)"
+                          @click="requestDelete(record)"
+                        >
+                          <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
+                          <span>删除</span>
+                        </a-link>
+                      </div>
+                    </template>
+                  </a-table-column>
+                </template>
+                <template #empty><a-empty description="当前筛选条件下暂无云端录像" /></template>
+              </a-table>
+            </div>
+          </div>
         </template>
 
         <template v-else-if="activeView === 'active'">
-            <div v-if="activeView === 'active'" class="active-recordings-view">
-              <a-alert v-if="activeError && !activeLoading" type="error" class="cloud-recordings-state">{{ activeError }}</a-alert>
-              <div v-else class="cloud-recordings-table-wrap">
-                <a-table
-                  class="uvp-data-table"
-                  row-key="id"
-                  :data="visibleActiveRecordings"
-                  :bordered="false"
-                  :loading="activeLoading"
-                  :pagination="false"
-                  :scroll="activeTableScroll"
-                >
-                  <template #columns>
-                    <a-table-column title="开始时间" :width="176"><template #cell="{ record }">{{ formatDateTime(record.startedAt) }}</template></a-table-column>
-                    <a-table-column title="通道" :width="220">
-                      <template #cell="{ record }"><div class="recording-entity-cell"><span>{{ record.channelName || record.channelCode }}</span><small>{{ record.channelCode }}</small></div></template>
-                    </a-table-column>
-                    <a-table-column title="设备编码" :width="210"><template #cell="{ record }"><code>{{ record.deviceId }}</code></template></a-table-column>
-                    <a-table-column title="节点" :width="180"><template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template></a-table-column>
-                    <a-table-column title="状态" :width="120"><template #cell><a-tag color="green">正在录制</a-tag></template></a-table-column>
-                    <a-table-column title="更新时间" :width="176"><template #cell="{ record }">{{ formatDateTime(record.updatedAt) }}</template></a-table-column>
-                    <a-table-column v-if="canStop" title="操作" :width="140" align="center" :fixed="isMobile ? '' : 'right'">
-                      <template #cell="{ record }">
-                        <div class="uvp-table-actions cloud-recording-actions">
-                          <a-link
-                            :data-testid="`stop-recording-${record.id}`"
-                            class="uvp-table-action uvp-table-action--stop"
-                            :loading="stoppingIds.has(record.id)"
-                            :disabled="stoppingIds.has(record.id)"
-                            @click="requestStopRecording(record)"
-                          >
-                            <template #icon><CircleStop :size="13" /></template>
-                            <span>停止录像</span>
-                          </a-link>
-                        </div>
-                      </template>
-                    </a-table-column>
-                  </template>
-                  <template #empty><a-empty description="当前没有正在录像的通道" /></template>
-                </a-table>
-              </div>
+          <div v-if="activeView === 'active'" class="active-recordings-view">
+            <a-alert v-if="activeError && !activeLoading" type="error" class="cloud-recordings-state">{{ activeError }}</a-alert>
+            <div v-else class="cloud-recordings-table-wrap">
+              <a-table
+                class="uvp-data-table"
+                row-key="id"
+                :data="visibleActiveRecordings"
+                :bordered="false"
+                :loading="activeLoading"
+                :pagination="false"
+                :scroll="activeTableScroll"
+              >
+                <template #columns>
+                  <a-table-column title="开始时间" :width="176"
+                    ><template #cell="{ record }">{{ formatDateTime(record.startedAt) }}</template></a-table-column
+                  >
+                  <a-table-column title="通道" :width="220">
+                    <template #cell="{ record }"
+                      ><div class="recording-entity-cell">
+                        <span>{{ record.channelName || record.channelCode }}</span
+                        ><small>{{ record.channelCode }}</small>
+                      </div></template
+                    >
+                  </a-table-column>
+                  <a-table-column title="设备编码" :width="210"
+                    ><template #cell="{ record }"
+                      ><code>{{ record.deviceId }}</code></template
+                    ></a-table-column
+                  >
+                  <a-table-column title="节点" :width="180"
+                    ><template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template></a-table-column
+                  >
+                  <a-table-column title="状态" :width="120"
+                    ><template #cell><a-tag color="green">正在录制</a-tag></template></a-table-column
+                  >
+                  <a-table-column title="更新时间" :width="176"
+                    ><template #cell="{ record }">{{ formatDateTime(record.updatedAt) }}</template></a-table-column
+                  >
+                  <a-table-column v-if="canStop" title="操作" :width="140" align="center" :fixed="isMobile ? '' : 'right'">
+                    <template #cell="{ record }">
+                      <div class="uvp-table-actions cloud-recording-actions">
+                        <a-link
+                          :data-testid="`stop-recording-${record.id}`"
+                          class="uvp-table-action uvp-table-action--stop"
+                          :loading="stoppingIds.has(record.id)"
+                          :disabled="stoppingIds.has(record.id)"
+                          @click="requestStopRecording(record)"
+                        >
+                          <template #icon><CircleStop :size="13" /></template>
+                          <span>停止录像</span>
+                        </a-link>
+                      </div>
+                    </template>
+                  </a-table-column>
+                </template>
+                <template #empty><a-empty description="当前没有正在录像的通道" /></template>
+              </a-table>
             </div>
+          </div>
         </template>
 
         <RecordingRuntimeControl v-else ref="runtimeControl" />
@@ -307,16 +338,28 @@
     </div>
   </div>
 
-  <RecordingDetailDrawer
-    v-model:visible="detailVisible"
-    :recording-id="detailId"
-  />
+  <RecordingDetailDrawer v-model:visible="detailVisible" :recording-id="detailId" />
   <RecordingPlayerDialog v-model:visible="playerVisible" :recording="playingRecording" />
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, TriangleAlert } from "@lucide/vue";
+import {
+  CircleCheck,
+  CircleDot,
+  CircleStop,
+  Download,
+  Eye,
+  FileVideo2,
+  LoaderCircle,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  ScanSearch,
+  Search,
+  Trash2,
+  TriangleAlert
+} from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
@@ -351,17 +394,20 @@ import {
 
 type RecordingWorkspaceMode = "all" | "files" | "tasks";
 
-const props = withDefaults(defineProps<{
-  active?: boolean;
-  mode?: RecordingWorkspaceMode;
-  autoRefresh?: boolean;
-  nodeId?: unknown;
-  keyword?: unknown;
-}>(), {
-  active: false,
-  mode: "all",
-  autoRefresh: true
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    mode?: RecordingWorkspaceMode;
+    autoRefresh?: boolean;
+    nodeId?: unknown;
+    keyword?: unknown;
+  }>(),
+  {
+    active: false,
+    mode: "all",
+    autoRefresh: true
+  }
+);
 
 const emit = defineEmits<{
   stats: [value: { filesTotal?: number | null; activeTotal?: number | null }];
@@ -370,7 +416,8 @@ const emit = defineEmits<{
 const userStore = useUserStoreHook();
 const proxy = useGlobalProperties();
 const { isMobile } = useDevicesSize();
-const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const hasPermission = (permission: string) =>
+  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
 const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
 const canDownload = computed(() => hasPermission("gb28181:recording:download"));
@@ -406,7 +453,7 @@ const selectedRowKeys = ref<string[]>([]);
 const deletingIds = ref(new Set<string>());
 const batchDeleting = ref(false);
 const stoppingIds = ref(new Set<string>());
-const rowSelection = computed(() => canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined);
+const rowSelection = computed(() => (canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined));
 const contextualNodeId = computed(() => {
   const scalar = Array.isArray(props.nodeId) ? props.nodeId[0] : props.nodeId;
   const value = typeof scalar === "number" || typeof scalar === "string" ? String(scalar).trim() : "";
@@ -418,9 +465,11 @@ const contextualKeyword = computed(() => {
   const value = String(scalar).trim().slice(0, 128);
   return /[:][/][/]|[\u0000-\u001f\u007f]/.test(value) ? "" : value;
 });
-const visibleActiveRecordings = computed(() => contextualNodeId.value
-  ? activeRecordings.value.filter(item => String(item.node.id) === contextualNodeId.value)
-  : activeRecordings.value);
+const visibleActiveRecordings = computed(() =>
+  contextualNodeId.value
+    ? activeRecordings.value.filter(item => String(item.node.id) === contextualNodeId.value)
+    : activeRecordings.value
+);
 const pagination = reactive({
   current: initialQuery.page,
   pageSize: initialQuery.pageSize,
@@ -431,7 +480,11 @@ const pagination = reactive({
   pageSizeOptions: [10, 20, 50, 100]
 });
 const fileTableScroll = computed(() => ({ x: 1694, ...(files.value.length ? { y: "100%" } : {}) }));
-const activeTableScroll = computed(() => ({ x: "100%", minWidth: canStop.value ? 1222 : 1082, ...(activeRecordings.value.length ? { y: "100%" } : {}) }));
+const activeTableScroll = computed(() => ({
+  x: "100%",
+  minWidth: canStop.value ? 1222 : 1082,
+  ...(activeRecordings.value.length ? { y: "100%" } : {})
+}));
 const reconciliationSummary = computed(() => {
   const running = reconciliations.value.filter(item => item.status === "queued" || item.status === "running").length;
   if (running) return { text: `${running} 个节点正在对账`, tone: "running" as const };
@@ -517,7 +570,8 @@ async function loadOptions() {
     if (requestGeneration !== panelGeneration || !props.active) return;
     Object.assign(options, response.data);
   } catch {
-    if (requestGeneration === panelGeneration && !options.nodes.length) Object.assign(options, { channels: [], devices: [], nodes: [] });
+    if (requestGeneration === panelGeneration && !options.nodes.length)
+      Object.assign(options, { channels: [], devices: [], nodes: [] });
   }
 }
 
@@ -627,8 +681,12 @@ function requestStopRecording(recording: ActiveRecording) {
   Modal.warning({
     title: "停止录像",
     content: `将停止“${recording.channelName || recording.channelCode}”在 ZLMediaKit 上的录像，并关闭该通道的云端录像开关。`,
-    okText: "停止录像", cancelText: "取消", hideCancel: false, escToClose: true,
-    okButtonProps: { status: "danger" }, onOk: () => performStopRecording(recording.id)
+    okText: "停止录像",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performStopRecording(recording.id)
   });
 }
 
@@ -653,8 +711,12 @@ function requestDelete(recording: RecordingFile) {
   Modal.warning({
     title: "删除录像文件",
     content: `将从 ZLMediaKit 节点物理删除“${recording.fileName || recording.id}”，删除后不可恢复。`,
-    okText: "删除", cancelText: "取消", hideCancel: false, escToClose: true,
-    okButtonProps: { status: "danger" }, onOk: () => performDelete(recording.id)
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performDelete(recording.id)
   });
 }
 
@@ -681,8 +743,12 @@ function requestBatchDelete() {
   Modal.warning({
     title: "批量删除录像文件",
     content: `将从 ZLMediaKit 节点物理删除选中的 ${selectedRowKeys.value.length} 个录像文件，删除后不可恢复。`,
-    okText: "删除", cancelText: "取消", hideCancel: false, escToClose: true,
-    okButtonProps: { status: "danger" }, onOk: () => performBatchDelete()
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performBatchDelete()
   });
 }
 
@@ -807,8 +873,28 @@ defineExpose({ refresh: refreshCurrent });
 </script>
 
 <style scoped lang="scss">
-.cloud-recordings-page { box-sizing: border-box; width: 100%; height: 100%; max-width: 100vw; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; color: var(--uvp-text-primary); }
-.cloud-recordings-shell { box-sizing: border-box; display: flex; width: 100%; height: 100%; max-width: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+.cloud-recordings-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100vw;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--uvp-text-primary);
+  contain: inline-size;
+}
+.cloud-recordings-shell {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
 .cloud-recordings-page :deep(.uvp-search-panel .arco-input-wrapper),
 .cloud-recordings-page :deep(.uvp-search-panel .arco-select-view),
 .cloud-recordings-page :deep(.uvp-search-panel .arco-picker) {
@@ -835,9 +921,23 @@ defineExpose({ refresh: refreshCurrent });
   box-sizing: border-box;
   border-radius: 10px;
 }
-.cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
-.cloud-recordings-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
-.cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
+.cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+.cloud-recordings-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.cloud-recordings-header__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .recording-reconcile-button {
   color: color-mix(in srgb, #7c3aed 82%, var(--uvp-text-primary));
   background: color-mix(in srgb, #7c3aed 9%, var(--uvp-panel-bg));
@@ -849,64 +949,233 @@ defineExpose({ refresh: refreshCurrent });
   background: color-mix(in srgb, #7c3aed 14%, var(--uvp-panel-bg));
   border-color: color-mix(in srgb, #7c3aed 38%, var(--uvp-panel-border));
 }
-.recording-date-range { width: 360px; max-width: 100%; }
-.recording-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
-.recording-view-switch__count { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
-.recording-view-switch button.active .recording-view-switch__count { color: currentColor; }
-.recording-refresh-countdown { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
-.reconciliation-summary { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
-.reconciliation-summary.is-success { color: rgb(var(--green-6)); }
-.reconciliation-summary.is-running { color: var(--uvp-brand); }
-.reconciliation-summary.is-warning { color: var(--uvp-warning); }
-.reconciliation-summary__icon { flex: 0 0 auto; }
-.reconciliation-summary__icon.is-spinning { animation: reconciliation-spin 900ms linear infinite; }
-@keyframes reconciliation-spin { to { transform: rotate(360deg); } }
-.cloud-recordings-state { margin: 10px 0 12px; }
-.recording-batch-bar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 0 12px; padding: 10px 14px; color: var(--uvp-text-secondary); background: color-mix(in srgb, var(--uvp-danger) 6%, var(--uvp-panel-bg)); border: 1px solid color-mix(in srgb, var(--uvp-danger) 20%, var(--uvp-panel-border)); border-radius: 8px; }
-.recording-batch-bar__actions { display: flex; align-items: center; gap: 8px; }
+.recording-date-range {
+  width: 360px;
+  max-width: 100%;
+}
+.recording-view-switch button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.recording-view-switch__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-text-tertiary);
+}
+.recording-view-switch button.active .recording-view-switch__count {
+  color: currentColor;
+}
+.recording-refresh-countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-text-tertiary);
+}
+.reconciliation-summary {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.reconciliation-summary.is-success {
+  color: rgb(var(--green-6));
+}
+.reconciliation-summary.is-running {
+  color: var(--uvp-brand);
+}
+.reconciliation-summary.is-warning {
+  color: var(--uvp-warning);
+}
+.reconciliation-summary__icon {
+  flex: 0 0 auto;
+}
+.reconciliation-summary__icon.is-spinning {
+  animation: reconciliation-spin 900ms linear infinite;
+}
+
+@keyframes reconciliation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.cloud-recordings-state {
+  margin: 10px 0 12px;
+}
+.recording-batch-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin: 10px 0 12px;
+  color: var(--uvp-text-secondary);
+  background: color-mix(in srgb, var(--uvp-danger) 6%, var(--uvp-panel-bg));
+  border: 1px solid color-mix(in srgb, var(--uvp-danger) 20%, var(--uvp-panel-border));
+  border-radius: 8px;
+}
+.recording-batch-bar__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .recording-files-view,
-.active-recordings-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.recording-runtime-control { display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.recording-files-view > :deep(.uvp-search-panel) { flex: 0 0 auto; }
-.cloud-recordings-table-wrap { flex: 1; max-width: 100%; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; border-radius: 6px; }
-.cloud-recordings-table-wrap :deep(.uvp-data-table) { height: 100%; min-height: 0; }
-.recording-entity-cell { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
-.recording-time-cell { display: flex; flex-direction: column; gap: 2px; line-height: 1.35; white-space: nowrap; }
-.recording-time-cell span { display: flex; align-items: baseline; gap: 6px; }
-.recording-time-cell small { color: var(--uvp-text-tertiary); font-family: inherit; font-size: 11px; }
+.active-recordings-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.recording-runtime-control {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.recording-files-view > :deep(.uvp-search-panel) {
+  flex: 0 0 auto;
+}
+.cloud-recordings-table-wrap {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  contain: inline-size;
+}
+.cloud-recordings-table-wrap :deep(.uvp-data-table) {
+  height: 100%;
+  min-height: 0;
+}
+.recording-entity-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.recording-time-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.recording-time-cell span {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.recording-time-cell small {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
 .recording-entity-cell span,
-.recording-entity-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recording-entity-cell small { margin-top: 2px; color: var(--uvp-text-tertiary); font-size: 11px; }
-.cloud-recording-actions { flex-wrap: nowrap; white-space: nowrap; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action) { flex: 0 0 auto; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--detail) { color: #0f7490; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--detail:hover) { color: #0e647c; background: rgb(14 116 144 / 8%); }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--preview) { color: #2563eb; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--preview:hover) { color: #1d4ed8; background: rgb(37 99 235 / 8%); }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download) { color: #16845b; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download:hover) { color: #10704b; background: rgb(22 132 91 / 8%); }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete) { color: var(--uvp-danger); }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete:hover) { color: var(--uvp-danger); background: color-mix(in srgb, var(--uvp-danger) 8%, transparent); }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop) { color: #d97706; }
-.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop:hover) { color: #b45309; background: rgb(217 119 6 / 8%); }
+.recording-entity-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-entity-cell small {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
+.cloud-recording-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action) {
+  flex: 0 0 auto;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--detail) {
+  color: #0f7490;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--detail:hover) {
+  color: #0e647c;
+  background: rgb(14 116 144 / 8%);
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--preview) {
+  color: #2563eb;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--preview:hover) {
+  color: #1d4ed8;
+  background: rgb(37 99 235 / 8%);
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download) {
+  color: #16845b;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download:hover) {
+  color: #10704b;
+  background: rgb(22 132 91 / 8%);
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete) {
+  color: var(--uvp-danger);
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete:hover) {
+  color: var(--uvp-danger);
+  background: color-mix(in srgb, var(--uvp-danger) 8%, transparent);
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop) {
+  color: #d97706;
+}
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop:hover) {
+  color: #b45309;
+  background: rgb(217 119 6 / 8%);
+}
 .mono,
-.active-recordings-view code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-@media (max-width: 768px) {
-  .cloud-recordings-toolbar { align-items: stretch; flex-wrap: wrap; gap: 10px; }
-  .recording-view-switch { flex: 1 0 auto; }
-  .recording-view-switch button { flex: 1; justify-content: center; }
-  .reconciliation-summary { display: none; }
-  .cloud-recordings-header__actions { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.active-recordings-view code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+@media (width <= 768px) {
+  .cloud-recordings-toolbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .recording-view-switch {
+    flex: 1 0 auto;
+  }
+  .recording-view-switch button {
+    flex: 1;
+    justify-content: center;
+  }
+  .reconciliation-summary {
+    display: none;
+  }
+  .cloud-recordings-header__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
   .cloud-recordings-header__actions :deep(.arco-btn),
-  :deep(.uvp-table-action) { min-height: 44px; }
-  :deep(.uvp-table-actions) { gap: 8px; }
-  :deep(.uvp-table-action) { display: inline-flex; align-items: center; padding: 0 7px; }
+  :deep(.uvp-table-action) {
+    min-height: 44px;
+  }
+  :deep(.uvp-table-actions) {
+    gap: 8px;
+  }
+  :deep(.uvp-table-action) {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+  }
 }
-@media (max-width: 480px) {
-  .recording-date-range { width: 100%; }
-  .cloud-recordings-header__actions :deep(.arco-btn) { padding-inline: 8px; }
+
+@media (width <= 480px) {
+  .recording-date-range {
+    width: 100%;
+  }
+  .cloud-recordings-header__actions :deep(.arco-btn) {
+    padding-inline: 8px;
+  }
 }
+
 @media (prefers-reduced-motion: reduce) {
-  .reconciliation-summary__icon.is-spinning { animation: none; }
+  .reconciliation-summary__icon.is-spinning {
+    animation: none;
+  }
 }
 </style>

@@ -15,7 +15,7 @@ export interface RecordingPlanSummary {
   enabled: boolean;
   version: number;
   channelCount: number;
-	periods: RecordingPlanPeriod[];
+  periods: RecordingPlanPeriod[];
   updatedAt: string;
 }
 
@@ -80,24 +80,32 @@ const path = "gb28181/recording-plans";
 
 export const listRecordingPlans = (params: { keyword?: string; status?: string; page: number; pageSize: number }) =>
   http.request<BaseResult<PageData<RecordingPlanSummary>>>("get", baseUrlApi(path), { params });
-export const getRecordingPlan = (id: number) =>
-  http.request<BaseResult<RecordingPlanDetail>>("get", baseUrlApi(`${path}/${id}`));
+export const getRecordingPlan = (id: number) => http.request<BaseResult<RecordingPlanDetail>>("get", baseUrlApi(`${path}/${id}`));
 export const createRecordingPlan = (data: RecordingPlanInput) =>
   http.request<BaseResult<RecordingPlanDetail>>("post", baseUrlApi(path), { data });
 export const updateRecordingPlan = (id: number, data: RecordingPlanInput) =>
   http.request<BaseResult<RecordingPlanDetail>>("put", baseUrlApi(`${path}/${id}`), { data });
 export const setRecordingPlanEnabled = (id: number, enabled: boolean) =>
   http.request<BaseResult<RecordingPlanDetail>>("patch", baseUrlApi(`${path}/${id}/status`), { data: { enabled } });
-export const deleteRecordingPlan = (id: number) =>
-  http.request<BaseResult<null>>("delete", baseUrlApi(`${path}/${id}`));
-export const listRecordingPlanDevices = (id: number, params: { keyword?: string; online?: string; page: number; pageSize: number }) =>
+export const deleteRecordingPlan = (id: number) => http.request<BaseResult<null>>("delete", baseUrlApi(`${path}/${id}`));
+export const listRecordingPlanDevices = (
+  id: number,
+  params: { keyword?: string; online?: string; page: number; pageSize: number }
+) =>
   http.request<BaseResult<PageData<AssignmentOption>>>("get", baseUrlApi(`${path}/${id}/assignment-options/devices`), { params });
-export const listRecordingPlanChannels = (id: number, params: { keyword?: string; online?: string; page: number; pageSize: number }) =>
-  http.request<BaseResult<PageData<AssignmentOption>>>("get", baseUrlApi(`${path}/${id}/assignment-options/channels`), { params });
+export const listRecordingPlanChannels = (
+  id: number,
+  params: { keyword?: string; online?: string; page: number; pageSize: number }
+) =>
+  http.request<BaseResult<PageData<AssignmentOption>>>("get", baseUrlApi(`${path}/${id}/assignment-options/channels`), {
+    params
+  });
 export const assignRecordingPlan = (id: number, data: { type: "device" | "channel"; ids: number[] }) =>
   http.request<BaseResult<AssignmentResult>>("post", baseUrlApi(`${path}/${id}/assignments`), { data });
-export const listRecordingPlanExecutionChannels = (id: number, params: { keyword?: string; online?: string; actualState?: string; page: number; pageSize: number }) =>
-  http.request<BaseResult<PlanChannelPage>>("get", baseUrlApi(`${path}/${id}/channels`), { params });
+export const listRecordingPlanExecutionChannels = (
+  id: number,
+  params: { keyword?: string; online?: string; actualState?: string; page: number; pageSize: number }
+) => http.request<BaseResult<PlanChannelPage>>("get", baseUrlApi(`${path}/${id}/channels`), { params });
 export const diagnoseRecordingPlanChannel = (channelId: number) =>
   http.request<BaseResult<Record<string, unknown>>>("get", baseUrlApi(`${path}/channels/${channelId}/diagnosis`));
 export const getRecordingPlanChannelTimeline = (channelId: number, params: { page: number; pageSize: number }) =>

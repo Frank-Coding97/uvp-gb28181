@@ -1,42 +1,53 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  buildFFmpegCreateRequest,
-  ffmpegCreateDecision,
-  ffmpegURLText
-} from "./ffmpegSourcesState";
+import { buildFFmpegCreateRequest, ffmpegCreateDecision, ffmpegURLText } from "./ffmpegSourcesState";
 
 describe("FFmpeg source state", () => {
   it("accepts only a listed template and typed parameters", () => {
-    const result = buildFFmpegCreateRequest({
-      templateKey: "ffmpeg.cmd_hd",
-      srcUrl: "rtsp://camera.example/live",
-      dstUrl: "rtmp://media.example/live/camera",
-      timeoutMs: "3000",
-      enableHls: true,
-      enableMp4: false
-    }, ["ffmpeg.cmd_hd"]);
+    const result = buildFFmpegCreateRequest(
+      {
+        templateKey: "ffmpeg.cmd_hd",
+        srcUrl: "rtsp://camera.example/live",
+        dstUrl: "rtmp://media.example/live/camera",
+        timeoutMs: "3000",
+        enableHls: true,
+        enableMp4: false
+      },
+      ["ffmpeg.cmd_hd"]
+    );
     expect(result.errors).toEqual({});
     expect(result.request).toMatchObject({ templateKey: "ffmpeg.cmd_hd", timeoutMs: 3000, enableHls: true, enableMp4: false });
 
-    const invalid = buildFFmpegCreateRequest({
-      templateKey: "ffmpeg.unknown",
-      srcUrl: "rtsp://camera.example/live",
-      dstUrl: "rtmp://media.example/live/camera",
-      timeoutMs: "3000.5",
-      enableHls: false,
-      enableMp4: false
-    }, ["ffmpeg.cmd_hd"]);
+    const invalid = buildFFmpegCreateRequest(
+      {
+        templateKey: "ffmpeg.unknown",
+        srcUrl: "rtsp://camera.example/live",
+        dstUrl: "rtmp://media.example/live/camera",
+        timeoutMs: "3000.5",
+        enableHls: false,
+        enableMp4: false
+      },
+      ["ffmpeg.cmd_hd"]
+    );
     expect(invalid.request).toBeUndefined();
     expect(invalid.errors).toMatchObject({ templateKey: expect.any(String), timeoutMs: expect.any(String) });
   });
 
   it("distinguishes unsupported, unknown and missing-template disable reasons", () => {
     expect(ffmpegCreateDecision("supported", ["ffmpeg.cmd_hd"], true)).toMatchObject({ allowed: true });
-    expect(ffmpegCreateDecision("unsupported", ["ffmpeg.cmd_hd"], true)).toMatchObject({ allowed: false, reason: expect.stringContaining("不支持") });
-    expect(ffmpegCreateDecision("unknown", ["ffmpeg.cmd_hd"], true)).toMatchObject({ allowed: false, reason: expect.stringContaining("未探测") });
-    expect(ffmpegCreateDecision("supported", [], true)).toMatchObject({ allowed: false, reason: expect.stringContaining("模板") });
+    expect(ffmpegCreateDecision("unsupported", ["ffmpeg.cmd_hd"], true)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining("不支持")
+    });
+    expect(ffmpegCreateDecision("unknown", ["ffmpeg.cmd_hd"], true)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining("未探测")
+    });
+    expect(ffmpegCreateDecision("supported", [], true)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining("模板")
+    });
   });
 
   it("renders only safe URL summaries", () => {

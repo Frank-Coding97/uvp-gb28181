@@ -191,12 +191,12 @@ func (e *RuntimeError) Is(target error) bool {
 	if e == nil {
 		return target == nil
 	}
-	switch {
-	case target == ErrCapabilityUnsupported:
+	switch target {
+	case ErrCapabilityUnsupported:
 		return e.Kind == RuntimeErrorCapabilityUnsupported
-	case target == ErrNodeFailure:
+	case ErrNodeFailure:
 		return e.Kind == RuntimeErrorNodeFailure
-	case target == ErrCapabilityUnknown:
+	case ErrCapabilityUnknown:
 		return e.Kind == RuntimeErrorCapabilityUnknown
 	}
 	if e.Cause != nil {

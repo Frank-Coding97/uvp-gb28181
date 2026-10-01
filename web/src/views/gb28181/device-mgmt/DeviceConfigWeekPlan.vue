@@ -122,6 +122,7 @@ function summary(): string {
           <a-input
             class="dcw-time"
             :model-value="segment.start"
+            allow-clear
             :disabled="disabled"
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段开始`"
@@ -132,6 +133,7 @@ function summary(): string {
           <a-input
             class="dcw-time"
             :model-value="segment.stop"
+            allow-clear
             :disabled="disabled"
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段结束`"

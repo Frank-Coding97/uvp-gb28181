@@ -26,7 +26,7 @@ func TestPTZClaimReadsStoredAttemptBeforeGrant(t *testing.T) {
 			if fail {
 				require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register("fail-attempt-read", func(tx *gorm.DB) {
 					if _, readingAttempt := tx.Statement.Dest.(*gbmodels.GbPTZOperationAttempt); readingAttempt {
-						tx.AddError(errors.New("injected read failure"))
+						_ = tx.AddError(errors.New("injected read failure")) // AddError mutates tx; the returned *DB is intentionally unused.
 					}
 				}))
 			} else {

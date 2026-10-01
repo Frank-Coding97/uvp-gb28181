@@ -1,6 +1,5 @@
-
 import { createApp } from "vue";
-import "@/style.css";
+import "@/style/index.scss";
 import "@/styles/zlm-tokens.css"; // ZLM 控制台 design tokens(2026-06-28 重设计)
 import App from "@/App.vue";
 
@@ -17,11 +16,10 @@ import directives from "@/directives/index";
 import ArcoVue from "@arco-design/web-vue";
 import ArcoVueIcon from "@arco-design/web-vue/es/icon";
 // import "@arco-design/web-vue/dist/arco.css"; // 默认样式
-import '@arco-themes/vue-gi-demo/css/arco.css'; // 自定义主题
+import "@arco-themes/vue-gi-demo/css/arco.css"; // 自定义主题
 import "@/styles/arco-overrides.scss"; // UVP 全局样式覆盖
 import i18n from "@/lang/index";
 import { startSessionHeartbeat } from "@/services/session-heartbeat";
-
 
 const app = createApp(App);
 app.use(pinia);
@@ -29,7 +27,7 @@ app.use(router);
 app.use(directives);
 
 app.use(ArcoVue, {
-    componentPrefix: "arco"
+  componentPrefix: "arco"
 });
 app.use(ArcoVueIcon);
 app.use(i18n);
@@ -40,25 +38,25 @@ startSessionHeartbeat();
 
 // 使用requestIdleCallback在浏览器空闲时加载非关键依赖
 const loadNonCriticalDependencies = () => {
-    const loadAsync = async () => {
-        try {
-            // 异步加载字体
-            await import("@/assets/fonts/fonts.scss");
-            // 异步加载主题
-            const { initVChartArcoTheme } = await import("@visactor/vchart-arco-theme");
-            initVChartArcoTheme();
-        } catch (error) {
-            console.warn("Non-critical dependencies loading failed:", error);
-        }
-    };
-
-    // 使用requestIdleCallback优化加载时机，降级使用setTimeout
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-        // 浏览器空闲时加载非关键依赖
-        window.requestIdleCallback(loadAsync);
-    } else {
-        setTimeout(loadAsync, 100);
+  const loadAsync = async () => {
+    try {
+      // 异步加载字体
+      await import("@/assets/fonts/fonts.scss");
+      // 异步加载主题
+      const { initVChartArcoTheme } = await import("@visactor/vchart-arco-theme");
+      initVChartArcoTheme();
+    } catch (error) {
+      console.warn("Non-critical dependencies loading failed:", error);
     }
+  };
+
+  // 使用requestIdleCallback优化加载时机，降级使用setTimeout
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    // 浏览器空闲时加载非关键依赖
+    window.requestIdleCallback(loadAsync);
+  } else {
+    setTimeout(loadAsync, 100);
+  }
 };
 
 // 在应用挂载后加载非关键依赖

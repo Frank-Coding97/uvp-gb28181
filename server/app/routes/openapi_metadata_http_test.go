@@ -104,7 +104,7 @@ func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 		}
 		response, err := httpClient.Do(request)
 		require.NoError(t, err)
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(response.Body, 65536))
 		require.NoError(t, err)
 		require.Equal(t, "no-store", response.Header.Get("Cache-Control"))

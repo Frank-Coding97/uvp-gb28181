@@ -91,11 +91,12 @@ func (store *PlayAttemptStore) last24Hours(ctx context.Context, now time.Time, q
 	}
 	result := PlaySuccessSummary{Status: StatusEmpty, Coverage: CoverageNotStarted, AsOf: now}
 	for _, row := range rows {
-		if row.Outcome == PlayOutcomeSuccess {
+		switch row.Outcome {
+		case PlayOutcomeSuccess:
 			result.Success = row.Count
-		} else if row.Outcome == PlayOutcomeFailure {
+		case PlayOutcomeFailure:
 			result.Failure = row.Count
-		} else {
+		default:
 			result.Started = row.Count
 			result.StaleStarted = row.StaleCount
 		}

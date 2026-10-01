@@ -47,10 +47,10 @@ func TestTraceStoreOfflineDoesNotChangeUDPRegisterResponse(t *testing.T) {
 
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent("trace-offline-test"))
 	require.NoError(t, err)
-	defer ua.Close()
+	defer func() { _ = ua.Close() }()
 	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
 	require.NoError(t, err)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	recipient := siplib.Uri{}
 	require.NoError(t, siplib.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(port), &recipient))

@@ -244,7 +244,8 @@ func (c *TalkController) Uplink(ctx *gin.Context) {
 		response.Fail(ctx, "语音对讲媒体服务不可用", http.StatusServiceUnavailable)
 		return
 	}
-	defer answer.Body.Close()
+	// 上游响应体的关闭错误无法改变已经建立的 HTTP 响应；显式忽略清理错误。
+	defer func() { _ = answer.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(answer.Body, maxTalkUplinkAnswerBytes+1))
 	if err != nil || len(body) > maxTalkUplinkAnswerBytes {
 		response.Fail(ctx, "语音对讲媒体服务响应异常", http.StatusBadGateway)
@@ -366,15 +367,6 @@ func (c *TalkController) logUplinkFailure(ctx *gin.Context, err error, code stri
 		zap.String("event", "gb28181.talk.uplink_prepare_failed"),
 		zap.String("session_id", strings.TrimSpace(ctx.Param("sessionId"))),
 		zap.String("error_code", code),
-		logging.Error(err))
-}
-
-// logUplinkForwardFailure 记转发到媒体节点失败。
-// 与 prepare 失败分开:那一步的问题在平台自己,这一步的问题在平台到节点的链路。
-func (c *TalkController) logUplinkForwardFailure(ctx *gin.Context, sessionID string, err error) {
-	app.Log(ctx.Request.Context()).Warn("Talk uplink forward failed",
-		zap.String("event", "gb28181.talk.uplink_forward_failed"),
-		zap.String("session_id", sessionID),
 		logging.Error(err))
 }
 

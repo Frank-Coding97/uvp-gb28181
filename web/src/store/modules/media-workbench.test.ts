@@ -46,7 +46,12 @@ describe("media workbench context", () => {
 
   it("does not let a cleared request repopulate the catalog after logout", async () => {
     let resolve!: (value: typeof nodes) => void;
-    const load = vi.fn(() => new Promise<typeof nodes>(done => { resolve = done; }));
+    const load = vi.fn(
+      () =>
+        new Promise<typeof nodes>(done => {
+          resolve = done;
+        })
+    );
     const catalog = createZLMNodeCatalog({ load });
     const pending = catalog.load();
     await Promise.resolve();

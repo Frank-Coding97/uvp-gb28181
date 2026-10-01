@@ -59,7 +59,7 @@ interface Cell extends TransactionStat {
 }
 
 const cells = computed((): Cell[] =>
-  props.transactions.map((t) => ({
+  props.transactions.map(t => ({
     ...t,
     iconAbbr: iconMap[t.kind] ?? "??"
   }))

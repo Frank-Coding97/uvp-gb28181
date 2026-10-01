@@ -20,8 +20,8 @@ describe("workspace tabs", () => {
     expect(fullscreenIndex).toBeGreaterThan(-1);
     expect(source).toContain('trigger="contextMenu"');
     expect(themeIndex).toBeGreaterThan(fullscreenIndex);
-    expect(source).toContain("@click=\"onFullScreen\"");
-    expect(source).toContain("@click=\"toggleThemeMode\"");
+    expect(source).toContain('@click="onFullScreen"');
+    expect(source).toContain('@click="toggleThemeMode"');
     expect(source).toContain("darkMode ? '明亮' : '暗色'");
     expect(source).not.toContain("切换至夜间蓝灰");
     expect(source).not.toContain("切换至明亮模式");
@@ -30,12 +30,14 @@ describe("workspace tabs", () => {
     expect(headerRightSource).toContain('<div v-if="isMobile" class="header-display-actions">');
     expect(headerRightSource).toContain('@click="onFullScreen"');
     expect(headerRightSource).toContain('@click="toggleThemeMode"');
-    expect(headerRightSource).toContain("@click=\"onSystemSetting\"");
+    expect(headerRightSource).toContain('@click="onSystemSetting"');
   });
 
   it("renders each opened route icon before its localized title", () => {
-    expect(source).toContain('<template #title>');
-    expect(source).toContain("<MenuItemIcon v-if=\"item.meta.svgIcon || item.meta.icon\" :svg-icon=\"item.meta.svgIcon\" :icon=\"item.meta.icon\" />");
+    expect(source).toContain("<template #title>");
+    expect(source).toContain(
+      '<MenuItemIcon v-if="item.meta.svgIcon || item.meta.icon" :svg-icon="item.meta.svgIcon" :icon="item.meta.icon" />'
+    );
     expect(source).toContain("$t(`menu.${item.meta.title}`)");
     expect(source).toContain(".arco-tabs-tab-close-btn svg");
     expect(source).toContain(".arco-tabs-nav-type-line .arco-tabs-tab");

@@ -34,6 +34,9 @@ describe("media workspace route contract", () => {
 
   it("keeps node management tabless and scheduling focused on logs", () => {
     expect(MEDIA_WORKSPACES.find(item => item.key === "nodes")).toMatchObject({ defaultView: "list", allowedViews: ["list"] });
-    expect(MEDIA_WORKSPACES.find(item => item.key === "scheduling")).toMatchObject({ defaultView: "logs", allowedViews: ["logs"] });
+    expect(MEDIA_WORKSPACES.find(item => item.key === "scheduling")).toMatchObject({
+      defaultView: "logs",
+      allowedViews: ["logs"]
+    });
   });
 });

@@ -66,19 +66,22 @@ describe("ZLMDangerActionDialog", () => {
 
     expect(wrapper.text()).not.toContain("请输入确认短语");
     await wrapper.get("button:last-child").trigger("click");
-    expect(wrapper.emitted("confirm")).toEqual([[
-      { nodeId: 7, targetKey: "node:7:delete", fingerprint: "fp-delete", reason: "" }
-    ]]);
+    expect(wrapper.emitted("confirm")).toEqual([
+      [{ nodeId: 7, targetKey: "node:7:delete", fingerprint: "fp-delete", reason: "" }]
+    ]);
   });
 
   it("closes as stale when the selected node changes", async () => {
     const testPinia = createPinia();
     setActivePinia(testPinia);
     const context = useZLMContextStore();
-    context.initialize([
-      { id: 7, name: "边缘节点 A", state: "active" },
-      { id: 8, name: "边缘节点 B", state: "active" }
-    ], "7");
+    context.initialize(
+      [
+        { id: 7, name: "边缘节点 A", state: "active" },
+        { id: 8, name: "边缘节点 B", state: "active" }
+      ],
+      "7"
+    );
     const wrapper = mount(ZLMDangerActionDialog, {
       props: {
         visible: true,
@@ -101,10 +104,13 @@ describe("ZLMDangerActionDialog", () => {
     const testPinia = createPinia();
     setActivePinia(testPinia);
     const context = useZLMContextStore();
-    context.initialize([
-      { id: 7, name: "边缘节点 A", state: "active" },
-      { id: 8, name: "边缘节点 B", state: "active" }
-    ], "7");
+    context.initialize(
+      [
+        { id: 7, name: "边缘节点 A", state: "active" },
+        { id: 8, name: "边缘节点 B", state: "active" }
+      ],
+      "7"
+    );
     const wrapper = mount(ZLMDangerActionDialog, {
       props: {
         visible: true,

@@ -176,7 +176,7 @@ func (w *fileWriter) Write(p []byte) (int, error) {
 		e = io.ErrShortWrite
 	}
 	if e != nil {
-		w.rememberFailure(e, n == 0, writeSize)
+		e = w.rememberFailure(e, n == 0, writeSize)
 	}
 	return n, e
 }
@@ -398,7 +398,7 @@ func (w *fileWriter) compress(name string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() { err = errors.Join(err, source.Close()) }()
 	stat, err := source.Stat()
 	if err != nil {
 		return err
@@ -490,12 +490,12 @@ func (w *boundedCompressionWriter) Write(p []byte) (int, error) {
 	}
 	return n, e
 }
-func (w *fileWriter) validateGzip(name string) error {
+func (w *fileWriter) validateGzip(name string) (e error) {
 	f, e := w.dir.open(name, logRead)
 	if e != nil {
 		return e
 	}
-	defer f.Close()
+	defer func() { e = errors.Join(e, f.Close()) }()
 	stat, e := f.Stat()
 	if e != nil {
 		return e

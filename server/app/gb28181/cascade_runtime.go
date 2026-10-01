@@ -23,7 +23,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -306,20 +305,6 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	cascadeRuntimeManager = manager
 	setupCascadeManagement(manager, cipher, newCascadeCatalogPusher(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
 	return nil
-}
-
-func stopCascadeRuntime(ctx context.Context) error {
-	stopCascadeVideoRuntime(ctx)
-	manager := cascadeRuntimeManager
-	cascadeRuntimeManager = nil
-	if manager == nil {
-		return nil
-	}
-	err := manager.Shutdown(ctx)
-	if err != nil {
-		app.Log(ctx).Named("cascade").Warn("Cascade shutdown incomplete", zap.String("event", "cascade.shutdown_incomplete"), logging.Error(err))
-	}
-	return err
 }
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)

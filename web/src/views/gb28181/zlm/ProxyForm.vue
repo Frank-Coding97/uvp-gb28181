@@ -1,16 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
-import type {
-  ZLMCapabilityState,
-  ZLMPullProxyCreateRequest,
-  ZLMPushProxyCreateRequest
-} from "@/api/gb28181-zlm-ingress";
-import {
-  buildProxyCreateRequest,
-  proxyCapabilityPresentation,
-  type ProxyFormState,
-  type ProxyTab
-} from "./proxyManagementState";
+import type { ZLMCapabilityState, ZLMPullProxyCreateRequest, ZLMPushProxyCreateRequest } from "@/api/gb28181-zlm-ingress";
+import { buildProxyCreateRequest, proxyCapabilityPresentation, type ProxyFormState, type ProxyTab } from "./proxyManagementState";
 
 const props = defineProps<{
   visible: boolean;
@@ -57,9 +48,12 @@ function reset() {
   clearErrors();
 }
 
-watch(() => [props.visible, props.kind] as const, ([visible]) => {
-  if (visible) reset();
-});
+watch(
+  () => [props.visible, props.kind] as const,
+  ([visible]) => {
+    if (visible) reset();
+  }
+);
 
 function validate() {
   const result = buildProxyCreateRequest(props.kind, form);
@@ -89,7 +83,7 @@ function close() {
     unmount-on-close
     @cancel="close"
   >
-    <template #title>创建{{ kind === 'pull' ? '拉流' : '推流' }}代理</template>
+    <template #title>创建{{ kind === "pull" ? "拉流" : "推流" }}代理</template>
     <a-alert v-if="!capability.actionable" type="warning">{{ capability.label }}，创建操作保持禁用。</a-alert>
     <a-alert v-else-if="!permitted" type="warning">当前账号缺少代理管理权限。</a-alert>
     <a-form :model="form" layout="vertical" class="proxy-form" @submit-success="submit">
@@ -122,13 +116,25 @@ function close() {
         />
       </a-form-item>
       <div class="form-grid">
-        <a-form-item label="重试次数" :validate-status="errors.retryCount ? 'error' : undefined" :help="errors.retryCount || '留空使用后端默认值，范围 0–10。'">
+        <a-form-item
+          label="重试次数"
+          :validate-status="errors.retryCount ? 'error' : undefined"
+          :help="errors.retryCount || '留空使用后端默认值，范围 0–10。'"
+        >
           <a-input v-model="form.retryCount" allow-clear inputmode="numeric" placeholder="留空" @blur="validate" />
         </a-form-item>
-        <a-form-item label="RTP 类型" :validate-status="errors.rtpType ? 'error' : undefined" :help="errors.rtpType || '0 / 1 / 2；留空使用后端默认值。'">
+        <a-form-item
+          label="RTP 类型"
+          :validate-status="errors.rtpType ? 'error' : undefined"
+          :help="errors.rtpType || '0 / 1 / 2；留空使用后端默认值。'"
+        >
           <a-input v-model="form.rtpType" allow-clear inputmode="numeric" placeholder="留空" @blur="validate" />
         </a-form-item>
-        <a-form-item label="超时（秒）" :validate-status="errors.timeoutSec ? 'error' : undefined" :help="errors.timeoutSec || '0.1–30；留空使用后端默认值。'">
+        <a-form-item
+          label="超时（秒）"
+          :validate-status="errors.timeoutSec ? 'error' : undefined"
+          :help="errors.timeoutSec || '0.1–30；留空使用后端默认值。'"
+        >
           <a-input v-model="form.timeoutSec" allow-clear inputmode="decimal" placeholder="留空" @blur="validate" />
         </a-form-item>
       </div>
@@ -141,9 +147,28 @@ function close() {
 </template>
 
 <style scoped>
-.proxy-form { margin-top: 16px; }
-.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.form-grid--media { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-@media (max-width: 700px) { .form-grid, .form-grid--media { grid-template-columns: 1fr; } }
+.proxy-form {
+  margin-top: 16px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.form-grid--media {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (width <= 700px) {
+  .form-grid,
+  .form-grid--media {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

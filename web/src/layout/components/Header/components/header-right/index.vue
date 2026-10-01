@@ -35,7 +35,14 @@
       </button>
       <template #content>
         <div class="uvp-user-menu-profile">
-          <a-image width="40" height="40" fit="cover" :src="account.avatar" :preview="false" class="uvp-user-menu-profile__avatar" />
+          <a-image
+            width="40"
+            height="40"
+            fit="cover"
+            :src="account.avatar"
+            :preview="false"
+            class="uvp-user-menu-profile__avatar"
+          />
           <div class="uvp-user-menu-profile__text">
             <strong class="uvp-user-menu-profile__name">{{ accountDisplayName }}</strong>
             <span class="uvp-user-menu-profile__account">{{ account.username }}</span>
@@ -166,10 +173,10 @@ const logOut = () => {
 <style lang="scss" scoped>
 .header_setting {
   display: flex;
+  gap: 8px;
   align-items: center;
   justify-content: flex-end;
   min-width: 0;
-  gap: 8px;
   height: 100%;
   background-color: transparent;
 
@@ -194,19 +201,19 @@ const logOut = () => {
   }
 
   .my_setting {
-    appearance: none;
     display: flex;
-    align-items: center;
     gap: 8px;
+    align-items: center;
     height: 40px;
-    margin-left: 8px;
     padding: 4px 8px;
+    margin-left: 8px;
     overflow: hidden;
     color: var(--uvp-text-primary);
+    appearance: none;
+    cursor: pointer;
     background: transparent;
     border: 0;
     border-radius: 4px;
-    cursor: pointer;
     transition:
       background-color 0.2s ease,
       color 0.2s ease;
@@ -224,9 +231,9 @@ const logOut = () => {
     .user-nickname {
       max-width: 144px;
       overflow: hidden;
+      text-overflow: ellipsis;
       font-size: 13px;
       font-weight: 520;
-      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
@@ -253,7 +260,9 @@ const logOut = () => {
   background: var(--uvp-popconfirm-bg) !important;
   border: 0 !important;
   border-radius: 12px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-primary) 9%, transparent), var(--uvp-popconfirm-shadow) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-primary) 9%, transparent),
+    var(--uvp-popconfirm-shadow) !important;
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .arco-dropdown-list) {
@@ -280,9 +289,9 @@ const logOut = () => {
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__text) {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__name),
@@ -293,14 +302,14 @@ const logOut = () => {
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__name) {
-  color: var(--uvp-text-primary);
   font-size: 14px;
   font-weight: 600;
+  color: var(--uvp-text-primary);
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__account) {
-  color: var(--uvp-text-tertiary);
   font-size: 12px;
+  color: var(--uvp-text-tertiary);
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option) {
@@ -308,10 +317,10 @@ const logOut = () => {
   height: 36px;
   min-height: 36px;
   padding: 6px 8px;
+  line-height: 24px;
   color: var(--uvp-text-secondary);
   background: transparent !important;
   border-radius: 8px;
-  line-height: 24px;
   transition:
     background-color 0.18s ease,
     color 0.18s ease;
@@ -333,10 +342,10 @@ const logOut = () => {
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-icon) {
   display: inline-grid;
+  place-items: center;
   width: 20px;
   height: 20px;
   color: var(--uvp-text-tertiary);
-  place-items: center;
 }
 
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option:hover .uvp-user-menu-icon) {
@@ -361,10 +370,10 @@ const logOut = () => {
   height: 40px;
   padding: 0;
   color: var(--uvp-text-secondary);
+  cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 8px;
-  cursor: pointer;
 
   &:hover {
     color: var(--uvp-brand);
@@ -372,10 +381,10 @@ const logOut = () => {
   }
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .header_setting .my_setting {
-    margin-left: 0;
     padding: 4px;
+    margin-left: 0;
   }
 
   .header_setting .user-nickname {

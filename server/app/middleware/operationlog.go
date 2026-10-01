@@ -204,7 +204,7 @@ func operationLogClaims(c *gin.Context) *app.Claims {
 		return claims
 	}
 	if c != nil && c.Request != nil {
-		if claims, ok := c.Request.Context().Value(consts.BindContextKeyName).(*app.Claims); ok {
+		if claims, ok := c.Request.Context().Value(consts.BindContextKey).(*app.Claims); ok {
 			return claims
 		}
 	}
@@ -222,7 +222,7 @@ func operationLogContext(c *gin.Context) context.Context {
 	ctx = logging.WithContext(ctx, app.Log(requestContext))
 	if claims := operationLogClaims(c); claims != nil {
 		copy := *claims
-		ctx = context.WithValue(ctx, consts.BindContextKeyName, &copy)
+		ctx = context.WithValue(ctx, consts.BindContextKey, &copy)
 	}
 	return ctx
 }
@@ -408,19 +408,6 @@ func sanitizeRequestData(data []byte) string {
 	// 如果不是JSON，直接返回原始数据（限制长度）
 	if len(data) > 10000 {
 		return string(data[:10000]) + "...(truncated)"
-	}
-	return string(data)
-}
-
-// sanitizeResponseData 对响应数据进行脱敏处理
-func sanitizeResponseData(data []byte) string {
-	if len(data) == 0 {
-		return ""
-	}
-
-	// 限制响应数据长度
-	if len(data) > 5000 {
-		return string(data[:5000]) + "...(truncated)"
 	}
 	return string(data)
 }

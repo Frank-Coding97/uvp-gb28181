@@ -18,20 +18,22 @@ const emit = defineEmits<{
 }>();
 
 const busy = ref(false);
-const targetKey = computed(() => props.viewer
-  ? `${streamIdentityKey(props.viewer.nodeId, props.viewer.media)}\u001f${props.viewer.identifier}`
-  : "");
-const targetLabel = computed(() => props.viewer
-  ? `${props.viewer.media.app}/${props.viewer.media.stream} · ${props.viewer.identifier}`
-  : "未选择观看者");
-const impacts = computed(() => props.viewer
-  ? [
-      `媒体：${props.viewer.media.schema}://${props.viewer.media.vhost}/${props.viewer.media.app}/${props.viewer.media.stream}`,
-      `远端：${props.viewer.peerIp}:${props.viewer.peerPort}`,
-      `本地：${props.viewer.localIp}:${props.viewer.localPort}`,
-      "仅踢除当前后端返回且标记 kickable 的观看会话"
-    ]
-  : []);
+const targetKey = computed(() =>
+  props.viewer ? `${streamIdentityKey(props.viewer.nodeId, props.viewer.media)}\u001f${props.viewer.identifier}` : ""
+);
+const targetLabel = computed(() =>
+  props.viewer ? `${props.viewer.media.app}/${props.viewer.media.stream} · ${props.viewer.identifier}` : "未选择观看者"
+);
+const impacts = computed(() =>
+  props.viewer
+    ? [
+        `媒体：${props.viewer.media.schema}://${props.viewer.media.vhost}/${props.viewer.media.app}/${props.viewer.media.stream}`,
+        `远端：${props.viewer.peerIp}:${props.viewer.peerPort}`,
+        `本地：${props.viewer.localIp}:${props.viewer.localPort}`,
+        "仅踢除当前后端返回且标记 kickable 的观看会话"
+      ]
+    : []
+);
 
 function close() {
   emit("update:visible", false);

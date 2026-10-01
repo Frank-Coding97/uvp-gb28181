@@ -56,19 +56,21 @@ func TestHTTPBindFailureProcessRetainsPersistentSIPWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, outputWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.Close()
-	defer outputWriter.Close()
+	defer func() { _ = output.Close() }()
+	defer func() { _ = outputWriter.Close() }()
 	cmd.Stdout = outputWriter
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	outputWriter.Close()
+	if err := outputWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
 	events := make(chan string, 32)
 	go func() {
 		defer close(events)
@@ -123,7 +125,7 @@ func runShutdownChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer occupied.Close()
+	defer func() { _ = occupied.Close() }()
 	app.ConfigYml = shutdownHTTPConfig{address: occupied.Addr().String()}
 	db, err := gorm.Open(sqlite.Open(os.Getenv("UVP_ROOT_SHUTDOWN_DB")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
@@ -133,7 +135,7 @@ func runShutdownChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	if err := db.Exec("CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id TEXT, access_epoch BIGINT, cleanup_completed_epoch BIGINT, deleted_at DATETIME)").Error; err != nil {
 		t.Fatal(err)
 	}

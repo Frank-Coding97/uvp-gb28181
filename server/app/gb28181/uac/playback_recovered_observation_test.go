@@ -27,7 +27,9 @@ func TestPlaybackRecoveredObservationRealUDPAndNoDispatch(t *testing.T) {
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
 	require.NoError(t, err)
-	defer o.CloseLocal(ctx)
+	defer func() {
+		_ = o.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	stored, err := f.store.LoadSIPInviteSteps(ctx, f.id)
 	require.NoError(t, err)
 	require.Equal(t, playauth.SIPBranchObserverIncomplete, stored.Steps[0].BranchInventoryFault, "gap is durable before observation starts")
@@ -77,7 +79,9 @@ func TestPlaybackRecoveredObservationRetriesFactsAndBoundsInventory(t *testing.T
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
 	require.NoError(t, err)
-	defer o.CloseLocal(ctx)
+	defer func() {
+		_ = o.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	var blocked atomic.Bool
 	blocked.Store(true)
 	entered := make(chan struct{}, 1)
@@ -87,7 +91,7 @@ func TestPlaybackRecoveredObservationRetriesFactsAndBoundsInventory(t *testing.T
 			case entered <- struct{}{}:
 			default:
 			}
-			db.AddError(errors.New("fixture database unavailable"))
+			_ = db.AddError(errors.New("fixture database unavailable")) // AddError mutates db; the returned *DB is intentionally unused.
 		}
 	}))
 	defer func() {
@@ -213,7 +217,9 @@ func TestPlaybackRecoveredObservationRepeatedLossDoesNotDriveSQL(t *testing.T) {
 	ctx := context.Background()
 	o, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
 	require.NoError(t, err)
-	defer o.CloseLocal(ctx)
+	defer func() {
+		_ = o.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	queried := make(chan struct{}, 1)
 	require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register("fixture:loss-sql", func(*gorm.DB) {
 		select {

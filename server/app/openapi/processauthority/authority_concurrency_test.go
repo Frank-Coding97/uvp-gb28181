@@ -25,10 +25,10 @@ func TestProcessAuthorityConcurrentFenceDoesNotInvertTransactionLocks(t *testing
 		if intercepted.CompareAndSwap(false, true) {
 			close(entered)
 			<-release
-			tx.AddError(context.Canceled)
+			_ = tx.AddError(context.Canceled)
 		}
 	}))
-	defer db.Callback().Update().Remove("authority-test:hold-second")
+	defer func() { _ = db.Callback().Update().Remove("authority-test:hold-second") }()
 	second := make(chan error, 1)
 	go func() { second <- db.Transaction(func(tx *gorm.DB) error { return authority.CheckTx(tx) }) }()
 	<-entered

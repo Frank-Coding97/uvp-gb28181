@@ -74,7 +74,7 @@ func (tx *sqliteTx) Commit() error {
 	if tx.fault.committed {
 		err = tx.Tx.Commit()
 	} else {
-		err = tx.Tx.Rollback()
+		err = tx.Rollback()
 	}
 	if err != nil {
 		return err

@@ -133,7 +133,7 @@ func TestDeviceSIPInviteProcessHelper(t *testing.T) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 	store, ctx, id := newIntentFixtureStore(db), context.Background(), intentIdentity(1)
 	if os.Getenv("UVP_SIP_INVITE_PROCESS_ACTION") == "info" {
 		id.Kind = "playback"

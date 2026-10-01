@@ -98,7 +98,9 @@ const onTabs = (key: string) => {
 
 // Closing from a tab menu is relative to that tab, not necessarily the active route.
 const closeTabs = (paths: string[], preferredPath?: string) => {
-  const removable = tabsList.value.filter((item: Menu.MenuOptions) => paths.includes(item.path) && !item.meta.affix).map((item: Menu.MenuOptions) => item.path);
+  const removable = tabsList.value
+    .filter((item: Menu.MenuOptions) => paths.includes(item.path) && !item.meta.affix)
+    .map((item: Menu.MenuOptions) => item.path);
   if (!removable.length) return;
   tabsList.value = tabsList.value.filter((item: Menu.MenuOptions) => !removable.includes(item.path));
   routerStore.removeRoutePaths(removable);
@@ -124,11 +126,19 @@ const closeSides = (side: "left" | "right", path: string) => {
   const index = tabsList.value.findIndex((item: Menu.MenuOptions) => item.path === path);
   if (index < 0) return;
   const items = side === "left" ? tabsList.value.slice(0, index) : tabsList.value.slice(index + 1);
-  closeTabs(items.map((item: Menu.MenuOptions) => item.path), path);
+  closeTabs(
+    items.map((item: Menu.MenuOptions) => item.path),
+    path
+  );
 };
 
 const closeOther = (type: "other" | "all", path: string) => {
-  closeTabs(tabsList.value.filter((item: Menu.MenuOptions) => type === "all" || item.path !== path).map((item: Menu.MenuOptions) => item.path), path);
+  closeTabs(
+    tabsList.value
+      .filter((item: Menu.MenuOptions) => type === "all" || item.path !== path)
+      .map((item: Menu.MenuOptions) => item.path),
+    path
+  );
 };
 </script>
 
@@ -136,16 +146,15 @@ const closeOther = (type: "other" | "all", path: string) => {
 .tabs {
   box-sizing: border-box;
   display: flex;
-  min-width: 0;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   height: 40px;
   overflow: hidden;
   .tabs_setting {
     flex: 0 0 auto;
     margin: 0 0 0 $margin;
     .tabs-action {
-      appearance: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -153,10 +162,11 @@ const closeOther = (type: "other" | "all", path: string) => {
       height: 28px;
       padding: 0;
       color: $color-text-2;
+      appearance: none;
+      cursor: pointer;
       background: transparent;
       border: 0;
       border-radius: 6px;
-      cursor: pointer;
 
       &:hover {
         color: rgb(var(--primary-6));
@@ -175,11 +185,15 @@ const closeOther = (type: "other" | "all", path: string) => {
 }
 :deep(.arco-tabs-nav) {
   min-width: 0;
+
+  &::before {
+    background: unset;
+  }
 }
 :deep(.arco-tabs-nav-type-line .arco-tabs-tab) {
   height: 34px;
-  margin: 0 2px;
   padding: 6px 10px;
+  margin: 0 2px;
   border-radius: 8px;
   transition:
     color 0.2s ease,
@@ -192,8 +206,8 @@ const closeOther = (type: "other" | "all", path: string) => {
 :deep(.arco-tabs-tab-active:hover) {
   position: relative;
   z-index: 1;
-  color: rgb(var(--primary-6));
   font-weight: 500;
+  color: rgb(var(--primary-6));
   background: var(--color-primary-light-1);
 }
 :deep(.arco-tabs-nav-ink) {
@@ -203,6 +217,7 @@ const closeOther = (type: "other" | "all", path: string) => {
   // 移入展示关闭icon
   min-width: 0;
   overflow: hidden;
+
   // 移入展示关闭icon
   .arco-tabs-tab-closable {
     .arco-tabs-tab-close-btn svg {
@@ -223,21 +238,14 @@ const closeOther = (type: "other" | "all", path: string) => {
 
 .tabs-tab-title {
   display: inline-flex;
+  gap: 6px;
   align-items: center;
   min-width: 0;
-  gap: 6px;
 
   :deep(svg) {
     flex: 0 0 auto;
     width: 16px;
     height: 16px;
-  }
-}
-
-// 消除tabs底部边线
-:deep(.arco-tabs-nav) {
-  &::before {
-    background: unset;
   }
 }
 </style>

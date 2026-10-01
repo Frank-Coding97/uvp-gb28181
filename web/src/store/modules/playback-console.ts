@@ -56,6 +56,6 @@ export const usePlaybackConsoleStore = defineStore("playback-console", () => {
     close,
     setDisplayMode,
     minimize,
-    restore,
+    restore
   };
 });

@@ -4,25 +4,28 @@ import { RefreshCw } from "lucide-vue-next";
 
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
 
-const props = withDefaults(defineProps<{
-  modelValue: MediaScope;
-  nodes: readonly MediaNodeCatalogNode[];
-  allowAll?: boolean;
-  requiresNode?: boolean;
-  loading?: boolean;
-  stale?: boolean;
-  errorText?: string;
-  showRefresh?: boolean;
-  compact?: boolean;
-}>(), {
-  allowAll: true,
-  requiresNode: false,
-  loading: false,
-  stale: false,
-  errorText: "",
-  showRefresh: true,
-  compact: false
-});
+const props = withDefaults(
+  defineProps<{
+    modelValue: MediaScope;
+    nodes: readonly MediaNodeCatalogNode[];
+    allowAll?: boolean;
+    requiresNode?: boolean;
+    loading?: boolean;
+    stale?: boolean;
+    errorText?: string;
+    showRefresh?: boolean;
+    compact?: boolean;
+  }>(),
+  {
+    allowAll: true,
+    requiresNode: false,
+    loading: false,
+    stale: false,
+    errorText: "",
+    showRefresh: true,
+    compact: false
+  }
+);
 
 const emit = defineEmits<{
   "update:modelValue": [scope: MediaScope];
@@ -85,26 +88,160 @@ function changeScope(next: string | number | Event) {
 </template>
 
 <style scoped>
-.media-scope-bar { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 10px; padding: 4px 0 6px; color: var(--zlm-text-2); background: transparent; border: 0; border-radius: 0; }
-.media-scope-bar__field { display: flex; width: 284px; min-width: 0; align-items: center; gap: 8px; padding: 3px; background: linear-gradient(135deg, var(--zlm-brand-50), var(--zlm-card)); border: 1px solid var(--zlm-brand-200); border-radius: 11px; box-shadow: 0 4px 14px rgb(22 93 255 / 10%); transition: border-color .18s ease, box-shadow .18s ease; }
-.media-scope-bar--compact { flex: none; justify-content: flex-start; gap: 6px; padding: 0; }
-.media-scope-bar__field:hover, .media-scope-bar__field:focus-within { border-color: var(--zlm-brand-500); box-shadow: 0 5px 18px rgb(22 93 255 / 16%); }
-.media-scope-bar__label { flex: none; margin-left: 9px; padding-right: 8px; color: var(--zlm-brand-600); border-right: 1px solid var(--zlm-brand-200); font-size: 12px; font-weight: var(--zlm-fw-semibold); line-height: 20px; white-space: nowrap; }
-.media-scope-bar__select { min-width: 0; flex: 1; }
-.media-scope-bar__select :deep(.arco-select-view) { height: 36px; padding-left: 8px; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); background: var(--zlm-card); border-color: transparent; border-radius: 8px; }
-.media-scope-bar__select :deep(.arco-select-view:hover), .media-scope-bar__select :deep(.arco-select-view-focus) { background: var(--zlm-card); border-color: transparent; }
-.media-scope-bar--compact .media-scope-bar__field { box-sizing: border-box; width: 170px; height: 40px; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
-.media-scope-bar--compact .media-scope-bar__field:hover, .media-scope-bar--compact .media-scope-bar__field:focus-within { border: 0; box-shadow: none; }
-.media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view) { height: 40px; background: var(--uvp-search-control-bg); border-radius: 10px; box-shadow: var(--uvp-search-control-shadow); }
-.media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view:hover), .media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view-focus) { box-shadow: var(--uvp-search-control-focus-shadow); }
-.media-scope-bar button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
-.media-scope-bar__notice { min-width: 0; flex: none; color: var(--zlm-text-3); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
-.media-scope-bar__notice--error { color: var(--zlm-warn-600); }
-.media-scope-bar button { display: inline-flex; min-height: 26px; flex: none; align-items: center; gap: 5px; padding: 0 5px; color: var(--zlm-brand-600); background: transparent; border: 0; border-radius: var(--zlm-radius-sm); cursor: pointer; font-size: 11px; }
-.media-scope-bar button:hover { background: var(--zlm-brand-50); }
-.media-scope-bar button:disabled { cursor: wait; opacity: .65; }
-.is-spinning { animation: media-scope-spin .8s linear infinite; }
-@keyframes media-scope-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .media-scope-bar * { animation-duration: .01ms !important; } }
-@media (max-width: 768px) { .media-scope-bar { align-items: stretch; flex-direction: column; } .media-scope-bar__field { width: 100%; } .media-scope-bar__notice { text-align: right; } }
+.media-scope-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 4px 0 6px;
+  color: var(--zlm-text-2);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.media-scope-bar__field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 284px;
+  min-width: 0;
+  padding: 3px;
+  background: linear-gradient(135deg, var(--zlm-brand-50), var(--zlm-card));
+  border: 1px solid var(--zlm-brand-200);
+  border-radius: 11px;
+  box-shadow: 0 4px 14px rgb(22 93 255 / 10%);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.media-scope-bar--compact {
+  flex: none;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 0;
+}
+.media-scope-bar__field:hover,
+.media-scope-bar__field:focus-within {
+  border-color: var(--zlm-brand-500);
+  box-shadow: 0 5px 18px rgb(22 93 255 / 16%);
+}
+.media-scope-bar__label {
+  flex: none;
+  padding-right: 8px;
+  margin-left: 9px;
+  font-size: 12px;
+  font-weight: var(--zlm-fw-semibold);
+  line-height: 20px;
+  color: var(--zlm-brand-600);
+  white-space: nowrap;
+  border-right: 1px solid var(--zlm-brand-200);
+}
+.media-scope-bar__select {
+  flex: 1;
+  min-width: 0;
+}
+.media-scope-bar__select :deep(.arco-select-view) {
+  height: 36px;
+  padding-left: 8px;
+  font-weight: var(--zlm-fw-semibold);
+  color: var(--zlm-text-1);
+  background: var(--zlm-card);
+  border-color: transparent;
+  border-radius: 8px;
+}
+.media-scope-bar__select :deep(.arco-select-view:hover),
+.media-scope-bar__select :deep(.arco-select-view-focus) {
+  background: var(--zlm-card);
+  border-color: transparent;
+}
+.media-scope-bar--compact .media-scope-bar__field {
+  box-sizing: border-box;
+  width: 170px;
+  height: 40px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.media-scope-bar--compact .media-scope-bar__field:hover,
+.media-scope-bar--compact .media-scope-bar__field:focus-within {
+  border: 0;
+  box-shadow: none;
+}
+.media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view) {
+  height: 40px;
+  background: var(--uvp-search-control-bg);
+  border-radius: 10px;
+  box-shadow: var(--uvp-search-control-shadow);
+}
+.media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view:hover),
+.media-scope-bar--compact .media-scope-bar__select :deep(.arco-select-view-focus) {
+  box-shadow: var(--uvp-search-control-focus-shadow);
+}
+.media-scope-bar button:focus-visible {
+  outline: 2px solid var(--zlm-brand-500);
+  outline-offset: 2px;
+}
+.media-scope-bar__notice {
+  flex: none;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--zlm-text-3);
+  overflow-wrap: anywhere;
+}
+.media-scope-bar__notice--error {
+  color: var(--zlm-warn-600);
+}
+.media-scope-bar button {
+  display: inline-flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 5px;
+  font-size: 11px;
+  color: var(--zlm-brand-600);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--zlm-radius-sm);
+}
+.media-scope-bar button:hover {
+  background: var(--zlm-brand-50);
+}
+.media-scope-bar button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.is-spinning {
+  animation: media-scope-spin 0.8s linear infinite;
+}
+
+@keyframes media-scope-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-scope-bar * {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@media (width <= 768px) {
+  .media-scope-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .media-scope-bar__field {
+    width: 100%;
+  }
+  .media-scope-bar__notice {
+    text-align: right;
+  }
+}
 </style>

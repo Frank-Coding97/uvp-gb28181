@@ -159,7 +159,11 @@ func TestPlaybackRTPRecoveryWorkerStopJoinsAndRestartKeepsOwner(t *testing.T) {
 		}
 	})
 	require.NoError(t, err)
-	defer stopAgain(ctx)
+	defer func() {
+		if err := stopAgain(ctx); err != nil {
+			t.Errorf("recovery stop failed: %v", err)
+		}
+	}()
 	select {
 	case <-ticked:
 	case <-time.After(3 * time.Second):

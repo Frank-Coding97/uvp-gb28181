@@ -1,8 +1,4 @@
-import type {
-  ZLMMediaIdentity,
-  ZLMStreamClosePreflight,
-  ZLMStreamQuery
-} from "@/api/gb28181-zlm-runtime";
+import type { ZLMMediaIdentity, ZLMStreamClosePreflight, ZLMStreamQuery } from "@/api/gb28181-zlm-runtime";
 
 export interface StreamRouteFilter extends ZLMMediaIdentity {
   nodeId: number;

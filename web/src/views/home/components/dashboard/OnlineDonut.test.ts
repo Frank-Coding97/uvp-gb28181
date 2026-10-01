@@ -6,7 +6,7 @@ vi.mock("./DashboardChart.vue", () => ({
   default: {
     name: "DashboardChart",
     props: ["spec", "title", "summary"],
-    template: '<div data-dashboard-chart />'
+    template: "<div data-dashboard-chart />"
   }
 }));
 

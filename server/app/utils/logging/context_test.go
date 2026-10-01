@@ -21,5 +21,5 @@ func TestLoggingContextDerivedScope(t *testing.T) {
 	if _, ok := rows[1]["request_id"]; ok {
 		t.Fatal("root scope polluted")
 	}
-	FromContext(nil, nil).Info("safe no-op")
+	FromContext(context.TODO(), nil).Info("safe no-op")
 }

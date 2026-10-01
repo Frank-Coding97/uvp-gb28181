@@ -21,7 +21,7 @@ func MaskNotDataError(gormDB *gorm.DB) {
 func CreateBeforeHook(gormDB *gorm.DB) {
 	// CreateInBatches 将指针切片拆成普通切片传给回调；其元素仍可写。
 	kind := reflect.TypeOf(gormDB.Statement.Dest).Kind()
-	if kind != reflect.Ptr && kind != reflect.Slice {
+	if kind != reflect.Pointer && kind != reflect.Slice {
 		app.ZapLog.Warn(myerrors.ErrorsGormDBCreateParamsNotPtr)
 	} else {
 		destValueOf := reflect.Indirect(reflect.ValueOf(gormDB.Statement.Dest))
@@ -36,7 +36,7 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 						if userID := GetCurrentUserIDFromContext(gormDB.Statement.Context); userID > 0 {
 							// column 可能是数据库列名，使用 GORM 字段映射设置当前行。
 							if field := gormDB.Statement.Schema.LookUpField(column); field != nil {
-								gormDB.AddError(field.Set(gormDB.Statement.Context, row, userID))
+								gormDB.Error = gormDB.AddError(field.Set(gormDB.Statement.Context, row, userID))
 							}
 						}
 					}
@@ -79,9 +79,6 @@ func UpdateBeforeHook(gormDB *gorm.DB) {
 	if reflect.TypeOf(gormDB.Statement.Dest).Kind() == reflect.Struct {
 		//_ = gormDB.AddError(errors.New(my_errors.ErrorsGormDBUpdateParamsNotPtr))
 		app.ZapLog.Warn(myerrors.ErrorsGormDBUpdateParamsNotPtr)
-	} else if reflect.TypeOf(gormDB.Statement.Dest).Kind() == reflect.Map {
-		// 如果是调用了 gorm.Update 、updates 函数 , 在参数没有传递指针的情况下，无法触发回调函数
-
 	}
 }
 
@@ -93,14 +90,14 @@ func DeleteBeforeHook(gormDB *gorm.DB) {
 // structHasSpecialField  检查结构体是否有特定字段
 func structHasSpecialField(fieldName string, anyStructPtr interface{}) (bool, string) {
 	var tmp reflect.Type
-	if reflect.TypeOf(anyStructPtr).Kind() == reflect.Ptr && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Map {
+	if reflect.TypeOf(anyStructPtr).Kind() == reflect.Pointer && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Map {
 		destValueOf := reflect.ValueOf(anyStructPtr).Elem()
 		for _, item := range destValueOf.MapKeys() {
 			if item.String() == fieldName {
 				return true, fieldName
 			}
 		}
-	} else if reflect.TypeOf(anyStructPtr).Kind() == reflect.Ptr && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Struct {
+	} else if reflect.TypeOf(anyStructPtr).Kind() == reflect.Pointer && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Struct {
 		destValueOf := reflect.ValueOf(anyStructPtr).Elem()
 		tf := destValueOf.Type()
 		for i := 0; i < tf.NumField(); i++ {

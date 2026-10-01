@@ -46,7 +46,7 @@ let generation = 0;
 // 无法读取影响、普通删除无法继续的死角。
 const canPurge = computed(() => props.action === "delete" && !!props.node && !!loadError.value);
 
-const copy = computed(() => props.node && props.action ? nodeActionCopy(props.action, props.node.name) : null);
+const copy = computed(() => (props.node && props.action ? nodeActionCopy(props.action, props.node.name) : null));
 const dialogReady = computed(() => {
   if (!props.visible || !props.node || !props.action || loadError.value || preflightLoading.value) return false;
   return props.action === "restart" || preflight.value !== null;
@@ -232,17 +232,10 @@ async function confirm(payload: { fingerprint: string }) {
       <div v-if="!purgeConfirming">
         <a-button @click="close">取消</a-button>
         <a-button type="primary" @click="loadPreflight">重新预检</a-button>
-        <a-button
-          v-if="canPurge"
-          status="danger"
-          data-test="purge-entry"
-          @click="purgeConfirming = true"
-        >强制移除</a-button>
+        <a-button v-if="canPurge" status="danger" data-test="purge-entry" @click="purgeConfirming = true">强制移除</a-button>
       </div>
       <template v-if="canPurge">
-        <p v-if="!purgeConfirming" class="purge-hint">
-          节点不可达时后端读不到它上面的流和会话，普通删除无法完成影响确认。
-        </p>
+        <p v-if="!purgeConfirming" class="purge-hint">节点不可达时后端读不到它上面的流和会话，普通删除无法完成影响确认。</p>
         <div v-else class="purge-confirm">
           <strong>确认强制移除该节点？</strong>
           <span>后端会先探一次：此刻如果读得通就会拒绝删除。</span>
@@ -278,11 +271,48 @@ async function confirm(payload: { fingerprint: string }) {
 </template>
 
 <style scoped>
-.preflight-state { display: flex; min-height: 150px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--zlm-text-3); text-align: center; }
-.preflight-state--error { color: var(--zlm-danger-600); }
-.preflight-state--error div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
-.purge-hint { max-width: 420px; margin: 4px 0 0; color: var(--zlm-text-3); font-size: 12px; line-height: 1.6; }
-.purge-confirm { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; max-width: 460px; }
-.purge-confirm span { color: var(--zlm-text-3); font-size: 12px; line-height: 1.6; }
-.purge-confirm strong { color: var(--zlm-danger-600); font-size: 13px; }
+.preflight-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  color: var(--zlm-text-3);
+  text-align: center;
+}
+.preflight-state--error {
+  color: var(--zlm-danger-600);
+}
+.preflight-state--error div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+.purge-hint {
+  max-width: 420px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--zlm-text-3);
+}
+.purge-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  max-width: 460px;
+  margin-top: 8px;
+}
+.purge-confirm span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--zlm-text-3);
+}
+.purge-confirm strong {
+  font-size: 13px;
+  color: var(--zlm-danger-600);
+}
 </style>

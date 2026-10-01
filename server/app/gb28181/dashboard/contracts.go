@@ -227,15 +227,16 @@ func NormalizeLayout(layout Layout) (Layout, error) {
 
 func migrateLegacyWidget(item WidgetLayout, definition WidgetDefinition, schemaVersion int) WidgetLayout {
 	defaults, sourceColumns := legacyWidgetDefaults, 12
-	if schemaVersion == 6 {
+	switch schemaVersion {
+	case 6:
 		defaults, sourceColumns = schema6WidgetDefaults, 20
-	} else if schemaVersion == 5 {
+	case 5:
 		defaults, sourceColumns = schema5WidgetDefaults, 20
-	} else if schemaVersion == 4 {
+	case 4:
 		defaults, sourceColumns = schema4WidgetDefaults, 20
-	} else if schemaVersion == 3 {
+	case 3:
 		defaults, sourceColumns = schema3WidgetDefaults, 20
-	} else if schemaVersion == 2 {
+	case 2:
 		defaults, sourceColumns = schema2WidgetDefaults, 20
 	}
 	legacy, matchesDefault := defaults[item.ID]

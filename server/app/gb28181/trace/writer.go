@@ -249,11 +249,3 @@ type unavailableStore struct{}
 func (unavailableStore) InsertBatch(context.Context, []StoredEvent) error {
 	return fmt.Errorf("trace store is not configured")
 }
-
-type errorStore struct {
-	err error
-}
-
-func (s errorStore) InsertBatch(context.Context, []StoredEvent) error {
-	return s.err
-}

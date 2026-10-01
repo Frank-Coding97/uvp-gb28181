@@ -213,11 +213,13 @@ func TestQueuedAuthorizationUsesRecordVersionForLegacyAuthority(t *testing.T) {
 }
 
 func TestQueuedAuthorizationChecksExpiryTerminalAndGlobalCutoff(t *testing.T) {
-	service, registry, authority, queued, now := newQueuedFixture(t, "queued-expiry", 7, 7, time.Minute)
+	service, _, _, queued, now := newQueuedFixture(t, "queued-expiry", 7, 7, time.Minute)
+	var registry *AuthorizationRegistry
+	var authority *queuedTestAuthority
 	*now = now.Add(2 * time.Minute)
 	require.ErrorIs(t, service.ValidateQueuedAuthorizationContext(context.Background(), queued), ErrAuthorizationExpired)
 
-	service, registry, authority, queued, now = newQueuedFixture(t, "queued-terminal", 7, 7, 2*time.Minute)
+	service, registry, authority, queued, _ = newQueuedFixture(t, "queued-terminal", 7, 7, 2*time.Minute)
 	require.NoError(t, service.BindAuthorizationContext(context.Background(), queued, 31))
 	require.Equal(t, 1, registry.TerminateMediaGeneration(31))
 	require.ErrorIs(t, service.ValidateQueuedAuthorizationContext(context.Background(), queued), ErrAuthorizationTerminal)
@@ -240,7 +242,7 @@ func TestQueuedAuthorizationStartLifetimeAppliesOnlyToUnboundRecords(t *testing.
 	require.ErrorIs(t, service.BindAuthorizationContext(context.Background(), queued, 41), ErrAuthorizationLifetimeTooShort)
 	require.Equal(t, AuthorizationUnbound, queuedRecordState(t, registry, queued.AuthorizationGeneration).state)
 
-	service, registry, authority, queued, now = newQueuedFixture(t, "queued-bound-short", 7, 7, 2*time.Minute)
+	service, _, authority, queued, now = newQueuedFixture(t, "queued-bound-short", 7, 7, 2*time.Minute)
 	require.NoError(t, service.BindAuthorizationContext(context.Background(), queued, 42))
 	*now = now.Add(91 * time.Second)
 	require.NoError(t, service.ValidateQueuedAuthorizationContext(context.Background(), queued))

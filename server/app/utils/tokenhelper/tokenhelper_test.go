@@ -126,7 +126,7 @@ func TestRotateRefreshToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 检查过期时间相近（允许2秒误差，因为有sleep和计算误差）
-	timeDiff := newClaims.ExpiresAt.Time.Sub(originalClaims.ExpiresAt.Time)
+	timeDiff := newClaims.ExpiresAt.Sub(originalClaims.ExpiresAt.Time)
 	assert.True(t, timeDiff < 2*time.Second && timeDiff > -2*time.Second,
 		"新token的过期时间应该与原token相近，时间差: %v", timeDiff)
 

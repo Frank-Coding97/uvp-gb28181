@@ -16,8 +16,10 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -176,7 +178,11 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 
 	// 创建zip写入器，直接写入到 io.Writer
 	zipWriter := zip.NewWriter(writer)
-	defer zipWriter.Close()
+	defer func() {
+		if closeErr := zipWriter.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭插件导出压缩包失败", zap.String("event", "plugin.export_zip_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	// 添加单个文件到zip的uvpback目录
 	for _, filePath := range filesToAdd {
@@ -270,12 +276,16 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 }
 
 // addFileToZip 将单个文件添加到zip压缩包中
-func (pms *PluginsManagerService) addFileToZip(zipWriter *zip.Writer, filePath, arcPath string) error {
+func (pms *PluginsManagerService) addFileToZip(zipWriter *zip.Writer, filePath, arcPath string) (err error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 在zip中创建文件条目
 	zipEntry, err := zipWriter.Create(arcPath)
@@ -388,8 +398,8 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 		return err
 	}
 
-	sqlContent.WriteString(fmt.Sprintf("-- Table structure for `%s`\n", tableName))
-	sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS `%s`;\n", tableName))
+	fmt.Fprintf(sqlContent, "-- Table structure for `%s`\n", tableName)
+	fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS `%s`;\n", tableName)
 	sqlContent.WriteString(createTableSQL)
 	sqlContent.WriteString(";\n\n")
 
@@ -403,7 +413,11 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	// 获取列信息
 	columns, err := rows.Columns()
@@ -426,13 +440,13 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 
 		// 构建INSERT语句
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO `%s` (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO `%s` (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
 				insertSQL.WriteString(", ")
 			}
-			insertSQL.WriteString(fmt.Sprintf("`%s`", col))
+			fmt.Fprintf(&insertSQL, "`%s`", col)
 		}
 
 		insertSQL.WriteString(") VALUES (")
@@ -469,15 +483,19 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	for rows.Next() {
 		var createTableSQL string
 		if err := rows.Scan(&createTableSQL); err != nil {
 			return err
 		}
-		sqlContent.WriteString(fmt.Sprintf("-- Table structure for %s\n", tableName))
-		sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS %s;\n", tableName))
+		fmt.Fprintf(sqlContent, "-- Table structure for %s\n", tableName)
+		fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS %s;\n", tableName)
 		sqlContent.WriteString(createTableSQL)
 		sqlContent.WriteString(";\n\n")
 	}
@@ -492,7 +510,11 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 	if err != nil {
 		return err
 	}
-	defer dataRows.Close()
+	defer func() {
+		if closeErr := dataRows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.data_rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	columns, err := dataRows.Columns()
 	if err != nil {
@@ -512,7 +534,7 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 		}
 
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO %s (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO %s (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
@@ -559,8 +581,8 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 	}
 
 	if createTableSQL != "" {
-		sqlContent.WriteString(fmt.Sprintf("-- Table structure for [%s]\n", tableName))
-		sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS [%s];\n", tableName))
+		fmt.Fprintf(sqlContent, "-- Table structure for [%s]\n", tableName)
+		fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS [%s];\n", tableName)
 		sqlContent.WriteString(createTableSQL)
 		sqlContent.WriteString(";\n\n")
 	}
@@ -575,7 +597,11 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -595,13 +621,13 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 		}
 
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO [%s] (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO [%s] (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
 				insertSQL.WriteString(", ")
 			}
-			insertSQL.WriteString(fmt.Sprintf("[%s]", col))
+			fmt.Fprintf(&insertSQL, "[%s]", col)
 		}
 
 		insertSQL.WriteString(") VALUES (")
@@ -739,11 +765,13 @@ func (pms *PluginsManagerService) processPluginImport(c *gin.Context, zipReader 
 			if err != nil {
 				return nil, fmt.Errorf("读取plugin.json失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("读取plugin.json内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return nil, fmt.Errorf("关闭plugin.json失败: %v", closeErr)
 			}
 
 			if err := json.Unmarshal(data, &pluginConfig); err != nil {
@@ -1041,7 +1069,7 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 }
 
 // extractFile 解压单个文件
-func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) error {
+func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) (err error) {
 	// 如果是目录，创建目录
 	if file.FileInfo().IsDir() {
 		return os.MkdirAll(destPath, os.ModePerm)
@@ -1057,14 +1085,22 @@ func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) e
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() {
+		if closeErr := rc.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 创建目标文件
 	destFile, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() {
+		if closeErr := destFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 复制内容
 	_, err = io.Copy(destFile, rc)
@@ -1081,11 +1117,13 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 			if err != nil {
 				return fmt.Errorf("读取database.sql失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return fmt.Errorf("读取database.sql内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("关闭database.sql失败: %v", closeErr)
 			}
 			sqlContent = string(data)
 			break
@@ -1141,11 +1179,13 @@ func (pms *PluginsManagerService) importMenus(c *gin.Context, zipReader *zip.Rea
 			if err != nil {
 				return fmt.Errorf("读取menus.json失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return fmt.Errorf("读取menus.json内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("关闭menus.json失败: %v", closeErr)
 			}
 			menuContent = string(data)
 			break

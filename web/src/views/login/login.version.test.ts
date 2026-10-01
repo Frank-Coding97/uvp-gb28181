@@ -11,4 +11,3 @@ describe("login product version", () => {
     expect(source).not.toContain("v2.3.0");
   });
 });
-

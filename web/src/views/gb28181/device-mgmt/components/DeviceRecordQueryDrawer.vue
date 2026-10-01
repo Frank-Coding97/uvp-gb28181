@@ -36,6 +36,7 @@ import {
   type RecordQueryUiState,
   type RecordQueryValidationErrors
 } from "../recordQueryState";
+import SNumberField from "@/components/s-number-field/index.vue";
 
 const props = defineProps<{
   visible: boolean;
@@ -56,6 +57,8 @@ const page = ref(1);
 const pageSize = ref(10);
 const form = reactive<RecordQueryForm>({ startTime: "", endTime: "", type: "all", secrecy: 0, recorderId: "" });
 const errors = reactive<RecordQueryValidationErrors>({});
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const secrecyField = ref<NumberFieldInstance | null>(null);
 let optionsToken = 0;
 let queryToken = 0;
 let queryController: AbortController | null = null;
@@ -161,6 +164,11 @@ async function loadContext(channelId: number) {
 async function submitQuery() {
   if (!props.channel || !options.value || state.value === "querying") return;
   clearErrors();
+  const numberFieldError = secrecyField.value?.error;
+  if (numberFieldError) {
+    errors.secrecy = numberFieldError;
+    return;
+  }
   Object.assign(errors, validateRecordQueryForm(form, options.value));
   if (Object.keys(errors).length) return;
 
@@ -347,7 +355,7 @@ function fileSizeText(value: number | null) {
           </div>
           <div v-if="advancedVisible" class="advanced-fields">
             <label class="field"
-              ><span>保密属性</span><a-input-number v-model="form.secrecy" :min="0" :precision="0" /><small
+              ><span>保密属性</span><s-number-field ref="secrecyField" v-model="form.secrecy" :min="0" required /><small
                 v-if="errors.secrecy"
                 class="field-error"
                 >{{ errors.secrecy }}</small

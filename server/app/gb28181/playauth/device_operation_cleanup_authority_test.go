@@ -19,12 +19,13 @@ func TestDeviceSIPCleanupRequiresRetiredGeneration(t *testing.T) {
 				ctx := context.Background()
 				version := int64(6)
 				next := sipCleanupIdentity(1)
-				if field == "info" {
+				switch field {
+				case "info":
 					_, err := store.PrepareSIPINFO(ctx, id, version, sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"}))
 					require.NoError(t, err)
 					version++
 					next = sipCleanupIdentity(2)
-				} else if field == "cleanup" {
+				case "cleanup":
 					_, err := store.PrepareSIPBranchCleanup(ctx, id, version, next)
 					require.NoError(t, err)
 					version++
@@ -108,11 +109,12 @@ func TestDeviceRTPCleanupRequiresRetiredGeneration(t *testing.T) {
 				oldID := strings.Repeat("d", 32)
 				_, err = store.mutateRTPFacts(ctx, id, out.Intent.RowVersion, authorizeRTPCleanupDevice, func(out *DeviceRTPResourceSteps, now time.Time) (bool, error) {
 					s := &out.Steps[0]
-					if field == "recovery" {
+					switch field {
+					case "recovery":
 						s.Recovery = &DeviceRTPRecovery{Version: 1, Generation: 1, OwnerProcessID: oldID, OwnerRunID: strings.Repeat("e", 32), ReservedAt: now}
-					} else if field == "missing-original" {
+					case "missing-original":
 						s.OwnerProcessID, s.OwnerRunID = "", ""
-					} else {
+					default:
 						s.OwnerProcessID = oldID
 					}
 					return true, nil

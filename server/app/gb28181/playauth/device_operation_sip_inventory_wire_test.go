@@ -62,9 +62,9 @@ func TestDeviceSIPInventoryDamagedBranchMaterialFailsClosed(t *testing.T) {
 func TestDeviceSIPInventoryRejectsINFOAfterObservationOnRead(t *testing.T) {
 	f, store, id := sipINFOFixture(t)
 	ctx := context.Background()
-	out, err := store.PrepareSIPINFO(ctx, id, 6, sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"}))
+	_, err := store.PrepareSIPINFO(ctx, id, 6, sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"}))
 	require.NoError(t, err)
-	out, err = store.ObserveSIPAdditionalBranch(ctx, id, 7, sipExtraBranch(1))
+	out, err := store.ObserveSIPAdditionalBranch(ctx, id, 7, sipExtraBranch(1))
 	require.NoError(t, err)
 	w := sipStepToWire(out.Steps[0])
 	w.AdditionalBranches[0].ObservedAt = w.KnownBranch.ObservedAt

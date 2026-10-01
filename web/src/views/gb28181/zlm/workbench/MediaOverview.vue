@@ -9,7 +9,7 @@ import RuntimeSummaryPanel from "./monitoring/RuntimeSummaryPanel.vue";
 
 const workspace = useMediaWorkspaceRoute("overview");
 const router = useRouter();
-const nodeId = computed(() => typeof workspace.scope.value === "number" ? workspace.scope.value : null);
+const nodeId = computed(() => (typeof workspace.scope.value === "number" ? workspace.scope.value : null));
 const views = [{ key: "overview", label: "节点运行态", description: "负载、吞吐与对象状态" }];
 
 function drilldown(view: "streams" | "sessions") {
@@ -41,11 +41,7 @@ function drilldown(view: "streams" | "sessions") {
     @update:scope="workspace.setScope"
   >
     <template #overview>
-      <RuntimeSummaryPanel
-        :active="workspace.activeView.value === 'overview'"
-        :node-id="nodeId"
-        @drilldown="drilldown"
-      >
+      <RuntimeSummaryPanel :active="workspace.activeView.value === 'overview'" :node-id="nodeId" @drilldown="drilldown">
         <template #scope>
           <MediaScopeBar
             compact

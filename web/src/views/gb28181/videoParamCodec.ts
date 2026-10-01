@@ -16,13 +16,7 @@
  * 一旦某一侧被转成人读串，比的就是两套表示了。
  */
 
-export type VideoParamReconcileStateName =
-  | "never_read"
-  | "pending"
-  | "read_ok"
-  | "type_absent"
-  | "mismatch"
-  | "failed";
+export type VideoParamReconcileStateName = "never_read" | "pending" | "read_ok" | "type_absent" | "mismatch" | "failed";
 
 export interface VideoParamCodecItem {
   streamNumber: number;
@@ -232,10 +226,7 @@ export interface ReconcileTextOptions {
  * 这个值有 `default:2016`，设备从未声明时也会是 2016。说成"设备声明了 2016"
  * 会在排障时把人带偏（明明设备什么都没说）。
  */
-export function videoParamReconcileText(
-  state: VideoParamReconcileStateName,
-  options: ReconcileTextOptions = {}
-): string {
+export function videoParamReconcileText(state: VideoParamReconcileStateName, options: ReconcileTextOptions = {}): string {
   const registered = String(options.registeredVersion ?? "").trim();
   switch (state) {
     case "never_read":
@@ -251,9 +242,7 @@ export function videoParamReconcileText(
     case "mismatch":
       return "设备已接受命令，但值未生效";
     case "failed":
-      return registered === "2016"
-        ? "设备未响应（平台按 2016 版处理，可能不支持该配置类型）"
-        : "读取失败：设备未响应或被拒绝";
+      return registered === "2016" ? "设备未响应（平台按 2016 版处理，可能不支持该配置类型）" : "读取失败：设备未响应或被拒绝";
     default:
       return "尚未读取设备视频参数";
   }
@@ -263,9 +252,7 @@ export function videoParamReconcileText(
  * 文案的严重程度，给 CSS 用。
  * ⛔ `mismatch` 是 `warn` 不是 `error`：设备已接受命令，只是值没照做。
  */
-export function videoParamReconcileTone(
-  state: VideoParamReconcileStateName
-): "idle" | "busy" | "ok" | "warn" | "error" {
+export function videoParamReconcileTone(state: VideoParamReconcileStateName): "idle" | "busy" | "ok" | "warn" | "error" {
   switch (state) {
     case "pending":
       return "busy";
@@ -292,10 +279,7 @@ export function videoParamReconcileTone(
  * 占位文案与顶部四态文案必须来自同一套判据（都是 reconcile state），
  * 否则两处会各说一套。
  */
-export function videoParamEmptyText(
-  state: VideoParamReconcileStateName,
-  options: { pending?: boolean } = {}
-): string {
+export function videoParamEmptyText(state: VideoParamReconcileStateName, options: { pending?: boolean } = {}): string {
   if (options.pending) return "正在读取设备视频参数…";
   switch (state) {
     case "pending":

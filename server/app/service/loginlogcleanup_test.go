@@ -50,7 +50,7 @@ func TestLoginLogCleanupStopsAfterFailedSecondBatch(t *testing.T) {
 	require.NoError(t, db.Callback().Delete().Before("gorm:delete").Register("test:fail_second_login_log_batch", func(tx *gorm.DB) {
 		deleteCalls++
 		if deleteCalls == 2 {
-			tx.AddError(errors.New("second batch failed"))
+			_ = tx.AddError(errors.New("second batch failed"))
 		}
 	}))
 

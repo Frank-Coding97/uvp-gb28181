@@ -46,7 +46,7 @@ func TestPlaybackHTTPOriginalEpochRejectedByActualService(t *testing.T) {
 			registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{})
 			barrier := playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(f.db))
 			service := gbplayback.NewService(registry, io, io, io, io, gbplayback.ServiceConfig{DeviceOperations: barrier})
-			defer service.Close(context.Background())
+			defer func() { require.NoError(t, service.Close(context.Background())) }()
 			f.controller.SetPlaybackRuntime(service, playbackSnapshotFunc(func(recordquery.ResolveRequest) (recordquery.Snapshot, error) {
 				// Even if cleanup has finished, an old permission snapshot cannot
 				// use the newly completed epoch to authorize a new session.

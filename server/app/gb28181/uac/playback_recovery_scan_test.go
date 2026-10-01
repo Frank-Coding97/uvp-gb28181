@@ -193,7 +193,9 @@ func TestPlaybackRecoveryScanResumesRetainedFactsWithoutResend(t *testing.T) {
 	faultDB := authoritytest.CommitFaultDB(t, f.db, 4, false)
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, newAuthorizedIntentTestStore(t, faultDB), f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	readCleanupRequest(t, f.peer)
@@ -226,7 +228,9 @@ func TestPlaybackRecoveryScanTimeoutRetainsRunningOwner(t *testing.T) {
 	defer closeScanObservations(t, f.u)
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	readCleanupRequest(t, f.peer)

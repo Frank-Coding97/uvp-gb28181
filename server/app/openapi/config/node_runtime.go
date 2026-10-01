@@ -396,7 +396,7 @@ func lockNodeRuntimeRow(db *gorm.DB) *gorm.DB {
 	if db == nil {
 		return nil
 	}
-	if db.Dialector.Name() == "sqlserver" {
+	if db.Name() == "sqlserver" {
 		return db.Table("meta_node WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return db.Model(&models.MediaNodeSecurity{}).Clauses(clause.Locking{Strength: "UPDATE"})

@@ -113,7 +113,7 @@ func readRequestBody(t *testing.T, getBody func() (io.ReadCloser, error)) []byte
 	t.Helper()
 	body, err := getBody()
 	require.NoError(t, err)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
 	return data

@@ -137,7 +137,9 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict, "old process permission never resumes")
 	observation, err := f.u.beginRecoveredPlaybackObservation(ctx, f.store, f.barrier, f.id, stepID)
 	require.NoError(t, err)
-	defer observation.CloseLocal(ctx)
+	defer func() {
+		_ = observation.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	listenerDone := make(chan error, 1)
@@ -153,7 +155,9 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	requirePlaybackNoPacket(t, f.peer) // Includes INVITE: observation never revives original SIP work.
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	newACK, _ := readCleanupRequest(t, f.peer)

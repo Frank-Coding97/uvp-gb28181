@@ -6,9 +6,10 @@ const route = useRoute();
 const router = useRouter();
 
 onMounted(() => {
-  const nodeId = typeof route.query.nodeId === "string" && /^\d+$/.test(route.query.nodeId) && Number(route.query.nodeId) > 0
-    ? route.query.nodeId
-    : undefined;
+  const nodeId =
+    typeof route.query.nodeId === "string" && /^\d+$/.test(route.query.nodeId) && Number(route.query.nodeId) > 0
+      ? route.query.nodeId
+      : undefined;
   void router.replace({ path: "/gb28181/zlm/overview", query: nodeId ? { nodeId } : {} });
 });
 </script>
@@ -18,5 +19,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.retired-runtime-overview { display: grid; min-height: 240px; place-items: center; color: var(--zlm-text-3); }
+.retired-runtime-overview {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  color: var(--zlm-text-3);
+}
 </style>

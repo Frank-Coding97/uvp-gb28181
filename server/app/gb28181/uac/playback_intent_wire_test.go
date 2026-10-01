@@ -25,7 +25,7 @@ func TestPlaybackIntentSnapshotMatchesInitialLoopbackWire(t *testing.T) {
 			if transport == "UDP" {
 				conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
 				require.NoError(t, err)
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				destination = conn.LocalAddr().String()
 				receive = func() []byte {
 					require.NoError(t, conn.SetReadDeadline(time.Now().Add(3*time.Second)))
@@ -37,13 +37,13 @@ func TestPlaybackIntentSnapshotMatchesInitialLoopbackWire(t *testing.T) {
 			} else {
 				listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 				require.NoError(t, err)
-				defer listener.Close()
+				defer func() { _ = listener.Close() }()
 				destination = listener.Addr().String()
 				receive = func() []byte {
 					require.NoError(t, listener.SetDeadline(time.Now().Add(3*time.Second)))
 					conn, err := listener.Accept()
 					require.NoError(t, err)
-					defer conn.Close()
+					defer func() { _ = conn.Close() }()
 					require.NoError(t, conn.SetReadDeadline(time.Now().Add(3*time.Second)))
 					reader := bufio.NewReader(io.LimitReader(conn, 65536))
 					var headers strings.Builder
@@ -65,7 +65,7 @@ func TestPlaybackIntentSnapshotMatchesInitialLoopbackWire(t *testing.T) {
 			}
 			ua, err := sipgo.NewUA()
 			require.NoError(t, err)
-			defer ua.Close()
+			defer func() { _ = ua.Close() }()
 			u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
 			require.NoError(t, err)
 			require.Nil(t, u.client.TxRequester)

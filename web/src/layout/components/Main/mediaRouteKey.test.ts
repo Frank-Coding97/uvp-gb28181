@@ -7,13 +7,7 @@ function route(path: string, fullPath: string, matchedPath: string = path) {
   return { path, fullPath, matched: [{ path: matchedPath }] };
 }
 
-const WORKBENCH_PATHS = [
-  "/media/overview",
-  "/media/monitoring",
-  "/media/ingress",
-  "/media/nodes",
-  "/media/scheduling"
-];
+const WORKBENCH_PATHS = ["/media/overview", "/media/monitoring", "/media/ingress", "/media/nodes", "/media/scheduling"];
 
 describe("media route render key", () => {
   it("keeps each workbench page mounted while its query changes", () => {
@@ -36,9 +30,7 @@ describe("media route render key", () => {
     expect(resolveMediaRouteRenderKey(route("/gb28181/device-mgmt/devices", "/gb28181/device-mgmt/devices?page=2"))).toBe(
       "/gb28181/device-mgmt/devices?page=2"
     );
-    expect(resolveMediaRouteRenderKey(route("/media/monitoring", "/media/monitoring?nodeId=2"))).toBe(
-      "/media/monitoring"
-    );
+    expect(resolveMediaRouteRenderKey(route("/media/monitoring", "/media/monitoring?nodeId=2"))).toBe("/media/monitoring");
   });
 
   it("falls back safely when matched records are unavailable", () => {

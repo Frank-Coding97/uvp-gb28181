@@ -229,12 +229,16 @@ func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVide
 		if strings.HasSuffix(r.URL.Path, "stopSendRtp") {
 			stops <- r.Form.Get("ssrc")
 			if failures.Add(-1) >= 0 {
-				fmt.Fprint(w, `{"code":-1,"msg":"temporarily unavailable"}`)
+				if _, err := fmt.Fprint(w, `{"code":-1,"msg":"temporarily unavailable"}`); err != nil {
+					panic(err)
+				}
 				return
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"code":0,"local_port":31000}`)
+		if _, err := fmt.Fprint(w, `{"code":0,"local_port":31000}`); err != nil {
+			panic(err)
+		}
 	}))
 	t.Cleanup(api.Close)
 	address := strings.TrimPrefix(api.URL, "http://")

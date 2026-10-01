@@ -28,7 +28,6 @@ type fakeAuthSessionLifecycle struct {
 	createPair *service.SessionTokenPair
 	createErr  error
 	rotatePair *service.SessionTokenPair
-	rotateSID  string
 	revokeSID  string
 }
 

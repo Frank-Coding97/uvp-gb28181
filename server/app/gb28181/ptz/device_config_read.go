@@ -316,15 +316,6 @@ func (s *Service) settleConfigReadStage(ctx context.Context, operationID string,
 	return nil
 }
 
-func (s *Service) discardConfigReadStage(operationID string) {
-	if s == nil || operationID == "" {
-		return
-	}
-	s.configReadMu.Lock()
-	delete(s.configReadStages, operationID)
-	s.configReadMu.Unlock()
-}
-
 func (s *Service) clearConfigReadStages() {
 	if s == nil {
 		return

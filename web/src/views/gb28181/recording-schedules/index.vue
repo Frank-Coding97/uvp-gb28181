@@ -5,8 +5,8 @@ import { useRoute } from "vue-router";
 import RecordingPlansPanel from "./RecordingPlansPanel.vue";
 
 const route = useRoute();
-const stream = computed(() => Array.isArray(route.query.stream) ? route.query.stream[0] : route.query.stream);
-const nodeId = computed(() => Array.isArray(route.query.nodeId) ? route.query.nodeId[0] : route.query.nodeId);
+const stream = computed(() => (Array.isArray(route.query.stream) ? route.query.stream[0] : route.query.stream));
+const nodeId = computed(() => (Array.isArray(route.query.nodeId) ? route.query.nodeId[0] : route.query.nodeId));
 </script>
 
 <template>
@@ -19,5 +19,11 @@ const nodeId = computed(() => Array.isArray(route.query.nodeId) ? route.query.no
 
 <style scoped>
 .recording-schedules-route,
-.recording-schedules-route__inner { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.recording-schedules-route__inner {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
 </style>

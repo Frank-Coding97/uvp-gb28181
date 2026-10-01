@@ -14,7 +14,7 @@ import type { MediaWorkbenchStatus } from "./MediaWorkspaceShell.vue";
 import { resolveMediaWorkspaceAccess } from "./mediaAccess";
 import { MEDIA_WORKSPACES } from "./mediaRoutes";
 
-export function useMediaWorkspaceRoute(key: typeof MEDIA_WORKSPACES[number]["key"]) {
+export function useMediaWorkspaceRoute(key: (typeof MEDIA_WORKSPACES)[number]["key"]) {
   const definition = MEDIA_WORKSPACES.find(workspace => workspace.key === key)!;
 
   const route = useRoute();
@@ -37,12 +37,8 @@ export function useMediaWorkspaceRoute(key: typeof MEDIA_WORKSPACES[number]["key
   watch(
     [() => route.query.view, allowedViews],
     () => {
-      activeView.value = workbenchStore.resolveView(
-        definition.path,
-        route.query.view,
-        allowedViews.value,
-        definition.defaultView
-      ) ?? "";
+      activeView.value =
+        workbenchStore.resolveView(definition.path, route.query.view, allowedViews.value, definition.defaultView) ?? "";
     },
     { immediate: true }
   );

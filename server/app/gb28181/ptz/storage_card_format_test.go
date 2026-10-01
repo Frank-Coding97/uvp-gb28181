@@ -124,8 +124,9 @@ func TestBuildScheduledPTZBodyRebuildsFormatStorageCard(t *testing.T) {
 //   - 表 1 序号 12：「存储卡格式化 A.2.3.1.13」的应答命令章节 = 「（无）」。
 //
 // ⛔ 若有人"体贴地"把它改成 ResponseRequired=true，不会报错、单测之外的路径也照跑，
-//    只是在真机上每次格式化都要白等到 transport deadline 才落 timeout —— 表现为
-//    "格式化功能总是结果未知"。所以这条契约必须在服务层钉住。
+//
+//	只是在真机上每次格式化都要白等到 transport deadline 才落 timeout —— 表现为
+//	"格式化功能总是结果未知"。所以这条契约必须在服务层钉住。
 //
 // 与之配套：判"格式化成没成"要靠**事后再查一次 SDCardStatus**（Status=formatting
 // 带 FormatProgress，或已回到 ok/unformatted），前端也是按这个口径提示用户的。

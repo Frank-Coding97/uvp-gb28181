@@ -55,7 +55,7 @@ func TestDiagnosisRepositoryUpdateUsesExplicitNaturalKeyScope(t *testing.T) {
 			return
 		}
 		if _, ok := tx.Statement.Clauses["WHERE"]; !ok {
-			tx.AddError(gorm.ErrMissingWhereClause)
+			_ = tx.AddError(gorm.ErrMissingWhereClause) // AddError mutates the transaction; its *DB return is intentionally unused.
 		}
 	}))
 	base := diagnosisRecord("explicit-scope", time.Date(2026, 9, 14, 11, 45, 0, 0, time.UTC))

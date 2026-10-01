@@ -159,7 +159,9 @@ describe("multi-screen playback page", () => {
   it("keeps the desktop polling countdown content inside its status button", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
 
-    expect(source).toMatch(/\.playback-actions button\.polling-control\.counting\s*\{[^}]*width:\s*44px;[^}]*flex-shrink:\s*0;/s);
+    const pollingRule = source.match(/\.playback-actions button\.polling-control\.counting\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(pollingRule).toMatch(/width:\s*44px/);
+    expect(pollingRule).toMatch(/flex-shrink:\s*0/);
     expect(source).not.toContain('class="countdown-label"');
   });
 
@@ -174,8 +176,10 @@ describe("multi-screen playback page", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
 
     expect(source).toMatch(/\.slot-topline\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*6;/s);
-    expect(source).toMatch(/\.slot-topline\s*\{[^}]*min-height:\s*28px;[^}]*background:\s*rgb\(15 23 42 \/ 72%\);/s);
-    expect(source).toMatch(/\.screen-slot:hover \.slot-topline, \.screen-slot:focus-within \.slot-topline/);
+    const slotToplineRule = source.match(/\.slot-topline\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(slotToplineRule).toMatch(/min-height:\s*28px/);
+    expect(slotToplineRule).toMatch(/background:\s*rgb\(15 23 42 \/ 72%\)/);
+    expect(source).toMatch(/\.screen-slot:hover\s+\.slot-topline,\s*\.screen-slot:focus-within\s+\.slot-topline/);
     expect(source).not.toContain('<footer class="slot-footer">');
     expect(source).toContain('class="slot-node-name">节点 {{ slot.result.node.name }}</span>');
     expect(source).toContain('<SlidersHorizontal :size="15" aria-hidden="true" />');

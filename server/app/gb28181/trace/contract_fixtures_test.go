@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -45,18 +44,4 @@ func TestTraceContractFixturesUseRFC3339AndStableCursor(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "2026-07-20T10:11:12.123Z")
 	require.NotContains(t, string(data), "offset")
-}
-
-type fixtureQueryRepository struct{}
-
-func (fixtureQueryRepository) ListMessages(context.Context, MessageFilter) (MessagePage, error) {
-	summary, _, _, _ := traceContractFixture()
-	return MessagePage{Items: []MessageSummary{summary}}, nil
-}
-func (fixtureQueryRepository) GetMessage(context.Context, string) (StoredMessage, error) {
-	return StoredMessage{}, ErrTraceMessageNotFound
-}
-func (fixtureQueryRepository) ListSessions(context.Context, SessionFilter) ([]SessionSummary, error) {
-	_, _, session, _ := traceContractFixture()
-	return []SessionSummary{session}, nil
 }

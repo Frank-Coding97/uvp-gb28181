@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/ChannelAssignmentDialog.vue"), "utf8");
+const source = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/ChannelAssignmentDialog.vue"),
+  "utf8"
+);
 
 describe("ChannelAssignmentDialog high fidelity workflow", () => {
   it("uses a system dialog instead of a drawer", () => {
@@ -39,7 +42,10 @@ describe("ChannelAssignmentDialog high fidelity workflow", () => {
   });
 
   it("places the online-state dropdown in the search toolbar", () => {
-    const filters = source.slice(source.indexOf('<div class="assignment-filters">'), source.indexOf('<div class="selection-policy">'));
+    const filters = source.slice(
+      source.indexOf('<div class="assignment-filters">'),
+      source.indexOf('<div class="selection-policy">')
+    );
     expect(filters).toContain('<a-select v-model="onlineFilter"');
     expect(filters).toContain(':options="onlineFilterOptions"');
     expect(source).toContain("仅显示在线通道");
@@ -54,11 +60,11 @@ describe("ChannelAssignmentDialog high fidelity workflow", () => {
     expect(source).toContain("跨页保留");
   });
 
-	it("loads assignment candidates and confirms selection through real APIs", () => {
-		expect(source).toContain("listRecordingPlanDevices");
-		expect(source).toContain("listRecordingPlanChannels");
-		expect(source).toContain("assignRecordingPlan");
-		expect(source).not.toContain("const devices:");
-		expect(source).not.toContain("const channels:");
-	});
+  it("loads assignment candidates and confirms selection through real APIs", () => {
+    expect(source).toContain("listRecordingPlanDevices");
+    expect(source).toContain("listRecordingPlanChannels");
+    expect(source).toContain("assignRecordingPlan");
+    expect(source).not.toContain("const devices:");
+    expect(source).not.toContain("const channels:");
+  });
 });

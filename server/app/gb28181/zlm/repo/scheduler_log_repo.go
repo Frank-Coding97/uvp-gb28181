@@ -58,31 +58,11 @@ type SchedulerLogFilter struct {
 }
 
 func (r SchedulerLogRow) toDTO() SchedulerLogDTO {
-	return SchedulerLogDTO{
-		ID:           r.ID,
-		HappenedAt:   r.HappenedAt,
-		Algorithm:    r.Algorithm,
-		NodeID:       r.NodeID,
-		NodeName:     r.NodeName,
-		StreamID:     r.StreamID,
-		DeviceID:     r.DeviceID,
-		ChannelID:    r.ChannelID,
-		ErrorMessage: r.ErrorMessage,
-	}
+	return SchedulerLogDTO(r)
 }
 
 func (d SchedulerLogDTO) toRow() SchedulerLogRow {
-	return SchedulerLogRow{
-		ID:           d.ID,
-		HappenedAt:   d.HappenedAt,
-		Algorithm:    d.Algorithm,
-		NodeID:       d.NodeID,
-		NodeName:     d.NodeName,
-		StreamID:     d.StreamID,
-		DeviceID:     d.DeviceID,
-		ChannelID:    d.ChannelID,
-		ErrorMessage: d.ErrorMessage,
-	}
+	return SchedulerLogRow(d)
 }
 
 // GormSchedulerLogRepo gorm 仓库实现

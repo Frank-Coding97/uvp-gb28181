@@ -56,11 +56,13 @@ describe("ZLM danger action snapshot", () => {
       requireReason: false
     });
 
-    expect(dangerActionSnapshotMatches(snapshot, {
-      contextVersion: 4,
-      nodeId: 7,
-      targetKey: "target-a",
-      fingerprint: "fingerprint-after"
-    })).toBe(false);
+    expect(
+      dangerActionSnapshotMatches(snapshot, {
+        contextVersion: 4,
+        nodeId: 7,
+        targetKey: "target-a",
+        fingerprint: "fingerprint-after"
+      })
+    ).toBe(false);
   });
 });

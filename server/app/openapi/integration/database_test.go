@@ -61,7 +61,7 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal("test database handle unavailable")
 	}
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	raw.SetMaxOpenConns(10)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

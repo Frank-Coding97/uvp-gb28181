@@ -107,7 +107,7 @@ func (c *Client) runtimeEnvelope(ctx context.Context, api string, query url.Valu
 	if err != nil {
 		return nil, ErrRuntimeControlUnavailable
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Age") != "" {
 		return nil, ErrRuntimeControlUnavailable
 	}

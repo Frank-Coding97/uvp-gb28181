@@ -7,11 +7,11 @@ export const isSeedSystemCopyright = (value?: string) => normalizeText(value) ==
 export const isSeedSystemRecordNo = (value?: string) => normalizeText(value) === SYSTEM_RECORD_NO_DEFAULT;
 
 export const getDisplaySystemCopyright = (value?: string) => {
-    const text = normalizeText(value);
-    return isSeedSystemCopyright(text) ? "© 2026 UVP 统一视频接入平台" : text || "© 2026 UVP 统一视频接入平台";
+  const text = normalizeText(value);
+  return isSeedSystemCopyright(text) ? "© 2026 UVP 统一视频接入平台" : text || "© 2026 UVP 统一视频接入平台";
 };
 
 export const getDisplaySystemRecordNo = (value?: string) => {
-    const text = normalizeText(value);
-    return isSeedSystemRecordNo(text) ? "" : text;
+  const text = normalizeText(value);
+  return isSeedSystemRecordNo(text) ? "" : text;
 };

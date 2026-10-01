@@ -66,7 +66,7 @@ func TestLoggingClaims(t *testing.T) {
 		require.True(t, ok)
 		ginClaims, ok = value.(*app.Claims)
 		require.True(t, ok)
-		contextClaims, ok = c.Request.Context().Value(consts.BindContextKeyName).(*app.Claims)
+		contextClaims, ok = c.Request.Context().Value(consts.BindContextKey).(*app.Claims)
 		require.True(t, ok)
 		app.Log(c.Request.Context()).Info("authenticated request", zap.String("event", "test.logging_claims"))
 		c.Status(http.StatusNoContent)

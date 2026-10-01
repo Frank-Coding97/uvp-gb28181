@@ -1160,10 +1160,7 @@ func (b *VideoRecordPlanBlock) wire() *videoRecordPlanWire {
 			WeekDayNum: schedule.WeekDayNum, TimeSegmentSumNum: len(schedule.Segments),
 		}
 		for _, segment := range schedule.Segments {
-			scheduleWire.Segments = append(scheduleWire.Segments, recordTimeSegmentWire{
-				StartHour: segment.StartHour, StartMin: segment.StartMin, StartSec: segment.StartSec,
-				StopHour: segment.StopHour, StopMin: segment.StopMin, StopSec: segment.StopSec,
-			})
+			scheduleWire.Segments = append(scheduleWire.Segments, recordTimeSegmentWire(segment))
 		}
 		wire.Schedules = append(wire.Schedules, scheduleWire)
 	}
@@ -1178,10 +1175,7 @@ func (w *videoRecordPlanWire) toBlock() *VideoRecordPlanBlock {
 	for _, scheduleWire := range w.Schedules {
 		schedule := RecordSchedule{WeekDayNum: scheduleWire.WeekDayNum}
 		for _, segmentWire := range scheduleWire.Segments {
-			schedule.Segments = append(schedule.Segments, RecordTimeSegment{
-				StartHour: segmentWire.StartHour, StartMin: segmentWire.StartMin, StartSec: segmentWire.StartSec,
-				StopHour: segmentWire.StopHour, StopMin: segmentWire.StopMin, StopSec: segmentWire.StopSec,
-			})
+			schedule.Segments = append(schedule.Segments, RecordTimeSegment(segmentWire))
 		}
 		block.Schedules = append(block.Schedules, schedule)
 	}

@@ -19,10 +19,10 @@ func TestRealtimeHubSequenceSnapshotAndGap(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, snapshot, gap := hub.Subscribe(ctx, RealtimeFilter{Event: "gb28181.play.started"}, 0)
+	_, snapshot, _ := hub.Subscribe(ctx, RealtimeFilter{Event: "gb28181.play.started"}, 0)
 	require.Len(t, snapshot, defaultRealtimeRing)
 	require.Equal(t, uint64(3), snapshot[0].Sequence)
-	_, _, gap = hub.Subscribe(ctx, RealtimeFilter{}, 1)
+	_, _, gap := hub.Subscribe(ctx, RealtimeFilter{}, 1)
 	require.True(t, gap)
 }
 

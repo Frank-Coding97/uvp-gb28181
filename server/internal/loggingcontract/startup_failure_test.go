@@ -76,7 +76,7 @@ func TestLoggingStartupFailureCleanupWiring(t *testing.T) {
 	configIndex := strings.Index(functionText, `Component: "config"`)
 	schedulerIndex := strings.Index(functionText, `Component: "scheduler"`)
 	resultsComponentIndex := strings.Index(functionText, `Component: "scheduler.results"`)
-	if configIndex < 0 || schedulerIndex < 0 || resultsComponentIndex < 0 || !(configIndex < schedulerIndex && schedulerIndex < resultsComponentIndex) {
+	if configIndex < 0 || schedulerIndex < 0 || resultsComponentIndex < 0 || (configIndex >= schedulerIndex || schedulerIndex >= resultsComponentIndex) {
 		t.Errorf("cleanup component order = config:%d scheduler:%d results:%d", configIndex, schedulerIndex, resultsComponentIndex)
 	}
 	if shutdownIndex >= 0 && resultIndex >= 0 && shutdownIndex <= resultIndex {

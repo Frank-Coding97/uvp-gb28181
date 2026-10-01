@@ -24,7 +24,7 @@ func TestPlaybackIntentCancelMatchesOwnedPreparation(t *testing.T) {
 	ctx := context.Background()
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.LocalAddr().String(), "UDP"
 	request, stored, err := u.prepareStoredPlaybackInvite(ctx, store, id, 2, strings.Repeat("b", 32), in)

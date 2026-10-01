@@ -2,8 +2,14 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleEditorDialog.vue"), "utf8");
-const gridSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/WeeklyScheduleGrid.vue"), "utf8");
+const source = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleEditorDialog.vue"),
+  "utf8"
+);
+const gridSource = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/WeeklyScheduleGrid.vue"),
+  "utf8"
+);
 
 describe("RecordingScheduleEditorDialog half-hour editor", () => {
   it("uses a system dialog instead of a drawer", () => {
@@ -32,7 +38,7 @@ describe("RecordingScheduleEditorDialog half-hour editor", () => {
     expect(source).toContain('@click="clearAllDays"');
     expect(source).toContain("一键清空");
     expect(source).toContain("function clearAllDays()");
-    expect(source).toContain('class="clear-all-button" size="small" type="primary" status="danger"');
+    expect(source).toMatch(/<a-button\s+class="clear-all-button"\s+size="small"\s+type="primary"\s+status="danger"/s);
     expect(gridSource).toContain("border: 1px solid var(--color-border-3)");
     expect(gridSource).toContain("border-right: 1px solid var(--color-border-3)");
   });

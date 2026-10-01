@@ -32,7 +32,7 @@
                     {{ (Array.isArray(value) && value.map((curr: any) => curr.name).join(",")) || "-" }}
                   </span>
                   <span v-else-if="data.key === 'status'">
-                    {{ value === 1 ? "启用" : "禁用" }}
+                    {{ statusLabel(value) }}
                   </span>
                   <span v-else-if="data.key === 'sex'">
                     {{ getSexName(value) }}
@@ -127,6 +127,7 @@ import { type ProfileItem, uploadAvatarAPI, getProfileAPI } from "@/api/user";
 import { formatTime } from "@/globals";
 import { IconEdit, IconUser } from "@arco-design/web-vue/es/icon";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStatusLabel } from "@/hooks/useDictOptions";
 import { VueCropper } from "vue-cropper";
 import "vue-cropper/dist/index.css";
 import { handleUrl } from "@/utils/app";
@@ -144,7 +145,6 @@ interface Detail {
 }
 
 const activeTabs = ref(route.query.type || "1");
-
 
 // 头像裁剪相关
 const avatarModalVisible = ref(false);
@@ -169,7 +169,7 @@ const cropperOptions = reactive({
 });
 
 const onChangeTab = (e: string) => {
-    activeTabs.value = e;
+  activeTabs.value = e;
 };
 
 const buildDetail = (profile: ProfileItem): Detail[] => {
@@ -191,28 +191,27 @@ const buildDetail = (profile: ProfileItem): Detail[] => {
 
 const detail = ref<Detail[]>([]);
 
-
 // 头像上传
 const showAvatarUpload = () => {
-    // 通过JavaScript创建input元素
+  // 通过JavaScript创建input元素
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.accept = "image/*";
   fileInput.style.display = "none";
 
-    // 添加change事件监听器
+  // 添加change事件监听器
   fileInput.addEventListener("change", handleFileChange);
 
-    // 触发文件选择
+  // 触发文件选择
   fileInput.click();
 };
 
 // 处理文件选择
 const handleFileChange = (event: Event) => {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-        const file = input.files[0];
-        // 保存文件名到ref中，以便后续使用
+  const input = event.target as HTMLInputElement;
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    // 保存文件名到ref中，以便后续使用
     selectedFileName.value = file.name;
     const reader = new FileReader();
     reader.onload = e => {
@@ -220,13 +219,13 @@ const handleFileChange = (event: Event) => {
       avatarModalVisible.value = true;
     };
     reader.readAsDataURL(file);
-    }
+  }
   input.value = "";
 };
 
 // 实时预览
 const handleRealTime = (data: any) => {
-    previewStyle.value = {
+  previewStyle.value = {
     width: `${data.w}px`,
     height: `${data.h}px`,
     overflow: "hidden",
@@ -238,8 +237,8 @@ const handleRealTime = (data: any) => {
 
 // 确认上传头像
 const confirmUploadAvatar = () => {
-    cropperRef.value.getCropBlob((data: Blob) => {
-        // 上传头像
+  cropperRef.value.getCropBlob((data: Blob) => {
+    // 上传头像
     const formData = new FormData();
     formData.append("file", data, selectedFileName.value);
     uploadAvatarAPI(formData).then(res => {
@@ -250,7 +249,7 @@ const confirmUploadAvatar = () => {
       resetAvatarUpload();
       proxy.$message.success("头像上传成功");
     });
-    });
+  });
 };
 
 // 重置头像上传
@@ -260,25 +259,26 @@ const resetAvatarUpload = () => {
 };
 
 const refresh = () => {
-    getUserInfo();
+  getUserInfo();
 };
 
 const loading = ref<boolean>(false);
 const userInfo = ref<ProfileItem>({} as ProfileItem);
 const getUserInfo = async () => {
-    try {
-      loading.value = true;
-      const data = await getProfileAPI();
-      userInfo.value = data.data;
-      userInfo.value.avatar = handleUrl(userInfo.value.avatar);
-      detail.value = buildDetail(userInfo.value);
-    } finally {
-      loading.value = false;
-    }
+  try {
+    loading.value = true;
+    const data = await getProfileAPI();
+    userInfo.value = data.data;
+    userInfo.value.avatar = handleUrl(userInfo.value.avatar);
+    detail.value = buildDetail(userInfo.value);
+  } finally {
+    loading.value = false;
+  }
 };
 
-
 const sexOption = ref(dictFilter("gender"));
+// 状态文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 const getSexName = (sex: number) => {
   const sexItem = sexOption.value.find((item: any) => item.value === sex);
   return sexItem ? sexItem.name : "-";
@@ -336,21 +336,21 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 }
 
 .userinfo-page :deep(.userinfo-form .arco-form-item-extra) {
-  color: var(--uvp-text-secondary);
   font-size: 13px;
   line-height: 20px;
+  color: var(--uvp-text-secondary);
 }
 
 .userinfo-profile {
   display: flex;
-  align-items: center;
   gap: 28px;
+  align-items: center;
   padding: 28px;
 
   :deep(.arco-descriptions-item-label) {
+    font-weight: 500;
     color: var(--uvp-text-secondary) !important;
     background: transparent !important;
-    font-weight: 500;
   }
 
   :deep(.arco-descriptions-item-value) {
@@ -407,14 +407,14 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
     height: 160px;
     margin: 0 auto;
     overflow: hidden;
-    border: 1px dashed #ccc;
+    border: 1px dashed #cccccc;
     border-radius: 18px;
   }
 
   p {
     margin-top: 10px;
     font-size: 12px;
-    color: #999;
+    color: #999999;
   }
 }
 
@@ -422,11 +422,11 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
   margin-top: 20px;
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .userinfo-profile {
     flex-direction: column;
-    align-items: stretch;
     gap: 16px;
+    align-items: stretch;
     padding: 20px;
   }
 

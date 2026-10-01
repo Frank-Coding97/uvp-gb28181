@@ -23,7 +23,7 @@ func (r runtimePresenceReader) IsPresent(ctx context.Context, target OwnershipTa
 	if err := target.Validate(); err != nil {
 		return false, err
 	}
-	_, err := (runtimeFreshMediaReader{reader: r.reader}).GetMediaInfoFresh(ctx, target.NodeID, zlm.StreamTarget{
+	_, err := (runtimeFreshMediaReader(r)).GetMediaInfoFresh(ctx, target.NodeID, zlm.StreamTarget{
 		Schema: target.Media.Schema,
 		VHost:  target.Media.Vhost,
 		App:    target.Media.App,

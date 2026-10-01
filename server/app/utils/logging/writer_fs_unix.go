@@ -103,12 +103,12 @@ func openedIdentity(f *os.File) (fileIdentity, error) {
 	e := unix.Fstat(int(f.Fd()), &s)
 	return identity(s), e
 }
-func (d *logDirectory) remove(name string, expected fileIdentity) error {
+func (d *logDirectory) remove(name string, expected fileIdentity) (e error) {
 	f, e := d.open(name, unix.O_RDONLY)
 	if e != nil {
 		return e
 	}
-	defer f.Close()
+	defer func() { e = errors.Join(e, f.Close()) }()
 	actual, e := openedIdentity(f)
 	if e != nil {
 		return e
@@ -124,13 +124,13 @@ func (d *logDirectory) remove(name string, expected fileIdentity) error {
 	}
 	return d.sync()
 }
-func (d *logDirectory) entries() ([]os.DirEntry, error) {
+func (d *logDirectory) entries() (entries []os.DirEntry, e error) {
 	fd, e := unix.Openat(d.fd(), ".", unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY, 0)
 	if e != nil {
 		return nil, e
 	}
 	f := os.NewFile(uintptr(fd), ".")
-	defer f.Close()
+	defer func() { e = errors.Join(e, f.Close()) }()
 	return f.ReadDir(-1)
 }
 func lockLogFile(f *os.File) error { return unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) }

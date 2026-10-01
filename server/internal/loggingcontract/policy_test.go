@@ -1,6 +1,7 @@
 package loggingcontract
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -165,17 +166,28 @@ func TestLoggingPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := 0
+		want := make(map[string]bool)
+		for _, path := range []string{
+			"resource/database/gb28181/migrations/run-merge-sip-log.go",
+			"resource/database/gb28181/migrations/remove_sip_log_new_menu.go",
+		} {
+			if _, err := os.Stat(filepath.Join(serverRoot(t), path)); err == nil {
+				want[path] = true
+			} else if !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+		}
+		found := make(map[string]bool)
 		for _, excluded := range report.Excluded {
-			if excluded.Path == "resource/database/gb28181/migrations/run-merge-sip-log.go" || excluded.Path == "resource/database/gb28181/migrations/remove_sip_log_new_menu.go" {
-				found++
+			if want[excluded.Path] {
+				found[excluded.Path] = true
 				if excluded.Reason == "" {
 					t.Errorf("build-ignored file %s has no reason", excluded.Path)
 				}
 			}
 		}
-		if found != 2 {
-			t.Fatalf("exact build-ignored exceptions = %d, want 2", found)
+		if len(found) != len(want) {
+			t.Fatalf("exact build-ignored exceptions = %v, want %v", found, want)
 		}
 		if hasPolicyFinding(report, PolicyUnreviewedExcluded) {
 			t.Fatalf("reviewed build-ignored files must not create unreviewed findings: %#v", report.Findings)

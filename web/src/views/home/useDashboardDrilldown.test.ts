@@ -4,15 +4,33 @@ import { useDashboardDrilldown, type DashboardDrilldownLoader } from "./useDashb
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
   return { promise, resolve, reject };
 }
 
 function response(range: "1h" | "24h" | "7d") {
   return {
-    status: "ok" as const, asOf: "now", scope: { type: "platform" as const }, coverage: "complete" as const,
-    data: { range, from: "", to: "", bucketSeconds: 60, timezone: "UTC", status: "ok" as const, coverage: "complete" as const,
-      points: [], ledger: [], gaps: [], todayRequests: 0, rollingRequests: 0 }
+    status: "ok" as const,
+    asOf: "now",
+    scope: { type: "platform" as const },
+    coverage: "complete" as const,
+    data: {
+      range,
+      from: "",
+      to: "",
+      bucketSeconds: 60,
+      timezone: "UTC",
+      status: "ok" as const,
+      coverage: "complete" as const,
+      points: [],
+      ledger: [],
+      gaps: [],
+      todayRequests: 0,
+      rollingRequests: 0
+    }
   };
 }
 
@@ -20,7 +38,8 @@ describe("dashboard drilldown request state", () => {
   it("defaults to 24h and ignores a stale slow response", async () => {
     const first = deferred<ReturnType<typeof response>>();
     const second = deferred<ReturnType<typeof response>>();
-    const loader = vi.fn<DashboardDrilldownLoader>()
+    const loader = vi
+      .fn<DashboardDrilldownLoader>()
       .mockImplementationOnce(() => first.promise)
       .mockImplementationOnce(() => second.promise);
     const state = useDashboardDrilldown(loader);
@@ -36,7 +55,8 @@ describe("dashboard drilldown request state", () => {
   });
 
   it("aborts on close and retains last good data as stale after refresh failure", async () => {
-    const loader = vi.fn<DashboardDrilldownLoader>()
+    const loader = vi
+      .fn<DashboardDrilldownLoader>()
       .mockResolvedValueOnce(response("24h"))
       .mockRejectedValueOnce(new Error("network"));
     const state = useDashboardDrilldown(loader);

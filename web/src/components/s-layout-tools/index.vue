@@ -33,7 +33,7 @@
   justify-content: flex-end;
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .tools-group-right {
     justify-content: flex-start;
   }

@@ -261,7 +261,7 @@ func TestDownloadFileStreamsFullAndRangeRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer response.Body.Close()
+			defer func() { _ = response.Body.Close() }()
 			if response.StatusCode != tc.status {
 				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
 			}
@@ -287,7 +287,7 @@ func TestDownloadFileDoesNotFollowRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusFound || redirectTargetHit {
 		t.Fatalf("status=%d redirectTargetHit=%v", response.StatusCode, redirectTargetHit)
 	}

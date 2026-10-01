@@ -36,7 +36,7 @@ func gormLogFixture(t *testing.T) (context.Context, *bytes.Buffer) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { r.Close() })
+	t.Cleanup(func() { _ = r.Close() })
 	return logging.WithContext(context.Background(), logging.WithIdentity(r.Root, zap.String("request_id", "request-db"))), b
 }
 func TestLoggingGORMModes(t *testing.T) {
@@ -121,7 +121,7 @@ func TestLoggingGORMParamsFilter(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	for _, dialector := range []gorm.Dialector{mysql.New(mysql.Config{Conn: conn, SkipInitializeWithVersion: true}), postgres.New(postgres.Config{Conn: conn}), sqlserver.New(sqlserver.Config{Conn: conn})} {
 		t.Run(dialector.Name(), func(t *testing.T) {
 			b.Reset()
@@ -159,7 +159,7 @@ func TestLoggingGORMRecordNotFoundAndRollback(t *testing.T) {
 		t.Fatal(e)
 	}
 	conn, _ := db.DB()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	db.Exec("CREATE TABLE test_rows (id INTEGER)")
 	sentinel := errors.New("fixture-secret")
 	e = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -189,8 +189,10 @@ func TestLoggingGORMSchemaAndFingerprint(t *testing.T) {
 		t.Fatal(e)
 	}
 	conn, _ := db.DB()
-	defer conn.Close()
-	installLogContext(db)
+	defer func() { _ = conn.Close() }()
+	if err := installLogContext(db); err != nil {
+		t.Fatal(err)
+	}
 	db.WithContext(ctx).Session(&gorm.Session{DryRun: true}).Model(&createHookRow{}).Where("created_by = ?", 42).Find(&[]createHookRow{})
 	if !strings.Contains(b.String(), `"table":"create_hook_rows"`) {
 		t.Fatal("missing known schema table")
@@ -225,7 +227,7 @@ func TestLoggingGORMConcurrentScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer runtime.Close()
+	defer func() { _ = runtime.Close() }()
 	l := &logger{Config: gormLog.Config{LogLevel: gormLog.Info}}
 	var wg sync.WaitGroup
 	for i := 0; i < 64; i++ {

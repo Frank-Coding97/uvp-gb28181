@@ -25,8 +25,8 @@ const { isTabs } = storeToRefs(useThemeConfig());
   box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
   gap: 12px;
+  align-items: center;
   height: var(--uvp-header-height);
   padding: 8px var(--uvp-header-padding-x);
   background: var(--uvp-workspace-bg);
@@ -35,9 +35,9 @@ const { isTabs } = storeToRefs(useThemeConfig());
 
 .header_tabs {
   display: flex;
+  align-items: center;
   min-width: 0;
   height: 40px;
-  align-items: center;
   overflow: hidden;
 }
 

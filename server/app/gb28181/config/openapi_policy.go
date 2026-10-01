@@ -8,7 +8,6 @@ var ErrPlayAuthRequired = errors.New("play authorization configuration cannot be
 // singleton before GB/HTTP startup. There is deliberately no inverse function.
 // This memory latch is only the effective-policy projection, not persistence.
 func RequirePlayAuth() {
-	return
 }
 
 // PlayAuthConfigConflict lets the configuration watcher report a fixed,

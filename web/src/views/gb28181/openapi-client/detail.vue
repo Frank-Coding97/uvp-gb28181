@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import { ArrowLeft, RefreshCw } from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
 import {
@@ -255,12 +255,26 @@ function handleAuditFilterChange(value: string | number) {
   void loadAudits();
 }
 
-function switchTab(tab: DetailTab) {
-  if (tab === activeTab.value) return;
-  if (dirty.value && !window.confirm("能力授权尚未保存，放弃本次修改并切换页面？")) return;
+function activateTab(tab: DetailTab) {
   activeTab.value = tab;
   void router.replace({ query: { ...route.query, tab } });
   if (tab === "logs" && !auditLoaded.value) void loadAudits();
+}
+
+function switchTab(tab: DetailTab) {
+  if (tab === activeTab.value) return;
+  if (!dirty.value) {
+    activateTab(tab);
+    return;
+  }
+  Modal.confirm({
+    title: "放弃未保存修改",
+    content: "能力授权尚未保存，放弃本次修改并切换页面？",
+    okText: "放弃修改",
+    cancelText: "继续编辑",
+    okButtonProps: { status: "warning" },
+    onOk: () => activateTab(tab)
+  });
 }
 
 function backToList() {
@@ -275,9 +289,20 @@ function beforeUnload(event: BeforeUnloadEvent) {
 
 onBeforeRouteLeave(() => {
   if (!dirty.value || allowLeave) return true;
-  const accepted = window.confirm("能力授权尚未保存，放弃本次修改并离开页面？");
-  if (accepted) allowLeave = true;
-  return accepted;
+  return new Promise<boolean>(resolve => {
+    Modal.confirm({
+      title: "放弃未保存修改",
+      content: "能力授权尚未保存，放弃本次修改并离开页面？",
+      okText: "放弃修改",
+      cancelText: "留在当前页",
+      okButtonProps: { status: "warning" },
+      onOk: () => {
+        allowLeave = true;
+        resolve(true);
+      },
+      onCancel: () => resolve(false)
+    });
+  });
 });
 watch(
   () => route.query.tab,

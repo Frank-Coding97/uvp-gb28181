@@ -72,6 +72,7 @@
   --uvp-danger: #d14343;
   --uvp-danger-soft: #fff2f2;
   --uvp-danger-border: #f5cece;
+  --uvp-success-border: #b7e4d0;
   --uvp-warning: #b66b12;
   --uvp-warning-soft: #fff7ed;
   --uvp-warning-border: #fed7aa;
@@ -200,6 +201,7 @@ body[arco-theme="dark"] {
   --uvp-primary: var(--uvp-brand);
   --uvp-success: #34d399;
   --uvp-success-soft: rgb(52 211 153 / 12%);
+  --uvp-success-border: rgb(52 211 153 / 28%);
   --uvp-border: var(--uvp-panel-border);
   --uvp-border-subtle: #1e2b3b;
   --uvp-bg: var(--uvp-panel-bg);

@@ -26,18 +26,20 @@ func TestPlaybackIntentINFOActualTCPKeepsMANSRTSPResultSeparate(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.Addr().String(), "TCP"
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	op, err := u.beginPlaybackIntentOperation(ctx, store, barrier, id, 2, strings.Repeat("b", 32), in)
 	require.NoError(t, err)
-	defer op.CloseLocal(context.Background())
+	defer func() {
+		_ = op.CloseLocal(context.Background()) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	require.NoError(t, peer.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second)))
 	conn, err := peer.Accept()
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	parser := sip.NewParser().NewSIPStream()
 	defer parser.Close()
 	var pending []sip.Message

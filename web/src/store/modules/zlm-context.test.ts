@@ -19,7 +19,13 @@ describe("ZLM node context", () => {
     expect(resolveInitialZLMNodeID(nodes, "3", "2")).toBe(3);
     expect(resolveInitialZLMNodeID(nodes, "99", "2")).toBe(2);
     expect(resolveInitialZLMNodeID(nodes, undefined, "99")).toBe(1);
-    expect(resolveInitialZLMNodeID(nodes.filter(node => node.state !== "active"), undefined, undefined)).toBeNull();
+    expect(
+      resolveInitialZLMNodeID(
+        nodes.filter(node => node.state !== "active"),
+        undefined,
+        undefined
+      )
+    ).toBeNull();
   });
 
   it("retains an offline selection but falls back when it is no longer visible", () => {
@@ -28,7 +34,7 @@ describe("ZLM node context", () => {
     expect(store.selectedNodeId).toBe(2);
     expect(store.selectedNode?.state).toBe("offline");
 
-    store.reconcileVisibleNodes(nodes.map(node => node.id === 2 ? { ...node, state: "offline" as const } : node));
+    store.reconcileVisibleNodes(nodes.map(node => (node.id === 2 ? { ...node, state: "offline" as const } : node)));
     expect(store.selectedNodeId).toBe(2);
 
     store.reconcileVisibleNodes(nodes.filter(node => node.id !== 2));

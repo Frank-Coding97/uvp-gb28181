@@ -70,7 +70,14 @@ export function createZLMRuntimePollingController<T>(options: ZLMRuntimePollingO
         options.publish(value, currentNode);
       })
       .catch(error => {
-        if (generation !== currentGeneration || controller.signal.aborted || isAbortError(error) || currentNode !== nodeId || !eligible()) return;
+        if (
+          generation !== currentGeneration ||
+          controller.signal.aborted ||
+          isAbortError(error) ||
+          currentNode !== nodeId ||
+          !eligible()
+        )
+          return;
         options.onError?.(error, currentNode);
       })
       .finally(() => {

@@ -61,7 +61,7 @@ func TestDeviceCleanupDiscoveryLimitsAndDependencyFailure(t *testing.T) {
 	require.Len(t, p.Targets, 3)
 	_, err = s.DiscoverPending(ctx, -1, 103, 1)
 	require.Error(t, err)
-	_, err = s.DiscoverPending(nil, 0, 103, 1)
+	_, err = s.DiscoverPending(nil, 0, 103, 1) //nolint:staticcheck // nil context must fail closed.
 	require.Error(t, err)
 	require.NoError(t, f.db.Exec("DROP TABLE gb_device").Error)
 	p, err = s.DiscoverPending(ctx, 0, 103, 1)

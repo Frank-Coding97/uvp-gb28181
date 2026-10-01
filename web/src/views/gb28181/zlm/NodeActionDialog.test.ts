@@ -109,9 +109,7 @@ describe("ZLMNodeActionDialog forced purge", () => {
 
   it("stays open when the backend refuses because the node turned out reachable", async () => {
     await rejectPreflight("delete");
-    mocks.purgeNode.mockRejectedValueOnce(
-      Object.assign(new Error("节点当前可达"), { response: { status: 409 } })
-    );
+    mocks.purgeNode.mockRejectedValueOnce(Object.assign(new Error("节点当前可达"), { response: { status: 409 } }));
 
     const wrapper = mountDialog("delete");
     await flushPromises();
@@ -135,12 +133,17 @@ const DangerStub = defineComponent({
   },
   emits: ["confirm", "update:visible", "stale"],
   setup(props, { emit }) {
-    return () => props.visible
-      ? h("button", {
-        class: "confirm-danger",
-        onClick: () => emit("confirm", { fingerprint: props.fingerprint, reason: "", nodeId: 7, targetKey: "node" })
-      }, (props.impacts as string[]).join("|"))
-      : null;
+    return () =>
+      props.visible
+        ? h(
+            "button",
+            {
+              class: "confirm-danger",
+              onClick: () => emit("confirm", { fingerprint: props.fingerprint, reason: "", nodeId: 7, targetKey: "node" })
+            },
+            (props.impacts as string[]).join("|")
+          )
+        : null;
   }
 });
 
@@ -265,9 +268,11 @@ describe("ZLMNodeActionDialog", () => {
           observedAt: "2026-08-30T00:00:00Z"
         }
       })
-      .mockRejectedValueOnce(Object.assign(new Error("节点已停用，等待排空后重试"), {
-        response: { status: 409 }
-      }));
+      .mockRejectedValueOnce(
+        Object.assign(new Error("节点已停用，等待排空后重试"), {
+          response: { status: 409 }
+        })
+      );
 
     const wrapper = mountDialog("delete");
     await flushPromises();

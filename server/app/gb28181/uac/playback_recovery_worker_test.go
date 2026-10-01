@@ -97,7 +97,7 @@ func TestPlaybackRecoveryWorkerActualUDPStopAndResumeRetainedOwner(t *testing.T)
 	var blocked atomic.Bool
 	require.NoError(t, f.db.Callback().Update().Before("gorm:update").Register("fixture:worker-facts", func(db *gorm.DB) {
 		if blocked.Load() {
-			db.AddError(errors.New("fixture facts unavailable"))
+			_ = db.AddError(errors.New("fixture facts unavailable")) // AddError mutates db; the returned *DB is intentionally unused.
 		}
 	}))
 	defer func() {
@@ -109,7 +109,11 @@ func TestPlaybackRecoveryWorkerActualUDPStopAndResumeRetainedOwner(t *testing.T)
 	devices := playauth.NewDeviceCleanupStore(f.db)
 	stop, err := f.u.StartPlaybackRecovery(ctx, devices, f.store, f.barrier, nil)
 	require.NoError(t, err)
-	defer stop(context.Background())
+	defer func() {
+		if err := stop(context.Background()); err != nil {
+			t.Errorf("recovery stop failed: %v", err)
+		}
+	}()
 	ack, _ := readCleanupRequest(t, f.peer)
 	bye, _ := readCleanupRequest(t, f.peer)
 	require.Equal(t, sip.ACK, ack.Method)
@@ -132,7 +136,11 @@ func TestPlaybackRecoveryWorkerActualUDPStopAndResumeRetainedOwner(t *testing.T)
 	ticked := make(chan struct{}, 2)
 	stopAgain, err := f.u.StartPlaybackRecovery(ctx, devices, f.store, f.barrier, func(PlaybackRecoveryTick, error) { ticked <- struct{}{} })
 	require.NoError(t, err)
-	defer stopAgain(context.Background())
+	defer func() {
+		if err := stopAgain(context.Background()); err != nil {
+			t.Errorf("recovery stop failed: %v", err)
+		}
+	}()
 	select {
 	case <-ticked:
 	case <-ctx.Done():
@@ -162,7 +170,11 @@ func TestPlaybackRecoveryWorkerStopTimeoutKeepsSingleRunner(t *testing.T) {
 	require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register("fixture:worker-blocked", func(*gorm.DB) {
 		once.Do(func() { close(entered); <-release })
 	}))
-	defer f.db.Callback().Query().Remove("fixture:worker-blocked")
+	defer func() {
+		if err := f.db.Callback().Query().Remove("fixture:worker-blocked"); err != nil {
+			t.Errorf("callback cleanup failed: %v", err)
+		}
+	}()
 	devices := playauth.NewDeviceCleanupStore(f.db)
 	stop, err := f.u.StartPlaybackRecovery(ctx, devices, f.store, f.barrier, nil)
 	require.NoError(t, err)

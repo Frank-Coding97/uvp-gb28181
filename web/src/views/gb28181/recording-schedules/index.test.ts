@@ -4,12 +4,15 @@ import { describe, expect, it } from "vitest";
 
 const shellSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/index.vue"), "utf8");
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/RecordingPlansPanel.vue"), "utf8");
-const drawerSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleDrawer.vue"), "utf8");
+const drawerSource = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleDrawer.vue"),
+  "utf8"
+);
 
 describe("recording schedule prototype", () => {
   it("keeps the legacy route as a thin shell over the shared plans panel", () => {
     expect(shellSource).toContain("RecordingPlansPanel");
-    expect(shellSource).toContain(":active=\"true\"");
+    expect(shellSource).toContain(':active="true"');
     expect(shellSource).toContain("route.query.stream");
     expect(shellSource).not.toContain("listRecordingPlans");
     expect(shellSource).not.toContain("RecordingScheduleEditorDialog");
@@ -26,8 +29,8 @@ describe("recording schedule prototype", () => {
   });
 
   it("shows the agreed management fields and operation entry points", () => {
-	expect(source).toContain("listRecordingPlans");
-	expect(source).not.toContain('id: "workday"');
+    expect(source).toContain("listRecordingPlans");
+    expect(source).not.toContain('id: "workday"');
     expect(source).toContain("执行周期");
     expect(source).toContain("录像时段");
     expect(source).toContain("已应用通道");
@@ -38,7 +41,9 @@ describe("recording schedule prototype", () => {
   });
 
   it("inherits the standard control heights instead of overriding them to 44px", () => {
-    const searchControlRule = source.match(/\.recording-schedules-page :deep\(\.uvp-search-panel \.arco-select-view\)\s*\{([^}]*)\}/s);
+    const searchControlRule = source.match(
+      /\.recording-schedules-page :deep\(\.uvp-search-panel \.arco-select-view\)\s*\{([^}]*)\}/s
+    );
     const toolbarButtonRule = source.match(/\.recording-schedules-page :deep\(\.toolbar-actions \.arco-btn\)\s*\{([^}]*)\}/s);
     expect(searchControlRule).not.toBeNull();
     expect(toolbarButtonRule).not.toBeNull();
@@ -48,7 +53,7 @@ describe("recording schedule prototype", () => {
 
   it("removes plan copying from the ledger and its implementation", () => {
     expect(source).not.toContain("uvp-table-action--copy");
-    expect(source).not.toContain("@click=\"copyPlan(record)\"");
+    expect(source).not.toContain('@click="copyPlan(record)"');
     expect(source).not.toContain("function copyPlan");
     expect(source).not.toMatch(/\bCopy\b/);
     expect(source).not.toContain("计划已复制");
@@ -68,8 +73,8 @@ describe("recording schedule prototype", () => {
       source.indexOf('<a-table-column title="状态"'),
       source.indexOf('<a-table-column title="最近更新"')
     );
-    expect(statusColumn).toContain('<a-switch v-if="canMaintain" v-model="record.enabled"');
-    expect(statusColumn).toContain('@change="notifyPlanStatusChange(record)"');
+    expect(statusColumn.replace(/\s+/g, " ")).toContain('<a-switch v-if="canMaintain" v-model="record.enabled"');
+    expect(statusColumn.replace(/\s+/g, " ")).toContain('@change="notifyPlanStatusChange(record)"');
     expect(statusColumn).not.toContain("<a-tag");
     expect(source).toContain("function notifyPlanStatusChange");
   });
@@ -77,7 +82,7 @@ describe("recording schedule prototype", () => {
   it("opens the channel assignment dialog from the applied-channel count", () => {
     expect(source).toContain('class="channel-count-link"');
     expect(source).toContain('@click="openAssign(record)"');
-    expect(source).toContain('查看并管理 ${record.channelCount} 个已应用通道');
+    expect(source).toContain("查看并管理 ${record.channelCount} 个已应用通道");
     expect(source).toContain('v-model:visible="assignmentVisible"');
     expect(source).toContain(':plan-id="activePlan?.id"');
     expect(source).toContain("activePlan.value = plan");
@@ -85,13 +90,16 @@ describe("recording schedule prototype", () => {
   });
 
   it("makes the applied-channel count visibly identifiable as a link", () => {
-    expect(source).toMatch(/\.channel-count-link\s*{[^}]*color:\s*var\(--uvp-brand-strong\)\s*!important;[^}]*cursor:\s*pointer;[^}]*text-decoration:\s*underline;/s);
+    const linkRule = source.match(/\.channel-count-link\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(linkRule).toMatch(/color:\s*var\(--uvp-brand-strong\)\s*!important/);
+    expect(linkRule).toMatch(/cursor:\s*pointer/);
+    expect(linkRule).toMatch(/text-decoration:\s*underline/);
     expect(source).toContain(".channel-count-link:hover");
     expect(source).toContain("background: var(--uvp-brand-soft)");
   });
 
   it("keeps channel assignment on plan rows and hides the fixed China timezone", () => {
-    expect(source).toContain('uvp-table-action--assign');
+    expect(source).toContain("uvp-table-action--assign");
     expect(source).not.toContain('@click="openAssign()"');
     expect(source).not.toContain("timezone-hint");
     expect(source).not.toContain('title="时区"');
@@ -133,7 +141,12 @@ describe("recording schedule prototype", () => {
     expect(source).toContain('class="recording-schedules-page"');
     expect(source).toContain('class="recording-schedules-shell"');
     expect(source).toMatch(/\.recording-schedules-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
-    expect(source).toMatch(/\.recording-schedules-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
+    const shellRule = source.match(/\.recording-schedules-shell\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(shellRule).toMatch(/display:\s*flex/);
+    expect(shellRule).toMatch(/height:\s*100%/);
+    expect(shellRule).toMatch(/min-height:\s*0/);
+    expect(shellRule).toMatch(/flex-direction:\s*column/);
+    expect(shellRule).toMatch(/overflow:\s*hidden/);
   });
 
   it("uses a plan-first split workspace for channel execution status", () => {
@@ -144,8 +157,8 @@ describe("recording schedule prototype", () => {
     expect(source).toContain('@click="selectExecutionPlan(plan.id)"');
     expect(source).toContain("selectedExecutionPlanId");
     expect(source).toContain("selectedExecutionPlan");
-	expect(source).toContain("loadExecutionChannels");
-	expect(source).toContain("listRecordingPlanExecutionChannels");
+    expect(source).toContain("loadExecutionChannels");
+    expect(source).toContain("listRecordingPlanExecutionChannels");
     expect(source).toContain("当前计划关联通道");
     expect(source).not.toContain('placeholder="关联计划"');
   });
@@ -154,10 +167,10 @@ describe("recording schedule prototype", () => {
     expect(source).toContain('<s-layout-search class="execution-plan-search">');
     expect(source).toContain('@scroll.passive="handleExecutionPlanScroll"');
     expect(source).toContain("const executionPlanPageSize = 30");
-	expect(source).toContain("executionPlanPage");
+    expect(source).toContain("executionPlanPage");
     expect(source).toContain("hasMoreExecutionPlans");
     expect(source).toContain("loadMoreExecutionPlans");
-	expect(source).toContain("已加载 {{ visibleExecutionPlans.length }} / 共 {{ executionPlanTotal }} 条");
+    expect(source).toContain("已加载 {{ visibleExecutionPlans.length }} / 共 {{ executionPlanTotal }} 条");
     expect(source).toContain(".execution-plan-search :deep(.uvp-search-panel__surface)");
   });
 

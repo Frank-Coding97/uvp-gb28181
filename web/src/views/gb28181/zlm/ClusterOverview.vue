@@ -62,18 +62,28 @@ onMounted(loadNodes);
         @change="updateScope"
         @refresh="refreshAll"
       />
-      <div v-if="nodesError && !nodes.length" class="merged-media-overview__error" role="alert">节点目录加载失败，请刷新重试。</div>
-      <RuntimeSummaryPanel
-        ref="panel"
-        :active="true"
-        :node-id="selectedNodeId"
-        @drilldown="drilldown"
-      />
+      <div v-if="nodesError && !nodes.length" class="merged-media-overview__error" role="alert">
+        节点目录加载失败，请刷新重试。
+      </div>
+      <RuntimeSummaryPanel ref="panel" :active="true" :node-id="selectedNodeId" @drilldown="drilldown" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.merged-media-overview { box-sizing: border-box; height: 100%; padding: 4px 8px 24px; overflow: auto; }
-.merged-media-overview__error { margin: 10px 0; padding: 9px 12px; color: var(--zlm-danger-600); background: var(--zlm-danger-50); border: 1px solid var(--zlm-danger-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }
+.merged-media-overview {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 4px 8px 24px;
+  overflow: auto;
+}
+.merged-media-overview__error {
+  padding: 9px 12px;
+  margin: 10px 0;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border: 1px solid var(--zlm-danger-500);
+  border-radius: var(--zlm-radius-md);
+}
 </style>

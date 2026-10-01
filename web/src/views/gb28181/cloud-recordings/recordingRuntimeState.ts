@@ -1,8 +1,4 @@
-import type {
-  ZLMOwnershipSnapshot,
-  ZLMOwnershipTarget,
-  ZLMRecordingResult
-} from "@/api/gb28181-zlm-runtime";
+import type { ZLMOwnershipSnapshot, ZLMOwnershipTarget, ZLMRecordingResult } from "@/api/gb28181-zlm-runtime";
 
 export interface RecordingTargetDraft {
   nodeId: number;
@@ -63,9 +59,9 @@ export function recordingImpactItems(snapshot: ZLMOwnershipSnapshot): string[] {
     items.push(`${label}：${safeText(subject)}${impact.reason ? ` · ${impact.reason}` : ""}`);
   }
   if (items.length === 0) {
-    items.push(snapshot.presenceKnown
-      ? "未发现录像计划、持续录像或其他业务持有"
-      : "媒体存在性或业务持有未知，执行前必须重新确认");
+    items.push(
+      snapshot.presenceKnown ? "未发现录像计划、持续录像或其他业务持有" : "媒体存在性或业务持有未知，执行前必须重新确认"
+    );
   }
   return items;
 }
@@ -89,7 +85,11 @@ export function recordingStatusPresentation(result: ZLMRecordingResult | null): 
   if (result.state === "stopped" || result.externalState === "stopped") {
     return { label: "已停止", tone: "neutral", readyToStopNormally: false };
   }
-  return { label: result.retryable ? "状态读取失败，可重试" : "未录制或归属未知", tone: result.retryable ? "danger" : "neutral", readyToStopNormally: false };
+  return {
+    label: result.retryable ? "状态读取失败，可重试" : "未录制或归属未知",
+    tone: result.retryable ? "danger" : "neutral",
+    readyToStopNormally: false
+  };
 }
 
 export function recordingScheduleQuery(target: ZLMOwnershipTarget) {

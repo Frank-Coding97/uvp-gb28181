@@ -140,25 +140,47 @@ describe("media overview chart adapters", () => {
     const distribution = createOverviewDistributionSpec(state);
 
     expect(load.series?.[0]).toMatchObject({ type: "bar", direction: "horizontal" });
-    expect(load.data?.[0]?.values).toEqual(expect.arrayContaining([
-      expect.objectContaining({ nodeId: 2, metric: "NetThread", value: 0.42 }),
-      expect.objectContaining({ nodeId: 3, metric: "NetThread", value: null })
-    ]));
+    expect(load.data?.[0]?.values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ nodeId: 2, metric: "NetThread", value: 0.42 }),
+        expect.objectContaining({ nodeId: 3, metric: "NetThread", value: null })
+      ])
+    );
     expect(health.series?.[0]).toMatchObject({ type: "heatmap" });
-    expect(health.data?.[0]?.values).toEqual(expect.arrayContaining([
-      expect.objectContaining({ nodeId: 3, dimension: "状态", value: null, label: "采集失败" })
-    ]));
+    expect(health.data?.[0]?.values).toEqual(
+      expect.arrayContaining([expect.objectContaining({ nodeId: 3, dimension: "状态", value: null, label: "采集失败" })])
+    );
     expect(distribution.series?.[0]).toMatchObject({ type: "bar" });
-    expect(distribution.data?.[0]?.values).toEqual(expect.arrayContaining([
-      expect.objectContaining({ dimension: "协议", category: "rtsp", count: 1 }),
-      expect.objectContaining({ dimension: "来源", category: "RTP", count: 1 })
-    ]));
+    expect(distribution.data?.[0]?.values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dimension: "协议", category: "rtsp", count: 1 }),
+        expect.objectContaining({ dimension: "来源", category: "RTP", count: 1 })
+      ])
+    );
   });
 
   it("distinguishes empty and unavailable snapshots", () => {
     expect(buildOverviewChartState(null).status).toBe("unknown");
-    expect(buildOverviewChartState({ ...overview(), nodes: [], streams: [], partial: false, successfulNodeIds: [], failedNodeIds: [] } as any).status).toBe("empty");
-    expect(buildOverviewChartState({ ...overview(), nodes: [], streams: [], partial: true, successfulNodeIds: [], failedNodeIds: [2] } as any).status).toBe("unavailable");
+    expect(
+      buildOverviewChartState({
+        ...overview(),
+        nodes: [],
+        streams: [],
+        partial: false,
+        successfulNodeIds: [],
+        failedNodeIds: []
+      } as any).status
+    ).toBe("empty");
+    expect(
+      buildOverviewChartState({
+        ...overview(),
+        nodes: [],
+        streams: [],
+        partial: true,
+        successfulNodeIds: [],
+        failedNodeIds: [2]
+      } as any).status
+    ).toBe("unavailable");
   });
 
   it("does not call a maintenance/offline cluster ready when no node was sampled", () => {

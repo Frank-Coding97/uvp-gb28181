@@ -9,7 +9,9 @@ import {
 
 describe("recording runtime state", () => {
   it("requires and normalizes the complete media identity", () => {
-    expect(buildRecordingTarget({ nodeId: 7, schema: " rtsp ", vhost: " __defaultVhost__ ", app: " live ", stream: " camera/1 " })).toEqual({
+    expect(
+      buildRecordingTarget({ nodeId: 7, schema: " rtsp ", vhost: " __defaultVhost__ ", app: " live ", stream: " camera/1 " })
+    ).toEqual({
       target: { nodeId: 7, media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "camera/1" } },
       errors: {}
     });
@@ -56,9 +58,11 @@ describe("recording runtime state", () => {
   });
 
   it("carries only node and stream context to the existing schedule page", () => {
-    expect(recordingScheduleQuery({
-      nodeId: 7,
-      media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001" }
-    })).toEqual({ nodeId: "7", stream: "34020000001320000001" });
+    expect(
+      recordingScheduleQuery({
+        nodeId: 7,
+        media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001" }
+      })
+    ).toEqual({ nodeId: "7", stream: "34020000001320000001" });
   });
 });

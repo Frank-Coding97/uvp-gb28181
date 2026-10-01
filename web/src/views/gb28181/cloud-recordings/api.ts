@@ -225,12 +225,9 @@ export function cancelRecordingDownload(taskId: string) {
 }
 
 export function listActiveRecordings() {
-  return http.request<BaseResult<{ list: ActiveRecording[] }>>(
-    "get",
-    baseUrlApi("gb28181/cloud-recordings/active"),
-    undefined,
-    { showErrorMessage: false }
-  );
+  return http.request<BaseResult<{ list: ActiveRecording[] }>>("get", baseUrlApi("gb28181/cloud-recordings/active"), undefined, {
+    showErrorMessage: false
+  });
 }
 
 export function stopActiveRecording(id: string) {
@@ -252,7 +249,9 @@ export function listReconciliations() {
 }
 
 export function triggerReconciliation(data: ReconciliationRequest) {
-  return http.request<BaseResult<{ acceptedNodeIds: number[] }>>("post", baseUrlApi("gb28181/cloud-recordings/reconciliations"), { data });
+  return http.request<BaseResult<{ acceptedNodeIds: number[] }>>("post", baseUrlApi("gb28181/cloud-recordings/reconciliations"), {
+    data
+  });
 }
 
 export function contentURL(id: string, capability: string) {

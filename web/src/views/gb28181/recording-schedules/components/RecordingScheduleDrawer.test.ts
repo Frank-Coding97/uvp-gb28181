@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleDrawer.vue"), "utf8");
+const source = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleDrawer.vue"),
+  "utf8"
+);
 
 describe("RecordingScheduleDrawer high fidelity workflow", () => {
   it("keeps the read-only plan detail and weekly timeline in a system dialog", () => {
@@ -18,7 +21,7 @@ describe("RecordingScheduleDrawer high fidelity workflow", () => {
   });
 
   it("keeps detail actions in the fixed dialog footer", () => {
-    expect(source).toContain('<template #footer>');
+    expect(source).toContain("<template #footer>");
     expect(source).toContain(">关闭</a-button>");
     expect(source).not.toContain(">分配通道</a-button>");
     expect(source).not.toContain(">编辑计划</a-button>");
@@ -41,7 +44,7 @@ describe("RecordingScheduleDrawer high fidelity workflow", () => {
     expect(source).toContain('activeDetailTab.value = "schedule"');
 
     const schedulePane = source.slice(source.indexOf('<a-tab-pane key="schedule"'), source.indexOf('<a-tab-pane key="channels"'));
-    const channelsPane = source.slice(source.indexOf('<a-tab-pane key="channels"'), source.indexOf('</a-tabs>'));
+    const channelsPane = source.slice(source.indexOf('<a-tab-pane key="channels"'), source.indexOf("</a-tabs>"));
     expect(schedulePane).toContain("每周时段");
     expect(schedulePane).toContain('<WeeklyScheduleGrid :slots="detailWeekSlots" :editable="false" />');
     expect(schedulePane).not.toContain("assigned-channel-table");
@@ -55,9 +58,9 @@ describe("RecordingScheduleDrawer high fidelity workflow", () => {
     expect(source).not.toContain("schedule-segment");
   });
 
-	it("receives assigned channels from the parent instead of embedding demo rows", () => {
-		expect(source).toContain("assignedChannels?: ScheduleChannel[]");
-		expect(source).toContain(":loading=\"channelsLoading\"");
-		expect(source).not.toContain('id: "c1"');
-	});
+  it("receives assigned channels from the parent instead of embedding demo rows", () => {
+    expect(source).toContain("assignedChannels?: ScheduleChannel[]");
+    expect(source).toContain(':loading="channelsLoading"');
+    expect(source).not.toContain('id: "c1"');
+  });
 });

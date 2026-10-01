@@ -4,7 +4,10 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import WeeklyScheduleGrid from "./WeeklyScheduleGrid.vue";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/WeeklyScheduleGrid.vue"), "utf8");
+const source = readFileSync(
+  resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/WeeklyScheduleGrid.vue"),
+  "utf8"
+);
 
 describe("WeeklyScheduleGrid shared modes", () => {
   it("renders the same 7 by 48 half-hour grid in edit and read-only modes", () => {
@@ -12,7 +15,7 @@ describe("WeeklyScheduleGrid shared modes", () => {
     expect(source).toContain("Array.from({ length: 48 }");
     expect(source).toContain("props.editable");
     expect(source).toContain('v-if="editable"');
-    expect(source).toContain('v-else class="time-slot readonly"');
+    expect(source).toMatch(/v-else\s+class="time-slot readonly"/);
   });
 
   it("emits immutable slot updates only from edit interactions", () => {

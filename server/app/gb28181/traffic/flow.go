@@ -45,7 +45,7 @@ func (s *FlowService) CollectFlow(ctx context.Context, report handler.FlowReport
 	}
 	businessKey := ""
 	if !report.Player {
-		businessKey, ok, err = s.repo.ActiveBusinessKey(ctx, nodeID, report.App, report.Stream, direction)
+		businessKey, _, err = s.repo.ActiveBusinessKey(ctx, nodeID, report.App, report.Stream, direction)
 		if err != nil {
 			return err
 		}

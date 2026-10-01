@@ -41,7 +41,7 @@ func TestLoggingSanitizeSensitiveFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	fields := []zap.Field{zap.String("password", testSecret), zap.String("Authorization", testSecret), zap.String("access_token", testSecret), zap.String("Cookie", testSecret), zap.String("secret_key", testSecret), zap.String("url", "https://user:"+testSecret+"@example.test/private/"+testSecret+"?cap="+testSecret), zap.String("device_id", "device-1")}
 	l := WithIdentity(r.Root.Named("test"), zap.String("request_id", "request-1"))
 	l.Info("safe event", fields...)

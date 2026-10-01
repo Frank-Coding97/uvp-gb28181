@@ -306,7 +306,7 @@ func TestContentProxyRefreshesDeadlineDuringLongRunningHTTPDownload(t *testing.T
 			return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": []string{strconv.Itoa(chunkCount * contentProxyBufferSize)}}, Body: body}, nil
 		}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", Mode: CapabilityModeDownload}, nil)
 		if err != nil {
-			ctx.Error(err)
+			_ = ctx.Error(err)
 		}
 	})
 	server := httptest.NewUnstartedServer(router)
@@ -316,7 +316,7 @@ func TestContentProxyRefreshesDeadlineDuringLongRunningHTTPDownload(t *testing.T
 
 	response, err := server.Client().Get(server.URL + "/download")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	downloaded, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode)

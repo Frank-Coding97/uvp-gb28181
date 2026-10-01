@@ -657,12 +657,12 @@ func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {
 	if response.CmdType != CmdCruiseTrackQuery || response.DeviceID == "" || response.SN <= 0 {
 		return nil, fmt.Errorf("非法巡航轨迹响应")
 	}
-	if response.CruiseTrack.ID < 0 || response.CruiseTrack.ID > 255 || response.CruiseTrack.SumNum < 0 ||
-		response.CruiseTrack.PointList.Num != len(response.CruiseTrack.PointList.Points) ||
-		response.CruiseTrack.SumNum < response.CruiseTrack.PointList.Num {
+	if response.ID < 0 || response.ID > 255 || response.SumNum < 0 ||
+		response.PointList.Num != len(response.PointList.Points) ||
+		response.SumNum < response.PointList.Num {
 		return nil, fmt.Errorf("巡航轨迹详情不合法")
 	}
-	for _, point := range response.CruiseTrack.PointList.Points {
+	for _, point := range response.PointList.Points {
 		if !point.stayTimeSet || !point.speedSet {
 			return nil, fmt.Errorf("巡航点停留时间和设备速度不能为空")
 		}

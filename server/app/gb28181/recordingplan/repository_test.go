@@ -32,7 +32,7 @@ func TestRepositoryCreatePlanRollsBackWhenPeriodInsertFails(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:reject_period", func(tx *gorm.DB) {
 		if tx.Statement.Table == "gb_recording_plan_period" {
-			tx.AddError(errors.New("injected period failure"))
+			_ = tx.AddError(errors.New("injected period failure")) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	repo := NewRepository(db)

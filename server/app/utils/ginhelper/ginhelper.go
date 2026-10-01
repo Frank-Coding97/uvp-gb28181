@@ -44,13 +44,6 @@ func GetEngine() *gin.Engine {
 	return engine
 }
 
-func accessLogger(output io.Writer) gin.HandlerFunc {
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		Formatter: accessLogFormatter,
-		Output:    output,
-	})
-}
-
 func accessLogFormatter(param gin.LogFormatterParams) string {
 	path := redactAccessLogPath(param.Path)
 	method := param.Method

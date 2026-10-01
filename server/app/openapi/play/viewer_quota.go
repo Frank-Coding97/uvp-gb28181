@@ -316,7 +316,7 @@ func (q *ViewerQuota) ReconcileViewers(ctx context.Context, runtime ViewerRuntim
 		if err != nil {
 			return closed, ErrQuotaFailed
 		}
-		if snapshot.BootNonce != viewer.BootNonce && !(snapshot.BootNonce == "" && snapshot.TargetAuthoritative) {
+		if snapshot.BootNonce != viewer.BootNonce && (snapshot.BootNonce != "" || !snapshot.TargetAuthoritative) {
 			continue
 		}
 		_, present := snapshot.Identifiers[viewer.Identifier]
@@ -399,14 +399,14 @@ func lockViewerByGrant(tx *gorm.DB, grantID string) (models.Viewer, bool, error)
 }
 
 func lockedModel(tx *gorm.DB, model any, table string) *gorm.DB {
-	if tx.Dialector.Name() == "sqlserver" {
+	if tx.Name() == "sqlserver" {
 		return tx.Table(table + " WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Model(model).Clauses(clause.Locking{Strength: "UPDATE"})
 }
 
 func lockedTable(tx *gorm.DB, table string) *gorm.DB {
-	if tx.Dialector.Name() == "sqlserver" {
+	if tx.Name() == "sqlserver" {
 		return tx.Table(table + " WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Table(table).Clauses(clause.Locking{Strength: "UPDATE"})
@@ -470,7 +470,7 @@ func validBootNonce(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return false
 		}
 	}

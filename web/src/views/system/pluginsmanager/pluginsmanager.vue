@@ -332,10 +332,10 @@ onMounted(() => {
 }
 
 .plugin-title {
-  font-weight: 600;
-  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -364,10 +364,10 @@ onMounted(() => {
 
 .plugin-cover__icon {
   display: inline-grid;
+  place-items: center;
   width: 56px;
   height: 56px;
   font-size: 28px;
-  place-items: center;
   background: rgb(37 99 235 / 8%);
   border: 1px solid rgb(37 99 235 / 12%);
   border-radius: 18px;

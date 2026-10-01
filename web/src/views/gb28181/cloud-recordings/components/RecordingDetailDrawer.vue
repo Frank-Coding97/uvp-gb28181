@@ -68,11 +68,14 @@
               <a-descriptions-item label="结束时间">{{ formatDateTime(detail.endTime) }}</a-descriptions-item>
               <a-descriptions-item label="录像时长">{{ formatDuration(detail.timeLen) }}</a-descriptions-item>
               <a-descriptions-item label="文件大小">{{ formatFileSize(detail.fileSize) }}</a-descriptions-item>
-              <a-descriptions-item label="索引来源">{{ detail.source === "hook" ? "录像完成通知" : "目录对账" }}</a-descriptions-item>
-              <a-descriptions-item label="最近发现">{{ formatDateTime(detail.lastSeenAt || detail.discoveredAt) }}</a-descriptions-item>
+              <a-descriptions-item label="索引来源">{{
+                detail.source === "hook" ? "录像完成通知" : "目录对账"
+              }}</a-descriptions-item>
+              <a-descriptions-item label="最近发现">{{
+                formatDateTime(detail.lastSeenAt || detail.discoveredAt)
+              }}</a-descriptions-item>
             </a-descriptions>
           </section>
-
         </template>
 
         <div v-else class="recording-detail-placeholder">
@@ -161,32 +164,126 @@ watch(
 
 <style scoped>
 .recording-detail-spin,
-.recording-detail-content { min-height: 470px; }
-.recording-detail-content { color: var(--uvp-text-primary); }
-.recording-detail-title { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.recording-detail-title > span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--uvp-primary); background: color-mix(in srgb, var(--uvp-primary) 10%, transparent); border-radius: 6px; }
-.recording-detail-title > div { display: flex; flex-direction: column; min-width: 0; }
-.recording-detail-title strong { font-size: 15px; }
-.recording-detail-title small { overflow: hidden; color: var(--uvp-text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.recording-detail-context { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; padding: 14px 18px; background: var(--uvp-bg-secondary); border-bottom: 1px solid var(--uvp-border); }
-.recording-detail-context > div { display: flex; flex-direction: column; min-width: 0; }
-.recording-detail-context span { color: var(--uvp-text-tertiary); font-size: 11px; }
+.recording-detail-content {
+  min-height: 470px;
+}
+.recording-detail-content {
+  color: var(--uvp-text-primary);
+}
+.recording-detail-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.recording-detail-title > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--uvp-primary);
+  background: color-mix(in srgb, var(--uvp-primary) 10%, transparent);
+  border-radius: 6px;
+}
+.recording-detail-title > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.recording-detail-title strong {
+  font-size: 15px;
+}
+.recording-detail-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--uvp-text-tertiary);
+  white-space: nowrap;
+}
+.recording-detail-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding: 14px 18px;
+  background: var(--uvp-bg-secondary);
+  border-bottom: 1px solid var(--uvp-border);
+}
+.recording-detail-context > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.recording-detail-context span {
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
 .recording-detail-context strong,
-.recording-detail-context code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recording-detail-context strong { margin: 3px 0; font-size: 13px; }
-.recording-detail-context code { color: var(--uvp-text-secondary); font-size: 11px; }
-.recording-detail-section { padding: 18px 18px 0; }
-.recording-detail-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.recording-detail-heading h3 { margin: 0; font-size: 14px; }
-.recording-detail-tags { display: flex; gap: 6px; }
-.recording-detail-description :deep(.arco-descriptions-item-value) { min-width: 0; overflow-wrap: anywhere; }
-.recording-detail-error { margin: 18px; }
-.recording-detail-error__body { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
-.recording-detail-placeholder { display: flex; min-height: 430px; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: var(--uvp-text-tertiary); }
-@media (max-width: 640px) {
+.recording-detail-context code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-detail-context strong {
+  margin: 3px 0;
+  font-size: 13px;
+}
+.recording-detail-context code {
+  font-size: 11px;
+  color: var(--uvp-text-secondary);
+}
+.recording-detail-section {
+  padding: 18px 18px 0;
+}
+.recording-detail-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.recording-detail-heading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.recording-detail-tags {
+  display: flex;
+  gap: 6px;
+}
+.recording-detail-description :deep(.arco-descriptions-item-value) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.recording-detail-error {
+  margin: 18px;
+}
+.recording-detail-error__body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.recording-detail-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 430px;
+  color: var(--uvp-text-tertiary);
+}
+
+@media (width <= 640px) {
   .recording-detail-spin,
-  .recording-detail-content { min-height: 400px; }
-  .recording-detail-context { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
-  .recording-detail-section { padding: 14px 12px 0; }
+  .recording-detail-content {
+    min-height: 400px;
+  }
+  .recording-detail-context {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .recording-detail-section {
+    padding: 14px 12px 0;
+  }
 }
 </style>

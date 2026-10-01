@@ -684,7 +684,8 @@ func (sm *SysMenuController) Import(c *gin.Context) {
 	if err != nil {
 		sm.FailAndAbort(c, "打开文件失败", err)
 	}
-	defer src.Close()
+	// 文件内容已读入内存，关闭失败无法再改变本次响应；显式忽略清理错误以保留原响应。
+	defer func() { _ = src.Close() }()
 
 	// 读取文件内容
 	content := make([]byte, file.Size)

@@ -8,7 +8,10 @@ export interface DashboardGridGeometry {
   h: number;
 }
 
-export type DashboardGridEngine = Pick<GridStack, "enableMove" | "enableResize" | "destroy" | "on" | "off" | "getColumn" | "isIgnoreChangeCB">;
+export type DashboardGridEngine = Pick<
+  GridStack,
+  "enableMove" | "enableResize" | "destroy" | "on" | "off" | "getColumn" | "isIgnoreChangeCB"
+>;
 export type DashboardGridFactory = (options: GridStackOptions, element: HTMLElement) => DashboardGridEngine;
 
 export interface DashboardGridHandle {
@@ -44,7 +47,15 @@ export function createDashboardGrid(
   const engine = factory(
     {
       column: 20,
-      columnOpts: { columnMax: 20, breakpointForWindow: true, layout: "move", breakpoints: [{ w: 1279, c: 8, layout: "list" }, { w: 767, c: 1 }] },
+      columnOpts: {
+        columnMax: 20,
+        breakpointForWindow: true,
+        layout: "move",
+        breakpoints: [
+          { w: 1279, c: 8, layout: "list" },
+          { w: 767, c: 1 }
+        ]
+      },
       cellHeight: 80,
       disableDrag: true,
       disableResize: true,

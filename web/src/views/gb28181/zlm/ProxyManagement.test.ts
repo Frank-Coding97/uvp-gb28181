@@ -36,7 +36,11 @@ describe("proxy management state", () => {
       timeoutSec: "0.05"
     });
     expect(invalid.request).toBeUndefined();
-    expect(invalid.errors).toMatchObject({ retryCount: expect.any(String), rtpType: expect.any(String), timeoutSec: expect.any(String) });
+    expect(invalid.errors).toMatchObject({
+      retryCount: expect.any(String),
+      rtpType: expect.any(String),
+      timeoutSec: expect.any(String)
+    });
   });
 
   it("only enables mutations for supported capabilities", () => {
@@ -53,8 +57,12 @@ describe("proxy management state", () => {
 
   it("uses only the backend redacted display and fails closed on ownership", () => {
     const summary = {
-      scheme: "rtsp", host: "example.test", fingerprint: "sha256", hasUserInfo: true,
-      hasSensitiveQuery: true, display: "rtsp://example.test"
+      scheme: "rtsp",
+      host: "example.test",
+      fingerprint: "sha256",
+      hasUserInfo: true,
+      hasSensitiveQuery: true,
+      display: "rtsp://example.test"
     };
     expect(proxyAddressText(summary)).toBe("rtsp://example.test");
     expect(proxyDeleteDecision({ status: "managed", present: true, presenceKnown: true })).toMatchObject({ allowed: true });

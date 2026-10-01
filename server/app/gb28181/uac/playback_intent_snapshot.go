@@ -25,6 +25,9 @@ type playbackIntentSnapshot struct {
 	bodySHA256                                               [32]byte
 }
 
+// MarshalJSON keeps this pre-transaction observation out of API payloads.
+func (playbackIntentSnapshot) MarshalJSON() ([]byte, error) { return []byte("{}"), nil }
+
 // preparePlaybackIntentSnapshot has no production caller until a durable
 // dispatch owner and the actual transport boundary are verified. It runs the
 // pinned sipgo builder without invoking a transaction or changing the source.

@@ -2218,6 +2218,7 @@ onBeforeUnmount(() => {
                         v-if="!isValidResolutionCode(row.resolution)"
                         class="dcg-input is-narrow"
                         :model-value="row.resolution"
+                        allow-clear
                         :disabled="videoFieldsDisabled"
                         placeholder="1920x1080"
                         aria-label="自定义分辨率"
@@ -2575,6 +2576,7 @@ onBeforeUnmount(() => {
                         <a-input
                           class="dcg-input is-coord"
                           :model-value="coordsValue(activeGroup.key, field.key)[index]"
+                          allow-clear
                           inputmode="numeric"
                           :disabled="familyFieldsDisabled"
                           :aria-label="`${field.label} ${axis}`"
@@ -2604,6 +2606,7 @@ onBeforeUnmount(() => {
                       class="dcg-input"
                       :disabled="familyFieldsDisabled"
                       :model-value="textValue(activeGroup.key, field.key)"
+                      allow-clear
                       :placeholder="field.placeholder"
                       :maxlength="field.maxlength"
                       :aria-label="field.label"
@@ -2671,6 +2674,7 @@ onBeforeUnmount(() => {
                         <a-input
                           class="dcg-input is-coord"
                           :model-value="coordsValue(activeGroup.key, field.key)[index]"
+                          allow-clear
                           inputmode="numeric"
                           :disabled="familyFieldsDisabled"
                           :aria-label="`${field.label} ${axis}`"

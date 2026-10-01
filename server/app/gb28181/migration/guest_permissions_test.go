@@ -46,7 +46,7 @@ func guestFixture(t *testing.T) (*gorm.DB, guestPreset) {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
-	t.Cleanup(func() { raw.Close() })
+	t.Cleanup(func() { _ = raw.Close() })
 	for _, s := range []string{
 		"CREATE TABLE sys_role(id INTEGER PRIMARY KEY,name TEXT,sort INTEGER,status INTEGER,description TEXT,parent_id INTEGER,data_scope INTEGER,checked_depts TEXT,created_at TEXT,updated_at TEXT,created_by INTEGER,deleted_at TEXT)",
 		"CREATE TABLE sys_menu(id INTEGER PRIMARY KEY,parent_id INTEGER,path TEXT,name TEXT,component TEXT,title TEXT,hide INTEGER,disable INTEGER,sort INTEGER,type INTEGER,permission TEXT,icon TEXT,created_at TEXT,updated_at TEXT,created_by INTEGER,deleted_at TEXT)",

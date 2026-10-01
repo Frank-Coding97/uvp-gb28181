@@ -95,7 +95,7 @@ func TestLoggingGBHTTPContextWiring(t *testing.T) {
 					}
 				}
 				if s, ok := call.Fun.(*ast.SelectorExpr); ok {
-					if id, ok := s.X.(*ast.Ident); ok && pkg.Name == "controllers" && id.Name == "context" && s.Sel.Name == "Background" && !(call.Pos() >= fallbackStart && call.End() <= fallbackEnd) {
+					if id, ok := s.X.(*ast.Ident); ok && pkg.Name == "controllers" && id.Name == "context" && s.Sel.Name == "Background" && (call.Pos() < fallbackStart || call.End() > fallbackEnd) {
 						t.Errorf("request background context at %s", pkg.Fset.Position(call.Pos()))
 					}
 					if receiver, ok := s.X.(*ast.SelectorExpr); ok {

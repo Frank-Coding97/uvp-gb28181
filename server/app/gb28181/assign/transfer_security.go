@@ -110,7 +110,7 @@ func loadAssignmentSecurity(tx *gorm.DB, deviceID uint) (int64, *time.Time, erro
 }
 
 func lockedAssignmentDeviceTable(tx *gorm.DB) *gorm.DB {
-	if strings.EqualFold(tx.Dialector.Name(), "sqlserver") {
+	if strings.EqualFold(tx.Name(), "sqlserver") {
 		return tx.Table("gb_device WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Table("gb_device").Clauses(clause.Locking{Strength: "UPDATE"})

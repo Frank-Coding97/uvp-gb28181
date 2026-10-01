@@ -254,7 +254,7 @@ func TestDeviceRTPStepsMissingSchemaAndParentStatesFailClosed(t *testing.T) {
 	wrong.Kind = "talk"
 	_, err = store.LoadRTPResourceSteps(ctx, wrong)
 	require.ErrorIs(t, err, ErrDeviceIntentConflict)
-	_, err = store.LoadRTPResourceSteps(nil, id)
+	_, err = store.LoadRTPResourceSteps(nil, id) //nolint:staticcheck // nil context must fail closed.
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 	_, err = NewDeviceOperationIntentStore(nil).AddRTPResourceStep(ctx, id, 2, rtpStepIdentity(1))
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)

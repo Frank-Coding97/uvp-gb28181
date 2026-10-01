@@ -59,12 +59,6 @@ const siderPadding = computed(() => (collapsed.value ? "0px" : "12px"));
       box-shadow:
         inset 0 0 0 1px $color-border-2,
         0 0 10px 0 rgb(0 0 0 / 5%);
-      box-shadow:
-        inset 0 0 0 1px $color-border-2,
-        0 0 10px 0 rgb(0 0 0 / 5%);
-      box-shadow:
-        inset 0 0 0 1px $color-border-2,
-        0 0 10px 0 rgb(0 0 0 / 5%);
       transform: translateY(-50%);
       transition: all 0.1s;
       &:hover {

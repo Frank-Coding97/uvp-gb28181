@@ -13,31 +13,50 @@ vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/layout/components/Menu/menu-item-icon.vue", () => ({ default: { template: "<i />" } }));
 
 function renderTabs() {
-  return mount(Tabs, { global: {
-    mocks: { $t: (key: string) => key },
-    stubs: {
-      "a-tabs": { template: "<div><slot /></div>" },
-      "a-tab-pane": { template: "<div><slot name='title' /></div>" },
-      "a-dropdown": { template: "<div class='dropdown'><slot /><slot name='content' /></div>" },
-      "a-doption": { props: ["disabled"], template: "<button :disabled='disabled'><slot /></button>" },
-      "a-tooltip": { template: "<span><slot /></span>" },
-      "a-space": { template: "<div><slot /></div>" },
-      "icon-refresh": true, "icon-close": true, "icon-left": true, "icon-right": true,
-      "icon-close-circle": true, "icon-folder-delete": true, "icon-fullscreen": true,
-      "icon-fullscreen-exit": true, "icon-sun-fill": true, "icon-moon-fill": true
+  return mount(Tabs, {
+    global: {
+      mocks: { $t: (key: string) => key },
+      stubs: {
+        "a-tabs": { template: "<div><slot /></div>" },
+        "a-tab-pane": { template: "<div><slot name='title' /></div>" },
+        "a-dropdown": { template: "<div class='dropdown'><slot /><slot name='content' /></div>" },
+        "a-doption": { props: ["disabled"], template: "<button :disabled='disabled'><slot /></button>" },
+        "a-tooltip": { template: "<span><slot /></span>" },
+        "a-space": { template: "<div><slot /></div>" },
+        "icon-refresh": true,
+        "icon-close": true,
+        "icon-left": true,
+        "icon-right": true,
+        "icon-close-circle": true,
+        "icon-folder-delete": true,
+        "icon-fullscreen": true,
+        "icon-fullscreen-exit": true,
+        "icon-sun-fill": true,
+        "icon-moon-fill": true
+      }
     }
-  } });
+  });
 }
 
 beforeEach(() => {
-  const tabs = ["/home", "/a", "/b", "/c"].map(path => ({ path, meta: { title: path, affix: path === "/home", keepAlive: true } }));
+  const tabs = ["/home", "/a", "/b", "/c"].map(path => ({
+    path,
+    meta: { title: path, affix: path === "/home", keepAlive: true }
+  }));
   routeStore = reactive({
-    tabsList: ref(tabs), currentRoute: ref(tabs[3]),
-    removeTabsList: vi.fn((path: string) => { routeStore.tabsList = routeStore.tabsList.filter((t: any) => t.path !== path); }),
-    removeRouteName: vi.fn(), removeRoutePaths: vi.fn(), setRoutePaths: vi.fn()
+    tabsList: ref(tabs),
+    currentRoute: ref(tabs[3]),
+    removeTabsList: vi.fn((path: string) => {
+      routeStore.tabsList = routeStore.tabsList.filter((t: any) => t.path !== path);
+    }),
+    removeRouteName: vi.fn(),
+    removeRoutePaths: vi.fn(),
+    setRoutePaths: vi.fn()
   });
   themeStore = reactive({ darkMode: ref(false), setRefreshPage: vi.fn() });
-  push.mockReset().mockImplementation(async (path: string) => { routeStore.currentRoute = routeStore.tabsList.find((t: any) => t.path === path); });
+  push.mockReset().mockImplementation(async (path: string) => {
+    routeStore.currentRoute = routeStore.tabsList.find((t: any) => t.path === path);
+  });
 });
 
 describe("tab context actions", () => {
@@ -51,7 +70,10 @@ describe("tab context actions", () => {
     const wrapper = renderTabs();
     const menu = wrapper.findAll(".dropdown")[2];
     expect(menu, "each tab needs its own context menu").toBeDefined();
-    await menu.findAll("button").find(button => button.text() === `system.${action}`)!.trigger("click");
+    await menu
+      .findAll("button")
+      .find(button => button.text() === `system.${action}`)!
+      .trigger("click");
     await flushPromises();
     expect(routeStore.tabsList.map((t: any) => t.path)).toEqual(remaining);
     const removed = ["/home", "/a", "/b", "/c"].filter(path => !(remaining as string[]).includes(path));
@@ -65,7 +87,10 @@ describe("tab context actions", () => {
     const wrapper = renderTabs();
     const menu = wrapper.findAll(".dropdown")[2];
     expect(menu).toBeDefined();
-    await menu.findAll("button").find(button => button.text() === "system.refresh")!.trigger("click");
+    await menu
+      .findAll("button")
+      .find(button => button.text() === "system.refresh")!
+      .trigger("click");
     await flushPromises();
     expect(push).toHaveBeenCalledWith("/b");
     expect(routeStore.removeRouteName).toHaveBeenCalledWith("/b");

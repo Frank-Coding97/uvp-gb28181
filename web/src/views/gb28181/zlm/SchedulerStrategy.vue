@@ -10,4 +10,9 @@ import SchedulerStrategyPanel from "./workbench/scheduling/SchedulerStrategyPane
   </div>
 </template>
 
-<style scoped>.scheduler-shell { padding: 0; overflow: hidden; }</style>
+<style scoped>
+.scheduler-shell {
+  padding: 0;
+  overflow: hidden;
+}
+</style>

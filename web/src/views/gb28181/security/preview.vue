@@ -44,6 +44,7 @@ import {
   type SecurityPolicy,
   type SecuritySnapshot
 } from "@/api/gb28181-security";
+import SNumberField from "@/components/s-number-field/index.vue";
 import { buildSecurityTrend, type SecurityTrendPeriod } from "./securityTrend";
 import {
   formatAutomaticBanTTL,
@@ -201,6 +202,9 @@ const ruleFormModel = computed(() => ({
 }));
 const maxUdpThreshold = ref(120);
 const banThreshold = ref(100);
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const maxUdpThresholdField = ref<NumberFieldInstance | null>(null);
+const banThresholdField = ref<NumberFieldInstance | null>(null);
 const refreshCountdown = ref(10);
 const dataUnavailable = ref(false);
 const chartElement = ref<HTMLElement | null>(null);
@@ -712,6 +716,11 @@ async function promoteToBlacklist(item: AutoBanRecord) {
 
 async function savePolicyPreview() {
   if (!securityPolicy.value) return;
+  const numberFieldError = maxUdpThresholdField.value?.error || banThresholdField.value?.error;
+  if (numberFieldError) {
+    Message.warning(numberFieldError);
+    return;
+  }
   securityPolicy.value.mode = selectedMode.value;
   securityPolicy.value.banScore = Math.max(1, banThreshold.value);
   securityPolicy.value.maxUdpPerWindow = Math.max(1, maxUdpThreshold.value);
@@ -1254,7 +1263,9 @@ onBeforeUnmount(() => {
                 ><strong>入口速率阈值</strong><small>当前策略窗口内允许的 UDP 包数量 · {{ policyWindowLabel }}</small></span
               >
               <div class="threshold-control">
-                <a-input-number v-model="maxUdpThreshold" :min="1" :max="100000" /><span>包/窗口</span>
+                <s-number-field ref="maxUdpThresholdField" v-model="maxUdpThreshold" :min="1" :max="100000" required /><span
+                  >包/窗口</span
+                >
               </div>
             </div>
             <div class="setting-row">
@@ -1263,7 +1274,9 @@ onBeforeUnmount(() => {
                 ><small>INVITE、REGISTER、MESSAGE 等风险按评分累计；达到阈值后仍需通过来源验证门禁，才加入主机防火墙</small></span
               >
               <div class="threshold-control">
-                <a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span>
+                <s-number-field ref="banThresholdField" v-model="banThreshold" :min="1" :max="10000" required /><span
+                  >风险分</span
+                >
               </div>
             </div>
             <div class="setting-row">
@@ -1340,12 +1353,13 @@ onBeforeUnmount(() => {
         <a-form-item label="匹配内容" required
           ><a-input
             v-model="ruleValue"
+            allow-clear
             :placeholder="
               ruleType === 'IP' ? '例如 203.0.113.12' : ruleType === 'CIDR' ? '例如 203.0.113.0/24' : '例如 friendly-scanner*'
             "
         /></a-form-item>
         <a-form-item label="备注"
-          ><a-textarea v-model="ruleNote" placeholder="说明规则用途，方便后续复核" :max-length="80" show-word-limit
+          ><a-textarea v-model="ruleNote" allow-clear placeholder="说明规则用途，方便后续复核" :max-length="80" show-word-limit
         /></a-form-item>
         <a-form-item label="有效期"
           ><a-select v-model="ruleExpiry"

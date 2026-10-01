@@ -2,8 +2,8 @@
 #
 # 仓库级质量门禁（本地版）
 #
-# 本仓已弃用 GitHub Actions（构建机只有 4G，跑不动 CI），原先由 CI 承担的门禁
-# 改由「本脚本 + husky 钩子」两层承担：
+# 本脚本负责本地整体健康检查；CI 对增量 Go 代码执行同一配置的检查。
+# 本地提交由「本脚本 + husky 钩子」两层承担：
 #   · husky 钩子守**单次提交**（pre-commit 跑 lint-staged，commit-msg 跑 commitlint）
 #   · 本脚本守**整体健康**（格式化 / 静态检查 / 单测，以及可选的完整测试）
 #
@@ -21,15 +21,12 @@ usage() {
   cat <<'EOF'
 用法: scripts/quality-gate.sh [选项]
 
-  快速档（默认）  gofmt / go vet / golangci-lint / ESLint / Vitest
+  快速档（默认）  gofmt / go vet / 全量 golangci-lint / ESLint / Vitest / Prettier / Stylelint
   完整档(--full)  以上全部 + vue-tsc 类型检查 + 全量 go test
-  --all-lint      golangci-lint 改为全量扫描（默认只查工作区改动过的 Go 文件）
+  --all-lint      兼容旧参数；当前默认已是全量扫描
 
 说明:
-  · **golangci-lint 默认只查改动文件**：本仓存量债 660 条
-    （errcheck 394 / staticcheck 208 / unused 34 / ineffassign 17 / govet 7），
-    全量跑必然红、会把信号淹没；清债是独立议题，不在本脚本职责内。
-    需要看全量存量用 --all-lint。
+  · Go lint、前端格式与样式检查均扫描全量源文件。
   · 全量 go test 约 20 分钟，需要可达的开发库与 Redis，且必须 -p 1 串行
     （并发跑会互相踩真实外部依赖）。
   · 本机 go / gofmt 不在 PATH，脚本会自动回退到 /opt/homebrew/Cellar/go/*/bin。
@@ -37,12 +34,11 @@ EOF
 }
 
 MODE="fast"
-LINT_ALL=0
 for arg in "$@"; do
   case "$arg" in
     ""|--fast) MODE="fast" ;;
     --full)    MODE="full" ;;
-    --all-lint) LINT_ALL=1 ;;
+    --all-lint) : ;;
     --help|-h) usage; exit 0 ;;
     *) echo "未知参数: $arg" >&2; usage >&2; exit 2 ;;
   esac
@@ -119,20 +115,8 @@ if [ -n "$GOLANGCI_BIN" ] && [ -x "$GOLANGCI_BIN" ]; then
   # ⛔ 不要用「把改动文件列表传给 golangci-lint」的做法：它要求所有文件名同目录，
   #    跨目录会以 "named files must all be in one directory" 直接失败。
   #    正确姿势是 --new：按 git diff 判定，只报本次改动引入的问题。
-  CHANGED_GO_FILES="$({
-    git -C "$ROOT" diff --name-only --diff-filter=ACM HEAD -- server
-    git -C "$ROOT" ls-files --others --exclude-standard -- server
-  } 2>/dev/null | grep -E '\.go$' | sed 's|^server/||' | sort -u || true)"
-  if [ "$LINT_ALL" -eq 1 ]; then
-    run_check "golangci-lint（全量存量）" "$ROOT/server" \
-      'PATH="$GO_PATH_PREFIX:$PATH" "$GOLANGCI_BIN" run --timeout 10m'
-  elif [ -z "$CHANGED_GO_FILES" ]; then
-    skip_check "golangci-lint（本次改动）" "工作区没有改动的 Go 文件（要看全量存量用 --all-lint）"
-  else
-    # ⚠️ --new 在完全没有改动时会退化成分析 HEAD~ 的改动，所以上面先判空再跑。
-    run_check "golangci-lint（本次改动）" "$ROOT/server" \
-      'PATH="$GO_PATH_PREFIX:$PATH" "$GOLANGCI_BIN" run --new --timeout 10m'
-  fi
+  run_check "golangci-lint（全量）" "$ROOT/server" \
+    'PATH="$GO_PATH_PREFIX:$PATH" "$GOLANGCI_BIN" run --timeout 10m'
 else
   skip_check "golangci-lint（静态检查）" \
     "未安装。安装: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"
@@ -141,7 +125,10 @@ fi
 # ---------- 前端检查 ----------
 if [ -x "$WEB_BIN/eslint" ]; then
   run_check "ESLint（前端）" "$ROOT/web" './node_modules/.bin/eslint src'
+  run_check "Vue 表单规则" "$ROOT/web" 'node scripts/check-form-rules.mjs && node --test scripts/check-form-rules.test.mjs'
   run_check "Vitest（前端单测）" "$ROOT/web" './node_modules/.bin/vitest run'
+  run_check "Prettier（前端全量）" "$ROOT/web" './node_modules/.bin/prettier --check "src/**/*.{js,ts,json,tsx,css,less,scss,vue,html,md}"'
+  run_check "Stylelint（前端全量）" "$ROOT/web" './node_modules/.bin/stylelint "src/**/*.{vue,scss,css}"'
 else
   skip_check "ESLint（前端）" "web/node_modules 未安装（先在 web/ 跑 pnpm install）"
   skip_check "Vitest（前端单测）" "web/node_modules 未安装（先在 web/ 跑 pnpm install）"

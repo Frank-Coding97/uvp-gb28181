@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const readHeaderSource = () => readFileSync(resolve(process.cwd(), "src/layout/components/Header/components/header-right/index.vue"), "utf8");
+const readHeaderSource = () =>
+  readFileSync(resolve(process.cwd(), "src/layout/components/Header/components/header-right/index.vue"), "utf8");
 const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 describe("header account menu", () => {
@@ -26,7 +27,9 @@ describe("header account menu", () => {
 
     expect(source).toContain(":global(.arco-dropdown:has(.uvp-user-menu-profile))");
     expect(source).toMatch(/\.uvp-user-menu-option\)\s*\{[^}]*height:\s*36px/s);
-    expect(source).toMatch(/\.uvp-user-menu-option:hover\)\s*\{[^}]*color-mix\(in srgb, var\(--uvp-text-primary\) 7%, transparent\)/s);
+    expect(source).toMatch(
+      /\.uvp-user-menu-option:hover\)\s*\{[^}]*color-mix\(in srgb, var\(--uvp-text-primary\) 7%, transparent\)/s
+    );
     expect(source).not.toContain("uvp-user-menu-option--danger");
   });
 

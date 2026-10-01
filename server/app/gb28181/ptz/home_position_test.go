@@ -30,8 +30,6 @@ func intValue(value int) *int { return &value }
 
 func boolValue(value bool) *bool { return &value }
 
-func stringValue(value string) *string { return &value }
-
 func homePositionUpdate(sequence uint, confirmedAt time.Time) HomePositionUpdate {
 	operationID := "operation-source"
 	return HomePositionUpdate{

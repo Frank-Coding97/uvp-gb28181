@@ -6,15 +6,57 @@ describe("dashboard registry", () => {
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets).toHaveLength(12);
     expect(new Set(DEFAULT_DASHBOARD_LAYOUT.widgets.map(widget => widget.id)).size).toBe(12);
     for (const [index, id] of ["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"].entries()) {
-      expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === id)).toMatchObject({ x: index * 4, y: 0, w: 4, h: 2, visible: true });
+      expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === id)).toMatchObject({
+        x: index * 4,
+        y: 0,
+        w: 4,
+        h: 2,
+        visible: true
+      });
     }
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({ x: 0, y: 6, w: 12, h: 7, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")).toMatchObject({ x: 12, y: 6, w: 8, h: 4, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({ x: 12, y: 10, w: 8, h: 3, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({
+      x: 0,
+      y: 6,
+      w: 12,
+      h: 7,
+      visible: true
+    });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")).toMatchObject({
+      x: 12,
+      y: 6,
+      w: 8,
+      h: 4,
+      visible: true
+    });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({
+      x: 12,
+      y: 10,
+      w: 8,
+      h: 3,
+      visible: true
+    });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "active-stream-ranking")?.visible).toBe(false);
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-rate")).toMatchObject({ x: 0, y: 2, w: 12, h: 4, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "device-online-rate")).toMatchObject({ x: 12, y: 2, w: 4, h: 4, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "channel-online-rate")).toMatchObject({ x: 16, y: 2, w: 4, h: 4, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-rate")).toMatchObject({
+      x: 0,
+      y: 2,
+      w: 12,
+      h: 4,
+      visible: true
+    });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "device-online-rate")).toMatchObject({
+      x: 12,
+      y: 2,
+      w: 4,
+      h: 4,
+      visible: true
+    });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "channel-online-rate")).toMatchObject({
+      x: 16,
+      y: 2,
+      w: 4,
+      h: 4,
+      visible: true
+    });
   });
 
   it("migrates a known old widget and appends new defaults", () => {
@@ -48,18 +90,27 @@ describe("dashboard registry", () => {
   });
 
   it("migrates the schema 2 default layout to the new first row", () => {
-    const normalized = normalizeDashboardLayout({ schemaVersion: 2, widgets: [
-      { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
-      { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
-      { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
-      { id: "device-online-rate", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
-      { id: "channel-online-rate", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
-      { id: "media-traffic-today", x: 0, y: 15, w: 4, h: 2, visible: false, settings: {} },
-      { id: "media-runtime", x: 14, y: 2, w: 6, h: 5, visible: true, settings: {} },
-      { id: "sip-monitor", x: 0, y: 2, w: 14, h: 5, visible: true, settings: {} }
-    ] });
+    const normalized = normalizeDashboardLayout({
+      schemaVersion: 2,
+      widgets: [
+        { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
+        { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
+        { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
+        { id: "device-online-rate", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
+        { id: "channel-online-rate", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
+        { id: "media-traffic-today", x: 0, y: 15, w: 4, h: 2, visible: false, settings: {} },
+        { id: "media-runtime", x: 14, y: 2, w: 6, h: 5, visible: true, settings: {} },
+        { id: "sip-monitor", x: 0, y: 2, w: 14, h: 5, visible: true, settings: {} }
+      ]
+    });
     for (const [index, id] of ["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"].entries()) {
-      expect(normalized.widgets.find(widget => widget.id === id)).toMatchObject({ x: index * 4, y: 0, w: 4, h: 2, visible: true });
+      expect(normalized.widgets.find(widget => widget.id === id)).toMatchObject({
+        x: index * 4,
+        y: 0,
+        w: 4,
+        h: 2,
+        visible: true
+      });
     }
     expect(normalized.widgets.find(widget => widget.id === "sip-monitor")?.visible).toBe(true);
     expect(normalized.widgets.find(widget => widget.id === "device-online-rate")).toMatchObject({ x: 12, y: 2, w: 4, h: 4 });

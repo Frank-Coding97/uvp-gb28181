@@ -531,6 +531,11 @@ func (s *Scheduler) claimAttempt(ctx context.Context, operationID uint, now time
 		attempt, err := s.service.intents.ClaimPTZAttempt(ctx, id, original.ID, original.Attempt, now)
 		return attempt, err == nil, err
 	}
+	if s.service.intents != nil || s.service.barrier != nil {
+		// A runtime with authorization enabled cannot recover authority for a
+		// historical queued row whose durable intent binding is missing.
+		return gbmodels.GbPTZOperationAttempt{}, false, playauth.ErrDeviceIntentRevoked
+	}
 	var claimed gbmodels.GbPTZOperationAttempt
 	err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		claimed = gbmodels.GbPTZOperationAttempt{}

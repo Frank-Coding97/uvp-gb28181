@@ -16,17 +16,17 @@
             <a-row :gutter="24">
               <a-col :span="12">
                 <a-form-item label="表名" field="name">
-                  <a-input v-model="editForm.name" disabled />
+                  <a-input v-model="editForm.name" disabled allow-clear />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
                 <a-form-item label="目录/模块" field="moduleName" :rules="[{ required: true, message: '模块名称不能为空' }]">
-                  <a-input v-model="editForm.moduleName" placeholder="请输入模块名称" />
+                  <a-input v-model="editForm.moduleName" allow-clear placeholder="请输入模块名称" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
                 <a-form-item label="文件及结构体前缀" field="fileName" :rules="[{ required: true, message: '文件名称不能为空' }]">
-                  <a-input v-model="editForm.fileName" placeholder="请输入文件名称" />
+                  <a-input v-model="editForm.fileName" allow-clear placeholder="请输入文件名称" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
@@ -85,7 +85,7 @@
               </a-col>
               <a-col :span="24">
                 <a-form-item label="描述" field="describe" :rules="[{ required: true, message: '描述不能为空' }]">
-                  <a-textarea v-model="editForm.describe" placeholder="请输入描述" :auto-size="{ minRows: 3 }" />
+                  <a-textarea v-model="editForm.describe" allow-clear placeholder="请输入描述" :auto-size="{ minRows: 3 }" />
                 </a-form-item>
               </a-col>
             </a-row>
@@ -111,12 +111,12 @@
               <template #columns>
                 <a-table-column title="字段名" :width="150">
                   <template #cell="{ record }">
-                    <a-input v-model="record.customName" placeholder="请输入字段名" />
+                    <a-input v-model="record.customName" allow-clear placeholder="请输入字段名" />
                   </template>
                 </a-table-column>
                 <a-table-column title="字段描述" :width="200">
                   <template #cell="{ record }">
-                    <a-input v-model="record.dataComment" placeholder="请输入字段描述" />
+                    <a-input v-model="record.dataComment" allow-clear placeholder="请输入字段描述" />
                   </template>
                 </a-table-column>
                 <a-table-column title="字段类型" :width="100">

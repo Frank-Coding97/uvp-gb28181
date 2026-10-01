@@ -1,16 +1,24 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
-vi.mock("../dashboard/DashboardChart.vue", () => ({ default: { name: "DashboardChart", props: ["spec", "title", "summary"], template: '<div class="chart-stub" />' } }));
+vi.mock("../dashboard/DashboardChart.vue", () => ({
+  default: { name: "DashboardChart", props: ["spec", "title", "summary"], template: '<div class="chart-stub" />' }
+}));
 import PulseChart from "./PulseChart.vue";
 
-const samples = [{ t: 60, msgPerSec: 2, failPct: 0 }, { t: 120, msgPerSec: 4, failPct: 10 }];
+const samples = [
+  { t: 60, msgPerSec: 2, failPct: 0 },
+  { t: 120, msgPerSec: 4, failPct: 10 }
+];
 
 describe("SIP pulse chart", () => {
   it("uses smooth VChart series with real message/percentage values and clipped abnormal windows", () => {
     const wrapper = mount(PulseChart, { props: { samples, abnormalWindows: [{ startT: 30, endT: 90 }] } });
     const spec = wrapper.getComponent({ name: "DashboardChart" }).props("spec");
     expect(spec.type).toBe("common");
-    expect(spec.data[0].values).toEqual([{ time: 60000, messages: 2, failure: 0, known: true }, { time: 120000, messages: 4, failure: 1, known: true }]);
+    expect(spec.data[0].values).toEqual([
+      { time: 60000, messages: 2, failure: 0, known: true },
+      { time: 120000, messages: 4, failure: 1, known: true }
+    ]);
     expect(spec.series[0].line.style.curveType).toBe("monotone");
     expect(spec.series[0].area.style.curveType).toBe("monotone");
     expect(spec.series[0].area.style.fill.stops).toEqual([

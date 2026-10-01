@@ -231,9 +231,11 @@ func attachSchemaTable(db *gorm.DB) {
 		db.Statement.Context = context.WithValue(db.Statement.Context, schemaTableKey{}, db.Statement.Schema.Table)
 	}
 }
-func installLogContext(db *gorm.DB) {
-	db.Callback().Query().Before("gorm:query").Register("logging:schema", attachSchemaTable)
-	db.Callback().Create().Before("gorm:create").Register("logging:schema", attachSchemaTable)
-	db.Callback().Update().Before("gorm:update").Register("logging:schema", attachSchemaTable)
-	db.Callback().Delete().Before("gorm:delete").Register("logging:schema", attachSchemaTable)
+func installLogContext(db *gorm.DB) error {
+	return errors.Join(
+		db.Callback().Query().Before("gorm:query").Register("logging:schema", attachSchemaTable),
+		db.Callback().Create().Before("gorm:create").Register("logging:schema", attachSchemaTable),
+		db.Callback().Update().Before("gorm:update").Register("logging:schema", attachSchemaTable),
+		db.Callback().Delete().Before("gorm:delete").Register("logging:schema", attachSchemaTable),
+	)
 }

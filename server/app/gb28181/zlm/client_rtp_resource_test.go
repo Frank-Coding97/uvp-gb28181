@@ -179,9 +179,9 @@ func TestOpenAPIRtpResourceInvalidInputNeverDispatches(t *testing.T) {
 		}
 	}
 	request := rtpResourceFixture()
-	_, err := control.OpenRtpServerIfMatch(nil, request)
+	_, err := control.OpenRtpServerIfMatch(nil, request) //nolint:staticcheck // nil context must fail closed.
 	require.ErrorIs(t, err, ErrRuntimeControlUnavailable)
-	_, err = control.CloseRtpServerIfMatch(nil, request.RtpResourceSelector)
+	_, err = control.CloseRtpServerIfMatch(nil, request.RtpResourceSelector) //nolint:staticcheck // nil context must fail closed.
 	require.ErrorIs(t, err, ErrRuntimeControlUnavailable)
 	var absent *OpenAPIRuntimeControl
 	_, err = absent.OpenRtpServerIfMatch(context.Background(), request)

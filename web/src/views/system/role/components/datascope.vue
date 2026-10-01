@@ -2,7 +2,7 @@
   <div class="data-scope-container">
     <a-form class="uvp-system-form" :model="formModel" layout="vertical">
       <a-form-item label="角色名称">
-        <a-input v-model="formModel.roleName" disabled />
+        <a-input v-model="formModel.roleName" disabled allow-clear />
       </a-form-item>
       <a-form-item label="权限范围(默认可以查看自己创建的数据)">
         <a-select v-model="formModel.dataScope" placeholder="请选择权限范围" @change="onDataScopeChange" allow-clear>
@@ -252,13 +252,13 @@ defineExpose({
 }
 
 .tree-loading {
-  text-align: center;
   padding: 20px;
+  text-align: center;
 }
 
 .tree-empty {
-  text-align: center;
   padding: 20px;
+  text-align: center;
 }
 
 .tree-operation-card {

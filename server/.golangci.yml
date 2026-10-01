@@ -1,6 +1,6 @@
 # golangci-lint 配置（v2 格式）
 #
-# 本仓已弃用 GitHub Actions，静态检查由 scripts/quality-gate.sh 在本地承担。
+# 本地快速检查由 scripts/quality-gate.sh 承担；CI 对增量 Go 代码执行同一配置的检查。
 # 运行方式（注意必须在 server/ 下，go.mod 在这一层）：
 #   cd server && golangci-lint run
 # 或直接：

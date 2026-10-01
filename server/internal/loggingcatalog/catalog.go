@@ -294,9 +294,7 @@ func Findings(root string, registry Registry) ([]Finding, error) {
 			})
 		}
 	}
-	for _, finding := range eventLevelDivergences(sites) {
-		findings = append(findings, finding)
-	}
+	findings = append(findings, eventLevelDivergences(sites)...)
 	for _, key := range registry.Fields {
 		if usedFields[key] {
 			continue

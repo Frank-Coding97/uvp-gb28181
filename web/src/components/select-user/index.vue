@@ -85,8 +85,9 @@
             <a-table-column title="手机号" data-index="phone" :width="130" />
             <a-table-column title="状态" :width="80" align="center">
               <template #cell="{ record }">
-                <a-tag bordered size="small" color="arcoblue" v-if="record.status === 1"> 启用 </a-tag>
-                <a-tag bordered size="small" color="red" v-else> 禁用 </a-tag>
+                <a-tag bordered size="small" :color="record.status === 1 ? 'arcoblue' : 'red'">
+                  {{ statusLabel(record.status) }}
+                </a-tag>
               </template>
             </a-table-column>
             <a-table-column title="操作" :width="72" align="center">
@@ -129,6 +130,7 @@
 import { computed, ref, watch } from "vue";
 import { getAccountListAPI, getAccountDetailAPI } from "@/api/user";
 import type { AccountItem } from "@/api/user";
+import { useStatusLabel } from "@/hooks/useDictOptions";
 
 // 用户信息接口（用于已选用户）
 interface UserInfo {
@@ -168,6 +170,9 @@ const emit = defineEmits<Emits>();
 
 // 弹窗显示状态
 const modalVisible = ref(false);
+
+// 状态标签文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 
 // 搜索关键字
 const searchKeyword = ref("");

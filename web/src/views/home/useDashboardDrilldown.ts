@@ -1,10 +1,6 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { getDashboardDrilldown, type DashboardHistoryEnvelope, type DashboardHistoryData } from "@/api/home-dashboard-drilldown";
-import {
-  DASHBOARD_DRILLDOWN_RANGES,
-  type DashboardDrilldownMetric,
-  type DashboardHistoryRange
-} from "./dashboardDrilldownState";
+import { DASHBOARD_DRILLDOWN_RANGES, type DashboardDrilldownMetric, type DashboardHistoryRange } from "./dashboardDrilldownState";
 
 export type DashboardDrilldownLoader = (
   metric: DashboardDrilldownMetric,
@@ -12,7 +8,8 @@ export type DashboardDrilldownLoader = (
   signal: AbortSignal
 ) => Promise<DashboardHistoryEnvelope<DashboardHistoryData>>;
 
-const defaultLoader: DashboardDrilldownLoader = async (metric, range, signal) => (await getDashboardDrilldown(metric, range, signal)).data;
+const defaultLoader: DashboardDrilldownLoader = async (metric, range, signal) =>
+  (await getDashboardDrilldown(metric, range, signal)).data;
 
 export function useDashboardDrilldown(loader: DashboardDrilldownLoader = defaultLoader) {
   const visible = ref(false);

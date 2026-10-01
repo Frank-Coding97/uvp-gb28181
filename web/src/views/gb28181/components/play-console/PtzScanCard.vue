@@ -38,6 +38,7 @@ const emit = defineEmits<{
         ><a-input
           id="scan-group-input"
           :model-value="group"
+          allow-clear
           class="scan-number"
           type="number"
           inputmode="numeric"
@@ -81,6 +82,7 @@ const emit = defineEmits<{
         ><a-input
           id="scan-speed-input"
           :model-value="speed"
+          allow-clear
           class="scan-number"
           type="number"
           inputmode="numeric"

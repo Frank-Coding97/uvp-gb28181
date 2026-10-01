@@ -216,8 +216,8 @@ func (a *Agent) ServeUnix(socketPath string, stop <-chan struct{}) error {
 		_ = os.Remove(socketPath)
 		return err
 	}
-	defer listener.Close()
-	defer os.Remove(socketPath)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(socketPath) }()
 	for {
 		if stop != nil {
 			select {
@@ -226,7 +226,9 @@ func (a *Agent) ServeUnix(socketPath string, stop <-chan struct{}) error {
 			default:
 			}
 		}
-		listener.(*net.UnixListener).SetDeadline(time.Now().Add(250 * time.Millisecond))
+		if err := listener.(*net.UnixListener).SetDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+			return err
+		}
 		conn, err := listener.Accept()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
@@ -239,7 +241,7 @@ func (a *Agent) ServeUnix(socketPath string, stop <-chan struct{}) error {
 }
 
 func (a *Agent) handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 	var req request

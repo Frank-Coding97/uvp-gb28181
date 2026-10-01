@@ -3,7 +3,6 @@ package manscdp
 import (
 	"encoding/xml"
 	"fmt"
-	"strings"
 )
 
 // `OSDConfig`（A.2.1.12）的取值域与上限。
@@ -132,7 +131,7 @@ func (b *OSDConfigBlock) wire() *osdConfigWire {
 		SumNum: len(b.Items),
 	}
 	for _, item := range b.Items {
-		wire.Items = append(wire.Items, osdTextItemWire{Text: item.Text, X: item.X, Y: item.Y})
+		wire.Items = append(wire.Items, osdTextItemWire(item))
 	}
 	return wire
 }
@@ -151,9 +150,7 @@ func (w *osdConfigWire) toBlock() *OSDConfigBlock {
 	}
 	block.Items = make([]OSDTextItem, 0, len(w.Items))
 	for _, item := range w.Items {
-		block.Items = append(block.Items, OSDTextItem{
-			Text: item.Text, X: item.X, Y: item.Y,
-		})
+		block.Items = append(block.Items, OSDTextItem(item))
 	}
 	return block
 }
@@ -198,19 +195,4 @@ func (b *OSDConfigBlock) validate() error {
 		}
 	}
 	return nil
-}
-
-// OSDPositionOptions 是 `TimeType` 的人读串（**只给日志/前端提示用，绝不进报文**）。
-func osdTimeTypeLabel(timeType *int) string {
-	if timeType == nil {
-		return "不指定"
-	}
-	switch strings.TrimSpace(fmt.Sprint(*timeType)) {
-	case "0":
-		return "YYYY-MM-DD HH:MM:SS"
-	case "1":
-		return "YYYY年MM月DD日HH:MM:SS"
-	default:
-		return fmt.Sprintf("非法值 %d", *timeType)
-	}
 }

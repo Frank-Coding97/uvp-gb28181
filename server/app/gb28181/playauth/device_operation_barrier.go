@@ -231,27 +231,6 @@ func (b *DeviceOperationBarrier) AuthorizeEpoch(ctx context.Context, deviceCode 
 	return normalizeDeviceOperationError(b.store.AuthorizeEpoch(ctx, deviceCode, expectedEpoch), ctx)
 }
 
-// beginLegacy is intentionally private. Only the trusted registry snapshot
-// may supply a v2 issued-at value; arbitrary callers cannot bypass the queued
-// authorization path by exporting a legacy timestamp API.
-func (b *DeviceOperationBarrier) beginLegacy(ctx context.Context, deviceCode string, issuedAt int64) (DeviceOperationLease, error) {
-	if isNilInterface(ctx) {
-		return nil, ErrDeviceOperationUnavailable
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if b == nil || b.store == nil || b.store.db == nil {
-		return nil, ErrDeviceOperationUnavailable
-	}
-	if !validGBID(deviceCode) || issuedAt <= 0 {
-		return nil, ErrDeviceOperationInvalid
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, deviceOperationAdmissionTimeout)
-	defer cancel()
-	return b.beginLegacyWithWait(ctx, waitCtx, deviceCode, issuedAt)
-}
-
 func (b *DeviceOperationBarrier) beginLegacyWithWait(ctx, waitCtx context.Context, deviceCode string, issuedAt int64) (DeviceOperationLease, error) {
 	if isNilInterface(ctx) || isNilInterface(waitCtx) {
 		return nil, ErrDeviceOperationUnavailable
@@ -390,7 +369,7 @@ func validateDeviceOperationRow(row deviceOperationRow, deviceCode string, devic
 }
 
 func lockedDeviceOperationTable(tx *gorm.DB) *gorm.DB {
-	if tx != nil && tx.Dialector.Name() == "sqlserver" {
+	if tx != nil && tx.Name() == "sqlserver" {
 		return tx.Table("gb_device WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Table("gb_device").Clauses(clause.Locking{Strength: "UPDATE"})

@@ -54,14 +54,30 @@ onMounted(refreshNodes);
       :disabled="false"
       @refresh="refreshNodes"
     />
-    <div v-if="error && !nodes.length" class="legacy-ingress-shell__error" role="alert">
-      节点目录加载失败，请刷新后重试。
-    </div>
+    <div v-if="error && !nodes.length" class="legacy-ingress-shell__error" role="alert">节点目录加载失败，请刷新后重试。</div>
     <slot :active="true" :scope="scope" :nodes="nodes" :refresh-key="refreshKey" />
   </div>
 </template>
 
 <style scoped>
-.legacy-ingress-shell { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; gap: 12px; padding: 4px 8px 16px; overflow: auto; color: var(--zlm-text-2); box-sizing: border-box; }
-.legacy-ingress-shell__error { padding: 10px 12px; color: var(--zlm-danger-600); background: var(--zlm-danger-50); border: 1px solid var(--zlm-danger-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }
+.legacy-ingress-shell {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 4px 8px 16px;
+  overflow: auto;
+  color: var(--zlm-text-2);
+}
+.legacy-ingress-shell__error {
+  padding: 10px 12px;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border: 1px solid var(--zlm-danger-500);
+  border-radius: var(--zlm-radius-md);
+}
 </style>

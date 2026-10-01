@@ -18,16 +18,16 @@ type TalkParams struct {
 func BuildTalkSDP(p TalkParams) string {
 	var b strings.Builder
 	b.WriteString("v=0\r\n")
-	b.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", p.ServerID, p.RecvIP))
+	fmt.Fprintf(&b, "o=%s 0 0 IN IP4 %s\r\n", p.ServerID, p.RecvIP)
 	b.WriteString("s=Talk\r\n")
-	b.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", p.RecvIP))
+	fmt.Fprintf(&b, "c=IN IP4 %s\r\n", p.RecvIP)
 	b.WriteString("t=0 0\r\n")
-	b.WriteString(fmt.Sprintf("m=audio %d TCP/RTP/AVP 8\r\n", p.RecvPort))
+	fmt.Fprintf(&b, "m=audio %d TCP/RTP/AVP 8\r\n", p.RecvPort)
 	b.WriteString("a=setup:passive\r\n")
 	b.WriteString("a=connection:new\r\n")
 	b.WriteString("a=sendrecv\r\n")
 	b.WriteString("a=rtpmap:8 PCMA/8000\r\n")
-	b.WriteString(fmt.Sprintf("y=%s\r\n", p.SSRC))
+	fmt.Fprintf(&b, "y=%s\r\n", p.SSRC)
 	b.WriteString("f=v/////a/1/8/1\r\n")
 	return b.String()
 }

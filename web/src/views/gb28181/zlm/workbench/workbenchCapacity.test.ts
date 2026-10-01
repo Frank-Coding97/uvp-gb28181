@@ -42,22 +42,48 @@ describe("media workbench large DTO boundaries", () => {
     const streams = largeStreams();
     const startedAt = performance.now();
     const runtimeNode = {
-        nodeId: 1,
-        name: "节点 1",
-        state: "active",
-        status: "fresh",
-        freshness: "fresh",
-        asOf: "2026-08-30T00:00:00Z",
-        heartbeatFreshness: "fresh",
-        metrics: { mediaSourceCount: LARGE_DTO_COUNT, multiMediaSourceMuxerCount: 0, tcpServerCount: 0, tcpSessionCount: 0, udpServerCount: 0, udpSessionCount: 0, tcpClientCount: 0, socketCount: 0, networkSessionCount: 0, netThreadLoad: 0, workThreadLoad: 0 },
-        metricsComplete: true,
-        mediaFreshness: "fresh",
-        streams
+      nodeId: 1,
+      name: "节点 1",
+      state: "active",
+      status: "fresh",
+      freshness: "fresh",
+      asOf: "2026-08-30T00:00:00Z",
+      heartbeatFreshness: "fresh",
+      metrics: {
+        mediaSourceCount: LARGE_DTO_COUNT,
+        multiMediaSourceMuxerCount: 0,
+        tcpServerCount: 0,
+        tcpSessionCount: 0,
+        udpServerCount: 0,
+        udpSessionCount: 0,
+        tcpClientCount: 0,
+        socketCount: 0,
+        networkSessionCount: 0,
+        netThreadLoad: 0,
+        workThreadLoad: 0
+      },
+      metricsComplete: true,
+      mediaFreshness: "fresh",
+      streams
     };
     const overview = buildOverviewChartState({
       nodes: [runtimeNode],
       streams,
-      metrics: { sampledNodeCount: 1, mediaSourceCount: LARGE_DTO_COUNT, multiMediaSourceMuxerCount: 0, tcpServerCount: 0, tcpSessionCount: 0, udpServerCount: 0, udpSessionCount: 0, tcpClientCount: 0, socketCount: 0, networkSessionCount: 0, netThreadLoadAvg: 0, workThreadLoadAvg: 0, streamCount: LARGE_DTO_COUNT },
+      metrics: {
+        sampledNodeCount: 1,
+        mediaSourceCount: LARGE_DTO_COUNT,
+        multiMediaSourceMuxerCount: 0,
+        tcpServerCount: 0,
+        tcpSessionCount: 0,
+        udpServerCount: 0,
+        udpSessionCount: 0,
+        tcpClientCount: 0,
+        socketCount: 0,
+        networkSessionCount: 0,
+        netThreadLoadAvg: 0,
+        workThreadLoadAvg: 0,
+        streamCount: LARGE_DTO_COUNT
+      },
       partial: false,
       asOf: "2026-08-30T00:00:00Z",
       metricsSampledNodeIds: [1],

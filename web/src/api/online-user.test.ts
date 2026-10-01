@@ -24,11 +24,6 @@ describe("online user API", () => {
   it("keeps the background heartbeat silent", () => {
     sessionHeartbeatAPI();
 
-    expect(request).toHaveBeenCalledWith(
-      "post",
-      baseUrlApi("users/session/heartbeat"),
-      undefined,
-      { showErrorMessage: false }
-    );
+    expect(request).toHaveBeenCalledWith("post", baseUrlApi("users/session/heartbeat"), undefined, { showErrorMessage: false });
   });
 });

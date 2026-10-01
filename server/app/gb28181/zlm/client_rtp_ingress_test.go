@@ -71,7 +71,7 @@ func TestOpenAPIRtpIngressV2InvalidInputAndMissingAPINeverFallback(t *testing.T)
 	var absent *OpenAPIRuntimeControl
 	_, err := absent.CloseRtpIngressIfMatchV2(context.Background(), target)
 	require.ErrorIs(t, err, ErrRuntimeControlUnavailable)
-	_, err = control.CloseRtpIngressIfMatchV2(nil, target)
+	_, err = control.CloseRtpIngressIfMatchV2(nil, target) //nolint:staticcheck // nil context must fail closed.
 	require.ErrorIs(t, err, ErrRuntimeControlUnavailable)
 	bad := target
 	bad.BootNonce = "bad"

@@ -18,14 +18,17 @@ const resolvedSpec = computed(() => {
       return value.replace(/var\((--[\w-]+)\)/g, (original, name: string) => styles.getPropertyValue(name).trim() || original);
     }
     if (Array.isArray(value)) return value.map(resolve);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
+    if (value && typeof value === "object")
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
     return value;
   }
   return resolve(props.spec) as MediaChartSpec;
 });
 
 onMounted(() => {
-  themeObserver = new MutationObserver(() => { themeRevision.value += 1; });
+  themeObserver = new MutationObserver(() => {
+    themeRevision.value += 1;
+  });
   const options = { attributes: true, attributeFilter: ["class", "style", "arco-theme", "data-theme"] };
   themeObserver.observe(document.body, options);
   themeObserver.observe(document.documentElement, options);
@@ -40,8 +43,32 @@ onBeforeUnmount(() => themeObserver?.disconnect());
 </template>
 
 <style scoped>
-.dashboard-chart{position:relative;width:100%;height:100%;min-width:0;min-height:0}
-.dashboard-chart :deep(.media-vchart){position:absolute;inset:0;box-sizing:border-box;width:100%;height:100%;min-height:0;padding:0;background:transparent;border:0;border-radius:0;box-shadow:none}
-.dashboard-chart :deep(.media-vchart__header){display:none}
-.dashboard-chart :deep(.media-vchart__canvas){width:100%;height:100%;min-height:0}
+.dashboard-chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+.dashboard-chart :deep(.media-vchart) {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.dashboard-chart :deep(.media-vchart__header) {
+  display: none;
+}
+.dashboard-chart :deep(.media-vchart__canvas) {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
 </style>

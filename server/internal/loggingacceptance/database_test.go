@@ -313,7 +313,7 @@ func TestLoggingAcceptanceDatabaseIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	probeTable := "t16_tcp_probe_" + acceptanceRandomHex(t, 4)
 	if _, err := conn.ExecContext(ctx, "CREATE TEMPORARY TABLE "+quoteMySQLIdentifier(probeTable)+" (value VARCHAR(32) NOT NULL)"); err != nil {
 		t.Fatalf("TCP 写入准备失败: %v", err)
@@ -444,7 +444,7 @@ func freeLoopbackPort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -490,11 +490,12 @@ func maskSQL(input string) string {
 			switch c {
 			case '\'', '"', '`':
 				masked[i] = ' '
-				if c == '\'' {
+				switch c {
+				case '\'':
 					state = singleQuote
-				} else if c == '"' {
+				case '"':
 					state = doubleQuote
-				} else {
+				default:
 					state = backtick
 				}
 			case '#':
@@ -529,9 +530,10 @@ func maskSQL(input string) string {
 			}
 		case singleQuote, doubleQuote, backtick:
 			quote := byte('`')
-			if state == singleQuote {
+			switch state {
+			case singleQuote:
 				quote = '\''
-			} else if state == doubleQuote {
+			case doubleQuote:
 				quote = '"'
 			}
 			if c == '\\' && state != backtick && i+1 < len(input) {

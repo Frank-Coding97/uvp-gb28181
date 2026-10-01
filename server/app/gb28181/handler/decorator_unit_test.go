@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/emiago/sipgo/sip"
+	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
@@ -31,7 +32,7 @@ func TestTxKindFromCmd(t *testing.T) {
 // T1.4-U6 + T1.5-U?: sipPairKey 缺 Call-ID 不 panic,返回空
 func TestSipPairKey_MissingHeaders(t *testing.T) {
 	uri := sip.Uri{}
-	sip.ParseUri("sip:test@127.0.0.1", &uri)
+	require.NoError(t, sip.ParseUri("sip:test@127.0.0.1", &uri))
 	req := sip.NewRequest(sip.MESSAGE, uri)
 	// 不附 CallID/CSeq 头,pairKey 应该返回 sipgo 自动生成的(非空)或空字符串
 	callID, cseq := sipPairKey(req)
@@ -42,7 +43,7 @@ func TestSipPairKey_MissingHeaders(t *testing.T) {
 // T1.4-U?: sipPairKey 完整请求返回非空
 func TestSipPairKey_FullRequest(t *testing.T) {
 	uri := sip.Uri{}
-	sip.ParseUri("sip:test@127.0.0.1", &uri)
+	require.NoError(t, sip.ParseUri("sip:test@127.0.0.1", &uri))
 	req := sip.NewRequest(sip.REGISTER, uri)
 	// 模拟 SIP transport 已经填好的头(入向请求是设备发的,必有 Call-ID/CSeq)
 	cid := sip.CallIDHeader("test-call-id-1234")

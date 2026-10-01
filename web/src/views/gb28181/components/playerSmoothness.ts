@@ -29,19 +29,19 @@
 export type SmoothnessState = "pending" | "smooth" | "fair" | "laggy" | "stalled";
 
 export interface SmoothnessSnapshot {
-    state: SmoothnessState;
-    /** 徽标上的短文案,如"流畅"。 */
-    label: string;
-    /** 悬浮提示文案,含归因与实测帧率。 */
-    detail: string;
-    /** 播放器档位 0-3(3 最好),未完成判定时为 null。 */
-    performance: number | null;
-    /** 播放器卡顿结论,null 表示本拍没有结论。 */
-    videoSmooth: boolean | null;
-    /** 本秒渲染帧数。 */
-    fps: number;
-    /** 播放器原因码原文,便于排查。 */
-    reason: string;
+  state: SmoothnessState;
+  /** 徽标上的短文案,如"流畅"。 */
+  label: string;
+  /** 悬浮提示文案,含归因与实测帧率。 */
+  detail: string;
+  /** 播放器档位 0-3(3 最好),未完成判定时为 null。 */
+  performance: number | null;
+  /** 播放器卡顿结论,null 表示本拍没有结论。 */
+  videoSmooth: boolean | null;
+  /** 本秒渲染帧数。 */
+  fps: number;
+  /** 播放器原因码原文,便于排查。 */
+  reason: string;
 }
 
 const BADGE_CLASS = "uvp-smooth-badge";
@@ -65,43 +65,43 @@ const POLL_FALLBACK_MS = 2500;
 const INGEST_DEDUPE_MS = 600;
 
 const STATE_LABEL: Record<SmoothnessState, string> = {
-    pending: "检测中",
-    smooth: "流畅",
-    fair: "一般",
-    laggy: "卡顿",
-    stalled: "严重"
+  pending: "检测中",
+  smooth: "流畅",
+  fair: "一般",
+  laggy: "卡顿",
+  stalled: "严重"
 };
 
 const STATE_BASE_DETAIL: Record<SmoothnessState, string> = {
-    pending: "正在采集播放统计",
-    smooth: "帧率与标称值相符",
-    fair: "帧率略低于标称值",
-    laggy: "帧率明显低于标称值",
-    stalled: "本秒几乎无可渲染画面"
+  pending: "正在采集播放统计",
+  smooth: "帧率与标称值相符",
+  fair: "帧率略低于标称值",
+  laggy: "帧率明显低于标称值",
+  stalled: "本秒几乎无可渲染画面"
 };
 
 /** 播放器原因码 -> 中文归因。 */
 const REASON_DETAIL: Record<string, string> = {
-    vbpsIsZero: "未收到视频数据",
-    isDroppingIsTrue: "播放器正在丢帧",
-    fpsIsLow: "帧率低于近期均值",
-    videoCurrentTimeDiffIsNotNormal: "播放进度异常"
+  vbpsIsZero: "未收到视频数据",
+  isDroppingIsTrue: "播放器正在丢帧",
+  fpsIsLow: "帧率低于近期均值",
+  videoCurrentTimeDiffIsNotNormal: "播放进度异常"
 };
 
 const STATE_RANK: Record<Exclude<SmoothnessState, "pending">, number> = {
-    stalled: 0,
-    laggy: 1,
-    fair: 2,
-    smooth: 3
+  stalled: 0,
+  laggy: 1,
+  fair: 2,
+  smooth: 3
 };
 
 function resolveState(performance: number | null, videoSmooth: boolean | null, graceTicks: number): SmoothnessState {
-    if (performance === null) return "pending";
-    if (videoSmooth === false) return "laggy";
-    if (performance <= 0) return graceTicks > 0 ? "pending" : "stalled";
-    if (performance === 1) return "laggy";
-    if (performance === 2) return "fair";
-    return "smooth";
+  if (performance === null) return "pending";
+  if (videoSmooth === false) return "laggy";
+  if (performance <= 0) return graceTicks > 0 ? "pending" : "stalled";
+  if (performance === 1) return "laggy";
+  if (performance === 2) return "fair";
+  return "smooth";
 }
 
 /**
@@ -109,311 +109,311 @@ function resolveState(performance: number | null, videoSmooth: boolean | null, g
  * 生命周期由宿主组件控制:`bind()` 绑定播放器,`dispose()` 解绑并移除徽标。
  */
 export class PlayerSmoothness {
-    private readonly container: HTMLElement;
-    /** 顶层 EasyPlayerPro 实例(宿主传进来的那个)。 */
-    private host: any = null;
-    /** 内部实例:统计事件的真正来源。 */
-    private core: any = null;
-    private onChange: ((snapshot: SmoothnessSnapshot) => void) | null = null;
-    private badge: HTMLElement | null = null;
-    private observer: ResizeObserver | null = null;
-    private mountTimer: ReturnType<typeof setTimeout> | null = null;
-    private mountRetries = 0;
-    private pollTimer: ReturnType<typeof setInterval> | null = null;
-    /** 最近一次收到 `stats` 事件的时间,用于判断是否要启用轮询兜底。 */
-    private lastStatsAt = 0;
-    /** 最近一次消费统计的时间,用于同一拍去重。 */
-    private lastIngestAt = 0;
+  private readonly container: HTMLElement;
+  /** 顶层 EasyPlayerPro 实例(宿主传进来的那个)。 */
+  private host: any = null;
+  /** 内部实例:统计事件的真正来源。 */
+  private core: any = null;
+  private onChange: ((snapshot: SmoothnessSnapshot) => void) | null = null;
+  private badge: HTMLElement | null = null;
+  private observer: ResizeObserver | null = null;
+  private mountTimer: ReturnType<typeof setTimeout> | null = null;
+  private mountRetries = 0;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  /** 最近一次收到 `stats` 事件的时间,用于判断是否要启用轮询兜底。 */
+  private lastStatsAt = 0;
+  /** 最近一次消费统计的时间,用于同一拍去重。 */
+  private lastIngestAt = 0;
 
-    private state: SmoothnessState = "pending";
-    private performance: number | null = null;
-    private videoSmooth: boolean | null = null;
-    private fps = 0;
-    private reason = "";
-    private upgradeTicks = 0;
-    private graceTicks = STARTUP_GRACE_TICKS;
-    private unknownTicks = 0;
-    private compact = false;
+  private state: SmoothnessState = "pending";
+  private performance: number | null = null;
+  private videoSmooth: boolean | null = null;
+  private fps = 0;
+  private reason = "";
+  private upgradeTicks = 0;
+  private graceTicks = STARTUP_GRACE_TICKS;
+  private unknownTicks = 0;
+  private compact = false;
 
-    constructor(container: HTMLElement) {
-        this.container = container;
-    }
+  constructor(container: HTMLElement) {
+    this.container = container;
+  }
 
-    /** 绑定播放器实例:订阅统计事件并把徽标挂进原生控制栏。 */
-    bind(player: any, onChange?: (snapshot: SmoothnessSnapshot) => void): void {
-        this.dispose();
-        this.host = player ?? null;
-        this.onChange = onChange ?? null;
-        this.resetState();
-        this.buildBadge();
-        this.startMounting();
-        this.observeWidth();
-        this.attachCore();
-        this.startPolling();
-    }
+  /** 绑定播放器实例:订阅统计事件并把徽标挂进原生控制栏。 */
+  bind(player: any, onChange?: (snapshot: SmoothnessSnapshot) => void): void {
+    this.dispose();
+    this.host = player ?? null;
+    this.onChange = onChange ?? null;
+    this.resetState();
+    this.buildBadge();
+    this.startMounting();
+    this.observeWidth();
+    this.attachCore();
+    this.startPolling();
+  }
 
-    /** 当前状态快照,供父组件读取(卡片展示等)。 */
-    snapshot(): SmoothnessSnapshot {
-        return {
-            state: this.state,
-            label: STATE_LABEL[this.state],
-            detail: this.buildDetail(),
-            performance: this.performance,
-            videoSmooth: this.videoSmooth,
-            fps: this.fps,
-            reason: this.reason
-        };
-    }
-
-    /** 解绑事件、断掉观察器并移除徽标。 */
-    dispose(): void {
-        this.detachCore();
-        this.stopPolling();
-        this.host = null;
-        this.onChange = null;
-        this.stopMounting();
-        this.observer?.disconnect();
-        this.observer = null;
-        this.badge?.remove();
-        this.badge = null;
-        this.resetState();
-    }
-
-    private resetState(): void {
-        this.state = "pending";
-        this.performance = null;
-        this.videoSmooth = null;
-        this.fps = 0;
-        this.reason = "";
-        this.upgradeTicks = 0;
-        this.graceTicks = STARTUP_GRACE_TICKS;
-        this.unknownTicks = 0;
-        this.lastStatsAt = 0;
-        this.lastIngestAt = 0;
-    }
-
-    /**
-     * 解析统计事件的真正来源。
-     *
-     * 顶层 EasyPlayerPro 的 `_bindEvents()` 只转发 `pt` 白名单里的事件,
-     * `stats` / `videoSmooth` 不在名单内,所以必须拿到内部实例;
-     * 但仍保留顶层作为回退,以防后续版本改成顶层直接转发。
-     */
-    private resolveCore(): any {
-        const host = this.host;
-        if (!host) return null;
-        const candidates = [host.player, host.easyplayer, host._player, host];
-        for (const candidate of candidates) {
-            if (candidate && typeof candidate.on === "function") return candidate;
-        }
-        return null;
-    }
-
-    /** 订阅内部实例的统计事件;内部实例被重建时会重新订阅。 */
-    private attachCore(): void {
-        const core = this.resolveCore();
-        if (!core || core === this.core) return;
-        this.detachCore();
-        this.core = core;
-        core.on("stats", this.handleStats);
-        core.on("videoSmooth", this.handleVideoSmooth);
-        // 订阅到即视为刚刚有数据,避免起播瞬间轮询抢跑
-        this.lastStatsAt = Date.now();
-    }
-
-    private detachCore(): void {
-        const core = this.core;
-        if (!core) return;
-        if (typeof core.off === "function") {
-            try {
-                core.off("stats", this.handleStats);
-                core.off("videoSmooth", this.handleVideoSmooth);
-            } catch (e) {
-                console.warn("PlayerSmoothness unbind error", e);
-            }
-        }
-        this.core = null;
-    }
-
-    /**
-     * 兜底轮询:①内部实例被重建时重新订阅;②事件连续缺失时直接读
-     * `getAllStatsData()`。1 秒一次,开销可忽略。
-     */
-    private startPolling(): void {
-        this.stopPolling();
-        this.pollTimer = setInterval(() => {
-            this.attachCore();
-            if (Date.now() - this.lastStatsAt < POLL_FALLBACK_MS) return;
-            const core = this.core;
-            const data = core && typeof core.getAllStatsData === "function" ? core.getAllStatsData() : null;
-            if (data) this.ingest(data, false);
-        }, POLL_INTERVAL_MS);
-    }
-
-    private stopPolling(): void {
-        if (this.pollTimer !== null) {
-            clearInterval(this.pollTimer);
-            this.pollTimer = null;
-        }
-    }
-
-    private buildBadge(): void {
-        const badge = document.createElement("div");
-        badge.className = `${BADGE_CLASS} is-pending`;
-        const dot = document.createElement("span");
-        dot.className = "uvp-smooth-dot";
-        const text = document.createElement("span");
-        text.className = TEXT_CLASS;
-        text.textContent = STATE_LABEL.pending;
-        badge.append(dot, text);
-        badge.title = this.buildDetail();
-        this.badge = badge;
-    }
-
-    /**
-     * 控制栏 DOM 在播放器构造时创建,但可能因容器尚未挂载而晚到一拍,
-     * 因此按固定间隔重试有限次。
-     */
-    private startMounting(): void {
-        this.stopMounting();
-        this.mountRetries = 0;
-        const tick = () => {
-            if (!this.badge) return;
-            if (this.tryMount() || this.mountRetries >= MOUNT_RETRY_LIMIT) {
-                this.mountTimer = null;
-                return;
-            }
-            this.mountRetries += 1;
-            this.mountTimer = setTimeout(tick, MOUNT_INTERVAL_MS);
-        };
-        this.mountTimer = setTimeout(tick, 0);
-    }
-
-    private stopMounting(): void {
-        if (this.mountTimer !== null) {
-            clearTimeout(this.mountTimer);
-            this.mountTimer = null;
-        }
-    }
-
-    private tryMount(): boolean {
-        if (!this.badge) return false;
-        if (this.badge.isConnected) return true;
-        for (const selector of MOUNT_TARGETS) {
-            const host = this.container.querySelector(selector);
-            if (host) {
-                // 插在右侧区最前面,紧贴原生"速率"读数左侧。
-                host.prepend(this.badge);
-                this.render();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private observeWidth(): void {
-        if (typeof ResizeObserver === "undefined") return;
-        this.observer = new ResizeObserver((entries) => {
-            const width = entries[0]?.contentRect.width ?? 0;
-            const compact = width > 0 && width < COMPACT_WIDTH_PX;
-            if (compact !== this.compact) {
-                this.compact = compact;
-                this.render();
-            }
-        });
-        this.observer.observe(this.container);
-    }
-
-    private readonly handleStats = (stats: Record<string, unknown> = {}): void => {
-        this.lastStatsAt = Date.now();
-        this.ingest(stats, true);
+  /** 当前状态快照,供父组件读取(卡片展示等)。 */
+  snapshot(): SmoothnessSnapshot {
+    return {
+      state: this.state,
+      label: STATE_LABEL[this.state],
+      detail: this.buildDetail(),
+      performance: this.performance,
+      videoSmooth: this.videoSmooth,
+      fps: this.fps,
+      reason: this.reason
     };
+  }
 
-    private readonly handleVideoSmooth = (result: unknown, reason: unknown): void => {
-        if (typeof result === "boolean") this.videoSmooth = result;
-        this.reason = typeof reason === "string" ? reason : "";
+  /** 解绑事件、断掉观察器并移除徽标。 */
+  dispose(): void {
+    this.detachCore();
+    this.stopPolling();
+    this.host = null;
+    this.onChange = null;
+    this.stopMounting();
+    this.observer?.disconnect();
+    this.observer = null;
+    this.badge?.remove();
+    this.badge = null;
+    this.resetState();
+  }
+
+  private resetState(): void {
+    this.state = "pending";
+    this.performance = null;
+    this.videoSmooth = null;
+    this.fps = 0;
+    this.reason = "";
+    this.upgradeTicks = 0;
+    this.graceTicks = STARTUP_GRACE_TICKS;
+    this.unknownTicks = 0;
+    this.lastStatsAt = 0;
+    this.lastIngestAt = 0;
+  }
+
+  /**
+   * 解析统计事件的真正来源。
+   *
+   * 顶层 EasyPlayerPro 的 `_bindEvents()` 只转发 `pt` 白名单里的事件,
+   * `stats` / `videoSmooth` 不在名单内,所以必须拿到内部实例;
+   * 但仍保留顶层作为回退,以防后续版本改成顶层直接转发。
+   */
+  private resolveCore(): any {
+    const host = this.host;
+    if (!host) return null;
+    const candidates = [host.player, host.easyplayer, host._player, host];
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate.on === "function") return candidate;
+    }
+    return null;
+  }
+
+  /** 订阅内部实例的统计事件;内部实例被重建时会重新订阅。 */
+  private attachCore(): void {
+    const core = this.resolveCore();
+    if (!core || core === this.core) return;
+    this.detachCore();
+    this.core = core;
+    core.on("stats", this.handleStats);
+    core.on("videoSmooth", this.handleVideoSmooth);
+    // 订阅到即视为刚刚有数据,避免起播瞬间轮询抢跑
+    this.lastStatsAt = Date.now();
+  }
+
+  private detachCore(): void {
+    const core = this.core;
+    if (!core) return;
+    if (typeof core.off === "function") {
+      try {
+        core.off("stats", this.handleStats);
+        core.off("videoSmooth", this.handleVideoSmooth);
+      } catch (e) {
+        console.warn("PlayerSmoothness unbind error", e);
+      }
+    }
+    this.core = null;
+  }
+
+  /**
+   * 兜底轮询:①内部实例被重建时重新订阅;②事件连续缺失时直接读
+   * `getAllStatsData()`。1 秒一次,开销可忽略。
+   */
+  private startPolling(): void {
+    this.stopPolling();
+    this.pollTimer = setInterval(() => {
+      this.attachCore();
+      if (Date.now() - this.lastStatsAt < POLL_FALLBACK_MS) return;
+      const core = this.core;
+      const data = core && typeof core.getAllStatsData === "function" ? core.getAllStatsData() : null;
+      if (data) this.ingest(data, false);
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private buildBadge(): void {
+    const badge = document.createElement("div");
+    badge.className = `${BADGE_CLASS} is-pending`;
+    const dot = document.createElement("span");
+    dot.className = "uvp-smooth-dot";
+    const text = document.createElement("span");
+    text.className = TEXT_CLASS;
+    text.textContent = STATE_LABEL.pending;
+    badge.append(dot, text);
+    badge.title = this.buildDetail();
+    this.badge = badge;
+  }
+
+  /**
+   * 控制栏 DOM 在播放器构造时创建,但可能因容器尚未挂载而晚到一拍,
+   * 因此按固定间隔重试有限次。
+   */
+  private startMounting(): void {
+    this.stopMounting();
+    this.mountRetries = 0;
+    const tick = () => {
+      if (!this.badge) return;
+      if (this.tryMount() || this.mountRetries >= MOUNT_RETRY_LIMIT) {
+        this.mountTimer = null;
+        return;
+      }
+      this.mountRetries += 1;
+      this.mountTimer = setTimeout(tick, MOUNT_INTERVAL_MS);
     };
+    this.mountTimer = setTimeout(tick, 0);
+  }
 
-    /**
-     * 消费一拍统计。
-     *
-     * `fromEvent` 为 true 时数据取自 `stats` 事件(帧数尚未清零,是真值);
-     * 为 false 时取自兜底轮询的 `getAllStatsData()` —— 那份数据里 `fps`
-     * 已被派发逻辑清零,只能沿用上一拍的帧数。
-     */
-    private ingest(stats: Record<string, unknown>, fromEvent: boolean): void {
-        const now = Date.now();
-        // `stats` 事件与兜底轮询可能落在同一秒,去重后只推进一次
-        if (now - this.lastIngestAt < INGEST_DEDUPE_MS) return;
-        this.lastIngestAt = now;
+  private stopMounting(): void {
+    if (this.mountTimer !== null) {
+      clearTimeout(this.mountTimer);
+      this.mountTimer = null;
+    }
+  }
 
-        const playing = this.isPlaying();
-        this.performance = playing && typeof stats.performance === "number" ? stats.performance : null;
-        if (typeof stats.fps === "number" && (fromEvent || stats.fps > 0)) this.fps = stats.fps;
-        if (typeof stats.videoSmooth === "boolean") this.videoSmooth = stats.videoSmooth;
-
-        this.unknownTicks = this.performance === null ? this.unknownTicks + 1 : 0;
-        this.graceTicks = Math.max(0, this.graceTicks - 1);
-
-        this.applyState(resolveState(this.performance, this.videoSmooth, this.graceTicks));
+  private tryMount(): boolean {
+    if (!this.badge) return false;
+    if (this.badge.isConnected) return true;
+    for (const selector of MOUNT_TARGETS) {
+      const host = this.container.querySelector(selector);
+      if (host) {
+        // 插在右侧区最前面,紧贴原生"速率"读数左侧。
+        host.prepend(this.badge);
         this.render();
-        this.onChange?.(this.snapshot());
+        return true;
+      }
     }
+    return false;
+  }
 
-    /**
-     * 播放器是否处于播放态。
-     *
-     * 暂停/停止后 `_allStatsData` 里的 `performance` / `videoSmooth` 仍留着
-     * 上一拍的残留值,只有 `playing` 能区分"本拍刚算出来"和"上次的旧值"。
-     */
-    private isPlaying(): boolean {
-        const core = this.core;
-        return !!core && core.playing === true;
-    }
+  private observeWidth(): void {
+    if (typeof ResizeObserver === "undefined") return;
+    this.observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      const compact = width > 0 && width < COMPACT_WIDTH_PX;
+      if (compact !== this.compact) {
+        this.compact = compact;
+        this.render();
+      }
+    });
+    this.observer.observe(this.container);
+  }
 
-    /** 变差立即生效,变好需连续确认;不参与滞回的 pending 直接切换。 */
-    private applyState(next: SmoothnessState): void {
-        if (next === this.state) {
-            this.upgradeTicks = 0;
-            return;
-        }
-        if (this.state === "pending" || next === "pending") {
-            this.state = next;
-            this.upgradeTicks = 0;
-            return;
-        }
-        if (STATE_RANK[next] < STATE_RANK[this.state as Exclude<SmoothnessState, "pending">]) {
-            this.state = next;
-            this.upgradeTicks = 0;
-            return;
-        }
-        this.upgradeTicks += 1;
-        if (this.upgradeTicks >= UPGRADE_HOLD_TICKS) {
-            this.state = next;
-            this.upgradeTicks = 0;
-        }
-    }
+  private readonly handleStats = (stats: Record<string, unknown> = {}): void => {
+    this.lastStatsAt = Date.now();
+    this.ingest(stats, true);
+  };
 
-    private buildDetail(): string {
-        const parts = [STATE_BASE_DETAIL[this.state]];
-        const reasonText = this.reason ? REASON_DETAIL[this.reason] ?? this.reason : "";
-        if (reasonText) parts.push(reasonText);
-        parts.push(`${this.fps.toFixed(1)} fps`);
-        if (typeof this.performance === "number") parts.push(`播放器档位 ${this.performance + 1}/4`);
-        return `${STATE_LABEL[this.state]} · ${parts.join(" · ")}`;
-    }
+  private readonly handleVideoSmooth = (result: unknown, reason: unknown): void => {
+    if (typeof result === "boolean") this.videoSmooth = result;
+    this.reason = typeof reason === "string" ? reason : "";
+  };
 
-    private render(): void {
-        const badge = this.badge;
-        if (!badge) return;
-        const hidden = this.unknownTicks >= UNKNOWN_HIDE_TICKS;
-        const classes = [BADGE_CLASS, `is-${this.state}`];
-        if (this.compact) classes.push("is-compact");
-        if (hidden) classes.push("is-hidden");
-        badge.className = classes.join(" ");
-        badge.title = this.buildDetail();
-        const text = badge.querySelector(`.${TEXT_CLASS}`);
-        const label = STATE_LABEL[this.state];
-        if (text && text.textContent !== label) text.textContent = label;
+  /**
+   * 消费一拍统计。
+   *
+   * `fromEvent` 为 true 时数据取自 `stats` 事件(帧数尚未清零,是真值);
+   * 为 false 时取自兜底轮询的 `getAllStatsData()` —— 那份数据里 `fps`
+   * 已被派发逻辑清零,只能沿用上一拍的帧数。
+   */
+  private ingest(stats: Record<string, unknown>, fromEvent: boolean): void {
+    const now = Date.now();
+    // `stats` 事件与兜底轮询可能落在同一秒,去重后只推进一次
+    if (now - this.lastIngestAt < INGEST_DEDUPE_MS) return;
+    this.lastIngestAt = now;
+
+    const playing = this.isPlaying();
+    this.performance = playing && typeof stats.performance === "number" ? stats.performance : null;
+    if (typeof stats.fps === "number" && (fromEvent || stats.fps > 0)) this.fps = stats.fps;
+    if (typeof stats.videoSmooth === "boolean") this.videoSmooth = stats.videoSmooth;
+
+    this.unknownTicks = this.performance === null ? this.unknownTicks + 1 : 0;
+    this.graceTicks = Math.max(0, this.graceTicks - 1);
+
+    this.applyState(resolveState(this.performance, this.videoSmooth, this.graceTicks));
+    this.render();
+    this.onChange?.(this.snapshot());
+  }
+
+  /**
+   * 播放器是否处于播放态。
+   *
+   * 暂停/停止后 `_allStatsData` 里的 `performance` / `videoSmooth` 仍留着
+   * 上一拍的残留值,只有 `playing` 能区分"本拍刚算出来"和"上次的旧值"。
+   */
+  private isPlaying(): boolean {
+    const core = this.core;
+    return !!core && core.playing === true;
+  }
+
+  /** 变差立即生效,变好需连续确认;不参与滞回的 pending 直接切换。 */
+  private applyState(next: SmoothnessState): void {
+    if (next === this.state) {
+      this.upgradeTicks = 0;
+      return;
     }
+    if (this.state === "pending" || next === "pending") {
+      this.state = next;
+      this.upgradeTicks = 0;
+      return;
+    }
+    if (STATE_RANK[next] < STATE_RANK[this.state as Exclude<SmoothnessState, "pending">]) {
+      this.state = next;
+      this.upgradeTicks = 0;
+      return;
+    }
+    this.upgradeTicks += 1;
+    if (this.upgradeTicks >= UPGRADE_HOLD_TICKS) {
+      this.state = next;
+      this.upgradeTicks = 0;
+    }
+  }
+
+  private buildDetail(): string {
+    const parts = [STATE_BASE_DETAIL[this.state]];
+    const reasonText = this.reason ? (REASON_DETAIL[this.reason] ?? this.reason) : "";
+    if (reasonText) parts.push(reasonText);
+    parts.push(`${this.fps.toFixed(1)} fps`);
+    if (typeof this.performance === "number") parts.push(`播放器档位 ${this.performance + 1}/4`);
+    return `${STATE_LABEL[this.state]} · ${parts.join(" · ")}`;
+  }
+
+  private render(): void {
+    const badge = this.badge;
+    if (!badge) return;
+    const hidden = this.unknownTicks >= UNKNOWN_HIDE_TICKS;
+    const classes = [BADGE_CLASS, `is-${this.state}`];
+    if (this.compact) classes.push("is-compact");
+    if (hidden) classes.push("is-hidden");
+    badge.className = classes.join(" ");
+    badge.title = this.buildDetail();
+    const text = badge.querySelector(`.${TEXT_CLASS}`);
+    const label = STATE_LABEL[this.state];
+    if (text && text.textContent !== label) text.textContent = label;
+  }
 }

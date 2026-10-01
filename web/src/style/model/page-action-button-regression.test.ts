@@ -39,13 +39,17 @@ const createActionSources = [
 describe("page action button regression", () => {
   it("uses shared sizing for page-level refresh actions", () => {
     for (const path of pageActionSources) {
-      expect(readSource(path), path).toMatch(/class="[^"]*uvp-page-action-btn[^"]*uvp-refresh-btn|class="[^"]*uvp-refresh-btn[^"]*uvp-page-action-btn/);
+      expect(readSource(path), path).toMatch(
+        /class="[^"]*uvp-page-action-btn[^"]*uvp-refresh-btn|class="[^"]*uvp-refresh-btn[^"]*uvp-page-action-btn/
+      );
     }
   });
 
   it("uses the shared create semantic for page-level create actions", () => {
     for (const path of createActionSources) {
-      expect(readSource(path), path).toMatch(/class="[^"]*uvp-page-action-btn[^"]*uvp-create-btn|class="[^"]*uvp-create-btn[^"]*uvp-page-action-btn/);
+      expect(readSource(path), path).toMatch(
+        /class="[^"]*uvp-page-action-btn[^"]*uvp-create-btn|class="[^"]*uvp-create-btn[^"]*uvp-page-action-btn/
+      );
     }
   });
 

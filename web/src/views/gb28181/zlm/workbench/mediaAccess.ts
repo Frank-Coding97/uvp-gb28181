@@ -41,9 +41,9 @@ export function resolveMediaWorkspaceAccess(
     }
   }
 
-  const workspacePaths = MEDIA_WORKSPACES
-    .map(workspace => workspace.path)
-    .filter(path => (grantedViews.get(path)?.size ?? 0) > 0);
+  const workspacePaths = MEDIA_WORKSPACES.map(workspace => workspace.path).filter(
+    path => (grantedViews.get(path)?.size ?? 0) > 0
+  );
   const viewsByWorkspace: Record<string, string[]> = {};
   for (const [workspace, views] of grantedViews) {
     viewsByWorkspace[workspace] = allViewsByWorkspace[workspace].filter(view => views.has(view));

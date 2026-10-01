@@ -953,7 +953,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 			if playAuthorization != nil {
 				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}
-			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
+			playSvc = play.NewWithScheduler(cfg, nil, nil, nil, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
@@ -1093,28 +1093,6 @@ func stopSIPDependencies(ctx context.Context) error {
 	return err
 }
 
-func stopPlaybackRuntime(ctx context.Context) error {
-	var stopErr error
-	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
-	if playbackService != nil {
-		stopErr = playbackService.Close(ctx)
-		if stopErr != nil {
-			return stopErr
-		}
-		playbackService = nil
-	}
-	playbackMetrics = nil
-	playbackRegistry = nil
-	gbroutes.SetPlaybackMediaSink(nil)
-	if sipServer != nil {
-		sipServer.SetPlaybackEndSink(nil)
-		if u := sipServer.UAC(); u != nil {
-			u.SetPlaybackEndHook(nil)
-		}
-	}
-	return stopErr
-}
-
 func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier, intents *playauth.DeviceOperationIntentStore) {
 	if inviter == nil || deviceOperations == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
@@ -1124,8 +1102,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		app.ZapLog.Info("GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)")
 		return
 	}
-	var opener gbplayback.RTPOpener
-	opener = gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
+	opener := gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
 	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
 		IdleTimeout: cfg.Playback.IdleTimeout(),
 		MaxSession:  cfg.Playback.MaxSession(),
@@ -1153,18 +1130,6 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 	service.StartSweeper(context.Background(), time.Second)
 	SetPlaybackService(service, recordQueryService.Snapshots())
 	app.ZapLog.Info("GB28181 设备录像回放 service 已装配(ZLM scheduler + Playback UAC)")
-}
-
-func stopRecordQueryRuntime() {
-	if recordQueryService != nil {
-		recordQueryService.Close()
-	}
-	gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
-	if sipServer != nil {
-		sipServer.SetRecordInfoSink(nil)
-	}
-	recordQueryService = nil
-	recordQueryMetrics = nil
 }
 
 func stopPTZRuntime() error {
@@ -1198,24 +1163,6 @@ func stopPTZRuntime() error {
 	ptzScheduler = nil
 	ptzService = nil
 	return nil
-}
-
-func stopFirmwareUpgradeRuntime() {
-	oldService := firmwareUpgradeService
-	// Detach inbound routing and the HTTP facade first. Once detached, Retire
-	// can safely drain the old generation without admitting new work.
-	if sipServer != nil {
-		if setter, ok := sipServer.(interface {
-			SetUpgradeProcessor(gbhandler.UpgradeMessageProcessor)
-		}); ok {
-			setter.SetUpgradeProcessor(nil)
-		}
-	}
-	gbroutes.SetDeviceMgmtFirmwareUpgradeService(nil)
-	if oldService != nil {
-		oldService.Retire()
-	}
-	firmwareUpgradeService = nil
 }
 
 func setupRecordingRuntime(cfg gbconfig.Config) {
@@ -1320,36 +1267,6 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.String("event", "gb28181.lifecycle.recording_catalog_assembled"), zap.Duration("interval", catalogInterval))
 }
 
-func stopRecordingRuntime() error {
-	var stopErr error
-	device.SetStatusObserver(nil)
-	gbroutes.SetRecordingPlanStreamObserver(nil)
-	executors.SetRecordingPlanRuntime(nil)
-	gbroutes.SetRecordingPlanSourceLeaseChecker(nil)
-	recordingPlanEngine = nil
-	recordingPlanLeases = nil
-	if recordingCatalogService != nil {
-		recordingCatalogService.CloseDownloads()
-		recordingCatalogService = nil
-	}
-	if recordingCatalogScheduler != nil {
-		if err := recordingCatalogScheduler.Stop(); err != nil {
-			stopErr = err
-			app.Log(context.Background()).Named("recording").Warn("Recording catalog shutdown incomplete", zap.String("event", "recording.catalog_shutdown_incomplete"), logging.Error(err))
-		}
-		recordingCatalogScheduler = nil
-	}
-	if recordingReconciler != nil {
-		recordingReconciler.Stop()
-		recordingReconciler = nil
-	}
-	recordingSvc = nil
-	recordingRepo = nil
-	gbroutes.SetCloudRecordingCatalogService(nil)
-	gbroutes.SetRecordingService(nil, nil, nil)
-	return stopErr
-}
-
 type broadcastSIPAdapter struct{ service *gbtalk.Service }
 
 func (a broadcastSIPAdapter) PrepareBroadcastInvite(ctx context.Context, request gbhandler.BroadcastInviteRequest) (gbhandler.BroadcastInviteResponse, error) {
@@ -1378,11 +1295,15 @@ func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
 	var broadcastRuntime broadcastRuntimeServer
 	if server != nil {
 		inviter = server.UAC()
-		broadcastRuntime, _ = server.(broadcastRuntimeServer)
+		if runtime, ok := server.(broadcastRuntimeServer); ok {
+			broadcastRuntime = runtime
+		}
 	}
 	if talkSvc != nil || talkCleanupWorker != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		stopTalkRuntime(ctx)
+		if err := stopTalkRuntime(ctx); err != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("重装 TALK runtime 时旧实例收尾失败", zap.String("event", "gb28181.talk.runtime_stop_failed"), logging.Error(err))
+		}
 		cancel()
 	}
 	if inviter == nil || app.DB() == nil || zlmRegistry == nil || zlmScheduler == nil || zlmLocationMap == nil || zlmServerConfigCache == nil {

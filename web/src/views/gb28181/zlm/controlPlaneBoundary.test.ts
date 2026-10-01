@@ -13,11 +13,9 @@ function sourceFiles(root: string): string[] {
 
 const zlmRoot = resolve(process.cwd(), "src/views/gb28181/zlm");
 const cloudRecordingRoot = resolve(process.cwd(), "src/views/gb28181/cloud-recordings");
-const apiFiles = [
-  "src/api/gb28181-zlm.ts",
-  "src/api/gb28181-zlm-runtime.ts",
-  "src/api/gb28181-zlm-ingress.ts"
-].map(file => resolve(process.cwd(), file));
+const apiFiles = ["src/api/gb28181-zlm.ts", "src/api/gb28181-zlm-runtime.ts", "src/api/gb28181-zlm-ingress.ts"].map(file =>
+  resolve(process.cwd(), file)
+);
 
 describe("ZLM browser control-plane boundary", () => {
   it("never connects to the raw ZLM management API or writes diagnostics to console", () => {

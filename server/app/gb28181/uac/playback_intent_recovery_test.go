@@ -87,7 +87,9 @@ func TestPlaybackRecoveryReservationSingleWinner(t *testing.T) {
 	close(winners)
 	require.Len(t, winners, 1)
 	r := <-winners
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	_, err := f.u.beginPlaybackIntentOperation(ctx, f.store, f.barrier, f.id, 5, strings.Repeat("c", 32), validPlaybackInvite())
 	require.Error(t, err)
 	loaded, err := f.store.LoadSIPInviteSteps(ctx, f.id)
@@ -109,7 +111,9 @@ func TestPlaybackRecoveryActualUDPAndRepeatCannotResend(t *testing.T) {
 	defer cancel()
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	ack, _ := readCleanupRequest(t, f.peer)
@@ -177,7 +181,9 @@ func TestPlaybackRecoveryUnknownCommitRetainsUntilFacts(t *testing.T) {
 				faultDB := authoritytest.CommitFaultDB(t, f.db, stage, committed)
 				r, err := f.u.beginRecoveredPlaybackCleanup(ctx, newAuthorizedIntentTestStore(t, faultDB), f.barrier, f.id, stepID, "recovery-remote")
 				require.NoError(t, err)
-				defer r.CloseLocal(ctx)
+				defer func() {
+					_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+				}()
 				result := make(chan error, 1)
 				go func() { result <- r.Run(ctx) }()
 				if stage >= 3 {
@@ -225,7 +231,11 @@ func TestPlaybackRecoveryReservesBeforeLoad(t *testing.T) {
 	require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register("fixture:recovery-load", func(*gorm.DB) {
 		once.Do(func() { close(entered); <-release })
 	}))
-	defer f.db.Callback().Query().Remove("fixture:recovery-load")
+	defer func() {
+		if err := f.db.Callback().Query().Remove("fixture:recovery-load"); err != nil {
+			t.Errorf("callback cleanup failed: %v", err)
+		}
+	}()
 	defer func() {
 		select {
 		case <-release:
@@ -282,7 +292,7 @@ func TestPlaybackRecoveryActualTCP(t *testing.T) {
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	peer, err := net.Listen("tcp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	in := validPlaybackInvite()
 	in.Destination, in.Transport = peer.Addr().String(), "TCP"
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -300,13 +310,15 @@ func TestPlaybackRecoveryActualTCP(t *testing.T) {
 	barrier := newAuthorizedBarrierTest(t, db)
 	r, err := u.beginRecoveredPlaybackCleanup(ctx, store, barrier, id, i.StepID, "recovery-tcp")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	require.NoError(t, peer.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second)))
 	conn, err := peer.Accept()
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	parser := sip.NewParser().NewSIPStream()
 	defer parser.Close()
 	var pending []sip.Message
@@ -388,7 +400,9 @@ func TestPlaybackRecoveryBranchSuccessPreservesInventoryUnknown(t *testing.T) {
 	require.NoError(t, err)
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
-	defer r.CloseLocal(ctx)
+	defer func() {
+		_ = r.CloseLocal(ctx) // result asserted by the test; cleanup may intentionally report unknown
+	}()
 	result := make(chan error, 1)
 	go func() { result <- r.Run(ctx) }()
 	readCleanupRequest(t, f.peer)

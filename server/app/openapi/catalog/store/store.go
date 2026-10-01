@@ -865,7 +865,7 @@ func (r *Repository) loadRuntimeState(ctx context.Context, db *gorm.DB) (*openap
 
 func (r *Repository) loadRuntimeStateForPublish(ctx context.Context, db *gorm.DB) (*openapimodels.RuntimeState, error) {
 	query := db.WithContext(ctx)
-	if db.Dialector.Name() == "sqlserver" {
+	if db.Name() == "sqlserver" {
 		query = query.Table((openapimodels.RuntimeState{}).TableName() + " WITH (UPDLOCK, HOLDLOCK)")
 	} else {
 		query = query.Model(&openapimodels.RuntimeState{}).Clauses(clause.Locking{Strength: "UPDATE"})
@@ -883,18 +883,6 @@ func (r *Repository) loadRuntimeStateWithQuery(ctx context.Context, query *gorm.
 		return nil, classifyQueryError((openapimodels.RuntimeState{}).TableName(), result.Error)
 	}
 	return &state, nil
-}
-
-func validateActiveReleasePointer(ctx context.Context, db *gorm.DB, releaseID int64) error {
-	var release openapimodels.Release
-	result := db.WithContext(ctx).Where("id = ?", releaseID).First(&release)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("%w: active release %d does not exist", ErrCatalogDependency, releaseID)
-		}
-		return classifyQueryError((openapimodels.Release{}).TableName(), result.Error)
-	}
-	return nil
 }
 
 func validateRuntimeStateSnapshot(state *openapimodels.RuntimeState, snapshot *ReleaseSnapshot) error {

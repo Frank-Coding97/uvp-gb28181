@@ -19,7 +19,7 @@ import (
 // 0.1 取出后 key 消失
 func TestGetDel_RemovesKey(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	ctx := context.Background()
 
 	require.NoError(t, m.Set(ctx, "k", "v", time.Minute))
@@ -35,7 +35,7 @@ func TestGetDel_RemovesKey(t *testing.T) {
 // 0.2 key 不存在
 func TestGetDel_MissingKey(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 
 	got, err := m.GetDel(context.Background(), "nope")
 	require.ErrorIs(t, err, app.ErrKeyNotFound)
@@ -46,7 +46,7 @@ func TestGetDel_MissingKey(t *testing.T) {
 // 这是整个一次性 token 安全模型的地基 —— 必须带 -race 跑。
 func TestGetDel_ConcurrentExactlyOnce(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	ctx := context.Background()
 
 	const n = 50
@@ -96,7 +96,7 @@ func TestGetDel_ConcurrentExactlyOnce(t *testing.T) {
 // 0.5 过期 key
 func TestGetDel_ExpiredKey(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	ctx := context.Background()
 
 	require.NoError(t, m.Set(ctx, "k", "v", 10*time.Millisecond))
@@ -109,7 +109,7 @@ func TestGetDel_ExpiredKey(t *testing.T) {
 // 0.6 空值 key —— 区分"值为空串"与"键不存在"
 func TestGetDel_EmptyValue(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	ctx := context.Background()
 
 	require.NoError(t, m.Set(ctx, "k", "", time.Minute))
@@ -125,7 +125,7 @@ func TestGetDel_EmptyValue(t *testing.T) {
 // GetDel 不能破坏过期堆:删掉带 TTL 的 key 后,其他 key 的过期清理仍须正常工作。
 func TestGetDel_KeepsExpiryHeapConsistent(t *testing.T) {
 	m := NewMemoryHelper()
-	defer m.Close()
+	defer func() { _ = m.Close() }()
 	ctx := context.Background()
 
 	require.NoError(t, m.Set(ctx, "a", "1", time.Minute))

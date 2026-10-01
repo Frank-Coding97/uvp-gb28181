@@ -67,12 +67,17 @@ const protocolLabels: Record<string, string> = {
 };
 
 export function formatZLMProtocol(value: unknown) {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return "未知协议";
   return protocolLabels[normalized] ?? normalized.toUpperCase();
 }
 
-export function zlmFreshnessPresentation(value: string | number | Date | null | undefined, now = Date.now()): ZLMFreshnessPresentation {
+export function zlmFreshnessPresentation(
+  value: string | number | Date | null | undefined,
+  now = Date.now()
+): ZLMFreshnessPresentation {
   const sampledAt = value instanceof Date ? value.getTime() : typeof value === "number" ? value : Date.parse(value ?? "");
   if (!Number.isFinite(sampledAt)) {
     return { label: "暂无采样", tone: "neutral", description: "尚未收到可用的运行态采样" };

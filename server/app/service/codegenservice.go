@@ -65,7 +65,11 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var dbName string
@@ -79,7 +83,11 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var dbName string
@@ -93,7 +101,11 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var dbName string
@@ -154,7 +166,11 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var table models.TableInfo
@@ -178,7 +194,11 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 			if err != nil {
 				return nil, err
 			}
-			defer rows.Close()
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+				}
+			}()
 
 			for rows.Next() {
 				var table models.TableInfo
@@ -198,7 +218,11 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 			if err != nil {
 				return nil, err
 			}
-			defer rows.Close()
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+				}
+			}()
 
 			for rows.Next() {
 				var table models.TableInfo
@@ -222,7 +246,11 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var table models.TableInfo
@@ -295,7 +323,11 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var column models.TableColumn
@@ -350,7 +382,11 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 			if err != nil {
 				return nil, err
 			}
-			defer rows.Close()
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+				}
+			}()
 
 			for rows.Next() {
 				var column models.TableColumn
@@ -401,7 +437,11 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 			if err != nil {
 				return nil, err
 			}
-			defer rows.Close()
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+				}
+			}()
 
 			for rows.Next() {
 				var column models.TableColumn
@@ -451,7 +491,11 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				app.Log(cgs.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "codegen.rows_close_failed"), logging.Error(closeErr))
+			}
+		}()
 
 		for rows.Next() {
 			var column models.TableColumn
@@ -926,9 +970,7 @@ func (cgs *CodeGenService) PreviewCode(ctx context.Context, genID uint) (map[str
 	// 获取前端代码生成目录
 	//frontendDir := cgs.getFrontendGenDir()
 	// 如果有前端目录，提取相对路径部分用于显示
-	var frontendPath string
-	//if frontendDir != "" {
-	frontendPath = "src/plugins"
+	frontendPath := "src/plugins"
 	//}
 
 	// 构建文件树结构

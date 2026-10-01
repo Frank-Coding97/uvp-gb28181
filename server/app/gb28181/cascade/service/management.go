@@ -298,7 +298,7 @@ func (s *ManagementService) Delete(ctx context.Context, id uint64) error {
 			return ErrRuntimeUnavailable
 		}
 		platform.Enabled = false
-		platform, err = s.store.UpdatePlatformConfig(ctx, platform, platform.ConfigRevision)
+		_, err = s.store.UpdatePlatformConfig(ctx, platform, platform.ConfigRevision)
 		if err != nil {
 			return err
 		}

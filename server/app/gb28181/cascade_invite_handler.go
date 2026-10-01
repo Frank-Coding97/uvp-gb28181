@@ -297,7 +297,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	parts := strings.Split(subject.Value(), ",")
 	if len(parts) != 2 || strings.SplitN(parts[0], ":", 2)[0] != req.Recipient.User || strings.SplitN(parts[1], ":", 2)[0] != platform.UpstreamServerID {
-		fail(403, fmt.Errorf("Subject identity mismatch"))
+		fail(403, fmt.Errorf("subject identity mismatch"))
 		return
 	}
 	projection, err := h.store.ProjectionSnapshot(ctx, platform.ID)
@@ -366,7 +366,11 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(503, err)
 		return
 	}
-	defer lease.Release(context.Background())
+	defer func() {
+		if releaseErr := lease.Release(context.Background()); releaseErr != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("级联媒体 source 释放失败", zap.String("event", "cascade.source_release_failed"), zap.String("dialog_id", dialog.ID), zap.Error(releaseErr))
+		}
+	}()
 	key := fmt.Sprintf("%d/%s/%s/%s", lease.Source.NodeID, lease.Source.App, lease.Source.StreamID, offer.SSRC)
 	h.mu.Lock()
 	busy := h.senders[key]

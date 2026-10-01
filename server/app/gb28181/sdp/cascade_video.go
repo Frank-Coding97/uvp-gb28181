@@ -93,9 +93,10 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 			}
 		case strings.HasPrefix(line, "f="):
 			format := strings.TrimSpace(strings.TrimPrefix(line, "f="))
-			if current == video {
+			switch current {
+			case video:
 				current.format = format
-			} else if current == nil {
+			case nil:
 				sessionFormat = format
 			}
 		default:
@@ -114,9 +115,10 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 				continue
 			}
 			if direction, ok := cascadeVideoDirection(line); ok {
-				if current == video {
+				switch current {
+				case video:
 					current.direction = direction
-				} else if current == nil {
+				case nil:
 					sessionDirection = direction
 				}
 			}
@@ -254,15 +256,15 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 
 	var answer strings.Builder
 	answer.WriteString("v=0\r\n")
-	answer.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", localID, parsedIP.To4().String()))
+	fmt.Fprintf(&answer, "o=%s 0 0 IN IP4 %s\r\n", localID, parsedIP.To4().String())
 	answer.WriteString("s=Play\r\n")
-	answer.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", parsedIP.To4().String()))
+	fmt.Fprintf(&answer, "c=IN IP4 %s\r\n", parsedIP.To4().String())
 	answer.WriteString("t=0 0\r\n")
-	answer.WriteString(fmt.Sprintf("m=video %d %s %d\r\n", localPort, transport, offer.PayloadType))
+	fmt.Fprintf(&answer, "m=video %d %s %d\r\n", localPort, transport, offer.PayloadType)
 	answer.WriteString(setup)
 	answer.WriteString("a=sendonly\r\n")
-	answer.WriteString(fmt.Sprintf("a=rtpmap:%d PS/90000\r\n", offer.PayloadType))
-	answer.WriteString(fmt.Sprintf("y=%s\r\n", ssrc))
+	fmt.Fprintf(&answer, "a=rtpmap:%d PS/90000\r\n", offer.PayloadType)
+	fmt.Fprintf(&answer, "y=%s\r\n", ssrc)
 	return []byte(answer.String()), nil
 }
 

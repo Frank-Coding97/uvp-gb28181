@@ -34,10 +34,16 @@ const recording = (availability = "available", metadataState = "complete") => ({
 });
 
 const stubs = {
-  "a-modal": { props: ["visible"], template: "<section v-if='visible' data-testid='detail-dialog'><slot name='title' /><slot /></section>" },
+  "a-modal": {
+    props: ["visible"],
+    template: "<section v-if='visible' data-testid='detail-dialog'><slot name='title' /><slot /></section>"
+  },
   "a-spin": { template: "<div><slot /></div>" },
   "a-alert": { template: "<div><slot /></div>" },
-  "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
+  "a-button": {
+    emits: ["click"],
+    template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>"
+  },
   "a-tag": { template: "<span><slot /></span>" },
   "a-descriptions": { template: "<dl><slot /></dl>" },
   "a-descriptions-item": { props: ["label"], template: "<div><dt>{{ label }}</dt><dd><slot /></dd></div>" }

@@ -24,7 +24,7 @@ describe("server config page", () => {
   });
 
   it("keeps update and restart under independent permissions", () => {
-    expect(source).toContain('gb28181:zlm:config:update');
-    expect(source).toContain('gb28181:zlm:restart');
+    expect(source).toContain("gb28181:zlm:config:update");
+    expect(source).toContain("gb28181:zlm:restart");
   });
 });

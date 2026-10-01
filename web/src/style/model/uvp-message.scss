@@ -16,7 +16,9 @@
   background: var(--uvp-panel-bg) !important;
   border: 1px solid var(--uvp-panel-border) !important;
   border-radius: 12px !important;
-  box-shadow: 0 12px 32px -12px rgb(15 23 42 / 18%), 0 4px 10px -4px rgb(15 23 42 / 10%) !important;
+  box-shadow:
+    0 12px 32px -12px rgb(15 23 42 / 18%),
+    0 4px 10px -4px rgb(15 23 42 / 10%) !important;
   backdrop-filter: blur(6px);
   transition: all 0.2s ease;
 }
@@ -32,10 +34,10 @@
 }
 
 .arco-message-content {
-  color: var(--uvp-text-primary) !important;
   font-size: 13px !important;
   font-weight: 550 !important;
   line-height: 20px !important;
+  color: var(--uvp-text-primary) !important;
   letter-spacing: 0.1px;
 }
 
@@ -90,19 +92,21 @@
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 12px;
-  box-shadow: 0 14px 36px -14px rgb(15 23 42 / 22%), 0 4px 10px -4px rgb(15 23 42 / 10%);
+  box-shadow:
+    0 14px 36px -14px rgb(15 23 42 / 22%),
+    0 4px 10px -4px rgb(15 23 42 / 10%);
 }
 
 .arco-notification-title {
-  color: var(--uvp-text-primary);
   font-size: 14px;
   font-weight: 620;
+  color: var(--uvp-text-primary);
 }
 
 .arco-notification-content {
-  color: var(--uvp-text-secondary);
   font-size: 13px;
   line-height: 20px;
+  color: var(--uvp-text-secondary);
 }
 
 .arco-notification-success {

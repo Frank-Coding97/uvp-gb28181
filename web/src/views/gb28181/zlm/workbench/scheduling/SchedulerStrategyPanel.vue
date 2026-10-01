@@ -2,20 +2,19 @@
 import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { useUserStoreHook } from "@/store/modules/user";
-import {
-  getScheduler,
-  switchScheduler,
-  type SchedulerAlgorithm
-} from "@/api/gb28181-zlm";
+import { getScheduler, switchScheduler, type SchedulerAlgorithm } from "@/api/gb28181-zlm";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
 
-const props = withDefaults(defineProps<{
-  active?: boolean;
-  canManage?: boolean;
-}>(), {
-  active: true,
-  canManage: undefined
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    canManage?: boolean;
+  }>(),
+  {
+    active: true,
+    canManage: undefined
+  }
+);
 
 const algorithmMeta: Record<SchedulerAlgorithm, { title: string; desc: string }> = {
   roundrobin: {
@@ -42,11 +41,12 @@ const loadError = ref<unknown>(null);
 const switchError = ref("");
 let generation = 0;
 
-const canManage = computed(() => props.canManage ?? (
-  userStore.account.permissions.includes("*:*:*")
-  || userStore.account.permissions.includes("gb28181:zlm:scheduler:manage")
-));
-const currentTitle = computed(() => current.value ? algorithmMeta[current.value]?.title || current.value : "未装配");
+const canManage = computed(
+  () =>
+    props.canManage ??
+    (userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes("gb28181:zlm:scheduler:manage"))
+);
+const currentTitle = computed(() => (current.value ? algorithmMeta[current.value]?.title || current.value : "未装配"));
 const loadErrorText = computed(() => zlmErrorPresentation(loadError.value).label);
 
 async function refresh() {
@@ -97,14 +97,18 @@ async function handleSave() {
   }
 }
 
-watch(() => props.active, active => {
-  if (!active) {
-    generation += 1;
-    loading.value = false;
-    return;
-  }
-  void refresh();
-}, { immediate: true });
+watch(
+  () => props.active,
+  active => {
+    if (!active) {
+      generation += 1;
+      loading.value = false;
+      return;
+    }
+    void refresh();
+  },
+  { immediate: true }
+);
 
 defineExpose({ refresh });
 </script>
@@ -118,9 +122,17 @@ defineExpose({ refresh });
         <p>选择新媒体分配策略；已经建立的流和会话不会迁移。</p>
       </div>
       <div class="panel-actions">
-        <span class="current-label">当前生效 <strong>{{ currentTitle }}</strong></span>
+        <span class="current-label"
+          >当前生效 <strong>{{ currentTitle }}</strong></span
+        >
         <button type="button" class="refresh-button" :disabled="loading || !active" @click="refresh">刷新</button>
-        <button v-if="canManage" type="button" class="primary-button" :disabled="saving || loading || !selected || selected === current || !active" @click="handleSave">
+        <button
+          v-if="canManage"
+          type="button"
+          class="primary-button"
+          :disabled="saving || loading || !selected || selected === current || !active"
+          @click="handleSave"
+        >
           {{ saving ? "保存中…" : "保存策略" }}
         </button>
       </div>
@@ -136,8 +148,19 @@ defineExpose({ refresh });
     <div v-else-if="loading && !available.length" class="loading-state" role="status">正在读取调度策略…</div>
     <div v-else-if="!available.length" class="empty-state" role="status">后端尚未返回可用调度策略。</div>
     <div v-else class="algorithm-list" role="radiogroup" aria-label="调度策略">
-      <label v-for="algorithm in available" :key="algorithm" class="algorithm-card" :class="{ 'is-selected': selected === algorithm }">
-        <input v-model="selected" type="radio" name="scheduler-algorithm" :value="algorithm" :disabled="!canManage || saving || !active" />
+      <label
+        v-for="algorithm in available"
+        :key="algorithm"
+        class="algorithm-card"
+        :class="{ 'is-selected': selected === algorithm }"
+      >
+        <input
+          v-model="selected"
+          type="radio"
+          name="scheduler-algorithm"
+          :value="algorithm"
+          :disabled="!canManage || saving || !active"
+        />
         <span class="algorithm-card__body">
           <strong>{{ algorithmMeta[algorithm]?.title || algorithm }}</strong>
           <small>{{ algorithmMeta[algorithm]?.desc || "后端返回的可用调度策略" }}</small>
@@ -149,21 +172,211 @@ defineExpose({ refresh });
 </template>
 
 <style scoped>
-.scheduler-strategy-panel { box-sizing: border-box; min-width: 0; padding: 18px; color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
-.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
-.panel-eyebrow { color: var(--zlm-brand-600); font-family: var(--zlm-font-mono); font-size: 10px; letter-spacing: .12em; }
-.panel-heading h2 { margin: 4px 0 0; color: var(--zlm-text-1); font-size: 18px; }
-.panel-heading p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
-.panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.current-label { color: var(--zlm-text-3); font-size: 12px; white-space: nowrap; }.current-label strong { margin-left: 4px; color: var(--zlm-brand-600); }
-.panel-actions button, .load-error button { min-height: 32px; padding: 0 11px; color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); cursor: pointer; }
-.panel-actions button:hover, .load-error button:hover { color: var(--zlm-brand-600); border-color: var(--zlm-brand-500); }
-.panel-actions button:disabled, .load-error button:disabled { cursor: wait; opacity: .6; }
-.panel-actions .primary-button { color: #fff; background: var(--zlm-brand-600); border-color: var(--zlm-brand-600); }
-.permission-state, .switch-error, .load-error { margin-top: 12px; padding: 10px 12px; font-size: var(--zlm-fs-caption); border-radius: var(--zlm-radius-md); }
-.permission-state { color: var(--zlm-text-3); border: 1px dashed var(--zlm-border-strong); }.switch-error, .load-error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border: 1px solid var(--zlm-danger-200); }.load-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.load-error button { flex: none; min-height: 28px; padding: 0 8px; font-size: 12px; }
-.algorithm-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }.algorithm-card { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 12px; background: var(--zlm-fill-1); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease; }.algorithm-card:hover, .algorithm-card.is-selected { background: var(--zlm-brand-50); border-color: var(--zlm-brand-300); box-shadow: 0 10px 22px -18px rgb(37 99 235 / 34%); }.algorithm-card input { flex: none; margin-top: 3px; accent-color: var(--zlm-brand-600); }.algorithm-card__body { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }.algorithm-card__body strong { color: var(--zlm-text-1); font-size: 14px; }.algorithm-card__body small { color: var(--zlm-text-3); font-size: 12px; line-height: 1.45; }.active-badge { flex: none; padding: 2px 7px; color: var(--zlm-success-600); background: var(--zlm-success-50); border-radius: 999px; font-size: 11px; white-space: nowrap; }.loading-state, .empty-state, .inactive-state { display: grid; min-height: 190px; margin-top: 16px; color: var(--zlm-text-3); text-align: center; background: var(--zlm-fill-1); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); place-items: center; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
-@media (max-width: 760px) { .panel-heading { flex-direction: column; }.panel-actions { width: 100%; justify-content: flex-start; }.current-label { width: 100%; }.algorithm-list { grid-template-columns: 1fr; }.algorithm-card { align-items: flex-start; flex-wrap: wrap; }.active-badge { margin-left: 28px; } }
-@media (prefers-reduced-motion: reduce) { .algorithm-card { transition: none; } }
+.scheduler-strategy-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 18px;
+  color: var(--zlm-text-2);
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+  box-shadow: var(--uvp-panel-shadow);
+}
+.panel-heading {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.panel-eyebrow {
+  font-family: var(--zlm-font-mono);
+  font-size: 10px;
+  color: var(--zlm-brand-600);
+  letter-spacing: 0.12em;
+}
+.panel-heading h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  color: var(--zlm-text-1);
+}
+.panel-heading p {
+  margin: 5px 0 0;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-text-3);
+}
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.current-label {
+  font-size: 12px;
+  color: var(--zlm-text-3);
+  white-space: nowrap;
+}
+.current-label strong {
+  margin-left: 4px;
+  color: var(--zlm-brand-600);
+}
+.panel-actions button,
+.load-error button {
+  min-height: 32px;
+  padding: 0 11px;
+  color: var(--zlm-text-2);
+  cursor: pointer;
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-md);
+}
+.panel-actions button:hover,
+.load-error button:hover {
+  color: var(--zlm-brand-600);
+  border-color: var(--zlm-brand-500);
+}
+.panel-actions button:disabled,
+.load-error button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.panel-actions .primary-button {
+  color: #ffffff;
+  background: var(--zlm-brand-600);
+  border-color: var(--zlm-brand-600);
+}
+.permission-state,
+.switch-error,
+.load-error {
+  padding: 10px 12px;
+  margin-top: 12px;
+  font-size: var(--zlm-fs-caption);
+  border-radius: var(--zlm-radius-md);
+}
+.permission-state {
+  color: var(--zlm-text-3);
+  border: 1px dashed var(--zlm-border-strong);
+}
+.switch-error,
+.load-error {
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border: 1px solid var(--zlm-danger-200);
+}
+.load-error {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.load-error button {
+  flex: none;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.algorithm-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.algorithm-card {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 12px;
+  cursor: pointer;
+  background: var(--zlm-fill-1);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+.algorithm-card:hover,
+.algorithm-card.is-selected {
+  background: var(--zlm-brand-50);
+  border-color: var(--zlm-brand-300);
+  box-shadow: 0 10px 22px -18px rgb(37 99 235 / 34%);
+}
+.algorithm-card input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--zlm-brand-600);
+}
+.algorithm-card__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.algorithm-card__body strong {
+  font-size: 14px;
+  color: var(--zlm-text-1);
+}
+.algorithm-card__body small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--zlm-text-3);
+}
+.active-badge {
+  flex: none;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--zlm-success-600);
+  white-space: nowrap;
+  background: var(--zlm-success-50);
+  border-radius: 999px;
+}
+.loading-state,
+.empty-state,
+.inactive-state {
+  display: grid;
+  place-items: center;
+  min-height: 190px;
+  margin-top: 16px;
+  color: var(--zlm-text-3);
+  text-align: center;
+  background: var(--zlm-fill-1);
+  border: 1px dashed var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--zlm-brand-500);
+  outline-offset: 2px;
+}
+
+@media (width <= 760px) {
+  .panel-heading {
+    flex-direction: column;
+  }
+  .panel-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .current-label {
+    width: 100%;
+  }
+  .algorithm-list {
+    grid-template-columns: 1fr;
+  }
+  .algorithm-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .active-badge {
+    margin-left: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .algorithm-card {
+    transition: none;
+  }
+}
 </style>

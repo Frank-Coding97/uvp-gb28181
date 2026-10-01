@@ -20,7 +20,7 @@ func TestLoggingDBContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	old := app.GormDbMysql
 	app.GormDbMysql = db
 	defer func() { app.GormDbMysql = old }()
@@ -33,10 +33,10 @@ func TestLoggingDBContext(t *testing.T) {
 			defer wg.Done()
 			claims := &app.Claims{}
 			claims.UserID = uint(id)
-			ctx := context.WithValue(context.Background(), consts.BindContextKeyName, claims)
+			ctx := context.WithValue(context.Background(), consts.BindContextKey, claims)
 			ctx = logging.WithContext(ctx, logging.WithIdentity(root, zap.Int("request_id", id)))
 			scoped := app.DBContext(ctx, "mysql").Session(&gorm.Session{DryRun: true})
-			child := scoped.WithContext(context.WithValue(scoped.Statement.Context, "child", true))
+			child := scoped.WithContext(context.WithValue(scoped.Statement.Context, consts.ContextKey("child"), true))
 			if gormhelper.GetCurrentUserIDFromContext(child.Statement.Context) != uint(id) {
 				t.Error("Claims crossed requests")
 			}
@@ -59,9 +59,9 @@ func TestLoggingDBContext(t *testing.T) {
 	if gormhelper.GetCurrentUserIDFromContext(db.Statement.Context) != 0 {
 		t.Error("root Claims leaked")
 	}
-	ctx := context.WithValue(context.Background(), consts.BindContextKeyName, &app.Claims{})
+	ctx := context.WithValue(context.Background(), consts.BindContextKey, &app.Claims{})
 	scoped := app.DBContext(ctx, "mysql")
-	sentinel := context.WithValue(ctx, "tx-scope", true)
+	sentinel := context.WithValue(ctx, consts.ContextKey("tx-scope"), true)
 	err = scoped.Transaction(func(tx *gorm.DB) error {
 		derived := tx.WithContext(sentinel)
 		if derived.Statement.ConnPool != tx.Statement.ConnPool || derived.Statement.ConnPool == db.Statement.ConnPool {

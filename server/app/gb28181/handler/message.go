@@ -259,7 +259,6 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			// During a SIP runtime detach the final result must be retried by
 			// the device; a generic 200 would acknowledge and lose it.
 			_ = tx.Respond(sip.NewResponseFromRequest(req, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), nil))
-			responseSent = true
 			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
 				h.recorder.End(callID, cseq, http.StatusServiceUnavailable, false)
 			}
@@ -280,7 +279,6 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 						reason = "OK"
 					}
 					_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
-					responseSent = true
 					if processErr != nil {
 						logger.Warn("GB28181 设备升级最终结果处理失败",
 							zap.String("event", "gb28181.message.upgrade_result_failed"),

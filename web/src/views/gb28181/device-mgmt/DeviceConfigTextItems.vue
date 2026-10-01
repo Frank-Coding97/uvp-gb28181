@@ -80,6 +80,7 @@ function counterText(): string {
       <a-input
         class="dct-input"
         :model-value="row.text"
+        allow-clear
         :maxlength="maxLength"
         :disabled="disabled"
         :placeholder="`第 ${index + 1} 条文字`"
@@ -92,6 +93,7 @@ function counterText(): string {
         <a-input
           class="dct-input is-coord"
           :model-value="row.x"
+          allow-clear
           inputmode="numeric"
           :disabled="disabled"
           :aria-label="`第 ${index + 1} 条文字 X`"
@@ -103,6 +105,7 @@ function counterText(): string {
         <a-input
           class="dct-input is-coord"
           :model-value="row.y"
+          allow-clear
           inputmode="numeric"
           :disabled="disabled"
           :aria-label="`第 ${index + 1} 条文字 Y`"

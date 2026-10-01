@@ -43,7 +43,13 @@ onMounted(loadNodes);
 <template>
   <div class="snow-fill">
     <div class="snow-fill-inner uvp-page-shell-flat legacy-stream-management">
-      <ZLMNodeContextBar :nodes="nodes" :query-node-id="route.query.nodeId" :loading="nodesLoading" title="流所在节点" @refresh="refreshAll" />
+      <ZLMNodeContextBar
+        :nodes="nodes"
+        :query-node-id="route.query.nodeId"
+        :loading="nodesLoading"
+        title="流所在节点"
+        @refresh="refreshAll"
+      />
       <div v-if="nodesError && !nodes.length" class="legacy-stream-error" role="alert">节点目录加载失败，请刷新重试。</div>
       <StreamPanel ref="panel" :active="true" :scope="scope" :node-id="selectedNodeId" :initial-query="route.query" />
     </div>
@@ -51,5 +57,19 @@ onMounted(loadNodes);
 </template>
 
 <style scoped>
-.legacy-stream-management { box-sizing: border-box; height: 100%; padding: 4px 8px 24px; overflow: auto; }.legacy-stream-error { margin: 10px 0; padding: 9px 12px; color: var(--zlm-danger-600); background: var(--zlm-danger-50); border: 1px solid var(--zlm-danger-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }
+.legacy-stream-management {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 4px 8px 24px;
+  overflow: auto;
+}
+.legacy-stream-error {
+  padding: 9px 12px;
+  margin: 10px 0;
+  font-size: var(--zlm-fs-caption);
+  color: var(--zlm-danger-600);
+  background: var(--zlm-danger-50);
+  border: 1px solid var(--zlm-danger-500);
+  border-radius: var(--zlm-radius-md);
+}
 </style>

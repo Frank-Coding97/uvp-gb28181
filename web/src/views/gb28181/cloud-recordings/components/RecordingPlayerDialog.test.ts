@@ -21,15 +21,26 @@ const stubs = {
   "a-modal": { props: ["visible"], template: "<section v-if='visible'><slot name='title' /><slot /></section>" },
   "a-spin": { template: "<div><slot /></div>" },
   "a-alert": { template: "<div><slot /></div>" },
-  "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot /></button>" }
+  "a-button": {
+    emits: ["click"],
+    template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot /></button>"
+  }
 };
 
 describe("RecordingPlayerDialog", () => {
   beforeEach(() => {
     issueRecordingAccess.mockReset();
     issueRecordingAccess
-      .mockResolvedValueOnce({ code: 0, message: "", data: { mode: "play", capability: "first", expiresAt: "2026-08-10T13:00:00Z" } })
-      .mockResolvedValueOnce({ code: 0, message: "", data: { mode: "play", capability: "renewed", expiresAt: "2026-08-10T13:00:00Z" } });
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { mode: "play", capability: "first", expiresAt: "2026-08-10T13:00:00Z" }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { mode: "play", capability: "renewed", expiresAt: "2026-08-10T13:00:00Z" }
+      });
   });
 
   it("uses native MP4 content and renews at most once while preserving position", async () => {

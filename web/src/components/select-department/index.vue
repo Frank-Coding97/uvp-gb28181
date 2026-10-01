@@ -77,8 +77,9 @@
           <template #title="record">
             <div class="tree-node-content" v-if="record">
               <span class="node-name">{{ record?.name || "" }}</span>
-              <a-tag v-if="record.status === 1" bordered size="small" color="arcoblue"> 启用 </a-tag>
-              <a-tag v-else bordered size="small" color="red"> 禁用 </a-tag>
+              <a-tag bordered size="small" :color="record.status === 1 ? 'arcoblue' : 'red'">
+                {{ statusLabel(record.status) }}
+              </a-tag>
             </div>
           </template>
         </a-tree>
@@ -99,6 +100,7 @@
 import { ref, computed, watch } from "vue";
 import { getDivisionAPI, getDivisionByIdAPI } from "@/api/department";
 import type { DivisionItem } from "@/api/department";
+import { useStatusLabel } from "@/hooks/useDictOptions";
 
 // 部门信息接口（用于已选部门）
 interface DepartmentInfo {
@@ -137,6 +139,9 @@ const emit = defineEmits<Emits>();
 
 // 弹窗显示状态
 const modalVisible = ref(false);
+
+// 状态标签文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 
 // 搜索关键字
 const searchKeyword = ref("");
@@ -372,13 +377,13 @@ const handleModalConfirm = () => {
   gap: 8px;
 
   .selected-tags-wrapper {
-    min-height: 32px;
-    padding: 4px 8px;
-    border: 1px solid var(--color-border-2);
-    border-radius: 4px;
-    background-color: var(--color-bg-2);
     display: flex;
     align-items: center;
+    min-height: 32px;
+    padding: 4px 8px;
+    background-color: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: 4px;
     transition: all 0.2s;
 
     &:hover {
@@ -386,8 +391,8 @@ const handleModalConfirm = () => {
     }
 
     .placeholder-text {
-      color: var(--color-text-3);
       font-size: 14px;
+      color: var(--color-text-3);
     }
   }
 
@@ -398,19 +403,19 @@ const handleModalConfirm = () => {
 }
 
 .tree-area {
-  margin-bottom: 16px;
   max-height: 400px;
+  padding: 12px;
+  margin-bottom: 16px;
   overflow-y: auto;
   border: 1px solid var(--color-border-2);
   border-radius: 4px;
-  padding: 12px;
 
   :deep(.arco-tree) {
     .tree-node-content {
       display: flex;
-      align-items: center;
-      gap: 8px;
       flex: 1;
+      gap: 8px;
+      align-items: center;
 
       .node-name {
         flex: 1;

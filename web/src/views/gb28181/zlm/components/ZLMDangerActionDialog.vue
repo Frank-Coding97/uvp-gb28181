@@ -2,35 +2,34 @@
 import { computed, ref, watch } from "vue";
 import { AlertTriangle } from "lucide-vue-next";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
-import {
-  createDangerActionSnapshot,
-  dangerActionSnapshotMatches,
-  type DangerActionSnapshot
-} from "./dangerActionState";
+import { createDangerActionSnapshot, dangerActionSnapshotMatches, type DangerActionSnapshot } from "./dangerActionState";
 
-const props = withDefaults(defineProps<{
-  visible: boolean;
-  nodeId: number;
-  nodeName: string;
-  targetKey: string;
-  targetLabel: string;
-  fingerprint?: string;
-  impacts?: string[];
-  confirmPhrase: string;
-  requireConfirmPhrase?: boolean;
-  requireReason?: boolean;
-  actionLabel?: string;
-  busy?: boolean;
-  contextBound?: boolean;
-}>(), {
-  fingerprint: "",
-  impacts: () => [],
-  requireConfirmPhrase: true,
-  requireReason: true,
-  actionLabel: "确认执行",
-  busy: false,
-  contextBound: true
-});
+const props = withDefaults(
+  defineProps<{
+    visible: boolean;
+    nodeId: number;
+    nodeName: string;
+    targetKey: string;
+    targetLabel: string;
+    fingerprint?: string;
+    impacts?: string[];
+    confirmPhrase: string;
+    requireConfirmPhrase?: boolean;
+    requireReason?: boolean;
+    actionLabel?: string;
+    busy?: boolean;
+    contextBound?: boolean;
+  }>(),
+  {
+    fingerprint: "",
+    impacts: () => [],
+    requireConfirmPhrase: true,
+    requireReason: true,
+    actionLabel: "确认执行",
+    busy: false,
+    contextBound: true
+  }
+);
 
 const emit = defineEmits<{
   "update:visible": [visible: boolean];
@@ -46,7 +45,7 @@ const typedPhrase = ref("");
 function currentIdentity() {
   return {
     contextVersion: props.contextBound ? context.dialogRevision : 0,
-    nodeId: props.contextBound ? context.selectedNodeId ?? props.nodeId : props.nodeId,
+    nodeId: props.contextBound ? (context.selectedNodeId ?? props.nodeId) : props.nodeId,
     targetKey: props.targetKey,
     fingerprint: props.fingerprint
   };
@@ -79,10 +78,14 @@ function expire() {
   emit("update:visible", false);
 }
 
-watch(() => props.visible, visible => {
-  if (visible) capture();
-  else snapshot.value = null;
-}, { immediate: true });
+watch(
+  () => props.visible,
+  visible => {
+    if (visible) capture();
+    else snapshot.value = null;
+  },
+  { immediate: true }
+);
 
 watch(
   () => [context.dialogRevision, context.selectedNodeId, props.nodeId, props.targetKey, props.fingerprint],
@@ -141,8 +144,14 @@ function confirm() {
       </div>
 
       <dl class="zlm-danger-dialog__summary">
-        <div><dt>节点</dt><dd>{{ snapshot.nodeName }}（#{{ snapshot.nodeId }}）</dd></div>
-        <div><dt>目标</dt><dd>{{ snapshot.targetLabel }}</dd></div>
+        <div>
+          <dt>节点</dt>
+          <dd>{{ snapshot.nodeName }}（#{{ snapshot.nodeId }}）</dd>
+        </div>
+        <div>
+          <dt>目标</dt>
+          <dd>{{ snapshot.targetLabel }}</dd>
+        </div>
       </dl>
 
       <div class="zlm-danger-dialog__impact">
@@ -155,12 +164,21 @@ function confirm() {
 
       <label v-if="snapshot.requireReason" class="zlm-danger-dialog__field">
         <span>操作理由</span>
-        <a-textarea v-model="reason" :max-length="256" show-word-limit placeholder="请输入可审计的操作理由" :disabled="busy" />
+        <a-textarea
+          v-model="reason"
+          allow-clear
+          :max-length="256"
+          show-word-limit
+          placeholder="请输入可审计的操作理由"
+          :disabled="busy"
+        />
       </label>
 
       <label v-if="requireConfirmPhrase" class="zlm-danger-dialog__field">
-        <span>请输入确认短语：<strong>{{ snapshot.confirmPhrase }}</strong></span>
-        <a-input v-model="typedPhrase" autocomplete="off" placeholder="输入上方完整短语" :disabled="busy" />
+        <span
+          >请输入确认短语：<strong>{{ snapshot.confirmPhrase }}</strong></span
+        >
+        <a-input v-model="typedPhrase" allow-clear autocomplete="off" placeholder="输入上方完整短语" :disabled="busy" />
       </label>
 
       <div class="zlm-danger-dialog__actions">
@@ -176,8 +194,8 @@ function confirm() {
 <style scoped>
 .zlm-danger-dialog__title {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   color: var(--zlm-danger-600);
 }
 
@@ -189,9 +207,9 @@ function confirm() {
 
 .zlm-danger-dialog__warning {
   padding: 10px 12px;
-  color: var(--zlm-danger-600);
   font-size: var(--zlm-fs-caption);
   line-height: 1.6;
+  color: var(--zlm-danger-600);
   background: var(--zlm-danger-50);
   border: 1px solid var(--zlm-danger-500);
   border-radius: var(--zlm-radius-md);
@@ -216,23 +234,23 @@ function confirm() {
 .zlm-danger-dialog__summary dd {
   min-width: 0;
   margin: 0;
-  overflow-wrap: anywhere;
   color: var(--zlm-text-1);
+  overflow-wrap: anywhere;
 }
 
 .zlm-danger-dialog__section-title,
 .zlm-danger-dialog__field > span {
-  color: var(--zlm-text-2);
   font-size: var(--zlm-fs-caption);
   font-weight: var(--zlm-fw-medium);
+  color: var(--zlm-text-2);
 }
 
 .zlm-danger-dialog__impact ul,
 .zlm-danger-dialog__impact p {
-  margin: 8px 0 0;
   padding-left: 20px;
-  color: var(--zlm-text-2);
+  margin: 8px 0 0;
   line-height: 1.7;
+  color: var(--zlm-text-2);
 }
 
 .zlm-danger-dialog__impact p {
@@ -246,14 +264,14 @@ function confirm() {
 }
 
 .zlm-danger-dialog__field strong {
-  color: var(--zlm-danger-600);
   font-family: var(--zlm-font-mono);
+  color: var(--zlm-danger-600);
 }
 
 .zlm-danger-dialog__actions {
   display: flex;
-  justify-content: flex-end;
   gap: var(--zlm-space-2);
+  justify-content: flex-end;
   padding-top: var(--zlm-space-2);
 }
 </style>

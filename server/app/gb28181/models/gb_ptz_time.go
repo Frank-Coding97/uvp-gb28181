@@ -11,7 +11,7 @@ import (
 // column to UTC and shifts due/expiry comparisons. Cast only the parameter so
 // indexes remain usable, retaining sub-millisecond comparison precision.
 func PTZTimeComparison(db *gorm.DB, value time.Time) any {
-	if db.Dialector.Name() == "sqlserver" {
+	if db.Name() == "sqlserver" {
 		return gorm.Expr("CAST(? AS DATETIME2(7))", value.In(time.Local))
 	}
 	return value
@@ -38,7 +38,7 @@ func ptzLocalWallPointers(values ...**time.Time) {
 }
 
 func (op *GbPTZOperation) AfterFind(tx *gorm.DB) error {
-	if tx.Dialector.Name() == "sqlserver" {
+	if tx.Name() == "sqlserver" {
 		op.CreatedAt = ptzLocalWallTime(op.CreatedAt)
 		ptzLocalWallPointers(&op.SentAt, &op.CompletedAt, &op.QueueDeadlineAt, &op.DispatchStartedAt, &op.TransportDeadlineAt, &op.DeadlineAt, &op.NextAttemptAt, &op.ResponseAt)
 	}
@@ -46,7 +46,7 @@ func (op *GbPTZOperation) AfterFind(tx *gorm.DB) error {
 }
 
 func (attempt *GbPTZOperationAttempt) AfterFind(tx *gorm.DB) error {
-	if tx.Dialector.Name() == "sqlserver" {
+	if tx.Name() == "sqlserver" {
 		attempt.StartedAt = ptzLocalWallTime(attempt.StartedAt)
 		attempt.LeaseUntil = ptzLocalWallTime(attempt.LeaseUntil)
 		attempt.CreatedAt = ptzLocalWallTime(attempt.CreatedAt)

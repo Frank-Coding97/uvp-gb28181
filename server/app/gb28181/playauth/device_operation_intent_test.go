@@ -154,7 +154,7 @@ func TestDeviceOperationIntentRejectsInvalidIdentityAndUnavailableStorage(t *tes
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 	_, err = NewDeviceOperationIntentStore(nil).Reserve(ctx, intentIdentity(1))
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
-	_, err = s.Reserve(nil, intentIdentity(1))
+	_, err = s.Reserve(nil, intentIdentity(1)) //nolint:staticcheck // nil context must fail closed.
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
 }
 

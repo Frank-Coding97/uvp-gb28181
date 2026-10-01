@@ -117,8 +117,9 @@
                 <a-table-column title="手机号" data-index="phone" :width="150"></a-table-column>
                 <a-table-column title="状态" :width="100" align="center">
                   <template #cell="{ record }">
-                    <a-tag bordered size="small" color="arcoblue" v-if="record.status === 1">启用</a-tag>
-                    <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
+                    <a-tag bordered size="small" :color="record.status === 1 ? 'arcoblue' : 'red'">
+                      {{ statusLabel(record.status) }}
+                    </a-tag>
                   </template>
                 </a-table-column>
                 <!-- <a-table-column title="描述" data-index="description" :ellipsis="true"
@@ -259,6 +260,7 @@ import { getAccountListAPI, addAccountAPI, editAccountAPI, deleteAccountAPI } fr
 import { deepClone } from "@/utils";
 import { formatTime } from "@/globals";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStatusLabel } from "@/hooks/useDictOptions";
 import { Building2, ChevronDown, Folder, FolderOpen } from "@lucide/vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
@@ -276,6 +278,8 @@ const layoutMode = computed(() => {
 });
 
 const openState = ref(dictFilter("status"));
+// 表格状态列文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 const sexOption = ref(dictFilter("gender"));
 const form = ref({
   name: "",

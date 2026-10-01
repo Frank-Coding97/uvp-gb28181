@@ -21,10 +21,6 @@ type fakeEnd struct {
 	Success    bool
 }
 
-func newFakeRecorder() *fakeRecorder {
-	return &fakeRecorder{pairOpen: make(map[string]metrics.Transaction)}
-}
-
 func (f *fakeRecorder) Begin(t metrics.Transaction) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

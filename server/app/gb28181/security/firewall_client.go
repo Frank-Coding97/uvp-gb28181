@@ -77,7 +77,7 @@ func (c *UnixFirewallClient) call(req unixFirewallRequest) (unixFirewallResponse
 	if err != nil {
 		return response, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(c.timeout))
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return response, err

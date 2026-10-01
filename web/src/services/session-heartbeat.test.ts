@@ -69,7 +69,11 @@ describe("session heartbeat coordinator", () => {
 
   it("does not overlap an in-flight heartbeat", async () => {
     let resolveHeartbeat!: () => void;
-    heartbeat.mockReturnValueOnce(new Promise<void>(resolve => { resolveHeartbeat = resolve; }));
+    heartbeat.mockReturnValueOnce(
+      new Promise<void>(resolve => {
+        resolveHeartbeat = resolve;
+      })
+    );
     startSessionHeartbeat();
     await flush();
 

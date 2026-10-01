@@ -17,11 +17,19 @@ interface TrendBucket {
 
 const PERIOD_CONFIG: Record<SecurityTrendPeriod, { windowMs: number; bucketMs: number; label: (time: number) => string }> = {
   "1h": { windowMs: 60 * 60 * 1000, bucketMs: 10 * 60 * 1000, label: formatClock },
-  "24h": { windowMs: 24 * 60 * 60 * 1000, bucketMs: 2 * 60 * 60 * 1000, label: time => `${formatDate(time)} ${formatClock(time)}` },
+  "24h": {
+    windowMs: 24 * 60 * 60 * 1000,
+    bucketMs: 2 * 60 * 60 * 1000,
+    label: time => `${formatDate(time)} ${formatClock(time)}`
+  },
   "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000, label: formatDate }
 };
 
-export function buildSecurityTrend(events: SecurityEventAggregate[], period: SecurityTrendPeriod, now = Date.now()): { points: SecurityTrendPoint[]; hasData: boolean } {
+export function buildSecurityTrend(
+  events: SecurityEventAggregate[],
+  period: SecurityTrendPeriod,
+  now = Date.now()
+): { points: SecurityTrendPoint[]; hasData: boolean } {
   const config = PERIOD_CONFIG[period];
   const windowStart = now - config.windowMs;
   const firstBucket = Math.floor(windowStart / config.bucketMs) * config.bucketMs;

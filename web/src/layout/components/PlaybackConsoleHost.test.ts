@@ -15,8 +15,8 @@ vi.mock("@/views/gb28181/components/PlayConsoleLinked.vue", () => ({
         <button data-testid="host-minimize" @click="$emit('update:displayMode', 'minimized')" />
         <button data-testid="host-close" @click="$emit('update:visible', false)" />
       </div>
-    `,
-  },
+    `
+  }
 }));
 
 import PlaybackConsoleHost from "./PlaybackConsoleHost.vue";

@@ -75,7 +75,7 @@ func TestOpenAPINonceProcessRestart(t *testing.T) {
 	db = open()
 	raw, err = db.DB()
 	require.NoError(t, err)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	var count int64
 	require.NoError(t, db.Model(&models.Nonce{}).Count(&count).Error)
 	require.EqualValues(t, 1, count)

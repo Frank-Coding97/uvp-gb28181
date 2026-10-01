@@ -45,8 +45,9 @@
           <a-table-column title="启用状态" align="center" :width="90">
             <template #cell="{ record }">
               <a-space>
-                <a-tag bordered size="small" color="arcoblue" v-if="record.status">启用</a-tag>
-                <a-tag bordered size="small" color="red" v-else>禁用</a-tag>
+                <a-tag bordered size="small" :color="record.status ? 'arcoblue' : 'red'">
+                  {{ statusLabel(record.status) }}
+                </a-tag>
               </a-space>
             </template>
           </a-table-column>
@@ -155,15 +156,7 @@
             </a-col>
             <a-col :span="12">
               <a-form-item field="sort" label="显示排序" validate-trigger="blur">
-                <a-input-number
-                  v-model="addFrom.sort"
-                  placeholder="请输入排序值"
-                  :min="1"
-                  :max="999"
-                  :step="1"
-                  :precision="0"
-                  allow-clear
-                />
+                <s-number-field ref="sortField" v-model="addFrom.sort" placeholder="请输入排序值" :min="1" :max="999" required />
               </a-form-item>
             </a-col>
           </a-row>
@@ -187,6 +180,8 @@ import {
 } from "@/api/department";
 import { formatTime } from "@/globals";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStatusLabel } from "@/hooks/useDictOptions";
+import SNumberField from "@/components/s-number-field/index.vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -220,7 +215,7 @@ const rules = {
 const addFrom = ref<DivisionFormData>({
   parentId: undefined,
   name: "",
-  sort: 0,
+  sort: 1,
   leader: "",
   phone: "",
   email: "",
@@ -230,12 +225,19 @@ const addFrom = ref<DivisionFormData>({
 const formType = ref(0); // 0新增 1修改 2新增下级
 const title = ref("");
 const formRef = ref();
+type NumberFieldInstance = InstanceType<typeof SNumberField>;
+const sortField = ref<NumberFieldInstance | null>(null);
 const onAdd = () => {
   title.value = "添加部门";
   formType.value = 0;
   open.value = true;
 };
 const handleOk = async () => {
+  const numberFieldError = sortField.value?.error;
+  if (numberFieldError) {
+    arcoMessage("error", numberFieldError);
+    return false;
+  }
   let state = await formRef.value.validate();
   if (state) return false; // 校验不通过
 
@@ -264,7 +266,7 @@ const afterClose = () => {
   addFrom.value = {
     parentId: undefined,
     name: "",
-    sort: 0,
+    sort: 1,
     leader: "",
     phone: "",
     email: "",
@@ -283,7 +285,7 @@ const onUpdate = (row: DivisionItem) => {
     leader: row.leader || "",
     phone: row.phone || "",
     email: row.email || "",
-    sort: row.sort || 0,
+    sort: row.sort || 1,
     describe: row.describe || ""
   };
   open.value = true;
@@ -341,6 +343,8 @@ const deleteDivision = async (record: DivisionItem) => {
 };
 
 const openState = ref(dictFilter("status"));
+// 表格状态列文案由 `status` 字典驱动（种子：0=禁用 / 1=启用）
+const statusLabel = useStatusLabel();
 const form = ref({
   name: "",
   status: ""

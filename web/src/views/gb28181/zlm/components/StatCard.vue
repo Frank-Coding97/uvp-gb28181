@@ -14,144 +14,143 @@
 import { computed } from "vue";
 
 const props = defineProps<{
-    title: string;
-    /** 数字值;为 percent 时 value 应是 0-1 浮点,组件自动 *100 */
-    value?: number;
-    /** 直接传文本(给 Uptime / 时长 等非数字 KPI) */
-    valueText?: string;
-    /** 单位,显示在数字右侧小字 */
-    unit?: string;
-    /** value 是 0-1 浮点,自动 ×100 显示 */
-    isPercent?: boolean;
-    /** 小数位数,默认数字 0 / 百分比 1 */
-    digits?: number;
-    /** 趋势文本,如 "+12 vs 1h" / "-3.5% vs 昨日" */
-    trend?: string;
-    /** 趋势类型,影响颜色 */
-    trendType?: "up" | "down" | "neutral" | "danger";
-    /** 强调 value 颜色(brand / accent / warning / danger) */
-    accent?: "brand" | "accent" | "warning" | "danger" | "default";
+  title: string;
+  /** 数字值;为 percent 时 value 应是 0-1 浮点,组件自动 *100 */
+  value?: number;
+  /** 直接传文本(给 Uptime / 时长 等非数字 KPI) */
+  valueText?: string;
+  /** 单位,显示在数字右侧小字 */
+  unit?: string;
+  /** value 是 0-1 浮点,自动 ×100 显示 */
+  isPercent?: boolean;
+  /** 小数位数,默认数字 0 / 百分比 1 */
+  digits?: number;
+  /** 趋势文本,如 "+12 vs 1h" / "-3.5% vs 昨日" */
+  trend?: string;
+  /** 趋势类型,影响颜色 */
+  trendType?: "up" | "down" | "neutral" | "danger";
+  /** 强调 value 颜色(brand / accent / warning / danger) */
+  accent?: "brand" | "accent" | "warning" | "danger" | "default";
 }>();
 
 const displayValue = computed(() => {
-    if (props.valueText !== undefined) return props.valueText;
-    if (props.value === undefined || props.value === null) return "—";
-    const v = props.isPercent ? props.value * 100 : props.value;
-    const d = props.digits ?? (props.isPercent ? 1 : 0);
-    if (Number.isNaN(v)) return "—";
-    return v.toFixed(d);
+  if (props.valueText !== undefined) return props.valueText;
+  if (props.value === undefined || props.value === null) return "—";
+  const v = props.isPercent ? props.value * 100 : props.value;
+  const d = props.digits ?? (props.isPercent ? 1 : 0);
+  if (Number.isNaN(v)) return "—";
+  return v.toFixed(d);
 });
 
 const valueColor = computed(() => {
-    switch (props.accent) {
-        case "brand":
-            return "var(--zlm-brand-600)";
-        case "accent":
-            return "var(--zlm-accent-600)";
-        case "warning":
-            return "var(--zlm-warn-600)";
-        case "danger":
-            return "var(--zlm-danger-600)";
-        default:
-            return "var(--zlm-text-1)";
-    }
+  switch (props.accent) {
+    case "brand":
+      return "var(--zlm-brand-600)";
+    case "accent":
+      return "var(--zlm-accent-600)";
+    case "warning":
+      return "var(--zlm-warn-600)";
+    case "danger":
+      return "var(--zlm-danger-600)";
+    default:
+      return "var(--zlm-text-1)";
+  }
 });
 
 const trendColor = computed(() => {
-    switch (props.trendType) {
-        case "up":
-            return "var(--zlm-success-600)";
-        case "down":
-            return "var(--zlm-danger-600)";
-        case "danger":
-            return "var(--zlm-danger-600)";
-        default:
-            return "var(--zlm-text-3)";
-    }
+  switch (props.trendType) {
+    case "up":
+      return "var(--zlm-success-600)";
+    case "down":
+      return "var(--zlm-danger-600)";
+    case "danger":
+      return "var(--zlm-danger-600)";
+    default:
+      return "var(--zlm-text-3)";
+  }
 });
 </script>
 
 <template>
-    <div class="stat-card">
-        <div class="title">{{ title }}</div>
-        <div class="value-row">
-            <span class="value zlm-numeric" :style="{ color: valueColor }">{{ displayValue }}</span>
-            <span v-if="unit" class="unit">{{ unit }}</span>
-        </div>
-        <div v-if="trend || $slots.spark" class="footer">
-            <span v-if="trend" class="trend" :style="{ color: trendColor }">{{ trend }}</span>
-            <div v-if="$slots.spark" class="spark">
-                <slot name="spark" />
-            </div>
-        </div>
+  <div class="stat-card">
+    <div class="title">{{ title }}</div>
+    <div class="value-row">
+      <span class="value zlm-numeric" :style="{ color: valueColor }">{{ displayValue }}</span>
+      <span v-if="unit" class="unit">{{ unit }}</span>
     </div>
+    <div v-if="trend || $slots.spark" class="footer">
+      <span v-if="trend" class="trend" :style="{ color: trendColor }">{{ trend }}</span>
+      <div v-if="$slots.spark" class="spark">
+        <slot name="spark" />
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-
 .stat-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: var(--zlm-space-4);
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
-    font-family: var(--zlm-font-display);
-    transition: border-color var(--zlm-dur-base) var(--zlm-ease-out);
-    min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 96px;
+  padding: var(--zlm-space-4);
+  font-family: var(--zlm-font-display);
+  background: var(--zlm-card);
+  border: 1px solid var(--zlm-border);
+  border-radius: var(--zlm-radius-lg);
+  transition: border-color var(--zlm-dur-base) var(--zlm-ease-out);
 }
 
 .stat-card:hover {
-    border-color: var(--zlm-border-strong);
+  border-color: var(--zlm-border-strong);
 }
 
 .title {
-    font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
-    font-weight: var(--zlm-fw-medium);
-    letter-spacing: 0.02em;
+  font-size: var(--zlm-fs-caption);
+  font-weight: var(--zlm-fw-medium);
+  color: var(--zlm-text-3);
+  letter-spacing: 0.02em;
 }
 
 .value-row {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    line-height: 1;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  line-height: 1;
 }
 
 .value {
-    font-size: var(--zlm-fs-display);
-    font-weight: var(--zlm-fw-semibold);
-    letter-spacing: -0.02em;
+  font-size: var(--zlm-fs-display);
+  font-weight: var(--zlm-fw-semibold);
+  letter-spacing: -0.02em;
 }
 
 .unit {
-    font-size: 14px;
-    color: var(--zlm-text-3);
-    font-weight: var(--zlm-fw-medium);
+  font-size: 14px;
+  font-weight: var(--zlm-fw-medium);
+  color: var(--zlm-text-3);
 }
 
 .footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--zlm-space-2);
-    margin-top: auto;
+  display: flex;
+  gap: var(--zlm-space-2);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
 }
 
 .trend {
-    font-size: var(--zlm-fs-caption);
-    font-weight: var(--zlm-fw-medium);
-    line-height: 1;
+  font-size: var(--zlm-fs-caption);
+  font-weight: var(--zlm-fw-medium);
+  line-height: 1;
 }
 
 .spark {
-    height: 28px;
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 28px;
 }
 </style>

@@ -26,8 +26,7 @@ func (ps *PermissionService) DeleteRoleApis(c context.Context, roleID uint) (err
 	domain := ps.GetDomain(c)
 
 	// 删除该角色的所有权限
-	app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...)
-	return
+	return app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...)
 }
 
 // 为角色分配资源权限，原有权限会被清除
@@ -35,7 +34,9 @@ func (ps *PermissionService) AddPoliciesForRole(c context.Context, roleID uint, 
 	domain := ps.GetDomain(c)
 
 	// 删除该角色的所有权限
-	app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...)
+	if err = app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
+		return
+	}
 	// 如果有API权限，则添加到casbin
 	if !sysapilist.IsEmpty() {
 		// 构建权限策略列表
@@ -187,7 +188,9 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByMenuID(c context.Context,
 		domain := ps.GetDomain(c)
 		// 如果角色没有关联任何菜单，则清除该角色的所有API权限
 		if roleMenusForRole.IsEmpty() {
-			app.CasbinV2.RemoveAllPoliciesForRole(role.ID, domain...)
+			if err = app.CasbinV2.RemoveAllPoliciesForRole(role.ID, domain...); err != nil {
+				return
+			}
 			continue
 		}
 
@@ -269,7 +272,9 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, 
 
 		// 如果角色没有关联任何菜单，则清除该角色的所有API权限
 		if roleMenusForRole.IsEmpty() {
-			app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...)
+			if err = app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
+				return
+			}
 			continue
 		}
 

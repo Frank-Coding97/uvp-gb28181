@@ -51,7 +51,10 @@ export interface MediaRuntimeLedger {
   asOf: string;
 }
 
-export function buildMediaRuntimeLedger(overview: ZLMOverview | null | undefined, bindings: HomeRuntimeBinding[] = []): MediaRuntimeLedger {
+export function buildMediaRuntimeLedger(
+  overview: ZLMOverview | null | undefined,
+  bindings: HomeRuntimeBinding[] = []
+): MediaRuntimeLedger {
   const rawStreams = overview?.streams ?? [];
   const bindingByStream = new Map(bindings.map(item => [item.streamId, item]));
   const nodeNames = new Map((overview?.nodes ?? []).map(item => [item.nodeId, item.name]));
@@ -89,7 +92,8 @@ export function buildMediaRuntimeLedger(overview: ZLMOverview | null | undefined
     current.mediaTargets.push({ ...item.media });
     grouped.set(key, current);
   }
-  const streams = [...grouped.values()].map(item => ({ ...item, protocols: item.protocols.sort() }))
+  const streams = [...grouped.values()]
+    .map(item => ({ ...item, protocols: item.protocols.sort() }))
     .sort((a, b) => b.viewers - a.viewers || b.bytesSpeed - a.bytesSpeed || a.key.localeCompare(b.key));
   const viewers = streams.filter(item => item.viewers > 0);
   const recordings = streams.filter(item => item.recordingMp4);

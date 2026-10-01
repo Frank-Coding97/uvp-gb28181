@@ -51,13 +51,13 @@ func LoadOrCreateCipher(envName, path, version string) (*Cipher, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err = f.WriteString(base64.StdEncoding.EncodeToString(key)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	if err = f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	if err = f.Close(); err != nil {

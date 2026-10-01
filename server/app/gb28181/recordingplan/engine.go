@@ -288,7 +288,8 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	if state.PlanID != nil {
 		actionFields = append(actionFields, zap.Uint64("plan_id", *state.PlanID))
 	}
-	if decision.Action == ActionStart {
+	switch decision.Action {
+	case ActionStart:
 		execution.Action, execution.Stage = ActionStart, FailureStreamStart
 		releaseDevice, acquireErr := e.acquireDevice(ctx, channel.DeviceID)
 		if acquireErr != nil {
@@ -319,7 +320,7 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 			}
 			logRecordingAction(ctx, ActionStart, "success", nil, append(actionFields, zap.String("stage", execution.Stage))...)
 		}
-	} else if decision.Action == ActionStop {
+	case ActionStop:
 		execution.Action, execution.Stage = ActionStop, "record_stop"
 		releaseDevice, acquireErr := e.acquireDevice(ctx, channel.DeviceID)
 		if acquireErr != nil {

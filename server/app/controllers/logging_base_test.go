@@ -37,7 +37,7 @@ func TestLoggingBaseHTTPFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	oldLog, oldResponse := app.ZapLog, app.Response
 	app.ZapLog = rt.Root
 	app.Response = response.NewResponseHandler()

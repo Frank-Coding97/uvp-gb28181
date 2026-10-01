@@ -2059,8 +2059,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(ptz).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(picture).toMatch(/\.linked-picture-layout\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/s);
     expect(picture).toMatch(/\.linked-picture-layout\s*>\s*\.picture-osd-cell\s*\{[^}]*grid-column:\s*span 2/s);
-    expect(osd).toMatch(/\.osd-blocks\.is-row\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s);
-    expect(osd).toMatch(/\.osd-blocks\.is-row > \.osd-card\s*\{[^}]*height:\s*auto;[^}]*align-self:\s*stretch;/s);
+    const osdRowRule = osd.match(/\.osd-blocks\.is-row\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(osdRowRule).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+    const osdCardRule = osd.match(/\.osd-blocks\.is-row > \.osd-card\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(osdCardRule).toMatch(/height:\s*auto/);
+    expect(osdCardRule).toMatch(/align-self:\s*stretch/);
     expect(probe).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr)");
   });
 

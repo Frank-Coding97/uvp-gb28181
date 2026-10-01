@@ -43,7 +43,7 @@ func BuildBroadcastNotify(in BroadcastNotify) ([]byte, error) {
 	in.SourceID = strings.TrimSpace(in.SourceID)
 	in.TargetID = strings.TrimSpace(in.TargetID)
 	if in.SN <= 0 || in.SourceID == "" || in.TargetID == "" {
-		return nil, fmt.Errorf("Broadcast Notify 缺少 SN、SourceID 或 TargetID")
+		return nil, fmt.Errorf("broadcast notify 缺少 SN、SourceID 或 TargetID")
 	}
 	body, err := xml.Marshal(broadcastNotifyWire{CmdType: CmdBroadcast, SN: in.SN, SourceID: in.SourceID, TargetID: in.TargetID})
 	if err != nil {
@@ -55,15 +55,15 @@ func BuildBroadcastNotify(in BroadcastNotify) ([]byte, error) {
 func ParseBroadcastResponse(body []byte) (BroadcastResponse, error) {
 	var wire broadcastResponseWire
 	if err := newDecoder(body).Decode(&wire); err != nil {
-		return BroadcastResponse{}, fmt.Errorf("解析 Broadcast Response 失败: %w", err)
+		return BroadcastResponse{}, fmt.Errorf("解析 broadcast response 失败: %w", err)
 	}
 	if wire.XMLName.Local != "Response" || strings.TrimSpace(wire.CmdType) != CmdBroadcast {
-		return BroadcastResponse{}, fmt.Errorf("不是 Broadcast Response")
+		return BroadcastResponse{}, fmt.Errorf("不是 broadcast response")
 	}
 	wire.DeviceID = strings.TrimSpace(wire.DeviceID)
 	wire.TargetID = strings.TrimSpace(wire.TargetID)
 	if wire.SN <= 0 || wire.DeviceID == "" {
-		return BroadcastResponse{}, fmt.Errorf("Broadcast Response 缺少 SN 或 DeviceID")
+		return BroadcastResponse{}, fmt.Errorf("broadcast response 缺少 SN 或 DeviceID")
 	}
 	return BroadcastResponse{
 		CmdType: CmdBroadcast, SN: wire.SN, DeviceID: wire.DeviceID, TargetID: wire.TargetID,

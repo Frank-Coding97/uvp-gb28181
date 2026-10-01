@@ -61,13 +61,16 @@ describe("runtime overview state", () => {
   });
 
   it("uses typed polling and keeps a single-node operational overview", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"),
+      "utf8"
+    );
     expect(source).toContain("getZLMNodeRuntime");
     expect(source).toContain("useZLMRuntimePolling");
     expect(source).not.toContain("getZLMOverview");
     expect(source).not.toContain("scope === 'all'");
-    expect(source).not.toContain("title=\"在线节点\"");
-    expect(source).not.toContain("title=\"异常节点\"");
+    expect(source).not.toContain('title="在线节点"');
+    expect(source).not.toContain('title="异常节点"');
     expect(source.match(/<StatCard/g)).toHaveLength(6);
     expect(source).not.toContain("文件描述符 / Socket");
     expect(source).not.toContain("WorkThread 负载");
@@ -107,7 +110,10 @@ describe("runtime overview state", () => {
     expect(source).not.toContain(".media-vchart { min-height: 100%; }");
     expect(source).not.toMatch(/font-size:\s*(?:8|9|10|11)px/);
     expect(source).not.toContain("color: var(--zlm-text-4)");
-    const chartSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/components/MediaVChart.vue"), "utf8");
+    const chartSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/components/MediaVChart.vue"),
+      "utf8"
+    );
     expect(chartSource).not.toMatch(/font-size:\s*11px/);
     expect(chartSource).not.toContain("var(--zlm-text-4, var(--color-text-3))");
     const retiredSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8");
@@ -115,5 +121,4 @@ describe("runtime overview state", () => {
     expect(retiredSource).toContain("/gb28181/zlm/overview");
     expect(retiredSource).not.toContain("getZLMNodeRuntime");
   });
-
 });

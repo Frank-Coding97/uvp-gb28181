@@ -100,7 +100,7 @@ func (c *OpenAPIRuntimeControl) readConfiguration(ctx context.Context) (map[stri
 	if err != nil {
 		return nil, ErrRuntimeControlUnavailable
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.ProtoMajor != 1 || response.Header.Get("Age") != "" {
 		return nil, ErrRuntimeControlUnavailable
 	}

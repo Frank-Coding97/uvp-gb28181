@@ -54,25 +54,38 @@ describe("SchedulerStrategyPanel", () => {
   });
 
   it("keeps the switch boundary and failed-switch semantics explicit", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"),
+      "utf8"
+    );
     expect(source).toContain("只影响新点播");
     expect(source).toContain("switchError");
     expect(source).toContain("旧策略");
     expect(source).toContain("active");
     expect(source).not.toContain("effective-boundary");
     expect(source).not.toContain("effectiveFrom");
-    expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerStrategy.vue"), "utf8")).toContain("SchedulerStrategyPanel");
+    expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerStrategy.vue"), "utf8")).toContain(
+      "SchedulerStrategyPanel"
+    );
   });
 
   it("lays out the three scheduling algorithms in one responsive row", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"),
+      "utf8"
+    );
 
     expect(source).toMatch(/\.algorithm-list\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/@media\s*\(max-width:\s*760px\)[\s\S]*\.algorithm-list\s*\{[^}]*grid-template-columns:\s*1fr/s);
+    expect(source).toMatch(
+      /@media\s*(?:\(max-width:\s*760px\)|\(width\s*<=\s*760px\))[\s\S]*\.algorithm-list\s*\{[^}]*grid-template-columns:\s*1fr/s
+    );
   });
 
   it("uses the defined panel radius token for the strategy card", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"),
+      "utf8"
+    );
 
     expect(source).toMatch(/\.scheduler-strategy-panel\s*\{[^}]*border-radius:\s*var\(--zlm-radius-lg\)/s);
     expect(source).not.toContain("var(--zlm-radius-xl)");

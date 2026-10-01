@@ -9,4 +9,3 @@ describe("product version", () => {
     expect(APP_VERSION_TEXT).toBe(`v${versionInfo.version}`);
   });
 });
-

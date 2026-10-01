@@ -611,7 +611,7 @@ defineExpose({ refresh });
   display: inline-flex;
   gap: 5px;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--zlm-text-3);
 }
 .runtime-rate-label i {

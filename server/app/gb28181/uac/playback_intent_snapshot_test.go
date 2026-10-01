@@ -25,7 +25,7 @@ func (o *snapshotTransactionObserver) Request(_ context.Context, req *sip.Reques
 func TestPlaybackIntentSnapshotMatchesPreTransactionRequest(t *testing.T) {
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
-	defer ua.Close()
+	defer func() { _ = ua.Close() }()
 	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
 	require.NoError(t, err)
 	observer := &snapshotTransactionObserver{}
@@ -74,7 +74,7 @@ func TestPlaybackIntentSnapshotMatchesPreTransactionRequest(t *testing.T) {
 func TestPlaybackIntentSnapshotRejectsUnfixedIdentity(t *testing.T) {
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
-	defer ua.Close()
+	defer func() { _ = ua.Close() }()
 	u, err := New(ua, "34020000002000000001", "3402000000", "192.0.2.1", 5061, false)
 	require.NoError(t, err)
 	observer := &snapshotTransactionObserver{}

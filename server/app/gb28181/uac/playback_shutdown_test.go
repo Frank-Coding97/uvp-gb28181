@@ -246,7 +246,7 @@ func TestPlaybackShutdownRetriesFinalFactsAfterReadersExit(t *testing.T) {
 	fail.Store(true)
 	require.NoError(t, f.db.Callback().Update().Before("gorm:update").Register("fixture:shutdown", func(tx *gorm.DB) {
 		if fail.Load() && tx.Statement.Table == "gb_device_operation_intent" {
-			tx.AddError(errors.New("fixture final SQL unavailable"))
+			_ = tx.AddError(errors.New("fixture final SQL unavailable")) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	defer func() {

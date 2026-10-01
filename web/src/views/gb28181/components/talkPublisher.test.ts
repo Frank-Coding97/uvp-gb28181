@@ -17,11 +17,10 @@ describe("talkPublisher", () => {
   });
 
   it("浏览器没有 PCMA/8000 时拒绝发布", () => {
-    expect(() => preferPCMA8000({ setCodecPreferences: vi.fn() } as any, [
-      { mimeType: "audio/opus", clockRate: 48000, channels: 2 }
-    ])).toThrow("PCMA/8000");
-    expect(() => assertPCMA8000("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n"))
-      .toThrow("PCMA/8000");
+    expect(() =>
+      preferPCMA8000({ setCodecPreferences: vi.fn() } as any, [{ mimeType: "audio/opus", clockRate: 48000, channels: 2 }])
+    ).toThrow("PCMA/8000");
+    expect(() => assertPCMA8000("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n")).toThrow("PCMA/8000");
   });
 
   it("等待 ICE gathering complete 后才返回", async () => {
@@ -90,12 +89,28 @@ describe("createAudioLevelMeter", () => {
       close
     };
     // 构造函数返回对象时 JS 会用它作为实例，等价于造了一个 AudioContext。
-    vi.stubGlobal("AudioContext", class { constructor() { return context as any; } });
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        constructor() {
+          return context as any;
+        }
+      }
+    );
     vi.stubGlobal("webkitAudioContext", undefined);
 
     return {
-      cancel, close, resume, analyser, disconnectAnalyser, disconnectSource,
-      tick: () => { const callback = pending; pending = null; callback?.(0); }
+      cancel,
+      close,
+      resume,
+      analyser,
+      disconnectAnalyser,
+      disconnectSource,
+      tick: () => {
+        const callback = pending;
+        pending = null;
+        callback?.(0);
+      }
     };
   }
 

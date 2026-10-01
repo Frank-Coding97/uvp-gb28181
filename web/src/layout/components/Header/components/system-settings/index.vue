@@ -36,8 +36,12 @@
         </div>
         <div class="flex-row">
           <div>{{ $t(`system.watermark text`) }}</div>
-          <a-input :style="{ width: '100px' }" v-model="watermark" 
-          :placeholder="$t(`system.please-enter-something`)" allow-clear />
+          <a-input
+            :style="{ width: '100px' }"
+            v-model="watermark"
+            :placeholder="$t(`system.please-enter-something`)"
+            allow-clear
+          />
         </div>
         <div class="flex-row">
           <div>{{ $t(`system.watermark size`) }}</div>

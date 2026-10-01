@@ -116,6 +116,7 @@ function mountPage() {
         "a-switch": SwitchStub,
         "a-slider": SliderStub,
         "a-input-number": InputNumberStub,
+        "s-number-field": InputNumberStub,
         "a-radio-group": SelectStub,
         "a-radio": OptionStub,
         "a-checkbox-group": CheckboxGroupStub,
@@ -395,7 +396,13 @@ describe("ServiceConfig edit mode", () => {
     api.fetchPlayAuthConfig.mockResolvedValue({
       code: 0,
       message: "",
-      data: { authEnabled: true, authBindClientIP: false, authTTLSeconds: 120 }
+      data: {
+        authEnabled: true,
+        authBindClientIP: false,
+        authTTLSeconds: 120,
+        authRequiredByOpenAPI: true,
+        authConfigConflict: true
+      }
     });
     const wrapper = mountPage();
     await flushPromises();

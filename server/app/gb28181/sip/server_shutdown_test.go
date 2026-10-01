@@ -28,7 +28,7 @@ func TestServerShutdownUnstartedClosesOwnedTransport(t *testing.T) {
 	t.Cleanup(func() { _ = server.ua.Close() })
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	client, err := sipgo.NewClient(server.ua)
 	require.NoError(t, err)
 	request := siplib.NewRequest(siplib.OPTIONS, siplib.Uri{Scheme: "sip", Host: "127.0.0.1"})
@@ -120,7 +120,7 @@ func TestServerShutdownRetainsListenersUntilRecoveryWorkerJoins(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := db.DB()
 	require.NoError(t, err)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	require.NoError(t, db.Exec("CREATE TABLE gb_device (id BIGINT PRIMARY KEY, device_id TEXT, access_epoch BIGINT, cleanup_completed_epoch BIGINT, deleted_at DATETIME)").Error)
 	entered, released := make(chan struct{}), make(chan struct{})
 	var once sync.Once

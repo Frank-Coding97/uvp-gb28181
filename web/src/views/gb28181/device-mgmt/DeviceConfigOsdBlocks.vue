@@ -304,6 +304,7 @@ function fmtKey(value: string): string {
             <a-input
               class="osd-input is-num"
               :model-value="posValue(index === 0 ? 'x' : 'y')"
+              allow-clear
               inputmode="numeric"
               :disabled="disabled"
               :aria-label="`时间戳 ${axis}`"
@@ -344,6 +345,7 @@ function fmtKey(value: string): string {
           <a-input
             class="osd-input"
             :model-value="row.text"
+            allow-clear
             :maxlength="maxLength"
             :disabled="disabled"
             :placeholder="`第 ${index + 1} 条文字`"

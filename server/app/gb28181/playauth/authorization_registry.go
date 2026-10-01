@@ -723,11 +723,11 @@ func (s *AuthorizationService) MarkVerifiedClientSourceContext(ctx context.Conte
 		}
 		return ErrAuthorizationRegistryUnavailable
 	}
-	verifiedClaims, resolved, err := s.authenticateContextToken(token, expected)
+	_, resolved, err := s.authenticateContextToken(token, expected)
 	if err != nil {
 		return err
 	}
-	verifiedClaims, err = s.signer.Verify(token, resolved)
+	verifiedClaims, err := s.signer.Verify(token, resolved)
 	if err != nil {
 		return err
 	}
@@ -799,17 +799,18 @@ func (s *AuthorizationService) authenticateContextToken(token string, expected B
 		return Claims{}, Binding{}, err
 	}
 	resolved := expected
-	if claims.Version == tokenVersionV4 {
+	switch claims.Version {
+	case tokenVersionV4:
 		if claims.DeviceEpoch <= 0 {
 			return Claims{}, Binding{}, ErrAuthorizationDeviceEpoch
 		}
 		resolved.DeviceEpoch = claims.DeviceEpoch
-	} else if claims.Version == tokenVersionV2 {
+	case tokenVersionV2:
 		if expected.DeviceEpoch != 0 {
 			return Claims{}, Binding{}, ErrTokenBindingMismatch
 		}
 		resolved.DeviceEpoch = 0
-	} else {
+	default:
 		return Claims{}, Binding{}, ErrTokenTampered
 	}
 	return claims, resolved, nil
@@ -872,7 +873,7 @@ func isNilInterface(value any) bool {
 	}
 	rv := reflect.ValueOf(value)
 	switch rv.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return rv.IsNil()
 	default:
 		return false

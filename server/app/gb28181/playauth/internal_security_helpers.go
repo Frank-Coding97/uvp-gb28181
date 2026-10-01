@@ -25,7 +25,7 @@ func validBootNonce(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return false
 		}
 	}
@@ -33,7 +33,7 @@ func validBootNonce(value string) bool {
 }
 
 func lockedModel(tx *gorm.DB, model any, table string) *gorm.DB {
-	if tx != nil && tx.Dialector.Name() == "sqlserver" {
+	if tx != nil && tx.Name() == "sqlserver" {
 		return tx.Table(table + " WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Model(model).Clauses(clause.Locking{Strength: "UPDATE"})

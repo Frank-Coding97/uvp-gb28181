@@ -128,7 +128,11 @@ func TestPlaybackRTPRecoveryActualTLSWorker(t *testing.T) {
 		}
 	})
 	require.NoError(t, err)
-	defer stop(context.Background())
+	defer func() {
+		if err := stop(context.Background()); err != nil {
+			t.Errorf("recovery stop failed: %v", err)
+		}
+	}()
 	select {
 	case err = <-done:
 		require.ErrorIs(t, err, uac.ErrPlaybackCleanupUnknown)

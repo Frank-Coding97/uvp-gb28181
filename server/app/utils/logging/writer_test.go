@@ -346,7 +346,8 @@ func TestLoggingWriterCompressionRecovery(t *testing.T) {
 			}
 			_ = w.Close()
 			o.before = nil
-			w = mustWriter(t, o)
+			recovered := mustWriter(t, o)
+			_ = recovered.Close()
 			if failPublish {
 				return
 			}
@@ -358,7 +359,7 @@ func TestLoggingWriterCompressionRecovery(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			z, e := gzip.NewReader(f)
 			if e != nil {
 				t.Fatal(e)
@@ -460,7 +461,8 @@ func TestLoggingWriterCompressionFailureCopies(t *testing.T) {
 				t.Fatal("sync failure removed sole gzip")
 			}
 			o.before = nil
-			w = mustWriter(t, o)
+			recovered := mustWriter(t, o)
+			_ = recovered.Close()
 			_, size := managedFiles(t, o)
 			if size > o.maxBytes*int64(o.maxBackups+1) {
 				t.Fatal("recovery failed to restore budget")
@@ -476,7 +478,7 @@ func TestLoggingWriterCompressionFailureCopies(t *testing.T) {
 				}
 			} else {
 				f, _ := os.Open(gz[0])
-				defer f.Close()
+				defer func() { _ = f.Close() }()
 				z, e := gzip.NewReader(f)
 				if e != nil {
 					t.Fatal(e)

@@ -32,7 +32,7 @@ func TestEngineReturnsGapCloseFailureToScheduler(t *testing.T) {
 	injected := errors.New("injected gap close failure")
 	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:reject_gap_close", func(tx *gorm.DB) {
 		if tx.Statement.Table == "gb_recording_plan_gap" {
-			tx.AddError(injected)
+			_ = tx.AddError(injected) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	engine := NewEngine(db, &fakeChannelOperator{}, EngineOptions{Now: func() time.Time { return now }})

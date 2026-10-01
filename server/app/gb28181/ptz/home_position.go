@@ -209,10 +209,6 @@ func findHomePositionDB(db *gorm.DB, channelID uint) (gbmodels.GbPTZHomePosition
 	return home, result.RowsAffected > 0, result.Error
 }
 
-func (s *Service) getHomePosition(ctx context.Context, channelID uint) (gbmodels.GbPTZHomePosition, error) {
-	return getHomePositionDB(ptzWriter(s.db).WithContext(ctx), channelID)
-}
-
 func getHomePositionDB(db *gorm.DB, channelID uint) (gbmodels.GbPTZHomePosition, error) {
 	home, found, err := findHomePositionDB(db, channelID)
 	if err != nil {

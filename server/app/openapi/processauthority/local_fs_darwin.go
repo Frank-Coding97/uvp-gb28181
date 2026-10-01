@@ -28,7 +28,7 @@ func secureLocalACL(file *os.File) bool {
 		Common, Volume, Directory, File, Fork uint32
 	}{Count: 5, Common: unix.ATTR_CMN_EXTENDED_SECURITY}
 	var data [4096]byte
-	_, _, errno := syscall.Syscall6(unix.SYS_FGETATTRLIST, file.Fd(), uintptr(unsafe.Pointer(&attrs)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), 0, 0)
+	_, _, errno := syscall.Syscall6(syscall.SYS_FGETATTRLIST, file.Fd(), uintptr(unsafe.Pointer(&attrs)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), 0, 0)
 	runtime.KeepAlive(file)
 	if errno != 0 {
 		return false

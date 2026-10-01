@@ -19,7 +19,6 @@ type fakeRetirementRepo struct {
 	markErr     error
 	saves       int
 	marks       []string
-	lastMarked  node.RetiredCredential
 	markedState string
 }
 

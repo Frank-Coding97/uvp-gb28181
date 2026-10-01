@@ -299,16 +299,17 @@ func TestSchedulerDoesNotDispatchTransferredQueuedCommand(t *testing.T) {
 				require.NoError(t, barrier.WaitBefore(waitCtx, 1, 2))
 				cancel()
 			}
-			if window == "other-device" {
+			switch window {
+			case "other-device":
 				require.Len(t, f.sender.Calls(), 1)
 				require.Contains(t, f.sender.Calls()[0].body, "34020000001320000004")
 				require.Empty(t, loadSchedulerAttempts(t, f.db, op.ID), "revoked command must have no dispatch attempt")
-			} else if window == "unchanged" || window == "writeback-fails" || window == "synchronous" {
+			case "unchanged", "writeback-fails", "synchronous":
 				require.Len(t, f.sender.Calls(), 1)
 				var attempt gbmodels.GbPTZOperationAttempt
 				require.NoError(t, f.db.First(&attempt).Error)
 				require.NotNil(t, attempt.LocalQuiescedAt, "successful result and sender exit must commit together")
-			} else {
+			default:
 				require.Empty(t, f.sender.Calls(), "an old queued command must not acquire the new owner's epoch")
 			}
 		})

@@ -36,8 +36,8 @@ describe("node service config route", () => {
     expect(source.match(/<h2>服务配置<\/h2>/g) ?? []).toHaveLength(0);
     expect(source).toContain("service-config-toolbar__node");
     expect(source).toContain("<template #heading>");
-    expect(source).toContain("热更新项保存后立即生效，重启后生效项保存后需重启媒体节点");
-    expect(source).toContain("Secret 不会回显");
+    expect(source.replace(/\s+/g, " ")).toContain("热更新项保存后立即生效，重启后生效项保存后需重启媒体节点");
+    expect(source.replace(/\s+/g, " ")).toContain("Secret 不会回显");
   });
 
   it("keeps invalid node ids explicit instead of silently selecting another node", () => {

@@ -1,27 +1,62 @@
 import { describe, expect, it } from "vitest";
-import { cascadeCycleLabel, cascadeFormFieldErrors, cascadeLocalIdentityDefaults, cascadePresentation, channelSourceLabel, defaultCascadePlatform, pendingSourceChannelIds, resolveChannelPTZAllowed, validateCascadePlatform } from "./cascadeState";
+import {
+  cascadeCycleLabel,
+  cascadeFormFieldErrors,
+  cascadeLocalIdentityDefaults,
+  cascadePresentation,
+  channelSourceLabel,
+  defaultCascadePlatform,
+  pendingSourceChannelIds,
+  resolveChannelPTZAllowed,
+  validateCascadePlatform
+} from "./cascadeState";
 
 describe("cascade platform state", () => {
   it("maps runtime facts to product conclusions", () => {
-    expect(cascadePresentation({ enabled: false, overall: "offline", registration: "unregistered", heartbeat: "unknown" })).toMatchObject({ label: "已停用", color: "gray" });
-    expect(cascadePresentation({ enabled: true, overall: "online", registration: "registered", heartbeat: "healthy" })).toMatchObject({ label: "在线", color: "green" });
-    expect(cascadePresentation({ enabled: true, overall: "offline", registration: "expired", heartbeat: "stale" })).toMatchObject({ label: "注册已过期", color: "red" });
+    expect(
+      cascadePresentation({ enabled: false, overall: "offline", registration: "unregistered", heartbeat: "unknown" })
+    ).toMatchObject({ label: "已停用", color: "gray" });
+    expect(
+      cascadePresentation({ enabled: true, overall: "online", registration: "registered", heartbeat: "healthy" })
+    ).toMatchObject({ label: "在线", color: "green" });
+    expect(cascadePresentation({ enabled: true, overall: "offline", registration: "expired", heartbeat: "stale" })).toMatchObject(
+      { label: "注册已过期", color: "red" }
+    );
   });
 
   it("rejects invalid identities and ports without leaking backend diagnostics", () => {
-    const errors = validateCascadePlatform({ ...defaultCascadePlatform(), name: "", upstreamServerId: "1", host: "bad host", port: 0, localDeviceId: "2", localDomain: "", localSipIp: "not an ip", localSipPort: 70000 });
-    expect(errors).toEqual(expect.arrayContaining(["平台名称不能为空", "上级平台 ID 必须是 20 位数字", "上级端口必须在 1-65535 之间", "本平台设备 ID 必须是 20 位数字"]));
+    const errors = validateCascadePlatform({
+      ...defaultCascadePlatform(),
+      name: "",
+      upstreamServerId: "1",
+      host: "bad host",
+      port: 0,
+      localDeviceId: "2",
+      localDomain: "",
+      localSipIp: "not an ip",
+      localSipPort: 70000
+    });
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        "平台名称不能为空",
+        "上级平台 ID 必须是 20 位数字",
+        "上级端口必须在 1-65535 之间",
+        "本平台设备 ID 必须是 20 位数字"
+      ])
+    );
     expect(errors.length).toBeGreaterThan(4);
   });
 
   it("maps the configured local SIP identity into a new cascade platform", () => {
-    expect(cascadeLocalIdentityDefaults({
-      listenIp: "0.0.0.0",
-      advertiseIp: "192.168.10.106",
-      port: 5061,
-      domain: "3402000000",
-      serverId: "34020000001320000001"
-    })).toEqual({
+    expect(
+      cascadeLocalIdentityDefaults({
+        listenIp: "0.0.0.0",
+        advertiseIp: "192.168.10.106",
+        port: 5061,
+        domain: "3402000000",
+        serverId: "34020000001320000001"
+      })
+    ).toEqual({
       localDeviceId: "34020000001320000001",
       localDomain: "3402000000",
       localSipIp: "192.168.10.106",
@@ -32,13 +67,15 @@ describe("cascade platform state", () => {
   });
 
   it("does not use a wildcard listener as the local advertised address", () => {
-    expect(cascadeLocalIdentityDefaults({
-      listenIp: "0.0.0.0",
-      advertiseIp: "",
-      port: 5060,
-      domain: "3402000000",
-      serverId: "34020000001320000001"
-    }).localSipIp).toBe("");
+    expect(
+      cascadeLocalIdentityDefaults({
+        listenIp: "0.0.0.0",
+        advertiseIp: "",
+        port: 5060,
+        domain: "3402000000",
+        serverId: "34020000001320000001"
+      }).localSipIp
+    ).toBe("");
   });
 
   it("defaults new shared channels to the platform PTZ setting", () => {
@@ -72,7 +109,13 @@ describe("cascade platform state", () => {
   });
 
   it("reports valid touched fields as empty and checks optional advertise address", () => {
-    const form = { ...defaultCascadePlatform(), name: "上级", upstreamServerId: "34020000002000000001", localDeviceId: "34020000001320000001", mediaAdvertiseIp: "bad ip" };
+    const form = {
+      ...defaultCascadePlatform(),
+      name: "上级",
+      upstreamServerId: "34020000002000000001",
+      localDeviceId: "34020000001320000001",
+      mediaAdvertiseIp: "bad ip"
+    };
     const touched = { name: true, upstreamServerId: true, localDeviceId: true, mediaAdvertiseIp: true };
     const errors = cascadeFormFieldErrors(form, touched);
     expect(errors.name).toBe("");
@@ -84,7 +127,10 @@ describe("cascade platform state", () => {
   // 保存共享前必须先收敛「勾选通道 → 所属设备」：解析是异步的，用户可能在请求
   // 回来前就点保存，此前会把"还没解析完"误判成"部分通道无法关联所属设备"。
   it("lists selected channels that still have no resolved source device", () => {
-    const resolved = new Map<number, number>([[3537, 5147], [3539, 5147]]);
+    const resolved = new Map<number, number>([
+      [3537, 5147],
+      [3539, 5147]
+    ]);
     expect(pendingSourceChannelIds([3537, 3538, 3539], resolved)).toEqual([3538]);
     expect(pendingSourceChannelIds([3537, 3539], resolved)).toEqual([]);
     expect(pendingSourceChannelIds([], resolved)).toEqual([]);
@@ -101,5 +147,4 @@ describe("cascade platform state", () => {
     expect(channelSourceLabel({ channelId: "  " }, 3538)).toBe("#3538");
     expect(channelSourceLabel(undefined, 3538)).toBe("#3538");
   });
-
 });

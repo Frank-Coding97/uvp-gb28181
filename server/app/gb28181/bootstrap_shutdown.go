@@ -126,7 +126,6 @@ var (
 	reloadMu                sync.Mutex
 	stopping                bool
 	activeShutdownRun       *bootstrapShutdownRun
-	lastShutdownGeneration  *shutdownGeneration
 	sipQuiesce              *sipQuiesceState
 	sipGenerationBackground *asyncgroup.Group
 
@@ -212,9 +211,6 @@ func (r *bootstrapShutdownRun) signalControl() {
 func (r *bootstrapShutdownRun) bindControlGeneration(ctx context.Context) {
 	if r == nil || r.controlGeneration != nil {
 		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	sipGeneration := r.generation
 	r.controlGeneration = newShutdownGeneration(context.Background(), nil, []shutdownStep{
@@ -311,23 +307,6 @@ func QuiesceRequests(ctx context.Context) error {
 	}
 	state := sipQuiesce
 	if server != nil && state == nil {
-		state = &sipQuiesceState{done: make(chan struct{})}
-		sipQuiesce = state
-	}
-	sipLifecycleMu.Unlock()
-	return quiesceSIPServerWithState(ctx, server, state)
-}
-
-func quiesceSIPServer(ctx context.Context, server sipRuntimeServer) error {
-	if server == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	sipLifecycleMu.Lock()
-	state := sipQuiesce
-	if state == nil {
 		state = &sipQuiesceState{done: make(chan struct{})}
 		sipQuiesce = state
 	}
@@ -733,7 +712,6 @@ func StopContext(ctx context.Context) error {
 	sipLifecycleMu.Lock()
 	stopping = true
 	if activeShutdownRun != nil && shutdownDone(activeShutdownRun.generation) {
-		lastShutdownGeneration = activeShutdownRun.generation
 		if !activeShutdownRun.process.Load() && activeShutdownRun.generation.result() == nil {
 			// Reload owns successful-generation cleanup. A failed generation
 			// remains active so process Stop can promote and join its captured
@@ -775,7 +753,6 @@ func reloadSIPGeneration(ctx context.Context) (*bootstrapShutdownRun, error) {
 	}
 	if activeShutdownRun != nil && shutdownDone(activeShutdownRun.generation) {
 		run := activeShutdownRun
-		lastShutdownGeneration = run.generation
 		if err := run.generation.result(); err != nil {
 			return nil, fmt.Errorf("上一次 SIP 热重载未完成: %w", err)
 		}
@@ -797,7 +774,6 @@ func finishReloadGeneration(run *bootstrapShutdownRun, err error) {
 	generationErr := run.generation.result()
 	sipLifecycleMu.Lock()
 	defer sipLifecycleMu.Unlock()
-	lastShutdownGeneration = run.generation
 	// A failed generation keeps its captured references and active marker so a
 	// later Reload cannot silently build on partially stopped dependencies.
 	if generationErr != nil || run.process.Load() {

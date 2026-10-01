@@ -18,7 +18,7 @@ func LockGBDeviceForMaintenance(tx *gorm.DB, deviceID uint, deviceCode string) (
 		return device, gorm.ErrRecordNotFound
 	}
 	query := tx.Model(&GbDevice{}).Where("id = ?", deviceID)
-	switch strings.ToLower(tx.Dialector.Name()) {
+	switch strings.ToLower(tx.Name()) {
 	case "mysql", "postgres", "postgresql":
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	case "sqlserver":

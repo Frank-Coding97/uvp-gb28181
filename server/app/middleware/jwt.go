@@ -60,7 +60,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		}
 		// 将用户信息同时存储到Gin和标准请求上下文中，保留既有日志scope。
 		c.Set(consts.BindContextKeyName, claims)
-		requestContext := context.WithValue(c.Request.Context(), consts.BindContextKeyName, claims)
+		requestContext := context.WithValue(c.Request.Context(), consts.BindContextKey, claims)
 		c.Request = c.Request.WithContext(requestContext)
 		if err := app.SessionValidator.TouchSession(c.Request.Context(), claims.SID); err != nil {
 			app.Log(c.Request.Context()).Named("auth").Warn("Update session activity failed",

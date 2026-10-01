@@ -21,7 +21,7 @@ func TestHTTPBindFailureReturnsToRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer occupied.Close()
+	defer func() { _ = occupied.Close() }()
 	server := &http.Server{Addr: occupied.Addr().String()}
 	done := make(chan error, 1)
 	go func() {
@@ -44,7 +44,7 @@ func TestHTTPShutdownTimeoutRetainsInFlightHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := probe.Addr().String()
-	probe.Close()
+	_ = probe.Close()
 	entered, release := make(chan struct{}), make(chan struct{})
 	server := &http.Server{Addr: addr, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(entered)
@@ -60,7 +60,7 @@ func TestHTTPShutdownTimeoutRetainsInFlightHandler(t *testing.T) {
 			}
 		}, 20*time.Millisecond, time.Millisecond)
 	}()
-	t.Cleanup(func() { server.Close() })
+	t.Cleanup(func() { _ = server.Close() })
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	defer client.CloseIdleConnections()
 	response := make(chan error, 1)
@@ -69,8 +69,8 @@ func TestHTTPShutdownTimeoutRetainsInFlightHandler(t *testing.T) {
 		for {
 			res, err := client.Get("http://" + addr)
 			if err == nil {
-				io.Copy(io.Discard, res.Body)
-				res.Body.Close()
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
 				response <- nil
 				return
 			}
@@ -105,7 +105,7 @@ func TestHTTPShutdownTimeoutRetainsInFlightHandler(t *testing.T) {
 	default:
 	}
 	if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Error("shutdown still admits new connections")
 	}
 	if os.Getenv("UVP_HTTP_DRAIN_CHILD") == "1" {
@@ -142,25 +142,25 @@ func TestHTTPShutdownTimeoutProcessStaysAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.Close()
-	defer writer.Close()
+	defer func() { _ = output.Close() }()
+	defer func() { _ = writer.Close() }()
 	cmd.Stdout, cmd.Stderr = writer, os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	writer.Close()
+	_ = writer.Close()
 	held := make(chan bool, 1)
 	go func() {
 		scanner := bufio.NewScanner(output)
 		for scanner.Scan() {
 			if scanner.Text() == "HTTP_HELD" {
 				held <- true
-				io.Copy(io.Discard, output)
+				_, _ = io.Copy(io.Discard, output)
 				return
 			}
 		}

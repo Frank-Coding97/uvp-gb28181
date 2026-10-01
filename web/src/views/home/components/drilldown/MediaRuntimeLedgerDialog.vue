@@ -13,6 +13,7 @@ import {
   type ZLMStreamViewer
 } from "@/api/gb28181-zlm-runtime";
 import { useUserStoreHook } from "@/store/modules/user";
+import SNumberField from "@/components/s-number-field/index.vue";
 import ZLMDangerActionDialog from "@/views/gb28181/zlm/components/ZLMDangerActionDialog.vue";
 import { formatZLMByteRate, formatZLMDuration, zlmErrorPresentation } from "@/views/gb28181/zlm/components/zlmFormatters";
 import ZLMSessionKickDialog from "@/views/gb28181/zlm/ZLMSessionKickDialog.vue";
@@ -48,7 +49,7 @@ const networkError = ref("");
 const networkTruncated = ref(false);
 const networkNodeId = ref<number>();
 const networkPeerIp = ref("");
-const networkLocalPort = ref<number>();
+const networkLocalPort = ref<number | null>(null);
 const networkPage = ref(1);
 const networkPageSize = ref(10);
 const networkTotal = ref(0);
@@ -160,7 +161,7 @@ watch(
     const preferredNode = props.ledger.sessions.find(item => item.sampled) ?? props.ledger.sessions[0];
     networkNodeId.value = preferredNode?.nodeId;
     networkPeerIp.value = "";
-    networkLocalPort.value = undefined;
+    networkLocalPort.value = null;
     networkPage.value = 1;
     void loadNetworkSessions();
   },
@@ -356,7 +357,7 @@ function queryNetworkSessions() {
 
 function resetNetworkSessions() {
   networkPeerIp.value = "";
-  networkLocalPort.value = undefined;
+  networkLocalPort.value = null;
   networkPage.value = 1;
   void loadNetworkSessions();
 }
@@ -425,16 +426,14 @@ function changeNetworkPageSize(value: number) {
             aria-label="按远端 IP 筛选"
             @search="queryNetworkSessions"
           />
-          <a-input-number
+          <s-number-field
             v-model="networkLocalPort"
             class="network-port-filter"
             :min="1"
             :max="65535"
-            hide-button
-            allow-clear
             placeholder="本地端口"
             aria-label="按本地端口筛选"
-            @press-enter="queryNetworkSessions"
+            @keydown.enter="queryNetworkSessions"
           />
         </template>
         <template #actions

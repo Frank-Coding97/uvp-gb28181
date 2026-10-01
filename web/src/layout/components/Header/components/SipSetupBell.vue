@@ -14,66 +14,60 @@ const permissions = computed(() => useUserStoreHook().account.permissions);
 const visible = computed(() => hasSipUpdatePermission(permissions.value) && store.needsAttention);
 
 const tooltip = computed(() => {
-    const state = store.status?.runtime?.state;
-    if (state === "failed") return "SIP 服务启动失败,点击查看和修改配置";
-    return "SIP 尚未配置,点击进入引导";
+  const state = store.status?.runtime?.state;
+  if (state === "failed") return "SIP 服务启动失败,点击查看和修改配置";
+  return "SIP 尚未配置,点击进入引导";
 });
 
 function openSetup() {
-    store.openModal();
+  store.openModal();
 }
 </script>
 
 <template>
-    <a-tooltip v-if="visible" :content="tooltip" position="bottom">
-        <a-button
-            size="mini"
-            type="text"
-            class="icon_btn sip-setup-bell"
-            aria-label="SIP 配置提醒"
-            @click="openSetup"
-        >
-            <template #icon>
-                <Bell :size="18" />
-            </template>
-        </a-button>
-    </a-tooltip>
+  <a-tooltip v-if="visible" :content="tooltip" position="bottom">
+    <a-button size="mini" type="text" class="icon_btn sip-setup-bell" aria-label="SIP 配置提醒" @click="openSetup">
+      <template #icon>
+        <Bell :size="18" />
+      </template>
+    </a-button>
+  </a-tooltip>
 </template>
 
 <style scoped>
 .sip-setup-bell {
-    position: relative;
-    color: var(--uvp-danger, #d14343);
+  position: relative;
+  color: var(--uvp-danger, #d14343);
 }
 
 .sip-setup-bell::before {
-    position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 8px;
-    height: 8px;
-    content: "";
-    background: var(--uvp-danger, #d14343);
-    border: 2px solid var(--uvp-workspace-bg, #ffffff);
-    border-radius: 50%;
-    animation: sip-bell-pulse 2s infinite;
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  content: "";
+  background: var(--uvp-danger, #d14343);
+  border: 2px solid var(--uvp-workspace-bg, #ffffff);
+  border-radius: 50%;
+  animation: sip-bell-pulse 2s infinite;
 }
 
 @keyframes sip-bell-pulse {
-    0%,
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 
-    50% {
-        transform: scale(1.15);
-        opacity: 0.75;
-    }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.15);
+  }
 }
 
 .sip-setup-bell:hover {
-    color: var(--uvp-danger, #d14343);
-    background: var(--uvp-danger-soft, #fff2f2);
+  color: var(--uvp-danger, #d14343);
+  background: var(--uvp-danger-soft, #fff2f2);
 }
 </style>

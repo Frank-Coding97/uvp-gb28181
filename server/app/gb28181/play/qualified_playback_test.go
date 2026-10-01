@@ -150,7 +150,8 @@ func TestQualifiedNilContextUsesBackground(t *testing.T) {
 		nodes: []*node.Node{qualifiedTestNode(1, "node-a")},
 	}, locations, &countingQualifiedValidator{})
 
-	if _, err := service.EnsureLive(nil, qualifiedTestRequest("ticket-nil-context")); err != nil {
+	// This fixture verifies the service's nil-context compatibility path.
+	if _, err := service.EnsureLive(nil, qualifiedTestRequest("ticket-nil-context")); err != nil { //nolint:staticcheck // nil is the contract under test.
 		t.Fatalf("nil context qualified reuse: %v", err)
 	}
 }

@@ -24,10 +24,11 @@ const statistics = (value: number): ZLMObjectStatistics => ({
 
 describe("object statistic history", () => {
   it("reads object trends returned by the backend", () => {
-    expect(objectStatisticTrend([
-      { sampledAt: 1, objectStatistics: statistics(3) },
-      { sampledAt: 2 },
-      { sampledAt: 3, objectStatistics: statistics(5) }
-    ], "mediaSource")).toEqual([3, 5]);
+    expect(
+      objectStatisticTrend(
+        [{ sampledAt: 1, objectStatistics: statistics(3) }, { sampledAt: 2 }, { sampledAt: 3, objectStatistics: statistics(5) }],
+        "mediaSource"
+      )
+    ).toEqual([3, 5]);
   });
 });

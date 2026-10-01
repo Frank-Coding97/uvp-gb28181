@@ -338,7 +338,7 @@ func TestParseHomeAndCruiseResponses(t *testing.T) {
 		t.Fatalf("unexpected track list: %+v, err=%v", list, err)
 	}
 	detail, err := ParseCruiseTrackResponse([]byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID><Number>0</Number><Name>T0</Name><SumNum>1</SumNum><CruisePointList Num="1"><CruisePoint><PresetIndex>3</PresetIndex><StayTime>5</StayTime><Speed>8</Speed></CruisePoint></CruisePointList></Response>`))
-	if err != nil || detail.CruiseTrack.ID != 0 || detail.CruiseTrack.PointList.Num != 1 || len(detail.CruiseTrack.PointList.Points) != 1 || detail.CruiseTrack.PointList.Points[0].PresetIndex != 3 {
+	if err != nil || detail.ID != 0 || detail.PointList.Num != 1 || len(detail.PointList.Points) != 1 || detail.CruiseTrack.PointList.Points[0].PresetIndex != 3 {
 		t.Fatalf("unexpected track detail: %+v, err=%v", detail, err)
 	}
 }

@@ -343,7 +343,7 @@ func TestDeviceRTPOriginalCloseFlushFailureBlocksNextNetworkCall(t *testing.T) {
 	const callback = "test:original-close-outcome-failure"
 	require.NoError(t, f.db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
 		if failing {
-			tx.AddError(errors.New("fixture outcome persistence unavailable"))
+			_ = tx.AddError(errors.New("fixture outcome persistence unavailable")) // AddError mutates tx; the returned *DB is intentionally unused.
 		}
 	}))
 	t.Cleanup(func() { _ = f.db.Callback().Update().Remove(callback) })

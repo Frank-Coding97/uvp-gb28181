@@ -14,6 +14,10 @@ import (
 	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
+func TestPublishedScopeSetNilSnapshot(t *testing.T) {
+	require.Empty(t, publishedScopeSet(nil))
+}
+
 func TestEnsurePublishedCatalogPublishesOnceAndNeverReSeeds(t *testing.T) {
 	db := newPublishTestDB(t)
 

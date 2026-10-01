@@ -301,9 +301,10 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	}
 	var onlineTotal, offlineTotal int64
 	for _, row := range statusCounts {
-		if row.Status == gbmodels.DeviceStatusOnline {
+		switch row.Status {
+		case gbmodels.DeviceStatusOnline:
 			onlineTotal = row.Count
-		} else if row.Status == gbmodels.DeviceStatusOffline {
+		case gbmodels.DeviceStatusOffline:
 			offlineTotal = row.Count
 		}
 	}

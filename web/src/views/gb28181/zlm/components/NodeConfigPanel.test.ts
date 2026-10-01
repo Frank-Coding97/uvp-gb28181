@@ -54,7 +54,7 @@ describe("NodeConfigPanel", () => {
     ]);
     expect(source).toContain('rows.filter(row => row.tone !== "danger")');
     expect(source).toContain("配置已保存，部分配置需重启媒体节点后生效");
-    expect(source).toContain(">保存配置</a-button>");
+    expect(source.replace(/\s+/g, " ")).toMatch(/>\s*保存配置\s*<\/a-button\s*>/);
   });
   it("edits network ports as restart-required values with an impact confirmation", () => {
     const port = item("http.port", "restart_required", "18080");
@@ -109,7 +109,7 @@ describe("NodeConfigPanel", () => {
       { label: "启用", value: "1" }
     ]);
     expect(source).toContain("dictCode");
-    expect(source).toContain('<a-select :model-value="dirty[record.key] ?? record.value"');
+    expect(source.replace(/\s+/g, " ")).toContain('<a-select :model-value="dirty[record.key] ?? record.value"');
     expect(configDictionaryOptions({ ...checkSource, dictCode: "status" }, [])).toEqual([
       { label: "禁用", value: "0" },
       { label: "启用", value: "1" }

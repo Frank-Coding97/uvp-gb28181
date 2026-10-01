@@ -54,7 +54,7 @@ func TestLoggingDeploymentCompose(t *testing.T) {
 				Driver  string
 				Options map[string]string
 			}
-			Volumes         []string
+			Volumes         []yaml.Node
 			StopGracePeriod string `yaml:"stop_grace_period"`
 		}
 	}
@@ -70,7 +70,22 @@ func TestLoggingDeploymentCompose(t *testing.T) {
 	}
 	wantMount := "${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs"
 	for _, mount := range backend.Volumes {
-		if mount == wantMount {
+		if mount.Kind == yaml.ScalarNode && mount.Value == wantMount {
+			return
+		}
+		if mount.Kind != yaml.MappingNode {
+			continue
+		}
+		var source, target string
+		for index := 0; index+1 < len(mount.Content); index += 2 {
+			switch mount.Content[index].Value {
+			case "source":
+				source = mount.Content[index+1].Value
+			case "target":
+				target = mount.Content[index+1].Value
+			}
+		}
+		if source+":"+target == wantMount {
 			return
 		}
 	}

@@ -67,7 +67,9 @@ func TestPlaybackOriginalProcessCrashChild(t *testing.T) {
 	}
 	if pauseAt > 0 {
 		pausedDB := authoritytest.AfterCommitDB(t, db, pauseAt, func() error {
-			fmt.Fprintln(os.Stdout, "UVP_ORIGINAL_COMMIT_PAUSED")
+			if _, err := fmt.Fprintln(os.Stdout, "UVP_ORIGINAL_COMMIT_PAUSED"); err != nil {
+				return err
+			}
 			_, err := bufio.NewReader(os.Stdin).ReadByte()
 			return err
 		})
@@ -111,7 +113,7 @@ func testPlaybackOriginalProcessCrash(t *testing.T, phase string) {
 	require.NoError(t, err)
 	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	binary, err := os.Executable()
@@ -120,10 +122,10 @@ func testPlaybackOriginalProcessCrash(t *testing.T, phase string) {
 	cmd.Env = append(os.Environ(), "UVP_ORIGINAL_CRASH_DB="+path, "UVP_ORIGINAL_CRASH_STATE="+stateDir, "UVP_ORIGINAL_CRASH_PHASE="+phase, "UVP_ORIGINAL_CRASH_PEER="+peer.LocalAddr().String())
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
-	defer stdin.Close()
+	defer func() { _ = stdin.Close() }()
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)
-	defer stdout.Close()
+	defer func() { _ = stdout.Close() }()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	paused := make(chan struct{})

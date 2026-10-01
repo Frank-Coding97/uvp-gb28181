@@ -1399,12 +1399,5 @@ func ApplyPlaybackSelection(result *Result, preferred string, secure bool) {
 	result.Protocol, result.URL, result.ZLMWebRTC = selected.Protocol, selected.URL, selected.ZLMWebRTC
 }
 
-// buildResult 旧版,deprecated 单节点路径用
-//
-// Deprecated: 走 buildResultFor。仅保留用于 service_test 旧用例(若有)。
-func (s *Service) buildResult(streamID, ssrc string) *Result {
-	return s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
-}
-
 // sessions 暴露给 hook 端点(on_stream_none_reader / on_rtp_server_timeout 用)
 var _ = sync.Mutex{}

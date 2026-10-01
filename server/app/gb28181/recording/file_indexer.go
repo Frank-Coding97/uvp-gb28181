@@ -51,7 +51,7 @@ func (i *FileIndexer) IndexRecordMP4(ctx context.Context, nodeID int64, event Re
 	if err != nil {
 		return false, err
 	}
-	attribution := RecordingFileAttribution{NodeID: nodeID}
+	var attribution RecordingFileAttribution
 	if session != nil {
 		attribution = RecordingFileAttribution{NodeID: nodeID, SessionID: &session.ID, ChannelID: session.ChannelID, DeviceID: session.DeviceID}
 	} else {

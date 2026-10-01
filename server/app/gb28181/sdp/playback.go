@@ -90,20 +90,20 @@ func buildHistoricalSDP(params PlaybackParams, sessionName string, start, end ti
 	}
 	var body strings.Builder
 	body.WriteString("v=0\r\n")
-	body.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", params.ServerID, params.RecvIP))
-	body.WriteString(fmt.Sprintf("s=%s\r\n", sessionName))
-	body.WriteString(fmt.Sprintf("u=%s:0\r\n", params.ChannelID))
-	body.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", params.RecvIP))
-	body.WriteString(fmt.Sprintf("t=%d %d\r\n", start.Unix(), end.Unix()))
+	fmt.Fprintf(&body, "o=%s 0 0 IN IP4 %s\r\n", params.ServerID, params.RecvIP)
+	fmt.Fprintf(&body, "s=%s\r\n", sessionName)
+	fmt.Fprintf(&body, "u=%s:0\r\n", params.ChannelID)
+	fmt.Fprintf(&body, "c=IN IP4 %s\r\n", params.RecvIP)
+	fmt.Fprintf(&body, "t=%d %d\r\n", start.Unix(), end.Unix())
 	writeVideoMediaDescription(&body, params.RecvPort, transport, params.Extended)
 	if downloadSpeed > 0 {
-		body.WriteString(fmt.Sprintf("a=downloadspeed:%d\r\n", downloadSpeed))
+		fmt.Fprintf(&body, "a=downloadspeed:%d\r\n", downloadSpeed)
 	}
 	if params.TCPMode {
 		body.WriteString("a=setup:passive\r\n")
 		body.WriteString("a=connection:new\r\n")
 	}
-	body.WriteString(fmt.Sprintf("y=%s\r\n", params.SSRC))
+	fmt.Fprintf(&body, "y=%s\r\n", params.SSRC)
 	return body.String(), nil
 }
 

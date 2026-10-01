@@ -11,6 +11,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/icholy/digest"
+	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -124,10 +125,10 @@ func doRegisterWithServerID(t *testing.T, deviceID, serverID, password string, e
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:"+serverID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	require.NoError(t, sip.ParseUri("sip:"+serverID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient))
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.AppendHeader(sip.NewHeader("Contact", "<sip:"+deviceID+"@127.0.0.1>"))
 	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
@@ -185,9 +186,9 @@ func TestRegisterChallenge(t *testing.T) {
 
 	ua, _ := sipgo.NewUA(sipgo.WithUserAgent(testDeviceID))
 	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:"+testServerID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	require.NoError(t, sip.ParseUri("sip:"+testServerID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient))
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.AppendHeader(sip.NewHeader("Contact", "<sip:"+testDeviceID+"@127.0.0.1>"))
 	req.SetTransport("UDP")
@@ -297,10 +298,10 @@ func TestRegisterRefresh(t *testing.T) {
 func sendKeepalive(t *testing.T, deviceID string) int {
 	ua, _ := sipgo.NewUA(sipgo.WithUserAgent(deviceID))
 	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	require.NoError(t, sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient))
 	req := sip.NewRequest(sip.MESSAGE, recipient)
 	body := `<?xml version="1.0" encoding="UTF-8"?>
 <Notify><CmdType>Keepalive</CmdType><SN>1</SN><DeviceID>` + deviceID + `</DeviceID><Status>OK</Status></Notify>`
@@ -362,9 +363,9 @@ func TestMalformedMessage(t *testing.T) {
 
 	ua, _ := sipgo.NewUA(sipgo.WithUserAgent("badmsg"))
 	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	require.NoError(t, sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient))
 	req := sip.NewRequest(sip.MESSAGE, recipient)
 	req.SetBody([]byte("garbage-not-xml"))
 	req.SetTransport("UDP")

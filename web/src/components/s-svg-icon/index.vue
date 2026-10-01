@@ -57,6 +57,7 @@ const svgClass = computed<string>(() => {
   width: auto;
   height: auto;
   vertical-align: middle;
+
   // 让 lucide 风格(stroke=currentColor)和老的 fill 风格 svg 都能跟随父元素颜色
   fill: currentColor;
   stroke: currentColor;

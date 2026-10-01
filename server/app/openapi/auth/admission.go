@@ -140,7 +140,7 @@ func (a *Admission) Admit(ctx context.Context, r AdmissionRequest, authorize fun
 }
 
 func lockClient(tx *gorm.DB) *gorm.DB {
-	if tx.Dialector.Name() == "sqlserver" {
+	if tx.Name() == "sqlserver" {
 		return tx.Table("sys_openapi_client WITH (UPDLOCK, HOLDLOCK)")
 	}
 	return tx.Model(&models.Client{}).Clauses(clause.Locking{Strength: "UPDATE"})

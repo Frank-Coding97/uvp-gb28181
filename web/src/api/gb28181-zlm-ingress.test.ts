@@ -33,13 +33,16 @@ describe("ZLM ingress API", () => {
     await listZLMRTPServers(9, { page: 3, pageSize: 10 }, controller.signal);
 
     expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/zlm/nodes/9/proxies/pull", {
-      params: { page: 2, pageSize: 50 }, signal: controller.signal
+      params: { page: 2, pageSize: 50 },
+      signal: controller.signal
     });
     expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/zlm/nodes/9/ffmpeg-sources", {
-      params: { page: 1, pageSize: 20 }, signal: controller.signal
+      params: { page: 1, pageSize: 20 },
+      signal: controller.signal
     });
     expect(request).toHaveBeenNthCalledWith(3, "get", "/api/gb28181/zlm/nodes/9/rtp-servers", {
-      params: { page: 3, pageSize: 10 }, signal: controller.signal
+      params: { page: 3, pageSize: 10 },
+      signal: controller.signal
     });
   });
 
@@ -76,7 +79,9 @@ describe("ZLM ingress API", () => {
     await closeZLMRTPServer(9, { nodeId: 9, vhost: media.vhost, app: media.app, stream: media.stream });
 
     const encoded = "opaque%2Fkey";
-    expect(request).toHaveBeenNthCalledWith(1, "post", `/api/gb28181/zlm/nodes/9/proxies/pull/${encoded}/preflight`, { data: deletion });
+    expect(request).toHaveBeenNthCalledWith(1, "post", `/api/gb28181/zlm/nodes/9/proxies/pull/${encoded}/preflight`, {
+      data: deletion
+    });
     expect(request).toHaveBeenNthCalledWith(2, "delete", `/api/gb28181/zlm/nodes/9/proxies/pull/${encoded}`, { data: deletion });
     expect(request).toHaveBeenNthCalledWith(3, "post", "/api/gb28181/zlm/nodes/9/rtp-servers/close", {
       data: { nodeId: 9, vhost: media.vhost, app: media.app, stream: media.stream }
