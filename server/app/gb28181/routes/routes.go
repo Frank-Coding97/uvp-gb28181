@@ -97,6 +97,9 @@ var recordingPlanStreamObserver gbhandler.StreamObserver
 
 var setupController *gbcontrollers.SetupController
 
+// firmwareRepositoryController 固件仓库管理控制器,由 bootstrap 注入
+var firmwareRepositoryController *gbcontrollers.FirmwareRepositoryController
+
 // qrController 扫码接入二维码(token 生成 + 免鉴权兑换),由 bootstrap 后置注入
 var qrController = gbcontrollers.NewQRController()
 
@@ -448,6 +451,10 @@ func SetDeviceMgmtPTZRuntime(sender gbcontrollers.DeviceControlSender, service *
 
 func SetDeviceMgmtFirmwareUpgradeService(service *upgrade.Service) {
 	deviceMgmtController.SetFirmwareUpgradeService(service)
+}
+
+func SetFirmwareRepositoryController(ctrl *gbcontrollers.FirmwareRepositoryController) {
+	firmwareRepositoryController = ctrl
 }
 
 func SetDeviceMgmtRecordQueryRuntime(service gbcontrollers.RecordQueryService, cfg gbconfig.RecordQueryConfig, metrics *recordquery.Metrics) {
@@ -892,6 +899,12 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/device/:id/maintenance-operations", deviceMgmtController.ListMaintenanceOperations)
 			dmgmt.POST("/device/:id/firmware-upgrade", deviceMgmtController.UpgradeDeviceFirmware)
 			dmgmt.GET("/device/:id/firmware-upgrades", deviceMgmtController.ListFirmwareUpgrades)
+			// 固件仓库管理（CRUD + 生成下载链接需要鉴权）
+			dmgmt.POST("/firmware-repository", firmwareRepositoryController.Upload)
+			dmgmt.GET("/firmware-repository", firmwareRepositoryController.List)
+			dmgmt.GET("/firmware-repository/:id", firmwareRepositoryController.GetByID)
+			dmgmt.DELETE("/firmware-repository/:id", firmwareRepositoryController.Delete)
+			dmgmt.POST("/firmware-repository/:id/download-link", firmwareRepositoryController.GenerateDownloadLink)
 			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
 			dmgmt.GET("/device/:id/subscriptions", deviceMgmtController.ListSubscriptions)
 			dmgmt.PATCH("/device/:id/subscriptions/:kind", deviceMgmtController.UpdateSubscription)
@@ -988,6 +1001,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/channel/batch-delete", deviceMgmtController.BatchDeleteChannels)
 			// 手动 Catalog 刷新(bootstrap 未装配 CatalogTrigger 时,handler 内部返 503)
 			dmgmt.POST("/device/:id/catalog/refresh", deviceMgmtController.RefreshDeviceCatalog)
+			dmgmt.GET("/device/:id/catalog/refresh/:operationId", deviceMgmtController.GetDeviceCatalogRefreshProgress)
 			dmgmt.GET("/device/:id/sip-trace-capture", func(c *gin.Context) { currentTraceController().ActiveCapture(c) })
 			dmgmt.POST("/device/:id/sip-trace-captures", func(c *gin.Context) { currentTraceController().StartCapture(c) })
 			// B3 map:地图视图
@@ -1019,6 +1033,8 @@ func RegisterContentRoutes(engine *gin.Engine) {
 	engine.GET("/api/gb28181/cloud-recordings/content/:id", func(c *gin.Context) {
 		currentCloudRecordingCatalogController().Content(c)
 	})
+	// 固件下载:凭一次性 token 兑换文件内容(token 本身是鉴权凭证,免 JWT)
+	engine.GET("/api/gb28181/device-mgmt/firmware-repository/download/:token", firmwareRepositoryController.Download)
 }
 
 func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {
@@ -1082,6 +1098,8 @@ func registerZLMManagementRoutes(zlm *gin.RouterGroup) {
 	zlm.POST("/nodes/:id/streams/close/batch/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightCloseStreams(c) })
 	zlm.POST("/nodes/:id/streams/close/batch", func(c *gin.Context) { currentZLMManagementController().CloseStreams(c) })
 
+	zlm.GET("/sessions/network", func(c *gin.Context) { currentZLMManagementController().AllNetworkSessions(c) })
+	zlm.GET("/sessions/viewers", func(c *gin.Context) { currentZLMManagementController().AllSessionViewers(c) })
 	zlm.GET("/nodes/:id/sessions/network", func(c *gin.Context) { currentZLMManagementController().NetworkSessions(c) })
 	zlm.GET("/nodes/:id/sessions/viewers", func(c *gin.Context) { currentZLMManagementController().SessionViewers(c) })
 	zlm.POST("/nodes/:id/sessions/kick", func(c *gin.Context) { currentZLMManagementController().KickSession(c) })

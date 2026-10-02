@@ -19,6 +19,7 @@ import (
 	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -372,6 +373,14 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	))
 	gbroutes.SetQRController(gbcontrollers.NewConfiguredQRController(
 		app.DB(), app.Cache, cfg.SIP.Transport,
+	))
+
+	// 固件仓库管理
+	gbroutes.SetFirmwareRepositoryController(gbcontrollers.NewFirmwareRepositoryController(
+		app.DB(),
+		firmware.NewRepositoryService(app.DB()),
+		firmware.NewDownloadTokenService(app.Cache()),
+		"uploads",
 	))
 
 	metricsAgg = metrics.NewAggregator()

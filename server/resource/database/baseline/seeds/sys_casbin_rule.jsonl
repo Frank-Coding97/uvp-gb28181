@@ -426,3 +426,12 @@
 {"id": 8655, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/play/lifecycles/:lifecycleId", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 8656, "ptype": "p", "v0": "role_3", "v1": "/api/gb28181/play/lifecycles", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 8658, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/openapi-clients/capabilities/catalog", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 8659, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id":8660,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository","v2":"POST","v3":"*","v4":"","v5":""}
+{"id":8661,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository","v2":"GET","v3":"*","v4":"","v5":""}
+{"id":8662,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository/:id","v2":"GET","v3":"*","v4":"","v5":""}
+{"id":8663,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository/:id","v2":"DELETE","v3":"*","v4":"","v5":""}
+{"id":8664,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository/:id/download-link","v2":"POST","v3":"*","v4":"","v5":""}
+{"id":8665,"ptype":"p","v0":"role_1","v1":"/api/gb28181/device-mgmt/firmware-repository/download/:token","v2":"GET","v3":"*","v4":"","v5":""}
+{"id":8666,"ptype":"p","v0":"role_1","v1":"/api/gb28181/zlm/sessions/network","v2":"GET","v3":"*","v4":"","v5":""}
+{"id":8667,"ptype":"p","v0":"role_1","v1":"/api/gb28181/zlm/sessions/viewers","v2":"GET","v3":"*","v4":"","v5":""}
