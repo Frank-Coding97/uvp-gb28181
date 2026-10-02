@@ -3,10 +3,10 @@
   "meta": {
     "source_database": "uvp_gb28181",
     "source_server_version": "8.0.46",
-    "live_table_count": 110,
-    "included_table_count": 109,
+    "live_table_count": 111,
+    "included_table_count": 110,
     "excluded_table_count": 16,
-    "schema_fingerprint": "b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f",
+    "schema_fingerprint": "manual_edit_firmware_repository_2026_10_02",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -4681,6 +4681,15 @@
           "collation": "utf8mb4_bin"
         },
         {
+          "name": "firmware_id",
+          "type": "varchar(64)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
           "name": "session_id",
           "type": "varchar(128)",
           "nullable": false,
@@ -5016,6 +5025,222 @@
             },
             {
               "name": "created_at",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_firmware_repository",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "firmware_id",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "version",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "manufacturer",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "model_pattern",
+          "type": "varchar(500)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "file_name",
+          "type": "varchar(500)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "file_size",
+          "type": "bigint",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "file_hash",
+          "type": "varchar(128)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "storage_path",
+          "type": "text",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "storage_key",
+          "type": "varchar(500)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "release_date",
+          "type": "date",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "status",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "uploaded_by",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "dept_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_at",
+          "type": "datetime(6)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime(6)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "remark",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "firmware_id",
+          "columns": [
+            {
+              "name": "firmware_id",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_manu_model",
+          "columns": [
+            {
+              "name": "manufacturer",
+              "prefix": null
+            },
+            {
+              "name": "version",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_file_hash",
+          "columns": [
+            {
+              "name": "file_hash",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_dept_status",
+          "columns": [
+            {
+              "name": "dept_id",
+              "prefix": null
+            },
+            {
+              "name": "status",
               "prefix": null
             }
           ]

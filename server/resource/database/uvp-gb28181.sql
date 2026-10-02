@@ -1,7 +1,7 @@
 -- UVP-GB28181 MySQL 8.0 release initialization script
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f
+-- Schema fingerprint: manual_edit_firmware_repository_2026_10_02
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.
@@ -585,6 +585,7 @@ CREATE TABLE `gb_device_firmware_upgrade` (
   `firmware` varchar(255) COLLATE utf8mb4_bin NOT NULL,
   `file_url` varchar(2048) COLLATE utf8mb4_bin NOT NULL,
   `manufacturer` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  `firmware_id` varchar(64) COLLATE utf8mb4_bin NULL,
   `session_id` varchar(128) COLLATE utf8mb4_bin NOT NULL,
   `sn` bigint NOT NULL,
   `profile_version` varchar(8) COLLATE utf8mb4_bin NOT NULL,
@@ -620,6 +621,33 @@ CREATE TABLE `gb_device_firmware_upgrade` (
   KEY `idx_firmware_upgrade_device_sn` (`device_code`,`sn`),
   KEY `idx_firmware_upgrade_device_status` (`device_id`,`status`),
   KEY `idx_firmware_upgrade_device_time` (`device_id`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for `gb_firmware_repository`
+DROP TABLE IF EXISTS `gb_firmware_repository`;
+CREATE TABLE `gb_firmware_repository` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `firmware_id` varchar(64) COLLATE utf8mb4_bin NOT NULL,
+  `version` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  `manufacturer` varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  `model_pattern` varchar(500) COLLATE utf8mb4_bin NULL,
+  `file_name` varchar(500) COLLATE utf8mb4_bin NOT NULL,
+  `file_size` bigint NOT NULL,
+  `file_hash` varchar(128) COLLATE utf8mb4_bin NULL,
+  `storage_path` text COLLATE utf8mb4_bin NOT NULL,
+  `storage_key` varchar(500) COLLATE utf8mb4_bin NULL,
+  `release_date` date NULL,
+  `status` varchar(20) COLLATE utf8mb4_bin NOT NULL,
+  `uploaded_by` bigint unsigned NOT NULL,
+  `dept_id` bigint unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `remark` text COLLATE utf8mb4_bin NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `firmware_id` (`firmware_id`),
+  KEY `idx_manu_model` (`manufacturer`,`version`),
+  KEY `idx_file_hash` (`file_hash`),
+  KEY `idx_dept_status` (`dept_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Table structure for `gb_device_grant`
@@ -2858,10 +2886,10 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 (346, '查询实时流量', '/api/gb28181/device-traffic/realtime', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (347, '查询流量会话', '/api/gb28181/device-traffic/sessions', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (348, '查询统计覆盖率', '/api/gb28181/device-traffic/coverage', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
-(349, '查询当前观看', '/api/gb28181/device-traffic/viewers', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1);
+(349, '查询当前观看', '/api/gb28181/device-traffic/viewers', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
+(350, '强退观看连接', '/api/gb28181/device-traffic/viewers/kick', 'POST', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1);
 
 INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
-(350, '强退观看连接', '/api/gb28181/device-traffic/viewers/kick', 'POST', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (351, '查询在线用户', '/api/sysOnlineUser/list', 'GET', '在线用户', '2026-08-17 19:03:35.000000', '2026-08-17 19:03:35.000000', NULL, 1),
 (352, '强制下线会话', '/api/sysOnlineUser/forceLogout', 'POST', '在线用户', '2026-08-17 19:03:35.000000', '2026-08-17 19:03:35.000000', NULL, 1),
 (355, '登录日志列表', '/api/sysLoginLog/list', 'GET', '日志中心', '2026-08-18 16:10:36.000000', '2026-08-18 16:10:36.000000', NULL, 1),
@@ -3060,10 +3088,10 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 (589, '查询抓拍图像库', '/api/gb28181/device-mgmt/snapshots', 'GET', '图像库', '2026-09-20 17:19:27.000000', '2026-09-20 17:19:27.000000', NULL, 1),
 (590, '读取目标跟踪已下发指令', '/api/gb28181/device-mgmt/channel/:id/target-track', 'GET', '设备控制', '2026-09-21 12:13:15.000000', '2026-09-21 12:13:15.000000', NULL, 1),
 (591, '下发目标跟踪', '/api/gb28181/device-mgmt/channel/:id/target-track', 'POST', '设备控制', '2026-09-21 12:13:15.000000', '2026-09-21 12:13:15.000000', NULL, 1),
-(593, '查询播放日志', '/api/gb28181/play/lifecycles', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1);
+(593, '查询播放日志', '/api/gb28181/play/lifecycles', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
+(594, '查询播放日志详情', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1);
 
 INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
-(594, '查询播放日志详情', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
 (595, '上报播放客户端事实', '/api/gb28181/play/lifecycles/:lifecycleId/client-events', 'POST', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
 (596, '查看 OpenAPI 分组能力目录', '/api/gb28181/openapi-clients/capabilities/catalog', 'GET', 'GB28181 OpenAPI 客户端', '2026-09-22 10:41:25.000000', '2026-09-22 10:41:25.000000', NULL, 1),
 (597, '查询设备列表', '/api/gb28181/device/list', 'GET', '设备管理', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
@@ -3088,7 +3116,8 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 (616, '根据编码获取参数', '/api/sysParam/getByCode/:code', 'GET', '系统配置', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (617, '共享级联通道', '/api/gb28181/cascade/platforms/:id/channels/share', 'POST', '国标级联', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (618, '取消共享级联通道', '/api/gb28181/cascade/platforms/:id/channels/unshare', 'POST', '国标级联', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
-(619, '语音对讲上行推流', '/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', 'POST', '设备控制', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1);
+(619, '语音对讲上行推流', '/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', 'POST', '设备控制', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
+(620, '查询设备目录刷新进度', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '设备管理', '2026-10-01 18:00:00.000000', '2026-10-01 18:00:00.000000', NULL, 1);
 INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3288,10 +3317,10 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (8423, 'p', 'role_1', '/api/users/delete', 'DELETE', '*', '', ''),
 (8424, 'p', 'role_1', '/api/sysDictItem/edit', 'PUT', '*', '', ''),
 (8425, 'p', 'role_1', '/api/gb28181/zlm/nodes', 'GET', '*', '', ''),
-(8426, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', 'POST', '*', '', '');
+(8426, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', 'POST', '*', '', ''),
+(8427, 'p', 'role_1', '/api/gb28181/sip/service-config/preallocation-mode', 'GET', '*', '', '');
 
 INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
-(8427, 'p', 'role_1', '/api/gb28181/sip/service-config/preallocation-mode', 'GET', '*', '', ''),
 (8428, 'p', 'role_1', '/api/gb28181/device-traffic/coverage', 'GET', '*', '', ''),
 (8429, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers/close', 'POST', '*', '', ''),
 (8430, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/timeline', 'GET', '*', '', ''),
@@ -3489,11 +3518,11 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (8623, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers/close/preflight', 'POST', '*', '', ''),
 (8624, 'p', 'role_1', '/api/sysDictItem/getByDictId/:dictId', 'GET', '*', '', ''),
 (8625, 'p', 'role_1', '/api/users/updateAccount', 'PUT', '*', '', ''),
-(8626, 'p', 'role_1', '/api/gb28181/cloud-recordings/files', 'GET', '*', '', '');
+(8626, 'p', 'role_1', '/api/gb28181/cloud-recordings/files', 'GET', '*', '', ''),
+(8627, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id', 'PATCH', '*', '', ''),
+(8628, 'p', 'role_1', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'GET', '*', '', '');
 
 INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
-(8627, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id', 'PATCH', '*', '', ''),
-(8628, 'p', 'role_1', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'GET', '*', '', ''),
 (8629, 'p', 'role_1', '/api/gb28181/sip/service-config/default-channel-stream-transport', 'PUT', '*', '', ''),
 (8630, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/start', 'POST', '*', '', ''),
 (8631, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/subscriptions/:kind', 'PATCH', '*', '', ''),
@@ -3521,7 +3550,8 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (8654, 'p', 'role_3', '/api/gb28181/play/lifecycles/:lifecycleId/client-events', 'POST', '*', '', ''),
 (8655, 'p', 'role_3', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '*', '', ''),
 (8656, 'p', 'role_3', '/api/gb28181/play/lifecycles', 'GET', '*', '', ''),
-(8658, 'p', 'role_1', '/api/gb28181/openapi-clients/capabilities/catalog', 'GET', '*', '', '');
+(8658, 'p', 'role_1', '/api/gb28181/openapi-clients/capabilities/catalog', 'GET', '*', '', ''),
+(8659, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '*', '', '');
 INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `level`, `pinyin`, `created_at`, `updated_at`) VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7407,10 +7437,10 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140382, 369),
 (140382, 370),
 (140383, 369),
-(140383, 370);
+(140383, 370),
+(140383, 373);
 
 INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
-(140383, 373),
 (140384, 368),
 (140384, 371),
 (140384, 372),
@@ -7534,6 +7564,7 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140444, 518),
 (140445, 522),
 (140446, 523),
+(140446, 620),
 (140447, 507),
 (140448, 464),
 (140448, 525),

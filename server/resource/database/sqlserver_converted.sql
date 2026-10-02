@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: b0d19469406977f43f52b984be5b06006282e1b0de5b59fcae5c354169847f8f
+-- Schema fingerprint: manual_edit_firmware_repository_2026_10_02
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -671,6 +671,7 @@ BEGIN
     [firmware] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
     [file_url] NVARCHAR(2048) COLLATE Latin1_General_100_BIN2 NOT NULL,
     [manufacturer] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [firmware_id] NVARCHAR(64) COLLATE Latin1_General_100_BIN2,
     [session_id] NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
     [sn] BIGINT NOT NULL,
     [profile_version] NVARCHAR(8) COLLATE Latin1_General_100_BIN2 NOT NULL,
@@ -712,6 +713,37 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_f
   CREATE INDEX [idx_firmware_upgrade_device_status] ON [gb_device_firmware_upgrade] ([device_id], [status]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'idx_firmware_upgrade_device_time')
   CREATE INDEX [idx_firmware_upgrade_device_time] ON [gb_device_firmware_upgrade] ([device_id], [created_at]);
+
+IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NOT NULL DROP TABLE [gb_firmware_repository];
+IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NULL
+BEGIN
+  CREATE TABLE [gb_firmware_repository] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [firmware_id] NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [version] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [manufacturer] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [model_pattern] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
+    [file_name] NVARCHAR(500) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [file_size] BIGINT NOT NULL,
+    [file_hash] NVARCHAR(128) COLLATE Latin1_General_100_BIN2,
+    [storage_path] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [storage_key] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
+    [release_date] DATE,
+    [status] NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [uploaded_by] BIGINT NOT NULL,
+    [dept_id] BIGINT NOT NULL,
+    [created_at] DATETIME2(6) NOT NULL,
+    [updated_at] DATETIME2(6) NOT NULL,
+    [remark] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2,
+    CONSTRAINT [firmware_id] UNIQUE ([firmware_id])
+  );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_manu_model')
+  CREATE INDEX [idx_manu_model] ON [gb_firmware_repository] ([manufacturer], [version]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_file_hash')
+  CREATE INDEX [idx_file_hash] ON [gb_firmware_repository] ([file_hash]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_dept_status')
+  CREATE INDEX [idx_dept_status] ON [gb_firmware_repository] ([dept_id], [status]);
 
 IF OBJECT_ID(N'gb_device_grant', N'U') IS NOT NULL DROP TABLE [gb_device_grant];
 IF OBJECT_ID(N'gb_device_grant', N'U') IS NULL
@@ -3227,10 +3259,10 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (346, N'查询实时流量', N'/api/gb28181/device-traffic/realtime', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (347, N'查询流量会话', N'/api/gb28181/device-traffic/sessions', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (348, N'查询统计覆盖率', N'/api/gb28181/device-traffic/coverage', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
-(349, N'查询当前观看', N'/api/gb28181/device-traffic/viewers', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1);
+(349, N'查询当前观看', N'/api/gb28181/device-traffic/viewers', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
+(350, N'强退观看连接', N'/api/gb28181/device-traffic/viewers/kick', N'POST', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1);
 
 INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
-(350, N'强退观看连接', N'/api/gb28181/device-traffic/viewers/kick', N'POST', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (351, N'查询在线用户', N'/api/sysOnlineUser/list', N'GET', N'在线用户', N'2026-08-17 19:03:35.000000', N'2026-08-17 19:03:35.000000', NULL, 1),
 (352, N'强制下线会话', N'/api/sysOnlineUser/forceLogout', N'POST', N'在线用户', N'2026-08-17 19:03:35.000000', N'2026-08-17 19:03:35.000000', NULL, 1),
 (355, N'登录日志列表', N'/api/sysLoginLog/list', N'GET', N'日志中心', N'2026-08-18 16:10:36.000000', N'2026-08-18 16:10:36.000000', NULL, 1),
@@ -3429,10 +3461,10 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (589, N'查询抓拍图像库', N'/api/gb28181/device-mgmt/snapshots', N'GET', N'图像库', N'2026-09-20 17:19:27.000000', N'2026-09-20 17:19:27.000000', NULL, 1),
 (590, N'读取目标跟踪已下发指令', N'/api/gb28181/device-mgmt/channel/:id/target-track', N'GET', N'设备控制', N'2026-09-21 12:13:15.000000', N'2026-09-21 12:13:15.000000', NULL, 1),
 (591, N'下发目标跟踪', N'/api/gb28181/device-mgmt/channel/:id/target-track', N'POST', N'设备控制', N'2026-09-21 12:13:15.000000', N'2026-09-21 12:13:15.000000', NULL, 1),
-(593, N'查询播放日志', N'/api/gb28181/play/lifecycles', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1);
+(593, N'查询播放日志', N'/api/gb28181/play/lifecycles', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
+(594, N'查询播放日志详情', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1);
 
 INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
-(594, N'查询播放日志详情', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
 (595, N'上报播放客户端事实', N'/api/gb28181/play/lifecycles/:lifecycleId/client-events', N'POST', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
 (596, N'查看 OpenAPI 分组能力目录', N'/api/gb28181/openapi-clients/capabilities/catalog', N'GET', N'GB28181 OpenAPI 客户端', N'2026-09-22 10:41:25.000000', N'2026-09-22 10:41:25.000000', NULL, 1),
 (597, N'查询设备列表', N'/api/gb28181/device/list', N'GET', N'设备管理', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
@@ -3457,7 +3489,8 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (616, N'根据编码获取参数', N'/api/sysParam/getByCode/:code', N'GET', N'系统配置', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (617, N'共享级联通道', N'/api/gb28181/cascade/platforms/:id/channels/share', N'POST', N'国标级联', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (618, N'取消共享级联通道', N'/api/gb28181/cascade/platforms/:id/channels/unshare', N'POST', N'国标级联', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
-(619, N'语音对讲上行推流', N'/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', N'POST', N'设备控制', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1);
+(619, N'语音对讲上行推流', N'/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', N'POST', N'设备控制', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
+(620, N'查询设备目录刷新进度', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'设备管理', N'2026-10-01 18:00:00.000000', N'2026-10-01 18:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_api] OFF;
 SET IDENTITY_INSERT [sys_casbin_rule] ON;
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
@@ -3659,10 +3692,10 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8423, N'p', N'role_1', N'/api/users/delete', N'DELETE', N'*', N'', N''),
 (8424, N'p', N'role_1', N'/api/sysDictItem/edit', N'PUT', N'*', N'', N''),
 (8425, N'p', N'role_1', N'/api/gb28181/zlm/nodes', N'GET', N'*', N'', N''),
-(8426, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', N'POST', N'*', N'', N'');
+(8426, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', N'POST', N'*', N'', N''),
+(8427, N'p', N'role_1', N'/api/gb28181/sip/service-config/preallocation-mode', N'GET', N'*', N'', N'');
 
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
-(8427, N'p', N'role_1', N'/api/gb28181/sip/service-config/preallocation-mode', N'GET', N'*', N'', N''),
 (8428, N'p', N'role_1', N'/api/gb28181/device-traffic/coverage', N'GET', N'*', N'', N''),
 (8429, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/rtp-servers/close', N'POST', N'*', N'', N''),
 (8430, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/timeline', N'GET', N'*', N'', N''),
@@ -3860,11 +3893,11 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8623, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/rtp-servers/close/preflight', N'POST', N'*', N'', N''),
 (8624, N'p', N'role_1', N'/api/sysDictItem/getByDictId/:dictId', N'GET', N'*', N'', N''),
 (8625, N'p', N'role_1', N'/api/users/updateAccount', N'PUT', N'*', N'', N''),
-(8626, N'p', N'role_1', N'/api/gb28181/cloud-recordings/files', N'GET', N'*', N'', N'');
+(8626, N'p', N'role_1', N'/api/gb28181/cloud-recordings/files', N'GET', N'*', N'', N''),
+(8627, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id', N'PATCH', N'*', N'', N''),
+(8628, N'p', N'role_1', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'GET', N'*', N'', N'');
 
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
-(8627, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id', N'PATCH', N'*', N'', N''),
-(8628, N'p', N'role_1', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'GET', N'*', N'', N''),
 (8629, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-channel-stream-transport', N'PUT', N'*', N'', N''),
 (8630, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/start', N'POST', N'*', N'', N''),
 (8631, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/subscriptions/:kind', N'PATCH', N'*', N'', N''),
@@ -3892,7 +3925,8 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8654, N'p', N'role_3', N'/api/gb28181/play/lifecycles/:lifecycleId/client-events', N'POST', N'*', N'', N''),
 (8655, N'p', N'role_3', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'*', N'', N''),
 (8656, N'p', N'role_3', N'/api/gb28181/play/lifecycles', N'GET', N'*', N'', N''),
-(8658, N'p', N'role_1', N'/api/gb28181/openapi-clients/capabilities/catalog', N'GET', N'*', N'', N'');
+(8658, N'p', N'role_1', N'/api/gb28181/openapi-clients/capabilities/catalog', N'GET', N'*', N'', N''),
+(8659, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'*', N'', N'');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 INSERT INTO [sys_civil_code] ([code], [name], [short_name], [parent_code], [level], [pinyin], [created_at], [updated_at]) VALUES
 (N'110000', N'北京市', N'北京市', N'', 1, N'', N'2026-07-18 17:27:38.000000', N'2026-07-18 17:27:38.000000'),
@@ -7787,10 +7821,10 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140382, 369),
 (140382, 370),
 (140383, 369),
-(140383, 370);
+(140383, 370),
+(140383, 373);
 
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
-(140383, 373),
 (140384, 368),
 (140384, 371),
 (140384, 372),
@@ -7914,6 +7948,7 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140444, 518),
 (140445, 522),
 (140446, 523),
+(140446, 620),
 (140447, 507),
 (140448, 464),
 (140448, 525),

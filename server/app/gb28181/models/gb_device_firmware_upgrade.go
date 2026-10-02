@@ -37,6 +37,7 @@ type GbDeviceFirmwareUpgrade struct {
 	Firmware        string                `gorm:"column:firmware;size:255;not null" json:"firmware"`
 	FileURL         string                `gorm:"column:file_url;size:2048;not null" json:"-"`
 	Manufacturer    string                `gorm:"column:manufacturer;size:255;not null" json:"manufacturer"`
+	FirmwareID      string                `gorm:"column:firmware_id;size:64" json:"firmwareId,omitempty"`
 	SessionID       string                `gorm:"column:session_id;size:128;not null;uniqueIndex:uk_firmware_upgrade_device_session,priority:2;index:idx_firmware_upgrade_device_session,priority:2" json:"sessionId"`
 	SN              int                   `gorm:"column:sn;not null;index:idx_firmware_upgrade_device_sn,priority:2;uniqueIndex:uk_firmware_upgrade_sn" json:"sn"`
 	ProfileVersion  string                `gorm:"column:profile_version;size:8;not null" json:"profileVersion"`
