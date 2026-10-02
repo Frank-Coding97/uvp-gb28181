@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
@@ -51,6 +52,16 @@ type snFloorEnsurer interface {
 	EnsureSNFloor(int) error
 }
 
+// FirmwareRepositoryService is the narrow contract needed for querying firmware from repository.
+type FirmwareRepositoryService interface {
+	GetByFirmwareID(c *gin.Context, firmwareID string) (*gbmodels.GbFirmwareRepository, error)
+}
+
+// DownloadTokenService is the narrow contract needed for generating temporary download tokens.
+type DownloadTokenService interface {
+	Generate(ctx context.Context, firmwareID string, userID, deptID uint64) (token, downloadURL string, expiresAt time.Time, err error)
+}
+
 // TrackedSender is the narrow UAC contract needed by an upgrade request.
 // Keeping it here avoids coupling the durable upgrade state machine to the
 // PTZ scheduler package while still accepting the platform UAC implementation.
@@ -73,6 +84,7 @@ type Target struct {
 type Request struct {
 	Confirmed      bool
 	IdempotencyKey string
+	FirmwareID     string // 固件仓库模式：从固件仓库选择固件
 	Firmware       string
 	FileURL        string
 	Manufacturer   string
@@ -81,19 +93,23 @@ type Request struct {
 }
 
 type Service struct {
-	db          *gorm.DB
-	sender      TrackedSender
-	allocator   SNAllocator
-	now         func() time.Time
-	lockMu      sync.Mutex
-	locks       map[uint]*sync.Mutex
-	lifecycleMu sync.RWMutex
-	retired     bool
+	db              *gorm.DB
+	sender          TrackedSender
+	allocator       SNAllocator
+	now             func() time.Time
+	lockMu          sync.Mutex
+	locks           map[uint]*sync.Mutex
+	lifecycleMu     sync.RWMutex
+	retired         bool
+	repoService     FirmwareRepositoryService
+	tokenService    DownloadTokenService
+	downloadBaseURL string
 }
 
 // NewService creates the durable upgrade service. allocator must be the live
 // PTZ service's shared SN allocator; refusing a nil allocator keeps upgrade
 // and PTZ DeviceControl sequence numbers in one allocation scope.
+// repoService and tokenService are optional; if both provided, enables firmware repository mode.
 func NewService(db *gorm.DB, sender TrackedSender, allocator SNAllocator, now func() time.Time) (*Service, error) {
 	if db == nil || allocator == nil {
 		return nil, ErrServiceUnavailable
@@ -118,8 +134,25 @@ func NewService(db *gorm.DB, sender TrackedSender, allocator SNAllocator, now fu
 			return nil, fmt.Errorf("%w: 恢复设备升级 SN 序列失败: %v", ErrServiceUnavailable, err)
 		}
 	}
-	service := &Service{db: db, sender: sender, allocator: allocator, now: now, locks: make(map[uint]*sync.Mutex)}
+	service := &Service{
+		db:        db,
+		sender:    sender,
+		allocator: allocator,
+		now:       now,
+		locks:     make(map[uint]*sync.Mutex),
+	}
 	return service, nil
+}
+
+// SetFirmwareRepositoryServices injects optional firmware repository and download token services.
+// Must be called before Execute if firmware repository mode is needed.
+func (s *Service) SetFirmwareRepositoryServices(repoService FirmwareRepositoryService, tokenService DownloadTokenService, downloadBaseURL string) {
+	if s == nil {
+		return
+	}
+	s.repoService = repoService
+	s.tokenService = tokenService
+	s.downloadBaseURL = downloadBaseURL
 }
 
 // Retire stops this runtime generation from accepting new work and waits for
@@ -179,25 +212,33 @@ func validateRequest(target Target, request Request) error {
 	if target.Profile.Version != protocol.Version2022 {
 		return ErrProfileUnsupported
 	}
-	firmware := strings.TrimSpace(request.Firmware)
-	if firmware == "" || len(firmware) > firmwareMaxBytes {
-		return fmt.Errorf("%w: Firmware 长度必须为 1-%d 字节", ErrInvalidArgument, firmwareMaxBytes)
+
+	// 固件仓库模式：firmwareID 非空时，Firmware/FileURL/Manufacturer 由后续注入逻辑填充
+	firmwareRepoMode := strings.TrimSpace(request.FirmwareID) != ""
+
+	if !firmwareRepoMode {
+		// 手填 URL 模式：必须提供完整参数
+		firmware := strings.TrimSpace(request.Firmware)
+		if firmware == "" || len(firmware) > firmwareMaxBytes {
+			return fmt.Errorf("%w: Firmware 长度必须为 1-%d 字节", ErrInvalidArgument, firmwareMaxBytes)
+		}
+		manufacturer := strings.TrimSpace(request.Manufacturer)
+		if manufacturer == "" || len(manufacturer) > manufacturerMaxBytes {
+			return fmt.Errorf("%w: Manufacturer 长度必须为 1-%d 字节", ErrInvalidArgument, manufacturerMaxBytes)
+		}
+		fileURL := strings.TrimSpace(request.FileURL)
+		if fileURL == "" || len(fileURL) > fileURLMaxBytes {
+			return fmt.Errorf("%w: FileURL 长度必须为 1-%d 字节", ErrInvalidArgument, fileURLMaxBytes)
+		}
+		parsed, err := url.Parse(fileURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return fmt.Errorf("%w: FileURL 必须是无用户信息的 HTTP(S) URL", ErrInvalidArgument)
+		}
+		if net.ParseIP(parsed.Hostname()) == nil && strings.TrimSpace(parsed.Hostname()) == "" {
+			return fmt.Errorf("%w: FileURL 主机不能为空", ErrInvalidArgument)
+		}
 	}
-	manufacturer := strings.TrimSpace(request.Manufacturer)
-	if manufacturer == "" || len(manufacturer) > manufacturerMaxBytes {
-		return fmt.Errorf("%w: Manufacturer 长度必须为 1-%d 字节", ErrInvalidArgument, manufacturerMaxBytes)
-	}
-	fileURL := strings.TrimSpace(request.FileURL)
-	if fileURL == "" || len(fileURL) > fileURLMaxBytes {
-		return fmt.Errorf("%w: FileURL 长度必须为 1-%d 字节", ErrInvalidArgument, fileURLMaxBytes)
-	}
-	parsed, err := url.Parse(fileURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-		return fmt.Errorf("%w: FileURL 必须是无用户信息的 HTTP(S) URL", ErrInvalidArgument)
-	}
-	if net.ParseIP(parsed.Hostname()) == nil && strings.TrimSpace(parsed.Hostname()) == "" {
-		return fmt.Errorf("%w: FileURL 主机不能为空", ErrInvalidArgument)
-	}
+
 	return nil
 }
 
@@ -268,6 +309,35 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 		return Operation{}, false, err
 	}
 	request.IdempotencyKey = key
+
+	// 固件仓库模式：注入 Firmware/FileURL/Manufacturer
+	firmwareID := strings.TrimSpace(request.FirmwareID)
+	if firmwareID != "" {
+		if s.repoService == nil || s.tokenService == nil {
+			return Operation{}, false, fmt.Errorf("%w: 固件仓库服务未就绪", ErrServiceUnavailable)
+		}
+		// 构造临时 gin.Context 用于租户隔离查询
+		// 这里的关键是：repoService.GetByFirmwareID 内部会校验 dept_id scope
+		// 我们需要传递 ActorDeptID 以确保租户隔离
+		tempCtx := &gin.Context{Request: ctx.(*gin.Context).Request}
+		firmware, err := s.repoService.GetByFirmwareID(tempCtx, firmwareID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return Operation{}, false, fmt.Errorf("%w: 固件不存在或无权访问", ErrInvalidArgument)
+			}
+			return Operation{}, false, fmt.Errorf("查询固件失败: %w", err)
+		}
+		// 生成临时下载 token
+		_, downloadURL, _, err := s.tokenService.Generate(ctx, firmwareID, uint64(target.DeviceID), uint64(request.ActorDeptID))
+		if err != nil {
+			return Operation{}, false, fmt.Errorf("生成下载地址失败: %w", err)
+		}
+		// 覆盖请求参数
+		request.FileURL = downloadURL
+		request.Firmware = firmware.Version
+		request.Manufacturer = firmware.Manufacturer
+	}
+
 	request.Firmware = strings.TrimSpace(request.Firmware)
 	request.FileURL = strings.TrimSpace(request.FileURL)
 	request.Manufacturer = strings.TrimSpace(request.Manufacturer)

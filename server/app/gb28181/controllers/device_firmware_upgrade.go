@@ -16,9 +16,10 @@ import (
 type deviceFirmwareUpgradeRequest struct {
 	Confirmed      bool   `json:"confirmed"`
 	IdempotencyKey string `json:"idempotencyKey"`
-	Firmware       string `json:"firmware"`
-	FileURL        string `json:"fileUrl"`
-	Manufacturer   string `json:"manufacturer"`
+	FirmwareId     string `json:"firmwareId"`     // 固件仓库模式：固件 ID
+	Firmware       string `json:"firmware"`       // 手填模式：固件版本
+	FileURL        string `json:"fileUrl"`        // 手填模式：下载地址
+	Manufacturer   string `json:"manufacturer"`   // 手填模式：厂商
 }
 
 func (dc *DeviceMgmtController) UpgradeDeviceFirmware(c *gin.Context) {
@@ -54,8 +55,9 @@ func (dc *DeviceMgmtController) UpgradeDeviceFirmware(c *gin.Context) {
 		Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
 		Profile: profileForDevice(device),
 	}, upgrade.Request{
-		Confirmed: request.Confirmed, IdempotencyKey: key, Firmware: request.Firmware,
-		FileURL: request.FileURL, Manufacturer: request.Manufacturer, ActorID: actorID, ActorDeptID: actorDeptID,
+		Confirmed: request.Confirmed, IdempotencyKey: key, FirmwareID: request.FirmwareId,
+		Firmware: request.Firmware, FileURL: request.FileURL, Manufacturer: request.Manufacturer,
+		ActorID: actorID, ActorDeptID: actorDeptID,
 	})
 	if executeErr != nil {
 		status := firmwareUpgradeErrorHTTPStatus(executeErr)

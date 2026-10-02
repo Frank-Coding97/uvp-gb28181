@@ -113,6 +113,18 @@ func (s *RepositoryService) GetByID(c *gin.Context, id uint64) (*gbmodels.GbFirm
 	return &record, nil
 }
 
+func (s *RepositoryService) GetByFirmwareID(c *gin.Context, firmwareID string) (*gbmodels.GbFirmwareRepository, error) {
+	var record gbmodels.GbFirmwareRepository
+	result := s.db.WithContext(c.Request.Context()).
+		Scopes(datascope.OwnerDeptScopeWithDB(c, s.db, "dept_id")).
+		Where("firmware_id = ?", firmwareID).
+		First(&record)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &record, nil
+}
+
 func (s *RepositoryService) Delete(c *gin.Context, id uint64) error {
 	// 软删除: 状态改为 archived
 	result := s.db.WithContext(c.Request.Context()).

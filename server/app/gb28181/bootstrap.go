@@ -238,6 +238,8 @@ var subscriptionScheduler *subscribe.Scheduler
 var ptzService *ptz.Service
 var ptzScheduler ptzSchedulerLifecycle
 var firmwareUpgradeService *upgrade.Service
+var firmwareRepoService *firmware.RepositoryService
+var firmwareTokenService *firmware.DownloadTokenService
 var recordQueryService *recordquery.Service
 var recordQueryMetrics *recordquery.Metrics
 var playbackMetrics *gbplayback.Metrics
@@ -376,10 +378,12 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	))
 
 	// 固件仓库管理
+	firmwareRepoService = firmware.NewRepositoryService(app.DB())
+	firmwareTokenService = firmware.NewDownloadTokenService(app.Cache)
 	gbroutes.SetFirmwareRepositoryController(gbcontrollers.NewFirmwareRepositoryController(
 		app.DB(),
-		firmware.NewRepositoryService(app.DB()),
-		firmware.NewDownloadTokenService(app.Cache()),
+		firmwareRepoService,
+		firmwareTokenService,
 		"uploads",
 	))
 
@@ -784,6 +788,8 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 				sipRuntimeStatus.MarkFailed(err.Error())
 				return fmt.Errorf("装配设备固件升级 service 失败: %w", err)
 			}
+			// 注入固件仓库服务（用于固件仓库模式）
+			newFirmwareUpgradeService.SetFirmwareRepositoryServices(firmwareRepoService, firmwareTokenService, "")
 			setter, ok := srv.(interface {
 				SetUpgradeProcessor(gbhandler.UpgradeMessageProcessor)
 			})
