@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -41,12 +42,22 @@ func (t *uacCatalogTrigger) Trigger(ctx context.Context, deviceID, dest, transpo
 	app.BackgroundWork.Go(func() {
 		logger := app.Log(scope).Named("gb28181.catalog")
 		sn := int(t.sn.Add(1))
+		operationID := catalogprogress.OperationIDFromContext(scope)
+		if operationID != "" {
+			catalogprogress.Default.Bind(operationID, sn)
+		}
 		body, err := manscdp.BuildCatalogQuery(deviceID, sn)
 		if err != nil {
+			if operationID != "" {
+				catalogprogress.Default.Fail(operationID, err)
+			}
 			logger.Warn("Catalog 查询 XML 构造失败", zap.String("event", "gb28181.catalog.query_build_failed"), zap.String("device_id", deviceID), logging.Error(err))
 			return
 		}
 		if err := t.uac.SendMessage(scope, deviceID, dest, transport, body); err != nil {
+			if operationID != "" {
+				catalogprogress.Default.Fail(operationID, err)
+			}
 			logger.Warn("Catalog 查询发送失败", zap.String("event", "gb28181.catalog.query_send_failed"),
 				zap.String("device_id", deviceID), zap.String("destination", dest),
 				zap.String("transport", transport), logging.Error(err))

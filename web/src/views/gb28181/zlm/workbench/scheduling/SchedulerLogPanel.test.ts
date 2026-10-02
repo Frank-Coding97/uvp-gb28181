@@ -16,7 +16,7 @@ vi.mock("@/api/gb28181-zlm", () => ({
 }));
 
 vi.mock("../components/MediaVChart.vue", () => ({
-  default: { template: "<div data-chart='stub' />" }
+  default: { template: "<div data-chart='stub'><slot name='header-actions' /></div>" }
 }));
 
 import SchedulerLogPanel from "./SchedulerLogPanel.vue";
@@ -43,7 +43,7 @@ const stubs = {
   "a-pagination": { template: "<button data-testid='log-pagination' @click=\"$emit('change', 2)\">下一页</button>" },
   "a-tag": { template: "<span><slot /></span>" },
   "s-layout-search": { template: "<div><slot name='fields' /><slot name='actions' /></div>" },
-  MediaVChart: { template: "<div data-chart='stub' />" }
+  MediaVChart: { template: "<div data-chart='stub'><slot name='header-actions' /></div>" }
 };
 
 describe("SchedulerLogPanel", () => {
@@ -57,7 +57,25 @@ describe("SchedulerLogPanel", () => {
     expect(api.listZLMNodes).not.toHaveBeenCalled();
     await wrapper.setProps({ active: true });
     await flushPromises();
-    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(1);
+    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(3);
+    wrapper.unmount();
+  });
+
+  it("defaults the node filter to all nodes", async () => {
+    api.listSchedulerLogs.mockResolvedValue({ code: 0, data: { list: [], total: 0 } });
+    const wrapper = mount(SchedulerLogPanel, {
+      props: {
+        active: true,
+        nodes: [
+          { id: 2, name: "zlm-220", state: "active" },
+          { id: 3, name: "zlm-221", state: "active" }
+        ]
+      },
+      global: { stubs }
+    });
+    await flushPromises();
+    expect(api.listSchedulerLogs).toHaveBeenCalledWith(expect.not.objectContaining({ nodeId: expect.anything() }));
+    expect((wrapper.get("[data-testid='node-filter']").element as HTMLSelectElement).value).toBe("all");
     wrapper.unmount();
   });
 
@@ -84,6 +102,44 @@ describe("SchedulerLogPanel", () => {
     await wrapper.setProps({ initialResult: "success" });
     await flushPromises();
     expect(api.listSchedulerLogs).toHaveBeenLastCalledWith(expect.objectContaining({ result: "success" }));
+    wrapper.unmount();
+  });
+
+  it("loads separate 24-hour and 7-day chart windows with the same filters", async () => {
+    api.listSchedulerLogs.mockResolvedValue({ code: 0, data: { list: [], total: 0 } });
+    const wrapper = mount(SchedulerLogPanel, {
+      props: { active: true, nodes: [], scope: "all", initialResult: "failure" },
+      global: { stubs }
+    });
+    await flushPromises();
+
+    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(3);
+    const filters = api.listSchedulerLogs.mock.calls.map(([filter]) => filter);
+    expect(filters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ result: "failure", limit: 1000 }),
+        expect.objectContaining({ result: "failure", limit: 1000 })
+      ])
+    );
+    const windows = filters.filter(filter => filter.from && filter.to);
+    expect(windows).toHaveLength(2);
+    expect(windows.every(filter => Date.parse(filter.from!) < Date.parse(filter.to!))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("exposes the same period switch on both chart cards", async () => {
+    api.listSchedulerLogs.mockResolvedValue({ code: 0, data: { list: [], total: 0 } });
+    const wrapper = mount(SchedulerLogPanel, {
+      props: { active: true, nodes: [] },
+      global: { stubs }
+    });
+    await flushPromises();
+    const tablists = wrapper.findAll("[data-testid='scheduler-chart-periods']");
+    expect(tablists).toHaveLength(2);
+    expect(tablists[0].findAll("button")[0].attributes("aria-selected")).toBe("true");
+    await tablists[1].findAll("button")[1].trigger("click");
+    expect(tablists[0].findAll("button")[1].attributes("aria-selected")).toBe("true");
+    expect(tablists[1].findAll("button")[1].attributes("aria-selected")).toBe("true");
     wrapper.unmount();
   });
 
@@ -129,11 +185,11 @@ describe("SchedulerLogPanel", () => {
     });
     await flushPromises();
     expect(wrapper.findAll("[data-testid='log-row']")).toHaveLength(10);
-    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(1);
+    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(3);
     await wrapper.get("[data-testid='log-pagination']").trigger("click");
     expect(wrapper.findAll("[data-testid='log-row']")).toHaveLength(10);
     expect(wrapper.text()).toContain("stream-11");
-    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(1);
+    expect(api.listSchedulerLogs).toHaveBeenCalledTimes(3);
     wrapper.unmount();
   });
 
@@ -163,7 +219,16 @@ describe("SchedulerLogPanel", () => {
     expect(source).toContain("未命中");
     expect(source).toContain('title="调度状态"');
     expect(source).toContain('title="未命中原因"');
-    expect(source).toContain('title="调度命中分布"');
+    expect(source).toContain("调度命中分布");
+    expect(source).toContain("命中节点");
+    expect(source).toContain('data-testid="scheduler-chart-periods"');
+    expect(source).toContain("<template #header-actions>");
+    expect(source).toContain(':show-summary="false"');
+    expect(source).not.toContain(':sampled-label="chartState.filterText"');
+    expect(source).not.toContain(':as-of="chartState.asOf"');
+    expect(source).toContain("SCHEDULER_CHART_PERIODS");
+    expect(source).not.toContain("limitOptions");
+    expect(source).not.toContain("返回上限");
     expect(source).not.toContain("全部结果");
     expect(source).not.toContain('title="结果"');
     expect(source).not.toContain('title="结果分布"');

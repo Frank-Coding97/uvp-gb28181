@@ -1,10 +1,12 @@
 import type { SchedulerAlgorithm, SchedulerLogEntry, SchedulerLogFilter } from "@/api/gb28181-zlm";
 
+import type { SchedulerChartPeriod } from "../../schedulerLogState";
 import type { ChartDatum, MediaChartSpec } from "./overviewChart";
 
 export type SchedulerChartStatus = "ready" | "empty" | "unknown" | "unavailable" | "partial";
 
 export interface SchedulerChartDistribution {
+  bucket: string;
   category: string;
   count: number;
   nodeId?: number;
@@ -12,6 +14,8 @@ export interface SchedulerChartDistribution {
 
 export interface SchedulerChartState {
   status: SchedulerChartStatus;
+  period: SchedulerChartPeriod;
+  timeBuckets: string[];
   sampleCount: number;
   limit: number | null;
   filter: SchedulerLogFilter;
@@ -25,9 +29,10 @@ export interface SchedulerChartState {
 
 export interface SchedulerChartStateOptions {
   unavailable?: boolean;
+  period?: SchedulerChartPeriod;
 }
 
-export const SCHEDULER_CHART_SAMPLE_LIMIT = 1_000;
+const SCHEDULER_NODE_CATEGORY_LIMIT = 40;
 
 const algorithmLabels: Record<SchedulerAlgorithm, string> = {
   roundrobin: "轮询",
@@ -53,24 +58,6 @@ function formatFilter(filter: SchedulerLogFilter, sampleCount: number, limit: nu
   return parts.join(" · ");
 }
 
-function increment(map: Map<string, SchedulerChartDistribution>, category: string, nodeId?: number) {
-  const key = nodeId === undefined ? category : `${category}:${nodeId}`;
-  const current = map.get(key);
-  if (current) current.count += 1;
-  else map.set(key, { category, count: 1, ...(nodeId === undefined ? {} : { nodeId }) });
-}
-
-function sorted(values: Map<string, SchedulerChartDistribution>): SchedulerChartDistribution[] {
-  return [...values.values()].sort((left, right) => {
-    const resultOrder = (category: string) => (category === "已命中" ? 0 : category === "未命中" ? 1 : 2);
-    return (
-      right.count - left.count ||
-      resultOrder(left.category) - resultOrder(right.category) ||
-      left.category.localeCompare(right.category)
-    );
-  });
-}
-
 function resultCategory(log: SchedulerLogEntry): string {
   return typeof log.errorMessage === "string" && log.errorMessage.trim() === "" ? "已命中" : "未命中";
 }
@@ -82,110 +69,230 @@ function nodeCategory(log: SchedulerLogEntry): { category: string; nodeId: numbe
   return { category: name || `节点 #${nodeId}`, nodeId };
 }
 
+function validDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function floorHour(value: Date): Date {
+  const result = new Date(value.getTime());
+  result.setMinutes(0, 0, 0);
+  return result;
+}
+
+function floorDay(value: Date): Date {
+  const result = new Date(value.getTime());
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function shift(value: Date, period: SchedulerChartPeriod, amount: number): Date {
+  const result = new Date(value.getTime());
+  if (period === "24h") result.setHours(result.getHours() + amount);
+  else result.setDate(result.getDate() + amount);
+  return result;
+}
+
+function bucketFor(value: Date, period: SchedulerChartPeriod): string {
+  return (period === "24h" ? floorHour(value) : floorDay(value)).toISOString();
+}
+
+function createTimeBuckets(
+  filter: SchedulerLogFilter,
+  logs: readonly SchedulerLogEntry[],
+  period: SchedulerChartPeriod
+): string[] {
+  const filterTo = validDate(filter.to);
+  const latest = logs.reduce<Date | null>((current, log) => {
+    const date = validDate(log.happenedAt);
+    return date && (!current || date > current) ? date : current;
+  }, null);
+  const anchor = period === "24h" ? floorHour(filterTo || latest || new Date()) : floorDay(filterTo || latest || new Date());
+  const first = shift(anchor, period, period === "24h" ? -23 : -6);
+  const buckets: string[] = [];
+  for (let current = first; current <= anchor; current = shift(current, period, 1)) buckets.push(current.toISOString());
+  return buckets;
+}
+
+function increment(map: Map<string, SchedulerChartDistribution>, bucket: string, category: string, nodeId?: number) {
+  const key = `${bucket}:${category}:${nodeId ?? ""}`;
+  const current = map.get(key);
+  if (current) current.count += 1;
+  else map.set(key, { bucket, category, count: 1, ...(nodeId === undefined ? {} : { nodeId }) });
+}
+
+function fillDistribution(
+  buckets: readonly string[],
+  categories: readonly { category: string; nodeId?: number }[],
+  values: Map<string, SchedulerChartDistribution>
+): SchedulerChartDistribution[] {
+  return buckets.flatMap(bucket =>
+    categories.map(
+      ({ category, nodeId }) =>
+        values.get(`${bucket}:${category}:${nodeId ?? ""}`) || {
+          bucket,
+          category,
+          count: 0,
+          ...(nodeId === undefined ? {} : { nodeId })
+        }
+    )
+  );
+}
+
+function fillNodeDistribution(
+  buckets: readonly string[],
+  categories: readonly { category: string; nodeId?: number }[],
+  values: Map<string, SchedulerChartDistribution>
+): SchedulerChartDistribution[] {
+  const selected = categories.slice(0, SCHEDULER_NODE_CATEGORY_LIMIT - 1);
+  const selectedKeys = new Set(selected.map(item => `${item.category}:${item.nodeId ?? ""}`));
+  const result = fillDistribution(buckets, selected, values);
+  const hasOther = categories.length > selected.length;
+  if (!hasOther) return result;
+  return [
+    ...result,
+    ...buckets.map(bucket => ({
+      bucket,
+      category: "其他",
+      count: [...values.values()].reduce(
+        (sum, item) =>
+          item.bucket === bucket && !selectedKeys.has(`${item.category}:${item.nodeId ?? ""}`) ? sum + item.count : sum,
+        0
+      )
+    }))
+  ];
+}
+
 export function buildSchedulerChartState(
   logs: readonly SchedulerLogEntry[] | null | undefined,
   filter: SchedulerLogFilter = {},
   options: SchedulerChartStateOptions = {}
 ): SchedulerChartState {
+  const period = options.period || "24h";
   const limit = normalizedLimit(filter);
-  const effectiveLimit = limit ?? SCHEDULER_CHART_SAMPLE_LIMIT;
   const sourceLogs = Array.isArray(logs) ? logs : [];
-  const sampledLogs = sourceLogs.slice(0, effectiveLimit);
+  const sampledLogs = limit === null ? sourceLogs : sourceLogs.slice(0, limit);
   const sampleCount = sampledLogs.length;
   const filterText = formatFilter(filter, sampleCount, limit);
-  if (options.unavailable) {
-    return {
-      status: "unavailable",
-      sampleCount,
-      limit,
-      filter,
-      filterText,
-      resultDistribution: [],
-      nodeDistribution: [],
-      summary: "调度日志暂不可用",
-      warning: "后端没有返回当前筛选样本，不能将其视为 0 条已命中或未命中",
-      asOf: null
-    };
-  }
-  if (!Array.isArray(logs)) {
-    return {
-      status: "unknown",
-      sampleCount: 0,
-      limit,
-      filter,
-      filterText,
-      resultDistribution: [],
-      nodeDistribution: [],
-      summary: "暂时没有可用的调度日志样本",
-      warning: "调度日志尚未返回",
-      asOf: null
-    };
-  }
-  if (sourceLogs.length === 0) {
-    return {
-      status: "empty",
-      sampleCount: 0,
-      limit,
-      filter,
-      filterText,
-      resultDistribution: [],
-      nodeDistribution: [],
-      summary: "当前筛选没有调度日志",
-      warning: null,
-      asOf: null
-    };
-  }
+  const empty = (status: SchedulerChartStatus, summary: string, warning: string | null): SchedulerChartState => ({
+    status,
+    period,
+    timeBuckets: [],
+    sampleCount,
+    limit,
+    filter,
+    filterText,
+    resultDistribution: [],
+    nodeDistribution: [],
+    summary,
+    warning,
+    asOf: null
+  });
+  if (options.unavailable) return empty("unavailable", "调度日志暂不可用", "后端没有返回当前筛选样本");
+  if (!Array.isArray(logs)) return empty("unknown", "暂时没有可用的调度日志样本", "调度日志尚未返回");
+  if (sourceLogs.length === 0) return empty("empty", "当前筛选没有调度日志", null);
 
-  const results = new Map<string, SchedulerChartDistribution>();
-  const nodes = new Map<string, SchedulerChartDistribution>();
+  const timeBuckets = createTimeBuckets(filter, sampledLogs, period);
+  const resultValues = new Map<string, SchedulerChartDistribution>();
+  const nodeValues = new Map<string, SchedulerChartDistribution>();
+  const nodeCategories = new Map<string, { category: string; nodeId: number }>();
   let latest: string | null = null;
   for (const log of sampledLogs) {
-    increment(results, resultCategory(log));
+    const happenedAt = validDate(log.happenedAt);
+    if (!happenedAt) continue;
+    const bucket = bucketFor(happenedAt, period);
+    if (!timeBuckets.includes(bucket)) continue;
+    increment(resultValues, bucket, resultCategory(log));
     const node = nodeCategory(log);
-    if (node) increment(nodes, node.category, node.nodeId);
-    if (typeof log.happenedAt === "string" && log.happenedAt && (!latest || log.happenedAt > latest)) latest = log.happenedAt;
+    if (node) {
+      nodeCategories.set(`${node.category}:${node.nodeId}`, node);
+      increment(nodeValues, bucket, node.category, node.nodeId);
+    }
+    if (!latest || log.happenedAt > latest) latest = log.happenedAt;
   }
-  const resultDistribution = sorted(results);
-  const nodeDistribution = sorted(nodes);
-  const sampledAtLimit = sourceLogs.length > sampledLogs.length || (limit !== null && sampledLogs.length >= limit);
+  const resultCategories = [{ category: "已命中" }, { category: "未命中" }];
+  const resultDistribution = fillDistribution(timeBuckets, resultCategories, resultValues);
+  const nodeTotalsByKey = new Map<string, number>();
+  for (const item of nodeValues.values()) {
+    const key = `${item.category}:${item.nodeId ?? ""}`;
+    nodeTotalsByKey.set(key, (nodeTotalsByKey.get(key) || 0) + item.count);
+  }
+  const nodeTotals = [...nodeCategories.values()]
+    .map(node => ({ ...node, total: nodeTotalsByKey.get(`${node.category}:${node.nodeId}`) || 0 }))
+    .sort((left, right) => right.total - left.total || left.category.localeCompare(right.category));
+  const nodeDistribution = fillNodeDistribution(timeBuckets, nodeTotals, nodeValues);
+  const sampledAtLimit = limit !== null && (sourceLogs.length > sampledLogs.length || sampledLogs.length >= limit);
+  const resultTotals = new Map<string, number>();
+  for (const item of resultDistribution) resultTotals.set(item.category, (resultTotals.get(item.category) || 0) + item.count);
   return {
     status: sampledAtLimit ? "partial" : "ready",
+    period,
+    timeBuckets,
     sampleCount,
     limit,
     filter,
     filterText,
     resultDistribution,
     nodeDistribution,
-    summary: `当前筛选统计 ${sampleCount} 条样本：${resultDistribution.map(item => `${item.category} ${item.count}`).join("、")}`,
-    warning: sampledAtLimit
-      ? `已达到${limit === null ? "前端统计" : "后端返回"}上限 ${effectiveLimit} 条，只代表当前筛选样本，不代表全量历史`
-      : null,
+    summary: `当前筛选统计 ${sampleCount} 条样本：${["已命中", "未命中"]
+      .filter(category => (resultTotals.get(category) || 0) > 0)
+      .map(category => `${category} ${resultTotals.get(category)}`)
+      .join("、")}`,
+    warning: sampledAtLimit ? `已达到后端返回上限 ${limit} 条，只代表当前筛选样本，不代表全量历史` : null,
     asOf: latest
   };
 }
 
-function distributionSpec(id: string, values: SchedulerChartDistribution[], yTitle: string): MediaChartSpec {
-  const data: ChartDatum[] = values.map(item => ({ category: item.category, count: item.count, nodeId: item.nodeId }));
+function formatHour(value: string): string {
+  const date = new Date(value);
+  return `${String(date.getHours()).padStart(2, "0")}:00`;
+}
+
+function formatDay(value: string): string {
+  const date = new Date(value);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function distributionSpec(
+  id: string,
+  values: SchedulerChartDistribution[],
+  yTitle: string,
+  period: SchedulerChartPeriod
+): MediaChartSpec {
+  const data: ChartDatum[] = values.map(item => ({
+    bucket: item.bucket,
+    category: item.category,
+    count: item.count,
+    nodeId: item.nodeId
+  }));
   return {
     type: "bar",
     background: "transparent",
     data: [{ id, values: data }],
-    series: [{ type: "bar", data: { id }, xField: "category", yField: "count", barMaxWidth: 28 }],
-    axes: [
-      { orient: "left", title: { text: yTitle } },
-      { orient: "bottom", label: { autoRotate: false, autoHide: true } }
+    series: [
+      { type: "bar", data: { id }, xField: "bucket", yField: "count", seriesField: "category", stack: true, barMaxWidth: 28 }
     ],
-    tooltip: { activeType: "dimension" },
+    axes: [
+      { orient: "left", title: { text: yTitle }, label: { autoHide: true } },
+      { orient: "bottom", label: { autoRotate: false, autoHide: true, formatMethod: period === "24h" ? formatHour : formatDay } }
+    ],
+    tooltip: {
+      activeType: "dimension",
+      dimension: {
+        title: { visible: false }
+      }
+    },
     padding: { left: 8, right: 12, top: 8, bottom: 8 }
   };
 }
 
 export function createSchedulerResultSpec(state: SchedulerChartState): MediaChartSpec {
-  return distributionSpec("scheduler-result-distribution", state.resultDistribution, "调度次数");
+  return distributionSpec("scheduler-result-distribution", state.resultDistribution, "调度次数", state.period);
 }
 
 export function createSchedulerNodeSpec(state: SchedulerChartState): MediaChartSpec {
-  return distributionSpec("scheduler-node-distribution", state.nodeDistribution, "承接次数");
+  return distributionSpec("scheduler-node-distribution", state.nodeDistribution, "承接次数", state.period);
 }
 
 export const schedulerChartState = buildSchedulerChartState;

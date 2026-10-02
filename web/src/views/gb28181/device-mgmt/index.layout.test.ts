@@ -131,9 +131,27 @@ describe("device management toolbar layout", () => {
     expect(source).toContain(".icon-btn.framed.subscription {");
   });
 
+  it("places the device maintenance menu at the far right of card actions", () => {
+    const actionBar = source.slice(
+      source.indexOf('<div class="card-actions device-card-actions">'),
+      source.indexOf("</article>", source.indexOf('<div class="card-actions device-card-actions">'))
+    );
+    const moreActionsIndex = actionBar.indexOf('aria-label="更多设备操作"');
+    const deleteIndex = actionBar.indexOf('class="icon-btn small framed danger"');
+
+    expect(moreActionsIndex).toBeGreaterThan(-1);
+    expect(deleteIndex).toBeGreaterThan(-1);
+    expect(moreActionsIndex).toBeGreaterThan(deleteIndex);
+  });
+
   it("distinguishes device drilldown from manual channel mode", () => {
     expect(source).toContain('channelEntrySource.value = "device-drilldown";');
     expect(source).toContain('channelEntrySource.value = "manual";');
+    const drilldown = source.slice(
+      source.indexOf("function showDeviceChannels"),
+      source.indexOf("async function loadPtzTypeDict")
+    );
+    expect(drilldown).toContain("drawerVisible.value = false;");
     expect(source).toContain('assetKind.value = "device";');
     expect(source).toContain('class="filter-chip device-drilldown-chip"');
     expect(source).toContain('aria-label="返回设备列表"');
@@ -157,24 +175,36 @@ describe("device management toolbar layout", () => {
     expect(source).toContain("zlmNodesError");
   });
 
-  it("exposes separate device maintenance actions through all device surfaces", () => {
+  it("exposes separate device maintenance actions on device cards", () => {
     for (const component of [
       "DeviceRebootDialog",
-      "DeviceFirmwareUpgradeDrawer",
-      "DeviceMaintenanceRecordsDrawer",
+      "DeviceFirmwareUpgradeDialog",
+      "DeviceMaintenanceRecordsDialog",
       "DeviceMaintenanceMenu"
     ]) {
       expect(source).toContain(component);
     }
     expect(source).not.toContain("DeviceMaintenanceDialog");
-    for (const target of ["record", "item", "deviceDetail"]) {
+    expect(source).not.toContain("DeviceFirmwareUpgradeDrawer");
+    expect(source).toContain("DeviceMaintenanceRecordsDialog");
+    expect(source).not.toContain("DeviceMaintenanceRecordsDrawer");
+    for (const target of ["record", "item"]) {
       expect(source).toContain(`openDeviceUpgrade(${target})`);
       expect(source).toContain(`openDeviceReboot(${target})`);
       expect(source).toContain(`openMaintenanceRecords(${target})`);
     }
+    const detailStart = source.indexOf("drawerTarget?.type === 'device' && deviceDetail");
+    const detailEnd = source.indexOf("</a-drawer>", detailStart);
+    const detail = source.slice(detailStart, detailEnd);
+    expect(detail).not.toContain("openDeviceUpgrade");
+    expect(detail).not.toContain("openDeviceReboot");
+    expect(detail).not.toContain("openMaintenanceRecords");
     expect(source).toContain('v-model:visible="upgradeVisible"');
+    expect(source).toContain("<DeviceFirmwareUpgradeDialog");
     expect(source).toContain('v-model:visible="rebootVisible"');
     expect(source).toContain('v-model:visible="recordsVisible"');
+    expect(source).toContain("<DeviceMaintenanceRecordsDialog");
+    expect(source).toContain("<a-modal");
 
     const playback = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
     expect(playback).not.toContain("远程重启父设备");

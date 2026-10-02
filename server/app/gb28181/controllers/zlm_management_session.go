@@ -33,6 +33,24 @@ func (controller *ZLMManagementController) NetworkSessions(c *gin.Context) {
 	writeManagementSuccess(c, result)
 }
 
+func (controller *ZLMManagementController) AllNetworkSessions(c *gin.Context) {
+	request, err := parseNetworkSessionQuery(c, 0)
+	if err != nil {
+		writeManagementError(c, err)
+		return
+	}
+	if controller == nil || controller.bundle == nil || controller.bundle.Sessions == nil {
+		controller.serviceUnavailable(c, 0, "network session")
+		return
+	}
+	result, err := controller.bundle.Sessions.ListAllNetworkSessions(requestContext(c), request)
+	if err != nil {
+		writeManagementError(c, err)
+		return
+	}
+	writeManagementSuccess(c, result)
+}
+
 func parseNetworkSessionQuery(c *gin.Context, nodeID int64) (management.NetworkSessionListRequest, error) {
 	page, err := parsePageQuery(c, "localPort", "peerIp")
 	if err != nil {
@@ -72,6 +90,24 @@ func (controller *ZLMManagementController) SessionViewers(c *gin.Context) {
 		return
 	}
 	result, err := controller.bundle.Sessions.ListMediaViewers(requestContext(c), management.MediaViewerListRequest{NodeID: nodeID, Media: media, Page: page})
+	if err != nil {
+		writeManagementError(c, err)
+		return
+	}
+	writeManagementSuccess(c, result)
+}
+
+func (controller *ZLMManagementController) AllSessionViewers(c *gin.Context) {
+	media, page, err := parseMediaPageQuery(c)
+	if err != nil {
+		writeManagementError(c, err)
+		return
+	}
+	if controller == nil || controller.bundle == nil || controller.bundle.Sessions == nil {
+		controller.serviceUnavailable(c, 0, "media viewer")
+		return
+	}
+	result, err := controller.bundle.Sessions.ListAllMediaViewers(requestContext(c), management.MediaViewerListRequest{Media: media, Page: page})
 	if err != nil {
 		writeManagementError(c, err)
 		return

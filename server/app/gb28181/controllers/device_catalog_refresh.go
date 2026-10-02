@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
@@ -52,6 +53,46 @@ func (dc *DeviceMgmtController) RefreshDeviceCatalog(c *gin.Context) {
 	}
 
 	dest := fmt.Sprintf("%s:%d", d.IP, d.Port)
-	dc.catalogTrigger.Trigger(context.WithoutCancel(c.Request.Context()), d.DeviceID, dest, d.Transport)
-	dc.Success(c, gin.H{"deviceId": d.DeviceID, "dest": dest, "transport": d.Transport, "ok": true})
+	started := catalogprogress.Default.Start(d.DeviceID)
+	if !started.Deduplicated {
+		triggerContext := catalogprogress.WithOperationID(context.WithoutCancel(c.Request.Context()), started.Snapshot.OperationID)
+		dc.catalogTrigger.Trigger(triggerContext, d.DeviceID, dest, d.Transport)
+	}
+	dc.Success(c, gin.H{"deviceId": d.DeviceID, "dest": dest, "transport": d.Transport, "operationId": started.Snapshot.OperationID, "deduplicated": started.Deduplicated, "ok": true})
+}
+
+// GetDeviceCatalogRefreshProgress returns the asynchronous Catalog refresh state.
+// GET /device-mgmt/device/:id/catalog/refresh/:operationId
+func (dc *DeviceMgmtController) GetDeviceCatalogRefreshProgress(c *gin.Context) {
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		dc.FailAndAbort(c, "ID 不合法", err)
+		return
+	}
+	var device gbmodels.GbDevice
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	if res.Error != nil {
+		dc.FailAndAbort(c, "查询失败", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		dc.FailAndAbort(c, "设备不存在或无权限", nil)
+		return
+	}
+	operationID := c.Param("operationId")
+	progress, ok := catalogprogress.Default.Get(operationID)
+	if !ok {
+		dc.FailAndAbort(c, "刷新任务不存在或已过期", nil)
+		return
+	}
+	if progress.DeviceID != device.DeviceID {
+		dc.FailAndAbort(c, "刷新任务不存在或无权限", nil)
+		return
+	}
+	dc.Success(c, progress)
 }

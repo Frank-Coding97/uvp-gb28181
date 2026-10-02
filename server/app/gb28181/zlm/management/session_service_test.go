@@ -35,6 +35,35 @@ func TestSessionServiceSeparatesNetworkSessionsAndMediaViewers(t *testing.T) {
 	require.NotEqual(t, network.List[0].ID, viewers.List[0].Identifier)
 }
 
+func TestSessionServiceAggregatesNetworkSessionsAndViewersAcrossNodes(t *testing.T) {
+	identity := t9Identity("aggregate")
+	runtime := &t9RuntimeReader{
+		sessions: map[int64][]zlm.Session{
+			1: {{ID: "network-1", Identifier: "network-1", Type: "TcpSession"}},
+			2: {{ID: "network-2", Identifier: "network-2", Type: "UdpServer"}},
+		},
+		players: map[string][]zlm.MediaPlayer{
+			t9MediaKey(1, identity): {{Identifier: "viewer-1", TypeID: "TcpSession"}},
+			t9MediaKey(2, identity): {{Identifier: "viewer-2", TypeID: "TcpSession"}},
+		},
+	}
+	service := NewSessionService(SessionServiceDependencies{
+		Registry: &t9NodeRegistry{nodes: []*node.Node{t9Node(1, node.StateActive), t9Node(2, node.StateActive)}}, Runtime: runtime,
+	})
+
+	network, err := service.ListAllNetworkSessions(context.Background(), NetworkSessionListRequest{Filter: zlm.SessionFilter{}, Page: PageRequest{Page: 1, PageSize: 10}})
+	require.NoError(t, err)
+	require.Len(t, network.List, 2)
+	require.Equal(t, "node-1", network.List[0].NodeName)
+	require.Equal(t, "node-2", network.List[1].NodeName)
+
+	viewers, err := service.ListAllMediaViewers(context.Background(), MediaViewerListRequest{Media: identity, Page: PageRequest{Page: 1, PageSize: 10}})
+	require.NoError(t, err)
+	require.Len(t, viewers.List, 2)
+	require.Equal(t, "node-1", viewers.List[0].NodeName)
+	require.Equal(t, "node-2", viewers.List[1].NodeName)
+}
+
 func TestSessionServiceKickRequiresFreshTargetProofAndReread(t *testing.T) {
 	identity := t9Identity("kick")
 	fresh := &t9FreshReader{players: map[string][][]zlm.MediaPlayer{t9MediaKey(1, identity): {

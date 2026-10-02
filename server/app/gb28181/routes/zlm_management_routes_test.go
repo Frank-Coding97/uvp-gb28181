@@ -36,6 +36,8 @@ func TestZLMManagementRoutesExposeStableTypedFamilies(t *testing.T) {
 		"/api/gb28181/zlm/nodes/:id/streams/close":                 {http.MethodPost},
 		"/api/gb28181/zlm/nodes/:id/streams/force-close":           {http.MethodPost},
 		"/api/gb28181/zlm/nodes/:id/sessions/network":              {http.MethodGet},
+		"/api/gb28181/zlm/sessions/network":                        {http.MethodGet},
+		"/api/gb28181/zlm/sessions/viewers":                        {http.MethodGet},
 		"/api/gb28181/zlm/nodes/:id/sessions/kick":                 {http.MethodPost},
 		"/api/gb28181/zlm/nodes/:id/proxies/pull":                  {http.MethodGet, http.MethodPost},
 		"/api/gb28181/zlm/nodes/:id/ffmpeg-sources":                {http.MethodGet, http.MethodPost},

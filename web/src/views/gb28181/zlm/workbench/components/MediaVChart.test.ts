@@ -229,6 +229,24 @@ describe("MediaVChart", () => {
     wrapper.unmount();
   });
 
+  it("omits the summary entirely when disabled without summary content", () => {
+    const wrapper = mount(MediaVChart, {
+      props: { title: "调度命中分布", spec: { type: "bar" }, summary: "", showSummary: false }
+    });
+    expect(wrapper.find(".media-vchart__summary").exists()).toBe(false);
+    expect(wrapper.get("[role='img']").attributes("aria-describedby")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("places chart controls inside the chart header", () => {
+    const wrapper = mount(MediaVChart, {
+      props: { title: "调度命中分布", spec: { type: "bar" } },
+      slots: { "header-actions": "<button type='button'>7 天</button>" }
+    });
+    expect(wrapper.get(".media-vchart__header button").text()).toBe("7 天");
+    wrapper.unmount();
+  });
+
   it("releases an inactive chart and can recreate it when explicitly activated", async () => {
     const wrapper = mount(MediaVChart, { props: { title: "节点", spec: { type: "bar" }, active: true } });
     await wrapper.setProps({ active: false });

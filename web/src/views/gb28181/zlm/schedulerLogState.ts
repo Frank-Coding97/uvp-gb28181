@@ -6,8 +6,19 @@ export interface SchedulerLogFilterState {
   algorithm?: SchedulerAlgorithm;
   result?: "success" | "failure";
   streamId?: string;
-  limit: number;
+  limit?: number;
 }
+
+export type SchedulerChartPeriod = "24h" | "7d";
+
+export const SCHEDULER_CHART_PERIODS: readonly {
+  key: SchedulerChartPeriod;
+  label: string;
+  durationMs: number;
+}[] = [
+  { key: "24h", label: "24 小时", durationMs: 24 * 60 * 60 * 1000 },
+  { key: "7d", label: "7 天", durationMs: 7 * 24 * 60 * 60 * 1000 }
+];
 
 export function schedulerLogResultFromQuery(value: unknown): SchedulerLogFilterState["result"] {
   const normalized = Array.isArray(value) ? value[0] : value;
@@ -21,10 +32,10 @@ function toRFC3339(value: string | number | Date) {
 }
 
 export function buildSchedulerLogFilter(state: SchedulerLogFilterState): SchedulerLogFilter {
-  if (!Number.isSafeInteger(state.limit) || state.limit <= 0 || state.limit > 1000) {
+  if (state.limit !== undefined && (!Number.isSafeInteger(state.limit) || state.limit <= 0 || state.limit > 1000)) {
     throw new Error("日志条数范围为 1-1000");
   }
-  const filter: SchedulerLogFilter = { limit: state.limit };
+  const filter: SchedulerLogFilter = state.limit === undefined ? {} : { limit: state.limit };
   if (state.timeRange?.length === 2 && state.timeRange[0] && state.timeRange[1]) {
     const from = toRFC3339(state.timeRange[0]);
     const to = toRFC3339(state.timeRange[1]);
@@ -38,4 +49,26 @@ export function buildSchedulerLogFilter(state: SchedulerLogFilterState): Schedul
   const streamId = state.streamId?.trim();
   if (streamId) filter.streamId = streamId;
   return filter;
+}
+
+export function buildSchedulerChartWindowFilter(
+  state: SchedulerLogFilterState,
+  period: SchedulerChartPeriod,
+  now: Date = new Date()
+): SchedulerLogFilter {
+  const config = SCHEDULER_CHART_PERIODS.find(item => item.key === period);
+  if (!config) throw new Error("调度图表时间范围无效");
+  const base = buildSchedulerLogFilter({ ...state, timeRange: [] });
+  const to = new Date(now.getTime());
+  let from: Date;
+  if (period === "24h") {
+    to.setMinutes(0, 0, 0);
+    from = new Date(to.getTime());
+    from.setHours(from.getHours() - 23);
+  } else {
+    to.setHours(0, 0, 0, 0);
+    from = new Date(to.getTime());
+    from.setDate(from.getDate() - 6);
+  }
+  return { ...base, from: from.toISOString(), to: new Date(now.getTime()).toISOString() };
 }

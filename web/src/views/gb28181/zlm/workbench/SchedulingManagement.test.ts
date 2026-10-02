@@ -6,10 +6,12 @@ describe("SchedulingManagement", () => {
   it("exposes scheduling logs as a standalone menu page", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/SchedulingManagement.vue"), "utf8");
     expect(source).toContain("SchedulerLogPanel");
+    expect(source).toContain('useMediaWorkspaceRoute("scheduling", { defaultScope: "all" })');
     expect(source).toMatch(/#logs=\"\{\s*active\s*\}\"/);
     expect(source).toContain(':active="active"');
     expect(source).toContain("MediaWorkspaceShell");
     expect(source).toContain(':show-scope="false"');
+    expect(source).toContain(':allow-all="true"');
     expect(source).toContain('@update:scope="workspace.setScope"');
     expect(source).toContain("useRoute");
     expect(source).toContain("initialLogResult");

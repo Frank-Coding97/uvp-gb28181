@@ -280,6 +280,7 @@ type StreamOwnershipImpact struct {
 
 type StreamListItem struct {
 	NodeID           int64               `json:"nodeId"`
+	NodeName         string              `json:"nodeName"`
 	NodeUUID         string              `json:"nodeUuid"`
 	Media            MediaIdentity       `json:"media"`
 	Online           bool                `json:"online"`
@@ -319,6 +320,7 @@ type StreamListResult struct {
 
 type StreamViewer struct {
 	NodeID     int64         `json:"nodeId"`
+	NodeName   string        `json:"nodeName"`
 	NodeUUID   string        `json:"nodeUuid"`
 	Media      MediaIdentity `json:"media"`
 	Identifier string        `json:"identifier"`
@@ -332,10 +334,12 @@ type StreamViewer struct {
 
 type StreamViewerPage struct {
 	Page[StreamViewer]
-	NodeID   int64         `json:"nodeId"`
-	NodeUUID string        `json:"nodeUuid"`
-	Target   MediaIdentity `json:"target"`
-	AsOf     time.Time     `json:"asOf"`
+	NodeID   int64             `json:"nodeId"`
+	NodeUUID string            `json:"nodeUuid"`
+	Target   MediaIdentity     `json:"target"`
+	AsOf     time.Time         `json:"asOf"`
+	Partial  bool              `json:"partial"`
+	Errors   []StreamNodeError `json:"errors,omitempty"`
 }
 
 func (s *StreamService) ListStreams(ctx context.Context, request StreamListRequest) (StreamListResult, error) {
@@ -937,7 +941,7 @@ func streamListItem(current *node.Node, info *zlm.MediaInfo) (StreamListItem, er
 	}
 	tracks := cloneStreamTracks(info.Tracks)
 	return StreamListItem{
-		NodeID: current.ID, NodeUUID: current.MediaServerUUID,
+		NodeID: current.ID, NodeName: strings.TrimSpace(current.Name), NodeUUID: current.MediaServerUUID,
 		Media:  MediaIdentity{Schema: info.Schema, Vhost: info.VHost, App: info.App, Stream: info.Stream},
 		Online: info.Online, AliveSecond: info.AliveSecond, BytesSpeed: info.BytesSpeed,
 		TotalBytes: info.TotalBytes, ReaderCount: info.ReaderCount, TotalReaderCount: info.TotalReaderCount,
@@ -1067,7 +1071,7 @@ func cloneStreamTracks(tracks []zlm.MediaTrack) []StreamTrack {
 
 func streamViewer(current *node.Node, media MediaIdentity, player zlm.MediaPlayer) StreamViewer {
 	return StreamViewer{
-		NodeID: current.ID, NodeUUID: current.MediaServerUUID, Media: media,
+		NodeID: current.ID, NodeName: strings.TrimSpace(current.Name), NodeUUID: current.MediaServerUUID, Media: media,
 		Identifier: safeRuntimeLabel(player.Identifier), PeerIP: safeRuntimeLabel(player.PeerIP), PeerPort: player.PeerPort,
 		LocalIP: player.LocalIP, LocalPort: player.LocalPort, TypeID: safeRuntimeLabel(player.TypeID),
 		Kickable: viewerKickable(player),

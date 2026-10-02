@@ -378,16 +378,14 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	))
 
 	// 固件仓库管理
-	if db := app.DB(); db != nil && app.Cache != nil {
-		firmwareRepoService = firmware.NewRepositoryService(db)
-		firmwareTokenService = firmware.NewDownloadTokenService(app.Cache)
-		gbroutes.SetFirmwareRepositoryController(gbcontrollers.NewFirmwareRepositoryController(
-			db,
-			firmwareRepoService,
-			firmwareTokenService,
-			"uploads",
-		))
-	}
+	firmwareRepoService = firmware.NewRepositoryService(app.DB())
+	firmwareTokenService = firmware.NewDownloadTokenService(app.Cache)
+	gbroutes.SetFirmwareRepositoryController(gbcontrollers.NewFirmwareRepositoryController(
+		app.DB(),
+		firmwareRepoService,
+		firmwareTokenService,
+		"uploads",
+	))
 
 	metricsAgg = metrics.NewAggregator()
 	metricsRecorder = metricsAgg

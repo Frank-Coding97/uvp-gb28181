@@ -41,8 +41,13 @@ describe("single-menu ZLM workbench", () => {
     expect(route).toContain("query: { ...route.query, nodeId: String(next) }");
     expect(route).toContain("router.replace({ path: definition.path, query: { ...route.query, view } })");
     expect(route).not.toContain("router.push({ path: definition.path, query: { view } })");
-    expect(systemMenu).toContain('path.startsWith("/media/")');
-    expect(systemMenu).toContain("query: { nodeId }");
+    expect(systemMenu).toContain("mediaMenuLocation(path, nodeId)");
+    expect(readFileSync(resolve(process.cwd(), "src/layout/components/Menu/mediaMenuRoute.ts"), "utf8")).toContain(
+      "/media/monitoring"
+    );
+    expect(readFileSync(resolve(process.cwd(), "src/layout/components/Menu/mediaMenuRoute.ts"), "utf8")).toContain(
+      "/media/scheduling"
+    );
   });
 
   it("does not collapse workbench menus into one outer tab", () => {

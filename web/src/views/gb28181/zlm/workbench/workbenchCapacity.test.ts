@@ -117,8 +117,8 @@ describe("media workbench large DTO boundaries", () => {
     expect(scheduler.status).toBe("partial");
     expect(scheduler.warning).toContain("1000");
     expect(scheduler.warning).not.toContain("null");
-    expect(defaultBoundedScheduler.warning).toContain("1000");
-    expect(defaultBoundedScheduler.warning).not.toContain("null");
+    expect(defaultBoundedScheduler.sampleCount).toBe(LARGE_DTO_COUNT);
+    expect(defaultBoundedScheduler.warning).toBeNull();
     expect(performance.now() - startedAt).toBeLessThan(2_000);
   });
 

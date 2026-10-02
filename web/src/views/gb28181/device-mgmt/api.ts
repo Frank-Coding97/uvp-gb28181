@@ -610,10 +610,36 @@ export interface CreateDeviceDTO {
 export const createDevice = (data: CreateDeviceDTO) =>
   http.request<BaseResult<{ id: number; deviceId: string }>>("post", baseUrlApi("gb28181/device-mgmt/device"), { data });
 
+export type CatalogRefreshStatus = "waiting" | "receiving" | "persisting" | "completed" | "failed" | "timeout";
+
+export interface CatalogRefreshProgress {
+  operationId: string;
+  deviceId: string;
+  status: CatalogRefreshStatus;
+  receivedCount: number;
+  totalCount?: number | null;
+  errorMessage?: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+}
+
+export interface CatalogRefreshResult {
+  deviceId: string;
+  dest: string;
+  transport: string;
+  ok: boolean;
+  operationId: string;
+  deduplicated: boolean;
+}
+
 export const refreshDeviceCatalog = (id: number) =>
-  http.request<BaseResult<{ deviceId: string; dest: string; ok: boolean }>>(
-    "post",
-    baseUrlApi(`gb28181/device-mgmt/device/${id}/catalog/refresh`)
+  http.request<BaseResult<CatalogRefreshResult>>("post", baseUrlApi(`gb28181/device-mgmt/device/${id}/catalog/refresh`));
+
+export const getDeviceCatalogRefreshProgress = (id: number, operationId: string) =>
+  http.request<BaseResult<CatalogRefreshProgress>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/device/${id}/catalog/refresh/${operationId}`)
   );
 
 export type StreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";

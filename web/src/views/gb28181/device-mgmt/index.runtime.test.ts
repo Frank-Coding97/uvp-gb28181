@@ -453,7 +453,7 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(menu.exists()).toBe(true);
     menu.vm.$emit("upgrade");
     await flushPromises();
-    const upgrade = wrapper.findComponent({ name: "DeviceFirmwareUpgradeDrawer" });
+    const upgrade = wrapper.findComponent({ name: "DeviceFirmwareUpgradeDialog" });
     expect(upgrade.props("visible")).toBe(true);
     const operation = { operationId: "upgrade-31", deviceId: 31, status: "accepted", firmware: "v2" };
     upgrade.vm.$emit("operationUpdated", operation);
@@ -469,7 +469,7 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(upgrade.props("visible")).toBe(false);
     reboot.vm.$emit("viewRecords", "reboot-31");
     await flushPromises();
-    const records = wrapper.findComponent({ name: "DeviceMaintenanceRecordsDrawer" });
+    const records = wrapper.findComponent({ name: "DeviceMaintenanceRecordsDialog" });
     expect(records.props("visible")).toBe(true);
     expect(records.props("initialType")).toBe("reboot");
     expect(records.props("operationId")).toBe("reboot-31");

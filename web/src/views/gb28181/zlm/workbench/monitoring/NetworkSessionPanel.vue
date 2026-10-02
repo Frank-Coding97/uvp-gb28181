@@ -4,6 +4,8 @@ import { Message } from "@arco-design/web-vue";
 import { Network, Radio, ShieldAlert, Users } from "lucide-vue-next";
 
 import {
+  listAllZLMMediaViewers,
+  listAllZLMNetworkSessions,
   listZLMMediaViewers,
   listZLMNetworkSessions,
   type ZLMNetworkSessionPage,
@@ -55,6 +57,7 @@ const loading = ref(false);
 const loadError = ref<unknown>(null);
 const kickVisible = ref(false);
 const kickViewer = ref<ZLMStreamViewer | null>(null);
+const kickNodeName = ref("");
 
 const scopeLabel = computed(() => (props.scope === "all" ? "全部节点" : `节点 #${props.nodeId ?? "—"}`));
 const viewerTarget = computed(() => buildViewerTarget(viewerFilter));
@@ -63,7 +66,13 @@ const hasKickPermission = computed(
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const paused = computed(() => kickVisible.value);
-const requestNodeId = computed(() => props.nodeId);
+const requestNodeId = computed(() => (props.scope === "all" ? 1 : props.nodeId));
+const networkRows = computed(() =>
+  (networkData.value?.list ?? []).map(record => ({ ...record, rowKey: `${record.nodeId}:${record.id}` }))
+);
+const viewerRows = computed(() =>
+  (viewerData.value?.list ?? []).map(record => ({ ...record, rowKey: `${record.nodeId}:${record.identifier}` }))
+);
 
 const { refresh } = useZLMRuntimePolling<PollPayload>({
   nodeId: requestNodeId,
@@ -74,18 +83,19 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     loading.value = true;
     const tab = props.view;
     if (tab === "network") {
-      const response = await listZLMNetworkSessions(nodeId, buildNetworkSessionQuery(networkFilter), signal);
+      const response =
+        props.scope === "all"
+          ? await listAllZLMNetworkSessions(buildNetworkSessionQuery(networkFilter), signal)
+          : await listZLMNetworkSessions(nodeId, buildNetworkSessionQuery(networkFilter), signal);
       if (response.code !== 0 || !response.data) throw new Error(response.message || "网络会话加载失败");
       return { kind: "network", data: response.data };
     }
     const target = viewerTarget.value;
     if (!target) return { kind: "viewer-query-empty" };
-    const response = await listZLMMediaViewers(
-      nodeId,
-      target,
-      { page: viewerPage.value, pageSize: viewerPageSize.value },
-      signal
-    );
+    const response =
+      props.scope === "all"
+        ? await listAllZLMMediaViewers(target, { page: viewerPage.value, pageSize: viewerPageSize.value }, signal)
+        : await listZLMMediaViewers(nodeId, target, { page: viewerPage.value, pageSize: viewerPageSize.value }, signal);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "媒体观看者加载失败");
     return { kind: "viewers", data: response.data };
   },
@@ -108,10 +118,11 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
 watch([() => props.scope, () => props.nodeId], () => {
   kickVisible.value = false;
   kickViewer.value = null;
+  kickNodeName.value = "";
   networkData.value = null;
   viewerData.value = null;
   loadError.value = null;
-  loading.value = props.nodeId !== null;
+  loading.value = props.scope === "all" || props.nodeId !== null;
   if (props.active) refresh();
 });
 
@@ -180,6 +191,7 @@ function changeViewerPageSize(nextSize: number) {
 function openKick(viewer: ZLMStreamViewer) {
   if (!canKickViewer(viewer, hasKickPermission.value)) return;
   kickViewer.value = { ...viewer, media: { ...viewer.media } };
+  kickNodeName.value = viewer.nodeName || `节点 #${viewer.nodeId}`;
   kickVisible.value = true;
 }
 
@@ -196,10 +208,17 @@ defineExpose({ refresh });
 <template>
   <div class="monitoring-panel session-panel">
     <div v-if="props.scope === 'all'" class="monitoring-banner" role="status">
-      会话接口按节点提供。请选择具体节点后查看网络会话与媒体观看者，避免把跨节点连接误合并。
+      当前展示全部可见节点的会话数据，结果保留节点来源。
     </div>
     <div v-if="loadError && (networkData || viewerData)" class="monitoring-banner monitoring-banner--warning" role="status">
       本次刷新失败：{{ errorPresentation.label }}；保留当前 Tab 的筛选、分页和上一次数据。
+    </div>
+    <div
+      v-if="(props.view === 'network' && networkData?.partial) || (props.view === 'viewers' && viewerData?.partial)"
+      class="monitoring-banner monitoring-banner--warning"
+      role="status"
+    >
+      部分节点读取失败，当前结果只包含成功返回的节点；请刷新重试。
     </div>
     <div v-if="!hasKickPermission" class="monitoring-banner" role="status">
       当前账号可查看会话，但没有 `gb28181:zlm:session:kick` 权限；踢除按钮不会显示。
@@ -221,33 +240,27 @@ defineExpose({ refresh });
             @press-enter="queryNetwork"
         /></template>
         <template #actions
-          ><a-button type="primary" :disabled="props.scope === 'all'" @click="queryNetwork">查询</a-button
-          ><a-button @click="resetNetwork">重置</a-button
-          ><a-button
-            class="uvp-page-action-btn uvp-refresh-btn"
-            :loading="loading"
-            :disabled="props.scope === 'all'"
-            @click="refresh"
+          ><a-button type="primary" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button
+          ><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" @click="refresh"
             ><template #icon><icon-refresh /></template>刷新</a-button
           ></template
         >
         <template #extra
-          ><span class="scope-note">{{ props.scope === "all" ? "请先选择节点" : `当前范围：${scopeLabel}` }}</span></template
+          ><span class="scope-note">当前范围：{{ scopeLabel }}</span></template
         >
       </s-layout-search>
 
-      <div v-if="props.scope === 'all'" class="monitoring-state" role="status">
-        <Network :size="36" /><strong>请选择具体节点</strong><span>网络会话是节点级数据，当前不做未经后端证明的跨节点聚合。</span>
-      </div>
-      <div v-else-if="loading && !networkData" class="monitoring-state" role="status"><a-spin />正在加载网络会话…</div>
+      <div v-if="loading && !networkData" class="monitoring-state" role="status"><a-spin />正在加载网络会话…</div>
       <div v-else-if="loadError && !networkData" class="monitoring-state monitoring-state--error" role="alert">
         <ShieldAlert :size="36" /><strong>{{ errorPresentation.label }}</strong
         ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
       </div>
       <template v-else>
         <section class="session-table-panel">
-          <a-table :data="networkData?.list || []" :loading="loading" row-key="id" :pagination="false" class="uvp-data-table"
+          <a-table :data="networkRows" :loading="loading" row-key="rowKey" :pagination="false" class="uvp-data-table"
             ><template #columns
+              ><a-table-column title="节点" :width="140"
+                ><template #cell="{ record }">{{ record.nodeName || `节点 #${record.nodeId}` }}</template></a-table-column
               ><a-table-column title="会话 ID" data-index="id" :width="220" /><a-table-column title="远端"
                 ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
               ><a-table-column title="本地"
@@ -301,27 +314,16 @@ defineExpose({ refresh });
             @search="queryViewers"
         /></template>
         <template #actions
-          ><a-button type="primary" :disabled="props.scope === 'all'" @click="queryViewers">查询</a-button
+          ><a-button type="primary" :disabled="!viewerTarget" @click="queryViewers">查询</a-button
           ><a-button @click="resetViewers">重置</a-button
-          ><a-button
-            class="uvp-page-action-btn uvp-refresh-btn"
-            :loading="loading"
-            :disabled="props.scope === 'all' || !viewerTarget"
-            @click="refresh"
+          ><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!viewerTarget" @click="refresh"
             ><template #icon><icon-refresh /></template>刷新</a-button
           ></template
         >
-        <template #extra
-          ><span class="scope-note">{{
-            props.scope === "all" ? "请先选择节点" : "需完整 MediaIdentity，踢除还需 kickable=true"
-          }}</span></template
-        >
+        <template #extra><span class="scope-note">需完整 MediaIdentity，踢除还需 kickable=true</span></template>
       </s-layout-search>
 
-      <div v-if="props.scope === 'all'" class="monitoring-state" role="status">
-        <Users :size="36" /><strong>请选择具体节点</strong><span>观看者接口需要 nodeId 与完整 MediaIdentity。</span>
-      </div>
-      <div v-else-if="!viewerTarget" class="monitoring-state" role="status">
+      <div v-if="!viewerTarget" class="monitoring-state" role="status">
         <Radio :size="36" /><strong>请输入完整媒体身份</strong
         ><span>Schema、VHost、App、Stream 缺一不可，页面不会猜默认值。</span>
       </div>
@@ -331,13 +333,10 @@ defineExpose({ refresh });
       </div>
       <template v-else>
         <section class="session-table-panel">
-          <a-table
-            :data="viewerData?.list || []"
-            :loading="loading"
-            row-key="identifier"
-            :pagination="false"
-            class="uvp-data-table"
+          <a-table :data="viewerRows" :loading="loading" row-key="rowKey" :pagination="false" class="uvp-data-table"
             ><template #columns
+              ><a-table-column title="节点" :width="140"
+                ><template #cell="{ record }">{{ record.nodeName || `节点 #${record.nodeId}` }}</template></a-table-column
               ><a-table-column title="观看标识" data-index="identifier" :width="240" /><a-table-column title="远端"
                 ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
               ><a-table-column title="本地"
@@ -373,7 +372,12 @@ defineExpose({ refresh });
       </template>
     </template>
 
-    <ZLMSessionKickDialog v-model:visible="kickVisible" :node-name="scopeLabel" :viewer="kickViewer" @done="kickDone" />
+    <ZLMSessionKickDialog
+      v-model:visible="kickVisible"
+      :node-name="kickNodeName || scopeLabel"
+      :viewer="kickViewer"
+      @done="kickDone"
+    />
   </div>
 </template>
 

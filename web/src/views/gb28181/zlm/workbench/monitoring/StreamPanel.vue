@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from "vue";
-import { Message } from "@arco-design/web-vue";
-import { Camera, Copy, Eye, Radio, ShieldAlert, Users } from "lucide-vue-next";
+import { Message, Modal } from "@arco-design/web-vue";
+import { Eye, PowerOff, Radio, ShieldAlert, Users } from "lucide-vue-next";
 
 import {
   getZLMStreamDetail,
-  fetchZLMStreamSnapshot,
-  issueZLMPreviewGrant,
+  forceCloseZLMStream,
   listZLMStreams,
   listZLMStreamViewers,
+  preflightCloseZLMStream,
   type ZLMOwnershipTarget,
-  type ZLMPreviewGrant,
   type ZLMStream,
   type ZLMStreamDetail,
   type ZLMStreamPage,
@@ -18,24 +17,24 @@ import {
 } from "@/api/gb28181-zlm-runtime";
 import type { MediaScope } from "@/store/modules/media-workbench";
 import { useUserStoreHook } from "@/store/modules/user";
-import PlayWindow from "@/views/gb28181/components/PlayWindow.vue";
 
-import ZLMStreamCloseDialog from "../../ZLMStreamCloseDialog.vue";
 import { formatZLMByteRate, formatZLMBytes, formatZLMDuration, zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
-import { streamIdentityKey as mediaIdentityKey } from "../../streamManagementState";
-import { buildStreamRequestQuery, createStreamFilters, sameNodeTargets, type MonitoringStreamFilters } from "./monitoringState";
+import { streamCloseDecision, streamIdentityKey as mediaIdentityKey } from "../../streamManagementState";
+import { buildStreamRequestQuery, createStreamFilters, type MonitoringStreamFilters } from "./monitoringState";
 import { boundedPageRows } from "../boundedData";
 
 const props = withDefaults(
   defineProps<{
     active: boolean;
+    autoRefresh?: boolean;
     scope: MediaScope;
     nodeId: number | null;
     initialQuery?: Record<string, unknown>;
   }>(),
   {
     active: true,
+    autoRefresh: true,
     initialQuery: undefined
   }
 );
@@ -47,7 +46,6 @@ const pageSize = ref(10);
 const pageData = ref<ZLMStreamPage | null>(null);
 const loading = ref(false);
 const loadError = ref<unknown>(null);
-const selectedKeys = ref<string[]>([]);
 const detailVisible = ref(false);
 const detailLoading = ref(false);
 const detailError = ref<unknown>(null);
@@ -55,25 +53,15 @@ const detail = ref<ZLMStreamDetail | null>(null);
 const detailViewers = ref<ZLMStreamViewerPage | null>(null);
 const detailViewerPage = ref(1);
 const detailTarget = ref<ZLMOwnershipTarget | null>(null);
-const previewVisible = ref(false);
-const previewLoading = ref(false);
-const previewError = ref<unknown>(null);
-const previewTarget = ref<ZLMOwnershipTarget | null>(null);
-const previewGrant = ref<ZLMPreviewGrant | null>(null);
-const previewProtocol = ref("https-flv");
-const snapshotVisible = ref(false);
-const snapshotTarget = ref<ZLMOwnershipTarget | null>(null);
-const snapshotLoading = ref(false);
-const snapshotError = ref<unknown>(null);
-const snapshotURL = ref("");
 const closeVisible = ref(false);
-const closeTargets = ref<ZLMOwnershipTarget[]>([]);
-const closeForce = ref(false);
+const closePreflighting = ref(false);
+const AUTO_REFRESH_SECONDS = 10;
+const refreshCountdown = ref(0);
+let refreshCountdownTimer: ReturnType<typeof setInterval> | null = null;
 let detailGeneration = 0;
-let previewGeneration = 0;
 let detailController: AbortController | null = null;
-let snapshotController: AbortController | null = null;
-let snapshotGeneration = 0;
+let disposed = false;
+let closeModal: ReturnType<typeof Modal.confirm> | null = null;
 
 const requestNodeId = computed(() => (props.scope === "all" ? 1 : props.nodeId));
 const scopeLabel = computed(() => (props.scope === "all" ? "全部节点" : `节点 #${props.nodeId ?? "—"}`));
@@ -86,25 +74,14 @@ const rows = computed<StreamTableRow[]>(() =>
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const detailErrorPresentation = computed(() => zlmErrorPresentation(detailError.value));
-const previewErrorPresentation = computed(() => zlmErrorPresentation(previewError.value));
 const hasPermission = (permission: string) =>
   userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
-const canPreview = computed(() => hasPermission("gb28181:zlm:stream:preview"));
-const canClose = computed(() => hasPermission("gb28181:zlm:stream:close"));
 const canForceClose = computed(() => hasPermission("gb28181:zlm:stream:force-close"));
-const readOnly = computed(() => !canPreview.value && !canClose.value && !canForceClose.value);
-const pollingPaused = computed(() => detailVisible.value || previewVisible.value || snapshotVisible.value || closeVisible.value);
-const selectedTargets = computed(() => {
-  const selected = new Set(selectedKeys.value);
-  return rows.value
-    .filter(stream => selected.has(streamIdentityKey(stream)))
-    .map(stream => ({ nodeId: stream.nodeId, media: { ...stream.media } }));
-});
-const canBatchClose = computed(() => sameNodeTargets(selectedTargets.value));
-const closeNodeName = computed(() => {
-  const nodeId = closeTargets.value[0]?.nodeId;
-  return nodeId ? `节点 #${nodeId}` : scopeLabel.value;
-});
+const readOnly = computed(() => !canForceClose.value);
+const pollingPaused = computed(() => !props.autoRefresh || detailVisible.value || closeVisible.value);
+const refreshButtonLabel = computed(() =>
+  props.active && props.autoRefresh && refreshCountdown.value > 0 ? `刷新（${refreshCountdown.value}s）` : "刷新"
+);
 
 function streamIdentityKey(stream: Pick<ZLMStream, "nodeId" | "media">) {
   return mediaIdentityKey(stream.nodeId, stream.media);
@@ -114,7 +91,7 @@ const { refresh } = useZLMRuntimePolling<ZLMStreamPage>({
   nodeId: requestNodeId,
   active: toRef(props, "active"),
   paused: pollingPaused,
-  intervalMs: 8_000,
+  intervalMs: 10_000,
   async load(nodeId, signal) {
     loading.value = true;
     const query = buildStreamRequestQuery(
@@ -131,10 +108,12 @@ const { refresh } = useZLMRuntimePolling<ZLMStreamPage>({
     pageData.value = { ...value, list: boundedPageRows(value.list, pageSize.value) };
     loadError.value = null;
     loading.value = false;
+    scheduleRefreshCountdown();
   },
   onError(error) {
     loadError.value = error;
     loading.value = false;
+    scheduleRefreshCountdown();
   }
 });
 
@@ -144,44 +123,28 @@ function cancelDetail() {
   detailController = null;
 }
 
-function clearSnapshot() {
-  snapshotGeneration += 1;
-  snapshotController?.abort();
-  snapshotController = null;
-  if (snapshotURL.value) URL.revokeObjectURL(snapshotURL.value);
-  snapshotURL.value = "";
-  snapshotError.value = null;
-  snapshotLoading.value = false;
-}
-
 function closeInteractions() {
   cancelDetail();
-  previewGeneration += 1;
   detailVisible.value = false;
-  previewVisible.value = false;
-  snapshotVisible.value = false;
-  clearSnapshot();
   closeVisible.value = false;
+  closeModal?.close();
+  closeModal = null;
   detail.value = null;
   detailViewers.value = null;
   detailTarget.value = null;
-  previewTarget.value = null;
-  previewGrant.value = null;
 }
 
 watch([() => props.scope, () => props.nodeId], () => {
   closeInteractions();
-  selectedKeys.value = [];
   pageData.value = null;
   loadError.value = null;
   loading.value = props.scope === "all" || props.nodeId !== null;
-  if (props.active) refresh();
+  if (props.active) requestRefresh();
 });
 
 function applyFilters() {
   page.value = 1;
-  selectedKeys.value = [];
-  refresh();
+  requestRefresh();
 }
 
 function clearFilters() {
@@ -195,15 +158,13 @@ function clearFilters() {
 
 function changePage(nextPage: number) {
   page.value = nextPage;
-  selectedKeys.value = [];
-  refresh();
+  requestRefresh();
 }
 
 function changePageSize(nextPageSize: number) {
   pageSize.value = nextPageSize;
   page.value = 1;
-  selectedKeys.value = [];
-  refresh();
+  requestRefresh();
 }
 
 function ownershipText(stream: Pick<ZLMStream, "ownership">) {
@@ -272,98 +233,119 @@ async function changeViewerPage(nextPage: number) {
   }
 }
 
-async function loadPreviewGrant() {
-  const target = previewTarget.value;
-  if (!target) return;
-  const currentGeneration = ++previewGeneration;
-  previewLoading.value = true;
-  previewError.value = null;
-  previewGrant.value = null;
+async function openClose(stream: ZLMStream) {
+  if (!canForceClose.value || closePreflighting.value || closeVisible.value) return;
+  closePreflighting.value = true;
+  const scope = props.scope;
+  const target = { nodeId: stream.nodeId, media: { ...stream.media } };
   try {
-    const response = await issueZLMPreviewGrant(target.nodeId, target.media, previewProtocol.value);
-    if (response.code !== 0 || !response.data) throw new Error(response.message || "预览授权失败");
-    if (currentGeneration === previewGeneration && previewVisible.value) previewGrant.value = response.data;
+    const response = await preflightCloseZLMStream(target.nodeId, target.media);
+    if (response.code !== 0 || !response.data) throw new Error(response.message || "流关闭预检失败");
+    if (disposed || !props.active || props.scope !== scope || !canForceClose.value) return;
+    const preflight = response.data;
+    const decision = streamCloseDecision(preflight, true, canForceClose.value);
+    if (!decision.allowed) {
+      Message.warning(decision.reason);
+      return;
+    }
+    closeVisible.value = true;
+    closeModal = Modal.confirm({
+      title: "确认强关媒体流？",
+      content: `节点 #${target.nodeId} · ${target.media.schema}://${target.media.vhost}/${target.media.app}/${target.media.stream}。此操作会中断当前观看连接。`,
+      okText: "确认强关",
+      cancelText: "取消",
+      okButtonProps: { status: "danger" },
+      onCancel: () => {
+        closeVisible.value = false;
+      },
+      onClose: () => {
+        closeVisible.value = false;
+        closeModal = null;
+      },
+      onBeforeOk: async () => {
+        if (disposed || !props.active || props.scope !== scope || !canForceClose.value) {
+          closeVisible.value = false;
+          return true;
+        }
+        try {
+          const result = await forceCloseZLMStream(target.nodeId, target.media, preflight.fingerprint, "用户确认强关");
+          if (result.code !== 0 || !result.data) throw new Error(result.message || "强关失败");
+          closeDone({
+            closed: result.data.closed ? 1 : 0,
+            alreadyAbsent: result.data.alreadyAbsent ? 1 : 0,
+            partial: false,
+            uncertain: result.data.uncertain
+          });
+        } catch (error) {
+          Message.error(zlmErrorPresentation(error).label);
+        }
+        closeVisible.value = false;
+        return true;
+      }
+    });
   } catch (error) {
-    if (currentGeneration === previewGeneration) previewError.value = error;
+    Message.error(zlmErrorPresentation(error).label);
   } finally {
-    if (currentGeneration === previewGeneration) previewLoading.value = false;
+    closePreflighting.value = false;
   }
-}
-
-function openPreview(stream: ZLMStream) {
-  if (!canPreview.value) return;
-  previewTarget.value = { nodeId: stream.nodeId, media: { ...stream.media } };
-  previewVisible.value = true;
-  void loadPreviewGrant();
-}
-
-async function copyPreviewURL() {
-  if (!previewGrant.value?.url) return;
-  try {
-    await navigator.clipboard.writeText(previewGrant.value.url);
-    Message.success("授权播放地址已复制；请注意其到期时间");
-  } catch {
-    Message.error("复制失败，请检查浏览器剪贴板权限");
-  }
-}
-
-async function openSnapshot(stream: ZLMStream) {
-  if (!canPreview.value) return;
-  clearSnapshot();
-  snapshotTarget.value = { nodeId: stream.nodeId, media: { ...stream.media } };
-  snapshotVisible.value = true;
-  snapshotLoading.value = true;
-  snapshotController = new AbortController();
-  const currentGeneration = snapshotGeneration;
-  try {
-    const blob = await fetchZLMStreamSnapshot(stream.nodeId, stream.media, snapshotController.signal);
-    if (currentGeneration !== snapshotGeneration || !snapshotVisible.value) return;
-    if (!(blob instanceof Blob) || blob.type !== "image/jpeg") throw new Error("后端没有返回有效 JPEG 截图");
-    snapshotURL.value = URL.createObjectURL(blob);
-  } catch (error) {
-    if (currentGeneration === snapshotGeneration && (error as { name?: string })?.name !== "AbortError")
-      snapshotError.value = error;
-  } finally {
-    if (currentGeneration === snapshotGeneration) snapshotLoading.value = false;
-  }
-}
-
-function openClose(stream: ZLMStream, force: boolean) {
-  if (force ? !canForceClose.value : !canClose.value) return;
-  closeTargets.value = [{ nodeId: stream.nodeId, media: { ...stream.media } }];
-  closeForce.value = force;
-  closeVisible.value = true;
-}
-
-function openBatchClose() {
-  if (!canClose.value || !canBatchClose.value) return;
-  closeTargets.value = selectedTargets.value.map(target => ({ nodeId: target.nodeId, media: { ...target.media } }));
-  closeForce.value = false;
-  closeVisible.value = true;
 }
 
 function closeDone(result: { closed: number; alreadyAbsent: number; partial: boolean; uncertain: boolean }) {
-  selectedKeys.value = [];
   if (result.uncertain || result.partial)
     Message.warning(`关闭已返回：成功 ${result.closed}，已不存在 ${result.alreadyAbsent}；部分结果需重新回读。`);
   else Message.success(`关闭完成：成功 ${result.closed}，已不存在 ${result.alreadyAbsent}。`);
+  requestRefresh();
+}
+
+function clearRefreshCountdown() {
+  if (refreshCountdownTimer) clearInterval(refreshCountdownTimer);
+  refreshCountdownTimer = null;
+  refreshCountdown.value = 0;
+}
+
+function tickRefreshCountdown() {
+  if (refreshCountdown.value > 1) {
+    refreshCountdown.value -= 1;
+    return;
+  }
+  refreshCountdown.value = 0;
+  clearRefreshCountdown();
+}
+
+function scheduleRefreshCountdown() {
+  clearRefreshCountdown();
+  if (!props.active || !props.autoRefresh || pollingPaused.value) return;
+  refreshCountdown.value = AUTO_REFRESH_SECONDS;
+  refreshCountdownTimer = setInterval(tickRefreshCountdown, 1_000);
+}
+
+function handleManualRefresh() {
+  requestRefresh();
+}
+
+function requestRefresh() {
+  clearRefreshCountdown();
   refresh();
 }
 
-onBeforeUnmount(() => {
-  cancelDetail();
-  previewGeneration += 1;
-  clearSnapshot();
+watch([() => props.active, () => props.autoRefresh, pollingPaused], () => {
+  if (!props.active || !props.autoRefresh || pollingPaused.value) clearRefreshCountdown();
 });
 
-defineExpose({ refresh });
+onBeforeUnmount(() => {
+  disposed = true;
+  closeModal?.close();
+  closeModal = null;
+  cancelDetail();
+  clearRefreshCountdown();
+});
+
+defineExpose({ refresh: requestRefresh });
 </script>
 
 <template>
   <div class="monitoring-panel stream-panel">
-    <div v-if="readOnly" class="monitoring-banner" role="status">
-      当前账号仅可查看流运行态；预览、普通关闭和强制关闭按钮按独立权限隐藏。
-    </div>
+    <div v-if="readOnly" class="monitoring-banner" role="status">当前账号仅可查看流运行态；强关按钮按独立权限隐藏。</div>
     <div v-if="pageData?.partial" class="monitoring-banner monitoring-banner--warning" role="status">
       部分节点采集失败，仍展示已返回的 {{ pageData.list.length }} 条数据，不清空整页。
     </div>
@@ -395,15 +377,11 @@ defineExpose({ refresh });
       </template>
       <template #actions
         ><a-button type="primary" @click="applyFilters">查询</a-button><a-button @click="clearFilters">重置</a-button
-        ><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" aria-label="刷新媒体流" @click="refresh"
-          ><template #icon><icon-refresh /></template>刷新</a-button
-        ></template
-      >
-      <template #extra
-        ><span class="selection-meta">已选 {{ selectedTargets.length }} 路</span
-        ><a-button v-if="canClose" status="danger" :disabled="!canBatchClose" @click="openBatchClose">批量普通关闭</a-button
-        ><span v-if="selectedTargets.length > 0 && !canBatchClose" class="selection-warning"
-          >跨节点选择不可批量关闭</span
+        ><a-button
+          class="uvp-page-action-btn uvp-refresh-btn stream-refresh-btn"
+          aria-label="刷新媒体流"
+          @click="handleManualRefresh"
+          ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
         ></template
       >
     </s-layout-search>
@@ -411,19 +389,11 @@ defineExpose({ refresh });
     <div v-if="loading && !pageData" class="monitoring-state" role="status"><a-spin />正在读取{{ scopeLabel }}媒体流…</div>
     <div v-else-if="loadError && !pageData" class="monitoring-state monitoring-state--error" role="alert">
       <ShieldAlert :size="34" /><strong>{{ errorPresentation.label }}</strong
-      ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
+      ><a-button v-if="errorPresentation.retryable" @click="requestRefresh">重新加载</a-button>
     </div>
     <template v-else>
       <section class="stream-table-panel">
-        <a-table
-          v-model:selected-keys="selectedKeys"
-          :data="rows"
-          :loading="loading"
-          row-key="rowKey"
-          :row-selection="canClose ? { type: 'checkbox', showCheckedAll: true } : undefined"
-          :pagination="false"
-          class="uvp-data-table"
-        >
+        <a-table :data="rows" row-key="rowKey" :pagination="false" class="uvp-data-table">
           <template #columns>
             <a-table-column title="媒体身份" :width="310"
               ><template #cell="{ record }"
@@ -442,8 +412,8 @@ defineExpose({ refresh });
             >
             <a-table-column title="来源" :width="130"
               ><template #cell="{ record }"
-                ><span>{{ record.originTypeName || `类型 ${record.originType}` }}</span
-                ><small class="subline">#{{ record.nodeId }}</small></template
+                ><span>{{ record.nodeName || `节点 #${record.nodeId}` }}</span
+                ><small class="subline">{{ record.originTypeName || `类型 ${record.originType}` }}</small></template
               ></a-table-column
             >
             <a-table-column title="观看 / 累计" :width="120"
@@ -469,20 +439,13 @@ defineExpose({ refresh });
                 ><span v-else class="muted">未录制</span></template
               ></a-table-column
             >
-            <a-table-column title="归属" :width="110"
+            <a-table-column title="操作" :width="150" align="center" fixed="right"
               ><template #cell="{ record }"
-                ><span :class="`ownership ownership--${record.ownership.status}`">{{ ownershipText(record) }}</span></template
-              ></a-table-column
-            >
-            <a-table-column title="操作" :width="330" fixed="right"
-              ><template #cell="{ record }"
-                ><div class="row-actions">
-                  <a-button size="small" @click="openDetail(record)">详情</a-button
-                  ><a-button v-if="canPreview" size="small" @click="openPreview(record)"><Eye :size="13" />预览</a-button
-                  ><a-button v-if="canPreview" size="small" @click="openSnapshot(record)"><Camera :size="13" />截图</a-button
-                  ><a-button v-if="canClose" size="small" status="danger" @click="openClose(record, false)">关闭</a-button
-                  ><a-button v-if="canForceClose" size="small" status="danger" type="primary" @click="openClose(record, true)"
-                    >强制</a-button
+                ><div class="uvp-table-actions stream-row-actions">
+                  <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)"
+                    ><template #icon><Eye :size="13" /></template>详情</a-link
+                  ><a-link v-if="canForceClose" class="uvp-table-action uvp-table-action--delete" @click="openClose(record)"
+                    ><template #icon><PowerOff :size="13" /></template>强关</a-link
                   >
                 </div></template
               ></a-table-column
@@ -510,7 +473,15 @@ defineExpose({ refresh });
       </div>
     </template>
 
-    <a-drawer v-model:visible="detailVisible" :width="760" :footer="false" unmount-on-close @cancel="cancelDetail">
+    <a-drawer
+      v-model:visible="detailVisible"
+      class="uvp-system-drawer"
+      body-class="uvp-system-dialog__body"
+      :width="760"
+      :footer="false"
+      unmount-on-close
+      @cancel="cancelDetail"
+    >
       <template #title>媒体流详情与观看者</template>
       <div v-if="detailLoading && !detail" class="drawer-state"><a-spin />正在读取详情和观看者…</div>
       <div v-else-if="detailError && !detail" class="drawer-state drawer-state--error" role="alert">
@@ -520,7 +491,7 @@ defineExpose({ refresh });
         <dl class="detail-grid">
           <div>
             <dt>节点</dt>
-            <dd>#{{ detail.nodeId }} · {{ detail.nodeUuid }}</dd>
+            <dd>{{ detail.nodeName || `节点 #${detail.nodeId}` }} · {{ detail.nodeUuid }}</dd>
           </div>
           <div>
             <dt>完整身份</dt>
@@ -539,7 +510,7 @@ defineExpose({ refresh });
             <dd>{{ formatZLMBytes(detail.totalBytes) }}</dd>
           </div>
           <div>
-            <dt>归属</dt>
+            <dt>业务归属</dt>
             <dd>{{ ownershipText(detail) }}</dd>
           </div>
           <div>
@@ -558,7 +529,7 @@ defineExpose({ refresh });
         </section>
         <section>
           <h3>媒体轨道</h3>
-          <a-table :data="detail.tracks || []" :pagination="false" size="small"
+          <a-table class="uvp-data-table detail-table" :data="detail.tracks || []" :pagination="false" size="small"
             ><template #columns
               ><a-table-column title="编码" data-index="codecIdName" /><a-table-column
                 title="类型"
@@ -573,7 +544,7 @@ defineExpose({ refresh });
         </section>
         <section>
           <h3>观看者（{{ detailViewers?.total ?? 0 }}）</h3>
-          <a-table :data="detailViewers?.list || []" :pagination="false" size="small"
+          <a-table class="uvp-data-table detail-table" :data="detailViewers?.list || []" :pagination="false" size="small"
             ><template #columns
               ><a-table-column title="标识" data-index="identifier" /><a-table-column title="远端"
                 ><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column
@@ -591,60 +562,6 @@ defineExpose({ refresh });
         </section>
       </div>
     </a-drawer>
-
-    <a-drawer
-      v-model:visible="previewVisible"
-      :width="760"
-      :footer="false"
-      unmount-on-close
-      @cancel="
-        previewGeneration += 1;
-        previewGrant = null;
-      "
-    >
-      <template #title>受控媒体预览</template>
-      <div class="preview-toolbar">
-        <a-select v-model="previewProtocol" :style="{ width: '150px' }" @change="loadPreviewGrant"
-          ><a-option value="https-flv">HTTPS-FLV</a-option><a-option value="wss-flv">WSS-FLV</a-option
-          ><a-option value="https-hls">HTTPS-HLS</a-option><a-option value="webrtcs">WebRTC Secure</a-option></a-select
-        ><a-button :loading="previewLoading" @click="loadPreviewGrant">刷新授权</a-button
-        ><a-button :disabled="!previewGrant" @click="copyPreviewURL"><Copy :size="14" />复制授权地址</a-button>
-      </div>
-      <div v-if="previewError" class="preview-error" role="alert">{{ previewErrorPresentation.label }}</div>
-      <div v-if="previewGrant" class="preview-expiry">
-        授权到期：{{ previewGrant.expiresAt }}；地址仅来自后端授权响应，页面不持有节点 API Secret。
-      </div>
-      <PlayWindow
-        :url="previewGrant?.url || ''"
-        :has-audio="true"
-        :zlm-webrtc="previewGrant?.protocol === 'webrtcs'"
-        @error="Message.error($event)"
-      />
-    </a-drawer>
-
-    <a-modal
-      v-model:visible="snapshotVisible"
-      modal-class="uvp-system-dialog"
-      :width="860"
-      :footer="false"
-      unmount-on-close
-      @cancel="clearSnapshot"
-      ><template #title>媒体截图</template>
-      <div class="snapshot-body">
-        <p>截图由共享鉴权客户端从 UVP 后端读取为 JPEG Blob，不在浏览器拼接 ZLM Host、端口、Secret 或 token 查询串。</p>
-        <div v-if="snapshotLoading" class="drawer-state"><a-spin />正在读取截图…</div>
-        <div v-else-if="snapshotError" class="preview-error" role="alert">{{ zlmErrorPresentation(snapshotError).label }}</div>
-        <img v-else-if="snapshotURL" :src="snapshotURL" alt="媒体流实时截图" /></div
-    ></a-modal>
-
-    <ZLMStreamCloseDialog
-      v-model:visible="closeVisible"
-      :node-name="closeNodeName"
-      :targets="closeTargets"
-      :force="closeForce"
-      :can-force="canForceClose"
-      @done="closeDone"
-    />
   </div>
 </template>
 
@@ -691,6 +608,9 @@ defineExpose({ refresh });
 .stream-search {
   margin: 0 0 12px;
 }
+.stream-refresh-btn {
+  min-width: 128px;
+}
 .filter-short {
   width: 100px;
 }
@@ -706,14 +626,6 @@ defineExpose({ refresh });
 .filter-recording {
   flex: 0 0 132px;
   width: 132px;
-}
-.selection-meta,
-.selection-warning {
-  font-size: var(--zlm-fs-caption);
-  color: var(--zlm-text-3);
-}
-.selection-warning {
-  color: var(--zlm-warn-600);
 }
 .stream-search :deep(.arco-select-view) {
   box-sizing: border-box;
@@ -792,13 +704,8 @@ defineExpose({ refresh });
 .ownership--unknown {
   color: var(--zlm-danger-600);
 }
-.row-actions {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-}
-.row-actions svg {
-  vertical-align: -2px;
+.stream-row-actions {
+  flex-wrap: wrap;
 }
 .stream-empty {
   display: flex;
@@ -865,6 +772,10 @@ defineExpose({ refresh });
 .detail-body p {
   color: var(--zlm-text-3);
 }
+.detail-table {
+  overflow: hidden;
+  border-radius: 10px;
+}
 .ownership-list {
   display: flex;
   flex-wrap: wrap;
@@ -876,39 +787,6 @@ defineExpose({ refresh });
   background: var(--zlm-fill-2);
   border: 1px solid var(--zlm-border);
   border-radius: var(--zlm-radius-sm);
-}
-.preview-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.preview-expiry,
-.preview-error {
-  padding: 9px 12px;
-  margin-bottom: 12px;
-  font-size: var(--zlm-fs-caption);
-  color: var(--zlm-text-2);
-  background: var(--zlm-info-50);
-  border: 1px solid var(--zlm-info-500);
-  border-radius: var(--zlm-radius-md);
-}
-.preview-error {
-  color: var(--zlm-danger-600);
-  background: var(--zlm-danger-50);
-  border-color: var(--zlm-danger-500);
-}
-.snapshot-body p {
-  font-size: var(--zlm-fs-caption);
-  color: var(--zlm-text-3);
-}
-.snapshot-body img {
-  display: block;
-  max-width: 100%;
-  max-height: 70vh;
-  margin: 0 auto;
-  background: #020617;
-  border-radius: var(--zlm-radius-md);
 }
 
 @media (width <= 900px) {

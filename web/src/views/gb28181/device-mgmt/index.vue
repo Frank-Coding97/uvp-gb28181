@@ -31,9 +31,7 @@ import {
   X,
   Plus,
   FolderPlus,
-  FolderMinus,
-  RotateCcw,
-  Upload
+  FolderMinus
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
@@ -47,6 +45,7 @@ import {
   getChannel,
   getChannelTimeline,
   getDevice,
+  getDeviceCatalogRefreshProgress,
   listChannelMounts,
   listChannels,
   listDevices,
@@ -63,6 +62,7 @@ import {
   type BatchDeleteResult,
   type ChannelMount,
   type ChannelVO,
+  type CatalogRefreshProgress,
   type CreateDeviceDTO,
   type DeviceVO,
   type DeviceOperationResult,
@@ -83,16 +83,15 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { storeToRefs } from "pinia";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DeviceRebootDialog from "./DeviceRebootDialog.vue";
-import DeviceFirmwareUpgradeDrawer from "./DeviceFirmwareUpgradeDrawer.vue";
-import DeviceMaintenanceRecordsDrawer from "./DeviceMaintenanceRecordsDrawer.vue";
+import DeviceFirmwareUpgradeDialog from "./DeviceFirmwareUpgradeDialog.vue";
+import DeviceMaintenanceRecordsDialog from "./DeviceMaintenanceRecordsDialog.vue";
 import DeviceMaintenanceMenu from "./DeviceMaintenanceMenu.vue";
 import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue";
 import StorageCardStatusPanel from "./StorageCardStatusPanel.vue";
+import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
 import DeviceControlPanel from "./DeviceControlPanel.vue";
 import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
-import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
-import FactChannelPicker from "./FactChannelPicker.vue";
-import { buildFactChannelOptions, pickDefaultFactChannel } from "./deviceFactChannel";
+import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
@@ -175,41 +174,13 @@ const currentRebootResult = computed(() => {
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
 const drawerWidth = computed(() => (drawerTarget.value?.type === "device" ? "min(760px, 92vw)" : "min(640px, 92vw)"));
-/**
- * 设备详情抽屉的页签：info（设备信息）/ control（设备控制）/ record（录像存储）/
- * alarm（报警控制）/ status（设备状态）/ storage（存储卡）。
- *
- * ⛔ 除 info 外的五页都是**通道级**的（接口是 /channel/:id/...），所以设备级入口要先解析出
- *    该设备的一个通道才能问；通道列表只在切到这五页时才拉，免得每次开抽屉都多发一次请求。
- */
-/**
- * 抽屉的**段**（2026-09-24：七页签 → 三段）。
- * 判据按**行为形状**分，不按接口族：
- *   overview = 只读事实（打开即答"它现在怎么样"，**不拉通道列表**）
- *   operate  = 点一下发一条 + 操作后的判读依据（两样都要选通道，所以必须在同一段）
- *   config   = 读·改·下发·对账（要选通道；4 组导航由 DeviceConfigDrawer 自己承载）
- */
-type DeviceSeg = "overview" | "operate" | "config";
-const deviceDrawerSeg = ref<DeviceSeg>("overview");
-const deviceSegOptions: Array<{ value: DeviceSeg; label: string; hint?: string }> = [
-  { value: "overview", label: "概览" },
-  { value: "operate", label: "操作", hint: "通道级" },
-  { value: "config", label: "配置", hint: "4 组" }
-];
-/**
- * 配置段的组导航受控口（`v-model:active-group-key`）。
- * ⛔ 必须受控：`DeviceConfigDrawer` 自己的 internal 初值是 `video-param`（不在 host 传的
- *    `group-keys` 里），只靠它内部的兜底会先把导航打到一组再跳回来；宿主显式给 basic，
- *    换设备/切段时也才有地方重置。
- */
-const deviceConfigGroupKey = ref<string>("basic");
-const deviceFactChannels = ref<ChannelVO[]>([]);
-/** ⛔ 用独立标记而不是 `channels.length > 0` 判断"已拉过"：设备真的没有通道时也要记住结论，
- *  否则每次切页签都会重拉一遍。 */
-const deviceFactChannelsLoaded = ref(false);
-const deviceFactChannelsLoading = ref(false);
-const deviceFactChannelId = ref<number | null>(null);
-const deviceFactChannelOptions = computed(() => buildFactChannelOptions(deviceFactChannels.value));
+const channelOperationVisible = ref(false);
+const channelOperationTarget = ref<ChannelVO | null>(null);
+type ChannelOperationTab = "control" | "snapshot" | "status" | "storage";
+const channelOperationTab = ref<ChannelOperationTab>("control");
+const channelOperationOptions = computed(() =>
+  channelOperationTarget.value ? buildFactChannelOptions([channelOperationTarget.value]) : []
+);
 const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
@@ -324,28 +295,6 @@ const canViewDeviceFacts = computed(() => hasPermission("gb28181:ptz:view"));
 const canControlDevice = computed(() => hasPermission("gb28181:device:control"));
 const canSnapshotDevice = computed(() => hasPermission("gb28181:device:snapshot"));
 const canUseDeviceControl = computed(() => canControlDevice.value || canSnapshotDevice.value);
-/**
- * 「录像存储」「报警控制」两页的**下发**权限（读仍是 `canViewDeviceFacts`）。
- *
- * ⛔ 写的是设备配置族（`POST /channel/:id/device-configs`），种子数据把它绑在
- *    `gb28181:ptz:control` 上（见 uvp-gb28181.sql 的 device-config-family-permissions）。
- *    ⇒ 只给 `ptz:view` 不给 `ptz:control` 的账号，看得见页签、读得出值，但下发必吃 403。
- *
- * ⭐ 这条门禁在播放控制台那一版里是**缺的**（那边 `:can-apply` 只判了"通道在线"），
- *    搬到设备详情后按「动作函数要什么权限，新位置就按什么权限挡」补上，
- *    否则就是把一个点不动的按钮换了个地方摆。
- */
-const canApplyDeviceConfig = computed(() => hasPermission("gb28181:ptz:control"));
-/** 「录像存储」「报警控制」两页的目标通道 —— 与设备状态/存储卡共用同一份通道选择。 */
-const deviceConfigTargetChannel = computed(
-  () => deviceFactChannelOptions.value.find(option => option.value === deviceFactChannelId.value) ?? null
-);
-/** 下发配置要求通道在线：离线通道的写入请求发出去也只会等超时。 */
-const deviceConfigChannelOnline = computed(() => deviceConfigTargetChannel.value?.online ?? false);
-const deviceConfigChannelName = computed(() => {
-  const target = deviceFactChannels.value.find(channel => channel.id === deviceFactChannelId.value);
-  return String(target?.alias || target?.name || "").trim();
-});
 const mapStyleUrls = {
   light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || "https://tiles.openfreemap.org/styles/bright",
   dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || "https://tiles.openfreemap.org/styles/dark"
@@ -687,6 +636,7 @@ function keepaliveIntervalText(seconds?: number) {
 }
 function showDeviceChannels(record: DeviceVO) {
   if (!canViewDevices.value) return;
+  drawerVisible.value = false;
   setKeywordWithoutSearch("");
   deviceIdFilter.value = record.deviceId;
   channelEntrySource.value = "device-drilldown";
@@ -1273,7 +1223,6 @@ async function openDevice(record: DeviceVO) {
   drawerVisible.value = true;
   drawerLoading.value = true;
   deviceSubscriptions.value = [];
-  resetDeviceFactState();
   try {
     const [detailRes, subscriptionsRes] = await Promise.all([
       getDevice(record.id),
@@ -1288,64 +1237,11 @@ async function openDevice(record: DeviceVO) {
   }
 }
 
-function resetDeviceFactState() {
-  deviceDrawerSeg.value = "overview";
-  deviceConfigGroupKey.value = "basic";
-  deviceFactChannels.value = [];
-  deviceFactChannelsLoaded.value = false;
-  deviceFactChannelsLoading.value = false;
-  deviceFactChannelId.value = null;
+function openChannelOperations(channel: ChannelVO) {
+  channelOperationTarget.value = channel;
+  channelOperationTab.value = canControlDevice.value ? "control" : canSnapshotDevice.value ? "snapshot" : "status";
+  channelOperationVisible.value = true;
 }
-
-/**
- * 拉取该设备的通道列表（「操作」段四个面板 + 「配置」段共用的查询/下发目标）。
- *
- * ⛔ 只在用户真的切到「操作」/「配置」时才拉：这些面板用的都是**通道级**接口
- *    （/channel/:id/device-control、/channel/:id/device-configs、
- *     /channel/:id/device-status、/channel/:id/storage-cards），
- *    设备级入口必须先落到一个通道上。打开抽屉就无条件拉一遍，对从不点这几页的人是白花一次请求。
- *
- * ⛔ 门禁按「这几块里**任意**一块可用」放行，不能只看 canViewDeviceFacts（ptz:view）——
- *    「操作」段里的设备控制面板由 device:control / device:snapshot 放行，
- *    账号只要有这两个权限之一就该能拉通道；只按 ptz:view 挡，
- *    会给出一个"有页签但没有通道可选"的空面板，按钮全灰还不知道为什么。
- */
-async function ensureDeviceFactChannels() {
-  if (!canViewDeviceFacts.value && !canUseDeviceControl.value) return;
-  const device = deviceDetail.value;
-  if (!device || deviceFactChannelsLoaded.value || deviceFactChannelsLoading.value) return;
-  const deviceCode = device.deviceId;
-  deviceFactChannelsLoading.value = true;
-  try {
-    const result = await listChannels({ deviceId: deviceCode, page: 1, pageSize: 200 });
-    if (deviceFactChannelsAbandoned(deviceCode)) return;
-    if (result.code !== 0) throw new Error(result.message || "设备通道加载失败");
-    deviceFactChannels.value = result.data?.list || [];
-    deviceFactChannelsLoaded.value = true;
-    deviceFactChannelId.value = pickDefaultFactChannel(
-      buildFactChannelOptions(deviceFactChannels.value),
-      deviceFactChannelId.value
-    );
-  } catch (error: any) {
-    if (deviceFactChannelsAbandoned(deviceCode)) return;
-    deviceFactChannels.value = [];
-    deviceFactChannelId.value = null;
-    Message.error(error?.message || "设备通道加载失败");
-  } finally {
-    if (!deviceFactChannelsAbandoned(deviceCode)) deviceFactChannelsLoading.value = false;
-  }
-}
-
-/** 抽屉已被关掉/换成了另一台设备时，在途结果一律作废。 */
-function deviceFactChannelsAbandoned(deviceCode: string) {
-  return drawerTarget.value?.type !== "device" || deviceDetail.value?.deviceId !== deviceCode;
-}
-
-watch(deviceDrawerSeg, seg => {
-  if (seg === "overview") return;
-  if (drawerTarget.value?.type !== "device") return;
-  void ensureDeviceFactChannels();
-});
 
 async function prepareMaintenance(record: DeviceVO) {
   const version = ++maintenanceOpenVersion;
@@ -1715,6 +1611,51 @@ function onChannelDblclick(record: ChannelVO, event: MouseEvent) {
 
 const deleting = ref(false);
 const refreshingCatalog = reactive<Record<number, boolean>>({});
+const catalogRefreshVisible = ref(false);
+const catalogRefreshProgress = ref<CatalogRefreshProgress | null>(null);
+const catalogRefreshDevice = ref<DeviceVO | null>(null);
+let catalogRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let catalogRefreshPollVersion = 0;
+
+function clearCatalogRefreshTimer() {
+  if (catalogRefreshTimer !== null) {
+    clearTimeout(catalogRefreshTimer);
+    catalogRefreshTimer = null;
+  }
+}
+
+function closeCatalogRefreshProgress() {
+  catalogRefreshPollVersion += 1;
+  clearCatalogRefreshTimer();
+  if (catalogRefreshDevice.value) refreshingCatalog[catalogRefreshDevice.value.id] = false;
+  catalogRefreshVisible.value = false;
+}
+
+function isCatalogRefreshTerminal(status?: CatalogRefreshProgress["status"]) {
+  return status === "completed" || status === "failed" || status === "timeout";
+}
+
+async function pollCatalogRefresh(device: DeviceVO, operationId: string, version: number) {
+  if (version !== catalogRefreshPollVersion || !catalogRefreshVisible.value) return;
+  try {
+    const res = await getDeviceCatalogRefreshProgress(device.id, operationId);
+    if (version !== catalogRefreshPollVersion) return;
+    if (res.code !== 0 || !res.data) throw new Error(res.message || "查询刷新进度失败");
+    catalogRefreshProgress.value = res.data;
+    if (isCatalogRefreshTerminal(res.data.status)) {
+      clearCatalogRefreshTimer();
+      refreshingCatalog[device.id] = false;
+      if (res.data.status === "completed") await refreshMainData();
+      return;
+    }
+    catalogRefreshTimer = setTimeout(() => void pollCatalogRefresh(device, operationId, version), 400);
+  } catch (error: any) {
+    if (version !== catalogRefreshPollVersion) return;
+    clearCatalogRefreshTimer();
+    refreshingCatalog[device.id] = false;
+    Message.error(error?.message || "查询刷新进度失败");
+  }
+}
 const createDeviceVisible = ref(false);
 const createDeviceForm = reactive<CreateDeviceDTO>({
   deviceId: "",
@@ -1747,18 +1688,19 @@ async function handleRefreshDeviceCatalog(record: DeviceVO) {
     return;
   }
   refreshingCatalog[record.id] = true;
+  catalogRefreshDevice.value = record;
+  catalogRefreshProgress.value = null;
+  catalogRefreshVisible.value = true;
+  const version = ++catalogRefreshPollVersion;
+  clearCatalogRefreshTimer();
   try {
     const res = await refreshDeviceCatalog(record.id);
-    if (res.code === 0) {
-      Message.success(`已下发 Catalog 查询 · ${record.deviceId}`);
-      // 通道回执异步落库,延迟稍长一点再拉列表,避免空刷新
-      setTimeout(() => refreshMainData(), 1500);
-    } else {
-      Message.error(res.message || "下发失败");
-    }
+    if (res.code !== 0 || !res.data?.operationId) throw new Error(res.message || "下发失败");
+    void pollCatalogRefresh(record, res.data.operationId, version);
   } catch (error: any) {
+    catalogRefreshPollVersion += 1;
+    catalogRefreshVisible.value = false;
     Message.error(error?.message || "下发失败");
-  } finally {
     refreshingCatalog[record.id] = false;
   }
 }
@@ -2266,6 +2208,7 @@ onMounted(async () => {
 onUnmounted(() => {
   ++maintenanceOpenVersion;
   clearInterval(maintenancePoll);
+  closeCatalogRefreshProgress();
   window.removeEventListener("keydown", focusKeyword);
   cancelKeywordSearch();
   stopAutoRefresh();
@@ -2276,6 +2219,13 @@ onUnmounted(() => {
 
 <template>
   <div class="device-mgmt-page">
+    <CatalogRefreshProgressDialog
+      :visible="catalogRefreshVisible"
+      :device-name="catalogRefreshDevice?.alias || catalogRefreshDevice?.name || ''"
+      :device-id="catalogRefreshDevice?.deviceId || ''"
+      :progress="catalogRefreshProgress"
+      @close="closeCatalogRefreshProgress"
+    />
     <div class="workspace">
       <s-layout-search class="workspace-toolbar">
         <template #fields>
@@ -2637,6 +2587,14 @@ onUnmounted(() => {
                       <span>录像</span>
                     </a-link>
                     <a-link
+                      v-if="canUseDeviceControl || canSnapshotDevice || canViewDeviceFacts"
+                      class="uvp-table-action uvp-table-action--more"
+                      @click="openChannelOperations(record)"
+                    >
+                      <template #icon><MoreHorizontal :size="13" /></template>
+                      <span>操作</span>
+                    </a-link>
+                    <a-link
                       v-if="canStopPlayback && isChannelPlaying(record)"
                       class="uvp-table-action uvp-table-action--stop"
                       :loading="stoppingChannels.has(record.id)"
@@ -2948,20 +2906,6 @@ onUnmounted(() => {
                       <Bell :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
-                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作">
-                      <MoreHorizontal :size="13" />
-                    </button>
-                    <template #content>
-                      <DeviceMaintenanceMenu
-                        :can-upgrade="canUpgradeDevice"
-                        :can-reboot="canRebootDevice"
-                        @upgrade="openDeviceUpgrade(item)"
-                        @records="openMaintenanceRecords(item)"
-                        @reboot="openDeviceReboot(item)"
-                      />
-                    </template>
-                  </a-dropdown>
                   <a-tooltip v-if="canEditDevice" content="编辑设备" position="top">
                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)">
                       <Pencil :size="13" />
@@ -2977,6 +2921,20 @@ onUnmounted(() => {
                       <Trash2 :size="13" />
                     </button>
                   </a-tooltip>
+                  <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
+                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作">
+                      <MoreHorizontal :size="13" />
+                    </button>
+                    <template #content>
+                      <DeviceMaintenanceMenu
+                        :can-upgrade="canUpgradeDevice"
+                        :can-reboot="canRebootDevice"
+                        @upgrade="openDeviceUpgrade(item)"
+                        @records="openMaintenanceRecords(item)"
+                        @reboot="openDeviceReboot(item)"
+                      />
+                    </template>
+                  </a-dropdown>
                 </div>
               </article>
             </template>
@@ -3134,6 +3092,20 @@ onUnmounted(() => {
                       </button>
                     </a-tooltip>
                     <a-tooltip
+                      v-if="canUseDeviceControl || canSnapshotDevice || canViewDeviceFacts"
+                      content="通道操作"
+                      position="top"
+                    >
+                      <button
+                        class="icon-btn small framed"
+                        type="button"
+                        aria-label="通道操作"
+                        @click.stop="openChannelOperations(item)"
+                      >
+                        <MoreHorizontal :size="13" />
+                      </button>
+                    </a-tooltip>
+                    <a-tooltip
                       v-if="canStopPlayback && isChannelPlaying(item)"
                       content="强制停止当前直播(会断开其他观看者)"
                       position="top"
@@ -3202,7 +3174,14 @@ onUnmounted(() => {
       </main>
     </div>
 
-    <a-drawer v-model:visible="drawerVisible" :width="drawerWidth" :footer="false" unmount-on-close>
+    <a-drawer
+      v-model:visible="drawerVisible"
+      class="uvp-system-drawer"
+      body-class="uvp-system-dialog__body"
+      :width="drawerWidth"
+      :footer="false"
+      unmount-on-close
+    >
       <template #title>
         <span v-if="drawerTarget?.type === 'channel'">通道详情</span>
         <span v-else-if="drawerTarget?.type === 'device'">设备详情</span>
@@ -3295,12 +3274,6 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-else-if="drawerTarget?.type === 'device' && deviceDetail" class="drawer-body">
-          <!-- ① 档案条（常驻，不随段切换）—— 2026-09-24 重构。
-               ⛔ 原页脚 6 个按钮已删除：实测 640 宽抽屉里它们需要约 700px（可用仅 608px），
-                  默认落在视口之外（内容 948px > 可视 850px）⇒ 用户以为没有这些功能。
-                  处置 = 按"它控制哪一块"就近落位，不是换个位置继续堆。
-               ⭐ 「重启 / 升级 / 维护记录」三个设备级动作留在档案条 —— 它们要的判据
-                  （在线状态、通道数、版本）就在本条上，视线不用离开。 -->
           <div class="device-idbar">
             <span class="idbar-icon"><RadioTower :size="18" /></span>
             <div class="idbar-main">
@@ -3310,314 +3283,195 @@ onUnmounted(() => {
               </p>
               <p class="idbar-code mono">
                 {{ deviceDetail.deviceId }}
-                <!-- ⛔ 用框架按钮：本抽屉「通道详情」那一支的复制按钮（`a-button`）就在同一份模板里，
-                     这里再写原生 `<button>` 会让两支的控件质感对不上。 -->
-                <a-button class="copy-btn" type="text" size="mini" title="复制设备编码" @click="copyText(deviceDetail.deviceId)">
-                  <template #icon><Copy :size="12" /></template>
-                </a-button>
               </p>
               <p class="idbar-sum">{{ vendorText(deviceDetail) }} · {{ endpointText(deviceDetail) }}</p>
             </div>
-            <div class="idbar-acts">
+            <div class="idbar-status">
               <span class="status-pill" :class="{ online: deviceDetail.online }">
                 <span class="status-dot" />
                 {{ deviceDetail.online ? "在线" : "离线" }}
               </span>
-              <template v-if="canViewMaintenance">
-                <a-button
-                  class="idbar-action"
-                  type="outline"
-                  size="small"
-                  :disabled="!canRebootDevice"
-                  :title="canRebootDevice ? '重启设备' : '暂无设备重启权限'"
-                  @click="openDeviceReboot(deviceDetail)"
-                >
-                  <template #icon><RotateCcw :size="13" /></template>
-                  <template #default>重启</template>
-                </a-button>
-                <a-button
-                  class="idbar-action"
-                  type="outline"
-                  size="small"
-                  :disabled="!canUpgradeDevice"
-                  :title="canUpgradeDevice ? '固件升级' : '暂无设备升级权限'"
-                  @click="openDeviceUpgrade(deviceDetail)"
-                >
-                  <template #icon><Upload :size="13" /></template>
-                  <template #default>升级</template>
-                </a-button>
-                <!-- ⭐ 「维护记录」在视觉层级上是**文字链接**而不是实心按钮：它只"看历史"，
-                     与上面两个"会改动设备"的动作风险等级不同，长得一样会诱导误点（设计 §6.3 / Q6）。
-                     ⛔ 但控件本身仍是框架的 `a-button`（`type="text"` 就是 Arco 的链接态按钮），
-                        不自己写原生 `<button>` —— 否则 hover / focus-visible / 禁用态全要重造一遍。 -->
-                <a-button
-                  class="idbar-link"
-                  type="text"
-                  size="mini"
-                  title="查看重启与升级的维护记录"
-                  @click="openMaintenanceRecords(deviceDetail)"
-                >
-                  <template #icon><History :size="13" /></template>
-                  <template #default>维护记录</template>
-                </a-button>
-              </template>
             </div>
           </div>
 
-          <!-- ② 段导航：三段代替七页签。判据按**行为形状**分，不按接口族分 ——
-               概览=只读事实 / 操作=点一下发一条 + 判读依据 / 配置=读·改·下发·对账。
-               ⛔ 配置是三者里最低频的，原先却占了 4/7 的页签宽度，这个倒置是"不顺手"的根因。 -->
-          <!-- ⛔ 用 `a-radio-group type="button"`（Arco 的分段控件）而不是自造 `.segs > button`：
-                 ——它是本仓「模式切换」的既有写法（`ShareDrawer.vue:234` 共享新增/收回、
-                `cascade/index.vue:195`、`security/preview.vue:1335`），focus / 键盘方向键 /
-                禁用态由框架兜底，自己写 `<button role="tab">` 这些全要补一遍。
-               ⛔ 走 `:model-value` + `@change` 而不是 `v-model`：Arco RadioGroup 的值类型是
-                `string | number | boolean`，直接 `v-model` 到 `Ref<DeviceSeg>` 在 strict 模板
-                检查下过不了；`ShareDrawer.vue:234` 也是这么绕的（那边还要顺带调 `switchMode`）。
-                ⛔ 回调参数**必须显式标注类型**：不写就是 TS7006（隐式 any）。 -->
-          <a-radio-group
-            :model-value="deviceDrawerSeg"
-            class="device-segs"
-            type="button"
-            data-testid="device-detail-segs"
-            @change="(value: string | number | boolean) => (deviceDrawerSeg = value as DeviceSeg)"
-          >
-            <a-radio v-for="seg in deviceSegOptions" :key="seg.value" :value="seg.value">
-              <span>{{ seg.label }}</span>
-              <em v-if="seg.hint">{{ seg.hint }}</em>
-            </a-radio>
-          </a-radio-group>
-
-          <div class="device-seg-body">
-            <!-- ③-1 概览：只读事实，打开即答"它现在怎么样"，目标本段不出现滚动条 -->
-            <div v-show="deviceDrawerSeg === 'overview'" class="device-seg" data-seg-panel="overview">
-              <div class="seg-sect">
-                <div class="seg-head">
-                  <b>状态</b>
-                  <span class="seg-right">
-                    <!-- ⛔ 用 `a-badge`（`:status` + `:text`）而不是自造"圆点 + 文案"：
+          <div class="device-seg device-readonly" data-seg-panel="overview">
+            <div class="seg-sect">
+              <div class="seg-head">
+                <b>状态</b>
+                <span class="seg-right">
+                  <!-- ⛔ 用 `a-badge`（`:status` + `:text`）而不是自造"圆点 + 文案"：
                           本仓「在线状态」一律这么写（`RecordingPlansPanel.vue:65`、
                           `ChannelAssignmentDialog.vue:165`），点色跟着框架的语义色走。 -->
-                    <a-badge
-                      class="seg-diag"
-                      :status="deviceDetail.online ? 'success' : 'normal'"
-                      :text="deviceDetail.online ? '已注册' : '未注册 / 已离线'"
-                    />
-                    <span v-if="deviceDetail.keepaliveTime" class="seg-cnt"
-                      >最近心跳 {{ relTime(deviceDetail.keepaliveTime) }}</span
-                    >
-                  </span>
-                </div>
-                <div class="seg-rows">
-                  <span class="k">注册</span>
-                  <span class="v">
-                    {{ deviceDetail.online ? "已注册" : "未注册 / 已离线" }}
-                    <span v-if="deviceDetail.registerTime" class="sub mono">{{ dateTime(deviceDetail.registerTime) }}</span>
-                    <span v-if="deviceDetail.online && deviceDetail.registerExpireAt" class="sub"
-                      >· 注册过期 {{ dateTime(deviceDetail.registerExpireAt) }}</span
-                    >
-                  </span>
-                  <span class="k">心跳</span>
-                  <span class="v">
-                    间隔 {{ keepaliveIntervalText(deviceDetail.keepaliveInterval) }}
-                    <span v-if="deviceDetail.keepaliveTime" class="sub mono">{{ dateTime(deviceDetail.keepaliveTime) }}</span>
-                  </span>
-                  <template v-if="!deviceDetail.online && deviceDetail.offlineAt">
-                    <span class="k">离线</span>
-                    <span class="v mono"
-                      >{{ dateTime(deviceDetail.offlineAt)
-                      }}<span class="sub">（{{ relTime(deviceDetail.offlineAt) }}）</span></span
-                    >
-                  </template>
-                  <span class="k">传输</span>
-                  <span class="v">
-                    {{ transportText(deviceDetail.transport) }}
-                    <span class="sub"
-                      >{{ protocolVersionText(deviceDetail.effectiveVersion) }} ·
-                      {{ protocolSourceText(deviceDetail.effectiveVersionSource) }}</span
-                    >
-                    <span v-if="deviceDetail.reportedVersion" class="sub mono"
-                      >· X-GB-Ver {{ deviceDetail.reportedVersion }}</span
-                    >
-                  </span>
-                </div>
+                  <a-badge
+                    class="seg-diag"
+                    :status="deviceDetail.online ? 'success' : 'normal'"
+                    :text="deviceDetail.online ? '已注册' : '未注册 / 已离线'"
+                  />
+                  <span v-if="deviceDetail.keepaliveTime" class="seg-cnt"
+                    >最近心跳 {{ relTime(deviceDetail.keepaliveTime) }}</span
+                  >
+                </span>
               </div>
+              <div class="seg-rows">
+                <span class="k">注册</span>
+                <span class="v">
+                  {{ deviceDetail.online ? "已注册" : "未注册 / 已离线" }}
+                  <span v-if="deviceDetail.registerTime" class="sub mono">{{ dateTime(deviceDetail.registerTime) }}</span>
+                  <span v-if="deviceDetail.online && deviceDetail.registerExpireAt" class="sub"
+                    >· 注册过期 {{ dateTime(deviceDetail.registerExpireAt) }}</span
+                  >
+                </span>
+                <span class="k">心跳</span>
+                <span class="v">
+                  间隔 {{ keepaliveIntervalText(deviceDetail.keepaliveInterval) }}
+                  <span v-if="deviceDetail.keepaliveTime" class="sub mono">{{ dateTime(deviceDetail.keepaliveTime) }}</span>
+                </span>
+                <template v-if="!deviceDetail.online && deviceDetail.offlineAt">
+                  <span class="k">离线</span>
+                  <span class="v mono"
+                    >{{ dateTime(deviceDetail.offlineAt)
+                    }}<span class="sub">（{{ relTime(deviceDetail.offlineAt) }}）</span></span
+                  >
+                </template>
+                <span class="k">传输</span>
+                <span class="v">
+                  {{ transportText(deviceDetail.transport) }}
+                  <span class="sub"
+                    >{{ protocolVersionText(deviceDetail.effectiveVersion) }} ·
+                    {{ protocolSourceText(deviceDetail.effectiveVersionSource) }}</span
+                  >
+                  <span v-if="deviceDetail.reportedVersion" class="sub mono">· X-GB-Ver {{ deviceDetail.reportedVersion }}</span>
+                </span>
+              </div>
+            </div>
 
-              <div class="seg-sect">
-                <div class="seg-head">
-                  <b>通道</b>
-                  <span class="seg-right">
-                    <span class="seg-cnt">{{ deviceDetail.channelOnlineCount }} / {{ deviceDetail.channelCount }} 在线</span>
-                    <!-- ⭐ 「刷新目录」刷的是目录（=通道列表），所以它就该在通道这一块的标题行上（设计 §6.3）。 -->
-                    <a-button
-                      v-if="canRefreshCatalog"
-                      class="uvp-refresh-btn"
-                      size="mini"
-                      :disabled="refreshingCatalog[deviceDetail.id] || !deviceDetail.online"
-                      :title="deviceDetail.online ? '刷新通道目录' : '设备离线,无法刷新'"
-                      @click="handleRefreshDeviceCatalog(deviceDetail)"
-                    >
-                      <template #icon
-                        ><Loader2 v-if="refreshingCatalog[deviceDetail.id]" :size="13" class="spin" /><RefreshCcw
-                          v-else
-                          :size="13"
-                      /></template>
-                      <template #default>刷新目录</template>
-                    </a-button>
-                  </span>
-                </div>
-                <div class="seg-rows">
-                  <span class="k">在线率</span>
-                  <span class="v seg-rate-row">
-                    <!-- ⛔ 用 `a-progress` 而不是自造"div + 渐变 i"进度条：本仓进度一律是它
+            <div class="seg-sect">
+              <div class="seg-head">
+                <b>通道</b>
+                <span class="seg-right">
+                  <span class="seg-cnt">{{ deviceDetail.channelOnlineCount }} / {{ deviceDetail.channelCount }} 在线</span>
+                </span>
+              </div>
+              <div class="seg-rows">
+                <span class="k">在线率</span>
+                <span class="v seg-rate-row">
+                  <!-- ⛔ 用 `a-progress` 而不是自造"div + 渐变 i"进度条：本仓进度一律是它
                           （`RecordingDownloadCenter.vue:36`、`upload/image-upload.vue:26`），
                           颜色也才会跟着主题的 primary 走。
                           ⚠️ Arco 的 `percent` 是 **0~1**，不是百分数（本仓既有用法同样 /100）。 -->
-                    <span class="seg-rate">
-                      <a-progress
-                        :percent="onlineRatePercent(deviceDetail.onlineRate) / 100"
-                        status="success"
-                        size="small"
-                        :show-text="false"
-                      />
-                    </span>
-                    <span class="sub">{{ onlineRatePercent(deviceDetail.onlineRate) }}%</span>
+                  <span class="seg-rate">
+                    <a-progress
+                      :percent="onlineRatePercent(deviceDetail.onlineRate) / 100"
+                      status="success"
+                      size="small"
+                      :show-text="false"
+                    />
                   </span>
-                </div>
+                  <span class="sub">{{ onlineRatePercent(deviceDetail.onlineRate) }}%</span>
+                </span>
               </div>
+            </div>
 
-              <div v-if="canManageSubscriptions" class="seg-sect">
-                <div class="seg-head">
-                  <b>订阅</b>
-                  <span class="seg-right">
-                    <!-- ⭐ 「管理订阅」管的正是订阅，所以落在订阅区标题行（设计 §6.3）。 -->
-                    <a-button size="mini" @click="openSubscriptionManager(deviceDetail)">
-                      <template #icon><Bell :size="13" /></template>
-                      <template #default>管理订阅</template>
-                    </a-button>
-                  </span>
-                </div>
-                <div class="seg-rows">
-                  <span class="k">状态</span>
-                  <span class="v">
-                    <span
-                      v-for="subscription in deviceSubscriptionSummary"
-                      :key="subscription.kind"
-                      class="subscription-chip"
-                      :class="`status-${subscription.status}`"
-                    >
-                      <span>{{ subscription.label }}</span>
-                      <strong>{{ subscriptionStatusText(subscription.status) }}</strong>
-                    </span>
-                  </span>
-                </div>
+            <div v-if="canManageSubscriptions" class="seg-sect">
+              <div class="seg-head">
+                <b>订阅状态</b>
               </div>
-
-              <div class="seg-sect">
-                <div class="seg-head"><b>接入</b></div>
-                <div class="seg-rows">
-                  <!-- ⛔ 这里不放"网络地址"：档案条的副标题已经报了 `endpointText`，
-                       同一句话说两遍正是这次重构要治的毛病（原「设备信息」页 3 处在线状态、
-                       2 处设备编码就是这么来的）。 -->
-                  <span class="k">厂商</span>
-                  <span class="v">
-                    {{ vendorText(deviceDetail) }}
-                    <span v-if="deviceDetail.firmware" class="sub mono">{{ deviceDetail.firmware }}</span>
-                  </span>
-                  <span class="k">记录</span>
-                  <span class="v"
-                    ><span class="sub plain"
-                      >创建 {{ dateTime(deviceDetail.createdAt) }} · 更新 {{ dateTime(deviceDetail.updatedAt) }}</span
-                    ></span
+              <div class="seg-rows">
+                <span class="k">状态</span>
+                <span class="v">
+                  <span
+                    v-for="subscription in deviceSubscriptionSummary"
+                    :key="subscription.kind"
+                    class="subscription-chip"
+                    :class="`status-${subscription.status}`"
                   >
-                </div>
+                    <span>{{ subscription.label }}</span>
+                    <strong>{{ subscriptionStatusText(subscription.status) }}</strong>
+                  </span>
+                </span>
               </div>
             </div>
 
-            <!-- ③-2 操作：点一下发一条 + 操作后的判读依据。⛔ 这两类必须是同一段 ——
-                 "我刚发了布防，设备回什么了"要在同一个视野里答完（原页签结构要切两次页）。 -->
-            <div v-show="deviceDrawerSeg === 'operate'" class="device-seg" data-seg-panel="operate">
-              <!-- ⭐ 一个段只留**一个**通道选择器；下面四个面板一律 `show-picker=false`。
-                   原结构是每页一个 ⇒ 多通道设备 DOM 里实测 7 份（P0-4）。 -->
-              <FactChannelPicker
-                :options="deviceFactChannelOptions"
-                :model-value="deviceFactChannelId"
-                :loading="deviceFactChannelsLoading"
-                @update:model-value="value => (deviceFactChannelId = value)"
-              />
-              <DeviceControlPanel
-                v-if="canUseDeviceControl"
-                v-model:channel-id="deviceFactChannelId"
-                :channel-options="deviceFactChannelOptions"
-                :channels-loading="deviceFactChannelsLoading"
-                :active="deviceDrawerSeg === 'operate'"
-                :show-picker="false"
-                :can-control="canControlDevice"
-              />
-              <SnapshotConfigPanel
-                v-if="canSnapshotDevice"
-                v-model:channel-id="deviceFactChannelId"
-                :channel-options="deviceFactChannelOptions"
-                :channels-loading="deviceFactChannelsLoading"
-                :show-picker="false"
-                :can-snapshot="canSnapshotDevice"
-              />
-              <DeviceStatusFactsPanel
-                v-if="canViewDeviceFacts"
-                v-model:channel-id="deviceFactChannelId"
-                :channel-options="deviceFactChannelOptions"
-                :channels-loading="deviceFactChannelsLoading"
-                :active="deviceDrawerSeg === 'operate'"
-                :show-picker="false"
-                :can-view="canViewDeviceFacts"
-              />
-              <StorageCardStatusPanel
-                v-if="canViewDeviceFacts"
-                v-model:channel-id="deviceFactChannelId"
-                :channel-options="deviceFactChannelOptions"
-                :channels-loading="deviceFactChannelsLoading"
-                :active="deviceDrawerSeg === 'operate'"
-                :show-picker="false"
-                :can-view="canViewDeviceFacts"
-                :can-format="canFormatStorageCard"
-                :device-label="deviceDetail.alias || deviceDetail.name"
-              />
-            </div>
-
-            <!-- ③-3 配置：**一层**组导航。原「基本参数 / 录像存储 / 报警控制」三页
-                 各挂一份 DeviceConfigDrawer 外壳 ⇒ 同一条对账告警逐字重复 4 次，
-                 且渲染在「基本参数」页里（那是 FrameMirror/OSDConfig 的结果，与 BasicParam 无关）。
-                 ⛔ 现在只有**一个**实例、一份组导航（4 组），对账结果只出现在它所属的组里。
-                 ⛔ 不传 `config-only`：它的语义是"排除 video-param 组"，而 `group-keys`
-                    已经把四组全部限定了；两个开关同时开着，将来谁往 group-keys 里加了
-                    video-param 会静默不生效（`DeviceConfigDrawer.vue:210`）。
-                 ⛔ `active-group-key` 必须受控：宿主切段/换设备时要能把它重置回 basic。 -->
-            <div v-show="deviceDrawerSeg === 'config'" class="device-seg" data-seg-panel="config">
-              <div class="device-config-tab" data-testid="device-config-groups">
-                <FactChannelPicker
-                  :options="deviceFactChannelOptions"
-                  :model-value="deviceFactChannelId"
-                  :loading="deviceFactChannelsLoading"
-                  @update:model-value="value => (deviceFactChannelId = value)"
-                />
-                <DeviceConfigDrawer
-                  v-model:active-group-key="deviceConfigGroupKey"
-                  :visible="deviceDrawerSeg === 'config'"
-                  embedded
-                  :group-keys="['basic', 'record-plan', 'alarm-record', 'alarm-report']"
-                  :device-code="deviceDetail.deviceId"
-                  :online="deviceConfigChannelOnline"
-                  :effective-version="deviceDetail.effectiveVersion"
-                  :channel-id="deviceFactChannelId"
-                  :channel-name="deviceConfigChannelName"
-                  :can-read="canViewDeviceFacts"
-                  :can-apply="canApplyDeviceConfig && deviceConfigChannelOnline"
-                />
+            <div class="seg-sect">
+              <div class="seg-head"><b>接入</b></div>
+              <div class="seg-rows">
+                <span class="k">设备地址</span>
+                <span class="v mono">{{ endpointText(deviceDetail) }}</span>
+                <span class="k">归属组织</span>
+                <span class="v">{{ deviceDetail.ownerDeptName || "未分配" }}</span>
+                <span class="k">节点策略</span>
+                <span class="v">{{ deviceDetail.zlmNodeId ? `节点 ${deviceDetail.zlmNodeId}` : "自动调度" }}</span>
+                <span class="k">厂商</span>
+                <span class="v">
+                  {{ vendorText(deviceDetail) }}
+                  <span v-if="deviceDetail.firmware" class="sub mono">{{ deviceDetail.firmware }}</span>
+                </span>
+                <span class="k">记录</span>
+                <span class="v"
+                  ><span class="sub plain"
+                    >创建 {{ dateTime(deviceDetail.createdAt) }} · 更新 {{ dateTime(deviceDetail.updatedAt) }}</span
+                  ></span
+                >
               </div>
             </div>
           </div>
         </div>
       </a-spin>
+    </a-drawer>
+
+    <a-drawer
+      v-model:visible="channelOperationVisible"
+      class="uvp-system-drawer"
+      body-class="uvp-system-dialog__body"
+      width="min(720px, 94vw)"
+      title="通道操作"
+      :footer="false"
+    >
+      <div v-if="channelOperationTarget" class="channel-operation-entry">
+        <div class="channel-operation-context">
+          <strong>{{ displayName(channelOperationTarget) }}</strong>
+          <span>{{ channelOperationTarget.channelId }} · {{ channelOperationTarget.deviceId }}</span>
+        </div>
+        <a-radio-group v-model="channelOperationTab" type="button" class="channel-operation-tabs">
+          <a-radio v-if="canUseDeviceControl" value="control">即时控制</a-radio>
+          <a-radio v-if="canSnapshotDevice" value="snapshot">抓拍</a-radio>
+          <a-radio v-if="canViewDeviceFacts" value="status">设备状态</a-radio>
+          <a-radio v-if="canViewDeviceFacts" value="storage">存储卡</a-radio>
+        </a-radio-group>
+        <DeviceControlPanel
+          v-if="channelOperationTab === 'control' && canUseDeviceControl"
+          v-model:channel-id="channelOperationTarget.id"
+          :channel-options="channelOperationOptions"
+          :active="channelOperationVisible"
+          :show-picker="false"
+          :can-control="canControlDevice"
+        />
+        <SnapshotConfigPanel
+          v-else-if="channelOperationTab === 'snapshot' && canSnapshotDevice"
+          v-model:channel-id="channelOperationTarget.id"
+          :channel-options="channelOperationOptions"
+          :show-picker="false"
+          :can-snapshot="canSnapshotDevice"
+        />
+        <DeviceStatusFactsPanel
+          v-else-if="channelOperationTab === 'status' && canViewDeviceFacts"
+          v-model:channel-id="channelOperationTarget.id"
+          :channel-options="channelOperationOptions"
+          :active="channelOperationVisible"
+          :show-picker="false"
+          :can-view="canViewDeviceFacts"
+        />
+        <StorageCardStatusPanel
+          v-else-if="channelOperationTab === 'storage' && canViewDeviceFacts"
+          v-model:channel-id="channelOperationTarget.id"
+          :channel-options="channelOperationOptions"
+          :active="channelOperationVisible"
+          :show-picker="false"
+          :can-view="canViewDeviceFacts"
+          :can-format="canFormatStorageCard"
+          :device-label="channelOperationTarget.deviceId"
+        />
+      </div>
     </a-drawer>
 
     <DeviceRebootDialog
@@ -3632,7 +3486,7 @@ onUnmounted(() => {
       @submission-uncertain="onMaintenanceUncertain('reboot')"
       @view-records="viewMaintenanceRecord('reboot', $event)"
     />
-    <DeviceFirmwareUpgradeDrawer
+    <DeviceFirmwareUpgradeDialog
       v-if="canViewMaintenance"
       v-model:visible="upgradeVisible"
       :device="maintenanceDevice"
@@ -3644,7 +3498,7 @@ onUnmounted(() => {
       @submission-uncertain="onMaintenanceUncertain('upgrade')"
       @view-records="viewMaintenanceRecord('upgrade', $event)"
     />
-    <DeviceMaintenanceRecordsDrawer
+    <DeviceMaintenanceRecordsDialog
       v-if="canViewMaintenance"
       v-model:visible="recordsVisible"
       :device="maintenanceDevice"
@@ -5658,15 +5512,10 @@ onUnmounted(() => {
 
 /* 注：.drawer-body 的 padding-bottom: 8px 已并入上方主定义（同名选择器不允许重复）。 */
 
-/* ============ 详情抽屉 · 三段重构(2026-09-24) ============
-   七页签 → 概览 / 操作 / 配置。判据按**行为形状**分,不按接口族:
-   概览=只读事实 / 操作=点一下发一条+判读依据 / 配置=读·改·下发·对账。
-   ⛔ 本段替代原 `.device-detail-tabs`(Arco 页签那套已从**设备分支**整体删除;
-      「通道详情」那一支本来就没有页签,不受影响)。 */
+/* ============ 设备详情抽屉 · 只读概览 ============
+   设备详情只回答设备当前状态和接入信息；通道级控制、配置和设备维护从这里分离。 */
 
-/* ① 档案条:身份 + 设备级动作同一行,常驻不随段切换。
-   ⛔ 它取代了原页脚 —— 那 6 个按钮在 640 宽抽屉里需要约 700px(可用 608px),
-      实测默认落在视口外(内容 948 > 可视 850),是"用户不知道有这些功能"的直接成因。 */
+/* 档案条只承载设备身份与在线状态，操作入口位于设备卡片或通道操作抽屉。 */
 .device-idbar {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) auto;
@@ -5694,7 +5543,7 @@ onUnmounted(() => {
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 650;
   line-height: 1.35;
   color: var(--uvp-text-primary);
@@ -5710,118 +5559,51 @@ onUnmounted(() => {
   gap: 4px;
   align-items: center;
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--uvp-text-tertiary);
 }
 .device-idbar .idbar-sum {
   margin: 3px 0 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--uvp-text-tertiary);
+  white-space: nowrap;
+}
+
+/* 概览随抽屉滚动，内容不再另设滚动区。 */
+.device-seg {
+  display: grid;
+  gap: 18px;
+}
+.device-readonly {
+  gap: 18px;
+}
+.channel-operation-entry {
+  display: grid;
+  gap: 14px;
+}
+.channel-operation-context {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 8px;
+}
+.channel-operation-context strong {
+  color: var(--uvp-text-primary);
+}
+.channel-operation-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
 }
-.device-idbar .idbar-acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-end;
-  max-width: 260px;
-}
-.idbar-action {
-  min-width: 68px;
-  height: 32px;
-  padding: 0 11px;
-  font-size: 13px;
-  font-weight: 550;
-  color: var(--uvp-text-primary);
-}
-.idbar-action:hover {
-  color: var(--uvp-brand-strong);
-  border-color: var(--uvp-brand);
-}
-
-/* 「维护记录」在**视觉层级**上是文字链接不是实心按钮:它只"看历史",与"会改动设备"的
-   两个动作风险等级不同,长得一样会诱导误点。
-   ⛔ 但控件本身是框架的 `a-button type="text"`(Arco 的链接态按钮),这里只做
-      "配色 + 字号"的最小适配 —— hover / focus-visible / 禁用态 / 键盘可达性全部沿用框架,
-      自己写原生 `<button>` 这些都得重造一遍,还会跟同抽屉「通道详情」那一支的控件质感对不上。 */
-.idbar-link {
-  font-size: 12px;
-  color: var(--uvp-brand);
-}
-.idbar-link:hover {
-  color: var(--uvp-brand);
-  background: color-mix(in srgb, var(--uvp-brand) 10%, transparent);
-}
-
-/* ② 段导航:直接用 Arco 的分段控件(`a-radio-group type="button"`)。
-   视觉契约对齐全局 `.uvp-system-tabs`: 外层浅底 + 4px 内间距、选中白底阴影、
-   12/9px 圆角。三段按内容收敛并保留最小点击宽度，避免默认 radio-button 的灰色整条横栏显得像筛选条。 */
-.device-segs {
-  display: flex;
-  gap: 4px;
+.channel-operation-tabs {
   width: fit-content;
   max-width: 100%;
-  padding: 4px;
-  margin-bottom: 16px;
-  background: #f3f7fb;
-  border: 1px solid var(--uvp-dialog-border);
-  border-radius: 12px;
-}
-.device-segs :deep(.arco-radio-button) {
-  display: inline-flex;
-  flex: 0 1 112px;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  min-width: 92px;
-  min-height: 30px;
-  padding: 5px 14px;
-  margin: 0;
-  font-weight: 580;
-  line-height: 18px;
-  color: var(--uvp-text-secondary);
-  border: 0;
-  border-radius: 9px;
-  transition:
-    color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-.device-segs :deep(.arco-radio-button-content) {
-  padding: 0;
-  line-height: 20px;
-}
-.device-segs :deep(.arco-radio-button::before) {
-  display: none;
-}
-.device-segs :deep(.arco-radio-button:hover) {
-  color: var(--uvp-brand-strong);
-}
-.device-segs :deep(.arco-radio-button.arco-radio-checked),
-.device-segs :deep(.arco-radio-button.arco-radio-checked:hover) {
-  color: var(--uvp-brand-strong);
-  background: #ffffff;
-  box-shadow: 0 6px 16px rgb(37 99 235 / 10%);
-}
-
-/* 分段标签后面的小字提示("通道级" / "4 组")只是解释词,跟着所在分段的字色走 ——
-   选中态是框架给的 primary 实底 + 白字,这里写死灰色会在蓝底上看不清。 */
-.device-segs :deep(.arco-radio-button) em {
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 500;
-  color: inherit;
-  opacity: 0.82;
-}
-
-/* ③ 段内容。⛔ 抽屉本身纵向滚动,段内不再各造一层滚动
-   —— 避免"抽屉里再套一个小滚动区"这种双滚动。 */
-.device-seg {
-  display: grid;
-  gap: 14px;
 }
 
 /* 概览:分区标题 + 细分隔线,**不画卡片框** —— 原「设备信息」页是 5 个等权重
@@ -5837,7 +5619,7 @@ onUnmounted(() => {
   margin-bottom: 6px;
 }
 .seg-head b {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 650;
   color: var(--uvp-text-secondary);
   letter-spacing: 0.02em;
@@ -5868,7 +5650,7 @@ onUnmounted(() => {
   align-items: baseline;
 }
 .seg-rows .k {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
   color: var(--uvp-text-secondary);
 }
@@ -5877,11 +5659,11 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--uvp-text-primary);
 }
 .seg-rows .sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--uvp-text-tertiary);
 }
 
@@ -5902,29 +5684,6 @@ onUnmounted(() => {
 }
 .seg-rows .seg-rate-row {
   align-items: center;
-}
-
-/* 「录像存储 / 报警控制」两页(2026-09-20 从播放控制台搬来)。
-   ⛔ 这两页**必须**给定高,是唯一破「抽屉自己滚、面板不造第二层滚动」惯例的地方 ——
-      DeviceConfigDrawer 嵌入形态是**定高三段式**(分组导航 / 参数头 / 参数体),
-      参数体靠 flex:1 + overflow-y:auto 自己滚;不给宿主定高,那个 flex 行就没有可分配的
-      高度,长内容(如「周计划」7 天编辑器)会被 .dcg-window 的 overflow:hidden **静默裁掉**
-      (不是换行、不是滚动,是消失)。播放控制台那一版靠 .panels 的 height:100% 拿到定高,
-      抽屉里没有那层容器,所以在这里显式给。
-   ⛔ 别改成 min-height:内容会塌成 0 高,表现与"页面空白"一模一样。 */
-.device-config-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: clamp(420px, calc(100vh - 250px), 560px);
-  min-height: 0;
-}
-.device-config-tab :deep(.fact-channel-picker) {
-  flex: none;
-}
-.device-config-tab :deep(.dcg-host--embedded) {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 /* 注：.drawer-headline 的 padding / background 增强值已并入上方主定义（同名选择器不允许重复）。 */
@@ -6284,11 +6043,6 @@ onUnmounted(() => {
   .device-idbar {
     grid-template-columns: 36px minmax(0, 1fr);
   }
-  .device-idbar .idbar-acts {
-    grid-column: 2;
-    justify-content: flex-start;
-    max-width: none;
-  }
   .status-event-summary {
     align-items: flex-start;
   }
@@ -6300,11 +6054,6 @@ onUnmounted(() => {
   }
 }
 
-@media (width <= 480px) {
-  .device-segs :deep(.arco-radio-button) em {
-    display: none;
-  }
-}
 .info-group {
   display: grid;
   gap: 10px;

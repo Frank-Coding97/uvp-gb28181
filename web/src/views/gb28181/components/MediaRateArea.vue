@@ -39,7 +39,6 @@ const chartSpec = computed(() => createMediaRateChartSpec(props.samples));
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: calc(100% - 74px);
   min-height: 150px;
   overflow: hidden;
 }

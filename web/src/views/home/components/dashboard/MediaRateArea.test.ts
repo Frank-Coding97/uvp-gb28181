@@ -104,7 +104,8 @@ describe("MediaRateArea", () => {
     expect(axes[1].layers[0]).toMatchObject({ tickCount: 3, timeFormat: "%H:%M", timeFormatMode: "local" });
     expect(spec.crosshair).toMatchObject({ xField: { visible: true } });
     expect(source).not.toContain("<svg");
-    expect(source).toMatch(/\.media-rate-area\s*\{[^}]*height:\s*calc\(100%\s*-\s*74px\);/s);
+    expect(source).not.toMatch(/\.media-rate-area\s*\{[^}]*height:\s*calc\(100%\s*-\s*74px\);/s);
+    expect(source).toMatch(/\.media-rate-area\s*\{[^}]*flex-direction:\s*column;/s);
     expect(source).toMatch(/\.media-rate-area\s*\{[^}]*min-height:\s*150px;/s);
     expect(source).toMatch(/\.media-rate-area\s*\{[^}]*overflow:\s*hidden;/s);
     expect(source).not.toContain('color: "transparent"');

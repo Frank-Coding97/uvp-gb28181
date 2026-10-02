@@ -26,6 +26,7 @@ type NetworkSessionListRequest struct {
 
 type NetworkSession struct {
 	NodeID     int64  `json:"nodeId"`
+	NodeName   string `json:"nodeName"`
 	NodeUUID   string `json:"nodeUuid"`
 	ID         string `json:"id"`
 	PeerIP     string `json:"peerIp"`
@@ -41,9 +42,11 @@ type NetworkSession struct {
 
 type NetworkSessionPage struct {
 	Page[NetworkSession]
-	NodeID   int64     `json:"nodeId"`
-	NodeUUID string    `json:"nodeUuid"`
-	AsOf     time.Time `json:"asOf"`
+	NodeID   int64             `json:"nodeId"`
+	NodeUUID string            `json:"nodeUuid"`
+	AsOf     time.Time         `json:"asOf"`
+	Partial  bool              `json:"partial"`
+	Errors   []StreamNodeError `json:"errors,omitempty"`
 }
 
 type MediaViewerListRequest struct {
@@ -144,11 +147,50 @@ func (s *SessionService) ListNetworkSessions(ctx context.Context, request Networ
 	items := make([]NetworkSession, 0, len(sessions))
 	for _, session := range sessions {
 		items = append(items, NetworkSession{
-			NodeID: request.NodeID, NodeUUID: current.MediaServerUUID,
+			NodeID: request.NodeID, NodeName: strings.TrimSpace(current.Name), NodeUUID: current.MediaServerUUID,
 			ID: safeRuntimeLabel(session.ID), PeerIP: safeRuntimeLabel(session.PeerIP), PeerPort: session.PeerPort,
 			LocalIP: safeRuntimeLabel(session.LocalIP), LocalPort: session.LocalPort,
 			Identifier: safeRuntimeLabel(session.Identifier), Type: safeRuntimeLabel(session.Type), TypeID: safeRuntimeLabel(session.TypeID),
 		})
+	}
+	result.Page = Paginate(items, request.Page)
+	return result, nil
+}
+
+// ListAllNetworkSessions aggregates node-scoped sessions while retaining the
+// node identity on every row. Unavailable nodes are reported as partial data.
+func (s *SessionService) ListAllNetworkSessions(ctx context.Context, request NetworkSessionListRequest) (NetworkSessionPage, error) {
+	result := NetworkSessionPage{AsOf: time.Now().UTC(), Errors: make([]StreamNodeError, 0)}
+	if err := validateSessionFilter(request.Filter); err != nil {
+		return result, err
+	}
+	if s == nil || s.registry == nil || s.runtime == nil {
+		return result, NewInternalError("", "session service dependencies are not configured")
+	}
+	opCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	items := make([]NetworkSession, 0)
+	for _, current := range s.registry.List() {
+		if current == nil || current.State != node.StateActive {
+			continue
+		}
+		sessions, err := s.runtime.GetAllSessions(opCtx, current.ID, request.Filter)
+		if err != nil {
+			result.Partial = true
+			result.Errors = append(result.Errors, streamNodeError(current.ID, err))
+			continue
+		}
+		for _, session := range boundedPageInput(sessions) {
+			if len(items) >= MaxResponseItems+1 {
+				break
+			}
+			items = append(items, NetworkSession{
+				NodeID: current.ID, NodeName: strings.TrimSpace(current.Name), NodeUUID: current.MediaServerUUID,
+				ID: safeRuntimeLabel(session.ID), PeerIP: safeRuntimeLabel(session.PeerIP), PeerPort: session.PeerPort,
+				LocalIP: safeRuntimeLabel(session.LocalIP), LocalPort: session.LocalPort,
+				Identifier: safeRuntimeLabel(session.Identifier), Type: safeRuntimeLabel(session.Type), TypeID: safeRuntimeLabel(session.TypeID),
+			})
+		}
 	}
 	result.Page = Paginate(items, request.Page)
 	return result, nil
@@ -162,6 +204,40 @@ func (s *SessionService) ListMediaViewers(ctx context.Context, request MediaView
 		return StreamViewerPage{NodeID: request.NodeID, Target: request.Media}, err
 	}
 	return s.listMediaViewers(ctx, request.NodeID, request.Media, request.Page)
+}
+
+// ListAllMediaViewers aggregates viewers for one media identity across all
+// active nodes. The node identity remains attached to every viewer row.
+func (s *SessionService) ListAllMediaViewers(ctx context.Context, request MediaViewerListRequest) (StreamViewerPage, error) {
+	result := StreamViewerPage{Target: request.Media, AsOf: time.Now().UTC(), Errors: make([]StreamNodeError, 0)}
+	if err := request.Media.Validate(); err != nil {
+		return result, err
+	}
+	if s == nil || s.registry == nil || s.runtime == nil {
+		return result, NewInternalError("", "session service dependencies are not configured")
+	}
+	opCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	items := make([]StreamViewer, 0)
+	for _, current := range s.registry.List() {
+		if current == nil || current.State != node.StateActive {
+			continue
+		}
+		players, err := s.runtime.GetMediaPlayerList(opCtx, current.ID, toStreamTarget(request.Media))
+		if err != nil {
+			result.Partial = true
+			result.Errors = append(result.Errors, streamNodeError(current.ID, err))
+			continue
+		}
+		for _, player := range boundedPageInput(players) {
+			if len(items) >= MaxResponseItems+1 {
+				break
+			}
+			items = append(items, streamViewer(current, request.Media, player))
+		}
+	}
+	result.Page = Paginate(items, request.Page)
+	return result, nil
 }
 
 func (s *SessionService) listMediaViewers(ctx context.Context, nodeID int64, media MediaIdentity, request PageRequest) (StreamViewerPage, error) {

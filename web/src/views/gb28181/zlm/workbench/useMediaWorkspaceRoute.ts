@@ -14,7 +14,11 @@ import type { MediaWorkbenchStatus } from "./MediaWorkspaceShell.vue";
 import { resolveMediaWorkspaceAccess } from "./mediaAccess";
 import { MEDIA_WORKSPACES } from "./mediaRoutes";
 
-export function useMediaWorkspaceRoute(key: (typeof MEDIA_WORKSPACES)[number]["key"]) {
+export interface MediaWorkspaceRouteOptions {
+  defaultScope?: MediaScope;
+}
+
+export function useMediaWorkspaceRoute(key: (typeof MEDIA_WORKSPACES)[number]["key"], options: MediaWorkspaceRouteOptions = {}) {
   const definition = MEDIA_WORKSPACES.find(workspace => workspace.key === key)!;
 
   const route = useRoute();
@@ -98,8 +102,14 @@ export function useMediaWorkspaceRoute(key: (typeof MEDIA_WORKSPACES)[number]["k
       const nodes = await catalog.load();
       if (!contextStore.initialized) contextStore.initialize(nodes, route.query.nodeId);
       else contextStore.reconcileVisibleNodes(nodes);
-      const nodeId = resolveDefaultZLMNodeId(nodes, route.query.nodeId, contextStore.selectedNodeId);
-      if (nodeId !== null) setScope(nodeId);
+      if (route.query.nodeId !== undefined) {
+        const requestedNodeId = resolveDefaultZLMNodeId(nodes, route.query.nodeId);
+        if (requestedNodeId !== null) setScope(requestedNodeId);
+      } else if (options.defaultScope !== undefined) setScope(options.defaultScope);
+      else {
+        const nodeId = resolveDefaultZLMNodeId(nodes, contextStore.selectedNodeId);
+        if (nodeId !== null) setScope(nodeId);
+      }
     } catch {
       // The shared catalog exposes the recoverable error while retaining its last successful nodes.
     }

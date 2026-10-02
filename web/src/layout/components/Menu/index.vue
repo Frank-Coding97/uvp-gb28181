@@ -21,6 +21,7 @@ import MenuItem from "@/layout/components/Menu/menu-item.vue";
 import { useRoutingMethod } from "@/hooks/useRoutingMethod";
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
+import { mediaMenuLocation } from "./mediaMenuRoute";
 const route = useRoute();
 const router = useRouter();
 const themeStore = useThemeConfig();
@@ -37,10 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const onMenuItem = (path: string) => {
   const nodeId = typeof route.query.nodeId === "string" && /^\d+$/.test(route.query.nodeId) ? route.query.nodeId : undefined;
-  if (path.startsWith("/media/") && nodeId) {
-    return router.push({ path, query: { nodeId } });
-  }
-  return router.push(path);
+  return router.push(mediaMenuLocation(path, nodeId));
 };
 
 const routePathList = computed(() => {

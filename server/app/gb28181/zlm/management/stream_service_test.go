@@ -31,6 +31,7 @@ func TestStreamServiceListFiltersPaginatesAndRedactsRawMedia(t *testing.T) {
 	require.Equal(t, int64(1), result.Total)
 	require.Len(t, result.List, 1)
 	require.Equal(t, MediaIdentity{Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "camera/1"}, result.List[0].Media)
+	require.Equal(t, "node-1", result.List[0].NodeName)
 	require.Equal(t, 1, runtime.listCalls)
 
 	encoded, marshalErr := json.Marshal(result)

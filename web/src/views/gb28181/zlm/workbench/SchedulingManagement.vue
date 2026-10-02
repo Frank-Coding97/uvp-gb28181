@@ -6,7 +6,7 @@ import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
 import SchedulerLogPanel from "./scheduling/SchedulerLogPanel.vue";
 import { schedulerLogResultFromQuery } from "../schedulerLogState";
 
-const workspace = useMediaWorkspaceRoute("scheduling");
+const workspace = useMediaWorkspaceRoute("scheduling", { defaultScope: "all" });
 const route = useRoute();
 const logPanel = ref<{ refresh: () => Promise<boolean> } | null>(null);
 const initialLogResult = computed(() => schedulerLogResultFromQuery(route.query.result));
@@ -32,8 +32,8 @@ async function refreshActive() {
     :auto-refresh="workspace.autoRefresh.value"
     :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
-    :allow-all="false"
-    :requires-node="true"
+    :allow-all="true"
+    :requires-node="false"
     :show-scope="false"
     @update:active-view="workspace.setActiveView"
     @update:scope="workspace.setScope"

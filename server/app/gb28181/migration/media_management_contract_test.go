@@ -84,6 +84,8 @@ var mediaManagementAPIs = []mediaManagementAPI{
 	{method: "POST", path: "/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight"},
 	{method: "POST", path: "/api/gb28181/zlm/nodes/:id/streams/close/batch"},
 	{method: "GET", path: "/api/gb28181/zlm/nodes/:id/sessions/network"},
+	{method: "GET", path: "/api/gb28181/zlm/sessions/network"},
+	{method: "GET", path: "/api/gb28181/zlm/sessions/viewers"},
 	{method: "GET", path: "/api/gb28181/zlm/nodes/:id/sessions/viewers"},
 	{method: "POST", path: "/api/gb28181/zlm/nodes/:id/sessions/kick"},
 	{method: "GET", path: "/api/gb28181/zlm/nodes/:id/proxies/pull"},

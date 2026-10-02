@@ -12,7 +12,13 @@ import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-wor
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
 import MediaVChart from "../components/MediaVChart.vue";
 import { buildSchedulerChartState, createSchedulerNodeSpec, createSchedulerResultSpec } from "../chart/schedulerChart";
-import { buildSchedulerLogFilter, type SchedulerLogFilterState } from "../../schedulerLogState";
+import {
+  buildSchedulerChartWindowFilter,
+  buildSchedulerLogFilter,
+  SCHEDULER_CHART_PERIODS,
+  type SchedulerChartPeriod,
+  type SchedulerLogFilterState
+} from "../../schedulerLogState";
 import { safeSchedulerError, schedulerAlgorithmLabel } from "./schedulerLogPresentation";
 
 const props = withDefaults(
@@ -47,16 +53,19 @@ const draft = ref<SchedulerLogDraft>({
   nodeId: typeof props.scope === "number" ? props.scope : undefined,
   algorithm: undefined,
   result: props.initialResult,
-  streamId: "",
-  limit: 100
+  streamId: ""
 });
 const applied = ref<SchedulerLogDraft>({ ...draft.value, timeRange: [] });
-const sampleFilter = ref<SchedulerLogFilter>({ limit: 100 });
 const sampleAvailable = ref(false);
+const chartPeriod = ref<SchedulerChartPeriod>("24h");
+const chartLogs = ref<Record<SchedulerChartPeriod, SchedulerLogEntry[] | undefined>>({ "24h": undefined, "7d": undefined });
+const chartFilters = ref<Record<SchedulerChartPeriod, SchedulerLogFilter>>({ "24h": {}, "7d": {} });
+const chartErrors = ref<Record<SchedulerChartPeriod, unknown>>({ "24h": null, "7d": null });
 const page = ref(1);
 const pageSize = ref(10);
 let generation = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
+const chartPageLimit = 1000;
 
 const nodes = computed(() => (props.nodes === undefined ? discoveredNodes.value : props.nodes));
 const nodeOptions = computed(() =>
@@ -64,15 +73,15 @@ const nodeOptions = computed(() =>
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const chartState = computed(() =>
-  buildSchedulerChartState(sampleAvailable.value ? logs.value : undefined, sampleFilter.value, {
-    unavailable: !!loadError.value && !sampleAvailable.value
+  buildSchedulerChartState(chartLogs.value[chartPeriod.value], chartFilters.value[chartPeriod.value], {
+    period: chartPeriod.value,
+    unavailable: !!chartErrors.value[chartPeriod.value] && chartLogs.value[chartPeriod.value] === undefined
   })
 );
 const resultSpec = computed(() => createSchedulerResultSpec(chartState.value));
 const nodeSpec = computed(() => createSchedulerNodeSpec(chartState.value));
 const visibleLogs = computed(() => logs.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value));
 const tableScroll = computed(() => ({ x: 1148, ...(visibleLogs.value.length ? { y: "100%" } : {}) }));
-const limitOptions = [50, 100, 200, 500, 1000].map(value => ({ label: `${value} 条`, value }));
 const algorithmOptions: Array<{ label: string; value: SchedulerAlgorithm }> = [
   { label: "轮询", value: "roundrobin" },
   { label: "加权轮询", value: "weighted" },
@@ -115,11 +124,43 @@ async function fetchLogs(filter: SchedulerLogFilter, requestGeneration: number) 
   if (requestGeneration !== generation || !props.active) return false;
   if (response.code !== 0) throw new Error(response.message || "调度日志加载失败");
   logs.value = response.data?.list ?? [];
-  sampleFilter.value = filter;
   sampleAvailable.value = true;
   page.value = 1;
   loadError.value = null;
   return true;
+}
+
+async function fetchChart(period: SchedulerChartPeriod, filter: SchedulerLogFilter, requestGeneration: number) {
+  const fetchRange = async (from: string, to: string): Promise<SchedulerLogEntry[]> => {
+    const response = await listSchedulerLogs({ ...filter, from, to, limit: chartPageLimit });
+    if (requestGeneration !== generation || !props.active) return [];
+    if (response.code !== 0) throw new Error(response.message || "调度图表加载失败");
+    const rows = response.data?.list ?? [];
+    if (rows.length < chartPageLimit) return rows;
+    const startMs = Date.parse(from);
+    const endMs = Date.parse(to);
+    const midpoint = startMs + Math.floor((endMs - startMs) / 2);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || midpoint <= startMs || midpoint >= endMs) {
+      throw new Error("调度图表时间片内日志超过查询上限");
+    }
+    const leftTo = new Date(midpoint).toISOString();
+    const [left, right] = await Promise.all([fetchRange(from, leftTo), fetchRange(leftTo, to)]);
+    return [...left, ...right];
+  };
+  try {
+    if (!filter.from || !filter.to) throw new Error("调度图表时间范围缺失");
+    const rows = await fetchRange(filter.from, filter.to);
+    if (requestGeneration !== generation || !props.active) return false;
+    const unique = new Map<number, SchedulerLogEntry>();
+    for (const row of rows) unique.set(row.id, row);
+    chartLogs.value[period] = [...unique.values()].sort((left, right) => right.happenedAt.localeCompare(left.happenedAt));
+    chartFilters.value[period] = filter;
+    chartErrors.value[period] = null;
+    return true;
+  } catch (error) {
+    if (requestGeneration === generation && props.active) chartErrors.value[period] = error;
+    return false;
+  }
 }
 
 async function refresh() {
@@ -127,8 +168,16 @@ async function refresh() {
   const requestGeneration = ++generation;
   loading.value = true;
   try {
-    const filter = buildSchedulerLogFilter(applied.value);
-    return await fetchLogs(filter, requestGeneration);
+    const tableFilter = buildSchedulerLogFilter(applied.value);
+    const chartFiltersForPeriod = SCHEDULER_CHART_PERIODS.map(period => ({
+      period: period.key,
+      filter: buildSchedulerChartWindowFilter(applied.value, period.key)
+    }));
+    const [tableLoaded, ...chartsLoaded] = await Promise.all([
+      fetchLogs(tableFilter, requestGeneration),
+      ...chartFiltersForPeriod.map(({ period, filter }) => fetchChart(period, filter, requestGeneration))
+    ]);
+    return tableLoaded && chartsLoaded.every(Boolean);
   } catch (error) {
     if (requestGeneration === generation && props.active) loadError.value = error;
     return false;
@@ -159,7 +208,10 @@ function queryFilters() {
 
 function changeNode(value: string | number | Event) {
   const rawValue = value instanceof Event ? (value.target as HTMLSelectElement).value : value;
-  if (rawValue === "all") return;
+  if (rawValue === "all") {
+    emit("update:scope", "all");
+    return;
+  }
   const nodeId = Number(rawValue);
   if (Number.isSafeInteger(nodeId) && nodeId > 0 && nodes.value.some(node => node.id === nodeId)) {
     emit("update:scope", nodeId);
@@ -181,8 +233,7 @@ function resetFilters() {
     nodeId: typeof props.scope === "number" ? props.scope : undefined,
     algorithm: undefined,
     result: undefined,
-    streamId: "",
-    limit: 100
+    streamId: ""
   };
   queryFilters();
 }
@@ -214,6 +265,8 @@ watch(
     const scopedNodeId = typeof props.scope === "number" ? props.scope : undefined;
     draft.value.nodeId = scopedNodeId;
     applied.value.nodeId = scopedNodeId;
+    chartLogs.value = { "24h": undefined, "7d": undefined };
+    chartErrors.value = { "24h": null, "7d": null };
     void loadNodes();
     void refresh();
   },
@@ -226,6 +279,8 @@ watch(
     if (draft.value.result === result && applied.value.result === result) return;
     draft.value.result = result;
     applied.value.result = result;
+    chartLogs.value = { "24h": undefined, "7d": undefined };
+    chartErrors.value = { "24h": null, "7d": null };
     if (props.active) void refresh();
   }
 );
@@ -262,7 +317,7 @@ defineExpose({ refresh });
         <a-select
           data-testid="node-filter"
           :model-value="scope"
-          :options="scope === 'all' ? [{ label: '请选择节点', value: 'all', disabled: true }, ...nodeOptions] : nodeOptions"
+          :options="[{ label: '全部节点', value: 'all' }, ...nodeOptions]"
           :disabled="!nodeOptions.length"
           placeholder="节点"
           class="node-filter"
@@ -292,7 +347,6 @@ defineExpose({ refresh });
           @search="queryFilters"
           @press-enter="queryFilters"
         />
-        <a-select v-model="draft.limit" :options="limitOptions" placeholder="返回上限" class="limit-filter" />
       </template>
       <template #actions>
         <a-button type="primary" @click="queryFilters"
@@ -305,28 +359,40 @@ defineExpose({ refresh });
     </s-layout-search>
 
     <div class="chart-grid">
-      <MediaVChart
-        title="调度命中分布"
-        :spec="resultSpec"
-        :status="chartState.status"
-        :status-text="chartState.summary"
-        :summary="chartState.summary"
-        :warning="chartState.warning"
-        :as-of="chartState.asOf"
-        :sampled-label="chartState.filterText"
-        :active="active"
-      />
-      <MediaVChart
-        title="命中节点"
-        :spec="nodeSpec"
-        :status="chartState.status"
-        :status-text="chartState.summary"
-        :summary="chartState.summary"
-        :warning="chartState.warning"
-        :as-of="chartState.asOf"
-        :sampled-label="chartState.filterText"
-        :active="active"
-      />
+      <div
+        v-for="chart in [
+          { title: '调度命中分布', spec: resultSpec },
+          { title: '命中节点', spec: nodeSpec }
+        ]"
+        :key="chart.title"
+        class="chart-card"
+      >
+        <MediaVChart
+          :title="chart.title"
+          :spec="chart.spec"
+          :status="chartState.status"
+          :status-text="chartState.summary"
+          summary=""
+          :show-summary="false"
+          :active="active"
+        >
+          <template #header-actions>
+            <div class="chart-period-tabs" data-testid="scheduler-chart-periods" role="tablist" aria-label="图表统计周期">
+              <button
+                v-for="period in SCHEDULER_CHART_PERIODS"
+                :key="period.key"
+                type="button"
+                role="tab"
+                :aria-selected="chartPeriod === period.key"
+                :class="{ 'is-active': chartPeriod === period.key }"
+                @click="chartPeriod = period.key"
+              >
+                {{ period.label }}
+              </button>
+            </div>
+          </template>
+        </MediaVChart>
+      </div>
     </div>
 
     <section v-if="active" class="log-table-panel" aria-label="调度日志列表">
@@ -467,15 +533,36 @@ defineExpose({ refresh });
 .scheduler-log-search :deep(.stream-filter) {
   width: 190px;
 }
-.scheduler-log-search :deep(.limit-filter) {
-  width: 120px;
-}
 .chart-grid {
   display: grid;
   flex: none;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 0;
+}
+.chart-card {
+  min-width: 0;
+}
+.chart-period-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--zlm-fill-2);
+  border-radius: var(--zlm-radius-md);
+}
+.chart-period-tabs button {
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--zlm-text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--zlm-radius-sm);
+}
+.chart-period-tabs button:hover,
+.chart-period-tabs button.is-active {
+  color: var(--zlm-brand-700);
+  background: var(--zlm-card);
 }
 .log-table-panel {
   display: flex;
@@ -577,8 +664,7 @@ select:focus-visible {
   .scheduler-log-search :deep(.node-filter),
   .scheduler-log-search :deep(.algorithm-filter),
   .scheduler-log-search :deep(.result-filter),
-  .scheduler-log-search :deep(.stream-filter),
-  .scheduler-log-search :deep(.limit-filter) {
+  .scheduler-log-search :deep(.stream-filter) {
     width: 100%;
   }
   .log-pagination {

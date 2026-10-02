@@ -14,6 +14,8 @@ import {
   getZLMRecordingStatus,
   kickZLMSession,
   listZLMNetworkSessions,
+  listAllZLMNetworkSessions,
+  listAllZLMMediaViewers,
   listZLMStreams,
   preflightCloseZLMStream,
   preflightForceStopZLMRecording,
@@ -54,6 +56,21 @@ describe("ZLM runtime API", () => {
     });
     expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/zlm/nodes/7/sessions/network", {
       params: { page: 3, pageSize: 20, localPort: 8000 },
+      signal: controller.signal
+    });
+  });
+
+  it("uses aggregate session routes when querying all nodes", async () => {
+    const controller = new AbortController();
+    await listAllZLMNetworkSessions({ page: 2, pageSize: 20, peerIp: "192.0.2.10" }, controller.signal);
+    await listAllZLMMediaViewers(media, { page: 3, pageSize: 10 }, controller.signal);
+
+    expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/zlm/sessions/network", {
+      params: { page: 2, pageSize: 20, peerIp: "192.0.2.10" },
+      signal: controller.signal
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/zlm/sessions/viewers", {
+      params: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001", page: 3, pageSize: 10 },
       signal: controller.signal
     });
   });

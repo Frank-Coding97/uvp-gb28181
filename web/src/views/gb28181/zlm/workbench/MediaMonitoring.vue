@@ -8,7 +8,7 @@ import NetworkSessionPanel from "./monitoring/NetworkSessionPanel.vue";
 import StreamPanel from "./monitoring/StreamPanel.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
 
-const workspace = useMediaWorkspaceRoute("monitoring");
+const workspace = useMediaWorkspaceRoute("monitoring", { defaultScope: "all" });
 const route = useRoute();
 const streamPanel = ref<{ refresh: () => void } | null>(null);
 const sessionPanel = ref<{ refresh: () => void } | null>(null);
@@ -44,8 +44,8 @@ function refreshAll() {
     :auto-refresh="workspace.autoRefresh.value"
     :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
-    :allow-all="false"
-    :requires-node="true"
+    :allow-all="true"
+    :requires-node="false"
     :show-scope="false"
     @update:active-view="workspace.setActiveView"
     @update:scope="workspace.setScope"
@@ -58,6 +58,7 @@ function refreshAll() {
         <StreamPanel
           ref="streamPanel"
           :active="workspace.activeView.value === 'streams'"
+          :auto-refresh="workspace.autoRefresh.value"
           :scope="workspace.scope.value"
           :node-id="nodeId"
           :initial-query="route.query"
@@ -67,8 +68,8 @@ function refreshAll() {
               compact
               :model-value="workspace.scope.value"
               :nodes="workspace.nodes.value"
-              :allow-all="false"
-              :requires-node="true"
+              :allow-all="true"
+              :requires-node="false"
               :loading="workspace.scopeLoading.value"
               :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''"
               :show-refresh="false"
@@ -95,8 +96,8 @@ function refreshAll() {
               compact
               :model-value="workspace.scope.value"
               :nodes="workspace.nodes.value"
-              :allow-all="false"
-              :requires-node="true"
+              :allow-all="true"
+              :requires-node="false"
               :loading="workspace.scopeLoading.value"
               :error-text="workspace.scopeError.value ? '节点目录刷新失败' : ''"
               :show-refresh="false"

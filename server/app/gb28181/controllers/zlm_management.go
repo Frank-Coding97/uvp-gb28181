@@ -46,7 +46,9 @@ type ZLMSnapshotAPI interface {
 
 type ZLMSessionAPI interface {
 	ListNetworkSessions(context.Context, management.NetworkSessionListRequest) (management.NetworkSessionPage, error)
+	ListAllNetworkSessions(context.Context, management.NetworkSessionListRequest) (management.NetworkSessionPage, error)
 	ListMediaViewers(context.Context, management.MediaViewerListRequest) (management.StreamViewerPage, error)
+	ListAllMediaViewers(context.Context, management.MediaViewerListRequest) (management.StreamViewerPage, error)
 	KickSession(context.Context, management.KickSessionRequest) (management.KickSessionResult, error)
 }
 

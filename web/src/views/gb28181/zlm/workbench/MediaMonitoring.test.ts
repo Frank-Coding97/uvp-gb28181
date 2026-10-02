@@ -13,6 +13,9 @@ describe("media monitoring workbench", () => {
     const source = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
     expect(source).toContain("StreamPanel");
     expect(source).toContain("NetworkSessionPanel");
+    expect(source).toContain('useMediaWorkspaceRoute("monitoring", { defaultScope: "all" })');
+    expect(source).toContain(':allow-all="true"');
+    expect(source).toContain(':requires-node="false"');
     expect(source).not.toContain("workspace-pending");
   });
 
@@ -49,6 +52,15 @@ describe("media monitoring workbench", () => {
     expect(panel).not.toContain("所有列表、详情和危险操作都通过 UVP 后端");
   });
 
+  it("uses the shared themed drawer surface for stream details", () => {
+    const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+    expect(panel).toContain('class="uvp-system-drawer"');
+    expect(panel).toContain('body-class="uvp-system-dialog__body"');
+    expect(panel.match(/class="uvp-data-table detail-table"/g)).toHaveLength(2);
+    expect(panel).not.toContain('title="业务归属"');
+    expect(panel).toContain("<dt>业务归属</dt>");
+  });
+
   it("places the shared node selector inside every monitoring filter row", () => {
     const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
     const streamPanel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
@@ -62,6 +74,36 @@ describe("media monitoring workbench", () => {
     expect(streamPanel).toMatch(/<template #fields>\s*<slot name="scope" \/>/s);
     // prettier 会把闭合 `>` 悬挂到下一行（`<template #fields\n  >`），所以留 \s*。
     expect(sessionPanel.match(/<template #fields\s*>\s*<slot name="scope" \/>/g)).toHaveLength(2);
+  });
+
+  it("gives the stream refresh action a ten-second countdown and shared table actions", () => {
+    const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
+    const streamPanel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+
+    expect(page).toContain(':auto-refresh="workspace.autoRefresh.value"');
+    expect(streamPanel).toContain("const AUTO_REFRESH_SECONDS = 10");
+    expect(streamPanel).toContain("refreshCountdownTimer = setInterval(tickRefreshCountdown, 1_000)");
+    expect(streamPanel).toMatch(/publish\(value\)\s*\{[\s\S]*?scheduleRefreshCountdown\(\)/);
+    expect(streamPanel).toMatch(/onError\(error\)\s*\{[\s\S]*?scheduleRefreshCountdown\(\)/);
+    expect(streamPanel).toContain("refreshCountdown.value -= 1");
+    expect(streamPanel).not.toContain("refreshCountdown.value = AUTO_REFRESH_SECONDS;\n}");
+    expect(streamPanel).toContain("const refreshButtonLabel = computed");
+    expect(streamPanel).toContain("刷新（${refreshCountdown.value}s）");
+    expect(streamPanel).toContain('class="uvp-table-actions stream-row-actions"');
+    expect(streamPanel).toContain("uvp-table-action--detail");
+    expect(streamPanel).toContain("uvp-table-action--delete");
+    expect(streamPanel).toContain("强关");
+    expect(streamPanel).toContain('<template #icon><Eye :size="13" /></template>详情');
+    expect(streamPanel).toContain('<template #icon><PowerOff :size="13" /></template>强关');
+    expect(streamPanel).toContain("Modal.confirm({");
+    expect(streamPanel).toContain('forceCloseZLMStream(target.nodeId, target.media, preflight.fingerprint, "用户确认强关")');
+    expect(streamPanel).not.toContain(' :loading="loading" row-key="rowKey"');
+    expect(streamPanel).not.toContain('v-model:selected-keys="selectedKeys"');
+    expect(streamPanel).not.toContain("批量普通关闭");
+    expect(streamPanel).not.toContain("uvp-table-action--preview");
+    expect(streamPanel).not.toContain("openSnapshot");
+    expect(streamPanel).not.toContain("openPreview");
+    expect(streamPanel).not.toContain('class="row-actions"');
   });
 
   it("keeps the recording status select at the system filter width", () => {

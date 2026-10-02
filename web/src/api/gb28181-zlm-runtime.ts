@@ -256,6 +256,7 @@ export interface ZLMStreamOwnership {
 
 export interface ZLMStream {
   nodeId: number;
+  nodeName: string;
   nodeUuid: string;
   media: ZLMMediaIdentity;
   online: boolean;
@@ -286,6 +287,7 @@ export interface ZLMStreamPage extends ZLMPage<ZLMStream> {
 
 export interface ZLMStreamViewer {
   nodeId: number;
+  nodeName?: string;
   nodeUuid: string;
   media: ZLMMediaIdentity;
   identifier: string;
@@ -302,10 +304,13 @@ export interface ZLMStreamViewerPage extends ZLMPage<ZLMStreamViewer> {
   nodeUuid: string;
   target: ZLMMediaIdentity;
   asOf: string;
+  partial?: boolean;
+  errors?: Array<{ nodeId: number; code: string; message: string; retryable: boolean }>;
 }
 
 export interface ZLMNetworkSession {
   nodeId: number;
+  nodeName?: string;
   nodeUuid: string;
   id: string;
   peerIp: string;
@@ -321,6 +326,8 @@ export interface ZLMNetworkSessionPage extends ZLMPage<ZLMNetworkSession> {
   nodeId: number;
   nodeUuid: string;
   asOf: string;
+  partial?: boolean;
+  errors?: Array<{ nodeId: number; code: string; message: string; retryable: boolean }>;
 }
 
 export interface ZLMStreamClosePreflight {
@@ -487,10 +494,20 @@ export const listZLMNetworkSessions = (nodeId: number, query: ZLMNetworkSessionQ
     getOptions(signal, query)
   );
 
+export const listAllZLMNetworkSessions = (query: ZLMNetworkSessionQuery = {}, signal?: AbortSignal) =>
+  http.request<BaseResult<ZLMNetworkSessionPage>>("get", baseUrlApi("gb28181/zlm/sessions/network"), getOptions(signal, query));
+
 export const listZLMMediaViewers = (nodeId: number, media: ZLMMediaIdentity, page: ZLMPageQuery = {}, signal?: AbortSignal) =>
   http.request<BaseResult<ZLMStreamViewerPage>>(
     "get",
     baseUrlApi(`gb28181/zlm/nodes/${nodeId}/sessions/viewers`),
+    getOptions(signal, { ...mediaParams(media), ...page })
+  );
+
+export const listAllZLMMediaViewers = (media: ZLMMediaIdentity, page: ZLMPageQuery = {}, signal?: AbortSignal) =>
+  http.request<BaseResult<ZLMStreamViewerPage>>(
+    "get",
+    baseUrlApi("gb28181/zlm/sessions/viewers"),
     getOptions(signal, { ...mediaParams(media), ...page })
   );
 

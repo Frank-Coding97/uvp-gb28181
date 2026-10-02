@@ -355,7 +355,7 @@ function closeDetails() {
   selectedRecord.value = null;
 }
 
-function handleDrawerVisible(value: boolean) {
+function handleDialogVisible(value: boolean) {
   if (!value) {
     invalidateRequests();
     selectedRecord.value = null;
@@ -363,7 +363,7 @@ function handleDrawerVisible(value: boolean) {
   emit("update:visible", value);
 }
 
-function closeDrawer() {
+function closeDialog() {
   invalidateRequests();
   selectedRecord.value = null;
   emit("update:visible", false);
@@ -388,15 +388,15 @@ onBeforeUnmount(() => invalidateRequests());
 </script>
 
 <template>
-  <a-drawer
+  <a-modal
     :visible="visible"
-    :width="'min(760px, 100vw)'"
+    :width="'min(920px, 92vw)'"
     :footer="false"
     unmount-on-close
-    class="maintenance-records-drawer"
-    data-testid="maintenance-records-drawer"
-    @update:visible="handleDrawerVisible"
-    @cancel="closeDrawer"
+    modal-class="uvp-system-dialog maintenance-records-dialog"
+    data-testid="maintenance-records-dialog"
+    @update:visible="handleDialogVisible"
+    @cancel="closeDialog"
   >
     <template #title>
       <div class="records-title">
@@ -600,10 +600,14 @@ onBeforeUnmount(() => invalidateRequests());
         </template>
       </template>
     </div>
-  </a-drawer>
+  </a-modal>
 </template>
 
 <style scoped>
+:global(.maintenance-records-dialog .arco-modal-body) {
+  max-height: min(720px, calc(100vh - 180px));
+  overflow-y: auto;
+}
 .records-layout {
   display: flex;
   flex-direction: column;

@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
@@ -188,6 +189,7 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 	}
 
 	aggregated, received, sumNum, done := catalogAgg.add(resp)
+	catalogprogress.Default.Observe(resp.DeviceID, resp.SN, received, sumNum, done)
 	if done {
 		pipeline := getCatalogPipeline()
 		if pipeline != nil {
@@ -199,12 +201,16 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 				items = append(items, manscdpToCatalogItem(it))
 			}
 			if e := pipeline.Ingest(ctx, catalog.Sender{SourceDeviceID: resp.DeviceID}, items); e != nil {
+				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, e)
 				logger.Warn("Catalog Pipeline.Ingest 失败(部分通道未入库)",
 					zap.String("event", "gb28181.catalog.ingest_failed"),
 					zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 					logging.Error(e))
+			} else {
+				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
 			}
 		} else {
+			catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
 			logger.Debug("CatalogPipeline 不可用,跳过 catalog 入库",
 				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
 				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))

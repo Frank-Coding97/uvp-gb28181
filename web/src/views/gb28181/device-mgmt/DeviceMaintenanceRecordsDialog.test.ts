@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeviceVO, MaintenanceOperation, UpgradeOperation } from "./api";
-import DeviceMaintenanceRecordsDrawer from "./DeviceMaintenanceRecordsDrawer.vue";
+import DeviceMaintenanceRecordsDialog from "./DeviceMaintenanceRecordsDialog.vue";
 
 const api = vi.hoisted(() => ({
   listMaintenanceOperations: vi.fn(),
@@ -74,14 +74,15 @@ function page<T>(list: T[], total = list.length, current = 1) {
   return { code: 0, message: "", data: { list, total, page: current, pageSize: 10 } };
 }
 
-function mountDrawer(props: Record<string, unknown> = {}) {
-  return mount(DeviceMaintenanceRecordsDrawer, {
+function mountDialog(props: Record<string, unknown> = {}) {
+  return mount(DeviceMaintenanceRecordsDialog, {
     props: { visible: true, device: device(), ...props },
     global: {
       stubs: {
-        "a-drawer": {
-          props: ["visible", "width"],
-          template: "<section v-if='visible' data-testid='maintenance-records-drawer'><slot name='title' /><slot /></section>"
+        "a-modal": {
+          props: ["visible", "width", "modalClass"],
+          template:
+            "<section v-if='visible' data-testid='maintenance-records-dialog' :data-modal-class='modalClass'><slot name='title' /><slot /></section>"
         },
         "a-button": {
           props: ["disabled", "loading"],
@@ -102,16 +103,20 @@ async function settle<T extends VueWrapper<any>>(wrapper: T) {
   await wrapper.vm.$nextTick();
 }
 
-describe("DeviceMaintenanceRecordsDrawer", () => {
+describe("DeviceMaintenanceRecordsDialog", () => {
   beforeEach(() => {
     api.listMaintenanceOperations.mockReset().mockResolvedValue(page([rebootOperation()], 1));
     api.listFirmwareUpgrades.mockReset().mockResolvedValue(page([], 0));
   });
 
   it("loads only the reboot page first and renders a read-only summary", async () => {
-    const wrapper = mountDrawer();
+    const wrapper = mountDialog();
     await settle(wrapper);
 
+    expect(wrapper.find("[data-testid='maintenance-records-dialog']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='maintenance-records-dialog']").attributes("data-modal-class")).toContain(
+      "uvp-system-dialog"
+    );
     expect(api.listMaintenanceOperations).toHaveBeenCalledWith(31, { page: 1, pageSize: 10 });
     expect(api.listFirmwareUpgrades).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("重启设备");
@@ -125,7 +130,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
   it("keeps upgrade paging independent from reboot paging", async () => {
     api.listMaintenanceOperations.mockResolvedValue(page([rebootOperation()], 21));
     api.listFirmwareUpgrades.mockResolvedValue(page([upgradeOperation()], 21));
-    const wrapper = mountDrawer();
+    const wrapper = mountDialog();
     await settle(wrapper);
 
     await wrapper.get("[data-testid='maintenance-records-tab-upgrade']").trigger("click");
@@ -140,12 +145,12 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
 
   it("opens first-page operation deep links and reports an accurate miss", async () => {
     api.listFirmwareUpgrades.mockResolvedValue(page([upgradeOperation()], 18));
-    const wrapper = mountDrawer({ initialType: "upgrade", operationId: "upgrade-op-1" });
+    const wrapper = mountDialog({ initialType: "upgrade", operationId: "upgrade-op-1" });
     await settle(wrapper);
     expect(wrapper.find("[data-testid='maintenance-record-detail']").exists()).toBe(true);
     expect(wrapper.text()).toContain("upgrade-op-1");
 
-    const missWrapper = mountDrawer({ initialType: "upgrade", operationId: "missing-op" });
+    const missWrapper = mountDialog({ initialType: "upgrade", operationId: "missing-op" });
     await settle(missWrapper);
     expect(missWrapper.text()).toContain("未在当前页找到操作");
     expect(missWrapper.find("[data-testid='maintenance-record-detail']").exists()).toBe(false);
@@ -162,7 +167,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
         })
       ])
     );
-    const wrapper = mountDrawer({ initialType: "upgrade" });
+    const wrapper = mountDialog({ initialType: "upgrade" });
     await settle(wrapper);
     await wrapper.get("[data-testid='maintenance-record-upgrade-row']").trigger("click");
 
@@ -187,7 +192,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
         })
     );
     api.listMaintenanceOperations.mockResolvedValueOnce(page([rebootOperation({ operationId: "new-op", actorId: 84 })]));
-    const wrapper = mountDrawer();
+    const wrapper = mountDialog();
     await wrapper.setProps({ device: device(32) });
     await settle(wrapper);
     resolveOld(page([rebootOperation({ operationId: "old-op" })]));
@@ -206,7 +211,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
           resolveUpgrade = resolve;
         })
     );
-    const wrapper = mountDrawer({ initialType: "upgrade", operationId: "upgrade-op-1" });
+    const wrapper = mountDialog({ initialType: "upgrade", operationId: "upgrade-op-1" });
     await wrapper.get("[data-testid='maintenance-records-tab-reboot']").trigger("click");
     resolveUpgrade(page([upgradeOperation()]));
     await settle(wrapper);
@@ -217,7 +222,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
 
   it("shows a retry state and recovers through GET only", async () => {
     api.listMaintenanceOperations.mockRejectedValueOnce(new Error("网络暂不可用"));
-    const wrapper = mountDrawer();
+    const wrapper = mountDialog();
     await settle(wrapper);
     expect(wrapper.get("[role='alert']").text()).toContain("网络暂不可用");
 
@@ -229,7 +234,7 @@ describe("DeviceMaintenanceRecordsDrawer", () => {
   });
   it("keeps the selected record in place when refreshing its result", async () => {
     api.listFirmwareUpgrades.mockResolvedValue(page([upgradeOperation({ status: "accepted" })]));
-    const wrapper = mountDrawer({ initialType: "upgrade" });
+    const wrapper = mountDialog({ initialType: "upgrade" });
     await settle(wrapper);
     await wrapper.get("[data-testid='maintenance-record-upgrade-row']").trigger("click");
     api.listFirmwareUpgrades.mockResolvedValue(page([upgradeOperation({ status: "succeeded", currentFirmware: "V5.9.0" })]));

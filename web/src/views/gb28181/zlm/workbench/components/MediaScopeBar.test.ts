@@ -46,6 +46,7 @@ describe("MediaScopeBar", () => {
     const wrapper = mount(MediaScopeBar, { props: { modelValue: "all", nodes, allowAll: true } });
 
     expect(wrapper.get("select[aria-label='节点范围']").text()).toContain("全部节点");
+    expect(wrapper.text()).not.toContain("聚合 2 个可见节点");
     expect(wrapper.text()).toContain("备节点 · 离线");
     await wrapper.get("[aria-label='节点范围']").setValue("2");
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([2]);

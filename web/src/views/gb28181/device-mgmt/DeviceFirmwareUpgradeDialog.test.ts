@@ -1,7 +1,7 @@
 import { defineComponent, h } from "vue";
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
-import DeviceFirmwareUpgradeDrawer from "./DeviceFirmwareUpgradeDrawer.vue";
+import DeviceFirmwareUpgradeDialog from "./DeviceFirmwareUpgradeDialog.vue";
 
 const device = {
   id: 31,
@@ -37,28 +37,27 @@ const PanelStub = defineComponent({
   }
 });
 
-function mountDrawer(attrs: Record<string, unknown> = {}) {
-  return mount(DeviceFirmwareUpgradeDrawer, {
+function mountDialog(attrs: Record<string, unknown> = {}) {
+  return mount(DeviceFirmwareUpgradeDialog, {
     props: { visible: true, device, canUpgrade: true, rebootBusy: false, ...attrs },
     global: {
-      components: {
-        "a-drawer": {
-          props: ["visible", "width", "closable", "maskClosable"],
-          template:
-            "<div v-if='visible' data-testid='drawer-stub' :data-width='width' :data-closable='closable' :data-mask-closable='maskClosable'><slot name='title' /><slot /><button data-testid='drawer-cancel' @click='$emit(`cancel`)'>close</button></div>"
-        }
-      },
       stubs: {
+        "a-modal": {
+          props: ["visible", "width", "closable", "maskClosable", "modalClass"],
+          template:
+            "<div v-if='visible' data-testid='dialog-stub' :data-width='width' :data-closable='closable' :data-mask-closable='maskClosable' :data-modal-class='modalClass'><slot name='title' /><slot /><button data-testid='dialog-cancel' @click='$emit(`cancel`)'>close</button></div>"
+        },
         DeviceFirmwareUpgradePanel: PanelStub
       }
     }
   });
 }
 
-describe("DeviceFirmwareUpgradeDrawer", () => {
+describe("DeviceFirmwareUpgradeDialog", () => {
   it("renders the device/version title and constrained responsive width", () => {
-    const wrapper = mountDrawer();
-    expect(wrapper.attributes("data-width")).toBe("min(680px, 100vw)");
+    const wrapper = mountDialog();
+    expect(wrapper.attributes("data-width")).toBe("min(760px, calc(100vw - 32px))");
+    expect(wrapper.attributes("data-modal-class")).toContain("uvp-system-dialog");
     expect(wrapper.text()).toContain("北门录像机 · 固件升级");
     expect(wrapper.text()).toContain("当前版本 V5.8.0");
     expect(wrapper.get("[data-testid='firmware-upgrade-device-identity']").text()).toContain("34020000001320000001");
@@ -68,19 +67,19 @@ describe("DeviceFirmwareUpgradeDrawer", () => {
   });
 
   it("forwards visibility and operation events while only blocking close during POST", async () => {
-    const wrapper = mountDrawer();
+    const wrapper = mountDialog();
     const panel = wrapper.getComponent(PanelStub);
     await panel.get("[data-testid='panel-emit-busy']").trigger("click");
     expect(wrapper.emitted("busy")).toEqual([[true]]);
     await panel.get("[data-testid='panel-view-records']").trigger("click");
     expect(wrapper.emitted("viewRecords")).toEqual([["op-1"]]);
 
-    await wrapper.get("[data-testid='drawer-cancel']").trigger("click");
+    await wrapper.get("[data-testid='dialog-cancel']").trigger("click");
     expect(wrapper.emitted("update:visible")).toEqual([[false]]);
 
     await panel.get("[data-testid='panel-block-close']").trigger("click");
     expect(wrapper.attributes("data-closable")).toBe("false");
-    await wrapper.get("[data-testid='drawer-cancel']").trigger("click");
+    await wrapper.get("[data-testid='dialog-cancel']").trigger("click");
     expect(wrapper.emitted("update:visible")).toHaveLength(1);
     wrapper.unmount();
   });

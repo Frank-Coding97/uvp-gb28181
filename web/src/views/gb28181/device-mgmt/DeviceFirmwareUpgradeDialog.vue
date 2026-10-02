@@ -52,27 +52,27 @@ function setCloseBlocked(value: boolean) {
 </script>
 
 <template>
-  <a-drawer
+  <a-modal
     :visible="visible"
-    :width="'min(680px, 100vw)'"
+    :width="'min(760px, calc(100vw - 32px))'"
     :closable="!closeBlocked"
     :mask-closable="!closeBlocked"
     :footer="false"
-    class="firmware-upgrade-drawer"
-    data-testid="firmware-upgrade-drawer"
+    modal-class="uvp-system-dialog firmware-upgrade-dialog"
+    data-testid="firmware-upgrade-dialog"
     @cancel="close"
     @update:visible="updateVisible"
   >
     <template #title>
-      <div class="upgrade-drawer-title">
-        <span class="upgrade-drawer-icon"><Upload :size="17" /></span>
+      <div class="upgrade-dialog-title">
+        <span class="upgrade-dialog-icon"><Upload :size="17" /></span>
         <div>
           <strong>{{ title }}</strong>
           <small>当前版本 {{ currentFirmware }}</small>
         </div>
       </div>
     </template>
-    <div class="upgrade-drawer-identity" data-testid="firmware-upgrade-device-identity">
+    <div class="upgrade-dialog-identity" data-testid="firmware-upgrade-device-identity">
       <div>
         <span>设备编码</span><strong class="mono">{{ device?.deviceId || "-" }}</strong>
       </div>
@@ -96,25 +96,21 @@ function setCloseBlocked(value: boolean) {
       @submission-uncertain="emit('submissionUncertain')"
       @close-blocked="setCloseBlocked"
     />
-  </a-drawer>
+  </a-modal>
 </template>
 
 <style scoped>
-.firmware-upgrade-drawer :deep(.arco-drawer-header) {
-  background: var(--uvp-panel-bg);
-  border-bottom-color: var(--uvp-panel-border);
+:global(.firmware-upgrade-dialog .arco-modal-body) {
+  max-height: min(760px, calc(100vh - 180px));
+  overflow-y: auto;
 }
-.firmware-upgrade-drawer :deep(.arco-drawer-body) {
-  padding: 16px;
-  background: var(--uvp-page-bg);
-}
-.upgrade-drawer-title {
+.upgrade-dialog-title {
   display: flex;
   gap: 10px;
   align-items: center;
   min-width: 0;
 }
-.upgrade-drawer-icon {
+.upgrade-dialog-icon {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
@@ -124,26 +120,26 @@ function setCloseBlocked(value: boolean) {
   background: color-mix(in srgb, var(--uvp-brand) 12%, transparent);
   border-radius: 8px;
 }
-.upgrade-drawer-title > div {
+.upgrade-dialog-title > div {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
-.upgrade-drawer-title strong {
+.upgrade-dialog-title strong {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 15px;
   color: var(--uvp-text-primary);
   white-space: nowrap;
 }
-.upgrade-drawer-title small {
+.upgrade-dialog-title small {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
 }
-.upgrade-drawer-identity {
+.upgrade-dialog-identity {
   display: grid;
   grid-template-columns: 1.25fr 0.75fr 1fr;
   gap: 8px;
@@ -153,26 +149,26 @@ function setCloseBlocked(value: boolean) {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 9px;
 }
-.upgrade-drawer-identity > div {
+.upgrade-dialog-identity > div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
-.upgrade-drawer-identity span {
+.upgrade-dialog-identity span {
   font-size: 11px;
   color: var(--uvp-text-tertiary);
 }
-.upgrade-drawer-identity strong {
+.upgrade-dialog-identity strong {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
-.upgrade-drawer-identity strong.online {
+.upgrade-dialog-identity strong.online {
   color: var(--uvp-brand-cyan);
 }
-.upgrade-drawer-identity strong.offline {
+.upgrade-dialog-identity strong.offline {
   color: var(--uvp-warning);
 }
 .mono {
@@ -180,16 +176,13 @@ function setCloseBlocked(value: boolean) {
 }
 
 @media (width <= 640px) {
-  .firmware-upgrade-drawer :deep(.arco-drawer-body) {
-    padding: 10px;
-  }
-  .upgrade-drawer-identity {
+  .upgrade-dialog-identity {
     grid-template-columns: 1fr 1fr;
   }
-  .upgrade-drawer-identity > div:first-child {
+  .upgrade-dialog-identity > div:first-child {
     grid-column: 1 / -1;
   }
-  .upgrade-drawer-identity strong {
+  .upgrade-dialog-identity strong {
     overflow-wrap: anywhere;
     white-space: normal;
   }

@@ -66,12 +66,15 @@ describe("stream management state", () => {
     });
   });
 
-  it("reuses PlayWindow and typed preview/snapshot/close APIs without direct ZLM access", () => {
+  it("keeps stream details and typed force-close APIs behind the backend", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/StreamPanel.vue"), "utf8");
-    expect(source).toContain("PlayWindow");
-    expect(source).toContain("issueZLMPreviewGrant");
-    expect(source).toContain("fetchZLMStreamSnapshot");
-    expect(source).toContain("ZLMStreamCloseDialog");
+    expect(source).toContain("preflightCloseZLMStream");
+    expect(source).toContain("forceCloseZLMStream");
+    expect(source).toContain("Modal.confirm");
+    expect(source).toContain("强关");
+    expect(source).not.toContain("PlayWindow");
+    expect(source).not.toContain("issueZLMPreviewGrant");
+    expect(source).not.toContain("fetchZLMStreamSnapshot");
     expect(source).not.toContain("index/api");
     expect(source).not.toContain("fetch(");
     expect(source).not.toContain("http.request");

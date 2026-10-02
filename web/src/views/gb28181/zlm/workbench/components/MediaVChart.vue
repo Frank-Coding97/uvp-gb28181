@@ -58,7 +58,7 @@ const stateText = computed(() => {
   if (effectiveStatus.value === "partial") return props.statusText || "当前为部分采样数据";
   return props.statusText;
 });
-const chartAriaLabel = computed(() => `${props.title}，${props.summary || stateText.value}`);
+const chartAriaLabel = computed(() => `${props.title}${props.summary ? `，${props.summary}` : ""}`);
 
 // VChart renders to Canvas, so CSS custom properties must be resolved first.
 const resolvedSpec = computed(() => {
@@ -203,7 +203,8 @@ onBeforeUnmount(() => {
           <span v-if="asOf">最新 {{ asOf }}</span>
         </p>
       </div>
-      <div v-if="legendLabel || effectiveStatus === 'partial'" class="media-vchart__header-aside">
+      <div v-if="$slots['header-actions'] || legendLabel || effectiveStatus === 'partial'" class="media-vchart__header-aside">
+        <div v-if="$slots['header-actions']" class="media-vchart__header-actions"><slot name="header-actions" /></div>
         <span v-if="legendLabel" class="media-vchart__legend"><i aria-hidden="true" />{{ legendLabel }}</span>
         <span v-if="effectiveStatus === 'partial'" class="media-vchart__badge">部分数据</span>
       </div>
@@ -216,7 +217,7 @@ onBeforeUnmount(() => {
       role="img"
       tabindex="0"
       :aria-label="chartAriaLabel"
-      :aria-describedby="summaryId"
+      :aria-describedby="showSummary || summary ? summaryId : undefined"
     />
     <div v-else class="media-vchart__state" role="status" :aria-label="`${title}：${stateText}`">
       <span class="media-vchart__state-icon" aria-hidden="true">{{
@@ -224,7 +225,12 @@ onBeforeUnmount(() => {
       }}</span>
       <strong>{{ stateText }}</strong>
     </div>
-    <p :id="summaryId" class="media-vchart__summary" :class="{ 'media-vchart__summary--sr-only': !showSummary }">
+    <p
+      v-if="showSummary || summary"
+      :id="summaryId"
+      class="media-vchart__summary"
+      :class="{ 'media-vchart__summary--sr-only': !showSummary }"
+    >
       {{ summary || stateText }}
     </p>
     <p v-if="warning" class="media-vchart__warning" role="status">{{ warning }}</p>
@@ -266,6 +272,13 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: center;
 }
+.media-vchart__header-actions {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--zlm-fill-2, var(--color-fill-2));
+  border-radius: var(--zlm-radius-md, 6px);
+}
 .media-vchart__legend {
   display: inline-flex;
   gap: 6px;
@@ -290,7 +303,9 @@ onBeforeUnmount(() => {
 }
 .media-vchart__canvas {
   width: 100%;
-  min-height: 220px;
+  height: 220px;
+  min-height: 0;
+  overflow: hidden;
 }
 .media-vchart__canvas:focus-visible {
   outline: 2px solid var(--zlm-brand-500, rgb(var(--primary-6)));
