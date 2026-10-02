@@ -7,7 +7,12 @@ const api = vi.hoisted(() => ({
   upgradeDeviceFirmware: vi.fn()
 }));
 
+const firmwareRepoApi = vi.hoisted(() => ({
+  listFirmware: vi.fn()
+}));
+
 vi.mock("./api", () => api);
+vi.mock("../firmware-repo/api", () => firmwareRepoApi);
 
 const device = {
   id: 31,
@@ -68,6 +73,23 @@ function mountPanel(props: Record<string, unknown> = {}, attrs: Record<string, u
           props: ["modelValue", "disabled"],
           template: "<input :value='modelValue' :disabled='disabled' @input='$emit(`update:modelValue`, $event.target.value)' />"
         },
+        "a-radio-group": {
+          props: ["modelValue"],
+          template: "<div @click='$emit(`update:modelValue`, \"manual\")'><slot /></div>"
+        },
+        "a-radio": {
+          props: ["value"],
+          template: "<span><slot /></span>"
+        },
+        "a-select": {
+          props: ["modelValue", "disabled", "loading"],
+          template:
+            "<select :value='modelValue' :disabled='disabled' @change='$emit(`update:modelValue`, $event.target.value)'><slot /></select>"
+        },
+        "a-option": {
+          props: ["value", "label"],
+          template: "<option :value='value'><slot /></option>"
+        },
         "a-button": {
           props: ["disabled", "loading"],
           template:
@@ -82,6 +104,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
   beforeEach(() => {
     api.listFirmwareUpgrades.mockReset().mockResolvedValue(response());
     api.upgradeDeviceFirmware.mockReset().mockResolvedValue({ code: 0, message: "", data: operation() });
+    firmwareRepoApi.listFirmware.mockReset().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { list: [], total: 0 }
+    });
   });
 
   afterEach(() => {
@@ -91,6 +118,10 @@ describe("DeviceFirmwareUpgradePanel", () => {
   it("prefills the vendor and shows field-level validation beside invalid input", async () => {
     const wrapper = mountPanel();
     await flushPromises();
+
+    // 切换到手填 URL 模式
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");
     expect((inputs[1].element as HTMLInputElement).value).toBe("海康");
@@ -107,6 +138,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
     const onOperationUpdated = vi.fn();
     const wrapper = mountPanel({}, { onOperationUpdated });
     await flushPromises();
+
+    // 切换到手填 URL 模式
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
+
     const inputs = wrapper.findAll("input");
     await inputs[0].setValue("V5.9.0");
     await inputs[2].setValue("http://192.0.2.50/firmware/V5.9.0.bin");
@@ -154,6 +190,24 @@ describe("DeviceFirmwareUpgradePanel", () => {
     wrapper.unmount();
   });
 
+  it("syncs the reported firmware when a running upgrade finishes while the dialog is closed", async () => {
+    const accepted = operation();
+    const succeeded = operation({ status: "succeeded", currentFirmware: "V5.9.0" });
+    api.listFirmwareUpgrades.mockResolvedValueOnce(response([accepted])).mockResolvedValueOnce(response([succeeded]));
+    const onFirmwareUpdated = vi.fn();
+    const wrapper = mountPanel({}, { onFirmwareUpdated });
+    await flushPromises();
+
+    await wrapper.setProps({ visible: false });
+    await wrapper.setProps({ visible: true });
+    await flushPromises();
+
+    expect(onFirmwareUpdated).toHaveBeenCalledOnce();
+    expect(onFirmwareUpdated).toHaveBeenCalledWith("V5.9.0");
+    expect(wrapper.get("[data-testid='firmware-upgrade-tracking']").text()).toContain("升级成功");
+    wrapper.unmount();
+  });
+
   it("recovers an expired operation as unknown and does not expose a repeat submission", async () => {
     api.listFirmwareUpgrades.mockResolvedValue(response([operation({ deadlineAt: "2020-01-01T00:00:00Z" })]));
     const onBusy = vi.fn();
@@ -194,6 +248,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
     const onSubmissionUncertain = vi.fn();
     const wrapper = mountPanel({}, { onSubmissionUncertain });
     await flushPromises();
+
+    // 切换到手填 URL 模式
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
+
     const inputs = wrapper.findAll("input");
     await inputs[0].setValue("V5.9.0");
     await inputs[2].setValue("https://192.0.2.50/firmware/V5.9.0.bin");
@@ -219,6 +278,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
     const onFirmwareUpdated = vi.fn();
     const wrapper = mountPanel({}, { onFirmwareUpdated });
     await flushPromises();
+
+    // 切换到手填 URL 模式
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
+
     const inputs = wrapper.findAll("input");
     await inputs[0].setValue("V5.9.0");
     await inputs[2].setValue("https://192.0.2.50/firmware/V5.9.0.bin");
@@ -230,6 +294,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
     expect(wrapper.get("[data-testid='firmware-upgrade-new']").text()).toContain("准备新升级");
     await wrapper.get("[data-testid='firmware-upgrade-new']").trigger("click");
     expect(wrapper.find("[data-testid='firmware-upgrade-tracking']").exists()).toBe(false);
+
+    // 点击"准备新升级"后重新切换到手填 URL 模式以验证表单重置
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
+
     expect((wrapper.findAll("input")[1].element as HTMLInputElement).value).toBe("海康");
     wrapper.unmount();
   });
@@ -254,6 +323,11 @@ describe("DeviceFirmwareUpgradePanel", () => {
   it("shows a new interlock during confirmation and does not submit", async () => {
     const wrapper = mountPanel();
     await flushPromises();
+
+    // 切换到手填 URL 模式
+    wrapper.vm.upgradeMode = "manual";
+    await wrapper.vm.$nextTick();
+
     const inputs = wrapper.findAll("input");
     await inputs[0].setValue("V5.9.0");
     await inputs[2].setValue("http://192.0.2.50/firmware.bin");

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { AlertTriangle, CircleCheck, CircleX, Clock3, Loader2, Upload } from "@lucide/vue";
 import { Message } from "@arco-design/web-vue";
 import {
@@ -9,10 +9,12 @@ import {
   type FirmwareUpgradeRequest,
   type UpgradeOperation
 } from "./api";
+import { listFirmware, type FirmwareRepository } from "../firmware-repo/api";
 
-type UpgradePayload = Pick<FirmwareUpgradeRequest, "firmware" | "fileUrl" | "manufacturer">;
+type UpgradePayload = Pick<FirmwareUpgradeRequest, "firmwareId" | "firmware" | "fileUrl" | "manufacturer">;
 type UpgradePhase = "prepare" | "confirm" | "tracking";
-type FieldName = keyof UpgradePayload;
+type FieldName = "firmware" | "fileUrl" | "manufacturer" | "firmwareId";
+type UpgradeMode = "repository" | "manual";
 
 const props = withDefaults(
   defineProps<{
@@ -54,8 +56,11 @@ const confirmVisible = ref(false);
 const pendingPayload = ref<UpgradePayload | null>(null);
 const submittedPayload = ref<UpgradePayload | null>(null);
 const lastFirmwareEventOperationId = ref("");
-const form = reactive<UpgradePayload>({ firmware: "", fileUrl: "", manufacturer: "" });
-const fieldErrors = reactive<Record<FieldName, string>>({ firmware: "", fileUrl: "", manufacturer: "" });
+const upgradeMode = ref<UpgradeMode>("repository");
+const firmwareList = ref<FirmwareRepository[]>([]);
+const firmwareLoading = ref(false);
+const form = reactive<UpgradePayload>({ firmwareId: "", firmware: "", fileUrl: "", manufacturer: "" });
+const fieldErrors = reactive<Record<FieldName, string>>({ firmwareId: "", firmware: "", fileUrl: "", manufacturer: "" });
 
 let requestVersion = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -73,7 +78,12 @@ const phase = computed<UpgradePhase>(() => {
   if (submitPending.value || activeOperation.value || uncertainSubmission.value) return "tracking";
   return confirmVisible.value && pendingPayload.value ? "confirm" : "prepare";
 });
-const formReady = computed(() => Boolean(form.firmware.trim() && form.fileUrl.trim() && form.manufacturer.trim()));
+const formReady = computed(() => {
+  if (upgradeMode.value === "repository") {
+    return Boolean(form.firmwareId?.trim());
+  }
+  return Boolean(form.firmware.trim() && form.fileUrl.trim() && form.manufacturer.trim());
+});
 const unavailableReason = computed(() => {
   if (props.blockedReason?.trim()) return props.blockedReason.trim();
   if (!props.canUpgrade) return "当前账号没有设备升级权限。";
@@ -122,6 +132,22 @@ function clearPollTimer() {
   if (pollTimer !== null) {
     clearTimeout(pollTimer);
     pollTimer = null;
+  }
+}
+
+async function loadFirmwareList() {
+  firmwareLoading.value = true;
+  try {
+    const result = await listFirmware({ page: 1, pageSize: 100, status: "published" });
+    if (result.code === 0) {
+      firmwareList.value = result.data.list || [];
+    } else {
+      Message.error(result.message || "加载固件列表失败");
+    }
+  } catch (error: any) {
+    Message.error(error?.message || "加载固件列表失败");
+  } finally {
+    firmwareLoading.value = false;
   }
 }
 
@@ -309,6 +335,10 @@ async function loadCurrentOperation(version: number, deviceId: number) {
       pollTimedOut.value = statusKey(localOperation.status) === "unknown";
       uncertainSubmission.value = pollTimedOut.value;
       if (isActiveStatus(localOperation.status)) schedulePoll(localOperation, version, deviceId);
+      else {
+        submitPending.value = false;
+        emitCompletedFirmware(localOperation);
+      }
     } else if (!activeOperation.value || isActiveStatus(activeOperation.value.status) || uncertainSubmission.value) {
       if (!activeOperation.value || !isActiveStatus(activeOperation.value.status)) recoverOperation(operations);
       else if (operations.some(item => item.operationId === activeOperation.value?.operationId)) recoverOperation(operations);
@@ -324,6 +354,8 @@ async function loadCurrentOperation(version: number, deviceId: number) {
 }
 
 function resetForDevice(device: DeviceVO | null) {
+  upgradeMode.value = "repository";
+  form.firmwareId = "";
   form.firmware = "";
   form.fileUrl = "";
   form.manufacturer = device?.manufacturer?.trim() || "";
@@ -341,13 +373,21 @@ function resetForDevice(device: DeviceVO | null) {
 }
 
 function clearFieldErrors() {
+  fieldErrors.firmwareId = "";
   fieldErrors.firmware = "";
   fieldErrors.fileUrl = "";
   fieldErrors.manufacturer = "";
 }
 
 function validateField(field: FieldName) {
-  const value = form[field].trim();
+  if (upgradeMode.value === "repository") {
+    if (field === "firmwareId") {
+      fieldErrors.firmwareId = form.firmwareId?.trim() ? "" : "请选择固件";
+    }
+    return;
+  }
+
+  const value = form[field]?.trim() || "";
   if (field === "firmware") fieldErrors.firmware = value ? "" : "请输入目标固件版本";
   if (field === "manufacturer") fieldErrors.manufacturer = value ? "" : "请输入设备厂商";
   if (field === "fileUrl") {
@@ -358,6 +398,11 @@ function validateField(field: FieldName) {
 }
 
 function validateForm() {
+  if (upgradeMode.value === "repository") {
+    validateField("firmwareId");
+    return !fieldErrors.firmwareId;
+  }
+
   validateField("firmware");
   validateField("manufacturer");
   validateField("fileUrl");
@@ -376,11 +421,23 @@ function isHttpUrl(value: string) {
 function requestUpgrade() {
   if (submitDisabled.value || !validateForm()) return;
   submitError.value = "";
-  pendingPayload.value = {
-    firmware: form.firmware.trim(),
-    fileUrl: form.fileUrl.trim(),
-    manufacturer: form.manufacturer.trim()
-  };
+
+  if (upgradeMode.value === "repository") {
+    const selectedFirmware = firmwareList.value.find(f => f.firmwareId === form.firmwareId);
+    pendingPayload.value = {
+      firmwareId: form.firmwareId?.trim(),
+      firmware: selectedFirmware?.version || "",
+      fileUrl: "",
+      manufacturer: selectedFirmware?.manufacturer || ""
+    };
+  } else {
+    pendingPayload.value = {
+      firmwareId: "",
+      firmware: form.firmware.trim(),
+      fileUrl: form.fileUrl.trim(),
+      manufacturer: form.manufacturer.trim()
+    };
+  }
   confirmVisible.value = true;
 }
 
@@ -462,6 +519,8 @@ function startNewUpgrade() {
   submittedPayload.value = null;
   confirmVisible.value = false;
   pendingPayload.value = null;
+  upgradeMode.value = "repository";
+  form.firmwareId = "";
   form.firmware = "";
   form.fileUrl = "";
   form.manufacturer = currentDevice.value?.manufacturer?.trim() || "";
@@ -504,6 +563,10 @@ watch(
   { deep: true }
 );
 
+onMounted(() => {
+  void loadFirmwareList();
+});
+
 onBeforeUnmount(() => {
   invalidateRequests();
   // Do not emit busy=false here: a parent may keep the operation lock after a drawer is unmounted.
@@ -522,39 +585,80 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="phase === 'prepare'" class="upgrade-form" data-testid="firmware-upgrade-form">
-      <label data-testid="firmware-field">
-        <span>目标固件版本</span>
-        <a-input
-          v-model="form.firmware"
-          placeholder="例如 V5.9.0"
-          :disabled="submitDisabled"
-          allow-clear
-          @blur="validateField('firmware')"
-        />
-        <small aria-live="polite" class="field-error" data-testid="firmware-error">{{ fieldErrors.firmware }}</small>
-      </label>
-      <label data-testid="manufacturer-field">
-        <span>设备厂商</span>
-        <a-input
-          v-model="form.manufacturer"
-          placeholder="请输入升级包对应厂商"
-          :disabled="submitDisabled"
-          allow-clear
-          @blur="validateField('manufacturer')"
-        />
-        <small aria-live="polite" class="field-error" data-testid="manufacturer-error">{{ fieldErrors.manufacturer }}</small>
-      </label>
-      <label class="upgrade-url-field" data-testid="file-url-field">
-        <span>升级文件地址</span>
-        <a-input
-          v-model="form.fileUrl"
-          placeholder="设备可访问的 HTTP 或 HTTPS 地址"
-          :disabled="submitDisabled"
-          allow-clear
-          @blur="validateField('fileUrl')"
-        />
-        <small aria-live="polite" class="field-error" data-testid="file-url-error">{{ fieldErrors.fileUrl }}</small>
-      </label>
+      <div class="upgrade-mode-switch">
+        <a-radio-group v-model="upgradeMode" type="button" size="small">
+          <a-radio value="repository">固件仓库</a-radio>
+          <a-radio value="manual">手填 URL</a-radio>
+        </a-radio-group>
+      </div>
+
+      <template v-if="upgradeMode === 'repository'">
+        <label data-testid="firmware-select-field" class="upgrade-firmware-select">
+          <span>选择固件</span>
+          <a-select
+            v-model="form.firmwareId"
+            placeholder="请选择固件"
+            :disabled="submitDisabled"
+            :loading="firmwareLoading"
+            allow-clear
+            allow-search
+            @change="validateField('firmwareId')"
+          >
+            <a-option
+              v-for="firmware in firmwareList"
+              :key="firmware.firmwareId"
+              :value="firmware.firmwareId"
+              :label="`${firmware.version} - ${firmware.manufacturer}`"
+            >
+              <div class="firmware-option">
+                <div class="firmware-option-main">
+                  <span class="firmware-version">{{ firmware.version }}</span>
+                  <span class="firmware-manufacturer">{{ firmware.manufacturer }}</span>
+                </div>
+                <div v-if="firmware.modelPattern" class="firmware-model">{{ firmware.modelPattern }}</div>
+              </div>
+            </a-option>
+          </a-select>
+          <small aria-live="polite" class="field-error" data-testid="firmware-id-error">{{ fieldErrors.firmwareId }}</small>
+        </label>
+      </template>
+
+      <template v-else>
+        <label data-testid="firmware-field">
+          <span>目标固件版本</span>
+          <a-input
+            v-model="form.firmware"
+            placeholder="例如 V5.9.0"
+            :disabled="submitDisabled"
+            allow-clear
+            @blur="validateField('firmware')"
+          />
+          <small aria-live="polite" class="field-error" data-testid="firmware-error">{{ fieldErrors.firmware }}</small>
+        </label>
+        <label data-testid="manufacturer-field">
+          <span>设备厂商</span>
+          <a-input
+            v-model="form.manufacturer"
+            placeholder="请输入升级包对应厂商"
+            :disabled="submitDisabled"
+            allow-clear
+            @blur="validateField('manufacturer')"
+          />
+          <small aria-live="polite" class="field-error" data-testid="manufacturer-error">{{ fieldErrors.manufacturer }}</small>
+        </label>
+        <label class="upgrade-url-field" data-testid="file-url-field">
+          <span>升级文件地址</span>
+          <a-input
+            v-model="form.fileUrl"
+            placeholder="设备可访问的 HTTP 或 HTTPS 地址"
+            :disabled="submitDisabled"
+            allow-clear
+            @blur="validateField('fileUrl')"
+          />
+          <small aria-live="polite" class="field-error" data-testid="file-url-error">{{ fieldErrors.fileUrl }}</small>
+        </label>
+      </template>
+
       <div class="upgrade-submit-wrap">
         <a-button
           data-testid="firmware-upgrade-submit"
@@ -595,11 +699,17 @@ onBeforeUnmount(() => {
             <dd>{{ pendingPayload.manufacturer }}</dd>
           </div>
           <div>
+            <dt>来源</dt>
+            <dd>{{ pendingPayload.firmwareId ? "固件仓库" : "手填 URL" }}</dd>
+          </div>
+          <div>
             <dt>影响</dt>
             <dd>升级期间设备及其通道可能短暂离线</dd>
           </div>
         </dl>
-        <span class="upgrade-confirm-url" :title="pendingPayload.fileUrl">文件地址：{{ pendingPayload.fileUrl }}</span>
+        <span v-if="pendingPayload.fileUrl" class="upgrade-confirm-url" :title="pendingPayload.fileUrl"
+          >文件地址：{{ pendingPayload.fileUrl }}</span
+        >
       </div>
       <p v-if="unavailableReason" class="upgrade-hint warning" role="alert">{{ unavailableReason }}</p>
       <div class="upgrade-confirm-actions">
@@ -652,7 +762,7 @@ onBeforeUnmount(() => {
         v-if="taskOperation && (statusKey(taskOperation.status) === 'sent' || statusKey(taskOperation.status) === 'accepted')"
         class="upgrade-hint"
       >
-        <AlertTriangle :size="14" />平台状态会持续更新，关闭抽屉不会取消升级任务。
+        <AlertTriangle :size="14" />平台状态会持续更新，关闭弹窗不会取消升级任务。
       </p>
       <p v-if="uncertainSubmission" class="upgrade-hint warning">
         <AlertTriangle :size="14" />请先从升级记录确认本次请求，暂不要重复提交。
@@ -773,6 +883,13 @@ onBeforeUnmount(() => {
   padding-top: 11px;
   border-top: 1px solid var(--uvp-panel-border);
 }
+.upgrade-mode-switch {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+}
+.upgrade-firmware-select {
+  grid-column: 1 / -1;
+}
 .upgrade-form label {
   display: grid;
   gap: 5px;
@@ -789,6 +906,27 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: end;
   justify-content: flex-end;
+}
+.firmware-option {
+  display: grid;
+  gap: 2px;
+}
+.firmware-option-main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.firmware-version {
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}
+.firmware-manufacturer {
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+}
+.firmware-model {
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
 }
 .upgrade-form :deep(.arco-input-wrapper) {
   color: var(--uvp-text-primary);
