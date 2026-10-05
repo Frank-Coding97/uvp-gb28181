@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ZLMOwnershipSnapshot, ZLMRecordingResult } from "@/api/gb28181-zlm-runtime";
 import {
+  DICT_CODE_RECORDING_HOLDER_STATE,
+  OWNERSHIP_TYPE_LABEL_FALLBACK,
   buildRecordingTarget,
   recordingImpactItems,
   recordingScheduleQuery,
@@ -64,5 +66,55 @@ describe("recording runtime state", () => {
         media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001" }
       })
     ).toEqual({ nodeId: "7", stream: "34020000001320000001" });
+  });
+});
+
+describe("持有态字典（recording_holder_state）", () => {
+  const snapshot: ZLMOwnershipSnapshot = {
+    target: { nodeId: 7, media: { schema: "rtsp", vhost: "v", app: "live", stream: "camera/1" } },
+    present: true,
+    presenceKnown: true,
+    status: "owned",
+    fingerprint: "fp",
+    owners: [{ type: "realtime_playback", confidence: "proven", owner: "值班台" }],
+    impacts: [{ resourceType: "talk", resourceKey: "talk-1" }]
+  };
+
+  it("不传表时走兜底（字典未加载 / 未登录场景）", () => {
+    const text = recordingImpactItems(snapshot).join("\n");
+    expect(text).toContain("实时点播：值班台");
+    expect(text).toContain("语音对讲：talk-1");
+  });
+
+  it("传入字典表时只用它的名字", () => {
+    const text = recordingImpactItems(snapshot, {
+      ...OWNERSHIP_TYPE_LABEL_FALLBACK,
+      realtime_playback: "实时预览"
+    }).join("\n");
+    expect(text).toContain("实时预览：值班台");
+    expect(text).toContain("语音对讲：talk-1");
+  });
+
+  it("⛔ 未命中回显原值，不被吞成空（后端新增持有方要看得见）", () => {
+    const text = recordingImpactItems(snapshot, { realtime_playback: "实时预览" }).join("\n");
+    expect(text).toContain("talk：talk-1");
+  });
+
+  it("值域锁定：兜底表恰好这 9 档持有态", () => {
+    expect(Object.keys(OWNERSHIP_TYPE_LABEL_FALLBACK).sort()).toEqual([
+      "cascade",
+      "continuous_recording",
+      "device_playback",
+      "managed",
+      "realtime_playback",
+      "recording_plan",
+      "recording_session",
+      "talk",
+      "unknown"
+    ]);
+  });
+
+  it("字典 code 固定", () => {
+    expect(DICT_CODE_RECORDING_HOLDER_STATE).toBe("recording_holder_state");
   });
 });

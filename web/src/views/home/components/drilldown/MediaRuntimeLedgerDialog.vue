@@ -18,6 +18,7 @@ import ZLMDangerActionDialog from "@/views/gb28181/zlm/components/ZLMDangerActio
 import { formatZLMByteRate, formatZLMDuration, zlmErrorPresentation } from "@/views/gb28181/zlm/components/zlmFormatters";
 import ZLMSessionKickDialog from "@/views/gb28181/zlm/ZLMSessionKickDialog.vue";
 import type { MediaBusinessStream, MediaRuntimeLedger, MediaRuntimeLedgerKind } from "../../dashboardDrilldownState";
+import { useZLMSessionTypeLabel } from "./useZLMSessionTypeDict";
 
 interface ViewerLedgerRow extends ZLMStreamViewer {
   key: string;
@@ -60,18 +61,6 @@ const kinds = [
   { key: "sessions" as const, label: "网络会话", icon: Network },
   { key: "recordings" as const, label: "录制中", icon: Video }
 ];
-const networkSessionTypeLabels: Record<string, string> = {
-  "mediakit::HttpSession": "HTTP 会话",
-  "mediakit::RtspSession": "RTSP 会话",
-  "mediakit::RtmpSession": "RTMP 会话",
-  "mediakit::RtpSession": "RTP 会话",
-  "mediakit::SrtSession": "SRT 会话",
-  "mediakit::WebSocketSession": "WebSocket 会话",
-  "mediakit::WebRtcSession": "WebRTC 会话",
-  "mediakit::TcpSession": "TCP 会话",
-  "mediakit::UdpSession": "UDP 会话"
-};
-
 const title = computed(() => `流媒体运行态 · ${kinds.find(item => item.key === props.kind)?.label ?? "在线流"}`);
 const sourceRows = computed(() => (props.kind === "recordings" ? props.ledger.recordings : props.ledger.streams));
 const streamRows = computed(() => {
@@ -186,12 +175,8 @@ function recordingText(row: MediaBusinessStream) {
 function rtpRequest(row: MediaBusinessStream): ZLMRTPServerCloseRequest {
   return { nodeId: row.nodeId, vhost: row.vhost, app: row.app, stream: row.streamId };
 }
-function networkSessionTypeLabel(value: string) {
-  const typeId = value.trim();
-  if (!typeId) return "未知";
-  const qualifiedTypeId = typeId.includes("::") ? typeId : `mediakit::${typeId}`;
-  return networkSessionTypeLabels[qualifiedTypeId] ?? typeId;
-}
+/** 会话类型文案：字典 `zlm_session_type` 驱动（兜底见 `zlmSessionType.ts`）。 */
+const networkSessionTypeLabel = useZLMSessionTypeLabel();
 
 async function confirmStop() {
   const target = stopTarget.value;

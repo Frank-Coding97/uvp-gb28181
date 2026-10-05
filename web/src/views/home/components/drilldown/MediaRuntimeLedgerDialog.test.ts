@@ -229,8 +229,10 @@ describe("MediaRuntimeLedgerDialog", () => {
       "utf8"
     );
     for (const label of ["会话 ID", "远端地址", "本地地址", "连接类型", "会话类型", "会话标识"]) expect(source).toContain(label);
-    expect(source).toContain('"mediakit::HttpSession": "HTTP 会话"');
-    expect(source).toContain('"mediakit::RtpSession": "RTP 会话"');
+    // 会话类型查表已抽到 `zlmSessionType.ts`（值域与未命中回显由该模块单测锁定），
+    // 本文件只保留"经注入层翻译"这条委派关系。
+    expect(source).toContain("useZLMSessionTypeLabel");
+    expect(source).not.toContain("networkSessionTypeLabels");
     expect(source).toContain("networkSessionTypeLabel(record.typeId)");
     expect(source).toContain(':title="record.typeId || undefined"');
     expect(source).toContain('@page-change="changeNetworkPage"');

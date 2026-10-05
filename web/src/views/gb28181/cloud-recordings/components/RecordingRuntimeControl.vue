@@ -28,6 +28,7 @@ import {
   recordingStatusPresentation,
   recordingTargetLabel
 } from "../recordingRuntimeState";
+import { useRecordingOwnershipLabels } from "../useRecordingOwnershipDict";
 import { recordingErrorPresentation } from "../recordingState";
 
 type RecordingAction = "start" | "stop" | "force-stop";
@@ -68,7 +69,11 @@ const canForceStop = computed(() => hasPermission("gb28181:recording:force-stop"
 const canViewPlans = computed(() => hasPermission("gb28181:recording-plan:view"));
 const statusView = computed(() => recordingStatusPresentation(status.value));
 const targetLabel = computed(() => (preparedTarget.value ? recordingTargetLabel(preparedTarget.value) : "未选择媒体目标"));
-const impactItems = computed(() => (preflight.value ? recordingImpactItems(preflight.value.snapshot) : []));
+/** 持有态查表：字典 `recording_holder_state` 驱动（兜底见 `recordingRuntimeState.ts`）。 */
+const ownershipLabels = useRecordingOwnershipLabels();
+const impactItems = computed(() =>
+  preflight.value ? recordingImpactItems(preflight.value.snapshot, ownershipLabels.value) : []
+);
 const actionCopy = computed(() => {
   if (preparedAction.value === "start")
     return { phrase: `START ${preparedTarget.value?.media.stream ?? ""}`, label: "确认启动", reason: false };
@@ -328,7 +333,7 @@ defineExpose({ refresh });
         <div v-if="status?.ownership" class="ownership-summary">
           <strong>持有与影响</strong>
           <ul>
-            <li v-for="item in recordingImpactItems(status.ownership)" :key="item">{{ item }}</li>
+            <li v-for="item in recordingImpactItems(status.ownership, ownershipLabels)" :key="item">{{ item }}</li>
           </ul>
         </div>
       </section>

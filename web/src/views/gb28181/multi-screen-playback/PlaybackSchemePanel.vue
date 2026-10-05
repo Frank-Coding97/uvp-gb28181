@@ -15,6 +15,7 @@ import {
   type PlaybackSchemeSlotInput,
   type PlaybackSchemeSummary
 } from "@/api/gb28181";
+import { usePlayableStateLabel } from "./usePlayableStateDict";
 
 const props = defineProps<{
   visible: boolean;
@@ -220,9 +221,11 @@ async function persistRemoval(scheme: PlaybackSchemeSummary) {
   }
 }
 
-function availabilityLabel(value: string) {
-  return { available: "可播放", offline: "离线", missing: "通道不存在", forbidden: "无权访问" }[value] || "不可用";
-}
+/**
+ * 槽位可播性文案：字典 `playable_state` 驱动（兜底见 `playbackAvailability.ts`）。
+ * ⛔ 同模板里 `availability-<原始值>` 那个 CSS 类仍取原始值，与本函数无关。
+ */
+const availabilityLabel = usePlayableStateLabel();
 
 function formatUpdatedAt(value: string) {
   const date = new Date(value);

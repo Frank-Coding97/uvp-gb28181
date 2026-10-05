@@ -50,7 +50,9 @@
 | **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏸ **暂缓**（2026-10-05 老板决定暂时跳过；重启前置见 §3.4B） |
 | **P4a** | 系统类三件套 | `sysjobs/sysjobslist.vue`、`system/login-log/index.vue`（+ 各 2 个新纯函数/注入层文件） | `job_execute_policy`、`job_blocking_policy`、`login_failure_reason` | ✅ **已完成**（顺带补 `sysjobslist` 里 F25 的漏项） |
 | **P4b** | 设备配置族（**会下发给设备**） | `device-mgmt/deviceConfigGroups.ts`、`DeviceConfigDrawer.vue`、`components/PlayConsoleLinked.vue`、`components/play-console/PictureVideoParamCard.vue`（+ 2 个新纯函数/注入层文件） | `frame_mirror`、`stream_number`（`osd_time_format` **已跳过**，见 §3.5-D） | ✅ **已完成** |
-| **P4c** | 纯展示批 | 见 §3.5 的 A 组 | 按项（约 8 项） | ⏳ 待做 |
+| **P4c-1** | 纯展示批（一）：可播性 / 会话类型 / 持有态 | `multi-screen-playback/PlaybackSchemePanel.vue`、`home/components/drilldown/MediaRuntimeLedgerDialog.vue`、`cloud-recordings/components/RecordingRuntimeControl.vue`（+ 各新纯函数/注入层） | `playable_state`、`zlm_session_type`、`recording_holder_state` | ✅ **已完成**（见 §二·P4c） |
+| **P4c-2** | 纯展示批（二）：看守位能力三态 / 探针诊断 | `components/PlayConsoleLinked.vue`、`probeDiagnosis.ts` | `home_position_capability`、`probe_diagnosis` | ⏳ 待做（⚠️ 文件夹着他人在建改动；F32 有一张"一码两串"表，见 §3.5-E） |
+| **P4c-3** | 纯展示批（三）：坐标来源 / 回读新鲜度 | `device-mgmt/channelPositionForm.ts`、`device-mgmt/DeviceConfigDrawer.vue` | `channel_position_source`、`config_read_freshness` | ⛔ **先拍板**（⚠️ 文件夹着他人在建改动；⚠️ 回读新鲜度有**同值域三实现、措辞还不同**，见 §3.5-A 补记） |
 | **P4d** | 维护操作结果收敛 | `DeviceRebootDialog` / `DeviceFirmwareUpgradePanel` / `StorageCardFormatDialog` / `DeviceMaintenanceRecordsDialog` | `maintenance_operation_result` | ⏳ 待做（⚠️ **4 份值域并不相同**，需先定口径） |
 | **B4–B10** | 后端文案 | 见盘点报告 | — | ⛔ **不做**（§8「后端不做字典」）；仅当前端另有一份重复时，以前端为准收敛 |
 
@@ -311,6 +313,45 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 
 ---
 
+### 二·P4c 明细（⏳ 拆三小批；P4c-1 ✅ 已完成 2026-10-05）
+
+⚠️ **P4c 不能当成一批做**：§3.5-A 列了 9 项，但其中 **F27 已被 §3.5-D 否掉**（11 条句子）、**F29 归 P4d**
+（4 份值域不同），真正可做 7 项，且**异质**（★ 有无"文案被当逻辑输入"、所在文件是否夹着他人改动都不同）。
+⇒ 按「干净程度」拆三小批，P4c-1 先做**三个最单纯的「码值 → 一个名字」映射**。
+
+#### P4c-1（✅ 已完成）：F19 多屏可播性 / F21 会话类型 / F31 录像持有态
+
+| 项 | 名称 | 纯函数模块（新） | 注入层（新） | 消费点 | 新字典 |
+| --- | --- | --- | --- | --- | --- |
+| **F31** | 录像持有态（谁在占用这路流） | `cloud-recordings/recordingRuntimeState.ts`（**原本就是纯模块**，扩出 `OWNERSHIP_TYPE_LABEL_FALLBACK`） | `cloud-recordings/useRecordingOwnershipDict.ts` | `RecordingRuntimeControl.vue`（`impactItems` + 模板行内 `recordingImpactItems(status.ownership, ownershipLabels)`） | `recording_holder_state`（9 档） |
+| **F19** | 多屏回放·槽位可播性 | `multi-screen-playback/playbackAvailability.ts` | `multi-screen-playback/usePlayableStateDict.ts` | `PlaybackSchemePanel.vue`（`availabilityLabel` 改注入，模板调用串**不变**） | `playable_state`（4 档） |
+| **F21** | 运行态·网络会话类型 | `home/components/drilldown/zlmSessionType.ts` | `home/components/drilldown/useZLMSessionTypeDict.ts` | `MediaRuntimeLedgerDialog.vue`（表已搬走，模板 `networkSessionTypeLabel(record.typeId)` **不变**） | `zlm_session_type`（9 档） |
+
+⭐ **统一手法（纯展示三件套）**：`DICT_CODE_*` + `*_LABEL_FALLBACK`（按后端值域写死） + 把 `labels` 做成
+**可注入参数**（默认值即兜底表）⇒ 纯函数可脱离 Vue 单测；注入层只做一件事：`useDictLabelMap(code, FALLBACK)`
+包成函数/computed 交给调用点。**兜底不是空字符串**：F19 →「不可用」、F21 → **回显原值**（排障要看得见 ZLM 报了什么）、
+F31 → **回显原值**。这三处都**不进「前端只读」名单**（§3.5-A：判定走码值/派生键，改名无害）。
+
+⛔ **F19 的一个"看着像坑其实不是"**：模板里 `:class="\`availability-${slot.availability}\`"` 取的是**原始值**，
+字典只覆盖那句话 ⇒ 改字典不会影响配色、加档位也不会凭空多出一个没样式定义的类。已在纯模块头部注释里写明这层分工。
+
+⛔ **F21 的测试断言要同步搬**：`MediaRuntimeLedgerDialog.test.ts` 原来**直接断言 `.vue` 源码里那两行字面量**
+（`'"mediakit::HttpSession": "HTTP 会话"'`）。表搬走后该断言必然红 —— 已改成断言**委派关系**
+（`toContain("useZLMSessionTypeLabel")` + `not.toContain("networkSessionTypeLabels")`），值域锁定与
+"未命中回显原值"移交给新模块的单测（`zlmSessionType.test.ts`）。**不是把断言删掉**。
+
+**验证**：`playbackAvailability.test.ts` 7 例 + `zlmSessionType.test.ts` 7 例 +
+`recordingRuntimeState.test.ts` 新增 5 例（合计 18 例）；
+`multi-screen-playback` + `home/components/drilldown` + `cloud-recordings` 三目录 **158 例全绿**；
+开发库 **33 字典 / 186 项**（三个新字典 4/9/9，无重复行、无父 id 落空，幂等复跑不增行）；
+接口 `getByDictCode/{playable_state,zlm_session_type,recording_holder_state}` **逐条对拍一致**；
+`eslint` 零告警、`prettier` 干净。
+
+**P4c 剩余**：F28 看守位能力三态、F32 探针诊断结论 → **P4c-2**；F15 坐标来源、F30 回读新鲜度 → **P4c-3**
+（见下方 §3.5 的新发现：这两处的文件里夹着**他人在建改动** / 有**同值域多实现**的问题，需先处理）。
+
+---
+
 ## 三、待拍板（阻塞 P3 及之后）
 
 ### 3.1 ⭐⭐ 已决：开发阶段**不写任何数据库脚本**（2026-10-05 口径变更）
@@ -409,6 +450,24 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 **A. 纯展示 · 低风险**（改字典只影响文案）：F15 坐标来源、F19 多屏可播性、F21 会话类型、F27 能力说明、
 F28 看守位能力三态、F29 维护操作结果、F30 回读新鲜度、F31 云录制持有态、F32 探针诊断结论。
 → 这些**不进只读名单**（判定走码值/派生键，改名无害）。
+
+**A 组落地进度**（2026-10-05 补）：F19 / F21 / F31 ✅ **P4c-1 已做**；F27 ⛔ 归 D 组（不做）；
+F29 ⛔ 归 F 组（P4d）；F28 / F32 → P4c-2；F15 / F30 → P4c-3。
+
+**A 组补记（2026-10-05 新发现，动手前必看两件事）**：
+1. ⚠️ **F15 / F28 两个"消费文件"里夹着他人未提交的改动** —— `device-mgmt/index.vue`（F15 的模板消费点）
+   与 `components/PlayConsoleLinked.vue`（F28）在 2026-10-05 均带**他人在建内容**。已核对
+   F15 要改的 `positionSourceText` 行与对方的 hunk **不重叠**，但仍须**按 hunk 精确 stage**（技能 `git-split-hunk-commit`）。
+   ⇒ 这两项**不适合与干净文件的项混做**，所以没进 P4c-1。
+2. ⛔⛔ **F30「回读新鲜度」是同值域三实现、且措辞并不相同**（盘点报告只收了配置抽屉那一处）：
+   | 位置 | fresh | stale |
+   | --- | --- | --- |
+   | `device-mgmt/DeviceConfigDrawer.vue:494` `FRESHNESS_TEXT` | 数据有效 | 数据已过期（另 `unknown`=尚无回读） |
+   | `device-mgmt/DeviceStatusFactsPanel.vue:335` | 设备状态已同步 | 设备状态已过期 |
+   | `device-mgmt/StorageCardStatusPanel.vue:307` | 存储卡状态已同步 | 存储卡状态已过期 |
+   三者的**值域完全一致**（`fresh`/`stale`/`unknown`）⇒ 按"归并判据 = 值域集合一致"**本该收敛**；
+   但后两处是**带主语**的复合句（"<某资源>状态已同步"），合并就要把主语剥掉、三处文案都会被改。
+   ⇒ 与 P4d 同类，**属设计题，需先拍板**：并成一个字典（统一措辞）还是各留各的。
 
 **B. 会被写进下发报文（高风险，字典上线后必须进只读名单）**：**F13 画面镜像**、**F14 码流编号**
 （经 `requiredInt` 收窄后写 `FrameMirror` / `VideoRecordPlan.streamNumber` 下发设备）。

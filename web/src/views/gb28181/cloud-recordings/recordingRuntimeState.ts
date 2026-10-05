@@ -13,7 +13,17 @@ export interface RecordingTargetValidation {
   errors: Record<string, string>;
 }
 
-const ownershipTypeLabels: Record<string, string> = {
+/** 字典 `sys_dict.code`：媒体资源的"持有态"（谁在占用这路流）。 */
+export const DICT_CODE_RECORDING_HOLDER_STATE = "recording_holder_state";
+
+/**
+ * 兜底口径 —— 按后端 `ZLMOwnershipSnapshot` 的 `type` / `resourceType` 值域写死。
+ *
+ * 属**纯展示**：只把"谁在持有"翻译成人话，不参与判定、也不下发 ⇒ 不进只读名单。
+ * ⛔ 未命中时调用点**回显原值**（见 `recordingImpactItems` 的 `?? owner.type`）——
+ * 后端新增一种持有方时要看得见它到底叫什么，不能被吞成空。
+ */
+export const OWNERSHIP_TYPE_LABEL_FALLBACK: Readonly<Record<string, string>> = {
   realtime_playback: "实时点播",
   device_playback: "设备回放",
   talk: "语音对讲",
@@ -46,16 +56,19 @@ function safeText(value: string | undefined) {
   return value?.trim() || "未标识";
 }
 
-export function recordingImpactItems(snapshot: ZLMOwnershipSnapshot): string[] {
+export function recordingImpactItems(
+  snapshot: ZLMOwnershipSnapshot,
+  labels: Readonly<Record<string, string>> = OWNERSHIP_TYPE_LABEL_FALLBACK
+): string[] {
   const items: string[] = [];
   for (const owner of snapshot.owners ?? []) {
-    const label = ownershipTypeLabels[owner.type] ?? owner.type;
+    const label = labels[owner.type] ?? owner.type;
     const subject = owner.owner || owner.key || owner.resourceType;
     items.push(`${label}：${safeText(subject)}（${owner.confidence === "proven" ? "已确认" : "待确认"}）`);
   }
   for (const impact of snapshot.impacts ?? []) {
     const subject = impact.resourceKey || impact.owner || impact.resourceType;
-    const label = ownershipTypeLabels[impact.resourceType ?? ""] ?? safeText(impact.resourceType);
+    const label = labels[impact.resourceType ?? ""] ?? safeText(impact.resourceType);
     items.push(`${label}：${safeText(subject)}${impact.reason ? ` · ${impact.reason}` : ""}`);
   }
   if (items.length === 0) {
