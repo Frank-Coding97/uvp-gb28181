@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: manual_edit_firmware_repository_2026_10_02
+-- Schema fingerprint: manual_edit_record_cache_2026_10_03
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -714,37 +714,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_f
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'idx_firmware_upgrade_device_time')
   CREATE INDEX [idx_firmware_upgrade_device_time] ON [gb_device_firmware_upgrade] ([device_id], [created_at]);
 
-IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NOT NULL DROP TABLE [gb_firmware_repository];
-IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NULL
-BEGIN
-  CREATE TABLE [gb_firmware_repository] (
-    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    [firmware_id] NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [version] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [manufacturer] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [model_pattern] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
-    [file_name] NVARCHAR(500) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [file_size] BIGINT NOT NULL,
-    [file_hash] NVARCHAR(128) COLLATE Latin1_General_100_BIN2,
-    [storage_path] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [storage_key] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
-    [release_date] DATE,
-    [status] NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    [uploaded_by] BIGINT NOT NULL,
-    [dept_id] BIGINT NOT NULL,
-    [created_at] DATETIME2(6) NOT NULL,
-    [updated_at] DATETIME2(6) NOT NULL,
-    [remark] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2,
-    CONSTRAINT [firmware_id] UNIQUE ([firmware_id])
-  );
-END;
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_manu_model')
-  CREATE INDEX [idx_manu_model] ON [gb_firmware_repository] ([manufacturer], [version]);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_file_hash')
-  CREATE INDEX [idx_file_hash] ON [gb_firmware_repository] ([file_hash]);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_dept_status')
-  CREATE INDEX [idx_dept_status] ON [gb_firmware_repository] ([dept_id], [status]);
-
 IF OBJECT_ID(N'gb_device_grant', N'U') IS NOT NULL DROP TABLE [gb_device_grant];
 IF OBJECT_ID(N'gb_device_grant', N'U') IS NULL
 BEGIN
@@ -1062,6 +1031,37 @@ BEGIN
 END;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_video_param') AND name=N'idx_video_param_device')
   CREATE INDEX [idx_video_param_device] ON [gb_device_video_param] ([device_id], [observed_at]);
+
+IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NOT NULL DROP TABLE [gb_firmware_repository];
+IF OBJECT_ID(N'gb_firmware_repository', N'U') IS NULL
+BEGIN
+  CREATE TABLE [gb_firmware_repository] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [firmware_id] NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [version] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [manufacturer] NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [model_pattern] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
+    [file_name] NVARCHAR(500) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [file_size] BIGINT NOT NULL,
+    [file_hash] NVARCHAR(128) COLLATE Latin1_General_100_BIN2,
+    [storage_path] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [storage_key] NVARCHAR(500) COLLATE Latin1_General_100_BIN2,
+    [release_date] DATE,
+    [status] NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [uploaded_by] BIGINT NOT NULL,
+    [dept_id] BIGINT NOT NULL,
+    [created_at] DATETIME2(6) NOT NULL,
+    [updated_at] DATETIME2(6) NOT NULL,
+    [remark] NVARCHAR(MAX) COLLATE Latin1_General_100_BIN2,
+    CONSTRAINT [firmware_id] UNIQUE ([firmware_id])
+  );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_manu_model')
+  CREATE INDEX [idx_manu_model] ON [gb_firmware_repository] ([manufacturer], [version]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_file_hash')
+  CREATE INDEX [idx_file_hash] ON [gb_firmware_repository] ([file_hash]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_firmware_repository') AND name=N'idx_dept_status')
+  CREATE INDEX [idx_dept_status] ON [gb_firmware_repository] ([dept_id], [status]);
 
 IF OBJECT_ID(N'gb_mobile_position_history', N'U') IS NOT NULL DROP TABLE [gb_mobile_position_history];
 IF OBJECT_ID(N'gb_mobile_position_history', N'U') IS NULL
@@ -1518,6 +1518,59 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_ptz_stat
   CREATE INDEX [idx_ptz_state_device] ON [gb_ptz_state] ([device_id]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_ptz_state') AND name=N'idx_ptz_state_received')
   CREATE INDEX [idx_ptz_state_received] ON [gb_ptz_state] ([received_at]);
+
+IF OBJECT_ID(N'gb_record_cache_task', N'U') IS NOT NULL DROP TABLE [gb_record_cache_task];
+IF OBJECT_ID(N'gb_record_cache_task', N'U') IS NULL
+BEGIN
+  CREATE TABLE [gb_record_cache_task] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [task_id] NVARCHAR(64) NOT NULL,
+    [owner_dept_id] BIGINT NOT NULL DEFAULT 0,
+    [created_by_user] INT NOT NULL DEFAULT 0,
+    [created_by_name] NVARCHAR(64) NOT NULL DEFAULT N'',
+    [channel_id] INT NOT NULL,
+    [device_id] NVARCHAR(20) NOT NULL,
+    [channel_code] NVARCHAR(20) NOT NULL DEFAULT N'',
+    [channel_name] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [device_name] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [start_time] DATETIME2(3) NOT NULL,
+    [end_time] DATETIME2(3) NOT NULL,
+    [record_type] NVARCHAR(16) NOT NULL DEFAULT N'all',
+    [record_key] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [download_speed] INT NOT NULL DEFAULT 4,
+    [node_id] BIGINT NOT NULL DEFAULT 0,
+    [vhost] NVARCHAR(128) NOT NULL DEFAULT N'__defaultVhost__',
+    [app] NVARCHAR(64) NOT NULL DEFAULT N'rtp',
+    [stream] NVARCHAR(64) NOT NULL DEFAULT N'',
+    [session_id] NVARCHAR(64),
+    [file_id] BIGINT,
+    [file_name] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [file_path] NVARCHAR(1000) NOT NULL DEFAULT N'',
+    [file_size] BIGINT NOT NULL DEFAULT 0,
+    [cached_bytes] BIGINT NOT NULL DEFAULT 0,
+    [estimated_bytes] BIGINT NOT NULL DEFAULT 0,
+    [state] NVARCHAR(20) NOT NULL,
+    [last_error] NVARCHAR(500) NOT NULL DEFAULT N'',
+    [request_id] NVARCHAR(64) NOT NULL DEFAULT N'',
+    [cursor_at] DATETIME2(3),
+    [segments] NVARCHAR(MAX) NOT NULL,
+    [started_at] DATETIME2(3),
+    [finished_at] DATETIME2(3),
+    [expires_at] DATETIME2(3),
+    [favorite] TINYINT NOT NULL DEFAULT 0,
+    [created_at] DATETIME2(3),
+    [updated_at] DATETIME2(3),
+    CONSTRAINT [uk_record_cache_task_id] UNIQUE ([task_id])
+  );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_record_cache_task') AND name=N'idx_record_cache_task_state_created')
+  CREATE INDEX [idx_record_cache_task_state_created] ON [gb_record_cache_task] ([state], [created_at]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_record_cache_task') AND name=N'idx_record_cache_task_channel_state')
+  CREATE INDEX [idx_record_cache_task_channel_state] ON [gb_record_cache_task] ([channel_id], [state]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_record_cache_task') AND name=N'idx_record_cache_task_dept_state')
+  CREATE INDEX [idx_record_cache_task_dept_state] ON [gb_record_cache_task] ([owner_dept_id], [state]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_record_cache_task') AND name=N'idx_record_cache_task_expires')
+  CREATE INDEX [idx_record_cache_task_expires] ON [gb_record_cache_task] ([expires_at]);
 
 IF OBJECT_ID(N'gb_recording_file', N'U') IS NOT NULL DROP TABLE [gb_recording_file];
 IF OBJECT_ID(N'gb_recording_file', N'U') IS NULL
@@ -3187,30 +3240,12 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (246, N'查询告警详情', N'/api/gb28181/alarms/:id', N'GET', N'告警管理', N'2026-08-04 22:41:38.000000', N'2026-08-04 22:41:38.000000', NULL, 1),
 (247, N'物理删除单条告警', N'/api/gb28181/alarms/:id', N'DELETE', N'告警管理', N'2026-08-04 22:41:38.000000', N'2026-08-04 22:41:38.000000', NULL, 1),
 (248, N'批量物理删除告警', N'/api/gb28181/alarms/batch-delete', N'POST', N'告警管理', N'2026-08-04 22:41:38.000000', N'2026-08-04 22:41:38.000000', NULL, 1),
-(252, N'读取移动位置历史轨迹配置', N'/api/gb28181/sip/service-config/position-history', N'GET', N'国标服务配置', N'2026-08-07 14:46:22.000000', N'2026-08-07 14:46:22.000000', NULL, 1),
-(253, N'修改移动位置历史轨迹配置', N'/api/gb28181/sip/service-config/position-history', N'PUT', N'国标服务配置', N'2026-08-07 14:46:22.000000', N'2026-08-07 14:46:22.000000', NULL, 1),
 (254, N'查询播放方案', N'/api/gb28181/playback-schemes', N'GET', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
 (255, N'查看播放方案', N'/api/gb28181/playback-schemes/:id', N'GET', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
 (256, N'创建播放方案', N'/api/gb28181/playback-schemes', N'POST', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
 (257, N'重命名播放方案', N'/api/gb28181/playback-schemes/:id', N'PATCH', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
 (258, N'覆盖播放方案', N'/api/gb28181/playback-schemes/:id/layout', N'PUT', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
 (259, N'删除播放方案', N'/api/gb28181/playback-schemes/:id', N'DELETE', N'多屏播放', N'2026-08-07 17:23:46.000000', N'2026-08-07 17:23:46.000000', NULL, 1),
-(261, N'读取云台默认速度配置', N'/api/gb28181/sip/service-config/ptz-default-speed', N'GET', N'国标服务配置', N'2026-08-09 16:03:32.000000', N'2026-08-09 16:03:32.000000', NULL, 1),
-(262, N'修改云台默认速度配置', N'/api/gb28181/sip/service-config/ptz-default-speed', N'PUT', N'国标服务配置', N'2026-08-09 16:03:32.000000', N'2026-08-09 16:03:32.000000', NULL, 1),
-(263, N'读取设备上线同步通道配置', N'/api/gb28181/sip/service-config/sync-channels-on-online', N'GET', N'国标服务配置', N'2026-08-09 16:57:04.000000', N'2026-08-09 16:57:04.000000', NULL, 1),
-(264, N'修改设备上线同步通道配置', N'/api/gb28181/sip/service-config/sync-channels-on-online', N'PUT', N'国标服务配置', N'2026-08-09 16:57:04.000000', N'2026-08-09 16:57:04.000000', NULL, 1),
-(265, N'读取 SIP 日志配置', N'/api/gb28181/sip/service-config/sip-log', N'GET', N'国标服务配置', N'2026-08-09 17:36:24.000000', N'2026-08-09 17:36:24.000000', NULL, 1),
-(266, N'修改 SIP 日志配置', N'/api/gb28181/sip/service-config/sip-log', N'PUT', N'国标服务配置', N'2026-08-09 17:36:24.000000', N'2026-08-09 17:36:24.000000', NULL, 1),
-(267, N'读取忽略通道离线异常通知配置', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'GET', N'国标服务配置', N'2026-08-09 18:29:09.000000', N'2026-08-09 18:29:09.000000', NULL, 1),
-(268, N'修改忽略通道离线异常通知配置', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'PUT', N'国标服务配置', N'2026-08-09 18:29:09.000000', N'2026-08-09 18:29:09.000000', NULL, 1),
-(269, N'读取收到心跳恢复设备上线配置', N'/api/gb28181/sip/service-config/online-on-heartbeat', N'GET', N'国标服务配置', N'2026-08-09 19:08:02.000000', N'2026-08-09 19:08:02.000000', NULL, 1),
-(270, N'修改收到心跳恢复设备上线配置', N'/api/gb28181/sip/service-config/online-on-heartbeat', N'PUT', N'国标服务配置', N'2026-08-09 19:08:02.000000', N'2026-08-09 19:08:02.000000', NULL, 1),
-(271, N'读取报警消息存储配置', N'/api/gb28181/sip/service-config/save-alarm-messages', N'GET', N'国标服务配置', N'2026-08-09 21:39:23.000000', N'2026-08-09 21:39:23.000000', NULL, 1),
-(272, N'修改报警消息存储配置', N'/api/gb28181/sip/service-config/save-alarm-messages', N'PUT', N'国标服务配置', N'2026-08-09 21:39:23.000000', N'2026-08-09 21:39:23.000000', NULL, 1),
-(273, N'读取 SIP 命令超时时间', N'/api/gb28181/sip/service-config/sip-command-timeout', N'GET', N'国标服务配置', N'2026-08-09 21:39:23.000000', N'2026-08-09 21:39:23.000000', NULL, 1),
-(274, N'修改 SIP 命令超时时间', N'/api/gb28181/sip/service-config/sip-command-timeout', N'PUT', N'国标服务配置', N'2026-08-09 21:39:23.000000', N'2026-08-09 21:39:23.000000', NULL, 1),
-(275, N'读取预分配模式', N'/api/gb28181/sip/service-config/preallocation-mode', N'GET', N'国标服务配置', N'2026-08-09 21:39:23.000000', N'2026-08-09 21:39:23.000000', NULL, 1),
-(276, N'修改预分配模式', N'/api/gb28181/sip/service-config/preallocation-mode', N'PUT', N'国标服务配置', N'2026-08-09 21:39:24.000000', N'2026-08-09 21:39:24.000000', NULL, 1),
 (277, N'查看安全快照', N'/api/gb28181/security/snapshot', N'GET', N'国标接入安全', N'2026-08-10 09:27:17.000000', N'2026-08-10 09:27:17.000000', NULL, 1),
 (278, N'查看安全事件', N'/api/gb28181/security/events', N'GET', N'国标接入安全', N'2026-08-10 09:27:17.000000', N'2026-08-10 09:27:17.000000', NULL, 1),
 (279, N'查看安全封禁', N'/api/gb28181/security/bans', N'GET', N'国标接入安全', N'2026-08-10 09:27:17.000000', N'2026-08-10 09:27:17.000000', NULL, 1),
@@ -3223,14 +3258,6 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (293, N'创建安全访问规则', N'/api/gb28181/security/access-rules', N'POST', N'国标接入安全', N'2026-08-10 09:27:18.000000', N'2026-08-10 09:27:18.000000', NULL, 1),
 (294, N'修改安全访问规则', N'/api/gb28181/security/access-rules/:id', N'PUT', N'国标接入安全', N'2026-08-10 09:27:18.000000', N'2026-08-10 09:27:18.000000', NULL, 1),
 (295, N'删除安全访问规则', N'/api/gb28181/security/access-rules/:id', N'DELETE', N'国标接入安全', N'2026-08-10 09:27:18.000000', N'2026-08-10 09:27:18.000000', NULL, 1),
-(299, N'读取全局订阅项目', N'/api/gb28181/sip/service-config/global-subscriptions', N'GET', N'国标服务配置', N'2026-08-10 11:13:31.000000', N'2026-08-10 11:13:31.000000', NULL, 1),
-(300, N'修改全局订阅项目', N'/api/gb28181/sip/service-config/global-subscriptions', N'PUT', N'国标服务配置', N'2026-08-10 11:13:31.000000', N'2026-08-10 11:13:31.000000', NULL, 1),
-(301, N'读取全局通道音频配置', N'/api/gb28181/sip/service-config/default-channel-audio', N'GET', N'国标服务配置', N'2026-08-10 11:13:31.000000', N'2026-08-10 11:13:31.000000', NULL, 1),
-(302, N'修改全局通道音频配置', N'/api/gb28181/sip/service-config/default-channel-audio', N'PUT', N'国标服务配置', N'2026-08-10 11:13:31.000000', N'2026-08-10 11:13:31.000000', NULL, 1),
-(306, N'读取默认播放协议', N'/api/gb28181/sip/service-config/default-playback-protocol', N'GET', N'国标服务配置', N'2026-08-10 18:56:34.000000', N'2026-08-10 18:56:34.000000', NULL, 1),
-(307, N'修改默认播放协议', N'/api/gb28181/sip/service-config/default-playback-protocol', N'PUT', N'国标服务配置', N'2026-08-10 18:56:34.000000', N'2026-08-10 18:56:34.000000', NULL, 1),
-(308, N'读取固定地址播放配置', N'/api/gb28181/sip/service-config/fixed-address-playback', N'GET', N'国标服务配置', N'2026-08-11 08:41:09.000000', N'2026-08-11 08:41:09.000000', NULL, 1),
-(309, N'修改固定地址播放配置', N'/api/gb28181/sip/service-config/fixed-address-playback', N'PUT', N'国标服务配置', N'2026-08-11 08:41:09.000000', N'2026-08-11 08:41:09.000000', NULL, 1),
 (310, N'查询云端录像列表', N'/api/gb28181/cloud-recordings/files', N'GET', N'云端录像', N'2026-08-11 08:43:35.000000', N'2026-08-11 08:43:35.000000', NULL, 1),
 (311, N'查询云端录像选项', N'/api/gb28181/cloud-recordings/files/options', N'GET', N'云端录像', N'2026-08-11 08:43:35.000000', N'2026-08-11 08:43:35.000000', NULL, 1),
 (312, N'查询云端录像详情', N'/api/gb28181/cloud-recordings/files/:id', N'GET', N'云端录像', N'2026-08-11 08:43:35.000000', N'2026-08-11 08:43:35.000000', NULL, 1),
@@ -3248,8 +3275,6 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (324, N'更新级联启用状态', N'/api/gb28181/cascade/platforms/:id/enabled', N'PUT', N'国标级联', N'2026-08-11 08:49:48.000000', N'2026-08-11 08:49:48.000000', NULL, 1),
 (326, N'查看级联共享', N'/api/gb28181/cascade/platforms/:id/shares', N'GET', N'国标级联', N'2026-08-11 08:49:48.000000', N'2026-08-11 08:49:48.000000', NULL, 1),
 (327, N'更新级联共享', N'/api/gb28181/cascade/platforms/:id/shares', N'PUT', N'国标级联', N'2026-08-11 08:49:48.000000', N'2026-08-11 08:49:48.000000', NULL, 1),
-(332, N'读取播放鉴权配置', N'/api/gb28181/sip/service-config/play-auth', N'GET', N'国标服务配置', N'2026-08-11 15:06:39.000000', N'2026-08-11 15:06:39.000000', NULL, 1),
-(333, N'修改播放鉴权配置', N'/api/gb28181/sip/service-config/play-auth', N'PUT', N'国标服务配置', N'2026-08-11 15:06:39.000000', N'2026-08-11 15:06:39.000000', NULL, 1),
 (335, N'发起实时点播', N'/api/gb28181/play/:deviceId/:channelId', N'POST', N'设备管理', N'2026-08-11 19:39:57.000000', N'2026-08-11 19:39:57.000000', NULL, 1),
 (336, N'创建云端录像下载', N'/api/gb28181/cloud-recordings/files/:id/downloads', N'POST', N'云端录像', N'2026-08-13 08:45:38.000000', N'2026-08-13 08:45:38.000000', NULL, 1),
 (337, N'查询云端录像下载', N'/api/gb28181/cloud-recordings/downloads/:taskId', N'GET', N'云端录像', N'2026-08-13 08:45:38.000000', N'2026-08-13 08:45:38.000000', NULL, 1),
@@ -3260,9 +3285,7 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (347, N'查询流量会话', N'/api/gb28181/device-traffic/sessions', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (348, N'查询统计覆盖率', N'/api/gb28181/device-traffic/coverage', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (349, N'查询当前观看', N'/api/gb28181/device-traffic/viewers', N'GET', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
-(350, N'强退观看连接', N'/api/gb28181/device-traffic/viewers/kick', N'POST', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1);
-
-INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
+(350, N'强退观看连接', N'/api/gb28181/device-traffic/viewers/kick', N'POST', N'设备管理', N'2026-08-16 10:15:36.000000', N'2026-08-16 10:15:36.000000', NULL, 1),
 (351, N'查询在线用户', N'/api/sysOnlineUser/list', N'GET', N'在线用户', N'2026-08-17 19:03:35.000000', N'2026-08-17 19:03:35.000000', NULL, 1),
 (352, N'强制下线会话', N'/api/sysOnlineUser/forceLogout', N'POST', N'在线用户', N'2026-08-17 19:03:35.000000', N'2026-08-17 19:03:35.000000', NULL, 1),
 (355, N'登录日志列表', N'/api/sysLoginLog/list', N'GET', N'日志中心', N'2026-08-18 16:10:36.000000', N'2026-08-18 16:10:36.000000', NULL, 1),
@@ -3290,7 +3313,9 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (380, N'查看录像计划', N'/api/gb28181/recording-plans/:id', N'GET', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
 (381, N'编辑录像计划', N'/api/gb28181/recording-plans/:id', N'PUT', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
 (382, N'删除录像计划', N'/api/gb28181/recording-plans/:id', N'DELETE', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
-(383, N'启停录像计划', N'/api/gb28181/recording-plans/:id/status', N'PATCH', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
+(383, N'启停录像计划', N'/api/gb28181/recording-plans/:id/status', N'PATCH', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1);
+
+INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
 (384, N'搜索分配设备', N'/api/gb28181/recording-plans/:id/assignment-options/devices', N'GET', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
 (385, N'搜索分配通道', N'/api/gb28181/recording-plans/:id/assignment-options/channels', N'GET', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
 (386, N'提交录像计划分配', N'/api/gb28181/recording-plans/:id/assignments', N'POST', N'录像计划', N'2026-08-29 21:22:43.000000', N'2026-08-29 21:22:43.000000', NULL, 1),
@@ -3429,13 +3454,9 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (527, N'探测媒体节点', N'/api/gb28181/zlm/nodes/probe', N'POST', N'流媒体管理', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
 (528, N'新增参数', N'/api/sysParam/add', N'POST', N'系统配置', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
 (529, N'保存仪表盘布局', N'/api/gb28181/home/layout', N'PUT', N'仪表盘', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
-(530, N'设置默认码流传输方式', N'/api/gb28181/sip/service-config/default-channel-stream-transport', N'PUT', N'国标服务配置', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
-(531, N'修改回放参数', N'/api/gb28181/sip/service-config/playback-settings', N'PUT', N'国标服务配置', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
-(532, N'设置 SDP 扩展参数', N'/api/gb28181/sip/service-config/sdp-extension', N'PUT', N'国标服务配置', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
 (533, N'编辑参数', N'/api/sysParam/edit', N'PUT', N'系统配置', N'2026-09-05 18:24:01.000000', N'2026-09-05 18:24:01.000000', NULL, 1),
 (534, N'发起视频探针检测', N'/api/gb28181/stream-probes/:streamId', N'POST', N'流媒体管理', N'2026-09-05 18:44:46.000000', N'2026-09-05 18:44:46.000000', NULL, 1),
 (535, N'读取 SIP 仪表盘快照', N'/api/gb28181/sip/dashboard/snapshot', N'GET', N'仪表盘', N'2026-09-05 18:46:37.000000', N'2026-09-05 18:46:37.000000', NULL, 1),
-(536, N'读取回放参数', N'/api/gb28181/sip/service-config/playback-settings', N'GET', N'国标服务配置', N'2026-09-05 18:46:37.000000', N'2026-09-05 18:46:37.000000', NULL, 1),
 (547, N'实时控制台日志流', N'/api/gb28181/logs/stream', N'GET', N'日志中心', N'2026-09-10 07:45:37.000000', N'2026-09-14 12:34:57.000000', NULL, 1),
 (548, N'查看 OpenAPI 客户端列表', N'/api/gb28181/openapi-clients', N'GET', N'OpenAPI 客户端', N'2026-09-10 10:13:07.000000', N'2026-09-10 10:13:07.000000', NULL, 1),
 (549, N'创建 OpenAPI 客户端', N'/api/gb28181/openapi-clients', N'POST', N'OpenAPI 客户端', N'2026-09-10 10:13:07.000000', N'2026-09-10 10:13:07.000000', NULL, 1),
@@ -3462,9 +3483,7 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (590, N'读取目标跟踪已下发指令', N'/api/gb28181/device-mgmt/channel/:id/target-track', N'GET', N'设备控制', N'2026-09-21 12:13:15.000000', N'2026-09-21 12:13:15.000000', NULL, 1),
 (591, N'下发目标跟踪', N'/api/gb28181/device-mgmt/channel/:id/target-track', N'POST', N'设备控制', N'2026-09-21 12:13:15.000000', N'2026-09-21 12:13:15.000000', NULL, 1),
 (593, N'查询播放日志', N'/api/gb28181/play/lifecycles', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
-(594, N'查询播放日志详情', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1);
-
-INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
+(594, N'查询播放日志详情', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
 (595, N'上报播放客户端事实', N'/api/gb28181/play/lifecycles/:lifecycleId/client-events', N'POST', N'播放日志', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1),
 (596, N'查看 OpenAPI 分组能力目录', N'/api/gb28181/openapi-clients/capabilities/catalog', N'GET', N'GB28181 OpenAPI 客户端', N'2026-09-22 10:41:25.000000', N'2026-09-22 10:41:25.000000', NULL, 1),
 (597, N'查询设备列表', N'/api/gb28181/device/list', N'GET', N'设备管理', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
@@ -3472,8 +3491,6 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (599, N'查询设备的通道列表', N'/api/gb28181/device/:deviceId/channels', N'GET', N'设备管理', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (600, N'查询SIP会话统计', N'/api/gb28181/sip-traces/sessions/stats', N'GET', N'日志中心', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (601, N'订阅SIP报文实时流', N'/api/gb28181/sip-traces/stream', N'GET', N'日志中心', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
-(602, N'读取通道默认流传输方式', N'/api/gb28181/sip/service-config/default-channel-stream-transport', N'GET', N'国标服务配置', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
-(603, N'读取SDP扩展开关', N'/api/gb28181/sip/service-config/sdp-extension', N'GET', N'国标服务配置', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (604, N'获取API分组清单', N'/api/sysApi/groups', N'GET', N'接口管理', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (605, N'手动推送目录到上级平台', N'/api/gb28181/cascade/platforms/:id/push-catalog', N'POST', N'国标级联', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (606, N'控制通道雨刷', N'/api/gb28181/device-mgmt/channel/:id/ptz/wiper', N'POST', N'设备控制', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
@@ -3490,7 +3507,29 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (617, N'共享级联通道', N'/api/gb28181/cascade/platforms/:id/channels/share', N'POST', N'国标级联', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (618, N'取消共享级联通道', N'/api/gb28181/cascade/platforms/:id/channels/unshare', N'POST', N'国标级联', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
 (619, N'语音对讲上行推流', N'/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', N'POST', N'设备控制', N'2026-09-23 18:00:00.000000', N'2026-09-23 18:00:00.000000', NULL, 1),
-(620, N'查询设备目录刷新进度', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'设备管理', N'2026-10-01 18:00:00.000000', N'2026-10-01 18:00:00.000000', NULL, 1);
+(620, N'查询设备目录刷新进度', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'设备管理', N'2026-10-01 18:00:00.000000', N'2026-10-01 18:00:00.000000', NULL, 1),
+(621, N'上传固件', N'/api/gb28181/device-mgmt/firmware-repository', N'POST', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(622, N'查询固件列表', N'/api/gb28181/device-mgmt/firmware-repository', N'GET', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(623, N'查询固件详情', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'GET', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(624, N'删除固件', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'DELETE', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(625, N'生成固件下载链接', N'/api/gb28181/device-mgmt/firmware-repository/:id/download-link', N'POST', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(626, N'下载固件', N'/api/gb28181/device-mgmt/firmware-repository/download/:token', N'GET', N'固件仓库', N'2026-10-02 15:20:00.000000', N'2026-10-02 15:20:00.000000', NULL, 1),
+(627, N'查询全部节点网络会话', N'/api/gb28181/zlm/sessions/network', N'GET', N'流媒体管理', N'2026-10-02 15:30:00.000000', N'2026-10-02 15:30:00.000000', NULL, 1),
+(628, N'查询全部节点媒体观看者', N'/api/gb28181/zlm/sessions/viewers', N'GET', N'流媒体管理', N'2026-10-02 15:30:00.000000', N'2026-10-02 15:30:00.000000', NULL, 1);
+
+INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
+(629, N'创建设备录像缓存任务', N'/api/gb28181/record-cache/tasks', N'POST', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(630, N'查询设备录像缓存任务列表', N'/api/gb28181/record-cache/tasks', N'GET', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(631, N'查询设备录像缓存任务详情', N'/api/gb28181/record-cache/tasks/:taskId', N'GET', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(632, N'取消设备录像缓存任务', N'/api/gb28181/record-cache/tasks/:taskId/cancel', N'POST', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(633, N'删除设备录像缓存任务', N'/api/gb28181/record-cache/tasks/:taskId', N'DELETE', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(634, N'下载设备录像缓存文件', N'/api/gb28181/record-cache/tasks/:taskId/content', N'GET', N'录像缓存', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(635, N'创建录像缓存下载', N'/api/gb28181/record-cache/tasks/:taskId/downloads', N'POST', N'录像缓存', N'2026-10-05 11:40:00.000000', N'2026-10-05 11:40:00.000000', NULL, 1),
+(636, N'查询录像缓存下载', N'/api/gb28181/record-cache/downloads/:downloadId', N'GET', N'录像缓存', N'2026-10-05 11:40:00.000000', N'2026-10-05 11:40:00.000000', NULL, 1),
+(637, N'取消录像缓存下载', N'/api/gb28181/record-cache/downloads/:downloadId', N'DELETE', N'录像缓存', N'2026-10-05 11:40:00.000000', N'2026-10-05 11:40:00.000000', NULL, 1),
+(638, N'收藏设备录像缓存任务', N'/api/gb28181/record-cache/tasks/:taskId/favorite', N'POST', N'录像缓存', N'2026-10-05 12:00:00.000000', N'2026-10-05 12:00:00.000000', NULL, 1),
+(639, N'读取国标服务聚合配置', N'/api/gb28181/sip/service-config', N'GET', N'国标服务配置', N'2026-10-05 00:00:00.000000', N'2026-10-05 00:00:00.000000', NULL, 1),
+(640, N'修改国标服务聚合配置', N'/api/gb28181/sip/service-config', N'PUT', N'国标服务配置', N'2026-10-05 00:00:00.000000', N'2026-10-05 00:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_api] OFF;
 SET IDENTITY_INSERT [sys_casbin_rule] ON;
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
@@ -3507,10 +3546,7 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8175, N'p', N'role_3', N'/api/gb28181/cloud-recordings/active', N'GET', N'*', N'', N''),
 (8176, N'p', N'role_3', N'/api/gb28181/zlm/nodes', N'GET', N'*', N'', N''),
 (8177, N'p', N'role_3', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/status', N'GET', N'*', N'', N''),
-(8178, N'p', N'role_3', N'/api/gb28181/sip/service-config/default-playback-protocol', N'GET', N'*', N'', N''),
-(8179, N'p', N'role_3', N'/api/gb28181/sip/service-config/fixed-address-playback', N'GET', N'*', N'', N''),
 (8181, N'p', N'role_3', N'/api/gb28181/play/:deviceId/:channelId', N'POST', N'*', N'', N''),
-(8182, N'p', N'role_3', N'/api/gb28181/sip/service-config/playback-settings', N'GET', N'*', N'', N''),
 (8183, N'p', N'role_3', N'/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', N'DELETE', N'*', N'', N''),
 (8184, N'p', N'role_3', N'/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', N'GET', N'*', N'', N''),
 (8185, N'p', N'role_3', N'/api/gb28181/device-mgmt/channel/:id/playback-sessions', N'POST', N'*', N'', N''),
@@ -3573,36 +3609,26 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8304, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz/cruise/tracks', N'POST', N'*', N'', N''),
 (8305, N'p', N'role_1', N'/api/sysRole/getRoles', N'GET', N'*', N'', N''),
 (8306, N'p', N'role_1', N'/api/sysDepartment/edit', N'PUT', N'*', N'', N''),
-(8307, N'p', N'role_1', N'/api/gb28181/sip/service-config/global-subscriptions', N'GET', N'*', N'', N''),
-(8308, N'p', N'role_1', N'/api/gb28181/sip/service-config/sip-command-timeout', N'PUT', N'*', N'', N''),
 (8309, N'p', N'role_1', N'/api/gb28181/sip-traces/messages', N'GET', N'*', N'', N''),
 (8310, N'p', N'role_1', N'/api/gb28181/logs/stream', N'GET', N'*', N'', N''),
 (8311, N'p', N'role_1', N'/api/gb28181/openapi-clients/:id', N'GET', N'*', N'', N''),
 (8312, N'p', N'role_1', N'/api/gb28181/openapi-clients/:id/enable', N'POST', N'*', N'', N''),
 (8313, N'p', N'role_1', N'/api/sysAffix/download/:id', N'GET', N'*', N'', N''),
-(8314, N'p', N'role_1', N'/api/gb28181/sip/service-config/sync-channels-on-online', N'GET', N'*', N'', N''),
-(8315, N'p', N'role_1', N'/api/gb28181/sip/service-config/global-subscriptions', N'PUT', N'*', N'', N''),
-(8316, N'p', N'role_1', N'/api/gb28181/sip/service-config/playback-settings', N'PUT', N'*', N'', N''),
 (8317, N'p', N'role_1', N'/api/gb28181/cloud-recordings/reconciliations', N'GET', N'*', N'', N''),
 (8318, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', N'DELETE', N'*', N'', N''),
-(8319, N'p', N'role_1', N'/api/gb28181/sip/service-config/preallocation-mode', N'PUT', N'*', N'', N''),
 (8320, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/sessions/viewers', N'GET', N'*', N'', N''),
 (8321, N'p', N'role_1', N'/api/sysAffix/list', N'GET', N'*', N'', N''),
-(8322, N'p', N'role_1', N'/api/gb28181/sip/service-config/play-auth', N'GET', N'*', N'', N''),
 (8323, N'p', N'role_1', N'/api/gb28181/cloud-recordings/files/:id', N'DELETE', N'*', N'', N''),
 (8324, N'p', N'role_1', N'/api/gb28181/recording-plans/:id/status', N'PATCH', N'*', N'', N''),
 (8325, N'p', N'role_1', N'/api/gb28181/stream-probes/operations/:operationId', N'GET', N'*', N'', N''),
 (8326, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/device-status', N'GET', N'*', N'', N''),
 (8327, N'p', N'role_1', N'/api/sysDict/edit', N'PUT', N'*', N'', N''),
-(8328, N'p', N'role_1', N'/api/gb28181/sip/service-config/sip-log', N'GET', N'*', N'', N''),
-(8329, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-channel-audio', N'PUT', N'*', N'', N''),
 (8330, N'p', N'role_1', N'/api/gb28181/channel-favorite-groups/:id/channels', N'POST', N'*', N'', N''),
 (8331, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/firmware-upgrade', N'POST', N'*', N'', N''),
 (8332, N'p', N'role_1', N'/api/gb28181/play/:streamId', N'DELETE', N'*', N'', N''),
 (8333, N'p', N'role_1', N'/api/sysDict/list', N'GET', N'*', N'', N''),
 (8334, N'p', N'role_1', N'/api/config/get', N'GET', N'*', N'', N''),
 (8335, N'p', N'role_1', N'/api/users/updateBasicInfo', N'PUT', N'*', N'', N''),
-(8336, N'p', N'role_1', N'/api/gb28181/sip/service-config/ptz-default-speed', N'PUT', N'*', N'', N''),
 (8337, N'p', N'role_1', N'/api/gb28181/device-mgmt/custom-groups/:id', N'PATCH', N'*', N'', N''),
 (8338, N'p', N'role_1', N'/api/gb28181/recording-plans/:id', N'GET', N'*', N'', N''),
 (8339, N'p', N'role_1', N'/api/gb28181/openapi-clients/:id/revocation-status', N'GET', N'*', N'', N''),
@@ -3632,8 +3658,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8363, N'p', N'role_1', N'/api/gb28181/openapi-clients/:id/audits', N'GET', N'*', N'', N''),
 (8364, N'p', N'role_1', N'/api/sysMenu/apis/:id', N'GET', N'*', N'', N''),
 (8365, N'p', N'role_1', N'/api/config/update', N'PUT', N'*', N'', N''),
-(8366, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-playback-protocol', N'GET', N'*', N'', N''),
-(8367, N'p', N'role_1', N'/api/gb28181/sip/service-config/position-history', N'GET', N'*', N'', N''),
 (8368, N'p', N'role_1', N'/api/gb28181/device-mgmt/permission-workbench/grant-targets', N'GET', N'*', N'', N''),
 (8369, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/proxies/push', N'GET', N'*', N'', N''),
 (8370, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId', N'DELETE', N'*', N'', N''),
@@ -3644,7 +3668,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8375, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/snapshot-sessions', N'POST', N'*', N'', N''),
 (8376, N'p', N'role_1', N'/api/gb28181/device-mgmt/directory/tree', N'GET', N'*', N'', N''),
 (8377, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId', N'DELETE', N'*', N'', N''),
-(8378, N'p', N'role_1', N'/api/gb28181/sip/service-config/position-history', N'PUT', N'*', N'', N''),
 (8379, N'p', N'role_1', N'/api/sysMenu/import', N'POST', N'*', N'', N''),
 (8380, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/shares', N'GET', N'*', N'', N''),
 (8381, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/rtp-servers', N'POST', N'*', N'', N''),
@@ -3678,7 +3701,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8409, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/proxies/push/:key', N'DELETE', N'*', N'', N''),
 (8410, N'p', N'role_1', N'/api/gb28181/cloud-recordings/downloads/:taskId', N'DELETE', N'*', N'', N''),
 (8411, N'p', N'role_1', N'/api/gb28181/security/access-rules/:id', N'DELETE', N'*', N'', N''),
-(8412, N'p', N'role_1', N'/api/gb28181/sip/service-config/sync-channels-on-online', N'PUT', N'*', N'', N''),
 (8413, N'p', N'role_1', N'/api/gb28181/device-mgmt/permission-workbench/assignments', N'POST', N'*', N'', N''),
 (8414, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight', N'POST', N'*', N'', N''),
 (8415, N'p', N'role_1', N'/api/plugins/example/list', N'GET', N'*', N'', N''),
@@ -3693,9 +3715,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8424, N'p', N'role_1', N'/api/sysDictItem/edit', N'PUT', N'*', N'', N''),
 (8425, N'p', N'role_1', N'/api/gb28181/zlm/nodes', N'GET', N'*', N'', N''),
 (8426, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', N'POST', N'*', N'', N''),
-(8427, N'p', N'role_1', N'/api/gb28181/sip/service-config/preallocation-mode', N'GET', N'*', N'', N'');
-
-INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
 (8428, N'p', N'role_1', N'/api/gb28181/device-traffic/coverage', N'GET', N'*', N'', N''),
 (8429, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/rtp-servers/close', N'POST', N'*', N'', N''),
 (8430, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/timeline', N'GET', N'*', N'', N''),
@@ -3707,19 +3726,19 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8436, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz/presets', N'POST', N'*', N'', N''),
 (8437, N'p', N'role_1', N'/api/sysAffix/updateName', N'PUT', N'*', N'', N''),
 (8438, N'p', N'role_1', N'/api/sysOperationLog/export', N'GET', N'*', N'', N''),
-(8439, N'p', N'role_1', N'/api/gb28181/sip/service-config/fixed-address-playback', N'GET', N'*', N'', N''),
 (8440, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/enable', N'POST', N'*', N'', N''),
 (8441, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/shares', N'PUT', N'*', N'', N''),
 (8442, N'p', N'role_1', N'/api/gb28181/device-mgmt/permission-workbench/grants/query', N'POST', N'*', N'', N''),
 (8443, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/device-control', N'POST', N'*', N'', N''),
 (8444, N'p', N'role_1', N'/api/sysRole/delete', N'DELETE', N'*', N'', N''),
 (8445, N'p', N'role_1', N'/api/sysApi/edit', N'PUT', N'*', N'', N''),
-(8446, N'p', N'role_1', N'/api/sysGen/refreshFields', N'PUT', N'*', N'', N''),
+(8446, N'p', N'role_1', N'/api/sysGen/refreshFields', N'PUT', N'*', N'', N'');
+
+INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
 (8447, N'p', N'role_1', N'/api/gb28181/playback-schemes/:id', N'PATCH', N'*', N'', N''),
 (8448, N'p', N'role_1', N'/api/gb28181/device-traffic/sessions', N'GET', N'*', N'', N''),
 (8449, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/proxies/push/:key/preflight', N'POST', N'*', N'', N''),
 (8450, N'p', N'role_1', N'/api/gb28181/home/drilldown/sip', N'GET', N'*', N'', N''),
-(8451, N'p', N'role_1', N'/api/gb28181/sip/service-config/sdp-extension', N'PUT', N'*', N'', N''),
 (8452, N'p', N'role_1', N'/api/sysLoginLog/unlock', N'POST', N'*', N'', N''),
 (8453, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId', N'GET', N'*', N'', N''),
 (8454, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/rtp-servers', N'GET', N'*', N'', N''),
@@ -3747,7 +3766,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8476, N'p', N'role_1', N'/api/sysDepartment/getDivision', N'GET', N'*', N'', N''),
 (8477, N'p', N'role_1', N'/api/gb28181/play/:deviceId/:channelId', N'POST', N'*', N'', N''),
 (8478, N'p', N'role_1', N'/api/sysGen/list', N'GET', N'*', N'', N''),
-(8479, N'p', N'role_1', N'/api/gb28181/sip/service-config/save-alarm-messages', N'GET', N'*', N'', N''),
 (8480, N'p', N'role_1', N'/api/gb28181/sip-traces/messages/:id', N'GET', N'*', N'', N''),
 (8481, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id', N'DELETE', N'*', N'', N''),
 (8482, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/subscriptions/:kind/renew', N'POST', N'*', N'', N''),
@@ -3764,11 +3782,8 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8493, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId', N'GET', N'*', N'', N''),
 (8494, N'p', N'role_1', N'/api/sysMenu/batchDelete', N'DELETE', N'*', N'', N''),
 (8495, N'p', N'role_1', N'/api/pluginsmanager/export', N'POST', N'*', N'', N''),
-(8496, N'p', N'role_1', N'/api/gb28181/sip/service-config/play-auth', N'PUT', N'*', N'', N''),
 (8497, N'p', N'role_1', N'/api/gb28181/recording-plans/:id/channels', N'GET', N'*', N'', N''),
 (8498, N'p', N'role_1', N'/api/users/profile', N'GET', N'*', N'', N''),
-(8499, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-channel-audio', N'GET', N'*', N'', N''),
-(8500, N'p', N'role_1', N'/api/gb28181/sip/service-config/fixed-address-playback', N'PUT', N'*', N'', N''),
 (8501, N'p', N'role_1', N'/api/gb28181/device-mgmt/custom-groups/:id/devices/remove', N'POST', N'*', N'', N''),
 (8502, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/firmware-upgrades', N'GET', N'*', N'', N''),
 (8503, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/control-capabilities', N'GET', N'*', N'', N''),
@@ -3798,14 +3813,12 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8527, N'p', N'role_1', N'/api/gb28181/recording-plans/:id/assignment-options/devices', N'GET', N'*', N'', N''),
 (8528, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz', N'POST', N'*', N'', N''),
 (8529, N'p', N'role_1', N'/api/sysOperationLog/delete', N'DELETE', N'*', N'', N''),
-(8530, N'p', N'role_1', N'/api/gb28181/sip/service-config/sip-command-timeout', N'GET', N'*', N'', N''),
 (8531, N'p', N'role_1', N'/api/gb28181/cloud-recordings/files/options', N'GET', N'*', N'', N''),
 (8532, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id', N'GET', N'*', N'', N''),
 (8533, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/streams/viewers', N'GET', N'*', N'', N''),
 (8534, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id', N'GET', N'*', N'', N''),
 (8535, N'p', N'role_1', N'/api/gb28181/recording-plans/:id', N'PUT', N'*', N'', N''),
 (8536, N'p', N'role_1', N'/api/pluginsmanager/uninstall', N'DELETE', N'*', N'', N''),
-(8537, N'p', N'role_1', N'/api/gb28181/sip/service-config/ptz-default-speed', N'GET', N'*', N'', N''),
 (8538, N'p', N'role_1', N'/api/gb28181/sip/setup/skip', N'POST', N'*', N'', N''),
 (8539, N'p', N'role_1', N'/api/sysLoginLog/:id', N'GET', N'*', N'', N''),
 (8540, N'p', N'role_1', N'/api/gb28181/recording-plans', N'GET', N'*', N'', N''),
@@ -3816,8 +3829,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8545, N'p', N'role_1', N'/api/sysMenu/export', N'GET', N'*', N'', N''),
 (8546, N'p', N'role_1', N'/api/sysJobs/add', N'POST', N'*', N'', N''),
 (8547, N'p', N'role_1', N'/api/sysJobResults/list', N'GET', N'*', N'', N''),
-(8548, N'p', N'role_1', N'/api/gb28181/sip/service-config/sip-log', N'PUT', N'*', N'', N''),
-(8549, N'p', N'role_1', N'/api/gb28181/sip/service-config/save-alarm-messages', N'PUT', N'*', N'', N''),
 (8550, N'p', N'role_1', N'/api/gb28181/cloud-recordings/reconciliations', N'POST', N'*', N'', N''),
 (8551, N'p', N'role_1', N'/api/gb28181/cascade/platforms', N'GET', N'*', N'', N''),
 (8552, N'p', N'role_1', N'/api/sysMenu/getMenuList', N'GET', N'*', N'', N''),
@@ -3832,7 +3843,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8561, N'p', N'role_1', N'/api/sysGen/:id', N'DELETE', N'*', N'', N''),
 (8562, N'p', N'role_1', N'/api/sysJobs/setStatus', N'PUT', N'*', N'', N''),
 (8563, N'p', N'role_1', N'/api/sysJobs/executeNow', N'POST', N'*', N'', N''),
-(8564, N'p', N'role_1', N'/api/gb28181/sip/service-config/online-on-heartbeat', N'GET', N'*', N'', N''),
 (8565, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/ptz/extended', N'POST', N'*', N'', N''),
 (8566, N'p', N'role_1', N'/api/gb28181/openapi-clients/:id/revoke', N'POST', N'*', N'', N''),
 (8567, N'p', N'role_1', N'/api/sysJobs/edit', N'PUT', N'*', N'', N''),
@@ -3842,7 +3852,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8572, N'p', N'role_1', N'/api/gb28181/device-mgmt/catalog/tree/:id/children', N'GET', N'*', N'', N''),
 (8573, N'p', N'role_1', N'/api/gb28181/security/policy', N'PUT', N'*', N'', N''),
 (8574, N'p', N'role_1', N'/api/codegen/preview', N'GET', N'*', N'', N''),
-(8575, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-playback-protocol', N'PUT', N'*', N'', N''),
 (8576, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/ffmpeg-sources', N'GET', N'*', N'', N''),
 (8577, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/download-sessions', N'POST', N'*', N'', N''),
 (8578, N'p', N'role_1', N'/api/users/uploadAvatar', N'POST', N'*', N'', N''),
@@ -3851,7 +3860,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8581, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/proxies/pull/:key/preflight', N'POST', N'*', N'', N''),
 (8582, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/ffmpeg-sources', N'POST', N'*', N'', N''),
 (8583, N'p', N'role_1', N'/api/sysJobs/:id', N'GET', N'*', N'', N''),
-(8584, N'p', N'role_1', N'/api/gb28181/sip/service-config/online-on-heartbeat', N'PUT', N'*', N'', N''),
 (8585, N'p', N'role_1', N'/api/gb28181/playback-schemes/:id/layout', N'PUT', N'*', N'', N''),
 (8586, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id/stream-transport', N'PATCH', N'*', N'', N''),
 (8587, N'p', N'role_1', N'/api/sysDict/getAllDicts', N'GET', N'*', N'', N''),
@@ -3866,13 +3874,11 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8596, N'p', N'role_1', N'/api/gb28181/recording-plans/channels/:channelId/recording-mode', N'PATCH', N'*', N'', N''),
 (8597, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key/preflight', N'POST', N'*', N'', N''),
 (8598, N'p', N'role_1', N'/api/gb28181/alarms/clear-all', N'POST', N'*', N'', N''),
-(8599, N'p', N'role_1', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'PUT', N'*', N'', N''),
 (8600, N'p', N'role_1', N'/api/gb28181/device-mgmt/custom-groups/:id/move', N'POST', N'*', N'', N''),
 (8601, N'p', N'role_1', N'/api/gb28181/device-mgmt/devices', N'GET', N'*', N'', N''),
 (8602, N'p', N'role_1', N'/api/codegen/insertmenuandapi', N'POST', N'*', N'', N''),
 (8603, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/sip-trace-capture', N'GET', N'*', N'', N''),
 (8604, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/enabled', N'PUT', N'*', N'', N''),
-(8605, N'p', N'role_1', N'/api/gb28181/sip/service-config/playback-settings', N'GET', N'*', N'', N''),
 (8606, N'p', N'role_1', N'/api/gb28181/cloud-recordings/active/:id/stop', N'POST', N'*', N'', N''),
 (8607, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/restart', N'POST', N'*', N'', N''),
 (8608, N'p', N'role_1', N'/api/gb28181/zlm/scheduler', N'GET', N'*', N'', N''),
@@ -3895,10 +3901,6 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8625, N'p', N'role_1', N'/api/users/updateAccount', N'PUT', N'*', N'', N''),
 (8626, N'p', N'role_1', N'/api/gb28181/cloud-recordings/files', N'GET', N'*', N'', N''),
 (8627, N'p', N'role_1', N'/api/gb28181/device-mgmt/channel/:id', N'PATCH', N'*', N'', N''),
-(8628, N'p', N'role_1', N'/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', N'GET', N'*', N'', N'');
-
-INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
-(8629, N'p', N'role_1', N'/api/gb28181/sip/service-config/default-channel-stream-transport', N'PUT', N'*', N'', N''),
 (8630, N'p', N'role_1', N'/api/gb28181/zlm/nodes/:id/recordings/runtime/start', N'POST', N'*', N'', N''),
 (8631, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/subscriptions/:kind', N'PATCH', N'*', N'', N''),
 (8632, N'p', N'role_1', N'/api/gb28181/openapi-clients/capabilities', N'GET', N'*', N'', N''),
@@ -3926,7 +3928,29 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (8655, N'p', N'role_3', N'/api/gb28181/play/lifecycles/:lifecycleId', N'GET', N'*', N'', N''),
 (8656, N'p', N'role_3', N'/api/gb28181/play/lifecycles', N'GET', N'*', N'', N''),
 (8658, N'p', N'role_1', N'/api/gb28181/openapi-clients/capabilities/catalog', N'GET', N'*', N'', N''),
-(8659, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'*', N'', N'');
+(8659, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'*', N'', N''),
+(8660, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'POST', N'*', N'', N''),
+(8661, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'GET', N'*', N'', N''),
+(8662, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'GET', N'*', N'', N''),
+(8663, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'DELETE', N'*', N'', N''),
+(8664, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id/download-link', N'POST', N'*', N'', N''),
+(8665, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/download/:token', N'GET', N'*', N'', N'');
+
+INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
+(8666, N'p', N'role_1', N'/api/gb28181/zlm/sessions/network', N'GET', N'*', N'', N''),
+(8667, N'p', N'role_1', N'/api/gb28181/zlm/sessions/viewers', N'GET', N'*', N'', N''),
+(8668, N'p', N'role_1', N'/api/gb28181/record-cache/tasks', N'POST', N'*', N'', N''),
+(8669, N'p', N'role_1', N'/api/gb28181/record-cache/tasks', N'GET', N'*', N'', N''),
+(8670, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId', N'GET', N'*', N'', N''),
+(8671, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId/cancel', N'POST', N'*', N'', N''),
+(8672, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId', N'DELETE', N'*', N'', N''),
+(8673, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId/content', N'GET', N'*', N'', N''),
+(8674, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId/downloads', N'POST', N'*', N'', N''),
+(8675, N'p', N'role_1', N'/api/gb28181/record-cache/downloads/:downloadId', N'GET', N'*', N'', N''),
+(8676, N'p', N'role_1', N'/api/gb28181/record-cache/downloads/:downloadId', N'DELETE', N'*', N'', N''),
+(8677, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId/favorite', N'POST', N'*', N'', N''),
+(8678, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'GET', N'*', N'', N''),
+(8679, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'PUT', N'*', N'', N'');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 INSERT INTO [sys_civil_code] ([code], [name], [short_name], [parent_code], [level], [pinyin], [created_at], [updated_at]) VALUES
 (N'110000', N'北京市', N'北京市', N'', 1, N'', N'2026-07-18 17:27:38.000000', N'2026-07-18 17:27:38.000000'),
@@ -7621,6 +7645,14 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140508, 140358, N'', N'GbDeviceStorageCardFormat', NULL, N'', N'格式化存储卡', 0, 1, 0, 0, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:device:format_sd', N'2026-09-20 17:12:58.000000', N'2026-09-20 17:12:58.000000', NULL, 1),
 (140509, 0, N'/gb28181/snapshot-library', N'snapshot-library', NULL, N'gb28181/snapshot-library/index', N'图像库', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:Images', 55, 2, 0, N'', N'2026-09-20 17:19:27.000000', N'2026-09-20 17:23:13.000000', NULL, 1),
 (140510, 140355, N'/gb28181/playback-log', N'gb28181-playback-log', NULL, N'gb28181/playback-log/index', N'播放日志', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:FileClock', 7, 2, 0, N'gb28181:play-log:view', N'2026-09-21 20:34:45.000000', N'2026-09-21 20:34:45.000000', NULL, 1);
+
+INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [component], [title], [is_full], [hide], [disable], [keep_alive], [affix], [link], [iframe], [svg_icon], [icon], [sort], [type], [is_link], [permission], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
+(140610, 0, N'/gb28181/record-cache', N'gb28181-record-cache', N'', N'gb28181/record-cache/index', N'录像缓存', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:HardDriveDownload', 52, 2, 0, N'gb28181:record-cache:view', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(140611, 140610, N'', N'', N'', N'', N'创建缓存', 0, 0, 0, 1, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:record-cache:create', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(140612, 140610, N'', N'', N'', N'', N'取消缓存', 0, 0, 0, 1, 0, N'', 0, N'', N'', 2, 3, 0, N'gb28181:record-cache:cancel', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(140613, 140610, N'', N'', N'', N'', N'下载录像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 3, 3, 0, N'gb28181:record-cache:download', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(140614, 140610, N'', N'', N'', N'', N'删除缓存', 0, 0, 0, 1, 0, N'', 0, N'', N'', 4, 3, 0, N'gb28181:record-cache:delete', N'2026-10-03 18:00:00.000000', N'2026-10-03 18:00:00.000000', NULL, 1),
+(140615, 140610, N'', N'', N'', N'', N'收藏缓存', 0, 0, 0, 1, 0, N'', 0, N'', N'', 5, 3, 0, N'gb28181:record-cache:favorite', N'2026-10-05 12:00:00.000000', N'2026-10-05 12:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_menu] OFF;
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (1, 5),
@@ -7730,38 +7762,8 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140360, 218),
 (140360, 219),
 (140360, 237),
-(140360, 261),
-(140360, 263),
-(140360, 265),
-(140360, 267),
-(140360, 269),
-(140360, 271),
-(140360, 273),
-(140360, 275),
-(140360, 299),
-(140360, 301),
-(140360, 306),
-(140360, 308),
-(140360, 332),
 (140361, 220),
 (140361, 221),
-(140361, 253),
-(140361, 262),
-(140361, 264),
-(140361, 266),
-(140361, 268),
-(140361, 270),
-(140361, 272),
-(140361, 274),
-(140361, 276),
-(140361, 300),
-(140361, 302),
-(140361, 307),
-(140361, 309),
-(140361, 333),
-(140361, 530),
-(140361, 531),
-(140361, 532),
 (140362, 222),
 (140362, 223),
 (140362, 224),
@@ -7783,8 +7785,6 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140369, 217),
 (140369, 218),
 (140369, 220),
-(140369, 252),
-(140369, 253),
 (140370, 254),
 (140370, 255),
 (140370, 256),
@@ -7811,10 +7811,7 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140378, 324),
 (140379, 326),
 (140379, 327),
-(140381, 306),
-(140381, 308),
 (140381, 335),
-(140381, 536),
 (140381, 595),
 (140382, 367),
 (140382, 368),
@@ -7822,9 +7819,7 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140382, 370),
 (140383, 369),
 (140383, 370),
-(140383, 373);
-
-INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
+(140383, 373),
 (140384, 368),
 (140384, 371),
 (140384, 372),
@@ -7859,7 +7854,9 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140401, 381),
 (140401, 382),
 (140401, 383),
-(140402, 384),
+(140402, 384);
+
+INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140402, 385),
 (140402, 386),
 (140402, 387),
@@ -8024,9 +8021,7 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140475, 463),
 (140475, 484),
 (140475, 520),
-(140476, 350);
-
-INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
+(140476, 350),
 (140477, 395),
 (140478, 402),
 (140478, 403),
@@ -8061,7 +8056,9 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140265, 106),
 (140265, 187),
 (140371, 277),
-(140371, 278),
+(140371, 278);
+
+INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140371, 279),
 (140371, 281),
 (140371, 283),
@@ -8072,8 +8069,6 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140452, 599),
 (140362, 600),
 (140362, 601),
-(140369, 602),
-(140369, 603),
 (140225, 604),
 (140377, 605),
 (140459, 606),
@@ -8086,7 +8081,30 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140483, 613),
 (140379, 617),
 (140379, 618),
-(140475, 619);
+(140475, 619),
+(140435, 621),
+(140435, 622),
+(140435, 623),
+(140435, 624),
+(140435, 625),
+(140435, 626),
+(140427, 627),
+(140427, 628),
+(140610, 629),
+(140610, 630),
+(140610, 631),
+(140610, 632),
+(140610, 633),
+(140610, 634),
+(140442, 629),
+(140442, 630),
+(140442, 631),
+(140610, 635),
+(140610, 636),
+(140610, 637),
+(140610, 638),
+(140369, 639),
+(140369, 640);
 SET IDENTITY_INSERT [sys_role] ON;
 INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES
 (1, N'系统管理员', 0, 1, N'最高权限管理员角色', 0, N'2025-09-01 17:32:12.000000', N'2025-09-30 15:53:24.000000', NULL, 1, 1, N''),
@@ -8304,7 +8322,13 @@ INSERT INTO [sys_role_menu] ([role_id], [menu_id]) VALUES
 (3, 140452),
 (3, 140455),
 (3, 140457),
-(3, 140510);
+(3, 140510),
+(1, 140610),
+(1, 140611),
+(1, 140612),
+(1, 140613),
+(1, 140614),
+(1, 140615);
 INSERT INTO [sys_user_role] ([user_id], [role_id]) VALUES
 (1, 1);
 SET IDENTITY_INSERT [sys_users] ON;

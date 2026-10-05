@@ -28,6 +28,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordcache"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
@@ -304,6 +305,7 @@ var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
 var recordingCatalogService *gbrecording.CatalogService
 var recordingPlanEngine *recordingplan.Engine
 var recordingPlanLeases *play.SourceLeaseRegistry
+var recordCacheLeases *play.SourceLeaseRegistry
 var talkSvc *gbtalk.Service
 var talkRepo *gbtalk.GormRepo
 var talkCleanupWorker *gbtalk.CleanupWorker
@@ -359,6 +361,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 }
 
 func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authority) bool {
+	app.ZapLog.Info("startControlPlane 开始执行", zap.String("event", "bootstrap.start"))
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
 	credentialWarningReported := cascadeCredentialWarningNeeded(err, false)
@@ -378,14 +381,17 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	))
 
 	// 固件仓库管理
+	app.ZapLog.Info("初始化固件仓库控制器", zap.String("event", "bootstrap.firmware_repository"))
 	firmwareRepoService = firmware.NewRepositoryService(app.DB())
 	firmwareTokenService = firmware.NewDownloadTokenService(app.Cache)
-	gbroutes.SetFirmwareRepositoryController(gbcontrollers.NewFirmwareRepositoryController(
+	ctrl := gbcontrollers.NewFirmwareRepositoryController(
 		app.DB(),
 		firmwareRepoService,
 		firmwareTokenService,
 		"uploads",
-	))
+	)
+	app.ZapLog.Info("固件仓库控制器已创建", zap.String("event", "bootstrap.firmware_repository_created"), zap.Bool("is_nil", ctrl == nil))
+	gbroutes.SetFirmwareRepositoryController(ctrl)
 
 	metricsAgg = metrics.NewAggregator()
 	metricsRecorder = metricsAgg
@@ -993,6 +999,8 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations, deviceIntents)
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
+	// 录像缓存依赖回放服务与录像查询快照，必须排在它们之后。
+	setupRecordCacheRuntime()
 	installZLMManagementController()
 
 	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
@@ -1108,6 +1116,26 @@ func stopSIPDependencies(ctx context.Context) error {
 	return err
 }
 
+// alignPlaybackIntentBinding 保证 ServiceConfig.Intents 与实际 opener 的 Intent 子步骤能力一致。
+//
+// 回放的持久意图路径要求 RTP 侧实现 IntentRTPFactory;legacy opener(*zlmRTPOpener)
+// 只有普通 Open,Service.Create 在进入持久意图分支时会做工厂断言
+// (playback/service.go 的 s.rtp.(IntentRTPFactory)),断言失败直接返回 ErrRTPUnavailable。
+// 该错误不是 ServiceError,mapPlaybackServiceError 落到兜底分支,对外表现为
+// 502 + 「回放控制失败」,且不建会话、不调度媒体节点、不发 SIP INVITE。
+//
+// 因此 Intents 非 nil 时必须只与具备 Intent 能力的 opener 搭配;
+// 不匹配时返回 (nil, true) 表示已降级到 legacy 绑定,由调用方记录告警。
+func alignPlaybackIntentBinding(opener gbplayback.RTPOpener, intents *playauth.DeviceOperationIntentStore) (*playauth.DeviceOperationIntentStore, bool) {
+	if intents == nil {
+		return nil, false
+	}
+	if _, ok := opener.(gbplayback.IntentRTPFactory); ok {
+		return intents, false
+	}
+	return nil, true
+}
+
 func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier, intents *playauth.DeviceOperationIntentStore) {
 	if inviter == nil || deviceOperations == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
@@ -1118,12 +1146,18 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 		return
 	}
 	opener := gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil)
+	intents, legacyBinding := alignPlaybackIntentBinding(opener, intents)
+	if legacyBinding {
+		app.ZapLog.Warn("GB28181 设备录像回放运行在 legacy 媒体路径(装配的 opener 不具备 Intent 子步骤能力,已关闭持久回放意图;若继续传入 Intents 会让每次创建会话以 502 失败)",
+			zap.String("event", "gb28181.lifecycle.playback_legacy_binding"))
+	}
+	playbackMetrics = &gbplayback.Metrics{}
 	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
 		IdleTimeout: cfg.Playback.IdleTimeout(),
 		MaxSession:  cfg.Playback.MaxSession(),
+		Metrics:     playbackMetrics,
 	})
 	playbackRegistry = registry
-	playbackMetrics = &gbplayback.Metrics{}
 	service := gbplayback.NewService(
 		registry,
 		gbplayback.NewZLMNodePicker(zlmScheduler, cfg.SIP.ServerID),
@@ -1178,6 +1212,98 @@ func stopPTZRuntime() error {
 	ptzScheduler = nil
 	ptzService = nil
 	return nil
+}
+
+// recordCacheService 持有「设备录像缓存到服务器」的任务编排器（供优雅关闭引用）。
+var recordCacheService *recordcache.Service
+
+// recordCacheDownloads 是录像缓存「票据下载」的任务登记处。
+//
+// ⛔ 与云端录像**各用一个实例**：两者的并发预算、票据命名空间、生命周期
+// 互不干扰，共用一份会让"缓存下载占满额度导致云录像下不了"这类问题极难排查。
+var recordCacheDownloads *gbrecording.DownloadRegistry
+
+// setupRecordCacheRuntime 装配设备录像缓存任务的编排器。
+//
+// 编排是**轮询驱动**的（每 TickInterval 扫一遍 queued/running 任务），
+// 所以进程重启后不需要额外的恢复流程：库里状态是什么，下一轮 tick 就接着推。
+// recordCacheLeasesAdapter 把 play.SourceLeaseRegistry 适配成 recordcache.SourceLeases。
+//
+// ⛔ Go 的接口是结构化匹配，但**方法签名里的具名类型必须逐字相同**：
+// registry.Acquire 返回 *play.SourceLease，与 recordcache.SourceLease 是不同类型，
+// 直接传会报 `wrong type for method Acquire` —— 看着像"少了个方法"，
+// 其实只是返回类型不同名。包一层适配即可。
+type recordCacheLeasesAdapter struct{ registry *play.SourceLeaseRegistry }
+
+func (a recordCacheLeasesAdapter) Acquire(streamID string, generation uint64, consumer string) recordcache.SourceLease {
+	if a.registry == nil {
+		return nil
+	}
+	return a.registry.Acquire(streamID, generation, consumer)
+}
+
+func setupRecordCacheRuntime() {
+	if app.DB() == nil || playbackService == nil || recordQueryService == nil || zlmRegistry == nil {
+		recordCacheService = nil
+		recordCacheLeases = nil
+		recordCacheDownloads = nil
+		gbcontrollers.SetRecordCacheRuntime(nil)
+		gbroutes.SetRecordCacheSourceLeaseChecker(nil)
+		app.ZapLog.Info("GB28181 录像缓存 service 跳过装配(DB/回放/录像查询/ZLM 依赖未就绪)",
+			zap.String("event", "gb28181.lifecycle.record_cache_skipped"))
+		return
+	}
+	repo := recordcache.NewGormRepo(app.DB())
+	// ⛔ 保流租约：录制器在 ZLM 眼里不算 reader，回放流建起来 ~20 秒后
+	// （general.streamNoneReaderDelayMS=20000）ZLM 就会问平台要不要关；
+	// 平台的通道级策略拿 pb- 流名去通道表查不到 → 判「关」→ 正在录制的流被拆。
+	// 走 recordingplan 的同一条租约通道登记后，hook 会回 close=false 保住流。
+	recordCacheLeases = play.NewSourceLeaseRegistry()
+	recordCacheDownloads = gbrecording.NewDownloadRegistry(gbrecording.DownloadRegistryConfig{})
+	service := recordcache.NewService(recordcache.Options{
+		Repo:     repo,
+		Targets:  repo,
+		Playback: playbackService,
+		Leases:   recordCacheLeasesAdapter{registry: recordCacheLeases},
+		// 真实时长/大小来自 gb_recording_file（on_record_mp4 hook 已准确入库）；
+		// ZLM 的 getMp4RecordFile 不回这两项，只有它会让进度永远停在 0。
+		FileIndex: recordcache.NewGormSegmentFileIndex(app.DB()),
+		Snapshots: recordQueryService.Snapshots(),
+		Nodes:     zlmRegistry,
+		Client:    func(n *node.Node) recordcache.Recorder { return gbzlm.NewClientForNode(n) },
+		// 同源下载复用云端录像那套代理（Range 透传 + Content-Disposition + 超时/中断处理）。
+		Content: gbrecording.NewContentProxy(),
+		// 票据下载（浏览器原生下载）：见 recordcache/download.go。
+		Downloads: recordCacheDownloads,
+		Speed:     recordcache.NewGormSpeedSource(app.DB()),
+		// 保留天数与服务配置页的「云端录像默认保留天数」是**同一个值**：
+		// 缓存产出与云端录像产出走同一条保留策略，不另起一套配置。
+		RetentionDays:   gbcontrollers.CloudRecordingRetentionDays,
+		DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(),
+	})
+	gbroutes.SetRecordCacheSourceLeaseChecker(recordCacheLeases)
+	service.Start(context.Background())
+	recordCacheService = service
+	gbcontrollers.SetRecordCacheRuntime(service)
+	app.ZapLog.Info("GB28181 录像缓存 service 已装配(服务器后台缓存 + 任务管理)",
+		zap.String("event", "gb28181.lifecycle.record_cache_ready"))
+}
+
+// CloseRecordCacheRuntime 停止编排循环并卸载控制器。
+func CloseRecordCacheRuntime() {
+	if recordCacheService != nil {
+		// Close 会释放全部保流租约（残留租约会让 ZLM 一直不回收那些流）。
+		recordCacheService.Close()
+		recordCacheService = nil
+	}
+	gbroutes.SetRecordCacheSourceLeaseChecker(nil)
+	recordCacheLeases = nil
+	if recordCacheDownloads != nil {
+		// 关掉登记处会取消所有在途下载（浏览器那边表现为下载中断）。
+		recordCacheDownloads.Close()
+		recordCacheDownloads = nil
+	}
+	gbcontrollers.SetRecordCacheRuntime(nil)
 }
 
 func setupRecordingRuntime(cfg gbconfig.Config) {

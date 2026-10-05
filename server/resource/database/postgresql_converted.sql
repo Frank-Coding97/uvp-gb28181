@@ -1,7 +1,7 @@
 -- UVP-GB28181 PostgreSQL release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: manual_edit_firmware_repository_2026_10_02
+-- Schema fingerprint: manual_edit_record_cache_2026_10_03
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -677,31 +677,6 @@ CREATE INDEX idx_firmware_upgrade_device_sn ON "gb_device_firmware_upgrade" ("de
 CREATE INDEX idx_firmware_upgrade_device_status ON "gb_device_firmware_upgrade" ("device_id", "status");
 CREATE INDEX idx_firmware_upgrade_device_time ON "gb_device_firmware_upgrade" ("device_id", "created_at");
 
-DROP TABLE IF EXISTS "gb_firmware_repository";
-CREATE TABLE "gb_firmware_repository" (
-  "id" BIGSERIAL PRIMARY KEY,
-  "firmware_id" VARCHAR(64) NOT NULL,
-  "version" VARCHAR(255) NOT NULL,
-  "manufacturer" VARCHAR(255) NOT NULL,
-  "model_pattern" VARCHAR(500),
-  "file_name" VARCHAR(500) NOT NULL,
-  "file_size" BIGINT NOT NULL,
-  "file_hash" VARCHAR(128),
-  "storage_path" TEXT NOT NULL,
-  "storage_key" VARCHAR(500),
-  "release_date" DATE,
-  "status" VARCHAR(20) NOT NULL,
-  "uploaded_by" BIGINT NOT NULL,
-  "dept_id" BIGINT NOT NULL,
-  "created_at" TIMESTAMP(6) NOT NULL,
-  "updated_at" TIMESTAMP(6) NOT NULL,
-  "remark" TEXT,
-  CONSTRAINT firmware_id UNIQUE ("firmware_id")
-);
-CREATE INDEX idx_manu_model ON "gb_firmware_repository" ("manufacturer", "version");
-CREATE INDEX idx_file_hash ON "gb_firmware_repository" ("file_hash");
-CREATE INDEX idx_dept_status ON "gb_firmware_repository" ("dept_id", "status");
-
 DROP TABLE IF EXISTS "gb_device_grant";
 CREATE TABLE "gb_device_grant" (
   "id" BIGSERIAL PRIMARY KEY,
@@ -973,6 +948,31 @@ CREATE TABLE "gb_device_video_param" (
   CONSTRAINT uk_video_param_target UNIQUE ("device_id", "target_code", "stream_number")
 );
 CREATE INDEX idx_video_param_device ON "gb_device_video_param" ("device_id", "observed_at");
+
+DROP TABLE IF EXISTS "gb_firmware_repository";
+CREATE TABLE "gb_firmware_repository" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "firmware_id" VARCHAR(64) NOT NULL,
+  "version" VARCHAR(255) NOT NULL,
+  "manufacturer" VARCHAR(255) NOT NULL,
+  "model_pattern" VARCHAR(500),
+  "file_name" VARCHAR(500) NOT NULL,
+  "file_size" BIGINT NOT NULL,
+  "file_hash" VARCHAR(128),
+  "storage_path" TEXT NOT NULL,
+  "storage_key" VARCHAR(500),
+  "release_date" DATE,
+  "status" VARCHAR(20) NOT NULL,
+  "uploaded_by" BIGINT NOT NULL,
+  "dept_id" BIGINT NOT NULL,
+  "created_at" TIMESTAMP(6) NOT NULL,
+  "updated_at" TIMESTAMP(6) NOT NULL,
+  "remark" TEXT,
+  CONSTRAINT firmware_id UNIQUE ("firmware_id")
+);
+CREATE INDEX idx_manu_model ON "gb_firmware_repository" ("manufacturer", "version");
+CREATE INDEX idx_file_hash ON "gb_firmware_repository" ("file_hash");
+CREATE INDEX idx_dept_status ON "gb_firmware_repository" ("dept_id", "status");
 
 DROP TABLE IF EXISTS "gb_mobile_position_history";
 CREATE TABLE "gb_mobile_position_history" (
@@ -1347,6 +1347,58 @@ CREATE TABLE "gb_ptz_state" (
 );
 CREATE INDEX idx_ptz_state_device ON "gb_ptz_state" ("device_id");
 CREATE INDEX idx_ptz_state_received ON "gb_ptz_state" ("received_at");
+
+DROP TABLE IF EXISTS "gb_record_cache_task";
+CREATE TABLE "gb_record_cache_task" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "task_id" VARCHAR(64) NOT NULL,
+  "owner_dept_id" BIGINT NOT NULL DEFAULT 0,
+  "created_by_user" INTEGER NOT NULL DEFAULT 0,
+  "created_by_name" VARCHAR(64) NOT NULL DEFAULT '',
+  "channel_id" INTEGER NOT NULL,
+  "device_id" VARCHAR(20) NOT NULL,
+  "channel_code" VARCHAR(20) NOT NULL DEFAULT '',
+  "channel_name" VARCHAR(255) NOT NULL DEFAULT '',
+  "device_name" VARCHAR(255) NOT NULL DEFAULT '',
+  "start_time" TIMESTAMP NOT NULL,
+  "end_time" TIMESTAMP NOT NULL,
+  "record_type" VARCHAR(16) NOT NULL DEFAULT 'all',
+  "record_key" VARCHAR(255) NOT NULL DEFAULT '',
+  "download_speed" INTEGER NOT NULL DEFAULT 4,
+  "node_id" BIGINT NOT NULL DEFAULT 0,
+  "vhost" VARCHAR(128) NOT NULL DEFAULT '__defaultVhost__',
+  "app" VARCHAR(64) NOT NULL DEFAULT 'rtp',
+  "stream" VARCHAR(64) NOT NULL DEFAULT '',
+  "session_id" VARCHAR(64),
+  "file_id" BIGINT,
+  "file_name" VARCHAR(255) NOT NULL DEFAULT '',
+  "file_path" VARCHAR(1000) NOT NULL DEFAULT '',
+  "file_size" BIGINT NOT NULL DEFAULT 0,
+  "cached_bytes" BIGINT NOT NULL DEFAULT 0,
+  "estimated_bytes" BIGINT NOT NULL DEFAULT 0,
+  "state" VARCHAR(20) NOT NULL,
+  "last_error" VARCHAR(500) NOT NULL DEFAULT '',
+  "request_id" VARCHAR(64) NOT NULL DEFAULT '',
+  "cursor_at" TIMESTAMP,
+  "segments" TEXT NOT NULL,
+  "started_at" TIMESTAMP,
+  "finished_at" TIMESTAMP,
+  "expires_at" TIMESTAMP,
+  "favorite" SMALLINT NOT NULL DEFAULT 0,
+  "created_at" TIMESTAMP,
+  "updated_at" TIMESTAMP,
+  CONSTRAINT uk_record_cache_task_id UNIQUE ("task_id")
+);
+COMMENT ON TABLE "gb_record_cache_task" IS '设备录像缓存任务（拉流缓存到服务器）';
+COMMENT ON COLUMN "gb_record_cache_task"."record_key" IS '录像段标识（续播分片要复用同一个）';
+COMMENT ON COLUMN "gb_record_cache_task"."session_id" IS '回放会话 ID（形如 pb-xxxx，字符型）';
+COMMENT ON COLUMN "gb_record_cache_task"."cursor_at" IS '分段续播游标（下一分片会话的起始时间）';
+COMMENT ON COLUMN "gb_record_cache_task"."segments" IS '分片产出清单（JSON 数组）';
+COMMENT ON COLUMN "gb_record_cache_task"."favorite" IS '收藏标记（收藏后不参与保留期自动清理）';
+CREATE INDEX idx_record_cache_task_state_created ON "gb_record_cache_task" ("state", "created_at");
+CREATE INDEX idx_record_cache_task_channel_state ON "gb_record_cache_task" ("channel_id", "state");
+CREATE INDEX idx_record_cache_task_dept_state ON "gb_record_cache_task" ("owner_dept_id", "state");
+CREATE INDEX idx_record_cache_task_expires ON "gb_record_cache_task" ("expires_at");
 
 DROP TABLE IF EXISTS "gb_recording_file";
 CREATE TABLE "gb_recording_file" (
@@ -2952,30 +3004,12 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (246, '查询告警详情', '/api/gb28181/alarms/:id', 'GET', '告警管理', '2026-08-04 22:41:38.000000', '2026-08-04 22:41:38.000000', NULL, 1),
 (247, '物理删除单条告警', '/api/gb28181/alarms/:id', 'DELETE', '告警管理', '2026-08-04 22:41:38.000000', '2026-08-04 22:41:38.000000', NULL, 1),
 (248, '批量物理删除告警', '/api/gb28181/alarms/batch-delete', 'POST', '告警管理', '2026-08-04 22:41:38.000000', '2026-08-04 22:41:38.000000', NULL, 1),
-(252, '读取移动位置历史轨迹配置', '/api/gb28181/sip/service-config/position-history', 'GET', '国标服务配置', '2026-08-07 14:46:22.000000', '2026-08-07 14:46:22.000000', NULL, 1),
-(253, '修改移动位置历史轨迹配置', '/api/gb28181/sip/service-config/position-history', 'PUT', '国标服务配置', '2026-08-07 14:46:22.000000', '2026-08-07 14:46:22.000000', NULL, 1),
 (254, '查询播放方案', '/api/gb28181/playback-schemes', 'GET', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
 (255, '查看播放方案', '/api/gb28181/playback-schemes/:id', 'GET', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
 (256, '创建播放方案', '/api/gb28181/playback-schemes', 'POST', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
 (257, '重命名播放方案', '/api/gb28181/playback-schemes/:id', 'PATCH', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
 (258, '覆盖播放方案', '/api/gb28181/playback-schemes/:id/layout', 'PUT', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
 (259, '删除播放方案', '/api/gb28181/playback-schemes/:id', 'DELETE', '多屏播放', '2026-08-07 17:23:46.000000', '2026-08-07 17:23:46.000000', NULL, 1),
-(261, '读取云台默认速度配置', '/api/gb28181/sip/service-config/ptz-default-speed', 'GET', '国标服务配置', '2026-08-09 16:03:32.000000', '2026-08-09 16:03:32.000000', NULL, 1),
-(262, '修改云台默认速度配置', '/api/gb28181/sip/service-config/ptz-default-speed', 'PUT', '国标服务配置', '2026-08-09 16:03:32.000000', '2026-08-09 16:03:32.000000', NULL, 1),
-(263, '读取设备上线同步通道配置', '/api/gb28181/sip/service-config/sync-channels-on-online', 'GET', '国标服务配置', '2026-08-09 16:57:04.000000', '2026-08-09 16:57:04.000000', NULL, 1),
-(264, '修改设备上线同步通道配置', '/api/gb28181/sip/service-config/sync-channels-on-online', 'PUT', '国标服务配置', '2026-08-09 16:57:04.000000', '2026-08-09 16:57:04.000000', NULL, 1),
-(265, '读取 SIP 日志配置', '/api/gb28181/sip/service-config/sip-log', 'GET', '国标服务配置', '2026-08-09 17:36:24.000000', '2026-08-09 17:36:24.000000', NULL, 1),
-(266, '修改 SIP 日志配置', '/api/gb28181/sip/service-config/sip-log', 'PUT', '国标服务配置', '2026-08-09 17:36:24.000000', '2026-08-09 17:36:24.000000', NULL, 1),
-(267, '读取忽略通道离线异常通知配置', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'GET', '国标服务配置', '2026-08-09 18:29:09.000000', '2026-08-09 18:29:09.000000', NULL, 1),
-(268, '修改忽略通道离线异常通知配置', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'PUT', '国标服务配置', '2026-08-09 18:29:09.000000', '2026-08-09 18:29:09.000000', NULL, 1),
-(269, '读取收到心跳恢复设备上线配置', '/api/gb28181/sip/service-config/online-on-heartbeat', 'GET', '国标服务配置', '2026-08-09 19:08:02.000000', '2026-08-09 19:08:02.000000', NULL, 1),
-(270, '修改收到心跳恢复设备上线配置', '/api/gb28181/sip/service-config/online-on-heartbeat', 'PUT', '国标服务配置', '2026-08-09 19:08:02.000000', '2026-08-09 19:08:02.000000', NULL, 1),
-(271, '读取报警消息存储配置', '/api/gb28181/sip/service-config/save-alarm-messages', 'GET', '国标服务配置', '2026-08-09 21:39:23.000000', '2026-08-09 21:39:23.000000', NULL, 1),
-(272, '修改报警消息存储配置', '/api/gb28181/sip/service-config/save-alarm-messages', 'PUT', '国标服务配置', '2026-08-09 21:39:23.000000', '2026-08-09 21:39:23.000000', NULL, 1),
-(273, '读取 SIP 命令超时时间', '/api/gb28181/sip/service-config/sip-command-timeout', 'GET', '国标服务配置', '2026-08-09 21:39:23.000000', '2026-08-09 21:39:23.000000', NULL, 1),
-(274, '修改 SIP 命令超时时间', '/api/gb28181/sip/service-config/sip-command-timeout', 'PUT', '国标服务配置', '2026-08-09 21:39:23.000000', '2026-08-09 21:39:23.000000', NULL, 1),
-(275, '读取预分配模式', '/api/gb28181/sip/service-config/preallocation-mode', 'GET', '国标服务配置', '2026-08-09 21:39:23.000000', '2026-08-09 21:39:23.000000', NULL, 1),
-(276, '修改预分配模式', '/api/gb28181/sip/service-config/preallocation-mode', 'PUT', '国标服务配置', '2026-08-09 21:39:24.000000', '2026-08-09 21:39:24.000000', NULL, 1),
 (277, '查看安全快照', '/api/gb28181/security/snapshot', 'GET', '国标接入安全', '2026-08-10 09:27:17.000000', '2026-08-10 09:27:17.000000', NULL, 1),
 (278, '查看安全事件', '/api/gb28181/security/events', 'GET', '国标接入安全', '2026-08-10 09:27:17.000000', '2026-08-10 09:27:17.000000', NULL, 1),
 (279, '查看安全封禁', '/api/gb28181/security/bans', 'GET', '国标接入安全', '2026-08-10 09:27:17.000000', '2026-08-10 09:27:17.000000', NULL, 1),
@@ -2988,14 +3022,6 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (293, '创建安全访问规则', '/api/gb28181/security/access-rules', 'POST', '国标接入安全', '2026-08-10 09:27:18.000000', '2026-08-10 09:27:18.000000', NULL, 1),
 (294, '修改安全访问规则', '/api/gb28181/security/access-rules/:id', 'PUT', '国标接入安全', '2026-08-10 09:27:18.000000', '2026-08-10 09:27:18.000000', NULL, 1),
 (295, '删除安全访问规则', '/api/gb28181/security/access-rules/:id', 'DELETE', '国标接入安全', '2026-08-10 09:27:18.000000', '2026-08-10 09:27:18.000000', NULL, 1),
-(299, '读取全局订阅项目', '/api/gb28181/sip/service-config/global-subscriptions', 'GET', '国标服务配置', '2026-08-10 11:13:31.000000', '2026-08-10 11:13:31.000000', NULL, 1),
-(300, '修改全局订阅项目', '/api/gb28181/sip/service-config/global-subscriptions', 'PUT', '国标服务配置', '2026-08-10 11:13:31.000000', '2026-08-10 11:13:31.000000', NULL, 1),
-(301, '读取全局通道音频配置', '/api/gb28181/sip/service-config/default-channel-audio', 'GET', '国标服务配置', '2026-08-10 11:13:31.000000', '2026-08-10 11:13:31.000000', NULL, 1),
-(302, '修改全局通道音频配置', '/api/gb28181/sip/service-config/default-channel-audio', 'PUT', '国标服务配置', '2026-08-10 11:13:31.000000', '2026-08-10 11:13:31.000000', NULL, 1),
-(306, '读取默认播放协议', '/api/gb28181/sip/service-config/default-playback-protocol', 'GET', '国标服务配置', '2026-08-10 18:56:34.000000', '2026-08-10 18:56:34.000000', NULL, 1),
-(307, '修改默认播放协议', '/api/gb28181/sip/service-config/default-playback-protocol', 'PUT', '国标服务配置', '2026-08-10 18:56:34.000000', '2026-08-10 18:56:34.000000', NULL, 1),
-(308, '读取固定地址播放配置', '/api/gb28181/sip/service-config/fixed-address-playback', 'GET', '国标服务配置', '2026-08-11 08:41:09.000000', '2026-08-11 08:41:09.000000', NULL, 1),
-(309, '修改固定地址播放配置', '/api/gb28181/sip/service-config/fixed-address-playback', 'PUT', '国标服务配置', '2026-08-11 08:41:09.000000', '2026-08-11 08:41:09.000000', NULL, 1),
 (310, '查询云端录像列表', '/api/gb28181/cloud-recordings/files', 'GET', '云端录像', '2026-08-11 08:43:35.000000', '2026-08-11 08:43:35.000000', NULL, 1),
 (311, '查询云端录像选项', '/api/gb28181/cloud-recordings/files/options', 'GET', '云端录像', '2026-08-11 08:43:35.000000', '2026-08-11 08:43:35.000000', NULL, 1),
 (312, '查询云端录像详情', '/api/gb28181/cloud-recordings/files/:id', 'GET', '云端录像', '2026-08-11 08:43:35.000000', '2026-08-11 08:43:35.000000', NULL, 1),
@@ -3013,8 +3039,6 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (324, '更新级联启用状态', '/api/gb28181/cascade/platforms/:id/enabled', 'PUT', '国标级联', '2026-08-11 08:49:48.000000', '2026-08-11 08:49:48.000000', NULL, 1),
 (326, '查看级联共享', '/api/gb28181/cascade/platforms/:id/shares', 'GET', '国标级联', '2026-08-11 08:49:48.000000', '2026-08-11 08:49:48.000000', NULL, 1),
 (327, '更新级联共享', '/api/gb28181/cascade/platforms/:id/shares', 'PUT', '国标级联', '2026-08-11 08:49:48.000000', '2026-08-11 08:49:48.000000', NULL, 1),
-(332, '读取播放鉴权配置', '/api/gb28181/sip/service-config/play-auth', 'GET', '国标服务配置', '2026-08-11 15:06:39.000000', '2026-08-11 15:06:39.000000', NULL, 1),
-(333, '修改播放鉴权配置', '/api/gb28181/sip/service-config/play-auth', 'PUT', '国标服务配置', '2026-08-11 15:06:39.000000', '2026-08-11 15:06:39.000000', NULL, 1),
 (335, '发起实时点播', '/api/gb28181/play/:deviceId/:channelId', 'POST', '设备管理', '2026-08-11 19:39:57.000000', '2026-08-11 19:39:57.000000', NULL, 1),
 (336, '创建云端录像下载', '/api/gb28181/cloud-recordings/files/:id/downloads', 'POST', '云端录像', '2026-08-13 08:45:38.000000', '2026-08-13 08:45:38.000000', NULL, 1),
 (337, '查询云端录像下载', '/api/gb28181/cloud-recordings/downloads/:taskId', 'GET', '云端录像', '2026-08-13 08:45:38.000000', '2026-08-13 08:45:38.000000', NULL, 1),
@@ -3025,9 +3049,7 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (347, '查询流量会话', '/api/gb28181/device-traffic/sessions', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (348, '查询统计覆盖率', '/api/gb28181/device-traffic/coverage', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (349, '查询当前观看', '/api/gb28181/device-traffic/viewers', 'GET', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
-(350, '强退观看连接', '/api/gb28181/device-traffic/viewers/kick', 'POST', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1);
-
-INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at", "updated_at", "deleted_at", "created_by") VALUES
+(350, '强退观看连接', '/api/gb28181/device-traffic/viewers/kick', 'POST', '设备管理', '2026-08-16 10:15:36.000000', '2026-08-16 10:15:36.000000', NULL, 1),
 (351, '查询在线用户', '/api/sysOnlineUser/list', 'GET', '在线用户', '2026-08-17 19:03:35.000000', '2026-08-17 19:03:35.000000', NULL, 1),
 (352, '强制下线会话', '/api/sysOnlineUser/forceLogout', 'POST', '在线用户', '2026-08-17 19:03:35.000000', '2026-08-17 19:03:35.000000', NULL, 1),
 (355, '登录日志列表', '/api/sysLoginLog/list', 'GET', '日志中心', '2026-08-18 16:10:36.000000', '2026-08-18 16:10:36.000000', NULL, 1),
@@ -3055,7 +3077,9 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (380, '查看录像计划', '/api/gb28181/recording-plans/:id', 'GET', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
 (381, '编辑录像计划', '/api/gb28181/recording-plans/:id', 'PUT', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
 (382, '删除录像计划', '/api/gb28181/recording-plans/:id', 'DELETE', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
-(383, '启停录像计划', '/api/gb28181/recording-plans/:id/status', 'PATCH', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
+(383, '启停录像计划', '/api/gb28181/recording-plans/:id/status', 'PATCH', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1);
+
+INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at", "updated_at", "deleted_at", "created_by") VALUES
 (384, '搜索分配设备', '/api/gb28181/recording-plans/:id/assignment-options/devices', 'GET', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
 (385, '搜索分配通道', '/api/gb28181/recording-plans/:id/assignment-options/channels', 'GET', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
 (386, '提交录像计划分配', '/api/gb28181/recording-plans/:id/assignments', 'POST', '录像计划', '2026-08-29 21:22:43.000000', '2026-08-29 21:22:43.000000', NULL, 1),
@@ -3194,13 +3218,9 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (527, '探测媒体节点', '/api/gb28181/zlm/nodes/probe', 'POST', '流媒体管理', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
 (528, '新增参数', '/api/sysParam/add', 'POST', '系统配置', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
 (529, '保存仪表盘布局', '/api/gb28181/home/layout', 'PUT', '仪表盘', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
-(530, '设置默认码流传输方式', '/api/gb28181/sip/service-config/default-channel-stream-transport', 'PUT', '国标服务配置', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
-(531, '修改回放参数', '/api/gb28181/sip/service-config/playback-settings', 'PUT', '国标服务配置', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
-(532, '设置 SDP 扩展参数', '/api/gb28181/sip/service-config/sdp-extension', 'PUT', '国标服务配置', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
 (533, '编辑参数', '/api/sysParam/edit', 'PUT', '系统配置', '2026-09-05 18:24:01.000000', '2026-09-05 18:24:01.000000', NULL, 1),
 (534, '发起视频探针检测', '/api/gb28181/stream-probes/:streamId', 'POST', '流媒体管理', '2026-09-05 18:44:46.000000', '2026-09-05 18:44:46.000000', NULL, 1),
 (535, '读取 SIP 仪表盘快照', '/api/gb28181/sip/dashboard/snapshot', 'GET', '仪表盘', '2026-09-05 18:46:37.000000', '2026-09-05 18:46:37.000000', NULL, 1),
-(536, '读取回放参数', '/api/gb28181/sip/service-config/playback-settings', 'GET', '国标服务配置', '2026-09-05 18:46:37.000000', '2026-09-05 18:46:37.000000', NULL, 1),
 (547, '实时控制台日志流', '/api/gb28181/logs/stream', 'GET', '日志中心', '2026-09-10 07:45:37.000000', '2026-09-14 12:34:57.000000', NULL, 1),
 (548, '查看 OpenAPI 客户端列表', '/api/gb28181/openapi-clients', 'GET', 'OpenAPI 客户端', '2026-09-10 10:13:07.000000', '2026-09-10 10:13:07.000000', NULL, 1),
 (549, '创建 OpenAPI 客户端', '/api/gb28181/openapi-clients', 'POST', 'OpenAPI 客户端', '2026-09-10 10:13:07.000000', '2026-09-10 10:13:07.000000', NULL, 1),
@@ -3227,9 +3247,7 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (590, '读取目标跟踪已下发指令', '/api/gb28181/device-mgmt/channel/:id/target-track', 'GET', '设备控制', '2026-09-21 12:13:15.000000', '2026-09-21 12:13:15.000000', NULL, 1),
 (591, '下发目标跟踪', '/api/gb28181/device-mgmt/channel/:id/target-track', 'POST', '设备控制', '2026-09-21 12:13:15.000000', '2026-09-21 12:13:15.000000', NULL, 1),
 (593, '查询播放日志', '/api/gb28181/play/lifecycles', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
-(594, '查询播放日志详情', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1);
-
-INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at", "updated_at", "deleted_at", "created_by") VALUES
+(594, '查询播放日志详情', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
 (595, '上报播放客户端事实', '/api/gb28181/play/lifecycles/:lifecycleId/client-events', 'POST', '播放日志', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1),
 (596, '查看 OpenAPI 分组能力目录', '/api/gb28181/openapi-clients/capabilities/catalog', 'GET', 'GB28181 OpenAPI 客户端', '2026-09-22 10:41:25.000000', '2026-09-22 10:41:25.000000', NULL, 1),
 (597, '查询设备列表', '/api/gb28181/device/list', 'GET', '设备管理', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
@@ -3237,8 +3255,6 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (599, '查询设备的通道列表', '/api/gb28181/device/:deviceId/channels', 'GET', '设备管理', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (600, '查询SIP会话统计', '/api/gb28181/sip-traces/sessions/stats', 'GET', '日志中心', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (601, '订阅SIP报文实时流', '/api/gb28181/sip-traces/stream', 'GET', '日志中心', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
-(602, '读取通道默认流传输方式', '/api/gb28181/sip/service-config/default-channel-stream-transport', 'GET', '国标服务配置', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
-(603, '读取SDP扩展开关', '/api/gb28181/sip/service-config/sdp-extension', 'GET', '国标服务配置', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (604, '获取API分组清单', '/api/sysApi/groups', 'GET', '接口管理', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (605, '手动推送目录到上级平台', '/api/gb28181/cascade/platforms/:id/push-catalog', 'POST', '国标级联', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (606, '控制通道雨刷', '/api/gb28181/device-mgmt/channel/:id/ptz/wiper', 'POST', '设备控制', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
@@ -3255,7 +3271,29 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (617, '共享级联通道', '/api/gb28181/cascade/platforms/:id/channels/share', 'POST', '国标级联', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (618, '取消共享级联通道', '/api/gb28181/cascade/platforms/:id/channels/unshare', 'POST', '国标级联', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
 (619, '语音对讲上行推流', '/api/gb28181/device-mgmt/talk-sessions/:sessionId/uplink', 'POST', '设备控制', '2026-09-23 18:00:00.000000', '2026-09-23 18:00:00.000000', NULL, 1),
-(620, '查询设备目录刷新进度', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '设备管理', '2026-10-01 18:00:00.000000', '2026-10-01 18:00:00.000000', NULL, 1);
+(620, '查询设备目录刷新进度', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '设备管理', '2026-10-01 18:00:00.000000', '2026-10-01 18:00:00.000000', NULL, 1),
+(621, '上传固件', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(622, '查询固件列表', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(623, '查询固件详情', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(624, '删除固件', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(625, '生成固件下载链接', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(626, '下载固件', '/api/gb28181/device-mgmt/firmware-repository/download/:token', 'GET', '固件仓库', '2026-10-02 15:20:00.000000', '2026-10-02 15:20:00.000000', NULL, 1),
+(627, '查询全部节点网络会话', '/api/gb28181/zlm/sessions/network', 'GET', '流媒体管理', '2026-10-02 15:30:00.000000', '2026-10-02 15:30:00.000000', NULL, 1),
+(628, '查询全部节点媒体观看者', '/api/gb28181/zlm/sessions/viewers', 'GET', '流媒体管理', '2026-10-02 15:30:00.000000', '2026-10-02 15:30:00.000000', NULL, 1);
+
+INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at", "updated_at", "deleted_at", "created_by") VALUES
+(629, '创建设备录像缓存任务', '/api/gb28181/record-cache/tasks', 'POST', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(630, '查询设备录像缓存任务列表', '/api/gb28181/record-cache/tasks', 'GET', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(631, '查询设备录像缓存任务详情', '/api/gb28181/record-cache/tasks/:taskId', 'GET', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(632, '取消设备录像缓存任务', '/api/gb28181/record-cache/tasks/:taskId/cancel', 'POST', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(633, '删除设备录像缓存任务', '/api/gb28181/record-cache/tasks/:taskId', 'DELETE', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(634, '下载设备录像缓存文件', '/api/gb28181/record-cache/tasks/:taskId/content', 'GET', '录像缓存', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(635, '创建录像缓存下载', '/api/gb28181/record-cache/tasks/:taskId/downloads', 'POST', '录像缓存', '2026-10-05 11:40:00.000000', '2026-10-05 11:40:00.000000', NULL, 1),
+(636, '查询录像缓存下载', '/api/gb28181/record-cache/downloads/:downloadId', 'GET', '录像缓存', '2026-10-05 11:40:00.000000', '2026-10-05 11:40:00.000000', NULL, 1),
+(637, '取消录像缓存下载', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '录像缓存', '2026-10-05 11:40:00.000000', '2026-10-05 11:40:00.000000', NULL, 1),
+(638, '收藏设备录像缓存任务', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '录像缓存', '2026-10-05 12:00:00.000000', '2026-10-05 12:00:00.000000', NULL, 1),
+(639, '读取国标服务聚合配置', '/api/gb28181/sip/service-config', 'GET', '国标服务配置', '2026-10-05 00:00:00.000000', '2026-10-05 00:00:00.000000', NULL, 1),
+(640, '修改国标服务聚合配置', '/api/gb28181/sip/service-config', 'PUT', '国标服务配置', '2026-10-05 00:00:00.000000', '2026-10-05 00:00:00.000000', NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3270,10 +3308,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8175, 'p', 'role_3', '/api/gb28181/cloud-recordings/active', 'GET', '*', '', ''),
 (8176, 'p', 'role_3', '/api/gb28181/zlm/nodes', 'GET', '*', '', ''),
 (8177, 'p', 'role_3', '/api/gb28181/zlm/nodes/:id/recordings/runtime/status', 'GET', '*', '', ''),
-(8178, 'p', 'role_3', '/api/gb28181/sip/service-config/default-playback-protocol', 'GET', '*', '', ''),
-(8179, 'p', 'role_3', '/api/gb28181/sip/service-config/fixed-address-playback', 'GET', '*', '', ''),
 (8181, 'p', 'role_3', '/api/gb28181/play/:deviceId/:channelId', 'POST', '*', '', ''),
-(8182, 'p', 'role_3', '/api/gb28181/sip/service-config/playback-settings', 'GET', '*', '', ''),
 (8183, 'p', 'role_3', '/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', 'DELETE', '*', '', ''),
 (8184, 'p', 'role_3', '/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', 'GET', '*', '', ''),
 (8185, 'p', 'role_3', '/api/gb28181/device-mgmt/channel/:id/playback-sessions', 'POST', '*', '', ''),
@@ -3336,36 +3371,26 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8304, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/cruise/tracks', 'POST', '*', '', ''),
 (8305, 'p', 'role_1', '/api/sysRole/getRoles', 'GET', '*', '', ''),
 (8306, 'p', 'role_1', '/api/sysDepartment/edit', 'PUT', '*', '', ''),
-(8307, 'p', 'role_1', '/api/gb28181/sip/service-config/global-subscriptions', 'GET', '*', '', ''),
-(8308, 'p', 'role_1', '/api/gb28181/sip/service-config/sip-command-timeout', 'PUT', '*', '', ''),
 (8309, 'p', 'role_1', '/api/gb28181/sip-traces/messages', 'GET', '*', '', ''),
 (8310, 'p', 'role_1', '/api/gb28181/logs/stream', 'GET', '*', '', ''),
 (8311, 'p', 'role_1', '/api/gb28181/openapi-clients/:id', 'GET', '*', '', ''),
 (8312, 'p', 'role_1', '/api/gb28181/openapi-clients/:id/enable', 'POST', '*', '', ''),
 (8313, 'p', 'role_1', '/api/sysAffix/download/:id', 'GET', '*', '', ''),
-(8314, 'p', 'role_1', '/api/gb28181/sip/service-config/sync-channels-on-online', 'GET', '*', '', ''),
-(8315, 'p', 'role_1', '/api/gb28181/sip/service-config/global-subscriptions', 'PUT', '*', '', ''),
-(8316, 'p', 'role_1', '/api/gb28181/sip/service-config/playback-settings', 'PUT', '*', '', ''),
 (8317, 'p', 'role_1', '/api/gb28181/cloud-recordings/reconciliations', 'GET', '*', '', ''),
 (8318, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/playback-sessions/:sessionId', 'DELETE', '*', '', ''),
-(8319, 'p', 'role_1', '/api/gb28181/sip/service-config/preallocation-mode', 'PUT', '*', '', ''),
 (8320, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/sessions/viewers', 'GET', '*', '', ''),
 (8321, 'p', 'role_1', '/api/sysAffix/list', 'GET', '*', '', ''),
-(8322, 'p', 'role_1', '/api/gb28181/sip/service-config/play-auth', 'GET', '*', '', ''),
 (8323, 'p', 'role_1', '/api/gb28181/cloud-recordings/files/:id', 'DELETE', '*', '', ''),
 (8324, 'p', 'role_1', '/api/gb28181/recording-plans/:id/status', 'PATCH', '*', '', ''),
 (8325, 'p', 'role_1', '/api/gb28181/stream-probes/operations/:operationId', 'GET', '*', '', ''),
 (8326, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/device-status', 'GET', '*', '', ''),
 (8327, 'p', 'role_1', '/api/sysDict/edit', 'PUT', '*', '', ''),
-(8328, 'p', 'role_1', '/api/gb28181/sip/service-config/sip-log', 'GET', '*', '', ''),
-(8329, 'p', 'role_1', '/api/gb28181/sip/service-config/default-channel-audio', 'PUT', '*', '', ''),
 (8330, 'p', 'role_1', '/api/gb28181/channel-favorite-groups/:id/channels', 'POST', '*', '', ''),
 (8331, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/firmware-upgrade', 'POST', '*', '', ''),
 (8332, 'p', 'role_1', '/api/gb28181/play/:streamId', 'DELETE', '*', '', ''),
 (8333, 'p', 'role_1', '/api/sysDict/list', 'GET', '*', '', ''),
 (8334, 'p', 'role_1', '/api/config/get', 'GET', '*', '', ''),
 (8335, 'p', 'role_1', '/api/users/updateBasicInfo', 'PUT', '*', '', ''),
-(8336, 'p', 'role_1', '/api/gb28181/sip/service-config/ptz-default-speed', 'PUT', '*', '', ''),
 (8337, 'p', 'role_1', '/api/gb28181/device-mgmt/custom-groups/:id', 'PATCH', '*', '', ''),
 (8338, 'p', 'role_1', '/api/gb28181/recording-plans/:id', 'GET', '*', '', ''),
 (8339, 'p', 'role_1', '/api/gb28181/openapi-clients/:id/revocation-status', 'GET', '*', '', ''),
@@ -3395,8 +3420,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8363, 'p', 'role_1', '/api/gb28181/openapi-clients/:id/audits', 'GET', '*', '', ''),
 (8364, 'p', 'role_1', '/api/sysMenu/apis/:id', 'GET', '*', '', ''),
 (8365, 'p', 'role_1', '/api/config/update', 'PUT', '*', '', ''),
-(8366, 'p', 'role_1', '/api/gb28181/sip/service-config/default-playback-protocol', 'GET', '*', '', ''),
-(8367, 'p', 'role_1', '/api/gb28181/sip/service-config/position-history', 'GET', '*', '', ''),
 (8368, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/grant-targets', 'GET', '*', '', ''),
 (8369, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/proxies/push', 'GET', '*', '', ''),
 (8370, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId', 'DELETE', '*', '', ''),
@@ -3407,7 +3430,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8375, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/snapshot-sessions', 'POST', '*', '', ''),
 (8376, 'p', 'role_1', '/api/gb28181/device-mgmt/directory/tree', 'GET', '*', '', ''),
 (8377, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId', 'DELETE', '*', '', ''),
-(8378, 'p', 'role_1', '/api/gb28181/sip/service-config/position-history', 'PUT', '*', '', ''),
 (8379, 'p', 'role_1', '/api/sysMenu/import', 'POST', '*', '', ''),
 (8380, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/shares', 'GET', '*', '', ''),
 (8381, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers', 'POST', '*', '', ''),
@@ -3441,7 +3463,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8409, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/proxies/push/:key', 'DELETE', '*', '', ''),
 (8410, 'p', 'role_1', '/api/gb28181/cloud-recordings/downloads/:taskId', 'DELETE', '*', '', ''),
 (8411, 'p', 'role_1', '/api/gb28181/security/access-rules/:id', 'DELETE', '*', '', ''),
-(8412, 'p', 'role_1', '/api/gb28181/sip/service-config/sync-channels-on-online', 'PUT', '*', '', ''),
 (8413, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/assignments', 'POST', '*', '', ''),
 (8414, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight', 'POST', '*', '', ''),
 (8415, 'p', 'role_1', '/api/plugins/example/list', 'GET', '*', '', ''),
@@ -3456,9 +3477,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8424, 'p', 'role_1', '/api/sysDictItem/edit', 'PUT', '*', '', ''),
 (8425, 'p', 'role_1', '/api/gb28181/zlm/nodes', 'GET', '*', '', ''),
 (8426, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', 'POST', '*', '', ''),
-(8427, 'p', 'role_1', '/api/gb28181/sip/service-config/preallocation-mode', 'GET', '*', '', '');
-
-INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (8428, 'p', 'role_1', '/api/gb28181/device-traffic/coverage', 'GET', '*', '', ''),
 (8429, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers/close', 'POST', '*', '', ''),
 (8430, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/timeline', 'GET', '*', '', ''),
@@ -3470,19 +3488,19 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8436, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/presets', 'POST', '*', '', ''),
 (8437, 'p', 'role_1', '/api/sysAffix/updateName', 'PUT', '*', '', ''),
 (8438, 'p', 'role_1', '/api/sysOperationLog/export', 'GET', '*', '', ''),
-(8439, 'p', 'role_1', '/api/gb28181/sip/service-config/fixed-address-playback', 'GET', '*', '', ''),
 (8440, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/enable', 'POST', '*', '', ''),
 (8441, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/shares', 'PUT', '*', '', ''),
 (8442, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/grants/query', 'POST', '*', '', ''),
 (8443, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/device-control', 'POST', '*', '', ''),
 (8444, 'p', 'role_1', '/api/sysRole/delete', 'DELETE', '*', '', ''),
 (8445, 'p', 'role_1', '/api/sysApi/edit', 'PUT', '*', '', ''),
-(8446, 'p', 'role_1', '/api/sysGen/refreshFields', 'PUT', '*', '', ''),
+(8446, 'p', 'role_1', '/api/sysGen/refreshFields', 'PUT', '*', '', '');
+
+INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (8447, 'p', 'role_1', '/api/gb28181/playback-schemes/:id', 'PATCH', '*', '', ''),
 (8448, 'p', 'role_1', '/api/gb28181/device-traffic/sessions', 'GET', '*', '', ''),
 (8449, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/proxies/push/:key/preflight', 'POST', '*', '', ''),
 (8450, 'p', 'role_1', '/api/gb28181/home/drilldown/sip', 'GET', '*', '', ''),
-(8451, 'p', 'role_1', '/api/gb28181/sip/service-config/sdp-extension', 'PUT', '*', '', ''),
 (8452, 'p', 'role_1', '/api/sysLoginLog/unlock', 'POST', '*', '', ''),
 (8453, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/talk-sessions/:sessionId', 'GET', '*', '', ''),
 (8454, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers', 'GET', '*', '', ''),
@@ -3510,7 +3528,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8476, 'p', 'role_1', '/api/sysDepartment/getDivision', 'GET', '*', '', ''),
 (8477, 'p', 'role_1', '/api/gb28181/play/:deviceId/:channelId', 'POST', '*', '', ''),
 (8478, 'p', 'role_1', '/api/sysGen/list', 'GET', '*', '', ''),
-(8479, 'p', 'role_1', '/api/gb28181/sip/service-config/save-alarm-messages', 'GET', '*', '', ''),
 (8480, 'p', 'role_1', '/api/gb28181/sip-traces/messages/:id', 'GET', '*', '', ''),
 (8481, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id', 'DELETE', '*', '', ''),
 (8482, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/subscriptions/:kind/renew', 'POST', '*', '', ''),
@@ -3527,11 +3544,8 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8493, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId', 'GET', '*', '', ''),
 (8494, 'p', 'role_1', '/api/sysMenu/batchDelete', 'DELETE', '*', '', ''),
 (8495, 'p', 'role_1', '/api/pluginsmanager/export', 'POST', '*', '', ''),
-(8496, 'p', 'role_1', '/api/gb28181/sip/service-config/play-auth', 'PUT', '*', '', ''),
 (8497, 'p', 'role_1', '/api/gb28181/recording-plans/:id/channels', 'GET', '*', '', ''),
 (8498, 'p', 'role_1', '/api/users/profile', 'GET', '*', '', ''),
-(8499, 'p', 'role_1', '/api/gb28181/sip/service-config/default-channel-audio', 'GET', '*', '', ''),
-(8500, 'p', 'role_1', '/api/gb28181/sip/service-config/fixed-address-playback', 'PUT', '*', '', ''),
 (8501, 'p', 'role_1', '/api/gb28181/device-mgmt/custom-groups/:id/devices/remove', 'POST', '*', '', ''),
 (8502, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/firmware-upgrades', 'GET', '*', '', ''),
 (8503, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/control-capabilities', 'GET', '*', '', ''),
@@ -3561,14 +3575,12 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8527, 'p', 'role_1', '/api/gb28181/recording-plans/:id/assignment-options/devices', 'GET', '*', '', ''),
 (8528, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz', 'POST', '*', '', ''),
 (8529, 'p', 'role_1', '/api/sysOperationLog/delete', 'DELETE', '*', '', ''),
-(8530, 'p', 'role_1', '/api/gb28181/sip/service-config/sip-command-timeout', 'GET', '*', '', ''),
 (8531, 'p', 'role_1', '/api/gb28181/cloud-recordings/files/options', 'GET', '*', '', ''),
 (8532, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id', 'GET', '*', '', ''),
 (8533, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/streams/viewers', 'GET', '*', '', ''),
 (8534, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id', 'GET', '*', '', ''),
 (8535, 'p', 'role_1', '/api/gb28181/recording-plans/:id', 'PUT', '*', '', ''),
 (8536, 'p', 'role_1', '/api/pluginsmanager/uninstall', 'DELETE', '*', '', ''),
-(8537, 'p', 'role_1', '/api/gb28181/sip/service-config/ptz-default-speed', 'GET', '*', '', ''),
 (8538, 'p', 'role_1', '/api/gb28181/sip/setup/skip', 'POST', '*', '', ''),
 (8539, 'p', 'role_1', '/api/sysLoginLog/:id', 'GET', '*', '', ''),
 (8540, 'p', 'role_1', '/api/gb28181/recording-plans', 'GET', '*', '', ''),
@@ -3579,8 +3591,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8545, 'p', 'role_1', '/api/sysMenu/export', 'GET', '*', '', ''),
 (8546, 'p', 'role_1', '/api/sysJobs/add', 'POST', '*', '', ''),
 (8547, 'p', 'role_1', '/api/sysJobResults/list', 'GET', '*', '', ''),
-(8548, 'p', 'role_1', '/api/gb28181/sip/service-config/sip-log', 'PUT', '*', '', ''),
-(8549, 'p', 'role_1', '/api/gb28181/sip/service-config/save-alarm-messages', 'PUT', '*', '', ''),
 (8550, 'p', 'role_1', '/api/gb28181/cloud-recordings/reconciliations', 'POST', '*', '', ''),
 (8551, 'p', 'role_1', '/api/gb28181/cascade/platforms', 'GET', '*', '', ''),
 (8552, 'p', 'role_1', '/api/sysMenu/getMenuList', 'GET', '*', '', ''),
@@ -3595,7 +3605,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8561, 'p', 'role_1', '/api/sysGen/:id', 'DELETE', '*', '', ''),
 (8562, 'p', 'role_1', '/api/sysJobs/setStatus', 'PUT', '*', '', ''),
 (8563, 'p', 'role_1', '/api/sysJobs/executeNow', 'POST', '*', '', ''),
-(8564, 'p', 'role_1', '/api/gb28181/sip/service-config/online-on-heartbeat', 'GET', '*', '', ''),
 (8565, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/extended', 'POST', '*', '', ''),
 (8566, 'p', 'role_1', '/api/gb28181/openapi-clients/:id/revoke', 'POST', '*', '', ''),
 (8567, 'p', 'role_1', '/api/sysJobs/edit', 'PUT', '*', '', ''),
@@ -3605,7 +3614,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8572, 'p', 'role_1', '/api/gb28181/device-mgmt/catalog/tree/:id/children', 'GET', '*', '', ''),
 (8573, 'p', 'role_1', '/api/gb28181/security/policy', 'PUT', '*', '', ''),
 (8574, 'p', 'role_1', '/api/codegen/preview', 'GET', '*', '', ''),
-(8575, 'p', 'role_1', '/api/gb28181/sip/service-config/default-playback-protocol', 'PUT', '*', '', ''),
 (8576, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/ffmpeg-sources', 'GET', '*', '', ''),
 (8577, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/download-sessions', 'POST', '*', '', ''),
 (8578, 'p', 'role_1', '/api/users/uploadAvatar', 'POST', '*', '', ''),
@@ -3614,7 +3622,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8581, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/proxies/pull/:key/preflight', 'POST', '*', '', ''),
 (8582, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/ffmpeg-sources', 'POST', '*', '', ''),
 (8583, 'p', 'role_1', '/api/sysJobs/:id', 'GET', '*', '', ''),
-(8584, 'p', 'role_1', '/api/gb28181/sip/service-config/online-on-heartbeat', 'PUT', '*', '', ''),
 (8585, 'p', 'role_1', '/api/gb28181/playback-schemes/:id/layout', 'PUT', '*', '', ''),
 (8586, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/stream-transport', 'PATCH', '*', '', ''),
 (8587, 'p', 'role_1', '/api/sysDict/getAllDicts', 'GET', '*', '', ''),
@@ -3629,13 +3636,11 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8596, 'p', 'role_1', '/api/gb28181/recording-plans/channels/:channelId/recording-mode', 'PATCH', '*', '', ''),
 (8597, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key/preflight', 'POST', '*', '', ''),
 (8598, 'p', 'role_1', '/api/gb28181/alarms/clear-all', 'POST', '*', '', ''),
-(8599, 'p', 'role_1', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'PUT', '*', '', ''),
 (8600, 'p', 'role_1', '/api/gb28181/device-mgmt/custom-groups/:id/move', 'POST', '*', '', ''),
 (8601, 'p', 'role_1', '/api/gb28181/device-mgmt/devices', 'GET', '*', '', ''),
 (8602, 'p', 'role_1', '/api/codegen/insertmenuandapi', 'POST', '*', '', ''),
 (8603, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/sip-trace-capture', 'GET', '*', '', ''),
 (8604, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/enabled', 'PUT', '*', '', ''),
-(8605, 'p', 'role_1', '/api/gb28181/sip/service-config/playback-settings', 'GET', '*', '', ''),
 (8606, 'p', 'role_1', '/api/gb28181/cloud-recordings/active/:id/stop', 'POST', '*', '', ''),
 (8607, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/restart', 'POST', '*', '', ''),
 (8608, 'p', 'role_1', '/api/gb28181/zlm/scheduler', 'GET', '*', '', ''),
@@ -3658,10 +3663,6 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8625, 'p', 'role_1', '/api/users/updateAccount', 'PUT', '*', '', ''),
 (8626, 'p', 'role_1', '/api/gb28181/cloud-recordings/files', 'GET', '*', '', ''),
 (8627, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id', 'PATCH', '*', '', ''),
-(8628, 'p', 'role_1', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'GET', '*', '', '');
-
-INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
-(8629, 'p', 'role_1', '/api/gb28181/sip/service-config/default-channel-stream-transport', 'PUT', '*', '', ''),
 (8630, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/start', 'POST', '*', '', ''),
 (8631, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/subscriptions/:kind', 'PATCH', '*', '', ''),
 (8632, 'p', 'role_1', '/api/gb28181/openapi-clients/capabilities', 'GET', '*', '', ''),
@@ -3689,7 +3690,29 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8655, 'p', 'role_3', '/api/gb28181/play/lifecycles/:lifecycleId', 'GET', '*', '', ''),
 (8656, 'p', 'role_3', '/api/gb28181/play/lifecycles', 'GET', '*', '', ''),
 (8658, 'p', 'role_1', '/api/gb28181/openapi-clients/capabilities/catalog', 'GET', '*', '', ''),
-(8659, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '*', '', '');
+(8659, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '*', '', ''),
+(8660, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '*', '', ''),
+(8661, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '*', '', ''),
+(8662, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
+(8663, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '*', '', ''),
+(8664, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
+(8665, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/download/:token', 'GET', '*', '', '');
+
+INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
+(8666, 'p', 'role_1', '/api/gb28181/zlm/sessions/network', 'GET', '*', '', ''),
+(8667, 'p', 'role_1', '/api/gb28181/zlm/sessions/viewers', 'GET', '*', '', ''),
+(8668, 'p', 'role_1', '/api/gb28181/record-cache/tasks', 'POST', '*', '', ''),
+(8669, 'p', 'role_1', '/api/gb28181/record-cache/tasks', 'GET', '*', '', ''),
+(8670, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId', 'GET', '*', '', ''),
+(8671, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/cancel', 'POST', '*', '', ''),
+(8672, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId', 'DELETE', '*', '', ''),
+(8673, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/content', 'GET', '*', '', ''),
+(8674, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/downloads', 'POST', '*', '', ''),
+(8675, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'GET', '*', '', ''),
+(8676, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '*', '', ''),
+(8677, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', ''),
+(8678, 'p', 'role_1', '/api/gb28181/sip/service-config', 'GET', '*', '', ''),
+(8679, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7376,6 +7399,14 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140508, 140358, '', 'GbDeviceStorageCardFormat', NULL, '', '格式化存储卡', 0, 1, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'gb28181:device:format_sd', '2026-09-20 17:12:58.000000', '2026-09-20 17:12:58.000000', NULL, 1),
 (140509, 0, '/gb28181/snapshot-library', 'snapshot-library', NULL, 'gb28181/snapshot-library/index', '图像库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Images', 55, 2, 0, '', '2026-09-20 17:19:27.000000', '2026-09-20 17:23:13.000000', NULL, 1),
 (140510, 140355, '/gb28181/playback-log', 'gb28181-playback-log', NULL, 'gb28181/playback-log/index', '播放日志', 0, 0, 0, 0, 0, '', 0, '', 'lucide:FileClock', 7, 2, 0, 'gb28181:play-log:view', '2026-09-21 20:34:45.000000', '2026-09-21 20:34:45.000000', NULL, 1);
+
+INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "component", "title", "is_full", "hide", "disable", "keep_alive", "affix", "link", "iframe", "svg_icon", "icon", "sort", "type", "is_link", "permission", "created_at", "updated_at", "deleted_at", "created_by") VALUES
+(140610, 0, '/gb28181/record-cache', 'gb28181-record-cache', '', 'gb28181/record-cache/index', '录像缓存', 0, 0, 0, 0, 0, '', 0, '', 'lucide:HardDriveDownload', 52, 2, 0, 'gb28181:record-cache:view', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(140611, 140610, '', '', '', '', '创建缓存', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'gb28181:record-cache:create', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(140612, 140610, '', '', '', '', '取消缓存', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:record-cache:cancel', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(140613, 140610, '', '', '', '', '下载录像', 0, 0, 0, 1, 0, '', 0, '', '', 3, 3, 0, 'gb28181:record-cache:download', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(140614, 140610, '', '', '', '', '删除缓存', 0, 0, 0, 1, 0, '', 0, '', '', 4, 3, 0, 'gb28181:record-cache:delete', '2026-10-03 18:00:00.000000', '2026-10-03 18:00:00.000000', NULL, 1),
+(140615, 140610, '', '', '', '', '收藏缓存', 0, 0, 0, 1, 0, '', 0, '', '', 5, 3, 0, 'gb28181:record-cache:favorite', '2026-10-05 12:00:00.000000', '2026-10-05 12:00:00.000000', NULL, 1);
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (1, 5),
 (1, 6),
@@ -7484,38 +7515,8 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140360, 218),
 (140360, 219),
 (140360, 237),
-(140360, 261),
-(140360, 263),
-(140360, 265),
-(140360, 267),
-(140360, 269),
-(140360, 271),
-(140360, 273),
-(140360, 275),
-(140360, 299),
-(140360, 301),
-(140360, 306),
-(140360, 308),
-(140360, 332),
 (140361, 220),
 (140361, 221),
-(140361, 253),
-(140361, 262),
-(140361, 264),
-(140361, 266),
-(140361, 268),
-(140361, 270),
-(140361, 272),
-(140361, 274),
-(140361, 276),
-(140361, 300),
-(140361, 302),
-(140361, 307),
-(140361, 309),
-(140361, 333),
-(140361, 530),
-(140361, 531),
-(140361, 532),
 (140362, 222),
 (140362, 223),
 (140362, 224),
@@ -7537,8 +7538,6 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140369, 217),
 (140369, 218),
 (140369, 220),
-(140369, 252),
-(140369, 253),
 (140370, 254),
 (140370, 255),
 (140370, 256),
@@ -7565,10 +7564,7 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140378, 324),
 (140379, 326),
 (140379, 327),
-(140381, 306),
-(140381, 308),
 (140381, 335),
-(140381, 536),
 (140381, 595),
 (140382, 367),
 (140382, 368),
@@ -7576,9 +7572,7 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140382, 370),
 (140383, 369),
 (140383, 370),
-(140383, 373);
-
-INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
+(140383, 373),
 (140384, 368),
 (140384, 371),
 (140384, 372),
@@ -7613,7 +7607,9 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140401, 381),
 (140401, 382),
 (140401, 383),
-(140402, 384),
+(140402, 384);
+
+INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140402, 385),
 (140402, 386),
 (140402, 387),
@@ -7778,9 +7774,7 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140475, 463),
 (140475, 484),
 (140475, 520),
-(140476, 350);
-
-INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
+(140476, 350),
 (140477, 395),
 (140478, 402),
 (140478, 403),
@@ -7815,7 +7809,9 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140265, 106),
 (140265, 187),
 (140371, 277),
-(140371, 278),
+(140371, 278);
+
+INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140371, 279),
 (140371, 281),
 (140371, 283),
@@ -7826,8 +7822,6 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140452, 599),
 (140362, 600),
 (140362, 601),
-(140369, 602),
-(140369, 603),
 (140225, 604),
 (140377, 605),
 (140459, 606),
@@ -7840,7 +7834,30 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140483, 613),
 (140379, 617),
 (140379, 618),
-(140475, 619);
+(140475, 619),
+(140435, 621),
+(140435, 622),
+(140435, 623),
+(140435, 624),
+(140435, 625),
+(140435, 626),
+(140427, 627),
+(140427, 628),
+(140610, 629),
+(140610, 630),
+(140610, 631),
+(140610, 632),
+(140610, 633),
+(140610, 634),
+(140442, 629),
+(140442, 630),
+(140442, 631),
+(140610, 635),
+(140610, 636),
+(140610, 637),
+(140610, 638),
+(140369, 639),
+(140369, 640);
 INSERT INTO "sys_role" ("id", "name", "sort", "status", "description", "parent_id", "created_at", "updated_at", "deleted_at", "created_by", "data_scope", "checked_depts") VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8056,7 +8073,13 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (3, 140452),
 (3, 140455),
 (3, 140457),
-(3, 140510);
+(3, 140510),
+(1, 140610),
+(1, 140611),
+(1, 140612),
+(1, 140613),
+(1, 140614),
+(1, 140615);
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by") VALUES
@@ -8065,11 +8088,11 @@ INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_
 -- 自增水位：种子行用的是显式 id，PostgreSQL 的序列不会自己前进，
 -- 不补这一步，全新装环境第一次 INSERT 就会撞主键。
 SELECT setval(pg_get_serial_sequence('gb_sip_security_policy', 'id'), 1, true);
-SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 620, true);
-SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 8659, true);
+SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 640, true);
+SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 8679, true);
 SELECT setval(pg_get_serial_sequence('sys_department', 'id'), 1, true);
 SELECT setval(pg_get_serial_sequence('sys_dict', 'id'), 13, true);
 SELECT setval(pg_get_serial_sequence('sys_dict_item', 'id'), 122, true);
-SELECT setval(pg_get_serial_sequence('sys_menu', 'id'), 140510, true);
+SELECT setval(pg_get_serial_sequence('sys_menu', 'id'), 140615, true);
 SELECT setval(pg_get_serial_sequence('sys_role', 'id'), 3, true);
 SELECT setval(pg_get_serial_sequence('sys_users', 'id'), 1, true);

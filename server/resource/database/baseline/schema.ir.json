@@ -3,10 +3,10 @@
   "meta": {
     "source_database": "uvp_gb28181",
     "source_server_version": "8.0.46",
-    "live_table_count": 111,
-    "included_table_count": 110,
+    "live_table_count": 112,
+    "included_table_count": 111,
     "excluded_table_count": 16,
-    "schema_fingerprint": "manual_edit_firmware_repository_2026_10_02",
+    "schema_fingerprint": "manual_edit_record_cache_2026_10_03",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -5035,222 +5035,6 @@
       "seeded": false
     },
     {
-      "name": "gb_firmware_repository",
-      "comment": "",
-      "columns": [
-        {
-          "name": "id",
-          "type": "bigint unsigned",
-          "nullable": false,
-          "default": null,
-          "extra": "auto_increment",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "firmware_id",
-          "type": "varchar(64)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "version",
-          "type": "varchar(255)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "manufacturer",
-          "type": "varchar(255)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "model_pattern",
-          "type": "varchar(500)",
-          "nullable": true,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "file_name",
-          "type": "varchar(500)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "file_size",
-          "type": "bigint",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "file_hash",
-          "type": "varchar(128)",
-          "nullable": true,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "storage_path",
-          "type": "text",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "storage_key",
-          "type": "varchar(500)",
-          "nullable": true,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "release_date",
-          "type": "date",
-          "nullable": true,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "status",
-          "type": "varchar(20)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        },
-        {
-          "name": "uploaded_by",
-          "type": "bigint unsigned",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "dept_id",
-          "type": "bigint unsigned",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "created_at",
-          "type": "datetime(6)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "updated_at",
-          "type": "datetime(6)",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": null
-        },
-        {
-          "name": "remark",
-          "type": "text",
-          "nullable": true,
-          "default": null,
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_bin"
-        }
-      ],
-      "primary_key": [
-        {
-          "name": "id",
-          "prefix": null
-        }
-      ],
-      "uniques": [
-        {
-          "name": "firmware_id",
-          "columns": [
-            {
-              "name": "firmware_id",
-              "prefix": null
-            }
-          ]
-        }
-      ],
-      "indexes": [
-        {
-          "name": "idx_manu_model",
-          "columns": [
-            {
-              "name": "manufacturer",
-              "prefix": null
-            },
-            {
-              "name": "version",
-              "prefix": null
-            }
-          ]
-        },
-        {
-          "name": "idx_file_hash",
-          "columns": [
-            {
-              "name": "file_hash",
-              "prefix": null
-            }
-          ]
-        },
-        {
-          "name": "idx_dept_status",
-          "columns": [
-            {
-              "name": "dept_id",
-              "prefix": null
-            },
-            {
-              "name": "status",
-              "prefix": null
-            }
-          ]
-        }
-      ],
-      "foreign_keys": [],
-      "checks": [],
-      "seeded": false
-    },
-    {
       "name": "gb_device_grant",
       "comment": "设备共享授权表(设备级可见性共享)",
       "columns": [
@@ -7475,6 +7259,222 @@
             },
             {
               "name": "observed_at",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_firmware_repository",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "firmware_id",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "version",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "manufacturer",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "model_pattern",
+          "type": "varchar(500)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "file_name",
+          "type": "varchar(500)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "file_size",
+          "type": "bigint",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "file_hash",
+          "type": "varchar(128)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "storage_path",
+          "type": "text",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "storage_key",
+          "type": "varchar(500)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "release_date",
+          "type": "date",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "status",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "uploaded_by",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "dept_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_at",
+          "type": "datetime(6)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime(6)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "remark",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "firmware_id",
+          "columns": [
+            {
+              "name": "firmware_id",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_manu_model",
+          "columns": [
+            {
+              "name": "manufacturer",
+              "prefix": null
+            },
+            {
+              "name": "version",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_file_hash",
+          "columns": [
+            {
+              "name": "file_hash",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_dept_status",
+          "columns": [
+            {
+              "name": "dept_id",
+              "prefix": null
+            },
+            {
+              "name": "status",
               "prefix": null
             }
           ]
@@ -10733,6 +10733,415 @@
           "columns": [
             {
               "name": "received_at",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_record_cache_task",
+      "comment": "设备录像缓存任务（拉流缓存到服务器）",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "task_id",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "owner_dept_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_by_user",
+          "type": "int unsigned",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_by_name",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "channel_id",
+          "type": "int unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "device_id",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "channel_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "channel_name",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "device_name",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "start_time",
+          "type": "datetime",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "end_time",
+          "type": "datetime",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "record_type",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "all",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "record_key",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "录像段标识（续播分片要复用同一个）",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "download_speed",
+          "type": "int",
+          "nullable": false,
+          "default": 4,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "node_id",
+          "type": "bigint",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "vhost",
+          "type": "varchar(128)",
+          "nullable": false,
+          "default": "__defaultVhost__",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "app",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "rtp",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "stream",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "session_id",
+          "type": "varchar(64)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "回放会话 ID（形如 pb-xxxx，字符型）",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "file_id",
+          "type": "bigint unsigned",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "file_name",
+          "type": "varchar(255)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "file_path",
+          "type": "varchar(1000)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "file_size",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "cached_bytes",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "estimated_bytes",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "state",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "last_error",
+          "type": "varchar(500)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "request_id",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "cursor_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "分段续播游标（下一分片会话的起始时间）",
+          "collation": null
+        },
+        {
+          "name": "segments",
+          "type": "text",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "分片产出清单（JSON 数组）",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "started_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "finished_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "expires_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "favorite",
+          "type": "tinyint",
+          "nullable": false,
+          "default": 0,
+          "extra": "",
+          "comment": "收藏标记（收藏后不参与保留期自动清理）",
+          "collation": null
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_record_cache_task_id",
+          "columns": [
+            {
+              "name": "task_id",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_record_cache_task_state_created",
+          "columns": [
+            {
+              "name": "state",
+              "prefix": null
+            },
+            {
+              "name": "created_at",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_record_cache_task_channel_state",
+          "columns": [
+            {
+              "name": "channel_id",
+              "prefix": null
+            },
+            {
+              "name": "state",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_record_cache_task_dept_state",
+          "columns": [
+            {
+              "name": "owner_dept_id",
+              "prefix": null
+            },
+            {
+              "name": "state",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_record_cache_task_expires",
+          "columns": [
+            {
+              "name": "expires_at",
               "prefix": null
             }
           ]

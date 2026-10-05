@@ -278,6 +278,13 @@ func (r *bootstrapShutdownRun) steps() []shutdownStep {
 		{name: "sip.quiesce", stop: func(ctx context.Context) error {
 			return quiesceSIPServerWithState(ctx, r.sip.server, r.quiesce)
 		}},
+		{name: "record-cache.stop", stop: func(ctx context.Context) error {
+			// 缓存任务的编排循环会建 download 回放会话（用 UAC），
+			// 必须排在 sip.dependencies 之前停 —— 否则 tick 会在 UAC 已释放后
+			// 继续建会话，把失败原因写成"设备回放信令建立失败"这种误导性文案。
+			CloseRecordCacheRuntime()
+			return nil
+		}},
 		{name: "sip.dependencies", stop: func(ctx context.Context) error {
 			// shutdownGeneration may start later steps concurrently after its
 			// stop context expires. Keep this dependency boundary explicit so

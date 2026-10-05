@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
@@ -29,6 +30,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/talk"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
@@ -91,6 +93,7 @@ var cascadeManagementController *gbcascadecontroller.ManagementController
 var sourceLeaseMu sync.Mutex
 var cascadeSourceLeaseChecker gbhandler.SourceLeaseChecker
 var recordingPlanSourceLeaseChecker gbhandler.SourceLeaseChecker
+var recordCacheSourceLeaseChecker gbhandler.SourceLeaseChecker
 var streamObserverMu sync.Mutex
 var recordingStreamObserver gbhandler.StreamObserver
 var recordingPlanStreamObserver gbhandler.StreamObserver
@@ -421,9 +424,24 @@ func SetRecordingPlanSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
 	sourceLeaseMu.Unlock()
 }
 
+// SetRecordCacheSourceLeaseChecker keeps device-recording cache streams alive.
+//
+// ⛔ 不接这个，缓存任务会「很快成功但文件只有一分多钟」：录制器在 ZLM 眼里不算
+// reader，回放流建起来 ~20 秒（streamNoneReaderDelayMS）后 ZLM 就发
+// on_stream_none_reader 问平台；平台的 NoneReaderPolicy 拿 pb- 流名去通道表里
+// 查（回放流天然不在通道表）→ 查不到 → 判「关」，于是 hook 调 stopper.Stop
+// 把正在录制的流拆掉。缓存任务走的就是 recordingplan 的同一条租约通道。
+func SetRecordCacheSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
+	sourceLeaseMu.Lock()
+	recordCacheSourceLeaseChecker = checker
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
+}
+
 func applySourceLeaseCheckers() {
 	hookController.SetSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{
 		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker,
+		recordCacheSourceLeaseChecker,
 	})
 }
 
@@ -454,7 +472,14 @@ func SetDeviceMgmtFirmwareUpgradeService(service *upgrade.Service) {
 }
 
 func SetFirmwareRepositoryController(ctrl *gbcontrollers.FirmwareRepositoryController) {
+	app.ZapLog.Info("SetFirmwareRepositoryController 被调用",
+		zap.String("event", "routes.set_firmware_controller"),
+		zap.Bool("ctrl_is_nil", ctrl == nil),
+		zap.Bool("before_is_nil", firmwareRepositoryController == nil))
 	firmwareRepositoryController = ctrl
+	app.ZapLog.Info("SetFirmwareRepositoryController 赋值后",
+		zap.String("event", "routes.set_firmware_controller_after"),
+		zap.Bool("after_is_nil", firmwareRepositoryController == nil))
 }
 
 func SetDeviceMgmtRecordQueryRuntime(service gbcontrollers.RecordQueryService, cfg gbconfig.RecordQueryConfig, metrics *recordquery.Metrics) {
@@ -676,6 +701,25 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
 		}
+		// 录像缓存：设备录像的「服务器后台缓存 + 任务管理」。
+		// ⛔ 用闭包间接取控制器，装配晚于路由注册时也能命中（与 cloud-recordings 同风格）。
+		recordCache := gb.Group("/record-cache")
+		{
+			recordCache.POST("/tasks", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().Create(c) })
+			recordCache.GET("/tasks", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().List(c) })
+			recordCache.GET("/tasks/:taskId", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().Detail(c) })
+			recordCache.POST("/tasks/:taskId/cancel", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().Cancel(c) })
+			recordCache.DELETE("/tasks/:taskId", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().Delete(c) })
+			// 收藏 / 取消收藏：收藏的录像不参与保留期自动清理。
+			recordCache.POST("/tasks/:taskId/favorite", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().SetFavorite(c) })
+			recordCache.GET("/tasks/:taskId/content", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().Content(c) })
+			// 票据下载：建一次（带票据 cookie + 免鉴权地址）、查状态、取消。
+			// 真正下文件的 `…/downloads/:downloadId/content` 在 RegisterContentRoutes
+			// 里注册成**免鉴权**路由 —— 浏览器自己的下载带不了 JWT 头。
+			recordCache.POST("/tasks/:taskId/downloads", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().CreateDownload(c) })
+			recordCache.GET("/downloads/:downloadId", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().DownloadStatus(c) })
+			recordCache.DELETE("/downloads/:downloadId", func(c *gin.Context) { gbcontrollers.RecordCacheRuntime().CancelDownload(c) })
+		}
 		recordingPlans := gb.Group("/recording-plans")
 		{
 			recordingPlans.GET("", recordingPlanController.Page)
@@ -741,40 +785,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		gb.GET("/sip/platform", func(c *gin.Context) { platformController.Info(c) })
 		serviceConfig := gb.Group("/sip/service-config")
 		{
-			serviceConfig.GET("/position-history", serviceConfigController.GetPositionHistory)
-			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
-			serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
-			serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
-			serviceConfig.GET("/sync-channels-on-online", serviceConfigController.GetSyncChannelsOnOnline)
-			serviceConfig.PUT("/sync-channels-on-online", serviceConfigController.UpdateSyncChannelsOnOnline)
-			serviceConfig.GET("/online-on-heartbeat", serviceConfigController.GetOnlineOnHeartbeat)
-			serviceConfig.PUT("/online-on-heartbeat", serviceConfigController.UpdateOnlineOnHeartbeat)
-			serviceConfig.GET("/save-alarm-messages", serviceConfigController.GetSaveAlarmMessages)
-			serviceConfig.PUT("/save-alarm-messages", serviceConfigController.UpdateSaveAlarmMessages)
-			serviceConfig.GET("/sip-command-timeout", serviceConfigController.GetSIPCommandTimeout)
-			serviceConfig.PUT("/sip-command-timeout", serviceConfigController.UpdateSIPCommandTimeout)
-			serviceConfig.GET("/preallocation-mode", serviceConfigController.GetPreallocationMode)
-			serviceConfig.PUT("/preallocation-mode", serviceConfigController.UpdatePreallocationMode)
-			serviceConfig.GET("/ignore-channel-offline-status-notify", serviceConfigController.GetIgnoreChannelOfflineStatusNotify)
-			serviceConfig.PUT("/ignore-channel-offline-status-notify", serviceConfigController.UpdateIgnoreChannelOfflineStatusNotify)
-			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)
-			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
-			serviceConfig.GET("/default-channel-stream-transport", serviceConfigController.GetDefaultChannelStreamTransport)
-			serviceConfig.PUT("/default-channel-stream-transport", serviceConfigController.UpdateDefaultChannelStreamTransport)
-			serviceConfig.GET("/default-playback-protocol", serviceConfigController.GetDefaultPlaybackProtocol)
-			serviceConfig.PUT("/default-playback-protocol", serviceConfigController.UpdateDefaultPlaybackProtocol)
-			serviceConfig.GET("/global-subscriptions", serviceConfigController.GetGlobalSubscriptions)
-			serviceConfig.PUT("/global-subscriptions", serviceConfigController.UpdateGlobalSubscriptions)
-			serviceConfig.GET("/default-channel-audio", serviceConfigController.GetDefaultChannelAudio)
-			serviceConfig.PUT("/default-channel-audio", serviceConfigController.UpdateDefaultChannelAudio)
-			serviceConfig.GET("/playback-settings", serviceConfigController.GetPlaybackSettings)
-			serviceConfig.PUT("/playback-settings", serviceConfigController.UpdatePlaybackSettings)
-			serviceConfig.GET("/fixed-address-playback", serviceConfigController.GetFixedAddressPlayback)
-			serviceConfig.PUT("/fixed-address-playback", serviceConfigController.UpdateFixedAddressPlayback)
-			serviceConfig.GET("/play-auth", serviceConfigController.GetPlayAuth)
-			serviceConfig.PUT("/play-auth", serviceConfigController.UpdatePlayAuth)
-			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
-			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
+			serviceConfig.GET("", serviceConfigController.GetServiceConfig)
+			serviceConfig.PUT("", serviceConfigController.UpdateServiceConfig)
 		}
 		setup := gb.Group("/sip/setup")
 		{
@@ -900,11 +912,12 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/device/:id/firmware-upgrade", deviceMgmtController.UpgradeDeviceFirmware)
 			dmgmt.GET("/device/:id/firmware-upgrades", deviceMgmtController.ListFirmwareUpgrades)
 			// 固件仓库管理（CRUD + 生成下载链接需要鉴权）
-			dmgmt.POST("/firmware-repository", firmwareRepositoryController.Upload)
-			dmgmt.GET("/firmware-repository", firmwareRepositoryController.List)
-			dmgmt.GET("/firmware-repository/:id", firmwareRepositoryController.GetByID)
-			dmgmt.DELETE("/firmware-repository/:id", firmwareRepositoryController.Delete)
-			dmgmt.POST("/firmware-repository/:id/download-link", firmwareRepositoryController.GenerateDownloadLink)
+			dmgmt.POST("/firmware-repository", func(c *gin.Context) { firmwareRepositoryController.Upload(c) })
+			dmgmt.GET("/firmware-repository", func(c *gin.Context) { firmwareRepositoryController.List(c) })
+			dmgmt.GET("/firmware-repository/:id", func(c *gin.Context) { firmwareRepositoryController.GetByID(c) })
+			dmgmt.PATCH("/firmware-repository/:id/status", func(c *gin.Context) { firmwareRepositoryController.UpdateStatus(c) })
+			dmgmt.DELETE("/firmware-repository/:id", func(c *gin.Context) { firmwareRepositoryController.Delete(c) })
+			dmgmt.POST("/firmware-repository/:id/download-link", func(c *gin.Context) { firmwareRepositoryController.GenerateDownloadLink(c) })
 			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
 			dmgmt.GET("/device/:id/subscriptions", deviceMgmtController.ListSubscriptions)
 			dmgmt.PATCH("/device/:id/subscriptions/:kind", deviceMgmtController.UpdateSubscription)
@@ -1033,8 +1046,19 @@ func RegisterContentRoutes(engine *gin.Engine) {
 	engine.GET("/api/gb28181/cloud-recordings/content/:id", func(c *gin.Context) {
 		currentCloudRecordingCatalogController().Content(c)
 	})
+	// 录像缓存的文件下载：一次性票据（HttpOnly cookie）就是鉴权凭证，免 JWT。
+	// ⛔ 与上面云录像那条同理：带 JWT 的入口只负责"签发凭据"，
+	// 真正下文件的这条必须在裸 engine 上 —— 浏览器自己的下载请求带不了头。
+	engine.GET("/api/gb28181/record-cache/downloads/:downloadId/content", func(c *gin.Context) {
+		gbcontrollers.RecordCacheRuntime().DownloadContent(c)
+	})
+	// 按分片下载：序号在**路径**里，于是票据 cookie 的 Path 也就限定到那一段
+	// （放进 query 的话，同一张凭据能被改成任意序号重放）。
+	engine.GET("/api/gb28181/record-cache/downloads/:downloadId/segments/:index/content", func(c *gin.Context) {
+		gbcontrollers.RecordCacheRuntime().DownloadSegmentContent(c)
+	})
 	// 固件下载:凭一次性 token 兑换文件内容(token 本身是鉴权凭证,免 JWT)
-	engine.GET("/api/gb28181/device-mgmt/firmware-repository/download/:token", firmwareRepositoryController.Download)
+	engine.GET("/api/gb28181/device-mgmt/firmware-repository/download/:token", func(c *gin.Context) { firmwareRepositoryController.Download(c) })
 }
 
 func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {
