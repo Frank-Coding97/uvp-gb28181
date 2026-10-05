@@ -55,13 +55,17 @@ describe("CatalogRefreshProgressDialog", () => {
     const wrapper = mountDialog("receiving", { receivedCount: 2, totalCount: 5 });
     expect(wrapper.text()).toContain("同步中...[2/5]");
     expect(wrapper.text()).toContain("已刷新 2 / 5 个通道");
-    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("40");
+    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("0.4");
   });
 
   it("完成时仍显示最终通道计数", async () => {
     const wrapper = mountDialog("receiving", { receivedCount: 2, totalCount: 5 });
+    // ⛔ 喂给 `a-progress` 的是 0~1 的比值：传 40 会让圆环的 strokeDashoffset
+    //    恒为 0（环永远画满），还会因 percent >= 1 提前被当成 success。
+    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("0.4");
     await wrapper.setProps({ progress: { ...baseProgress, status: "completed", receivedCount: 5, totalCount: 5 } });
     expect(wrapper.text()).toContain("已刷新 5 / 5 个通道");
+    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("1");
   });
 
   it("展示失败原因并支持关闭", async () => {

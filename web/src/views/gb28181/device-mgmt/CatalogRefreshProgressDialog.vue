@@ -13,12 +13,20 @@ const emit = defineEmits<{ close: [] }>();
 
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
-const percent = computed(() => {
+// ⛔ Arco 的 `a-progress` 收的是 **0~1 的比值**，不是百分数：
+//    circle 的 `strokeDashoffset = (percent >= 1 ? 0 : 1 - percent) * 周长`
+//    （@arco-design/web-vue/es/progress/circle.js）。传 40 ⇒ offset 恒为 0
+//    ⇒ **圆环从头到尾画满**，还会因 `percent >= 1` 被判成 success 而提前显示 ✓。
+//    所以展示用百分数（progressPercent），喂组件用比值（progressRatio）。
+//    判别依据与防回归见 `src/style/model/arco-progress-percent.test.ts`。
+const progressPercent = computed(() => {
   const progress = props.progress;
   if (progress?.status === "completed") return 100;
   if (!progress?.totalCount || progress.totalCount <= 0) return 0;
   return Math.min(100, Math.round((progress.receivedCount / progress.totalCount) * 100));
 });
+
+const progressRatio = computed(() => progressPercent.value / 100);
 
 const progressStatus = computed<"normal" | "success" | "danger">(() => {
   if (props.progress?.status === "completed") return "success";
@@ -82,7 +90,7 @@ onBeforeUnmount(clearCloseTimer);
     @cancel="close"
   >
     <div class="catalog-refresh-progress" :aria-label="`${deviceName || deviceId}刷新进度`">
-      <a-progress type="circle" :percent="percent" :status="progressStatus" :width="120" />
+      <a-progress type="circle" :percent="progressRatio" :status="progressStatus" :width="120" />
       <div class="progress-message">{{ message }}</div>
       <div class="progress-count">{{ channelCountLabel }}</div>
     </div>

@@ -59,6 +59,15 @@ const requestVersions: Record<RecordType, number> = { reboot: 0, upgrade: 0 };
 let contextVersion = 0;
 
 const activeState = computed(() => (activeType.value === "reboot" ? rebootState : upgradeState));
+const mergedRecords = computed(() =>
+  [
+    ...rebootState.list.map(item => ({ type: "reboot" as const, item })),
+    ...upgradeState.list.map(item => ({ type: "upgrade" as const, item }))
+  ].sort((a, b) => new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime())
+);
+const mergedTotal = computed(() => rebootState.total + upgradeState.total);
+const mergedLoading = computed(() => rebootState.loading || upgradeState.loading);
+const mergedError = computed(() => rebootState.error || upgradeState.error);
 const deviceName = computed(() => props.device?.alias?.trim() || props.device?.name?.trim() || "未命名设备");
 const deviceVendor = computed(() => [props.device?.manufacturer, props.device?.model].filter(Boolean).join(" / ") || "未上报");
 const selectedTimeline = computed(() => {
@@ -163,16 +172,15 @@ function operationLabel(type: RecordType) {
   return type === "reboot" ? "重启设备" : "固件升级";
 }
 
-function recordTypeTitle(type: RecordType) {
-  return type === "reboot" ? "重启记录" : "升级记录";
-}
-
-function countText(state: RebootState | UpgradeState) {
-  return state.loaded ? String(state.total) : "—";
-}
-
-function actorText(actorId?: number | null) {
+function actorText(actorId?: number | null, actorName?: string | null) {
+  if (actorName?.trim()) return actorName.trim();
   return actorId && actorId > 0 ? `账号 #${actorId}` : "未记录";
+}
+
+// 重启记录（MaintenanceOperation）带 actorName，固件升级记录（UpgradeOperation）后端不返回，
+// 合并列表里两种记录混排，所以在这里按形状收窄而不是在模板上直接取属性。
+function actorNameOf(item: RecordItem): string | null | undefined {
+  return "actorName" in item ? item.actorName : null;
 }
 
 function failedReasonText(value?: string | null) {
@@ -316,30 +324,25 @@ async function loadPage(type: RecordType, page: number, token = contextVersion, 
   }
 }
 
-function setActiveType(type: RecordType) {
-  if (activeType.value === type) return;
-  activeType.value = type;
-  selectedRecord.value = null;
-  deepLinkMessage.value = "";
-  const state = stateFor(type);
-  if (!state.loaded && !state.loading && props.device?.id != null) void loadPage(type, 1);
-  else tryResolveDeepLink(type);
-}
-
 function refreshCurrent() {
   deepLinkMessage.value = "";
   deepLinkPending.value = false;
-  if (props.device?.id != null) void loadPage(activeType.value, activeState.value.page);
+  if (props.device?.id != null) loadAll(Math.max(rebootState.page, upgradeState.page));
 }
 
 function retryCurrent() {
-  const state = stateFor(activeType.value);
-  if (props.device?.id != null) void loadPage(activeType.value, state.page || 1);
+  if (props.device?.id != null) loadAll(Math.max(rebootState.page, upgradeState.page) || 1);
 }
 
 function changePage(page: number) {
   selectedRecord.value = null;
   if (props.device?.id != null) void loadPage(activeType.value, page);
+}
+
+function loadAll(page = 1) {
+  if (props.device?.id == null) return;
+  void loadPage("reboot", page);
+  void loadPage("upgrade", page);
 }
 
 function changePageSize(size: number) {
@@ -379,7 +382,7 @@ watch(
     deepLinkPending.value = Boolean(operationId);
     resetState(rebootState);
     resetState(upgradeState);
-    if (visible && typeof deviceId === "number") void loadPage(activeType.value, 1);
+    if (visible && typeof deviceId === "number") loadAll(1);
   },
   { immediate: true }
 );
@@ -466,7 +469,7 @@ onBeforeUnmount(() => invalidateRequests());
           <dl class="detail-facts">
             <div>
               <dt>操作人</dt>
-              <dd>{{ actorText(selectedRecord.item.actorId) }}</dd>
+              <dd>{{ actorText(selectedRecord.item.actorId, actorNameOf(selectedRecord.item)) }}</dd>
             </div>
             <div>
               <dt>摘要</dt>
@@ -511,83 +514,59 @@ onBeforeUnmount(() => invalidateRequests());
         </div>
 
         <template v-else>
-          <div class="record-tabs" role="tablist" aria-label="维护记录类型">
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="activeType === 'reboot'"
-              :class="{ active: activeType === 'reboot' }"
-              data-testid="maintenance-records-tab-reboot"
-              @click="setActiveType('reboot')"
-            >
-              {{ recordTypeTitle("reboot") }} <span>{{ countText(rebootState) }}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="activeType === 'upgrade'"
-              :class="{ active: activeType === 'upgrade' }"
-              data-testid="maintenance-records-tab-upgrade"
-              @click="setActiveType('upgrade')"
-            >
-              {{ recordTypeTitle("upgrade") }} <span>{{ countText(upgradeState) }}</span>
-            </button>
-          </div>
-
-          <section class="record-list-panel" :aria-label="recordTypeTitle(activeType)">
+          <section class="record-list-panel" aria-label="全部维护记录">
             <div class="list-heading">
               <div>
-                <strong>{{ recordTypeTitle(activeType) }}</strong
-                ><span>共 {{ countText(activeState) }} 条</span>
+                <strong>全部维护记录</strong><span>共 {{ mergedTotal }} 条</span>
               </div>
-              <span v-if="activeState.loading && activeState.list.length" class="loading-inline"
+              <span v-if="mergedLoading && mergedRecords.length" class="loading-inline"
                 ><Loader2 :size="14" class="spin" />正在刷新</span
               >
             </div>
             <div v-if="deepLinkMessage" class="deep-link-note" role="status">
               <AlertTriangle :size="15" />{{ deepLinkMessage }}
             </div>
-            <div v-if="activeState.error" class="records-error" role="alert">
+            <div v-if="mergedError" class="records-error" role="alert">
               <CircleX :size="16" />
               <div>
-                <strong>记录加载失败</strong><span>{{ activeState.error }}</span
+                <strong>记录加载失败</strong><span>{{ mergedError }}</span
                 ><button type="button" data-testid="maintenance-records-retry" @click="retryCurrent">重试</button>
               </div>
             </div>
-            <div v-else-if="activeState.loading && !activeState.list.length" class="records-state" role="status">
-              <Loader2 :size="17" class="spin" />正在加载{{ recordTypeTitle(activeType) }}
+            <div v-else-if="mergedLoading && !mergedRecords.length" class="records-state" role="status">
+              <Loader2 :size="17" class="spin" />正在加载维护记录
             </div>
-            <div v-else-if="!activeState.list.length" class="records-state" role="status">
-              暂无{{ recordTypeTitle(activeType) }}
-            </div>
+            <div v-else-if="!mergedRecords.length" class="records-state" role="status">暂无维护记录</div>
             <div v-else class="record-table" role="table">
               <div class="record-row record-row-head" role="row">
-                <span>时间</span><span>操作</span><span>操作人</span><span>结果</span><span>摘要</span>
+                <span>时间</span><span>操作类型</span><span>操作人</span><span>结果</span><span>摘要</span>
               </div>
               <button
-                v-for="item in activeState.list"
-                :key="item.operationId"
+                v-for="record in mergedRecords"
+                :key="record.item.operationId"
                 type="button"
                 class="record-row record-row-item"
                 role="row"
-                :data-testid="`maintenance-record-${activeType}-row`"
-                @click="showDetails(activeType, item)"
+                :data-testid="`maintenance-record-${record.type}-row`"
+                @click="showDetails(record.type, record.item)"
               >
-                <time :title="formatDateTime(item.createdAt)">{{ formatDateTime(item.createdAt) }}</time>
-                <strong>{{ operationLabel(activeType) }}</strong>
-                <span>{{ actorText(item.actorId) }}</span>
-                <span class="record-status" :class="`tone-${statusTone(item.status)}`">{{
-                  statusText(activeType, item.status)
+                <time :title="formatDateTime(record.item.createdAt)">{{ formatDateTime(record.item.createdAt) }}</time>
+                <strong>{{ operationLabel(record.type) }}</strong>
+                <span>{{ actorText(record.item.actorId, actorNameOf(record.item)) }}</span>
+                <span class="record-status" :class="`tone-${statusTone(record.item.status)}`">{{
+                  statusText(record.type, record.item.status)
                 }}</span>
-                <span class="record-summary" :title="summaryText(activeType, item)">{{ summaryText(activeType, item) }}</span>
+                <span class="record-summary" :title="summaryText(record.type, record.item)">{{
+                  summaryText(record.type, record.item)
+                }}</span>
               </button>
             </div>
-            <footer v-if="activeState.total > 0" class="records-pagination uvp-pagination-bar">
+            <footer v-if="mergedTotal > 0" class="records-pagination uvp-pagination-bar">
               <a-pagination
-                :current="activeState.page"
+                :current="Math.max(rebootState.page, upgradeState.page)"
                 :page-size="pageSize"
                 :total="activeState.total"
-                :loading="activeState.loading"
+                :loading="mergedLoading"
                 :page-size-options="[10, 20, 50, 100]"
                 show-total
                 show-page-size
@@ -931,19 +910,28 @@ dd {
 }
 .detail-back {
   display: inline-flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
-  padding: 0;
+  min-height: 32px;
+  padding: 0 11px 0 8px;
   margin-bottom: 14px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--uvp-text-secondary);
+  font: 600 13px/1 inherit;
+  color: var(--uvp-brand);
   cursor: pointer;
-  background: transparent;
-  border: 0;
+  background: var(--uvp-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--uvp-brand) 28%, transparent);
+  border-radius: 7px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 .detail-back:hover {
-  color: var(--uvp-brand);
+  background: color-mix(in srgb, var(--uvp-brand) 16%, transparent);
+  border-color: color-mix(in srgb, var(--uvp-brand) 46%, transparent);
+}
+.detail-back:focus-visible {
+  outline: 2px solid var(--uvp-brand);
+  outline-offset: 2px;
 }
 .detail-heading {
   display: flex;

@@ -15,6 +15,7 @@ import {
   Grid2X2,
   History,
   Info,
+  Joystick,
   Layers,
   List,
   Loader2,
@@ -598,6 +599,17 @@ function protocolSourceText(value?: string | null) {
       value || ""
     ] || "未说明"
   );
+}
+// 列表 / 卡片上的「国标版本」提示：生效版本 + 来源 + 设备原始上报值
+// (effectiveVersion 有 default:2016 兜底,单看值分不出"真 2016"还是"没上报",所以把来源一并给出)
+function protocolVersionTooltip(item: {
+  effectiveVersion?: string | null;
+  effectiveVersionSource?: string | null;
+  reportedVersion?: string | null;
+}) {
+  const parts = [protocolVersionText(item.effectiveVersion), protocolSourceText(item.effectiveVersionSource)];
+  if (item.reportedVersion) parts.push(`X-GB-Ver ${item.reportedVersion}`);
+  return parts.join(" · ");
 }
 function copyText(value?: string | null) {
   const text = (value || "").trim();
@@ -1608,6 +1620,32 @@ function onDeviceDblclick(record: DeviceVO, event: MouseEvent) {
 function onChannelDblclick(record: ChannelVO, event: MouseEvent) {
   if (!isInteractiveDblclick(event)) playChannel(record);
 }
+// 双击下钻的悬停说明:列表行 / 设备卡片上双击可进入该设备的通道列表,
+// 但这个交互本身没有任何视觉线索 ⇒ 悬停时给一条跟随光标的浮层。
+// 只在「设备」资产视图成立:通道行 / 通道卡片上的双击是播放,不是下钻。
+// 落到按钮 / 链接 / 下拉等可交互元素上时也收起(那里双击不会触发下钻)。
+const drilldownHint = reactive({ visible: false, x: 0, y: 0 });
+function hideDrilldownHint() {
+  drilldownHint.visible = false;
+}
+function updateDrilldownHint(event: MouseEvent) {
+  const target = event.target;
+  if (
+    assetKind.value !== "device" ||
+    !(target instanceof Element) ||
+    isInteractiveDblclick(event) ||
+    !target.closest(".arco-table-tr, .device-summary-card")
+  ) {
+    hideDrilldownHint();
+    return;
+  }
+  // 贴光标右下方,并夹在视口内,避免贴近右下角时被裁掉
+  drilldownHint.visible = true;
+  drilldownHint.x = Math.min(event.clientX + 14, window.innerWidth - 116);
+  drilldownHint.y = Math.min(event.clientY + 18, window.innerHeight - 36);
+}
+// 视图/资产切换会卸载悬挂事件的容器(不保证触发 mouseleave) ⇒ 主动收起,避免浮层残留
+watch([viewMode, assetKind], hideDrilldownHint);
 
 const deleting = ref(false);
 const refreshingCatalog = reactive<Record<number, boolean>>({});
@@ -2219,6 +2257,18 @@ onUnmounted(() => {
 
 <template>
   <div class="device-mgmt-page">
+    <!-- 双击下钻的悬停说明:跟随光标,pointer-events:none 不挡任何操作 -->
+    <!-- Teleport 到 body:避免被 .device-mgmt-page 的 overflow:hidden / 祖先 transform 影响 -->
+    <Teleport to="body">
+      <div
+        v-if="drilldownHint.visible"
+        class="drilldown-hint"
+        :style="{ left: `${drilldownHint.x}px`, top: `${drilldownHint.y}px` }"
+        role="presentation"
+      >
+        双击进入通道
+      </div>
+    </Teleport>
     <CatalogRefreshProgressDialog
       :visible="catalogRefreshVisible"
       :device-name="catalogRefreshDevice?.alias || catalogRefreshDevice?.name || ''"
@@ -2405,7 +2455,12 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="viewMode === 'list'" class="view-body table-view">
+        <div
+          v-if="viewMode === 'list'"
+          class="view-body table-view"
+          @mousemove="updateDrilldownHint"
+          @mouseleave="hideDrilldownHint"
+        >
           <a-table
             v-if="assetKind === 'channel'"
             v-model:selected-keys="selectedRowKeys"
@@ -2413,7 +2468,7 @@ onUnmounted(() => {
             :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
-            :scroll="{ x: 1580, y: '85%' }"
+            :scroll="{ x: 2130, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
             class="uvp-data-table"
             @page-change="onPageChange"
@@ -2567,7 +2622,13 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
-              <a-table-column title="操作" :width="350" fixed="right">
+              <!-- 操作列宽必须放得下「最多动作数」这一行：通道最多 7 个动作
+                   (播放/录像/操作/停止/详情/编辑/删除)，单个动作 50px(4+13+3+26+4)、动作间 1px、
+                   单元格左右各 16px 内边距 ⇒ 7×50+6×1+32 = 388px。
+                   旧值 350 只够 6 个：任一通道「直播中」时多出「停止」，该行比列宽多出 38px，
+                   会把「删除」顶出列外被表格右缘裁掉。列宽改动后同步维护 :scroll.x
+                   (上面通道表的 scroll.x = Σ列宽 2090 + 勾选列 40 = 2130)。 -->
+              <a-table-column title="操作" :width="400" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link
@@ -2591,7 +2652,7 @@ onUnmounted(() => {
                       class="uvp-table-action uvp-table-action--more"
                       @click="openChannelOperations(record)"
                     >
-                      <template #icon><MoreHorizontal :size="13" /></template>
+                      <template #icon><Joystick :size="13" /></template>
                       <span>操作</span>
                     </a-link>
                     <a-link
@@ -2637,7 +2698,7 @@ onUnmounted(() => {
             :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
-            :scroll="{ x: 1650, y: '85%' }"
+            :scroll="{ x: 2000, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
             class="uvp-data-table device-data-table"
             @page-change="onPageChange"
@@ -2720,6 +2781,13 @@ onUnmounted(() => {
                   </a-tooltip>
                 </template>
               </a-table-column>
+              <a-table-column title="国标版本" :width="150">
+                <template #cell="{ record }">
+                  <a-tooltip :content="protocolVersionTooltip(record)" position="top">
+                    <span class="relative text-ellipsis">{{ protocolVersionText(record.effectiveVersion) }}</span>
+                  </a-tooltip>
+                </template>
+              </a-table-column>
               <a-table-column title="注册时间" :width="170">
                 <template #cell="{ record }">
                   <span class="relative">{{ dateTime(record.registerTime) }}</span>
@@ -2730,7 +2798,7 @@ onUnmounted(() => {
                   <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
                 </template>
               </a-table-column>
-              <a-table-column title="操作" :width="302" fixed="right">
+              <a-table-column title="操作" :width="400" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
@@ -2757,37 +2825,41 @@ onUnmounted(() => {
                       <template #icon><Bell :size="13" /></template>
                       <span>订阅</span>
                     </a-link>
-                    <a-dropdown trigger="click" position="br">
+                    <a-link class="uvp-table-action uvp-table-action--detail" @click="openDevice(record)">
+                      <template #icon><Eye :size="13" /></template>
+                      <span>详情</span>
+                    </a-link>
+                    <a-link
+                      v-if="canEditDevice"
+                      class="uvp-table-action uvp-table-action--edit"
+                      @click="openEditDeviceModal(record)"
+                    >
+                      <template #icon><Pencil :size="13" /></template>
+                      <span>编辑</span>
+                    </a-link>
+                    <a-link
+                      v-if="canDeleteDevice"
+                      class="uvp-table-action uvp-table-action--delete"
+                      :disabled="deleting"
+                      @click="handleDeleteDevice(record)"
+                    >
+                      <template #icon><Trash2 :size="13" /></template>
+                      <span>删除</span>
+                    </a-link>
+                    <!-- 「更多」只剩设备维护(固件升级/维护记录/重启),详情·编辑·删除已平铺到操作列 -->
+                    <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
                       <a-link class="uvp-table-action uvp-table-action--more">
-                        <span>更多</span>
+                        <span>维护</span>
                         <MoreHorizontal :size="13" />
                       </a-link>
                       <template #content>
                         <DeviceMaintenanceMenu
-                          v-if="canViewMaintenance"
                           :can-upgrade="canUpgradeDevice"
                           :can-reboot="canRebootDevice"
                           @upgrade="openDeviceUpgrade(record)"
                           @records="openMaintenanceRecords(record)"
                           @reboot="openDeviceReboot(record)"
                         />
-                        <a-doption class="device-action-menu-item" @click="openDevice(record)">
-                          <Eye :size="14" />
-                          <span>详情</span>
-                        </a-doption>
-                        <a-doption v-if="canEditDevice" class="device-action-menu-item" @click="openEditDeviceModal(record)">
-                          <Pencil :size="14" />
-                          <span>编辑</span>
-                        </a-doption>
-                        <a-doption
-                          v-if="canDeleteDevice"
-                          class="device-action-menu-item device-action-menu-item--danger"
-                          :disabled="deleting"
-                          @click="handleDeleteDevice(record)"
-                        >
-                          <Trash2 :size="14" />
-                          <span>删除</span>
-                        </a-doption>
                       </template>
                     </a-dropdown>
                   </div>
@@ -2797,7 +2869,12 @@ onUnmounted(() => {
           </a-table>
         </div>
 
-        <div v-else-if="viewMode === 'card'" class="view-body card-view">
+        <div
+          v-else-if="viewMode === 'card'"
+          class="view-body card-view"
+          @mousemove="updateDrilldownHint"
+          @mouseleave="hideDrilldownHint"
+        >
           <div class="card-grid">
             <template v-if="assetKind === 'device'">
               <article
@@ -2843,6 +2920,12 @@ onUnmounted(() => {
                   </div>
                   <div>
                     <span>型号</span><strong class="text-ellipsis">{{ item.model || "未上报" }}</strong>
+                  </div>
+                  <div>
+                    <span>国标版本</span
+                    ><a-tooltip :content="protocolVersionTooltip(item)" position="top"
+                      ><strong class="text-ellipsis">{{ protocolVersionText(item.effectiveVersion) }}</strong></a-tooltip
+                    >
                   </div>
                   <div>
                     <span>地址</span
@@ -2921,7 +3004,13 @@ onUnmounted(() => {
                       <Trash2 :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
+                  <a-dropdown
+                    v-if="canViewMaintenance"
+                    trigger="click"
+                    position="br"
+                    :popup-max-height="false"
+                    content-class="device-card-maintenance-dropdown"
+                  >
                     <button class="icon-btn small framed" type="button" aria-label="更多设备操作">
                       <MoreHorizontal :size="13" />
                     </button>
@@ -3102,7 +3191,7 @@ onUnmounted(() => {
                         aria-label="通道操作"
                         @click.stop="openChannelOperations(item)"
                       >
-                        <MoreHorizontal :size="13" />
+                        <Joystick :size="13" />
                       </button>
                     </a-tooltip>
                     <a-tooltip
@@ -3858,6 +3947,20 @@ onUnmounted(() => {
   min-height: 0;
   padding: 0;
   overflow: hidden;
+}
+
+/* 双击下钻提示:深色气泡在任何主题下都保证白字可读,且不吃鼠标事件 */
+.drilldown-hint {
+  position: fixed;
+  z-index: 3000;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ffffff;
+  pointer-events: none;
+  background: rgb(15 23 42 / 88%);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px -10px rgb(15 23 42 / 60%);
 }
 .device-stats {
   display: inline-flex;
@@ -4785,30 +4888,24 @@ onUnmounted(() => {
 :global(.arco-dropdown:has(.device-action-menu-item) .arco-dropdown-list) {
   padding: 0;
 }
+:global(.device-card-maintenance-dropdown .arco-scrollbar-thumb-direction-vertical) {
+  display: none;
+}
 :global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item) {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   min-width: 112px;
   height: 32px;
   padding: 0 9px;
   font-size: 13px;
+  line-height: 32px;
   color: var(--uvp-text-secondary);
   border-radius: 6px;
 }
 :global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item:hover) {
   color: var(--uvp-brand-strong);
   background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-list-toolbar-bg));
-}
-:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item--danger) {
-  margin-top: 4px;
-  color: #d14343;
-  border-top: 1px solid var(--uvp-panel-border);
-  border-radius: 0 0 6px 6px;
-}
-:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item--danger:hover) {
-  color: #ba2f2f;
-  background: rgb(209 67 67 / 8%);
 }
 .btn-ghost.compact {
   height: 28px;

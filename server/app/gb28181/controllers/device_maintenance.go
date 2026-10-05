@@ -48,6 +48,7 @@ type MaintenanceOperation struct {
 	SIPStatus        int                         `json:"sipStatus"`
 	ErrorMessage     string                      `json:"errorMessage"`
 	ActorID          uint                        `json:"actorId"`
+	ActorName        string                      `json:"actorName"`
 	CreatedAt        time.Time                   `json:"createdAt"`
 	SentAt           *time.Time                  `json:"sentAt"`
 	CompletedAt      *time.Time                  `json:"completedAt"`
@@ -210,15 +211,16 @@ func (dc *DeviceMgmtController) ListMaintenanceOperations(c *gin.Context) {
 	deviceID, _ := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 64)
 	query := db.Clauses(dbresolver.Write).WithContext(c.Request.Context()).
 		Model(&gbmodels.GbPTZOperation{}).
-		Where("device_id = ? AND action IN ?", deviceID, maintenanceOperationActions)
+		Where("gb_ptz_operation.device_id = ? AND gb_ptz_operation.action IN ?", deviceID, maintenanceOperationActions)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		dc.FailAndAbort(c, "查询设备维护记录统计失败", err)
 		return
 	}
 	var operations []gbmodels.GbPTZOperation
-	if err := query.Select("operation_id, action, status, sip_status, error_message, device_error, device_id, device_code, actor_id, created_at, sent_at, completed_at, response_required, target_code, queue_deadline_at").
-		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&operations).Error; err != nil {
+	if err := query.Select("gb_ptz_operation.operation_id, gb_ptz_operation.action, gb_ptz_operation.status, gb_ptz_operation.sip_status, gb_ptz_operation.error_message, gb_ptz_operation.device_error, gb_ptz_operation.device_id, gb_ptz_operation.device_code, gb_ptz_operation.actor_id, COALESCE(sys_users.username, '') AS actor_name, gb_ptz_operation.created_at, gb_ptz_operation.sent_at, gb_ptz_operation.completed_at, gb_ptz_operation.response_required, gb_ptz_operation.target_code, gb_ptz_operation.queue_deadline_at").
+		Joins("LEFT JOIN sys_users ON sys_users.id = gb_ptz_operation.actor_id").
+		Order("gb_ptz_operation.created_at DESC, gb_ptz_operation.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&operations).Error; err != nil {
 		dc.FailAndAbort(c, "查询设备维护记录失败", err)
 		return
 	}
@@ -250,7 +252,7 @@ func (dc *DeviceMgmtController) ListMaintenanceOperations(c *gin.Context) {
 		}
 		list = append(list, MaintenanceOperation{
 			OperationID: operation.OperationID, Action: operation.Action, Status: status,
-			SIPStatus: operation.SIPStatus, ErrorMessage: errorMessage, ActorID: operation.ActorID,
+			SIPStatus: operation.SIPStatus, ErrorMessage: errorMessage, ActorID: operation.ActorID, ActorName: operation.ActorName,
 			CreatedAt: operation.CreatedAt, SentAt: operation.SentAt, CompletedAt: operation.CompletedAt,
 			ResponseRequired: operation.ResponseRequired, TargetCode: targetCode,
 		})

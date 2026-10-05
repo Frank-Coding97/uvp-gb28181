@@ -109,7 +109,7 @@ describe("DeviceMaintenanceRecordsDialog", () => {
     api.listFirmwareUpgrades.mockReset().mockResolvedValue(page([], 0));
   });
 
-  it("loads only the reboot page first and renders a read-only summary", async () => {
+  it("loads both operation types into one read-only table", async () => {
     const wrapper = mountDialog();
     await settle(wrapper);
 
@@ -118,29 +118,22 @@ describe("DeviceMaintenanceRecordsDialog", () => {
       "uvp-system-dialog"
     );
     expect(api.listMaintenanceOperations).toHaveBeenCalledWith(31, { page: 1, pageSize: 10 });
-    expect(api.listFirmwareUpgrades).not.toHaveBeenCalled();
+    expect(api.listFirmwareUpgrades).toHaveBeenCalledWith(31, { page: 1, pageSize: 10 });
     expect(wrapper.text()).toContain("重启设备");
     expect(wrapper.text()).toContain("账号 #42");
     expect(wrapper.text()).toContain("已发送");
     expect(wrapper.text()).toContain("平台已下发指令（该命令无需设备回执）");
-    expect(wrapper.get("[data-testid='maintenance-records-tab-upgrade']").text()).toContain("—");
     expect(wrapper.find("[data-testid='maintenance-records-reboot-action']").exists()).toBe(false);
   });
 
-  it("keeps upgrade paging independent from reboot paging", async () => {
+  it("renders reboot and upgrade rows together", async () => {
     api.listMaintenanceOperations.mockResolvedValue(page([rebootOperation()], 21));
     api.listFirmwareUpgrades.mockResolvedValue(page([upgradeOperation()], 21));
     const wrapper = mountDialog();
     await settle(wrapper);
 
-    await wrapper.get("[data-testid='maintenance-records-tab-upgrade']").trigger("click");
-    await settle(wrapper);
-    expect(api.listFirmwareUpgrades).toHaveBeenCalledWith(31, { page: 1, pageSize: 10 });
-
-    await wrapper.get("[data-testid='maintenance-records-next-page']").trigger("click");
-    await settle(wrapper);
-    expect(api.listFirmwareUpgrades).toHaveBeenCalledWith(31, { page: 2, pageSize: 10 });
-    expect(api.listMaintenanceOperations).not.toHaveBeenCalledWith(31, { page: 2, pageSize: 10 });
+    expect(wrapper.findAll("[data-testid='maintenance-record-reboot-row']")).toHaveLength(1);
+    expect(wrapper.findAll("[data-testid='maintenance-record-upgrade-row']")).toHaveLength(1);
   });
 
   it("opens first-page operation deep links and reports an accurate miss", async () => {
@@ -172,6 +165,7 @@ describe("DeviceMaintenanceRecordsDialog", () => {
     await wrapper.get("[data-testid='maintenance-record-upgrade-row']").trigger("click");
 
     expect(wrapper.text()).toContain("创建时间");
+    expect(wrapper.get("[data-testid='maintenance-record-detail-back']").classes()).toContain("detail-back");
     expect(wrapper.text()).toContain("2026-09-05 12:00:00");
     expect(wrapper.text()).toContain("设备回报版本");
     expect(wrapper.text()).toContain("V5.8.0");
@@ -203,7 +197,7 @@ describe("DeviceMaintenanceRecordsDialog", () => {
     expect(wrapper.text()).not.toContain("账号 #42");
   });
 
-  it("does not open a deep-linked detail when its tab is no longer active", async () => {
+  it("opens a deep-linked detail from the merged table", async () => {
     let resolveUpgrade!: (value: unknown) => void;
     api.listFirmwareUpgrades.mockImplementationOnce(
       () =>
@@ -212,12 +206,10 @@ describe("DeviceMaintenanceRecordsDialog", () => {
         })
     );
     const wrapper = mountDialog({ initialType: "upgrade", operationId: "upgrade-op-1" });
-    await wrapper.get("[data-testid='maintenance-records-tab-reboot']").trigger("click");
     resolveUpgrade(page([upgradeOperation()]));
     await settle(wrapper);
 
-    expect(wrapper.find("[data-testid='maintenance-record-detail']").exists()).toBe(false);
-    expect(wrapper.text()).toContain("重启记录");
+    expect(wrapper.find("[data-testid='maintenance-record-detail']").exists()).toBe(true);
   });
 
   it("shows a retry state and recovers through GET only", async () => {
