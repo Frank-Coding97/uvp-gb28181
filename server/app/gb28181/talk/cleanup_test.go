@@ -17,10 +17,19 @@ import (
 
 func activateSessionForCleanup(t *testing.T, repo *GormRepo, sessionID string, channelID uint, callID string, expiresAt time.Time) *models.GbTalkSession {
 	t.Helper()
+	return activateSessionForCleanupWithSender(t, repo, sessionID, channelID, callID, expiresAt, 0)
+}
+
+// activateSessionForCleanupWithSender 同上，另外可选地标记"发送会话已建立"（local_port>0）。
+// 清理链路据此区分「有物可停」与「设备从未应答、本来就没有发送会话」—— 见
+// TestCleanupStopSendRtpWithoutSenderStillFinishesLease。
+func activateSessionForCleanupWithSender(t *testing.T, repo *GormRepo, sessionID string, channelID uint, callID string, expiresAt time.Time, localPort int) *models.GbTalkSession {
+	t.Helper()
 	session := &models.GbTalkSession{
 		SessionID: sessionID, ChannelID: channelID, DeviceID: "device-1", NodeID: 1,
 		App: "talk", SourceStream: "source-" + sessionID, RecvStream: "recv-" + sessionID,
 		SSRC: fmt.Sprintf("%010d", channelID), State: models.TalkSessionReserved, ExpiresAt: expiresAt,
+		LocalPort: localPort,
 	}
 	require.NoError(t, repo.Create(context.Background(), session, "token"))
 	changed, err := repo.Transition(context.Background(), sessionID, models.TalkSessionReserved, models.TalkSessionPublishing, TransitionPatch{})
@@ -92,6 +101,47 @@ func TestCleanupMediaFailureRetainsStoppingLeaseForRetry(t *testing.T) {
 	closeCalls := media.closes
 	require.NoError(t, service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "idempotent retry"))
 	require.Equal(t, closeCalls, media.closes)
+}
+
+// ⛔⛔ 回归锚点：2026-10-03 现场 —— 点「停止对讲/广播」时 DELETE 返回
+// 500「语音对讲操作失败」，而会话最终是被后台 sweep 按"租约过期"收掉的。
+//
+// 设备从未应答（local_port=0，见 broadcast/talk 的 answering 阶段才写 local_port）⇒
+// ZLM 侧没有该 ssrc 的发送会话 ⇒ stopSendRtp 回 `code=-300 "stopSendRtp failed"`
+// （ZLM `MediaSource::stopSendRtp` 找不到 ssrc 即 false），客户端只容忍 -500。
+// 旧实现把它当可重试 ⇒ 租约吊在 stopping、会话不落终态 ⇒ 控制器映射成 500。
+// 要求：错误仍要记进 error 列（可追溯），但会话必须收尾。
+func TestCleanupStopSendRtpWithoutSenderStillFinishesLease(t *testing.T) {
+	media := &fakeActivationMedia{stopErr: errors.New(`stopSendRtp code=-300 msg=stopSendRtp failed`)}
+	service, repo, _ := newActivationService(t, media, &fakeTalkInviter{})
+	session := activateSessionForCleanup(t, repo, "cleanup-no-sender", 81, "", time.Now().Add(time.Minute))
+
+	err := service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "user stopped")
+	require.ErrorContains(t, err, "stopSendRtp")
+	require.Equal(t, 1, media.stops)
+
+	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionEnded, stored.State, "无物可停不能把会话吊在 stopping")
+	require.Nil(t, stored.LeaseKey)
+	require.Contains(t, stored.Error, "stopSendRtp", "失败仍要落库可追溯")
+}
+
+// 反面锚点：真的建过发送会话（local_port>0）时，stopSendRtp 失败**必须**继续保留
+// stopping 租约等重试 —— 否则媒体侧会漏放。防止上一条把口子开太大。
+func TestCleanupStopSendRtpFailureRetainsLeaseWhenSenderExisted(t *testing.T) {
+	media := &fakeActivationMedia{stopErr: errors.New(`stopSendRtp code=-300 msg=stopSendRtp failed`)}
+	service, repo, _ := newActivationService(t, media, &fakeTalkInviter{})
+	session := activateSessionForCleanupWithSender(t, repo, "cleanup-has-sender", 82, "", time.Now().Add(time.Minute), 40022)
+
+	err := service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "user stopped")
+	require.ErrorContains(t, err, "stopSendRtp")
+
+	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionStopping, stored.State)
+	require.NotNil(t, stored.LeaseKey)
+	require.Nil(t, stored.EndedAt)
 }
 
 type blockingCleanupMedia struct {

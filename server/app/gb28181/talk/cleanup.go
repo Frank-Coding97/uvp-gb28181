@@ -146,8 +146,24 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	}
 	if client != nil && session.SourceStream != "" && session.SSRC != "" {
 		stopCtx, cancelStop := stepBudget(ctx, mediaReleaseTimeout)
-		recordRetryable("stopSendRtp", client.StopSendRtp(stopCtx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC))
+		stopErr := client.StopSendRtp(stopCtx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		cancelStop()
+		// ⛔ 只有**我们确实建过发送会话**时，stopSendRtp 的失败才值得重试。
+		//
+		// local_port 是 answering 阶段 startSendRtpPassive/StartBroadcastSendRtp 成功后写下的
+		// （talk/activation.go、talk/broadcast_activation.go）。设备从未应答 ⇒ local_port 仍为 0
+		// ⇒ 本次会话压根没建过发送会话，"停掉"这个诉求其实已经达成。
+		//
+		// 这一层是**兜底**：ZLM 侧"流在但无该 ssrc 发送器"现在已在 client.StopSendRtp 里
+		// 按幂等处理（回 -1 other_failed，见 zlm/client_talk.go）。留这里是因为幂等只覆盖
+		// 已定义的返回码；传输层错误、-400 exception 等仍会返回 error，而 local_port=0 时
+		// 这些同样不该把租约吊在 stopping（否则 DELETE 变 500「语音对讲操作失败」，
+		// 2026-10-03 实测两条会话都卡到租约过期）。失败仍要**记进 error 列**，只是不拦收尾。
+		if session.LocalPort > 0 {
+			recordRetryable("stopSendRtp", stopErr)
+		} else {
+			record("stopSendRtp", stopErr)
+		}
 	}
 	if client != nil && session.SourceStream != "" {
 		closeCtx, cancelClose := stepBudget(ctx, mediaReleaseTimeout)

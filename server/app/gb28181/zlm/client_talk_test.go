@@ -3,6 +3,7 @@ package zlm
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -124,6 +125,40 @@ func TestStopSendRtpRequiresSSRC(t *testing.T) {
 	c := &Client{}
 	if err := c.StopSendRtp(context.Background(), "__defaultVhost__", "talk", "source-1", ""); err == nil {
 		t.Fatal("empty SSRC could stop unrelated senders")
+	}
+}
+
+// TestStopSendRtpTreatsMissingSenderAsIdempotent 锚定真机行为：**流还在、但该 ssrc 没有发送会话**
+// 时 ZLM 回的是 `code=-1 "stopSendRtp failed"`，而不是流不存在时的 `-500`。
+//
+// 设备从未应答的对讲会话（local_port=0）正是这个形态；若当失败处理，清理链路会把它记成
+// "必须重试"，租约吊在 stopping、永不落终态 ⇒ DELETE 返回 500「语音对讲操作失败」。
+// 现场证据：2026-09-17 会话 error 列原文 `stopSendRtp code=-1 msg=stopSendRtp failed`。
+func TestStopSendRtpTreatsMissingSenderAsIdempotent(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-1,"msg":"stopSendRtp failed"}`))
+	})
+	defer server.Close()
+
+	if err := c.StopSendRtp(context.Background(), "__defaultVhost__", "talk", "source-1", "0200000001"); err != nil {
+		t.Fatalf("no matching sender must be idempotent: %v", err)
+	}
+}
+
+// TestStopSendRtpStillReportsExceptionCode 是反向锚点：幂等只覆盖已定义的"无物可停"返回码，
+// -400（对端抛异常）必须继续报错，避免把幂等放宽成"任何非零码都算成功"。
+func TestStopSendRtpStillReportsExceptionCode(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-400,"msg":"process exception"}`))
+	})
+	defer server.Close()
+
+	err := c.StopSendRtp(context.Background(), "__defaultVhost__", "talk", "source-1", "0200000001")
+	if err == nil {
+		t.Fatal("-400 exception must not be swallowed")
+	}
+	if !strings.Contains(err.Error(), "exception") {
+		t.Fatalf("error should carry the semantic code label, got: %v", err)
 	}
 }
 

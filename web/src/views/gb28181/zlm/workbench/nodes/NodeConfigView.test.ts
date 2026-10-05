@@ -31,4 +31,13 @@ describe("NodeConfigView", () => {
       true
     );
   });
+
+  it("keeps the restart spinner inline instead of letting it squeeze the status text", () => {
+    // 回归（2026-10-03）：zlm-tokens.css 的「Arco-Design 全局自适应兜底」给所有
+    // .arco-spin 设了 display:block + width:100%（为包裹布局容器的场景兜底）。
+    // 重启状态区是 flex 行，满宽 spin 会吃掉整行，把 flex:1/min-width:0 的状态文字
+    // 压成 0 宽 —— 表现为文字逐字竖排、区块高度被撑到 429px。
+    // 必须在本页把它恢复成内容尺寸。
+    expect(hasRuleBlock(source, ".restart-state :deep(.arco-spin)", "flex: none", "width: auto")).toBe(true);
+  });
 });

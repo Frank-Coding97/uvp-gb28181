@@ -317,6 +317,16 @@ onBeforeUnmount(() => {
   background: var(--zlm-brand-50);
   border-radius: var(--zlm-radius-md);
 }
+
+/* zlm-tokens.css 的「Arco-Design 全局自适应兜底」把所有 .arco-spin 设成
+   display:block + width:100%（为包裹布局容器的场景兜底）。但本行的重启状态
+   区是 flex 行，满宽的 spin 会吃掉整行，把右侧 flex:1/min-width:0 的状态文字
+   压成 0 宽 —— 文字逐字换行成竖排、区块高度被撑到数百像素。
+   这里把这个内联小图标恢复成内容尺寸，不参与占宽。 */
+.restart-state :deep(.arco-spin) {
+  flex: none;
+  width: auto;
+}
 .restart-state > div:nth-child(2) {
   flex: 1;
   min-width: 0;

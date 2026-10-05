@@ -228,3 +228,60 @@ func TestApplyConfigForNodeRefreshesPlatformHookButPreservesDisabledSwitch(t *te
 	require.Equal(t, "0", config["hook.enable"])
 	require.Equal(t, "https://custom.example/flow", config["hook.on_flow_report"])
 }
+
+// ⛔⛔ 回归锚点：2026-10-03 现场 —— 「对讲/广播点了没反应」，根因就是这条。
+//
+// ZLM 上的 `hook.on_stream_changed` 是一条**没有 cap/node 的旧值**
+// （`http://192.168.0.204:8280/index/hook/on_stream_changed`：平台早先的 IP + 人工抄的），
+// 而旧判据只认 cap+node ⇒ 把它当 user-owned ⇒ **永不刷新** ⇒ ZLM 每次回调都被 hook 认证
+// 按 credentials_invalid 静默丢弃（HTTP 200 + `{"code":0}`，ZLM 以为成功，平台什么都没做）。
+//
+// 后果（平台侧一条 on_stream_changed 都收不到）：
+//   - `ObserveTalkStream(regist=true)` 不触发 ⇒ 对讲/广播激活压根不开始：会话停在 publishing、
+//     `signal_phase` 空、`broadcast_sn=0`、设备侧连一条 MESSAGE 都没收到，30s 后租约过期；
+//   - `regist=false` 同样丢 ⇒ 浏览器停推后会话不会自动收尾。
+//
+// 要求：指着**本平台自己端点**的 URL（哪怕凭据丢了）必须被认领重写；换路径的自定义 URL、
+// 空值照旧不碰。
+func TestApplyConfigForNodeClaimsOwnEndpointWithoutCapability(t *testing.T) {
+	config := map[string]string{
+		"general.mediaServerId": "node-a",
+		// 现场原样：旧平台 IP、无 cap、无 node。
+		"hook.on_stream_changed": "http://192.168.0.204:8280/index/hook/on_stream_changed",
+		// 别人的中继服务（换路径）必须原样保留。
+		"hook.on_flow_report": "https://relay.example/hooks/flow?tenant=demo",
+		// 空值仍是 user-owned 语义：不写。
+		"hook.on_play": "",
+	}
+	var applied url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/setServerConfig") {
+			applied = r.URL.Query()
+			for key, values := range r.URL.Query() {
+				if key != "secret" {
+					config[key] = values[0]
+				}
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "data": []map[string]string{config}})
+	}))
+	defer server.Close()
+
+	require.NoError(t, newTestApplyClient(t, server.URL, "zlm-secret", "node-a").ApplyConfigForNode(context.Background(),
+		gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280}))
+
+	parsed, err := url.Parse(config["hook.on_stream_changed"])
+	require.NoError(t, err)
+	require.Equal(t, "platform:8280", parsed.Host, "认领后必须指回本平台")
+	require.Equal(t, "/index/hook/on_stream_changed", parsed.Path)
+	require.Equal(t, "node-a", parsed.Query().Get("node"))
+	require.True(t, playauth.VerifyHookCapability("zlm-secret", "node-a", playauth.HookOnStreamChanged,
+		parsed.Query().Get("cap")), "必须带上事件专属 cap，否则回调会被静默丢弃")
+
+	require.Equal(t, "https://relay.example/hooks/flow?tenant=demo", config["hook.on_flow_report"])
+	require.Equal(t, "", config["hook.on_play"])
+	require.NotContains(t, applied, "hook.on_flow_report")
+	require.NotContains(t, applied, "hook.on_play")
+}

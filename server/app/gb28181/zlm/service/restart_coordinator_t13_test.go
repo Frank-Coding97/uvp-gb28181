@@ -77,6 +77,60 @@ func TestRestartT13_NodeStartedAdvancesWaitingOffline(t *testing.T) {
 	c.FailGeneration(n.ID, accepted.Generation, errors.New("test cleanup"))
 }
 
+// 回归（2026-10-03 真机实测）：ZLM 快速重启时停机窗口只有 27s，短于 Watcher 的
+// offlineThreshold(90s，即 3 个 30s tick)，因此 MarkOffline 一次都不会触发；
+// 而 on_server_started 这条唯一兜底也可能整条丢失（后端恰好在那一刻重启时，
+// ZLM 的 hook 回调只会被 connection refused）。结果是：重启明明成功了，操作却一直
+// 停在 waiting_offline，直到两分钟超时被判 failed —— 现场表现为"节点重启不起来"。
+// 修复后，命令下发且过了宽限期之后到达的心跳，本身就是新进程已上线的直接证据。
+func TestRestartT13_HeartbeatAdvancesWaitingOfflineForFastRestart(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	c := service.NewRestartCoordinator(reg, 30*time.Second)
+	c.SetHeartbeatGrace(0)
+	c.SetConverger(func(context.Context, int64) error {
+		_ = reg.SetAutoOnDemandReady(n.ID, true)
+		return nil
+	})
+
+	accepted, err := c.Begin(n.ID)
+	require.NoError(t, err)
+	require.True(t, c.AdvanceToWaitingOffline(n.ID, accepted.Generation))
+
+	// 既没有 OnNodeOffline，也没有 OnNodeStarted —— 只有心跳。
+	c.OnNodeHeartbeat(n.ID)
+
+	require.Eventually(t, func() bool {
+		op, ok := c.Get(n.ID)
+		return ok && op.Status == service.RestartStatusReady
+	}, time.Second, time.Millisecond)
+	require.False(t, c.IsPending(n.ID))
+	require.False(t, reg.IsAdmissionBlocked(n.ID))
+}
+
+// 宽限期内的心跳必须被忽略：restartServer 刚被受理时，旧进程可能还没退干净，
+// 这条心跳不能拿来当作"新进程已上线"，否则会在旧进程上跑一次收敛。
+func TestRestartT13_HeartbeatInsideGraceWindowDoesNotAdvance(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	c := service.NewRestartCoordinator(reg, 30*time.Second)
+	c.SetHeartbeatGrace(time.Hour)
+
+	accepted, err := c.Begin(n.ID)
+	require.NoError(t, err)
+	require.True(t, c.AdvanceToWaitingOffline(n.ID, accepted.Generation))
+
+	c.OnNodeHeartbeat(n.ID)
+
+	operation, ok := c.Get(n.ID)
+	require.True(t, ok)
+	require.Equal(t, service.RestartStatusWaitingOffline, operation.Status)
+	require.False(t, c.MarkHeartbeatForGeneration(n.ID, accepted.Generation))
+	c.FailGeneration(n.ID, accepted.Generation, errors.New("test cleanup"))
+}
+
 func TestRestartT13_CommandFailureIsFailedAndNotPending(t *testing.T) {
 	repo := newT13Repo()
 	reg := node.NewRegistry(repo)

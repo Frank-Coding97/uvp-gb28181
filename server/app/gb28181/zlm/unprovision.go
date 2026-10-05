@@ -107,3 +107,34 @@ func ManagedHookTargetsNode(rawURL, mediaServerUUID string) bool {
 	}
 	return parsed.Query().Get("node") == mediaServerUUID && parsed.Query().Get("cap") != ""
 }
+
+// ManagedHookClaimsEndpoint 判断一条 hook URL 是否**打在本平台自己的 managed hook 端点上**。
+//
+// 与 ManagedHookTargetsNode 的分工（一个管"写"、一个管"删"）：
+//   - ManagedHookTargetsNode = "能证明是我们写的"（带本节点 node + cap）⇒ 删除侧用它：
+//     UnprovisionHooks 只清自己写的，绝不动同一台 ZLM 上别人配的回调。
+//   - 本函数 = "这条回调打的是我们自己的端点" ⇒ 下发侧用它：ApplyConfigForNode 该不该覆盖。
+//
+// ⛔ 为什么下发侧必须认路径：`cap`/`node` 是平台写进去的标记，但**旧版本写的、运维手改的、
+// 或从文档/测试里抄来的**值不带它们。只看 cap+node 会把这类值判成 user-owned ⇒ 永久保留
+// ⇒ 得到一条"ZLM 认为回调成功、平台按 credentials_invalid 静默丢弃"的死 hook：
+// 平台一条事件都收不到，**且没有任何告警**。
+//
+// 2026-10-03 现场即此：ZLM 上 `hook.on_stream_changed` 停在
+// `http://192.168.0.204:8280/index/hook/on_stream_changed`（旧 IP、无 cap）⇒
+// `ObserveTalkStream(regist=true)` 永不触发 ⇒ 对讲/广播的激活压根不开始（会话卡在
+// publishing、`signal_phase` 空、`broadcast_sn=0`，30 秒后租约过期），
+// 流注销（regist=false）也一并丢失 ⇒ 浏览器停推后会话不会自动收尾。
+//
+// 判据刻意保守：仅 http/https、host 非空、**路径恰好**等于 `/index/hook/<event>`。
+// 指向别的路径的自定义 URL（别人的中继服务、另一套平台的换路径部署）一律不认。
+func ManagedHookClaimsEndpoint(rawURL string, event playauth.HookEvent) bool {
+	if strings.TrimSpace(rawURL) == "" || !event.Valid() {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return false
+	}
+	return strings.TrimSuffix(parsed.Path, "/") == "/index/hook/"+string(event)
+}

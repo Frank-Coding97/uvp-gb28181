@@ -67,6 +67,7 @@ type RestartStartedNotifier interface {
 type RestartCoordinator struct {
 	registry        *node.Registry
 	timeout         time.Duration
+	heartbeatGrace  time.Duration
 	now             func() time.Time
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
@@ -82,6 +83,12 @@ type RestartCoordinator struct {
 	convergenceWait sync.Once
 }
 
+// defaultHeartbeatGrace is the minimum quiet period after the restart command
+// was accepted before a keepalive may be treated as evidence that the new
+// process is up. ZLM exits within milliseconds of accepting restartServer, so
+// anything arriving later than this cannot plausibly be the old process.
+const defaultHeartbeatGrace = 5 * time.Second
+
 // NewRestartCoordinator constructs an in-memory coordinator. timeout is
 // optional for compatibility; the production default is two minutes.
 func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *RestartCoordinator {
@@ -93,6 +100,7 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 	return &RestartCoordinator{
 		registry:        reg,
 		timeout:         t,
+		heartbeatGrace:  defaultHeartbeatGrace,
 		now:             time.Now,
 		lifecycleCtx:    lifecycleCtx,
 		lifecycleCancel: lifecycleCancel,
@@ -101,6 +109,18 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 		timers:          make(map[int64]*time.Timer),
 		convergenceDone: make(chan struct{}),
 	}
+}
+
+// SetHeartbeatGrace overrides how long a keepalive must trail the accepted
+// restart command before it counts as a fresh-process heartbeat. It exists for
+// deterministic tests; production keeps defaultHeartbeatGrace.
+func (c *RestartCoordinator) SetHeartbeatGrace(grace time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || grace < 0 {
+		return
+	}
+	c.heartbeatGrace = grace
 }
 
 // SetConverger injects the service's verified Apply+readback path.
@@ -226,8 +246,9 @@ func (c *RestartCoordinator) OnNodeStarted(nodeID int64) {
 func (c *RestartCoordinator) MarkStarted(nodeID int64) { c.OnNodeStarted(nodeID) }
 
 // OnNodeHeartbeat is called after an offline node is promoted by a received
-// keepalive. Convergence runs asynchronously so the Hook response remains
-// bounded and generation-guarded.
+// keepalive, or (for a pending restart) after any keepalive at all.
+// Convergence runs asynchronously so the Hook response remains bounded and
+// generation-guarded.
 func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 	c.mu.Lock()
 	if c.closed {
@@ -235,7 +256,7 @@ func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 		return
 	}
 	op := c.operations[nodeID]
-	if op == nil || op.Status != RestartStatusWaitingHeartbeat {
+	if op == nil || !c.heartbeatClaimsNewProcessLocked(op) {
 		c.mu.Unlock()
 		return
 	}
@@ -257,7 +278,39 @@ func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 	}()
 }
 
+// MarkHeartbeat is the exported alias used by integrations.
 func (c *RestartCoordinator) MarkHeartbeat(nodeID int64) { c.OnNodeHeartbeat(nodeID) }
+
+// heartbeatClaimsNewProcessLocked reports whether an arriving keepalive is
+// strong enough evidence that the restarted process is serving again.
+//
+// waiting_heartbeat is the documented path: the old process was already
+// observed offline, so any keepalive now belongs to the new one.
+//
+// waiting_offline covers the fast-restart path. ZLMediaKit is typically back
+// within tens of seconds — shorter than the heartbeat Watcher's
+// offlineThreshold (90s, i.e. three 30s ticks) — so MarkOffline never fires and
+// no Offline event is produced. The on_server_started Hook is the only other
+// exit, and it is fragile: its callback is simply refused ("connection
+// refused") whenever this backend happens to be restarting at that moment.
+// Without this second path a restart that actually succeeded stays in
+// waiting_offline until the operation times out and reports a failure.
+//
+// The grace window is what keeps this honest: a keepalive that raced the
+// command — still served by the old process before it exited — must not be
+// mistaken for the new one. ZLM exits within milliseconds of accepting
+// restartServer, so a keepalive arriving after the grace period can only come
+// from a process that came back up.
+func (c *RestartCoordinator) heartbeatClaimsNewProcessLocked(op *RestartOperation) bool {
+	switch op.Status {
+	case RestartStatusWaitingHeartbeat:
+		return true
+	case RestartStatusWaitingOffline:
+		return c.now().Sub(op.UpdatedAt) >= c.heartbeatGrace
+	default:
+		return false
+	}
+}
 
 // MarkOfflineForGeneration and MarkHeartbeatForGeneration are explicit
 // generation-guarded hooks useful to tests and integrations that carry an
@@ -287,7 +340,7 @@ func (c *RestartCoordinator) MarkHeartbeatForGeneration(nodeID int64, generation
 		return false
 	}
 	op := c.operations[nodeID]
-	if op == nil || op.Generation != generation || op.Status != RestartStatusWaitingHeartbeat {
+	if op == nil || op.Generation != generation || !c.heartbeatClaimsNewProcessLocked(op) {
 		c.mu.Unlock()
 		return false
 	}

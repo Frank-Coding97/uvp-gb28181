@@ -49,6 +49,50 @@ type baseResp struct {
 	Msg  string `json:"msg"`
 }
 
+// ZLM API 返回码，取自对端 `server/WebApi.h` 的 `API::ApiErr`（多年未变）。
+//
+// ⛔ 不要凭直觉推断这几个数的归属：**业务失败是 -1**，-300 是"参数不合法"、
+// -400 才是"对端抛异常"、-100 是"secret 不对"。写反的代价是把正常态判成故障。
+//
+// 现场依据（两处互相印证）：
+//   - 2026-09-17 `gb_talk_session.error` 原文
+//     `device sent Broadcast BYE; stopSendRtp: stopSendRtp code=-1 msg=stopSendRtp failed`
+//     —— 设备从未应答、流还在但没有该 ssrc 的发送会话，回的就是 -1；
+//   - 2026-10-03 对 192.168.10.220 实测：不存在的流回 `-500 can not find the stream`。
+const (
+	// zlmAPIOtherFailed 表示"业务代码执行失败"。本包里出现它只有一种含义：
+	// 目标不存在、已无可做（例如该 ssrc 没有发送会话）。对幂等操作要当成功。
+	zlmAPIOtherFailed = -1
+	// zlmAPIAuthFailed 鉴权失败。这是配置错误，绝不能当成业务态吞掉。
+	zlmAPIAuthFailed = -100
+	// zlmAPIInvalidArgs 参数不合法，通常是我方把请求拼错了。
+	zlmAPIInvalidArgs = -300
+	// zlmAPIException 对端抛异常。
+	zlmAPIException = -400
+	// zlmAPINotFound 资源未找到：流/会话已经不存在。
+	zlmAPINotFound = -500
+)
+
+// zlmCodeLabel 把 ZLM 业务码翻成可直接搜的语义名，供错误串与日志使用。
+//
+// 目的是让 `code=-1` 这种数字在日志里自带解释，避免再次按直觉把它读成故障。
+func zlmCodeLabel(code int) string {
+	switch code {
+	case zlmAPIOtherFailed:
+		return "other_failed"
+	case zlmAPIAuthFailed:
+		return "auth_failed"
+	case zlmAPIInvalidArgs:
+		return "invalid_args"
+	case zlmAPIException:
+		return "exception"
+	case zlmAPINotFound:
+		return "not_found"
+	default:
+		return "unknown"
+	}
+}
+
 type redactedTransportError struct {
 	err     error
 	secrets []string

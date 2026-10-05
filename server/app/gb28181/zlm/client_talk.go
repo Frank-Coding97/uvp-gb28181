@@ -130,11 +130,17 @@ func (c *Client) StopSendRtp(ctx context.Context, vhost, appName, stream, ssrc s
 	}, &response); err != nil {
 		return err
 	}
-	if response.Code == -500 {
+	// 幂等语义：以下两种都是"已经没有发送会话可停"，等同成功——
+	//   -500 not_found   流本身已注销（ZLM `can not find the stream`）；
+	//   -1   other_failed 流还在，但该 ssrc 没有匹配的发送器（ZLM `stopSendRtp failed`）。
+	//
+	// ⛔ 别把 -1 当失败：设备从未应答的对讲会话就是这个形态（`local_port=0`）。按失败处理会把
+	// 清理吊死、租约永不落终态，DELETE 变成 500「语音对讲操作失败」（2026-10-03 现场）。
+	if response.Code == zlmAPIOtherFailed || response.Code == zlmAPINotFound {
 		return nil
 	}
 	if response.Code != 0 {
-		return fmt.Errorf("stopSendRtp code=%d msg=%s", response.Code, response.Msg)
+		return fmt.Errorf("stopSendRtp code=%d(%s) msg=%s", response.Code, zlmCodeLabel(response.Code), response.Msg)
 	}
 	return nil
 }
@@ -154,11 +160,13 @@ func (c *Client) CloseTalkSource(ctx context.Context, vhost, appName, stream str
 	}, &response); err != nil {
 		return err
 	}
-	if response.Code == -500 {
+	// ZLM 的 close_streams 对不存在的流也回 code=0（只把 count_* 置 0，2026-10-03 实测），
+	// 这里保留 not_found 的容忍只是防御性兜底：真正会失败的是鉴权/参数与传输层。
+	if response.Code == zlmAPINotFound {
 		return nil
 	}
 	if response.Code != 0 {
-		return fmt.Errorf("close_streams code=%d msg=%s", response.Code, response.Msg)
+		return fmt.Errorf("close_streams code=%d(%s) msg=%s", response.Code, zlmCodeLabel(response.Code), response.Msg)
 	}
 	return nil
 }

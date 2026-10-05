@@ -41,10 +41,15 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	params["general.mediaServerId"] = c.node.MediaServerUUID
 	for _, event := range playauth.ManagedHookEvents() {
 		key := "hook." + string(event)
-		// ZLM persists setServerConfig to config.ini. Preserve user-owned URLs
-		// (including empty URLs); only refresh callbacks bearing platform identity.
+		// ZLM persists setServerConfig to config.ini. 只刷新**平台自己的**回调：
+		// ⓐ 带本节点 node+cap(= 现在就是我们写的)；
+		// ⓑ 路径恰好是本平台自己的 hook 端点 —— 覆盖"旧版本写的 / 运维手改的、丢了 cap
+		//    的死 hook"。少了 ⓑ 这类值会被当成 user-owned 永久保留，表现为回调全丢但无告警，
+		//    见 ManagedHookClaimsEndpoint 的现场记录。
+		// 其余（包括空值）按 user-owned 处理，不碰。
 		if initialized {
-			if !ManagedHookTargetsNode(current[key], c.node.MediaServerUUID) {
+			if !ManagedHookTargetsNode(current[key], c.node.MediaServerUUID) &&
+				!ManagedHookClaimsEndpoint(current[key], event) {
 				continue
 			}
 		}
