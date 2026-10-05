@@ -510,23 +510,6 @@ function viewRecords() {
   emit("viewRecords", activeOperation.value?.operationId);
 }
 
-function startNewUpgrade() {
-  clearPollTimer();
-  activeOperation.value = null;
-  pollTimedOut.value = false;
-  uncertainSubmission.value = false;
-  submitError.value = "";
-  submittedPayload.value = null;
-  confirmVisible.value = false;
-  pendingPayload.value = null;
-  upgradeMode.value = "repository";
-  form.firmwareId = "";
-  form.firmware = "";
-  form.fileUrl = "";
-  form.manufacturer = currentDevice.value?.manufacturer?.trim() || "";
-  clearFieldErrors();
-}
-
 watch(
   () => busy.value,
   value => emit("busy", value),
@@ -713,7 +696,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="unavailableReason" class="upgrade-hint warning" role="alert">{{ unavailableReason }}</p>
       <div class="upgrade-confirm-actions">
-        <a-button data-testid="firmware-upgrade-cancel" @click="cancelUpgrade">返回修改</a-button>
+        <a-button data-testid="firmware-upgrade-cancel" type="secondary" @click="cancelUpgrade">返回修改</a-button>
         <a-button
           data-testid="firmware-upgrade-confirm"
           type="primary"
@@ -822,14 +805,16 @@ onBeforeUnmount(() => {
         </dl>
       </details>
       <div class="upgrade-tracking-actions">
-        <a-button data-testid="firmware-upgrade-view-records" @click="viewRecords">查看升级记录</a-button>
         <a-button
-          v-if="taskOperation && !isActiveStatus(taskOperation.status) && !uncertainSubmission"
-          data-testid="firmware-upgrade-new"
-          type="primary"
-          @click="startNewUpgrade"
-          >准备新升级</a-button
+          v-if="taskOperation && statusKey(taskOperation.status) === 'succeeded'"
+          data-testid="firmware-upgrade-view-records"
+          type="text"
+          size="small"
+          @click="viewRecords"
         >
+          查看升级记录
+        </a-button>
+        <a-button v-else data-testid="firmware-upgrade-view-records" type="primary" @click="viewRecords"> 查看升级记录 </a-button>
       </div>
     </div>
 

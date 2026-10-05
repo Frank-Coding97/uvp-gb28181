@@ -103,8 +103,9 @@ function summary(): string {
 <template>
   <div class="dcw" :class="{ 'is-disabled': disabled }">
     <div v-for="day in days()" :key="day.weekDayNum" class="dcw-day" :data-testid="`dcw-day-${day.weekDayNum}`">
-      <button
-        type="button"
+      <a-button
+        html-type="button"
+        type="text"
         class="dcw-switch"
         :class="{ 'is-on': day.segments.length > 0 }"
         :disabled="disabled"
@@ -113,7 +114,7 @@ function summary(): string {
         @click="toggleDay(day.weekDayNum, day.segments.length === 0)"
       >
         <i />
-      </button>
+      </a-button>
       <span class="dcw-label">周{{ WEEKDAY_LABELS[day.weekDayNum - 1] }}</span>
 
       <div class="dcw-segments">
@@ -140,25 +141,28 @@ function summary(): string {
             :data-testid="`dcw-stop-${day.weekDayNum}-${index}`"
             @change="setSegment(day.weekDayNum, index, 'stop', $event)"
           />
-          <button
-            type="button"
+          <a-button
+            html-type="button"
+            type="text"
             class="dcw-icon"
             :disabled="disabled"
             :aria-label="`删除周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段`"
             @click="removeSegment(day.weekDayNum, index)"
           >
             <Trash2 :size="11" />
-          </button>
+          </a-button>
         </div>
-        <button
-          type="button"
+        <a-button
+          html-type="button"
+          type="outline"
           class="dcw-add"
           :disabled="disabled"
+          :aria-label="`为周${WEEKDAY_LABELS[day.weekDayNum - 1]}添加时段`"
           :data-testid="`dcw-add-${day.weekDayNum}`"
           @click="addSegment(day.weekDayNum)"
         >
           <Plus :size="10" />时段
-        </button>
+        </a-button>
       </div>
     </div>
     <p class="dcw-foot">
@@ -179,7 +183,20 @@ function summary(): string {
   min-width: 0;
 
   &.is-disabled {
-    opacity: 0.55;
+    color: var(--uvp-text-disabled);
+
+    :deep(.dcw-time.arco-input-disabled) {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+
+    .dcw-icon.arco-btn[type="button"],
+    .dcw-add.arco-btn[type="button"] {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
   }
 }
 
@@ -190,7 +207,7 @@ function summary(): string {
   min-height: 24px;
 }
 
-.dcw-switch {
+.dcw-switch.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -221,8 +238,11 @@ function summary(): string {
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.5;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
@@ -280,8 +300,8 @@ function summary(): string {
   color: var(--uvp-text-tertiary);
 }
 
-.dcw-icon,
-.dcw-add {
+.dcw-icon.arco-btn[type="button"],
+.dcw-add.arco-btn[type="button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -298,19 +318,24 @@ function summary(): string {
   }
 
   &:disabled {
-    color: var(--uvp-text-tertiary);
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-shell-muted);
+    opacity: 1;
   }
 }
 
-.dcw-icon {
+.dcw-icon.arco-btn[type="button"] {
   width: 22px;
+  height: auto;
+  min-height: 0;
   padding: 0;
 }
 
-.dcw-add {
+.dcw-add.arco-btn[type="button"] {
   gap: 2px;
+  height: auto;
+  min-height: 0;
   padding: 0 7px;
   font-size: 11px;
 }
@@ -326,5 +351,9 @@ function summary(): string {
 
 .dcw-foot-sep {
   opacity: 0.6;
+}
+
+.dcw-time :deep(.arco-input:disabled) {
+  color: var(--uvp-text-secondary);
 }
 </style>

@@ -1033,6 +1033,44 @@ body[arco-theme="dark"] .zlm-node-form {
   background: rgb(107 79 155 / 8%);
 }
 
+/* 「中断一个正在进行中的动作」（停止录像 / 取消缓存任务）—— 琥珀色，与真正破坏数据的
+   `--delete`（红）区分开。本仓原先没有这条全局基准，device-mgmt（红 #dc2626）与
+   cloud-recordings（琥珀 #d97706）各自在页面 scoped 里补了一份、颜色还不一致；
+   这里定为唯一口径，新页面直接复用，不要再各写一遍。
+   ⛔ 那两处页面内的 scoped 定义优先级更高（多一层祖先选择器），本次不会被这里影响。 */
+.uvp-data-table .uvp-table-action--stop {
+  color: #d97706;
+}
+
+.uvp-data-table .uvp-table-action--stop:hover {
+  color: #b45309;
+  background: rgb(217 119 6 / 8%);
+}
+
+/* 「收藏」星标：未收藏是灰描边、收藏后是琥珀实心。
+   和 `--stop` 用的是同一个琥珀，但语义完全不同（那是"中断进行中的动作"）——
+   所以单开一个 tone，不要复用 `--stop`：将来调 --stop 的颜色会把星标一起带跑。
+   ⛔ 收藏态只靠图标的填充区分，不给整格铺底色 —— 一列星标里十几个色块会把
+      操作列的色调（下载/删除/取消）全都盖过去。 */
+.uvp-data-table .uvp-table-action--favorite {
+  color: var(--uvp-text-tertiary);
+}
+
+.uvp-data-table .uvp-table-action--favorite:hover {
+  color: #d97706;
+  background: rgb(217 119 6 / 8%);
+}
+
+.uvp-data-table .uvp-table-action--favorite.is-on {
+  color: #d97706;
+}
+
+/* ⛔ lucide 的图标默认 `fill="none"`、只有描边，所以"实心星"必须自己补 fill。
+   少了这条，收藏前后长得一模一样（只是颜色深浅差一点），用户根本看不出收藏成功没。 */
+.uvp-data-table .uvp-table-action--favorite.is-on svg {
+  fill: currentcolor;
+}
+
 .uvp-data-table .uvp-table-action--delete,
 .uvp-data-table .uvp-table-action--delete.arco-link-status-normal {
   color: #d14343;
@@ -1155,30 +1193,25 @@ body[arco-theme="dark"] .zlm-node-form {
   color: var(--uvp-brand-strong);
 }
 
-.uvp-data-table .arco-table-body::-webkit-scrollbar,
-.uvp-data-table .arco-table-content::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.uvp-data-table .arco-table-body::-webkit-scrollbar-thumb,
-.uvp-data-table .arco-table-content::-webkit-scrollbar-thumb {
-  background: rgb(148 163 184 / 34%);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 999px;
-}
-
-.uvp-data-table .arco-table-body::-webkit-scrollbar-track,
-.uvp-data-table .arco-table-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+/* ⛔⛔ 表体/内容区的**原生**滚动条必须「不占任何布局宽度」。
+   表头与表体是两个各自独立滚动的容器，而 `fixed="right"` 的「操作」列在两侧都靠
+   `position: sticky; right: 0` 贴**各自滚动区**的右边缘 —— 表体一旦因为原生的占位滚动条
+   少掉 N 像素宽，表体里的固定列就会比表头整体**左移 N 像素**（实机复现：滚动区窄 15px ⇒
+   列左移 15px；窄 22px ⇒ 左移 22px），表现就是「表头『操作』与行内按钮错位」。
+   这里原来给表体写的是 `width: 8px`（自定义原生滚动条）：只要某个引擎不认 Arco 的
+   `.arco-scrollbar-container::-webkit-scrollbar { display: none }`，这 8px（甚至宿主默认的
+   15~22px）就会真的占位。Arco 自己会画 overlay 滑块（`.arco-scrollbar-thumb`，样式见
+   global-scrollbar.scss），所以原生滚动条直接抹掉即可，滚动能力与观感都不受影响。 */
+.uvp-data-table .arco-table-body,
+.uvp-data-table .arco-table-content,
 .uvp-data-table .arco-table-header {
   scrollbar-width: none;
 }
 
+.uvp-data-table .arco-table-body::-webkit-scrollbar,
+.uvp-data-table .arco-table-content::-webkit-scrollbar,
 .uvp-data-table .arco-table-header::-webkit-scrollbar {
+  display: none;
   width: 0;
   height: 0;
 }
@@ -1203,6 +1236,8 @@ body[arco-theme="dark"] .zlm-node-form {
 
 /* 面板自身 `overflow: auto` ⇒ border-radius 能正常裁掉 header/body/footer 的直角 */
 .uvp-system-drawer .arco-drawer {
+  max-width: 100vw;
+  color: var(--uvp-text-primary);
   border-radius: 16px 0 0 16px !important;
 }
 
@@ -1271,6 +1306,36 @@ body[arco-theme="dark"] .uvp-system-form {
 .uvp-system-drawer .arco-drawer-footer .arco-btn {
   min-width: 88px;
   border-radius: 8px;
+}
+
+/* 抽屉详情与加载态统一跟随主题，涵盖未使用业务 description class 的页面。 */
+.uvp-system-drawer .arco-drawer-body .arco-descriptions-title {
+  font-size: 15px;
+  font-weight: 680;
+  color: var(--uvp-text-primary);
+}
+
+.uvp-system-drawer .arco-drawer-body .arco-descriptions-table {
+  overflow: hidden;
+  border-color: var(--uvp-dialog-border);
+  border-radius: 12px;
+}
+
+.uvp-system-drawer .arco-drawer-body .arco-descriptions-item-label {
+  font-weight: 580;
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-table-header-bg);
+  border-color: var(--uvp-dialog-border);
+}
+
+.uvp-system-drawer .arco-drawer-body .arco-descriptions-item-value {
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-bg);
+  border-color: var(--uvp-dialog-border);
+}
+
+.uvp-system-drawer .arco-drawer-body .arco-spin-mask {
+  background: color-mix(in srgb, var(--uvp-dialog-bg) 78%, transparent);
 }
 
 .uvp-system-dialog .arco-form-item-label,
@@ -1495,7 +1560,7 @@ body[arco-theme="dark"] .uvp-system-form {
 }
 
 .uvp-list-toolbar .arco-btn,
-.uvp-system-dialog .arco-btn,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn,
 .uvp-system-dialog__body .arco-btn,
 .uvp-system-form .arco-btn {
   min-height: 34px;
@@ -1505,14 +1570,14 @@ body[arco-theme="dark"] .uvp-system-form {
 }
 
 .uvp-list-toolbar .arco-btn:hover,
-.uvp-system-dialog .arco-btn:hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn:hover,
 .uvp-system-dialog__body .arco-btn:hover,
 .uvp-system-form .arco-btn:hover {
   transform: translateY(-1px);
 }
 
 .uvp-list-toolbar .arco-btn-primary,
-.uvp-system-dialog .arco-btn-primary,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-primary,
 .uvp-system-dialog__body .arco-btn-primary,
 .uvp-system-form .arco-btn-primary {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
@@ -1521,7 +1586,7 @@ body[arco-theme="dark"] .uvp-system-form {
 }
 
 .uvp-list-toolbar .arco-btn-primary:hover,
-.uvp-system-dialog .arco-btn-primary:hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-primary:hover,
 .uvp-system-dialog__body .arco-btn-primary:hover,
 .uvp-system-form .arco-btn-primary:hover {
   box-shadow: 0 14px 24px -18px rgb(29 78 216 / 72%);
@@ -1530,9 +1595,9 @@ body[arco-theme="dark"] .uvp-system-form {
 .uvp-list-toolbar .arco-btn-secondary,
 .uvp-list-toolbar .arco-btn-outline,
 .uvp-list-toolbar .arco-btn:not(.arco-btn-primary),
-.uvp-system-dialog .arco-btn-secondary,
-.uvp-system-dialog .arco-btn-outline,
-.uvp-system-dialog .arco-btn:not(.arco-btn-primary),
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-secondary,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-outline,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn:not(.arco-btn-primary),
 .uvp-system-dialog__body .arco-btn-secondary,
 .uvp-system-dialog__body .arco-btn-outline,
 .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary),
@@ -1547,9 +1612,10 @@ body[arco-theme="dark"] .uvp-system-form {
 .uvp-list-toolbar .arco-btn-secondary:hover,
 .uvp-list-toolbar .arco-btn-outline:hover,
 .uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover,
-.uvp-system-dialog .arco-btn-secondary:hover,
-.uvp-system-dialog .arco-btn-outline:hover,
-.uvp-system-dialog .arco-btn:not(.arco-btn-primary):hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-secondary:hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-outline:hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn:not(.arco-btn-primary):hover,
 .uvp-system-dialog__body .arco-btn-secondary:hover,
 .uvp-system-dialog__body .arco-btn-outline:hover,
 .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary):hover,
@@ -1563,7 +1629,7 @@ body[arco-theme="dark"] .uvp-system-form {
 }
 
 .uvp-list-toolbar .arco-btn-status-danger,
-.uvp-system-dialog .arco-btn-status-danger,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-status-danger,
 .uvp-system-dialog__body .arco-btn-status-danger,
 .uvp-system-form .arco-btn-status-danger {
   color: var(--uvp-danger);
@@ -1573,7 +1639,7 @@ body[arco-theme="dark"] .uvp-system-form {
 }
 
 .uvp-list-toolbar .arco-btn-status-danger:hover,
-.uvp-system-dialog .arco-btn-status-danger:hover,
+.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-status-danger:hover,
 .uvp-system-dialog__body .arco-btn-status-danger:hover,
 .uvp-system-form .arco-btn-status-danger:hover {
   color: #c53030;
@@ -1907,9 +1973,15 @@ body[arco-theme="dark"] .uvp-pagination-bar .arco-pagination-jumper-input,
 body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-secondary,
 body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-outline,
 body[arco-theme="dark"] .uvp-list-toolbar .arco-btn:not(.arco-btn-primary),
-body[arco-theme="dark"] .uvp-system-dialog .arco-btn-secondary,
-body[arco-theme="dark"] .uvp-system-dialog .arco-btn-outline,
-body[arco-theme="dark"] .uvp-system-dialog .arco-btn:not(.arco-btn-primary),
+body[arco-theme="dark"]
+  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn-secondary,
+body[arco-theme="dark"]
+  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn-outline,
+body[arco-theme="dark"]
+  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn:not(.arco-btn-primary),
 body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-secondary,
 body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-outline,
 body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary),
@@ -1986,7 +2058,9 @@ body[arco-theme="dark"] .uvp-system-form .arco-picker-disabled {
 }
 
 body[arco-theme="dark"] .uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover,
-body[arco-theme="dark"] .uvp-system-dialog .arco-btn:not(.arco-btn-primary):hover,
+body[arco-theme="dark"]
+  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn:not(.arco-btn-primary):hover,
 body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary):hover,
 body[arco-theme="dark"] .uvp-system-form .arco-btn:not(.arco-btn-primary):hover {
   color: var(--uvp-brand-strong);
@@ -1996,7 +2070,9 @@ body[arco-theme="dark"] .uvp-system-form .arco-btn:not(.arco-btn-primary):hover 
 }
 
 body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-primary,
-body[arco-theme="dark"] .uvp-system-dialog .arco-btn-primary,
+body[arco-theme="dark"]
+  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
+  .arco-btn-primary,
 body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-primary,
 body[arco-theme="dark"] .uvp-system-form .arco-btn-primary,
 body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm .arco-btn-primary {
@@ -2095,6 +2171,16 @@ body[arco-theme="dark"] .uvp-data-table .uvp-table-action--copy {
 
 body[arco-theme="dark"] .uvp-data-table .uvp-table-action--scope {
   color: #fcd34d;
+}
+
+/* 收藏星标：收起时也要看得见（深色底上用 tertiary 会淡到几乎消失）。 */
+body[arco-theme="dark"] .uvp-data-table .uvp-table-action--favorite {
+  color: var(--uvp-text-tertiary);
+}
+
+body[arco-theme="dark"] .uvp-data-table .uvp-table-action--favorite.is-on,
+body[arco-theme="dark"] .uvp-data-table .uvp-table-action--favorite:hover {
+  color: #fbbf24;
 }
 
 body[arco-theme="dark"] .uvp-data-table .uvp-table-action--assign {

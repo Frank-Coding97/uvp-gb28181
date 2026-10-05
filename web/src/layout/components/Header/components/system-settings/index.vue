@@ -1,5 +1,13 @@
 <template>
-  <a-drawer :width="340" :visible="props.systemOpen" @ok="handleCancel" @cancel="handleCancel" unmount-on-close>
+  <a-drawer
+    body-class="uvp-system-dialog__body"
+    class="uvp-system-drawer"
+    :width="340"
+    :visible="props.systemOpen"
+    @ok="handleCancel"
+    @cancel="handleCancel"
+    unmount-on-close
+  >
     <template #title> {{ $t(`system.system settings`) }} </template>
     <div>
       <div>

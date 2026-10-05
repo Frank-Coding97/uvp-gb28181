@@ -216,8 +216,9 @@ function fmtKey(value: string): string {
         <span class="osd-card-title" :class="{ 'section-title': layout === 'row' }"><Clock3 :size="13" />时间戳</span>
         <!-- ⛔ 关闭 ≠ 配置丢了：字段灰显保留，状态写在标题这一行。 -->
         <span v-if="!timeEnable" class="osd-card-off" data-testid="osd-time-off">已关闭</span>
-        <button
-          type="button"
+        <a-button
+          html-type="button"
+          type="text"
           class="osd-switch"
           :class="{ 'is-on': timeEnable }"
           :disabled="disabled"
@@ -227,7 +228,7 @@ function fmtKey(value: string): string {
           @click="emit('update:timeEnable', !timeEnable)"
         >
           <i />
-        </button>
+        </a-button>
       </header>
 
       <div class="osd-card-body" :class="{ 'is-muted': !timeEnable }">
@@ -261,9 +262,10 @@ function fmtKey(value: string): string {
         <div class="osd-row" data-testid="osd-time-position">
           <span class="osd-row-label">位置</span>
           <div class="osd-row-control">
-            <button
+            <a-button
               v-if="canvasLinked"
-              type="button"
+              html-type="button"
+              type="outline"
               class="osd-adjust"
               :class="{ 'is-active': editing }"
               :disabled="disabled"
@@ -280,13 +282,14 @@ function fmtKey(value: string): string {
               <CheckCircle2 v-if="editing" :size="11" />
               <Crosshair v-else :size="11" />
               <span>{{ editing ? "完成调整" : "调整位置" }}</span>
-            </button>
+            </a-button>
             <span class="osd-pos-value" data-testid="osd-time-pos">
               X {{ posValue("x") || 0 }} · Y {{ posValue("y") || 0 }}
             </span>
-            <button
+            <a-button
               v-if="canvasLinked"
-              type="button"
+              html-type="button"
+              type="text"
               class="osd-pos-toggle"
               :aria-expanded="posExpanded"
               data-testid="osd-pos-toggle"
@@ -294,7 +297,7 @@ function fmtKey(value: string): string {
             >
               精确数值
               <ChevronDownIcon :size="10" :class="{ 'is-open': posExpanded }" />
-            </button>
+            </a-button>
           </div>
         </div>
 
@@ -322,8 +325,9 @@ function fmtKey(value: string): string {
         <span class="osd-card-title" :class="{ 'section-title': layout === 'row' }"><Type :size="13" />叠加文字</span>
         <span class="osd-card-count" data-testid="osd-text-count">{{ rows().length }}/{{ maxItems }}</span>
         <span v-if="!textEnable" class="osd-card-off" data-testid="osd-text-off">已关闭</span>
-        <button
-          type="button"
+        <a-button
+          html-type="button"
+          type="text"
           class="osd-switch"
           :class="{ 'is-on': textEnable }"
           :disabled="disabled"
@@ -333,7 +337,7 @@ function fmtKey(value: string): string {
           @click="emit('update:textEnable', !textEnable)"
         >
           <i />
-        </button>
+        </a-button>
       </header>
 
       <div class="osd-card-body" :class="{ 'is-muted': !textEnable }">
@@ -355,9 +359,10 @@ function fmtKey(value: string): string {
           />
           <!-- 字符计数就地显示：原实现要等 `buildOSD` 拒发才说「第 N 条超 32 个字符」，用户得回去找 -->
           <span class="osd-charcount" :data-testid="`osd-charcount-${index}`"> {{ charCount(row.text) }}/{{ maxLength }} </span>
-          <button
+          <a-button
             v-if="canvasLinked"
-            type="button"
+            html-type="button"
+            type="outline"
             class="osd-locate"
             :class="{ 'is-unplaced': isUnplaced(row) }"
             :disabled="disabled"
@@ -366,10 +371,11 @@ function fmtKey(value: string): string {
             @click="emit('locate', { kind: 'item', index })"
           >
             <Crosshair :size="10" /><span>定位</span>
-          </button>
+          </a-button>
           <span v-if="isUnplaced(row)" class="osd-unplaced-tag" :data-testid="`osd-unplaced-${index}`">未定位</span>
-          <button
-            type="button"
+          <a-button
+            html-type="button"
+            type="text"
             class="osd-del"
             :disabled="disabled"
             :aria-label="`删除第 ${index + 1} 条`"
@@ -377,18 +383,20 @@ function fmtKey(value: string): string {
             @click="removeRow(index)"
           >
             <Trash2 :size="11" />
-          </button>
+          </a-button>
         </div>
 
-        <button
-          type="button"
+        <a-button
+          html-type="button"
+          type="outline"
           class="osd-add"
           :disabled="disabled || rows().length >= maxItems"
+          aria-label="添加一行叠加文字"
           data-testid="osd-add"
           @click="addRow"
         >
           <Plus :size="11" />加一行字
-        </button>
+        </a-button>
       </div>
     </section>
 
@@ -422,7 +430,7 @@ export default { name: "DeviceConfigOsdBlocks" };
   min-width: 0;
 
   &.is-disabled {
-    opacity: 0.6;
+    color: var(--uvp-text-disabled);
   }
 }
 
@@ -505,17 +513,23 @@ export default { name: "DeviceConfigOsdBlocks" };
 }
 
 /* 开关跟在「已关闭」提示之后时不再吃 margin-left:auto */
-.osd-card-off + .osd-switch {
+.osd-card-off + .osd-switch.arco-btn[type="button"] {
+  height: auto;
+  min-height: 0;
   margin-left: 0;
 }
 
-.osd-switch {
+.osd-switch.arco-btn[type="button"] {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   width: 28px;
   height: 16px;
   padding: 0 2px;
   margin-left: auto;
+  overflow: hidden;
+  line-height: 0;
   cursor: pointer;
   background: var(--uvp-panel-border, #dbe4f0);
   border: none;
@@ -523,6 +537,8 @@ export default { name: "DeviceConfigOsdBlocks" };
   transition: background 0.15s;
 
   i {
+    display: block;
+    flex: 0 0 12px;
     width: 12px;
     height: 12px;
     background: #ffffff;
@@ -539,16 +555,23 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.5;
+    background: var(--uvp-panel-border);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
+  }
+
+  &.is-on:disabled {
+    background: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-shell-muted));
   }
 }
 
-:global(body[arco-theme="dark"]) .osd-switch.is-on {
+body[arco-theme="dark"] .osd-switch.arco-btn[type="button"].is-on:not(:disabled) {
   background: #2563eb;
 }
 
-:global(body[arco-theme="dark"]) .osd-switch.is-on i {
+body[arco-theme="dark"] .osd-switch.arco-btn[type="button"].is-on i {
   background: #ffffff;
 }
 
@@ -560,7 +583,7 @@ export default { name: "DeviceConfigOsdBlocks" };
 
   /* 开关关闭：灰显但**保留可读**（配置还在、只是不显示） */
   &.is-muted {
-    opacity: 0.55;
+    color: var(--uvp-text-secondary);
   }
 }
 
@@ -619,7 +642,7 @@ export default { name: "DeviceConfigOsdBlocks" };
 
 /* 「调整位置 / 完成调整」：它改的就是这一行的坐标，所以跟坐标读数同一行。
    ⛔ 不许再搬回画面上（老板 2026-09-20：常驻按钮会遮挡画面）。 */
-.osd-adjust {
+.osd-adjust.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   gap: 3px;
@@ -648,12 +671,15 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
-.osd-pos-toggle {
+.osd-pos-toggle.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   gap: 2px;
@@ -748,9 +774,9 @@ export default { name: "DeviceConfigOsdBlocks" };
 
   /* 未定位 = 与画布上的琥珀虚线锚点同色 */
   &.is-unplaced {
-    color: #b26a00;
-    background: #fff3d6;
-    border: 1px dashed #e08b00;
+    color: var(--uvp-warning);
+    background: var(--uvp-warning-soft);
+    border: 1px dashed var(--uvp-warning-border);
   }
 }
 
@@ -761,7 +787,7 @@ export default { name: "DeviceConfigOsdBlocks" };
   color: var(--uvp-text-tertiary);
 }
 
-.osd-locate {
+.osd-locate.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   gap: 3px;
@@ -781,24 +807,27 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 
   &.is-unplaced {
-    color: #b26a00;
-    background: #fff8e8;
-    border-color: #f0c26b;
+    color: var(--uvp-warning);
+    background: var(--uvp-warning-soft);
+    border-color: var(--uvp-warning-border);
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
 .osd-unplaced-tag {
   flex: none;
   font-size: 10px;
-  color: #b26a00;
+  color: var(--uvp-warning);
 }
 
-.osd-del {
+.osd-del.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -817,12 +846,15 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
-.osd-add {
+.osd-add.arco-btn[type="button"] {
   display: inline-flex;
   gap: 3px;
   align-items: center;
@@ -842,8 +874,11 @@ export default { name: "DeviceConfigOsdBlocks" };
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
@@ -885,11 +920,11 @@ export default { name: "DeviceConfigOsdBlocks" };
 /* 没读到设备声明时走琥珀态：让"这是平台猜的 / 还没拿到"一眼可见 */
 .osd-canvas.is-missing {
   .osd-canvas-value {
-    color: #b26a00;
+    color: var(--uvp-warning);
   }
 
   .osd-row-label {
-    color: #b26a00;
+    color: var(--uvp-warning);
   }
 }
 </style>

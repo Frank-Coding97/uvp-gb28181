@@ -112,8 +112,9 @@ function counterText(): string {
           @change="setCoord(index, 'y', $event)"
         />
       </label>
-      <button
-        type="button"
+      <a-button
+        html-type="button"
+        type="text"
         class="dct-del"
         :disabled="disabled"
         :aria-label="`删除第 ${index + 1} 条`"
@@ -121,18 +122,20 @@ function counterText(): string {
         @click="removeRow(index)"
       >
         <Trash2 :size="11" />
-      </button>
+      </a-button>
     </div>
     <div class="dct-foot">
-      <button
-        type="button"
+      <a-button
+        html-type="button"
+        type="outline"
         class="dct-add"
         :disabled="disabled || rows().length >= maxItems"
+        aria-label="添加一条叠加文字"
         data-testid="dct-add"
         @click="addRow"
       >
         <Plus :size="11" />添加一条
-      </button>
+      </a-button>
       <span class="dct-count" data-testid="dct-count">{{ counterText() }}</span>
       <span class="dct-axis-hint"><Info :size="10" />坐标为像素，基准是设备声明的坐标画布（不是画面解码尺寸）</span>
     </div>
@@ -148,7 +151,20 @@ function counterText(): string {
   min-width: 0;
 
   &.is-disabled {
-    opacity: 0.55;
+    color: var(--uvp-text-disabled);
+
+    :deep(.dct-input.arco-input-disabled) {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+
+    .dct-del.arco-btn[type="button"],
+    .dct-add.arco-btn[type="button"] {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
   }
 }
 
@@ -201,8 +217,8 @@ function counterText(): string {
   }
 }
 
-.dct-del,
-.dct-add {
+.dct-del.arco-btn[type="button"],
+.dct-add.arco-btn[type="button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -220,9 +236,10 @@ function counterText(): string {
   }
 
   &:disabled {
-    color: var(--uvp-text-tertiary);
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-shell-muted);
+    opacity: 1;
   }
 }
 
@@ -233,9 +250,10 @@ function counterText(): string {
   margin-top: 2px;
 }
 
-.dct-add {
+.dct-add.arco-btn[type="button"] {
   gap: 3px;
   height: 22px;
+  min-height: 0;
   padding: 0 8px;
   font-size: 11px;
 }
@@ -251,5 +269,9 @@ function counterText(): string {
   align-items: center;
   font-size: 10px;
   color: var(--uvp-text-tertiary);
+}
+
+.dct-input :deep(.arco-input:disabled) {
+  color: var(--uvp-text-secondary);
 }
 </style>

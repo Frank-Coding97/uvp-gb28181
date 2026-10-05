@@ -152,6 +152,7 @@ export interface MaintenanceOperation {
   sipStatus?: number | null;
   errorMessage?: string | null;
   actorId?: number | null;
+  actorName?: string | null;
   createdAt: string;
   sentAt?: string | null;
   completedAt?: string | null;

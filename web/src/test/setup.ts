@@ -97,6 +97,32 @@ const ArcoOptionStub = defineComponent({
   }
 });
 
+/**
+ * a-range-picker 的 v-model 是 [开始, 结束] 二元组（配 value-format 时是字符串）。
+ * 桩必须保持这个形状，否则「二元组 ↔ 两个表单字段」的桥接在单测里测不出来。
+ */
+const ArcoRangePickerStub = defineComponent({
+  inheritAttrs: false,
+  props: { modelValue: { type: Array, default: () => [] }, disabled: Boolean },
+  emits: ["update:modelValue", "change"],
+  setup(props, { attrs, emit }) {
+    const setPart = (index: 0 | 1, value: string) => {
+      const next = [...((props.modelValue ?? []) as string[])];
+      next[index] = value;
+      emit("update:modelValue", next);
+      emit("change", next);
+    };
+    const input = (index: 0 | 1, className: string) =>
+      h("input", {
+        class: className,
+        value: (props.modelValue as string[] | undefined)?.[index] ?? "",
+        disabled: props.disabled,
+        onInput: (event: Event) => setPart(index, (event.target as HTMLInputElement).value)
+      });
+    return () => h("span", attrs, [input(0, "range-start"), input(1, "range-end")]);
+  }
+});
+
 const ArcoSliderStub = defineComponent({
   inheritAttrs: false,
   props: { modelValue: { type: Number, default: 0 }, min: Number, max: Number, step: Number, disabled: Boolean },
@@ -142,6 +168,7 @@ config.global.stubs = {
   "a-modal": { template: "<div><slot name='title' /><slot /></div>" },
   "a-select": ArcoSelectStub,
   "a-option": ArcoOptionStub,
+  "a-range-picker": ArcoRangePickerStub,
   "a-slider": ArcoSliderStub,
   "a-checkbox": ArcoCheckboxStub,
   "a-tag": { template: "<span><slot /></span>" }

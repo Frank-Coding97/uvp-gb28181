@@ -1862,9 +1862,9 @@ onBeforeUnmount(() => {
         <span v-if="effectiveVersion || videoRegisteredVersion" class="dcg-titlebar-ver"
           >GB/T 28181-{{ effectiveVersion || videoRegisteredVersion }}</span
         >
-        <button type="button" class="dcg-close" aria-label="关闭" data-testid="dcg-close" @click="close">
+        <a-button html-type="button" type="text" class="dcg-close" aria-label="关闭" data-testid="dcg-close" @click="close">
           <X :size="14" />
-        </button>
+        </a-button>
       </header>
 
       <div class="dcg-body">
@@ -1884,33 +1884,36 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="dcg-actionbar">
-            <button
-              type="button"
+            <a-button
+              html-type="button"
+              type="outline"
               class="dcg-btn"
               data-testid="dcg-reset"
               :disabled="activeApplying || !activeDirtyCount"
               @click="resetActiveGroup"
             >
               <RotateCcw :size="12" />还原
-            </button>
-            <button
-              type="button"
+            </a-button>
+            <a-button
+              html-type="button"
+              type="outline"
               class="dcg-btn"
               data-testid="dcg-read"
               :disabled="activeLoading || !canRead || !online || !activeIsReady"
               @click="readActiveGroup"
             >
               <RefreshCcw :size="12" />读取
-            </button>
-            <button
-              type="button"
+            </a-button>
+            <a-button
+              html-type="button"
+              type="primary"
               class="dcg-btn is-primary"
               data-testid="dcg-apply"
               :disabled="activeApplying || !activeDirtyCount || !canApply || !activeIsReady"
               @click="applyActiveGroup"
             >
               <Send :size="12" />下发
-            </button>
+            </a-button>
           </div>
 
           <div class="dcg-ptz">
@@ -1923,14 +1926,22 @@ onBeforeUnmount(() => {
             </div>
             <div class="dcg-ptz-zoom">
               <div class="dcg-zoom-row">
-                <button type="button" class="dcg-step-btn" aria-label="变倍减小"><Minus :size="11" /></button>
+                <a-button html-type="button" type="outline" class="dcg-step-btn" aria-label="变倍减小"
+                  ><Minus :size="11"
+                /></a-button>
                 <span>变倍</span>
-                <button type="button" class="dcg-step-btn" aria-label="变倍增大"><Plus :size="11" /></button>
+                <a-button html-type="button" type="outline" class="dcg-step-btn" aria-label="变倍增大"
+                  ><Plus :size="11"
+                /></a-button>
               </div>
               <div class="dcg-zoom-row">
-                <button type="button" class="dcg-step-btn" aria-label="变焦减小"><Minus :size="11" /></button>
+                <a-button html-type="button" type="outline" class="dcg-step-btn" aria-label="变焦减小"
+                  ><Minus :size="11"
+                /></a-button>
                 <span>变焦</span>
-                <button type="button" class="dcg-step-btn" aria-label="变焦增大"><Plus :size="11" /></button>
+                <a-button html-type="button" type="outline" class="dcg-step-btn" aria-label="变焦增大"
+                  ><Plus :size="11"
+                /></a-button>
               </div>
             </div>
           </div>
@@ -1950,10 +1961,11 @@ onBeforeUnmount(() => {
         </aside>
 
         <nav v-if="configGroups.length > 1" class="dcg-nav" aria-label="配置分组">
-          <button
+          <a-button
             v-for="group in configGroups"
             :key="group.key"
-            type="button"
+            html-type="button"
+            type="text"
             class="dcg-nav-item"
             :class="{ 'is-active': group.key === activeGroupKey }"
             :data-testid="`dcg-nav-${group.key}`"
@@ -1972,7 +1984,7 @@ onBeforeUnmount(() => {
               :class="`is-${group.state}`"
               :title="group.state === 'ready' ? '已接入后端' : '未接入后端（静态形态）'"
             />
-          </button>
+          </a-button>
         </nav>
 
         <section class="dcg-params">
@@ -1997,8 +2009,9 @@ onBeforeUnmount(() => {
               class="dcg-embedded-actions"
               data-testid="dcg-embedded-actions"
             >
-              <button
-                type="button"
+              <a-button
+                html-type="button"
+                type="outline"
                 class="dcg-btn"
                 data-testid="dcg-reset"
                 title="还原为最近回读值"
@@ -2006,25 +2019,27 @@ onBeforeUnmount(() => {
                 @click="resetActiveGroup"
               >
                 <RotateCcw :size="12" />还原
-              </button>
-              <button
-                type="button"
+              </a-button>
+              <a-button
+                html-type="button"
+                type="outline"
                 class="dcg-btn"
                 data-testid="dcg-read"
                 :disabled="activeLoading || !canRead || !online"
                 @click="readActiveGroup"
               >
                 <RefreshCcw :size="12" />读取
-              </button>
-              <button
-                type="button"
+              </a-button>
+              <a-button
+                html-type="button"
+                type="primary"
                 class="dcg-btn is-primary"
                 data-testid="dcg-apply"
                 :disabled="activeApplying || !activeDirtyCount || !canApply"
                 @click="applyActiveGroup"
               >
                 <Send :size="12" />下发
-              </button>
+              </a-button>
             </div>
             <div v-if="activeIsVideo && !embedded" class="dcg-params-profile">
               <span>配置文件</span>
@@ -2066,8 +2081,9 @@ onBeforeUnmount(() => {
                 <div class="dcg-video-header">
                   <span class="dcg-video-title"><Video :size="13" aria-hidden="true" />视频编码</span>
                   <div class="dcg-video-actions" data-testid="dcg-video-actions">
-                    <button
-                      type="button"
+                    <a-button
+                      html-type="button"
+                      type="outline"
                       class="dcg-btn"
                       data-testid="dcg-reset"
                       title="还原为最近回读值"
@@ -2075,25 +2091,27 @@ onBeforeUnmount(() => {
                       @click="resetActiveGroup"
                     >
                       <RotateCcw :size="12" />还原
-                    </button>
-                    <button
-                      type="button"
+                    </a-button>
+                    <a-button
+                      html-type="button"
+                      type="outline"
                       class="dcg-btn"
                       data-testid="dcg-read"
                       :disabled="activeLoading || !canRead || !online"
                       @click="readActiveGroup"
                     >
                       <RefreshCcw :size="12" />读取
-                    </button>
-                    <button
-                      type="button"
+                    </a-button>
+                    <a-button
+                      html-type="button"
+                      type="primary"
                       class="dcg-btn is-primary"
                       data-testid="dcg-apply"
                       :disabled="activeApplying || !activeDirtyCount || !canApply"
                       @click="applyActiveGroup"
                     >
                       <Send :size="12" />下发
-                    </button>
+                    </a-button>
                   </div>
                 </div>
                 <div class="dcg-reconcile dcg-reconcile-inline" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
@@ -2125,8 +2143,9 @@ onBeforeUnmount(() => {
                   <div class="dcg-video-header">
                     <span class="dcg-video-title"><Video :size="13" aria-hidden="true" />视频编码</span>
                     <div class="dcg-video-actions" data-testid="dcg-video-actions">
-                      <button
-                        type="button"
+                      <a-button
+                        html-type="button"
+                        type="outline"
                         class="dcg-btn"
                         data-testid="dcg-reset"
                         title="还原为最近回读值"
@@ -2134,25 +2153,27 @@ onBeforeUnmount(() => {
                         @click="resetActiveGroup"
                       >
                         <RotateCcw :size="12" />还原
-                      </button>
-                      <button
-                        type="button"
+                      </a-button>
+                      <a-button
+                        html-type="button"
+                        type="outline"
                         class="dcg-btn"
                         data-testid="dcg-read"
                         :disabled="activeLoading || !canRead || !online"
                         @click="readActiveGroup"
                       >
                         <RefreshCcw :size="12" />读取
-                      </button>
-                      <button
-                        type="button"
+                      </a-button>
+                      <a-button
+                        html-type="button"
+                        type="primary"
                         class="dcg-btn is-primary"
                         data-testid="dcg-apply"
                         :disabled="activeApplying || !activeDirtyCount || !canApply"
                         @click="applyActiveGroup"
                       >
                         <Send :size="12" />下发
-                      </button>
+                      </a-button>
                     </div>
                   </div>
 
@@ -2344,17 +2365,18 @@ onBeforeUnmount(() => {
                     <span class="dcg-row-label">码率类型</span>
                     <div class="dcg-row-control">
                       <div class="dcg-segment" role="group" aria-label="码率类型">
-                        <button
+                        <a-button
                           v-for="option in BIT_RATE_TYPE_OPTIONS"
                           :key="option.value"
-                          type="button"
+                          html-type="button"
+                          type="text"
                           :class="{ 'is-on': row.bitRateType === option.value }"
                           :disabled="videoFieldsDisabled"
                           :data-testid="`dcg-bit-rate-type-${row.streamNumber}-${option.value}`"
                           @click="row.bitRateType = option.value"
                         >
                           {{ option.label }}
-                        </button>
+                        </a-button>
                       </div>
                     </div>
                     <span
@@ -2396,17 +2418,18 @@ onBeforeUnmount(() => {
                 <div v-if="embedded" class="dcg-compact-row">
                   <span class="dcg-compact-label">码率类型</span>
                   <div class="dcg-segment" role="group" aria-label="码率类型">
-                    <button
+                    <a-button
                       v-for="option in BIT_RATE_TYPE_OPTIONS"
                       :key="option.value"
-                      type="button"
+                      html-type="button"
+                      type="text"
                       :class="{ 'is-on': row.bitRateType === option.value }"
                       :disabled="videoFieldsDisabled"
                       :data-testid="`dcg-bit-rate-type-${row.streamNumber}-${option.value}`"
                       @click="row.bitRateType = option.value"
                     >
                       {{ option.label }}
-                    </button>
+                    </a-button>
                   </div>
                 </div>
 
@@ -2529,10 +2552,11 @@ onBeforeUnmount(() => {
 
                     <div v-else-if="field.kind === 'mirror'" class="dcg-mirror" :data-testid="`dcg-mirror-${field.key}`">
                       <!-- ⛔ 图标不能替代文字：对账比的是值，不是画面对不对 -->
-                      <button
+                      <a-button
                         v-for="option in field.options"
                         :key="option.value"
-                        type="button"
+                        html-type="button"
+                        type="outline"
                         class="dcg-mirror-btn"
                         :class="{ 'is-active': textValue(activeGroup.key, field.key) === option.value }"
                         :disabled="familyFieldsDisabled"
@@ -2543,7 +2567,7 @@ onBeforeUnmount(() => {
                       >
                         <component :is="mirrorIcon(option.value)" :size="16" />
                         <span>{{ option.shortLabel ?? option.label }}</span>
-                      </button>
+                      </a-button>
                     </div>
 
                     <DeviceConfigSlider
@@ -2558,9 +2582,10 @@ onBeforeUnmount(() => {
                       @update:model-value="setSv(activeGroup.key, field.key, $event)"
                     />
 
-                    <button
+                    <a-button
                       v-else-if="field.kind === 'switch'"
-                      type="button"
+                      html-type="button"
+                      type="text"
                       class="dcg-switch"
                       :class="{ 'is-on': boolValue(activeGroup.key, field.key) }"
                       :disabled="familyFieldsDisabled"
@@ -2568,7 +2593,7 @@ onBeforeUnmount(() => {
                       @click="setSv(activeGroup.key, field.key, !boolValue(activeGroup.key, field.key))"
                     >
                       <i />
-                    </button>
+                    </a-button>
 
                     <div v-else-if="field.kind === 'coords'" class="dcg-coords">
                       <label v-for="(axis, index) in field.axes" :key="axis">
@@ -2626,8 +2651,9 @@ onBeforeUnmount(() => {
               <header class="dcg-detail-fields-head">
                 <span class="dcg-detail-fields-title">{{ activeGroup.label }}</span>
                 <div v-if="activeIsReady" class="dcg-embedded-actions" data-testid="dcg-embedded-actions">
-                  <button
-                    type="button"
+                  <a-button
+                    html-type="button"
+                    type="outline"
                     class="dcg-btn"
                     data-testid="dcg-reset"
                     title="还原为最近回读值"
@@ -2635,25 +2661,27 @@ onBeforeUnmount(() => {
                     @click="resetActiveGroup"
                   >
                     <RotateCcw :size="12" />还原
-                  </button>
-                  <button
-                    type="button"
+                  </a-button>
+                  <a-button
+                    html-type="button"
+                    type="outline"
                     class="dcg-btn"
                     data-testid="dcg-read"
                     :disabled="activeLoading || !canRead || !online"
                     @click="readActiveGroup"
                   >
                     <RefreshCcw :size="12" />读取
-                  </button>
-                  <button
-                    type="button"
+                  </a-button>
+                  <a-button
+                    html-type="button"
+                    type="primary"
                     class="dcg-btn is-primary"
                     data-testid="dcg-apply"
                     :disabled="activeApplying || !activeDirtyCount || !canApply"
                     @click="applyActiveGroup"
                   >
                     <Send :size="12" />下发
-                  </button>
+                  </a-button>
                 </div>
               </header>
               <div v-if="detailFields.length" class="dcg-detail-fields-body">
@@ -2720,9 +2748,10 @@ onBeforeUnmount(() => {
                 <span>{{ activeGroupConfigTypeText }}</span>
                 <span class="dcg-foot-sep">·</span>
               </template>
-              <button
+              <a-button
                 v-if="activeDirtyCount > 0"
-                type="button"
+                html-type="button"
+                type="text"
                 class="dcg-foot-dirty is-dirty"
                 data-testid="dcg-pending-toggle"
                 :aria-expanded="pendingExpanded"
@@ -2730,7 +2759,7 @@ onBeforeUnmount(() => {
               >
                 {{ activeDirtyCount }} 项未下发
                 <span class="dcg-foot-caret">{{ pendingExpanded ? "▴" : "▾" }}</span>
-              </button>
+              </a-button>
               <span v-else>无未下发的改动</span>
             </template>
             <template v-else>
@@ -2765,9 +2794,15 @@ onBeforeUnmount(() => {
               <span class="dcg-pending-label">{{ change.label }}</span>
               <span class="dcg-pending-from">{{ change.from }}</span>
               <span class="dcg-pending-to">{{ change.to }}</span>
-              <button type="button" class="dcg-pending-revert" :data-testid="`dcg-revert-${change.key}`" @click="change.revert()">
+              <a-button
+                html-type="button"
+                type="outline"
+                class="dcg-pending-revert"
+                :data-testid="`dcg-revert-${change.key}`"
+                @click="change.revert()"
+              >
                 撤销
-              </button>
+              </a-button>
             </div>
           </div>
         </section>
@@ -2885,7 +2920,7 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 
-.dcg-close {
+.dcg-close.arco-btn[type="button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2926,7 +2961,7 @@ onBeforeUnmount(() => {
     `display: grid` 时代它被隐式盖掉，换成 flex 后不写就变成**竖排导航**
     （实测：2 个组各 592px 宽、上下摞着，整条导航高 47px）。这是"改一个属性、坏另一个"
     的典型，只有真在浏览器里量过才看得见。
-  ⛔ 子项保留 `min-width: 0`（见 .dcg-nav-item）：组多了靠收缩 + 省略号收场，
+  ⛔ 子项保留 `min-width: 0`（见 .dcg-nav-item.arco-btn[type="button"]）：组多了靠收缩 + 省略号收场，
     不许把导航撑出横向滚动。 */
 .dcg-window--embedded .dcg-nav {
   display: flex;
@@ -2940,8 +2975,10 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--uvp-dialog-border, #e6edf7);
 }
 
-.dcg-window--embedded .dcg-nav > .dcg-nav-item {
+.dcg-window--embedded .dcg-nav > .dcg-nav-item.arco-btn[type="button"] {
   flex: 1 1 0;
+  height: auto;
+  min-height: 0;
 }
 
 .dcg-window--embedded .dcg-params-head {
@@ -2966,16 +3003,17 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.dcg-window--embedded .dcg-nav-item {
+.dcg-window--embedded .dcg-nav-item.arco-btn[type="button"] {
   width: auto;
   min-width: 0;
   height: 30px;
+  min-height: 0;
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 4px;
 }
 
-.dcg-window--embedded .dcg-nav-item.is-active {
+.dcg-window--embedded .dcg-nav-item.arco-btn[type="button"].is-active {
   color: var(--uvp-brand, #2563eb);
   background: var(--uvp-brand-soft, #e8f2ff);
   border-color: color-mix(in srgb, var(--uvp-brand, #2563eb) 30%, var(--uvp-dialog-border, #e6edf7));
@@ -3101,7 +3139,7 @@ onBeforeUnmount(() => {
   em {
     font-size: 10px;
     font-style: normal;
-    color: #556274;
+    color: rgb(203 213 225 / 78%);
   }
 }
 
@@ -3146,7 +3184,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.dcg-btn {
+.dcg-btn.arco-btn[type="button"] {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -3166,8 +3204,11 @@ onBeforeUnmount(() => {
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.5;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 
   &.is-primary:not(:disabled) {
@@ -3272,7 +3313,7 @@ onBeforeUnmount(() => {
   }
 }
 
-.dcg-step-btn {
+.dcg-step-btn.arco-btn[type="button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3314,7 +3355,7 @@ onBeforeUnmount(() => {
   border-right: 1px solid var(--uvp-dialog-border, #e6edf7);
 }
 
-.dcg-nav-item {
+.dcg-nav-item.arco-btn[type="button"] {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -3366,11 +3407,10 @@ onBeforeUnmount(() => {
 .dcg-nav-sub {
   font-family: var(--uvp-font-mono, ui-monospace, monospace);
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
-  opacity: 0.85;
+  color: var(--uvp-text-secondary);
 }
 
-.dcg-nav-item.is-active .dcg-nav-sub {
+.dcg-nav-item.arco-btn[type="button"].is-active .dcg-nav-sub {
   color: rgb(255 255 255 / 70%);
 }
 
@@ -3389,7 +3429,7 @@ onBeforeUnmount(() => {
   }
 }
 
-.dcg-nav-item.is-active .dcg-nav-flag.is-static {
+.dcg-nav-item.arco-btn[type="button"].is-active .dcg-nav-flag.is-static {
   background: rgb(255 255 255 / 55%);
 }
 
@@ -3449,13 +3489,13 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 
   &.is-ready {
-    color: #047857;
-    background: #d1fae5;
+    color: var(--uvp-success);
+    background: var(--uvp-success-soft);
   }
 
   &.is-static {
     color: var(--uvp-text-tertiary);
-    background: #eef1f6;
+    background: var(--uvp-dialog-control-bg, #f8fbff);
   }
 }
 
@@ -3477,8 +3517,9 @@ onBeforeUnmount(() => {
   margin-left: auto;
 }
 
-.dcg-embedded-actions .dcg-btn {
+.dcg-embedded-actions .dcg-btn.arco-btn[type="button"] {
   height: 24px;
+  min-height: 0;
   padding: 0 7px;
   font-size: 10.5px;
 }
@@ -3570,9 +3611,9 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-/* 静态组的控件没有真实读写，视觉上必须比可用的组弱一档 */
+/* 静态组保留可读的配置事实，控件自身显示禁用状态。 */
 .dcg-params-body.is-static .dcg-row-control {
-  opacity: 0.7;
+  color: var(--uvp-text-disabled);
 }
 
 /* 参数区底部汇总：内容少时也把底边压实，不留空档 */
@@ -3695,7 +3736,7 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.dcg-pending-revert {
+.dcg-pending-revert.arco-btn[type="button"] {
   padding: 2px 6px;
   font-size: 10px;
   color: var(--uvp-text-secondary);
@@ -3730,11 +3771,11 @@ onBeforeUnmount(() => {
   }
 
   &.is-ok {
-    color: #047857;
-    background: #ecfdf5;
+    color: var(--uvp-success);
+    background: var(--uvp-success-soft);
 
     .dcg-reconcile-dot {
-      background: #10b981;
+      background: var(--uvp-success);
     }
   }
 
@@ -3847,10 +3888,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.dcg-video-header .dcg-btn {
+.dcg-video-header .dcg-btn.arco-btn[type="button"] {
   flex: none;
   gap: 3px;
   height: 26px;
+  min-height: 0;
   padding: 0 4px;
   font-size: 10px;
   white-space: nowrap;
@@ -4011,7 +4053,7 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
-.dcg-mirror-btn {
+.dcg-mirror-btn.arco-btn[type="button"] {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
@@ -4033,13 +4075,16 @@ onBeforeUnmount(() => {
 
   &.is-active {
     color: var(--uvp-brand);
-    background: #eef4ff;
+    background: var(--uvp-brand-soft);
     border-color: var(--uvp-brand);
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.55;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
@@ -4052,13 +4097,13 @@ onBeforeUnmount(() => {
 }
 
 .dcg-row-hint[data-source="设备"] {
-  color: #047857;
-  background: #ecfdf5;
+  color: var(--uvp-success);
+  background: var(--uvp-success-soft);
 }
 
 .dcg-row-hint[data-source="缺省"] {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-dialog-control-bg, #f8fbff);
 }
 
 .dcg-row-hint[data-source="不发"] {
@@ -4085,6 +4130,44 @@ onBeforeUnmount(() => {
     color: var(--uvp-text-tertiary);
     cursor: not-allowed;
   }
+}
+
+:deep(.dcg-select.arco-select-view) {
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border-color: var(--uvp-panel-border, #dbe4f0);
+}
+
+:deep(.dcg-select.arco-select-view-focus) {
+  border-color: var(--uvp-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 18%, transparent);
+}
+
+:deep(.dcg-select.arco-select-view-disabled) {
+  color: var(--uvp-text-disabled);
+  background: var(--uvp-shell-muted);
+  border-color: var(--uvp-panel-border, #dbe4f0);
+}
+
+:deep(.dcg-input.arco-input-wrapper) {
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border-color: var(--uvp-panel-border, #dbe4f0);
+}
+
+:deep(.dcg-input.arco-input-wrapper.arco-input-focus) {
+  border-color: var(--uvp-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 18%, transparent);
+}
+
+:deep(.dcg-input.arco-input-wrapper.arco-input-disabled) {
+  color: var(--uvp-text-disabled);
+  background: var(--uvp-shell-muted);
+  border-color: var(--uvp-panel-border, #dbe4f0);
+}
+
+.dcg-input :deep(.arco-input:disabled) {
+  color: var(--uvp-text-secondary);
 }
 
 .dcg-select {
@@ -4148,7 +4231,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
   border-radius: 4px;
 
-  button {
+  button.arco-btn[type="button"] {
     min-width: 48px;
     height: 22px;
     padding: 0 10px;
@@ -4158,7 +4241,7 @@ onBeforeUnmount(() => {
     background: var(--uvp-dialog-control-bg, #ffffff);
     border: none;
 
-    & + button {
+    & + button.arco-btn[type="button"] {
       border-left: 1px solid var(--uvp-panel-border, #dbe4f0);
     }
 
@@ -4166,20 +4249,26 @@ onBeforeUnmount(() => {
       color: #ffffff;
       background: var(--uvp-brand, #2563eb);
     }
+
+    &:disabled {
+      color: var(--uvp-text-disabled);
+      cursor: not-allowed;
+      background: var(--uvp-shell-muted);
+    }
   }
 }
 
-:global(body[arco-theme="dark"]) .dcg-segment button.is-on {
+body[arco-theme="dark"] .dcg-segment button.arco-btn[type="button"].is-on:not(:disabled) {
   color: #ffffff;
   background: #2563eb;
 }
 
-:global(body[arco-theme="dark"]) .dcg-segment button:not(.is-on) {
+body[arco-theme="dark"] .dcg-segment button.arco-btn[type="button"]:not(.is-on, :disabled) {
   color: #a8b8cc;
   background: #142131;
 }
 
-.dcg-switch {
+.dcg-switch.arco-btn[type="button"] {
   position: relative;
   width: 34px;
   height: 18px;
@@ -4211,8 +4300,11 @@ onBeforeUnmount(() => {
   }
 
   &:disabled {
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.6;
+    background: var(--uvp-dialog-control-bg);
+    border-color: var(--uvp-panel-border);
+    opacity: 1;
   }
 }
 
@@ -4331,7 +4423,7 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-.dcg-compact-row .dcg-segment button {
+.dcg-compact-row .dcg-segment button.arco-btn[type="button"] {
   flex: 1;
 }
 </style>

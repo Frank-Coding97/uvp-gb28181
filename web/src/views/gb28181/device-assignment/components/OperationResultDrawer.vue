@@ -23,7 +23,14 @@ const title = computed(() => (props.kind === "assignment" ? "归属调整结果"
 </script>
 
 <template>
-  <a-drawer v-model:visible="visible" :width="560" :title="title" unmount-on-close>
+  <a-drawer
+    body-class="uvp-system-dialog__body"
+    class="uvp-system-drawer"
+    v-model:visible="visible"
+    :width="560"
+    :title="title"
+    unmount-on-close
+  >
     <div class="operation-result">
       <div class="operation-result__summary">
         <div>

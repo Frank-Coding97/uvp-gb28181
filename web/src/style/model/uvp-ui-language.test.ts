@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { hasRuleBlock, squash } from "@/test/source-assert";
+import { hasRuleBlock, ruleBlocks, squash } from "@/test/source-assert";
 
 const source = readFileSync(resolve(process.cwd(), "src/style/model/uvp-ui-language.scss"), "utf8");
 
@@ -36,6 +36,21 @@ describe("media workbench theme tokens", () => {
   });
 });
 
+describe("table fixed-right column alignment", () => {
+  it("never lets the native table-body scrollbar take layout width", () => {
+    // 表头与表体是两个独立滚动的容器,`fixed="right"` 的列在两侧各自贴**自己**滚动区的右边缘;
+    // 表体滚动区一旦被**原生**滚动条吃掉 N 像素宽,表体里的固定列就会比表头整体左移 N 像素
+    // (实机复现:滚动区窄 15px ⇒ 列左移 15px),表现就是「表头『操作』与行内按钮错位」。
+    // Arco 自带 overlay 滑块,所以原生滚动条必须彻底不占位(曾经写成 width: 8px)。
+    expect(hasRuleBlock(source, ".uvp-data-table .arco-table-body::-webkit-scrollbar", "display: none;", "width: 0;")).toBe(true);
+    expect(hasRuleBlock(source, ".uvp-data-table .arco-table-body", "scrollbar-width: none;")).toBe(true);
+
+    for (const block of ruleBlocks(source, ".uvp-data-table .arco-table-body::-webkit-scrollbar")) {
+      expect(block).not.toMatch(/width:\s*[1-9]/);
+    }
+  });
+});
+
 describe("table loading mask theme", () => {
   it("uses a dark translucent surface instead of the light loading mask in dark mode", () => {
     expect(source).toMatch(
@@ -62,5 +77,30 @@ describe("system drawer surface scoping", () => {
       }
     }
     expect(rules.length).toBeGreaterThan(0); // 保住「自定义属性仍挂在容器上」这条事实
+  });
+});
+
+describe("play console button scope", () => {
+  it("does not apply generic dialog button sizing and surfaces to the console modal", () => {
+    const scope = ".uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))";
+    expect(hasRuleBlock(source.replace(/\s+/g, ""), `${scope}.arco-btn`.replace(/\s+/g, ""), "min-height:34px")).toBe(true);
+    expect(
+      hasRuleBlock(source.replace(/\s+/g, ""), `${scope}.arco-btn-primary`.replace(/\s+/g, ""), "border-color:transparent")
+    ).toBe(true);
+    expect(
+      hasRuleBlock(
+        source.replace(/\s+/g, ""),
+        `${scope}.arco-btn:not(.arco-btn-primary)`.replace(/\s+/g, ""),
+        "background:#ffffff"
+      )
+    ).toBe(true);
+    expect(
+      hasRuleBlock(
+        source.replace(/\s+/g, ""),
+        `body[arco-theme="dark"]${scope}.arco-btn-primary`.replace(/\s+/g, ""),
+        "box-shadow:"
+      )
+    ).toBe(true);
+    expect(source).not.toMatch(/\.uvp-system-dialog \.arco-btn(?:[,\s]|-)/);
   });
 });

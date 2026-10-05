@@ -1,11 +1,12 @@
 <template>
   <a-drawer
+    body-class="uvp-system-dialog__body"
     :visible="visible"
     width="min(840px, 94vw)"
     :footer="false"
     :esc-to-close="true"
     unmount-on-close
-    class="alarm-detail-drawer"
+    class="uvp-system-drawer alarm-detail-drawer"
     @update:visible="emit('update:visible', $event)"
     @cancel="emit('update:visible', false)"
   >

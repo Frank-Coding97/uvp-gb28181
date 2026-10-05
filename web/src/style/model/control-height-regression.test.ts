@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { hasRuleBlock } from "@/test/source-assert";
 
 const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
@@ -35,6 +36,21 @@ const pageSources = [
 ];
 
 describe("control height regression", () => {
+  it("keeps compact console buttons independent of Arco size and text-type defaults", () => {
+    const details = readSource("src/views/gb28181/components/play-console/detail-cards.scss");
+    expect(
+      hasRuleBlock(
+        details,
+        ":where(.play-console-modal, .preset-popover, .home-settings-form, .cruise-save-form) .arco-btn",
+        "height: auto",
+        "min-height: 0"
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(details, '.resource-sync-btn.arco-btn[type="button"]', "padding: 2px 6px")).toBe(true);
+    expect(hasRuleBlock(details, '.mask-switch.arco-btn[type="button"]', "height: 20px")).toBe(true);
+    expect(hasRuleBlock(details, '.mirror-choice.arco-btn[type="button"]', "padding: 6px 4px")).toBe(true);
+  });
+
   it("keeps control sizing owned by the shared components", () => {
     const searchPanel = readSource("src/components/s-layout-search/index.vue");
 
@@ -66,11 +82,20 @@ describe("control height regression", () => {
 
   it("restores the original sizes of custom controls", () => {
     const playback = readSource("src/views/gb28181/device-record-playback/index.vue");
-    // ⛔ 并列选择器会被 prettier 拆成两行（`.query-field input,\n.query-field select {`），
-    //    选择器内部必须容许换行，否则格式化一次就红一次。
-    expect(playback).toMatch(/\.query-field input,\s*\.query-field select\s*\{[^}]*height:\s*32px;/s);
-    expect(playback).toMatch(/\.range-separator\s*\{[^}]*height:\s*32px;[^}]*line-height:\s*32px;/s);
-    expect(playback).toMatch(/\.query-submit\s*\{[^}]*height:\s*32px;/s);
+    // ⛔ 别写串序正则（`/\.x\s*\{[^}]*a:[^}]*b:/`）：stylelint 的 recess-order 会重排声明，
+    //    顺序一变就红。用 hasRuleBlock 钉「同一个规则块里有这几条声明」。
+    //
+    // 2026-10-03 该页控件换成 Arco：查询栏/控制条的高度（32px）改由 Arco 默认提供，页面只
+    // 声明宽度与图标按钮的 32×32 方格。原来钉「.query-field input/select { height:32px }」
+    // 和「.query-submit { height:32px }」的两条随原生控件一起退役，改钉新的落点 —— 目的不变：
+    // 这些自定义控件的尺寸是刻意调过的，别被全局口径（30px / 44px）改掉。
+    expect(hasRuleBlock(playback, ".query-field", "width: 360px")).toBe(true);
+    expect(hasRuleBlock(playback, ".query-field", "width: 108px")).toBe(true);
+    // 固定方格必须同时清 padding：Arco 按钮默认靠 `padding: 0 12px` 撑开，漏了会把图标挤出去。
+    expect(hasRuleBlock(playback, ".icon-command", "width: 32px", "height: 32px", "padding: 0")).toBe(true);
+    // 起止时间合成一个 a-range-picker 之后，「至」分隔符（.range-separator）退役；换来的是
+    // 窄屏下时间范围必须独占一行，否则两个日期输入挤在半列里会把时间文本截断。
+    expect(hasRuleBlock(playback, ".time-field", "grid-column: 1 / -1")).toBe(true);
     expect(readSource("src/views/gb28181/device-mgmt/index.vue")).not.toMatch(/\.create-device-btn\s*\{[^}]*height:\s*44px;/s);
     expect(readSource("src/views/gb28181/zlm/NodeDetail.vue")).not.toMatch(/\.back-btn\s*\{[^}]*height:\s*44px;/s);
     expect(readSource("src/views/gb28181/zlm/NodeForm.vue")).not.toMatch(

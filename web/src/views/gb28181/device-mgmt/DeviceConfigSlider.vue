@@ -79,15 +79,16 @@ function onInputCommit(valueOrEvent: string | Event) {
 
 <template>
   <div class="cfg-slider" :class="{ 'is-disabled': disabled }">
-    <button
-      type="button"
+    <a-button
+      html-type="button"
+      type="outline"
       class="cfg-slider-step"
       :disabled="!canDec"
       :aria-label="label ? `减小${label}` : '减小'"
       @click="nudge(-1)"
     >
       <Minus :size="11" />
-    </button>
+    </a-button>
     <a-slider
       class="cfg-slider-track"
       :min="min"
@@ -99,15 +100,16 @@ function onInputCommit(valueOrEvent: string | Event) {
       :show-tooltip="false"
       @update:model-value="onTrackInput"
     />
-    <button
-      type="button"
+    <a-button
+      html-type="button"
+      type="outline"
       class="cfg-slider-step"
       :disabled="!canInc"
       :aria-label="label ? `增大${label}` : '增大'"
       @click="nudge(1)"
     >
       <Plus :size="11" />
-    </button>
+    </a-button>
     <span class="cfg-slider-value">
       <a-input
         class="cfg-slider-input"
@@ -136,11 +138,29 @@ function onInputCommit(valueOrEvent: string | Event) {
   max-width: 400px;
 
   &.is-disabled {
-    opacity: 0.55;
+    color: var(--uvp-text-disabled);
+
+    .cfg-slider-step.arco-btn[type="button"] {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+
+    :deep(.cfg-slider-input.arco-input-disabled) {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+
+    .cfg-slider-track :deep(.arco-slider-btn::after) {
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-text-disabled);
+      box-shadow: none;
+    }
   }
 }
 
-.cfg-slider-step {
+.cfg-slider-step.arco-btn[type="button"] {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -163,9 +183,10 @@ function onInputCommit(valueOrEvent: string | Event) {
   }
 
   &:disabled {
-    color: var(--uvp-text-tertiary);
+    color: var(--uvp-text-disabled);
     cursor: not-allowed;
-    opacity: 0.45;
+    background: var(--uvp-shell-muted);
+    opacity: 1;
   }
 }
 
@@ -210,6 +231,17 @@ function onInputCommit(valueOrEvent: string | Event) {
   box-shadow: 0 1px 4px rgb(15 23 42 / 28%);
 }
 
+.cfg-slider-track :deep(.arco-slider-btn:focus-visible::after) {
+  box-shadow: 0 0 0 3px var(--uvp-brand-soft, rgb(37 99 235 / 22%));
+}
+
+.cfg-slider-track :deep(.arco-slider-track-disabled .arco-slider-btn::after),
+.cfg-slider-track :deep(.arco-slider-track-disabled .arco-slider-btn:hover::after),
+.cfg-slider-track :deep(.arco-slider-track-disabled .arco-slider-btn-active::after) {
+  box-shadow: none;
+  transform: none;
+}
+
 .cfg-slider-value {
   display: inline-flex;
   flex: none;
@@ -245,5 +277,9 @@ function onInputCommit(valueOrEvent: string | Event) {
 
 .cfg-slider-input:focus-within {
   border-color: var(--uvp-brand);
+}
+
+.cfg-slider-input :deep(.arco-input:disabled) {
+  color: var(--uvp-text-secondary);
 }
 </style>

@@ -393,7 +393,15 @@ defineExpose({ refresh });
         <div v-else class="runtime-empty" role="status">ZLM 当前没有返回事件线程明细。</div>
       </section>
 
-      <a-drawer v-model:visible="objectDetailsVisible" :width="720" :footer="false" unmount-on-close title="全部对象实例">
+      <a-drawer
+        body-class="uvp-system-dialog__body"
+        class="uvp-system-drawer"
+        v-model:visible="objectDetailsVisible"
+        :width="720"
+        :footer="false"
+        unmount-on-close
+        title="全部对象实例"
+      >
         <p class="object-detail-intro">中文名称用于日常判断，英文名称对应 ZLM getStatistic 返回的技术对象。</p>
         <div class="object-detail-grid">
           <div v-for="item in objectStatisticItems" :key="item.key" class="object-detail-card">

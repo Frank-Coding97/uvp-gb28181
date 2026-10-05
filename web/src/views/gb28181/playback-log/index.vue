@@ -111,7 +111,14 @@
       </footer>
     </div>
 
-    <a-drawer v-model:visible="detailVisible" :width="560" title="播放生命周期" unmount-on-close>
+    <a-drawer
+      body-class="uvp-system-dialog__body"
+      class="uvp-system-drawer"
+      v-model:visible="detailVisible"
+      :width="560"
+      title="播放生命周期"
+      unmount-on-close
+    >
       <a-spin :loading="detailLoading" class="detail-spin">
         <template v-if="detail">
           <div class="detail-summary">

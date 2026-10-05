@@ -221,7 +221,14 @@ watch(
 </script>
 
 <template>
-  <a-drawer v-model:visible="visible" :width="560" :title="title" unmount-on-close>
+  <a-drawer
+    body-class="uvp-system-dialog__body"
+    class="uvp-system-drawer"
+    v-model:visible="visible"
+    :width="560"
+    :title="title"
+    unmount-on-close
+  >
     <div class="share-drawer">
       <div class="share-drawer__devices">
         <div class="share-drawer__device-icon"><UsersRound :size="17" /></div>

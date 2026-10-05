@@ -444,37 +444,48 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   }
 }
 
-body[arco-theme="dark"] button.btn-primary {
-  color: #ffffff;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  box-shadow:
-    0 10px 22px -12px rgb(37 99 235 / 78%),
-    inset 0 1px 0 rgb(255 255 255 / 18%);
-  transition:
-    background 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.1s ease;
-}
+// 文字/图标使用浅蓝品牌色，实心按钮使用对比度更高的深蓝。
+// 保留危险、警告、成功及独立工具动作的语义色；只统一表面，不改变按钮尺寸。
+body[arco-theme="dark"] {
+  :is(.arco-btn-primary, button.btn-primary):not(
+      .arco-btn-status-danger,
+      .arco-btn-status-warning,
+      .arco-btn-status-success,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .btn-danger
+    ) {
+    &:not(.arco-btn-disabled, [disabled]) {
+      color: #ffffff !important;
+      background: #2563eb !important;
+      border-color: #2563eb !important;
+      box-shadow: none !important;
 
-body[arco-theme="dark"] button.btn-primary:not(:disabled):hover {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  box-shadow:
-    0 12px 24px -12px rgb(37 99 235 / 88%),
-    inset 0 1px 0 rgb(255 255 255 / 16%);
-  transform: translateY(-1px);
-}
+      &:hover:not(.arco-btn-loading) {
+        background: #1d4ed8 !important;
+        border-color: #1d4ed8 !important;
+      }
 
-body[arco-theme="dark"] button.btn-primary:not(:disabled):active {
-  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
-  box-shadow: 0 5px 12px -8px rgb(37 99 235 / 72%);
-  transform: translateY(0);
-}
+      &:active:not(.arco-btn-loading) {
+        background: #1e40af !important;
+        border-color: #1e40af !important;
+      }
 
-body[arco-theme="dark"] button.btn-primary:disabled {
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-panel-border);
-  box-shadow: none;
-  opacity: 1;
+      &:focus-visible {
+        outline: 2px solid var(--uvp-brand);
+        outline-offset: 2px;
+      }
+    }
+
+    &.arco-btn-disabled,
+    &[disabled] {
+      color: var(--uvp-text-disabled) !important;
+      background: var(--uvp-dialog-control-bg) !important;
+      border-color: var(--uvp-panel-border) !important;
+      box-shadow: none !important;
+      opacity: 1 !important;
+    }
+  }
 }
 
 .btn-ghost {

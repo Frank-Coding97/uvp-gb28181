@@ -139,7 +139,14 @@ const submit = async () => {
 </script>
 
 <template>
-  <a-drawer v-model:visible="visible" :width="560" :title="title" unmount-on-close>
+  <a-drawer
+    body-class="uvp-system-dialog__body"
+    class="uvp-system-drawer"
+    v-model:visible="visible"
+    :width="560"
+    :title="title"
+    unmount-on-close
+  >
     <div class="assignment-drawer">
       <div class="assignment-drawer__identity">
         <div class="assignment-drawer__identity-icon"><Building2 :size="18" /></div>

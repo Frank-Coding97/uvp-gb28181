@@ -250,11 +250,12 @@ function fileSizeText(value: number | null) {
 
 <template>
   <a-drawer
+    body-class="uvp-system-dialog__body"
     :visible="visible"
     width="min(1120px, 94vw)"
     :footer="false"
     unmount-on-close
-    class="record-query-drawer"
+    class="uvp-system-drawer record-query-drawer"
     @update:visible="handleDrawerVisible"
     @cancel="closeDrawer"
   >
@@ -323,9 +324,13 @@ function fileSizeText(value: number | null) {
                 >{{ displayDateTime(form.startTime) }} 至 {{ displayDateTime(form.endTime) }}</small
               >
             </label>
-            <label class="field type-field">
+            <!-- ⛔ 这里必须是 div 而不是 label：无 `for` 的 <label> 会把点击转发给内部
+                 第一个可标注控件(Arco select 的隐藏 readonly input)，一次点击变两次 toggle，
+                 Arco 下拉弹出来立刻收回。原生 <select> 不看重复 click 所以从前没暴露。
+                 `a-range-picker`/`a-input` 不受影响(点击目标就是内部 input)。 -->
+            <div class="field type-field">
               <span>录像类型</span>
-              <a-select v-model="form.type" :disabled="state === 'querying'">
+              <a-select v-model="form.type" aria-label="录像类型" :disabled="state === 'querying'">
                 <a-option
                   v-for="item in recordQueryRequestTypes.filter(item => options?.supportedTypes.includes(item.value))"
                   :key="item.value"
@@ -334,7 +339,7 @@ function fileSizeText(value: number | null) {
                 >
               </a-select>
               <small v-if="errors.type" class="field-error">{{ errors.type }}</small>
-            </label>
+            </div>
             <div class="query-actions">
               <a-button v-if="state === 'querying'" data-testid="record-query-cancel" @click="cancelInFlight()">
                 <template #icon><StopCircle :size="15" /></template>取消查询
