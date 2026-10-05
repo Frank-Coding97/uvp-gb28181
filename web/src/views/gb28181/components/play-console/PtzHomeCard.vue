@@ -52,7 +52,10 @@ const emit = defineEmits<{ (e: "configure"): void; (e: "close"): void; (e: "refr
         请先添加预置位，再配置看守位。
       </p>
       <div class="home-card-actions">
-        <button
+        <a-button
+          type="primary"
+          size="mini"
+          html-type="button"
           v-if="
             presentation.showConfigure &&
             (presentation.state === 'enabled' ||
@@ -64,26 +67,35 @@ const emit = defineEmits<{ (e: "configure"): void; (e: "close"): void; (e: "refr
           data-testid="home-configure"
           :disabled="!canConfigure"
           :title="!hasPresets ? '请先添加预置位' : undefined"
+          aria-label="配置看守位"
           @click="emit('configure')"
         >
-          <Settings :size="12" />{{ confirmed?.enabled ? "修改设置" : "配置并启用" }}</button
-        ><button
+          <Settings :size="12" />{{ confirmed?.enabled ? "修改设置" : "配置并启用" }}</a-button
+        ><a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           v-if="confirmed?.enabled"
           class="btn-ghost sm home-close-btn"
           data-testid="home-close"
           :disabled="!canClose"
+          aria-label="关闭看守位"
           @click="emit('close')"
         >
-          <CircleSlash :size="12" />关闭</button
-        ><button
+          <CircleSlash :size="12" />关闭</a-button
+        ><a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           v-if="presentation.showQuery"
           class="btn-ghost sm uvp-refresh-btn"
           data-testid="home-refresh"
           :disabled="!canRefresh"
+          aria-label="刷新看守位状态"
           @click="emit('refresh')"
         >
           <RefreshCcw :size="12" />{{ presentation.queryLabel }}
-        </button>
+        </a-button>
       </div>
     </div>
   </section>

@@ -122,8 +122,10 @@ const emit = defineEmits<{ (event: "openTimeline"): void }>();
             props.frameOverviewMeta
           }}</span>
         </div>
-        <button
-          type="button"
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="frame-overview"
           :class="{ muted: !props.probeOverview }"
           :disabled="!props.probeOverview"
@@ -155,7 +157,7 @@ const emit = defineEmits<{ (event: "openTimeline"): void }>();
             >
             <template v-else><Activity :size="18" /><span>启动检测后展示全量帧到达概览</span></template>
           </div>
-        </button>
+        </a-button>
       </section>
     </div>
   </div>

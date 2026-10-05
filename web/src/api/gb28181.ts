@@ -1655,116 +1655,41 @@ export interface PositionHistoryConfig {
   retentionDays: number;
 }
 
-export const fetchPositionHistoryConfig = () =>
-  http.request<BaseResult<PositionHistoryConfig>>("get", baseUrlApi("gb28181/sip/service-config/position-history"));
-
-export const updatePositionHistoryConfig = (config: PositionHistoryConfig) =>
-  http.request<BaseResult<PositionHistoryConfig>>("put", baseUrlApi("gb28181/sip/service-config/position-history"), {
-    data: config
-  });
+export interface CloudRecordingRetentionConfig {
+  retentionDays: number;
+}
 
 export interface SDPExtensionConfig {
   enabled: boolean;
 }
 
-export const fetchSDPExtensionConfig = () =>
-  http.request<BaseResult<SDPExtensionConfig>>("get", baseUrlApi("gb28181/sip/service-config/sdp-extension"));
-
-export const updateSDPExtensionConfig = (enabled: boolean) =>
-  http.request<BaseResult<SDPExtensionConfig>>("put", baseUrlApi("gb28181/sip/service-config/sdp-extension"), {
-    data: { enabled }
-  });
-
 export interface SyncChannelsOnOnlineConfig {
   enabled: boolean;
 }
-
-export const fetchSyncChannelsOnOnlineConfig = () =>
-  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("get", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"));
-
-export const updateSyncChannelsOnOnlineConfig = (enabled: boolean) =>
-  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("put", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"), {
-    data: { enabled }
-  });
 
 export interface OnlineOnHeartbeatConfig {
   enabled: boolean;
 }
 
-export const fetchOnlineOnHeartbeatConfig = () =>
-  http.request<BaseResult<OnlineOnHeartbeatConfig>>("get", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"));
-
-export const updateOnlineOnHeartbeatConfig = (enabled: boolean) =>
-  http.request<BaseResult<OnlineOnHeartbeatConfig>>("put", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"), {
-    data: { enabled }
-  });
-
 export interface SaveAlarmMessagesConfig {
   enabled: boolean;
 }
-
-export const fetchSaveAlarmMessagesConfig = () =>
-  http.request<BaseResult<SaveAlarmMessagesConfig>>("get", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"));
-
-export const updateSaveAlarmMessagesConfig = (enabled: boolean) =>
-  http.request<BaseResult<SaveAlarmMessagesConfig>>("put", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"), {
-    data: { enabled }
-  });
 
 export interface SIPCommandTimeoutConfig {
   timeoutSec: number;
 }
 
-export const fetchSIPCommandTimeoutConfig = () =>
-  http.request<BaseResult<SIPCommandTimeoutConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"));
-
-export const updateSIPCommandTimeoutConfig = (timeoutSec: number) =>
-  http.request<BaseResult<SIPCommandTimeoutConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"), {
-    data: { timeoutSec }
-  });
-
 export interface PreallocationModeConfig {
   enabled: boolean;
 }
-
-export const fetchPreallocationModeConfig = () =>
-  http.request<BaseResult<PreallocationModeConfig>>("get", baseUrlApi("gb28181/sip/service-config/preallocation-mode"));
-
-export const updatePreallocationModeConfig = (enabled: boolean) =>
-  http.request<BaseResult<PreallocationModeConfig>>("put", baseUrlApi("gb28181/sip/service-config/preallocation-mode"), {
-    data: { enabled }
-  });
 
 export interface IgnoreChannelOfflineStatusNotifyConfig {
   enabled: boolean;
 }
 
-export const fetchIgnoreChannelOfflineStatusNotifyConfig = () =>
-  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
-    "get",
-    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify")
-  );
-
-export const updateIgnoreChannelOfflineStatusNotifyConfig = (enabled: boolean) =>
-  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
-    "put",
-    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify"),
-    {
-      data: { enabled }
-    }
-  );
-
 export interface PTZDefaultSpeedConfig {
   level: number;
 }
-
-export const fetchPTZDefaultSpeedConfig = () =>
-  http.request<BaseResult<PTZDefaultSpeedConfig>>("get", baseUrlApi("gb28181/sip/service-config/ptz-default-speed"));
-
-export const updatePTZDefaultSpeedConfig = (level: number) =>
-  http.request<BaseResult<PTZDefaultSpeedConfig>>("put", baseUrlApi("gb28181/sip/service-config/ptz-default-speed"), {
-    data: { level }
-  });
 
 export type ChannelStreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";
 export type PlaybackProtocol = "ws-flv" | "http-flv" | "hls" | "webrtc";
@@ -1773,35 +1698,9 @@ export interface DefaultChannelStreamTransportConfig {
   transport: ChannelStreamTransport;
 }
 
-export const fetchDefaultChannelStreamTransportConfig = () =>
-  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
-    "get",
-    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport")
-  );
-
-export const updateDefaultChannelStreamTransportConfig = (transport: ChannelStreamTransport) =>
-  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
-    "put",
-    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport"),
-    { data: { transport } }
-  );
-
 export interface DefaultPlaybackProtocolConfig {
   protocol: PlaybackProtocol;
 }
-
-export const fetchDefaultPlaybackProtocolConfig = () =>
-  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
-    "get",
-    baseUrlApi("gb28181/sip/service-config/default-playback-protocol")
-  );
-
-export const updateDefaultPlaybackProtocolConfig = (protocol: PlaybackProtocol) =>
-  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
-    "put",
-    baseUrlApi("gb28181/sip/service-config/default-playback-protocol"),
-    { data: { protocol } }
-  );
 
 export interface PlaybackSettingsConfig {
   playTimeoutMs: number;
@@ -1809,26 +1708,10 @@ export interface PlaybackSettingsConfig {
   cloudRecordingEnabled: boolean;
 }
 
-export const fetchPlaybackSettingsConfig = () =>
-  http.request<BaseResult<PlaybackSettingsConfig>>("get", baseUrlApi("gb28181/sip/service-config/playback-settings"));
-
-export const updatePlaybackSettingsConfig = (config: PlaybackSettingsConfig) =>
-  http.request<BaseResult<PlaybackSettingsConfig>>("put", baseUrlApi("gb28181/sip/service-config/playback-settings"), {
-    data: config
-  });
-
 export interface FixedAddressPlaybackConfig {
   fixedAddressEnabled: boolean;
   autoOnDemandEnabled: boolean;
 }
-
-export const fetchFixedAddressPlaybackConfig = () =>
-  http.request<BaseResult<FixedAddressPlaybackConfig>>("get", baseUrlApi("gb28181/sip/service-config/fixed-address-playback"));
-
-export const updateFixedAddressPlaybackConfig = (config: FixedAddressPlaybackConfig) =>
-  http.request<BaseResult<FixedAddressPlaybackConfig>>("put", baseUrlApi("gb28181/sip/service-config/fixed-address-playback"), {
-    data: config
-  });
 
 export interface PlayAuthConfig {
   authEnabled: boolean;
@@ -1839,52 +1722,49 @@ export interface PlayAuthConfig {
   authConfigConflict?: boolean;
 }
 
-export const fetchPlayAuthConfig = () =>
-  http.request<BaseResult<PlayAuthConfig>>("get", baseUrlApi("gb28181/sip/service-config/play-auth"));
-
-export const updatePlayAuthConfig = (config: PlayAuthConfig) =>
-  http.request<BaseResult<PlayAuthConfig>>("put", baseUrlApi("gb28181/sip/service-config/play-auth"), { data: config });
-
 export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
 
 export interface GlobalSubscriptionConfig {
   items: GlobalSubscriptionItem[];
 }
 
-export const fetchGlobalSubscriptionConfig = () =>
-  http.request<BaseResult<GlobalSubscriptionConfig>>("get", baseUrlApi("gb28181/sip/service-config/global-subscriptions"));
-
-export const updateGlobalSubscriptionConfig = (items: GlobalSubscriptionItem[]) =>
-  http.request<BaseResult<GlobalSubscriptionConfig>>("put", baseUrlApi("gb28181/sip/service-config/global-subscriptions"), {
-    data: { items }
-  });
-
 export interface DefaultChannelAudioConfig {
   enabled: boolean;
 }
 
-export const fetchDefaultChannelAudioConfig = () =>
-  http.request<BaseResult<DefaultChannelAudioConfig>>("get", baseUrlApi("gb28181/sip/service-config/default-channel-audio"));
-
-export const updateDefaultChannelAudioConfig = (enabled: boolean) =>
-  http.request<BaseResult<DefaultChannelAudioConfig>>("put", baseUrlApi("gb28181/sip/service-config/default-channel-audio"), {
-    data: { enabled }
-  });
-
 export interface SIPLogConfig {
   enabled: boolean;
-  retentionDays?: number;
+  retentionDays: number;
   applied: boolean;
   applyError?: string;
 }
 
-export const fetchSIPLogConfig = () =>
-  http.request<BaseResult<SIPLogConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-log"));
+export interface ServiceConfigAggregate {
+  positionHistory: { enabled: boolean; retentionDays: number };
+  cloudRecordingRetention: { retentionDays: number };
+  sdpExtension: { enabled: boolean };
+  syncChannelsOnOnline: { enabled: boolean };
+  onlineOnHeartbeat: { enabled: boolean };
+  saveAlarmMessages: { enabled: boolean };
+  sipCommandTimeout: { timeoutSec: number };
+  preallocationMode: { enabled: boolean };
+  ignoreChannelOfflineStatusNotify: { enabled: boolean };
+  ptzDefaultSpeed: { level: number };
+  defaultChannelStreamTransport: { transport: ChannelStreamTransport };
+  defaultPlaybackProtocol: { protocol: PlaybackProtocol };
+  globalSubscriptions: { items: GlobalSubscriptionItem[] };
+  defaultChannelAudio: { enabled: boolean };
+  playbackSettings: PlaybackSettingsConfig;
+  fixedAddressPlayback: FixedAddressPlaybackConfig;
+  playAuth: PlayAuthConfig;
+  sipLog: SIPLogConfig;
+}
 
-export const updateSIPLogConfig = (config: { enabled: boolean; retentionDays: number }) =>
-  http.request<BaseResult<SIPLogConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-log"), {
-    data: config
-  });
+export const fetchServiceConfig = () =>
+  http.request<BaseResult<ServiceConfigAggregate>>("get", baseUrlApi("gb28181/sip/service-config"));
+
+export const updateServiceConfig = (config: ServiceConfigAggregate) =>
+  http.request<BaseResult<ServiceConfigAggregate>>("put", baseUrlApi("gb28181/sip/service-config"), { data: config });
 
 export type SipDeploymentMode = "lan" | "public";
 // 2026-07-20 后端简化:runtime state 仍是六态,restart_required 语义已废弃(保留兼容枚举,新代码不产生).

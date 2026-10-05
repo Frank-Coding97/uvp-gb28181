@@ -225,6 +225,69 @@ describe("PlayerSmoothness 控制栏徽标", () => {
     smoothness.dispose();
   });
 
+  /**
+   * ⛔ 回归点:播放器换流/换协议时会重建内部 core,并把整套控制栏
+   * `.easyplayer-controls` 从容器里 removeChild 掉再插一套新的 —— 挂在旧栏里的
+   * 徽标随之脱离文档。`startMounting()` 的定时器在首次挂载成功时就已经停了,
+   * 所以必须跟着轮询持续校正,否则徽标会永久消失(现象:切换播放协议后
+   * 「流畅度检测」不见了)。
+   */
+  it("控制栏被播放器重建后,徽标自动重新挂载并保留状态", async () => {
+    const { container, core, smoothness } = await setup();
+
+    core.emit("stats", { performance: 3, videoSmooth: true, fps: 25 });
+    await tick();
+    expect(labelOf(container)).toBe("流畅");
+
+    // 真实场景:container 里的控制栏被整套替换
+    container.innerHTML = [
+      '<div class="easyplayer-controls">',
+      '<div class="easyplayer-controls-bottom">',
+      '<div class="easyplayer-controls-right">',
+      '<div class="easyplayer-controls-item easyplayer-speed"></div>',
+      "</div>",
+      "</div>",
+      "</div>"
+    ].join("");
+    expect(container.querySelector(".uvp-smooth-badge")).toBeNull();
+
+    await tick(1200);
+
+    const right = container.querySelector(".easyplayer-controls-right") as HTMLElement;
+    expect(right.firstElementChild).toBe(badgeOf(container));
+    expect(labelOf(container)).toBe("流畅");
+
+    smoothness.dispose();
+    expect(container.querySelector(".uvp-smooth-badge")).toBeNull();
+  });
+
+  it("两台控制栏并存时只挂在最新的一套上", async () => {
+    const { container, smoothness } = await setup();
+
+    // 库重建时序:旧栏尚未移除、新栏已插入(新栏一定在容器内更靠后)
+    container.insertAdjacentHTML(
+      "beforeend",
+      [
+        '<div class="easyplayer-controls">',
+        '<div class="easyplayer-controls-bottom">',
+        '<div class="easyplayer-controls-right">',
+        '<div class="easyplayer-controls-item easyplayer-speed"></div>',
+        "</div>",
+        "</div>",
+        "</div>"
+      ].join("")
+    );
+
+    await tick(1200);
+
+    const rights = container.querySelectorAll(".easyplayer-controls-right");
+    expect(rights).toHaveLength(2);
+    expect(rights[0].querySelector(".uvp-smooth-badge")).toBeNull();
+    expect(rights[1].firstElementChild).toBe(badgeOf(container));
+
+    smoothness.dispose();
+  });
+
   it("事件静默时用轮询兜底读档位,且不被清零后的帧数覆盖", async () => {
     const { container, core, smoothness, snapshots } = await setup();
 

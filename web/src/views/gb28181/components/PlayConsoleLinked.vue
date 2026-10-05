@@ -59,7 +59,7 @@ import {
   createPtzPreset,
   deletePtzPreset,
   deleteTalkSession,
-  fetchPTZDefaultSpeedConfig,
+  fetchServiceConfig,
   getControlCapabilities,
   getChannelTargetTrack,
   getCruiseTrack,
@@ -1024,7 +1024,11 @@ async function syncPresets() {
       presetSyncError.value = "同步预置位失败,请重试";
     }
   } finally {
-    if (token === sessionToken) presetSyncing.value = false;
+    if (token === sessionToken && props.channel?.id === channelId) {
+      presetSyncing.value = false;
+      if (presetSyncError.value) Message.error(`预置位同步失败：${presetSyncError.value}`);
+      else Message.success("预置位同步成功");
+    }
   }
 }
 
@@ -1060,6 +1064,7 @@ async function syncCruises() {
     if (token !== sessionToken || props.channel?.id !== channelId) return;
     if (listed.code !== 0 || !listed.data) {
       cruiseLoadError.value = listed.message || "加载巡航轨迹失败,请重试";
+      Message.error(`巡航轨迹同步失败：${cruiseLoadError.value}`);
       return;
     }
     // ⛔ 结论要**留到最后再写**。中间的每一次重读(`loadCruises(..., false)`)都会把
@@ -1093,9 +1098,14 @@ async function syncCruises() {
       }
     }
     cruiseRefreshError.value = failure;
+    if (token === sessionToken && props.channel?.id === channelId) {
+      if (failure || cruiseLoadError.value) Message.error(`巡航轨迹同步失败：${failure || cruiseLoadError.value}`);
+      else Message.success("巡航轨迹同步成功");
+    }
   } catch {
     if (token === sessionToken && props.channel?.id === channelId) {
       cruiseLoadError.value = "加载巡航轨迹失败,请重试";
+      Message.error(`巡航轨迹同步失败：${cruiseLoadError.value}`);
     }
   } finally {
     if (token === sessionToken) cruiseSyncing.value = false;
@@ -1522,7 +1532,7 @@ const homePresentation = computed(() => {
     state,
     ...copy[state],
     showQuery: state !== "unsupported" && state !== "loading" && state !== "offline",
-    queryLabel: state === "error" ? "重试" : state === "pending" ? "查询中" : "查询设备",
+    queryLabel: state === "pending" ? "查询中" : "查询设备",
     // 控制能力明确不支持时**不渲染**「配置」按钮。
     //
     // 只靠 `:disabled="!homeCanConfigure"` 拦不住观感:homeCanConfigure 已经把
@@ -2406,11 +2416,14 @@ async function loadPresets(channelId = props.channel?.id, token = sessionToken, 
           setAt: item.updatedAt ? String(item.updatedAt) : undefined
         }))
         .filter(item => item.id > 0);
+    } else if (token === sessionToken && props.channel?.id === channelId && presetSyncing.value) {
+      presetSyncError.value = response.message || "读取预置位失败,请重试";
     }
   } catch {
     if (token === sessionToken) {
       presets.value = [];
       presetFreshness.value = "unknown";
+      if (presetSyncing.value) presetSyncError.value = "读取预置位失败,请重试";
     }
   }
 }
@@ -2692,8 +2705,8 @@ async function loadDefaultPtzSpeed() {
   moveSpeed.value = DEFAULT_PTZ_SPEED_LEVEL;
   if (!canReadPtzSpeed.value) return;
   try {
-    const response = await fetchPTZDefaultSpeedConfig();
-    if (response.code === 0 && response.data) moveSpeed.value = normalizePtzSpeedLevel(response.data.level);
+    const response = await fetchServiceConfig();
+    if (response.code === 0 && response.data) moveSpeed.value = normalizePtzSpeedLevel(response.data.ptzDefaultSpeed.level);
   } catch {
     // 配置读取失败时保持默认 6 档，不阻断播放和云台控制。
   }
@@ -2958,12 +2971,12 @@ async function sendScanCommand(action: ScanAction) {
     Message.error(`扫描组号必须在 ${SCAN_GROUP_MIN}-${SCAN_GROUP_MAX} 之间`);
     return;
   }
-  if (action === "scan_set_speed" && scanSpeedInvalid.value) {
+  if ((action === "scan_set_speed" || action === "scan_start") && scanSpeedInvalid.value) {
     Message.error(`扫描速度必须在 ${SCAN_SPEED_MIN}-${SCAN_SPEED_MAX} 之间`);
     return;
   }
   const group = scanGroup.value;
-  const value = action === "scan_set_speed" ? scanSpeed.value : undefined;
+  const value = action === "scan_set_speed" || action === "scan_start" ? scanSpeed.value : undefined;
   const channelId = props.channel.id;
   const token = sessionToken;
   scanBusy.value = true;
@@ -5252,7 +5265,9 @@ provide(PLAY_CONSOLE_CONTEXT, {
                 <AlertTriangle :size="42" />
                 <strong>点播未完成</strong>
                 <span>{{ phaseHint }}</span>
-                <button class="btn-primary player-retry" @click="reconnect"><RefreshCcw :size="14" />重试</button>
+                <a-button type="primary" size="mini" html-type="button" class="btn-primary player-retry" @click="reconnect">
+                  <RefreshCcw :size="14" />重试
+                </a-button>
               </div>
             </template>
             <template v-else>
@@ -5402,17 +5417,21 @@ provide(PLAY_CONSOLE_CONTEXT, {
                   <em class="picture-draft-summary" data-testid="picture-draft-summary">{{ pictureDraftSummary }}</em>
                 </span>
                 <span class="picture-draft-actions">
-                  <button
-                    type="button"
+                  <a-button
+                    type="text"
+                    size="mini"
+                    html-type="button"
                     class="picture-draft-revert"
                     data-testid="picture-draft-revert"
                     title="丢弃本次改动，回到设备当前值"
                     @click="revertPictureDraft"
                   >
                     还原
-                  </button>
-                  <button
-                    type="button"
+                  </a-button>
+                  <a-button
+                    type="primary"
+                    size="mini"
+                    html-type="button"
                     class="picture-draft-submit"
                     data-testid="picture-draft-apply"
                     :disabled="Boolean(draftBlockedReason)"
@@ -5420,7 +5439,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
                     @click="applyPictureDraft"
                   >
                     <Send :size="12" /><span>下发</span>
-                  </button>
+                  </a-button>
                 </span>
               </div>
             </div>
@@ -6038,11 +6057,11 @@ provide(PLAY_CONSOLE_CONTEXT, {
 
 /* 播放器控制条(悬浮画面下)的「重试」按钮:在通用按钮基础上多加 4px 上边距。
  *
- * ⛔ 选择器**必须**带 `.player-retry` 这一层 class,不能只写 `.btn-primary`。
- *    这里原来是一份完整的 `.btn-primary` 定义(display/gap/padding/radius/font… +
+ * ⛔ 选择器**必须**带 `.player-retry` 这一层 class,不能只写 `.btn-primary.arco-btn[type="button"]`。
+ *    这里原来是一份完整的 `.btn-primary.arco-btn[type="button"]` 定义(display/gap/padding/radius/font… +
  *    `margin-top: 4px`),但它在源序上排在下方「通用按钮」区**之前**,两者特异性
  *    同为 0,1,0 —— 于是除 `margin-top` 以外的声明全被后者覆盖掉,实际只有
- *    `margin-top: 4px` 生效,并且泄漏到了**页面上每一个** `.btn-primary`
+ *    `margin-top: 4px` 生效,并且泄漏到了**页面上每一个** `.btn-primary.arco-btn[type="button"]`
  *    (后面那两次重定义都没声明 margin,等于没覆盖)。看守位卡片的「保存」按钮
  *    因此被往下顶 4px:它在 32dp 行里顶到行首、底部多出 4px,和同一行的 28dp
  *    输入框不再居中对齐。2026-09-17 由用户截图上报,复现页实测:
@@ -6050,7 +6069,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
  *
  * 既然原本生效的只有那一条,这里就只保留它 —— 其余交给下方「通用按钮」区的
  * 唯一真源,既不泄漏,也不改变「重试」按钮自身的观感(它此前用的就是通用那套值)。 */
-.btn-primary.player-retry {
+.btn-primary.arco-btn[type="button"].player-retry {
   margin-top: 4px;
 }
 
@@ -6236,8 +6255,8 @@ provide(PLAY_CONSOLE_CONTEXT, {
   gap: 6px;
 }
 
-.picture-draft-revert,
-.picture-draft-submit {
+.picture-draft-revert.arco-btn[type="button"],
+.picture-draft-submit.arco-btn[type="button"] {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -6249,22 +6268,25 @@ provide(PLAY_CONSOLE_CONTEXT, {
   border-radius: 5px;
 }
 
-.picture-draft-revert {
+.picture-draft-revert.arco-btn[type="button"] {
   color: var(--uvp-text-secondary);
   background: transparent;
   border: 1px solid var(--uvp-panel-border);
 }
 
-.picture-draft-submit {
+.picture-draft-submit.arco-btn[type="button"] {
   color: #ffffff;
   background: var(--uvp-brand);
   border: 1px solid var(--uvp-brand);
 }
 
-.picture-draft-revert:disabled,
-.picture-draft-submit:disabled {
+.picture-draft-revert.arco-btn[type="button"]:disabled,
+.picture-draft-submit.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.45;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 
 /* 画面上已有遮挡区的投影：只作参照，不吃指针事件 */
@@ -6541,8 +6563,11 @@ provide(PLAY_CONSOLE_CONTEXT, {
   background: var(--uvp-danger-soft);
 }
 .preset-tile-del:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.4;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 
 /* 「更多」chip:作为 preset-grid 的最后一个 cell,只在预置位溢出(> 9)时出现 */
@@ -6676,9 +6701,36 @@ provide(PLAY_CONSOLE_CONTEXT, {
   min-height: 0;
 }
 
+.sidebar-deviceconfig-panel :deep(.dcg-host--embedded),
 .sidebar-deviceconfig-panel :deep(.dcg-window--embedded) {
-  height: auto;
+  height: 100%;
   min-height: 0;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-body) {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-params) {
+  flex: 1;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-window--embedded .dcg-params-body) {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: auto;
+  background: transparent;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-stream.is-compact) {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-compact-row) {
+  padding: 8px 10px;
 }
 
 /* 双栏桌面布局中,右侧操作内容远高于左侧视频是正常的;不能让它的 min-content 高度
@@ -6716,7 +6768,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
   align-items: center;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-text-primary);
 }
 .section-title .tag-2022 {
   padding: 1px 5px;
@@ -6734,7 +6786,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
   gap: 4px;
   align-items: center;
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .section-meta .dot {
   width: 6px;
@@ -6944,9 +6996,11 @@ provide(PLAY_CONSOLE_CONTEXT, {
 }
 .video-param-fields input:disabled,
 .video-param-fields select:disabled {
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.7;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 .video-param-hints {
   display: flex;
@@ -7030,16 +7084,16 @@ provide(PLAY_CONSOLE_CONTEXT, {
 }
 
 /* ═══════════ 通用按钮 ═══════════
- * ⚠️ `.btn-primary` 在本文件里被定义过多次(这里 / 悬浮播放器的 `.player-retry` /
+ * ⚠️ `.btn-primary.arco-btn[type="button"]` 在本文件里被定义过多次(这里 / 悬浮播放器的 `.player-retry` /
  *    全局 `styles/arco-overrides.scss`),各自的 border-radius 是 7px / 8px / 10px ——
  *    同特异性下**后写的赢**,实际生效的是这一份的 7px,另外两个值是死代码。
  *    要改按钮圆角请改这里,别只改 arco-overrides(不生效,会白排查一轮)。
  * ⚠️ transition 只列具体属性,不用 `all`:暗色主题下按钮背景是 `linear-gradient`,
  *    `all` 会把 `background-image` 和 `box-shadow` 一起纳入过渡 —— 渐变不可插值时
  *    Chromium 会退化成整帧重绘,叠加 transform 后的合成层容易留下半张画面的残影。 */
-.btn-primary,
-.btn-danger,
-.btn-ghost {
+.btn-primary.arco-btn[type="button"],
+.btn-danger.arco-btn[type="button"],
+.btn-ghost.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;
@@ -7059,42 +7113,45 @@ provide(PLAY_CONSOLE_CONTEXT, {
     opacity 0.15s ease,
     transform 0.15s ease;
 }
-.btn-primary:hover:not(:disabled) {
+.btn-primary.arco-btn[type="button"]:hover:not(:disabled) {
   background: var(--uvp-brand-strong);
 }
-.btn-primary:disabled {
+.btn-primary.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.5;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
-.btn-primary.sm,
-.btn-ghost.sm {
+.btn-primary.arco-btn[type="button"].sm,
+.btn-ghost.arco-btn[type="button"].sm {
   padding: 5px 10px;
   font-size: 11px;
 }
-.btn-primary.xs,
-.btn-ghost.xs {
+.btn-primary.arco-btn[type="button"].xs,
+.btn-ghost.arco-btn[type="button"].xs {
   padding: 4px 8px;
   font-size: 10.5px;
 }
-.btn-danger {
+.btn-danger.arco-btn[type="button"] {
   background: var(--uvp-danger);
 }
-.btn-danger:hover:not(:disabled) {
+.btn-danger.arco-btn[type="button"]:hover:not(:disabled) {
   background: color-mix(in srgb, var(--uvp-danger) 85%, #000000);
 }
-.btn-ghost {
+.btn-ghost.arco-btn[type="button"] {
   color: var(--uvp-text-secondary);
   background: transparent;
   border: 1px solid var(--uvp-panel-border);
 }
-.btn-ghost:hover:not(:disabled) {
+.btn-ghost.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
 }
-.btn-primary.block,
-.btn-ghost.block,
-.btn-danger.block {
+.btn-primary.arco-btn[type="button"].block,
+.btn-ghost.arco-btn[type="button"].block,
+.btn-danger.arco-btn[type="button"].block {
   width: 100%;
 }
 

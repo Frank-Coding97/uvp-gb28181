@@ -219,6 +219,8 @@ export class PlayerSmoothness {
     core.on("videoSmooth", this.handleVideoSmooth);
     // 订阅到即视为刚刚有数据,避免起播瞬间轮询抢跑
     this.lastStatsAt = Date.now();
+    // core 被重建时控制栏往往也在重建,顺手校正一次挂载点
+    this.ensureMounted();
   }
 
   private detachCore(): void {
@@ -242,6 +244,7 @@ export class PlayerSmoothness {
   private startPolling(): void {
     this.stopPolling();
     this.pollTimer = setInterval(() => {
+      this.ensureMounted();
       this.attachCore();
       if (Date.now() - this.lastStatsAt < POLL_FALLBACK_MS) return;
       const core = this.core;
@@ -296,19 +299,49 @@ export class PlayerSmoothness {
     }
   }
 
+  /**
+   * 找当前控制栏里要插入的宿主节点。
+   *
+   * ⛔ 播放器重建内部 core 时会先 `removeChild` 掉整套旧控制栏再插一套新的,
+   * 同一容器里可能短暂同时存在两套;新的一套一定在容器内更靠后,所以取**最后
+   * 一个**匹配,避免把徽标又挂回已经废弃的那一套(那样徽标仍在文档里却看不见)。
+   */
+  private findMountHost(): HTMLElement | null {
+    for (const selector of MOUNT_TARGETS) {
+      const hosts = this.container.querySelectorAll<HTMLElement>(selector);
+      if (hosts.length > 0) return hosts[hosts.length - 1];
+    }
+    return null;
+  }
+
   private tryMount(): boolean {
     if (!this.badge) return false;
     if (this.badge.isConnected) return true;
-    for (const selector of MOUNT_TARGETS) {
-      const host = this.container.querySelector(selector);
-      if (host) {
-        // 插在右侧区最前面,紧贴原生"速率"读数左侧。
-        host.prepend(this.badge);
-        this.render();
-        return true;
-      }
+    const host = this.findMountHost();
+    if (!host) return false;
+    // 插在右侧区最前面,紧贴原生"速率"读数左侧。
+    host.prepend(this.badge);
+    this.render();
+    return true;
+  }
+
+  /**
+   * 校正徽标挂载点,父节点已经是当前控制栏时什么都不做。
+   *
+   * ⛔ 播放器每次换流/换协议都会在内部重建 core 并替换整套控制栏 DOM(库内
+   * Control 的 destroy 会 `removeChild(.easyplayer-controls)`),挂在旧控制栏
+   * 里的徽标随之脱离文档;而 `startMounting()` 的定时器在首次挂载成功时就已经
+   * 停了。少了这一步,徽标会**永久消失** —— 现象就是「切换播放协议后,流畅度
+   * 检测不见了」。所以这里跟着轮询持续比对父节点,一旦不是当前控制栏就重挂。
+   */
+  private ensureMounted(): void {
+    const badge = this.badge;
+    if (!badge) return;
+    const host = this.findMountHost();
+    if (host && badge.parentElement !== host) {
+      host.prepend(badge);
+      this.render();
     }
-    return false;
   }
 
   private observeWidth(): void {

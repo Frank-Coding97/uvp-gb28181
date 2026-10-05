@@ -123,8 +123,20 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
         请选择一个已存在的预置位，等待时间必须是 10 至 3600 秒整数。
       </p>
       <div class="home-settings-actions">
-        <button class="btn-ghost sm" :disabled="homeSettingsSubmitting" @click="closeHomeSettingsDialog">取消</button>
-        <button
+        <a-button
+          type="outline"
+          size="mini"
+          html-type="button"
+          class="btn-ghost sm"
+          :disabled="homeSettingsSubmitting"
+          @click="closeHomeSettingsDialog"
+        >
+          取消
+        </a-button>
+        <a-button
+          type="primary"
+          size="mini"
+          html-type="button"
           class="btn-primary sm"
           data-testid="home-dialog-submit"
           :disabled="homeSettingsSubmitting || !homePositionCanSave"
@@ -133,7 +145,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
           <Loader2 v-if="homeSettingsSubmitting" :size="13" class="spin" />
           <ShieldCheck v-else :size="13" />
           {{ homeSettingsActionLabel }}
-        </button>
+        </a-button>
       </div>
     </div>
   </a-modal>
@@ -253,7 +265,10 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
               >
                 <a-option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</a-option>
               </a-select>
-              <button
+              <a-button
+                type="text"
+                size="mini"
+                html-type="button"
                 class="cruise-stop-move"
                 :disabled="cruiseDraft.submitting || index === 0"
                 title="上移"
@@ -261,8 +276,11 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
                 @click="moveCruiseStop(index, -1)"
               >
                 ↑
-              </button>
-              <button
+              </a-button>
+              <a-button
+                type="text"
+                size="mini"
+                html-type="button"
                 class="cruise-stop-move"
                 :disabled="cruiseDraft.submitting || index === cruiseDraft.stops.length - 1"
                 title="下移"
@@ -270,8 +288,11 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
                 @click="moveCruiseStop(index, 1)"
               >
                 ↓
-              </button>
-              <button
+              </a-button>
+              <a-button
+                type="text"
+                size="mini"
+                html-type="button"
                 class="cruise-stop-del"
                 :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1"
                 title="删除该巡航点"
@@ -279,10 +300,13 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
                 @click="removeCruiseStop(index)"
               >
                 <X :size="11" />
-              </button>
+              </a-button>
             </div>
           </div>
-          <button
+          <a-button
+            type="outline"
+            size="mini"
+            html-type="button"
             class="cruise-stop-add"
             data-testid="cruise-stop-add-btn"
             :disabled="cruiseDraft.submitting || cruiseDraft.stops.length >= 32"
@@ -293,7 +317,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
             <small v-if="cruiseDraft.stops.length < 32" class="cruise-stop-add-count"
               >还可添加 {{ 32 - cruiseDraft.stops.length }} 个</small
             >
-          </button>
+          </a-button>
           <p class="preset-save-hint">
             已选 {{ cruiseDraft.stops.length }} 个巡航点。列表从上到下就是设备实际走的顺序,可用 ↑ ↓ 调整。
           </p>
@@ -447,16 +471,16 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
 }
 .preset-save-count {
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .preset-save-count.ok {
   font-weight: 600;
-  color: #059669;
+  color: var(--uvp-success);
 }
 .preset-save-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .preset-save-error {
   margin: 0;
@@ -571,15 +595,15 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
   background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
   border-radius: 50%;
 }
-.cruise-stop-move,
-.cruise-stop-del {
+.cruise-stop-move.arco-btn[type="button"],
+.cruise-stop-del.arco-btn[type="button"] {
   display: inline-grid;
   place-items: center;
   width: 24px;
   height: 24px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
@@ -589,21 +613,24 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
     background 0.12s ease,
     border-color 0.12s ease;
 }
-.cruise-stop-move:hover:not(:disabled) {
+.cruise-stop-move.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand-cyan);
   background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
 }
-.cruise-stop-del:hover:not(:disabled) {
+.cruise-stop-del.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
   border-color: var(--uvp-danger-border);
 }
-.cruise-stop-move:disabled,
-.cruise-stop-del:disabled {
+.cruise-stop-move.arco-btn[type="button"]:disabled,
+.cruise-stop-del.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.35;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
-.cruise-stop-add {
+.cruise-stop-add.arco-btn[type="button"] {
   display: inline-flex;
   gap: 6px;
   align-items: center;
@@ -624,18 +651,21 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
     border-color 0.18s ease,
     color 0.18s ease;
 }
-.cruise-stop-add:hover:not(:disabled) {
+.cruise-stop-add.arco-btn[type="button"]:hover:not(:disabled) {
   color: #ffffff;
   background: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
-.cruise-stop-add:focus-visible {
+.cruise-stop-add.arco-btn[type="button"]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--uvp-brand) 52%, transparent);
   outline-offset: 2px;
 }
-.cruise-stop-add:disabled {
+.cruise-stop-add.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.65;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 .cruise-stop-add-count {
   margin-left: auto;
@@ -734,7 +764,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
   line-height: 1.6;
 }
 .home-settings-description {
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .home-settings-error {
   color: var(--uvp-danger);
@@ -745,7 +775,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
   justify-content: flex-end;
   padding-top: 2px;
 }
-.home-settings-actions button {
+.home-settings-actions button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;

@@ -16,10 +16,12 @@ const emit = defineEmits<{ (e: "select", value: string): void }>();
       <span class="linked-card-actions"><span v-if="!editable" class="linked-card-note">不可编辑</span></span>
     </header>
     <div class="mirror-choice-grid">
-      <button
+      <a-button
         v-for="option in options"
         :key="option.value"
-        type="button"
+        type="text"
+        size="mini"
+        html-type="button"
         class="mirror-choice"
         :class="{ active: mirror === option.value }"
         :disabled="!editable"
@@ -28,7 +30,7 @@ const emit = defineEmits<{ (e: "select", value: string): void }>();
         @click="emit('select', option.value)"
       >
         <component :is="icon(option.value)" :size="16" /><span>{{ option.shortLabel || option.label }}</span>
-      </button>
+      </a-button>
     </div>
   </section>
 </template>

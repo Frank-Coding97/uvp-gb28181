@@ -172,7 +172,7 @@ const api = vi.hoisted(() => {
         reconcilePending: true
       }
     }),
-    fetchPTZDefaultSpeedConfig: vi.fn().mockResolvedValue({ code: 0, message: "", data: { level: 6 } }),
+    fetchServiceConfig: vi.fn().mockResolvedValue({ code: 0, message: "", data: { ptzDefaultSpeed: { level: 6 } } }),
     listPtzPresets: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: presets, freshness: "fresh" } }),
     listCruiseTracks: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: cruises, freshness: "fresh" } }),
     // 单条轨迹回读。「设备上这条轨迹走哪几个预置位」只能靠它拿到 —— 清单查询的
@@ -578,8 +578,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.updateHomePosition.mockReset();
     api.createDeviceSnapshotSession.mockReset();
     api.getDeviceSnapshotSession.mockReset();
-    api.fetchPTZDefaultSpeedConfig.mockReset();
-    api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 6 } });
+    api.fetchServiceConfig.mockReset();
+    api.fetchServiceConfig.mockResolvedValue({ code: 0, message: "", data: { ptzDefaultSpeed: { level: 6 } } });
     api.getCruiseTrack.mockReset();
     api.getCruiseTrack.mockResolvedValue({ code: 0, message: "", data: { track: {}, freshness: "fresh" } });
     // 目标跟踪：默认"平台还没下发过"。⛔ 一定要在 beforeEach 里重置 ——
@@ -879,7 +879,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   it("读取云台默认速度并把第十档映射为协议速度 255", async () => {
-    api.fetchPTZDefaultSpeedConfig.mockResolvedValueOnce({ code: 0, message: "", data: { level: 10 } });
+    api.fetchServiceConfig.mockResolvedValueOnce({ code: 0, message: "", data: { ptzDefaultSpeed: { level: 10 } } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -892,7 +892,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   it("云台默认速度加载失败时回退到第六档", async () => {
-    api.fetchPTZDefaultSpeedConfig.mockRejectedValueOnce(new Error("network error"));
+    api.fetchServiceConfig.mockRejectedValueOnce(new Error("network error"));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -1960,7 +1960,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).not.toContain(".linked-stream-metrics");
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
     expect(detailStyles).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
-    expect(detailStyles).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
+    expect(detailStyles).toMatch(/\.preset-tile-more\.arco-btn\[type="button"\]\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(ptzPanelSource).toMatch(
       // ⛔ 媒体查询两种写法都要接受：stylelint 的 media-feature-range-notation 会把
       //    `(max-width: 720px)` 自动 fix 成 `(width <= 720px)`（提交钩子会跑 --fix），
@@ -1986,6 +1986,40 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).not.toContain("adv-actions");
   });
 
+  /**
+   * 播放协议栏：下拉是这条深色控制栏（`rgb(15 23 42 / 92%)`）里唯一的 Arco 控件，
+   * 全局基准（`styles/arco-overrides.scss` L52-65）把它刷成**亮底**（`--uvp-dialog-control-bg`）
+   * + 8px 圆角，尺寸走 Arco 自带的 `.arco-select-view-size-small`（实测 **28px**），
+   * 比右侧 `.proto-btn` 高出一圈（28 vs 24.6px）且是整栏唯一亮块 ⇒ 看着突兀
+   * （老板 2026-10-03 反馈「是不是高度太高了」）。
+   *
+   * 契约：**栏内控件与标签同族** —— 两者等高、同圆角、玻璃底。
+   * ⛔ 别退化成「有个自定义皮肤」的存在性断言：真正要钉的是**高度相等**。
+   *    只改一边（例如给 `.proto-btn` 调 padding）就会重新错位，而「皮肤存在」照样为真。
+   * ⚠️ 覆盖只需要压过 Arco 自带的 28px：`arco-overrides.scss:232` 那条
+   *    `.arco-select-size-small{height:32px}` 是**死规则**（该类名在 Arco 里不存在）。
+   */
+  it("协议栏下拉与切换标签等高同族（深色栏内局部破例）", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleProtocolBar.vue"),
+      "utf8"
+    );
+    const selectBlock = source.match(/\.protocol-switcher \.switcher-left :deep\(\.arco-select-view\)\s*\{([^}]*)\}/s)?.[1] ?? "";
+    const btnBlock = source.match(/\.proto-btn\.arco-btn\[type="button"\]\s*\{([^}]*)\}/s)?.[1] ?? "";
+    const heightOf = (block: string) => block.match(/height:\s*(\d+(?:\.\d+)?)px/)?.[1] ?? null;
+
+    // 两边都要**显式**钉高度：靠 padding + 字号撑出来的高度会随字体/行高漂移
+    expect(heightOf(selectBlock)).not.toBeNull();
+    expect(heightOf(btnBlock)).not.toBeNull();
+    expect(heightOf(selectBlock)).toBe(heightOf(btnBlock));
+    // 深色栏内必须是玻璃底 + 6px 圆角，不能沿用全局那个亮色底 / 8px 圆角
+    expect(selectBlock).toMatch(/background:\s*rgb\(255 255 255 \/ \d+%\)/);
+    expect(selectBlock).toMatch(/border-radius:\s*6px/);
+    // 宽度收到与标签同一量级（原来内联 160px，是整栏最宽的元素）
+    expect(source).toMatch(/\.protocol-switcher \.switcher-left :deep\(\.protocol-select\)\s*\{[^}]*width:\s*118px/s);
+    expect(source).not.toMatch(/width:\s*['"]160px['"]/);
+  });
+
   it("三个详情页共享固定工作区高度，窄屏只滚动内容不改变弹窗高度", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
     const workspaceSource = readFileSync(
@@ -2008,12 +2042,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(workspaceSource).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
     expect(workspaceSource).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--play-console-detail-height\)/s);
     expect(workspaceSource).toMatch(/\.linked-detail\s*\{[^}]*overflow:\s*auto/s);
-    expect(workspaceSource).not.toMatch(/@media[\s\S]*?\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*auto/s);
+    expect(workspaceSource).not.toMatch(/@media[\s\S]*?\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*100%/s);
     expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console/detail-cards.scss"), "utf8")).toMatch(
       /@media \((?:max-width:\s*720px|width <= 720px)\)[\s\S]*?\.linked-card,\s*\.picture-osd-cell,\s*\.linked-probe-layout > \.linked-section\.probe-detail-card\s*\{[^}]*box-sizing:\s*border-box;[^}]*min-height:\s*180px/s
     );
     expect(source).not.toContain("--linked-detail-height:");
-    expect(source).not.toMatch(/\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*auto/s);
+    expect(source).not.toMatch(/\.linked-detail(?:-[\w-]+)?\s*\{[^}]*height:\s*100%/s);
   });
 
   it("详情区按云台、画面、探针三个职责组件挂载", () => {
@@ -2070,7 +2104,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("视频编码卡内部承载参数对照，底部画面卡片不再预留对照列", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
     expect(source).not.toContain('data-testid="linked-side-video-compare"');
-    expect(source).toMatch(/\.sidebar-deviceconfig-panel :deep\(\.dcg-window--embedded\)\s*\{[^}]*height:\s*auto/s);
+    expect(source).toMatch(/\.sidebar-deviceconfig-panel :deep\(\.dcg-window--embedded\)\s*\{[^}]*height:\s*100%/s);
     expect(source).toContain("#video-compare");
   });
 
@@ -2102,9 +2136,9 @@ describe("PlayConsoleLinked 双区联动", () => {
       "utf8"
     );
 
-    expect(source).toMatch(/\.probe-action\s*\{[^}]*flex:\s*7 1 0/s);
+    expect(source).toMatch(/\.probe-action\.arco-btn\[type="button"\]\s*\{[^}]*flex:\s*7 1 0/s);
     // flex item 默认 min-width:auto 会被内容顶住,两侧都必须显式清零
-    expect(source).toMatch(/\.probe-action\s*\{[^}]*min-width:\s*0/s);
+    expect(source).toMatch(/\.probe-action\.arco-btn\[type="button"\]\s*\{[^}]*min-width:\s*0/s);
 
     // a-select 的根节点由 Arco 内部渲染,拿不到本组件的 scoped 属性(实测 hasScopeAttr=false)。
     // 裸类名选择器编译得过却永远匹配不到它,下拉会退回 Arco 自带的 width:100%,
@@ -3195,6 +3229,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.get("[data-testid='ptz-drag-zoom-in']").text()).toContain("取消 3D 放大");
 
     const dragZoomBlock = wrapper.get("[data-testid='ptz-drag-zoom']").element as HTMLElement;
+    expect(dragZoomBlock.classList.contains("ptz-drag-zoom-frame")).toBe(true);
     expect(dragZoomBlock.closest(".ptz-speed")).not.toBeNull();
     expect(wrapper.find("[data-testid='drag-zoom-layer']").exists()).toBe(true);
     await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
@@ -3395,7 +3430,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     await card.get("[data-testid='scan-toggle']").trigger("click");
     await flushPromises();
-    expect(api.controlPtzScan).toHaveBeenCalledWith(channel.id, { action: "scan_start", id: 1 });
+    expect(api.controlPtzScan).toHaveBeenCalledWith(channel.id, { action: "scan_start", id: 1, value: 60 });
 
     // HTTP 成功 ≠ 设备正在扫描:chip 说的是「启动已下发」
     const chip = wrapper.get("[data-testid='scan-running-chip']");
@@ -3440,8 +3475,8 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     // 12 位参数域:与巡航速度同一个量纲(1-4095)
     const speedInput = wrapper.get("[data-testid='scan-speed-input']");
-    expect(speedInput.attributes("min")).toBe("1");
-    expect(speedInput.attributes("max")).toBe("4095");
+    expect(speedInput.attributes("type")).toBe("text");
+    expect(speedInput.attributes("inputmode")).toBe("numeric");
     await speedInput.setValue("5000");
     await wrapper.get("[data-testid='scan-set-speed']").trigger("click");
     await flushPromises();
@@ -3575,7 +3610,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       "utf8"
     );
     expect(source).toMatch(/\.cruise-stops-list\s*\{[^}]*max-height:\s*clamp\(168px,\s*30vh,\s*260px\)[^}]*overflow-y:\s*auto/s);
-    expect(source).toMatch(/\.cruise-stop-add\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
+    expect(source).toMatch(/\.cruise-stop-add\.arco-btn\[type="button"\]\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
     expect(source).toMatch(
       // ⛔ 同上：两种媒体查询写法都接受（stylelint --fix 会把 max-width 改成 width <=）。
       /@media \((?:max-width:\s*560px|width <= 560px)\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s
@@ -4222,7 +4257,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect(failedWrapper.get("[data-testid='home-phase']").text()).toContain("当前状态未确认");
-      expect(failedWrapper.get("[data-testid='home-refresh']").text()).toContain("重试");
+      expect(failedWrapper.get("[data-testid='home-refresh']").text()).toContain("查询设备");
       expect(failedWrapper.get("[data-testid='home-card']").text()).not.toContain("network unavailable");
       expect(failedWrapper.find("[data-testid='home-toggle']").exists()).toBe(false);
       failedWrapper.unmount();
@@ -5100,7 +5135,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         expect(wrapper.get("[data-testid='home-notice']").text()).toContain("查询设备超时");
       } else {
         expect(wrapper.get("[data-testid='home-phase']").text()).toContain("当前状态未确认");
-        expect(wrapper.get("[data-testid='home-refresh']").text()).toContain("重试");
+        expect(wrapper.get("[data-testid='home-refresh']").text()).toContain("查询设备");
       }
       wrapper.unmount();
     });
@@ -5413,6 +5448,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   const presetRows = [{ presetId: 1, name: "预置位 1", updatedAt: "2026-07-22T10:00:00Z" }];
 
   it("预置位同步:先下发查询,等操作落地后才重读列表", async () => {
+    const success = vi.spyOn(Message, "success");
     vi.useFakeTimers();
     let syncStatus: "queued" | "accepted" = "queued";
     api.getPtzOperation.mockImplementation((_channelId: number, operationId: string) =>
@@ -5451,10 +5487,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     expect(api.listPtzPresets).toHaveBeenNthCalledWith(2, channel.id, false);
     expect(wrapper.get("[data-testid='preset-sync-btn']").text()).toContain("已同步");
+    expect(success).toHaveBeenCalledWith("预置位同步成功");
     wrapper.unmount();
   });
 
   it("巡航同步:重读列表后,给点位未知的轨迹逐条回读点位链", async () => {
+    const success = vi.spyOn(Message, "success");
     api.getPtzOperation.mockResolvedValue(operationResponse("accepted", "any-op", null));
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -5534,10 +5572,12 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.get("[data-testid='cruise-tile-tooltip-7']").attributes("content")).toContain("预置位 2");
     expect(api.listCruiseTracks).toHaveBeenNthCalledWith(3, channel.id, false);
     expect(wrapper.get("[data-testid='cruise-sync-btn']").text()).toContain("已同步");
+    expect(success).toHaveBeenCalledWith("巡航轨迹同步成功");
     wrapper.unmount();
   });
 
   it("设备不答时收敛为「同步失败」,并把原因写进悬浮提示", async () => {
+    const error = vi.spyOn(Message, "error");
     vi.useFakeTimers();
     // 一直停在 queued:设备收到了但没回,或压根没走到它
     api.getPtzOperation.mockResolvedValue(operationResponse("queued", "preset-sync-op", "2026-07-22T10:00:13Z"));
@@ -5562,6 +5602,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 「设备未应答」这类具体原因塞不进药丸(卡片只有详情条三分之一宽),
     // 但不说出来操作员只会反复点同一个按钮
     expect(button.attributes("title")).toContain("设备未应答");
+    expect(error).toHaveBeenCalledWith("预置位同步失败：设备未应答");
     expect(button.attributes("disabled")).toBeUndefined();
     wrapper.unmount();
   });

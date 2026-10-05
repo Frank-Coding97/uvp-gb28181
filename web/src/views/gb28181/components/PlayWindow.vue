@@ -119,18 +119,28 @@ function stopSizePolling() {
   }
 }
 
-function destroy() {
+/**
+ * 销毁当前播放器，并**等到库把容器交还**才返回。
+ *
+ * ⛔ 必须 await：`EasyPlayerPro.destroy()` 返回 Promise，而库靠容器上的
+ *    `data-EasyProv` 标记判定「容器已被占用」（构造函数里 `_checkHasCreated()`），
+ *    该标记是在 destroy 的 then 链里删的。实测（EasyPlayer-pro 2025-12-5 + 无头
+ *    Chrome）：标记要跨过 **1 个宏任务**才消失，调用后同步读仍是 SET。
+ *    不等就 `new`，构造函数会直接抛 `EasyPlayerPro err container`
+ *    —— 只 `await nextTick()`（微任务）差一个量级，钉不住。
+ */
+async function destroy(): Promise<void> {
   stopSizePolling();
   videoSize.value = null;
   smoothness.value?.dispose();
   smoothness.value = null;
-  if (player.value) {
-    try {
-      player.value.destroy();
-    } catch (e) {
-      console.warn("EasyPlayerPro destroy error", e);
-    }
-    player.value = null;
+  const instance = player.value;
+  player.value = null;
+  if (!instance) return;
+  try {
+    await instance.destroy();
+  } catch (e) {
+    console.warn("EasyPlayerPro destroy error", e);
   }
 }
 
@@ -144,10 +154,10 @@ function reportPlayerError(code: "player_error" | "player_timeout") {
   });
 }
 
-async function play(u: string) {
+async function play(u: string, token: number) {
   errorMsg.value = "";
   if (!u) {
-    destroy();
+    await destroy();
     return;
   }
 
@@ -160,6 +170,7 @@ async function play(u: string) {
   if (player.value) {
     try {
       await player.value.play(u);
+      if (token !== playToken) return;
       applyAudioState(player.value);
       startSizePolling();
     } catch (e) {
@@ -170,6 +181,9 @@ async function play(u: string) {
   }
 
   await nextTick();
+  // 期间又发生了新的切换(含跨协议重建):这次构造作废,让位给更新的那次,
+  // 否则两个 await 之间插进来的切换会让旧实例回写到 player 上。
+  if (token !== playToken) return;
   if (!containerRef.value) return;
 
   try {
@@ -236,24 +250,96 @@ async function play(u: string) {
   }
 }
 
+/**
+ * 解复用族。
+ *
+ * EasyPlayer 在 `_play()` 里按 URL 后缀决定 demuxType，并把结果写进**实例级**的
+ * `_opt.isFlv` / `isHls` / `isTs` / `isWebrtc` … 一组互斥标志
+ * （`_resetDemuxType(x)` = 全部清 `false` 再把 `x` 置 `true`）。
+ *
+ * ⛔ 这些标志**不在顶层默认配置里**，而 `_replay()` 只做
+ *    `Object.assign(this._opt, _getConfig())` ⇒ **永远清不掉上一次的值**。
+ *    库里给 `.flv` / `.fmp4` / `.mpeg4` / `.h264` / `.mp4` 都写了复位分支，
+ *    **唯独 `.m3u8` 没有**；而 demuxType 的取值链是
+ *    `… isFlv ? flv : isTs ? ts : (… : 后缀 .m3u8 ? hls : …)` ——
+ *    `isFlv` **排在** `.m3u8` 后缀判定**之前**。
+ *    于是「先播过 FLV，再切 HLS」会得到 `play protocol is hls, demuxType is flv`
+ *    这种错配（实测），画面出不来；只有换实例才能让这组标志整体归零。
+ *
+ * ⭐ 判据是**族**而不是单个标志：同族（ws-flv ↔ http-flv、hls ↔ https-hls）复用安全，
+ *    跨族一律重建。取值口径刻意对齐库里的后缀判定（先 `split("?")[0]`，故 `play_token`
+ *    之类的查询串不影响判定）。
+ */
+type DemuxFamily = "webrtc" | "hls" | "flv" | "ts" | "fmp4" | "mpeg4" | "naked" | "wsrtc" | "other";
+
+function demuxFamily(u: string, zlmWebrtc: boolean | undefined): DemuxFamily {
+  if (zlmWebrtc === true || /^(webrtc|artc|wt):\/\//i.test(u)) return "webrtc";
+  const path = u.split("?")[0].toLowerCase();
+  const httpish = /^https?:\/\//.test(path);
+  const wsish = /^wss?:\/\//.test(path);
+  const streamish = httpish || wsish;
+  if (httpish && path.endsWith(".m3u8")) return "hls";
+  if (streamish && path.endsWith(".flv")) return "flv";
+  if (streamish && path.endsWith(".ts")) return "ts";
+  if (streamish && (path.endsWith(".fmp4") || path.includes(".mp4"))) return "fmp4";
+  if (streamish && path.endsWith(".mpeg4")) return "mpeg4";
+  if (streamish && (path.endsWith(".h264") || path.endsWith(".h265"))) return "naked";
+  if (wsish && path.includes("6688")) return "wsrtc";
+  return "other";
+}
+
+/** 当前实例上一次按哪个解复用族播过。跨族必须换实例。 */
+let playerFamily: DemuxFamily | null = null;
+
+/**
+ * 播放代次。每次切换自增；跨 `await` 的旧任务据此让位给更新的那次，
+ * 避免「先发起的重建后落地」把播放器状态写回旧值。
+ */
+let playToken = 0;
+
+/**
+ * 统一切换入口：按需换实例，再交给 `play()`。
+ *
+ * `force` 用于「族没变、但实例必须重建」的场景（截图权限影响控制栏按钮）。
+ */
+async function switchTo(u: string, force = false): Promise<void> {
+  const token = ++playToken;
+  const nextFamily = demuxFamily(u, props.zlmWebrtc);
+  if (player.value && (force || nextFamily !== playerFamily)) {
+    // ⛔ 必须等 destroy 落定再重建（库的容器占用标记是异步清掉的），
+    //    否则构造函数会抛 `EasyPlayerPro err container`。
+    await destroy();
+    if (token !== playToken) return;
+  }
+  playerFamily = nextFamily;
+  await play(u, token);
+}
+
 watch(
-  () => props.url,
-  u => {
+  [() => props.url, () => props.zlmWebrtc],
+  ([u]) => {
     playbackSession += 1;
     playbackStartedAt = performance.now();
     firstFrameReported = false;
     playerErrorReported = false;
-    void play(u);
+    // ⛔ 跨解复用族必须销毁重建，不能复用实例（同族之间切换仍复用）。
+    //   两类已知的实例级残留（都由「顶层默认配置里没这些字段 ⇒ _replay 清不掉」造成）：
+    //   ① 进过 WebRTC 后切回任何 FLV 地址：`_opt.isWebrtc` 仍为 true，
+    //      `<video>` 拿不到 MediaSource（src 恒空串）⇒ 永久黑屏；
+    //   ② 先播过 FLV 再切 HLS：`_opt.isFlv` 仍为 true，demuxType 被判成 flv 而
+    //      协议是 hls ⇒ 错配 ⇒ 画面出不来（库唯独没有 .m3u8 的复位分支）。
+    //    重建实例是唯一能让这组构造期状态整体归零的做法。
+    void switchTo(u);
   },
   { immediate: true }
 );
 watch(canScreenshot, () => {
   if (!player.value || !props.url) return;
-  const currentUrl = props.url;
-  destroy();
-  void play(currentUrl);
+  void switchTo(props.url, true);
 });
-onBeforeUnmount(destroy);
+onBeforeUnmount(() => {
+  void destroy();
+});
 
 /**
  * 播放后对齐一次音频状态。

@@ -39,7 +39,10 @@ const emit = defineEmits<{
         <em v-if="usedCount && !retainedMode" class="preset-count">{{ usedCount }}</em>
       </span>
       <span class="linked-card-actions">
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="mask-switch"
           :class="{ on: maskOn, pending: maskPending }"
           :disabled="!editable"
@@ -48,11 +51,23 @@ const emit = defineEmits<{
           @click="emit('toggle', !maskOn)"
         >
           {{ switchText }}
-        </button>
-        <button class="resource-sync-btn" data-testid="picture-read-btn" title="重新向设备查询画面配置" @click="emit('read')">
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
+          class="resource-sync-btn"
+          data-testid="picture-read-btn"
+          title="重新向设备查询画面配置"
+          aria-label="读取画面遮挡配置"
+          @click="emit('read')"
+        >
           <RefreshCcw :size="11" /><span>读取</span>
-        </button>
-        <button
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="preset-save-btn"
           data-testid="picture-mask-add-btn"
           :disabled="!editable || !canAddRegion"
@@ -62,7 +77,7 @@ const emit = defineEmits<{
           @click="emit('add')"
         >
           <Plus :size="12" /><span>新建</span>
-        </button>
+        </a-button>
       </span>
     </header>
     <p v-if="error" class="picture-card-error" data-testid="picture-card-error">{{ error }}</p>
@@ -98,7 +113,11 @@ const emit = defineEmits<{
         <span class="mask-slot-idx">#{{ region.seq }}</span
         ><span v-if="region.used" class="mask-slot-coords">{{ props.coordsText(region.coords) }}</span
         ><span v-else class="mask-slot-blank">空位</span>
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          shape="square"
+          html-type="button"
           v-if="region.used"
           class="mask-slot-del"
           :title="`删除遮挡区 ${region.seq}`"
@@ -106,7 +125,7 @@ const emit = defineEmits<{
           @click="emit('remove', region.seq)"
         >
           <X :size="11" />
-        </button>
+        </a-button>
       </div>
     </div>
     <p v-if="canvasSize" class="mask-canvas-note" :class="{ 'is-unverified': !canvasFromDevice }" data-testid="picture-mask-base">

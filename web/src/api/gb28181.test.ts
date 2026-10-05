@@ -9,22 +9,6 @@ import {
   controlPtzWiper,
   createDeviceSnapshotSession,
   createStreamProbe,
-  fetchPTZDefaultSpeedConfig,
-  fetchDefaultChannelStreamTransportConfig,
-  fetchDefaultPlaybackProtocolConfig,
-  fetchFixedAddressPlaybackConfig,
-  fetchPlaybackSettingsConfig,
-  fetchGlobalSubscriptionConfig,
-  fetchDefaultChannelAudioConfig,
-  fetchSDPExtensionConfig,
-  fetchSIPLogConfig,
-  fetchPositionHistoryConfig,
-  fetchSyncChannelsOnOnlineConfig,
-  fetchIgnoreChannelOfflineStatusNotifyConfig,
-  fetchOnlineOnHeartbeatConfig,
-  fetchSaveAlarmMessagesConfig,
-  fetchSIPCommandTimeoutConfig,
-  fetchPreallocationModeConfig,
   getControlCapabilities,
   getDeviceStatus,
   getDeviceSnapshotSession,
@@ -37,22 +21,6 @@ import {
   reportPlaybackClientEvent,
   startPlay,
   updateHomePosition,
-  updatePositionHistoryConfig,
-  updatePTZDefaultSpeedConfig,
-  updateDefaultChannelStreamTransportConfig,
-  updateDefaultPlaybackProtocolConfig,
-  updateFixedAddressPlaybackConfig,
-  updatePlaybackSettingsConfig,
-  updateGlobalSubscriptionConfig,
-  updateDefaultChannelAudioConfig,
-  updateSDPExtensionConfig,
-  updateSIPLogConfig,
-  updateSyncChannelsOnOnlineConfig,
-  updateIgnoreChannelOfflineStatusNotifyConfig,
-  updateOnlineOnHeartbeatConfig,
-  updateSaveAlarmMessagesConfig,
-  updateSIPCommandTimeoutConfig,
-  updatePreallocationModeConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -103,32 +71,13 @@ describe("国标服务配置 API", () => {
     });
   });
 
-  it("读取移动位置历史轨迹开关", async () => {
-    await fetchPositionHistoryConfig();
-    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/sip/service-config/position-history");
-  });
-
-  it("同时提交轨迹开关和保留天数", async () => {
-    await updatePositionHistoryConfig({ enabled: false, retentionDays: 30 });
-    expect(request).toHaveBeenCalledWith("put", "/api/gb28181/sip/service-config/position-history", {
-      data: { enabled: false, retentionDays: 30 }
-    });
-  });
-
-  it("读取并更新扩展 SDP 兼容模式", async () => {
-    await fetchSDPExtensionConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sdp-extension");
-
-    await updateSDPExtensionConfig(true);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sdp-extension", { data: { enabled: true } });
-  });
-
-  it("读取并更新云台默认速度档位", async () => {
-    await fetchPTZDefaultSpeedConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/ptz-default-speed");
-
-    await updatePTZDefaultSpeedConfig(10);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/ptz-default-speed", { data: { level: 10 } });
+  it("使用聚合接口读取并保存全部国标服务配置", async () => {
+    const aggregate = { positionHistory: { enabled: true, retentionDays: 7 }, ptzDefaultSpeed: { level: 6 } };
+    const { fetchServiceConfig, updateServiceConfig } = await import("./gb28181");
+    await fetchServiceConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config");
+    await updateServiceConfig(aggregate as any);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config", { data: aggregate });
   });
 
   it("创建并读取设备图像抓拍任务", async () => {
@@ -153,134 +102,6 @@ describe("国标服务配置 API", () => {
     await controlPtzWiper(12, { action: "off" });
     expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/device-mgmt/channel/12/ptz/wiper", {
       data: { action: "off" }
-    });
-  });
-
-  it("读取并更新新通道默认流传输模式", async () => {
-    await fetchDefaultChannelStreamTransportConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-stream-transport");
-
-    await updateDefaultChannelStreamTransportConfig("TCP-Active");
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-channel-stream-transport", {
-      data: { transport: "TCP-Active" }
-    });
-  });
-
-  it("读取并更新默认播放协议", async () => {
-    await fetchDefaultPlaybackProtocolConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-playback-protocol");
-
-    await updateDefaultPlaybackProtocolConfig("webrtc");
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-playback-protocol", {
-      data: { protocol: "webrtc" }
-    });
-  });
-
-  it("使用聚合 API 读取并更新全局播放策略", async () => {
-    await fetchPlaybackSettingsConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/playback-settings");
-
-    const config = { playTimeoutMs: 15000, onDemandLive: false, cloudRecordingEnabled: true };
-    await updatePlaybackSettingsConfig(config);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/playback-settings", { data: config });
-  });
-
-  it("读取并完整更新固定播放地址与自动点播配置", async () => {
-    await fetchFixedAddressPlaybackConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/fixed-address-playback");
-
-    const config = { fixedAddressEnabled: true, autoOnDemandEnabled: false };
-    await updateFixedAddressPlaybackConfig(config);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/fixed-address-playback", { data: config });
-  });
-
-  it("读取并更新全局订阅项目", async () => {
-    await fetchGlobalSubscriptionConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/global-subscriptions");
-
-    await updateGlobalSubscriptionConfig(["catalog", "alarm"]);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/global-subscriptions", {
-      data: { items: ["catalog", "alarm"] }
-    });
-  });
-
-  it("读取并更新全局通道音频默认值", async () => {
-    await fetchDefaultChannelAudioConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-audio");
-
-    await updateDefaultChannelAudioConfig(false);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/default-channel-audio", {
-      data: { enabled: false }
-    });
-  });
-
-  it("读取并更新设备上线同步通道配置", async () => {
-    await fetchSyncChannelsOnOnlineConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sync-channels-on-online");
-
-    await updateSyncChannelsOnOnlineConfig(false);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sync-channels-on-online", {
-      data: { enabled: false }
-    });
-  });
-
-  it("读取并更新收到心跳恢复设备上线配置", async () => {
-    await fetchOnlineOnHeartbeatConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/online-on-heartbeat");
-
-    await updateOnlineOnHeartbeatConfig(false);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/online-on-heartbeat", {
-      data: { enabled: false }
-    });
-  });
-
-  it("读取并更新报警消息存储配置", async () => {
-    await fetchSaveAlarmMessagesConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/save-alarm-messages");
-
-    await updateSaveAlarmMessagesConfig(false);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/save-alarm-messages", {
-      data: { enabled: false }
-    });
-  });
-
-  it("读取并更新 SIP 命令超时时间", async () => {
-    await fetchSIPCommandTimeoutConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-command-timeout");
-
-    await updateSIPCommandTimeoutConfig(30);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sip-command-timeout", {
-      data: { timeoutSec: 30 }
-    });
-  });
-
-  it("读取并更新预分配模式", async () => {
-    await fetchPreallocationModeConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/preallocation-mode");
-
-    await updatePreallocationModeConfig(true);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/preallocation-mode", {
-      data: { enabled: true }
-    });
-  });
-
-  it("读取并更新忽略通道离线/异常通知配置", async () => {
-    await fetchIgnoreChannelOfflineStatusNotifyConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify");
-
-    await updateIgnoreChannelOfflineStatusNotifyConfig(true);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify", {
-      data: { enabled: true }
-    });
-  });
-
-  it("读取并更新 SIP 日志配置", async () => {
-    await fetchSIPLogConfig();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-log");
-
-    await updateSIPLogConfig({ enabled: true, retentionDays: 30 });
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sip-log", {
-      data: { enabled: true, retentionDays: 30 }
     });
   });
 });

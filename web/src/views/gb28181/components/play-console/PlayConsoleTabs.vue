@@ -22,10 +22,12 @@ const emit = defineEmits<{
 
 <template>
   <nav v-if="tabs.length" class="tabs" aria-label="播放工作区">
-    <button
+    <a-button
       v-for="tab in tabs"
       :key="tab.key"
-      type="button"
+      type="text"
+      size="mini"
+      html-type="button"
       class="tab"
       :class="{ active: activeTab === tab.key }"
       :aria-current="activeTab === tab.key ? 'page' : undefined"
@@ -41,7 +43,7 @@ const emit = defineEmits<{
         data-testid="linked-tab-draft-dot"
         :title="`${pictureDraftSummary} 未下发`"
       ></em>
-    </button>
+    </a-button>
   </nav>
 </template>
 
@@ -56,7 +58,7 @@ const emit = defineEmits<{
   border: 1px solid var(--uvp-panel-border);
   border-radius: 10px;
 }
-.tab {
+.tab.arco-btn[type="button"] {
   position: relative;
   display: inline-flex;
   flex-direction: column;
@@ -65,7 +67,7 @@ const emit = defineEmits<{
   justify-content: center;
   padding: 8px 4px;
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   letter-spacing: 0.02em;
   cursor: pointer;
   background: transparent;
@@ -73,11 +75,11 @@ const emit = defineEmits<{
   border-radius: 7px;
   transition: all 0.15s ease;
 }
-.tab:hover {
+.tab.arco-btn[type="button"]:hover {
   color: var(--uvp-text-secondary);
   background: color-mix(in srgb, var(--uvp-brand) 6%, transparent);
 }
-.tab.active {
+.tab.arco-btn[type="button"].active {
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 30%, transparent);

@@ -34,7 +34,10 @@ const emit = defineEmits<{
         <Hash :size="13" />预置位<em v-if="presets.length" class="preset-count">{{ presets.length }}</em>
       </span>
       <span class="linked-card-actions">
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="resource-sync-btn"
           data-testid="preset-sync-btn"
           :class="{ syncing }"
@@ -45,10 +48,18 @@ const emit = defineEmits<{
           <Loader2 v-if="syncing" :size="11" class="resource-sync-spin" />
           <RefreshCcw v-else :size="11" />
           <span>{{ syncLabel }}</span>
-        </button>
-        <button class="preset-save-btn" data-testid="preset-save-btn" @click="emit('add')">
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
+          class="preset-save-btn"
+          data-testid="preset-save-btn"
+          aria-label="添加预置位"
+          @click="emit('add')"
+        >
           <Plus :size="12" /><span>添加</span>
-        </button>
+        </a-button>
       </span>
     </header>
 
@@ -66,14 +77,30 @@ const emit = defineEmits<{
           :mouse-enter-delay="tooltipDelay"
           :data-testid="`preset-tile-tooltip-${preset.id}`"
         >
-          <button class="preset-tile-hit preset-item" @click="emit('call', preset.id)">
+          <a-button
+            type="text"
+            size="mini"
+            html-type="button"
+            class="preset-tile-hit preset-item"
+            :aria-label="`调用预置位 #${preset.id} ${preset.name}`"
+            :aria-pressed="activeId === preset.id"
+            @click="emit('call', preset.id)"
+          >
             <span class="preset-idx">#{{ preset.id }}</span>
             <span class="preset-name">{{ preset.name }}</span>
-          </button>
+          </a-button>
         </a-tooltip>
-        <button class="preset-tile-del" :title="`删除 #${preset.id}`" @click.stop="emit('delete', preset.id)">
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
+          class="preset-tile-del"
+          :title="`删除 #${preset.id}`"
+          :aria-label="`删除预置位 #${preset.id}`"
+          @click.stop="emit('delete', preset.id)"
+        >
           <X :size="11" />
-        </button>
+        </a-button>
       </div>
 
       <a-popover
@@ -85,10 +112,17 @@ const emit = defineEmits<{
         class="preset-more-popover-trigger"
         @popup-visible-change="emit('update:moreVisible', $event)"
       >
-        <button class="preset-tile-more" data-testid="preset-more-btn">
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
+          class="preset-tile-more"
+          data-testid="preset-more-btn"
+          aria-label="查看全部预置位"
+        >
           <span>更多 · {{ presets.length }}</span>
           <ChevronDown :size="11" />
-        </button>
+        </a-button>
         <template #content>
           <div class="preset-popover" data-testid="preset-popover">
             <header class="preset-popover-hd">
@@ -114,12 +148,28 @@ const emit = defineEmits<{
                   <span class="preset-popover-name">{{ preset.name }}</span>
                 </a-tooltip>
                 <div class="preset-popover-actions">
-                  <button class="preset-popover-call" title="调用此预置位" @click="emit('call', preset.id)">
+                  <a-button
+                    type="text"
+                    size="mini"
+                    html-type="button"
+                    class="preset-popover-call"
+                    title="调用此预置位"
+                    :aria-label="`调用预置位 #${preset.id}`"
+                    @click="emit('call', preset.id)"
+                  >
                     <Navigation :size="11" />
-                  </button>
-                  <button class="preset-popover-del" title="删除此预置位" @click="emit('delete', preset.id)">
+                  </a-button>
+                  <a-button
+                    type="text"
+                    size="mini"
+                    html-type="button"
+                    class="preset-popover-del"
+                    title="删除此预置位"
+                    :aria-label="`删除预置位 #${preset.id}`"
+                    @click="emit('delete', preset.id)"
+                  >
                     <Trash2 :size="11" />
-                  </button>
+                  </a-button>
                 </div>
               </div>
             </div>

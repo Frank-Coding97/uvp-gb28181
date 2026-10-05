@@ -6,18 +6,23 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
 <template>
   <section class="wiper-compact" data-testid="wiper-card">
     <span class="wiper-label"><Waves :size="12" />雨刷</span>
-    <button
+    <a-button
+      type="text"
+      size="mini"
+      html-type="button"
       class="wiper-toggle"
       :class="{ active: state === 'on-sent' }"
       data-testid="wiper-toggle"
       :disabled="!canSend"
       :title="title"
+      aria-label="雨刷开关"
+      :aria-pressed="state === 'on-sent'"
       @click="emit('toggle')"
     >
       <Play v-if="state === 'off'" :size="11" /><Square v-else :size="11" /><span>{{
         state === "on-sent" ? "关闭雨刷" : "开启雨刷"
       }}</span>
-    </button>
+    </a-button>
     <p v-if="error" class="wiper-error" data-testid="wiper-error">{{ error }}</p>
   </section>
 </template>
@@ -33,9 +38,9 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
   gap: 4px;
   align-items: center;
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
-.wiper-toggle {
+.wiper-toggle.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;
@@ -50,19 +55,25 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
   border-radius: 5px;
   transition: all 0.15s ease;
 }
-.wiper-toggle:hover:not(:disabled) {
+.wiper-toggle.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
-.wiper-toggle.active {
+.wiper-toggle.arco-btn[type="button"].active {
   font-weight: 600;
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
 }
-.wiper-toggle:disabled {
+.wiper-toggle.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
+}
+.wiper-toggle.arco-btn[type="button"].active:disabled {
+  background: var(--uvp-brand-soft);
 }
 .wiper-error {
   margin: 0;

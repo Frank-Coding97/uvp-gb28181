@@ -37,9 +37,11 @@ const emit = defineEmits<{
     </span>
     <div class="console-window-actions">
       <template v-if="!isMinimized">
-        <button
-          type="button"
+        <a-button
           class="console-window-action is-minimize"
+          type="secondary"
+          size="mini"
+          html-type="button"
           data-testid="play-console-minimize"
           title="切换为小窗播放"
           aria-label="切换为小窗播放"
@@ -48,10 +50,12 @@ const emit = defineEmits<{
         >
           <PictureInPicture2 :size="15" aria-hidden="true" />
           <span>小窗</span>
-        </button>
-        <button
-          type="button"
+        </a-button>
+        <a-button
           class="console-window-action is-close"
+          type="secondary"
+          size="mini"
+          html-type="button"
           data-testid="play-console-close"
           title="关闭并停止播放"
           aria-label="关闭并停止播放"
@@ -60,12 +64,15 @@ const emit = defineEmits<{
         >
           <X :size="15" aria-hidden="true" />
           <span>关闭</span>
-        </button>
+        </a-button>
       </template>
       <template v-else>
-        <button
-          type="button"
+        <a-button
           class="console-window-action is-compact"
+          type="secondary"
+          size="mini"
+          shape="square"
+          html-type="button"
           data-testid="play-console-restore"
           title="恢复播放控制台"
           aria-label="恢复播放控制台"
@@ -73,10 +80,13 @@ const emit = defineEmits<{
           @click.stop="emit('restore')"
         >
           <Maximize2 :size="15" />
-        </button>
-        <button
-          type="button"
+        </a-button>
+        <a-button
           class="console-window-action is-close is-compact"
+          type="secondary"
+          size="mini"
+          shape="square"
+          html-type="button"
           data-testid="play-console-close-mini"
           title="关闭并停止播放"
           aria-label="关闭并停止播放"
@@ -84,7 +94,7 @@ const emit = defineEmits<{
           @click.stop="emit('close')"
         >
           <X :size="15" />
-        </button>
+        </a-button>
       </template>
     </div>
   </div>
@@ -126,7 +136,7 @@ const emit = defineEmits<{
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
 
@@ -140,7 +150,7 @@ const emit = defineEmits<{
 .console-title.is-minimized .console-window-actions {
   margin-left: auto;
 }
-.console-window-action {
+.console-window-action.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;
@@ -164,50 +174,50 @@ const emit = defineEmits<{
     box-shadow 0.15s ease,
     transform 0.15s ease;
 }
-.console-window-action svg {
+.console-window-action.arco-btn[type="button"] svg {
   flex: 0 0 auto;
 }
-.console-window-action.is-minimize {
+.console-window-action.arco-btn[type="button"].is-minimize {
   color: var(--uvp-brand);
   background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-panel-bg));
   border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
 }
-.console-window-action.is-minimize:hover {
+.console-window-action.arco-btn[type="button"].is-minimize:hover {
   color: var(--uvp-brand-strong);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
 }
-.console-window-action.is-config {
+.console-window-action.arco-btn[type="button"].is-config {
   color: var(--uvp-brand-strong, var(--uvp-brand));
   background: color-mix(in srgb, var(--uvp-brand) 5%, var(--uvp-panel-bg));
   border-color: color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
 }
-.console-window-action.is-config:hover {
+.console-window-action.arco-btn[type="button"].is-config:hover {
   color: var(--uvp-brand-strong);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
 }
-.console-window-action.is-close {
+.console-window-action.arco-btn[type="button"].is-close {
   color: color-mix(in srgb, var(--uvp-danger) 76%, var(--uvp-text-secondary));
   background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-panel-bg));
   border-color: color-mix(in srgb, var(--uvp-danger) 18%, var(--uvp-panel-border));
 }
-.console-window-action.is-close:hover {
+.console-window-action.arco-btn[type="button"].is-close:hover {
   color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
   border-color: var(--uvp-danger-border);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-danger) 12%, transparent);
 }
-.console-window-action:focus-visible {
+.console-window-action.arco-btn[type="button"]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--uvp-brand) 48%, transparent);
   outline-offset: 2px;
 }
-.console-window-action:active {
+.console-window-action.arco-btn[type="button"]:active {
   transform: translateY(1px);
 }
-.console-window-action.is-compact {
+.console-window-action.arco-btn[type="button"].is-compact {
   gap: 0;
   width: 28px;
   min-width: 28px;
@@ -222,7 +232,7 @@ const emit = defineEmits<{
   padding: 4px 10px;
   margin-left: auto;
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
   background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
@@ -261,9 +271,9 @@ const emit = defineEmits<{
   background: var(--uvp-danger);
 }
 .session-badge.paused {
-  color: #a78bfa;
-  background: rgb(167 139 250 / 12%);
-  border-color: rgb(167 139 250 / 28%);
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-list-toolbar-bg);
+  border-color: var(--uvp-panel-border);
 }
 .session-badge.warn {
   color: var(--uvp-warning);
@@ -287,12 +297,12 @@ const emit = defineEmits<{
   .console-title {
     flex-wrap: wrap;
   }
-  .console-title:not(.is-minimized) .console-window-action {
+  .console-title:not(.is-minimized) .console-window-action.arco-btn[type="button"] {
     width: 30px;
     min-width: 30px;
     padding: 0;
   }
-  .console-title:not(.is-minimized) .console-window-action span {
+  .console-title:not(.is-minimized) .console-window-action.arco-btn[type="button"] span {
     display: none;
   }
 }

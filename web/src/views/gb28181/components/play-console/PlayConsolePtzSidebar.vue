@@ -76,12 +76,30 @@ const {
   <div v-if="canPtzPanel" v-show="activeTab === 'ptz'" class="panel" data-testid="linked-side-ptz">
     <!-- 模式切换:连续控制 / 高级控制(2022) -->
     <div class="mode-switch">
-      <button data-testid="ptz-mode-speed" :class="{ active: ptzMode === 'speed' }" @click="setPtzMode('speed')">
+      <a-button
+        type="text"
+        size="mini"
+        html-type="button"
+        data-testid="ptz-mode-speed"
+        :class="{ active: ptzMode === 'speed' }"
+        :aria-pressed="ptzMode === 'speed'"
+        aria-label="连续控制模式"
+        @click="setPtzMode('speed')"
+      >
         <Compass :size="13" />连续控制
-      </button>
-      <button data-testid="ptz-mode-precise" :class="{ active: ptzMode === 'precise' }" @click="setPtzMode('precise')">
+      </a-button>
+      <a-button
+        type="text"
+        size="mini"
+        html-type="button"
+        data-testid="ptz-mode-precise"
+        :class="{ active: ptzMode === 'precise' }"
+        :aria-pressed="ptzMode === 'precise'"
+        aria-label="高级控制模式"
+        @click="setPtzMode('precise')"
+      >
         <Crosshair :size="13" />高级控制<span class="tag-2022">2022</span>
-      </button>
+      </a-button>
     </div>
 
     <!-- 速度模式:拖拽摇杆 + 变倍 + 速度 -->
@@ -124,24 +142,37 @@ const {
       </div>
 
       <div class="talk-mode-switch" aria-label="对讲模式">
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           :class="{ active: talkMode === 'broadcast' }"
           :disabled="talkState !== 'idle' || !talkAvailable"
           :title="capabilityActionTitle('broadcast', '广播')"
+          :aria-pressed="talkMode === 'broadcast'"
+          aria-label="广播模式"
           @click="talkMode = 'broadcast'"
         >
           广播
-        </button>
-        <button
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           :class="{ active: talkMode === 'talk' }"
           :disabled="talkState !== 'idle' || !talkAvailable"
           :title="capabilityActionTitle('talk', 'Talk')"
+          :aria-pressed="talkMode === 'talk'"
+          aria-label="双向对讲模式"
           @click="talkMode = 'talk'"
         >
           Talk
-        </button>
+        </a-button>
       </div>
-      <button
+      <a-button
+        type="text"
+        size="mini"
+        html-type="button"
         class="talk-button"
         data-testid="talk-button"
         :class="{ active: talkState !== 'idle' }"
@@ -161,7 +192,7 @@ const {
           <i v-for="bar in 4" :key="bar" :style="{ animationDelay: `${(bar - 1) * -0.17}s` }"></i>
         </span>
         <span>{{ talkButtonText }}</span>
-      </button>
+      </a-button>
 
       <div class="speed-row">
         <label>
@@ -175,70 +206,118 @@ const {
         <div class="lens-item">
           <span class="lens-label"><ZoomIn :size="12" />变倍</span>
           <div class="lens-btns">
-            <button
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="放大"
+              aria-label="镜头放大"
               @pointerdown.prevent="sendPtz('放大')"
               @pointerup.prevent="sendPtz('停止')"
               @pointerleave="sendPtz('停止')"
               @pointercancel="sendPtz('停止')"
+              @keydown.enter.prevent="sendPtz('放大')"
+              @keyup.enter.prevent="sendPtz('停止')"
+              @keydown.space.prevent="sendPtz('放大')"
+              @keyup.space.prevent="sendPtz('停止')"
             >
               <ZoomIn :size="14" />
-            </button>
-            <button
+            </a-button>
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="缩小"
+              aria-label="镜头缩小"
               @pointerdown.prevent="sendPtz('缩小')"
               @pointerup.prevent="sendPtz('停止')"
               @pointerleave="sendPtz('停止')"
               @pointercancel="sendPtz('停止')"
+              @keydown.enter.prevent="sendPtz('缩小')"
+              @keyup.enter.prevent="sendPtz('停止')"
+              @keydown.space.prevent="sendPtz('缩小')"
+              @keyup.space.prevent="sendPtz('停止')"
             >
               <ZoomOut :size="14" />
-            </button>
+            </a-button>
           </div>
         </div>
         <div class="lens-item">
           <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
           <div class="lens-btns">
-            <button
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="远焦(按住连续)"
+              aria-label="远焦，按住连续"
               @pointerdown.prevent="sendPtz('远焦')"
               @pointerup.prevent="sendPtz('镜头停止')"
               @pointerleave="sendPtz('镜头停止')"
               @pointercancel="sendPtz('镜头停止')"
+              @keydown.enter.prevent="sendPtz('远焦')"
+              @keyup.enter.prevent="sendPtz('镜头停止')"
+              @keydown.space.prevent="sendPtz('远焦')"
+              @keyup.space.prevent="sendPtz('镜头停止')"
             >
               远
-            </button>
-            <button
+            </a-button>
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="近焦(按住连续)"
+              aria-label="近焦，按住连续"
               @pointerdown.prevent="sendPtz('近焦')"
               @pointerup.prevent="sendPtz('镜头停止')"
               @pointerleave="sendPtz('镜头停止')"
               @pointercancel="sendPtz('镜头停止')"
+              @keydown.enter.prevent="sendPtz('近焦')"
+              @keyup.enter.prevent="sendPtz('镜头停止')"
+              @keydown.space.prevent="sendPtz('近焦')"
+              @keyup.space.prevent="sendPtz('镜头停止')"
             >
               近
-            </button>
+            </a-button>
           </div>
         </div>
         <div class="lens-item">
           <span class="lens-label"><Circle :size="12" />光圈</span>
           <div class="lens-btns">
-            <button
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="开大(按住连续)"
+              aria-label="光圈开大，按住连续"
               @pointerdown.prevent="sendPtz('光圈+')"
               @pointerup.prevent="sendPtz('镜头停止')"
               @pointerleave="sendPtz('镜头停止')"
               @pointercancel="sendPtz('镜头停止')"
+              @keydown.enter.prevent="sendPtz('光圈+')"
+              @keyup.enter.prevent="sendPtz('镜头停止')"
+              @keydown.space.prevent="sendPtz('光圈+')"
+              @keyup.space.prevent="sendPtz('镜头停止')"
             >
               +
-            </button>
-            <button
+            </a-button>
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               title="缩小(按住连续)"
+              aria-label="光圈缩小，按住连续"
               @pointerdown.prevent="sendPtz('光圈-')"
               @pointerup.prevent="sendPtz('镜头停止')"
               @pointerleave="sendPtz('镜头停止')"
               @pointercancel="sendPtz('镜头停止')"
+              @keydown.enter.prevent="sendPtz('光圈-')"
+              @keyup.enter.prevent="sendPtz('镜头停止')"
+              @keydown.space.prevent="sendPtz('光圈-')"
+              @keyup.space.prevent="sendPtz('镜头停止')"
             >
               −
-            </button>
+            </a-button>
           </div>
         </div>
       </div>
@@ -246,29 +325,37 @@ const {
       <!-- 低频辅助控制并排，避免雨刷被连续控制区底部裁切。 -->
       <div class="ptz-aux-grid">
         <!-- 3D 拖拽：连续控制下的画面级手势。 -->
-        <div v-if="canControlDevice" class="ptz-drag-zoom" data-testid="ptz-drag-zoom">
+        <div v-if="canControlDevice" class="ptz-drag-zoom ptz-drag-zoom-frame" data-testid="ptz-drag-zoom">
           <span class="lens-label"><Move3d :size="12" />3D 拖拽</span>
           <div class="drag-zoom-switch" aria-label="3D 拖拽方向">
-            <button
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }"
               data-testid="ptz-drag-zoom-in"
               :title="capabilityActionTitle('dragZoom', '3D 放大')"
               :disabled="isAdvancedPending('drag_zoom_in')"
               :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_in'"
+              aria-label="3D 放大"
               @click="toggleDragZoomMode('drag_zoom_in')"
             >
               {{ dragZoomMode && dragZoomAction === "drag_zoom_in" ? "取消 3D 放大" : "3D 放大" }}
-            </button>
-            <button
+            </a-button>
+            <a-button
+              type="text"
+              size="mini"
+              html-type="button"
               :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }"
               data-testid="ptz-drag-zoom-out"
               :title="capabilityActionTitle('dragZoom', '3D 缩小')"
               :disabled="isAdvancedPending('drag_zoom_out')"
               :aria-pressed="dragZoomMode && dragZoomAction === 'drag_zoom_out'"
+              aria-label="3D 缩小"
               @click="toggleDragZoomMode('drag_zoom_out')"
             >
               {{ dragZoomMode && dragZoomAction === "drag_zoom_out" ? "取消 3D 缩小" : "3D 缩小" }}
-            </button>
+            </a-button>
           </div>
         </div>
         <PtzWiperCard
@@ -293,16 +380,7 @@ const {
           <span>Pan 水平角(°)</span>
           <div class="axis-ctrl">
             <a-slider v-model="precisePan" :min="0" :max="360" :step="0.1" :show-tooltip="false" aria-label="Pan 水平角" />
-            <a-input
-              v-model.number="precisePan"
-              allow-clear
-              type="number"
-              min="0"
-              max="360"
-              step="0.1"
-              class="axis-num"
-              aria-label="Pan 水平角"
-            />
+            <a-input v-model.number="precisePan" type="text" inputmode="decimal" class="axis-num" aria-label="Pan 水平角" />
           </div>
         </label>
       </div>
@@ -311,16 +389,7 @@ const {
           <span>Tilt 俯仰角(°)</span>
           <div class="axis-ctrl">
             <a-slider v-model="preciseTilt" :min="-90" :max="90" :step="0.1" :show-tooltip="false" aria-label="Tilt 俯仰角" />
-            <a-input
-              v-model.number="preciseTilt"
-              allow-clear
-              type="number"
-              min="-90"
-              max="90"
-              step="0.1"
-              class="axis-num"
-              aria-label="Tilt 俯仰角"
-            />
+            <a-input v-model.number="preciseTilt" type="text" inputmode="decimal" class="axis-num" aria-label="Tilt 俯仰角" />
           </div>
         </label>
       </div>
@@ -329,70 +398,96 @@ const {
           <span>Zoom 变倍(x)</span>
           <div class="axis-ctrl">
             <a-slider v-model="preciseZoom" :min="1" :max="32" :step="0.1" :show-tooltip="false" aria-label="Zoom 变倍" />
-            <a-input
-              v-model.number="preciseZoom"
-              allow-clear
-              type="number"
-              min="1"
-              max="32"
-              step="0.1"
-              class="axis-num"
-              aria-label="Zoom 变倍"
-            />
+            <a-input v-model.number="preciseZoom" type="text" inputmode="decimal" class="axis-num" aria-label="Zoom 变倍" />
           </div>
         </label>
       </div>
       <div class="precise-actions">
-        <button class="btn-primary sm" data-testid="ptz-precise-apply" @click="sendPrecise"><Target :size="13" />应用定位</button>
-        <button class="btn-ghost sm" @click="readPreciseStatus"><Navigation :size="13" />读取当前位置</button>
+        <a-button
+          type="primary"
+          size="mini"
+          html-type="button"
+          class="btn-primary sm"
+          data-testid="ptz-precise-apply"
+          aria-label="应用精准定位"
+          @click="sendPrecise"
+        >
+          <Target :size="13" />应用定位
+        </a-button>
+        <a-button
+          type="outline"
+          size="mini"
+          html-type="button"
+          class="btn-ghost sm"
+          aria-label="读取当前位置"
+          @click="readPreciseStatus"
+        >
+          <Navigation :size="13" />读取当前位置
+        </a-button>
       </div>
       <!-- 请求关键帧：高级控制下的一次性流操作。 -->
       <div v-if="canControlDevice" class="ptz-iframe" data-testid="ptz-iframe">
         <span class="lens-label"><Video :size="12" />关键帧</span>
-        <button
+        <a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           data-testid="ptz-iframe-request"
           :title="capabilityActionTitle('iFrame', '请求关键帧')"
           :disabled="isAdvancedPending('iframe')"
+          aria-label="请求关键帧"
           @click="runAdvancedAction('iframe')"
         >
           <Loader2 v-if="isAdvancedPending('iframe')" :size="12" class="spin" /><Video v-else :size="12" />
           <span>请求关键帧</span>
-        </button>
+        </a-button>
       </div>
 
       <!-- 目标跟踪：高级控制下的画面级即时命令。 -->
       <div v-if="canControlDevice" class="ptz-target-track" data-testid="ptz-target-track">
         <span class="lens-label"><ScanEye :size="12" />目标跟踪<span class="tag-2022">2022</span></span>
         <div class="target-track-switch" aria-label="目标跟踪方式">
-          <button
+          <a-button
+            type="outline"
+            size="mini"
+            html-type="button"
             data-testid="ptz-target-track-auto"
             :title="capabilityActionTitle('targetTrack', '自动跟踪')"
             :disabled="targetTrackPending"
+            aria-label="自动跟踪"
             @click="submitTargetTrack('Auto')"
           >
             <Loader2 v-if="targetTrackPending" :size="12" class="spin" /><ScanEye v-else :size="12" />
             <span>自动跟踪</span>
-          </button>
-          <button
+          </a-button>
+          <a-button
+            type="outline"
+            size="mini"
+            html-type="button"
             :class="{ active: targetTrackMode }"
             data-testid="ptz-target-track-manual"
             :title="capabilityActionTitle('targetTrack', '手动框选目标')"
             :disabled="targetTrackPending"
             :aria-pressed="targetTrackMode"
+            aria-label="手动框选目标"
             @click="toggleTargetTrackMode"
           >
             <Square v-if="targetTrackMode" :size="12" /><ScanEye v-else :size="12" />
             <span>{{ targetTrackMode ? "取消框选" : "框选跟踪" }}</span>
-          </button>
-          <button
+          </a-button>
+          <a-button
+            type="outline"
+            size="mini"
+            html-type="button"
             data-testid="ptz-target-track-stop"
             :title="capabilityActionTitle('targetTrack', '停止跟踪')"
             :disabled="targetTrackPending"
+            aria-label="停止跟踪"
             @click="submitTargetTrack('Stop')"
           >
             <CircleSlash :size="12" />
             <span>停止跟踪</span>
-          </button>
+          </a-button>
         </div>
         <!-- ⛔ 这三行文字合起来才是完整口径,少一行都会被读成"设备在做某事":
                     「平台最近一次下发…」(全知的一侧) + 「已下发,设备未回执」(没有回执) +
@@ -430,21 +525,21 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 8px;
 }
-.mode-switch button {
+.mode-switch button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;
   justify-content: center;
   padding: 6px 8px;
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 6px;
   transition: all 0.15s ease;
 }
-.mode-switch button.active {
+.mode-switch button.arco-btn[type="button"].active {
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 26%, transparent);
@@ -583,7 +678,7 @@ const {
   z-index: 3;
   font-size: 9px;
   line-height: 1;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   pointer-events: none;
 }
 .joystick-label.top {
@@ -693,26 +788,31 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 7px;
 }
-.talk-mode-switch button {
+.talk-mode-switch button.arco-btn[type="button"] {
   height: 22px;
   font-size: 10px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 5px;
 }
-.talk-mode-switch button.active {
+.talk-mode-switch button.arco-btn[type="button"].active {
   font-weight: 600;
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
 }
-.talk-mode-switch button:disabled {
+.talk-mode-switch button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  opacity: 1;
+}
+.talk-mode-switch button.arco-btn[type="button"].active:disabled {
+  background: var(--uvp-brand-soft);
 }
 
-.talk-button {
+.talk-button.arco-btn[type="button"] {
   display: flex;
   gap: 7px;
   align-items: center;
@@ -732,18 +832,21 @@ const {
   border-radius: 8px;
   transition: all 0.15s ease;
 }
-.talk-button:hover:not(:disabled) {
+.talk-button.arco-btn[type="button"]:hover:not(:disabled) {
   border-color: var(--uvp-brand);
 }
-.talk-button.active {
+.talk-button.arco-btn[type="button"].active {
   color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
   border-color: var(--uvp-danger-border);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-danger) 10%, transparent);
 }
-.talk-button:disabled {
+.talk-button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.45;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 
 /* 「正在说话」的波形：4 根 bar 相位错开各自起伏，整体幅度再由采集电平（--talk-level，0..1）缩放。
@@ -795,7 +898,7 @@ const {
   gap: 8px;
   align-items: center;
   font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .speed-row label > span {
   display: inline-flex;
@@ -838,9 +941,15 @@ const {
 }
 .lens-grid.disabled {
   pointer-events: none;
-  opacity: 0.42;
 }
-.lens-item {
+
+.lens-grid.disabled .lens-label,
+.lens-grid.disabled .lens-btns button.arco-btn[type="button"] {
+  color: var(--uvp-text-disabled);
+}
+.lens-item,
+.ptz-drag-zoom-frame,
+.ptz-wiper-side {
   display: grid;
   gap: 6px;
   padding: 8px;
@@ -853,13 +962,13 @@ const {
   gap: 4px;
   align-items: center;
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .lens-btns {
   display: flex;
   gap: 4px;
 }
-.lens-btns button {
+.lens-btns button.arco-btn[type="button"] {
   flex: 1;
   height: 26px;
   padding: 0;
@@ -870,39 +979,29 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 5px;
 }
-.lens-btns button:hover:not(:disabled) {
+.lens-btns button.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
 
-/* 3D 拖拽(2026-09-20 从「高级」搬来 / 2026-09-23 压缩高度去边框):
- * 去掉外层边框和背景,让它和雨刷直接摆在页面上,减少视觉重量。
- * 按钮高度从 26px 降到 22px,减少垂直占用。 */
+/* 3D 拖拽与雨刷沿用镜头控制卡片的外框。 */
 .ptz-drag-zoom {
   display: grid;
   gap: 3px;
   min-width: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
 }
 .ptz-wiper-side {
   gap: 3px;
-  width: 100%;
+  width: 90%;
   height: auto;
   min-height: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
 }
 .drag-zoom-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
 }
-.drag-zoom-switch button {
+.drag-zoom-switch button.arco-btn[type="button"] {
   height: 26px;
   padding: 0;
   font-size: 10.5px;
@@ -912,19 +1011,25 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 5px;
 }
-.drag-zoom-switch button:hover:not(:disabled) {
+.drag-zoom-switch button.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
-.drag-zoom-switch button.active {
+.drag-zoom-switch button.arco-btn[type="button"].active {
   font-weight: 600;
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
 }
-.drag-zoom-switch button:disabled {
+.drag-zoom-switch button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
+}
+.drag-zoom-switch button.arco-btn[type="button"].active:disabled {
+  background: var(--uvp-brand-soft);
 }
 
 /* 请求关键帧:与 3D 拖拽同款"标签 + 动作"盒,但只有一个动作,故走两列(标签/按钮)排一行。 */
@@ -938,7 +1043,7 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 8px;
 }
-.ptz-iframe button {
+.ptz-iframe button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
   align-items: center;
@@ -952,13 +1057,16 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 5px;
 }
-.ptz-iframe button:hover:not(:disabled) {
+.ptz-iframe button.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
-.ptz-iframe button:disabled {
+.ptz-iframe button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 
 /* 目标跟踪（A.2.3.1.14）:三段"动作"而不是"方向" —— 但它们同样是三选一里的"当前态"
@@ -978,7 +1086,7 @@ const {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
-.target-track-switch button {
+.target-track-switch button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -992,19 +1100,25 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 5px;
 }
-.target-track-switch button:hover:not(:disabled) {
+.target-track-switch button.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
-.target-track-switch button.active {
+.target-track-switch button.arco-btn[type="button"].active {
   font-weight: 600;
   color: var(--uvp-warning);
   background: color-mix(in srgb, var(--uvp-warning) 14%, transparent);
   border-color: var(--uvp-warning);
 }
-.target-track-switch button:disabled {
+.target-track-switch button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
+}
+.target-track-switch button.arco-btn[type="button"].active:disabled {
+  background: var(--uvp-warning-soft);
 }
 
 /* 状态三行:意图 / 下发结果 / 说明。⛔ 字号与颜色都往"事实"靠,不要做成告警条 ——
@@ -1026,7 +1140,7 @@ const {
   color: var(--uvp-warning);
 }
 .target-track-tip {
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .target-track-error {
   color: var(--uvp-danger);
@@ -1064,7 +1178,7 @@ const {
   padding: 8px 10px;
   font-size: 10.5px;
   line-height: 1.5;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, transparent);
   border-radius: 8px;
@@ -1075,26 +1189,28 @@ const {
 }
 .axis-row label {
   display: grid;
-  gap: 4px;
+  gap: 12px;
 }
 .axis-row label > span {
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .axis-ctrl {
   display: grid;
-  grid-template-columns: 1fr 60px;
+  grid-template-columns: 1fr 72px;
   gap: 6px;
   align-items: center;
 }
 .axis-num {
-  width: 60px;
+  width: 72px;
 }
 .axis-ctrl :deep(.axis-num) {
   height: 26px;
+  border-radius: 3px;
 }
 .axis-ctrl :deep(.axis-num input) {
-  padding: 0 6px;
+  min-width: 0;
+  padding: 0 7px;
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   color: var(--uvp-text-secondary);
@@ -1104,7 +1220,7 @@ const {
   display: flex;
   gap: 6px;
 }
-.precise-actions button {
+.precise-actions button.arco-btn[type="button"] {
   flex: 1;
 }
 </style>

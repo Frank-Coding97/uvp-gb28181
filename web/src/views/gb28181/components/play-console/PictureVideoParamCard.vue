@@ -72,8 +72,12 @@ const isEmpty = computed(() => !props.rows.length);
             {{ streamLabel(row.streamNumber) }}
           </a-option>
         </a-select>
-        <button
-          type="button"
+        <a-button
+          type="text"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="还原码流改动"
           class="vpc-btn"
           data-testid="vpc-reset"
           :disabled="!dirtyCount"
@@ -81,19 +85,33 @@ const isEmpty = computed(() => !props.rows.length);
           @click="emit('reset')"
         >
           <RotateCcw :size="11" />
-        </button>
-        <button type="button" class="vpc-btn" data-testid="vpc-read" :disabled="!canRead || applying" @click="emit('read')">
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="读取编码参数"
+          class="vpc-btn"
+          data-testid="vpc-read"
+          :disabled="!canRead || applying"
+          @click="emit('read')"
+        >
           <RefreshCcw :size="11" />
-        </button>
-        <button
-          type="button"
+        </a-button>
+        <a-button
+          type="primary"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="应用编码参数"
           class="vpc-btn is-primary"
           data-testid="vpc-apply"
           :disabled="applying || !dirtyCount || !canApply"
           @click="emit('apply')"
         >
           <Send :size="11" />
-        </button>
+        </a-button>
       </div>
     </div>
 
@@ -137,15 +155,17 @@ const isEmpty = computed(() => !props.rows.length);
         <div class="vpc-field">
           <label>码率类型</label>
           <div class="vpc-segment" role="group">
-            <button
+            <a-button
               v-for="opt in BIT_RATE_TYPE_OPTIONS"
               :key="opt.value"
-              type="button"
+              type="text"
+              size="mini"
+              html-type="button"
               :class="{ 'is-on': currentRow.bitRateType === opt.value }"
               @click="currentRow.bitRateType = opt.value"
             >
               {{ opt.label }}
-            </button>
+            </a-button>
           </div>
         </div>
 
@@ -191,7 +211,7 @@ const isEmpty = computed(() => !props.rows.length);
   align-items: center;
   padding: 4px 8px;
   font-size: 10px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 999px;
@@ -229,7 +249,7 @@ const isEmpty = computed(() => !props.rows.length);
   width: 90px;
 }
 
-.vpc-btn {
+.vpc-btn.arco-btn[type="button"] {
   display: inline-grid;
   place-items: center;
   width: 26px;
@@ -243,24 +263,27 @@ const isEmpty = computed(() => !props.rows.length);
   transition: all 0.15s ease;
 }
 
-.vpc-btn:hover:not(:disabled) {
+.vpc-btn.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
 
-.vpc-btn.is-primary {
+.vpc-btn.arco-btn[type="button"].is-primary {
   color: #ffffff;
   background: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
 
-.vpc-btn.is-primary:hover:not(:disabled) {
+.vpc-btn.arco-btn[type="button"].is-primary:hover:not(:disabled) {
   background: var(--uvp-brand-strong);
 }
 
-.vpc-btn:disabled {
+.vpc-btn.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 
 .vpc-error {
@@ -288,7 +311,7 @@ const isEmpty = computed(() => !props.rows.length);
 .vpc-empty em {
   font-size: 10px;
   font-style: normal;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 
 /* 表单：紧凑排列，无分组标题 */
@@ -311,7 +334,7 @@ const isEmpty = computed(() => !props.rows.length);
 
 .vpc-field label {
   font-size: 10.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 
 .vpc-field-slider {
@@ -325,7 +348,7 @@ const isEmpty = computed(() => !props.rows.length);
   gap: 4px;
 }
 
-.vpc-segment button {
+.vpc-segment button.arco-btn[type="button"] {
   height: 26px;
   padding: 0 8px;
   font-size: 10.5px;
@@ -337,20 +360,29 @@ const isEmpty = computed(() => !props.rows.length);
   transition: all 0.15s ease;
 }
 
-.vpc-segment button:hover:not(:disabled) {
+.vpc-segment button.arco-btn[type="button"]:hover:not(:disabled) {
   color: var(--uvp-brand);
   border-color: var(--uvp-brand);
 }
 
-.vpc-segment button.is-on {
+.vpc-segment button.arco-btn[type="button"].is-on {
   font-weight: 600;
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
   border-color: var(--uvp-brand);
 }
 
-.vpc-segment button:disabled {
+body[arco-theme="dark"] .vpc-segment button.arco-btn[type="button"].is-on:not(:disabled) {
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.vpc-segment button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.42;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
 }
 </style>

@@ -44,20 +44,27 @@ const emit = defineEmits<{
     <header class="linked-card-hd">
       <span class="section-title">
         <Route :size="13" />巡航轨迹<em v-if="tracks.length" class="preset-count">{{ tracks.length }}</em>
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           v-if="activeId !== null && state !== 'stopped'"
           class="cruise-running-chip"
           data-testid="cruise-running-chip"
           :title="`巡航 #${activeId} 启动指令已发送,点击停止`"
+          aria-label="停止当前巡航"
           @click="emit('stop')"
         >
           <span class="cruise-running-dot" :class="state" />
           启动已下发
           <Square :size="10" />
-        </button>
+        </a-button>
       </span>
       <span class="linked-card-actions">
-        <button
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="resource-sync-btn"
           data-testid="cruise-sync-btn"
           :class="{ syncing }"
@@ -68,16 +75,20 @@ const emit = defineEmits<{
           <Loader2 v-if="syncing" :size="11" class="resource-sync-spin" />
           <RefreshCcw v-else :size="11" />
           <span>{{ syncLabel }}</span>
-        </button>
-        <button
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
           class="preset-save-btn"
           data-testid="cruise-add-btn"
           :disabled="!canAdd"
           :title="canAdd ? '新建巡航轨迹(按顺序串联多个预置位)' : '需要先添加预置位才能新建巡航轨迹'"
+          aria-label="添加巡航轨迹"
           @click="emit('add')"
         >
           <Plus :size="12" /><span>添加</span>
-        </button>
+        </a-button>
       </span>
     </header>
 
@@ -111,19 +122,32 @@ const emit = defineEmits<{
           }"
           :data-testid="`cruise-tile-${track.id}`"
         >
-          <button
+          <a-button
+            type="text"
+            size="mini"
+            html-type="button"
             class="preset-tile-hit cruise-item"
             :disabled="!track.enabled && !track.pending"
+            :aria-label="`${tileState(track) === 'stop' ? '停止' : '启动'}巡航 ${track.name}`"
+            :aria-pressed="activeId === track.id && state !== 'stopped'"
             @click="emit('toggle', track.id)"
           >
             <Square v-if="tileState(track) === 'stop'" :size="10" class="cruise-tile-icon" />
             <Play v-else :size="10" class="cruise-tile-icon" />
             <span class="preset-name">{{ track.name }}</span>
             <span v-if="track.pending" class="cruise-status-badge">未验证</span>
-          </button>
-          <button class="preset-tile-del" :title="`删除巡航 #${track.id}`" @click.stop="emit('delete', track.id)">
+          </a-button>
+          <a-button
+            type="text"
+            size="mini"
+            html-type="button"
+            class="preset-tile-del"
+            :title="`删除巡航 #${track.id}`"
+            :aria-label="`删除巡航 #${track.id}`"
+            @click.stop="emit('delete', track.id)"
+          >
             <X :size="11" />
-          </button>
+          </a-button>
         </div>
       </a-tooltip>
 
@@ -136,10 +160,17 @@ const emit = defineEmits<{
         class="preset-more-popover-trigger"
         @popup-visible-change="emit('update:moreVisible', $event)"
       >
-        <button class="preset-tile-more" data-testid="cruise-more-btn">
+        <a-button
+          type="text"
+          size="mini"
+          html-type="button"
+          class="preset-tile-more"
+          data-testid="cruise-more-btn"
+          aria-label="查看全部巡航轨迹"
+        >
           <span>更多 · {{ tracks.length }}</span>
           <ChevronDown :size="11" />
-        </button>
+        </a-button>
         <template #content>
           <div class="preset-popover" data-testid="cruise-popover">
             <header class="preset-popover-hd">
@@ -164,17 +195,29 @@ const emit = defineEmits<{
                   <span class="preset-popover-idx">#{{ track.id }}</span>
                   <span class="preset-popover-name">{{ track.name }}</span>
                   <div class="preset-popover-actions">
-                    <button
+                    <a-button
+                      type="text"
+                      size="mini"
+                      html-type="button"
                       class="preset-popover-call"
                       :disabled="!track.enabled && !track.pending"
+                      :aria-label="`${tileState(track) === 'stop' ? '停止' : '启动'}巡航 ${track.name}`"
                       @click="emit('toggle', track.id)"
                     >
                       <Square v-if="tileState(track) === 'stop'" :size="11" />
                       <Play v-else :size="11" />
-                    </button>
-                    <button class="preset-popover-del" title="删除此巡航轨迹" @click="emit('delete', track.id)">
+                    </a-button>
+                    <a-button
+                      type="text"
+                      size="mini"
+                      html-type="button"
+                      class="preset-popover-del"
+                      title="删除此巡航轨迹"
+                      :aria-label="`删除巡航 ${track.name}`"
+                      @click="emit('delete', track.id)"
+                    >
                       <Trash2 :size="11" />
-                    </button>
+                    </a-button>
                   </div>
                 </div>
               </a-tooltip>

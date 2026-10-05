@@ -18,7 +18,7 @@ import {
   ZoomIn,
   ZoomOut
 } from "@lucide/vue";
-import { controlPtz, fetchPTZDefaultSpeedConfig, getControlCapabilities } from "@/api/gb28181";
+import { controlPtz, fetchServiceConfig, getControlCapabilities } from "@/api/gb28181";
 import { useUserStoreHook } from "@/store/modules/user";
 import type { ChannelVO } from "../device-mgmt/api";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
@@ -115,8 +115,8 @@ async function loadDefaultSpeed() {
   speed.value = DEFAULT_PTZ_SPEED_LEVEL;
   if (!canReadSpeed.value) return;
   try {
-    const response = await fetchPTZDefaultSpeedConfig();
-    if (response.code === 0 && response.data) speed.value = normalizePtzSpeedLevel(response.data.level);
+    const response = await fetchServiceConfig();
+    if (response.code === 0 && response.data) speed.value = normalizePtzSpeedLevel(response.data.ptzDefaultSpeed.level);
   } catch {
     // 配置读取失败时保持默认 6 档，不影响云台控制。
   }

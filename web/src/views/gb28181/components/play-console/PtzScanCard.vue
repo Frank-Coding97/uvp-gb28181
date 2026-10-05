@@ -23,13 +23,17 @@ const emit = defineEmits<{
   <section class="linked-section linked-card" data-testid="scan-card">
     <header class="linked-card-hd">
       <span class="section-title"
-        ><MoveHorizontal :size="13" />自动扫描<button
+        ><MoveHorizontal :size="13" />自动扫描<a-button
+          type="text"
+          size="mini"
+          html-type="button"
           v-if="state === 'start-sent'"
           class="cruise-running-chip"
           data-testid="scan-running-chip"
+          aria-label="停止扫描"
           @click="emit('command', 'scan_stop')"
         >
-          <span class="cruise-running-dot" />启动已下发<Square :size="10" /></button
+          <span class="cruise-running-dot" />启动已下发<Square :size="10" /></a-button
       ></span>
     </header>
     <div class="scan-panel" data-testid="scan-panel">
@@ -38,18 +42,17 @@ const emit = defineEmits<{
         ><a-input
           id="scan-group-input"
           :model-value="group"
-          allow-clear
           class="scan-number"
-          type="number"
+          type="text"
           inputmode="numeric"
-          :min="groupMin"
-          :max="groupMax"
-          step="1"
           size="small"
           data-testid="scan-group-input"
           aria-label="扫描组号"
           @input="emit('update:group', Number($event ?? 0))"
-        /><button
+        /><a-button
+          type="primary"
+          size="mini"
+          html-type="button"
           class="btn-primary sm scan-toggle"
           data-testid="scan-toggle"
           :disabled="!canSend"
@@ -58,49 +61,54 @@ const emit = defineEmits<{
           <Play v-if="state === 'stopped'" :size="11" /><Square v-else :size="11" /><span>{{
             state === "start-sent" ? "停止扫描" : "开始扫描"
           }}</span>
-        </button>
+        </a-button>
       </div>
       <div class="scan-row">
-        <button
+        <a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           class="btn-ghost sm scan-bound-btn"
           data-testid="scan-set-left"
           :disabled="!canSend"
           @click="emit('command', 'scan_set_left')"
         >
-          设左边界</button
-        ><button
+          设左边界</a-button
+        ><a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           class="btn-ghost sm scan-bound-btn"
           data-testid="scan-set-right"
           :disabled="!canSend"
           @click="emit('command', 'scan_set_right')"
         >
           设右边界
-        </button>
+        </a-button>
       </div>
       <div class="scan-row">
         <label class="scan-label" for="scan-speed-input">速度</label
         ><a-input
           id="scan-speed-input"
           :model-value="speed"
-          allow-clear
           class="scan-number"
-          type="number"
+          type="text"
           inputmode="numeric"
-          :min="speedMin"
-          :max="speedMax"
-          step="1"
           size="small"
           data-testid="scan-speed-input"
           aria-label="扫描速度"
           @input="emit('update:speed', Number($event ?? 0))"
-        /><button
+        /><a-button
+          type="outline"
+          size="mini"
+          html-type="button"
           class="btn-ghost sm"
           data-testid="scan-set-speed"
           :disabled="!canSend || speedInvalid"
           @click="emit('command', 'scan_set_speed')"
         >
-          下发
-        </button>
+          应用速度
+        </a-button>
       </div>
       <p v-if="error" class="scan-error" data-testid="scan-error">{{ error }}</p>
       <p v-else class="scan-hint" data-testid="scan-hint">

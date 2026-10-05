@@ -34,7 +34,7 @@ defineProps<{
           ><i :class="{ 'is-differ': diffs.codec === true }">{{ streamInfo.videoCodec }}</i> ·
           <i :class="{ 'is-differ': diffs.resolution === true }">{{ streamInfo.resolution }}</i> ·
           <i :class="{ 'is-differ': diffs.fps === true }">{{ streamInfo.videoFps ? `${streamInfo.videoFps} fps` : "—" }}</i
-          ><em v-if="bitrate" class="vpc-bitrate">{{ bitrate }} kbps</em></strong
+          ><em v-if="bitrate" class="vpc-bitrate">实时码率 {{ bitrate }} kbps</em></strong
         >
       </div>
     </div>

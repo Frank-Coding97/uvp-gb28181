@@ -123,7 +123,10 @@ const durationModel = computed({
       </div>
 
       <div v-if="canDiagnosePlayback" class="probe-action-row">
-        <button
+        <a-button
+          type="primary"
+          size="mini"
+          html-type="button"
           class="probe-action"
           data-testid="probe-start"
           :disabled="phase !== 'playing' || probeState === 'sampling'"
@@ -132,7 +135,7 @@ const durationModel = computed({
           <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
           <Play v-else :size="14" />
           <span>{{ probeButtonText }}</span>
-        </button>
+        </a-button>
         <a-select
           v-model="durationModel"
           class="probe-duration"
@@ -198,14 +201,14 @@ const durationModel = computed({
   align-items: center;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-text-primary);
 }
 .section-meta {
   display: inline-flex;
   gap: 4px;
   align-items: center;
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .probe-card {
   display: grid;
@@ -241,7 +244,7 @@ const durationModel = computed({
 }
 .stream-brief-overview span {
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .stream-brief-overview strong {
   overflow: hidden;
@@ -256,7 +259,7 @@ const durationModel = computed({
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 9px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
 .stream-brief-split {
@@ -305,7 +308,7 @@ const durationModel = computed({
 .stream-brief-rows span {
   flex-shrink: 0;
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .stream-brief-rows strong {
   overflow: hidden;
@@ -329,7 +332,7 @@ const durationModel = computed({
   align-items: center;
   padding: 3px 7px;
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
   background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 999px;
@@ -353,7 +356,7 @@ const durationModel = computed({
   gap: 6px;
   align-items: stretch;
 }
-.probe-action {
+.probe-action.arco-btn[type="button"] {
   display: inline-flex;
   flex: 7 1 0;
   gap: 6px;
@@ -371,12 +374,14 @@ const durationModel = computed({
   border: 0;
   border-radius: 7px;
 }
-.probe-action:hover:not(:disabled) {
+.probe-action.arco-btn[type="button"]:hover:not(:disabled) {
   background: var(--uvp-brand-strong);
 }
-.probe-action:disabled {
+.probe-action.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
   cursor: not-allowed;
-  opacity: 0.56;
+  background: var(--uvp-dialog-control-bg);
+  opacity: 1;
 }
 :deep(.probe-duration) {
   flex: 3 1 0;
@@ -400,7 +405,7 @@ const durationModel = computed({
 }
 .probe-summary span {
   font-size: 9.5px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
 .probe-summary strong {
   font-family: ui-monospace, Menlo, monospace;
@@ -414,10 +419,10 @@ const durationModel = computed({
   font-size: 9px;
   font-style: normal;
   font-weight: 400;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-text-secondary);
 }
-.probe-summary.muted {
-  opacity: 0.56;
+.probe-summary.muted strong {
+  color: var(--uvp-text-secondary);
 }
 .probe-verdict {
   display: flex;

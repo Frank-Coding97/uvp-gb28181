@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   controlPtz: vi.fn(),
   getControlCapabilities: vi.fn(),
-  fetchPTZDefaultSpeedConfig: vi.fn()
+  fetchServiceConfig: vi.fn()
 }));
 const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
@@ -29,7 +29,7 @@ describe("BasicPtzPanel", () => {
       data: { basicPtz: { state: "supported", reason: "" } }
     });
     api.controlPtz.mockResolvedValue({ code: 0, data: { action: "accepted" } });
-    api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, data: { level: 6 } });
+    api.fetchServiceConfig.mockResolvedValue({ code: 0, data: { ptzDefaultSpeed: { level: 6 } } });
   });
 
   it("does not mount or initialize for a guest without PTZ permissions", async () => {
@@ -39,7 +39,7 @@ describe("BasicPtzPanel", () => {
 
     expect(wrapper.find(".basic-ptz").exists()).toBe(false);
     expect(api.getControlCapabilities).not.toHaveBeenCalled();
-    expect(api.fetchPTZDefaultSpeedConfig).not.toHaveBeenCalled();
+    expect(api.fetchServiceConfig).not.toHaveBeenCalled();
     expect(api.controlPtz).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -91,7 +91,7 @@ describe("BasicPtzPanel", () => {
   });
 
   it("loads level ten and sends the full GB28181 speed byte", async () => {
-    api.fetchPTZDefaultSpeedConfig.mockResolvedValueOnce({ code: 0, data: { level: 10 } });
+    api.fetchServiceConfig.mockResolvedValueOnce({ code: 0, data: { ptzDefaultSpeed: { level: 10 } } });
     const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
     await flushPromises();
 
@@ -102,7 +102,7 @@ describe("BasicPtzPanel", () => {
   });
 
   it("falls back to level six when the default speed cannot be loaded", async () => {
-    api.fetchPTZDefaultSpeedConfig.mockRejectedValueOnce(new Error("network error"));
+    api.fetchServiceConfig.mockRejectedValueOnce(new Error("network error"));
     const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
     await flushPromises();
 
