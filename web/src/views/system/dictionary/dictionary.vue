@@ -38,7 +38,16 @@
       >
         <template #columns>
           <a-table-column title="字典名称" data-index="name" :width="150"></a-table-column>
-          <a-table-column title="字典编码" data-index="code" :width="150"></a-table-column>
+          <a-table-column title="字典编码" :width="200">
+            <template #cell="{ record }">
+              <span class="dict-code-cell">
+                <span>{{ record.code }}</span>
+                <a-tooltip v-if="isSystemDict(record.code)" :content="SYSTEM_DICT_READONLY_HINT" position="top">
+                  <icon-lock class="dict-system-lock" />
+                </a-tooltip>
+              </span>
+            </template>
+          </a-table-column>
           <a-table-column title="状态" :width="100" align="center">
             <template #cell="{ record }">
               <a-tag bordered size="small" :color="record.status === 1 ? 'arcoblue' : 'red'">
@@ -64,13 +73,23 @@
                 <a-link
                   class="uvp-table-action uvp-table-action--edit"
                   @click="onUpdate(record)"
+                  :disabled="isSystemDict(record.code)"
                   v-hasPerm="['system:dict:edit']"
                 >
                   <template #icon><icon-edit /></template>
                   <span>修改</span>
                 </a-link>
-                <a-popconfirm type="warning" content="确定删除该字典吗?" @ok="onDelete(record)">
-                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:dict:delete']">
+                <a-popconfirm
+                  type="warning"
+                  content="确定删除该字典吗?"
+                  :disabled="isSystemDict(record.code)"
+                  @ok="onDelete(record)"
+                >
+                  <a-link
+                    class="uvp-table-action uvp-table-action--delete"
+                    :disabled="isSystemDict(record.code)"
+                    v-hasPerm="['system:dict:delete']"
+                  >
                     <template #icon><icon-delete /></template>
                     <span>删除</span>
                   </a-link>
@@ -122,9 +141,13 @@
     >
       <template #title> 字典详情 </template>
       <div>
+        <div v-if="currentDictReadonly" class="dict-readonly-hint">
+          <icon-lock />
+          <span>{{ SYSTEM_DICT_READONLY_HINT }}</span>
+        </div>
         <a-row>
           <a-space wrap>
-            <a-button type="primary" @click="onAddDetail" v-hasPerm="['system:dictitem:add']">
+            <a-button type="primary" @click="onAddDetail" :disabled="currentDictReadonly" v-hasPerm="['system:dictitem:add']">
               <template #icon><icon-plus /></template>
               <span>新增</span>
             </a-button>
@@ -159,13 +182,23 @@
                   <a-link
                     class="uvp-table-action uvp-table-action--edit"
                     @click="onDetailUpdate(record)"
+                    :disabled="currentDictReadonly"
                     v-hasPerm="['system:dictitem:edit']"
                   >
                     <template #icon><icon-edit /></template>
                     <span>修改</span>
                   </a-link>
-                  <a-popconfirm type="warning" content="确定删除该字典吗?" @ok="onDeleteDetail(record)">
-                    <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:dictitem:delete']">
+                  <a-popconfirm
+                    type="warning"
+                    content="确定删除该字典吗?"
+                    :disabled="currentDictReadonly"
+                    @ok="onDeleteDetail(record)"
+                  >
+                    <a-link
+                      class="uvp-table-action uvp-table-action--delete"
+                      :disabled="currentDictReadonly"
+                      v-hasPerm="['system:dictitem:delete']"
+                    >
                       <template #icon><icon-delete /></template>
                       <span>删除</span>
                     </a-link>
@@ -230,6 +263,7 @@ import {
 
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useStatusLabel } from "@/hooks/useDictOptions";
+import { SYSTEM_DICT_READONLY_HINT, isSystemDict } from "./systemDictCodes";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -344,6 +378,8 @@ const afterClose = () => {
   };
 };
 const onUpdate = (record: SystemDict) => {
+  // 双保险：按钮已置灰，这里再拦一道（防键盘/程序化触发）
+  if (isSystemDict(record.code)) return;
   title.value = "修改字典";
   addFrom.value = { ...deepClone(record) };
   open.value = true;
@@ -351,6 +387,7 @@ const onUpdate = (record: SystemDict) => {
 
 // 删除字典
 const onDelete = async (record: SystemDict) => {
+  if (isSystemDict(record.code)) return;
   try {
     await deleteDictAPI({ id: record.id });
     arcoMessage("success", "删除成功");
@@ -417,6 +454,8 @@ const getDict = async () => {
 const detailLoading = ref(false);
 const detailOpen = ref(false);
 const currentDict = ref<SystemDict | null>(null);
+// 系统内置字典（值域由国标/协议固定）：详情弹窗内的增删改一并置灰
+const currentDictReadonly = computed(() => isSystemDict(currentDict.value?.code));
 const dictDetail = ref<{
   list: SystemDictItem[];
 }>({
@@ -478,6 +517,7 @@ const detailFormRef = ref();
 const detailTitle = ref("");
 const detailCaseOpen = ref(false);
 const onAddDetail = () => {
+  if (currentDictReadonly.value) return;
   detailTitle.value = "新增字典数据";
   deatilForm.value = {
     name: "",
@@ -524,6 +564,7 @@ const handleOkDetail = async () => {
   }
 };
 const onDetailUpdate = (record: SystemDictItem) => {
+  if (currentDictReadonly.value) return;
   detailTitle.value = "修改字典数据";
   deatilForm.value = { ...deepClone(record) };
   detailCaseOpen.value = true;
@@ -531,6 +572,7 @@ const onDetailUpdate = (record: SystemDictItem) => {
 
 // 删除字典项
 const onDeleteDetail = async (record: SystemDictItem) => {
+  if (currentDictReadonly.value) return;
   try {
     await deleteDictItemAPI({ id: record.id });
     arcoMessage("success", "删除成功");
@@ -598,5 +640,31 @@ getDict();
 
 .uvp-data-table :deep(.uvp-table-action) {
   padding: 0 4px;
+}
+
+/* 系统内置字典：编码列尾部的锁标（只读提示） */
+.dict-code-cell {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.dict-system-lock {
+  flex: none;
+  font-size: 13px;
+  color: var(--uvp-text-tertiary);
+}
+
+/* 系统内置字典：详情弹窗顶部的只读说明条 */
+.dict-readonly-hint {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-search-control-bg, rgb(0 0 0 / 3%));
+  border-radius: 8px;
 }
 </style>

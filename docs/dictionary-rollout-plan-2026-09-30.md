@@ -260,21 +260,34 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 **连带影响**：`useVideoParamDict.test.ts` 里"兜底 == 种子逐字比对"的锚点随之失效，已改为**协议值域正向锁定**（改兜底必然红）。
 ⚠️ 旧的"基线漂移"议题（提交的 seeds 与三方言不同步）**随本次口径变更自然消解** —— 不再维护 seeds，就无所谓漂移。
 
-### 3.2 字段型字典是否标「系统级只读」
+### 3.2 ✅ 已定并已实施：字段型字典「前端只读」（2026-10-05 选方案 B）
 
-`ptz_type`、`channel_*`、`alarm_*` 的值域由 GB/T 28181 固定。字典管理页现在**允许任意增删改**这些字典项。现场改坏值域会导致解析 / 对账**静默错位**（如把 `PTZType=1` 的文案改掉，界面就认不出球机）。
+`ptz_type`、`video_*`、`channel_*` 的值域由 GB/T 28181 或代码固定。字典管理页原先**允许任意增删改** ——
+现场改坏会让那一档**选不出来 / 下发不出去**（界面里没有这个选项了）。
 
-⚠️ **2026-10-05 P1 又新增了三个字段型字典**（`video_format` / `video_resolution` / `bit_rate_type`），这条待拍板的紧迫性上升了。
+**老板 2026-10-05 拍板：走方案 B（前端只读，零改表，后端不拦）。**
 
-P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所以现场改文案**不再影响**「回读 vs 实测」的结论；但**下拉选项**仍会被改坏 —— 字典项被停用/删掉，那一档就再也发不出去（界面里没有这个选项了）。
+实现落点：
 
-**待选方案**
-
-| 方案 | 做法 |
+| 落点 | 说明 |
 | --- | --- |
-| A（推荐） | 给字典加「系统级」标记（可复用 `created_by = 1` 或加 `is_system` 列），管理页对系统级**禁改禁删** |
-| B | 只在前端管理页对这批 code 做只读，后端不拦 |
-| C | 不设限，靠文档和规范约束 |
+| `web/src/views/system/dictionary/systemDictCodes.ts` | **唯一真源**：`SYSTEM_DICT_CODES`（11 个）+ `isSystemDict(code)`；入名单判据写在文件头注释 |
+| `dictionary.vue` | 外层字典「修改/删除」、详情弹窗「新增/逐项改删」按 code 置灰；⛔ 删除的**确认气泡也要 `:disabled`**（否则点链接会弹出一个"点了也没用"的气泡 —— Arco 的 Trigger 监听在包裹层，链接禁用拦不住它）；每个改动入口另加函数守卫做双保险；编码列加锁标 + 详情弹窗顶部说明条 |
+| `uvp-ui-language.scss` | 新增 `.uvp-table-action.arco-link-disabled` 置灰规则 —— ⛔ **必须 3 类选择器**，否则会被各 tone 的 2 类规则按加载顺序盖回彩色；深色主题另带 `body[arco-theme="dark"]` 前缀（那些 tone 有前缀，权重更高） |
+
+**名单口径（11 个）**：`ptz_type` / `video_format` / `video_resolution` / `bit_rate_type` /
+`channel_room_type` / `channel_supply_light_type` / `channel_direction_type` / `channel_position_type` /
+`channel_use_type` / `channel_photoelectric_imaging_type` / `gb28181_playback_protocol`。
+
+⛔ **刻意排除**：`post`（业务字典，管理员本就该增补）；`gender` / `status` / `taskStatus` / `playback_*` /
+`device_status` / `media_node_state` / `cascade_register_state`（纯展示，且判定走派生键，改名无害）。
+
+⛔ **方案 A（真·系统级标记）为什么不走**：原想复用 `created_by = 1`，但**实测 25 个字典的 `created_by` 全是 1**，
+无法作判据 ⇒ 真拦必须给 `sys_dict` 加 `is_system` 列（属 schema 改动：`schema.ir.json` + `seeds/` →
+`generate_sql.py` → 手工迁移）。老板选择暂不动表结构。
+
+**测试**：`systemDictCodes.test.ts`（名单/判据锁定）+ `dictionary.readonlyGate.test.ts`（源码断言：5 个改动入口都有守卫）
++ `dictionary.readonlyGate.trigger.test.ts`（**真渲染**：禁用时气泡不弹、启用时会弹 → 反证判据不是恒假的假绿）。
 
 ### 3.3 ✅ 已决策：告警（B1–B3）翻译层 —— 走前端　（⏸ 整批暂缓，见 §3.4C）
 
@@ -309,10 +322,7 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
 
 **C. 建议顺序**（含 §3.2 的依赖）
 
-1. ⏳ §3.2「字段型字典只读闸门」——**仍未拍板**（老板 2026-10-05 接受了建议的**顺序**，但没选 A/B/C 方案）。
-   ⚠️ 有个成本前提要先说清：**"真·系统级标记"要加列 ⇒ 属 schema 类改动**，按本仓口径得走
-   `schema.ir.json` + `seeds/` → `generate_sql.py` → 手工幂等迁移，**不能再走"直插开发库"那条快路**；
-   若只是"前端对这批 code 只读"（方案 B）则零 schema 改动。二者代价差一个量级，故**先不擅自落**。
+1. ✅ **§3.2「字段型字典只读闸门」—— 已拍板并已实施（方案 B 前端只读）**，见 §3.2 正文；
 2. ✅ **P3a 通道属性 6 个字典 —— 已完成**（见 §二·P3a）；
 3. ⏸ **P3b 告警 —— 2026-10-05 老板决定暂时跳过**（原话"那就暂时跳过告警"）。⛔ 重启前置三条**缺一不可**：
    ① 先定"谁翻译"（§3.3 已倾向归前端，但落地要动后端 DTO）；② 收敛那 20 项前后端重复值域；③ 拍板

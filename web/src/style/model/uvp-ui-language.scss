@@ -1085,6 +1085,25 @@ body[arco-theme="dark"] .zlm-node-form {
   opacity: 0.92;
 }
 
+/* 只读行（如系统内置字典）：操作链接置灰且不可点。
+   ⛔ 必须比上面各 tone 规则更具体 —— 那些是 `.uvp-data-table .uvp-table-action--edit`（2 类），
+   与 Arco 的 `.arco-link.arco-link-disabled`（2 类）同权重，按加载顺序可能被盖回彩色。 */
+.uvp-data-table .uvp-table-action.arco-link-disabled,
+.uvp-data-table .uvp-table-action.arco-link-disabled:hover {
+  color: var(--uvp-text-tertiary);
+  pointer-events: none;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* 深色主题下 `--edit` / `--detail` 等有 `body[arco-theme="dark"]` 前缀（更高权重），
+   ⇒ 只读态也要带同样前缀，否则深色下仍是彩色（"两套皮肤"）。 */
+body[arco-theme="dark"] .uvp-data-table .uvp-table-action.arco-link-disabled,
+body[arco-theme="dark"] .uvp-data-table .uvp-table-action.arco-link-disabled:hover {
+  color: var(--uvp-text-tertiary);
+  background: transparent;
+}
+
 .uvp-data-table .arco-link.arco-link-status-normal:hover {
   color: var(--uvp-brand-strong);
 }
