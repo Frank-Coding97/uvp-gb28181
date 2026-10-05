@@ -47,7 +47,7 @@
 | **P1** | 视频参数三码值 | `videoParamCodec.ts`、`DeviceConfigDrawer.vue`、`PictureVideoParamCard.vue`、新增 `useVideoParamDict.ts` | `video_format`、`video_resolution`、`bit_rate_type` | ✅ **已完成** |
 | **P2** | 设备/节点/级联状态 | 18 处在线状态 + `zlm/**` 8 处节点状态 + `cascadeState.ts` | `device_status`、`media_node_state`、`cascade_register_state` | ✅ **已完成** |
 | **P3a** | 通道属性（只读展示） | `channelAttributeText.ts`、新增 `useChannelAttributeDict.ts`、`device-mgmt/index.vue` | `channel_*` ×6 | ✅ **已完成** |
-| **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏳ 待拍板（见 §3.3/§3.4B） |
+| **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏸ **暂缓**（2026-10-05 老板决定暂时跳过；重启前置见 §3.4B） |
 | **P4** | 其余 20 项 | 见盘点报告 F12–F32、B4–B10 | 按项 | ⏳ 待开始 |
 
 ### 二·P0 明细（✅ 已完成）
@@ -276,9 +276,11 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
 | B | 只在前端管理页对这批 code 做只读，后端不拦 |
 | C | 不设限，靠文档和规范约束 |
 
-### 3.3 ✅ 已决策：告警（B1–B3）翻译层 —— 走前端
+### 3.3 ✅ 已决策：告警（B1–B3）翻译层 —— 走前端　（⏸ 整批暂缓，见 §3.4C）
 
 **2026-10-05 拍板：后端不做字典。** 字典只做前端展示翻译；后端只在"输出不经浏览器"的场景（对外 OpenAPI、短信/邮件通知正文、导出文件）才译。
+
+⏸ **2026-10-05 追加：整批 P3b 暂时跳过**（老板原话"那就暂时跳过告警"）—— 翻译层方向定了，但落地还卡在 §3.4B 的三个前置，故不改后端、不动前端，原地挂起。
 
 ⚠️ 但告警现由**后端** `alarm.go` 返回带中文 `label` 的对象（属**已有的**后端译），前端直接展示 —— 要收归前端就得改后端 DTO + 前端全部告警消费点，是独立改造，不在 P1/P2 范围内。
 
@@ -298,7 +300,7 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
   2. `photoelectricImagingType` 是**多值**（标准允许 `1/2/3` 斜杠分隔）—— 字典只管"单码→中文"，拆段/拼回留在纯函数。
 - ✅ 形态判断逻辑（`catalogShapeFromAttributes` 推 2016/2022 形态）**已经认码值**，不受字典改名影响，无需改动。
 
-**B. 告警（3 个）—— ⏳ 建议推迟，且需先做一个前置动作**
+**B. 告警（3 个）—— ⏸ 暂缓（2026-10-05 老板拍板"暂时跳过"）**
 
 - ⛔ **后端已经在翻译**：`controllers/alarm.go` 硬编码三张表 —— `alarmPriority`(4) / `alarmMethod`(7) / `alarmType(method,value)`(20)，接口以 `alarmEnumValue{value,label}` 下发，前端**直接显示 `label`**。此时前端再加字典 = **两个真源**（要么字典成死代码，要么后端 label 变废负载）⇒ **先定"谁翻译"**。
 - ⛔⛔ **同一值域已写两遍**（已逐项机检）：后端 `alarmType()` 20 项 与 前端 `alarm-management/alarmState.ts` 的 `ALARM_TYPE_OPTIONS` 20 项 **逐项完全一致**（三组 5/13/2，含「图像遮挡报警（2022）」的括号）。属 P1 那类"同一值域多处定义"⇒ **先收敛再字典化**。
@@ -312,7 +314,9 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
    `schema.ir.json` + `seeds/` → `generate_sql.py` → 手工幂等迁移，**不能再走"直插开发库"那条快路**；
    若只是"前端对这批 code 只读"（方案 B）则零 schema 改动。二者代价差一个量级，故**先不擅自落**。
 2. ✅ **P3a 通道属性 6 个字典 —— 已完成**（见 §二·P3a）；
-3. P3b 告警：定"翻译归前端"→ 收敛那 20 项重复 → 后端改只返码值 + 前端接管展示，**单独一批**做，不与 P3a 混。
+3. ⏸ **P3b 告警 —— 2026-10-05 老板决定暂时跳过**（原话"那就暂时跳过告警"）。⛔ 重启前置三条**缺一不可**：
+   ① 先定"谁翻译"（§3.3 已倾向归前端，但落地要动后端 DTO）；② 收敛那 20 项前后端重复值域；③ 拍板
+   `alarm_type` 的 method×type 二维怎么落（拼接值 vs 拆 3 字典）。**单独一批**做，不与 P3a 混。
 
 ---
 
