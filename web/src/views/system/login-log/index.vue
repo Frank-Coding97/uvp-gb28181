@@ -16,16 +16,13 @@ import {
   type LoginLogListParams,
   type LoginLogResult
 } from "@/api/login-log";
+import { useLoginFailureReason } from "./useLoginFailureReasonDict";
 
-const reasonLabels: Record<string, string> = {
-  captcha_invalid: "验证码错误",
-  user_not_found: "用户不存在",
-  user_disabled: "用户未启用",
-  account_locked: "账户已锁定",
-  password_incorrect: "密码错误",
-  session_create_failed: "会话创建失败",
-  server_error: "服务器错误"
-};
+/**
+ * 失败原因：**值域由后端白名单固定**（`sysloginlogparam.go` 的 switch），展示名走
+ * `login_failure_reason` 字典（`loginFailureReason.ts` 是纯函数层，未命中/未加载回原兜底）。
+ */
+const { options: reasonOptions, label: failureLabel } = useLoginFailureReason();
 
 const form = reactive({
   username: "",
@@ -228,10 +225,6 @@ function resultLabel(result: string) {
   return result === "success" ? "成功" : "失败";
 }
 
-function failureLabel(reason?: string) {
-  return reasonLabels[reason || ""] || (reason ? "其他失败" : "-");
-}
-
 onMounted(() => void load());
 
 defineExpose({
@@ -280,7 +273,9 @@ defineExpose({
           </div>
           <div class="login-log-filter login-log-filter--reason">
             <a-select v-model="form.failureReason" placeholder="失败原因" allow-clear>
-              <a-option v-for="(label, reason) in reasonLabels" :key="reason" :value="reason">{{ label }}</a-option>
+              <a-option v-for="option in reasonOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </a-option>
             </a-select>
           </div>
           <div class="login-log-filter">

@@ -36,7 +36,18 @@ const GB_PROTOCOL_DICT_CODES = [
 /** 平台协议值域：值是代码里写死的字面量（见 `playbackProtocol.ts` 的 `isPlaybackProtocol`）。 */
 const PLATFORM_PROTOCOL_DICT_CODES = ["gb28181_playback_protocol"] as const;
 
-export const SYSTEM_DICT_CODES: readonly string[] = [...GB_PROTOCOL_DICT_CODES, ...PLATFORM_PROTOCOL_DICT_CODES];
+/**
+ * 平台内部枚举：值不是国标，但**与后端/落库契约绑定** —— 删一档就是"选不出来"或"与后端白名单对不上"。
+ * - `job_execute_policy` / `job_blocking_policy`：int 直接提交落库（`sysjobs.go`）
+ * - `login_failure_reason`：既作查询参数，又是后端 switch 白名单（`sysloginlogparam.go`）
+ */
+const PLATFORM_ENUM_DICT_CODES = ["job_execute_policy", "job_blocking_policy", "login_failure_reason"] as const;
+
+export const SYSTEM_DICT_CODES: readonly string[] = [
+  ...GB_PROTOCOL_DICT_CODES,
+  ...PLATFORM_PROTOCOL_DICT_CODES,
+  ...PLATFORM_ENUM_DICT_CODES
+];
 
 const SYSTEM_DICT_CODE_SET = new Set<string>(SYSTEM_DICT_CODES);
 

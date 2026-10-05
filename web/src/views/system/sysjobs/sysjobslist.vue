@@ -22,12 +22,14 @@
               <a-option v-for="executor in executorList" :key="executor" :value="executor">{{ executor }}</a-option>
             </a-select>
             <a-select v-model="searchForm.executionPolicy" placeholder="请选择执行策略" style="width: 136px" allow-clear>
-              <a-option :value="0">单次执行</a-option>
-              <a-option :value="1">重复执行</a-option>
+              <a-option v-for="option in executePolicyOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </a-option>
             </a-select>
             <a-select v-model="searchForm.status" placeholder="请选择任务状态" style="width: 136px" allow-clear>
-              <a-option :value="1">启用</a-option>
-              <a-option :value="0">禁用</a-option>
+              <a-option v-for="option in jobStatusOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </a-option>
             </a-select>
           </template>
           <template #actions>
@@ -163,8 +165,9 @@
           </a-form-item>
           <a-form-item field="executionPolicy" label="执行策略">
             <a-select v-model="editingData.executionPolicy" placeholder="请选择执行策略">
-              <a-option :value="0">单次执行</a-option>
-              <a-option :value="1">重复执行</a-option>
+              <a-option v-for="option in executePolicyOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </a-option>
             </a-select>
             <template #extra v-if="editingData.executionPolicy === 0">
               单次执行：仅执行一次任务。执行成功后任务状态将自动变更为停用。
@@ -225,8 +228,9 @@
           </a-form-item>
           <a-form-item field="blockingPolicy" label="阻塞策略">
             <a-select v-model="editingData.blockingPolicy" placeholder="请选择阻塞策略">
-              <a-option :value="0">丢弃</a-option>
-              <a-option :value="1">并行</a-option>
+              <a-option v-for="option in blockingPolicyOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </a-option>
             </a-select>
           </a-form-item>
           <a-form-item field="parallelNum" label="并行数" v-if="editingData.blockingPolicy === 1">
@@ -260,9 +264,20 @@ import { getExecutorsList, setSysJobsStatus, executeSysJobsNow } from "@/api/sys
 import { formatTime } from "@/globals";
 import { Message } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useStatusLabel } from "@/hooks/useDictOptions";
+import { useJobBlockingPolicy, useJobExecutePolicy } from "./useJobPolicyDict";
 
 const router = useRouter();
 const { isMobile } = useDevicesSize();
+// 执行策略 / 阻塞策略：值域是**后端契约**（int，落库），只有展示名走字典
+const { options: executePolicyOptions, label: executePolicyLabel } = useJobExecutePolicy();
+const { options: blockingPolicyOptions, label: blockingPolicyLabel } = useJobBlockingPolicy();
+// 任务状态：复用 P0 的 `status` 字典（此文件当时漏了，本次补上；switch 的交互文案不动）
+const jobStatusLabel = useStatusLabel();
+const jobStatusOptions = computed(() => [
+  { value: 1, label: jobStatusLabel(1) },
+  { value: 0, label: jobStatusLabel(0) }
+]);
 const layoutMode = computed(() => {
   const info = {
     mobile: {
@@ -498,23 +513,12 @@ const loadExecutorList = async () => {
   }
 };
 
-// 格式化执行策略
-const formatExecutionPolicy = (value: number) => {
-  const policyMap: Record<number, string> = {
-    0: "单次执行",
-    1: "重复执行"
-  };
-  return policyMap[value] || "-";
-};
+// 格式化执行策略 / 阻塞策略
+// 档位（0/1）与未命中兜底都在 jobPolicy.ts（纯函数层），展示名走 job_execute_policy /
+// job_blocking_policy 字典 —— 字典只能改名，改不了档位（值要提交给后端落库）。
+const formatExecutionPolicy = (value: number) => executePolicyLabel(value);
 
-// 格式化阻塞策略
-const formatBlockingPolicy = (value: number) => {
-  const policyMap: Record<number, string> = {
-    0: "丢弃",
-    1: "并行"
-  };
-  return policyMap[value] || "-";
-};
+const formatBlockingPolicy = (value: number) => blockingPolicyLabel(value);
 
 // 状态切换loading状态
 const statusLoading = reactive<Record<string, boolean>>({});

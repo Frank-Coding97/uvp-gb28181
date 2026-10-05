@@ -48,7 +48,11 @@
 | **P2** | 设备/节点/级联状态 | 18 处在线状态 + `zlm/**` 8 处节点状态 + `cascadeState.ts` | `device_status`、`media_node_state`、`cascade_register_state` | ✅ **已完成** |
 | **P3a** | 通道属性（只读展示） | `channelAttributeText.ts`、新增 `useChannelAttributeDict.ts`、`device-mgmt/index.vue` | `channel_*` ×6 | ✅ **已完成** |
 | **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏸ **暂缓**（2026-10-05 老板决定暂时跳过；重启前置见 §3.4B） |
-| **P4** | 其余 20 项 | 见盘点报告 F12–F32、B4–B10 | 按项 | ⏳ 待开始 |
+| **P4a** | 系统类三件套 | `sysjobs/sysjobslist.vue`、`system/login-log/index.vue`（+ 各 2 个新纯函数/注入层文件） | `job_execute_policy`、`job_blocking_policy`、`login_failure_reason` | ✅ **已完成**（顺带补 `sysjobslist` 里 F25 的漏项） |
+| **P4b** | 设备配置族（**会下发给设备**） | `device-mgmt/deviceConfigGroups.ts`、`DeviceConfigOsdBlocks.vue`、`DeviceConfigDrawer.vue` | `frame_mirror`、`stream_number`（`osd_time_format` **不建议**做，见 §3.5） | ⏳ 待做 |
+| **P4c** | 纯展示批 | 见 §3.5 的 A 组 | 按项（约 8 项） | ⏳ 待做 |
+| **P4d** | 维护操作结果收敛 | `DeviceRebootDialog` / `DeviceFirmwareUpgradePanel` / `StorageCardFormatDialog` / `DeviceMaintenanceRecordsDialog` | `maintenance_operation_result` | ⏳ 待做（⚠️ **4 份值域并不相同**，需先定口径） |
+| **B4–B10** | 后端文案 | 见盘点报告 | — | ⛔ **不做**（§8「后端不做字典」）；仅当前端另有一份重复时，以前端为准收敛 |
 
 ### 二·P0 明细（✅ 已完成）
 
@@ -236,8 +240,39 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 **⚠️ 知情项（老板 2026-10-05 提醒）**：这六项**真实设备极少上报**，本批价值在"枚举口径统一"，
 不在覆盖面 —— 别指望它在现场能常看到值。
 
-**提交状态**：⏳ 未提交（4 个文件：1 改 + 1 新增 + 1 测试 + 本台账；`device-mgmt/index.vue` 为改）。
+**提交状态**：✅ 已提交 `c7a9fee0`（5 个文件：3 前端 + 1 测试 + 本台账）。
 ⛔ **数据库侧零改动**（新字典直插开发库，仓库里没有任何 SQL/seeds 痕迹）。
+
+### 二·P4a 明细（✅ 已完成 2026-10-05）
+
+**范围**：系统类三件套 —— F22 任务执行策略 / F23 任务阻塞策略 / F24 登录失败原因。
+
+| 落点 | 说明 |
+| --- | --- |
+| `sysjobs/jobPolicy.ts`（纯函数） | `DICT_CODE_*` + `*_LABEL_FALLBACK`（值域唯一真源，**键序 = 下拉序**）+ `jobPolicyLabelsFrom` / `jobPolicyOptionsFromLabels` / `jobPolicyLabelFrom` |
+| `sysjobs/useJobPolicyDict.ts`（注入层） | `useJobExecutePolicy()` / `useJobBlockingPolicy()` |
+| `login-log/loginFailureReason.ts`（纯函数） | 同上一组导出（key 为字符串） |
+| `login-log/useLoginFailureReasonDict.ts` | `useLoginFailureReason()` |
+| `sysjobslist.vue` | 两处 `policyMap` + 两处模板硬编码 `<a-option>` ⇒ 全走字典选项；`formatExecutionPolicy/BlockingPolicy` 改为委托 |
+| `login-log/index.vue` | `reasonLabels` 常量 ⇒ 组合式；筛选下拉与 `failureLabel` 都走字典 |
+
+⭐ **本批首次采用「白名单式」字典合并**（与 P1/P2 的「字典驱动」不同）：
+字典项只按 `value` **改名** —— `value` 不在代码 `fallback` 里的**直接丢弃**、`fallback` 里缺的**自动补齐**
+⇒ **档位与顺序永远由代码锁定**。理由：这三项的值都要提交给后端（int 落库 / 后端白名单），
+多一档少一档都是契约破坏。单测正反两面都钉了（多给的档位被丢弃 / 缺的档位补回兜底）。
+
+✅ **核实：不存在"两个真源"**。盘点报告 B6 提示 `schedulerhelper/job.go` 有中文与 F22/F23 同源，
+但实测那两个 `getXxxName()` 是**包私有**、调用方只有日志（`logger.go` / `zap_logger.go`），
+**API 返回的是 int** ⇒ 前端本地译就是对的口径，不需要像告警那样先搬翻译层。
+
+⭐ **顺带补 F25 漏项**：`sysjobslist.vue` 的任务状态筛选当时没接 `status` 字典（P0 漏了）——
+它就在执行策略筛选旁边，不补会出现"一格里两种写法"。其 `a-switch` 的 `checked-text/unchecked-text`
+**保持硬编码**（属控件交互文案，不在字典化范围，见 §7）。
+
+**验证**：`jobPolicy.test.ts` 8 例 + `loginFailureReason.test.ts` 6 例 + 同目录既有用例，合计 **36 例全绿**；
+字典目录 14 例（只读名单已扩到 **14 个 code**）；开发库 **28 字典 / 156 项**（无重复行、无父 id 落空）；
+接口 `getByDictCode/*` 三个 code **逐条对拍一致（3/3 ✓）**；`eslint` 零告警。
+⚠️ `vue-tsc` 仍按「只看本批文件」验（存量 108 条，全在 `firmware-repo/*` 等）。
 
 ---
 
@@ -327,6 +362,45 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 3. ⏸ **P3b 告警 —— 2026-10-05 老板决定暂时跳过**（原话"那就暂时跳过告警"）。⛔ 重启前置三条**缺一不可**：
    ① 先定"谁翻译"（§3.3 已倾向归前端，但落地要动后端 DTO）；② 收敛那 20 项前后端重复值域；③ 拍板
    `alarm_type` 的 method×type 二维怎么落（拼接值 vs 拆 3 字典）。**单独一批**做，不与 P3a 混。
+
+### 3.5 P4 侦察结论（2026-10-05，动手前先看，避免重做）
+
+对 F12–F16 / F19 / F21–F24 / F26–F32 逐项摸过「定义点 / 值域 / 消费点 / 是否下发」。分六类：
+
+**A. 纯展示 · 低风险**（改字典只影响文案）：F15 坐标来源、F19 多屏可播性、F21 会话类型、F27 能力说明、
+F28 看守位能力三态、F29 维护操作结果、F30 回读新鲜度、F31 云录制持有态、F32 探针诊断结论。
+→ 这些**不进只读名单**（判定走码值/派生键，改名无害）。
+
+**B. 会被写进下发报文（高风险，字典上线后必须进只读名单）**：**F13 画面镜像**、**F14 码流编号**
+（经 `requiredInt` 收窄后写 `FrameMirror` / `VideoRecordPlan.streamNumber` 下发设备）。
+字典只能改 label，**value 绝不能动**。
+
+**C. 值是后端/落库契约（不是设备报文，但同样不可增删档）**：F16（筛选参数 `source=`）、F22/F23（int 落库）、
+F24（**后端 switch 白名单**）、F26（落库 + DB `CHECK (3,4)`）。→ 一并进只读名单。
+
+**D. ⛔ 不建议字典化的**：
+- **F12 OSD 时间格式** —— 界面渲染的是 `sample` 模板**展开成当前时刻**的实例（`DeviceConfigOsdBlocks.vue:103`），
+  下拉里**根本不显示 `label`**；字典只能改对账/无障碍用的那串，**价值极低、风险不小**（`sample` 是逻辑输入）。
+  ⇒ 建议**跳过**，并在盘点表里标注理由。
+- **F27 能力说明** = 11 条**句子**（不是枚举名），且 scope 值域由后端下发、前端另有 `OPENAPI_CLIENT_SCOPES` 一份
+  ⇒ 与 §3.4 的长句状态同类，不并入字典。
+
+**E. ⛔ 有"文案/键被当逻辑输入"，改造时必须先拆**：
+- **F16**：`SOURCE_LABELS` 的 key 被 `raw in SOURCE_LABELS` 当**校验白名单**（`snapshotLibraryState.ts:59`）；
+- **F32**：`ISSUE_META` 的 code 被用于 severity 判定与 verdict 决策（`probeDiagnosis.ts:118,136-163`）；
+- **F19**：`slot.availability` 原值直接拼 CSS class（`PlaybackSchemePanel.vue:291`）；
+- **F21**：测试直接断言源码里的中文串（`MediaRuntimeLedgerDialog.test.ts:232`）⇒ 改字典必须同步改测试；
+- **F24**：`reasonLabels` 的 key **既是筛选选项值又是后端白名单**，只许改名、不许增删 key。
+
+**F. ⛔ F29 的 4 份实现值域并**不相同**（重启 9 / 固件 7 / 格式化 9 / 维护记录 9）—— 不是"同一值域写 4 遍"，
+而是**四个有交集的集合** ⇒ 属设计题，先定"并成一个字典还是各自一个"再动手。
+
+**F28 口径订正**：盘点报告写的 F28「订阅能力」，实际是 **`PlayConsoleLinked` 的看守位能力三态**
+（`supported/unsupported/unknown`）；该文件全文没有"订阅"三态。按看守位处理。
+
+**⭐ 顺手发现（F25 漏项）**：P0 声称 `status` 字典覆盖 9 处，实际 `views/system/menu/menu.vue` 与
+`views/system/sysjobs/sysjobslist.vue` **仍是硬编码**（全仓只有 7 个文件 import 了 `useStatusLabel`）。
+P4a 已补 `sysjobslist`（同一行就是本次要改的执行策略筛选，不补会"一格里两种写法"）；`menu.vue` 待确认是否还需要。
 
 ---
 

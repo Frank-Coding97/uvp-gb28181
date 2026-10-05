@@ -15,7 +15,10 @@ describe("系统内置字典名单", () => {
         "channel_direction_type",
         "channel_position_type",
         "channel_use_type",
-        "channel_photoelectric_imaging_type"
+        "channel_photoelectric_imaging_type",
+        "job_execute_policy",
+        "job_blocking_policy",
+        "login_failure_reason"
       ].sort()
     );
   });
