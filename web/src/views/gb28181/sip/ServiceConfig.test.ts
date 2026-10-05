@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ServiceConfig from "./ServiceConfig.vue";
 
 const api = vi.hoisted(() => ({
+  fetchServiceConfig: vi.fn(),
+  updateServiceConfig: vi.fn(),
   fetchPTZDefaultSpeedConfig: vi.fn(),
   updatePTZDefaultSpeedConfig: vi.fn(),
   fetchDefaultChannelStreamTransportConfig: vi.fn(),
@@ -36,8 +38,81 @@ const api = vi.hoisted(() => ({
   fetchPreallocationModeConfig: vi.fn(),
   updatePreallocationModeConfig: vi.fn(),
   fetchSIPLogConfig: vi.fn(),
-  updateSIPLogConfig: vi.fn()
+  updateSIPLogConfig: vi.fn(),
+  fetchCloudRecordingRetentionConfig: vi.fn(),
+  updateCloudRecordingRetentionConfig: vi.fn()
 }));
+
+const aggregateSections = [
+  ["positionHistory", "fetchPositionHistoryConfig", "updatePositionHistoryConfig"],
+  ["cloudRecordingRetention", "fetchCloudRecordingRetentionConfig", "updateCloudRecordingRetentionConfig"],
+  ["sdpExtension", "fetchSDPExtensionConfig", "updateSDPExtensionConfig"],
+  ["syncChannelsOnOnline", "fetchSyncChannelsOnOnlineConfig", "updateSyncChannelsOnOnlineConfig"],
+  ["onlineOnHeartbeat", "fetchOnlineOnHeartbeatConfig", "updateOnlineOnHeartbeatConfig"],
+  ["saveAlarmMessages", "fetchSaveAlarmMessagesConfig", "updateSaveAlarmMessagesConfig"],
+  ["sipCommandTimeout", "fetchSIPCommandTimeoutConfig", "updateSIPCommandTimeoutConfig"],
+  ["preallocationMode", "fetchPreallocationModeConfig", "updatePreallocationModeConfig"],
+  [
+    "ignoreChannelOfflineStatusNotify",
+    "fetchIgnoreChannelOfflineStatusNotifyConfig",
+    "updateIgnoreChannelOfflineStatusNotifyConfig"
+  ],
+  ["ptzDefaultSpeed", "fetchPTZDefaultSpeedConfig", "updatePTZDefaultSpeedConfig"],
+  ["defaultChannelStreamTransport", "fetchDefaultChannelStreamTransportConfig", "updateDefaultChannelStreamTransportConfig"],
+  ["defaultPlaybackProtocol", "fetchDefaultPlaybackProtocolConfig", "updateDefaultPlaybackProtocolConfig"],
+  ["globalSubscriptions", "fetchGlobalSubscriptionConfig", "updateGlobalSubscriptionConfig"],
+  ["defaultChannelAudio", "fetchDefaultChannelAudioConfig", "updateDefaultChannelAudioConfig"],
+  ["playbackSettings", "fetchPlaybackSettingsConfig", "updatePlaybackSettingsConfig"],
+  ["fixedAddressPlayback", "fetchFixedAddressPlaybackConfig", "updateFixedAddressPlaybackConfig"],
+  ["playAuth", "fetchPlayAuthConfig", "updatePlayAuthConfig"],
+  ["sipLog", "fetchSIPLogConfig", "updateSIPLogConfig"]
+] as const;
+
+let aggregateSnapshot: Record<string, any> = {};
+
+function installAggregateApiMocks() {
+  api.fetchServiceConfig.mockImplementation(async () => {
+    const results = await Promise.all(
+      aggregateSections.map(async ([section, fetchName]) => [section, (await api[fetchName]()).data] as const)
+    );
+    aggregateSnapshot = Object.fromEntries(results.map(([section, value]) => [section, structuredClone(value)]));
+    return { code: 0, message: "", data: structuredClone(aggregateSnapshot) };
+  });
+  api.updateServiceConfig.mockImplementation(async (payload: Record<string, any>) => {
+    const next = structuredClone(aggregateSnapshot);
+    for (const [section, , updateName] of aggregateSections) {
+      if (JSON.stringify(payload[section]) === JSON.stringify(aggregateSnapshot[section])) continue;
+      const value = payload[section];
+      const legacyValue =
+        section === "sdpExtension" ||
+        section === "defaultChannelAudio" ||
+        section === "syncChannelsOnOnline" ||
+        section === "onlineOnHeartbeat" ||
+        section === "saveAlarmMessages" ||
+        section === "preallocationMode" ||
+        section === "ignoreChannelOfflineStatusNotify"
+          ? value.enabled
+          : section === "ptzDefaultSpeed"
+            ? value.level
+            : section === "defaultChannelStreamTransport"
+              ? value.transport
+              : section === "defaultPlaybackProtocol"
+                ? value.protocol
+                : section === "sipLog"
+                  ? { enabled: value.enabled, retentionDays: value.retentionDays }
+                  : section === "sipCommandTimeout"
+                    ? value.timeoutSec
+                    : section === "globalSubscriptions"
+                      ? value.items
+                      : value;
+      const response = await api[updateName](legacyValue);
+      if (response.code !== 0) return response;
+      next[section] = structuredClone(response.data);
+    }
+    aggregateSnapshot = next;
+    return { code: 0, message: "保存成功", data: structuredClone(next) };
+  });
+}
 
 const dictionaryApi = vi.hoisted(() => ({
   getDictItemsByDictCodeAPI: vi.fn()
@@ -130,6 +205,8 @@ function mountPage() {
 
 describe("ServiceConfig edit mode", () => {
   beforeEach(() => {
+    api.fetchServiceConfig.mockReset();
+    api.updateServiceConfig.mockReset();
     api.fetchPositionHistoryConfig.mockReset();
     api.updatePositionHistoryConfig.mockReset();
     api.fetchSDPExtensionConfig.mockReset();
@@ -164,6 +241,8 @@ describe("ServiceConfig edit mode", () => {
     api.updatePreallocationModeConfig.mockReset();
     api.fetchSIPLogConfig.mockReset();
     api.updateSIPLogConfig.mockReset();
+    api.fetchCloudRecordingRetentionConfig.mockReset();
+    api.updateCloudRecordingRetentionConfig.mockReset();
     dictionaryApi.getDictItemsByDictCodeAPI.mockReset();
     api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
     api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
@@ -247,12 +326,20 @@ describe("ServiceConfig edit mode", () => {
       message: "保存成功",
       data: { enabled: true, retentionDays: 7, applied: true }
     });
+    api.fetchCloudRecordingRetentionConfig.mockResolvedValue({ code: 0, message: "", data: { retentionDays: 7 } });
+    api.updateCloudRecordingRetentionConfig.mockResolvedValue({
+      code: 0,
+      message: "保存成功",
+      data: { retentionDays: 7 }
+    });
+    installAggregateApiMocks();
   });
 
   it("reuses the system configuration page layout primitives", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
+    expect(api.fetchServiceConfig).toHaveBeenCalledOnce();
     expect(wrapper.find(".service-config-page").exists()).toBe(true);
     expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
     expect(wrapper.find(".service-config-shell").exists()).toBe(false);
@@ -260,7 +347,7 @@ describe("ServiceConfig edit mode", () => {
     expect(wrapper.findAll(".uvp-system-form")).toHaveLength(2);
     expect(wrapper.findAll(".uvp-config-view")).toHaveLength(1);
     expect(wrapper.findAll(".uvp-config-badge")).toHaveLength(4);
-    expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
+    expect(wrapper.findAll("input[type='number']")).toHaveLength(6);
     expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
       true
     );
@@ -270,7 +357,7 @@ describe("ServiceConfig edit mode", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(24);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(25);
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );

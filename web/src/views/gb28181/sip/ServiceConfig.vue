@@ -4,40 +4,8 @@ import { Check, RotateCcw } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { getDictItemsByDictCodeAPI } from "@/api/dictionary";
 import {
-  fetchPTZDefaultSpeedConfig,
-  fetchDefaultChannelStreamTransportConfig,
-  fetchDefaultPlaybackProtocolConfig,
-  fetchFixedAddressPlaybackConfig,
-  fetchPlayAuthConfig,
-  fetchPlaybackSettingsConfig,
-  fetchGlobalSubscriptionConfig,
-  fetchDefaultChannelAudioConfig,
-  fetchPositionHistoryConfig,
-  fetchSDPExtensionConfig,
-  fetchSIPLogConfig,
-  fetchSyncChannelsOnOnlineConfig,
-  fetchOnlineOnHeartbeatConfig,
-  fetchSaveAlarmMessagesConfig,
-  fetchSIPCommandTimeoutConfig,
-  fetchPreallocationModeConfig,
-  fetchIgnoreChannelOfflineStatusNotifyConfig,
-  updatePositionHistoryConfig,
-  updatePTZDefaultSpeedConfig,
-  updateDefaultChannelStreamTransportConfig,
-  updateDefaultPlaybackProtocolConfig,
-  updateFixedAddressPlaybackConfig,
-  updatePlayAuthConfig,
-  updatePlaybackSettingsConfig,
-  updateGlobalSubscriptionConfig,
-  updateDefaultChannelAudioConfig,
-  updateSIPLogConfig,
-  updateSDPExtensionConfig,
-  updateSyncChannelsOnOnlineConfig,
-  updateOnlineOnHeartbeatConfig,
-  updateSaveAlarmMessagesConfig,
-  updateSIPCommandTimeoutConfig,
-  updatePreallocationModeConfig,
-  updateIgnoreChannelOfflineStatusNotifyConfig,
+  fetchServiceConfig,
+  updateServiceConfig,
   type PlaybackProtocol,
   type FixedAddressPlaybackConfig,
   type PlayAuthConfig,
@@ -105,6 +73,12 @@ const sipLogLoading = ref(true);
 const sipLogSaving = ref(false);
 const sipLogReady = ref(false);
 const sipLogApplied = ref(true);
+const cloudRecordingRetentionLoading = ref(true);
+const cloudRecordingRetentionSaving = ref(false);
+const aggregateLoading = ref(true);
+const aggregateReady = ref(false);
+const aggregateSaving = ref(false);
+const cloudRecordingRetentionReady = ref(false);
 const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
@@ -136,15 +110,18 @@ const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const savedSIPLogRetentionDays = ref(7);
+const savedCloudRecordingRetentionDays = ref(7);
 type NumberFieldInstance = InstanceType<typeof SNumberField>;
 const positionHistoryRetentionField = ref<NumberFieldInstance | null>(null);
 const sipLogRetentionField = ref<NumberFieldInstance | null>(null);
+const cloudRecordingRetentionField = ref<NumberFieldInstance | null>(null);
 const sipTimeoutField = ref<NumberFieldInstance | null>(null);
 const playAuthTTLField = ref<NumberFieldInstance | null>(null);
 const playTimeoutField = ref<NumberFieldInstance | null>(null);
 const numberFields = computed(() => [
   positionHistoryRetentionField,
   sipLogRetentionField,
+  cloudRecordingRetentionField,
   sipTimeoutField,
   playAuthTTLField,
   playTimeoutField
@@ -196,6 +173,15 @@ const sipLogChanged = computed(
 const sipLogRetentionValid = computed(
   () => Number.isInteger(draft.sipLogRetentionDays) && draft.sipLogRetentionDays >= 1 && draft.sipLogRetentionDays <= 365
 );
+const cloudRecordingRetentionChanged = computed(
+  () => draft.cloudRecordingRetentionDays !== savedCloudRecordingRetentionDays.value
+);
+const cloudRecordingRetentionValid = computed(
+  () =>
+    Number.isInteger(draft.cloudRecordingRetentionDays) &&
+    draft.cloudRecordingRetentionDays >= 1 &&
+    draft.cloudRecordingRetentionDays <= 365
+);
 const playTimeoutValid = computed(
   () =>
     Number.isInteger(draft.playback.playTimeoutMs) &&
@@ -226,127 +212,12 @@ const hasChanges = computed(
     sipCommandTimeoutChanged.value ||
     preallocationModeChanged.value ||
     ignoreChannelOfflineStatusNotifyChanged.value ||
-    sipLogChanged.value
+    sipLogChanged.value ||
+    cloudRecordingRetentionChanged.value
 );
-const configSaving = computed(
-  () =>
-    positionHistorySaving.value ||
-    sdpExtensionSaving.value ||
-    ptzDefaultSpeedSaving.value ||
-    defaultChannelStreamTransportSaving.value ||
-    defaultPlaybackProtocolSaving.value ||
-    fixedAddressPlaybackSaving.value ||
-    playAuthSaving.value ||
-    playbackSettingsSaving.value ||
-    globalSubscriptionSaving.value ||
-    defaultChannelAudioSaving.value ||
-    syncChannelsOnOnlineSaving.value ||
-    onlineOnHeartbeatSaving.value ||
-    saveAlarmMessagesSaving.value ||
-    sipCommandTimeoutSaving.value ||
-    preallocationModeSaving.value ||
-    ignoreChannelOfflineStatusNotifySaving.value ||
-    sipLogSaving.value
-);
-const configReady = computed(
-  () =>
-    positionHistoryReady.value &&
-    sdpExtensionReady.value &&
-    ptzDefaultSpeedReady.value &&
-    defaultChannelStreamTransportReady.value &&
-    defaultPlaybackProtocolReady.value &&
-    fixedAddressPlaybackReady.value &&
-    playAuthReady.value &&
-    playbackSettingsReady.value &&
-    globalSubscriptionReady.value &&
-    defaultChannelAudioReady.value &&
-    syncChannelsOnOnlineReady.value &&
-    onlineOnHeartbeatReady.value &&
-    saveAlarmMessagesReady.value &&
-    sipCommandTimeoutReady.value &&
-    preallocationModeReady.value &&
-    ignoreChannelOfflineStatusNotifyReady.value &&
-    sipLogReady.value
-);
+const configSaving = computed(() => aggregateSaving.value);
+const configReady = computed(() => aggregateReady.value && !aggregateLoading.value);
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
-
-async function loadPositionHistoryConfig() {
-  positionHistoryLoading.value = true;
-  try {
-    const response = await fetchPositionHistoryConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    const retentionDays = response.data.retentionDays ?? 7;
-    draft.saveMobilePositionHistory = response.data.enabled;
-    draft.positionHistoryRetentionDays = retentionDays;
-    savedPositionHistoryEnabled.value = response.data.enabled;
-    savedPositionHistoryRetentionDays.value = retentionDays;
-    positionHistoryReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载移动位置历史轨迹配置失败");
-  } finally {
-    positionHistoryLoading.value = false;
-  }
-}
-
-async function loadSDPExtensionConfig() {
-  sdpExtensionLoading.value = true;
-  try {
-    const response = await fetchSDPExtensionConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.sdpExtension = response.data.enabled;
-    savedSDPExtensionEnabled.value = response.data.enabled;
-    sdpExtensionReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载扩展 SDP 兼容模式失败");
-  } finally {
-    sdpExtensionLoading.value = false;
-  }
-}
-
-async function loadPTZDefaultSpeedConfig() {
-  ptzDefaultSpeedLoading.value = true;
-  try {
-    const response = await fetchPTZDefaultSpeedConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.ptzSpeed = response.data.level;
-    savedPTZDefaultSpeed.value = response.data.level;
-    ptzDefaultSpeedReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载云台默认速度失败");
-  } finally {
-    ptzDefaultSpeedLoading.value = false;
-  }
-}
-
-async function loadDefaultChannelStreamTransportConfig() {
-  defaultChannelStreamTransportLoading.value = true;
-  try {
-    const response = await fetchDefaultChannelStreamTransportConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.defaultChannelStreamTransport = response.data.transport;
-    savedDefaultChannelStreamTransport.value = response.data.transport;
-    defaultChannelStreamTransportReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载新通道默认流传输模式失败");
-  } finally {
-    defaultChannelStreamTransportLoading.value = false;
-  }
-}
-
-async function loadDefaultPlaybackProtocolConfig() {
-  defaultPlaybackProtocolLoading.value = true;
-  try {
-    const response = await fetchDefaultPlaybackProtocolConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.playback.defaultProtocol = response.data.protocol;
-    savedDefaultPlaybackProtocol.value = response.data.protocol;
-    defaultPlaybackProtocolReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载默认播放协议失败");
-  } finally {
-    defaultPlaybackProtocolLoading.value = false;
-  }
-}
 
 function applyPlaybackSettings(settings: PlaybackSettingsConfig) {
   draft.playback.playTimeoutMs = settings.playTimeoutMs;
@@ -395,48 +266,6 @@ function restorePlayAuthDraft() {
   draft.playback.authTTLSeconds = normalized.authTTLSeconds;
 }
 
-async function loadPlayAuthConfig() {
-  playAuthLoading.value = true;
-  try {
-    const response = await fetchPlayAuthConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    applyPlayAuthConfig(response.data);
-    playAuthReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载播放鉴权配置失败");
-  } finally {
-    playAuthLoading.value = false;
-  }
-}
-
-async function loadFixedAddressPlaybackConfig() {
-  fixedAddressPlaybackLoading.value = true;
-  try {
-    const response = await fetchFixedAddressPlaybackConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    applyFixedAddressPlaybackConfig(response.data);
-    fixedAddressPlaybackReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载固定播放地址与自动点播配置失败");
-  } finally {
-    fixedAddressPlaybackLoading.value = false;
-  }
-}
-
-async function loadPlaybackSettingsConfig() {
-  playbackSettingsLoading.value = true;
-  try {
-    const response = await fetchPlaybackSettingsConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    applyPlaybackSettings(response.data);
-    playbackSettingsReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载播放配置失败");
-  } finally {
-    playbackSettingsLoading.value = false;
-  }
-}
-
 async function loadPlaybackProtocolOptions() {
   try {
     const response = await getDictItemsByDictCodeAPI(PLAYBACK_PROTOCOL_DICT_CODE);
@@ -445,145 +274,6 @@ async function loadPlaybackProtocolOptions() {
     }
   } catch {
     playbackProtocolOptions.value = playbackProtocolOptionsFromDictionary([]);
-  }
-}
-
-async function loadGlobalSubscriptionConfig() {
-  globalSubscriptionLoading.value = true;
-  try {
-    const response = await fetchGlobalSubscriptionConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.globalSubscriptionItems = [...response.data.items];
-    savedGlobalSubscriptionItems.value = [...response.data.items];
-    globalSubscriptionReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载全局订阅项目失败");
-  } finally {
-    globalSubscriptionLoading.value = false;
-  }
-}
-
-async function loadDefaultChannelAudioConfig() {
-  defaultChannelAudioLoading.value = true;
-  try {
-    const response = await fetchDefaultChannelAudioConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.defaultChannelAudioEnabled = response.data.enabled;
-    savedDefaultChannelAudioEnabled.value = response.data.enabled;
-    defaultChannelAudioReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载全局通道音频配置失败");
-  } finally {
-    defaultChannelAudioLoading.value = false;
-  }
-}
-
-async function loadSyncChannelsOnOnlineConfig() {
-  syncChannelsOnOnlineLoading.value = true;
-  try {
-    const response = await fetchSyncChannelsOnOnlineConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.syncChannelsOnOnline = response.data.enabled;
-    savedSyncChannelsOnOnline.value = response.data.enabled;
-    syncChannelsOnOnlineReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载设备上线同步通道配置失败");
-  } finally {
-    syncChannelsOnOnlineLoading.value = false;
-  }
-}
-
-async function loadOnlineOnHeartbeatConfig() {
-  onlineOnHeartbeatLoading.value = true;
-  try {
-    const response = await fetchOnlineOnHeartbeatConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.onlineOnHeartbeat = response.data.enabled;
-    savedOnlineOnHeartbeat.value = response.data.enabled;
-    onlineOnHeartbeatReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载收到心跳恢复设备上线配置失败");
-  } finally {
-    onlineOnHeartbeatLoading.value = false;
-  }
-}
-
-async function loadSaveAlarmMessagesConfig() {
-  saveAlarmMessagesLoading.value = true;
-  try {
-    const response = await fetchSaveAlarmMessagesConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.saveAlarmMessages = response.data.enabled;
-    savedSaveAlarmMessages.value = response.data.enabled;
-    saveAlarmMessagesReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载报警消息存储配置失败");
-  } finally {
-    saveAlarmMessagesLoading.value = false;
-  }
-}
-
-async function loadSIPCommandTimeoutConfig() {
-  sipCommandTimeoutLoading.value = true;
-  try {
-    const response = await fetchSIPCommandTimeoutConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.sipTimeoutSec = response.data.timeoutSec;
-    savedSIPCommandTimeoutSec.value = response.data.timeoutSec;
-    sipCommandTimeoutReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载 SIP 命令超时时间失败");
-  } finally {
-    sipCommandTimeoutLoading.value = false;
-  }
-}
-
-async function loadPreallocationModeConfig() {
-  preallocationModeLoading.value = true;
-  try {
-    const response = await fetchPreallocationModeConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.preallocationMode = response.data.enabled;
-    savedPreallocationMode.value = response.data.enabled;
-    preallocationModeReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载预分配模式失败");
-  } finally {
-    preallocationModeLoading.value = false;
-  }
-}
-
-async function loadIgnoreChannelOfflineStatusNotifyConfig() {
-  ignoreChannelOfflineStatusNotifyLoading.value = true;
-  try {
-    const response = await fetchIgnoreChannelOfflineStatusNotifyConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    draft.ignoreChannelOfflineStatusNotify = response.data.enabled;
-    savedIgnoreChannelOfflineStatusNotify.value = response.data.enabled;
-    ignoreChannelOfflineStatusNotifyReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载忽略通道离线/异常通知配置失败");
-  } finally {
-    ignoreChannelOfflineStatusNotifyLoading.value = false;
-  }
-}
-
-async function loadSIPLogConfig() {
-  sipLogLoading.value = true;
-  try {
-    const response = await fetchSIPLogConfig();
-    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
-    const retentionDays = response.data.retentionDays ?? 7;
-    draft.sipLogEnabled = response.data.enabled;
-    draft.sipLogRetentionDays = retentionDays;
-    savedSIPLogEnabled.value = response.data.enabled;
-    savedSIPLogRetentionDays.value = retentionDays;
-    sipLogApplied.value = response.data.applied;
-    sipLogReady.value = true;
-  } catch (error: any) {
-    Message.error(error?.message || "加载 SIP 日志配置失败");
-  } finally {
-    sipLogLoading.value = false;
   }
 }
 
@@ -635,179 +325,93 @@ async function saveConfig() {
     Message.warning(numberFieldError);
     return;
   }
-  if (!sipLogRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value) return;
+  if (!sipLogRetentionValid.value || !cloudRecordingRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value)
+    return;
   if (!hasChanges.value) {
     return;
   }
+  aggregateSaving.value = true;
   try {
-    if (positionHistoryChanged.value) {
-      positionHistorySaving.value = true;
-      const response = await updatePositionHistoryConfig({
-        enabled: draft.saveMobilePositionHistory,
-        retentionDays: draft.positionHistoryRetentionDays
-      });
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      const retentionDays = response.data.retentionDays ?? draft.positionHistoryRetentionDays;
-      draft.saveMobilePositionHistory = response.data.enabled;
-      draft.positionHistoryRetentionDays = retentionDays;
-      savedPositionHistoryEnabled.value = response.data.enabled;
-      savedPositionHistoryRetentionDays.value = retentionDays;
-      positionHistorySaving.value = false;
-    }
-    if (sdpExtensionChanged.value) {
-      sdpExtensionSaving.value = true;
-      const response = await updateSDPExtensionConfig(draft.sdpExtension);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.sdpExtension = response.data.enabled;
-      savedSDPExtensionEnabled.value = response.data.enabled;
-      sdpExtensionSaving.value = false;
-    }
-    if (ptzDefaultSpeedChanged.value) {
-      ptzDefaultSpeedSaving.value = true;
-      const response = await updatePTZDefaultSpeedConfig(draft.ptzSpeed);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.ptzSpeed = response.data.level;
-      savedPTZDefaultSpeed.value = response.data.level;
-      ptzDefaultSpeedSaving.value = false;
-    }
-    if (defaultChannelStreamTransportChanged.value) {
-      defaultChannelStreamTransportSaving.value = true;
-      const response = await updateDefaultChannelStreamTransportConfig(draft.defaultChannelStreamTransport);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.defaultChannelStreamTransport = response.data.transport;
-      savedDefaultChannelStreamTransport.value = response.data.transport;
-      defaultChannelStreamTransportSaving.value = false;
-    }
-    if (defaultPlaybackProtocolChanged.value) {
-      defaultPlaybackProtocolSaving.value = true;
-      const response = await updateDefaultPlaybackProtocolConfig(draft.playback.defaultProtocol);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.playback.defaultProtocol = response.data.protocol;
-      savedDefaultPlaybackProtocol.value = response.data.protocol;
-      defaultPlaybackProtocolSaving.value = false;
-    }
-    if (playAuthChanged.value) {
-      playAuthSaving.value = true;
-      const response = await updatePlayAuthConfig({
-        authEnabled: draft.playback.authEnabled,
-        authBindClientIP: draft.playback.authEnabled && draft.playback.authBindClientIP,
-        authTTLSeconds: draft.playback.authTTLSeconds
-      });
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      applyPlayAuthConfig(response.data);
-      playAuthSaving.value = false;
-    }
-    if (fixedAddressPlaybackChanged.value) {
-      fixedAddressPlaybackSaving.value = true;
-      const response = await updateFixedAddressPlaybackConfig({
-        fixedAddressEnabled: draft.playback.fixedAddressEnabled,
-        autoOnDemandEnabled: draft.playback.fixedAddressEnabled && draft.playback.autoOnDemandEnabled
-      });
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      applyFixedAddressPlaybackConfig(response.data);
-      fixedAddressPlaybackSaving.value = false;
-    }
-    if (playbackSettingsChanged.value) {
-      playbackSettingsSaving.value = true;
-      const response = await updatePlaybackSettingsConfig({
+    const response = await updateServiceConfig({
+      positionHistory: { enabled: draft.saveMobilePositionHistory, retentionDays: draft.positionHistoryRetentionDays },
+      cloudRecordingRetention: { retentionDays: draft.cloudRecordingRetentionDays },
+      sdpExtension: { enabled: draft.sdpExtension },
+      syncChannelsOnOnline: { enabled: draft.syncChannelsOnOnline },
+      onlineOnHeartbeat: { enabled: draft.onlineOnHeartbeat },
+      saveAlarmMessages: { enabled: draft.saveAlarmMessages },
+      sipCommandTimeout: { timeoutSec: draft.sipTimeoutSec },
+      preallocationMode: { enabled: draft.preallocationMode },
+      ignoreChannelOfflineStatusNotify: { enabled: draft.ignoreChannelOfflineStatusNotify },
+      ptzDefaultSpeed: { level: draft.ptzSpeed },
+      defaultChannelStreamTransport: { transport: draft.defaultChannelStreamTransport },
+      defaultPlaybackProtocol: { protocol: draft.playback.defaultProtocol },
+      globalSubscriptions: { items: draft.globalSubscriptionItems },
+      defaultChannelAudio: { enabled: draft.defaultChannelAudioEnabled },
+      playbackSettings: {
         playTimeoutMs: draft.playback.playTimeoutMs,
         onDemandLive: draft.playback.onDemandLive,
         cloudRecordingEnabled: draft.playback.cloudRecordingEnabled
-      });
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      applyPlaybackSettings(response.data);
-      playbackSettingsSaving.value = false;
-    }
-    if (globalSubscriptionChanged.value) {
-      globalSubscriptionSaving.value = true;
-      const response = await updateGlobalSubscriptionConfig(draft.globalSubscriptionItems);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.globalSubscriptionItems = [...response.data.items];
-      savedGlobalSubscriptionItems.value = [...response.data.items];
-      globalSubscriptionSaving.value = false;
-    }
-    if (defaultChannelAudioChanged.value) {
-      defaultChannelAudioSaving.value = true;
-      const response = await updateDefaultChannelAudioConfig(draft.defaultChannelAudioEnabled);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.defaultChannelAudioEnabled = response.data.enabled;
-      savedDefaultChannelAudioEnabled.value = response.data.enabled;
-      defaultChannelAudioSaving.value = false;
-    }
-    if (syncChannelsOnOnlineChanged.value) {
-      syncChannelsOnOnlineSaving.value = true;
-      const response = await updateSyncChannelsOnOnlineConfig(draft.syncChannelsOnOnline);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.syncChannelsOnOnline = response.data.enabled;
-      savedSyncChannelsOnOnline.value = response.data.enabled;
-      syncChannelsOnOnlineSaving.value = false;
-    }
-    if (onlineOnHeartbeatChanged.value) {
-      onlineOnHeartbeatSaving.value = true;
-      const response = await updateOnlineOnHeartbeatConfig(draft.onlineOnHeartbeat);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.onlineOnHeartbeat = response.data.enabled;
-      savedOnlineOnHeartbeat.value = response.data.enabled;
-      onlineOnHeartbeatSaving.value = false;
-    }
-    if (saveAlarmMessagesChanged.value) {
-      saveAlarmMessagesSaving.value = true;
-      const response = await updateSaveAlarmMessagesConfig(draft.saveAlarmMessages);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.saveAlarmMessages = response.data.enabled;
-      savedSaveAlarmMessages.value = response.data.enabled;
-      saveAlarmMessagesSaving.value = false;
-    }
-    if (sipCommandTimeoutChanged.value) {
-      sipCommandTimeoutSaving.value = true;
-      const response = await updateSIPCommandTimeoutConfig(draft.sipTimeoutSec);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.sipTimeoutSec = response.data.timeoutSec;
-      savedSIPCommandTimeoutSec.value = response.data.timeoutSec;
-      sipCommandTimeoutSaving.value = false;
-    }
-    if (preallocationModeChanged.value) {
-      preallocationModeSaving.value = true;
-      const response = await updatePreallocationModeConfig(draft.preallocationMode);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.preallocationMode = response.data.enabled;
-      savedPreallocationMode.value = response.data.enabled;
-      preallocationModeSaving.value = false;
-    }
-    if (ignoreChannelOfflineStatusNotifyChanged.value) {
-      ignoreChannelOfflineStatusNotifySaving.value = true;
-      const response = await updateIgnoreChannelOfflineStatusNotifyConfig(draft.ignoreChannelOfflineStatusNotify);
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      draft.ignoreChannelOfflineStatusNotify = response.data.enabled;
-      savedIgnoreChannelOfflineStatusNotify.value = response.data.enabled;
-      ignoreChannelOfflineStatusNotifySaving.value = false;
-    }
-    if (sipLogChanged.value) {
-      sipLogSaving.value = true;
-      const response = await updateSIPLogConfig({
-        enabled: draft.sipLogEnabled,
-        retentionDays: draft.sipLogRetentionDays
-      });
-      if (response.code !== 0) throw new Error(response.message || "保存配置失败");
-      const retentionDays = response.data.retentionDays ?? draft.sipLogRetentionDays;
-      draft.sipLogEnabled = response.data.enabled;
-      draft.sipLogRetentionDays = retentionDays;
-      savedSIPLogEnabled.value = response.data.enabled;
-      savedSIPLogRetentionDays.value = retentionDays;
-      sipLogApplied.value = response.data.applied;
-      sipLogSaving.value = false;
-      if (response.data.applied === false) {
-        Message.error("SIP 日志配置已保存，但 SIP 服务重载失败，请检查服务状态");
-        return;
-      }
-    }
+      },
+      fixedAddressPlayback: {
+        fixedAddressEnabled: draft.playback.fixedAddressEnabled,
+        autoOnDemandEnabled: draft.playback.autoOnDemandEnabled
+      },
+      playAuth: {
+        authEnabled: draft.playback.authEnabled,
+        authBindClientIP: draft.playback.authBindClientIP,
+        authTTLSeconds: draft.playback.authTTLSeconds
+      },
+      sipLog: { enabled: draft.sipLogEnabled, retentionDays: draft.sipLogRetentionDays, applied: sipLogApplied.value }
+    });
+    if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+    const v = response.data;
+    draft.saveMobilePositionHistory = v.positionHistory.enabled;
+    draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
+    draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
+    draft.sdpExtension = v.sdpExtension.enabled;
+    draft.syncChannelsOnOnline = v.syncChannelsOnOnline.enabled;
+    draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
+    draft.saveAlarmMessages = v.saveAlarmMessages.enabled;
+    draft.sipTimeoutSec = v.sipCommandTimeout.timeoutSec;
+    draft.preallocationMode = v.preallocationMode.enabled;
+    draft.ignoreChannelOfflineStatusNotify = v.ignoreChannelOfflineStatusNotify.enabled;
+    draft.ptzSpeed = v.ptzDefaultSpeed.level;
+    draft.defaultChannelStreamTransport = v.defaultChannelStreamTransport.transport;
+    draft.playback.defaultProtocol = v.defaultPlaybackProtocol.protocol;
+    draft.globalSubscriptionItems = [...v.globalSubscriptions.items];
+    draft.defaultChannelAudioEnabled = v.defaultChannelAudio.enabled;
+    applyPlaybackSettings(v.playbackSettings);
+    applyFixedAddressPlaybackConfig(v.fixedAddressPlayback);
+    applyPlayAuthConfig(v.playAuth);
+    draft.sipLogEnabled = v.sipLog.enabled;
+    draft.sipLogRetentionDays = v.sipLog.retentionDays ?? 7;
+    sipLogApplied.value = v.sipLog.applied ?? true;
+    savedPositionHistoryEnabled.value = v.positionHistory.enabled;
+    savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
+    savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
+    savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
+    savedPTZDefaultSpeed.value = v.ptzDefaultSpeed.level;
+    savedDefaultChannelStreamTransport.value = v.defaultChannelStreamTransport.transport;
+    savedDefaultPlaybackProtocol.value = v.defaultPlaybackProtocol.protocol;
+    savedGlobalSubscriptionItems.value = [...v.globalSubscriptions.items];
+    savedDefaultChannelAudioEnabled.value = v.defaultChannelAudio.enabled;
+    savedSyncChannelsOnOnline.value = v.syncChannelsOnOnline.enabled;
+    savedOnlineOnHeartbeat.value = v.onlineOnHeartbeat.enabled;
+    savedSaveAlarmMessages.value = v.saveAlarmMessages.enabled;
+    savedSIPCommandTimeoutSec.value = v.sipCommandTimeout.timeoutSec;
+    savedPreallocationMode.value = v.preallocationMode.enabled;
+    savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
+    savedSIPLogEnabled.value = v.sipLog.enabled;
+    savedSIPLogRetentionDays.value = v.sipLog.retentionDays ?? 7;
     Message.success("国标服务配置已更新");
+    return;
   } catch (error: any) {
     restoreFixedAddressPlaybackDraft();
     restorePlayAuthDraft();
     restorePlaybackSettingsDraft();
     Message.error(error?.message || "保存国标服务配置失败");
   } finally {
+    aggregateSaving.value = false;
     positionHistorySaving.value = false;
     sdpExtensionSaving.value = false;
     ptzDefaultSpeedSaving.value = false;
@@ -825,31 +429,100 @@ async function saveConfig() {
     preallocationModeSaving.value = false;
     ignoreChannelOfflineStatusNotifySaving.value = false;
     sipLogSaving.value = false;
+    cloudRecordingRetentionSaving.value = false;
   }
 }
 
-onMounted(() =>
-  Promise.all([
-    loadPositionHistoryConfig(),
-    loadSDPExtensionConfig(),
-    loadPTZDefaultSpeedConfig(),
-    loadDefaultChannelStreamTransportConfig(),
-    loadDefaultPlaybackProtocolConfig(),
-    loadFixedAddressPlaybackConfig(),
-    loadPlayAuthConfig(),
-    loadPlaybackSettingsConfig(),
-    loadPlaybackProtocolOptions(),
-    loadGlobalSubscriptionConfig(),
-    loadDefaultChannelAudioConfig(),
-    loadSyncChannelsOnOnlineConfig(),
-    loadOnlineOnHeartbeatConfig(),
-    loadSaveAlarmMessagesConfig(),
-    loadSIPCommandTimeoutConfig(),
-    loadPreallocationModeConfig(),
-    loadIgnoreChannelOfflineStatusNotifyConfig(),
-    loadSIPLogConfig()
-  ])
-);
+async function loadServiceConfig() {
+  aggregateLoading.value = true;
+  try {
+    const response = await fetchServiceConfig();
+    if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+    const v = response.data;
+    draft.saveMobilePositionHistory = v.positionHistory.enabled;
+    draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
+    savedPositionHistoryEnabled.value = v.positionHistory.enabled;
+    savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
+    draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
+    savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
+    draft.sdpExtension = v.sdpExtension.enabled;
+    savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
+    draft.ptzSpeed = v.ptzDefaultSpeed.level;
+    savedPTZDefaultSpeed.value = v.ptzDefaultSpeed.level;
+    draft.defaultChannelStreamTransport = v.defaultChannelStreamTransport.transport;
+    savedDefaultChannelStreamTransport.value = v.defaultChannelStreamTransport.transport;
+    draft.playback.defaultProtocol = v.defaultPlaybackProtocol.protocol;
+    savedDefaultPlaybackProtocol.value = v.defaultPlaybackProtocol.protocol;
+    draft.globalSubscriptionItems = [...v.globalSubscriptions.items];
+    savedGlobalSubscriptionItems.value = [...v.globalSubscriptions.items];
+    draft.defaultChannelAudioEnabled = v.defaultChannelAudio.enabled;
+    savedDefaultChannelAudioEnabled.value = v.defaultChannelAudio.enabled;
+    draft.syncChannelsOnOnline = v.syncChannelsOnOnline.enabled;
+    savedSyncChannelsOnOnline.value = v.syncChannelsOnOnline.enabled;
+    draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
+    savedOnlineOnHeartbeat.value = v.onlineOnHeartbeat.enabled;
+    draft.saveAlarmMessages = v.saveAlarmMessages.enabled;
+    savedSaveAlarmMessages.value = v.saveAlarmMessages.enabled;
+    draft.sipTimeoutSec = v.sipCommandTimeout.timeoutSec;
+    savedSIPCommandTimeoutSec.value = v.sipCommandTimeout.timeoutSec;
+    draft.preallocationMode = v.preallocationMode.enabled;
+    savedPreallocationMode.value = v.preallocationMode.enabled;
+    draft.ignoreChannelOfflineStatusNotify = v.ignoreChannelOfflineStatusNotify.enabled;
+    savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
+    draft.sipLogEnabled = v.sipLog.enabled;
+    draft.sipLogRetentionDays = v.sipLog.retentionDays ?? 7;
+    sipLogApplied.value = v.sipLog.applied ?? true;
+    savedSIPLogEnabled.value = v.sipLog.enabled;
+    savedSIPLogRetentionDays.value = v.sipLog.retentionDays ?? 7;
+    applyPlaybackSettings(v.playbackSettings);
+    applyFixedAddressPlaybackConfig(v.fixedAddressPlayback);
+    applyPlayAuthConfig(v.playAuth);
+    positionHistoryReady.value = true;
+    sdpExtensionReady.value = true;
+    ptzDefaultSpeedReady.value = true;
+    defaultChannelStreamTransportReady.value = true;
+    defaultPlaybackProtocolReady.value = true;
+    playbackSettingsReady.value = true;
+    fixedAddressPlaybackReady.value = true;
+    playAuthReady.value = true;
+    globalSubscriptionReady.value = true;
+    defaultChannelAudioReady.value = true;
+    syncChannelsOnOnlineReady.value = true;
+    onlineOnHeartbeatReady.value = true;
+    saveAlarmMessagesReady.value = true;
+    sipCommandTimeoutReady.value = true;
+    preallocationModeReady.value = true;
+    ignoreChannelOfflineStatusNotifyReady.value = true;
+    sipLogReady.value = true;
+    cloudRecordingRetentionReady.value = true;
+    aggregateReady.value = true;
+    await loadPlaybackProtocolOptions();
+  } catch (error: any) {
+    Message.error(error?.message || "加载国标服务配置失败");
+  } finally {
+    aggregateLoading.value = false;
+    positionHistoryLoading.value = false;
+    sdpExtensionLoading.value = false;
+    ptzDefaultSpeedLoading.value = false;
+    defaultChannelStreamTransportLoading.value = false;
+    defaultPlaybackProtocolLoading.value = false;
+    playbackSettingsLoading.value = false;
+    fixedAddressPlaybackLoading.value = false;
+    playAuthLoading.value = false;
+    globalSubscriptionLoading.value = false;
+    defaultChannelAudioLoading.value = false;
+    syncChannelsOnOnlineLoading.value = false;
+    onlineOnHeartbeatLoading.value = false;
+    saveAlarmMessagesLoading.value = false;
+    sipCommandTimeoutLoading.value = false;
+    preallocationModeLoading.value = false;
+    ignoreChannelOfflineStatusNotifyLoading.value = false;
+    sipLogLoading.value = false;
+    cloudRecordingRetentionLoading.value = false;
+  }
+}
+
+onMounted(loadServiceConfig);
 </script>
 
 <template>
@@ -1057,6 +730,27 @@ onMounted(() =>
                     :disabled="sipLogLoading || sipLogSaving || !sipLogReady"
                   />
                   <template v-if="!sipLogRetentionValid" #extra>
+                    <span>请输入 1-365 之间的整数</span>
+                  </template>
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="cloudRecordingRetentionDays"
+                  label="云端录像默认保留天数（天）"
+                  tooltip="云端录像与设备录像下载产生的缓存文件按录制时间自动清理，默认保留 7 天。"
+                  :validate-status="cloudRecordingRetentionValid ? undefined : 'error'"
+                >
+                  <s-number-field
+                    ref="cloudRecordingRetentionField"
+                    v-model="draft.cloudRecordingRetentionDays"
+                    class="service-config-number-input"
+                    :min="1"
+                    :max="365"
+                    required
+                    :disabled="cloudRecordingRetentionLoading || cloudRecordingRetentionSaving || !cloudRecordingRetentionReady"
+                  />
+                  <template v-if="!cloudRecordingRetentionValid" #extra>
                     <span>请输入 1-365 之间的整数</span>
                   </template>
                 </a-form-item>

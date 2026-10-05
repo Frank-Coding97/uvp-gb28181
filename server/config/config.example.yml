@@ -332,3 +332,7 @@ gb28181:
     catalog_periodic_lookback_days: 2     # 周期对账逻辑回看天数
     catalog_manual_lookback_days: 7       # 首次/手动对账默认逻辑回看天数
     capability_key_env: "UVP_CLOUD_RECORDING_CAPABILITY_KEY" # 可选覆盖；未配置时自动从 JWT 根密钥派生，禁止复用 JWT/ZLM secret
+  cloud_recording:
+    # 云端录像（含设备录像缓存）文件在服务器上的保留天数；范围 1-365，缺省 7。
+    # 在「国标服务配置」页可改，改动会写回本文件；非法值回落默认 7。
+    retention_days: 7

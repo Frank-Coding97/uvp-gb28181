@@ -13,8 +13,10 @@ describe("static service config draft", () => {
     expect(draft.defaultChannelStreamTransport).toBe("TCP-Passive");
     expect(draft.globalSubscriptionItems).toEqual([]);
     expect(draft.defaultChannelAudioEnabled).toBe(true);
+    expect(draft.cloudRecordingRetentionDays).toBe(7);
 
-    expect(staticServiceConfigLabels).toHaveLength(15);
+    expect(staticServiceConfigLabels).toHaveLength(16);
+    expect(staticServiceConfigLabels).toContain("云端录像默认保留天数（天）");
     expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
     expect(staticServiceConfigLabels).toContain("全局订阅项目");
     expect(staticServiceConfigLabels).toContain("全局通道开启音频");
