@@ -243,6 +243,31 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
 
 ⛔ 另注：`alarm_type` 是**按报警方式（method 2/5/6）分组的嵌套 map**（共 20 项），做成字典必须带 `method` 维度，不能拍平成一个 code。
 
+### 3.4 P3 侦察结论（2026-10-05，动手前先看，避免重做）
+
+**A. 通道属性（6 个）—— 可直接做，风险低**
+
+- 事实：6 项全是**设备上报什么就显示什么**（来源 `catalog` 目录应答落 `gb_channel` 属性列），**平台侧没有任何让用户选它的入口，也没有下发路径** ⇒ 改坏的最坏结果只是那条显示 `未知(N)`。
+- 唯一消费点：`device-mgmt/index.vue`（+ `channelAttributeText.ts` 本体与单测）。改动面很小。
+- ⚠️ 口径校正：P3 的「`channel_*` ×6」= `channelAttributeText.ts` 里现有的 **6 张表**（见下方第 2 条）。同面板还有一个字段 `capturePositionType`（采集部位类型）**本来就没有表**、也不该加 —— 代码里**刻意不硬编码中文名**（标准只说"应符合附录 O"），没有文案可搬进字典。
+- ⛔ **两个语义必须留在代码里，不能进字典**：
+  1. `0` / `""` = "设备本次未上报"（哨兵，不是"值为 0"）—— 字典表达不了这层含义，须在纯函数里**先判再查表**；
+  2. `photoelectricImagingType` 是**多值**（标准允许 `1/2/3` 斜杠分隔）—— 字典只管"单码→中文"，拆段/拼回留在纯函数。
+- ✅ 形态判断逻辑（`catalogShapeFromAttributes` 推 2016/2022 形态）**已经认码值**，不受字典改名影响，无需改动。
+
+**B. 告警（3 个）—— ⏳ 建议推迟，且需先做一个前置动作**
+
+- ⛔ **后端已经在翻译**：`controllers/alarm.go` 硬编码三张表 —— `alarmPriority`(4) / `alarmMethod`(7) / `alarmType(method,value)`(20)，接口以 `alarmEnumValue{value,label}` 下发，前端**直接显示 `label`**。此时前端再加字典 = **两个真源**（要么字典成死代码，要么后端 label 变废负载）⇒ **先定"谁翻译"**。
+- ⛔⛔ **同一值域已写两遍**（已逐项机检）：后端 `alarmType()` 20 项 与 前端 `alarm-management/alarmState.ts` 的 `ALARM_TYPE_OPTIONS` 20 项 **逐项完全一致**（三组 5/13/2，含「图像遮挡报警（2022）」的括号）。属 P1 那类"同一值域多处定义"⇒ **先收敛再字典化**。
+- ⛔ `alarm_type` 是 **method × type 二维**，而 `sys_dict_item` 只有 (dict_id, value, name) 三位 ⇒ 要么造拼接值（如 `2-1`，我方发明的编码），要么拆 3 个字典。**这是待拍板的设计题。**
+- ⭐ **范围比原先估计的小**：真正消费 label 的只有 `alarm-management/components/AlarmDetailDrawer.vue`（priority/method/alarmType 3 个字段）与 `alarm-management/index.vue`（筛选下拉）。`home/dashboardState.ts` 用的是原始描述文本，**不受影响**。
+
+**C. 建议顺序**（含 §3.2 的依赖）
+
+1. 先定 §3.2「字段型字典只读闸门」——P1 的视频参数是**要下发**的，停用/删掉一档就再也发不出去；P3a 又要加 6 个"国标固定值域"字典，闸门宜先立；
+2. P3a 通道属性 **6 个**字典（`room_type` / `supply_light_type` / `direction_type` / `position_type` / `use_type` / `photoelectric_imaging_type`，即 `channelAttributeText.ts` 现有的 6 张表）一次做完；
+3. P3b 告警：定"翻译归前端"→ 收敛那 20 项重复 → 后端改只返码值 + 前端接管展示，**单独一批**做，不与 P3a 混。
+
 ---
 
 ## 四、提交注意
