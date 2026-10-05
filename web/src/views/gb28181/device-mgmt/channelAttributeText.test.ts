@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   CHANNEL_ATTR_UNREPORTED,
+  CHANNEL_DIRECTION_TYPE_LABEL_FALLBACK,
+  CHANNEL_PHOTOELECTRIC_IMAGING_TYPE_LABEL_FALLBACK,
+  CHANNEL_POSITION_TYPE_LABEL_FALLBACK,
+  CHANNEL_ROOM_TYPE_LABEL_FALLBACK,
+  CHANNEL_SUPPLY_LIGHT_TYPE_LABEL_FALLBACK,
+  CHANNEL_USE_TYPE_LABEL_FALLBACK,
+  DICT_CODE_CHANNEL_DIRECTION_TYPE,
+  DICT_CODE_CHANNEL_PHOTOELECTRIC_IMAGING_TYPE,
+  DICT_CODE_CHANNEL_POSITION_TYPE,
+  DICT_CODE_CHANNEL_ROOM_TYPE,
+  DICT_CODE_CHANNEL_SUPPLY_LIGHT_TYPE,
+  DICT_CODE_CHANNEL_USE_TYPE,
   catalogShapeFromAttributes,
   catalogShapeText,
   channelAttributeEntries,
@@ -217,5 +229,122 @@ describe("catalogShapeFromAttributes", () => {
     expect(catalogShapeText("2022")).toBe("GB/T 28181-2022 形态");
     expect(catalogShapeText("both")).toBe("两版属性混发");
     expect(catalogShapeText("unknown")).toBe("未上报版本独有属性");
+  });
+});
+
+/**
+ * 字典化(P3a)之后的防回归。
+ * ⭐ 这一组的价值:字典**只能改展示名**,绝不能影响判定,也不能吃掉"未上报"哨兵。
+ * ⛔ 兜底常量按**协议值域**逐条锁定 —— 顺手改掉一个码值必然红(开发库字典项与兜底的
+ *    一致性只能人工核对,单测不连库,所以这里锁的是协议值域本身)。
+ */
+describe("channelAttributeText 字典化", () => {
+  it("字典 code 是约定的六个(改 code 等于换字典,必须显式)", () => {
+    expect(DICT_CODE_CHANNEL_ROOM_TYPE).toBe("channel_room_type");
+    expect(DICT_CODE_CHANNEL_SUPPLY_LIGHT_TYPE).toBe("channel_supply_light_type");
+    expect(DICT_CODE_CHANNEL_DIRECTION_TYPE).toBe("channel_direction_type");
+    expect(DICT_CODE_CHANNEL_POSITION_TYPE).toBe("channel_position_type");
+    expect(DICT_CODE_CHANNEL_USE_TYPE).toBe("channel_use_type");
+    expect(DICT_CODE_CHANNEL_PHOTOELECTRIC_IMAGING_TYPE).toBe("channel_photoelectric_imaging_type");
+  });
+
+  it("兜底常量按协议值域逐条锁定(GB/T 28181 附录 A)", () => {
+    expect(CHANNEL_ROOM_TYPE_LABEL_FALLBACK).toEqual({ "1": "室外", "2": "室内" });
+    expect(CHANNEL_SUPPLY_LIGHT_TYPE_LABEL_FALLBACK).toEqual({
+      "1": "无补光",
+      "2": "红外补光",
+      "3": "白光补光",
+      "4": "激光补光",
+      "9": "其他"
+    });
+    expect(CHANNEL_DIRECTION_TYPE_LABEL_FALLBACK).toEqual({
+      "1": "东",
+      "2": "西",
+      "3": "南",
+      "4": "北",
+      "5": "东南",
+      "6": "东北",
+      "7": "西南",
+      "8": "西北"
+    });
+    expect(CHANNEL_POSITION_TYPE_LABEL_FALLBACK).toEqual({
+      "1": "省际检查站",
+      "2": "党政机关",
+      "3": "车站码头",
+      "4": "中心广场",
+      "5": "体育场馆",
+      "6": "商业中心",
+      "7": "宗教场所",
+      "8": "校园周边",
+      "9": "治安复杂区域",
+      "10": "交通干线"
+    });
+    expect(CHANNEL_USE_TYPE_LABEL_FALLBACK).toEqual({ "1": "治安", "2": "交通", "3": "重点" });
+    expect(CHANNEL_PHOTOELECTRIC_IMAGING_TYPE_LABEL_FALLBACK).toEqual({
+      "1": "可见光成像",
+      "2": "热成像",
+      "3": "雷达成像",
+      "4": "X光成像",
+      "5": "深度光场成像",
+      "9": "其他"
+    });
+  });
+
+  it("展示名走字典:现场改了名字,界面就跟着改", () => {
+    expect(roomTypeText(1, { "1": "户外", "2": "户内" })).toBe("户外");
+    expect(supplyLightTypeText(9, { "9": "其他补光" })).toBe("其他补光");
+    expect(directionTypeText(5, { "5": "东南向" })).toBe("东南向");
+    expect(positionTypeText(10, { "10": "交通要道" })).toBe("交通要道");
+    expect(useTypeText(3, { "3": "重点单位" })).toBe("重点单位");
+    // 多值字段同样走字典,但仍按 "/" 逐段翻译
+    expect(photoelectricImagingTypeText("1/2", { "1": "可见光", "2": "红外热成像" })).toBe("可见光 / 红外热成像");
+  });
+
+  it("字典里没有的码值仍落回协议值域兜底,不因字典缺项而变「未知」", () => {
+    expect(roomTypeText(2, { "1": "户外" })).toBe("室内");
+    expect(supplyLightTypeText(3, { "1": "无" })).toBe("白光补光");
+  });
+
+  it("字典里没有的码值且兜底也没有 → 仍是 `未知(N)`(值域外私扩照旧回显)", () => {
+    expect(roomTypeText(7, { "1": "户外" })).toBe("未知(7)");
+  });
+
+  it("⛔ 哨兵优先于字典:`0` 永远是「未上报」,哪怕字典偏偏给了个 0", () => {
+    expect(roomTypeText(0, { "0": "零值" })).toBe(CHANNEL_ATTR_UNREPORTED);
+    expect(supplyLightTypeText(0, { "0": "零值" })).toBe(CHANNEL_ATTR_UNREPORTED);
+    expect(photoelectricImagingTypeText("", { "0": "零值" })).toBe(CHANNEL_ATTR_UNREPORTED);
+  });
+
+  it("⛔ 字典只能改展示名,不能改判定:改名后形态推断与 reported/scope 一个都不许变", () => {
+    const renamed = { "1": "随便改个名字", "2": "再改一次" };
+    const channel = { positionType: 1, photoelectricImagingType: "1" };
+
+    const base = channelAttributeEntries(channel);
+    const dict = channelAttributeEntries(channel, { positionType: renamed, photoelectricImagingType: renamed });
+
+    // 形态推断只认码值 ⇒ 被改名也不影响
+    expect(catalogShapeFromAttributes(channel)).toBe("both");
+
+    // 除 value 外,key / label / scope / reported 必须逐条一致
+    const strip = (rows: typeof base) =>
+      rows.map(row => ({ key: row.key, label: row.label, reported: row.reported, scope: row.scope }));
+    expect(strip(dict)).toEqual(strip(base));
+
+    // 而 value 确实跟着字典走了(否则字典就是白接)
+    expect(dict.find(row => row.key === "positionType")?.value).toBe("随便改个名字");
+    expect(dict.find(row => row.key === "photoelectricImagingType")?.value).toBe("随便改个名字");
+  });
+
+  it("entry 的 key/label/scope/reported 不受字典影响,只有 value 变", () => {
+    const entries = channelAttributeEntries(
+      { roomType: 1, supplyLightType: 2, positionType: 0, photoelectricImagingType: "1" },
+      { roomType: { "1": "户外" }, photoelectricImagingType: { "1": "可见光" } }
+    );
+    const byKey = Object.fromEntries(entries.map(entry => [entry.key, entry]));
+
+    expect(byKey.roomType).toMatchObject({ label: "室内外", value: "户外", reported: true, scope: "both" });
+    expect(byKey.supplyLightType).toMatchObject({ value: "红外补光", reported: true, scope: "both" });
+    expect(byKey.positionType).toMatchObject({ value: CHANNEL_ATTR_UNREPORTED, reported: false, scope: "2016" });
+    expect(byKey.photoelectricImagingType).toMatchObject({ value: "可见光", reported: true, scope: "2022" });
   });
 });

@@ -100,7 +100,8 @@ import AddToGroupDialog from "./components/AddToGroupDialog.vue";
 import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
-import { catalogShapeFromAttributes, catalogShapeText, channelAttributeEntries } from "./channelAttributeText";
+import { catalogShapeFromAttributes, catalogShapeText } from "./channelAttributeText";
+import { useChannelAttributeEntries } from "./useChannelAttributeDict";
 import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
 import {
   createDirectoryState,
@@ -583,8 +584,10 @@ function cameraTypeText(ptzType?: number | null) {
 // 通道详情里的「设备上报属性」区块(GB/T 28181 附录 A / §9.3.1)。
 // 2016 与 2022 的版本独有属性(2016: 位置类型/用途;2022: 光电成像类型/采集部位类型)并存展示,
 // 哪一组有值就说明设备报的是哪一版目录形态 —— 不读设备声明的 effectiveGbVersion(它有 default:2016,
-// 对 2022 设备会误判)。映射与判定逻辑都在 channelAttributeText.ts,此处只取数。
-const channelAttributeRows = computed(() => channelAttributeEntries(channelDetail.value ?? {}));
+// 对 2022 设备会误判)。映射与判定逻辑都在 channelAttributeText.ts,此处只取数;
+// 六个值域改由字典驱动(只读展示),查表来自 useChannelAttributeDict。
+const channelAttributeEntriesOf = useChannelAttributeEntries();
+const channelAttributeRows = computed(() => channelAttributeEntriesOf(channelDetail.value ?? {}));
 const channelCatalogShapeText = computed(() => catalogShapeText(catalogShapeFromAttributes(channelDetail.value ?? {})));
 function channelAttributeScopeText(scope: "both" | "2016" | "2022") {
   if (scope === "2016") return "仅 2016";

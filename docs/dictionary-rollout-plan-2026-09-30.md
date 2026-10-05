@@ -46,7 +46,8 @@
 | **P0** | 启用/禁用展示层 | 7 个文件（见 §二·P0） | 无（复用 `status`） | ✅ **已完成** |
 | **P1** | 视频参数三码值 | `videoParamCodec.ts`、`DeviceConfigDrawer.vue`、`PictureVideoParamCard.vue`、新增 `useVideoParamDict.ts` | `video_format`、`video_resolution`、`bit_rate_type` | ✅ **已完成** |
 | **P2** | 设备/节点/级联状态 | 18 处在线状态 + `zlm/**` 8 处节点状态 + `cascadeState.ts` | `device_status`、`media_node_state`、`cascade_register_state` | ✅ **已完成** |
-| **P3** | 通道属性 + 告警 | `channelAttributeText.ts`、`alarm.go` | `channel_*` ×6、`alarm_priority`、`alarm_method`、`alarm_type` | ⏳ 待拍板 |
+| **P3a** | 通道属性（只读展示） | `channelAttributeText.ts`、新增 `useChannelAttributeDict.ts`、`device-mgmt/index.vue` | `channel_*` ×6 | ✅ **已完成** |
+| **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏳ 待拍板（见 §3.3/§3.4B） |
 | **P4** | 其余 20 项 | 见盘点报告 F12–F32、B4–B10 | 按项 | ⏳ 待开始 |
 
 ### 二·P0 明细（✅ 已完成）
@@ -198,6 +199,48 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 
 ---
 
+### 二·P3a 明细（✅ 已完成 2026-10-05）
+
+**新增 6 个字典**（⛔ 直接写开发库 220，不写任何 SQL 脚本）：
+
+| 字典 code | 值域（= 协议值域，锁进单测） | 开发库 id / 项数 |
+| --- | --- | --- |
+| `channel_room_type` | 1 室外 / 2 室内 | 20 / 2 |
+| `channel_supply_light_type` | 1 无补光 / 2 红外补光 / 3 白光补光 / 4 激光补光（2022 新增）/ 9 其他（2022 新增） | 21 / 5 |
+| `channel_direction_type` | 1 东 … 8 西北 | 22 / 8 |
+| `channel_position_type` | 1 省际检查站 … 10 交通干线（**2016 独有**） | 23 / 10 |
+| `channel_use_type` | 1 治安 / 2 交通 / 3 重点（**2016 独有**） | 24 / 3 |
+| `channel_photoelectric_imaging_type` | 1 可见光成像 / 2 热成像 / 3 雷达成像 / 4 X光成像 / 5 深度光场成像 / 9 其他（**2022 独有，多值**） | 25 / 6 |
+
+**改动**：`device-mgmt/channelAttributeText.ts`（6 张数字键表 → 冻结的协议值域兜底常量 + 可注入查表）、
+新增注入层 `device-mgmt/useChannelAttributeDict.ts`、唯一消费点 `device-mgmt/index.vue`。
+
+⭐ **本批刻意"不做"的三件事**（都写进了代码注释）：
+
+1. ⛔ `capturePositionType`（采集部位类型）**不加表、不入字典** —— 标准只要求"应符合附录 O"，无权威中文名。
+2. ⛔ **`0` / `""` = "本次未上报"这条哨兵语义留在纯函数**（字典表只有"所属字典/值/名字"三位，表达不了"缺失"）。
+   单测专门钉死：**即便字典里偏偏有条 `value="0"`，也必须显示"未上报"**。
+3. ⛔ **多值拆分/拼回留在纯函数**（`photoelectricImagingType` 允许 `1/2/3`），字典只管"单码 → 中文"。
+
+✅ **判定零改动**：`catalogShapeFromAttributes` 本来就认码值，字典改名不影响它。单测用"把名字全改掉后
+`key/label/scope/reported` 逐条不变、只有 `value` 变"来同时守住"字典生效"与"判定不受影响"两件事。
+
+**验证**
+
+- `channelAttributeText.test.ts` **48 例全绿**（原 34 例 + 新增 14 例字典化用例）。
+- `device-mgmt` 全目录：**431 例通过，2 例失败**，两个都是**已知历史遗留**（见 §四·4.2 红名单）。
+- 开发库：**25 字典 / 145 项**（⚠️ 项数用 `COUNT(*)`，见 §四·4.1）；无重复行、无父 id 落空的孤儿项。
+- 接口 `sysDictItem/getByDictCode/<6 个 code>` **逐条与代码兜底比对一致**（脚本化对拍，6/6 ✓）。
+- `eslint` 零告警；`vue-tsc` 本批文件**零错误**（存量 108 条，全在 `firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*`）。
+
+**⚠️ 知情项（老板 2026-10-05 提醒）**：这六项**真实设备极少上报**，本批价值在"枚举口径统一"，
+不在覆盖面 —— 别指望它在现场能常看到值。
+
+**提交状态**：⏳ 未提交（4 个文件：1 改 + 1 新增 + 1 测试 + 本台账；`device-mgmt/index.vue` 为改）。
+⛔ **数据库侧零改动**（新字典直插开发库，仓库里没有任何 SQL/seeds 痕迹）。
+
+---
+
 ## 三、待拍板（阻塞 P3 及之后）
 
 ### 3.1 ⭐⭐ 已决：开发阶段**不写任何数据库脚本**（2026-10-05 口径变更）
@@ -264,8 +307,11 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
 
 **C. 建议顺序**（含 §3.2 的依赖）
 
-1. 先定 §3.2「字段型字典只读闸门」——P1 的视频参数是**要下发**的，停用/删掉一档就再也发不出去；P3a 又要加 6 个"国标固定值域"字典，闸门宜先立；
-2. P3a 通道属性 **6 个**字典（`room_type` / `supply_light_type` / `direction_type` / `position_type` / `use_type` / `photoelectric_imaging_type`，即 `channelAttributeText.ts` 现有的 6 张表）一次做完；
+1. ⏳ §3.2「字段型字典只读闸门」——**仍未拍板**（老板 2026-10-05 接受了建议的**顺序**，但没选 A/B/C 方案）。
+   ⚠️ 有个成本前提要先说清：**"真·系统级标记"要加列 ⇒ 属 schema 类改动**，按本仓口径得走
+   `schema.ir.json` + `seeds/` → `generate_sql.py` → 手工幂等迁移，**不能再走"直插开发库"那条快路**；
+   若只是"前端对这批 code 只读"（方案 B）则零 schema 改动。二者代价差一个量级，故**先不擅自落**。
+2. ✅ **P3a 通道属性 6 个字典 —— 已完成**（见 §二·P3a）；
 3. P3b 告警：定"翻译归前端"→ 收敛那 20 项重复 → 后端改只返码值 + 前端接管展示，**单独一批**做，不与 P3a 混。
 
 ---
@@ -304,6 +350,30 @@ GROUP BY d.id, d.code, d.name;
 
 ⛔ 表 `sys_dict_item` **没有 `deleted_at` 列**（不是软删除表），别去按它过滤。
 ⭐ 通用教训：**「条数」与「最大 id」是两个量；稀疏 id 表上永远用 `COUNT(*)`，并且把口径写进结论里。**
+
+### 4.2 存量失败红名单（批次前先看，别把历史遗留算到本批头上）
+
+全量/目录跑完若仍红，**必须"摘掉本批改动重跑"来证明它是历史遗留**，不要凭记忆断言：
+
+```bash
+git stash push -m "verify" -- $(git diff --name-only)   # 只摘已跟踪改动，未跟踪新文件不碍事
+# 原样重跑同一批失败用例 —— Test Files / Tests 两行数字必须与摘之前逐字相同
+git stash pop                                            # ⛔ 确认修改文件全回来了
+```
+
+⛔ 别用 `git checkout --` 代替 stash。⛔ 别只凭"报错内容像不像本批"，要**比对数字**。
+
+**已知红名单（会变，每次实测）**：
+
+| 用例 | 症状 | 性质 |
+| --- | --- | --- |
+| `device-mgmt/DeviceFirmwareUpgradePanel.test.ts` | emits 断言 | 历史遗留 |
+| `device-mgmt/index.deviceDetailTabs.test.ts` | 第 132 行源码断言 `toContain(".dcg-window--embedded .dcg-nav > .dcg-nav-item {")` —— 该选择器**在 HEAD 里也不存在** | **过期断言**（断言没跟上代码） |
+| `layout/.../theme-toggle.test.ts` | `arco-overrides.scss` 的暗色按钮源码断言 | 历史遗留 |
+| `vue-tsc` 存量 **108** 条 | 全在 `firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*` | 历史遗留 |
+
+⭐ 判断"是不是过期断言"的快速办法：若失败断言读的恰好是本批改过的文件，先
+`git show HEAD:<file> | grep <断言串>` —— **两边都没有 ⇒ 与本次无关**。
 
 ---
 
