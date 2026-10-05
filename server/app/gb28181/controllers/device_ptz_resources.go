@@ -214,6 +214,13 @@ func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile: profileForDevice(&device),
 	}
+	if service := dc.ptzServiceSnapshot(); service != nil && service.RequiresDeviceAuthorization() {
+		authorized, err := capturePTZAuthorization(c, dc.db(), target)
+		if err != nil {
+			return ptz.Target{}, homePositionFailure(http.StatusForbidden, ptz.ErrorCodeHomePositionUnavailable, "PTZ 设备授权已失效", err)
+		}
+		target = authorized
+	}
 	return target, nil
 }
 
@@ -262,6 +269,16 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		Profile: profileForDevice(&device),
+	}
+	// 授权 PTZ 运行时要求把当前设备 epoch 固定到操作记录；仅读取设备/通道状态
+	// 会创建无授权绑定的队列项，调度器会在发送前将其拒绝。
+	if service := dc.ptzServiceSnapshot(); service != nil && service.RequiresDeviceAuthorization() {
+		authorized, err := capturePTZAuthorization(c, dc.db(), target)
+		if err != nil {
+			dc.FailAndAbort(c, "PTZ 设备授权已失效", err)
+			return ptz.Target{}, false
+		}
+		target = authorized
 	}
 	if !dc.authorizePTZTarget(c, &target) {
 		return ptz.Target{}, false

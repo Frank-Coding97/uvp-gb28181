@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -360,7 +361,7 @@ func TestDeviceMgmt_ControlPTZExtendedScanActions(t *testing.T) {
 		body string
 		want string
 	}{
-		{"start", `{"action":"scan_start","id":1}`, "A50F01890100003F"},
+		{"start", `{"action":"scan_start","id":1,"value":120}`, "A50F01890100003F"},
 		// 89H 一个码管三件事,子动作在字节6(00 开始 / 01 左边界 / 02 右边界)。
 		{"left bound", `{"action":"scan_set_left","id":1}`, "A50F018901010040"},
 		{"right bound", `{"action":"scan_set_right","id":1}`, "A50F018901020041"},
@@ -385,6 +386,11 @@ func TestDeviceMgmt_ControlPTZExtendedScanActions(t *testing.T) {
 			sender.mu.Lock()
 			bodies := append([]string(nil), sender.bodies[before:]...)
 			sender.mu.Unlock()
+			if tt.name == "start" {
+				require.Len(t, bodies, 2)
+				require.Contains(t, bodies[0], "A50F018A017800B8")
+				require.Contains(t, bodies[1], tt.want)
+			}
 			found := false
 			for _, b := range bodies {
 				if strings.Contains(b, tt.want) {
@@ -395,6 +401,24 @@ func TestDeviceMgmt_ControlPTZExtendedScanActions(t *testing.T) {
 			require.True(t, found, "want %q in sent bodies, got %v", tt.want, bodies)
 		})
 	}
+}
+
+func TestDeviceMgmt_ScanStartStopsAfterSpeedFailure(t *testing.T) {
+	controller, _, channel, sender := newPTZResourceController(t)
+	sender.err = errors.New("speed transport failed")
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/extended", controller.ControlPTZExtended)
+	request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/extended",
+		strings.NewReader(`{"action":"scan_start","id":1,"value":120}`))
+	request.Header.Set("Content-Type", "application/json")
+	result := httptest.NewRecorder()
+	router.ServeHTTP(result, request)
+	require.Contains(t, result.Body.String(), "未发送启动指令")
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	require.Len(t, sender.bodies, 1)
+	require.Contains(t, sender.bodies[0], "A50F018A017800B8")
 }
 
 func TestDeviceMgmt_ControlPTZExtendedRejectsScanSpeedOutOfRange(t *testing.T) {

@@ -147,6 +147,8 @@ type RegistryConfig struct {
 	MaxSession  time.Duration
 	// TerminalTTL 终态会话在内存中的保留时长,超龄后从 sessions 表删除
 	TerminalTTL time.Duration
+	// Metrics 可选。仅用于观测重试耗尽后的强制释放,不影响清理语义。
+	Metrics *Metrics
 }
 
 func (s Session) clone() *Session {

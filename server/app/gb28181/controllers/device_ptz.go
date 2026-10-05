@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"net"
 	"net/http"
 	"strconv"
@@ -225,6 +226,10 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 		dc.FailAndAbort(c, "扫描速度必须在 1-4095 之间", nil)
 		return
 	}
+	if action == manscdp.PTZActionScanStart && request.Value != 0 && (request.Value < 1 || request.Value > 4095) {
+		dc.FailAndAbort(c, "扫描速度必须在 1-4095 之间", nil)
+		return
+	}
 	var channel gbmodels.GbChannel
 	var device gbmodels.GbDevice
 	db := dc.db()
@@ -256,6 +261,27 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	key := request.IdempotencyKey
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
+	}
+	if action == manscdp.PTZActionScanStart && request.Value > 0 {
+		batchLock := dc.deviceControlLock(channel.ID)
+		batchLock.Lock()
+		defer batchLock.Unlock()
+		if key == "" {
+			key = "scan-start-" + uuid.NewString()
+		}
+		_, speedErr := service.Execute(c.Request.Context(), target, ptz.Command{
+			CmdType: manscdp.CmdDeviceControl, Action: string(manscdp.PTZActionScanSetSpeed), IdempotencyKey: key + "-speed",
+			Profile: target.Profile,
+			Payload: map[string]interface{}{"action": manscdp.PTZActionScanSetSpeed, "id": id, "value": request.Value},
+			Build: func(sn int) ([]byte, error) {
+				return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn,
+					manscdp.PTZExtendedCommand{Action: manscdp.PTZActionScanSetSpeed, ID: id, Value16: request.Value})
+			},
+		})
+		if speedErr != nil {
+			dc.FailAndAbort(c, "扫描速度下发失败，未发送启动指令", speedErr)
+			return
+		}
 	}
 	op, executeErr := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,

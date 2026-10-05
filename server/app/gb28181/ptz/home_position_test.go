@@ -145,6 +145,25 @@ func TestHomePositionReadModelPreservesConfigAfterNoDataQuery(t *testing.T) {
 	require.Equal(t, "no-data", *model.Refresh.OperationID)
 }
 
+func TestHomePositionReadModelConfirmedQuerySupersedesOlderFailedControl(t *testing.T) {
+	now := time.Now()
+	service, db := newHomePositionTestService(t, &now)
+	require.NoError(t, db.Create(&gbmodels.GbPTZOperation{
+		ID: 1, OperationID: "old-control", IdempotencyKey: "old-control", DeviceID: 2, ChannelID: 1,
+		CmdType: "DeviceControl", Action: "home_position", Status: gbmodels.PTZOperationRejected,
+		ErrorCode: "DEVICE_EPOCH_REVOKED", CreatedAt: now,
+	}).Error)
+	_, applied, err := service.ApplyHomePosition(context.Background(), homePositionUpdate(2, now))
+	require.NoError(t, err)
+	require.True(t, applied)
+	model, err := service.GetHomePositionReadModel(context.Background(), 1, nil)
+	require.NoError(t, err)
+	require.Equal(t, HomePositionControlIdle, model.Control.Status)
+	require.Nil(t, model.Control.ErrorCode)
+	require.NotNil(t, model.HomePosition)
+	require.False(t, model.HomePosition.Enabled)
+}
+
 func TestHomePositionCapabilitiesResolveProfileThenAcceptedHistory(t *testing.T) {
 	now := time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC)
 	service, db := newHomePositionTestService(t, &now)

@@ -3,6 +3,8 @@ package sipgo
 import (
 	"context"
 	"log/slog"
+	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,6 +144,109 @@ func TestNewAckRequestUACKeepsAdvertisedViaAddress(t *testing.T) {
 	assert.Equal(t, 5062, ack.Via().Port)
 	assert.Equal(t, "UDP", ack.Via().Transport)
 	assert.NotEqual(t, "z9hG4bK.original", ack.Via().Params.GetOr("branch", ""))
+}
+
+func TestInviteSentByViaKeepsAddressAndRotatesBranch(t *testing.T) {
+	invite := sip.NewRequest(sip.INVITE, sip.Uri{User: "device", Host: "192.0.2.20", Port: 5060})
+	params := sip.NewParams()
+	params.Add("branch", "z9hG4bK.original")
+	invite.AppendHeader(&sip.ViaHeader{
+		ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: "TCP",
+		Host: "192.0.2.10", Port: 5062, Params: params,
+	})
+
+	via := inviteSentByVia(invite)
+
+	require.NotNil(t, via)
+	assert.Equal(t, "192.0.2.10", via.Host)
+	assert.Equal(t, 5062, via.Port)
+	assert.Equal(t, "TCP", via.Transport)
+	assert.NotEqual(t, "z9hG4bK.original", via.Params.GetOr("branch", ""))
+	// 原始 INVITE 的 Via 不得被就地改写。
+	assert.Equal(t, "z9hG4bK.original", invite.Via().Params.GetOr("branch", ""))
+	assert.Nil(t, inviteSentByVia(sip.NewRequest(sip.INVITE, sip.Uri{Host: "192.0.2.20"})), "没有 Via 时不得伪造 sent-by")
+}
+
+// TestDialogClientSessionByeKeepsAdvertisedViaAddress 端到端钉住 BYE 的 sent-by。
+//
+// 真实报文实测:拖动时间轴触发的拆除 INFO/BYE 曾带着 `[::]:5062` 出网,而设备
+// 按 RFC 3261 §18.2.1 把应答发往 sent-by,于是每条都只能靠重传超时收场(实测
+// 该设备 2890 条出向 BYE 零应答)。INVITE 由应用层显式写地址、ACK 克隆 INVITE,
+// 只有 BYE 需要在这里补齐。
+func TestDialogClientSessionByeKeepsAdvertisedViaAddress(t *testing.T) {
+	peer, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer peer.Close()
+	port := peer.LocalAddr().(*net.UDPAddr).Port
+
+	var mu sync.Mutex
+	var bye *sip.Request
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			n, addr, readErr := peer.ReadFrom(buf)
+			if readErr != nil {
+				return
+			}
+			message, parseErr := sip.ParseMessage(buf[:n])
+			if parseErr != nil {
+				continue
+			}
+			request, ok := message.(*sip.Request)
+			if !ok {
+				continue
+			}
+			var response *sip.Response
+			switch request.Method {
+			case sip.INVITE:
+				response = cleanupBranchResponse(request, port)
+			case sip.BYE:
+				mu.Lock()
+				bye = request
+				mu.Unlock()
+				response = sip.NewResponseFromRequest(request, sip.StatusOK, "OK", nil)
+			default:
+				continue
+			}
+			_, _ = peer.WriteTo([]byte(response.String()), addr)
+		}
+	}()
+
+	dua, invite := ownedInviteRequest(t, peer.LocalAddr().String())
+	session, err := dua.WriteInvite(context.Background(), invite)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	require.NoError(t, session.WaitAnswer(ctx, AnswerOptions{}))
+	require.NoError(t, session.Ack(ctx))
+	require.NoError(t, session.Bye(ctx))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotNil(t, bye, "BYE 必须真的发到设备")
+	require.Len(t, bye.GetHeaders("Via"), 1, "BYE 只能有一个 Via")
+	assert.Equal(t, invite.Via().Host, bye.Via().Host)
+	assert.Equal(t, invite.Via().Port, bye.Via().Port)
+	assert.NotEqual(t, invite.Via().Params.GetOr("branch", ""), bye.Via().Params.GetOr("branch", ""))
+}
+
+// TestNewBranchCleanupKeepsSingleVia 钉住 NewBranchCleanup 的单 Via 不变式。
+//
+// 它自己会用 INVITE 的 sent-by 覆盖 BYE 的 Via；若 newByeRequestUAC 也塞一个，
+// 就会变成两个 Via，被 validFixedCleanupRequest 判为非法，整条定点拆除路径直接
+// 不发 BYE（实测 download-final-SQL 用例 byes=0）。这个不变式同时也是
+// NewFixedBranchCleanup 的前提：ACK/BYE 除 branch 外必须逐字节相同。
+func TestNewBranchCleanupKeepsSingleVia(t *testing.T) {
+	dua, invite := ownedInviteRequest(t, "127.0.0.1:5060")
+	owner, err := dua.NewBranchCleanup(invite, cleanupBranchResponse(invite, 5060), invite.CSeq().SeqNo+1)
+	require.NoError(t, err)
+	defer owner.Terminate()
+
+	ack, bye := owner.ACKRequest(), owner.BYERequest()
+	require.Len(t, bye.GetHeaders("Via"), 1, "BYE 只能有一个 Via")
+	require.Equal(t, invite.Via().Host, bye.Via().Host)
+	require.Equal(t, invite.Via().Port, bye.Via().Port)
+	require.NotEqual(t, ack.Via().Params.GetOr("branch", ""), bye.Via().Params.GetOr("branch", ""))
 }
 
 func TestDialogClientMultiRequest(t *testing.T) {

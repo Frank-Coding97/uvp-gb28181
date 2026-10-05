@@ -5,6 +5,11 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
+// RequiresDeviceAuthorization reports whether operations need durable epoch bindings.
+func (s *Service) RequiresDeviceAuthorization() bool {
+	return s != nil && (s.intents != nil || s.barrier != nil)
+}
+
 func requiresPTZIntent(op gbmodels.GbPTZOperation) bool {
 	return op.DeviceEpoch != nil || op.DeviceIntentID != nil
 }

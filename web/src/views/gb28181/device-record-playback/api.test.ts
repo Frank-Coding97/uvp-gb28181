@@ -26,10 +26,15 @@ describe("device record playback API", () => {
       "playback-create-key"
     );
 
-    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/device-mgmt/channel/31/playback-sessions", {
-      data: { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
-      headers: { "Idempotency-Key": "playback-create-key" }
-    });
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions",
+      {
+        data: { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
+        headers: { "Idempotency-Key": "playback-create-key" }
+      },
+      {}
+    );
   });
 
   it("loads, controls, and deletes one playback session", async () => {
@@ -37,7 +42,13 @@ describe("device record playback API", () => {
     await actionPlaybackSession(31, "session-1", { action: "seek", positionSeconds: 42 });
     await deletePlaybackSession(31, "session-1");
 
-    expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1");
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "get",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1",
+      undefined,
+      {}
+    );
     expect(request).toHaveBeenNthCalledWith(
       2,
       "post",
@@ -46,7 +57,47 @@ describe("device record playback API", () => {
         data: { action: "seek", positionSeconds: 42 }
       }
     );
-    expect(request).toHaveBeenNthCalledWith(3, "delete", "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1");
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      "delete",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1",
+      undefined,
+      {}
+    );
+  });
+
+  it("lets retry loops suppress the automatic error toast", async () => {
+    // 重试期间的中间失败(通道还没释放)不该弹全局提示,否则会被连续弹一脸。
+    await createPlaybackSession(
+      31,
+      { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
+      "playback-create-key",
+      { showErrorMessage: false }
+    );
+    await getPlaybackSession(31, "session-1", { showErrorMessage: false });
+    await deletePlaybackSession(31, "session-1", { showErrorMessage: false });
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "post",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions",
+      expect.objectContaining({ headers: { "Idempotency-Key": "playback-create-key" } }),
+      { showErrorMessage: false }
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "get",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1",
+      undefined,
+      { showErrorMessage: false }
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      "delete",
+      "/api/gb28181/device-mgmt/channel/31/playback-sessions/session-1",
+      undefined,
+      { showErrorMessage: false }
+    );
   });
 
   it("prefers ws-flv, then http-flv, then hls", () => {

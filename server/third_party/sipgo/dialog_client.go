@@ -435,12 +435,44 @@ func (s *DialogClientSession) WriteAck(ctx context.Context, ack *sip.Request) er
 	return nil
 }
 
+// inviteSentByVia returns a Via that reuses the INVITE sent-by address with a
+// fresh branch, or nil when the INVITE has no Via to copy.
+//
+// In-dialog requests must carry a routable sent-by: RFC 3261 §18.2.1 makes the
+// UAS send its final response to that address. Requests built without a Via are
+// filled in by the transport layer from the local listening socket, which for a
+// socket bound on all interfaces yields the unspecified address [::]:<port>.
+// A response addressed there is lost, so the request can only end in UDP
+// retransmission timeouts.
+func inviteSentByVia(invite *sip.Request) *sip.ViaHeader {
+	if invite == nil {
+		return nil
+	}
+	via := invite.Via()
+	if via == nil {
+		return nil
+	}
+	cloned := via.Clone()
+	cloned.Params.Add("branch", sip.GenerateBranchN(16))
+	return cloned
+}
+
 // Bye sends bye and terminates session. Use WriteBye if you want to customize bye request
 func (s *DialogClientSession) Bye(ctx context.Context) error {
 	if s.InviteResponse == nil {
 		return fmt.Errorf("bye: can not send as no invite response present")
 	}
 	bye := newByeRequestUAC(s.InviteRequest, s.InviteResponse, nil)
+	// newByeRequestUAC deliberately leaves Via empty, so the sent-by has to be
+	// restored here or the BYE becomes unacknowledgeable (see inviteSentByVia).
+	//
+	// This is done here rather than inside newByeRequestUAC because
+	// DialogUA.NewBranchCleanup builds the very same request and prepends its
+	// own Via afterwards; adding one there would produce a second Via and fail
+	// that path's single-Via validation.
+	if via := inviteSentByVia(s.InviteRequest); via != nil {
+		bye.PrependHeader(via)
+	}
 	return s.WriteBye(ctx, bye)
 }
 

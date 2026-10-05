@@ -20,7 +20,7 @@ func TestPTZResponseScopeCannotLeaveOrphanOnReuse(t *testing.T) {
 		ChannelID: 11, ChannelCode: id.TargetCode, TargetScope: "channel", TargetCode: id.TargetCode,
 		CmdType: "DeviceControl", Action: "home_position", Status: gbmodels.PTZOperationQueued, MaxAttempts: 1})
 	require.NoError(t, err)
-	require.NoError(t, f.db.Transaction(func(tx *gorm.DB) error {
+	require.NoError(t, f.db.Session(&gorm.Session{PrepareStmt: true}).Transaction(func(tx *gorm.DB) error {
 		scope, err := store.BeginPTZResponseObservation(tx, op)
 		require.NoError(t, err)
 		require.NoError(t, tx.Model(&op).Update("status", gbmodels.PTZOperationAccepted).Error)

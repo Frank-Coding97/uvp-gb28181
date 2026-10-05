@@ -27,7 +27,11 @@ func (s *DeviceOperationIntentStore) BeginPTZResponseObservation(tx *gorm.DB, or
 	if s == nil || tx == nil || tx.Statement == nil || original.DeviceIntentID == nil || original.DeviceEpoch == nil {
 		return nil, ErrDeviceIntentUnavailable
 	}
-	if _, ok := tx.Statement.ConnPool.(*sql.Tx); !ok {
+	pool := tx.Statement.ConnPool
+	if prepared, ok := pool.(*gorm.PreparedStmtTX); ok && prepared != nil {
+		pool = prepared.Tx
+	}
+	if _, ok := pool.(*sql.Tx); !ok {
 		return nil, ErrDeviceIntentInvalid
 	}
 	scope, pk, code, err := PTZIntentTarget(original)

@@ -208,6 +208,57 @@ func TestSendPlaybackInfoBuildsAllActionsInOriginalDialog(t *testing.T) {
 	}
 }
 
+func TestPlaybackControlRequestsPreserveInviteSentBy(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ViaHost != "192.0.2.1" || metadata.ViaPort != 5061 || metadata.Transport != "TCP" {
+		t.Fatalf("INVITE sent-by=%q:%d/%s", metadata.ViaHost, metadata.ViaPort, metadata.Transport)
+	}
+	if _, err := u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoPause}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 背景:INFO/BYE 曾经带着 [::]:5062 的 Via 出网。RFC 3261 §18.2.1 要求 UAS
+	// 把应答发往 sent-by,于是这些请求永远收不到应答(实测 2890 条出向 BYE 零
+	// 应答),拖动时间轴触发的拆除固定耗时约 4 秒并被 HTTP 层判 504。
+	// INVITE 由 prepareOutboundRequest 显式写地址、ACK 由 sipgo 克隆 INVITE,
+	// 因此这里逐个钉住 dialog 内的 INFO(控制 + TEARDOWN)。
+	dialog.mu.Lock()
+	defer dialog.mu.Unlock()
+	if len(dialog.requests) != 2 {
+		t.Fatalf("requests=%d", len(dialog.requests))
+	}
+	for index, request := range dialog.requests {
+		via := request.Via()
+		if via == nil {
+			t.Fatalf("request %d (%s) 缺少 Via", index, request.Method)
+		}
+		if via.Host != metadata.ViaHost || via.Port != metadata.ViaPort {
+			t.Fatalf("request %d (%s) sent-by=%s:%d,必须复用 INVITE 的 %s:%d",
+				index, request.Method, via.Host, via.Port, metadata.ViaHost, metadata.ViaPort)
+		}
+		if via.Host == "" || via.Host == "::" || via.Host == "0.0.0.0" {
+			t.Fatalf("request %d (%s) sent-by 不可路由: %q", index, request.Method, via.Host)
+		}
+		if via.Transport != "TCP" {
+			t.Fatalf("request %d (%s) via transport=%s", index, request.Method, via.Transport)
+		}
+		if via.Params.GetOr("branch", "") == "" {
+			t.Fatalf("request %d (%s) 缺少 branch", index, request.Method)
+		}
+	}
+	if dialog.requests[0].Via().Params.GetOr("branch", "") == dialog.requests[1].Via().Params.GetOr("branch", "") {
+		t.Fatal("两条请求必须各自使用独立 branch")
+	}
+}
+
 func TestSendPlaybackInfoConcurrentCSeqIsStrictlyMonotonic(t *testing.T) {
 	dialog := establishedPlaybackDialog()
 	u, _ := newPlaybackTestUAC(dialog)
@@ -344,8 +395,11 @@ func TestTeardownPlaybackUnansweredInfoStillBYEsAndSucceeds(t *testing.T) {
 	}
 }
 
-func TestTeardownPlaybackRetainsFailedBYEForRetry(t *testing.T) {
+// 没有任何确认(设备拒绝 MANSRTSP TEARDOWN)时,BYE 失败必须保留对话与可重试性。
+// 这是 fail-closed 的那一半,和下面那条「设备已确认 TEARDOWN」的新口径配对。
+func TestTeardownPlaybackRetainsDialogWhenTeardownUnconfirmed(t *testing.T) {
 	dialog := establishedPlaybackDialog()
+	dialog.responseStatus = sip.StatusBadRequest
 	u, _ := newPlaybackTestUAC(dialog)
 	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
 	if err != nil {
@@ -365,12 +419,41 @@ func TestTeardownPlaybackRetainsFailedBYEForRetry(t *testing.T) {
 	if err := u.TeardownPlayback(context.Background(), metadata.CallID); !errors.Is(err, want) || dialog.byeCalls != 2 {
 		t.Fatalf("repeat failure swallowed: err=%v bye=%d", err, dialog.byeCalls)
 	}
-	dialog.byeErr = nil
-	if err := u.TeardownPlayback(context.Background(), metadata.CallID); err != nil || dialog.byeCalls != 3 || dialog.closeCalls != 1 {
-		t.Fatalf("retry: err=%v bye=%d close=%d", err, dialog.byeCalls, dialog.closeCalls)
-	}
 	if len(dialog.requests) != 1 {
 		t.Fatalf("retry resent INFO: %d", len(dialog.requests))
+	}
+}
+
+// 设备已用 2xx 确认 MANSRTSP TEARDOWN、唯独不回 BYE(实测大华 DH-3H3405-ADG:
+// 全历史出向 2908 条 BYE、应答 0 条)⇒ 平台侧必须收敛。
+//
+// 背景:旧口径只认 BYE 应答,于是这类设备每次停止/切录像都要耗满重试上限
+// (退避 1/2/4/8/16s ≈ 30s)才释放通道占位,期间任何再操作固定 429
+// 「当前通道已有回放会话」——现场表现为"拖一下时间轴通道就死了"。
+// "会话结束"的确认点在 GB/T 28181-2016 里是 RTSP TEARDOWN 的 2xx,BYE 只负责
+// 收 SIP 对话,它没被应答不构成"会话仍活着"的证据。
+func TestTeardownPlaybackClosesAfterConfirmedTeardownDespiteUnansweredBYE(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byeErr := errors.New("BYE acknowledgement lost")
+	dialog.byeErr = byeErr
+	result, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID)
+	if result != PlaybackTeardownClosedByeUnconfirmed || err != nil {
+		t.Fatalf("confirmed TEARDOWN + unanswered BYE = %s %v", result, err)
+	}
+	if dialog.closeCalls != 1 {
+		t.Fatalf("close=%d", dialog.closeCalls)
+	}
+	if u.playbackDialogs.get(metadata.CallID) != nil {
+		t.Fatal("converged teardown kept the dialog registered")
+	}
+	// 迁移器(TeardownPlayback)对调用方仍是无错:平台侧已经释放。
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); err != nil {
+		t.Fatalf("idempotent repeat=%v", err)
 	}
 }
 

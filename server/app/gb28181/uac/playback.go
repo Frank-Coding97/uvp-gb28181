@@ -36,6 +36,17 @@ type PlaybackDialogMetadata struct {
 	CSeq                                      uint32
 	StatusCode                                int
 	DeviceID, ChannelID, SSRC                 string
+	// ViaHost/ViaPort/Transport 记录 INVITE 实际写入的 Via sent-by。
+	//
+	// dialog 内的后续请求（INFO/BYE）必须复用同一个 sent-by：sipgo 只在请求
+	// 没有 Via 时才用 Client.host 生成，而 Client.host 为空时会被 transport 层
+	// 填成本地监听套接字地址（[::]:5062）。RFC 3261 §18.2.1 规定 UAS 把应答发往
+	// sent-by，那个地址不可路由 ⇒ INFO/BYE 永远收不到应答，拆除只能靠重传超时。
+	// INVITE 在 prepareOutboundRequest 里显式写了地址，ACK 由 sipgo 克隆 INVITE
+	// 的 Via，所以只有 INFO/BYE 需要在这里补齐。
+	ViaHost   string
+	ViaPort   int
+	Transport string
 }
 
 type PlaybackInfoAction string
@@ -158,14 +169,17 @@ func (d *sipgoPlaybackDialog) Metadata() PlaybackDialogMetadata {
 }
 
 type playbackDialogRecord struct {
-	mu             sync.Mutex
-	dialog         playbackDialog
-	metadata       PlaybackDialogMetadata
-	closed         bool
-	closing        bool
-	byeConfirmed   bool
-	ackPending     bool
-	inboundByeCSeq *uint32
+	mu       sync.Mutex
+	dialog   playbackDialog
+	metadata PlaybackDialogMetadata
+	closed   bool
+	closing  bool
+	// teardownConfirmed 记录设备是否已用 2xx 确认过 MANSRTSP TEARDOWN。
+	// 它才是"会话已被拆掉"的确认点;byeConfirmed 只说明 BYE 这一跳拿到了应答。
+	teardownConfirmed bool
+	byeConfirmed      bool
+	ackPending        bool
+	inboundByeCSeq    *uint32
 }
 
 type PlaybackDialogStore struct {
@@ -214,6 +228,10 @@ func (u *UAC) buildPlaybackInviteRequest(in PlaybackInviteRequest) (*sip.Request
 	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, true); err != nil {
 		return nil, PlaybackDialogMetadata{}, err
 	}
+	viaHost, viaPort := "", 0
+	if via := req.Via(); via != nil {
+		viaHost, viaPort = via.Host, via.Port
+	}
 
 	cseqText := u.nextCSeq()
 	cseq, err := strconv.ParseUint(cseqText, 10, 32)
@@ -227,6 +245,7 @@ func (u *UAC) buildPlaybackInviteRequest(in PlaybackInviteRequest) (*sip.Request
 	return req, PlaybackDialogMetadata{
 		CallID: callID, CSeq: uint32(cseq), DeviceID: in.DeviceID,
 		ChannelID: in.ChannelID, SSRC: in.SSRC,
+		ViaHost: viaHost, ViaPort: viaPort, Transport: normalizeTransport(in.Transport),
 	}, nil
 }
 
@@ -274,6 +293,11 @@ func (u *UAC) InvitePlayback(ctx context.Context, in PlaybackInviteRequest) (Pla
 	dialogMetadata.DeviceID = metadata.DeviceID
 	dialogMetadata.ChannelID = metadata.ChannelID
 	dialogMetadata.SSRC = metadata.SSRC
+	// sent-by 只来自 INVITE 的构造过程：dialog.Metadata() 读的是应答，
+	// 拿不到这个信息，漏掉就会被后续 INFO/BYE 当成"没有 Via"重新生成。
+	dialogMetadata.ViaHost = metadata.ViaHost
+	dialogMetadata.ViaPort = metadata.ViaPort
+	dialogMetadata.Transport = metadata.Transport
 	record := &playbackDialogRecord{dialog: dialog, metadata: dialogMetadata}
 	// Publishing the record must not allow control/cleanup to race the ACK.
 	record.mu.Lock()
@@ -308,6 +332,60 @@ func buildPlaybackInfoBody(request PlaybackInfoRequest, cseq uint32) ([]byte, er
 	}
 }
 
+// playbackControlRecipient 解析回放控制类请求的目标地址。
+//
+// dialog 的远端目标是设备在 INVITE 应答里给出的 Contact(逐跳可达地址),
+// 而 deviceURI 用的是平台自身域(公网地址),两者并不相同。所有在既有 dialog
+// 内发送的请求都必须优先采用 Contact,否则报文会被发往平台自己而不是设备。
+func (u *UAC) playbackControlRecipient(metadata PlaybackDialogMetadata) sip.Uri {
+	recipient := u.deviceURI(metadata.ChannelID)
+	if target := strings.TrimSpace(metadata.RemoteTarget); target != "" {
+		var parsedTarget sip.Uri
+		if err := sip.ParseUri(strings.Trim(target, "<>"), &parsedTarget); err == nil {
+			recipient = parsedTarget
+		}
+	}
+	return recipient
+}
+
+// bindPlaybackVia 给 dialog 内的后续请求补上可路由的 Via sent-by。
+//
+// sipgo 只有在请求完全没有 Via 时才生成一个，而生成时用的是 Client.host；
+// 该字段为空时 transport 层会用本地监听套接字兜底，也就是 [::]:5062 这类
+// 未指定地址。按 RFC 3261 §18.2.1，UAS 会把应答发往 Via 的 sent-by，于是
+// 这样的 INFO/BYE 永远收不到应答，只能靠 UDP 重传超时结束（实测该设备
+// 2890 条出向 BYE 零应答，拖动时间轴后的拆除固定耗时 4 秒并被 HTTP 层判超时）。
+//
+// 因此这里显式复用 INVITE 的 sent-by。metadata 缺这些字段时（历史会话）退回
+// 按目的地址做一次路由解析，绝不留下空 host 让 transport 层兜底。
+func (u *UAC) bindPlaybackVia(req *sip.Request, metadata PlaybackDialogMetadata) {
+	if req == nil || req.Via() != nil {
+		return
+	}
+	host := strings.TrimSpace(metadata.ViaHost)
+	if host == "" {
+		localIP, err := u.outboundIP(req.Destination())
+		if err != nil {
+			return
+		}
+		host = localIP
+	}
+	port := metadata.ViaPort
+	if port <= 0 {
+		port = u.sipPort
+	}
+	transport := strings.TrimSpace(metadata.Transport)
+	if transport == "" {
+		transport = req.Transport()
+	}
+	params := sip.NewParams()
+	params.Add("branch", sip.GenerateBranchN(16))
+	req.AppendHeader(&sip.ViaHeader{
+		ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: normalizeTransport(transport),
+		Host: host, Port: port, Params: params,
+	})
+}
+
 func (u *UAC) SendPlaybackInfo(ctx context.Context, callID string, request PlaybackInfoRequest) (PlaybackControlResult, error) {
 	if u == nil || u.playbackDialogs == nil {
 		return PlaybackControlResult{}, ErrPlaybackUnavailable
@@ -327,14 +405,8 @@ func (u *UAC) SendPlaybackInfo(ctx context.Context, callID string, request Playb
 	if err != nil {
 		return PlaybackControlResult{}, err
 	}
-	recipient := u.deviceURI(record.metadata.ChannelID)
-	if target := strings.TrimSpace(record.metadata.RemoteTarget); target != "" {
-		var parsedTarget sip.Uri
-		if err := sip.ParseUri(strings.Trim(target, "<>"), &parsedTarget); err == nil {
-			recipient = parsedTarget
-		}
-	}
-	req := sip.NewRequest(sip.INFO, recipient)
+	req := sip.NewRequest(sip.INFO, u.playbackControlRecipient(record.metadata))
+	u.bindPlaybackVia(req, record.metadata)
 	req.SetBody(body)
 	req.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
 	callIDHeader := sip.CallIDHeader(record.metadata.CallID)
@@ -385,6 +457,10 @@ const (
 	PlaybackTeardownMissing PlaybackTeardownResult = "missing"
 	PlaybackTeardownPending PlaybackTeardownResult = "pending"
 	PlaybackTeardownClosed  PlaybackTeardownResult = "sip_dialog_closed"
+	// PlaybackTeardownClosedByeUnconfirmed 表示设备已用 2xx 确认 MANSRTSP
+	// TEARDOWN、本地 SIP 对话也已关闭,只是 BYE 没拿到应答(有一类设备恒不回
+	// BYE)。平台侧已收敛,因此不是错误;但也不等于"完全干净"。
+	PlaybackTeardownClosedByeUnconfirmed PlaybackTeardownResult = "sip_dialog_closed_bye_unconfirmed"
 )
 
 // TeardownPlayback retains the legacy missing-is-idempotent behavior. Its nil
@@ -433,6 +509,9 @@ func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result
 	}
 
 	var controlErr error
+	// controlAccepted 表示设备已经用 2xx(+可接受的 MANSRTSP 应答)确认了这次拆除。
+	// 未确认时必须保持 fail-closed(保留绑定、下次重试);已确认时 BYE 只是收尾动作。
+	controlAccepted := false
 	if !record.closing {
 		record.closing = true
 		cseq := record.metadata.CSeq + 1
@@ -441,7 +520,10 @@ func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result
 		if buildErr == nil {
 			record.metadata.CSeq = cseq
 			controlCtx, controlCancel := context.WithTimeout(ctx, playbackTeardownTimeout)
-			req := sip.NewRequest(sip.INFO, u.deviceURI(record.metadata.ChannelID))
+			// 必须与暂停/拖动走同一套目标解析:漏掉 Contact 覆盖会让这条
+			// TEARDOWN INFO 被发往平台自身域(公网地址),设备永远收不到。
+			req := sip.NewRequest(sip.INFO, u.playbackControlRecipient(record.metadata))
+			u.bindPlaybackVia(req, record.metadata)
 			req.SetBody(body)
 			req.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
 			callIDHeader := sip.CallIDHeader(record.metadata.CallID)
@@ -455,23 +537,46 @@ func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result
 				controlErr = fmt.Errorf("%w: SIP %d %s", ErrPlaybackRejected, response.StatusCode, response.Reason)
 			} else if len(response.Body()) == 0 {
 				// GB/T 28181-2016 9.8.3.2 permits a SIP 200 response without a MANSRTSP body.
+				controlAccepted = true
 			} else if result, err := mansrtsp.ParseResponse(response.Body()); err != nil {
 				controlErr = err
 			} else if result.CSeq != cseq {
 				controlErr = fmt.Errorf("%w: response CSeq %d, want %d", mansrtsp.ErrProtocol, result.CSeq, cseq)
 			} else if result.Status != mansrtsp.ResultAccepted {
 				controlErr = fmt.Errorf("%w: MANSRTSP %d %s", ErrPlaybackRejected, result.StatusCode, result.Reason)
+			} else {
+				controlAccepted = true
 			}
 		}
+	}
+	if controlAccepted {
+		record.teardownConfirmed = true
 	}
 	if !record.byeConfirmed {
 		byeCtx, byeCancel := context.WithTimeout(context.WithoutCancel(ctx), playbackTeardownTimeout)
 		byeErr := record.dialog.Bye(byeCtx)
 		byeCancel()
 		if byeErr != nil {
-			return PlaybackTeardownPending, errors.Join(controlErr, byeErr)
+			if !record.teardownConfirmed {
+				return PlaybackTeardownPending, errors.Join(controlErr, byeErr)
+			}
+			// 设备已经确认了 MANSRTSP TEARDOWN(会话确实被拆掉),唯独没回 BYE。
+			// 有一类设备恒不回 BYE —— 实测大华 DH-3H3405-ADG:全历史出向
+			// 2908 条 BYE、应答 0 条(同一台设备的直播 dialog 是回 BYE 的)。
+			// 而 GB/T 28181-2016 里"会话结束"的确认点本来就是 RTSP TEARDOWN
+			// 的 2xx,BYE 只负责收 SIP 对话:它没被应答不构成"会话仍活着"的
+			// 证据。若据此判失败,拆除永远不收敛 —— 每次停止/切录像都要耗满
+			// 重试上限(退避 1/2/4/8/16s ≈ 30s)才释放通道,这段窗口内任何
+			// 再操作都固定 429「当前通道已有回放会话」。
+			//
+			// 注意这仍然是 fail-closed:没拿到任何确认(INFO 失败/被拒)时
+			// 走上面那个分支,保留绑定、保留可重试性。
+			//
+			// 可观测性:这类设备在 gb_sip_trace_message 里表现为长期存在的
+			// method='BYE' AND direction='outbound' AND status_code=0。
+		} else {
+			record.byeConfirmed = true
 		}
-		record.byeConfirmed = true
 	}
 	closeErr := record.dialog.Close()
 	if closeErr == nil {
@@ -484,6 +589,11 @@ func (u *UAC) TeardownPlaybackResult(ctx context.Context, callID string) (result
 	}
 	if closeErr != nil {
 		return PlaybackTeardownPending, errors.Join(controlErr, closeErr)
+	}
+	if !record.byeConfirmed {
+		// 平台侧已收敛(设备确认了 TEARDOWN、本地对话已关闭),但 BYE 没拿到应答。
+		// 用独立返回值把"降级成功"与"完全干净"区分开,不升级成错误。
+		return PlaybackTeardownClosedByeUnconfirmed, controlErr
 	}
 	return PlaybackTeardownClosed, controlErr
 }

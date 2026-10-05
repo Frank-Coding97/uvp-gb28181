@@ -148,20 +148,50 @@ func TestSipgoPlaybackByeRequiresAttributableConfirmation(t *testing.T) {
 }
 
 func TestPlaybackCleanupResultDoesNotTurnMissingIntoEvidence(t *testing.T) {
-	dialog := establishedPlaybackDialog()
-	u, _ := newPlaybackTestUAC(dialog)
+	// 一半:完全没拿到确认(设备拒绝 MANSRTSP TEARDOWN)⇒ 不把"没证据"当成
+	// "已经拆干净",保留绑定以便安全重试。
+	unconfirmed := establishedPlaybackDialog()
+	unconfirmed.responseStatus = sip.StatusBadRequest
+	rejected, _ := newPlaybackTestUAC(unconfirmed)
+	rejectedMetadata, err := rejected.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unconfirmed.byeErr = context.DeadlineExceeded
+	if result, err := rejected.TeardownPlaybackResult(context.Background(), rejectedMetadata.CallID); result != PlaybackTeardownPending || err == nil {
+		t.Fatalf("no confirmation must stay pending: %s %v", result, err)
+	}
+	if rejected.playbackDialogs.get(rejectedMetadata.CallID) == nil || unconfirmed.closeCalls != 0 {
+		t.Fatalf("unconfirmed teardown lost the dialog: close=%d", unconfirmed.closeCalls)
+	}
+
+	// 另一半:设备已经确认了 MANSRTSP TEARDOWN,只是没回 BYE ⇒ 平台侧收敛,
+	// 但用独立返回值把"降级成功"和"完全干净"分开,不冒充证据。
+	confirmed := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(confirmed)
 	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialog.byeErr = context.DeadlineExceeded
-	if result, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID); result != PlaybackTeardownPending || err == nil {
-		t.Fatalf("unconfirmed=%s %v", result, err)
+	confirmed.byeErr = context.DeadlineExceeded
+	if result, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID); result != PlaybackTeardownClosedByeUnconfirmed || err != nil {
+		t.Fatalf("bye-unconfirmed=%s %v", result, err)
 	}
-	dialog.byeErr = nil
-	if result, err := u.TeardownPlaybackResult(context.Background(), metadata.CallID); result != PlaybackTeardownClosed || err != nil {
+	if confirmed.closeCalls != 1 {
+		t.Fatalf("close=%d", confirmed.closeCalls)
+	}
+
+	// 干净路径:BYE 有应答 ⇒ 普通 Closed。
+	clean := establishedPlaybackDialog()
+	cleanUAC, _ := newPlaybackTestUAC(clean)
+	cleanMetadata, err := cleanUAC.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := cleanUAC.TeardownPlaybackResult(context.Background(), cleanMetadata.CallID); result != PlaybackTeardownClosed || err != nil {
 		t.Fatalf("confirmed=%s %v", result, err)
 	}
+
 	for _, callID := range []string{metadata.CallID, "unknown-after-restart", ""} {
 		if result, err := u.TeardownPlaybackResult(context.Background(), callID); result != PlaybackTeardownMissing || err != nil {
 			t.Fatalf("missing=%s %v", result, err)

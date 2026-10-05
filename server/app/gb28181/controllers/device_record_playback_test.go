@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,7 @@ type fakePlaybackHTTPService struct {
 	session   *gbplayback.Session
 	createErr error
 	actionErr error
+	stopErr   error
 	actions   []gbplayback.ActionRequest
 	stops     int
 }
@@ -65,6 +67,9 @@ func (f *fakePlaybackHTTPService) StopForOwner(_ context.Context, _ string, owne
 		return gbplayback.ErrPlaybackNotFound
 	}
 	f.stops++
+	if f.stopErr != nil {
+		return f.stopErr
+	}
 	f.session.State = gbplayback.StateStopped
 	return nil
 }
@@ -192,6 +197,24 @@ func TestDeviceRecordPlaybackMapsCreateFailureStage(t *testing.T) {
 			require.NotContains(t, result.Body.String(), "device detail")
 		})
 	}
+}
+
+func TestDeviceRecordPlaybackStopReportsTeardownNotMediaWait(t *testing.T) {
+	fixture, service, _ := newPlaybackHTTPFixture(t)
+	service.session = &gbplayback.Session{ID: "session-1", OwnerID: "100", ChannelID: uintStr(fixture.channel.ID), State: gbplayback.StatePlaying}
+	// 设备不应答 BYE ⇒ registry 的拆除超时向上冒泡成 context.DeadlineExceeded。
+	// 停止路径上没有任何"等媒体"的步骤,所以这条错误必须报成拆除侧的问题;
+	// 曾经它被兜底分支译成「回放媒体等待超时 / media_wait」,把排查引向设备推流。
+	service.stopErr = fmt.Errorf("停止设备录像回放失败: %w", context.DeadlineExceeded)
+
+	request := httptest.NewRequest(http.MethodDelete, "/channel/"+uintStr(fixture.channel.ID)+"/playback-sessions/session-1", nil)
+	result := httptest.NewRecorder()
+	fixture.router.ServeHTTP(result, request)
+
+	require.Equal(t, http.StatusGatewayTimeout, result.Code, result.Body.String())
+	require.Contains(t, result.Body.String(), `"errorStage":"teardown"`)
+	require.NotContains(t, result.Body.String(), "media_wait")
+	require.NotContains(t, result.Body.String(), "回放媒体等待超时")
 }
 
 func TestDeviceRecordPlaybackActionsAndDeleteAreValidatedAndOwnerScoped(t *testing.T) {

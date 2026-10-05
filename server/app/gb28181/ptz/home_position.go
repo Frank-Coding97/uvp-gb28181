@@ -425,6 +425,9 @@ func (s *Service) GetHomePositionReadModel(ctx context.Context, channelID uint, 
 	if err != nil {
 		return HomePositionReadModel{}, err
 	}
+	if homePointer != nil && latestControl != nil && latestControl.ID < home.SourceOperationSeq {
+		latestControl = nil
+	}
 	refresh, err := s.exactReconcileOperation(ctx, homePointer)
 	if err != nil {
 		return HomePositionReadModel{}, err

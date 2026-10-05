@@ -50,6 +50,7 @@ type GbPTZOperation struct {
 	ErrorCode            string             `gorm:"column:error_code;size:64" json:"errorCode"`
 	ErrorMessage         string             `gorm:"column:error_message;type:text" json:"errorMessage"`
 	ActorID              uint               `gorm:"column:actor_id;not null;default:0" json:"actorId"`
+	ActorName            string             `gorm:"column:actor_name;->" json:"-"`
 	ActorDeptID          uint               `gorm:"column:actor_dept_id;not null;default:0" json:"actorDeptId"`
 	CreatedAt            time.Time          `gorm:"column:created_at;not null;index:idx_ptz_operation_channel_time,priority:2;index:idx_ptz_operation_status_time,priority:2;index:idx_ptz_operation_device_scope_time,priority:3" json:"createdAt"`
 	SentAt               *time.Time         `json:"sentAt"`

@@ -202,7 +202,7 @@ func (s *Service) createOperation(
 		"queue_deadline_at":    queueDeadline, "created_at": createdAt,
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Model(&gbmodels.GbPTZOperation{}).Create(values).Error
+		return tx.Model(&gbmodels.GbPTZOperation{}).Create(&values).Error
 	}); err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}

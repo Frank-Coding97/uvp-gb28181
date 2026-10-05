@@ -25,7 +25,10 @@ type playbackIntentOwner struct {
 	readyOnce          sync.Once
 	gate               chan struct{}
 	sipLocal, rtpLocal bool
-	released           bool
+	// sipAbandoned 在设备侧拆除重试耗尽后被置位。它表示"不再等待 SIP 确认",
+	// 让租约释放不再被一台不应答的设备永久拖住。
+	sipAbandoned bool
+	released     bool
 }
 
 func newPlaybackIntentOwner(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, request CreateRequest) (*playbackIntentOwner, error) {
@@ -147,7 +150,7 @@ func (o *playbackIntentOwner) CloseRTP(ctx context.Context) error {
 		err = localIntentCloseError(result, err)
 		o.rtpLocal = err == nil
 	}
-	if o.rtpLocal && o.sipLocal && !o.released {
+	if o.rtpLocal && (o.sipLocal || o.sipAbandoned) && !o.released {
 		if o.stopLease != nil {
 			o.stopLease()
 		}
@@ -157,6 +160,19 @@ func (o *playbackIntentOwner) CloseRTP(ctx context.Context) error {
 		o.released = true
 	}
 	return err
+}
+
+// AbandonDeviceTeardown 解除"SIP 必须确认"这个释放前置条件。
+//
+// 由 Registry 在设备侧拆除重试耗尽后调用:一台不应答 BYE/TEARDOWN 的设备不能让
+// 该通道的设备操作租约永久滞留。它自身不与设备交互,只改变后续释放的判定。
+func (o *playbackIntentOwner) AbandonDeviceTeardown(ctx context.Context) error {
+	if err := o.enter(ctx); err != nil {
+		return err
+	}
+	defer func() { <-o.gate }()
+	o.sipAbandoned = true
+	return nil
 }
 
 func (o *playbackIntentOwner) Unbind(ctx context.Context) error {

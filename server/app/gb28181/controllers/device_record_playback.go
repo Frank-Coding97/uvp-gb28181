@@ -215,7 +215,7 @@ func (dc *DeviceMgmtController) DeletePlaybackSession(c *gin.Context) {
 	}
 	err := service.StopForOwner(c.Request.Context(), c.Param("sessionId"), strconv.FormatUint(uint64(claims.UserID), 10), "user stop")
 	if err != nil {
-		status, code, stage, message := mapPlaybackServiceError(err)
+		status, code, stage, message := mapPlaybackStopError(err)
 		writePlaybackFailure(c, status, code, message, stage, string(code))
 		return
 	}
@@ -284,6 +284,21 @@ func mapPlaybackSnapshotError(err error) (int, string, string, string) {
 		return http.StatusUnprocessableEntity, playbackInvalid, "invalid_argument", "录像段参数不合法"
 	}
 	return http.StatusNotFound, playbackNotFound, "not_found", "录像段不存在或无权限"
+}
+
+// mapPlaybackStopError 把"停止会话"的失败翻译成它真实的归属。
+//
+// 停止路径上的超时来自 SIP 拆除(BYE/MANSRTSP TEARDOWN),不是媒体侧。但
+// mapPlaybackServiceError 为 context.DeadlineExceeded 准备的兜底分支会把
+// 它报成「回放媒体等待超时 / media_wait」——实测这条文案会把整个排查方向
+// 带偏:现场看到"收流超时",于是去查设备推流和媒体节点,而真因是设备不应答
+// 拆除。停止路径上不会出现 ServiceError(只有 Create 路径构造它),所以这里
+// 可以先判 DeadlineExceeded,不会遮蔽任何真实的服务阶段。
+func mapPlaybackStopError(err error) (int, string, string, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout, playbackFailure, "teardown", "停止回放会话超时：设备未确认拆除"
+	}
+	return mapPlaybackServiceError(err)
 }
 
 func mapPlaybackServiceError(err error) (int, string, string, string) {

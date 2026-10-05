@@ -9,7 +9,11 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -31,6 +35,10 @@ func newPTZQueryTestService(t *testing.T, sender TrackedSender) (*Service, *gorm
 }
 
 func TestServiceRefresh_CreatesDurableResponseQueryOperations(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
 	tests := []struct {
 		kind    QueryKind
 		trackID int
@@ -42,10 +50,12 @@ func TestServiceRefresh_CreatesDurableResponseQueryOperations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
 			sender := &fakeTrackedSender{}
-			svc, _ := newPTZQueryTestService(t, sender)
+			svc, db := newPTZQueryTestService(t, sender)
+			require.NoError(t, db.Callback().Create().Before("gorm:before_create").Register("test:create", gormhelper.CreateBeforeHook))
 
 			op, err := svc.Refresh(context.Background(), testTarget(), tt.kind, tt.trackID, "refresh-"+string(tt.kind))
 			require.NoError(t, err)
+			require.Zero(t, logs.Len(), "query creation must not trigger pointer warnings")
 			require.Equal(t, gbmodels.PTZOperationQueued, op.Status)
 			require.True(t, op.ResponseRequired)
 			require.Equal(t, 3, op.MaxAttempts)
