@@ -9,7 +9,13 @@ const push = vi.fn();
 vi.mock("@/store/modules/route-config", () => ({ useRouteConfigStore: () => routeStore }));
 vi.mock("@/store/modules/theme-config", () => ({ useThemeConfig: () => themeStore }));
 vi.mock("@/hooks/useThemeMethods", () => ({ useThemeMethods: () => ({ setDarkMode: vi.fn() }) }));
-vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
+// ⛔ 必须是**部分** mock：Tabs 现在会带上右上角的「录像缓存任务」入口，那条链路
+// （`@/api/recordCache` → `@/utils/http` → `@/router`）在导入时就要用 `createRouter`。
+// 整个模块换成 `{ useRouter }` 会让整个文件在导入阶段就炸掉。
+vi.mock("vue-router", async importOriginal => ({
+  ...(await importOriginal<typeof import("vue-router")>()),
+  useRouter: () => ({ push })
+}));
 vi.mock("@/layout/components/Menu/menu-item-icon.vue", () => ({ default: { template: "<i />" } }));
 
 function renderTabs() {
@@ -23,6 +29,8 @@ function renderTabs() {
         "a-doption": { props: ["disabled"], template: "<button :disabled='disabled'><slot /></button>" },
         "a-tooltip": { template: "<span><slot /></span>" },
         "a-space": { template: "<div><slot /></div>" },
+        // 顶栏入口自己会去拉缓存任务列表；这一组用例只管标签页操作，把它整体桩掉。
+        RecordCacheTaskCenter: true,
         "icon-refresh": true,
         "icon-close": true,
         "icon-left": true,

@@ -48,6 +48,9 @@
     </a-tabs>
     <div class="tabs_setting">
       <a-space>
+        <!-- 录像缓存任务入口：角标 = 正在缓存到服务器的任务数。
+             放在全屏/主题切换旁边，和"系统级操作"这一排保持一致。 -->
+        <RecordCacheTaskCenter />
         <a-tooltip :content="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)" position="bottom" mini>
           <button
             id="system-tabs-fullscreen"
@@ -85,6 +88,7 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useHeaderDisplayActions } from "../Header/useHeaderDisplayActions";
 import MenuItemIcon from "@/layout/components/Menu/menu-item-icon.vue";
+import RecordCacheTaskCenter from "@/layout/components/Header/components/RecordCacheTaskCenter.vue";
 const router = useRouter();
 const routerStore = useRouteConfigStore();
 const themeStore = useThemeConfig();

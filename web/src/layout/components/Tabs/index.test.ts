@@ -20,6 +20,11 @@ describe("workspace tabs", () => {
     expect(fullscreenIndex).toBeGreaterThan(-1);
     expect(source).toContain('trigger="contextMenu"');
     expect(themeIndex).toBeGreaterThan(fullscreenIndex);
+    // 「录像缓存任务」入口要挂在系统风格切换这一排（用户 2026-10-05 的要求），
+    // 而且是**排在前面** —— 它是常驻入口，不是全屏/主题那种纯显示开关。
+    const recordCacheIndex = source.indexOf("<RecordCacheTaskCenter />");
+    expect(recordCacheIndex).toBeGreaterThan(-1);
+    expect(recordCacheIndex).toBeLessThan(fullscreenIndex);
     expect(source).toContain('@click="onFullScreen"');
     expect(source).toContain('@click="toggleThemeMode"');
     expect(source).toContain("darkMode ? '明亮' : '暗色'");
@@ -28,6 +33,8 @@ describe("workspace tabs", () => {
     const actions = readFileSync(resolve(process.cwd(), "src/layout/components/Header/useHeaderDisplayActions.ts"), "utf8");
     expect(actions).toContain('document.addEventListener("fullscreenchange", syncFullScreen)');
     expect(headerRightSource).toContain('<div v-if="isMobile" class="header-display-actions">');
+    // 移动端也要有同一个入口，紧挨着全屏/主题切换（尺寸换成 40×40 那一档）。
+    expect(headerRightSource).toContain('<RecordCacheTaskCenter variant="header" />');
     expect(headerRightSource).toContain('@click="onFullScreen"');
     expect(headerRightSource).toContain('@click="toggleThemeMode"');
     expect(headerRightSource).toContain('@click="onSystemSetting"');

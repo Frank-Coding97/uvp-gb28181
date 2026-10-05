@@ -24,10 +24,13 @@ const stubs = {
   "a-drawer": {
     props: ["visible"],
     emits: ["update:visible"],
-    template: "<aside v-if='visible'><slot name='title' /><slot /></aside>"
+    // ⛔ 捕获 class：抽屉面板的暗色皮肤全靠 `uvp-system-drawer` 这个类（见下面那条断言）。
+    template: "<aside v-if='visible' :data-drawer-class='$attrs.class'><slot name='title' /><slot /></aside>"
   },
   "a-empty": { props: ["description"], template: "<span>{{ description }}</span>" },
-  "a-progress": { template: "<span />" }
+  // ⛔ 捕获 `percent`：Arco 的 `a-progress` 收的是 0~1 的比值（`width = percent * 100%`），
+  //    传百分数会被裁成"永远顶满"。这个 stub 就是这条口径的守卫。
+  "a-progress": { props: ["percent"], template: "<span class='dl-progress' :data-percent='percent' />" }
 };
 
 describe("RecordingDownloadCenter", () => {
@@ -120,7 +123,13 @@ describe("RecordingDownloadCenter", () => {
     expect(trigger.attributes("aria-expanded")).toBe("false");
     await trigger.trigger("click");
     expect(wrapper.text()).toContain("one.mp4");
+    // ⛔ 抽屉要挂系统统一的类：暗色下抽屉面板的底色/描边/圆角全由
+    //    `.uvp-system-drawer .arco-drawer` 提供，漏了就退回 Arco 自带的灰面板，
+    //    和旁边每一个弹层都不是一套皮肤（漏了不报错，只是难看）。
+    expect(wrapper.get("aside").attributes("data-drawer-class")).toContain("uvp-system-drawer");
     expect(wrapper.text()).toContain("50%");
+    // 条本身拿的是比值 0.5（= 50%），不是 50：传 50 会被 Arco 渲染成 width:5000%。
+    expect(wrapper.get(".dl-progress").attributes("data-percent")).toBe("0.5");
     expect(wrapper.text()).not.toContain("contentUrl");
     await wrapper.get("button[aria-label='取消下载']").trigger("click");
     await wrapper.get("button[aria-label='重新下载']").trigger("click");

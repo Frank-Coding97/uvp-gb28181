@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 import {
   ArrowLeft,
   CalendarRange,
-  ChevronDown,
   CircleAlert,
   Clock3,
   Download,
@@ -36,18 +35,27 @@ import {
   type RecordQueryUiState
 } from "../device-mgmt/recordQueryState";
 import { createPlaybackState, reducePlaybackState } from "./playbackState";
+import {
+  channelReleaseWatchBudget,
+  isChannelBusy,
+  isSessionReleased,
+  isTeardownStall,
+  waitForChannelRelease,
+  waitForNextProbe
+} from "./playbackTeardown";
 import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
 import PlayWindow from "../components/PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { useUserStoreHook } from "@/store/modules/user";
+import { Message } from "@arco-design/web-vue";
+import { createRecordCacheTask } from "@/api/recordCache";
+import RecordCacheProgressDialog from "./RecordCacheProgressDialog.vue";
 import {
   actionPlaybackSession,
-  createDownloadSession,
   createPlaybackSession,
   deletePlaybackSession,
   getPlaybackSession,
-  selectDownloadMediaUrl,
   type PlaybackActionRequest,
   type PlaybackSession
 } from "./api";
@@ -69,8 +77,16 @@ const playbackSource = ref<PlaybackSource | null>(null);
 const playbackHasAudio = ref(false);
 const playbackBuffering = ref(false);
 const controlPending = ref(false);
+// 通道释放观察中:上一路回放的占位还没被后台清扫器释放,正在退避等待。
+// 它是唯一能解释「为什么点了半天还没动静」的状态文案。
+const channelReleasePending = ref(false);
 const downloadPending = ref(false);
 const downloadNotice = ref("");
+// 提交成功后弹出的实时进度弹窗。缓存跑在服务端，弹窗只是"看得见"，
+// 关掉它（转后台）任务照常推进。
+const cacheDialogVisible = ref(false);
+const cacheTaskId = ref("");
+const cacheTaskName = ref("");
 const queryToken = ref(0);
 const viewport = ref<HTMLElement | null>(null);
 let queryAbort: AbortController | null = null;
@@ -88,6 +104,19 @@ const queryRange = computed(() => ({
   startTime: form.value?.startTime || options.value?.serverNow || "",
   endTime: form.value?.endTime || options.value?.serverNow || ""
 }));
+// a-range-picker 的 v-model 是一个二元组,而表单/序列化仍然按 startTime、endTime
+// 两个字段走(与设备管理里的录像查询抽屉同一套桥接)。:allow-clear="false" 保证
+// 清空按钮不存在,所以 setter 不会收到 null。
+// ⛔ get/set 的返回与参数类型必须写出来:否则数组字面量被推成 string[] 而不是元组,
+//    报「Target requires 2 element(s) but source may have fewer」。
+const timeRange = computed<[string, string]>({
+  get: (): [string, string] => [form.value?.startTime || "", form.value?.endTime || ""],
+  set: (value: [string, string]) => {
+    if (!form.value) return;
+    form.value.startTime = value?.[0] || "";
+    form.value.endTime = value?.[1] || "";
+  }
+});
 const isPlaying = computed(() => playback.value.status === "playing");
 const isPlaybackLoading = computed(() => ["creating", "buffering", "stopping"].includes(playback.value.status));
 const hasPermission = (permission: string) =>
@@ -102,23 +131,35 @@ const canStartPlayback = computed(
     !controlPending.value &&
     !["creating", "buffering", "stopping"].includes(playback.value.status)
 );
-const statusText = computed(
-  () =>
-    (
-      ({
-        unselected: "请选择录像段",
-        selected: "已选择，等待播放",
-        creating: "正在创建回放会话",
-        buffering: "设备响应，正在缓冲",
-        playing: "正在回放",
-        paused: "已暂停",
-        ended: "回放结束",
-        failed: "回放失败",
-        stopping: "正在停止",
-        stopped: "已停止"
-      }) as Record<string, string>
-    )[playback.value.status]
-);
+const playbackScaleOptions = [0.25, 0.5, 1, 2, 4];
+// 倍速下拉的 v-model 桥。a-select 的 :value 绑的是数字,但组件内部回传的值
+// 在单测桩里是字符串(setValue 走原生 select),统一 Number() 归一后再交给 setScale,
+// setScale 只接受数字。
+const playbackScale = computed<number>({
+  get: () => playback.value.scale,
+  set: value => {
+    void setScale(Number(value));
+  }
+});
+const statusText = computed(() => {
+  // 等待通道释放是跨「停止」与「创建」两个阶段的同一件事,单独一句文案说清楚,
+  // 否则用户只会看到「正在停止」卡住不动。
+  if (channelReleasePending.value) return "正在等待通道释放";
+  return (
+    {
+      unselected: "请选择录像段",
+      selected: "已选择，等待播放",
+      creating: "正在创建回放会话",
+      buffering: "设备响应，正在缓冲",
+      playing: "正在回放",
+      paused: "已暂停",
+      ended: "回放结束",
+      failed: "回放失败",
+      stopping: "正在停止",
+      stopped: "已停止"
+    } as Record<string, string>
+  )[playback.value.status];
+});
 const querySummary = computed(() => {
   if (queryState.value === "querying") return "正在向设备查询录像目录";
   if (queryState.value === "complete") return `查询完成，共 ${records.value.length} 段`;
@@ -227,10 +268,10 @@ async function runQuery() {
 async function selectRecord(record: RecordQueryItem) {
   if (!canPlayPermission.value) return false;
   if (playback.value.recordKey === record.recordKey) return true;
-  if (
-    ["creating", "buffering", "playing", "paused", "stopping"].includes(playback.value.status) &&
-    playback.value.recordKey !== record.recordKey
-  ) {
+  // ⛔ 判据不能只看 status:停止失败时会停在 "failed",但会话 id 还留着 ——
+  // 那种情况下必须先重新把上一路拆干净,否则新建会话只会拿到 429
+  // 「当前通道已有回放会话」,用户看到的是"拖动之后一直失败"。
+  if (playback.value.sessionId || ["creating", "buffering", "playing", "paused"].includes(playback.value.status)) {
     if (!(await stopPlayback(false, false))) return false;
   }
   playback.value = reducePlaybackState(playback.value, { type: "select", recordKey: record.recordKey });
@@ -250,43 +291,51 @@ function clearPlaybackTimers() {
   sessionPollTimer = null;
 }
 
+/**
+ * 把选中的录像段交给**服务端后台缓存**。
+ *
+ * 这里不再把设备推上来的直播流 fetch 成 blob：那条路要等整段流播完才拿到内容，
+ * 没有进度也不能取消，而且下载模式单会话 30 分钟，长录像必然被掐断。
+ * 现在只提交一个任务，拉流/落盘都在服务端跑，用户去「录像缓存」看进度、
+ * 完成后从服务器下载静态文件。
+ */
 async function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
   if (!canDownload.value || !record || !record.startTime || downloadPending.value) return;
   if (downloadTimer !== null) window.clearTimeout(downloadTimer);
   downloadPending.value = true;
-  downloadNotice.value = `正在接收设备录像 · ${record.name || "未命名录像"}`;
+  downloadNotice.value = "";
   try {
-    const response = await createDownloadSession(
-      playbackChannelId,
-      {
-        recordKey: record.recordKey,
-        playFrom: record.startTime,
-        downloadSpeed: 4
-      },
-      `download-${encodeURIComponent(`${playbackChannelId}|${recordIdentity(record)}`)}`
-    );
-    const mediaUrl = selectDownloadMediaUrl(response.data?.media?.urls);
-    if (!mediaUrl) throw new Error("设备未返回可下载的录像地址");
-    const mediaResponse = await fetch(mediaUrl, { credentials: "include" });
-    if (!mediaResponse.ok) throw new Error(`录像下载失败（HTTP ${mediaResponse.status}）`);
-    const blob = await mediaResponse.blob();
-    if (blob.size === 0) throw new Error("设备返回的录像内容为空");
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = `${(record.name || "设备录像").replace(/[\\/:*?"<>|]/g, "_")}.flv`;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-    downloadNotice.value = `录像下载完成 · ${record.name || "未命名录像"}`;
+    const response = await createRecordCacheTask({
+      channelId: playbackChannelId,
+      recordKey: record.recordKey,
+      playFrom: record.startTime
+    });
+    const created = response?.data;
+    if (created?.taskId) {
+      // 受理成功就直接弹实时进度：用户能立刻确认"真的在跑"（有速率），
+      // 而不是只收到一句看不见进度的提示。弹窗可随时转后台。
+      cacheTaskId.value = created.taskId;
+      cacheTaskName.value = record.name || "未命名录像";
+      cacheDialogVisible.value = true;
+    } else {
+      downloadNotice.value = `已加入缓存队列 · ${record.name || "未命名录像"}，可在「录像缓存」查看进度`;
+    }
   } catch (error) {
-    downloadNotice.value = playbackErrorMessage(error).replace("设备录像回放", "设备录像下载");
+    downloadNotice.value = playbackErrorMessage(error).replace("设备录像回放", "录像缓存");
   } finally {
     downloadPending.value = false;
-    downloadTimer = window.setTimeout(() => {
-      downloadNotice.value = "";
-      downloadTimer = null;
-    }, 4000);
+    if (downloadNotice.value) {
+      downloadTimer = window.setTimeout(() => {
+        downloadNotice.value = "";
+        downloadTimer = null;
+      }, 4000);
+    }
   }
+}
+
+/** 弹窗的「查看缓存任务」出口：缓存任务在服务端继续跑，这里把用户送到任务列表。 */
+function goRecordCachePage() {
+  void router.push("/gb28181/record-cache");
 }
 
 function createIdempotencyKey(record: RecordQueryItem) {
@@ -350,7 +399,9 @@ function scheduleSessionPoll(sessionId: string, token: number) {
   if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
   sessionPollTimer = window.setTimeout(async () => {
     try {
-      const response = await getPlaybackSession(playbackChannelId, sessionId);
+      // 会话被后台收尾后这里会拿到 404「回放会话不存在」——那是正常收流,
+      // 不该弹全局错误提示,状态由下面的 catch 落到「回放失败」即可。
+      const response = await getPlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
       if (token !== sessionToken) return;
       applySession(response.data, token);
     } catch (error) {
@@ -403,6 +454,32 @@ function applySession(session: PlaybackSession, token: number, syncPosition = fa
   scheduleSessionPoll(session.sessionId, token);
 }
 
+// 建会话时通道可能还被上一路的占位占着(上一路刚结束、后台清扫器还没释放),
+// 平台此时返回 429 playback_busy。等通道释放后重试,而不是把「当前通道已有
+// 回放会话」直接摔给用户 —— 后者正是"拖动时间轴后一直报错"的表象。
+//
+// 重试沿用同一个幂等键:平台按幂等键去重,不会因为重试生成第二路会话。
+async function createSessionAfterChannelRelease(record: RecordQueryItem, token: number) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await createPlaybackSession(
+        playbackChannelId,
+        {
+          recordKey: record.recordKey,
+          playFrom: playback.value.currentTime || record.startTime || ""
+        },
+        createIdempotencyKey(record),
+        { showErrorMessage: false }
+      );
+    } catch (error) {
+      if (token !== sessionToken || !isChannelBusy(error) || attempt >= channelReleaseWatchBudget) throw error;
+      channelReleasePending.value = true;
+      await waitForNextProbe(attempt);
+      if (token !== sessionToken) throw error;
+    }
+  }
+}
+
 async function startPlayback() {
   if (!selectedRecord.value || !canStartPlayback.value) return;
   if (playback.value.status === "paused" && playback.value.sessionId) {
@@ -417,20 +494,19 @@ async function startPlayback() {
   const record = selectedRecord.value;
   saveLastRecordIdentity(record);
   try {
-    const response = await createPlaybackSession(
-      playbackChannelId,
-      {
-        recordKey: record.recordKey,
-        playFrom: playback.value.currentTime || record.startTime || ""
-      },
-      createIdempotencyKey(record)
-    );
+    const response = await createSessionAfterChannelRelease(record, token);
+    if (token !== sessionToken) return;
     applySession(response.data, token);
   } catch (error) {
     if (token !== sessionToken) return;
-    playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
+    const message = playbackErrorMessage(error);
+    playback.value = { ...playback.value, status: "failed", error: message };
     playbackMediaUrl.value = "";
     playbackSource.value = null;
+    // 重试期间的中间失败已被抑制,真正失败时统一提示一次。
+    Message.error(isChannelBusy(error) ? "当前通道已有回放会话，请稍后重试" : message);
+  } finally {
+    if (token === sessionToken) channelReleasePending.value = false;
   }
 }
 
@@ -453,11 +529,46 @@ async function pausePlayback() {
   await sendPlaybackAction({ action: "pause" });
 }
 
+type TeardownOutcome = { state: "released" } | { state: "superseded" } | { state: "failed"; message: string };
+
+// 收尾一路回放会话,并明确回答「通道到底释放了没有」。
+//
+// 只打一次 DELETE:平台在「设备没确认拆除」时会保留通道绑定、交给后台清扫器
+// 按退避重试,此时重复 DELETE 推不动任何状态(那条 TEARDOWN 已经发过,不会
+// 重发),只会再白等一个 SIP 超时 —— 详见 playbackTeardown.ts 的说明。
+// 所以失败后转为「观察会话是否已从平台消失」,释放了就继续用户原本的操作。
+async function teardownSession(sessionId: string, token: number): Promise<TeardownOutcome> {
+  try {
+    await deletePlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
+    return { state: "released" };
+  } catch (error) {
+    if (token !== sessionToken) return { state: "superseded" };
+    // 会话已经不在平台上 = 通道本来就已经释放(多半是后台清扫器收的尾)。
+    if (isSessionReleased(error)) return { state: "released" };
+    if (!isTeardownStall(error)) return { state: "failed", message: playbackErrorMessage(error) };
+  }
+  channelReleasePending.value = true;
+  try {
+    const released = await waitForChannelRelease(async () => {
+      try {
+        await getPlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
+        return false; // 还查得到 = 占位仍在,通道没释放
+      } catch (error) {
+        return isSessionReleased(error);
+      }
+    });
+    if (token !== sessionToken) return { state: "superseded" };
+    return released ? { state: "released" } : { state: "failed", message: "设备未确认拆除，通道仍在后台释放中，请稍后重试" };
+  } finally {
+    if (token === sessionToken) channelReleasePending.value = false;
+  }
+}
+
 async function stopPlayback(keepSelection = true, enforcePermission = true) {
   if (enforcePermission && !canPlayPermission.value) return false;
   const sessionId = playback.value.sessionId;
   const selectedKey = playback.value.recordKey;
-  ++sessionToken;
+  const token = ++sessionToken;
   clearPlaybackTimers();
   resetPlayerClock();
   playbackBuffering.value = false;
@@ -465,14 +576,17 @@ async function stopPlayback(keepSelection = true, enforcePermission = true) {
   playbackSource.value = null;
   if (sessionId) {
     playback.value = reducePlaybackState(playback.value, { type: "stopping" });
-    try {
-      await deletePlaybackSession(playbackChannelId, sessionId);
-    } catch (error) {
-      console.warn("停止设备录像回放会话失败", error);
-      playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
+    const outcome = await teardownSession(sessionId, token);
+    if (outcome.state === "superseded") return false;
+    if (outcome.state === "failed") {
+      // 通道没释放:保留会话 id 与所选录像段,让用户可以直接重试 ——
+      // 下一次选段会先重新走拆除,而不是带着旧占位去建会话撞 429。
+      playback.value = { ...playback.value, status: "failed", error: outcome.message };
+      Message.error(outcome.message);
       return false;
     }
   }
+  if (token !== sessionToken) return false;
   if (keepSelection && selectedKey) {
     playback.value = reducePlaybackState(playback.value, { type: "stopped" });
   } else {
@@ -540,7 +654,8 @@ onUnmounted(() => {
   const sessionId = playback.value.sessionId;
   ++sessionToken;
   clearPlaybackTimers();
-  if (sessionId) void deletePlaybackSession(playbackChannelId, sessionId).catch(() => undefined);
+  // 离开页面时的收尾属于后台行为,失败不该再弹提示。
+  if (sessionId) void deletePlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false }).catch(() => undefined);
   if (downloadTimer !== null) window.clearTimeout(downloadTimer);
 });
 </script>
@@ -553,9 +668,9 @@ onUnmounted(() => {
       </div>
       <template v-else>
         <header class="query-bar" data-testid="playback-query-bar">
-          <button class="icon-command back-command" type="button" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
-            <ArrowLeft :size="18" />
-          </button>
+          <a-button class="icon-command back-command" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
+            <template #icon><ArrowLeft :size="18" /></template>
+          </a-button>
           <div class="channel-context">
             <span class="channel-icon"><Video :size="17" /></span>
             <div>
@@ -567,36 +682,44 @@ onUnmounted(() => {
             }}</i>
           </div>
 
+          <!-- ⛔ 查询栏里不要用 <label> 包 Arco 控件。label 没写 for 时浏览器会把里面
+               第一个可标注控件当成它的关联控件,于是把点击**再转发一次**;而 Arco 的下拉
+               点击目标是 view 那个 span、关联控件却是另一个隐藏的 readonly input,一次点击
+               变成两次开合 ⇒ 面板弹出来立刻就收回去。原生 select 不看重复 click,所以这个
+               坑只在换成 Arco 之后才出现。控件自身带 aria-label,语义不依赖 label。 -->
           <div v-if="form" class="query-fields">
-            <label class="query-field time-field">
-              <span><CalendarRange :size="13" />开始时间</span>
-              <input v-model="form.startTime" type="datetime-local" step="1" :disabled="queryState === 'querying'" />
-            </label>
-            <span class="range-separator">至</span>
-            <label class="query-field time-field">
-              <span><CalendarRange :size="13" />结束时间</span>
-              <input v-model="form.endTime" type="datetime-local" step="1" :disabled="queryState === 'querying'" />
-            </label>
-            <label class="query-field type-field">
+            <div class="query-field time-field">
+              <span><CalendarRange :size="13" />录像时间</span>
+              <a-range-picker
+                v-model="timeRange"
+                class="time-picker"
+                aria-label="录像时间范围"
+                show-time
+                value-format="YYYY-MM-DDTHH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ss"
+                :allow-clear="false"
+                :disabled="queryState === 'querying'"
+              />
+            </div>
+            <div class="query-field type-field">
               <span>录像类型</span>
-              <span class="select-wrap">
-                <select v-model="form.type" :disabled="queryState === 'querying'">
-                  <option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
-                </select>
-                <ChevronDown :size="14" />
-              </span>
-            </label>
-            <button
+              <a-select v-model="form.type" class="type-select" aria-label="录像类型" :disabled="queryState === 'querying'">
+                <a-option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{
+                  item.label
+                }}</a-option>
+              </a-select>
+            </div>
+            <a-button
               data-testid="record-query-submit"
               class="query-submit"
-              type="button"
+              type="primary"
+              :loading="queryState === 'querying'"
               :disabled="queryState === 'querying'"
               @click="runQuery"
             >
-              <LoaderCircle v-if="queryState === 'querying'" :size="15" class="spin" />
-              <Search v-else :size="15" />
+              <template #icon><Search :size="15" /></template>
               查询录像
-            </button>
+            </a-button>
           </div>
           <div v-else class="query-loading"><LoaderCircle :size="16" class="spin" />正在加载查询条件</div>
         </header>
@@ -644,53 +767,56 @@ onUnmounted(() => {
             </div>
 
             <div class="playback-controls" data-testid="playback-controls">
-              <button
+              <a-button
                 data-testid="playback-primary-action"
                 class="control-primary"
-                type="button"
+                type="primary"
+                shape="circle"
                 :disabled="!canStartPlayback"
                 :aria-label="isPlaying ? '暂停' : '播放'"
                 @click="isPlaying ? pausePlayback() : startPlayback()"
               >
-                <Pause v-if="isPlaying" :size="17" fill="currentColor" />
-                <Play v-else :size="17" fill="currentColor" />
-              </button>
-              <button
+                <template #icon>
+                  <Pause v-if="isPlaying" :size="17" fill="currentColor" />
+                  <Play v-else :size="17" fill="currentColor" />
+                </template>
+              </a-button>
+              <a-button
                 class="control-icon"
-                type="button"
                 aria-label="停止"
                 title="停止"
                 :disabled="!selectedRecord || !canPlayPermission"
                 @click="stopPlayback()"
               >
-                <Square :size="15" fill="currentColor" />
-              </button>
+                <template #icon><Square :size="15" fill="currentColor" /></template>
+              </a-button>
               <div class="control-spacer"></div>
-              <label class="scale-select" title="播放倍速">
-                <select
-                  :value="playback.scale"
-                  :disabled="!canPlayPermission"
-                  @change="setScale(Number(($event.target as HTMLSelectElement).value))"
-                >
-                  <option v-for="scale in [0.25, 0.5, 1, 2, 4]" :key="scale" :value="scale">{{ scale }}x</option>
-                </select>
-                <ChevronDown :size="13" />
-              </label>
-              <button
+              <a-select
+                v-model="playbackScale"
+                class="scale-select"
+                data-testid="playback-scale"
+                title="播放倍速"
+                :disabled="!canPlayPermission"
+              >
+                <a-option v-for="scale in playbackScaleOptions" :key="scale" :value="scale">{{ scale }}x</a-option>
+              </a-select>
+              <a-button
                 v-if="canDownload"
                 data-testid="playback-download"
                 class="control-icon"
-                type="button"
-                aria-label="下载当前录像"
-                title="下载当前录像"
+                aria-label="缓存到服务器"
+                title="缓存到服务器"
                 :disabled="!selectedRecord || downloadPending"
                 @click="queueDownload()"
               >
-                <LoaderCircle v-if="downloadPending" :size="16" class="spin" /><Download v-else :size="16" />
-              </button>
-              <button class="control-icon" type="button" aria-label="全屏" title="全屏" @click="toggleFullscreen">
-                <Fullscreen :size="16" />
-              </button>
+                <template #icon>
+                  <LoaderCircle v-if="downloadPending" :size="16" class="spin" />
+                  <Download v-else :size="16" />
+                </template>
+              </a-button>
+              <a-button class="control-icon" aria-label="全屏" title="全屏" @click="toggleFullscreen">
+                <template #icon><Fullscreen :size="16" /></template>
+              </a-button>
             </div>
           </section>
 
@@ -699,15 +825,15 @@ onUnmounted(() => {
               <div>
                 <strong>录像段</strong><span>{{ querySummary }}</span>
               </div>
-              <button
-                type="button"
+              <a-button
+                class="icon-command"
                 aria-label="重新查询"
                 title="重新查询"
                 :disabled="queryState === 'querying'"
                 @click="runQuery"
               >
-                <RotateCcw :size="14" />
-              </button>
+                <template #icon><RotateCcw :size="14" /></template>
+              </a-button>
             </div>
             <div v-if="records.length" class="segment-list">
               <div
@@ -741,18 +867,18 @@ onUnmounted(() => {
                     </span>
                   </span>
                 </button>
-                <button
+                <a-button
                   v-if="canDownload"
                   :data-testid="`record-segment-download-${index}`"
-                  class="segment-download"
-                  type="button"
-                  :aria-label="`下载 ${record.name || `录像段 ${index + 1}`}`"
-                  :title="`下载 ${record.name || `录像段 ${index + 1}`}`"
+                  class="icon-command segment-download"
+                  type="text"
+                  :aria-label="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
+                  :title="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
                   :disabled="downloadPending"
                   @click="queueDownload(record)"
                 >
-                  <Download :size="15" />
-                </button>
+                  <template #icon><Download :size="15" /></template>
+                </a-button>
               </div>
             </div>
             <div v-else class="segment-empty">
@@ -778,6 +904,13 @@ onUnmounted(() => {
         />
       </template>
     </div>
+
+    <RecordCacheProgressDialog
+      v-model:visible="cacheDialogVisible"
+      :task-id="cacheTaskId"
+      :task-name="cacheTaskName"
+      @navigate="goRecordCachePage"
+    />
   </div>
 </template>
 
@@ -817,31 +950,14 @@ onUnmounted(() => {
   border-radius: var(--uvp-panel-radius);
   box-shadow: var(--uvp-search-panel-shadow);
 }
+
+/* 图标按钮统一 32×32 的方格尺寸。Arco 默认按钮是靠 padding 撑开的,固定成方格
+   时必须同时清掉 padding,否则 16px 的图标会被挤出按钮。底色/描边/hover 归 Arco。 */
 .icon-command,
-.control-icon,
-.segment-header button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.control-icon {
   width: 32px;
   height: 32px;
   padding: 0;
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: var(--uvp-search-secondary-btn-bg);
-  border: 1px solid var(--uvp-search-secondary-btn-border);
-  border-radius: 6px;
-  transition:
-    background-color 180ms ease,
-    border-color 180ms ease,
-    color 180ms ease;
-}
-.icon-command:hover,
-.control-icon:hover,
-.segment-header button:hover {
-  color: var(--uvp-brand);
-  background: var(--uvp-search-secondary-btn-hover-bg);
-  border-color: var(--uvp-brand);
 }
 .channel-context {
   display: flex;
@@ -906,73 +1022,16 @@ onUnmounted(() => {
   gap: 4px;
   align-items: center;
 }
-.query-field input,
-.query-field select {
-  box-sizing: border-box;
-  height: 32px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--uvp-text-primary);
-  outline: none;
-  background: var(--uvp-search-control-bg);
-  border: 1px solid var(--uvp-search-secondary-btn-border);
-  border-radius: 10px;
+
+/* 时间选择器与录像类型下拉的外观全部交给 Arco,页面只声明它们占多宽。 */
+
+/* ⛔ 作用在 a-select / a-date-picker 上的规则必须用 :deep():scoped 样式不会给
+   这两个组件的根元素加父 scopeId,直接写类名编译得过、运行时永远匹配不到。 */
+.query-field :deep(.time-picker) {
+  width: 360px;
 }
-.query-field input {
-  width: 177px;
-  padding: 0 8px;
-}
-.query-field select {
+.query-field :deep(.type-select) {
   width: 108px;
-  padding: 0 28px 0 9px;
-  appearance: none;
-}
-.query-field input:focus,
-.query-field select:focus {
-  border-color: var(--uvp-brand);
-  box-shadow: var(--uvp-search-control-focus-shadow);
-}
-.select-wrap {
-  position: relative;
-  display: block;
-}
-.select-wrap svg {
-  position: absolute;
-  top: 9px;
-  right: 8px;
-  pointer-events: none;
-}
-.range-separator {
-  align-self: flex-end;
-  height: 32px;
-  font-size: 11px;
-  line-height: 32px;
-  color: var(--uvp-text-tertiary);
-}
-.query-submit {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  height: 32px;
-  padding: 0 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #ffffff;
-  cursor: pointer;
-  background: var(--uvp-brand);
-  border: 0;
-  border-radius: 10px;
-  transition: background-color 180ms ease;
-}
-.query-submit:hover {
-  background: var(--uvp-brand-strong);
-}
-button:disabled,
-input:disabled,
-select:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 .playback-main {
   display: grid;
@@ -1096,44 +1155,13 @@ select:disabled {
   border: 1px solid var(--uvp-panel-border);
   border-top: 0;
 }
-.control-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  color: #ffffff;
-  cursor: pointer;
-  background: var(--uvp-brand);
-  border: 0;
-  border-radius: 50%;
-}
-.control-primary:hover {
-  background: var(--uvp-brand-strong);
-}
 .control-spacer {
   flex: 1;
 }
-.scale-select {
-  position: relative;
-}
-.scale-select select {
-  width: 62px;
-  height: 30px;
-  padding: 0 23px 0 8px;
-  font-size: 11px;
-  color: var(--uvp-text-secondary);
-  appearance: none;
-  background: var(--uvp-search-control-bg);
-  border: 1px solid var(--uvp-search-secondary-btn-border);
-  border-radius: 6px;
-}
-.scale-select svg {
-  position: absolute;
-  top: 9px;
-  right: 6px;
-  pointer-events: none;
+
+/* 倍速下拉:外观归 Arco,页面只管占宽。a-select 必须走 :deep()。 */
+.playback-controls :deep(.scale-select) {
+  width: 78px;
 }
 .segment-panel {
   display: flex;
@@ -1167,10 +1195,6 @@ select:disabled {
   font-size: 10px;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
-}
-.segment-header button {
-  width: 28px;
-  height: 28px;
 }
 .segment-list {
   flex: 1;
@@ -1213,6 +1237,15 @@ select:disabled {
   background: var(--uvp-table-row-checked-bg);
   border-color: var(--uvp-brand);
   box-shadow: 0 2px 8px rgb(29 100 235 / 12%);
+}
+
+/* ⛔ 段卡片刻意保留原生 button:它是 74px 高、内嵌三行内容的卡片式列表项,
+   不是按钮控件。换成 a-button 得把 Arco 的 height/padding/display 再覆盖回去,
+   收益为零而维护成本更高。禁用态因此也要自己兜(全局的 button:disabled 已随
+   原生控件一起删除)。 */
+.segment-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .segment-marker {
   flex: none;
@@ -1266,34 +1299,17 @@ select:disabled {
   gap: 5px;
   align-items: center;
 }
+
+/* 段内下载按钮换成 Arco 的 text 按钮后只剩定位(尺寸共用 .icon-command)。
+   选中行高亮是本页业务语义,保留;hover/focus 的底色交给 Arco。 */
 .segment-download {
   position: absolute;
-  top: 23px;
+  top: 21px;
   right: 8px;
   z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: var(--uvp-text-tertiary);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  transition:
-    color 160ms ease,
-    background-color 160ms ease,
-    border-color 160ms ease;
 }
-.segment-download:hover,
-.segment-download:focus-visible,
 .segment-row.selected .segment-download {
   color: var(--uvp-brand);
-  outline: none;
-  background: var(--uvp-search-secondary-btn-bg);
-  border-color: var(--uvp-search-secondary-btn-border);
 }
 .segment-empty {
   display: flex;
@@ -1380,17 +1396,14 @@ select:disabled {
     grid-template-columns: 1fr 1fr;
     width: 100%;
   }
-  .query-field input {
-    width: 100%;
+
+  /* 时间范围选择器在窄屏独占一行:两个日期输入挤在半列里会把时间文本截断。 */
+  .time-field {
+    grid-column: 1 / -1;
   }
-  .range-separator {
-    display: none;
-  }
-  .type-field,
+  .query-field :deep(.time-picker),
+  .query-field :deep(.type-select),
   .query-submit {
-    width: 100%;
-  }
-  .type-field select {
     width: 100%;
   }
   .playback-main {
@@ -1427,8 +1440,8 @@ select:disabled {
   .query-fields {
     grid-template-columns: 1fr;
   }
-  .query-field input,
-  .query-field select,
+  .query-field :deep(.time-picker),
+  .query-field :deep(.type-select),
   .query-submit {
     height: 44px;
   }
@@ -1443,7 +1456,7 @@ select:disabled {
   .control-spacer {
     display: none;
   }
-  .scale-select {
+  .playback-controls :deep(.scale-select) {
     display: none;
   }
   .segment-panel {

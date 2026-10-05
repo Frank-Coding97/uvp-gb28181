@@ -15,12 +15,13 @@
   </a-badge>
 
   <a-drawer
+    body-class="uvp-system-dialog__body"
     v-if="canDownload"
     v-model:visible="visible"
     width="min(440px, 100vw)"
     :footer="false"
     unmount-on-close
-    class="recording-download-drawer"
+    class="uvp-system-drawer recording-download-drawer"
   >
     <template #title>下载任务</template>
     <div class="recording-download-toolbar">
@@ -33,7 +34,7 @@
         <div class="recording-download-item__main">
           <strong :title="task.fileName">{{ task.fileName }}</strong>
           <span>{{ statusText(task.status) }}</span>
-          <a-progress v-if="task.totalBytes" :percent="progress(task)" size="small" :show-text="false" />
+          <a-progress v-if="task.totalBytes" :percent="progressRatio(task)" size="small" :show-text="false" />
           <small>{{ progressLabel(task) }}</small>
         </div>
         <div class="recording-download-item__actions">
@@ -70,8 +71,17 @@ const canDownload = computed(
 const activeStatuses = new Set<RecordingDownloadItem["status"]>(["queued", "ready", "streaming"]);
 const terminalStatuses = new Set<RecordingDownloadItem["status"]>(["completed", "failed", "cancelled", "expired"]);
 
+// ⛔ Arco 的 `a-progress` 收的是 **0~1 的比值**，不是百分数（源码
+//    `barStyle.width = `${percent * 100}%``）：传 50 会渲染成 `width: 5000%`，
+//    被容器裁掉后就是"进度条永远顶满"，而右侧文字仍是 50%。
+//    所以比值喂组件（progressRatio）、百分数只用于文字（progress）。
+//    判别依据与防回归见 `src/style/model/arco-progress-percent.test.ts`。
+function progressRatio(task: RecordingDownloadItem) {
+  return Math.min(1, task.bytesSent / task.totalBytes!);
+}
+
 function progress(task: RecordingDownloadItem) {
-  return Math.min(100, Math.round((task.bytesSent / task.totalBytes!) * 100));
+  return Math.round(progressRatio(task) * 100);
 }
 
 function formatBytes(bytes: number) {
