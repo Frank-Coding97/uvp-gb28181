@@ -190,7 +190,7 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 **验证**
 
 - 本批相关 **118 例全绿**（`deviceStatus` 6 + `mediaNodeState` 8 + `cascadeState` 13 + `overviewChart` + `workbenchCapacity` + `ClusterOverview` + 设备/多屏相关）。
-- 开发库：**19 字典 / 146 项**；接口 `sysDictItem/getByDictCode/{device_status,media_node_state,cascade_register_state}` 实测逐条核对一致。
+- 开发库：**19 字典 / 111 项**（⚠️ 见 §四·4.1「别用 max(id) 当项数」）；接口 `sysDictItem/getByDictCode/{device_status,media_node_state,cascade_register_state}` 实测逐条核对一致。
 - `eslint` 零告警；`vue-tsc` 本批改动文件**零错误**（存量 12 条集中在 `firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*`）。
 
 **提交状态**：✅ 已提交 `6d730d2c feat(dict): 设备/节点/级联状态字典化并收敛重复实现（P2）`（27 个文件，+586/−111）。
@@ -250,6 +250,35 @@ P1 已把**判定**与展示解耦（对账改认码值，见 §二·P1），所
 1. **工作区在 2026-10-05 已清空**（原 722 个在途文件随 `e1c67298` 提交）。今后**只 stage 本次相关文件**，别把无关改动卷进来。
 2. 本仓约定：同一文件里的无关 hunk 要**按 hunk 分组 stage**（`git apply --cached`），⛔ 直接 `git commit <path>` 会把整文件的工作区版本一起带走。
 3. 推 `develop` 前**必须先问**。
+4. ⭐ 常年挂着一个**与本主题无关的在途改动** `device-mgmt/DeviceControlPanel.vue` + `.test.ts`（控制面板 UI 打磨）—— 连续几批都**别 stage 它**。
+
+### 4.1 ⛔⛔ 别用 `max(id)` 当「项数」（2026-10-05 抓到的记录错误）
+
+**踩坑**：本文档与技能/记忆里一度写着「16 字典 / **135** 项」「19 字典 / **146** 项」——
+那两个数是 **`MAX(id)`**，不是行数。真实行数是 **100**（P1 后）/ **111**（P2 后）。
+
+```
+raw_total = 111,  max_id = 146      # 差 35
+```
+
+原因：开发库 id **稀疏**（改名/删除留下的空洞），`AUTO_INCREMENT` 不回填 ⇒ `max(id)` 恒 ≥ 行数。
+同一天更早的记录其实写对过（「items 只 **87 行**、max id 已是 **122**」），后面几次却把 max id 当成了项数，
+且**连续两批各错一次、错法一模一样** ⇒ 一旦写成结论就会被到处抄。
+
+**正确口径**：
+
+```sql
+SELECT COUNT(*) FROM sys_dict;         -- 字典个数
+SELECT COUNT(*) FROM sys_dict_item;    -- 字典项个数
+-- 验证新字典：按 code 查，别按 id 猜
+SELECT d.code, d.name, COUNT(i.id) items FROM sys_dict d
+LEFT JOIN sys_dict_item i ON i.dict_id = d.id
+WHERE d.code IN ('device_status','media_node_state','cascade_register_state')
+GROUP BY d.id, d.code, d.name;
+```
+
+⛔ 表 `sys_dict_item` **没有 `deleted_at` 列**（不是软删除表），别去按它过滤。
+⭐ 通用教训：**「条数」与「最大 id」是两个量；稀疏 id 表上永远用 `COUNT(*)`，并且把口径写进结论里。**
 
 ---
 
