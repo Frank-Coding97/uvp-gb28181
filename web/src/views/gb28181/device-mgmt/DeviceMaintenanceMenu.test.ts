@@ -20,6 +20,7 @@ describe("device maintenance menu", () => {
   it("exposes three named actions in a consistent order without posting", async () => {
     const wrapper = menu();
     expect(wrapper.findAll("button").map(button => button.text())).toEqual(["固件升级", "维护记录", "重启设备"]);
+    expect(wrapper.text()).not.toContain("查看详情");
     await wrapper.findAll("button")[0].trigger("click");
     await wrapper.findAll("button")[1].trigger("click");
     await wrapper.findAll("button")[2].trigger("click");

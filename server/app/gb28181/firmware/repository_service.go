@@ -1,6 +1,7 @@
 package firmware
 
 import (
+	"context"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -123,6 +124,35 @@ func (s *RepositoryService) GetByFirmwareID(c *gin.Context, firmwareID string) (
 		return nil, result.Error
 	}
 	return &record, nil
+}
+
+// GetByFirmwareIDWithDept 通过固件 ID 和部门 ID 查询固件（用于非 HTTP 上下文）
+func (s *RepositoryService) GetByFirmwareIDWithDept(ctx context.Context, firmwareID string, deptID uint64) (*gbmodels.GbFirmwareRepository, error) {
+	var record gbmodels.GbFirmwareRepository
+	result := s.db.WithContext(ctx).
+		Where("firmware_id = ? AND dept_id = ?", firmwareID, deptID).
+		First(&record)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &record, nil
+}
+
+// UpdateStatus 更新固件状态
+func (s *RepositoryService) UpdateStatus(c *gin.Context, id uint64, status gbmodels.FirmwareStatus) error {
+	result := s.db.WithContext(c).
+		Model(&gbmodels.GbFirmwareRepository{}).
+		Scopes(datascope.OwnerDeptScopeWithDB(c, s.db, "dept_id")).
+		Where("id = ?", id).
+		Update("status", status)
+
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (s *RepositoryService) Delete(c *gin.Context, id uint64) error {

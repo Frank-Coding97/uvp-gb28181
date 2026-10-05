@@ -90,3 +90,10 @@ export function generateDownloadLink(id: number) {
 export function getFirmwareById(id: number) {
   return http.request<BaseResult<FirmwareRepository>>("get", baseUrlApi(`gb28181/device-mgmt/firmware-repository/${id}`));
 }
+
+// 更新固件状态
+export function updateFirmwareStatus(id: number, status: "draft" | "published" | "archived") {
+  return http.request<BaseResult<void>>("patch", baseUrlApi(`gb28181/device-mgmt/firmware-repository/${id}/status`), {
+    data: { status }
+  });
+}

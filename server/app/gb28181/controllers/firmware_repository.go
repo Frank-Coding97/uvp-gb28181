@@ -12,10 +12,12 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 )
@@ -173,6 +175,12 @@ func (ctrl *FirmwareRepositoryController) Upload(c *gin.Context) {
 
 // List 查询固件列表
 func (ctrl *FirmwareRepositoryController) List(c *gin.Context) {
+	if ctrl.repoService == nil {
+		app.ZapLog.Error("固件仓库 repoService 为 nil", zap.String("event", "firmware.list_nil_service"))
+		response.Fail(c, "服务未初始化")
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
 	manufacturer := c.Query("manufacturer")
@@ -237,6 +245,34 @@ func (ctrl *FirmwareRepositoryController) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, "删除成功")
+}
+
+// UpdateStatus 更新固件状态
+func (ctrl *FirmwareRepositoryController) UpdateStatus(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Fail(c, "参数错误")
+		return
+	}
+
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=draft published archived"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, "参数错误: "+err.Error())
+		return
+	}
+
+	if err := ctrl.repoService.UpdateStatus(c, id, gbmodels.FirmwareStatus(req.Status)); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			response.Fail(c, "固件不存在")
+			return
+		}
+		response.Fail(c, "更新状态失败: "+err.Error())
+		return
+	}
+
+	response.Success(c, "状态更新成功")
 }
 
 // GenerateDownloadLink 生成临时下载链接

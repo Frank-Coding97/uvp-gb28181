@@ -68,6 +68,9 @@ server/.playwright-mcp/
 # 发布产物(打包脚本输出,不入库)
 release-output/
 
+# 运行时上传目录(固件包/图片等测试数据,不入库)
+server/uploads/
+
 # 临时截图 / 调试 JSON(开发过程产物,不入库)
 *.png
 !web/public/**/*.png

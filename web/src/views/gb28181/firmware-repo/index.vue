@@ -1,7 +1,7 @@
 <template>
   <div class="firmware-repo-container">
-    <div class="filter-section">
-      <a-space>
+    <s-layout-search>
+      <template #fields>
         <a-input
           v-model="filters.manufacturer"
           placeholder="厂商"
@@ -15,33 +15,38 @@
           <a-option value="published">已发布</a-option>
           <a-option value="archived">已归档</a-option>
         </a-select>
+      </template>
+      <template #actions>
         <a-button type="primary" @click="handleSearch">
           <template #icon>
-            <Search :size="16" />
+            <Search :size="15" />
           </template>
           查询
         </a-button>
         <a-button @click="handleReset">
           <template #icon>
-            <RotateCcw :size="16" />
+            <RotateCcw :size="15" />
           </template>
           重置
         </a-button>
-      </a-space>
-      <a-button type="primary" @click="showUploadDialog = true">
-        <template #icon>
-          <Plus :size="16" />
-        </template>
-        上传固件
-      </a-button>
-    </div>
+      </template>
+      <template #extra>
+        <a-button type="primary" @click="showUploadDialog = true">
+          <template #icon>
+            <Plus :size="15" />
+          </template>
+          上传固件
+        </a-button>
+      </template>
+    </s-layout-search>
 
     <a-table
       class="uvp-data-table"
       :columns="columns"
       :data="tableData"
       :loading="loading"
-      :pagination="pagination"
+      :pagination="false"
+      :scroll="{ x: 'max-content' }"
       @page-change="handlePageChange"
       @page-size-change="handlePageSizeChange"
     >
@@ -63,22 +68,48 @@
       </template>
 
       <template #actions="{ record }">
-        <a-space>
+        <a-space :size="4">
+          <a-button v-if="record.status === 'draft'" type="text" size="small" status="success" @click="handlePublish(record)">
+            <template #icon>
+              <Check :size="14" />
+            </template>
+            发布
+          </a-button>
+          <a-button v-if="record.status === 'published'" type="text" size="small" status="warning" @click="handleArchive(record)">
+            <template #icon>
+              <Archive :size="14" />
+            </template>
+            归档
+          </a-button>
           <a-button type="text" size="small" @click="handleDownload(record)">
             <template #icon>
-              <Download :size="16" />
+              <Download :size="14" />
             </template>
             下载
           </a-button>
           <a-button type="text" size="small" status="danger" @click="handleDelete(record)">
             <template #icon>
-              <Trash2 :size="16" />
+              <Trash2 :size="14" />
             </template>
             删除
           </a-button>
         </a-space>
       </template>
     </a-table>
+
+    <footer class="uvp-pagination-bar">
+      <a-pagination
+        :current="pagination.current"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :page-size-options="[10, 20, 50, 100]"
+        show-total
+        show-page-size
+        show-jumper
+        @change="handlePageChange"
+        @page-size-change="handlePageSizeChange"
+      />
+    </footer>
 
     <FirmwareUploadDialog v-model:visible="showUploadDialog" @success="handleUploadSuccess" />
   </div>
@@ -87,8 +118,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
-import { Search, RotateCcw, Plus, Download, Trash2 } from "lucide-vue-next";
-import { listFirmware, deleteFirmware, generateDownloadLink } from "./api";
+import { Search, RotateCcw, Plus, Download, Trash2, Check, Archive } from "lucide-vue-next";
+import { listFirmware, deleteFirmware, generateDownloadLink, updateFirmwareStatus } from "./api";
 import FirmwareUploadDialog from "./FirmwareUploadDialog.vue";
 import type { FirmwareRepository } from "./api";
 import type { TableColumnData } from "@arco-design/web-vue";
@@ -135,7 +166,7 @@ const columns: TableColumnData[] = [
   {
     title: "操作",
     slotName: "actions",
-    width: 150,
+    width: 160,
     fixed: "right"
   }
 ];
@@ -152,9 +183,7 @@ const showUploadDialog = ref(false);
 const pagination = reactive({
   current: 1,
   pageSize: 10,
-  total: 0,
-  showTotal: true,
-  showPageSize: true
+  total: 0
 });
 
 async function fetchData() {
@@ -201,6 +230,33 @@ function handlePageSizeChange(pageSize: number) {
 function handleUploadSuccess() {
   pagination.current = 1;
   fetchData();
+}
+
+async function handlePublish(record: FirmwareRepository) {
+  try {
+    await updateFirmwareStatus(record.id, "published");
+    Message.success("固件已发布");
+    record.status = "published";
+  } catch (error: any) {
+    Message.error(error.message || "发布失败");
+  }
+}
+
+async function handleArchive(record: FirmwareRepository) {
+  Modal.confirm({
+    title: "确认归档",
+    content: `确定要归档固件 "${record.version}" 吗？归档后设备升级时将无法选择该固件。`,
+    modalClass: "uvp-system-dialog",
+    onOk: async () => {
+      try {
+        await updateFirmwareStatus(record.id, "archived");
+        Message.success("固件已归档");
+        record.status = "archived";
+      } catch (error: any) {
+        Message.error(error.message || "归档失败");
+      }
+    }
+  });
 }
 
 async function handleDownload(record: FirmwareRepository) {
@@ -274,14 +330,18 @@ onMounted(() => {
 
 <style scoped>
 .firmware-repo-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
   padding: 20px;
 }
 
-.filter-section {
+.uvp-pagination-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  justify-content: flex-end;
+  padding-top: 2px;
 }
 
 .file-info {

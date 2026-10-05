@@ -55,6 +55,7 @@ type snFloorEnsurer interface {
 // FirmwareRepositoryService is the narrow contract needed for querying firmware from repository.
 type FirmwareRepositoryService interface {
 	GetByFirmwareID(c *gin.Context, firmwareID string) (*gbmodels.GbFirmwareRepository, error)
+	GetByFirmwareIDWithDept(ctx context.Context, firmwareID string, deptID uint64) (*gbmodels.GbFirmwareRepository, error)
 }
 
 // DownloadTokenService is the narrow contract needed for generating temporary download tokens.
@@ -316,11 +317,8 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 		if s.repoService == nil || s.tokenService == nil {
 			return Operation{}, false, fmt.Errorf("%w: 固件仓库服务未就绪", ErrServiceUnavailable)
 		}
-		// 构造临时 gin.Context 用于租户隔离查询
-		// 这里的关键是：repoService.GetByFirmwareID 内部会校验 dept_id scope
-		// 我们需要传递 ActorDeptID 以确保租户隔离
-		tempCtx := &gin.Context{Request: ctx.(*gin.Context).Request}
-		firmware, err := s.repoService.GetByFirmwareID(tempCtx, firmwareID)
+		// 直接通过 ActorDeptID 查询固件（租户隔离已在 Request 中携带）
+		firmware, err := s.repoService.GetByFirmwareIDWithDept(ctx, firmwareID, uint64(request.ActorDeptID))
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return Operation{}, false, fmt.Errorf("%w: 固件不存在或无权访问", ErrInvalidArgument)

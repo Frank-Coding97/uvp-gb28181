@@ -4,7 +4,7 @@
 
 -- sys_menu: 固件仓库菜单项
 INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `component`, `title`, `is_full`, `hide`, `disable`, `keep_alive`, `affix`, `link`, `iframe`, `svg_icon`, `icon`, `sort`, `type`, `is_link`, `permission`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
-(140600, 0, '/gb28181/firmware-repo/index', 'firmware-repository-list', '', 'gb28181/firmware-repo/index', '固件仓库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:HardDrive', 21, 2, 0, '', NOW(), NOW(), NULL, 1);
+(140600, 0, '/gb28181/firmware-repo/index', 'firmware-repository-list', '', 'gb28181/firmware-repo/index', '固件仓库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Box', 21, 2, 0, '', NOW(), NOW(), NULL, 1);
 
 -- sys_menu: 固件仓库权限按钮（已在 Task 5 提到但未实际插入）
 INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `component`, `title`, `is_full`, `hide`, `disable`, `keep_alive`, `affix`, `link`, `iframe`, `svg_icon`, `icon`, `sort`, `type`, `is_link`, `permission`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
