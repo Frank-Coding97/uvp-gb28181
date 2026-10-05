@@ -20,6 +20,8 @@ import {
   createOverviewNodeLoadSpec
 } from "../chart/overviewChart";
 import { nodeOverviewLocation, overviewHealthSummary, streamOverviewLocation } from "../../clusterOverviewState";
+import { useDictLabelMap } from "@/hooks/useDictOptions";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK, mediaNodeStateRuntimeText } from "../../../mediaNodeState";
 import { buildOverviewKpis, overviewKpiValueText } from "./overviewState";
 
 const props = withDefaults(
@@ -74,7 +76,9 @@ const { refresh } = useZLMRuntimePolling<ZLMOverview>({
 defineExpose({ refresh });
 
 const health = computed(() => (overview.value ? overviewHealthSummary(overview.value) : null));
-const chartState = computed(() => buildOverviewChartState(overview.value));
+/** 节点状态文案的字典查表（`media_node_state`）。 */
+const nodeStateLabels = useDictLabelMap(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
+const chartState = computed(() => buildOverviewChartState(overview.value, nodeStateLabels.value));
 const kpis = computed(() => buildOverviewKpis(overview.value));
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const freshness = computed(() => zlmFreshnessPresentation(overview.value?.asOf));
@@ -102,13 +106,9 @@ const overallStatus = computed(() => {
   return "ready" as const;
 });
 
+/** 节点状态文案 —— 与 `overviewChart` 共用同一份实现（此前这里写的是「维护」，那边是「维护中」）。 */
 function nodeStateText(node: ZLMNodeRuntime) {
-  if (node.state === "maintenance") return "维护";
-  if (node.state === "offline") return "离线";
-  if (node.status === "unavailable") return "采集失败";
-  if (node.status === "partial") return "部分数据";
-  if (node.status === "fresh") return "在线";
-  return "状态未知";
+  return mediaNodeStateRuntimeText(nodeStateLabels.value, node);
 }
 
 function nodeStateTone(node: ZLMNodeRuntime) {

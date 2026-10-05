@@ -3,6 +3,8 @@ import { computed } from "vue";
 import { RefreshCw } from "lucide-vue-next";
 
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
+import { useDictLabel } from "@/hooks/useDictOptions";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "@/views/gb28181/mediaNodeState";
 
 const props = withDefaults(
   defineProps<{
@@ -35,11 +37,8 @@ const emit = defineEmits<{
 const selectedValue = computed(() => String(props.modelValue));
 const selectionRequired = computed(() => props.requiresNode && props.modelValue === "all");
 
-function stateText(state: MediaNodeCatalogNode["state"]) {
-  if (state === "active") return "在线";
-  if (state === "maintenance") return "维护";
-  return "离线";
-}
+/** 节点状态文案（`media_node_state` 字典）。 */
+const mediaNodeStateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
 
 function changeScope(next: string | number | Event) {
   const value = next instanceof Event ? (next.target as HTMLSelectElement).value : next;
@@ -69,7 +68,7 @@ function changeScope(next: string | number | Event) {
         <a-option v-if="allowAll && !requiresNode" value="all">全部节点</a-option>
         <a-option v-if="requiresNode && modelValue === 'all'" value="all" disabled>请选择节点</a-option>
         <a-option v-for="node in nodes" :key="node.id" :value="String(node.id)">
-          {{ node.name }} · {{ stateText(node.state) }}
+          {{ node.name }} · {{ mediaNodeStateLabel(node.state) }}
         </a-option>
       </a-select>
     </div>

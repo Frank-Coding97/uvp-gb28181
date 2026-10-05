@@ -111,6 +111,9 @@ import {
 } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "../mediaNodeState";
+import { useDictLabel } from "@/hooks/useDictOptions";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget = { type: "channel"; id: number } | { type: "device"; id: number };
@@ -135,6 +138,9 @@ const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
+// 「在线状态」文案由 `device_status` 字典驱动；媒体节点状态由 `media_node_state` 字典驱动。
+const deviceStatusLabel = useDeviceStatusLabel();
+const mediaNodeStateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
 const directoryState = ref(createDirectoryState());
 const selectedDirectories = ref<Record<"national" | "administrative" | "business" | "custom", DirectoryNode | null>>({
   national: null,
@@ -408,7 +414,7 @@ const zlmNodeOptions = computed(() => {
     { value: 0, label: "自动调度", disabled: false },
     ...zlmNodes.value.map(mediaNode => ({
       value: mediaNode.id,
-      label: `${mediaNode.name} · ${mediaNode.host}:${mediaNode.apiPort} · ${{ active: "可用", maintenance: "维护中", offline: "离线" }[mediaNode.state]}`,
+      label: `${mediaNode.name} · ${mediaNode.host}:${mediaNode.apiPort} · ${mediaNodeStateLabel(mediaNode.state)}`,
       disabled: mediaNode.state !== "active" && mediaNode.id !== editDeviceForm.value.zlmNodeId
     }))
   ];
@@ -2411,7 +2417,7 @@ onUnmounted(() => {
             </button>
           </span>
           <span v-if="statusFilter" class="filter-chip"
-            >状态: {{ statusFilter === "online" ? "在线" : "离线" }}
+            >状态: {{ deviceStatusLabel(statusFilter === "online") }}
             <button class="close" @click="statusFilter = undefined">×</button></span
           >
           <span v-if="selectedDirectory" class="filter-chip"
@@ -2512,7 +2518,7 @@ onUnmounted(() => {
                   <div class="status-cell">
                     <span class="status-inline" :class="{ online: record.status === 1 }">
                       <span class="status-dot"></span>
-                      <span>{{ record.status === 1 ? "在线" : "离线" }}</span>
+                      <span>{{ deviceStatusLabel(record.status === 1) }}</span>
                     </span>
                     <span v-if="isChannelPlaying(record)" class="status-inline playing">
                       <span class="status-dot"></span>
@@ -2749,11 +2755,11 @@ onUnmounted(() => {
                     @click.stop="openStatusEvents(record)"
                   >
                     <History class="status-trigger-icon" :size="13" aria-hidden="true" />
-                    <span class="status-trigger-label">{{ record.online ? "在线" : "离线" }}</span>
+                    <span class="status-trigger-label">{{ deviceStatusLabel(!!record.online) }}</span>
                   </button>
                   <span v-else class="status-inline status-readonly" :class="{ online: record.online }">
                     <span class="status-dot"></span>
-                    <span>{{ record.online ? "在线" : "离线" }}</span>
+                    <span>{{ deviceStatusLabel(!!record.online) }}</span>
                   </span>
                 </template>
               </a-table-column>
@@ -2902,11 +2908,11 @@ onUnmounted(() => {
                     :aria-label="`查看设备${item.deviceId}运行监控`"
                     @click.stop="openStatusEvents(item)"
                   >
-                    {{ item.online ? "在线" : "离线" }}
+                    {{ deviceStatusLabel(!!item.online) }}
                   </button>
                 </a-tooltip>
                 <span v-else class="device-status-ribbon device-status-readonly" :class="{ online: item.online }">
-                  {{ item.online ? "在线" : "离线" }}
+                  {{ deviceStatusLabel(!!item.online) }}
                 </span>
                 <div class="device-card-info">
                   <div>
@@ -3162,7 +3168,7 @@ onUnmounted(() => {
                   </div>
                   <div class="card-actions channel-card-actions">
                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
-                      item.status === 1 ? "在线" : "离线"
+                      deviceStatusLabel(item.status === 1)
                     }}</span>
                     <a-tooltip v-if="canStartPlayback" content="点播" position="top">
                       <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
@@ -3285,7 +3291,7 @@ onUnmounted(() => {
               <p>{{ channelDetail.channelId }}</p>
             </div>
             <span class="status-pill" :class="{ online: channelDetail.status === 1 }">{{
-              channelDetail.status === 1 ? "在线" : "离线"
+              deviceStatusLabel(channelDetail.status === 1)
             }}</span>
           </div>
           <div class="kv-grid">
@@ -3378,7 +3384,7 @@ onUnmounted(() => {
             <div class="idbar-status">
               <span class="status-pill" :class="{ online: deviceDetail.online }">
                 <span class="status-dot" />
-                {{ deviceDetail.online ? "在线" : "离线" }}
+                {{ deviceStatusLabel(!!deviceDetail.online) }}
               </span>
             </div>
           </div>
@@ -3642,7 +3648,7 @@ onUnmounted(() => {
           </div>
           <span class="status-pill status-event-current-status" :class="{ online: statusEventDevice.online }">
             <span class="status-dot"></span>
-            {{ statusEventDevice.online ? "在线" : "离线" }}
+            {{ deviceStatusLabel(!!statusEventDevice.online) }}
           </span>
         </header>
         <section class="runtime-overview" aria-label="设备运行概览">

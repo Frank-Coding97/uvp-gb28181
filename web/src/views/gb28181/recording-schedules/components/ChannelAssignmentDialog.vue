@@ -126,7 +126,7 @@
             </a-table-column>
             <a-table-column title="在线状态" :width="100" align="center">
               <template #cell="{ record }"
-                ><a-badge :status="record.online ? 'success' : 'normal'" :text="record.online ? '在线' : '离线'"
+                ><a-badge :status="record.online ? 'success' : 'normal'" :text="deviceStatusLabel(!!record.online)"
               /></template>
             </a-table-column>
             <a-table-column title="分配说明"><template #cell>确认后应用到该设备下当前有权限的全部通道</template></a-table-column>
@@ -165,7 +165,7 @@
             >
             <a-table-column title="在线状态" :width="100" align="center"
               ><template #cell="{ record }"
-                ><a-badge :status="record.online ? 'success' : 'normal'" :text="record.online ? '在线' : '离线'" /></template
+                ><a-badge :status="record.online ? 'success' : 'normal'" :text="deviceStatusLabel(!!record.online)" /></template
             ></a-table-column>
             <a-table-column title="分配状态"
               ><template #cell="{ record }"
@@ -212,6 +212,7 @@ import {
   type AssignmentOption
 } from "@/api/gb28181-recording-plan";
 import type { RecordingSchedule } from "../types";
+import { useDeviceStatusLabel } from "../../useDeviceStatusDict";
 
 type AssignmentScope = "device" | "channel";
 type OnlineFilter = "all" | "online";
@@ -221,6 +222,9 @@ const emit = defineEmits<{
   (event: "update:visible", value: boolean): void;
   (event: "confirm", payload: { planId: string; scope: AssignmentScope; targetIds: number[]; channelCount: number }): void;
 }>();
+
+/** 通道在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 
 const selectionScope = ref<AssignmentScope>("device");
 const selectedDeviceKeys = ref<number[]>([]);

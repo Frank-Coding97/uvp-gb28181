@@ -59,6 +59,7 @@ import {
   useVideoParamLabels,
   useVideoResolutionOptions
 } from "../useVideoParamDict";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 import DeviceConfigOsdBlocks from "./DeviceConfigOsdBlocks.vue";
 import DeviceConfigSlider from "./DeviceConfigSlider.vue";
 import DeviceConfigTextItems from "./DeviceConfigTextItems.vue";
@@ -85,6 +86,9 @@ import {
   type BuildResult,
   type FormValues
 } from "./deviceConfigPayload";
+
+/** 设备在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 
 const props = withDefaults(
   defineProps<{
@@ -1878,7 +1882,7 @@ onBeforeUnmount(() => {
             <span class="dcg-screen-badge" :class="online ? 'is-on' : 'is-off'">
               <Wifi v-if="online" :size="11" />
               <WifiOff v-else :size="11" />
-              {{ online ? "在线" : "离线" }}
+              {{ deviceStatusLabel(!!online) }}
             </span>
             <span class="dcg-screen-res">{{ previewResolution }}</span>
           </div>

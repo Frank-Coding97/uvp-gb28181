@@ -9,6 +9,8 @@ import {
   type SchedulerLogFilter
 } from "@/api/gb28181-zlm";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
+import { useDictLabel } from "@/hooks/useDictOptions";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "@/views/gb28181/mediaNodeState";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
 import MediaVChart from "../components/MediaVChart.vue";
 import { buildSchedulerChartState, createSchedulerNodeSpec, createSchedulerResultSpec } from "../chart/schedulerChart";
@@ -67,9 +69,12 @@ let generation = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 const chartPageLimit = 1000;
 
+/** 节点状态文案（`media_node_state` 字典）。 */
+const mediaNodeStateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
+
 const nodes = computed(() => (props.nodes === undefined ? discoveredNodes.value : props.nodes));
 const nodeOptions = computed(() =>
-  nodes.value.map(node => ({ label: `${node.name} · ${nodeStateLabel(node.state)}`, value: node.id }))
+  nodes.value.map(node => ({ label: `${node.name} · ${mediaNodeStateLabel(node.state)}`, value: node.id }))
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const chartState = computed(() =>
@@ -87,12 +92,6 @@ const algorithmOptions: Array<{ label: string; value: SchedulerAlgorithm }> = [
   { label: "加权轮询", value: "weighted" },
   { label: "最小负载", value: "leastload" }
 ];
-
-function nodeStateLabel(state: MediaNodeCatalogNode["state"]) {
-  if (state === "active") return "在线";
-  if (state === "maintenance") return "维护";
-  return "离线";
-}
 
 function stopTimer() {
   if (timer !== null) clearTimeout(timer);

@@ -59,10 +59,13 @@ import {
   type PlaybackActionRequest,
   type PlaybackSession
 } from "./api";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStoreHook();
+/** 设备在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 const channelId = computed(() => Number(route.params.channelId || 31));
 const playbackChannelId = channelId.value;
 const options = ref<RecordQueryOptions | null>(null);
@@ -678,7 +681,7 @@ onUnmounted(() => {
               <span>{{ options?.device.name || "正在加载设备" }} · {{ options?.channel.code || "--" }}</span>
             </div>
             <i :class="['online-indicator', { offline: options && !options.device.online }]">{{
-              options?.device.online === false ? "离线" : "在线"
+              deviceStatusLabel(options?.device.online !== false)
             }}</i>
           </div>
 

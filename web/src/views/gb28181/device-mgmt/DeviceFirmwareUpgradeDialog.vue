@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { Upload } from "@lucide/vue";
 import DeviceFirmwareUpgradePanel from "./DeviceFirmwareUpgradePanel.vue";
 import type { DeviceVO, UpgradeOperation } from "./api";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +35,8 @@ const deviceName = computed(() => props.device?.alias?.trim() || props.device?.n
 const currentFirmware = computed(() => props.device?.firmware?.trim() || "未上报");
 const deviceVendor = computed(() => [props.device?.manufacturer, props.device?.model].filter(Boolean).join(" / ") || "未上报");
 const deviceOnline = computed(() => props.device?.online === true);
+/** 在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 const title = computed(() => `${deviceName.value} · 固件升级`);
 
 function close() {
@@ -77,7 +80,7 @@ function setCloseBlocked(value: boolean) {
         <span>设备编码</span><strong class="mono">{{ device?.deviceId || "-" }}</strong>
       </div>
       <div>
-        <span>在线状态</span><strong :class="deviceOnline ? 'online' : 'offline'">{{ deviceOnline ? "在线" : "离线" }}</strong>
+        <span>在线状态</span><strong :class="deviceOnline ? 'online' : 'offline'">{{ deviceStatusLabel(deviceOnline) }}</strong>
       </div>
       <div>
         <span>厂商 / 型号</span><strong>{{ deviceVendor }}</strong>

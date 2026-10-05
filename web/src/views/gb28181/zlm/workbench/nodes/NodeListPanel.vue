@@ -13,6 +13,8 @@ import ZLMNodeActionDialog from "../../ZLMNodeActionDialog.vue";
 import LifecycleDot from "../../components/LifecycleDot.vue";
 import HealthBadge from "../../components/HealthBadge.vue";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
+import { useDictOptions } from "@/hooks/useDictOptions";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_OPTIONS_FALLBACK } from "@/views/gb28181/mediaNodeState";
 import type { NodeDangerAction } from "../../nodeActionState";
 import { filterNodeRecords, nodeHealth, nodeHealthReason, nodeOnlineState, type NodeHealth } from "./nodeManagementState";
 
@@ -48,6 +50,8 @@ const legacyLoading = ref(false);
 const legacyError = ref<unknown>(null);
 const search = ref("");
 const filterState = ref<string>();
+/** 「在线状态」筛选项（`media_node_state` 字典）。 */
+const nodeStateOptions = useDictOptions(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_OPTIONS_FALLBACK);
 const filterEnabled = ref<boolean>();
 const filterHealth = ref<NodeHealth>();
 const appliedSearch = ref("");
@@ -271,16 +275,7 @@ function relativeTime(value?: string) {
             { label: '停用', value: false }
           ]"
         />
-        <a-select
-          v-model="filterState"
-          allow-clear
-          placeholder="在线状态"
-          style="width: 150px"
-          :options="[
-            { label: '在线', value: 'active' },
-            { label: '离线', value: 'offline' }
-          ]"
-        />
+        <a-select v-model="filterState" allow-clear placeholder="在线状态" style="width: 150px" :options="nodeStateOptions" />
         <a-select
           v-model="filterHealth"
           allow-clear

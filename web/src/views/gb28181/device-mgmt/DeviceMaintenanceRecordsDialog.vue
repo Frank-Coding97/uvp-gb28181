@@ -8,6 +8,7 @@ import {
   type MaintenanceOperation,
   type UpgradeOperation
 } from "./api";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 type RecordType = "reboot" | "upgrade";
 type RecordItem = MaintenanceOperation | UpgradeOperation;
@@ -47,6 +48,9 @@ const props = withDefaults(
 const emit = defineEmits<{
   "update:visible": [value: boolean];
 }>();
+
+/** 在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 
 const pageSize = ref(10);
 const rebootState = reactive<RebootState>({ list: [], total: 0, page: 1, loading: false, error: "", loaded: false });
@@ -418,7 +422,7 @@ onBeforeUnmount(() => invalidateRequests());
             <strong>{{ deviceName }}</strong>
             <code>{{ device.deviceId }}</code>
           </div>
-          <span class="device-status" :class="{ online: device.online }"><i></i>{{ device.online ? "在线" : "离线" }}</span>
+          <span class="device-status" :class="{ online: device.online }"><i></i>{{ deviceStatusLabel(!!device.online) }}</span>
           <dl>
             <div>
               <dt>厂商 / 型号</dt>

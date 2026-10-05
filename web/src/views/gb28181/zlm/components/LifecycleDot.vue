@@ -4,12 +4,11 @@
  *
  * 用法:<LifecycleDot :state="record.state" />
  *
- * 状态对应:
- *   active       → 绿色圆点 + "活跃"
- *   maintenance  → 橙色圆点 + "维护"
- *   offline      → 灰色圆点 + "离线"
+ * ⛔ 文案走 `media_node_state` 字典（默认 在线 / 维护中 / 离线），圆点色走 CSS 变量。
  */
 import { computed } from "vue";
+import { useDictLabel } from "@/hooks/useDictOptions";
+import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "../../mediaNodeState";
 
 const props = withDefaults(
   defineProps<{
@@ -19,16 +18,18 @@ const props = withDefaults(
   { showText: true }
 );
 
-const cfg = computed(() => {
+const stateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
+
+const color = computed(() => {
   switch (props.state) {
     case "active":
-      return { color: "var(--zlm-state-active)", text: "活跃" };
+      return "var(--zlm-state-active)";
     case "maintenance":
-      return { color: "var(--zlm-state-maintenance)", text: "维护" };
+      return "var(--zlm-state-maintenance)";
     case "offline":
-      return { color: "var(--zlm-state-offline)", text: "离线" };
+      return "var(--zlm-state-offline)";
     default:
-      return { color: "var(--zlm-text-3)", text: props.state };
+      return "var(--zlm-text-3)";
   }
 });
 
@@ -36,9 +37,9 @@ const showText = computed(() => props.showText !== false);
 </script>
 
 <template>
-  <span class="lifecycle-dot" :aria-label="`生命周期：${cfg.text}`">
-    <span class="dot" :style="{ background: cfg.color }" />
-    <span v-if="showText" class="text">{{ cfg.text }}</span>
+  <span class="lifecycle-dot" :aria-label="`生命周期：${stateLabel(state)}`">
+    <span class="dot" :style="{ background: color }" />
+    <span v-if="showText" class="text">{{ stateLabel(state) }}</span>
   </span>
 </template>
 

@@ -1,4 +1,5 @@
 import type { CascadePlatform, SipConfigSummary } from "@/api/gb28181";
+import type { DictLabelFallback } from "@/hooks/useDictOptions";
 
 export interface CascadePresentation {
   label: string;
@@ -6,15 +7,68 @@ export interface CascadePresentation {
   detail: string;
 }
 
-export function cascadePresentation(
+/** 字典 code（开发库 `sys_dict` id=19）。 */
+export const DICT_CODE_CASCADE_REGISTER_STATE = "cascade_register_state";
+
+/**
+ * 字典未加载时的兜底，与开发库 `sys_dict_item`（id=141–146）逐字对齐。
+ * ⛔ 注意这是**派生状态键**（由 enabled / overall / registration / heartbeat 合成），
+ *    不是后端直接给的一个码 —— 所以先算键，再查字典。
+ */
+export const CASCADE_REGISTER_STATE_LABEL_FALLBACK: DictLabelFallback = {
+  disabled: "已停用",
+  online: "在线",
+  registration_expired: "注册已过期",
+  heartbeat_stale: "心跳超时",
+  awaiting_heartbeat: "等待心跳",
+  awaiting_registration: "等待注册"
+};
+
+export type CascadeRegisterStateKey =
+  | "disabled"
+  | "online"
+  | "registration_expired"
+  | "heartbeat_stale"
+  | "awaiting_heartbeat"
+  | "awaiting_registration";
+
+/** 语义色 + 说明 —— 展示层信息，**不入字典**（字典只管"值叫什么"）。 */
+const CASCADE_REGISTER_STATE_PRESENTATION: Record<
+  CascadeRegisterStateKey,
+  { color: CascadePresentation["color"]; detail: string }
+> = {
+  disabled: { color: "gray", detail: "平台未启用" },
+  online: { color: "green", detail: "注册和心跳正常" },
+  registration_expired: { color: "red", detail: "上级平台未保持注册" },
+  heartbeat_stale: { color: "orange", detail: "最近心跳超过容忍窗口" },
+  awaiting_heartbeat: { color: "blue", detail: "已注册,等待有效心跳" },
+  awaiting_registration: { color: "blue", detail: "尚未收到上级注册确认" }
+};
+
+/** 上级平台当前处于哪个状态键（分支顺序即优先级）。 */
+export function cascadeRegisterStateKey(
   platform: Pick<CascadePlatform, "enabled" | "overall" | "registration" | "heartbeat">
+): CascadeRegisterStateKey {
+  if (!platform.enabled) return "disabled";
+  if (platform.overall === "online") return "online";
+  if (platform.registration === "expired") return "registration_expired";
+  if (platform.heartbeat === "stale") return "heartbeat_stale";
+  if (platform.registration === "registered") return "awaiting_heartbeat";
+  return "awaiting_registration";
+}
+
+/**
+ * @param labels `cascade_register_state` 的字典查表（`useDictLabelMap` 产物）；
+ *   省略则用兜底常量。色与说明恒来自代码（不是字典值域）。
+ */
+export function cascadePresentation(
+  platform: Pick<CascadePlatform, "enabled" | "overall" | "registration" | "heartbeat">,
+  labels?: DictLabelFallback
 ): CascadePresentation {
-  if (!platform.enabled) return { label: "已停用", color: "gray", detail: "平台未启用" };
-  if (platform.overall === "online") return { label: "在线", color: "green", detail: "注册和心跳正常" };
-  if (platform.registration === "expired") return { label: "注册已过期", color: "red", detail: "上级平台未保持注册" };
-  if (platform.heartbeat === "stale") return { label: "心跳超时", color: "orange", detail: "最近心跳超过容忍窗口" };
-  if (platform.registration === "registered") return { label: "等待心跳", color: "blue", detail: "已注册,等待有效心跳" };
-  return { label: "等待注册", color: "blue", detail: "尚未收到上级注册确认" };
+  const key = cascadeRegisterStateKey(platform);
+  const spec = CASCADE_REGISTER_STATE_PRESENTATION[key];
+  const label = { ...CASCADE_REGISTER_STATE_LABEL_FALLBACK, ...(labels || {}) }[key] ?? key;
+  return { label, color: spec.color, detail: spec.detail };
 }
 
 /** 注册/心跳周期展示文本（纯秒数，顺序同表头：注册 / 心跳）；0 视为未配置，按后端默认值（3600s/60s）展示。 */

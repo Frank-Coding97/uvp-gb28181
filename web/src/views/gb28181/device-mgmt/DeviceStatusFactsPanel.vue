@@ -13,6 +13,7 @@ import {
 } from "@/api/gb28181";
 import FactChannelPicker from "./FactChannelPicker.vue";
 import type { FactChannelOption } from "./deviceFactChannel";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 /**
  * 设备状态事实（GB/T 28181 DeviceStatus / A.2.4.x）—— 从播放控制台搬到设备详情抽屉。
@@ -356,11 +357,11 @@ function alarmInputClass() {
   return `fact-${guardState.value}`;
 }
 
+// 设备自报的在线状态走 `device_status` 字典；自报缺省时是「未上报」，**不是**「离线」。
+const deviceStatusLabel = useDeviceStatusLabel("未上报");
+
 function deviceOnlineText() {
-  const state = deviceReport.value?.online;
-  if (state === "online") return "在线";
-  if (state === "offline") return "离线";
-  return "未上报";
+  return deviceStatusLabel(deviceReport.value?.online);
 }
 
 function selfTestText() {

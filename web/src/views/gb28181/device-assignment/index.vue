@@ -40,8 +40,12 @@ import ShareDrawer, { type ShareDeviceBrief } from "./components/ShareDrawer.vue
 import AssignmentDrawer, { type AssignmentDeviceBrief } from "./components/AssignmentDrawer.vue";
 import OperationResultDrawer from "./components/OperationResultDrawer.vue";
 import { useCrossPageSelection } from "./useCrossPageSelection";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 // ---- 权限 ----
+/** 设备在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
+
 const permissions = computed(() => useUserStoreHook().account?.permissions ?? []);
 const router = useRouter();
 const canAssign = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:device:assign"));
@@ -564,7 +568,7 @@ onMounted(() => {
                 <a-table-column title="状态" :width="100" align="center">
                   <template #cell="{ record }">
                     <a-tag :color="record.online ? 'green' : 'gray'" size="small">
-                      {{ record.online ? "在线" : "离线" }}
+                      {{ deviceStatusLabel(!!record.online) }}
                     </a-tag>
                   </template>
                 </a-table-column>

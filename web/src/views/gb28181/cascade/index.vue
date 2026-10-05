@@ -113,8 +113,8 @@
             </a-table-column>
             <a-table-column title="运行状态" :width="150">
               <template #cell="{ record }">
-                <a-tooltip :content="cascadePresentation(record).detail">
-                  <a-tag :color="cascadePresentation(record).color">{{ cascadePresentation(record).label }}</a-tag>
+                <a-tooltip :content="cascadeStatus(record).detail">
+                  <a-tag :color="cascadeStatus(record).color">{{ cascadeStatus(record).label }}</a-tag>
                 </a-tooltip>
               </template>
             </a-table-column>
@@ -478,7 +478,7 @@
             <a-table-column title="状态" :width="90" align="center">
               <template #cell="{ record }"
                 ><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{
-                  record.status === 1 ? "在线" : "离线"
+                  deviceStatusLabel(record.status === 1)
                 }}</a-tag></template
               >
             </a-table-column>
@@ -561,7 +561,10 @@ import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
 import SNumberField from "@/components/s-number-field/index.vue";
 import SPasswordField from "@/components/s-password-field/index.vue";
+import { useDictLabelMap } from "@/hooks/useDictOptions";
 import {
+  CASCADE_REGISTER_STATE_LABEL_FALLBACK,
+  DICT_CODE_CASCADE_REGISTER_STATE,
   cascadeCycleLabel,
   cascadeFormFieldErrors,
   cascadeLocalIdentityDefaults,
@@ -575,6 +578,7 @@ import {
 } from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 type ChannelOption = (GbChannel | ChannelVO) & { sourceDeviceId: number };
 type ShareDevice = GbDevice & Partial<DeviceVO>;
@@ -587,6 +591,13 @@ const canView = computed(() => hasPermission("gb28181:cascade:view"));
 const canManage = computed(() => hasPermission("gb28181:cascade:manage"));
 const canEnable = computed(() => hasPermission("gb28181:cascade:enable"));
 const canShare = computed(() => hasPermission("gb28181:cascade:share"));
+/** 下级通道的在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
+/** 上级平台的注册状态文案（`cascade_register_state` 字典；色/说明仍在代码里）。 */
+const cascadeRegisterLabels = useDictLabelMap(DICT_CODE_CASCADE_REGISTER_STATE, CASCADE_REGISTER_STATE_LABEL_FALLBACK);
+function cascadeStatus(platform: Parameters<typeof cascadePresentation>[0]) {
+  return cascadePresentation(platform, cascadeRegisterLabels.value);
+}
 
 const platforms = ref<CascadePlatform[]>([]);
 const loading = ref(false);

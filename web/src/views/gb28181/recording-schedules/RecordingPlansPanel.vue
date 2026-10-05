@@ -287,7 +287,7 @@
                     ><template #cell="{ record }"
                       ><a-badge
                         :status="record.online ? 'success' : 'normal'"
-                        :text="record.online ? '在线' : '离线'" /></template
+                        :text="deviceStatusLabel(!!record.online)" /></template
                   ></a-table-column>
                   <a-table-column title="计划命中" :width="104" align="center"
                     ><template #cell="{ record }"
@@ -390,6 +390,7 @@ import RecordingScheduleEditorDialog from "./components/RecordingScheduleEditorD
 import ChannelAssignmentDialog from "./components/ChannelAssignmentDialog.vue";
 import type { RecordingSchedule, ScheduleChannel, ScheduleDay } from "./types";
 import { useUserStoreHook } from "@/store/modules/user";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const props = withDefaults(
   defineProps<{
@@ -405,6 +406,9 @@ const props = withDefaults(
 const emit = defineEmits<{
   stats: [value: { enabledPlanTotal?: number | null; abnormalChannelTotal?: number | null }];
 }>();
+
+/** 通道在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 
 function safeContext(value: unknown, maxLength: number) {
   const scalar = Array.isArray(value) ? value[0] : value;

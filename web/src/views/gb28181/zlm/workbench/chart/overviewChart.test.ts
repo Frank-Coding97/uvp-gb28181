@@ -128,7 +128,11 @@ describe("media overview chart adapters", () => {
     expect(state.asOf).toBe("2026-08-30T10:00:00Z");
     expect(state.nodeLoad.find(item => item.nodeId === 3)?.netThreadLoad).toBeNull();
     expect(state.nodeLoad.find(item => item.nodeId === 3)?.workThreadLoad).toBeNull();
-    expect(state.health.find(item => item.nodeId === 3)?.statusText).toContain("采集失败");
+    // ⛔ 2026-10-05 口径收敛：节点 3 是 `state=offline` + `status=unavailable`，
+    //    生命周期状态**优先**于采集状态 ⇒ 写「离线」，不再写「采集失败」。
+    //    此前本文件与 `MediaOverviewPanel` 两处实现分支相反（这边离线算采集失败、卡片算离线），
+    //    收敛后统一按「卡片口径」（用户实际看到的那个）。文案真源现在是 `media_node_state` 字典。
+    expect(state.health.find(item => item.nodeId === 3)?.statusText).toBe("离线");
     expect(state.summary).toContain("采样 1 个节点");
     expect(state.summary).toContain("失败 1 个");
   });
@@ -148,7 +152,9 @@ describe("media overview chart adapters", () => {
     );
     expect(health.series?.[0]).toMatchObject({ type: "heatmap" });
     expect(health.data?.[0]?.values).toEqual(
-      expect.arrayContaining([expect.objectContaining({ nodeId: 3, dimension: "状态", value: null, label: "采集失败" })])
+      // `state=offline` 是**已知事实** ⇒ 该维度出 0（最差），不是 null（未知）；
+      // 此前因为把「采集失败」短路在前，这里被当成未知了。
+      expect.arrayContaining([expect.objectContaining({ nodeId: 3, dimension: "状态", value: 0, label: "离线" })])
     );
     expect(distribution.series?.[0]).toMatchObject({ type: "bar" });
     expect(distribution.data?.[0]?.values).toEqual(

@@ -1,4 +1,11 @@
 import type { ZLMNodeRuntime, ZLMOverview, ZLMRuntimeMedia } from "@/api/gb28181-zlm-runtime";
+import type { DictLabelFallback } from "@/hooks/useDictOptions";
+import {
+  MEDIA_NODE_DATA_STATUS_LABEL,
+  MEDIA_NODE_STATE_LABEL_FALLBACK,
+  mediaNodeRuntimeKey,
+  mediaNodeStateRuntimeText
+} from "../../../mediaNodeState";
 
 export type OverviewChartStatus = "ready" | "empty" | "unknown" | "unavailable" | "partial";
 
@@ -78,15 +85,6 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function nodeStatusText(node: ZLMNodeRuntime): string {
-  if (node.state === "maintenance") return "维护中";
-  if (node.status === "unavailable") return "采集失败";
-  if (node.state === "offline") return "离线";
-  if (node.status === "partial") return "部分数据";
-  if (node.status === "fresh") return "在线";
-  return "状态未知";
-}
-
 function isMetricsSampled(node: ZLMNodeRuntime, sampledNodeIds: ReadonlySet<number>): boolean {
   return sampledNodeIds.has(node.nodeId) && node.metricsComplete === true && !!node.metrics;
 }
@@ -96,8 +94,9 @@ function isMediaSampled(node: ZLMNodeRuntime): boolean {
 }
 
 function healthValue(node: ZLMNodeRuntime, dimension: OverviewHealthDatum["dimension"]): number | null {
-  const status = nodeStatusText(node);
-  if (status === "状态未知" || status === "采集失败") return null;
+  // ⛔ 判「能不能出数」认**维度键**，不认中文字串（字典一改名就会静默走错分支）。
+  const key = mediaNodeRuntimeKey(node);
+  if (key === "unknown" || key === "unavailable") return null;
   switch (dimension) {
     case "状态":
       return node.state === "offline" ? 0 : node.state === "maintenance" ? 0.5 : node.status === "partial" ? 0.5 : 1;
@@ -110,12 +109,16 @@ function healthValue(node: ZLMNodeRuntime, dimension: OverviewHealthDatum["dimen
   }
 }
 
-function healthLabel(node: ZLMNodeRuntime, dimension: OverviewHealthDatum["dimension"]): string {
-  const status = nodeStatusText(node);
-  if (status === "采集失败") return status;
+function healthLabel(
+  labels: DictLabelFallback | undefined,
+  node: ZLMNodeRuntime,
+  dimension: OverviewHealthDatum["dimension"]
+): string {
+  const key = mediaNodeRuntimeKey(node);
+  if (key === "unavailable") return MEDIA_NODE_DATA_STATUS_LABEL.unavailable;
   switch (dimension) {
     case "状态":
-      return status;
+      return mediaNodeStateRuntimeText(labels, node);
     case "运行态新鲜度":
       return node.freshness === "fresh" ? "新鲜" : node.freshness === "stale" ? "已过期" : "不可用";
     case "媒体采样":
@@ -184,12 +187,16 @@ function sampledAndFailed(overview: ZLMOverview) {
   return { nodeIds, sampledNodeIds, failedNodeIds };
 }
 
-function createNodeLoad(overview: ZLMOverview, sampledNodeIds: ReadonlySet<number>): OverviewNodeLoadDatum[] {
+function createNodeLoad(
+  overview: ZLMOverview,
+  sampledNodeIds: ReadonlySet<number>,
+  labels: DictLabelFallback | undefined
+): OverviewNodeLoadDatum[] {
   const result = overview.nodes.flatMap(node => {
     const sampled = isMetricsSampled(node, sampledNodeIds);
     const netThreadLoad = sampled ? finiteNumber(node.metrics?.netThreadLoad) : null;
     const workThreadLoad = sampled ? finiteNumber(node.metrics?.workThreadLoad) : null;
-    const statusText = nodeStatusText(node);
+    const statusText = mediaNodeStateRuntimeText(labels, node);
     return [
       {
         nodeId: node.nodeId,
@@ -220,7 +227,11 @@ function createNodeLoad(overview: ZLMOverview, sampledNodeIds: ReadonlySet<numbe
   });
 }
 
-function createHealth(overview: ZLMOverview, sampledNodeIds: ReadonlySet<number>): OverviewHealthDatum[] {
+function createHealth(
+  overview: ZLMOverview,
+  sampledNodeIds: ReadonlySet<number>,
+  labels: DictLabelFallback | undefined
+): OverviewHealthDatum[] {
   const dimensions: OverviewHealthDatum["dimension"][] = ["状态", "运行态新鲜度", "媒体采样", "指标采样"];
   return overview.nodes.flatMap(node =>
     dimensions.map(dimension => ({
@@ -228,8 +239,8 @@ function createHealth(overview: ZLMOverview, sampledNodeIds: ReadonlySet<number>
       nodeName: node.name,
       dimension,
       value: healthValue(node, dimension),
-      label: healthLabel(node, dimension),
-      statusText: nodeStatusText(node),
+      label: healthLabel(labels, node, dimension),
+      statusText: mediaNodeStateRuntimeText(labels, node),
       sampled:
         dimension === "指标采样" ? isMetricsSampled(node, sampledNodeIds) : dimension === "媒体采样" ? isMediaSampled(node) : true
     }))
@@ -255,7 +266,14 @@ function emptyState(status: OverviewChartStatus, summary: string, warning: strin
   };
 }
 
-export function buildOverviewChartState(overview: ZLMOverview | null | undefined): OverviewChartState {
+/**
+ * @param labels 节点状态文案的字典查表（可选）。省略时用兜底常量 —— 与入库的字典值一致，
+ *   所以纯函数场景（单测、非组件调用）行为不变。
+ */
+export function buildOverviewChartState(
+  overview: ZLMOverview | null | undefined,
+  labels: DictLabelFallback | undefined = MEDIA_NODE_STATE_LABEL_FALLBACK
+): OverviewChartState {
   if (!overview) return emptyState("unknown", "暂时没有可用的集群采样", "集群运行态尚未返回");
 
   const { nodeIds, sampledNodeIds, failedNodeIds } = sampledAndFailed(overview);
@@ -311,8 +329,8 @@ export function buildOverviewChartState(overview: ZLMOverview | null | undefined
     failed: { nodeIds: failedNodeIds, count: failedNodeIds.length },
     failedNodeIds,
     asOf: overview.asOf || null,
-    nodeLoad: createNodeLoad(overview, sampledSet),
-    health: createHealth(overview, sampledSet),
+    nodeLoad: createNodeLoad(overview, sampledSet, labels),
+    health: createHealth(overview, sampledSet, labels),
     distribution: [...protocolDistribution, ...sourceDistribution, ...nodeDistribution],
     protocolDistribution,
     sourceDistribution,

@@ -45,7 +45,7 @@
 | --- | --- | --- | --- | --- |
 | **P0** | 启用/禁用展示层 | 7 个文件（见 §二·P0） | 无（复用 `status`） | ✅ **已完成** |
 | **P1** | 视频参数三码值 | `videoParamCodec.ts`、`DeviceConfigDrawer.vue`、`PictureVideoParamCard.vue`、新增 `useVideoParamDict.ts` | `video_format`、`video_resolution`、`bit_rate_type` | ✅ **已完成** |
-| **P2** | 设备/节点/级联状态 | `device-mgmt/index.vue` 等 17 处 + `zlm/**` 6 处 + `cascadeState.ts` | `device_status`、`media_node_state`、`cascade_register_state` | ⏳ 待开始 |
+| **P2** | 设备/节点/级联状态 | 18 处在线状态 + `zlm/**` 8 处节点状态 + `cascadeState.ts` | `device_status`、`media_node_state`、`cascade_register_state` | ✅ **已完成** |
 | **P3** | 通道属性 + 告警 | `channelAttributeText.ts`、`alarm.go` | `channel_*` ×6、`alarm_priority`、`alarm_method`、`alarm_type` | ⏳ 待拍板 |
 | **P4** | 其余 20 项 | 见盘点报告 F12–F32、B4–B10 | 按项 | ⏳ 待开始 |
 
@@ -145,12 +145,60 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
   ⛔ 已确证：把 `DeviceConfigDrawer.vue` 还原到 HEAD 再跑 `index.deviceDetailTabs`，**照旧失败**（1 failed / 12 passed）⇒ 与本批无关（全是样式契约 / 固件模块的在途问题）。
 - ~~`generate_sql.py --check`~~ **数据库脚本改动已全部撤回**（口径变更，见 §三·3.1）；`eslint` 零告警；`vue-tsc` 本批改动文件零错误（存量错误集中在 `views/gb28181/firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*`）。
 
-**提交状态**：⏳ 未提交（**10 个文件：9 前端 + 本台账**）—— `videoParamCodec.ts` / `videoParamCodec.test.ts` / `useVideoParamDict.ts` / `useVideoParamDict.test.ts` / `DeviceConfigDrawer.vue` / `DeviceConfigDrawer.test.ts` / `PlayConsoleLinked.vue` / `PictureVideoParamCard.vue` / `test/setup.ts` / 本台账。
+**提交状态**：✅ 已提交 `a2f0724b feat(dict): 视频参数三码值收敛并字典化（P1）`（10 个文件，+629/−106）。
 ⛔ **数据库侧零改动**（seeds 2 + 三方言 3 + 迁移 1 已全部撤回）。
+
+### 二·P2 明细（✅ 已完成 2026-10-05）
+
+**新增 3 个字典**（⛔ 直接写开发库 220，不写任何 SQL 脚本 —— 见 §三·3.1）：
+
+| 字典 code | 值域 | 开发库 id |
+| --- | --- | --- |
+| `device_status` | `online`=在线 / `offline`=离线 | 17（项 136–137） |
+| `media_node_state` | `active`=在线 / `maintenance`=维护中 / `offline`=离线 | 18（项 138–140） |
+| `cascade_register_state` | `disabled` / `online` / `registration_expired` / `heartbeat_stale` / `awaiting_heartbeat` / `awaiting_registration` | 19（项 141–146） |
+
+**新增 3 个前端模块**（纯函数 + 注入层分层，对齐 P1 的 `videoParamCodec` / `useVideoParamDict`）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `views/gb28181/deviceStatus.ts` | 字典 code + 兜底 + **归一化**（boolean / `1|0` / `"online|offline"` 三种形状 → 同一把尺子）+ `deviceStatusLabelFrom` |
+| `views/gb28181/useDeviceStatusDict.ts` | `useDeviceStatusLabel(unknownText?)` 注入层 |
+| `views/gb28181/mediaNodeState.ts` | 字典 code + 兜底 + `mediaNodeRuntimeKey`（**判定**）+ `mediaNodeStateRuntimeText`（**文案**）+ 下拉兜底 |
+
+**F17 设备/通道在线状态（18 处）**：`device-mgmt/{index,DeviceConfigDrawer,DeviceStatusFactsPanel,DeviceFirmwareUpgradeDialog,DeviceMaintenanceRecordsDialog}`、`device-record-playback/index`、`recording-schedules/{RecordingPlansPanel,components/ChannelAssignmentDialog}`、`device-assignment/index`、`multi-screen-playback/PlaybackSourceTree`、`cascade/index`。
+⛔ **各站点原有极性原样保留**（`x ? A : B` ⇒ `!!x`；`x === false ? A : B` ⇒ `x !== false`；`status === 1 ? A : B` ⇒ `status === 1`）—— 未知值算在线还是离线是**该站点的语义**，本批不替它决定。
+⛔ **排除的非本值域**：`security/preview.vue`（主机防火墙 在线/降级）、`zlm/.../ProxyPanel.vue`（代理 在线/失败·离线）、`multi-screen-playback/PlaybackSchemePanel.vue`（可播放性 4 值）、`components/PlayConsoleLinked.vue:2194`（**错误串匹配**，不是展示）、`device-mgmt/index.vue` 的「已注册 / 运行正常 / 当前离线」（**是更长的成句状态**，不是这个二值）。
+
+**F20 媒体节点状态（8 处）**：`zlm/components/{NodeStateBadge,LifecycleDot}.vue`、`zlm/workbench/components/MediaScopeBar.vue`、`zlm/workbench/scheduling/SchedulerLogPanel.vue`、`zlm/workbench/nodes/NodeListPanel.vue`（筛选下拉**补上 `maintenance`**，此前维护态筛不出来）、`device-mgmt/index.vue`（节点选择器）。
+⭐⭐ **收敛了两处重复实现**：`zlm/workbench/overview/MediaOverviewPanel.vue` 与 `zlm/workbench/chart/overviewChart.ts` 各写了一份「state + status 合成文案」，**分支顺序相反、文案也不同** ⇒ 收进 `mediaNodeStateRuntimeText`。
+⭐ **文案口径统一**：`active` 此前被写成 **活跃 / 可用 / 在线** 三种，现统一为 **在线**；`maintenance` 的 **维护 / 维护中** 统一为 **维护中**。
+⛔ 同时拆掉一个**「拿中文串反判逻辑」**的耦合：`overviewChart` 原本 `if (status === "状态未知")` 用合成出来的中文串做判断 ⇒ 现在判定一律走 `mediaNodeRuntimeKey`。
+
+**F18 级联注册状态（1 处）**：`cascade/cascadeState.ts` —— 先算 `cascadeRegisterStateKey`（6 个派生键），label 走字典，**色与说明（detail）留代码**（不是字典值域）。
+
+**⚠️ 本批唯一的语义变更（收敛的必然代价，需知情）**
+
+`overviewChart` 原把「采集失败」排在「离线」之前，`MediaOverviewPanel` 反之。收敛取**生命周期优先**（离线胜过采集失败），连带的可见变化：
+
+1. `state=offline && status=unavailable` 的节点：图里 `statusText` **采集失败 → 离线**（与卡片口径一致）。
+2. 该节点健康矩阵「状态」维度值 **null（未知）→ 0（最差）** —— 离线是**已知事实**，不该算未知。
+3. 该节点其余三个维度的 label 从统一的「采集失败」变为各自具体的 不可用 / 不完整（只在 `state` 正常但采集失败时才是「采集失败」）。
+
+依据：`overviewChart.test.ts` 的两条断言已按新口径更新（原断言是旧实现的产物，非产品契约）；「采集失败」标签并未失效，`state` 正常而探针失败时仍会出现。
+
+**验证**
+
+- 本批相关 **118 例全绿**（`deviceStatus` 6 + `mediaNodeState` 8 + `cascadeState` 13 + `overviewChart` + `workbenchCapacity` + `ClusterOverview` + 设备/多屏相关）。
+- 开发库：**19 字典 / 146 项**；接口 `sysDictItem/getByDictCode/{device_status,media_node_state,cascade_register_state}` 实测逐条核对一致。
+- `eslint` 零告警；`vue-tsc` 本批改动文件**零错误**（存量 12 条集中在 `firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*`）。
+
+**提交状态**：✅ 已提交（P2 批次，27 个文件：22 前端改动 + 5 前端新增 + 本台账）。
+⛔ **数据库侧零改动**（新字典直插开发库，仓库里没有任何 SQL/seeds 痕迹）。
 
 ---
 
-## 三、待拍板（阻塞 P2 及之后）
+## 三、待拍板（阻塞 P3 及之后）
 
 ### 3.1 ⭐⭐ 已决：开发阶段**不写任何数据库脚本**（2026-10-05 口径变更）
 

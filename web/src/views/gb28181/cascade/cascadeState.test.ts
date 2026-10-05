@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  CASCADE_REGISTER_STATE_LABEL_FALLBACK,
+  DICT_CODE_CASCADE_REGISTER_STATE,
   cascadeCycleLabel,
   cascadeFormFieldErrors,
   cascadeLocalIdentityDefaults,
   cascadePresentation,
+  cascadeRegisterStateKey,
   channelSourceLabel,
   defaultCascadePlatform,
   pendingSourceChannelIds,
@@ -22,6 +25,42 @@ describe("cascade platform state", () => {
     expect(cascadePresentation({ enabled: true, overall: "offline", registration: "expired", heartbeat: "stale" })).toMatchObject(
       { label: "注册已过期", color: "red" }
     );
+  });
+
+  it("先算状态键、再查字典：六个分支的键与兜底文案一一对应", () => {
+    expect(DICT_CODE_CASCADE_REGISTER_STATE).toBe("cascade_register_state");
+    expect(CASCADE_REGISTER_STATE_LABEL_FALLBACK).toEqual({
+      disabled: "已停用",
+      online: "在线",
+      registration_expired: "注册已过期",
+      heartbeat_stale: "心跳超时",
+      awaiting_heartbeat: "等待心跳",
+      awaiting_registration: "等待注册"
+    });
+
+    const keyOf = (overall: string, registration: string, heartbeat: string) =>
+      cascadeRegisterStateKey({
+        enabled: true,
+        overall: overall as never,
+        registration: registration as never,
+        heartbeat: heartbeat as never
+      });
+    expect(keyOf("online", "registered", "healthy")).toBe("online");
+    expect(keyOf("offline", "expired", "stale")).toBe("registration_expired");
+    expect(keyOf("offline", "registered", "stale")).toBe("heartbeat_stale");
+    expect(keyOf("offline", "registered", "healthy")).toBe("awaiting_heartbeat");
+    expect(keyOf("offline", "unregistered", "unknown")).toBe("awaiting_registration");
+  });
+
+  it("字典改名后界面跟着变，但**色与说明不受影响**（它们不是字典值域）", () => {
+    const platform = { enabled: true, overall: "offline", registration: "expired", heartbeat: "stale" } as const;
+    expect(cascadePresentation(platform, { registration_expired: "注册失效" })).toEqual({
+      label: "注册失效",
+      color: "red",
+      detail: "上级平台未保持注册"
+    });
+    // 字典没给的键回落兜底，不塌成 key
+    expect(cascadePresentation(platform, {})).toMatchObject({ label: "注册已过期", color: "red" });
   });
 
   it("rejects invalid identities and ports without leaking backend diagnostics", () => {

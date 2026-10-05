@@ -33,6 +33,10 @@ import {
   type ChannelFavoriteInput
 } from "@/api/gb28181";
 import { useUserStoreHook } from "@/store/modules/user";
+import { useDeviceStatusLabel } from "../useDeviceStatusDict";
+
+/** 在线状态文案（`device_status` 字典）。 */
+const deviceStatusLabel = useDeviceStatusLabel();
 
 type SourceView = "devices" | "national" | "custom" | "favorites";
 type SourceNodeKind = "directory" | "device" | "channel" | "favorite-group";
@@ -574,8 +578,8 @@ function nodeIcon(node: SourceTreeNode) {
 }
 
 function nodeStatus(node: SourceTreeNode) {
-  if (node.kind === "channel") return node.status === 1 ? "在线" : "离线";
-  if (node.kind === "device") return node.status === 1 ? "在线" : "离线";
+  if (node.kind === "channel") return deviceStatusLabel(node.status === 1);
+  if (node.kind === "device") return deviceStatusLabel(node.status === 1);
   if (node.kind === "favorite-group")
     return node.favoriteGroup?.unavailableCount
       ? `${node.count} 个通道，${node.favoriteGroup.unavailableCount} 个不可用`
