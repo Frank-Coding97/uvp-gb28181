@@ -193,7 +193,7 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 - 开发库：**19 字典 / 146 项**；接口 `sysDictItem/getByDictCode/{device_status,media_node_state,cascade_register_state}` 实测逐条核对一致。
 - `eslint` 零告警；`vue-tsc` 本批改动文件**零错误**（存量 12 条集中在 `firmware-repo/*` 与 `DeviceFirmwareUpgradePanel.*`）。
 
-**提交状态**：✅ 已提交（P2 批次，27 个文件：22 前端改动 + 5 前端新增 + 本台账）。
+**提交状态**：✅ 已提交 `6d730d2c feat(dict): 设备/节点/级联状态字典化并收敛重复实现（P2）`（27 个文件，+586/−111）。
 ⛔ **数据库侧零改动**（新字典直插开发库，仓库里没有任何 SQL/seeds 痕迹）。
 
 ---

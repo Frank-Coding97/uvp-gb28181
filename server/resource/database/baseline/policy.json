@@ -165,8 +165,9 @@
     "⚠️ 布尔判定不能只看取值域。开发库是『跑过迁移的存量库』，它的数据只反映",
     "『当前恰好出现了哪些值』，不反映这个列在代码里的语义类型。",
     "踩过的坑：sys_users.status / sys_dict.status 在开发库里恰好只有 1，被取值域判成布尔；",
-    "但 Go 模型是 *int8，语义是 1=正常 / 2=停用 的小枚举。若基线把它建成 BOOLEAN，",
-    "应用一写 status=2 就报类型错；SQLite 的 CHECK(status IN (0,1)) 还会直接拒绝。",
+    "但 Go 模型是 *int8，语义是 0=停用 / 1=启用 的小枚举（sysdictparam.go 的入参校验即",
+    "validate:\"required|in:0,1\"，写 2 直接 422；sysdict.go 自身只留 comment:状态）。",
+    "若基线把它建成 BOOLEAN，SQLite 的 CHECK(status IN (0,1)) 同样会拒绝，语义也丢了。",
     "判据：以 Go 模型字段类型为准 —— bool / *bool 才是布尔，int8 / *int8 / int 一律是整数。",
     "下面两条清单是逐列比对模型后得到的结论，新增列必须有代码依据。"
   ],
