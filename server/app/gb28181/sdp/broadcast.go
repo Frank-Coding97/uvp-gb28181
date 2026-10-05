@@ -67,8 +67,14 @@ func ParseBroadcastOffer(raw string) (BroadcastMedia, error) {
 			} else if sessionIP == "" {
 				sessionIP = ip
 			}
-		case inAudio && strings.EqualFold(line, "a=rtpmap:8 PCMA/8000"):
-			codecOK = true
+		case inAudio && strings.HasPrefix(strings.ToLower(line), "a=rtpmap:"):
+			fields := strings.Fields(line)
+			if len(fields) == 2 && strings.EqualFold(fields[0], "a=rtpmap:8") {
+				encoding := strings.Split(fields[1], "/")
+				// 单声道可省略声道数，也可显式写成 PCMA/8000/1。
+				codecOK = (len(encoding) == 2 || len(encoding) == 3 && encoding[2] == "1") &&
+					strings.EqualFold(encoding[0], "PCMA") && encoding[1] == "8000"
+			}
 		case inAudio && strings.HasPrefix(strings.ToLower(line), "a=setup:"):
 			setup = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "a=setup:")))
 		case strings.HasPrefix(line, "y="):
