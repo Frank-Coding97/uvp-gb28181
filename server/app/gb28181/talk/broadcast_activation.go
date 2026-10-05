@@ -146,6 +146,14 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 			return PreparedBroadcastInvite{}, err
 		}
 	}
+	// 部分设备的 Subject 只含平台 ID，From 为设备 ID，没有回显通道 ID。
+	// 保留上面的通道格式兼容查询，再按设备匹配；多个候选仍由下方拒绝。
+	if len(candidates) == 0 && strings.TrimSpace(invite.PeerID) != "" {
+		candidates, err = s.repo.FindPendingBroadcast(ctx, strings.TrimSpace(invite.PeerID), "")
+		if err != nil {
+			return PreparedBroadcastInvite{}, err
+		}
+	}
 	if len(candidates) == 0 {
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 403, Reason: "没有匹配的 Broadcast 会话"}
 	}
