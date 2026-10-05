@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { RefreshCcw, RotateCcw, Send } from "@lucide/vue";
 import DeviceConfigSlider from "../../device-mgmt/DeviceConfigSlider.vue";
 import type { VideoParamCodecItem } from "../../videoParamCodec";
+import { useBitRateTypeOptions, useVideoFormatOptions, useVideoResolutionOptions } from "../../useVideoParamDict";
 
 const props = defineProps<{
   rows: VideoParamCodecItem[];
@@ -23,27 +24,16 @@ const emit = defineEmits<{
   (e: "apply"): void;
 }>();
 
-const VIDEO_FORMAT_OPTIONS = [
-  { label: "MPEG-4", value: "1" },
-  { label: "H.264", value: "2" },
-  { label: "SVAC", value: "3" },
-  { label: "3GP", value: "4" },
-  { label: "H.265", value: "5" }
-];
-
-const RESOLUTION_OPTIONS = [
-  { label: "QCIF", value: "1" },
-  { label: "CIF", value: "2" },
-  { label: "4CIF", value: "3" },
-  { label: "D1", value: "4" },
-  { label: "720P", value: "5" },
-  { label: "1080P", value: "6" }
-];
-
-const BIT_RATE_TYPE_OPTIONS = [
-  { label: "CBR", value: "1" },
-  { label: "VBR", value: "2" }
-];
+/**
+ * 三个下拉走字典（`video_format` / `video_resolution` / `bit_rate_type`），
+ * 兜底在 `videoParamCodec` 的 `*_LABEL_FALLBACK`。
+ * ⛔ 2026-10-05 收敛：此前本文件的 `VIDEO_FORMAT_OPTIONS` 与设备配置抽屉各写了一份
+ *    （且抽屉那份漏 SVAC），现在三处共用同一份字典值域。
+ * ⛔ 控件绑定的必须是**码值**（`"2"` 而不是 `"H.264"`）—— 人读串只出现在选项文案上。
+ */
+const VIDEO_FORMAT_OPTIONS = useVideoFormatOptions();
+const RESOLUTION_OPTIONS = useVideoResolutionOptions();
+const BIT_RATE_TYPE_OPTIONS = useBitRateTypeOptions();
 
 const streamLabel = (num: number) => (num === 0 ? "主码流" : `子码流 ${num}`);
 const videoBitRateDisabled = (row: VideoParamCodecItem) => row.bitRateType === "2";

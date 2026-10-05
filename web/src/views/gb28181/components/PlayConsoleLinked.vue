@@ -102,7 +102,14 @@ import {
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 import { buildTargetTrackArea } from "../targetTrackBox";
 import { PLAY_CONSOLE_CONTEXT } from "./play-console/playConsoleContext";
-import { frameRateText, resolutionText, videoFormatText, type VideoParamCodecItem } from "../videoParamCodec";
+import {
+  frameRateText,
+  normalizeCodecToken,
+  resolutionPixels,
+  videoFormatCodecToken,
+  type VideoParamCodecItem
+} from "../videoParamCodec";
+import { useVideoParamLabels } from "../useVideoParamDict";
 import {
   Activity,
   AlertTriangle,
@@ -2546,28 +2553,12 @@ function videoParamCompareReadRow(): VideoParam | undefined {
   return videoParams.value.find(item => item.streamNumber === streamNumber);
 }
 
-/** `resolutionText` 那六个码值对应的像素尺寸（用来把"码值档位"与"实测像素"拉到同一把尺子上）。 */
-const VIDEO_RESOLUTION_TIERS: Record<string, { width: number; height: number }> = {
-  QCIF: { width: 176, height: 144 },
-  CIF: { width: 352, height: 288 },
-  "4CIF": { width: 704, height: 576 },
-  D1: { width: 720, height: 576 },
-  "720P": { width: 1280, height: 720 },
-  "1080P": { width: 1920, height: 1080 }
-};
-
-/** `1920×1080` / `1920x1080` → `{1920, 1080}`；取不到两个数就返回 null。 */
-function pixelsOf(text: string): { width: number; height: number } | null {
-  const nums = (String(text ?? "").match(/\d+/g) ?? []).map(Number).slice(0, 2);
-  return nums.length === 2 && nums[0] > 0 && nums[1] > 0 ? { width: nums[0], height: nums[1] } : null;
-}
-
-/** 编码格式归一：`H.264` / `H264` / `h264` 是同一个东西；中文（"未上报"）会被剥成空串 = 未知。 */
-function normalizeCodecToken(text: string): string {
-  return String(text ?? "")
-    .replace(/[^A-Za-z0-9]/g, "")
-    .toUpperCase();
-}
+/**
+ * 展示用的两个翻译函数（字典驱动）。
+ * ⛔ 只出**人读串**给画面用；下面 `videoParamDiffs` 的判定**不走它** ——
+ *   把人读串当逻辑输入，字典改个名就会让对账静默失效。
+ */
+const { resolutionText, videoFormatText } = useVideoParamLabels();
 
 /**
  * 「设备回读」与「画面实测」**逐项**是否对得上（2026-09-20 收成两行时补）。
@@ -2579,19 +2570,23 @@ function normalizeCodecToken(text: string): string {
  * ⛔ 读不到回读（还没点「读取」）⇒ 三项全 `null`，界面写「未读取」，**不是**"不一致"。
  * ⛔ 分辨率按**像素**比、容差 ±20px：设备侧是码值档位（`D1` = 720×576），ZLM 报的是
  *    实际解码尺寸（704×576 也属同一档）—— 按码值硬比会天天误报。
+ *
+ * ⭐ 2026-10-05：三项判定一律**认码值**（`videoFormatCodecToken` / `resolutionPixels`）。
+ *    此前是"先把码值翻译成人读串、再从那个串反推回编码/尺寸" —— 人读串的真源已改为字典，
+ *    那条路子等于把"字典里叫什么"变成判定输入：现场把 `2` 的名字换个写法，
+ *    编码对比就会退化成"未读取"（静默失效，还查不出原因）。
  */
 const videoParamDiffs = computed<{ codec: boolean | null; resolution: boolean | null; fps: boolean | null }>(() => {
   const unknown = { codec: null, resolution: null, fps: null };
   const read = videoParamCompareReadRow();
   if (!read || !videoParamCompareStream.value) return unknown;
 
-  const readCodec = normalizeCodecToken(videoFormatText(read.videoFormat));
+  const readCodec = videoFormatCodecToken(read.videoFormat);
   const measuredCodec = normalizeCodecToken(streamInfo.value.videoCodec);
   const codec = readCodec && measuredCodec ? readCodec !== measuredCodec : null;
 
-  const readLabel = resolutionText(read.resolution);
-  const readPixels = VIDEO_RESOLUTION_TIERS[readLabel] ?? pixelsOf(readLabel);
-  const measuredPixels = pixelsOf(streamInfo.value.resolution);
+  const readPixels = resolutionPixels(read.resolution);
+  const measuredPixels = resolutionPixels(streamInfo.value.resolution);
   const resolution =
     readPixels && measuredPixels
       ? Math.abs(readPixels.width - measuredPixels.width) > 20 || Math.abs(readPixels.height - measuredPixels.height) > 20

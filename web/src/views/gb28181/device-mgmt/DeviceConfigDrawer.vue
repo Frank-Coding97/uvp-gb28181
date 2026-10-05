@@ -49,11 +49,16 @@ import {
 import {
   isValidResolutionCode,
   parseStreamNumberList,
-  resolutionText,
   validateVideoParamItems,
   videoParamEmptyText,
   type VideoParamCodecItem
 } from "../videoParamCodec";
+import {
+  useBitRateTypeOptions,
+  useVideoFormatOptions,
+  useVideoParamLabels,
+  useVideoResolutionOptions
+} from "../useVideoParamDict";
 import DeviceConfigOsdBlocks from "./DeviceConfigOsdBlocks.vue";
 import DeviceConfigSlider from "./DeviceConfigSlider.vue";
 import DeviceConfigTextItems from "./DeviceConfigTextItems.vue";
@@ -180,26 +185,21 @@ function readErrorMessage(error: unknown, fallback: string): string {
 
 const PTZ_STEPS = [1, 2, 3, 4, 5, 6, 7, 8];
 
-const VIDEO_FORMAT_OPTIONS: ConfigSelectOption[] = [
-  { value: "1", label: "MPEG-4" },
-  { value: "2", label: "H.264" },
-  { value: "4", label: "3GP" },
-  { value: "5", label: "H.265" }
-];
+/**
+ * 三个下拉的**真源是字典**（`video_format` / `video_resolution` / `bit_rate_type`），
+ * 兜底在 `videoParamCodec` 的 `*_LABEL_FALLBACK`。
+ *
+ * ⛔ 收敛记录（2026-10-05）：此前这里写死 4 个编码格式、**漏了 `3`(SVAC)**，而
+ *    `videoParamCodec` 的码表与播放控制台的 `PictureVideoParamCard` 都是 5 个 ——
+ *    同一个协议值域（附录 G `VideoFormat` 1-5）被定义了三份，其中一份还是缺的。
+ *    现在三处统一走字典，值域即标准的 1-5。
+ */
+const VIDEO_FORMAT_OPTIONS = useVideoFormatOptions();
+const RESOLUTION_OPTIONS = useVideoResolutionOptions();
+const BIT_RATE_TYPE_OPTIONS = useBitRateTypeOptions();
 
-const RESOLUTION_OPTIONS: ConfigSelectOption[] = [
-  { value: "1", label: "QCIF" },
-  { value: "2", label: "CIF" },
-  { value: "3", label: "4CIF" },
-  { value: "4", label: "D1" },
-  { value: "5", label: "720P" },
-  { value: "6", label: "1080P" }
-];
-
-const BIT_RATE_TYPE_OPTIONS: ConfigSelectOption[] = [
-  { value: "1", label: "CBR" },
-  { value: "2", label: "VBR" }
-];
+/** 分辨率人读串（预览窗用）。⛔ 只做展示，不参与任何判定。 */
+const { resolutionText } = useVideoParamLabels();
 
 const CUSTOM_RESOLUTION = "__custom__";
 

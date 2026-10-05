@@ -28,8 +28,32 @@ export interface VideoParamCodecItem {
 }
 
 // ---- 码值 → 人读串（只用于展示）----
+//
+// ⭐ 三张表的**真源是字典**（`sys_dict`：video_format / video_resolution / bit_rate_type）。
+// 开发阶段字典数据**直接补在开发库**，不再维护 `seeds/*.jsonl`（见技能 `uvp-dict-rollout`）。
+// 这里导出的 `*_LABEL_FALLBACK` 只是**字典未加载 / 查不到时的兜底**，值域由 GB/T 28181 固定，
+// 有单测逐条锁死（改这里必然红，必须显式改用例）。
+//
+// ⛔ 为什么做成"可注入的查表"而不是在本模块里直接读 store：
+//    本模块是**纯函数模块**（见文件头：协议取值转换必须有单测）。一旦 import Vue/pinia，
+//    这里的 30 多个用例就全得先起一个 pinia。所以字典由调用方（`useVideoParamDict`）
+//    注入进来，纯函数只认一张表。
+//
+// ⛔ 字典只管"叫什么"，**不管"合不合法"** —— 值域校验（`isValidVideoFormat` 等）
+//    仍然是写死的白名单，那校验的是"值合不合法"。
 
-const VIDEO_FORMAT_TEXT: Record<string, string> = {
+/** 字典 code。 */
+export const DICT_CODE_VIDEO_FORMAT = "video_format";
+/** 字典 code。 */
+export const DICT_CODE_VIDEO_RESOLUTION = "video_resolution";
+/** 字典 code。 */
+export const DICT_CODE_BIT_RATE_TYPE = "bit_rate_type";
+
+/** 展示用查表（`value` → 展示名）。`useDictLabelMap` 的产物即此形态。 */
+export type VideoParamLabelTable = Readonly<Record<string, string>>;
+
+/** `video_format` 兜底（GB/T 28181 值域，单测逐条锁定）。 */
+export const VIDEO_FORMAT_LABEL_FALLBACK: VideoParamLabelTable = {
   "1": "MPEG-4",
   "2": "H.264",
   "3": "SVAC",
@@ -37,7 +61,8 @@ const VIDEO_FORMAT_TEXT: Record<string, string> = {
   "5": "H.265"
 };
 
-const RESOLUTION_TEXT: Record<string, string> = {
+/** `video_resolution` 兜底（GB/T 28181 值域，单测逐条锁定）。 */
+export const RESOLUTION_LABEL_FALLBACK: VideoParamLabelTable = {
   "1": "QCIF",
   "2": "CIF",
   "3": "4CIF",
@@ -46,15 +71,19 @@ const RESOLUTION_TEXT: Record<string, string> = {
   "6": "1080P"
 };
 
-const BIT_RATE_TYPE_TEXT: Record<string, string> = {
+/** `bit_rate_type` 兜底（GB/T 28181 值域，单测逐条锁定）。 */
+export const BIT_RATE_TYPE_LABEL_FALLBACK: VideoParamLabelTable = {
   "1": "CBR",
   "2": "VBR"
 };
 
-export function videoFormatText(value: string | null | undefined): string {
+export function videoFormatText(
+  value: string | null | undefined,
+  labels: VideoParamLabelTable = VIDEO_FORMAT_LABEL_FALLBACK
+): string {
   const code = String(value ?? "").trim();
   if (!code) return "未上报";
-  return VIDEO_FORMAT_TEXT[code] ?? `未知(${code})`;
+  return labels[code] ?? `未知(${code})`;
 }
 
 /**
@@ -62,16 +91,80 @@ export function videoFormatText(value: string | null | undefined): string {
  * ⛔ 不认识的码值原样带出来而不是显示"未知" —— 设备回了什么就得让人看见什么，
  * 否则排障时无法区分"设备给了个怪值"与"我们没解析"。
  */
-export function resolutionText(value: string | null | undefined): string {
+export function resolutionText(
+  value: string | null | undefined,
+  labels: VideoParamLabelTable = RESOLUTION_LABEL_FALLBACK
+): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "未上报";
-  return RESOLUTION_TEXT[raw] ?? raw;
+  return labels[raw] ?? raw;
 }
 
-export function bitRateTypeText(value: string | null | undefined): string {
+export function bitRateTypeText(
+  value: string | null | undefined,
+  labels: VideoParamLabelTable = BIT_RATE_TYPE_LABEL_FALLBACK
+): string {
   const code = String(value ?? "").trim();
   if (!code) return "未上报";
-  return BIT_RATE_TYPE_TEXT[code] ?? `未知(${code})`;
+  return labels[code] ?? `未知(${code})`;
+}
+
+// ---- 码值 → 归一化 token / 像素尺寸（⛔ 逻辑用，与字典文案无关）----
+//
+// ⭐ 这两张表是**给对账逻辑用的**，不是展示。此前它们是从 `videoFormatText` /
+// `resolutionText` 的**输出文案**反推的（`normalizeCodecToken(videoFormatText(...))`、
+// `VIDEO_RESOLUTION_TIERS[resolutionText(...)]`）—— 那等于把"字典里叫什么"变成了
+// 逻辑输入：现场把 `2` 的名字从 `H.264` 改成别串，编码对比就会静默失效（显示"未读取"）。
+// 故这里改成**按码值直接查**，与展示彻底解耦。
+
+/** 附录 G `VideoFormat` 码值 → 归一化编码 token（与 ZLM 实测编码同尺子）。 */
+export const VIDEO_FORMAT_CODEC_TOKENS: Readonly<Record<string, string>> = {
+  "1": "MPEG4",
+  "2": "H264",
+  "3": "SVAC",
+  "4": "3GP",
+  "5": "H265"
+};
+
+/** 附录 G `Resolution` 六个码值 → 像素尺寸。容量容差比对用（见 `videoParamDiffs`）。 */
+export const RESOLUTION_TIERS_BY_CODE: Readonly<Record<string, { width: number; height: number }>> = {
+  "1": { width: 176, height: 144 },
+  "2": { width: 352, height: 288 },
+  "3": { width: 704, height: 576 },
+  "4": { width: 720, height: 576 },
+  "5": { width: 1280, height: 720 },
+  "6": { width: 1920, height: 1080 }
+};
+
+/** `1920×1080` / `1920x1080` → `{1920, 1080}`；取不到两个数就返回 null。 */
+export function pixelsOf(text: string | null | undefined): { width: number; height: number } | null {
+  const nums = (String(text ?? "").match(/\d+/g) ?? []).map(Number).slice(0, 2);
+  return nums.length === 2 && nums[0] > 0 && nums[1] > 0 ? { width: nums[0], height: nums[1] } : null;
+}
+
+/** 编码格式归一：`H.264` / `H264` / `h264` 是同一个东西；中文会被剥成空串 = 未知。 */
+export function normalizeCodecToken(text: string | null | undefined): string {
+  return String(text ?? "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+}
+
+/**
+ * 回读的编码格式码值 → 归一化 token（**只认码值**，不经过字典文案）。
+ * ⛔ 返回空串表示"这不是附录 G 的码值"，调用方据此判 `null`（比不出来），而不是判"不一致"。
+ */
+export function videoFormatCodecToken(value: string | null | undefined): string {
+  return VIDEO_FORMAT_CODEC_TOKENS[String(value ?? "").trim()] ?? "";
+}
+
+/**
+ * 回读的分辨率 → 像素尺寸（**先认码值，再认 `WxH` 原文**）。
+ * ⛔ 不查字典：字典改个名不该让"画面到底变没变"这个判断失效。
+ */
+export function resolutionPixels(value: string | null | undefined): { width: number; height: number } | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  return RESOLUTION_TIERS_BY_CODE[raw] ?? pixelsOf(raw);
 }
 
 export function frameRateText(value: string | null | undefined): string {

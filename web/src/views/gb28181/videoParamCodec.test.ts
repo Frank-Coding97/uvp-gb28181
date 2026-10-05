@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  BIT_RATE_TYPE_LABEL_FALLBACK,
+  RESOLUTION_LABEL_FALLBACK,
+  VIDEO_FORMAT_LABEL_FALLBACK,
   bitRateTypeText,
   canEditVideoParams,
   frameRateText,
   isValidFrameRate,
   isValidResolutionCode,
   isValidVideoBitRate,
+  normalizeCodecToken,
   parseStreamNumberList,
+  pixelsOf,
+  resolutionPixels,
   resolutionText,
   validateVideoParamItem,
   validateVideoParamItems,
   videoBitRateRequired,
   videoBitRateText,
+  videoFormatCodecToken,
   videoParamEmptyText,
   videoFormatText,
   videoParamReconcileText,
@@ -288,5 +295,85 @@ describe("可编辑性", () => {
     expect(canEditVideoParams("mismatch", true)).toBe(true);
     expect(canEditVideoParams("failed", true)).toBe(true);
     expect(canEditVideoParams("read_ok", true)).toBe(true);
+  });
+});
+
+// ---- 字典注入（2026-10-05：三张码表的真源改为 sys_dict）----
+
+describe("展示名走注入的查表", () => {
+  it("传了查表就按查表翻译，字典改了界面必须跟着变", () => {
+    expect(videoFormatText("2", { "2": "AVC（现场口径）" })).toBe("AVC（现场口径）");
+    expect(bitRateTypeText("1", { "1": "定码率" })).toBe("定码率");
+    expect(resolutionText("5", { "5": "高清 720P" })).toBe("高清 720P");
+  });
+
+  // ⛔ 三个函数的"认不出来"口径本来就不同，字典化不能把它们拉平：
+  //    编码/码率类型 → `未知(N)`；分辨率 → 原样（`WxH` 是标准允许的形态）。
+  it("字典未覆盖的码值仍各按各的口径兜底", () => {
+    expect(videoFormatText("9", { "2": "H.264" })).toBe("未知(9)");
+    expect(bitRateTypeText("9", {})).toBe("未知(9)");
+    expect(resolutionText("1920x1080", {})).toBe("1920x1080");
+    expect(resolutionText("9", {})).toBe("9");
+  });
+
+  it("不传查表时用与种子逐字对齐的兜底常量", () => {
+    for (const [code, label] of Object.entries(VIDEO_FORMAT_LABEL_FALLBACK)) {
+      expect(videoFormatText(code)).toBe(label);
+    }
+    for (const [code, label] of Object.entries(RESOLUTION_LABEL_FALLBACK)) {
+      expect(resolutionText(code)).toBe(label);
+    }
+    for (const [code, label] of Object.entries(BIT_RATE_TYPE_LABEL_FALLBACK)) {
+      expect(bitRateTypeText(code)).toBe(label);
+    }
+  });
+
+  it("空值一律未上报，与查表无关", () => {
+    expect(videoFormatText("", { "2": "X" })).toBe("未上报");
+    expect(resolutionText(null, { "5": "X" })).toBe("未上报");
+    expect(bitRateTypeText(undefined, { "1": "X" })).toBe("未上报");
+  });
+});
+
+describe("对账用的码值换算（⛔ 与字典文案无关）", () => {
+  it("编码格式按码值出归一 token，认不出就是空串", () => {
+    expect(videoFormatCodecToken("1")).toBe("MPEG4");
+    expect(videoFormatCodecToken("2")).toBe("H264");
+    expect(videoFormatCodecToken("3")).toBe("SVAC");
+    expect(videoFormatCodecToken("4")).toBe("3GP");
+    expect(videoFormatCodecToken("5")).toBe("H265");
+    // 非附录 G 码值 ⇒ 认不出来（调用方据此判"比不出来"，**不是**"不一致"）
+    expect(videoFormatCodecToken("9")).toBe("");
+    expect(videoFormatCodecToken("")).toBe("");
+    expect(videoFormatCodecToken(null)).toBe("");
+  });
+
+  it("分辨率先认码值，再认 WxH 原文", () => {
+    expect(resolutionPixels("5")).toEqual({ width: 1280, height: 720 });
+    expect(resolutionPixels("4")).toEqual({ width: 720, height: 576 });
+    expect(resolutionPixels("1920x1080")).toEqual({ width: 1920, height: 1080 });
+    expect(resolutionPixels("1920×1080")).toEqual({ width: 1920, height: 1080 });
+    expect(resolutionPixels("")).toBeNull();
+    expect(resolutionPixels("未上报")).toBeNull();
+  });
+
+  it("归一与像素解析对脏输入不抛错", () => {
+    expect(normalizeCodecToken("h.264")).toBe("H264");
+    expect(normalizeCodecToken("H264")).toBe("H264");
+    expect(normalizeCodecToken("未上报")).toBe("");
+    expect(pixelsOf("1920x1080")).toEqual({ width: 1920, height: 1080 });
+    expect(pixelsOf("abc")).toBeNull();
+  });
+
+  // ⭐ 本次改造的分水岭：**字典只改展示名，绝不能改判定输入**。
+  // 改前是"先翻译成人读串、再从串反推"，现场把 `2` 的名字换个写法，对账就会静默失效。
+  it("字典把展示名改掉，码值换算的结果一个都不许变", () => {
+    const weird = { "2": "高清编码", "5": "1280×720", "1": "定码率" };
+    expect(videoFormatText("2", weird)).toBe("高清编码");
+    expect(resolutionText("5", weird)).toBe("1280×720");
+    expect(bitRateTypeText("1", weird)).toBe("定码率");
+
+    expect(videoFormatCodecToken("2")).toBe("H264");
+    expect(resolutionPixels("5")).toEqual({ width: 1280, height: 720 });
   });
 });

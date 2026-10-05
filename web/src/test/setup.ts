@@ -1,5 +1,7 @@
 import { config } from "@vue/test-utils";
-import { defineComponent, h } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach } from "vitest";
+import { defineComponent, h, ref } from "vue";
 
 const ArcoInputStub = defineComponent({
   inheritAttrs: false,
@@ -173,3 +175,28 @@ config.global.stubs = {
   "a-checkbox": ArcoCheckboxStub,
   "a-tag": { template: "<span><slot /></span>" }
 };
+
+/**
+ * ⛔ 补齐**构建期自动导入**的 API。
+ *
+ * `src/store/modules/system.ts` 里写了 `const dict = ref<any>([])`，但那个 `ref` 是
+ * unplugin-auto-import（vite 插件）在**构建期**注入的；vitest 不带该插件
+ * ⇒ 只要有组件消费字典（`useSystemStore()`），就会抛
+ * `ReferenceError: ref is not defined`（栈指向 `system.ts:12`，极易误判成组件的问题）。
+ *
+ * ⚠️ 在测试文件里 `import { ref } from "vue"` **不管用** —— 模块作用域不会污染全局，
+ *    必须挂到 `globalThis` 上（`vi.stubGlobal` 同理，这里一次性挂好）。
+ */
+Object.assign(globalThis, { ref });
+
+/**
+ * 组件消费字典时需要**活跃 pinia**（`system` store）。每个用例给一个新实例。
+ *
+ * ⛔ 用 `beforeEach` 而不是只往 `config.global.plugins` 里塞：后者是**同一个实例**，
+ *    前一个用例写进去的 dict 会漏到下一个用例（典型案例：`useDictOptions` 的字典改名断言）。
+ * ⛔ 具体文件里若已显式 `vi.stubGlobal("ref", ref)` / `setActivePinia(...)`（声明"我依赖字典"），
+ *    保留即可，与本兜底不冲突。
+ */
+beforeEach(() => {
+  setActivePinia(createPinia());
+});

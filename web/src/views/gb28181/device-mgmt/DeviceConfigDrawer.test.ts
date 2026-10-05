@@ -1,4 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
+import { ref } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
 import { CONFIG_GROUPS } from "./deviceConfigGroups";
@@ -133,6 +135,9 @@ function pictureMaskEntry(overrides: Record<string, unknown> = {}) {
 function mountDrawer(props: Record<string, unknown> = {}) {
   return mount(DeviceConfigDrawer, {
     global: {
+      // 三个视频参数下拉与分辨率文案现在走字典（`useVideoParamDict`）⇒ 需要活跃 pinia。
+      // 每个用例一个空 store：dict 为空 ⇒ 走 `*_LABEL_FALLBACK` 兜底，与改前的写死常量等价。
+      plugins: [createPinia()],
       stubs: {
         "a-select": SelectStub
       }
@@ -156,6 +161,10 @@ function mountDrawer(props: Record<string, unknown> = {}) {
 
 describe("DeviceConfigDrawer 设备配置中心", () => {
   beforeEach(() => {
+    // 三个视频参数下拉与分辨率文案现在走字典（`useVideoParamDict` → `system` store），
+    // 而 `src/store/modules/system.ts` 的 `ref` 依赖构建期自动导入；
+    // 单测环境要显式补上（同 `useDictOptions.test.ts` / `route-config.test.ts`）。
+    vi.stubGlobal("ref", ref);
     api.getChannelVideoParams.mockReset();
     api.applyChannelVideoParams.mockReset();
     api.getChannelDeviceConfigs.mockReset();
