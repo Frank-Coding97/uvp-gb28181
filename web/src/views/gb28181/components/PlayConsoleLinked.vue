@@ -36,7 +36,8 @@ import PtzHomeCard from "./play-console/PtzHomeCard.vue";
 import PtzPresetCard from "./play-console/PtzPresetCard.vue";
 import PtzCruiseCard from "./play-console/PtzCruiseCard.vue";
 import DeviceConfigDrawer from "../device-mgmt/DeviceConfigDrawer.vue";
-import { MAX_MASK_REGIONS, MIRROR_OPTIONS, type ConfigTextItem } from "../device-mgmt/deviceConfigGroups";
+import { MAX_MASK_REGIONS, type ConfigTextItem } from "../device-mgmt/deviceConfigGroups";
+import { useFrameMirrorOptions } from "../device-mgmt/useDeviceConfigDict";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import {
@@ -2559,6 +2560,13 @@ function videoParamCompareReadRow(): VideoParam | undefined {
  *   把人读串当逻辑输入，字典改个名就会让对账静默失效。
  */
 const { resolutionText, videoFormatText } = useVideoParamLabels();
+
+/**
+ * 画面镜像选项：名字走 `frame_mirror` 字典。
+ * ⛔ 值 / 顺序 / `shortLabel` 恒由 `MIRROR_OPTIONS` 锁死（字典只能改名，不能增删档）——
+ *    这几个值要原样下发设备，多一档就是设备收到不认识的档位。
+ */
+const frameMirrorOptions = useFrameMirrorOptions();
 
 /**
  * 「设备回读」与「画面实测」**逐项**是否对得上（2026-09-20 收成两行时补）。
@@ -5581,11 +5589,11 @@ provide(PLAY_CONSOLE_CONTEXT, {
               @remove="removeMaskRegion"
             />
 
-            <!-- ② 画面镜像 -->
+            <!-- ② 画面镜像（名字走 frame_mirror 字典，值/顺序恒由 MIRROR_OPTIONS 锁死） -->
             <PictureMirrorCard
               :editable="pictureEditable"
               :mirror="pictureMirror"
-              :options="MIRROR_OPTIONS"
+              :options="frameMirrorOptions"
               :icon="mirrorChoiceIcon"
               @select="choosePictureMirror"
             />

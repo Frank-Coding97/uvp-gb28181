@@ -18,7 +18,9 @@ describe("系统内置字典名单", () => {
         "channel_photoelectric_imaging_type",
         "job_execute_policy",
         "job_blocking_policy",
-        "login_failure_reason"
+        "login_failure_reason",
+        "frame_mirror",
+        "stream_number"
       ].sort()
     );
   });
@@ -31,6 +33,8 @@ describe("系统内置字典名单", () => {
     expect(isSystemDict("ptz_type")).toBe(true);
     expect(isSystemDict("channel_room_type")).toBe(true);
     expect(isSystemDict("gb28181_playback_protocol")).toBe(true);
+    expect(isSystemDict("frame_mirror")).toBe(true);
+    expect(isSystemDict("stream_number")).toBe(true);
     expect(isSystemDict("post")).toBe(false);
     expect(isSystemDict("my_custom_dict")).toBe(false);
   });

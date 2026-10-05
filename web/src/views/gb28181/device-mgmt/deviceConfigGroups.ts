@@ -57,6 +57,14 @@ interface ConfigFieldBase {
 export interface ConfigSelectField extends ConfigFieldBase {
   kind: "select";
   options: ConfigSelectOption[];
+  /**
+   * 这个字段的**选项名字**来自哪个字典（`sys_dict.code`）。
+   *
+   * ⛔ 只换名字、不换档位：合并走【白名单式】，槽位集合与顺序恒等于 `options`
+   *    （见 `deviceConfigDict.ts`）。用于"值是下发报文码值"的字段 ——
+   *    字典里冒出个新档位，设备收不到、界面也不该给。
+   */
+  dictCode?: string;
 }
 
 export interface ConfigSliderField extends ConfigFieldBase {
@@ -126,6 +134,8 @@ export interface ConfigPointField extends ConfigFieldBase {
 export interface ConfigMirrorField extends ConfigFieldBase {
   kind: "mirror";
   options: ConfigSelectOption[];
+  /** 选项名字来自哪个字典（同 `ConfigSelectField.dictCode`）。 */
+  dictCode?: string;
 }
 
 /** 变长文本行（OSD 自由文本，标准上限 8 条）。 */
@@ -347,7 +357,14 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
       "画面镜像与隐私遮挡区。遮挡区最多 4 个，每个是左上角 + 右下角两个角点（不是位置 + 宽高）；四个坐标全 0 的区域视为未启用、不下发。",
     configTypes: ["FrameMirror", "PictureMask"],
     fields: [
-      { kind: "mirror", key: "mirror", label: "画面镜像", options: MIRROR_OPTIONS, hint: "1=左右，2=上下" },
+      {
+        kind: "mirror",
+        key: "mirror",
+        label: "画面镜像",
+        options: MIRROR_OPTIONS,
+        hint: "1=左右，2=上下",
+        dictCode: "frame_mirror"
+      },
       { kind: "switch", key: "maskOn", label: "启用遮挡" },
       { kind: "coords", key: "mask1", label: "遮挡区 1", axes: MASK_AXES },
       { kind: "coords", key: "mask2", label: "遮挡区 2", axes: MASK_AXES },
@@ -366,7 +383,7 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
     configTypes: ["VideoRecordPlan"],
     fields: [
       { kind: "switch", key: "recordEnable", label: "启用计划" },
-      { kind: "select", key: "streamNumber", label: "录像码流", options: STREAM_NUMBER_OPTIONS },
+      { kind: "select", key: "streamNumber", label: "录像码流", options: STREAM_NUMBER_OPTIONS, dictCode: "stream_number" },
       { kind: "schedules", key: "schedules", label: "周计划", hint: "时间为 HH:MM:SS（秒可省略）" }
     ]
   },
@@ -381,7 +398,7 @@ export const CONFIG_GROUPS: ConfigGroup[] = [
     configTypes: ["VideoAlarmRecord"],
     fields: [
       { kind: "switch", key: "recordEnable", label: "启用报警录像" },
-      { kind: "select", key: "streamNumber", label: "录像码流", options: STREAM_NUMBER_OPTIONS },
+      { kind: "select", key: "streamNumber", label: "录像码流", options: STREAM_NUMBER_OPTIONS, dictCode: "stream_number" },
       {
         kind: "slider",
         key: "recordTime",

@@ -33,6 +33,20 @@ const GB_PROTOCOL_DICT_CODES = [
   "channel_photoelectric_imaging_type" // 通道光电成像类型
 ] as const;
 
+/**
+ * ⛔⛔ 值是**下发报文码值**的字典 —— 本名单里"改坏后果"最重的一类。
+ *
+ * 它们会被原样写进发给设备的 XML（`FrameMirror` / `VideoRecordPlan.streamNumber`，
+ * 见 `deviceConfigPayload.ts` 的 `requiredInt` 收窄）。字典**多一档**就是设备收到
+ * 不认识的档位（静默忽略或收窄失败），**少一档**就是"永远选不出来、下发不出去"。
+ * ⇒ 前端消费侧一律走【白名单式合并】（`deviceConfigDict.ts`）：字典只能改名，
+ *    槽位集合与顺序恒由代码锁死。
+ */
+const DEVICE_DOWNLINK_DICT_CODES = [
+  "frame_mirror", // 画面镜像（FrameMirror 枚举）
+  "stream_number" // 码流编号（录像码流 / 视频参数）
+] as const;
+
 /** 平台协议值域：值是代码里写死的字面量（见 `playbackProtocol.ts` 的 `isPlaybackProtocol`）。 */
 const PLATFORM_PROTOCOL_DICT_CODES = ["gb28181_playback_protocol"] as const;
 
@@ -45,6 +59,7 @@ const PLATFORM_ENUM_DICT_CODES = ["job_execute_policy", "job_blocking_policy", "
 
 export const SYSTEM_DICT_CODES: readonly string[] = [
   ...GB_PROTOCOL_DICT_CODES,
+  ...DEVICE_DOWNLINK_DICT_CODES,
   ...PLATFORM_PROTOCOL_DICT_CODES,
   ...PLATFORM_ENUM_DICT_CODES
 ];

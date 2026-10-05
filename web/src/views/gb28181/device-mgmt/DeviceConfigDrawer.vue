@@ -86,6 +86,8 @@ import {
   type BuildResult,
   type FormValues
 } from "./deviceConfigPayload";
+import { applyOptionLabels } from "./deviceConfigDict";
+import { useDeviceConfigDictLabels } from "./useDeviceConfigDict";
 
 /** 设备在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
@@ -268,6 +270,8 @@ interface RenderField {
   label: string;
   hint: string;
   options: ConfigSelectOption[];
+  /** 选项名字来自哪个字典（select / mirror 专用，白名单式改名，见 `deviceConfigDict.ts`）。 */
+  dictCode: string;
   min: number;
   max: number;
   step: number;
@@ -289,6 +293,7 @@ function toRenderField(field: ConfigField): RenderField {
     label: field.label,
     hint: field.hint ?? "",
     options: [],
+    dictCode: "",
     min: 0,
     max: 100,
     step: 1,
@@ -301,7 +306,7 @@ function toRenderField(field: ConfigField): RenderField {
   switch (field.kind) {
     case "select":
     case "mirror":
-      return { ...base, options: field.options };
+      return { ...base, options: field.options, dictCode: field.dictCode ?? "" };
     case "slider":
       return {
         ...base,
@@ -322,7 +327,23 @@ function toRenderField(field: ConfigField): RenderField {
   }
 }
 
-const activeFields = computed<RenderField[]>(() => activeGroup.value.fields.map(toRenderField));
+const configDictLabels = useDeviceConfigDictLabels();
+
+/**
+ * 渲染字段 = 声明 + **字典改名**。
+ *
+ * ⛔ 白名单式：字典只给 `options` 里**已声明的 value** 换名字，槽位集合与顺序
+ *    恒由 `deviceConfigGroups.ts` 锁死（frame_mirror / stream_number 的值是下发
+ *    报文码值，字典多一档就是设备收到不认识的档位）。见 `deviceConfigDict.ts`。
+ */
+const activeFields = computed<RenderField[]>(() =>
+  activeGroup.value.fields.map(field => {
+    const rendered = toRenderField(field);
+    const labels = configDictLabels.value[rendered.dictCode];
+    if (!labels || !rendered.options.length) return rendered;
+    return { ...rendered, options: applyOptionLabels(rendered.options, labels) };
+  })
+);
 
 /**
  * 渲染用的字段提示 = 声明里的静态文案 + 依赖**设备事实**的动态补充。

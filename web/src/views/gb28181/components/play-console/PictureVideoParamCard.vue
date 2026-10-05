@@ -4,6 +4,7 @@ import { RefreshCcw, RotateCcw, Send } from "@lucide/vue";
 import DeviceConfigSlider from "../../device-mgmt/DeviceConfigSlider.vue";
 import type { VideoParamCodecItem } from "../../videoParamCodec";
 import { useBitRateTypeOptions, useVideoFormatOptions, useVideoResolutionOptions } from "../../useVideoParamDict";
+import { useStreamNumberLabel } from "../../device-mgmt/useDeviceConfigDict";
 
 const props = defineProps<{
   rows: VideoParamCodecItem[];
@@ -35,7 +36,14 @@ const VIDEO_FORMAT_OPTIONS = useVideoFormatOptions();
 const RESOLUTION_OPTIONS = useVideoResolutionOptions();
 const BIT_RATE_TYPE_OPTIONS = useBitRateTypeOptions();
 
-const streamLabel = (num: number) => (num === 0 ? "主码流" : `子码流 ${num}`);
+/**
+ * 码流编号 → 名字：0–3 走 `stream_number` 字典，**超出部分**回落过程式「子码流 N」。
+ *
+ * ⛔ 本卡按设备**实际上报**的码流数逐行渲染，编号可能 > 3（配置表单只列 0–3，
+ *    因为协议里"录像码流"就这几档）—— 所以这里不能只用字典表，得有过程式兜底。
+ * ⛔ 与「画面镜像」同批字典化：此前这里是"主码流 / 子码流 N"的**第三处**独立实现。
+ */
+const streamLabel = useStreamNumberLabel();
 const videoBitRateDisabled = (row: VideoParamCodecItem) => row.bitRateType === "2";
 
 const currentRow = computed(() => props.rows.find(r => r.streamNumber === props.selectedStream));

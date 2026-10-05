@@ -49,7 +49,7 @@
 | **P3a** | 通道属性（只读展示） | `channelAttributeText.ts`、新增 `useChannelAttributeDict.ts`、`device-mgmt/index.vue` | `channel_*` ×6 | ✅ **已完成** |
 | **P3b** | 告警 | `alarm.go`、`alarm-management/*` | `alarm_priority`、`alarm_method`、`alarm_type` | ⏸ **暂缓**（2026-10-05 老板决定暂时跳过；重启前置见 §3.4B） |
 | **P4a** | 系统类三件套 | `sysjobs/sysjobslist.vue`、`system/login-log/index.vue`（+ 各 2 个新纯函数/注入层文件） | `job_execute_policy`、`job_blocking_policy`、`login_failure_reason` | ✅ **已完成**（顺带补 `sysjobslist` 里 F25 的漏项） |
-| **P4b** | 设备配置族（**会下发给设备**） | `device-mgmt/deviceConfigGroups.ts`、`DeviceConfigOsdBlocks.vue`、`DeviceConfigDrawer.vue` | `frame_mirror`、`stream_number`（`osd_time_format` **不建议**做，见 §3.5） | ⏳ 待做 |
+| **P4b** | 设备配置族（**会下发给设备**） | `device-mgmt/deviceConfigGroups.ts`、`DeviceConfigDrawer.vue`、`components/PlayConsoleLinked.vue`、`components/play-console/PictureVideoParamCard.vue`（+ 2 个新纯函数/注入层文件） | `frame_mirror`、`stream_number`（`osd_time_format` **已跳过**，见 §3.5-D） | ✅ **已完成** |
 | **P4c** | 纯展示批 | 见 §3.5 的 A 组 | 按项（约 8 项） | ⏳ 待做 |
 | **P4d** | 维护操作结果收敛 | `DeviceRebootDialog` / `DeviceFirmwareUpgradePanel` / `StorageCardFormatDialog` / `DeviceMaintenanceRecordsDialog` | `maintenance_operation_result` | ⏳ 待做（⚠️ **4 份值域并不相同**，需先定口径） |
 | **B4–B10** | 后端文案 | 见盘点报告 | — | ⛔ **不做**（§8「后端不做字典」）；仅当前端另有一份重复时，以前端为准收敛 |
@@ -274,6 +274,41 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 接口 `getByDictCode/*` 三个 code **逐条对拍一致（3/3 ✓）**；`eslint` 零告警。
 ⚠️ `vue-tsc` 仍按「只看本批文件」验（存量 108 条，全在 `firmware-repo/*` 等）。
 
+### 二·P4b 明细（✅ 已完成 2026-10-05）
+
+**范围**：设备配置族里两个「值是**下发报文码值**」的枚举 —— F13 画面镜像（`FrameMirror`）/ F14 码流编号
+（`VideoRecordPlan.streamNumber`）。**F12 OSD 时间格式按 §3.5-D 跳过**（界面渲染 `sample` 展开实例、不显示 `label`）。
+
+| 落点 | 说明 |
+| --- | --- |
+| `device-mgmt/deviceConfigDict.ts`（纯函数，新） | `DICT_CODE_FRAME_MIRROR` / `DICT_CODE_STREAM_NUMBER` + 两张冻结兜底 + `whitelistedLabel` / `applyOptionLabels`（白名单式合并）/ `streamNumberLabelFrom` |
+| `device-mgmt/useDeviceConfigDict.ts`（注入层，新） | `useDeviceConfigDictLabels()` / `useFrameMirrorOptions()` / `useStreamNumberOptions()` / `useStreamNumberLabel()` |
+| `deviceConfigGroups.ts` | `ConfigSelectField` / `ConfigMirrorField` 加 `dictCode?`；3 处字段声明 `dictCode`（mirror ×1 + streamNumber ×2） |
+| `DeviceConfigDrawer.vue` | `RenderField` 带 `dictCode`；`activeFields` 按 code 做白名单式改名（**槽位/顺序/shortLabel 仍由 `MIRROR_OPTIONS` 锁死**） |
+| `components/PlayConsoleLinked.vue` | ② 画面镜像卡的 `:options` 由 `MIRROR_OPTIONS` ⇒ `useFrameMirrorOptions()` |
+| `components/play-console/PictureVideoParamCard.vue` | `streamLabel` 由过程式 `num===0?"主码流":\`子码流 ${num}\`` ⇒ `useStreamNumberLabel()`（**第三处**独立实现，本批收敛） |
+| `systemDictCodes.ts` | 新增分组 `DEVICE_DOWNLINK_DICT_CODES`（2 个），名单 14 → **16** |
+
+⛔⛔ **本批是本主题风险最高的一批**：这两个值会被 `requiredInt` 收窄后**原样写进发给设备的 XML**。
+字典**多一档** ⇒ 设备收到不认识的档位（静默忽略 / 收窄失败）；**少一档** ⇒ 永远选不出来、下发不出去。
+⇒ 一律【白名单式合并】：字典**只能改名**，槽位集合与顺序恒由代码锁死（同 P4a 口径，见技能 §5.3）。
+⇒ 也因此**必须进「前端只读」名单**（新增的 `DEVICE_DOWNLINK_DICT_CODES` 组）。
+
+⭐ **顺手收敛的第三处重复**：`PictureVideoParamCard.vue` 里 `主码流 / 子码流 N` 是**第三份**独立实现
+（另两份是 `STREAM_NUMBER_OPTIONS` 与 `streamNumberLabelFrom`）。但它按设备**实际上报**的码流数逐行取名、
+编号可能 > 3，所以合并时保留**过程式兜底**：0–3 走字典、超出回落 `子码流 N`。
+
+**验证**：`deviceConfigDict.test.ts` **13 例**（白名单四个方向：改名生效 / 多给档位丢弃 / 缺的补回 / 不修改入参）
++ `systemDictCodes.test.ts` 6 例；`PlayConsoleLinked.test.ts` **201 例**、`DeviceConfigDrawer.test.ts` 42 例、
+`deviceConfigPayload.test.ts` + play-console 相关合计 **92 例** 全绿；
+`device-mgmt` 全目录 **448 通过 / 2 失败** —— 两个失败经 `git stash` 对照证明**逐字相同的历史遗留**
+（`DeviceFirmwareUpgradePanel` / `index.deviceDetailTabs`，见技能 §10-2b），与本批无关；
+开发库 **30 字典 / 164 项**（两个新字典各 4 项，无重复行、无父 id 落空，幂等复跑不增行）；
+接口 `getByDictCode/frame_mirror|stream_number` **逐条对拍一致**；`eslint` 零告警、`prettier` 干净。
+
+⚠️ **提交时按 hunk 拆分**：`PlayConsoleLinked.vue` 里混着**他人在建的对讲频谱改动**（`talkSpectrum` / `AudioLevelSnapshot`），
+只 stage 本批的 3 个 hunk（0/2/5），已用索引断言核对（`talkSpectrum` 在暂存版本里出现 0 次）。
+
 ---
 
 ## 三、待拍板（阻塞 P3 及之后）
@@ -306,13 +341,17 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 
 | 落点 | 说明 |
 | --- | --- |
-| `web/src/views/system/dictionary/systemDictCodes.ts` | **唯一真源**：`SYSTEM_DICT_CODES`（11 个）+ `isSystemDict(code)`；入名单判据写在文件头注释 |
+| `web/src/views/system/dictionary/systemDictCodes.ts` | **唯一真源**：`SYSTEM_DICT_CODES`（**16 个**，随批次增长）+ `isSystemDict(code)`；入名单判据写在文件头注释。分三组：`GB_PROTOCOL_DICT_CODES` / **`DEVICE_DOWNLINK_DICT_CODES`** / `PLATFORM_PROTOCOL_DICT_CODES` + `PLATFORM_ENUM_DICT_CODES` |
 | `dictionary.vue` | 外层字典「修改/删除」、详情弹窗「新增/逐项改删」按 code 置灰；⛔ 删除的**确认气泡也要 `:disabled`**（否则点链接会弹出一个"点了也没用"的气泡 —— Arco 的 Trigger 监听在包裹层，链接禁用拦不住它）；每个改动入口另加函数守卫做双保险；编码列加锁标 + 详情弹窗顶部说明条 |
 | `uvp-ui-language.scss` | 新增 `.uvp-table-action.arco-link-disabled` 置灰规则 —— ⛔ **必须 3 类选择器**，否则会被各 tone 的 2 类规则按加载顺序盖回彩色；深色主题另带 `body[arco-theme="dark"]` 前缀（那些 tone 有前缀，权重更高） |
 
-**名单口径（11 个）**：`ptz_type` / `video_format` / `video_resolution` / `bit_rate_type` /
-`channel_room_type` / `channel_supply_light_type` / `channel_direction_type` / `channel_position_type` /
-`channel_use_type` / `channel_photoelectric_imaging_type` / `gb28181_playback_protocol`。
+**名单口径（16 个）**：
+- GB 协议值域（10）：`ptz_type` / `video_format` / `video_resolution` / `bit_rate_type` /
+  `channel_room_type` / `channel_supply_light_type` / `channel_direction_type` / `channel_position_type` /
+  `channel_use_type` / `channel_photoelectric_imaging_type`
+- ⛔⛔ **下发报文码值（2，P4b 新增，后果最重）**：`frame_mirror` / `stream_number`
+- 平台协议值域（1）：`gb28181_playback_protocol`
+- 平台内部枚举（3，P4a 新增）：`job_execute_policy` / `job_blocking_policy` / `login_failure_reason`
 
 ⛔ **刻意排除**：`post`（业务字典，管理员本就该增补）；`gender` / `status` / `taskStatus` / `playback_*` /
 `device_status` / `media_node_state` / `cascade_register_state`（纯展示，且判定走派生键，改名无害）。
@@ -373,7 +412,8 @@ F28 看守位能力三态、F29 维护操作结果、F30 回读新鲜度、F31 �
 
 **B. 会被写进下发报文（高风险，字典上线后必须进只读名单）**：**F13 画面镜像**、**F14 码流编号**
 （经 `requiredInt` 收窄后写 `FrameMirror` / `VideoRecordPlan.streamNumber` 下发设备）。
-字典只能改 label，**value 绝不能动**。
+字典只能改 label，**value 绝不能动**。→ ✅ **P4b 已做**（`frame_mirror` / `stream_number`，
+走白名单式合并 + 进 `DEVICE_DOWNLINK_DICT_CODES` 只读组）。
 
 **C. 值是后端/落库契约（不是设备报文，但同样不可增删档）**：F16（筛选参数 `source=`）、F22/F23（int 落库）、
 F24（**后端 switch 白名单**）、F26（落库 + DB `CHECK (3,4)`）。→ 一并进只读名单。
