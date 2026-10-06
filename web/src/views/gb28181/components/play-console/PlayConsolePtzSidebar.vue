@@ -24,6 +24,7 @@ import PtzWiperCard from "./PtzWiperCard.vue";
 
 const context = inject(PLAY_CONSOLE_CONTEXT) as Record<string, any> | undefined;
 if (!context) throw new Error("PlayConsolePtzSidebar must be rendered inside PlayConsoleLinked");
+const TALK_WAVE_WEIGHTS = [0.38, 0.52, 0.7, 0.86, 1, 0.9, 1, 0.86, 0.7, 0.52, 0.38];
 const {
   canPtzPanel,
   activeTab,
@@ -43,6 +44,7 @@ const {
   isAudioCapable,
   toggleTalk,
   talkLevel,
+  talkSpectrum,
   talkButtonText,
   moveSpeed,
   sendPtz,
@@ -189,7 +191,15 @@ const {
           :style="{ '--talk-level': String(talkLevel) }"
           aria-hidden="true"
         >
-          <i v-for="bar in 4" :key="bar" :style="{ animationDelay: `${(bar - 1) * -0.17}s` }"></i>
+          <i
+            v-for="(weight, index) in TALK_WAVE_WEIGHTS"
+            :key="index"
+            :style="{
+              '--talk-weight': String(weight),
+              '--talk-band-level': String(talkSpectrum[index] ?? talkLevel * weight),
+              animationDelay: `${(index - TALK_WAVE_WEIGHTS.length) * 0.06}s`
+            }"
+          ></i>
         </span>
         <span>{{ talkButtonText }}</span>
       </a-button>
@@ -849,42 +859,46 @@ const {
   opacity: 1;
 }
 
-/* 「正在说话」的波形：4 根 bar 相位错开各自起伏，整体幅度再由采集电平（--talk-level，0..1）缩放。
- * 静态动画保证「一直在动」，电平缩放保证「动得和声音有关」。拿不到 AudioContext 时电平恒为 0，
- * 波形仍以 0.4 倍显示，不会变成空按钮。 */
+/* 「正在说话」的频谱：11 根 bar 分别对应从低频到高频的频段。
+ * 每根 bar 的高度由对应频段电平（--talk-band-level，0..1）决定；轻微透明度动画
+ * 只负责让静音时仍有呼吸感，不会盖过真实音量变化。拿不到 AudioContext 时电平恒为 0，
+ * 波形仍保留低幅起伏，不会变成空按钮。 */
 .talk-wave {
   display: inline-flex;
   flex: none;
-  gap: 2px;
+  gap: 1px;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 13px;
-  transform: scaleY(calc(0.4 + var(--talk-level, 0) * 0.6));
-  transform-origin: center;
-  transition: transform 0.08s linear;
+  width: 30px;
+  height: 18px;
 }
 .talk-wave i {
   width: 2px;
-  height: 100%;
+  height: 18px;
   background: currentColor;
   border-radius: 1px;
-  animation: talk-wave-pulse 0.9s ease-in-out infinite;
+  opacity: 0.72;
+  transform: scaleY(calc(0.16 + var(--talk-band-level, var(--talk-level, 0)) * 0.84));
+  transform-origin: center;
+  transition:
+    transform 0.12s ease-out,
+    opacity 0.12s ease-out;
+  animation: talk-wave-breathe 1.1s ease-in-out infinite;
 }
 
-@keyframes talk-wave-pulse {
+@keyframes talk-wave-breathe {
   0%,
   100% {
-    transform: scaleY(0.32);
+    opacity: 0.62;
   }
   50% {
-    transform: scaleY(1);
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .talk-wave i {
-    transform: scaleY(0.8);
+    opacity: 0.86;
     animation: none;
   }
 }

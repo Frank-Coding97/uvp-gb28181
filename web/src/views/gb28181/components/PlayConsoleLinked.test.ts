@@ -2489,7 +2489,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     await flushPromises();
     const wave = wrapper.get("[data-testid='talk-wave']");
-    expect(wave.findAll("i")).toHaveLength(4);
+    expect(wave.findAll("i")).toHaveLength(11);
+    expect(wave.attributes("style")).toContain("--talk-level: 0");
     expect(wave.attributes("aria-hidden")).toBe("true");
 
     await wrapper.get("[data-testid='talk-button']").trigger("click");

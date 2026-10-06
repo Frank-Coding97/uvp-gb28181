@@ -80,9 +80,14 @@ describe("createAudioLevelMeter", () => {
       fftSize: 0,
       smoothingTimeConstant: 0,
       getFloatTimeDomainData: (target: Float32Array) => target.fill(sampleValue),
+      get frequencyBinCount() {
+        return this.fftSize / 2;
+      },
+      getByteFrequencyData: (target: Uint8Array) => target.fill(0),
       disconnect: disconnectAnalyser
     };
     const context = {
+      sampleRate: 48000,
       createAnalyser: () => analyser,
       createMediaStreamSource: () => ({ connect: vi.fn(), disconnect: disconnectSource }),
       resume,
@@ -148,5 +153,35 @@ describe("createAudioLevelMeter", () => {
     for (let frame = 0; frame < 20; frame++) fake.tick();
     expect(levels.every(level => level === 0)).toBe(true);
     expect(levels.length).toBeLessThanOrEqual(1);
+  });
+
+  it("按频段输出独立频谱电平，而不是让所有柱子同步缩放", () => {
+    const fake = installAudioContext(0.05);
+    const snapshots: number[][] = [];
+    fake.analyser.getByteFrequencyData = (target: Uint8Array) => {
+      target.fill(0);
+      // 48 kHz / 2048 FFT 下，约 7 kHz 的齿音应落在人声展示范围末端。
+      target[299] = 255;
+    };
+
+    createAudioLevelMeter(stream, (_level, spectrum) => snapshots.push(spectrum))!;
+    fake.tick();
+
+    const spectrum = snapshots.at(-1)!;
+    expect(spectrum).toHaveLength(11);
+    expect(spectrum[10]).toBeGreaterThan(0);
+    expect(spectrum[0]).toBe(0);
+  });
+
+  it("人声范围以外的超高频不占用展示柱", () => {
+    const fake = installAudioContext(0.05);
+    const snapshots: number[][] = [];
+    fake.analyser.getByteFrequencyData = (target: Uint8Array) => {
+      target.fill(0);
+      target[768] = 255; // 约 18 kHz
+    };
+    createAudioLevelMeter(stream, (_level, spectrum) => snapshots.push(spectrum))!;
+    fake.tick();
+    expect(snapshots.at(-1)!.every(value => value === 0)).toBe(true);
   });
 });

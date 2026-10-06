@@ -45,6 +45,7 @@ import {
   createAudioLevelMeter,
   preferPCMA8000,
   waitForIceGatheringComplete,
+  type AudioLevelSnapshot,
   type AudioLevelMeter
 } from "./talkPublisher";
 import {
@@ -4739,20 +4740,24 @@ let talkToken = 0;
  * 拿不到 AudioContext 时恒为 0 —— 波形退化成静态起伏，不影响对讲本身。
  */
 const talkLevel = ref(0);
+const talkSpectrum = ref<number[]>(Array.from({ length: 11 }, () => 0));
 let talkMeter: AudioLevelMeter | null = null;
 
 function stopTalkMeter() {
   talkMeter?.stop();
   talkMeter = null;
   talkLevel.value = 0;
+  talkSpectrum.value = Array.from({ length: 11 }, () => 0);
 }
 
 function startTalkMeter() {
   stopTalkMeter();
   if (!talkStream) return;
-  talkMeter = createAudioLevelMeter(talkStream, level => {
+  const onAudioLevel: AudioLevelSnapshot = (level, spectrum) => {
     talkLevel.value = level;
-  });
+    talkSpectrum.value = spectrum;
+  };
+  talkMeter = createAudioLevelMeter(talkStream, onAudioLevel);
 }
 
 const talkButtonText = computed(() => {
@@ -5077,6 +5082,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
   isAudioCapable,
   toggleTalk,
   talkLevel,
+  talkSpectrum,
   talkButtonText,
   moveSpeed,
   sendPtz,

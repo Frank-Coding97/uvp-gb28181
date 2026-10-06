@@ -30,6 +30,8 @@ export interface AudioLevelMeter {
   stop(): void;
 }
 
+export type AudioLevelSnapshot = (level: number, spectrum: number[]) => void;
+
 /**
  * 采集流的实时电平（0..1），用于「正在说话」的波动指示。
  *
@@ -39,7 +41,7 @@ export interface AudioLevelMeter {
  * ⛔ 电平按 dB 映射（-60dB→0，0dB→1），不是线性 RMS —— 线性映射下正常说话只在 0.05 附近，
  * 波形几乎不动。
  */
-export function createAudioLevelMeter(stream: MediaStream, onLevel: (level: number) => void): AudioLevelMeter | null {
+export function createAudioLevelMeter(stream: MediaStream, onLevel: AudioLevelSnapshot): AudioLevelMeter | null {
   const Ctor: typeof AudioContext | undefined = (window as any).AudioContext || (window as any).webkitAudioContext;
   if (!Ctor) return null;
   let context: AudioContext;
@@ -50,13 +52,26 @@ export function createAudioLevelMeter(stream: MediaStream, onLevel: (level: numb
   }
 
   const analyser = context.createAnalyser();
-  analyser.fftSize = 512;
+  analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.6;
   const source = context.createMediaStreamSource(stream);
   source.connect(analyser);
   if (typeof context.resume === "function") void context.resume().catch(() => undefined);
 
   const samples = new Float32Array(analyser.fftSize);
+  const frequencyData = new Uint8Array(analyser.frequencyBinCount || analyser.fftSize / 2);
+  const smoothedSpectrum = Array.from({ length: 11 }, () => 0);
+  const emittedSpectrum = Array.from({ length: 11 }, () => 0);
+  // 只展示人声相关频率，避免把柱子浪费在接近 Nyquist 的超高频上。
+  const minFrequency = 80;
+  const maxFrequency = Math.min(8000, context.sampleRate / 2);
+  const binWidth = context.sampleRate / analyser.fftSize;
+  const bands = smoothedSpectrum.map((_, band) => {
+    const low = minFrequency * Math.pow(maxFrequency / minFrequency, band / smoothedSpectrum.length);
+    const high = minFrequency * Math.pow(maxFrequency / minFrequency, (band + 1) / smoothedSpectrum.length);
+    const start = Math.max(1, Math.floor(low / binWidth));
+    return { start, end: Math.min(frequencyData.length, Math.max(start + 1, Math.floor(high / binWidth))) };
+  });
   let smoothed = 0;
   let lastEmitted = -1;
   let frame = 0;
@@ -70,10 +85,24 @@ export function createAudioLevelMeter(stream: MediaStream, onLevel: (level: numb
     const level = Math.min(1, Math.max(0, (db + 60) / 60));
     // 起音快、释放慢，与音量表一致；否则波形会随帧噪声乱跳。
     smoothed += (level - smoothed) * (level > smoothed ? 0.55 : 0.12);
-    // 变化不足 2% 就不回调，省掉无意义的 DOM 写入。
-    if (Math.abs(smoothed - lastEmitted) >= 0.02) {
+    if (typeof analyser.getByteFrequencyData === "function") {
+      analyser.getByteFrequencyData(frequencyData);
+      for (let band = 0; band < smoothedSpectrum.length; band++) {
+        const { start, end } = bands[band];
+        let peak = 0;
+        for (let index = start; index < end; index++) peak = Math.max(peak, frequencyData[index] / 255);
+        const gated = peak < 0.06 ? 0 : peak;
+        smoothedSpectrum[band] += (gated - smoothedSpectrum[band]) * (gated > smoothedSpectrum[band] ? 0.5 : 0.16);
+      }
+    }
+    const spectrumChanged = smoothedSpectrum.some((value, index) => Math.abs(value - emittedSpectrum[index]) >= 0.025);
+    // 变化不足 2% 就不回调，省掉无意义的 DOM 写入；频谱变化单独触发回调，保证每根柱子独立响应。
+    if (Math.abs(smoothed - lastEmitted) >= 0.02 || spectrumChanged) {
       lastEmitted = smoothed;
-      onLevel(smoothed);
+      smoothedSpectrum.forEach((value, index) => {
+        emittedSpectrum[index] = value;
+      });
+      onLevel(smoothed, [...smoothedSpectrum]);
     }
     frame = window.requestAnimationFrame(tick);
   };
@@ -82,7 +111,10 @@ export function createAudioLevelMeter(stream: MediaStream, onLevel: (level: numb
   return {
     stop() {
       window.cancelAnimationFrame(frame);
-      onLevel(0);
+      onLevel(
+        0,
+        smoothedSpectrum.map(() => 0)
+      );
       source.disconnect();
       analyser.disconnect();
       if (typeof context.close === "function") void context.close().catch(() => undefined);
