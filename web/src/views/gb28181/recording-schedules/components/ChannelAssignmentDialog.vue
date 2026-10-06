@@ -10,7 +10,7 @@
       display: 'flex',
       flexDirection: 'column'
     }"
-    :body-style="{ flex: '1 1 auto', minHeight: 0, maxHeight: 'none', overflowY: 'auto' }"
+    :body-style="{ flex: '1 1 auto', minHeight: 0, maxHeight: 'none', overflow: 'hidden' }"
     :mask-closable="false"
     :esc-to-close="true"
     unmount-on-close
@@ -96,9 +96,9 @@
           <a-button @click="resetSearch">重置</a-button>
         </div>
 
-        <div class="selection-policy">
-          <span>全选仅作用于当前页，已选结果跨页保留。</span>
-          <a-link v-if="selectedTargetCount" @click="clearSelection">清空已选</a-link>
+        <!-- 已选清空入口：仅在有勾选时出现，右侧对齐。 -->
+        <div v-if="selectedTargetCount" class="selection-actions">
+          <a-link @click="clearSelection">清空已选（{{ selectedTargetCount }}）</a-link>
         </div>
 
         <a-table
@@ -106,21 +106,30 @@
           v-model:selected-keys="selectedDeviceKeys"
           class="uvp-data-table assignment-channel-table"
           row-key="id"
-          :data="assignmentOptions"
+          :data="assignmentRows"
           :loading="loading"
           :pagination="assignmentPagination"
           :bordered="false"
-          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-          :scroll="{ x: 860, y: 300 }"
+          :row-selection="deviceRowSelection"
+          :row-class="rowClass"
+          :scroll="{ x: 860, y: 1 }"
           @page-change="handlePageChange"
           @page-size-change="handlePageSizeChange"
         >
           <template #columns>
-            <a-table-column title="设备" :width="240">
+            <a-table-column title="设备名称" :width="220">
               <template #cell="{ record }"
                 ><div class="entity-cell">
-                  <span>{{ record.name }}</span
-                  ><small>{{ record.code }}</small>
+                  <span>{{ record.name || "—" }}</span>
+                  <!-- 已占用：名称后跟一个弱化标签，配合整行置灰与禁用勾选 -->
+                  <small v-if="record.bound" class="bound-hint">已被录像计划占用</small>
+                </div></template
+              >
+            </a-table-column>
+            <a-table-column title="设备 ID" :width="220">
+              <template #cell="{ record }"
+                ><div class="entity-cell">
+                  <small class="entity-code">{{ record.code }}</small>
                 </div></template
               >
             </a-table-column>
@@ -129,7 +138,6 @@
                 ><a-badge :status="record.online ? 'success' : 'normal'" :text="deviceStatusLabel(!!record.online)"
               /></template>
             </a-table-column>
-            <a-table-column title="分配说明"><template #cell>确认后应用到该设备下当前有权限的全部通道</template></a-table-column>
           </template>
         </a-table>
 
@@ -138,24 +146,32 @@
           v-model:selected-keys="selectedChannelKeys"
           class="uvp-data-table assignment-channel-table"
           row-key="id"
-          :data="assignmentOptions"
+          :data="assignmentRows"
           :loading="loading"
           :pagination="assignmentPagination"
           :bordered="false"
-          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-          :scroll="{ x: 900, y: 300 }"
+          :row-selection="channelRowSelection"
+          :row-class="rowClass"
+          :scroll="{ x: 900, y: 1 }"
           @page-change="handlePageChange"
           @page-size-change="handlePageSizeChange"
         >
           <template #columns>
-            <a-table-column title="通道" :width="210"
-              ><template #cell="{ record }"
+            <a-table-column title="通道名称" :width="200">
+              <template #cell="{ record }"
                 ><div class="entity-cell">
-                  <span>{{ record.name }}</span
-                  ><small>{{ record.code }}</small>
+                  <span>{{ record.name || "—" }}</span>
+                  <small v-if="record.bound" class="bound-hint">已被录像计划占用</small>
                 </div></template
-              ></a-table-column
-            >
+              >
+            </a-table-column>
+            <a-table-column title="通道 ID" :width="200">
+              <template #cell="{ record }"
+                ><div class="entity-cell">
+                  <small class="entity-code">{{ record.code }}</small>
+                </div></template
+              >
+            </a-table-column>
             <a-table-column title="所属设备" :width="200"
               ><template #cell="{ record }"
                 ><div class="entity-cell">
@@ -167,18 +183,9 @@
               ><template #cell="{ record }"
                 ><a-badge :status="record.online ? 'success' : 'normal'" :text="deviceStatusLabel(!!record.online)" /></template
             ></a-table-column>
-            <a-table-column title="分配状态"
-              ><template #cell="{ record }"
-                ><a-tag :color="record.bound ? 'orange' : 'gray'">{{ record.bound ? "已有录像计划" : "未分配" }}</a-tag></template
-              ></a-table-column
-            >
           </template>
         </a-table>
       </section>
-
-      <a-alert type="warning" class="assignment-impact">
-        选择后，通道录像模式将切换为“按计划”；若当前正在持续录像，将按新计划立即重新计算执行状态。
-      </a-alert>
     </div>
 
     <template #footer>
@@ -258,6 +265,36 @@ const selectionSummary = computed(() =>
     ? `已选择 ${selectedDeviceKeys.value.length} 台设备，确认后按服务端当前通道清单展开`
     : `已选择 ${selectedChannelKeys.value.length} 个通道`
 );
+
+/**
+ * 已被录像计划占用的候选**不可勾选**（老板选方案B：提交前就告知结果）。
+ *
+ * ⛔⛔ Arco 表格的「按行禁用」**只认数据行上的 `record.disabled`**：
+ * 实测 `rowSelection.disabled`（哪怕写成按行返回的函数）**完全不生效** ——
+ * `table-operation-td.js` 里是 `"disabled": Boolean(props.record.disabled)`。
+ * 所以这里给候选行**注入** disabled 字段，而不是配 rowSelection。
+ * （rowSelection 只负责 type/showCheckedAll。）
+ */
+type AssignmentRow = AssignmentOption & { disabled?: boolean };
+function rowDisabled(record: AssignmentOption): boolean {
+  return !!record.bound;
+}
+/** 已占用行的行class，供置灰样式命中（Arco 不会自动加）。 */
+function rowClass(record: AssignmentOption): string {
+  return record.bound ? "row-bounded" : "";
+}
+const deviceRowSelection = computed(() => ({
+  type: "checkbox" as const,
+  showCheckedAll: true
+}));
+const channelRowSelection = computed(() => ({
+  type: "checkbox" as const,
+  showCheckedAll: true
+}));
+/** 候选数据：注入按行 disabled（Arco 只认 record.disabled）。 */
+const assignmentRows = computed<AssignmentRow[]>(() =>
+  assignmentOptions.value.map(item => ({ ...item, disabled: rowDisabled(item) }))
+);
 const footerSummary = computed(() => {
   if (!selectedPlan.value) return "未找到当前录像计划";
   if (selectionScope.value === "device")
@@ -288,7 +325,19 @@ async function confirm() {
       ids: [...targetIds]
     });
     const conflicts = response.data.items.filter(item => item.status !== "assigned").length;
-    if (conflicts) Message.warning(`成功分配 ${response.data.assignedCount} 个通道，${conflicts} 项未分配`);
+    // ⚠️ 必须把「已被其他计划占用」单独挑出来说：笼统的"M 项未分配"让用户不知道
+    // 该换哪几个（此前正是这个缺口）。这里按 status 分类计数。
+    const takenCount = response.data.items.filter(item => item.status === "conflict").length;
+    if (conflicts) {
+      const assigned = response.data.assignedCount;
+      if (takenCount && takenCount === conflicts) {
+        Message.warning(`成功分配 ${assigned} 个通道，${takenCount} 个已被其他录像计划占用，未分配`);
+      } else {
+        Message.warning(
+          `成功分配 ${assigned} 个通道，${conflicts} 项未分配${takenCount ? `（其中 ${takenCount} 个已被其他录像计划占用）` : ""}`
+        );
+      }
+    }
     emit("confirm", {
       planId: selectedPlan.value.id,
       scope: selectionScope.value,
@@ -410,10 +459,39 @@ watch(onlineFilter, () => {
   font-size: 12px;
   color: var(--uvp-text-tertiary);
 }
+
+/* ⛔⛔ 滚动条只能出现在**表格表体**上，弹窗自身与全屏遮罩都不许有。
+   实测（1440x900 / 1280x720 / 1280x577 三档）：修复前有两条多余竖向滚动条 ——
+     ① `.arco-modal-wrapper`：Arco 的 `align-center` 靠 `white-space:nowrap` +
+        高度 100% 的 `::after` 做垂直居中，`inline-block` 的弹窗把 wrapper 的
+        scrollHeight 撑到 1108px（视口仅 577px）⇒ 全屏右侧一条大滚动条；
+     ② `.arco-modal-body`：`:body-style` 的 `overflowY:auto` 让 777px 内容
+        挤在 406px 可用高度里滚动 ⇒ 弹窗内一条大滚动条，表格被压到只剩表头。
+   修法：wrapper 禁滚（同 RecordScheduleDrawer 的既有做法）+ body 改成
+   「固定块 + 弹性表格」的 flex 纵向布局，滚动下沉到 `.arco-table-body`。 */
+
+/* ⛔ `.arco-modal-body` 必须自己变成 flex 容器：本仓全局给弹窗 body 的 padding 是
+   `22px 24px` 且 `box-sizing: content-box`（实测），所以 body 作为 flex item 时
+   `clientHeight` 含 padding，而它若还是 `display:block`，内部 `.assignment-content`
+   就只能按内容高度收缩（实测 637px 的 body 里只分到 486px，表格可用高度被压成 0）。
+   这里用 scoped `:deep()` 接管：body 不滚、内部纵向 flex、滚动只交给表体。 */
+.channel-assignment-dialog :deep(.arco-modal-body) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .assignment-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   color: var(--uvp-text-primary);
 }
 .assignment-plan-section {
+  flex: 0 0 auto;
   padding: 0 0 18px;
   border-bottom: 1px solid var(--uvp-border-subtle);
 }
@@ -458,7 +536,13 @@ watch(onlineFilter, () => {
 .assignment-plan-warning {
   margin-top: 10px;
 }
+
+/* 「选择应用对象」整段参与弹性伸缩，内部筛选/说明固定，只有表格吃掉剩余高度 */
 .assignment-channel-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   padding: 18px 0 14px;
 }
 .assignment-section-heading {
@@ -515,17 +599,60 @@ watch(onlineFilter, () => {
   min-height: 38px;
   border-radius: 8px;
 }
-.selection-policy {
+
+/* 已选清空入口：右对齐的轻量操作行。 */
+.selection-actions {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  justify-content: space-between;
-  min-height: 28px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 26px;
+  font-size: 12px;
 }
+
+/* 表格区：表头/筛选等按内容固定，表格本体 `flex:1` 吃满剩余高度。
+   原来的 `min-height: 340px` 会在矮视口下反向撑破 `.arco-modal-body`
+   （实测 577px 视口时表格被腰斩到 48px），故改为纯 flex 分配。
+   ⛔ 伸缩链必须一路穿过 Arco 的 `.arco-scrollbar` 包装层：它们是
+   `display:block; flex:0 1 auto`（实测），不接管的话 `.arco-table-container`
+   只按内容高度收缩，表格会被压回 140px（表头+一行+分页的自然高度）。
+   ⛔ `height` 要压过 Arco 写在 `.arco-table` 上的内联 `height:100%`
+   （`scroll.y` 传字符串时落的），否则 flex 分配同样失效。 */
+
+/* ⛔⛔ `scroll.y` 这里给的是占位值 1，不是「表体高度 1px」，更不是随手写的：
+   Arco 只有在 `scroll.y` 为**非空值**时才会拆分表头/表体（`splitTable`），拆开后
+   表头才独立固定、只有表体滚动 —— 这正是「滚动条只出现在表格上」的前提。
+   但写死正常数字（如 300）会把表体高度钉死、写字符串则被 Arco 落成内联
+   `height:100%`，两者都会压掉下面的 flex 分配（实测表格被压回 140px，
+   即「表头 + 一行 + 分页」的自然高度）。所以真正的表体高度交给 flex 链 +
+   `max-height: none`，`scroll.y` 只负责「触发拆分」。 */
 .assignment-channel-table {
-  min-height: 340px;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: auto !important;
+  min-height: 0;
+}
+.assignment-channel-table :deep(.arco-spin),
+.assignment-channel-table :deep(.arco-table-container),
+.assignment-channel-table :deep(.arco-table-content),
+.assignment-channel-table :deep(.arco-table-container > .arco-scrollbar) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.assignment-channel-table :deep(.arco-table-header) {
+  flex: 0 0 auto;
+}
+
+/* 唯一允许出现竖向滚动条的地方：表体。
+   ⛔ `max-height` 必须 `!important`：Arco 会把 `scroll.y` 的值落成表体的**内联**
+   `max-height`（实测 `style="max-height: 1px"`），内联优先级高于普通 class 规则，
+   不加 `!important` 就会把表体钉死在占位值（实测只剩 1px，只露出表头）。 */
+.assignment-channel-table :deep(.arco-table-body) {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
 }
 .entity-cell {
   display: flex;
@@ -544,9 +671,32 @@ watch(onlineFilter, () => {
   font-size: 10px;
   color: var(--uvp-text-tertiary);
 }
-.assignment-impact {
-  margin-top: 4px;
+
+/* 设备 ID 独占一列后不再挤在名称下方，字号提到与名称同级（12px）才读得清；
+   仍保留等宽字体 + 省略号，方便肉眼比对 20 位国标编码。 */
+.entity-cell small.entity-code {
+  margin-top: 0;
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
 }
+
+/* 已占用标记：与名称同行的弱化小标签（不新增表格列，避免改变已定下的列结构）。 */
+.bound-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
+
+/* ⛔ 已占用的候选整行置灰且禁用勾选。
+   用「灰字+ 浅底」而不是 opacity：opacity 会连复选框一起变淡，看起来像"可点"，反而误导。 */
+.assignment-channel-table :deep(tr.arco-table-tr.row-bounded) {
+  cursor: not-allowed;
+}
+.assignment-channel-table :deep(tr.arco-table-tr.row-bounded > td) {
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-search-panel-bg);
+}
+
 .assignment-footer {
   display: flex;
   gap: 12px;
@@ -587,5 +737,33 @@ watch(onlineFilter, () => {
   .assignment-footer {
     justify-content: flex-end;
   }
+}
+</style>
+
+<style lang="scss">
+/* ⛔ 必须是非 scoped 的全局样式：`.arco-modal-wrapper` 是 Arco 在 body 下另起的
+   容器，不在本组件作用域内。`modal-class` 落在 `.arco-modal` 面板上（不是
+   wrapper），所以只能用 `:has(> ...)` 选中「装着本弹窗的那一个 wrapper」。
+
+   这里做两件事，缺一不可：
+
+   ① `overflow: hidden` —— Arco 的 `align-center` 靠「`white-space:nowrap` +
+      高度 100% 的 `::after`」这套 inline-block 技巧做垂直居中，会把 wrapper 的
+      scrollHeight 撑到远超视口（实测 1280x577 下撑到 1108px）⇒ 全屏一条大滚动条。
+      禁掉它，滚动只由表格表体承担（同 RecordScheduleDrawer 的既有做法）。
+
+   ② 换成真正的 flex 居中 —— ①禁滚后 `align-center` 那套技巧会退化成
+      「贴顶对齐」（实测 top=0、下方却空 138px，上下不对称，看着很别扭）。
+      Arco 官方的 align-center 就是这么实现的，**详情弹窗同样贴顶**，
+      不是本组件独有。改用 flex 后实测上下各留 69px，真正居中。
+      `white-space: normal` 必须一起改：nowrap 会让 flex 容器里的 inline-block
+      仍按 nowrap 对齐。
+   ⚠️ 不要再改回 `align-center` 属性配套的样式，否则又会贴顶。 */
+.arco-modal-wrapper:has(> .channel-assignment-dialog) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: normal;
 }
 </style>

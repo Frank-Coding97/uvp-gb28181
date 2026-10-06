@@ -14,6 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 type RecordingPlanController struct {
@@ -152,6 +153,20 @@ func (c *RecordingPlanController) Delete(ctx *gin.Context) {
 	c.success(ctx, nil)
 }
 
+// assignmentService 构造带**设备可见性过滤**的分配服务。
+//
+// ⛔⛔ 这里必须注入 datascope.VisibilityScope，而不是让 service 内部
+// 拿 `user.DeptID` 硬查 `owner_dept_id`：后者只认归属部门、且不认
+// `server.notcheckuser` 白名单，与设备列表页口径不一致 ——
+// 实测后果：设备列表 7 台、分配弹窗只有 1 台（admin 属白名单却仍被按 dept_id=1 拦）。
+//
+// deviceColumn：设备表用主键 "id"；通道表用 20 位国标编码 "device_id"
+// （VisibilityScope 内部会把 grant 表的设备主键 join 成编码来比对）。
+func (c *RecordingPlanController) assignmentService(ctx *gin.Context, deviceColumn string) *recordingplan.AssignmentService {
+	return recordingplan.NewAssignmentService(c.dbFunc()).
+		WithVisibleScope(datascope.VisibilityScope(ctx, "owner_dept_id", deviceColumn))
+}
+
 func (c *RecordingPlanController) SearchDevices(ctx *gin.Context) {
 	deptID, _, planID, ok := c.assignmentIdentity(ctx)
 	if !ok {
@@ -168,7 +183,7 @@ func (c *RecordingPlanController) SearchDevices(ctx *gin.Context) {
 		value := false
 		online = &value
 	}
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchDevicesFiltered(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
+	result, err := c.assignmentService(ctx, "id").SearchDevicesFiltered(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -191,7 +206,7 @@ func (c *RecordingPlanController) SearchChannels(ctx *gin.Context) {
 		online = &value
 	}
 	page, pageSize := pagination(ctx)
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchChannels(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
+	result, err := c.assignmentService(ctx, "device_id").SearchChannels(ctx.Request.Context(), deptID, ctx.Query("keyword"), online, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -209,7 +224,9 @@ func (c *RecordingPlanController) Assign(ctx *gin.Context) {
 		c.failure(ctx, http.StatusBadRequest, "分配参数不合法")
 		return
 	}
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).Assign(ctx.Request.Context(), deptID, actorID, planID, selection)
+	// ⛔ 与候选列表注入同一套可见性，否则「列表能勾、点确认全 forbidden」。
+	// deviceColumn 用 "device_id"（通道表按 20 位国标编码与 grant 表比对）。
+	result, err := c.assignmentService(ctx, "device_id").Assign(ctx.Request.Context(), deptID, actorID, planID, selection)
 	if err != nil {
 		c.respondError(ctx, err)
 		return

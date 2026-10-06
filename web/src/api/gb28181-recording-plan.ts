@@ -38,7 +38,11 @@ export interface AssignmentOption {
   code: string;
   deviceCode?: string;
   online: boolean;
-  bound: boolean;
+  /**
+   * 「是否已分配录像计划」。对应表格的「分配状态」列已按产品要求移除，
+   * 当前后端不再计算、恒为 false。保留字段仅为兼容存量调用方，后续可整项移除。
+   */
+  bound?: boolean;
 }
 
 export interface PageData<T> {
