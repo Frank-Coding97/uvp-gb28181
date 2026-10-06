@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
@@ -260,7 +261,7 @@ func (s *Service) recordLifecycle(ctx context.Context, req Request, event Lifecy
 		return
 	}
 	if event.EventID == "" {
-		event.EventID = fmt.Sprintf("%s:%s:%d", req.LifecycleID, event.EventName, time.Now().UnixNano())
+		event.EventID = uuid.NewString()
 	}
 	event.DeviceCode, event.ChannelCode = req.DeviceID, req.ChannelID
 	s.lifecycleRecorder.Record(ctx, req.LifecycleID, event)
@@ -271,7 +272,7 @@ func (s *Service) recordStreamLifecycle(ctx context.Context, streamID string, no
 		return
 	}
 	if event.EventID == "" {
-		event.EventID = fmt.Sprintf("%s:%s:%d", streamID, event.EventName, time.Now().UnixNano())
+		event.EventID = uuid.NewString()
 	}
 	s.streamLifecycleRecorder.RecordByStream(ctx, streamID, nodeID, event)
 }
