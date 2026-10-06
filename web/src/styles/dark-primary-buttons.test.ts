@@ -33,13 +33,31 @@ afterEach(() => {
 });
 
 describe("dark primary button contract", () => {
+  it("keeps the document background on the UVP shell color", () => {
+    const bodyRule = css.nodes.find(node => node.type === "rule" && (node as postcss.Rule).selector === "body") as
+      | postcss.Rule
+      | undefined;
+    expect(bodyRule).toBeDefined();
+    expect(
+      bodyRule?.nodes.some(
+        node => node.type === "decl" && node.prop === "background" && node.value === "var(--uvp-navigation-bg)" && node.important
+      )
+    ).toBe(true);
+  });
+
   it.each(["arco-btn arco-btn-primary", "btn-primary", "arco-btn arco-btn-primary btn-primary"])(
     "gives %s an opaque blue fill and white text without changing geometry",
     classes => {
       document.body.setAttribute("arco-theme", "dark");
       const rules = rulesFor(classes);
       expect(rules).toHaveLength(1);
-      expect(rules[0].declarations).toMatchObject({ color: "#ffffff", background: "#2563eb", "box-shadow": "none" });
+      // ⛔ 这里断言的是 **token 名** 而不是字面色值：实心面的色由 `--uvp-solid-*` 统一承载
+      //   （见 style/model/solid-surface-token.test.ts），暗色下解析为深蓝 #2563eb。
+      expect(rules[0].declarations).toMatchObject({
+        color: "var(--uvp-solid-text)",
+        background: "var(--uvp-solid-bg)",
+        "box-shadow": "none"
+      });
       for (const property of ["height", "padding", "border-radius"]) {
         expect(rules[0].declarations).not.toHaveProperty(property);
       }

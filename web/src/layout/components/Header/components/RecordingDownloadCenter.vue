@@ -165,9 +165,9 @@ function clearTerminal() {
   padding: 0 5px;
   font-size: 11px;
   line-height: 18px;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   text-align: center;
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
   border-radius: 9px;
 }
 .recording-download-list {

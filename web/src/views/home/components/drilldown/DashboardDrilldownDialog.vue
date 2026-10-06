@@ -190,9 +190,9 @@ function formatBytes(value: number) {
   border-radius: 7px;
 }
 .drilldown-ranges button.active {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
 }
 .drilldown-notice {
   padding: 8px 10px;

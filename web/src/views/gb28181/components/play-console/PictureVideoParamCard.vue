@@ -267,9 +267,9 @@ const isEmpty = computed(() => !props.rows.length);
 }
 
 .vpc-btn.arco-btn[type="button"].is-primary {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
 }
 
 .vpc-btn.arco-btn[type="button"].is-primary:hover:not(:disabled) {

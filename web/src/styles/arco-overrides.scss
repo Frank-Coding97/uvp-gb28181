@@ -1,6 +1,18 @@
 // Arco Design 组件全局样式覆盖
 // 目标：让 Arco 组件符合 UVP 系统设计风格
 
+// Arco 主题会在后置样式中把 body 背景设为 --color-bg-2。暗色主题下该值是品牌蓝，
+// 刷新触发重绘时会短暂露出蓝色底；页面底色应始终跟随 UVP 外壳背景。
+body {
+  background: var(--uvp-navigation-bg) !important;
+  background-color: var(--uvp-navigation-bg) !important;
+}
+
+html body[arco-theme="dark"] {
+  background: #0b1118 !important;
+  background-color: #0b1118 !important;
+}
+
 // ========== Switch 开关 ==========
 .arco-switch {
   background-color: var(--uvp-panel-border) !important;
@@ -184,8 +196,8 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   .arco-picker-cell-selected .arco-picker-date-value,
   .arco-picker-cell-range-start .arco-picker-date-value,
   .arco-picker-cell-range-end .arco-picker-date-value {
-    color: #ffffff !important;
-    background: var(--uvp-brand) !important;
+    color: var(--uvp-solid-text) !important;
+    background: var(--uvp-solid-bg) !important;
   }
 
   .arco-picker-cell-in-view:not(
@@ -432,9 +444,9 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 
 .btn-primary {
   font-weight: 600;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   cursor: pointer;
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
   border: 0;
   transition: opacity 0.15s ease;
 
@@ -444,7 +456,7 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   }
 }
 
-// 文字/图标使用浅蓝品牌色，实心按钮使用对比度更高的深蓝。
+// 文字/图标使用浅蓝品牌色，实心按钮使用对比度更高的深蓝（--uvp-solid-*）。
 // 保留危险、警告、成功及独立工具动作的语义色；只统一表面，不改变按钮尺寸。
 body[arco-theme="dark"] {
   :is(.arco-btn-primary, button.btn-primary):not(
@@ -456,19 +468,19 @@ body[arco-theme="dark"] {
       .btn-danger
     ) {
     &:not(.arco-btn-disabled, [disabled]) {
-      color: #ffffff !important;
-      background: #2563eb !important;
-      border-color: #2563eb !important;
+      color: var(--uvp-solid-text) !important;
+      background: var(--uvp-solid-bg) !important;
+      border-color: var(--uvp-solid-bg) !important;
       box-shadow: none !important;
 
       &:hover:not(.arco-btn-loading) {
-        background: #1d4ed8 !important;
-        border-color: #1d4ed8 !important;
+        background: var(--uvp-solid-hover-bg) !important;
+        border-color: var(--uvp-solid-hover-bg) !important;
       }
 
       &:active:not(.arco-btn-loading) {
-        background: #1e40af !important;
-        border-color: #1e40af !important;
+        background: var(--uvp-solid-active-bg) !important;
+        border-color: var(--uvp-solid-active-bg) !important;
       }
 
       &:focus-visible {

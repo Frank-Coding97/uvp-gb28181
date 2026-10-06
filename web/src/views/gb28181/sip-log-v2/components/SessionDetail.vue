@@ -376,9 +376,9 @@ async function copyCallId() {
   border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
 }
 .action-brand:hover {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
 }
 
 /* 会话元信息 */

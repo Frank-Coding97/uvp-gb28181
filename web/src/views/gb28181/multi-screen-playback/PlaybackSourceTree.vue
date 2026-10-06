@@ -1560,8 +1560,8 @@ defineExpose({ openFavoriteDialogForChannels });
   border: 1px solid var(--uvp-panel-border);
 }
 .favorite-dialog .dialog-primary {
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
   border: 1px solid var(--uvp-brand);
 }
 .tree-pagination {

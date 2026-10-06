@@ -700,8 +700,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--uvp-panel-border);
 }
 .primary {
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
   border: 0;
 }
 .actions .primary {

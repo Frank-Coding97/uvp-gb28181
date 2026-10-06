@@ -188,8 +188,8 @@ function skipLater() {
   justify-content: center;
   width: 28px;
   height: 28px;
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
   border-radius: 8px;
 }
 

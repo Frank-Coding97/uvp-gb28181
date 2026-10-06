@@ -6278,8 +6278,8 @@ provide(PLAY_CONSOLE_CONTEXT, {
 }
 
 .picture-draft-submit.arco-btn[type="button"] {
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
   border: 1px solid var(--uvp-brand);
 }
 
@@ -6330,8 +6330,8 @@ provide(PLAY_CONSOLE_CONTEXT, {
 
 .mask-overlay-box.is-draft .mask-overlay-tag {
   font-weight: 600;
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
 }
 
 /* ─────────── 图像叠加（OSD）的锚点层（2026-09-20）───────────
@@ -7104,9 +7104,9 @@ provide(PLAY_CONSOLE_CONTEXT, {
   padding: 7px 12px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   cursor: pointer;
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
   border: 0;
   border-radius: 7px;
   transition:

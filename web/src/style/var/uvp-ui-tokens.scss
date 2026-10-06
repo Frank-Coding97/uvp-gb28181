@@ -46,6 +46,20 @@
   --uvp-refresh-btn-active-bg: #c7e9e5;
   --uvp-refresh-btn-border: #b7e3df;
   --uvp-refresh-btn-text: #0f766e;
+
+  /* ═══════════════════ 实心面（白字压在上面）专用 token ═══════════════════
+   * ⛔⛔ 为什么不能直接用 --uvp-brand 当底色：
+   *   --uvp-brand 是**文字/图标色**，暗色下被调成浅蓝 #60a5fa（否则文字在深底上看不见）。
+   *   一旦拿它当 `background` 再配 `color: #fff`，白字压浅蓝 = 对比度约 2:1，
+   *   实心块整体"发白、发糊"，深色下最显眼的问题。
+   *   正确口径：实心面单独一套 token，暗色下用**深蓝 #2563eb**（与主按钮一致），
+   *   白字对比度约 5:1，才是图2 那种沉稳的实心蓝。
+   * 本组**必须两套主题都定义**，且不要写成 var() 别名（别名在计算值阶段会被替换、钉死在亮色）。 */
+  --uvp-solid-bg: #2563eb;
+  --uvp-solid-hover-bg: #1d4ed8;
+  --uvp-solid-active-bg: #1e40af;
+  --uvp-solid-border: #2563eb;
+  --uvp-solid-text: #ffffff;
   --uvp-table-header-bg: #f5f9fd;
   --uvp-table-row-bg: #ffffff;
   --uvp-table-row-hover-bg: #f8fbff;
@@ -156,6 +170,14 @@ body[arco-theme="dark"] {
   --uvp-refresh-btn-active-bg: #1d5b58;
   --uvp-refresh-btn-border: #2f7773;
   --uvp-refresh-btn-text: #5eead4;
+
+  /* 实心面 · 暗色：用**深蓝**而不是 --uvp-brand 的浅蓝，白字才有对比度。
+     值与亮色段同为 #2563eb，是刻意对齐 —— 实心主按钮在两套主题下观感一致。 */
+  --uvp-solid-bg: #2563eb;
+  --uvp-solid-hover-bg: #1d4ed8;
+  --uvp-solid-active-bg: #1e40af;
+  --uvp-solid-border: #2563eb;
+  --uvp-solid-text: #ffffff;
   --uvp-table-header-bg: #1a2a3b;
   --uvp-table-row-bg: #142130;
   --uvp-table-row-hover-bg: #1d3146;

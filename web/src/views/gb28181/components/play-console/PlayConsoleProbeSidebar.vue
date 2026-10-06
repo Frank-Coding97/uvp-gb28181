@@ -368,9 +368,9 @@ const durationModel = computed({
   padding: 0 12px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   cursor: pointer;
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
   border: 0;
   border-radius: 7px;
 }

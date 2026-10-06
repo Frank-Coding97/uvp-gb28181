@@ -652,9 +652,9 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
     color 0.18s ease;
 }
 .cruise-stop-add.arco-btn[type="button"]:hover:not(:disabled) {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
 }
 .cruise-stop-add.arco-btn[type="button"]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--uvp-brand) 52%, transparent);

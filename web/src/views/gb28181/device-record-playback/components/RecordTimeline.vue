@@ -631,10 +631,10 @@ onUnmounted(() => {
     SFMono-Regular,
     Menlo,
     monospace;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   text-align: center;
   white-space: nowrap;
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
   border-radius: 4px;
   box-shadow: 0 2px 7px rgb(0 0 0 / 18%);
   transform: translateX(-50%);

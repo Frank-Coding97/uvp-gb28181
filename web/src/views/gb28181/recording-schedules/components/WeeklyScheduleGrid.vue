@@ -230,13 +230,22 @@ button.time-slot {
   cursor: crosshair;
 }
 button.time-slot:hover {
-  background: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-table-row-bg));
+  /* 悬停只是提示"可点"，用极淡的 brand 晕染即可；⛔ 不做实心面（那是 .active 的职责）。 */
+  background: color-mix(in srgb, var(--uvp-solid-bg) 12%, var(--uvp-table-row-bg));
 }
 .time-slot.readonly {
   cursor: default;
 }
+
+/* ⛔⛔ 选中格必须用 --uvp-solid-bg（实心面），**不能**用 --uvp-brand：
+ *   --uvp-brand 是**文字/图标色**，暗色下被调成浅蓝 #60a5fa（否则字在深底上看不见），
+ *   拿它当整格底色 ⇒ 暗色下是一大片浅蓝发白，和主按钮的深蓝完全不同色（老板要求"和按钮同步"）。
+ *   正确口径：实心面走 --uvp-solid-bg（两主题同为 #2563eb，与主按钮一致），
+ *   配 --uvp-solid-text 白字，对比度约 5:1。
+ *   ⚠️ 渐变两端也必须用 solid 组（hover-bg / active-bg），不能混 brand。
+ *   实测：改前 #a3cfff（浅蓝）→ 改后 #2563eb，与「一键清空」按钮同色。 */
 .time-slot.active {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--uvp-brand) 88%, white), var(--uvp-brand));
+  background: linear-gradient(180deg, var(--uvp-solid-hover-bg), var(--uvp-solid-bg));
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
 }
 .day-actions {

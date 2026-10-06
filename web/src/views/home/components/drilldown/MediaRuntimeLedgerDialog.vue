@@ -739,10 +739,10 @@ function changeNetworkPageSize(value: number) {
   border-color: color-mix(in srgb, var(--uvp-brand) 35%, var(--uvp-panel-border));
 }
 .media-ledger-tabs button.active {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
-  box-shadow: 0 8px 18px -14px color-mix(in srgb, var(--uvp-brand) 65%, transparent);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
+  box-shadow: 0 8px 18px -14px color-mix(in srgb, var(--uvp-solid-bg) 65%, transparent);
 }
 .media-ledger-tab-count {
   display: inline-grid;

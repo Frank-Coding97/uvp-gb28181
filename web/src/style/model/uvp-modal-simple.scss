@@ -95,8 +95,8 @@
 
 /* 主按钮 */
 .arco-modal-simple .arco-modal-footer .arco-btn-primary {
-  color: #ffffff;
-  background: var(--uvp-brand) !important;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg) !important;
   border: 0 !important;
   box-shadow: 0 2px 4px -2px rgb(37 99 235 / 28%);
 }

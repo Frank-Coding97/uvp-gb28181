@@ -4184,8 +4184,8 @@ onUnmounted(() => {
 }
 .btn-primary {
   font-weight: 600;
-  color: #ffffff;
-  background: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
   border: 0;
 }
 .btn-primary.long {
@@ -4928,9 +4928,9 @@ onUnmounted(() => {
   border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
 }
 .icon-btn.framed.primary:hover {
-  color: #ffffff;
-  background: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
 }
 .icon-btn.framed.subscription {
   color: #6b4f9b;
