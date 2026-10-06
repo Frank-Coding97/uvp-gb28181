@@ -227,9 +227,13 @@ const pageSize = computed({
 });
 const total = ref(0);
 const selectedRowKeys = ref<number[]>([]);
+const themeStore = useThemeConfig();
+const { darkMode } = storeToRefs(themeStore);
 const mapZoom = ref(10);
 const mapMinZoom = 5;
 const mapMaxZoom = 22;
+const mapBaseStyle = ref<"light" | "dark">(darkMode.value ? "dark" : "light");
+const mapSearchQuery = ref("");
 // 单独画通道标记点的最小 zoom；低于它改用聚合气泡（两者互斥，见 renderMapOverlays）。
 const mapMarkerMinZoom = 14;
 // 点击聚合后**至少**要放大到的层级。必须严格高于 mapMarkerMinZoom。
@@ -256,8 +260,8 @@ const mapContainer = ref<HTMLElement | null>(null);
 const mapReady = ref(false);
 const mapFirstRender = ref(false);
 const mapError = ref("");
-const themeStore = useThemeConfig();
-const { darkMode } = storeToRefs(themeStore);
+const mapCursorLongitude = ref(116.3974);
+const mapCursorLatitude = ref(39.9093);
 const permissions = computed(() => useUserStoreHook().account.permissions ?? []);
 const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
@@ -303,9 +307,10 @@ const canViewDeviceFacts = computed(() => hasPermission("gb28181:ptz:view"));
 const canControlDevice = computed(() => hasPermission("gb28181:device:control"));
 const canSnapshotDevice = computed(() => hasPermission("gb28181:device:snapshot"));
 const canUseDeviceControl = computed(() => canControlDevice.value || canSnapshotDevice.value);
+const defaultLightMapStyleUrl = `${import.meta.env.BASE_URL}map-styles/uvp-light.json`;
 const mapStyleUrls = {
-  light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || "https://tiles.openfreemap.org/styles/bright",
-  dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || "https://tiles.openfreemap.org/styles/dark"
+  light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || defaultLightMapStyleUrl,
+  dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || `${import.meta.env.BASE_URL}map-styles/uvp-dark.json`
 };
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
@@ -356,6 +361,7 @@ let keywordSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let suppressKeywordSearch = false;
 let mapInstance: MapLibreMap | null = null;
 let mapMoveHandler: (() => void) | null = null;
+let mapMouseMoveHandler: ((event: maplibregl.MapMouseEvent) => void) | null = null;
 let mapAutoFitPending = true;
 // 底图加载 12s 兜底定时器句柄(window.setTimeout 返回 number),销毁地图时必须清除,防跨实例污染
 let mapFirstRenderTimer: number | null = null;
@@ -498,7 +504,8 @@ watch(viewMode, mode => {
     // Storage can be unavailable in privacy-restricted browser contexts.
   }
 });
-watch(darkMode, () => {
+watch(darkMode, value => {
+  mapBaseStyle.value = value ? "dark" : "light";
   if (!mapInstance) return;
   mapInstance.setStyle(currentMapStyleUrl());
   mapReady.value = false;
@@ -897,7 +904,31 @@ function mapBoundsParams() {
 }
 
 function currentMapStyleUrl() {
-  return darkMode.value ? mapStyleUrls.dark : mapStyleUrls.light;
+  return mapBaseStyle.value === "dark" ? mapStyleUrls.dark : mapStyleUrls.light;
+}
+
+function resetMapView() {
+  mapInstance?.flyTo({ center: [116.3974, 39.9093], zoom: 10, essential: true });
+}
+
+function switchMapBaseStyle(value: "light" | "dark") {
+  mapBaseStyle.value = value;
+  if (!mapInstance) return;
+  mapInstance.setStyle(currentMapStyleUrl());
+  mapReady.value = false;
+  mapFirstRender.value = false;
+  mapInstance.once("style.load", () => {
+    mapReady.value = true;
+    mapInstance?.resize();
+    renderMapOverlays();
+  });
+}
+
+function searchMapCameras() {
+  keyword.value = mapSearchQuery.value.trim();
+  page.value = 1;
+  mapAutoFitPending = true;
+  loadMapData();
 }
 
 function removeMapMarkers() {
@@ -916,6 +947,9 @@ function destroyMap() {
   // 使在途的地图数据请求响应失效,避免旧响应覆盖当前视图
   mapDataSeq += 1;
   if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
+  if (mapInstance && mapMouseMoveHandler) mapInstance.off("mousemove", mapMouseMoveHandler);
+  mapMoveHandler = null;
+  mapMouseMoveHandler = null;
   removeMapMarkers();
   mapInstance?.remove();
   mapInstance = null;
@@ -1065,8 +1099,9 @@ function createMapInstance(container: HTMLElement): MapLibreMap {
     attributionControl: false,
     hash: false
   });
-  instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-  instance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+  if (typeof maplibregl.ScaleControl === "function") {
+    instance.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+  }
   return instance;
 }
 
@@ -1094,6 +1129,11 @@ function attachMapLifecycle() {
     loadMapData();
   };
   mapInstance.on("moveend", mapMoveHandler);
+  mapMouseMoveHandler = event => {
+    mapCursorLongitude.value = event.lngLat.lng;
+    mapCursorLatitude.value = event.lngLat.lat;
+  };
+  mapInstance.on("mousemove", mapMouseMoveHandler);
   mapInstance.on("error", () => {
     if (!mapReady.value) {
       mapError.value = "底图加载失败，请检查网络或配置 VITE_MAP_STYLE_URL";
@@ -1629,32 +1669,6 @@ function onDeviceDblclick(record: DeviceVO, event: MouseEvent) {
 function onChannelDblclick(record: ChannelVO, event: MouseEvent) {
   if (!isInteractiveDblclick(event)) playChannel(record);
 }
-// 双击下钻的悬停说明:列表行 / 设备卡片上双击可进入该设备的通道列表,
-// 但这个交互本身没有任何视觉线索 ⇒ 悬停时给一条跟随光标的浮层。
-// 只在「设备」资产视图成立:通道行 / 通道卡片上的双击是播放,不是下钻。
-// 落到按钮 / 链接 / 下拉等可交互元素上时也收起(那里双击不会触发下钻)。
-const drilldownHint = reactive({ visible: false, x: 0, y: 0 });
-function hideDrilldownHint() {
-  drilldownHint.visible = false;
-}
-function updateDrilldownHint(event: MouseEvent) {
-  const target = event.target;
-  if (
-    assetKind.value !== "device" ||
-    !(target instanceof Element) ||
-    isInteractiveDblclick(event) ||
-    !target.closest(".arco-table-tr, .device-summary-card")
-  ) {
-    hideDrilldownHint();
-    return;
-  }
-  // 贴光标右下方,并夹在视口内,避免贴近右下角时被裁掉
-  drilldownHint.visible = true;
-  drilldownHint.x = Math.min(event.clientX + 14, window.innerWidth - 116);
-  drilldownHint.y = Math.min(event.clientY + 18, window.innerHeight - 36);
-}
-// 视图/资产切换会卸载悬挂事件的容器(不保证触发 mouseleave) ⇒ 主动收起,避免浮层残留
-watch([viewMode, assetKind], hideDrilldownHint);
 
 const deleting = ref(false);
 const refreshingCatalog = reactive<Record<number, boolean>>({});
@@ -2266,18 +2280,6 @@ onUnmounted(() => {
 
 <template>
   <div class="device-mgmt-page">
-    <!-- 双击下钻的悬停说明:跟随光标,pointer-events:none 不挡任何操作 -->
-    <!-- Teleport 到 body:避免被 .device-mgmt-page 的 overflow:hidden / 祖先 transform 影响 -->
-    <Teleport to="body">
-      <div
-        v-if="drilldownHint.visible"
-        class="drilldown-hint"
-        :style="{ left: `${drilldownHint.x}px`, top: `${drilldownHint.y}px` }"
-        role="presentation"
-      >
-        双击进入通道
-      </div>
-    </Teleport>
     <CatalogRefreshProgressDialog
       :visible="catalogRefreshVisible"
       :device-name="catalogRefreshDevice?.alias || catalogRefreshDevice?.name || ''"
@@ -2401,7 +2403,7 @@ onUnmounted(() => {
         />
       </aside>
 
-      <main class="content-pane">
+      <main class="content-pane" :class="{ 'content-pane-map': viewMode === 'map' }">
         <div class="filter-chips">
           <button
             v-if="deviceIdFilter && channelEntrySource === 'device-drilldown'"
@@ -2464,12 +2466,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div
-          v-if="viewMode === 'list'"
-          class="view-body table-view"
-          @mousemove="updateDrilldownHint"
-          @mouseleave="hideDrilldownHint"
-        >
+        <div v-if="viewMode === 'list'" class="view-body table-view">
           <a-table
             v-if="assetKind === 'channel'"
             v-model:selected-keys="selectedRowKeys"
@@ -2878,12 +2875,7 @@ onUnmounted(() => {
           </a-table>
         </div>
 
-        <div
-          v-else-if="viewMode === 'card'"
-          class="view-body card-view"
-          @mousemove="updateDrilldownHint"
-          @mouseleave="hideDrilldownHint"
-        >
+        <div v-else-if="viewMode === 'card'" class="view-body card-view">
           <div class="card-grid">
             <template v-if="assetKind === 'device'">
               <article
@@ -3250,24 +3242,40 @@ onUnmounted(() => {
           />
         </div>
 
-        <div v-else class="view-body map-view">
-          <div class="map-toolbar">
-            <span>缩放 {{ mapZoom }}</span>
-            <a-slider
-              :model-value="mapZoom"
-              :min="mapMinZoom"
-              :max="mapMaxZoom"
-              :style="{ width: '180px' }"
-              @change="(value: number) => mapInstance?.setZoom(value)"
-            />
-            <button class="btn-ghost" type="button" @click="fitMapToData">定位点位</button>
-            <button class="btn-ghost uvp-refresh-btn" type="button" @click="loadMapData">刷新地图</button>
+        <div v-else class="view-body map-view" :class="{ 'map-dark': darkMode }">
+          <div ref="mapContainer" class="map-container"></div>
+          <div class="map-floating-actions">
+            <div class="map-search-box">
+              <Search :size="15" />
+              <input
+                v-model="mapSearchQuery"
+                type="search"
+                placeholder="搜索地点 / 道路 / 建筑 / 摄像头"
+                @keyup.enter="searchMapCameras"
+              />
+            </div>
+            <span class="map-camera-count">摄像头：{{ total }}</span>
+            <div class="map-toolbar-spacer"></div>
+            <button class="btn-ghost" type="button" @click="loadMapData">刷新</button>
+            <button class="btn-ghost" type="button" @click="resetMapView">复位</button>
+            <button class="btn-primary map-fit-btn" type="button" @click="fitMapToData">适应视野</button>
+            <label class="map-basemap-select">
+              <span>底图</span>
+              <select
+                :value="mapBaseStyle"
+                @change="switchMapBaseStyle(($event.target as HTMLSelectElement).value as 'light' | 'dark')"
+              >
+                <option value="light">矢量</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
           </div>
-          <div class="map-canvas">
-            <div ref="mapContainer" class="map-container"></div>
-            <div v-if="mapError" class="map-state map-state-error"><Info :size="16" /> {{ mapError }}</div>
-            <div v-else-if="!mapReady || !mapFirstRender" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
+          <div class="map-position-readout" aria-live="polite">
+            <span>{{ mapCursorLongitude.toFixed(5) }}, {{ mapCursorLatitude.toFixed(5) }}</span>
+            <strong>Z{{ mapZoom }}</strong>
           </div>
+          <div v-if="mapError" class="map-state map-state-error"><Info :size="16" /> {{ mapError }}</div>
+          <div v-else-if="!mapReady || !mapFirstRender" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
         </div>
       </main>
     </div>
@@ -3470,6 +3478,42 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <div class="seg-sect">
+              <div class="seg-head">
+                <b>下载能力</b>
+                <span class="seg-right">
+                  <span class="seg-cnt">
+                    {{ deviceDetail.videoCapability?.observedChannelCount || 0 }} /
+                    {{ deviceDetail.videoCapability?.channelCount ?? deviceDetail.channelCount }} 通道已获取
+                  </span>
+                </span>
+              </div>
+              <div class="seg-rows">
+                <span class="k">下载速度</span>
+                <span class="v">
+                  <strong v-if="deviceDetail.videoCapability?.maxDownloadSpeed">
+                    {{ deviceDetail.videoCapability.maxDownloadSpeed }} 倍
+                  </strong>
+                  <span v-else class="sub">未获取</span>
+                  <span v-if="deviceDetail.videoCapability?.downloadSpeeds?.length" class="sub">
+                    支持 {{ deviceDetail.videoCapability.downloadSpeeds.join(" / ") }} 倍
+                  </span>
+                </span>
+                <span class="k">分辨率</span>
+                <span class="v">
+                  {{
+                    deviceDetail.videoCapability?.resolutions?.length
+                      ? deviceDetail.videoCapability.resolutions.join(" / ")
+                      : "未获取"
+                  }}
+                </span>
+                <span class="k">最近获取</span>
+                <span class="v mono">
+                  {{ deviceDetail.videoCapability?.observedAt ? dateTime(deviceDetail.videoCapability.observedAt) : "未获取" }}
+                </span>
+              </div>
+            </div>
+
             <div v-if="canManageSubscriptions" class="seg-sect">
               <div class="seg-head">
                 <b>订阅状态</b>
@@ -3510,6 +3554,24 @@ onUnmounted(() => {
                     >创建 {{ dateTime(deviceDetail.createdAt) }} · 更新 {{ dateTime(deviceDetail.updatedAt) }}</span
                   ></span
                 >
+              </div>
+            </div>
+
+            <div v-if="deviceDetail.basicParam" class="seg-sect">
+              <div class="seg-head"><b>基础参数</b></div>
+              <div class="seg-rows">
+                <span class="k">设备名称</span>
+                <span class="v">{{ deviceDetail.basicParam.name || "未上报" }}</span>
+                <span class="k">注册有效期</span>
+                <span class="v">{{
+                  deviceDetail.basicParam.expiration ? `${deviceDetail.basicParam.expiration} 秒` : "未上报"
+                }}</span>
+                <span class="k">心跳间隔</span>
+                <span class="v">{{
+                  deviceDetail.basicParam.heartBeatInterval ? `${deviceDetail.basicParam.heartBeatInterval} 秒` : "未上报"
+                }}</span>
+                <span class="k">心跳次数</span>
+                <span class="v">{{ deviceDetail.basicParam.heartBeatCount ?? "未上报" }}</span>
               </div>
             </div>
           </div>
@@ -3958,19 +4020,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* 双击下钻提示:深色气泡在任何主题下都保证白字可读,且不吃鼠标事件 */
-.drilldown-hint {
-  position: fixed;
-  z-index: 3000;
-  padding: 4px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #ffffff;
-  pointer-events: none;
-  background: rgb(15 23 42 / 88%);
-  border-radius: 6px;
-  box-shadow: 0 6px 16px -10px rgb(15 23 42 / 60%);
-}
 .device-stats {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4332,6 +4381,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   padding: 14px 14px 12px;
+}
+.content-pane.content-pane-map {
+  padding: 0;
+}
+.content-pane.content-pane-map > .filter-chips,
+.content-pane.content-pane-map > .batch-bar {
+  display: none;
 }
 .refresh-control {
   width: 104px;
@@ -5394,28 +5450,159 @@ onUnmounted(() => {
   }
 }
 .map-view {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.map-toolbar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  color: var(--uvp-text-tertiary);
-}
-.map-canvas {
   position: relative;
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 460px;
   overflow: hidden;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 12px;
 }
 .map-container {
   position: absolute;
   inset: 0;
+}
+.map-floating-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 10px;
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(148 163 184 / 35%);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgb(15 23 42 / 12%);
+  backdrop-filter: blur(8px);
+}
+.map-search-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 260px;
+  height: 32px;
+  padding: 0 10px;
+  color: #64748b;
+  background: rgb(248 250 252 / 92%);
+  border: 1px solid #dbe3ed;
+  border-radius: 7px;
+}
+.map-search-box input {
+  width: 100%;
+  min-width: 0;
+  color: #334155;
+  outline: 0;
+  background: transparent;
+  border: 0;
+}
+.map-camera-count {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #2563eb;
+  white-space: nowrap;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+}
+.map-toolbar-spacer {
+  flex: 1;
+}
+.map-fit-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+}
+.map-basemap-select {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #dbe3ed;
+  border-radius: 7px;
+}
+.map-basemap-select select {
+  color: #334155;
+  cursor: pointer;
+  outline: 0;
+  background: transparent;
+  border: 0;
+}
+.map-view.map-dark .map-floating-actions {
+  background: linear-gradient(105deg, rgb(12 30 48 / 96%), rgb(18 28 53 / 94%) 58%, rgb(12 52 61 / 92%));
+  border-color: rgb(78 211 226 / 52%);
+  box-shadow:
+    0 0 0 1px rgb(96 165 250 / 12%),
+    0 8px 26px rgb(0 0 0 / 42%),
+    0 0 22px rgb(45 212 191 / 12%);
+}
+.map-view.map-dark .map-search-box {
+  color: #9fb2c6;
+  background: rgb(16 25 35 / 94%);
+  border-color: #31465b;
+}
+.map-view.map-dark .map-search-box input,
+.map-view.map-dark .map-search-box input::placeholder {
+  color: #a8b6c7;
+}
+.map-view.map-dark .map-camera-count {
+  color: #8ff7e5;
+  background: linear-gradient(135deg, rgb(13 83 91 / 72%), rgb(30 64 126 / 68%));
+  border-color: rgb(45 212 191 / 64%);
+  box-shadow: inset 0 0 12px rgb(45 212 191 / 10%);
+}
+.map-view.map-dark .map-basemap-select {
+  color: #a8b6c7;
+  background: #101923;
+  border-color: #31465b;
+}
+.map-view.map-dark .map-basemap-select select {
+  color: #dbe7f3;
+}
+.map-position-readout {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  font:
+    12px/1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  color: #4b5563;
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid rgb(148 163 184 / 35%);
+  border-radius: 7px;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 13%);
+  backdrop-filter: blur(8px);
+}
+.map-position-readout strong {
+  font-weight: 700;
+  color: #2563eb;
+}
+.map-view.map-dark .map-position-readout {
+  color: #b8c7d8;
+  background: linear-gradient(105deg, rgb(12 30 48 / 94%), rgb(18 28 53 / 94%));
+  border-color: rgb(78 211 226 / 46%);
+  box-shadow:
+    0 0 0 1px rgb(96 165 250 / 10%),
+    0 4px 18px rgb(0 0 0 / 38%);
+}
+.map-view.map-dark .map-position-readout strong {
+  color: #8ff7e5;
 }
 .map-state {
   position: absolute;
@@ -5518,28 +5705,36 @@ onUnmounted(() => {
   background: #ffffff;
   border-radius: 50%;
 }
-.maplibregl-ctrl-group {
-  overflow: hidden;
-  background: rgb(13 19 28 / 88%);
-  border: 1px solid rgb(255 255 255 / 14%);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 22%);
+:deep(.maplibregl-ctrl-bottom-left) {
+  right: 0;
+  bottom: 14px;
+  left: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
 }
-.maplibregl-ctrl-group button {
-  filter: invert(1) brightness(1.8);
+:deep(.maplibregl-ctrl-scale) {
+  position: static;
+  margin: 0;
+  color: #4b5563;
+  text-align: center;
+  pointer-events: auto;
+  background: rgb(255 255 255 / 88%);
+  border-color: #6b7280;
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 12%);
 }
-.maplibregl-ctrl-attrib {
-  color: rgb(255 255 255 / 75%);
-  background: rgb(13 19 28 / 70%);
-}
-
-/* Keep attribution readable on the dark basemap. */
-.maplibregl-ctrl-attrib a {
-  color: rgb(255 255 255 / 82%);
-  text-decoration: none;
+.map-view.map-dark :deep(.maplibregl-ctrl-scale) {
+  color: #b8c7d8;
+  background: rgb(12 30 48 / 94%);
+  border-color: #59c7d3;
+  box-shadow:
+    0 0 10px rgb(45 212 191 / 18%),
+    0 3px 12px rgb(0 0 0 / 32%);
 }
 
 /* The map occupies the full content area; overlays are DOM markers. */
-.map-canvas > .map-container {
+.map-view > .map-container {
   inset: 0;
 }
 .drawer-body {

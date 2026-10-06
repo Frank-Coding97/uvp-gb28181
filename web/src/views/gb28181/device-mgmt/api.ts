@@ -115,6 +115,24 @@ export interface DeviceVO {
   zlmNodeId?: number;
   ownerDeptId: number;
   ownerDeptName?: string;
+  videoCapability?: VideoCapabilitySummary;
+  basicParam?: BasicParamSummary;
+}
+
+export interface BasicParamSummary {
+  name?: string;
+  expiration?: number;
+  heartBeatInterval?: number;
+  heartBeatCount?: number;
+}
+
+export interface VideoCapabilitySummary {
+  downloadSpeeds: number[];
+  maxDownloadSpeed: number;
+  resolutions: string[];
+  channelCount: number;
+  observedChannelCount: number;
+  observedAt?: string | null;
 }
 
 export type DeviceOperationStatus =

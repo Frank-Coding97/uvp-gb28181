@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue";
+
+const PANEL_SOURCE = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/DeviceStatusFactsPanel.vue"), "utf8");
 
 /**
  * 设备状态事实面板（从播放控制台搬到设备详情抽屉）的单测。
@@ -102,6 +106,15 @@ describe("DeviceStatusFactsPanel", () => {
     const text = wrapper.text();
     expect(text).toContain("设备未录制");
     expect(text).toContain("已布防");
+    wrapper.unmount();
+  });
+
+  it("设备查询按钮使用醒目的蓝色操作按钮样式", async () => {
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='fact-refresh']").classes()).toContain("fact-refresh-button");
+    expect(wrapper.get("[data-testid='fact-refresh']").attributes("type")).toBe("primary");
     wrapper.unmount();
   });
 
@@ -450,5 +463,13 @@ describe("DeviceStatusFactsPanel", () => {
 
     expect(api.getDeviceStatus).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+});
+
+describe("设备查询按钮的主题视觉契约", () => {
+  it("暗色主题使用深蓝底配白字，避免浅蓝底上的白字失去对比度", () => {
+    expect(PANEL_SOURCE).toMatch(
+      /body\[arco-theme="dark"\][\s\S]*fact-refresh-button[^}]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
+    );
   });
 });

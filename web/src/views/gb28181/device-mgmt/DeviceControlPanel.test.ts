@@ -4,6 +4,10 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceControlPanel from "./DeviceControlPanel.vue";
 
+const messages = vi.hoisted(() => ({ success: vi.fn() }));
+
+vi.mock("@arco-design/web-vue", () => ({ Message: messages }));
+
 /**
  * 设备控制面板（2026-09-20 从播放控制台侧栏「高级」搬到设备详情抽屉）的单测。
  *
@@ -83,6 +87,7 @@ describe("DeviceControlPanel", () => {
     api.controlDevice.mockReset();
     api.getDeviceStatus.mockReset();
     api.getPtzOperation.mockReset();
+    messages.success.mockReset();
     api.getDeviceStatus.mockResolvedValue(statusResponse());
   });
 
@@ -98,7 +103,7 @@ describe("DeviceControlPanel", () => {
     expect(api.getDeviceStatus).not.toHaveBeenCalledWith(CHANNEL_ID, true);
     expect(wrapper.get("[data-testid='control-record-fact']").text()).toBe("设备未录制");
     expect(wrapper.get("[data-testid='control-guard-fact']").text()).toBe("已撤防");
-    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始设备端录制");
+    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始录制");
     expect(wrapper.get("[data-testid='control-guard-toggle']").text()).toContain("布防");
     // 事实已知 ⇒ 不摆第二个"请求停止"按钮，避免操作员在两条路之间犹豫
     expect(wrapper.find("[data-testid='control-record-stop']").exists()).toBe(false);
@@ -117,10 +122,10 @@ describe("DeviceControlPanel", () => {
 
     expect(wrapper.get("[data-testid='control-record-fact']").text()).toBe("录制状态未知");
     expect(wrapper.get("[data-testid='control-guard-fact']").text()).toBe("布防状态未知");
-    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始设备端录制");
-    expect(wrapper.get("[data-testid='control-record-stop']").text()).toContain("请求停止设备录制");
+    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始录制");
+    expect(wrapper.get("[data-testid='control-record-stop']").text()).toContain("停止录制");
     expect(wrapper.get("[data-testid='control-guard-toggle']").text()).toContain("布防");
-    expect(wrapper.get("[data-testid='control-guard-reset']").text()).toContain("请求撤防");
+    expect(wrapper.get("[data-testid='control-guard-reset']").text()).toContain("撤防");
     wrapper.unmount();
   });
 
@@ -145,7 +150,7 @@ describe("DeviceControlPanel", () => {
     expect(wrapper.get("[data-testid='control-record-status']").text()).toBe("等待设备应答");
     // 关键：200 没让它把事实改成"设备录制中"
     expect(wrapper.get("[data-testid='control-record-fact']").text()).toBe("设备未录制");
-    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始设备端录制");
+    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("开始录制");
     wrapper.unmount();
   });
 
@@ -165,7 +170,7 @@ describe("DeviceControlPanel", () => {
     await flushPromises();
 
     expect(wrapper.get("[data-testid='control-record-fact']").text()).toBe("设备录制中");
-    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("停止设备端录制");
+    expect(wrapper.get("[data-testid='control-record-toggle']").text()).toContain("停止录制");
     expect(wrapper.get("[data-testid='control-record-status']").text()).toBe("设备已确认");
 
     await wrapper.get("[data-testid='control-record-toggle']").trigger("click");
@@ -344,8 +349,7 @@ describe("DeviceControlPanel", () => {
         }
       })
     );
-    api.controlDevice.mockResolvedValueOnce(controlResponse("alarm-op"));
-    api.getPtzOperation.mockResolvedValueOnce(operationResponse("alarm-op", "accepted"));
+    api.controlDevice.mockResolvedValueOnce(controlResponse("alarm-op", "accepted"));
 
     const wrapper = mountPanel();
     await flushPromises();
@@ -354,6 +358,7 @@ describe("DeviceControlPanel", () => {
     await wrapper.get("[data-testid='control-alarm-reset']").trigger("click");
     await flushPromises();
     expect(api.controlDevice).toHaveBeenCalledWith(CHANNEL_ID, expect.objectContaining({ action: "alarm_reset" }));
+    expect(messages.success).toHaveBeenCalledWith("报警复位成功");
     wrapper.unmount();
   });
 

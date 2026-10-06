@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,10 +176,120 @@ func (dc *DeviceMgmtController) nextPTZSN() int {
 // channelStats 单个 channel 的派生聚合
 type deviceVOExtra struct {
 	*gbmodels.GbDevice
-	Online             bool    `json:"online"`
-	ChannelCount       int64   `json:"channelCount"`
-	ChannelOnlineCount int64   `json:"channelOnlineCount"`
-	OnlineRate         float64 `json:"onlineRate"`
+	Online             bool                    `json:"online"`
+	ChannelCount       int64                   `json:"channelCount"`
+	ChannelOnlineCount int64                   `json:"channelOnlineCount"`
+	OnlineRate         float64                 `json:"onlineRate"`
+	VideoCapability    *videoCapabilitySummary `json:"videoCapability,omitempty"`
+	BasicParam         *basicParamSummary      `json:"basicParam,omitempty"`
+}
+
+type basicParamSummary struct {
+	Name              string `json:"name,omitempty"`
+	Expiration        *int   `json:"expiration,omitempty"`
+	HeartBeatInterval *int   `json:"heartBeatInterval,omitempty"`
+	HeartBeatCount    *int   `json:"heartBeatCount,omitempty"`
+}
+
+func (dc *DeviceMgmtController) basicParam(c *gin.Context, db *gorm.DB, devicePK uint, deviceCode string) (*basicParamSummary, error) {
+	var row struct{ PayloadJSON string }
+	result := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDeviceConfig{}).
+		Select("payload_json").Where("device_id = ? AND target_code = ? AND config_type = ?", devicePK, deviceCode, "BasicParam").
+		Order("observed_at DESC").Limit(1).Find(&row)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	var payload struct {
+		Name              *string `json:"name"`
+		Expiration        *int    `json:"expiration"`
+		HeartBeatInterval *int    `json:"heartBeatInterval"`
+		HeartBeatCount    *int    `json:"heartBeatCount"`
+	}
+	if err := json.Unmarshal([]byte(row.PayloadJSON), &payload); err != nil {
+		return nil, nil
+	}
+	summary := &basicParamSummary{Expiration: payload.Expiration, HeartBeatInterval: payload.HeartBeatInterval, HeartBeatCount: payload.HeartBeatCount}
+	if payload.Name != nil {
+		summary.Name = *payload.Name
+	}
+	return summary, nil
+}
+
+type videoCapabilitySummary struct {
+	DownloadSpeeds       []int      `json:"downloadSpeeds"`
+	MaxDownloadSpeed     int        `json:"maxDownloadSpeed"`
+	Resolutions          []string   `json:"resolutions"`
+	ChannelCount         int64      `json:"channelCount"`
+	ObservedChannelCount int64      `json:"observedChannelCount"`
+	ObservedAt           *time.Time `json:"observedAt,omitempty"`
+}
+
+func (dc *DeviceMgmtController) videoCapability(c *gin.Context, db *gorm.DB, devicePK uint, channelCount int64) (*videoCapabilitySummary, error) {
+	var rows []struct {
+		TargetCode  string
+		PayloadJSON string
+		ObservedAt  time.Time
+	}
+	result := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDeviceConfig{}).
+		Select("target_code, payload_json, observed_at").
+		Where("device_id = ? AND config_type = ?", devicePK, "VideoParamOpt").Find(&rows)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if len(rows) == 0 {
+		return &videoCapabilitySummary{ChannelCount: channelCount}, nil
+	}
+	summary := &videoCapabilitySummary{ChannelCount: channelCount}
+	speedSet := make(map[int]struct{})
+	resolutionSet := make(map[string]struct{})
+	for _, row := range rows {
+		var payload struct {
+			DownloadSpeed string `json:"downloadSpeed"`
+			Resolution    string `json:"resolution"`
+		}
+		if err := json.Unmarshal([]byte(row.PayloadJSON), &payload); err != nil {
+			continue
+		}
+		if strings.TrimSpace(row.TargetCode) != "" {
+			summary.ObservedChannelCount++
+		}
+		if row.ObservedAt.After(summaryTime(summary.ObservedAt)) {
+			observed := row.ObservedAt
+			summary.ObservedAt = &observed
+		}
+		for _, value := range strings.Split(payload.DownloadSpeed, "/") {
+			if speed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && speed > 0 {
+				speedSet[speed] = struct{}{}
+				if speed > summary.MaxDownloadSpeed {
+					summary.MaxDownloadSpeed = speed
+				}
+			}
+		}
+		for _, value := range strings.Split(payload.Resolution, "/") {
+			if value = strings.TrimSpace(value); value != "" {
+				resolutionSet[value] = struct{}{}
+			}
+		}
+	}
+	for speed := range speedSet {
+		summary.DownloadSpeeds = append(summary.DownloadSpeeds, speed)
+	}
+	for resolution := range resolutionSet {
+		summary.Resolutions = append(summary.Resolutions, resolution)
+	}
+	sort.Ints(summary.DownloadSpeeds)
+	sort.Strings(summary.Resolutions)
+	return summary, nil
+}
+
+func summaryTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
 }
 
 // ListDevices 设备列表
@@ -446,12 +558,24 @@ func (dc *DeviceMgmtController) GetDevice(c *gin.Context) {
 		return
 	}
 	stats := dc.channelAggregate(c, db, d.DeviceID)
+	videoCapability, err := dc.videoCapability(c, db, d.ID, stats.total)
+	if err != nil {
+		dc.FailAndAbort(c, "查询视频能力失败", err)
+		return
+	}
+	basicParam, err := dc.basicParam(c, db, d.ID, d.DeviceID)
+	if err != nil {
+		dc.FailAndAbort(c, "查询基础参数失败", err)
+		return
+	}
 	dc.Success(c, deviceVOExtra{
 		GbDevice:           &d,
 		Online:             d.Status == gbmodels.DeviceStatusOnline,
 		ChannelCount:       stats.total,
 		ChannelOnlineCount: stats.online,
 		OnlineRate:         stats.rate(),
+		VideoCapability:    videoCapability,
+		BasicParam:         basicParam,
 	})
 }
 

@@ -532,7 +532,9 @@ function formatCapacity(mb: number | null | undefined) {
             跟踪态下它的语义变成「立即查询一次」（并打断自动跟踪），文案跟着变。
         -->
         <a-button
+          class="storage-refresh-button"
           size="small"
+          type="primary"
           :loading="pending && !formatWatching"
           :disabled="!props.canView || !hasChannel || props.channelOptions.length === 0 || (pending && !formatWatching)"
           :title="!hasChannel ? '该设备下暂无通道，无法查询' : '向设备查询存储卡状态（A.2.4.14）'"
@@ -659,22 +661,26 @@ function formatCapacity(mb: number | null | undefined) {
   align-items: center;
   padding: 3px 9px;
   font-size: 11.5px;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-danger);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-danger-soft);
+  border: 1px solid var(--uvp-danger-border);
   border-radius: 7px;
   transition:
     border-color 0.15s ease,
-    color 0.15s ease;
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 .storage-format-btn:hover:not(:disabled) {
-  color: var(--uvp-danger);
-  border-color: var(--uvp-danger-border);
+  color: #ffffff;
+  background: var(--uvp-danger);
+  border-color: var(--uvp-danger);
 }
 .storage-format-btn:disabled {
   color: var(--uvp-text-tertiary);
   cursor: not-allowed;
+  background: var(--uvp-shell-muted);
+  border-color: var(--uvp-panel-border);
   opacity: 0.6;
 }
 
@@ -829,6 +835,58 @@ function formatCapacity(mb: number | null | undefined) {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+.storage-actions :deep(.storage-refresh-button) {
+  min-width: 104px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border: 1px solid var(--uvp-brand);
+  border-radius: 6px;
+  box-shadow: none !important;
+  transform: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.storage-actions :deep(.storage-refresh-button:hover:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.storage-actions :deep(.storage-refresh-button:active:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.storage-actions :deep(.storage-refresh-button.arco-btn-disabled) {
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-shell-muted);
+  border-color: var(--uvp-panel-border);
+}
+:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:not(.arco-btn-disabled)) {
+  color: #ffffff !important;
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+}
+:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
+:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
+  color: #ffffff !important;
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+}
+:global(body[arco-theme="dark"]) .storage-format-btn:not(:disabled) {
+  color: #fecaca;
+  background: rgb(185 28 28 / 22%);
+  border-color: rgb(248 113 113 / 48%);
+}
+:global(body[arco-theme="dark"]) .storage-format-btn:hover:not(:disabled) {
+  color: #ffffff;
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 .storage-actions-hint {
   font-size: 11px;

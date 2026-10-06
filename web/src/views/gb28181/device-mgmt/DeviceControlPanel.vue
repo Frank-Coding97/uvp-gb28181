@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { AlertTriangle, Circle, ShieldCheck, Square } from "@lucide/vue";
+import { Message } from "@arco-design/web-vue";
 import { controlDevice, getDeviceStatus, getPtzOperation, type DeviceAlarmResolution, type DeviceFactState } from "@/api/gb28181";
 import FactChannelPicker from "./FactChannelPicker.vue";
 import type { FactChannelOption } from "./deviceFactChannel";
@@ -195,6 +196,7 @@ function applyAccepted(group: string, action: ActionKey) {
   if (action === "guard_set") guardState.value = "armed";
   if (action === "guard_reset") guardState.value = "disarmed";
   setStatus(group, "设备已确认");
+  if (action === "alarm_reset") Message.success("报警复位成功");
 }
 
 function parseDeadline(deadlineAt?: string | null): number | null {
@@ -395,7 +397,7 @@ const blockedReason = computed(() => {
 });
 
 function recordLabel() {
-  return recordState.value === "on" ? "停止设备端录制" : "开始设备端录制";
+  return recordState.value === "on" ? "停止录制" : "开始录制";
 }
 
 function guardLabel() {
@@ -413,6 +415,19 @@ function guardStateText() {
   if (guardState.value === "armed") return "已布防";
   if (guardState.value === "disarmed") return "已撤防";
   return "布防状态未知";
+}
+
+function recordStateColor() {
+  if (recordState.value === "on") return "green";
+  if (recordState.value === "off") return "gray";
+  return "orange";
+}
+
+function guardStateColor() {
+  if (guardState.value === "armed") return "blue";
+  if (guardState.value === "alarm") return "red";
+  if (guardState.value === "disarmed") return "gray";
+  return "orange";
 }
 
 /** 设备自报没有报警输入时「未知」就是错的 —— 它说的是「我没有报警输入」。 */
@@ -461,10 +476,11 @@ function errorOf(action: ActionKey) {
     <section class="fact-group">
       <header class="fact-group-head">
         <span class="fact-group-title"><Circle :size="14" />设备录制</span>
-        <span class="fact-group-status" data-testid="control-record-fact">{{ recordStateText() }}</span>
+        <a-tag :color="recordStateColor()" size="small" data-testid="control-record-fact">{{ recordStateText() }}</a-tag>
       </header>
       <div class="control-actions">
         <a-button
+          class="control-action-button"
           size="small"
           :type="recordState === 'on' ? 'default' : 'primary'"
           :loading="isPending('record_start')"
@@ -480,6 +496,7 @@ function errorOf(action: ActionKey) {
         </a-button>
         <!-- 状态未知时正反两个动作都摆出来：不猜，让操作员显式选。 -->
         <a-button
+          class="control-action-button"
           v-if="recordState === 'unknown'"
           size="small"
           :loading="isPending('record_stop')"
@@ -488,7 +505,7 @@ function errorOf(action: ActionKey) {
           @click="run('record_stop')"
         >
           <template #icon><Square :size="13" /></template>
-          请求停止设备录制
+          停止录制
         </a-button>
       </div>
       <p class="control-hint" :data-level="levelOf('record_start')" data-testid="control-record-status" aria-live="polite">
@@ -502,42 +519,62 @@ function errorOf(action: ActionKey) {
     <section class="fact-group">
       <header class="fact-group-head">
         <span class="fact-group-title"><ShieldCheck :size="14" />布防与复位</span>
-        <span class="fact-group-status" data-testid="control-guard-fact">{{ guardStateText() }}</span>
+        <a-tag :color="guardStateColor()" size="small" data-testid="control-guard-fact">{{ guardStateText() }}</a-tag>
       </header>
-      <p v-if="alarmTargetHint()" class="control-hint" data-testid="control-alarm-target">{{ alarmTargetHint() }}</p>
-      <div class="control-actions">
-        <a-button
-          size="small"
-          :type="guardState === 'armed' ? 'default' : 'primary'"
-          :loading="isPending('guard_set')"
-          :disabled="!!blockedReason"
-          data-testid="control-guard-toggle"
-          @click="run(guardState === 'armed' ? 'guard_reset' : 'guard_set')"
-        >
-          <template #icon><ShieldCheck :size="13" /></template>
-          {{ guardLabel() }}
-        </a-button>
-        <a-button
-          v-if="guardState === 'unknown'"
-          size="small"
-          :loading="isPending('guard_reset')"
-          :disabled="!!blockedReason"
-          data-testid="control-guard-reset"
-          @click="run('guard_reset')"
-        >
-          <template #icon><ShieldCheck :size="13" /></template>
-          请求撤防
-        </a-button>
-        <a-button
-          size="small"
-          :loading="isPending('alarm_reset')"
-          :disabled="!!blockedReason"
-          data-testid="control-alarm-reset"
-          @click="run('alarm_reset')"
-        >
-          <template #icon><AlertTriangle :size="13" /></template>
-          报警复位
-        </a-button>
+      <div class="control-subsection">
+        <div class="control-subsection-head">
+          <span>布防状态</span>
+        </div>
+        <div class="control-actions">
+          <a-button
+            class="control-action-button"
+            size="small"
+            :type="guardState === 'armed' ? 'default' : 'primary'"
+            :loading="isPending('guard_set')"
+            :disabled="!!blockedReason"
+            data-testid="control-guard-toggle"
+            @click="run(guardState === 'armed' ? 'guard_reset' : 'guard_set')"
+          >
+            <template #icon><ShieldCheck :size="13" /></template>
+            {{ guardLabel() }}
+          </a-button>
+          <a-button
+            class="control-action-button"
+            v-if="guardState === 'unknown'"
+            size="small"
+            :loading="isPending('guard_reset')"
+            :disabled="!!blockedReason"
+            data-testid="control-guard-reset"
+            @click="run('guard_reset')"
+          >
+            <template #icon><ShieldCheck :size="13" /></template>
+            撤防
+          </a-button>
+        </div>
+      </div>
+      <div class="control-subsection control-alarm-subsection">
+        <div class="control-subsection-head">
+          <span>报警目标</span>
+          <span
+            v-if="alarmResolution?.targetCode && alarmResolution.status !== 'resolved'"
+            class="control-subsection-value control-subsection-code"
+            >{{ alarmResolution.targetCode }}</span
+          >
+        </div>
+        <p v-if="alarmTargetHint()" class="control-hint" data-testid="control-alarm-target">{{ alarmTargetHint() }}</p>
+        <div class="control-actions">
+          <a-button
+            class="control-action-button"
+            size="small"
+            :loading="isPending('alarm_reset')"
+            :disabled="!!blockedReason"
+            data-testid="control-alarm-reset"
+            @click="run('alarm_reset')"
+          >
+            <template #icon><AlertTriangle :size="13" /></template>
+            报警复位
+          </a-button>
+        </div>
       </div>
       <p class="control-hint" :data-level="levelOf('guard_set')" data-testid="control-guard-status" aria-live="polite">
         {{ statusOf("guard_set") }}
@@ -559,6 +596,43 @@ function errorOf(action: ActionKey) {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+.control-actions :deep(.control-action-button) {
+  min-width: 96px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--uvp-brand-strong);
+  background: color-mix(in srgb, var(--uvp-brand-soft) 82%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--uvp-brand) 58%, var(--uvp-panel-border));
+  border-radius: 6px;
+  box-shadow: none !important;
+  transform: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.control-actions :deep(.control-action-button:hover:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+}
+.control-actions :deep(.control-action-button:active:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.control-actions :deep(.control-action-button.arco-btn-primary) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+  box-shadow: none !important;
+}
+.control-actions :deep(.control-action-button.arco-btn-primary:hover:not(.arco-btn-disabled)) {
+  background: var(--uvp-brand-strong);
+  border-color: var(--uvp-brand-strong);
 }
 .fact-group {
   display: grid;
@@ -582,9 +656,32 @@ function errorOf(action: ActionKey) {
   font-weight: 620;
   color: var(--uvp-text-secondary);
 }
-.fact-group-status {
-  font-size: 11px;
+.control-subsection {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--uvp-panel-border);
+}
+.control-subsection-head {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+}
+.control-subsection-value {
   color: var(--uvp-text-tertiary);
+}
+.control-subsection-code {
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+}
+.control-alarm-subsection {
+  padding-bottom: 0;
 }
 .control-hint {
   margin: 0;

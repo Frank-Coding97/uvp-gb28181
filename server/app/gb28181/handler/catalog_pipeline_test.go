@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -159,4 +160,38 @@ func TestHandleCatalogResponse_EmptyResponseDoesNotLeaveBucket(t *testing.T) {
 
 	HandleCatalogResponse(context.Background(), catalogResponseBody(7, 0, "empty-device"), "dev-1", "call-1", "1")
 	require.Equal(t, 0, catalogAgg.active())
+}
+
+type countingCapabilityRefresher struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *countingCapabilityRefresher) Refresh(_ context.Context, deviceID string, sn int) {
+	r.mu.Lock()
+	r.calls = append(r.calls, fmt.Sprintf("%s:%d", deviceID, sn))
+	r.mu.Unlock()
+}
+
+func TestHandleCatalogResponse_RefreshesCapabilitiesForEachCompletedBatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{}, &gbmodels.GbAnomalyRecord{}, &gbmodels.GbChannel{}, &gbmodels.GbDevice{}))
+	deviceID := "34020000002000000009"
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: deviceID, OwnerDeptID: 1}).Error)
+	SetCatalogPipeline(catalog.New(db))
+	refresher := &countingCapabilityRefresher{}
+	SetCapabilityRefresher(refresher)
+	catalogAgg.reset()
+	t.Cleanup(func() {
+		SetCatalogPipeline(nil)
+		SetCapabilityRefresher(nil)
+		catalogAgg.reset()
+	})
+	body := catalogResponseBody(21, 2, deviceID, "37011200001310000001", "37011200001310000002")
+	HandleCatalogResponse(context.Background(), body, deviceID, "call-1", "1")
+	HandleCatalogResponse(context.Background(), body, deviceID, "call-1", "1")
+	refresher.mu.Lock()
+	defer refresher.mu.Unlock()
+	require.Equal(t, []string{deviceID + ":21", deviceID + ":21"}, refresher.calls)
 }

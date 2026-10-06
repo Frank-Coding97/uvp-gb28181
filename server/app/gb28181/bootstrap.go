@@ -827,6 +827,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	// 装配依赖 UAC 的 processor(手动 catalog 刷新按钮、PTZ、订阅、告警)
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
+		gbhandler.SetCapabilityRefresher(gbhandler.NewCapabilityRefresher(deviceDB, newPTZService, 4))
 		ptzService = newPTZService
 		ptzScheduler = newPTZScheduler
 		firmwareUpgradeService = newFirmwareUpgradeService
@@ -1182,6 +1183,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperation
 }
 
 func stopPTZRuntime() error {
+	gbhandler.SetCapabilityRefresher(nil)
 	openAPIPTZRoot.Clear()
 	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
 	if sipServer != nil {

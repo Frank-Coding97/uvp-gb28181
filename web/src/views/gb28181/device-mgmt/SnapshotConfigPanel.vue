@@ -171,16 +171,43 @@ function openInLibrary() {
       <div class="snapshot-fields">
         <label>
           张数
-          <input v-model.number="snapshotCount" data-testid="snapshot-count" type="number" min="1" max="10" />
+          <a-input-number
+            v-model="snapshotCount"
+            class="snapshot-input"
+            data-testid="snapshot-count"
+            size="small"
+            :min="1"
+            :max="10"
+            :step="1"
+            :precision="0"
+          />
         </label>
         <label>
           间隔（秒）
-          <input v-model.number="snapshotInterval" data-testid="snapshot-interval" type="number" min="1" max="3600" />
+          <a-input-number
+            v-model="snapshotInterval"
+            class="snapshot-input"
+            data-testid="snapshot-interval"
+            size="small"
+            :min="1"
+            :max="3600"
+            :step="1"
+            :precision="0"
+          />
         </label>
       </div>
 
       <div class="snapshot-actions">
-        <a-button size="small" type="primary" :loading="pending" :disabled="!canSend" data-testid="snapshot-submit" @click="run">
+        <a-button
+          class="control-action-button"
+          size="small"
+          type="primary"
+          html-type="button"
+          :loading="pending"
+          :disabled="!canSend"
+          data-testid="snapshot-submit"
+          @click="run"
+        >
           <template #icon>
             <Loader2 v-if="pending" :size="13" class="spin" />
             <Camera v-else :size="13" />
@@ -256,20 +283,52 @@ function openInLibrary() {
   font-size: 12px;
   color: var(--uvp-text-secondary);
 }
-.snapshot-fields input {
-  width: 84px;
-  padding: 3px 6px;
-  font-size: 12px;
+.snapshot-input {
+  width: 96px;
+}
+.snapshot-input :deep(.arco-input-wrapper) {
+  height: 34px;
+  min-height: 34px;
   color: var(--uvp-text-primary);
-  background: var(--uvp-shell-muted);
+  background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 6px;
+  box-shadow: none;
+}
+.snapshot-input :deep(.arco-input-wrapper:hover),
+.snapshot-input :deep(.arco-input-wrapper.arco-input-focus) {
+  border-color: var(--uvp-brand);
+}
+.snapshot-input :deep(.arco-input) {
+  font-size: 12px;
+  color: var(--uvp-text-primary);
+  text-align: right;
 }
 .snapshot-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+.snapshot-actions :deep(.control-action-button) {
+  min-width: 128px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border: 1px solid var(--uvp-brand);
+  border-radius: 6px;
+  box-shadow: none !important;
+  transform: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.snapshot-actions :deep(.control-action-button:hover:not(.arco-btn-disabled)) {
+  background: var(--uvp-brand-strong);
+  border-color: var(--uvp-brand-strong);
 }
 .snapshot-hint {
   font-size: 11px;

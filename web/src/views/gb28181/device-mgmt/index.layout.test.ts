@@ -185,16 +185,14 @@ describe("device management toolbar layout", () => {
     }
   });
 
-  it("hints the double-click drilldown on hover instead of leaving it invisible", () => {
-    expect(source).toContain("function updateDrilldownHint");
-    expect(source).toContain("function hideDrilldownHint");
-    expect(source).toContain("双击进入通道");
-    expect(hasMarkup(source, 'class="drilldown-hint"')).toBe(true);
-    // 列表视图与卡片视图挂的是同一套悬停提示
-    expect(source.match(/@mousemove="updateDrilldownHint"/g)).toHaveLength(2);
-    expect(source.match(/@mouseleave="hideDrilldownHint"/g)).toHaveLength(2);
-    // 通道侧的双击是播放而不是下钻,提示只在设备视图生效
-    expect(source).toContain('assetKind.value !== "device"');
+  it("keeps the double-click drilldown free of any floating hint", () => {
+    // 2026-10-05 老板要求去掉设备列表上跟随光标的「双击进入通道」浮层。
+    // 双击下钻本身保留(onDeviceDblclick 仍在),这里钉住"不要再挂回来"。
+    expect(source).not.toContain("DrilldownHint");
+    expect(source).not.toContain("drilldown-hint");
+    expect(source).not.toContain("双击进入通道");
+    expect(source).not.toContain("@mousemove=");
+    expect(source).not.toContain("@mouseleave=");
   });
 
   it("keeps offline channel snapshots at normal color and opacity", () => {

@@ -157,6 +157,15 @@ describe("StorageCardStatusPanel", () => {
     wrapper.unmount();
   });
 
+  it("存储卡查询和格式化按钮带有统一的可识别操作样式", async () => {
+    const wrapper = await mountWithCard();
+
+    expect(wrapper.get("[data-testid='storage-refresh']").classes()).toContain("storage-refresh-button");
+    expect(wrapper.get("[data-testid='storage-refresh']").attributes("type")).toBe("primary");
+    expect(wrapper.get("[data-testid='storage-format-1']").classes()).toContain("storage-format-btn");
+    wrapper.unmount();
+  });
+
   it("已用/可用是两段语义：实心段宽度=已用占比，图例数字与百分比互补", async () => {
     const wrapper = await mountWithCard({ capacityMb: 128 * 1024, freeSpaceMb: Math.round(93.4 * 1024) });
 
@@ -745,5 +754,14 @@ describe("存储卡进度条底轨的视觉契约（源码级）", () => {
     expect(panelSource).toMatch(/\.storage-bar-format\s*\{[^}]*background:\s*var\(--uvp-warning\)/);
     // 不确定态必须是"不给宽度"（宽度由 CSS 的 100% + 脉冲动画承担）。
     expect(panelSource).toMatch(/\.storage-item-bar-format\.is-indeterminate\s+\.storage-bar-format\s*\{[^}]*width:\s*100%/);
+  });
+
+  it("格式化入口使用危险红色，查询按钮在暗色主题使用深蓝底", () => {
+    expect(panelSource).toMatch(
+      /\.storage-format-btn\s*\{[\s\S]*color:\s*var\(--uvp-danger\)[\s\S]*background:\s*var\(--uvp-danger-soft\)/
+    );
+    expect(panelSource).toMatch(
+      /body\[arco-theme="dark"\][\s\S]*storage-refresh-button[^}]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
+    );
   });
 });

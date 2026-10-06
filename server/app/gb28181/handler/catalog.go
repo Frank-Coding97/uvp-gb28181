@@ -127,8 +127,10 @@ func (a *catalogAggregator) active() int {
 // catalogPipeline 全局入库管道(A4 改造:不再直接 UpsertChannel,投递到 catalog.Pipeline)
 // 包内可见单例,首次使用 lazy 装配;测试可调 SetCatalogPipeline 注入替身
 var (
-	catalogPipelineMu sync.RWMutex
-	catalogPipeline   *catalog.Pipeline
+	catalogPipelineMu   sync.RWMutex
+	catalogPipeline     *catalog.Pipeline
+	capabilityRefreshMu sync.RWMutex
+	capabilityRefresher CapabilityRefresher
 )
 
 // SetCatalogPipeline 注入 Pipeline(给单测 / bootstrap 用)
@@ -136,6 +138,31 @@ func SetCatalogPipeline(p *catalog.Pipeline) {
 	catalogPipelineMu.Lock()
 	catalogPipeline = p
 	catalogPipelineMu.Unlock()
+}
+
+// SetCapabilityRefresher 注入 Catalog 完成后的设备能力刷新器。
+func SetCapabilityRefresher(r CapabilityRefresher) {
+	capabilityRefreshMu.Lock()
+	capabilityRefresher = r
+	capabilityRefreshMu.Unlock()
+}
+
+func getCapabilityRefresher() CapabilityRefresher {
+	capabilityRefreshMu.RLock()
+	defer capabilityRefreshMu.RUnlock()
+	return capabilityRefresher
+}
+
+func triggerCapabilityRefresh(ctx context.Context, deviceID string, sn int) {
+	refresher := getCapabilityRefresher()
+	if refresher == nil {
+		return
+	}
+	// catalogAgg removes a bucket as soon as a complete response is assembled.
+	// The same SN is commonly reused by a device for a later refresh, so SN is
+	// only a response aggregation key and must not suppress a new completed
+	// Catalog batch.
+	refresher.Refresh(ctx, deviceID, sn)
 }
 
 // getCatalogPipeline lazy init,首次返回基于 app.DB() 的 Pipeline
@@ -208,12 +235,16 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 					logging.Error(e))
 			} else {
 				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
+				triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
 			}
 		} else {
 			catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
 			logger.Debug("CatalogPipeline 不可用,跳过 catalog 入库",
 				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
 				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+		}
+		if pipeline == nil {
+			triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
 		}
 	}
 

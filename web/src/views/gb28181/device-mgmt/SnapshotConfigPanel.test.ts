@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -311,5 +313,14 @@ describe("SnapshotConfigPanel", () => {
     await open.trigger("click");
     expect(push).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it("抓拍参数使用 Arco 数字输入框，提交按钮复用控制面板按钮样式", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/SnapshotConfigPanel.vue"), "utf8");
+
+    expect(source).toContain("<a-input-number");
+    expect(source).not.toMatch(/<input\s+v-model/);
+    expect(source).toContain('class="control-action-button"');
+    expect(source).toContain('html-type="button"');
   });
 });

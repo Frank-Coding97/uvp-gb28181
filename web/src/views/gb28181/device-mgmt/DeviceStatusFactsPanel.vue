@@ -457,7 +457,9 @@ function alarmFactText(fact: DeviceAlarmFact) {
 
       <div class="fact-actions">
         <a-button
+          class="fact-refresh-button"
           size="small"
+          type="primary"
           :loading="pending"
           :disabled="refreshDisabled"
           :title="refreshTitle"
@@ -610,6 +612,48 @@ function alarmFactText(fact: DeviceAlarmFact) {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+.fact-actions :deep(.fact-refresh-button) {
+  min-width: 104px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border: 1px solid var(--uvp-brand);
+  border-radius: 6px;
+  box-shadow: none !important;
+  transform: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.fact-actions :deep(.fact-refresh-button:hover:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.fact-actions :deep(.fact-refresh-button:active:not(.arco-btn-disabled)) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.fact-actions :deep(.fact-refresh-button.arco-btn-disabled) {
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-shell-muted);
+  border-color: var(--uvp-panel-border);
+}
+:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:not(.arco-btn-disabled)) {
+  color: #ffffff !important;
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+}
+:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
+:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
+  color: #ffffff !important;
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
 }
 .fact-actions-hint {
   font-size: 11px;
