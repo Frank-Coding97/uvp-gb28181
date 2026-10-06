@@ -111,6 +111,7 @@ import {
   type VideoParamCodecItem
 } from "../videoParamCodec";
 import { useVideoParamLabels } from "../useVideoParamDict";
+import { useHomePositionSupportLabel } from "../useHomePositionSupportDict";
 import {
   Activity,
   AlertTriangle,
@@ -1567,13 +1568,12 @@ const homeNoticeText = computed(() => {
   return homeConfirmed.value ? "设备状态可能已变化，请重新查询" : "暂时无法确认设备状态，请重试";
 });
 const homeSettingsActionLabel = computed(() => (homeConfirmed.value?.enabled ? "保存修改" : "启用看守位"));
+// 能力三态文案走字典（`home_position_support`，注入层 `../useHomePositionSupportDict`）。
+// ⛔ 只覆盖「支持 / 不支持 / 尚未确认」这三个词：紧邻的 `homePresentation` 是 8 态
+//    **派生状态**（能力 × 查询阶段 × 已确认配置组合而来），必须留在代码里。
+const homeSupportLabel = useHomePositionSupportLabel();
 const homeDiagnosticsTitle = computed(() => {
-  const supportText = (support: HomePositionSupport) =>
-    ({
-      supported: "支持",
-      unsupported: "不支持",
-      unknown: "尚未确认"
-    })[support.status];
+  const supportText = (support: HomePositionSupport) => homeSupportLabel(support.status);
   const lines = [
     `控制能力：${supportText(homeControlSupport.value)}${homeControlSupport.value.reason ? `（${homeControlSupport.value.reason}）` : ""}`,
     `查询能力：${supportText(homeQuerySupport.value)}${homeQuerySupport.value.reason ? `（${homeQuerySupport.value.reason}）` : ""}`

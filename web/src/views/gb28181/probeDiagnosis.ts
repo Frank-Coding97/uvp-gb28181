@@ -57,17 +57,84 @@ export type ProbeDiagnosis = {
 };
 
 /**
- * 后端 issue.code → 人话标题与该问题的排查方向。
+ * 后端 issue.code → 该问题的**排查方向**。
+ *
+ * ⛔ 这张表**刻意不进字典**（与标题分开看待）：一条 issue 在后端是「一个码 + 两条文案」，
+ * 而 `sys_dict_item` 只有 `id/name/value/status/dict_id` 五列、**没有第二文案列** ⇒
+ * 硬塞的话只能带走标题、把排查方向留在代码里。既然注定要拆，就按性质拆：
+ * - **标题**（"这个码叫什么"）→ 字典 `probe_issue_code`，运维可改；
+ * - **排查方向**（一整句处置建议）→ 留代码，与 §3.4「长句状态不并入字典」同口径。
+ * ⚠️ 两张表的 key 必须同步 —— `probeDiagnosis.test.ts` 有一条用例拿着全量码值
+ *    同时断言"四个码都有专属标题、也都有专属方向"，防止拆开后单边漂移。
  *
  * 用 Map 而不是 Record<string, …>:后者是索引签名,开了 noUncheckedIndexedAccess 时
  * 取值类型会带 undefined,Map.get 则天然是 `| undefined`,两种情况都不用额外断言。
  */
-const ISSUE_META = new Map<string, { title: string; focus: string }>([
-  ["no_frames", { title: "采样期间未收到媒体帧", focus: "先确认设备在推流、平台已收到该路流" }],
-  ["large_arrival_gap", { title: "帧到达出现连续大间隔", focus: "指向传输链路:带宽不足或链路抖动" }],
-  ["missing_keyframe", { title: "采样窗口内没有关键帧", focus: "指向设备编码配置:GOP 过长或未发 IDR" }],
-  ["timestamp_regression", { title: "媒体时间戳倒退", focus: "指向设备编码器:出帧时间戳错乱" }]
+const ISSUE_FOCUS = new Map<string, string>([
+  ["no_frames", "先确认设备在推流、平台已收到该路流"],
+  ["large_arrival_gap", "指向传输链路:带宽不足或链路抖动"],
+  ["missing_keyframe", "指向设备编码配置:GOP 过长或未发 IDR"],
+  ["timestamp_regression", "指向设备编码器:出帧时间戳错乱"]
 ]);
+
+/* -------------------------------------------------------------------------- *
+ * 字典化（纯展示）
+ *
+ * 本文件三处文案都由 `sys_dict` 驱动，但**都不进「前端只读」名单**：它们只影响
+ * 弹窗上怎么说话，既不参与判定、也不下发设备（判定走的是 `issue.code` 本身）。
+ * 注入层见 `useProbeDiagnosisDict.ts` —— ⛔ 本模块不 import vue/pinia，
+ * 只认"传进来的一张表"，默认值即下面的兜底表。
+ * -------------------------------------------------------------------------- */
+
+export const DICT_CODE_PROBE_STATUS = "probe_diagnosis_status";
+export const DICT_CODE_PROBE_ARRIVAL = "probe_arrival_level";
+export const DICT_CODE_PROBE_ISSUE_CODE = "probe_issue_code";
+
+/** 兜底口径 —— 按后端 `health.status` 值域写死，与字典项逐条对齐。 */
+export const PROBE_STATUS_LABEL_FALLBACK: Readonly<Record<string, string>> = {
+  ok: "平稳",
+  warning: "需关注",
+  error: "异常",
+  unknown: "未知"
+};
+
+/** 兜底口径 —— 按 `ProbeArrivalLevel` 值域写死。⚠️ 与上面同值 `unknown` 但说法不同，别并。 */
+export const PROBE_ARRIVAL_LABEL_FALLBACK: Readonly<Record<string, string>> = {
+  steady: "平稳",
+  slight: "轻微波动",
+  rough: "明显不匀",
+  unknown: "无法判断"
+};
+
+/**
+ * 兜底口径 —— 按 `ISSUE_FOCUS` 的 code 写死（两张表 key 必须一一对应）。
+ * ⛔ 码值未命中时**回显后端 `message`**（见 `toIssueView`），不吃兜底 ——
+ *    后端加了新码，排障要看见它自己的原话，而不是被吞成一句编造的标题。
+ */
+export const PROBE_ISSUE_TITLE_FALLBACK: Readonly<Record<string, string>> = {
+  no_frames: "采样期间未收到媒体帧",
+  large_arrival_gap: "帧到达出现连续大间隔",
+  missing_keyframe: "采样窗口内没有关键帧",
+  timestamp_regression: "媒体时间戳倒退"
+};
+
+/** 三张表的打包形态 —— 注入层给一份，纯函数侧默认用兜底。 */
+export type ProbeDiagnosisLabels = {
+  status: Readonly<Record<string, string>>;
+  arrival: Readonly<Record<string, string>>;
+  issueTitle: Readonly<Record<string, string>>;
+};
+
+const DEFAULT_LABELS: ProbeDiagnosisLabels = {
+  status: PROBE_STATUS_LABEL_FALLBACK,
+  arrival: PROBE_ARRIVAL_LABEL_FALLBACK,
+  issueTitle: PROBE_ISSUE_TITLE_FALLBACK
+};
+
+/** 查表：调用方给的表优先，缺项回落本模块兜底表，再缺才回显原码值（排障要看得见）。 */
+function pick(labels: Readonly<Record<string, string>>, fallback: Readonly<Record<string, string>>, key: string): string {
+  return labels[key] || fallback[key] || key;
+}
 
 /**
  * 到达节奏的定性分级阈值。
@@ -79,20 +146,6 @@ const ISSUE_META = new Map<string, { title: string; focus: string }>([
  */
 const STEADY_RATIO = 0.5;
 const ROUGH_RATIO = 1;
-
-const STATUS_LABEL: Record<ProbeDiagnosisStatus, string> = {
-  ok: "平稳",
-  warning: "需关注",
-  error: "异常",
-  unknown: "未知"
-};
-
-const ARRIVAL_LABEL: Record<ProbeArrivalLevel, string> = {
-  steady: "平稳",
-  slight: "轻微波动",
-  rough: "明显不匀",
-  unknown: "无法判断"
-};
 
 function normalizeStatus(raw: string | undefined): ProbeDiagnosisStatus {
   if (raw === "ok" || raw === "warning" || raw === "error") return raw;
@@ -107,25 +160,29 @@ function issueEvidence(thresholdMs?: number, observedMs?: number): string | null
   return `实测 ${observedMs} ms ／ 阈值 ${thresholdMs} ms`;
 }
 
-function toIssueView(issue: { code: string; message: string; thresholdMs?: number; observedMs?: number }): ProbeIssueView {
-  const meta = ISSUE_META.get(issue.code);
+function toIssueView(
+  issue: { code: string; message: string; thresholdMs?: number; observedMs?: number },
+  labels: ProbeDiagnosisLabels
+): ProbeIssueView {
   return {
     code: issue.code,
-    title: meta?.title ?? issue.message,
+    // 字典与兜底只回答「认识的码叫什么」；**不认识的码回显后端原话**，不被吞成编造标题。
+    title: labels.issueTitle[issue.code] || PROBE_ISSUE_TITLE_FALLBACK[issue.code] || issue.message || issue.code,
     message: issue.message,
     evidence: issueEvidence(issue.thresholdMs, issue.observedMs),
-    focus: meta?.focus ?? "建议结合逐帧曲线复核",
+    focus: ISSUE_FOCUS.get(issue.code) ?? "建议结合逐帧曲线复核",
+    // ⛔ severity 取的是 code 本身，不是文案 ⇒ 字典改名不影响它，别改成按标题判。
     severity: issue.code === "no_frames" ? "error" : "warning"
   };
 }
 
-function buildRhythm(snapshot: ProbeSnapshot): ProbeRhythmView {
+function buildRhythm(snapshot: ProbeSnapshot, labels: ProbeDiagnosisLabels): ProbeRhythmView {
   const encodeMs = snapshot.timestamps?.videoDtsIntervalMeanMs ?? null;
   const arrivalMs = snapshot.timestamps?.arrivalJitterMs ?? null;
   const ratio = encodeMs != null && encodeMs > 0 && arrivalMs != null ? arrivalMs / encodeMs : null;
   const level: ProbeArrivalLevel =
     ratio == null ? "unknown" : ratio >= ROUGH_RATIO ? "rough" : ratio >= STEADY_RATIO ? "slight" : "steady";
-  return { encodeMs, arrivalMs, ratio, level, label: ARRIVAL_LABEL[level] };
+  return { encodeMs, arrivalMs, ratio, level, label: pick(labels.arrival, PROBE_ARRIVAL_LABEL_FALLBACK, level) };
 }
 
 /**
@@ -196,15 +253,22 @@ function buildVerdict(status: ProbeDiagnosisStatus, codes: Set<string>, rhythm: 
   };
 }
 
-export function buildProbeDiagnosis(snapshot: ProbeSnapshot | null | undefined): ProbeDiagnosis | null {
+/**
+ * 把一份健康快照摊平成可渲染视图模型。
+ * `labels` 由注入层从字典取（见 `useProbeDiagnosisDict.ts`），省略时用本模块兜底表。
+ */
+export function buildProbeDiagnosis(
+  snapshot: ProbeSnapshot | null | undefined,
+  labels: ProbeDiagnosisLabels = DEFAULT_LABELS
+): ProbeDiagnosis | null {
   if (!snapshot) return null;
   const status = normalizeStatus(snapshot.health?.status);
   const rawIssues = snapshot.health?.issues ?? [];
-  const rhythm = buildRhythm(snapshot);
+  const rhythm = buildRhythm(snapshot, labels);
   return {
     status,
-    statusLabel: STATUS_LABEL[status],
-    issues: rawIssues.map(toIssueView),
+    statusLabel: pick(labels.status, PROBE_STATUS_LABEL_FALLBACK, status),
+    issues: rawIssues.map(issue => toIssueView(issue, labels)),
     rhythm,
     verdict: buildVerdict(status, new Set(rawIssues.map(issue => issue.code)), rhythm)
   };

@@ -16,6 +16,7 @@ import VChart from "@visactor/vchart";
 import { RotateCcw } from "@lucide/vue";
 import type { ProbeSnapshot } from "@/api/gb28181";
 import { buildProbeDiagnosis } from "../probeDiagnosis";
+import { useProbeDiagnosisLabels } from "../useProbeDiagnosisDict";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 
 const props = defineProps<{
@@ -38,7 +39,9 @@ const durationMs = computed(() => Math.max(0, props.snapshot?.summary?.sampleDur
 const overview = computed(() => buildProbeOverview(props.snapshot));
 // 诊断结论跟着快照走,与曲线同源。后端 health 里已经带了 status / issues / 阈值,
 // 这里只做摊平与判读(见 probeDiagnosis.ts),不在组件里重算任何指标。
-const diagnosis = computed(() => buildProbeDiagnosis(props.snapshot));
+// 三张展示表(状态 / 到达节奏 / 问题标题)走字典,字典缺失时回落纯函数里的兜底表。
+const diagnosisLabels = useProbeDiagnosisLabels();
+const diagnosis = computed(() => buildProbeDiagnosis(props.snapshot, diagnosisLabels.value));
 
 function toKb(bytes: number) {
   return Math.round((bytes / 1024) * 100) / 100;

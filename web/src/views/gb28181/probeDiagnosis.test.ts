@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeSnapshot } from "@/api/gb28181";
-import { buildProbeDiagnosis } from "./probeDiagnosis";
+import {
+  buildProbeDiagnosis,
+  PROBE_ARRIVAL_LABEL_FALLBACK,
+  PROBE_ISSUE_TITLE_FALLBACK,
+  PROBE_STATUS_LABEL_FALLBACK
+} from "./probeDiagnosis";
 
 type ProbeHealth = ProbeSnapshot["health"];
 type ProbeIssue = ProbeHealth["issues"][number];
@@ -170,5 +175,63 @@ describe("buildProbeDiagnosis", () => {
     expect(diagnosis?.statusLabel).toBe("未知");
     expect(diagnosis?.verdict.level).toBe("notice");
     expect(diagnosis?.verdict.title).toContain("信息不完整");
+  });
+});
+
+/** 全量 issue 码值 —— 两张表（标题 / 排查方向）必须都覆盖到。 */
+const ALL_ISSUE_CODES = ["no_frames", "large_arrival_gap", "missing_keyframe", "timestamp_regression"];
+
+/** 代码侧 `ISSUE_FOCUS` 未命中时给的那句通用兜底（见 `probeDiagnosis.ts`）。 */
+const GENERIC_FOCUS = "建议结合逐帧曲线复核";
+
+describe("buildProbeDiagnosis · 字典化（三张纯展示表）", () => {
+  it("兜底表按后端值域写死 —— 状态四态 / 到达节奏四档 / 问题标题四个码", () => {
+    expect(Object.keys(PROBE_STATUS_LABEL_FALLBACK).sort()).toEqual(["error", "ok", "unknown", "warning"]);
+    expect(Object.keys(PROBE_ARRIVAL_LABEL_FALLBACK).sort()).toEqual(["rough", "slight", "steady", "unknown"]);
+    expect(Object.keys(PROBE_ISSUE_TITLE_FALLBACK).sort()).toEqual([...ALL_ISSUE_CODES].sort());
+  });
+
+  it("⛔ 状态表与到达节奏表都有一档叫 unknown，但说法不同 —— 不许并成一张表", () => {
+    expect(PROBE_STATUS_LABEL_FALLBACK.unknown).toBe("未知");
+    expect(PROBE_ARRIVAL_LABEL_FALLBACK.unknown).toBe("无法判断");
+  });
+
+  it("字典给的名字覆盖兜底，且三张表各自独立生效", () => {
+    const diagnosis = buildProbeDiagnosis(snapshot({}, { status: "error", issues: [issue("no_frames")] }), {
+      status: { ...PROBE_STATUS_LABEL_FALLBACK, error: "严重异常" },
+      arrival: { ...PROBE_ARRIVAL_LABEL_FALLBACK, steady: "很匀" },
+      issueTitle: { ...PROBE_ISSUE_TITLE_FALLBACK, no_frames: "没有收到任何帧" }
+    });
+
+    expect(diagnosis?.statusLabel).toBe("严重异常");
+    expect(diagnosis?.rhythm.label).toBe("很匀");
+    expect(diagnosis?.issues[0].title).toBe("没有收到任何帧");
+  });
+
+  it("注入进来的表缺项时回落本模块兜底，而不是把英文码值甩到界面上", () => {
+    const diagnosis = buildProbeDiagnosis(snapshot(), { status: {}, arrival: {}, issueTitle: {} });
+
+    expect(diagnosis?.statusLabel).toBe("平稳");
+    expect(diagnosis?.rhythm.label).toBe("平稳");
+  });
+
+  it("后端新增了不认识的码值时，标题回显后端原话、方向回落通用兜底", () => {
+    const diagnosis = buildProbeDiagnosis(snapshot({}, { status: "warning", issues: [issue("brand_new_code")] }));
+
+    expect(diagnosis?.issues[0].title).toBe("后端原始 message: brand_new_code");
+    expect(diagnosis?.issues[0].focus).toBe(GENERIC_FOCUS);
+  });
+
+  it("⭐ 标题与排查方向是**两张表按同一组 code 拆的** —— 防止拆开后单边漂移", () => {
+    const issues = ALL_ISSUE_CODES.map(code => issue(code));
+    const diagnosis = buildProbeDiagnosis(snapshot({}, { status: "warning", issues }));
+
+    expect(diagnosis?.issues).toHaveLength(ALL_ISSUE_CODES.length);
+    for (const item of diagnosis?.issues ?? []) {
+      // 标题取到了兜底表里的专属文案（不是后端 message）
+      expect(item.title).not.toContain("后端原始 message");
+      // 方向取到了代码侧表里的专属文案（不是那句通用兜底）
+      expect(item.focus).not.toBe(GENERIC_FOCUS);
+    }
   });
 });

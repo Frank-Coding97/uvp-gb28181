@@ -51,7 +51,7 @@
 | **P4a** | 系统类三件套 | `sysjobs/sysjobslist.vue`、`system/login-log/index.vue`（+ 各 2 个新纯函数/注入层文件） | `job_execute_policy`、`job_blocking_policy`、`login_failure_reason` | ✅ **已完成**（顺带补 `sysjobslist` 里 F25 的漏项） |
 | **P4b** | 设备配置族（**会下发给设备**） | `device-mgmt/deviceConfigGroups.ts`、`DeviceConfigDrawer.vue`、`components/PlayConsoleLinked.vue`、`components/play-console/PictureVideoParamCard.vue`（+ 2 个新纯函数/注入层文件） | `frame_mirror`、`stream_number`（`osd_time_format` **已跳过**，见 §3.5-D） | ✅ **已完成** |
 | **P4c-1** | 纯展示批（一）：可播性 / 会话类型 / 持有态 | `multi-screen-playback/PlaybackSchemePanel.vue`、`home/components/drilldown/MediaRuntimeLedgerDialog.vue`、`cloud-recordings/components/RecordingRuntimeControl.vue`（+ 各新纯函数/注入层） | `playable_state`、`zlm_session_type`、`recording_holder_state` | ✅ **已完成**（见 §二·P4c） |
-| **P4c-2** | 纯展示批（二）：看守位能力三态 / 探针诊断 | `components/PlayConsoleLinked.vue`、`probeDiagnosis.ts` | `home_position_capability`、`probe_diagnosis` | ⏳ 待做（⚠️ 文件夹着他人在建改动；F32 有一张"一码两串"表，见 §3.5-E） |
+| **P4c-2** | 纯展示批（二）：看守位能力三态 / 探针诊断 | `components/PlayConsoleLinked.vue`、`probeDiagnosis.ts`、`components/ProbeTimelineDialog.vue`（+ 各新纯函数/注入层） | `home_position_support`、`probe_diagnosis_status`、`probe_arrival_level`、`probe_issue_code` | ✅ **已完成**（见 §二·P4c；⚠️ `PlayConsoleLinked.vue` 仍夹他人在建改动，已按 hunk 精确 stage） |
 | **P4c-3** | 纯展示批（三）：坐标来源 / 回读新鲜度 | `device-mgmt/channelPositionForm.ts`、`device-mgmt/DeviceConfigDrawer.vue` | `channel_position_source`、`config_read_freshness` | ⛔ **先拍板**（⚠️ 文件夹着他人在建改动；⚠️ 回读新鲜度有**同值域三实现、措辞还不同**，见 §3.5-A 补记） |
 | **P4d** | 维护操作结果收敛 | `DeviceRebootDialog` / `DeviceFirmwareUpgradePanel` / `StorageCardFormatDialog` / `DeviceMaintenanceRecordsDialog` | `maintenance_operation_result` | ⏳ 待做（⚠️ **4 份值域并不相同**，需先定口径） |
 | **B4–B10** | 后端文案 | 见盘点报告 | — | ⛔ **不做**（§8「后端不做字典」）；仅当前端另有一份重复时，以前端为准收敛 |
@@ -313,7 +313,7 @@ VIDEO_RESOLUTION_TIERS[resolutionText(码值)]      // 分辨率对比
 
 ---
 
-### 二·P4c 明细（⏳ 拆三小批；P4c-1 ✅ 已完成 2026-10-05）
+### 二·P4c 明细（拆三小批；P4c-1 ✅ 2026-10-05 / P4c-2 ✅ 2026-10-06）
 
 ⚠️ **P4c 不能当成一批做**：§3.5-A 列了 9 项，但其中 **F27 已被 §3.5-D 否掉**（11 条句子）、**F29 归 P4d**
 （4 份值域不同），真正可做 7 项，且**异质**（★ 有无"文案被当逻辑输入"、所在文件是否夹着他人改动都不同）。
@@ -347,8 +347,51 @@ F31 → **回显原值**。这三处都**不进「前端只读」名单**（§3.
 接口 `getByDictCode/{playable_state,zlm_session_type,recording_holder_state}` **逐条对拍一致**；
 `eslint` 零告警、`prettier` 干净。
 
-**P4c 剩余**：F28 看守位能力三态、F32 探针诊断结论 → **P4c-2**；F15 坐标来源、F30 回读新鲜度 → **P4c-3**
-（见下方 §3.5 的新发现：这两处的文件里夹着**他人在建改动** / 有**同值域多实现**的问题，需先处理）。
+#### P4c-2（✅ 已完成 2026-10-06）：F28 看守位能力三态 / F32 探针诊断结论
+
+| 项 | 名称 | 纯函数模块（新） | 注入层（新） | 消费点 | 新字典 |
+| --- | --- | --- | --- | --- | --- |
+| **F28** | 看守位·能力三态 | `homePositionSupport.ts` | `useHomePositionSupportDict.ts` | `components/PlayConsoleLinked.vue`（`homeDiagnosticsTitle` 里的 `supportText` 改注入） | `home_position_support`（3 档） |
+| **F32** | 逐帧检测·诊断结论 | `probeDiagnosis.ts`（**原本就是纯模块**，三张表改成可注入参数） | `useProbeDiagnosisDict.ts` | `components/ProbeTimelineDialog.vue`（`buildProbeDiagnosis(snapshot, labels)`） | `probe_diagnosis_status`(4) / `probe_arrival_level`(4) / `probe_issue_code`(4) |
+
+⛔⛔ **F32 的「一码两串」怎么落（本批唯一的设计判断）**：盘点时把 F32 记成"一张表"，实际是
+「一个 issue code → **标题 + 排查方向**两条文案」。而 `sys_dict_item` 实测只有
+`id / name / value / status / dict_id` 五列 —— **没有第二文案列**，一张表装不下两条。
+⇒ 按**性质**拆，不硬塞：**标题**（"这个码叫什么"）进字典 `probe_issue_code`；
+**排查方向**（一整句处置建议）留代码（`ISSUE_FOCUS`），与 §3.4「长句状态不并入字典」同口径。
+⚠️ 拆开后最大的风险是**单边漂移**（字典加了码、代码侧没加）⇒ 单测拿**全量码值**同时断言
+"四个码都有专属标题、也都有专属方向"，任一侧缺项即红。
+
+⛔ **F32 里三处刻意留在代码里、不许字典化的东西**（都属"派生 / 逻辑输入"）：
+- `verdict`（定责结论）—— 按"先设备侧硬证据、再链路侧、最后泛化"的**优先级链**由码值组合出来的整句；
+- `issue.focus` —— 上面那条，整句处置建议；
+- `issue.severity` —— 取的是 `code === "no_frames"` 即**码值本身**（已在代码里注明别改成按标题判）。
+⚠️ 另外 `ProbeTimelineDialog.vue` 模板里 `:class="diagnosis.status"` 取的是**原始码值**（同 F19 的
+`availability-<值>`）⇒ 改字典不影响配色、加档位也不会多出一个没样式定义的类。
+
+⛔ **F28 的显示面比盘点记的小得多**：全仓只有**一处**用到这个三态 —— `PlayConsoleLinked.vue` 的
+`homeDiagnosticsTitle`（一个 tooltip 里的「控制能力 / 查询能力」两行）。据此砍掉了本来可能顺手做的几件事：
+- `HomePositionSource` / `HomePositionVerification` / `HomePositionFreshness` 三个类型
+  **只在 `api/gb28181.ts` 里声明、全仓从未被读取**（已核）⇒ 不值得为它们造字典；
+- 紧邻的 `homePresentation` 是 **8 态派生状态机**（未知 / 加载中 / 待确认 / 不支持 / 未配置 / 已启用 /
+  已关闭 / 离线），由能力 × 查询阶段 × 已确认配置组合而来 ⇒ **必须留代码**，字典只覆盖那三个词；
+- 同文件 `capabilityActionTitle` 里的「设备上报不支持」是**拼进整句**的说明（还要带 action 名与 reason）
+  ⇒ 也不是"一码一名"，留代码。
+- ⛔ 空值按 `unknown` 处理（"还没读到"本就等于"尚未确认"），否则 tooltip 里会出现「控制能力：」这种半句。
+
+**验证**：`homePositionSupport.test.ts` 6 例 + `probeDiagnosis.test.ts` 新增 6 例 ⇒ 本批相关共 **34 例绿**
+（`probeDiagnosis` 20 / `homePositionSupport` 6 / `ProbeTimelineDialog` 8）；`PlayConsoleLinked.test.ts`
+**201 例全绿**（既有断言钉的是 `reason` 串与派生文案，未受影响）；
+开发库 **37 字典 / 201 项**（四个新字典 3/4/4/4，无重复行、无孤儿项，幂等复跑不增行）；
+`eslint` 零告警、`prettier` 干净；`vue-tsc` 本批文件零错误。
+⚠️ **本批接口层没跑成** —— 后端 8280 当时**没在运行**（IDE 调试进程已停），改用**与 `getByDictCode` 同构的
+SQL** 复刻（并按 API 会过滤的 `deleted_at IS NULL` + `status=1` 双条件核），四个字典 15 项逐条一致。
+⛔ 没有为了"凑齐验证"去起后端：起平台会向共享环境注册媒体节点 / 下发 ZLM hook，侧效应远大于收益。
+**待补**：后端起来时，把 P4c-1 / P4c-2 这 7 个字典一起过一次接口层对拍。
+
+**P4c 剩余**：只剩 **P4c-3** = F15 坐标来源 / F30 回读新鲜度 —— ⛔ **两项都有前置**（见 §3.5-A 补记）：
+F15 的消费文件里夹着**他人在建改动**（须按 hunk 精确 stage）；F30 是**同值域三实现、措辞还各不相同**，
+属设计题**需先拍板**（并成一个字典统一措辞，还是各留各的）。
 
 ---
 
