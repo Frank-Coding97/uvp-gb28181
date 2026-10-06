@@ -1219,9 +1219,17 @@ export interface SnapshotLibraryItem {
   /** 通道国标编码 */
   channelCode: string;
   channelName: string;
+  /**
+   * 用户自定义通道别名（`gb_channel.alias`，设备上报覆盖不了）。
+   * ⛔ 现场人员认的是它，而 `channelName` 是设备自报的厂家串 ——
+   * 界面上必须别名优先，否则满屏都是没人认得的型号。
+   */
+  channelAlias?: string;
   /** 设备 20 位国标编码 */
   deviceCode: string;
   deviceName: string;
+  /** 用户自定义设备别名（`gb_device.alias`）。 */
+  deviceAlias?: string;
   /** 平台生成的抓拍会话 id；非会话抓拍（如平台抓帧）为空 */
   sessionId?: string;
   fileName: string;
@@ -1257,6 +1265,12 @@ export interface SnapshotLibraryQuery {
   deviceCode?: string;
   sessionId?: string;
   source?: SnapshotLibrarySource | "";
+  /**
+   * 设备名/通道名/两种编码的模糊搜。
+   * ⛔ 必须走后端：分页在后端这一层，页内过滤会让「在第 7 页」和「不存在」
+   * 表现完全一致（都是"没搜到"）。
+   */
+  keyword?: string;
   /** RFC3339，按 `capturedAt` 过滤 */
   from?: string;
   to?: string;

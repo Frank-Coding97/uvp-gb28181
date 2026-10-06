@@ -581,6 +581,137 @@ func TestListSnapshotsFiltersByPlatformChannelAndSession(t *testing.T) {
 	require.Equal(t, float64(0), total, "会话 + 通道是 AND，不是两条独立查询的最后一条")
 }
 
+// TestListSnapshotsKeywordMatchesNamesAndEscapesWildcards 钉住 `keyword` 的三个要点。
+//
+// 关键词搜索**必须在这一层**（分页在这一层）：若改由前端在页内过滤，
+// 「搜不到」的两种成因（真的没有 / 在第 7 页）会长得一模一样，界面无从分辨。
+//
+// 1. 名称能搜到 —— 这是它存在的理由。原来的界面只有两个 20 位编码输入框，
+//    不知道编码的人一步也走不了。
+// 2. 通配符被转义 —— 不转义的话搜 `100%` 会匹配到所有行，界面表现是
+//    "搜一个具体编码却出来一堆不相干的图"，比不过滤更难排查。
+// 3. 编码片段能搜到 —— 用户手上往往只有编码的后几位。
+func TestListSnapshotsKeywordMatchesNamesAndEscapesWildcards(t *testing.T) {
+	router, db := snapshotLibraryFixture(t)
+	const deviceA, channelA = "37010301021320000711", "37010301021320000712"
+	const deviceB, channelB = "37010301021320000811", "37010301021320000812"
+	seedSnapshotChannel(t, db, deviceA, channelA, 10)
+	seedSnapshotChannel(t, db, deviceB, channelB, 10)
+	// 改成有业务含义的名字，否则"按名称搜"这条断言其实只在搜编码前缀。
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", channelA).
+		Update("name", "东门出入口").Error)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", deviceB).
+		Update("name", "西库房摄像机").Error)
+
+	base := time.Date(2026, 9, 20, 17, 0, 0, 0, time.UTC)
+	gateShot := seedSnapshotImage(t, db, channelA, "gate.jpg", base, gbmodels.SnapshotSourceDevice)
+	shedShot := seedSnapshotImage(t, db, channelB, "shed.jpg", base.Add(time.Minute), gbmodels.SnapshotSourceDevice)
+
+	// 1) 按通道中文名搜
+	list, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("东门")))
+	require.Equal(t, float64(1), total, "按通道名搜不到 = 名称搜索没接上")
+	require.Equal(t, float64(gateShot), list[0]["id"])
+
+	// 1b) 按设备中文名搜（打的是 JOIN 来的 d.name，与 ch.name 是两条独立的列）
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("西库房")))
+	require.Equal(t, float64(1), total, "按设备名搜不到 = 只接了通道名那一半")
+
+	// 2) 编码片段（不是完整编码，也不是开头）
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("0000")))
+	require.Equal(t, float64(2), total, "两个通道的编码都含 0000 段，两边都要能搜到")
+
+	// 3) 通配符必须被当字面量。`%` 未转义时上面那条查询会命中全部行，
+	//    所以这里用"只含 % 的关键词"来对照：命中数必须是 0 而不是全部。
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("%")))
+	require.Equal(t, float64(0), total, "%% 被当成了通配符 —— LIKE 没转义，搜什么都命中一切")
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("_")))
+	require.Equal(t, float64(0), total, "_ 是单字符通配符，必须被转义")
+
+	// 反证：上面两条都恒 0 时，要确认不是"这条查询根本没生效"造成的假通过
+	// —— 用真实存在的编码片段必须能命中。
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+channelB))
+	require.Equal(t, float64(1), total)
+	require.NotEqual(t, float64(gateShot), float64(shedShot), "两条种子图必须是不同行，否则上面的断言区分不出打到哪一列")
+}
+
+// TestEscapeLikePatternLocksTheEscapeChar 转义规则是**跨用例**的：
+// 一旦换转义符（比如有人改成 `\`），所有带 ESCAPE 的 SQL 都要同步改，
+// 而这种不同步的表现是「搜不出东西」，不报错。这里把字符级行为钉住。
+func TestEscapeLikePatternLocksTheEscapeChar(t *testing.T) {
+	require.Equal(t, "100!%", gbcontrollers.EscapeLikePattern("100%"))
+	require.Equal(t, "a!_b", gbcontrollers.EscapeLikePattern("a_b"))
+	// ⛔ 转义符自身必须先转义，否则搜 `!%` 会被拆成 `!!` + `!%` = `!!!%` 之外的口径，
+	// 后面紧跟的字符可能被当成字面量吞掉（这里钉住的是"两个字符各转各的"）。
+	require.Equal(t, "!!", gbcontrollers.EscapeLikePattern("!"))
+	require.Equal(t, "!!!%", gbcontrollers.EscapeLikePattern("!%"))
+	require.Equal(t, "普通名称", gbcontrollers.EscapeLikePattern("普通名称"))
+}
+
+// TestListSnapshotsReturnsBothNamesAndAliases 钉住**四个名字列**都必须出现在响应里。
+//
+// ⛔ 少一列的表现是静默的：前端回退到另一个名字，于是满屏都是设备自报的厂家串
+// （"IPC-HFW2431S"），而现场人员嘴里的"东门枪机"（`alias`）一个字都搜不到/看不到。
+// 字段名拼错同样静默 —— JSON 少一个 key，前端读出来是 undefined，回退逻辑照跑。
+func TestListSnapshotsReturnsBothNamesAndAliases(t *testing.T) {
+	router, db := snapshotLibraryFixture(t)
+	const deviceCode, channelCode = "37010301021320000911", "37010301021320000912"
+	seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+	// 别名与上报名**故意设成不同** —— 两列同名时无法区分是否真的各自取到了值。
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", channelCode).
+		Update("name", "IPC-HFW2431S").Error)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", channelCode).
+		Update("alias", "东门枪机").Error)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", deviceCode).
+		Update("name", "NVR").Error)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", deviceCode).
+		Update("alias", "一号机房NVR").Error)
+
+	base := time.Date(2026, 9, 20, 18, 0, 0, 0, time.UTC)
+	seedSnapshotImage(t, db, channelCode, "a.jpg", base, gbmodels.SnapshotSourceDevice)
+
+	list, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, ""))
+	require.Equal(t, float64(1), total)
+	row := list[0]
+	require.Equal(t, "IPC-HFW2431S", row["channelName"], "上报名要原样给出")
+	require.Equal(t, "东门枪机", row["channelAlias"], "通道别名缺失 ⇒ 界面回退到厂家串，现场认不出")
+	require.Equal(t, "NVR", row["deviceName"], "设备上报名要原样给出")
+	require.Equal(t, "一号机房NVR", row["deviceAlias"], "设备别名缺失 ⇒ 满屏都是 NVR 这类通称")
+
+	// 平台主键：报障时对方要的是"哪一条记录"，光有 20 位编码没法定位库行。
+	require.NotNil(t, row["deviceId"], "deviceId（平台主键）必须在响应里")
+	require.NotNil(t, row["channelId"], "channelId（平台主键）必须在响应里")
+	// ⛔ 编码与主键是两个语义不同的东西，同时出现在一行里最容易接反。
+	require.Equal(t, channelCode, row["channelCode"])
+	require.NotEqual(t, channelCode, row["channelId"], "channelId 是主键，与 20 位编码不是同一列")
+}
+
+// TestListSnapshotsKeywordAlsoMatchesAliases 别名必须能被搜到。
+//
+// ⛔ 只在 SELECT 里返回、但没进 LIKE 条件，等于给了用户"页面上写着这个名字、
+// 搜这个名字却搜不到"的矛盾 —— 而这正是"我不知道该搜什么"的另一种表现。
+func TestListSnapshotsKeywordAlsoMatchesAliases(t *testing.T) {
+	router, db := snapshotLibraryFixture(t)
+	const deviceCode, channelCode = "37010301021320001011", "37010301021320001012"
+	seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", channelCode).
+		Update("alias", "东门枪机").Error)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", deviceCode).
+		Update("alias", "一号机房NVR").Error)
+
+	base := time.Date(2026, 9, 20, 19, 0, 0, 0, time.UTC)
+	seedSnapshotImage(t, db, channelCode, "a.jpg", base, gbmodels.SnapshotSourceDevice)
+
+	_, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("东门枪机")))
+	require.Equal(t, float64(1), total, "按通道别名搜不到")
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("一号机房")))
+	require.Equal(t, float64(1), total, "按设备别名搜不到")
+	// 反证：上报名仍然能搜（别名的加入不能顶掉原来的四列）。
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", channelCode).
+		Update("name", "IPC-HFW2431S").Error)
+	_, total = decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, "?keyword="+url.QueryEscape("IPC-HFW")))
+	require.Equal(t, float64(1), total, "上报名搜不到了 = 加别名时把原来的列弄丢了")
+}
+
 // TestListSnapshotsCapsPageSizeAndCoercesPage 把分页的两个**静默**风险钉死：
 // `pageSize` 不封顶等于一次请求扫全表（`?pageSize=1000000` 就能把库拖住）；
 // 页号非法时若不回落而是照原样算 offset，表现是"翻到第 0 页看到空列表"，

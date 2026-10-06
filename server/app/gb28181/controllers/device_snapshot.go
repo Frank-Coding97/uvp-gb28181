@@ -400,6 +400,20 @@ func (dc *DeviceMgmtController) SnapshotContent(c *gin.Context) {
 	c.File(path)
 }
 
+// EscapeLikePattern 转义 LIKE 模式里的通配符，配合 `ESCAPE '!'` 使用。
+//
+// ⛔ 不转义的话，用户搜 `100%`（或 `_`）会变成"匹配任意串"，界面表现是
+// "搜一个具体编码却出来一堆不相干的图"——比不过滤更难排查。
+// ⛔ 转义符是 `!` 而不是默认的 `\`：MySQL 里 `NO_BACKSLASH_ESCAPES` 之外
+// 的模式下 `\` 会被当作字面量，行为随 sql_mode 漂移；`!` 不与二者冲突。
+//
+// 导出是因为本包的测试在 `controllers_test` 外部包里：转义字符级行为必须能
+// 被单独钉住（换转义符时所有 ESCAPE 子句都要同步改，不同步的表现是"搜不到东西"）。
+func EscapeLikePattern(raw string) string {
+	replacer := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+	return replacer.Replace(raw)
+}
+
 // snapshotLibraryRow 是列表查询的扫描行：图像库自己的列 + 从 gb_channel / gb_device 补的名称。
 type snapshotLibraryRow struct {
 	ID          uint      `gorm:"column:id"`
@@ -416,6 +430,12 @@ type snapshotLibraryRow struct {
 	ChannelName string    `gorm:"column:channel_name"`
 	DeviceCode  string    `gorm:"column:device_code"`
 	DeviceName  string    `gorm:"column:device_name"`
+	// ⛔ 别名是**用户自己起的名字**（`gb_channel.alias` / `gb_device.alias`，
+	// 设备上报覆盖不了）。现场人员嘴里的"东门那个枪机"往往只对应 alias，
+	 // 而 `name` 是设备自报的厂家串（"IPC-HFW2431S"）。两个都要出：
+	// 只给 name 会出现"搜不到东门"，只给 alias 会出现"这名字哪来的"。
+	ChannelAlias string    `gorm:"column:channel_alias"`
+	DeviceAlias  string    `gorm:"column:device_alias"`
 }
 
 // snapshotLibraryVO 是列表接口对外的一行。`url` 是**取图地址**（稳定读接口），
@@ -426,8 +446,12 @@ type snapshotLibraryVO struct {
 	ChannelID   uint      `json:"channelId"`
 	ChannelCode string    `json:"channelCode"`
 	ChannelName string    `json:"channelName"`
+	/** 用户自定义通道别名（不被设备上报覆盖）。为空时前端回退到 channelName。 */
+	ChannelAlias string    `json:"channelAlias"`
 	DeviceCode  string    `json:"deviceCode"`
 	DeviceName  string    `json:"deviceName"`
+	/** 用户自定义设备别名（不被设备上报覆盖）。为空时前端回退到 deviceName。 */
+	DeviceAlias  string    `json:"deviceAlias"`
 	SessionID   string    `json:"sessionId,omitempty"`
 	FileName    string    `json:"fileName"`
 	Size        int64     `json:"size"`
@@ -445,12 +469,16 @@ type snapshotLibraryVO struct {
 // 很容易把两者接反 —— 而前端拿反了就是"用编码当主键去关联"。
 const snapshotLibrarySelect = "s.id, s.device_id, s.channel_id, s.channel_code, s.session_id, s.file_name, " +
 	"s.size, s.md5, s.captured_at, s.source, s.created_at, " +
-	"ch.name AS channel_name, ch.device_id AS device_code, d.name AS device_name"
+	"ch.name AS channel_name, ch.device_id AS device_code, d.name AS device_name, " +
+	// ⛔ 两个 alias 都要显式取，别指望 GORM 按名字猜：`ch.alias` 与 `d.alias`
+	// 同名，不起 AS 就撞成同一列，而扫描行只有一个字段能接住两个值 ——
+	// 表现是"设备别名显示成通道别名"或干脆空着，且不报错。
+	"ch.alias AS channel_alias, d.alias AS device_alias"
 
 // ListSnapshots 图像库列表：按通道 / 时间段 / 来源翻历史抓拍图。
 //
 //	GET /api/gb28181/device-mgmt/snapshots
-//	    ?channelId=&channelCode=&deviceCode=&sessionId=&source=&from=&to=&page=&pageSize=
+//	    ?channelId=&channelCode=&deviceCode=&sessionId=&source=&keyword=&from=&to=&page=&pageSize=
 //
 // 与 [DeviceMgmtController.SnapshotContent] 的分工：本条回答"有哪些图"（只出元数据 + 取图地址），
 // 那条回答"这张图的字节"。
@@ -507,6 +535,19 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 		}
 		q = q.Where("s.source = ?", source)
 	}
+	// 名称/编码模糊搜。前端**不能**自己过滤：分页发生在这一层，只在页内过滤的话
+	// 「搜到 0 条」可能只是目标在第 7 页，而界面看上去就是"没这张图"。
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		// ⛔ `%`/`_` 是 LIKE 的通配符，必须转义后再拼，否则用户搜 `100%` 会匹配到一切。
+		like := "%" + EscapeLikePattern(keyword) + "%"
+		// ⛔ 名称列取自 LEFT JOIN 的 ch/d，与可见性 Scope 命中的是同一批行；
+		// 编码列用 `s.channel_code`（抓拍当时记下的快照，不是 ch 表当前值），
+		// 这样"设备改名之前拍的图"仍能按旧编码搜到。
+		q = q.Where(
+			"ch.name LIKE ? ESCAPE '!' OR d.name LIKE ? ESCAPE '!' OR s.channel_code LIKE ? ESCAPE '!' OR ch.device_id LIKE ? ESCAPE '!' "+
+				"OR ch.alias LIKE ? ESCAPE '!' OR d.alias LIKE ? ESCAPE '!'",
+			like, like, like, like, like, like)
+	}
 	from, err := parseOptionalTime(c.Query("from"))
 	if err != nil {
 		dc.FailAndAbort(c, "from 时间格式不合法", err)
@@ -548,8 +589,8 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 	for _, row := range rows {
 		view := snapshotLibraryVO{
 			ID: row.ID, DeviceID: row.DeviceID, ChannelID: row.ChannelID,
-			ChannelCode: row.ChannelCode, ChannelName: row.ChannelName,
-			DeviceCode: row.DeviceCode, DeviceName: row.DeviceName,
+			ChannelCode: row.ChannelCode, ChannelName: row.ChannelName, ChannelAlias: row.ChannelAlias,
+			DeviceCode: row.DeviceCode, DeviceName: row.DeviceName, DeviceAlias: row.DeviceAlias,
 			FileName: row.FileName, Size: row.Size, MD5: row.MD5,
 			CapturedAt: row.CapturedAt, Source: row.Source, CreatedAt: row.CreatedAt,
 			URL: snapshotContentURL(row.ID),
