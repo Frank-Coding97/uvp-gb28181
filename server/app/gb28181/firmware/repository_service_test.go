@@ -19,7 +19,9 @@ func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbFirmwareRepository{}, &models.User{}))
+	// ⛔ 必须一并建 gb_device_firmware_upgrade：Delete 删前要查"有没有升级记录引用这个固件"，
+	//   少这张表会报 "no such table" 而把断言打偏到表结构上，看不出真实意图。
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbFirmwareRepository{}, &models.User{}, &gbmodels.GbDeviceFirmwareUpgrade{}))
 	return db
 }
 
@@ -243,7 +245,16 @@ func TestRepositoryService_GetByID_TenantIsolation(t *testing.T) {
 	require.Equal(t, gorm.ErrRecordNotFound, err)
 }
 
-// TC2.7: Delete 软删除
+// TC2.7: Delete 物理删除记录（不是软删除）
+//
+// ⛔⛔ 本用例**原先断言的是"软删除"**：Delete 只把 status 改成 archived，断言
+//   "记录仍存在但状态为 archived"。但那正是 2026-10-06 上报的缺陷 2 本体 ——
+//   用户点删除收到"删除成功"，刷新后台账里那条记录还好端端在（列表默认不过滤
+//   archived，于是"已删除"的行始终显示）。
+//
+//   归档是一个**独立动作**（PATCH .../status { status: "archived" }），语义是
+//   "下线但保留文件供历史追溯"；删除必须真的消失。两者混为一谈是当初的错，
+//   这里的断言随之改掉。
 func TestRepositoryService_Delete(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewRepositoryService(db)
@@ -256,15 +267,59 @@ func TestRepositoryService_Delete(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// 删除(状态改为 archived)
 	err = svc.Delete(ctx, created.ID)
 	require.NoError(t, err)
 
-	// 记录仍存在但状态为 archived
+	// 契约：记录必须**真的消失**，而不是换个状态继续躺在列表里
 	var persisted gbmodels.GbFirmwareRepository
 	err = db.First(&persisted, created.ID).Error
+	require.Error(t, err, "删除后记录必须不存在；仍存在即回到「提示删除成功但台账还在」的缺陷")
+	require.Equal(t, gorm.ErrRecordNotFound, err)
+}
+
+// TC2.7b: 被设备升级记录引用的固件不允许删除。
+//
+// ⛔ 硬删会让历史升级记录指向不存在的固件，审计链断掉。这里选择**明确拒绝**
+//   而不是级联删除 —— 升级历史是凭证，不该因为清理仓库被抹掉。
+func TestRepositoryService_Delete_ReferencedByUpgradeIsRejected(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewRepositoryService(db)
+	ctx := newTestContext(db, 1, 100)
+
+	created, err := svc.Create(ctx, CreateFirmwareRequest{
+		FirmwareID: "fw-used", Version: "v2.0", Manufacturer: "Test",
+		FileName: "fw.bin", FileSize: 1024, StoragePath: "/s",
+		Status: gbmodels.FirmwareStatusPublished, UploadedBy: 1, DeptID: 100,
+	})
 	require.NoError(t, err)
-	require.Equal(t, gbmodels.FirmwareStatusArchived, persisted.Status)
+
+	// 造一条引用该固件的升级记录
+	require.NoError(t, db.Create(&gbmodels.GbDeviceFirmwareUpgrade{
+		OperationID:  "op-fw-used-1",
+		IdempotencyKey: "idem-fw-used-1",
+		DeviceID:     1,
+		DeviceCode:   "34020000001320000001",
+		Firmware:     created.Version,
+		FileURL:      "http://placeholder/fw.bin",
+		Manufacturer: "Test",
+		FirmwareID:   created.FirmwareID,
+		SessionID:    "session-fw-used-1",
+		SN:           1,
+		Status:       gbmodels.FirmwareUpgradeSucceeded,
+		ActorID:      1,
+		ActorDeptID:  100,
+	}).Error)
+
+	err = svc.Delete(ctx, created.ID)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrFirmwareInUse)
+	// 错误信息要带引用条数，让用户知道为什么删不掉
+	require.Contains(t, err.Error(), "1 条设备升级记录")
+
+	// 拒绝之后记录必须还在
+	var persisted gbmodels.GbFirmwareRepository
+	require.NoError(t, db.First(&persisted, created.ID).Error)
+	require.Equal(t, gbmodels.FirmwareStatusPublished, persisted.Status)
 }
 
 // TC2.8: Delete 租户隔离

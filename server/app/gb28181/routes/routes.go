@@ -16,6 +16,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
+	gbfirmware "uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
@@ -1058,7 +1059,9 @@ func RegisterContentRoutes(engine *gin.Engine) {
 		gbcontrollers.RecordCacheRuntime().DownloadSegmentContent(c)
 	})
 	// 固件下载:凭一次性 token 兑换文件内容(token 本身是鉴权凭证,免 JWT)
-	engine.GET("/api/gb28181/device-mgmt/firmware-repository/download/:token", func(c *gin.Context) { firmwareRepositoryController.Download(c) })
+	// ⛔ 路径取自 firmware.DownloadRoutePath —— 与生成下载链接的那一端同一个常量,
+	//   避免"两边各写一份字符串、悄悄写歪"导致点了下载就404(历史上就这么坏过)。
+	engine.GET(gbfirmware.DownloadRoutePath+":token", func(c *gin.Context) { firmwareRepositoryController.Download(c) })
 }
 
 func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {

@@ -3,6 +3,7 @@ package firmware
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,7 +115,10 @@ func TestDownloadTokenService_Generate(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, token, 22, "token should be 22 characters (base64url of 16 bytes)")
-	assert.Contains(t, downloadURL, "/api/v1/gb28181/firmware/download/")
+	// ⛔ 路径原先断言的是 `/api/v1/gb28181/firmware/download/`，那条路由**从来没注册过**
+	//   —— 断言的是"生成链接里含某串字符"，而没人验证那串字符是否真的能路由到 handler，
+	//   于是断言绿灯、线上点下载 404。改为断言"就是路由常量"，见下方 TC4.1。
+	assert.Contains(t, downloadURL, DownloadRoutePath)
 	assert.Contains(t, downloadURL, token)
 	assert.True(t, expiresAt.After(time.Now()))
 	assert.True(t, expiresAt.Before(time.Now().Add(61*time.Minute)), "TTL should be ~1 hour")
@@ -225,4 +229,40 @@ func TestDownloadTokenService_Consume_NotFound(t *testing.T) {
 
 	_, err := service.Consume(context.Background(), nonExistentToken)
 	assert.ErrorIs(t, err, ErrDownloadTokenInvalid)
+}
+
+// TC4.1: 下载链接路径必须与路由注册逐字一致。
+//
+// 起因（2026-10-06 线上问题）：Generate 生成的 URL 是
+//
+//	/api/v1/gb28181/firmware/download/{token}
+//
+// 而 routes.go 实际 engine.GET 注册的是
+//
+//	/api/gb28181/device-mgmt/firmware-repository/download/:token
+//
+// 两边**没有任何一段重合**，于是"点下载 → 404 Page Not Found"。
+// ⛔ 最难归因的地方：这个错在服务端完全看不出来 —— Generate 照样返回 200、
+// 链接照样生成、token 照样写进缓存，只有浏览器去访问那个不存在的路径时才炸。
+//
+// 所以这里不只断言"链接长什么样"，而是断言"链接是常量拼出来的"，
+// 让任何改动都必须同时改路由（路由那边也引用同一个常量），无法单边漂移。
+func TestDownloadTokenService_Generate_DownloadURLMatchesRoute(t *testing.T) {
+	cache := newMockCache()
+	service := NewDownloadTokenService(cache)
+
+	token, downloadURL, _, err := service.Generate(context.Background(), "fw_abc", 1, 100)
+	require.NoError(t, err)
+
+	// 链接 = 路由常量 + token
+	assert.Equal(t, DownloadRoutePath+token, downloadURL)
+	assert.True(t, strings.HasPrefix(downloadURL, DownloadRoutePath),
+		"下载链接必须以 DownloadRoutePath 开头，实际: %s", downloadURL)
+
+	// ⛔ 历史 bug 的形状：多写了 /v1 与旧版路径段
+	assert.NotContains(t, downloadURL, "/v1/", "真实前缀是 /api/，没有 /v1")
+	assert.Contains(t, downloadURL, "/api/gb28181/device-mgmt/firmware-repository/download/")
+
+	// 链接里必须带得上 token 本身，否则 Download handler 拿不到凭据
+	assert.Equal(t, token, downloadURL[len(DownloadRoutePath):])
 }

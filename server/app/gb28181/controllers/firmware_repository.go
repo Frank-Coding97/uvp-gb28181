@@ -3,6 +3,7 @@ package controllers
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -227,7 +228,7 @@ func (ctrl *FirmwareRepositoryController) GetByID(c *gin.Context) {
 	response.Success(c, record)
 }
 
-// Delete 删除固件（软删除）
+// Delete 删除固件（物理删除：数据库记录 + 磁盘文件）
 func (ctrl *FirmwareRepositoryController) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -236,8 +237,13 @@ func (ctrl *FirmwareRepositoryController) Delete(c *gin.Context) {
 	}
 
 	if err := ctrl.repoService.Delete(c, id); err != nil {
-		if err == gorm.ErrRecordNotFound {
-			response.Fail(c, "固件不存在")
+		// 已被设备升级记录引用 ⇒ 明确告知原因，不要笼统报"删除失败"
+		if errors.Is(err, firmware.ErrFirmwareInUse) {
+			response.Fail(c, err.Error())
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Fail(c, "固件不存在或无权限删除")
 			return
 		}
 		response.Fail(c, "删除失败: "+err.Error())
@@ -283,16 +289,25 @@ func (ctrl *FirmwareRepositoryController) GenerateDownloadLink(c *gin.Context) {
 		return
 	}
 
-	firmwareID := c.Param("id")
-	if firmwareID == "" {
-		response.Fail(c, "固件ID不能为空")
+	// ⛔⛔ 这里的 `:id` 是**数字主键** gb_firmware_repository.id（全仓 CRUD 路由的统一约定），
+	//   **不是** firmware_id。历史上本函数错把 c.Param("id") 当 firmware_id 写进 token 快照，
+	//   而前端传的也正是数字主键 ⇒ 快照里 FirmwareID="1"，Download 拿它去查
+	//   `firmware_id = '1'` 永远查不到 ⇒ 用户看到的是"无权下载此固件"(403)，
+	//   而真正的原因是**两侧 ID 语义错配**，报错信息还完全指错方向，极难归因。
+	//   现在统一：先按主键取记录，再把**真正的 firmware_id** 写进快照。
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Fail(c, "参数错误")
 		return
 	}
 
-	// 验证固件存在且用户有权限访问（通过 repoService 的 datascope）
-	var record gbmodels.GbFirmwareRepository
-	if err := ctrl.db.Model(&gbmodels.GbFirmwareRepository{}).Where("firmware_id = ?", firmwareID).First(&record).Error; err != nil {
-		response.Fail(c, "固件不存在")
+	record, err := ctrl.repoService.GetByID(c, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Fail(c, "固件不存在")
+			return
+		}
+		response.Fail(c, "查询失败: "+err.Error())
 		return
 	}
 
@@ -305,8 +320,9 @@ func (ctrl *FirmwareRepositoryController) GenerateDownloadLink(c *gin.Context) {
 		return
 	}
 
-	// 生成下载 token
-	token, downloadURL, expiresAt, err := ctrl.tokenService.Generate(c.Request.Context(), firmwareID, uint64(claims.UserID), uint64(user.DeptID))
+	// token 快照绑定的是**业务固件号**（Download 端按它查回记录），不是数据库主键
+	token, downloadURL, expiresAt, err := ctrl.tokenService.Generate(
+		c.Request.Context(), record.FirmwareID, uint64(claims.UserID), uint64(user.DeptID))
 	if err != nil {
 		response.Fail(c, "生成下载链接失败: "+err.Error())
 		return
@@ -338,22 +354,37 @@ func (ctrl *FirmwareRepositoryController) Download(c *gin.Context) {
 		return
 	}
 
-	// 查询固件记录
+	// 查询固件记录（快照里存的是业务固件号 firmware_id，不是数据库主键）
 	var record gbmodels.GbFirmwareRepository
 	if err := ctrl.db.Model(&gbmodels.GbFirmwareRepository{}).Where("firmware_id = ?", snapshot.FirmwareID).First(&record).Error; err != nil {
-		response.Fail(c, "固件不存在")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// ⛔ 固件已被删除（token 还在有效期内）。必须报"固件不存在"，
+			//   不能落到下面的 403 —— 403 会被读成"权限问题"，把真实原因指错方向
+			//   （这正是 2026-10-06 那个 403 让人查错方向的原因：真因是 ID 语义错配）。
+			response.Fail(c, "固件不存在或已被删除")
+			return
+		}
+		response.Fail(c, "查询失败: "+err.Error())
 		return
 	}
 
 	// 二次校验：token 绑定的部门必须能访问该固件（租户隔离）
 	if record.DeptID != snapshot.DeptID {
-		c.JSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "message": "无权下载此固件"})
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    http.StatusForbidden,
+			"message": "无权下载此固件（当前固件不属于你的部门）",
+		})
 		return
 	}
 
 	// 读取文件并流式返回
 	file, err := os.Open(record.StoragePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// 数据库有记录但磁盘文件没了（手工清理过 / 上传中断）—— 说清是哪一种
+			response.Fail(c, "固件文件已丢失，请重新上传")
+			return
+		}
 		response.Fail(c, "文件读取失败")
 		return
 	}

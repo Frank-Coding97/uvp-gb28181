@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -32,6 +31,14 @@ const (
 	downloadTokenTTL = 1 * time.Hour
 	// downloadCacheKeyPrefix 缓存键前缀
 	downloadCacheKeyPrefix = "firmware:download:token:"
+	// DownloadRoutePath 固件文件下载路由(免 JWT，凭一次性 token 兑换)。
+	// ⛔ 必须与 routes.go 里实际 engine.GET 注册的路径**逐字一致**，否则前端
+	//   拿到链接后直接 404 —— 这个错不会在服务端暴露（Generate 照样成功返回 200），
+	//   只会表现为"点了下载 Page Not Found"，极难归因。
+	//   历史坑：这里曾写成 `/api/v1/gb28181/firmware/download/%s`，而真实注册的是
+	//   `/api/gb28181/device-mgmt/firmware-repository/download/:token`。
+	//   测试 download_token_service_test.go 会断言两者一致，改这里必须同步改路由。
+	DownloadRoutePath = "/api/gb28181/device-mgmt/firmware-repository/download/"
 )
 
 // DownloadTokenSnapshot 下载 token 快照，存储在 cache 中
@@ -82,7 +89,7 @@ func (s *DownloadTokenService) Generate(ctx context.Context, firmwareID string, 
 		return "", "", time.Time{}, err
 	}
 
-	downloadURL = fmt.Sprintf("/api/v1/gb28181/firmware/download/%s", token)
+	downloadURL = DownloadRoutePath + token
 	return token, downloadURL, expiresAt, nil
 }
 
