@@ -560,6 +560,50 @@ func (r *Registry) UpdateHeartbeatFields(uuid string, mediaSourceCount, sessionC
 	}
 }
 
+// UpdateLivenessAt 只刷新"最后一次确认节点活着的时间",不动任何计数。
+//
+// ⛔ 为什么需要它:on_server_keepalive 不是一条**可靠**的存活证据 ——
+// ZLM 侧 `reportServerKeepalive()`（server/WebHook.cpp）只在 `installWebHook()`
+// 里被调用**一次**,且要求那一刻 `hook.on_server_keepalive` **非空**才建 `g_keepalive_timer`。
+// 于是"平台比ZLM 晚接入"的节点(先有跑着的 ZLM → 后在平台上新增该节点并下发 hook URL)
+// 命中一个无法靠改配置绕过的死局:URL 是热生效的(所以看起来一切正常),但定时器**永远不存在**。
+// 现场2026-10-06:18090 节点接入后"最后心跳"恒为「从未上报」,同一台 ZLM 的
+// on_stream_changed 却正常到达 ⇒ 证明网络/凭据/路由都没问题,缺的只是这个定时器。
+// 对端唯一的解法是重启进程(重启后 URL 非空 → 定时器建起来),而这不该由运维手动兜。
+//
+// 因此存活证据**不再只依赖对端主动上报**:平台自己周期性地主动探测
+// (见 heartbeat.ThreadLoadPoller,同频 30s)成功一次,就等于一次有效的存活证明。
+// ⛔ 但只碰 LastHeartbeatAt:**绝不**覆盖 MediaSourceCount / SessionCount ——
+// 探测通道不携带这两个数,清零会让"当前流数"在两次心跳之间凭空归零。
+func (r *Registry) UpdateLivenessAt(uuid string, at time.Time) {
+	r.mu.RLock()
+	id, ok := r.uuids[uuid]
+	r.mu.RUnlock()
+	if !ok {
+		return
+	}
+	lock := r.nodeMutationLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[id]
+	if !ok {
+		return
+	}
+	// ⛔ 只前进,不后退:两条通道(对端心跳 / 主动探测)各有延迟,并发到达时
+	// 较早的那条不该把已经刷新的时间戳拽回旧值。
+	if at.Before(n.Stats.LastHeartbeatAt) {
+		return
+	}
+	n.Stats.LastHeartbeatAt = at
+	// 探测通= 节点 alive,与 UpdateHeartbeatFields 保持同一语义:
+	// 否则一个只缺心跳回调的活节点会被 Watcher 判离线并写进 DB。
+	if n.State == StateOffline {
+		n.State = StateActive
+	}
+}
+
 // UpdateLoadFields 在锁内合并线程负载字段(见 UpdateHeartbeatFields)
 func (r *Registry) UpdateLoadFields(uuid string, netLoad, workLoad float64) {
 	r.mu.RLock()

@@ -77,6 +77,12 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 	}
 	// 锁内字段级更新:与 Collector 的心跳字段互不覆盖
 	p.registry.UpdateLoadFields(n.MediaServerUUID, netLoad, workLoad)
+	// 这次 REST 往返本身就是"节点此刻可达"的直接证据 ⇒ 等价于一次心跳。
+	// ⛔ 为什么必须有这条:on_server_keepalive 的定时器只在 ZLM **启动那一刻**
+	// URL 非空时才建(server/WebHook.cpp reportServerKeepalive),平台比 ZLM 晚接入时
+	// 那个定时器永远不存在,改 URL 也救不回来 ⇒ 只认它会让一个完全健康的节点
+	// 在界面上永远是「从未上报」。详见 node.Registry.UpdateLivenessAt。
+	p.registry.UpdateLivenessAt(n.MediaServerUUID, time.Now())
 }
 
 // Start 启动 goroutine,周期跑 Tick;ctx 取消 → 退出
