@@ -4,6 +4,30 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo/uvp-favicon.svg?v=uvp-20260918" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      启动主题预置：必须在 Vue 之前同步跑完。
+      暗色是靠 JS 运行时给 body 加 arco-theme="dark" 实现的，而本文件的 .init-page
+      是浏览器拿到 HTML 就立刻绘制的 —— 那 100 多毫秒里主题机制还不存在，
+      于是暗色用户会看到「白底 + 品牌蓝条」闪一下（实测 dev 与生产构建一致）。
+      这里提前读一次 localStorage，把结论写成 html 上的 class，
+      loading.css 就能据此给占位页上暗色，不需要等 JS。
+      ⛔ 本文件走 <link> 硬加载、不经 Vite 打包 ⇒ 这里不能用 SCSS 变量与
+         打包期注入的 CSS 变量（--primary-6 那时要等 useThemeMethods 才算出）。
+      ⛔ key 与 store/modules/theme-config.ts 的 persistedstateConfig("theme-config") 保持一致。
+    -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("theme-config");
+          var cfg = raw ? JSON.parse(raw) : null;
+          if (cfg && cfg.darkMode === true) {
+            document.documentElement.classList.add("uvp-boot-dark");
+          }
+        } catch (e) {
+          /* 隐私模式 / 存储被禁用：保持亮色启动页即可，不阻断渲染 */
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="/css/loading.css" type="text/css" />
     <title>UVP-GB28181</title>
     <!-- EasyPlayer.js 国标视频播放器(支持 H264/H265 + AAC/G711/PCMA, MSE/WCS/WASM 解码) -->
