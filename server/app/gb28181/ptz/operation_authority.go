@@ -23,7 +23,9 @@ func operationMatchesTarget(op gbmodels.GbPTZOperation, target Target) bool {
 		return true
 	}
 	return op.DeviceEpoch != nil && op.DeviceIntentID != nil && target.DeviceEpoch > 0 && *op.DeviceEpoch == target.DeviceEpoch &&
-		op.DeviceID == target.DeviceID && op.DeviceCode == target.DeviceCode && op.ChannelID == target.ChannelID && op.ChannelCode == target.ChannelCode
+		op.DeviceID == target.DeviceID && op.DeviceCode == target.DeviceCode &&
+		((op.TargetScope == gbmodels.ControlTargetScopeDevice && op.TargetCode == target.DeviceCode) ||
+			(op.TargetScope != gbmodels.ControlTargetScopeDevice && op.ChannelID == target.ChannelID && op.ChannelCode == target.ChannelCode))
 }
 
 func ptzIntentIdentity(op gbmodels.GbPTZOperation) (playauth.DeviceOperationIntentIdentity, error) {

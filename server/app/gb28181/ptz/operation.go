@@ -97,10 +97,10 @@ func idempotencyConflict(existing gbmodels.GbPTZOperation) error {
 	)
 }
 
-func (s *Service) findIdempotentOperation(ctx context.Context, channelID uint, key string) (gbmodels.GbPTZOperation, bool, error) {
+func (s *Service) findIdempotentOperation(ctx context.Context, target Target, scope, code, key string) (gbmodels.GbPTZOperation, bool, error) {
 	var operation gbmodels.GbPTZOperation
 	result := ptzWriter(s.db).WithContext(ctx).
-		Where("channel_id = ? AND idempotency_key = ?", channelID, key).
+		Where("device_id = ? AND target_scope = ? AND target_code = ? AND idempotency_key = ?", target.DeviceID, scope, code, key).
 		Limit(1).Find(&operation)
 	return operation, result.RowsAffected > 0, result.Error
 }
@@ -138,6 +138,9 @@ func (s *Service) createOperation(
 			return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionInvalidArgument, "PTZ 非通道目标编码不能为空", nil)
 		}
 		targetCode = strings.TrimSpace(target.ChannelCode)
+	}
+	if err := validateTargetIdentity(target, targetScope); err != nil {
+		return gbmodels.GbPTZOperation{}, err
 	}
 	scopeKey, err := controlScopeKey(targetScope, targetCode)
 	if err != nil {
@@ -243,9 +246,6 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 			return gbmodels.GbPTZOperation{}, err
 		}
 	}
-	if err := validateTargetIdentity(target); err != nil {
-		return gbmodels.GbPTZOperation{}, err
-	}
 	if strings.TrimSpace(command.CmdType) == "" || command.Build == nil {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("PTZ 命令不完整")
 	}
@@ -259,14 +259,29 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 		return gbmodels.GbPTZOperation{}, err
 	}
 
-	entry := s.lockChannel(target.ChannelID)
+	requestedScope := strings.TrimSpace(command.TargetScope)
+	if requestedScope == "" {
+		requestedScope = gbmodels.ControlTargetScopeChannel
+	}
+	requestedCode := strings.TrimSpace(command.TargetCode)
+	if requestedCode == "" {
+		requestedCode = target.ChannelCode
+		if requestedScope == gbmodels.ControlTargetScopeDevice {
+			requestedCode = target.DeviceCode
+		}
+	}
+	lockID := target.ChannelID
+	if requestedScope == gbmodels.ControlTargetScopeDevice {
+		lockID = 0
+	}
+	entry := s.lockChannel(lockID)
 	entry.mu.Lock()
 	defer func() {
 		entry.mu.Unlock()
-		s.unlockChannel(target.ChannelID, entry)
+		s.unlockChannel(lockID, entry)
 	}()
 
-	existing, found, err := s.findIdempotentOperation(ctx, target.ChannelID, command.IdempotencyKey)
+	existing, found, err := s.findIdempotentOperation(ctx, target, requestedScope, requestedCode, command.IdempotencyKey)
 	if err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
@@ -279,7 +294,7 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	if s.sender == nil {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "SIP UAC 未就绪", nil)
 	}
-	if err := validateTargetAvailability(target); err != nil {
+	if err := validateTargetAvailability(target, requestedScope); err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
 
@@ -299,7 +314,7 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 			}
 			return gbmodels.GbPTZOperation{}, err
 		}
-		raced, racedFound, readErr := s.findIdempotentOperation(ctx, target.ChannelID, command.IdempotencyKey)
+		raced, racedFound, readErr := s.findIdempotentOperation(ctx, target, requestedScope, requestedCode, command.IdempotencyKey)
 		if readErr == nil && racedFound {
 			if !operationMatchesTarget(raced, target) || !operationMatches(raced, command, payloadJSON) {
 				return raced, idempotencyConflict(raced)

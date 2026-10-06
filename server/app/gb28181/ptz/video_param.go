@@ -59,6 +59,8 @@ func (s *Service) ReadVideoParams(ctx context.Context, target Target, actorID, a
 		Build: func(sn int) ([]byte, error) {
 			return manscdp.BuildConfigDownloadQueryWithProfile(profile, target.ChannelCode, sn, configTypes)
 		},
+		TargetScope: gbmodels.ControlTargetScopeChannel,
+		TargetCode: target.ChannelCode,
 		Profile: profile,
 	})
 }

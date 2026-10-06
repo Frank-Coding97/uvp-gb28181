@@ -264,15 +264,21 @@ func (s *Service) FlushResults(ctx context.Context) error {
 	return s.synchronous.FlushResults(ctx)
 }
 
-func validateTargetIdentity(target Target) error {
-	if target.DeviceID == 0 || target.ChannelID == 0 || strings.TrimSpace(target.DeviceCode) == "" || strings.TrimSpace(target.ChannelCode) == "" {
+func validateTargetIdentity(target Target, scope string) error {
+	if target.DeviceID == 0 || strings.TrimSpace(target.DeviceCode) == "" {
+		return operationError(ErrorCodeHomePositionUnavailable, "PTZ 目标不完整", nil)
+	}
+	if scope == gbmodels.ControlTargetScopeDevice {
+		return nil
+	}
+	if target.ChannelID == 0 || strings.TrimSpace(target.ChannelCode) == "" {
 		return operationError(ErrorCodeHomePositionUnavailable, "PTZ 目标不完整", nil)
 	}
 	return nil
 }
 
-func validateTargetAvailability(target Target) error {
-	if !target.DeviceOnline || !target.ChannelOnline {
+func validateTargetAvailability(target Target, scope string) error {
+	if !target.DeviceOnline || (scope != gbmodels.ControlTargetScopeDevice && !target.ChannelOnline) {
 		return operationError(ErrorCodeHomePositionDeviceOffline, "设备或通道离线", nil)
 	}
 	if strings.TrimSpace(target.IP) == "" || target.Port <= 0 {

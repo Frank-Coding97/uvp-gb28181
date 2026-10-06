@@ -100,10 +100,32 @@ func (s *Service) ReadDeviceConfigs(ctx context.Context, target Target, configTy
 		ActorID:          actorID,
 		ActorDeptID:      actorDeptID,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildConfigDownloadQueryWithProfile(profile, target.ChannelCode, sn, normalized)
+			code := target.ChannelCode
+			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
+				code = target.DeviceCode
+			}
+			return manscdp.BuildConfigDownloadQueryWithProfile(profile, code, sn, normalized)
 		},
+		TargetScope: func() string {
+			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
+				return gbmodels.ControlTargetScopeDevice
+			}
+			return gbmodels.ControlTargetScopeChannel
+		}(),
+		TargetCode: func() string {
+			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
+				return target.DeviceCode
+			}
+			return target.ChannelCode
+		}(),
 		Profile: profile,
 	})
+}
+
+// ReadVideoParamOptions 读取通道支持的视频下载速度/分辨率范围（VideoParamOpt）。
+// VideoParamOpt 是按通道查询的只读能力块；不要与设备级 BasicParam 合并到同一条报文。
+func (s *Service) ReadVideoParamOptions(ctx context.Context, target Target, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.ReadDeviceConfigs(ctx, target, []string{manscdp.ConfigTypeVideoParamOpt}, actorID, actorDeptID, idempotencyKey)
 }
 
 // ApplyDeviceConfig 下发一组配置（A.2.3.2.5 DeviceConfig）。

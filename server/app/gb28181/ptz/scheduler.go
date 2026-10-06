@@ -711,7 +711,10 @@ func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPT
 	if result.RowsAffected == 0 || strings.TrimSpace(device.IP) == "" || device.Port <= 0 || device.Status != gbmodels.DeviceStatusOnline {
 		return "", "", errors.New("PTZ 设备地址不可用")
 	}
-	// 重试路径必须复核通道:设备在线而通道已离线或目录已变更时,
+	if operation.TargetScope == gbmodels.ControlTargetScopeDevice {
+		return net.JoinHostPort(device.IP, strconv.Itoa(device.Port)), device.Transport, nil
+	}
+	// 通道级重试路径必须复核通道:设备在线而通道已离线或目录已变更时,
 	// 不得对失效目标继续发送 PTZ 指令。用写库句柄防读副本返回过期在线状态
 	var channel gbmodels.GbChannel
 	channelResult := ptzWriter(s.db).WithContext(ctx).
