@@ -91,7 +91,10 @@ const stubs = {
   "a-alert": { template: "<div><slot /></div>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
   "a-select": { template: "<select><slot /></select>" },
-  "a-option": { template: "<option><slot /></option>" },
+  "a-option": {
+    props: ["value"],
+    template: "<option :data-value='value'><slot /></option>"
+  },
   "a-input": {
     props: ["modelValue", "placeholder"],
     emits: ["update:modelValue", "pressEnter"],
@@ -437,5 +440,70 @@ describe("CloudRecordings", () => {
     await wrapper.get("[data-testid='download-9007199254740993']").trigger("click");
     await flushPromises();
     expect(enqueueDownload).toHaveBeenCalledWith({ fileId: "9007199254740993", fileName: "record.mp4" });
+  });
+
+  // ⛔ 防回归（2026-10-06）：节点下拉必须能列出**全部已注册节点**。
+  // 后端原先只给"已有录像的节点"（从录像表 distinct），老板两个节点只出现一个。
+  // 前端这边钉住：没录像的节点也得出现，且非 active 的要标状态。
+  it("列出全部已注册节点，并对非 active 节点标注状态", async () => {
+    api.listRecordingOptions.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        channels: [],
+        devices: [],
+        nodes: [
+          { id: "2", name: "zlm-220", state: "active" },
+          { id: "5", name: "192.168.10.220:18090", state: "active" },
+          { id: "7", name: "down-node", state: "offline" }
+        ]
+      }
+    });
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    // ⛔ 按 value 精确挑出"存储节点"那一组（页面还有可用状态/信息状态等其他下拉）
+    const nodeOptions = wrapper
+      .findAll("option[data-value]")
+      .filter(item => ["2", "5", "7"].includes(item.attributes("data-value")!));
+    const texts = nodeOptions.map(item => item.text());
+    expect(texts).toHaveLength(3);
+    expect(texts.join("|")).toContain("zlm-220");
+    // 没录像的 5 号节点也必须在（这正是老板报的那个 bug）
+    expect(texts.join("|")).toContain("192.168.10.220:18090");
+    // 离线节点要标出来，否则"选了 0 条"像坏了
+    expect(texts.join("|")).toContain("离线");
+  });
+
+  // ⛔ 防回归（2026-10-06）：设备/通道两列的归属为空时，
+  // 第二行不能也打"--"（主副两行一模一样像渲染坏了），要说人话。
+  it("归属名称与编码都为空时，第二行说明是归属缺失而非重复的占位符", async () => {
+    api.listRecordingFiles.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        list: [{ ...file(), deviceName: "", deviceId: "", channelName: "", channelCode: "" }],
+        total: 1,
+        page: 1,
+        pageSize: 10
+      }
+    });
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("归属待补全");
+    // 不能再出现主副两行都是 "--" 的情形
+    expect(wrapper.findAll(".recording-entity-cell small").every(cell => cell.text() !== "--")).toBe(true);
+  });
+
+  // 名称在、编码也在 ⇒ 第二行显示编码（对国标编号有用），不是"归属待补全"。
+  it("名称齐全时第二行显示编码", async () => {
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+    const subs = wrapper.findAll(".recording-entity-cell small").map(cell => cell.text());
+    expect(subs).toContain("34020000001110000001");
+    expect(subs).toContain("34020000001320000001");
+    expect(subs).not.toContain("归属待补全");
   });
 });

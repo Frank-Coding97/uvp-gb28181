@@ -446,16 +446,17 @@ func (s *CatalogService) FileOptions(ctx context.Context, userID uint, query Fil
 	query.AllowedDeptIDs, query.FullAccess = access.DeptIDs, access.FullAccess
 	nodes := s.nodeSnapshot()
 	query.KnownNodeIDs, query.OfflineNodeIDs, query.AccessibleNodeIDs = nodes.known, nodes.offline, nodes.accessible
-	options, err := s.repo.CatalogOptions(ctx, query)
-	if err != nil {
-		return CatalogOptionsDTO{}, err
-	}
 	result := CatalogOptionsDTO{
 		Channels: make([]CatalogChannelOptionDTO, 0),
 		Devices:  make([]CatalogDeviceOptionDTO, 0),
-		Nodes:    make([]NodeDTO, 0, len(options.NodeIDs)),
+		// ⛔ 节点选项列**全部已注册节点**，不是"已有录像的节点"。
+		//   原实现是 `Distinct("node_id")` 从录像表里取 ⇒ 刚接入还没出录像的节点
+		//   根本不会出现在下拉里（2026-10-06 老板实测：两个流媒体节点，下拉只出一个）。
+		//   口径：按平台已注册的节点全给，空节点选了返回 0 条，由前端提示"暂无录像"。
+		//   `nodeSnapshot` 已按 id 升序，且包含离线/缺失态，够用来区分可用性。
+		Nodes: make([]NodeDTO, 0, len(nodes.known)),
 	}
-	for _, nodeID := range options.NodeIDs {
+	for _, nodeID := range nodes.known {
 		result.Nodes = append(result.Nodes, nodes.dto(nodeID))
 	}
 	return result, nil

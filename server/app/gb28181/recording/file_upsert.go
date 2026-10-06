@@ -2,7 +2,6 @@ package recording
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -32,13 +31,20 @@ func (r *GormRepo) UpsertCompleteFile(ctx context.Context, attribution Recording
 	})
 }
 
+// loadRecordingSnapshots 在写入录像文件前补齐"设备名/通道名/归属"快照。
+//
+// ⛔⛔ 判据必须是"查没查到"，**不能只看 err** —— 生产每个 gorm 实例都注册了
+// `MaskNotDataError`（app/utils/gormhelper/client.go），`First` 查不到时返回
+// **nil error + 零值结构体**，所以 `if result.Error == nil` 在生产恒为真，
+// 会拿零值当"查到了"，把归属信息覆盖成空（2026-10-06 定位）。
+//
+// ⛔ `file.ChannelID` 存的是 `gb_channel` 的**自增主键**，不是国标通道编码；
+// 通道行被删后主键关联直接失效 ⇒ 名称快照永久缺失。
+// 所以这里**先用主键查，查不到再按 `channel_code`（国标编码，稳定）反查一次**，
+// 后者能把"通道被删但设备还在"的存量录像救回来。
 func loadRecordingSnapshots(tx *gorm.DB, file *models.GbRecordingFile) error {
-	var channel models.GbChannel
-	result := tx.First(&channel, file.ChannelID)
-	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return result.Error
-	}
-	if result.Error == nil {
+	channel, found := lookupChannel(tx, file)
+	if found {
 		file.ChannelCode = channel.ChannelID
 		file.ChannelName = preferredName(channel.Alias, channel.Name)
 		file.OwnerDeptID = channel.OwnerDeptID
@@ -50,7 +56,7 @@ func loadRecordingSnapshots(tx *gorm.DB, file *models.GbRecordingFile) error {
 		return nil
 	}
 	var device models.GbDevice
-	result = tx.Where("device_id = ?", file.DeviceID).Limit(1).Find(&device)
+	result := tx.Where("device_id = ?", file.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -58,6 +64,39 @@ func loadRecordingSnapshots(tx *gorm.DB, file *models.GbRecordingFile) error {
 		file.DeviceName = preferredName(device.Alias, device.Name)
 	}
 	return nil
+}
+
+// lookupChannel 先按主键查通道；查不到再按国标编码（channel_code）反查。
+// 两条路都查不到才算真的没有。
+//
+// ⛔ 判据说明：这里**故意不把 `err != nil` 当成"查不到"就立即返回**。
+// `First` 查不到时的 err 形态**取决于是否装了 `MaskNotDataError`**：
+//   · 生产（装了屏蔽回调）⇒ err == nil，靠 RowsAffected 判断；
+//   · 未装回调的环境（部分单测、外部工具、直接 new 的 gorm）⇒ err 可能是 ErrRecordNotFound。
+// 两种都要走兜底，所以这里只把"确实查到了"当成功，其余一律继续尝试按编码反查。
+func lookupChannel(tx *gorm.DB, file *models.GbRecordingFile) (models.GbChannel, bool) {
+	if file.ChannelID != 0 {
+		var channel models.GbChannel
+		result := tx.First(&channel, file.ChannelID)
+		if result.Error == nil && result.RowsAffected > 0 {
+			return channel, true
+		}
+		// ⛔ 不在这里 return —— 没查到不等于结束，还要按国标编码兜底。
+	}
+	// 主键没命中 ⇒ 通道行可能已被清理，改用稳定的国标编码再试一次
+	if file.ChannelCode == "" {
+		return models.GbChannel{}, false
+	}
+	var channel models.GbChannel
+	result := tx.Where("channel_id = ?", file.ChannelCode).Limit(1).Find(&channel)
+	if result.Error != nil || result.RowsAffected == 0 {
+		return models.GbChannel{}, false
+	}
+	// 主键已失效 ⇒ 把主键刷成当前有效行，后续写入不再指向死引用
+	if channel.ID != file.ChannelID {
+		file.ChannelID = channel.ID
+	}
+	return channel, true
 }
 
 func preferredName(alias, name string) string {

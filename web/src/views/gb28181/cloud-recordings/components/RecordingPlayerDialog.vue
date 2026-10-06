@@ -1,11 +1,21 @@
 <template>
+  <!--
+    ⛔ `modal-class="uvp-system-dialog"` 不能省（这就是它跟系统"不像一家"的原因）：
+       本仓弹窗壳层的底色 / 描边 / 阴影 / 16px 圆角 / header 渐变与底边线 / body 内边距
+       全部由全局 `.uvp-system-dialog .arco-modal-*` 那组规则提供（见 uvp-ui-language.scss）。
+       本组件原来写的是 `class="recording-player-dialog"` —— 而 Arco 的 Modal 是
+       `inheritAttrs: false`，`class` 经 `$attrs` 落在**外层 `.arco-modal-container`** 上，
+       `modal-class` 才落在 `.arco-modal` 面板上（已核对 node_modules 渲染函数）。
+       于是壳层规则一条都没命中 ⇒ 暗色下弹出的是 Arco 自带灰面板，
+       摆在深蓝黑控制台界面上就是"两套皮肤"。同目录 RecordingDetailDrawer 是对的。
+  -->
   <a-modal
     :visible="visible"
-    :width="960"
+    width="min(94vw, 960px)"
     :footer="false"
     :esc-to-close="true"
     unmount-on-close
-    class="recording-player-dialog"
+    modal-class="uvp-system-dialog recording-player-dialog"
     @update:visible="emit('update:visible', $event)"
     @cancel="emit('update:visible', false)"
   >
@@ -13,8 +23,13 @@
       <div class="recording-player-title">
         <span><CirclePlay :size="18" /></span>
         <div>
-          <strong>{{ recording?.channelName || "云端录像" }}</strong>
-          <small>{{ recording?.fileName || "正在准备播放" }}</small>
+          <!-- 两行都是ellipsis 截断，鼠标悬停给出全文，否则长通道名/文件名看不到 -->
+          <strong :title="recording?.channelName || '云端录像'">
+            {{ recording?.channelName || "云端录像" }}
+          </strong>
+          <small :title="recording?.fileName || '正在准备播放'">
+            {{ recording?.fileName || "正在准备播放" }}
+          </small>
         </div>
       </div>
     </template>
@@ -141,6 +156,9 @@ watch(
   flex-direction: column;
   min-width: 0;
 }
+.recording-player-title strong {
+  font-size: 15px;
+}
 .recording-player-title strong,
 .recording-player-title small {
   overflow: hidden;
@@ -153,7 +171,13 @@ watch(
 }
 .recording-player-body {
   min-width: 0;
+  color: var(--uvp-text-primary);
 }
+
+/* 视频舞台：底色是**两主题共用的深灰**，不是主题色。
+   播放画面（尤其暗场录像）压在浅色面板上会"发灰看不清"，压在纯黑上又太突兀，
+   所以固定用 #090b0f —— 与多屏回放 `.screen-slot.empty` 同一口径。
+   ⛔ 别把它改成 var(--uvp-panel-bg) 之类跟着主题走：那样亮色下白底 + 深色控件栏会很刺眼。 */
 .recording-player-stage {
   display: grid;
   place-items: center;
@@ -161,6 +185,8 @@ watch(
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: #090b0f;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 6%);
 }
 .recording-player-stage video {
   display: block;
@@ -173,6 +199,8 @@ watch(
   flex-direction: column;
   gap: 10px;
   align-items: center;
+
+  /* 同理：占位在深色舞台上，必须用固定浅色，不能跟主题走 */
   color: #a8b0bd;
 }
 .recording-player-error {

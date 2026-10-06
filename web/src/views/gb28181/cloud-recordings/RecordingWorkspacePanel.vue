@@ -98,9 +98,22 @@
                   format="YYYY-MM-DD HH:mm"
                   value-format="YYYY-MM-DDTHH:mm:ssZ"
                 />
-                <a-select v-model="form.nodeId" placeholder="存储节点" allow-clear style="width: 160px">
+                <a-select
+                  v-model="form.nodeId"
+                  placeholder="存储节点"
+                  allow-clear
+                  style="width: 160px"
+                  data-testid="recording-node-filter"
+                >
                   <a-option v-for="node in options.nodes" :key="node.id" :value="node.id">
-                    {{ node.name || `节点 ${node.id}` }}
+                    <!--
+                      后端列的是**全部已注册节点**（不再只列"已有录像的节点"），
+                      所以这里要标出非active 的节点，否则"选了就 0 条"会像坏了。
+                    -->
+                    <span class="recording-node-option">
+                      <span>{{ node.name || `节点 ${node.id}` }}</span>
+                      <small v-if="node.state && node.state !== 'active'">{{ nodeStateLabel(node.state) }}</small>
+                    </span>
                   </a-option>
                 </a-select>
                 <a-select v-model="form.availability" placeholder="可用状态" allow-clear style="width: 150px">
@@ -185,7 +198,7 @@
                     <template #cell="{ record }">
                       <div class="recording-entity-cell">
                         <span>{{ record.deviceName || record.deviceId || "--" }}</span
-                        ><small>{{ record.deviceId || "--" }}</small>
+                        ><small>{{ entitySubLine(record.deviceName, record.deviceId) }}</small>
                       </div>
                     </template>
                   </a-table-column>
@@ -193,7 +206,7 @@
                     <template #cell="{ record }">
                       <div class="recording-entity-cell">
                         <span>{{ record.channelName || record.channelCode || "--" }}</span
-                        ><small>{{ record.channelCode || "--" }}</small>
+                        ><small>{{ entitySubLine(record.channelName, record.channelCode) }}</small>
                       </div>
                     </template>
                   </a-table-column>
@@ -499,6 +512,25 @@ const availabilityOptions = [
   { value: "file_missing", label: "文件已缺失" },
   { value: "access_unavailable", label: "暂不可访问" }
 ] as const;
+
+/** 节点下拉里的状态后缀。只标注非 active 的，active 不加字样保持干净。
+ *  取值与后端 `zlm/node.State` 对齐：active / maintenance / offline。 */
+function nodeStateLabel(state: string) {
+  if (state === "offline") return "离线";
+  if (state === "maintenance") return "维护中";
+  return state;
+}
+
+/**
+ * 「设备 / 通道」两列的第二行。
+ * 有名称 ⇒ 显示编码（便于对国标编号）；名称与编码都空 ⇒ 明确说"归属待补全"，
+ *不要也打"--"，否则主副两行一模一样，用户会以为是渲染坏了。
+ */
+function entitySubLine(name: string | undefined, code: string | undefined) {
+  if (name && code) return code;
+  if (!name && !code) return "归属待补全";
+  return code || "--";
+}
 
 const requestCoordinator = createLatestRequestCoordinator();
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -1176,6 +1208,32 @@ defineExpose({ refresh: refreshCurrent });
 @media (prefers-reduced-motion: reduce) {
   .reconciliation-summary__icon.is-spinning {
     animation: none;
+  }
+}
+
+/* 节点下拉里的「名称 + 状态」两段。
+   ⛔ a-option 渲染在 body 上的浮层里，scoped 属性到不了 ⇒ 这段必须写成全局
+      （见下方 <style> 块），否则选择器完全不命中、状态字样挤在名称后面没间距。 */
+</style>
+
+<style lang="scss">
+.recording-node-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    flex: none;
+    font-size: 12px;
+    color: var(--uvp-text-tertiary);
   }
 }
 </style>

@@ -33,6 +33,9 @@ type CatalogReconcileRepo interface {
 	ListReconcileCandidates(context.Context) ([]ReconcileCandidate, error)
 	ApplyReconcileUnit(context.Context, ReconcileCandidate, time.Time, []zlm.MP4RecordFile, time.Time) (ReconcileUnitResult, error)
 	SaveReconcileState(context.Context, *models.GbRecordingReconcileState) error
+	// BackfillAttribution 顺带回填存量录像缺失的归属名称。
+	// 对账本来就会全量扫录像，正是修历史数据的天然时机，不额外加定时器。
+	BackfillAttribution(context.Context, int) (int, error)
 }
 
 type CatalogReconciler struct {
@@ -139,6 +142,14 @@ func (r *CatalogReconciler) RunNode(ctx context.Context, nodeID int64, trigger s
 	}
 	if state.FailureCount > 0 {
 		state.LastError = "one or more recording scan units failed"
+	}
+	// ⭐ 顺带回填归属：存量录像的设备/通道名是写入那一刻的快照，通道行被删后
+	// 靠主键再也关联不上，只有 `channel_code`（国标编码）能反查回来。
+	// 对账是唯一会全量触碰录像的时机，挂这里最省事（详见 reconcile_repo.BackfillAttribution）。
+	// ⛔ 回填失败**不影响**对账结论 —— 它是数据整洁度优化，不是对账职责。
+	//用 limit 防止一次性锁全表；剩余的下轮继续。
+	if _, err := r.repo.BackfillAttribution(ctx, 500); err != nil {
+		scanErrors = append(scanErrors, err)
 	}
 	if err := r.repo.SaveReconcileState(ctx, &state); err != nil {
 		scanErrors = append(scanErrors, err)
