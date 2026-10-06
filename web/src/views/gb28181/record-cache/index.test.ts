@@ -331,8 +331,9 @@ describe("record cache workspace", () => {
     });
   });
 
-  it("表格里能看到设备 ID、通道 ID 和任务 ID", async () => {
-    // 用户 2026-10-05 提的：只有通道名/设备名时对不上号，排查问题要能直接看到编码。
+  it("表格里能看到设备、通道的名称与国标编码，以及任务 ID", async () => {
+    // 用户 2026-10-05 提的：只有通道名/设备名时对不上号，排查问题要能直接看到编码；
+    // 2026-10-06 调整为「设备」「通道」两列，每列 = 上行名称 + 下行编码。
     const wrapper = mount(RecordCachePage, { global: { stubs } });
     await flushPromises();
 
@@ -344,12 +345,17 @@ describe("record cache workspace", () => {
     };
 
     // ⛔ 逐列断言而不是 `wrapper.text()).toContain(...)`：后者在
-    //    "通道 ID 列其实渲染成了 deviceId" 这种错法下**照样通过**（两个编码都在页面里）。
-    expect(columnText("设备 ID")).toBe("34020000001320000001");
-    // 通道 ID 取的是 channelCode（国标编码）—— 不是 `channelId`（库里的自增主键 31），
+    //    "通道列其实渲染成了 deviceId" 这种错法下**照样通过**（两个编码都在页面里）。
+    // 设备列 = 设备名 + deviceId；通道列 = 通道名 + channelCode。
+    expect(columnText("设备")).toBe("一号 NVR34020000001320000001");
+    // 通道那格取的是 channelCode（国标编码）—— 不是 `channelId`（库里的自增主键 31），
     // 那个号在设备侧根本不存在，显示出来只会让人对不上。
-    expect(columnText("通道 ID")).toBe("34020000001320000002");
+    expect(columnText("通道")).toBe("东门出入口34020000001320000002");
     expect(columnText("任务 ID")).toBe("t1");
+    // 「通道 / 设备」「设备 ID」「通道 ID」三个旧列已经并成两列，别把它们留回来。
+    for (const legacy of ["通道 / 设备", "设备 ID", "通道 ID"]) {
+      expect(wrapper.findAll("[data-title]").some(node => node.attributes("data-title") === legacy)).toBe(false);
+    }
   });
 
   it("点星标收藏：调接口、按回包回写、给出提示", async () => {

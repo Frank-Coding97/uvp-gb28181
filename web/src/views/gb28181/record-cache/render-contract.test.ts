@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import ArcoVue from "@arco-design/web-vue";
 import { describe, expect, it, vi } from "vitest";
+import { hasRuleBlock } from "@/test/source-assert";
 import RecordCachePage from "./index.vue";
 
 /**
@@ -128,5 +131,148 @@ describe("录像缓存页：真实 Arco 渲染契约", () => {
     expect(star.find("svg").exists()).toBe(true);
 
     wrapper.unmount();
+  });
+
+  it("收藏按钮带文字，且收藏态把文案换成「取消收藏」", async () => {
+    // ⛔ 老板 2026-10-06 要求补文字：操作列里一排链接，纯星标认不出是什么。
+    // 纯图标这一版得钉死，否则下次有人"优化"成只留图标不会有人拦。
+    const mountWith = async (favorite: boolean) => {
+      api.listRecordCacheTasks.mockResolvedValue({ code: 0, data: { list: [task], total: 1, page: 1, size: 20 } });
+      api.getRecordCacheTask.mockResolvedValue({ code: 0, data: { ...task, favorite } });
+      const wrapper = mountPage();
+      await flushPromises();
+      return wrapper;
+    };
+
+    const off = await mountWith(false);
+    const offStar = off.get(".uvp-table-action--favorite");
+    expect(offStar.text()).toContain("收藏");
+    // 收藏态要**换文案**而不只是变色：只变色的话"点一下是取消"只能靠 tooltip 才知道。
+    expect(offStar.text()).not.toContain("取消");
+    // 悬停提示始终把语义说全（"不会被自动清理"是这个开关唯一的功能）。
+    expect(offStar.attributes("title")).toBe("收藏后不会被自动清理");
+    off.unmount();
+
+    const on = await mountWith(true);
+    const onStar = on.get(".uvp-table-action--favorite");
+    expect(onStar.text()).toContain("取消收藏");
+    expect(onStar.attributes("title")).toBe("已收藏，不会被自动清理");
+    on.unmount();
+  });
+
+  it("进度条渲染成 6px 胶囊，且带得出业务状态（不交给 Arco 自己猜）", async () => {
+    api.listRecordCacheTasks.mockResolvedValue({ code: 0, data: { list: [task], total: 1, page: 1, size: 20 } });
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: task });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const bar = wrapper.get(".record-cache-progress__bar");
+    // 状态要落在 DOM 上：颜色是 CSS 按 `data-state` 挑的，没有这个属性就退回默认蓝。
+    expect(bar.attributes("data-state")).toBe("running");
+    // ⛔ 高度是**行内 style**（Arco 把 strokeWidth 写成 `height: Npx`），
+    //    CSS 的 height 压不过行内 ⇒ 只能断言这个行内值本身。
+    // 3px 时100px 圆角被压成 1.5px，看着是根硬线；6px 才是胶囊。
+    const line = wrapper.get(".arco-progress-line");
+    expect(line.attributes("style")).toContain("height: 6px");
+
+    wrapper.unmount();
+  });
+
+  it("失败态即使 percent 满格，颜色也归CSS 管（Arco 会自说自话）", async () => {
+    /*
+     *⛔ 实测（2026-10-06，本条断言的第一版就是错的）：
+     *   Arco 的 `computedStatus = props.status || (props.percent >= 1 ? "success" : "normal")`
+     *   （`es/progress/progress.js`）—— 所以**不传 `status` 并不能让它闭嘴**：
+     *   `percent = 1` 时它照样给自己加 `arco-progress-status-success`，
+     *   并用 `.arco-progress-status-success .arco-progress-line-bar { background-color:
+     *   rgb(var(--success-6)) }` 上色（实测类名见下方）。
+     *   ⇒"整理中 / 已取消但percent 已经是 1"的任务会被涂成成功绿，把终态说反。
+     *   对策不是"不传 status"（传了也一样，它只是优先用你给的那个），
+     *   而是**让本页 CSS 的特异度压过它**：每条状态色规则都带 `[data-state="..."]`，
+     *   比Arco 的单层 status 类多一层，scoped 又再加一层 `[data-v-xxx]` ⇒ 稳赢。
+     */
+    api.listRecordCacheTasks.mockResolvedValue({ code: 0, data: { list: [task], total: 1, page: 1, size: 20 } });
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: { ...task, state: "failed", progress: 1 } });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const bar = wrapper.get(".record-cache-progress__bar");
+    expect(bar.attributes("data-state")).toBe("failed");
+    // 前置事实（钉住 Arco 的真实行为）：它确实会自己加 success 类。
+    // 哪天 Arco 改了这条，下面的源码断言就该重新评估优先级还够不够。
+    expect(bar.classes()).toContain("arco-progress-status-success");
+
+    wrapper.unmount();
+  });
+});
+
+/**
+ * 进度条**配色**的源码级契约。
+ *
+ * ⛔ 为什么只能钉源码：上面那些渲染单测能证明"高度是 6px""状态落在 data-state 上"，
+ *    但证明不了"底轨是什么颜色" —— happy-dom 不解析真实 CSS 计算值，
+ *    `background: var(--某个不存在的token)` 在测试里一切正常，在页面上却是透明。
+ *    同款坑：StorageCardStatusPanel 的底轨曾写 `var(--uvp-border)`（全仓未定义）。
+ */
+describe("录像缓存进度条的配色契约（源码级）", () => {
+  const PAGE = resolve(process.cwd(), "src/views/gb28181/record-cache/index.vue");
+  const source = readFileSync(PAGE, "utf8");
+
+  it("底轨用系统专用的--uvp-meter-track，而不是 Arco 自带的灰阶", () => {
+    // 底轨是**大面积色块**："还剩多少没缓存"全靠它读出来。Arco 的 `--color-fill-3`
+    // 是它自己的灰阶，跟本仓面板底不同源，暗色下会和卡片底糊在一起。
+    expect(
+      hasRuleBlock(source, ".record-cache-progress__bar :deep(.arco-progress-line)", "background: var(--uvp-meter-track)")
+    ).toBe(true);
+    expect(source).not.toMatch(/var\(\s*--color-fill-3\s*\)/);
+  });
+
+  it("底轨与填充都是胶囊（999px 圆角），不靠 Arco 内部的 100px 数值", () => {
+    // 依赖 Arco 的 `border-radius: 100px` 等于把圆角绑死在它的高度换算上：
+    // 哪天它改了 strokeWidth，胶囊就变方角。
+    expect(hasRuleBlock(source, ".record-cache-progress__bar :deep(.arco-progress-line)", "border-radius: 999px")).toBe(true);
+    expect(hasRuleBlock(source, ".record-cache-progress__bar :deep(.arco-progress-line-bar)", "border-radius: 999px")).toBe(true);
+  });
+
+  it("五种业务状态各有自己的颜色，且都取本仓 token", () => {
+    for (const state of ["running", "merging", "succeeded", "failed"]) {
+      expect(source).toContain(`[data-state="${state}"]`);
+    }
+    // 颜色一律来自 token，不写死十六进制 —— 换主题时才会跟着变。
+    // ⛔ 进度条是**纯色块、没有白字压在上面**，所以用 --uvp-brand / --uvp-success 这类
+    //    "标记色"是对的；不要误套"白字压实心底色 ⇒ --uvp-solid-*"那条规则。
+    for (const token of ["var(--uvp-brand)", "var(--uvp-warning)", "var(--uvp-success)", "var(--uvp-danger)"]) {
+      expect(source).toContain(token);
+    }
+  });
+
+  it("每条状态色规则都带 [data-state] 限定 —— 否则压不住 Arco 的 status 类", () => {
+    /*
+     * ⛔ 这是本页进度条配色最关键的一条。Arco 自带
+     *    `.arco-progress-status-success .arco-progress-line-bar { background-color: ... }`
+     *    （arco.css 12001行），而它**总会**出现：`computedStatus = status ||
+     *    (percent >= 1 ? "success" : "normal")`（progress.js），不传 status 也一样。
+     *    那条规则的选择器是「一个 status 类 + 一个 bar 类」= 2 个类。
+     *    本页的规则写成 `[data-state="x"] .bar` = 2 个类 + 1 个属性选择器
+     *    （scoped 再自动加 `[data-v-xxx]`）⇒ 本页稳赢。
+     *⛔ 一旦有人把某条降级成 `.bar__外层 :deep(.arco-progress-line-bar)`
+     *    （裸类、不带 data-state），特异度就掉到 2 个类，**变成平手**、
+     *    顺序一变就被 Arco 盖掉 ⇒ 失败/取消的任务全变成功绿，而且看不出来。
+     *
+     * 判据用「逐个状态点名的**完整选择器串**」，而不是"数一数带 data-state 的规则有几条"
+     * —— ⛔ 计数式判据在"降级一条"时数量不变，是会漏网的（第一版就这么写，被变异自检抓到）。
+     */
+    for (const state of ["running", "merging", "succeeded", "failed", "cancelled", "expired"]) {
+      expect(source).toContain(`.record-cache-progress__bar[data-state="${state}"] :deep(`);
+    }
+  });
+
+  it("已取消 / 已过期压成灰色，别显示成「卡在某个百分比」", () => {
+    for (const state of ["cancelled", "expired"]) {
+      expect(source).toContain(`[data-state="${state}"]`);
+    }
+    expect(source).toContain("var(--uvp-text-tertiary)");
   });
 });

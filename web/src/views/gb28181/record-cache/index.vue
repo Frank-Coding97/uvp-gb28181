@@ -440,66 +440,50 @@ onMounted(() => {
         :loading="loading"
         :pagination="false"
         :bordered="false"
-        :scroll="{ x: 2380, y: '100%' }"
+        :scroll="{ x: 2290, y: '100%' }"
         row-key="taskId"
       >
         <template #columns>
-          <!-- 收藏放在最左并固定：它是"这一段录像要不要被自动清理"的唯一开关，
-               横向滚动时不该跟着飘走。 -->
-          <a-table-column title="收藏" :width="64" align="center" fixed="left">
-            <template #cell="{ record }">
-              <!-- ⛔ 用 `a-link`（本仓操作列的唯一基准），别换成 `a-button`：Arco 按钮自带
-                   padding / 圆角 / hover 底色，在同一张表里就成了第二套观感。
-                   收藏态只靠 `is-on`（琥珀 + 实心星）区分，不给整行/整格加底色。 -->
-              <a-link
-                v-if="canFavorite"
-                class="uvp-table-action uvp-table-action--favorite"
-                :class="{ 'is-on': record.favorite }"
-                :disabled="favoritePendingId === record.taskId"
-                :title="record.favorite ? '已收藏，不会被自动清理' : '收藏后不会被自动清理'"
-                @click="toggleFavorite(record)"
-              >
-                <template #icon><Star :size="14" /></template>
-              </a-link>
-            </template>
-          </a-table-column>
-
-          <a-table-column title="通道 / 设备" :width="200">
-            <template #cell="{ record }">
-              <div class="record-cache-cell record-cache-cell--stack">
-                <span class="record-cache-cell__title">{{ record.channelName || record.channelCode || "-" }}</span>
-                <span class="record-cache-cell__sub">{{ record.deviceName || record.deviceId }}</span>
-              </div>
-            </template>
-          </a-table-column>
-
-          <!-- 下面两列都取**国标编码**，跟 device-mgmt 里「设备 ID / 通道 ID」的
-               展示口径一致（用户 2026-10-05 要求把 ID 露出来，就是为了跟设备上的编码对得上）。
-               ⛔ 通道 ID 取的是 `channelCode`，**不是** `channelId` ——
-                  `channelId` 是库里的自增主键（31 这种），在设备侧根本不存在这个号。 -->
-          <a-table-column title="设备 ID" :width="180">
-            <template #cell="{ record }">
-              <span v-if="record.deviceId" class="mono" :title="record.deviceId">{{ record.deviceId }}</span>
-              <span v-else>-</span>
-            </template>
-          </a-table-column>
-
-          <a-table-column title="通道 ID" :width="180">
-            <template #cell="{ record }">
-              <span v-if="record.channelCode" class="mono" :title="record.channelCode">{{ record.channelCode }}</span>
-              <span v-else>-</span>
-            </template>
-          </a-table-column>
-
-          <!-- 任务 ID 是排障时的唯一指代（日志、下载地址、后端排查都按它对齐），所以完整露出来，
-               不做省略号截断。 -->
-          <a-table-column title="任务 ID" :width="300">
+          <!-- 任务 ID 是排障时的唯一指代（日志、下载地址、后端排查都按它对齐），所以放最前
+               并完整露出来，不做省略号截断。表格 `scroll.x` 有 2000+ 需要横向滚动，
+               它是排障入口，不该滚出视野 ⇒ 钉在左侧。 -->
+          <a-table-column title="任务 ID" :width="300" fixed="left">
             <template #cell="{ record }">
               <span class="mono" :title="record.taskId">{{ record.taskId }}</span>
             </template>
           </a-table-column>
 
-          <a-table-column title="录像区间" :width="290">
+          <!-- 「设备」和「通道」各自把**名称 + 国标编码**合成一格（上行名称、下行编码）。
+               ⛔ 编码一行都不折：20 位国标编码按 mono 字体量下来 ~168px，加内边距要 180 起步，
+                  所以这两列各留 220。名字再长就在上面那行 `ellipsis` 省略、hover 出title。
+               ⛔ 通道那一格取的是 `channelCode`，**不是** `channelId` ——
+                  `channelId` 是库里的自增主键（31 这种），在设备侧根本不存在这个号，
+                  设备面板上的通道编码是 `channelCode`。同理设备那一格是 `deviceId`。 -->
+          <a-table-column title="设备" :width="180">
+            <template #cell="{ record }">
+              <div class="record-cache-cell record-cache-cell--stack">
+                <span class="record-cache-cell__title" :title="record.deviceName || record.deviceId">
+                  {{ record.deviceName || record.deviceId || "-" }}
+                </span>
+                <span class="record-cache-cell__sub mono">{{ record.deviceId || "-" }}</span>
+              </div>
+            </template>
+          </a-table-column>
+
+          <a-table-column title="通道" :width="180">
+            <template #cell="{ record }">
+              <div class="record-cache-cell record-cache-cell--stack">
+                <span class="record-cache-cell__title" :title="record.channelName || record.channelCode">
+                  {{ record.channelName || record.channelCode || "-" }}
+                </span>
+                <span class="record-cache-cell__sub mono">{{ record.channelCode || "-" }}</span>
+              </div>
+            </template>
+          </a-table-column>
+
+          <!-- 录像区间只有"起 / 至"两行时间戳，内容宽度是固定的（`2026-10-06 12:53:49`），
+               290 是当初随手给的富余值，实际只需 ~230 就不会折行。 -->
+          <a-table-column title="录像区间" :width="180">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
                 <span>{{ formatTime(record.startTime) }}</span>
@@ -517,12 +501,19 @@ onMounted(() => {
           <a-table-column title="进度" :width="220">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
-                <div class="record-cache-progress">
+                <div class="record-cache-progress" :data-state="record.state">
+                  <!-- ⛔ 颜色统一由 CSS 按 `[data-state]` 取本仓 token，**不让组件自己猜**：
+                       Arco 的 `computedStatus = status || (percent>=1 ? "success" : "normal")`
+                       （progress.js）—— "到底走没走完"是**推断**，不是业务状态：
+                       整理中/已取消时percent 也可能已经 1，那时条会变成"成功绿"。
+                       ⛔ 也不传 `size`：它只决定 `strokeWidth`（3/4/8px），而 Arco 把高度
+                       写成**行内 style**（`height: 3px`），CSS 压不过⇒ 只能靠 `:stroke-width` 传。
+                       这里给 6px：Arco 默认 3px 下100px 圆角被压成 1.5px，看着是根硬线。 -->
                   <a-progress
                     class="record-cache-progress__bar"
+                    :data-state="record.state"
                     :percent="progressRatio(record)"
-                    :status="record.state === 'failed' ? 'danger' : undefined"
-                    size="small"
+                    :stroke-width="6"
                     :show-text="false"
                   />
                   <span class="record-cache-progress__percent">{{ progressPercent(record) }}%</span>
@@ -560,9 +551,29 @@ onMounted(() => {
             <template #cell="{ record }">{{ formatTime(record.expiresAt) }}</template>
           </a-table-column>
 
-          <a-table-column title="操作" :width="180" align="center" fixed="right">
+          <!-- 「操作」列宽度按最挤的一行给足：取消收藏(4 字，最长的一档) + 下载 + 分段 + 删除。
+               ⛔ 收藏原来是靠左的独立一列（老板 2026-10-06 要求并进来），
+               独立列占掉一格宽度、且横向滚动时和操作区分处两端，两处都得找。
+               并进操作列后它天然跟着 `fixed="right"` 钉住，位置也稳定（永远第一个）。 -->
+          <a-table-column title="操作" :width="260" align="center" fixed="right">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
+                <!-- ⛔ 用 `a-link`（本仓操作列的唯一基准），别换成 `a-button`：Arco 按钮自带
+                     padding / 圆角 / hover 底色，在同一张表里就成了第二套观感。
+                     ⛔ 纯图标在操作列里认不出是什么（同一排还有星标以外的下载/删除），
+                        必须带文字；收藏态**换文案**（收藏 ↔ 取消收藏）而不只是变色 ——
+                        只变色的话，"点一下会取消"这件事得靠 tooltip 才知道。 -->
+                <a-link
+                  v-if="canFavorite"
+                  class="uvp-table-action uvp-table-action--favorite"
+                  :class="{ 'is-on': record.favorite }"
+                  :disabled="favoritePendingId === record.taskId"
+                  :title="record.favorite ? '已收藏，不会被自动清理' : '收藏后不会被自动清理'"
+                  @click="toggleFavorite(record)"
+                >
+                  <template #icon><Star :size="14" /></template>
+                  <span>{{ record.favorite ? "取消收藏" : "收藏" }}</span>
+                </a-link>
                 <!-- ⛔ 操作列一律用 `a-link`，不要用 `a-button type="text"`。
                      本仓 34 个页面的操作列都是 a-link（device-mgmt / cloud-recordings /
                      role / menu …），色调由 `uvp-table-action--*` 统一给。用 a-button 会带上
@@ -700,8 +711,13 @@ onMounted(() => {
   gap: 2px;
 }
 
+/* 名称行（设备名 / 通道名）：定宽列里名字可能很长，单行省略 + hover 出 title，
+   别让它折行把整行撑高。`*_sub`（国标编码）**不**省略 —— 编码要对得上。 */
 .record-cache-cell__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .record-cache-cell__sub {
@@ -733,6 +749,61 @@ onMounted(() => {
   min-width: 0;
 }
 
+/* 底轨 = 还没缓存的那部分。它是**大面积色块**，必须两套主题都看得见 ⇒ 用系统里
+   专为此留的 `--uvp-meter-track`（亮 #e2e8f0 / 暗 #33475c）。
+   ⛔ 别用 Arco 自带的 `--color-fill-3`：那套是 Arco 自己的灰阶，跟本仓面板底色不同源，
+      暗色下会和卡片底糊在一起。同款坑见 StorageCardStatusPanel 的 `--uvp-border` 教训。 */
+.record-cache-progress__bar :deep(.arco-progress-line) {
+  background: var(--uvp-meter-track);
+
+  /* 胶囊：6px 高配999px 圆角 = 两端正好半圆。Arco 默认写死 100px，在 6px 上也够，
+     这里仍显式写出来 —— 依赖 Arco 内部数值换算，下次它改 strokeWidth 就会变方角。 */
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 4%);
+}
+
+/* 已缓存的那一段。颜色按 `data-state` 走本仓 token（不用 Arco 自带的状态色 ——
+   见模板处注释：`percent>=1` 会被它自动判成"成功绿"，而整理中/已取消也可能已经 1）。 */
+.record-cache-progress__bar :deep(.arco-progress-line-bar) {
+  background: var(--uvp-brand);
+  border-radius: 999px;
+  transition:
+    width 0.6s cubic-bezier(0.34, 0.69, 0.1, 1),
+    background-color 0.3s ease;
+}
+
+/* 进行中：加一层极淡的高光，让"正在跑"的方向感更强（不加动画 —— 表格里20 行一起闪
+   会让人没法读数字，而这块信息靠的是下面那行实时速率，不是动画）。 */
+.record-cache-progress__bar[data-state="running"] :deep(.arco-progress-line-bar),
+.record-cache-progress__bar[data-state="merging"] :deep(.arco-progress-line-bar) {
+  background: linear-gradient(90deg, var(--uvp-brand) 0%, var(--uvp-brand-cyan) 100%);
+}
+
+/* 整理中：录像已拉完、正在拼文件，用琥珀色把它和"还在拉流"区分开。 */
+.record-cache-progress__bar[data-state="merging"] :deep(.arco-progress-line-bar) {
+  background: linear-gradient(90deg, var(--uvp-warning) 0%, #d97706 100%);
+}
+
+.record-cache-progress__bar[data-state="succeeded"] :deep(.arco-progress-line-bar) {
+  background: var(--uvp-success);
+}
+
+.record-cache-progress__bar[data-state="failed"] :deep(.arco-progress-line-bar) {
+  background: var(--uvp-danger);
+}
+
+/* 终态但没有进度可言（已取消 / 已过期）：条别再显示成"卡在某个百分比"的样子，
+   压成灰、并且降到半透明，让它读起来是"这条不用再看了"。 */
+.record-cache-progress__bar[data-state="cancelled"] :deep(.arco-progress-line),
+.record-cache-progress__bar[data-state="expired"] :deep(.arco-progress-line) {
+  opacity: 0.55;
+}
+
+.record-cache-progress__bar[data-state="cancelled"] :deep(.arco-progress-line-bar),
+.record-cache-progress__bar[data-state="expired"] :deep(.arco-progress-line-bar) {
+  background: var(--uvp-text-tertiary);
+}
+
 .record-cache-progress__percent {
   flex: none;
   min-width: 34px;
@@ -740,6 +811,13 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
   color: var(--zlm-text-2);
   text-align: right;
+}
+
+/* 失败行的百分比也跟着变红 —— 数字和条不一致时（比如条是灰的、数字是黑的）
+   用户会以为数字是另一件事。判据挂在**外层 flex 行**上（`:has()` 在 happy-dom 里
+   不生效、且多一层依赖），所以模板里给这行也写了同一个 `data-state`。 */
+.record-cache-progress[data-state="failed"] .record-cache-progress__percent {
+  color: var(--uvp-danger);
 }
 
 @media (width <= 760px) {
