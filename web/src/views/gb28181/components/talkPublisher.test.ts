@@ -158,10 +158,14 @@ describe("createAudioLevelMeter", () => {
   it("按频段输出独立频谱电平，而不是让所有柱子同步缩放", () => {
     const fake = installAudioContext(0.05);
     const snapshots: number[][] = [];
+    // ⛔ 桩必须原样返回 target：`getByteFrequencyData` 在 lib.dom 里的签名是
+    // `(target: Uint8Array) => Uint8Array`（返回同一个数组，不是 void），
+    // 少写 return 会让 TS 判成"桩与真实接口不兼容"而报错。
     fake.analyser.getByteFrequencyData = (target: Uint8Array) => {
       target.fill(0);
       // 48 kHz / 2048 FFT 下，约 7 kHz 的齿音应落在人声展示范围末端。
       target[299] = 255;
+      return target;
     };
 
     createAudioLevelMeter(stream, (_level, spectrum) => snapshots.push(spectrum))!;
@@ -179,6 +183,7 @@ describe("createAudioLevelMeter", () => {
     fake.analyser.getByteFrequencyData = (target: Uint8Array) => {
       target.fill(0);
       target[768] = 255; // 约 18 kHz
+      return target;
     };
     createAudioLevelMeter(stream, (_level, spectrum) => snapshots.push(spectrum))!;
     fake.tick();
