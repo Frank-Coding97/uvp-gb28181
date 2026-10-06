@@ -8,7 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 const (
@@ -52,11 +56,18 @@ func newCleanupRuntime() *cleanupRuntime {
 }
 
 func (s *Service) Cleanup(ctx context.Context, sessionID string, terminal models.TalkSessionState, reason string) error {
+	err, _ := s.cleanupWithOwnership(ctx, sessionID, terminal, reason)
+	return err
+}
+
+// cleanupWithOwnership identifies the caller that started the shared cleanup.
+// Other schema callbacks wait for the same result without reporting it again.
+func (s *Service) cleanupWithOwnership(ctx context.Context, sessionID string, terminal models.TalkSessionState, reason string) (error, bool) {
 	if s == nil || s.repo == nil {
-		return ErrTalkActivationUnavailable
+		return ErrTalkActivationUnavailable, true
 	}
 	if !terminal.IsTerminal() {
-		return fmt.Errorf("%w: %s", ErrInvalidTerminalState, terminal)
+		return fmt.Errorf("%w: %s", ErrInvalidTerminalState, terminal), true
 	}
 	if s.cleanup == nil {
 		s.cleanup = newCleanupRuntime()
@@ -64,7 +75,7 @@ func (s *Service) Cleanup(ctx context.Context, sessionID string, terminal models
 	call, owner := s.cleanup.begin(sessionID)
 	if owner {
 		go func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaultCleanupTimeout)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultCleanupTimeout)
 			defer cancel()
 			err := s.executeCleanup(cleanupCtx, sessionID, terminal, reason)
 			s.cleanup.complete(sessionID, call, err)
@@ -72,9 +83,9 @@ func (s *Service) Cleanup(ctx context.Context, sessionID string, terminal models
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return ctx.Err(), owner
 	case <-call.done:
-		return call.err
+		return call.err, owner
 	}
 }
 
@@ -87,26 +98,35 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 		return nil
 	}
 	var firstErr error
-	record := func(step string, stepErr error) {
-		if stepErr != nil && firstErr == nil {
+	retryRequired := false
+	record := func(step string, stepErr error, retryable bool) {
+		if stepErr == nil {
+			return
+		}
+		if firstErr == nil {
 			firstErr = fmt.Errorf("%s: %w", step, stepErr)
 		}
-	}
-	retryRequired := false
-	recordRetryable := func(step string, stepErr error) {
-		if stepErr != nil {
-			retryRequired = true
-			record(step, stepErr)
+		retryRequired = retryRequired || retryable
+		fields := []zap.Field{
+			zap.String("session_id", sessionID), zap.String("stream_id", session.SourceStream),
+			zap.String("cleanup_step", step), logging.Error(stepErr),
+		}
+		if retryable {
+			app.Log(ctx).Named("talk").Warn("对讲清理步骤失败，保留会话等待重试",
+				append(fields, zap.String("event", "gb28181.talk.cleanup.step_failed"))...)
+		} else {
+			app.Log(ctx).Named("talk").Info("对讲清理步骤未确认，继续释放资源",
+				append(fields, zap.String("event", "gb28181.talk.cleanup.step_unconfirmed"))...)
 		}
 	}
 	if session.State != models.TalkSessionStopping {
 		changed, transitionErr := s.repo.Transition(ctx, sessionID, session.State, models.TalkSessionStopping, TransitionPatch{})
-		recordRetryable("mark stopping", transitionErr)
+		record("mark stopping", transitionErr, true)
 		if transitionErr == nil && !changed {
 			reloaded, reloadErr := s.repo.FindBySession(ctx, sessionID)
-			recordRetryable("reload cleanup state", reloadErr)
+			record("reload cleanup state", reloadErr, true)
 			if reloaded == nil {
-				recordRetryable("reload cleanup state", ErrTalkSessionNotFound)
+				record("reload cleanup state", ErrTalkSessionNotFound, true)
 			} else if reloaded.State.IsTerminal() {
 				return firstErr
 			} else {
@@ -116,9 +136,9 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 					// active（实测 ACK 与 BYE 相隔 0.36ms）。这是良性竞争而非故障：用最新状态
 					// 再抢一次即可。原来直接记 conflict，会把假错误写进会话 error 列，看着像故障。
 					retried, retryErr := s.repo.Transition(ctx, sessionID, session.State, models.TalkSessionStopping, TransitionPatch{})
-					recordRetryable("mark stopping", retryErr)
+					record("mark stopping", retryErr, true)
 					if retryErr == nil && !retried {
-						recordRetryable("cleanup state conflict", fmt.Errorf("state=%s", session.State))
+						record("cleanup state conflict", fmt.Errorf("state=%s", session.State), true)
 					}
 				}
 			}
@@ -127,21 +147,21 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	if session.CallID != "" && s.activation != nil {
 		sipCtx, cancelSIP := stepBudget(ctx, sipTeardownTimeout)
 		if session.Mode == models.TalkSessionModeBroadcast && s.activation.deps.BroadcastDialogs != nil {
-			record("Broadcast BYE", s.activation.deps.BroadcastDialogs.ByeBroadcast(sipCtx, session.CallID))
+			record("Broadcast BYE", s.activation.deps.BroadcastDialogs.ByeBroadcast(sipCtx, session.CallID), false)
 		} else if session.Mode == models.TalkSessionModeTalk && s.activation.deps.Inviter != nil {
-			record("TALK BYE", s.activation.deps.Inviter.ByeTalk(sipCtx, session.CallID))
+			record("TALK BYE", s.activation.deps.Inviter.ByeTalk(sipCtx, session.CallID), false)
 		}
 		cancelSIP()
 	}
 	var client TalkMediaClient
 	if s.activation == nil || s.activation.deps.ClientFor == nil || s.nodes == nil {
-		recordRetryable("ZLM client", ErrTalkActivationUnavailable)
+		record("ZLM client", ErrTalkActivationUnavailable, true)
 	} else if mediaNode, ok := s.nodes.Get(session.NodeID); !ok || mediaNode == nil {
-		recordRetryable("ZLM node", ErrTalkNodeUnavailable)
+		record("ZLM node", ErrTalkNodeUnavailable, true)
 	} else {
 		client = s.activation.deps.ClientFor(mediaNode)
 		if client == nil {
-			recordRetryable("ZLM client", ErrTalkActivationUnavailable)
+			record("ZLM client", ErrTalkActivationUnavailable, true)
 		}
 	}
 	if client != nil && session.SourceStream != "" && session.SSRC != "" {
@@ -159,15 +179,11 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 		// 已定义的返回码；传输层错误、-400 exception 等仍会返回 error，而 local_port=0 时
 		// 这些同样不该把租约吊在 stopping（否则 DELETE 变 500「语音对讲操作失败」，
 		// 2026-10-03 实测两条会话都卡到租约过期）。失败仍要**记进 error 列**，只是不拦收尾。
-		if session.LocalPort > 0 {
-			recordRetryable("stopSendRtp", stopErr)
-		} else {
-			record("stopSendRtp", stopErr)
-		}
+		record("stopSendRtp", stopErr, session.LocalPort > 0)
 	}
 	if client != nil && session.SourceStream != "" {
 		closeCtx, cancelClose := stepBudget(ctx, mediaReleaseTimeout)
-		recordRetryable("close source", client.CloseTalkSource(closeCtx, defaultTalkVHost, session.App, session.SourceStream))
+		record("close source", client.CloseTalkSource(closeCtx, defaultTalkVHost, session.App, session.SourceStream), true)
 		cancelClose()
 	}
 	if retryRequired {
@@ -186,6 +202,7 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	finishCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, finishErr := s.repo.FinishAndReleaseLease(finishCtx, sessionID, terminal, message, s.now().UTC()); finishErr != nil {
+		record("finish session", finishErr, true)
 		return errors.Join(firstErr, finishErr)
 	}
 	return firstErr

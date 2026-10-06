@@ -235,7 +235,17 @@ func (s *Service) OnUnpublished(ctx context.Context, nodeID int64, appName, sour
 	if err != nil || session == nil || session.State.IsTerminal() {
 		return err
 	}
-	return s.Cleanup(ctx, session.SessionID, models.TalkSessionEnded, "talk source unpublished")
+	err, owner := s.cleanupWithOwnership(ctx, session.SessionID, models.TalkSessionEnded, "talk source unpublished")
+	if err == nil || (!owner && ctx.Err() == nil) {
+		return nil
+	}
+	// A BYE timeout may accompany successful media release. Keep its diagnostic
+	// in the cleanup log/session, but do not report a completed stop as a failure.
+	latest, findErr := s.repo.FindBySession(ctx, session.SessionID)
+	if findErr == nil && latest != nil && latest.State.IsTerminal() {
+		return nil
+	}
+	return errors.Join(err, findErr)
 }
 
 func (s *Service) OnRemoteBye(ctx context.Context, callID string) error {
