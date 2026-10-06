@@ -174,4 +174,16 @@ describe("MediaRateArea", () => {
     ]);
     expect(spec.axes?.[1]).toMatchObject({ min: sampledAt("10:00:00"), max: sampledAt("10:05:00") });
   });
+
+  // ⛔ 这条断言是「切走再切回后实时媒体速率容器被拉高」那条bug 的护栏。
+  // VChart 的 _setCanvasStyle 会给宿主写**内联** `position: relative`，
+  // 内联优先级高于 :deep 规则 ⇒ 画布脱离 absolute 约束进入正常流，
+  // 其 px 高度被计入 flex 内容高度，再被 ResizeObserver 当成新尺寸反馈回去，逐级放大且不回落。
+  // 所以 `absolute` 必须带 !important，不能只写 position: absolute。
+  it("pins the chart canvas as an overlay so VChart cannot re-enter normal flow", () => {
+    expect(source).toMatch(
+      /\.media-rate-area__plot\s*:deep\(\.media-vchart__canvas\)\s*\{[^}]*position:\s*absolute\s*!important;/s
+    );
+    expect(source).not.toMatch(/\.media-rate-area__plot\s*:deep\(\.media-vchart__canvas\)\s*\{[^}]*position:\s*absolute\s*;/s);
+  });
 });

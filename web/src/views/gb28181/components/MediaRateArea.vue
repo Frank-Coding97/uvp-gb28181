@@ -64,8 +64,12 @@ const chartSpec = computed(() => createMediaRateChartSpec(props.samples));
 .media-rate-area__plot :deep(.media-vchart__header) {
   display: none;
 }
+
+/* VChart 的 _setCanvasStyle 会给宿主写内联 `display:block; position:relative`，
+   内联样式优先级高于这里的 :deep 规则 ⇒ 画布一度脱离 absolute 约束进入正常流。
+   用 `!important` 把 absolute 钉死，保证画布永远只是覆盖层、不参与父级高度计算。 */
 .media-rate-area__plot :deep(.media-vchart__canvas) {
-  position: absolute;
+  position: absolute !important;
   inset: 0;
   width: 100%;
   height: 100%;

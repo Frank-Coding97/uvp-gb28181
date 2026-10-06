@@ -571,9 +571,15 @@ defineExpose({ refresh });
   align-self: stretch;
   min-height: 220px;
 }
+
+/* flex-basis 固定 0：图表高度只由「面板高 − 头部」决定，不参与内容高度计算。
+   不可写成 `flex: 1` + `height: auto` —— 那会让图表画布反过来撑大面板：
+   VChart 渲染时会给宿主写内联 `position: relative`（击穿下面 :deep 的 absolute），
+   画布进入正常流后其 px 高度被计入 flex 内容高度，ResizeObserver 又把这个高度
+   当成新尺寸反馈回去，切走再切回后容器被逐级放大且不会回落。 */
 .runtime-rate-panel :deep(.media-rate-area) {
-  flex: 1;
-  height: auto;
+  flex: 1 1 0;
+  height: 0;
   min-height: 160px;
 }
 .runtime-thread-panel--full {

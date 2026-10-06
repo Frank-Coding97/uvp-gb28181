@@ -121,4 +121,18 @@ describe("runtime overview state", () => {
     expect(retiredSource).toContain("/gb28181/zlm/overview");
     expect(retiredSource).not.toContain("getZLMNodeRuntime");
   });
+
+  // ⛔ 「切走再切回后实时媒体速率容器被拉高」的护栏（第一道防线）。
+  // 图表区若参与内容高度计算（`flex: 1` + `height: auto`），画布的 px 高度会被
+  // 计入 flex 内容高度，再被 ResizeObserver 当成新尺寸反馈回去 ⇒ 切回后容器被放大且不回落。
+  // 正确写法是 flex-basis 固定 0：高度只由「面板高 − 头部」决定。
+  it("keeps the rate chart out of content-height calculation", () => {
+    const panelSource = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"),
+      "utf8"
+    );
+    expect(panelSource).toMatch(/\.runtime-rate-panel\s*:deep\(\.media-rate-area\)\s*\{[^}]*flex:\s*1 1 0;/s);
+    expect(panelSource).toMatch(/\.runtime-rate-panel\s*:deep\(\.media-rate-area\)\s*\{[^}]*height:\s*0;/s);
+    expect(panelSource).not.toMatch(/\.runtime-rate-panel\s*:deep\(\.media-rate-area\)\s*\{[^}]*height:\s*auto;/s);
+  });
 });
