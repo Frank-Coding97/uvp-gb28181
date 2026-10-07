@@ -27,6 +27,9 @@ SERVER_DIR="$REPO_ROOT/server"
 WEB_DIR="$REPO_ROOT/web"
 DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
+# ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
+# ⛔ 不入库：MediaServer 13MB + ffmpeg 运行时库 32MB + www 16MB，且必须与目标机架构匹配。
+ZLM_DIR="$DEPLOY_DIR/bin/zlm"
 
 HTTP_PORT="${UVP_HTTP_PORT:-8280}"
 REDIS_PORT="${UVP_REDIS_PORT:-6379}"
@@ -55,6 +58,14 @@ command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成
 [ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server"
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
+
+# ZLM（平台靠它推流/取流/录像，缺了整套功能跑不起来）
+[ -x "$ZLM_DIR/MediaServer" ] || fail "缺少 ZLM：$ZLM_DIR/MediaServer（先跑 deploy/standalone/fetch-zlm.sh）"
+[ -f "$ZLM_DIR/config.ini" ]   || fail "缺少 ZLM 配置：$ZLM_DIR/config.ini"
+# ⛔ 必须校验依赖闭包完整：MediaServer 缺库时报的是
+#   `error while loading shared libraries: libavfilter.so.9`，
+#   而那是**启动瞬间**的事 —— 装完的客户机上表现为「服务起了但推流全失败」。
+[ -d "$ZLM_DIR/lib" ]         || fail "缺少 ZLM 运行时库目录：$ZLM_DIR/lib（见 deploy/standalone/README）"
 [ -f "$SERVER_DIR/version.json" ]     || fail "缺少 version.json"
 # ⛔ 源配置必须用 config.example.yml：config.yml 因含数据库凭据被 .gitignore 排除，
 #   任何从 git clone 下来的构建机上都不存在它（实测首次出包就撞到这个）。
@@ -70,6 +81,7 @@ fi
 arch_of() { file "$1" | grep -oE 'x86-64|x86_64' | head -1; }
 [ -n "$(arch_of "$SERVER_DIR/bin/uvp-server")" ] || fail "后端二进制不是 x86_64"
 [ -n "$(arch_of "$DEPLOY_DIR/bin/redis-server")" ] || fail "redis-server 不是 x86_64"
+[ -n "$(arch_of "$ZLM_DIR/MediaServer")" ]|| fail "MediaServer 不是 x86_64"
 
 # ------------------------------------------------------------------ 组装 ----
 
@@ -87,6 +99,17 @@ chmod 0755 "$PKG/bin/uvp-server"
 log "复制 Redis（自带，包内跑，不连外部）"
 cp "$DEPLOY_DIR/bin/redis-server" "$DEPLOY_DIR/bin/redis-cli" "$PKG/bin/"
 chmod 0755 "$PKG/bin/redis-server" "$PKG/bin/redis-cli"
+
+log "复制二开 ZLM（含 ffmpeg 运行时库）"
+# ⛔ 必须连 lib/ 一起拷且保持相对位置：MediaServer 是动态链接的，
+#   靠 LD_LIBRARY_PATH=$ROOT/bin/zlm/lib 找那些 .so，缺一个就起不来。
+cp -a "$ZLM_DIR/MediaServer" "$PKG/bin/zlm/"
+cp -a "$ZLM_DIR/lib" "$PKG/bin/zlm/lib"
+cp -a "$ZLM_DIR/www" "$PKG/bin/zlm/www"
+cp "$ZLM_DIR/config.ini" "$PKG/bin/zlm/config.ini"
+[ -f "$ZLM_DIR/default.pem" ] && cp "$ZLM_DIR/default.pem" "$PKG/bin/zlm/default.pem"
+[ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/bin/zlm/"
+chmod 0755 "$PKG/bin/zlm/MediaServer"
 
 log "复制前端产物"
 if [ -f "$WEB_DIR/dist/index.html" ]; then
