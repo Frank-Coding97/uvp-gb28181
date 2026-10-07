@@ -56,6 +56,11 @@ command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
 [ -f "$SERVER_DIR/version.json" ]     || fail "缺少 version.json"
+# ⛔ 源配置必须用 config.example.yml：config.yml 因含数据库凭据被 .gitignore 排除，
+#   任何从 git clone 下来的构建机上都不存在它（实测首次出包就撞到这个）。
+#   用 example 版还有一层好处 —— 打包结果不依赖某个开发者的本地配置，
+#   仓库里的 example 版是唯一真源。
+[ -f "$SERVER_DIR/config/config.example.yml" ] || fail "缺少 config.example.yml"
 
 if [ "$SKIP_FRONTEND" -eq 0 ]; then
   [ -f "$WEB_DIR/dist/index.html" ] || fail "缺少前端产物：$WEB_DIR/dist/index.html（先跑 vite build）"
@@ -98,7 +103,7 @@ cp "$SERVER_DIR/version.json" "$PKG/version.json"
 log "生成生产配置（SQLite + 本机 Redis）"
 $PY \
   "$DEPLOY_DIR/make-config.py" \
-  --source "$SERVER_DIR/config/config.yml" \
+  --source "$SERVER_DIR/config/config.example.yml" \
   --target "$PKG/config/config.yml" \
   --http-port "$HTTP_PORT" \
   --redis-port "$REDIS_PORT" \
