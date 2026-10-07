@@ -45,8 +45,10 @@ ZLM_DIR="$DEPLOY_DIR/bin/zlm"
 # ⛔ 不入库：二进制必须与目标机的 OpenSSL 大版本对齐（见该脚本的说明）。
 NGINX_DIR="$DEPLOY_DIR/bin/nginx"
 
-HTTP_PORT="${UVP_HTTP_PORT:-8280}"
-REDIS_PORT="${UVP_REDIS_PORT:-6379}"
+# ⛔ 端口默认值只在上面定义一次（30010/30011）。
+# ⛔⛔ 这里曾有过第二组 8280/6379 —— bash **后定义覆盖先定义**，
+#   于是上面新加的 30010/30011 被这组旧的盖回去，端口规划等于没改。
+#   与 uvp-ctl.sh 里 nginx 端口那个坑是同一个：**同名的第二处定义**。
 VERSION="${UVP_VERSION:-$(cat "$SERVER_DIR/version.json" 2>/dev/null | grep -m1 '"version"' | cut -d'"' -f4 || echo 1.0.0)}"
 SKIP_FRONTEND=0
 OUT_DIR="$REPO_ROOT/release-output"
@@ -79,6 +81,30 @@ if command -v shellcheck >/dev/null 2>&1; then
   if [ -n "$shellcheck_out" ]; then
     printf '%s\n' "$shellcheck_out" >&2
     fail "shellcheck 未通过（见上）。⚠️ 这类问题 bash -n 抓不到，必须过。"
+  fi
+
+  # ---- 端口变量单点定义门禁 ----
+  # ⛔⛔ 今天在两个脚本里各栽一次「同名变量的第二处定义」，而症状都是
+  #   「明明改了端口，运行时还是旧值」且**毫无提示**：
+  #   uvp-ctl.sh 里 nginx 端口有第二组（443/80），build-standalone.sh 里
+  #   HTTP_PORT/REDIS_PORT 有第二组（8280/6379）。
+  #   bash 的**后定义覆盖先定义**，且shellcheck 不报（语法合法、变量名正确）。
+  #   ⇒ 这里显式拦：端口变量每台机器只允许出现一次赋值。
+  log "检查端口变量是否单点定义"
+  # ⛔⛔ 判据要挑对，否则门禁自己变噪音。
+  #   我第一版按"变量名出现过几次"来数 ⇒ **误报**：端口变量的正常写法本来就是
+  #   两行（先读环境变量、再套默认值）：
+  #       HTTP_PORT="${UVP_HTTP_PORT:-$(read_port_env UVP_HTTP_PORT)}"
+  #       HTTP_PORT="${HTTP_PORT:-$HTTP_PORT_DEFAULT}"
+  #   这样每个变量必然出现两次。
+  #   ⭐ 真正要抓的是「**两处独立的默认值**」—— 也就是 `X="${...:-默认值}"`
+  #   这种**自带字面量**的赋值在同一变量上出现多次（后者会覆盖前者）。
+  #   判据：只看自带字面量的那一类。
+  dup_ports="$(grep -hE '^(HTTP_PORT|REDIS_PORT|NGINX_HTTPS_PORT|NGINX_HTTP_PORT|ZLM_HTTP_PORT|ZLM_RTSP_PORT)="\$\{[A-Za-z_]+:-[0-9]+' \
+    "$0" "$DEPLOY_DIR/uvp-ctl.sh" 2>/dev/null | sed 's/=.*//' | sort | uniq -d || true)"
+  if [ -n "$dup_ports" ]; then
+    printf '端口变量存在多处字面量默认值（后者覆盖前者，改动不生效）：\n%s\n' "$dup_ports" >&2
+    fail "端口默认值必须单点定义。端口规划见 deploy/standalone/PORTS.md"
   fi
 else
   log "⚠️ 未安装 shellcheck，跳过脚本静态检查（apt install shellcheck 可启用）"
