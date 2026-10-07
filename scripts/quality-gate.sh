@@ -109,6 +109,11 @@ run_check "gofmt（Go 格式）" "$ROOT/server" '
 
 run_check "go vet（后端）" "$ROOT/server" '"$GO_BIN" vet ./...'
 
+# 域名残留：散落在 1100+ 个 Go 文件 import、10 个代码生成器模板、Nginx 部署配置
+# 与前端扫码页里，靠人眼盯不完整。口径与 scripts/domain-guard.sh 一致。
+# ⛔ 本注释刻意不写出完整旧域名 —— 那是护栏的判据本身，写出来会把自己判违规。
+run_check "域名残留（uvplatform.com）" "$ROOT" './scripts/domain-guard.sh'
+
 if [ -n "$GOLANGCI_BIN" ] && [ -x "$GOLANGCI_BIN" ]; then
   # golangci-lint 内部要调 go，而 go 不在 PATH，所以给它补上。
   #
