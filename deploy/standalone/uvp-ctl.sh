@@ -463,7 +463,7 @@ case "${1:-start}" in
     start_redis          # ⛔ 顺序不能反：后端启动时要连缓存
     start_backend
     log "启动完成 → http://127.0.0.1:${HTTP_PORT}"
-    printf'首次登录账号 admin，密码见交付说明（登录后请立即修改）\n'
+    printf '首次登录账号 admin，密码见交付说明（登录后请立即修改）\n'
     ;;
   stop)
     stop_backend
