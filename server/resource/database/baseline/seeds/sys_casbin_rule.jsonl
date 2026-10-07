@@ -489,3 +489,9 @@
 {"id": 10282, "ptype": "p", "v0": "role_1", "v1": "/api/sysRole/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 10283, "ptype": "p", "v0": "role_1", "v1": "/api/sysMenu/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 10284, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/cascade/platforms/:id/disable", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
+{"id": 10285, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10286, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
+{"id": 10287, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10288, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
+{"id": 10289, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id/download-link", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
+{"id": 10290, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/snapshots", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}

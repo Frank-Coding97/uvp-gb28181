@@ -3508,7 +3508,13 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10281, 'p', 'role_1', '/api/sysRole/list', 'GET', '*', '', ''),
 (10282, 'p', 'role_1', '/api/sysRole/:id', 'GET', '*', '', ''),
 (10283, 'p', 'role_1', '/api/sysMenu/:id', 'GET', '*', '', ''),
-(10284, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/disable', 'POST', '*', '', '');
+(10284, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/disable', 'POST', '*', '', ''),
+(10285, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '*', '', ''),
+(10286, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '*', '', ''),
+(10287, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
+(10288, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '*', '', ''),
+(10289, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
+(10290, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),

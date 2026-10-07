@@ -100,39 +100,44 @@ def main() -> int:
         ).fetchall()
         print(f"✅ casbin 策略 ptype 合法，取值: {[k[0] for k in kinds]}")
 
-        # ---- 权限覆盖检查（系统管理员不该有 403）----
-        # ⛔⛔ 这条来自一次真实踩坑：admin 打开参数管理页报 403，
-        #   而**开发库里也一样缺** —— 说明是产品侧一直没给这些接口授权，
-        #   不是绿色包/迁移的问题。它在开发环境被"知道 admin 应该有权限"的心智
-        #   掩盖了，一装成新库就暴露。
-        #   症状有迷惑性：日志里只有统一失败出口的「请求被拒」，
-        #   与权限拒绝、参数错误长得一模一样 ⇒ 排查时极易往别处想。
-        admin_apis = set()
-        for (v1,) in db.execute(
-                "SELECT v1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1 <> '*'"
-        ):
-            if v1:
-                admin_apis.add(v1.strip())
+        # ---- 权限覆盖：role_1 必须能过所有「登记在 sys_api 且走鉴权」的接口 ----
+        # ⛔⛔ 判据必须用**全量对比**，不能硬编码路径清单 ——
+        #   我第一版就列了 9 个已知路径，结果漏掉 /firmware-repository，
+        #   而它恰恰是用户实际撞到 403 的那个（参数管理页实测全通，
+        #   但固件仓库页 403 ⇒ 我上轮"修好了"的说法是错的）。
+        #   ⇒ 现在从 sys_api 表取全量，算出 role_1 缺哪些。
+        # ⭐ 关键前提：casbin 中间件用 **c.Request.URL.Path** 匹配策略
+        #   （见 casbinhelper.CasbinMiddleware 的 s.Enforce(userSubject, path, method, domain)），
+        #   **不查 sys_api 表** ⇒ 所以"路由注册了但 sys_api 没登记"的接口
+        #   无法被这张表发现，只能靠下面的「反向核对」从 routes.go 找。
+        admin_p = set()
+        for (v1, v2) in db.execute(
+                "SELECT v1, v2 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1'"):
+            if v1 and v1 != '*':
+                admin_p.add((v1.strip(), (v2 or '').upper()))
 
-        def _admin_can(path: str) -> bool:
-            return any(a == path or (a.endswith('*') and path.startswith(a.rstrip('*')))
-                       for a in admin_apis)
+        def _can(path: str, method: str) -> bool:
+            m = method.upper()
+            return any(p == path and (a == m or a == '*')
+                       or (p.endswith('*') and path.startswith(p.rstrip('*')))
+                       for p, a in admin_p)
 
-        # 走casbin 中间件的接口，必须有对应授权；system_manager 这类无需鉴权的不在此列
-        protected_missing = [
-            (m, p) for (p, m) in db.execute(
-                "SELECT path, method FROM sys_api "
-                "WHERE path IN ('/api/sysParam/list', '/api/sysParam/:id', "
-                "  '/api/sysParam/getByCode/:code', '/api/sysParam/add', "
-                "  '/api/sysParam/edit', '/api/sysParam/delete', "
-                "  '/api/sysRole/list', '/api/sysRole/:id', '/api/sysMenu/:id')"
-            ) if not _admin_can('/' + p.lstrip('/'))
+        # 免鉴权的那几个（登录/刷新 token 不该也不能有策略）
+        exempt = {('/api/login', 'POST'), ('/api/refreshToken', 'POST')}
+
+        missing = [
+            (m, path) for (path, m) in db.execute(
+                "SELECT path, method FROM sys_api")
+            if (path, m) not in exempt and not _can('/' + path.lstrip('/'), m)
         ]
-        if protected_missing:
-            print(f"❌ 以下接口走鉴权但 role_1（系统管理员）没授权 → admin 访问会 403：{protected_missing}")
-            print("   新增这类接口时，记得同时给系统管理员补一条 sys_casbin_rule 策略。")
+        if missing:
+            print(f"❌ 以下接口登记在 sys_api 但 role_1 没授权 → admin 访问会 403（{len(missing)} 条）：")
+            for m, path in missing[:20]:
+                print(f"     {m:6s} {path}")
+            print("   修法：把这些策略加进 casbin_delta_role1.jsonl 后重跑")
+            print("         apply_casbin_seed_delta.py（别手工改 SQL，理由见该脚本头部）。")
             return 1
-        print("✅ 关键接口的系统管理员授权齐全（admin 不再 403）")
+        print(f"✅ sys_api 里的接口 role_1 全部有授权（{len(admin_p)} 条策略，无 403 缺口）")
 
         # admin 账号必须在 —— 没有它装完登不进去
         admin = one("SELECT count(*) FROM sys_users WHERE username='admin'")
