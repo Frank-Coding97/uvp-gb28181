@@ -78,11 +78,15 @@ ZLM_LOG="$LOGS/zlm.log"
 #   ⇒ sync_zlm_ports_ini() 负责写进去。
 ZLM_INI="$ZLM_DIR/config.ini"
 ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
-ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-80}"
+# ⛔ 默认值一律选**高位端口**，不用 ZLM 自带的 80/443/554。
+#   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
+#   「Listen on :: 554 failed: permission denied」）。
+#   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
+ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-18080}"
 ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
-ZLM_SSL_PORT="${ZLM_SSL_PORT:-443}"
+ZLM_SSL_PORT="${ZLM_SSL_PORT:-18443}"
 ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
-ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-554}"
+ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-10554}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
