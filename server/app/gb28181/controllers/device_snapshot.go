@@ -500,7 +500,22 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 		// ⛔ LEFT JOIN 而不是 INNER JOIN：通道/设备被删之后，**历史图仍是原始凭证**，
 		// 不该跟着消失。可见性由下面的 Scope 决定（它作用在 `ch.*` 上，匹配不到通道的行
 		// 天然不可见），而不是由 JOIN 类型决定。
-		Joins("LEFT JOIN gb_channel AS ch ON ch.channel_id = s.channel_code AND ch.deleted_at IS NULL").
+		//
+		// ⛔⛔ 通道必须走**子查询取唯一行**，不能直接 JOIN（老板 2026-10-07 报
+		// 「设备ID通道ID 的值不对」+「勾第一张第二张也跟着勾」+「看着像重复数据」）。
+		// 实测根因：**同一个 20 位 `channel_id` 在 `gb_channel` 里有两行**
+		// （库行 3539 与 3732 指向同一设备），直连 JOIN 变成一对多 ⇒
+		//   1) 同一张图被**渲染两次**（页面出现两张一模一样的卡片）；
+		//   2) 两行前端 `:key="item.id"` 相同 ⇒ Vue 复用同一 DOM ⇒ **勾一张选中两张**；
+		//   3) 展示的通道主键变成 JOIN 命中的那一行（3732），与图里存的 3539 不一致。
+		// ⛔ 归并判据用 `MIN(id)`：**只取一行**，宁可主键偏小也不要行数翻倍
+		//（行数翻倍会同时毁掉展示与交互，而主键只用于报障定位）。
+		// ⚠️ 同一个编码对应两个**不同**通道行，说明写入侧曾经重复建行，
+		// 根治要在通道创建处加唯一约束，不是这里能兜住的。
+		Joins(`LEFT JOIN gb_channel AS ch ON ch.id = (
+			SELECT MIN(c2.id) FROM gb_channel AS c2
+			WHERE c2.channel_id = s.channel_code AND c2.deleted_at IS NULL
+		)`).
 		Joins("LEFT JOIN gb_device AS d ON d.device_id = ch.device_id AND d.deleted_at IS NULL").
 		Where("s.deleted_at IS NULL").
 		// ⛔ 用**带别名**的可见性 Scope：本表自己也有 `device_id` 列（平台主键），

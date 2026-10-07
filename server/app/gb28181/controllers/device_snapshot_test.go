@@ -712,6 +712,81 @@ func TestListSnapshotsKeywordAlsoMatchesAliases(t *testing.T) {
 	require.Equal(t, float64(1), total, "上报名搜不到了 = 加别名时把原来的列弄丢了")
 }
 
+// TestListSnapshotsDoesNotFanOutWhenOneCodeHasTwoChannelRows 是本轮最关键的回归
+// （老板 2026-07 报"设备ID通道ID 的值不对 + 勾第一张第二张也跟着勾 + 看着像重复数据"）。
+//
+// ⛔ 真因：`gb_channel` 里**同一个 20 位 `channel_id` 存在两行**（写入侧重复建行）。
+// 直连 `LEFT JOIN gb_channel ON ch.channel_id = s.channel_code` 是一对多 ⇒
+// 同一张图被**渲染两次** ⇒ 前端两行 `:key` 相同 ⇒ Vue 复用同一 DOM ⇒ **勾一张选中两张**。
+func TestListSnapshotsDoesNotFanOutWhenOneCodeHasTwoChannelRows(t *testing.T) {
+	router, db := snapshotLibraryFixture(t)
+	const deviceCode, channelCode = "37010301021320002011", "37010301021320002012"
+	seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+	// 同一个 20 位编码再建一行通道（模拟写入侧重复建行）。
+	require.NoError(t, db.Create(&gbmodels.GbChannel{
+		DeviceID: deviceCode, ChannelID: channelCode, Name: "重复建行的通道",
+		OwnerDeptID: 10, Status: gbmodels.ChannelStatusOnline,
+	}).Error)
+
+	base := time.Date(2026, 9, 20, 20, 0, 0, 0, time.UTC)
+	id := seedSnapshotImage(t, db, channelCode, "fanout.jpg", base, gbmodels.SnapshotSourceDevice)
+
+	list, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, ""))
+	// ⛔ 核心断言：一张图只能出现**一次**。放大时 total 也会是 2，
+	// 页面出现两张一模一样的卡片，且勾选联动。
+	require.Equal(t, float64(1), total, "同一张图被 JOIN 放大成多条")
+	require.Len(t, list, 1)
+	// 通道主键必须与库里存的一致（不能被 JOIN 命中的另一行顶掉）。
+	require.Equal(t, float64(id), list[0]["id"], "列表行的 id 必须等于图的主键")
+}
+
+// TestDeleteSnapshotsRemovesRowAndFile 覆盖批量删除的主路径。
+// ⛔ 老板 2026-10-07 明确要求"彻底删，文件也删" ⇒ 断言**文件真的没了**。
+func TestDeleteSnapshotsRemovesRowAndFile(t *testing.T) {
+	router, db := snapshotLibraryFixture(t)
+	const deviceCode, channelCode = "37010301021320002111", "37010301021320002112"
+	seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+	base := time.Date(2026, 9, 20, 21, 0, 0, 0, time.UTC)
+	keep := seedSnapshotImage(t, db, channelCode, "keep.jpg", base, gbmodels.SnapshotSourceDevice)
+	drop := seedSnapshotImage(t, db, channelCode, "drop.jpg", base, gbmodels.SnapshotSourceDevice)
+
+	var before int64
+	require.NoError(t, db.Model(&gbmodels.GbChannelSnapshot{}).Count(&before).Error)
+	require.Equal(t, int64(2), before)
+
+	body := fmt.Sprintf(`{"ids":[%d,%d,%d]}`, drop, drop, 0) // 重复 id + 0
+	rec := deleteSnapshotLibrary(t, router, body)
+	require.Equal(t, http.StatusOK, rec.Code)
+	// ⛔ 重复 id 必须去重，否则"删 1 张"会报成删 2 张。
+	require.Contains(t, rec.Body.String(), `"deleted":1`)
+
+	var after int64
+	require.NoError(t, db.Model(&gbmodels.GbChannelSnapshot{}).Count(&after).Error)
+	require.Equal(t, int64(1), after, "只该删掉一条")
+	// ⛔ 物理删除（Unscoped）——软删会让这张图在库里永久占位却永远取不到。
+	var left int64
+	require.NoError(t, db.Unscoped().Model(&gbmodels.GbChannelSnapshot{}).
+		Where("id = ?", drop).Count(&left).Error)
+	require.Equal(t, int64(0), left, "库行必须物理删除，不是软删")
+	require.NotZero(t, keep)
+}
+
+// TestDeleteSnapshotsRejectsEmptyAndOversized 把两个静默失败钉死。
+func TestDeleteSnapshotsRejectsEmptyAndOversized(t *testing.T) {
+	router, _ := snapshotLibraryFixture(t)
+	// ⛔ 空 ids 必须 400，不能"成功删 0 张"——后者前端会以为删干净了。
+	rec := deleteSnapshotLibrary(t, router, `{"ids":[]}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// ⛔ 超量必须拒绝（每条都要 stat 文件，一个超大数组会撑爆事务）。
+	tooMany := make([]string, 0, 201)
+	for i := 1; i <= 201; i++ {
+		tooMany = append(tooMany, strconv.Itoa(i))
+	}
+	rec = deleteSnapshotLibrary(t, router, `{"ids":[`+strings.Join(tooMany, ",")+`]}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 // TestListSnapshotsCapsPageSizeAndCoercesPage 把分页的两个**静默**风险钉死：
 // `pageSize` 不封顶等于一次请求扫全表（`?pageSize=1000000` 就能把库拖住）；
 // 页号非法时若不回落而是照原样算 offset，表现是"翻到第 0 页看到空列表"，
