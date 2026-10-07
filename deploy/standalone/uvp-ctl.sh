@@ -515,9 +515,31 @@ ZLM_INI_PY
 
 # ---------------------------------------------------------------- ZLM ----
 
+# port_in_use_by_other 判断某端口是否被**非本包**的进程占用。
+# ⛔ 用 ss 而不是 lsof：绿色包不保证目标机装了 lsof，而 ss 是 iproute2 自带的。
+#   只能看端口是否有人听（不解析进程归属，归属交给调用方自己的 pgrep 判）。
+port_in_use_by_other() {
+  ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${1}$"
+}
+
+# zlm_healthy 要求**端口通**且**是本包的 ZLM 在服务**。
+#
+# ⛔⛔ 端口通不足以证明是"我的 ZLM"：实测机器上有别人的 MediaServer 占着同一端口时，
+#   我们的 ZLM 起来后bind 失败、**1 秒后正常析构退出**（日志里是 ~EventPoller/~Logger，
+#   不是崩溃），而这里只探测端口 ⇒ 立刻误判"启动成功"。
+#   症状最坑的地方：status 随后又报「未运行」（那时对方也退了），
+#   于是**启动成功、状态未运行**，两个输出互相矛盾且都"有依据"。
+#   ⇒ 必须同时确认两件事：① 端口在听 ② 本包路径的 MediaServer 进程活着。
 zlm_healthy() {
-  (exec 3<>"/dev/tcp/127.0.0.1/$ZLM_HTTP_PORT") 2>/dev/null && exec 3<&- 3>&- && return 0
-  return 1
+  (exec 3<>"/dev/tcp/127.0.0.1/$ZLM_HTTP_PORT") 2>/dev/null || {
+    exec 3<&- 3>&- 2>/dev/null || true
+    return 1
+  }
+  exec 3<&- 3>&-
+  # ⛔ 端口被谁占着也要分清：机器上可能跑着别的 MediaServer（容器内的、
+  #   用相对路径 -c ../conf/config.ini 启动），按可执行文件**绝对路径**匹配
+  #   只会命中本包启动的。
+  pgrep -f "$ZLM_BIN" >/dev/null 2>&1
 }
 
 start_zlm() {
@@ -552,6 +574,12 @@ start_zlm() {
         log "ZLM 进程已退出，最后 20 行日志："
         tail -20 "$ZLM_LOG" >&2 || true
         rm -f "$ZLM_PID_FILE"
+        # ⛔ 区分两种退出：端口被别人占着 vs 自身起不来。
+        #   这两种的处置完全不同（前者要换端口，后者要查库），混为一谈会误导排障。
+        if port_in_use_by_other "$ZLM_HTTP_PORT"; then
+          fail "ZLM 端口 ${ZLM_HTTP_PORT} 已被**其他进程**占用（多半是另一套 ZLM），
+   本包的 ZLM 无法bind 而退出。处理：停掉占用者，或用 UVP_ZLM_HTTP_PORT 换一个端口。"
+        fi
         fail "ZLM 启动失败（详见 ${ZLM_LOG}）。常见原因：lib/ 下缺 ffmpeg 运行时库"
       fi
     fi
