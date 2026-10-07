@@ -108,6 +108,12 @@ make -j"$(nproc 2>/dev/null || echo 2)" > "$SRC_ROOT/make.log" 2>&1 || {
 
 # ---------------------------------------------------------------- 装配 ----
 log "装配到 $DEST"
+# ⛔⛔ 每次装配都从零重建，`bin/nginx/` 里不保留任何旧文件。
+#   实测踩过：改了仓库里的 nginx.conf.template（pid 占位符补空格）并提交，
+#   但**没有重跑本脚本** —— `bin/nginx/` 是构建产物目录（gitignore），
+#   里面还是上一次拷进去的旧模板，于是出包后 nginx 依旧报
+#   `unknown directive "pid/home/..."`。看起来像"改了没用"，其实是产物没更新。
+#   ⇒ 推论：**改完模板/脚本必须重跑 build-nginx.sh**，否则包里的还是旧的。
 rm -rf "$DEST"
 mkdir -p "$DEST/sbin" "$DEST/conf" "$DEST/logs" "$DEST/client_body_temp"
 
