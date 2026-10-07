@@ -30,6 +30,9 @@ SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
 # ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
 # ⛔ 不入库：MediaServer 13MB + ffmpeg 运行时库 32MB + www 16MB，且必须与目标机架构匹配。
 ZLM_DIR="$DEPLOY_DIR/bin/zlm"
+# nginx（前端托管 + HTTPS 终止）：构建时由 deploy/standalone/build-nginx.sh 放到这里。
+# ⛔ 不入库：二进制必须与目标机的 OpenSSL 大版本对齐（见该脚本的说明）。
+NGINX_DIR="$DEPLOY_DIR/bin/nginx"
 
 HTTP_PORT="${UVP_HTTP_PORT:-8280}"
 REDIS_PORT="${UVP_REDIS_PORT:-6379}"
@@ -82,6 +85,12 @@ fi
 #   `error while loading shared libraries: libavfilter.so.9`，
 #   而那是**启动瞬间**的事 —— 装完的客户机上表现为「服务起了但推流全失败」。
 [ -d "$ZLM_DIR/lib" ]         || fail "缺少 ZLM 运行时库目录：$ZLM_DIR/lib（见 deploy/standalone/README）"
+
+# nginx（前端 + HTTPS）。⛔ 它的 OpenSSL 符号版本必须匹配目标机 ——
+#   从镜像里直接抠出来的 nginx 要 OPENSSL_3.2/3.5，而目标机只有 3.0，
+#   拷过去会报 "version `OPENSSL_3.5.0' not found" 且**nginx 连启动都做不到**。
+#   ⇒ 必须按目标机环境自行编译（build-nginx.sh），不引入新的运行时依赖。
+[ -x "$NGINX_DIR/sbin/nginx" ] || fail "缺少 nginx：$NGINX_DIR/sbin/nginx（先跑 deploy/standalone/build-nginx.sh）"
 [ -f "$SERVER_DIR/version.json" ]     || fail "缺少 version.json"
 # ⛔ 源配置必须用 config.example.yml：config.yml 因含数据库凭据被 .gitignore 排除，
 #   任何从 git clone 下来的构建机上都不存在它（实测首次出包就撞到这个）。
@@ -127,6 +136,11 @@ cp "$ZLM_DIR/config.ini" "$PKG/bin/zlm/config.ini"
 [ -f "$ZLM_DIR/default.pem" ] && cp "$ZLM_DIR/default.pem" "$PKG/bin/zlm/default.pem"
 [ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/bin/zlm/"
 chmod 0755 "$PKG/bin/zlm/MediaServer"
+
+log "复制 nginx（前端 + HTTPS 终止）"
+mkdir -p "$PKG/bin/nginx"
+cp -a "$NGINX_DIR/." "$PKG/bin/nginx/"
+chmod 0755 "$PKG/bin/nginx/sbin/nginx"
 
 log "复制前端产物"
 if [ -f "$WEB_DIR/dist/index.html" ]; then

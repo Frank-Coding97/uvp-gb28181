@@ -259,6 +259,136 @@ check_preconditions() {
   [ -f "$CONF" ] || fail "缺少 $CONF —— 解压是否完整？"
 }
 
+# ------------------------------------------------------------ nginx ----
+# nginx 只做两件事：托管前端 + HTTPS 终止，后端仍是纯 HTTP 的
+# @BACKEND_PORT@（二维码里填的就是它，App 因此完全不碰 TLS）。
+NGINX_DIR="$BIN/nginx"
+NGINX_BIN="$NGINX_DIR/sbin/nginx"
+NGINX_CONF="$NGINX_DIR/conf/nginx.conf"
+NGINX_PID_FILE="$RUN/nginx.pid"
+NGINX_LOG="$LOGS/nginx.log"
+NGINX_CONF_TEMPLATE="$NGINX_DIR/conf/nginx.conf.template"
+NGINX_CRT="$NGINX_DIR/conf/uvp.crt"
+NGINX_KEY="$NGINX_DIR/conf/uvp.key"
+
+# HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
+NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
+NGINX_HTTP_PORT="${UVP_HTTP_PORT:-$(read_env_file UVP_HTTP_PORT)}"
+NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+
+# ------------------------------------------------------------ nginx ----
+# nginx 只做两件事：托管前端 + HTTPS 终止，后端仍是纯 HTTP 的
+# @BACKEND_PORT@（二维码里填的就是它，App 因此完全不碰 TLS）。
+NGINX_DIR="$BIN/nginx"
+NGINX_BIN="$NGINX_DIR/sbin/nginx"
+NGINX_CONF="$NGINX_DIR/conf/nginx.conf"
+NGINX_PID_FILE="$RUN/nginx.pid"
+NGINX_LOG="$LOGS/nginx.log"
+NGINX_CONF_TEMPLATE="$NGINX_DIR/conf/nginx.conf.template"
+NGINX_CRT="$NGINX_DIR/conf/uvp.crt"
+NGINX_KEY="$NGINX_DIR/conf/uvp.key"
+
+# HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
+NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
+NGINX_HTTP_PORT="${UVP_HTTP_PORT:-$(read_env_file UVP_HTTP_PORT)}"
+NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+
+# ------------------------------------------------------------ nginx ----
+
+# render_nginx_conf 从模板生成实际配置：把 @ROOT@ / @BACKEND_PORT@ / 端口
+# 替换成真实值。
+#
+# ⛔ 为什么不直接把配置写死在包里：安装目录、客户选的端口都是运行期才知道的。
+#   而每次start 都重写一遍也安全 —— 模板在包里是只读的，生成物在 run/ 下。
+# ⛔ 用 sed 替换 @...@ 这种带@ 的标记：nginx 配置文件里 @ 有特殊含义吗？没有。
+#   但 **# 和 & 在替换串里有特殊含义**，所以只出现固定文本，不会踩到。
+render_nginx_conf() {
+  [ -f "$NGINX_CONF_TEMPLATE" ] || {
+    log "⚠️  缺少 nginx 配置模板（$NGINX_CONF_TEMPLATE），跳过 nginx"
+    return 1
+  }
+  sed -e "s|@ROOT@|$ROOT|g" \
+      -e "s|@BACKEND_PORT@|$HTTP_PORT|g" \
+      -e "s|listen443 ssl;|listen ${NGINX_HTTPS_PORT} ssl;|" \
+      -e "s|listen      \[::\]:443 ssl;|listen      [::]:${NGINX_HTTPS_PORT} ssl;|" \
+      -e "s|listen      80;|listen      ${NGINX_HTTP_PORT};|" \
+      -e "s|listen      \[::\]:80;|listen      [::]:${NGINX_HTTP_PORT};|" \
+      "$NGINX_CONF_TEMPLATE" > "$NGINX_CONF"
+  return 0
+}
+
+# ensure_self_signed_cert 没有证书时生成自签名。
+#
+# ⛔ 一次签发 10 年：客户现场一旦部署，几年内不会重签；
+#   而短期证书过期会让整个系统突然"打不开"且原因极难自查。
+# ⛔ CN 填 _（通配占位）：自签名证书浏览器本来就会警告，
+#   写具体主机名反而制造「IP 访问 + CN 不匹配」这种更硬的拦截。
+#   ⭐ 根本解法仍是换真证书 —— 交付说明里必须写清楚。
+ensure_self_signed_cert() {
+  [ -f "$NGINX_CRT" ] && [ -f "$NGINX_KEY" ] && return 0
+  mkdir -p "$NGINX_DIR/conf"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl req -x509 -nodes -newkey rsa:2048 \
+      -keyout "$NGINX_KEY" -out "$NGINX_CRT" \
+      -days 3650 -subj "/CN=uvp-local" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >>"$NGINX_LOG" 2>&1 || {
+      log "⚠️  自签证书生成失败，nginx 不会启动（详见 $NGINX_LOG）"
+      return 1
+    }
+    log "已生成自签名证书（10 年有效；建议客户换用正式证书）"
+    return 0
+  fi
+  log "⚠️  未找到 openssl，无法生成自签证书 —— 请自行放入 ${NGINX_CRT} 与 ${NGINX_KEY}"
+  return 1
+}
+
+nginx_healthy() {
+  [ -f "$NGINX_PID_FILE" ] || return 1
+  local pid; pid="$(cat "$NGINX_PID_FILE")"
+  kill -0 "$pid" 2>/dev/null
+}
+
+start_nginx() {
+  if [ ! -x "$NGINX_BIN" ]; then
+    log "⚠️  未找到 nginx（$NGINX_BIN），跳过。系统仍可通过 http://127.0.0.1:${HTTP_PORT} 访问"
+    return 0
+  fi
+  if nginx_healthy; then
+    log "nginx 已在运行（端口 ${NGINX_HTTPS_PORT}）"
+    return 0
+  fi
+
+  render_nginx_conf || return 0
+  ensure_self_signed_cert || return 0
+
+  # ⛔ 先 -t 校验再起：nginx 配置写错时的表现是「反复重启、端口时有时无」，
+  #   远不如一次性报清楚。-t 失败必须把错误原样打出来。
+  if ! "$NGINX_BIN" -p "$ROOT" -c "$NGINX_CONF" -t >>"$NGINX_LOG" 2>&1; then
+    log "nginx 配置校验失败，最后 10 行："
+    tail -10 "$NGINX_LOG" >&2 || true
+    fail "nginx 配置有误（详见 ${NGINX_LOG}）"
+  fi
+
+  "$NGINX_BIN" -p "$ROOT" -c "$NGINX_CONF" >>"$NGINX_LOG" 2>&1
+
+  for _ in $(seq 1 50); do
+    if nginx_healthy; then
+      log "nginx 启动成功（HTTPS ${NGINX_HTTPS_PORT}，前端已托管，反代到 127.0.0.1:${HTTP_PORT}）"
+      return 0
+    fi
+    sleep 0.2
+  done
+  log "nginx 启动超时，最后 10 行日志："
+  tail -10 "$NGINX_LOG" >&2 || true
+  fail "nginx 未能在预期时间内启动"
+}
+
+stop_nginx() {
+  stop_by_pidfile "$NGINX_PID_FILE" "$NGINX_BIN" "nginx"
+}
+
 # ---------------------------------------------------- ZLM 端口同步到 config.ini ----
 
 # sync_zlm_ports_ini 把端口写进 bin/zlm/config.ini 的对应段。
@@ -476,6 +606,8 @@ sync_ports_into_config() {
   fi
 
   printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}" > "$ENV_FILE"
+  # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
+  printf 'UVP_HTTPS_PORT=%s\nUVP_HTTP_PORT_80=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
 
   # config.yml 里同步：后端是通过这两个键读端口的
   if [ -f "$CONF" ]; then
@@ -541,12 +673,15 @@ case "${1:-start}" in
     # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
     #   校验 ZLM 连通性，ZLM 没起就报连接失败。
     start_zlm
+    # ⛔ nginx 在最后起：它要反代后端，后端得先在监听。
+    start_nginx
     start_redis          # ⛔ 顺序不能反：后端启动时要连缓存
     start_backend
     log "启动完成 → http://127.0.0.1:${HTTP_PORT}"
     printf '首次登录账号 admin，密码见交付说明（登录后请立即修改）\n'
     ;;
   stop)
+    stop_nginx
     stop_backend
     stop_zlm
     stop_redis
@@ -559,6 +694,11 @@ case "${1:-start}" in
     redis_healthy    && log "Redis:  运行中（端口 ${REDIS_PORT}）"  || log "Redis:  未运行"
     zlm_healthy      && log "ZLM:    运行中（端口 ${ZLM_HTTP_PORT}）" || log "ZLM:    未运行"
     backend_healthy && log "后端:  运行中（端口 ${HTTP_PORT}）"    || log "后端:  未运行"
+    if [ -x "$NGINX_BIN" ]; then
+      nginx_healthy  && log "nginx:  运行中（HTTPS ${NGINX_HTTPS_PORT}）" || log "nginx:  未运行"
+    else
+      log "nginx:  未安装（可直接访问 http://127.0.0.1:${HTTP_PORT}）"
+    fi
     ;;
   *)
     echo "用法: $0 {start|stop|restart|status}" >&2
