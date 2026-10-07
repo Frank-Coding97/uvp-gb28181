@@ -300,6 +300,13 @@ func databaseIdentitySQL(dialect migration.Dialect) string {
 		return "SELECT current_database() AS database_name, version() AS database_version"
 	case migration.DialectSQLServer:
 		return "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS database_version"
+	case migration.DialectSQLite:
+		// ⛔ SQLite 既没有 DATABASE() 也没有 VERSION()（后者是 SQLite 3.47+ 才有的
+		//   PRAGMA 扩展，不保证存在）。这列是给人看的证据，所以给固定说明值 ——
+		//   比选个可能不存在的 PRAGMA 更稳。
+		//   ⚠️ 别退回default 分支（MySQL 的 SELECT DATABASE()）：SQLite 会报
+		//   no such function: DATABASE，而它在 -migrate-up 的第一个查询就执行。
+		return "SELECT 'uvp.db' AS database_name, 'sqlite' AS database_version"
 	default:
 		return "SELECT DATABASE() AS database_name, VERSION() AS database_version"
 	}
@@ -347,7 +354,7 @@ func runMigrateDown(downFile string) error {
 	return migration.Down(db, d, downFile)
 }
 
-// primaryDB 返回主数据库连接与方言(优先级 MySQL > PostgreSQL > SQL Server,
+// primaryDB 返回主数据库连接与方言(优先级 MySQL > PostgreSQL > SQL Server > SQLite,
 // 多库同时启用时 down 仅作用于主库)。
 func primaryDB() (*gorm.DB, migration.Dialect, error) {
 	if app.GormDbMysql != nil {
@@ -358,6 +365,12 @@ func primaryDB() (*gorm.DB, migration.Dialect, error) {
 	}
 	if app.GormDbSqlserver != nil {
 		return app.GormDbSqlserver, migration.DialectSQLServer, nil
+	}
+	// ⛔ SQLite 必须显式列出：绿色安装包默认用它，而本函数原先只认前三个
+	//   ⇒ `-migrate-up` / `-publish-catalog` / `-migrate-down` 三条运维命令
+	//   在 SQLite 下会返回「未初始化任何数据库连接」。
+	if app.GormDbSqlite != nil {
+		return app.GormDbSqlite, migration.DialectSQLite, nil
 	}
 	return nil, migration.DialectUnknown, errors.New("未初始化任何数据库连接")
 }

@@ -1,8 +1,8 @@
 {
   "version": "sqlite-baseline-20261007-r1",
   "source": "uvp-gb28181.sql",
-  "source_sha256": "7f87485eb1ccffe383fd11008a11a54825bf76bf57e5198cf0b9b4cb0c4c771c",
-  "sha256": "895c8bd3a6ab45cfb4b4b2504ee4399b7287f3d648cfb6bf7b7aaea9c2933310",
+  "source_sha256": "9f350aa172276eb835889f4c10977985bc3da932571a169f0e3d424a98d4c8bc",
+  "sha256": "1290c431d42eab4bcedd00d58650015b67e7cdbf4c39db2190331d51df71d546",
   "tables": 111,
   "seed_statements": 38,
   "foreign_keys_kept": 3,

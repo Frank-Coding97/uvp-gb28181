@@ -3661,8 +3661,7 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (10271, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/downloads', 'POST', '*', '', ''),
 (10272, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'GET', '*', '', ''),
 (10273, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '*', '', ''),
-(10274, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', ''),
-(10275, NULL, 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '', '', '');
+(10274, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', '');
 INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `level`, `pinyin`, `created_at`, `updated_at`) VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),

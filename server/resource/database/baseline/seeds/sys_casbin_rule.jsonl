@@ -479,4 +479,3 @@
 {"id": 10272, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/downloads/:downloadId", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 10273, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/downloads/:downloadId", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
 {"id": 10274, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/tasks/:taskId/favorite", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
-{"id": 10275, "ptype": null, "v0": "role_1", "v1": "/api/gb28181/device-mgmt/snapshots", "v2": "DELETE", "v3": "", "v4": "", "v5": ""}

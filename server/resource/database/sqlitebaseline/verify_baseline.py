@@ -75,6 +75,31 @@ def main() -> int:
             print(f"❌ 自增表写入失败: {exc}")
             return 1
 
+        # ---- casbin 策略表专项检查 -------------------------------------------
+        # ⛔⛔ 为什么单列一条：ptype 为空的策略会让 **casbin 启动即 panic**，
+        #   而且症状极具误导性 —— 后端不做任何 DB 查询就直接退，日志里只有
+        #   一行 stdlib 占位，报错是 `slice bounds out of range [:1]`
+        #   出现在 casbin/gorm-adapter 内部，看不出跟种子数据有关。
+        #   （adapter.go 的 Preview() 会做 `p[0]` → `key[:1]`，
+        #     ptype 为 NULL 时 p 是空切片，切片越界直接 panic。）
+        #   这条检查的价值在于：**种子文件里混进一条脏数据就会开机失败**，
+        #   而这类问题只有真机启动才暴露 —— 放在这里能提前拦住。
+        bad_ptype = one(
+            "SELECT count(*) FROM sys_casbin_rule "
+            "WHERE ptype IS NULL OR trim(ptype) = ''"
+        )
+        if bad_ptype:
+            print(f"❌ sys_casbin_rule 有 {bad_ptype} 条 ptype 为空 —— casbin 启动会 panic")
+            print("   样例:", db.execute(
+                "SELECT id, v0, v1, v2 FROM sys_casbin_rule "
+                "WHERE ptype IS NULL OR trim(ptype) = '' LIMIT 3"
+            ).fetchall())
+            return 1
+        kinds = db.execute(
+            "SELECT DISTINCT ptype FROM sys_casbin_rule ORDER BY ptype"
+        ).fetchall()
+        print(f"✅ casbin 策略 ptype 合法，取值: {[k[0] for k in kinds]}")
+
         # admin 账号必须在 —— 没有它装完登不进去
         admin = one("SELECT count(*) FROM sys_users WHERE username='admin'")
         if admin != 1:
