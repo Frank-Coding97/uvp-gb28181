@@ -1641,7 +1641,18 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 	}
 	if len(reg.List()) == 0 && cfg.ZLM.Host != "" {
 		// 空表 + yaml 有配置 → seed 第一节点(单节点过渡)
-		uuidStr := uuid.NewString()
+		//
+		// ⛔⛔ 节点身份标识**优先取配置的固定值**，为空才随机。
+		//   随机的后果不是"多点随机"这么简单：它会被 apply.go 通过
+		//   setServerConfig **持久化进 ZLM 的 config.ini**
+		//   （ZLM 把 setServerConfig 的结果写回自己的配置文件），
+		//   于是随机值一旦落盘就固化下来 —— 此后即便改了配置，
+		//   ZLM 那侧也不会跟着变，hook 归属校验就再也对不上。
+		//   绿色包/交付场景必须给固定值（见 ZLMConfig.MediaServerID 注释）。
+		uuidStr := strings.TrimSpace(cfg.ZLM.MediaServerID)
+		if uuidStr == "" {
+			uuidStr = uuid.NewString()
+		}
 		seeded, err := reg.Add(ctx, node.Node{
 			Name:            "zlm-default",
 			Host:            cfg.ZLM.Host,

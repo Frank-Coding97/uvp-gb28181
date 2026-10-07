@@ -109,7 +109,8 @@ def set_in_section(text: str, section: str, key: str, value: str) -> str:
     return "\n".join(lines)
 
 
-def build(source: Path, target: Path, http_port: str, redis_port: str) -> None:
+def build(source: Path, target: Path, http_port: str, redis_port: str,
+          zlm_secret: str = "", zlm_media_server_id: str = "") -> None:
     text = source.read_text(encoding="utf-8")
 
     # 1) 数据库：默认 SQLite
@@ -129,10 +130,29 @@ def build(source: Path, target: Path, http_port: str, redis_port: str) -> None:
     # 3) HTTP 端口
     text = set_in_section(text, "httpserver", "port", f":{http_port}")
 
+    # 4) ZLM 身份：secret 与节点标识都**固定写死**，不留占位符。
+    #
+    # ⛔⛔ 为什么必须在**出包时**就写好，而不是让启动脚本去对齐：
+    #   · ZLM 的 config.ini 是随包发的，secret 已固化在包里；
+    #   · 而 config.yml 是出包时生成的 —— 此处不写，启动脚本就得反推 ini，
+    #     一旦反推失败（判据没匹配上）就是「配置文件静默 + 脚本谎报成功」。
+    #   实测这个坑连踩两层：① zlm 是**嵌套**段、顶级段判据抓不到；
+    #   ② 值后面跟着**行尾注释**，正则把注释吞进值里判成"不是占位符"。
+    #   源头固定好，后面那两层就不需要存在了。
+    # 节点标识（mediaserverid）：seed 进 meta_node.media_server_uuid，
+    #   且被 apply.go 通过 setServerConfig **持久化回 ZLM 的 config.ini**，
+    #   所以它必须稳定 —— 随机值一旦落盘就固化，事后改配置也没用。
+    if zlm_secret:
+        text = set_in_section(text, "zlm", "secret", zlm_secret)
+    if zlm_media_server_id:
+        text = set_in_section(text, "zlm", "mediaserverid", zlm_media_server_id)
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     print(f"✅ 已生成 {target}")
     print(f"   数据库 sqlite / 缓存 redis(127.0.0.1:{redis_port}) / HTTP :{http_port}")
+    if zlm_secret and zlm_media_server_id:
+        print(f"   ZLM secret / 节点标识已固定（各 {len(zlm_secret)}/{len(zlm_media_server_id)} 字符）")
 
 
 def add_sqlite_section(target: Path, db_path: str) -> None:
@@ -228,9 +248,14 @@ def main() -> None:
     parser.add_argument("--redis-port", default="6379")
     parser.add_argument("--db-path", default="./data/uvp.db",
                         help="SQLite 文件路径（相对应用根目录；绝对路径也行）")
+    parser.add_argument("--zlm-secret", default="",
+                        help="ZLM API secret（建议固定值；留空则保留示例里的占位符）")
+    parser.add_argument("--zlm-media-server-id", default="",
+                        help="ZLM 节点标识 mediaserverid（建议固定 UUID；留空=每次 seed 随机）")
     args = parser.parse_args()
 
-    build(args.source, args.target, args.http_port, args.redis_port)
+    build(args.source, args.target, args.http_port, args.redis_port,
+          args.zlm_secret, args.zlm_media_server_id)
     add_sqlite_section(args.target, args.db_path)
 
 

@@ -289,6 +289,10 @@ gb28181:
     httpport: 18080               # ZLM HTTP API 端口
     secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
     rtpport: 40000                # RTP 单端口收流
+    # 节点身份标识:写入 ZLM 的 general.mediaServerId,且 seed 进 meta_node。
+    # ⚠️ 绿色包必须固定值 —— 它被 ZLM 持久化进 config.ini,随机值落盘后无法再改。
+    #留空 = 每次 seed 随机生成(非绿色包部署可接受,hook 归属在首次装载后即固化)。
+    mediaserverid: ""
   # 媒体/Hook 配置
   media:
     hookbaseurl: ""               # 推荐:完整回调根,如 https://hook.example.com/index/hook

@@ -37,6 +37,23 @@ DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 #   端口规划见 deploy/standalone/PORTS.md。
 HTTP_PORT="${UVP_HTTP_PORT:-51010}"
 REDIS_PORT="${UVP_REDIS_PORT:-51011}"
+
+# ---- ZLM 的两个身份：secret 与节点标识（老板定的：都用固定值）----
+#
+# ⛔⛔ 必须是**固定值**，不能让它们随机 —— 这是本轮最贵的两个教训：
+#   · secret 对不上：平台调 ZLM 全被拒（-100 Please login first），
+#     录像缓存/点播/录像查询 runtime 全部跳过装配，
+#     页面报「录像缓存服务未装配」，与真因完全无关。
+#   · 节点标识（mediaserverid）更隐蔽：它 seed 进 meta_node.media_server_uuid，
+#     又被 apply.go 通过 setServerConfig **持久化回 ZLM 的 config.ini** ——
+#     随机值一旦落盘就固化，之后改配置也不会重新对齐，
+#     而 hook 归属校验（hook.go 用 MediaServerUUID 比对 body.MediaServerID）
+#     就再也过不了，且**没有任何报错**。
+#
+# 出包时就把两者写进 config.yml，让"两处不一致"从根上不可能发生
+#（此前是在启动时反推对齐，连踩两层判据不匹配的坑）。
+ZLM_SECRET="${UVP_ZLM_SECRET:-035c73f7-bb6b-4889-a715-d9eb2d1925cc}"
+ZLM_MEDIA_SERVER_ID="${UVP_ZLM_MEDIA_SERVER_ID:-uvp-media-server-0001}"
 SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
 # ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
 # ⛔ 不入库：MediaServer 13MB + ffmpeg 运行时库 32MB + www 16MB，且必须与目标机架构匹配。
@@ -174,6 +191,47 @@ cp "$ZLM_DIR/config.ini" "$PKG/bin/zlm/config.ini"
 [ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/bin/zlm/"
 chmod 0755 "$PKG/bin/zlm/MediaServer"
 
+# ---- ZLM 的身份也固定（源头侧）----
+# ⛔⛔ 必须改**包内这份** config.ini，而不是靠启动时对齐：
+#   `mediaServerId` 的默认值是占位符 `your_server_id`，
+#   而 ZLM 的 setServerConfig 会把平台下发的值**持久化回这个文件**
+#   （见 server/app/gb28181/zlm/apply.go）—— 也就是它一旦落盘就固化。
+#   所以这里出包时就写好，启动时ZLM 读到的第一眼就是正确值。
+#   secret 同理：它必须与 config.yml 里的**逐字相同**，否则平台调 ZLM 全被拒。
+log "固定 ZLM 的secret 与节点标识"
+"$PY" - "$PKG/bin/zlm/config.ini" "$ZLM_SECRET" "$ZLM_MEDIA_SERVER_ID" <<'ZLM_INI_ID_PY'
+import re
+import sys
+
+path, secret, msid = sys.argv[1:4]
+# ⛔ 读写都用 newline="" + split("\n")：这份 ini 是 **CRLF**，
+#   用 splitlines() 会吃掉 \r，写回时行尾就变了（下次判据又对不上）。
+lines = open(path, encoding="utf-8", newline="").read().split("\n")
+
+section = None
+changed = []
+for i, line in enumerate(lines):
+    t = line.strip()
+    if t.startswith("[") and t.endswith("]"):
+        section = t[1:-1].strip().lower()
+        continue
+    m = re.match(r"^(\s*)([A-Za-z_]+)(\s*=\s*)(.*?)(\r?)$", line)
+    if not m:
+        continue
+    indent, key, eq, old, cr = m.groups()
+    # 只认 [api] 的 secret 与 [general] 的 mediaServerId，
+    # 别处出现的同名键不能动（这份 ini 有 11 个段）。
+    if section == "api" and key == "secret" and old.strip() != secret:
+        changed.append(f"[api] secret: {old.strip()} -> (固定值)")
+        lines[i] = f"{indent}{key}{eq}{secret}{cr}"
+    elif section == "general" and key.lower() == "mediaserverid" and old.strip() != msid:
+        changed.append(f"[general] mediaServerId: {old.strip()} -> {msid}")
+        lines[i] = f"{indent}mediaServerId={msid}{cr}"
+
+open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
+print("   ZLM config.ini: " + ("; ".join(changed) if changed else "已是固定值，无需改动"))
+ZLM_INI_ID_PY
+
 log "复制 nginx（前端 + HTTPS 终止）"
 mkdir -p "$PKG/bin/nginx"
 cp -a "$NGINX_DIR/." "$PKG/bin/nginx/"
@@ -198,7 +256,33 @@ $PY \
   --target "$PKG/config/config.yml" \
   --http-port "$HTTP_PORT" \
   --redis-port "$REDIS_PORT" \
-  --db-path "./data/uvp.db"
+  --db-path "./data/uvp.db" \
+  --zlm-secret "$ZLM_SECRET" \
+  --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID"
+
+# ⛔ 出包前**解析后断言**这两个固定值真的进去了。
+#   理由：make-config.py 用的是"段落内替换"，判据（段名/键名/缩进/行尾注释）
+#   任一不匹配都会**静默不替换**，而它仍照常打印"ZLM secret / 节点标识已固定"。
+#   ⇒ 查"字符串出现过"没意义，必须 yaml.safe_load 之后断言取值。
+log "校验 ZLM 身份配置"
+"$PY" - "$PKG/config/config.yml" "$ZLM_SECRET" "$ZLM_MEDIA_SERVER_ID" <<'ZLM_ID_CHECK_PY'
+import sys
+
+import yaml
+
+path, want_secret, want_uuid = sys.argv[1:4]
+zlm = (yaml.safe_load(open(path, encoding="utf-8")) or {}).get("gb28181", {}).get("zlm", {})
+problems = []
+if zlm.get("secret") != want_secret:
+    problems.append(f"secret={zlm.get('secret')!r}（应为 {want_secret!r}）")
+if zlm.get("mediaserverid") != want_uuid:
+    problems.append(f"mediaserverid={zlm.get('mediaserverid')!r}（应为 {want_uuid!r}）")
+if problems:
+    sys.exit("❌ ZLM 身份配置未写进 config.yml：" + "；".join(problems)
+             + "。\n   出了这个包，ZLM 侧与平台侧就对不上——现场表现为"
+               "「录像缓存服务未装配」等各功能报未装配，且 ZLM 进程本身看起来完全正常。")
+print(f"✅ ZLM 身份配置已固定（secret {len(want_secret)} 字符 / 节点标识 {len(want_uuid)} 字符）")
+ZLM_ID_CHECK_PY
 
 log "复制启停脚本"
 cp "$DEPLOY_DIR/uvp-ctl.sh" "$PKG/uvp-ctl.sh"

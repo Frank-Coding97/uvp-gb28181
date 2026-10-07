@@ -617,6 +617,21 @@ type ZLMConfig struct {
 	HTTPPort     int    // ZLM HTTP API 端口
 	Secret       string // API secret
 	RTPPort      int    // RTP 单端口收流
+	// MediaServerID 节点身份标识,写入 ZLM 的 general.mediaServerId。
+	//
+	// ⛔⛔ 绿色包必须**固定值**,不能留空让 seed 随机生成
+	// (uuid.NewString()),原因有三:
+	//   1) 它同时写进 meta_node.media_server_uuid 与 ZLM 的
+	//      general.mediaServerId,是 hook 归属校验的依据
+	//      (hook.go 用 MediaServerUUID != body.MediaServerID 认节点);
+	//   2) ZLM 的 setServerConfig 会把值**持久化回 config.ini**
+	//      (见 zlm/apply.go),所以它一旦随机就固化进磁盘了,
+	//      之后再改配置也不会重新对齐;
+	//   3) 客户重装/升级包时,固定值保证 ZLM 与平台的节点身份仍然匹配,
+	//      不需要手工清 meta_node。
+	//
+	// ⚠️ 留空时行为不变(随机生成),这是给非绿色包部署留的。
+	MediaServerID string
 }
 
 func (c ZLMConfig) EffectiveReceiveHost() string {
@@ -779,12 +794,13 @@ func loadFrom(c valueSource) (Config, error) {
 			OfflineScanInterval:   c.GetInt("gb28181.device.offline_scan_interval"),
 		},
 		ZLM: ZLMConfig{
-			Host:         c.GetString("gb28181.zlm.host"),
-			ReceiveHost:  c.GetString("gb28181.zlm.receivehost"),
-			PlaybackHost: c.GetString("gb28181.zlm.playbackhost"),
-			HTTPPort:     c.GetInt("gb28181.zlm.httpport"),
-			Secret:       c.GetString("gb28181.zlm.secret"),
-			RTPPort:      c.GetInt("gb28181.zlm.rtpport"),
+			Host:          c.GetString("gb28181.zlm.host"),
+			ReceiveHost:   c.GetString("gb28181.zlm.receivehost"),
+			PlaybackHost:  c.GetString("gb28181.zlm.playbackhost"),
+			HTTPPort:      c.GetInt("gb28181.zlm.httpport"),
+			Secret:        c.GetString("gb28181.zlm.secret"),
+			RTPPort:       c.GetInt("gb28181.zlm.rtpport"),
+			MediaServerID: c.GetString("gb28181.zlm.mediaserverid"),
 		},
 		Media: MediaConfig{
 			HookBaseURL:             c.GetString("gb28181.media.hookbaseurl"),
