@@ -43,8 +43,8 @@ for _c in "${UVP_BUILD_PY:-}" python3 python; do
 done
 
 ENV_FILE="$ROOT/config.env"
-HTTP_PORT_DEFAULT=30010
-REDIS_PORT_DEFAULT=30011
+HTTP_PORT_DEFAULT=51010
+REDIS_PORT_DEFAULT=51011
 
 read_env_file() {
   # 读 config.env 的 KEY=VALUE；忽略注释与空行；取最后一条（后写的覆盖先写的）
@@ -103,27 +103,27 @@ ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
-ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-30100}"
+ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-51100}"
 ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_port_env UVP_ZLM_SSL_PORT)}"
-ZLM_SSL_PORT="${ZLM_SSL_PORT:-30103}"
+ZLM_SSL_PORT="${ZLM_SSL_PORT:-51103}"
 ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_port_env UVP_ZLM_RTSP_PORT)}"
-ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-30101}"
+ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-51101}"
 # 其余对外段也统一到规划段（PORTS.md）
-ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-30102}"
-ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-30104}"
-ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-30200}"
+ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-51102}"
+ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-51104}"
+ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-51200}"
 # ⛔⛔ RTP 动态端口段必须改！ZLM 默认是 49152-65535，那是 Linux 的
 #   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
 #   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
-ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-30200-30299}"
+ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-51200-51299}"
 # WebRTC 信令（键名不是 port，按"段名+port"匹配抓不到，实测漏掉导致 ZLM 起不来）
-ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-30105}"
-ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-30106}"
+ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-51105}"
+ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-51106}"
 # SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
-ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-30107}"
-ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-30108}"
+ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-51107}"
+ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-51108}"
 # STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
-ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-30109}"
+ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-51109}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -240,7 +240,11 @@ port_holder() {
     "$NGINX_HTTPS_PORT") printf '%s' "本包的 nginx（先执行 ./uvp-ctl.sh stop）"; return 0 ;;
   esac
 
-  printf '%s' "某个进程（看名字：sudo ss %s -p | grep %s）" "$flag" "$port"
+  # ⛔ 格式串里有两个 %s 就必须给两个参数 —— 少给一个不会报错，
+  #   只会把剩下的 %s 原样打给用户（实测输出过
+  #   「看名字：sudo ss %s -p | grep %s）-tln30001」这种）。
+  #   ⇒ 提示文本直接内插，不走 printf 的占位符。
+  printf '某个进程（看名字：sudo ss %s -p | grep %s）' "$flag" "$port"
   return 0
 }
 # ---------------------------------------------------------- 进程兜底查找 ----
@@ -421,13 +425,13 @@ NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_port_env UVP_HTTPS_PORT)}"
-NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-30000}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-51000}"
 # ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
 #   曾经也叫 UVP_HTTP_PORT，于是后端设 8390 时nginx 也去 bind 8390 ⇒
 #   `bind() to 0.0.0.0:8390 failed: Address already in use`，
 #   而报错完全看不出是「两个组件抢同一个端口」。
 NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_port_env UVP_NGINX_HTTP_PORT)}"
-NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-30001}"
+NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-51001}"
 
 # ------------------------------------------------------------ nginx ----
 # nginx 只做两件事：托管前端 + HTTPS 终止，后端仍是纯 HTTP 的
