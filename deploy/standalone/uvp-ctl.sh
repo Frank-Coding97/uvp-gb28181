@@ -599,6 +599,104 @@ stop_nginx() {
 # ⛔ 不能用 configparser：这份 ini **有重名段**（[general] 出现两次），
 #   标准库直接抛 DuplicateSectionError —— 实测过。
 #   ⇒ 行扫描：记住当前段名，只在目标段内改目标键。
+# ------------------------------------------------------ ZLM secret 对齐 ----
+
+# sync_zlm_secret 把平台侧与 ZLM 侧的 API secret 对齐。
+#
+# ⛔⛔⛔ 这是绿色包最隐蔽的一个坑（实测踩了一整轮）：
+#   config.example.yml 里 zlm.secret 写的是占位符 `CHANGE_ME`，注释也明说
+#   「**部署时填 ZLM 实际 secret**」—— 而绿色包**从来没做过这一步**。
+#
+#   为什么它比看起来严重得多：
+#   · ZLM 侧 secret 在 bin/zlm/config.ini 里（构建 ZLM 时随机生成）；
+#   · 平台侧在 config.yml 里（种子/示例给的是 CHANGE_ME）；
+#   · 两者对不上 ⇒ ZLM 每次 API 调用都返回 `{"code":-100,"msg":"Please login first"}`。
+#
+#   症状链条极长、且每一环都不指向真因：
+#     ZLM 节点配置恢复失败（error 被脱敏）→ zlmRegistry 就绪但不可用
+#     → setupRecordCacheRuntime() 的四个前置条件之一不满足
+#     → **录像缓存服务未装配** → 页面报 503。
+#   而ZLM 进程本身活得好好的（curl getServerConfig 用对secret 就是 200）。
+#
+#   ⚠️ 最坑的是：这跟"录像缓存"八竿子打不着。录像缓存只是**第一个撞上**的
+#   受害者，同一个 secret 还会让点播、录像查询、hook 全线失效。
+#
+# ⇒ 判据：**以 ZLM 自己的 config.ini 为准**（它是真正在跑的那个进程的密钥），
+#   把 config.yml 里的值对齐过去。反过来（改 ZLM 的）会让已在跑的 ZLM 失联。
+sync_zlm_secret() {
+  [ -f "$ZLM_INI" ] || return 0
+  [ -f "$CONF" ] || return 0
+
+  local zlm_secret
+  zlm_secret="$("$PY_BIN" - "$ZLM_INI" <<'SECRET_PY'
+import re
+import sys
+
+# 只认 [api] 段里的 secret —— config.ini 有 11 个段，别处也可能出现同名键。
+section = None
+for line in open(sys.argv[1], encoding="utf-8", newline="").read().split("\n"):
+    t = line.strip()
+    if t.startswith("[") and t.endswith("]"):
+        section = t[1:-1].strip().lower()
+    elif section == "api" and re.match(r"^secret\s*=", line, re.I):
+        # 值可能带引号，两种都剥掉
+        print(line.split("=", 1)[1].strip().strip("\"'").strip())
+        break
+SECRET_PY
+)"
+  [ -n "$zlm_secret" ] || return 0
+
+  # config.yml 的 zlm.secret：只在它是占位符或为空时才写，
+  # 绝不覆盖运维手工填过的真值。
+  "$PY_BIN" - "$CONF" "$zlm_secret" <<'SECRET_SYNC_PY'
+import re
+import sys
+
+path, secret = sys.argv[1], sys.argv[2]
+lines = open(path, encoding="utf-8").read().split("\n")
+
+# ⛔⛔ 必须按**缩进层级**定位 zlm 段，不能只认「顶格 + 结尾冒号」。
+#   实测踩过：config.yml 里 zlm 是**嵌套**段（gb28181: → zlm:，2 空格缩进），
+#   顶级段判据永远不成立⇒ 静默不替换 ⇒ 后端仍拿 CHANGE_ME 去连 ZLM。
+#   这是"配置文件是静默的"又一例：改不成功也不报错，只是功能不工作。
+zlm_indent = None
+changed = False
+for i, line in enumerate(lines):
+    t = line.strip()
+    if not t or t.startswith("#"):
+        continue
+    m = re.match(r"^(\s*)zlm\s*:\s*(#.*)?$", line)
+    if m and zlm_indent is None:
+        zlm_indent = len(m.group(1))
+        continue
+    if zlm_indent is None:
+        continue
+    # 遇到同级或更浅的非注释行 ⇒ 已走出 zlm 段，停。
+    # ⛔ 不加这一句就会顺着文件往下扫，把 media/ 等其它段的 secret 也改掉。
+    cur = len(line) - len(line.lstrip())
+    if cur <= zlm_indent:
+        break
+    sm = re.match(r"^(\s*)secret(\s*:\s*)(.*?)(\r?)$", line)
+    if not sm:
+        continue
+    indent, sep, old, cr = sm.groups()
+    old = old.strip().strip("\"'").strip()
+    # 只替换占位符/空值；已有真值说明运维填过，尊重它（幂等的关键）
+    if old and old.upper() not in ("CHANGE_ME", "CHANGE-ME", "TODO", "YOUR_SECRET"):
+        continue
+    lines[i] = f"{indent}secret{sep}\"{secret}\"{cr}"
+    changed = True
+    break
+
+if changed:
+    open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
+    print(f"ZLM secret 已按 config.ini 对齐写入 config.yml（{len(secret)} 字符）")
+else:
+    print("ZLM secret 已就绪，无需改动")
+SECRET_SYNC_PY
+}
+
+
 sync_zlm_ports_ini() {
   [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
 
@@ -975,6 +1073,11 @@ case "${1:-start}" in
       fail "找不到 python3 —— 改端口需要它（Ubuntu/Debian 请先 apt install python3）"
     fi
     sync_ports_into_config
+    # ⛔⛔ ZLM secret 必须对齐，且必须在**后端启动之前**：
+    #   不对齐时平台调 ZLM 全被拒（-100 Please login first），
+    #   后端启动会「成功」但录像缓存/点播/录像查询/hook 全部装配失败，
+    #   页面报的是「录像缓存服务未装配」—— 与真因完全无关。
+    sync_zlm_secret
     # ⛔ ZLM 端口也要同步：它的真源是 config.ini，不是本脚本里的变量。
     sync_zlm_ports_ini
     # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
