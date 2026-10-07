@@ -699,7 +699,6 @@ sync_ports_into_config() {
     [ -n "${UVP_NGINX_HTTP_PORT:-}" ]  && printf 'UVP_USER_SET_UVP_NGINX_HTTP_PORT=1\n'
   } > "$ENV_FILE"
   # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
-  printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
 
   # config.yml 里同步：后端是通过这两个键读端口的
   if [ -f "$CONF" ]; then
