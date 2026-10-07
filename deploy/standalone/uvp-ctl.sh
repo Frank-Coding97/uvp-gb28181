@@ -679,12 +679,25 @@ for i, line in enumerate(lines):
     sm = re.match(r"^(\s*)secret(\s*:\s*)(.*?)(\r?)$", line)
     if not sm:
         continue
-    indent, sep, old, cr = sm.groups()
-    old = old.strip().strip("\"'").strip()
+    indent, sep, raw, cr = sm.groups()
+    # ⛔⛔ 必须先剥掉**行尾注释**再判值。实测踩过：
+    #   config.yml 里这行长这样——
+    #       secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
+    #   正则的 `(.*?)$` 会把注释一起吞进值里，判读成
+    #   `CHANGE_ME"  # ZLM API secret(...)` ⇒ 不等于占位符 ⇒ **静默跳过**。
+    #   而启动脚本照常打印「ZLM secret 已就绪，无需改动」——
+    #   **谎报成功**，后端仍然拿 CHANGE_ME 去连 ZLM。
+    #   这类"配置文件是静默的 + 脚本还报成功"是最坏的组合：骗过了所有人。
+    tail = ""
+    vm = re.match(r"^\s*(.*?)\s*(#.*)?$", raw)
+    if vm:
+        raw, tail = vm.group(1), (vm.group(2) or "")
+    old = raw.strip().strip("\"'").strip()
     # 只替换占位符/空值；已有真值说明运维填过，尊重它（幂等的关键）
     if old and old.upper() not in ("CHANGE_ME", "CHANGE-ME", "TODO", "YOUR_SECRET"):
         continue
-    lines[i] = f"{indent}secret{sep}\"{secret}\"{cr}"
+    # 保留行尾注释：那是给现场运维看的说明，不能被我们抹掉
+    lines[i] = f"{indent}secret{sep}\"{secret}\"{cr}" + (f"    {tail}" if tail else "")
     changed = True
     break
 
