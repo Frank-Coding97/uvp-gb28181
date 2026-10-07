@@ -665,27 +665,39 @@ sync_ports_into_config() {
   #   重新按新默认值起。⛔ 但**用户显式设过的端口要保留** ——
   #   见下方 preserve_env_if_user_set()：只有"值等于旧默认值"才跟着升级，
   #   用户手动改过的一律不动。
-  preserve_env_if_user_set() {
-    local key="$1" old_default="$2" current="$3"
-    if [ -f "$ENV_FILE" ]; then
-      local old
-      old="$(read_env_file "$key")"
-      # 旧值存在且不等于旧默认值 ⇒ 用户主动设过，尊重它
-      if [ -n "$old" ] && [ "$old" != "$old_default" ]; then
-        printf '%s' "$old"
-        return 0
-      fi
-    fi
-    printf '%s' "$current"
+  # ⛔⛔⛔ 这里**不能硬编码「上一版的默认值」**来判别"是不是用户设的"。
+  #   实测踩了两次：
+  #   ① 我把默认值改成 30010，却把"旧默认"仍写成 8280 —— 而8280 恰好是
+  #      上一版的真实默认值，判据本身没错，但我改代码时漏改这里就等于
+  #      **判据会随版本漂移**；下次改默认值时又错一次。
+  #   ② 调试残留（UVP_NGINX_HTTP_PORT=8280）被误判成"用户主动设的"，
+  #      于是 nginx 去 bind 后端的端口。
+  #
+  # ⭐ 正确判据：**config.env 里显式记录"这些值是默认还是用户设的"**。
+  #   写入时对每个键加一个 UVP_USER_SET_<键> 标记；只有带标记的才当用户设置。
+  #   缺标记的（老包写的）一律按新默认值处理 —— 老包本来就没有标记，
+  #   这正好与"跟着升级"的诉求一致。
+  #   ⚠️ 若用户手工编辑过 config.env，标记还在 ⇒ 依然尊重其设置。
+  is_user_set() {
+    [ "$(read_env_file "UVP_USER_SET_$1")" = "1" ]
   }
   local _http _redis _https _ngxhttp
-  _http="$(preserve_env_if_user_set UVP_HTTP_PORT 8280 "$HTTP_PORT")"
-  _redis="$(preserve_env_if_user_set UVP_REDIS_PORT 6379 "$REDIS_PORT")"
-  _https="$(preserve_env_if_user_set UVP_HTTPS_PORT 443 "$NGINX_HTTPS_PORT")"
-  _ngxhttp="$(preserve_env_if_user_set UVP_NGINX_HTTP_PORT 80 "$NGINX_HTTP_PORT")"
+  _http="$HTTP_PORT";      is_user_set UVP_HTTP_PORT      && _http="$(read_env_file UVP_HTTP_PORT)"
+  _redis="$REDIS_PORT";    is_user_set UVP_REDIS_PORT    && _redis="$(read_env_file UVP_REDIS_PORT)"
+  _https="$NGINX_HTTPS_PORT";  is_user_set UVP_HTTPS_PORT     && _https="$(read_env_file UVP_HTTPS_PORT)"
+  _ngxhttp="$NGINX_HTTP_PORT";  is_user_set UVP_NGINX_HTTP_PORT && _ngxhttp="$(read_env_file UVP_NGINX_HTTP_PORT)"
   HTTP_PORT="$_http"; REDIS_PORT="$_redis"
   NGINX_HTTPS_PORT="$_https"; NGINX_HTTP_PORT="$_ngxhttp"
-  printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}" > "$ENV_FILE"
+  {
+    printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}"
+    printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}"
+    # 记录"这四个值不是用户设的" ⇒ 下次读到它们时按默认值处理。
+    # ⛔ 环境变量显式传入时（${UVP_*}非空）才算用户设置，要写 1。
+    [ -n "${UVP_HTTP_PORT:-}" ]        && printf 'UVP_USER_SET_UVP_HTTP_PORT=1\n'
+    [ -n "${UVP_REDIS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_REDIS_PORT=1\n'
+    [ -n "${UVP_HTTPS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_HTTPS_PORT=1\n'
+    [ -n "${UVP_NGINX_HTTP_PORT:-}" ]  && printf 'UVP_USER_SET_UVP_NGINX_HTTP_PORT=1\n'
+  } > "$ENV_FILE"
   # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
   printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
 
