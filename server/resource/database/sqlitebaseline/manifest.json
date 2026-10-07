@@ -1,0 +1,36 @@
+{
+  "version": "sqlite-baseline-20261007-r1",
+  "source": "uvp-gb28181.sql",
+  "source_sha256": "7f87485eb1ccffe383fd11008a11a54825bf76bf57e5198cf0b9b4cb0c4c771c",
+  "sha256": "895c8bd3a6ab45cfb4b4b2504ee4399b7287f3d648cfb6bf7b7aaea9c2933310",
+  "tables": 111,
+  "seed_statements": 38,
+  "foreign_keys_kept": 3,
+  "autoincrement_tables": 92,
+  "tables_without_autoincrement": [
+    "gb_device_operation_intent",
+    "gb_openapi_play_grant",
+    "gb_recording_plan_channel_state",
+    "gb_recording_reconcile_state",
+    "gb_sip_config",
+    "gb_sip_trace_capture",
+    "gb_sip_trace_message",
+    "sys_civil_code",
+    "sys_jobs",
+    "sys_menu_api",
+    "sys_openapi_client_scope",
+    "sys_openapi_nonce",
+    "sys_openapi_process_authority",
+    "sys_openapi_process_generation",
+    "sys_openapi_runtime_state",
+    "sys_openapi_security_state",
+    "sys_role_menu",
+    "sys_user_role",
+    "sys_user_sessions"
+  ],
+  "skipped_statement_heads": {},
+  "notes": [
+    "sys_civil_code 不在本文件：3348 行区划数据由应用侧 civilcode.SeedIfEmpty 在同一事务内灌。",
+    "复合主键表保留主键约束、放弃 AUTOINCREMENT（SQLite 只允许单列 INTEGER 主键自增）。"
+  ]
+}

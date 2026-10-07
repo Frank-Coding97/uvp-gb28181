@@ -128,6 +128,16 @@ func initDB() {
 			app.GormDbPostgreSql = dbPostgresql
 		}
 	}
+	//sqlite —— 绿色安装包的默认库；单文件、零外部依赖。
+	// 放在最后：它是唯一会**创建数据目录**的库，放在其他库之后可以避免
+	// 「MySQL 已连上、SQLite 初始化失败」的半初始化状态。
+	if app.ConfigYml.GetInt("gormv2.sqlite.isinitglobalgormsqlite") == 1 {
+		if dbSqlite, err := gormhelper.GetOneSqliteClient(); err != nil {
+			startupFail("database", err)
+		} else {
+			app.GormDbSqlite = dbSqlite
+		}
+	}
 }
 
 // 检查必要的文件夹是否存在

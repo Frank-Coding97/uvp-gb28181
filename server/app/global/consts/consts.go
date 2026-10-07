@@ -14,7 +14,10 @@ const (
 	DbTypeMySql      = "mysql"
 	DbTypeSqlServer  = "sqlserver"
 	DbTypePostgreSql = "postgresql"
-	RequestAborted   = "request_aborted"
+	// DbTypeSqlite 是**绿色安装包默认库**：单文件、零外部依赖，装完即用。
+	// 用纯 Go 驱动（modernc.org/sqlite），不需CGO，因此可交叉编译进静态包。
+	DbTypeSqlite  = "sqlite"
+	RequestAborted = "request_aborted"
 	// 上传类型
 	UploadTypeLocal = "local"
 	UploadTypeQiniu = "qiniu"

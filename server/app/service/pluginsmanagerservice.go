@@ -351,6 +351,8 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -979,6 +981,8 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -1146,6 +1150,8 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -1557,6 +1563,8 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}

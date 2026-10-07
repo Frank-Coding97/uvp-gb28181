@@ -42,6 +42,8 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -143,6 +145,8 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -288,6 +292,8 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}
@@ -1606,6 +1612,8 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 		db, err = gormhelper.GetOnePostgreSqlClient()
 	case "sqlserver":
 		db, err = gormhelper.GetOneSqlserverClient()
+	case "sqlite":
+		db, err = gormhelper.GetOneSqliteClient()
 	default:
 		db, err = gormhelper.GetOneMysqlClient()
 	}

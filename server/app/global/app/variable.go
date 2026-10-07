@@ -18,6 +18,7 @@ var (
 	GormDbMysql      *gorm.DB                  // mysql数据库连接
 	GormDbSqlserver  *gorm.DB                  // sqlserver数据库连接
 	GormDbPostgreSql *gorm.DB                  // postgresql数据库连接
+	GormDbSqlite     *gorm.DB                  // sqlite数据库连接（绿色安装包默认库，单文件、零外部依赖）
 	ZapLog           *zap.Logger               // 全局日志指针
 	CasbinV2         CasbinInterf              // casbin指针
 	Cache            CacheInterf               // 缓存指针
@@ -31,7 +32,8 @@ var (
 
 /*
  * @Description: 获取数据库连接
- * @param sqlType 数据库类型 mysql sqlserver postgresql
+ * @param sqlType 数据库类型 mysql sqlserver postgresql sqlite
+ *	不传则读配置 gormv2.usedbtype
  * @return *gorm.DB
  */
 func DB(sqlType ...string) *gorm.DB {
@@ -49,6 +51,8 @@ func DB(sqlType ...string) *gorm.DB {
 		db = GormDbSqlserver
 	case consts.DbTypePostgreSql:
 		db = GormDbPostgreSql
+	case consts.DbTypeSqlite:
+		db = GormDbSqlite
 	default:
 		db = GormDbMysql
 	}
