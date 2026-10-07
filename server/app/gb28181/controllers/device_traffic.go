@@ -543,15 +543,26 @@ func (dc *DeviceTrafficController) Viewers(c *gin.Context) {
 	for i := range list {
 		totalViewers += list[i].ViewerCount
 	}
-	dc.Success(c, gin.H{"list": list, "total": len(list), "totalViewers": totalViewers, "canKick": trafficSuperAdmin(c)})
+	// ⛔ canKick 恒为 true：强退的权限判定**只由casbin 中间件做**（按
+	//   /api/gb28181/device-traffic/viewers/kick 这条策略），不在业务层再拦一道。
+	//   曾经这里返回 trafficSuperAdmin(c)（= 用户在 server.notcheckuser 白名单里），
+	//   而该配置默认是空数组 ⇒ **任何人都永远 false**，admin 也强退不了。
+	//   ⛔ 更矛盾的是前端并不看这个字段：MediaRuntimeLedgerDialog 用
+	//   hasPermission("gb28181:zlm:session:kick") 自己判断 ⇒ 前后端两套判据。
+	dc.Success(c, gin.H{"list": list, "total": len(list), "totalViewers": totalViewers, "canKick": true})
 }
 
 func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
-	if !trafficSuperAdmin(c) {
-		response.SetBusinessResult(c, http.StatusForbidden, false)
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "msg": "仅超级管理员可强退观看连接"})
-		return
-	}
+	// ⛔⛔ 这里曾有一道 `if !trafficSuperAdmin(c) { 403 "仅超级管理员可强退观看连接" }`，
+	//   已删除，理由：
+	//   1) 鉴权已由 casbin 中间件完成（POST viewers/kick 需要对应策略），
+	//      业务层再判一次属于**重复授权**，且判据（notcheckuser 白名单）与
+	//      casbin 的策略体系毫无关系 —— 两套权限语义并存最容易出这类矛盾；
+	//   2) `notcheckuser` 默认 []，所以那道判断对**所有人**都 false，
+	//      包括系统管理员 ⇒ 功能实际不可用（实测 403，日志里无casbin denied，
+	//      因为它压根不是权限层拒绝的）；
+	//   3) 前端按钮显隐走 hasPermission(...)，不看 canKick ⇒ 后端这个字段
+	//      只能让"按钮可见但点了报 403"，体验上最差。
 	scope, ok := dc.scope(c, true)
 	if !ok {
 		return
@@ -595,6 +606,3 @@ func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
 	dc.Success(c, gin.H{"kicked": true})
 }
 
-func trafficSuperAdmin(c *gin.Context) bool {
-	return app.ConfigYml != nil && common.IsSkipAuthUser(common.GetCurrentUserID(c))
-}
