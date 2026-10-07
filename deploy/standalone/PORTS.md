@@ -35,9 +35,20 @@
 #    30101      ZLM RTSP               （设备拉流播放）
 #    30102      ZLM RTMP               （如需 RTMP 推流）
 #    30103      ZLM HTTP SSL           （如需 ZLM 自身 HTTPS，默认关闭）
-#    30104      ZLM WebRTC             （如需浏览器 webrtc）
+#    30104      ZLM WebRTC媒体         （如需浏览器 webrtc）
+#    30105      ZLM WebRTC 信令 WS      ⚠️ 键名是 signalingPort，不叫 port
+#    30106      ZLM WebRTC 信令 WSS
+#    30107      ZLM SRT
+#    30108      ZLM ONVIF
 #    30200-30299 ZLM RTP 动态端口（UDP+TCP，成对占用 ⇒ 100 个会话）
 #               ⚠️ 这是**设备把流推到平台**的入口，防火墙必须开 UDP
+#
+# ⛔⛔ ZLM 的端口**必须成体系地挪**：config.ini 里有 11 个段各带监听端口，
+#   漏掉任何一个都会让 ZLM 整体起不来（它bind 失败即进程退出），
+#   而 status 只看 HTTP 端口(30100) ⇒ 会报「运行中」但推流/录像全废。
+#   ⚠️ 最隐蔽的是 **WebRTC 信令**（signalingPort/signalingSslPort）——
+#   键名不叫 port，按"段名 + port"匹配抓不到；容器默认 3000/3001 在目标机上
+#   常已被占用 ⇒ 实测报 `Listen on :: 3001 failed: address already in use`。
 #
 # ---------------- 平台内部（防火墙不用开）----------------
 # 同机进程之间通信，走回环；开到外网等于把内部接口暴露

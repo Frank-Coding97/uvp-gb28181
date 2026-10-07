@@ -116,6 +116,12 @@ ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-30200}"
 #   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
 #   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
 ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-30200-30299}"
+# WebRTC 信令（键名不是 port，按"段名+port"匹配抓不到，实测漏掉导致 ZLM 起不来）
+ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-30105}"
+ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-30106}"
+# SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
+ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-30107}"
+ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-30108}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -467,11 +473,13 @@ sync_zlm_ports_ini() {
   [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
 
   "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" \
-                    "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" <<'ZLM_INI_PY'
+                    "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" \
+"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" <<'ZLM_INI_PY'
 import re
 import sys
 
-path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range = sys.argv[1:9]
+(path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range,
+ signaling_port, signaling_ssl_port, srt_port, onvif_port) = sys.argv[1:13]
 
 # 段名（小写） → {键: 新值}
 # 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
@@ -480,10 +488,21 @@ path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_r
 targets = {
     "http":   {"port": http_port, "sslport": ssl_port},
     "rtsp":   {"port": rtsp_port, "sslport": "0"},      # sslport=0 = 不启用
-    "rtmp":   {"port": rtmp_port},
-    "rtc":    {"port": rtc_port},
+    "rtmp":   {"port": rtmp_port, "sslport": "0"},
+    "rtc":    {"port": rtc_port,
+               # ⛔⛔ WebRTC 的信令端口**键名不叫 port**（叫 signalingPort），
+               #   所以按"段名 + 键名 port"去匹配是抓不到它们的 ——
+               #   实测漏掉后 ZLM 报 `Listen on :: 3001 failed: address already in use`：
+               #   3001 是容器默认值、这台机器已被占用，ZLM 起不来。
+               #   而 status 只看 http 端口(30100) ⇒ 报「运行中」但推流/WebRTC 全废。
+               "signalingPort": signaling_port,
+               "signalingSslPort": signaling_ssl_port},
     "rtp_proxy": {"port": rtp_proxy_port},
     "rtp":    {"port": rtp_proxy_port, "port_range": rtp_range},
+    # SRT 与 onvif 也不改就会被容器默认值(9000/3702)拖住，
+    # 而这两个在目标机上很可能已被别的服务占用。
+    "srt":    {"port": srt_port},
+    "onvif":  {"port": onvif_port},
 }
 
 section = None
