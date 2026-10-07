@@ -274,7 +274,11 @@ NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
 NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
-NGINX_HTTP_PORT="${UVP_HTTP_PORT:-$(read_env_file UVP_HTTP_PORT)}"
+# ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
+#   曾经也叫 UVP_HTTP_PORT，于是后端设 8390 时nginx 也去 bind 8390 ⇒
+#   `bind() to 0.0.0.0:8390 failed: Address already in use`，
+#   而报错完全看不出是「两个组件抢同一个端口」。
+NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_env_file UVP_NGINX_HTTP_PORT)}"
 NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
 
 # ------------------------------------------------------------ nginx ----
@@ -354,10 +358,17 @@ ensure_self_signed_cert() {
   return 1
 }
 
+# nginx_healthy 以「**HTTPS 端口能连上**」为准，不看 pid 文件。
+#
+# ⛔⛔ 实测：nginx 启动时若 bind 失败，master 会退出，但已经 fork 出来的 worker
+#   还活着并继续持有端口 —— 此刻 pid 文件是**0 字节**（master 没来得及写），
+#   而 8443 照样能curl 通。于是「按 pid 判活」会误报"未运行"，
+#   而 stop 也停不掉（stop_by_pidfile 依赖 pid 文件）。
+#   ⭐ 端口能连 = 真的在服务，这才是用户关心的。
 nginx_healthy() {
-  [ -f "$NGINX_PID_FILE" ] || return 1
-  local pid; pid="$(cat "$NGINX_PID_FILE")"
-  kill -0 "$pid" 2>/dev/null
+  (exec 3<>"/dev/tcp/127.0.0.1/$NGINX_HTTPS_PORT") 2>/dev/null \
+    && exec 3<&- 3>&- && return 0
+  return 1
 }
 
 start_nginx() {
@@ -396,7 +407,19 @@ start_nginx() {
 }
 
 stop_nginx() {
-  stop_by_pidfile "$NGINX_PID_FILE" "$NGINX_BIN" "nginx"
+  # ⛔ 必须走 nginx 自己的 \`-s quit\`：它会让 master 通知**所有 worker** 退出。
+  #   直接 kill master 的话，已经 fork 的 worker 会继续占着端口变成孤儿
+  #   （实测过：kill 掉 master 后 curl 8443 仍然 200）。
+  if [ -x "$NGINX_BIN" ] && [ -f "$NGINX_CONF" ]; then
+    "$NGINX_BIN" -p "$ROOT" -c "$NGINX_CONF" -s quit >/dev/null 2>&1 || true
+    for _ in $(seq 1 40); do
+      nginx_healthy || break
+      sleep 0.25
+    done
+  fi
+  # 兜底：端口还没放掉就按可执行路径清（pid 文件可能不可靠）
+  nginx_healthy && stop_by_pidfile "" "$NGINX_BIN" "nginx"
+  rm -f "$NGINX_PID_FILE"
 }
 
 # ---------------------------------------------------- ZLM 端口同步到 config.ini ----
@@ -617,7 +640,7 @@ sync_ports_into_config() {
 
   printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}" > "$ENV_FILE"
   # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
-  printf 'UVP_HTTPS_PORT=%s\nUVP_HTTP_PORT_80=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
+  printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
 
   # config.yml 里同步：后端是通过这两个键读端口的
   if [ -f "$CONF" ]; then
