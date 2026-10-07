@@ -52,7 +52,14 @@ REDIS_PORT="${UVP_REDIS_PORT:-51011}"
 #
 # 出包时就把两者写进 config.yml，让"两处不一致"从根上不可能发生
 #（此前是在启动时反推对齐，连踩两层判据不匹配的坑）。
-ZLM_SECRET="${UVP_ZLM_SECRET:-035c73f7-bb6b-4889-a715-d9eb2d1925cc}"
+# ⛔⛔ 绝不能用 ZLMediaKit 的官方默认 secret（035c73f7-bb6b-4889-a715-d9eb2d1925cc）。
+#   二开版 main.cpp:301 有硬编码规则：secret 等于该默认**或为空**时，
+#   自动 makeRandStr(32) 换成随机值并 **dumpFile 写回 config.ini**。
+#   ⇒ 包里明明写死了这个值，装完启动一次就被ZLM 自己改掉，
+#     而平台侧 config.yml 不知道这件事 ⇒ 双方永久失配。
+#   症状极具误导性：ZLM 日志里所有成功请求都带着旧 secret（它启动时加载的是内存值），
+#   而配置文件已经变了 —— 只有重启后才会暴露。
+ZLM_SECRET="${UVP_ZLM_SECRET:-uvp-9f3c7a1e5d84b206c1a9e4f7b2d6c805}"
 ZLM_MEDIA_SERVER_ID="${UVP_ZLM_MEDIA_SERVER_ID:-uvp-media-server-0001}"
 SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
 # ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
