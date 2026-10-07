@@ -26,6 +26,17 @@ cd "$REPO_ROOT"
 SERVER_DIR="$REPO_ROOT/server"
 WEB_DIR="$REPO_ROOT/web"
 DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
+
+# ---- 端口默认值（必须与 uvp-ctl.sh 的 *_PORT_DEFAULT 完全一致）----
+# ⛔⛔ 为什么这里也要有一份：make-config.py 靠命令行参数把端口写进 config.yml，
+#   而**首次运行时 uvp-ctl.sh 以 config.yml 为权威**。两边不一致的话，
+#   首次启动时变量会被 config.yml 里的值覆盖 —— 实测症状是
+#   「脚本里明明写着 30011，Redis 却起在 6379」，毫无线索。
+#   根因是这两个变量一直只靠调用方传环境变量，不传就落回 make-config.py
+#   的 argparse 默认值，于是与 uvp-ctl.sh 各说各话。
+#   端口规划见 deploy/standalone/PORTS.md。
+HTTP_PORT="${UVP_HTTP_PORT:-30010}"
+REDIS_PORT="${UVP_REDIS_PORT:-30011}"
 SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
 # ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
 # ⛔ 不入库：MediaServer 13MB + ffmpeg 运行时库 32MB + www 16MB，且必须与目标机架构匹配。
