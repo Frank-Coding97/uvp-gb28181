@@ -52,6 +52,27 @@ read_env_file() {
   sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
 }
 
+# read_port_env 读**端口类**配置：只认带 UVP_USER_SET_ 标记的键。
+#
+# ⛔⛔ 为什么端口要单独一套读法（这一轮踩了一整天才搞清）：
+#   普通键（如 ZLM 各段）config.env 里有就该用；但端口不行 ——
+#   **老包写的 config.env 里全是旧默认值**（8280/6379/443/80）。
+#   若无条件读取，客户升级包后端口永远停在旧值上 ⇒ 包里代码是新的、
+#   配置是旧的，两者**静默共存**，而且没有任何提示。
+#
+#   而"这个值是用户设的还是默认值留下的"**无法从值本身判断**：
+#   我试过硬编码「上一版默认值」去比 —— 那玩意儿会随我改版本而漂移
+#   （改了默认值忘了改判据），而且调试残留值也会被误判成用户设置，
+#   两次都栽了。
+#   ⇒ 唯一可靠的做法：**写入时就把意图记下来**。老包没有标记，
+#   天然按新默认值处理，正好符合"跟着升级"的诉求。
+read_port_env() {
+  [ -f "$ENV_FILE" ] || return 0
+  if [ "$(sed -n "s/^UVP_USER_SET_$1=//p" "$ENV_FILE" 2>/dev/null | tail -1)" = "1" ]; then
+    sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
+  fi
+}
+
 HTTP_PORT="${UVP_HTTP_PORT:-$(read_port_env UVP_HTTP_PORT)}"
 HTTP_PORT="${HTTP_PORT:-$HTTP_PORT_DEFAULT}"
 REDIS_PORT="${UVP_REDIS_PORT:-$(read_port_env UVP_REDIS_PORT)}"
