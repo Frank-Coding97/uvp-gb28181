@@ -309,13 +309,23 @@ render_nginx_conf() {
     log "⚠️  缺少 nginx 配置模板（$NGINX_CONF_TEMPLATE），跳过 nginx"
     return 1
   }
+  # ⛔⛔ 只做「@占位符@ → 字面值」这一种替换，不要去匹配 `listenNNNssl;` 这类文本。
+  #   实测踩过：模式 `listen      80;` 会把 80 误换成**后端端口**（因为它同样匹配
+  #   别的行），而带空格的 `listen      443 ssl;` 又匹配不上 ⇒ 一行都没换对。
+  #   模板里端口已经写成 @HTTPS_PORT@ / @PLAIN_HTTP_PORT@，这里只负责填值。
   sed -e "s|@ROOT@|$ROOT|g" \
       -e "s|@BACKEND_PORT@|$HTTP_PORT|g" \
-      -e "s|listen443 ssl;|listen ${NGINX_HTTPS_PORT} ssl;|" \
-      -e "s|listen      \[::\]:443 ssl;|listen      [::]:${NGINX_HTTPS_PORT} ssl;|" \
-      -e "s|listen      80;|listen      ${NGINX_HTTP_PORT};|" \
-      -e "s|listen      \[::\]:80;|listen      [::]:${NGINX_HTTP_PORT};|" \
+      -e "s|@HTTPS_PORT@|$NGINX_HTTPS_PORT|g" \
+      -e "s|@PLAIN_HTTP_PORT@|$NGINX_HTTP_PORT|g" \
       "$NGINX_CONF_TEMPLATE" > "$NGINX_CONF"
+
+  # ⛔ 渲染后自检：模板里不该再有 @...@。有就是漏了某个占位符，
+  #   而 nginx 会把它当成一个畸形的路径/指令，报的错与真因完全无关。
+  if grep -q '@[A-Z_]*@' "$NGINX_CONF"; then
+    log "nginx 配置里仍有未替换的占位符："
+    grep -n '@[A-Z_]*@' "$NGINX_CONF" >&2 || true
+    fail "nginx 配置模板与本脚本不匹配（占位符未全部替换）"
+  fi
   return 0
 }
 

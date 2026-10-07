@@ -10,8 +10,8 @@
 #   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
 #
 # ⛔ 端口规划（与 uvp-ctl.sh 的变量必须一致）：
-#   443   nginx HTTPS        ← 浏览器访问
-#   80    nginx HTTP         ← 跳转到 HTTPS（也允许直接放行，取下面的开关）
+#   443   nginx HTTPS        ← 浏览器访问（端口由 uvp-ctl.sh 填入）
+#   80    nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（端口由 uvp-ctl.sh 填入）
 #   8390  后端 HTTP          ← API + 二维码地址，**不设 TLS**
 #   16380 Redis（仅回环）18080/10554 ZLM
 #
@@ -71,8 +71,8 @@ http {
     # HTTPS（自签名）
     # ============================================================
     server {
-        listen      443 ssl;
-        listen      [::]:443 ssl;
+        listen      @HTTPS_PORT@ ssl;
+        listen      [::]:@HTTPS_PORT@ ssl;
         http2       on;
         server_name _;
 
@@ -154,8 +154,8 @@ http {
     #   若客户不需要这条例外，把下面 location /api/ 与 /gb28181/ 整块删掉即可。
     # ============================================================
     server {
-        listen      80;
-        listen      [::]:80;
+        listen      @PLAIN_HTTP_PORT@;
+        listen      [::]:@PLAIN_HTTP_PORT@;
         server_name _;
 
         location /api/ {
