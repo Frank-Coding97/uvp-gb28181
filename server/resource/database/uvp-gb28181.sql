@@ -3376,9 +3376,7 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (8423, 'p', 'role_1', '/api/users/delete', 'DELETE', '*', '', ''),
 (8424, 'p', 'role_1', '/api/sysDictItem/edit', 'PUT', '*', '', ''),
 (8425, 'p', 'role_1', '/api/gb28181/zlm/nodes', 'GET', '*', '', ''),
-(8426, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', 'POST', '*', '', '');
-
-INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
+(8426, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/stop', 'POST', '*', '', ''),
 (8427, 'p', 'role_1', '/api/gb28181/sip/service-config/preallocation-mode', 'GET', '*', '', ''),
 (8428, 'p', 'role_1', '/api/gb28181/device-traffic/coverage', 'GET', '*', '', ''),
 (8429, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers/close', 'POST', '*', '', ''),
@@ -3578,9 +3576,7 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (8623, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/rtp-servers/close/preflight', 'POST', '*', '', ''),
 (8624, 'p', 'role_1', '/api/sysDictItem/getByDictId/:dictId', 'GET', '*', '', ''),
 (8625, 'p', 'role_1', '/api/users/updateAccount', 'PUT', '*', '', ''),
-(8626, 'p', 'role_1', '/api/gb28181/cloud-recordings/files', 'GET', '*', '', '');
-
-INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
+(8626, 'p', 'role_1', '/api/gb28181/cloud-recordings/files', 'GET', '*', '', ''),
 (8627, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id', 'PATCH', '*', '', ''),
 (8628, 'p', 'role_1', '/api/gb28181/sip/service-config/ignore-channel-offline-status-notify', 'GET', '*', '', ''),
 (8629, 'p', 'role_1', '/api/gb28181/sip/service-config/default-channel-stream-transport', 'PUT', '*', '', ''),
@@ -3661,7 +3657,17 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (10271, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/downloads', 'POST', '*', '', ''),
 (10272, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'GET', '*', '', ''),
 (10273, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '*', '', ''),
-(10274, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', '');
+(10274, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', ''),
+(10275, 'p', 'role_1', '/api/sysParam/list', 'GET', '*', '', ''),
+(10276, 'p', 'role_1', '/api/sysParam/:id', 'GET', '*', '', ''),
+(10277, 'p', 'role_1', '/api/sysParam/getByCode/:code', 'GET', '*', '', ''),
+(10278, 'p', 'role_1', '/api/sysParam/add', 'POST', '*', '', ''),
+(10279, 'p', 'role_1', '/api/sysParam/edit', 'PUT', '*', '', ''),
+(10280, 'p', 'role_1', '/api/sysParam/delete', 'DELETE', '*', '', ''),
+(10281, 'p', 'role_1', '/api/sysRole/list', 'GET', '*', '', ''),
+(10282, 'p', 'role_1', '/api/sysRole/:id', 'GET', '*', '', ''),
+(10283, 'p', 'role_1', '/api/sysMenu/:id', 'GET', '*', '', ''),
+(10284, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/disable', 'POST', '*', '', '');
 INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `level`, `pinyin`, `created_at`, `updated_at`) VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),

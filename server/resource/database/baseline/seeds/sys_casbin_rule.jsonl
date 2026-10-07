@@ -479,3 +479,13 @@
 {"id": 10272, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/downloads/:downloadId", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 10273, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/downloads/:downloadId", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
 {"id": 10274, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/record-cache/tasks/:taskId/favorite", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
+{"id": 10275, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/list", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10276, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10277, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/getByCode/:code", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10278, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/add", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
+{"id": 10279, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/edit", "v2": "PUT", "v3": "*", "v4": "", "v5": ""}
+{"id": 10280, "ptype": "p", "v0": "role_1", "v1": "/api/sysParam/delete", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
+{"id": 10281, "ptype": "p", "v0": "role_1", "v1": "/api/sysRole/list", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10282, "ptype": "p", "v0": "role_1", "v1": "/api/sysRole/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10283, "ptype": "p", "v0": "role_1", "v1": "/api/sysMenu/:id", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10284, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/cascade/platforms/:id/disable", "v2": "POST", "v3": "*", "v4": "", "v5": ""}

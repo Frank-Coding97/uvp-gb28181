@@ -100,6 +100,40 @@ def main() -> int:
         ).fetchall()
         print(f"✅ casbin 策略 ptype 合法，取值: {[k[0] for k in kinds]}")
 
+        # ---- 权限覆盖检查（系统管理员不该有 403）----
+        # ⛔⛔ 这条来自一次真实踩坑：admin 打开参数管理页报 403，
+        #   而**开发库里也一样缺** —— 说明是产品侧一直没给这些接口授权，
+        #   不是绿色包/迁移的问题。它在开发环境被"知道 admin 应该有权限"的心智
+        #   掩盖了，一装成新库就暴露。
+        #   症状有迷惑性：日志里只有统一失败出口的「请求被拒」，
+        #   与权限拒绝、参数错误长得一模一样 ⇒ 排查时极易往别处想。
+        admin_apis = set()
+        for (v1,) in db.execute(
+                "SELECT v1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1 <> '*'"
+        ):
+            if v1:
+                admin_apis.add(v1.strip())
+
+        def _admin_can(path: str) -> bool:
+            return any(a == path or (a.endswith('*') and path.startswith(a.rstrip('*')))
+                       for a in admin_apis)
+
+        # 走casbin 中间件的接口，必须有对应授权；system_manager 这类无需鉴权的不在此列
+        protected_missing = [
+            (m, p) for (p, m) in db.execute(
+                "SELECT path, method FROM sys_api "
+                "WHERE path IN ('/api/sysParam/list', '/api/sysParam/:id', "
+                "  '/api/sysParam/getByCode/:code', '/api/sysParam/add', "
+                "  '/api/sysParam/edit', '/api/sysParam/delete', "
+                "  '/api/sysRole/list', '/api/sysRole/:id', '/api/sysMenu/:id')"
+            ) if not _admin_can('/' + p.lstrip('/'))
+        ]
+        if protected_missing:
+            print(f"❌ 以下接口走鉴权但 role_1（系统管理员）没授权 → admin 访问会 403：{protected_missing}")
+            print("   新增这类接口时，记得同时给系统管理员补一条 sys_casbin_rule 策略。")
+            return 1
+        print("✅ 关键接口的系统管理员授权齐全（admin 不再 403）")
+
         # admin 账号必须在 —— 没有它装完登不进去
         admin = one("SELECT count(*) FROM sys_users WHERE username='admin'")
         if admin != 1:
