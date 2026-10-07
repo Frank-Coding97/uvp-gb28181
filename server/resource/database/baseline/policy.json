@@ -14,7 +14,13 @@
     "该前提已失效（codex/aksk-openapi 已并入 develop，菜单 140498 与 12 条 openapi-clients 接口都在库里）⇒ 全部改收录；",
     "gb_device_operation_intent 同理（playauth 包在用）⇒ 改收录。",
     "下面 16 张是本轮真正不能进交付的：3 张插件示例表 + 3 张迁移测试/运行态表 + 10 张运维备份表。",
-    "⚠️ 这张映射会参与 capture 的 included = 实库 - excluded 推导，所以**不要**往这里塞注释键（会虚增 excluded 计数）。"
+    "⚠️ 这张映射会参与 capture 的 included = 实库 - excluded 推导，所以**不要**往这里塞注释键（会虚增 excluded 计数）。",
+    "2026-10-07 补 4 张：3 张 *_permfix_backup_20260923（权限治理前的整表备份）+ bak_recording_file_20261006（录像清理前的备份）。",
+    "认这类表的判据是「名字带 backup/bak 语义 且 与某张真表列结构完全一致」⇒ 是运维过程产物，不是业务表。",
+    "漏一条的后果是备份表被当业务表收进 IR，交付脚本里凭空多出一张空壳表和它的索引。",
+    "⚠️ 2026-10-07 已把这 4 张从**开发库物理删除**（116 表 → 112 表，快照留在仓库外 ~/uvp-db-snapshots/）。",
+    "⛔ 但这 20 条**排除项本身刻意保留不删** —— 它是「永不进基线」的黑名单，不是活表清单：",
+    "删表 ≠ 删规则。下次再有人做整表备份，这些名字仍会被挡住；删掉规则就会漏。"
   ],
   "excluded_tables": {
     "gb_migration_dummy": "服务端迁移测试残留（2099-01-01-dummy.sql）",
@@ -32,7 +38,11 @@
     "sys_api_apigroup_backup_reroute_20260921": "同上（二次重路由）",
     "sys_api_apigroup_backup_reroute2_20260921": "同上（三次重路由）",
     "sys_api_title_backup_20260921": "接口标题归一化的整表备份，运维过程产物",
-    "sys_api_title_backup2_20260921": "同上（第二轮）"
+    "sys_api_title_backup2_20260921": "同上（第二轮）",
+    "sys_api_permfix_backup_20260923": "权限治理（2026-09-23 契约对账那轮）前的 sys_api 整表备份，运维过程产物",
+    "sys_casbin_rule_permfix_backup_20260923": "同上，sys_casbin_rule 整表备份",
+    "sys_menu_api_permfix_backup_20260923": "同上，sys_menu_api 整表备份",
+    "bak_recording_file_20261006": "gb_recording_file 的整表备份（2026-10-06 录像清理前），列结构与真表一致，运维过程产物"
   },
   "seed_tables": {
     "_comment": "只有这些表带数据；其余表一律只建结构。soft_delete=true 表示该表有 deleted_at 列时按 deleted_at IS NULL 过滤（基线不带软删行）；没有该列则原样全取。",
@@ -82,19 +92,59 @@
     "/public/uploads/",
     "18800000006",
     "13800000001",
-    "headquarters@company.com"
+    "headquarters@company.com",
+    "wb_full",
+    "wb_assign",
+    "wb_share",
+    "wb_view",
+    "east_admin",
+    "east_staff",
+    "south_admin",
+    "WB-全权限",
+    "WB-仅分配",
+    "WB-仅共享",
+    "WB-只读",
+    "WB-分部管理员",
+    "WB-组员",
+    "华东分部",
+    "上海组",
+    "华南分部",
+    "role_5",
+    "role_6",
+    "role_7",
+    "role_8",
+    "role_9",
+    "user_8",
+    "user_9",
+    "user_10",
+    "user_11",
+    "user_12",
+    "user_13",
+    "user_14"
   ],
   "_seed_filters_comment": [
     "种子的逐行清洗规则。判据与表一致：只有 develop「拥有」的才进基线。",
     "为什么需要它：开发库里混着环境数据（演示账号、测试部门、悬空角色规则），",
     "而旧快照是靠人工手改 SQL 清洗的 —— 那些知识既没落盘也无法复核。",
     "这里把它显式化：每条规则都能被读、被执行、被契约测试校验。",
-    "set 用于抹掉个人信息与占位字段（隐私考虑，且这些值本来就不是产品数据）。"
+    "set 用于抹掉个人信息与占位字段（隐私考虑，且这些值本来就不是产品数据）。",
+    "2026-10-07 补「设备权限工作台」（2026-09-23 造）那套：角色 5-10、账号 8-14、部门 4-6。",
+    "它们是为了验证权限分配功能临时造的，密码全是同一个弱哈希、口号都写着「（测试账号）」⇒ 不是产品数据。",
+    "⭐ 关联表（sys_role_menu / sys_user_role）**不要**在这里逐条列 id：删掉 sys_role / sys_users 的行之后，",
+    "referential_cleanup 会按「引用目标是否还在」自动清掉孤儿行。真正必须手写的是 sys_casbin_rule ——",
+    "它的 v0 是字符串（'role_5' / 'user_13'），没有可用的引用关系，只能显式排除。",
+    "⭐ 排除账号/角色后，forbidden_literals 要同步加上这些名字当兜底：",
+    "否则哪天有人改了 role_id 分配，规则静默失效、测试账号就跟着进了交付脚本。"
   ],
   "seed_filters": {
     "sys_users": {
       "drop_where": [
-        {"column": "username", "in": ["demo"], "why": "演示账号，非产品数据"}
+        {"column": "username", "in": ["demo"], "why": "演示账号，非产品数据"},
+        {
+          "column": "username",
+          "in": ["wb_full", "wb_assign", "wb_share", "wb_view", "east_admin", "east_staff", "south_admin"],
+          "why": "设备权限工作台 2026-09-23 造的验证账号（密码同一个弱哈希、描述写着「测试账号」），非产品数据"
+        }
       ],
       "set": {
         "email": "",
@@ -107,13 +157,23 @@
     },
     "sys_department": {
       "drop_where": [
-        {"column": "name", "in": ["测试001", "测试002"], "why": "测试部门"}
+        {"column": "name", "in": ["测试001", "测试002"], "why": "测试部门"},
+        {
+          "column": "name",
+          "in": ["华东分部", "上海组", "华南分部"],
+          "why": "设备权限工作台 2026-09-23 为验证「本部门及以下可见」造的组织，非产品数据"
+        }
       ],
       "set": {"leader": "", "phone": "", "email": "", "describe": ""}
     },
     "sys_role": {
       "drop_where": [
-        {"column": "name", "in": ["演示"], "why": "无迁移创建、无代码依赖，属环境数据"}
+        {"column": "name", "in": ["演示"], "why": "无迁移创建、无代码依赖，属环境数据"},
+        {
+          "column": "name",
+          "in": ["WB-全权限", "WB-仅分配", "WB-仅共享", "WB-只读", "WB-分部管理员", "WB-组员"],
+          "why": "设备权限工作台 2026-09-23 造的验证角色（描述里自带「测试账号」），非产品数据"
+        }
       ]
     },
     "sys_role_menu": {
@@ -128,6 +188,14 @@
           "column": "v0",
           "in": ["role_2", "role_4", "user_4", "role_10"],
           "why": "指向已不存在的角色/账号（演示角色 2、演示账号 4、历史角色 10）"
+        },
+        {
+          "column": "v0",
+          "in": [
+            "role_5", "role_6", "role_7", "role_8", "role_9",
+            "user_8", "user_9", "user_10", "user_11", "user_12", "user_13", "user_14"
+          ],
+          "why": "设备权限工作台 2026-09-23 那套验证角色（5-10）与验证账号（8-14）的授权规则；角色/账号本身已被 seed_filters 排除，规则必须同步排除否则 casbin 加载时会指向不存在的 policy"
         }
       ]
     }

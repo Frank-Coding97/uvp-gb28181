@@ -5,8 +5,8 @@
     "source_server_version": "8.0.46",
     "live_table_count": 112,
     "included_table_count": 111,
-    "excluded_table_count": 16,
-    "schema_fingerprint": "manual_edit_record_cache_2026_10_03",
+    "excluded_table_count": 20,
+    "schema_fingerprint": "ffd9b7baf53ebbdb2131c147a4a6f5b5ebdff3df1d9385cd4af7d0df0be7745a",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -25,7 +25,11 @@
     "sys_api_apigroup_backup_reroute_20260921": "同上（二次重路由）",
     "sys_api_apigroup_backup_reroute2_20260921": "同上（三次重路由）",
     "sys_api_title_backup_20260921": "接口标题归一化的整表备份，运维过程产物",
-    "sys_api_title_backup2_20260921": "同上（第二轮）"
+    "sys_api_title_backup2_20260921": "同上（第二轮）",
+    "sys_api_permfix_backup_20260923": "权限治理（2026-09-23 契约对账那轮）前的 sys_api 整表备份，运维过程产物",
+    "sys_casbin_rule_permfix_backup_20260923": "同上，sys_casbin_rule 整表备份",
+    "sys_menu_api_permfix_backup_20260923": "同上，sys_menu_api 整表备份",
+    "bak_recording_file_20261006": "gb_recording_file 的整表备份（2026-10-06 录像清理前），列结构与真表一致，运维过程产物"
   },
   "seed_tables": {
     "sys_menu": {
@@ -7445,14 +7449,14 @@
       ],
       "indexes": [
         {
-          "name": "idx_manu_model",
+          "name": "idx_dept_status",
           "columns": [
             {
-              "name": "manufacturer",
+              "name": "dept_id",
               "prefix": null
             },
             {
-              "name": "version",
+              "name": "status",
               "prefix": null
             }
           ]
@@ -7467,14 +7471,14 @@
           ]
         },
         {
-          "name": "idx_dept_status",
+          "name": "idx_manu_model",
           "columns": [
             {
-              "name": "dept_id",
+              "name": "manufacturer",
               "prefix": null
             },
             {
-              "name": "status",
+              "name": "version",
               "prefix": null
             }
           ]
@@ -10768,7 +10772,7 @@
           "name": "owner_dept_id",
           "type": "bigint unsigned",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10777,7 +10781,7 @@
           "name": "created_by_user",
           "type": "int unsigned",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10876,7 +10880,7 @@
           "name": "download_speed",
           "type": "int",
           "nullable": false,
-          "default": 4,
+          "default": "4",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10885,7 +10889,7 @@
           "name": "node_id",
           "type": "bigint",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10957,7 +10961,7 @@
           "name": "file_size",
           "type": "bigint unsigned",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10966,7 +10970,7 @@
           "name": "cached_bytes",
           "type": "bigint unsigned",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -10975,7 +10979,7 @@
           "name": "estimated_bytes",
           "type": "bigint unsigned",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
@@ -11017,15 +11021,6 @@
           "collation": null
         },
         {
-          "name": "segments",
-          "type": "text",
-          "nullable": false,
-          "default": null,
-          "extra": "",
-          "comment": "分片产出清单（JSON 数组）",
-          "collation": "utf8mb4_general_ci"
-        },
-        {
           "name": "started_at",
           "type": "datetime",
           "nullable": true,
@@ -11056,7 +11051,7 @@
           "name": "favorite",
           "type": "tinyint",
           "nullable": false,
-          "default": 0,
+          "default": "0",
           "extra": "",
           "comment": "收藏标记（收藏后不参与保留期自动清理）",
           "collation": null
@@ -11078,6 +11073,15 @@
           "extra": "",
           "comment": "",
           "collation": null
+        },
+        {
+          "name": "segments",
+          "type": "text",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "分片产出清单（JSON 数组）",
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -11098,19 +11102,6 @@
         }
       ],
       "indexes": [
-        {
-          "name": "idx_record_cache_task_state_created",
-          "columns": [
-            {
-              "name": "state",
-              "prefix": null
-            },
-            {
-              "name": "created_at",
-              "prefix": null
-            }
-          ]
-        },
         {
           "name": "idx_record_cache_task_channel_state",
           "columns": [
@@ -11142,6 +11133,19 @@
           "columns": [
             {
               "name": "expires_at",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_record_cache_task_state_created",
+          "columns": [
+            {
+              "name": "state",
+              "prefix": null
+            },
+            {
+              "name": "created_at",
               "prefix": null
             }
           ]
