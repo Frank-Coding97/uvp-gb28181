@@ -101,6 +101,7 @@ cp "$DEPLOY_DIR/bin/redis-server" "$DEPLOY_DIR/bin/redis-cli" "$PKG/bin/"
 chmod 0755 "$PKG/bin/redis-server" "$PKG/bin/redis-cli"
 
 log "复制二开 ZLM（含 ffmpeg 运行时库）"
+mkdir -p "$PKG/bin/zlm"
 # ⛔ 必须连 lib/ 一起拷且保持相对位置：MediaServer 是动态链接的，
 #   靠 LD_LIBRARY_PATH=$ROOT/bin/zlm/lib 找那些 .so，缺一个就起不来。
 cp -a "$ZLM_DIR/MediaServer" "$PKG/bin/zlm/"
