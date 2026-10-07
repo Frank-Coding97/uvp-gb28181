@@ -110,7 +110,10 @@ type AlarmController struct {
 }
 
 func NewAlarmController() *AlarmController {
-	return &AlarmController{db: func() *gorm.DB { return app.GormDbMysql }}
+	// ⛔ 用app.DB()（按 usedbtype 分发到 MySQL/PG/SQLServer/SQLite），
+//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
+//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
+return &AlarmController{db: func() *gorm.DB { return app.DB() }}
 }
 
 func (controller *AlarmController) SetDB(provider func() *gorm.DB) {
