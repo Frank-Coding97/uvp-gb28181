@@ -646,6 +646,13 @@ sync_ports_into_config() {
   #
   # 首次运行（config.env 还不存在）用打包时写入 config.yml 的值作为权威，
   # 之后一律以 config.env 为准。
+  #
+  # ⛔⛔ 但「nginx 端口」有个例外：它**不写进 config.yml**（nginx 读的是自己的
+  #   conf），所以这里必须拿它和 config.env 里的值对照：
+  #   若 config.env 记录的是**上一版包的默认值**（本版已改），就该更新。
+  #   ⇒ 判据：值等于「非当前默认值」时，无法区分是"用户主动设的"还是
+  #   "老包留下的"。这个歧义必须消掉，否则升级包后客户会莫名停在旧端口。
+  #   ⇒ 做法：给 config.env 加一个"版本标记"，值变了就整体重写。
   if [ ! -f "$ENV_FILE" ]; then
     local yml_http yml_redis
     yml_http="$(sed -n 's/^[[:space:]]*port:[[:space:]]*:\([0-9]\+\).*/\1/p' "$CONF" | head -1)"
@@ -654,6 +661,30 @@ sync_ports_into_config() {
     REDIS_PORT="${yml_redis:-$REDIS_PORT}"
   fi
 
+  # ⛔ 写入版本标记：包升级后若规划变了（PORT_PLAN_REV），旧的 config.env 整体作废，
+  #   重新按新默认值起。⛔ 但**用户显式设过的端口要保留** ——
+  #   见下方 preserve_env_if_user_set()：只有"值等于旧默认值"才跟着升级，
+  #   用户手动改过的一律不动。
+  preserve_env_if_user_set() {
+    local key="$1" old_default="$2" current="$3"
+    if [ -f "$ENV_FILE" ]; then
+      local old
+      old="$(read_env_file "$key")"
+      # 旧值存在且不等于旧默认值 ⇒ 用户主动设过，尊重它
+      if [ -n "$old" ] && [ "$old" != "$old_default" ]; then
+        printf '%s' "$old"
+        return 0
+      fi
+    fi
+    printf '%s' "$current"
+  }
+  local _http _redis _https _ngxhttp
+  _http="$(preserve_env_if_user_set UVP_HTTP_PORT 8280 "$HTTP_PORT")"
+  _redis="$(preserve_env_if_user_set UVP_REDIS_PORT 6379 "$REDIS_PORT")"
+  _https="$(preserve_env_if_user_set UVP_HTTPS_PORT 443 "$NGINX_HTTPS_PORT")"
+  _ngxhttp="$(preserve_env_if_user_set UVP_NGINX_HTTP_PORT 80 "$NGINX_HTTP_PORT")"
+  HTTP_PORT="$_http"; REDIS_PORT="$_redis"
+  NGINX_HTTPS_PORT="$_https"; NGINX_HTTP_PORT="$_ngxhttp"
   printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}" > "$ENV_FILE"
   # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
   printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}" >> "$ENV_FILE"
