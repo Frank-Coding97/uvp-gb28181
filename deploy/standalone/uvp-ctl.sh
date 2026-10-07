@@ -273,8 +273,9 @@ PY
 case "${1:-start}" in
   start)
     check_preconditions
-    ensure_database# ⛔ 必须先建库再起 Redis/后端：后端启动时会立刻查库，
-                    #   库不存在就是「页面能开、登录报 no such table」。
+    # ⛔ 必须先建库再起 Redis/后端：后端启动时会立刻查库，
+    #   库不存在就是「页面能开、登录报 no such table」。
+    ensure_database
     start_redis          # ⛔ 顺序不能反：后端启动时要连缓存
     start_backend
     log "启动完成 → http://127.0.0.1:${HTTP_PORT}"
