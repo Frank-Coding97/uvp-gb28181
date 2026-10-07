@@ -118,18 +118,25 @@ stop_by_pidfile() {
   fi
 
   # 兜底：pid 文件不在了 ⇒ 按绝对路径找本包启动的进程
+  #
+  # ⛔⛔ 匹配用「路径**出现在**命令行里」而不是「路径**开头**」。
+  #   实测 redis 被自己的守护逻辑改写了 argv[0]：
+  #     /path/bin/redis-server  →  实际 cmdline 是「redis-server 127.0.0.1:16380」
+  #   （只剩 basename），所以 ^绝对路径 锚定匹配不到，兜底静默失效 ——
+  #   而症状又是「stop 说停了、进程还在」。
+  #   ⇒ 去掉 ^ 锚定；安全性靠绝对路径本身足够独特来保证。
   if [ -n "$exe_path" ] && [ -x "$exe_path" ]; then
     local found
-    found="$(pgrep -f "^${exe_path}" 2>/dev/null | tr '\n' ' ')"
+    found="$(pgrep -f "${exe_path}" 2>/dev/null | tr '\n' ' ')"
     if [ -n "${found// /}" ]; then
       log "${label} 的 pid 文件缺失，按可执行路径找到遗留进程（${found}），正在停止"
       # shellcheck disable=SC2086  # 上面已用 tr 转成空格分隔的列表
       kill -TERM $found 2>/dev/null || true
       for _ in $(seq 1 40); do
-        pgrep -f "^${exe_path}" >/dev/null 2>&1 || break
+        pgrep -f "${exe_path}" >/dev/null 2>&1 || break
         sleep 0.25
       done
-      pgrep -f "^${exe_path}" >/dev/null 2>&1 && kill -KILL $(pgrep -f "^${exe_path}") 2>/dev/null || true
+      pgrep -f "${exe_path}" >/dev/null 2>&1 && kill -KILL $(pgrep -f "${exe_path}") 2>/dev/null || true
     fi
   fi
 }
