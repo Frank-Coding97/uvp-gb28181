@@ -122,6 +122,8 @@ ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-30106}"
 # SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
 ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-30107}"
 ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-30108}"
+# STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
+ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-30109}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -474,12 +476,12 @@ sync_zlm_ports_ini() {
 
   "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" \
                     "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" \
-"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" <<'ZLM_INI_PY'
+"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" "$ZLM_ICE_PORT" <<'ZLM_INI_PY'
 import re
 import sys
 
 (path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range,
- signaling_port, signaling_ssl_port, srt_port, onvif_port) = sys.argv[1:13]
+ signaling_port, signaling_ssl_port, srt_port, onvif_port, ice_port) = sys.argv[1:14]
 
 # 段名（小写） → {键: 新值}
 # 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
@@ -496,7 +498,10 @@ targets = {
                #   3001 是容器默认值、这台机器已被占用，ZLM 起不来。
                #   而 status 只看 http 端口(30100) ⇒ 报「运行中」但推流/WebRTC 全废。
                "signalingPort": signaling_port,
-               "signalingSslPort": signaling_ssl_port},
+               "signalingSslPort": signaling_ssl_port,
+               # STUN/TURN：容器默认 3478 同样在规划段外，且 3478/3479 常被别的服务占
+               "icePort": ice_port,
+               "iceTcpPort": ice_port},
     "rtp_proxy": {"port": rtp_proxy_port},
     "rtp":    {"port": rtp_proxy_port, "port_range": rtp_range},
     # SRT 与 onvif 也不改就会被容器默认值(9000/3702)拖住，
@@ -508,24 +513,31 @@ targets = {
 section = None
 changed = []
 out = []
-for line in open(path, encoding="utf-8").read().splitlines():
+# ⛔ 不能用 splitlines()：它会**吃掉** \r\n 的行尾信息，写回时行尾就变了
+#   （ini 里混行尾虽然多数能解析，但会让 diff 变脏、且下次再匹配又对不上）。
+for line in open(path, encoding="utf-8", newline="").read().split("\n"):
     stripped = line.strip()
     if stripped.startswith("[") and stripped.endswith("]"):
         section = stripped[1:-1].strip().lower()
         out.append(line)
         continue
-    m = re.match(r"^(\s*)([a-z_]+)(\s*=\s*)(.*)$", line)
+    # ⛔⛔ 正则必须容忍 **CRLF**：ZLM 的 config.ini 是 Windows 行尾，
+    #   \`(.*)$\` 里的 \`.\` 会吃掉 \r，于是键名后跟 \r 匹配不上
+    #   \`([a-z_]+)(\s*=)\` ⇒ **signalingPort 这类驼峰键一个都改不到**。
+    #   实测症状：日志仍显示 `Listen on :: 3001 failed: address already in use`
+    #   而同步脚本报告"已改"[rtc] port —— 看着改了、实际没改。
+    m = re.match(r"^(\s*)([A-Za-z_]+)(\s*=\s*)(.*?)(\r?)$", line)
     if m and section in targets and m.group(2) in targets[section]:
-        indent, key, eq, old_val = m.groups()
+        indent, key, eq, old_val, cr = m.groups()
         new_val = targets[section][key]
         if old_val.strip() != new_val:
             changed.append("[%s] %s: %s -> %s" % (section, key, old_val.strip(), new_val))
-        out.append("%s%s%s%s" % (indent, key, eq, new_val))
+        out.append("%s%s%s%s%s" % (indent, key, eq, new_val, cr))
         continue
     out.append(line)
 
 if changed:
-    open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+    open(path, "w", encoding="utf-8", newline="").write("\n".join(out))
     print("   ZLM config.ini: " + "; ".join(changed))
 else:
     print("   ZLM config.ini: 端口已与目标一致，无需改动")
