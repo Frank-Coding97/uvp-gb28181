@@ -52,9 +52,9 @@ read_env_file() {
   sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
 }
 
-HTTP_PORT="${UVP_HTTP_PORT:-$(read_env_file UVP_HTTP_PORT)}"
+HTTP_PORT="${UVP_HTTP_PORT:-$(read_port_env UVP_HTTP_PORT)}"
 HTTP_PORT="${HTTP_PORT:-$HTTP_PORT_DEFAULT}"
-REDIS_PORT="${UVP_REDIS_PORT:-$(read_env_file UVP_REDIS_PORT)}"
+REDIS_PORT="${UVP_REDIS_PORT:-$(read_port_env UVP_REDIS_PORT)}"
 REDIS_PORT="${REDIS_PORT:-$REDIS_PORT_DEFAULT}"
 # ⛔ Redis 只监听回环：它没有密码，暴露到公网等于把后端的会话存储敞开。
 #   后端与 Redis 同机，走回环即可。
@@ -77,15 +77,15 @@ ZLM_LOG="$LOGS/zlm.log"
 #   而真实原因是端口没写进配置文件。⚠️ 实测踩过这个（设了 18081 仍起不来）。
 #   ⇒ sync_zlm_ports_ini() 负责写进去。
 ZLM_INI="$ZLM_DIR/config.ini"
-ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
+ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
 # ⛔ 默认值一律选**高位端口**，不用 ZLM 自带的 80/443/554。
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
 ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-30100}"
-ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
+ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_port_env UVP_ZLM_SSL_PORT)}"
 ZLM_SSL_PORT="${ZLM_SSL_PORT:-30103}"
-ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
+ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_port_env UVP_ZLM_RTSP_PORT)}"
 ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-30101}"
 # 其余对外段也统一到规划段（PORTS.md）
 ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-30102}"
@@ -280,13 +280,13 @@ NGINX_CRT="$NGINX_DIR/conf/uvp.crt"
 NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
-NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
+NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_port_env UVP_HTTPS_PORT)}"
 NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-30000}"
 # ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
 #   曾经也叫 UVP_HTTP_PORT，于是后端设 8390 时nginx 也去 bind 8390 ⇒
 #   `bind() to 0.0.0.0:8390 failed: Address already in use`，
 #   而报错完全看不出是「两个组件抢同一个端口」。
-NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_env_file UVP_NGINX_HTTP_PORT)}"
+NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_port_env UVP_NGINX_HTTP_PORT)}"
 NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-30001}"
 
 # ------------------------------------------------------------ nginx ----
@@ -301,11 +301,13 @@ NGINX_CONF_TEMPLATE="$NGINX_DIR/conf/nginx.conf.template"
 NGINX_CRT="$NGINX_DIR/conf/uvp.crt"
 NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 
-# HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
-NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
-NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
-NGINX_HTTP_PORT="${UVP_HTTP_PORT:-$(read_env_file UVP_HTTP_PORT)}"
-NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+# ⛔ nginx 端口只在上面「# ---- nginx ----」段里定义一次。
+# ⛔⛔ 这里曾有过第二组定义（旧版 443/80，且用 UVP_HTTP_PORT 而非
+#   UVP_NGINX_HTTP_PORT）—— bash 里**后定义覆盖先定义**，于是：
+#   ① nginx 的明文端口被读成**后端**的端口（UVP_HTTP_PORT）；
+#   ② 改了 30000/30001 的新默认值被这组旧的重新盖回 443/80。
+#   症状是「明明改了端口，nginx 还是绑443/80」且毫无提示。
+#   ⇒ 端口变量必须单点定义；要改就改那一处。
 
 # ------------------------------------------------------------ nginx ----
 
@@ -678,16 +680,8 @@ sync_ports_into_config() {
   #   缺标记的（老包写的）一律按新默认值处理 —— 老包本来就没有标记，
   #   这正好与"跟着升级"的诉求一致。
   #   ⚠️ 若用户手工编辑过 config.env，标记还在 ⇒ 依然尊重其设置。
-  is_user_set() {
-    [ "$(read_env_file "UVP_USER_SET_$1")" = "1" ]
-  }
-  local _http _redis _https _ngxhttp
-  _http="$HTTP_PORT";      is_user_set UVP_HTTP_PORT      && _http="$(read_env_file UVP_HTTP_PORT)"
-  _redis="$REDIS_PORT";    is_user_set UVP_REDIS_PORT    && _redis="$(read_env_file UVP_REDIS_PORT)"
-  _https="$NGINX_HTTPS_PORT";  is_user_set UVP_HTTPS_PORT     && _https="$(read_env_file UVP_HTTPS_PORT)"
-  _ngxhttp="$NGINX_HTTP_PORT";  is_user_set UVP_NGINX_HTTP_PORT && _ngxhttp="$(read_env_file UVP_NGINX_HTTP_PORT)"
-  HTTP_PORT="$_http"; REDIS_PORT="$_redis"
-  NGINX_HTTPS_PORT="$_https"; NGINX_HTTP_PORT="$_ngxhttp"
+  # 端口值在文件头已由 read_port_env 决定（只认带 UVP_USER_SET_ 标记的键），
+  # 这里只负责把最终生效值落盘。
   {
     printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}"
     printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}"
