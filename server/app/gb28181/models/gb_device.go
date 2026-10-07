@@ -222,14 +222,41 @@ func intPtr(value int) *int { return &value }
 // ListStaleOnline 查询 status=1(缓存在线)但心跳已超时的设备(扫描器用)
 // 注意:阈值按设备各自 keepalive_interval 计算,故在 SQL 里用字段表达式,不能用全局常量
 // cutoffBase = timeoutCount, grace = 宽限秒数
+//
+// ⛔⛔ 方言分支是必需的，不是防御性冗余：
+//   原实现用 MySQL 的 `DATE_SUB(NOW(), INTERVAL (keepalive_interval * ? + ?) SECOND)`，
+//   而 **DATE_SUB / NOW() / INTERVAL 三个都是 MySQL 专有**，SQLite 里
+//   `no such function: DATE_SUB` ⇒ 查询直接报错。
+//   症状极具误导性：日志只说「离线扫描:查询超时设备失败」，
+//   而**设备列表页面报的是「DB 未就绪」** —— 一个后台扫描的错，
+//   在前端表现为整个数据库连不上。实测踩过。
+//   ⇒ MySQL 保持原样（避免影响既有生产），SQLite 走等价表达式。
+//
+// ⭐ SQLite 侧为什么用 `datetime('now', ?)` 而非 `julianday(...)`：
+//   keepalive_time 列声明为 DATETIME，实际存的是 'YYYY-MM-DD HH:MM:SS' 文本，
+//   `julianday()` 对这种值返回 NULL（实测命中 0 行，静默错误）；
+//   而 datetime('now') 返回同格式文本，**字典序比较即时间序**（实测命中正确）。
 func ListStaleOnline(c context.Context, timeoutCount, graceSeconds int) (GbDeviceList, error) {
 	var list GbDeviceList
 	// keepalive_time < now - (keepalive_interval * timeoutCount + grace) 秒
-	err := app.DB().WithContext(c).
+	db := app.DB().WithContext(c).
 		Where("status = ?", DeviceStatusOnline).
-		Where("keepalive_time IS NOT NULL").
-		Where("keepalive_time < DATE_SUB(NOW(), INTERVAL (keepalive_interval * ? + ?) SECOND)", timeoutCount, graceSeconds).
-		Find(&list).Error
+		Where("keepalive_time IS NOT NULL")
+
+	if db.Dialector.Name() == "sqlite" {
+		// SQLite 的 datetime() 修饰符是字符串（'-30 seconds'），不能内联算式，
+		// 所以用 printf 拼出 '-N seconds'；N = interval*timeoutCount + grace。
+		// ⛔ printf 在 SQLite 里没有 —— 用 || 拼字符串。
+		db = db.Where(
+			"keepalive_time < datetime('now', '-' || (keepalive_interval * ? + ?) || ' seconds')",
+			timeoutCount, graceSeconds)
+	} else {
+		db = db.Where(
+			"keepalive_time < DATE_SUB(NOW(), INTERVAL (keepalive_interval * ? + ?) SECOND)",
+			timeoutCount, graceSeconds)
+	}
+
+	err := db.Find(&list).Error
 	return list, err
 }
 
