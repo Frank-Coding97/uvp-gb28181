@@ -35,8 +35,8 @@ DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 #   根因是这两个变量一直只靠调用方传环境变量，不传就落回 make-config.py
 #   的 argparse 默认值，于是与 uvp-ctl.sh 各说各话。
 #   端口规划见 deploy/standalone/PORTS.md。
-HTTP_PORT="${UVP_HTTP_PORT:-30010}"
-REDIS_PORT="${UVP_REDIS_PORT:-30011}"
+HTTP_PORT="${UVP_HTTP_PORT:-51010}"
+REDIS_PORT="${UVP_REDIS_PORT:-51011}"
 SQLITE_DIR="$SERVER_DIR/resource/database/sqlitebaseline"
 # ZLM（二开版）与它的运行时库：构建时由 deploy/standalone/fetch-zlm.sh 放到这里。
 # ⛔ 不入库：MediaServer 13MB + ffmpeg 运行时库 32MB + www 16MB，且必须与目标机架构匹配。

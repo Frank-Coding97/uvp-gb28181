@@ -132,6 +132,117 @@ ensure_dirs() {
   mkdir -p "$DATA" "$LOGS" "$RUN"
 }
 
+# ------------------------------------------------------------ 端口预检 ----
+
+# check_ports_free 在**启动任何组件之前**检查端口占用。
+#
+# ⛔⛔ 为什么必须有这一步（今天真实踩到）：
+#   规划到 30000 段时，30000/30001 已被同机另一套服务（livesms）占着。
+#   而 nginx 的健康检查只看「端口能不能连」⇒ 别人的服务在监听，
+#   就被判成「我的 nginx 起来了」⇒ status 报「运行中」而实际**根本没起**。
+#   症状：浏览器访问 30000 通的是**别人的服务**，页面完全不对，
+#   而包这边所有自检都显示正常 —— 没有任何一处会报错。
+#   ⭐ 这类「静默指向别人的服务」比直接启动失败危险得多：
+#   它把**错误的响应**喂给了客户，看起来像系统有响应、只是内容不对。
+#
+# ⇒ 所以占用检测放在**起服务之前**，且要**明确告诉用户哪个端口被谁占了**。
+#   只报「启动失败」没用 —— 用户需要知道去停掉谁、或者改哪个端口。
+check_ports_free() {
+  local busy="" busy_count=0
+
+  # ---- 逐个检查单端口 ----
+  # $1=默认端口 $2=协议 tcp|udp $3=用途 $4=可覆盖的变量名
+  # ⛔ 用**实际生效值**而不是默认值：用户改过 config.env 或传了环境变量时，
+  #   查默认值等于查了一个没在用的端口 —— 检测形同虚设。
+  _check_one() {
+    local eff="${!4:-$1}" holder
+    holder="$(port_holder "$eff" "$2")" || return 0
+    busy_count=$(( busy_count + 1 ))
+    busy="${busy}
+  ${eff}/$2  $3
+      └─ 已被占用：${holder}"
+  }
+
+  _check_one 51000 tcp "HTTPS（浏览器访问管理页面）"     NGINX_HTTPS_PORT
+  _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
+  _check_one 51010 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
+  _check_one 51100 tcp "ZLM HTTP API（平台开关流）"       ZLM_HTTP_PORT
+  _check_one 51101 tcp "ZLM RTSP（设备拉流播放）"         ZLM_RTSP_PORT
+  _check_one 51102 tcp "ZLM RTMP"                         ZLM_RTMP_PORT
+  _check_one 51103 tcp "ZLM HTTPS"                        ZLM_SSL_PORT
+  _check_one 51104 tcp "ZLM WebRTC 媒体"                  ZLM_RTC_PORT
+  _check_one 51105 tcp "ZLM WebRTC 信令 WS"               ZLM_SIGNALING_PORT
+  _check_one 51106 tcp "ZLM WebRTC 信令 WSS"              ZLM_SIGNALING_SSL_PORT
+  _check_one 51107 udp "ZLM SRT"                          ZLM_SRT_PORT
+  _check_one 51108 tcp "ZLM ONVIF"                        ZLM_ONVIF_PORT
+  _check_one 51109 udp "ZLM STUN/TURN"                    ZLM_ICE_PORT
+
+  # ---- RTP 动态段：整段都要查（UDP/TCP 成对占用）----
+  # ⛔ 只查起点是不够的：段内任一端口被占，ZLM 都会在 bind 那一个时退出。
+  #   （实测就栽在这类"段中间被占"上。）
+  local from="${ZLM_RTP_RANGE%-*}" to="${ZLM_RTP_RANGE#*-}" i proto holder
+  for (( i = from; i <= to; i++ )); do
+    for proto in tcp udp; do
+      holder="$(port_holder "$i" "$proto")" || continue
+      busy_count=$(( busy_count + 1 ))
+      busy="${busy}
+  ${i}/${proto}  ZLM RTP 动态段
+      └─ 已被占用：${holder}"
+    done
+  done
+
+  if [ "$busy_count" -gt 0 ]; then
+    log "端口预检失败：${busy_count} 个端口已被占用"
+    printf '%s\n' "$busy" >&2
+    printf '\n处理办法（按推荐顺序）：\n' >&2
+    printf '  1) 停掉占用者 —— 若那不是本系统，说明机器上还有另一套服务在用这些端口。\n' >&2
+    printf '  2) 换端口 —— 编辑 config.env 里的对应键，常用键名：\n' >&2
+    printf '     UVP_HTTPS_PORT / UVP_HTTP_PORT / UVP_ZLM_HTTP_PORT / UVP_ZLM_RTSP_PORT ...\n' >&2
+    printf '  3) 当前端口规划见 deploy/standalone/PORTS.md（规划段 51000-51299）。\n' >&2
+    printf '\n  ⚠️ 为什么必须在启动前发现：若端口被别人占着而我们照常启动，\n' >&2
+    printf '     nginx 会连到**别人的服务**上，而 status 仍报「运行中」——\n' >&2
+    printf '     客户看到的是别的系统的页面，全程却没有任何报错。\n' >&2
+    fail "端口被占用，未启动任何服务"
+  fi
+  log "端口预检通过（${NGINX_HTTPS_PORT}-${ZLM_RTP_RANGE#*-} 无冲突）"
+}
+
+# port_holder 返回占用某端口的进程描述；返回码 0=被占用，1=空闲。
+#
+# ⛔ 不用 lsof：绿色包不保证目标机装了它。
+# ⛔⛔ ss 非 root 时**看不到别人的进程名** —— 而"被谁占的"恰恰是用户最需要的信息
+#   （今天就靠它才发现 30000 已被 livesms 占用）。所以先用 ss 判"有没有人听"
+#   （这一步非 root 也可靠），再尝试用 sudo -n 拿名字；拿不到就如实说
+#   "需 root 才能看到名字"，**绝不编一个名字出来**。
+port_holder() {
+  local port="$1" proto="$2" flag="-tln"
+  [ "$proto" = "udp" ] && flag="-uln"
+
+  if ! ss "$flag" 2>/dev/null | awk -v pat=":$port\$" '$4 ~ pat {found=1} END{exit !found}'; then
+    return 1
+  fi
+
+  # 有人听⇒ 尝试拿名字。sudo 用 -n（免密），失败就算了，不提示输密码。
+  local out
+  out="$(sudo -n ss "$flag" -p 2>/dev/null \
+        | awk -v pat=":$port\$" '$4 ~ pat' \
+        | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/users:((\"//; s/"$//')"
+  if [ -n "$out" ]; then
+    printf '%s' "$out"
+    return 0
+  fi
+
+  # 拿不到名字时，先判断是不是**本系统自己**（最常见的自占用，值得精确指认）
+  case "$port" in
+    "$HTTP_PORT")      printf '%s' "本包的后端（先执行 ./uvp-ctl.sh stop）"; return 0 ;;
+    "$REDIS_PORT")     printf '%s' "本包的 Redis（先执行 ./uvp-ctl.sh stop）";  return 0 ;;
+    "$ZLM_HTTP_PORT")  printf '%s' "本包的 ZLM（先执行 ./uvp-ctl.sh stop）";    return 0 ;;
+    "$NGINX_HTTPS_PORT") printf '%s' "本包的 nginx（先执行 ./uvp-ctl.sh stop）"; return 0 ;;
+  esac
+
+  printf '%s' "某个进程（看名字：sudo ss %s -p | grep %s）" "$flag" "$port"
+  return 0
+}
 # ---------------------------------------------------------- 进程兜底查找 ----
 
 # stop_by_pidfile 先按 pid 文件停；**停不掉时按可执行文件绝对路径兜底**。
@@ -404,10 +515,23 @@ ensure_self_signed_cert() {
 #   而 8443 照样能curl 通。于是「按 pid 判活」会误报"未运行"，
 #   而 stop 也停不掉（stop_by_pidfile 依赖 pid 文件）。
 #   ⭐ 端口能连 = 真的在服务，这才是用户关心的。
+# nginx_healthy 要求**端口通**且**是本包的 nginx 在服务**。
+#
+# ⛔⛔ 只探端口会把**别人的服务**误认成自己的（今天真实踩到）：
+#   规划到 30000 段时 30000/30001 已被同机另一套服务（livesms）占着，
+#   而"端口能连"对它一样成立 ⇒ status 报「运行中」而我们的 nginx 根本没起。
+#   最坏情况：浏览器打开 30000，看到的是**别的系统**的页面，
+#   而包这边所有自检都显示正常 —— 全程零报错，最难查的一类问题。
+#   ⭐ 与 ZLM 同一个道理：端口可连≠ 服务是我们的。判据必须是**进程**。
 nginx_healthy() {
-  (exec 3<>"/dev/tcp/127.0.0.1/$NGINX_HTTPS_PORT") 2>/dev/null \
-    && exec 3<&- 3>&- && return 0
-  return 1
+  (exec 3<>"/dev/tcp/127.0.0.1/$NGINX_HTTPS_PORT") 2>/dev/null || {
+    exec 3<&- 3>&- 2>/dev/null || true
+    return 1
+  }
+  exec 3<&- 3>&-
+  # 按可执行文件**绝对路径**匹配：按名字会命中同机其它 nginx
+  # （这台机器上就Docker 里跑了 27 天的 nginx）。
+  pgrep -f "$NGINX_BIN" >/dev/null 2>&1
 }
 
 start_nginx() {
@@ -834,6 +958,10 @@ SYNC_PY
 case "${1:-start}" in
   start)
     check_preconditions
+    # ⛔⛔ 端口预检必须在**任何组件启动之前**：端口被别人占着而我们照常启动时，
+    #   nginx 会连到别人的服务上，而 status 仍报「运行中」——
+    #   客户看到的是别的系统的页面，全程却没有任何报错（今天真实踩到）。
+    check_ports_free
     # ⛔ 必须先建库再起 Redis/后端：后端启动时会立刻查库，
     #   库不存在就是「页面能开、登录报 no such table」。
     ensure_database
