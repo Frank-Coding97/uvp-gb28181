@@ -88,6 +88,52 @@ ensure_dirs() {
   mkdir -p "$DATA" "$LOGS" "$RUN"
 }
 
+# ---------------------------------------------------------- 进程兜底查找 ----
+
+# stop_by_pidfile 先按 pid 文件停；**停不掉时按可执行文件绝对路径兜底**。
+#
+# ⛔⛔ 为什么必须有兜底（实测踩过）：pid 文件在 run/ 目录里，而 run/ 会随
+#   「rm -rf 后重新解压」一起消失 —— 此时进程还活着（它持有的是已删除的目录），
+#   pid 文件却没了，stop 就**静默地什么都不停**，用户以为停了其实还在跑。
+#   症状是：重启后端口被占⇒ 新进程起不来，而 stop 全程报「已停止」。
+#
+# ⛔ 匹配必须用**绝对路径 + pgrep -f**，且要排除 grep 自身。
+#   只按进程名匹配会误杀别人的同named 进程（这台机器上就有别人的 redis-server /
+#   MediaServer 在跑，见验收记录）；按绝对路径只命中本包启动的。
+stop_by_pidfile() {
+  local pid_file="$1" exe_path="$2" label="$3"
+  local pid=""
+  if [ -f "$pid_file" ]; then
+    pid="$(cat "$pid_file")"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null || true
+      for _ in $(seq 1 40); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.25
+      done
+      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+    return 0
+  fi
+
+  # 兜底：pid 文件不在了 ⇒ 按绝对路径找本包启动的进程
+  if [ -n "$exe_path" ] && [ -x "$exe_path" ]; then
+    local found
+    found="$(pgrep -f "^${exe_path}" 2>/dev/null | tr '\n' ' ')"
+    if [ -n "${found// /}" ]; then
+      log "${label} 的 pid 文件缺失，按可执行路径找到遗留进程（${found}），正在停止"
+      # shellcheck disable=SC2086  # 上面已用 tr 转成空格分隔的列表
+      kill -TERM $found 2>/dev/null || true
+      for _ in $(seq 1 40); do
+        pgrep -f "^${exe_path}" >/dev/null 2>&1 || break
+        sleep 0.25
+      done
+      pgrep -f "^${exe_path}" >/dev/null 2>&1 && kill -KILL $(pgrep -f "^${exe_path}") 2>/dev/null || true
+    fi
+  fi
+}
+
 # ---------------------------------------------------------------- Redis ----
 
 redis_healthy() {
@@ -131,20 +177,9 @@ start_redis() {
 }
 
 stop_redis() {
-  if [ -f "$REDIS_PID_FILE" ]; then
-    local pid; pid="$(cat "$REDIS_PID_FILE")"
-    if kill -0 "$pid" 2>/dev/null; then
-      # ⛔ 用 SIGTERM 而不是 kill -9：Redis 收到 SIGTERM 会先执行最后的
-      #   AOF flush 再退出；kill -9 会留下需要下次启动回放的 AOF 文件。
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in $(seq 1 30); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.2
-      done
-      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-    fi
-    rm -f "$REDIS_PID_FILE"
-  fi
+  # ⛔ SIGTERM 而非 kill -9：Redis 收到 SIGTERM 会先执行最后的 AOF flush
+  #   再退出；kill -9 会留下需要下次启动回放的 AOF 文件。
+  stop_by_pidfile "$REDIS_PID_FILE" "$REDIS_BIN" "Redis"
 }
 
 # --------------------------------------------------------------- 后端 ----
@@ -193,21 +228,10 @@ start_backend() {
 }
 
 stop_backend() {
-  if [ -f "$BACKEND_PID_FILE" ]; then
-    local pid; pid="$(cat "$BACKEND_PID_FILE")"
-    if kill -0 "$pid" 2>/dev/null; then
-      # ⛔ 一定要给足优雅退出时间：进程退出时要 flush SQLite 的 WAL、
-      #   关闭 Redis 连接。SIGKILL 会留下 -wal/-shm 文件（下次启动能恢复，
-      #   但期间数据处于「已提交、未 checkpoint」状态，出问题时难排查）。
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in $(seq 1 60); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.25
-      done
-      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-    fi
-    rm -f "$BACKEND_PID_FILE"
-  fi
+  # ⛔ 一定要给足优雅退出时间：进程退出时要 flush SQLite 的 WAL、关闭 Redis
+  #   连接。SIGKILL 会留下 -wal/-shm（下次启动能恢复，但期间数据处于
+  #   「已提交、未 checkpoint」状态，出问题时难排查）。
+  stop_by_pidfile "$BACKEND_PID_FILE" "$SERVER_BIN" "后端"
 }
 
 # ---------------------------------------------------------------- 入口 ----
@@ -272,18 +296,7 @@ start_zlm() {
 }
 
 stop_zlm() {
-  if [ -f "$ZLM_PID_FILE" ]; then
-    local pid; pid="$(cat "$ZLM_PID_FILE")"
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in $(seq 1 40); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.25
-      done
-      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
-    fi
-    rm -f "$ZLM_PID_FILE"
-  fi
+  stop_by_pidfile "$ZLM_PID_FILE" "$ZLM_BIN" "ZLM"
 }
 
 # ------------------------------------------------------------ 自动建库 ----
