@@ -43,8 +43,8 @@ for _c in "${UVP_BUILD_PY:-}" python3 python; do
 done
 
 ENV_FILE="$ROOT/config.env"
-HTTP_PORT_DEFAULT=8280
-REDIS_PORT_DEFAULT=6379
+HTTP_PORT_DEFAULT=30010
+REDIS_PORT_DEFAULT=30011
 
 read_env_file() {
   # 读 config.env 的 KEY=VALUE；忽略注释与空行；取最后一条（后写的覆盖先写的）
@@ -82,11 +82,19 @@ ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
-ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-18080}"
+ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-30100}"
 ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
-ZLM_SSL_PORT="${ZLM_SSL_PORT:-18443}"
+ZLM_SSL_PORT="${ZLM_SSL_PORT:-30103}"
 ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
-ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-10554}"
+ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-30101}"
+# 其余对外段也统一到规划段（PORTS.md）
+ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-30102}"
+ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-30104}"
+ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-30200}"
+# ⛔⛔ RTP 动态端口段必须改！ZLM 默认是 49152-65535，那是 Linux 的
+#   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
+#   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
+ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-30200-30299}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -273,13 +281,13 @@ NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_env_file UVP_HTTPS_PORT)}"
-NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-443}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-30000}"
 # ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
 #   曾经也叫 UVP_HTTP_PORT，于是后端设 8390 时nginx 也去 bind 8390 ⇒
 #   `bind() to 0.0.0.0:8390 failed: Address already in use`，
 #   而报错完全看不出是「两个组件抢同一个端口」。
 NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_env_file UVP_NGINX_HTTP_PORT)}"
-NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-80}"
+NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-30001}"
 
 # ------------------------------------------------------------ nginx ----
 # nginx 只做两件事：托管前端 + HTTPS 终止，后端仍是纯 HTTP 的
@@ -435,16 +443,24 @@ stop_nginx() {
 sync_zlm_ports_ini() {
   [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
 
-  "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" <<'ZLM_INI_PY'
+  "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" \
+                    "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" <<'ZLM_INI_PY'
 import re
 import sys
 
-path, http_port, ssl_port, rtsp_port = sys.argv[1:5]
+path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range = sys.argv[1:9]
 
 # 段名（小写） → {键: 新值}
+# 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
+# ⛔ **只列真正要对外的段**：onvif/shell 这类管理端口默认关掉（port=0），
+#   改它们没意义；而且它们在本机回环上，不属于防火墙要开的范围。
 targets = {
-    "http": {"port": http_port, "sslport": ssl_port},
-    "rtsp": {"port": rtsp_port, "sslport": "0"},   # sslport=0 表示不启用
+    "http":   {"port": http_port, "sslport": ssl_port},
+    "rtsp":   {"port": rtsp_port, "sslport": "0"},      # sslport=0 = 不启用
+    "rtmp":   {"port": rtmp_port},
+    "rtc":    {"port": rtc_port},
+    "rtp_proxy": {"port": rtp_proxy_port},
+    "rtp":    {"port": rtp_proxy_port, "port_range": rtp_range},
 }
 
 section = None
@@ -644,9 +660,9 @@ sync_ports_into_config() {
 
   # config.yml 里同步：后端是通过这两个键读端口的
   if [ -f "$CONF" ]; then
-    "$PY_BIN" - "$CONF" "$HTTP_PORT" "$REDIS_PORT" <<'PY'
+    "$PY_BIN" - "$CONF" "$HTTP_PORT" "$REDIS_PORT" "$ZLM_HTTP_PORT" "$ZLM_RTP_PROXY_PORT" <<'SYNC_PY'
 import re, sys
-path, http_port, redis_port = sys.argv[1], sys.argv[2], sys.argv[3]
+path, http_port, redis_port, zlm_http, zlm_rtp_proxy = sys.argv[1:6]
 lines = open(path, encoding="utf-8").read().split("\n")
 
 def replace_in_section(section, key, value):
@@ -682,11 +698,21 @@ if replace_in_section("httpserver", "port", f":{http_port}"):
     dirty = True
 if replace_in_section("redis", "port", redis_port):
     dirty = True
+# ---- ZLM 相关端口（见 deploy/standalone/PORTS.md）----
+# ⛔ 这三处必须跟着 ZLM 实际监听的端口走，否则会出现
+#   「平台按 18080 调 ZLM、ZLM 却听 30100」⇒ 所有推流/取流静默失败。
+for _sec, _pairs in (
+    ("zlm", {"httpport": zlm_http, "rtpport": zlm_rtp_proxy}),
+    ("media", {"hookport": http_port}),      # ZLM hook 回调指向本机后端
+):
+    for _k, _v in _pairs.items():
+        if replace_in_section(_sec, _k, str(_v)):
+            dirty = True
 if dirty:
     open(path, "w", encoding="utf-8").write("\n".join(lines))
-PY
+SYNC_PY
   fi
-  log "生效端口：HTTP ${HTTP_PORT} / Redis ${REDIS_PORT}（已写入 config.env）"
+  log "生效端口：HTTP ${HTTP_PORT} / Redis ${REDIS_PORT} / ZLM ${ZLM_HTTP_PORT}（已写入 config.env）"
 }
 
 case "${1:-start}" in
