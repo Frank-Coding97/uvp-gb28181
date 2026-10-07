@@ -136,36 +136,88 @@ def build(source: Path, target: Path, http_port: str, redis_port: str) -> None:
 
 
 def add_sqlite_section(target: Path, db_path: str) -> None:
-    """追加 SQLite 段并开启它的初始化开关。
+    """追加SQLite 段并开启它的初始化开关。
 
-    ⛔ 后端读的是 ``gormv2.sqlite.write.database`` 与
-       ``gormv2.sqlite.isinitglobalgormsqlite``，而仓库的 config.yml 里没有这一段，
-       所以必须追加。只改 usedbtype 是不够的 —— 连接参数与开关都无处可取。
+    ⛔ 后端读的是 ``gormv2.sqlite.isinitglobalgormsqlite`` 与
+       ``gormv2.sqlite.write.database``，而config.example.yml 里没有这一段
+       （只有 mysql/sqlserver/postgresql 三段），所以必须追加。
+       只改usedbtype 是不够的 —— 开关与连接参数都无处可取，
+       后端启动时会因「没有可初始化的库」直接退出。
+
+    ⭐ 本函数有两条硬约束，都是踩出来的：
+    1. 插入点必须**按行匹配实际缩进**。写死 ``"\n    usedbtype:"`` 而实际是 2 空格时，
+       ``str.replace`` 静默返回原串、什么都不插，而调用方还照常打印「成功」。
+    2. 缩进平移**只能动块的首行**。对每一行都``lstrip()`` 会把sqlite: 的子键
+       （isinitglobalgormsqlite 等）提到与 sqlite: 同级，YAML 照样解析成功、
+       不报错 —— 症状是后端启动即退且日志无内容。
     """
     text = target.read_text(encoding="utf-8")
-    if "\n  sqlite:" in text:
+
+    if re.search(r"^\s*sqlite:", text, re.MULTILINE):
         text = set_in_section(text, "sqlite", "isinitglobalgormsqlite", "1")
         text = set_in_section(text, "write", "database", db_path)
     else:
-        # ⛔ 插入点选在**行首**，不能接在上一行尾部：`replace("\n    usedbtype:")`
-        #   只会命中键名，前一行剩下的内容就被挤到同一行 ——
-        #   实测产出了 `user: ""  # ---- SQLite ----` 这种，
-        #   YAML 仍能解析，但现场运维看到会莫名其妙。
-        block = (
-            "\n  # ---- SQLite（绿色安装包默认库；本段由打包脚本生成）----\n"
-            "  sqlite:\n"
-            "      isinitglobalgormsqlite: 1\n"
-            "      isopenreaddb: 0\n"
-            "      loglevel: warn\n"
-            "      slowthreshold: 30\n"
-            "      timezone: Local\n"
-            "      write:\n"
-            f"          database: {db_path}\n"
-        )
-        # 插在 usedbtype 之前（gormv2 的直接子键，与它同级）
-        text = text.replace("\n    usedbtype:", block + "\n    usedbtype:", 1)
+        block = [
+            "",
+            "# ---- SQLite（绿色安装包默认库；本段由打包脚本生成）----",
+            "sqlite:",
+            "    isinitglobalgormsqlite: 1",
+            "    isopenreaddb: 0",
+            "    loglevel: warn",
+            "    slowthreshold: 30",
+            "    timezone: Local",
+            "    write:",
+            f"        database: {db_path}",
+        ]
+        out: list[str] = []
+        inserted = False
+        for line in text.split("\n"):
+            m = re.match(r"^(\s*)usedbtype\s*:", line)
+            if m and not inserted:
+                # 只把首行对齐到 usedbtype 的缩进，块内其余行保持相对缩进
+                pad = m.group(1)
+                out.extend(pad + b if b else "" for b in block)
+                inserted = True
+            out.append(line)
+        if not inserted:
+            raise SystemExit(
+                "配置里找不到 usedbtype 键 —— 无法确定 SQLite 段的插入位置。"
+                "不要靠猜，请检查 config.example.yml 的结构是否变了。"
+            )
+        text = "\n".join(out)
+
+    _assert_sqlite_section_valid(text, db_path)
     target.write_text(text, encoding="utf-8")
-    print(f"   SQLite 数据库路径: {db_path}")
+    print(f"   SQLite 数据库路径: {db_path}（已写入并通过结构校验）")
+
+
+def _assert_sqlite_section_valid(text: str, db_path: str) -> None:
+    """校验 SQLite 段**结构上**真的对，而不只是「字符串出现过」。
+
+    ⛔ 配置文件是静默的：少一层缩进 yaml照样解析成功、不报错，
+    缺一段也不报错 —— 两者都只在客户机上表现为「后端启动即退、日志空白」。
+    所以这里必须**解析后**断言子键存在且取值正确。
+    """
+    try:
+        import yaml
+    except ImportError:                      # 没装 PyYAML 就退回弱检查
+        if "isinitglobalgormsqlite" not in text:
+            raise SystemExit("SQLite 段写入失败：结果里找不到 isinitglobalgormsqlite")
+        print("   ⚠️ 未安装 PyYAML，跳过结构校验（pip install pyyaml 可启用）")
+        return
+
+    parsed = yaml.safe_load(text) or {}
+    gorm = parsed.get("gormv2") or {}
+    sqlite = gorm.get("sqlite") or {}
+    problems = []
+    if str(gorm.get("usedbtype", "")).strip("\"'") != "sqlite":
+        problems.append(f"usedbtype={gorm.get('usedbtype')!r}（应为 sqlite）")
+    if str(sqlite.get("isinitglobalgormsqlite")) != "1":
+        problems.append(f"gormv2.sqlite.isinitglobalgormsqlite={sqlite.get('isinitglobalgormsqlite')!r}（应为 '1'）")
+    if (sqlite.get("write") or {}).get("database") != db_path:
+        problems.append(f"gormv2.sqlite.write.database={(sqlite.get('write') or {}).get('database')!r}（应为 {db_path!r}）")
+    if problems:
+        raise SystemExit("SQLite 段结构校验失败：\n  - " + "\n  - ".join(problems))
 
 
 def main() -> None:
