@@ -54,6 +54,22 @@ command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成
 
 # ---------------------------------------------------------------- 前置检查 ----
 
+# ⛔⛔ shellcheck 门禁（不是可选的质量检查，是**必须过**的）：
+#   `bash -n` 抓不到"命令名后面紧跟 # 注释"这类错 —— 因为它语法合法，
+#   bash 会把 start_zlm# 当成一个叫「start_zlm#」的命令，报command not found。
+#   ⭐ 这个错我连犯两次（ensure_database#、start_zlm#），都是靠实跑才发现，
+#   所以必须用工具兜住而不是靠眼睛。SC2288 就是专抓这个的。
+if command -v shellcheck >/dev/null 2>&1; then
+  log "shellcheck 检查脚本"
+  shellcheck_out="$(shellcheck -S warning "$0" "$DEPLOY_DIR/uvp-ctl.sh" 2>&1)" || true
+  if [ -n "$shellcheck_out" ]; then
+    printf '%s\n' "$shellcheck_out" >&2
+    fail "shellcheck 未通过（见上）。⚠️ 这类问题 bash -n 抓不到，必须过。"
+  fi
+else
+  log "⚠️ 未安装 shellcheck，跳过脚本静态检查（apt install shellcheck 可启用）"
+fi
+
 [ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server（先跑 go build）"
 [ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server"
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli"

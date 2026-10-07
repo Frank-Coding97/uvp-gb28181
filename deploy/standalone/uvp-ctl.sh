@@ -457,8 +457,9 @@ case "${1:-start}" in
       fail "找不到 python3 —— 改端口需要它（Ubuntu/Debian 请先 apt install python3）"
     fi
     sync_ports_into_config
-    start_zlm# ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
-                   #   校验 ZLM 连通性，ZLM 没起就报连接失败。
+    # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
+    #   校验 ZLM 连通性，ZLM 没起就报连接失败。
+    start_zlm
     start_redis          # ⛔ 顺序不能反：后端启动时要连缓存
     start_backend
     log "启动完成 → http://127.0.0.1:${HTTP_PORT}"
