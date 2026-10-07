@@ -71,15 +71,18 @@ ZLM_DIR="$BIN/zlm"
 ZLM_BIN="$ZLM_DIR/MediaServer"
 ZLM_PID_FILE="$RUN/zlm.pid"
 ZLM_LOG="$LOGS/zlm.log"
-# ZLM 端口：与后端的 httpport 段（18080）、hookport（8280）一起构成一段连续高位端口。
-# ⛔ 改了 config.ini 里的端口就必须同步改这里，否则启停脚本探测的是旧端口，
-#   表现为「服务起来了但 status 说没起」。
+# ---- ZLM 端口 ----
+# ⛔⛔ ZLM 端口的**唯一真源是 bin/zlm/config.ini**，下面这些变量只是"探测用镜像"。
+#   只改变量不改 ini ⇒ 脚本探测 18081、MediaServer 却仍听 80 ⇒ 报「ZLM 启动失败」，
+#   而真实原因是端口没写进配置文件。⚠️ 实测踩过这个（设了 18081 仍起不来）。
+#   ⇒ sync_zlm_ports_ini() 负责写进去。
+ZLM_INI="$ZLM_DIR/config.ini"
 ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
-ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-18080}"
+ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-80}"
 ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
-ZLM_SSL_PORT="${ZLM_SSL_PORT:-18443}"
+ZLM_SSL_PORT="${ZLM_SSL_PORT:-443}"
 ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
-ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-10554}"
+ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-554}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -250,6 +253,58 @@ check_preconditions() {
     *) fail "本包只支持 x86_64，当前架构 $(uname -m)" ;;
   esac
   [ -f "$CONF" ] || fail "缺少 $CONF —— 解压是否完整？"
+}
+
+# ---------------------------------------------------- ZLM 端口同步到 config.ini ----
+
+# sync_zlm_ports_ini 把端口写进 bin/zlm/config.ini 的对应段。
+#
+# ⛔⛔ 必须**按段落**改，绝不能全局替换 `port=` —— config.ini 里有 11 个段各带
+#   port/sslport（http / rtmp / rtp_proxy / rtc / srt / rtsp / shell / onvif …），
+#   全局替换会把它们全改成同一个值，表现为「一堆协议抢同一个端口」。
+# ⛔ 不能用 configparser：这份 ini **有重名段**（[general] 出现两次），
+#   标准库直接抛 DuplicateSectionError —— 实测过。
+#   ⇒ 行扫描：记住当前段名，只在目标段内改目标键。
+sync_zlm_ports_ini() {
+  [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
+
+  "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" <<'ZLM_INI_PY'
+import re
+import sys
+
+path, http_port, ssl_port, rtsp_port = sys.argv[1:5]
+
+# 段名（小写） → {键: 新值}
+targets = {
+    "http": {"port": http_port, "sslport": ssl_port},
+    "rtsp": {"port": rtsp_port, "sslport": "0"},   # sslport=0 表示不启用
+}
+
+section = None
+changed = []
+out = []
+for line in open(path, encoding="utf-8").read().splitlines():
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        section = stripped[1:-1].strip().lower()
+        out.append(line)
+        continue
+    m = re.match(r"^(\s*)([a-z_]+)(\s*=\s*)(.*)$", line)
+    if m and section in targets and m.group(2) in targets[section]:
+        indent, key, eq, old_val = m.groups()
+        new_val = targets[section][key]
+        if old_val.strip() != new_val:
+            changed.append("[%s] %s: %s -> %s" % (section, key, old_val.strip(), new_val))
+        out.append("%s%s%s%s" % (indent, key, eq, new_val))
+        continue
+    out.append(line)
+
+if changed:
+    open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+    print("   ZLM config.ini: " + "; ".join(changed))
+else:
+    print("   ZLM config.ini: 端口已与目标一致，无需改动")
+ZLM_INI_PY
 }
 
 # ---------------------------------------------------------------- ZLM ----
@@ -477,6 +532,8 @@ case "${1:-start}" in
       fail "找不到 python3 —— 改端口需要它（Ubuntu/Debian 请先 apt install python3）"
     fi
     sync_ports_into_config
+    # ⛔ ZLM 端口也要同步：它的真源是 config.ini，不是本脚本里的变量。
+    sync_zlm_ports_ini
     # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
     #   校验 ZLM 连通性，ZLM 没起就报连接失败。
     start_zlm
