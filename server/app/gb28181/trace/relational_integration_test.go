@@ -13,7 +13,7 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 func TestRelationalStoreDatabaseMatrix(t *testing.T) {

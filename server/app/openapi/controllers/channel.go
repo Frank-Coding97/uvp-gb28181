@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 type ChannelController struct {

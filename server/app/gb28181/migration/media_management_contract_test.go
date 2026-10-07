@@ -10,8 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gb28181routes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	gb28181routes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 var mediaManagementMenuPaths = []string{

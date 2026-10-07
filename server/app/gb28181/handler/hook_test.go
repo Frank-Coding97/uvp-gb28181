@@ -14,12 +14,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
 )

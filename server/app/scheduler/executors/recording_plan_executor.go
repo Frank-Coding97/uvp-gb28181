@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // 本文件的 golden 报文**逐字抄自模拟器侧的 render 实现**（`uvp-gb28181-sim` 的

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 type maintenancePlayDispatcher struct {

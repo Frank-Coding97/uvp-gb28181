@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 )
 
 // 配置家族（A.2.4.7 查询 / A.2.3.2.5 下发）的 HTTP 面。

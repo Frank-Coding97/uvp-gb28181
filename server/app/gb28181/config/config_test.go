@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
 // serverConfigDir 从本测试文件位置回溯到 server/config 目录

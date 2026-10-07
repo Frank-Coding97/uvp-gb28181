@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	appcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	appcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 func newRecordingPlanControllerDB(t *testing.T) *gorm.DB {

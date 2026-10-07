@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 var (

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 const deviceCleanupBarrierBase = "2026-09-06-device-cleanup-barrier"

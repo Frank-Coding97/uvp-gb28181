@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 	"testing"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestOpenAPIAuditOutcomesAndRetention(t *testing.T) {

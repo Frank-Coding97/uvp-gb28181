@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func TestSIPRootRejectsAuthorityBeforeStartingProducer(t *testing.T) {

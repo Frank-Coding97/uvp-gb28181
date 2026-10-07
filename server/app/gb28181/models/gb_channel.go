@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // 通道在线状态

@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 // The controller interfaces are deliberately method-shaped instead of

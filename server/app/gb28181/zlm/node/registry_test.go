@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // memoryRepo 内存版 Repo,只用来测 Registry(repo 包另测真 DB 版)

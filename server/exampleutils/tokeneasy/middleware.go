@@ -2,8 +2,8 @@ package tokeneasy
 
 import (
 	"net/http"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

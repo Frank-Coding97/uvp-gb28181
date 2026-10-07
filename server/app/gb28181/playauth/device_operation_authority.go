@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 )
 
 type deviceIntentAuthority interface {

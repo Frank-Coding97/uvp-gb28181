@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
 )
 
 func (controller *ZLMManagementController) NetworkSessions(c *gin.Context) {

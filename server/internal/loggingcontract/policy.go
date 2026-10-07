@@ -26,7 +26,7 @@ const (
 	fmtPackagePath     = "fmt"
 	osPackagePath      = "os"
 	ioPackagePath      = "io"
-	loggingPackagePath = "uvplatform.cn/uvp-gb28181/app/utils/logging"
+	loggingPackagePath = "uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // PolicyOptions controls the type-aware logging policy check.

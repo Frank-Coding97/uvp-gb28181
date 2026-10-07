@@ -6,8 +6,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 	"testing"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func TestLoggingGBHTTPPTZPersistenceFailure(t *testing.T) {

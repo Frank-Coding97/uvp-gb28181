@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 func (r *GormRepo) UpsertCompleteFile(ctx context.Context, attribution RecordingFileAttribution, event RecordMP4Event) error {

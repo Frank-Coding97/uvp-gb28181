@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 type preparedTokenIssuer interface {

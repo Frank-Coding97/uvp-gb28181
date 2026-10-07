@@ -17,12 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	globalapp "uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/devicecapture"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	globalapp "uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 // 真机上传的 JPEG 头尾。设备实际发的是 137 KB 真图，这里只要过 magic 校验即可。

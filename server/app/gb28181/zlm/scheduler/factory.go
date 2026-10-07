@@ -3,7 +3,7 @@ package scheduler
 import (
 	"fmt"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // Factory 按算法名构造 Scheduler

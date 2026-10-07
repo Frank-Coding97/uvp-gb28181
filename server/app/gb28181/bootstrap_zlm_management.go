@@ -5,15 +5,15 @@ import (
 
 	"go.uber.org/zap"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	gbzlmmanagement "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
-	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	gbzlmmanagement "uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	gbzlmrepo "uvplatform.com/uvp-gb28181/app/gb28181/zlm/repo"
+	gbzlmsvc "uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // zlmManagementCoreRuntime owns process-wide dependencies that do not depend

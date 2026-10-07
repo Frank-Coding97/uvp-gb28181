@@ -6,9 +6,9 @@ import (
 	"go.uber.org/zap"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // This file deliberately carries no build tag.

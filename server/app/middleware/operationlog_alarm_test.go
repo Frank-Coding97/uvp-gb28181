@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 func TestAlarmBatchDeleteCanOverrideOperationType(t *testing.T) {

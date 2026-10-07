@@ -8,11 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/repo"
 )
 
 func TestOwnershipResolverProvesLiveGenerationOnlyWithCurrentLocation(t *testing.T) {

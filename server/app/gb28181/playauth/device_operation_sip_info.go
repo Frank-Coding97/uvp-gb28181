@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mansrtsp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
 )
 
 const maxSIPINFOSteps = 16

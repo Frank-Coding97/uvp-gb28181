@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/bootstrap"
-	catalogstore "uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/catalog/bootstrap"
+	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestInitializeCatalogRuntimeKeepsLegacyDeploymentCompatible(t *testing.T) {

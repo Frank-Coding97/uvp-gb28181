@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 )
 
 // hikSnapshotFileIDs 是海康 `37010301021320000002` 一次 3 张抓拍的**实际文件名**

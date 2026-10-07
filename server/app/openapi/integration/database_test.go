@@ -16,10 +16,10 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
-	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/migration"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	openapiconfig "uvplatform.com/uvp-gb28181/app/openapi/config"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 // This core gate intentionally does not claim the later HTTP/media/T16 suite.

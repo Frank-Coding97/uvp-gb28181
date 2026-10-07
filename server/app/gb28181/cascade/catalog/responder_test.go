@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	cascadeprotocol "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/protocol"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	baseprotocol "uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	cascadeprotocol "uvplatform.com/uvp-gb28181/app/gb28181/cascade/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	baseprotocol "uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 func TestPlanCatalogResponsesParsesQueryBatchesAndUsesProfiledXML(t *testing.T) {

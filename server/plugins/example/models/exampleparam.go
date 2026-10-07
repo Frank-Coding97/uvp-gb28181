@@ -1,7 +1,7 @@
 package models
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

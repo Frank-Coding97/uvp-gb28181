@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
 )
 
 // InstallPublicBoundary must run before CORS/business logging/timeouts. The

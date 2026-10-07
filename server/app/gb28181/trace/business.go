@@ -7,7 +7,7 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 )
 
 // BusinessCode is a stable machine-readable classification for a SIP trace.

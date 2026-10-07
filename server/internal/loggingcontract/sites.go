@@ -387,7 +387,7 @@ func isGlobalAppSelector(expression ast.Expr, imports map[string]string) bool {
 		return false
 	}
 	path := imports[identifier.Name]
-	return strings.HasSuffix(path, "/app/global/app") || path == "uvplatform.cn/uvp-gb28181/app/global/app"
+	return strings.HasSuffix(path, "/app/global/app") || path == "uvplatform.com/uvp-gb28181/app/global/app"
 }
 
 func isZapConstructorCall(call *ast.CallExpr, imports map[string]string) bool {

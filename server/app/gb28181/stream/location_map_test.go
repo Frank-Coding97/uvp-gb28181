@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
 )
 
 func TestLocationMap_BindLookupUnbind(t *testing.T) {

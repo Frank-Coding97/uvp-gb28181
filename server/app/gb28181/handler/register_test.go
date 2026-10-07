@@ -13,11 +13,11 @@ import (
 	"github.com/icholy/digest"
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbsip "uvplatform.com/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"

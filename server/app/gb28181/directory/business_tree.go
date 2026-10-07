@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // BuildAdministrativeTree 只展示行政区划层级。设备仍以 count/onlineCount 汇总，

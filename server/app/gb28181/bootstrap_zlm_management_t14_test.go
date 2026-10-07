@@ -11,16 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	gbzlmmanagement "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
-	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	gbzlmmanagement "uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	gbzlmrepo "uvplatform.com/uvp-gb28181/app/gb28181/zlm/repo"
+	gbzlmsvc "uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 type t14ExistingRecordingService struct{}

@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	openapiplay "uvplatform.cn/uvp-gb28181/app/openapi/play"
+	gbzlm "uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
 )
 
 type openAPIViewerNodeResolverStub struct {

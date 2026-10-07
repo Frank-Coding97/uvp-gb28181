@@ -5,16 +5,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordingplan"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 type RecordingPlanController struct {

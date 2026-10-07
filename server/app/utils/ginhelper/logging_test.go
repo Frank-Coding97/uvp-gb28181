@@ -17,11 +17,11 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
 type logValues map[string]interface{}

@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/client"
-	"uvplatform.cn/uvp-gb28181/app/openapi/controllers"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/controllers"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 type RuntimeSettings interface {

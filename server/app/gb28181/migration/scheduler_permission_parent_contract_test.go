@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 const schedulerPermissionParentMigration = "2026-09-17-scheduler-permission-parent"

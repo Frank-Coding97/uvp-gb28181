@@ -3,8 +3,8 @@ package tokeneasy
 import (
 	"go.uber.org/zap"
 	"sync"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
 var (

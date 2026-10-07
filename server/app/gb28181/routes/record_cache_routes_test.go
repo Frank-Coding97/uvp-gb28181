@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordcache"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordcache"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 // routeRecordCacheService 只实现路由用例关心的那几条：票据签发与认领。

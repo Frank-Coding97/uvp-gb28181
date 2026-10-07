@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // observeRecordingFailure 跑一次失败记录并把 observer 交回给断言

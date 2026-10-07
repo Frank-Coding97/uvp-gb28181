@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
-	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
+	gbzlmrepo "uvplatform.com/uvp-gb28181/app/gb28181/zlm/repo"
+	gbzlmsched "uvplatform.com/uvp-gb28181/app/gb28181/zlm/scheduler"
 )
 
 func TestSchedulerLogRepoAdapter_MapsFilteredContract(t *testing.T) {

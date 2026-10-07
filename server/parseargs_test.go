@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
+	"uvplatform.com/uvp-gb28181/app/gb28181/migration"
 )
 
 // 5.3:无 flag 正常启动

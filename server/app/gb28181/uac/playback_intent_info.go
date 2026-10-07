@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mansrtsp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // The operation's work domain owns every field and retains this object before

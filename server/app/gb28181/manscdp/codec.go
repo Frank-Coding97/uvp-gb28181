@@ -9,7 +9,7 @@ import (
 
 	xencoding "golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/simplifiedchinese"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // CodecErrorKind identifies the stage at which a profiled XML operation

@@ -3,7 +3,7 @@ package playback
 import (
 	"context"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // IntentSIPFactory prepares a real retained SIP child under the existing

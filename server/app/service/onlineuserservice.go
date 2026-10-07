@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 var ErrCurrentSessionForceLogout = errors.New("cannot force logout current session")

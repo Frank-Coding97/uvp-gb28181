@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"uvplatform.cn/uvp-gb28181/internal/loggingcontract"
+	"uvplatform.com/uvp-gb28181/internal/loggingcontract"
 )
 
 func main() {

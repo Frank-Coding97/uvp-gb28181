@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // 回归锚点(2026-10-03):ServiceConfig.Intents 必须与 rtp opener 的 Intent 子步骤能力匹配。

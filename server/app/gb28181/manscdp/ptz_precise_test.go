@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 func TestHomePositionProtocol(t *testing.T) {

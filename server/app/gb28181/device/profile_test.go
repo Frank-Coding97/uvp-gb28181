@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 func TestHandleRegisterPersistsReportedAndEffectiveProfile(t *testing.T) {

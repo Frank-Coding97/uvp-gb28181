@@ -14,10 +14,10 @@ import (
 
 	"go.uber.org/zap"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
 // TestMain 初始化测试环境:app.ZapLog 必须非 nil

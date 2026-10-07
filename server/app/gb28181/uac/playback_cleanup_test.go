@@ -11,7 +11,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 type playbackTxRequestFunc func(context.Context, *sip.Request) (sip.ClientTransaction, error)

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
 )
 
 type runtimeRootDispatcher struct {

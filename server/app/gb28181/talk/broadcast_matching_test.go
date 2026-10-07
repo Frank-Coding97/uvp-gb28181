@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // 水星抓包中的 Subject 首段是平台 ID，From 是设备 ID，均不是 Notify 的通道 ID。

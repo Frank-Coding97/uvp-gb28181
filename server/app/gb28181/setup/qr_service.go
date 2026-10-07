@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // 扫码回填 SIP 接入信息 —— 平台侧 token 生成与兑换.

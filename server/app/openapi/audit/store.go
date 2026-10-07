@@ -6,7 +6,7 @@ import (
 	"errors"
 	"gorm.io/gorm"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 var ErrUnavailable = errors.New("openapi audit unavailable")

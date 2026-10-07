@@ -8,9 +8,9 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 func TestRegisterSystemJobsPersistsParentsBeforeScheduling(t *testing.T) {

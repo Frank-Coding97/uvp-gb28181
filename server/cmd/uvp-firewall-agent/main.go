@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/security/firewall"
+	"uvplatform.com/uvp-gb28181/app/gb28181/security/firewall"
 )
 
 func main() {

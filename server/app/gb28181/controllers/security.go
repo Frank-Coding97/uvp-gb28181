@@ -6,11 +6,11 @@ import (
 	"sort"
 	"strconv"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
-	appcontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	appcontrollers "uvplatform.com/uvp-gb28181/app/controllers"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 )
 
 type SecuritySnapshot struct {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 )
 
 func TestServiceAdapterPreservesConfiguredHookBaseURL(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // ⛔ 筛选项「存储节点」口径（2026-10-06 老板拍板：列出**全部在线节点**）。

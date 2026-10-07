@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/emiago/sipgo/sip"
-	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
+	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
 )
 
 // Admission is the transport-side gate. It uses the shared bounded trace

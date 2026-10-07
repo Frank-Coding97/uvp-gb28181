@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 func TestDirectoryControllerViews(t *testing.T) {

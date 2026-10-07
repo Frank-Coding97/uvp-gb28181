@@ -19,13 +19,13 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type fakeAutoNodeResolver struct {

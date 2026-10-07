@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 var ErrChannelAlreadyBound = errors.New("通道已分配到其他录像计划")

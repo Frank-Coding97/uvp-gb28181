@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 const contentProxyBufferSize = 32 * 1024

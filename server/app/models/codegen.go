@@ -6,7 +6,7 @@ import (
 
 	"strconv"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 )
 
 // CodeGenContext 代码生成上下文 - 统一参数结构体

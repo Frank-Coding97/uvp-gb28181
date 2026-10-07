@@ -8,13 +8,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	zlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	zlmrepo "uvplatform.com/uvp-gb28181/app/gb28181/zlm/repo"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 // DeviceController 国标设备管理(最小:列表 + 详情,含实时在线态)

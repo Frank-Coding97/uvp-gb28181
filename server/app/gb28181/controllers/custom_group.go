@@ -10,11 +10,11 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 type CustomGroupController struct {

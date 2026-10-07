@@ -16,12 +16,12 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
-	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/passwordhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
 )
 
 type loggingConfig map[string]interface{}

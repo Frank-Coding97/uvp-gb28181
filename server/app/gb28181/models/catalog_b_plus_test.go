@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // newCatalogTestDB sqlite in-memory + AutoMigrate 4 张目录新表

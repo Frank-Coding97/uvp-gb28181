@@ -4,7 +4,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 func TestCascadeCatalogPeerSeparatesSameIPByPort(t *testing.T) {

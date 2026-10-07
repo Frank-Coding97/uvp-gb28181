@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func requirePlaybackNoPacket(t *testing.T, peer net.PacketConn) {

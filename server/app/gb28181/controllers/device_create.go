@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 )
 
 // CreateDevice 手动创建设备(预分配模式 / 一设备一密码)

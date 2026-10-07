@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/plugin/dbresolver"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 )
 
 const ptzCacheFreshFor = time.Minute

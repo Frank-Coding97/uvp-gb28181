@@ -7,7 +7,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
 )
 
 // TestLoggingRegisterWarnsOnAbnormalVersionHeader 锁住附录 I「协议版本标识」的留痕行为。

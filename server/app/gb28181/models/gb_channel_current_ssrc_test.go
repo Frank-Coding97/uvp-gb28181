@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type currentSSRCTestConfig struct{}

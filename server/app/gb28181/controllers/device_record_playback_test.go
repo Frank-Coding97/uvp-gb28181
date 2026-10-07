@@ -14,8 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
 )
 
 type fakePlaybackHTTPService struct {

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 )
 
 type SnapshotInput struct {

@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecleanup"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/devicecleanup"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type fakeLiveCleanup struct {

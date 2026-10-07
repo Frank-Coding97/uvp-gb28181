@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 func newQueryTestDB(t *testing.T) *gorm.DB {

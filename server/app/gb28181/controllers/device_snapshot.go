@@ -11,18 +11,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/devicecapture"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type snapshotCreateBody struct {

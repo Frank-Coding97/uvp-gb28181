@@ -4,12 +4,12 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/gb28181/dashboard"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 func (controller *HomeDashboardController) SIPHistory(c *gin.Context) {

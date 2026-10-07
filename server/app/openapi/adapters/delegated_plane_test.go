@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 )
 
 func TestDelegatedPlaneRegistrationsCoverTheWholeDelegatedSurface(t *testing.T) {

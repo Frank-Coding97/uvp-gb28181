@@ -9,12 +9,12 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )

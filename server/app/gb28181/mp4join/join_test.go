@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mp4join/mp4fixture"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mp4join/mp4fixture"
 )
 
 // ---------- 测试用 MP4 构造 ----------

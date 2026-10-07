@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // GormSegmentFileIndex 读取平台**已入库**的录制文件（gb_recording_file）。

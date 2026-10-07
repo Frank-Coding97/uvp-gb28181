@@ -13,11 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 type fakeCloudRecordingCatalogService struct {

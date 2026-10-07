@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
 )
 
 func newCivilTestDB(t *testing.T) *gorm.DB {

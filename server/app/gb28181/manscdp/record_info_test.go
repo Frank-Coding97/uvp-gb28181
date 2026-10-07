@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding/simplifiedchinese"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 const recordInfoTimeLayout = "2006-01-02T15:04:05"

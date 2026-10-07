@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // 设备配置族**通用通道**（GB/T 28181-2022 A.2.3.2 下发 / A.2.4.7 查询 / A.2.6.9 应答）。

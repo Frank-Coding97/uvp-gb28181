@@ -2,7 +2,7 @@ package filehelper
 
 import (
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 )
 
 func TestGetFileTypeBySuffix(t *testing.T) {

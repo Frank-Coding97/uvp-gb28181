@@ -16,13 +16,13 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	gbsip "uvplatform.com/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 // Actual SIP dependency assembly runs in a fresh process so legacy global

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // 目录声明这一路（三通路里的 catalog）对 gb_channel 坐标两列的覆盖门禁。

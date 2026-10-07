@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/service"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/service"
 
-	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/captchahelper"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/passwordhelper"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

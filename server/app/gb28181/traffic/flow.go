@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
 )
 
 type NodeUUIDResolver interface {

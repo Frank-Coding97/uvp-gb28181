@@ -7,10 +7,10 @@ import (
 
 	"gorm.io/gorm"
 
-	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	gbplay "uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 type liveStarter interface {

@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	globalapp "uvplatform.cn/uvp-gb28181/app/global/app"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	globalapp "uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type platformInterfaceProvider struct {

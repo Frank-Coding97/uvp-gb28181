@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/openapi/controllers"
+	"uvplatform.com/uvp-gb28181/app/openapi/controllers"
 )
 
 func TestOpenAPIAdminExplicitProtectedRoutes(t *testing.T) {

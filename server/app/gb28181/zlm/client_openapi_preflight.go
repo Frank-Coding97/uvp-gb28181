@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // RuntimeConfiguration is a fresh, validated control readback, not a playback

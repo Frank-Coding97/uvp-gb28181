@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 const PlayLiveScope = "play:live"

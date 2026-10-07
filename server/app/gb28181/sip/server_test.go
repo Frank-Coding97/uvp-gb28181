@@ -10,8 +10,8 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
 )

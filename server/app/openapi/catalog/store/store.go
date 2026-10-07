@@ -17,8 +17,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 var (

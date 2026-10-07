@@ -15,14 +15,14 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 const (

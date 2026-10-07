@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/securestore"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/securestore"
 )
 
 const upstreamPasswordPurpose = "upstream-password"

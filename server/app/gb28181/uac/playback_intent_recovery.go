@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/emiago/sipgo"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // A reservation is installed before Load and retains the concrete owner until

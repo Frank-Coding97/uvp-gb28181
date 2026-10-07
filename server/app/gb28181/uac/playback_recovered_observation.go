@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // Observation has the intent's lifetime, not one cleanup attempt's lifetime.

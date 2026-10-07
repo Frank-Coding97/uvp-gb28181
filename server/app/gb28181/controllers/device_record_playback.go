@@ -13,12 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 const (

@@ -2,8 +2,8 @@ package service
 
 import (
 	"errors"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

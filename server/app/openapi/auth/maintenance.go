@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/audit"
+	"uvplatform.com/uvp-gb28181/app/openapi/audit"
 )
 
 // RunMaintenance belongs to the same single-process lifetime as the Gateway.

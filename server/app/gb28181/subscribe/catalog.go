@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalog"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // CatalogProcessor forwards subscription notifications through the established catalog pipeline.

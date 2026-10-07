@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mp4join"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mp4join"
 )
 
 // mergeTotalSizeLimit 是「后端临时合并」的分片总大小上限。

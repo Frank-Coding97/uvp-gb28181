@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 // T13 RED-1: 复现修复——创建的设备归属创建人部门(修复前恒为 0)

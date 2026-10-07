@@ -11,9 +11,9 @@ import (
 	"github.com/emiago/sipgo/siptest"
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
 type blockingRecordInfoSink struct {

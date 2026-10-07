@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 func TestDeviceMgmt_GetPTZStateAndOperation(t *testing.T) {

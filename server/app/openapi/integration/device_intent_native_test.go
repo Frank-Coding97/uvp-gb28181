@@ -17,10 +17,10 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 // An additional explicit opt-in prevents broad integration runs from using an

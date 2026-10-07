@@ -144,7 +144,7 @@ onMounted(() => {
       <span class="qr-card__header-hint">设备扫码后自动填入接入信息</span>
     </header>
 
-    <a class="qr-download" href="https://download.uvplatform.cn/" target="_blank" rel="noopener noreferrer">
+    <a class="qr-download" href="https://download.uvplatform.com/" target="_blank" rel="noopener noreferrer">
       <span class="qr-download__icon"><Download :size="15" /></span>
       <span class="qr-download__body">
         <strong>移动端国标模拟器下载</strong>

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // PTZAction is the small, stable action vocabulary exposed by the HTTP API.

@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 // RetireDeletedSources 回收一批"源已经不存在"的共享投影,在源数据的删除事务里调用。

@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 )
 
 func TestServiceForwardsBasicControlToSourceTarget(t *testing.T) {

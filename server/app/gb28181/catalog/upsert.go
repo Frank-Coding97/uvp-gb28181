@@ -7,8 +7,8 @@ import (
 
 	"gorm.io/gorm"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // CivilCodeLookup 行政区划字典查询接口(解耦 civilcode.Service)

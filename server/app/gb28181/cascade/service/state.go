@@ -4,7 +4,7 @@ package service
 import (
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 type Clock interface {

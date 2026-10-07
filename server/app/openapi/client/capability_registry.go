@@ -9,8 +9,8 @@ import (
 
 	"gorm.io/gorm"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	catalogstore "uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
 )
 
 var ErrCapabilityDrift = errors.New("OpenAPI capability registry drift")

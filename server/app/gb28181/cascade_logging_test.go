@@ -11,9 +11,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // C05 的验收面：cascade 链路的日志必须

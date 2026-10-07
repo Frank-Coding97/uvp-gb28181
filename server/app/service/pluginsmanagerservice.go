@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

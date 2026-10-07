@@ -5,7 +5,7 @@ import (
 	"gorm.io/gorm"
 	"regexp"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 var publishedIDPattern = regexp.MustCompile(`^[0-9]{20}$`)

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 // 回放装配契约:ServiceConfig.Intents 非 nil 时,回放 Create 会进入持久意图分支并做

@@ -14,12 +14,12 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // TestMain 初始化测试环境:app.ZapLog 必须非 nil 才能安全调用 Info/Warn

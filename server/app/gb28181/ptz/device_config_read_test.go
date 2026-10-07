@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // ⛔ 回归锚点（2026-09-19 海康 DS-2DC2C040MY-DE 真机验证发现）：

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 )
 
 func TestDeviceOperationProcessIdentityMatchesRootGeneration(t *testing.T) {

@@ -3,7 +3,7 @@ package policyhelperfield
 import (
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func unsafeField(payload any) zap.Field {

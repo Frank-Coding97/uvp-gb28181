@@ -6,8 +6,8 @@ import (
 
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 type DepartmentCount struct {

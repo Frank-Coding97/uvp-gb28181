@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 type qualifiedTestRegistry struct {

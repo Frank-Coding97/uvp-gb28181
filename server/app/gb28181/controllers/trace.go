@@ -16,13 +16,13 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 var sipMethodPattern = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,31}$`)

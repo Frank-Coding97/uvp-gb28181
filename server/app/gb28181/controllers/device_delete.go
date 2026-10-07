@@ -8,9 +8,9 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	gbcascaderepo "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbcascaderepo "uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // DeleteDevice 单个设备硬删除(dept-scoped)

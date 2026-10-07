@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 // 设备列表里"删了再建"那条路径的级联版本:平台被删掉之后,底下那条软删行仍然

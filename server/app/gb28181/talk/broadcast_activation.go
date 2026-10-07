@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 var broadcastSN atomic.Uint32

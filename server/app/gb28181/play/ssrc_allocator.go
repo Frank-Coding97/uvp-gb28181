@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 )
 
 const realtimeSSRCSequenceSpace = 10000

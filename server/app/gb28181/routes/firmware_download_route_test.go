@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbfirmware "uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
+	gbfirmware "uvplatform.com/uvp-gb28181/app/gb28181/firmware"
 )
 
 // 固件下载路由与「生成下载链接」那一端必须指向同一个常量。

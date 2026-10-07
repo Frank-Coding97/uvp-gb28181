@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func newAuthorizedIntentTestStore(t *testing.T, db *gorm.DB) *playauth.DeviceOperationIntentStore {

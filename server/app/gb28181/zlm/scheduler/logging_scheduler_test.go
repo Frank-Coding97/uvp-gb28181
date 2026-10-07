@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/scheduler"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // C07 契约：调度日志写入链路的两个「组件级」事件，判定结果**相反**，所以一起锁住。

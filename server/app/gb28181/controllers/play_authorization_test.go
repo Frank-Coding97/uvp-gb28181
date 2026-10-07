@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 type fixedAuthorizationControllerService struct {

@@ -3,8 +3,8 @@ package gormhelper
 import (
 	"reflect"
 	"strings"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/myerrors"
 
 	"gorm.io/gorm"
 )

@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 var (

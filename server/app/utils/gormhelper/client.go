@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/myerrors"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"

@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playurl"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 )
 
 var (

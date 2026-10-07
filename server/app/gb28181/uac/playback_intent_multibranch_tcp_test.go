@@ -10,8 +10,8 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 // Preserve message boundaries even when ACK and BYE arrive in one TCP read.

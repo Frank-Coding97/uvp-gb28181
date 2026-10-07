@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // newTaskID 生成任务号。用 UUID 而不是自增：任务号会出现在下载 URL 里，

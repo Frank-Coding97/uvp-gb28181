@@ -9,15 +9,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
-	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/service"
+	"uvplatform.com/uvp-gb28181/app/utils/cachehelper"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/passwordhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
 func TestLoginLogMySQLRealAuthenticationBranches(t *testing.T) {

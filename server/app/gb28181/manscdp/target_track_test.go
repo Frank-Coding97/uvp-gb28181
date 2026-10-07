@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // 一条标准形态的手动跟踪命令：球机通道当 DeviceID，全景通道当 DeviceID2。

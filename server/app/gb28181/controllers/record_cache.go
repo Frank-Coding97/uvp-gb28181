@@ -10,11 +10,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordcache"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordcache"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 // RecordCacheAPI 是控制器依赖的服务能力（窄接口，便于用不可用实现兜底）。

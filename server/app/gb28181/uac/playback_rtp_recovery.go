@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // This controller outlives restartable scan workers. The shared barrier remains

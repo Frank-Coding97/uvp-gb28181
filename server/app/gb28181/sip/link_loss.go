@@ -7,7 +7,7 @@ import (
 
 	siplib "github.com/emiago/sipgo/sip"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
 )

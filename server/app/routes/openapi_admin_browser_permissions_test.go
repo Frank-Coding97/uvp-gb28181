@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm/clause"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 var browserPermissionActions = []string{"read", "create", "grant", "rotate", "status", "audit"}

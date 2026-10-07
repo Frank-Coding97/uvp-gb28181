@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 )
 
 // installNotDataMask 装上生产同款的 "屏蔽 record-not-found" 回调。

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.com/uvp-gb28181/app/gb28181/security"
 )
 
 func TestAgentReportsSupportedFirewallCapability(t *testing.T) {

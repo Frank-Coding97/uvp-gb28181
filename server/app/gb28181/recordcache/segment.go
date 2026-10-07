@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // ── 分片记账：一次会话的产出算哪一片 ──────────────────────────────────

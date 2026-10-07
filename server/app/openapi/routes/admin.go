@@ -2,7 +2,7 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"uvplatform.cn/uvp-gb28181/app/openapi/controllers"
+	"uvplatform.com/uvp-gb28181/app/openapi/controllers"
 )
 
 // RegisterAdminRoutes requires the existing JWT/DemoAccount/Casbin protected /api

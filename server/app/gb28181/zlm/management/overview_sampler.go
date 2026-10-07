@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 const (

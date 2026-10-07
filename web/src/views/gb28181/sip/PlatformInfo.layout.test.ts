@@ -39,6 +39,6 @@ describe("SIP platform deployment card", () => {
   it("keeps the simulator download entry out of the guide card", () => {
     // 下载入口已搬到扫码接入卡(见 QrProvisionCard.vue),这里只防回归
     expect(source).not.toContain("guide-download");
-    expect(source).not.toContain("download.uvplatform.cn");
+    expect(source).not.toContain("download.uvplatform.com");
   });
 });

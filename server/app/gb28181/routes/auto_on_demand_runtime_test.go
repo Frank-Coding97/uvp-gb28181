@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbplay "uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 type autoRuntimeRegistry struct {

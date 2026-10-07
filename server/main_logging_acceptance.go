@@ -2,7 +2,7 @@
 
 package main
 
-import "uvplatform.cn/uvp-gb28181/internal/loggingacceptance"
+import "uvplatform.com/uvp-gb28181/internal/loggingacceptance"
 
 func init() {
 	loggingacceptance.Register()

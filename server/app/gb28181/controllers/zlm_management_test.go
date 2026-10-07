@@ -12,8 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 type t14StreamService struct {

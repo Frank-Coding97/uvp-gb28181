@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
 )
 
 type fakeCivilCodes map[string]*civilcode.SysCivilCode

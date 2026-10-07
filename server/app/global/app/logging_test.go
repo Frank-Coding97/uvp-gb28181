@@ -8,10 +8,10 @@ import (
 	"gorm.io/gorm"
 	"sync"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func TestLoggingDBContext(t *testing.T) {

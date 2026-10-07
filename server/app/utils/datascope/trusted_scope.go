@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 var ErrOwnerDeptAccessDenied = errors.New("owner department access denied")

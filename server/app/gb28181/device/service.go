@@ -9,10 +9,10 @@ import (
 
 	"gorm.io/gorm"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 var ErrDeviceNotPreallocated = errors.New("device is not preallocated")

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 )
 
 var (

@@ -15,8 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/client"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func gatewayFixture(t *testing.T) (*Gateway, *gorm.DB, string) {

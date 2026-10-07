@@ -3,7 +3,7 @@ package play
 import (
 	"context"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
 )
 
 // Restore installs a recovered live generation as ready without invoking the

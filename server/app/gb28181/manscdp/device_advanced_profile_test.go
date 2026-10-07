@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 func TestAdvancedControlBuildersWithProfileUseVersionedIFrameElement(t *testing.T) {

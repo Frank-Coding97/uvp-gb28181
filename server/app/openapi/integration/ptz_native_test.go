@@ -13,11 +13,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 func ptzNativeBaselineStatements(body string) []string {

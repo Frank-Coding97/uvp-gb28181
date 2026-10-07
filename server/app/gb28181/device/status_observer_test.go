@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 func TestStatusObserverPublishesOnlyAfterSuccessfulStateTransactions(t *testing.T) {

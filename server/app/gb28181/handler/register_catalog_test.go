@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbsip "uvplatform.com/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // fakeTrigger 计数版,验证调用次数(替代真实 UAC,绕开网络)

@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // 测试用 gin 引擎(关闭日志噪音)

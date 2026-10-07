@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // ShutdownStep stops admission and waits for that component's accepted work.

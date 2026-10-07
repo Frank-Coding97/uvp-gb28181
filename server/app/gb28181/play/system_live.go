@@ -3,7 +3,7 @@ package play
 import (
 	"context"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // SystemLiveEnsurer is the capability passed only to internal recording-plan

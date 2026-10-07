@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/service"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/sipclient"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/service"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/sipclient"
 )
 
 const (

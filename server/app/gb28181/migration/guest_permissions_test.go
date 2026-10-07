@@ -17,10 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
-	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/utils/casbinhelper"
+	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/utils/casbinhelper"
 )
 
 type guestAPI struct {

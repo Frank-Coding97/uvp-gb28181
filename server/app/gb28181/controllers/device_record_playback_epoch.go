@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 // The same SQL row supplies visibility, target identity and the original epoch.

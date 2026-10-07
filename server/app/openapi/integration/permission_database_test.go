@@ -14,7 +14,7 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 type permissionRule struct {

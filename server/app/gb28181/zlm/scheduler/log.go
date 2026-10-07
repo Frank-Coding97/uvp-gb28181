@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // SchedulerLog 一次调度决策的日志记录(M3 T3.3)

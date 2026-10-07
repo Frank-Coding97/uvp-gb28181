@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 func prepareStoredPlaybackCancel(ctx context.Context, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, version int64, invite playauth.DeviceSIPInviteIdentity, request *sip.Request) (playauth.DeviceSIPInviteSteps, error) {

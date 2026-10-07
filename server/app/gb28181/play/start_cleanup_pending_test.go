@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 func TestStartRollbackCloseFailureQuarantinesGenerationUntilRetry(t *testing.T) {

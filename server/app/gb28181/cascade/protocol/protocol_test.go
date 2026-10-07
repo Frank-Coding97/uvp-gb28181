@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	protocol "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/protocol"
-	baseprotocol "uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	protocol "uvplatform.com/uvp-gb28181/app/gb28181/cascade/protocol"
+	baseprotocol "uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // T1 evidence table. The page numbers are printed page numbers, not PDF

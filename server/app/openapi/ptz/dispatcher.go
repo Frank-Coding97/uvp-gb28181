@@ -11,12 +11,12 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	runtimeptz "uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	runtimeptz "uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 type Dispatcher struct {

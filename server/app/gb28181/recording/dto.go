@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // FileDTO is the public catalog representation of a recording file.

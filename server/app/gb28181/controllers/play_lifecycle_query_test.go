@@ -11,10 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	gbdashboard "uvplatform.com/uvp-gb28181/app/gb28181/dashboard"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
 )
 
 func TestPlayLifecycleQueryDefaultsToTenAndEnforcesDeviceScope(t *testing.T) {

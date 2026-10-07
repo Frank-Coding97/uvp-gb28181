@@ -3,7 +3,7 @@ package handler
 import (
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
 // fakeRecorder 测试用,只记录 Begin/End 调用,供断言

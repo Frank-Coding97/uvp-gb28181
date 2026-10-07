@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 var ErrRestartCoordinatorClosed = errors.New("restart coordinator closed")

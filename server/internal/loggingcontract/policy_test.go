@@ -110,7 +110,7 @@ func TestLoggingPolicy(t *testing.T) {
 	t.Run("exactLegacyExceptionIsAccepted", func(t *testing.T) {
 		root := filepath.Join("testdata", "policy_legacy")
 		report := mustCheckPolicyFixture(t, "policy_legacy", PolicyOptions{LegacyExceptions: []LegacyException{{
-			PackagePath: "uvplatform.cn/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy",
+			PackagePath: "uvplatform.com/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy",
 			File:        "legacy.go",
 			Function:    "Historical",
 			Method:      "Info",
@@ -127,7 +127,7 @@ func TestLoggingPolicy(t *testing.T) {
 	t.Run("legacyExceptionDoesNotMatchChangedMessage", func(t *testing.T) {
 		root := filepath.Join("testdata", "policy_legacy_changed")
 		report, err := CheckPolicy(root, PolicyOptions{LegacyExceptions: []LegacyException{{
-			PackagePath: "uvplatform.cn/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy_changed",
+			PackagePath: "uvplatform.com/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy_changed",
 			File:        "legacy.go",
 			Function:    "Historical",
 			Method:      "Info",
@@ -145,7 +145,7 @@ func TestLoggingPolicy(t *testing.T) {
 
 	t.Run("legacyExceptionCountRejectsNewDuplicate", func(t *testing.T) {
 		report, err := CheckPolicy(filepath.Join("testdata", "policy_legacy_duplicate"), PolicyOptions{LegacyExceptions: []LegacyException{{
-			PackagePath: "uvplatform.cn/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy_duplicate",
+			PackagePath: "uvplatform.com/uvp-gb28181/internal/loggingcontract/testdata/policy_legacy_duplicate",
 			File:        "legacy.go",
 			Function:    "Historical",
 			Method:      "Info",

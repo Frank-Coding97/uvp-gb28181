@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 // contractThreshold 契约生效日期:该日期及以后的迁移文件必须

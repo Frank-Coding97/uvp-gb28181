@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/catalog"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/catalog"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // cascadeCatalogPusher proactively reports the shared catalog to one upstream

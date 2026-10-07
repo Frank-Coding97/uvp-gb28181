@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // Frozen from this actual owner's responses after its transactions quiesce.

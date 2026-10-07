@@ -8,11 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 // MapController 地图视图相关接口(plan §4.2 B3)

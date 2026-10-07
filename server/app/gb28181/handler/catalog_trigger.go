@@ -4,13 +4,13 @@ import (
 	"context"
 	"sync/atomic"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalogprogress"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // CatalogTrigger 设备首次注册或从离线恢复后触发 Catalog 查询的能力(便于注入与测试)

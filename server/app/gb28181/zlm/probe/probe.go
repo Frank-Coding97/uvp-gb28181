@@ -34,7 +34,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // Client probe 只需要一个探活能力,不依赖 zlm.Client 具体类型(避免循环 + 便于打桩)

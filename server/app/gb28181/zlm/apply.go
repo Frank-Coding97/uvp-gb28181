@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strconv"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 const AutoOnDemandStreamWaitMS = 30000

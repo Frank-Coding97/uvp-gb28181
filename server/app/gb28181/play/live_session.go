@@ -1,6 +1,6 @@
 package play
 
-import "uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+import "uvplatform.com/uvp-gb28181/app/gb28181/stream"
 
 type LiveMode string
 

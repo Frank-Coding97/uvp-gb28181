@@ -17,12 +17,12 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 var (

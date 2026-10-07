@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 const DefaultNodeExecutorTimeout = 3 * time.Second

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // Request identifies one channel-level live ensure operation.

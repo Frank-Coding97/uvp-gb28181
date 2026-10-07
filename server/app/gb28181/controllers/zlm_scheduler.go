@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/scheduler"
 )
 
 // supportedAlgorithms 跟 scheduler.Factory.Build 取值对齐

@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // ErrNodeNotFound 节点不存在

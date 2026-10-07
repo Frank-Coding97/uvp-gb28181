@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 )
 
 type controllerInterfaceProvider struct {

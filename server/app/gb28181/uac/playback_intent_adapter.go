@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 var _ gbplayback.IntentSIPFactory = (*PlaybackAdapter)(nil)

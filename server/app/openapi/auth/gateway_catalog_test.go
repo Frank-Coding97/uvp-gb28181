@@ -9,11 +9,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 type catalogDispatchSpy struct {

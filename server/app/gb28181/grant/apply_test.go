@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 func seedGrantApplyFixture(t *testing.T) (*Service, []gbmodels.GbDevice, []ApplyTarget) {

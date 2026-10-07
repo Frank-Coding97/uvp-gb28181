@@ -12,19 +12,19 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
-	openapiroutes "uvplatform.cn/uvp-gb28181/app/openapi/routes"
-	"uvplatform.cn/uvp-gb28181/app/routes"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
-	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
-	_ "uvplatform.cn/uvp-gb28181/bootstrap"
+	"uvplatform.com/uvp-gb28181/app/gb28181"
+	"uvplatform.com/uvp-gb28181/app/gb28181/migration"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
+	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
+	"uvplatform.com/uvp-gb28181/app/routes"
+	"uvplatform.com/uvp-gb28181/app/scheduler"
+	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+	_ "uvplatform.com/uvp-gb28181/bootstrap"
 
-	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
-	_ "uvplatform.cn/uvp-gb28181/plugins"
+	_ "uvplatform.com/uvp-gb28181/docs/swagger" // swagger docs
+	_ "uvplatform.com/uvp-gb28181/plugins"
 )
 
 // @title UVP-GB28181 API

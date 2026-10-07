@@ -16,17 +16,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
-	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/assign"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/devicecapture"
+	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // DeviceMgmtController 设备管理页主查询(plan §4.2 B2)

@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestRepositoryBuildDraftMapsCatalogAndRetainsClientOrphans(t *testing.T) {

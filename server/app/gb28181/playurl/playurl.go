@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // URLs contains only protocols actually exposed by the selected node.

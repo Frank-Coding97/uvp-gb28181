@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 // RecordingState is the management-side state of a manual recorder lease.

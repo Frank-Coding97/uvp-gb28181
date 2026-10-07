@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 )
 
 func newT12Coordinator(t *testing.T, timeout time.Duration, converge func(context.Context, int64) error) (*service.RestartCoordinator, *node.Node) {

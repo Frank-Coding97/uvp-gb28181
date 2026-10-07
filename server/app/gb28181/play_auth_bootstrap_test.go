@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 )
 
 func TestBuildPlaySignerRequiresIndependentStrongKeyWhenEnabled(t *testing.T) {

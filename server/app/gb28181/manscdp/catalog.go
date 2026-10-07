@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // CatalogQuery Catalog 目录查询请求(平台→设备)

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
 )
 
 var (

@@ -8,13 +8,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbhandler "uvplatform.com/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
 
 type fakeSIPRuntimeServer struct {

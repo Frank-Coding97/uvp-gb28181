@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 )
 
 type Service struct {

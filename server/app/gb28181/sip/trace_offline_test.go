@@ -12,8 +12,8 @@ import (
 	siplib "github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
 )
 
 type offlineTraceStore struct{}

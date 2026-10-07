@@ -10,8 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 func validateMessageFilter(filter MessageFilter) error {

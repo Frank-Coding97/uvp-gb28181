@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 )
 
 const leafEnv = "UVP_AUTHORITY_TEST_LEAF"

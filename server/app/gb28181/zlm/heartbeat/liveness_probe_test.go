@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/heartbeat"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // 现场（2026-10-06，192.168.10.220:18090）：平台比 ZLM 晚接入，节点建好后

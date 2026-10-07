@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 // PlaybackAdapter bridges the SIP UAC dialog to the playback service's narrow

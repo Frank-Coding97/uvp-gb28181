@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // defaultMergedDirName 是「已合并产物」的默认目录名（挂在系统临时目录下）。

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // ServerConfigCache ZLM 节点端口配置缓存(nodeID → ServerConfig)

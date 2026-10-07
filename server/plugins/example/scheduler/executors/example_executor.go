@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 
 	"go.uber.org/zap"
 )

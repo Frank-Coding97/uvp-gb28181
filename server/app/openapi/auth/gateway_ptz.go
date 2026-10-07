@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/client"
-	"uvplatform.cn/uvp-gb28181/app/openapi/limit"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/limit"
 )
 
 func (g *Gateway) handlePTZ(c *gin.Context, requestID, scope string, respond func(gatewayResponse)) {

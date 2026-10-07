@@ -16,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 const (

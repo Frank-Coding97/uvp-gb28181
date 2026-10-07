@@ -12,13 +12,13 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/catalog"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/control"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/catalog"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/control"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // `cascade.control.forward_failed` 的 reason_code —— 受控短码，不是自由文本。

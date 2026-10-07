@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"

@@ -1,11 +1,11 @@
 package service
 
 import (
-	"uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/models"
+	"uvplatform.com/uvp-gb28181/plugins/{{.DirName}}/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 {{- if .HasCreatedBy}}
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 {{- end}}
 )
 

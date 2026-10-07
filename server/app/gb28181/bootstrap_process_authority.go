@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 )
 
 // GB borrows main's authority. Neither assembly, reload nor stop may register

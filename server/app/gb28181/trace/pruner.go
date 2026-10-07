@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 type combinedPrunableStore struct {

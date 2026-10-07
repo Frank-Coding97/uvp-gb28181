@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 const (

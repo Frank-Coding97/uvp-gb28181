@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
 )
 
 var ErrUnattributed = errors.New("traffic media cannot be attributed")

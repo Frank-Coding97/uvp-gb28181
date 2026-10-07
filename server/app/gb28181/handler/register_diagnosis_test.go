@@ -11,9 +11,9 @@ import (
 	"github.com/icholy/digest"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 type captureDiagnosticSink struct {

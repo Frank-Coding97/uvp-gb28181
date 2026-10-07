@@ -14,7 +14,7 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 )
 
 const testBootA = "00112233445566778899aabbccddeeff"

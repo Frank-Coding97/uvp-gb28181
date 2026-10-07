@@ -14,17 +14,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbdashboard "uvplatform.com/uvp-gb28181/app/gb28181/dashboard"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // PlayController 国标点播 REST

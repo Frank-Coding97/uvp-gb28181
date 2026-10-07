@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mansrtsp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
 )
 
 func sipINFOIdentity(t *testing.T, n int, command DeviceSIPINFOCommand) DeviceSIPINFOIdentity {

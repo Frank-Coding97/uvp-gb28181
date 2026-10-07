@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 )
 
 type CloudRecordingCatalogAPI interface {

@@ -3,7 +3,7 @@ package grant
 import (
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 )
 
 // installNotDataMask 复刻生产环境的全局查询回调。

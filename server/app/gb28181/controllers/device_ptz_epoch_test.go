@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 )
 
 func TestPTZAuthorizationSnapshotRejectsMixedRoot(t *testing.T) {

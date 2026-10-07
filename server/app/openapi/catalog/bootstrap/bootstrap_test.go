@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestEnsureCoreCatalogIsIdempotentAndKeepsSysAPIAsMetadata(t *testing.T) {

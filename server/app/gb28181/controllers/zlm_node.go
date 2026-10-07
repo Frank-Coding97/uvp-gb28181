@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 )
 
 // ZLMNodeController ZLM 媒体节点 CRUD + 状态切换(M1)

@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/favorites"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/favorites"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type ChannelFavoriteController struct {

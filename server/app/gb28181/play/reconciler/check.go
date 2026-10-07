@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // judgeResult 单条通道对账判定结果.

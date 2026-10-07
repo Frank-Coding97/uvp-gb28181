@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync/atomic"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // LeastLoad 选综合负载最低的活跃节点

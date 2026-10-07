@@ -4,8 +4,8 @@ import (
 	"encoding/csv"
 	"strconv"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

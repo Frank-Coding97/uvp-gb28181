@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 )
 
 type securityControllerProvider struct {

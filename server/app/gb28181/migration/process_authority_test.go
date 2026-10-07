@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 func TestProcessAuthorityMigrationAndInitialization(t *testing.T) {

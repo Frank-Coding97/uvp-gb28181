@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 func verifySIPCleanupNative(t *testing.T, ctx context.Context, db *gorm.DB, store *playauth.DeviceOperationIntentStore, id playauth.DeviceOperationIntentIdentity, loaded playauth.DeviceSIPInviteSteps) playauth.DeviceSIPInviteSteps {

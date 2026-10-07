@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestOpenAPIAdminScopeBatchAtomicValidation(t *testing.T) {

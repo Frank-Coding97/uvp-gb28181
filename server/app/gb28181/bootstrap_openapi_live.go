@@ -7,10 +7,10 @@ import (
 	"errors"
 	"sync"
 
-	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	openapiplay "uvplatform.cn/uvp-gb28181/app/openapi/play"
-	openapiptz "uvplatform.cn/uvp-gb28181/app/openapi/ptz"
+	gbzlm "uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
+	openapiptz "uvplatform.com/uvp-gb28181/app/openapi/ptz"
 )
 
 var openAPIPTZRoot = openapiptz.NewRuntimeRoot()

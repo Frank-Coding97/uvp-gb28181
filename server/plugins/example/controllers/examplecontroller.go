@@ -1,9 +1,9 @@
 package controllers
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/plugins/example/models"
-	"uvplatform.cn/uvp-gb28181/plugins/example/service"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/plugins/example/models"
+	"uvplatform.com/uvp-gb28181/plugins/example/service"
 
 	"github.com/gin-gonic/gin"
 )

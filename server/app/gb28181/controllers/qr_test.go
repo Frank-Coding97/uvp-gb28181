@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/cachehelper"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 type qrInterfaceProvider struct{}

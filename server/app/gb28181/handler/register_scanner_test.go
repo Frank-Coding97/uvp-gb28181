@@ -7,8 +7,8 @@ import (
 	"github.com/icholy/digest"
 	"github.com/stretchr/testify/require"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 )
 
 func TestRegisterInvalidIDsNeverReachBusinessOrBanFixedConfiguration(t *testing.T) {

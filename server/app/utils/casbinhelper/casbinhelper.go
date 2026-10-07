@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"

@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/service"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 )
 
 type onlineUserService interface {

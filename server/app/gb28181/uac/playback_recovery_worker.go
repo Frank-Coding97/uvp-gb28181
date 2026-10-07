@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // PlaybackRecoveryTick contains scheduling counters only. RoundEnded means

@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
 
 	"gorm.io/gorm"
 )

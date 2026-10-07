@@ -10,7 +10,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
 // ErrStaleInviteGeneration 本 INVITE 的 ACK 已完成,但较新的代次已占据同一

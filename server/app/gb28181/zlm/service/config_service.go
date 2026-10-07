@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 var ErrManagedConfigKey = errors.New("platform-managed ZLM config key")

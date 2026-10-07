@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 // Only validated immutable values cross into a worker. No Gin context, shared

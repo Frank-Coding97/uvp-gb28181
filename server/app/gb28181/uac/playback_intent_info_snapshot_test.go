@@ -11,7 +11,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func TestPlaybackIntentINFOSnapshotPreservesExistingCommands(t *testing.T) {

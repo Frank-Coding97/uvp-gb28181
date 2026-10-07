@@ -4,7 +4,7 @@ import (
 	"context"
 	"gorm.io/gorm"
 	"time"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // PTZUnissuedAttempt proves that Claim never returned dispatch permission.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
+	openapiconfig "uvplatform.com/uvp-gb28181/app/openapi/config"
 )
 
 const (

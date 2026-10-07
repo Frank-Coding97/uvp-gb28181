@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func createCustomGormLog(sqlType string) gormLog.Interface {

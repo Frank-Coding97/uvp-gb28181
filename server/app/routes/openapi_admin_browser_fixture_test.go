@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
-	appservice "uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
+	appservice "uvplatform.com/uvp-gb28181/app/service"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 func newOpenAPIAdminBrowserFixture(t *testing.T) *openAPIAdminHTTPFixture {

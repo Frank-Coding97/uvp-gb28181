@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // Weighted Nginx Smooth Weighted Round Robin

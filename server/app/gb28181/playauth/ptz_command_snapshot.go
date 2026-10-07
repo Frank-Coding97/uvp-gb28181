@@ -1,6 +1,6 @@
 package playauth
 
-import gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+import gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 
 // Compare immutable command inputs only; result and scheduling state may
 // legitimately advance while a private recovery receipt is being retained.

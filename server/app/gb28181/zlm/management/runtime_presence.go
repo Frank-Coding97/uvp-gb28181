@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 // NewRuntimePresenceReader adapts the fresh, node-guarded media detail path

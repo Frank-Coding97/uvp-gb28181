@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalogprogress"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // RefreshDeviceCatalog 手动触发一次 Catalog 查询,拉取通道树

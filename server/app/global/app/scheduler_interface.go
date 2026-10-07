@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // JobSchedulerInterf 任务调度器接口

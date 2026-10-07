@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 // GetChannelStorageCards 读取某通道所属设备的存储卡状态（GB/T 28181-2022 A.2.4.14/A.2.6.16）。

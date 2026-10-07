@@ -6,7 +6,7 @@ import (
 	stdlog "log"
 	slogalias "log/slog"
 	"os"
-	appalias "uvplatform.cn/uvp-gb28181/app/global/app"
+	appalias "uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 const (

@@ -19,9 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
-	"uvplatform.cn/uvp-gb28181/app/openapi/client"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
-	"uvplatform.cn/uvp-gb28181/app/openapi/routes"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/routes"
 )
 
 type openAPIContract struct {

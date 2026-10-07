@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // ControlState is the fact value exposed by DeviceStatus. Missing or unknown

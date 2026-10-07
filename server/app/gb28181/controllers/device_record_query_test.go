@@ -15,13 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 type fakeRecordQueryService struct {

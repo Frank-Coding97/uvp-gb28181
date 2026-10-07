@@ -12,8 +12,8 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func addPlaybackCleanupFork(t *testing.T, f *playbackOperationUDPFixture, tag string) net.PacketConn {

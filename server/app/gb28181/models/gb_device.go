@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 // 设备在线状态

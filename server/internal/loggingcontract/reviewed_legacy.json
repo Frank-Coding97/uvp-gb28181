@@ -1,6 +1,6 @@
 [
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startControlPlane",
     "receiver": "",
@@ -10,7 +10,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "Start",
     "receiver": "",
@@ -20,7 +20,7 @@
     "reason": "Reviewed T12 historical startup/background site (level re-graded by C03 to INFO: idempotent duplicate start / unconfigured first boot are normal states, not degradation); static message, no fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "Start",
     "receiver": "",
@@ -30,7 +30,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "Start",
     "receiver": "",
@@ -40,7 +40,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "Start",
     "receiver": "",
@@ -50,7 +50,7 @@
     "reason": "Reviewed T12 historical startup/background site (level re-graded by C03 to INFO: idempotent duplicate start / unconfigured first boot are normal states, not degradation); static message, no fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -60,7 +60,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -70,7 +70,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -80,7 +80,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -90,7 +90,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -100,7 +100,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -110,7 +110,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -120,7 +120,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "startSIPDependenciesWithFactory",
     "receiver": "",
@@ -130,7 +130,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupPlaybackRuntime",
     "receiver": "",
@@ -140,7 +140,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupPlaybackRuntime",
     "receiver": "",
@@ -150,7 +150,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -160,7 +160,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -170,7 +170,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -180,7 +180,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -190,7 +190,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -200,7 +200,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupRecordingRuntime",
     "receiver": "",
@@ -210,7 +210,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupTalkRuntime",
     "receiver": "",
@@ -220,7 +220,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupTalkRuntime",
     "receiver": "",
@@ -230,7 +230,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupTalkRuntime",
     "receiver": "",
@@ -240,7 +240,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupTrafficRuntime",
     "receiver": "",
@@ -250,7 +250,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupTrafficRuntime",
     "receiver": "",
@@ -260,7 +260,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupZLMScheduler",
     "receiver": "",
@@ -270,7 +270,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupZLMSchedulerLog",
     "receiver": "",
@@ -280,7 +280,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupZLMSchedulerController",
     "receiver": "",
@@ -290,7 +290,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "setupCivilCodeService",
     "receiver": "",
@@ -300,7 +300,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "package_path": "uvplatform.com/uvp-gb28181/app/gb28181",
     "file": "app/gb28181/bootstrap.go",
     "function": "buildSnapshotService",
     "receiver": "",
@@ -310,7 +310,7 @@
     "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "package_path": "uvplatform.com/uvp-gb28181/app/utils/ginhelper",
     "file": "app/utils/ginhelper/ginhelper.go",
     "function": "RegisterPluginRoutes",
     "receiver": "",
@@ -320,7 +320,7 @@
     "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "package_path": "uvplatform.com/uvp-gb28181/app/utils/ginhelper",
     "file": "app/utils/ginhelper/ginhelper.go",
     "function": "RegisterPluginRoutes",
     "receiver": "",
@@ -330,7 +330,7 @@
     "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/gormhelper",
+    "package_path": "uvplatform.com/uvp-gb28181/app/utils/gormhelper",
     "file": "app/utils/gormhelper/hook.go",
     "function": "CreateBeforeHook",
     "receiver": "",
@@ -340,7 +340,7 @@
     "reason": "Reviewed T07 historical GORM hook warning site: static message constants and no dynamic fields or payload data; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/gormhelper",
+    "package_path": "uvplatform.com/uvp-gb28181/app/utils/gormhelper",
     "file": "app/utils/gormhelper/hook.go",
     "function": "UpdateBeforeHook",
     "receiver": "",
@@ -350,7 +350,7 @@
     "reason": "Reviewed T07 historical GORM hook warning site: static message constants and no dynamic fields or payload data; plan 4.3 permits legacy.log."
   },
   {
-    "package_path": "uvplatform.cn/uvp-gb28181/app/global/app",
+    "package_path": "uvplatform.com/uvp-gb28181/app/global/app",
     "file": "app/global/app/variable.go",
     "function": "DB",
     "receiver": "",

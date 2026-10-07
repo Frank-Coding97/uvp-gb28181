@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 const ptzRecoveryChildEnv = "UVP_PTZ_RECOVERY_CHILD"

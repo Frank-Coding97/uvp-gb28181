@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 var managementBoundaryDBID atomic.Int64

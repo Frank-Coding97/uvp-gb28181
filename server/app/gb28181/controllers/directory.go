@@ -9,12 +9,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
-	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
+	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 type DirectoryController struct {

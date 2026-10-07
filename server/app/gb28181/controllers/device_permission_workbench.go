@@ -9,13 +9,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/gb28181/assign"
+	"uvplatform.com/uvp-gb28181/app/gb28181/grant"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 func deptValidatorFor(c *gin.Context) assign.DeptValidator {

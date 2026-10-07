@@ -3,7 +3,7 @@ package play
 import (
 	"context"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // gormDeviceRepo 用 gbmodels 包级函数实现 DeviceRepo

@@ -3,15 +3,15 @@ package controllers
 import (
 	"errors"
 	"net/http"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type UpdateSIPConfigRequest struct {

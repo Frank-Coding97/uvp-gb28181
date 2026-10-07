@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/gb28181/firmware"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 	"gorm.io/gorm"
 )
 

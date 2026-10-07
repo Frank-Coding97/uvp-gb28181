@@ -7,11 +7,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalogprogress"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalog"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalogprogress"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )

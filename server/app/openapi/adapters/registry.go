@@ -8,8 +8,8 @@ import (
 	"errors"
 	"net/http"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 var (

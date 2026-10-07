@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	catalogstore "uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 func TestPublishedScopeSetNilSnapshot(t *testing.T) {

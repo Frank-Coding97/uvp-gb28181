@@ -19,7 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 type logTestValues map[string]interface{}

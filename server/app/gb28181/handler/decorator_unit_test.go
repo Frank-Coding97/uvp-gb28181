@@ -7,7 +7,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
 // T1.5-U1: txKindFromCmd 各 CmdType 映射

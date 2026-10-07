@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playurl"
 )
 
 const testRootSecret = "0123456789abcdef0123456789abcdef"

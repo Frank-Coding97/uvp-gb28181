@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/auth"
 )
 
 // RuntimeRoot is the process-lifetime PTZ boundary. SIP reloads replace the

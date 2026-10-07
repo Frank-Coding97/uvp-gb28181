@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 // TestSegmentMediaLimitScalesWithDownloadSpeed 钉住分片长度的唯一口径：

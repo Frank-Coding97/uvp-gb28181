@@ -3,8 +3,8 @@ package play
 import (
 	"context"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playurl"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // ServerConfigProvider returns the media ports exposed by one ZLM node.

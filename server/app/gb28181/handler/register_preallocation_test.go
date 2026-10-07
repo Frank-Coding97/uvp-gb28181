@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
 )
 
 func TestRegisterFailureResponseMapsPreallocationRejection(t *testing.T) {

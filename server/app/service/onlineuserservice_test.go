@@ -8,7 +8,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 func TestOnlineUserListFiltersAndUsesOneActivityCutoff(t *testing.T) {

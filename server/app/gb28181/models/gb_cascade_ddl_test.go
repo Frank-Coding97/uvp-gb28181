@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	cascademodel "uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {

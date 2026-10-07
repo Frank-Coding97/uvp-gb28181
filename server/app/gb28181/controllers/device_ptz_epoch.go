@@ -4,10 +4,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/plugin/dbresolver"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 // Permission and original epoch come from the same joined row. Earlier

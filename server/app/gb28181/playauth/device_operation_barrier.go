@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 )
 
 const deviceOperationAdmissionTimeout = 5 * time.Second

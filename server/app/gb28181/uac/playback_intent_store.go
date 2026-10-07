@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // prepareStoredPlaybackInvite persists the exact prepared request, without

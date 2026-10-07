@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	useragent "github.com/mssola/user_agent"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
 )
 
 var (

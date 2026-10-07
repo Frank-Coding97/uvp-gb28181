@@ -7,8 +7,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 func BuildNationalTree(ctx context.Context, db *gorm.DB, ownerDeptID uint, lookup CivilCodeLookup) ([]DirectoryNodeVO, error) {

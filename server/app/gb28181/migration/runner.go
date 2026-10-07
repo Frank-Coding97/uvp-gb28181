@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 // versionStore runner 依赖的版本表操作,*Store 与测试 fake 均实现。

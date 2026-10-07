@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // 现场故障：语音广播"偶发"建立失败，设备 ACK 后 0.36ms 就 BYE。

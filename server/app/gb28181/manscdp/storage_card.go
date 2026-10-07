@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // CmdSDCardStatus is GB/T 28181-2022 A.2.4.14「存储卡状态查询」。

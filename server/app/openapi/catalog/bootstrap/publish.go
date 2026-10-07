@@ -10,8 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	catalogstore "uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
 )
 
 var (

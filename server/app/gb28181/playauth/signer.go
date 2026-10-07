@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playurl"
 )
 
 const (

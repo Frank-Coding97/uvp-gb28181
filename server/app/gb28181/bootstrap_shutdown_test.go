@@ -17,12 +17,12 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 type shutdownRootConfig struct{ app.YmlConfigInterf }

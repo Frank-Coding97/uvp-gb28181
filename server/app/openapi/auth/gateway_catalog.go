@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
 // catalogRuntimeReady is the last durable-state gate before an adapter or

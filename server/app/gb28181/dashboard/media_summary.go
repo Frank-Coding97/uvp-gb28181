@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 const highEventThreadLoad = 80

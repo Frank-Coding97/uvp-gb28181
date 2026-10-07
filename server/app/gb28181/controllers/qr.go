@@ -7,10 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 )
 
 // 扫码回填 SIP 接入信息 —— 平台侧 HTTP 端点.

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // ── 片 = 内容区间，补拉并进同一片 ─────────────────────────────────────

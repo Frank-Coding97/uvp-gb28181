@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	basecontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	basecontrollers "uvplatform.com/uvp-gb28181/app/controllers"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 const maxAlarmDeleteBatch = 100

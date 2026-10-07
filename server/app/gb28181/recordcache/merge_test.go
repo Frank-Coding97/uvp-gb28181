@@ -17,9 +17,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mp4join/mp4fixture"
-	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mp4join/mp4fixture"
+	gbrecording "uvplatform.com/uvp-gb28181/app/gb28181/recording"
 )
 
 // ── 素材与夹具 ────────────────────────────────────────────────────────

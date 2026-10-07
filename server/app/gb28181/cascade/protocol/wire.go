@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	baseprotocol "uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	baseprotocol "uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 var errInvalidWire = errors.New("cascade protocol: invalid wire fixture")

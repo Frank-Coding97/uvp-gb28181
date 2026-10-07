@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 // Target 是缓存任务要拉流的那一对（设备, 通道）的全部事实。

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // hikOSDConfigBlock 是**海康 DS-2DC2C040MY-DE（GB28181-2022）真机应答里的

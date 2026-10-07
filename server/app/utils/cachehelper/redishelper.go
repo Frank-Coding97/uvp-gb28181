@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/go-redis/redis/v8"
 )

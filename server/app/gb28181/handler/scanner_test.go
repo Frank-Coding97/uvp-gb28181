@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbdevice "uvplatform.com/uvp-gb28181/app/gb28181/device"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // TestOfflineScan_TimeoutToOffline T6-测1(AC-5): keepalive_time 超时 → 扫描置离线

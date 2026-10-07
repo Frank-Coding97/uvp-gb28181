@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 )
 
 type retryPlaybackRootCleanup struct{ err error }

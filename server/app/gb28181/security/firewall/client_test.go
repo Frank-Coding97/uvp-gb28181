@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.com/uvp-gb28181/app/gb28181/security"
 )
 
 type runnerCall struct {

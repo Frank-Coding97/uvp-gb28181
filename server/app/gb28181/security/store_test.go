@@ -9,7 +9,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 )
 
 func newSecurityStoreTestDB(t *testing.T) *gorm.DB {

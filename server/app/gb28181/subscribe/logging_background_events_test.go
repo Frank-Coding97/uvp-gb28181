@@ -13,9 +13,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/subscribe"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func TestLoggingSubscribeStateEventsUseRequestScope(t *testing.T) {

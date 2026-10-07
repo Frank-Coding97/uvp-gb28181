@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
 )
 
 // 两条已删除的平台分别占着名称与接入关系键位时,仓库层报 ErrRetiredPlatformConflict。

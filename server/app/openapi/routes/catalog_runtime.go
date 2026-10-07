@@ -8,15 +8,15 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
-	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/bootstrap"
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	"uvplatform.cn/uvp-gb28181/app/openapi/catalog/store"
-	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	"uvplatform.com/uvp-gb28181/app/openapi/catalog/bootstrap"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 var catalogRuntimeSchemaModels = []any{

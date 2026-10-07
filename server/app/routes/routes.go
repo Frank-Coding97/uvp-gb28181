@@ -8,14 +8,14 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gb28181 "uvplatform.cn/uvp-gb28181/app/gb28181"
-	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	openapiauth "uvplatform.cn/uvp-gb28181/app/openapi/auth"
-	openapicontrollers "uvplatform.cn/uvp-gb28181/app/openapi/controllers"
-	openapiroutes "uvplatform.cn/uvp-gb28181/app/openapi/routes"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gb28181 "uvplatform.com/uvp-gb28181/app/gb28181"
+	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	openapiauth "uvplatform.com/uvp-gb28181/app/openapi/auth"
+	openapicontrollers "uvplatform.com/uvp-gb28181/app/openapi/controllers"
+	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
 )
 
 var userControllers = controllers.NewUserController()                       // 用户控制器

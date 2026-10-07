@@ -189,7 +189,7 @@ describe("QrProvisionCard 模拟器下载入口", () => {
   });
 
   it("opens the public download site in a new tab", () => {
-    expect(source).toContain('href="https://download.uvplatform.cn/"');
+    expect(source).toContain('href="https://download.uvplatform.com/"');
     expect(source).toContain('target="_blank"');
     expect(source).toContain('rel="noopener noreferrer"');
   });

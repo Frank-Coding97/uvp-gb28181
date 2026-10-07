@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // OpenAPIControlTLS is a trusted operator-provided control-plane binding, not

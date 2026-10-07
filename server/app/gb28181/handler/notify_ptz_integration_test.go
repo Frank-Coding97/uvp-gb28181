@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.com/uvp-gb28181/app/gb28181/subscribe"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
 
 type notifyPTZSender struct{}

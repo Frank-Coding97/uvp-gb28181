@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
 
 // findRetiredPlatform 找出被软删、但仍然占着唯一键位的遗留平台行。

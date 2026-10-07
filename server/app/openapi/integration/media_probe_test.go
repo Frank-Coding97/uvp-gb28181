@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/websocket"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 type probePlayer struct {

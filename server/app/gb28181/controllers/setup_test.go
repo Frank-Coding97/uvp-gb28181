@@ -16,9 +16,9 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
 func newSetupControllerDB(t *testing.T) *gorm.DB {

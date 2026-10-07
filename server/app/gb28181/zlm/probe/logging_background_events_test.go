@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/probe"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/probe"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func TestLoggingBackgroundEventsProbe(t *testing.T) {

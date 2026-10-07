@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
-	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/scheduler/executors"
+	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 func TestLoginLogCleanupSchedulerRegistrationIsIdempotent(t *testing.T) {

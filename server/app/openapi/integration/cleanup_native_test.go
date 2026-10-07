@@ -16,7 +16,7 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	playauth "uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	playauth "uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 type cleanupBarrierConfig struct {

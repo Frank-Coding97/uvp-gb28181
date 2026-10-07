@@ -8,7 +8,7 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/icholy/digest"
-	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 )
 
 type sourceBoundRegisterSecurity interface {

@@ -14,11 +14,11 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	gbfirmware "uvplatform.cn/uvp-gb28181/app/gb28181/firmware"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/models"
+	gbfirmware "uvplatform.com/uvp-gb28181/app/gb28181/firmware"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 // ⛔⛔ 固件下载链路的 ID 语义：路由 `:id` 是**数字主键**（gb_firmware_repository.id），

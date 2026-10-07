@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // UnprovisionHooks 撤销平台自己写进对端 ZLM 的 managed hook，让一个**已被移除**的

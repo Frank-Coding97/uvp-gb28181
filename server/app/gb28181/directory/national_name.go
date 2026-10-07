@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
 )
 
 type UnknownReason string

@@ -2,8 +2,8 @@ package response
 
 import (
 	"net/http"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 
 	"github.com/gin-gonic/gin"
 )

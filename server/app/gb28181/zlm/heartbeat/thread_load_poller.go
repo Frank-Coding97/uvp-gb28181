@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // ThreadLoadFetcher 从 ZLM 拉 NetThread / WorkThread 负载(0-1)

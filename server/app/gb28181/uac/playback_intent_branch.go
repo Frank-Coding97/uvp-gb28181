@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/emiago/sipgo/sip"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // observeStoredPlaybackBranch only records the first known response. The

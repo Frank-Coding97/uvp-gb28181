@@ -8,9 +8,9 @@ import (
 
 	"gorm.io/gorm"
 
-	appmodels "uvplatform.cn/uvp-gb28181/app/models"
-	clientmodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	clientmodels "uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
 const (

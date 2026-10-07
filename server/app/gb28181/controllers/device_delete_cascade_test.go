@@ -9,9 +9,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	cascademodel "uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // captureCascadeDeleteLogs 把这一轮删除操作期间产生的日志收集下来。

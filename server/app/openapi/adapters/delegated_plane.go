@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 )
 
 // The external OpenAPI surface is served by two dispatch planes.

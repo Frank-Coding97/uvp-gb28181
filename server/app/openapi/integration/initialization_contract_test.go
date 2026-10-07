@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 func readInitializationContractSQL(t *testing.T, name string) string {

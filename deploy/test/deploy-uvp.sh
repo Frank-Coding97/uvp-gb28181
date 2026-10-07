@@ -173,9 +173,14 @@ for url in \
     --max-redirs 5 --max-time 15 "$url" >/dev/null
 done
 for url in \
-  https://www.uvplatform.cn/healthz \
-  https://www.uvplatform.cn/ \
-  https://www.uvplatform.cn/system/; do
+  https://www.uvplatform.com/healthz \
+  https://www.uvplatform.com/ \
+  https://www.uvplatform.com/system/; do
+  # ⚠️ 域名已从 .cn 切到 .com（2026-10-07）。这一段是**线上**健康检查（不是本地），
+  # 所以前提是 uvplatform.com 的 DNS 与 TLS 证书都已就绪 ——
+  # 否则 curl 会因解析失败或证书域名不匹配而在这里报错、并中断后面的部署步骤。
+  # 域名刚切换、DNS 还没生效的过渡期，先把下面三行注释掉跑完部署，
+  # 等解析与证书都备齐后再放开。
   curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
     --max-redirs 5 --max-time 20 "$url" >/dev/null
 done

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 func newTestAssignService(db *gorm.DB, validator DeptValidator, options ...ServiceOption) *Service {

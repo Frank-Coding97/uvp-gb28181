@@ -2,8 +2,8 @@ package controllers
 
 import (
 	"strconv"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/service"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/service"
 
 	"github.com/gin-gonic/gin"
 )

@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // HookUnprovisioner 是"撤销对端 hook"的能力抽象。

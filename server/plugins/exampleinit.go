@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	_ "uvplatform.cn/uvp-gb28181/plugins/example/routes"
-	"uvplatform.cn/uvp-gb28181/plugins/example/scheduler"
+	_ "uvplatform.com/uvp-gb28181/plugins/example/routes"
+	"uvplatform.com/uvp-gb28181/plugins/example/scheduler"
 )
 
 // 插件初始化时自动执行

@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
-	globalapp "uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/controllers"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
+	globalapp "uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // PlatformInfo 是本级 GB28181 平台对外接入参数。

@@ -12,12 +12,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/openapi/adapters"
-	"uvplatform.cn/uvp-gb28181/app/openapi/audit"
-	catalogruntime "uvplatform.cn/uvp-gb28181/app/openapi/catalog/runtime"
-	"uvplatform.cn/uvp-gb28181/app/openapi/client"
-	"uvplatform.cn/uvp-gb28181/app/openapi/limit"
-	"uvplatform.cn/uvp-gb28181/app/openapi/resource"
+	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	"uvplatform.com/uvp-gb28181/app/openapi/audit"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/limit"
+	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 type GatewayConfig struct {

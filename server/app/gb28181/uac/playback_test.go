@@ -12,7 +12,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/mansrtsp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
 )
 
 type fakePlaybackDialog struct {

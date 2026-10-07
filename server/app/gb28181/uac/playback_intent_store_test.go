@@ -12,8 +12,8 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 func playbackIntentStoreFixture(t *testing.T, options ...sipgo.UserAgentOption) (*UAC, *gorm.DB, *playauth.DeviceOperationIntentStore, playauth.DeviceOperationIntentIdentity, *snapshotTransactionObserver) {

@@ -15,9 +15,9 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"uvplatform.cn/uvp-gb28181/app/openapi/models"
-	"uvplatform.cn/uvp-gb28181/app/openapi/processauthority"
-	migrationsfs "uvplatform.cn/uvp-gb28181/resource/database/gb28181"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 func TestOpenAPIProcessAuthorityNative(t *testing.T) {

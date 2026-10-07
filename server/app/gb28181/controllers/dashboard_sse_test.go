@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
 // 用真 HTTP 服务器跑 SSE,httptest.NewRecorder 不模拟流式

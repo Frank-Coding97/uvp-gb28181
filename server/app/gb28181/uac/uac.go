@@ -14,9 +14,9 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
+	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
+	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
 )
 
 const trackedMessageSummaryLimit = 4 * 1024

@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
 	"go.uber.org/zap"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 func CreateYamlFactory(path string, fileName ...string) app.YmlConfigInterf {

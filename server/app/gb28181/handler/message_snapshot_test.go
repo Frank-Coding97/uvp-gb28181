@@ -8,7 +8,7 @@ import (
 	"github.com/emiago/sipgo/siptest"
 	"github.com/stretchr/testify/require"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 )
 
 // snapshotMessageRequest 复用 `recordInfoRequest` 的报文骨架，只把 `From` 换成真实来源设备。

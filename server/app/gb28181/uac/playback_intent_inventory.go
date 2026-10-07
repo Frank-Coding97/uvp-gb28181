@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
 // Only NextResponse selects the business response. A retransmission observer

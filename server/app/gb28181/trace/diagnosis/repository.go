@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 var ErrRepositoryUnavailable = errors.New("diagnosis repository unavailable")

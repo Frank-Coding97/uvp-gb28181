@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"uvplatform.cn/uvp-gb28181/internal/authoritytest"
+	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
 // Each invocation owns a real OS process. Exit deliberately bypasses database

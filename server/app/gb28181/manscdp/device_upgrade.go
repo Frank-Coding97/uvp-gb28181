@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 // CmdDeviceUpgradeResult is the MANSCDP command used by the device's final

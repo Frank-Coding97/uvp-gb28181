@@ -13,10 +13,10 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"gorm.io/gorm"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 // Runtime is the lifecycle boundary between the SIP transport and trace pipeline.

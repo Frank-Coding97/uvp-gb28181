@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbdashboard "uvplatform.com/uvp-gb28181/app/gb28181/dashboard"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 func TestRetentionLifecycleStartsImmediatelyOnlyWhenAllFactTablesExist(t *testing.T) {

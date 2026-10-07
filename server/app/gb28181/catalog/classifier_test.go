@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
-	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalog"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 // TestClassify 20 位编码类型识别 + anomaly 兜底

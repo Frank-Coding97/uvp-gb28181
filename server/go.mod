@@ -1,4 +1,4 @@
-module uvplatform.cn/uvp-gb28181
+module uvplatform.com/uvp-gb28181
 
 go 1.25
 

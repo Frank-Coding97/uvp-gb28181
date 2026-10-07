@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
 
 const DefaultRuntimeCacheTTL = 250 * time.Millisecond
