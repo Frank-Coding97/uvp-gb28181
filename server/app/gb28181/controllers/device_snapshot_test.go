@@ -373,6 +373,7 @@ func snapshotLibraryFixture(t *testing.T, middleware ...gin.HandlerFunc) (*gin.E
 	router.Use(gin.Recovery())
 	router.Use(middleware...)
 	router.GET("/snapshots", controller.ListSnapshots)
+	router.DELETE("/snapshots", controller.DeleteSnapshots)
 	return router, db
 }
 
@@ -398,6 +399,16 @@ func channelPrimaryKey(t *testing.T, db *gorm.DB, channelCode string) uint {
 	require.NoError(t, db.Where("channel_id = ?", channelCode).First(&channel).Error)
 	require.NotZero(t, channel.ID)
 	return channel.ID
+}
+
+// deleteSnapshotLibrary 打批量删除请求。
+func deleteSnapshotLibrary(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/snapshots", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	return rec
 }
 
 func ptrTo[T any](value T) *T { return &value }

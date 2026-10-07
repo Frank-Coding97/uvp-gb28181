@@ -1,8 +1,14 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const gbApi = vi.hoisted(() => ({ listSnapshotLibrary: vi.fn() }));
+const gbApi = vi.hoisted(() => ({ listSnapshotLibrary: vi.fn(), deleteSnapshots: vi.fn() }));
+
+// ⛔ 源码断言需要真实文件内容：勾选框"外层不能包 label"这类不变量
+// 靠渲染结果测不出来（桩渲染不出浏览器对 label 的默认激活行为）。
+const pageSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/snapshot-library/index.vue"), "utf8");
 const accountState = vi.hoisted(() => ({ permissions: ["gb28181:device:snapshot"] as string[] }));
 const account = reactive(accountState);
 const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
@@ -13,7 +19,8 @@ const currentRoute = reactive({ query: {} as Record<string, unknown> });
 
 vi.mock("@/api/gb28181", async importOriginal => ({
   ...(await importOriginal<typeof import("@/api/gb28181")>()),
-  listSnapshotLibrary: gbApi.listSnapshotLibrary
+  listSnapshotLibrary: gbApi.listSnapshotLibrary,
+  deleteSnapshots: gbApi.deleteSnapshots
 }));
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@/utils/auth", () => ({ getAccessToken: () => authState }));
@@ -122,6 +129,20 @@ const stubs = {
   // 于是 `find('[data-testid="library-pick-1"]')` 找到的是 <label>，
   // 而 setChecked 作用在 <label> 上不产生 change —— 表现是"点了没反应 / 已选 0 张"，
   // 排查时会误以为是组件的选中逻辑坏了。
+  // ⛔ a-popconfirm 桩必须真的渲染触发按钮 + 确认按钮：
+  // 页面把删除按钮放在它的默认插槽里，只渲染 content 的话
+  // `find('[data-testid="library-batch-delete"]')` 找不到，测试会误以为按钮没渲染。
+  // ⛔ 桩必须声明 `name`，否则 `findComponent({ name: "a-popconfirm" })` 找不到
+  // （匿名桩会返回空 wrapper，报 "Cannot call vm on an empty VueWrapper"）。
+  // ⛔ 确认动作走 `vm.$emit("ok")` 而不是模板里 `@click="$emit(...)"`：
+  // 后者在 stub 里能渲染出按钮，但点击后事件未必冒到父组件的 `@ok` 绑定上，
+  // 表现是"点了确定、请求没发出"—— 会误判成组件的删除逻辑坏了。
+  "a-popconfirm": {
+    name: "a-popconfirm",
+    props: ["content", "type", "disabled"],
+    emits: ["ok", "cancel"],
+    template: "<div><slot /></div>"
+  },
   "a-checkbox": {
     inheritAttrs: false,
     props: ["modelValue"],
@@ -411,6 +432,87 @@ describe("snapshot library page", () => {
     await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
     await flushPromises();
     expect(wrapper.find('[data-testid="library-batch-bar"]').text()).toContain("已选 0 张");
+    wrapper.unmount();
+  });
+
+  it("deletes the picked images and leaves the list clean afterwards", async () => {
+    // ⛔ 老板 2026-10-07 要求加「批量删除」。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    gbApi.deleteSnapshots.mockResolvedValue({ data: { deleted: 2, filesFailed: 0 } });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // 没勾选时**不显示**删除入口：避免"删 0 张"这种无意义请求。
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="library-batch-delete"]').exists()).toBe(false);
+
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await wrapper.find('[data-testid="library-pick-2"]').setValue(true);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="library-batch-delete"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
+    await flushPromises();
+    const confirm = wrapper.findComponent({ name: "a-popconfirm" });
+    if (confirm.exists()) confirm.vm.$emit("ok");
+    await flushPromises();
+
+    expect(gbApi.deleteSnapshots).toHaveBeenCalledWith([1, 2]);
+    // ⛔ 删完必须退出批量模式：selectedIds 里留着已删 id 会让工具条一直显示
+    // 「已选 2 张」而列表只剩 0 张，用户以为删失败又去点删除。
+    expect(wrapper.find('[data-testid="library-pick-1"]').exists()).toBe(false);
+    // ⛔ 重新拉列表而不是前端 filter —— 后端才是权威（可能有越权行被跳过）。
+    expect(gbApi.listSnapshotLibrary).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("keeps the selection when the delete call fails so a retry needs no re-picking", async () => {
+    // ⛔ 失败时清空选择 = 用户得重新勾一遍，体验上像"删掉了又没删掉"。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    gbApi.deleteSnapshots.mockRejectedValue(new Error("删除失败"));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+
+    await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
+    await flushPromises();
+    const confirm = wrapper.findComponent({ name: "a-popconfirm" });
+    if (confirm.exists()) confirm.vm.$emit("ok");
+    await flushPromises();
+
+    // 还在批量模式、选择还在 ⇒ 用户可直接重试。
+    expect(wrapper.find('[data-testid="library-pick-1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="library-batch-bar"]').text()).toContain("已选 1 张");
+    wrapper.unmount();
+  });
+
+  it("ticking one card never ticks another one", async () => {
+    // ⛔⛔ 老板 2026-10-07 报「勾第一张第二张也跟着勾」。根因**不在前端**：
+    // 后端 JOIN 一对多把同一张图渲染两次（同一 id），Vue `:key` 相同 ⇒ 复用同一 DOM。
+    // 但前端仍要钉住这条：一旦数据层出问题（同一 id 出现两次），
+    // 至少「勾选不会传染」是本组件必须保证的不变量。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+    // ⛔ 只勾了 1 张 ⇒ 工具条必须是「已选 1 张」。曾经因为两行 id 相同
+    // 而显示「已选 2 张」—— 那是数据放大，不是勾选逻辑。
+    expect(wrapper.find('[data-testid="library-batch-bar"]').text()).toContain("已选 1 张");
+    // ⛔ 勾选框外**不能再包一层 <label>**：a-checkbox 内部的 input 没有 id、
+    // 外层 label 也没有 for ⇒ 点「选这张」文字时浏览器找不到关联控件，
+    // 会回退激活页面里**第一个**可聚焦元素（表现为"勾 A 勾上 B"）。
+    const wrapped = pageSource.indexOf('<label v-if="batchMode" class="library-pick"');
+    expect(wrapped).toBe(-1);
+    expect(pageSource).not.toContain('<label v-if="batchMode" class="library-pick"');
     wrapper.unmount();
   });
 

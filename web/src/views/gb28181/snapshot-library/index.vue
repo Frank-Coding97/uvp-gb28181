@@ -97,6 +97,24 @@
           <!-- ⛔ 这句说明刻意写短：原句太长会在窄屏把后面的分页器挤到换行，
                而"会不会自动合成压缩包"这种问题用半透明小字反而更难读。 -->
           <span class="library-batch-note">逐张下载，不合成压缩包</span>
+          <!-- ⛔ 删除是**不可恢复**的（后端连磁盘 jpg 一起删），所以必须：
+               ① 用 `a-popconfirm` 而不是 `Modal.confirm`（后者在暗色下样式突兀、
+                  且记忆里已有「弹层 prop 名不统一」的坑，popconfirm 少一层风险）；
+               ② 文案写明**会连磁盘文件一起删**、要**写清张数**（"删 3 张"比"确定吗？"可核对）；
+               ③ 删完必须**退出批量模式并清空选择** —— 否则 selectedIds 里
+                  留着已被删掉的 id，工具条会一直显示"已选 3 张"而列表只剩 2 张。 -->
+          <a-popconfirm
+            v-if="selectedIds.size"
+            :content="`确定删除这 ${selectedIds.size} 张抓拍图？磁盘上的图片文件也会一并删除，无法恢复。`"
+            type="warning"
+            :data-testid="`library-batch-delete-confirm-${selectedIds.size}`"
+            @ok="deleteSelected"
+          >
+            <template #icon><Delete :size="15" /></template>
+            <a-button size="small" type="error" data-testid="library-batch-delete" :loading="deleting" :disabled="deleting">
+              {{ deleting ? "正在删除…" : "批量删除" }}
+            </a-button>
+          </a-popconfirm>
         </div>
 
         <div class="library-body">
@@ -111,6 +129,7 @@
                 'library-card--selected': batchMode && selectedIds.has(item.id),
                 'library-card--active': detail?.id === item.id
               }"
+              :data-snapshot-id="item.id"
             >
               <button
                 type="button"
@@ -192,16 +211,25 @@
                        浏览态是默认场景，每张图上都挂一个复选框会让人以为
                        「进来就要做选择」，而绝大多数人只是来找图看图的。
                        ⛔ 位置在卡片**左下角**（原来压在图片上）—— 压图会盖掉
-                       画面左上角，而那正是判断"拍到没有"的关键区域。 -->
-                  <label v-if="batchMode" class="library-pick" @click.stop>
-                    <a-checkbox
-                      :model-value="selectedIds.has(item.id)"
-                      :data-testid="`library-pick-${item.id}`"
-                      @change="toggleSelect(item.id)"
-                    >
-                      选这张
-                    </a-checkbox>
-                  </label>
+                       画面左上角，而那正是判断"拍到没有"的关键区域。
+
+                       ⛔⛔ **外面不能包 `<label>`**（老板 2026-10-07 报"勾第一张第二张也跟着勾"）。
+                       真实 Arco 的 `<a-checkbox>` 渲染出的 `<input>` **没有 id**，
+                       而 `<label>` 也没有 `for` ⇒ 点「选这张」文字时浏览器找不到
+                       关联控件，**回退激活页面里第一个可聚焦元素** ⇒ 表现为
+                       "点 A 结果勾上了 B"。`@click.stop` 挡得住冒泡、挡不住这个默认行为。
+                       ✅ 复现：checkbox 的 snapshot 出现 `checked=true` 的不是我点的那一个。
+                       ✅ `a-checkbox` 自带 `<label>` 包裹（它内部就是 label>input 结构），
+                       点文字本来就能勾选，外层再包一层纯属多余。 -->
+                  <a-checkbox
+                    v-if="batchMode"
+                    class="library-pick"
+                    :model-value="selectedIds.has(item.id)"
+                    :data-testid="`library-pick-${item.id}`"
+                    @change="toggleSelect(item.id)"
+                  >
+                    选这张
+                  </a-checkbox>
                   <span v-else class="library-actions-spacer" />
                   <a-link
                     class="uvp-table-action--primary"
@@ -359,11 +387,11 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Message } from "@arco-design/web-vue";
-import { CheckSquare, Download, ImageOff, RotateCcw, Search } from "@lucide/vue";
+import { CheckSquare, Delete, Download, ImageOff, RotateCcw, Search } from "@lucide/vue";
 import { getAccessToken } from "@/utils/auth";
 import { getBaseUrl } from "@/api/utils";
 import { useUserStoreHook } from "@/store/modules/user";
-import { listSnapshotLibrary, type SnapshotLibraryItem } from "@/api/gb28181";
+import { deleteSnapshots, listSnapshotLibrary, type SnapshotLibraryItem } from "@/api/gb28181";
 import {
   emptySnapshotFilters,
   formatCapturedAt,
@@ -414,6 +442,7 @@ const detailVisible = ref(false);
 const detail = ref<SnapshotLibraryItem | null>(null);
 const selectedIds = ref(new Set<number>());
 const downloading = ref(false);
+const deleting = ref(false);
 
 /**
  * 批量选择模式开关（老板 2026-10-06）。
@@ -520,6 +549,44 @@ function toggleSelectAll() {
   if (allSelected.value) rows.value.forEach(item => next.delete(item.id));
   else rows.value.forEach(item => next.add(item.id));
   selectedIds.value = next;
+}
+
+/**
+ * 批量删除已选抓拍图（老板 2026-10-07 要求）。
+ *
+ * ⛔ 不可恢复：后端连磁盘上的 jpg 一起删。
+ * ⛔ 删完**必须退出批量模式 + 清空选择**：selectedIds 里若还留着已删掉的 id，
+ * 工具条会一直显示"已选 3 张"而列表只剩 2 张，用户会以为删失败又去点删除。
+ * ⛔ 只在**当前页**可见范围内选（selectedIds 本身就是本页勾选的），删完重新拉列表，
+ * 不要前端自行 filter —— 后端才是权威（可能有越权行被后端跳过）。
+ */
+async function deleteSelected() {
+  if (deleting.value) return;
+  const ids = [...selectedIds.value];
+  if (!ids.length) return;
+  deleting.value = true;
+  try {
+    const res = await deleteSnapshots(ids);
+    const result = res?.data;
+    // ⛔ `filesFailed > 0` 要**单独提示**：库行删了但磁盘文件还在，
+    // 用户以为清干净了，磁盘却在悄悄堆积。
+    if (result?.filesFailed) {
+      Message.warning(`已删除 ${result.deleted} 条记录，但有 ${result.filesFailed} 个图片文件未能删除（可在服务器上手动清理）`);
+    } else {
+      Message.success(`已删除 ${result?.deleted ?? ids.length} 张抓拍图`);
+    }
+    exitBatchMode();
+    await loadRows();
+  } catch (error) {
+    // ⛔ 失败时**保留选择**：用户点重试就能再试一次，
+    // 清空选择等于让他重新勾一遍。
+    // ⛔ 这里在 `<script>` 里，必须写 `errorMessage.value`：模板里能自动解包，
+    // 脚本里写 `errorMessage = ...` 是给 const 赋值 ⇒ TS2588 编译报错。
+    errorMessage.value = (error as Error)?.message || "删除失败";
+    Message.error(errorMessage.value);
+  } finally {
+    deleting.value = false;
+  }
 }
 
 function clearSelection() {

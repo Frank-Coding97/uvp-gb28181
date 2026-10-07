@@ -482,6 +482,129 @@ const snapshotLibrarySelect = "s.id, s.device_id, s.channel_id, s.channel_code, 
 //
 // 与 [DeviceMgmtController.SnapshotContent] 的分工：本条回答"有哪些图"（只出元数据 + 取图地址），
 // 那条回答"这张图的字节"。
+// DeleteSnapshots 批量删除抓拍图（老板 2026-10-07 要求）。
+//
+//	DELETE /api/gb28181/device-mgmt/snapshots   body: {"ids":[1,2]}
+//
+// ⛔ 语义是**彻底删**：库行物理删除 **且** 删掉磁盘上的 jpg（老板明确选择，不可恢复）。
+//
+// ⛔ 顺序刻意是「先删文件 → 再删库行」，反过来的话一旦文件删失败就回滚不了库，
+// 而文件删不掉时保留库行至少还能在列表里看到这张图（用户可以重试）。
+//
+// ⛔ 可见性 Scope 必须带：否则能删到别的部门/设备管理范围之外的图。
+// ⛔ 文件路径必须走 `registry.FilePath`（它内含**路径穿越**校验：
+// `strings.HasPrefix(target, base+sep)`），绝不能直接 `filepath.Join(root, rel)`
+// —— rel_path 来自数据库，一旦被篡改成 `../../etc/passwd` 就是任意文件删除。
+func (dc *DeviceMgmtController) DeleteSnapshots(c *gin.Context) {
+	db := dc.db()
+	registry := dc.captureRuntime()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+
+	var payload struct {
+		IDs []uint64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		dc.FailAndAbort(c, "参数不合法", nil)
+		return
+	}
+	// ⛔ 去重 + 限量：重复 id 会让 `IN` 变长且无意义；不限量则一个超大数组
+	// 会把整个事务撑爆（每条都要 stat 文件）。
+	ids := dedupUint64(payload.IDs)
+	if len(ids) == 0 {
+		dc.FailAndAbort(c, "请先选择要删除的图片", nil)
+		return
+	}
+	const maxDelete = 200
+	if len(ids) > maxDelete {
+		dc.FailAndAbort(c, fmt.Sprintf("一次最多删除 %d 张，请分批操作", maxDelete), nil)
+		return
+	}
+
+	ctx := c.Request.Context()
+	// ⛔ 带可见性 Scope 取行：拿不到的行（不存在/越权）**不计入失败**，
+	// 直接忽略即可 —— 前端列表本来也只显示看得见的图。
+	var rows []gbmodels.GbChannelSnapshot
+	// ⛔ 用带别名的可见性 Scope：本表自己也有 device_id/channel_id 列（平台主键），
+	// 不带前缀在联表里是歧义列。
+	q := db.WithContext(ctx).Select("id", "rel_path").Where("id IN ?", ids).
+		Scopes(aliasedChannelVisibleScope(c))
+	if err := q.Find(&rows).Error; err != nil {
+		dc.FailAndAbort(c, "查询失败", err)
+		return
+	}
+	if len(rows) == 0 {
+		dc.Success(c, gin.H{"deleted": 0, "filesFailed": 0})
+		return
+	}
+
+	// 先删文件。⚠️ 逐个删而不是并发：图片数受 maxDelete 限制，
+	// 并发只会让错误处理变复杂，且这里的瓶颈是磁盘 IO。
+	//
+	// ⛔ registry 为 nil（抓拍存储未装配）时**只删库行**：删文件必须经
+	// `registry.FilePath` 做**路径穿越**校验（`strings.HasPrefix(target, base+sep)`），
+	// 没有它就只能直接 `filepath.Join(root, rel)` —— 而 rel_path 来自数据库，
+	// 一旦被篡改成 `../../etc/passwd` 就是**任意文件删除**。
+	// 此时宁可留孤儿文件（可人工清理）也不能开这个口子。
+	fileFailed := 0
+	if registry == nil {
+		zap.S().Warnw("抓拍存储未装配，本次只删除库行，文件保留待人工清理",
+			zap.Int("rows", len(rows)))
+		fileFailed = len(rows)
+	} else {
+		for i := range rows {
+			path, err := registry.FilePath(rows[i].RelPath)
+			if err != nil {
+				// ⛔ 路径非法（库里数据被篡改）⇒ **跳过这个文件**，
+				// 但库行照删：否则一条坏数据就能让整个批量删不掉。
+				zap.S().Errorw("快照相对路径非法，跳过文件删除",
+					zap.Uint("id", rows[i].ID), zap.String("rel_path", rows[i].RelPath))
+				fileFailed++
+				continue
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				// ⛔ 文件不存在（os.IsNotExist）不算失败：库行与磁盘不一致是可预期
+				// 的运营状态（手工清过目录），此时仍应把库行删掉，让列表归位。
+				zap.S().Errorw("抓拍图文件删除失败",
+					zap.Uint("id", rows[i].ID), zap.Error(err))
+				fileFailed++
+			}
+		}
+	}
+
+	delIDs := make([]uint64, 0, len(rows))
+	for i := range rows {
+		delIDs = append(delIDs, uint64(rows[i].ID))
+	}
+	// ⛔ 物理删除而不是 `deleted_at` 软删：老板明确要求"彻底删、文件也删"，
+	// 软删会让这张图在库里永久占位却永远取不到（文件没了）。
+	if err := db.WithContext(ctx).Unscoped().Where("id IN ?", delIDs).
+		Delete(&gbmodels.GbChannelSnapshot{}).Error; err != nil {
+		dc.FailAndAbort(c, "删除失败", err)
+		return
+	}
+	dc.Success(c, gin.H{"deleted": len(delIDs), "filesFailed": fileFailed})
+}
+
+// dedupUint64 去重并保持原顺序（批量删除的入参可能重复）。
+func dedupUint64(in []uint64) []uint64 {
+	seen := make(map[uint64]struct{}, len(in))
+	out := make([]uint64, 0, len(in))
+	for _, v := range in {
+		if v == 0 {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
 func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 	db := dc.db()
 	if db == nil {

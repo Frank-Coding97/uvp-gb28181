@@ -314,7 +314,13 @@ describe("image library download and batch actions", () => {
     // 否则"没勾选 → 工具条不显示 → 看不到已选 0 张"，用户以为自己没选上。
     expect(pageSource).toContain('v-if="batchMode" class="library-batch"');
     // ⛔ 勾选框在 body 底部行（`library-card-actions`）里，不在图片区（`library-thumb`）里。
-    expect(pageSource).toContain('v-if="batchMode" class="library-pick"');
+    // ⛔⛔ 勾选框**外面不能再包一层 <label>**（老板 2026-10-07 报"勾第一张第二张也跟着勾"）：
+    // a-checkbox 内部的 input 没有 id、外层 label 也没有 for ⇒ 点「选这张」文字时
+    // 浏览器找不到关联控件，会回退激活页面里**第一个**可聚焦元素。
+    //     判据钉"没有 label 包裹"这件事本身，而不是去匹配 attr 的换行位置。
+    expect(pageSource).toContain('class="library-pick"');
+    expect(pageSource).not.toContain('<label v-if="batchMode" class="library-pick"');
+    expect(pageSource).not.toContain('<label class="library-pick"');
     // ⛔ 浮层时代的样式（半透明黑底/白描边/z-index）必须删干净：
     // 勾选框已改成行内元素，留着就是"行内元素带 z-index"的死样式。
     const pick = cssBlock(pageSource, ".library-pick");

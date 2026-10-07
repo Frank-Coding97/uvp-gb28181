@@ -943,6 +943,12 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			// 不是一条 —— gin 允许两者共存(GET 同方法不同深度),但少注册一条的表现是
 			// "页面打得开、列表永远空"(404 被前端当成空数组),而不是报错。
 			dmgmt.GET(gbmodels.SnapshotListRoutePath, deviceMgmtController.ListSnapshots)
+			// 图像库**批量删除**：与列表同一条路径、不同方法。
+			// ⛔ 用同一个常量而不是手写字面量：删接口的 sys_api 授权走全路径
+			// (SnapshotListAPIPath)，与列表共用 ⇒ 不用新增一条授权记录。
+			// ⚠️ 若将来要单独授权（只读账号不许删），必须另开一条路径常量并登记新的 sys_api，
+			// 否则同一条路径会共用同一份授权，权限拆分不成立。
+			dmgmt.DELETE(gbmodels.SnapshotListRoutePath, deviceMgmtController.DeleteSnapshots)
 			dmgmt.GET("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.GetPlaybackSession)
 			dmgmt.POST("/channel/:id/playback-sessions/:sessionId/actions", deviceMgmtController.ActionPlaybackSession)
 			dmgmt.DELETE("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.DeletePlaybackSession)

@@ -1286,6 +1286,32 @@ export interface SnapshotLibraryQuery {
 export const listSnapshotLibrary = (params: SnapshotLibraryQuery = {}) =>
   http.request<BaseResult<SnapshotLibraryPage>>("get", baseUrlApi("gb28181/device-mgmt/snapshots"), { params });
 
+/** 批量删除抓拍图的结果。 */
+export interface SnapshotDeleteResult {
+  /** 实际删掉的库行数（已去重、且只算当前账号看得见的）。 */
+  deleted: number;
+  /**
+   * ⛔ **文件**没删掉的条数。
+   * ⛔ 与 `deleted` 分开报：库行删了但文件还在（抓拍存储未装配 / 路径非法），
+   * 用户需要知道磁盘上还留着图，而不是以为清干净了。
+   */
+  filesFailed: number;
+}
+
+/**
+ * 批量删除抓拍图（**彻底删**：库行物理删除 + 删掉磁盘 jpg，不可恢复）。
+ *
+ * ⛔ 与列表同一条路径、不同方法（`DELETE /gb28181/device-mgmt/snapshots`）——
+ * 共用同一份 `sys_api` 授权，所以**只有图像库权限**就能删，不额外设权限码。
+ * ⚠️ 若将来要"只读账号不许删"，必须另开路径常量 + 新登记 `sys_api`，
+ * 同路径共用授权的做法拆不开权限。
+ *
+ * ⛔ ids 由前端去重后再传，但**后端仍要去重**：重复 id 会让返回的
+ * `deleted` 数字对不上，用户以为"删了 2 张"其实只有 1 张。
+ */
+export const deleteSnapshots = (ids: number[]) =>
+  http.request<BaseResult<SnapshotDeleteResult>>("delete", baseUrlApi("gb28181/device-mgmt/snapshots"), { data: { ids } });
+
 export const controlPtz = (channelId: number, data: Record<string, unknown>) =>
   http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz`), { data });
 
