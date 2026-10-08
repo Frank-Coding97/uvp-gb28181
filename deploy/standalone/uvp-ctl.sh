@@ -273,10 +273,16 @@ stop_by_pidfile() {
       kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
     fi
     rm -f "$pid_file"
-    return 0
+    # ⛔⛔ pid 已失效时**不能直接 return** —— 必须继续往下走兜底。
+    #   实测踩过：ZLM 会 **daemon 化**（自己 fork，ppid 变成 1），
+    #   start_zlm 里 `echo $!` 记到的是那个短命的父进程 pid。
+    #   ⇒ 第一次 stop 时 kill -0 <父pid> 已失败 ⇒ 原实现直接 return 0，
+    #     而**真正在监听端口的 ZLM 永远停不掉**，
+    #     症状是「stop 说已停止、端口还占着、再 start 被端口预检拦下」。
+    #   ⇒ pid 文件的 pid 失效**不等于**服务停了，两种情况要分开处理。
   fi
 
-  # 兜底：pid 文件不在了 ⇒ 按绝对路径找本包启动的进程
+  # 兜底：pid 文件不在、或里面那个 pid 已失效 ⇒ 按绝对路径找本包启动的进程
   #
   # ⛔⛔ 匹配用「路径**出现在**命令行里」而不是「路径**开头**」。
   #   实测 redis 被自己的守护逻辑改写了 argv[0]：
