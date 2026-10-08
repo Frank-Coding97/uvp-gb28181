@@ -265,7 +265,9 @@ cp -a "$SERVER_DIR/resource/database/sqlitebaseline" "$PKG/resource/baseline"
 #   出包时落到 resource/public/uploads/seed/ —— **不带日期**，
 #   这样路径稳定、不会被用户上传的头像覆盖，也不与 uploads/<日期>/ 混。
 AVATAR_SEED_SRC="$SERVER_DIR/resource/seed-assets/avatar"
-AVATAR_SEED_URL="/public/uploads/seed/admin.png"
+# ⛔ 这里曾有个死变量 AVATAR_SEED_URL —— 定义后从未使用（URL 是写在
+#   sys_users 种子里的，两边靠"约定的同一个路径"对齐，不是靠这个变量传递）。
+#   它会触发 shellcheck SC2034，而出包门禁是「有输出就fail」⇒ 直接卡住出包。
 if [ -f "$AVATAR_SEED_SRC/admin.png" ]; then
   mkdir -p "$PKG/resource/public/uploads/seed"
   cp "$AVATAR_SEED_SRC/admin.png" "$PKG/resource/public/uploads/seed/admin.png"
