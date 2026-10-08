@@ -100,6 +100,37 @@ http {
             try_files $uri =404;
         }
 
+        # ---------------- 用户上传的资源 ----------------
+        # ⛔⛔⛔ 必须有这一条，否则**所有用户上传的文件都取不到**。
+        #   为什么：`root` 指向 resource/public，所以磁盘上的 uploads/xxx.png
+        #   对应的 URL 是 `/uploads/xxx.png`（**没有** /public 前缀）；
+        #   而后端 GetFileUrl 生成的却是
+        #     `httpserver.serverrootpath` + `/uploads/...` = `/public/uploads/...`
+        #   （config.example.yml 里 serverrootpath 默认就是 "/public"）。
+        #   ⇒ 两边差一个 /public 前缀，nginx 匹配不到 ⇒ 落到 SPA 回落
+        #     把 index.html 返回给图片请求 ⇒ **HTTP 200 但内容是 HTML**，
+        #     浏览器静默显示不出图，**全程零报错**（实测踩过：admin 头像出不来）。
+        #
+        # ⚠️ 这里用 alias 而不是改 root：`/public/uploads/` 映射到
+        #   `resource/public/uploads/`（去掉 /public 前缀）。
+        location /public/uploads/ {
+            alias @ROOT@/resource/public/uploads/;
+            # ⚠️ 上传目录是**用户可写**的：关掉脚本执行、限制方法。
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            # 上传的文件名带日期与 uuid，不做immutable（避免同名覆盖后拿到旧缓存）
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        # 其余 /public/ 下的静态文件（图纸、文档等）
+        location /public/ {
+            alias @ROOT@/resource/public/;
+            autoindex off;
+        }
+
         # ⛔ SPA 前端路由：任何未匹配的路径都交回 index.html，
         #   否则刷新 /devices/123 会 404（前端是 history 路由）。
         #   ⚠️ 但 /api/ 与 /gb28181/ 必须列在前面 —— 否则它们会被这条规则
@@ -175,6 +206,26 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header Connection        "";
+        }
+
+        # 用户上传的资源：明文入口也必须放行。
+        # ⛔ 不能只留 HTTPS 那一条 —— 明文段的 `location /` 是 301 跳 HTTPS，
+        #   而**图片/附件被301 跟随后是能通的**，只是多一跳；
+        #   真正的问题是扫码/移动端若直接引明文地址（不跟随跳转）就拿不到图。
+        #   规则与 HTTPS 段保持一致（alias 去掉 /public 前缀）。
+        location /public/uploads/ {
+            alias @ROOT@/resource/public/uploads/;
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        location /public/ {
+            alias @ROOT@/resource/public/;
+            autoindex off;
         }
 
         location / {
