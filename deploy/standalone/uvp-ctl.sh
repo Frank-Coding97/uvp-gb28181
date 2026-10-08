@@ -379,6 +379,27 @@ start_backend() {
   [ -f "$CONF" ]    || fail "找不到配置文件 $CONF"
   [ -f "$ROOT/version.json" ] || fail "找不到 version.json（后端启动会读它，缺了日志里全是噪音）"
 
+  # ---- 把「后端要读的环境变量」从 config.env 显式导出到子进程 ----
+  #
+  # ⛔⛔ 为什么必须显式导出：`read_env_file` 只是**按需取值**，
+  #   `config.env` 里的东西并不会自动成为进程环境变量 ——
+  #   而 SIP 报文诊断的加密密钥是走 `os.Getenv(envName)` 读的（trace/crypto.go），
+  #   不导出 ⇒ 后端永远读不到 ⇒ 报文诊断无法落库（fail-closed，不存明文，但功能不可用）。
+  #
+  # ⛔ 键名与 config.yml 里的 `gb28181.trace.encryption_key_env` **必须一致**，
+  #   这里只认这一条 —— 别顺手加更多变量：config.env 是明文文件，
+  #   往里放不该落盘的东西会随包分发。
+  #
+  # 用法（config.env 里加一行，重启即生效）：
+  #   UVP_SIP_TRACE_ENCRYPTION_KEY=<32 字节，原文 / base64 / hex 均可>
+  # 密钥缺失时的表现：报文诊断整体不落库（安全，但菜单点进去是空的）。
+  SIP_TRACE_KEY_ENV="UVP_SIP_TRACE_ENCRYPTION_KEY"
+  sip_trace_key="$(read_env_file "$SIP_TRACE_KEY_ENV")"
+  if [ -n "$sip_trace_key" ]; then
+    export "$SIP_TRACE_KEY_ENV=$sip_trace_key"
+    log "SIP 报文诊断密钥已从 config.env 载入"
+  fi
+
   # ⛔ 绝不能关掉子 shell 的 stdio：`uvp-ctl.sh start | tail` 这类用法会永远挂住
   #   （孤儿子 shell 攥着管道的写端），看起来像「启动卡死」。实测挂过 10 分钟以上。
   ( "$SERVER_BIN" >"$BACKEND_LOG" 2>&1 </dev/null & echo $! > "$BACKEND_PID_FILE" ) >/dev/null 2>&1

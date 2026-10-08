@@ -121,45 +121,25 @@ func (sm *SysMenuController) GetRouters(c *gin.Context) {
 		}
 	}
 
-	disabledFeatures := map[string]bool{}
-	if !app.ConfigYml.GetBool("gb28181.trace.enabled") {
-		disabledFeatures["/gb28181/sip-traces"] = true
-	}
-	menuList = filterDisabledFeatureMenus(menuList, disabledFeatures)
+	// ⛔⛔ 这里**不再按配置文件的开关过滤菜单**（老板 2026-10-08 定）。
+	//
+	// 原实现：`gb28181.trace.enabled=false` 时把 `/gb28181/sip-traces` 从菜单里剔掉。
+	// 问题有三条，每条都真实发生过：
+	//  1. 正常用户**只认界面上的开关**（国标服务配置 → 「是否开启 SIP 日志」），
+	//     没人会去改config.yml ⇒ 界面上开了、菜单仍不出现。
+	//  2. `trace.enabled` 只有**重启后端**才进 viper；而界面保存走的是
+	//     `SaveConfig()` + 热重载 SIP 服务，**不重载 viper** ⇒
+	//     菜单显隐与开关状态长期不一致，症状就是「改了要重启才生效」。
+	//  3. 功能关闭时用户点进去是一片空白，**没有任何提示**，
+	//     分不清是「没数据」还是「功能没开」。
+	//
+	//⇒ 现在的契约：**数据库里有就展示**；功能是否可用由页面自己感知并引导开启。
+	//关闭态的提示与跳转入口见 `views/gb28181/sip-log-v2`。
 	if !menuList.IsEmpty() {
 		menuList = menuList.BuildTree(c.Request.Context()).TreeSort()
 	}
 
 	sm.Success(c, menuList)
-}
-
-func filterDisabledFeatureMenus(menuList models.SysMenuList, disabledPaths map[string]bool) models.SysMenuList {
-	if len(menuList) == 0 || len(disabledPaths) == 0 {
-		return menuList
-	}
-	removedIDs := make(map[uint]bool)
-	for _, menu := range menuList {
-		if disabledPaths[menu.Path] {
-			removedIDs[menu.ID] = true
-		}
-	}
-	changed := true
-	for changed {
-		changed = false
-		for _, menu := range menuList {
-			if !removedIDs[menu.ID] && removedIDs[menu.ParentID] {
-				removedIDs[menu.ID] = true
-				changed = true
-			}
-		}
-	}
-	filtered := make(models.SysMenuList, 0, len(menuList)-len(removedIDs))
-	for _, menu := range menuList {
-		if !removedIDs[menu.ID] {
-			filtered = append(filtered, menu)
-		}
-	}
-	return filtered
 }
 
 // GetMenuList 获取完整的菜单列表

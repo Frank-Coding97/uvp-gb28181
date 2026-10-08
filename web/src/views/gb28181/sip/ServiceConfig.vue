@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Message } from "@arco-design/web-vue";
 import { Check, RotateCcw } from "lucide-vue-next";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { getDictItemsByDictCodeAPI } from "@/api/dictionary";
 import {
   fetchServiceConfig,
@@ -522,7 +523,29 @@ async function loadServiceConfig() {
   }
 }
 
-onMounted(loadServiceConfig);
+// 从 SIP 日志页跳转过来时高亮那个开关（老板 2026-10-08 定的引导链路）。
+//
+// ⛔ 判据只认 `?focus=` 的**具体键名**，不做模糊匹配 ——
+//   否则 "?focus=sip" 之类会误命中一堆开关，用户反而找不到要看的地方。
+// ⛔⛔ `useRoute()` 在没有路由上下文的场合（单测里直接 mount 本组件）会返回 undefined，
+//   直接读 `route.query` 会把整个组件渲染打断（`Cannot read properties of undefined`），
+//   ⭐ 而且症状是「39 条用例一起红」，看不出是哪一行引起的。
+//   ⇒ 这里判空后退化成「不高亮」，功能降级但页面照常。
+const route = useRoute();
+const focusedField = computed(() => {
+  const raw = route?.query?.focus;
+  return typeof raw === "string" ? raw : "";
+});
+const isSipLogFocused = computed(() => focusedField.value === "sipLogEnabled");
+
+onMounted(async () => {
+  await loadServiceConfig();
+  // 数据到位后再高亮：字段是异步渲染的，早一步 scrollIntoView 找不到节点。
+  if (isSipLogFocused.value) {
+    await nextTick();
+    document.querySelector('[data-field="sipLogEnabled"]')?.scrollIntoView({ block: "center" });
+  }
+});
 </script>
 
 <template>
@@ -696,6 +719,8 @@ onMounted(loadServiceConfig);
               <a-col :span="isMobile ? 24 : 12">
                 <a-form-item
                   field="sipLogEnabled"
+                  data-field="sipLogEnabled"
+                  :class="{ 'sip-log-focused': isSipLogFocused }"
                   label="是否开启 SIP 日志"
                   :tooltip="
                     sipLogApplied
@@ -1074,6 +1099,13 @@ onMounted(loadServiceConfig);
 <style lang="scss" scoped>
 .service-config-page {
   overflow-y: auto;
+}
+
+// 从 SIP 日志页跳来时的定位高亮（老板 2026-10-08）。
+// ⛔ 只描边不铺大面积底色 —— 暗色下大面积 brand 底会发白发糊（本仓踩过）。
+.sip-log-focused {
+  border-radius: var(--uvp-border-radius-md, 8px);
+  box-shadow: 0 0 0 2px var(--uvp-brand, #2563eb) inset;
 }
 
 .service-config-tabs {

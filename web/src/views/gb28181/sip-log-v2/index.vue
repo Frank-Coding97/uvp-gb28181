@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
 import { Message } from "@arco-design/web-vue";
 import {
@@ -42,6 +42,24 @@ type TraceWindowMinutes = 5 | 10 | 30 | 60;
 type TraceWindowPreset = TraceWindowMinutes | "custom";
 
 const route = useRoute();
+const router = useRouter();
+
+// SIP 日志未启用时的引导（老板 2026-10-08 定）。
+//
+// ⛔ 菜单**不再按配置过滤**了（数据库里有就展示），所以"没数据"有两种完全不同的原因：
+//   ① 功能压根没开⇒ 一直不会有数据，用户却分不清是「没数据」还是「功能没开」；
+//   ② 开了但这段时间确实没有 SIP 往来。
+// ⇒ 必须靠 health.state 区分：`disabled` 走引导态，其余照常展示列表。
+const traceDisabled = computed(() => health.value.state === "disabled");
+
+// 国标服务配置页的路径（菜单 id=140369 → /gb28181/sip/config）。
+//⛔ 别硬编码后就完事 —— 路径变了这里会静默跳错地方；
+//   顺带带上来源标记，让配置页能把那个开关高亮出来（见 serviceConfigState.ts）。
+const SIP_CONFIG_PATH = "/gb28181/sip/config";
+
+function gotoSipConfig() {
+  void router.push({ path: SIP_CONFIG_PATH, query: { focus: "sipLogEnabled" } });
+}
 
 const DEFAULT_TRACE_WINDOW_MINUTES: TraceWindowMinutes = 5;
 const traceWindowOptions: Array<{ value: TraceWindowMinutes; label: string }> = [
@@ -541,9 +559,23 @@ onBeforeUnmount(() => {
       <!-- 主体:视图区(左) + 可选的详情面板(右) -->
       <div :class="['workspace', { 'has-detail': showDetailPanel }]">
         <div class="view-slot">
+          <!--未启用引导态：菜单照常展示，但明确告知"为什么没有数据"并给出开启入口。
+               ⛔ 必须与"已启用但这段时间没有 SIP 往来"区分开 —— 后者数据为空是正常的，
+               前者是功能没开、永远不会有数据。不区分的话用户只会以为系统坏了。-->
+          <div v-if="traceDisabled && !drillCallId" class="trace-disabled-hint">
+            <CircleOff class="trace-disabled-icon" :size="30" aria-hidden="true" />
+            <p class="trace-disabled-title">SIP 日志当前处于关闭状态</p>
+            <p class="trace-disabled-desc">
+              开启后系统会采集 SIP 原始信令并写入 Trace 存储，用于排查注册失败、点播卡住等问题。 关闭期间不会产生任何日志数据。
+            </p>
+            <a-button type="primary" class="trace-disabled-action" @click="gotoSipConfig">
+              <template #icon><icon-settings /></template>
+              去国标服务配置开启
+            </a-button>
+          </div>
           <!-- 会话时序详情:表格点某会话进入 -->
           <SessionDetail
-            v-if="drillCallId && drillSession"
+            v-else-if="drillCallId && drillSession"
             :session="drillSession"
             :messages="drillMessages"
             :selected-event-id="selectedEventId"
@@ -579,6 +611,41 @@ onBeforeUnmount(() => {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 未启用引导态：占满视图区，不做居中卡片（避免与大块内容嵌套出双层边框） */
+.trace-disabled-hint {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.trace-disabled-icon {
+  color: var(--uvp-text-tertiary, #86909c);
+}
+
+.trace-disabled-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--uvp-text-primary, #1f2937);
+}
+
+.trace-disabled-desc {
+  max-width: 460px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--uvp-text-secondary, #4e5969);
+}
+
+.trace-disabled-action {
+  margin-top: 4px;
 }
 .toolbar-left {
   display: flex;
