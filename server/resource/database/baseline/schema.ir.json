@@ -6,7 +6,7 @@
     "live_table_count": 112,
     "included_table_count": 111,
     "excluded_table_count": 20,
-    "schema_fingerprint": "5cec5cc55af5f3345e2e00e8aa03241f5066e5070af13e37c66d24ad55379e9b",
+    "schema_fingerprint": "31da105ee0069a9205fe7153f6b37efa3c07b85d3176b0b0333f3abdbf83c360",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -12918,24 +12918,6 @@
           "boolean": true
         },
         {
-          "name": "hook_ip",
-          "type": "varchar(45)",
-          "nullable": false,
-          "default": "",
-          "extra": "",
-          "comment": "平台默认 Hook 地址",
-          "collation": "utf8mb4_0900_ai_ci"
-        },
-        {
-          "name": "stream_ip",
-          "type": "varchar(253)",
-          "nullable": false,
-          "default": "",
-          "extra": "",
-          "comment": "平台默认 Stream 地址",
-          "collation": "utf8mb4_0900_ai_ci"
-        },
-        {
           "name": "port",
           "type": "int unsigned",
           "nullable": false,
@@ -12988,6 +12970,24 @@
           "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
           "comment": "更新时间",
           "collation": null
+        },
+        {
+          "name": "hook_ip",
+          "type": "varchar(45)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_0900_ai_ci"
+        },
+        {
+          "name": "stream_ip",
+          "type": "varchar(253)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_0900_ai_ci"
         }
       ],
       "primary_key": [
@@ -15719,15 +15719,6 @@
           "collation": "utf8mb4_general_ci"
         },
         {
-          "name": "hook_ip",
-          "type": "varchar(45)",
-          "nullable": false,
-          "default": "",
-          "extra": "",
-          "comment": "节点默认 Hook 地址",
-          "collation": "utf8mb4_general_ci"
-        },
-        {
           "name": "receive_host",
           "type": "varchar(255)",
           "nullable": false,
@@ -15932,6 +15923,15 @@
           "type": "varchar(16)",
           "nullable": false,
           "default": "unknown",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "hook_ip",
+          "type": "varchar(45)",
+          "nullable": false,
+          "default": "",
           "extra": "",
           "comment": "",
           "collation": "utf8mb4_general_ci"
@@ -21306,17 +21306,6 @@
           "collation": "utf8mb4_0900_ai_ci"
         },
         {
-          "name": "must_change_password",
-          "type": "tinyint(1)",
-          "nullable": false,
-          "default": "0",
-          "extra": "",
-          "comment": "",
-          "collation": null,
-          "boolean": true,
-          "boolean_reason": "policy:boolean_columns（模型字段为 bool 类型）"
-        },
-        {
           "name": "email",
           "type": "varchar(100)",
           "nullable": true,
@@ -21425,6 +21414,17 @@
           "extra": "",
           "comment": "创建人",
           "collation": null
+        },
+        {
+          "name": "must_change_password",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true,
+          "boolean_reason": "policy:boolean_columns（模型字段为 bool 类型）"
         }
       ],
       "primary_key": [

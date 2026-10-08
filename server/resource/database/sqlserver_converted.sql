@@ -1825,14 +1825,14 @@ BEGIN
     [listen_ip] NVARCHAR(45) NOT NULL,
     [advertise_ip] NVARCHAR(45) NOT NULL,
     [advertise_ip_inferred] BIT NOT NULL DEFAULT 0,
-    [hook_ip] NVARCHAR(45) NOT NULL DEFAULT N'',
-    [stream_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     [port] INT NOT NULL,
     [domain] NVARCHAR(10) NOT NULL,
     [server_id] NVARCHAR(20) NOT NULL,
     [password] NVARCHAR(255) NOT NULL,
     [created_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     [updated_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    [hook_ip] NVARCHAR(45) NOT NULL DEFAULT N'',
+    [stream_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     PRIMARY KEY ([id]),
     CONSTRAINT [chk_gb_sip_config_deployment_mode] CHECK (([deployment_mode] in ('lan','public'))),
     CONSTRAINT [chk_gb_sip_config_port] CHECK (([port] between 1 and 65535)),
@@ -2219,7 +2219,6 @@ BEGIN
     [revision] BIGINT NOT NULL DEFAULT 1,
     [name] NVARCHAR(64) NOT NULL DEFAULT N'',
     [host] NVARCHAR(64) NOT NULL DEFAULT N'',
-    [hook_ip] NVARCHAR(45) NOT NULL DEFAULT N'',
     [receive_host] NVARCHAR(255) NOT NULL DEFAULT N'',
     [playback_host] NVARCHAR(255) NOT NULL DEFAULT N'',
     [api_port] INT NOT NULL DEFAULT 18080,
@@ -2243,6 +2242,7 @@ BEGIN
     [runtime_confirmed_revision] BIGINT NOT NULL DEFAULT 0,
     [runtime_confirmed_at] DATETIME2(6),
     [runtime_identity_status] NVARCHAR(16) NOT NULL DEFAULT N'unknown',
+    [hook_ip] NVARCHAR(45) NOT NULL DEFAULT N'',
     CONSTRAINT [uk_media_server_uuid] UNIQUE ([media_server_uuid])
   );
 END;
@@ -2900,7 +2900,6 @@ BEGIN
     [id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     [username] NVARCHAR(50) NOT NULL DEFAULT N'',
     [password] NVARCHAR(255) NOT NULL DEFAULT N'',
-    [must_change_password] BIT NOT NULL DEFAULT 0,
     [email] NVARCHAR(100) DEFAULT N'',
     [status] TINYINT DEFAULT 1,
     [dept_id] INT DEFAULT 0,
@@ -2913,6 +2912,7 @@ BEGIN
     [updated_at] DATETIME2(3),
     [deleted_at] DATETIME2(3),
     [created_by] INT DEFAULT 0,
+    [must_change_password] BIT NOT NULL DEFAULT 0,
     CONSTRAINT [username] UNIQUE ([username])
   );
 END;

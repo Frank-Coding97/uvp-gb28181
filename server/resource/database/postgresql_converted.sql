@@ -1628,14 +1628,14 @@ CREATE TABLE "gb_sip_config" (
   "listen_ip" VARCHAR(45) NOT NULL,
   "advertise_ip" VARCHAR(45) NOT NULL,
   "advertise_ip_inferred" BOOLEAN NOT NULL DEFAULT false,
-  "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
-  "stream_ip" VARCHAR(253) NOT NULL DEFAULT '',
   "port" INTEGER NOT NULL,
   "domain" VARCHAR(10) NOT NULL,
   "server_id" VARCHAR(20) NOT NULL,
   "password" VARCHAR(255) NOT NULL,
   "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
+  "stream_ip" VARCHAR(253) NOT NULL DEFAULT '',
   PRIMARY KEY ("id"),
   CONSTRAINT "chk_gb_sip_config_deployment_mode" CHECK (("deployment_mode" in ('lan','public'))),
   CONSTRAINT "chk_gb_sip_config_port" CHECK (("port" between 1 and 65535)),
@@ -1965,7 +1965,6 @@ CREATE TABLE "meta_node" (
   "revision" BIGINT NOT NULL DEFAULT 1,
   "name" VARCHAR(64) NOT NULL DEFAULT '',
   "host" VARCHAR(64) NOT NULL DEFAULT '',
-  "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
   "receive_host" VARCHAR(255) NOT NULL DEFAULT '',
   "playback_host" VARCHAR(255) NOT NULL DEFAULT '',
   "api_port" INTEGER NOT NULL DEFAULT 18080,
@@ -1989,6 +1988,7 @@ CREATE TABLE "meta_node" (
   "runtime_confirmed_revision" BIGINT NOT NULL DEFAULT 0,
   "runtime_confirmed_at" TIMESTAMP(6),
   "runtime_identity_status" VARCHAR(16) NOT NULL DEFAULT 'unknown',
+  "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
   CONSTRAINT uk_media_server_uuid UNIQUE ("media_server_uuid")
 );
 COMMENT ON TABLE "meta_node" IS 'ZLM 媒体节点表';
@@ -2692,7 +2692,6 @@ CREATE TABLE "sys_users" (
   "id" SERIAL PRIMARY KEY,
   "username" VARCHAR(50) NOT NULL DEFAULT '',
   "password" VARCHAR(255) NOT NULL DEFAULT '',
-  "must_change_password" BOOLEAN NOT NULL DEFAULT false,
   "email" VARCHAR(100) DEFAULT '',
   "status" SMALLINT DEFAULT 1,
   "dept_id" INTEGER DEFAULT 0,
@@ -2705,6 +2704,7 @@ CREATE TABLE "sys_users" (
   "updated_at" TIMESTAMP,
   "deleted_at" TIMESTAMP,
   "created_by" INTEGER DEFAULT 0,
+  "must_change_password" BOOLEAN NOT NULL DEFAULT false,
   CONSTRAINT username UNIQUE ("username")
 );
 COMMENT ON COLUMN "sys_users"."username" IS '用户名';

@@ -434,5 +434,7 @@
 {"id": 637, "title": "取消录像缓存下载", "path": "/api/gb28181/record-cache/downloads/:downloadId", "method": "DELETE", "api_group": "录像缓存", "created_at": {"$ts": "2026-10-05 11:33:55.000000"}, "updated_at": {"$ts": "2026-10-05 11:33:55.000000"}, "deleted_at": null, "created_by": 1}
 {"id": 638, "title": "收藏设备录像缓存任务", "path": "/api/gb28181/record-cache/tasks/:taskId/favorite", "method": "POST", "api_group": "录像缓存", "created_at": {"$ts": "2026-10-05 11:52:03.000000"}, "updated_at": {"$ts": "2026-10-05 11:52:03.000000"}, "deleted_at": null, "created_by": 1}
 {"id": 639, "title": "删除抓拍图像", "path": "/api/gb28181/device-mgmt/snapshots", "method": "DELETE", "api_group": "图像库", "created_at": {"$ts": "2026-10-07 10:30:08.000000"}, "updated_at": {"$ts": "2026-10-07 10:30:08.000000"}, "deleted_at": null, "created_by": 1}
-{"id": 640, "method": "GET", "path": "/api/gb28181/sip/service-config"}
-{"id": 641, "method": "PUT", "path": "/api/gb28181/sip/service-config"}
+{"id": 640, "title": "查询设备目录刷新进度", "path": "/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId", "method": "GET", "api_group": "设备管理", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 641, "title": "更新固件仓库状态", "path": "/api/gb28181/device-mgmt/firmware-repository/:id/status", "method": "PATCH", "api_group": "设备管理", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 642, "title": "网络会话列表（运行时监控）", "path": "/api/gb28181/zlm/sessions/network", "method": "GET", "api_group": "流媒体节点", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 643, "title": "观看会话列表（运行时监控）", "path": "/api/gb28181/zlm/sessions/viewers", "method": "GET", "api_group": "流媒体节点", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}

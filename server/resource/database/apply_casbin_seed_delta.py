@@ -200,12 +200,25 @@ def sync_sys_users(sql_path: pathlib.Path) -> None:
 
     为什么必须同步：绿色包的库是**首次启动时从这份基线建的**，
     只改 JSONL 不改 SQL ⇒ 新建出来的库头像仍是空的。
+
+    ⛔⛔ 字段清单必须**从种子动态取**，不能硬编码：
+       硬编码过一次，漏了 `must_change_password`（首次登录强制改密），
+       脚本仍照常打印「sys_users 已同步：1 个用户」、
+       `verify_baseline` 却在下一条报「新装管理员必须标记为待修改初始密码」——
+       **报错位置离真因隔了一条命令**，且前者那句成功提示完全是假的。
+       凡种子新增字段，这条同步会静默丢掉它。
     """
     rows = [json.loads(l) for l in USERS_SEED.read_text(encoding="utf-8").split("\n") if l.strip()]
     if not rows:
         return
-    cols = ["id", "username", "password", "email", "status", "dept_id", "phone", "sex",
-            "nick_name", "avatar", "description", "created_by"]
+    # ⛔ 特殊列（时间戳）由种子用 {"$ts": ...} 表达，转成 SQL 字面量；
+    #    其余列按种子给的值输出，**新增字段无需改这里**。
+    ORDER = ["id", "username", "password", "must_change_password", "email", "status",
+             "dept_id", "phone", "sex", "nick_name", "avatar", "description",
+             "created_at", "updated_at", "deleted_at", "created_by"]
+    present = set(rows[0].keys())
+    cols = [c for c in ORDER if c in present] + \
+           sorted(present - set(ORDER))          # 种子里的新字段也带上
     text = sql_path.read_text(encoding="utf-8", errors="replace")
     head = re.compile(r"INSERT INTO `sys_users`\s*\([^)]*\)\s*VALUES", re.MULTILINE)
     m = head.search(text)
@@ -221,8 +234,17 @@ def sync_sys_users(sql_path: pathlib.Path) -> None:
 
     def lit(col, r):
         v = r.get(col, "")
-        if col in ("id", "status", "dept_id", "created_by"):
-            return str(v if v not in ("", None) else 0)
+        # 种子里的时间戳是 {"$ts": "...."}，转成 SQL 字面量
+        if isinstance(v, dict) and "$ts" in v:
+            return f"'{v['$ts']}'"
+        if v in ("", None):
+            if col in ("must_change_password", "status", "dept_id", "created_by"):
+                return "0"
+            if col == "deleted_at":
+                return "NULL"
+            return "''"
+        if col in ("id", "status", "dept_id", "created_by", "must_change_password"):
+            return str(v)
         if col == "password":
             # bcrypt 的 $ 前缀在 SQL 里没有特殊含义，原样单引号包裹即可
             return "'" + str(v).replace("'", "''") + "'"
@@ -234,8 +256,10 @@ def sync_sys_users(sql_path: pathlib.Path) -> None:
     new_stmt = "\n".join(lines) + "\n"
     sql_path.write_text(text[:m.start()] + new_stmt + text[end:], encoding="utf-8")
     avatars = [r.get("username") for r in rows if (r.get("avatar") or "").strip()]
-    print(f"sys_users 已同步：{len(rows)} 个用户"
-          + (f"（含头像：{', '.join(avatars)}）" if avatars else ""))
+    forced = [r.get("username") for r in rows if r.get("must_change_password")]
+    print(f"sys_users 已同步：{len(rows)} 个用户（字段 {len(cols)} 个：{', '.join(cols)}）"
+          + (f"（含头像：{', '.join(avatars)}）" if avatars else "")
+          + (f"（待改密：{', '.join(forced)}）" if forced else ""))
 
 
 # ------------------------------------------------------------- sys_api ----

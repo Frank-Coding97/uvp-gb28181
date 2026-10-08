@@ -397,19 +397,65 @@ def scan_forbidden(table: str, rows: list[dict], forbidden: list[str]) -> list[s
     return [token for token in forbidden if token in blob]
 
 
-def fetch_rows(cur, table: str, rule: dict) -> list[dict]:
+def fetch_rows(cur, table: str, rule: dict, policy: dict | None = None) -> list[dict]:
     """Read seed rows.  ``soft_delete`` filters on ``deleted_at`` when present.
 
     Not every seed table has a ``deleted_at`` column, so the filter is applied
     conditionally rather than assuming the column exists.
+
+    ⛔⛔ ``tinyint(1)`` 列必须按**列元数据里判定的 boolean 标记**取值，不能原样写数字。
+       踩过：``sys_users.must_change_password`` 在 ``policy.json`` 里已声明为
+       ``boolean_columns``，``resolve_tinyint1`` 也确实在列元数据上打了 ``boolean: true``，
+       但种子里落下的仍是数字 ``1``；而 Go 侧契约测试用 ``bool`` 接收该字段 ⇒
+       ``json: cannot unmarshal number``，**报错行号落在断言上、离真因隔了好几行**。
+
+       ⭐⭐ 判据唯一来源是列元数据（``resolve_tinyint1`` 的判定结果），
+       **不要在这里按类型名硬判**：``tinyint(1)`` 可能是小枚举
+       （见 ``resolve_tinyint1`` 的 docstring：``sys_menu.type`` 存 1/2/3）。
+
+       ⛔ 而本函数**不能**指望调用方传进来打过标记的 columns：
+       ``build_ir`` 里 ``resolve_tinyint1`` 改的是表格循环里的局部变量，
+       种子写出阶段（另一段循环）会**重新** ``fetch_columns`` 拿到一份
+       **没有 boolean 标记**的副本 —— 第一次修这里时正是踩了这个坑，
+       改完重跑仍然输出数字。所以这里自己判一次。
     """
-    columns = [c["name"] for c in fetch_columns(cur, table)]
+    columns_meta = fetch_columns(cur, table)
+    columns = [c["name"] for c in columns_meta]
+
+    # 自己复现 boolean 判定（与 build_ir 表格循环里那次调用同参同结果）
+    bool_cols: set[str] = set()
+    if any(c.get("type") == "tinyint(1)" for c in columns_meta):
+        marked = [dict(c) for c in columns_meta]
+        try:
+            resolve_tinyint1(
+                cur, table, marked,
+                set((policy or {}).get("enum_columns", [])),
+                set((policy or {}).get("not_boolean_columns", [])),
+                set((policy or {}).get("boolean_columns", [])),
+                [],
+            )
+        except SystemExit:
+            # 判定失败（配置冲突等）时退回「不转bool」：上层会看到它自己那次的报错，
+            # 这里不该成为第一个炸点。
+            marked = []
+        bool_cols = {c["name"] for c in marked if c.get("boolean")}
+
     sql = "SELECT " + ", ".join(f"`{c}`" for c in columns) + f" FROM `{table}`"
     if rule.get("soft_delete") and "deleted_at" in columns:
         sql += " WHERE `deleted_at` IS NULL"
     sql += " ORDER BY " + ", ".join(f"`{c}`" for c in columns[:1])
     cur.execute(sql)
-    return [dict(zip(columns, (encode_value(v) for v in row))) for row in cur.fetchall()]
+
+    def encode_row(row):
+        out = {}
+        for name, value in zip(columns, row):
+            if name in bool_cols and value is not None:
+                out[name] = bool(value)
+            else:
+                out[name] = encode_value(value)
+        return out
+
+    return [encode_row(row) for row in cur.fetchall()]
 
 
 # --------------------------------------------------------------------------
@@ -557,7 +603,7 @@ def main() -> int:
         for name, rule in policy["seed_tables"].items():
             if name.startswith("_"):
                 continue
-            rows = fetch_rows(cur, name, rule)
+            rows = fetch_rows(cur, name, rule, policy)
             rows = apply_seed_filters(name, rows, filters)
             seeds[name] = rows
         cleanup_notes = apply_referential_cleanup(seeds, policy.get("referential_cleanup", []))
