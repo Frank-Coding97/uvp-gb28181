@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
@@ -111,26 +112,32 @@ func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
 	return NewRuntimeWithDB(cfg, activeTraceDB())
 }
 
+// activeTraceDB 返回报文诊断用的关系型连接。
+//
+// ⛔⛔⛔ 这里**必须直接用 app.DB()，不能自己按 usedbtype 分发**（2026-10-09 修）
+//
+// 原来的实现是「switch usedbtype → mysql/postgresql/sqlserver」+ 一层
+// 「兜底遍历 app.GormDbMysql/PostgreSql/Sqlserver」的循环。
+// 绿色安装包跑的是 SQLite（`gormv2.usedbtype: sqlite`），
+// 而 switch 里**没有 sqlite 分支** ⇒ 落到兜底循环 ⇒ 三个传统全局连接全是 nil
+// ⇒ 返回 nil ⇒ traceRelationalStore/diagnosisService 双双降级
+// ⇒ health 报`SIP trace store is unavailable` + `diagnosis repository unavailable`，
+// **日志里一句原因都没有**（装配处根本不打印）。
+//
+// ⭐ `app.DB()` 本身已是方言感知的统一入口（记忆里那条「控制器层已统一改用
+// app.DB()」就是为这个），trace 模块当时漏了。同一类修复本项目已做过 5 个控制器，
+// 这次是第6 个 —— 说明**新增调用方必须默认走 app.DB()，别再抄那段switch**。
 func activeTraceDB() *gorm.DB {
-	if app.ConfigYml != nil {
-		switch strings.ToLower(app.ConfigYml.GetString("gormv2.usedbtype")) {
-		case "postgresql":
-			return app.GormDbPostgreSql
-		case "sqlserver":
-			return app.GormDbSqlserver
-		case "mysql":
-			// // ⛔ 用app.DB()（按 usedbtype 分发到 MySQL/PG/SQLServer/SQLite），
-			//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
-			//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
-			return app.DB()
-		}
+	// ⛔ app.DB() 内部**直接解引用 app.ConfigYml**，ConfigYml 为 nil 会 panic
+	//   （测试环境与极早期的启动阶段就是这种情况 ——实测
+	//   TestHealthStatesCoverDisabledDegradedAndReady 直接 SIGSEGV）。
+	//   ⇒ 这里必须先挡一道，**不能**把nil 透传给 app.DB()。
+	if app.ConfigYml == nil {
+		return nil
 	}
-	for _, db := range []*gorm.DB{app.GormDbMysql, app.GormDbPostgreSql, app.GormDbSqlserver} {
-		if db != nil {
-			return db
-		}
-	}
-	return nil
+	// app.DB() 内部按 usedbtype 分发并对未知/空值有兜底；
+	// SQLite 是绿色包的默认形态，必须覆盖到。
+	return app.DB()
 }
 
 func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
@@ -161,6 +168,23 @@ func tracePayloadCipher(cfg gbconfig.TraceConfig) (PayloadCipher, error) {
 // traceRelationalStore 装配关系型存储(带重连);密钥不可用或 db 为空时降级 unavailableStore
 func traceRelationalStore(cfg gbconfig.TraceConfig, db *gorm.DB, cipherErr error) Store {
 	if cipherErr != nil || db == nil {
+		// ⛔⛔ 降级时**必须打出原因**（2026-10-09 补）。
+		// 原实现静默返回 unavailableStore，日志里一句都没有 ——
+		// 现场只看到 health 报 `SIP trace store is unavailable`，
+		// 而「密钥缺失」与「db 是 nil」这两个原因要翻代码 + 查配置才能区分，
+		// 这次就为它挖了半小时。降级不是正常状态，别静默。
+		usedbtype := ""
+		if app.ConfigYml != nil {
+			usedbtype = app.ConfigYml.GetString("gormv2.usedbtype")
+		}
+		logger := app.Log(context.Background()).Named("gb28181.trace")
+		logger.Error("SIP 报文诊断存储不可用：报文不会被记录（不影响 SIP 通话本身）",
+			zap.String("event", "gb28181.trace.store_unavailable"),
+			zap.String("usedbtype", usedbtype),
+			zap.Bool("db_nil", db == nil),
+			zap.String("key_env", cfg.EncryptionKeyEnv),
+			zap.Error(cipherErr),
+		)
 		return unavailableStore{}
 	}
 	return NewReconnectingStore(func(ctx context.Context) (Store, error) {

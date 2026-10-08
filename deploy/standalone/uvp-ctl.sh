@@ -1054,7 +1054,35 @@ sync_ports_into_config() {
     [ -n "${UVP_REDIS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_REDIS_PORT=1\n'
     [ -n "${UVP_HTTPS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_HTTPS_PORT=1\n'
     [ -n "${UVP_NGINX_HTTP_PORT:-}" ]  && printf 'UVP_USER_SET_UVP_NGINX_HTTP_PORT=1\n'
-  } > "$ENV_FILE"
+  } > "$ENV_FILE.new"
+  # ⛔⛔⛔ 必须把**非本函数托管的键原样搬回去**，否则用户手工加的键会被无声清掉。
+  #
+  #   实测踩过：`sync_ports_into_config` 用 `> "$ENV_FILE"` 全量覆盖、只写 4 个端口键，
+  #   而上一版的注释正教用户「在 config.env 里加一行
+  #   UVP_SIP_TRACE_ENCRYPTION_KEY=...  重启即生效」——
+  #   ⇒ 用户照做、重启、密钥消失、SIP 报文诊断永久degraded，
+  #   **全程零报错**（fail-closed 不落库，连日志都不一定明显）。
+  #
+  #   ⛔ 不能改成「只在文件不存在时才写」：那会让端口变更不再持久化。
+  #   ⛔ 也不能靠「追加」：`>` 是这里的既有语义（要重置 USER_SET 标记）。
+  #   ⇒ 做法：先备份旧文件里**所有非托管键**（含注释行），写完端口后再追加回去。
+  #
+  #   托管键清单要显式列出：只有这4 个端口键 + 对应的 UVP_USER_SET_ 标记会被接管。
+  local preserved
+  preserved="$(mktemp "$ROOT/.config.env.preserve.XXXXXX")"
+  if [ -f "$ENV_FILE" ]; then
+    grep -vE '^(UVP_HTTP_PORT|UVP_REDIS_PORT|UVP_HTTPS_PORT|UVP_NGINX_HTTP_PORT|UVP_USER_SET_UVP_HTTP_PORT|UVP_USER_SET_UVP_REDIS_PORT|UVP_USER_SET_UVP_HTTPS_PORT|UVP_USER_SET_UVP_NGINX_HTTP_PORT)=' "$ENV_FILE" > "$preserved" || true
+  else
+    : > "$preserved"
+  fi
+  cat "$ENV_FILE.new" > "$ENV_FILE"
+  # 追加时先补一个空行，避免用户第一行注释紧贴端口行、可读性差
+  if [ -s "$preserved" ]; then
+    printf '\n' >> "$ENV_FILE"
+    cat "$preserved" >> "$ENV_FILE"
+  fi
+  rm -f "$ENV_FILE.new" "$preserved"
+
   # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
 
   # config.yml 里同步：后端是通过这两个键读端口的
