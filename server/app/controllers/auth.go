@@ -206,6 +206,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 		"accessTokenExpires":  claims.ExpiresAt.Unix(),
 		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": claims1.ExpiresAt.Unix(),
+		"mustChangePassword":  user.MustChangePassword,
 	})
 }
 

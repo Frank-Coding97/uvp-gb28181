@@ -46,9 +46,22 @@ router.beforeEach(async (to: any, _: any, next: any) => {
   if (to.path === "/login" && !tokenExist) return next();
   // 2、没有token，直接重定向到登录页
   if (!tokenExist) return next("/login");
-  // 3、去登录页，有token，直接重定向到home页
-  if (to.path === "/login" && tokenExist) {
-    // 项目内的跳转，处理跳转路由高亮
+
+  const userStore = useUserStoreHook();
+  // 路由状态不持久化，刷新后必须重新从后端资料接口确认初始密码状态。
+  try {
+    if (!userStore.initialPasswordStatusLoaded) await userStore.getUserInfo();
+    if (userStore.mustChangePassword) {
+      return to.path === "/login" ? next() : next("/login");
+    }
+  } catch (error: any) {
+    console.error("读取初始密码状态失败:", error);
+    await userStore.logOut();
+    return next("/login");
+  }
+
+  // 3、去登录页，有正常会话，直接重定向到home页
+  if (to.path === "/login") {
     currentlyRoute(to);
     return next("/home");
   }
@@ -62,8 +75,8 @@ router.beforeEach(async (to: any, _: any, next: any) => {
   // 解决刷新页面404的问题
   if (!routeTree.value.length) {
     try {
-      // 获取用户信息、路由信息(初始化)、字典数据
-      await Promise.all([useUserStoreHook().getUserInfo(), routeStore.initSetRouter()]);
+      // 获取路由信息(初始化)、字典数据
+      await routeStore.initSetRouter();
       useSystemStore()
         .setDictData()
         .catch((err: Error) => {

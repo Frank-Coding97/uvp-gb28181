@@ -3,14 +3,14 @@
     <div class="login_form_box">
       <a-form :rules="rules" :model="form" layout="vertical" @submit="onSubmit">
         <a-form-item field="username" :hide-asterisk="true">
-          <a-input v-model="form.username" allow-clear placeholder="请输入账号">
+          <a-input v-model="form.username" allow-clear :placeholder="usernamePlaceholder">
             <template #prefix>
               <icon-user />
             </template>
           </a-input>
         </a-form-item>
         <a-form-item field="password" :hide-asterisk="true">
-          <a-input-password v-model="form.password" allow-clear placeholder="请输入密码">
+          <a-input-password v-model="form.password" allow-clear :placeholder="passwordPlaceholder">
             <template #prefix>
               <icon-lock />
             </template>
@@ -35,6 +35,7 @@
         </a-form-item>
       </a-form>
     </div>
+    <InitialPasswordDialog v-if="mustChangePassword" @success="onInitialPasswordChanged" />
     <!-- <div class="register">注册账号</div> -->
   </div>
 </template>
@@ -43,15 +44,18 @@
 import { useRouter } from "vue-router";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useUserStoreHook } from "@/store/modules/user";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getVerifyImgString } from "@/api/user";
 import { useSystemStore } from "@/store/modules/system";
 import { useSysConfigStore } from "@/store/modules/sys-config";
+import InitialPasswordDialog from "./InitialPasswordDialog.vue";
 
 import { storeToRefs } from "pinia";
 // 获取系统配置
 const sysConfigStore = useSysConfigStore();
 const { systemConfig, captchaConfig } = storeToRefs(sysConfigStore);
+const userStore = useUserStoreHook();
+const { mustChangePassword } = storeToRefs(userStore);
 // 定义表单数据类型
 interface LoginForm {
   username: string;
@@ -66,6 +70,7 @@ const router = useRouter();
 
 // 响应式数据
 const loginLoading = ref(false);
+const loginConfigLoaded = ref(false);
 const form = ref<LoginForm>({
   username: "",
   password: "",
@@ -74,6 +79,8 @@ const form = ref<LoginForm>({
 });
 
 const isCaptchaEnabled = computed(() => captchaConfig.value.open);
+const usernamePlaceholder = computed(() => (loginConfigLoaded.value && systemConfig.value.defaultusername) || "请输入账号");
+const passwordPlaceholder = computed(() => (loginConfigLoaded.value && systemConfig.value.defaultpassword) || "请输入密码");
 
 // 表单验证规则
 const rules = computed(() => {
@@ -124,10 +131,13 @@ const onLogin = async () => {
       captchaValue: isCaptchaEnabled.value ? form.value.captchaValue : null
     };
 
-    await useUserStoreHook().loginByUsername(loginData);
+    await userStore.loginByUsername(loginData);
 
     // 加载用户信息
-    await useUserStoreHook().getUserInfo();
+    await userStore.getUserInfo();
+
+    // 首次登录只允许停留在当前登录页完成初始密码修改，不加载业务路由。
+    if (mustChangePassword.value) return;
 
     // 加载路由信息
     await routeStore.initSetRouter();
@@ -150,6 +160,25 @@ const onLogin = async () => {
   }
 };
 
+const onInitialPasswordChanged = async () => {
+  form.value.username = "";
+  form.value.password = "";
+  form.value.captchaValue = null;
+  form.value.captchaId = "";
+  captchaImgUrl.value = "";
+  // 后端修改成功时已撤销所有会话；同步清除浏览器令牌并刷新一次性默认提示。
+  await userStore.logOut();
+  loginConfigLoaded.value = false;
+  try {
+    await sysConfigStore.getConfig();
+    loginConfigLoaded.value = true;
+  } catch (error: unknown) {
+    console.warn("刷新登录配置失败:", error);
+  }
+  await router.replace("/login");
+  refreshCaptcha();
+};
+
 // 验证码
 const captchaImgUrl = ref("");
 const refreshCaptcha = () => {
@@ -169,27 +198,14 @@ const refreshCaptcha = () => {
     });
 };
 
-// 监听系统配置变化，自动更新默认账号密码
-watch(
-  systemConfig,
-  newConfig => {
-    if (newConfig) {
-      if (newConfig.defaultusername) {
-        form.value.username = newConfig.defaultusername;
-      }
-      if (newConfig.defaultpassword) {
-        form.value.password = newConfig.defaultpassword;
-      }
-    }
-  },
-  { immediate: true }
-);
-
 // 组件挂载时的初始化
 onMounted(async () => {
-  await sysConfigStore.getConfig().catch((error: unknown) => {
-    console.warn("获取系统配置失败，将使用已缓存配置:", error);
-  });
+  try {
+    await sysConfigStore.getConfig();
+    loginConfigLoaded.value = true;
+  } catch (error: unknown) {
+    console.warn("获取系统配置失败，将使用普通登录提示:", error);
+  }
   refreshCaptcha();
 });
 </script>

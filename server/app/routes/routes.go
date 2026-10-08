@@ -114,9 +114,11 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 		sessionOnly := api.Group("")
 		sessionOnly.Use(middleware.JWTAuthMiddleware())
 		sessionOnly.POST("/users/session/heartbeat", sysOnlineUserControllers.Heartbeat)
+		sessionOnly.PUT("/users/changeInitialPassword", middleware.PasswordValidatorMiddleware(), userControllers.ChangeInitialPassword)
 		// 受保护的路由
 		protected := api.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())
+		protected.Use(middleware.InitialPasswordMiddleware())
 		protected.Use(middleware.DemoAccountMiddleware()) // 添加演示账号中间件
 		protected.Use(middleware.CasbinMiddleware())
 		openapiroutes.RegisterAdminRoutes(protected, openAPIAdmin)

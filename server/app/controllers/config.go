@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"gorm.io/gorm"
+	"net/http"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 
@@ -46,11 +48,18 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 	systemConfig["systemName"] = app.ConfigYml.GetString("system.systemname")           // 系统名称
 	systemConfig["systemCopyright"] = app.ConfigYml.GetString("system.systemcopyright") // 版权声明信息
 	systemConfig["systemRecordNo"] = app.ConfigYml.GetString("system.systemrecordno")   // 网站备案号
-	// 获取DemoAccount配置，仅在演示账号开关开启时传递
-	if app.ConfigYml.GetBool("server.demoaccount.enabled") {
-		systemConfig["defaultusername"] = app.ConfigYml.GetString("server.demoaccount.defaultusername") // 演示账号默认用户名
-		systemConfig["defaultpassword"] = app.ConfigYml.GetString("server.demoaccount.defaultpassword") // 演示账号默认密码
+	// 初始化引导只由数据库状态决定，完成后不再下发默认凭据。
+	systemConfig["defaultusername"], systemConfig["defaultpassword"] = "", ""
+	var initialAdmin models.User
+	if err := app.DBContext(ctx.Request.Context()).Select("id", "must_change_password").Where("id = ?", 1).First(&initialAdmin).Error; err != nil && err != gorm.ErrRecordNotFound {
+		con.FailAndAbort(ctx, "读取初始化状态失败", nil, http.StatusServiceUnavailable)
+		return
 	}
+	if initialAdmin.MustChangePassword {
+		systemConfig["defaultusername"] = app.ConfigYml.GetString("server.demoaccount.defaultusername")
+		systemConfig["defaultpassword"] = app.ConfigYml.GetString("server.demoaccount.defaultpassword")
+	}
+	ctx.Header("Cache-Control", "no-store")
 	result["system"] = systemConfig // 将系统配置放入结果集
 
 	// 获取Safe配置

@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT.parent / "uvp-gb28181.sql"
 POLICY = ROOT.parent / "baseline" / "policy.json"
-VERSION = "sqlite-baseline-20261007-r1"
+VERSION = "sqlite-baseline-20261008-r1"
 
 
 # --------------------------------------------------------------------------

@@ -37,6 +37,9 @@ export const useUserStore = defineStore("user", () => {
     roles: userInfo?.roles ?? [],
     permissions: userInfo?.permissions ?? []
   });
+  // 该状态只来自当前会话接口，不从本地缓存恢复，避免绕过服务端初始密码状态。
+  const mustChangePassword = ref(false);
+  const initialPasswordStatusLoaded = ref(false);
 
   // action
   /** 登入 */
@@ -52,6 +55,8 @@ export const useUserStore = defineStore("user", () => {
             // 登录成功后，设置 accessToken 和 refreshToken
             setAccessToken(res?.data?.accessToken, res?.data?.accessTokenExpires);
             setRefreshToken(res?.data?.refreshToken, res?.data?.refreshTokenExpires);
+            mustChangePassword.value = Boolean(res?.data?.mustChangePassword);
+            initialPasswordStatusLoaded.value = true;
             startSessionHeartbeat();
             resolve(res);
           } else {
@@ -73,6 +78,8 @@ export const useUserStore = defineStore("user", () => {
     account.value.nickname = "";
     account.value.roles = [];
     account.value.permissions = [];
+    mustChangePassword.value = false;
+    initialPasswordStatusLoaded.value = false;
     // 清除 accessToken 、 refreshToken 及登录用户信息
     removeAccessToken();
     removeRefreshToken();
@@ -100,6 +107,8 @@ export const useUserStore = defineStore("user", () => {
   /** 获取并设置当前登录用户信息 */
   const getUserInfo = async () => {
     const { data } = await getProfileAPI();
+    mustChangePassword.value = Boolean(data?.mustChangePassword);
+    initialPasswordStatusLoaded.value = true;
     if (data?.id) {
       account.value.id = data.id;
       account.value.username = data.userName;
@@ -107,13 +116,17 @@ export const useUserStore = defineStore("user", () => {
       account.value.avatar = handleUrl(data.avatar);
       account.value.roles = data.roleIDs;
       account.value.permissions = data.permissions;
-      setLocalStorage(UserInfoKey, data);
+      const { mustChangePassword: _mustChangePassword, ...cachedProfile } = data;
+      void _mustChangePassword;
+      setLocalStorage(UserInfoKey, cachedProfile);
     }
     return data;
   };
   return {
     // State
     account,
+    mustChangePassword,
+    initialPasswordStatusLoaded,
     // action
     loginByUsername,
     logOut,

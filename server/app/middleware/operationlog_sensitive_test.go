@@ -21,6 +21,11 @@ type countingBody struct {
 	reads  int
 }
 
+func TestInitialPasswordConfirmationIsRedacted(t *testing.T) {
+	value := sanitizeNested(map[string]interface{}{"password": "new-secret!", "confirmPassword": "new-secret!"})
+	require.Equal(t, map[string]interface{}{"password": "***", "confirmPassword": "***"}, value)
+}
+
 func (b *countingBody) Read(p []byte) (int, error) {
 	b.reads++
 	return b.reader.Read(p)

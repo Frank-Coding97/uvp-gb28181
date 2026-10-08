@@ -362,7 +362,7 @@ func sanitizeNested(value interface{}) interface{} {
 	case map[string]interface{}:
 		for key, item := range nested {
 			switch strings.ToLower(key) {
-			case "password", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
+			case "password", "confirmpassword", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
 				nested[key] = "***"
 			default:
 				nested[key] = sanitizeNested(item)

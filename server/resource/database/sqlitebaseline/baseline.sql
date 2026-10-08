@@ -2118,6 +2118,7 @@ CREATE TABLE IF NOT EXISTS "sys_users" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
   "username" TEXT NOT NULL CHECK ("username" IS NULL OR length("username") <= 50) DEFAULT '',
   "password" TEXT NOT NULL CHECK ("password" IS NULL OR length("password") <= 255) DEFAULT '',
+  "must_change_password" INTEGER NOT NULL CHECK ("must_change_password" IS NULL OR typeof("must_change_password") = 'integer') CHECK ("must_change_password" IS NULL OR "must_change_password" IN (0, 1)) DEFAULT 0,
   "email" TEXT NULL CHECK ("email" IS NULL OR length("email") <= 100) DEFAULT '',
   "status" INTEGER NULL CHECK ("status" IS NULL OR typeof("status") = 'integer') CHECK ("status" IS NULL OR "status" IN (0, 1)) DEFAULT 1,
   "dept_id" INTEGER NULL CHECK ("dept_id" IS NULL OR (typeof("dept_id") = 'integer' AND "dept_id" >= 0)) DEFAULT 0,
@@ -8036,5 +8037,5 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (3, 140510);
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
-INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_by") VALUES
-(1, 'admin', '$2a$10$TnFc1plPXF9hu9uDPNcdc.wStdbMZDfwGqnaFAbUmVQKfXzXD1Rsa', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', 0);
+INSERT INTO "sys_users" ("id", "username", "password", "must_change_password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by") VALUES
+(1, 'admin', '$2a$10$JSTDoY/H/SpiqQs2syahmORWZXJAS2oKMaWimSXK7da7apRs5CDJa', 1, '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0);

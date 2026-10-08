@@ -227,7 +227,8 @@
     "这时不能靠类型文本或当前 0/1 取值推断 Go bool；下面按模型字段显式钉住。"
   ],
   "boolean_columns": [
-    "sys_openapi_security_state.must_auth_locked"
+    "sys_openapi_security_state.must_auth_locked",
+    "sys_users.must_change_password"
   ],
   "_boolean_source_comment": [
     "⚠️ 布尔判定不能只看取值域。开发库是『跑过迁移的存量库』，它的数据只反映",

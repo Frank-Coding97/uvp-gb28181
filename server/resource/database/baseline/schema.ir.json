@@ -6,7 +6,7 @@
     "live_table_count": 112,
     "included_table_count": 111,
     "excluded_table_count": 20,
-    "schema_fingerprint": "ffd9b7baf53ebbdb2131c147a4a6f5b5ebdff3df1d9385cd4af7d0df0be7745a",
+    "schema_fingerprint": "5cec5cc55af5f3345e2e00e8aa03241f5066e5070af13e37c66d24ad55379e9b",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -12918,6 +12918,24 @@
           "boolean": true
         },
         {
+          "name": "hook_ip",
+          "type": "varchar(45)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "平台默认 Hook 地址",
+          "collation": "utf8mb4_0900_ai_ci"
+        },
+        {
+          "name": "stream_ip",
+          "type": "varchar(253)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "平台默认 Stream 地址",
+          "collation": "utf8mb4_0900_ai_ci"
+        },
+        {
           "name": "port",
           "type": "int unsigned",
           "nullable": false,
@@ -15698,6 +15716,15 @@
           "default": "",
           "extra": "",
           "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "hook_ip",
+          "type": "varchar(45)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "节点默认 Hook 地址",
           "collation": "utf8mb4_general_ci"
         },
         {
@@ -21277,6 +21304,17 @@
           "extra": "",
           "comment": "密码",
           "collation": "utf8mb4_0900_ai_ci"
+        },
+        {
+          "name": "must_change_password",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true,
+          "boolean_reason": "policy:boolean_columns（模型字段为 bool 类型）"
         },
         {
           "name": "email",

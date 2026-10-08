@@ -79,20 +79,21 @@ func (uc *UserController) GetProfile(c *gin.Context) {
 	}
 
 	uc.Success(c, gin.H{
-		"id":          user.ID,
-		"avatar":      user.Avatar,
-		"userName":    user.Username,
-		"nickName":    user.NickName,
-		"roleIDs":     user.Roles.GetRoleIDs(),
-		"permissions": user.Permissions,
-		"sex":         user.Sex,
-		"status":      user.Status,
-		"email":       user.Email,
-		"phone":       user.Phone,
-		"createdAt":   user.CreatedAt,
-		"description": user.Description,
-		"roles":       user.Roles,
-		"department":  user.Department,
+		"mustChangePassword": user.MustChangePassword,
+		"id":                 user.ID,
+		"avatar":             user.Avatar,
+		"userName":           user.Username,
+		"nickName":           user.NickName,
+		"roleIDs":            user.Roles.GetRoleIDs(),
+		"permissions":        user.Permissions,
+		"sex":                user.Sex,
+		"status":             user.Status,
+		"email":              user.Email,
+		"phone":              user.Phone,
+		"createdAt":          user.CreatedAt,
+		"description":        user.Description,
+		"roles":              user.Roles,
+		"department":         user.Department,
 	})
 }
 

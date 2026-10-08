@@ -11,6 +11,8 @@ export type UserResult = BaseResult<{
   /** `accessToken`的过期时间（格式'xxxx/xx/xx xx:xx:xx'） */
   accessTokenExpires: number;
   refreshTokenExpires: number;
+  /** 是否必须修改初始密码 */
+  mustChangePassword: boolean;
 }>;
 
 export type RefreshTokenResult = BaseResult<{
@@ -40,6 +42,8 @@ export type ProfileItem = {
   description: string;
   roles: Array<RoleItem>;
   department: DivisionItem;
+  /** 是否必须修改初始密码 */
+  mustChangePassword: boolean;
 };
 
 export type ProfileResult = BaseResult<ProfileItem>;
@@ -48,6 +52,11 @@ export type VerifyImgResult = BaseResult<{
   captchaId: string;
   image: string;
 }>;
+
+export type ChangeInitialPasswordRequest = {
+  password: string;
+  confirmPassword: string;
+};
 
 // 用户
 export interface AccountItem {
@@ -107,6 +116,11 @@ export const refreshTokenApi = (refreshToken: string) => {
 /** 获取登录用户信息 */
 export const getProfileAPI = () => {
   return http.request<ProfileResult>("get", baseUrlApi("users/profile"));
+};
+
+/** 修改初始化管理员密码 */
+export const changeInitialPasswordAPI = (data: ChangeInitialPasswordRequest) => {
+  return http.request<BaseResult>("put", baseUrlApi("users/changeInitialPassword"), { data });
 };
 
 /** 获取验证码图片字符串 */

@@ -146,6 +146,16 @@ def main() -> int:
             return 1
         print("✅ admin 账号存在")
 
+        user_columns = {row[1]: row for row in db.execute("PRAGMA table_info(sys_users)")}
+        forced_change = user_columns.get("must_change_password")
+        if forced_change is None or forced_change[3] != 1 or str(forced_change[4]) != "0":
+            print("❌ sys_users.must_change_password 必须为 NOT NULL 且默认 false")
+            return 1
+        if one("SELECT must_change_password FROM sys_users WHERE username='admin'") != 1:
+            print("❌ 新装管理员必须标记为待修改初始密码")
+            return 1
+        print("✅ 新装管理员被标记为待修改初始密码")
+
         # 字典是本轮字典化的成果，缺了就等于白做
         dicts = one("SELECT count(*) FROM sys_dict")
         items = one("SELECT count(*) FROM sys_dict_item")

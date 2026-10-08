@@ -62,6 +62,7 @@ func init() {
 		"mysql":      app.GormDbMysql,
 		"sqlserver":  app.GormDbSqlserver,
 		"postgresql": app.GormDbPostgreSql,
+		"sqlite":     app.GormDbSqlite,
 	}); err != nil {
 		startupFail("migration", err)
 	}
