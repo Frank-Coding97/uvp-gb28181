@@ -292,7 +292,14 @@ stop_by_pidfile() {
   #   ⇒ 去掉 ^ 锚定；安全性靠绝对路径本身足够独特来保证。
   if [ -n "$exe_path" ] && [ -x "$exe_path" ]; then
     local found
-    found="$(pgrep -f "${exe_path}" 2>/dev/null | tr '\n' ' ')"
+    # ⛔⛔ 必须带 `|| true`：**"没找到进程"是这里的正常情况**（服务本来就没跑），
+    #   而 pgrep 无匹配时退出码是 1，`var="$(cmd)"` 这条赋值语句的退出码
+    #   就等于 cmd 的⇒ `set -e` 直接把整个脚本杀掉。
+    #   实测症状：stop **零输出、退出码 1**，而且恰好停在"兜底什么都没找到"这条路
+    #   —— 也就是说**越是该静默的情况，它越会崩**。
+    #   （管道里 tr 是成功的，但赋值语句取的是整条管道的退出码，
+    #     shellpipefail 又让 pgrep 的 1 冒上来。）
+    found="$(pgrep -f "${exe_path}" 2>/dev/null | tr '\n' ' ' || true)"
     if [ -n "${found// /}" ]; then
       log "${label} 的 pid 文件缺失，按可执行路径找到遗留进程（${found}），正在停止"
       # shellcheck disable=SC2086  # 上面已用 tr 转成空格分隔的列表
