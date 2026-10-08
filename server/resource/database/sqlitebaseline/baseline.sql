@@ -3025,7 +3025,14 @@ INSERT INTO "sys_api" ("id", "method", "path", "api_group", "created_by", "creat
 (640, 'GET', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', '设备管理', 1, 'None', 'None'),
 (641, 'PATCH', '/api/gb28181/device-mgmt/firmware-repository/:id/status', '设备管理', 1, 'None', 'None'),
 (642, 'GET', '/api/gb28181/zlm/sessions/network', '流媒体节点', 1, 'None', 'None'),
-(643, 'GET', '/api/gb28181/zlm/sessions/viewers', '流媒体节点', 1, 'None', 'None');
+(643, 'GET', '/api/gb28181/zlm/sessions/viewers', '流媒体节点', 1, 'None', 'None'),
+(644, 'POST', '/api/gb28181/device-mgmt/firmware-repository', '设备管理', 1, 'None', 'None'),
+(645, 'GET', '/api/gb28181/device-mgmt/firmware-repository', '设备管理', 1, 'None', 'None'),
+(646, 'DELETE', '/api/gb28181/device-mgmt/firmware-repository/:id', '设备管理', 1, 'None', 'None'),
+(647, 'GET', '/api/gb28181/device-mgmt/firmware-repository/:id', '设备管理', 1, 'None', 'None'),
+(648, 'POST', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', '设备管理', 1, 'None', 'None'),
+(649, 'GET', '/api/gb28181/sip/service-config', '国标平台', 1, 'None', 'None'),
+(650, 'PUT', '/api/gb28181/sip/service-config', '国标平台', 1, 'None', 'None');
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3522,7 +3529,14 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10286, 'p', 'role_1', '/api/sysParam/list', 'GET', '*', '', ''),
 (10287, 'p', 'role_1', '/api/sysParam/:id', 'GET', '*', '', ''),
 (10288, 'p', 'role_1', '/api/sysParam/getByCode/:code', 'GET', '*', '', ''),
-(10289, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '*', '', '');
+(10289, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '*', '', ''),
+(10290, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '*', '', ''),
+(10291, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '*', '', ''),
+(10292, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '*', '', ''),
+(10293, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
+(10294, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
+(10295, 'p', 'role_1', '/api/gb28181/sip/service-config', 'GET', '*', '', ''),
+(10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
