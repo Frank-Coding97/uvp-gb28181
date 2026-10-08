@@ -495,3 +495,5 @@
 {"id": 10288, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
 {"id": 10289, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id/download-link", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 10290, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/snapshots", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
+{"id": 10291, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/sip/service-config", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10292, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/sip/service-config", "v2": "PUT", "v3": "*", "v4": "", "v5": ""}

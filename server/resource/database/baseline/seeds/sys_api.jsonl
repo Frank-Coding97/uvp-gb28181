@@ -434,3 +434,5 @@
 {"id": 637, "title": "取消录像缓存下载", "path": "/api/gb28181/record-cache/downloads/:downloadId", "method": "DELETE", "api_group": "录像缓存", "created_at": {"$ts": "2026-10-05 11:33:55.000000"}, "updated_at": {"$ts": "2026-10-05 11:33:55.000000"}, "deleted_at": null, "created_by": 1}
 {"id": 638, "title": "收藏设备录像缓存任务", "path": "/api/gb28181/record-cache/tasks/:taskId/favorite", "method": "POST", "api_group": "录像缓存", "created_at": {"$ts": "2026-10-05 11:52:03.000000"}, "updated_at": {"$ts": "2026-10-05 11:52:03.000000"}, "deleted_at": null, "created_by": 1}
 {"id": 639, "title": "删除抓拍图像", "path": "/api/gb28181/device-mgmt/snapshots", "method": "DELETE", "api_group": "图像库", "created_at": {"$ts": "2026-10-07 10:30:08.000000"}, "updated_at": {"$ts": "2026-10-07 10:30:08.000000"}, "deleted_at": null, "created_by": 1}
+{"id": 640, "method": "GET", "path": "/api/gb28181/sip/service-config"}
+{"id": 641, "method": "PUT", "path": "/api/gb28181/sip/service-config"}

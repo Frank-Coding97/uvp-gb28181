@@ -14,3 +14,5 @@
 {"v1": "/api/gb28181/device-mgmt/firmware-repository/:id", "v2": "DELETE"}
 {"v1": "/api/gb28181/device-mgmt/firmware-repository/:id/download-link", "v2": "POST"}
 {"v1": "/api/gb28181/device-mgmt/snapshots", "v2": "DELETE"}
+{"v1": "/api/gb28181/sip/service-config", "v2": "GET"}
+{"v1": "/api/gb28181/sip/service-config", "v2": "PUT"}

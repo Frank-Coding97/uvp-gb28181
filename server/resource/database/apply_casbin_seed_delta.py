@@ -185,7 +185,75 @@ def main() -> int:
     new_stmt = render_insert(all_rows) + "\n"
     sql_path.write_text(sql_text[:first] + new_stmt + sql_text[first:], encoding="utf-8")
     print(f"SQL 已重写：{len(segments)} 段合并为 1 段，共 {len(all_rows)} 条策略")
+
+    sync_sys_api(sql_path)
     return 0
+
+
+# ------------------------------------------------------------- sys_api ----
+#
+# ⛔⛔ 为什么必须同步 sys_api（实测踩过，与固件仓库那次完全同型）：
+#   路由注册了但 sys_api 表里没有这条登记 ⇒
+#   ① 基线护栏的「全量对比」**抓不到它**（它只扫表里有记录的东西）；
+#   ② 管理端列表页依赖 sys_api，接口也不会出现在权限配置界面里。
+#   实测：`/api/gb28181/sip/service-config` 的父路径（GET/PUT）就是这样漏的 ——
+#   34 条子路径（playback-settings/sdp-extension/…）全都有，
+#   **唯独父路径本身没登记、也没授权** ⇒ admin 打开就是 403。
+API_SEED = pathlib.Path(__file__).resolve().parent / "baseline" / "seeds" / "sys_api.jsonl"
+API_COLUMNS = ("id", "method", "path", "api_group", "api_name", "remark",
+               "created_by", "created_at", "updated_at")
+
+
+def sync_sys_api(sql_path: pathlib.Path) -> None:
+    """把 sys_api 种子里的登记同步进基线 SQL（同样整段重渲染）。"""
+    rows = [json.loads(l) for l in API_SEED.read_text(encoding="utf-8").split("\n") if l.strip()]
+    # 只同步种子里有的列：SQL 里的 INSERT 列名必须与实际渲染一致，
+    # 多写一个不存在的列会直接让建库失败。
+    cols = [c for c in API_COLUMNS if any(c in r for r in rows)]
+    text = sql_path.read_text(encoding="utf-8", errors="replace")
+    # ⛔⛔ 必须处理**全部段**，不能只替换第一段（与 casbin 当初同一个坑）。
+    #   实测源 SQL 里 sys_api 也有 3 段（438 + 200 + 36 行）—— MySQL 导出的分批。
+    #   只改第一段 ⇒ 另两段残留 ⇒ id 与第一段撞车 ⇒ 建库时报
+    #   `UNIQUE constraint failed: sys_api.id`，而报错位置离真因很远。
+    head = re.compile(r"INSERT INTO `sys_api`\s*\([^)]*\)\s*VALUES", re.MULTILINE)
+    segments: list[tuple[int, int]] = []
+    pos = 0
+    while True:
+        m = head.search(text, pos)
+        if not m:
+            break
+        close = text.find(");", m.end())
+        if close < 0:
+            print("❌ 某段 sys_api INSERT 找不到结尾');' —— 请先 git checkout 再重试",
+                  file=sys.stderr)
+            return
+        end = close + 2
+        while end < len(text) and text[end] == "\n":
+            end += 1
+        segments.append((m.start(), end))
+        pos = end
+    if not segments:
+        print("\n⚠️ SQL 里找不到 sys_api 的 INSERT，跳过同步")
+        return
+    total_before = sum(text[a:b].count("\n") for a, b in segments)
+    for a, b in reversed(segments):
+        text = text[:a] + text[b:]
+    first = segments[0][0]
+
+    lines = [f"INSERT INTO `sys_api` ({', '.join('`' + c + '`' for c in cols)}) VALUES"]
+    for n, r in enumerate(rows, 1):
+        def lit(col):
+            v = r.get(col, "")
+            if col in ("id", "created_by"):
+                return str(v if v not in ("", None) else 0)
+            return "'" + str(v).replace("'", "''") + "'"
+        lines.append("(" + ", ".join(lit(c) for c in cols) + ")"
+                     + (";" if n == len(rows) else ","))
+    new_stmt = "\n".join(lines) + "\n"
+
+    sql_path.write_text(text[:first] + new_stmt + text[first:], encoding="utf-8")
+    print(f"sys_api 已同步：{len(segments)} 段合并为 1 段，共 {len(rows)} 条登记"
+          f"（原 {total_before} 行）")
 
 
 if __name__ == "__main__":
