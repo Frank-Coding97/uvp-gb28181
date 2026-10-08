@@ -254,7 +254,56 @@ log "复制后端资源（SQLite 建库脚本 + 静态资源）"
 cp -a "$SERVER_DIR/resource/database/sqlitebaseline" "$PKG/resource/baseline"
 [ -d "$SERVER_DIR/resource/public" ] && cp -a "$SERVER_DIR/resource/public/." "$PKG/resource/public/" || true
 
+# ---- admin 默认头像（种子资源）----
+# ⛔⛔ 为什么不能直接用 server/resource/public/uploads：那个目录被 gitignore
+#   （server/.gitignore 的 `/resource/public/uploads`）——它是**运行时产物**。
+#   构建机从 git 拉代码 ⇒ 那里是空的 ⇒ 头像文件压根进不了包。
+#   实测症状：URL 存在但文件不存在，nginx 的 SPA 回落把 index.html 返回给了
+#   图片请求 ⇒ HTTP 200 而内容是 HTML，浏览器显示不出图。
+#
+#⇒ 走server/resource/seed-assets/（已加 gitignore 例外、随源码入库），
+#   出包时落到 resource/public/uploads/seed/ —— **不带日期**，
+#   这样路径稳定、不会被用户上传的头像覆盖，也不与 uploads/<日期>/ 混。
+AVATAR_SEED_SRC="$SERVER_DIR/resource/seed-assets/avatar"
+AVATAR_SEED_URL="/public/uploads/seed/admin.png"
+if [ -f "$AVATAR_SEED_SRC/admin.png" ]; then
+  mkdir -p "$PKG/resource/public/uploads/seed"
+  cp "$AVATAR_SEED_SRC/admin.png" "$PKG/resource/public/uploads/seed/admin.png"
+  log "  admin 头像已随包（$(basename "$AVATAR_SEED_SRC/admin.png") → resource/public/uploads/seed/）"
+else
+  log "  ⚠️ 未找到 $AVATAR_SEED_SRC/admin.png，admin 将无默认头像（不阻断出包）"
+fi
+
 cp "$SERVER_DIR/version.json" "$PKG/version.json"
+
+# ⛔ 出包前断言：**库里有头像路径 ⇒ 包里必须有那个文件**。
+#   这类"数据库说有、磁盘上没有"的组合最坑：nginx 的 SPA 回落会把
+#   index.html 返回给图片请求 ⇒ HTTP 200 而内容是 HTML，
+#   浏览器静默显示不出图，**没有任何一行报错**（实测踩过）。
+log "校验头像资源与数据库一致"
+"$PY" - "$PKG/config/config.yml" "$PKG/resource/baseline/baseline.sql" "$PKG/resource/public" <<'AVATAR_CHECK_PY'
+import pathlib
+import re
+import sys
+
+cfg, baseline, public = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+
+# 从基线 SQL 里取 sys_users 的 avatar 值（不连库，出包阶段还没有库）
+sql = baseline.read_text(encoding="utf-8", errors="replace")
+m = re.search(r"INSERT INTO [\"`]?sys_users[\"`]?\s*\([^)]*\)\s*VALUES(.*?);", sql, re.S)
+urls = re.findall(r"'(/public/uploads/[^']+)'", m.group(1)) if m else []
+
+problems = []
+for url in urls:
+    rel = url.lstrip("/").split("public/", 1)[-1]      # /public/uploads/x → uploads/x
+    if not (public / rel).is_file():
+        problems.append(f"库里有 {url}，但包内 resource/public/{rel} 不存在")
+if problems:
+    sys.exit("❌ 头像资源与数据库不一致：\n  - " + "\n  - ".join(problems)
+             + "\n   这个组合的现场症状是「HTTP 200 但图片出不来」——"
+               "nginx 把 index.html 返回给了图片请求，全程无报错。")
+print(f"✅ 头像资源与数据库一致（{len(urls)} 个引用）")
+AVATAR_CHECK_PY
 
 log "生成生产配置（SQLite + 本机 Redis）"
 $PY \

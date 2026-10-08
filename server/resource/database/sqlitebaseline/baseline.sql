@@ -8036,5 +8036,5 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (3, 140510);
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
-INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by") VALUES
-(1, 'admin', '$2a$10$TnFc1plPXF9hu9uDPNcdc.wStdbMZDfwGqnaFAbUmVQKfXzXD1Rsa', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0);
+INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_by") VALUES
+(1, 'admin', '$2a$10$TnFc1plPXF9hu9uDPNcdc.wStdbMZDfwGqnaFAbUmVQKfXzXD1Rsa', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', 0);

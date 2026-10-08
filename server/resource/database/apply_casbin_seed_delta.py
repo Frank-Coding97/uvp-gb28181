@@ -187,7 +187,55 @@ def main() -> int:
     print(f"SQL 已重写：{len(segments)} 段合并为 1 段，共 {len(all_rows)} 条策略")
 
     sync_sys_api(sql_path)
+    sync_sys_users(sql_path)
     return 0
+
+
+# ------------------------------------------------------------ sys_users ----
+USERS_SEED = pathlib.Path(__file__).resolve().parent / "baseline" / "seeds" / "sys_users.jsonl"
+
+
+def sync_sys_users(sql_path: pathlib.Path) -> None:
+    """把 sys_users 种子同步进基线 SQL（admin 的默认头像走这条路）。
+
+    为什么必须同步：绿色包的库是**首次启动时从这份基线建的**，
+    只改 JSONL 不改 SQL ⇒ 新建出来的库头像仍是空的。
+    """
+    rows = [json.loads(l) for l in USERS_SEED.read_text(encoding="utf-8").split("\n") if l.strip()]
+    if not rows:
+        return
+    cols = ["id", "username", "password", "email", "status", "dept_id", "phone", "sex",
+            "nick_name", "avatar", "description", "created_by"]
+    text = sql_path.read_text(encoding="utf-8", errors="replace")
+    head = re.compile(r"INSERT INTO `sys_users`\s*\([^)]*\)\s*VALUES", re.MULTILINE)
+    m = head.search(text)
+    if not m:
+        print("\n⚠️ SQL 里找不到 sys_users 的 INSERT，跳过")
+        return
+    close = text.find(");", m.end())
+    end = close + 2
+    while end < len(text) and text[end] == "\n":
+        end += 1
+
+    lines = [f"INSERT INTO `sys_users` ({', '.join('`' + c + '`' for c in cols)}) VALUES"]
+
+    def lit(col, r):
+        v = r.get(col, "")
+        if col in ("id", "status", "dept_id", "created_by"):
+            return str(v if v not in ("", None) else 0)
+        if col == "password":
+            # bcrypt 的 $ 前缀在 SQL 里没有特殊含义，原样单引号包裹即可
+            return "'" + str(v).replace("'", "''") + "'"
+        return "'" + str(v).replace("'", "''") + "'"
+
+    for n, r in enumerate(rows, 1):
+        lines.append("(" + ", ".join(lit(c, r) for c in cols) + ")"
+                     + (";" if n == len(rows) else ","))
+    new_stmt = "\n".join(lines) + "\n"
+    sql_path.write_text(text[:m.start()] + new_stmt + text[end:], encoding="utf-8")
+    avatars = [r.get("username") for r in rows if (r.get("avatar") or "").strip()]
+    print(f"sys_users 已同步：{len(rows)} 个用户"
+          + (f"（含头像：{', '.join(avatars)}）" if avatars else ""))
 
 
 # ------------------------------------------------------------- sys_api ----
