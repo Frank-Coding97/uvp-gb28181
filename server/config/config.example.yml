@@ -301,6 +301,20 @@ gb28181:
     hookport: 8280                 # 兼容旧配置:后端 HTTP 端口
     streamnonereadertimeout: 20   # 无人观看多少秒后断流
     rtpservertimeout: 15          # RTP 收流超时(秒)
+  # 扫码接入 — 二维码里带的**设备可达**基址
+  #
+  # ⛔⛔ 绝不要让前端用「用户打开平台的地址」(`window.location.origin`)顶替。
+  # 二维码是给**设备**扫的:绿色包的前端走 nginx 自签 HTTPS(SAN 只有 localhost),
+  # 设备侧 Ktor CIO 默认校验证书 ⇒ 用 origin 会让扫码必然失败,
+  # 且失败被报成「连不上平台,请检查手机与平台是否同网络」, 排查全跑偏(2026-10-08)。
+  #
+  # 基址取空时按 host+port 派生明文 http://<host>:<port>；
+  # base_url 非空时优先,公网部署用它填 https 域名。
+  qr_provision:
+    base_url: ""                 # 推荐:完整基址,如 http://192.168.1.10:51010 或 https://uv.example.com
+    host: ""                     # base_url 为空时用它+port 派生;留空则拒绝出码(而不是出坏码)
+    port: 0                      # base_url 为空时必填,通常是后端 HTTP 端口
+    require_tls: false           # 公网部署设 true,拒绝明文基址
   # 设备/NVR 本地录像查询。时间输入按平台时区墙钟解释，不按浏览器时区转换。
   record_query:
     timezone: "Asia/Shanghai"     # 显式 IANA 时区；非法值会阻止查询/回放 runtime 装配

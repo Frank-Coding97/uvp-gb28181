@@ -40,7 +40,14 @@ function mountCard(props: { canGenerate?: boolean } = {}) {
 }
 
 function okResponse(token: string, expiresInSeconds: number) {
-  return { code: 0, message: "", data: { token, expiresInSeconds } };
+  // ⛔ baseUrl 必须由后端下发（2026-10-08 新契约）。
+  // 桩照真接口建模：漏掉它 ⇒ 组件判定"接入地址不可用"⇒ 不出码，
+  // 正好证明前端真的在用后端给的值，而不是自己推断。
+  return {
+    code: 0,
+    message: "",
+    data: { token, expiresInSeconds, baseUrl: "http://192.168.1.10:51010" }
+  };
 }
 
 describe("QrProvisionCard 自动续码", () => {
@@ -168,6 +175,76 @@ describe("QrProvisionCard 自动续码", () => {
     vi.advanceTimersByTime(30000);
     await flushPromises();
     expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("QrProvisionCard 接入基址来自后端（2026-10-08）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    api.generateSipQrToken.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // ⛔⛔ 回归防线：曾经的默认值是 window.location.origin。
+  // 用户从 nginx 自签 HTTPS 打开平台 ⇒ 二维码里带自签地址 ⇒ 手机侧证书校验失败
+  // ⇒ 失败被报成「连不上平台,请检查手机与平台是否同网络」, 用户去查 Wi-Fi 永远查不出。
+  it("后端没给基址时不出码，也不静默回退到浏览器地址", async () => {
+    api.generateSipQrToken.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { token: "tok-x", expiresInSeconds: 300 } // ⛔ 没有 baseUrl
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    expect(wrapper.find("[data-qrcode]").exists()).toBe(false);
+    // 且必须给用户看得见的提示，而不是空白或"转圈"
+    expect(wrapper.text()).toContain("平台未下发");
+    wrapper.unmount();
+  });
+
+  it("基址非法（缺 scheme）时同样不出码", async () => {
+    api.generateSipQrToken.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { token: "tok-y", expiresInSeconds: 300, baseUrl: "192.168.1.10:51010" }
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    expect(wrapper.find("[data-qrcode]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("基址合法时二维码里的地址就是后端给的那个", async () => {
+    api.generateSipQrToken.mockResolvedValue(okResponse("tok-z", 300));
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    // 二维码组件被 stub 成空标签，改由链接区断言实际 URL
+    expect(wrapper.text()).toContain("http://192.168.1.10:51010/gb28181/qr#t=tok-z");
+    wrapper.unmount();
+  });
+
+  it("源码里不再用 window.location.origin 当默认值（防止被加回来）", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/sip/QrProvisionCard.vue"), "utf8");
+    // ⛔ 只扫**代码**：注释里必须留着这段事故说明（那是给后来人看的），
+    //   全文扫会把说明本身判成违规。判据 = 该串出现在赋值/传参位置。
+    const code = source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toContain("window.location.origin");
+  });
+
+  it("界面不再提供「平台访问地址」输入框（只展示二维码）", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/sip/QrProvisionCard.vue"), "utf8");
+    // 地址改由后端下发，界面上不该再有让用户填地址的地方
+    expect(source).not.toContain('v-model="baseUrl"');
+    expect(source).not.toContain("平台访问地址");
   });
 });
 

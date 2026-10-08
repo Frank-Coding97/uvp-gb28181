@@ -38,6 +38,16 @@ DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 HTTP_PORT="${UVP_HTTP_PORT:-51010}"
 REDIS_PORT="${UVP_REDIS_PORT:-51011}"
 
+# ---- 扫码接入基址里的设备可达地址 ----
+#
+# ⛔⛔ 为什么不能沿用「浏览器打开平台的地址」：
+#   二维码是给**设备**扫的，设备要访问的是后端。
+#   绿色包前端走 nginx 自签 HTTPS（SAN 只有 localhost/127.0.0.1），
+#   之前前端拿 window.location.origin 当默认值 ⇒ 二维码里带自签地址 ⇒
+#   手机侧 Ktor CIO 校验证书失败 ⇒ 失败被报成「连不上平台,请检查 Wi-Fi」。
+#   这个值会被写进 config.yml，现场可用 gb28181.qr_provision.base_url 改。
+QR_PROVISION_HOST="${UVP_QR_PROVISION_HOST:-}"
+
 # ---- ZLM 的两个身份：secret 与节点标识（老板定的：都用固定值）----
 #
 # ⛔⛔ 必须是**固定值**，不能让它们随机 —— 这是本轮最贵的两个教训：
@@ -316,7 +326,8 @@ $PY \
   --redis-port "$REDIS_PORT" \
   --db-path "./data/uvp.db" \
   --zlm-secret "$ZLM_SECRET" \
-  --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID"
+  --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
+  --qr-provision-host "$QR_PROVISION_HOST"
 
 # ⛔ 出包前**解析后断言**这两个固定值真的进去了。
 #   理由：make-config.py 用的是"段落内替换"，判据（段名/键名/缩进/行尾注释）
@@ -341,6 +352,44 @@ if problems:
                "「录像缓存服务未装配」等各功能报未装配，且 ZLM 进程本身看起来完全正常。")
 print(f"✅ ZLM 身份配置已固定（secret {len(want_secret)} 字符 / 节点标识 {len(want_uuid)} 字符）")
 ZLM_ID_CHECK_PY
+
+# ⛔ 出包前断言「扫码接入基址」真的写进去了。
+#   这一条的价值不在于「值对不对」，而在于**杜绝二维码指向错误地址**：
+#   地址不对时二维码照样出得来、扫得动，只是设备换不到接入信息，
+#   而失败现场在手机上，现场根本查不到是包的问题（2026-10-08 就是这样坏的）。
+log "校验扫码接入基址"
+"$PY" - "$PKG/config/config.yml" "$HTTP_PORT" <<'QR_BASE_CHECK_PY'
+import re
+import sys
+
+import yaml
+
+path, http_port = sys.argv[1:3]
+text = open(path, encoding="utf-8").read()
+qr = (yaml.safe_load(text) or {}).get("gb28181", {}).get("qr_provision", {})
+
+problems = []
+# ① 段只能出现一次 —— 重复键 YAML 不报错，只是后者静默覆盖前者，
+#   但文件里两份配置会让现场运维改错地方。
+hits = sum(1 for line in text.split("\n") if line.strip() == "qr_provision:")
+if hits != 1:
+    problems.append(f"qr_provision 段出现 {hits} 次（应为 1 次）")
+# ② 必须是非空基址，且指向后端明文端口
+base_url = str(qr.get("base_url") or "")
+if not base_url:
+    problems.append("base_url 为空（没传 --qr-provision-host？）——"
+                    "后端会拒绝出码，扫码页面永远转圈")
+elif f":{http_port}" not in base_url:
+    problems.append(f"base_url={base_url!r} 未指向后端端口 {http_port}")
+elif base_url.startswith("https://"):
+    # 不是必然错，但绿色包默认不该这样 —— nginx 是自签证书，设备侧必然验不过
+    print(f"   ⚠️ base_url 用了 https（{base_url}）——设备侧必须信任该证书才能扫通")
+if problems:
+    sys.exit("❌ 扫码接入基址未正确写进 config.yml：" + "；".join(problems)
+             + "。\n   出了这个包，页面能出二维码，但设备扫码后换不到接入信息，"
+               "而失败现场在手机上、看不出是包的问题。")
+print(f"✅ 扫码接入基址: {base_url}")
+QR_BASE_CHECK_PY
 
 log "复制启停脚本"
 cp "$DEPLOY_DIR/uvp-ctl.sh" "$PKG/uvp-ctl.sh"

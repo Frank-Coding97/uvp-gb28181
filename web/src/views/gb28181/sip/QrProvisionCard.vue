@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { ChevronRight, Clock, Download, QrCode, RefreshCw, ShieldAlert } from "lucide-vue-next";
 import { generateSipQrToken } from "@/api/gb28181";
-import { buildQrUrl, formatCountdown, normalizeBaseUrl, validateBaseUrl } from "./qrProvisionState";
+import { buildQrUrl, formatCountdown, validateBaseUrl } from "./qrProvisionState";
 
 // 模拟器下载是公开资源,不该被「生成二维码」的权限卡住:
 // 无出码权限时卡片仍然渲染,只是不显示出码区.
@@ -12,14 +12,16 @@ const props = withDefaults(defineProps<{ canGenerate?: boolean }>(), { canGenera
 const loading = ref(false);
 const token = ref("");
 const secondsLeft = ref(0);
-// 平台访问地址.默认当前站点 origin —— 设备扫码后要用它兑换,必须是设备能访问到的地址.
-const baseUrl = ref(normalizeBaseUrl(window.location.origin));
-const touched = ref({ baseUrl: false });
-let timer: ReturnType<typeof setInterval> | null = null;
+// 设备可达的接入基址 —— 由后端随 token 一起下发,前端**不自行推断**.
+// ⛔⛔ 曾经用 `window.location.origin` 当默认值,于是「用户从 nginx 自签 HTTPS
+// 打开平台 → 二维码里带 HTTPS → 设备侧证书校验失败 → 报『连不上平台,请检查
+// Wi-Fi』」。二维码是给设备用的,地址必须后端说了算。
+const baseUrl = ref("");
 // 自动续码失败后的退避重试:已重试次数 + 挂起的定时器.
 // 失败后按 5s→10s→20s 退避,最多 3 次,之后停在失效态等手动点击.
 const renewAttempts = ref(0);
 const renewFailed = ref(false);
+let timer: ReturnType<typeof setInterval> | null = null;
 let renewTimer: ReturnType<typeof setTimeout> | null = null;
 // 卸载守卫:在途请求返回后不得再调度重试
 let mounted = false;
@@ -27,7 +29,9 @@ let mounted = false;
 // 退避间隔(ms):第 1/2/3 次重试
 const RENEW_BACKOFF_MS = [5000, 10000, 20000];
 
-const baseUrlError = computed(() => (touched.value.baseUrl ? validateBaseUrl(baseUrl.value) : ""));
+// ⛔ 失败时把地址**清空**，于是 baseUrlError 会恒为非空 ——
+// 靠它就能把「后端没给可用地址」显示出来，而不是留一片空白让人以为在加载。
+const baseUrlError = computed(() => validateBaseUrl(baseUrl.value));
 const baseUrlValid = computed(() => validateBaseUrl(baseUrl.value) === "");
 const expired = computed(() => Boolean(token.value) && secondsLeft.value <= 0);
 // 校验不过就不出码 —— 宁可不出码,不能出一个扫了会失败的码.
@@ -85,16 +89,11 @@ async function autoRenew() {
 
 async function generate(silent = false): Promise<boolean> {
   if (!props.canGenerate) return false;
-  touched.value.baseUrl = true;
   // 手动生成时取消挂起的自动续码重试,避免新旧请求竞争
   if (!silent) {
     stopRenewTimer();
     renewAttempts.value = 0;
     renewFailed.value = false;
-  }
-  if (!baseUrlValid.value) {
-    if (!silent) Message.warning(validateBaseUrl(baseUrl.value));
-    return false;
   }
   loading.value = true;
   try {
@@ -102,10 +101,19 @@ async function generate(silent = false): Promise<boolean> {
     // 卸载后在途成功响应:不更新任何状态、不重建计时器
     if (!mounted) return false;
     if (res.code !== 0) throw new Error(res.message || "生成接入二维码失败");
+    // 基址与 token 同源:两者一起被服务端校验,不会出现「token 有效但地址不可达」
+    baseUrl.value = res.data.baseUrl ?? "";
+    if (validateBaseUrl(baseUrl.value) !== "") {
+      throw new Error(validateBaseUrl(baseUrl.value));
+    }
     token.value = res.data.token;
     startCountdown(res.data.expiresInSeconds);
     return true;
   } catch (error: any) {
+    // ⛔ 地址不可达时**清掉旧码**:留着上一张必然扫不通的码,用户会反复扫它
+    token.value = "";
+    baseUrl.value = "";
+    stopTimer();
     if (!silent) Message.error(error?.message || "生成接入二维码失败");
     return false;
   } finally {
@@ -156,17 +164,6 @@ onMounted(() => {
     <p v-if="!canGenerate" class="qr-locked">当前账号无生成接入二维码的权限,如需扫码请联系管理员。</p>
 
     <template v-if="canGenerate">
-      <a-form layout="vertical">
-        <a-form-item
-          label="平台访问地址"
-          required
-          :validate-status="baseUrlError ? 'error' : ''"
-          :help="baseUrlError || '设备需要能访问到这个地址,跨网段时请改成设备侧可达的地址。'"
-        >
-          <a-input v-model="baseUrl" placeholder="http://192.168.1.10:8280" allow-clear @blur="touched.baseUrl = true" />
-        </a-form-item>
-      </a-form>
-
       <div class="qr-stage">
         <!-- :key 必须有: SQrcodeDraw 只在 onMounted 生成,不 watch text.
                      token 是异步拿到的,没有 :key 会渲染空白码. -->
@@ -174,16 +171,17 @@ onMounted(() => {
           <SQrcodeDraw :key="qrUrl" :text="qrUrl" :options="{ width: 220, margin: 1 }" />
         </div>
         <div v-else class="qr-placeholder" :class="{ 'is-expired': expired }">
-          <span v-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
+          <span v-if="baseUrlError && !loading">{{ baseUrlError }}</span>
+          <span v-else-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
           <span v-else-if="expired">二维码已失效</span>
           <span v-else-if="loading">正在生成…</span>
-          <span v-else-if="!baseUrlValid">请先填写合法的平台访问地址</span>
           <span v-else>点击下方按钮生成二维码</span>
         </div>
 
         <div class="qr-meta">
           <Clock :size="14" />
-          <span v-if="expired">已失效,请重新生成</span>
+          <span v-if="baseUrlError">接入地址不可用</span>
+          <span v-else-if="expired">已失效,请重新生成</span>
           <span v-else-if="token">{{ countdownText }} 后失效</span>
           <span v-else>尚未生成</span>
         </div>

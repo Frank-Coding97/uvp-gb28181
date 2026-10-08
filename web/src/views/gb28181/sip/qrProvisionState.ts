@@ -8,12 +8,17 @@ export function normalizeBaseUrl(input: string): string {
   return input.trim().replace(/\/+$/, "");
 }
 
-// 空串表示通过.校验失败时调用方不出码 —— 宁可不出码,不能出一个扫了会失败的码.
+// 后端下发的基址校验 —— 空串表示通过.
+//
+// ⛔⛔ 这里**不做**「地址不合法就自己兜底成 window.location.origin」那类回退:
+// 二维码是给**设备**用的,兜底成浏览器地址会让扫码必然失败,而失败现场
+// 在手机上、排查成本全落在用户那边(2026-10-08 就是这么坏掉的)。
+// 地址不对就不出码。
 export function validateBaseUrl(input: string): string {
   const value = normalizeBaseUrl(input);
-  if (!value) return "请填写平台访问地址";
-  if (!/^https?:\/\//i.test(value)) return "必须以 http:// 或 https:// 开头";
-  if (!/^https?:\/\/[^/\s]+/i.test(value)) return "地址格式不正确";
+  if (!value) return "平台未下发设备可达的接入地址";
+  if (!/^https?:\/\//i.test(value)) return "接入地址必须以 http:// 或 https:// 开头";
+  if (!/^https?:\/\/[^/\s]+/i.test(value)) return "接入地址格式不正确";
   return "";
 }
 

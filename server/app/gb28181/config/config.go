@@ -540,6 +540,27 @@ func CurrentDefaultPlaybackProtocol() string {
 	return DefaultPlaybackProtocolFrom(app.ConfigYml)
 }
 
+// QRProvisionConfigFrom 从配置源读扫码接入基址配置.
+func QRProvisionConfigFrom(c valueSource) QRProvisionConfig {
+	if c == nil {
+		return QRProvisionConfig{}
+	}
+	return QRProvisionConfig{
+		BaseURL:    c.GetString("gb28181.qr_provision.base_url"),
+		Host:       c.GetString("gb28181.qr_provision.host"),
+		Port:       c.GetInt("gb28181.qr_provision.port"),
+		RequireTLS: c.GetBool("gb28181.qr_provision.require_tls"),
+	}
+}
+
+// CurrentQRProvisionBaseURL 读当前生效的设备可达接入基址.
+//
+// 生成二维码时用:二维码是给**设备**用的,地址必须设备能访问,
+// 而不是用户打开平台的那个 origin。
+func CurrentQRProvisionBaseURL() (string, error) {
+	return QRProvisionConfigFrom(app.ConfigYml).EffectiveBaseURL()
+}
+
 // Config GB28181 国标平台配置
 type Config struct {
 	Enabled     bool
@@ -552,6 +573,56 @@ type Config struct {
 	Recording   RecordingConfig
 	RecordQuery RecordQueryConfig
 	Playback    PlaybackConfig
+	QRProvision QRProvisionConfig
+}
+
+// QRProvisionConfig controls the address handed to devices by the access QR code.
+//
+// 二维码里带的基址**必须是设备能访问到的后端地址**,不能是浏览器打开平台的地址。
+// ⛔⛔ 前端曾用 `window.location.origin` 当默认值(2026-10-08 之前),
+// 于是「用户从 nginx HTTPS 打开平台 → 二维码里就是自签 HTTPS 地址 →
+// 设备侧 Ktor/CIO 校验证书失败 → 被吞成 NetworkError → UI 骗人去查 Wi-Fi」。
+// 绿色包场景下 nginx 是自签证书(SAN 只有 localhost/127.0.0.1),此路必然不通。
+//
+// 形状照 MediaConfig.EffectiveHookBaseURL:完整 URL 优先,为空则由 host+port 拼明文。
+type QRProvisionConfig struct {
+	// BaseURL 完整基址(如 http://192.168.10.220:51010)。非空时优先。
+	BaseURL string
+	// Host 设备可达的本机地址;BaseURL 为空时与 Port 一起拼出 http://<host>:<port>
+	Host string
+	// Port 后端 HTTP 端口(绿色包为 51010)
+	Port int
+	// RequireTLS 公网部署要求 HTTPS(与 media.hookrequiretls 同一口径)
+	RequireTLS bool
+}
+
+// EffectiveBaseURL 返回设备侧应使用的基址,无效时返回错误。
+func (c QRProvisionConfig) EffectiveBaseURL() (string, error) {
+	raw := strings.TrimSpace(c.BaseURL)
+	if raw == "" {
+		host := strings.Trim(strings.TrimSpace(c.Host), "[]")
+		if host == "" || c.Port <= 0 || c.Port > 65535 {
+			return "", errors.New("扫码接入基址未完整配置")
+		}
+		raw = "http://" + net.JoinHostPort(host, strconv.Itoa(c.Port))
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
+		return "", errors.New("扫码接入基址无效")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("扫码接入基址仅支持 HTTP 或 HTTPS")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", errors.New("扫码接入基址不得包含用户信息、查询参数或片段")
+	}
+	if c.RequireTLS && parsed.Scheme != "https" {
+		return "", errors.New("扫码接入已要求 TLS")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
+	return parsed.String(), nil
 }
 
 // RecordQueryConfig controls device-local RecordInfo queries.
@@ -834,6 +905,8 @@ func loadFrom(c valueSource) (Config, error) {
 			IdleTimeoutSec: intValue(c, "gb28181.playback.idle_timeout_sec", DefaultPlaybackIdleTimeoutSec),
 			MaxSessionSec:  intValue(c, "gb28181.playback.max_session_sec", DefaultPlaybackMaxSessionSec),
 		},
+		// ⛔ 用与 CurrentQRProvisionBaseURL 同一个读取函数,免得两处键名写岔
+		QRProvision: QRProvisionConfigFrom(c),
 	}
 	if err := validateRecordRuntimeConfig(&cfg, c.GetInt("httpserver.handler_timeout")); err != nil {
 		return cfg, err

@@ -1890,6 +1890,13 @@ export interface SipQrToken {
   token: string;
   // 相对秒数而非绝对时间戳:前端以响应到达时刻起算倒计时,免受客户端时钟偏移影响.
   expiresInSeconds: number;
+  // 设备可达的接入基址,由后端下发.
+  //
+  // ⛔⛔ 不要用 `window.location.origin` 顶替(2026-10-08 之前就是这么做的):
+  // 二维码是给**设备**扫的,而用户打开平台的地址与设备能访问的地址未必相同 ——
+  // 绿色包前端走 nginx 自签 HTTPS,设备侧 Ktor CIO 默认校验证书,
+  // 拿 origin 会让扫码必然失败,且失败被报成「连不上平台」骗人去查 Wi-Fi.
+  baseUrl: string;
 }
 
 /** 生成一次性接入 token(权限点 gb28181:sip:config:view) */

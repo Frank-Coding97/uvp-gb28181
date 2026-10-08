@@ -32,6 +32,12 @@ var (
 	// ErrTooManyAttempts 兑换尝试超出速率上限.
 	// 兑换端点免鉴权且每次尝试都要打共享缓存,必须挡住无差别轰炸
 	ErrTooManyAttempts = errors.New("qr: too many attempts")
+
+	// ErrBaseURLUnavailable 设备可达的接入基址未配置/无效.
+	//
+	// ⛔ 与其出一个扫了必失败的码,不如拒绝出码 —— 二维码里带的是设备要访问的地址,
+	// 地址不对时设备侧只会报「连不上平台」,排查成本全在用户那边。
+	ErrBaseURLUnavailable = errors.New("qr: device-reachable base url unavailable")
 )
 
 const (
@@ -79,7 +85,15 @@ type QRService struct {
 	config          *SIPConfigService
 	transportFn     func() []string
 	networkProvider InterfaceProvider
-	ttl             time.Duration
+	// baseURLFn 返回**设备可达**的接入基址(不含 /gb28181/qr 与 token).
+	//
+	// ⛔⛔ 这里必须是后端明文地址,**绝不能**取「用户打开平台的浏览器 origin」:
+	// 绿色包的前端走 nginx 自签 HTTPS,而设备侧 Ktor CIO 默认校验证书
+	// ⇒ 用 origin 会让扫码必然失败,且失败被归类成 NetworkError 骗人去查 Wi-Fi。
+	baseURLFn func() (string, error)
+	// baseURL 最近一次生成 token 时解析出的基址(见 BaseURL 方法)
+	baseURL string
+	ttl     time.Duration
 	// limiter 兑换速率上限 —— 兑换端点免鉴权且每次尝试都要打共享缓存,
 	// 无差别轰炸会压满 Redis 与 HTTP worker
 	limiter *rate.Limiter
@@ -102,12 +116,32 @@ func (s *QRService) SetNetworkProvider(provider InterfaceProvider) {
 	s.networkProvider = provider
 }
 
+// SetBaseURLProvider 注入设备可达基址的解析函数.
+func (s *QRService) SetBaseURLProvider(fn func() (string, error)) {
+	s.baseURLFn = fn
+}
+
+// BaseURL 返回最近一次成功生成 token 时解析出的设备可达基址.
+//
+// 数据源就是那次 GenerateToken 里的同一次解析 —— 不重新读配置,避免
+// 「生成时有效、下发时已变」这类时序不一致;未生成过则返回空串。
+func (s *QRService) BaseURL() string {
+	return s.baseURL
+}
+
 // GenerateToken 生成一次性接入 token,并把当前 SIP 六元组快照写入缓存.
 // 返回 token 与有效期秒数.
 //
 // 返回相对秒数而非绝对时间戳:前端以响应到达时刻起算倒计时,免受客户端
 // 时钟偏移影响.
 func (s *QRService) GenerateToken(ctx context.Context) (string, int, error) {
+	if s.baseURLFn == nil {
+		return "", 0, fmt.Errorf("%w: base url provider not wired", ErrBaseURLUnavailable)
+	}
+	baseURL, err := s.baseURLFn()
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: %v", ErrBaseURLUnavailable, err)
+	}
 	view, err := s.config.Get(ctx)
 	if err != nil {
 		return "", 0, err
@@ -143,6 +177,7 @@ func (s *QRService) GenerateToken(ctx context.Context) (string, int, error) {
 		return "", 0, err
 	}
 
+	s.baseURL = baseURL
 	return token, int(s.ttl.Seconds()), nil
 }
 

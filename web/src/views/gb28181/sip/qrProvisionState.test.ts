@@ -14,8 +14,16 @@ describe("baseUrl normalization", () => {
 });
 
 describe("baseUrl validation", () => {
+  // ⛔⛔ 回归防线(2026-10-08):基址来自后端下发,前端不自行推断。
+  // 曾经的默认值是 `window.location.origin`,于是「用户从 nginx 自签 HTTPS 打开平台
+  // → 二维码里带 HTTPS → 设备侧证书校验失败 → 报『连不上平台,请检查 Wi-Fi』」。
+  // 这里锁死:后端给空就必须判不通过,**绝不允许**静默回退到浏览器地址。
   it("rejects empty input", () => {
     expect(validateBaseUrl("")).not.toBe("");
+  });
+
+  it("names the missing platform config instead of blaming the network", () => {
+    expect(validateBaseUrl("")).toContain("平台未下发");
   });
 
   it("rejects a missing scheme", () => {

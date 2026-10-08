@@ -53,6 +53,8 @@ func newQRService(t *testing.T, db *gorm.DB, transport []string) *QRService {
 		interfaces: []net.Interface{{Index: 1, Name: "en0", Flags: net.FlagUp}},
 		addresses:  map[int][]net.Addr{1: {mustCIDR(t, "192.168.1.10/24")}},
 	}
+	// 设备可达基址：没有它GenerateToken 会拒绝出码（2026-10-08 起的后端契约）
+	service.SetBaseURLProvider(func() (string, error) { return "http://192.168.1.10:51010", nil })
 	return service
 }
 
@@ -241,6 +243,7 @@ func TestQRExchange_Expired(t *testing.T) {
 	// 用极短 TTL 的服务实例验证过期路径
 	svc := NewQRService(cache, NewSIPConfigService(db), func() []string { return []string{"udp"} })
 	svc.ttl = 10 * time.Millisecond
+	svc.SetBaseURLProvider(func() (string, error) { return "http://192.168.1.10:51010", nil })
 
 	ctx := context.Background()
 	token, _, err := svc.GenerateToken(ctx)
