@@ -528,8 +528,17 @@ ensure_self_signed_cert() {
 #   而包这边所有自检都显示正常 —— 全程零报错，最难查的一类问题。
 #   ⭐ 与 ZLM 同一个道理：端口可连≠ 服务是我们的。判据必须是**进程**。
 nginx_healthy() {
+  # ⛔⛔ 关闭 fd 必须写进**子 shell**。
+  #   实测踩过：写成裸的 `exec 3<&- 3>&- 2>/dev/null || true` 时，
+  #   它会把**整个脚本的 shell 替换掉** —— 在 `set -Eeuo pipefail` 下，
+  #   `exec` 作用于当前 shell 且关闭一个从未打开的 fd 会中断执行，
+  #   后面的语句（包括调用方 `stop_nginx` 的收尾）**全部不再执行**。
+  #
+  #   症状极具误导性：stop 的退出码是 1、**一行输出都没有**，
+  #   而 ZLM 还在跑 —— 看起来像"stop 失败了"，实际是"stop 把自己杀了"。
+  #   只有用探针插进 || 分支（发现 close 之后那句没打）才定位到。
   (exec 3<>"/dev/tcp/127.0.0.1/$NGINX_HTTPS_PORT") 2>/dev/null || {
-    exec 3<&- 3>&- 2>/dev/null || true
+    ( exec 3<&- 3>&- ) 2>/dev/null || true
     return 1
   }
   exec 3<&- 3>&-
@@ -801,8 +810,9 @@ port_in_use_by_other() {
 #   于是**启动成功、状态未运行**，两个输出互相矛盾且都"有依据"。
 #   ⇒ 必须同时确认两件事：① 端口在听 ② 本包路径的 MediaServer 进程活着。
 zlm_healthy() {
+  # ⛔ close 同样必须包进子 shell —— 理由见 nginx_healthy 处的注释。
   (exec 3<>"/dev/tcp/127.0.0.1/$ZLM_HTTP_PORT") 2>/dev/null || {
-    exec 3<&- 3>&- 2>/dev/null || true
+    ( exec 3<&- 3>&- ) 2>/dev/null || true
     return 1
   }
   exec 3<&- 3>&-
