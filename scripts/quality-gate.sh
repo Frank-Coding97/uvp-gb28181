@@ -63,8 +63,25 @@ if [ -z "$GOLANGCI_BIN" ] && [ -x "$HOME/go/bin/golangci-lint" ]; then
   GOLANGCI_BIN="$HOME/go/bin/golangci-lint"
 fi
 
+# Python：schema 捕获 / 基线生成 / 权限对账都用它。
+# ⚠️ 必须用**带PyYAML/pymysql 的那个 venv**（脚本里要用 yaml 解析结构断言），
+#    裸系统 python3 会因缺 yaml 而跳过校验 —— 表现是「护栏静默失效」。
+PY_BIN="$(command -v python3 2>/dev/null || true)"
+for cand in \
+  "$HOME/.workbuddy/binaries/python/envs/default/bin/python" \
+  "$ROOT/.venv/bin/python"
+do
+  if [ -x "$cand" ] && "$cand" -c 'import yaml' >/dev/null 2>&1; then
+    PY_BIN="$cand"; break
+  fi
+done
+if [ -z "$PY_BIN" ] || [ ! -x "$PY_BIN" ]; then
+  echo "✗ 找不到带 PyYAML 的 Python（schema 捕获/基线生成/权限对账都要它）" >&2
+  exit 2
+fi
+
 WEB_BIN="$ROOT/web/node_modules/.bin"
-export GO_BIN GOFMT_BIN GO_PATH_PREFIX GOLANGCI_BIN WEB_BIN ROOT
+export GO_BIN GOFMT_BIN GO_PATH_PREFIX GOLANGCI_BIN WEB_BIN ROOT PY_BIN
 
 echo "仓库根  : $ROOT"
 echo "Go      : $GO_BIN"
@@ -113,6 +130,14 @@ run_check "go vet（后端）" "$ROOT/server" '"$GO_BIN" vet ./...'
 # 与前端扫码页里，靠人眼盯不完整。口径与 scripts/domain-guard.sh 一致。
 # ⛔ 本注释刻意不写出完整旧域名 —— 那是护栏的判据本身，写出来会把自己判违规。
 run_check "域名残留（uvplatform.com）" "$ROOT" './scripts/domain-guard.sh'
+
+# 路由 ↔ sys_api 对账：新增路由忘了登记权限 ⇒ 用户一点就 403，
+# 而 casbin 只匹配 URL 路径、完全不查 sys_api，所以这类缺口对所有基于
+# sys_api 正查的检查都是隐形的（2026-10-08 已因此漏过两批）。
+# 判据用仓库种子，离线可跑；活库版本用 scripts/permission/dump_sys_api.py 导出后
+# 再传给 reconcile_routes.py --perm。
+run_check "路由权限登记（routes ↔ sys_api）" "$ROOT" \
+  "$PY_BIN scripts/permission/reconcile_routes.py --perm server/resource/database/baseline/seeds/sys_api.jsonl"
 
 if [ -n "$GOLANGCI_BIN" ] && [ -x "$GOLANGCI_BIN" ]; then
   # golangci-lint 内部要调 go，而 go 不在 PATH，所以给它补上。
