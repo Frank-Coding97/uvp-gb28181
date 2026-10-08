@@ -15,8 +15,8 @@ const visible = computed(() => hasSipUpdatePermission(permissions.value) && stor
 
 const tooltip = computed(() => {
   const state = store.status?.runtime?.state;
-  if (state === "failed") return "SIP 服务启动失败,点击查看和修改配置";
-  return "SIP 尚未配置,点击进入引导";
+  if (state === "failed") return "平台接入配置应用失败,点击查看和修改配置";
+  return "平台尚未完成接入配置,点击进入引导";
 });
 
 function openSetup() {
@@ -26,7 +26,7 @@ function openSetup() {
 
 <template>
   <a-tooltip v-if="visible" :content="tooltip" position="bottom">
-    <a-button size="mini" type="text" class="icon_btn sip-setup-bell" aria-label="SIP 配置提醒" @click="openSetup">
+    <a-button size="mini" type="text" class="icon_btn sip-setup-bell" aria-label="平台接入配置提醒" @click="openSetup">
       <template #icon>
         <Bell :size="18" />
       </template>

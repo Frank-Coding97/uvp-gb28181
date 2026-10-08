@@ -9,6 +9,8 @@ const configuredStatus = {
     listenIp: "192.168.1.10",
     advertiseIp: "203.0.113.10",
     advertiseIpInferred: false,
+    hookIp: "192.0.2.11",
+    streamIp: "media.example.com",
     port: 5061,
     domain: "3402000000",
     serverId: "34020000002000000001",
@@ -37,6 +39,27 @@ function fakeApi(overrides: Partial<SipSetupApi> = {}): SipSetupApi {
 }
 
 describe("useSipSetup", () => {
+  it("sends a custom domain and an eight-character password unchanged", async () => {
+    const api = fakeApi();
+    const setup = useSipSetup(api);
+    await setup.loadStatus();
+    setup.form.domain = "4401000000";
+    setup.form.password = "K9#nT2xQ";
+    await setup.save();
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ domain: "4401000000", password: "K9#nT2xQ" }));
+  });
+
+  it("loads and saves optional media addresses", async () => {
+    const api = fakeApi();
+    const setup = useSipSetup(api);
+    await setup.loadStatus();
+    expect(setup.form.hookIp).toBe("192.0.2.11");
+    expect(setup.form.streamIp).toBe("media.example.com");
+    setup.form.hookIp = "2001:db8::22";
+    setup.form.streamIp = "stream.example.com";
+    await setup.save();
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ hookIp: "2001:db8::22", streamIp: "stream.example.com" }));
+  });
   it("maps an existing configuration without exposing its password", async () => {
     const setup = useSipSetup(fakeApi());
     await setup.loadStatus();

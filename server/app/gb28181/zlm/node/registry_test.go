@@ -106,6 +106,29 @@ func TestRegistry_GetByUUID(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestRegistry_PlatformPlaybackHostIsRuntimeFallback(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	withOverride := mustAdd(t, r, node.Node{
+		Name: "override", Host: "10.0.0.1", PlaybackHost: "node.example.com", State: node.StateActive,
+	})
+	withoutOverride := mustAdd(t, r, node.Node{
+		Name: "default", Host: "10.0.0.2", State: node.StateActive,
+	})
+
+	r.SetPlatformPlaybackHost("stream.example.com")
+	gotOverride, ok := r.Get(withOverride.ID)
+	require.True(t, ok)
+	require.Equal(t, "node.example.com", gotOverride.EffectivePlaybackHost())
+	gotDefault, ok := r.Get(withoutOverride.ID)
+	require.True(t, ok)
+	require.Equal(t, "stream.example.com", gotDefault.EffectivePlaybackHost())
+
+	r.SetPlatformPlaybackHost("media.example.net")
+	gotDefault, ok = r.Get(withoutOverride.ID)
+	require.True(t, ok)
+	require.Equal(t, "media.example.net", gotDefault.EffectivePlaybackHost())
+}
+
 func TestRegistry_ListActive_SkipsOfflineAndMaintenance(t *testing.T) {
 	r := node.NewRegistry(newMemoryRepo())
 	mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateActive})

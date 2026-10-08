@@ -22,6 +22,7 @@ export interface ZLMNode {
   revision: number;
   name: string;
   host: string;
+  hookIp?: string;
   receiveHost: string;
   playbackHost: string;
   apiPort: number;
@@ -46,6 +47,7 @@ export interface ZLMNode {
 export interface CreateZLMNodeReq {
   name?: string;
   host: string;
+  hookIp?: string;
   receiveHost?: string;
   playbackHost?: string;
   apiPort: number;
@@ -79,6 +81,7 @@ export interface ZLMNodeProbeResult {
 export interface UpdateZLMNodeReq {
   name?: string;
   host?: string;
+  hookIp?: string;
   receiveHost?: string;
   playbackHost?: string;
   apiPort?: number;

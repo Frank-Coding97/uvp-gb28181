@@ -52,6 +52,10 @@ func releaseSQL(d Dialect) string {
 // Acquire 取锁。MySQL/SQLServer 检查返回值,非成功即报错。
 func (l *dbLocker) Acquire() error {
 	switch l.d {
+	case DialectSQLite:
+		// SQLite serializes schema writes at the database level; advisory lock SQL
+		// is unavailable and would make the embedded deployment fail at startup.
+		return nil
 	case DialectPostgres:
 		// pg_advisory_lock 返回 void,无结果集,Exec 直接执行。
 		return l.db.Exec(acquireSQL(l.d)).Error
@@ -86,5 +90,8 @@ func (l *dbLocker) Acquire() error {
 
 // Release 放锁,失败则透传(锁随连接关闭自动释放,兜底)。
 func (l *dbLocker) Release() error {
+	if l.d == DialectSQLite {
+		return nil
+	}
 	return l.db.Exec(releaseSQL(l.d)).Error
 }

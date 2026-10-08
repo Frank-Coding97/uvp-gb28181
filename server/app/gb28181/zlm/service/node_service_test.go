@@ -69,6 +69,8 @@ type mockProbe struct {
 	setServerConfigErr error
 	calls              []string
 	lastSetParams      map[string]string
+	lastHookIP         string
+	lastTuning         service.MediaTuning
 }
 
 type blockingApplyProbe struct {
@@ -123,11 +125,13 @@ func (m *mockProbe) GetServerConfig(_ context.Context, _ *node.Node) (map[string
 	}
 	return map[string]string{"api.secret": "x", "http.port": "80"}, nil
 }
-func (m *mockProbe) ApplyConfigForNode(_ context.Context, n *node.Node, _ service.MediaTuning) error {
+func (m *mockProbe) ApplyConfigForNode(_ context.Context, n *node.Node, tuning service.MediaTuning) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "SetServerConfig")
 	m.lastSetParams = map[string]string{"general.mediaServerId": n.MediaServerUUID}
+	m.lastHookIP = n.HookIP
+	m.lastTuning = tuning
 	return m.setServerConfigErr
 }
 
@@ -460,6 +464,47 @@ func TestNodeService_Update_MediaHosts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, receiveHost, updated.ReceiveHost)
 	require.Equal(t, playbackHost, updated.PlaybackHost)
+}
+
+func TestNodeService_CreateAndUpdate_HookIPOverride(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	svc := newSvc(repo, probe)
+
+	created, err := svc.Create(context.Background(), service.CreateNodeReq{
+		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s", HookIP: "192.0.2.10",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "192.0.2.10", created.HookIP)
+	require.Equal(t, "192.0.2.10", probe.lastHookIP)
+
+	next := "198.51.100.11"
+	updated, err := svc.Update(context.Background(), created.ID, service.UpdateNodeReq{HookIP: &next})
+	require.NoError(t, err)
+	require.Equal(t, next, updated.HookIP)
+	require.Equal(t, next, probe.lastHookIP)
+}
+
+func TestNodeService_ReloadPlatformMediaDefaults_ReappliesActiveNodes(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	registry := node.NewRegistry(repo)
+	svc := service.NewNodeService(registry, probe, service.MediaTuning{})
+	created, err := svc.Create(context.Background(), service.CreateNodeReq{
+		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
+	})
+	require.NoError(t, err)
+	before := len(probe.calls)
+
+	err = svc.ReloadPlatformMediaDefaults(context.Background(), "203.0.113.20", "media.example.com")
+	require.NoError(t, err)
+	require.Greater(t, len(probe.calls), before, "active node should be reapplied")
+	require.Equal(t, "203.0.113.20", probe.lastTuning.HookIP)
+	require.Equal(t, "media.example.com", probe.lastTuning.StreamIP)
+
+	updated, ok := registry.Get(created.ID)
+	require.True(t, ok)
+	require.Equal(t, "media.example.com", updated.EffectivePlaybackHost())
 }
 
 func TestNodeService_Get_NotFound(t *testing.T) {

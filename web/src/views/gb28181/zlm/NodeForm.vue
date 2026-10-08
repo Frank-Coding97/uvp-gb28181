@@ -229,11 +229,6 @@ async function handleSubmit() {
           <div class="form-tip">设备向此地址发送 RTP；公网部署时填写设备可达地址。</div>
         </a-form-item>
 
-        <a-form-item label="播放访问地址">
-          <a-input v-model="form.playbackHost" allow-clear :max-length="255" placeholder="浏览器可访问的 IP 或域名" />
-          <div class="form-tip">用于后端生成安全播放出口，留空跟随管理地址。</div>
-        </a-form-item>
-
         <a-form-item label="调度权重" :validate-status="errors.weight ? 'error' : undefined" :help="errors.weight">
           <a-input
             v-model="form.weight"
@@ -273,6 +268,33 @@ async function handleSubmit() {
           <div class="form-tip">范围 1024-65535，结束端口不得小于起始端口。</div>
         </a-form-item>
       </template>
+
+      <div class="form-section-title">媒体网络地址覆盖</div>
+      <a-form-item label="Hook IP 覆盖" :validate-status="errors.hookIp ? 'error' : undefined" :help="errors.hookIp">
+        <a-input
+          v-model="form.hookIp"
+          allow-clear
+          :max-length="45"
+          placeholder="具体 IPv4 或 IPv6"
+          @blur="validateField('hookIp')"
+        />
+        <div class="form-tip">留空使用平台默认 Hook IP；平台默认未配置时沿用原地址策略。</div>
+      </a-form-item>
+
+      <a-form-item
+        label="Stream IP 覆盖"
+        :validate-status="errors.playbackHost ? 'error' : undefined"
+        :help="errors.playbackHost"
+      >
+        <a-input
+          v-model="form.playbackHost"
+          allow-clear
+          :max-length="253"
+          placeholder="具体 IP 地址或域名"
+          @blur="validateField('playbackHost')"
+        />
+        <div class="form-tip">留空使用平台默认 Stream IP；平台默认未配置时沿用原播放地址策略。</div>
+      </a-form-item>
     </a-form>
 
     <section v-else class="probe-preview" aria-label="ZL 信息确认">

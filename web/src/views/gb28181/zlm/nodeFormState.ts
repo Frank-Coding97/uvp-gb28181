@@ -1,8 +1,10 @@
 import type { CreateZLMNodeReq, UpdateZLMNodeReq, ZLMNode } from "@/api/gb28181-zlm";
+import { validateOptionalHookIp, validateOptionalStreamIp } from "../sip/mediaNetworkAddress";
 
 export interface NodeFormState {
   name: string;
   host: string;
+  hookIp: string;
   receiveHost: string;
   playbackHost: string;
   apiPort: string;
@@ -18,6 +20,7 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
   return {
     name: node?.name ?? "",
     host: node?.host ?? "",
+    hookIp: node?.hookIp ?? "",
     receiveHost: node?.receiveHost ?? "",
     playbackHost: node?.playbackHost ?? "",
     apiPort: node ? String(node.apiPort) : "",
@@ -50,6 +53,10 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
   if (weightError) errors.weight = weightError;
   if (startError) errors.rtpPortStart = startError;
   if (endError) errors.rtpPortEnd = endError;
+  const hookIpError = validateOptionalHookIp(form.hookIp);
+  if (hookIpError) errors.hookIp = hookIpError;
+  const streamIpError = validateOptionalStreamIp(form.playbackHost);
+  if (streamIpError) errors.playbackHost = streamIpError;
   if (!startError && !endError && Number(form.rtpPortEnd) < Number(form.rtpPortStart)) {
     errors.rtpPortEnd = "RTP 结束端口不能小于起始端口";
   }
@@ -59,6 +66,7 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
 export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZLMNodeReq | UpdateZLMNodeReq {
   const request: CreateZLMNodeReq = {
     host: form.host.trim(),
+    hookIp: form.hookIp.trim(),
     receiveHost: form.receiveHost.trim(),
     playbackHost: form.playbackHost.trim(),
     apiPort: Number(form.apiPort),

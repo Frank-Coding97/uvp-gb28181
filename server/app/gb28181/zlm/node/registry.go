@@ -44,14 +44,15 @@ type CASRepo = RevisionedRepo
 // 内存表 + DB 双写:Add/Update/Delete/MarkOffline 都同步写 DB;
 // UpdateStats 不写 DB(高频心跳数据只在内存)。
 type Registry struct {
-	mu                sync.RWMutex
-	nodeLocksMu       sync.Mutex
-	nodeLocks         map[int64]*sync.Mutex // serializes persistence per node
-	nodes             map[int64]*Node       // ID -> Node
-	uuids             map[string]int64      // mediaServerUUID -> ID(Hook 反查)
-	autoOnDemandReady map[int64]bool        // 当前进程已写入并回读确认缺流 Hook
-	admissionBlocked  map[int64]bool        // 显式运维/恢复 gate,不改变普通 active 语义
-	repo              Repo
+	mu                   sync.RWMutex
+	nodeLocksMu          sync.Mutex
+	nodeLocks            map[int64]*sync.Mutex // serializes persistence per node
+	nodes                map[int64]*Node       // ID -> Node
+	uuids                map[string]int64      // mediaServerUUID -> ID(Hook 反查)
+	autoOnDemandReady    map[int64]bool        // 当前进程已写入并回读确认缺流 Hook
+	admissionBlocked     map[int64]bool        // 显式运维/恢复 gate,不改变普通 active 语义
+	platformPlaybackHost string
+	repo                 Repo
 }
 
 func cloneTags(tags map[string]string) map[string]string {
@@ -408,12 +409,25 @@ func (r *Registry) IsAdmissionBlocked(id int64) bool {
 	return r.admissionBlocked[id]
 }
 
+// SetPlatformPlaybackHost sets the runtime fallback used when a node has no
+// explicit PlaybackHost. It is intentionally kept out of repository rows.
+func (r *Registry) SetPlatformPlaybackHost(host string) {
+	r.mu.Lock()
+	r.platformPlaybackHost = host
+	r.mu.Unlock()
+}
+
+func (r *Registry) withRuntimeDefaults(n Node) Node {
+	n.PlatformPlaybackHost = r.platformPlaybackHost
+	return n
+}
+
 // Get 按 ID 取节点(包含最新 Stats,内存优先)
 func (r *Registry) Get(id int64) (*Node, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if n, ok := r.nodes[id]; ok {
-		copy := cloneNode(*n)
+		copy := r.withRuntimeDefaults(cloneNode(*n))
 		return &copy, true
 	}
 	return nil, false
@@ -431,7 +445,7 @@ func (r *Registry) GetByUUID(uuid string) (*Node, bool) {
 	if !ok {
 		return nil, false
 	}
-	copy := cloneNode(*n)
+	copy := r.withRuntimeDefaults(cloneNode(*n))
 	return &copy, true
 }
 
@@ -450,7 +464,7 @@ func (r *Registry) ResolveAutoOnDemandNode(uuid string) (*Node, bool) {
 	if !ok || !n.IsSchedulable() || n.IsNearCapacity() {
 		return nil, false
 	}
-	copy := cloneNode(*n)
+	copy := r.withRuntimeDefaults(cloneNode(*n))
 	return &copy, true
 }
 
@@ -470,7 +484,7 @@ func (r *Registry) List() []*Node {
 	defer r.mu.RUnlock()
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		copy := cloneNode(*n)
+		copy := r.withRuntimeDefaults(cloneNode(*n))
 		out = append(out, &copy)
 	}
 	return out
@@ -483,7 +497,7 @@ func (r *Registry) ListActive() []*Node {
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
 		if n.IsActive() {
-			copy := cloneNode(*n)
+			copy := r.withRuntimeDefaults(cloneNode(*n))
 			out = append(out, &copy)
 		}
 	}
@@ -501,7 +515,7 @@ func (r *Registry) ListSchedulable() []*Node {
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
 		if n.IsSchedulable() && !n.IsNearCapacity() && !r.admissionBlocked[n.ID] {
-			copy := cloneNode(*n)
+			copy := r.withRuntimeDefaults(cloneNode(*n))
 			out = append(out, &copy)
 		}
 	}

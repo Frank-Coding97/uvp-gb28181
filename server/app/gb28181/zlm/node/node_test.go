@@ -20,9 +20,15 @@ func TestNode_HTTPEndpoint(t *testing.T) {
 }
 
 func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
-	n := node.Node{Host: "10.0.0.2", ReceiveHost: "  ", PlaybackHost: "play.example.com"}
+	n := node.Node{Host: "10.0.0.2", ReceiveHost: "  ", PlaybackHost: "play.example.com", PlatformPlaybackHost: "platform.example.com"}
 	require.Equal(t, "10.0.0.2", n.EffectiveReceiveHost())
 	require.Equal(t, "play.example.com", n.EffectivePlaybackHost())
+
+	n.PlaybackHost = ""
+	require.Equal(t, "platform.example.com", n.EffectivePlaybackHost())
+
+	n.PlatformPlaybackHost = ""
+	require.Equal(t, "10.0.0.2", n.EffectivePlaybackHost())
 
 	n.ReceiveHost = "203.0.113.10"
 	require.Equal(t, "203.0.113.10", n.EffectiveReceiveHost())

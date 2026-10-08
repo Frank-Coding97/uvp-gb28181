@@ -13,8 +13,7 @@ const passwordVisible = ref(true);
 const touched = ref({ serverId: false, port: false, password: false });
 
 function updateServerId(value: string) {
-  // allow-clear 会传空串,也走同一路径同步 domain(会派生为空,与 UI 一致).
-  emit("update", { serverId: value, domain: deriveDomain(value) });
+  emit("update", { serverId: value });
 }
 
 function onPortInput(value: string) {
@@ -28,7 +27,7 @@ watch(
   () => props.form.serverId,
   serverId => {
     const derived = deriveDomain(serverId);
-    if (derived && derived !== props.form.domain) emit("update", { domain: derived });
+    if (!props.form.domain && derived) emit("update", { domain: derived });
   },
   { immediate: true }
 );
@@ -80,8 +79,13 @@ const passwordError = computed(() => {
     </div>
 
     <a-form-item label="SIP 域">
-      <a-input :model-value="form.domain" disabled allow-clear placeholder="填入平台 ID 后自动生成" />
-      <template #extra>按 GB/T 28181-2016,SIP 域取平台 ID 前 10 位(行政区划码),无需手动填写。</template>
+      <a-input
+        :model-value="form.domain"
+        allow-clear
+        placeholder="默认取平台 ID 前 10 位,也可手动修改"
+        @update:model-value="emit('update', { domain: $event })"
+      />
+      <template #extra>默认取平台 ID 前 10 位,可手动修改为 10 位数字。</template>
     </a-form-item>
 
     <a-form-item
@@ -93,7 +97,7 @@ const passwordError = computed(() => {
       <a-input
         :model-value="form.password"
         :type="passwordVisible ? 'text' : 'password'"
-        :placeholder="hasExistingPassword ? '留空保留原密码;设置新密码需 ≥ 12 位' : '至少 12 位,含大小写 / 数字 / 特殊字符 3 类'"
+        :placeholder="hasExistingPassword ? '留空保留原密码;设置新密码需 ≥ 8 位' : '至少 8 位,含大小写 / 数字 / 特殊字符 3 类'"
         allow-clear
         @update:model-value="emit('update', { password: $event })"
         @blur="touched.password = true"
@@ -127,7 +131,7 @@ const passwordError = computed(() => {
         </span>
         <span v-else-if="!form.password && hasExistingPassword"> 留空保留原密码。如需修改,新密码需满足强度规则。 </span>
         <span v-else class="pw-strength__hint">
-          要求:长度 ≥ 12,包含大写、小写、数字、特殊字符中的至少 3 类,不使用常见弱口令。
+          要求:长度 ≥ 8,包含大写、小写、数字、特殊字符中的至少 3 类,不使用常见弱口令。
         </span>
       </template>
     </a-form-item>

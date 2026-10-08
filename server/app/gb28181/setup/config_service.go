@@ -14,6 +14,8 @@ type SaveSIPConfigRequest struct {
 	ListenIP            string
 	AdvertiseIP         string
 	AdvertiseIPInferred bool
+	HookIP              string
+	StreamIP            string
 	Port                int
 	Domain              string
 	ServerID            string
@@ -28,6 +30,8 @@ type SIPConfigView struct {
 	ListenIP            string         `json:"listenIp"`
 	AdvertiseIP         string         `json:"advertiseIp"`
 	AdvertiseIPInferred bool           `json:"advertiseIpInferred"`
+	HookIP              string         `json:"hookIp"`
+	StreamIP            string         `json:"streamIp"`
 	Port                int            `json:"port"`
 	Domain              string         `json:"domain"`
 	ServerID            string         `json:"serverId"`
@@ -81,6 +85,8 @@ func (s *SIPConfigService) Save(ctx context.Context, req SaveSIPConfigRequest) (
 			ListenIP:            req.ListenIP,
 			AdvertiseIP:         req.AdvertiseIP,
 			AdvertiseIPInferred: req.AdvertiseIPInferred,
+			HookIP:              req.HookIP,
+			StreamIP:            req.StreamIP,
 			Port:                req.Port,
 			Domain:              req.Domain,
 			ServerID:            req.ServerID,
@@ -103,6 +109,8 @@ func sipConfigView(row *SIPConfig) SIPConfigView {
 		ListenIP:            row.ListenIP,
 		AdvertiseIP:         row.AdvertiseIP,
 		AdvertiseIPInferred: row.AdvertiseIPInferred,
+		HookIP:              row.HookIP,
+		StreamIP:            row.StreamIP,
 		Port:                row.Port,
 		Domain:              row.Domain,
 		ServerID:            row.ServerID,

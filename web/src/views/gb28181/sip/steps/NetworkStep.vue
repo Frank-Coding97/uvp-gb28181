@@ -2,6 +2,7 @@
 import { computed, watch } from "vue";
 import type { SipNetworkAddress, SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
+import { validateOptionalHookIp, validateOptionalStreamIp } from "../mediaNetworkAddress";
 
 const props = defineProps<{ form: SipSetupForm; network: SipNetworkInterfaces | null }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
@@ -56,6 +57,16 @@ function onAdvertiseInputChange(value: string) {
 
 // 选中当前 nicIp: 局域网 listen 是权威(advertise 从属);公网 listen 是权威.
 const currentNic = computed(() => props.form.listenIp);
+const hookIpError = computed(() => validateOptionalHookIp(props.form.hookIp));
+const streamIpError = computed(() => validateOptionalStreamIp(props.form.streamIp));
+
+function updateHookIp(value: string) {
+  emit("update", { hookIp: value });
+}
+
+function updateStreamIp(value: string) {
+  emit("update", { streamIp: value });
+}
 
 // 每次 network 数据到达 / 部署模式变化时,如果当前 nic 不在下拉可选列表 → 自动选推荐网卡填进去.
 // 判据用 nicOptions(含 0.0.0.0)而不是 usableNics,否则用户主动选 0.0.0.0 会被 watcher 立刻改回具体网卡.
@@ -103,6 +114,41 @@ watch(
         />
         <template #extra> 设备通过公网接入平台时使用的地址(NAT 场景下填映射后的公网 IPv4)。 </template>
       </a-form-item>
+
+      <section class="media-address-section" aria-labelledby="media-address-title">
+        <h3 id="media-address-title">媒体网络地址</h3>
+        <div class="media-address-grid">
+          <a-form-item
+            label="Hook IP"
+            :validate-status="hookIpError ? 'error' : undefined"
+            :help="hookIpError || '留空沿用现有地址策略。'"
+          >
+            <a-input
+              :model-value="form.hookIp"
+              allow-clear
+              :max-length="45"
+              placeholder="具体 IPv4 或 IPv6"
+              @update:model-value="updateHookIp"
+            />
+            <div class="form-tip">ZLMediaKit 回调平台时使用的地址；媒体节点可单独覆盖。</div>
+          </a-form-item>
+
+          <a-form-item
+            label="Stream IP"
+            :validate-status="streamIpError ? 'error' : undefined"
+            :help="streamIpError || '留空沿用现有地址策略。'"
+          >
+            <a-input
+              :model-value="form.streamIp"
+              allow-clear
+              :max-length="253"
+              placeholder="IP 地址或域名"
+              @update:model-value="updateStreamIp"
+            />
+            <div class="form-tip">浏览器播放媒体时使用的主机名，不含协议、端口或路径；媒体节点可单独覆盖。</div>
+          </a-form-item>
+        </div>
+      </section>
     </a-form>
   </div>
 </template>
@@ -118,5 +164,37 @@ watch(
 .option-meta {
   margin-left: 2px;
   color: var(--uvp-text-tertiary);
+}
+
+.media-address-section {
+  padding-top: 14px;
+  border-top: 1px solid var(--uvp-panel-border, #e8edf5);
+}
+
+.media-address-section h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}
+
+.media-address-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-tip {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--uvp-text-tertiary);
+}
+
+@media (width <= 560px) {
+  .media-address-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
 }
 </style>

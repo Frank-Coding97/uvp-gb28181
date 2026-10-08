@@ -45,6 +45,20 @@ func TestSIPConfigService_SaveNewConfig(t *testing.T) {
 	require.Equal(t, "Sec12345Aa!!", row.Password)
 }
 
+func TestSIPConfigService_CustomDomainAndEightCharacterPassword(t *testing.T) {
+	db := newConfigTestDB(t)
+	svc := NewSIPConfigService(db)
+	password := "K9#nT2xQ"
+	req := validSaveRequest(&password)
+	req.Domain = "4401000000"
+	_, err := svc.Save(context.Background(), req)
+	require.NoError(t, err)
+	row, err := NewSIPConfigRepository(db).Get(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, req.Domain, row.Domain)
+	require.Equal(t, password, row.Password)
+}
+
 func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 	db := newConfigTestDB(t)
 	svc := NewSIPConfigService(db)

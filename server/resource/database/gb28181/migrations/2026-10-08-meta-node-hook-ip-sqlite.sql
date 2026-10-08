@@ -1,0 +1,1 @@
+ALTER TABLE "meta_node" ADD COLUMN "hook_ip" TEXT NOT NULL DEFAULT '';

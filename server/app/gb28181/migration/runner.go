@@ -51,8 +51,61 @@ var baselineRequiredTables = []string{
 	"sys_openapi_runtime_state",
 }
 
-// schemaProbe 探测表是否存在
-type schemaProbe func(tableName string) (bool, error)
+// schemaProbe probes the release baseline fingerprint and the few upgrade
+// columns that must still run when an older snapshot has an empty ledger.
+type schemaProbe struct {
+	hasTable  func(tableName string) (bool, error)
+	hasColumn func(tableName, columnName string) (bool, error)
+}
+
+type baselineColumnRequirement struct {
+	table  string
+	column string
+}
+
+var baselineColumnMigrations = map[string]baselineColumnRequirement{
+	"2026-10-08-initial-admin-password-change.sql":            {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-postgresql.sql": {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-sqlserver.sql":  {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-sqlite.sql":     {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-sip-platform-hook-ip.sql":                     {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-postgresql.sql":          {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-sqlserver.sql":           {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-sqlite.sql":              {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-stream-ip.sql":                   {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-postgresql.sql":        {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-sqlserver.sql":         {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-sqlite.sql":            {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-meta-node-hook-ip.sql":                        {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-postgresql.sql":             {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-sqlserver.sql":              {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-sqlite.sql":                 {table: "meta_node", column: "hook_ip"},
+}
+
+// needsBaselineColumnUpgrade applies only to additive column migrations whose
+// presence can be checked safely. All other embedded migrations keep the
+// normal empty-ledger baseline behavior.
+func needsBaselineColumnUpgrade(name string, probe schemaProbe) (bool, error) {
+	requirement, ok := baselineColumnMigrations[name]
+	if !ok {
+		return false, nil
+	}
+	if probe.hasColumn == nil {
+		return false, fmt.Errorf("列迁移缺少列探测器")
+	}
+	exists, err := probe.hasTable(requirement.table)
+	if err != nil {
+		return false, fmt.Errorf("探测 %s 表失败: %w", requirement.table, err)
+	}
+	if !exists {
+		return false, fmt.Errorf("检测到旧基线缺少 %s 表，无法应用列迁移", requirement.table)
+	}
+	exists, err = probe.hasColumn(requirement.table, requirement.column)
+	if err != nil {
+		return false, fmt.Errorf("探测 %s.%s 失败: %w", requirement.table, requirement.column, err)
+	}
+	return !exists, nil
+}
 
 // migrationExecutor 执行单条迁移 SQL。
 type migrationExecutor interface {
@@ -150,8 +203,13 @@ func splitStatements(sqlText string) []string {
 
 // Up 执行未应用的迁移:建版本表 → 取锁 → 基线化或增量执行 → 放锁。
 func Up(db *gorm.DB, d Dialect) error {
-	probe := func(tableName string) (bool, error) {
-		return db.Migrator().HasTable(tableName), nil
+	probe := schemaProbe{
+		hasTable: func(tableName string) (bool, error) {
+			return db.Migrator().HasTable(tableName), nil
+		},
+		hasColumn: func(tableName, columnName string) (bool, error) {
+			return db.Migrator().HasColumn(tableName, columnName), nil
+		},
 	}
 	return run(NewStore(db), newDBLocker(db, d), &embedSource{dialect: d}, &dbExecutor{db: db}, probe)
 }
@@ -190,7 +248,7 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		//   2. 老基线库:探测表缺失 → 无法确定哪些迁移已应用,
 		//      明确拒绝而不是"迁移成功但缺表"的假成功
 		for _, table := range baselineRequiredTables {
-			exists, err := probe(table)
+			exists, err := probe.hasTable(table)
 			if err != nil {
 				return fmt.Errorf("基线探测失败(%s): %w", table, err)
 			}
@@ -198,7 +256,46 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 				return fmt.Errorf("检测到空迁移版本表且缺少 %s 表:无法确定存量库的迁移基线,请人工建立基线后重试", table)
 			}
 		}
-		return store.MarkApplied(names)
+
+		// New full baselines already contain all additive columns, but older
+		// snapshots have an empty ledger too. Probe only migrations with an
+		// explicit column requirement before baseline-marking so an upgrade cannot
+		// silently skip those columns.
+		pending := make(map[string]bool)
+		for _, name := range names {
+			needed, err := needsBaselineColumnUpgrade(name, probe)
+			if err != nil {
+				return err
+			}
+			pending[name] = needed
+		}
+		baselineApplied := make([]string, 0, len(names))
+		for _, name := range names {
+			if !pending[name] {
+				baselineApplied = append(baselineApplied, name)
+			}
+		}
+		if len(baselineApplied) > 0 {
+			if err := store.MarkApplied(baselineApplied); err != nil {
+				return fmt.Errorf("标记基线迁移失败: %w", err)
+			}
+		}
+		for _, name := range names {
+			if !pending[name] {
+				continue
+			}
+			sqlText, err := src.ReadSQL(name)
+			if err != nil {
+				return fmt.Errorf("读迁移文件 %s 失败: %w", name, err)
+			}
+			if err := exec.ExecSQL(sqlText); err != nil {
+				return fmt.Errorf("迁移 %s 执行失败: %w\nSQL: %s", name, err, sqlText)
+			}
+			if err := store.MarkApplied([]string{name}); err != nil {
+				return fmt.Errorf("标记迁移 %s 失败: %w", name, err)
+			}
+		}
+		return nil
 	}
 
 	for _, name := range names {

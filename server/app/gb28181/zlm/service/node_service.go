@@ -69,6 +69,8 @@ type MediaTuning struct {
 	HookRequireTLS          bool
 	HookHost                string
 	HookPort                int
+	HookIP                  string
+	StreamIP                string
 	StreamNoneReaderTimeout int
 	RTPServerTimeout        int
 }
@@ -81,6 +83,7 @@ type NodeDTO struct {
 	Host                string            `json:"host"`
 	ReceiveHost         string            `json:"receiveHost"`
 	PlaybackHost        string            `json:"playbackHost"`
+	HookIP              string            `json:"hookIp"`
 	APIPort             int               `json:"apiPort"`
 	MediaServerUUID     string            `json:"mediaServerUUID"`
 	Weight              int               `json:"weight"`
@@ -106,6 +109,7 @@ type CreateNodeReq struct {
 	Host         string            `json:"host" binding:"required"`
 	ReceiveHost  string            `json:"receiveHost"`
 	PlaybackHost string            `json:"playbackHost"`
+	HookIP       string            `json:"hookIp"`
 	APIPort      int               `json:"apiPort" binding:"required"`
 	APISecret    string            `json:"apiSecret" binding:"required"`
 	Weight       int               `json:"weight"`
@@ -145,6 +149,7 @@ type UpdateNodeReq struct {
 	Host         *string           `json:"host,omitempty"`
 	ReceiveHost  *string           `json:"receiveHost,omitempty"`
 	PlaybackHost *string           `json:"playbackHost,omitempty"`
+	HookIP       *string           `json:"hookIp,omitempty"`
 	APIPort      *int              `json:"apiPort,omitempty"`
 	APISecret    *string           `json:"apiSecret,omitempty"`
 	Weight       *int              `json:"weight,omitempty"`
@@ -164,6 +169,7 @@ type NodeService struct {
 	scheduleDone    chan struct{}
 	scheduleWait    sync.Once
 	applyMu         sync.Mutex
+	tuningMu        sync.RWMutex
 	applying        map[int64]struct{}
 	locksMu         sync.Mutex
 	locks           map[int64]*sync.Mutex
@@ -214,6 +220,7 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		Host:                n.Host,
 		ReceiveHost:         n.ReceiveHost,
 		PlaybackHost:        n.PlaybackHost,
+		HookIP:              n.HookIP,
 		APIPort:             n.APIPort,
 		MediaServerUUID:     n.MediaServerUUID,
 		Weight:              n.Weight,
@@ -445,6 +452,7 @@ func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 		Host:            req.Host,
 		ReceiveHost:     req.ReceiveHost,
 		PlaybackHost:    req.PlaybackHost,
+		HookIP:          strings.TrimSpace(req.HookIP),
 		APIPort:         req.APIPort,
 		APISecret:       req.APISecret,
 		MediaServerUUID: uuid.NewString(),
@@ -539,6 +547,9 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	if req.PlaybackHost != nil {
 		candidate.PlaybackHost = *req.PlaybackHost
 	}
+	if req.HookIP != nil {
+		candidate.HookIP = strings.TrimSpace(*req.HookIP)
+	}
 	if req.APIPort != nil {
 		candidate.APIPort = *req.APIPort
 	}
@@ -630,6 +641,29 @@ func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResul
 	}
 	wg.Wait()
 	return results
+}
+
+// ReloadPlatformMediaDefaults updates platform-level media defaults and
+// converges all active nodes through the verified ZLM apply path. Node-level
+// HookIP/PlaybackHost overrides remain authoritative.
+func (s *NodeService) ReloadPlatformMediaDefaults(ctx context.Context, hookIP, streamIP string) error {
+	s.tuningMu.Lock()
+	s.tuning.HookIP = strings.TrimSpace(hookIP)
+	s.tuning.StreamIP = strings.TrimSpace(streamIP)
+	tuning := s.tuning
+	s.tuningMu.Unlock()
+	s.registry.SetPlatformPlaybackHost(tuning.StreamIP)
+	for _, current := range s.registry.ListActive() {
+		s.registry.SetAutoOnDemandReady(current.ID, false)
+	}
+	results := s.ApplyActiveConfigs(ctx)
+	var resultErr error
+	for _, result := range results {
+		if result.Err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("节点 %d(%s)媒体配置收敛失败: %w", result.NodeID, result.Name, result.Err))
+		}
+	}
+	return resultErr
 }
 
 func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) error {
@@ -767,7 +801,10 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 		delete(s.applying, current.ID)
 		s.applyMu.Unlock()
 	}()
-	if err := s.probe.ApplyConfigForNode(ctx, current, s.tuning); err != nil {
+	s.tuningMu.RLock()
+	tuning := s.tuning
+	s.tuningMu.RUnlock()
+	if err := s.probe.ApplyConfigForNode(ctx, current, tuning); err != nil {
 		return redactNodeError(err, current)
 	}
 	// A successful set command is only an acknowledgement. Read the effective
@@ -867,7 +904,10 @@ func (s *NodeService) restoreNodeSnapshot(ctx context.Context, old *node.Node, r
 func (s *NodeService) rollbackNodeLocked(ctx context.Context, old *node.Node) error {
 	s.registry.SetAutoOnDemandReady(old.ID, false)
 	var externalErr error
-	if err := s.probe.ApplyConfigForNode(ctx, old, s.tuning); err != nil {
+	s.tuningMu.RLock()
+	tuning := s.tuning
+	s.tuningMu.RUnlock()
+	if err := s.probe.ApplyConfigForNode(ctx, old, tuning); err != nil {
 		externalErr = redactNodeError(err, old)
 	} else if _, err := s.probe.GetServerConfig(ctx, old); err != nil {
 		externalErr = fmt.Errorf("%w: %v", ErrExternalStateUncertain, redactNodeError(err, old))

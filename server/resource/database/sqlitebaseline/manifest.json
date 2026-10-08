@@ -1,10 +1,10 @@
 {
-  "version": "sqlite-baseline-20261007-r1",
+  "version": "sqlite-baseline-20261008-r1",
   "source": "uvp-gb28181.sql",
-  "source_sha256": "0573a36caff62ba709500c9546587ef508ccc001eb83fd6f3372d45082c4247c",
-  "sha256": "bab455c65d617f7e02c0f2665cae224fb6f309100a1d18a0993a5d4616d6a331",
+  "source_sha256": "e157bc6503023aed8fafd9e2991f7aa5687124ff5062e8b5eeeb884e3b55809d",
+  "sha256": "abf1b4685c2ef28d0674f40eabd50f772c3c74949bd002755b5e395cc39e4fff",
   "tables": 111,
-  "seed_statements": 34,
+  "seed_statements": 38,
   "foreign_keys_kept": 3,
   "autoincrement_tables": 92,
   "tables_without_autoincrement": [

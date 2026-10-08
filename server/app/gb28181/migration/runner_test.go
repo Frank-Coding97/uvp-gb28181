@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // ---- fakes ----
@@ -96,7 +98,7 @@ func TestRunFirstStartBaselines(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
+	err := run(store, lock, src, exec, allTablesExistProbe())
 	require.NoError(t, err)
 	require.Empty(t, exec.executed, "快照库(探测表存在)基线化不应执行任何 SQL")
 	require.Len(t, store.marks, 1)
@@ -109,7 +111,7 @@ func TestRunFirstStartRejectsMissingBaselineTable(t *testing.T) {
 	store, lock, src, exec := newFakes()
 	src.files["a.sql"] = "SQL FOR a"
 
-	err := run(store, lock, src, exec, func(string) (bool, error) { return false, nil })
+	err := run(store, lock, src, exec, noTablesExistProbe())
 	require.Error(t, err, "老基线库不得记录假成功")
 	require.Empty(t, exec.executed)
 	require.Empty(t, store.marks)
@@ -122,7 +124,7 @@ func TestRunFirstStartRejectsLegacySnapshotWithoutCatalogProjection(t *testing.T
 		return table != "sys_openapi_runtime_state", nil
 	}
 
-	err := run(store, lock, src, exec, probe)
+	err := run(store, lock, src, exec, schemaProbe{hasTable: probe})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "sys_openapi_runtime_state")
 	require.Empty(t, exec.executed)
@@ -137,7 +139,7 @@ func TestRunIncrementalAppliesPendingOnly(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
+	err := run(store, lock, src, exec, allTablesExistProbe())
 	require.NoError(t, err)
 	require.Len(t, exec.executed, 1)
 	require.Contains(t, exec.executed[0], "SQL FOR b")
@@ -153,7 +155,7 @@ func TestRunFailureNotMarked(t *testing.T) {
 	src.files["b.sql"] = "SQL FOR b IS BROKEN"
 	exec.failOn = "IS BROKEN"
 
-	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
+	err := run(store, lock, src, exec, allTablesExistProbe())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "b.sql", "错误应含文件名")
 	require.Contains(t, err.Error(), "SQL FOR b IS BROKEN", "错误应含 SQL 内容")
@@ -168,8 +170,8 @@ func TestRunIdempotent(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	require.NoError(t, run(store, lock, src, exec, func(string) (bool, error) { return true, nil }))
-	require.NoError(t, run(store, lock, src, exec, func(string) (bool, error) { return true, nil }))
+	require.NoError(t, run(store, lock, src, exec, allTablesExistProbe()))
+	require.NoError(t, run(store, lock, src, exec, allTablesExistProbe()))
 	require.Len(t, exec.executed, 1, "第二次运行不应执行任何 SQL")
 }
 
@@ -180,9 +182,110 @@ func TestRunLockFailureBlocks(t *testing.T) {
 	lock.acquireErr = errors.New("lock timeout")
 	src.files["a.sql"] = "SQL FOR a"
 
-	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
+	err := run(store, lock, src, exec, allTablesExistProbe())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lock timeout")
 	require.Empty(t, exec.executed, "锁失败不应执行任何迁移")
 	require.Len(t, store.marks, 0)
+}
+
+func TestRunEmptyLedgerAppliesMediaNetworkMigrationToOlderBaseline(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	passwordMigration := "2026-10-08-initial-admin-password-change-sqlite.sql"
+	hookMigration := "2026-10-08-sip-platform-hook-ip-sqlite.sql"
+	streamMigration := "2026-10-08-sip-platform-stream-ip-sqlite.sql"
+	src.files[passwordMigration] = "PASSWORD MIGRATION"
+	src.files[hookMigration] = "HOOK IP MIGRATION"
+	src.files[streamMigration] = "STREAM IP MIGRATION"
+	probe := schemaProbe{
+		hasTable: func(string) (bool, error) { return true, nil },
+		hasColumn: func(_ string, column string) (bool, error) {
+			return column != "hook_ip" && column != "stream_ip", nil
+		},
+	}
+
+	err := run(store, lock, src, exec, probe)
+	require.NoError(t, err)
+	require.Equal(t, []string{"HOOK IP MIGRATION", "STREAM IP MIGRATION"}, exec.executed)
+	require.Equal(t, [][]string{{passwordMigration}, {hookMigration}, {streamMigration}}, store.marks,
+		"旧基线只执行媒体地址字段迁移，密码迁移继续按原行为基线化")
+}
+
+func TestRunEmptyLedgerSkipsMediaNetworkMigrationForCurrentBaseline(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	hookMigration := "2026-10-08-sip-platform-hook-ip-sqlite.sql"
+	streamMigration := "2026-10-08-sip-platform-stream-ip-sqlite.sql"
+	src.files[hookMigration] = "HOOK IP MIGRATION"
+	src.files[streamMigration] = "STREAM IP MIGRATION"
+	probe := schemaProbe{
+		hasTable:  func(string) (bool, error) { return true, nil },
+		hasColumn: func(string, string) (bool, error) { return true, nil },
+	}
+
+	err := run(store, lock, src, exec, probe)
+	require.NoError(t, err)
+	require.Empty(t, exec.executed)
+	require.Equal(t, [][]string{{hookMigration, streamMigration}}, store.marks)
+}
+
+func TestRunEmptyLedgerAppliesOnlyMissingMediaNetworkColumn(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	hookMigration := "2026-10-08-sip-platform-hook-ip-sqlite.sql"
+	streamMigration := "2026-10-08-sip-platform-stream-ip-sqlite.sql"
+	src.files[hookMigration] = "HOOK IP MIGRATION"
+	src.files[streamMigration] = "STREAM IP MIGRATION"
+	probe := schemaProbe{
+		hasTable: func(string) (bool, error) { return true, nil },
+		hasColumn: func(_ string, column string) (bool, error) {
+			return column == "hook_ip", nil
+		},
+	}
+
+	err := run(store, lock, src, exec, probe)
+	require.NoError(t, err)
+	require.Equal(t, []string{"STREAM IP MIGRATION"}, exec.executed)
+	require.Equal(t, [][]string{{hookMigration}, {streamMigration}}, store.marks)
+}
+
+func TestUpSQLiteMigratesMediaColumnsFromEmptyLedger(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	for _, table := range baselineRequiredTables {
+		require.NoError(t, db.Exec(`CREATE TABLE "`+table+`" (id INTEGER)`).Error)
+	}
+	require.NoError(t, db.Exec(`CREATE TABLE "gb_sip_config" (
+		id INTEGER PRIMARY KEY,
+		advertise_ip_inferred INTEGER NOT NULL DEFAULT 0
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE "meta_node" (
+		id INTEGER PRIMARY KEY,
+		host TEXT NOT NULL DEFAULT ''
+	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE "sys_users" (
+		id INTEGER PRIMARY KEY,
+		must_change_password INTEGER NOT NULL DEFAULT 0
+	)`).Error)
+
+	require.NoError(t, Up(db, DialectSQLite))
+	require.True(t, db.Migrator().HasColumn("gb_sip_config", "hook_ip"))
+	require.True(t, db.Migrator().HasColumn("gb_sip_config", "stream_ip"))
+
+	var applied int64
+	require.NoError(t, db.Table("gb_schema_migrations").Count(&applied).Error)
+	require.Equal(t, int64(4), applied)
+}
+
+func allTablesExistProbe() schemaProbe {
+	return schemaProbe{
+		hasTable:  func(string) (bool, error) { return true, nil },
+		hasColumn: func(string, string) (bool, error) { return true, nil },
+	}
+}
+
+func noTablesExistProbe() schemaProbe {
+	return schemaProbe{
+		hasTable:  func(string) (bool, error) { return false, nil },
+		hasColumn: func(string, string) (bool, error) { return false, nil },
+	}
 }

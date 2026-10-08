@@ -57,7 +57,7 @@ export function deriveDomain(serverId: string): string {
 
 // ===== 密码强度 =====
 // 规则跟后端 validator.go checkPasswordStrength 一致:
-//   - 长度 >= 12
+//   - 长度 >= 8
 //   - 至少含大写/小写/数字/特殊字符中的 3 类
 //   - 不在常见弱口令黑名单
 //   - 不为纯顺序序列
@@ -92,7 +92,7 @@ const WEAK_PASSWORDS = new Set([
 ]);
 
 function isSequential(password: string): boolean {
-  if (password.length < 12) return false;
+  if (password.length < 8) return false;
   let ascending = true;
   let descending = true;
   for (let i = 1; i < password.length; i++) {
@@ -111,8 +111,8 @@ export interface PasswordStrength {
 }
 
 export function evaluatePasswordStrength(password: string): PasswordStrength {
-  if (!password) return { level: 0, label: "未填写", reason: "长度至少 12 位" };
-  if (password.length < 12) return { level: 1, label: "太短", reason: "长度至少 12 位" };
+  if (!password) return { level: 0, label: "未填写", reason: "长度至少 8 位" };
+  if (password.length < 8) return { level: 1, label: "太短", reason: "长度至少 8 位" };
 
   let hasUpper = false,
     hasLower = false,

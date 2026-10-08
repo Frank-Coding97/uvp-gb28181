@@ -3,6 +3,7 @@ package setup
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 type ValidationError struct {
@@ -27,6 +28,12 @@ func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool
 	allowDynamicAdvertise := req.DeploymentMode == DeploymentLAN && req.ListenIP == wildcardIPv4 && req.AdvertiseIP == ""
 	if !allowDynamicAdvertise && !validIPv4(req.AdvertiseIP, false) {
 		fields["advertiseIp"] = "must be a concrete non-loopback IPv4 address"
+	}
+	if req.HookIP != "" && !validMediaIP(req.HookIP) {
+		fields["hookIp"] = "must be a concrete IP address"
+	}
+	if req.StreamIP != "" && !validMediaHost(req.StreamIP) {
+		fields["streamIp"] = "must be an IP address or domain without scheme, port or path"
 	}
 	if req.Port < 1 || req.Port > 65535 {
 		fields["port"] = "must be between 1 and 65535"
@@ -75,7 +82,7 @@ func asciiDigits(value string) bool {
 
 // checkPasswordStrength 返回空字符串表示密码合规,否则返回给前端展示的原因.
 // 规则:
-//   - 长度 >= 12
+//   - 长度 >= 8
 //   - 至少 3 类字符(大写/小写/数字/特殊)
 //   - 不在常见弱口令黑名单
 //
@@ -108,8 +115,8 @@ var commonWeakPasswords = map[string]struct{}{
 }
 
 func checkPasswordStrength(password string) string {
-	if len(password) < 12 {
-		return "长度至少 12 位"
+	if len(password) < 8 {
+		return "长度至少 8 位"
 	}
 	var hasUpper, hasLower, hasDigit, hasSpecial bool
 	for i := 0; i < len(password); i++ {
@@ -154,7 +161,7 @@ func checkPasswordStrength(password string) string {
 // isSequential 判断是否为纯顺序序列 (12345678... 或 abcdefgh...).
 // 只当整个密码由单一顺序构成时返回 true,不影响随机密码里偶然出现的短顺序片段.
 func isSequential(password string) bool {
-	if len(password) < 12 {
+	if len(password) < 8 {
 		return false
 	}
 	ascending := true
@@ -168,6 +175,38 @@ func isSequential(password string) bool {
 		}
 		if !ascending && !descending {
 			return false
+		}
+	}
+	return true
+}
+
+func validMediaIP(value string) bool {
+	ip := net.ParseIP(value)
+	return ip != nil && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+func validMediaHost(value string) bool {
+	if net.ParseIP(value) != nil {
+		return validMediaIP(value)
+	}
+	if len(value) > 253 || value == "" {
+		return false
+	}
+	value = strings.TrimSuffix(value, ".")
+	if value == "" {
+		return false
+	}
+	if asciiDigits(strings.ReplaceAll(value, ".", "")) {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
 		}
 	}
 	return true

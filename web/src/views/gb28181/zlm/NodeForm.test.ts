@@ -11,6 +11,7 @@ const existingNode = {
   host: "10.0.0.7",
   receiveHost: "10.0.0.8",
   playbackHost: "media.example.com",
+  hookIp: "192.0.2.20",
   apiPort: 18080,
   mediaServerUUID: "uuid-a",
   weight: 50,
@@ -41,7 +42,7 @@ describe("ZLM node form state", () => {
 
   it("loads editable connection candidates without ever loading the existing secret", () => {
     const form = createNodeFormState(existingNode);
-    expect(form).toMatchObject({ host: "10.0.0.7", apiPort: "18080", apiSecret: "" });
+    expect(form).toMatchObject({ host: "10.0.0.7", hookIp: "192.0.2.20", apiPort: "18080", apiSecret: "" });
   });
 
   it("validates numeric fields manually instead of relying on input clamping", () => {
@@ -80,6 +81,18 @@ describe("ZLM node form state", () => {
     form.apiPort = "28080";
     expect(buildNodeRequest(form, true)).toMatchObject({ host: "10.0.0.9", apiPort: 28080 });
     expect(buildNodeRequest(form, true)).not.toHaveProperty("apiSecret");
+  });
+
+  it("validates and submits optional node media address overrides", () => {
+    const form = createNodeFormState(existingNode);
+    form.hookIp = "2001:db8::20";
+    form.playbackHost = "stream.example.com";
+    expect(validateNodeForm(form, true)).toEqual({});
+    expect(buildNodeRequest(form, true)).toMatchObject({ hookIp: "2001:db8::20", playbackHost: "stream.example.com" });
+
+    form.hookIp = "224.0.0.1";
+    form.playbackHost = "https://stream.example.com/live";
+    expect(validateNodeForm(form, true)).toMatchObject({ hookIp: expect.any(String), playbackHost: expect.any(String) });
   });
 
   it("clears the write-only secret after a successful save", () => {

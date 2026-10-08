@@ -47,7 +47,13 @@ const fields = computed(() => [
   })),
   { key: "port", label: "SIP 端口", value: String(props.form.port) },
   { key: "serverId", label: "平台 ID", value: props.form.serverId },
+  { key: "domain", label: "SIP 域", value: props.form.domain },
   { key: "password", label: "SIP 密码", value: passwordDisplay.value }
+]);
+
+const mediaFields = computed(() => [
+  { key: "hook-ip", label: "Hook IP（平台默认）", value: props.form.hookIp || "-" },
+  { key: "stream-ip", label: "Stream IP（平台默认）", value: props.form.streamIp || "-" }
 ]);
 </script>
 
@@ -67,7 +73,7 @@ const fields = computed(() => [
       </a-tag>
     </section>
 
-    <!-- 设备端要填的四个参数 -->
+    <!-- 设备端接入参数 -->
     <section class="confirm-card">
       <header class="confirm-card__header">
         <span class="confirm-card__icon confirm-card__icon--soft">
@@ -83,6 +89,35 @@ const fields = computed(() => [
             <code class="confirm-value">{{ field.value || "-" }}</code>
             <button
               v-if="field.value && field.value !== '-' && field.value !== '(保留原密码)'"
+              type="button"
+              class="confirm-copy"
+              :class="{ 'is-copied': copiedKey === field.key }"
+              :title="copiedKey === field.key ? '已复制' : `复制${field.label}`"
+              @click="copyValue(field.key, field.value)"
+            >
+              <Check v-if="copiedKey === field.key" :size="14" />
+              <Copy v-else :size="14" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="confirm-card">
+      <header class="confirm-card__header">
+        <span class="confirm-card__icon confirm-card__icon--soft">
+          <Server :size="16" />
+        </span>
+        <h4>媒体网络默认地址</h4>
+        <span class="confirm-card__header-hint">媒体节点可单独覆盖</span>
+      </header>
+      <div class="confirm-card__rows">
+        <div v-for="field in mediaFields" :key="field.key" class="confirm-row">
+          <span class="confirm-row__label">{{ field.label }}</span>
+          <div class="confirm-row__body">
+            <code class="confirm-value">{{ field.value }}</code>
+            <button
+              v-if="field.value !== '-'"
               type="button"
               class="confirm-copy"
               :class="{ 'is-copied': copiedKey === field.key }"

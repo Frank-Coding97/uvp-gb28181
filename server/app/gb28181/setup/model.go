@@ -22,6 +22,8 @@ type SIPConfig struct {
 	ListenIP            string         `gorm:"column:listen_ip;size:45;not null" json:"listenIp"`
 	AdvertiseIP         string         `gorm:"column:advertise_ip;size:45;not null" json:"advertiseIp"`
 	AdvertiseIPInferred bool           `gorm:"column:advertise_ip_inferred;not null;default:false" json:"advertiseIpInferred"`
+	HookIP              string         `gorm:"column:hook_ip;size:45;not null;default:''" json:"hookIp"`
+	StreamIP            string         `gorm:"column:stream_ip;size:253;not null;default:''" json:"streamIp"`
 	Port                int            `gorm:"column:port;not null" json:"port"`
 	Domain              string         `gorm:"column:domain;size:10;not null" json:"domain"`
 	ServerID            string         `gorm:"column:server_id;size:20;not null" json:"serverId"`

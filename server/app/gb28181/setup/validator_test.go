@@ -95,6 +95,7 @@ func TestPasswordStrength(t *testing.T) {
 	}
 
 	strong := []string{
+		"K9#nT2xQ",
 		"Sec12345Aa!!",
 		"MyP@ssw0rdX1",
 		"K9#nT2xQvL5m",

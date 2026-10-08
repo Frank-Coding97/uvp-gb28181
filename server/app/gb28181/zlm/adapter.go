@@ -2,6 +2,9 @@ package zlm
 
 import (
 	"context"
+	"net"
+	"net/url"
+	"strings"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
@@ -52,10 +55,39 @@ func (a *ServiceAdapter) ApplyConfigForNode(ctx context.Context, n *node.Node, t
 	if t.HookPort != 0 {
 		media.HookPort = t.HookPort
 	}
+	// 节点覆盖优先于平台默认 HookIP；完整 HookBaseURL 的 scheme、端口、
+	// path 保持不变，只替换可达主机。没有节点覆盖时使用平台默认 HookIP。
+	hookIP := strings.TrimSpace(n.HookIP)
+	if hookIP == "" {
+		hookIP = strings.TrimSpace(t.HookIP)
+	}
+	if hookIP != "" {
+		if media.HookBaseURL != "" {
+			media.HookBaseURL = replaceHookHost(media.HookBaseURL, hookIP)
+		} else {
+			media.HookHost = hookIP
+		}
+	}
 	if t.StreamNoneReaderTimeout != 0 {
 		media.StreamNoneReaderTimeout = t.StreamNoneReaderTimeout
 	}
 	return NewClientForNode(n).ApplyConfigForNode(ctx, media)
+}
+
+func replaceHookHost(raw, host string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return raw
+	}
+	host = strings.Trim(host, "[]")
+	if port := parsed.Port(); port != "" {
+		parsed.Host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		parsed.Host = "[" + strings.Trim(host, "[]") + "]"
+	} else {
+		parsed.Host = host
+	}
+	return parsed.String()
 }
 
 // KickSessions 实现 service.ZLMProbe(T3.5)

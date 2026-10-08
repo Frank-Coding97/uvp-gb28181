@@ -8,6 +8,7 @@ import IdentityStep from "@/views/gb28181/sip/steps/IdentityStep.vue";
 import ConfirmStep from "@/views/gb28181/sip/steps/ConfirmStep.vue";
 import { useSipSetup } from "@/views/gb28181/sip/useSipSetup";
 import { identityCanContinue, networkCanContinue } from "@/views/gb28181/sip/sipSetupRules";
+import { mediaNetworkAddressesCanContinue } from "@/views/gb28181/sip/mediaNetworkAddress";
 
 const props = withDefaults(
   defineProps<{
@@ -23,7 +24,7 @@ const emit = defineEmits<{
   saved: [];
 }>();
 
-const modalTitle = computed(() => (props.editing ? "编辑 SIP 配置" : "配置 SIP 服务"));
+const modalTitle = computed(() => (props.editing ? "编辑平台接入配置" : "平台接入配置"));
 
 const setup = useSipSetup();
 const step = ref(1);
@@ -32,7 +33,11 @@ const reloadError = ref("");
 
 const canNext = computed(() => {
   if (step.value === 1) return setup.form.deploymentMode !== "";
-  if (step.value === 2) return networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp);
+  if (step.value === 2)
+    return (
+      networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp) &&
+      mediaNetworkAddressesCanContinue(setup.form.hookIp, setup.form.streamIp)
+    );
   if (step.value === 3)
     return identityCanContinue(
       setup.form.port,
@@ -102,14 +107,14 @@ function skipLater() {
         <Bell :size="14" />
       </span>
       <div class="sip-modal-intro-text">
-        <strong>首次接入国标设备前需要完成 SIP 参数配置</strong>
+        <strong>首次接入国标设备前需要完成平台接入配置</strong>
         <span>点稍后再配也可以先进入系统,右上角铃铛会一直提醒你完成配置</span>
       </div>
     </div>
 
     <a-steps :current="step" size="small" class="sip-modal-steps">
       <a-step title="部署方式" description="局域网 / 公网" />
-      <a-step title="网络地址" description="监听 & 宣告" />
+      <a-step title="网络地址" description="接入与媒体地址" />
       <a-step title="SIP 身份" description="ID / 域 / 密码" />
       <a-step title="确认" description="核对信息" />
     </a-steps>

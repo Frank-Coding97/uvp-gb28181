@@ -17,18 +17,20 @@ const (
 
 // Node 一台 ZLM 节点的逻辑表示
 type Node struct {
-	ID              int64             // DB 自增主键
-	Revision        uint64            // 持久化版本,用于跨调用方 CAS
-	Name            string            // 显示名
-	Host            string            // ZLM API host
-	ReceiveHost     string            // 设备收流地址,写入 SDP 的 c= 地址
-	PlaybackHost    string            // 播放访问地址,返回给浏览器/客户端
-	APIPort         int               // ZLM API port
-	APISecret       string            // ZLM api.secret
-	MediaServerUUID string            // 业务侧生成,启动时写入 ZLM general.mediaServerId
-	Weight          int               // 0-100,加权轮询,默认 50
-	Tags            map[string]string // 任意标签
-	State           State
+	ID                   int64             // DB 自增主键
+	Revision             uint64            // 持久化版本,用于跨调用方 CAS
+	Name                 string            // 显示名
+	Host                 string            // ZLM API host
+	HookIP               string            // ZLM Hook 回调地址节点覆盖
+	ReceiveHost          string            // 设备收流地址,写入 SDP 的 c= 地址
+	PlaybackHost         string            // 播放访问地址,返回给浏览器/客户端
+	PlatformPlaybackHost string            // 平台默认播放地址,仅运行时填充
+	APIPort              int               // ZLM API port
+	APISecret            string            // ZLM api.secret
+	MediaServerUUID      string            // 业务侧生成,启动时写入 ZLM general.mediaServerId
+	Weight               int               // 0-100,加权轮询,默认 50
+	Tags                 map[string]string // 任意标签
+	State                State
 	// AdminState is the operator-controlled admission intent. Empty means
 	// enabled for backwards compatibility with nodes created before this field.
 	AdminState          string
@@ -55,6 +57,9 @@ func (n Node) EffectiveReceiveHost() string {
 // 旧节点未配置时回退到 API host,保持升级兼容。
 func (n Node) EffectivePlaybackHost() string {
 	if host := strings.TrimSpace(n.PlaybackHost); host != "" {
+		return host
+	}
+	if host := strings.TrimSpace(n.PlatformPlaybackHost); host != "" {
 		return host
 	}
 	return n.Host

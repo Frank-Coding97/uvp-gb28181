@@ -369,7 +369,19 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		warnCascadeCredentialKeyUnavailable()
 	}
 	setupCascadeManagement(nil, cascadeCipher, nil)
-	reload := func() error { return ReloadSIP(authority) }
+	reload := func() error {
+		var reloadErr error
+		if err := ReloadSIP(authority); err != nil {
+			reloadErr = errors.Join(reloadErr, err)
+		}
+		// SIP and media-node runtime are independent consumers of the same
+		// persisted wizard row; a transient SIP restart failure must not leave
+		// a newly saved Hook/Stream default unapplied.
+		if err := reloadZLMPlatformMediaDefaults(); err != nil {
+			reloadErr = errors.Join(reloadErr, err)
+		}
+		return reloadErr
+	}
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, reload))
 	gbroutes.SetServiceConfigSIPTraceReloader(reload)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
@@ -469,6 +481,15 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 			HookPort:                cfg.Media.HookPort,
 			StreamNoneReaderTimeout: cfg.Media.StreamNoneReaderTimeout,
 			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
+		}
+		// gb_sip_config 是引导保存的持久化来源；启动时把平台级媒体地址
+		// 注入节点运行时。不存在配置时继续使用 config.yml defaults。
+		if row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background()); err == nil && row != nil {
+			tuning.HookIP = row.HookIP
+			tuning.StreamIP = row.StreamIP
+			zlmRegistry.SetPlatformPlaybackHost(row.StreamIP)
+		} else if err != nil {
+			app.ZapLog.Debug("读取平台媒体网络默认值失败,沿用 YAML 配置", zap.String("event", "zlm.platform_media_defaults_load_failed"), zap.Error(err))
 		}
 		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
 		restartCoordinator := gbzlmsvc.NewRestartCoordinator(zlmRegistry)
@@ -674,6 +695,12 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 		ServerID:         row.ServerID,
 		Password:         row.Password,
 		XGBVersion:       base.SIP.XGBVersion,
+	}
+	// Deprecated single-node playback paths still read cfg.ZLM.PlaybackHost;
+	// carry the persisted platform default into that runtime too. Node-level
+	// PlaybackHost remains authoritative in the registry path.
+	if streamIP := strings.TrimSpace(row.StreamIP); streamIP != "" {
+		base.ZLM.PlaybackHost = streamIP
 	}
 	if len(base.SIP.Transport) == 0 {
 		base.SIP.Transport = []string{"udp", "tcp"}
@@ -1595,6 +1622,26 @@ func ReloadSIP(authority *processauthority.Authority) error {
 		return err
 	}
 	return nil
+}
+
+// reloadZLMPlatformMediaDefaults reloads the Hook/Stream defaults saved by the
+// SIP setup wizard and applies them to every active media node. It is kept
+// separate from ReloadSIP so a SIP restart and a ZLM convergence failure are
+// reported independently through the shared setup save result.
+func reloadZLMPlatformMediaDefaults() error {
+	if zlmNodeService == nil || app.DB() == nil {
+		return nil
+	}
+	row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background())
+	if err != nil {
+		return fmt.Errorf("读取平台媒体网络默认值失败: %w", err)
+	}
+	if row == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, row.StreamIP)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

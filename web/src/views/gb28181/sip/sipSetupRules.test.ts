@@ -112,6 +112,8 @@ describe("SIP password strength", () => {
   });
 
   it("accepts strong passwords", () => {
+    expect(passwordAcceptable("K9#nT2xQ", false)).toBe(true);
+    expect(evaluatePasswordStrength("K9#nT2x").reason).toBe("长度至少 8 位");
     expect(evaluatePasswordStrength("Sec12345Aa!!").level).toBeGreaterThanOrEqual(2);
     expect(evaluatePasswordStrength("MyP@ssw0rdX1").level).toBeGreaterThanOrEqual(2);
   });
