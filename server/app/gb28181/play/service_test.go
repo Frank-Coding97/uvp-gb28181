@@ -379,6 +379,15 @@ func TestBuildResultIncludesDefaultPlaybackSelectionSnapshot(t *testing.T) {
 	}
 }
 
+func TestBuildResultForBracketsIPv6PlaybackHost(t *testing.T) {
+	s, _, _ := newSvc(t, &mockZLM{}, &mockInviter{}, onlineDevice(), aChannel())
+
+	result := s.buildResultFor("stream-1", "0100000001", "2001:db8::20")
+	if result.HTTPFlvURL != "http://[2001:db8::20]:80/rtp/stream-1.live.flv" {
+		t.Fatalf("HTTPFlvURL=%q", result.HTTPFlvURL)
+	}
+}
+
 func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}

@@ -2,7 +2,10 @@ package playurl
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
+	"strings"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
@@ -43,7 +46,7 @@ func Build(playbackHost string, cfg node.ServerConfig, app, stream string) URLs 
 	path := escapedApp + "/" + escapedStream
 	var urls URLs
 	if cfg.HTTPPort > 0 {
-		base := fmt.Sprintf("%s:%d", playbackHost, cfg.HTTPPort)
+		base := playbackAuthority(playbackHost, cfg.HTTPPort)
 		urls.WSFLV = stringPtr("ws://" + base + "/" + path + ".live.flv")
 		urls.HTTPFLV = stringPtr("http://" + base + "/" + path + ".live.flv")
 		if cfg.FMP4Enabled {
@@ -61,7 +64,7 @@ func Build(playbackHost string, cfg node.ServerConfig, app, stream string) URLs 
 		urls.WebRTC = stringPtr(fmt.Sprintf("http://%s/index/api/webrtc?%s", base, query.Encode()))
 	}
 	if cfg.HTTPSPort > 0 {
-		base := fmt.Sprintf("%s:%d", playbackHost, cfg.HTTPSPort)
+		base := playbackAuthority(playbackHost, cfg.HTTPSPort)
 		urls.WSSFLV = stringPtr("wss://" + base + "/" + path + ".live.flv")
 		urls.HTTPSFLV = stringPtr("https://" + base + "/" + path + ".live.flv")
 		if cfg.FMP4Enabled {
@@ -79,18 +82,22 @@ func Build(playbackHost string, cfg node.ServerConfig, app, stream string) URLs 
 		urls.WebRTCS = stringPtr(fmt.Sprintf("https://%s/index/api/webrtc?%s", base, query.Encode()))
 	}
 	if cfg.RTMPPort > 0 && cfg.RTMPEnabled {
-		urls.RTMP = stringPtr(fmt.Sprintf("rtmp://%s:%d/%s/%s", playbackHost, cfg.RTMPPort, escapedApp, escapedStream))
+		urls.RTMP = stringPtr(fmt.Sprintf("rtmp://%s/%s/%s", playbackAuthority(playbackHost, cfg.RTMPPort), escapedApp, escapedStream))
 	}
 	if cfg.RTMPSPort > 0 && cfg.RTMPEnabled {
-		urls.RTMPS = stringPtr(fmt.Sprintf("rtmps://%s:%d/%s/%s", playbackHost, cfg.RTMPSPort, escapedApp, escapedStream))
+		urls.RTMPS = stringPtr(fmt.Sprintf("rtmps://%s/%s/%s", playbackAuthority(playbackHost, cfg.RTMPSPort), escapedApp, escapedStream))
 	}
 	if cfg.RTSPPort > 0 && cfg.RTSPEnabled {
-		urls.RTSP = stringPtr(fmt.Sprintf("rtsp://%s:%d/%s/%s", playbackHost, cfg.RTSPPort, escapedApp, escapedStream))
+		urls.RTSP = stringPtr(fmt.Sprintf("rtsp://%s/%s/%s", playbackAuthority(playbackHost, cfg.RTSPPort), escapedApp, escapedStream))
 	}
 	if cfg.RTSPSPort > 0 && cfg.RTSPEnabled {
-		urls.RTSPS = stringPtr(fmt.Sprintf("rtsps://%s:%d/%s/%s", playbackHost, cfg.RTSPSPort, escapedApp, escapedStream))
+		urls.RTSPS = stringPtr(fmt.Sprintf("rtsps://%s/%s/%s", playbackAuthority(playbackHost, cfg.RTSPSPort), escapedApp, escapedStream))
 	}
 	return urls
+}
+
+func playbackAuthority(host string, port int) string {
+	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
 func (u URLs) AsMap() map[string]string {

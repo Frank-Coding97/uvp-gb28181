@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -1340,7 +1341,7 @@ func (s *Service) ShouldCloseOnNoneReader(ctx context.Context, streamID string) 
 // 多节点场景假设 web 端口也是 80(M3 可加 Node.WebPort 字段)。
 func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 	port := s.cfg.ZLM.HTTPPort
-	base := fmt.Sprintf("%s:%d/%s/%s", host, port, zlmApp, streamID)
+	base := fmt.Sprintf("%s/%s/%s", net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)), zlmApp, streamID)
 	urls := PlaybackURLs{
 		WSFLV: stringPtr("ws://" + base + ".live.flv"), HTTPFLV: stringPtr("http://" + base + ".live.flv"),
 		HLS: stringPtr("http://" + base + "/hls.m3u8"),

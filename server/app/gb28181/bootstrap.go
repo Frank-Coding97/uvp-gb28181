@@ -486,8 +486,8 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		// 注入节点运行时。不存在配置时继续使用 config.yml defaults。
 		if row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background()); err == nil && row != nil {
 			tuning.HookIP = row.HookIP
-			tuning.StreamIP = row.StreamIP
-			zlmRegistry.SetPlatformPlaybackHost(row.StreamIP)
+			tuning.StreamIP = platformStreamHost(row.StreamIP, cfg.ZLM.PlaybackHost)
+			zlmRegistry.SetPlatformPlaybackHost(tuning.StreamIP)
 		} else if err != nil {
 			app.ZapLog.Debug("读取平台媒体网络默认值失败,沿用 YAML 配置", zap.String("event", "zlm.platform_media_defaults_load_failed"), zap.Error(err))
 		}
@@ -706,6 +706,16 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 		base.SIP.Transport = []string{"udp", "tcp"}
 	}
 	return base, true, nil
+}
+
+// platformStreamHost keeps the existing YAML playback address active when the
+// optional SIP wizard field is empty. An empty wizard value means "use the
+// existing address strategy", not "force every multi-node URL back to node.Host".
+func platformStreamHost(configured, yamlFallback string) string {
+	if host := strings.TrimSpace(configured); host != "" {
+		return host
+	}
+	return strings.TrimSpace(yamlFallback)
 }
 
 func setupSecurityRuntime() *gbsecurity.Runtime {
@@ -1639,9 +1649,10 @@ func reloadZLMPlatformMediaDefaults() error {
 	if row == nil {
 		return nil
 	}
+	streamHost := platformStreamHost(row.StreamIP, gbconfig.Load().ZLM.PlaybackHost)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, row.StreamIP)
+	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, streamHost)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
