@@ -2876,7 +2876,12 @@ onUnmounted(() => {
         </div>
 
         <div v-else-if="viewMode === 'card'" class="view-body card-view">
-          <div class="card-grid">
+          <a-empty
+            v-if="!rowsLoading && (assetKind === 'device' ? devices.length === 0 : channels.length === 0)"
+            class="card-empty"
+            :description="assetKind === 'device' ? '暂无符合条件的设备' : '暂无符合条件的通道'"
+          />
+          <div v-else class="card-grid">
             <template v-if="assetKind === 'device'">
               <article
                 v-for="item in devices"
@@ -5081,6 +5086,13 @@ onUnmounted(() => {
   min-height: 0;
   padding-right: 4px;
   overflow: hidden auto;
+}
+.card-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .card-pagination {
   display: flex;

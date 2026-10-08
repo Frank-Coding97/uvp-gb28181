@@ -2308,6 +2308,33 @@ body[arco-theme="dark"] .arco-trigger-popup .arco-trigger-arrow-fill {
   fill: var(--uvp-popconfirm-bg);
 }
 
+// Embedded input actions must override the generic dialog/form button rules in both themes.
+body .arco-input-wrapper .arco-input-suffix > .arco-btn.arco-btn-text {
+  display: inline-flex;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  color: var(--color-text-3);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  transform: none;
+}
+
+body .arco-input-wrapper .arco-input-suffix > .arco-btn.arco-btn-text:hover:not(.arco-btn-disabled, [disabled]) {
+  color: var(--color-text-1);
+  background: var(--color-fill-2);
+  border: 0;
+  box-shadow: none;
+  transform: none;
+}
+
 @media (width <= 768px) {
   .snow-page,
   .snow-fill {

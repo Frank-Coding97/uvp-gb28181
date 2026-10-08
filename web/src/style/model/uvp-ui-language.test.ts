@@ -5,6 +5,40 @@ import { hasRuleBlock, ruleBlocks, squash } from "@/test/source-assert";
 
 const source = readFileSync(resolve(process.cwd(), "src/style/model/uvp-ui-language.scss"), "utf8");
 
+describe("input suffix text buttons", () => {
+  const selector = "body .arco-input-wrapper .arco-input-suffix > .arco-btn.arco-btn-text";
+
+  it("keeps embedded actions compact and free of dialog button surfaces", () => {
+    expect(
+      hasRuleBlock(
+        source,
+        selector,
+        "width: 28px",
+        "height: 28px",
+        "min-width: 28px",
+        "min-height: 0",
+        "padding: 0",
+        "background: transparent",
+        "border: 0",
+        "box-shadow: none",
+        "transform: none"
+      )
+    ).toBe(true);
+  });
+
+  it("keeps hover feedback inside the input without moving the action", () => {
+    expect(
+      hasRuleBlock(
+        source,
+        `${selector}:hover:not(.arco-btn-disabled, [disabled])`,
+        "background: var(--color-fill-2)",
+        "box-shadow: none",
+        "transform: none"
+      )
+    ).toBe(true);
+  });
+});
+
 /** 取出「选择器含 `.uvp-system-drawer` 但没往下打到面板」的规则块 —— 即落在 Arco 全屏容器上的那批。 */
 function containerScopedDrawerRules(): { selector: string; body: string }[] {
   return [...source.matchAll(/([^{}]+)\{([^{}]*)\}/gs)]
