@@ -280,9 +280,19 @@ assert_fresh() {
   #   ⚠️ 它确实被 git 跟踪（所以不能用「未跟踪」筛），只能按文件名排除。
   #
   # 判据要挑「人写的」文件：.d.ts 是类型声明、由工具生成；.vue/.go/.scss 才是。
+  #
+  # ⛔⛔ `_test.go` 也必须排除：测试文件**不编进二进制**（go build 忽略它们），
+  #   但 git 操作（lint-staged / checkout / stash pop）会刷新它们的 mtime。
+  #   ⇒ 只要动过任何测试文件，二进制就"比源码旧"，而重编一次并不能让它更新
+  #   （build 不看 .go_test），于是**出包流程被永久卡死**。
+  #   实测踩过：提交后 lint-staged 刷新了 config_service_test.go 的 mtime，
+  #   后续出包一律报"比源码旧"，重编也无效。
   newest="$(find "$SERVER_DIR" "$WEB_DIR/src" -type f \
     \( -name '*.go' -o -name '*.vue' -o -name '*.ts' -o -name '*.scss' \) \
     ! -name '*.d.ts' \
+    ! -name '*_test.go' \
+    ! -name '*.test.ts' \
+    ! -name '*.spec.ts' \
     -newer "$artifact" -print 2>/dev/null | head -1)"
   if [ -n "$newest" ]; then
     fail "$label 比源码旧，拒绝出包（否则会打出一个「看起来全新、跑起来是旧的」包）。
