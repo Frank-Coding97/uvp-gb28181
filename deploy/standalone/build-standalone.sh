@@ -144,7 +144,70 @@ else
   log "⚠️ 未安装 shellcheck，跳过脚本静态检查（apt install shellcheck 可启用）"
 fi
 
-[ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server（先跑 go build）"
+# ------------------------------------------------------------ 自动构建 ----
+#
+# ⛔⛔⛔ 为什么这里必须自己构建，而不是「复制预编译产物」（老板 2026-10-09 定）
+#
+# 这个脚本原本只有两行`cp`：
+#     cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
+#     cp -a "$WEB_DIR/dist/." "$PKG/resource/public/"
+#   ⇒ 它**从不自己编译**，只是把上次构建的产物搬进包里。
+#
+#   而所有出包断言（ZLM 身份、扫码基址、SQLite 基线校验）验的都是**配置**，
+#   **产物压根不在断言范围内** ⇒ 打包一个陈旧产物时，**全部检查照样通过**。
+#
+#   本周因此踩了 4 次（2026-10-07/ 08 / 09 ×2），症状极具误导性：
+#     「源码里修复在、config.yml 里配置对、包里密钥也在，但运行行为就是旧的」
+#   ⇒ 第一反应永远是怀疑「配置没读到 / 代码没生效 / 环境变量没传进去」，
+#      每次都要绕一大圈才想到「二进制比代码旧」。
+#
+#   ⇒ 改成「先构建再打包」，并保留 SKIP_BUILD 逃生口
+#     （离线出包/只改配置重出包时可用，但会在日志里显式标注）。
+#
+# ⚠️ 构建**故意放在前置检查之后、复制之前**：
+#   前置检查（shellcheck / 端口单点定义）要先过，否则白等一次几分钟的构建。
+SKIP_BUILD="${UVP_SKIP_BUILD:-0}"
+if [ "$SKIP_BUILD" = "1" ]; then
+  log "⚠️ 已跳过构建（UVP_SKIP_BUILD=1）—— **包里的产物可能比源码旧**，请自行确认"
+else
+  log "构建后端二进制（linux/amd64）"
+  # CGO_ENABLED=0：SQLite 引擎是纯 Go（modernc.org/sqlite），不需要 libcgo。
+  #   交叉编译必须关 CGO —— 它会去找本机（macOS）的 C 工具链，产物就废了。
+  # -s -w：去符号表与调试信息，22MB vs 66MB，对交付体积差别很大。
+  (
+    cd "$SERVER_DIR" || exit 1
+    # 优先用go.mod 里声明的 go 版本，避免本机 go 版本过低报"requires go >= x"
+    GO_BIN="${GO:-go}"
+    command -v "$GO_BIN" >/dev/null 2>&1 || fail "找不到 go 工具链（apt install golang-go，或用 UVP_SKIP_BUILD=1 跳过）"
+    # ⛔ GOFLAGS=-mod=mod：默认 -mod=readonly 会因 vendor/ 或 go.sum 不一致而拒绝编译，
+    #   而这类失败在打包脚本里极难定位。
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=mod \
+      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-server .
+  ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
+  log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
+
+  log "构建前端产物"
+  (
+    cd "$WEB_DIR" || exit 1
+    # ⛔ rm -rf dist：vite 会**按内容哈希命名 chunk**，
+    #   残留旧 hash 文件会让页面引用到旧产物 ⇒ 看起来像"改了没生效"。
+    rm -rf dist
+    # npm ci（有 lock 就用它保证版本一致）否则 npm install；
+    # node_modules 缺失时先装—— 出包机可能是干净环境。
+    if [ ! -d node_modules ]; then
+      log "  node_modules 缺失，先安装依赖（首次较慢）"
+      if [ -f package-lock.json ]; then npm ci --no-audit --no-fund
+      else npm install --no-audit --no-fund; fi
+    fi
+    if [ -x node_modules/.bin/vite ]; then
+      node_modules/.bin/vite build
+    else
+      npx --yes vite build
+    fi
+  ) || fail "前端构建失败（见上）"
+fi
+
+[ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server"
 [ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server"
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
@@ -191,6 +254,35 @@ mkdir -p "$PKG"/{bin,config,data/redis,logs,run,scripts}
 log "复制后端二进制"
 cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
 chmod 0755 "$PKG/bin/uvp-server"
+
+# ---- 产物新鲜度断言（双保险，与上面的自动构建互为兜底）----
+#
+# ⛔ 为什么还要这一条：自动构建可能被 SKIP_BUILD=1 跳过（离线出包/只改配置重出包），
+#   也可能有人手动 cp 了一个旧二进制进 server/bin/。
+#   ⇒ 无论走哪条路，这里都比一次 mtime：**产物比源码旧 = 拒绝出包**。
+#
+# ⭐ 判据用「产物 mtime 是否早于**最新改动的源码**」，而不是「早于脚本运行时间」——
+#   后者在刚build 完时会误报（同秒/时钟精度问题），而且抓不到"构建了但漏编了某文件"。
+assert_fresh() {
+  local artifact="$1" label="$2" newest
+  [ -e "$artifact" ] || fail "$label 不存在：$artifact"
+  # 源码目录里最新的 .go / .vue / .ts / .scss 文件
+  newest="$(find "$SERVER_DIR" "$WEB_DIR/src" -type f \
+    \( -name '*.go' -o -name '*.vue' -o -name '*.ts' -o -name '*.scss' \) \
+    -newer "$artifact" -print 2>/dev/null | head -1)"
+  if [ -n "$newest" ]; then
+    fail "$label 比源码旧，拒绝出包（否则会打出一个「看起来全新、跑起来是旧的」包）。
+     产物: $artifact
+     更新的源码: ${newest#$REPO_ROOT/}
+     ⛔ 这就是本周反复踩的坑：所有出包断言都过，但包里跑的是旧代码。
+     解决：删掉产物重新构建，或用 UVP_SKIP_BUILD=0 强制自动构建。"
+  fi
+  log "  $label 新鲜度 OK"
+}
+if [ "$SKIP_BUILD" != "1" ]; then
+  assert_fresh "$SERVER_DIR/bin/uvp-server" "后端二进制"
+  assert_fresh "$WEB_DIR/dist/index.html" "前端产物"
+fi
 
 log "复制 Redis（自带，包内跑，不连外部）"
 cp "$DEPLOY_DIR/bin/redis-server" "$DEPLOY_DIR/bin/redis-cli" "$PKG/bin/"
