@@ -13,6 +13,18 @@ html body[arco-theme="dark"] {
   background-color: #0b1118 !important;
 }
 
+// ========== Loading 加载 ==========
+// 自定义 Arco 主题的默认灰色遮罩与 UVP 蓝灰暗色面板不一致。
+.arco-spin .arco-spin-mask {
+  background-color: color-mix(in srgb, var(--uvp-panel-bg) 78%, transparent) !important;
+  border-radius: inherit;
+}
+
+.arco-spin .arco-spin-icon,
+.arco-spin .arco-spin-tip {
+  color: var(--uvp-brand-strong);
+}
+
 // ========== Switch 开关 ==========
 .arco-switch {
   background-color: var(--uvp-panel-border) !important;

@@ -361,6 +361,7 @@ onMounted(refresh);
   display: block;
   width: 100%;
   min-height: 260px;
+  border-radius: var(--uvp-panel-radius);
 }
 
 .sip-empty {
