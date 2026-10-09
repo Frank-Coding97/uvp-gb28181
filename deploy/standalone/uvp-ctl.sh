@@ -321,7 +321,7 @@ redis_healthy() {
 
 start_redis() {
   if redis_healthy; then
-    log "Redis 已在运行（端口 $REDIS_PORT）"
+    log "Redis 已在运行（端口 ${REDIS_PORT}）"
     return 0
   fi
   [ -x "$REDIS_BIN" ] || fail "找不到可执行的 $REDIS_BIN"
@@ -344,7 +344,7 @@ start_redis() {
   #   而本机（容器/慢盘）固定 sleep 又白等。
   for _ in $(seq 1 50); do
     if redis_healthy; then
-      log "Redis 启动成功（端口 $REDIS_PORT，密码为空、仅监听回环）"
+      log "Redis 启动成功（端口 ${REDIS_PORT}，密码为空、仅监听回环）"
       return 0
     fi
     sleep 0.2
@@ -372,7 +372,7 @@ backend_healthy() {
 
 start_backend() {
   if backend_healthy; then
-    log "后端已在运行（端口 $HTTP_PORT）"
+    log "后端已在运行（端口 ${HTTP_PORT}）"
     return 0
   fi
   [ -x "$SERVER_BIN" ] || fail "找不到可执行的 $SERVER_BIN"
@@ -417,7 +417,7 @@ start_backend() {
 
   for _ in $(seq 1 150); do
     if backend_healthy; then
-      log "后端启动成功（端口 $HTTP_PORT）"
+      log "后端启动成功（端口 ${HTTP_PORT}）"
       return 0
     fi
     # 进程已死就别再等了
@@ -427,7 +427,7 @@ start_backend() {
         log "后端进程已退出，最后 30 行日志："
         tail -30 "$BACKEND_LOG" >&2 || true
         rm -f "$BACKEND_PID_FILE"
-        fail "后端启动失败（详见 $BACKEND_LOG）"
+        fail "后端启动失败（详见 ${BACKEND_LOG}）"
       fi
     fi
     sleep 0.2
@@ -509,7 +509,7 @@ NGINX_KEY="$NGINX_DIR/conf/uvp.key"
 #   但 **# 和 & 在替换串里有特殊含义**，所以只出现固定文本，不会踩到。
 render_nginx_conf() {
   [ -f "$NGINX_CONF_TEMPLATE" ] || {
-    log "⚠️  缺少 nginx 配置模板（$NGINX_CONF_TEMPLATE），跳过 nginx"
+    log "⚠️  缺少 nginx 配置模板（${NGINX_CONF_TEMPLATE}），跳过 nginx"
     return 1
   }
   # ⛔⛔ 只做「@占位符@ → 字面值」这一种替换，不要去匹配 `listenNNNssl;` 这类文本。
@@ -547,7 +547,7 @@ ensure_self_signed_cert() {
       -keyout "$NGINX_KEY" -out "$NGINX_CRT" \
       -days 3650 -subj "/CN=uvp-local" \
       -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >>"$NGINX_LOG" 2>&1 || {
-      log "⚠️  自签证书生成失败，nginx 不会启动（详见 $NGINX_LOG）"
+      log "⚠️  自签证书生成失败，nginx 不会启动（详见 ${NGINX_LOG}）"
       return 1
     }
     log "已生成自签名证书（10 年有效；建议客户换用正式证书）"
@@ -594,7 +594,7 @@ nginx_healthy() {
 
 start_nginx() {
   if [ ! -x "$NGINX_BIN" ]; then
-    log "⚠️  未找到 nginx（$NGINX_BIN），跳过。系统仍可通过 http://127.0.0.1:${HTTP_PORT} 访问"
+    log "⚠️  未找到 nginx（${NGINX_BIN}），跳过。系统仍可通过 http://127.0.0.1:${HTTP_PORT} 访问"
     return 0
   fi
   if nginx_healthy; then
@@ -875,7 +875,7 @@ start_zlm() {
   if [ ! -x "$ZLM_BIN" ]; then
     # ⛔ ZLM 缺失不阻断启动：平台核心（设备管理、实时预览列表、录像查询）
     #   不依赖它，但推流/取流/录像会失败。让用户能先进去看页面，别卡在这一步。
-    log "⚠️  未找到 ZLM（$ZLM_BIN），跳过启动。系统可访问，但推流/取流/录像不可用。"
+    log "⚠️  未找到 ZLM（${ZLM_BIN}），跳过启动。系统可访问，但推流/取流/录像不可用。"
     return 0
   fi
 
@@ -938,7 +938,7 @@ ensure_database() {
   local db_path="${UVP_DB_PATH:-./data/uvp.db}"
   local baseline="$ROOT/resource/baseline/baseline.sql"
 
-  [ -f "$baseline" ] || fail "缺少建库脚本 $baseline（包不完整？请重新解压）"
+  [ -f "$baseline" ] || fail "缺少建库脚本 ${baseline}（包不完整？请重新解压）"
 
   # ⛔ python 路径不能写死：构建机是 macOS、目标机是 Ubuntu，
   #   写死本机路径的话包发到客户机上必然 command not found。
@@ -967,7 +967,7 @@ except Exception:
 PY
 )"
     if [ "$has_table" = "1" ]; then
-      log "数据库已就绪（$db_path）"
+      log "数据库已就绪（${db_path}）"
       return 0
     fi
     log "检测到 $db_path 存在但库不完整（可能是上次建库中断），将重建"

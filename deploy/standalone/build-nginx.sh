@@ -76,7 +76,7 @@ if [ ! -d "nginx-${VERSION}" ]; then
     fi
     rm -f "$TARBALL"
   done
-  [ -f "$TARBALL" ] || fail "所有源都下载失败（最后尝试：$url）"
+  [ -f "$TARBALL" ] || fail "所有源都下载失败（最后尝试：${url}）"
   tar -xzf "$TARBALL"
 fi
 

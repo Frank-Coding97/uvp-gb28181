@@ -567,8 +567,8 @@ fi
   printf '# ⚠️ 本文件明文随包分发 —— 它与 openapi.master_key_id 配套使用。\n'
   printf '%s=%s\n' "$OPENAPI_MASTER_KEY_ENV" "$OPENAPI_MASTER_KEY"
 } > "$PKG/config.env"
-log "写入 $SIP_TRACE_KEY_ENV（32 字节随机，base64）"
-log "写入 $OPENAPI_MASTER_KEY_ENV（32 字节随机，base64url）"
+log "写入 ${SIP_TRACE_KEY_ENV}（32 字节随机，base64）"
+log "写入 ${OPENAPI_MASTER_KEY_ENV}（32 字节随机，base64url）"
 
 # --------------------------------------------------------------- 打包 ----
 
