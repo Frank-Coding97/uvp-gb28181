@@ -312,6 +312,7 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 func (s *JobScheduler) executeJob(job *Job) {
 	startTime := time.Now()
 	jobExecutionID := s.newExecutionID(job.ID, startTime)
+	summaryReporter := &summaryReporter{}
 
 	var err error
 	for currentRetry := 0; currentRetry <= job.MaxRetry; currentRetry++ {
@@ -348,6 +349,7 @@ func (s *JobScheduler) executeJob(job *Job) {
 
 		// 创建带超时的上下文
 		ctx, cancel := context.WithTimeout(context.Background(), job.Timeout)
+		ctx = withSummaryReporter(ctx, summaryReporter)
 		ctx = WithExecutionContext(ctx, jobExecutionID, attempt, job.ExecutorName, job.ID)
 		if logger, ok := s.logger.(*ZapJobLogger); ok {
 			ctx = logging.WithContext(ctx, logger.executionScope(job.ID, jobExecutionID, attempt, job.ExecutorName))
@@ -356,6 +358,7 @@ func (s *JobScheduler) executeJob(job *Job) {
 		// 执行任务（传递 job 的深拷贝，避免并发修改）
 		jobCopy := job.Clone()
 		err = executor.Execute(ctx, jobCopy)
+		result.Summary = summaryReporter.snapshot()
 		cancel()
 
 		result.EndTime = time.Now()

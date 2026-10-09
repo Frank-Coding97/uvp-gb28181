@@ -14,6 +14,7 @@ type SysJobResults struct {
 	JobId      string     `gorm:"column:job_id;not null;index" json:"jobId"`               // 任务ID
 	Status     string     `gorm:"column:status;not null;index" json:"status"`              // 执行状态
 	Error      string     `gorm:"column:error" json:"error"`                               // 错误信息
+	Summary    string     `gorm:"column:summary;type:text" json:"summary"`                 // 执行摘要
 	StartTime  *time.Time `gorm:"column:start_time;not null;index" json:"startTime"`       // 开始时间
 	EndTime    *time.Time `gorm:"column:end_time;not null" json:"endTime"`                 // 结束时间
 	Duration   int64      `gorm:"column:duration;not null" json:"duration"`                // 执行时长(纳秒)

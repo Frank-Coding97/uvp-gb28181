@@ -50,6 +50,11 @@
             <a-table-column title="任务ID" data-index="jobId" :width="110" ellipsis tooltip />
             <a-table-column title="执行状态" data-index="status" :width="150" ellipsis tooltip />
             <a-table-column title="错误信息" data-index="error" :width="150" ellipsis tooltip />
+            <a-table-column title="执行摘要" data-index="summary" :width="260" ellipsis tooltip>
+              <template #cell="{ record }">
+                {{ record.summary?.trim() || "—" }}
+              </template>
+            </a-table-column>
             <a-table-column title="开始时间" data-index="startTime" :width="150" ellipsis tooltip>
               <template #cell="{ record }">
                 {{ record["startTime"] ? formatTime(record["startTime"]) : "" }}

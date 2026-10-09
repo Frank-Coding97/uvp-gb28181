@@ -113,6 +113,7 @@ func saveJobResultContext(ctx context.Context, result *schedulerhelper.JobResult
 		JobId:      result.JobID,
 		Status:     result.Status,
 		StartTime:  &result.StartTime,
+		Summary:    result.Summary,
 		EndTime:    &result.EndTime,
 		Duration:   result.Duration.Nanoseconds(), // 转换为纳秒
 		RetryCount: result.RetryCount,

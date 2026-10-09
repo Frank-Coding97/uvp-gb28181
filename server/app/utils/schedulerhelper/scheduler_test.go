@@ -3,9 +3,12 @@ package schedulerhelper
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // MockExecutor 模拟执行器
@@ -491,6 +494,135 @@ func TestExecuteNow(t *testing.T) {
 	if executor.GetExecCount() != 1 {
 		t.Errorf("expected 1 execution, got %d", executor.GetExecCount())
 	}
+}
+
+type summaryTestExecutor struct {
+	started chan<- string
+	release <-chan struct{}
+	err     error
+}
+
+func (e summaryTestExecutor) Name() string { return "summary-test" }
+
+func (e summaryTestExecutor) Execute(ctx context.Context, job *Job) error {
+	ReportSummary(ctx, job.ID+" summary")
+	if e.started != nil {
+		e.started <- job.ID
+	}
+	if e.release != nil {
+		select {
+		case <-e.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return e.err
+}
+
+func TestExecuteJobCollectsSummaryPerConcurrentExecution(t *testing.T) {
+	scheduler := NewJobScheduler(WithJobResultsBufferSize(2))
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	scheduler.RegisterExecutor(summaryTestExecutor{started: started, release: release})
+	for _, id := range []string{"summary-a", "summary-b"} {
+		_, err := scheduler.AddOrUpdateJob(&Job{
+			ID: id, Name: id, Group: "test", ExecutorName: "summary-test",
+			CronExpression: "0 0 1 * * *", Status: StatusDisabled,
+			BlockingPolicy: BlockParallel, ParallelNum: 2, Timeout: time.Second,
+		})
+		require.NoError(t, err)
+		require.NoError(t, scheduler.ExecuteNow(id))
+	}
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent executions")
+		}
+	}
+	close(release)
+	results := map[string]string{}
+	for range 2 {
+		select {
+		case result := <-scheduler.GetResults():
+			results[result.JobID] = result.Summary
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for execution results")
+		}
+	}
+	require.Equal(t, map[string]string{
+		"summary-a": "summary-a summary",
+		"summary-b": "summary-b summary",
+	}, results)
+	require.NoError(t, scheduler.StopContext(context.Background()))
+}
+
+func TestExecuteJobKeepsReportedSummaryOnFailure(t *testing.T) {
+	scheduler := NewJobScheduler(WithJobResultsBufferSize(1))
+	scheduler.RegisterExecutor(summaryTestExecutor{err: errors.New("cleanup failed")})
+	_, err := scheduler.AddOrUpdateJob(&Job{
+		ID: "summary-failure", Name: "summary failure", Group: "test", ExecutorName: "summary-test",
+		CronExpression: "0 0 1 * * *", Status: StatusDisabled, Timeout: time.Second,
+	})
+	require.NoError(t, err)
+	require.NoError(t, scheduler.ExecuteNow("summary-failure"))
+	select {
+	case result := <-scheduler.GetResults():
+		require.Equal(t, "FAILED", result.Status)
+		require.EqualError(t, result.Error, "cleanup failed")
+		require.Equal(t, "summary-failure summary", result.Summary)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for execution result")
+	}
+	require.NoError(t, scheduler.StopContext(context.Background()))
+}
+
+func TestExecuteJobAccumulatesSummaryAcrossRetries(t *testing.T) {
+	scheduler := NewJobScheduler(WithJobResultsBufferSize(1))
+	executor := NewMockExecutor("summary-test")
+	var attempts int32
+	executor.SetExecuteFn(func(ctx context.Context, _ *Job) error {
+		attempt := atomic.AddInt32(&attempts, 1)
+		ReportSummary(ctx, fmt.Sprintf("attempt %d", attempt))
+		if attempt == 1 {
+			return errors.New("retry cleanup")
+		}
+		return nil
+	})
+	scheduler.RegisterExecutor(executor)
+	_, err := scheduler.AddOrUpdateJob(&Job{
+		ID: "summary-retry", Name: "summary retry", Group: "test", ExecutorName: "summary-test",
+		CronExpression: "0 0 1 * * *", Status: StatusDisabled, Timeout: time.Second, MaxRetry: 1, RetryInterval: time.Millisecond,
+	})
+	require.NoError(t, err)
+	require.NoError(t, scheduler.ExecuteNow("summary-retry"))
+	select {
+	case result := <-scheduler.GetResults():
+		require.Equal(t, "SUCCESS", result.Status)
+		require.Equal(t, 1, result.RetryCount)
+		require.Equal(t, "attempt 1\nattempt 2", result.Summary)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for execution result")
+	}
+	require.NoError(t, scheduler.StopContext(context.Background()))
+}
+
+func TestExecuteJobLeavesSummaryEmptyForOrdinaryExecutor(t *testing.T) {
+	scheduler := NewJobScheduler(WithJobResultsBufferSize(1))
+	scheduler.RegisterExecutor(NewMockExecutor("ordinary"))
+	_, err := scheduler.AddOrUpdateJob(&Job{
+		ID: "ordinary", Name: "ordinary", Group: "test", ExecutorName: "ordinary",
+		CronExpression: "0 0 1 * * *", Status: StatusDisabled, Timeout: time.Second,
+	})
+	require.NoError(t, err)
+	require.NoError(t, scheduler.ExecuteNow("ordinary"))
+	select {
+	case result := <-scheduler.GetResults():
+		require.Empty(t, result.Summary)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for execution result")
+	}
+	require.NoError(t, scheduler.StopContext(context.Background()))
 }
 
 // TestExecuteNowWithBlockingPolicy 测试立即执行时的阻塞策略

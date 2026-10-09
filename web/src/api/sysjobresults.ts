@@ -8,6 +8,7 @@ export interface SysJobResultsData {
   jobId: string; // 任务ID
   status: string; // 执行状态
   error: string; // 错误信息
+  summary?: string | null; // 执行摘要
   startTime: string; // 开始时间
   endTime: string; // 结束时间
   duration: number; // 执行时长(纳秒)

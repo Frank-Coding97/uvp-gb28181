@@ -52,7 +52,7 @@ func (SysJobs) TableName() string {
 
 // GetByID 根据ID获取sys_jobs
 func (m *SysJobs) GetByID(c context.Context, id string) error {
-	return app.DB().WithContext(c).First(m, id).Error
+	return app.DB().WithContext(c).Where("id = ?", id).First(m).Error
 }
 
 // Create 创建sys_jobs记录

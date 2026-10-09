@@ -8,12 +8,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+	"gorm.io/gorm"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
+
+func TestSaveJobResultPersistsSummaryOnFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SysJobResults{}))
+	previousDB, previousConfig := app.GormDbMysql, app.ConfigYml
+	app.GormDbMysql, app.ConfigYml = db, loggingRegisterTestConfig{}
+	t.Cleanup(func() { app.GormDbMysql, app.ConfigYml = previousDB, previousConfig })
+
+	start := time.Now().Add(-time.Minute)
+	end := time.Now()
+	err = saveJobResultContext(context.Background(), &schedulerhelper.JobResult{
+		JobID: "cleanup", Status: "FAILED", Error: errors.New("database unavailable"),
+		Summary: "已删除 12 条，另有一个批次失败", StartTime: start, EndTime: end,
+		ExecutionPolicy: schedulerhelper.PolicyRepeat,
+	})
+	require.NoError(t, err)
+
+	var stored models.SysJobResults
+	require.NoError(t, db.Where("job_id = ?", "cleanup").First(&stored).Error)
+	require.Equal(t, "已删除 12 条，另有一个批次失败", stored.Summary)
+	require.Equal(t, "database unavailable", stored.Error)
+}
 
 func TestLoggingResultDrainWaitsForEverySave(t *testing.T) {
 	results := make(chan *schedulerhelper.JobResult, 8)
