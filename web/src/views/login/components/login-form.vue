@@ -201,11 +201,11 @@ onMounted(async () => {
   :deep(.arco-input-wrapper) {
     height: 46px;
     padding: 0 14px;
-    background: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
-    border: 1px solid #dbe6f4;
+    background: var(--login-control-bg, linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%));
+    border: 1px solid var(--login-control-border, #dbe6f4);
     border-radius: 12px;
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 90%),
+      var(--login-control-shadow, inset 0 1px 0 rgb(255 255 255 / 90%)),
       0 1px 2px rgb(15 23 42 / 4%);
     transition:
       border-color 0.18s ease,
@@ -215,15 +215,15 @@ onMounted(async () => {
   }
 
   :deep(.arco-input-wrapper:hover) {
-    background: #f7fbff;
-    border-color: #b8cce7;
+    background: var(--login-control-hover-bg, #f7fbff);
+    border-color: var(--login-control-hover-border, #b8cce7);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 95%),
+      var(--login-control-shadow, inset 0 1px 0 rgb(255 255 255 / 95%)),
       0 4px 12px rgb(24 144 255 / 8%);
   }
 
   :deep(.arco-input-wrapper.arco-input-focus) {
-    background: #ffffff;
+    background: var(--login-control-focus-bg, #ffffff);
     border-color: #1890ff;
     box-shadow:
       0 0 0 3px rgb(24 144 255 / 12%),
@@ -234,18 +234,18 @@ onMounted(async () => {
   :deep(.arco-input),
   :deep(.arco-input-password) {
     font-size: 14px;
-    color: #1f2d3d;
+    color: var(--login-text, #1f2d3d);
   }
 
   :deep(.arco-input::placeholder) {
-    color: #9aa8ba;
+    color: var(--login-placeholder, #9aa8ba);
   }
 
   :deep(.arco-input-prefix),
   :deep(.arco-input-suffix),
   :deep(.arco-input-clear-btn),
   :deep(.arco-input-password-visibility-btn) {
-    color: #7d8da1;
+    color: var(--login-icon, #7d8da1);
   }
 
   :deep(.arco-input-wrapper.arco-input-focus .arco-input-prefix),

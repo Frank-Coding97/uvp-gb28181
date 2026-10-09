@@ -1,5 +1,5 @@
 <template>
-  <div class="login-page">
+  <div class="login-page" :class="{ 'dark-mode': darkMode }">
     <!-- Topology background — connections static, nodes twinkle -->
     <svg class="topology-bg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
@@ -76,21 +76,38 @@
       </g>
     </svg>
 
-    <!-- Top brand bar -->
-    <header class="brand-bar">
-      <img class="brand-mark" :src="uvpMark" alt="统一视频接入平台" />
-      <span class="brand-logo-text">UVP 统一视频接入平台</span>
-      <span class="brand-meta">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
+    <header class="page-meta">
+      <span class="version-text">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
     </header>
 
     <!-- Floating card -->
     <main class="stage">
       <div class="float-card">
+        <button
+          id="login-theme-toggle"
+          class="theme-toggle"
+          type="button"
+          :aria-label="darkMode ? '切换到明亮模式' : '切换到暗色模式'"
+          :title="darkMode ? '切换到明亮模式' : '切换到暗色模式'"
+          :aria-pressed="darkMode"
+          @click="toggleThemeMode"
+        >
+          <Sun v-if="darkMode" :size="18" aria-hidden="true" />
+          <Moon v-else :size="18" aria-hidden="true" />
+        </button>
         <!-- LEFT: brand / slogan -->
         <aside class="brand-side">
-          <div class="brand-eyebrow">Unified Video Platform</div>
-          <div class="brand-title">把所有视频源<br />接入同一张控制台</div>
-          <p class="brand-lede">国标 SIP 接入 · 视频转发 · 录像点播 · 级联调度， 一套平台覆盖从设备侧到平台侧的核心链路。</p>
+          <div class="brand-heading">
+            <img class="brand-mark" :src="uvpMark" alt="统一视频接入平台" />
+            <div class="brand-eyebrow">Unified Video Platform</div>
+          </div>
+          <div class="brand-title" aria-label="统一视频接入平台-GB28181">
+            <span>统一视频接入平台</span>
+            <span>GB28181</span>
+          </div>
+          <p class="brand-lede">
+            以国标接入为核心，集中管理设备、视频、录像与平台级联，结合信令追踪和媒体诊断，让运行状态与问题定位有据可依。
+          </p>
 
           <div class="brand-features">
             <div class="feature">
@@ -99,7 +116,7 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </span>
-              <span>GB/T 28181-2022 全字段兼容</span>
+              <span>视频业务：实时预览 · 录像回放 · 级联共享</span>
             </div>
             <div class="feature">
               <span class="ic">
@@ -107,7 +124,7 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </span>
-              <span>部门数据权限 · 设备权限粒度到通道</span>
+              <span>资源管理：通道授权 · 多媒体节点调度</span>
             </div>
             <div class="feature">
               <span class="ic">
@@ -115,15 +132,15 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </span>
-              <span>媒体服务编排 · 转发、回放与级联统一治理</span>
+              <span>运行追溯：SIP 追踪 · 媒体探针 · 日志审计</span>
             </div>
           </div>
 
           <div class="brand-foot">
-            <span class="chip">SIP / RTP</span>
-            <span class="chip">级联</span>
-            <span class="chip">回放点播</span>
-            <span class="chip">部门权限</span>
+            <span class="chip">GB/T 28181</span>
+            <span class="chip">云端录像</span>
+            <span class="chip">多节点</span>
+            <span class="chip">OpenAPI</span>
           </div>
         </aside>
 
@@ -157,6 +174,16 @@ import { storeToRefs } from "pinia";
 import { getDisplaySystemCopyright, getDisplaySystemRecordNo } from "@/utils/system-footer";
 import { APP_VERSION_TEXT } from "@/config/version";
 import uvpMark from "@/assets/logo/uvp-mark.svg";
+import { Sun, Moon } from "lucide-vue-next";
+import { useThemeConfig } from "@/store/modules/theme-config";
+import { useThemeMethods } from "@/hooks/useThemeMethods";
+
+const { darkMode } = storeToRefs(useThemeConfig());
+const { setDarkMode } = useThemeMethods();
+const toggleThemeMode = () => {
+  darkMode.value = !darkMode.value;
+  setDarkMode();
+};
 
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
@@ -174,16 +201,30 @@ $primary: #1890ff;
 $primary-light: #69c0ff;
 
 .login-page {
+  --login-bg: linear-gradient(135deg, #edf4fc 0%, #f5f8fd 50%, #e2edfa 100%);
+  --login-overlay: rgb(255 255 255 / 40%);
+  --login-surface: #ffffff;
+  --login-text: #1f2d3d;
+  --login-muted: #64748b;
+  --login-page-muted: #64748b;
+  --login-control-bg: linear-gradient(180deg, #f8fbff 0%, #f3f7fc 100%);
+  --login-control-hover-bg: #f7fbff;
+  --login-control-focus-bg: #ffffff;
+  --login-control-border: #dbe6f4;
+  --login-control-hover-border: #b8cce7;
+  --login-control-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+  --login-placeholder: #718198;
+  --login-icon: #64748b;
+  --login-card-shadow: 0 24px 64px rgb(30 64 100 / 12%), 0 8px 24px rgb(30 64 100 / 8%);
+
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   overflow: hidden;
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
-  color: #ffffff;
-  background:
-    radial-gradient(ellipse at 50% 50%, rgb(24 144 255 / 6%), transparent 65%),
-    linear-gradient(135deg, #0a1424 0%, #0f1d33 50%, #122242 100%);
+  color: var(--login-text);
+  background: radial-gradient(ellipse at 50% 50%, rgb(24 144 255 / 6%), transparent 65%), var(--login-bg);
 
   &::after {
     position: absolute;
@@ -191,8 +232,17 @@ $primary-light: #69c0ff;
     z-index: 0;
     pointer-events: none;
     content: "";
-    background: radial-gradient(ellipse 50% 40% at 50% 50%, rgb(15 29 51 / 55%), transparent 70%);
+    background: radial-gradient(ellipse 50% 40% at 50% 50%, var(--login-overlay), transparent 70%);
   }
+}
+
+.login-page.dark-mode {
+  --login-bg: linear-gradient(135deg, #0a1424 0%, #0f1d33 50%, #122242 100%);
+  --login-overlay: rgb(15 29 51 / 55%);
+  --login-page-muted: #a5b5ca;
+  --login-card-shadow: 0 24px 64px rgb(0 0 0 / 28%), 0 8px 24px rgb(0 0 0 / 10%);
+
+  color-scheme: dark;
 }
 
 /* Topology */
@@ -243,35 +293,65 @@ $primary-light: #69c0ff;
   }
 }
 
-/* Brand bar */
-.brand-bar {
+.page-meta {
   position: relative;
   z-index: 2;
   display: flex;
   flex-shrink: 0;
+  gap: 16px;
   align-items: center;
+  justify-content: flex-end;
   height: 64px;
   padding: 0 32px;
+  font-family: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--login-page-muted);
+  letter-spacing: 0;
 }
-.brand-logo-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #ffffff;
-  letter-spacing: 0.5px;
+
+.theme-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--login-text);
+  cursor: pointer;
+  background: var(--login-surface);
+  border: 1px solid var(--login-control-border);
+  border-radius: 8px;
+
+  &:hover {
+    background: var(--login-control-hover-bg);
+    border-color: var(--login-control-hover-border);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $primary;
+    outline-offset: 3px;
+  }
+}
+
+/* Card branding */
+.brand-heading {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
 }
 .brand-mark {
   display: block;
-  width: 30px;
-  height: 30px;
-  margin-right: 10px;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
   object-fit: contain;
-}
-.brand-meta {
-  margin-left: auto;
-  font-family: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: rgb(255 255 255 / 62%);
-  letter-spacing: 0.08em;
 }
 
 /* Stage */
@@ -286,18 +366,18 @@ $primary-light: #69c0ff;
 }
 
 .float-card {
+  position: relative;
   display: grid;
   grid-template-columns: 1.05fr 1fr;
   width: 920px;
   max-width: 100%;
   min-height: 520px;
   overflow: hidden;
-  color: #333333;
-  background: #ffffff;
+  color: var(--login-text);
+  color-scheme: light;
+  background: var(--login-surface);
   border-radius: 12px;
-  box-shadow:
-    0 24px 64px rgb(0 0 0 / 28%),
-    0 8px 24px rgb(0 0 0 / 10%);
+  box-shadow: var(--login-card-shadow);
 }
 
 /* Brand side */
@@ -325,12 +405,11 @@ $primary-light: #69c0ff;
 }
 .brand-eyebrow {
   position: relative;
-  margin-bottom: 14px;
   font-family: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: rgb(255 255 255 / 70%);
   text-transform: uppercase;
-  letter-spacing: 0.22em;
+  letter-spacing: 0;
 }
 .brand-title {
   position: relative;
@@ -338,7 +417,12 @@ $primary-light: #69c0ff;
   font-size: 32px;
   font-weight: 700;
   line-height: 1.3;
-  letter-spacing: -0.3px;
+  letter-spacing: 0;
+
+  span {
+    display: block;
+    white-space: nowrap;
+  }
 }
 .brand-lede {
   position: relative;
@@ -410,11 +494,11 @@ $primary-light: #69c0ff;
     margin-bottom: 6px;
     font-size: 22px;
     font-weight: 600;
-    color: #333333;
+    color: var(--login-text);
   }
   p {
     font-size: 13px;
-    color: #999999;
+    color: var(--login-muted);
   }
 }
 
@@ -460,31 +544,24 @@ $primary-light: #69c0ff;
   flex-shrink: 0;
   padding: 16px 24px 24px;
   font-size: 12px;
-  color: rgb(255 255 255 / 55%);
+  color: var(--login-page-muted);
   text-align: center;
 
   .sep {
     margin: 0 8px;
-    color: rgb(255 255 255 / 25%);
+    color: var(--login-page-muted);
   }
 }
 
 /* Responsive */
 @media (width <= 880px) {
-  .brand-bar {
+  .page-meta {
     height: 56px;
     padding: 0 24px;
-  }
-  .brand-meta {
-    display: none;
-  }
-  .brand-logo-text {
-    font-size: 15px;
-  }
-  .brand-mark {
-    width: 28px;
-    height: 28px;
-    margin-right: 8px;
+
+    .version-text {
+      display: none;
+    }
   }
   .float-card {
     grid-template-columns: 1fr;
@@ -492,15 +569,31 @@ $primary-light: #69c0ff;
     min-height: 0;
   }
   .brand-side {
-    padding: 32px 28px;
+    padding: 64px 28px 32px;
 
     .brand-features,
     .brand-foot {
       display: none;
     }
   }
+  .theme-toggle {
+    color: #ffffff;
+    background: rgb(255 255 255 / 8%);
+    border-color: rgb(255 255 255 / 22%);
+
+    &:hover {
+      background: rgb(255 255 255 / 16%);
+      border-color: rgb(255 255 255 / 40%);
+    }
+  }
   .form-side {
     padding: 32px 28px;
+  }
+}
+
+@media (width <= 360px) {
+  .brand-title {
+    font-size: 24px;
   }
 }
 </style>
