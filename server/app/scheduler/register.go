@@ -23,6 +23,7 @@ func RegisterExecutors() {
 	app.JobScheduler.RegisterExecutor(&executors.DemoExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.SessionCleanupExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.LoginLogCleanupExecutor{})
+	app.JobScheduler.RegisterExecutor(&executors.LogCleanupExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanDispatchExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanHealExecutor{})
 
@@ -54,10 +55,51 @@ func systemJobDefinitions() []*schedulerhelper.Job {
 			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 50 * time.Second,
 		},
 		{
-			ID: "system-login-log-cleanup", Group: "system", Name: "登录日志清理",
-			Description:  "每日分批清理 180 天前的登录日志",
-			ExecutorName: executors.LoginLogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			ID: "system-log-cleanup-sip", Group: "system", Name: "SIP 日志清理",
+			Description:  "每日按系统配置分批清理过期 SIP 日志",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
 			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "sip"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			ID: "system-log-cleanup-operation", Group: "system", Name: "操作日志清理",
+			Description:  "每日按系统配置分批清理过期操作日志",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "operation"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			ID: "system-login-log-cleanup", Group: "system", Name: "登录日志清理",
+			Description:  "每日按系统配置分批清理过期登录日志",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "login"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			ID: "system-log-cleanup-job", Group: "system", Name: "定时任务日志清理",
+			Description:  "每日按系统配置分批清理已结束的过期任务结果",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "job"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			ID: "system-log-cleanup-playback", Group: "system", Name: "播放日志清理",
+			Description:  "每日按系统配置分批清理过期播放日志",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "playback"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			ID: "system-log-cleanup-scheduler", Group: "system", Name: "媒体调度日志清理",
+			Description:  "每日按系统配置分批清理过期媒体调度日志",
+			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+			Parameters:     map[string]interface{}{"kind": "scheduler"},
 			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
 		},
 	}

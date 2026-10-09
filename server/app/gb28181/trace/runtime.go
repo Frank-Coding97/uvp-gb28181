@@ -315,19 +315,8 @@ func NewModuleWithDiagnosis(cfg gbconfig.TraceConfig, store Store, payloadCipher
 	module.cancel = cancel
 	go module.runWriter(ctx)
 	go module.runRetryWriter(ctx)
-	if prunable, ok := store.(PrunableStore); ok {
-		var scheduledPruner = prunable
-		if diagnosisService != nil {
-			scheduledPruner = combinedPrunableStore{trace: prunable, diagnosis: diagnosisService}
-		}
-		pruner := NewTracePruner(scheduledPruner, cfg.RetentionDays, DefaultTracePruneBatchSize, time.Now)
-		go func() {
-			defer close(module.prunerDone)
-			pruner.Run(ctx, time.Hour, func(err error) { module.health.degraded(err.Error()) })
-		}()
-	} else {
-		close(module.prunerDone)
-	}
+	// Database retention belongs to the platform scheduler, including while capture is disabled.
+	close(module.prunerDone)
 	return module
 }
 

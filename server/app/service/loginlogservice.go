@@ -82,14 +82,14 @@ func (s *LoginLogService) CleanupBefore(ctx context.Context, cutoff time.Time, b
 	var deleted int64
 	for {
 		var ids []uint
-		if err := s.db.WithContext(ctx).Model(&models.SysLoginLog{}).
+		if err := s.db.WithContext(ctx).Unscoped().Model(&models.SysLoginLog{}).
 			Where("created_at < ?", cutoff).Order("id").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
 			return deleted, err
 		}
 		if len(ids) == 0 {
 			return deleted, nil
 		}
-		result := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&models.SysLoginLog{})
+		result := s.db.WithContext(ctx).Unscoped().Where("id IN ? AND created_at < ?", ids, cutoff).Delete(&models.SysLoginLog{})
 		if result.Error != nil {
 			return deleted, result.Error
 		}

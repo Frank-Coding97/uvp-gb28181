@@ -55,6 +55,7 @@ import (
 	gbzlmsched "uvplatform.com/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/logcleanup"
 	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
 	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 	openapiptz "uvplatform.com/uvp-gb28181/app/openapi/ptz"
@@ -384,6 +385,7 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 	}
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, reload))
 	gbroutes.SetServiceConfigSIPTraceReloader(reload)
+	logcleanup.SetSIPReloader(reload)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
@@ -1863,13 +1865,12 @@ func setupZLMScheduler() {
 	app.ZapLog.Info("GB28181 ZLM Scheduler 已装配", zap.String("event", "gb28181.lifecycle.zlm_scheduler_assembled"), zap.String("algorithm", algorithm))
 }
 
-// setupZLMSchedulerLog 装配调度日志服务 + 启动 24h prune ticker(M3 T3.3)
+// setupZLMSchedulerLog 装配调度日志写入服务，过期清理由平台任务负责。
 //
 // 流程:
 //  1. zlmScheduler 为 nil → 跳过(没 Manager 就没 Pick,没日志可写)
 //  2. app.DB() 为 nil → 跳过(无 DB 持久化能力)
 //  3. 起 LogService(buffer 1000)+ Manager.SetLogService 注入
-//  4. 起 24h ticker,跑 PruneOlderThan(now-7d),失败 zap.Warn
 //
 // 整套通过 schedulerLogCancel 控制退出。
 func setupZLMSchedulerLog() {
@@ -1894,44 +1895,9 @@ func setupZLMSchedulerLog() {
 	schedulerLogCancel = cancel
 
 	pruneDone := make(chan struct{})
+	close(pruneDone)
 	schedulerLogDone = pruneDone
-	go func() {
-		defer close(pruneDone)
-		pruneSchedulerLogDaily(ctx, svc)
-	}()
-
-	app.ZapLog.Info("GB28181 ZLM 调度日志服务已启动(buffer=1000, retention=7d)")
-}
-
-// pruneSchedulerLogDaily 每 24h 跑一次 PruneOlderThan(now-7d)
-//
-// 启动时立即跑一次(冷启清遗留),之后每 24h 一次。
-// 失败 zap.Warn 不中断 ticker。
-func pruneSchedulerLogDaily(ctx context.Context, svc *gbzlmsched.LogService) {
-	prune := func() {
-		pCtx, pCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer pCancel()
-		n, err := svc.PruneOlderThan(pCtx, time.Now().Add(-7*24*time.Hour))
-		if err != nil {
-			app.ZapLog.Warn("GB28181 调度日志 prune 失败",
-				zap.String("event", "zlm.scheduler_log.prune_failed"), zap.Error(err))
-			return
-		}
-		if n > 0 {
-			app.ZapLog.Info("GB28181 调度日志 prune 完成", zap.String("event", "gb28181.cleanup.scheduler_log_pruned"), zap.Int64("removed", n))
-		}
-	}
-	prune() // 启动时立即清一轮
-	tk := time.NewTicker(24 * time.Hour)
-	defer tk.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tk.C:
-			prune()
-		}
-	}
+	app.ZapLog.Info("GB28181 ZLM 调度日志服务已启动(buffer=1000, retention=platform-scheduler)")
 }
 
 // setupZLMSchedulerController 装配算法切换 + 日志查询 controller(M3 T3.3)

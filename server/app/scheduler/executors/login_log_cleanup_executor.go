@@ -3,9 +3,11 @@ package executors
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/logcleanup"
 	"uvplatform.com/uvp-gb28181/app/service"
 	"uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
@@ -18,6 +20,11 @@ type LoginLogCleanupExecutor struct {
 }
 
 func (e *LoginLogCleanupExecutor) Execute(ctx context.Context, _ *schedulerhelper.Job) error {
+	release, err := logcleanup.Acquire(ctx, logcleanup.Login)
+	if err != nil {
+		return err
+	}
+	defer release()
 	loginLogs := e.Service
 	if loginLogs == nil {
 		loginLogs, _ = app.LoginLogRecorder.(*service.LoginLogService)
@@ -29,7 +36,10 @@ func (e *LoginLogCleanupExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 	if e.Now != nil {
 		now = e.Now
 	}
-	_, err := loginLogs.CleanupBefore(ctx, now().Add(-180*24*time.Hour), 1000)
+	days := logcleanup.CurrentConfig().LoginRetentionDays
+	cutoff := now().Add(-time.Duration(days) * 24 * time.Hour)
+	deleted, err := loginLogs.CleanupBefore(ctx, cutoff, 500)
+	schedulerhelper.ReportSummary(ctx, fmt.Sprintf("日志类型=login；保留=%d天；截止=%s；已删除=%d条", days, cutoff.Format(time.RFC3339), deleted))
 	return err
 }
 

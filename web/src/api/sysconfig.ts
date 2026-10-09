@@ -27,22 +27,50 @@ export interface CaptchaConfig {
   length: number;
 }
 
+export interface LogCleanupConfig {
+  sipRetentionDays: number;
+  operationRetentionDays: number;
+  loginRetentionDays: number;
+  jobRetentionDays: number;
+  playbackRetentionDays: number;
+  schedulerRetentionDays: number;
+  configured: boolean;
+}
+
+export type LogCleanupUpdateConfig = Omit<LogCleanupConfig, "configured">;
+export type LogCleanupDraft = Omit<LogCleanupConfig, keyof LogCleanupUpdateConfig> &
+  Record<keyof LogCleanupUpdateConfig, number | null>;
+
+export const defaultLogCleanupConfig: LogCleanupConfig = {
+  sipRetentionDays: 7,
+  operationRetentionDays: 180,
+  loginRetentionDays: 180,
+  jobRetentionDays: 30,
+  playbackRetentionDays: 7,
+  schedulerRetentionDays: 7,
+  configured: false
+};
+
 // 配置响应数据
 export interface ConfigResponseData {
   system: SystemConfig;
   captcha: CaptchaConfig;
   safe: SafeConfig;
+  logCleanup?: LogCleanupConfig;
 }
 
-// 配置请求参数
-export interface ConfigRequestData {
-  system: SystemConfig;
-  safe: SafeConfig;
-  captcha: CaptchaConfig;
+export interface RegularConfigRequestData {
+  system?: SystemConfig;
+  safe?: SafeConfig;
+  captcha?: CaptchaConfig;
 }
+
+// 普通页签沿用完整配置；日志清理页签可仅更新对应配置段。
+export type ConfigRequestData = RegularConfigRequestData & { logCleanup?: LogCleanupUpdateConfig };
 
 // 获取配置响应结果
 export type GetConfigResult = BaseResult<ConfigResponseData>;
+export type UpdateConfigResult = BaseResult<Partial<ConfigResponseData>>;
 
 /** 获取系统配置 */
 export const getConfigAPI = () => {
@@ -51,5 +79,5 @@ export const getConfigAPI = () => {
 
 /** 更新系统配置 */
 export const updateConfigAPI = (data: ConfigRequestData) => {
-  return http.request<BaseResult>("put", baseUrlApi("config/update"), { data });
+  return http.request<UpdateConfigResult>("put", baseUrlApi("config/update"), { data });
 };

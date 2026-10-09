@@ -14,6 +14,7 @@ import {
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
+import { logCleanupPageRoute } from "@/views/system/sysconfig/sysconfigState";
 import { PLAYBACK_PROTOCOL_DICT_CODE, playbackProtocolOptionsFromDictionary } from "../playbackProtocol";
 import { createStaticServiceConfigDraft, normalizePlayAuthConfig } from "./serviceConfigState";
 
@@ -114,14 +115,12 @@ const savedSIPLogRetentionDays = ref(7);
 const savedCloudRecordingRetentionDays = ref(7);
 type NumberFieldInstance = InstanceType<typeof SNumberField>;
 const positionHistoryRetentionField = ref<NumberFieldInstance | null>(null);
-const sipLogRetentionField = ref<NumberFieldInstance | null>(null);
 const cloudRecordingRetentionField = ref<NumberFieldInstance | null>(null);
 const sipTimeoutField = ref<NumberFieldInstance | null>(null);
 const playAuthTTLField = ref<NumberFieldInstance | null>(null);
 const playTimeoutField = ref<NumberFieldInstance | null>(null);
 const numberFields = computed(() => [
   positionHistoryRetentionField,
-  sipLogRetentionField,
   cloudRecordingRetentionField,
   sipTimeoutField,
   playAuthTTLField,
@@ -333,6 +332,9 @@ async function saveConfig() {
   }
   aggregateSaving.value = true;
   try {
+    const latestSipLogConfig = await fetchServiceConfig();
+    if (latestSipLogConfig.code !== 0) throw new Error(latestSipLogConfig.message || "读取最新 SIP 日志配置失败");
+
     const response = await updateServiceConfig({
       positionHistory: { enabled: draft.saveMobilePositionHistory, retentionDays: draft.positionHistoryRetentionDays },
       cloudRecordingRetention: { retentionDays: draft.cloudRecordingRetentionDays },
@@ -362,7 +364,11 @@ async function saveConfig() {
         authBindClientIP: draft.playback.authBindClientIP,
         authTTLSeconds: draft.playback.authTTLSeconds
       },
-      sipLog: { enabled: draft.sipLogEnabled, retentionDays: draft.sipLogRetentionDays, applied: sipLogApplied.value }
+      sipLog: {
+        enabled: draft.sipLogEnabled,
+        retentionDays: latestSipLogConfig.data.sipLog.retentionDays,
+        applied: sipLogApplied.value
+      }
     });
     if (response.code !== 0) throw new Error(response.message || "保存配置失败");
     const v = response.data;
@@ -741,22 +747,13 @@ onMounted(async () => {
               <a-col :span="isMobile ? 24 : 12">
                 <a-form-item
                   field="sipLogRetentionDays"
-                  label="SIP 日志保留天数（天）"
-                  tooltip="SIP 日志按接收时间自动清理，默认保留 7 天。"
-                  :validate-status="sipLogRetentionValid ? undefined : 'error'"
+                  label="SIP 日志保留天数"
+                  tooltip="保留天数请前往系统配置的日志清理页签修改。"
                 >
-                  <s-number-field
-                    ref="sipLogRetentionField"
-                    v-model="draft.sipLogRetentionDays"
-                    class="service-config-number-input"
-                    :min="1"
-                    :max="365"
-                    required
-                    :disabled="sipLogLoading || sipLogSaving || !sipLogReady"
-                  />
-                  <template v-if="!sipLogRetentionValid" #extra>
-                    <span>请输入 1-365 之间的整数</span>
-                  </template>
+                  <div class="sip-log-retention-display">
+                    <span>{{ draft.sipLogRetentionDays }} 天</span>
+                    <router-link :to="logCleanupPageRoute"> 前往日志清理配置 </router-link>
+                  </div>
                 </a-form-item>
               </a-col>
               <a-col :span="isMobile ? 24 : 12">

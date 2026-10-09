@@ -35,17 +35,17 @@ func TestDashboardRetentionPrunesOnlyExpiredHistoryAndProtectsStartedAttempts(t 
 	service.SetClock(func() time.Time { return now })
 	result, err := service.Prune(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, RetentionResult{SIPMinutes: 1, SIPFlushes: 1, SIPGaps: 1, PlayAttempts: 1}, result)
+	require.Equal(t, RetentionResult{SIPMinutes: 1, SIPFlushes: 1, SIPGaps: 1}, result)
 
 	require.EqualValues(t, 2, countRows(t, db, &gbmodels.GbSipMetricMinute{}))
 	require.EqualValues(t, 2, countRows(t, db, &gbmodels.GbSipMetricFlush{}))
 	require.EqualValues(t, 1, countRows(t, db, &gbmodels.GbSipMetricGap{}))
-	require.EqualValues(t, 2, countRows(t, db, &gbmodels.GbPlayAttempt{}))
+	require.EqualValues(t, 3, countRows(t, db, &gbmodels.GbPlayAttempt{}))
 	var pending gbmodels.GbPlayAttempt
 	require.NoError(t, db.Where("correlation_id = ?", "old-started").First(&pending).Error)
 }
 
-func TestDashboardRetentionUsesSevenDaysForLifecycleEventsAndThirtyForSummaries(t *testing.T) {
+func TestDashboardRetentionLeavesPlaybackDeletionToScheduler(t *testing.T) {
 	db := newRetentionDB(t)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbPlayLifecycleEvent{}))
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
@@ -56,14 +56,14 @@ func TestDashboardRetentionUsesSevenDaysForLifecycleEventsAndThirtyForSummaries(
 	service.SetClock(func() time.Time { return now })
 	result, err := service.Prune(context.Background())
 	require.NoError(t, err)
-	require.EqualValues(t, 1, result.PlayLifecycleEvents)
+	require.Zero(t, result.PlayLifecycleEvents)
 
 	var count int64
 	require.NoError(t, db.Model(&gbmodels.GbPlayLifecycleEvent{}).Count(&count).Error)
-	require.Zero(t, count)
+	require.EqualValues(t, 1, count)
 }
 
-func TestDashboardRetentionPrunesOldStaleLifecycleButKeepsInProgress(t *testing.T) {
+func TestDashboardRetentionKeepsStaleLifecycleForScheduledCleanup(t *testing.T) {
 	db := newRetentionDB(t)
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	old := now.Add(-31 * 24 * time.Hour)
@@ -77,11 +77,11 @@ func TestDashboardRetentionPrunesOldStaleLifecycleButKeepsInProgress(t *testing.
 	service.SetClock(func() time.Time { return now })
 	result, err := service.Prune(context.Background())
 	require.NoError(t, err)
-	require.EqualValues(t, 1, result.PlayAttempts)
+	require.Zero(t, result.PlayAttempts)
 
 	var ids []string
 	require.NoError(t, db.Model(&gbmodels.GbPlayAttempt{}).Order("correlation_id").Pluck("correlation_id", &ids).Error)
-	require.Equal(t, []string{"active"}, ids)
+	require.Equal(t, []string{"active", "old-stale"}, ids)
 }
 
 func TestDashboardRetentionMarksOnlyUnreferencedInactiveLifecycleStale(t *testing.T) {

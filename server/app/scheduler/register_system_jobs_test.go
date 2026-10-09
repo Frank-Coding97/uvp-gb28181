@@ -28,7 +28,7 @@ func TestRegisterSystemJobsPersistsParentsBeforeScheduling(t *testing.T) {
 
 	var persisted []models.SysJobs
 	require.NoError(t, db.Order("id").Find(&persisted).Error)
-	require.Len(t, persisted, 4)
+	require.Len(t, persisted, 9)
 
 	for _, job := range app.JobScheduler.ListJobs() {
 		var count int64
@@ -55,7 +55,7 @@ func TestRegisterSystemJobsIsIdempotentAndPreservesDisabledStatus(t *testing.T) 
 
 	var count int64
 	require.NoError(t, db.Model(&models.SysJobs{}).Count(&count).Error)
-	require.Equal(t, int64(4), count)
+	require.Equal(t, int64(9), count)
 
 	var registered *schedulerhelper.Job
 	for _, job := range app.JobScheduler.ListJobs() {

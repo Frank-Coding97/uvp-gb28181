@@ -4,7 +4,13 @@
       <a-tabs class="uvp-system-tabs sysconfig-tabs" v-model:active-key="activeTab" :animation="true">
         <template #extra>
           <div class="sysconfig-tabs__actions">
-            <a-button type="primary" @click="onSave" v-hasPerm="['system:config:update']">
+            <a-button
+              type="primary"
+              :loading="sysConfigStore.loading"
+              :disabled="sysConfigStore.loading"
+              @click="onSave"
+              v-hasPerm="['system:config:update']"
+            >
               <template #icon>
                 <icon-save />
               </template>
@@ -213,18 +219,51 @@
             </a-form>
           </a-card>
         </a-tab-pane>
+
+        <a-tab-pane key="logCleanup" title="日志清理">
+          <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
+            <a-alert class="mb-4" type="warning">
+              保留天数按 1–365 天配置。保存只更新策略，不会立即删除数据；清理任务按计划执行。
+            </a-alert>
+            <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="logCleanupDraft" auto-label-width>
+              <a-row :gutter="24">
+                <a-col v-for="field in logCleanupFields" :key="field.key" :span="isMobile ? 24 : 12">
+                  <a-form-item :field="field.key" :label="field.label">
+                    <s-number-field
+                      :ref="instance => setLogCleanupField(field.key, instance)"
+                      v-model="logCleanupDraft[field.key]"
+                      :min="1"
+                      :max="365"
+                      required
+                      placeholder="请输入 1–365 天"
+                      :disabled="sysConfigStore.loading"
+                    />
+                    <template #extra>
+                      <div>{{ field.hint }}</div>
+                    </template>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-form>
+          </a-card>
+        </a-tab-pane>
       </a-tabs>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, reactive } from "vue";
+import { useRoute } from "vue-router";
 import { useSysConfigStore } from "@/store/modules/sys-config";
+import { defaultLogCleanupConfig } from "@/api/sysconfig";
+import type { LogCleanupDraft, LogCleanupUpdateConfig, RegularConfigRequestData } from "@/api/sysconfig";
 import ImageUpload from "@/components/upload/image-upload.vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
+import { buildConfigUpdatePayload, isLogCleanupConfigValid, logCleanupPageRoute } from "./sysconfigState";
 const { isMobile } = useDevicesSize();
+const route = useRoute();
 const layoutMode = computed(() => {
   let info = {
     mobile: {
@@ -239,7 +278,11 @@ const layoutMode = computed(() => {
   return isMobile.value ? info.mobile : info.desktop;
 });
 
-const activeTab = ref("server");
+const activeTab = ref(
+  typeof route.query.tab === "string" && route.query.tab === logCleanupPageRoute.query.tab
+    ? logCleanupPageRoute.query.tab
+    : "server"
+);
 
 // 使用系统配置 store
 const sysConfigStore = useSysConfigStore();
@@ -250,6 +293,15 @@ const configData = ref({
   captcha: sysConfigStore.captchaConfig,
   safe: sysConfigStore.safeConfig
 });
+const logCleanupDraft = reactive<LogCleanupDraft>({ ...defaultLogCleanupConfig });
+const logCleanupFields: Array<{ key: keyof LogCleanupUpdateConfig; label: string; hint: string }> = [
+  { key: "sipRetentionDays", label: "SIP 日志保留天数", hint: "SIP 信令和已结束诊断数据的保留期。" },
+  { key: "operationRetentionDays", label: "操作日志保留天数", hint: "包含已软删除的过期操作日志。" },
+  { key: "loginRetentionDays", label: "登录日志保留天数", hint: "登录审计记录的保留期。" },
+  { key: "jobRetentionDays", label: "定时任务日志保留天数", hint: "只清理执行结果，不删除任务定义。" },
+  { key: "playbackRetentionDays", label: "播放日志保留天数", hint: "活动中的播放记录会继续保留。" },
+  { key: "schedulerRetentionDays", label: "调度日志保留天数", hint: "媒体节点选择记录的保留期。" }
+];
 type NumberFieldInstance = InstanceType<typeof SNumberField>;
 const captchaLengthField = ref<NumberFieldInstance | null>(null);
 const loginLockThresholdField = ref<NumberFieldInstance | null>(null);
@@ -263,6 +315,12 @@ const numberFields = computed(() => [
   loginLockDurationField,
   minPasswordLengthField
 ]);
+const logCleanupNumberFields = new Map<keyof LogCleanupUpdateConfig, NumberFieldInstance>();
+
+function setLogCleanupField(key: keyof LogCleanupUpdateConfig, instance: unknown) {
+  if (instance) logCleanupNumberFields.set(key, instance as NumberFieldInstance);
+  else logCleanupNumberFields.delete(key);
+}
 
 // 获取配置信息
 const getConfig = async () => {
@@ -274,6 +332,7 @@ const getConfig = async () => {
       captcha: sysConfigStore.captchaConfig,
       safe: sysConfigStore.safeConfig
     };
+    Object.assign(logCleanupDraft, sysConfigStore.logCleanupConfig);
   } catch (error) {
     console.error("获取配置失败:", error);
     arcoMessage("error", "获取配置失败");
@@ -282,17 +341,30 @@ const getConfig = async () => {
 
 // 保存配置
 const onSave = async () => {
-  const numberFieldError = numberFields.value.map(field => field.value?.error || "").find(Boolean);
+  const numberFieldError =
+    activeTab.value === "logCleanup"
+      ? [...logCleanupNumberFields.values()].map(field => field.error || "").find(Boolean)
+      : numberFields.value.map(field => field.value?.error || "").find(Boolean);
   if (numberFieldError) {
     arcoMessage("error", numberFieldError);
     return;
   }
+  if (activeTab.value === "logCleanup" && !isLogCleanupConfigValid(logCleanupDraft)) {
+    arcoMessage("error", "请输入 1-365 之间的整数");
+    return;
+  }
   try {
-    await sysConfigStore.updateConfig(configData.value);
+    const payload = buildConfigUpdatePayload(activeTab.value, configData.value as RegularConfigRequestData, logCleanupDraft);
+    const response = await sysConfigStore.updateConfig(payload);
+    if (activeTab.value === "logCleanup") {
+      const savedConfig = response?.data?.logCleanup;
+      if (savedConfig) Object.assign(logCleanupDraft, savedConfig);
+      else Object.assign(logCleanupDraft, sysConfigStore.logCleanupConfig);
+    }
     arcoMessage("success", "保存成功");
   } catch (error) {
     console.error("保存配置失败:", error);
-    arcoMessage("error", "保存配置失败");
+    arcoMessage("error", (error as Error)?.message || "保存配置失败");
   }
 };
 

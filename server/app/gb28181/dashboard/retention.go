@@ -60,10 +60,6 @@ func (service *DashboardRetention) Prune(ctx context.Context) (RetentionResult, 
 		if result.PlayLifecyclesStale, err = lifecycleStore.MarkStale(ctx, service.clock().Add(-PlayLifecycleStaleAfter)); err != nil {
 			return result, err
 		}
-		lifecycleCutoff := service.clock().Add(-PlayLifecycleEventRetention)
-		if result.PlayLifecycleEvents, err = service.deleteBatches(ctx, &gbmodels.GbPlayLifecycleEvent{}, "event_at < ?", lifecycleCutoff); err != nil {
-			return result, err
-		}
 	}
 	if result.SIPMinutes, err = service.deleteBatches(ctx, &gbmodels.GbSipMetricMinute{}, "bucket_start < ?", cutoff); err != nil {
 		return result, err
@@ -74,10 +70,7 @@ func (service *DashboardRetention) Prune(ctx context.Context) (RetentionResult, 
 	if result.SIPGaps, err = service.deleteBatches(ctx, &gbmodels.GbSipMetricGap{}, "ended_at < ?", cutoff); err != nil {
 		return result, err
 	}
-	result.PlayAttempts, err = service.deleteBatches(ctx, &gbmodels.GbPlayAttempt{},
-		"(lifecycle_state IN ? OR outcome IN ?) AND finished_at IS NOT NULL AND finished_at < ?",
-		[]string{"completed", "failed", "stale_in_progress"}, []string{PlayOutcomeSuccess, PlayOutcomeFailure}, cutoff)
-	return result, err
+	return result, nil
 }
 
 func (service *DashboardRetention) deleteBatches(ctx context.Context, model any, condition string, args ...any) (int64, error) {

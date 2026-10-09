@@ -12,6 +12,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/logcleanup"
 )
 
 const (
@@ -180,27 +181,31 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	}
 	sc.playbackSettingsMu.Lock()
 	defer sc.playbackSettingsMu.Unlock()
+	unlock := logcleanup.LockConfig()
 	previous := sc.currentServiceConfig()
 	applyServiceConfig(request)
 	if err := app.ConfigYml.SaveConfig(); err != nil {
 		applyServiceConfig(previous)
+		unlock()
 		sc.Fail(c, "保存国标服务配置失败", err, http.StatusInternalServerError)
 		return
 	}
+	if sc.playAuthTTLUpdater != nil && previous.PlayAuth.TTLSeconds != request.PlayAuth.TTLSeconds {
+		if err := sc.playAuthTTLUpdater(time.Duration(request.PlayAuth.TTLSeconds) * time.Second); err != nil {
+			applyServiceConfig(previous)
+			_ = app.ConfigYml.SaveConfig()
+			unlock()
+			sc.Fail(c, "国标服务配置已保存，但播放鉴权有效期未应用", err, http.StatusInternalServerError)
+			return
+		}
+	}
+	unlock()
 	if previous.SIPLog.Enabled != request.SIPLog.Enabled || previous.SIPLog.RetentionDays != request.SIPLog.RetentionDays {
 		if sc.reload != nil {
 			if err := sc.reload(); err != nil {
 				request.SIPLog.Applied = false
 				request.SIPLog.ApplyError = err.Error()
 			}
-		}
-	}
-	if sc.playAuthTTLUpdater != nil && previous.PlayAuth.TTLSeconds != request.PlayAuth.TTLSeconds {
-		if err := sc.playAuthTTLUpdater(time.Duration(request.PlayAuth.TTLSeconds) * time.Second); err != nil {
-			applyServiceConfig(previous)
-			_ = app.ConfigYml.SaveConfig()
-			sc.Fail(c, "国标服务配置已保存，但播放鉴权有效期未应用", err, http.StatusInternalServerError)
-			return
 		}
 	}
 	sc.SuccessWithMessage(c, "国标服务配置已更新", request)
