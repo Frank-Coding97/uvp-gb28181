@@ -2,7 +2,7 @@
 import { computed, watch } from "vue";
 import type { SipNetworkAddress, SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
-import { validateOptionalHookIp, validateOptionalStreamIp } from "../mediaNetworkAddress";
+import { validateOptionalHookIp, validateOptionalStreamIp, validateRequiredSdpIp } from "../mediaNetworkAddress";
 
 const props = defineProps<{ form: SipSetupForm; network: SipNetworkInterfaces | null }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
@@ -58,10 +58,15 @@ function onAdvertiseInputChange(value: string) {
 // 选中当前 nicIp: 局域网 listen 是权威(advertise 从属);公网 listen 是权威.
 const currentNic = computed(() => props.form.listenIp);
 const hookIpError = computed(() => validateOptionalHookIp(props.form.hookIp));
+const sdpIpError = computed(() => validateRequiredSdpIp(props.form.sdpIp));
 const streamIpError = computed(() => validateOptionalStreamIp(props.form.streamIp));
 
 function updateHookIp(value: string) {
   emit("update", { hookIp: value });
+}
+
+function updateSdpIp(value: string) {
+  emit("update", { sdpIp: value });
 }
 
 function updateStreamIp(value: string) {
@@ -130,7 +135,23 @@ watch(
               placeholder="具体 IPv4 或 IPv6"
               @update:model-value="updateHookIp"
             />
-            <div class="form-tip">ZLMediaKit 回调平台时使用的地址；媒体节点可单独覆盖。</div>
+            <template #extra>ZLMediaKit 回调平台时使用的地址；媒体节点可单独覆盖。</template>
+          </a-form-item>
+
+          <a-form-item
+            label="SDP IP"
+            required
+            :validate-status="sdpIpError ? 'error' : undefined"
+            :help="sdpIpError || '设备按此地址把视频流推回平台，必须是设备能访问到的地址。'"
+          >
+            <a-input
+              :model-value="form.sdpIp"
+              allow-clear
+              :max-length="253"
+              placeholder="设备可访问的 IP 或域名"
+              @update:model-value="updateSdpIp"
+            />
+            <template #extra>写入点播 INVITE 的 SDP 地址（设备据此回推 RTP 流）；不能填 127.0.0.1，媒体节点可单独覆盖。</template>
           </a-form-item>
 
           <a-form-item
@@ -142,10 +163,10 @@ watch(
               :model-value="form.streamIp"
               allow-clear
               :max-length="253"
-              placeholder="IP 地址或域名"
+              placeholder="播放地址（可留空）"
               @update:model-value="updateStreamIp"
             />
-            <div class="form-tip">浏览器播放媒体时使用的主机名，不含协议、端口或路径；媒体节点可单独覆盖。</div>
+            <template #extra>浏览器播放媒体时使用的主机名，不含协议、端口或路径；媒体节点可单独覆盖。</template>
           </a-form-item>
         </div>
       </section>
@@ -180,21 +201,7 @@ watch(
 
 .media-address-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.form-tip {
-  margin-top: 5px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--uvp-text-tertiary);
-}
-
-@media (width <= 560px) {
-  .media-address-grid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 </style>

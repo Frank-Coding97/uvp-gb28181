@@ -434,7 +434,13 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	mediaIP := strings.TrimSpace(platform.MediaAdvertiseIP)
 	if mediaIP == "" {
-		mediaIP = mediaNode.EffectiveReceiveHost()
+		mediaIP = mediaNode.EffectiveSDPIP()
+	}
+	if mediaIP == "" {
+		// 无可用 SDP 地址时宁可明确失败,也不下发 c=IN IP4 127.0.0.1 让上级
+		// 把 RTP 推向平台自己(表征是级联通了但没有画面)。
+		fail(503, fmt.Errorf("no usable SDP address for media node %d", mediaNode.ID))
+		return
 	}
 	answer, err := sdp.BuildCascadeVideoAnswer(offer, platform.LocalDeviceID, mediaIP, sender.LocalPort)
 	if err != nil {

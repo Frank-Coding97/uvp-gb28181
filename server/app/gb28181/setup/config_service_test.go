@@ -22,6 +22,7 @@ func validSaveRequest(password *string) SaveSIPConfigRequest {
 		DeploymentMode: DeploymentLAN,
 		ListenIP:       "0.0.0.0",
 		AdvertiseIP:    "192.168.1.10",
+		SDPIP:          "192.168.1.10",
 		Port:           5061,
 		Domain:         "3402000000",
 		ServerID:       "34020000002000000001",

@@ -22,7 +22,7 @@ func TestSetupController_MediaNetworkDefaultsReachReloadAndStatus(t *testing.T) 
 		return nil
 	}
 	router := newSetupControllerRouter(NewSetupController(db, gbsetup.NewRuntimeStatus(), nil, reload))
-	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"K9#nT2xQ","hookIp":"192.168.1.20","streamIp":"stream.example.com"}`
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"","port":5061,"domain":"3402000000","serverId":"34020000002000000001","sdpIp":"192.168.1.10","password":"K9#nT2xQ","hookIp":"192.168.1.20","streamIp":"stream.example.com"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())

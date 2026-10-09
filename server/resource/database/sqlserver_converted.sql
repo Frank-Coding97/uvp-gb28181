@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 5cec5cc55af5f3345e2e00e8aa03241f5066e5070af13e37c66d24ad55379e9b
+-- Schema fingerprint: 8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -1832,6 +1832,7 @@ BEGIN
     [created_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     [updated_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     [hook_ip] NVARCHAR(45) NOT NULL DEFAULT N'',
+    [sdp_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     [stream_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     PRIMARY KEY ([id]),
     CONSTRAINT [chk_gb_sip_config_deployment_mode] CHECK (([deployment_mode] in ('lan','public'))),
@@ -2220,6 +2221,7 @@ BEGIN
     [name] NVARCHAR(64) NOT NULL DEFAULT N'',
     [host] NVARCHAR(64) NOT NULL DEFAULT N'',
     [receive_host] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [sdp_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     [playback_host] NVARCHAR(255) NOT NULL DEFAULT N'',
     [api_port] INT NOT NULL DEFAULT 18080,
     [api_secret] NVARCHAR(128) NOT NULL DEFAULT N'',
@@ -3558,8 +3560,17 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (637, N'取消录像缓存下载', N'/api/gb28181/record-cache/downloads/:downloadId', N'DELETE', N'录像缓存', N'2026-10-05 11:33:55.000000', N'2026-10-05 11:33:55.000000', NULL, 1),
 (638, N'收藏设备录像缓存任务', N'/api/gb28181/record-cache/tasks/:taskId/favorite', N'POST', N'录像缓存', N'2026-10-05 11:52:03.000000', N'2026-10-05 11:52:03.000000', NULL, 1),
 (639, N'删除抓拍图像', N'/api/gb28181/device-mgmt/snapshots', N'DELETE', N'图像库', N'2026-10-07 10:30:08.000000', N'2026-10-07 10:30:08.000000', NULL, 1),
-(640, NULL, N'/api/gb28181/sip/service-config', N'GET', NULL, NULL, NULL, NULL, NULL),
-(641, NULL, N'/api/gb28181/sip/service-config', N'PUT', NULL, NULL, NULL, NULL, NULL);
+(640, N'查询设备目录刷新进度', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'设备管理', NULL, NULL, NULL, 1),
+(641, N'更新固件仓库状态', N'/api/gb28181/device-mgmt/firmware-repository/:id/status', N'PATCH', N'设备管理', NULL, NULL, NULL, 1),
+(642, N'网络会话列表（运行时监控）', N'/api/gb28181/zlm/sessions/network', N'GET', N'流媒体节点', NULL, NULL, NULL, 1),
+(643, N'观看会话列表（运行时监控）', N'/api/gb28181/zlm/sessions/viewers', N'GET', N'流媒体节点', NULL, NULL, NULL, 1),
+(644, N'新增固件仓库', N'/api/gb28181/device-mgmt/firmware-repository', N'POST', N'设备管理', NULL, NULL, NULL, 1),
+(645, N'固件仓库列表', N'/api/gb28181/device-mgmt/firmware-repository', N'GET', N'设备管理', NULL, NULL, NULL, 1),
+(646, N'删除固件仓库', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'DELETE', N'设备管理', NULL, NULL, NULL, 1),
+(647, N'固件仓库详情', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'GET', N'设备管理', NULL, NULL, NULL, 1),
+(648, N'获取固件下载链接', N'/api/gb28181/device-mgmt/firmware-repository/:id/download-link', N'POST', N'设备管理', NULL, NULL, NULL, 1),
+(649, N'查询国标服务配置', N'/api/gb28181/sip/service-config', N'GET', N'国标平台', NULL, NULL, NULL, 1),
+(650, N'保存国标服务配置', N'/api/gb28181/sip/service-config', N'PUT', N'国标平台', NULL, NULL, NULL, 1);
 SET IDENTITY_INSERT [sys_api] OFF;
 SET IDENTITY_INSERT [sys_casbin_rule] ON;
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
@@ -4048,24 +4059,28 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (10272, N'p', N'role_1', N'/api/gb28181/record-cache/downloads/:downloadId', N'GET', N'*', N'', N''),
 (10273, N'p', N'role_1', N'/api/gb28181/record-cache/downloads/:downloadId', N'DELETE', N'*', N'', N''),
 (10274, N'p', N'role_1', N'/api/gb28181/record-cache/tasks/:taskId/favorite', N'POST', N'*', N'', N''),
-(10275, N'p', N'role_1', N'/api/sysParam/list', N'GET', N'*', N'', N''),
-(10276, N'p', N'role_1', N'/api/sysParam/:id', N'GET', N'*', N'', N''),
-(10277, N'p', N'role_1', N'/api/sysParam/getByCode/:code', N'GET', N'*', N'', N''),
-(10278, N'p', N'role_1', N'/api/sysParam/add', N'POST', N'*', N'', N''),
-(10279, N'p', N'role_1', N'/api/sysParam/edit', N'PUT', N'*', N'', N''),
-(10280, N'p', N'role_1', N'/api/sysParam/delete', N'DELETE', N'*', N'', N''),
-(10281, N'p', N'role_1', N'/api/sysRole/list', N'GET', N'*', N'', N''),
-(10282, N'p', N'role_1', N'/api/sysRole/:id', N'GET', N'*', N'', N''),
-(10283, N'p', N'role_1', N'/api/sysMenu/:id', N'GET', N'*', N'', N''),
-(10284, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/disable', N'POST', N'*', N'', N''),
-(10285, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'GET', N'*', N'', N''),
-(10286, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'POST', N'*', N'', N''),
-(10287, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'GET', N'*', N'', N''),
-(10288, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'DELETE', N'*', N'', N''),
-(10289, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id/download-link', N'POST', N'*', N'', N''),
-(10290, N'p', N'role_1', N'/api/gb28181/device-mgmt/snapshots', N'DELETE', N'*', N'', N''),
-(10291, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'GET', N'*', N'', N''),
-(10292, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'PUT', N'*', N'', N'');
+(10275, N'p', N'role_1', N'/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', N'GET', N'*', N'', N''),
+(10276, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id/status', N'PATCH', N'*', N'', N''),
+(10277, N'p', N'role_1', N'/api/gb28181/zlm/sessions/network', N'GET', N'*', N'', N''),
+(10278, N'p', N'role_1', N'/api/gb28181/zlm/sessions/viewers', N'GET', N'*', N'', N''),
+(10279, N'p', N'role_1', N'/api/sysMenu/:id', N'GET', N'*', N'', N''),
+(10280, N'p', N'role_1', N'/api/sysRole/list', N'GET', N'*', N'', N''),
+(10281, N'p', N'role_1', N'/api/sysRole/:id', N'GET', N'*', N'', N''),
+(10282, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/disable', N'POST', N'*', N'', N''),
+(10283, N'p', N'role_1', N'/api/sysParam/delete', N'DELETE', N'*', N'', N''),
+(10284, N'p', N'role_1', N'/api/sysParam/add', N'POST', N'*', N'', N''),
+(10285, N'p', N'role_1', N'/api/sysParam/edit', N'PUT', N'*', N'', N''),
+(10286, N'p', N'role_1', N'/api/sysParam/list', N'GET', N'*', N'', N''),
+(10287, N'p', N'role_1', N'/api/sysParam/:id', N'GET', N'*', N'', N''),
+(10288, N'p', N'role_1', N'/api/sysParam/getByCode/:code', N'GET', N'*', N'', N''),
+(10289, N'p', N'role_1', N'/api/gb28181/device-mgmt/snapshots', N'DELETE', N'*', N'', N''),
+(10290, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'POST', N'*', N'', N''),
+(10291, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository', N'GET', N'*', N'', N''),
+(10292, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'DELETE', N'*', N'', N''),
+(10293, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id', N'GET', N'*', N'', N''),
+(10294, N'p', N'role_1', N'/api/gb28181/device-mgmt/firmware-repository/:id/download-link', N'POST', N'*', N'', N''),
+(10295, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'GET', N'*', N'', N''),
+(10296, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'PUT', N'*', N'', N'');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 INSERT INTO [sys_civil_code] ([code], [name], [short_name], [parent_code], [level], [pinyin], [created_at], [updated_at]) VALUES
 (N'110000', N'北京市', N'北京市', N'', 1, N'', N'2026-07-18 17:27:38.000000', N'2026-07-18 17:27:38.000000'),
@@ -8618,6 +8633,6 @@ INSERT INTO [sys_role_menu] ([role_id], [menu_id]) VALUES
 INSERT INTO [sys_user_role] ([user_id], [role_id]) VALUES
 (1, 1);
 SET IDENTITY_INSERT [sys_users] ON;
-INSERT INTO [sys_users] ([id], [username], [password], [must_change_password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
-(1, N'admin', N'$2a$10$JSTDoY/H/SpiqQs2syahmORWZXJAS2oKMaWimSXK7da7apRs5CDJa', 1, N'', 1, 1, N'', N'', N'系统管理员', N'/public/uploads/seed/admin.png', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-08-16 10:56:02.000000', NULL, 0);
+INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by], [must_change_password]) VALUES
+(1, N'admin', N'$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', N'', 1, 1, N'', N'', N'系统管理员', N'', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-08-16 10:56:02.000000', NULL, 0, 1);
 SET IDENTITY_INSERT [sys_users] OFF;

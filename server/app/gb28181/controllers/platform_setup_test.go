@@ -33,7 +33,7 @@ func TestPlatformController_UsesPersistedAdvertiseAddress(t *testing.T) {
 	password := "Sec12345Aa!!"
 	_, err := gbsetup.NewSIPConfigService(db).Save(t.Context(), gbsetup.SaveSIPConfigRequest{
 		DeploymentMode: gbsetup.DeploymentLAN, ListenIP: "0.0.0.0", AdvertiseIP: "192.168.1.10",
-		Port: 5061, Domain: "3402000000", ServerID: "34020000002000000001", Password: &password,
+		SDPIP: "192.168.1.10", Port: 5061, Domain: "3402000000", ServerID: "34020000002000000001", Password: &password,
 	})
 	require.NoError(t, err)
 	runtime := gbsetup.NewRuntimeStatus()

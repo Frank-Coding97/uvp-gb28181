@@ -281,6 +281,19 @@ async function handleSubmit() {
         <div class="form-tip">留空使用平台默认 Hook IP；平台默认未配置时沿用原地址策略。</div>
       </a-form-item>
 
+      <a-form-item label="SDP IP 覆盖" :validate-status="errors.sdpIp ? 'error' : undefined" :help="errors.sdpIp">
+        <a-input
+          v-model="form.sdpIp"
+          allow-clear
+          :max-length="253"
+          placeholder="设备可访问的 IP 或域名"
+          @blur="validateField('sdpIp')"
+        />
+        <div class="form-tip">
+          该节点下发 SDP 时通告的地址（设备据此回推 RTP 流）；留空使用平台默认 SDP IP，不能填 127.0.0.1。
+        </div>
+      </a-form-item>
+
       <a-form-item
         label="Stream IP 覆盖"
         :validate-status="errors.playbackHost ? 'error' : undefined"

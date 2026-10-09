@@ -80,6 +80,14 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-08-meta-node-hook-ip-postgresql.sql":             {table: "meta_node", column: "hook_ip"},
 	"2026-10-08-meta-node-hook-ip-sqlserver.sql":              {table: "meta_node", column: "hook_ip"},
 	"2026-10-08-meta-node-hook-ip-sqlite.sql":                 {table: "meta_node", column: "hook_ip"},
+	"2026-10-09-sip-platform-sdp-ip.sql":                      {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-postgresql.sql":           {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-sqlserver.sql":            {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-sqlite.sql":               {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip.sql":                         {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-postgresql.sql":              {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-sqlserver.sql":               {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-sqlite.sql":                  {table: "meta_node", column: "sdp_ip"},
 }
 
 // needsBaselineColumnUpgrade applies only to additive column migrations whose

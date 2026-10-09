@@ -808,7 +808,13 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 			}
 		}
 		client = s.clientForNode(selectedNode)
-		recvHost = selectedNode.EffectiveReceiveHost()
+		recvHost = selectedNode.EffectiveSDPIP()
+		if recvHost == "" {
+			// 节点没有任何可用的 SDP 地址。这里必须显式失败:继续走会把空地址
+			// 写进 SDP 的 c= 行,设备侧要么推向平台自己(单机 127.0.0.1),
+			// 要么解析失败 —— 两者都表现为"信令成功但没有画面"。
+			return nil, fmt.Errorf("媒体节点 %d 未配置 SDP 地址,设备无法回推RTP 流", selectedNode.ID)
+		}
 		rtpFallback = selectedNode.RTPPortStart // 兜底端口
 		pickedNodeID = selectedNode.ID
 		pickedNode = selectedNode
@@ -823,7 +829,11 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	} else {
 		// deprecated 单节点路径
 		client = s.zlm
-		recvHost = s.cfg.ZLM.EffectiveReceiveHost()
+		recvHost = s.cfg.ZLM.EffectiveSDPIP()
+		if recvHost == "" {
+			// 与多节点路径同理:没有可用 SDP 地址就明确失败,不下发空地址。
+			return nil, fmt.Errorf("未配置 SDP 地址,设备无法回推RTP 流")
+		}
 		rtpFallback = s.cfg.ZLM.RTPPort
 	}
 	app.Log(playCtx).Named("play").Info("点播媒体节点已确定", zap.String("event", "gb28181.play.node_selected"), zap.String("stage", "node_selection"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID))

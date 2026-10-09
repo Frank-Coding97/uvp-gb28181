@@ -230,7 +230,7 @@ func fingerprintNodeImpact(n *node.Node, action NodeImpactAction, impact NodeImp
 	secretHash := sha256.Sum256([]byte(n.APISecret))
 	values := []string{
 		strconv.FormatInt(n.ID, 10), string(action), n.Name, n.Host, n.HookIP,
-		strconv.Itoa(n.APIPort), n.ReceiveHost, n.PlaybackHost,
+		strconv.Itoa(n.APIPort), n.ReceiveHost, n.SDPIP, n.PlaybackHost,
 		n.MediaServerUUID, strconv.Itoa(n.Weight), string(n.State), strconv.FormatBool(n.IsEnabled()),
 		strconv.Itoa(n.RTPPortStart), strconv.Itoa(n.RTPPortEnd),
 		n.UpdatedAt.UTC().Format(time.RFC3339Nano), hex.EncodeToString(secretHash[:]),

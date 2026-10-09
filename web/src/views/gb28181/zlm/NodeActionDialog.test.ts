@@ -28,6 +28,7 @@ const node = {
   name: "zlm-a",
   host: "10.0.0.7",
   receiveHost: "",
+  sdpIp: "",
   playbackHost: "",
   apiPort: 18080,
   mediaServerUUID: "uuid-a",

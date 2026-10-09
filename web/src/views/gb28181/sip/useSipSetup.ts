@@ -18,6 +18,7 @@ export interface SipSetupForm {
   advertiseIp: string;
   advertiseIpInferred: boolean;
   hookIp: string;
+  sdpIp: string;
   streamIp: string;
   port: number;
   domain: string;
@@ -55,6 +56,7 @@ function initialForm(): SipSetupForm {
     advertiseIp: "",
     advertiseIpInferred: false,
     hookIp: "",
+    sdpIp: "",
     streamIp: "",
     port: 5061,
     domain: "",
@@ -86,6 +88,7 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
       advertiseIpInferred:
         next.config.deploymentMode === "lan" && next.config.listenIp === "0.0.0.0" ? false : next.config.advertiseIpInferred,
       hookIp: next.config.hookIp ?? "",
+      sdpIp: next.config.sdpIp ?? "",
       streamIp: next.config.streamIp ?? "",
       port: next.config.port,
       domain: next.config.domain,
@@ -126,6 +129,7 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
       advertiseIp: wildcardLAN ? "" : form.advertiseIp,
       advertiseIpInferred: wildcardLAN ? false : form.advertiseIpInferred,
       hookIp: form.hookIp.trim(),
+      sdpIp: form.sdpIp.trim(),
       streamIp: form.streamIp.trim(),
       port: form.port,
       domain: form.domain,

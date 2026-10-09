@@ -1823,6 +1823,7 @@ export interface SipConfigSummary {
   advertiseIp: string;
   advertiseIpInferred: boolean;
   hookIp?: string;
+  sdpIp?: string;
   streamIp?: string;
   port: number;
   domain: string;
@@ -1864,6 +1865,7 @@ export interface SaveSipConfigPayload {
   advertiseIp: string;
   advertiseIpInferred: boolean;
   hookIp?: string;
+  sdpIp?: string;
   streamIp?: string;
   port: number;
   domain: string;

@@ -72,6 +72,11 @@ func MigrateYAMLToDB(ctx context.Context, db *gorm.DB, yaml YAMLSIPSource) (bool
 	if candidate.AdvertiseIP == "" && candidate.ListenIP != "" && candidate.ListenIP != wildcardIPv4 {
 		candidate.AdvertiseIP = candidate.ListenIP
 	}
+	// SDP IP 是必填项,但 legacy YAML 段里没有这个键 —— 依次从 ZLM 的
+	// sdpip / receivehost / playbackhost 推导。推导不出可用值时
+	// ValidateSIPConfigRequest 会拒绝,于是不 seed、用户走引导页补填,
+	// 而不是把一个 127.0.0.1 静默固化进库(那会让点播永远没有画面)。
+	candidate.SDPIP = legacySDPIP(yaml)
 	pw := yaml.GetString("gb28181.sip.password")
 	candidate.Password = &pw
 
@@ -88,10 +93,24 @@ func MigrateYAMLToDB(ctx context.Context, db *gorm.DB, yaml YAMLSIPSource) (bool
 		Port:           candidate.Port,
 		Domain:         candidate.Domain,
 		ServerID:       candidate.ServerID,
+		SDPIP:          candidate.SDPIP,
 		Password:       pw,
 	}
 	if err := NewSIPConfigRepository(db).Save(ctx, &row); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// legacySDPIP 从 legacy YAML 的 gb28181.zlm 段推导 SDP 地址。
+//
+// 刻意不读 zlm.host:那是 ZLM 的 API 地址,单机部署就是 127.0.0.1,
+// 推导它等于把「设备推流给平台自己」写死进库。
+func legacySDPIP(yaml YAMLSIPSource) string {
+	for _, key := range []string{"gb28181.zlm.sdpip", "gb28181.zlm.receivehost", "gb28181.zlm.playbackhost"} {
+		if host := strings.TrimSpace(yaml.GetString(key)); host != "" {
+			return host
+		}
+	}
+	return ""
 }

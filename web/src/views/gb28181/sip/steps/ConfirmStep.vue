@@ -199,7 +199,7 @@ const mediaFields = computed(() => [
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
-  background: linear-gradient(120deg, var(--uvp-brand-soft, #e8f2ff) 0%, #ffffff 62%);
+  background: linear-gradient(120deg, var(--uvp-brand-soft, #e8f2ff) 0%, var(--uvp-panel-bg, #ffffff) 62%);
   border-color: rgb(37 99 235 / 18%);
 }
 

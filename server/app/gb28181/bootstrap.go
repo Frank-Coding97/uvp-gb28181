@@ -488,6 +488,9 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 			tuning.HookIP = row.HookIP
 			tuning.StreamIP = platformStreamHost(row.StreamIP, cfg.ZLM.PlaybackHost)
 			zlmRegistry.SetPlatformPlaybackHost(tuning.StreamIP)
+			// SDP 地址是设备回推RTP 的目标,与播放地址是两个独立旋钮
+			// (NAT / 端口映射场景下两者常常不同)。
+			zlmRegistry.SetPlatformSDPIP(strings.TrimSpace(row.SDPIP))
 		} else if err != nil {
 			app.ZapLog.Debug("读取平台媒体网络默认值失败,沿用 YAML 配置", zap.String("event", "zlm.platform_media_defaults_load_failed"), zap.Error(err))
 		}
@@ -696,11 +699,14 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 		Password:         row.Password,
 		XGBVersion:       base.SIP.XGBVersion,
 	}
-	// Deprecated single-node playback paths still read cfg.ZLM.PlaybackHost;
-	// carry the persisted platform default into that runtime too. Node-level
-	// PlaybackHost remains authoritative in the registry path.
+	// Deprecated single-node playback paths still read cfg.ZLM.PlaybackHost /
+	// SDPIP; carry the persisted platform defaults into that runtime too.
+	// Node-level PlaybackHost / SDPIP remain authoritative in the registry path.
 	if streamIP := strings.TrimSpace(row.StreamIP); streamIP != "" {
 		base.ZLM.PlaybackHost = streamIP
+	}
+	if sdpIP := strings.TrimSpace(row.SDPIP); sdpIP != "" {
+		base.ZLM.SDPIP = sdpIP
 	}
 	if len(base.SIP.Transport) == 0 {
 		base.SIP.Transport = []string{"udp", "tcp"}
@@ -1652,7 +1658,7 @@ func reloadZLMPlatformMediaDefaults() error {
 	streamHost := platformStreamHost(row.StreamIP, gbconfig.Load().ZLM.PlaybackHost)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, streamHost)
+	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, row.SDPIP, streamHost)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

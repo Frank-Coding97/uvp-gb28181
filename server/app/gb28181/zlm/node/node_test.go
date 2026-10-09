@@ -34,6 +34,53 @@ func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
 	require.Equal(t, "203.0.113.10", n.EffectiveReceiveHost())
 }
 
+// The SDP resolution order is the contract that keeps "signalling succeeds but
+// no picture" from happening: node sdp_ip → node receive_host → platform sdp_ip
+// → platform stream_ip. It must NEVER fall back to Host, because a single-host
+// deployment has Host == 127.0.0.1.
+func TestNode_EffectiveSDPIPResolutionOrder(t *testing.T) {
+	n := node.Node{Host: "127.0.0.1", PlatformSDPIP: "203.0.113.30", PlatformPlaybackHost: "198.51.100.9"}
+	require.Equal(t, "203.0.113.30", n.EffectiveSDPIP(), "platform sdp_ip wins over playback host")
+	require.True(t, n.HasUsableSDPIP())
+
+	n.SDPIP = "192.0.2.77"
+	require.Equal(t, "192.0.2.77", n.EffectiveSDPIP(), "node sdp_ip is authoritative")
+
+	n.SDPIP = ""
+	n.ReceiveHost = "192.0.2.88"
+	require.Equal(t, "192.0.2.88", n.EffectiveSDPIP(), "legacy receive_host still honoured")
+
+	n.ReceiveHost = "  "
+	require.Equal(t, "203.0.113.30", n.EffectiveSDPIP(), "blank receive_host must fall through")
+
+	n.PlatformSDPIP = ""
+	require.Equal(t, "198.51.100.9", n.EffectiveSDPIP(), "platform stream_ip is the last resort")
+}
+
+// 节点播放地址是运维显式填的对外可达地址，可以兜底（wvp 同样用 ip 兜底 sdpIp）；
+// 但 ZLM API host 是系统推导的，绝不能当答案。
+func TestNode_EffectiveSDPIPFallsBackToNodePlaybackHostOnly(t *testing.T) {
+	n := node.Node{Host: "127.0.0.1", PlaybackHost: "192.168.10.222"}
+	require.Equal(t, "192.168.10.222", n.EffectiveSDPIP())
+
+	// 只有 API host 时必须交白卷，让调用方显式失败。
+	bare := node.Node{Host: "192.168.10.222"}
+	require.Empty(t, bare.EffectiveSDPIP())
+	require.False(t, bare.HasUsableSDPIP())
+}
+
+// With nothing configured there is no safe answer: EffectiveSDPIP returns empty
+// and the caller must fail loudly instead of emitting c=IN IP4 127.0.0.1.
+func TestNode_EffectiveSDPIPNeverFallsBackToAPIHost(t *testing.T) {
+	n := node.Node{Host: "127.0.0.1"}
+	require.Empty(t, n.EffectiveSDPIP())
+	require.False(t, n.HasUsableSDPIP())
+
+	n = node.Node{Host: "10.0.0.5"}
+	require.Empty(t, n.EffectiveSDPIP(), "a routable API host is still not a device-reachable SDP address")
+	require.False(t, n.HasUsableSDPIP())
+}
+
 func TestNode_IsActive(t *testing.T) {
 	cases := []struct {
 		state  node.State

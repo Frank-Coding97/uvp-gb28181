@@ -70,6 +70,7 @@ type MediaTuning struct {
 	HookHost                string
 	HookPort                int
 	HookIP                  string
+	SDPIP                   string
 	StreamIP                string
 	StreamNoneReaderTimeout int
 	RTPServerTimeout        int
@@ -82,6 +83,7 @@ type NodeDTO struct {
 	Name                string            `json:"name"`
 	Host                string            `json:"host"`
 	ReceiveHost         string            `json:"receiveHost"`
+	SDPIP               string            `json:"sdpIp"`
 	PlaybackHost        string            `json:"playbackHost"`
 	HookIP              string            `json:"hookIp"`
 	APIPort             int               `json:"apiPort"`
@@ -108,6 +110,7 @@ type CreateNodeReq struct {
 	Name         string            `json:"name"`
 	Host         string            `json:"host" binding:"required"`
 	ReceiveHost  string            `json:"receiveHost"`
+	SDPIP        string            `json:"sdpIp"`
 	PlaybackHost string            `json:"playbackHost"`
 	HookIP       string            `json:"hookIp"`
 	APIPort      int               `json:"apiPort" binding:"required"`
@@ -148,6 +151,7 @@ type UpdateNodeReq struct {
 	Name         *string           `json:"name,omitempty"`
 	Host         *string           `json:"host,omitempty"`
 	ReceiveHost  *string           `json:"receiveHost,omitempty"`
+	SDPIP        *string           `json:"sdpIp,omitempty"`
 	PlaybackHost *string           `json:"playbackHost,omitempty"`
 	HookIP       *string           `json:"hookIp,omitempty"`
 	APIPort      *int              `json:"apiPort,omitempty"`
@@ -219,6 +223,7 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		Name:                n.Name,
 		Host:                n.Host,
 		ReceiveHost:         n.ReceiveHost,
+		SDPIP:               n.SDPIP,
 		PlaybackHost:        n.PlaybackHost,
 		HookIP:              n.HookIP,
 		APIPort:             n.APIPort,
@@ -451,6 +456,7 @@ func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 		Name:            name,
 		Host:            req.Host,
 		ReceiveHost:     req.ReceiveHost,
+		SDPIP:           req.SDPIP,
 		PlaybackHost:    req.PlaybackHost,
 		HookIP:          strings.TrimSpace(req.HookIP),
 		APIPort:         req.APIPort,
@@ -540,6 +546,9 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	}
 	if req.Host != nil {
 		candidate.Host = *req.Host
+	}
+	if req.SDPIP != nil {
+		candidate.SDPIP = *req.SDPIP
 	}
 	if req.ReceiveHost != nil {
 		candidate.ReceiveHost = *req.ReceiveHost
@@ -645,14 +654,16 @@ func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResul
 
 // ReloadPlatformMediaDefaults updates platform-level media defaults and
 // converges all active nodes through the verified ZLM apply path. Node-level
-// HookIP/PlaybackHost overrides remain authoritative.
-func (s *NodeService) ReloadPlatformMediaDefaults(ctx context.Context, hookIP, streamIP string) error {
+// HookIP/SDPIP/PlaybackHost overrides remain authoritative.
+func (s *NodeService) ReloadPlatformMediaDefaults(ctx context.Context, hookIP, sdpIP, streamIP string) error {
 	s.tuningMu.Lock()
 	s.tuning.HookIP = strings.TrimSpace(hookIP)
+	s.tuning.SDPIP = strings.TrimSpace(sdpIP)
 	s.tuning.StreamIP = strings.TrimSpace(streamIP)
 	tuning := s.tuning
 	s.tuningMu.Unlock()
 	s.registry.SetPlatformPlaybackHost(tuning.StreamIP)
+	s.registry.SetPlatformSDPIP(tuning.SDPIP)
 	for _, current := range s.registry.ListActive() {
 		s.registry.SetAutoOnDemandReady(current.ID, false)
 	}

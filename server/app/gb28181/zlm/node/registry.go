@@ -51,6 +51,7 @@ type Registry struct {
 	uuids                map[string]int64      // mediaServerUUID -> ID(Hook 反查)
 	autoOnDemandReady    map[int64]bool        // 当前进程已写入并回读确认缺流 Hook
 	admissionBlocked     map[int64]bool        // 显式运维/恢复 gate,不改变普通 active 语义
+	platformSDPIP       string
 	platformPlaybackHost string
 	repo                 Repo
 }
@@ -418,8 +419,18 @@ func (r *Registry) SetPlatformPlaybackHost(host string) {
 }
 
 func (r *Registry) withRuntimeDefaults(n Node) Node {
+	n.PlatformSDPIP = r.platformSDPIP
 	n.PlatformPlaybackHost = r.platformPlaybackHost
 	return n
+}
+
+// SetPlatformSDPIP sets the platform-level SDP announcement address used when a
+// node declares no sdp_ip and no receive_host. It is intentionally kept out of
+// repository rows so changing it does not rewrite every node.
+func (r *Registry) SetPlatformSDPIP(host string) {
+	r.mu.Lock()
+	r.platformSDPIP = host
+	r.mu.Unlock()
 }
 
 // Get 按 ID 取节点(包含最新 Stats,内存优先)

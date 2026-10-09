@@ -24,6 +24,8 @@ type Node struct {
 	HookIP               string            // ZLM Hook 回调地址节点覆盖
 	ReceiveHost          string            // 设备收流地址,写入 SDP 的 c= 地址
 	PlaybackHost         string            // 播放访问地址,返回给浏览器/客户端
+	SDPIP                string            // SDP 通告地址,写入 SDP 的 c= 地址
+	PlatformSDPIP        string            // 平台默认 SDP 地址,仅运行时填充
 	PlatformPlaybackHost string            // 平台默认播放地址,仅运行时填充
 	APIPort              int               // ZLM API port
 	APISecret            string            // ZLM api.secret
@@ -44,13 +46,47 @@ type Node struct {
 	UpdatedAt           time.Time
 }
 
-// EffectiveReceiveHost 返回设备应向其发送 RTP 的地址。
-// 旧节点未配置时回退到 API host,保持升级兼容。
+// EffectiveSDPIP 返回写进 SDP c= 行、也就是告诉设备「把RTP 推到哪」 的地址。
+//
+// 兜底顺序：节点 sdp_ip → 节点 receive_host → 平台 sdp_ip → 平台播放地址 →
+// 节点播放地址。
+//
+// ⛔⛔ 与 EffectiveReceiveHost 的关键差异：**这里不兜底到 n.Host**。
+// Host 是 ZLM 的 API 地址,单机部署下是 127.0.0.1;写进 SDP 等于让设备把流
+// 推向平台自己 —— 表征是"信令全成功、10 秒后 play_timeout、ZLM 零 RTP 包",
+// 现场完全看不出是配置问题。宁可让上层显式拒绝这种节点参与调度。
+//
+// 播放地址可以当最后兜底,因为它是运维显式填的"对外可达地址"(wvp-GB28181-pro
+// 的 MediaServer 同样用 ip 兜底 sdpIp);而 Host 是系统推导出来的,不能当答案。
+func (n Node) EffectiveSDPIP() string {
+	if host := strings.TrimSpace(n.SDPIP); host != "" {
+		return host
+	}
+	if host := strings.TrimSpace(n.ReceiveHost); host != "" {
+		return host
+	}
+	if host := strings.TrimSpace(n.PlatformSDPIP); host != "" {
+		return host
+	}
+	if host := strings.TrimSpace(n.PlatformPlaybackHost); host != "" {
+		return host
+	}
+	return strings.TrimSpace(n.PlaybackHost)
+}
+
+// EffectiveReceiveHost 返回旧配置的收流地址兜底。
+//
+// 仅保留给依赖历史语义的调用方；新代码请用 EffectiveSDPIP。
 func (n Node) EffectiveReceiveHost() string {
 	if host := strings.TrimSpace(n.ReceiveHost); host != "" {
 		return host
 	}
 	return n.Host
+}
+
+// HasUsableSDPIP 报告该节点能否被安全地下发 SDP。
+func (n Node) HasUsableSDPIP() bool {
+	return strings.TrimSpace(n.EffectiveSDPIP()) != ""
 }
 
 // EffectivePlaybackHost 返回播放 URL 使用的地址。

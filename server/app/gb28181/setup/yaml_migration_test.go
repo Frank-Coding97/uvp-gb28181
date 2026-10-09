@@ -53,6 +53,8 @@ func completeYAMLSource() fakeYAMLSource {
 		"gb28181.sip.domain":         "3402000000",
 		"gb28181.sip.serverid":       "34020000002000000001",
 		"gb28181.sip.password":       "Sec12345Aa!!",
+		// legacy YAML 段里没有 sdp_ip，从 zlm 段推导。
+		"gb28181.zlm.receivehost": "192.168.1.20",
 	}
 }
 
@@ -66,7 +68,23 @@ func TestMigrateYAMLToDB_SeedsWhenLegacyDeviceExists(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, row)
 	require.Equal(t, "192.168.1.20", row.ListenIP)
+	require.Equal(t, "192.168.1.20", row.SDPIP, "SDP IP 应从 legacy ZLM 段推导并落库")
 	require.Equal(t, "Sec12345Aa!!", row.Password)
+}
+
+// legacy YAML 推导不出可用 SDP 地址时**不 seed**：宁可让用户走引导页补填，
+// 也不能把 127.0.0.1 固化进库 —— 那会让后续所有点播都「注册成功但没有画面」。
+func TestMigrateYAMLToDB_SkipsWhenNoUsableSDPIP(t *testing.T) {
+	db := newMigrationTestDB(t, true)
+	source := completeYAMLSource()
+	source["gb28181.zlm.receivehost"] = "127.0.0.1"
+	migrated, err := MigrateYAMLToDB(context.Background(), db, source)
+	require.NoError(t, err)
+	require.False(t, migrated, "回环 SDP 地址不得被静默固化")
+
+	row, err := NewSIPConfigRepository(db).Get(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, row)
 }
 
 func TestMigrateYAMLToDB_SkipsWhenNoLegacyDevice(t *testing.T) {

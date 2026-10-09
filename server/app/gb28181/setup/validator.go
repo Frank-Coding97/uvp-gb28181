@@ -32,6 +32,17 @@ func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool
 	if req.HookIP != "" && !validMediaIP(req.HookIP) {
 		fields["hookIp"] = "must be a concrete IP address"
 	}
+	// SDP IP是设备往回推RTP 的目标地址,必填且必须是设备可达的具体地址。
+	//
+	// ⛔⛔ 为什么这里必须拒绝回环/未指定地址,而不是像 stream_ip 那样"留空沿用现有策略":
+	// 该字段失效的表征是**信令全成功但没有画面** —— INVITE 被接受、SDP 正常协商、
+	// 10 秒后 play_timeout、ZLM 侧零 RTP 包。现场根本看不出是配置问题。
+	// 所以宁可保存时报错,也不让用户走到那一步。参考 wvp-GB28181-pro:
+	// 它的 sdp-ip 兜底是 `media.ip`(裸机 127.0.0.1 / Docker 容器名),
+	// 两种部署下都不可用 —— 差别只是"填了才对",填错的表现和我们一样静默。
+	if reason := sdpIPRejectionReason(req.SDPIP); reason != "" {
+		fields["sdpIp"] = reason
+	}
 	if req.StreamIP != "" && !validMediaHost(req.StreamIP) {
 		fields["streamIp"] = "must be an IP address or domain without scheme, port or path"
 	}
@@ -183,6 +194,41 @@ func isSequential(password string) bool {
 func validMediaIP(value string) bool {
 	ip := net.ParseIP(value)
 	return ip != nil && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+// sdpIPRejectionReason 返回空字符串表示 sdpIp 可用,否则返回给用户看的原因。
+//
+// 三类拒绝,分别对应三种"配了但设备推不上流"的形态:
+//
+//   - 空:字段必填,不填就没有可下发给设备的收流地址。
+//   - 回环 (127.0.0.0/8、::1)/ 未指定 (0.0.0.0、::):设备拿到后会把 RTP 推向
+//     平台自己或广播地址,必然收不到流。
+//   - 单一标签主机名(如 Docker 容器名 polaris-media):设备侧无法解析,
+//     连"推向自己"都做不到,直接丢弃。
+//
+// 刻意接受的是**多标签域名**(如 media.example.com):GB28181 允许 SDP 写域名,
+// WVP 也支持(`MediaConfig.getSdpIp` 会做 DNS 解析)。
+func sdpIPRejectionReason(value string) string {
+	host := strings.TrimSpace(value)
+	if host == "" {
+		return "is required:设备按此地址回推RTP 流,不填则无法点播"
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		switch {
+		case ip.IsUnspecified():
+			return "must not be 0.0.0.0 or :: —设备无法向该地址回推RTP 流"
+		case ip.IsLoopback():
+			return "must not be a loopback address such as 127.0.0.1 —设备会把RTP 推向平台自身,导致注册成功但没有画面"
+		}
+		return ""
+	}
+	if len(strings.Split(strings.TrimSuffix(host, "."), ".")) < 2 {
+		return "must be an IP address or a resolvable domain, not a single host label such as a container name —设备无法解析该名称"
+	}
+	if !validMediaHost(host) {
+		return "must be an IP address or domain without scheme, port or path"
+	}
+	return ""
 }
 
 func validMediaHost(value string) bool {

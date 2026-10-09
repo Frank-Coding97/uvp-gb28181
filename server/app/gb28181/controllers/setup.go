@@ -20,6 +20,7 @@ type UpdateSIPConfigRequest struct {
 	AdvertiseIP         string                 `json:"advertiseIp"`
 	AdvertiseIPInferred bool                   `json:"advertiseIpInferred"`
 	HookIP              string                 `json:"hookIp"`
+	SDPIP               string                 `json:"sdpIp"`
 	StreamIP            string                 `json:"streamIp"`
 	Port                int                    `json:"port"`
 	Domain              string                 `json:"domain"`
@@ -93,6 +94,7 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		AdvertiseIP:         request.AdvertiseIP,
 		AdvertiseIPInferred: request.AdvertiseIPInferred,
 		HookIP:              request.HookIP,
+		SDPIP:               request.SDPIP,
 		StreamIP:            request.StreamIP,
 		Port:                request.Port,
 		Domain:              request.Domain,

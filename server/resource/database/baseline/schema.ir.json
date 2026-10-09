@@ -6,7 +6,7 @@
     "live_table_count": 112,
     "included_table_count": 111,
     "excluded_table_count": 20,
-    "schema_fingerprint": "31da105ee0069a9205fe7153f6b37efa3c07b85d3176b0b0333f3abdbf83c360",
+    "schema_fingerprint": "8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -12981,6 +12981,15 @@
           "collation": "utf8mb4_0900_ai_ci"
         },
         {
+          "name": "sdp_ip",
+          "type": "varchar(253)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "平台默认 SDP 地址(设备回推RTP 目标)",
+          "collation": "utf8mb4_0900_ai_ci"
+        },
+        {
           "name": "stream_ip",
           "type": "varchar(253)",
           "nullable": false,
@@ -15721,6 +15730,15 @@
         {
           "name": "receive_host",
           "type": "varchar(255)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "sdp_ip",
+          "type": "varchar(253)",
           "nullable": false,
           "default": "",
           "extra": "",

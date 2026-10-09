@@ -24,6 +24,7 @@ export interface ZLMNode {
   host: string;
   hookIp?: string;
   receiveHost: string;
+  sdpIp: string;
   playbackHost: string;
   apiPort: number;
   mediaServerUUID: string;
@@ -49,6 +50,7 @@ export interface CreateZLMNodeReq {
   host: string;
   hookIp?: string;
   receiveHost?: string;
+  sdpIp?: string;
   playbackHost?: string;
   apiPort: number;
   apiSecret: string;
@@ -83,6 +85,7 @@ export interface UpdateZLMNodeReq {
   host?: string;
   hookIp?: string;
   receiveHost?: string;
+  sdpIp?: string;
   playbackHost?: string;
   apiPort?: number;
   apiSecret?: string;

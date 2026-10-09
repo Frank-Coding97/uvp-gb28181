@@ -496,15 +496,58 @@ func TestNodeService_ReloadPlatformMediaDefaults_ReappliesActiveNodes(t *testing
 	require.NoError(t, err)
 	before := len(probe.calls)
 
-	err = svc.ReloadPlatformMediaDefaults(context.Background(), "203.0.113.20", "media.example.com")
+	err = svc.ReloadPlatformMediaDefaults(context.Background(), "203.0.113.20", "sdp.example.com", "media.example.com")
 	require.NoError(t, err)
 	require.Greater(t, len(probe.calls), before, "active node should be reapplied")
 	require.Equal(t, "203.0.113.20", probe.lastTuning.HookIP)
+	require.Equal(t, "sdp.example.com", probe.lastTuning.SDPIP)
 	require.Equal(t, "media.example.com", probe.lastTuning.StreamIP)
 
 	updated, ok := registry.Get(created.ID)
 	require.True(t, ok)
 	require.Equal(t, "media.example.com", updated.EffectivePlaybackHost())
+	// 平台 SDP IP 是运行时兜底，不落库；节点未配 sdp_ip/receive_host 时由它兜底。
+	require.Empty(t, updated.SDPIP)
+	require.Equal(t, "sdp.example.com", updated.EffectiveSDPIP())
+}
+
+// SDP 地址必须能覆盖播放地址：NAT/端口映射场景下两者常常不同，
+// 若被播放地址盖住，设备就会推向错误的地址（表现为信令成功但没有画面）。
+func TestNodeService_ReloadPlatformMediaDefaults_SDPIPIsIndependentFromStreamIP(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	registry := node.NewRegistry(repo)
+	svc := service.NewNodeService(registry, probe, service.MediaTuning{})
+	created, err := svc.Create(context.Background(), service.CreateNodeReq{
+		Name: "n1", Host: "127.0.0.1", APIPort: 18080, APISecret: "s",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.ReloadPlatformMediaDefaults(context.Background(), "", "203.0.113.30", "198.51.100.9"))
+
+	got, ok := registry.Get(created.ID)
+	require.True(t, ok)
+	require.Equal(t, "203.0.113.30", got.EffectiveSDPIP())
+	require.Equal(t, "198.51.100.9", got.EffectivePlaybackHost())
+	// Host 是 127.0.0.1，但 SDP 绝不能因此退化成回环地址。
+	require.NotEqual(t, "127.0.0.1", got.EffectiveSDPIP())
+}
+
+// 节点级 sdp_ip 优先于平台默认，且绝不能回落到 ZLM API host。
+func TestNodeService_NodeLevelSDPIPOverridesPlatformDefault(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{}
+	registry := node.NewRegistry(repo)
+	svc := service.NewNodeService(registry, probe, service.MediaTuning{})
+	created, err := svc.Create(context.Background(), service.CreateNodeReq{
+		Name: "n1", Host: "127.0.0.1", APIPort: 18080, APISecret: "s", SDPIP: "192.0.2.77",
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.ReloadPlatformMediaDefaults(context.Background(), "", "203.0.113.30", ""))
+
+	got, ok := registry.Get(created.ID)
+	require.True(t, ok)
+	require.Equal(t, "192.0.2.77", got.EffectiveSDPIP())
 }
 
 func TestNodeService_Get_NotFound(t *testing.T) {

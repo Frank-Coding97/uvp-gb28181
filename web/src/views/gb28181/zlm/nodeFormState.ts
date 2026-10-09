@@ -1,11 +1,12 @@
 import type { CreateZLMNodeReq, UpdateZLMNodeReq, ZLMNode } from "@/api/gb28181-zlm";
-import { validateOptionalHookIp, validateOptionalStreamIp } from "../sip/mediaNetworkAddress";
+import { validateOptionalHookIp, validateOptionalStreamIp, validateRequiredSdpIp } from "../sip/mediaNetworkAddress";
 
 export interface NodeFormState {
   name: string;
   host: string;
   hookIp: string;
   receiveHost: string;
+  sdpIp: string;
   playbackHost: string;
   apiPort: string;
   apiSecret: string;
@@ -22,6 +23,7 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
     host: node?.host ?? "",
     hookIp: node?.hookIp ?? "",
     receiveHost: node?.receiveHost ?? "",
+    sdpIp: node?.sdpIp ?? "",
     playbackHost: node?.playbackHost ?? "",
     apiPort: node ? String(node.apiPort) : "",
     apiSecret: "",
@@ -55,6 +57,12 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
   if (endError) errors.rtpPortEnd = endError;
   const hookIpError = validateOptionalHookIp(form.hookIp);
   if (hookIpError) errors.hookIp = hookIpError;
+  // 节点级 sdp_ip 留空时回落到平台默认，所以这里只在填了值时校验格式；
+  // 一旦填了回环地址就必须拦下 —— 那会让该节点的点播永远没有画面。
+  if (form.sdpIp.trim()) {
+    const sdpIpError = validateRequiredSdpIp(form.sdpIp);
+    if (sdpIpError) errors.sdpIp = sdpIpError;
+  }
   const streamIpError = validateOptionalStreamIp(form.playbackHost);
   if (streamIpError) errors.playbackHost = streamIpError;
   if (!startError && !endError && Number(form.rtpPortEnd) < Number(form.rtpPortStart)) {
@@ -68,6 +76,7 @@ export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZ
     host: form.host.trim(),
     hookIp: form.hookIp.trim(),
     receiveHost: form.receiveHost.trim(),
+    sdpIp: form.sdpIp.trim(),
     playbackHost: form.playbackHost.trim(),
     apiPort: Number(form.apiPort),
     apiSecret: form.apiSecret,

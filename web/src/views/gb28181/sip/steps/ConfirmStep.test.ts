@@ -1,4 +1,6 @@
 import { mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import postcss from "postcss";
 import { describe, expect, it, vi } from "vitest";
 import ConfirmStep from "./ConfirmStep.vue";
 import { writeTextToClipboard } from "@/utils/app";
@@ -6,6 +8,18 @@ import { writeTextToClipboard } from "@/utils/app";
 vi.mock("@/utils/app", () => ({ writeTextToClipboard: vi.fn().mockResolvedValue(true) }));
 
 describe("ConfirmStep SIP domain", () => {
+  it("uses the panel theme color at the deployment summary gradient endpoint", () => {
+    const source = readFileSync("src/views/gb28181/sip/steps/ConfirmStep.vue", "utf8");
+    const styles = postcss.parse(source.match(/<style scoped>([\s\S]*?)<\/style>/)![1]);
+    let background = "";
+    styles.walkRules(".confirm-card--intro", rule => {
+      rule.walkDecls("background", declaration => {
+        background = declaration.value;
+      });
+    });
+    expect(background).toContain("var(--uvp-panel-bg, #ffffff) 62%");
+  });
+
   it("displays and copies the custom domain from the current form", async () => {
     const wrapper = mount(ConfirmStep, {
       props: {
@@ -16,6 +30,7 @@ describe("ConfirmStep SIP domain", () => {
           advertiseIpInferred: false,
           port: 5062,
           hookIp: "192.0.2.12",
+          sdpIp: "192.168.10.220",
           streamIp: "media.example.com",
           serverId: "34020000002000000002",
           domain: "4401000000",
@@ -42,6 +57,7 @@ describe("ConfirmStep SIP domain", () => {
           advertiseIp: "",
           advertiseIpInferred: false,
           hookIp: "192.0.2.12",
+          sdpIp: "192.168.10.220",
           streamIp: "media.example.com",
           port: 5062,
           serverId: "34020000002000000002",

@@ -1,7 +1,7 @@
 -- UVP-GB28181 PostgreSQL release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 5cec5cc55af5f3345e2e00e8aa03241f5066e5070af13e37c66d24ad55379e9b
+-- Schema fingerprint: 8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -1635,6 +1635,7 @@ CREATE TABLE "gb_sip_config" (
   "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
+  "sdp_ip" VARCHAR(253) NOT NULL DEFAULT '',
   "stream_ip" VARCHAR(253) NOT NULL DEFAULT '',
   PRIMARY KEY ("id"),
   CONSTRAINT "chk_gb_sip_config_deployment_mode" CHECK (("deployment_mode" in ('lan','public'))),
@@ -1647,14 +1648,13 @@ COMMENT ON COLUMN "gb_sip_config"."deployment_mode" IS 'lan/public';
 COMMENT ON COLUMN "gb_sip_config"."listen_ip" IS 'SIP 监听地址';
 COMMENT ON COLUMN "gb_sip_config"."advertise_ip" IS 'SIP 对外宣告地址';
 COMMENT ON COLUMN "gb_sip_config"."advertise_ip_inferred" IS '宣告地址是否由系统推断';
-COMMENT ON COLUMN "gb_sip_config"."hook_ip" IS '平台默认 Hook 地址';
-COMMENT ON COLUMN "gb_sip_config"."stream_ip" IS '平台默认 Stream 地址';
 COMMENT ON COLUMN "gb_sip_config"."port" IS 'SIP 端口';
 COMMENT ON COLUMN "gb_sip_config"."domain" IS 'SIP 域';
 COMMENT ON COLUMN "gb_sip_config"."server_id" IS '平台国标编码';
 COMMENT ON COLUMN "gb_sip_config"."password" IS 'SIP Digest 原始凭据';
 COMMENT ON COLUMN "gb_sip_config"."created_at" IS '创建时间';
 COMMENT ON COLUMN "gb_sip_config"."updated_at" IS '更新时间';
+COMMENT ON COLUMN "gb_sip_config"."sdp_ip" IS '平台默认 SDP 地址(设备回推RTP 目标)';
 
 DROP TABLE IF EXISTS "gb_sip_metric_flush";
 CREATE TABLE "gb_sip_metric_flush" (
@@ -1966,6 +1966,7 @@ CREATE TABLE "meta_node" (
   "name" VARCHAR(64) NOT NULL DEFAULT '',
   "host" VARCHAR(64) NOT NULL DEFAULT '',
   "receive_host" VARCHAR(255) NOT NULL DEFAULT '',
+  "sdp_ip" VARCHAR(253) NOT NULL DEFAULT '',
   "playback_host" VARCHAR(255) NOT NULL DEFAULT '',
   "api_port" INTEGER NOT NULL DEFAULT 18080,
   "api_secret" VARCHAR(128) NOT NULL DEFAULT '',
@@ -1992,7 +1993,6 @@ CREATE TABLE "meta_node" (
   CONSTRAINT uk_media_server_uuid UNIQUE ("media_server_uuid")
 );
 COMMENT ON TABLE "meta_node" IS 'ZLM 媒体节点表';
-COMMENT ON COLUMN "meta_node"."hook_ip" IS '节点默认 Hook 地址';
 CREATE INDEX idx_enabled ON "meta_node" ("enabled");
 CREATE INDEX idx_state ON "meta_node" ("state");
 
@@ -3325,8 +3325,17 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (637, '取消录像缓存下载', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '录像缓存', '2026-10-05 11:33:55.000000', '2026-10-05 11:33:55.000000', NULL, 1),
 (638, '收藏设备录像缓存任务', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '录像缓存', '2026-10-05 11:52:03.000000', '2026-10-05 11:52:03.000000', NULL, 1),
 (639, '删除抓拍图像', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '图像库', '2026-10-07 10:30:08.000000', '2026-10-07 10:30:08.000000', NULL, 1),
-(640, NULL, '/api/gb28181/sip/service-config', 'GET', NULL, NULL, NULL, NULL, NULL),
-(641, NULL, '/api/gb28181/sip/service-config', 'PUT', NULL, NULL, NULL, NULL, NULL);
+(640, '查询设备目录刷新进度', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '设备管理', NULL, NULL, NULL, 1),
+(641, '更新固件仓库状态', '/api/gb28181/device-mgmt/firmware-repository/:id/status', 'PATCH', '设备管理', NULL, NULL, NULL, 1),
+(642, '网络会话列表（运行时监控）', '/api/gb28181/zlm/sessions/network', 'GET', '流媒体节点', NULL, NULL, NULL, 1),
+(643, '观看会话列表（运行时监控）', '/api/gb28181/zlm/sessions/viewers', 'GET', '流媒体节点', NULL, NULL, NULL, 1),
+(644, '新增固件仓库', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '设备管理', NULL, NULL, NULL, 1),
+(645, '固件仓库列表', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '设备管理', NULL, NULL, NULL, 1),
+(646, '删除固件仓库', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '设备管理', NULL, NULL, NULL, 1),
+(647, '固件仓库详情', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '设备管理', NULL, NULL, NULL, 1),
+(648, '获取固件下载链接', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '设备管理', NULL, NULL, NULL, 1),
+(649, '查询国标服务配置', '/api/gb28181/sip/service-config', 'GET', '国标平台', NULL, NULL, NULL, 1),
+(650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3813,24 +3822,28 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10272, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'GET', '*', '', ''),
 (10273, 'p', 'role_1', '/api/gb28181/record-cache/downloads/:downloadId', 'DELETE', '*', '', ''),
 (10274, 'p', 'role_1', '/api/gb28181/record-cache/tasks/:taskId/favorite', 'POST', '*', '', ''),
-(10275, 'p', 'role_1', '/api/sysParam/list', 'GET', '*', '', ''),
-(10276, 'p', 'role_1', '/api/sysParam/:id', 'GET', '*', '', ''),
-(10277, 'p', 'role_1', '/api/sysParam/getByCode/:code', 'GET', '*', '', ''),
-(10278, 'p', 'role_1', '/api/sysParam/add', 'POST', '*', '', ''),
-(10279, 'p', 'role_1', '/api/sysParam/edit', 'PUT', '*', '', ''),
-(10280, 'p', 'role_1', '/api/sysParam/delete', 'DELETE', '*', '', ''),
-(10281, 'p', 'role_1', '/api/sysRole/list', 'GET', '*', '', ''),
-(10282, 'p', 'role_1', '/api/sysRole/:id', 'GET', '*', '', ''),
-(10283, 'p', 'role_1', '/api/sysMenu/:id', 'GET', '*', '', ''),
-(10284, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/disable', 'POST', '*', '', ''),
-(10285, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '*', '', ''),
-(10286, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '*', '', ''),
-(10287, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
-(10288, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '*', '', ''),
-(10289, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
-(10290, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '*', '', ''),
-(10291, 'p', 'role_1', '/api/gb28181/sip/service-config', 'GET', '*', '', ''),
-(10292, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', '');
+(10275, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId', 'GET', '*', '', ''),
+(10276, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/status', 'PATCH', '*', '', ''),
+(10277, 'p', 'role_1', '/api/gb28181/zlm/sessions/network', 'GET', '*', '', ''),
+(10278, 'p', 'role_1', '/api/gb28181/zlm/sessions/viewers', 'GET', '*', '', ''),
+(10279, 'p', 'role_1', '/api/sysMenu/:id', 'GET', '*', '', ''),
+(10280, 'p', 'role_1', '/api/sysRole/list', 'GET', '*', '', ''),
+(10281, 'p', 'role_1', '/api/sysRole/:id', 'GET', '*', '', ''),
+(10282, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/disable', 'POST', '*', '', ''),
+(10283, 'p', 'role_1', '/api/sysParam/delete', 'DELETE', '*', '', ''),
+(10284, 'p', 'role_1', '/api/sysParam/add', 'POST', '*', '', ''),
+(10285, 'p', 'role_1', '/api/sysParam/edit', 'PUT', '*', '', ''),
+(10286, 'p', 'role_1', '/api/sysParam/list', 'GET', '*', '', ''),
+(10287, 'p', 'role_1', '/api/sysParam/:id', 'GET', '*', '', ''),
+(10288, 'p', 'role_1', '/api/sysParam/getByCode/:code', 'GET', '*', '', ''),
+(10289, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots', 'DELETE', '*', '', ''),
+(10290, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'POST', '*', '', ''),
+(10291, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository', 'GET', '*', '', ''),
+(10292, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'DELETE', '*', '', ''),
+(10293, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
+(10294, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
+(10295, 'p', 'role_1', '/api/gb28181/sip/service-config', 'GET', '*', '', ''),
+(10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -8371,14 +8384,14 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (3, 140510);
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
-INSERT INTO "sys_users" ("id", "username", "password", "must_change_password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by") VALUES
-(1, 'admin', '$2a$10$JSTDoY/H/SpiqQs2syahmORWZXJAS2oKMaWimSXK7da7apRs5CDJa', true, '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0);
+INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
+(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0, true);
 
 -- 自增水位：种子行用的是显式 id，PostgreSQL 的序列不会自己前进，
 -- 不补这一步，全新装环境第一次 INSERT 就会撞主键。
 SELECT setval(pg_get_serial_sequence('gb_sip_security_policy', 'id'), 1, true);
-SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 641, true);
-SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10292, true);
+SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 650, true);
+SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10296, true);
 SELECT setval(pg_get_serial_sequence('sys_department', 'id'), 1, true);
 SELECT setval(pg_get_serial_sequence('sys_dict', 'id'), 38, true);
 SELECT setval(pg_get_serial_sequence('sys_dict_item', 'id'), 299, true);

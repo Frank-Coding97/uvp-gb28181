@@ -10,6 +10,7 @@ const existingNode = {
   name: "zlm-a",
   host: "10.0.0.7",
   receiveHost: "10.0.0.8",
+  sdpIp: "192.0.2.21",
   playbackHost: "media.example.com",
   hookIp: "192.0.2.20",
   apiPort: 18080,

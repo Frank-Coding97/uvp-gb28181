@@ -36,7 +36,7 @@ const canNext = computed(() => {
   if (step.value === 2)
     return (
       networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp) &&
-      mediaNetworkAddressesCanContinue(setup.form.hookIp, setup.form.streamIp)
+      mediaNetworkAddressesCanContinue(setup.form.hookIp, setup.form.sdpIp, setup.form.streamIp)
     );
   if (step.value === 3)
     return identityCanContinue(
