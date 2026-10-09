@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { RefreshCw, RotateCcw, Search } from "lucide-vue-next";
 import { getDivisionAPI, type DivisionItem } from "@/api/department";
-import { getOnlineUsersAPI, type OnlineUserListParams, type OnlineUserSession, type OnlineUserStatus } from "@/api/online-user";
+import { getOnlineUsersAPI, type OnlineUserListParams, type OnlineUserSession } from "@/api/online-user";
 import { formatTime } from "@/globals";
 import { useUserStoreHook } from "@/store/modules/user";
 import OnlineUserAction from "./OnlineUserAction.vue";
@@ -22,8 +22,7 @@ const departmentOptions = ref<DepartmentOption[]>([]);
 const form = reactive({
   username: "",
   departmentId: undefined as number | undefined,
-  clientIp: "",
-  status: "" as OnlineUserStatus | ""
+  clientIp: ""
 });
 const pagination = reactive({
   current: 1,
@@ -48,13 +47,12 @@ let requestVersion = 0;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
 function buildParams(): OnlineUserListParams {
-  const params: OnlineUserListParams = { pageNum: pagination.current, pageSize: pagination.pageSize };
+  const params: OnlineUserListParams = { pageNum: pagination.current, pageSize: pagination.pageSize, status: "active" };
   const username = form.username.trim();
   const clientIp = form.clientIp.trim();
   if (username) params.username = username;
   if (form.departmentId) params.departmentId = form.departmentId;
   if (clientIp) params.clientIp = clientIp;
-  if (form.status) params.status = form.status;
   return params;
 }
 
@@ -93,7 +91,6 @@ async function reset() {
   form.username = "";
   form.departmentId = undefined;
   form.clientIp = "";
-  form.status = "";
   pagination.current = 1;
   await load();
 }
@@ -183,12 +180,6 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
           <div class="online-user-filter">
             <a-input v-model="form.clientIp" placeholder="IP 地址" allow-clear @press-enter="search" />
           </div>
-          <div class="online-user-filter online-user-filter--status">
-            <a-select v-model="form.status" placeholder="状态" allow-clear>
-              <a-option value="active">活跃</a-option>
-              <a-option value="idle">空闲</a-option>
-            </a-select>
-          </div>
         </template>
         <template #actions>
           <a-button type="primary" @click="search">
@@ -260,10 +251,8 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
             ><template #cell="{ record }">{{ formatTime(record.lastActiveAt) }}</template></a-table-column
           >
           <a-table-column title="状态" :width="100" align="center">
-            <template #cell="{ record }">
-              <span class="online-user-status" :class="`online-user-status--${record.status}`"
-                ><i />{{ record.status === "active" ? "活跃" : "空闲" }}</span
-              >
+            <template #cell>
+              <span class="online-user-status online-user-status--active"><i />活跃</span>
             </template>
           </a-table-column>
           <a-table-column v-if="canForce" title="操作" :width="144" align="center" fixed="right">
@@ -290,11 +279,6 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   flex: 0 1 176px;
   width: 176px;
   max-width: 100%;
-}
-
-.online-user-filter--status {
-  flex-basis: 128px;
-  width: 128px;
 }
 
 .online-user-filter :deep(.arco-input-wrapper),
@@ -416,10 +400,6 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 .online-user-status--active {
   color: rgb(var(--success-6));
 }
-.online-user-status--idle {
-  color: var(--uvp-text-secondary);
-}
-
 .online-user-page :deep(.arco-btn:focus-visible),
 .online-user-page :deep(.arco-input-wrapper:focus-within),
 .online-user-page :deep(.arco-select-view:focus-within) {
@@ -428,8 +408,7 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 }
 
 @media (width <= 768px) {
-  .online-user-filter,
-  .online-user-filter--status {
+  .online-user-filter {
     flex-basis: min(100%, 280px);
     width: min(100%, 280px);
   }

@@ -62,7 +62,7 @@ func (s *AuthSessionService) ListOnline(ctx context.Context, filter OnlineSessio
 	base := s.db.WithContext(ctx).Table("sys_user_sessions AS sessions").
 		Joins("JOIN sys_users AS users ON users.id = sessions.user_id AND users.deleted_at IS NULL AND users.status = ?", 1).
 		Joins("LEFT JOIN sys_department AS departments ON departments.id = users.dept_id AND departments.deleted_at IS NULL").
-		Where("sessions.revoked_at IS NULL AND sessions.session_expires_at > ?", now)
+		Where("sessions.revoked_at IS NULL AND sessions.session_expires_at > ? AND sessions.last_active_at >= ?", now, cutoff)
 	if username := strings.TrimSpace(filter.Username); username != "" {
 		base = base.Where("users.username LIKE ?", "%"+username+"%")
 	}

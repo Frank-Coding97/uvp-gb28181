@@ -2,7 +2,7 @@ import { http } from "@/utils/http";
 import { baseUrlApi } from "./utils";
 import type { BaseResult } from "./types";
 
-export type OnlineUserStatus = "active" | "idle";
+export type OnlineUserStatus = "active";
 
 export interface OnlineUserSession {
   sid: string;

@@ -92,13 +92,13 @@ describe("online user page", () => {
   it("loads initially and keeps filters stable across search, reset and pagination", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 10 });
+    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 10, status: "active" });
+    expect(wrapper.findAll("option")).toHaveLength(0);
 
     const vm = wrapper.vm as any;
     vm.form.username = "alice";
     vm.form.departmentId = 7;
     vm.form.clientIp = "10.0.0.9";
-    vm.form.status = "idle";
     await vm.search();
     expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({
       pageNum: 1,
@@ -106,20 +106,20 @@ describe("online user page", () => {
       username: "alice",
       departmentId: 7,
       clientIp: "10.0.0.9",
-      status: "idle"
+      status: "active"
     });
 
     await vm.handlePageChange(3);
     expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(
-      expect.objectContaining({ pageNum: 3, pageSize: 10, username: "alice" })
+      expect.objectContaining({ pageNum: 3, pageSize: 10, username: "alice", status: "active" })
     );
     await vm.handlePageSizeChange(50);
     expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith(
-      expect.objectContaining({ pageNum: 1, pageSize: 50, username: "alice" })
+      expect.objectContaining({ pageNum: 1, pageSize: 50, username: "alice", status: "active" })
     );
 
     await vm.reset();
-    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 50 });
+    expect(api.getOnlineUsersAPI).toHaveBeenLastCalledWith({ pageNum: 1, pageSize: 50, status: "active" });
   });
 
   it("keeps the newest response when an older request finishes last", async () => {
@@ -155,6 +155,9 @@ describe("online user page", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     await flushPromises();
     expect(api.getOnlineUsersAPI).toHaveBeenCalledTimes(3);
+    for (const [params] of api.getOnlineUsersAPI.mock.calls) {
+      expect(params.status).toBe("active");
+    }
     wrapper.unmount();
   });
 
