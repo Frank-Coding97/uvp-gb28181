@@ -98,6 +98,25 @@ func (o *zlmRTPOpener) Open(ctx context.Context, request RTPRequest) (RTPAllocat
 		return RTPAllocation{}, fmt.Errorf("%w: node not found", ErrRTPUnavailable)
 	}
 	client := o.client(selected)
+	if selected.EffectiveRTPReceiveMode() == "single" {
+		shared, ok := client.(interface {
+			OpenSinglePortReceiver(context.Context, string, int) (zlm.SinglePortReceiver, error)
+			CloseSinglePortReceiver(context.Context, string) error
+		})
+		if !ok {
+			return RTPAllocation{}, fmt.Errorf("%w: 单端口客户端不可用", ErrRTPUnavailable)
+		}
+		receiver, err := shared.OpenSinglePortReceiver(ctx, request.SSRC, selected.RTPProxyPort)
+		if err != nil {
+			return RTPAllocation{}, err
+		}
+		return RTPAllocation{StreamID: receiver.StreamID, SSRC: request.SSRC, Port: receiver.Port,
+			Bind: func() error { o.locations.Bind(receiver.StreamID, nodeID); return nil },
+			Close: func(closeCtx context.Context) error {
+				return shared.CloseSinglePortReceiver(closeCtx, receiver.StreamID)
+			},
+			Unbind: func() error { o.locations.Unbind(receiver.StreamID); return nil }}, nil
+	}
 	tcpMode := 0
 	if request.TCPMode {
 		tcpMode = 1

@@ -11,6 +11,8 @@ export interface NodeFormState {
   apiPort: string;
   apiSecret: string;
   weight: string;
+  rtpReceiveMode: "single" | "multi";
+  rtpProxyPort: string;
   rtpPortStart: string;
   rtpPortEnd: string;
 }
@@ -28,6 +30,8 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
     apiPort: node ? String(node.apiPort) : "",
     apiSecret: "",
     weight: String(node?.weight ?? 50),
+    rtpReceiveMode: node?.rtpReceiveMode ?? "multi",
+    rtpProxyPort: "",
     rtpPortStart: String(node?.rtpPortStart ?? 30000),
     rtpPortEnd: String(node?.rtpPortEnd ?? 35000)
   };
@@ -53,8 +57,13 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
   const endError = integerError(form.rtpPortEnd, "RTP 结束端口", 1024, 65535);
   if (apiPortError) errors.apiPort = apiPortError;
   if (weightError) errors.weight = weightError;
-  if (startError) errors.rtpPortStart = startError;
-  if (endError) errors.rtpPortEnd = endError;
+  if (form.rtpReceiveMode === "single") {
+    const portError = integerError(form.rtpProxyPort, "RTP 单端口", 1024, 65534);
+    if (portError) errors.rtpProxyPort = portError;
+  } else {
+    if (startError) errors.rtpPortStart = startError;
+    if (endError) errors.rtpPortEnd = endError;
+  }
   const hookIpError = validateOptionalHookIp(form.hookIp);
   if (hookIpError) errors.hookIp = hookIpError;
   // 节点级 sdp_ip 留空时回落到平台默认，所以这里只在填了值时校验格式；
@@ -65,8 +74,8 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
   }
   const streamIpError = validateOptionalStreamIp(form.playbackHost);
   if (streamIpError) errors.playbackHost = streamIpError;
-  if (!startError && !endError && Number(form.rtpPortEnd) < Number(form.rtpPortStart)) {
-    errors.rtpPortEnd = "RTP 结束端口不能小于起始端口";
+  if (form.rtpReceiveMode === "multi" && !startError && !endError && Number(form.rtpPortEnd) <= Number(form.rtpPortStart)) {
+    errors.rtpPortEnd = "RTP 结束端口必须大于起始端口";
   }
   return errors;
 }
@@ -81,8 +90,10 @@ export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZ
     apiPort: Number(form.apiPort),
     apiSecret: form.apiSecret,
     weight: Number(form.weight),
-    rtpPortStart: Number(form.rtpPortStart),
-    rtpPortEnd: Number(form.rtpPortEnd)
+    rtpReceiveMode: form.rtpReceiveMode,
+    ...(form.rtpReceiveMode === "single"
+      ? { rtpProxyPort: Number(form.rtpProxyPort) }
+      : { rtpPortStart: Number(form.rtpPortStart), rtpPortEnd: Number(form.rtpPortEnd) })
   };
   if (editing) request.name = form.name.trim();
   if (editing && !request.apiSecret) {

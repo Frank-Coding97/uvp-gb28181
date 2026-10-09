@@ -330,6 +330,14 @@ function relativeTime(value?: string) {
               </div></template
             ></a-table-column
           >
+          <a-table-column title="收流模式" :width="140">
+            <template #cell="{ record }">
+              <span>{{ record.rtpReceiveMode === "single" ? "单端口" : "多端口" }}</span>
+              <div class="cell-node-host">
+                {{ record.rtpReceiveMode === "single" ? record.rtpProxyPort : `${record.rtpPortStart}-${record.rtpPortEnd}` }}
+              </div>
+            </template>
+          </a-table-column>
           <a-table-column title="管理状态" :width="110"
             ><template #cell="{ record }"
               ><span :class="['admin-state', record.enabled === false ? 'admin-state--disabled' : 'admin-state--enabled']">{{

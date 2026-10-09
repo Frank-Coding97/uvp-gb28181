@@ -330,9 +330,9 @@ func (s *Service) useMultiNode() bool {
 
 func (s *Service) clientForNode(mediaNode *node.Node) ZLM {
 	if s.nodeClient != nil {
-		return s.nodeClient(mediaNode)
+		return wrapReceiveModeClient(s.nodeClient(mediaNode))
 	}
-	return zlm.NewClientForNode(mediaNode)
+	return wrapReceiveModeClient(zlm.NewClientForNode(mediaNode))
 }
 
 // clientForStream 返回操作 streamID 对应节点的 ZLM client。
@@ -819,6 +819,22 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		pickedNodeID = selectedNode.ID
 		pickedNode = selectedNode
 		liveRef.NodeID = selectedNode.ID
+		if selectedNode.EffectiveRTPReceiveMode() == "single" {
+			if mode == LiveModeFixed {
+				return nil, fmt.Errorf("固定播放地址不支持单端口收流，请选择多端口节点")
+			}
+			receiver, receiverErr := sharedReceiver(client)
+			if receiverErr != nil {
+				return nil, receiverErr
+			}
+			shared, receiverErr := receiver.OpenSinglePortReceiver(playCtx, ssrc, selectedNode.RTPProxyPort)
+			if receiverErr != nil {
+				return nil, receiverErr
+			}
+			streamID = shared.StreamID
+			liveRef.StreamID = streamID
+			rtpFallback = shared.Port
+		}
 		if versioned, ok := s.locationMap.(interface{ BindCurrent(stream.LiveRef) bool }); ok {
 			if !versioned.BindCurrent(liveRef) {
 				return nil, fmt.Errorf("绑定实时流代际失败: %s", streamID)
@@ -860,20 +876,19 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if tcpPassive {
 		tcpMode = 1
 	}
-	rtpRes, err := client.OpenRtpServerWithSSRC(playCtx, zlm.OpenRtpServerRequest{
-		StreamID:  streamID,
-		SSRC:      ssrc,
-		Port:      0,
-		TCPMode:   tcpMode,
-		OnlyTrack: onlyTrack,
-	})
-	if err != nil {
-		s.unbindLocation(liveRef)
-		return nil, fmt.Errorf("申请 ZLM 收流端口失败: %w", err)
-	}
-	recvPort := rtpRes.Port
-	if recvPort == 0 {
-		recvPort = rtpFallback
+	recvPort := rtpFallback
+	if pickedNode == nil || pickedNode.EffectiveRTPReceiveMode() != "single" {
+		rtpRes, openErr := client.OpenRtpServerWithSSRC(playCtx, zlm.OpenRtpServerRequest{
+			StreamID: streamID, SSRC: ssrc, Port: 0, TCPMode: tcpMode, OnlyTrack: onlyTrack,
+		})
+		if openErr != nil {
+			s.unbindLocation(liveRef)
+			return nil, fmt.Errorf("申请 ZLM 收流端口失败: %w", openErr)
+		}
+		recvPort = rtpRes.Port
+		if recvPort == 0 {
+			recvPort = rtpFallback
+		}
 	}
 	app.Log(playCtx).Named("play").Info("点播 RTP 接收资源已分配", zap.String("event", "gb28181.play.rtp_allocated"), zap.String("stage", "rtp_allocation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID))
 	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageRTP, EventName: EventRTPAllocated, FactState: FactConfirmed, Source: SourcePlayService, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc})
@@ -1164,7 +1179,7 @@ func (s *Service) rollbackFailedStart(
 		byeErr = s.inviter.Bye(cleanupCtx, s.sessions, ref.StreamID)
 	}
 	closeErr := client.CloseRtpServer(cleanupCtx, ref.StreamID)
-	if closeErr != nil {
+	if closeErr != nil || (zlm.IsSinglePortStreamID(ref.StreamID) && byeErr != nil) {
 		if releaseSSRC != nil {
 			*releaseSSRC = false
 		}
@@ -1305,6 +1320,17 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		closeErr = clientErr
 	} else {
 		closeErr = client.CloseRtpServer(ctx, streamID)
+	}
+
+	// Shared ingress must retain its binding and SSRC lease until device BYE
+	// and process disappearance are both confirmed; otherwise retry is unsafe.
+	if zlm.IsSinglePortStreamID(streamID) {
+		if byeErr != nil {
+			return byeErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 
 	// Unbind 总要做(即便 Close 失败,避免 streamID 永远占位)

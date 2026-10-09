@@ -138,6 +138,7 @@ async function handleSave() {
     if (Object.keys(changes).some(isNetworkPortChange)) {
       const impact = ["网络端口保存后需重启媒体节点生效。"];
       if ("http.port" in changes) impact.push("修改 http.port 后还需同步节点登记的 API 端口。");
+      if ("rtp_proxy.port" in changes) impact.push("修改单端口监听后需同步节点登记的收流端口；重启将影响该节点的现有播放。");
       if ("rtp_proxy.port_range" in changes)
         impact.push("修改 rtp_proxy.port_range 后还需同步节点登记的 RTP 收流范围及防火墙映射。");
       const confirmed = await new Promise<boolean>(resolve => {

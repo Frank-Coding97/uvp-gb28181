@@ -164,7 +164,7 @@ func TestConfigService_Update_SplitsHotAndRestart(t *testing.T) {
 func TestConfigService_NetworkPortsAreRestartRequiredAndPersisted(t *testing.T) {
 	ports := map[string]string{
 		"http.port": "18080", "http.sslport": "0", "rtmp.port": "0", "rtmp.sslport": "0",
-		"rtsp.port": "0", "rtsp.sslport": "0", "rtp_proxy.port_range": "30000-35000", "shell.port": "0",
+		"rtsp.port": "0", "rtsp.sslport": "0", "rtp_proxy.port": "10000", "rtp_proxy.port_range": "30000-35000", "shell.port": "0",
 	}
 	cli := &mockZLMClient{getReturn: map[string]string{}}
 	reg := fakeRegistry(t, node.Node{Name: "n1", State: node.StateActive})
@@ -202,6 +202,7 @@ func TestConfigService_InvalidNetworkPortBatchNeverSets(t *testing.T) {
 		"rtsp.port":            {"-1", "65536"},
 		"rtsp.sslport":         {"-1", "65536"},
 		"shell.port":           {"-1", "65536"},
+		"rtp_proxy.port":       {"-1", "65535", "abc"},
 		"rtp_proxy.port_range": {"", "0-10", "500-499", "1-65536", "1,2", "1 - 2", "abc-def"},
 	}
 	for key, values := range invalid {

@@ -89,3 +89,44 @@ func TestZLMRuntimeAdaptersPickAllocateWaitAndCleanup(t *testing.T) {
 }
 
 var _ PlaybackServerConfigProvider = fakePlaybackServerConfigs{}
+
+type sharedPlaybackClient struct {
+	fakePlaybackZLMClient
+	closed string
+}
+
+func (f *sharedPlaybackClient) OpenSinglePortReceiver(_ context.Context, ssrc string, port int) (zlm.SinglePortReceiver, error) {
+	id, err := zlm.SinglePortStreamID(ssrc)
+	return zlm.SinglePortReceiver{StreamID: id, Port: port}, err
+}
+func (f *sharedPlaybackClient) CloseSinglePortReceiver(_ context.Context, id string) error {
+	f.closed = id
+	return nil
+}
+
+func TestPlaybackSinglePortAllocationKeepsOriginalCleanup(t *testing.T) {
+	selected := &node.Node{ID: 7, RTPReceiveMode: "single", RTPProxyPort: 10000}
+	client := &sharedPlaybackClient{}
+	locations := stream.NewLocationMap()
+	opener := NewZLMRTPOpener(fakePlaybackNodes{selected}, locations, func(*node.Node) PlaybackZLMClient { return client })
+	allocation, err := opener.Open(context.Background(), RTPRequest{NodeID: "7", StreamID: "pb-before", SSRC: "1000000001", TCPMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allocation.StreamID != "3B9ACA01" || allocation.Port != 10000 || client.openCalls.Load() != 0 {
+		t.Fatalf("allocation=%+v", allocation)
+	}
+	if err := allocation.Bind(); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := locations.Lookup(allocation.StreamID); !ok || id != 7 {
+		t.Fatal("incorrect shared media binding")
+	}
+	selected.RTPReceiveMode = "multi"
+	if err := allocation.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if client.closed != allocation.StreamID || client.closeCalls.Load() != 0 {
+		t.Fatal("shared listener cleanup mismatch")
+	}
+}

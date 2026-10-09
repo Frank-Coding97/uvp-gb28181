@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -48,6 +49,12 @@ func (f *zlmIntentRTPOpener) PrepareIntent(ctx context.Context, store *playauth.
 	if !ok || selected == nil || selected.State != node.StateActive || selected.RecoveryRequired || selected.MediaServerUUID != picked.NodeUUID || selected.Revision != picked.NodeRevision || selected.EffectiveReceiveHost() != picked.RecvIP {
 		return nil, ErrRTPUnavailable
 	}
+	// The exact-resource intent protocol currently supports dedicated receivers
+	// only. Never bypass its identity fencing with a legacy shared-listener API.
+	if selected.EffectiveRTPReceiveMode() == "single" {
+		return nil, fmt.Errorf("%w: 当前操作意图协议不支持单端口收流", ErrRTPUnavailable)
+	}
+
 	runtime, err := f.resolver.ResolveRTP(ctx, picked.NodeUUID)
 	if err != nil {
 		if runtime.Release != nil {

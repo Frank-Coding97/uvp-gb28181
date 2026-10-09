@@ -29,6 +29,26 @@ var ErrConfigConvergenceInProgress = errors.New("node config convergence in prog
 
 var ErrNodeConfigChanged = errors.New("node config changed during convergence")
 
+var ErrRTPListenerMismatch = errors.New("rtp_listener_mismatch")
+
+// RTPListenerMismatchError carries only numeric, user-actionable state from
+// ZLM; upstream response text is intentionally never propagated.
+type RTPListenerMismatchError struct {
+	RequestedPort int
+	ActualPort    int
+	HasActual     bool
+	Reason        string
+}
+
+func (e *RTPListenerMismatchError) Error() string {
+	if e.HasActual {
+		return fmt.Sprintf("%s: 单端口监听未启用或端口不一致：节点配置端口为 %d，填写端口为 %d，请核对端口；修改节点服务配置后需重启媒体节点再保存", ErrRTPListenerMismatch, e.ActualPort, e.RequestedPort)
+	}
+	return fmt.Sprintf("%s: 单端口监听未启用或端口不一致：节点未返回有效的 rtp_proxy.port，填写端口为 %d，请核对节点服务配置并重启节点后再保存", ErrRTPListenerMismatch, e.RequestedPort)
+}
+
+func (e *RTPListenerMismatchError) Unwrap() error { return ErrRTPListenerMismatch }
+
 // ErrExternalStateUncertain means that ZLM accepted (or may have accepted) a
 // configuration change, but the post-write readback could not prove the
 // effective state. Callers must not report the node as ready in this case.
@@ -96,6 +116,8 @@ type NodeDTO struct {
 	RecoveryRequired    bool              `json:"recoveryRequired"`
 	RecoveryReason      string            `json:"recoveryReason,omitempty"`
 	RecoveryFingerprint string            `json:"recoveryFingerprint,omitempty"`
+	RTPReceiveMode      string            `json:"rtpReceiveMode"`
+	RTPProxyPort        int               `json:"rtpProxyPort"`
 	RTPPortStart        int               `json:"rtpPortStart"`
 	RTPPortEnd          int               `json:"rtpPortEnd"`
 	Stats               node.Stats        `json:"stats"`
@@ -107,18 +129,20 @@ type NodeDTO struct {
 
 // CreateNodeReq 新建节点入参
 type CreateNodeReq struct {
-	Name         string            `json:"name"`
-	Host         string            `json:"host" binding:"required"`
-	ReceiveHost  string            `json:"receiveHost"`
-	SDPIP        string            `json:"sdpIp"`
-	PlaybackHost string            `json:"playbackHost"`
-	HookIP       string            `json:"hookIp"`
-	APIPort      int               `json:"apiPort" binding:"required"`
-	APISecret    string            `json:"apiSecret" binding:"required"`
-	Weight       int               `json:"weight"`
-	Tags         map[string]string `json:"tags"`
-	RTPPortStart int               `json:"rtpPortStart"`
-	RTPPortEnd   int               `json:"rtpPortEnd"`
+	Name           string            `json:"name"`
+	Host           string            `json:"host" binding:"required"`
+	ReceiveHost    string            `json:"receiveHost"`
+	SDPIP          string            `json:"sdpIp"`
+	PlaybackHost   string            `json:"playbackHost"`
+	HookIP         string            `json:"hookIp"`
+	APIPort        int               `json:"apiPort" binding:"required"`
+	APISecret      string            `json:"apiSecret" binding:"required"`
+	Weight         int               `json:"weight"`
+	Tags           map[string]string `json:"tags"`
+	RTPReceiveMode string            `json:"rtpReceiveMode"`
+	RTPProxyPort   int               `json:"rtpProxyPort"`
+	RTPPortStart   int               `json:"rtpPortStart"`
+	RTPPortEnd     int               `json:"rtpPortEnd"`
 }
 
 // NodeProbeServerConfig 是新增向导可安全回显的 ZLM 配置子集。
@@ -148,18 +172,20 @@ type NodeProbeResult struct {
 
 // UpdateNodeReq 更新节点入参(可选字段用指针)
 type UpdateNodeReq struct {
-	Name         *string           `json:"name,omitempty"`
-	Host         *string           `json:"host,omitempty"`
-	ReceiveHost  *string           `json:"receiveHost,omitempty"`
-	SDPIP        *string           `json:"sdpIp,omitempty"`
-	PlaybackHost *string           `json:"playbackHost,omitempty"`
-	HookIP       *string           `json:"hookIp,omitempty"`
-	APIPort      *int              `json:"apiPort,omitempty"`
-	APISecret    *string           `json:"apiSecret,omitempty"`
-	Weight       *int              `json:"weight,omitempty"`
-	Tags         map[string]string `json:"tags,omitempty"`
-	RTPPortStart *int              `json:"rtpPortStart,omitempty"`
-	RTPPortEnd   *int              `json:"rtpPortEnd,omitempty"`
+	Name           *string           `json:"name,omitempty"`
+	Host           *string           `json:"host,omitempty"`
+	ReceiveHost    *string           `json:"receiveHost,omitempty"`
+	SDPIP          *string           `json:"sdpIp,omitempty"`
+	PlaybackHost   *string           `json:"playbackHost,omitempty"`
+	HookIP         *string           `json:"hookIp,omitempty"`
+	APIPort        *int              `json:"apiPort,omitempty"`
+	APISecret      *string           `json:"apiSecret,omitempty"`
+	Weight         *int              `json:"weight,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	RTPReceiveMode *string           `json:"rtpReceiveMode,omitempty"`
+	RTPProxyPort   *int              `json:"rtpProxyPort,omitempty"`
+	RTPPortStart   *int              `json:"rtpPortStart,omitempty"`
+	RTPPortEnd     *int              `json:"rtpPortEnd,omitempty"`
 }
 
 // NodeService 节点 CRUD + 状态切换
@@ -236,6 +262,8 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		RecoveryRequired:    n.RecoveryRequired,
 		RecoveryReason:      publicNodeRecoveryReason(n),
 		RecoveryFingerprint: publicNodeRecoveryFingerprint(n),
+		RTPReceiveMode:      n.EffectiveRTPReceiveMode(),
+		RTPProxyPort:        n.RTPProxyPort,
 		RTPPortStart:        n.RTPPortStart,
 		RTPPortEnd:          n.RTPPortEnd,
 		Stats:               n.Stats,
@@ -431,7 +459,48 @@ func validateNodeFields(host string, apiPort, weight, rtpStart, rtpEnd int, apiS
 	return nil
 }
 
+func validateReceiveMode(mode string, port int) error {
+	if mode != "single" && mode != "multi" {
+		return fmt.Errorf("收流端口模式非法: %q", mode)
+	}
+	if mode == "single" && (port < 1024 || port > 65534) {
+		return fmt.Errorf("单端口收流端口需在 1024-65534 之间")
+	}
+	return nil
+}
+
+func validateSinglePortConfig(n *node.Node, config map[string]string) error {
+	if n.EffectiveRTPReceiveMode() != "single" {
+		return nil
+	}
+	actual, err := strconv.Atoi(config["rtp_proxy.port"])
+	if err != nil || actual != n.RTPProxyPort {
+		e := &RTPListenerMismatchError{RequestedPort: n.RTPProxyPort, Reason: "config_unavailable"}
+		if err == nil {
+			e.ActualPort, e.HasActual = actual, true
+			e.Reason = "port_mismatch"
+			if actual == 0 {
+				e.Reason = "listener_disabled"
+			}
+		}
+		return e
+	}
+	return nil
+}
+
 func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
+	mode := req.RTPReceiveMode
+	if mode == "" {
+		mode = "multi"
+	}
+	port := req.RTPProxyPort
+	if port == 0 && mode == "multi" {
+		port = 10000
+	}
+	if err := validateReceiveMode(mode, port); err != nil {
+		return nil, err
+	}
+
 	weight := req.Weight
 	if weight == 0 {
 		weight = 50
@@ -465,6 +534,8 @@ func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 		Weight:          weight,
 		Tags:            cloneTags(req.Tags),
 		State:           node.StateActive,
+		RTPReceiveMode:  mode,
+		RTPProxyPort:    port,
 		RTPPortStart:    rtpStart,
 		RTPPortEnd:      rtpEnd,
 	}, nil
@@ -503,8 +574,12 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 	}
 
 	// 1. 先 probe 探测连通性
-	if _, err = s.probe.GetServerConfig(ctx, tmp); err != nil {
+	config, err := s.probe.GetServerConfig(ctx, tmp)
+	if err != nil {
 		return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", req.Host, req.APIPort, redactNodeError(err, tmp))
+	}
+	if err := validateSinglePortConfig(tmp, config); err != nil {
+		return nil, err
 	}
 
 	// 2. 入库 + 加内存(Registry.Add 内部 Repo.Create)
@@ -571,6 +646,18 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	if req.Tags != nil {
 		candidate.Tags = cloneTags(req.Tags)
 	}
+	if req.RTPReceiveMode != nil {
+		if *req.RTPReceiveMode == "" {
+			return nil, fmt.Errorf("收流端口模式不能为空")
+		}
+		candidate.RTPReceiveMode = *req.RTPReceiveMode
+	}
+	if req.RTPProxyPort != nil {
+		candidate.RTPProxyPort = *req.RTPProxyPort
+	}
+	if err := validateReceiveMode(candidate.EffectiveRTPReceiveMode(), candidate.RTPProxyPort); err != nil {
+		return nil, err
+	}
 	if req.RTPPortStart != nil {
 		candidate.RTPPortStart = *req.RTPPortStart
 	}
@@ -592,6 +679,16 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 			// candidate has not reached Registry yet: the old snapshot remains
 			// authoritative and no persistence/write-back is attempted.
 			return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", candidate.Host, candidate.APIPort, redactNodeError(err, candidate))
+		}
+	}
+
+	if candidate.EffectiveRTPReceiveMode() == "single" {
+		config, err := s.probe.GetServerConfig(ctx, candidate)
+		if err != nil {
+			return nil, redactNodeError(err, candidate)
+		}
+		if err := validateSinglePortConfig(candidate, config); err != nil {
+			return nil, err
 		}
 	}
 

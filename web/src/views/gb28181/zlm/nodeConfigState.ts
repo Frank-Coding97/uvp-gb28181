@@ -77,6 +77,7 @@ export function isNetworkPortChange(key: string) {
     key === "rtmp.sslport" ||
     key === "rtsp.port" ||
     key === "rtsp.sslport" ||
+    key === "rtp_proxy.port" ||
     key === "rtp_proxy.port_range" ||
     key === "shell.port"
   );

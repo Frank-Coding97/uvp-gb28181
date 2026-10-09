@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import {
   createZLMNode,
+  getZLMNodeConfig,
   probeZLMNode,
   updateZLMNode,
   type CreateZLMNodeReq,
@@ -49,12 +50,27 @@ const protocolItems = computed(() => {
 
 watch(
   () => [props.visible, props.node] as const,
-  ([visible]) => {
+  async ([visible], _previous, onCleanup) => {
+    let cancelled = false;
+    onCleanup(() => {
+      cancelled = true;
+    });
     if (!visible) return;
     form.value = createNodeFormState(props.node);
     errors.value = {};
     currentStep.value = 1;
     probeResult.value = null;
+    if (props.node) {
+      try {
+        const response = await getZLMNodeConfig(props.node.id);
+        if (cancelled) return;
+        if (response.code !== 0 || !response.data) throw new Error("读取节点配置失败");
+        const item = response.data.groups.flatMap(group => group.items).find(item => item.key === "rtp_proxy.port");
+        form.value.rtpProxyPort = item?.value ?? "";
+      } catch (error) {
+        if (!cancelled) Message.error(`读取实际收流端口失败：${zlmErrorPresentation(error).label}`);
+      }
+    }
   },
   { immediate: true }
 );
@@ -75,7 +91,9 @@ function handleVisibleUpdate(value: boolean) {
 }
 
 async function handleProbe() {
-  const nextErrors = validateNodeForm(form.value, false);
+  // The fixed listener is unknown until this read succeeds.
+  const connectionForm = { ...form.value, rtpReceiveMode: "multi" as const };
+  const nextErrors = validateNodeForm(connectionForm, false);
   errors.value = nextErrors;
   if (Object.keys(nextErrors).length > 0) {
     Message.warning("请先完整填写必填参数");
@@ -84,10 +102,11 @@ async function handleProbe() {
 
   loading.value = true;
   try {
-    const request = buildNodeRequest(form.value, false) as CreateZLMNodeReq;
+    const request = buildNodeRequest(connectionForm, false) as CreateZLMNodeReq;
     const response = await probeZLMNode(request);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "读取 ZL 信息失败");
     probeResult.value = response.data;
+    form.value.rtpProxyPort = String(response.data.serverConfig.rtpProxyPort);
     currentStep.value = 2;
   } catch (error) {
     Message.error(zlmErrorPresentation(error).label);
@@ -120,7 +139,7 @@ async function handleSubmit() {
     if (response.code !== 0) throw new Error(response.message || "节点保存失败");
 
     saved = true;
-    Message.success(editing.value ? "候选连接已验证并更新" : "节点已验证并创建");
+    Message.success(editing.value ? "节点配置已保存，收流模式仅影响新会话" : "节点已验证并创建");
   } catch (error) {
     Message.error(zlmErrorPresentation(error).label);
   } finally {
@@ -240,7 +259,31 @@ async function handleSubmit() {
           />
           <div class="form-tip">0 表示不参与加权调度；不会在输入时静默修正数值。</div>
         </a-form-item>
-
+      </template>
+      <a-form-item label="收流端口模式">
+        <a-space>
+          <span :class="{ 'form-tip': form.rtpReceiveMode !== 'single' }">单端口</span>
+          <a-switch v-model="form.rtpReceiveMode" checked-value="multi" unchecked-value="single" aria-label="收流端口模式" />
+          <span :class="{ 'form-tip': form.rtpReceiveMode !== 'multi' }">多端口</span>
+        </a-space>
+        <div class="form-tip">保存后仅影响新会话，已有会话继续使用原模式。固定播放地址需使用多端口。</div>
+      </a-form-item>
+      <a-form-item
+        v-if="form.rtpReceiveMode === 'single'"
+        label="RTP 收流端口"
+        :validate-status="errors.rtpProxyPort ? 'error' : undefined"
+        :help="errors.rtpProxyPort"
+      >
+        <a-input
+          v-model="form.rtpProxyPort"
+          readonly
+          placeholder="连接节点后读取"
+          aria-label="RTP 单端口"
+          @blur="validateField('rtpProxyPort')"
+        />
+        <div class="form-tip">从 ZLM 实时读取，只读显示。修改端口请前往节点“服务配置”；0 表示单端口未启用。</div>
+      </a-form-item>
+      <template v-else>
         <a-form-item
           label="RTP 端口范围"
           :validate-status="errors.rtpPortStart || errors.rtpPortEnd ? 'error' : undefined"
@@ -265,7 +308,7 @@ async function handleSubmit() {
               @blur="validateField('rtpPortEnd')"
             />
           </a-space>
-          <div class="form-tip">范围 1024-65535，结束端口不得小于起始端口。</div>
+          <div class="form-tip">范围 1024-65535，结束端口必须大于起始端口。</div>
         </a-form-item>
       </template>
 

@@ -164,3 +164,21 @@ func TestNodeRepo_UpdateCASRejectsStaleFullRow(t *testing.T) {
 	require.Equal(t, 80, after.Weight)
 	require.EqualValues(t, 2, after.Revision)
 }
+
+func TestNodeRepoReceiveModeSurvivesCASAndLegacyDefaults(t *testing.T) {
+	r := repo.NewMetaNodeRepo(setupDB(t))
+	ctx := context.Background()
+	id, err := r.Create(ctx, node.Node{Name: "receive", MediaServerUUID: "receive", State: node.StateActive})
+	require.NoError(t, err)
+	n, err := r.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, "multi", n.EffectiveRTPReceiveMode())
+	n.RTPReceiveMode, n.RTPProxyPort = "single", 12000
+	changed, err := r.UpdateCAS(ctx, *n, n.Revision)
+	require.NoError(t, err)
+	require.True(t, changed)
+	n, err = r.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, "single", n.RTPReceiveMode)
+	require.Equal(t, 12000, n.RTPProxyPort)
+}

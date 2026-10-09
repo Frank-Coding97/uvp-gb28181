@@ -31,6 +31,8 @@ type MetaNode struct {
 	RecoveryRequired    bool      `gorm:"column:recovery_required;not null;default:false;index:idx_recovery_required"`
 	RecoveryReason      string    `gorm:"column:recovery_reason;size:255;not null;default:''"`
 	RecoveryFingerprint string    `gorm:"column:recovery_fingerprint;size:64;not null;default:''"`
+	RTPReceiveMode      string    `gorm:"column:rtp_receive_mode;size:8;not null;default:multi"`
+	RTPProxyPort        int       `gorm:"column:rtp_proxy_port;not null;default:10000"`
 	RTPPortStart        int       `gorm:"column:rtp_port_start;not null;default:30000"`
 	RTPPortEnd          int       `gorm:"column:rtp_port_end;not null;default:35000"`
 	CreatedAt           time.Time `gorm:"column:created_at"`
@@ -72,6 +74,8 @@ func (m MetaNode) ToDomain() node.Node {
 		RecoveryRequired:    m.RecoveryRequired,
 		RecoveryReason:      m.RecoveryReason,
 		RecoveryFingerprint: m.RecoveryFingerprint,
+		RTPReceiveMode:      m.RTPReceiveMode,
+		RTPProxyPort:        m.RTPProxyPort,
 		RTPPortStart:        m.RTPPortStart,
 		RTPPortEnd:          m.RTPPortEnd,
 		CreatedAt:           m.CreatedAt,
@@ -105,6 +109,8 @@ func fromDomain(n node.Node) MetaNode {
 		RecoveryRequired:    n.RecoveryRequired,
 		RecoveryReason:      n.RecoveryReason,
 		RecoveryFingerprint: n.RecoveryFingerprint,
+		RTPReceiveMode:      n.EffectiveRTPReceiveMode(),
+		RTPProxyPort:        n.RTPProxyPort,
 		RTPPortStart:        n.RTPPortStart,
 		RTPPortEnd:          n.RTPPortEnd,
 		CreatedAt:           n.CreatedAt,
@@ -205,6 +211,8 @@ func (r *MetaNodeRepo) UpdateCAS(ctx context.Context, n node.Node, expectedRevis
 		"recovery_required":    row.RecoveryRequired,
 		"recovery_reason":      row.RecoveryReason,
 		"recovery_fingerprint": row.RecoveryFingerprint,
+		"rtp_receive_mode":     row.RTPReceiveMode,
+		"rtp_proxy_port":       row.RTPProxyPort,
 		"rtp_port_start":       row.RTPPortStart,
 		"rtp_port_end":         row.RTPPortEnd,
 		"created_at":           row.CreatedAt,

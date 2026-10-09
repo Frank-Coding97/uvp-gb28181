@@ -8,6 +8,9 @@ const CapacityThresholdCPU = 0.8
 
 // PortUsage 当前已用 RTP 端口数 / 端口范围总数;无端口范围返 0
 func (n Node) PortUsage() float64 {
+	if n.EffectiveRTPReceiveMode() == "single" {
+		return 0
+	}
 	total := n.RTPPortEnd - n.RTPPortStart
 	if total <= 0 {
 		return 0

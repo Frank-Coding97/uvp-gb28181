@@ -264,6 +264,21 @@ func TestZLMNodeAPI_Update(t *testing.T) {
 	require.Equal(t, float64(90), dto["weight"])
 }
 
+func TestZLMNodeAPI_UpdateReportsReceiveConfigurationReason(t *testing.T) {
+	r, _ := setupRouter(t)
+	_, resp := do(t, r, "POST", "/api/gb28181/zlm/nodes", service.CreateNodeReq{
+		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "fixture-secret",
+	})
+	id := pathInt(int64(resp["data"].(map[string]any)["id"].(float64)))
+	mode, port := "single", 10000
+	_, rejected := do(t, r, "PUT", "/api/gb28181/zlm/nodes/"+id, service.UpdateNodeReq{
+		RTPReceiveMode: &mode, RTPProxyPort: &port,
+	})
+	require.Contains(t, rejected["message"], "单端口")
+	require.Contains(t, rejected["message"], "填写端口为 10000")
+	require.NotContains(t, rejected["message"], "fixture-secret")
+}
+
 func pathInt(id int64) string {
 	if id == 0 {
 		return "0"

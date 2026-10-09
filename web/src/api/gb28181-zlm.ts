@@ -36,6 +36,8 @@ export interface ZLMNode {
   recoveryRequired: boolean;
   recoveryReason?: string;
   recoveryFingerprint?: string;
+  rtpReceiveMode?: "single" | "multi";
+  rtpProxyPort?: number;
   rtpPortStart: number;
   rtpPortEnd: number;
   stats: ZLMNodeStats;
@@ -56,6 +58,8 @@ export interface CreateZLMNodeReq {
   apiSecret: string;
   weight?: number;
   tags?: Record<string, string>;
+  rtpReceiveMode?: "single" | "multi";
+  rtpProxyPort?: number;
   rtpPortStart?: number;
   rtpPortEnd?: number;
 }
@@ -91,6 +95,8 @@ export interface UpdateZLMNodeReq {
   apiSecret?: string;
   weight?: number;
   tags?: Record<string, string>;
+  rtpReceiveMode?: "single" | "multi";
+  rtpProxyPort?: number;
   rtpPortStart?: number;
   rtpPortEnd?: number;
 }

@@ -114,6 +114,15 @@ func (zc *ZLMNodeController) Update(c *gin.Context) {
 			zc.FailAndAbort(c, "节点不存在", err)
 			return
 		}
+		if errors.Is(err, service.ErrRTPListenerMismatch) {
+			message := "单端口监听未启用或端口不一致，请检查节点服务配置并重启媒体节点"
+			var detail *service.RTPListenerMismatchError
+			if errors.As(err, &detail) {
+				message = detail.Error()
+			}
+			zc.FailAndAbort(c, message, err)
+			return
+		}
 		zc.FailAndAbort(c, "更新节点失败", err)
 		return
 	}

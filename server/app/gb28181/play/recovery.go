@@ -82,7 +82,7 @@ func (s *Service) RecoverLiveSessions(ctx context.Context) (RecoveryStats, error
 		mode := LiveModeDynamic
 		if _, _, parseErr := ParseFixedStreamID(channel.StreamID); parseErr == nil {
 			mode = LiveModeFixed
-		} else if channel.StreamID != ssrc {
+		} else if singleID, _ := zlm.SinglePortStreamID(ssrc); channel.StreamID != ssrc && channel.StreamID != singleID {
 			stats.Skipped++
 			continue
 		}

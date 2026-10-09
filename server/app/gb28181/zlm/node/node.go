@@ -39,6 +39,8 @@ type Node struct {
 	RecoveryRequired    bool   // 外部配置收敛不确定时 fail-close
 	RecoveryReason      string // 安全、有限长的恢复原因
 	RecoveryFingerprint string // candidate endpoint 的不透明 SHA-256 指纹
+	RTPReceiveMode      string // single or multi; empty legacy value means multi
+	RTPProxyPort        int    // fixed shared RTP listener
 	RTPPortStart        int    // rtp_proxy.port_range 起
 	RTPPortEnd          int    // rtp_proxy.port_range 止
 	Stats               Stats  // 实时状态,内存,心跳更新
@@ -132,4 +134,12 @@ func (n Node) IsEnabled() bool {
 // IsSchedulable is the shared admission predicate for new work.
 func (n Node) IsSchedulable() bool {
 	return n.IsActive() && n.IsEnabled()
+}
+
+// EffectiveRTPReceiveMode preserves legacy multi-port nodes.
+func (n Node) EffectiveRTPReceiveMode() string {
+	if n.RTPReceiveMode == "" {
+		return "multi"
+	}
+	return n.RTPReceiveMode
 }

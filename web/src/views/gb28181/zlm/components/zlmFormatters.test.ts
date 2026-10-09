@@ -34,4 +34,24 @@ describe("ZLM shared formatters", () => {
     expect(zlmErrorPresentation({ response: { status: 409 } })).toMatchObject({ label: "目标状态已变化，请重新确认" });
     expect(zlmErrorPresentation(new Error("apiSecret=hidden"))).toMatchObject({ label: "请求失败，请稍后重试" });
   });
+
+  it("shows a safe receive configuration reason for rejected node updates", () => {
+    const detail =
+      "单端口监听未启用或端口不一致：节点配置端口为 20000，填写端口为 10000。请核对端口；修改节点服务配置后需重启媒体节点再保存";
+    expect(zlmErrorPresentation({ response: { status: 400, data: { message: detail } } })).toMatchObject({
+      label: detail,
+      retryable: false
+    });
+    expect(
+      zlmErrorPresentation({
+        response: {
+          status: 400,
+          data: {
+            message: "apiSecret=hidden",
+            data: { reason: "rtp_listener_mismatch" }
+          }
+        }
+      })
+    ).toMatchObject({ label: "单端口监听未启用或端口不一致，请检查节点服务配置并重启媒体节点", retryable: false });
+  });
 });

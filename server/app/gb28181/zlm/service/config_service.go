@@ -82,6 +82,7 @@ var configCatalog = []ConfigGroup{
 			{Key: "rtmp.sslport", Default: "0", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTMPS 端口，0 表示禁用"},
 			{Key: "rtsp.port", Default: "554", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTSP 端口，0 表示禁用"},
 			{Key: "rtsp.sslport", Default: "0", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTSPS 端口，0 表示禁用"},
+			{Key: "rtp_proxy.port", Default: "10000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTP 单端口监听，0 表示禁用；修改后需重启节点并同步节点登记的单端口端口号"},
 			{Key: "rtp_proxy.port_range", Default: "30000-35000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTP 多端口收流范围；修改后还需同步节点登记的 RTP 收流范围"},
 			{Key: "shell.port", Default: "9000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "telnet 调试端口，0 表示禁用"},
 		},
@@ -533,7 +534,7 @@ func validateNetworkPortConfig(key, value string) error {
 		}
 		return nil
 	}
-	allowDisabled := key == "http.sslport" || key == "rtmp.port" || key == "rtmp.sslport" || key == "rtsp.port" || key == "rtsp.sslport" || key == "shell.port"
+	allowDisabled := key == "rtp_proxy.port" || key == "http.sslport" || key == "rtmp.port" || key == "rtmp.sslport" || key == "rtsp.port" || key == "rtsp.sslport" || key == "shell.port"
 	isPort := key == "http.port" || allowDisabled
 	if !isPort {
 		return nil
@@ -543,7 +544,11 @@ func validateNetworkPortConfig(key, value string) error {
 	if allowDisabled {
 		minimum = 0
 	}
-	if err != nil || port < minimum || port > 65535 {
+	maximum := 65535
+	if key == "rtp_proxy.port" {
+		maximum = 65534
+	}
+	if err != nil || port < minimum || port > maximum {
 		if allowDisabled {
 			return fmt.Errorf("%w: %s 必须为 0-65535 的整数，0 表示禁用", ErrInvalidConfigValue, key)
 		}

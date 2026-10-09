@@ -94,6 +94,14 @@ function errorStatus(error: unknown) {
 }
 
 export function zlmErrorPresentation(error: unknown): ZLMErrorPresentation {
+  const responseMessage = (error as { response?: { data?: { message?: string } } } | null)?.response?.data?.message;
+  if (responseMessage?.includes("单端口监听未启用或端口不一致")) {
+    return { label: responseMessage, retryable: false };
+  }
+  const responseData = (error as { response?: { data?: { data?: { reason?: string } } } } | null)?.response?.data?.data;
+  if (responseData?.reason === "rtp_listener_mismatch") {
+    return { label: "单端口监听未启用或端口不一致，请检查节点服务配置并重启媒体节点", retryable: false };
+  }
   switch (errorStatus(error)) {
     case 400:
       return { label: "请求参数无效", retryable: false };

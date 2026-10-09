@@ -168,3 +168,30 @@ describe("ZLM node form state", () => {
     expect(source).toContain('class="probe-details" :column="2"');
   });
 });
+
+describe("receive port mode", () => {
+  it("never guesses a fixed listener port from a node registration", () => {
+    expect(createNodeFormState().rtpProxyPort).toBe("");
+    expect(createNodeFormState({ ...existingNode, rtpProxyPort: 10000 }).rtpProxyPort).toBe("");
+  });
+  it("keeps legacy nodes on multi-port and round trips the single-port selection", () => {
+    expect(createNodeFormState(existingNode).rtpReceiveMode).toBe("multi");
+    const form = createNodeFormState({ ...existingNode, rtpReceiveMode: "single", rtpProxyPort: 10000 });
+    expect(form.rtpProxyPort).toBe("");
+    form.rtpProxyPort = "40000";
+    expect(buildNodeRequest(form, true)).toMatchObject({ rtpReceiveMode: "single", rtpProxyPort: 40000 });
+  });
+  it("validates only the active receive port fields and reserves the RTCP successor", () => {
+    const form = createNodeFormState(existingNode);
+    form.rtpReceiveMode = "single";
+    form.rtpProxyPort = "65535";
+    expect(validateNodeForm(form, true)).toHaveProperty("rtpProxyPort");
+    form.rtpProxyPort = "10000";
+    form.rtpPortStart = "";
+    form.rtpPortEnd = "";
+    expect(validateNodeForm(form, true)).toEqual({});
+    expect(buildNodeRequest(form, true)).not.toHaveProperty("rtpPortStart");
+    form.rtpReceiveMode = "multi";
+    expect(validateNodeForm(form, true)).toHaveProperty("rtpPortStart");
+  });
+});
