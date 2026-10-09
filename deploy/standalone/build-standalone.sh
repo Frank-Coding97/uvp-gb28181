@@ -400,6 +400,39 @@ chmod 0755 "$PKG/uvp-ctl.sh"
 #   （页面能开、登录页报 no such table），用户联想不到是因为少跑了一个脚本。
 [ -f "$DEPLOY_DIR/README.md" ] && cp "$DEPLOY_DIR/README.md" "$PKG/README.md"
 
+# ---- SIP 报文诊断加密密钥（每份包一份随机）----
+#
+# ⛔⛔⛔ 为什么必须在**出包时**生成、而不是让客户自己填（老板 2026-10-09 定）：
+#   报文诊断的加密密钥缺失时，后端**fail-closed 不落库**（安全，但功能彻底不可用），
+#   而health 只报 `invalid SIP trace encryption key`，**不说该怎么修**
+#   ⇒ 现场看到的是一个「菜单能进、列表永远空」的页面，
+#   没有任何线索指向「你得去 config.env 里加一行」。
+#   实测2026-10-09 就是这样：功能默认不可用，老板直接看到的。
+#
+#   安全取舍：密钥明文随包分发（与初始口令同级）。
+#   但报文里的密码字段本就依赖它加密落库 —— 能读到包的人本来就能读到初始口令，
+#   所以「不自动生成」换来的安全收益很有限，而「装完不可用」的代价是确定的。
+#   ⇒ 客户想更严可以自行换成自己的 32 字节值（见下面注释里的生成命令）。
+#
+# ⚠️ 换密钥后**历史密文解不开**，需要能接受丢历史再换。
+# ⚠️ 用 secrets 而不是 openssl rand：后者在本机/目标机的可用性不确定，
+#    而这里本来就依赖 python3（脚本里已在用它生成配置）。
+SIP_TRACE_KEY_ENV="UVP_SIP_TRACE_ENCRYPTION_KEY"
+SIP_TRACE_KEY="$("$PY" -c 'import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+if [ -z "$SIP_TRACE_KEY" ]; then
+  fail "生成 SIP 报文诊断密钥失败（python3 不可用？）"
+fi
+{
+  printf '\n'
+  printf '# ---- SIP 报文诊断加密密钥（打包时生成，每份包不同）----\n'
+  printf '# 报文里的密码字段用它加密后落库。缺失或无效则**整条报文不落库**\n'
+  printf '# （安全优先，但功能不可用且health 只报 invalid key，不提示怎么修）。\n'
+  printf '# 要换成自己的值：python3 -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"\n'
+  printf '# ⚠️ 换密钥后历史密文解不开，需能接受丢历史再换。\n'
+  printf '%s=%s\n' "$SIP_TRACE_KEY_ENV" "$SIP_TRACE_KEY"
+} > "$PKG/config.env"
+log "写入 $SIP_TRACE_KEY_ENV（32 字节随机，base64）"
+
 # --------------------------------------------------------------- 打包 ----
 
 mkdir -p "$OUT_DIR"
