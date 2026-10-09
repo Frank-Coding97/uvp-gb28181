@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -94,13 +95,23 @@ func (n Node) HasUsableSDPIP() bool {
 // EffectivePlaybackHost 返回播放 URL 使用的地址。
 // 旧节点未配置时回退到 API host,保持升级兼容。
 func (n Node) EffectivePlaybackHost() string {
-	if host := strings.TrimSpace(n.PlaybackHost); host != "" {
+	host := strings.TrimSpace(n.PlaybackHost)
+	if host != "" && !isLoopbackPlaybackHost(host) {
 		return host
 	}
 	if host := strings.TrimSpace(n.PlatformPlaybackHost); host != "" {
 		return host
 	}
 	return n.Host
+}
+
+func isLoopbackPlaybackHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Stats 实时状态(由心跳更新,内存表)

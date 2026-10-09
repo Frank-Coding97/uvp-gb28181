@@ -18,11 +18,13 @@ import (
 )
 
 type fakeStreamMonitor struct {
-	calls int
+	calls     int
+	streamIDs []string
 }
 
-func (f *fakeStreamMonitor) Get(context.Context, string) (*streammonitor.Snapshot, error) {
+func (f *fakeStreamMonitor) Get(_ context.Context, streamID string) (*streammonitor.Snapshot, error) {
 	f.calls++
+	f.streamIDs = append(f.streamIDs, streamID)
 	return &streammonitor.Snapshot{StreamID: "dept10-stream", Status: streammonitor.StatusOnline}, nil
 }
 
@@ -53,4 +55,30 @@ func TestStreamMonitorControllerReturns503WhenUnconfigured(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/play/stream/monitor", nil))
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+func TestStreamMonitorControllerResolvesLegacySSRCToCanonicalStreamID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newScopedDeviceDB(t)
+	seedDeptScopedUser(t, db, 100, 10)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{
+		DeviceID:    "device",
+		ChannelID:   "channel",
+		StreamID:    "device_channel",
+		CurrentSSRC: "0100000001",
+		OwnerDeptID: 10,
+	}).Error)
+	service := &fakeStreamMonitor{}
+	controller := gbcontrollers.NewStreamMonitorController(service)
+	controller.SetDB(func() *gorm.DB { return db })
+	app.Response = response.NewResponseHandler()
+
+	router := gin.New()
+	router.Use(gin.Recovery(), withClaims(100))
+	router.GET("/play/:streamId/monitor", controller.Get)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/play/0100000001/monitor", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, []string{"device_channel"}, service.streamIDs)
 }

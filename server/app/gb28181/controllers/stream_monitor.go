@@ -45,7 +45,7 @@ func (c *StreamMonitorController) Get(ctx *gin.Context) {
 	var channel gbmodels.GbChannel
 	result := c.dbFunc().WithContext(ctx.Request.Context()).
 		Scopes(ownerDeptScope(ctx)).
-		Select("id").
+		Select("id, stream_id, current_ssrc").
 		Where("stream_id = ?", streamID).
 		Limit(1).
 		Find(&channel)
@@ -54,11 +54,31 @@ func (c *StreamMonitorController) Get(ctx *gin.Context) {
 		return
 	}
 	if result.RowsAffected == 0 {
-		c.FailAndAbort(ctx, "流不存在", nil)
-		return
+		// Older playback responses exposed the SSRC as streamId. Resolve that
+		// legacy identifier to the channel's canonical stream ID before asking
+		// the media service for its snapshot.
+		channel = gbmodels.GbChannel{}
+		result = c.dbFunc().WithContext(ctx.Request.Context()).
+			Scopes(ownerDeptScope(ctx)).
+			Select("id, stream_id, current_ssrc").
+			Where("current_ssrc = ?", streamID).
+			Limit(1).
+			Find(&channel)
+		if result.Error != nil {
+			c.FailAndAbort(ctx, "查询流失败", result.Error)
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.FailAndAbort(ctx, "流不存在", nil)
+			return
+		}
 	}
 
-	snapshot, err := c.service.Get(ctx.Request.Context(), streamID)
+	canonicalStreamID := channel.StreamID
+	if canonicalStreamID == "" {
+		canonicalStreamID = streamID
+	}
+	snapshot, err := c.service.Get(ctx.Request.Context(), canonicalStreamID)
 	if errors.Is(err, streammonitor.ErrStreamOffline) {
 		response.SetBusinessResult(ctx, 1, false)
 		ctx.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "流已离线"})

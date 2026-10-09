@@ -34,6 +34,17 @@ func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
 	require.Equal(t, "203.0.113.10", n.EffectiveReceiveHost())
 }
 
+func TestNode_EffectivePlaybackHostSkipsLoopbackOverrideWhenPlatformHostExists(t *testing.T) {
+	n := node.Node{Host: "192.168.10.220", PlaybackHost: "127.0.0.1", PlatformPlaybackHost: "192.168.10.220"}
+	require.Equal(t, "192.168.10.220", n.EffectivePlaybackHost())
+
+	n.PlaybackHost = "localhost"
+	require.Equal(t, "192.168.10.220", n.EffectivePlaybackHost())
+
+	n.PlatformPlaybackHost = ""
+	require.Equal(t, "192.168.10.220", n.EffectivePlaybackHost())
+}
+
 // The SDP resolution order is the contract that keeps "signalling succeeds but
 // no picture" from happening: node sdp_ip → node receive_host → platform sdp_ip
 // → platform stream_ip. It must NEVER fall back to Host, because a single-host

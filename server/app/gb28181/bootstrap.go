@@ -488,7 +488,7 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		// 注入节点运行时。不存在配置时继续使用 config.yml defaults。
 		if row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background()); err == nil && row != nil {
 			tuning.HookIP = row.HookIP
-			tuning.StreamIP = platformStreamHost(row.StreamIP, cfg.ZLM.PlaybackHost)
+			tuning.StreamIP = platformStreamHost(row.StreamIP, cfg.ZLM.EffectivePlaybackHost())
 			zlmRegistry.SetPlatformPlaybackHost(tuning.StreamIP)
 			// SDP 地址是设备回推RTP 的目标,与播放地址是两个独立旋钮
 			// (NAT / 端口映射场景下两者常常不同)。
@@ -1657,7 +1657,7 @@ func reloadZLMPlatformMediaDefaults() error {
 	if row == nil {
 		return nil
 	}
-	streamHost := platformStreamHost(row.StreamIP, gbconfig.Load().ZLM.PlaybackHost)
+	streamHost := platformStreamHost(row.StreamIP, gbconfig.Load().ZLM.EffectivePlaybackHost())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, row.SDPIP, streamHost)
