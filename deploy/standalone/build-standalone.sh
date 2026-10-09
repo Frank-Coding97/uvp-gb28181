@@ -261,27 +261,44 @@ chmod 0755 "$PKG/bin/uvp-server"
 #   也可能有人手动 cp 了一个旧二进制进 server/bin/。
 #   ⇒ 无论走哪条路，这里都比一次 mtime：**产物比源码旧 = 拒绝出包**。
 #
+# ⛔⛔ 第一版把它包在 `if SKIP_BUILD != 1` 里，**逻辑写反了**：
+#   SKIP_BUILD=1 恰恰是「产物可能没重建」的场景，却正好跳过了检查 ——
+#   实测「touch 成10-01 + SKIP_BUILD=1」照样出包成功。
+#   ⇒ **断言必须无条件执行**；跳过构建时它就是唯一的守门人。
+#
 # ⭐ 判据用「产物 mtime 是否早于**最新改动的源码**」，而不是「早于脚本运行时间」——
-#   后者在刚build 完时会误报（同秒/时钟精度问题），而且抓不到"构建了但漏编了某文件"。
+#   后者在刚 build 完时会误报（同秒/时钟精度问题），而且抓不到"构建了但漏编了某文件"。
 assert_fresh() {
   local artifact="$1" label="$2" newest
   [ -e "$artifact" ] || fail "$label 不存在：$artifact"
-  # 源码目录里最新的 .go / .vue / .ts / .scss 文件
+  # 源码目录里最新的 .go / .vue / .ts / .scss 文件。
+  #
+  # ⛔⛔ 必须排除**构建时自动生成的声明文件**（实测踩过）：
+  #   web/src/auto-import.d.ts 由 vite 插件在**每次构建时重写**，
+  #   而后端二进制是在前端构建**之前**编译的（时间戳必然更早）
+  #   ⇒ 拿它当判据 ⇒ **每次出包都误报「二进制比源码旧」**，直接卡死流程。
+  #   ⚠️ 它确实被 git 跟踪（所以不能用「未跟踪」筛），只能按文件名排除。
+  #
+  # 判据要挑「人写的」文件：.d.ts 是类型声明、由工具生成；.vue/.go/.scss 才是。
   newest="$(find "$SERVER_DIR" "$WEB_DIR/src" -type f \
     \( -name '*.go' -o -name '*.vue' -o -name '*.ts' -o -name '*.scss' \) \
+    ! -name '*.d.ts' \
     -newer "$artifact" -print 2>/dev/null | head -1)"
   if [ -n "$newest" ]; then
     fail "$label 比源码旧，拒绝出包（否则会打出一个「看起来全新、跑起来是旧的」包）。
      产物: $artifact
      更新的源码: ${newest#$REPO_ROOT/}
      ⛔ 这就是本周反复踩的坑：所有出包断言都过，但包里跑的是旧代码。
-     解决：删掉产物重新构建，或用 UVP_SKIP_BUILD=0 强制自动构建。"
+     解决：删掉产物重新构建（或去掉 UVP_SKIP_BUILD 让脚本自动构建）。"
   fi
   log "  $label 新鲜度 OK"
 }
-if [ "$SKIP_BUILD" != "1" ]; then
-  assert_fresh "$SERVER_DIR/bin/uvp-server" "后端二进制"
+assert_fresh "$SERVER_DIR/bin/uvp-server" "后端二进制"
+if [ -f "$WEB_DIR/dist/index.html" ]; then
   assert_fresh "$WEB_DIR/dist/index.html" "前端产物"
+else
+  # 没产物时上面的自动构建应该已经建好了；真没有就报清楚
+  fail "前端产物不存在：$WEB_DIR/dist/index.html"
 fi
 
 log "复制 Redis（自带，包内跑，不连外部）"
