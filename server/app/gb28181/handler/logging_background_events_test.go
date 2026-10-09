@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/glebarez/sqlite"
@@ -153,11 +154,17 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 		DeviceID: deviceID, Name: "old-name", Manufacturer: "old-maker", Model: "old-model", Firmware: "old-firmware",
 	}).Error)
 	oldDB := app.GormDbMysql
+	oldSQLiteDB := app.GormDbSqlite
+	oldConfig := app.ConfigYml
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
-	app.GormDbMysql = db
+	app.GormDbMysql = nil
+	app.GormDbSqlite = db
+	app.ConfigYml = deviceInfoTestConfig{dbType: "sqlite"}
 	t.Cleanup(func() {
 		app.GormDbMysql = oldDB
+		app.GormDbSqlite = oldSQLiteDB
+		app.ConfigYml = oldConfig
 		require.NoError(t, sqlDB.Close())
 	})
 
@@ -180,6 +187,27 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 	require.Equal(t, "new-model", got.Model)
 	require.Equal(t, "firmware-secret-t14", got.Firmware)
 }
+
+type deviceInfoTestConfig struct{ dbType string }
+
+func (c deviceInfoTestConfig) ConfigFileChangeListen(...func()) {}
+func (deviceInfoTestConfig) Get(string) interface{}             { return nil }
+func (c deviceInfoTestConfig) GetString(key string) string {
+	if key == "gormv2.usedbtype" {
+		return c.dbType
+	}
+	return ""
+}
+func (deviceInfoTestConfig) GetBool(string) bool              { return false }
+func (deviceInfoTestConfig) GetInt(string) int                { return 0 }
+func (deviceInfoTestConfig) GetInt32(string) int32            { return 0 }
+func (deviceInfoTestConfig) GetInt64(string) int64            { return 0 }
+func (deviceInfoTestConfig) GetFloat64(string) float64        { return 0 }
+func (deviceInfoTestConfig) GetDuration(string) time.Duration { return 0 }
+func (deviceInfoTestConfig) GetStringSlice(string) []string   { return nil }
+func (deviceInfoTestConfig) GetUintSlice(string) []uint       { return nil }
+func (deviceInfoTestConfig) Set(string, interface{})          {}
+func (deviceInfoTestConfig) SaveConfig() error                { return nil }
 
 func TestLoggingDeviceInfoParseFailureIncludesStableReasonAndSIPIdentity(t *testing.T) {
 	_, sink := t14Runtime(t)

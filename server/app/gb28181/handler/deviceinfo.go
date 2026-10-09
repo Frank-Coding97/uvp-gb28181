@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -11,6 +12,28 @@ import (
 
 	"go.uber.org/zap"
 )
+
+// deviceInfoDB 返回当前配置方言对应的连接。
+// DeviceInfo 回写也必须和其余 GB28181 数据路径使用同一个数据库；只读
+// GormDbMysql 会让 SQLite/SQL Server/ PostgreSQL 部署在解析成功后静默丢失元数据。
+func deviceInfoDB() *gorm.DB {
+	if app.ConfigYml != nil {
+		switch strings.ToLower(strings.TrimSpace(app.ConfigYml.GetString("gormv2.usedbtype"))) {
+		case "sqlite":
+			return app.GormDbSqlite
+		case "sqlserver":
+			return app.GormDbSqlserver
+		case "postgresql", "postgres":
+			return app.GormDbPostgreSql
+		case "mysql", "":
+			return app.GormDbMysql
+		default:
+			return app.GormDbMysql
+		}
+	}
+	// 启动早期配置尚未装载时，兼容已有 MySQL 初始化顺序；没有连接则由调用方安全跳过。
+	return app.GormDbMysql
+}
 
 // HandleDeviceInfoResponse 处理一条 DeviceInfo 应答
 //
@@ -41,7 +64,7 @@ func HandleDeviceInfoResponse(ctx context.Context, body []byte, deviceID, callID
 		return
 	}
 
-	db := app.GormDbMysql
+	db := deviceInfoDB()
 	if db == nil {
 		logger.Debug("DB 未初始化,跳过 DeviceInfo 回写",
 			zap.String("event", "gb28181.deviceinfo.store_unavailable"),
