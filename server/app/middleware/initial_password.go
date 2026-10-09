@@ -12,7 +12,8 @@ import (
 func InitialPasswordMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if (c.Request.Method == http.MethodGet && c.FullPath() == "/api/users/profile") ||
-			(c.Request.Method == http.MethodPost && c.FullPath() == "/api/users/logout") {
+			(c.Request.Method == http.MethodPost && c.FullPath() == "/api/users/logout") ||
+			(c.Request.Method == http.MethodGet && c.FullPath() == "/api/sysMenu/getRouters") {
 			c.Next()
 			return
 		}

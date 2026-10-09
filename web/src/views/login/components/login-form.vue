@@ -35,7 +35,6 @@
         </a-form-item>
       </a-form>
     </div>
-    <InitialPasswordDialog v-if="mustChangePassword" @success="onInitialPasswordChanged" />
     <!-- <div class="register">注册账号</div> -->
   </div>
 </template>
@@ -48,7 +47,6 @@ import { computed, onMounted, ref } from "vue";
 import { getVerifyImgString } from "@/api/user";
 import { useSystemStore } from "@/store/modules/system";
 import { useSysConfigStore } from "@/store/modules/sys-config";
-import InitialPasswordDialog from "./InitialPasswordDialog.vue";
 
 import { storeToRefs } from "pinia";
 // 获取系统配置
@@ -136,9 +134,6 @@ const onLogin = async () => {
     // 加载用户信息
     await userStore.getUserInfo();
 
-    // 首次登录只允许停留在当前登录页完成初始密码修改，不加载业务路由。
-    if (mustChangePassword.value) return;
-
     // 加载路由信息
     await routeStore.initSetRouter();
     loginLoading.value = false;
@@ -148,8 +143,8 @@ const onLogin = async () => {
     // 跳转首页
     router.replace("/home");
 
-    // 设置字典
-    useSystemStore().setDictData();
+    // 初始密码修改完成前不加载业务字典，避免触发业务接口拦截。
+    if (!mustChangePassword.value) useSystemStore().setDictData();
   } catch (error) {
     console.error("登录失败:", error);
     //arcoMessage("error", typeof error === "string" ? error : "登录失败，请检查用户名和密码");
@@ -158,25 +153,6 @@ const onLogin = async () => {
   } finally {
     loginLoading.value = false;
   }
-};
-
-const onInitialPasswordChanged = async () => {
-  form.value.username = "";
-  form.value.password = "";
-  form.value.captchaValue = null;
-  form.value.captchaId = "";
-  captchaImgUrl.value = "";
-  // 后端修改成功时已撤销所有会话；同步清除浏览器令牌并刷新一次性默认提示。
-  await userStore.logOut();
-  loginConfigLoaded.value = false;
-  try {
-    await sysConfigStore.getConfig();
-    loginConfigLoaded.value = true;
-  } catch (error: unknown) {
-    console.warn("刷新登录配置失败:", error);
-  }
-  await router.replace("/login");
-  refreshCaptcha();
 };
 
 // 验证码

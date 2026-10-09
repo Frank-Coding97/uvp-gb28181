@@ -52,7 +52,7 @@ router.beforeEach(async (to: any, _: any, next: any) => {
   try {
     if (!userStore.initialPasswordStatusLoaded) await userStore.getUserInfo();
     if (userStore.mustChangePassword) {
-      return to.path === "/login" ? next() : next("/login");
+      return to.path === "/login" ? next("/home") : next();
     }
   } catch (error: any) {
     console.error("读取初始密码状态失败:", error);

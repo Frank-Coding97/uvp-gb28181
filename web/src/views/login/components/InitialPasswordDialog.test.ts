@@ -56,6 +56,13 @@ describe("initial password dialog", () => {
     expect(source).toContain("confirmPassword");
   });
 
+  it("shows a three-segment strength indicator while entering the password", () => {
+    expect(source).toContain("passwordStrength");
+    expect(source).toContain('v-for="segment in 3"');
+    expect(source).toContain("password-strength__segment");
+    expect(source).toContain("符合要求");
+  });
+
   it("submits matching passwords and emits success only after the API succeeds", async () => {
     const wrapper = mountDialog();
     const inputs = wrapper.findAll("input");

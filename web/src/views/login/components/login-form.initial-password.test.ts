@@ -12,12 +12,9 @@ describe("login initial-password flow", () => {
     expect(source).not.toContain("form.value.password = newConfig.defaultpassword");
   });
 
-  it("renders the forced dialog on the login page and clears credentials after completion", () => {
-    expect(source).toContain("InitialPasswordDialog");
-    expect(source).toContain("mustChangePassword");
-    expect(source).toContain("await userStore.logOut()");
-    expect(source).toContain('form.value.username = ""');
-    expect(source).toContain('form.value.password = ""');
-    expect(source).toContain("sysConfigStore.getConfig");
+  it("enters the system shell before the forced password dialog is shown", () => {
+    expect(source).not.toContain("InitialPasswordDialog");
+    expect(source).toContain("await routeStore.initSetRouter()");
+    expect(source).toContain('router.replace("/home")');
   });
 });

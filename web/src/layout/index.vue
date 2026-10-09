@@ -3,6 +3,7 @@
     <s-lang-provider>
       <component :is="layouts[resolvedLayoutType]" />
       <PlaybackConsoleHost />
+      <InitialPasswordDialog v-if="mustChangePassword" @success="onInitialPasswordChanged" />
     </s-lang-provider>
   </div>
 </template>
@@ -11,6 +12,20 @@
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import PlaybackConsoleHost from "@/layout/components/PlaybackConsoleHost.vue";
+import InitialPasswordDialog from "@/views/login/components/InitialPasswordDialog.vue";
+import { useUserStoreHook } from "@/store/modules/user";
+import { useSysConfigStore } from "@/store/modules/sys-config";
+import { useRouter } from "vue-router";
+
+const userStore = useUserStoreHook();
+const { mustChangePassword } = storeToRefs(userStore);
+const sysConfigStore = useSysConfigStore();
+const router = useRouter();
+const onInitialPasswordChanged = async () => {
+  await userStore.logOut();
+  await sysConfigStore.getConfig();
+  await router.replace("/login");
+};
 
 const themeStore = useThemeConfig();
 const { layoutType } = storeToRefs(themeStore);
