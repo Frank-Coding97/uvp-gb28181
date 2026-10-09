@@ -2,7 +2,7 @@
   <div class="layout-main-shell">
     <a-watermark :content="watermark" v-bind="watermarkConfig" class="layout-main-watermark">
       <a-layout-content class="layout-main-content">
-        <router-view v-slot="{ Component, route }">
+        <router-view v-if="!mustChangePassword" v-slot="{ Component, route }">
           <s-main-transition>
             <keep-alive :include="cacheRoutes">
               <component
@@ -23,6 +23,8 @@ import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { resolveMediaRouteRenderKey } from "./mediaRouteKey";
+import { useUserStoreHook } from "@/store/modules/user";
+const { mustChangePassword } = storeToRefs(useUserStoreHook());
 const themeStore = useThemeConfig();
 let { refreshPage, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
 const routerStore = useRouteConfigStore();

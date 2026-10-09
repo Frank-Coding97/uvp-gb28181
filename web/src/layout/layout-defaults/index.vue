@@ -5,7 +5,7 @@
       <Header />
       <Main />
       <Footer v-if="isFooter" />
-      <SipSetupHost />
+      <SipSetupHost v-if="!mustChangePassword" />
     </a-layout>
   </a-layout>
 </template>
@@ -19,6 +19,8 @@ import SipSetupHost from "@/layout/components/SipSetupHost.vue";
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import { useUserStoreHook } from "@/store/modules/user";
+const { mustChangePassword } = storeToRefs(useUserStoreHook());
 
 defineOptions({ name: "LayoutDefaults" });
 

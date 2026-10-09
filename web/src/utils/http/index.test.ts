@@ -8,6 +8,7 @@ const interceptorHandlers = vi.hoisted(() => ({
 }));
 const logout = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+const currentRoute = vi.hoisted(() => ({ value: { fullPath: "/online" } }));
 
 vi.mock("axios", () => ({
   default: {
@@ -34,7 +35,7 @@ vi.mock("@/utils/auth", () => ({
   formatToken: vi.fn()
 }));
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ logOut: logout }) }));
-vi.mock("@/router", () => ({ default: { push, currentRoute: { value: { fullPath: "/online" } } } }));
+vi.mock("@/router", () => ({ default: { push, currentRoute } }));
 
 import { http } from "./index";
 
@@ -46,6 +47,7 @@ describe("HTTP error messages", () => {
     messageError.mockReset();
     logout.mockReset();
     push.mockReset();
+    currentRoute.value.fullPath = "/online";
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
@@ -59,6 +61,28 @@ describe("HTTP error messages", () => {
     await expect(http.request("get", "/failure")).rejects.toBeTruthy();
 
     expect(messageError).toHaveBeenCalledWith("请求失败");
+  });
+
+  it("does not nest login redirects for late unauthorized responses", async () => {
+    currentRoute.value.fullPath = "/login?redirect=/home";
+    await expect(
+      interceptorHandlers.responseRejected!({ response: { status: 401 }, config: { url: "/api/home" } })
+    ).rejects.toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("handles unauthorized responses through login navigation without raw token toasts", async () => {
+    axiosRequest.mockRejectedValue({ response: { status: 401, data: { message: "token is required" } } });
+    await expect(http.request("get", "/api/home")).rejects.toBeTruthy();
+    expect(messageError).not.toHaveBeenCalled();
+  });
+
+  it("leaves initial-password restrictions to the forced dialog without stacking errors", async () => {
+    axiosRequest.mockRejectedValue({
+      response: { status: 403, data: { mustChangePassword: true, message: "请先修改初始密码" } }
+    });
+    await Promise.allSettled([http.request("get", "/home"), http.request("get", "/status")]);
+    expect(messageError).not.toHaveBeenCalled();
   });
 
   it("suppresses the global message for an explicitly silent request", async () => {

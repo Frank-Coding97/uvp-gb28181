@@ -59,6 +59,7 @@ class Http {
     useUserStoreHook().logOut();
     // 清空待执行的请求队列
     Http.requests = [];
+    if (router.currentRoute.value.fullPath.split("?")[0] === "/login") return;
     //Message.error("登录状态已过期，请重新登录");
     router.push({
       path: "/login",
@@ -204,8 +205,17 @@ class Http {
             reject(error);
             return;
           }
-          console.error("http.error:", error);
           const { response } = error;
+          if (response?.status === 401 && !config.url?.includes("/login")) {
+            reject(error);
+            return;
+          }
+          if (response?.status === 403 && response.data?.mustChangePassword === true) {
+            useUserStoreHook().mustChangePassword = true;
+            reject(error);
+            return;
+          }
+          console.error("http.error:", error);
           if (config.showErrorMessage === false) {
             reject(error);
             return;

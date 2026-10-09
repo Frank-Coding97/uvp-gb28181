@@ -12,15 +12,17 @@
     <p class="initial-password-dialog__rule">{{ passwordRuleHint }}</p>
     <a-form :model="form" layout="vertical" @submit="onSubmit">
       <a-form-item label="新密码" required>
-        <a-input-password v-model="form.password" placeholder="请输入新密码" allow-clear />
-        <div class="password-strength" aria-live="polite">
-          <span
-            v-for="segment in 3"
-            :key="segment"
-            class="password-strength__segment"
-            :class="{ active: passwordStrength >= segment, valid: passwordStrength === 3 }"
-          />
-          <span class="password-strength__label">{{ passwordStrengthLabel }}</span>
+        <div class="initial-password-dialog__password-field">
+          <a-input-password v-model="form.password" placeholder="请输入新密码" allow-clear />
+          <div class="password-strength" aria-live="polite">
+            <span
+              v-for="segment in 3"
+              :key="segment"
+              class="password-strength__segment"
+              :class="{ active: passwordStrength >= segment, valid: passwordStrength === 3 }"
+            />
+            <span class="password-strength__label">{{ passwordStrengthLabel }}</span>
+          </div>
         </div>
       </a-form-item>
       <a-form-item label="确认新密码" required>
@@ -113,6 +115,11 @@ const onSubmit = async ({ errors }: { errors?: Record<string, unknown> }) => {
   margin-top: 8px;
 }
 
+.initial-password-dialog__password-field {
+  width: 100%;
+  min-width: 0;
+}
+
 .password-strength__segment {
   flex: 1;
   height: 4px;
@@ -130,9 +137,11 @@ const onSubmit = async ({ errors }: { errors?: Record<string, unknown> }) => {
 }
 
 .password-strength__label {
+  flex-shrink: 0;
   min-width: 52px;
   font-size: 12px;
   color: var(--color-text-3);
   text-align: right;
+  white-space: nowrap;
 }
 </style>
