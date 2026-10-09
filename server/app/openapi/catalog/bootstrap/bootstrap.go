@@ -264,6 +264,10 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 
 // disableRetiredPlaybackGroup retires the former playback category when it is
 // empty. No playback capability is seeded or migrated anymore.
+//
+// ⛔ `group.ID == 0` 同样必须当"没查到"处理：Model(&group) 传值时主键为 0
+// 会拼不出 WHERE，发出的就是无 WHERE 的全表 UPDATE。理由与
+// retireRemovedPlaybackCapability 的注释一致。
 func disableRetiredPlaybackGroup(ctx context.Context, tx *gorm.DB, updatedBy uint) error {
 	var group openapimodels.CapabilityGroup
 	query := tx.WithContext(ctx).Where("code = ? AND deleted_at IS NULL", "playback").First(&group)
@@ -272,6 +276,9 @@ func disableRetiredPlaybackGroup(ctx context.Context, tx *gorm.DB, updatedBy uin
 	}
 	if query.Error != nil {
 		return query.Error
+	}
+	if group.ID <= 0 {
+		return nil
 	}
 	var count int64
 	if err := tx.WithContext(ctx).Model(&openapimodels.Capability{}).
@@ -290,6 +297,24 @@ func disableRetiredPlaybackGroup(ctx context.Context, tx *gorm.DB, updatedBy uin
 // retireRemovedPlaybackCapability keeps old catalog identities/audit rows
 // queryable while making the removed external operation unavailable to new
 // releases and grants.
+//
+// ⛔⛔ `capability.ID == 0` 必须当"没查到"处理，不能继续往下走。
+//
+// 现场证据（220 绿色包，2026-10-09 18:55，SQL 日志逐条）：
+//
+//	select ... FROM `sys_openapi_capability` WHERE scope IN (...)   rows=0
+//	UPDATE `sys_openapi_capability` SET status=?,updated_by=?,updated_at=?  ← 无 WHERE
+//	→ gorm_missing_where_clause → panic → 整个后端退出、平台完全不可用
+//
+// 机制：`Model(&capability)` 传的是**值**，GORM 从字段值里取主键；
+// 主键为 0 就拼不出 `WHERE id = ...`，于是发出无 WHERE 的全表 UPDATE，
+// GORM 拒绝执行并返回 ErrMissingWhereClause。
+//
+// ⛔ 为什么上面那句 ErrRecordNotFound 判断没拦住、为什么这不是"加个 if 就完事"：
+// 那句判断只覆盖"查询返回了 error"。这里真正发生的是**查询没报错、但也没查到行**，
+// 零值对象被继续使用 —— 与本仓反复出现的 masked-not-found 同源
+// （错误被当成成功，零值覆盖真实数据）。所以必须显式判主键。
+// disableRetiredPlaybackGroup（下一函数）有同样形态，同样加了守卫。
 func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy uint) error {
 	var capability openapimodels.Capability
 	query := tx.WithContext(ctx).
@@ -300,6 +325,11 @@ func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy
 	}
 	if query.Error != nil {
 		return query.Error
+	}
+	if capability.ID <= 0 {
+		// 没报错但也没有行 ⇒ capability 是零值。继续执行会发出无 WHERE 的
+		// 全表 UPDATE，宁可什么都不做。
+		return nil
 	}
 	if capability.Status != openapimodels.CatalogStatusDisabled {
 		if err := tx.WithContext(ctx).Model(&capability).Updates(map[string]any{
