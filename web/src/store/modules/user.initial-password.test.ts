@@ -36,6 +36,7 @@ vi.mock("@/services/session-heartbeat", () => ({
   startSessionHeartbeat: vi.fn(),
   stopSessionHeartbeat: vi.fn()
 }));
+vi.mock("@/assets/svgs/user.svg", () => ({ default: "default-avatar.svg" }));
 
 import { useUserStore } from "./user";
 
@@ -98,5 +99,26 @@ describe("initial password authentication state", () => {
     expect(store.mustChangePassword).toBe(false);
     expect(authMocks.removeAccessToken).toHaveBeenCalledTimes(1);
     expect(authMocks.removeRefreshToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the default avatar when the profile has no avatar", async () => {
+    apiMocks.getProfileAPI.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        id: 1,
+        userName: "admin",
+        nickName: "管理员",
+        avatar: "",
+        roleIDs: [],
+        permissions: [],
+        mustChangePassword: false
+      }
+    });
+
+    const store = useUserStore();
+    await store.getUserInfo();
+
+    expect(store.account.avatar).toBe("default-avatar.svg");
   });
 });

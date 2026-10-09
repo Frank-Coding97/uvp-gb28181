@@ -8,6 +8,7 @@ import { type UserResult, type RefreshTokenResult, getLogin, refreshTokenApi, ge
 import { userType } from "@/store/types";
 import { handleUrl } from "@/utils/app";
 import { startSessionHeartbeat, stopSessionHeartbeat } from "@/services/session-heartbeat";
+import defaultAvatar from "@/assets/svgs/user.svg";
 
 const logoutCleanups = new Set<() => Promise<void> | void>();
 
@@ -31,7 +32,7 @@ export const useUserStore = defineStore("user", () => {
   // State
   const account = ref<userType>({
     id: userInfo?.id ?? 0,
-    avatar: userInfo?.avatar ?? "",
+    avatar: userInfo?.avatar || defaultAvatar,
     username: userInfo?.username ?? "",
     nickname: userInfo?.nickname ?? "",
     roles: userInfo?.roles ?? [],
@@ -73,7 +74,7 @@ export const useUserStore = defineStore("user", () => {
     stopSessionHeartbeat();
     if (cleanup) await runUserLogoutCleanup();
     account.value.id = 0;
-    account.value.avatar = "";
+    account.value.avatar = defaultAvatar;
     account.value.username = "";
     account.value.nickname = "";
     account.value.roles = [];
@@ -113,7 +114,7 @@ export const useUserStore = defineStore("user", () => {
       account.value.id = data.id;
       account.value.username = data.userName;
       account.value.nickname = data.nickName;
-      account.value.avatar = handleUrl(data.avatar);
+      account.value.avatar = handleUrl(data.avatar) || defaultAvatar;
       account.value.roles = data.roleIDs;
       account.value.permissions = data.permissions;
       const { mustChangePassword: _mustChangePassword, ...cachedProfile } = data;

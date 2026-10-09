@@ -132,6 +132,7 @@ import { VueCropper } from "vue-cropper";
 import "vue-cropper/dist/index.css";
 import { handleUrl } from "@/utils/app";
 import { useUserStoreHook } from "@/store/modules/user";
+import defaultAvatar from "@/assets/svgs/user.svg";
 const { isMobile } = useDevicesSize();
 
 const route = useRoute();
@@ -269,7 +270,7 @@ const getUserInfo = async () => {
     loading.value = true;
     const data = await getProfileAPI();
     userInfo.value = data.data;
-    userInfo.value.avatar = handleUrl(userInfo.value.avatar);
+    userInfo.value.avatar = handleUrl(userInfo.value.avatar) || defaultAvatar;
     detail.value = buildDetail(userInfo.value);
   } finally {
     loading.value = false;
