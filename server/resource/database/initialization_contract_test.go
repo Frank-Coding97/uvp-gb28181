@@ -637,7 +637,6 @@ func TestMySQLReleaseInitializationContract(t *testing.T) {
 		"`demo_teacher`",
 		"create table `example`",
 		"'演示账号'",
-		"/public/uploads/",
 		"18800000006",
 		"13800000001",
 		"headquarters@company.com",
@@ -646,6 +645,10 @@ func TestMySQLReleaseInitializationContract(t *testing.T) {
 	} {
 		require.NotContains(t, sql, forbidden)
 	}
+
+	// 只允许随包交付的固定头像资源，不能把开发环境的日期目录上传文件带进基线。
+	uploads := regexp.MustCompile(`/public/uploads/[^'"\s,;)]+`).FindAllString(sql, -1)
+	require.Equal(t, []string{"/public/uploads/seed/admin.png"}, uploads)
 
 	for _, seeded := range []string{
 		"sys_api",

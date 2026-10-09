@@ -89,7 +89,7 @@
   "forbidden_literals": [
     "demo_students",
     "demo_teacher",
-    "/public/uploads/",
+    "/public/uploads/20",
     "18800000006",
     "13800000001",
     "headquarters@company.com",
@@ -139,6 +139,8 @@
     "  首登强制改密」的设计直接矛盾。这里钉死为默认口令 123456 的 bcrypt；换默认口令只改这一行。",
     "  判据：凡是「随运行而变、但全新安装必须有确定值」的列，都要在这里钉死，",
     "  不能指望开发库那一刻的值恰好是对的。",
+    "⛔ admin.avatar 使用随包交付的固定资源 /public/uploads/seed/admin.png，不能再清空；",
+    "  日期目录下的运行时上传文件仍由 forbidden_literals 拦截。",
     "  ⚠️ 同一族还有 updated_at：它会随改密等写操作前进。目前未钉死，因为它不进产品语义，",
     "  但若哪天契约测试开始比对它，就照 password 这条把它一起钉住。",
     "2026-10-07 补「设备权限工作台」（2026-09-23 造）那套：角色 5-10、账号 8-14、部门 4-6。",
@@ -162,7 +164,7 @@
       "set": {
         "email": "",
         "phone": "",
-        "avatar": "",
+        "avatar": "/public/uploads/seed/admin.png",
         "sex": "",
         "nick_name": "系统管理员",
         "description": "初始系统管理员",

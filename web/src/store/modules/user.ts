@@ -8,7 +8,7 @@ import { type UserResult, type RefreshTokenResult, getLogin, refreshTokenApi, ge
 import { userType } from "@/store/types";
 import { handleUrl } from "@/utils/app";
 import { startSessionHeartbeat, stopSessionHeartbeat } from "@/services/session-heartbeat";
-import defaultAvatar from "@/assets/svgs/user.svg";
+import defaultAvatar from "@/assets/img/admin-avatar.png";
 
 const logoutCleanups = new Set<() => Promise<void> | void>();
 

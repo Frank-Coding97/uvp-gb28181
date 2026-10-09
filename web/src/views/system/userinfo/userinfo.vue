@@ -132,7 +132,7 @@ import { VueCropper } from "vue-cropper";
 import "vue-cropper/dist/index.css";
 import { handleUrl } from "@/utils/app";
 import { useUserStoreHook } from "@/store/modules/user";
-import defaultAvatar from "@/assets/svgs/user.svg";
+import defaultAvatar from "@/assets/img/admin-avatar.png";
 const { isMobile } = useDevicesSize();
 
 const route = useRoute();

@@ -8591,5 +8591,5 @@ INSERT INTO [sys_user_role] ([user_id], [role_id]) VALUES
 (1, 1);
 SET IDENTITY_INSERT [sys_users] ON;
 INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by], [must_change_password]) VALUES
-(1, N'admin', N'$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', N'', 1, 1, N'', N'', N'系统管理员', N'', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-10-09 20:03:48.000000', NULL, 0, 1);
+(1, N'admin', N'$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', N'', 1, 1, N'', N'', N'系统管理员', N'/public/uploads/seed/admin.png', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-10-09 20:03:48.000000', NULL, 0, 1);
 SET IDENTITY_INSERT [sys_users] OFF;

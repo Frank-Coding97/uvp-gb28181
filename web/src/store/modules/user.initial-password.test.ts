@@ -36,7 +36,7 @@ vi.mock("@/services/session-heartbeat", () => ({
   startSessionHeartbeat: vi.fn(),
   stopSessionHeartbeat: vi.fn()
 }));
-vi.mock("@/assets/svgs/user.svg", () => ({ default: "default-avatar.svg" }));
+vi.mock("@/assets/img/admin-avatar.png", () => ({ default: "admin-avatar.png" }));
 
 import { useUserStore } from "./user";
 
@@ -119,6 +119,6 @@ describe("initial password authentication state", () => {
     const store = useUserStore();
     await store.getUserInfo();
 
-    expect(store.account.avatar).toBe("default-avatar.svg");
+    expect(store.account.avatar).toBe("admin-avatar.png");
   });
 });
