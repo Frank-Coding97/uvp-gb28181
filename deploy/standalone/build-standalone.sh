@@ -581,13 +581,42 @@ ARCHIVE="$OUT_DIR/uvp-$VERSION-standalone-linux-amd64.tar.gz"
 chmod 0755 "$STAGE" "$PKG"
 
 log "打包 → ${ARCHIVE}"
-# ⛔ 必须加 --format=gnu（等价于 --format=ustar + 不带扩展头）。
-#   macOS 的 bsdtar 默认把 Apple 扩展属性（xattr / provenance / ACL）打进归档，
-#   Linux 的 GNU tar 每解一个文件就警告一次
-#   「Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'」——
-#   几百行警告刷屏，客户以为包坏了。
+# ⛔⛔ 必须保证归档里**没有 Apple 扩展属性**（xattr / provenance / ACL）。
+#   macOS 的 bsdtar 默认把它们打进归档，Linux 的 GNU tar 每解一个文件就警告一次
+#   「Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'」
+#   —— 几百行警告刷屏，客户以为包坏了。
 #   ⛔ 这类"只在目标机暴露"的交付问题只能靠实机解压发现 —— 本地 macOS 解压不会有任何提示。
-tar --format=gnu -czf "${ARCHIVE}" -C "${STAGE}" "uvp-${VERSION}"
+#
+# ⛔⛔ 为什么不能写死 `tar --format=gnu`：那是 GNU tar 独有的选项，
+#   macOS 自带的 bsdtar 会直接报 `Can't use format gnu: No such format 'gnu'`
+#   —— 而这个脚本本身就是 macOS 出包机在跑（它大量使用 macOS 专有的
+#   mktemp/du/shasum 组合）。原写法等于"在 macOS 上跑不了自己的出包脚本"，
+#   只是此前出包机装了 brew 的 gnu-tar 才碰巧能过。
+#
+# 现在的做法：按可用性择优。GNU tar 用 --format=gnu；
+# bsdtar 用 --format=ustar +显式关掉各类扩展属性（语义等价）。
+TAR_BIN="tar"
+if ! tar --format=gnu --version >/dev/null 2>&1; then
+  if command -v gtar >/dev/null 2>&1; then
+    TAR_BIN="gtar"
+  else
+    TAR_BIN="tar"   # bsdtar 路径
+  fi
+fi
+
+if [ "$TAR_BIN" = "tar" ]; then
+  # bsdtar：ustar 格式本身不带扩展头，再显式关掉 xattr/acl 双保险。
+  # --no-xattrs 在旧版 bsdtar 上不存在，故先探测再传。
+  TAR_XATTR_FLAG=""
+  if tar --no-xattrs --version >/dev/null 2>&1; then
+    TAR_XATTR_FLAG="--no-xattrs"
+  fi
+  log "  打包器: bsdtar（${TAR_XATTR_FLAG:-无扩展属性开关}）"
+  "$TAR_BIN" --format=ustar ${TAR_XATTR_FLAG} -czf "${ARCHIVE}" -C "${STAGE}" "uvp-${VERSION}"
+else
+  log "  打包器: ${TAR_BIN}（GNU tar，--format=gnu）"
+  "$TAR_BIN" --format=gnu -czf "${ARCHIVE}" -C "${STAGE}" "uvp-${VERSION}"
+fi
 test -s "$ARCHIVE" || fail "产物为空"
 
 SIZE="$(du -h "$ARCHIVE" | cut -f1)"
