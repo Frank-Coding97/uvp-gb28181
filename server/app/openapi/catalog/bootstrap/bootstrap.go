@@ -271,13 +271,13 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 func disableRetiredPlaybackGroup(ctx context.Context, tx *gorm.DB, updatedBy uint) error {
 	var group openapimodels.CapabilityGroup
 	query := tx.WithContext(ctx).Where("code = ? AND deleted_at IS NULL", "playback").First(&group)
-	if errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if query.Error != nil {
+	switch {
+	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
 		return query.Error
-	}
-	if group.ID <= 0 {
+	case query.RowsAffected == 0, group.ID <= 0:
+		// 没有行（掩码下 Error 也是 nil）⇒ 没什么可禁用的。
+		// ID<=0 同样当"没查到"：Model(&group) 传值时主键为 0 会拼不出 WHERE，
+		// 发出的就是无 WHERE 的全表 UPDATE（详见 retireRemovedPlaybackCapability）。
 		return nil
 	}
 	var count int64
@@ -326,9 +326,9 @@ func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy
 	if query.Error != nil {
 		return query.Error
 	}
-	if capability.ID <= 0 {
-		// 没报错但也没有行 ⇒ capability 是零值。继续执行会发出无 WHERE 的
-		// 全表 UPDATE，宁可什么都不做。
+	if query.RowsAffected == 0 || capability.ID <= 0 {
+		// 没报错但也没有行（掩码下 Error 就是 nil）⇒ capability 是零值。
+		// 继续执行会发出无 WHERE 的全表 UPDATE，宁可什么都不做。
 		return nil
 	}
 	if capability.Status != openapimodels.CatalogStatusDisabled {
@@ -343,18 +343,49 @@ func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy
 		Updates(map[string]any{"status": openapimodels.CatalogStatusDisabled, "updated_by": updatedBy}).Error
 }
 
+// ensureGroup 返回匹配的分组，或新建一个。
+//
+// ⛔⛔⛔ 这里**不能**用 `if query.Error == nil` 判断"查到了"。
+//
+// 生产（gormhelper/sqlite.go:121）注册了全局回调把 not-found 掩掉：
+//
+//	db.Callback().Query().Before("gorm:query").
+//		Register("disable_raise_record_not_found", MaskNotDataError)
+//	// MaskNotDataError: Statement.RaiseErrorOnNotFound = false
+//
+// ⇒ `First` 查不到行时 **query.Error 是 nil**（不是 gorm.ErrRecordNotFound）。
+// 于是按 Error 判断的旧写法会：
+//
+//	1) 认为"查到了"→ 返回**零值 group**（ID=0、Code=""）且 created=false；
+//	2) 永远跳到下面 Create 之前就return ⇒ 分组根本没被创建；
+//	3) 零值 group 存进 groups map ⇒ bootstrap.go:234 `group.ID == 0` 命中
+//	　 ⇒ `catalog_seed_conflict: group %q is missing`
+//	　 ⇒ panic: OpenAPI initialization failed ⇒ **整个后端退出、平台不可用**。
+//
+// ⛔ 为什么这个坑只咬绿色包：本地测试惯用裸 gorm.Open，**没有注册**上述回调，
+// First 正常返回 ErrRecordNotFound，代码按预期工作 —— 于是"单测全绿、
+// 客户机启动即panic"。判据必须选**与掩码无关**的那个：
+// `query.RowsAffected > 0` 表示真的取到了行。
 func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, createdBy uint) (openapimodels.CapabilityGroup, bool, error) {
 	var group openapimodels.CapabilityGroup
 	query := tx.WithContext(ctx).Unscoped().Where("code = ?", definition.code).First(&group)
-	if query.Error == nil {
+	switch {
+	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
+		// 真正的查询失败（连接断了、表不存在等）。
+		return openapimodels.CapabilityGroup{}, false, query.Error
+	case query.RowsAffected > 0:
+		// 真的取到了行。RowsAffected 在掩码与不掩码下语义一致。
+		if group.ID <= 0 {
+			// 有行但主键为 0：宁可报错，也不用零值继续。
+			return openapimodels.CapabilityGroup{}, false,
+				fmt.Errorf("%w: group %q has no primary key", ErrBootstrapConflict, definition.code)
+		}
 		if group.DeletedAt != nil {
 			return openapimodels.CapabilityGroup{}, false, fmt.Errorf("%w: group %q is soft deleted", ErrBootstrapConflict, definition.code)
 		}
 		return group, false, nil
 	}
-	if !errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return openapimodels.CapabilityGroup{}, false, query.Error
-	}
+	// 没有行（RowsAffected == 0；掩码下 Error 也是 nil）⇒ 建一个。
 
 	group = openapimodels.CapabilityGroup{
 		Code: definition.code, Name: definition.name, Sort: definition.sort,
@@ -364,20 +395,32 @@ func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, c
 	if err := tx.WithContext(ctx).Create(&group).Error; err != nil {
 		return openapimodels.CapabilityGroup{}, false, err
 	}
+	if group.ID <= 0 {
+		// Create 没有回填主键，后续 group.ID==0 的守卫会报"missing"，
+		// 与其让上层报那个含混的错误，不如在这里说清是哪一步没成功。
+		return openapimodels.CapabilityGroup{}, false,
+			fmt.Errorf("%w: group %q was created without a primary key", ErrBootstrapConflict, definition.code)
+	}
 	return group, true, nil
 }
 
+// ensureCapability 与 ensureGroup 同理：判据必须是 RowsAffected，不是 Error。
+// 原因（MaskNotDataError 全局掩码）见 ensureGroup 的注释。
 func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.CapabilityGroup, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint) (openapimodels.Capability, bool, error) {
 	var capability openapimodels.Capability
 	query := tx.WithContext(ctx).Unscoped().Where("scope = ?", definition.scope).First(&capability)
-	if query.Error == nil {
+	switch {
+	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
+		return openapimodels.Capability{}, false, query.Error
+	case query.RowsAffected > 0:
+		if capability.ID <= 0 {
+			return openapimodels.Capability{}, false,
+				fmt.Errorf("%w: capability scope %q has no primary key", ErrBootstrapConflict, definition.scope)
+		}
 		if capability.DeletedAt != nil {
 			return openapimodels.Capability{}, false, fmt.Errorf("%w: capability scope %q is soft deleted", ErrBootstrapConflict, definition.scope)
 		}
 		return capability, false, nil
-	}
-	if !errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return openapimodels.Capability{}, false, query.Error
 	}
 
 	name := definition.name
@@ -393,34 +436,47 @@ func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.Capa
 	if err := tx.WithContext(ctx).Create(&capability).Error; err != nil {
 		return openapimodels.Capability{}, false, err
 	}
+	if capability.ID <= 0 {
+		return openapimodels.Capability{}, false,
+			fmt.Errorf("%w: capability scope %q was created without a primary key", ErrBootstrapConflict, definition.scope)
+	}
 	return capability, true, nil
 }
 
+// ensureOperation 同 ensureGroup/ensureCapability：判据用 RowsAffected。
 func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.Capability, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint) (bool, error) {
 	var operation openapimodels.Operation
 	query := tx.WithContext(ctx).Unscoped().Where("capability_id = ? AND code = ?", capability.ID, definition.code).First(&operation)
-	if query.Error == nil {
+	switch {
+	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
+		return false, query.Error
+	case query.RowsAffected > 0:
+		if operation.ID <= 0 {
+			return false, fmt.Errorf("%w: operation %q has no primary key", ErrBootstrapConflict, definition.code)
+		}
 		if operation.DeletedAt != nil {
 			return false, fmt.Errorf("%w: operation %q is soft deleted", ErrBootstrapConflict, definition.code)
 		}
 		return false, nil
 	}
-	if !errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return false, query.Error
-	}
 
 	// The external route is globally stable. Detect an existing route owned by
 	// another operation before relying on the database unique index.
+	//
+	// ⛔ 这里同样必须用 RowsAffected 判定"这条路由是否已被占用"：
+	// 掩码后查不到行时 Error 是 nil，若按 Error 判就会把**零值 routeOwner**
+	// 当成"存在"，而它的 ID=0 / CapabilityID=0 / Code="" 全部不等于本operation
+	// ⇒ 每次 seed 都会误报 "route is already reserved"，全新安装直接失败。
 	var routeOwner openapimodels.Operation
-	query = tx.WithContext(ctx).Unscoped().Where("method = ? AND external_path = ?", definition.method, definition.externalPath).First(&routeOwner)
-	if query.Error == nil {
+	routeQuery := tx.WithContext(ctx).Unscoped().Where("method = ? AND external_path = ?", definition.method, definition.externalPath).First(&routeOwner)
+	switch {
+	case routeQuery.Error != nil && !errors.Is(routeQuery.Error, gorm.ErrRecordNotFound):
+		return false, routeQuery.Error
+	case routeQuery.RowsAffected > 0:
 		if routeOwner.DeletedAt != nil || routeOwner.CapabilityID != capability.ID || routeOwner.Code != definition.code {
 			return false, fmt.Errorf("%w: route %s %s is already reserved", ErrBootstrapConflict, definition.method, definition.externalPath)
 		}
 		return false, nil
-	}
-	if !errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return false, query.Error
 	}
 
 	operation = openapimodels.Operation{
@@ -434,6 +490,9 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 	}
 	if err := tx.WithContext(ctx).Create(&operation).Error; err != nil {
 		return false, err
+	}
+	if operation.ID <= 0 {
+		return false, fmt.Errorf("%w: operation %q was created without a primary key", ErrBootstrapConflict, definition.code)
 	}
 	return true, nil
 }
@@ -468,16 +527,27 @@ func adapterContractVersion(definition readDefinition) string {
 	return adapters.ResourceAdapterContractVersion
 }
 
+// findSysAPI 返回匹配的 sys_api 行，或 nil（表示"没有匹配的元数据"）。
+//
+// ⛔⛔ 掩码下这里最容易出错：按 `errors.Is(query.Error, ErrRecordNotFound)`
+// 判断时，查不到行 ⇒ Error 为 nil ⇒ 落到最后一行 `return &row, nil`，
+// 于是返回**指向零值 SysApi 的非 nil 指针**。
+// 调用方 `ensureCapability` 判的是 `sysAPI != nil`，于是每个 capability
+// 都会绑上 sys_api_id=0 / path="" / method="" —— 元数据全错且不会报错。
+//
+// 判据同样是 RowsAffected。
 func findSysAPI(ctx context.Context, tx *gorm.DB, path, method string) (*appmodels.SysApi, error) {
 	var row appmodels.SysApi
 	query := tx.WithContext(ctx).
 		Where("path = ? AND method = ? AND deleted_at IS NULL", path, method).
 		Order("id ASC").First(&row)
-	if errors.Is(query.Error, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if query.Error != nil {
+	switch {
+	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
 		return nil, query.Error
+	case query.RowsAffected == 0:
+		return nil, nil
+	case row.ID <= 0:
+		return nil, nil
 	}
 	return &row, nil
 }
