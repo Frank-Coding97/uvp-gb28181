@@ -7,6 +7,10 @@ const readHeaderSource = () =>
 const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 describe("header account menu", () => {
+  it("does not include the recording download entry", () => {
+    expect(readHeaderSource()).not.toContain("RecordingDownloadCenter");
+  });
+
   it("renders the reference-style account summary", () => {
     const source = readHeaderSource();
 

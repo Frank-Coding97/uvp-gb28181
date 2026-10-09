@@ -51,7 +51,6 @@
         </div>
         <a-divider margin="0" />
         <!-- 工作台 -->
-        <RecordingDownloadCenter menu />
         <a-doption class="uvp-user-menu-option" @click="onSystemSetting">
           <template #default>
             <span class="uvp-user-menu-icon"><icon-settings :size="16" /></span>
@@ -97,7 +96,6 @@
 <script setup lang="ts">
 import { useHeaderDisplayActions } from "../../useHeaderDisplayActions";
 import SipSetupBell from "@/layout/components/Header/components/SipSetupBell.vue";
-import RecordingDownloadCenter from "@/layout/components/Header/components/RecordingDownloadCenter.vue";
 import RecordCacheTaskCenter from "@/layout/components/Header/components/RecordCacheTaskCenter.vue";
 import SystemSettings from "@/layout/components/Header/components/system-settings/index.vue";
 //import myImage from "@/assets/img/my-image.jpg";
