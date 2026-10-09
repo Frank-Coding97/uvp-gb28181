@@ -54,6 +54,7 @@ const containerRef = ref<HTMLDivElement | null>(null);
 const player = shallowRef<any>(null);
 const smoothness = shallowRef<PlayerSmoothness | null>(null);
 const errorMsg = ref("");
+const firstFrameReady = ref(false);
 const userStore = useUserStoreHook();
 const canScreenshot = computed(() => {
   const permissions = userStore.account.permissions ?? [];
@@ -96,6 +97,7 @@ function readVideoSize() {
   const prev = videoSize.value;
   if (next && !firstFrameReported && session === playbackSession) {
     firstFrameReported = true;
+    firstFrameReady.value = true;
     emit("firstFrame", {
       event: "first_frame",
       clientElapsedMs: Math.max(0, Math.round(performance.now() - playbackStartedAt))
@@ -321,6 +323,7 @@ watch(
     playbackSession += 1;
     playbackStartedAt = performance.now();
     firstFrameReported = false;
+    firstFrameReady.value = false;
     playerErrorReported = false;
     // ⛔ 跨解复用族必须销毁重建，不能复用实例（同族之间切换仍复用）。
     //   两类已知的实例级残留（都由「顶层默认配置里没这些字段 ⇒ _replay 清不掉」造成）：
@@ -373,6 +376,10 @@ defineExpose({ stop: destroy, getSmoothness, getVideoSize, refreshVideoSize: rea
 <template>
   <div :class="['play-window', { playback }]">
     <div ref="containerRef" class="player" />
+    <div v-if="url && !firstFrameReady && !errorMsg" class="loading" data-testid="player-loading" role="status">
+      <span class="loading-spinner" aria-hidden="true" />
+      <span>正在连接视频流，等待首帧…</span>
+    </div>
     <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
     <div v-else-if="!url" class="placeholder">点击左侧通道开始播放</div>
   </div>
@@ -407,6 +414,36 @@ defineExpose({ stop: destroy, getSmoothness, getVideoSize, refreshVideoSize: rea
   width: 100%;
   height: 100%;
   min-height: 100%;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: rgb(226 232 240 / 92%);
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 45%, rgb(30 41 59 / 46%) 0%, rgb(2 6 23 / 72%) 72%);
+}
+
+.loading-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgb(148 163 184 / 28%);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: player-loading-spin 0.8s linear infinite;
+}
+
+@keyframes player-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* EasyPlayer 原生控制栏上的流畅度徽标:运行时插入,需穿透 scoped 才能命中 */

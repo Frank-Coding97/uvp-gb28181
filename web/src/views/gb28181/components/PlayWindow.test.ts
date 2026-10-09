@@ -17,6 +17,7 @@ describe("PlayWindow playback embedding", () => {
 
   afterEach(() => {
     delete (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro;
+    vi.useRealTimers();
   });
 
   it("keeps the original EasyPlayer controls visible in playback mode", async () => {
@@ -141,6 +142,54 @@ describe("PlayWindow playback embedding", () => {
 
     expect(wrapper.emitted("timeupdate")).toEqual([[1234]]);
     expect(wrapper.emitted("loading")).toEqual([[true]]);
+  });
+
+  it("从播放器挂载开始显示等待首帧状态,直到真实解码出画面", async () => {
+    vi.useFakeTimers();
+    let videoInfo: { width: number; height: number } | null = null;
+    class FakeEasyPlayer {
+      on = vi.fn();
+      play = vi.fn();
+      destroy = vi.fn();
+      getVideoInfo = vi.fn(() => videoInfo);
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="player-loading"]').text()).toContain("等待首帧");
+
+    videoInfo = { width: 1920, height: 1080 };
+    vi.advanceTimersByTime(1000);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(false);
+    expect(wrapper.emitted("firstFrame")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("播放器报错后移除等待首帧状态并展示错误", async () => {
+    const listeners: Record<string, (value?: unknown) => void> = {};
+    class FakeEasyPlayer {
+      on = vi.fn((event: string, callback: (value?: unknown) => void) => {
+        listeners[event] = callback;
+      });
+      play = vi.fn();
+      destroy = vi.fn();
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(true);
+
+    listeners.timeout?.();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(false);
+    expect(wrapper.get(".err").text()).toContain("拉流超时");
+    wrapper.unmount();
   });
 
   it("reports the first decoded frame once per playback URL", async () => {
