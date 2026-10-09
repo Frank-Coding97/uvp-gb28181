@@ -173,8 +173,25 @@ func getCatalogPipeline() *catalog.Pipeline {
 	if p != nil {
 		return p
 	}
-	// 直接读底层 *gorm.DB,避开 app.DB() 在 ConfigYml=nil 时的 panic
-	db := app.GormDbMysql
+	// ⛔⛔⛔ 必须用 app.DB()（方言感知），**不能写死 app.GormDbMysql**（2026-10-09 修）
+	//
+	// 原实现直接读 app.GormDbMysql，注释理由是「避开 app.DB() 在 ConfigYml=nil 时的panic」。
+	// 那个理由成立，但**结论错**：绿色包跑 SQLite 时 `app.GormDbMysql` 恒为 nil
+	// ⇒ 返回 nil ⇒ **设备目录应答处理后一条通道都不入库**，
+	// 而分支里只打一条 **Debug** 日志（默认级别看不到）⇒ 现场表现是
+	// 「设备注册成功、在线正常、Catalog 应答也收到了（complete=true），
+	//   但通道列表永远是空的」，全程零报错。
+	//
+	// ⭐ 这是本项目**第 7 处**「自己挑数据库连接漏 SQLite」
+	//（设备/告警/地图 5 个控制器 + trace 模块 + 本处）。
+	// ⇒ 判据不是「哪个写法不panic」，而是「哪个写法在**四种方言**下都拿到连接」。
+	//
+	// ⚠️ app.DB() 确实会在 ConfigYml==nil 时 panic，所以 nil 守卫必须留着 ——
+	//   两个问题要分别解：方言分发用 app.DB()，nil 安全用守卫。
+	db := (*gorm.DB)(nil)
+	if app.ConfigYml != nil {
+		db = app.DB()
+	}
 	if db == nil {
 		return nil
 	}
@@ -239,9 +256,16 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 			}
 		} else {
 			catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
-			logger.Debug("CatalogPipeline 不可用,跳过 catalog 入库",
+			// ⛔⛔ 这条**必须是 Warn 而不是 Debug**：它是「设备报了目录、但一条通道都没入库」
+			// 的唯一线索，而 Debug 在默认日志级别下不输出 ⇒ 现场完全静默。
+			// 实测2026-10-09：设备在线、Catalog 应答 complete=true，
+			// 而 gb_channel 一直 0 行，日志里什么都查不到，就是这一条。
+			logger.Warn("CatalogPipeline 不可用，目录应答已收到但**通道未入库**（设备在线但通道列表为空）",
 				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
-				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+				zap.String("reason_code", "catalog_pipeline_nil"),
+				zap.Int("item_count", len(resp.DeviceList.Items)),
+				zap.String("likely_cause", "app.DB() 返回 nil（gormv2.usedbtype 与实际连接不匹配，或数据库未初始化）"))
 		}
 		if pipeline == nil {
 			triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
