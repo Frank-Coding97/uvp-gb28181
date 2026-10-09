@@ -492,6 +492,152 @@ def _detect_lan_ip() -> str:
     return ip
 
 
+def _detect_openapi_audience() -> str:
+    """生成 OpenAPI 的部署环境标识（audience）。
+
+    ⛔⛔ 不同环境**不得共享**同一个 audience：它是签发 token 的受众声明，
+    共享后 A 环境签的 token 能到 B 环境用（JWT 的aud 校验形同虚设）。
+    ⇒ 每份包生成一个随机值，写进 config.yml；客户想固定可自行改。
+    """
+    import secrets
+
+    return "uvp-" + secrets.token_hex(8)
+
+
+def add_openapi_section(target: Path, enabled: bool, audience: str,
+                        master_key_id: str) -> None:
+    """写入 ``openapi:`` 段：默认开启并填好环境标识与主密钥标识。
+
+    ⛔⛔ 为什么必须在出包时就写好（老板 2026-10-09 定「开箱可用」）：
+      后端装配 OpenAPI 有五道前置检查（app/openapi/routes/runtime.go），
+      任何一道不过就统一返回 ``ErrUnavailable`` ⇒ 页面报 **503 SERVICE_UNAVAILABLE**，
+      且**不告诉你是哪一道**。实测现场缺的就是这里两项：
+        ① ``UVP_OPENAPI_MASTER_KEY`` 未注入（主密钥只能走环境变量，不在配置文件里）
+        ② ``audience`` 为空
+      另外三道（表结构 / write_timeout / 库连接）在绿色包里本来就满足。
+
+    ⛔主密钥**不写进 config.yml**：那是配置文件、随包分发、可被读取；
+      它只从环境变量 ``UVP_OPENAPI_MASTER_KEY`` 读（由出包脚本写进 config.env，
+      uvp-ctl.sh 再 export 给后端进程 —— 与 SIP 报文诊断密钥同一套机制）。
+    """
+    text = target.read_text(encoding="utf-8")
+
+    # 已存在则**改写**而非追加（追加会出现重复键，YAML 不报错但会静默覆盖）。
+    if _has_section(text, "openapi"):
+        text = _rewrite_section(text, "openapi", {
+            "enabled": "true" if enabled else "false",
+            "audience": f'"{audience}"',
+            # ⚠️ 只写标识，不写主密钥本身
+            "master_key_id": f'"{master_key_id}"',
+        })
+    else:
+        block = [
+            "",
+            "# ---- OpenAPI（第三方接入；本段由打包脚本生成）----",
+            "# 主密钥**不在这里**：它只从环境变量 UVP_OPENAPI_MASTER_KEY 读，",
+            "# 出包时已写进包根目录的 config.env。",
+            "# ⚠️ audience 是部署环境标识，不同环境不得共享；换环境必须换值。",
+            "openapi:",
+            f"    enabled: {'true' if enabled else 'false'}",
+            f'    audience: "{audience}"',
+            f'    master_key_id: "{master_key_id}"',
+        ]
+        text = _append_top_level(text, block)
+
+    _assert_openapi_valid(text, enabled, audience, master_key_id)
+    target.write_text(text, encoding="utf-8")
+    print(f"   OpenAPI: enabled={str(enabled).lower()} audience={audience}")
+
+
+def _assert_openapi_valid(text: str, enabled: bool, audience: str,
+                          master_key_id: str) -> None:
+    """解析后断言 openapi 段真的生效。
+
+    ⛔ yaml 解析失败也必须在这里变成**清晰**的失败，不能往上抛 traceback：
+      出包现场看到的是「第 329 行」这种行号，离真因（缩进/插入位置）十万八千里。
+    """
+    try:
+        import yaml
+    except ImportError:
+        if "openapi:" not in text:
+            raise SystemExit("openapi 段写入失败：结果里找不到该段")
+        print("   ⚠️ 未安装 PyYAML，跳过结构校验（pip install pyyaml 可启用）")
+        return
+
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except Exception as exc:
+        raise SystemExit(
+            f"openapi 写入后配置无法解析（{type(exc).__name__}）—— 多半是插入位置或缩进错了"
+        ) from None
+
+    sec = parsed.get("openapi") or {}
+    problems = []
+    if "openapi" not in parsed:
+        problems.append("openapi 不在顶级（缩进错了）")
+    # ⛔⛔⛔ 必须查「顶级 openapi 键出现几次」——YAML 里**重复键不报错**，
+    #   后者静默覆盖前者，解析结果依然是对的 ⇒ 只看值永远抓不到。
+    #   现场含义：配置文件里两份 openapi 段，人改的那份可能被生成的那份盖掉，
+    #   而运维看文件时会以为改生效了。（与 qr_provision 同一个教训。）
+    if len(re.findall(r"(?m)^openapi:[ \t]*$", text)) != 1:
+        problems.append(
+            "openapi 顶级键出现了 %d 次（应为 1）—— 重复键 YAML 不报错但会静默覆盖"
+            % len(re.findall(r"(?m)^openapi:[ \t]*$", text)))
+    if bool(sec.get("enabled")) != enabled:
+        problems.append(f"openapi.enabled={sec.get('enabled')!r}（应为 {enabled}）")
+    if str(sec.get("audience") or "") != audience:
+        problems.append(f"openapi.audience={sec.get('audience')!r}（应为 {audience!r}）")
+    if str(sec.get("master_key_id") or "") != master_key_id:
+        problems.append(
+            f"openapi.master_key_id={sec.get('master_key_id')!r}（应为 {master_key_id!r}）")
+    # 主密钥绝不能落进配置文件
+    if "UVP_OPENAPI_MASTER_KEY=" in text:
+        problems.append("主密钥被写进了 config.yml —— 必须只走环境变量")
+    if problems:
+        raise SystemExit("openapi 段结构校验失败：\n  - " + "\n  - ".join(problems))
+
+
+def _append_top_level(text: str, block: list[str]) -> str:
+    """把 block 追加到**顶级**（列首，无缩进）区段的最末尾。
+
+    ⛔ 为什么不用「插到文件开头」：配置顶级段的顺序不影响解析，
+    但插在开头会让「出包脚本生成的内容」与人工维护的内容混在最前面，
+    现场改配置时容易漏看。追加到末尾更符合直觉。
+
+    ⛔⛔ block 里的子键缩进**必须按文件实际顶级段缩进平移**，不能硬编码。
+       踩过一次：``config.example.yml`` 用 2 空格而**出包后的 config.yml 是 4 空格**
+       ⇒ 硬编码写进去与同级段不齐 ⇒ yaml ParserError。
+       做法：探测已存在的某个顶级段的首个子键缩进，照它写。
+    """
+    lines = text.split("\n")
+    child_indent = "    "
+    for i, line in enumerate(lines):
+        if not line.strip() or line.startswith((" ", "\t")) or line.startswith("#"):
+            continue
+        # 找到一个有子键的顶级段，用它的子键缩进
+        for j in range(i + 1, len(lines)):
+            nxt = lines[j]
+            if not nxt.strip() or nxt.startswith("#"):
+                continue
+            if nxt.startswith((" ", "\t")):
+                child_indent = nxt[: len(nxt) - len(nxt.lstrip())]
+                break
+            break
+        break
+
+    out = lines[:]
+    while out and not out[-1].strip():
+        out.pop()
+    out.append("")
+    for b in block:
+        # 只平移 block 里以4 空格开头的子键行，顶级键（openapi:）与注释不动
+        if b.startswith("    ") and not b.startswith("        "):
+            out.append(child_indent + b.lstrip())
+        else:
+            out.append(b)
+    return "\n".join(out) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path, help="仓库里的 config.yml")
@@ -506,6 +652,13 @@ def main() -> None:
                         help="ZLM 节点标识 mediaserverid（建议固定 UUID；留空=每次 seed 随机）")
     parser.add_argument("--qr-provision-host", default="",
                         help="扫码接入基址里的设备可达地址；留空则取本机主 IP")
+    parser.add_argument("--openapi-audience", default="",
+                        help="OpenAPI 部署环境标识（不同环境不得共享）")
+    parser.add_argument("--openapi-master-key-id", default="uvp-openapi-k1",
+                        help="OpenAPI 主密钥标识；须与包内 config.env 里的主密钥配套")
+    parser.add_argument("--openapi-enabled", default="true",
+                        choices=("true", "false"),
+                        help="是否默认开启 OpenAPI（老板 2026-10-09 定：默认开）")
     args = parser.parse_args()
 
     build(args.source, args.target, args.http_port, args.redis_port,
@@ -513,6 +666,9 @@ def main() -> None:
     add_sqlite_section(args.target, args.db_path)
     add_qr_provision_section(args.target, args.qr_provision_host or _detect_lan_ip(),
                              args.http_port)
+    add_openapi_section(args.target, args.openapi_enabled == "true",
+                        args.openapi_audience or _detect_openapi_audience(),
+                        args.openapi_master_key_id)
 
 
 if __name__ == "__main__":

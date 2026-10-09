@@ -436,7 +436,13 @@ $PY \
   --db-path "./data/uvp.db" \
   --zlm-secret "$ZLM_SECRET" \
   --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
-  --qr-provision-host "$QR_PROVISION_HOST"
+  --qr-provision-host "$QR_PROVISION_HOST" \
+  --openapi-enabled "${UVP_OPENAPI_ENABLED:-true}" \
+  --openapi-master-key-id "${UVP_OPENAPI_MASTER_KEY_ID:-uvp-openapi-k1}"
+# ⛔⛔ 这里**不要**引用后面才定义的 $OPENAPI_MASTER_KEY_ENV / $SIP_TRACE_KEY_ENV：
+#   本函数（生成 config.yml）在它们定义之前就调用了 ⇒ 展开成空串 ⇒
+#   make-config.py 收到空值且**不报错**。（本项目已栽过一次同型坑：
+#   quality-gate.sh 引用了从没定义过的 $PY_BIN。）
 
 # ⛔ 出包前**解析后断言**这两个固定值真的进去了。
 #   理由：make-config.py 用的是"段落内替换"，判据（段名/键名/缩进/行尾注释）
@@ -531,6 +537,19 @@ SIP_TRACE_KEY="$("$PY" -c 'import base64,secrets;print(base64.b64encode(secrets.
 if [ -z "$SIP_TRACE_KEY" ]; then
   fail "生成 SIP 报文诊断密钥失败（python3 不可用？）"
 fi
+# ---- OpenAPI 主密钥（同样只走环境变量，不进配置文件）----
+#
+# ⛔ 后端装配 OpenAPI 有五道前置检查（app/openapi/routes/runtime.go），
+#   任何一道不过就统一返回 ErrUnavailable ⇒ 页面报 503 且**不说是哪一道**。
+#   其中一道就是主密钥：`base64.RawURLEncoding.Strict().DecodeString(os.Getenv(...))`
+#   要求 **32 字节的无填充 base64url** ⇒ 用标准 base64 会因 `+` `/` `=` 被拒。
+#   ⛔ `secrets.token_urlsafe(32)` 产出的正是无填充 base64url，天然合规；
+#      而 `base64.b64encode`（SIP 密钥用的那个）**带填充**，这里不能用它。
+OPENAPI_MASTER_KEY_ENV="UVP_OPENAPI_MASTER_KEY"
+OPENAPI_MASTER_KEY="$("$PY" -c 'import secrets;print(secrets.token_urlsafe(32))')"
+if [ -z "$OPENAPI_MASTER_KEY" ]; then
+  fail "生成 OpenAPI 主密钥失败（python3 不可用？）"
+fi
 {
   printf '\n'
   printf '# ---- SIP 报文诊断加密密钥（打包时生成，每份包不同）----\n'
@@ -539,8 +558,17 @@ fi
   printf '# 要换成自己的值：python3 -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"\n'
   printf '# ⚠️ 换密钥后历史密文解不开，需能接受丢历史再换。\n'
   printf '%s=%s\n' "$SIP_TRACE_KEY_ENV" "$SIP_TRACE_KEY"
+  printf '\n'
+  printf '# ---- OpenAPI 主密钥（打包时生成，每份包不同）----\n'
+  printf '# 格式必须是 **32 字节的无填充 base64url**（后端用 Strict 解码，\n'
+  printf '# 标准 base64 的 + / = 会直接被拒 ⇒ 表现为 OpenAPI 客户端页 503）。\n'
+  printf '# 生成：python3 -c "import secrets;print(secrets.token_urlsafe(32))"\n'
+  printf '# ⚠️ 换主密钥后**已签发的客户端凭据全部失效**，需重新下发。\n'
+  printf '# ⚠️ 本文件明文随包分发 —— 它与 openapi.master_key_id 配套使用。\n'
+  printf '%s=%s\n' "$OPENAPI_MASTER_KEY_ENV" "$OPENAPI_MASTER_KEY"
 } > "$PKG/config.env"
 log "写入 $SIP_TRACE_KEY_ENV（32 字节随机，base64）"
+log "写入 $OPENAPI_MASTER_KEY_ENV（32 字节随机，base64url）"
 
 # --------------------------------------------------------------- 打包 ----
 

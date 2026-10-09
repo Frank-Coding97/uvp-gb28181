@@ -400,6 +400,17 @@ start_backend() {
     log "SIP 报文诊断密钥已从 config.env 载入"
   fi
 
+  # ---- OpenAPI 主密钥 ----
+  #⛔ 同一个坑（read_env_file 只是按需取值、不会让 config.env 成为进程环境变量）。
+  #   后端用 os.Getenv 读它，缺失时 OpenAPI 装配直接 ErrUnavailable ⇒ 客户端页 503，
+  #   而报错**不说是哪一道检查没过**。格式：32 字节**无填充 base64url**。
+  OPENAPI_MASTER_KEY_ENV="UVP_OPENAPI_MASTER_KEY"
+  openapi_master_key="$(read_env_file "$OPENAPI_MASTER_KEY_ENV")"
+  if [ -n "$openapi_master_key" ]; then
+    export "$OPENAPI_MASTER_KEY_ENV=$openapi_master_key"
+    log "OpenAPI 主密钥已从 config.env 载入"
+  fi
+
   # ⛔ 绝不能关掉子 shell 的 stdio：`uvp-ctl.sh start | tail` 这类用法会永远挂住
   #   （孤儿子 shell 攥着管道的写端），看起来像「启动卡死」。实测挂过 10 分钟以上。
   ( "$SERVER_BIN" >"$BACKEND_LOG" 2>&1 </dev/null & echo $! > "$BACKEND_PID_FILE" ) >/dev/null 2>&1

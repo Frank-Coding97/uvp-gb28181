@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
@@ -24,7 +25,34 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	if err != nil {
 		return fmt.Errorf("读取 ZLM 现有配置失败: %w", err)
 	}
-	initialized := current["general.mediaServerId"] == c.node.MediaServerUUID && c.node.MediaServerUUID != ""
+	// ⛔⛔⛔ `initialized` **不能只看 mediaServerId**，但也**不能只看 hook.enable**（2026-10-09 修）
+	//
+	// 现场症状：绿色包出包时把 `mediaserverid` **预置**进 config.ini（为了让它是固定值），
+	//   ZLM 启动即读入 ⇒ 首次启动 `mediaServerId` 就已匹配
+	//   ⇒ 原判据 initialized=true ⇒ 跳过 `hook.enable=1`
+	//   ⇒ 再加上下面循环的两道 continue（现存值为空 ⇒ 既不带本节点 cap、
+	//      也不是本平台 hook 端点）⇒ **ManagedHookEvents 全被跳过，回调一个都没下发**
+	//   ⇒ ZLM 侧 `hook.on_*` 全空、`hook.enable=0`，而日志照样打「启动收敛完成」。
+	//
+	// ⚠️ 但**不能**把判据改成「mediaServerId 匹配 且 hook.enable=1」——
+	//   那会破坏既有契约「**hook.enable=0 是用户的显式选择，要尊重**」
+	//   （见 TestApplyConfigForNodePreservesCustomHooksOnRepeatedApply /
+	//     TestApplyConfigForNodeRefreshesPlatformHookButPreservesDisabledSwitch）。
+	//
+	// ✅ 正确判据：**「用户是否曾经管过这些回调」**，而不是「hook 开着没有」。
+	//   出包预置的 medianserverid 不算「管过」—— 判据是**现存回调值里有没有本平台的东西**：
+	//     · 一个本平台该管的回调都没有 ⇒ 从未下发过 ⇒ 要下发（并同时打开 hook.enable）
+	//     · 已经有过（无论是本平台的、还是 user-owned 的）⇒ 尊重现状，只刷新该刷新的
+	hasManagedHook := false
+	for _, event := range playauth.ManagedHookEvents() {
+		if strings.TrimSpace(current["hook."+string(event)]) != "" {
+			hasManagedHook = true
+			break
+		}
+	}
+	// 身份已匹配（认得这台节点）**且**回调已有人管过 ⇒ 才算 initialized
+	initialized := current["general.mediaServerId"] == c.node.MediaServerUUID &&
+		c.node.MediaServerUUID != "" && hasManagedHook
 	base, err := media.EffectiveHookBaseURL()
 	if err != nil {
 		return fmt.Errorf("ZLM Hook 回调基址不可用: %w", err)
@@ -36,6 +64,7 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		"general.flowThreshold":           "0",
 	}
 	if !initialized {
+		// hook 未启用时**连同全部回调一起**下发，否则下面循环会把它们全continue 掉
 		params["hook.enable"] = "1"
 	}
 	params["general.mediaServerId"] = c.node.MediaServerUUID
