@@ -33,6 +33,11 @@ func Down(db *gorm.DB, d Dialect, upFileName string) error {
 		return err
 	}
 	store := NewStore(db)
+	if requirement, ok := baselineColumnMigrations[upFileName]; ok {
+		if !db.Migrator().HasTable(requirement.table) || !db.Migrator().HasColumn(requirement.table, requirement.column) {
+			return store.DeleteApplied(upFileName)
+		}
+	}
 	exec := &dbExecutor{db: db}
 	return downWith(store, exec, &embedSource{dialect: d}, d, upFileName)
 }

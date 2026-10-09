@@ -175,6 +175,36 @@ func TestRunIdempotent(t *testing.T) {
 	require.Len(t, exec.executed, 1, "第二次运行不应执行任何 SQL")
 }
 
+func TestRunResumesSummaryColumnMigrationAfterColumnWasAdded(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	store.applied["previous.sql"] = true
+	name := "2026-10-09-job-result-summary-sqlite.sql"
+	src.files[name] = "ALTER TABLE sys_job_results ADD COLUMN summary TEXT"
+	probe := schemaProbe{
+		hasTable: func(table string) (bool, error) { return table == "sys_job_results", nil },
+		hasColumn: func(table, column string) (bool, error) {
+			return table == "sys_job_results" && column == "summary", nil
+		},
+	}
+
+	require.NoError(t, run(store, lock, src, exec, probe))
+	require.Empty(t, exec.executed, "已有 summary 列时重试不得重复执行 ADD COLUMN")
+	require.True(t, store.applied[name], "已存在的列应补记迁移版本")
+}
+
+func TestJobResultSummaryMigrationNamesMapToColumn(t *testing.T) {
+	for _, name := range []string{
+		"2026-10-09-job-result-summary.sql",
+		"2026-10-09-job-result-summary-postgresql.sql",
+		"2026-10-09-job-result-summary-sqlserver.sql",
+		"2026-10-09-job-result-summary-sqlite.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, baselineColumnRequirement{table: "sys_job_results", column: "summary"}, baselineColumnMigrations[name])
+		})
+	}
+}
+
 // ---- 3.6 锁失败透传 ----
 
 func TestRunLockFailureBlocks(t *testing.T) {
@@ -266,14 +296,19 @@ func TestUpSQLiteMigratesMediaColumnsFromEmptyLedger(t *testing.T) {
 		id INTEGER PRIMARY KEY,
 		must_change_password INTEGER NOT NULL DEFAULT 0
 	)`).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE "sys_job_results" (
+		id INTEGER PRIMARY KEY,
+		status TEXT NOT NULL
+	)`).Error)
 
 	require.NoError(t, Up(db, DialectSQLite))
 	require.True(t, db.Migrator().HasColumn("gb_sip_config", "hook_ip"))
 	require.True(t, db.Migrator().HasColumn("gb_sip_config", "stream_ip"))
+	require.True(t, db.Migrator().HasColumn("sys_job_results", "summary"))
 
 	var applied int64
 	require.NoError(t, db.Table("gb_schema_migrations").Count(&applied).Error)
-	require.Equal(t, int64(4), applied)
+	require.GreaterOrEqual(t, applied, int64(6))
 }
 
 func allTablesExistProbe() schemaProbe {

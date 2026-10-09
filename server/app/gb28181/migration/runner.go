@@ -88,6 +88,15 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-09-meta-node-sdp-ip-postgresql.sql":              {table: "meta_node", column: "sdp_ip"},
 	"2026-10-09-meta-node-sdp-ip-sqlserver.sql":               {table: "meta_node", column: "sdp_ip"},
 	"2026-10-09-meta-node-sdp-ip-sqlite.sql":                  {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-job-result-summary.sql":                       {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-postgresql.sql":            {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-sqlserver.sql":             {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-sqlite.sql":                {table: "sys_job_results", column: "summary"},
+	// rtp_receive_mode 与 rtp_proxy_port 成对出现，只需登记其中一列即可。
+	"2026-10-09-meta-node-receive-mode.sql":            {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-postgresql.sql": {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-sqlserver.sql":  {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-sqlite.sql":     {table: "meta_node", column: "rtp_receive_mode"},
 }
 
 // needsBaselineColumnUpgrade applies only to additive column migrations whose
@@ -309,6 +318,21 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 	for _, name := range names {
 		if appliedSet[name] {
 			continue
+		}
+		if _, isColumnMigration := baselineColumnMigrations[name]; isColumnMigration {
+			// An interrupted additive migration may have added its column before
+			// the version row was written. Record it as applied instead of replaying
+			// a dialect-specific ADD COLUMN statement.
+			needed, err := needsBaselineColumnUpgrade(name, probe)
+			if err != nil {
+				return err
+			}
+			if !needed {
+				if err := store.MarkApplied([]string{name}); err != nil {
+					return fmt.Errorf("标记迁移 %s 失败: %w", name, err)
+				}
+				continue
+			}
 		}
 		sqlText, err := src.ReadSQL(name)
 		if err != nil {
