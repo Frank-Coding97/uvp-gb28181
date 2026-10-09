@@ -1,7 +1,7 @@
 -- UVP-GB28181 MySQL 8.0 release initialization script
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8
+-- Schema fingerprint: 6e47b88a7c4f8c668eaf53f2f653ce8beb6410831be4d1abff1f12bb974d05f5
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.
@@ -1966,6 +1966,8 @@ CREATE TABLE `meta_node` (
   `recovery_fingerprint` char(64) NOT NULL DEFAULT '',
   `rtp_port_start` int NOT NULL DEFAULT 30000,
   `rtp_port_end` int NOT NULL DEFAULT 35000,
+  `rtp_receive_mode` varchar(8) NOT NULL DEFAULT 'multi',
+  `rtp_proxy_port` bigint NOT NULL DEFAULT 10000,
   `created_at` datetime NULL,
   `updated_at` datetime NULL,
   `current_boot_nonce` char(32) NULL,
@@ -2226,6 +2228,7 @@ CREATE TABLE `sys_job_results` (
   `duration` bigint NOT NULL COMMENT '执行时长(纳秒)',
   `retry_count` int NOT NULL DEFAULT 0 COMMENT '重试次数',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  `summary` text COLLATE utf8mb4_unicode_ci NULL,
   PRIMARY KEY (`id`),
   KEY `idx_created_at` (`created_at`),
   KEY `idx_job_id` (`job_id`),
@@ -8242,4 +8245,4 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 INSERT INTO `sys_user_role` (`user_id`, `role_id`) VALUES
 (1, 1);
 INSERT INTO `sys_users` (`id`, `username`, `password`, `email`, `status`, `dept_id`, `phone`, `sex`, `nick_name`, `avatar`, `description`, `created_at`, `updated_at`, `deleted_at`, `created_by`, `must_change_password`) VALUES
-(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0, 1);
+(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, 1);

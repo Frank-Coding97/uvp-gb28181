@@ -1552,6 +1552,8 @@ CREATE TABLE IF NOT EXISTS "meta_node" (
   "recovery_fingerprint" TEXT NOT NULL CHECK ("recovery_fingerprint" IS NULL OR length("recovery_fingerprint") <= 64) DEFAULT '',
   "rtp_port_start" INTEGER NOT NULL CHECK ("rtp_port_start" IS NULL OR typeof("rtp_port_start") = 'integer') DEFAULT 30000,
   "rtp_port_end" INTEGER NOT NULL CHECK ("rtp_port_end" IS NULL OR typeof("rtp_port_end") = 'integer') DEFAULT 35000,
+  "rtp_receive_mode" TEXT NOT NULL CHECK ("rtp_receive_mode" IS NULL OR length("rtp_receive_mode") <= 8) DEFAULT 'multi',
+  "rtp_proxy_port" INTEGER NOT NULL CHECK ("rtp_proxy_port" IS NULL OR typeof("rtp_proxy_port") = 'integer') DEFAULT 10000,
   "created_at" DATETIME NULL,
   "updated_at" DATETIME NULL,
   "current_boot_nonce" TEXT NULL CHECK ("current_boot_nonce" IS NULL OR length("current_boot_nonce") <= 32),
@@ -1821,6 +1823,7 @@ CREATE TABLE IF NOT EXISTS "sys_job_results" (
   "duration" INTEGER NOT NULL CHECK ("duration" IS NULL OR typeof("duration") = 'integer'),
   "retry_count" INTEGER NOT NULL CHECK ("retry_count" IS NULL OR typeof("retry_count") = 'integer') DEFAULT 0,
   "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "summary" TEXT NULL,
   FOREIGN KEY ("job_id") REFERENCES "sys_jobs" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
   -- "id": 自增主键
@@ -8061,4 +8064,4 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
-(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0, 1);
+(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, 1);

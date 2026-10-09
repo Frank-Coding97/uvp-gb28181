@@ -1,7 +1,7 @@
 -- UVP-GB28181 PostgreSQL release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8
+-- Schema fingerprint: 6e47b88a7c4f8c668eaf53f2f653ce8beb6410831be4d1abff1f12bb974d05f5
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -1980,6 +1980,8 @@ CREATE TABLE "meta_node" (
   "recovery_fingerprint" CHAR(64) NOT NULL DEFAULT '',
   "rtp_port_start" INTEGER NOT NULL DEFAULT 30000,
   "rtp_port_end" INTEGER NOT NULL DEFAULT 35000,
+  "rtp_receive_mode" VARCHAR(8) NOT NULL DEFAULT 'multi',
+  "rtp_proxy_port" BIGINT NOT NULL DEFAULT 10000,
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
   "current_boot_nonce" CHAR(32),
@@ -2309,7 +2311,8 @@ CREATE TABLE "sys_job_results" (
   "end_time" TIMESTAMP NOT NULL,
   "duration" BIGINT NOT NULL,
   "retry_count" INTEGER NOT NULL DEFAULT 0,
-  "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "summary" TEXT
 );
 COMMENT ON TABLE "sys_job_results" IS '任务执行结果表';
 COMMENT ON COLUMN "sys_job_results"."id" IS '自增主键';
@@ -8385,7 +8388,7 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
-(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-08-16 10:56:02.000000', NULL, 0, true);
+(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, true);
 
 -- 自增水位：种子行用的是显式 id，PostgreSQL 的序列不会自己前进，
 -- 不补这一步，全新装环境第一次 INSERT 就会撞主键。

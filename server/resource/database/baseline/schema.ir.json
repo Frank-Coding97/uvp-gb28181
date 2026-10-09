@@ -6,7 +6,7 @@
     "live_table_count": 112,
     "included_table_count": 111,
     "excluded_table_count": 20,
-    "schema_fingerprint": "8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8",
+    "schema_fingerprint": "6e47b88a7c4f8c668eaf53f2f653ce8beb6410831be4d1abff1f12bb974d05f5",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -15865,6 +15865,24 @@
           "collation": null
         },
         {
+          "name": "rtp_receive_mode",
+          "type": "varchar(8)",
+          "nullable": false,
+          "default": "multi",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "rtp_proxy_port",
+          "type": "bigint",
+          "nullable": false,
+          "default": "10000",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
           "name": "created_at",
           "type": "datetime",
           "nullable": true,
@@ -17752,6 +17770,15 @@
           "extra": "DEFAULT_GENERATED",
           "comment": "记录创建时间",
           "collation": null
+        },
+        {
+          "name": "summary",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_unicode_ci"
         }
       ],
       "primary_key": [

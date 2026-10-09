@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 8a98ed09a31b84eec390751af428175506bd457c77db1b83e2e6ff5217bd66a8
+-- Schema fingerprint: 6e47b88a7c4f8c668eaf53f2f653ce8beb6410831be4d1abff1f12bb974d05f5
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -2235,6 +2235,8 @@ BEGIN
     [recovery_fingerprint] NCHAR(64) NOT NULL DEFAULT N'',
     [rtp_port_start] INT NOT NULL DEFAULT 30000,
     [rtp_port_end] INT NOT NULL DEFAULT 35000,
+    [rtp_receive_mode] NVARCHAR(8) NOT NULL DEFAULT N'multi',
+    [rtp_proxy_port] BIGINT NOT NULL DEFAULT 10000,
     [created_at] DATETIME2(3),
     [updated_at] DATETIME2(3),
     [current_boot_nonce] NCHAR(32),
@@ -2518,7 +2520,8 @@ BEGIN
     [end_time] DATETIME2(3) NOT NULL,
     [duration] BIGINT NOT NULL,
     [retry_count] INT NOT NULL DEFAULT 0,
-    [created_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    [created_at] DATETIME2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    [summary] NVARCHAR(MAX)
   );
 END;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'sys_job_results') AND name=N'idx_created_at')
@@ -8634,5 +8637,5 @@ INSERT INTO [sys_user_role] ([user_id], [role_id]) VALUES
 (1, 1);
 SET IDENTITY_INSERT [sys_users] ON;
 INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by], [must_change_password]) VALUES
-(1, N'admin', N'$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', N'', 1, 1, N'', N'', N'系统管理员', N'', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-08-16 10:56:02.000000', NULL, 0, 1);
+(1, N'admin', N'$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', N'', 1, 1, N'', N'', N'系统管理员', N'', N'初始系统管理员', N'2025-08-18 14:55:05.000000', N'2026-10-09 20:03:48.000000', NULL, 0, 1);
 SET IDENTITY_INSERT [sys_users] OFF;
