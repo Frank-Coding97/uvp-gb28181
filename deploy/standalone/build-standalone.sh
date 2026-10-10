@@ -227,11 +227,14 @@ else
     # ⛔⛔ 读回断言：注入没生效必须**当场报错**。
     #   否则包照常出、向导预填的还是 5061，而"SIP 在段内"只存在于文档里，
     #   现场根本发现不了 —— 正是本项目反复踩的「静默不生效」那类坑。
-    if ! grep -rq "$SIP_PORT" dist 2>/dev/null; then
-      echo "错误：前端产物里找不到注入的 SIP 默认端口 $SIP_PORT —— VITE_DEFAULT_SIP_PORT 未生效（变量名/vite 读 env 的方式有变）。" >&2
+    if ! grep -rq "${SIP_PORT}" dist 2>/dev/null; then
+      echo "错误：前端产物里找不到注入的 SIP 默认端口 ${SIP_PORT} —— VITE_DEFAULT_SIP_PORT 未生效（变量名/vite 读 env 的方式有变）。" >&2
       exit 1
     fi
-    log "  已注入 SIP 默认端口 $SIP_PORT（产物内读回校验通过）"
+    # ⛔ 变量必须带花括号：写成 `$SIP_PORT（` 时 bash 会把全角括号的字节吞进变量名，
+    #   报 `SIP_PORT（: unbound variable`（2026-10-10 实测：前端 3 分钟构建**成功**后
+    #   才在最后一行日志炸掉，看起来像"前端构建失败"，其实构建是好的）。
+    log "  已注入 SIP 默认端口 ${SIP_PORT}（产物内读回校验通过）"
   ) || fail "前端构建失败（见上）"
 fi
 
