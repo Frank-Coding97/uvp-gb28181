@@ -43,8 +43,12 @@ for _c in "${UVP_BUILD_PY:-}" python3 python; do
 done
 
 ENV_FILE="$ROOT/config.env"
-HTTP_PORT_DEFAULT=51010
-REDIS_PORT_DEFAULT=51011
+# ⛔ 端口规划：整段 51000-51064 **连续无空洞**（老板 2026-10-10 定）。
+#   顺序：对外在前（nginx → ZLM），内部随后，RTP 动态段收尾，末尾 51064 给 SIP。
+#   ⚠️ SIP（51064）不在下面的预检清单里：它由**引导页**录入并写进 gb_sip_config 表，
+#      本脚本无从知道现场最终选了哪个端口；保存时若端口被占，引导页会报 bind 失败。
+HTTP_PORT_DEFAULT=51002
+REDIS_PORT_DEFAULT=51003
 
 read_env_file() {
   # 读 config.env 的 KEY=VALUE；忽略注释与空行；取最后一条（后写的覆盖先写的）
@@ -103,27 +107,30 @@ ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
-ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-51100}"
+ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-51004}"
 ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_port_env UVP_ZLM_SSL_PORT)}"
-ZLM_SSL_PORT="${ZLM_SSL_PORT:-51103}"
+ZLM_SSL_PORT="${ZLM_SSL_PORT:-51007}"
 ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_port_env UVP_ZLM_RTSP_PORT)}"
-ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-51101}"
+ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-51005}"
 # 其余对外段也统一到规划段（PORTS.md）
-ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-51102}"
-ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-51104}"
-ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-51200}"
+ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-51006}"
+ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-51008}"
+# ⛔ rtp_proxy 端口必须 = RTP 动态段的起点（同一个值，改一个必须改另一个）
+ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-51014}"
 # ⛔⛔ RTP 动态端口段必须改！ZLM 默认是 49152-65535，那是 Linux 的
 #   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
 #   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
-ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-51200-51299}"
+# ⭐ 段长 = 默认 50 个（UDP+TCP 成对占用 ⇒ 50 路并发收流）；不够时改这个键放大，
+#   但**注意别越过 51063**（51064 是 SIP 预留位，见 PORTS.md）。
+ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-51014-51063}"
 # WebRTC 信令（键名不是 port，按"段名+port"匹配抓不到，实测漏掉导致 ZLM 起不来）
-ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-51105}"
-ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-51106}"
+ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-51009}"
+ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-51010}"
 # SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
-ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-51107}"
-ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-51108}"
+ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-51011}"
+ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-51012}"
 # STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
-ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-51109}"
+ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-51013}"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -163,19 +170,21 @@ check_ports_free() {
       └─ 已被占用：${holder}"
   }
 
+  # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
   _check_one 51000 tcp "HTTPS（浏览器访问管理页面）"     NGINX_HTTPS_PORT
   _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
-  _check_one 51010 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
-  _check_one 51100 tcp "ZLM HTTP API（平台开关流）"       ZLM_HTTP_PORT
-  _check_one 51101 tcp "ZLM RTSP（设备拉流播放）"         ZLM_RTSP_PORT
-  _check_one 51102 tcp "ZLM RTMP"                         ZLM_RTMP_PORT
-  _check_one 51103 tcp "ZLM HTTPS"                        ZLM_SSL_PORT
-  _check_one 51104 tcp "ZLM WebRTC 媒体"                  ZLM_RTC_PORT
-  _check_one 51105 tcp "ZLM WebRTC 信令 WS"               ZLM_SIGNALING_PORT
-  _check_one 51106 tcp "ZLM WebRTC 信令 WSS"              ZLM_SIGNALING_SSL_PORT
-  _check_one 51107 udp "ZLM SRT"                          ZLM_SRT_PORT
-  _check_one 51108 tcp "ZLM ONVIF"                        ZLM_ONVIF_PORT
-  _check_one 51109 udp "ZLM STUN/TURN"                    ZLM_ICE_PORT
+  _check_one 51002 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
+  _check_one 51003 tcp "Redis（仅回环）"                  REDIS_PORT
+  _check_one 51004 tcp "ZLM HTTP API（平台开关流）"       ZLM_HTTP_PORT
+  _check_one 51005 tcp "ZLM RTSP（设备拉流播放）"         ZLM_RTSP_PORT
+  _check_one 51006 tcp "ZLM RTMP"                         ZLM_RTMP_PORT
+  _check_one 51007 tcp "ZLM HTTPS"                        ZLM_SSL_PORT
+  _check_one 51008 tcp "ZLM WebRTC 媒体"                  ZLM_RTC_PORT
+  _check_one 51009 tcp "ZLM WebRTC 信令 WS"               ZLM_SIGNALING_PORT
+  _check_one 51010 tcp "ZLM WebRTC 信令 WSS"              ZLM_SIGNALING_SSL_PORT
+  _check_one 51011 udp "ZLM SRT"                          ZLM_SRT_PORT
+  _check_one 51012 tcp "ZLM ONVIF"                        ZLM_ONVIF_PORT
+  _check_one 51013 udp "ZLM STUN/TURN"                    ZLM_ICE_PORT
 
   # ---- RTP 动态段：整段都要查（UDP/TCP 成对占用）----
   # ⛔ 只查起点是不够的：段内任一端口被占，ZLM 都会在 bind 那一个时退出。
@@ -198,7 +207,8 @@ check_ports_free() {
     printf '  1) 停掉占用者 —— 若那不是本系统，说明机器上还有另一套服务在用这些端口。\n' >&2
     printf '  2) 换端口 —— 编辑 config.env 里的对应键，常用键名：\n' >&2
     printf '     UVP_HTTPS_PORT / UVP_HTTP_PORT / UVP_ZLM_HTTP_PORT / UVP_ZLM_RTSP_PORT ...\n' >&2
-    printf '  3) 当前端口规划见 deploy/standalone/PORTS.md（规划段 51000-51299）。\n' >&2
+    printf '  3) 当前端口规划见 deploy/standalone/PORTS.md（规划段 51000-51064，连续无空洞）。\n' >&2
+    printf '     ⚠️ SIP（51064）由引导页录入、不在此预检内：若它被占，保存引导页时会报 bind 失败。\n' >&2
     printf '\n  ⚠️ 为什么必须在启动前发现：若端口被别人占着而我们照常启动，\n' >&2
     printf '     nginx 会连到**别人的服务**上，而 status 仍报「运行中」——\n' >&2
     printf '     客户看到的是别的系统的页面，全程却没有任何报错。\n' >&2
@@ -776,7 +786,6 @@ import sys
 (path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range,
  signaling_port, signaling_ssl_port, srt_port, onvif_port, ice_port) = sys.argv[1:14]
 
-# 段名（小写） → {键: 新值}
 # 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
 # ⛔ **只列真正要对外的段**：onvif/shell 这类管理端口默认关掉（port=0），
 #   改它们没意义；而且它们在本机回环上，不属于防火墙要开的范围。
@@ -795,8 +804,15 @@ targets = {
                # STUN/TURN：容器默认 3478 同样在规划段外，且 3478/3479 常被别的服务占
                "icePort": ice_port,
                "iceTcpPort": ice_port},
-    "rtp_proxy": {"port": rtp_proxy_port},
-    "rtp":    {"port": rtp_proxy_port, "port_range": rtp_range},
+    # ⛔⛔ RTP 动态段的**真源是 [rtp_proxy] port_range**，不是 [rtp] ——
+    #   ZLM 源码 src/Common/config.cpp: RtpProxy::kPortRange = "rtp_proxy.port_range"
+    #   （默认 "30000-35000"）。
+    #   曾把 port_range 写到 [rtp] 段，而该段只有 audioMtuSize/videoMtuSize/
+    #   rtpMaxSize/lowLatency/h264_stap_a —— **根本没有 port_range 这个键** ⇒
+    #   行扫描匹配不到 ⇒ 静默不生效，ZLM 实际仍用 30000-35000（5001 个端口）。
+    #   症状极具误导性：PORTS.md 写着"RTP 段 = 51200-51299"、端口预检也照这段查，
+    #   而 ZLM 收流实际开在 30000-35000 —— 规划与运行完全对不上，且**零报错**。
+    "rtp_proxy": {"port": rtp_proxy_port, "port_range": rtp_range},
     # SRT 与 onvif 也不改就会被容器默认值(9000/3702)拖住，
     # 而这两个在目标机上很可能已被别的服务占用。
     "srt":    {"port": srt_port},
@@ -834,6 +850,28 @@ if changed:
     print("   ZLM config.ini: " + "; ".join(changed))
 else:
     print("   ZLM config.ini: 端口已与目标一致，无需改动")
+
+# ⛔⛔ 读回校验 —— 上面打印 changed 只能证明"改到了某个同名键"，
+#   不能证明**改到了 ZLM 真正读的那个键**。段名/键名任一不匹配时它静默不改，
+#   日志照样显示"无需改动"（本项目已多次栽在"谎报成功"上，见 PORTS.md 附注）。
+#   ⇒ 这里按 ZLM 的键路径回读一次，不对就**中止启动**（配合脚本顶部的 set -e）。
+def _read_key(section_want, key):
+    sec = None
+    for line in open(path, encoding="utf-8", newline="").read().split("\n"):
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]"):
+            sec = s[1:-1].strip().lower()
+        elif sec == section_want:
+            m = re.match(r"^\s*" + re.escape(key) + r"\s*=\s*(.*?)\s*\r?$", line)
+            if m:
+                return m.group(1)
+    return None
+
+_got = _read_key("rtp_proxy", "port_range")
+if _got != rtp_range:
+    sys.exit("❌ [rtp_proxy] port_range 未生效（期望 %s，实际 %s）"
+             " —— ZLM 收流端口会跑出规划段，端口预检与实际监听对不上" % (rtp_range, _got))
+
 ZLM_INI_PY
 }
 

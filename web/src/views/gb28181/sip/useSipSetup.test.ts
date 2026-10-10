@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSipSetup, type SipSetupApi } from "./useSipSetup";
 
 const configuredStatus = {
@@ -143,5 +143,24 @@ describe("useSipSetup", () => {
     const result = await setup.save();
     expect(result.reloadedOk).toBe(false);
     expect(result.reloadError).toContain("bind failed");
+  });
+
+  // ---- 向导默认端口的来源（绿色包与其它构建形态必须分开）----
+  describe("default port", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("prefills the packed default when the build injects VITE_DEFAULT_SIP_PORT", () => {
+      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "51064");
+      expect(useSipSetup(fakeApi()).form.port).toBe(51064);
+    });
+
+    it("falls back to 5061 when the injected value is missing or invalid", () => {
+      for (const bad of ["", "not-a-number", "0", "70000", "51064.5"]) {
+        vi.stubEnv("VITE_DEFAULT_SIP_PORT", bad);
+        expect(useSipSetup(fakeApi()).form.port).toBe(5061);
+      }
+    });
   });
 });

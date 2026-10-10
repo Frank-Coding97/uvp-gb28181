@@ -12,6 +12,27 @@ import {
 } from "@/api/gb28181";
 import type { BaseResult } from "@/api/types";
 
+// 引导页默认 SIP 端口。
+//
+// ⛔⛔ 为什么默认值必须允许"按包覆盖"，而不是写死一个数字：
+//   绿色安装包把**所有**端口压进一整段连续高位端口（51000-51064，
+//   见 deploy/standalone/PORTS.md），但 SIP 端口**不经过 config.env** ——
+//   它是管理员首次登录引导页时录入、存进 gb_sip_config 表的
+//   （2026-07-20 起 SIP 明文配置从 YAML 移到了 DB）。
+//   ⇒ 若这里写死 5061，绿色包首次打开向导就预填一个**段外**端口，
+//     与"整段连续、防火墙一条规则"的规划自相矛盾。
+//   ⇒ 出包时由 build-standalone.sh 注入 VITE_DEFAULT_SIP_PORT；
+//     其它构建形态不带该变量 ⇒ 回落 5061，行为完全不变（互不影响）。
+const FALLBACK_SIP_PORT = 5061;
+
+function defaultSipPort(): number {
+  const raw = import.meta.env.VITE_DEFAULT_SIP_PORT as string | undefined;
+  const parsed = Number(raw);
+  // 非法值（空 / 非数字 / 越界）一律回落：预填一个必然保存失败的端口
+  // 会让现场以为是"平台不允许这个端口"，而真正的原因是打包注入写错了。
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : FALLBACK_SIP_PORT;
+}
+
 export interface SipSetupForm {
   deploymentMode: SipDeploymentMode | "";
   listenIp: string;
@@ -58,7 +79,7 @@ function initialForm(): SipSetupForm {
     hookIp: "",
     sdpIp: "",
     streamIp: "",
-    port: 5061,
+    port: defaultSipPort(),
     domain: "",
     serverId: "",
     password: ""

@@ -311,7 +311,7 @@ gb28181:
   # 基址取空时按 host+port 派生明文 http://<host>:<port>；
   # base_url 非空时优先,公网部署用它填 https 域名。
   qr_provision:
-    base_url: ""                 # 推荐:完整基址,如 http://192.168.1.10:51010 或 https://uv.example.com
+    base_url: ""                 # 推荐:完整基址,如 http://192.168.1.10:51002 或 https://uv.example.com
     host: ""                     # base_url 为空时用它+port 派生;留空则拒绝出码(而不是出坏码)
     port: 0                      # base_url 为空时必填,通常是后端 HTTP 端口
     require_tls: false           # 公网部署设 true,拒绝明文基址

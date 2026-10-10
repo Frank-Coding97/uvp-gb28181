@@ -9,11 +9,14 @@
 #   拆开后：nginx 独占 HTTPS，后端留在纯 HTTP 的内网端口上，
 #   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
 #
-# ⛔ 端口规划（与 uvp-ctl.sh 的变量必须一致）：
-#   443   nginx HTTPS        ← 浏览器访问（端口由 uvp-ctl.sh 填入）
-#   80    nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（端口由 uvp-ctl.sh 填入）
-#   8390  后端 HTTP          ← API + 二维码地址，**不设 TLS**
-#   16380 Redis（仅回环）18080/10554 ZLM
+# ⛔ 端口规划（与 uvp-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
+#   51000 nginx HTTPS        ← 浏览器访问（端口由 uvp-ctl.sh 填入 @HTTPS_PORT@）
+#   51001 nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
+#   51002 后端 HTTP          ← API + 二维码地址，**不设 TLS**（@BACKEND_PORT@）
+#   51003 Redis（仅回环）    51004-51013 ZLM 各协议
+#   51014-51063 ZLM RTP 动态段    51064 SIP（UDP+TCP，引导页预填）
+#
+#   ⇒ 整段 51000-51064 连续无空洞，防火墙一条规则即可覆盖（见 PORTS.md）。
 #
 # ⛔ 本文件里的路径由 uvp-ctl.sh 启动时按实际安装目录改写（占位符 @ROOT@），
 #   不要手工改包内的模板。

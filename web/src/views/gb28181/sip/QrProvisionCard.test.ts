@@ -46,7 +46,7 @@ function okResponse(token: string, expiresInSeconds: number) {
   return {
     code: 0,
     message: "",
-    data: { token, expiresInSeconds, baseUrl: "http://192.168.1.10:51010" }
+    data: { token, expiresInSeconds, baseUrl: "http://192.168.1.10:51002" }
   };
 }
 
@@ -211,7 +211,7 @@ describe("QrProvisionCard 接入基址来自后端（2026-10-08）", () => {
     api.generateSipQrToken.mockResolvedValue({
       code: 0,
       message: "",
-      data: { token: "tok-y", expiresInSeconds: 300, baseUrl: "192.168.1.10:51010" }
+      data: { token: "tok-y", expiresInSeconds: 300, baseUrl: "192.168.1.10:51002" }
     });
 
     const wrapper = mountCard();
@@ -228,7 +228,7 @@ describe("QrProvisionCard 接入基址来自后端（2026-10-08）", () => {
     await flushPromises();
 
     // 二维码组件被 stub 成空标签，改由链接区断言实际 URL
-    expect(wrapper.text()).toContain("http://192.168.1.10:51010/gb28181/qr#t=tok-z");
+    expect(wrapper.text()).toContain("http://192.168.1.10:51002/gb28181/qr#t=tok-z");
     wrapper.unmount();
   });
 

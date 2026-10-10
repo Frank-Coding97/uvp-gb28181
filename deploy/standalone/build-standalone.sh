@@ -35,8 +35,20 @@ DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 #   根因是这两个变量一直只靠调用方传环境变量，不传就落回 make-config.py
 #   的 argparse 默认值，于是与 uvp-ctl.sh 各说各话。
 #   端口规划见 deploy/standalone/PORTS.md。
-HTTP_PORT="${UVP_HTTP_PORT:-51010}"
-REDIS_PORT="${UVP_REDIS_PORT:-51011}"
+# 规划段 51000-51064 连续无空洞（详见 PORTS.md）。
+HTTP_PORT="${UVP_HTTP_PORT:-51002}"
+REDIS_PORT="${UVP_REDIS_PORT:-51003}"
+
+# ---- SIP 端口（引导页默认值，构建期注入到前端）----
+#
+# ⛔⛔ SIP 端口**不走 config.env** —— 2026-07-20 起 SIP 明文配置从 YAML 移进了
+#   `gb_sip_config` 表，端口由管理员首次登录的引导页录入（见 server/config/config.example.yml 注释）。
+#   ⇒ 包里唯一能"默认落进规划段"的着力点，就是给前端**构建期**注入一个默认值：
+#     打出来的 SPA 里 import.meta.env.VITE_DEFAULT_SIP_PORT = 51064，
+#     向导一打开就预填段内端口（管理员仍可改）。
+#   ⇒ 不注入的构建形态（开发、其它交付包）回落 5061，行为完全不变。
+#   ⚠️ 因此 SIP 端口**改不了 config.env**：现场要改就在引导页改（存 DB）。
+SIP_PORT="${UVP_SIP_PORT:-51064}"
 
 # ---- 扫码接入基址里的设备可达地址 ----
 #
@@ -186,7 +198,7 @@ else
   ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
   log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
 
-  log "构建前端产物"
+  log "构建前端产物（SIP 默认端口 ${SIP_PORT} 构建期注入）"
   (
     cd "$WEB_DIR" || exit 1
     # ⛔ rm -rf dist：vite 会**按内容哈希命名 chunk**，
@@ -199,11 +211,27 @@ else
       if [ -f package-lock.json ]; then npm ci --no-audit --no-fund
       else npm install --no-audit --no-fund; fi
     fi
+    # ⛔⛔ 构建期注入 SIP 默认端口（原因见文件头 SIP_PORT 注释）。
+    #   用 `.env.production.local`：Vite 只在 `.env.[mode]` 与 `.env.[mode].local`
+    #   里保证读得到（`vite build` 的 mode 就是 production），而 `.local` 已被
+    #   web/.gitignore 的 `*.local` 忽略 ⇒ 不会污染工作区。
+    ENV_LOCAL="$WEB_DIR/.env.production.local"
+    printf 'VITE_DEFAULT_SIP_PORT=%s\n' "$SIP_PORT" > "$ENV_LOCAL"
+    # 构建失败/断言失败/正常结束一律清掉，别把这个临时文件留在工作区。
+    trap 'rm -f "$ENV_LOCAL"' EXIT
     if [ -x node_modules/.bin/vite ]; then
       node_modules/.bin/vite build
     else
       npx --yes vite build
     fi
+    # ⛔⛔ 读回断言：注入没生效必须**当场报错**。
+    #   否则包照常出、向导预填的还是 5061，而"SIP 在段内"只存在于文档里，
+    #   现场根本发现不了 —— 正是本项目反复踩的「静默不生效」那类坑。
+    if ! grep -rq "$SIP_PORT" dist 2>/dev/null; then
+      echo "错误：前端产物里找不到注入的 SIP 默认端口 $SIP_PORT —— VITE_DEFAULT_SIP_PORT 未生效（变量名/vite 读 env 的方式有变）。" >&2
+      exit 1
+    fi
+    log "  已注入 SIP 默认端口 $SIP_PORT（产物内读回校验通过）"
   ) || fail "前端构建失败（见上）"
 fi
 
@@ -234,6 +262,14 @@ fi
 
 if [ "$SKIP_FRONTEND" -eq 0 ]; then
   [ -f "$WEB_DIR/dist/index.html" ] || fail "缺少前端产物：$WEB_DIR/dist/index.html（先跑 vite build）"
+else
+  # ⛔ --skip-frontend 复用已有 dist ⇒ 无法保证 SIP 默认端口已注入。
+  #   这不会让包坏掉（引导页仍可手工填端口），但会让"SIP 在 51064"只停留在文档上 ——
+  #   提示一声，别让现场以为向导预填的就是规划值。
+  if ! grep -rq "$SIP_PORT" "$WEB_DIR/dist" 2>/dev/null; then
+    log "⚠️ 复用已有前端产物（--skip-frontend）：产物里看不到 SIP 默认端口 ${SIP_PORT}，"
+    log "   引导页会预填 5061（仍可手工改成 ${SIP_PORT}）；要预填就在不带 --skip-frontend 时构建。"
+  fi
 fi
 
 # 静态校验：二进制必须是 linux/amd64。用 file 判，别只看文件名。
