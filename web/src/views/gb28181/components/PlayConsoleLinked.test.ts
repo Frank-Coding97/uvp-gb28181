@@ -1036,7 +1036,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("在播放弹窗中手动切换并包装 ZLM WebRTC 地址", async () => {
+  it.each([
+    ["http:", "18080"],
+    ["https:", "18443"]
+  ])("在 %s 页面手动切换 WebRTC 使用对应信令端口 %s", async (pageProtocol, signalingPort) => {
+    vi.stubGlobal("location", { ...window.location, protocol: pageProtocol });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     api.startPlay.mockResolvedValueOnce({
@@ -1048,7 +1052,9 @@ describe("PlayConsoleLinked 双区联动", () => {
         app: "rtp",
         urls: {
           wsFlv: "ws://zlm/rtp/stream-webrtc.live.flv",
-          webrtc: "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
+          wssFlv: "wss://zlm/rtp/stream-webrtc.live.flv",
+          webrtc: "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play",
+          webrtcs: "https://zlm:18443/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
         },
         wsflvUrl: "",
         httpFlvUrl: "",
@@ -1060,7 +1066,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     const player = wrapper.get("[data-testid='play-window']");
-    expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
+    const initialURL = `${pageProtocol === "https:" ? "wss" : "ws"}://zlm/rtp/stream-webrtc.live.flv`;
+    expect(player.attributes("data-url")).toBe(initialURL);
     expect(player.attributes("data-zlm-webrtc")).toBe("false");
     expect(wrapper.findAll(".protocol-option strong").map(label => label.text())).toContain("WebRTC:");
     expect(wrapper.findAll(".proto-btn").map(button => button.text())).toContain("WebRTC");
@@ -1068,14 +1075,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     const webRtcOption = wrapper.findAll(".protocol-option").find(option => option.text().includes("WebRTC:"));
     await webRtcOption!.get(".protocol-copy-btn").trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith("http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play");
-    expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
+    expect(writeText).toHaveBeenCalledWith(
+      `${pageProtocol}//zlm:${signalingPort}/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play`
+    );
+    expect(player.attributes("data-url")).toBe(initialURL);
 
     const vm = wrapper.vm as unknown as { switchProtocol: (proto: "webrtc") => void };
     vm.switchProtocol("webrtc");
     await flushPromises();
 
-    expect(player.attributes("data-url")).toBe("webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play");
+    expect(player.attributes("data-url")).toBe(
+      `webrtc://zlm:${signalingPort}/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play`
+    );
     expect(player.attributes("data-zlm-webrtc")).toBe("true");
     wrapper.unmount();
   });

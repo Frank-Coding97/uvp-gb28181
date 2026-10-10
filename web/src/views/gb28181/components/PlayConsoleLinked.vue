@@ -596,7 +596,8 @@ function protocolUrlsFor(result: PlayResult | null | undefined): ProtocolURLMap 
     "http-ts": result?.urls?.httpTs || null,
     "wss-ts": result?.urls?.wssTs || null,
     "https-ts": result?.urls?.httpsTs || null,
-    webrtc: result?.urls?.webrtc || null,
+    // EasyPlayer 按页面协议恢复信令 URL，HTTPS 页面必须同时选择 HTTPS 端口。
+    webrtc: (window.location.protocol === "https:" ? result?.urls?.webrtcs : result?.urls?.webrtc) || null,
     webrtcs: result?.urls?.webrtcs || null,
     rtmp: result?.urls?.rtmp || null,
     rtmps: result?.urls?.rtmps || null,
