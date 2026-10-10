@@ -17,9 +17,9 @@ export interface RefreshTokenData {
 // 继承
 export interface DataInfo extends AccessTokenData, RefreshTokenData {}
 
-export const AccessTokenKey = "gin-fast-access-token";
-export const RefreshTokenKey = "gin-fast-refresh-token";
-export const UserInfoKey = "gin-fast-user-info";
+export const AccessTokenKey = "uvp-gb28181-access-token";
+export const RefreshTokenKey = "uvp-gb28181-refresh-token";
+export const UserInfoKey = "uvp-gb28181-user-info";
 
 export function hasRefreshToken(): boolean {
   return !!Cookies.get(RefreshTokenKey);

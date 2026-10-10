@@ -1,0 +1,326 @@
+package handler
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"gorm.io/gorm"
+
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalog"
+	"uvplatform.com/uvp-gb28181/app/gb28181/catalogprogress"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+
+	"go.uber.org/zap"
+)
+
+const catalogAggregationTimeout = 30 * time.Second
+
+// catalogAggregator 按 deviceID + SN 聚合分包的 Catalog 应答。
+type catalogAggregator struct {
+	mu    sync.Mutex
+	cache map[catalogAggregateKey]*catalogBucket
+}
+
+type catalogAggregateKey struct {
+	deviceID string
+	sn       int
+}
+
+type catalogBucket struct {
+	sumNum int
+	items  map[string]manscdp.CatalogItem
+	order  []string
+	timer  *time.Timer
+}
+
+var catalogAgg = &catalogAggregator{cache: make(map[catalogAggregateKey]*catalogBucket)}
+
+func (a *catalogAggregator) add(resp *manscdp.CatalogResponse) (items []manscdp.CatalogItem, received, total int, done bool) {
+	if resp == nil {
+		return nil, 0, 0, false
+	}
+	key := catalogAggregateKey{deviceID: resp.DeviceID, sn: resp.SN}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// 标准空结果是一个完整终态，不能留下永不完成的 SumNum=0 bucket。
+	if resp.SumNum == 0 && len(resp.DeviceList.Items) == 0 {
+		if old := a.cache[key]; old != nil {
+			old.timer.Stop()
+			delete(a.cache, key)
+		}
+		return nil, 0, 0, true
+	}
+
+	b := a.cache[key]
+	if b == nil {
+		b = &catalogBucket{
+			sumNum: resp.SumNum,
+			items:  make(map[string]manscdp.CatalogItem),
+		}
+		a.cache[key] = b
+	}
+	if resp.SumNum > b.sumNum {
+		b.sumNum = resp.SumNum
+	}
+	for _, item := range resp.DeviceList.Items {
+		if item.DeviceID == "" {
+			continue
+		}
+		if _, exists := b.items[item.DeviceID]; !exists {
+			b.order = append(b.order, item.DeviceID)
+		}
+		// 相同目录编码的重复包不增加进度；较新的字段覆盖旧值。
+		b.items[item.DeviceID] = item
+	}
+	if b.sumNum <= 0 {
+		// 兼容少量老设备漏填 SumNum 的单包应答。
+		b.sumNum = len(b.items)
+	}
+	received, total = len(b.items), b.sumNum
+	done = total > 0 && received >= total
+	if done {
+		items = make([]manscdp.CatalogItem, 0, len(b.order))
+		for _, id := range b.order {
+			items = append(items, b.items[id])
+		}
+		if b.timer != nil {
+			b.timer.Stop()
+		}
+		delete(a.cache, key)
+		return items, received, total, true
+	}
+
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.timer = time.AfterFunc(catalogAggregationTimeout, func() {
+		a.mu.Lock()
+		if current := a.cache[key]; current == b {
+			delete(a.cache, key)
+		}
+		a.mu.Unlock()
+	})
+	return nil, received, total, false
+}
+
+func (a *catalogAggregator) reset() {
+	a.mu.Lock()
+	for _, bucket := range a.cache {
+		if bucket.timer != nil {
+			bucket.timer.Stop()
+		}
+	}
+	a.cache = make(map[catalogAggregateKey]*catalogBucket)
+	a.mu.Unlock()
+}
+
+func (a *catalogAggregator) active() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.cache)
+}
+
+// catalogPipeline 全局入库管道(A4 改造:不再直接 UpsertChannel,投递到 catalog.Pipeline)
+// 包内可见单例,首次使用 lazy 装配;测试可调 SetCatalogPipeline 注入替身
+var (
+	catalogPipelineMu   sync.RWMutex
+	catalogPipeline     *catalog.Pipeline
+	capabilityRefreshMu sync.RWMutex
+	capabilityRefresher CapabilityRefresher
+)
+
+// SetCatalogPipeline 注入 Pipeline(给单测 / bootstrap 用)
+func SetCatalogPipeline(p *catalog.Pipeline) {
+	catalogPipelineMu.Lock()
+	catalogPipeline = p
+	catalogPipelineMu.Unlock()
+}
+
+// SetCapabilityRefresher 注入 Catalog 完成后的设备能力刷新器。
+func SetCapabilityRefresher(r CapabilityRefresher) {
+	capabilityRefreshMu.Lock()
+	capabilityRefresher = r
+	capabilityRefreshMu.Unlock()
+}
+
+func getCapabilityRefresher() CapabilityRefresher {
+	capabilityRefreshMu.RLock()
+	defer capabilityRefreshMu.RUnlock()
+	return capabilityRefresher
+}
+
+func triggerCapabilityRefresh(ctx context.Context, deviceID string, sn int) {
+	refresher := getCapabilityRefresher()
+	if refresher == nil {
+		return
+	}
+	// catalogAgg removes a bucket as soon as a complete response is assembled.
+	// The same SN is commonly reused by a device for a later refresh, so SN is
+	// only a response aggregation key and must not suppress a new completed
+	// Catalog batch.
+	refresher.Refresh(ctx, deviceID, sn)
+}
+
+// getCatalogPipeline lazy init,首次返回基于 app.DB() 的 Pipeline
+func getCatalogPipeline() *catalog.Pipeline {
+	catalogPipelineMu.RLock()
+	p := catalogPipeline
+	catalogPipelineMu.RUnlock()
+	if p != nil {
+		return p
+	}
+	// ⛔⛔⛔ 必须用 app.DB()（方言感知），**不能写死 app.GormDbMysql**（2026-10-09 修）
+	//
+	// 原实现直接读 app.GormDbMysql，注释理由是「避开 app.DB() 在 ConfigYml=nil 时的panic」。
+	// 那个理由成立，但**结论错**：绿色包跑 SQLite 时 `app.GormDbMysql` 恒为 nil
+	// ⇒ 返回 nil ⇒ **设备目录应答处理后一条通道都不入库**，
+	// 而分支里只打一条 **Debug** 日志（默认级别看不到）⇒ 现场表现是
+	// 「设备注册成功、在线正常、Catalog 应答也收到了（complete=true），
+	//   但通道列表永远是空的」，全程零报错。
+	//
+	// ⭐ 这是本项目**第 7 处**「自己挑数据库连接漏 SQLite」
+	//（设备/告警/地图 5 个控制器 + trace 模块 + 本处）。
+	// ⇒ 判据不是「哪个写法不panic」，而是「哪个写法在**四种方言**下都拿到连接」。
+	//
+	// ⚠️ app.DB() 确实会在 ConfigYml==nil 时 panic，所以 nil 守卫必须留着 ——
+	//   两个问题要分别解：方言分发用 app.DB()，nil 安全用守卫。
+	db := (*gorm.DB)(nil)
+	if app.ConfigYml != nil {
+		db = app.DB()
+	}
+	if db == nil {
+		return nil
+	}
+	catalogPipelineMu.Lock()
+	defer catalogPipelineMu.Unlock()
+	if catalogPipeline == nil {
+		catalogPipeline = catalog.New(db.Session(&gorm.Session{NewDB: true}))
+	}
+	return catalogPipeline
+}
+
+// HandleCatalogResponse 处理一条 Catalog 应答:按设备与 SN 聚合，收齐后一次性入库。
+//
+// A4 改造:
+//   - 旧路径:gbmodels.UpsertChannel(只写 gb_channel)
+//   - 新路径:catalog.Pipeline.Ingest(写 gb_channel + gb_catalog_node + gb_channel_mount
+//   - classify/anomaly 兜底)
+//
+// pipeline 不可用时(db nil)回退到旧路径,保证生产兼容
+// deviceID / callID / cseq 是**显式参数**而不是 `traceFields ...zap.Field`。
+//
+// 原先的写法是 `logger := ...With(traceFields...)` + 调用点传 `zap.String(...)`：
+// 运行时字段在，但**字段名在调用点的日志语句里读不到** —— 静态扫描把它判成"无定位字段"，
+// 门禁的字段可验证性检查也看不到。"字段有没有"和"字段能不能被验证"是两件事，
+// 后者不做掉，治理就只剩人工翻代码。（同级反模式见 `fields []zap.Field` 容器。）
+func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, cseq string) {
+	logger := app.Log(ctx).Named("gb28181.catalog")
+	resp, err := manscdp.ParseCatalogResponse(body)
+	if err != nil {
+		// INFO：设备回的 Catalog 应答解析不了，丢弃并结束这次查询 —— 对方的错，
+		// 无可执行动作（`device_id` 仍取自报文信封，所以"是谁发的"照样定位得到）。
+		logger.Info("Catalog 应答解析失败",
+			zap.String("event", "gb28181.catalog.response_parse_failed"),
+			// resp 是 nil，用信封上已经解析出来的 device_id —— 报文解析失败并不代表
+			// 不知道是谁发的（MESSAGE 信封在进入这里之前就解开过了）。
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			zap.String("reason_code", "catalog_response_invalid"), logging.Error(err))
+		return
+	}
+
+	aggregated, received, sumNum, done := catalogAgg.add(resp)
+	catalogprogress.Default.Observe(resp.DeviceID, resp.SN, received, sumNum, done)
+	if done {
+		pipeline := getCatalogPipeline()
+		if pipeline != nil {
+			items := make([]catalog.CatalogItem, 0, len(aggregated))
+			for _, it := range aggregated {
+				if it.DeviceID == "" {
+					continue
+				}
+				items = append(items, manscdpToCatalogItem(it))
+			}
+			if e := pipeline.Ingest(ctx, catalog.Sender{SourceDeviceID: resp.DeviceID}, items); e != nil {
+				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, e)
+				logger.Warn("Catalog Pipeline.Ingest 失败(部分通道未入库)",
+					zap.String("event", "gb28181.catalog.ingest_failed"),
+					zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(e))
+			} else {
+				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
+				triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
+			}
+		} else {
+			catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
+			// ⛔⛔ 这条**必须是 Warn 而不是 Debug**：它是「设备报了目录、但一条通道都没入库」
+			// 的唯一线索，而 Debug 在默认日志级别下不输出 ⇒ 现场完全静默。
+			// 实测2026-10-09：设备在线、Catalog 应答 complete=true，
+			// 而 gb_channel 一直 0 行，日志里什么都查不到，就是这一条。
+			logger.Warn("CatalogPipeline 不可用，目录应答已收到但**通道未入库**（设备在线但通道列表为空）",
+				zap.String("event", "gb28181.catalog.pipeline_unavailable"),
+				zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+				zap.String("reason_code", "catalog_pipeline_nil"),
+				zap.Int("item_count", len(resp.DeviceList.Items)),
+				zap.String("likely_cause", "app.DB() 返回 nil（gormv2.usedbtype 与实际连接不匹配，或数据库未初始化）"))
+		}
+		if pipeline == nil {
+			triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
+		}
+	}
+
+	logger.Info("Catalog 应答处理",
+		zap.String("event", "gb28181.catalog.response_processed"),
+		zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+		zap.Int("sn", resp.SN),
+		zap.Int("item_count", len(resp.DeviceList.Items)),
+		zap.Int("received_count", received), zap.Int("total_count", sumNum), zap.Bool("complete", done))
+}
+
+// manscdpToCatalogItem 把 manscdp DTO 转 catalog DTO(无依赖,易测)
+//
+// ⛔ 通道属性(RoomType / SupplyLightType / DirectionType / Resolution)都在 `<Info>` 容器内,
+// 经 manscdp.CatalogItem.InfoOrEmpty() 取;容器缺失(minOccurs=0)时为零值 = "未上报"。
+// ⛔ 版本独有属性同样在 `<Info>` 内:2016 的 PositionType/UseType 与 2022 的
+// PhotoelectricImagingType/CapturePositionType **两版各自解析、并存落库**,不做版本分支 ——
+// 设备注册声明的版本(GbDevice.EffectiveVersion)有 `default:2016`,对 2022 设备会误判,
+// 而这两组字段在 XSD 上互斥,谁来上报就落谁,天然可以反推设备实际形态。
+func manscdpToCatalogItem(it manscdp.CatalogItem) catalog.CatalogItem {
+	info := it.InfoOrEmpty()
+	return catalog.CatalogItem{
+		DeviceID:        it.DeviceID,
+		Name:            it.Name,
+		Manufacturer:    it.Manufacturer,
+		Model:           it.Model,
+		Owner:           it.Owner,
+		CivilCode:       it.CivilCode,
+		ParentID:        it.ParentID,
+		BusinessGroupID: it.BusinessGroupID,
+		Parental:        it.Parental,
+		PTZType:         it.PTZType,
+		Longitude:       it.Longitude,
+		Latitude:        it.Latitude,
+		StatusOn:        it.IsOnline(),
+		Address:         it.Address,
+		Secrecy:         int8(it.Secrecy),
+		RegisterWay:     int8(it.RegisterWay),
+
+		IPAddress:       it.IPAddress,
+		Port:            it.Port,
+		RoomType:        manscdp.ParseAttrInt(info.RoomType),
+		SupplyLightType: manscdp.ParseAttrInt(info.SupplyLightType),
+		DirectionType:   manscdp.ParseAttrInt(info.DirectionType),
+		Resolution:      info.Resolution,
+
+		PositionType:             manscdp.ParseAttrInt(info.PositionType),
+		UseType:                  manscdp.ParseAttrInt(info.UseType),
+		PhotoelectricImagingType: info.PhotoelectricImagingType,
+		CapturePositionType:      info.CapturePositionType,
+		// 码流编号列表：2022 独有。视频参数面板按它渲染码流分段，
+		// 空值 = 设备本次未上报，面板据此退化成"按已知回读行数渲染"。
+		StreamNumberList: info.StreamNumberList,
+	}
+}

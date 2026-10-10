@@ -11,6 +11,9 @@ type TokenServiceInterface interface {
 	// GenerateToken 生成JWT令牌
 	GenerateToken(user *ClaimsUser) (string, error)
 
+	// GenerateTokenForSession generates an access token bound to one server session.
+	GenerateTokenForSession(user *ClaimsUser, sid, jti string) (string, error)
+
 	// ParseToken 解析JWT令牌
 	ParseToken(tokenString string) (*Claims, error)
 
@@ -27,7 +30,13 @@ type TokenServiceInterface interface {
 	RevokeTokenWithCache(tokenString string) error
 
 	// GenerateRefreshToken 生成Refresh Token
-	GenerateRefreshToken(userID uint, tenantID uint, tenantCode string) (string, error)
+	GenerateRefreshToken(userID uint) (string, error)
+
+	// GenerateRefreshTokenForSession generates a refresh token bound to one server session.
+	GenerateRefreshTokenForSession(userID uint, sid, jti string) (string, error)
+
+	// GenerateRefreshTokenForSessionUntil signs a refresh token with a fixed absolute expiry.
+	GenerateRefreshTokenForSessionUntil(userID uint, sid, jti string, expiresAt time.Time) (string, error)
 
 	// ParseRefreshToken 解析Refresh Token
 	ParseRefreshToken(tokenString string) (*RefreshTokenClaims, error)
@@ -47,23 +56,29 @@ type TokenServiceInterface interface {
 
 // ClaimsUser 用户声明信息
 type ClaimsUser struct {
-	UserID     uint   `json:"userId"`               // 用户ID
-	Username   string `json:"username"`             // 用户名
-	TenantID   uint   `json:"tenantId,omitempty"`   // 租户ID
-	TenantCode string `json:"tenantCode,omitempty"` // 租户编码
+	UserID   uint   `json:"userId"`   // 用户ID
+	Username string `json:"username"` // 用户名
+}
+
+// SessionClaims are mandatory bindings for backend access and refresh tokens.
+type SessionClaims struct {
+	SID            string `json:"sid"`
+	JTI            string `json:"-"` // mirrors jwt.RegisteredClaims.ID after parsing
+	TokenUse       string `json:"token_use"`
+	SessionVersion int    `json:"session_version"`
 }
 
 // Claims JWT声明结构
 type Claims struct {
 	ClaimsUser
+	SessionClaims
 	jwt.RegisteredClaims
 }
 
 // RefreshTokenClaims Refresh Token声明结构
 type RefreshTokenClaims struct {
-	UserID     uint   `json:"userId"`
-	TenantID   uint   `json:"tenantId,omitempty"`
-	TenantCode string `json:"tenantCode,omitempty"`
+	UserID uint `json:"userId"`
+	SessionClaims
 	jwt.RegisteredClaims
 }
 

@@ -1,7 +1,8 @@
 package app
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"log"
 
@@ -10,23 +11,29 @@ import (
 )
 
 var (
-	BasePath         string                // 定义项目的根目录
-	ConfigYml        YmlConfigInterf       // 全局配置文件指针
-	GormDbMysql      *gorm.DB              // mysql数据库连接
-	GormDbSqlserver  *gorm.DB              // sqlserver数据库连接
-	GormDbPostgreSql *gorm.DB              // postgresql数据库连接
-	ZapLog           *zap.Logger           // 全局日志指针
-	CasbinV2         CasbinInterf          // casbin指针
-	Cache            CacheInterf           // 缓存指针
-	TokenService     TokenServiceInterface // token管理
-	Response         ResponseHandler       // 全局响应指针
-	UploadService    FileUploadService     // 文件上传服务
-	JobScheduler     JobSchedulerInterf    // 全局任务调度器
+	LogRuntime       *logging.Runtime          // startup-owned logging runtime
+	RealtimeLogHub   *logging.EventHub         // bounded realtime console log stream
+	BasePath         string                    // 定义项目的根目录
+	ConfigYml        YmlConfigInterf           // 全局配置文件指针
+	GormDbMysql      *gorm.DB                  // mysql数据库连接
+	GormDbSqlserver  *gorm.DB                  // sqlserver数据库连接
+	GormDbPostgreSql *gorm.DB                  // postgresql数据库连接
+	GormDbSqlite     *gorm.DB                  // sqlite数据库连接（绿色安装包默认库，单文件、零外部依赖）
+	ZapLog           *zap.Logger               // 全局日志指针
+	CasbinV2         CasbinInterf              // casbin指针
+	Cache            CacheInterf               // 缓存指针
+	TokenService     TokenServiceInterface     // token管理
+	SessionValidator SessionValidatorInterface // persistent login-session validation
+	LoginLogRecorder LoginLogRecorderInterface // login audit recorder
+	Response         ResponseHandler           // 全局响应指针
+	UploadService    FileUploadService         // 文件上传服务
+	JobScheduler     JobSchedulerInterf        // 全局任务调度器
 )
 
 /*
  * @Description: 获取数据库连接
- * @param sqlType 数据库类型 mysql sqlserver postgresql
+ * @param sqlType 数据库类型 mysql sqlserver postgresql sqlite
+ *	不传则读配置 gormv2.usedbtype
  * @return *gorm.DB
  */
 func DB(sqlType ...string) *gorm.DB {
@@ -44,6 +51,8 @@ func DB(sqlType ...string) *gorm.DB {
 		db = GormDbSqlserver
 	case consts.DbTypePostgreSql:
 		db = GormDbPostgreSql
+	case consts.DbTypeSqlite:
+		db = GormDbSqlite
 	default:
 		db = GormDbMysql
 	}

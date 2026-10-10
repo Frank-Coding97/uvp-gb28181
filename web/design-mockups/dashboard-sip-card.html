@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SIP 协议看板 - 首页卡片 mockup</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --card: #121826;
+    --card-2: #1a2235;
+    --border: #1f2a40;
+    --text: #e6edf7;
+    --text-2: #8b97ad;
+    --text-3: #5a6478;
+    --green: #3ddc84;
+    --green-bg: rgba(61, 220, 132, 0.08);
+    --yellow: #ffb547;
+    --red: #ff5a5f;
+    --red-bg: rgba(255, 90, 95, 0.08);
+    --blue: #4d8eff;
+    --purple: #a78bfa;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
+    padding: 32px;
+    min-height: 100vh;
+  }
+
+  .page-title {
+    color: var(--text-3);
+    font-size: 12px;
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+  }
+
+  /* 模拟首页栅格,SIP 卡占左下一片 */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 16px;
+    max-width: 1600px;
+  }
+
+  .ghost-card {
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+    font-size: 12px;
+  }
+
+  .ghost-card.tall { min-height: 380px; }
+
+  /* SIP 卡本体 */
+  .sip-card {
+    grid-column: span 6;
+    background: linear-gradient(180deg, #131a2c 0%, #0f1424 100%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* 卡片标题区 */
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .card-head .title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .card-head .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .card-head .sub {
+    color: var(--text-3);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  .card-head .more {
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .card-head .more:hover { color: var(--blue); }
+
+  /* ① 健康度汇总条 */
+  .summary-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 14px 16px;
+    background: var(--green-bg);
+    border: 1px solid rgba(61, 220, 132, 0.2);
+    border-radius: 10px;
+  }
+  .summary-bar .health {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .health-num {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .health-label {
+    font-size: 11px;
+    color: var(--text-2);
+    letter-spacing: 0.5px;
+  }
+  .summary-bar .divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border);
+  }
+  .summary-stats {
+    display: flex;
+    gap: 24px;
+    flex: 1;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-num {
+    font-size: 18px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-num.warn { color: var(--yellow); }
+  .stat-num.danger { color: var(--red); }
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-3);
+  }
+
+  /* ② 七大事务矩阵 */
+  .tx-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .section-title {
+    font-size: 11px;
+    color: var(--text-3);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .tx-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .tx-cell {
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    cursor: pointer;
+    transition: transform 0.1s, border-color 0.1s;
+    position: relative;
+    overflow: hidden;
+  }
+  .tx-cell:hover {
+    border-color: var(--blue);
+    transform: translateY(-1px);
+  }
+  .tx-cell.alert {
+    border-color: rgba(255, 90, 95, 0.4);
+    background: var(--red-bg);
+  }
+  .tx-cell.alert::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--red);
+  }
+  .tx-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .tx-icon {
+    width: 20px; height: 20px;
+    border-radius: 4px;
+    background: rgba(77, 142, 255, 0.15);
+    color: var(--blue);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .tx-cell.alert .tx-icon {
+    background: rgba(255, 90, 95, 0.15);
+    color: var(--red);
+  }
+  .tx-trend {
+    font-size: 10px;
+    color: var(--text-3);
+  }
+  .tx-trend.up { color: var(--green); }
+  .tx-trend.down { color: var(--red); }
+  .tx-name {
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .tx-name .en {
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 400;
+    margin-left: 4px;
+  }
+  .tx-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 2px;
+  }
+  .tx-count {
+    font-size: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .tx-rate {
+    font-size: 11px;
+    color: var(--green);
+    font-variant-numeric: tabular-nums;
+  }
+  .tx-rate.warn { color: var(--yellow); }
+  .tx-rate.bad { color: var(--red); }
+
+  /* ③ 脉搏图 */
+  .pulse-section {
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pulse-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .pulse-title {
+    font-size: 11px;
+    color: var(--text-2);
+    letter-spacing: 0.5px;
+  }
+  .pulse-legend {
+    display: flex;
+    gap: 12px;
+    font-size: 10px;
+    color: var(--text-3);
+  }
+  .pulse-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 8px; height: 2px;
+    background: var(--blue);
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .pulse-legend span.err::before { background: var(--red); }
+  .pulse-svg {
+    width: 100%;
+    height: 60px;
+    display: block;
+  }
+  .footer-hint {
+    font-size: 10px;
+    color: var(--text-3);
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-title">UVP 综合管理平台 · 首页看板预览(只看 SIP 协议卡)</div>
+
+<div class="dashboard-grid">
+
+  <!-- 上排其他卡片占位 -->
+  <div class="ghost-card" style="grid-column: span 4">设备总览(占位)</div>
+  <div class="ghost-card" style="grid-column: span 4">实时点播路数(占位)</div>
+  <div class="ghost-card" style="grid-column: span 4">告警中心(占位)</div>
+
+  <!-- 主角:SIP 协议卡 -->
+  <div class="sip-card">
+    <div class="card-head">
+      <div>
+        <div class="title">
+          <span class="dot"></span>
+          GB28181 SIP 协议监控
+        </div>
+        <div class="sub">SIGNALING HEALTH · 实时</div>
+      </div>
+      <div class="more">详情 →</div>
+    </div>
+
+    <!-- ① 健康度汇总条 -->
+    <div class="summary-bar">
+      <div class="health">
+        <div class="health-num">97.3</div>
+        <div class="health-label">% 接入健康度</div>
+      </div>
+      <div class="divider"></div>
+      <div class="summary-stats">
+        <div class="stat">
+          <div class="stat-num">12,453</div>
+          <div class="stat-label">今日信令</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num warn">47</div>
+          <div class="stat-label">异常事务</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num danger">3</div>
+          <div class="stat-label">待处理</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② 七大事务矩阵 -->
+    <div class="tx-section">
+      <div class="section-title">协议事务 · 今日</div>
+      <div class="tx-grid">
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">RG</div>
+            <div class="tx-trend up">↑ 2.1%</div>
+          </div>
+          <div class="tx-name">注册 <span class="en">REGISTER</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">2,184</div>
+            <div class="tx-rate">99.8%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">KA</div>
+            <div class="tx-trend">— 0%</div>
+          </div>
+          <div class="tx-name">心跳 <span class="en">Keepalive</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">8,640</div>
+            <div class="tx-rate">99.9%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">CT</div>
+            <div class="tx-trend up">↑ 12%</div>
+          </div>
+          <div class="tx-name">目录 <span class="en">Catalog</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">312</div>
+            <div class="tx-rate">100%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell alert">
+          <div class="tx-head">
+            <div class="tx-icon">IV</div>
+            <div class="tx-trend down">↓ 4.5%</div>
+          </div>
+          <div class="tx-name">点播 <span class="en">INVITE</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">186</div>
+            <div class="tx-rate bad">94.6%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">RI</div>
+            <div class="tx-trend">— 0.2%</div>
+          </div>
+          <div class="tx-name">录像 <span class="en">RecordInfo</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">42</div>
+            <div class="tx-rate">100%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">AL</div>
+            <div class="tx-trend up">↑ 1</div>
+          </div>
+          <div class="tx-name">报警 <span class="en">Alarm</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">7</div>
+            <div class="tx-rate">100%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">PT</div>
+            <div class="tx-trend up">↑ 8%</div>
+          </div>
+          <div class="tx-name">控制 <span class="en">PTZ</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">94</div>
+            <div class="tx-rate warn">98.9%</div>
+          </div>
+        </div>
+
+        <div class="tx-cell">
+          <div class="tx-head">
+            <div class="tx-icon">BY</div>
+            <div class="tx-trend">— 0%</div>
+          </div>
+          <div class="tx-name">挂断 <span class="en">BYE</span></div>
+          <div class="tx-stats">
+            <div class="tx-count">178</div>
+            <div class="tx-rate">100%</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ③ 信令脉搏图 -->
+    <div class="pulse-section">
+      <div class="pulse-head">
+        <div class="pulse-title">信令脉搏 · 最近 60 分钟</div>
+        <div class="pulse-legend">
+          <span>消息速率</span>
+          <span class="err">失败率</span>
+        </div>
+      </div>
+      <svg class="pulse-svg" viewBox="0 0 600 60" preserveAspectRatio="none">
+        <!-- 异常时间窗背景 -->
+        <rect x="320" y="0" width="60" height="60" fill="rgba(255,90,95,0.08)"/>
+
+        <!-- 主脉搏曲线 -->
+        <path d="M 0,40 L 20,38 L 40,42 L 60,35 L 80,30 L 100,32 L 120,28 L 140,33 L 160,25 L 180,30 L 200,22 L 220,28 L 240,20 L 260,26 L 280,18 L 300,24 L 320,28 L 340,45 L 360,38 L 380,30 L 400,22 L 420,26 L 440,20 L 460,24 L 480,18 L 500,22 L 520,16 L 540,20 L 560,14 L 580,18 L 600,15"
+              fill="none" stroke="#4d8eff" stroke-width="1.5" opacity="0.9"/>
+
+        <!-- 失败率虚线 -->
+        <path d="M 0,55 L 100,55 L 100,54 L 200,54 L 200,55 L 320,55 L 320,48 L 380,48 L 380,55 L 600,55"
+              fill="none" stroke="#ff5a5f" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/>
+
+        <!-- 当前点 -->
+        <circle cx="600" cy="15" r="2.5" fill="#4d8eff"/>
+      </svg>
+      <div class="footer-hint">采样 1s · 仅显示 GB28181 信令</div>
+    </div>
+
+  </div>
+
+  <!-- SIP 卡右边的占位 -->
+  <div class="ghost-card tall" style="grid-column: span 6">媒体流监控(占位)</div>
+
+  <div class="ghost-card" style="grid-column: span 4">设备地理分布(占位)</div>
+  <div class="ghost-card" style="grid-column: span 4">最近告警(占位)</div>
+  <div class="ghost-card" style="grid-column: span 4">系统资源(占位)</div>
+
+</div>
+
+</body>
+</html>

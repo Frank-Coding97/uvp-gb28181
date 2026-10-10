@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 设备管理 · 地图视图</title>
+<link rel="stylesheet" href="./common.css" />
+<style>
+  /* ============ 地图视图专用 ============ */
+
+  /* 主区域改不再走 main-body padding,地图要顶满 */
+  .map-stage {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #050b1c;
+  }
+
+  /* 暗色城市底图(SVG 自绘) */
+  .map-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* 路网 */
+  .road {
+    stroke: rgba(148, 163, 184, 0.08);
+    stroke-width: 12;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .road-main {
+    stroke: rgba(148, 163, 184, 0.14);
+    stroke-width: 18;
+  }
+  .road-highlight {
+    stroke: rgba(59, 130, 246, 0.18);
+    stroke-width: 22;
+  }
+
+  /* 河 */
+  .river {
+    stroke: rgba(59, 130, 246, 0.20);
+    stroke-width: 36;
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  /* 区域块(行政区底色) */
+  .region-fill {
+    fill: rgba(30, 41, 59, 0.55);
+    stroke: rgba(148, 163, 184, 0.12);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+  .region-fill.active {
+    fill: rgba(59, 130, 246, 0.08);
+    stroke: rgba(59, 130, 246, 0.35);
+  }
+  .region-label {
+    fill: var(--color-text-3);
+    font-size: 13px;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    text-anchor: middle;
+    pointer-events: none;
+    letter-spacing: 0.08em;
+  }
+  .region-label.active { fill: var(--primary-5); }
+
+  /* Marker — 单点 */
+  .marker {
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .marker:hover { transform: scale(1.25); }
+  .marker .pin-ring {
+    fill: none;
+    stroke-width: 2;
+  }
+  .marker .pin-core {
+    /* fill 由 status 决定 */
+  }
+  .marker.online .pin-ring { stroke: var(--status-online); }
+  .marker.online .pin-core { fill: var(--status-online); }
+  .marker.online .pulse { fill: var(--status-online); opacity: 0.35; }
+  .marker.offline .pin-ring { stroke: var(--status-offline); }
+  .marker.offline .pin-core { fill: var(--status-offline); }
+  .marker.warning .pin-ring { stroke: var(--status-warning); }
+  .marker.warning .pin-core { fill: var(--status-warning); }
+  .marker.warning .pulse { fill: var(--status-warning); opacity: 0.4; }
+
+  /* 在线 marker 的呼吸圈 */
+  @keyframes marker-pulse {
+    0% { r: 6; opacity: 0.6; }
+    100% { r: 18; opacity: 0; }
+  }
+  .marker.online .pulse, .marker.warning .pulse {
+    animation: marker-pulse 2.2s var(--ease-out) infinite;
+  }
+
+  /* Cluster 气泡(代表多个 Marker) */
+  .cluster {
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+  .cluster:hover { transform: scale(1.1); }
+  .cluster circle {
+    fill: rgba(59, 130, 246, 0.16);
+    stroke: var(--primary-5);
+    stroke-width: 2;
+  }
+  .cluster.warm circle {
+    fill: rgba(245, 158, 11, 0.16);
+    stroke: var(--status-warning);
+  }
+  .cluster text {
+    fill: var(--color-text-1);
+    font-size: 13px;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  .cluster .ring-arc {
+    fill: none;
+    stroke: var(--status-online);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  /* 当前 hover marker 的预览卡 */
+  .marker-popover {
+    position: absolute;
+    width: 240px;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-3);
+    box-shadow: var(--shadow-overlay);
+    overflow: hidden;
+    pointer-events: auto;
+    animation: pop-in var(--duration-mid) var(--ease-out);
+    z-index: 30;
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .marker-popover .pop-snap {
+    aspect-ratio: 16 / 9;
+    background: var(--color-bg-1);
+    position: relative;
+  }
+  .marker-popover .pop-snap .snap-placeholder { font-size: 24px; }
+  .marker-popover .pop-snap .snap-overlay {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 6px var(--space-3);
+    background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.7) 100%);
+    color: #fff;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .marker-popover .pop-body {
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .marker-popover .pop-body .title {
+    font-size: var(--font-13);
+    color: var(--color-text-1);
+    font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .marker-popover .pop-body .code {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--color-text-3);
+  }
+  .marker-popover .pop-body .meta {
+    font-size: 11px;
+    color: var(--color-text-3);
+    margin-top: 2px;
+  }
+  .marker-popover .pop-foot {
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--color-border-1);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .marker-popover .pop-foot .btn-cta {
+    flex: 1;
+    height: 28px;
+    border-radius: var(--radius-2);
+    background: var(--primary-6);
+    color: #fff;
+    font-size: var(--font-12);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .marker-popover .pop-foot .btn-cta:hover { background: var(--primary-7); }
+  .marker-popover .pop-foot button.icon {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-2);
+    border: 1px solid var(--color-border-2);
+    color: var(--color-text-3);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .marker-popover .pop-foot button.icon:hover { color: var(--color-text-1); background: var(--color-bg-3); }
+
+  /* 右上角小工具条 */
+  .map-toolbox {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    z-index: 20;
+  }
+  .map-toolbox .group {
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-2);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .map-toolbox .group button {
+    width: 36px; height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-3);
+    transition: color var(--duration-fast), background var(--duration-fast);
+    border-bottom: 1px solid var(--color-border-1);
+  }
+  .map-toolbox .group button:last-child { border-bottom: 0; }
+  .map-toolbox .group button:hover { color: var(--color-text-1); background: var(--color-bg-3); }
+  .map-toolbox .group button.active { color: var(--primary-5); background: var(--primary-fade-08); }
+
+  /* 左下视野统计气泡 */
+  .map-statbox {
+    position: absolute;
+    left: var(--space-4);
+    bottom: var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-bg-overlay);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-card);
+    z-index: 20;
+    font-size: var(--font-12);
+  }
+  .map-statbox .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--color-text-2);
+    padding: 0 var(--space-2);
+  }
+  .map-statbox .seg + .seg {
+    border-left: 1px solid var(--color-border-2);
+  }
+  .map-statbox .seg .num {
+    color: var(--color-text-1);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 左下角图例 */
+  .map-legend {
+    position: absolute;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    background: var(--color-bg-overlay);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-2);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-card);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--font-12);
+    color: var(--color-text-3);
+  }
+  .map-legend .head {
+    font-size: 11px;
+    color: var(--color-text-4);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .map-legend .item { display: flex; align-items: center; gap: var(--space-2); }
+  .map-legend .item .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  /* 左侧无坐标提示 banner */
+  .no-coord-banner {
+    position: absolute;
+    top: var(--space-4);
+    left: var(--space-4);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-bg-overlay);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-2);
+    color: var(--color-text-2);
+    font-size: var(--font-12);
+    z-index: 20;
+  }
+  .no-coord-banner svg { color: var(--status-warning); }
+  .no-coord-banner a {
+    color: var(--primary-5);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    margin-left: var(--space-1);
+  }
+
+  /* 主区域内的 footnote 浮在底部 */
+  .map-footnote {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: var(--space-1);
+    color: var(--color-text-4);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    z-index: 10;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 顶栏 -->
+  <div class="topbar">
+    <div class="logo"><span class="dot"></span>UVP</div>
+    <div class="breadcrumb">
+      <span>设备管理</span>
+      <span class="sep">/</span>
+      <span>山东·济南</span>
+      <span class="sep">/</span>
+      <span class="cur">历城区</span>
+    </div>
+    <div class="cmdk">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>搜索设备 / 通道 / 编码 ...</span>
+      <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+    </div>
+
+    <div class="view-switch">
+      <button title="列表视图" onclick="location.href='./list.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button title="卡片视图" onclick="location.href='./card.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button class="active" title="地图视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+      </button>
+    </div>
+
+    <button class="icon-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
+    <button class="btn-primary">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      新建设备
+    </button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></button>
+  </div>
+
+  <!-- 主工作区 -->
+  <div class="workspace">
+
+    <!-- 左侧目录树 -->
+    <aside class="aside">
+      <div class="aside-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-3H5a2 2 0 0 0-2 2z"/></svg>
+        <span class="title">目录</span>
+        <button class="icon-btn" style="width:24px;height:24px">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+      <div class="aside-search"><input placeholder="筛选节点 ..." /></div>
+      <nav class="tree">
+        <div class="tree-node lv-1 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">山东省·济南市</span>
+          <span class="count">124 / 1,284</span>
+        </div>
+        <div class="tree-node lv-2 expanded active">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">历城区</span>
+          <span class="count">42 / 318</span>
+        </div>
+        <div class="tree-node lv-3 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大路街道</span>
+          <span class="count">18 / 96</span>
+        </div>
+        <div class="tree-node lv-4">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大南路 A 小区</span>
+          <span class="count">6 / 38</span>
+        </div>
+        <div class="tree-node lv-4">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">花园路 B 小区</span>
+          <span class="count">4 / 24</span>
+        </div>
+        <div class="tree-node lv-3">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">洪家楼街道</span>
+          <span class="count">12 / 72</span>
+        </div>
+        <div class="tree-node lv-2">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">市中区</span>
+          <span class="count">38 / 285</span>
+        </div>
+        <div class="tree-node lv-2">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-virtual"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">业务分组(自定义)</span>
+          <span class="count">16</span>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- 主区域:地图 -->
+    <main class="main">
+      <div class="map-stage">
+
+        <!-- SVG 暗色城市底图(济南简化:小清河 + 历城区/市中区/天桥区) -->
+        <svg class="map-svg" viewBox="0 0 1400 800" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <!-- 区域底色微渐变 -->
+            <radialGradient id="region-glow" cx="50%" cy="50%" r="60%">
+              <stop offset="0%" stop-color="rgba(59,130,246,0.10)"/>
+              <stop offset="100%" stop-color="rgba(59,130,246,0)"/>
+            </radialGradient>
+            <!-- marker pulse 滤镜 -->
+            <filter id="marker-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- 行政区划块 -->
+          <polygon class="region-fill" points="80,120 480,80 540,260 460,420 200,440 100,300"/>
+          <text class="region-label" x="290" y="240">市中区</text>
+
+          <polygon class="region-fill" points="540,260 880,180 980,360 880,540 600,520 460,420"/>
+          <text class="region-label" x="720" y="370">天桥区</text>
+
+          <polygon class="region-fill active" points="880,180 1320,160 1340,560 1080,640 880,540 980,360"/>
+          <text class="region-label active" x="1110" y="400">历城区</text>
+
+          <!-- 历城区光晕 -->
+          <ellipse cx="1110" cy="400" rx="240" ry="180" fill="url(#region-glow)"/>
+
+          <!-- 河流(小清河横穿) -->
+          <path class="river" d="M 60,360 Q 320,320 580,360 T 1100,340 T 1380,360"/>
+
+          <!-- 主干道(经十路 / 二环东路) -->
+          <path class="road road-main" d="M 80,500 Q 400,490 720,500 T 1380,490"/>
+          <path class="road road-main" d="M 1080,140 Q 1100,400 1110,660"/>
+          <path class="road road-highlight" d="M 880,180 Q 960,360 1080,560"/>
+
+          <!-- 次级路网 -->
+          <path class="road" d="M 200,250 L 600,260"/>
+          <path class="road" d="M 280,350 L 720,360"/>
+          <path class="road" d="M 920,220 L 1280,230"/>
+          <path class="road" d="M 940,300 L 1300,310"/>
+          <path class="road" d="M 920,440 L 1320,440"/>
+          <path class="road" d="M 940,540 L 1280,530"/>
+          <path class="road" d="M 1180,180 L 1190,580"/>
+          <path class="road" d="M 1240,180 L 1240,560"/>
+          <path class="road" d="M 1010,200 L 1010,560"/>
+
+          <!-- Cluster:山大路街道(代表 18 设备 / 96 通道) -->
+          <g class="cluster" transform="translate(1000, 360)">
+            <circle r="36"/>
+            <!-- 内 96 通道环 -->
+            <circle r="30" class="ring-arc" stroke-dasharray="165 25" stroke-dashoffset="0" transform="rotate(-90)"/>
+            <text y="-4">96</text>
+            <text y="14" style="font-size:10px; font-weight:500; fill:var(--color-text-3)">通道</text>
+          </g>
+
+          <!-- Cluster:洪家楼街道(12 设备 / 72 通道) -->
+          <g class="cluster" transform="translate(1230, 280)">
+            <circle r="30"/>
+            <circle r="25" class="ring-arc" stroke-dasharray="140 18" transform="rotate(-90)"/>
+            <text y="-2">72</text>
+            <text y="13" style="font-size:9px; font-weight:500; fill:var(--color-text-3)">通道</text>
+          </g>
+
+          <!-- Cluster warm:王舍人街道(9 设备 / 54 通道,在线率 67%) -->
+          <g class="cluster warm" transform="translate(1180, 540)">
+            <circle r="28"/>
+            <circle r="23" class="ring-arc" stroke="var(--status-warning)" stroke-dasharray="96 48" transform="rotate(-90)"/>
+            <text y="-2">54</text>
+            <text y="12" style="font-size:9px; font-weight:500; fill:var(--color-text-3)">通道</text>
+          </g>
+
+          <!-- 单点 Marker(历城区内放大可见) -->
+          <!-- M1: A 小区大门 NVR(在线 + popover anchor) -->
+          <g class="marker online" transform="translate(960, 410)" filter="url(#marker-glow)" id="m-anchor">
+            <circle class="pulse" r="6"/>
+            <circle class="pin-ring" r="8"/>
+            <circle class="pin-core" r="4"/>
+          </g>
+
+          <!-- M2: A 小区停车场球机(在线) -->
+          <g class="marker online" transform="translate(978, 422)" filter="url(#marker-glow)">
+            <circle class="pulse" r="6"/>
+            <circle class="pin-ring" r="8"/>
+            <circle class="pin-core" r="4"/>
+          </g>
+
+          <!-- M3: 周界报警球机(warning) -->
+          <g class="marker warning" transform="translate(940, 432)" filter="url(#marker-glow)">
+            <circle class="pulse" r="6"/>
+            <circle class="pin-ring" r="8"/>
+            <circle class="pin-core" r="4"/>
+          </g>
+
+          <!-- M4-M8: 散布在历城区 -->
+          <g class="marker online" transform="translate(1080, 380)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker online" transform="translate(1120, 460)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker offline" transform="translate(1160, 420)"><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker offline" transform="translate(1300, 350)"><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker online" transform="translate(1280, 480)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+
+          <!-- 市中区少量散点(对比示意) -->
+          <g class="marker online" transform="translate(220, 200)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker online" transform="translate(360, 320)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker offline" transform="translate(160, 380)"><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+
+          <!-- 天桥区少量散点 -->
+          <g class="marker online" transform="translate(640, 280)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker online" transform="translate(720, 460)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+          <g class="marker warning" transform="translate(800, 380)" filter="url(#marker-glow)"><circle class="pulse" r="6"/><circle class="pin-ring" r="8"/><circle class="pin-core" r="4"/></g>
+        </svg>
+
+        <!-- 无坐标 banner(左上) -->
+        <div class="no-coord-banner">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>42 个通道无坐标 ·</span>
+          <a href="./list.html">在列表中查看</a>
+        </div>
+
+        <!-- 右上工具条 -->
+        <div class="map-toolbox">
+          <div class="group">
+            <button title="放大">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button title="缩小">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button title="复位">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 4 3 12 11 12"/></svg>
+            </button>
+          </div>
+
+          <div class="group">
+            <button class="active" title="标准">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+            </button>
+            <button title="卫星">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12a7 7 0 1 0 14 0 7 7 0 0 0-14 0z"/><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button title="路网">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 7 9 7 12 12 15 7 21 7"/><polyline points="3 17 9 17 12 12 15 17 21 17"/></svg>
+            </button>
+          </div>
+
+          <div class="group">
+            <button title="热力图">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7" opacity="0.5"/><circle cx="12" cy="12" r="11" opacity="0.2"/></svg>
+            </button>
+            <button title="轨迹回放(Phase 3)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Marker 预览卡(hover M1 anchor 时浮出) -->
+        <div class="marker-popover" style="left: 980px; top: 230px">
+          <div class="pop-snap">
+            <div class="snap-placeholder hk">HK</div>
+            <div class="snap-overlay">
+              <span class="status-dot online"></span>
+              <span>在线 · 3 秒前</span>
+              <span class="live-dot" style="margin-left:auto; font-size:9px">LIVE</span>
+            </div>
+          </div>
+          <div class="pop-body">
+            <div class="title">A 小区 · 大门入口枪机</div>
+            <div class="code">34010500001310000001</div>
+            <div class="meta">海康威视 · DS-2CD2T46WD · 36.6852°N 117.0568°E</div>
+          </div>
+          <div class="pop-foot">
+            <button class="btn-cta">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              点播
+            </button>
+            <button class="icon" title="查看详情">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <button class="icon" title="收藏">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 左下视野统计气泡 -->
+        <div class="map-statbox">
+          <span class="seg">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="var(--color-text-3)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>当前视野</span>
+          </span>
+          <span class="seg"><span class="num">276</span><span>通道</span></span>
+          <span class="seg" style="color:var(--status-online)"><span class="num" style="color:var(--status-online)">240</span>在线</span>
+          <span class="seg" style="color:var(--color-text-3)"><span class="num" style="color:var(--color-text-3)">36</span>离线</span>
+          <span class="seg" style="color:var(--status-warning)"><span class="num" style="color:var(--status-warning)">2</span>告警</span>
+        </div>
+
+        <!-- 右下图例 -->
+        <div class="map-legend">
+          <div class="head">图例</div>
+          <div class="item"><span class="dot" style="background: var(--status-online)"></span>在线通道</div>
+          <div class="item"><span class="dot" style="background: var(--status-warning)"></span>告警通道</div>
+          <div class="item"><span class="dot" style="background: var(--status-offline)"></span>离线通道</div>
+          <div class="item">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--primary-5)" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
+            聚合气泡(数字 = 通道数)
+          </div>
+        </div>
+
+        <div class="map-footnote">
+          地图视图 · spec §9.7 · 高德暗色 + cluster + hover 浮预览卡 · 实现侧接 AMap JS API v2
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

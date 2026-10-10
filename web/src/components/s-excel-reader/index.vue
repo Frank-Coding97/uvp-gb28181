@@ -8,13 +8,7 @@
     @drop.prevent="handleDrop"
   >
     <div class="excel-upload-area" @click="handleClick">
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept=".xlsx,.xls"
-        style="display: none"
-        @change="handleFileChange"
-      />
+      <input ref="fileInputRef" type="file" accept=".xlsx,.xls" style="display: none" @change="handleFileChange" />
       <div class="upload-content">
         <div class="upload-icon">
           <icon-file :size="48" />
@@ -29,9 +23,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { read, utils, WorkBook } from 'xlsx';
-import { IconFile } from '@arco-design/web-vue/es/icon';
+import { ref } from "vue";
+import { read, utils, WorkBook } from "xlsx";
+import { IconFile } from "@arco-design/web-vue/es/icon";
 
 interface ExcelSheetData {
   sheetName: string;
@@ -47,14 +41,14 @@ interface Props {
 }
 
 interface Emits {
-  (e: 'success', data: ExcelSheetData[] | ExcelSheetData): void;
-  (e: 'error', error: Error): void;
-  (e: 'loading', isLoading: boolean): void;
+  (e: "success", data: ExcelSheetData[] | ExcelSheetData): void;
+  (e: "error", error: Error): void;
+  (e: "loading", isLoading: boolean): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: '点击或拖拽上传 Excel 文件',
-  description: '支持 .xlsx、.xls 格式',
+  title: "点击或拖拽上传 Excel 文件",
+  description: "支持 .xlsx、.xls 格式",
   multiple: false,
   readAsArray: false
 });
@@ -115,7 +109,7 @@ const handleFileChange = (e: Event) => {
   handleFiles(Array.from(files));
 
   // 清空 input，允许重复选择同一文件
-  target.value = '';
+  target.value = "";
 };
 
 // 处理文件
@@ -124,12 +118,12 @@ const handleFiles = async (files: File[]) => {
 
   // 过滤非 Excel 文件
   const excelFiles = files.filter(file => {
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    return extension === 'xlsx' || extension === 'xls';
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    return extension === "xlsx" || extension === "xls";
   });
 
   if (excelFiles.length === 0) {
-    emit('error', new Error('请选择有效的 Excel 文件（.xlsx 或 .xls）'));
+    emit("error", new Error("请选择有效的 Excel 文件（.xlsx 或 .xls）"));
     return;
   }
 
@@ -138,7 +132,7 @@ const handleFiles = async (files: File[]) => {
 
   try {
     loading.value = true;
-    emit('loading', true);
+    emit("loading", true);
 
     const results: ExcelSheetData[] = [];
 
@@ -149,16 +143,16 @@ const handleFiles = async (files: File[]) => {
 
     // 根据配置返回单个或多个结果
     if (props.multiple) {
-      emit('success', results);
+      emit("success", results);
     } else {
-      emit('success', results[0]);
+      emit("success", results[0]);
     }
   } catch (error) {
-    console.error('读取 Excel 文件失败:', error);
-    emit('error', error as Error);
+    console.error("读取 Excel 文件失败:", error);
+    emit("error", error as Error);
   } finally {
     loading.value = false;
-    emit('loading', false);
+    emit("loading", false);
   }
 };
 
@@ -167,15 +161,15 @@ const readExcelFile = (file: File): Promise<ExcelSheetData[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = e => {
       try {
         const data = e.target?.result;
         if (!data) {
-          reject(new Error('文件读取失败'));
+          reject(new Error("文件读取失败"));
           return;
         }
 
-        const workbook: WorkBook = read(data, { type: 'array' });
+        const workbook: WorkBook = read(data, { type: "array" });
         const result: ExcelSheetData[] = [];
 
         // 遍历所有工作表
@@ -208,7 +202,7 @@ const readExcelFile = (file: File): Promise<ExcelSheetData[]> => {
     };
 
     reader.onerror = () => {
-      reject(new Error('文件读取失败'));
+      reject(new Error("文件读取失败"));
     };
 
     reader.readAsArrayBuffer(file);
@@ -226,20 +220,20 @@ defineExpose({
   width: 100%;
   height: 100%;
   min-height: 200px;
+  cursor: pointer;
+  background-color: var(--color-fill-1);
   border: 2px dashed var(--color-border-2);
   border-radius: 4px;
   transition: all 0.3s;
-  background-color: var(--color-fill-1);
-  cursor: pointer;
 
   &:hover {
-    border-color: var(--color-border-3);
     background-color: var(--color-fill-2);
+    border-color: var(--color-border-3);
   }
 
   &.is-dragover {
-    border-color: rgb(var(--primary-6));
     background-color: rgba(var(--primary-1), 0.1);
+    border-color: rgb(var(--primary-6));
   }
 
   &.is-loading {
@@ -248,18 +242,18 @@ defineExpose({
   }
 
   .excel-upload-area {
-    width: 100%;
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
+    height: 100%;
     padding: 20px;
 
     .upload-content {
       display: flex;
       flex-direction: column;
-      align-items: center;
       gap: 16px;
+      align-items: center;
       text-align: center;
 
       .upload-icon {
@@ -269,9 +263,9 @@ defineExpose({
 
       .upload-text {
         .upload-title {
+          margin-bottom: 4px;
           font-size: 14px;
           color: var(--color-text-1);
-          margin-bottom: 4px;
         }
 
         .upload-desc {

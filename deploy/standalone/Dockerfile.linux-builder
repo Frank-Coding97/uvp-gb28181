@@ -1,0 +1,54 @@
+# 构建底座镜像：给「随包分发的 C/C++ 预编译二进制」一个 glibc ≤ 2.17 的编译环境。
+#
+# ⛔⛔ 为什么需要它（2026-10-10 客户银河麒麟 V10 SP2 实机踩到）：
+#   绿色包里的 nginx 曾在新系统上直接编出来，ELF 要 `libssl.so.3` + `GLIBC_2.34`，
+#   而国产 OS 普遍只有 glibc 2.28~2.34、OpenSSL 1.1.1 ⇒ 装上去连启动都做不到。
+#   ZLM 之所以没事，就是因为它在这个 CentOS 7 底座里编（GLIBC ≤ 2.17、零 OpenSSL 依赖）。
+#   ⇒ **凡是要随包分发的 C/C++ 二进制（nginx / redis / 将来的其它）都必须进这个底座编。**
+#
+# 用法：
+#   docker build -f deploy/standalone/Dockerfile.linux-builder \
+#                -t uvp/glibc217-builder:latest deploy/standalone/
+#   UVP_LINUX_BUILDER_IMAGE=uvp/glibc217-builder:latest ./deploy/standalone/build-nginx.sh
+#
+# ⛔⛔ 别把它直接 tag 成 `uvp/linux-builder:glibc217` 去覆盖构建机上已有的同名镜像 ——
+#   那个镜像里还装了 **devtoolset-11**（ZLM 的 C++ 构建依赖它），
+#   用这个精简版覆盖会把 ZLM 的构建路径一起打坏。
+#   本文件是"给没有该镜像的机器用"的等价底座，故意只装最小依赖集。
+#
+# ⛔ 为什么是 centos:7：它的 glibc 是 2.17，而国产 OS（麒麟/UOS/openEuler）都 ≥ 2.28
+#   ⇒ 在 2.17 上编出来的产物能**向前兼容**所有国产系统。反过来编不出来。
+#
+# ⛔ 为什么不装 openssl-devel / pcre2-devel / zlib-devel：
+#   这三个库由 build-nginx.sh 从源码静态编译（no-shared）。
+#   装了反而有风险 —— 底座自带的是 OpenSSL 1.0.2，一旦动态链上，
+#   产物就会要 `libssl.so.10`，而麒麟（1.1.1）、UOS（1.1.1）、Ubuntu（3.0）**都没有**。
+FROM centos:7
+
+# CentOS 7 已 EOL，官方 mirrorlist 全线 404 ⇒ 指到 vault 归档源。
+# ⛔ 不这么改的话 `yum install` 直接失败，报的还是一堆 404 与镜像超时，
+#   看起来像"网络不通"，其实是源没了。
+RUN sed -i 's/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/CentOS-*.repo \
+ && sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|' /etc/yum.repos.d/CentOS-*.repo
+
+# 只装编译 nginx + 静态 OpenSSL/PCRE2/zlib 所需的最小集合：
+#   gcc/make       编译
+#   perl-core      OpenSSL 的 Configure 是 Perl 脚本（缺模块会在 Configure 阶段才炸）
+#   binutils       出包门禁用 `strings` 读二进制的动态依赖
+#   curl/tar/gzip  下载与解包源码
+#   which/diffutils/bzip2  tar 解压与 OpenSSL 构建脚本偶尔会用到
+RUN yum -y install \
+      gcc gcc-c++ make perl-core \
+      binutils which \
+      curl tar gzip bzip2 xz diffutils \
+      findutils sed grep coreutils \
+ && yum clean all \
+ && rm -rf /var/cache/yum
+
+# 自检：底座必须真的是 glibc 2.17，否则一切免谈。
+# ⛔ 这条断言是刻意的 —— "我以为镜像对"是本项目已经踩过的坑型
+#   （宁可在 docker build 时红，也别等到客户机上 `error while loading shared libraries`）。
+RUN ldd --version | head -1 | grep -q '2\.17' \
+ || { echo "底座 glibc 不是 2.17，产物将无法在国产 OS 上向前兼容" >&2; ldd --version; exit 1; }
+
+CMD ["bash"]

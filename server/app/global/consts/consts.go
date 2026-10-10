@@ -4,8 +4,9 @@ package consts
 type ContextKey string
 
 const (
-	BindContextKeyName = "userToken"          // token解析值绑定上下文键名
-	ConfigFilePath     = "/config/config.yml" // 配置文件路径
+	BindContextKeyName            = "userToken"          // token解析值绑定上下文键名
+	BindContextKey     ContextKey = "userToken"          // 标准 context 使用的认证键
+	ConfigFilePath                = "/config/config.yml" // 配置文件路径
 	//服务器代码发生错误
 	ServerOccurredErrorCode int    = -500100
 	ServerOccurredErrorMsg  string = "服务器内部发生代码执行错误,请联系开发者排查错误日志"
@@ -13,7 +14,10 @@ const (
 	DbTypeMySql      = "mysql"
 	DbTypeSqlServer  = "sqlserver"
 	DbTypePostgreSql = "postgresql"
-	RequestAborted   = "request_aborted"
+	// DbTypeSqlite 是**绿色安装包默认库**：单文件、零外部依赖，装完即用。
+	// 用纯 Go 驱动（modernc.org/sqlite），不需CGO，因此可交叉编译进静态包。
+	DbTypeSqlite  = "sqlite"
+	RequestAborted = "request_aborted"
 	// 上传类型
 	UploadTypeLocal = "local"
 	UploadTypeQiniu = "qiniu"

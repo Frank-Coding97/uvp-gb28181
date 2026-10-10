@@ -5,6 +5,7 @@
 <script setup lang="ts">
 //必须引入的核心
 import Recorder from "recorder-core";
+import { Message } from "@arco-design/web-vue";
 //引入pcm格式支持文件
 import "recorder-core/src/engine/pcm";
 //可选的插件支持项，这个是波形可视化插件
@@ -39,7 +40,7 @@ const recOpen = () => {
     }
   });
   if (!rec) {
-    alert("当前浏览器不支持录音功能！");
+    Message.error("当前浏览器不支持录音功能！");
     return;
   }
   // 打开录音，获得权限

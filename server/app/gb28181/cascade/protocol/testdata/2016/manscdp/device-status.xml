@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="GB2312"?>
+<Response>
+  <CmdType>DeviceStatus</CmdType>
+  <SN>201</SN>
+  <DeviceID>34020000002000000001</DeviceID>
+  <Result>OK</Result>
+  <Online>ONLINE</Online>
+  <Status>OK</Status>
+  <DeviceList num="0"></DeviceList>
+</Response>

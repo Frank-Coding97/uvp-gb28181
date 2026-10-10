@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 96" role="img" aria-label="UVP 统一视频接入平台" data-uvp-logo="unified-video-gateway">
+  <g transform="translate(8 8) scale(.625)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 32H43M10 64H43M16 96H43" stroke="#2563EB" stroke-width="8"/>
+      <circle cx="16" cy="32" r="5" fill="#2563EB" stroke="none"/>
+      <circle cx="10" cy="64" r="5" fill="#2563EB" stroke="none"/>
+      <circle cx="16" cy="96" r="5" fill="#2563EB" stroke="none"/>
+      <rect x="43" y="31" width="42" height="66" rx="13" fill="#10233F" stroke="#FFFFFF" stroke-width="3"/>
+      <rect x="52" y="45" width="24" height="38" rx="5" fill="#FFFFFF" stroke="none"/>
+      <path d="M58 53H70V59H58ZM58 65H70V75H58Z" fill="#2563EB" stroke="none"/>
+      <path d="M85 64H111M103 56L111 64L103 72" stroke="#0FAAA6" stroke-width="8"/>
+    </g>
+  </g>
+  <g fill="none" stroke="#10233F" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M108 30V58Q108 70 120 70Q132 70 132 58V30"/>
+    <path d="M145 30L159 70L173 30"/>
+    <path d="M187 70V30H200Q214 30 214 43Q214 56 200 56H187"/>
+  </g>
+</svg>

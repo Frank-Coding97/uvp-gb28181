@@ -58,15 +58,15 @@ func (jt *JSONTime) UnmarshalJSON(b []byte) error {
 
 // MarshalJSON 实现 JSON 序列化
 func (jt JSONTime) MarshalJSON() ([]byte, error) {
-	if jt.Time.IsZero() {
+	if jt.IsZero() {
 		return json.Marshal(nil)
 	}
-	return json.Marshal(jt.Time.Format("2006-01-02 15:04:05"))
+	return json.Marshal(jt.Format("2006-01-02 15:04:05"))
 }
 
 // Value 实现 driver.Valuer 接口，用于数据库写入
 func (jt JSONTime) Value() (driver.Value, error) {
-	if jt.Time.IsZero() {
+	if jt.IsZero() {
 		return nil, nil
 	}
 	return jt.Time, nil

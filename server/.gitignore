@@ -44,6 +44,12 @@ resource/logs/*.log
 
 # resource 目录配置 - 只提交 database 文件夹下的内容，public 文件夹本身不提交
 /resource/*
+
+# ⛔ 种子资源（绿色包要随包交付的静态文件，如 admin 默认头像）**必须入库**。
+#   /resource/* 把整个 resource 目录排除了，而 resource/public 里的东西
+#   绝大多数是**运行时产物**（前端 dist、用户上传的 uploads）—— 所以之前
+#   从 git 拉代码的构建机上没有 uploads 目录，头像文件压根进不了包。
+!/resource/seed-assets/
 !/resource/database/
 !/resource/public/
 /resource/public/*
@@ -75,9 +81,10 @@ go.work.sum
 config/*.local.yml
 config/config.yml
 
-# config 目录配置 - 只提交 config.example.yml
+# config 目录配置 - 只提交明确的无凭据示例
 /config/*
 !/config/config.example.yml
+!/config/openapi-revocation.example.yml
 
 # 调试生成的文件
 __debug_bin.exe*
@@ -86,7 +93,7 @@ __debug_bin.exe*
 # Roo
 .roo/
 /config/config.yml
-/gin-fast-linux
+/uvp-gb28181-linux
 /resource/public/uploads
 /.qoder
 

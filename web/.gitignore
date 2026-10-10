@@ -24,9 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Husky
-.husky/
-
 # Roo
 .roo/
 

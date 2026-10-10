@@ -6,6 +6,7 @@
         <icon-right v-else />
       </div>
       <div
+        class="sider-content"
         v-show="!collapsed"
         :style="{
           padding: siderPadding
@@ -39,6 +40,10 @@ const siderPadding = computed(() => (collapsed.value ? "0px" : "12px"));
   .layout-sider {
     position: relative;
     border-right: 1px solid $color-border-2;
+    .sider-content {
+      box-sizing: border-box;
+      height: 100%;
+    }
     .packup-btn {
       position: absolute;
       top: 50%;
@@ -51,12 +56,6 @@ const siderPadding = computed(() => (collapsed.value ? "0px" : "12px"));
       color: $color-text-2;
       background: $color-bg-white;
       border-radius: 50%;
-      box-shadow:
-        inset 0 0 0 1px $color-border-2,
-        0 0 10px 0 rgb(0 0 0 / 5%);
-      box-shadow:
-        inset 0 0 0 1px $color-border-2,
-        0 0 10px 0 rgb(0 0 0 / 5%);
       box-shadow:
         inset 0 0 0 1px $color-border-2,
         0 0 10px 0 rgb(0 0 0 / 5%);

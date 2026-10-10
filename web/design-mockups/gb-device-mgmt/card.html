@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 设备管理 · 卡片视图</title>
+<link rel="stylesheet" href="./common.css" />
+<style>
+  /* ============ 卡片视图专用 ============ */
+
+  /* 卡片网格 */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-4);
+  }
+
+  /* 单卡 */
+  .device-card {
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-1);
+    border-radius: var(--radius-3);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    transition: transform var(--duration-mid) var(--ease-out),
+                box-shadow var(--duration-mid) var(--ease-out),
+                border-color var(--duration-mid) var(--ease-out);
+    position: relative;
+  }
+  .device-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--color-border-2);
+  }
+
+  /* 16:9 缩略图区 */
+  .card-snap {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--color-bg-1);
+  }
+  .card-snap .snap-placeholder {
+    font-size: 36px;
+    letter-spacing: 0.08em;
+  }
+  .card-snap img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* 底部渐变蒙层 + 状态条 */
+  .snap-overlay {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: var(--space-2) var(--space-3);
+    background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.65) 100%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: #fff;
+    font-size: var(--font-12);
+  }
+  .snap-overlay .status-text {
+    color: #fff;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .snap-overlay .heart-text {
+    margin-left: auto;
+    color: rgba(255,255,255,0.85);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 右上角角标(PTZ / 报警 / 多挂载) */
+  .snap-corner {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .corner-badge {
+    width: 22px; height: 22px;
+    border-radius: var(--radius-1);
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(4px);
+    color: rgba(255,255,255,0.9);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .corner-badge.alarm {
+    color: var(--status-warning);
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.18);
+  }
+  .corner-badge.ptz svg { width: 12px; height: 12px; }
+
+  /* 左上角设备类型 chip */
+  .snap-type {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-1);
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(4px);
+    color: rgba(255,255,255,0.9);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .snap-type svg { width: 12px; height: 12px; }
+
+  /* LIVE / 实时刷新指示 */
+  .live-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--status-online);
+  }
+  .live-dot::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--status-online);
+    box-shadow: 0 0 0 2px var(--status-online-fade);
+    animation: live-pulse 1.6s var(--ease-out) infinite;
+  }
+  @keyframes live-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--status-online-fade); }
+    50% { box-shadow: 0 0 0 5px var(--status-online-fade); opacity: 0.6; }
+  }
+
+  /* 离线态:灰度 + 暗化 + 暗示性提示 */
+  .card-snap.offline .snap-placeholder,
+  .card-snap.offline img {
+    filter: grayscale(0.7) brightness(0.55);
+  }
+  .card-snap.offline::after {
+    content: "已离线 · 12 分钟前";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.6);
+    font-size: var(--font-13);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(2px);
+  }
+  .card-snap.offline .snap-overlay { opacity: 0; }
+
+  /* anomaly 态:橙色 1px 描边 + 右上挂 anomaly 角标 */
+  .device-card.has-anomaly { border-color: rgba(245, 158, 11, 0.3); }
+
+  /* 卡片底部信息区 */
+  .card-info {
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .card-info .title {
+    font-size: var(--font-14);
+    font-weight: 500;
+    color: var(--color-text-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .card-info .code {
+    font-size: var(--font-12);
+    color: var(--color-text-3);
+    font-family: var(--font-mono);
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-info .meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--color-text-3);
+    font-size: var(--font-12);
+    margin-top: 2px;
+  }
+  .card-info .meta .dot-sep {
+    color: var(--color-text-4);
+    opacity: 0.5;
+    margin: 0 2px;
+  }
+
+  /* 卡片底部操作行 */
+  .card-actions {
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--color-border-1);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .card-actions button {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-3);
+    transition: color var(--duration-fast), background var(--duration-fast);
+  }
+  .card-actions button:hover { color: var(--color-text-1); background: var(--color-bg-3); }
+  .card-actions button.fav.active { color: var(--status-danger); }
+  .card-actions button.fav.active:hover { color: var(--status-danger); background: var(--status-danger-fade); }
+  .card-actions .play-cta {
+    margin-left: auto;
+    height: 28px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-2);
+    background: var(--primary-fade-16);
+    color: var(--primary-5);
+    font-size: var(--font-12);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    transition: background var(--duration-fast);
+  }
+  .card-actions .play-cta:hover { background: var(--primary-6); color: #fff; }
+
+  /* 卡片之间的视觉密度调节 */
+  .density-toggle {
+    display: inline-flex;
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-2);
+    padding: 2px;
+    gap: 2px;
+  }
+  .density-toggle button {
+    width: 28px; height: 24px;
+    border-radius: var(--radius-1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-3);
+  }
+  .density-toggle button.active { background: var(--primary-fade-16); color: var(--primary-5); }
+  .density-toggle button:hover:not(.active) { color: var(--color-text-1); background: var(--color-bg-3); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- 顶栏 -->
+  <div class="topbar">
+    <div class="logo"><span class="dot"></span>UVP</div>
+    <div class="breadcrumb">
+      <span>设备管理</span>
+      <span class="sep">/</span>
+      <span>山东·济南</span>
+      <span class="sep">/</span>
+      <span class="cur">历城区</span>
+    </div>
+    <div class="cmdk">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>搜索设备 / 通道 / 编码 ...</span>
+      <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+    </div>
+
+    <div class="view-switch">
+      <button title="列表视图" onclick="location.href='./list.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button class="active" title="卡片视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button title="地图视图" onclick="location.href='./map.html'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+      </button>
+    </div>
+
+    <button class="icon-btn" title="筛选">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    </button>
+    <button class="btn-primary">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      新建设备
+    </button>
+    <button class="icon-btn">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </div>
+
+  <!-- 主工作区 -->
+  <div class="workspace">
+
+    <!-- 左侧目录树(与 list 共用样式) -->
+    <aside class="aside">
+      <div class="aside-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-3H5a2 2 0 0 0-2 2z"/></svg>
+        <span class="title">目录</span>
+        <button class="icon-btn" style="width:24px;height:24px">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+      <div class="aside-search"><input placeholder="筛选节点 ..." /></div>
+      <nav class="tree">
+        <div class="tree-node lv-1 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">山东省·济南市</span>
+          <span class="count">124 / 1,284</span>
+        </div>
+        <div class="tree-node lv-2 expanded active">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">历城区</span>
+          <span class="count">42 / 318</span>
+        </div>
+        <div class="tree-node lv-3 expanded">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大路街道</span>
+          <span class="count">18 / 96</span>
+        </div>
+        <div class="tree-node lv-4">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">山大南路 A 小区</span>
+          <span class="count">6 / 38</span>
+        </div>
+        <div class="tree-node lv-4">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">花园路 B 小区</span>
+          <span class="count">4 / 24</span>
+        </div>
+        <div class="tree-node lv-3">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-biz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">洪家楼街道</span>
+          <span class="count">12 / 72</span>
+        </div>
+        <div class="tree-node lv-2">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-civil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="label">市中区</span>
+          <span class="count">38 / 285</span>
+        </div>
+        <div class="tree-node lv-2">
+          <svg class="twist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="node-chip t-virtual"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="label">业务分组(自定义)</span>
+          <span class="count">16</span>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- 主区域 -->
+    <main class="main">
+      <div class="main-head">
+        <div class="title-zone">
+          <span class="title">历城区 · 通道墙</span>
+          <span class="desc">318 通道 · 实时画面每 60s 自动刷新 · 双击进入直播</span>
+        </div>
+        <div class="toolbar">
+          <div class="density-toggle" title="密度">
+            <button class="active" title="紧凑">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </button>
+            <button title="舒适">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+            </button>
+          </div>
+          <button class="btn-ghost">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            刷新
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-chips">
+        <span class="filter-chip">
+          状态:在线
+          <span class="close"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+        </span>
+        <span class="filter-chip">
+          有云台
+          <span class="close"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+        </span>
+        <span class="clear-all">清除筛选</span>
+        <span class="live-dot" style="margin-left: auto">LIVE · 上次刷新 12s 前</span>
+      </div>
+
+      <div class="main-body">
+        <div class="card-grid">
+
+          <!-- 卡 1: 在线 + PTZ -->
+          <div class="device-card">
+            <div class="card-snap">
+              <div class="snap-placeholder hk">HK</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+                枪机
+              </div>
+              <div class="snap-corner">
+                <div class="corner-badge ptz" title="支持云台">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+                </div>
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线</span>
+                <span class="heart-text">3 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">
+                A 小区 · 大门入口枪机
+                <span class="mount-badge" title="同时挂载在 2 处">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"/></svg>
+                  2
+                </span>
+              </span>
+              <span class="code">34010500001310000001</span>
+              <span class="meta">
+                <span>海康威视</span>
+                <span class="dot-sep">·</span>
+                <span>DS-2CD2T46WD</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav" title="收藏">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                </button>
+                <button title="打标">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                </button>
+                <button title="更多">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                </button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 2: 在线 + 球机 -->
+          <div class="device-card">
+            <div class="card-snap">
+              <div class="snap-placeholder dh">DH</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                球机
+              </div>
+              <div class="snap-corner">
+                <div class="corner-badge ptz">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+                </div>
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线</span>
+                <span class="heart-text">8 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">A 小区 · 停车场球机</span>
+              <span class="code">34010500001320000007</span>
+              <span class="meta">
+                <span>大华股份</span>
+                <span class="dot-sep">·</span>
+                <span>DH-SD-6C82</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav active">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                </button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 3: 在线 + 报警 -->
+          <div class="device-card">
+            <div class="card-snap">
+              <div class="snap-placeholder uvp">UV</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+                枪机
+              </div>
+              <div class="snap-corner">
+                <div class="corner-badge alarm" title="报警事件">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+                </div>
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot warning"></span>
+                <span class="status-text">在线 · 报警中</span>
+                <span class="heart-text">2 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">A 小区 · 周界报警球机</span>
+              <span class="code">34010500001320000012</span>
+              <span class="meta">
+                <span>大华股份</span>
+                <span class="dot-sep">·</span>
+                <span>DH-IPC-HFW2230</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 4: 离线 -->
+          <div class="device-card">
+            <div class="card-snap offline">
+              <div class="snap-placeholder hk">HK</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+                枪机
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title" style="color: var(--color-text-3)">花园路 NVR-A · 通道 01</span>
+              <span class="code">34010500002310000009</span>
+              <span class="meta">
+                <span>海康威视</span>
+                <span class="dot-sep">·</span>
+                <span>DS-7916N-I4</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta" style="opacity:0.4; cursor:not-allowed">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  无法点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 5: 在线 anomaly -->
+          <div class="device-card has-anomaly">
+            <div class="card-snap">
+              <div class="snap-placeholder uvp">UV</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+                未识别
+              </div>
+              <div class="snap-corner">
+                <div class="corner-badge alarm" title="目录异常,已兜底进 virtual_org">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线</span>
+                <span class="heart-text">45 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">
+                山大路 12 号枪机
+                <span class="anomaly-flag" title="编码不规范">
+                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  异常
+                </span>
+              </span>
+              <span class="code">UVP-X-PRIVATE-0012</span>
+              <span class="meta">
+                <span>UVP</span>
+                <span class="dot-sep">·</span>
+                <span>未识别厂商</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 6: 在线 NVR -->
+          <div class="device-card">
+            <div class="card-snap">
+              <div class="snap-placeholder hk">HK</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><polygon points="22 8 16 12 22 16 22 8"/></svg>
+                枪机
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线</span>
+                <span class="heart-text">12 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">B 小区 · 正门</span>
+              <span class="code">34010500001310000004</span>
+              <span class="meta">
+                <span>海康威视</span>
+                <span class="dot-sep">·</span>
+                <span>DS-7908N · 通道 01</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 7: 在线 -->
+          <div class="device-card">
+            <div class="card-snap">
+              <div class="snap-placeholder dh">DH</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                球机
+              </div>
+              <div class="snap-corner">
+                <div class="corner-badge ptz">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+                </div>
+              </div>
+              <div class="snap-overlay">
+                <span class="status-dot online"></span>
+                <span class="status-text">在线</span>
+                <span class="heart-text">6 秒前</span>
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title">A 小区 · 后门球机</span>
+              <span class="code">34010500001320000008</span>
+              <span class="meta">
+                <span>大华股份</span>
+                <span class="dot-sep">·</span>
+                <span>DH-SD-6A82</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 卡 8: 离线 -->
+          <div class="device-card">
+            <div class="card-snap offline">
+              <div class="snap-placeholder dh">DH</div>
+              <div class="snap-type">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                球机
+              </div>
+            </div>
+            <div class="card-info">
+              <span class="title" style="color: var(--color-text-3)">花园路 · 消防通道</span>
+              <span class="code">34010500002320000011</span>
+              <span class="meta">
+                <span>大华股份</span>
+                <span class="dot-sep">·</span>
+                <span>DH-SD-49225</span>
+              </span>
+              <div class="card-actions">
+                <button class="fav"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg></button>
+                <button><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+                <button class="play-cta" style="opacity:0.4; cursor:not-allowed">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  无法点播
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="pagination">
+          <span>共 318 通道 · 当前显示 8</span>
+          <div class="pages">
+            <button>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button>...</button>
+            <button>40</button>
+            <button>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="footnote">
+        web/design-mockups/gb-device-mgmt/card.html · 卡片视图 · 对应 spec §9.6 (监控员向) · 16:9 快照 60s 自动刷新 / 渐变蒙层状态条 / 离线灰度 + 暗化 / PTZ 报警角标 / 双击点播 / hover 抬升 4px
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

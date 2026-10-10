@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 登录 · 网关汇流(04)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* === UVP brand — 取自 uvp-mark.svg 的实际取值 === */
+  --brand-navy-900: #08111F;
+  --brand-navy-800: #0A1526;
+  --brand-navy-700: #10233F;
+  --brand-navy-600: #14305A;
+  --brand-blue-700: #1D4ED8;
+  --brand-blue-600: #2563EB;
+  --brand-blue-400: #60A5FA;
+  --brand-cyan-600: #0FAAA6;
+  --brand-cyan-300: #39D1C7;
+
+  /* === app shell 对齐（uvp-ui-tokens.scss）=== */
+  --radius-card: 14px;
+  --radius-panel: 12px;
+  --radius-chip: 99px;
+
+  /* === 主题色（替代原 #1890ff）=== */
+  --primary: var(--brand-blue-600);
+  --primary-strong: var(--brand-blue-700);
+  --text: #12233B;
+  --text-secondary: #56697F;
+  --text-hint: #8A97A8;
+  --line: #D8E3F2;
+  --line-hover: #B9CBE6;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(.4, .14, .3, 1);
+}
+
+html, body { height: 100%; }
+body {
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  color: var(--text);
+}
+
+/* ============================================================
+   Page — 深色底：品牌藏青渐变 + 网格 + 汇流环境光
+   ============================================================ */
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(ellipse 70% 55% at 18% 8%, rgba(37, 99, 235, .22), transparent 62%),
+    radial-gradient(ellipse 60% 50% at 88% 94%, rgba(15, 170, 166, .16), transparent 60%),
+    linear-gradient(158deg, var(--brand-navy-800) 0%, #0C1B33 52%, var(--brand-navy-700) 100%);
+}
+/* 视觉聚焦：中心透明、四周压暗，让卡片浮起来 */
+.login-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 62% 58% at 50% 46%, transparent 34%, rgba(5, 12, 23, .58) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.flow-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+.pkt { animation: pkt-run 3s linear infinite; }
+.pkt.out { animation-name: pkt-run-out; }
+.pkt.bg { animation-name: pkt-run-bg; animation-duration: 6s; }
+.pkt.far { animation-name: pkt-run-far; animation-duration: 17s; }
+.pkt.d1 { animation-delay: -0.2s; }
+.pkt.d2 { animation-delay: -1.1s; }
+.pkt.d3 { animation-delay: -2.0s; }
+.node { animation: node-breathe 4.4s ease-in-out infinite; }
+.node.d1 { animation-delay: -1.1s; }
+.node.d2 { animation-delay: -2.2s; }
+
+@keyframes pkt-run {
+  from { transform: translateX(0); }
+  to   { transform: translateX(100px); }
+}
+@keyframes pkt-run-out {
+  from { transform: translateX(0); }
+  to   { transform: translateX(92px); }
+}
+@keyframes pkt-run-bg {
+  from { transform: translateX(0); }
+  to   { transform: translateX(270px); }
+}
+@keyframes pkt-run-far {
+  from { transform: translateX(0); }
+  to   { transform: translateX(1400px); }
+}
+@keyframes node-breathe {
+  0%, 100% { opacity: .28; }
+  50%      { opacity: .85; }
+}
+
+/* ============================================================
+   Top brand bar
+   ============================================================ */
+.brand-bar {
+  position: relative;
+  z-index: 2;
+  height: 64px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+}
+.brand-wordmark { display: block; height: 30px; width: auto; }
+.brand-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 14px;
+  background: rgba(255, 255, 255, .18);
+}
+.brand-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  color: rgba(255, 255, 255, .9);
+}
+.brand-meta {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  color: rgba(255, 255, 255, .6);
+}
+
+/* ============================================================
+   Stage / floating card
+   ============================================================ */
+.stage {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 24px 40px;
+}
+
+.float-card {
+  width: 920px;
+  max-width: 100%;
+  background: #fff;
+  border-radius: var(--radius-card);
+  display: grid;
+  /* 必须用 minmax(0,…)：1fr 等价于 minmax(auto,1fr)，而 auto 最小值会被
+     输入框的固有宽度（~209px）顶大，轨道就能超出卡片宽度、把右侧内容挤出去。 */
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  overflow: hidden;
+  box-shadow:
+    0 32px 72px -20px rgba(3, 10, 20, .62),
+    0 12px 28px -12px rgba(3, 10, 20, .38),
+    0 0 0 1px rgba(255, 255, 255, .06);
+}
+/* 网格项默认 min-width:auto，同样会被内部固有宽度撑破轨道；显式归零 */
+.brand-side,
+.form-side { min-width: 0; }
+
+/* ---------- LEFT: brand ---------- */
+.brand-side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 40px 30px;
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(ellipse at 26% 12%, rgba(37, 99, 235, .40), transparent 60%),
+    radial-gradient(ellipse at 84% 98%, rgba(15, 170, 166, .28), transparent 56%),
+    linear-gradient(152deg, var(--brand-navy-700) 0%, #163362 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .10);
+}
+.brand-side::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+.brand-eyebrow {
+  position: relative;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: rgba(127, 178, 240, .95);
+  margin-bottom: 16px;
+}
+.brand-title {
+  position: relative;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.34;
+  letter-spacing: -.2px;
+  margin-bottom: 12px;
+}
+.brand-title em {
+  font-style: normal;
+  color: var(--brand-cyan-300);
+}
+.brand-lede {
+  position: relative;
+  font-size: 13.5px;
+  line-height: 1.72;
+  color: rgba(255, 255, 255, .78);
+  max-width: 340px;
+}
+
+/* ---------- 汇流示意（本页的识别符号，复刻 logo 语义） ---------- */
+.flow-hero {
+  position: relative;
+  margin: 22px 0 0;
+  width: 100%;
+}
+.flow-hero svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.flow-tag {
+  position: absolute;
+  left: 0;
+  width: 21.5%;
+  height: 18.2%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px solid rgba(96, 165, 250, .30);
+  background: rgba(96, 165, 250, .10);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  color: #A8C8F2;
+}
+.flow-tag.t1 { top: 20.45%; }
+.flow-tag.t2 { top: 50%; border-color: rgba(96, 165, 250, .34); background: rgba(96, 165, 250, .13); color: #BBD6F7; }
+.flow-tag.t3 { top: 79.55%; border-color: rgba(57, 209, 199, .28); background: rgba(15, 170, 166, .12); color: #8FDCD6; }
+
+/* ---------- feature list ---------- */
+.brand-features {
+  position: relative;
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .86);
+}
+.feature .ic {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--brand-cyan-300);
+  background: rgba(15, 170, 166, .14);
+  border: 1px solid rgba(57, 209, 199, .30);
+}
+
+/* ---------- capability chips ---------- */
+.brand-foot {
+  position: relative;
+  margin-top: auto;
+  padding-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid rgba(255, 255, 255, .14);
+}
+.chip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  padding: 3px 9px;
+  border-radius: var(--radius-chip);
+  color: rgba(255, 255, 255, .84);
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid rgba(255, 255, 255, .16);
+}
+
+/* ---------- RIGHT: form ---------- */
+.form-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px 44px 34px;
+}
+.form-rule {
+  width: 32px;
+  height: 3px;
+  border-radius: var(--radius-chip);
+  background: linear-gradient(90deg, var(--brand-blue-600), var(--brand-cyan-600));
+  margin-bottom: 18px;
+}
+.form-head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.1px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.form-head p {
+  font-size: 13px;
+  color: var(--text-hint);
+}
+
+.login-form { margin-top: 26px; }
+.field + .field { margin-top: 18px; }
+
+/* Arco input 皮肤（对齐既有 login-form.vue 的触感语言，仅换品牌色） */
+.input-wrap {
+  position: relative;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(180deg, #F8FBFF 0%, #F3F7FC 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 1px 2px rgba(15, 23, 42, .04);
+  transition: border-color .18s var(--ease), background .18s var(--ease),
+              box-shadow .18s var(--ease), transform .18s var(--ease);
+}
+.input-wrap:hover {
+  border-color: var(--line-hover);
+  background: #F7FBFF;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 4px 12px rgba(37, 99, 235, .08);
+}
+.input-wrap:focus-within {
+  border-color: var(--brand-blue-600);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .14), 0 8px 22px rgba(37, 99, 235, .12);
+  transform: translateY(-1px);
+}
+.input-wrap .prefix {
+  display: flex;
+  color: #8798AD;
+  transition: color .18s var(--ease);
+}
+.input-wrap:hover .prefix,
+.input-wrap:focus-within .prefix { color: var(--brand-blue-600); }
+.input-wrap input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 14px;
+  color: #1F2D3D;
+}
+.input-wrap input::placeholder { color: #9AA8BA; }
+.input-wrap .reveal {
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: #8798AD;
+  cursor: pointer;
+  display: flex;
+  border-radius: 6px;
+}
+.input-wrap .reveal:hover { color: var(--brand-blue-600); }
+
+/* 验证码行 */
+.captcha-row { display: flex; align-items: center; gap: 10px; }
+.captcha-row .input-wrap { flex: 1; min-width: 0; }
+.captcha-img {
+  flex: 0 0 138px;
+  height: 48px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: #F8FBFF;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), transform .18s var(--ease);
+}
+.captcha-img:hover {
+  border-color: var(--brand-blue-600);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, .14);
+  transform: translateY(-1px);
+}
+.captcha-hint {
+  margin-top: 8px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-hint);
+}
+.captcha-hint b { color: var(--brand-blue-600); font-weight: 500; }
+
+/* 大写锁定提示——内嵌胶囊，不占额外行高，字段间距节奏不被打乱 */
+.caps-badge {
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: var(--radius-chip);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: #92400E;
+  background: #FEF3C7;
+  border: 1px solid #FCD34D;
+}
+.caps-badge.on { display: inline-flex; }
+
+/* 主 CTA */
+.btn-primary {
+  width: 100%;
+  height: 48px;
+  margin-top: 24px;
+  border: 0;
+  border-radius: var(--radius-panel);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--brand-blue-600) 0%, var(--brand-blue-700) 100%);
+  box-shadow: 0 10px 22px -6px rgba(37, 99, 235, .46), inset 0 1px 0 rgba(255, 255, 255, .18);
+  transition: transform .15s var(--ease), box-shadow .2s var(--ease), background .2s var(--ease);
+}
+/* 字距只作用于两字之间；用负 margin 吃掉 letter-spacing 在末字后多出的那一份，
+   这样"文字 + 箭头"整组的左右留白才是真对称的（比 text-indent 补偿更准） */
+.btn-primary span {
+  letter-spacing: .3em;
+  margin-right: -.3em;
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #3B7BF0 0%, var(--brand-blue-600) 100%);
+  box-shadow: 0 14px 30px -8px rgba(37, 99, 235, .56), inset 0 1px 0 rgba(255, 255, 255, .24);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  background: linear-gradient(135deg, var(--brand-blue-700) 0%, #1740B8 100%);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, .34);
+  transform: translateY(0);
+}
+.btn-primary .arrow { transition: transform .2s var(--ease); }
+.btn-primary:hover .arrow { transform: translateX(3px); }
+
+.form-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #EDF2F9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-hint);
+}
+.form-foot .dot-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand-cyan-600);
+  box-shadow: 0 0 0 3px rgba(15, 170, 166, .14);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Page footer
+   ============================================================ */
+.page-foot {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  padding: 14px 24px 20px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, .62);
+}
+.page-foot .sep { margin: 0 8px; color: rgba(255, 255, 255, .26); }
+
+/* ============================================================
+   Focus ring —— 统一键盘可达样式
+   ============================================================ */
+.captcha-img:focus-visible,
+.btn-primary:focus-visible,
+.input-wrap .reveal:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, .95);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 880px) {
+  .brand-bar { height: 52px; padding: 0 18px; }
+  .brand-meta { display: none; }
+  .brand-name { font-size: 13px; }
+  .brand-wordmark { height: 26px; }
+  .brand-divider { margin: 0 10px; }
+
+  .stage { padding: 12px 16px 18px; }
+  .float-card { grid-template-columns: minmax(0, 1fr); width: 420px; }
+
+  .brand-side { padding: 24px 22px 22px; }
+  .brand-title { font-size: 22px; }
+  .brand-lede { max-width: none; }
+  .flow-hero { margin-top: 16px; }
+  .brand-features, .brand-foot { display: none; }
+
+  .form-side { padding: 24px 22px 22px; }
+  .page-foot { padding: 10px 16px 14px; font-size: 11.5px; }
+}
+@media (max-width: 440px) {
+  .float-card { width: 100%; }
+  .captcha-img { flex-basis: 112px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pkt, .node { animation: none; }
+  .pkt { opacity: .5; }
+  .btn-primary:hover { transform: none; }
+  .input-wrap:focus-within { transform: none; }
+}
+
+/* ============================================================
+   附：改动说明（首屏之外，供评审）
+   ============================================================ */
+.notes {
+  background: #F3F7FB;
+  color: var(--text);
+  padding: 56px 24px 72px;
+  font-size: 14px;
+}
+.notes-inner { max-width: 920px; margin: 0 auto; }
+.notes .nk {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--brand-blue-600);
+  margin-bottom: 8px;
+}
+.notes h2 { font-size: 24px; font-weight: 600; letter-spacing: -.2px; margin-bottom: 10px; }
+.notes .nl { color: var(--text-secondary); line-height: 1.7; margin-bottom: 28px; }
+.notes table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+.notes th, .notes td { text-align: left; padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #EDF2F9; vertical-align: top; }
+.notes th { background: #F8FBFF; font-weight: 600; color: #34465C; white-space: nowrap; }
+.notes tr:last-child td { border-bottom: 0; }
+.notes code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: rgba(37, 99, 235, .07);
+  color: var(--brand-blue-700);
+  padding: 1px 6px;
+  border-radius: 4px;
+  overflow-wrap: anywhere; /* 长代码串在窄屏会把表格列撑破，必须允许断行 */
+}
+.notes .swatches { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0 4px; }
+.notes .sw { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #E6EDF7; border-radius: 8px; padding: 8px 12px; font-family: var(--mono); font-size: 11.5px; }
+.notes .sw i { width: 16px; height: 16px; border-radius: 4px; display: block; }
+</style>
+</head>
+<body>
+
+<div class="login-page">
+
+  <!-- ============ 环境层：三路信源汇入 → 单路转发（低对比，走卡片两侧） ============
+       约定：每条描边都必须延伸到画布边缘或伸进卡片背后，
+       这样任何视口裁剪都只会"遮住"它，不会出现悬空断头。 -->
+  <svg class="flow-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <pattern id="uvp-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+        <path d="M32 0H0V32" fill="none" stroke="rgba(255,255,255,.035)" stroke-width="1" />
+      </pattern>
+      <linearGradient id="lane-in" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#60A5FA" stop-opacity=".05" />
+        <stop offset=".6" stop-color="#60A5FA" stop-opacity=".26" />
+        <stop offset="1" stop-color="#60A5FA" stop-opacity=".44" />
+      </linearGradient>
+      <linearGradient id="lane-out" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#39D1C7" stop-opacity=".10" />
+        <stop offset=".34" stop-color="#39D1C7" stop-opacity=".12" />
+        <stop offset=".78" stop-color="#39D1C7" stop-opacity=".34" />
+        <stop offset="1" stop-color="#39D1C7" stop-opacity=".46" />
+      </linearGradient>
+    </defs>
+
+    <rect width="1600" height="900" fill="url(#uvp-grid)" />
+
+    <!-- 三路信源 → 接入竖轨 -->
+    <g fill="none" stroke-linecap="round">
+      <path d="M-40 336H400" stroke="url(#lane-in)" stroke-width="1.2" />
+      <path d="M-40 450H400" stroke="url(#lane-in)" stroke-width="1.4" />
+      <path d="M-40 564H400" stroke="url(#lane-in)" stroke-width="1.2" />
+      <path d="M180 336V564" stroke="#60A5FA" stroke-opacity=".26" stroke-width="1.4" />
+    </g>
+    <g fill="#60A5FA">
+      <circle class="node" cx="180" cy="336" r="2.6" opacity=".45" />
+      <circle class="node d1" cx="180" cy="450" r="2.6" opacity=".45" />
+      <circle class="node d2" cx="180" cy="564" r="2.6" opacity=".45" />
+      <circle class="pkt bg" cx="-40" cy="336" r="2.2" opacity=".7" />
+      <circle class="pkt bg d2" cx="-40" cy="450" r="2.2" opacity=".7" />
+      <circle class="pkt bg d3" cx="-40" cy="564" r="2.2" opacity=".7" />
+    </g>
+
+    <!-- 单路转发：从竖轨一路穿到画布右侧之外 -->
+    <path d="M180 450H1670" fill="none" stroke="url(#lane-out)" stroke-width="1.6" stroke-linecap="round" />
+    <g fill="#39D1C7">
+      <circle class="pkt far" cx="190" cy="450" r="2.4" opacity=".8" />
+      <circle class="pkt far d2" cx="190" cy="450" r="2.4" opacity=".8" />
+    </g>
+  </svg>
+
+  <!-- ============ 顶部品牌条 ============ -->
+  <header class="brand-bar">
+    <svg class="brand-wordmark" viewBox="0 0 320 96" role="img" aria-label="UVP 统一视频接入平台">
+      <g transform="translate(8 8) scale(.625)">
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 32H43M10 64H43M16 96H43" stroke="#60A5FA" stroke-width="8" />
+          <circle cx="16" cy="32" r="5" fill="#60A5FA" stroke="none" />
+          <circle cx="10" cy="64" r="5" fill="#60A5FA" stroke="none" />
+          <circle cx="16" cy="96" r="5" fill="#60A5FA" stroke="none" />
+          <rect x="43" y="31" width="42" height="66" rx="13" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="3" />
+          <rect x="52" y="45" width="24" height="38" rx="5" fill="#10233F" stroke="none" />
+          <path d="M58 53H70V59H58ZM58 65H70V75H58Z" fill="#0FAAA6" stroke="none" />
+          <path d="M85 64H111M103 56L111 64L103 72" stroke="#39D1C7" stroke-width="8" />
+        </g>
+      </g>
+      <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M108 30V58Q108 70 120 70Q132 70 132 58V30" />
+        <path d="M145 30L159 70L173 30" />
+        <path d="M187 70V30H200Q214 30 214 43Q214 56 200 56H187" />
+      </g>
+    </svg>
+    <span class="brand-divider"></span>
+    <span class="brand-name">统一视频接入平台</span>
+    <span class="brand-meta">v1.1.0 · GB/T 28181-2022</span>
+  </header>
+
+  <!-- ============ 主体 ============ -->
+  <main class="stage">
+    <div class="float-card">
+
+      <!-- ---------- 左：品牌面 ---------- -->
+      <aside class="brand-side">
+        <div class="brand-eyebrow">Unified Video Platform</div>
+        <h2 class="brand-title">把所有视频源<br />接入<em>同一张</em>控制台</h2>
+        <p class="brand-lede">
+          国标 SIP 接入 · 视频转发 · 录像点播 · 级联调度，
+          一套平台覆盖从设备侧到平台侧的核心链路。
+        </p>
+
+        <!-- 汇流示意：复刻 uvp-mark 的三路输入 → 网关 → 单路输出语义 -->
+        <div class="flow-hero">
+          <svg viewBox="0 0 391 88" role="img"
+               aria-label="三路信源 SIP 信令、RTP 媒体、级联调度汇入统一网关，再单路转发输出">
+            <defs>
+              <radialGradient id="plate-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0" stop-color="#60A5FA" stop-opacity=".38" />
+                <stop offset="100%" stop-color="#60A5FA" stop-opacity="0" />
+              </radialGradient>
+            </defs>
+
+            <ellipse cx="251" cy="44" rx="52" ry="32" fill="url(#plate-glow)" />
+
+            <g fill="none" stroke="#60A5FA" stroke-width="1.3" stroke-linecap="round">
+              <path d="M92 18H196" stroke-opacity=".40" />
+              <path d="M92 44H196" stroke-opacity=".55" />
+              <path d="M92 70H196" stroke-opacity=".40" />
+              <path d="M196 18V70" stroke-opacity=".5" />
+              <path d="M196 44H228" stroke-opacity=".7" />
+            </g>
+
+            <!-- 网关牌：uvp-mark 的「设备」被反相放大 -->
+            <rect x="228" y="22" width="46" height="44" rx="11" fill="#FFFFFF" />
+            <rect x="235" y="31" width="32" height="26" rx="4" fill="#10233F" />
+            <rect x="240" y="36" width="22" height="4.5" rx="1.5" fill="#60A5FA" />
+            <rect x="240" y="45" width="22" height="6" rx="1.5" fill="#0FAAA6" />
+
+            <!-- 单路转发输出 -->
+            <path d="M274 44H372" stroke="#39D1C7" stroke-width="2.5" stroke-linecap="round" />
+            <path d="M371 36L387 44L371 52Z" fill="#39D1C7" />
+
+            <!-- 轨道上的报文脉冲 -->
+            <g fill="#60A5FA">
+              <circle class="pkt" cx="92" cy="18" r="2.2" />
+              <circle class="pkt d1" cx="92" cy="44" r="2.2" />
+              <circle class="pkt d2" cx="92" cy="70" r="2.2" />
+            </g>
+            <circle class="pkt out d3" cx="276" cy="44" r="2.6" fill="#39D1C7" />
+
+            <!-- 汇入点 -->
+            <g fill="#93C5FD">
+              <circle class="node" cx="196" cy="18" r="2.2" />
+              <circle class="node d1" cx="196" cy="44" r="2.2" />
+              <circle class="node d2" cx="196" cy="70" r="2.2" />
+            </g>
+          </svg>
+
+          <span class="flow-tag t1">SIP 信令</span>
+          <span class="flow-tag t2">RTP 媒体</span>
+          <span class="flow-tag t3">级联调度</span>
+        </div>
+
+        <div class="brand-features">
+          <div class="feature">
+            <span class="ic">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            </span>
+            <span>GB/T 28181-2022 全字段兼容</span>
+          </div>
+          <div class="feature">
+            <span class="ic">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            </span>
+            <span>部门数据权限 · 设备权限粒度到通道</span>
+          </div>
+          <div class="feature">
+            <span class="ic">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            </span>
+            <span>媒体服务编排 · 转发、回放与级联统一治理</span>
+          </div>
+        </div>
+
+        <div class="brand-foot">
+          <span class="chip">SIP / RTP</span>
+          <span class="chip">级联</span>
+          <span class="chip">回放点播</span>
+          <span class="chip">部门权限</span>
+        </div>
+      </aside>
+
+      <!-- ---------- 右：表单面 ---------- -->
+      <section class="form-side">
+        <div class="form-rule"></div>
+        <div class="form-head">
+          <h1>账号登录</h1>
+          <p>请输入账号信息进入控制台</p>
+        </div>
+
+        <form class="login-form" novalidate>
+          <div class="field">
+            <div class="input-wrap">
+              <span class="prefix" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21a8 8 0 1 0-16 0" /><circle cx="12" cy="8" r="4" /></svg>
+              </span>
+              <input id="uvp-username" name="username" type="text" autocomplete="username"
+                     aria-label="账号" placeholder="请输入账号" />
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="input-wrap">
+              <span class="prefix" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2.5" /><path d="M8 10V7a4 4 0 1 1 8 0v3" /></svg>
+              </span>
+              <input id="uvp-password" name="password" type="password" autocomplete="current-password"
+                     aria-label="密码" placeholder="请输入密码" />
+              <span class="caps-badge" id="uvp-caps" role="status" data-caps>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l7 6h-4v6h-6v-6H5l7-6Z" /><path d="M6 20h12" /></svg>
+                大写锁定
+              </span>
+              <button class="reveal" type="button" aria-label="显示密码" aria-controls="uvp-password" data-reveal>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z" /><circle cx="12" cy="12" r="2.6" /></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="captcha-row">
+              <div class="input-wrap">
+                <span class="prefix" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7.5 3.4v5c0 4.6-3.1 8.3-7.5 9.6C7.6 19.7 4.5 16 4.5 11.4v-5L12 3Z" /><path d="M9.3 11.7l1.9 1.9 3.6-3.6" /></svg>
+                </span>
+                <input id="uvp-captcha" name="captchaValue" type="text" autocomplete="off"
+                       aria-label="验证码" placeholder="请输入验证码" />
+              </div>
+              <img class="captcha-img" tabindex="0" role="button"
+                   aria-label="图形验证码，点击或按回车换一张"
+                   alt="图形验证码"
+                   src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='276' height='96' viewBox='0 0 276 96'><rect width='276' height='96' fill='%23F4F8FE'/><path d='M14 68C58 30 96 82 138 42S214 22 262 60' stroke='%23BBCFEA' stroke-width='3' fill='none'/><path d='M18 26C64 62 110 14 156 52S228 74 258 34' stroke='%23C9DAF0' stroke-width='3' fill='none'/><g font-family='Georgia,serif' font-size='54' font-weight='700'><text x='34' y='70' fill='%23D98A2B' transform='rotate(-7 34 70)'>t</text><text x='88' y='66' fill='%232563EB' transform='rotate(5 88 66)'>n</text><text x='146' y='72' fill='%23102333' transform='rotate(-5 146 72)'>7</text><text x='202' y='64' fill='%230FAAA6' transform='rotate(8 202 64)'>m</text></g></svg>" />
+            </div>
+            <p class="captcha-hint">看不清？<b>点击图片换一张</b></p>
+          </div>
+
+          <button class="btn-primary" type="submit">
+            <span>登录</span>
+            <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+          </button>
+        </form>
+
+        <div class="form-foot">
+          <span class="dot-live" aria-hidden="true"></span>
+          <span>建议使用 Chrome / Edge 浏览器访问</span>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============ 页脚 ============ -->
+  <footer class="page-foot">
+    <span>© 2026 统一视频接入平台</span>
+    <span class="sep">·</span>
+    <span>Powered by GB/T 28181-2022</span>
+  </footer>
+</div>
+
+<!-- ============================================================
+     附：改动说明
+     ============================================================ -->
+<section class="notes">
+  <div class="notes-inner">
+    <div class="nk">Design Notes · login-04-gateway</div>
+    <h2>相对现有登录页改了什么</h2>
+    <p class="nl">
+      结构与现有 <code>login.vue</code> 一一对应（顶部品牌条 / 左品牌面 / 右表单面 / 页脚），
+      不改信息架构与字段，只做三件事：<b>把配色锚回新 logo 的真实取值</b>、
+      <b>把背景从通用拓扑星图换成产品语义的汇流示意</b>、<b>补齐触感与可达性细节</b>。
+    </p>
+
+    <div class="swatches">
+      <span class="sw"><i style="background:#2563EB"></i>#2563EB 品牌蓝</span>
+      <span class="sw"><i style="background:#1D4ED8"></i>#1D4ED8 按压蓝</span>
+      <span class="sw"><i style="background:#10233F"></i>#10233F 品牌藏青</span>
+      <span class="sw"><i style="background:#0FAAA6"></i>#0FAAA6 品牌青</span>
+      <span class="sw"><i style="background:#39D1C7"></i>#39D1C7 亮青</span>
+      <span class="sw"><i style="background:#60A5FA"></i>#60A5FA 浅蓝</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>项</th><th>现状</th><th>改后</th><th>理由</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>主色</td>
+          <td><code>#1890ff</code>（Arco 默认蓝）</td>
+          <td><code>#2563EB</code> / <code>#0FAAA6</code></td>
+          <td>新 <code>uvp-mark.svg</code> 用的是 2563EB + 0FAAA6；同屏出现两种蓝会显得"贴牌"。</td>
+        </tr>
+        <tr>
+          <td>背景</td>
+          <td>中心辐射拓扑星图（hub + 8 主星 + 18 副星），中心正压在卡片后面</td>
+          <td>三路信源 → 接入竖轨 → 单路转发出网，只走页面左右两侧</td>
+          <td>原图是通用"网络感"，看不出这是什么产品；现图直接复刻 logo 语义，且不再和卡片抢中心。</td>
+        </tr>
+        <tr>
+          <td>品牌面识别</td>
+          <td>只有文字标题</td>
+          <td>新增 391×112 汇流示意（SIP 信令 / RTP 媒体 / 级联调度 → 网关 → 输出）</td>
+          <td>把 logo 的抽象线条翻译成架构图，补上"左半分栏为什么存在"的答案。</td>
+        </tr>
+        <tr>
+          <td>顶部品牌条</td>
+          <td><code>uvp-mark.svg</code>（30px）+ 中文名 + 版本</td>
+          <td><code>uvp-wordmark-light.svg</code>（含 UVP 字形）+ 分隔线 + 中文名 + 版本</td>
+          <td>已有现成的浅色字标资源，用它比"图标 + 纯文字"更完整。</td>
+        </tr>
+        <tr>
+          <td>卡片圆角 / 阴影</td>
+          <td>12px，两层阴影</td>
+          <td>14px，三层（含 1px 高光描边）</td>
+          <td>对齐 <code>--uvp-workspace-radius: 14px</code> 与 <code>--uvp-panel-radius: 14px</code>。加密码后按钮也一样。</td>
+        </tr>
+        <tr>
+          <td>输入框</td>
+          <td>46px / 圆角 12px / 边框 <code>#dbe6f4</code></td>
+          <td>48px / 圆角 12px / 边框 <code>#d8e3f2</code>，焦点环换成品牌蓝</td>
+          <td>48px 满足最小点击高度；焦点环从 Arco 蓝改为品牌蓝，和 logo 同色系。</td>
+        </tr>
+        <tr>
+          <td>主按钮</td>
+          <td><code>letter-spacing: 4px</code>，末字后多出的那份字距使整组视觉偏左</td>
+          <td>字距只留在两字之间：<code>span{letter-spacing:.3em; margin-right:-.3em}</code></td>
+          <td>letter-spacing 会在最后一个字后面也加一份；用负 margin 吃掉它，"文字 + 箭头"整组才是真对称。</td>
+        </tr>
+        <tr>
+          <td>验证码</td>
+          <td>裸 <code>&lt;img&gt;</code>，只能鼠标点</td>
+          <td>加 <code>role="button"</code> / <code>tabindex="0"</code> / <code>aria-label</code> / 焦点环，并补"点击换一张"提示</td>
+          <td>键盘用户原本无法刷新验证码，是实际的功能缺失。</td>
+        </tr>
+        <tr>
+          <td>密码框</td>
+          <td>无</td>
+          <td>大写锁定提示做成输入框内嵌胶囊（绝对定位，零行高占用）</td>
+          <td>登录失败最常见的原因之一。做成内嵌是为了既不顶动下方按钮、也不打乱字段 18px 的间距节奏。</td>
+        </tr>
+        <tr>
+          <td>表单底注</td>
+          <td>无</td>
+          <td>「建议使用 Chrome / Edge 浏览器访问」+ 状态点</td>
+          <td>用真实内容占住表单下半区。若不需要可整块删除，卡片高度会回落约 34px。</td>
+        </tr>
+        <tr>
+          <td>动效</td>
+          <td>星点脉冲（已支持 reduced-motion）</td>
+          <td>轨道报文脉冲 + 汇入点呼吸（同样支持 reduced-motion）</td>
+          <td>保留原有克制程度，不引入新的大幅位移。</td>
+        </tr>
+        <tr>
+          <td>响应式</td>
+          <td>≤880px 折单列，品牌面只剩标题</td>
+          <td>≤880px 折单列，保留汇流示意（它是识别符号，不该掉）；页脚内边距同步收紧</td>
+          <td>窄屏丢了 features/chips 没问题，丢了识别符号就变成"随便一个后台登录页"。</td>
+        </tr>
+        <tr>
+          <td>网格轨道</td>
+          <td>—（原实现不是 Grid，没有这个问题）</td>
+          <td><code>grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr)</code> + 两项 <code>min-width: 0</code></td>
+          <td>实测踩到：<code>1fr</code> 等价于 <code>minmax(auto, 1fr)</code>，auto 最小值会被输入框固有宽度（约 209px）顶大，轨道撑到 375px 而卡片只有 343px，右列内容被裁。窄屏必须显式归零。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+// 大写锁定提示：真实可用的行为，不是装饰
+(function () {
+  var pwd = document.getElementById("uvp-password");
+  var badge = document.querySelector("[data-caps]");
+  if (!pwd || !badge) return;
+  function check(e) {
+    var on = false;
+    try { on = e.getModifierState && e.getModifierState("CapsLock"); } catch (err) { on = false; }
+    badge.classList.toggle("on", !!on);
+    // 只在真正提示时才挂 aria-describedby，避免读屏把"已开启"当静态描述一直念
+    if (on) { pwd.setAttribute("aria-describedby", "uvp-caps"); }
+    else { pwd.removeAttribute("aria-describedby"); }
+  }
+  pwd.addEventListener("keyup", check);
+  pwd.addEventListener("keydown", check);
+  pwd.addEventListener("blur", function () {
+    badge.classList.remove("on");
+    pwd.removeAttribute("aria-describedby");
+  });
+})();
+
+// 密码显隐（当前 login-form.vue 由 Arco 提供，此处仅演示形态）
+(function () {
+  var btn = document.querySelector("[data-reveal]");
+  var pwd = document.getElementById("uvp-password");
+  if (!btn || !pwd) return;
+  btn.addEventListener("click", function () {
+    var show = pwd.type === "password";
+    pwd.type = show ? "text" : "password";
+    btn.setAttribute("aria-label", show ? "隐藏密码" : "显示密码");
+  });
+})();
+
+// 验证码换一张：演示键盘（Enter / Space）也能触发刷新
+(function () {
+  var img = document.querySelector(".captcha-img");
+  if (!img) return;
+  var chars = "tn7mkc4x9abqz";
+  var colors = ["D98A2B", "2563EB", "102333", "0FAAA6"];
+  function pick(s) { return s.charAt(Math.floor(Math.random() * s.length)); }
+  function render() {
+    var out = "<svg xmlns='http://www.w3.org/2000/svg' width='276' height='96' viewBox='0 0 276 96'>" +
+      "<rect width='276' height='96' fill='%23F4F8FE'/>" +
+      "<path d='M14 68C58 30 96 82 138 42S214 22 262 60' stroke='%23BBCFEA' stroke-width='3' fill='none'/>" +
+      "<path d='M18 26C64 62 110 14 156 52S228 74 258 34' stroke='%23C9DAF0' stroke-width='3' fill='none'/>" +
+      "<g font-family='Georgia,serif' font-size='54' font-weight='700'>";
+    for (var i = 0; i < 4; i++) {
+      var x = 34 + i * 57;
+      out += "<text x='" + x + "' y='" + (64 + (i % 2 ? 2 : 6)) + "' fill='%23" + pick(colors) +
+             "' transform='rotate(" + (Math.floor(Math.random() * 18) - 9) + " " + x + " 66)'>" +
+             pick(chars) + "</text>";
+    }
+    img.src = "data:image/svg+xml;utf8," + out + "</g></svg>";
+  }
+  img.addEventListener("click", render);
+  img.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); render(); }
+  });
+})();
+</script>
+</body>
+</html>

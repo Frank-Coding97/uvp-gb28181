@@ -17,6 +17,7 @@ export interface HttpResponse extends AxiosResponse {
 export interface HttpRequestConfig extends AxiosRequestConfig {
   beforeRequestCallback?: (request: HttpRequestConfig) => void;
   beforeResponseCallback?: (response: HttpResponse) => void;
+  showErrorMessage?: boolean;
 }
 
 export default class Http {

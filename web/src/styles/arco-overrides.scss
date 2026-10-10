@@ -1,0 +1,682 @@
+// Arco Design 组件全局样式覆盖
+// 目标：让 Arco 组件符合 UVP 系统设计风格
+
+// Arco 主题会在后置样式中把 body 背景设为 --color-bg-2。暗色主题下该值是品牌蓝，
+// 刷新触发重绘时会短暂露出蓝色底；页面底色应始终跟随 UVP 外壳背景。
+body {
+  background: var(--uvp-navigation-bg) !important;
+  background-color: var(--uvp-navigation-bg) !important;
+}
+
+html body[arco-theme="dark"] {
+  background: #0b1118 !important;
+  background-color: #0b1118 !important;
+}
+
+// ========== Loading 加载 ==========
+// 自定义 Arco 主题的默认灰色遮罩与 UVP 蓝灰暗色面板不一致。
+.arco-spin .arco-spin-mask {
+  background-color: color-mix(in srgb, var(--uvp-panel-bg) 78%, transparent) !important;
+  border-radius: inherit;
+}
+
+.arco-spin .arco-spin-icon,
+.arco-spin .arco-spin-tip {
+  color: var(--uvp-brand-strong);
+}
+
+// ========== Switch 开关 ==========
+.arco-switch {
+  background-color: var(--uvp-panel-border) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-tertiary) 24%, transparent) !important;
+
+  &:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-panel-border)) !important;
+  }
+
+  &.arco-switch-checked {
+    background-color: var(--uvp-brand) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 14%, transparent) !important;
+  }
+
+  &:not(.arco-switch-checked, [disabled]) .arco-switch-text {
+    color: var(--uvp-text-secondary) !important;
+  }
+
+  &[disabled] {
+    background-color: var(--uvp-panel-border) !important;
+    box-shadow: none !important;
+    opacity: 0.5;
+  }
+
+  &[disabled].arco-switch-checked {
+    background-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)) !important;
+  }
+}
+
+body[arco-theme="dark"] .arco-switch.arco-switch-checked {
+  background-color: #2563eb !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme="dark"] .arco-switch.arco-switch-checked:not([disabled]):hover {
+  background-color: #1d4ed8 !important;
+}
+
+body[arco-theme="dark"] .arco-switch.arco-switch-checked .arco-switch-handle {
+  background-color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
+  background-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)) !important;
+}
+
+// ========== Select 下拉框 ==========
+.arco-select-view {
+  background: var(--uvp-dialog-control-bg) !important;
+  border: 1px solid var(--uvp-panel-border) !important;
+  border-radius: 8px !important;
+
+  &:hover {
+    border-color: var(--uvp-brand) !important;
+  }
+
+  &.arco-select-view-focus {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 12%, transparent) !important;
+  }
+}
+
+.arco-select-view-value {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--uvp-text-primary) !important;
+}
+
+.arco-select-view-suffix {
+  color: var(--uvp-text-tertiary) !important;
+}
+
+// 下拉面板
+.arco-select-dropdown {
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+.arco-select-dropdown-list-wrapper {
+  padding: 0 4px !important;
+}
+
+.arco-select-option {
+  margin: 2px 0 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--uvp-text-secondary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border-radius: 6px !important;
+
+  &.arco-select-option-active,
+  &:not(.arco-select-option-disabled):hover {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  &.arco-select-option-selected {
+    font-weight: 600 !important;
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+}
+
+// Dropdown 菜单与 Select 弹层统一跟随主题
+.arco-dropdown {
+  color: var(--uvp-text-secondary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+.arco-dropdown-option {
+  color: var(--uvp-text-secondary) !important;
+
+  &:not(.arco-dropdown-option-disabled):hover {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+}
+
+// ========== DatePicker / RangePicker 日期弹层 ==========
+.arco-picker-container,
+.arco-picker-range-container {
+  color: var(--uvp-text-primary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+
+  .arco-picker-header,
+  .arco-picker-footer-btn-wrapper,
+  .arco-picker-footer-extra-wrapper,
+  .arco-picker-footer-now-wrapper,
+  .arco-panel-date-view-tabs,
+  .arco-panel-date-view-tab-pane,
+  .arco-panel-date-timepicker,
+  .arco-panel-date-timepicker-title,
+  .arco-panel-date-footer {
+    border-color: var(--uvp-popconfirm-border) !important;
+  }
+
+  .arco-picker-header-title,
+  .arco-picker-header-label,
+  .arco-panel-date-timepicker-title {
+    font-weight: 600 !important;
+    color: var(--uvp-text-primary) !important;
+  }
+
+  .arco-picker-header-icon {
+    color: var(--uvp-text-secondary) !important;
+    background: transparent !important;
+
+    &:hover {
+      color: var(--uvp-brand) !important;
+      background: var(--uvp-brand-soft) !important;
+    }
+  }
+
+  .arco-picker-week-list-item {
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-picker-date-value {
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-picker-cell-in-view .arco-picker-date-value {
+    color: var(--uvp-text-primary) !important;
+  }
+
+  .arco-picker-cell-in-range .arco-picker-date,
+  .arco-picker-cell-hover-in-range .arco-picker-date {
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-cell-selected .arco-picker-date-value,
+  .arco-picker-cell-range-start .arco-picker-date-value,
+  .arco-picker-cell-range-end .arco-picker-date-value {
+    color: var(--uvp-solid-text) !important;
+    background: var(--uvp-solid-bg) !important;
+  }
+
+  .arco-picker-cell-in-view:not(
+      .arco-picker-cell-selected,
+      .arco-picker-cell-range-start,
+      .arco-picker-cell-range-end,
+      .arco-picker-cell-disabled
+    )
+    .arco-picker-date-value:hover,
+  .arco-picker-header-label:hover,
+  .arco-timepicker-cell:not(.arco-timepicker-cell-selected, .arco-timepicker-cell-disabled):hover .arco-timepicker-cell-inner {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-cell-today::after {
+    background: var(--uvp-brand) !important;
+  }
+
+  .arco-panel-date-view-tab-pane {
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-panel-date-view-tab-pane-active,
+  .arco-timepicker-cell-selected .arco-timepicker-cell-inner {
+    font-weight: 600 !important;
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-btn-confirm.arco-btn-primary {
+    background: var(--uvp-brand) !important;
+    border-color: var(--uvp-brand) !important;
+    border-radius: 7px !important;
+
+    &:hover {
+      background: var(--uvp-brand-strong) !important;
+      border-color: var(--uvp-brand-strong) !important;
+    }
+  }
+}
+
+// 小尺寸 select
+.arco-select-size-small {
+  .arco-select-view {
+    height: 32px !important;
+    padding: 0 10px !important;
+  }
+
+  .arco-select-view-value {
+    font-size: 12px !important;
+  }
+}
+
+// ========== 其他 Arco 组件后续在这里扩展 ==========
+
+// ========== 刷新工具按钮 ==========
+// 刷新是中性工具动作,使用独立蓝绿色语义色,与查询/危险操作区分。
+.uvp-page-action-btn {
+  box-sizing: border-box;
+  min-width: 88px;
+  height: 40px;
+  padding-inline: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+
+.uvp-create-btn {
+  color: #ffffff !important;
+  background: #16845f !important;
+  border-color: #16845f !important;
+  box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%) !important;
+
+  &:hover:not([disabled], .arco-btn-disabled),
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
+    color: #ffffff !important;
+    background: #0f6f4f !important;
+    border-color: #0f6f4f !important;
+    box-shadow: 0 12px 20px -15px rgb(15 111 79 / 64%) !important;
+  }
+}
+
+.uvp-refresh-btn {
+  color: var(--uvp-refresh-btn-text) !important;
+  background: var(--uvp-refresh-btn-bg) !important;
+  border-color: var(--uvp-refresh-btn-border) !important;
+  box-shadow: none !important;
+
+  &:hover:not([disabled], .arco-btn-disabled),
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-hover-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+  }
+
+  &:focus-visible:not([disabled], .arco-btn-disabled) {
+    outline: 2px solid color-mix(in srgb, var(--uvp-refresh-btn-text) 34%, transparent);
+    outline-offset: 2px;
+  }
+
+  &:active:not([disabled], .arco-btn-disabled) {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-active-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+  }
+
+  &[disabled],
+  &.arco-btn-disabled {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+    opacity: 0.55;
+  }
+}
+
+.uvp-refresh-link {
+  color: var(--uvp-refresh-btn-text) !important;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-hover-bg) !important;
+  }
+}
+
+// ========== uvp 通用组件 class(从 device-mgmt / account 页面提取,供跨页复用) ==========
+// 提取自 web/src/views/gb28181/device-mgmt/index.vue(scoped)与 system/account/account.vue(scoped),
+// 因设备分配页等多页面复用,统一全局化;原页面 scoped 副本保留不受影响。
+
+// 搜索框(cmdk)
+.cmdk {
+  display: flex;
+  flex: 1 1 210px;
+  gap: 8px;
+  align-items: center;
+  width: min(360px, 100%);
+  min-width: 210px;
+  max-width: 360px;
+  height: 40px;
+  padding: 0 12px;
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-search-control-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  border-radius: 10px;
+
+  &:focus-within {
+    border-color: color-mix(in srgb, var(--uvp-brand) 40%, transparent);
+    box-shadow: var(--uvp-search-control-focus-shadow);
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    color: var(--uvp-text-primary);
+    outline: none;
+    background: transparent;
+    border: 0;
+  }
+
+  .kbd {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: auto;
+    font-size: 11px;
+  }
+
+  kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 4px;
+  }
+}
+
+.cmdk-clear {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--uvp-text-tertiary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+
+  &:hover {
+    color: var(--uvp-text-primary);
+    background: var(--uvp-brand-soft);
+  }
+}
+
+// 分段切换(segmented)
+.segmented {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
+  box-shadow: var(--uvp-search-secondary-btn-shadow);
+
+  button {
+    min-width: 52px;
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+    line-height: 30px;
+    color: var(--uvp-text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    transition:
+      color 0.2s ease,
+      background 0.2s ease;
+
+    &.active {
+      font-weight: 620;
+      color: var(--uvp-brand);
+      background: var(--uvp-brand-soft);
+    }
+  }
+}
+
+// 按钮(btn-primary / btn-ghost)
+.btn-primary,
+.btn-ghost {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+  border-radius: 10px;
+
+  &:focus-visible {
+    outline: 2px solid var(--uvp-brand);
+    outline-offset: 2px;
+  }
+}
+
+.btn-primary {
+  font-weight: 600;
+  color: var(--uvp-solid-text);
+  cursor: pointer;
+  background: var(--uvp-solid-bg);
+  border: 0;
+  transition: opacity 0.15s ease;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+// 文字/图标使用浅蓝品牌色，实心按钮使用对比度更高的深蓝（--uvp-solid-*）。
+// 保留危险、警告、成功及独立工具动作的语义色；只统一表面，不改变按钮尺寸。
+body[arco-theme="dark"] {
+  :is(.arco-btn-primary, button.btn-primary):not(
+      .arco-btn-status-danger,
+      .arco-btn-status-warning,
+      .arco-btn-status-success,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .btn-danger
+    ) {
+    &:not(.arco-btn-disabled, [disabled]) {
+      color: var(--uvp-solid-text) !important;
+      background: var(--uvp-solid-bg) !important;
+      border-color: var(--uvp-solid-bg) !important;
+      box-shadow: none !important;
+
+      &:hover:not(.arco-btn-loading) {
+        background: var(--uvp-solid-hover-bg) !important;
+        border-color: var(--uvp-solid-hover-bg) !important;
+      }
+
+      &:active:not(.arco-btn-loading) {
+        background: var(--uvp-solid-active-bg) !important;
+        border-color: var(--uvp-solid-active-bg) !important;
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--uvp-brand);
+        outline-offset: 2px;
+      }
+    }
+
+    &.arco-btn-disabled,
+    &[disabled] {
+      color: var(--uvp-text-disabled) !important;
+      background: var(--uvp-dialog-control-bg) !important;
+      border-color: var(--uvp-panel-border) !important;
+      box-shadow: none !important;
+      opacity: 1 !important;
+    }
+  }
+}
+
+.btn-ghost {
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-search-secondary-btn-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+
+  &:hover {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+  }
+
+  &:active {
+    background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
+    transform: scale(0.96);
+  }
+}
+
+// 工具栏下拉
+.toolbar-select {
+  flex: 0 0 auto;
+}
+
+.status-select {
+  min-width: 126px;
+}
+
+// 左树右表容器(账号管理/设备分配页共用)
+.container.uvp-split-list-page {
+  .left-box {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+
+    .tree-box {
+      flex: 1;
+      overflow: auto;
+    }
+  }
+
+  .right-box {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// 工具栏布局(workspace-toolbar-row / toolbar-actions)
+.workspace-toolbar-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  margin-left: auto;
+}
+
+// ========== Transfer(穿梭框,设备分配页首次引入) ==========
+// 注意:Arco transfer 的真实 class 为 .arco-transfer-view-*(不是 transfer-list)
+.arco-transfer {
+  width: 100%;
+
+  .arco-transfer-view {
+    overflow: hidden;
+    background: var(--uvp-dialog-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
+  }
+
+  .arco-transfer-view-header {
+    height: 42px;
+    padding-inline: 12px;
+    background: var(--uvp-dialog-bg);
+    border-bottom: 1px solid var(--uvp-panel-border);
+  }
+
+  .arco-transfer-view-header-title,
+  .arco-transfer-view-header-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--uvp-text-primary);
+  }
+
+  .arco-transfer-view-search {
+    padding: 9px 10px 2px;
+    background: transparent;
+
+    .arco-input-inner-wrapper {
+      background: var(--uvp-dialog-control-bg);
+      border: 1px solid var(--uvp-panel-border);
+      border-radius: 8px;
+    }
+  }
+
+  .arco-transfer-view-body {
+    background: var(--uvp-dialog-bg);
+  }
+
+  .arco-transfer-view-list {
+    padding: 6px;
+  }
+
+  .arco-transfer-list-item {
+    min-height: 34px;
+    padding-inline: 8px;
+    font-size: 13px;
+    color: var(--uvp-text-primary);
+    border-radius: 7px;
+
+    &:hover {
+      background: var(--uvp-brand-soft);
+    }
+  }
+
+  .arco-transfer-list-item-checkbox .arco-checkbox {
+    align-items: center;
+  }
+
+  .arco-transfer-operations {
+    gap: 8px;
+    padding-inline: 8px;
+
+    .arco-btn {
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      padding: 0;
+      color: var(--uvp-text-secondary);
+      background: var(--uvp-dialog-bg);
+      border: 1px solid var(--uvp-search-secondary-btn-border);
+      border-radius: 8px;
+
+      &:hover {
+        color: var(--uvp-brand);
+        background: var(--uvp-brand-soft);
+        border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+      }
+    }
+  }
+
+  .arco-transfer-view-empty {
+    display: grid;
+    place-items: center;
+    min-height: 142px;
+    padding: 20px 12px;
+
+    .arco-empty-description {
+      font-size: 12px;
+      color: var(--uvp-text-tertiary);
+    }
+  }
+}

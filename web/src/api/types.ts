@@ -4,6 +4,3 @@ export interface BaseResult<T = any> {
   data: T;
   message: string;
 }
-
-
-

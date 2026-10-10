@@ -2,6 +2,11 @@ module.exports = {
   ignores: [commit => commit.includes("init")],
   extends: ["@commitlint/config-conventional"],
   rules: {
+    // subject-case 来自 @commitlint/config-conventional：它会把「以大写英文开头」的
+    // subject 判成 start-case / pascal-case 而拒绝（如 "ZLM 节点启停…"、"MobilePosition
+    // NOTIFY 双形态归一化…"）。本项目 subject 常以专有名词 / 任务编号开头，
+    // 实测近 200 条提交中 86 条被它拦下，对中英混排纯属误伤 —— 故关闭该规则。
+    "subject-case": [0],
     "body-leading-blank": [2, "always"],
     "footer-leading-blank": [1, "always"],
     "header-max-length": [2, "always", 108],

@@ -1,212 +1,257 @@
 <template>
-<div class="snow-page">
-    <div class="snow-inner" >
-        <a-card title="示例插件列表" :loading="loading" :bordered="false">
-            <a-space wrap>
-                <a-input-search v-model="searchForm.name" placeholder="请输入名称搜索" style="width: 240px;"
-                    @search="handleSearch" allow-clear />
+  <div class="snow-page">
+    <div class="snow-inner uvp-page-shell-flat">
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchForm.name"
+            placeholder="请输入名称"
+            style="width: 220px"
+            allow-clear
+            @press-enter="handleSearch"
+          />
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+        <template #extra>
+          <a-button type="primary" @click="handleCreate" v-hasPerm="['plugins:example:add']">
+            <template #icon><icon-plus /></template>
+            <span>新增</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
-                <a-button type="primary" @click="handleSearch">查询</a-button>
-                <a-button @click="handleReset">重置</a-button>
-                <a-button type="primary" @click="handleCreate" v-hasPerm="['plugins:example:add']">
-                    <template #icon>
-                        <icon-plus />
-                    </template>
-                    <span>新增数据</span>
-                </a-button>
-            </a-space>
-          
-            <a-table :data="dataList" :loading="loading" :pagination="paginationConfig"
-                :bordered="{ wrapper: true, cell: true }" @page-change="handlePageChange"
-                @page-size-change="handlePageSizeChange">
-                <template #columns>
-                    <a-table-column title="ID" data-index="id" :width="70" align="center" />
-                    <a-table-column title="名称" data-index="name"  :width="150"  ellipsis tooltip/>
-                    <a-table-column title="描述" data-index="description"  :width="200"  ellipsis tooltip  />
-                    <a-table-column title="操作" :width="200">
-                        <template #cell="{ record }">
-                            <a-space>
-                                <a-button size="small" @click="handleEdit(record)" v-hasPerm="['plugins:example:edit']">
-                                    编辑
-                                </a-button>
-                                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                                    <a-button size="small" status="danger" v-hasPerm="['plugins:example:delete']">
-                                        删除
-                                    </a-button>
-                                </a-popconfirm>
-                            </a-space>
-                        </template>
-                    </a-table-column>
-                </template>
-            </a-table>
-
-        </a-card>
-
-        <!-- 编辑/创建弹窗 -->
-        <a-modal v-model:visible="modalVisible" :title="editingData.id ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
-            @cancel="handleCancel">
-            <a-form :model="editingData" :rules="rules" ref="formRef">
-                <a-form-item field="name" label="名称">
-                    <a-input v-model="editingData.name" placeholder="请输入名称" />
-                </a-form-item>
-                <a-form-item field="description" label="描述">
-                    <a-textarea v-model="editingData.description" placeholder="请输入描述" />
-                </a-form-item>
-            </a-form>
-        </a-modal>
+      <a-table
+        class="uvp-data-table"
+        row-key="id"
+        :data="dataList"
+        :loading="loading"
+        :bordered="false"
+        :pagination="paginationConfig"
+        :scroll="tableScroll"
+        @page-change="handlePageChange"
+        @page-size-change="handlePageSizeChange"
+      >
+        <template #columns>
+          <a-table-column title="名称" data-index="name" :width="180" ellipsis tooltip />
+          <a-table-column title="描述" data-index="description" :width="260" ellipsis tooltip />
+          <a-table-column title="操作" :width="112" align="center" :fixed="isMobile ? '' : 'right'">
+            <template #cell="{ record }">
+              <div class="uvp-table-actions">
+                <a-link
+                  class="uvp-table-action uvp-table-action--edit"
+                  @click="handleEdit(record)"
+                  v-hasPerm="['plugins:example:edit']"
+                >
+                  <template #icon><icon-edit /></template>
+                  <span>编辑</span>
+                </a-link>
+                <a-popconfirm type="warning" content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
+                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['plugins:example:delete']">
+                    <template #icon><icon-delete /></template>
+                    <span>删除</span>
+                  </a-link>
+                </a-popconfirm>
+              </div>
+            </template>
+          </a-table-column>
+        </template>
+      </a-table>
     </div>
-</div>
+
+    <a-modal
+      modal-class="uvp-system-dialog"
+      v-model:visible="modalVisible"
+      :width="layoutMode.width"
+      @close="afterClose"
+      @cancel="afterClose"
+      :on-before-ok="handleSave"
+    >
+      <template #title>{{ isEditMode ? "编辑数据" : "新增数据" }}</template>
+      <div>
+        <a-form ref="formRef" :layout="layoutMode.layout" auto-label-width :model="editingData" :rules="rules">
+          <a-form-item field="name" label="名称" validate-trigger="blur">
+            <a-input v-model="editingData.name" placeholder="请输入名称" allow-clear />
+          </a-form-item>
+          <a-form-item field="description" label="描述" validate-trigger="blur">
+            <a-textarea v-model="editingData.description" placeholder="请输入描述" allow-clear />
+          </a-form-item>
+        </a-form>
+      </div>
+    </a-modal>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
-import { useExamplePluginHook } from '../hooks/example';
-import type { ExampleData } from '../api/example';
+import { Message } from "@arco-design/web-vue";
+import { computed, onMounted, reactive, ref } from "vue";
+import { useDevicesSize } from "@/hooks/useDevicesSize";
+import type { ExampleData } from "../api/example";
+import { useExamplePluginHook } from "../hooks/example";
+
+const { isMobile } = useDevicesSize();
 const {
-    dataList,
-    loading,
-    total,
-    currentPage,
-    pageSize,
-    fetchDataList,
-    createData,
-    updateData,
-    deleteData,
-    getDetail,
-    resetSearchParams
+  dataList,
+  loading,
+  total,
+  currentPage,
+  pageSize,
+  fetchDataList,
+  createData,
+  updateData,
+  deleteData,
+  getDetail,
+  resetSearchParams
 } = useExamplePluginHook();
 
+const layoutMode = computed(() => {
+  const info = {
+    mobile: {
+      width: "95%",
+      layout: "vertical"
+    },
+    desktop: {
+      width: "40%",
+      layout: "horizontal"
+    }
+  };
+  return isMobile.value ? info.mobile : info.desktop;
+});
 
 const modalVisible = ref(false);
+const isEditMode = ref(false);
 const formRef = ref();
 
-// 搜索表单
 const searchForm = reactive({
-    name: '',
+  name: ""
 });
 
 const editingData = reactive({
-    id: 0,
-    name: '',
-    description: '',
+  id: 0,
+  name: "",
+  description: ""
 });
 
 const rules = {
-    name: [{ required: true, message: '请输入名称' }],
-    description: [{ required: true, message: '请输入描述' }],
+  name: [{ required: true, message: "请输入名称" }],
+  description: [{ required: true, message: "请输入描述" }]
 };
 
-// 分页配置
 const paginationConfig = computed(() => ({
-    total: total.value,
-    current: currentPage.value,
-    pageSize: pageSize.value,
-    showTotal: true,
-    showJumper: true,
-    showPageSize: true,
-    pageSizeOptions: [10, 20, 30, 50],
+  total: total.value,
+  current: currentPage.value,
+  pageSize: pageSize.value,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 30, 50]
 }));
 
-// 获取数据列表
+const tableScroll = computed(() => ({
+  x: "100%",
+  minWidth: 760,
+  ...(dataList.value.length > 0 ? { y: "100%" } : {})
+}));
+
+const resetEditingData = () => {
+  Object.assign(editingData, {
+    id: 0,
+    name: "",
+    description: ""
+  });
+};
+
 const loadData = async (pageNum: number = currentPage.value, pageSizeVal: number = pageSize.value) => {
-    await fetchDataList({
-        pageNum,
-        pageSize: pageSizeVal,
-        name: searchForm.name || undefined
-    });
+  await fetchDataList({
+    pageNum,
+    pageSize: pageSizeVal,
+    name: searchForm.name || undefined
+  });
 };
 
-// 处理分页变化
 const handlePageChange = (page: number) => {
-    loadData(page, pageSize.value);
+  loadData(page, pageSize.value);
 };
 
-// 处理页面大小变化
 const handlePageSizeChange = (size: number) => {
-    loadData(1, size); // 页码重置为1
+  loadData(1, size);
 };
 
-// 搜索处理
 const handleSearch = () => {
-    loadData(1); // 搜索时重置到第一页
+  loadData(1);
 };
 
-// 重置搜索
 const handleReset = () => {
-    searchForm.name = '';
-    resetSearchParams();
-    loadData(1);
+  searchForm.name = "";
+  resetSearchParams();
+  loadData(1);
 };
 
-// 新增数据
 const handleCreate = () => {
-    // 重置表单数据
-    Object.assign(editingData, {
-        id: 0,
-        name: '',
-        description: '',
-    });
-    modalVisible.value = true;
+  resetEditingData();
+  isEditMode.value = false;
+  modalVisible.value = true;
 };
 
-// 编辑数据
 const handleEdit = async (record: ExampleData) => {
-    // 获取详情
-    const detail = await getDetail(record.id);
-    // 赋值给编辑数据
-    Object.assign(editingData, detail.data);
-    modalVisible.value = true;
+  const detail = await getDetail(record.id);
+  Object.assign(editingData, detail.data);
+  isEditMode.value = true;
+  modalVisible.value = true;
 };
 
-// 删除数据
 const handleDelete = async (id: number) => {
-    try {
-        await deleteData(id);
-        // 重新加载当前页数据
-        await loadData();
-        // 显示删除成功消息
-        // 这里可以使用项目的消息提示机制
-    } catch (error) {
-        // 显示删除失败消息
-        console.error('删除失败:', error);
-    }
+  try {
+    await deleteData(id);
+    Message.success("删除成功");
+    await loadData();
+  } catch (error) {
+    console.error("删除失败:", error);
+    Message.error("删除失败");
+  }
 };
 
-// 保存数据
 const handleSave = async () => {
-    const isValid = await formRef.value?.validate();
-    if (isValid) return false;
-    console.log("editingData", editingData);
-    try {
-        if (editingData.id) {
-            // 更新数据
-            await updateData(editingData);
-        } else {
-            // 创建数据
-            await createData(editingData);
-        }
-        // 重新加载数据
-        await loadData();
-    } catch (error) {
-        console.error('保存失败:', error);
-        return false;
+  const isValid = await formRef.value?.validate();
+  if (isValid) return false;
+
+  try {
+    if (isEditMode.value) {
+      await updateData(editingData);
+      Message.success("修改成功");
+    } else {
+      await createData({
+        name: editingData.name,
+        description: editingData.description
+      });
+      Message.success("新增成功");
     }
-    return true;
+    await loadData();
+  } catch (error) {
+    console.error("保存失败:", error);
+    Message.error("保存失败");
+    return false;
+  }
+
+  return true;
 };
 
-// 取消操作
-const handleCancel = () => {
-    modalVisible.value = false;
+const afterClose = () => {
+  formRef.value?.resetFields();
+  resetEditingData();
+  isEditMode.value = false;
+  modalVisible.value = false;
 };
-
 
 onMounted(async () => {
-    // 初始化加载数据
-    await loadData();
-})
-
+  await loadData();
+});
 </script>
-
-<style scoped lang="scss">
-
-</style>

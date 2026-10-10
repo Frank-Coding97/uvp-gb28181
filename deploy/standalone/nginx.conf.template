@@ -1,0 +1,238 @@
+# ==============================================================
+# UVP 绿色安装包 —— nginx 配置文件
+#
+# 职责：① 托管前端（Vue 构建产物）  ② HTTPS 终止  ③ 反向代理到后端
+#
+# ⛔ 为什么前端要放 nginx 而不是让后端托管：
+#   后端自带静态服务时，前端页面和 API 只能共用一个端口，于是「要么全 HTTP、
+#   要么全 HTTPS」，扫码接入拿不到注册信息（App 撞自签名证书）。
+#   拆开后：nginx 独占 HTTPS，后端留在纯 HTTP 的内网端口上，
+#   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
+#
+# ⛔ 端口规划（与 uvp-gb28181-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
+#   51000 nginx HTTPS        ← 浏览器访问（端口由 uvp-gb28181-ctl.sh 填入 @HTTPS_PORT@）
+#   51001 nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
+#   51002 后端 HTTP          ← API + 二维码地址，**不设 TLS**（@BACKEND_PORT@）
+#   51003 Redis（仅回环）    51004-51013 ZLM 各协议
+#   51014-51063 ZLM RTP 动态段    51064 SIP（UDP+TCP，引导页预填）
+#
+#   ⇒ 整段 51000-51064 连续无空洞，防火墙一条规则即可覆盖（见 PORTS.md）。
+#
+# ⛔ 本文件里的路径由 uvp-gb28181-ctl.sh 启动时按实际安装目录改写（占位符 @ROOT@），
+#   不要手工改包内的模板。
+#==============================================================
+
+worker_processes  auto;
+# ⛔ pid 写在包内而不是 /run：绿色包不写系统目录，多实例也不会互相覆盖。
+pid  @ROOT@/run/nginx.pid;
+error_log @ROOT@/logs/nginx-error.log warn;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include @ROOT@/vendor/nginx/conf/mime.types;
+    default_type  application/octet-stream;
+
+    # 临时目录放包内（/tmp 可能被 noexec 挂载）
+    client_body_temp_path @ROOT@/run/nginx-client-body;
+    proxy_temp_path      @ROOT@/run/nginx-proxy;
+    fastcgi_temp_path    @ROOT@/run/nginx-fastcgi;
+    uwsgi_temp_path      @ROOT@/run/nginx-uwsgi;
+    scgi_temp_path       @ROOT@/run/nginx-scgi;
+
+    # ---------------- 日志 ----------------
+    # ⛔ 单独一份 access log：排障时要把「页面请求」和「接口请求」分开看，
+    #   混在应用日志里会因为量太大而找不到那一条。
+    log_format uvp '$remote_addr - [$time_local] "$request" $status $body_bytes_sent '
+                   '"$http_referer" "$http_user_agent" rt=$request_time';
+    access_log @ROOT@/logs/nginx-access.log uvp;
+
+    sendfile      on;
+    tcp_nopush    on;
+    keepalive_timeout  65;
+    server_tokens off;      # 不暴露 nginx 版本
+    client_max_body_size 1024m;   # ⛔ 录像/抓拍上传：默认 1m 会直接 413
+
+    gzip              on;
+    gzip_min_length   1k;
+    gzip_comp_level   5;
+    gzip_vary         on;
+    gzip_types        text/plain text/css application/json application/javascript
+                      application/xml text/xml image/svg+xml font/woff font/woff2;
+    # ⛔ 不 gzip 二进制（vorbis/flv/mp4 已在压缩，再压是纯浪费 CPU）
+    gzip_proxied      any;
+
+    # ---------------- 上游：后端 ----------------
+    upstream uvp_backend {
+        server 127.0.0.1:@BACKEND_PORT@;
+        keepalive 32;
+    }
+
+    # ============================================================
+    # HTTPS（自签名）
+    # ============================================================
+    server {
+        listen      @HTTPS_PORT@ ssl;
+        listen      [::]:@HTTPS_PORT@ ssl;
+        http2       on;
+        server_name _;
+
+        # ⛔⛔ 自签名证书：CN 只能填一个主机名，浏览器对「IP 访问 + CN 不匹配」
+        #   会直接拦下（ERR_CERT_COMMON_NAME_INVALID），扫码更是第一步就失败。
+        #   ⇒ 交付说明必须告诉客户：把证书的 CN 填成他们实际访问的域名，
+        #     或让手机/电脑信任这个自签根证书。**换成真证书是根本解法。**
+        ssl_certificate      @ROOT@/vendor/nginx/conf/uvp.crt;
+        ssl_certificate_key  @ROOT@/vendor/nginx/conf/uvp.key;
+        ssl_protocols        TLSv1.2 TLSv1.3;
+        ssl_ciphers          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+        ssl_prefer_server_ciphers off;
+        ssl_session_cache    shared:UVP:4m;
+        ssl_session_timeout  1h;
+
+        root @ROOT@/resource/public;
+        index index.html;
+
+        # ---------------- 前端 ----------------
+        # ⛔ 带 hash 的静态资源（/static/js/xxx.<hash>.js）可以长期缓存：
+        #   文件名变了浏览器就会重新拉，这是构建工具的契约。
+        location /static/ {
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            try_files $uri =404;
+        }
+
+        # ---------------- 用户上传的资源 ----------------
+        # ⛔⛔⛔ 必须有这一条，否则**所有用户上传的文件都取不到**。
+        #   为什么：`root` 指向 resource/public，所以磁盘上的 uploads/xxx.png
+        #   对应的 URL 是 `/uploads/xxx.png`（**没有** /public 前缀）；
+        #   而后端 GetFileUrl 生成的却是
+        #     `httpserver.serverrootpath` + `/uploads/...` = `/public/uploads/...`
+        #   （config.example.yml 里 serverrootpath 默认就是 "/public"）。
+        #   ⇒ 两边差一个 /public 前缀，nginx 匹配不到 ⇒ 落到 SPA 回落
+        #     把 index.html 返回给图片请求 ⇒ **HTTP 200 但内容是 HTML**，
+        #     浏览器静默显示不出图，**全程零报错**（实测踩过：admin 头像出不来）。
+        #
+        # ⚠️ 这里用 alias 而不是改 root：`/public/uploads/` 映射到
+        #   `resource/public/uploads/`（去掉 /public 前缀）。
+        location /public/uploads/ {
+            alias @ROOT@/resource/public/uploads/;
+            # ⚠️ 上传目录是**用户可写**的：关掉脚本执行、限制方法。
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            # 上传的文件名带日期与 uuid，不做immutable（避免同名覆盖后拿到旧缓存）
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        # 其余 /public/ 下的静态文件（图纸、文档等）
+        location /public/ {
+            alias @ROOT@/resource/public/;
+            autoindex off;
+        }
+
+        # ⛔ SPA 前端路由：任何未匹配的路径都交回 index.html，
+        #   否则刷新 /devices/123 会 404（前端是 history 路由）。
+        #   ⚠️ 但 /api/ 与 /gb28181/ 必须列在前面 —— 否则它们会被这条规则
+        #   吞掉、返回 HTML，前端拿到 HTML 当 JSON 解析 ⇒ 报一个和真因无关的错。
+        location /api/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+            # 上传/下载超时给足：录像片段可能上百 MB
+            proxy_connect_timeout 15s;
+            proxy_send_timeout    300s;
+            proxy_read_timeout    300s;
+            # ⛔ 必须关缓冲：大文件（录像下载）时后端边发 nginx 边缓冲，
+            #   内存会涨且延迟高一截
+            proxy_buffering       off;
+        }
+
+        # GB28181 相关：扫码落地页 + 免鉴权兑换接口。
+        # ⛔ 兑换接口走的是**纯 HTTP 的后端**，这里只是顺带转过去，
+        #   真正的扫码走「http://本机:后端端口」（明文，不经 TLS，见交付说明）。
+        location /gb28181/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+        }
+
+        # 设备抓拍/录像等落在 resource/public 下的其它前缀，同样交给后端处理
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # 兜底：不在配置里出现的接口一律 404，且**不要**回落到 index.html
+        location ~ /\. {
+            deny all;
+        }
+    }
+
+    # ============================================================
+    # HTTP：跳 HTTPS
+    #
+    # ⛔ 保留一条例外：/api/ 与 /gb28181/ 走明文转发。
+    #   理由：二维码里填的就是「http://本机:后端端口」，而部分客户端
+    #   （含模拟器 App）只信任这个来源；让它们也能直接打到这里可以少一层依赖。
+    #   若客户不需要这条例外，把下面 location /api/ 与 /gb28181/ 整块删掉即可。
+    # ============================================================
+    server {
+        listen      @PLAIN_HTTP_PORT@;
+        listen      [::]:@PLAIN_HTTP_PORT@;
+        server_name _;
+
+        location /api/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header Connection        "";
+            proxy_buffering off;
+        }
+
+        location /gb28181/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header Connection        "";
+        }
+
+        # 用户上传的资源：明文入口也必须放行。
+        # ⛔ 不能只留 HTTPS 那一条 —— 明文段的 `location /` 是 301 跳 HTTPS，
+        #   而**图片/附件被301 跟随后是能通的**，只是多一跳；
+        #   真正的问题是扫码/移动端若直接引明文地址（不跟随跳转）就拿不到图。
+        #   规则与 HTTPS 段保持一致（alias 去掉 /public 前缀）。
+        location /public/uploads/ {
+            alias @ROOT@/resource/public/uploads/;
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        location /public/ {
+            alias @ROOT@/resource/public/;
+            autoindex off;
+        }
+
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+}

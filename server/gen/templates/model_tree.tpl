@@ -6,7 +6,7 @@ import (
 	"time"
 {{- end}}
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 	"sort"
 
 	"gorm.io/gorm"

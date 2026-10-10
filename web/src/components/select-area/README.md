@@ -16,10 +16,10 @@
 
 本目录包含两个组件：
 
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| SelectArea | [`index.vue`](index.vue) | 单选模式组件，绑定值为逗号分隔的字符串 |
-| SelectAreaMultiple | [`multiple.vue`](multiple.vue) | 多选模式组件，绑定值为数组 |
+| 组件               | 文件                           | 说明                                   |
+| ------------------ | ------------------------------ | -------------------------------------- |
+| SelectArea         | [`index.vue`](index.vue)       | 单选模式组件，绑定值为逗号分隔的字符串 |
+| SelectAreaMultiple | [`multiple.vue`](multiple.vue) | 多选模式组件，绑定值为数组             |
 
 ## 单选组件 (SelectArea)
 
@@ -31,10 +31,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
-const areaCode = ref('');
+const areaCode = ref("");
 </script>
 ```
 
@@ -42,15 +42,15 @@ const areaCode = ref('');
 
 #### Props
 
-| 参数 | 说明 | 类型 | 默认值 |
-|------|------|------|--------|
+| 参数       | 说明                             | 类型                  | 默认值      |
+| ---------- | -------------------------------- | --------------------- | ----------- |
 | modelValue | 绑定值，逗号分隔的地区编码字符串 | `string \| undefined` | `undefined` |
-| level | 地区选择级数 | `number` | `3` |
+| level      | 地区选择级数                     | `number`              | `3`         |
 
 #### Events
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
+| 事件名            | 说明         | 参数              |
+| ----------------- | ------------ | ----------------- |
 | update:modelValue | 值变化时触发 | `(value: string)` |
 
 ## 多选组件 (SelectAreaMultiple)
@@ -63,8 +63,8 @@ const areaCode = ref('');
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectAreaMultiple from '@/components/select-area/multiple.vue';
+import { ref } from "vue";
+import SelectAreaMultiple from "@/components/select-area/multiple.vue";
 
 const areaCodes = ref<string[]>([]);
 </script>
@@ -74,15 +74,15 @@ const areaCodes = ref<string[]>([]);
 
 #### Props
 
-| 参数 | 说明 | 类型 | 默认值 |
-|------|------|------|--------|
+| 参数       | 说明                 | 类型                    | 默认值      |
+| ---------- | -------------------- | ----------------------- | ----------- |
 | modelValue | 绑定值，地区编码数组 | `string[] \| undefined` | `undefined` |
-| level | 地区选择级数 | `number` | `3` |
+| level      | 地区选择级数         | `number`                | `3`         |
 
 #### Events
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
+| 事件名            | 说明         | 参数                |
+| ----------------- | ------------ | ------------------- |
 | update:modelValue | 值变化时触发 | `(value: string[])` |
 
 ## 单选组件示例
@@ -99,10 +99,10 @@ const areaCodes = ref<string[]>([]);
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
-const areaCode = ref('');
+const areaCode = ref("");
 </script>
 ```
 
@@ -114,11 +114,11 @@ const areaCode = ref('');
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
 // 设置默认值：北京市市辖区
-const areaCode = ref('11,1101');
+const areaCode = ref("11,1101");
 </script>
 ```
 
@@ -126,22 +126,19 @@ const areaCode = ref('11,1101');
 
 ```vue
 <template>
-  <select-area 
-    v-model="areaCode" 
-    @change="handleAreaChange" 
-  />
+  <select-area v-model="areaCode" @change="handleAreaChange" />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
-import type { AreaItem } from '@/api/area';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
+import type { AreaItem } from "@/api/area";
 
-const areaCode = ref('');
+const areaCode = ref("");
 
 const handleAreaChange = (value: string, selectedOptions: AreaItem[]) => {
-  console.log('选中的地区编码:', value);
-  console.log('选中的地区信息:', selectedOptions);
+  console.log("选中的地区编码:", value);
+  console.log("选中的地区信息:", selectedOptions);
   // selectedOptions 示例:
   // [
   //   { value: '11', label: '北京市', level: '1', parent: '' },
@@ -184,11 +181,11 @@ const handleAreaChange = (value: string, selectedOptions: AreaItem[]) => {
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
 const areaSelector = ref();
-const areaCode = ref('');
+const areaCode = ref("");
 
 const refreshData = () => {
   // 清除缓存并重新加载
@@ -217,10 +214,10 @@ const refreshData = () => {
 
 ```typescript
 // 示例：选中了北京市市辖区和东城区
-['11,1101', '11,1101,110101']
-
-// 示例：选中了多个不同地区的完整路径
-['11,1101,110101', '31,3101,310101', '44,4401,440101']
+["11,1101", "11,1101,110101"][
+  // 示例：选中了多个不同地区的完整路径
+  ("11,1101,110101", "31,3101,310101", "44,4401,440101")
+];
 ```
 
 **注意**：多选组件的绑定值不需要任何转换，直接使用数组格式。支持四级联动选择（省/市/区/县/乡镇）。
@@ -229,10 +226,10 @@ const refreshData = () => {
 
 ```typescript
 interface AreaItem {
-  value: string;      // 地区编码
-  label: string;      // 地区名称
-  level: string;      // 级别（1:省/直辖市, 2:市, 3:区/县）
-  parent: string;     // 父级编码
+  value: string; // 地区编码
+  label: string; // 地区名称
+  level: string; // 级别（1:省/直辖市, 2:市, 3:区/县）
+  parent: string; // 父级编码
   children?: AreaItem[]; // 子级地区
 }
 ```
@@ -294,11 +291,11 @@ import.meta.env.VITE_APP_BASE_URL + "/public/area/area.json"
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
 // 设置默认值：北京市市辖区
-const areaCode = ref('11,1101');
+const areaCode = ref("11,1101");
 </script>
 ```
 
@@ -310,10 +307,10 @@ const areaCode = ref('11,1101');
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectArea from '@/components/select-area/index.vue';
+import { ref } from "vue";
+import SelectArea from "@/components/select-area/index.vue";
 
-const provinceCode = ref('');
+const provinceCode = ref("");
 </script>
 ```
 
@@ -331,8 +328,8 @@ const provinceCode = ref('');
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectAreaMultiple from '@/components/select-area/multiple.vue';
+import { ref } from "vue";
+import SelectAreaMultiple from "@/components/select-area/multiple.vue";
 
 const selectedAreas = ref<string[]>([]);
 </script>
@@ -342,18 +339,15 @@ const selectedAreas = ref<string[]>([]);
 
 ```vue
 <template>
-  <select-area-multiple
-    v-model="areaCodes"
-    placeholder="请选择多个地区"
-  />
+  <select-area-multiple v-model="areaCodes" placeholder="请选择多个地区" />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectAreaMultiple from '@/components/select-area/multiple.vue';
+import { ref } from "vue";
+import SelectAreaMultiple from "@/components/select-area/multiple.vue";
 
 // 设置默认值：北京市市辖区和东城区
-const areaCodes = ref<string[]>(['11,1101', '11,1101,110101']);
+const areaCodes = ref<string[]>(["11,1101", "11,1101,110101"]);
 </script>
 ```
 
@@ -361,16 +355,12 @@ const areaCodes = ref<string[]>(['11,1101', '11,1101,110101']);
 
 ```vue
 <template>
-  <select-area-multiple
-    v-model="cityCodes"
-    :level="2"
-    placeholder="请选择城市（最多到市级）"
-  />
+  <select-area-multiple v-model="cityCodes" :level="2" placeholder="请选择城市（最多到市级）" />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import SelectAreaMultiple from '@/components/select-area/multiple.vue';
+import { ref } from "vue";
+import SelectAreaMultiple from "@/components/select-area/multiple.vue";
 
 const cityCodes = ref<string[]>([]);
 </script>
@@ -389,21 +379,22 @@ const cityCodes = ref<string[]>([]);
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Message } from '@arco-design/web-vue';
-import SelectAreaMultiple from '@/components/select-area/multiple.vue';
+import { ref } from "vue";
+import { Message } from "@arco-design/web-vue";
+import SelectAreaMultiple from "@/components/select-area/multiple.vue";
 
 const form = ref({
   areas: [] as string[]
 });
 
 const handleSubmit = () => {
-  console.log('提交的地区数据:', form.value.areas);
+  console.log("提交的地区数据:", form.value.areas);
   // 输出示例: ['11,1101,110101', '31,3101,310101']
-  Message.success('提交成功');
+  Message.success("提交成功");
 };
 </script>
 ```
+
 ## 注意事项
 
 1. 组件需要服务器端提供 `/public/area/area.json` 接口

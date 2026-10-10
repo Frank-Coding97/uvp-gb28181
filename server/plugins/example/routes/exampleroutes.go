@@ -1,10 +1,11 @@
 package routes
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
-	"uvplatform.cn/uvp-gb28181/plugins/example/controllers"
+	"go.uber.org/zap"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.com/uvp-gb28181/plugins/example/controllers"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +31,6 @@ func init() {
 			example.GET("/:id", exampleControllers.GetByID)
 		}
 
-		app.ZapLog.Info("示例插件路由注册成功")
+		app.ZapLog.Named("plugin.example").Info("示例插件路由注册成功", zap.String("event", "plugin.example.routes_registered"))
 	})
 }
