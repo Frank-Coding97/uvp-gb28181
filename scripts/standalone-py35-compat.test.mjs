@@ -41,16 +41,10 @@ function scriptFiles() {
 
 // 交给 CPython 做「抠 heredoc + AST 判版本」的探针。
 // ⛔ 探针自身必须只用 3.5 就有的语法（它自己也得能在老解释器上跑）。
-const PROBE = `
+const PROBE_COMMON = `
 import ast, re, sys
 
 HEREDOC = re.compile(r"<<-?\\s*'?([A-Za-z_][A-Za-z0-9_]*)'?")
-NEW_NODES = {
-    "JoinedStr": "f-string (3.6+)",
-    "AnnAssign": "变量注解 (3.6+)",
-    "NamedExpr": "海象运算符 := (3.8+)",
-    "Match": "match 语句 (3.10+)",
-}
 
 def heredocs(text):
     lines = text.split("\\n")
@@ -78,6 +72,15 @@ def is_python(body):
         if s.startswith("import ") or s.startswith("from "):
             return True
     return False
+`;
+
+const PROBE_SYNTAX = PROBE_COMMON + `
+NEW_NODES = {
+    "JoinedStr": "f-string (3.6+)",
+    "AnnAssign": "变量注解 (3.6+)",
+    "NamedExpr": "海象运算符 := (3.8+)",
+    "Match": "match 语句 (3.10+)",
+}
 
 bad = 0
 for path in sys.argv[1:]:
@@ -104,16 +107,78 @@ for path in sys.argv[1:]:
 sys.exit(1 if bad else 0)
 `;
 
+// 静态判据：内嵌 Python 不得 import pathlib。
+// 理由见下面的 test 注释（3.5 的 C 层函数不认 Path 对象 —— 这是**运行期**差异，
+// 语法扫描器抓不到，只能靠"别用 pathlib"这条规则兜住整类问题）。
+const PROBE_PATHLIB = PROBE_COMMON + `
+bad = 0
+for path in sys.argv[1:]:
+    text = open(path, encoding="utf-8").read()
+    for start, tag, body in heredocs(text):
+        if not is_python(body):
+            continue
+        tree = ast.parse(body, filename=path)
+        for node in ast.walk(tree):
+            mod = None
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] == "pathlib":
+                        mod = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module or "").split(".")[0] == "pathlib":
+                    mod = node.module
+            if mod is not None:
+                bad += 1
+                line = body.split("\\n")[node.lineno - 1].strip()
+                print("%s:%d: pathlib（%s）  <<%s>>  %s"
+                      % (path, start + node.lineno - 1, mod, tag, line))
+sys.exit(1 if bad else 0)
+`;
+
 test('内嵌 Python 不含 Python 3.6+ 才支持的语法（f-string / 变量注解 / 海象 …）', () => {
   const files = scriptFiles();
   assert.ok(files.length > 0, '没找到任何 deploy/standalone/*.sh');
 
-  const result = spawnSync('python3', ['-', ...files], { input: PROBE, encoding: 'utf8' });
+  const result = spawnSync('python3', ['-', ...files], { input: PROBE_SYNTAX, encoding: 'utf8' });
   assert.equal(
     result.status, 0,
     '内嵌 Python 里出现了当前目标机（Ubuntu 16 / python3.5）不认识的语法。\n' +
     '这类语法会让**整段 heredoc 编译失败、一行都不执行**，报错行还指向那句语法，\n' +
     '现场完全看不出是解释器版本问题。请改用 `%` 或字符串拼接。\n' +
+    '命中：\n' + result.stdout + result.stderr,
+  );
+});
+
+// ============================================================================
+// 契约（第二层，运行期）：内嵌 Python 不得用 pathlib。
+//
+// 真实事故（2026-10-10，同一台 Ubuntu 16，客户第二次报障）：语法那关过了之后，
+// 卡在「正在初始化数据库」——
+//     File "<stdin>", line 189, in <module>
+//     TypeError: argument 1 must be str, not PosixPath
+//   该行是 `db = sqlite3.connect(db_path)`，而上游 `db_path = Path(sys.argv[2])`。
+//
+// 根因：**path-like 支持（PEP 519）是 Python 3.6 才进标准库的**。3.5 的
+//   `sqlite3.connect` 走 `PyArg_ParseTupleAndKeywords(..., "s|diOiOip")`，格式串 "s"
+//   只认 str ⇒ 直接把 PosixPath 拒了。同一类还适用 `os.remove` / 内置 `open` /
+//   `os.stat` … 一切用 C 层参数解析的入口。
+//   ⛔ 这属于"语法完全合法、在我们的新解释器上也永远正常"，只有目标机 3.5 才会炸 ——
+//      静态语法扫描（上面那条）看不见它，必须另立一条规则。
+//
+// 判据选"一律不许 import pathlib"而不是"逐个调用点加 str()"：
+//   path-like 传参的调用点是**无限**的（以后谁新加一句 open(p) 就又中招），
+//   而"内嵌脚本不用 pathlib"是**有限且可判定**的规则 —— 内嵌脚本都很小，
+//   用 os.path + 显式 str() 完全够用。
+// ============================================================================
+test('内嵌 Python 不得使用 pathlib（3.5 下 Path 传给 C 层函数直接 TypeError）', () => {
+  const files = scriptFiles();
+  const result = spawnSync('python3', ['-', ...files], { input: PROBE_PATHLIB, encoding: 'utf8' });
+  assert.equal(
+    result.status, 0,
+    '内嵌 Python 里 import 了 pathlib。目标机可能是 Ubuntu 16（python3.5），\n' +
+    '而 path-like（PEP 519）是 3.6 才有的：Path 对象交给 sqlite3.connect / os.remove /\n' +
+    'open() 这些 C 层入口会抛 `TypeError: argument 1 must be str, not PosixPath`。\n' +
+    '这类错**语法完全合法**，在构建机上永远复现不了。请改用 os.path + 显式 str()。\n' +
     '命中：\n' + result.stdout + result.stderr,
   );
 });
@@ -198,4 +263,182 @@ test('SYNC_PY：重复同步幂等（内容不再变化）', () => {
   const second = runHeredoc(grab('SYNC_PY'), args, first.out);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.out, first.out, '同步两次的最终内容必须一致（幂等）');
+});
+
+// ---------------------------------------------------------------------------
+// 行为式证据：把**真实的** DB_INIT_PY 放进"python3.5 语义模拟器"里跑一遍。
+//
+// 为什么光有静态规则不够：上面那条"不许 import pathlib"是**规则**，
+// 而这里要证明的是"改完之后，3.5 语义下建库真的能通"——尤其是
+// `isolation_level=None` 这个改动确实把 3.5 的隐式事务挡住了。
+// 把 `isolation_level=None` 拿掉（或把 db_path 换回 Path），这个测试必须立刻变红。
+// ---------------------------------------------------------------------------
+const SHIM = `
+# python3.5 语义模拟器（只在契约测试的临时目录里生效，靠 PYTHONPATH 注入，不进交付物）。
+#
+# 用新解释器模拟 3.5 的两处**运行期**行为 —— 它们都"语法完全合法、在构建机上永远正常"，
+# 只有目标机（Ubuntu 16 / python3.5）才会现形：
+#   ① C 层入口只认 str（path-like = PEP 519 是 3.6 才有的）。
+#   ② isolation_level 非 None 时，模块会在**非 DML 语句之前先自动 COMMIT 一次**。
+# 依据（CPython 3.5 源码）：
+#   Modules/_sqlite/connection.c：connect 的参数格式串是 "s|diOiOip"（"s" 只认 str）；
+#     且 isolation_level == Py_None 时把 begin_statement 置 NULL，否则置成 "BEGIN" 等。
+#   Modules/_sqlite/cursor.c：begin_statement 非 NULL 时，先看语句类型再动手 ——
+#     INSERT/UPDATE/DELETE/REPLACE 且不在事务里 → 隐式 BEGIN；
+#     其它语句（DDL / PRAGMA / COMMIT …，即 STATEMENT_OTHER）且**在事务里 → 隐式 COMMIT**。
+import builtins
+import os
+import sqlite3
+
+PathLike = getattr(os, "PathLike")
+
+_DML = ("insert", "update", "delete", "replace")
+
+
+def _reject(value):
+    if isinstance(value, PathLike) or type(value).__name__ in ("PosixPath", "WindowsPath"):
+        raise TypeError("argument 1 must be str, not %s" % type(value).__name__)
+
+
+def _kind(sql):
+    s = sql.strip()
+    while s.startswith("--") or s.startswith("/*"):
+        if s.startswith("--"):
+            s = s.split("\\n", 1)[1].strip() if "\\n" in s else ""
+        else:
+            s = s.split("*/", 1)[1].strip() if "*/" in s else ""
+    if not s:
+        return "other"
+    word = s.split(None, 1)[0].lower()
+    if word in _DML:
+        return "dml"
+    if word == "select":
+        return "select"
+    return "other"
+
+
+class _Conn35(object):
+    def __init__(self, real, managed):
+        self._real = real
+        self._managed = managed
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    @property
+    def in_transaction(self):
+        return self._real.in_transaction
+
+    def execute(self, sql, *args):
+        if self._managed:
+            kind = _kind(sql)
+            if kind == "dml" and not self._real.in_transaction:
+                self._real.execute("BEGIN")
+            elif kind == "other" and self._real.in_transaction:
+                self._real.execute("COMMIT")
+        return self._real.execute(sql, *args)
+
+    def executemany(self, sql, seq):
+        return self._real.executemany(sql, seq)
+
+    def close(self):
+        return self._real.close()
+
+
+_real_connect = sqlite3.connect
+
+
+def connect(database=":memory:", *args, **kwargs):
+    _reject(database)
+    level = kwargs.get("isolation_level", args[2] if len(args) >= 3 else "")
+    return _Conn35(_real_connect(database, *args, **kwargs), level is not None)
+
+
+sqlite3.connect = connect
+
+_real_remove = os.remove
+_real_open = builtins.open
+
+
+def remove(path, *args, **kwargs):
+    _reject(path)
+    return _real_remove(path, *args, **kwargs)
+
+
+def open(path, *args, **kwargs):
+    _reject(path)
+    return _real_open(path, *args, **kwargs)
+
+
+os.remove = os.unlink = remove
+builtins.open = open
+`;
+
+// 小基线：覆盖 heredoc 会走到的全部 phase（pragma / table / index / seed），
+// 并满足它自己的收尾自检（sys_users 里恰好 1 个 admin、外键开着、无悬挂引用）。
+const TINY_BASELINE = [
+  'PRAGMA foreign_keys = ON;',
+  'PRAGMA busy_timeout = 5000;',
+  'CREATE TABLE IF NOT EXISTS "sys_users" (',
+  '  "id" INTEGER PRIMARY KEY AUTOINCREMENT,',
+  '  "username" TEXT NOT NULL,',
+  '  "created_at" DATETIME NOT NULL',
+  ');',
+  'CREATE TABLE IF NOT EXISTS "gb_device" (',
+  '  "id" INTEGER PRIMARY KEY AUTOINCREMENT,',
+  '  "owner_id" INTEGER NOT NULL REFERENCES "sys_users"("id")',
+  ');',
+  'CREATE INDEX IF NOT EXISTS "idx_gb_device_owner" ON "gb_device" ("owner_id");',
+  "INSERT INTO \"sys_users\" (\"id\", \"username\", \"created_at\") VALUES (1, 'admin', '2026-10-10 00:00:00');",
+  "INSERT INTO \"gb_device\" (\"id\", \"owner_id\") VALUES (1, 1);",
+  '',
+].join('\n');
+
+// ⛔ 回读用**新连接**：`PRAGMA foreign_keys` 是**连接级**的，新连接读回来必然是 0，
+//   拿它断言会假红（第几次踩这个了）。外键是否开启由 heredoc 自己的收尾自检断言。
+// ⛔ 表数要排除 `sqlite_%`：AUTOINCREMENT 会带出一个 sqlite_sequence。
+const READBACK_PY = [
+  'import sqlite3, sys',
+  'db = sqlite3.connect(sys.argv[1])',
+  "tables = db.execute(\"select count(*) from sqlite_master where type='table'"
+  + " and name not like 'sqlite_%'\").fetchone()[0]",
+  "admins = db.execute(\"select count(*) from sys_users where username='admin'\").fetchone()[0]",
+  'print(tables, admins)',
+  '',
+].join('\n');
+
+test('建库脚本在「python3.5 语义」下能跑通（拒绝 path-like + 3.5 的隐式事务）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uvp-py35-shim-'));
+  const env = { ...process.env, PYTHONPATH: dir, PYTHONIOENCODING: 'utf-8' };
+  try {
+    writeFileSync(join(dir, 'sitecustomize.py'), SHIM, 'utf8');
+
+    // ① 先证明模拟器真的生效 —— 否则这个测试可能"因为什么都没模拟"而假绿。
+    const sense = spawnSync('python3',
+      ['-c', 'import sqlite3,pathlib;sqlite3.connect(pathlib.Path(":memory:"))'],
+      { encoding: 'utf8', env });
+    assert.notEqual(sense.status, 0, '模拟器没生效：3.5 下 connect(Path) 必须被拒');
+    assert.match(sense.stderr, /must be str, not PosixPath/,
+      '模拟器报的不是 3.5 那句错：' + sense.stderr);
+
+    // ② 真实 heredoc + 小基线，在模拟器下必须建库成功
+    const base = join(dir, 'baseline.sql');
+    const dbPath = join(dir, 'uvp.db');
+    writeFileSync(base, TINY_BASELINE, 'utf8');
+    const r = spawnSync('python3', ['-', base, dbPath],
+      { input: grab('DB_INIT_PY'), encoding: 'utf8', env });
+    assert.equal(r.status, 0,
+      '在 python3.5 语义下建库失败（这正是现场 Ubuntu 16 会卡住的那一步）：\n' +
+      r.stdout + r.stderr);
+    assert.match(r.stdout, /管理员账号已就位/, r.stdout);
+
+    // ③ 落盘的确实是个可用的库（表数、admin、外键都读回来）
+    const probe = join(dir, 'readback.py');
+    writeFileSync(probe, READBACK_PY, 'utf8');
+    const back = spawnSync('python3', [probe, dbPath], { encoding: 'utf8', env });
+    assert.equal(back.stdout.trim(), '2 1',
+      '回读结果不对（应为 "2 张业务表 / 1 个 admin"）：' + back.stdout + back.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

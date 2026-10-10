@@ -497,21 +497,25 @@ cp "$SERVER_DIR/version.json" "$PKG/version.json"
 #   浏览器静默显示不出图，**没有任何一行报错**（实测踩过）。
 log "校验头像资源与数据库一致"
 "$PY" - "$PKG/config/config.yml" "$PKG/resource/baseline/baseline.sql" "$PKG/resource/public" <<'AVATAR_CHECK_PY'
-import pathlib
+import os
 import re
 import sys
 
-cfg, baseline, public = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+# ⛔ 不用 pathlib：内嵌 Python 要在 python3.5 上也能跑（目标机 Ubuntu 16 自带 3.5），
+#   而 3.5 的 C 层函数（sqlite3.connect / os.remove / 内置 open…）**不认 Path 对象**
+#   —— 传进去就是 `TypeError: argument 1 must be str, not PosixPath`（path-like 是 3.6 才有）。
+#   契约锁在 scripts/standalone-py35-compat.test.mjs（"内嵌 Python 不得用 pathlib"）。
+cfg, baseline, public = sys.argv[1], sys.argv[2], sys.argv[3]
 
 # 从基线 SQL 里取 sys_users 的 avatar 值（不连库，出包阶段还没有库）
-sql = baseline.read_text(encoding="utf-8", errors="replace")
+sql = open(baseline, encoding="utf-8", errors="replace").read()
 m = re.search(r"INSERT INTO [\"`]?sys_users[\"`]?\s*\([^)]*\)\s*VALUES(.*?);", sql, re.S)
 urls = re.findall(r"'(/public/uploads/[^']+)'", m.group(1)) if m else []
 
 problems = []
 for url in urls:
     rel = url.lstrip("/").split("public/", 1)[-1]      # /public/uploads/x → uploads/x
-    if not (public / rel).is_file():
+    if not os.path.isfile(os.path.join(public, rel)):
         problems.append("库里有 " + url + "，但包内 resource/public/" + rel + " 不存在")
 if problems:
     sys.exit("❌ 头像资源与数据库不一致：\n  - " + "\n  - ".join(problems)

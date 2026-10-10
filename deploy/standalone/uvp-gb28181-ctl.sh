@@ -1525,7 +1525,6 @@ import re
 import sqlite3
 import sys
 import time
-from pathlib import Path
 
 # ⛔ 输出编码：主要靠调用方设的 PYTHONIOENCODING=utf-8（见 shell 里的调用行，
 #   那是**版本无关**的做法 —— py3.5 上根本没有 reconfigure）。这里再兜一层，
@@ -1541,7 +1540,15 @@ C_WARN = os.environ.get("UVP_C_WARN", "")
 C_RST = os.environ.get("UVP_C_RST", "")
 IND = "      "        # 与 shell 的 det()/ok() 同宽（"[uvp] " 恰好 6 个字符）
 
-baseline_path, db_path = Path(sys.argv[1]), Path(sys.argv[2])
+# ⛔⛔ 两个路径一律按 **str** 用着走，别改回 pathlib.Path：
+#   目标机可能是 Ubuntu 16（自带 python3.5），而 path-like（PEP 519）是 **3.6** 才
+#   进标准库的 —— 3.5 的 C 层入口（sqlite3.connect / open / os.remove / os.stat…）
+#   只认 str，拿到 Path 就抛 `TypeError: argument 1 must be str, not PosixPath`。
+#   现场真栽过（2026-10-10 客户第二次报障，就卡在建库这一步）：报错行是下面那句
+#   `db = sqlite3.connect(db_path)`，可它看着毫无问题 —— 是**这一行**埋的雷：
+#   `db_path` 一旦是 Path 对象，错误要到第一次把它交给 C 层函数时才爆出来。
+#   契约锁在 scripts/standalone-py35-compat.test.mjs（"内嵌 Python 不得用 pathlib"）。
+baseline_sql, db_path = sys.argv[1], sys.argv[2]
 
 
 def split_sql(text):
@@ -1599,7 +1606,8 @@ def split_sql(text):
     return [s.strip() for s in statements if s.strip()]
 
 
-sql = baseline_path.read_text(encoding="utf-8")
+with open(baseline_sql, encoding="utf-8") as _fh:
+    sql = _fh.read()
 stmts = split_sql(sql)
 if not stmts:
     raise SystemExit("建库失败：从 baseline.sql 里切不出任何语句（文件被截断？）")
@@ -1707,7 +1715,20 @@ def advance(idx, phase):
 #   —— 开发库验过、客户机上数据却能写成孤儿。
 # ⛔⛔ 而且必须在**事务外**执行：SQLite 里 `PRAGMA foreign_keys` 在事务内是
 #   **静默空操作**。基线文件开头那两句 PRAGMA 若不搬出事务，就等于没开。
-db = sqlite3.connect(db_path)
+#
+# ⛔⛔⛔ `isolation_level=None` 是**给 python3.5 兜底**的（目标机 Ubuntu 16 自带的正是 3.5）：
+#   3.5 的模块在 isolation_level 非 None（默认是空串）时，**执行非 DML 语句
+#   （DDL / PRAGMA / COMMIT…）之前会先自动 COMMIT 一次** —— Modules/_sqlite/cursor.c：
+#     if (self->connection->begin_statement) switch (statement_type) {
+#         case …INSERT/UPDATE/DELETE/REPLACE: if (!inTransaction) BEGIN;
+#         case STATEMENT_OTHER:               if (inTransaction)  COMMIT; }
+#   ⇒ 下面那句显式 `BEGIN` 会被它无声结束：整库不再原子（失败也回滚不了，
+#     "已回滚（未留下半成品库）"这句就变成假话），循环末尾那句 `COMMIT` 还会报
+#     `cannot commit - no transaction is active`。
+#   置 None 即关掉模块的全部隐式事务（begin_statement = NULL），BEGIN/COMMIT 全由本脚本
+#   掌控 —— 3.5 与 3.6+ 的事务行为这才一致（3.6 只是去掉了"DDL 前隐式提交"，
+#   置 None 在两边都是纯"手动事务"模式，对现有环境是**零行为变化**）。
+db = sqlite3.connect(db_path, isolation_level=None)
 db.execute("PRAGMA foreign_keys = ON")
 db.execute("PRAGMA busy_timeout = 5000")
 
@@ -1732,7 +1753,7 @@ except Exception as exc:
         pass
     db.close()
     try:
-        os.remove(db_path)      # 别留半成品：下次启动会看到"文件在、库是空的"
+        os.remove(db_path)        # 别留半成品：下次启动会看到"文件在、库是空的"
     except OSError:
         pass
     bad = stmts[processed][:200].replace("\n", " ") if processed < len(stmts) else ""
