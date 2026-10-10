@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# 组装 UVP 绿色安装包（Linux / x86_64 / 零预装）。
+# 组装 UVP 绿色安装包（Linux / x86_64 或 aarch64 / 零预装）。
+#
+# 出 ARM64（aarch64）包：UVP_PKG_ARCH=arm64 bash deploy/standalone/build-standalone.sh
+#   ⛔ 前置的三个原生二进制（ZLM / nginx / redis）也必须是 aarch64 的，
+#     脚本会在出包前逐个用 `file` 断言（见文件后半的静态校验段）。
+#     构建它们的容器见本目录下的 arm64/（CentOS 7 AltArch + glibc 2.17 构建镜像）。
 #
 # 产出一个 tar.gz：解压后执行 ./uvp-gb28181-ctl.sh start 即可用，
 # 不需要 Docker / nginx / MySQL / Redis（Redis 与 SQLite 都自带）。
@@ -110,8 +115,10 @@ VERSION="${UVP_VERSION:-$(cat "$SERVER_DIR/version.json" 2>/dev/null | grep -m1 
 #   ⭐ 包内解压出来的顶层目录与包名**同名**（见下面 PKG="$STAGE/${PKG_STEM}"）：
 #     tar 里的根目录就是 uvp-gb28181-linux-amd64-1.1.0/，解压后目录名 = 包名去扩展名。
 #     ⛔ 这两处必须共用 PKG_STEM，别再各写一份 —— 曾经就是「包名改了、解压目录没改」。
-PKG_OS="linux"
-PKG_ARCH="amd64"
+# ⛔ 系统/架构可被环境变量覆盖（出 ARM64 包：UVP_PKG_ARCH=arm64）。默认仍是 amd64，
+#   老调用方（含 220 上的出包流程）行为完全不变。
+PKG_OS="${UVP_PKG_OS:-linux}"
+PKG_ARCH="${UVP_PKG_ARCH:-amd64}"
 PKG_STEM="uvp-gb28181-${PKG_OS}-${PKG_ARCH}-${VERSION}"
 
 SKIP_FRONTEND=0
@@ -200,7 +207,7 @@ SKIP_BUILD="${UVP_SKIP_BUILD:-0}"
 if [ "$SKIP_BUILD" = "1" ]; then
   log "⚠️ 已跳过构建（UVP_SKIP_BUILD=1）—— **包里的产物可能比源码旧**，请自行确认"
 else
-  log "构建后端二进制（linux/amd64）"
+  log "构建后端二进制（${PKG_OS}/${PKG_ARCH}）"
   # CGO_ENABLED=0：SQLite 引擎是纯 Go（modernc.org/sqlite），不需要 libcgo。
   #   交叉编译必须关 CGO —— 它会去找本机（macOS）的 C 工具链，产物就废了。
   # -s -w：去符号表与调试信息，22MB vs 66MB，对交付体积差别很大。
@@ -295,11 +302,21 @@ else
   fi
 fi
 
-# 静态校验：二进制必须是 linux/amd64。用 file 判，别只看文件名。
-arch_of() { file "$1" | grep -oE 'x86-64|x86_64' | head -1; }
-[ -n "$(arch_of "$SERVER_DIR/bin/uvp-server")" ] || fail "后端二进制不是 x86_64"
-[ -n "$(arch_of "$DEPLOY_DIR/bin/redis-server")" ] || fail "redis-server 不是 x86_64"
-[ -n "$(arch_of "$ZLM_DIR/MediaServer")" ]|| fail "MediaServer 不是 x86_64"
+# 静态校验：二进制必须是**目标架构**（PKG_ARCH，默认 linux/amd64）。用 file 判，别只看文件名。
+# ⛔ 判据从 PKG_ARCH 反推，与上面那行交叉编译同源 —— 否则会做出
+#   「包名写着 arm64、里面装的还是 x86_64」这种包内外不一致、且全程零报错的包。
+case "$PKG_ARCH" in
+  amd64) ELF_ARCH_RE='x86-64|x86_64' ;;
+  arm64) ELF_ARCH_RE='aarch64|ARM aarch64' ;;
+  *) fail "不支持的架构 PKG_ARCH=$PKG_ARCH（目前只支持 amd64 / arm64）" ;;
+esac
+arch_of() { file "$1" | grep -oE "$ELF_ARCH_RE" | head -1; }
+[ -n "$(arch_of "$SERVER_DIR/bin/uvp-server")" ] || fail "后端二进制不是 $PKG_ARCH"
+[ -n "$(arch_of "$DEPLOY_DIR/bin/redis-server")" ] || fail "redis-server 不是 $PKG_ARCH"
+[ -n "$(arch_of "$ZLM_DIR/MediaServer")" ]|| fail "MediaServer 不是 $PKG_ARCH"
+# nginx 也必须一起查：它是最容易"忘了换"的那个（ZLM/redis 有明显的 lib 目录提示，
+# nginx 只是 bin/nginx 里一个文件，装到目标机才会以 `Exec format error` 暴露）。
+[ -n "$(arch_of "$NGINX_DIR/sbin/nginx")" ]|| fail "nginx 不是 $PKG_ARCH"
 
 # ------------------------------------------------------------------ 组装 ----
 

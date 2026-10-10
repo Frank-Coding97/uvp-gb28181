@@ -2,7 +2,7 @@
 # UVP 绿色安装包 —— 启停脚本（start / stop / status / restart）
 #
 # 设计目标：目标机**零预装**。不需要 Docker、nginx、MySQL、Redis，
-# 只要一个 x86_64 的 Linux + 可执行权限。
+# 只要一个 x86_64 或 aarch64（ARM64）的 Linux + 可执行权限。
 #
 # ⛔⛔ 三条铁律（都是踩过的坑）：
 #   1. **必须 cd 到安装目录再执行**。后端用相对路径找 config.yml、
@@ -814,10 +814,25 @@ stop_backend() {
 
 check_preconditions() {
   ensure_dirs
-  case "$(uname -m)" in
-    x86_64|amd64) : ;;
-    *) fail "本包只支持 x86_64，当前架构 $(uname -m)" ;;
+  # ⛔ 架构要**两头都查**，缺一头都会在现场留一个难懂的症状：
+  #   ① 宿主 uname -m 必须落在本包支持的两族里（x86_64 / aarch64）；
+  #   ② 包内后端二进制的 ELF e_machine 必须与宿主一致 —— 拿错架构的包时，
+  #      后端起不来只会打一行 `Exec format error`，没人会往"包拿错了"想。
+  #      e_machine 在 ELF 头 offset 18（2 字节，小端）：3e00=x86-64，b700=AArch64。
+  #      od 读不到时（缺 coreutils 等）**只跳过 ②**，不让它把 ① 的正确判断变成误报。
+  local host_arch want_elf pkg_elf
+  host_arch="$(uname -m)"
+  case "$host_arch" in
+    x86_64|amd64)  want_elf="3e00" ;;
+    aarch64|arm64) want_elf="b700" ;;
+    *) fail "本包只支持 x86_64 / aarch64，当前架构 ${host_arch}" ;;
   esac
+  if [ -r "$SERVER_BIN" ]; then
+    pkg_elf="$(od -An -tx1 -j18 -N2 "$SERVER_BIN" 2>/dev/null | tr -d ' \n')"
+    if [ -n "$pkg_elf" ] && [ "$pkg_elf" != "$want_elf" ]; then
+      fail "包内后端二进制的 ELF 架构（e_machine=0x${pkg_elf}）与本机（${host_arch}）不匹配 —— 是不是拿错了架构的包？"
+    fi
+  fi
   [ -f "$CONF" ] || fail "缺少 $CONF —— 解压是否完整？"
   check_python
 }
