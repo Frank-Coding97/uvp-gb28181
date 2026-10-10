@@ -43,6 +43,16 @@ const loadNonCriticalDependencies = () => {
       // 异步加载字体
       await import("@/assets/fonts/fonts.scss");
       // 异步加载主题
+      // ⚠️ 必须先补齐 vchart 内置 dark 主题基底，再初始化 arco 主题桥接：
+      //    vchart 1.13 起，内置 dark 主题仅由 core 模块的注册副作用提供，而生产构建
+      //    依据 package.json 的 sideEffects 白名单（只含 vchart-all/vchart-simple 等）
+      //    会将 core 内的该副作用裁剪掉；arco 主题桥接包注册 arcoDesignDark 时需要
+      //    dark 基底来合并 component 段（自身体积很小、不含 component），基底缺失
+      //    会合成出残缺主题 → 深色下所有 VChart 图表一渲染就抛错、画布全空白。
+      const { ThemeManager, darkTheme } = await import("@visactor/vchart");
+      if (!ThemeManager.themeExist("dark")) {
+        ThemeManager.registerTheme("dark", darkTheme);
+      }
       const { initVChartArcoTheme } = await import("@visactor/vchart-arco-theme");
       initVChartArcoTheme();
     } catch (error) {
