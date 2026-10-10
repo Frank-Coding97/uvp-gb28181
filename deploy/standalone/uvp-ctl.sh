@@ -131,6 +131,22 @@ ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-51011}"
 ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-51012}"
 # STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
 ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-51013}"
+# ⛔⛔ TURN 一律**关掉**（`[rtc] enableTurn=0`，老板 2026-10-10 定）。
+#   不是"用不到"，而是**根本没接上**：平台的 ICE 下发只有 STUN 一条路 ——
+#   `app/gb28181/talk/ice.go` 的 BuildICEServers() 只构造 `"stun:" + endpoint`
+#   （该文件注释原文："TURN 凭据在启用中继时再补，**当前不下发**"），
+#   全仓 `server/` + `web/src/` 搜 `turn:` **零命中** ⇒ 浏览器永远拿不到
+#   中继地址与凭据，ZLM 这个中继服务是**死的**，收益为 0。
+#   而它的端口池 `[rtc] port_range` 默认落在 Linux **临时端口区**（49152-65535，
+#   客户端出站 connect 会随机占用同一段）—— 留着就等于埋雷：哪天有人把
+#   enableTurn 打开，就会和出站连接抢端口，表现为偶发 bind 失败、重启就好。
+#   ⇒ 关掉后端口规划仍是 51000-51064，不必再为它划段（原「51065-51099」方案作废）。
+#   ⚠️ 将来真要开中继（浏览器在严格 NAT 后面 + 必须用 WebRTC 低延迟），**三步缺一不可**：
+#      ① 这里改成 "1"；② `[rtc] port_range` 挪出临时端口区（如 51065-51099）；
+#      ③ 防火墙上放开该段 UDP。只做 ① 等于又埋一次同样的雷。
+#   ⚠️ 不给它做 config.env 开关：config.env 里的键**不会自动成为环境变量**
+#      （见本文件 392 行附近的说明），写进去会让运维以为改了却没生效。
+ZLM_ENABLE_TURN="0"
 
 log()  { printf '[uvp] %s\n' "$*"; }
 fail() { printf '[uvp][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -779,12 +795,13 @@ sync_zlm_ports_ini() {
 
   "$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" \
                     "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" \
-"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" "$ZLM_ICE_PORT" <<'ZLM_INI_PY'
+"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" "$ZLM_ICE_PORT" \
+"$ZLM_ENABLE_TURN" <<'ZLM_INI_PY'
 import re
 import sys
 
 (path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range,
- signaling_port, signaling_ssl_port, srt_port, onvif_port, ice_port) = sys.argv[1:14]
+ signaling_port, signaling_ssl_port, srt_port, onvif_port, ice_port, enable_turn) = sys.argv[1:15]
 
 # 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
 # ⛔ **只列真正要对外的段**：onvif/shell 这类管理端口默认关掉（port=0），
@@ -803,7 +820,12 @@ targets = {
                "signalingSslPort": signaling_ssl_port,
                # STUN/TURN：容器默认 3478 同样在规划段外，且 3478/3479 常被别的服务占
                "icePort": ice_port,
-               "iceTcpPort": ice_port},
+               "iceTcpPort": ice_port,
+               # ⛔ TURN 默认关（=0）。它**不是端口**，所以不参与端口预检；
+               #   但必须写进 ini —— 原因见文件上方 ZLM_ENABLE_TURN 处的长注释
+               #   （平台只下发 STUN、从不下发 turn:，这个中继是死功能，
+               #    而它的 [rtc] port_range 占着 Linux 临时端口区）。
+               "enableTurn": enable_turn},
     # ⛔⛔ RTP 动态段的**真源是 [rtp_proxy] port_range**，不是 [rtp] ——
     #   ZLM 源码 src/Common/config.cpp: RtpProxy::kPortRange = "rtp_proxy.port_range"
     #   （默认 "30000-35000"）。
@@ -872,6 +894,22 @@ if _got != rtp_range:
     sys.exit("❌ [rtp_proxy] port_range 未生效（期望 %s，实际 %s）"
              " —— ZLM 收流端口会跑出规划段，端口预检与实际监听对不上" % (rtp_range, _got))
 
+# ⛔ TURN 开关同样回读，但**策略刻意与上面不同**：
+#   · 键在、却写不进去 ⇒ 是**我们自己的同步逻辑坏了**（段名/键名/行尾不匹配 ——
+#     历史上 signalingPort 就栽在这上面：报告"已改"、实际一个都没改到）⇒ 必须中止启动。
+#   · 键**根本不存在** ⇒ 是未知配置形态（旧版 ini / 客户手改过）。
+#     为一个"死开关"拦住整个平台上线不划算 ⇒ 大声告警 + 给出补救命令，继续启动。
+#     判据为什么不统一：port_range 影响**实际监听端口与收流功能**，写不进去会直接坏功能；
+#     enableTurn 只是关掉一个没人会用的中继，没写进去不改变任何可用性。
+_got_turn = _read_key("rtc", "enableTurn")
+if _got_turn is None:
+    print("   ⚠️ [rtc] enableTurn 键不存在，TURN 状态未知 —— 请在该段手工补一行 "
+          "`enableTurn=0`（TURN 是死功能：平台只下发 STUN，从不下发 turn:；"
+          "而它的 port_range 占着 49152-65535 临时端口区）", file=sys.stderr)
+elif _got_turn != enable_turn:
+    sys.exit("❌ [rtc] enableTurn 未生效（期望 %s，实际 %s）"
+             " —— 同步逻辑写不动这个键，ZLM 会继续开着中继并占用临时端口区"
+             % (enable_turn, _got_turn))
 ZLM_INI_PY
 }
 

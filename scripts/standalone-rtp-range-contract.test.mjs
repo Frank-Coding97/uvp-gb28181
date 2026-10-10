@@ -6,14 +6,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 const script = readFileSync(new URL('../deploy/standalone/uvp-ctl.sh', import.meta.url), 'utf8');
-const fixture = '[rtp_proxy]\r\nport=10000\r\nport_range=30000-35000\r\n[rtp]\r\naudioMtuSize=600\r\n[rtsp]\r\nport=554\r\n';
+const fixture = '[rtp_proxy]\r\nport=10000\r\nport_range=30000-35000\r\n[rtp]\r\naudioMtuSize=600\r\n[rtc]\r\nenableTurn=1\r\n[rtsp]\r\nport=554\r\n';
 
 // 位置参数与 uvp-ctl.sh 里那行 heredoc 调用**必须逐位对应**（顺序错了不会报错，
 // 只会把端口写到别的键上 —— 所以这里也当契约来锁）。
 const PORTS_ARGS = ['51004', '51007', '51005', '51006', '51008', '51014',
   '51014-51063', '51009', '51010', '51011', '51012', '51013'];
+// TURN 开关不是端口，但和 [rtc] 的端口一起同步（2026-10-10 起固定关，见 uvp-ctl.sh）。
+const CURRENT_ARGS = [...PORTS_ARGS, '0'];
 
-function sync(source, iniText, args = PORTS_ARGS) {
+function sync(source, iniText, args = CURRENT_ARGS) {
   const code = source.match(/<<'ZLM_INI_PY'\n([\s\S]*?)\nZLM_INI_PY/)[1];
   const directory = mkdtempSync(join(tmpdir(), 'uvp-rtp-range-'));
   try {
@@ -28,7 +30,8 @@ function sync(source, iniText, args = PORTS_ARGS) {
 
 test('deployed package regression: old synchronizer leaves the RTP proxy range unchanged', () => {
   const old = execFileSync('git', ['show', 'a86e5782:deploy/standalone/uvp-ctl.sh'], { encoding: 'utf8' });
-  const result = sync(old, fixture);
+  // 老版同步器只接 12 个端口参数，不认识 TURN 开关。
+  const result = sync(old, fixture, PORTS_ARGS);
   assert.equal(result.status, 0);
   assert.match(result.ini, /\[rtp_proxy\]\r\nport=51014\r\nport_range=30000-35000/);
 });
@@ -40,8 +43,20 @@ test('synchronizer writes the actual RTP proxy range and preserves unrelated RTP
   assert.match(result.ini, /\[rtp\]\r\naudioMtuSize=600\r\n/);
 });
 
+test('synchronizer turns TURN off so the dead relay stops holding the ephemeral port range', () => {
+  const result = sync(script, fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.ini, /\[rtc\]\r\nenableTurn=0\r\n/);
+});
+
 test('missing RTP proxy range blocks startup instead of silently keeping ZLM defaults', () => {
   const result = sync(script, fixture.replace('port_range=30000-35000\r\n', ''));
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /rtp_proxy/);
+});
+
+test('missing enableTurn warns but does not block startup (a dead switch must not stop the platform)', () => {
+  const result = sync(script, fixture.replace('[rtc]\r\nenableTurn=1\r\n', ''));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /enableTurn/);
 });
