@@ -7,6 +7,29 @@
 #
 # ==============================================================
 #
+# ## 包内目录布局（2026-10-10 整理）
+#
+#   uvp-gb28181-ctl.sh                 唯一入口：start / stop / restart / status
+#   uvp-gb28181-service-install.sh     可选：注册为 systemd 服务（开机自启）
+#   uvp-gb28181-service-uninstall.sh   可选：摘掉服务注册（不动数据）
+#   version.json
+#   bin/        只有**自家程序**：uvp-server
+#   vendor/     第三方运行时，各自自洽（自带 conf/lib/www，升级=整目录替换）
+#               vendor/redis/ · vendor/nginx/ · vendor/zlm/
+#   config/     config.yml + config.env（**端口就在 config/config.env 里改**）
+#   data/       uvp.db · redis/ · secrets/
+#   logs/       全部日志：backend/nginx/redis/zlm.log、
+#               app/（后端业务日志）、zlm/（ZLM 自带按天滚动的那份）
+#   resource/   只读静态资源：public/（前端产物 + uploads）+ baseline/（建库 SQL）
+#   run/        pid 文件与 nginx 临时目录
+#
+# ⛔ 升级 = **原地 tar 覆盖**，tar 不会删旧目录 ⇒ `uvp-gb28181-ctl.sh` 启动时会
+#   **自动把旧布局搬过来**（旧 bin/*、根目录 config.env、resource/logs、bin/zlm/log
+#   → 新位置），无需手工干预；搬完打一行日志，只做一次。旧版入口 `uvp-ctl.sh`
+#   也会在这一步被删掉（它的路径引用已随旧布局失效）。
+#
+# ==============================================================
+#
 # ## 规划段：51000-51064（65 个端口，全部用上、中间没有断点）
 #
 # ⛔ 为什么不用更低的段：
@@ -30,7 +53,7 @@
 #     51200 之外的 51300+），已全部压平
 #
 # ⛔⛔ 换段**不能替代端口预检**：任何一段都可能被客户现场占掉。
-#   所以 `uvp-ctl.sh start` 会**先逐端口检查占用**，发现被占就报出
+#   所以 `uvp-gb28181-ctl.sh start` 会**先逐端口检查占用**，发现被占就报出
 #   「哪个端口、被谁占了」并给出处理办法，**不启动任何服务**。
 #   （今天真实踩过：30000/30001 已被同机另一套服务占着，而 nginx 判活
 #    只看「端口能不能连」⇒ 客户的浏览器看到的是**别的系统**的页面，
@@ -60,9 +83,9 @@
 #              ⚠️ 这是**设备把流推到平台**的入口，防火墙必须开 UDP
 #              ⭐ 默认 50 个；不够时改 UVP_ZLM_RTP_RANGE 放大，
 #                但**别越过 51063**（51064 是 SIP 预留位，放不进去）。
-#              ⛔⛔ 真源是 `bin/zlm/config.ini` 的 **[rtp_proxy] port_range**
+#              ⛔⛔ 真源是 `vendor/zlm/config.ini` 的 **[rtp_proxy] port_range**
 #                （ZLM 源码 `src/Common/config.cpp`: `RtpProxy::kPortRange`），
-#                由 `uvp-ctl.sh` 的 `sync_zlm_ports_ini()` 写入 ——
+#                由 `uvp-gb28181-ctl.sh` 的 `sync_zlm_ports_ini()` 写入 ——
 #                写的是 **[rtp_proxy] 段**，不是 [rtp] 段（后者压根没有这个键，
 #                2026-10-10 之前一直写错 ⇒ 实际跑在 ZLM 默认的 30000-35000）。
 #                该函数末尾有**读回断言**，写不进去就中止启动，不会再静默放过。
@@ -76,7 +99,7 @@
 #              ⚠️ 设备侧必须配成**同一个端口**（国标设备默认 5060，不自动跟随）。
 #                扫码接入（二维码）会把平台当前的 SIP 地址:端口下发给设备，
 #                支持扫码的设备不用手工填。
-#              ❗ 它**不在 `uvp-ctl.sh` 的端口预检清单内**（脚本无从预知向导里最终填了什么）；
+#              ❗ 它**不在 `uvp-gb28181-ctl.sh` 的端口预检清单内**（脚本无从预知向导里最终填了什么）；
 #                若该端口被占，保存引导页时会直接报 bind 失败。
 #
 # ---------------- ② 平台内部（防火墙不用开）----------------
@@ -127,7 +150,7 @@
 # 改端口的办法
 # ==============================================================
 #
-# 改 `config.env` 里的对应键（改动后 `./uvp-ctl.sh start` 生效）：
+# 改 `config/config.env` 里的对应键（改动后 `./uvp-gb28181-ctl.sh start` 生效）：
 #
 #   UVP_HTTPS_PORT=51500            nginx HTTPS
 #   UVP_NGINX_HTTP_PORT=51501       nginx HTTP
@@ -139,9 +162,9 @@
 # ⛔ **SIP 例外：它不读 config.env**（见上「SIP 端口怎么定」）——
 #   改它在**引导页**里改（存 gb_sip_config 表）；改了要重启后端生效。
 #
-# ⛔ 只改 config.env 的值还不够：ZLM 的端口最终写进 `bin/zlm/config.ini`，
+# ⛔ 只改 config.env 的值还不够：ZLM 的端口最终写进 `vendor/zlm/config.ini`，
 #   由启动脚本按同名环境变量同步 —— 键名必须对应，否则改不动。
-# ⛔ 改完先跑 `./uvp-ctl.sh start`，它会**先做端口预检**再启动；
+# ⛔ 改完先跑 `./uvp-gb28181-ctl.sh start`，它会**先做端口预检**再启动；
 #   端口冲突时会明确报出「哪个端口被谁占了」，按提示处理即可。
 # ⛔ 若把整段平移（如 51500 起），记得**保持连续**，并同步更新本文件。
 
@@ -164,7 +187,7 @@
 # TURN：已关闭（2026-10-10 决议）—— 不是"用不到"，是"根本没接上"
 # ==============================================================
 #
-# 结论：`[rtc] enableTurn` 由 `uvp-ctl.sh` 每次启动**强制写成 0**。
+# 结论：`[rtc] enableTurn` 由 `uvp-gb28181-ctl.sh` 每次启动**强制写成 0**。
 #
 # 判据（三条，都是代码级，缺一不可）：
 #  1. 平台只会给浏览器发 STUN，从不发 TURN —— `app/gb28181/talk/ice.go` 的
@@ -185,7 +208,7 @@
 #    （原「51065-51099」方案**作废**）。
 #
 # ⚠️ 将来真要开中继（浏览器在严格 NAT 后面 + 必须用 WebRTC 低延迟），
-#   **三步缺一不可**：① `uvp-ctl.sh` 的 `ZLM_ENABLE_TURN` 改成 "1"；
+#   **三步缺一不可**：① `uvp-gb28181-ctl.sh` 的 `ZLM_ENABLE_TURN` 改成 "1"；
 #   ② `[rtc] port_range` 挪出临时端口区（如 51065-51099）；
 #   ③ 防火墙上放开该段（UDP）。只做 ① 等于又埋一次同样的雷。
 #
@@ -198,9 +221,9 @@
 ## 附：ZLM secret（启动时自动对齐，无需人工填）
 
 `config.yml` 的 `gb28181.zlm.secret`在示例里是占位符 `CHANGE_ME`，
-而 ZLM 真正的密钥在 `bin/zlm/config.ini` 的 `[api] secret=`（构建时随机生成）。
+而 ZLM 真正的密钥在 `vendor/zlm/config.ini` 的 `[api] secret=`（构建时随机生成）。
 
-**`uvp-ctl.sh start` 会自动对齐**：以 `config.ini` 为准，把真值写进 `config.yml`。
+**`uvp-gb28181-ctl.sh start` 会自动对齐**：以 `config.ini` 为准，把真值写进 `config.yml`。
 两条硬规则：
 
 - 只在原值是占位符（`CHANGE_ME` / `TODO` / 空）时才写 ⇒ 运维手工填过的真值不被覆盖，重复启动也幂等。

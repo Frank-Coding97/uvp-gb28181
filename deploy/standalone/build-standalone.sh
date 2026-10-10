@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # 组装 UVP 绿色安装包（Linux / x86_64 / 零预装）。
 #
-# 产出一个 tar.gz：解压后执行 ./uvp-ctl.sh start 即可用，
+# 产出一个 tar.gz：解压后执行 ./uvp-gb28181-ctl.sh start 即可用，
 # 不需要 Docker / nginx / MySQL / Redis（Redis 与 SQLite 都自带）。
+# 想开机自启再跑 ./uvp-gb28181-service-install.sh（可选，见该脚本头部说明）。
+#
+# 产物命名 **uvp-gb28181-<系统>-<架构>-<版本>.tar.gz**（如 uvp-gb28181-linux-amd64-1.1.0.tar.gz），
+# 落在 release-output/，并附同名 .sha256 校验文件。
+# 解压出来的顶层目录与包名同名（去掉 .tar.gz），即 uvp-gb28181-linux-amd64-1.1.0/。
 #
 # 用法：
 #   deploy/standalone/build-standalone.sh [--skip-frontend] [--out DIR]
@@ -27,13 +32,13 @@ SERVER_DIR="$REPO_ROOT/server"
 WEB_DIR="$REPO_ROOT/web"
 DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 
-# ---- 端口默认值（必须与 uvp-ctl.sh 的 *_PORT_DEFAULT 完全一致）----
+# ---- 端口默认值（必须与 uvp-gb28181-ctl.sh 的 *_PORT_DEFAULT 完全一致）----
 # ⛔⛔ 为什么这里也要有一份：make-config.py 靠命令行参数把端口写进 config.yml，
-#   而**首次运行时 uvp-ctl.sh 以 config.yml 为权威**。两边不一致的话，
+#   而**首次运行时 uvp-gb28181-ctl.sh 以 config.yml 为权威**。两边不一致的话，
 #   首次启动时变量会被 config.yml 里的值覆盖 —— 实测症状是
 #   「脚本里明明写着 30011，Redis 却起在 6379」，毫无线索。
 #   根因是这两个变量一直只靠调用方传环境变量，不传就落回 make-config.py
-#   的 argparse 默认值，于是与 uvp-ctl.sh 各说各话。
+#   的 argparse 默认值，于是与 uvp-gb28181-ctl.sh 各说各话。
 #   端口规划见 deploy/standalone/PORTS.md。
 # 规划段 51000-51064 连续无空洞（详见 PORTS.md）。
 HTTP_PORT="${UVP_HTTP_PORT:-51002}"
@@ -94,8 +99,21 @@ NGINX_DIR="$DEPLOY_DIR/bin/nginx"
 # ⛔ 端口默认值只在上面定义一次（30010/30011）。
 # ⛔⛔ 这里曾有过第二组 8280/6379 —— bash **后定义覆盖先定义**，
 #   于是上面新加的 30010/30011 被这组旧的盖回去，端口规划等于没改。
-#   与 uvp-ctl.sh 里 nginx 端口那个坑是同一个：**同名的第二处定义**。
+#   与 uvp-gb28181-ctl.sh 里 nginx 端口那个坑是同一个：**同名的第二处定义**。
 VERSION="${UVP_VERSION:-$(cat "$SERVER_DIR/version.json" 2>/dev/null | grep -m1 '"version"' | cut -d'"' -f4 || echo 1.0.0)}"
+
+# ⛔⛔ 产物包名 = **产品-系统-架构-版本**（老板 2026-10-10 定）：
+#     uvp-gb28181-linux-amd64-1.1.0.tar.gz
+#   ⭐ 系统/架构这一对变量**同时喂给交叉编译那行**（见下面 GOOS/GOARCH），
+#     故意不写两份：只改包名忘了改编译目标，会做出「包名叫 linux-amd64、
+#     二进制其实是别的架构」这种包内外不一致的包，且出包与解压全程零报错。
+#   ⭐ 包内解压出来的顶层目录与包名**同名**（见下面 PKG="$STAGE/${PKG_STEM}"）：
+#     tar 里的根目录就是 uvp-gb28181-linux-amd64-1.1.0/，解压后目录名 = 包名去扩展名。
+#     ⛔ 这两处必须共用 PKG_STEM，别再各写一份 —— 曾经就是「包名改了、解压目录没改」。
+PKG_OS="linux"
+PKG_ARCH="amd64"
+PKG_STEM="uvp-gb28181-${PKG_OS}-${PKG_ARCH}-${VERSION}"
+
 SKIP_FRONTEND=0
 OUT_DIR="$REPO_ROOT/release-output"
 
@@ -110,7 +128,7 @@ done
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 log()  { printf '[build] %s\n' "$*"; }
 
-# 构建机上用的 python（生成配置要跑脚本）。目标机上由 init-database.sh 自行探测。
+# 构建机上用的 python（生成配置要跑脚本）。目标机上由 uvp-gb28181-ctl.sh 自行探测。
 PY="${UVP_BUILD_PY:-python3}"
 command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成 config.yml）"
 
@@ -123,7 +141,7 @@ command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成
 #   所以必须用工具兜住而不是靠眼睛。SC2288 就是专抓这个的。
 if command -v shellcheck >/dev/null 2>&1; then
   log "shellcheck 检查脚本"
-  shellcheck_out="$(shellcheck -S warning "$0" "$DEPLOY_DIR/uvp-ctl.sh" 2>&1)" || true
+  shellcheck_out="$(shellcheck -S warning "$0" "$DEPLOY_DIR/uvp-gb28181-ctl.sh" 2>&1)" || true
   if [ -n "$shellcheck_out" ]; then
     printf '%s\n' "$shellcheck_out" >&2
     fail "shellcheck 未通过（见上）。⚠️ 这类问题 bash -n 抓不到，必须过。"
@@ -132,7 +150,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   # ---- 端口变量单点定义门禁 ----
   # ⛔⛔ 今天在两个脚本里各栽一次「同名变量的第二处定义」，而症状都是
   #   「明明改了端口，运行时还是旧值」且**毫无提示**：
-  #   uvp-ctl.sh 里 nginx 端口有第二组（443/80），build-standalone.sh 里
+  #   uvp-gb28181-ctl.sh 里 nginx 端口有第二组（443/80），build-standalone.sh 里
   #   HTTP_PORT/REDIS_PORT 有第二组（8280/6379）。
   #   bash 的**后定义覆盖先定义**，且shellcheck 不报（语法合法、变量名正确）。
   #   ⇒ 这里显式拦：端口变量每台机器只允许出现一次赋值。
@@ -147,7 +165,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   #   这种**自带字面量**的赋值在同一变量上出现多次（后者会覆盖前者）。
   #   判据：只看自带字面量的那一类。
   dup_ports="$(grep -hE '^(HTTP_PORT|REDIS_PORT|NGINX_HTTPS_PORT|NGINX_HTTP_PORT|ZLM_HTTP_PORT|ZLM_RTSP_PORT)="\$\{[A-Za-z_]+:-[0-9]+' \
-    "$0" "$DEPLOY_DIR/uvp-ctl.sh" 2>/dev/null | sed 's/=.*//' | sort | uniq -d || true)"
+    "$0" "$DEPLOY_DIR/uvp-gb28181-ctl.sh" 2>/dev/null | sed 's/=.*//' | sort | uniq -d || true)"
   if [ -n "$dup_ports" ]; then
     printf '端口变量存在多处字面量默认值（后者覆盖前者，改动不生效）：\n%s\n' "$dup_ports" >&2
     fail "端口默认值必须单点定义。端口规划见 deploy/standalone/PORTS.md"
@@ -193,7 +211,9 @@ else
     command -v "$GO_BIN" >/dev/null 2>&1 || fail "找不到 go 工具链（apt install golang-go，或用 UVP_SKIP_BUILD=1 跳过）"
     # ⛔ GOFLAGS=-mod=mod：默认 -mod=readonly 会因 vendor/ 或 go.sum 不一致而拒绝编译，
     #   而这类失败在打包脚本里极难定位。
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=mod \
+    # ⛔ GOOS/GOARCH 取自 PKG_OS/PKG_ARCH（包名那段），保证「包名里的架构」
+    #   与「真正编出来的架构」永远是同一个来源，不会被改漏。
+    CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
       "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-server .
   ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
   log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
@@ -287,8 +307,17 @@ STAGE="$(mktemp -d "${TMPDIR:-/tmp}/uvp-standalone.XXXXXX")"
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
 
-PKG="$STAGE/uvp-$VERSION"
-mkdir -p "$PKG"/{bin,config,data/redis,logs,run,scripts}
+PKG="$STAGE/${PKG_STEM}"
+# ⛔ 包内布局（2026-10-10 整理，与 uvp-gb28181-ctl.sh 顶部注释必须一致）：
+#   bin/    只放**我们自己**的程序（uvp-server）
+#   vendor/ 第三方运行时，每个组件自成一体（自带 conf/lib/www）
+#   config/ data/ logs/ run/ resource/
+#   ⛔ 顶层只允许 4 个文件：uvp-gb28181-ctl.sh（唯一入口）、
+#      uvp-gb28181-service-install.sh / -uninstall.sh（可选的服务注册）、version.json。
+#      再往顶层塞东西先问一句「它是不是应该进 config/ 或 data/」。
+# ⛔ 不再建空的 scripts/ —— 历史上它从没被填过任何东西。
+mkdir -p "$PKG"/{bin,config,data/redis,logs,run}
+mkdir -p "$PKG"/vendor/{redis,nginx,zlm}
 
 log "复制后端二进制"
 cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
@@ -351,20 +380,20 @@ else
 fi
 
 log "复制 Redis（自带，包内跑，不连外部）"
-cp "$DEPLOY_DIR/bin/redis-server" "$DEPLOY_DIR/bin/redis-cli" "$PKG/bin/"
-chmod 0755 "$PKG/bin/redis-server" "$PKG/bin/redis-cli"
+cp "$DEPLOY_DIR/bin/redis-server" "$DEPLOY_DIR/bin/redis-cli" "$PKG/vendor/redis/"
+chmod 0755 "$PKG/vendor/redis/redis-server" "$PKG/vendor/redis/redis-cli"
 
 log "复制二开 ZLM（含 ffmpeg 运行时库）"
-mkdir -p "$PKG/bin/zlm"
+mkdir -p "$PKG/vendor/zlm"
 # ⛔ 必须连 lib/ 一起拷且保持相对位置：MediaServer 是动态链接的，
-#   靠 LD_LIBRARY_PATH=$ROOT/bin/zlm/lib 找那些 .so，缺一个就起不来。
-cp -a "$ZLM_DIR/MediaServer" "$PKG/bin/zlm/"
-cp -a "$ZLM_DIR/lib" "$PKG/bin/zlm/lib"
-cp -a "$ZLM_DIR/www" "$PKG/bin/zlm/www"
-cp "$ZLM_DIR/config.ini" "$PKG/bin/zlm/config.ini"
-[ -f "$ZLM_DIR/default.pem" ] && cp "$ZLM_DIR/default.pem" "$PKG/bin/zlm/default.pem"
-[ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/bin/zlm/"
-chmod 0755 "$PKG/bin/zlm/MediaServer"
+#   靠 LD_LIBRARY_PATH=$ROOT/vendor/zlm/lib 找那些 .so，缺一个就起不来。
+cp -a "$ZLM_DIR/MediaServer" "$PKG/vendor/zlm/"
+cp -a "$ZLM_DIR/lib" "$PKG/vendor/zlm/lib"
+cp -a "$ZLM_DIR/www" "$PKG/vendor/zlm/www"
+cp "$ZLM_DIR/config.ini" "$PKG/vendor/zlm/config.ini"
+[ -f "$ZLM_DIR/default.pem" ] && cp "$ZLM_DIR/default.pem" "$PKG/vendor/zlm/default.pem"
+[ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/vendor/zlm/"
+chmod 0755 "$PKG/vendor/zlm/MediaServer"
 
 # ---- ZLM 的身份也固定（源头侧）----
 # ⛔⛔ 必须改**包内这份** config.ini，而不是靠启动时对齐：
@@ -374,7 +403,7 @@ chmod 0755 "$PKG/bin/zlm/MediaServer"
 #   所以这里出包时就写好，启动时ZLM 读到的第一眼就是正确值。
 #   secret 同理：它必须与 config.yml 里的**逐字相同**，否则平台调 ZLM 全被拒。
 log "固定 ZLM 的secret 与节点标识"
-"$PY" - "$PKG/bin/zlm/config.ini" "$ZLM_SECRET" "$ZLM_MEDIA_SERVER_ID" <<'ZLM_INI_ID_PY'
+"$PY" - "$PKG/vendor/zlm/config.ini" "$ZLM_SECRET" "$ZLM_MEDIA_SERVER_ID" <<'ZLM_INI_ID_PY'
 import re
 import sys
 
@@ -397,20 +426,36 @@ for i, line in enumerate(lines):
     # 只认 [api] 的 secret 与 [general] 的 mediaServerId，
     # 别处出现的同名键不能动（这份 ini 有 11 个段）。
     if section == "api" and key == "secret" and old.strip() != secret:
-        changed.append(f"[api] secret: {old.strip()} -> (固定值)")
-        lines[i] = f"{indent}{key}{eq}{secret}{cr}"
+        changed.append("[api] secret: " + old.strip() + " -> (固定值)")
+        lines[i] = indent + key + eq + secret + cr
     elif section == "general" and key.lower() == "mediaserverid" and old.strip() != msid:
-        changed.append(f"[general] mediaServerId: {old.strip()} -> {msid}")
-        lines[i] = f"{indent}mediaServerId={msid}{cr}"
+        changed.append("[general] mediaServerId: " + old.strip() + " -> " + msid)
+        lines[i] = indent + "mediaServerId=" + msid + cr
 
 open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
 print("   ZLM config.ini: " + ("; ".join(changed) if changed else "已是固定值，无需改动"))
 ZLM_INI_ID_PY
 
 log "复制 nginx（前端 + HTTPS 终止）"
-mkdir -p "$PKG/bin/nginx"
-cp -a "$NGINX_DIR/." "$PKG/bin/nginx/"
-chmod 0755 "$PKG/bin/nginx/sbin/nginx"
+mkdir -p "$PKG/vendor/nginx"
+cp -a "$NGINX_DIR/." "$PKG/vendor/nginx/"
+chmod 0755 "$PKG/vendor/nginx/sbin/nginx"
+
+# ---- nginx 配置模板：以仓库版本为唯一真源 ----
+#
+# ⛔⛔ 历史坑（2026-10-10 实测踩到，直接导致升级后 nginx 起不来）：
+#   `deploy/standalone/bin/nginx/conf/` 下还有一份**同名模板副本**，而
+#   `bin/` 整体被 `deploy/standalone/.gitignore` 忽略 ⇒ 那份副本
+#   **不入版本管理、没人维护**：改了仓库里的模板，它纹丝不动，
+#   而打进包的恰恰是它。实测症状：升级后 nginx 启动失败，报
+#     `open() ".../bin/nginx/conf/mime.types" failed`
+#   ——旧副本里 include 的仍是 bin/nginx 路径，而旧布局迁移已把 bin/nginx 删了。
+#   ⇒ ① 出包时强制用仓库版本覆盖；② 断言包内模板不再出现 bin/nginx。
+cp "$DEPLOY_DIR/nginx.conf.template" "$PKG/vendor/nginx/conf/nginx.conf.template"
+if grep -q '@ROOT@/bin/nginx' "$PKG/vendor/nginx/conf/nginx.conf.template"; then
+  fail "nginx 配置模板里仍是旧路径（@ROOT@/bin/nginx）——仓库模板没覆盖进去"
+fi
+log "  nginx 模板已用仓库版本覆盖（唯一真源：deploy/standalone/nginx.conf.template）"
 
 log "复制前端产物"
 if [ -f "$WEB_DIR/dist/index.html" ]; then
@@ -467,12 +512,12 @@ problems = []
 for url in urls:
     rel = url.lstrip("/").split("public/", 1)[-1]      # /public/uploads/x → uploads/x
     if not (public / rel).is_file():
-        problems.append(f"库里有 {url}，但包内 resource/public/{rel} 不存在")
+        problems.append("库里有 " + url + "，但包内 resource/public/" + rel + " 不存在")
 if problems:
     sys.exit("❌ 头像资源与数据库不一致：\n  - " + "\n  - ".join(problems)
              + "\n   这个组合的现场症状是「HTTP 200 但图片出不来」——"
                "nginx 把 index.html 返回给了图片请求，全程无报错。")
-print(f"✅ 头像资源与数据库一致（{len(urls)} 个引用）")
+print("✅ 头像资源与数据库一致（%d 个引用）" % len(urls))
 AVATAR_CHECK_PY
 
 log "生成生产配置（SQLite + 本机 Redis）"
@@ -483,6 +528,7 @@ $PY \
   --http-port "$HTTP_PORT" \
   --redis-port "$REDIS_PORT" \
   --db-path "./data/uvp.db" \
+  --log-path "./logs/app/uvp-gb28181.log" \
   --zlm-secret "$ZLM_SECRET" \
   --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
   --qr-provision-host "$QR_PROVISION_HOST" \
@@ -507,14 +553,15 @@ path, want_secret, want_uuid = sys.argv[1:4]
 zlm = (yaml.safe_load(open(path, encoding="utf-8")) or {}).get("gb28181", {}).get("zlm", {})
 problems = []
 if zlm.get("secret") != want_secret:
-    problems.append(f"secret={zlm.get('secret')!r}（应为 {want_secret!r}）")
+    problems.append("secret=%r（应为 %r）" % (zlm.get("secret"), want_secret))
 if zlm.get("mediaserverid") != want_uuid:
-    problems.append(f"mediaserverid={zlm.get('mediaserverid')!r}（应为 {want_uuid!r}）")
+    problems.append("mediaserverid=%r（应为 %r）" % (zlm.get("mediaserverid"), want_uuid))
 if problems:
     sys.exit("❌ ZLM 身份配置未写进 config.yml：" + "；".join(problems)
              + "。\n   出了这个包，ZLM 侧与平台侧就对不上——现场表现为"
                "「录像缓存服务未装配」等各功能报未装配，且 ZLM 进程本身看起来完全正常。")
-print(f"✅ ZLM 身份配置已固定（secret {len(want_secret)} 字符 / 节点标识 {len(want_uuid)} 字符）")
+print("✅ ZLM 身份配置已固定（secret %d 字符 / 节点标识 %d 字符）"
+      % (len(want_secret), len(want_uuid)))
 ZLM_ID_CHECK_PY
 
 # ⛔ 出包前断言「扫码接入基址」真的写进去了。
@@ -537,28 +584,40 @@ problems = []
 #   但文件里两份配置会让现场运维改错地方。
 hits = sum(1 for line in text.split("\n") if line.strip() == "qr_provision:")
 if hits != 1:
-    problems.append(f"qr_provision 段出现 {hits} 次（应为 1 次）")
+    problems.append("qr_provision 段出现 %d 次（应为 1 次）" % hits)
 # ② 必须是非空基址，且指向后端明文端口
 base_url = str(qr.get("base_url") or "")
 if not base_url:
     problems.append("base_url 为空（没传 --qr-provision-host？）——"
                     "后端会拒绝出码，扫码页面永远转圈")
-elif f":{http_port}" not in base_url:
-    problems.append(f"base_url={base_url!r} 未指向后端端口 {http_port}")
+elif (":" + http_port) not in base_url:
+    problems.append("base_url=%r 未指向后端端口 %s" % (base_url, http_port))
 elif base_url.startswith("https://"):
     # 不是必然错，但绿色包默认不该这样 —— nginx 是自签证书，设备侧必然验不过
-    print(f"   ⚠️ base_url 用了 https（{base_url}）——设备侧必须信任该证书才能扫通")
+    print("   ⚠️ base_url 用了 https（" + base_url + "）——设备侧必须信任该证书才能扫通")
 if problems:
     sys.exit("❌ 扫码接入基址未正确写进 config.yml：" + "；".join(problems)
              + "。\n   出了这个包，页面能出二维码，但设备扫码后换不到接入信息，"
                "而失败现场在手机上、看不出是包的问题。")
-print(f"✅ 扫码接入基址: {base_url}")
+print("✅ 扫码接入基址: " + base_url)
 QR_BASE_CHECK_PY
 
 log "复制启停脚本"
-cp "$DEPLOY_DIR/uvp-ctl.sh" "$PKG/uvp-ctl.sh"
-chmod 0755 "$PKG/uvp-ctl.sh"
-# ⛔ 不再分发独立的 init-database.sh —— 建库已内置进 `uvp-ctl.sh start`。
+cp "$DEPLOY_DIR/uvp-gb28181-ctl.sh" "$PKG/uvp-gb28181-ctl.sh"
+chmod 0755 "$PKG/uvp-gb28181-ctl.sh"
+
+# ---- systemd 服务注册脚本（可选：把本包装成开机自启的系统服务）----
+# ⛔ 它们是**可选**工具：绿色包的核心契约仍是「解压 + ./uvp-gb28181-ctl.sh start」，
+#   不装服务也能完整使用 ⇒ 不进 ctl、不参与迁移逻辑。
+# ⛔ 必须随包分发：漏了之后现场跑 ./uvp-gb28181-service-install.sh 会报「找不到文件」，
+#   用户只会当成包坏了 —— 「脚本没进包」这类坑本项目已经踩过一次（nginx 模板那份副本）。
+for svc_script in uvp-gb28181-service-install.sh uvp-gb28181-service-uninstall.sh; do
+  [ -f "$DEPLOY_DIR/${svc_script}" ] || { printf '[build][ERROR] 缺少 %s\n' "${svc_script}" >&2; exit 1; }
+  cp "$DEPLOY_DIR/${svc_script}" "$PKG/${svc_script}"
+  chmod 0755 "$PKG/${svc_script}"
+done
+log "已打包服务注册脚本（install / uninstall）"
+# ⛔ 不再分发独立的 init-database.sh —— 建库已内置进 `uvp-gb28181-ctl.sh start`。
 #   绿色包的契约是「解压即用」：用户装完只做"执行 start"这一件事。
 #   多一条"记得先建库"的步骤就会有一批人漏掉，而漏掉的症状极具误导性
 #   （页面能开、登录页报 no such table），用户联想不到是因为少跑了一个脚本。
@@ -615,14 +674,15 @@ fi
   printf '# ⚠️ 换主密钥后**已签发的客户端凭据全部失效**，需重新下发。\n'
   printf '# ⚠️ 本文件明文随包分发 —— 它与 openapi.master_key_id 配套使用。\n'
   printf '%s=%s\n' "$OPENAPI_MASTER_KEY_ENV" "$OPENAPI_MASTER_KEY"
-} > "$PKG/config.env"
+} > "$PKG/config/config.env"
 log "写入 ${SIP_TRACE_KEY_ENV}（32 字节随机，base64）"
 log "写入 ${OPENAPI_MASTER_KEY_ENV}（32 字节随机，base64url）"
 
 # --------------------------------------------------------------- 打包 ----
 
 mkdir -p "$OUT_DIR"
-ARCHIVE="$OUT_DIR/uvp-$VERSION-standalone-linux-amd64.tar.gz"
+# 包名 = uvp-gb28181-<系统>-<架构>-<版本>.tar.gz（见文件顶部 PKG_* 注释）
+ARCHIVE="$OUT_DIR/${PKG_STEM}.tar.gz"
 
 # ⛔ mktemp -d 建的是 0700，tar 会把这个模式存进归档项；
 #   用 root 解压后目录变成 0700，非 root 的服务进程就**穿不过去** ⇒ 页面全 404，
@@ -661,21 +721,21 @@ if [ "$TAR_BIN" = "tar" ]; then
     TAR_XATTR_FLAG="--no-xattrs"
   fi
   log "  打包器: bsdtar（${TAR_XATTR_FLAG:-无扩展属性开关}）"
-  "$TAR_BIN" --format=ustar ${TAR_XATTR_FLAG} -czf "${ARCHIVE}" -C "${STAGE}" "uvp-${VERSION}"
+  "$TAR_BIN" --format=ustar ${TAR_XATTR_FLAG} -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
 else
   log "  打包器: ${TAR_BIN}（GNU tar，--format=gnu）"
-  "$TAR_BIN" --format=gnu -czf "${ARCHIVE}" -C "${STAGE}" "uvp-${VERSION}"
+  "$TAR_BIN" --format=gnu -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
 fi
 test -s "$ARCHIVE" || fail "产物为空"
 
 SIZE="$(du -h "$ARCHIVE" | cut -f1)"
 SHA="$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)"
 
-cat > "$OUT_DIR/uvp-$VERSION-standalone-linux-amd64.sha256" <<EOF
-${SHA}  uvp-${VERSION}-standalone-linux-amd64.tar.gz
+cat > "$OUT_DIR/${PKG_STEM}.sha256" <<EOF
+${SHA}  ${PKG_STEM}.tar.gz
 EOF
 
 log "完成：${ARCHIVE}（${SIZE}）"
 log "校验：${SHA}"
-printf '\n下一步：\n  1. 上传到目标机并解压：tar -xzf %s\n  2. 首次使用先建库：./init-database.sh\n  3. 启动：./uvp-ctl.sh start\n  4. 访问：http://<目标机IP>:%s\n' \
-  "uvp-${VERSION}-standalone-linux-amd64.tar.gz" "$HTTP_PORT"
+printf '\n下一步：\n  1. 上传到目标机并解压：tar -xzf %s\n  2. 进目录启动（首次会自动建库，无需单独跑建库脚本）：cd %s && ./uvp-gb28181-ctl.sh start\n  3. 访问：http://<目标机IP>:%s\n' \
+  "${PKG_STEM}.tar.gz" "${PKG_STEM}" "$HTTP_PORT"

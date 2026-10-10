@@ -5,14 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const script = readFileSync(new URL('../deploy/standalone/uvp-ctl.sh', import.meta.url), 'utf8');
+const script = readFileSync(new URL('../deploy/standalone/uvp-gb28181-ctl.sh', import.meta.url), 'utf8');
 const fixture = '[rtp_proxy]\r\nport=10000\r\nport_range=30000-35000\r\n[rtp]\r\naudioMtuSize=600\r\n[rtc]\r\nenableTurn=1\r\n[rtsp]\r\nport=554\r\n';
 
-// 位置参数与 uvp-ctl.sh 里那行 heredoc 调用**必须逐位对应**（顺序错了不会报错，
+// 位置参数与 uvp-gb28181-ctl.sh 里那行 heredoc 调用**必须逐位对应**（顺序错了不会报错，
 // 只会把端口写到别的键上 —— 所以这里也当契约来锁）。
 const PORTS_ARGS = ['51004', '51007', '51005', '51006', '51008', '51014',
   '51014-51063', '51009', '51010', '51011', '51012', '51013'];
-// TURN 开关不是端口，但和 [rtc] 的端口一起同步（2026-10-10 起固定关，见 uvp-ctl.sh）。
+// TURN 开关不是端口，但和 [rtc] 的端口一起同步（2026-10-10 起固定关，见 uvp-gb28181-ctl.sh）。
 const CURRENT_ARGS = [...PORTS_ARGS, '0'];
 
 function sync(source, iniText, args = CURRENT_ARGS) {

@@ -30,7 +30,7 @@ DEST="${1:-$SCRIPT_DIR/bin/nginx}"
 SRC_ROOT="${UVP_NGINX_WORKDIR:-/tmp/uvp-nginx-build}"
 VERSION="${UVP_NGINX_VERSION:-1.26.2}"
 # ⛔ 这里曾有个死变量 PREFIX_IN_PACKAGE="bin/nginx"，注释说"conf 里会按它写 include"，
-#   但它定义后再没被用过 —— conf 的路径是由 uvp-ctl.sh 用 nginx.conf.template 的
+#   但它定义后再没被用过 —— conf 的路径是由 uvp-gb28181-ctl.sh 用 nginx.conf.template 的
 #   @ROOT@ 渲染的，不读这个变量。死变量会触发 shellcheck SC2034，而
 #   build-standalone.sh 的门禁是「有输出就fail」⇒它直接把出包卡住了。
 

@@ -9,8 +9,8 @@
 #   拆开后：nginx 独占 HTTPS，后端留在纯 HTTP 的内网端口上，
 #   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
 #
-# ⛔ 端口规划（与 uvp-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
-#   51000 nginx HTTPS        ← 浏览器访问（端口由 uvp-ctl.sh 填入 @HTTPS_PORT@）
+# ⛔ 端口规划（与 uvp-gb28181-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
+#   51000 nginx HTTPS        ← 浏览器访问（端口由 uvp-gb28181-ctl.sh 填入 @HTTPS_PORT@）
 #   51001 nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
 #   51002 后端 HTTP          ← API + 二维码地址，**不设 TLS**（@BACKEND_PORT@）
 #   51003 Redis（仅回环）    51004-51013 ZLM 各协议
@@ -18,7 +18,7 @@
 #
 #   ⇒ 整段 51000-51064 连续无空洞，防火墙一条规则即可覆盖（见 PORTS.md）。
 #
-# ⛔ 本文件里的路径由 uvp-ctl.sh 启动时按实际安装目录改写（占位符 @ROOT@），
+# ⛔ 本文件里的路径由 uvp-gb28181-ctl.sh 启动时按实际安装目录改写（占位符 @ROOT@），
 #   不要手工改包内的模板。
 #==============================================================
 
@@ -32,7 +32,7 @@ events {
 }
 
 http {
-    include @ROOT@/bin/nginx/conf/mime.types;
+    include @ROOT@/vendor/nginx/conf/mime.types;
     default_type  application/octet-stream;
 
     # 临时目录放包内（/tmp 可能被 noexec 挂载）
@@ -83,8 +83,8 @@ http {
         #   会直接拦下（ERR_CERT_COMMON_NAME_INVALID），扫码更是第一步就失败。
         #   ⇒ 交付说明必须告诉客户：把证书的 CN 填成他们实际访问的域名，
         #     或让手机/电脑信任这个自签根证书。**换成真证书是根本解法。**
-        ssl_certificate      @ROOT@/bin/nginx/conf/uvp.crt;
-        ssl_certificate_key  @ROOT@/bin/nginx/conf/uvp.key;
+        ssl_certificate      @ROOT@/vendor/nginx/conf/uvp.crt;
+        ssl_certificate_key  @ROOT@/vendor/nginx/conf/uvp.key;
         ssl_protocols        TLSv1.2 TLSv1.3;
         ssl_ciphers          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
         ssl_prefer_server_ciphers off;

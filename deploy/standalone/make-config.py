@@ -247,6 +247,45 @@ def _assert_sqlite_section_valid(text: str, db_path: str) -> None:
         raise SystemExit("SQLite 段结构校验失败：\n  - " + "\n  - ".join(problems))
 
 
+def set_log_filepath(target: Path, log_path: str) -> None:
+    """把 ``logs.filepath`` 指到包内日志目录（绿色包：``./logs/app/…``）。
+
+    ⛔ 为什么不直接改 config.example.yml 的默认值：那份模板**同时**被
+      ``deploy/test`` 的 Docker 形态使用（configure_server.py 读它、其单测
+      还断言里面有 ``./resource/logs/…``）——改模板会连带弄红那套部署。
+      ⇒ 模板保持中立，绿色包在出包时在这里覆写。
+
+    形态照 ``sqlite`` 段：**yaml 解析后**断言取值，而不是「字符串出现过」。
+    """
+    text = target.read_text(encoding="utf-8")
+    text = set_in_section(text, "logs", "filepath", log_path)
+
+    try:
+        import yaml
+    except ImportError:                      # 没装 PyYAML 就退回弱检查
+        if log_path not in text:
+            raise SystemExit("logs.filepath 写入失败：结果里找不到目标路径")
+        print("   ⚠️ 未安装 PyYAML，跳过 logs.filepath 结构校验")
+        target.write_text(text, encoding="utf-8")
+        return
+
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except Exception as exc:
+        raise SystemExit(
+            f"配置无法解析（{type(exc).__name__}）——多半是 logs.filepath 改写时缩进错了"
+        ) from None
+    got = str((parsed.get("logs") or {}).get("filepath") or "")
+    if got != log_path:
+        raise SystemExit(
+            f"logs.filepath 结构校验失败：得到 {got!r}（应为 {log_path!r}）。\n"
+            "   出了这个包，后端业务日志会写到别处 —— 启动本身看起来完全正常，"
+            "   只是现场排障时永远找不到那份日志。"
+        )
+    target.write_text(text, encoding="utf-8")
+    print(f"   后端业务日志: {log_path}（已写入并通过结构校验）")
+
+
 def add_qr_provision_section(target: Path, host: str, port: str) -> None:
     """写入「扫码接入基址」段（``gb28181.qr_provision``）。
 
@@ -518,7 +557,7 @@ def add_openapi_section(target: Path, enabled: bool, audience: str,
 
     ⛔主密钥**不写进 config.yml**：那是配置文件、随包分发、可被读取；
       它只从环境变量 ``UVP_OPENAPI_MASTER_KEY`` 读（由出包脚本写进 config.env，
-      uvp-ctl.sh 再 export 给后端进程 —— 与 SIP 报文诊断密钥同一套机制）。
+      uvp-gb28181-ctl.sh 再 export 给后端进程 —— 与 SIP 报文诊断密钥同一套机制）。
     """
     text = target.read_text(encoding="utf-8")
 
@@ -646,6 +685,8 @@ def main() -> None:
     parser.add_argument("--redis-port", default="6379")
     parser.add_argument("--db-path", default="./data/uvp.db",
                         help="SQLite 文件路径（相对应用根目录；绝对路径也行）")
+    parser.add_argument("--log-path", default="./logs/app/uvp-gb28181.log",
+                        help="后端业务日志路径（相对应用根目录）；绿色包统一放 logs/app/ 下")
     parser.add_argument("--zlm-secret", default="",
                         help="ZLM API secret（建议固定值；留空则保留示例里的占位符）")
     parser.add_argument("--zlm-media-server-id", default="",
@@ -664,6 +705,7 @@ def main() -> None:
     build(args.source, args.target, args.http_port, args.redis_port,
           args.zlm_secret, args.zlm_media_server_id)
     add_sqlite_section(args.target, args.db_path)
+    set_log_filepath(args.target, args.log_path)
     add_qr_provision_section(args.target, args.qr_provision_host or _detect_lan_ip(),
                              args.http_port)
     add_openapi_section(args.target, args.openapi_enabled == "true",
