@@ -259,8 +259,8 @@ else
 fi
 
 [ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server"
-[ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server"
-[ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli"
+[ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server（先跑 deploy/standalone/build-redis.sh）"
+[ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli（先跑 deploy/standalone/build-redis.sh）"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
 
 # ZLM（平台靠它推流/取流/录像，缺了整套功能跑不起来）
@@ -681,6 +681,32 @@ fi
 } > "$PKG/config/config.env"
 log "写入 ${SIP_TRACE_KEY_ENV}（32 字节随机，base64）"
 log "写入 ${OPENAPI_MASTER_KEY_ENV}（32 字节随机，base64url）"
+
+# ------------------------------------------------- 可移植性门禁（打包前）----
+#
+# ⛔⛔ 为什么要在**打包前**、对着**装好的包**再查一遍（2026-10-10 客户麒麟 V10 实机踩到）：
+#   包里的 `vendor/nginx/sbin/nginx` 是在较新的 Linux 上直接编的，ELF 里写着要
+#       `libssl.so.3` / `libcrypto.so.3`（OpenSSL 3.x） + `GLIBC_2.34`
+#   而交付目标机（银河麒麟 V10 SP2）只有 **OpenSSL 1.1.1f + glibc 2.28**
+#   ⇒ 启动即 `error while loading shared libraries: libssl.so.3`，nginx 连 `-v` 都跑不起来。
+#   ⛔ 同一个包里 ZLM 反而没事 —— 它走的是 `uvp/linux-builder:glibc217`
+#   （GLIBC ≤ 2.17、零 OpenSSL 依赖）。**差别只在"在哪编的"，在开发机上完全看不出来。**
+#   实测同批五个可执行文件：nginx / redis-server / redis-cli **三个坏**，
+#   ZLM 与 Go 后端**两个好** ⇒ 判据不能停在"包级 glibc 基线"这种笼统说法，
+#   必须逐个二进制核（判据与理由见 check-portable-elf.sh 头部注释）。
+log "审计可移植性（国产 OS / 老 glibc 目标机）"
+# ⛔ 通配符必须是 `*.so*` 而不是 `*.so` —— 库名是 `libavcodec.so.60` 这种带版本号的，
+#   `*.so` 一个都匹配不到（本地实测踩过：glob 不展开，白跑一趟）。
+bash "$DEPLOY_DIR/check-portable-elf.sh" \
+  --glibc-max "${UVP_GLIBC_MAX:-2.17}" \
+  --provided-dir "$PKG/vendor/zlm/lib" \
+  "$PKG/bin/uvp-server" \
+  "$PKG/vendor/nginx/sbin/nginx" \
+  "$PKG/vendor/redis/redis-server" \
+  "$PKG/vendor/redis/redis-cli" \
+  "$PKG/vendor/zlm/MediaServer" \
+  "$PKG"/vendor/zlm/lib/*.so* \
+  || fail "包内二进制对目标系统库的要求过高（拷到国产 OS 上必然起不来，逐条见上）。"
 
 # --------------------------------------------------------------- 打包 ----
 
