@@ -121,6 +121,7 @@ var configCatalog = []ConfigGroup{
 	{
 		Name: "运行时策略",
 		Items: []ConfigItem{
+			{Key: "rtc.externIP", Default: "", HotReloadable: true, Comment: "WebRTC 对外地址；公网/NAT 部署填写公网 IP，多个地址用逗号分隔；留空使用本机地址。保存后新建会话生效，已有会话需重新连接"},
 			{Key: "general.streamNoneReaderDelayMS", Default: "20000", HotReloadable: true, Comment: "无人观看自动断流延迟(毫秒)"},
 			{Key: "general.mediaServerId", Default: "", HotReloadable: true, Comment: "节点 UUID,业务侧生成"},
 			{Key: "general.maxStreamWaitMS", Default: "15000", HotReloadable: true, Comment: "流就绪最大等待(毫秒)"},

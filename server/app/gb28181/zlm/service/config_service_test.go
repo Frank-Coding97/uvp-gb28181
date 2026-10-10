@@ -113,6 +113,36 @@ func TestConfigService_GetGrouped(t *testing.T) {
 	require.Empty(t, apiSecret.Value)
 }
 
+func TestConfigService_WebRTCExternalIP(t *testing.T) {
+	cli := &mockZLMClient{getReturn: map[string]string{"rtc.externIP": ""}}
+	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	svc := service.NewConfigService(reg, cli)
+	id := reg.List()[0].ID
+	groups, err := svc.GetGrouped(context.Background(), id)
+	require.NoError(t, err)
+	var externalIP *service.ConfigItem
+	for _, group := range groups {
+		for _, item := range group.Items {
+			if item.Key == "rtc.externIP" {
+				copy := item
+				externalIP = &copy
+			}
+		}
+	}
+	require.NotNil(t, externalIP, "服务配置页面必须展示 WebRTC 对外地址")
+	require.Equal(t, service.ConfigModeHotReload, externalIP.Mode)
+	require.Empty(t, externalIP.Value)
+	for _, value := range []string{"62.234.152.39", ""} {
+		result, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{"rtc.externIP": value}})
+		require.NoError(t, err)
+		require.Equal(t, []string{"rtc.externIP"}, result.Applied)
+		require.Empty(t, result.RequiresRestart)
+		require.Empty(t, result.Unknown)
+		require.Equal(t, value, cli.lastSetParams["rtc.externIP"])
+		require.Equal(t, value, cli.getReturn["rtc.externIP"])
+	}
+}
+
 func TestConfigService_GetGroupedMarksEveryBooleanWithSharedStatusDictionary(t *testing.T) {
 	cli := &mockZLMClient{getReturn: map[string]string{}}
 	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})

@@ -27,6 +27,23 @@ const item = (key: string, mode: ConfigItem["mode"], value = "old"): ConfigItem 
 });
 
 describe("NodeConfigPanel", () => {
+  it("submits and confirms a WebRTC external address as a hot update", () => {
+    const externalIP = item("rtc.externIP", "hot_reload", "");
+    const changes = buildConfigChanges([externalIP], { "rtc.externIP": "62.234.152.39" });
+    expect(isConfigEditable(externalIP)).toBe(true);
+    expect(changes).toEqual({ "rtc.externIP": "62.234.152.39" });
+    const rows = updateResultRows([externalIP], changes, {
+      applied: ["rtc.externIP"],
+      requiresRestart: [],
+      unknown: []
+    });
+    expect(rows[0]?.actualValue).toBe("62.234.152.39");
+    expect(rows[0]?.tone).toBe("success");
+    expect(isNetworkPortChange("rtc.externIP")).toBe(false);
+    expect(buildConfigChanges([item("rtc.externIP", "hot_reload", "62.234.152.39")], { "rtc.externIP": "" })).toEqual({
+      "rtc.externIP": ""
+    });
+  });
   it("allows saving the heartbeat interval without claiming immediate activation", () => {
     const interval = item("hook.alive_interval", "restart_required", "30");
     expect(isConfigEditable(interval)).toBe(true);
