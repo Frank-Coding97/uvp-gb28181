@@ -18,6 +18,7 @@ ehthumbs.db
 *~
 
 # AI 工具
+.ai/
 .claude/
 .codex/
 CLAUDE.md
