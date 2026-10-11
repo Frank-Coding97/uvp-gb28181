@@ -16,7 +16,7 @@ from pathlib import Path
 
 BASELINE = Path(__file__).resolve().parent / "baseline.sql"
 
-EXPECT_TABLES = 111
+EXPECT_TABLES = 112
 EXPECT_INDEX = None      # 由 manifest 给出，不硬编码
 EXPECT_SEED_ROWS = None
 

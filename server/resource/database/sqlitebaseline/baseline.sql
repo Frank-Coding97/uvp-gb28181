@@ -2266,6 +2266,25 @@ CREATE TABLE IF NOT EXISTS "sys_openapi_runtime_state" (
   "updated_at" DATETIME NOT NULL,
   PRIMARY KEY ("id")
 );
+CREATE TABLE IF NOT EXISTS "sys_openapi_device_capture_session" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "client_id" INTEGER NOT NULL CHECK ("client_id" IS NULL OR typeof("client_id") = 'integer'),
+  "idempotency_digest" TEXT NOT NULL CHECK ("idempotency_digest" IS NULL OR length("idempotency_digest") <= 64),
+  "request_digest" TEXT NOT NULL CHECK ("request_digest" IS NULL OR length("request_digest") <= 64),
+  "session_id" TEXT NOT NULL CHECK ("session_id" IS NULL OR length("session_id") <= 36),
+  "registry_session_id" TEXT NOT NULL CHECK ("registry_session_id" IS NULL OR length("registry_session_id") <= 36) DEFAULT '',
+  "operation_id" TEXT NOT NULL CHECK ("operation_id" IS NULL OR length("operation_id") <= 64) DEFAULT '',
+  "device_id" TEXT NOT NULL CHECK ("device_id" IS NULL OR length("device_id") <= 20),
+  "channel_id" TEXT NOT NULL CHECK ("channel_id" IS NULL OR length("channel_id") <= 20),
+  "internal_device_id" INTEGER NOT NULL CHECK ("internal_device_id" IS NULL OR (typeof("internal_device_id") = 'integer' AND "internal_device_id" >= 0)),
+  "internal_channel_id" INTEGER NOT NULL CHECK ("internal_channel_id" IS NULL OR (typeof("internal_channel_id") = 'integer' AND "internal_channel_id" >= 0)),
+  "department_id" INTEGER NOT NULL CHECK ("department_id" IS NULL OR (typeof("department_id") = 'integer' AND "department_id" >= 0)),
+  "snap_num" INTEGER NOT NULL CHECK ("snap_num" IS NULL OR typeof("snap_num") = 'integer'),
+  "interval_seconds" INTEGER NOT NULL CHECK ("interval_seconds" IS NULL OR typeof("interval_seconds") = 'integer'),
+  "state" TEXT NOT NULL CHECK ("state" IS NULL OR length("state") <= 24),
+  "created_at" DATETIME NOT NULL,
+  "updated_at" DATETIME NOT NULL
+);
 
 -- 索引与表级约束（SQLite 不允许写在表定义内部；必须在建表之后执行）
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_alarm_binding_channel" ON "gb_alarm_binding" ("device_id", "channel_code");
@@ -2584,6 +2603,11 @@ CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_capability" ON "sys_openapi
 CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_operation" ON "sys_openapi_release_item" ("operation_id");
 CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_release" ON "sys_openapi_release_item" ("release_id");
 CREATE INDEX IF NOT EXISTS "idx_openapi_runtime_release" ON "sys_openapi_runtime_state" ("active_release_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_idem" ON "sys_openapi_device_capture_session" ("client_id", "idempotency_digest");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_session" ON "sys_openapi_device_capture_session" ("session_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_registry_session" ON "sys_openapi_device_capture_session" ("registry_session_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_session_client" ON "sys_openapi_device_capture_session" ("client_id", "device_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_state_updated" ON "sys_openapi_device_capture_session" ("state", "created_at");
 
 -- Deterministic system seed and permission metadata.
 INSERT INTO "gb_sip_security_policy" ("id", "scope_key", "mode", "window_seconds", "ban_score", "max_packet_bytes", "max_udp_per_window", "max_tcp_connections", "sample_per_source", "nonce_ttl_seconds", "ban_ttl_steps", "allowlist_text", "updated_by", "updated_at") VALUES

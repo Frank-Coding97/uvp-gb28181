@@ -2731,6 +2731,34 @@ CREATE TABLE `sys_openapi_runtime_state` (
   KEY `idx_openapi_runtime_release` (`active_release_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Table structure for `sys_openapi_device_capture_session`
+DROP TABLE IF EXISTS `sys_openapi_device_capture_session`;
+CREATE TABLE `sys_openapi_device_capture_session` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `client_id` bigint NOT NULL,
+  `idempotency_digest` varchar(64) COLLATE utf8mb4_bin NOT NULL,
+  `request_digest` varchar(64) COLLATE utf8mb4_bin NOT NULL,
+  `session_id` varchar(36) COLLATE utf8mb4_bin NOT NULL,
+  `registry_session_id` varchar(36) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  `operation_id` varchar(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  `device_id` varchar(20) NOT NULL,
+  `channel_id` varchar(20) NOT NULL,
+  `internal_device_id` bigint unsigned NOT NULL,
+  `internal_channel_id` bigint unsigned NOT NULL,
+  `department_id` bigint unsigned NOT NULL,
+  `snap_num` int NOT NULL,
+  `interval_seconds` int NOT NULL,
+  `state` varchar(24) COLLATE utf8mb4_bin NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_openapi_capture_idem` (`client_id`,`idempotency_digest`),
+  UNIQUE KEY `uk_openapi_capture_session` (`session_id`),
+  KEY `idx_openapi_capture_registry_session` (`registry_session_id`),
+  KEY `idx_openapi_capture_session_client` (`client_id`,`device_id`,`channel_id`),
+  KEY `idx_openapi_capture_state_updated` (`state`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- openapi-capability-catalog:end
 
 -- Foreign keys（建表之后统一添加：表按名字母序输出，被引用的表可能排在后面）

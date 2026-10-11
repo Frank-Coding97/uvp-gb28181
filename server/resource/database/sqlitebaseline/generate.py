@@ -9,7 +9,7 @@
 
 转换 vs 手写
 ------------
-MySQL 基线有 111 张表 / 5409 行种子、444 处 COLLATE、92 处 AUTO_INCREMENT。
+MySQL 基线有 112 张表 / 5409 行种子、455 处 COLLATE、93 处 AUTO_INCREMENT。
 手写 SQLite 版必然漏项、且两边会随时间漂移 —— 所以从源脚本**自动转换**。
 
 三条硬规则
@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT.parent / "uvp-gb28181.sql"
 POLICY = ROOT.parent / "baseline" / "policy.json"
-VERSION = "sqlite-baseline-20261008-r1"
+VERSION = "sqlite-baseline-20261011-r1"
 
 
 # --------------------------------------------------------------------------
